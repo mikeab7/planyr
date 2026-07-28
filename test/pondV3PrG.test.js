@@ -101,9 +101,19 @@ describe("G2 — the verdict is GREEN only for a buildable design; else AMBER 'n
     expect(detentionVerdict({ providedAcFt: 80, requiredAcFt: 76.7 }).tone).toBe("ok");
     expect(detentionVerdict({ providedAcFt: 90, requiredAcFt: 76.7, hardBlocked: true }).heading).toBe("Detention volume met — not buildable as drawn");
   });
-  it("the card render carries a three-way tone (short/amber/ok) and the Optimize button rides any non-OK card", () => {
-    expect(src).toContain('const optimizeIdx = statusCards.findIndex((c) => (c.tone ?? (c.short ? "short" : "ok")) !== "ok");');
+  it("the card render carries a three-way tone (short/amber/ok)", () => {
     expect(src).toContain('t === "short" ? PAL.danger : t === "amber" ? PAL.warn : PAL.success');
+  });
+
+  // NEW-1 (2026-07-28) — PR-G's other half ("the Optimize button rides any non-OK card") is REVERSED.
+  // That coupling is what removed the optimizer from an all-green panel once B1031 kept an over-dug
+  // ledger green: with no non-OK card there was no row for the button to ride, so it never mounted.
+  it("the optimizer no longer rides a card at all — the tone→affordance coupling is gone for good", () => {
+    // Match the executable forms only — the comments above the suggestion line deliberately
+    // quote the old code so the next reader knows exactly what not to reintroduce.
+    expect(src.includes("statusCards.findIndex((c)")).toBe(false);
+    expect(src.includes("const optimizeIdx")).toBe(false);
+    expect(src.includes("i === optimizeIdx")).toBe(false);
   });
 });
 

@@ -57,9 +57,13 @@ Read `CLAUDE.md` first if anything below is unclear — its standing rules win o
 npm run lint
 node ui-audit/gis-source-audit.mjs
 node ui-audit/doc-pointer-audit.mjs
+node ui-audit/panel-copy-budget.mjs --check
 npm test
 npm run build
 ```
+- `panel-copy-budget --check` is the **PANEL-BREVITY** gate (`CLAUDE.md`). If you touched yield /
+  pond panel copy, run it **before and after** and report both numbers on the item — a net increase
+  needs explicit justification, and the fix is always to COLLAPSE, never to delete a fact.
 - Then, for any UI-affecting change, drive it headless:
   `npx vite preview --host --port 4173 &` then run the matching `ui-audit/verify-*.mjs`.
   **Write a new `ui-audit/verify-<thing>.mjs` if none exists** for what you changed.

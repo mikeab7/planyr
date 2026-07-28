@@ -110,8 +110,14 @@ describe("G2/G8 — no em dash in the new visible copy; 'Optimize pond' not 'Des
     }
   });
 
-  it("the status card's action button reads ⚡ Optimize pond", () => {
-    expect(pondBody).toContain("⚡ Optimize pond");
+  // NEW-1 (2026-07-28) — the status card no longer carries an action button. The optimizer is one
+  // apply-gated suggestion line beside the cards, present only when a materially smaller basin
+  // exists (owner: "I actually don't even need a button... I want to lay out my buildings and then
+  // fill in with my ponds"). The label lives in lib/pondOptimizeAffordance.js, not in this render.
+  it("the inspector's optimizer is a suggestion line with an Apply, not a button on a card", () => {
+    expect(pondBody).toContain('data-testid="pond-rightsize"');
+    expect(pondBody).toContain("materialAlternative(rightSizeResultFor(selEl))");
+    expect(pondBody.includes("⚡ Optimize pond</button>")).toBe(false);
   });
 });
 

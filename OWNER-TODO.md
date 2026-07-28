@@ -55,6 +55,29 @@ are in hand. Details for the next Claude session: BACKLOG.md B916/B917, VERIFICA
       don't paste them anywhere in this repo's files or a commit, since anyone who can read the code could
       then read it back.)
 
+## ☎️ One question for the county — it may make an engineer's flood study REQUIRED on Tsakiris, not optional (B1057)
+
+While building the independent flood-level estimate you asked for, I found a federal rule worth checking with
+Waller County (or whoever reviews Tsakiris) before you plan around it.
+
+**What the federal rule says.** Where FEMA has drawn a floodplain but never published a flood elevation — exactly
+Tsakiris's situation — the national flood-insurance rules say a community has to require any development **bigger
+than 50 lots or 5 acres, whichever is smaller**, to submit flood-elevation data with the proposal. Tsakiris is far
+over that.
+
+**Why it matters to you.** If Waller adopted that wording, then having an engineer determine the flood level isn't
+a nice-to-have on this deal — it's a submittal requirement, and it belongs in the schedule and the budget from the
+start rather than turning up late in review.
+
+**The one thing I need from you:** ask the county (or your civil engineer) whether their floodplain ordinance
+carries that "50 lots or 5 acres" requirement, and tell me what they say. I've written the rule into the code as
+**research, clearly marked unconfirmed for this county** — I won't let the app state it as fact until you've
+confirmed it. The federal text is 44 CFR 60.3(b)(3) if your engineer wants the citation.
+
+**Worth knowing:** the federal rule binds the *county*, not you directly — it reaches you through whatever the
+county actually wrote into its own ordinance, which can be stricter. So the county's own document is the answer,
+not the federal one.
+
 ## 🗓 Optional — one Scheduler date to sanity-check on Grand Port (B835)
 - [ ] **Nothing broken; just a judgment call only you can make.** The task you flagged — Grand Port →
       Site Development → **"AHJ Review #1 - Civil Revisions"** (task 81) — is now correct: it starts the

@@ -53,6 +53,7 @@ import { sampleEbfePoint } from "./lib/ebfe.js";
 import { sampleMaapnextWse } from "./lib/hcfcdWse.js";
 import { resolveEstimatedWse } from "./lib/wseProviders.js";
 import { sanityCheckEstimate, sensitivityBand } from "./lib/estimateChallenge.js";
+import { wseSensitivity } from "./lib/wseSensitivity.js";
 import LayerPanel from "./components/LayerPanel.jsx";
 import { useGroundElevation, GROUND_EL_TITLE } from "./components/useGroundElevation.js";
 import ViewMenu from "./components/ViewMenu.jsx";
@@ -194,6 +195,7 @@ import { outletProblems } from "./lib/outletStructure.js";
 import { assessRoutedDetention, suggestedPreDevReleaseCfs, autoSizeCompoundOutlet } from "./lib/pondRouting.js";
 import { regionalDetentionFor, feeInLieuCompare } from "./lib/regionalDetention.js";
 import { optimizePond } from "./lib/pondOptimizer.js";
+import { optimizeAffordance, materialAlternative } from "./lib/pondOptimizeAffordance.js";
 import {
   computeRequiredDetention, assessAnalysisTier, assessHydraulicRegime, screenOutfall,
   solvePondExpansion, solvePondDepth, pondDefaultsFor, deadStoragePoolDepthFt, pondAutoValues,
@@ -8938,10 +8940,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     : null;
   // (b) sensitivity band — re-run mitigation volume, required FFE + verdict, and the pond
   // usable/dead split at the estimate ±1 ft, and flag any material flip.
-  const fmEstSensitivity = useMemo(() => {
-    if (!fmEstWse || !Number.isFinite(fmEstWse.wseFt)) return null;
-    const evalAtWse = (wse) => {
-      const elevW = { ...fmElev, bfeFt: wse, bfeSrc: fmEstWse.provider, derivedWse1pctFt: null, derivedWse1pctSrc: null };
+  // NEW-4 — evalAtWse is HOISTED out of the ±1 ft band memo so the multi-step sensitivity sweep
+  // runs the SAME function. That is the whole guarantee behind the scenario table: a row cannot
+  // disagree with the live panel, because it is not a second derivation — it is this one, at a
+  // different flood level. (It re-runs computeMitigation, assessBuildability and usablePondVolume,
+  // exactly as the panel does.)
+  const fmEvalAtWse = useCallback((wse) => {
+    {
+      if (!Number.isFinite(wse)) return {};
+      const elevW = { ...fmElev, bfeFt: wse, bfeSrc: fmEstWse?.provider ?? null, derivedWse1pctFt: null, derivedWse1pctSrc: null };
       let mitigationCf = null;
       for (const fp of fmFootprints) {
         const m = computeMitigation({ footprints: [fp], zones: fmZones, rule: fmRule, elev: elevW });
@@ -8967,10 +8974,24 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         detUsableCf: Math.round(detUsableCf),
         detDeadCf: Math.round(detDeadCf),
       };
-    };
-    return sensitivityBand(evalAtWse, fmEstWse.wseFt, { deltaFt: 1 });
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fmEstWse, floodGeo, fmDemGridKey, drainSigNow]);
+  }, [fmElev, fmFootprints, fmZones, fmRule, fmEstWse, floodGeo, fmDemGridKey, drainSigNow]);
+  const fmEstSensitivity = useMemo(() => {
+    if (!fmEstWse || !Number.isFinite(fmEstWse.wseFt)) return null;
+    return sensitivityBand(fmEvalAtWse, fmEstWse.wseFt, { deltaFt: 1 });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fmEvalAtWse, fmEstWse, floodGeo, fmDemGridKey, drainSigNow]);
+  // NEW-4 — the SWEEP: the same evaluator across a criteria-configurable ladder of flood levels.
+  // Anchored on the GOVERNING flood surface the panel is already using (the estimate when that is
+  // what's driving the ledger), so step 0 is always the number on screen right now.
+  const fmWseSweep = useMemo(() => {
+    const baseWse = Number.isFinite(fmEstWse?.wseFt) ? fmEstWse.wseFt : null;
+    if (baseWse == null) return null;
+    const steps = criteriaFor(critJurKey, { overrides: criteriaOverrides }).wseSensitivityStepsFt?.value;
+    return wseSensitivity(fmEvalAtWse, baseWse, { stepsFt: steps });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fmEvalAtWse, fmEstWse, critJurKey, criteriaOverrides, floodGeo, fmDemGridKey, drainSigNow]);
   // NEW-3/NEW-4 — the suggested pad FFE (the ghost + accept chip): the same rule evaluation as
   // the AUTO pad, wrapped with the outside-floodplain honesty rule + the ESTIMATED stamp.
   // (fmAnyBuildingInTrigger is computed above, ahead of assessBuildability, so both paths agree.)
@@ -9286,6 +9307,65 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // existing outlet auto-size (autoSizeCompoundOutlet, "⚡ Auto-size") whenever detention
   // was actually part of the job, and stores a plain-English before/after summary
   // (lib/pondChangeSummary.js) for the persistent "what changed" card in the inspector.
+  // NEW-1 — the RIGHT-SIZE derivation: "this pond already holds what it owes; how much smaller
+  // could it be, and what does that hand back?" ONE function, called by BOTH the ⚡ Optimize click
+  // handler and the options card that renders the result, so the toast and the card can never
+  // quote different numbers. Pure pass-through to lib/pondOptimizer.js (the same volume machinery
+  // the ledger uses), so an alternative can't claim a volume the rest of the app disagrees with.
+  // Returns { ok:false, reason } — never a fabricated basin — when it cannot run.
+  const rightSizeResultFor = useCallback((el) => {
+    if (!el || el.type !== "pond") return { ok: false, reason: "no pond selected" };
+    const requiredAcFt = detReq && detReq.kind === "point" && detReq.requiredAcFt > 0 ? detReq.requiredAcFt
+      : detReq && detReq.kind === "band" ? detReq.bandAcFt[1] : null;
+    if (!(requiredAcFt > 0)) return { ok: false, reason: "no required detention volume is known for this site yet" };
+    const det = el.det || {};
+    const critRule = pondCriteria[floodJurKey] || pondCriteria.generic;
+    // Don't dig below the water table: the SAME groundwater ceiling the inspector's own max-excavation
+    // field screens against, so a "smaller/deeper" option can't propose a basin the panel calls wet.
+    const gwRawFt = Number.isFinite(det.maxExcavDepthFt)
+      ? det.maxExcavDepthFt
+      : estMaxExcavDepthFt({ depthToWaterFt: estDepthToWaterFt({ measuredFt: det.depthToWaterFt }).valueFt }).valueFt;
+    const drawnDepthFt = Number.isFinite(det.depth) && det.depth > 0 ? det.depth : 8;
+    // THE OPTIMIZER MUST NOT BE STRICTER THAN THE PANEL. The groundwater ceiling here is usually a
+    // SCREENING estimate (a shallow Gulf-Coast seasonal-high water table — 5 ft by default), and
+    // the pond inspector treats digging past it as a SOFT geotech warning, never a hard block. Held
+    // as a hard constraint it vetoed every candidate on a basin the owner had already drawn 12 ft
+    // deep, so the optimizer silently proposed nothing on the whole Gulf Coast — the same
+    // never-appears failure NEW-1 exists to kill. The ceiling still bars going DEEPER than drawn;
+    // it can never veto the depth already on the plan.
+    const depthCeilingFt = Number.isFinite(gwRawFt) ? Math.max(gwRawFt, drawnDepthFt) : null;
+    // Candidates must include SHALLOWER-AND-WIDER and the drawn depth itself (a basin that keeps
+    // its depth but sheds footprint is a legitimate right-size), not just the stock deep ladder.
+    const depthsFt = [...new Set([3, 4, 5, 6, 8, 10, 12, 15, 18, drawnDepthFt])]
+      .filter((d) => d > 0 && (depthCeilingFt == null || d <= depthCeilingFt + 1e-9))
+      .sort((a, b) => a - b);
+    const earthRaw = (settings.prices || {}).earthworkCy;
+    return optimizePond({
+      baseRing: ringOf(el), det,
+      requiredCf: requiredAcFt * 43560,
+      groundwaterMaxDepthFt: depthCeilingFt,
+      depthsFt,
+      maintBermFt: critRule && critRule.maintBermWidthFt > 0 ? critRule.maintBermWidthFt : 30,
+      costs: { earthworkPerCy: earthRaw == null || earthRaw === "" || !Number.isFinite(+earthRaw) ? null : +earthRaw },
+    });
+  }, [detReq, pondCriteria, floodJurKey, settings.prices]);
+
+  // NEW-1 — what ⚡ Optimize pond does when nothing is short. This used to be `return;` — a click
+  // that did nothing and said nothing (LOUD-FAILURE's exact prohibition, and the second half of the
+  // regression the owner hit). A covered pond is not "nothing to do": it is the RIGHT-SIZE
+  // question. Every branch here ends in something visible — the inspector's suggestion line, or a
+  // toast naming why there isn't one. It never edits the plan; the suggestion line's Apply does.
+  const rightSizePond = (pondId = null) => {
+    const id = pondId || (sel?.kind === "el" ? sel.id : null);
+    const el = els.find((e) => e.id === id && e.type === "pond");
+    if (!el) { flashWarn("Select a pond on the plan first — Optimize works on one basin at a time.", 6000); return; }
+    const alt = materialAlternative(rightSizeResultFor(el));
+    revealPondInspector(el.id);
+    flashWarn(alt
+      ? `This pond already holds its required volume. A ${f1(alt.depthFt)}′-deep basin holds the same on ${f2(alt.landTakeAc)} ac — the suggestion is on the pond's panel, with Apply.`
+      : "This pond already holds its required volume, and nothing smaller holds it within the depth, side-slope and groundwater limits — it's as land-efficient as this footprint gets.", 9000);
+  };
+
   const designPond = () => {
     // ---- 1. What's actually short, site-wide? ----
     const requiredDetAcFt = detReq && (detReq.kind === "point" || detReq.kind === "band")
@@ -9297,7 +9377,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const mitProvidedCf = pondLedger.creditedMitCf || 0;
     const mitDeficitCf = mit && mit.volumeCf > 0 ? mit.volumeCf - mitProvidedCf : null;
     const needsMit = mitDeficitCf != null && mitDeficitCf > 0;
-    if (!needsDet && !needsMit) return;
+    // NEW-1 — this used to be a bare `return`: with nothing short, ⚡ Optimize pond did NOTHING and
+    // said nothing. That silent no-op is half of the regression the owner hit (the other half being
+    // the button not mounting at all on an all-green panel), and it is exactly the LOUD-FAILURE
+    // class. A covered pond is not "nothing to do" — it is the RIGHT-SIZE job: find the smallest
+    // basin that still holds the requirement and hand the difference back as buildable land.
+    if (!needsDet && !needsMit) { rightSizePond(); return; }
 
     const criteria = criteriaFor(critJurKey, { overrides: criteriaOverrides });
     const avgDepthFt = criteria.screeningPondDepthFt?.value ?? 8;
@@ -9944,6 +10029,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       estWse: fmEstWse, // NEW-2 / B882 — the estimated Zone A BFE (accept-gated ghost; provider-resolved; null when N/A)
       estSanity: fmEstSanity, // B882 — (a) sanity-check vs site grade (suspect flag)
       estSensitivity: fmEstSensitivity, // B882 — (b) BFE ±1 ft sensitivity band (estimate-sensitive flag)
+      wseSweep: fmWseSweep, // NEW-4 — the multi-step flood-level sensitivity ladder (same evaluator)
       estDisagreement: fmEstDisagreement, // B882 — (c) cross-provider disagreement (show both + delta)
       bfeSrc: fmBfeSrc, // NEW-2 — "est-boundary-grade" when the committed BFE is the accepted estimate
       hagFt: fmHagFt, // NEW-3 — the HAG screening proxy feeding the Waller §D(5) basis
@@ -17620,20 +17706,25 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 // one-line "P of R ac-ft required" heading, an optional plain-English body, and
                 // the ⚡ Optimize pond button when short. Presentation only — the numbers are the
                 // same site provided/required the Yield verdict shows.
+                // NEW-1 — the two REQUIREMENT figures are hoisted out of the statusCards IIFE because
+                // the optimizer affordance below needs the same numbers. They must not be re-derived
+                // separately: the whole point of NEW-1 is that the button and the cards read ONE
+                // source, so the button can never again depend on what the cards happen to look like.
+                // E2(a) — a requirement that ROUNDS TO 0 at the 1dp we display is treated as absent
+                // (a "of 0.0 ac-ft required" card is meaningless). Floor 0.05 ac-ft, aligned with f1.
+                const sc_detReqRaw = detReq && detReq.kind === "point" && detReq.requiredAcFt > 0 ? detReq.requiredAcFt
+                  : detReq && detReq.kind === "band" ? detReq.bandAcFt[1] : null;
+                const sc_detReqAcFt = sc_detReqRaw != null && sc_detReqRaw >= 0.05 ? sc_detReqRaw : null;
+                const sc_mitReqAcFt = drainMitDisplay && drainMitDisplay.volumeCf > 0 && drainMitDisplay.volumeAcFt >= 0.05 ? drainMitDisplay.volumeAcFt : null;
                 const statusCards = (() => {
                   const split = pondSplitFor(selEl);
                   const thisHoldsAcFt = r.vol / 43560;
                   const thisInundated = !!(split.mode === "anchored" && split.bands && split.bands.fullyInundated);
                   const floodLevel = split.mode === "anchored" && split.wseFt != null ? split.wseFt : null;
                   const floodEst = !!(split.mode === "anchored" && isEstimatedWseSrc(split.wseSrc));
-                  // E2(a) — a status card must NOT render when its requirement ROUNDS TO 0 at the
-                  // 1dp we display (a "of 0.0 ac-ft required" card is meaningless). The floor is
-                  // 0.05 ac-ft, aligned with f1's rounding, so no card ever reads "of 0.0".
-                  const detReqRaw = detReq && detReq.kind === "point" && detReq.requiredAcFt > 0 ? detReq.requiredAcFt
-                    : detReq && detReq.kind === "band" ? detReq.bandAcFt[1] : null;
-                  const detReqAcFt = detReqRaw != null && detReqRaw >= 0.05 ? detReqRaw : null;
-                  const mit = drainMitDisplay;
-                  const mitReqAcFt = mit && mit.volumeCf > 0 && mit.volumeAcFt >= 0.05 ? mit.volumeAcFt : null;
+                  // E2(a) — the requirement floor is applied once, above (sc_detReqAcFt/sc_mitReqAcFt).
+                  const detReqAcFt = sc_detReqAcFt;
+                  const mitReqAcFt = sc_mitReqAcFt;
                   const out = [];
                   if (detReqAcFt != null && providedUsableCf != null) {
                     const provAcFt = providedUsableCf / 43560;
@@ -17864,14 +17955,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       </span>
                     </div>
                     {/* v3 UI SPEC B2 — status card(s): the ONE provided/required statement in this panel (G1).
-                        E2(c) — EXACTLY ONE ⚡ Optimize pond button per panel: it rides only the FIRST short
-                        card (the detention card when detention is short), never once per card. One click of
-                        it runs the whole solve for every shortfall, so a second button was pure duplication. */}
+                        E2(c) — EXACTLY ONE ⚡ Optimize pond button per panel. NEW-1 (2026-07-28) — that
+                        button no longer lives INSIDE a card. It used to mount on the first NON-GREEN card
+                        (`statusCards.findIndex(tone !== "ok")`), which meant an all-green panel had nothing
+                        for it to attach to and the optimizer VANISHED. It is now a standalone action row
+                        below the cards whose availability is decided by lib/pondOptimizeAffordance.js from
+                        POSSIBILITY alone (drawn ring · known requirement · resolved split) — never tone. */}
                     {statusCards.length > 0 && (() => {
-                      // PR-G — the ⚡ Optimize button rides the first NON-OK card (SHORT or the AMBER
-                      // "not buildable as drawn"); re-optimizing an unbuildable pond re-solves to the
-                      // best BUILDABLE design (which then honestly reads short, never a false green).
-                      const optimizeIdx = statusCards.findIndex((c) => (c.tone ?? (c.short ? "short" : "ok")) !== "ok");
                       const toneColorOf = (c) => { const t = c.tone ?? (c.short ? "short" : "ok"); return t === "short" ? PAL.danger : t === "amber" ? PAL.warn : PAL.success; };
                       return (
                       <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 11 }}>
@@ -17890,12 +17980,59 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                               <div title={c.qualifier.title || undefined} style={{ fontSize: 11, fontWeight: 700, lineHeight: 1.4, marginTop: 4, color: PAL.warn, cursor: c.qualifier.title ? "help" : undefined, overflowWrap: "anywhere" }}>▲ {c.qualifier.text}</div>
                             ) : null}
                             {c.body ? <div style={{ fontSize: 11.5, color: PAL.text, lineHeight: 1.5, marginTop: 4 }}>{c.body}</div> : null}
-                            {i === optimizeIdx && (c.tone ?? (c.short ? "short" : "ok")) !== "ok" && (
-                              <button type="button" onClick={designPond} title="One click: sets the pond's elevations and outlet so storage counts. Your drawn outline is never changed." style={{ marginTop: 8, padding: "5px 11px", border: "none", borderRadius: 7, background: "var(--accent)", color: "var(--on-accent)", fontWeight: 700, fontSize: 11, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>⚡ Optimize pond</button>
-                            )}
                           </div>
                         ))}
                       </div>
+                      );
+                    })()}
+                    {/* NEW-1 — THE OPTIMIZER, as ONE LINE (owner decision, 2026-07-28: "I actually don't
+                        even need a button necessarily... I want to lay out my buildings and then fill in
+                        with my ponds"). Not a control to hunt for: a single suggestion that appears only
+                        when the search finds a MATERIALLY smaller basin holding the same required volume,
+                        states the delta plainly, and applies in one atomically-undoable click.
+
+                        Its condition mentions no tone anywhere, which is the whole point — the button this
+                        replaced mounted on `statusCards.findIndex(tone !== "ok")`, so once B1031 kept an
+                        over-dug ledger GREEN the optimizer silently vanished from an all-green panel.
+                        Availability is POSSIBILITY only (drawn ring · known requirement · resolved split),
+                        and the mode that gets a line is "rightsize" — a COVERED or OVER-DUG pond, which is
+                        exactly the case where land can come back. A SHORT pond is not silently dropped: it
+                        keeps the Sizing assistant's raise/deepen/grow Apply chips below, which are that
+                        same one-line-plus-Apply idiom, so nothing is stated twice.
+
+                        Nothing materially better → NOTHING renders. Silence is information. */}
+                    {(() => {
+                      const provAcFt = providedUsableCf != null ? providedUsableCf / 43560 : null;
+                      const provMitAcFt = pondLedger.creditedMitCf != null ? pondLedger.creditedMitCf / 43560 : null;
+                      const aff = optimizeAffordance({
+                        hasRing: Array.isArray(ring) && ring.length >= 3,
+                        detRequiredAcFt: sc_detReqAcFt,
+                        mitRequiredAcFt: sc_mitReqAcFt,
+                        splitKnown: provAcFt != null && (sc_mitReqAcFt == null || provMitAcFt != null),
+                        detShort: sc_detReqAcFt != null && provAcFt != null && provAcFt < sc_detReqAcFt - 0.005,
+                        mitShort: sc_mitReqAcFt != null && provMitAcFt != null && provMitAcFt < sc_mitReqAcFt - 0.005,
+                      });
+                      if (!aff.available || aff.mode !== "rightsize") return null;
+                      const alt = materialAlternative(rightSizeResultFor(selEl));
+                      if (!alt) return null;
+                      // The tool PROPOSES. One click writes through the normal element-sync path (one
+                      // atomic undo); the drawn outline is never reshaped without it.
+                      const apply = () => {
+                        pushHistory();
+                        if (selEl.points) setSelEl({ points: scaleRing(ring, alt.scale), depth: alt.depthFt });
+                        else setSelEl({ w: selEl.w * alt.scale, h: selEl.h * alt.scale, depth: alt.depthFt });
+                        flashWarn(`Pond resized to a ${f1(alt.depthFt)}′-deep basin on ${f2(alt.landTakeAc)} ac. One Ctrl+Z reverts.`, 6000);
+                      };
+                      return (
+                        <div data-pond-card="rightsize" data-testid="pond-rightsize" style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8, marginBottom: 11, fontSize: 11, color: PAL.text, lineHeight: 1.5 }}>
+                          <span title={`Screening: a ${f1(alt.depthFt)}′-deep basin holds the same ${f2(alt.achievedAcFt)} ac-ft required volume on ${f2(alt.landTakeAc)} ac instead of ${f2(alt.baseLandTakeAc)} ac. An engineer redraws the chosen basin for real.`}>
+                            {f1(alt.depthFt)}′ deep frees {f2(alt.landSavedAc)} ac
+                            {alt.buildableSfDelta > 0 ? ` · ~${alt.buildableSfDelta.toLocaleString()} sf buildable` : ""}
+                            {alt.earthworkCost != null ? ` · ~$${alt.earthworkCost.toLocaleString()} dirt` : ""}
+                          </span>
+                          <button type="button" onClick={apply} title="Resize this pond to that basin. One Ctrl+Z reverts."
+                            style={{ flex: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 10, fontWeight: 700, padding: "2px 9px", borderRadius: 999, border: "1px solid var(--accent)", background: "var(--accent)", color: "var(--on-accent)", whiteSpace: "nowrap" }}>Apply</button>
+                        </div>
                       );
                     })()}
                     {designChangeSummary && designChangeSummary.pondId === selEl.id && (
@@ -18129,21 +18266,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                             out.push(noteLine(`Fee-in-lieu may be available (${rd.authorityLabel}): paying in lieu of this on-site pond could recover ~${cmp.buildableSfRecovered.toLocaleString()} SF buildable from its ${f2(cmp.landRecoveredAc)}-ac land take (screening, 40% coverage). ${rd.eligibilityNote} Verify the fee + eligibility with the district.`, "fee-in-lieu"));
                           }
                         }
-                        // NEW-D1 (Phase D) — the pond economics optimizer: if this pond owes a
-                        // known volume, the best deeper-smaller alternative that recovers the most
-                        // buildable land (screening; the owner redraws the winner).
-                        if (detReq && detReq.kind === "point" && detReq.requiredAcFt > 0) {
-                          const opt = optimizePond({
-                            baseRing: ring, det,
-                            requiredCf: detReq.requiredAcFt * 43560,
-                            maintBermFt: critRule && critRule.maintBermWidthFt > 0 ? critRule.maintBermWidthFt : 30,
-                            costs: { earthworkPerCy: Number.isFinite((settings.prices || {}).earthworkCy) ? +settings.prices.earthworkCy : null },
-                          });
-                          if (opt.ok && opt.best && opt.best.buildableSfDelta != null && opt.best.buildableSfDelta > 0) {
-                            const b = opt.best;
-                            out.push(noteLine(`Optimizer (screening): a ${b.depthFt}′-deep basin holds the required volume on ~${f2(b.landTakeAc)} ac; recovering ~${b.buildableSfDelta.toLocaleString()} SF buildable vs the current ${f2(opt.base.landTakeAc)}-ac take${b.earthworkCost != null ? ` (~$${b.earthworkCost.toLocaleString()} earthwork)` : ""}. Deeper-smaller vs shallower-bigger; redraw to adopt.`, "pond-opt"));
-                          }
-                        }
+                        // NEW-D1 (Phase D) — the pond economics optimizer USED to render its answer
+                        // here, buried as one gray sentence inside "Engineering assumptions" where a
+                        // developer never looks. NEW-1 (2026-07-28) promoted it to the ONE apply-gated
+                        // suggestion line beside the status cards, so this copy is DELETED rather than
+                        // duplicated: PANEL-BREVITY forbids stating the same fact in two places.
                       }
                       if ((crit.slope || crit.freeboard || landTakeSf != null) && critRule && critRule.verified === false) {
                         out.push(noteLine("Criteria values are unverified placeholders: confirm in Standards against the county criteria manual (PCPM / DCM).", "crit-unv"));
@@ -21297,6 +21424,51 @@ function YieldPanel({
                 mitR.push(row("Floodplain mitigation", "not screened in this remembered view"));
                 mitR.push(warnNote("Mitigation wasn't saved with this remembered check — ↻ re-check to screen it.", "mit-remembered-missing", "The remembered result predates the mitigation ledger, so fill volume hasn't been screened against the mapped floodplain in this view. ↻ Re-check drainage criteria to price it."));
               }
+              // NEW-4 — FLOOD-LEVEL SENSITIVITY. In unstudied Zone A the flood level is an
+              // ESTIMATE standing in for a base flood elevation FEMA never published, and on a flat
+              // site the whole mitigation obligation can rest on a few inches of it (Tsakiris: 0.2
+              // ac-ft, because the estimated surface sits about a quarter foot above grade). This
+              // ladder answers the underwriting question — does a flood level two feet higher make
+              // that 2 ac-ft or 20? Every row comes from fmEvalAtWse, the SAME evaluator the live
+              // panel uses, so a scenario can never disagree with the number above it.
+              if (d.wseSweep && d.wseSweep.ok) {
+                const sw = d.wseSweep;
+                if (sw.flat) {
+                  // A flat answer is still an answer, and a short one: folded, one line.
+                  mitR.push(keyedNote(`Flood-level sensitivity: nothing moves from ${f1(sw.baseWseFt)}′ up to +${Math.max(...sw.stepsFt)}′.`, "wse-sens-flat"));
+                } else {
+                  const maxReq = sw.rows.reduce((mx, r) => Math.max(mx, r.mitigationAcFt ?? 0), 0);
+                  mitR.push(
+                    <div key="wse-sens" data-testid="yield-wse-sensitivity" style={{ padding: "4px 0 2px" }}>
+                      <div style={{ display: "flex", alignItems: "baseline", gap: 3, fontSize: 11, fontWeight: 700, color: Y.rowLabel, letterSpacing: "0.02em" }}>
+                        If the flood level is higher
+                        <RowInfo label="Flood-level sensitivity" sections={[
+                          { text: "This site's floodplain has a mapped boundary but no published base flood elevation, so the flood level driving the requirement above is an estimate. These rows re-run the same check at higher flood levels, to show how fast the obligation grows if the estimate is low." },
+                          { text: "Screening only, and not a design allowance — an engineer's study sets the number a reviewer will accept." },
+                        ]} />
+                      </div>
+                      {sw.rows.map((r) => (
+                        <div key={`ws-${r.stepFt}`} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "2px 0" }}>
+                          <span style={{ fontFamily: NUM_FONT, fontSize: 11, color: r.stepFt === 0 ? Y.text : Y.muted, fontVariantNumeric: TABULAR_NUMS, whiteSpace: "nowrap", minWidth: 62 }}>
+                            {r.stepFt === 0 ? "now" : `+${f1(r.stepFt)}′`} · {f1(r.wseFt)}′
+                          </span>
+                          {r.unknown ? (
+                            <span style={{ fontSize: 11, color: Y.warnText, fontWeight: 700 }}>unknown</span>
+                          ) : (
+                            <span style={{ display: "flex", alignItems: "center", gap: 6, whiteSpace: "nowrap" }}>
+                              <BulletBar layout={bulletBarLayout({ provided: r.creditedAcFt ?? 0, required: r.mitigationAcFt, reference: maxReq })} Y={Y} width={110} />
+                              <span style={{ fontFamily: NUM_FONT, fontSize: 11.5, fontWeight: 700, fontVariantNumeric: TABULAR_NUMS, color: Y.text, minWidth: 54, textAlign: "right" }}>
+                                {r.mitigationAcFt == null ? "—" : `${f2(r.mitigationAcFt)} ac-ft`}
+                              </span>
+                            </span>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  );
+                  if (sw.anyUnknown) mitR.push(keyedNote("Some flood levels in the ladder can't be priced — those rows read unknown rather than zero.", "wse-sens-unk"));
+                }
+              }
               if (d.unanchoredInTrigger > 0) mitR.push(warnNote(`${d.unanchoredInTrigger} floodplain pond${d.unanchoredInTrigger > 1 ? "s" : ""} not elevation-anchored — gross volume OVERSTATES usable detention.`, "mit-unanch", "An unanchored pond can't split usable from dead storage at the flood water surface, so the gross volume above overstates usable detention. Set each pond's top-of-bank elevation in its panel."));
               // B822 — the anchored-but-WSE-unknown half: the anchor exists (manual or the 3DEP
               // auto), the reach's flood elevation doesn't — the BFE input is what's missing.
@@ -21946,24 +22118,31 @@ function YieldPanel({
                 const deadAcFt = d.deadCf != null ? d.deadCf / 43560 : 0;
                 const mitAcFt = d.mitDedicatedCf != null ? d.mitDedicatedCf / 43560 : 0;
                 const unusedAcFt = d.unusedCf != null ? d.unusedCf / 43560 : 0;
+                // NEW-2 (2026-07-28) — PANEL-BREVITY. B1032's explainer was RIGHT and stays whole; it
+                // was just spent as prose in the default view ("Of the 80.8 ac-ft the outline could
+                // hold, 17.4 is taken up by the earthen berm ring built inside the outline, 29.6 is
+                // set aside for floodplain compensating storage — 33.8 ac-ft is left to count for
+                // detention."). Numbers over prose, named state over a sentence explaining the state:
+                // the visible line is now the counted-of-held PAIR, each deduction is a short labelled
+                // term, and the term-by-term account moves into "Assumptions & method ▸". Nothing is
+                // deleted — the ⓘ text is byte-identical and the terms are all still reachable.
                 const terms = [];
-                if (bermAcFt > ACFT_EPS) terms.push(`${f1(bermAcFt)} is taken up by the earthen berm ring built inside the outline`);
-                if (deadAcFt > ACFT_EPS) terms.push(`${f1(deadAcFt)} sits below the level the pond stays wet to`);
-                if (mitAcFt > ACFT_EPS) terms.push(`${f1(mitAcFt)} is set aside for floodplain compensating storage`);
-                if (unusedAcFt > ACFT_EPS) terms.push(`${f1(unusedAcFt)} sits below the flood level and can't be used for detention`);
-                const totalDead = siteCounts < ACFT_EPS;
-                const rimClause = d.rimRaiseFeasible ? " Raising the rim adds storage above the flood level." : "";
-                const body = terms.length
-                  ? `Of the ${f1(siteHolds)} ac-ft the outline could hold, ${terms.join(", ")} — ${totalDead ? "nothing is" : `${f1(siteCounts)} ac-ft is`} left to count for detention.${rimClause}`
-                  : totalDead
-                    ? `All of its storage sits below the flood level, so none counts yet.${rimClause}`
-                    : `${f1(gapAcFt)} of its ${f1(siteHolds)} ac-ft doesn't count toward detention.${rimClause}`;
+                if (bermAcFt > ACFT_EPS) terms.push(`berm ring ${f1(bermAcFt)}`);
+                if (deadAcFt > ACFT_EPS) terms.push(`permanent water ${f1(deadAcFt)}`);
+                if (mitAcFt > ACFT_EPS) terms.push(`floodplain compensation ${f1(mitAcFt)}`);
+                if (unusedAcFt > ACFT_EPS) terms.push(`below flood level ${f1(unusedAcFt)}`);
                 rows.push(
-                  <div key="det-explainer" style={{ display: "flex", alignItems: "baseline", gap: 3, fontSize: 12.5, color: Y.rowLabel, lineHeight: 1.5, padding: "4px 0" }}>
-                    <span>{body}</span>
-                    <RowInfo label="Why some storage doesn't count" sections={[{ text: "Storage above the flood level is empty when the design storm arrives and earns detention credit. The rest is spoken for: the berm ring is earth, not water; storage below the pond's standing water level is permanently full; and storage set aside to compensate for floodplain fill is already promised to that ledger — the same acre-foot can never serve two purposes." }]} />
+                  <div key="det-explainer" style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8, fontSize: 12.5, color: Y.rowLabel, lineHeight: 1.5, padding: "4px 0" }}>
+                    <span style={{ display: "flex", alignItems: "baseline", gap: 3 }}>
+                      Counts for detention
+                      <RowInfo label="Why some storage doesn't count" sections={[{ text: "Storage above the flood level is empty when the design storm arrives and earns detention credit. The rest is spoken for: the berm ring is earth, not water; storage below the pond's standing water level is permanently full; and storage set aside to compensate for floodplain fill is already promised to that ledger — the same acre-foot can never serve two purposes." }]} />
+                    </span>
+                    <span style={{ fontFamily: NUM_FONT, fontSize: 13, fontWeight: 700, fontVariantNumeric: TABULAR_NUMS, whiteSpace: "nowrap" }}>{f1(siteCounts)} of {f1(siteHolds)} ac-ft held</span>
                   </div>
                 );
+                // The account itself — every term B1032 bought, folded, not dropped.
+                if (terms.length) rows.push(keyedNote(`Not counted: ${terms.join(" · ")} ac-ft.${d.rimRaiseFeasible ? " Raising the rim adds storage above the flood level." : ""}`, "det-terms"));
+                else if (d.rimRaiseFeasible) rows.push(keyedNote("Raising the rim adds storage above the flood level.", "det-rim"));
               }
               // ── NEW-1 — STORAGE RECONCILIATION. Two ledgers can each add up on their own terms
               // while together claiming more water than the ponds hold. This row is the only place
@@ -21990,7 +22169,7 @@ function YieldPanel({
                 // NUMBERS and points at it, instead of repeating the same paragraph verbatim.
                 if (bad) rows.push(
                   <div key="rec-msg" style={{ fontSize: 12, color: Y.dangerText, lineHeight: 1.5, padding: "2px 0 5px" }}>
-                    The same storage is being counted twice — see the Detention line at the top of this panel for the full reconciliation.
+                    Counted twice — see Detention above.
                     <RowInfo label="Storage reconciliation" sections={[{ text: rc.message }]} />
                   </div>
                 );
@@ -22029,8 +22208,8 @@ function YieldPanel({
                 for (const m of gravFails) {
                   const g = m.gravity;
                   const parts = [];
-                  if (g.detention.pass === false) parts.push(`only ${Math.round((g.detention.share || 0) * 100)}% of its detention storage sits high enough to drain out by gravity (the rule wants at least ${Math.round((d.gravityShareRequired || 0.5) * 100)}%)`);
-                  if (g.mitigation.pass === false) parts.push(`${f1(g.mitigation.deadCf / 43560)} ac-ft of its flood-mitigation storage sits below the outlet and can never drain back out — that volume earns no credit, and pumping it is not allowed`);
+                  if (g.detention.pass === false) parts.push(`gravity drains only ${Math.round((g.detention.share || 0) * 100)}% of detention storage (rule: ${Math.round((d.gravityShareRequired || 0.5) * 100)}%)`);
+                  if (g.mitigation.pass === false) parts.push(`${f1(g.mitigation.deadCf / 43560)} ac-ft of mitigation storage sits below the outlet, so it earns no credit`);
                   rows.push(warnNote(`${m.name}: ${parts.join("; ")}.`, `grav-${m.id}`, g.detention.basis + " " + g.mitigation.basis));
                 }
                 if (gravUnknown.length && !gravFails.length) {
@@ -22039,19 +22218,16 @@ function YieldPanel({
                 // NEW-5 — only worth saying when a straight-down read would have been materially wrong.
                 const worst = models.filter((m) => m.prism && m.prism.deltaPct != null).sort((a, b) => b.prism.deltaPct - a.prism.deltaPct)[0];
                 if (worst && worst.prism.deltaPct > 0.15) {
-                  rows.push(
-                    <div key="prism-note" title={`Sloped sides at ${worst.prism.slopeRatio}:1 with ${worst.prism.freeboardFt} ft of freeboard. Average depth over the drawn outline works out at ${f1(worst.prism.avgDepthFt)} ft.`} style={{ fontSize: 10.5, color: Y.muted, lineHeight: 1.5, padding: "2px 0", cursor: "help" }}>
-                      Storage is measured as a real basin with sloping sides, not a straight-sided box — on {worst.name} that is {Math.round(worst.prism.deltaPct * 100)}% less than the outline would suggest.
-                      {worst.prism.pinched ? " Its sides also meet before it reaches the depth set for it, so it can't actually be dug that deep." : ""}
-                    </div>
-                  );
+                  // NEW-2 — a METHOD note (how storage is measured), not an action: it belongs in
+                  // "Assumptions & method ▸", not in the default view. Text unchanged, home changed.
+                  rows.push(keyedNote(`Storage is measured as a real basin with sloping sides, not a straight-sided box — on ${worst.name} that is ${Math.round(worst.prism.deltaPct * 100)}% less than the outline would suggest.${worst.prism.pinched ? " Its sides also meet before it reaches the depth set for it, so it can't actually be dug that deep." : ""}`, "prism-note"));
                 }
               }
               // ── NEW-10 — is the surplus real slack, or the hole the pad fill came out of?
               if (d.cutFill && d.cutFill.surplus && d.cutFill.surplus.driver === "borrow") {
                 rows.push(
                   <div key="borrow-note" data-testid="yield-borrow-note" style={{ fontSize: 12, color: Y.warnText, lineHeight: 1.5, padding: "3px 0" }}>
-                    This extra storage is dirt-driven, not drainage-driven: the ponds are big because the pads needed the fill. Shrinking them toward the bare requirement would mean buying and hauling in roughly {Math.round(d.cutFill.surplus.importIfShrunkCy).toLocaleString("en-US")} cubic yards of fill instead.
+                    Surplus is dirt-driven: shrinking to the bare requirement means importing ~{Math.round(d.cutFill.surplus.importIfShrunkCy).toLocaleString("en-US")} cy of fill.
                   </div>
                 );
               }

@@ -68,6 +68,16 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   over the 3DEP DEM → upstream contributing area + the offsite-drainage "engineer's check" flag) +
   `regionalDetention.js` (regional-detention / fee-in-lieu cited registry + on-site-vs-fee buildable-SF
   comparison). Pure/Node-tested.
+- Pond optimizer affordance (NEW-1, 2026-07-28): `pondOptimizeAffordance.js` — decides WHEN the
+  optimizer is offered (POSSIBILITY only: drawn ring · known requirement · resolved split — NEVER
+  verdict tone; the old tone coupling is what made the button vanish from an all-green panel) and
+  whether a smaller basin is worth a line (`materialAlternative` → null means render NOTHING).
+- Flood-level sensitivity (NEW-4): `wseSensitivity.js` — sweeps the SAME `evalAtWse` the live panel
+  uses across criteria-configurable steps above the governing flood surface; absolute deltas only.
+- Screening BFE (NEW-3): `screeningBfe.js` — the app's FIRST real hydrology + hydraulics (SCS unit-
+  hydrograph peak, Manning normal depth over a terrain-sampled section). Every other "derived" WSE
+  in this codebase reads FEMA's published number; this one computes one. Engine only so far — the
+  live inputs (watershed delineation, Atlas-14 fetch, section sampler) are not yet wired.
 - Pond economics optimizer (NEW-D, Phase D): `pondOptimizer.js` — searches depth × placement pond
   configurations (deeper-smaller vs shallower-bigger, pond-cut-as-pad-fill dirt balance) under
   constraints (max depth, Phase-B groundwater ceiling, 30-ft maintenance berm, pipeline-corridor
