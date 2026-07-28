@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-07-28 @ `75fc04a` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-07-28 @ `1fdfedf` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_330 source files mapped._
+_336 source files mapped._
 
 ## infra
 
@@ -184,6 +184,10 @@ _330 source files mapped._
   - _exports_: `default (AppHeader)`, `MODULE_ACCENT`
 - **`src/shared/ui/CloudSyncBadge.jsx`** — App-wide cloud-sync glyph driven by real saveState (synced/saving/offline/readonly/error/local); loud never-vanish error via crash boundary + retry popover
   - _exports_: `CloudBadgeBoundary`, `cloudBadgeView`, `default (CloudSyncBadge)`
+- **`src/shared/ui/ColorField.jsx`** — Color control = the native wheel + the shared recently-used swatch row (NEW-4); `ColorRecentsRow` is the row alone, for controls with a bespoke wheel.
+  - _exports_: `ColorRecentsRow`, `default (ColorField)`, `useColorRecents`
+- **`src/shared/ui/colorRecents.js`** — The ONE shared most-recently-used color list (NEW-4) — pure MRU/seed math, localStorage persistence, and a subscription so every open picker stays in step.
+  - _exports_: `_resetRecentsCache`, `getRecents`, `loadRecents`, `mergeRecent`, `normalizeHex`, `pushRecent`, `RECENTS_MAX`, `recentsWithSeed`, `saveRecents`, `subscribeRecents`
 - **`src/shared/ui/ContextMenu.jsx`** — The ONE shared cursor-anchored right-click menu (B915): portal-to-body, measures itself in a layout effect, flips up/left + clamps + scrolls over-tall via `placeContextMenu`; closes on Escape / outside click / scroll / resize. Replaces every hand-rolled assumed-height menu.
   - _exports_: `default (ContextMenu)`
 - **`src/shared/ui/contextMenuPlacement.js`** — Pure viewport-placement math for `ContextMenu` (B915): flip-up-if-bottom-overflow, flip-left-if-right-overflow, hard-clamp to a margin on all four edges, and a viewport max-height. Unit-tested without a DOM.
@@ -245,6 +249,8 @@ _330 source files mapped._
   - _exports_: `default (SourcesLegend)`
 - **`src/workspaces/site-planner/components/SourceTag.jsx`** — B895 the reusable per-figure provenance tag (CODE/PLAN/SURVEY/ESTIMATE/YOURS/UNVERIFIED) + its Basis popover (built on RowInfo)
   - _exports_: `default (SourceTag)`
+- **`src/workspaces/site-planner/components/StandardScope.jsx`** — The short chip row under a Standards field (NEW-3): Apply (retroactive) + the Project / All scope this default lives at.
+  - _exports_: `default (StandardScope)`
 - **`src/workspaces/site-planner/components/TeamPanel.jsx`** — Team workspace management tab: roster, invite-by-email, role changes, rename/delete/leave team via RLS-scoped teams.js
   - _exports_: `default (TeamPanel)`
 - **`src/workspaces/site-planner/components/useGroundElevation.js`** — B706 hook: cursor ground-elevation readout (bilinear from the cached terrain grid, else one debounced 3DEP point sample; aborts superseded requests, suppresses over no-data)
@@ -477,8 +483,10 @@ _330 source files mapped._
   - _exports_: `COMMODITY_BUCKETS`, `commodityBucket`, `commodityBucketRecord`, `isHazardOutlier`, `PIPELINE_LEGEND`, `pipelineStyleFor`
 - **`src/workspaces/site-planner/lib/pipelineCorridor.js`** — Pure pipeline easement screening-corridor geometry (B752): buffers a WGS84 [lon,lat] centerline into an ASSUMED band via the shared bufferPolyline (local feet frame), plus the editable default/min/max width constants
   - _exports_: `corridorRingLngLat`, `corridorRings`, `DEFAULT_CORRIDOR_WIDTH_FT`, `MAX_CORRIDOR_WIDTH_FT`, `MIN_CORRIDOR_WIDTH_FT`
+- **`src/workspaces/site-planner/lib/planClipboard.js`** — The general canvas clipboard (NEW-2/NEW-6) — collect a selection (elements expanded to their `attachedTo` assembly), and paste it with fresh ids, remapped bonds and relative geometry preserved.
+  - _exports_: `CLIP_KINDS`, `clipboardBBox`, `clipboardLabel`, `clipCalloutTips`, `clipRefKey`, `collectClipboard`, `pasteClipboard`, `translateCalloutBy`, `translateParcelBy`
 - **`src/workspaces/site-planner/lib/planStyle.js`** — Shared element style tokens (fills/strokes/weight/pattern per surface type), style resolver, paint z-order, element feet ring outline
-  - _exports_: `byZ`, `elRingFeet`, `elStyle`, `parcelDefaultStyle`, `toHex6`, `TYPE`, `typeStyle`, `zOrder`
+  - _exports_: `byZ`, `elRingFeet`, `elStyle`, `getAccountStyleDefaults`, `parcelDefaultStyle`, `setAccountStyleDefaults`, `standardScope`, `toHex6`, `TYPE`, `typeStyle`, `zOrder`
 - **`src/workspaces/site-planner/lib/polyClip.js`** — Pure polygon intersection-AREA via ear-clip triangulation + Sutherland–Hodgman; pairwise active-parcel overlap detection for the B652 double-count warning; clipper-lib UNION/dissolve of overlapping active parcels for correct site acreage (B715)
   - _exports_: `dissolvedParcelSqft`, `overlappingParcelPairs`, `PARCEL_OVERLAP_TOL`, `polyIntersectArea`, `triangulate`
 - **`src/workspaces/site-planner/lib/polygonSplit.js`** — Pure parcel-split geometry: straight-line cut pairing all crossings for concave lots, plus bent-polyline path cut
@@ -555,6 +563,8 @@ _330 source files mapped._
   - _exports_: `filterHealthyCandidates`, `isSourceOpen`, `isStatewideBackup`, `recordSourceResult`, `resetSourceHealth`, `SOURCE_COOLDOWN_MS`, `SOURCE_FAIL_THRESHOLD`, `sourceCooldownMs`
 - **`src/workspaces/site-planner/lib/stageStorageDischarge.js`** — Stage-storage-discharge curve (NEW-A3): pairs pondGeom storage (volumeBetween) with the outlet rating curve over the basin's stage range; interpolation helpers feed the reservoir routing. Anchored ponds only. Pure.
   - _exports_: `buildStageStorageDischarge`, `dischargeAtElev`, `dischargeAtStorage`, `elevAtStorage`, `storageAtElev`
+- **`src/workspaces/site-planner/lib/standardsApply.js`** — Standards "Apply now" (NEW-3): push a standard onto existing parcels (stamped → write) or existing elements (render-resolved → clear the per-element override), plus the impact counts the chip shows.
+  - _exports_: `appliedLabel`, `applyParcelStandard`, `applyTypeStandard`, `PARCEL_STD_KEYS`, `parcelStandardImpact`, `TYPE_STD_KEYS`, `typeStandardImpact`
 - **`src/workspaces/site-planner/lib/storage.js`** — Multi-site persistence layer: localStorage primary with per-user cloud mirror, content-union pull merge, per-tab resurrection guards, and an IndexedDB-backed version-history ring
   - _exports_: `_readSiteTombs`, `_recentlyDeleted`, `_resetHistoryForTest`, `activeUid`, `AUTOSAVE_KEY`, `backupNow`, `clearCloudCache`, `clearHistory`, `clearRecentlyDeleted`, `clearSiteTombstone`, `DELETED_RETENTION_DAYS`, `deleteSite`, `deleteSiteGroup`, `discardLegacySite`, `getCurrentSiteId`, `getVersion`, `groupOf`, `importLegacyIntoCloud`, `importOneSiteToCloud`, `initHistoryStore`, `isCloudActive`, `isEmptySite`, `keepaliveFlushSite`, `legacySitesList`, `listDeletedProjects`, `listVersions`, `loadAutosave`, `loadPlansOfGroup`, `loadSite`, `loadSitesList`, `mergePulledSites`, `migrateOldAutosave`, `migrateScenarios`, `migrateSiteGroups`, `pendingLegacyCount`, `pendingLegacySites`, `pruneMigratedLegacy`, `pullCloud`, `purgeDeletedProject`, `purgeExpiredDeletedProjects`, `pushModelToCloud`, `pushSiteToCloud`, `reconcileSiteFromCloud`, `recordSiteTombstone`, `renameSiteGroup`, `restoreDeletedProject`, `saveAutosave`, `saveSite`, `scheduleLinkOf`, `setActiveUser`, `setCurrentSiteId`, `setScheduleLink`, `SITE_TOMB_GRACE_MS`, `siteNameOf`, `snapshotVersion`, `stageLegacySite`, `storage`, `summarizeVersion`
 - **`src/workspaces/site-planner/lib/storageReconcile.js`** — NEW-1 site storage reconciliation: counted detention plus counted mitigation against total physical pond storage, with a hard FAIL naming the overlap volume and the ponds involved (and undeclared dual-duty ponds)
@@ -583,6 +593,8 @@ _330 source files mapped._
   - _exports_: `parseNearestWell`, `resolveNearestWell`, `TWDB_WELLS_SOURCE`
 - **`src/workspaces/site-planner/lib/upstreamArea.js`** — Upstream/offsite drainage delineation (NEW-C1): extends flowField D8 → flow-accumulation over the 3DEP DEM, contributing-area acreage at the site outfall, and the offsite-drainage "engineer's check" flag when upstream materially exceeds the site. Pure.
   - _exports_: `contributingAcres`, `delineateUpstream`, `downstreamIndex`, `flowAccumulation`, `lowestCell`, `OFFSITE_MATERIAL_RATIO`, `offsiteDrainageFlag`
+- **`src/workspaces/site-planner/lib/userPrefs.js`** — Account-level user preferences (NEW-3) — `public.profiles.prefs` jsonb with a localStorage mirror; backs the Standards "All projects" scope and publishes it into `planStyle`'s account layer.
+  - _exports_: `_normalizePrefs`, `applyPrefs`, `EMPTY_PREFS`, `getStandardPref`, `loadUserPrefs`, `readMirror`, `saveUserPrefs`, `setStandardPref`
 - **`src/workspaces/site-planner/lib/vectorLayers.js`** — Pure registry-driven vector GIS engine (FEMA/NWI + county/city/ETJ boundaries): paged ArcGIS pull, detail tiers with server-side generalization, grid-snapped SWR cache keys, Esri-to-GeoJSON, Douglas-Peucker, vector-vs-image decision
   - _exports_: `buildQueryUrl`, `buildVectorQuery`, `decideVectorOrImage`, `douglasPeucker`, `featuresToGeoJson`, `fetchCached`, `fetchVectorFeatures`, `pickTier`, `simplifyGeoJson`, `snapBbox`, `styleFor`, `VECTOR_SOURCES`, `vectorKey`
 - **`src/workspaces/site-planner/lib/vectorOverlay.js`** — Leaflet glue over the vector cache tier: cachedVectorLayer paints last-good boundaries instantly, background-refreshes, hover/click identify (identifyOk-gated), zoom-gated divIcon name labels, live esri-leaflet fallback

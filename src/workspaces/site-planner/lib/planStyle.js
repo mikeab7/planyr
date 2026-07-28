@@ -27,10 +27,43 @@ export const TYPE = {
   road: { fill: "#b9b4a8", stroke: "#7c786d", label: "Road", weight: 1.25 },
 };
 
-// Resolved style for a type = built-in default merged with any user-set default
-// (settings.typeStyles). An individual element may further override fill/stroke/
-// fillOpacity on itself (the Bluebeam-style per-element Properties).
-export const typeStyle = (type, settings) => ({ ...TYPE[type], ...((settings && settings.typeStyles && settings.typeStyles[type]) || {}) });
+/* NEW-3 — ACCOUNT-level style defaults ("default for ALL projects").
+ *
+ * The precedence ladder, lowest to highest:
+ *   built-in TYPE  <  account default (this user, every project)  <  project setting  <  per-object override
+ *
+ * It lives here as a module-level register rather than as an extra argument threaded through 14+
+ * call sites, so EVERY consumer resolves style the same way — the canvas, the site-list thumbnail
+ * (MapFinder), the KMZ export, the print sheet and the multi-select panel — and none of them can
+ * drift from the others. It is a read-only fallback layer: it is never written into a site's
+ * settings, so a project that hasn't overridden a value keeps following the account default when
+ * that default later changes. `userPrefs.js` sets it once the signed-in profile loads.
+ */
+let ACCOUNT_STD = { parcelStyle: {}, typeStyles: {} };
+
+export const setAccountStyleDefaults = (v) => {
+  ACCOUNT_STD = { parcelStyle: { ...(v?.parcelStyle || {}) }, typeStyles: { ...(v?.typeStyles || {}) } };
+};
+export const getAccountStyleDefaults = () => ACCOUNT_STD;
+
+/**
+ * Where a given standard's current value comes from — what the Standards scope chips read.
+ * @returns "project" (this plan overrides it) · "all" (an account default, every project) · "builtin"
+ */
+export const standardScope = (projectVal, accountVal) => {
+  if (projectVal !== undefined && projectVal !== null) return "project";
+  if (accountVal !== undefined && accountVal !== null) return "all";
+  return "builtin";
+};
+
+// Resolved style for a type = built-in default, under the account default (NEW-3), under any
+// project-level default (settings.typeStyles). An individual element may further override
+// fill/stroke/fillOpacity on itself (the Bluebeam-style per-element Properties).
+export const typeStyle = (type, settings) => ({
+  ...TYPE[type],
+  ...((ACCOUNT_STD.typeStyles || {})[type] || {}),
+  ...((settings && settings.typeStyles && settings.typeStyles[type]) || {}),
+});
 
 export const elStyle = (el, settings) => {
   const base = typeStyle(el.type, settings);
@@ -56,7 +89,8 @@ export const elStyle = (el, settings) => {
 // calls this. Because these are stamped at creation (not resolved at render), changing a
 // default only affects PARCELS DRAWN AFTERWARD — matching "Defaults for new elements".
 export const parcelDefaultStyle = (settings) => {
-  const ps = (settings && settings.parcelStyle) || {};
+  // NEW-3 — account default under the project's own default (see setAccountStyleDefaults).
+  const ps = { ...(ACCOUNT_STD.parcelStyle || {}), ...((settings && settings.parcelStyle) || {}) };
   const out = {};
   if (ps.stroke) out.stroke = ps.stroke;
   if (ps.weight != null) out.weight = ps.weight;
