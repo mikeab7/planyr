@@ -101,8 +101,14 @@ test.describe("NEW-3/NEW-4 — a corner that can't hold its class fixes itself",
     await expect(first, "and offer the fix in place").toContainText("Fix");
     expect(Number(await first.getAttribute("data-road-radius-shortfall"))).toBeGreaterThan(0);
 
+    // Read the FINAL leg's bearing, not a hardcoded vertex index — B1052 drops control points the
+    // owner never placed, so an interior index is not stable across a load.
+    const lastLeg = (r) => {
+      const n = r.pts.length;
+      return Math.atan2(r.pts[n - 1].y - r.pts[n - 2].y, r.pts[n - 1].x - r.pts[n - 2].x);
+    };
     const fire = (await roads(page)).find((r) => r.cls === "fire");
-    const bearingBefore = Math.atan2(fire.pts[3].y - fire.pts[2].y, fire.pts[3].x - fire.pts[2].x);
+    const bearingBefore = lastLeg(fire);
 
     // Each remaining corner may be anywhere on the plan, so park the viewport on it before clicking.
     let guard = 0;
@@ -124,8 +130,14 @@ test.describe("NEW-3/NEW-4 — a corner that can't hold its class fixes itself",
     // The fix runs the approach OUT along its own bearing — it must not skew the alignment, which
     // is what the vertex-nudge fallback used to do (a chamfered entry no one lays out on a plan).
     const after = (await roads(page)).find((r) => r.cls === "fire");
-    const bearingAfter = Math.atan2(after.pts[3].y - after.pts[2].y, after.pts[3].x - after.pts[2].x);
+    const bearingAfter = lastLeg(after);
     expect(Math.abs(bearingAfter - bearingBefore)).toBeLessThan(0.02);
-    expect(after.pts.length, "no control points invented or lost").toBe(fire.pts.length);
+    // The fix must never INVENT a control point. It may legitimately be read back with FEWER: the
+    // stored record still holds the raw road until the first save, and B1052's load-time cleanup drops
+    // control points the owner never placed — so assert a ceiling, plus the fact that actually matters,
+    // that the road still STARTS exactly where he drew it (only an end leg may run outward).
+    expect(after.pts.length, "the fix never invents a control point").toBeLessThanOrEqual(fire.pts.length);
+    expect(after.pts[0].x).toBeCloseTo(fire.pts[0].x, 6);
+    expect(after.pts[0].y).toBeCloseTo(fire.pts[0].y, 6);
   });
 });
