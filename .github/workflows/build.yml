@@ -52,3 +52,10 @@ jobs:
           # runs fine un-configured (the cloud chip just shows "Cloud off").
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+      # Performance budget gate (NEW-8). Deterministic half only — bundle weight and the
+      # Site-route chunk allowlist, computed from dist/.vite/manifest.json with no browser.
+      # A breach names the metric and its delta. The runtime half (frame time, heap, tiles)
+      # is deliberately NOT gated here: it is too sensitive to shared-runner CPU contention
+      # to gate a merge on. See docs/PERF-BUDGETS.md.
+      - name: Performance budget (bundle weight + Site-route chunk allowlist — NEW-8)
+        run: node ui-audit/perf-bundle-audit.mjs

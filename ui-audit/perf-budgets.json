@@ -1,0 +1,142 @@
+{
+  "$comment": [
+    "Planyr standing performance budgets (NEW-8). THESE ARE THE CEILING — a feature that",
+    "breaches one ships with a matching optimization, or does not ship. See docs/PERF-BUDGETS.md",
+    "for the rule, the measurement blockers, and how to change a number here.",
+    "",
+    "Every metric carries TWO numbers, and the difference matters:",
+    "  ceiling — the committed maximum. A breach FAILS the check and is attributable to the PR",
+    "            that caused it. Seeded from the 2026-07-28 production baseline PLUS headroom, so",
+    "            it is green on day one and only trips on a real regression.",
+    "  target  — where the metric SHOULD be. Where target < ceiling the metric is knowingly out of",
+    "            budget today; the harness reports the gap loudly as ABOVE TARGET (never silently",
+    "            passing) and names the backlog item that owns closing it. Ratchet the ceiling down",
+    "            toward the target as optimizations land — never up to accommodate a regression.",
+    "",
+    "Baseline provenance: measured on production planyr.io in a signed-in Chrome session on",
+    "Sylvestri / 'Concept C - Full 275ft Frontage', 2026-07-28, dpr 2.15, viewport 1600x465."
+  ],
+
+  "bundle": {
+    "$comment": "Static, deterministic, no browser. Computed from dist/.vite/manifest.json by ui-audit/perf-bundle-audit.mjs. Gated in CI.",
+    "siteRouteJsBytes": {
+      "ceiling": 2400000,
+      "target": 1600000,
+      "measured": 2270513,
+      "unit": "bytes",
+      "what": "Total JS a plain Site route must download: the entry chunk plus SitePlannerApp and its static-import closure.",
+      "note": "Was 3094689 before NEW-9 removed the boot-time idle prefetch of the other workspaces. Target assumes the SitePlannerApp split (see targetOwner)."
+    },
+    "siteRouteChunks": {
+      "ceiling": 4,
+      "target": 4,
+      "measured": 4,
+      "unit": "chunks",
+      "what": "How many JS chunks a plain Site route pulls.",
+      "note": "THE PREFETCH GUARD. Was 11 before NEW-9. Any workspace chunk reappearing here means something warms a route-irrelevant module at boot again."
+    },
+    "siteRouteAllowlist": {
+      "$comment": "Exact chunk identities allowed on a Site route, matched by stem (content hash stripped). An unexpected member fails the audit by NAME, so the diagnosis is immediate.",
+      "allow": ["index", "SitePlannerApp", "hitTest", "AppHeader"]
+    },
+    "totalJsBytes": {
+      "ceiling": 4050000,
+      "target": 4050000,
+      "measured": 3774188,
+      "unit": "bytes",
+      "what": "Every JS chunk EMITTED into dist/assets, summed. Catches overall bundle growth even when it lands off the Site route.",
+      "note": "Larger than the 3016 KB the owner's 2026-07-28 pass reported, and correctly so: that figure counted the 11 chunks a browser actually FETCHED, while this counts all 20 emitted — the extra 5 are Web Worker bundles (terrainWorker, dxfWorker) and small helper chunks that only a dynamic import ever pulls. Two different questions; the per-route budgets above answer the owner's."
+    },
+    "largestChunkBytes": {
+      "ceiling": 1800000,
+      "target": 900000,
+      "measured": 1711381,
+      "unit": "bytes",
+      "what": "The single biggest chunk (today SitePlannerApp).",
+      "note": "SitePlannerApp is 55% of all JS and sits on the critical path. Splitting it is the target's owner."
+    }
+  },
+
+  "runtime": {
+    "$comment": [
+      "Browser-measured, by ui-audit/perf-harness.mjs. NOT gated in the required CI build check —",
+      "frame timing and heap on a shared CI runner are too noisy to gate a merge on, and the aerial",
+      "budget needs live external tile hosts. Run on demand; see docs/PERF-BUDGETS.md for why and for",
+      "what IS gated. The reference scenario is the committed ui-audit/lib/perf-scenario.mjs, which",
+      "stands in for Sylvestri / Concept C (real project data needs a signed-in session the sandbox",
+      "cannot reach) and is LIGHTER than it, so these local numbers are a floor, not a match."
+    ],
+    "timeToFirstDragMs": {
+      "ceiling": 4200,
+      "target": 2500,
+      "measured": null,
+      "localFloor": 999,
+      "unit": "ms",
+      "what": "Navigation start until the planner canvas actually responds to a drag: canvas mounted AND a synthetic pointerdown/move/up round-trip commits a frame.",
+      "note": "PROVISIONAL CEILING — not yet measured under trustworthy conditions. The owner's 2026-07-28 pass deliberately did NOT report a TTFD number, and warned that first-contentful-paint (328ms) is a different, much earlier moment that must not be read as TTFD. This harness defines it; the sandbox cannot measure it honestly because the render-blocking webfont stylesheet is egress-blocked and inflates every paint timing. localFloor is what the stand-in scenario measures locally with all cross-origin traffic aborted — a lower bound on lighter geometry, NOT a production figure. Re-seed the ceiling from the first production run."
+    },
+    "firstAerialCoverageMs": {
+      "ceiling": 9000,
+      "target": 6000,
+      "measured": null,
+      "unit": "ms",
+      "what": "Basemap-layer mount until the visible map area is at least 90% filled by tiles that actually loaded.",
+      "note": "Requires live external tile hosts, which this sandbox blocks. Reported as SKIPPED, never silently passed. Ceiling is provisional until a production run seeds it."
+    },
+    "frameMedianMs": {
+      "ceiling": 24,
+      "target": 16.7,
+      "measured": 20,
+      "localFloor": 16.7,
+      "unit": "ms",
+      "what": "Median frame time during a scripted drag across the planner canvas.",
+      "note": "ABOVE TARGET — 20ms on the owner's production/Sylvestri baseline vs the 16.7ms (60fps) target. The ceiling is set so a regression trips it while the standing gap stays visible every run. localFloor is the stand-in scenario on an idle sandbox CPU; it hits 60fps because that scene is lighter than Sylvestri, which is exactly why the ceiling is seeded from the owner's number and not from a local run."
+    },
+    "frameP90Ms": {
+      "ceiling": 96,
+      "target": 33,
+      "measured": 80,
+      "localFloor": 16.7,
+      "unit": "ms",
+      "what": "90th-percentile frame time during the same scripted drag — the stutter the owner actually feels.",
+      "note": "ABOVE TARGET — 80ms on the owner's baseline vs 33ms. The single worst number in the baseline. See frameMedianMs on why localFloor is far lower."
+    },
+    "peakHeapMB": {
+      "ceiling": 160,
+      "target": 160,
+      "measured": 134.6,
+      "localFloor": 56.9,
+      "unit": "MB",
+      "what": "Peak performance.memory.usedJSHeapSize across a scripted pan/zoom + overlay-toggle loop.",
+      "note": "JS HEAP ONLY, not tab memory. performance.measureUserAgentSpecificMemory() is unavailable on planyr.io (no cross-origin isolation), so decoded tile bitmaps and GPU memory are invisible here — the owner observed ~555MB for the tab while the JS heap peaked at 134.6MB. Do not read this budget as a tab-memory budget."
+    },
+    "aerialTileRequests": {
+      "ceiling": 240,
+      "target": 120,
+      "measured": 221,
+      "localFloor": 182,
+      "unit": "requests",
+      "what": "Aerial basemap tile requests ISSUED per scenario load, counted across all zoom levels.",
+      "note": "ABOVE TARGET — 221 on the owner's baseline vs 120. Counted as REQUESTS, not bytes: cross-origin tile responses carry no Timing-Allow-Origin, so transferSize reads 0 and a byte budget would silently never fire. Counting requests ISSUED (not completed) also keeps the metric meaningful where tile hosts are blocked, as they are in the sandbox — the app still asks for 182 tiles there."
+    },
+    "firstContentfulPaintMs": {
+      "ceiling": 500,
+      "target": 500,
+      "measured": 328,
+      "unit": "ms",
+      "what": "The browser's first-contentful-paint entry.",
+      "note": "Within budget. Kept so a boot-path regression is caught even though it is not the metric that hurts today."
+    }
+  },
+
+  "targetOwner": {
+    "$comment": "Backlog items that own closing an ABOVE TARGET gap. The harness prints these next to the gap so a reader knows the work is tracked, not forgotten.",
+    "runtime.timeToFirstDragMs": "B1040 / V477 live check (re-seed the provisional ceiling from a production run on the real Sylvestri scenario)",
+    "runtime.firstAerialCoverageMs": "B1040 / V477 live check (re-seed the provisional ceiling from a production run; tile hosts are unreachable from the sandbox)",
+    "bundle.siteRouteJsBytes": "B1042 (split SitePlannerApp behind dynamic imports)",
+    "bundle.largestChunkBytes": "B1042 (split SitePlannerApp behind dynamic imports)",
+    "runtime.frameMedianMs": "companion map-side perf session, 2026-07-28 nine-item run (drift / overlay lifecycle / SVG culling) — tighten to 60fps once that render work lands",
+    "runtime.frameP90Ms": "companion map-side perf session, 2026-07-28 nine-item run (drift / overlay lifecycle / SVG culling) — tighten to 60fps once that render work lands",
+    "runtime.aerialTileRequests": "companion map-side perf session, 2026-07-28 nine-item run (tile-footprint reduction)"
+  }
+}

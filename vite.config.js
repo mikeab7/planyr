@@ -79,6 +79,15 @@ export default defineConfig(({ command }) => ({
   // Compile-time constant for error telemetry (B279); read via a typeof guard in
   // src/shared/telemetry/clientErrors.js (falls back to "dev" under dev/test).
   define: { __BUILD_ID__: JSON.stringify(BUILD_ID) },
+  build: {
+    // Emit dist/.vite/manifest.json — the chunk graph (per-chunk `imports` = static deps,
+    // `dynamicImports` = lazy deps, plus each chunk's file name). The performance-budget
+    // audit (NEW-8, ui-audit/perf-bundle-audit.mjs) walks it to compute what a given ROUTE
+    // actually has to download, which is the number a budget should cap — a per-chunk size
+    // table can't tell you that. Inert at runtime: nothing in the app reads the manifest,
+    // and Cloudflare Pages just serves it as one more static file.
+    manifest: true,
+  },
   plugins: [
     react(),
     pdfjsAssets(),

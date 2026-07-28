@@ -166,7 +166,12 @@ function ModuleTab({ m, isActive, onClick }) {
       data-testid={`module-tab-${m.id}`}
       // Hover = nav intent: warm the target workspace's chunk (and Schedule's
       // iframe doc) so the click loads from cache. Idempotent + best-effort. (B223)
+      // Since NEW-9 removed the boot-time idle warm, these gestures are the ONLY
+      // thing that warms a workspace — so cover the touch path too: a tap fires
+      // pointerdown with no preceding mouseenter, and pointerdown lands before the
+      // click commits, which is enough of a head start to hide the chunk fetch.
       onMouseEnter={() => { setHover(true); if (!isActive) prefetchModule(m.id); }}
+      onPointerDown={() => { if (!isActive) prefetchModule(m.id); }}
       onMouseLeave={() => setHover(false)}
       aria-current={isActive ? "page" : undefined}
       style={{
