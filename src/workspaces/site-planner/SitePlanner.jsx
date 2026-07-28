@@ -110,7 +110,7 @@ import { classifyWseSource, classifyVerified } from "./lib/provenance.js";
 import { formatAge } from "./lib/gisCache.js";
 import { buildingNumbers, isBuilding, roadTravelWidth, bondedChildRot, roadStripBBox, rectRoadEndpoints, parcelOutline, parcelDisplayInfo, lineageConflicts } from "./lib/siteModel.js";
 import { roadCenterline, roadMinRadius, insertRoadVertex, removeRoadVertex, canRemoveRoadVertex, curbStrokePx, findRoadConnect, planRoadConnect, fixRoadRadii, teeGeometry, rectEdges, nearestRectEdge, weldCoverPolygon, roadRadiusConflicts, fitRoadCorners, nodeJunction } from "./lib/roadGeometry.js";
-import { dissolveRings, clipPolylineOutside, clusterIds, regionPathD } from "./lib/roadNetwork.js";
+import { dissolveRings, clipPolylineOutside, clusterIds, regionPathD, rectOutlineCutSegments } from "./lib/roadNetwork.js";
 import { dashZoom, insetRingVisible } from "./lib/lineZoom.js";
 import { roadClassesOf, roadClassOf, classMinRadius, classDefaultRadius, classReturnRadius, DEFAULT_ROAD_CLASS, ROAD_CLASS_SEEDS, speedMinRadius } from "./lib/roadClasses.js";
 import { DOGEAR_W, DOGEAR_D, dogEarGeom, dogEarSize, sidewalkSpanForBumps, isDogEarSide } from "./lib/dogEar.js";
@@ -19489,15 +19489,21 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
   parts.push(<rect key="r" x={tl.x} y={tl.y} width={w} height={h} fill={ghostPath ? rectAddF : waterFill} fillOpacity={waterOp}
     stroke={outlineCut ? "none" : st.stroke /* B619: no accent recolor on select */} strokeWidth={outlineCut ? 0 : rectStrokeW} rx={rx} />);
   if (outlineCut) {
-    const rad = ((el.rot || 0) * Math.PI) / 180, cc = Math.cos(rad), ss = Math.sin(rad);
-    const corner = (lx, ly) => ({ x: el.cx + (lx * cc - ly * ss), y: el.cy + (lx * ss + ly * cc) });
-    const cs = [corner(-el.w / 2, -el.h / 2), corner(el.w / 2, -el.h / 2), corner(el.w / 2, el.h / 2), corner(-el.w / 2, el.h / 2)];
-    for (let e = 0; e < 4; e++) {
-      const segs = clipPolylineOutside([cs[e], cs[(e + 1) % 4]], outlineCut);
-      segs.forEach((seg, k) => parts.push(
-        <polyline key={`ol${e}-${k}`} points={seg.map((q) => { const sp = f2p(q); return `${sp.x},${sp.y}`; }).join(" ")}
-          fill="none" stroke={st.stroke} strokeWidth={rectStrokeW} strokeLinecap="butt" pointerEvents="none" />));
-    }
+    // NEW-1 — rectOutlineCutSegments returns WORLD feet with el.rot ALREADY BAKED into the corners,
+    // but this whole branch renders inside a `rotate(el.rot, c)` group (see the return at the end of
+    // renderElPx), so the segments MUST be counter-rotated or the rotation lands twice. At rot 90/270
+    // the doubled 540° ≡ 180° redrew a w×h field as h×w about its own centre: stray element-coloured
+    // lines projecting out over bare aerial, and — because outlineCut also blanks the plain rect's own
+    // stroke above — the field's real edge missing entirely. Same counter-rotate the pond baseline
+    // ghost and the stage contours already apply for exactly this reason.
+    const segs = rectOutlineCutSegments(el, outlineCut);
+    if (segs.length) parts.push(
+      <g key="olcut" transform={`rotate(${-(el.rot || 0)} ${c.x} ${c.y})`} data-testid="rect-outline-cut" data-el-id={el.id}>
+        {segs.map((seg, i) => (
+          <polyline key={`ol${i}`} points={seg.map((q) => { const sp = f2p(q); return `${sp.x},${sp.y}`; }).join(" ")}
+            fill="none" stroke={st.stroke} strokeWidth={rectStrokeW} strokeLinecap="butt" pointerEvents="none" />
+        ))}
+      </g>);
   }
   // Baseline ghost fill (existing basin) sits on top of the added-tint rect; stroke layer added below.
   if (ghostPath) parts.push(<g key="ghostfill" transform={`rotate(${-el.rot} ${c.x} ${c.y})`}><path d={ghostPath} fill={rectExistF} fillOpacity={waterOp} stroke="none" pointerEvents="none" /></g>);

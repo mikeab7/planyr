@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-07-26 @ `9a342d7` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-07-28 @ `7af9327` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -516,7 +516,7 @@ _313 source files mapped._
 - **`src/workspaces/site-planner/lib/roadGeometry.js`** — Pure centerline road geometry: tessellate clicked alignment into arc fillets/smooth splines/sharp corners, min radius of curvature
   - _exports_: `canRemoveRoadVertex`, `concatRoads`, `cornerApproachShortfall`, `cornerShares`, `curbStrokePx`, `dedupeRoadVertices`, `DEFAULT_ARC_RADIUS`, `DEFAULT_TESS_DEG`, `findRoadConnect`, `fitRoadCorners`, `fixRoadRadii`, `insertRoadVertex`, `minRadiusOfCurvature`, `nearestRectEdge`, `nodeJunction`, `planRoadConnect`, `polylineLength`, `rectEdges`, `removeRoadVertex`, `repairBakedRadii`, `ROAD_VERTEX_COLLAPSE_FT`, `roadCenterline`, `roadCornerRadii`, `roadMinRadius`, `roadRadiusConflicts`, `roadsMergeCompatible`, `teeGeometry`, `weldCoverPolygon`
 - **`src/workspaces/site-planner/lib/roadNetwork.js`** — Dissolves connected road strips + curb-return wedges into ONE pavement region per cluster (clipper union, orientation-normalised, morphologically closed), and trims curb stripes at junctions. The topology replacement for the old per-junction cover patches.
-  - _exports_: `clipPolylineOutside`, `clusterIds`, `dissolveRings`, `regionPathD`
+  - _exports_: `clipPolylineOutside`, `clusterIds`, `dissolveRings`, `rectOutlineCutSegments`, `regionPathD`
 - **`src/workspaces/site-planner/lib/sharing.js`** — Project team sharing: stamp/clear team_id on a group's sites, doc_reviews, and file_facts then re-pull the local cache
   - _exports_: `makeProjectPrivate`, `shareProject`
 - **`src/workspaces/site-planner/lib/sheetFurniture.js`** — Map sheet furniture: graphic scale bar and two-tone north arrow, output-unit sized with no-occlude corner placement, screen + export
