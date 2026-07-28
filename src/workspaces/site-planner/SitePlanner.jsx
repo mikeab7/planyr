@@ -124,6 +124,9 @@ import { dimSlideRange, clampDimOffset, DIM_POS_F_DEFAULT, DIM_POS_F_ROAD, dimNu
 import { addedAreaLabelPoint, pondContours, contourLabelPoint, autoContourInterval, detentionStorage, usablePondVolume, incrementalExcavationCf, detentionLandTakeEstimate, estimateFootprintSf, pondPlacementCandidates, drawdownWarning, bermAsFillHeight, bermFillVolume, bermFillCells } from "./lib/pondGeom.js";
 import { accumulatePondLedger, effectivePondRole, POND_ROLE_LABEL, pondDisplayName, pondDisplayNameFor } from "./lib/pondLedger.js";
 import { rankLedgerMoves, BERM_MAX_RAISE_FT } from "./lib/ledgerBalancer.js";
+// NEW-1/NEW-2 — the ONE derivation of the pond inspector's detention + mitigation verdict
+// strings (heading names its ledger; buildability + over-provision ride the qualifier line).
+import { detentionVerdict, mitigationVerdict, overdugAcFt, overProvision } from "./lib/pondVerdict.js";
 import { pondEncumbranceConflicts } from "./lib/corridorConflicts.js";
 import { envelopeOf, revalidationNeed, fetchStaleForEdit, FETCH_TTL_MS, canonEnv, DRAIN_STUCK_MS, fetchWatchdogFired } from "./lib/factRevalidation.js";
 import { bulletBarLayout, stackedBarLayout, bulletBarMarks, stackedBarMarks, stormwaterBarSpecs, ACFT_EPS } from "./lib/yieldBar.js";
@@ -171,7 +174,7 @@ import { loadPondCriteria, checkPondCriteria } from "./lib/pondCriteriaRules.js"
 import { GRADING_RULES, chipLabel as gradingChipLabel } from "./lib/gradingRules.js";
 import { loadBuildabilityRules, assessBuildability, requiredFfe, suggestedFfe, OUTSIDE_FLOODPLAIN_FFE_NOTE, SITE_BASED_FFE_NOTE } from "./lib/buildability.js";
 import { sizePondForTargets, scaleRing, solveTobRaise, applyPondSizingActions } from "./lib/pondSizing.js";
-import { rimCapElevFt, assessBuildability as assessPondEnvelope, unbuildableHeading, makeItBuildableOptions, unbuildableNote, requirementNote, DEFAULT_MAX_EXCAV_DEPTH_FT } from "./lib/buildableEnvelope.js";
+import { rimCapElevFt, assessBuildability as assessPondEnvelope, makeItBuildableOptions, unbuildableNote, requirementNote, DEFAULT_MAX_EXCAV_DEPTH_FT } from "./lib/buildableEnvelope.js";
 import { estDepthToWaterFt, estMaxExcavDepthFt, poolRelevantForRole } from "./lib/pondScreeningDefaults.js";
 import { deriveTailwater, TAILWATER_SOURCES, tailwaterNote } from "./lib/tailwaterSource.js";
 import { pondGroundwaterScreen } from "./lib/groundwater.js";
@@ -10859,9 +10862,21 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       const caution = d.unanchoredInTrigger > 0 ? " ⚠ unanchored pond" : d.anchoredNoWseInTrigger > 0 ? " ⚠ pond WSE unknown" : d.pondAutoAnchored > 0 ? " · TOB auto (3DEP)" : "";
       // NEW-9 (PDF-PARITY): a restored check without the per-pond split prints UNKNOWN —
       // the sheet must not credit gross volume as usable any more than the screen may.
+      // NEW-2 (PDF-PARITY): the OVER-PROVISION the pond inspector's detention row now names on
+      // screen prints here too, off the SAME pure derivation (pondVerdict.overdugAcFt +
+      // overProvision) and the SAME criteria-configurable slack — screen and sheet can't drift.
+      // With no $/CY entered the sheet prints the volume only; a cost is never fabricated.
+      const detOverText = (() => {
+        if (d.providedUsableCf == null) return "";
+        const cx = criteriaFor(critJurKey, { overrides: criteriaOverrides });
+        const over = overdugAcFt(d.providedUsableCf / 43560, reqAcFt, { slackAcFt: cx.overdugSlackAcFt?.value, slackPct: cx.overdugSlackPct?.value });
+        const pRaw = (settings.prices || {}).earthworkCy;
+        const op = overProvision(over, { earthPerCy: pRaw == null || pRaw === "" || !Number.isFinite(+pRaw) ? null : +pRaw });
+        return op ? ` — ${op.text.replace(/\.$/, "")}` : "";
+      })();
       pairs.push(["Det. req / prov (usable)", d.providedUsableCf == null
         ? `${f2(reqAcFt)} / UNKNOWN — re-check (usable split not saved)`
-        : `${f2(reqAcFt)} / ${f1(d.providedUsableCf / 43560)} ac-ft${caution}`]);
+        : `${f2(reqAcFt)} / ${f1(d.providedUsableCf / 43560)} ac-ft${caution}${detOverText}`]);
     }
     const mit = d && d.mitigation;
     const geoFailed = d && d.floodGeo && d.floodGeo.state === "failed";
@@ -17316,7 +17331,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     const inFloodway = pondFloodplainTier(ring, fmZones).inFloodway;
                     const hardBlocked = !bld.buildable;                 // drainage cap / outfall-tailwater
                     const needsNoRise = bld.requirements.length > 0;    // floodway berm → no-rise cert
-                    const amber = hardBlocked || needsNoRise;
                     const hardReasons = bld.hard.map((h) => h.label).join(" ");
                     const reqReasons = requirementNote({ requirements: bld.requirements });
                     const body = short && thisInundated && floodLevel != null && !hardBlocked
@@ -17328,34 +17342,34 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           : "";
                     // I5 — the HEADLINE states the outcome; the achieved-vs-required figure is its OWN
                     // styled sub-line (never a wrapped dangling parenthesis). Every card carries both.
-                    out.push({
-                      kind: "detention",
-                      short,
-                      tone: amber ? "amber" : short ? "short" : "ok",
-                      heading: hardBlocked
-                        ? (short ? `Not buildable to reach ${f1(detReqAcFt)} ac-ft` : unbuildableHeading({ requiredAcFt: detReqAcFt }))
-                        : short
-                          ? `Short of ${f1(detReqAcFt)} ac-ft required`
-                          : needsNoRise
-                            ? "Buildable, needs a no-rise certification"
-                            : "Buildable",
-                      subline: hardBlocked && short
-                        ? `${f1(provAcFt)} of ${f1(detReqAcFt)} ac-ft achievable`
-                        : `${f1(provAcFt)} of ${f1(detReqAcFt)} ac-ft`,
-                      body,
+                    // NEW-1/NEW-2 — the strings now come from the ONE pure derivation
+                    // (lib/pondVerdict.js): the heading NAMES this row's ledger ("Detention covered" /
+                    // "Detention short 4.6 ac-ft" / "Detention not achievable here") instead of
+                    // headlining the BUILDABILITY answer over a VOLUME sub-line, and buildability is
+                    // demoted (never deleted) to the card's qualifier line. The over-provision state
+                    // rides the same qualifier slot. `body` (the flood-level / make-it-buildable gloss)
+                    // is unchanged and still renders underneath.
+                    const vSlack = (() => {
+                      // NEW-2 — the over-provision threshold is CRITERIA-CONFIGURABLE (the
+                      // screeningPondDepthFt precedent), never an inline constant here.
+                      const cx = criteriaFor(critJurKey, { overrides: criteriaOverrides });
+                      return { slackAcFt: cx.overdugSlackAcFt?.value, slackPct: cx.overdugSlackPct?.value };
+                    })();
+                    const earthPerCyRaw = (settings.prices || {}).earthworkCy;
+                    const earthPerCy = earthPerCyRaw == null || earthPerCyRaw === "" || !Number.isFinite(+earthPerCyRaw) ? null : +earthPerCyRaw;
+                    const dv = detentionVerdict({
+                      providedAcFt: provAcFt,
+                      requiredAcFt: detReqAcFt,
+                      hardBlocked,
+                      needsNoRise,
+                      slack: vSlack,
+                      earthPerCy,
                     });
+                    out.push({ ...dv, body });
                   }
                   if (mitReqAcFt != null && pondLedger.creditedMitCf != null) {
                     const provMitAcFt = pondLedger.creditedMitCf / 43560;
-                    const short = provMitAcFt < mitReqAcFt - 0.005;
-                    out.push({
-                      kind: "mitigation",
-                      short,
-                      tone: short ? "short" : "ok",
-                      heading: short ? "Mitigation short" : "Mitigation covered",
-                      subline: `${f1(provMitAcFt)} of ${f1(mitReqAcFt)} ac-ft`,
-                      body: "",
-                    });
+                    out.push({ ...mitigationVerdict({ providedAcFt: provMitAcFt, requiredAcFt: mitReqAcFt }), body: "" });
                   }
                   return out;
                 })();
@@ -17548,7 +17562,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                             {/* I5 — HEADLINE (outcome) + a separate styled achieved-vs-required sub-line; never a
                                 wrapped dangling parenthesis. overflowWrap keeps it inside the panel at any width. */}
                             <div style={{ fontSize: 12.5, fontWeight: 800, lineHeight: 1.35, color: toneColorOf(c), overflowWrap: "anywhere" }}>{c.heading}</div>
-                            {c.subline ? <div style={{ fontSize: 11, color: PAL.muted, fontWeight: 700, lineHeight: 1.4, marginTop: 2, letterSpacing: "0.02em" }}>{c.subline}</div> : null}
+                            {c.subline ? <div title={c.basisNote || undefined} style={{ fontSize: 11, color: PAL.muted, fontWeight: 700, lineHeight: 1.4, marginTop: 2, letterSpacing: "0.02em", cursor: c.basisNote ? "help" : undefined }}>{c.subline}</div> : null}
+                            {/* NEW-1 — the buildability answer, DEMOTED off the headline to its own
+                                qualifier line (never deleted: floodway hard stops / the no-rise
+                                certification are real and load-bearing). NEW-2 — the over-provision
+                                state rides the same slot in WARN tone: as visible as a shortfall's
+                                sub-line, never louder than a shortfall's headline. */}
+                            {c.qualifier ? (
+                              <div title={c.qualifier.title || undefined} style={{ fontSize: 11, fontWeight: 700, lineHeight: 1.4, marginTop: 4, color: PAL.warn, cursor: c.qualifier.title ? "help" : undefined, overflowWrap: "anywhere" }}>▲ {c.qualifier.text}</div>
+                            ) : null}
                             {c.body ? <div style={{ fontSize: 11.5, color: PAL.text, lineHeight: 1.5, marginTop: 4 }}>{c.body}</div> : null}
                             {i === optimizeIdx && (c.tone ?? (c.short ? "short" : "ok")) !== "ok" && (
                               <button type="button" onClick={designPond} title="One click: sets the pond's elevations and outlet so storage counts. Your drawn outline is never changed." style={{ marginTop: 8, padding: "5px 11px", border: "none", borderRadius: 7, background: "var(--accent)", color: "var(--on-accent)", fontWeight: 700, fontSize: 11, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>⚡ Optimize pond</button>

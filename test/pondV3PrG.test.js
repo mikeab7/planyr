@@ -9,6 +9,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { bandedStorage, usablePondVolume } from "../src/workspaces/site-planner/lib/pondGeom.js";
+import { detentionVerdict } from "../src/workspaces/site-planner/lib/pondVerdict.js";
 
 const src = readFileSync(fileURLToPath(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url)), "utf8");
 const at = (needle) => { const i = src.indexOf(needle); if (i < 0) throw new Error(`marker not found: ${needle}`); return i; };
@@ -89,11 +90,16 @@ describe("G2 — the verdict is GREEN only for a buildable design; else AMBER 'n
     // requirement is outstanding (a floodway berm). The old "floodplain forbids the berm" gate is gone.
     expect(src).toContain("const hardBlocked = !bld.buildable;");
     expect(src).toContain("const needsNoRise = bld.requirements.length > 0;");
-    expect(src).toContain("const amber = hardBlocked || needsNoRise;");
-    expect(src).toContain('tone: amber ? "amber" : short ? "short" : "ok",');
     expect(src.includes("const envelopeBlocked = short && inFw;")).toBe(false);
-    // the amber heading uses the pure helper and never reads "OK"
-    expect(src).toContain("unbuildableHeading({ requiredAcFt: detReqAcFt })");
+    // NEW-1 — both facts are now handed to the ONE pure verdict derivation, which preserves
+    // this tone rule (amber whenever the design is unbuildable or carries an outstanding
+    // requirement) and demotes the buildability answer off the headline to the qualifier line.
+    expect(src).toContain("hardBlocked,\n                      needsNoRise,");
+    expect(detentionVerdict({ providedAcFt: 80, requiredAcFt: 76.7, hardBlocked: true }).tone).toBe("amber");
+    expect(detentionVerdict({ providedAcFt: 80, requiredAcFt: 76.7, needsNoRise: true }).tone).toBe("amber");
+    expect(detentionVerdict({ providedAcFt: 40, requiredAcFt: 76.7 }).tone).toBe("short");
+    expect(detentionVerdict({ providedAcFt: 80, requiredAcFt: 76.7 }).tone).toBe("ok");
+    expect(detentionVerdict({ providedAcFt: 90, requiredAcFt: 76.7, hardBlocked: true }).heading).toBe("Detention volume met — not buildable as drawn");
   });
   it("the card render carries a three-way tone (short/amber/ok) and the Optimize button rides any non-OK card", () => {
     expect(src).toContain('const optimizeIdx = statusCards.findIndex((c) => (c.tone ?? (c.short ? "short" : "ok")) !== "ok");');

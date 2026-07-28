@@ -5,6 +5,8 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
+import { detentionVerdict } from "../src/workspaces/site-planner/lib/pondVerdict.js";
+
 const src = readFileSync(fileURLToPath(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url)), "utf8");
 const at = (needle) => {
   const i = src.indexOf(needle);
@@ -157,8 +159,11 @@ describe("A4 — the sizing-assistant zero-detention line + 'no targets' line ar
 describe("PR-B — pond inspector fixes", () => {
   it("B4/I5 — the status-card is a HEADLINE + a separate achieved/required sub-line, never 'of the'", () => {
     // PR-I (I5) restructured the verdict: the outcome is the headline; the figure is its own sub-line.
-    expect(pondBody).toContain("`Short of ${f1(detReqAcFt)} ac-ft required`");
-    expect(pondBody).toContain("subline: hardBlocked && short"); // PR-K renamed the gate
+    // NEW-1 — the headline now NAMES its ledger ("Detention short 4.6 ac-ft") and the figure
+    // keeps its own sub-line; both come from the ONE pure derivation (lib/pondVerdict.js).
+    expect(pondBody).toContain("const dv = detentionVerdict({");
+    expect(detentionVerdict({ providedAcFt: 72.1, requiredAcFt: 76.7 }).heading).toBe("Detention short 4.6 ac-ft");
+    expect(detentionVerdict({ providedAcFt: 72.1, requiredAcFt: 76.7 }).subline).toBe("72.1 of 76.7 ac-ft");
     expect(pondBody.includes("of the ${f1(detReqAcFt)}")).toBe(false);
   });
   it("B5 — the OUTLET & STORMS summary is fed the real routed fail count", () => {
