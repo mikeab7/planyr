@@ -13,6 +13,14 @@
 import { loadSitesList, renameSiteGroup, deleteSiteGroup, pullCloud, isCloudActive, activeUid } from "../../workspaces/site-planner/lib/storage.js";
 import { groupProjects } from "./projectModel.js";
 
+// Recently deleted (NEW-1) — deleting a project now bins it for 30 days instead of destroying it.
+// Re-exported here so the shared breadcrumb reads the bin through the same one project-layer seam
+// it already uses for list/rename/delete, rather than reaching into the Site Planner store itself.
+export {
+  listDeletedProjects, restoreDeletedProject, purgeDeletedProject,
+  purgeExpiredDeletedProjects, DELETED_RETENTION_DAYS,
+} from "../../workspaces/site-planner/lib/storage.js";
+
 export { groupProjects, filterProjects, relTime, suggestNameMatch, normalizeProjectName } from "./projectModel.js";
 
 export function listProjects() {
