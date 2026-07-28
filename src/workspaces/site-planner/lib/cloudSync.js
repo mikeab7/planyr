@@ -220,24 +220,42 @@ export function interpretDelete(rows, error) {
   return { ok: true, removed: Array.isArray(rows) ? rows.length : 0 };
 }
 
+/* NEW-1 — deleting a site is a SOFT delete: stamp `deleted_at` instead of hard-DELETEing the row.
+ *
+ * Two things this buys, both of which the old hard delete got wrong:
+ *   1. The delete becomes a FACT EVERY CLIENT CAN READ. A client-local tombstone lives in one
+ *      browser's localStorage, so a second signed-in client saw only "the cloud doesn't have this
+ *      row", read that as "a push that didn't land", and heal-the-split re-pushed it (the
+ *      resurrection bug). `cloudDeletedRows` below hands the merge the server's deleted ids, so
+ *      absence and deletion stop being the same signal.
+ *   2. The ELEMENTS SURVIVE. `site_elements_site_id_fkey` is ON DELETE CASCADE — a hard delete
+ *      destroyed every element row, so the resurrected project came back GUTTED (slim header,
+ *      zero buildings). No cascade fires on an UPDATE, so a restore returns the site whole.
+ *
+ * Honesty semantics are unchanged (B372): `.select("id")` means a 0-row no-op (RLS/ownership
+ * mismatch — the row survives) stays DISTINGUISHABLE from a real removal, and both the error and
+ * the zero-row cases stay loud. Scope by id only and let RLS decide who may act (own row, or a
+ * team member on a shared row) — a user_id filter would block a permitted team delete.
+ *
+ * Pre-migration DBs (db/sites_soft_delete.sql not run) degrade to the old immediate hard delete,
+ * so deleting never regresses before the migration lands. */
 export async function cloudDelete(uid, id) {
   // Nothing to remove server-side (logged out / unconfigured) is success, not a failure to alarm on.
   if (!supabase || !uid || !id) return { ok: true, removed: 0, skipped: true };
   delete siteVersions[id]; // stop tracking a removed row's version
   delete lastHeaderSig[id];
-  // Scope by id only and let RLS decide who may delete (own row, OR team-admin on a shared row).
-  // A user_id filter would block an admin from deleting a teammate's shared project, which the
-  // policy permits — RLS is the security boundary here, not the client filter (team feature).
-  // `.select()` returns the rows actually removed, so a 0-row no-op (RLS mismatch, or an
-  // already-deleted row) is DISTINGUISHABLE from a real removal — a bare `.delete()` reports
-  // success on both (B372).
   try {
-    const { data, error } = await supabase.from("sites").delete().eq("id", id).select("id");
+    // Deliberately does NOT touch `version` or `team_id`: the soft delete must not invalidate
+    // another tab's CAS token (an ordinary content push carries no `deleted_at` key, so it can't
+    // un-bin the row either) and must not trip the `guard_team_rehome` BEFORE UPDATE trigger.
+    const { data, error } = await supabase.from("sites")
+      .update({ deleted_at: new Date().toISOString() }).eq("id", id).select("id");
+    if (error && isMissingColumn(error, "deleted_at")) return cloudHardDelete(uid, id); // un-migrated DB → old behavior
     const out = interpretDelete(data, error);
     // B468/NEW-5 — a delete that errored, or matched ZERO rows (RLS/ownership mismatch → the row
     // survives and reappears on reload), is exactly the kind of silent failure we want traceable.
-    if (out.ok === false) reportClientEvent("cloud-write-failed", "delete failed (sites)", { id, error: out.error });
-    else if (!out.skipped && out.removed === 0) reportClientEvent("delete-zero-rows", "delete matched no rows (sites)", { id });
+    if (out.ok === false) reportClientEvent("cloud-write-failed", "soft delete failed (sites)", { id, error: out.error });
+    else if (out.removed === 0) reportClientEvent("delete-zero-rows", "soft delete matched no rows (sites)", { id });
     return out;
   } catch (e) {
     reportClientEvent("cloud-write-failed", "delete threw (sites)", { id, error: (e && e.message) || "" });
@@ -245,19 +263,87 @@ export async function cloudDelete(uid, id) {
   }
 }
 
+/* The REAL row removal. Only two callers: the pre-migration degrade above, and the 30-day purge /
+ * "Delete forever" out of Recently deleted. The `site_elements` cascade firing here is correct —
+ * at this point the user (or the expiry) has asked for permanent destruction. */
+export async function cloudHardDelete(uid, id) {
+  if (!supabase || !uid || !id) return { ok: true, removed: 0, skipped: true };
+  delete siteVersions[id];
+  delete lastHeaderSig[id];
+  try {
+    const { data, error } = await supabase.from("sites").delete().eq("id", id).select("id");
+    const out = interpretDelete(data, error);
+    if (out.ok === false) reportClientEvent("cloud-write-failed", "delete failed (sites)", { id, error: out.error });
+    else if (out.removed === 0) reportClientEvent("delete-zero-rows", "delete matched no rows (sites)", { id });
+    return out;
+  } catch (e) {
+    reportClientEvent("cloud-write-failed", "delete threw (sites)", { id, error: (e && e.message) || "" });
+    return { ok: false, error: (e && e.message) || "delete threw" };
+  }
+}
+
+/* Lift a site out of Recently deleted. Rides the same UPDATE policy the soft delete does. Returns
+ * { ok, restored } — restored:0 means nothing matched (already purged, or an RLS mismatch), which
+ * the caller surfaces rather than reporting a phantom success. */
+export async function cloudRestore(uid, id) {
+  if (!supabase || !uid || !id) return { ok: false, restored: 0, error: "not signed in" };
+  const { data, error } = await supabase.from("sites")
+    .update({ deleted_at: null }).eq("id", id).select("id");
+  const restored = Array.isArray(data) ? data.length : 0;
+  if (error) reportClientEvent("cloud-write-failed", "restore failed (sites)", { id, error: error.message });
+  return { ok: !error && restored > 0, restored, error: error ? error.message : null };
+}
+
+/* Every soft-deleted row this user can see — the "Recently deleted" bin AND, critically, the
+ * server-deleted id set `mergePulledSites` needs so a cloud-absent row can be told apart from a
+ * cloud-DELETED one. Slim projection (no `data` jsonb) so this stays cheap on every pull.
+ *
+ * Returns { ok, supported, rows }:
+ *   ok:false            → the fetch genuinely failed. The caller must NOT heal cloud-absent rows
+ *                         this pull (it can't tell "never landed" from "deleted") — fail safe.
+ *   supported:false     → db/sites_soft_delete.sql hasn't run. Nothing is ever soft-deleted on
+ *                         this DB, so healing stays safe (the durable local tombstones + their
+ *                         grace window are the guard there).                                    */
+export async function cloudDeletedRows(uid) {
+  if (!supabase || !uid) return { ok: true, supported: false, rows: [] };
+  const { data, error } = await supabase.from("sites")
+    .select("id, group_id, site, name, county, updated_at, deleted_at")
+    .not("deleted_at", "is", null)
+    .order("deleted_at", { ascending: false });
+  if (error) {
+    if (isMissingColumn(error, "deleted_at")) return { ok: true, supported: false, rows: [] };
+    return { ok: false, supported: true, rows: [], error: error.message || "deleted list failed" };
+  }
+  return { ok: true, supported: true, rows: data || [] };
+}
+
+
 // Every site row the signed-in user can see — their own PLUS any shared with a team they're
 // in (RLS decides). Returns the array of serialized Site Models (the `data` column), records
 // each row's `version` for the next compare-and-swap (B314), and overlays the authoritative
 // team_id / owner (user_id) columns onto each model so the UI can show "shared / owned by".
 export async function cloudList(uid) {
   if (!supabase || !uid) return [];
-  let { data, error } = await supabase.from("sites").select("data, version, team_id, user_id").order("updated_at", { ascending: false });
+  // NEW-1 — soft-deleted rows are NOT live projects: filter them out here so a binned site never
+  // reaches the merge, the list, or the map. The filter is dropped on a pre-migration DB (no
+  // deleted_at column), where nothing can be soft-deleted anyway.
+  const live = (q) => q.is("deleted_at", null);
+  let { data, error } = await live(supabase.from("sites").select("data, version, team_id, user_id")).order("updated_at", { ascending: false });
+  if (error && isMissingColumn(error, "deleted_at"))
+    ({ data, error } = await supabase.from("sites").select("data, version, team_id, user_id").order("updated_at", { ascending: false }));
   // Pre-migration fallbacks: team_id (db/team_sharing.sql) then version (db/optimistic_concurrency.sql)
   // may not exist yet → re-select with fewer columns so loading never breaks before they're run.
-  if (error && isMissingColumn(error, "team_id"))
-    ({ data, error } = await supabase.from("sites").select("data, version").order("updated_at", { ascending: false }));
-  if (error && isMissingVersionColumn(error))
-    ({ data, error } = await supabase.from("sites").select("data").order("updated_at", { ascending: false }));
+  // Each tier re-applies the deleted_at filter (and drops it the same way if that column is absent).
+  if (error && isMissingColumn(error, "team_id")) {
+    ({ data, error } = await live(supabase.from("sites").select("data, version")).order("updated_at", { ascending: false }));
+    if (error && isMissingColumn(error, "deleted_at"))
+      ({ data, error } = await supabase.from("sites").select("data, version").order("updated_at", { ascending: false }));
+  }
+  if (error && isMissingVersionColumn(error)) {
+    ({ data, error } = await live(supabase.from("sites").select("data")).order("updated_at", { ascending: false }));
+    if (error && isMissingColumn(error, "deleted_at"))
+      ({ data, error } = await supabase.from("sites").select("data").order("updated_at", { ascending: false }));
+  }
   // THROW on a real fetch error so callers can tell it apart from a genuinely-empty
   // result. Returning [] here let `pullCloud` wipe the local cache to empty on a
   // transient/offline error, showing a scary "no sites" state (B54).

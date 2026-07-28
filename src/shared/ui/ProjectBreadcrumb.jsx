@@ -36,6 +36,8 @@ import { NO_AUTOFILL } from "./noAutofill.js";
 import {
   listProjects, filterProjects, relTime, warmProjectsIfEmpty,
   renameProject as storeRename, deleteProject as storeDelete,
+  listDeletedProjects, restoreDeletedProject, purgeDeletedProject, purgeExpiredDeletedProjects,
+  DELETED_RETENTION_DAYS,
 } from "../projects/projects.js";
 import { resolveCurrentName } from "../projects/projectModel.js";
 
@@ -145,6 +147,12 @@ export default function ProjectBreadcrumb({
   const [menuFor, setMenuFor] = useState(null); // {id, name, x, y, confirm} — per-row manage menu (B439)
   const [editingId, setEditingId] = useState(null); // project id being renamed inline (B439)
   const [editVal, setEditVal] = useState("");
+  // Recently deleted (NEW-1) — the restore bin. Deleting a project soft-deletes it, so the plans
+  // AND their elements survive and a restore returns the project whole.
+  const [deleted, setDeleted] = useState([]);       // [{ id, name, ids, deletedAt }]
+  const [binOpen, setBinOpen] = useState(false);
+  const [binBusy, setBinBusy] = useState(null);     // group id of an in-flight restore/purge
+  const [purgeFor, setPurgeFor] = useState(null);   // group id awaiting "delete forever" confirmation
   const anchorRef = useRef(null);
   const toastTimer = useRef(null);
 
@@ -177,8 +185,27 @@ export default function ProjectBreadcrumb({
     return () => { window.removeEventListener("storage", onStorage); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [controlled]);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { if (open) { refresh(); warmThenRefresh(); setQ(""); } else { setMenuFor(null); setEditingId(null); } }, [open]);
+  // Recently deleted (NEW-1): read the bin when the dropdown opens, and take the lazy 30-day purge
+  // pass at the same time (anything past retention gets the real DELETE then — the site_elements
+  // cascade is correct at that point). Signed-out / pre-migration DBs report unsupported and the
+  // section simply doesn't render. Never throws into the dropdown.
+  const refreshBin = () => {
+    if (controlled) return;
+    listDeletedProjects()
+      .then((r) => { if (r && r.ok && r.supported) setDeleted(r.projects || []); else setDeleted([]); })
+      .catch(() => setDeleted([]));
+    purgeExpiredDeletedProjects()
+      .then((r) => {
+        if (r && r.purged > 0) listDeletedProjects().then((r2) => { if (r2 && r2.ok) setDeleted(r2.projects || []); }).catch(() => {});
+        if (r && r.failed > 0) flashToast("Some expired items in Recently deleted couldn't be cleared — they'll be retried next time this list opens.");
+      })
+      .catch(() => {});
+  };
+  useEffect(() => {
+    if (open) { refresh(); warmThenRefresh(); refreshBin(); setQ(""); }
+    else { setMenuFor(null); setEditingId(null); setBinOpen(false); setPurgeFor(null); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
   useEffect(() => () => clearTimeout(toastTimer.current), []);
 
   // Surface (don't block) an at-risk save when leaving the current project (B193).
@@ -256,6 +283,27 @@ export default function ProjectBreadcrumb({
     refresh();
     notifyStoreChange();
     if (wasCurrent) onDashboard?.(); // the open project no longer exists → go to all-projects
+  };
+
+  // Restore a binned project (NEW-1). Because the delete was soft, no site_elements cascade ever
+  // fired — the project comes back WHOLE, not as the gutted empty shell the old resurrection bug
+  // produced. restoreDeletedProject re-pulls, so the list/map reflect it immediately.
+  const doRestore = (p) => {
+    setBinBusy(p.id);
+    Promise.resolve(restoreDeletedProject(p.ids)).then((res) => {
+      if (!res || res.ok === false) flashToast((res && res.error) || `“${p.name}” couldn't be restored — check your connection and try again.`);
+      refresh(); refreshBin(); notifyStoreChange();
+    }).catch(() => flashToast(`“${p.name}” couldn't be restored — check your connection and try again.`))
+      .finally(() => setBinBusy(null));
+  };
+  // "Delete forever" — the only user-facing HARD delete, and the only path that destroys elements.
+  const doPurge = (p) => {
+    setBinBusy(p.id); setPurgeFor(null);
+    Promise.resolve(purgeDeletedProject(p.ids)).then((res) => {
+      if (!res || res.ok === false) flashToast((res && res.error) || `“${p.name}” couldn't be permanently deleted — check your connection and try again.`);
+      refreshBin();
+    }).catch(() => flashToast(`“${p.name}” couldn't be permanently deleted — check your connection and try again.`))
+      .finally(() => setBinBusy(null));
   };
 
   const onDash = !currentProject; // we're at the all-projects view
@@ -445,6 +493,72 @@ export default function ProjectBreadcrumb({
           )}
         </div>
 
+        {/* Recently deleted (NEW-1) — the restore bin. Only rendered when the account actually has
+            binned projects (signed out, or a DB without db/sites_soft_delete.sql, reports none). */}
+        {!controlled && deleted.length > 0 && (
+          <>
+            <div style={divider} />
+            <button
+              data-testid="project-bin-toggle"
+              onClick={() => { setBinOpen((v) => !v); setPurgeFor(null); }}
+              onMouseEnter={() => setHoverRow("__bin")}
+              onMouseLeave={() => setHoverRow(null)}
+              aria-expanded={binOpen}
+              style={row({ background: hoverRow === "__bin" ? "var(--hover-ghost)" : "transparent", color: "var(--text-secondary)", fontWeight: 700 })}
+            >
+              <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span aria-hidden style={{ fontSize: 12, lineHeight: 1 }}>{binOpen ? "▾" : "▸"}</span>
+                ↺ Recently deleted · {deleted.length}
+              </span>
+            </button>
+            {binOpen && (
+              <div data-testid="project-bin" style={{ maxHeight: 190, overflowY: "auto" }}>
+                <div style={{ padding: "2px 11px 7px", fontSize: 11, color: "var(--text-tertiary)", lineHeight: 1.45 }}>
+                  Restorable for {DELETED_RETENTION_DAYS} days — everything in the project comes back with it.
+                </div>
+                {deleted.map((p) => (
+                  <div key={p.id} style={row({ padding: "4px 7px 4px 11px", gap: 6, background: "transparent" })}>
+                    <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12.5, color: "var(--text-secondary)" }} title={p.name}>
+                      {p.name}
+                    </span>
+                    <span style={{ flex: "none", color: "var(--text-tertiary)", fontSize: 11 }}>{relTime(p.deletedAt)}</span>
+                    {purgeFor === p.id ? (
+                      <>
+                        <button
+                          data-testid={`project-purge-confirm-${p.id}`}
+                          disabled={binBusy === p.id}
+                          onClick={() => doPurge(p)}
+                          style={{ ...btnSm, flex: "none", padding: "3px 8px", fontSize: 11, background: "var(--danger, #dc2626)", color: "#fff" }}
+                        >Delete forever</button>
+                        <button
+                          onClick={() => setPurgeFor(null)}
+                          style={{ ...btnSm, flex: "none", padding: "3px 8px", fontSize: 11, background: "var(--hover-menu)", color: "var(--text-primary)" }}
+                        >Cancel</button>
+                      </>
+                    ) : (
+                      <>
+                        <button
+                          data-testid={`project-restore-${p.id}`}
+                          disabled={binBusy === p.id}
+                          onClick={() => doRestore(p)}
+                          title={`Restore ${p.name}`}
+                          style={{ ...btnSm, flex: "none", padding: "3px 8px", fontSize: 11, background: "var(--hover-menu)", color: "var(--text-primary)" }}
+                        >{binBusy === p.id ? "Working…" : "Restore"}</button>
+                        <button
+                          onClick={() => setPurgeFor(p.id)}
+                          title={`Permanently delete ${p.name}`}
+                          aria-label={`Permanently delete ${p.name}`}
+                          style={{ flex: "none", border: "none", background: "transparent", color: "var(--danger-text, #dc2626)", cursor: "pointer", fontSize: 14, padding: "0 4px", fontFamily: "inherit" }}
+                        >×</button>
+                      </>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </>
+        )}
+
         <div style={divider} />
 
         {/* New project — pinned at the bottom */}
@@ -502,7 +616,10 @@ export default function ProjectBreadcrumb({
             ) : (
               <div style={{ padding: "5px 7px" }}>
                 <div style={{ fontSize: 12, color: "var(--text-secondary)", lineHeight: 1.45, marginBottom: 9 }}>
-                  Delete <strong style={{ color: "var(--text-primary)" }}>{menuFor.name}</strong>? This can't be undone.
+                  {/* NEW-1 — the delete is now recoverable, so the confirm says so instead of the
+                      old "can't be undone" (which is no longer true, and made the stakes read higher
+                      than they are). Permanent destruction lives behind "Delete forever" in the bin. */}
+                  Delete <strong style={{ color: "var(--text-primary)" }}>{menuFor.name}</strong>? It moves to Recently deleted — you can restore it for {DELETED_RETENTION_DAYS} days.
                 </div>
                 <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
                   <button

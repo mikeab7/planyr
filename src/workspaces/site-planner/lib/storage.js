@@ -9,7 +9,7 @@
  * loadSite migrates on read, saveSite normalizes on write.
  */
 import { createSiteModel, migrate, mergeSiteContent, contentCount, isBuilding, toMs, countJunkEntries } from "./siteModel.js";
-import { cloudUpsert, cloudDelete, cloudList, clearSiteVersions, keepaliveCloudPush, fetchSiteForReconcile } from "./cloudSync.js";
+import { cloudUpsert, cloudDelete, cloudHardDelete, cloudRestore, cloudDeletedRows, cloudList, clearSiteVersions, keepaliveCloudPush, fetchSiteForReconcile } from "./cloudSync.js";
 import { idbGet, idbPut, idbAvailable, idbDeleteByPrefix } from "./localDb.js";
 import { reportClientEvent } from "../../../shared/telemetry/clientErrors.js";
 
@@ -38,6 +38,13 @@ const cloudKey = (uid) => "planarfit:sites:cloud:" + uid;
 // keep the row (cross-device safety). Only used signed-in (logged-out has no cloud to resurrect from).
 const tombKey = (uid) => "planarfit:sites:deltomb:v1:" + uid;
 const MAX_SITE_TOMBS = 300; // bound the list; an old tombstone whose row is long gone is harmless to drop
+// NEW-1 — how long a durable tombstone is KEPT after the cloud confirms the row is gone. The old
+// code pruned it the instant the cloud stopped listing the row, which disarmed the deleting client
+// at exactly the wrong moment: a second client's heal-the-split re-push lands moments later, and
+// with the tombstone already gone this client happily adopted the resurrected row. The window
+// matches the 30-day Recently-deleted retention, so a tombstone outlives every path that could
+// re-offer the row and only expires once the server has permanently purged it anyway.
+export const SITE_TOMB_GRACE_MS = 30 * 24 * 60 * 60 * 1000;
 function readSiteTombs(uid) {
   if (!uid) return {};
   try { return JSON.parse(localStorage.getItem(tombKey(uid))) || {}; } catch (_) { return {}; }
@@ -121,7 +128,21 @@ function contentSig(m, headerOnly) {
     sigArr(m && m.parcelDrawings).slice().sort(sigById),
   ]);
 }
-export function mergePulledSites(existing, cloudModels, selfUid, tombstones) {
+// NEW-1 — `opts` carries the server's view of deletion, which is what makes a delete stick across
+// CLIENTS rather than just across reloads of the one browser that performed it:
+//   serverDeleted — ids the cloud reports as soft-deleted (`sites.deleted_at`). These are dropped
+//                   from the merged map and can never enter `toPush`, so "the cloud is missing this
+//                   row" (heal it) stops being confused with "the cloud says this row is deleted"
+//                   (honour it). Without this, client B — which never even opened the site — rebuilt
+//                   the merged map from its LOCAL cache (the B124 never-drop-local-work guarantee),
+//                   hit `!(id in cloudAt)`, and cloudUpsert'd the deleted row straight back.
+//   healAbsent    — false when the deleted-id fetch FAILED. We then can't tell "never landed" from
+//                   "deleted", so the cloud-absent half of heal-the-split is suspended for this pull
+//                   (a fail-safe: nothing local is dropped, the heal just waits for the next pull).
+//   now           — injectable clock for the tombstone grace window (tests).
+export function mergePulledSites(existing, cloudModels, selfUid, tombstones, opts) {
+  const { serverDeleted, healAbsent = true, now = Date.now() } = opts || {};
+  const serverDead = new Set(serverDeleted || []);
   const tombs = tombstones || {};
   const map = {};
   for (const rec of Object.values(existing || {})) { const n = createSiteModel(rec); if (n.id) map[n.id] = n; }
@@ -157,13 +178,32 @@ export function mergePulledSites(existing, cloudModels, selfUid, tombstones) {
   //   • cloud row is genuinely NEWER than our delete → a real later edit on another device: the delete
   //     is stale — keep the row and drop the tombstone (cross-device safety, mirrors the B18/B511 rule).
   //   • not ours (a teammate's shared row we can't delete) → let it show; drop the tombstone.
+  // NEW-1 (hole 1) — the server's own tombstones outrank every local cache. A row the cloud reports
+  // as soft-deleted is removed from the merge on EVERY client, whether or not that client has a
+  // local tombstone for it, and a local tombstone is recorded (tombAdd) so this browser's `saveSite`
+  // gate also refuses to re-create it from a still-mounted planner's late flush.
+  const tombAdd = [];
+  for (const id of serverDead) {
+    if (id in map) { delete map[id]; if (!(id in tombs)) tombAdd.push(id); }
+  }
   const deleteRetry = [];
   const tombClear = [];
   for (const id of Object.keys(tombs)) {
-    if (!cloudIds.has(id)) { tombClear.push(id); continue; }
-    const row = map[id];
-    if (row && mine(row) && toMs(cloudAt[id]) <= toMs(tombs[id])) { delete map[id]; deleteRetry.push(id); }
-    else tombClear.push(id);
+    if (cloudIds.has(id)) {
+      const row = map[id];
+      if (row && mine(row) && toMs(cloudAt[id]) <= toMs(tombs[id])) { delete map[id]; deleteRetry.push(id); }
+      else tombClear.push(id); // a genuinely newer cross-device edit, or a teammate's row we can't delete
+      continue;
+    }
+    // The cloud isn't listing it: it's server-tombstoned, hard-deleted (pre-migration DB), or was
+    // never pushed. NEW-1 (hole 2): the old code cleared the tombstone right here — the instant the
+    // cloud confirmed the removal — which is precisely when another client's re-push is still in
+    // flight. Keep the tombstone through the grace window instead, and suppress our own stale cache
+    // copy meanwhile, so even a pre-migration peer's resurrection gets re-killed rather than adopted.
+    // (B124 is intact: a genuinely local-only, never-pushed site carries NO tombstone, so it isn't
+    // in this loop at all and still heals.)
+    delete map[id];
+    if (now - toMs(tombs[id]) > SITE_TOMB_GRACE_MS) tombClear.push(id);
   }
   // B460 — re-push ONLY when the merge actually changed the cloud's CONTENT (an add/move/delete the
   // cloud lacks), or the row is cloud-absent. The old rule also re-pushed on a merely-newer updatedAt
@@ -172,8 +212,8 @@ export function mergePulledSites(existing, cloudModels, selfUid, tombstones) {
   // SPURIOUS "changed in another session" conflict in any OTHER open tab. map[id] is the union (⊇ cloud),
   // so this can never push a thinner row; an identical re-open now pushes nothing (no version churn).
   const toPush = Object.keys(map).filter((id) =>
-    mine(map[id]) && (!(id in cloudAt) || contentSig(map[id], cloudSlim[id]) !== cloudSig[id]));
-  return { map, toPush, deleteRetry, tombClear };
+    mine(map[id]) && (!(id in cloudAt) ? healAbsent : contentSig(map[id], cloudSlim[id]) !== cloudSig[id]));
+  return { map, toPush, deleteRetry, tombClear, tombAdd };
 }
 
 // Pull the signed-in user's sites from the cloud into their local cache. Returns
@@ -188,18 +228,31 @@ export async function pullCloud(uid) {
   } catch (e) {
     return { ok: false, count: 0, error: (e && e.message) || "couldn't reach the cloud" };
   }
+  // NEW-1 — ask the cloud which rows it considers DELETED, not just which rows it still has. The
+  // merge needs both: absence alone was read as "a push that didn't land" and re-pushed (the
+  // cross-client resurrection). A failed fetch here is LOUD and fail-safe — heal-the-split's
+  // cloud-absent half is suspended for this pull rather than risking a resurrection.
+  let dead = { ok: true, supported: false, rows: [] };
+  try { dead = await cloudDeletedRows(uid); } catch (e) { dead = { ok: false, supported: true, rows: [], error: (e && e.message) || "" }; }
+  if (!dead.ok) reportClientEvent("cloud-read-failed", "deleted-id fetch failed (sites) — suppressing absent-row heal this pull", { error: dead.error || "" });
   let existing = {};
   try { existing = JSON.parse(localStorage.getItem(cloudKey(uid))) || {}; } catch (_) {}
-  const { map, toPush, deleteRetry, tombClear } = mergePulledSites(existing, models, uid, readSiteTombs(uid));
+  const { map, toPush, deleteRetry, tombClear, tombAdd } = mergePulledSites(existing, models, uid, readSiteTombs(uid), {
+    serverDeleted: dead.ok ? dead.rows.map((r) => r && r.id).filter(Boolean) : [],
+    healAbsent: dead.ok,
+  });
   try { localStorage.setItem(cloudKey(uid), JSON.stringify(map)); } catch (_) {}
+  // A row the SERVER says is deleted gets a local tombstone too, so this browser's saveSite gate
+  // (and a still-mounted planner's late flush) can't re-create it before the next pull.
+  for (const id of (tombAdd || [])) recordSiteTombstone(uid, id, Date.now());
   pruneMigratedLegacy(map); // B473 — free the ~MB of dead logged-out duplicates now safely in the cloud
   // B757 — prune tombstones the cloud has already honored (or a not-ours / newer-edit row), then
   // RETRY the cloud delete for a plan whose removal never landed, so a deliberate delete STICKS
   // instead of resurrecting on the next pull. Clear the tombstone only on a confirmed removal.
   for (const id of (tombClear || [])) clearSiteTombstone(uid, id);
-  for (const id of (deleteRetry || [])) {
-    cloudDelete(uid, id).then((r) => { if (r && r.ok && (r.removed > 0 || r.skipped)) clearSiteTombstone(uid, id); }).catch(() => {});
-  }
+  // NEW-1 — a confirmed removal no longer clears the tombstone: it now expires on the grace window
+  // in mergePulledSites, so this client stays armed against another client's late re-push.
+  for (const id of (deleteRetry || [])) cloudDelete(uid, id).catch(() => {});
   // Heal the split: re-push anything the cloud is missing / older on, so a push that didn't
   // land doesn't strand work on this device (fire-and-forget; the next autosave would too).
   for (const id of toPush) cloudUpsert(uid, map[id]).catch(() => {});
@@ -813,6 +866,85 @@ export function deleteSiteGroup(groupId) {
     return { ok: true, removed: plans.length };
   });
 }
+/* ── Recently deleted (NEW-1) ───────────────────────────────────────────────────────────────────
+ * A deleted project now goes to a restorable bin for 30 days instead of being destroyed. Because
+ * the delete is a soft delete, the `site_elements` cascade never fires — so a restore returns the
+ * project WHOLE (every building back), not the gutted slim header the old resurrection produced.
+ *
+ * The unit here is the PROJECT (a site group), matching how delete is offered in the UI: deleting
+ * a project bins every plan in its group, and restoring it brings the whole group back. */
+export const DELETED_RETENTION_DAYS = 30;
+
+// Group the cloud's soft-deleted rows into projects. Returns { ok, supported, projects }:
+// supported:false = db/sites_soft_delete.sql hasn't run on this DB (there is no bin — deletes are
+// still immediate + permanent there), so the caller hides the section rather than showing it empty.
+export async function listDeletedProjects() {
+  if (!activeUser) return { ok: true, supported: false, projects: [] };
+  let r;
+  try { r = await cloudDeletedRows(activeUser); } catch (e) { r = { ok: false, supported: true, rows: [], error: (e && e.message) || "" }; }
+  if (!r.ok || !r.supported) return { ok: r.ok, supported: !!r.supported, projects: [], error: r.error };
+  const by = new Map();
+  for (const row of (r.rows || [])) {
+    if (!row || !row.id) continue;
+    const gid = row.group_id || row.id;
+    const e = by.get(gid) || { id: gid, name: null, county: null, ids: [], deletedAt: 0 };
+    e.ids.push(row.id);
+    if (!e.name) e.name = row.site || row.name || null;
+    if (!e.county) e.county = row.county || null;
+    const ts = toMs(row.deleted_at);
+    if (ts > e.deletedAt) e.deletedAt = ts; // the group's most recent binning drives its position + expiry
+    by.set(gid, e);
+  }
+  const projects = [...by.values()]
+    .map((p) => ({ ...p, name: p.name || "Untitled project", expiresAt: p.deletedAt + DELETED_RETENTION_DAYS * 86400000 }))
+    .sort((a, b) => b.deletedAt - a.deletedAt);
+  return { ok: true, supported: true, projects };
+}
+
+// Restore a binned project (every plan in its group). Lifts the local tombstones too — otherwise
+// the very guards that keep a delete stuck would suppress the restored rows on the next pull — then
+// re-pulls so the project reappears in the list/map immediately. Honest about a partial failure.
+export async function restoreDeletedProject(ids) {
+  const list = (Array.isArray(ids) ? ids : [ids]).filter(Boolean);
+  if (!activeUser || !list.length) return { ok: false, restored: 0, error: "not signed in" };
+  const results = await Promise.all(list.map((id) => cloudRestore(activeUser, id).catch((e) => ({ ok: false, restored: 0, error: (e && e.message) || "restore threw" }))));
+  const restored = results.reduce((n, r) => n + ((r && r.restored) || 0), 0);
+  for (const id of list) clearRecentlyDeleted(id); // lifts BOTH the per-tab set and the durable tombstone
+  await pullCloud(activeUser).catch(() => {});
+  const failed = results.find((r) => r && r.ok === false);
+  if (restored === 0) return { ok: false, restored: 0, error: (failed && failed.error) || "Nothing was restored — it may already have been permanently removed." };
+  return { ok: !failed, restored, error: failed ? failed.error : null };
+}
+
+// "Delete forever" — the only user-facing HARD delete. The site_elements cascade firing here is
+// correct: this is the point at which permanent destruction was actually asked for.
+export async function purgeDeletedProject(ids) {
+  const list = (Array.isArray(ids) ? ids : [ids]).filter(Boolean);
+  if (!activeUser || !list.length) return { ok: false, purged: 0, error: "not signed in" };
+  const results = await Promise.all(list.map((id) => cloudHardDelete(activeUser, id).catch((e) => ({ ok: false, error: (e && e.message) || "purge threw" }))));
+  const failed = results.find((r) => r && r.ok === false);
+  const purged = results.filter((r) => r && r.ok !== false).length;
+  return { ok: !failed, purged, error: failed ? failed.error : null };
+}
+
+// Lazy 30-day purge — runs when the bin is listed. Anything that has sat past the retention window
+// is hard-deleted for real. Returns { ok, purged, failed } so the caller can surface a failure.
+export async function purgeExpiredDeletedProjects({ days = DELETED_RETENTION_DAYS } = {}) {
+  if (!activeUser) return { ok: true, purged: 0, failed: 0 };
+  let r;
+  try { r = await cloudDeletedRows(activeUser); } catch (_) { return { ok: false, purged: 0, failed: 0 }; }
+  if (!r.ok) return { ok: false, purged: 0, failed: 0, error: r.error };
+  if (!r.supported) return { ok: true, purged: 0, failed: 0 };
+  const cutoff = Date.now() - days * 86400000;
+  const expired = (r.rows || []).filter((row) => row && row.id && toMs(row.deleted_at) < cutoff);
+  let purged = 0, failed = 0;
+  for (const row of expired) {
+    const out = await cloudHardDelete(activeUser, row.id).catch(() => ({ ok: false }));
+    if (out && out.ok) purged += 1; else failed += 1;
+  }
+  return { ok: failed === 0, purged, failed };
+}
+
 // loadSite returns the canonical Site Model (migrated/normalized); saveSite merges
 // the partial onto the existing record and normalizes it back through the schema,
 // so storage is a thin persistence layer over the model.
@@ -841,7 +973,12 @@ export function saveSite(partial, { skipHistory = false } = {}) {
   // unmounting planner (persist-on-leave / beforeunload) or an already-queued debounced autosave
   // must NOT re-insert it. Block ONLY a re-create of a deleted, currently-absent row — a normal
   // edit-save (existing present) and a brand-new site (id never deleted) both pass through.
-  if (!existing && recentlyDeleted.has(partial.id)) return false;
+  // NEW-1 (hole 3) — the guard also consults the DURABLE tombstone, not just this tab's in-memory
+  // set. `recentlyDeleted` is per-tab and cleared on reload, so a SECOND tab in the same browser —
+  // or the same tab after a reload — could re-create a deleted row locally, which the next pull
+  // then healed straight back into the cloud. A deliberate re-create / re-import still works:
+  // clearRecentlyDeleted() lifts both tombstones together.
+  if (!existing && (recentlyDeleted.has(partial.id) || (activeUser && partial.id in readSiteTombs(activeUser)))) return false;
   let merged = { ...(existing || {}), ...partial };
   // Cross-tab guard (B127): if the stored record is NEWER than what THIS tab last saw, another
   // tab wrote in between — fold our change ON TOP of the store's content (union) instead of a
