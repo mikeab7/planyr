@@ -26,6 +26,7 @@ import { cachedVectorLayer, cachedPipelineLayer, cachedCorridorLayer } from "./v
 import { PIPELINE_LEGEND } from "./pipelineCommodity.js";
 import { DEFAULT_CORRIDOR_WIDTH_FT } from "./pipelineCorridor.js";
 import { proxyServiceUrl } from "../../../shared/gis/gisProxyCore.js";
+import { releaseLayer } from "./tileLifecycle.js";
 
 export { JURISDICTION_LAYERS };
 
@@ -777,7 +778,7 @@ export function attachFeatureRetry(lyr, k, cfg, onStatus, max = 3) {
  * nothing is added until the map has a real, non-zero size (kills the degenerate
  * zero-area export esri-leaflet fires before the map is ready). */
 export function syncOverlayLayers(map, overlays, refs, opts = {}) {
-  const { pane = "envpane", paneZ = 350, onError, onStatus } = opts;
+  const { pane = "envpane", paneZ = 350, onError, onStatus, admit } = opts;
   if (!map) return;
   // wait for a ready, non-zero-size map before adding raster layers
   if (!map._loaded) { map.whenReady(() => syncOverlayLayers(map, overlays, refs, opts)); return; }
@@ -796,6 +797,11 @@ export function syncOverlayLayers(map, overlays, refs, opts = {}) {
   Object.entries(ALL_LAYERS).forEach(([k, cfg]) => {
     const st = overlays[k], cur = refs[k];
     if (!st) return;
+    // NEW-3 — `admit` lets the caller stage which layers may START loading on this pass, so
+    // the first paint isn't gated behind a fan-out of hundreds of GIS requests. It gates only
+    // the ADD path: a layer turned OFF is still torn down immediately, and a live layer still
+    // gets its opacity/width updates, whatever the gate says.
+    if (st.on && !cur && typeof admit === "function" && !admit(k, cfg)) return;
     if (st.on && !cur) {
       refs[k] = "pending";
       onStatus && onStatus(k, "loading");
@@ -933,7 +939,13 @@ export function syncOverlayLayers(map, overlays, refs, opts = {}) {
         }).catch((e) => { if (refs[k] === "pending") fail(k, cfg, `${cfg.label}: ${(e && e.message) || "probe failed"}`); }); // don't leak an unhandled rejection (B55)
       }
     } else if (!st.on && cur) {
-      if (cur !== "pending") { try { map.removeLayer(cur); } catch (_) {} }
+      // NEW-6 — a real release, not just `map.removeLayer`. The vector half was already
+      // correct (780 of 782 SVG elements went), but the raster half released ZERO of its 51
+      // tiles: esri-leaflet keeps its painted image on the layer, and a request still in
+      // flight re-adds a fresh one on resolve, so a toggled-off layer quietly put itself
+      // back. releaseLayer drops the raster DOM, empties the tile cache, and tombstones the
+      // layer so a late resolve can't resurrect it.
+      releaseLayer(map, cur);
       refs[k] = null; onStatus && onStatus(k, null);
     } else if (cur && cur !== "pending") {
       if (cur.setOpacity) cur.setOpacity(st.opacity);

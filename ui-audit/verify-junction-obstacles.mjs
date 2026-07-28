@@ -83,8 +83,11 @@ log(outline.interruptedEdges >= 4, `drive target outline drawn as interrupted ed
 
 // ---- 3. sub-minimum corners are flagged on the canvas -------------------------------------------
 const flags = await page.evaluate(() => [...document.querySelectorAll("[data-road-radius-flag]")].map((n) => n.getAttribute("data-road-radius-flag")));
-log(flags.includes("e1454682splyoj:3"), `fire lane's clamped 28' corner is flagged on the plan (${JSON.stringify(flags)})`);
-log(flags.includes("e54duuwgj:1"), "truck stub's sub-minimum corner is flagged on the plan");
+// Match by ROAD, never by `road:vertexIndex` — B1052 drops control points the owner never placed, so
+// an interior vertex's index is not stable across a load and asserting on it tests the wrong thing.
+const flaggedRoads = new Set(flags.map((f) => String(f).split(":")[0]));
+log(flaggedRoads.has("e1454682splyoj"), `fire lane's clamped 28' corner is flagged on the plan (${JSON.stringify(flags)})`);
+log(flaggedRoads.has("e54duuwgj"), "truck stub's sub-minimum corner is flagged on the plan");
 
 // ---- shots -------------------------------------------------------------------------------------
 for (const [k, x, y, ppf] of [["A-dogear-court", 735, -360, 1.6], ["B-employee-parking", -214, 442, 3.0], ["C-court-mouth", 748, -366, 3.0]]) {

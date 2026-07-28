@@ -1212,3 +1212,110 @@ export function nodeJunction(params) {
   }
   return { wedges, corners, gaps, R: gaps.reduce((m, g) => Math.max(m, g.R || 0), 0) };
 }
+
+/* ---- Control points the owner never placed (B1052) -----------------------------------
+ *
+ * Owner, 2026-07-25, off a screenshot of his truck loop: "I don't remember adding this many control
+ * points." He didn't. Every road-to-road connect SPLICES a vertex into the target road at the tee
+ * point, and nothing has ever taken one back out: redraw the side road, drag its end, reconnect it a
+ * foot over, and each attempt leaves its own vertex behind. On his plan the 40 ft truck loop carries
+ * ten interior vertices that sit 0.00–0.25 ft off the chord between their own neighbours — they bend
+ * the alignment by nothing, they are simply grips he has to look at and avoid dragging.
+ *
+ * B1008 and B1010 both attacked this and both missed THIS mode by design: B1008 collapsed vertices
+ * within ~1.5 ft of each other, B1010 added "a short stub the alignment TURNS through", and both
+ * explicitly judged a COLLINEAR stub harmless because it doesn't distort the geometry. It doesn't —
+ * and it is still clutter the user never authored, which is the actual complaint.
+ *
+ * So the test here is contribution, not distance or deflection: drop an interior vertex when the road
+ * WITHOUT it still traces where it was drawn. Greedy — remove the least-contributing vertex, then
+ * re-measure EVERY ORIGINAL point against the simplified polyline and stop the moment any of them
+ * would sit more than `tolFt` off it. That check is against the ORIGINAL, not the previous step, so
+ * error cannot accumulate across a long run: the guarantee is absolute — the road never moves more
+ * than `tolFt` from where the owner drew it, however many points come out.
+ *
+ * For each `pinned` point (another road's endpoint) the NEAREST vertex within `pinTolFt` is protected —
+ * exactly one per junction, so the tee survives while the debris that collected around it does not.
+ * Endpoints never go. `opts.reference` (default: `pts`) is the polyline the movement bound is measured
+ * against — pass the pre-cleanup original when an earlier pass has already touched the road, so the
+ * total drift across every pass stays inside `tolFt` rather than each pass getting its own budget. Idempotent: a clean road returns null.
+ * Returns { pts, vtx, dropped:[originalIndex] } or null. Pure — unit-tested. */
+export const ROAD_SIMPLIFY_TOL_FT = 1.5;
+
+function distToSegment(p, a, b) {
+  const d = sub(b, a), L2 = dot(d, d);
+  if (L2 < EPS) return len(sub(p, a));
+  let t = dot(sub(p, a), d) / L2;
+  t = Math.max(0, Math.min(1, t));
+  return len(sub(p, add(a, mul(d, t))));
+}
+// Farthest any point of `orig` sits from the polyline `keep` (both arrays of points).
+function maxOffset(orig, keep) {
+  let worst = 0;
+  for (const p of orig) {
+    let best = Infinity;
+    for (let i = 0; i < keep.length - 1; i++) best = Math.min(best, distToSegment(p, keep[i], keep[i + 1]));
+    if (best > worst) worst = best;
+  }
+  return worst;
+}
+
+export function simplifyRoadVertices(pts, vtx, tolFt = ROAD_SIMPLIFY_TOL_FT, opts = {}) {
+  const P = Array.isArray(pts) ? pts.filter((p) => p && Number.isFinite(p.x) && Number.isFinite(p.y)) : [];
+  if (P.length < 3) return null;
+  const tol = tolFt > 0 ? tolFt : ROAD_SIMPLIFY_TOL_FT;
+  const pinned = Array.isArray(opts.pinned) ? opts.pinned : [];
+  const pinTol = opts.pinTolFt > 0 ? opts.pinTolFt : 0.75;
+  // Protect exactly ONE vertex per junction — the vertex NEAREST each pin, not every vertex within
+  // tolerance of it. The distinction matters: the debris clusters precisely AROUND a junction (each
+  // reconnect left its own vertex a foot or two from the last), so a generous radius that pinned the
+  // whole cluster would protect the very clutter this exists to remove, while a radius tight enough to
+  // isolate one vertex would fail to recognise a junction drawn with a little slack — and dropping THAT
+  // vertex silently breaks the tee. Nearest-wins gives both: the junction keeps its node, the debris goes.
+  const pinIdx = new Set();
+  for (const q of pinned) {
+    if (!q) continue;
+    let bestI = -1, bestD = pinTol;
+    for (let i = 0; i < P.length; i++) {
+      const dd = Math.hypot(q.x - P[i].x, q.y - P[i].y);
+      if (dd <= bestD) { bestD = dd; bestI = i; }
+    }
+    if (bestI >= 0) pinIdx.add(bestI);
+  }
+  const isPinnedIdx = (i) => pinIdx.has(i);
+  const v = normVtx(P, vtx);
+  // Measure against the road AS THE OWNER DREW IT, not against this function's own input. migrateRoad
+  // runs a dedupe pass first, and two stages each inside their own budget can total more than either —
+  // that is how a "never more than tol" promise quietly becomes "never more than tol, per stage".
+  // Passing the pre-cleanup polyline as `reference` makes the bound absolute end to end.
+  const orig = (Array.isArray(opts.reference) && opts.reference.length >= 2 ? opts.reference : P)
+    .filter((p) => p && Number.isFinite(p.x) && Number.isFinite(p.y))
+    .map((p) => ({ x: p.x, y: p.y }));
+  let keepIdx = P.map((_, i) => i);
+
+  for (;;) {
+    // The least-contributing removable vertex this round: smallest offset from the chord between the
+    // neighbours it would leave behind. (A `sharp` vertex is a deliberate hard corner — never touched.)
+    let best = -1, bestOff = Infinity;
+    for (let k = 1; k < keepIdx.length - 1; k++) {
+      const i = keepIdx[k];
+      if (isPinnedIdx(i)) continue;
+      if (treatmentAt(v, i) === "sharp") continue;
+      const off = distToSegment(P[i], P[keepIdx[k - 1]], P[keepIdx[k + 1]]);
+      if (off < bestOff) { bestOff = off; best = k; }
+    }
+    if (best < 0) break;
+    const trial = keepIdx.filter((_, k) => k !== best);
+    // Measure the WHOLE original road against the trial — this is what bounds the total movement.
+    if (maxOffset(orig, trial.map((i) => P[i])) > tol) break;
+    keepIdx = trial;
+  }
+
+  if (keepIdx.length === P.length) return null;
+  const dropped = P.map((_, i) => i).filter((i) => !keepIdx.includes(i));
+  return {
+    pts: keepIdx.map((i) => ({ x: P[i].x, y: P[i].y })),
+    vtx: keepIdx.map((i) => ({ ...(v[i] || {}) })),
+    dropped,
+  };
+}

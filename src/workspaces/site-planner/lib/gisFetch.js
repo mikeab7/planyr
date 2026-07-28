@@ -105,7 +105,49 @@ export function backoffMs(attempt, base = 300, rng = Math.random) {
  * Throws a typed GisFetchError on failure (carrying `.diag` for the console). Validates
  * the RESPONSE BODY too: ArcGIS returns HTTP 200 with a JSON {error} body for a bad
  * query — that's a failure, not a silent success. */
+/* ── request coalescing (NEW-6) ───────────────────────────────────────────────────────
+ * One overlay pass on the reference site fired 465 requests across 17 hosts, and a good
+ * share of those were the SAME query issued twice: two layers sharing a service, a 45 s
+ * self-heal re-probe landing on top of a view change, or a pan back to a bbox just left.
+ * So identical requests are coalesced two ways:
+ *   • IN FLIGHT — a second caller for a key already in flight awaits the first request
+ *     instead of opening its own. Always safe, no staleness window.
+ *   • JUST FINISHED — a result is reused for a short window (COALESCE_TTL_MS) so panning
+ *     back to a bbox you just left is free.
+ * The window is deliberately seconds, not minutes: the long-lived stale-while-revalidate
+ * cache (gisCache) is a separate, deliberate tier and this must not become a shadow copy
+ * of it. Pass `noCoalesce: true` for a request that must hit the network (a manual
+ * ↻ re-check).
+ */
+export const COALESCE_TTL_MS = 5000;
+const _inFlight = new Map(); // key → Promise
+const _recent = new Map();   // key → { value, ts }
+
+/* Exported for the test suite and for callers that want to coalesce their own request. */
+export function coalesceRequest(key, fn, { ttlMs = COALESCE_TTL_MS, now = Date.now } = {}) {
+  const t = now();
+  const hit = _recent.get(key);
+  if (hit && t - hit.ts < ttlMs) return Promise.resolve(hit.value);
+  const live = _inFlight.get(key);
+  if (live) return live;
+  const p = Promise.resolve()
+    .then(fn)
+    .then((value) => { _recent.set(key, { value, ts: now() }); return value; })
+    .finally(() => { _inFlight.delete(key); });
+  _inFlight.set(key, p);
+  return p;
+}
+
+/* Drop every coalesced entry — used by tests and by a forced re-check. */
+export function clearCoalesced() { _inFlight.clear(); _recent.clear(); }
+
 export async function fetchArcgisJson(url, opts = {}) {
+  // Only the real-network path coalesces: an injected `fetchImpl` (tests, the screening
+  // harness) must see exactly the calls it makes, and a request carrying a body or its own
+  // abort signal belongs to one caller and is never shared.
+  if (!opts.noCoalesce && !opts.body && !opts.signal && !opts.fetchImpl) {
+    return coalesceRequest(`gis:${url}`, () => fetchArcgisJson(url, { ...opts, noCoalesce: true }));
+  }
   const fetchImpl = opts.fetchImpl || (typeof fetch !== "undefined" ? fetch : null);
   if (!fetchImpl) throw new GisFetchError("error", "No fetch implementation available.");
   const timeoutMs = opts.timeoutMs ?? GIS_FETCH_TIMEOUT_MS;

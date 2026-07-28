@@ -43,15 +43,18 @@ if (!chipTexts.every((t) => /Fix/.test(t) && /more approach|tighter/.test(t))) {
 }
 
 // Click every flag's Fix chip, in place, on the real canvas.
-const spots = [{ f: "e1454682splyoj:3", x: -216, y: 450, ppf: 2.0 }, { f: "e54duuwgj:1", x: 554, y: -340, ppf: 1.6 }];
+// Targeted by ROAD, not `road:vertexIndex` — B1052 drops phantom control points on load, so an
+// interior vertex's index legitimately moves and a hardcoded one silently skips the click.
+const spots = [{ road: "e1454682splyoj", x: -216, y: 450, ppf: 2.0 }, { road: "e54duuwgj", x: 554, y: -340, ppf: 1.6 }];
 for (const s of spots) {
   await page.evaluate(([x, y, p]) => window.__plannerView.centerOn(x, y, p), [s.x, s.y, s.ppf]);
   await page.waitForTimeout(400);
-  const chip = page.locator(`[data-road-radius-flag="${s.f}"]`);
-  if (await chip.count() === 0) { console.log(`  (${s.f} already clear)`); continue; }
+  const chip = page.locator(`[data-road-radius-flag^="${s.road}:"]`).first();
+  if (await chip.count() === 0) { console.log(`  (${s.road} already clear)`); continue; }
+  const which = await chip.getAttribute("data-road-radius-flag");
   await chip.locator("circle").click({ force: true });      // the corner dot IS the click target
   await page.waitForTimeout(500);
-  console.log(`  clicked Fix on ${s.f}`);
+  console.log(`  clicked Fix on ${which}`);
 }
 await page.waitForTimeout(600);
 const after = await readFlags();
@@ -70,7 +73,7 @@ for (const g of geom.filter((g) => ["e54duuwgj", "e1454682splyoj"].includes(g.id
 for (const s of spots) {
   await page.evaluate(([x, y, p]) => window.__plannerView.centerOn(x, y, p), [s.x, s.y, s.ppf]);
   await page.waitForTimeout(400);
-  await page.locator('[data-testid="planner-canvas"]').screenshot({ path: `${OUT}fixed-${s.f.replace(":", "-")}.png` });
+  await page.locator('[data-testid="planner-canvas"]').screenshot({ path: `${OUT}fixed-${s.road}.png` });
 }
 if (errs.length) console.log("\nPAGE ERRORS:\n" + errs.slice(0, 5).join("\n"));
 console.log(after.length === 0 && errs.length === 0 ? "\nPASS — the owner's plan holds its class turns with no leftover marks." : "\nFAIL");

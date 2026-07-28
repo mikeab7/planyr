@@ -86,3 +86,57 @@ export function needsScheduleCarryIn(projects, siteId, activeId) {
   if (linked && linked.id === activeId) return false;
   return true;
 }
+
+/* ---- B1050: the Dashboard escape from the link-resolution panel -------------------------
+ *
+ * The trap: pressing Dashboard used to ONLY post planar:nav-dashboard into the iframe. The
+ * embedded app obeyed (its nav-state came back with section "reports", so the breadcrumb read
+ * "Dashboard / Select a project") but the OUTER route kept its projectId — and the resolution
+ * panel's gate is derived purely from the outer route, so the panel stayed up, dimming and
+ * blocking the dashboard the user had just navigated to. With no X, no Escape and no
+ * click-outside, that was a dead end.
+ *
+ * The three pure predicates below are the decision layer for the fix, kept out of the component
+ * so the Node runner can exercise the exact sequence (route a project → press Dashboard → the
+ * route clears → the panel is gone) without a DOM.
+ */
+
+// What pressing Dashboard must do. The post alone is what trapped the user: the outer route has
+// to follow the iframe, exactly the way selectSchedule() carries a picked schedule's linked site
+// up. `clearRoute` true ⇒ the caller also calls onProjectChange(null).
+export function dashboardNavActions({ projectId } = {}) {
+  return { post: { type: "planar:nav-dashboard" }, clearRoute: projectId != null };
+}
+
+// Whether the "no schedule linked yet" resolution panel may render.
+//
+// Belt-and-braces beyond clearing the route: this is a PROJECT-SCOPED panel, so it must never
+// render while the embedded app is on its dashboard/reports section. That way ANY future
+// route↔iframe desync degrades to a missing panel instead of a trapped user. `dismissed` is the
+// user's own X / Escape close — it hides the panel without linking or creating anything.
+export function shouldShowLinkPanel({
+  ready = false, section = "projects", projectId = null,
+  linkedSchedule = null, routedSiteName = null, dismissed = false,
+} = {}) {
+  if (!ready) return false;              // never flash before the iframe reports in
+  if (section !== "projects") return false; // dashboard/reports → not a project-scoped surface
+  if (projectId == null) return false;   // no routed site → nothing to resolve
+  if (linkedSchedule) return false;      // already linked → the grid is the answer
+  if (!routedSiteName) return false;     // never surface (or create) a schedule named the raw id (B560)
+  return !dismissed;
+}
+
+// Whether the carry-OUT effect may adopt the iframe's active schedule's linked site into an empty
+// route. `dashboardIntent` is the anti-ping-pong guard: clearing the route on Dashboard leaves a
+// window where the route is empty but the iframe hasn't yet reported section "reports" — without
+// this the carry-out would instantly re-adopt the site we just cleared and bring the panel back.
+// The intent is cleared by the very next nav-state, so a non-honouring iframe degrades to the
+// prior behaviour rather than a route that can never adopt again.
+export function shouldAdoptLinkedSiteIntoRoute({
+  isActive = true, section = "projects", projectId = null, dashboardIntent = false,
+} = {}) {
+  if (!isActive) return false;          // only the VISIBLE module may write the route (keep-alive gate)
+  if (section !== "projects") return false;
+  if (projectId != null) return false;  // route already carries a project → inert (loop-free)
+  return !dashboardIntent;
+}

@@ -3,6 +3,7 @@
  * so they depend on the target server allowing CORS (Esri's do, by default).
  */
 import { FEET_WKID } from "./counties.js";
+import { FT_PER_DEG, ftPerDeg, mercDeg, lngLatToFeet, feetToLatLngPair } from "./mapLock.js";
 
 /* A typed failure from a parcel/ArcGIS request. Lets a caller tell a SERVER problem
  * (timeout / HTTP error / ArcGIS error body / network or CORS block) apart from a
@@ -447,26 +448,23 @@ export function outerRingsLngLat(feature) {
     .map((r) => (ringClosed(r) ? r.slice(0, -1) : r));
 }
 
-// Feet per degree using the Web-Mercator sphere base (2πR/360 ≈ 365223 ft) for
-// BOTH axes — so the local equirectangular feet model is a linearization of
-// spherical Mercator and overlays a Web-Mercator aerial basemap with no axis
-// distortion (the planner/map both render on such a basemap).
-const FT_PER_DEG_LAT = 365223;
-const ftPerDegLon = (lat) => 365223 * Math.cos((lat * Math.PI) / 180);
+// The projection itself lives in lib/mapLock.js (pure, unit-tested) — the planner's feet
+// frame is an exact UNIFORM SCALING of spherical Web Mercator anchored at the site origin,
+// so feet↔lat/lng round-trips exactly and the drawing stays welded to the imagery no matter
+// how far the map is panned. See mapLock.js's header for why the old equirectangular frame
+// (linear in latitude, while Mercator's y is not) let every north–south excursion leave a
+// few feet behind (NEW-1).
+const ftPerDegLon = (lat) => ftPerDeg(lat);
 
 // Project a lon/lat ring to local feet about a shared origin (north up).
 export function lngLatRingToFeet(ring, lon0, lat0) {
-  const FT_LON = ftPerDegLon(lat0);
-  return ring.map(([lon, lat]) => ({
-    x: (lon - lon0) * FT_LON,
-    y: -(lat - lat0) * FT_PER_DEG_LAT,
-  }));
+  return ring.map(([lon, lat]) => lngLatToFeet(lon, lat, lon0, lat0));
 }
 
 // Inverse of the above: a planner-feet point back to [lat, lng] for Leaflet,
 // given the site's geographic origin. Lets the map redraw saved-site footprints.
 export function feetToLatLng(pt, lat0, lon0) {
-  return [lat0 - pt.y / FT_PER_DEG_LAT, lon0 + pt.x / ftPerDegLon(lat0)];
+  return feetToLatLngPair(pt, lat0, lon0);
 }
 
 // Feet placement for an aerial export covering a lon/lat bbox, in the same local
@@ -487,15 +485,20 @@ function aerialGeom(bbox, lon0, lat0, maxPx) {
   let imgW, imgH;
   if (lonSpan >= latSpan) { imgW = maxPx; imgH = Math.max(16, Math.round(maxPx * (latSpan / lonSpan))); }
   else { imgH = maxPx; imgW = Math.max(16, Math.round(maxPx * (lonSpan / latSpan))); }
+  // The image is REQUESTED in degrees (imgW/imgH follow the degree aspect so the server
+  // returns exactly this bbox) but PLACED in the planner's feet frame — which is scaled
+  // Mercator (NEW-1), so the vertical span must be measured in Mercator too. Using the raw
+  // degree span here would re-introduce the exact linear-vs-Mercator mismatch the feet
+  // frame just eliminated, and the aerial would drift against the parcels it backs.
   const widthFt = lonSpan * FT_LON;
-  const heightFt = latSpan * FT_PER_DEG_LAT;
+  const heightFt = (mercDeg(bbox.latMax) - mercDeg(bbox.latMin)) * FT_LON;
   return {
     imgW,
     imgH,
     ftPerPx: widthFt / imgW,
     ftPerPxY: heightFt / imgH,
     x: (bbox.lonMin - lon0) * FT_LON,
-    y: -(bbox.latMax - lat0) * FT_PER_DEG_LAT,
+    y: -(mercDeg(bbox.latMax) - mercDeg(lat0)) * FT_LON,
   };
 }
 
@@ -552,10 +555,11 @@ export function feetExtentToBbox(ext, lat0, lon0) {
 // stitch the SAME fast, pre-rendered XYZ tiles the live Leaflet basemap already shows (browser/
 // CDN-cached) into a frame-exact image. These are the PURE math (Web Mercator / EPSG:3857 tile
 // grid); the fetch + canvas draw + toDataURL lives in SitePlanner (DOM-bound). The tiles are Web
-// Mercator while the planner's feet frame maps lat/lon LINEARLY — but over a single site the
-// Mercator↔linear difference within the frame is sub-pixel, and we crop to the SAME bbox corners
-// aerialPlacement already uses, so the stitched image registers on the parcels exactly like the
-// /export image did (only the pixels change, never the placement geometry).
+// Mercator and (since NEW-1) so is the planner's feet frame — it is a uniform scaling of spherical
+// Mercator anchored at the site origin — so there is no longer any linear-vs-Mercator residual to
+// wave off. We crop to the SAME bbox corners aerialPlacement already uses, so the stitched image
+// registers on the parcels exactly like the /export image did (only the pixels change, never the
+// placement geometry).
 
 // Global pixel coordinate (256-px tiles) of a lon/lat at Web Mercator zoom z.
 export function lngLatToGlobalPixel(lon, lat, z) {

@@ -18,7 +18,7 @@
 import { dogEarGeom, dogEarSize, isDogEarSide,
   wallStripBox, wallKidBox, wallKidAlong, hostAxisExtents, ownExtents, bumpsOfHost,
   sideOfBondedBox, localToWorld } from "./dogEar.js";
-import { roadCenterline, dedupeRoadVertices, repairBakedRadii, ROAD_VERTEX_COLLAPSE_FT } from "./roadGeometry.js";
+import { roadCenterline, dedupeRoadVertices, repairBakedRadii, simplifyRoadVertices, ROAD_SIMPLIFY_TOL_FT, ROAD_VERTEX_COLLAPSE_FT } from "./roadGeometry.js";
 import { bufferPolyline } from "./metesAndBounds.js";
 import { DEFAULT_ROAD_CLASS, roadClassOf } from "./roadClasses.js";
 import { ensureZ } from "./zOrder.js";
@@ -732,6 +732,24 @@ function migrateRoad(el, opts) {
   // BELOW-CLASS, non-round value is touched (see repairBakedRadii) and no point ever moves, so this
   // can only improve a drawn corner. Lives in migrateRoad, not a call site, so BOTH read paths get it
   // (the B1012 lesson: two code paths for the same data drift unless they share the function).
+  // B1052 — drop control points the owner never placed. Every connect SPLICES a vertex into the target
+  // road and nothing ever took one back out, so a redrawn or re-dragged side road left a trail of grips
+  // that bend the alignment by nothing. B1008 (near-duplicates) and B1010 (turning stubs) both judged a
+  // COLLINEAR stub harmless — it distorts no geometry, but it is still clutter he has to look at and
+  // avoid dragging, which is the actual complaint. `simplifyRoadVertices` bounds its own removals
+  // against the polyline it is handed, so however many points come out the alignment stays put. It runs
+  // AFTER the two debris passes above, which are justified differently: those drop vertices that
+  // provably are NOT geometry (a near-duplicate; a stub too short to carry the turn it holds), and
+  // B1010 accepts a couple of feet of correction on one of them precisely because the vertex was
+  // mis-aimed connect debris. The passes compose as: remove what is provably wrong, then remove what
+  // adds nothing.
+  // The pin radius scales with the road's own width, matching the junction-coincidence rule, and only
+  // the vertex NEAREST each pin is protected — so a junction keeps its node while its debris goes.
+  const simplified = simplifyRoadVertices(out.pts, out.vtx, ROAD_SIMPLIFY_TOL_FT, {
+    pinned: opts && Array.isArray(opts.pinned) ? opts.pinned : [],
+    pinTolFt: Math.max(0.75, Math.min((+out.travelW || 0) / 8, 4)),
+  });
+  if (simplified) out = { ...out, pts: simplified.pts, vtx: simplified.vtx };
   const cls = roadClassOf(opts && opts.settings, out.roadClass);
   const min = cls && cls.minRadius > 0 ? cls.minRadius : 0;
   if (min > 0) {
