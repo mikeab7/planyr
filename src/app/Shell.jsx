@@ -12,7 +12,6 @@ import ErrorBoundary from "./ErrorBoundary.jsx";
 import ModuleLoader from "../shared/ui/ModuleLoader.jsx";
 import AccountControl from "./AccountControl.jsx";
 import { useProfile } from "../shared/profile/useProfile.js";
-import { prefetchOnIdle } from "./modulePrefetch.js";
 import { setTelemetryModule } from "../shared/telemetry/clientErrors.js";
 import { useHashRoute, INITIAL_HASH_EMPTY } from "./route.js";
 import { writeLastRoute, seedBootRoute } from "./lastRoute.js";
@@ -90,10 +89,12 @@ export default function Shell() {
     });
   }, []);
 
-  // B223 — once boot is idle, quietly warm the non-active workspaces (chunk +,
-  // for Schedule, the heavy /sequence/ iframe doc) so switching to them feels
-  // instant. Lazy-loading still gates the first paint; this only runs after.
-  useEffect(() => { prefetchOnIdle(["scheduler", "doc-review", "library"]); }, []);
+  // NEW-9 — the B223 boot-time idle warm of scheduler/doc-review/library was REMOVED.
+  // Its requestIdleCallback fired at ~t=304ms, ahead of first-contentful-paint at ~328ms,
+  // so it raced the critical path instead of following it: a Site-only session fetched AND
+  // evaluated ~805 KB of chunks it never uses. Warming now happens on navigation intent
+  // only (AppHeader module-tab hover / pointerdown → prefetchModule), which keeps the
+  // instant-switch feel without taxing a session that never leaves the Site route.
 
   // B279 — tag telemetry rows with the workspace the user is in, so a reported error
   // says WHERE it happened (site-planner / doc-review / scheduler).

@@ -1,4 +1,4 @@
-/* Corner bump-out ("dog-ear") geometry (B362).
+/* Corner bump-out ("dog-ear") geometry (B362) + the wall-hugging-child span rule (B492 / NEW-2).
  *
  * A dog-ear is a building element flush at the END of a dock wall that projects out into the
  * truck court, taking that span out of dock use. It stores its corner (`side` = top/bottom/
@@ -6,8 +6,14 @@
  * the dock wall plus its PROJECTION out from the dock face (`along`/`proj`). Absent → the
  * 55′×60′ default.
  *
+ * The second half of this module is the WALL-KID placement rule (NEW-2 / NEW-3): an end-wall
+ * sidewalk spans EXACTLY the extended side (building depth + the projection of any corner bump-out
+ * that lengthens that wall) and every wall-hugging child sits FLUSH — no bare ground, no overlap.
+ * Both are DERIVED placements, never a remembered box scaled by a ratio, which is what let the
+ * strips drift on a host resize.
+ *
  * Kept pure + framework-free (its own rot2 / SIDE_N, matching dockZones.js) so the
- * resize-survives-a-host-refit contract is unit-testable; SitePlanner wires it in.
+ * resize-survives-a-host-refit contract is unit-testable; SitePlanner + siteModel wire it in.
  */
 export const DOGEAR_W = 55; // default span along the dock wall
 export const DOGEAR_D = 60; // default projection out from the dock face
@@ -72,3 +78,88 @@ export function sidewalkSpanForBumps(b, swSide, bumps = []) {
   });
   return { run: base + extNeg + extPos, alongShift: (extPos - extNeg) / 2 };
 }
+
+/* ---- Wall-hugging child placement (NEW-2 / NEW-3) ----------------------------------------
+ * A "wall kid" is a bonded child that hugs one building side: a sidewalk / landscape strip, or a
+ * side-parking row. Its geometry has TWO independent axes and they follow DIFFERENT rules:
+ *
+ *   • PERPENDICULAR (distance out from the wall) — ALWAYS derived, always flush: half the host
+ *     side + whatever already sits between it and the wall (`gap`, e.g. a sidewalk's thickness)
+ *     + half its own depth. Never a remembered gap: replaying a `perpGap` captured before the
+ *     sidewalk changed is exactly what left the owner's west parking field stranded in bare
+ *     ground while the east one stayed flush.
+ *   • ALONG the wall (position + run) — the sidewalk span rule for strips (absolute); for side
+ *     parking it is USER INTENT and the caller decides (see SitePlanner.relayoutWallKids).
+ *
+ * Everything here is in the host's LOCAL frame (host centre at the origin, host angle removed),
+ * so the caller does one rotate back into world feet. */
+
+// The perpendicular offset (host-local, signed) of a wall kid on `side` of host box `b`: flush
+// past `gap` of intervening stuff, with `depth` = its own extent perpendicular to the wall.
+export function wallKidPerp(b, side, depth, gap = 0) {
+  const isVert = side === "left" || side === "right";
+  const [nx, ny] = SIDE_N[side];
+  return (isVert ? nx : ny) * ((isVert ? b.w : b.h) / 2 + Math.max(0, gap || 0) + depth / 2);
+}
+
+// The full host-local box of a wall kid: its centre {lx, ly} plus its extents on the HOST's two
+// local axes {dimBX, dimBY}. `run`/`alongShift` are the along-wall length + centre shift the
+// caller resolved (the span rule for a strip, stored intent for a pinned parking field).
+export function wallKidBox(b, side, { depth, gap = 0, run, alongShift = 0 }) {
+  const isVert = side === "left" || side === "right";
+  const perp = wallKidPerp(b, side, depth, gap);
+  return {
+    lx: isVert ? perp : alongShift,
+    ly: isVert ? alongShift : perp,
+    dimBX: isVert ? depth : run,
+    dimBY: isVert ? run : depth,
+  };
+}
+
+// A wall STRIP (sidewalk / landscape) is fully derived: the span rule gives its run + centre
+// shift, `gap` is 0 (a strip is always against the wall). Returns the host-local box plus the
+// {run, alongShift} it came from, so a caller can assert the span rule directly.
+export function wallStripBox(b, side, bumps = [], depth) {
+  const span = sidewalkSpanForBumps(b, side, bumps);
+  return { ...wallKidBox(b, side, { depth, gap: 0, ...span }), ...span };
+}
+
+// Which of the host's local axes a bonded box child's own w/h land on. A child may sit at a
+// quarter turn from its host (a side-parking row runs ALONG a side wall), so its `w` is not
+// necessarily the host's X extent. `cross` = the child is turned 90°/270° from the host.
+export function hostAxisExtents(b, kid) {
+  const rel = (((((kid.rot || 0) - (b.rot || 0)) % 360) + 360) % 360);
+  const cross = Math.min(Math.abs(rel - 90), Math.abs(rel - 270)) < 45;
+  return { cross, dimBX: cross ? kid.h : kid.w, dimBY: cross ? kid.w : kid.h };
+}
+// The inverse: host-axis extents back to the child's OWN w/h.
+export const ownExtents = (cross, dimBX, dimBY) => (cross ? { w: dimBY, h: dimBX } : { w: dimBX, h: dimBY });
+
+// The along-wall run + centre shift a bonded box child CURRENTLY has, in the host's local frame.
+// Used to read a side-parking field's stored user intent off a legacy record (no schema change).
+export function wallKidAlong(b, side, kid) {
+  const isVert = side === "left" || side === "right";
+  const { dimBX, dimBY } = hostAxisExtents(b, kid);
+  const l = rot2(kid.cx - b.cx, kid.cy - b.cy, -(b.rot || 0));
+  return { run: isVert ? dimBY : dimBX, alongShift: isVert ? l.y : l.x, depth: isVert ? dimBX : dimBY };
+}
+
+// A host-local point back into world feet (rotate by the host angle, offset by its centre).
+export const localToWorld = (b, lx, ly) => { const o = rot2(lx, ly, b.rot || 0); return { x: b.cx + o.x, y: b.cy + o.y }; };
+
+// Which building side a bonded BOX child hugs, from its position alone (the tag-free fallback).
+export function sideOfBondedBox(b, kid) {
+  const l = rot2(kid.cx - b.cx, kid.cy - b.cy, -(b.rot || 0));
+  const outX = Math.abs(l.x) - b.w / 2, outY = Math.abs(l.y) - b.h / 2;
+  return outY >= outX ? (l.y >= 0 ? "bottom" : "top") : (l.x >= 0 ? "right" : "left");
+}
+
+// A dog-ear's {side, sign, along, proj} descriptor, recovering along/proj from its rendered box
+// when the tag doesn't carry them. The ONE place that decision is made, so the sidewalk span, the
+// re-anchor and the load-time heal can never read a bump's projection differently.
+export const dogEarDesc = (el) =>
+  (el.dogEar.along != null && el.dogEar.proj != null ? el.dogEar : { ...el.dogEar, ...dogEarSize(el.dogEar, el.w, el.h) });
+
+// The bump descriptors sidewalkSpanForBumps wants, for every corner bump-out bonded to `b` in `arr`.
+export const bumpsOfHost = (arr, b) =>
+  arr.filter((x) => x && x.dogEar && x.attachedTo === b.id && isDogEarSide(x.dogEar.side)).map((x) => dogEarDesc(x));

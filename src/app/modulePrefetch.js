@@ -8,8 +8,26 @@
  *      (public/sequence/index.html, ~692 KB) that its iframe loads — warmed with
  *      <link rel="prefetch"> so the iframe boots from cache on navigation.
  *
- * Lazy-loading still gates the FIRST paint (nothing here runs at boot); these run
- * only on idle / hover-intent. Every call is idempotent and best-effort.
+ * ⛔ INTENT-DRIVEN ONLY — never warm at boot (NEW-9). B223 originally also warmed
+ * scheduler + doc-review + library from a boot `requestIdleCallback`. Measurement on
+ * production (2026-07-28, Sylvestri/Concept C) showed that idle callback firing at
+ * ~t=304ms — BEFORE first-contentful-paint at ~328ms — so the "runs only after first
+ * paint" assumption was simply false: requestIdleCallback fires in any gap in the main
+ * thread, including gaps *during* boot while the network is still delivering the
+ * critical path. The result was that a Site-only session fetched all 11 chunks, pulling
+ * ~805 KB raw (~27% of all JS: pdf.worker 460 · DocReview 187 · Library 91 · uploadQueue
+ * 33 · Scheduler 15 · folders 14 · pdf 5) that it never executes — and, worse, `import()`
+ * fetches at HIGH priority and then EVALUATES the module, spending main-thread
+ * parse/compile time in exactly the window the planner needs to become interactive.
+ *
+ * So warming is now driven purely by NAVIGATION INTENT, from AppHeader's module tabs:
+ * `onMouseEnter` (pointer aiming at the tab) and `onPointerDown` (the touch/tap path,
+ * which has no hover). Both land well before the click commits, so switching still feels
+ * instant, while a session that never leaves the Site route pays nothing. The accepted
+ * tradeoff is a short chunk fetch on the first open for a user who taps a tab with no
+ * preceding hover or pointerdown gap.
+ *
+ * Every call is idempotent and best-effort.
  */
 
 // Same specifiers as the Shell's lazy() imports — Vite resolves both to the one chunk.
@@ -39,21 +57,13 @@ function warmSequenceDoc() {
   } catch (_) { /* best-effort */ }
 }
 
-/** Warm one module's chunk (and its iframe doc, for Schedule). Idempotent. */
+/** Warm one module's chunk (and its iframe doc, for Schedule). Idempotent.
+ *
+ * Call this ONLY from a navigation-intent gesture (tab hover / pointerdown). There is
+ * deliberately no boot-time / idle-time entry point — see the header note (NEW-9). */
 export function prefetchModule(id) {
   if (warmed.has(id)) return;
   warmed.add(id);
   try { IMPORTERS[id]?.(); } catch (_) { /* best-effort */ }
   if (id === "scheduler") warmSequenceDoc();
-}
-
-/** Warm the given modules once the main thread is idle (after first paint). */
-export function prefetchOnIdle(ids) {
-  if (typeof window === "undefined") return;
-  const run = () => ids.forEach(prefetchModule);
-  if (typeof window.requestIdleCallback === "function") {
-    window.requestIdleCallback(run, { timeout: 2500 });
-  } else {
-    setTimeout(run, 1200);
-  }
 }

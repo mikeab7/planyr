@@ -120,7 +120,8 @@ import { roadCenterline, roadMinRadius, insertRoadVertex, removeRoadVertex, canR
 import { dissolveRings, clipPolylineOutside, clusterIds, regionPathD, rectOutlineCutSegments } from "./lib/roadNetwork.js";
 import { dashZoom, insetRingVisible } from "./lib/lineZoom.js";
 import { roadClassesOf, roadClassOf, classMinRadius, classDefaultRadius, classReturnRadius, DEFAULT_ROAD_CLASS, ROAD_CLASS_SEEDS, speedMinRadius } from "./lib/roadClasses.js";
-import { DOGEAR_W, DOGEAR_D, dogEarGeom, dogEarSize, sidewalkSpanForBumps, isDogEarSide } from "./lib/dogEar.js";
+import { DOGEAR_W, DOGEAR_D, dogEarGeom, dogEarSize, sidewalkSpanForBumps, isDogEarSide,
+  wallStripBox, wallKidBox, wallKidPerp, wallKidAlong, hostAxisExtents, ownExtents, bumpsOfHost } from "./lib/dogEar.js";
 import { CURB_TYPES as COST_CURB_TYPES, CURB_TYPE_META, roadCurbType, roadCurbedSides, roadPanWidth, roadQuantities, costRollup } from "./lib/costTakeoff.js";
 import { layoutLabels, buildingLabelLines, dimCalloutVisible, detailLabelVisible, pondParamLabelVisible, pondParamFontPx, suppressedDimIds, dimFontScale, dimFontPx, boxOf } from "./lib/labelLayout.js";
 import { calloutLayout, minCalloutWidthFt } from "./lib/calloutLayout.js";
@@ -6371,7 +6372,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       const el = a.find((x) => x.id === id);
       let next = removeWithChildren(a, [id]);
       const b = el && a.find((x) => x.id === el.attachedTo);
-      if (b && b.type === "building") next = relayoutAllSides(next, b);
+      // NEW-3 — deleting the sidewalk pulls the side parking back FLUSH against the wall (its
+      // clearance is derived from whatever strip is actually there, so removing one closes the gap).
+      if (b && b.type === "building" && !b.dogEar) next = relayoutWallKids(relayoutAllSides(next, b), b);
       return next;
     });
     tombstone([...killed]);
@@ -6390,9 +6393,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // this wall (B492) — so a sidewalk added after the bumps starts at the right length.
     const sw = sidewalkFullRunPatch(els, b, makeStrip(b, ...SIDE_N[name], "sidewalk", SIDEWALK_W, { sidewalkSide: name }));
     const out = outwardUnit(b, name);
-    const shift = new Set(els.filter((x) => x.attachedTo === b.id && !x.points && !x.dogEar && !isWallStrip(x) && sideOfKid(b, x) === name).map((x) => x.id));
+    // Side-parking rows are excluded: relayoutWallKids re-derives their distance out from the wall
+    // against the just-added strip, so hand-shifting them here would push them out twice (NEW-3).
+    const shift = new Set(els.filter((x) => x.attachedTo === b.id && !x.points && !x.dogEar && !x.sideParkSide && !isWallStrip(x) && sideOfKid(b, x) === name).map((x) => x.id));
     pushHistory();
-    setEls((a) => [...a.map((x) => shift.has(x.id) ? { ...x, cx: x.cx + out.x * SIDEWALK_W, cy: x.cy + out.y * SIDEWALK_W } : x), sw]);
+    setEls((a) => relayoutWallKids([...a.map((x) => shift.has(x.id) ? { ...x, cx: x.cx + out.x * SIDEWALK_W, cy: x.cy + out.y * SIDEWALK_W } : x), sw], b));
     setSel({ kind: "el", id: b.id });
   };
   const addParkingRowSide = (b, name) => {
@@ -6405,9 +6410,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // Parking row depth is a FIXED constant (one stall row + aisle) — it must never
     // be derived from adjacent or just-deleted geometry.
     const parkDepth = settings.stallDepth + settings.aisle;
-    const along = ny !== 0 ? b.w : b.h;
-    const half = (nx !== 0 ? b.w : b.h) / 2;
-    const off = rot2(nx * (half + swDepth + parkDepth / 2), ny * (half + swDepth + parkDepth / 2), b.rot);
+    // Start on the span DEFAULT — the same extended-side run the sidewalk uses (building side +
+    // the projection of any corner bump-out that lengthens it). A field still sitting on that
+    // default counts as UNTOUCHED and keeps tracking the host; once the user slides or resizes it
+    // along the wall, relayoutWallKids pins it there instead (NEW-3, owner amendment).
+    const { run: along, alongShift } = sidewalkSpanForBumps(b, name, bumpsOfHost(els, b));
+    const perp = wallKidPerp(b, name, parkDepth, swDepth);
+    const off = rot2(nx !== 0 ? perp : alongShift, ny !== 0 ? perp : alongShift, b.rot);
     // First stall row hugs the building face, drive aisle on the OUTSIDE (B119): the
     // strip's inner (local y=0) edge sits against the wall and carStalls lays the first
     // row there by default, so DON'T flip the depth (flipDepth would put the aisle against
@@ -6784,6 +6793,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // (re-scaled) court's far edge.
   const refitChildren = (a, buildingId, nb, kids) => {
     const resized = a.find((x) => x.id === buildingId);
+    const hostIsBuilding = !!resized && resized.type === "building" && !resized.dogEar;
     let next = a.map((x) => {
       if (x.id === buildingId) {
         // A bump-out resized on its own stays GLUED to its building corner: update its stored span
@@ -6802,6 +6812,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         return { ...x, cx: nb.cx, cy: nb.cy, w: nb.w, h: nb.h, ...(nb.rot != null ? { rot: nb.rot } : {}) };
       }
       if (x.attachedTo === buildingId && x.dogEar) return { ...x, ...fitDogEar(nb, x.dogEar) };
+      // NEW-2 / NEW-3 — wall strips and side-parking rows are DERIVED by relayoutWallKids below
+      // (span rule / flush-against-the-sidewalk), never ratio-scaled here. fitKid's
+      // `alongDim = 2 * alongHalf * ratio` rescaled a strip's stored run instead of recomputing it
+      // from the span, and its `perpGap` replayed a clearance captured before the sidewalk changed
+      // — the two drifts the owner reported on Building 3.
+      if (hostIsBuilding && (ownedWallStrip(x, resized) || ownedSidePark(x, resized))) return x;
       const k = kids?.find((kk) => kk.id === x.id);
       if (k) return { ...x, ...fitKid(nb, k) };
       return x;
@@ -6811,8 +6827,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // sides) or a stack zone itself (re-derive that zone's depth from its new box, then
     // relay its side so the trailer/buffer beyond it follow — the old "court drags its
     // trailer" behaviour, now extended through the buffer).
-    if (resized && resized.type === "building" && !resized.dogEar) {
-      next = relayoutAllSides(next, { ...resized, cx: nb.cx, cy: nb.cy, w: nb.w, h: nb.h, rot: nb.rot != null ? nb.rot : resized.rot });
+    if (hostIsBuilding) {
+      const newB = { ...resized, cx: nb.cx, cy: nb.cy, w: nb.w, h: nb.h, rot: nb.rot != null ? nb.rot : resized.rot };
+      next = relayoutAllSides(next, newB);
+      // NEW-2 / NEW-3 — the branch that was MISSING: on a host resize the wall strips and side
+      // parking must be re-derived from the span rule + the live sidewalk, not left to fitKid's
+      // proportional replay. `resized` (the PRE-resize host) is the side reference so an untagged
+      // strip can't be inferred onto the wrong wall part-way through a big drag.
+      next = relayoutWallKids(next, newB, resized);
     } else if (resized && resized.dogEar) {
       // A bump-out resized on its own (B492): re-lay the host's full-side sidewalks and pull its
       // truck court in to the new clear face between the (now-resized) bump-outs.
@@ -6828,6 +6850,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         next = next.map((x) => (x.id === buildingId ? { ...x, zd: newDepth } : x));
         next = relayoutSide(next, b, side);
       }
+    } else if (resized && (isWallStrip(resized) || resized.sideParkSide)) {
+      // NEW-3 — a wall strip or the parking row itself was resized: re-derive the whole side so the
+      // parking stays flush against the strip's new thickness (and the strip back onto its span).
+      // A resize of the parking field's RUN is user intent, so the pin rule in relayoutWallKids
+      // keeps it; only its distance out from the wall is re-resolved.
+      const host = next.find((x) => x.id === resized.attachedTo);
+      if (host && host.type === "building" && !host.dogEar) next = relayoutWallKids(next, host);
     }
     // Keep every bonded child's angle locked to the building's (B363) — closes the gap where a
     // strip kept a stale angle through a resize (fitKid preserves rot0, so drift would survive).
@@ -6841,18 +6870,86 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // corner bump-outs that lengthen that wall (B492). Preserves the strip's thickness and its
   // outward offset from the wall — only its length along the wall and its centre move. So a
   // bump-out added/edited/removed keeps the sidewalk covering the whole side, at the real bump size.
-  const sidewalkFullRunPatch = (arr, b, sw) => {
-    const side = swSide(sw);
+  const sidewalkFullRunPatch = (arr, b, sw, sideRef = b) => {
+    const side = swSideOn(sideRef, sw);
+    const { cross, dimBX, dimBY } = hostAxisExtents(b, sw);
     const isVert = side === "left" || side === "right";
-    const bumps = arr.filter((x) => x.attachedTo === b.id && x.dogEar)
-      .map((x) => ({ side: x.dogEar.side, sign: x.dogEar.sign, proj: dogEarSize(x.dogEar, x.w, x.h).proj }));
-    const { run, alongShift } = sidewalkSpanForBumps(b, side, bumps);
-    const l = rot2(sw.cx - b.cx, sw.cy - b.cy, -b.rot); // strip centre, building-local
-    const perp = isVert ? l.x : l.y;                    // keep its outward (perpendicular) offset
-    const off = rot2(isVert ? perp : alongShift, isVert ? alongShift : perp, b.rot);
-    return { ...sw, ...(isVert ? { h: run } : { w: run }), cx: b.cx + off.x, cy: b.cy + off.y };
+    const depth = isVert ? dimBX : dimBY;                // thickness: perpendicular to the wall
+    const box = wallStripBox(b, side, bumpsOfHost(arr, b), depth);
+    const off = rot2(box.lx, box.ly, b.rot);
+    return { ...sw, ...ownExtents(cross, box.dimBX, box.dimBY), cx: b.cx + off.x, cy: b.cy + off.y };
   };
-  const relayoutBumpSidewalks = (arr, b) => arr.map((x) => (isWallStrip(x) && x.attachedTo === b.id && !x.points ? sidewalkFullRunPatch(arr, b, x) : x));
+  // A wall-hugging child this relayout OWNS: a free sidewalk/landscape strip or a side-parking
+  // row bonded straight to the building. Dock-zone stack members and appended "Add layer" chain
+  // zones (both `noFit`, positioned by relayoutSide) are deliberately excluded — the old
+  // relayoutBumpSidewalks filter caught a chain-zone landscape buffer as if it were a sidewalk.
+  const ownedWallStrip = (x, b) => isWallStrip(x) && x.attachedTo === b.id && !x.points && !x.noFit
+    && !x.truckCourt && !x.forCourt && !x.forTrailer && !x.prevZone;
+  const ownedSidePark = (x, b) => !!x.sideParkSide && x.attachedTo === b.id && !x.points && !x.noFit;
+  /* Re-lay every wall-hugging child of `b` from the RULE rather than from a remembered box
+     (NEW-2 / NEW-3). `sideRef` is the host box used only to infer an untagged child's side — on a
+     resize that's the PRE-resize host, so a big drag can't flip a strip onto the wrong wall.
+
+     Two different contracts, deliberately:
+       • Wall STRIPS (sidewalk / landscape) — fully derived, and the span rule is ABSOLUTE
+         (owner rule): the strip spans exactly the extended side (building depth + the projection
+         of any corner bump-out that lengthens that wall), centred on that span, flush to the wall.
+         So a host resize, a bump-out add/delete/resize and a strip width edit all land on the same
+         number, and deleting the bump collapses the strip back to the bare side.
+       • SIDE PARKING — split by axis (owner amendment). PERPENDICULAR is always derived and always
+         flush against the live sidewalk on that side (or the wall when there is none); replaying a
+         `perpGap` captured before the sidewalk changed is the whole bug. ALONG the wall is USER
+         INTENT: a field whose run + centre already match the span default is UNTOUCHED and tracks
+         the span; anything else has been positioned by hand (the owner slid Building 3's east field
+         to get the curb return right where the fire lane ties in) and is carried through every
+         refit unchanged, only its run clamped to the span — with the unclamped intent stamped on
+         `sideParkFit` so it springs back when the host grows again, exactly like a dog-ear's
+         stored along/proj. */
+  const SIDE_PARK_PIN_TOL = 0.5; // ft — below this a field still counts as sitting on the default
+  const relayoutWallKids = (arr, b, sideRef = b) => {
+    const bumps = bumpsOfHost(arr, b);
+    // The strip (if any) each parking row has to clear, keyed by side — resolved from the array
+    // being built, so a just-added / just-deleted / just-widened sidewalk is already reflected.
+    const stripBySide = {};
+    arr.forEach((x) => { if (ownedWallStrip(x, b)) { const s = swSideOn(sideRef, x); if (!stripBySide[s]) stripBySide[s] = x; } });
+    const placed = arr.map((x) => {
+      if (ownedWallStrip(x, b)) return sidewalkFullRunPatch(arr, b, x, sideRef);
+      if (!ownedSidePark(x, b)) return x;
+      const side = x.sideParkSide;
+      const isVert = side === "left" || side === "right";
+      const { cross } = hostAxisExtents(b, x);
+      const cur = wallKidAlong(b, side, x);                       // its live run / centre / depth
+      const strip = stripBySide[side];
+      // Only the strip's THICKNESS may become the gap — never its run (a rotated strip would
+      // otherwise leak a wall-length value here, the swThick guard from addParkingRowSide).
+      const gap = strip ? (isVert ? hostAxisExtents(b, strip).dimBX : hostAxisExtents(b, strip).dimBY) : 0;
+      const span = sidewalkSpanForBumps(b, side, bumps);
+      const untouched = Math.abs(cur.run - span.run) <= SIDE_PARK_PIN_TOL
+        && Math.abs(cur.alongShift - span.alongShift) <= SIDE_PARK_PIN_TOL;
+      let extra = null, run, alongShift;
+      if (untouched) {                                            // still on the default → track the span
+        ({ run, alongShift } = span);
+      } else {                                                    // hand-positioned → preserve, clamp only
+        const want = x.sideParkFit || { run: cur.run, alongShift: cur.alongShift };
+        run = Math.min(want.run, span.run);
+        alongShift = want.alongShift;
+        // Stamp the unclamped intent only once the clamp actually bites, so it springs back.
+        if (run !== want.run) extra = { sideParkFit: want };
+      }
+      const box = wallKidBox(b, side, { depth: cur.depth, gap, run, alongShift });
+      const off = rot2(box.lx, box.ly, b.rot);
+      return { ...x, ...(extra || {}), ...ownExtents(cross, box.dimBX, box.dimBY), cx: b.cx + off.x, cy: b.cy + off.y };
+    });
+    // Preserve object identity when nothing actually moved (no dirty flag / no cloud re-save
+    // churn on a plan that is already correct — the same idempotency contract as dogEarGeom).
+    const near = (p, q) => Math.abs(p - q) <= 1e-6;
+    return placed.map((x, i) => {
+      const o = arr[i];
+      return (x !== o && near(x.cx, o.cx) && near(x.cy, o.cy) && near(x.w, o.w) && near(x.h, o.h)
+        && x.sideParkFit === o.sideParkFit) ? o : x;
+    });
+  };
+  const relayoutBumpSidewalks = (arr, b, sideRef = b) => relayoutWallKids(arr, b, sideRef);
   // Add dog-ears at the given corners; re-lay the perpendicular sidewalks to the full building
   // side and pull the truck court in to the clear face between the new bump-outs (B492).
   const placeDogEars = (b, corners) => {
@@ -6894,7 +6991,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   /* ---- wall-strip (sidewalk/landscape) geometry & flushness ---- */
   const buildingOf = (el) => els.find((x) => x.id === el.attachedTo);
   // Which building side a strip hugs, and whether its thickness is on the h axis.
-  const swSide = (el) => { if (el.sidewalkSide) return el.sidewalkSide; const b = buildingOf(el); return b ? sideOfKid(b, el) : (el.w >= el.h ? "bottom" : "right"); };
+  // Which side a strip hugs, resolved against an EXPLICIT host box — so a relayout mid-resize can
+  // infer from the pre-resize host instead of whatever `els` happens to hold.
+  const swSideOn = (b, el) => el.sidewalkSide || (b ? sideOfKid(b, el) : (el.w >= el.h ? "bottom" : "right"));
+  const swSide = (el) => swSideOn(el.sidewalkSide ? null : buildingOf(el), el);
   const swThickIsH = (el) => SIDE_N[swSide(el)][1] !== 0; // top/bottom → thickness is h
   const swThick = (el) => (swThickIsH(el) ? el.h : el.w);
   const swRun = (el) => (swThickIsH(el) ? el.w : el.h);
@@ -6903,7 +7003,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const stripsBeyond = (b, side, refOutPerp, exceptId) => {
     const [nx, ny] = SIDE_N[side], isH = ny !== 0, s = isH ? ny : nx;
     return els.filter((x) => {
-      if (x.attachedTo !== b.id || x.points || x.id === exceptId || x.dogEar) return false;
+      // NEW-3 — a side-parking row is NOT hand-shifted any more: its distance out from the wall is
+      // derived by relayoutWallKids from the live strip, so shifting it here too would double-count.
+      if (x.attachedTo !== b.id || x.points || x.id === exceptId || x.dogEar || x.sideParkSide) return false;
       const l = rot2(x.cx - b.cx, x.cy - b.cy, -b.rot);
       return sideOfKid(b, x) === side && s * (isH ? l.y : l.x) > refOutPerp + 1;
     });
@@ -6920,11 +7022,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const refOutPerp = s * (isH ? l.y : l.x);
     const beyond = new Set(stripsBeyond(b, side, refOutPerp, el.id).map((x) => x.id));
     pushHistory();
-    setEls((a) => a.map((x) => {
+    setEls((a) => relayoutWallKids(a.map((x) => {
       if (x.id === el.id) return { ...x, ...(isH ? { h: newT } : { w: newT }), cx: x.cx + out.x * dT / 2, cy: x.cy + out.y * dT / 2 };
       if (beyond.has(x.id)) return { ...x, cx: x.cx + out.x * dT, cy: x.cy + out.y * dT };
       return x;
-    }));
+    }), b));  // NEW-3 — the side parking re-flushes against the strip's NEW thickness (derived, not shifted)
   };
   const setSidewalkLength = (el, newRun) => {
     const isH = swThickIsH(el);
@@ -11641,22 +11743,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     );
   });
 
-  // Dashed tethers between the selected element and anything bonded to it.
-  const attachLinks = (() => {
-    if (sel?.kind !== "el") return null;
-    const members = assemblyOf(sel.id);
-    if (members.length < 2) return null;
-    const ctr = (m) => (m.points ? centroid(m.points) : { x: m.cx, y: m.cy });
-    const sc = f2p(ctr(els.find((x) => x.id === sel.id)));
-    return (
-      <g pointerEvents="none">
-        {members.filter((m) => m.id !== sel.id).map((m) => {
-          const p = f2p(ctr(m));
-          return <line key={`lk${m.id}`} x1={sc.x} y1={sc.y} x2={p.x} y2={p.y} stroke={PAL.accent} strokeWidth={1} strokeDasharray="3 3" opacity={0.7} />;
-        })}
-      </g>
-    );
-  })();
+  // (Removed NEW-1: the dashed attachment tethers. Selecting a building drew an orange dashed
+  // line from its centre out to the centre of EVERY bonded child — truck court, trailer,
+  // sidewalks, side parking, bump-outs — so a selected building read as a starburst of stray
+  // lines across the plan and over the aerial. Bonding is already legible from the blue handle
+  // chrome; the tethers are gone entirely, not toggled or faded. They lived inside the
+  // data-export="skip" chrome group, so no PDF/PNG export ever carried them.)
 
   // "+" quick-add handles on a selected building:
   //  • each long (dock-capable) side: a 135′ truck dock + drive (orange)
@@ -15934,7 +16026,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               {labelEls}
               {/* selection / editing chrome — stripped from exports */}
               <g data-export="skip">
-                {attachLinks}
                 {parcelEdgeHighlight}
                 {parcelEdgeLabels}
                 {handleNodes}
@@ -20094,7 +20185,10 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
       </g>,
     );
   }
-  return <g key={el.id} transform={`rotate(${el.rot} ${c.x} ${c.y})`} filter={st.shadow ? "url(#bldgShadow)" : undefined} style={{ cursor: tool === "select" ? (el.locked ? "pointer" : "move") : "crosshair" }}
+  // `data-el-id` on the element's own group (NEW-2/NEW-3): a headless harness can measure ONE
+  // element's real rendered geometry — the same identifier the junction outline-cut group already
+  // carries. Inert markup: no styling, no behaviour, and it rides through the export clone harmlessly.
+  return <g key={el.id} data-el-id={el.id} transform={`rotate(${el.rot} ${c.x} ${c.y})`} filter={st.shadow ? "url(#bldgShadow)" : undefined} style={{ cursor: tool === "select" ? (el.locked ? "pointer" : "move") : "crosshair" }}
     onPointerDown={(e) => startMoveEl(e, el.id)} onDoubleClick={(e) => onElDouble && onElDouble(e, el.id)}
     onContextMenu={(e) => { if (onElContext) onElContext(e, el.id); }}>{parts}</g>;
 }
