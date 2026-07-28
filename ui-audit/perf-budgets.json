@@ -62,8 +62,9 @@
       "Browser-measured, by ui-audit/perf-harness.mjs. NOT gated in the required CI build check —",
       "frame timing and heap on a shared CI runner are too noisy to gate a merge on, and the aerial",
       "budget needs live external tile hosts. Run on demand; see docs/PERF-BUDGETS.md for why and for",
-      "what IS gated. The reference scenario is the committed dense-testfit fixture, which stands in",
-      "for Sylvestri / Concept C (real project data needs a signed-in session the sandbox cannot reach)."
+      "what IS gated. The reference scenario is the committed ui-audit/lib/perf-scenario.mjs, which",
+      "stands in for Sylvestri / Concept C (real project data needs a signed-in session the sandbox",
+      "cannot reach) and is LIGHTER than it, so these local numbers are a floor, not a match."
     ],
     "timeToFirstDragMs": {
       "ceiling": 4200,
@@ -130,12 +131,12 @@
 
   "targetOwner": {
     "$comment": "Backlog items that own closing an ABOVE TARGET gap. The harness prints these next to the gap so a reader knows the work is tracked, not forgotten.",
-    "runtime.timeToFirstDragMs": "NEW-8 live check (re-seed the provisional ceiling from a production run on the real Sylvestri scenario)",
-    "runtime.firstAerialCoverageMs": "NEW-8 live check (re-seed the provisional ceiling from a production run; tile hosts are unreachable from the sandbox)",
-    "bundle.siteRouteJsBytes": "NEW-9-followup (split SitePlannerApp behind dynamic imports)",
-    "bundle.largestChunkBytes": "NEW-9-followup (split SitePlannerApp behind dynamic imports)",
-    "runtime.frameMedianMs": "NEW-8-followup (tighten to 60fps once the map-side render work lands)",
-    "runtime.frameP90Ms": "NEW-8-followup (tighten to 60fps once the map-side render work lands)",
-    "runtime.aerialTileRequests": "NEW-8-followup (tile-footprint reduction, companion session)"
+    "runtime.timeToFirstDragMs": "B1040 / V477 live check (re-seed the provisional ceiling from a production run on the real Sylvestri scenario)",
+    "runtime.firstAerialCoverageMs": "B1040 / V477 live check (re-seed the provisional ceiling from a production run; tile hosts are unreachable from the sandbox)",
+    "bundle.siteRouteJsBytes": "B1042 (split SitePlannerApp behind dynamic imports)",
+    "bundle.largestChunkBytes": "B1042 (split SitePlannerApp behind dynamic imports)",
+    "runtime.frameMedianMs": "companion map-side perf session, 2026-07-28 nine-item run (drift / overlay lifecycle / SVG culling) — tighten to 60fps once that render work lands",
+    "runtime.frameP90Ms": "companion map-side perf session, 2026-07-28 nine-item run (drift / overlay lifecycle / SVG culling) — tighten to 60fps once that render work lands",
+    "runtime.aerialTileRequests": "companion map-side perf session, 2026-07-28 nine-item run (tile-footprint reduction)"
   }
 }
