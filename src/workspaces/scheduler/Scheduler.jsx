@@ -10,7 +10,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import AppHeader from "../../shared/ui/AppHeader.jsx";
 import ModuleLoader from "../../shared/ui/ModuleLoader.jsx";
-import { parseNavState, deriveCurrentProject, findBySiteId, needsScheduleCarryIn } from "./lib/navState.js";
+import {
+  parseNavState, deriveCurrentProject, findBySiteId, needsScheduleCarryIn,
+  dashboardNavActions, shouldShowLinkPanel, shouldAdoptLinkedSiteIntoRoute,
+} from "./lib/navState.js";
 import { reportClientEvent } from "../../shared/telemetry/clientErrors.js";
 import { scheduleSaveState } from "./lib/saveState.js";
 import { ScheduleCenter, ScheduleActions } from "./components/ScheduleToolbar.jsx";
@@ -59,6 +62,14 @@ export default function Scheduler({
   // tab that lands straight on the Schedule still has the list. listProjects() is a local read.
   const [siteProjects, setSiteProjects] = useState(() => { try { return listProjects(); } catch (_) { return []; } });
   useEffect(() => { (async () => { try { await warmProjectsIfEmpty(); setSiteProjects(listProjects()); } catch (_) {} })(); }, []);
+  // B1050 — the user pressed Dashboard: the route is being cleared, but the iframe hasn't reported
+  // section "reports" back yet. Suppress the carry-OUT adoption for exactly that window, or it would
+  // re-adopt the site we just cleared and put the trapping panel straight back up. Cleared by the
+  // very next nav-state (see the message handler), so it can never wedge the route permanently.
+  const dashboardIntentRef = useRef(false);
+  // The user's own dismissal of the resolution panel (X / Escape), remembered per routed project so
+  // routing to a DIFFERENT unlinked project still offers to resolve it. Dismissing links nothing.
+  const [dismissedFor, setDismissedFor] = useState(null);
 
   // Receive the embedded scheduler's nav state (its own projects — not the Site
   // Planner's). It re-emits on load and on every project add/rename/delete/switch.
@@ -95,6 +106,9 @@ export default function Scheduler({
       // deref an undefined entry.
       const nav = parseNavState(e.data);
       if (!nav) return;
+      // The iframe has reported since the Dashboard press — whatever it says is now the truth, so
+      // the anti-ping-pong suppression has done its job (B1050).
+      dashboardIntentRef.current = false;
       setProjects(nav.projects);
       setActiveId(nav.activeId);
       setSection(nav.section);
@@ -205,8 +219,10 @@ export default function Scheduler({
   useEffect(() => {
     // Keep-alive gate: only the VISIBLE module may write the route. A hidden scheduler
     // adopting its linked site would rewrite the project out from under the user (e.g.
-    // while they sit on the Site dashboard with no project selected).
-    if (!isActive || section !== "projects" || projectId != null) return;
+    // while they sit on the Site dashboard with no project selected). The dashboardIntent arm
+    // (B1050) holds the adoption off for the one frame between "Dashboard cleared the route" and
+    // "the iframe confirmed it's on reports" — without it the two would ping-pong the project back.
+    if (!shouldAdoptLinkedSiteIntoRoute({ isActive, section, projectId, dashboardIntent: dashboardIntentRef.current })) return;
     const cur = deriveCurrentProject(projects, activeId, section);
     const linked = cur && cur.linkedSiteId != null ? cur.linkedSiteId : null;
     if (linked != null) { try { onProjectChange?.(linked); } catch (_) {} }
@@ -216,10 +232,22 @@ export default function Scheduler({
   // site, carry that site into the route so the Site/Review tabs follow. One-shot (not a reactive
   // effect), so it can't loop with the carry-in.
   const selectSchedule = (id) => {
+    dashboardIntentRef.current = false; // a deliberate pick supersedes a pending Dashboard press
     post({ type: "planar:nav-select", id });
     const sch = projects.find((p) => p && p.id === id);
     const linked = sch && sch.linkedSiteId != null ? sch.linkedSiteId : null;
     if (linked != null && linked !== projectId) { try { onProjectChange?.(linked); } catch (_) {} }
+  };
+
+  // Pressing Dashboard is a USER action that has to move BOTH halves (B1050). Posting to the iframe
+  // alone left the outer route pointing at the project, so the route-derived resolution panel stayed
+  // up over the dashboard the user had just navigated to, with no way to close it. Mirror
+  // selectSchedule: post AND carry the change up to the route. One-shot, not a reactive effect.
+  const goDashboard = () => {
+    const { post: msg, clearRoute } = dashboardNavActions({ projectId });
+    if (clearRoute) dashboardIntentRef.current = true; // arm before the route write (see the carry-out effect)
+    post(msg);
+    if (clearRoute) { try { onProjectChange?.(null); } catch (_) {} }
   };
 
   // Resolve the routed project's display NAME from the site list — NEVER the raw group_id (which
@@ -244,8 +272,13 @@ export default function Scheduler({
 
   // Resolution panel (suggest-and-confirm): the route points at a site that has NO linked schedule
   // yet. Gated on `ready` AND a RESOLVED name, so it never flashes before the iframe reports in and
-  // never shows — or creates a schedule named — the raw group_id.
-  const showLinkPanel = ready && projectId != null && !linkedSchedule && !!routedSiteName;
+  // never shows — or creates a schedule named — the raw group_id. B1050 adds two more gates: the
+  // embedded app must be on its PROJECTS section (this is a project-scoped panel — never render it
+  // over the dashboard), and the user's own X/Escape dismissal wins.
+  const showLinkPanel = shouldShowLinkPanel({
+    ready, section, projectId, linkedSchedule, routedSiteName,
+    dismissed: dismissedFor != null && dismissedFor === projectId,
+  });
   const suggestedMatch = showLinkPanel ? suggestNameMatch(routedSiteName, projects) : null;
 
   // B566 — the Schedule workspace now shows the SAME unified top-right cloud sync badge as the
@@ -290,7 +323,7 @@ export default function Scheduler({
         currentProject={currentProject}
         projects={projects}
         onSelectProject={selectSchedule}
-        onDashboard={() => post({ type: "planar:nav-dashboard" })}
+        onDashboard={goDashboard}
         onNewProject={() => post({ type: "planar:nav-new" })}
         // Rename/delete a SCHEDULE project (B440) — bridged to the embedded app's own hs-v1
         // record (not the Site store). The breadcrumb already confirmed the delete inline, so
@@ -330,6 +363,9 @@ export default function Scheduler({
             suggestedMatch={suggestedMatch}
             onCreate={() => post({ type: "planar:nav-create-linked", name: routedSiteName, siteId: projectId, siteName: routedSiteName })}
             onLink={(scheduleId) => post({ type: "planar:nav-link", id: scheduleId, siteId: projectId, siteName: routedSiteName })}
+            // B1050 — a real escape hatch. Dismissing links and creates NOTHING; it just reveals the
+            // empty Schedule tab underneath, and only for THIS routed project.
+            onDismiss={() => setDismissedFor(projectId)}
           />
         )}
       </div>
