@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo, Fragment } from "react";
+import { flushSync } from "react-dom";
 import ContextMenu from "../../shared/ui/ContextMenu.jsx";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
@@ -37,6 +38,12 @@ import { syncOverlayLayers, withTileRetry, ALL_LAYERS, probeService, gisProxyEna
 import { sanitizeLayerOverrides, overridesFromOverlays, overlaysWithOverrides, applyOnOverrides, overridesSig } from "./lib/layerPrefs.js";
 import { overlayExportRequest } from "./lib/layerRequest.js";
 import { BASEMAPS } from "./lib/basemaps.js";
+import { ppfToZoom } from "./lib/mapLock.js";
+import { overscanPx, keepBufferFor, retinaForZoom, tileWeight, tileCacheLimit } from "./lib/tileBudget.js";
+import { preserveTilesAcrossSetView, announceSetView, boundTileCache, releaseLayer } from "./lib/tileLifecycle.js";
+import { buildGhost } from "./lib/ghostSnapshot.js";
+import { visibleWorldRect, cullToView, shouldCull } from "./lib/viewCull.js";
+import { orderLayersByPriority, LAYER_STAGE_SIZE } from "./lib/layerSchedule.js";
 import { prefetchExtents, computeCoverage, boundsFromLeaflet, getNearbyRadiusMiles, subscribeRelevance } from "./lib/coverage.js";
 import { fetchOverpass } from "./lib/evidenceLayers.js";
 import { loadEasementRules, saveEasementRules, defaultJurForCounty } from "./lib/easementRules.js";
@@ -218,13 +225,13 @@ import { resolveDraftStepBack } from "./lib/drafts.js";
 // How far the basemap container overhangs the viewport on each side (px). The
 // extra margin (with keepBuffer tiles loaded) means a pan/zoom that CSS-transforms
 // the basemap reveals already-loaded imagery instead of the backdrop (B65).
-const GEO_OVERSCAN = 320;
-const M_PER_FT = 0.3048;
-const EARTH_M = 40075016.686; // Web-Mercator world circumference (m) at the equator
-// Leaflet (fractional) zoom whose pixels-per-foot equals the planner's `ppf` at
-// the given latitude — so the basemap scale matches the SVG exactly.
-const ppfToZoom = (ppf, lat) =>
-  Math.log2((ppf / M_PER_FT) * EARTH_M * Math.cos((lat * Math.PI) / 180) / 256);
+// NEW-7 — this is now the CEILING, not a constant: lib/tileBudget.js steps it (and the
+// matching keepBuffer) down on a heavy plan, a constrained device, or a small window,
+// because measured it made the tile container 3.9x the visible pixel area before retina.
+// (the ceiling itself is OVERSCAN_FULL in lib/tileBudget.js — the single place the policy lives)
+// ppfToZoom now lives in lib/mapLock.js beside the feet↔lat/lng projection it has to agree
+// with — the two ARE one model, and splitting them across files is how they silently drifted
+// apart (NEW-1). Always anchor it at the SITE ORIGIN latitude, never the panned-to centre.
 
 /* ------------------------------------------------------------------ *
  *  Industrial Site Planner — prototype (TestFit-style, industrial)
@@ -1755,6 +1762,26 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // to its own row above the bar (see the badge block below).
   const calibBadgeRef = useRef(null);
   const [calibBadgeW, setCalibBadgeW] = useState(0);
+
+  /* ── tile + render budget (NEW-4/NEW-5/NEW-7) ──────────────────────────────────────
+     How much basemap we hold off-screen, how many tiles we retain, whether we ask for
+     retina density, and whether the SVG culls to the viewport all key off ONE weight
+     number: how heavy this plan is (plus what the device says about its memory). Kept
+     coarse deliberately — it must not flip class on a single element added, which would
+     resize the basemap container mid-edit. */
+  const drawableCount = els.length + markups.length + parcels.length;
+  const geoWeight = tileWeight({ elementCount: drawableCount, deviceMemoryGb: typeof navigator !== "undefined" ? navigator.deviceMemory : null });
+  const geoOverscan = overscanPx({ elementCount: drawableCount, deviceMemoryGb: typeof navigator !== "undefined" ? navigator.deviceMemory : null, viewportW: size.w, viewportH: size.h });
+  const geoKeepBuffer = keepBufferFor({ elementCount: drawableCount, deviceMemoryGb: typeof navigator !== "undefined" ? navigator.deviceMemory : null });
+  // An EXPORT pass must render the complete model whatever the view is (NEW-5's hard
+  // constraint). buildExportSvg clones the LIVE svg, so it flips this off, flushes a full
+  // render, clones, and flips it back — see `withFullRender`.
+  const [exportPass, setExportPass] = useState(false);
+  const cullActive = !exportPass && shouldCull(drawableCount);
+  const cullRect = useMemo(
+    () => (cullActive ? visibleWorldRect(view, size) : null),
+    [cullActive, view, size]
+  );
   const [cursor, setCursor] = useState(null);   // {x,y} feet
   const [hoverElId, setHoverElId] = useState(null); // B226: building under the cursor (select mode, nothing selected) → preview its feature-add buttons
   const [hoverMkId, setHoverMkId] = useState(null); // B156: markup under the cursor in Select mode → pre-click hover glow (set by the markup's own pointer enter/leave, so it matches what a click grabs)
@@ -2018,6 +2045,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const geoMapRef = useRef(null);
   const geoBaseRef = useRef(null);
   const geoBackfillRef = useRef(null); // coarse low-zoom layer for instant blurry coverage
+  const geoCapRef = useRef(null);      // detach fn for the bounded tile cache (NEW-7)
+  const overlayStagedRef = useRef(false); // has the staged first-load pass finished? (NEW-3)
   const overlayRefs = useRef({});
   const [coverage, setCoverage] = useState({}); // id -> "in"|"out"|"unknown" (NEW-1; picker-only)
   const geoCommitRef = useRef(null);   // last view actually setView'd: {center, zoom, w, h}
@@ -2075,8 +2104,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // backfill→detail window used to key on the detail ref alone and strand the
     // backfill layer on the map.
     if (geoSrcRef.current !== want && (geoBaseRef.current || geoBackfillRef.current)) {
-      try { if (geoBaseRef.current) map.removeLayer(geoBaseRef.current); } catch (_) {}
-      try { if (geoBackfillRef.current) map.removeLayer(geoBackfillRef.current); } catch (_) {}
+      // NEW-6/NEW-7 — a real release: drop the retained tiles and their DOM now rather than
+      // waiting for an incidental prune, and detach the cache-cap listeners with them.
+      try { if (geoCapRef.current) geoCapRef.current(); } catch (_) {}
+      geoCapRef.current = null;
+      if (geoBaseRef.current) releaseLayer(map, geoBaseRef.current);
+      if (geoBackfillRef.current) releaseLayer(map, geoBackfillRef.current);
       geoBaseRef.current = null; geoBackfillRef.current = null;
     }
     geoSrcRef.current = want;
@@ -2092,7 +2125,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // fine for a placeholder); generous keepBuffer to cover the overscan. (B65)
     // crossOrigin (B839): request tiles with CORS so the same tile bytes are cached canvas-readable
     // and can be reused to STITCH the export backdrop (Esri/USGS both send Access-Control-Allow-Origin:*).
-    const bf = withTileRetry(L.tileLayer(bm.tiles, { maxNativeZoom: 13, maxZoom: 24, attribution: bm.attr, keepBuffer: 6, crossOrigin: true }));
+    const bf = withTileRetry(L.tileLayer(bm.tiles, { maxNativeZoom: 13, maxZoom: 24, attribution: bm.attr, keepBuffer: Math.max(2, geoKeepBuffer + 2), crossOrigin: true }));
+    preserveTilesAcrossSetView(bf); // NEW-7: a same-native-zoom commit must not wipe these
     bf.setZIndex(0); bf.addTo(map); geoBackfillRef.current = bf;
     // Honest status dot for the Basemap row: "loaded" only on a REAL painted tile
     // (`tileload`) — Leaflet's layer-level `load` fires even when every tile errored
@@ -2118,18 +2152,40 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // which both providers answer with the gray "Map data not yet available"
     // placeholder as HTTP 200. Capping the native fetch at the ceiling makes it
     // upscale the deepest real imagery instead. Per-source via bm.maxNative. (B182/B220)
-    const detailMaxNative = L.Browser.retina ? bm.maxNative - 1 : bm.maxNative;
+    // NEW-7 — retina is gated by ZOOM BAND, not switched off globally. Turning it off
+    // everywhere would soften the aerial, and a soft aerial is a credibility regression for
+    // a tool people eyeball sites in — so full density is kept at the working zooms (where
+    // the extra tile level is what makes a truck court legible) and dropped only at the wide
+    // context zooms, where a whole extra level of tiles buys nothing the eye can use. A very
+    // heavy plan gives the pixels back first. The band is evaluated when the layer is BUILT
+    // (basemap on/off, source switch, origin change): Leaflet bakes detectRetina into the
+    // tile grid at construction, so re-deciding it mid-gesture would mean rebuilding the
+    // layer and refetching every tile — a worse trade than the one it saves.
+    const wantRetina = retinaForZoom(ppfToZoom(view.ppf, origin.lat), { dpr: typeof window !== "undefined" ? window.devicePixelRatio : 1, weight: geoWeight });
+    const detailMaxNative = wantRetina ? bm.maxNative - 1 : bm.maxNative;
     const addDetail = () => {
       // bail if the map went away, detail's already added, or the aerial was toggled
       // off / switched source during the wait (THIS backfill instance is gone then —
       // an identity check, so a stale timer can't build a layer for the old source).
       if (!geoMapRef.current || geoBaseRef.current || geoBackfillRef.current !== bf) return;
-      const t = withTileRetry(L.tileLayer(bm.tiles, { maxNativeZoom: detailMaxNative, maxZoom: 24, detectRetina: true, attribution: bm.attr, keepBuffer: 4, crossOrigin: true }));
+      const t = withTileRetry(L.tileLayer(bm.tiles, { maxNativeZoom: detailMaxNative, maxZoom: 24, detectRetina: wantRetina, attribution: bm.attr, keepBuffer: geoKeepBuffer, crossOrigin: true }));
+      preserveTilesAcrossSetView(t); // NEW-7: the big one — a fractional-zoom commit keeps its tiles
       t.on("tileload", () => { if (geoBaseRef.current === t) setBasemapStatus("loaded"); });
       t.setZIndex(1); t.addTo(geoMapRef.current); geoBaseRef.current = t;
+      // NEW-7 (4): an explicit ceiling, so a long session can't grow the tile cache without
+      // limit. Only non-current tiles are ever shed, so this can't punch a hole in the view.
+      geoCapRef.current = boundTileCache(t, () => tileCacheLimit({
+        containerW: (geoWrapRef.current && geoWrapRef.current.clientWidth) || size.w,
+        containerH: (geoWrapRef.current && geoWrapRef.current.clientHeight) || size.h,
+        tileSizePx: (t.getTileSize && t.getTileSize().x) || 256,
+        keepBuffer: geoKeepBuffer,
+      }));
     };
     bf.once("load", addDetail);
     setTimeout(addDetail, 600); // fallback in case `load` is slow/never fires
+    // Deliberately NOT dependent on the view or the tile-budget values it reads: those are
+    // BUILD-TIME choices (see the retina note above). Re-running this effect on every zoom
+    // would rebuild the tile layer and refetch the whole aerial mid-gesture.
   }, [basemapSrc, basemapOn, origin]);
 
   /* Re-sync the basemap size when the planner is (re-)shown (keep-alive show/hide) or the origin
@@ -2188,7 +2244,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const fx = (size.w / 2 - view.offX) / view.ppf;
     const fy = (size.h / 2 - view.offY) / view.ppf;
     const center = feetToLatLng({ x: fx, y: fy }, origin.lat, origin.lon);
-    const z = ppfToZoom(view.ppf, center[0]); // scale at the panned-to latitude
+    // NEW-1 — the scale is anchored at the SITE ORIGIN latitude, the same latitude the feet
+    // frame is anchored at. It used to be re-derived at `center[0]` (the panned-to latitude),
+    // which made the basemap rescale as you travelled north/south while the drawing, whose
+    // pixels-per-foot is fixed, did not — so the two disagreed by a fraction of a percent at
+    // the far end of a pan and the drawing crept off the imagery a few feet per excursion,
+    // cumulatively. Position and scale now share one model, so an out-and-back pan of any
+    // distance returns the drawing to exactly where it started.
+    const z = ppfToZoom(view.ppf, origin.lat);
 
     // Snapshot the current tiles as a static overlay (cloned WITH the live
     // transform, so it sits exactly where the basemap looks right now) and keep
@@ -2200,12 +2263,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if (!clip || !basemapOn) return;
       try {
         dropGhost();
-        const g = wrap.cloneNode(true);
-        g.style.pointerEvents = "none";
-        // Transparent so the ghost contributes ONLY its sharp tiles on top; its
-        // own gaps (e.g. the wider area exposed on zoom-out) fall through to the
-        // live backfill below instead of showing the container's dark bg.
-        g.style.background = "transparent";
+        // NEW-4 — a FLAT snapshot of only the tiles the user can actually see, instead of a
+        // deep clone of the whole overscanned container (~390–500 <img> copied on every
+        // zoom commit). Typically an order of magnitude less allocation per gesture, with
+        // pixel-identical cover; the live coarse backfill underneath covers any reveal, and
+        // the ghost is transparent so its own gaps fall through to it rather than showing
+        // the container's dark background.
+        const g = buildGhost(clip, wrap);
+        if (!g) return; // nothing loaded to snapshot — the backfill is the whole defence
         clip.appendChild(g);
         geoGhostRef.current = g;
         const base = geoBaseRef.current;
@@ -2246,7 +2311,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       }
       if (ghost) spawnGhost();
       wrap.style.transform = "";
-      try { map.setView(c, zoom, { animate: false }); } catch (_) {}
+      // NEW-7 — tell the tile layers the zoom we're about to set. Leaflet wipes every tile
+      // on `viewprereset` regardless of whether the NATIVE (rounded) tile zoom actually
+      // moved, so a fractional-zoom commit used to throw away tiles it immediately asked
+      // for again. That is most of the 53% of one load's tiles that came from zoom levels
+      // nobody ever lingered on. With the target announced, a same-grid commit keeps them.
+      try {
+        announceSetView([geoBaseRef.current, geoBackfillRef.current], zoom, () => map.setView(c, zoom, { animate: false }));
+      } catch (_) {}
       geoCommitRef.current = { center: c, zoom, w: size.w, h: size.h };
     };
 
@@ -2311,13 +2383,50 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   /* shared overlay layers (same source as the map finder) */
   useEffect(() => {
     if (!origin) return;
+    /* NEW-3 — overlays load OFF the critical path, in priority order.
+       Restoring a fully-enabled Layers panel fired 465 requests across 17 hosts in one
+       burst, all of it racing the first paint (and starving the coarse basemap backfill
+       that is supposed to make the map usable instantly). Now: the map draws and becomes
+       draggable first, then previously-enabled overlays are admitted a few at a time on
+       idle callbacks, deal-shaping layers first (flood, pipelines) before descriptive ones
+       (terrain, street-level photos). Nothing blocks a gesture at any point, and each chip
+       in the Layers panel keeps its own honest "loading" dot, so a not-yet-arrived overlay
+       reads as coming rather than broken. Turning a layer OFF is never staged — a removal
+       is immediate whatever the gate says (see `admit` in syncOverlayLayers).
+       A layer that lands after the user has panned requests the view it is added to, not
+       the one it was queued against: every layer derives its bbox from the live map at add
+       time, and the view-driven ones re-request on the next `moveend`. */
+    // Staging applies to the RESTORE burst only. Once the first pass has admitted
+    // everything, a layer the user toggles on by hand is admitted immediately — waiting an
+    // idle tick for a chip you just clicked would read as lag, which is the opposite of the
+    // point.
+    let staged = overlayStagedRef.current ? Infinity : 0;
+    let idleId = null, idleTimer = null;
+    const order = orderLayersByPriority(overlays, ALL_LAYERS);
     const sync = () => syncOverlayLayers(geoMapRef.current, overlays, overlayRefs.current, {
+      admit: (id) => order.indexOf(id) < staged * LAYER_STAGE_SIZE,
       onStatus: (id, state, msg, extra) => setLayerStatus && setLayerStatus((s) => ({ ...s, [id]: state ? { state, msg, ts: extra?.ts ?? null, stale: extra?.stale ?? false } : null })),
       onError: (cfg, msg) => { flashWarn(`⚠ “${cfg.label}” layer failed: ${msg || "service may be down or moved"}.`, 6000); },
     });
-    sync();
-    const iv = setInterval(sync, 45000); // re-probe so stopped services self-heal
-    return () => clearInterval(iv);
+    const idle = (fn) => (typeof requestIdleCallback === "function"
+      ? (idleId = requestIdleCallback(fn, { timeout: 600 }))
+      : (idleTimer = setTimeout(fn, 0)));
+    const stageNext = () => {
+      staged += 1;
+      sync();
+      if (staged * LAYER_STAGE_SIZE < order.length) idle(stageNext);
+      else overlayStagedRef.current = true;
+    };
+    sync();                                            // pass 0: removals + live-layer updates
+    if (staged === Infinity) overlayStagedRef.current = true;
+    else if (!order.length) overlayStagedRef.current = true;
+    else idle(stageNext);                              // widen a slice at a time, behind first paint
+    const iv = setInterval(() => { staged = Math.max(staged, Math.ceil(order.length / LAYER_STAGE_SIZE)); sync(); }, 45000); // re-probe so stopped services self-heal
+    return () => {
+      clearInterval(iv);
+      if (idleId != null && typeof cancelIdleCallback === "function") { try { cancelIdleCallback(idleId); } catch (_) {} }
+      if (idleTimer) clearTimeout(idleTimer);
+    };
   }, [overlays, origin, basemapOn]); // eslint-disable-line
 
   /* Coverage (NEW-1/B283): which layers' DATA reaches the planner's current view, for
@@ -10317,7 +10426,24 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       minY: Math.min(...pts.map((p) => p.y)) - PAD, maxY: Math.max(...pts.map((p) => p.y)) + PAD,
     };
   };
-  const buildExportSvg = (frame, includeOverlay = true, paper = PAL.paper, exportAerial = null, exportOverlays = null, includeMapLayers = true, exportVectorOverlays = null) => {
+  /* NEW-5's hard constraint, enforced in ONE place. Screen rendering culls to the viewport;
+     an export must not. `buildExportSvg` clones the LIVE `<svg>`, so before it reads the DOM
+     it flips the cull off and flushes a synchronous full render, then restores culling after
+     the clone. flushSync is the whole point — a normal setState would land a frame later,
+     i.e. after the clone, and the PDF would quietly print only what was on screen. If the
+     flush can't run (an export triggered from inside a render/lifecycle), we fall back to
+     rendering uncrossed rather than silently exporting a partial drawing. */
+  const withFullRender = (fn) => {
+    if (!cullActive) return fn();
+    let flushed = false;
+    try { flushSync(() => setExportPass(true)); flushed = true; } catch (_) { /* fall through */ }
+    try { return fn(); }
+    finally { if (flushed) { try { flushSync(() => setExportPass(false)); } catch (_) { setExportPass(false); } } }
+  };
+
+  const buildExportSvg = (...args) => withFullRender(() => buildExportSvgRaw(...args));
+
+  const buildExportSvgRaw = (frame, includeOverlay = true, paper = PAL.paper, exportAerial = null, exportOverlays = null, includeMapLayers = true, exportVectorOverlays = null) => {
     if (!svgRef.current) return null;
     const fe = exportFeetExtent(frame);
     if (!fe) return null;
@@ -14212,6 +14338,23 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // BEFORE the elements (sent behind the buildings), the rest after. Hit-testing is native SVG DOM
   // order, so reordering the DOM reorders clicks too — what looks on top is what you grab.
   const markupsZ = [...markups].sort(byZAsc);
+  /* NEW-5 — viewport culling. What is drawn is the model filtered to what the viewport can
+     reach (plus a generous margin, so nothing pops in at the edge mid-drag); frame cost then
+     tracks what is ON SCREEN instead of how big the plan has grown. Three guards make it
+     safe: the selection and anything mid-drag are force-kept whatever their bounds say; an
+     element whose shape we can't bound is never culled; and during an EXPORT pass `cullRect`
+     is null, so these are identity — `buildExportSvg`, the PDF and the aerial pipeline always
+     see the complete model (asserted in test/viewCull.test.js). */
+  const cullKeep = useMemo(() => {
+    const s = new Set();
+    if (sel && sel.id != null) s.add(sel.id);
+    if (Array.isArray(multi)) multi.forEach((r) => { if (r && r.id != null) s.add(r.id); });
+    if (drag.current && drag.current.id != null) s.add(drag.current.id);
+    return s;
+  }, [sel, multi]);
+  const drawEls = useMemo(() => cullToView(els, cullRect, { enabled: !!cullRect, keep: cullKeep }), [els, cullRect, cullKeep]);
+  const drawMarkupsZ = useMemo(() => cullToView(markupsZ, cullRect, { enabled: !!cullRect, keep: cullKeep }), [markupsZ, cullRect, cullKeep]);
+  const drawParcels = useMemo(() => cullToView(parcels, cullRect, { enabled: !!cullRect, keep: cullKeep }), [parcels, cullRect, cullKeep]);
   // B953/NEW-1 — clean-tee junction geometry (world feet), recomputed only when els/settings change;
   // rendered through f2p each frame. Drawn as an overlay after the element pass (see the render below).
   const teeJunctions = useMemo(() => teeJunctionsOf(els, settings), [els, settings]);
@@ -14664,14 +14807,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               a bright (near-white) flash against the imagery (B65). With the aerial
               OFF this stays PAL.paper so the planner background matches the SVG.
               Structure (B65 follow-up): a STATIC clip box (inset:0, never moves, dark
-              bg) holds an OVERSIZED inner map div (inset:-GEO_OVERSCAN). During a
+              bg) holds an OVERSIZED inner map div (inset:-geoOverscan). During a
               pan/zoom the inner div is CSS-transformed; because it overhangs the
-              viewport by GEO_OVERSCAN with extra tiles loaded (keepBuffer), the
+              viewport by geoOverscan with extra tiles loaded (keepBuffer), the
               reveal shows real imagery, and anything beyond it shows the static
               dark backdrop — never the cream page behind the canvas. */}
           {origin && (
             <div data-export="skip" style={{ position: "absolute", inset: 0, zIndex: 0, overflow: "hidden", pointerEvents: "none", background: basemapOn ? "#3f3f3f" : PAL.paper }}>
-              <div ref={geoWrapRef} style={{ position: "absolute", inset: -GEO_OVERSCAN, background: basemapOn ? "#3f3f3f" : PAL.paper }} />
+              <div ref={geoWrapRef} style={{ position: "absolute", inset: -geoOverscan, background: basemapOn ? "#3f3f3f" : PAL.paper }} />
             </div>
           )}
           {/* "Drop to place" hint — mounts only during an active file drag over the canvas
@@ -14930,7 +15073,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   by its empty interior. Interior presses fall through to whatever element is painted on
                   top, else the background pan — exactly as on empty canvas. Reuses the B146 fat invisible
                   hit-stroke; ~12 screen px (f2p already projects feet→pixels, so the grab is zoom-independent). B420. */}
-              {parcels.map((pc) => {
+              {drawParcels.map((pc) => {
                 // B651 — a superseded (split) parent isn't drawn: its active children occupy the
                 // exact same ground, so a dimmed parent outline under them is redundant clutter.
                 // It stays selectable from the Parcel panel (nested, greyed).
@@ -14962,7 +15105,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   building footprint (e.g. dock dog-ears sit ON the truck court). */}
               {/* markups sent BEHIND the buildings (B820 layer ordering) paint before the elements,
                   the rest after — both in z order. See renderMarkupNode / markupsZ above. */}
-              {markupsZ.filter((m) => m.behindEls).map(renderMarkupNode)}
+              {drawMarkupsZ.filter((m) => m.behindEls).map(renderMarkupNode)}
               {/* The element pass is split at the building layer so a building always paints over ground
                   pavement (B959/NEW-1 — connection pavement can never overlap a building). */}
               {/* NEW-1/NEW-2 — DISSOLVED ROAD NETWORK. Roads share the bottom paint layer (Z_LAYER.road = 0),
@@ -14989,7 +15132,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   })}
                 </g>
               )}
-              {[...els].sort(byZ).filter((el) => zOrder(el) < BUILDING_Z).map((el) => renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, els, startDimMove, onDimNumberDown, onElContext, dimSuppressed, roadNet))}
+              {[...drawEls].sort(byZ).filter((el) => zOrder(el) < BUILDING_Z).map((el) => renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, els, startDimMove, onDimNumberDown, onElContext, dimSuppressed, roadNet))}
               {/* NEW-4 — civil radius conflict flags. A corner the leg is too short to carry gets marked
                   ON THE PLAN, so a non-compliant turn can't hide until someone selects the road. Review
                   chrome: data-export="skip" keeps it out of the PDF a consultant receives. */}
@@ -15092,9 +15235,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   strokes and the tee-cover knockout mask are all superseded by the dissolved road network
                   painted above: a junction is now a boolean union of pavement, not a patch over a seam. */}
               {/* buildings + any layer at/above the building band, painted OVER the overlay. */}
-              {[...els].sort(byZ).filter((el) => zOrder(el) >= BUILDING_Z).map((el) => renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, els, startDimMove, onDimNumberDown, onElContext, dimSuppressed))}
+              {[...drawEls].sort(byZ).filter((el) => zOrder(el) >= BUILDING_Z).map((el) => renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, els, startDimMove, onDimNumberDown, onElContext, dimSuppressed))}
               {/* markup shapes (neutral line/polyline/rect/ellipse/polygon) on top of the elements */}
-              {markupsZ.filter((m) => !m.behindEls).map(renderMarkupNode)}
+              {drawMarkupsZ.filter((m) => !m.behindEls).map(renderMarkupNode)}
               {/* ditch cross-section line (in-progress + last result) */}
               {(xsecMode && xsecPts.length === 1 && cursor) && (() => { const a = f2p(xsecPts[0]), b = f2p(cursor); return <line data-export="skip" x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="#0e7490" strokeWidth={2} strokeDasharray="6 4" pointerEvents="none" />; })()}
               {xsec && (() => { const a = f2p(xsec.p0), b = f2p(xsec.p1); return <g data-export="skip" pointerEvents="none"><line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="#0e7490" strokeWidth={2.4} /><circle cx={a.x} cy={a.y} r={3.5} fill="#0e7490" stroke="#fff" strokeWidth={1} /><circle cx={b.x} cy={b.y} r={3.5} fill="#0e7490" stroke="#fff" strokeWidth={1} /></g>; })()}

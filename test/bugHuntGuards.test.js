@@ -645,16 +645,25 @@ describe("B36(e)/B843: view-driven map layers guard against stale post-unmount r
   // guards above). The defect: `if (!map) return` was checked only BEFORE the await, so a
   // fetch that resolved AFTER the layer was toggled off (onRemove nulls `map`) still painted
   // into the detached group + reported "loaded" for an off layer.
-  it("B36(e): evidenceLayers overpass + Mapillary have the post-await mount guard, and Mapillary aborts on removal", () => {
+  it("B36(e): evidenceLayers overpass + Mapillary have the post-await mount guard, and BOTH abort on removal", () => {
     const src = read("../src/workspaces/site-planner/lib/evidenceLayers.js");
-    // Overpass rides gisCache.swr (cached) → guarded (not aborted; aborting would poison the cache).
+    // Overpass rides gisCache.swr (cached) → guarded post-await…
     expect(src).toMatch(/B36e: the layer may have been toggled off \/ the map torn down while the request was/);
+    // …and, since NEW-6, ALSO aborted. The old note said aborting would poison the shared SWR
+    // cache; it doesn't — swr writes only on success, so an aborted attempt lands in its catch
+    // and leaves the last-good copy untouched. The `busy`/`pending` queue it replaced let a
+    // superseded request run to completion before the view the user is looking at was even asked for.
+    expect(src).toMatch(/NEW-6 — a pan SUPERSEDES whatever is still in flight/);
+    expect(src).toMatch(/fetchOverpass\(bb, want, sig\)/);
+    expect(src).not.toMatch(/if \(busy\) \{ pending = true; return; \}/);
     // Mapillary is a direct fetch → AbortController threaded through + aborted on removal + post-await guard.
     expect(src).toMatch(/B36e: abort a slow request the moment the layer is toggled off/);
     expect(src).toMatch(/try \{ feats = await fetchMapillary\(bb, token, sig\); \}/);
     expect(src).toMatch(/if \(sig\.aborted \|\| \(e && e\.name === "AbortError"\)\) return;/);
-    expect(src).toMatch(/if \(!map\) return; \/\/ B36e: removed mid-fetch/);
-    expect(src).toMatch(/group\.onRemove = function \(m\) \{ if \(ctrl\) ctrl\.abort\(\);/); // the Mapillary onRemove
+    expect(src).toMatch(/if \(!map \|\| sig\.aborted\) return; \/\/ B36e: removed \/ superseded mid-fetch/);
+    // Both layers expose abortPending, so releaseLayer (NEW-6) can cancel them on teardown.
+    expect((src.match(/group\.abortPending = \(\) =>/g) || []).length).toBe(2);
+    expect((src.match(/group\.onRemove = function \(m\) \{ group\.abortPending\(\);/g) || []).length).toBe(2);
   });
   it("B843: terrainLayer has the post-await mount guard before paint (same class as overpass)", () => {
     const src = read("../src/workspaces/site-planner/lib/terrainLayers.js");
