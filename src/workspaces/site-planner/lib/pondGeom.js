@@ -279,7 +279,14 @@ export function volumeBetween(ring, det, elevLo, elevHi) {
 const _bandMemo = new Map();
 const BAND_MEMO_MAX = 32;
 
-/* Split an ANCHORED pond's storage into the exclusive bands above. `wseFt` is the
+/* Split an ANCHORED pond's storage into the exclusive bands above. The partition is
+ * `permanentDeadCf` (floor → permanent water level) + `mitigationCandidateCf` (permanent water
+ * → flood WSE) + `aboveWseCf` (flood WSE → design water surface) == `grossCf`, and it holds
+ * under EVERY policy — see test/pondGeom.bands.test.js's partition property (B1032). `usableCf`
+ * is the DETENTION-availability read over those bands (above-flood always; the below-flood void
+ * too unless the coincident-storm policy floors it) — it deliberately OVERLAPS the candidate
+ * band, which is why the exclusive DUTY split lives in pondLedger.allocatePondDuty and no ledger
+ * may add usableCf and mitigationCandidateCf together. `wseFt` is the
  * governing flood water surface at the pond (B707's wse1pctForRing / manual BFE) —
  * null when the pond is outside the floodplain or the WSE is unknown, in which case
  * only the pool band splits (a wet-bottom pond outside the floodplain still earns
@@ -325,28 +332,41 @@ export function bandedStorage(ring, det, { wseFt = null, gradeFt = null, deadFlo
   const grossCf = detentionStorage(ring, depth, freeboard, slope).vol;
   const poolTop = poolElev != null ? Math.min(poolElev, waterSurf) : null;
   const poolDeadCf = poolTop != null ? volumeBetween(ring, det, floorElev, poolTop) : 0;
-  // Mitigation-candidate: pool surface (or floor) up to the flood WSE — the flood
-  // already occupies it during the design storm (tailwater), so it stores nothing
-  // for detention; it IS candidate compensating-storage cut ("hydraulic connection
-  // + stage distribution: engineer confirms").
-  const candLo = Math.max(floorElev, poolTop != null ? poolTop : floorElev);
+  // NEW-1 (B1032) — the PERMANENT WATER LEVEL: the highest of the pond floor, the permanent-pool
+  // surface, and the normal (dry-weather) tailwater the pond recovers to. Storage BELOW it is
+  // permanently occupied by water, so it is dead for detention AND worthless as compensating
+  // storage — a volume already full of water cannot accept floodwater. The candidate band must
+  // therefore start HERE, not at the floor: the old `candLo` ignored `deadFloor`, so a pond with a
+  // normal-tailwater floor credited its permanently-wet bottom as flood compensation.
+  const permWaterElev = Math.max(floorElev, poolTop != null ? poolTop : floorElev, deadFloor != null ? deadFloor : -Infinity);
+  const permanentDeadCf = permWaterElev > floorElev ? volumeBetween(ring, det, floorElev, permWaterElev) : 0;
+  // Mitigation-candidate: the VOID band between the permanent water level and the flood WSE — the
+  // flood backs in and occupies it, so it is candidate compensating-storage cut ("hydraulic
+  // connection + stage distribution: engineer confirms"). Exclusive of both the dead band below it
+  // and the above-flood band above it: permanentDead + mitigationCandidate + aboveWse == gross.
+  const candLo = permWaterElev;
   const candHi = wseFt != null ? Math.min(wseFt, waterSurf) : candLo;
   const mitigationCandidateCf = candHi > candLo ? volumeBetween(ring, det, candLo, candHi) : 0;
   // R1 — usable floor = NORMAL tailwater (deadFloor) / pond floor / pool top, and the 100-yr storm
   // floor ONLY under a coincident-storm policy. The bare 100-yr wseFt is no longer a permanent floor.
-  const usableLo = Math.max(stormFloor != null ? stormFloor : floorElev, poolTop != null ? poolTop : floorElev, floorElev, deadFloor != null ? deadFloor : -Infinity);
+  const usableLo = Math.max(stormFloor != null ? stormFloor : floorElev, permWaterElev);
   const usableCf = usableLo < waterSurf ? volumeBetween(ring, det, usableLo, waterSurf) : 0;
   // R1 — the geometric volume ABOVE the flood WSE, ALWAYS computed (regardless of the coincident-storm
   // policy). This is the flood-OCCUPANCY measure the pond-ROLE suggestion needs (how much of the pond
   // sits below the flood, i.e. is compensating-storage territory) — a property of geometry + the flood,
   // not of the storm-coincidence assumption, so it must not move when usableCf floats with the policy.
-  const aboveWseLo = Math.max(wseFt != null ? wseFt : floorElev, poolTop != null ? poolTop : floorElev, floorElev);
+  const aboveWseLo = Math.max(wseFt != null ? wseFt : permWaterElev, permWaterElev);
   const aboveWseCf = aboveWseLo < waterSurf ? volumeBetween(ring, det, aboveWseLo, waterSurf) : 0;
   const val = {
     usableCf,
     aboveWseCf,
     mitigationCandidateCf,
     poolDeadCf,
+    // NEW-1 (B1032) — the FULL permanently-occupied band (pool AND/OR normal tailwater), which
+    // `poolDeadCf` (pool only) never covered. The exclusive partition of gross is
+    // permanentDeadCf + mitigationCandidateCf + aboveWseCf, under EVERY policy and role.
+    permanentDeadCf,
+    permWaterElev,
     grossCf,
     // R1 — "fully inundated for detention" now follows the EFFECTIVE usable floor (no usable band left),
     // not the raw 100-yr WSE: a pond whose rim sits below the 100-yr flood but recovers to normal

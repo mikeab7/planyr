@@ -71,7 +71,10 @@ describe("D4 — the on-screen pond noun follows the resolved purpose at every r
     expect(src.includes('lines = ["Existing Detention Pond"]')).toBe(false);
   });
   it("the Yield per-pond row label resolves the lone pond's purpose", () => {
-    expect(src).toContain("label: pondCount === 1 ? pondDisplayNameFor(p.det, p) : (p.name || `Pond ${i + 1}`)");
+    // NEW-4 (B1035) — the resolution moved UP to the ledger entry (`displayName`), so the map, the
+    // Yield row and any error that names a pond all read ONE string; the row renders that.
+    expect(src).toContain("p.displayName = pondLedgerEntries.length === 1 ? pondDisplayNameFor(p.det, p) : (p.name || `Pond ${i + 1}`)");
+    expect(src).toContain("label: p.displayName || p.name || `Pond ${i + 1}`");
     expect(src.includes('pondCount === 1 ? "Detention Pond"')).toBe(false);
   });
 });

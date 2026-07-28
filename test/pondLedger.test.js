@@ -171,13 +171,14 @@ describe("effectivePondRole — the owner's pick wins; absent = auto (NEW-8)", (
   });
 });
 
-describe("accumulatePondLedger — the outfall credit gate (NEW-26, supersedes the NEW-8 role gate)", () => {
+describe("accumulatePondLedger — the outfall credit gate (NEW-26) + the EXCLUSIVE duty split (NEW-1/B1032)", () => {
   const candOf = (e) => e.bands.mitigationCandidateCf;
+  const BIG = 1e9; // a requirement large enough that every pond dedicates its whole below-flood band
   it("EVERY connected (ungated) pond credits its candidate band regardless of role — the flood backs in through the outfall", () => {
     const mitPond = { ...splitAt(97.5), id: "m", role: "mitigation" };
     const dualPond = { ...splitAt(97.5), id: "d", role: "dual" };
     const detPond = { ...splitAt(97.5), id: "det", role: "detention" };
-    const led = accumulatePondLedger([mitPond, dualPond, detPond]);
+    const led = accumulatePondLedger([mitPond, dualPond, detPond], { mitigationRequiredCf: BIG });
     expect(led.creditedMitCf).toBeCloseTo(candOf(mitPond) + candOf(dualPond) + candOf(detPond), 6);
     expect(led.uncreditedMitCf).toBe(0);
     expect(led.mitCandidateCf).toBeCloseTo(led.creditedMitCf + led.uncreditedMitCf, 6);
@@ -186,36 +187,77 @@ describe("accumulatePondLedger — the outfall credit gate (NEW-26, supersedes t
   });
   it("a GATED outfall withholds the credit (reason outlet-gated) even for a detention pond", () => {
     const gated = { ...splitAt(97.5), id: "g", role: "detention", outletGated: true };
-    const led = accumulatePondLedger([gated]);
+    const led = accumulatePondLedger([gated], { mitigationRequiredCf: BIG });
     expect(led.creditedMitCf).toBe(0);
     expect(led.uncreditedMitCf).toBeCloseTo(candOf(gated), 6);
     expect(led.mitGatedReason).toBe("outlet-gated");
   });
   it("NO outfall (hasOutfall:false) withholds the credit (reason no-outfall)", () => {
     const isolated = { ...splitAt(97.5), id: "i", role: "detention", hasOutfall: false };
-    const led = accumulatePondLedger([isolated]);
+    const led = accumulatePondLedger([isolated], { mitigationRequiredCf: BIG });
     expect(led.creditedMitCf).toBe(0);
     expect(led.mitGatedReason).toBe("no-outfall");
   });
   it("auto role credits a mostly-inundated pond (connected by default) without an owner pick", () => {
-    const led = accumulatePondLedger([{ ...splitAt(100.5), role: null }]);
+    const led = accumulatePondLedger([{ ...splitAt(100.5), role: null }], { mitigationRequiredCf: BIG });
     expect(led.creditedMitCf).toBeGreaterThan(0);
     expect(led.uncreditedMitCf).toBe(0);
   });
-  it("role NEVER moves usable/dead — only whether the candidate band credits (no double-count)", () => {
-    for (const role of ["detention", "mitigation", "dual", null]) {
-      // coincidentStorm:true so usable/candidate/poolDead partition the column exclusively (R1 —
-      // by default the recovered column overlaps the below-WSE candidate band).
-      const e = { ...splitAt(97.5, true), role };
-      const led = accumulatePondLedger([e]);
-      expect(led.usableCf).toBeCloseTo(e.usableCf, 6);
-      expect(led.deadCf).toBeCloseTo(e.deadCf, 6);
-      // Exclusive bands: usable + candidate + poolDead ≈ gross, and the candidate lands
-      // in exactly ONE of credited/uncredited.
-      expect(led.usableCf + led.mitCandidateCf + (e.bands.poolDeadCf || 0)).toBeCloseTo(e.grossCf, -3);
-      expect((led.creditedMitCf || 0) + (led.uncreditedMitCf || 0)).toBeCloseTo(led.mitCandidateCf, 6);
+
+  // ── NEW-1 (B1032) — the four bands PARTITION the pond's gross under every role and policy.
+  // The bug: `usableCf` (the recovered column) and `bands.mitigationCandidateCf` (the below-flood
+  // slice OF that column) were both credited, so the same acre-foot served two ledgers.
+  it("dead + detention + mitigation + unused == gross, under every role and either storm policy", () => {
+    for (const coincident of [false, true]) {
+      for (const role of ["detention", "mitigation", "dual", null]) {
+        for (const needCf of [0, 5000, 1e9]) {
+          const e = { ...splitAt(97.5, coincident), role };
+          const led = accumulatePondLedger([e], { mitigationRequiredCf: needCf });
+          const sum = led.deadCf + led.usableCf + led.creditedMitCf + led.unusedCf;
+          expect(sum).toBeCloseTo(e.grossCf, -3);
+          for (const v of [led.deadCf, led.usableCf, led.creditedMitCf, led.unusedCf]) expect(v).toBeGreaterThanOrEqual(-1e-6);
+          // Credited mitigation can never exceed the void that physically sits below the flood.
+          expect(led.creditedMitCf).toBeLessThanOrEqual(candOf(e) + 1e-6);
+          // The two STORAGE ledgers together never claim more than the pond holds.
+          expect(led.usableCf + led.creditedMitCf).toBeLessThanOrEqual(e.grossCf + 1e-6);
+        }
+      }
     }
   });
+
+  it("with NO mitigation requirement a detention-role pond keeps its whole column (nothing is dedicated)", () => {
+    const e = { ...splitAt(97.5), role: "detention" };
+    const led = accumulatePondLedger([e], { mitigationRequiredCf: 0 });
+    expect(led.usableCf).toBeCloseTo(e.usableCf, 6);
+    expect(led.creditedMitCf).toBe(0);
+    expect(led.mitGatedReason).toBe("counted-as-detention");
+  });
+
+  it("a pond dedicates only what the requirement still needs — the rest stays on the detention ledger", () => {
+    const e = { ...splitAt(97.5), role: "detention" };
+    const needCf = candOf(e) / 4;
+    const led = accumulatePondLedger([e], { mitigationRequiredCf: needCf });
+    expect(led.creditedMitCf).toBeCloseTo(needCf, 6);
+    expect(led.usableCf).toBeCloseTo(e.usableCf - needCf, 6);
+    expect(led.usableCf + led.creditedMitCf).toBeCloseTo(e.usableCf, 6);
+  });
+
+  it("an UNKNOWN requirement (null) dedicates nothing — volume never leaves detention silently", () => {
+    const e = { ...splitAt(97.5), role: "detention" };
+    const led = accumulatePondLedger([e]);
+    expect(led.creditedMitCf).toBe(0);
+    expect(led.usableCf).toBeCloseTo(e.usableCf, 6);
+  });
+
+  it("the requirement is spent down across ponds in order — no pond over-dedicates", () => {
+    const a = { ...splitAt(97.5), id: "a", role: "detention" };
+    const b = { ...splitAt(97.5), id: "b", role: "detention" };
+    const needCf = candOf(a) * 1.5;
+    const led = accumulatePondLedger([a, b], { mitigationRequiredCf: needCf });
+    expect(led.creditedMitCf).toBeCloseTo(needCf, 6);
+    expect(led.usableCf).toBeCloseTo(a.usableCf + b.usableCf - needCf, 6);
+  });
+
   it("unknown facts poison the credited/uncredited gates too (NEW-9 discipline)", () => {
     const led = accumulatePondLedger([{ ...splitAt(97.5), role: "mitigation" }, unknownEntry("x", DET)]);
     expect(led.creditedMitCf).toBeNull();

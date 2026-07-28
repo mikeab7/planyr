@@ -99,6 +99,39 @@ describe("bandedStorage — the exclusive WSE/pool split", () => {
     expect(b.usableCf).toBeCloseTo(volumeBetween(SQ, DET, 98.5, 99), 6);
     expect(b.poolDeadCf + b.usableCf).toBeCloseTo(GROSS, -3);
   });
+  // ── NEW-1 (B1032) — THE PARTITION PROPERTY. permanentDead + mitigationCandidate + aboveWse ==
+  // gross, under EVERY policy — the guard that was missing. The pre-B1032 version of this suite
+  // asserted exclusivity only under coincidentStorm:true (see the note on the pool test above),
+  // which is exactly why the Tsakiris double-count shipped: with the default policy nothing
+  // checked that the below-WSE candidate band and the recovered usable column were disjoint.
+  it("PARTITION: permanentDead + mitigationCandidate + aboveWse == gross, under every policy", () => {
+    for (const coincidentStorm of [false, true]) {
+      for (const wseFt of [null, 90, 96.5, 97.5, 98.9, 100.5]) {
+        for (const poolElev of [null, 96.5, 98.5]) {
+          for (const deadFloorFt of [null, 96.8, 97.9]) {
+            const b = bandedStorage(SQ, { ...DET, poolElev }, { wseFt, deadFloorFt, coincidentStorm });
+            const sum = b.permanentDeadCf + b.mitigationCandidateCf + b.aboveWseCf;
+            expect(sum).toBeCloseTo(b.grossCf, -3);
+            for (const v of [b.permanentDeadCf, b.mitigationCandidateCf, b.aboveWseCf]) expect(v).toBeGreaterThanOrEqual(0);
+            // usable is a READ over those bands, never a fourth band: it is the above-flood band,
+            // plus the below-flood void when the policy lets the pond recover to it.
+            const expected = b.aboveWseCf + (coincidentStorm ? 0 : b.mitigationCandidateCf);
+            expect(b.usableCf).toBeCloseTo(expected, -3);
+          }
+        }
+      }
+    }
+  });
+
+  it("the candidate band starts at the PERMANENT WATER level — never credits volume already under water", () => {
+    // Normal tailwater at 97: the column below it is permanently wet, so it cannot accept
+    // floodwater and is not compensating-storage candidate (it used to be counted as one).
+    const b = bandedStorage(SQ, DET, { wseFt: 98, deadFloorFt: 97 });
+    expect(b.permWaterElev).toBeCloseTo(97, 6);
+    expect(b.mitigationCandidateCf).toBeCloseTo(volumeBetween(SQ, DET, 97, 98), 6);
+    expect(b.permanentDeadCf).toBeCloseTo(volumeBetween(SQ, DET, 96, 97), 6);
+  });
+
   it("unanchored → null (the caller must fall back to the estimate, never gross-silently)", () => {
     expect(bandedStorage(SQ, { depth: 4, freeboard: 1, slope: 3 }, { wseFt: 97 })).toBeNull();
   });

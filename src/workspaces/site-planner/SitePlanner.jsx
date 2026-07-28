@@ -8187,19 +8187,20 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       det: detWithAuto(e.det),
     });
   }
-  const pondLedger = accumulatePondLedger(pondLedgerEntries);
-  const siteDeadCf = pondLedger.deadCf; // null when any pond's split facts are unknown (restored w/o record)
-  const siteMitCandidateCf = pondLedger.mitCandidateCf; // ditto
-  const { pondFullyInundated, unanchoredInTrigger, anchoredNoWseInTrigger, autoAnchored: pondAutoAnchored, excavationCf: pondExcavationCf } = pondLedger;
-  // NEW-9 — an unknown dead-storage split demotes usable to null (rendered as "usable
-  // unknown — re-check"), NEVER gross-as-usable.
-  // F1 (D-followup, owner live-verify 2026-07-22) — the site usable MUST be the SAME number the
-  // pond's "Usable detention (above flood WSE)" row shows. Use the ledger's usable (the sum of each
-  // pond's INWARD-model usableCf, from pondSplitFor→usablePondVolume with gradeFt) directly — the
-  // old `providedDetCf − siteDeadCf` mixed a DRAWN-ring gross (providedDetCf, no inward crest) with
-  // the inward dead, so a bermed pond's headline overstated usable (20.9 vs the row's 15.3). The
-  // ledger's usableCf is already null when any split is unknown, so the null guard is preserved.
-  const providedUsableCf = pondLedger.usableCf;
+  // NEW-4 (B1035) — the ONE on-screen label for a pond. Every surface that NAMES a specific pond
+  // (the map label, the Yield per-pond row, a reconciliation error) reads this, so an error can
+  // never blame "Pond 1" for a basin the map calls "Detention Pond".
+  for (let i = 0; i < pondLedgerEntries.length; i++) {
+    const p = pondLedgerEntries[i];
+    p.displayName = pondLedgerEntries.length === 1 ? pondDisplayNameFor(p.det, p) : (p.name || `Pond ${i + 1}`);
+  }
+  // NEW-1 (B1032) — the GEOMETRY-ONLY fold, available before the mitigation requirement is known.
+  // It carries only facts the duty split can't move (gross, excavation, anchor/inundation flags,
+  // the unknown-facts poison). The DETENTION + MITIGATION totals come from `pondLedger` below,
+  // which is folded ONCE the requirement exists so the below-flood void can be assigned to exactly
+  // one ledger — reading usable/credited off this pass would resurrect the double-count.
+  const pondLedgerGeom = accumulatePondLedger(pondLedgerEntries);
+  const { pondFullyInundated, unanchoredInTrigger, anchoredNoWseInTrigger, autoAnchored: pondAutoAnchored, excavationCf: pondExcavationCf } = pondLedgerGeom;
 
   // ---- B707/B712: the floodplain-mitigation ledger — a SEPARATE ledger from
   // detention; nothing here nets the two (the same acre-foot can't count twice).
@@ -8271,21 +8272,44 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const fmBermTriggerClasses = triggerClasses(wedgeMitRule || fmRule || { trigger: "1pct" });
   const fmBermTriggerZones = fmZones.filter((z) => fmBermTriggerClasses.includes(z.cls));
   const fmTriggerClassAt = fmBermTriggerZones.length ? (pt) => { for (const z of fmBermTriggerZones) if (pointInZone(pt, z)) return z.cls; return null; } : null;
-  const pondBerms = (() => {
+  // NEW-5 (B1036) — the berm-as-fill screen, WITH ITS STATE. The B833/B871 path can produce a
+  // perfectly confident 0.0 for five completely different reasons, and before this every one of
+  // them looked identical on the panel: no berm exists · the berm is upland · no grade sampler
+  // reached this site · the pond has no top-of-bank set · no governing flood elevation resolved.
+  // The last three are UNKNOWNS on the REQUIRED side of a drainage ledger, and a silent zero
+  // there is exactly what LOUD-FAILURE forbids. The screen therefore reports which one it is.
+  const pondBermScreen = (() => {
     const list = [];
-    if (!fmBermGradeAt) return list;
-    for (const e of els) {
-      if (e.type !== "pond") continue;
+    const pondEls = els.filter((e) => e.type === "pond" && ringOf(e) && ringOf(e).length >= 3);
+    if (!pondEls.length) return { state: "no-ponds", berms: list, unanchored: [], bermed: 0, inTrigger: 0 };
+    // No per-cell 3DEP grid AND no constant existing grade → the berm height is unknowable, so
+    // the below-flood berm prism is UNKNOWN, never 0.
+    if (!fmBermGradeAt) return { state: "unknown-grade", berms: list, unanchored: [], bermed: 0, inTrigger: 0 };
+    const unanchored = [];
+    let bermed = 0, inTrigger = 0;
+    for (const e of pondEls) {
       const det = detWithAuto(e.det);
-      if (det.tobElev == null || !Number.isFinite(det.tobElev)) continue;
       const ring = ringOf(e);
-      if (!ring || ring.length < 3) continue;
+      // No top-of-bank → we cannot tell whether this pond is bermed at all.
+      if (det.tobElev == null || !Number.isFinite(det.tobElev)) { unanchored.push(e.id); continue; }
       const bc = bermFillCells(ring, det, { gradeAt: fmBermGradeAt, wseFt: fmGoverningBfe, ratio: gsApronRatio, triggerClassAt: fmTriggerClassAt, fpId: "berm:" + e.id });
-      if (!bc || !(bc.volCf > 0)) continue;
+      if (!bc) continue;
+      if (bc.volCf > 0) bermed++;
+      if (bc.volCf > 0 && fmTriggerClassAt) inTrigger++;
+      if (!(bc.volCf > 0)) continue;
       list.push({ id: e.id, hFt: bc.maxHeightFt, crestElevFt: bc.crestElevFt, volCf: bc.volCf, floodCf: bc.floodCf, floodFrac: bc.floodCf > 0 ? 1 : 0, heatCells: bc.heatCells, toeRing: bc.toeRing, landTakeSf: bc.landTakeSf });
     }
-    return list;
+    const floodCf = list.reduce((s, b) => s + b.floodCf, 0);
+    const state = unanchored.length && !bermed ? "unknown-anchor"
+      // A berm exists inside the trigger floodplain but no governing flood elevation resolved:
+      // the below-WSE slice would silently price as zero. Say UNKNOWN instead.
+      : bermed && inTrigger && !Number.isFinite(fmGoverningBfe) ? "unknown-wse"
+      : floodCf > 0 ? "counted"
+      : bermed ? "upland"
+      : "none";
+    return { state, berms: list, unanchored, bermed, inTrigger, floodCf };
   })();
+  const pondBerms = pondBermScreen.berms;
   const pondBermFillCf = pondBerms.reduce((s, b) => s + b.volCf, 0);
   // v3 D2 — site-wide berm-ring land area for the LAND USE Pond legend title, computed on the
   // INWARD model: the earthen ring sits INSIDE each drawn footprint (between the outline and the
@@ -8308,7 +8332,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // every consumer (verdict, Balance, combined basin, print, the remembered slim)
   // stays consistent by construction. An UNKNOWN footprint volume stays unknown —
   // wedges never turn an unknown into a number.
-  const fmResultWedged = fmResult && (wedgeMit || pondBermFloodCf > 0)
+  // NEW-5 (B1036) — an UNKNOWN berm contribution is a flag on the REQUIREMENT, so the mitigation
+  // verdict can never read as a clean pass over a berm prism nobody could price.
+  const pondBermUnknown = ["unknown-grade", "unknown-wse", "unknown-anchor"].includes(pondBermScreen.state);
+  const fmResultWedged = fmResult && (wedgeMit || pondBermFloodCf > 0 || pondBermUnknown)
     ? (() => {
         const addCf = (wedgeMit ? wedgeMit.volumeCf : 0) + pondBermFloodCf;
         const known = fmResult.volumeCf != null;
@@ -8316,6 +8343,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         // as intersect acreage, so a berm-only intersect never mis-reads "no fill in the zones".
         const bermFloodAcres = pondBermHeatCells.reduce((s, c) => s + c.wFt * c.hFt, 0) / SQFT_PER_ACRE;
         const wedgeFloodwayAcres = wedgeMit && wedgeMit.floodwaySf > 0 ? wedgeMit.floodwaySf / SQFT_PER_ACRE : 0;
+        // One merged flag list — the floodway spread below must not clobber the berm-unknown flag.
+        const bermFlags = [...new Set([...(fmResult.flags || []), ...(pondBermUnknown ? ["berm-contribution-unknown"] : [])])];
         return {
           ...fmResult,
           wedgePriced: !!wedgeMit,
@@ -8323,13 +8352,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           wedgeUnknownSf: wedgeMit ? wedgeMit.unknownSf : 0,
           bermAcFt: pondBermFloodCf / 43560,
           bermAcres: bermFloodAcres,
+          // NEW-5 (B1036) — WHY the berm contribution is what it is, so a confident 0.0 and an
+          // unpriceable one never look alike.
+          bermState: pondBermScreen.state,
+          bermCount: pondBermScreen.bermed,
+          ...(pondBermUnknown ? { flags: bermFlags } : {}),
           ...(known && addCf > 0 ? {
             volumeCf: fmResult.volumeCf + addCf,
             volumeAcFt: (fmResult.volumeCf + addCf) / 43560,
             cutCy: (fmResult.volumeCf + addCf) / 27,
           } : {}),
           ...(wedgeFloodwayAcres > 0 ? {
-            flags: [...new Set([...(fmResult.flags || []), "floodway_intersect"])],
+            flags: [...new Set([...bermFlags, "floodway_intersect"])],
             floodwayAcres: (fmResult.floodwayAcres || 0) + wedgeFloodwayAcres,
           } : {}),
           ...((wedgeFloodwayAcres > 0 || bermFloodAcres > 0) ? { intersectAcres: (fmResult.intersectAcres || 0) + wedgeFloodwayAcres + bermFloodAcres } : {}),
@@ -8465,7 +8499,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         lastCheck: settings.drainage?.lastCheck || null,
         sigNow: drainSigNow,
         ...drainFactsNow,
-        incomplete: drainIsRestored && (drainMitRememberedMissing || pondLedger.unknownIds.length > 0),
+        incomplete: drainIsRestored && (drainMitRememberedMissing || pondLedgerGeom.unknownIds.length > 0),
         nowMs: Date.now(), // B860 — SWR refresh-on-open when the remembered fetch aged past FETCH_TTL_MS
         ttlMs: FETCH_TTL_MS,
       })
@@ -8491,6 +8525,26 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         ? { ...drainLastGoodMitRef.current, stale: true }
         : (fmResultView ? { ...fmResultView, stale: true, stalePending: true, volumeCf: null, volumeAcFt: null, cutCy: null } : null))
     : fmResultView;
+  // ── NEW-1 (B1032) — THE EXCLUSIVE POND-DUTY FOLD. Deliberately here, AFTER the mitigation
+  // requirement resolves: the below-flood void band in each pond can serve detention OR
+  // compensating storage but never both, so the fold dedicates only what the requirement still
+  // needs and leaves the rest on the detention ledger (lib/pondLedger.js allocatePondDuty). Before
+  // this, `usableCf` (the whole recovered column) and `bands.mitigationCandidateCf` (the below-
+  // flood slice of that same column) were both credited — 29.6 ac-ft counted twice on Tsakiris.
+  // An UNKNOWN requirement dedicates nothing (never silently moves volume off detention).
+  const mitRequiredCfForDuty = drainMitDisplay && Number.isFinite(drainMitDisplay.volumeCf) ? drainMitDisplay.volumeCf : null;
+  const pondLedger = accumulatePondLedger(pondLedgerEntries, { mitigationRequiredCf: mitRequiredCfForDuty });
+  // Each entry + its exclusive `duty` allocation — the ONE per-pond source for the reconciliation,
+  // the per-pond rows and the drawdown screen, so no consumer can re-derive a different split.
+  const pondDutyEntries = pondLedger.perPond;
+  const siteDeadCf = pondLedger.deadCf; // null when any pond's split facts are unknown (restored w/o record)
+  const siteMitCandidateCf = pondLedger.mitCandidateCf; // ditto
+  // NEW-9 — an unknown dead-storage split demotes usable to null (rendered as "usable
+  // unknown — re-check"), NEVER gross-as-usable.
+  // F1 (D-followup, owner live-verify 2026-07-22) — the site usable MUST be the SAME number the
+  // pond's "Usable detention" row shows: the ledger's own usable (the sum of each pond's
+  // INWARD-model column, now net of any volume dedicated to compensating storage).
+  const providedUsableCf = pondLedger.usableCf;
   // B874 — the refresh state machine, made BOUNDED. The old flag was
   // `drainReval.need || busy` — so it showed "Refreshing flood data…" whenever a refetch was
   // merely WANTED, even after the single auto-attempt was spent and nothing was in flight → an
@@ -8885,7 +8939,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (closes) { let lo = 0; for (let i = 0; i < 24; i++) { const mid = (lo + hi) / 2; if (gainAt(mid) >= deficitCf) hi = mid; else lo = mid; } }
     const hFt = closes ? Math.min(MAXH, Math.ceil(hi * 10) / 10) : MAXH;
     if (!(hFt > 0) || !(gainAt(hFt) > 0)) return null;
-    const perPond = inund.map((p) => ({ id: p.id, name: p.name, addCf: usableAt(p, hFt) - usableAt(p, 0), tobTargetFt: Math.round((p.det.tobElev + hFt) * 100) / 100, depthTargetFt: (Number.isFinite(p.det.depth) ? p.det.depth : 8) + hFt }));
+    const perPond = inund.map((p) => ({ id: p.id, name: p.displayName || p.name, addCf: usableAt(p, hFt) - usableAt(p, 0), tobTargetFt: Math.round((p.det.tobElev + hFt) * 100) / 100, depthTargetFt: (Number.isFinite(p.det.depth) ? p.det.depth : 8) + hFt }));
     const gain = gainAt(hFt);
     return { payload: { hFt, perPond }, preview: { hFt, diff: `Raise TOB +${(Math.round(hFt * 10) / 10).toFixed(1)}′ on ${inund.length} inundated pond${inund.length > 1 ? "s" : ""} → +${(gain / 43560).toFixed(2)} ac-ft usable${closes ? " (site closes)" : " (partial; the +15′ screening clamp still leaves it short)"}. The berm becomes modeled fill; one Ctrl+Z reverts it all.` } };
   })();
@@ -9093,7 +9147,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // share is the site total minus this one's, reusing the SAME accumulator the ledger
     // itself is built from so a pond that's ALREADY partially credited (e.g. an existing
     // Hybrid basin) is never double-subtracted or double-counted.
-    const otherLedger = accumulatePondLedger(pondLedgerEntries.filter((p) => p.id !== baseEl.id));
+    const otherLedger = accumulatePondLedger(pondLedgerEntries.filter((p) => p.id !== baseEl.id), { mitigationRequiredCf: mitRequiredCfForDuty });
 
     // ---- 3. Decide the SOLVE PATH by the pond's ACTUAL elevation status — never by
     //         needsMit alone (see the reopened-bug note above). "Purpose" is stamped from
@@ -9411,41 +9465,49 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // NEW-6 — the gravity share the jurisdiction requires. FBCDD's Interim Atlas-14 §5 record already
   // carries the VERIFIED 0.5 ("≥50% drains by gravity"); it had no consumer until now.
   const yGravityShare = ycriteria.gravityDrainFraction?.value ?? 0.5;
-  const yPondModels = pondLedgerEntries.map((p) => {
+  const yPondModels = pondDutyEntries.map((p) => {
     const stages = p.det && p.det.outlet && Array.isArray(p.det.outlet.stages) ? p.det.outlet.stages : [];
     const inverts = stages.map((s) => s.invertElevFt).filter((n) => Number.isFinite(n));
     const model = pondStageModel(p.ring, p.det || {}, {
       floodElevFt: Number.isFinite(p.wseFt) ? p.wseFt : null,
       outletInvertFt: inverts.length ? Math.min(...inverts) : null,
       minGravityShare: yGravityShare,
-      id: p.id, name: p.name,
+      id: p.id, name: p.displayName || p.name, // NEW-4 (B1035) — the ONE on-screen pond label
     });
     return { entry: p, model };
   });
-  // NEW-1 — claimed detention + claimed mitigation vs storage that physically exists. The credited
-  // mitigation is apportioned across the ponds by their below-flood candidate volume, so the
-  // reconciliation compares the SAME numbers the two ledgers actually credited.
-  const yMitCreditTotalCf = pondLedgerEntries.reduce((s, p) => s + (p.bands && Number.isFinite(p.bands.mitigationCandidateCf) ? p.bands.mitigationCandidateCf : 0), 0);
-  const yCreditedMitCf = pondLedger.creditedMitCf;
-  const yReconcile = pondLedgerEntries.length ? reconcileStorage(pondLedgerEntries.map((p, i) => {
+  // NEW-1 — claimed detention + claimed mitigation vs storage that physically exists. Both counted
+  // numbers now come straight off the pond's EXCLUSIVE duty allocation (allocatePondDuty), so the
+  // reconciliation compares exactly what the two ledgers credited — no apportioning heuristic.
+  const yReconcile = pondDutyEntries.length ? reconcileStorage(pondDutyEntries.map((p, i) => {
     const m = yPondModels[i] ? yPondModels[i].model : null;
-    const candCf = p.bands && Number.isFinite(p.bands.mitigationCandidateCf) ? p.bands.mitigationCandidateCf : 0;
-    const share = yCreditedMitCf != null && yMitCreditTotalCf > 0 ? (candCf / yMitCreditTotalCf) * yCreditedMitCf : 0;
     return {
-      id: p.id, name: p.name,
+      id: p.id,
+      // NEW-4 (B1035) — the pond's REAL on-screen label (the same string the map and the detail row
+      // use), so an error that blames a pond names one the reader can actually find.
+      name: p.displayName || p.name,
       known: p.factsKnown !== false,
-      // Physical = what the pond actually holds (the drawn-ring gross, the same "holds" the panel shows).
-      physicalCf: p.drawnGrossCf != null ? p.drawnGrossCf : p.grossCf,
-      detentionCountedCf: p.usableCf,
-      mitigationCountedCf: share,
-      boundaryElevFt: m && m.duty && m.duty.declared ? m.duty.boundaryElevFt : null,
+      // NEW-1 (B1032) — physical = the storage the pond holds UNDER THE MODEL THE LEDGERS COUNT
+      // FROM: the inward-berm crest column (`grossCf`), never the drawn-ring gross. On Tsakiris the
+      // drawn ring reads 80.8 ac-ft while the bermed pond actually holds 63.4, and reconciling
+      // against 80.8 fabricated 17.4 ac-ft of headroom — it reported a 12.2 ac-ft double-count
+      // where the real overlap was 29.6.
+      physicalCf: p.grossCf,
+      detentionCountedCf: p.duty ? p.duty.detentionCf : p.usableCf,
+      mitigationCountedCf: p.duty ? p.duty.mitigationCf : 0,
+      // The elevation that divides the two duties: the allocation's own declared boundary (the
+      // governing flood WSE) when it dedicated volume, else the stage model's declared split.
+      boundaryElevFt: p.duty && p.duty.boundaryElevFt != null ? p.duty.boundaryElevFt
+        : m && m.duty && m.duty.declared ? m.duty.boundaryElevFt : null,
     };
   })) : null;
   // NEW-2 — drawdown at the jurisdiction's allowable release rate.
   const yReleaseRate = ycriteria.allowableReleaseCfsPerAc?.value ?? null;
   const yRelease = allowableReleaseCfs({ rateCfsPerAc: yReleaseRate, acres: acresActive });
   const yDrawdown = assessDrawdown({
-    ponds: pondLedgerEntries.map((p) => ({ id: p.id, name: p.name, volumeCf: p.usableCf != null ? p.usableCf : p.grossCf })),
+    // NEW-1 (B1032) — drain the DETENTION volume the ledger actually counts (net of any storage
+    // dedicated to compensating storage), not the raw usable column.
+    ponds: pondDutyEntries.map((p) => ({ id: p.id, name: p.displayName || p.name, volumeCf: p.duty && p.usableCf != null ? p.duty.detentionCf : (p.usableCf != null ? p.usableCf : p.grossCf) })),
     siteVolumeCf: providedUsableCf != null ? providedUsableCf : null,
     release: yRelease,
     maxHr: ycriteria.drawdownMaxHr?.value ?? DEFAULT_DRAWDOWN_MAX_HR,
@@ -9506,18 +9568,39 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       : drainViewCtx?.restored ? (settings.drainage?.lastCheck?.fetch?.mode ?? null) : null,
     acres: acresActive,
     providedCf: providedDetCf, providedUsableCf, deadCf: siteDeadCf, pondCount,
+    // NEW-1 (B1032) — the four EXCLUSIVE site totals behind "holds X, counts Y", so the panel can
+    // say WHERE the difference went instead of blaming all of it on the flood level:
+    //   modelGrossCf  storage the bermed (inward-crest) model actually holds
+    //   deadCf        permanently under water (pool / normal tailwater)
+    //   creditedMitCf dedicated to floodplain compensating storage
+    //   unusedCf      below-flood void neither ledger counts (coincident-storm policy)
+    // providedCf − modelGrossCf is the volume the berm ring takes out of the drawn footprint.
+    modelGrossCf: pondLedger.grossCf,
+    mitDedicatedCf: pondLedger.creditedMitCf,
+    unusedCf: pondLedger.unusedCf,
+    // NEW-3 (B1034) — the criteria-configurable requirement below which a percentage margin is
+    // meaningless and the absolute delta is shown instead (both storage groups read it).
+    marginPctFloorAcFt: ycriteria.marginPctFloorAcFt?.value ?? null,
     // v3 A3 — the per-pond detention breakdown for the DETENTION DETAIL group's per-pond rows:
     // {counts} = usable (above the flood), {holds} = gross stored; ↗ selects the pond.
-    ponds: pondLedgerEntries.map((p, i) => ({
+    ponds: pondDutyEntries.map((p, i) => ({
       id: p.id,
       // D4 — the lone pond reads by its resolved purpose (p carries det + the elevation split);
-      // multi-pond sites keep their per-pond names.
-      label: pondCount === 1 ? pondDisplayNameFor(p.det, p) : (p.name || `Pond ${i + 1}`),
-      countsAcFt: p.usableCf != null ? p.usableCf / 43560 : null,
+      // multi-pond sites keep their per-pond names. NEW-4 (B1035): the ONE label, shared with the
+      // map and with any error that names this pond.
+      label: p.displayName || p.name || `Pond ${i + 1}`,
+      // NEW-1 (B1032) — "counts" is the DETENTION share of the exclusive duty split, so a pond
+      // whose below-flood cut is dedicated to compensating storage never counts it twice.
+      countsAcFt: p.usableCf == null ? null : (p.duty ? p.duty.detentionCf : p.usableCf) / 43560,
+      mitAcFt: p.duty ? p.duty.mitigationCf / 43560 : 0,
       // NEW-23 — "holds" is the DRAWN-ring gross (the full footprint hold), the SAME number the
       // site total + the partial-dead explainer show, so "X counts · holds Y" never renders a
       // mismatched pair (the chip used the inward crest gross before, reading holds == counts).
       holdsAcFt: (p.drawnGrossCf != null ? p.drawnGrossCf : (p.grossCf || 0)) / 43560,
+      // NEW-1 (B1032) — the storage the BERMED model actually holds. The drawn ring can hold far
+      // more than the inward-berm crest column does (Tsakiris: 80.8 drawn vs 63.4 modeled), and
+      // the panel used to attribute that whole gap to "sits below the flood level".
+      modelHoldsAcFt: (p.grossCf || 0) / 43560,
     })),
     onSelectPond: (id) => revealPondInspector(id),
     // NEW-15 — is "raising the rim fixes this" an honest suggestion? Only when at least one
@@ -9596,7 +9679,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     offsetElevFt: yOffsetElevFt,
     pondModels: yPondModels.map(({ entry, model }) => ({
       id: entry.id,
-      name: entry.name,
+      // NEW-4 (B1035) — the ONE on-screen pond label, so a finding names the pond the map names.
+      name: entry.displayName || entry.name,
       // NEW-5: what a straight-down footprint × depth read would have over-stated.
       prism: model ? model.prism : null,
       // NEW-6: the outfall-invert split and both gravity-drain tests.
@@ -20947,6 +21031,20 @@ function YieldPanel({
                     "Part of the transition fringe crosses DEM voids or zones without a usable water surface — those cells price nothing (never zero-as-a-number). Enter a BFE or re-check to close the gap."));
                   if (mit.bermAcFt > 0) mitR.push(warnNote(`+${f1(mit.bermAcFt)} ac-ft from pond berms whose fill sits in the mapped floodplain.`, "mit-berm",
                     "A bermed pond's embankment is placed fill inside the drawn footprint (the outline is the berm's outer toe; it rises inward to the crest); the below-WSE share of that fill inside the floodplain displaces storage, so it joins the requirement (sampled berm cells times the below-WSE slice, screening; upland berms price as earthwork only, never here)."));
+                  // NEW-5 (B1036) — a berm contribution of ZERO has five different meanings and
+                  // they must never look alike. Three of them are UNKNOWNS on the REQUIRED side of
+                  // the ledger; a silent confident 0.0 there is the defect class this codebase
+                  // refuses. Each state says which it is, and the unknowns flag the requirement.
+                  if (mit.bermState === "unknown-grade") mitR.push(warnNote("Pond berms can't be priced: no existing-ground elevation reached this site.", "mit-berm-unk-grade",
+                    "A berm's fill volume is its crest height ABOVE existing ground, so with neither the per-cell 3DEP grid nor a typed existing grade there is no height to price and the berm's share of the requirement is UNKNOWN — not zero. ↻ Re-check to fetch the terrain grid, or type an existing grade in the pond's Properties."));
+                  else if (mit.bermState === "unknown-wse") mitR.push(warnNote("Pond berms sit in the floodplain but no flood elevation resolved — their share is unknown.", "mit-berm-unk-wse",
+                    "Only the part of a berm BELOW the flood water surface displaces storage. With no governing flood elevation (published BFE or an accepted estimate) that slice can't be measured, so the berm's share of the requirement is UNKNOWN rather than zero. Enter a BFE, or accept the screening estimate, in the Floodplain inputs."));
+                  else if (mit.bermState === "unknown-anchor") mitR.push(warnNote("A pond has no top-of-bank elevation, so it isn't known whether it's bermed.", "mit-berm-unk-anchor",
+                    "Whether a basin is cut into the ground or built up behind an embankment is the difference between zero floodplain fill and a real requirement. Set the pond's top-of-bank elevation in its Properties to resolve it."));
+                  else if (mit.bermState === "upland") mitR.push(keyedNote(`${mit.bermCount === 1 ? "The pond berm sits" : "Pond berms sit"} outside the mapped floodplain — earthwork only, no mitigation owed.`, "mit-berm-upland",
+                    "A berm above existing ground is placed fill, but only fill INSIDE the mapped floodplain and BELOW the flood water surface displaces storage. This one is upland, so it prices as earthwork and adds nothing here."));
+                  else if (mit.bermState === "none") mitR.push(keyedNote("No pond berms — every basin is cut at or below existing ground.", "mit-berm-none",
+                    "Each pond's top of bank sits at or below the surrounding ground, so nothing is built up above grade and no berm fill enters the requirement. A confident zero, not a missing number."));
                 } else {
                   mitR.push(warnNote("Fill priced at element footprints — daylight/transition slopes aren't counted here; treat as a floor.", "mit-wedge-floor",
                     "Past a pad or court edge, fill continues as a graded wedge (3:1 default) down to existing grade; inside the mapped floodplain that wedge displaces storage too. Wedges price automatically once the auto-graded surface exists — enter an FFE (or let the code-minimum auto-pad engage) to generate it."));
@@ -21598,22 +21696,35 @@ function YieldPanel({
               }
               const siteCounts = d.providedUsableCf == null ? null : d.providedUsableCf / 43560;
               const siteHolds = (d.providedCf || 0) / 43560;
-              const deadAcFt = siteCounts != null ? siteHolds - siteCounts : null;
-              // NEW-15 — the explainer must MATCH the numbers above it. The gate fires on ANY dead
-              // storage, so the copy has two honest variants: TOTAL-dead keeps "none counts yet";
-              // PARTIAL names the dead share ("X of its Y ac-ft…doesn't count") so it can't claim
-              // "none counts" over a row that says 34.0 counts. The rim clause appears only when a
-              // rim raise is a feasible fix (rimRaiseFeasible) — never an empty promise.
-              if (siteCounts != null && deadAcFt != null && deadAcFt > ACFT_EPS) {
+              const gapAcFt = siteCounts != null ? siteHolds - siteCounts : null;
+              // NEW-1 (B1032) — the explainer must ACCOUNT for the gap, not blame all of it on the
+              // flood. Before this it read "17.4 of its 80.8 ac-ft sits below the flood level" on a
+              // Tsakiris pond with ZERO dead storage — the whole 17.4 was volume the inward berm
+              // ring takes out of the drawn footprint, and that wrong sentence is what sent the
+              // owner's own diagnosis after the wrong number. Each term renders only when it is
+              // real, and together they equal the gap by construction.
+              if (siteCounts != null && gapAcFt != null && gapAcFt > ACFT_EPS) {
+                const modelHolds = d.modelGrossCf != null ? d.modelGrossCf / 43560 : null;
+                const bermAcFt = modelHolds != null ? Math.max(0, siteHolds - modelHolds) : 0;
+                const deadAcFt = d.deadCf != null ? d.deadCf / 43560 : 0;
+                const mitAcFt = d.mitDedicatedCf != null ? d.mitDedicatedCf / 43560 : 0;
+                const unusedAcFt = d.unusedCf != null ? d.unusedCf / 43560 : 0;
+                const terms = [];
+                if (bermAcFt > ACFT_EPS) terms.push(`${f1(bermAcFt)} is taken up by the earthen berm ring built inside the outline`);
+                if (deadAcFt > ACFT_EPS) terms.push(`${f1(deadAcFt)} sits below the level the pond stays wet to`);
+                if (mitAcFt > ACFT_EPS) terms.push(`${f1(mitAcFt)} is set aside for floodplain compensating storage`);
+                if (unusedAcFt > ACFT_EPS) terms.push(`${f1(unusedAcFt)} sits below the flood level and can't be used for detention`);
                 const totalDead = siteCounts < ACFT_EPS;
                 const rimClause = d.rimRaiseFeasible ? " Raising the rim adds storage above the flood level." : "";
-                const body = totalDead
-                  ? `All of its storage sits below the flood level, so none counts yet.${rimClause}`
-                  : `${f1(deadAcFt)} of its ${f1(siteHolds)} ac-ft sits below the flood level and doesn't count.${rimClause}`;
+                const body = terms.length
+                  ? `Of the ${f1(siteHolds)} ac-ft the outline could hold, ${terms.join(", ")} — ${totalDead ? "nothing is" : `${f1(siteCounts)} ac-ft is`} left to count for detention.${rimClause}`
+                  : totalDead
+                    ? `All of its storage sits below the flood level, so none counts yet.${rimClause}`
+                    : `${f1(gapAcFt)} of its ${f1(siteHolds)} ac-ft doesn't count toward detention.${rimClause}`;
                 rows.push(
                   <div key="det-explainer" style={{ display: "flex", alignItems: "baseline", gap: 3, fontSize: 12.5, color: Y.rowLabel, lineHeight: 1.5, padding: "4px 0" }}>
                     <span>{body}</span>
-                    <RowInfo label="Storage below the flood level" sections={[{ text: "Storage above the flood level is empty when the design storm arrives and earns credit. Storage below is already occupied by the flood." }]} />
+                    <RowInfo label="Why some storage doesn't count" sections={[{ text: "Storage above the flood level is empty when the design storm arrives and earns detention credit. The rest is spoken for: the berm ring is earth, not water; storage below the pond's standing water level is permanently full; and storage set aside to compensate for floodplain fill is already promised to that ledger — the same acre-foot can never serve two purposes." }]} />
                   </div>
                 );
               }
@@ -21637,8 +21748,14 @@ function YieldPanel({
                     </span>
                   </div>
                 );
+                // NEW-4 (B1035) — the reconciliation SENTENCE is stated once, on the verdict strip
+                // above (the level the failure applies to). This row keeps the claimed-vs-exists
+                // NUMBERS and points at it, instead of repeating the same paragraph verbatim.
                 if (bad) rows.push(
-                  <div key="rec-msg" style={{ fontSize: 12, color: Y.dangerText, lineHeight: 1.5, padding: "2px 0 5px" }}>{rc.message}</div>
+                  <div key="rec-msg" style={{ fontSize: 12, color: Y.dangerText, lineHeight: 1.5, padding: "2px 0 5px" }}>
+                    The same storage is being counted twice — see the Detention line at the top of this panel for the full reconciliation.
+                    <RowInfo label="Storage reconciliation" sections={[{ text: rc.message }]} />
+                  </div>
                 );
               } else if (d.reconcile && d.reconcile.state === "unknown") {
                 rows.push(warnNote("Storage can't be reconciled until every pond's flood split is known — re-check the flood data.", "rec-unk", d.reconcile.message));
@@ -21855,9 +21972,15 @@ function YieldPanel({
                         The "…" pill + "checking flood data" already convey a loading row, so no
                         competing "↻ retrying" element squeezes the sentence into an overflow. */}
                     <div style={{ minWidth: 0 }}>
-                    <span data-testid={`yield-verdict-sentence-${v.key}`} style={{ display: "flex", alignItems: "baseline", gap: 6, fontSize: 12.5, color: Y.text, lineHeight: 1.35, whiteSpace: "nowrap", minWidth: 0 }}>
+                    {/* NEW-2 (B1033) — the row WRAPS. The provided/required pair keeps its bold
+                        nowrap treatment (G1), but any clause appended to it (the reconciliation
+                        "12.2 ac-ft counted twice", the elevation-band shortfall) is a separate
+                        wrappable span, and the whole line carries the full text in a title. A single
+                        nowrap headline was clipped mid-word at the panel edge — cutting off the one
+                        word that carried the meaning ("…counted twi"). */}
+                    <span data-testid={`yield-verdict-sentence-${v.key}`} title={v.text} style={{ display: "flex", alignItems: "baseline", gap: 6, flexWrap: "wrap", fontSize: 12.5, color: Y.text, lineHeight: 1.35, whiteSpace: "normal", overflowWrap: "anywhere", minWidth: 0 }}>
                       <span style={{ minWidth: 0 }}>{v.label}: {v.pair
-                        ? <b style={{ whiteSpace: "nowrap", fontWeight: 750 }}>{v.sentence}</b>
+                        ? <><b style={{ whiteSpace: "nowrap", fontWeight: 750 }}>{v.pairText || v.sentence}</b>{v.suffix ? <span style={{ whiteSpace: "normal", overflowWrap: "anywhere" }}> — {v.suffix}</span> : null}</>
                         // NEW-20(a) — a recheck row reads "checking…" while its fetch is in flight,
                         // never a frozen "not checked yet" that looks like the click did nothing.
                         : <span style={{ color: v.loading || (v.recheck && drainRefreshing) ? Y.muted : Y.text }}>{v.recheck && drainRefreshing ? "checking…" : v.sentence}</span>}</span>

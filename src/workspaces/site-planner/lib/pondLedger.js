@@ -92,7 +92,93 @@ export function mitigationCredit(det, split) {
   return { creditedCf: candidateCf, candidateCf, reason: null };
 }
 
-export function accumulatePondLedger(entries = []) {
+/* ── NEW-1 / B1032 — THE EXCLUSIVE DUTY ALLOCATION ────────────────────────────────────────────
+ *
+ * THE BUG THIS EXISTS TO PREVENT (Tsakiris / Concept A, owner report 2026-07-28): the panel read
+ * Detention 63.4 of 33.8 AND Mitigation 29.6 of 0.2 on a SINGLE pond that holds 63.4 ac-ft — the
+ * same 29.6 ac-ft credited to both ledgers. Root cause: R1 removed the flood WSE as a permanent
+ * floor under `usableCf` (a pond recovers to normal tailwater between storms, so the below-flood
+ * void IS available for the design storm) but left `bands.mitigationCandidateCf` spanning those
+ * same elevations. The two numbers stopped being exclusive, and B834's partition property test was
+ * amended at the same time to assert exclusivity ONLY under `coincidentStorm:true` — so nothing
+ * failed. The invariant "credited mitigation ≤ below-WSE volume" would NOT have caught it either
+ * (29.6 ≤ 29.6): the invariant that bites is detention + mitigation + dead ≤ the pond's gross.
+ *
+ * THE RULE. A pond's storage is partitioned into four EXCLUSIVE, non-negative bands that always
+ * sum to its gross:
+ *   deadCf        permanently occupied by water (below the permanent pool / normal tailwater)
+ *   mitigationCf  the below-flood void DEDICATED to compensating storage
+ *   detentionCf   everything the detention ledger counts
+ *   unusedCf      void that neither ledger counts (a below-flood band a coincident-storm policy
+ *                 bars from detention and nothing dedicated to mitigation)
+ *
+ * The below-flood void band can serve EITHER duty but never both, so it is assigned once:
+ *   • a pond whose owner-declared purpose is MITIGATION dedicates the whole band (that is the
+ *     basin's job) — detention then counts only the above-flood band, the original B708 split;
+ *   • every other pond dedicates only what the site's remaining mitigation REQUIREMENT needs
+ *     (`needCf`) and keeps the rest for detention, so a detention pond is never told it is short
+ *     0.2 ac-ft while 29 ac-ft of usable below-flood cut sits right there;
+ *   • under a COINCIDENT-storm policy detention cannot use the band at all, so dedicating it
+ *     costs detention nothing;
+ *   • a GATED or ABSENT outfall (mitigationCredit) blocks the dedication entirely — the flood
+ *     can't reach the cut — and the band falls back to detention.
+ * Pure. `split` is a usablePondVolume result (+ the stamped facts); `needCf` is the site's
+ * still-unmet mitigation requirement in cubic feet (0 / null = nothing left to dedicate). */
+export function allocatePondDuty(det, split, { needCf = 0 } = {}) {
+  const grossCf = split && Number.isFinite(split.grossCf) ? split.grossCf : 0;
+  const usableCf = split && Number.isFinite(split.usableCf) ? split.usableCf : 0;
+  const bands = split && split.bands;
+  const base = {
+    grossCf, belowFloodVoidCf: 0, creditableCf: 0,
+    deadCf: Math.max(0, grossCf - usableCf), detentionCf: usableCf, mitigationCf: 0, unusedCf: 0,
+    uncreditedMitCf: 0, reason: null, dedicated: false,
+  };
+  // No elevation bands (unanchored / estimate / gross mode) → nothing to split: detention counts
+  // its usable column, mitigation credits nothing. Never a fabricated below-flood credit.
+  if (!bands || split.mode !== "anchored") return base;
+  const belowFloodVoidCf = Number.isFinite(bands.mitigationCandidateCf) ? bands.mitigationCandidateCf : 0;
+  const aboveWseCf = Number.isFinite(bands.aboveWseCf) ? bands.aboveWseCf : usableCf;
+  // How much of the below-flood void the DETENTION column is currently counting: the whole band
+  // under the default (recovered) policy, zero under a coincident-storm policy.
+  const detClaimCf = Math.max(0, usableCf - aboveWseCf);
+  const credit = mitigationCredit(det, split);
+  const creditableCf = credit.creditedCf;
+  const role = effectivePondRole(det, split).role;
+  const need = Number.isFinite(needCf) && needCf > 0 ? needCf : 0;
+  const dedicateCf = role === "mitigation" ? creditableCf : Math.min(creditableCf, need);
+  const detentionCf = usableCf - Math.min(dedicateCf, detClaimCf);
+  // The dead band is what is left of gross once BOTH void bands are removed — so a coincident
+  // policy (which parks the below-flood void outside `usableCf`) can't misreport it as dead.
+  const deadCf = Math.max(0, grossCf - aboveWseCf - belowFloodVoidCf);
+  const unusedCf = Math.max(0, grossCf - deadCf - detentionCf - dedicateCf);
+  return {
+    grossCf, belowFloodVoidCf, creditableCf,
+    deadCf, detentionCf, mitigationCf: dedicateCf, unusedCf,
+    uncreditedMitCf: Math.max(0, belowFloodVoidCf - dedicateCf),
+    // WHY a below-flood cut earns no (or partial) mitigation credit, so the panel can explain the
+    // SHORT instead of showing a bare 0.0. "counted-as-detention" is the NEW-1 state: the void is
+    // real but the detention ledger is already counting it.
+    reason: dedicateCf >= belowFloodVoidCf - 1e-6 ? null
+      : credit.reason ? credit.reason
+      : detClaimCf > 0 ? "counted-as-detention"
+      : "not-required",
+    dedicated: dedicateCf > 0,
+    // The DECLARED vertical split: the governing flood WSE divides the dedicated compensating-
+    // storage band (below) from the detention band (above). A dedication without a boundary
+    // elevation is exactly the "undeclared split" storageReconcile refuses to pass, so the
+    // allocation states it rather than leaving the reconciler to guess.
+    boundaryElevFt: dedicateCf > 0
+      ? (bands.elevations && Number.isFinite(bands.elevations.wseFt) ? bands.elevations.wseFt
+        : Number.isFinite(split.wseFt) ? split.wseFt : null)
+      : null,
+    role,
+  };
+}
+
+/* `entries` are pondSplitFor results + bookkeeping. `mitigationRequiredCf` is the site's
+ * mitigation REQUIREMENT: ponds dedicate below-flood void against it in order until it is met, so
+ * no pond over-dedicates storage the detention ledger could have used (NEW-1 / B1032). */
+export function accumulatePondLedger(entries = [], { mitigationRequiredCf = null } = {}) {
   const out = {
     pondCount: entries.length,
     grossCf: 0,
@@ -112,15 +198,25 @@ export function accumulatePondLedger(entries = []) {
     // NEW-26 — WHY a below-flood cut earns no mitigation credit ("outlet-gated" |
     // "no-outfall" | null), so the panel + verdict can explain the SHORT, not just show 0.0.
     mitGatedReason: null,
+    // NEW-1 (B1032) — void that NEITHER ledger counts (a below-flood band a coincident-storm
+    // policy bars from detention with nothing dedicated to mitigation). Surfaced, never silent.
+    unusedCf: 0,
     excavationCf: 0,
     unknownIds: [],
     pondFullyInundated: false,
     unanchoredInTrigger: 0,
     anchoredNoWseInTrigger: 0,
     autoAnchored: 0,
-    perPond: entries,
+    // Each entry + its `duty` (the exclusive allocation below). NEVER the caller's array — the
+    // fold is pure, and `otherLedger` folds (a subset, a different remaining need) must not
+    // rewrite the shared entries' allocation.
+    perPond: entries.map((p) => ({ ...p })),
   };
-  for (const p of entries) {
+  // NEW-1 (B1032) — the site's still-unmet mitigation requirement, spent down pond by pond as the
+  // below-flood void is DEDICATED. Null (requirement unknown / not yet screened) dedicates nothing:
+  // an unknown requirement must never silently move volume off the detention ledger.
+  let remainingNeedCf = Number.isFinite(mitigationRequiredCf) && mitigationRequiredCf > 0 ? mitigationRequiredCf : 0;
+  for (const p of out.perPond) {
     out.grossCf += p.grossCf || 0;
     out.excavationCf += p.excavationCf || 0;
     if (p.autoAnchored) out.autoAnchored++;
@@ -128,20 +224,21 @@ export function accumulatePondLedger(entries = []) {
       out.unknownIds.push(p.id);
       continue;
     }
-    out.usableCf += p.usableCf || 0;
-    out.deadCf += p.deadCf || 0;
+    // NEW-1 (B1032) — the ONE exclusive duty split. `usableCf`/`deadCf` are NO LONGER read raw off
+    // the split (that is what let the same acre-foot land in both ledgers): detention gets what the
+    // allocation leaves it after any dedication to compensating storage.
+    const alloc = allocatePondDuty({ role: p.role, outletGated: p.outletGated }, p, { needCf: remainingNeedCf });
+    p.duty = alloc; // stamped on the COPY, so the per-pond rows / reconciliation read the SAME numbers
+    out.usableCf += alloc.detentionCf;
+    out.deadCf += alloc.deadCf;
+    out.unusedCf += alloc.unusedCf;
     if (p.mode === "anchored" && p.bands) {
-      const cand = p.bands.mitigationCandidateCf || 0;
-      out.mitCandidateCf += cand;
-      // NEW-26 — the ONE shared credit function (connected-by-default; zero only on a gated /
-      // absent outfall), so the ledger, verdict, optimizer, and card can never disagree on
-      // "provided mitigation". The outfall-gated flag rides the stamped split (p.outletGated).
-      const mc = mitigationCredit({ role: p.role }, p);
-      out.creditedMitCf += mc.creditedCf;
-      if (mc.creditedCf > 0) out.creditedPondCount++;
-      const uncredited = Math.max(0, mc.candidateCf - mc.creditedCf);
-      out.uncreditedMitCf += uncredited;
-      if (uncredited > 0 && mc.reason && out.mitGatedReason == null) out.mitGatedReason = mc.reason;
+      out.mitCandidateCf += alloc.belowFloodVoidCf;
+      out.creditedMitCf += alloc.mitigationCf;
+      remainingNeedCf = Math.max(0, remainingNeedCf - alloc.mitigationCf);
+      if (alloc.mitigationCf > 0) out.creditedPondCount++;
+      out.uncreditedMitCf += alloc.uncreditedMitCf;
+      if (alloc.uncreditedMitCf > 0 && alloc.reason && out.mitGatedReason == null) out.mitGatedReason = alloc.reason;
       if (p.bands.fullyInundated) out.pondFullyInundated = true;
     } else if (p.inTrigger) {
       // B822 — two DIFFERENT honesty states: anchored (manual or auto TOB) with an
@@ -156,6 +253,7 @@ export function accumulatePondLedger(entries = []) {
     out.mitCandidateCf = null;
     out.creditedMitCf = null;
     out.uncreditedMitCf = null;
+    out.unusedCf = null;
   }
   return out;
 }

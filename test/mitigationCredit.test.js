@@ -76,7 +76,10 @@ describe("NEW-26 — the ledger and the optimizer AGREE (both read mitigationCre
   });
 
   it("the ledger credits an ungated detention pond the FULL candidate, no gate reason", () => {
-    const led = accumulatePondLedger([entry()]);
+    // NEW-1 (B1032) — the credit is now DEDICATED against the site's mitigation requirement (the
+    // same acre-foot can't also count for detention), so the fold is given a requirement big
+    // enough for the whole band. With no requirement it dedicates nothing — asserted below.
+    const led = accumulatePondLedger([entry()], { mitigationRequiredCf: 1e9 });
     expect(led.creditedMitCf).toBeCloseTo(bands.mitigationCandidateCf, 6);
     expect(led.uncreditedMitCf).toBe(0);
     expect(led.mitGatedReason).toBe(null);
@@ -84,14 +87,14 @@ describe("NEW-26 — the ledger and the optimizer AGREE (both read mitigationCre
   });
 
   it("the ledger credits ZERO and records outlet-gated when the split is gated", () => {
-    const led = accumulatePondLedger([entry({ outletGated: true })]);
+    const led = accumulatePondLedger([entry({ outletGated: true })], { mitigationRequiredCf: 1e9 });
     expect(led.creditedMitCf).toBe(0);
     expect(led.uncreditedMitCf).toBeCloseTo(bands.mitigationCandidateCf, 6);
     expect(led.mitGatedReason).toBe("outlet-gated");
   });
 
   it("the ledger records no-outfall when the split has no outfall", () => {
-    const led = accumulatePondLedger([entry({ hasOutfall: false })]);
+    const led = accumulatePondLedger([entry({ hasOutfall: false })], { mitigationRequiredCf: 1e9 });
     expect(led.creditedMitCf).toBe(0);
     expect(led.mitGatedReason).toBe("no-outfall");
   });

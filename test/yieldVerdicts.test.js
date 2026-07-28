@@ -1,7 +1,7 @@
 // v3 UI SPEC Part A — the Yield-panel verdict strip (A2) + number-format rule (G4).
 // Pure tests over lib/yieldVerdicts.js (the repo's vitest config is DOM-free).
 import { describe, it, expect } from "vitest";
-import { fmtAcFt, fmtProvidedOfRequired, fmtSignedAcFt, yieldVerdictStrip } from "../src/workspaces/site-planner/lib/yieldVerdicts.js";
+import { fmtAcFt, fmtProvidedOfRequired, fmtSignedAcFt, fmtMargin, marginFor, yieldVerdictStrip, DEFAULT_MARGIN_PCT_FLOOR_ACFT } from "../src/workspaces/site-planner/lib/yieldVerdicts.js";
 
 const EM_DASH = "—";
 
@@ -201,5 +201,121 @@ describe("G2 — no em dash anywhere in the verdict copy", () => {
       expect(v.text.includes(EM_DASH), v.text).toBe(false);
       expect(v.sentence.includes(EM_DASH), v.sentence).toBe(false);
     }
+  });
+});
+
+/* ── The Tsakiris / Concept A panel batch (owner report 2026-07-28) ─────────────────────────── */
+
+// The reported panel: ONE pond, detention 63.4 of 33.8, mitigation 29.6 of 0.2, reconciliation
+// FAIL naming 12.2 ac-ft counted twice.
+const tsakiris = (over = {}) => ({
+  req: { kind: "point", requiredAcFt: 33.8 },
+  providedUsableCf: 63.4 * AC_FT,
+  mitigation: { intersectAcres: 1.12, volumeCf: 0.16 * AC_FT, volumeAcFt: 0.16 },
+  mitProvided: { creditedCf: 29.6 * AC_FT },
+  reconcile: { state: "fail", overlapCf: 12.24 * AC_FT, physicalCf: 80.8 * AC_FT, claimedCf: 93.06 * AC_FT,
+    offenders: [{ name: "Detention Pond" }], undeclared: [],
+    message: "Detention and mitigation together claim 93.1 ac-ft of storage, but only 80.8 ac-ft physically exists. 12.2 ac-ft is counted twice — Detention Pond." },
+  ...over,
+});
+
+describe("NEW-2 (B1033) — the verdict headline never truncates mid-word", () => {
+  it("the reconciliation clause is a separate wrappable SUFFIX, not glued into the nowrap pair", () => {
+    const rows = yieldVerdictStrip(tsakiris());
+    const det = rows.find((r) => r.key === "det");
+    // The bold nowrap element is ONLY the provided/required pair (G1); the clause that used to be
+    // clipped at the panel edge ("…12.2 ac-ft counted twi") rides its own wrappable span.
+    expect(det.pairText).toBe("63.4 of 33.8 ac-ft");
+    expect(det.suffix).toBe("12.2 ac-ft counted twice");
+    expect(det.pairText.includes("counted")).toBe(false);
+    // The one-line sentence stays intact for legacy readers + the title attribute.
+    expect(det.sentence).toBe("63.4 of 33.8 ac-ft — 12.2 ac-ft counted twice");
+    expect(det.text.endsWith("twice")).toBe(true);
+  });
+  it("an elevation-band shortfall carries the same wrappable suffix", () => {
+    const rows = yieldVerdictStrip(tsakiris({
+      reconcile: null,
+      mitigation: { intersectAcres: 2, volumeCf: 20 * AC_FT, volumeAcFt: 20 },
+      mitProvided: { creditedCf: 21 * AC_FT },
+      mitBands: { known: true, overallPass: false, totalWouldPass: true, shortBands: [1, 2], totals: { shortCf: 100 } },
+    }));
+    const mit = rows.find((r) => r.key === "mit");
+    expect(mit.pairText).toBe("21.0 of 20.0 ac-ft");
+    expect(mit.suffix).toBe("2 elevation bands short");
+  });
+});
+
+describe("NEW-3 (B1034) — a percentage of a near-zero requirement is suppressed", () => {
+  it("below the floor the margin drops the percentage and states the requirement", () => {
+    const m = marginFor(29.6, 0.16, { key: "mit" });
+    expect(m.pct).toBeNull();
+    expect(fmtMargin(m)).toBe("+29.4 ac-ft over a 0.2 ac-ft requirement");
+    expect(fmtMargin(m).includes("%")).toBe(false);
+  });
+  it("the pre-fix five-digit percentage can no longer render on the strip", () => {
+    const rows = yieldVerdictStrip(tsakiris({ reconcile: null }));
+    const mit = rows.find((r) => r.key === "mit");
+    expect(mit.marginText.includes("%")).toBe(false);
+    expect(mit.marginText).toContain("0.2 ac-ft requirement");
+  });
+  it("at or above the floor the percentage returns", () => {
+    const m = marginFor(34, 33.8, { key: "det" });
+    expect(m.pct).toBeCloseTo(0.2 / 33.8, 6);
+    expect(fmtMargin(m)).toContain("%");
+  });
+  it("the floor is CRITERIA-CONFIGURABLE, not an inline constant", () => {
+    expect(DEFAULT_MARGIN_PCT_FLOOR_ACFT).toBe(1.0);
+    // A jurisdiction that wants percentages down to a tenth of an acre-foot passes its own floor.
+    expect(marginFor(29.6, 0.16, { key: "mit", pctFloorAcFt: 0.1 }).pct).not.toBeNull();
+    // …and one that wants them only above 50 ac-ft suppresses a normally-shown percentage.
+    expect(marginFor(34, 33.8, { key: "det", pctFloorAcFt: 50 }).pct).toBeNull();
+  });
+  it("the same rule governs the DETENTION group, not just mitigation", () => {
+    const rows = yieldVerdictStrip({ req: { kind: "point", requiredAcFt: 0.3 }, providedUsableCf: 12 * AC_FT });
+    const det = rows.find((r) => r.key === "det");
+    expect(det.margin.pct).toBeNull();
+    expect(det.marginText).toContain("0.3 ac-ft requirement");
+  });
+});
+
+describe("NEW-4 (B1035) — the reconciliation paragraph is stated ONCE", () => {
+  it("only the first affected row carries the sentence; the other points at it", () => {
+    const rows = yieldVerdictStrip(tsakiris());
+    const affected = rows.filter((r) => r.reconcileFail);
+    expect(affected.length).toBe(2);
+    expect(affected[0].reconcileFail.primary).toBe(true);
+    expect(affected[0].reconcileFail.message).toContain("counted twice");
+    expect(affected[1].reconcileFail.primary).toBe(false);
+    expect(affected[1].reconcileFail.message).toBe("Same storage reconciliation as Detention above.");
+    // The full text stays reachable for a tooltip / a11y, just not rendered twice.
+    expect(affected[1].reconcileFail.fullMessage).toBe(affected[0].reconcileFail.message);
+  });
+  it("the offending pond is named the way the map names it", () => {
+    const rows = yieldVerdictStrip(tsakiris());
+    expect(rows.find((r) => r.reconcileFail).reconcileFail.ponds).toEqual(["Detention Pond"]);
+  });
+});
+
+describe("NEW-5 (B1036) — an unpriceable pond-berm contribution never reads as a clean pass", () => {
+  it("the berm-unknown flag demotes an OK mitigation verdict and marks it understated", () => {
+    const rows = yieldVerdictStrip({
+      req: { kind: "point", requiredAcFt: 33.8 }, providedUsableCf: 63.4 * AC_FT,
+      mitigation: { intersectAcres: 2, volumeCf: 20 * AC_FT, volumeAcFt: 20, flags: ["berm-contribution-unknown"], bermState: "unknown-grade" },
+      mitProvided: { creditedCf: 25 * AC_FT },
+    });
+    const mit = rows.find((r) => r.key === "mit");
+    expect(mit.understated).toBe(true);
+    expect(mit.bermUnknown).toBe("unknown-grade");
+    expect(mit.pill).toBe("THIN");
+  });
+  it("a priced berm contribution leaves the verdict alone", () => {
+    const rows = yieldVerdictStrip({
+      req: { kind: "point", requiredAcFt: 33.8 }, providedUsableCf: 63.4 * AC_FT,
+      mitigation: { intersectAcres: 2, volumeCf: 20 * AC_FT, volumeAcFt: 20, flags: [], bermState: "counted", bermAcFt: 0.16 },
+      mitProvided: { creditedCf: 25 * AC_FT },
+    });
+    const mit = rows.find((r) => r.key === "mit");
+    expect(mit.understated).toBeUndefined();
+    expect(mit.pill).toBe("OK");
   });
 });
