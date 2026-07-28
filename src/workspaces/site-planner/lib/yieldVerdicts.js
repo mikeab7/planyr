@@ -63,25 +63,42 @@ export function thinThresholdFor(key, overrides = null) {
   return THIN_PCT_BY_CHECK[key] != null ? THIN_PCT_BY_CHECK[key] : DEFAULT_THIN_PCT;
 }
 
-/* The signed margin for a provided/required pair. `pct` is null when the requirement is zero (no
- * meaningful percentage of nothing). `band`: "short" | "thin" | "ok". Pure. */
-export function marginFor(provided, required, { key = null, thinPct = null, overrides = null } = {}) {
+/* NEW-3 (B1034) — the PERCENTAGE FLOOR. A percentage of a near-zero requirement is noise, not
+ * information: on Tsakiris a 0.2 ac-ft mitigation requirement against 29.6 provided rendered
+ * "+18420%", which makes a trivial absolute surplus look catastrophic. Below this requirement the
+ * margin drops the percentage entirely and states the absolute against the requirement instead.
+ * CRITERIA-CONFIGURABLE (`marginPctFloorAcFt` in detentionCriteria.js), never an inline constant
+ * at a call site — the caller passes the resolved value through `overrides`. */
+export const DEFAULT_MARGIN_PCT_FLOOR_ACFT = 1.0;
+
+/* The signed margin for a provided/required pair. `pct` is null when the requirement is zero or
+ * below the percentage floor (no meaningful percentage of nothing). `band`: "short" | "thin" | "ok".
+ * Pure. */
+export function marginFor(provided, required, { key = null, thinPct = null, overrides = null, pctFloorAcFt = null } = {}) {
   if (!Number.isFinite(provided) || !Number.isFinite(required)) return null;
   const absAcFt = provided - required;
-  const pct = required > EPS ? absAcFt / required : null;
+  const floor = Number.isFinite(pctFloorAcFt) ? pctFloorAcFt : DEFAULT_MARGIN_PCT_FLOOR_ACFT;
+  const pct = required > EPS && required >= floor ? absAcFt / required : null;
   const thin = thinPct != null ? thinPct : thinThresholdFor(key, overrides);
   const band = absAcFt < -EPS ? "short"
     : pct != null && pct <= thin ? "thin"
     : absAcFt <= EPS && required > EPS ? "thin"
     : "ok";
-  return { absAcFt, pct, band, thinPct: thin, thin: band === "thin" };
+  return { absAcFt, pct, band, thinPct: thin, thin: band === "thin", requiredAcFt: required, pctFloorAcFt: floor };
 }
 
-// The margin as the panel says it: "+0.5 ac-ft (+0.5%)" / "−12.3 ac-ft (−16%)". Pure.
+// The margin as the panel says it: "+0.5 ac-ft (+0.5%)" / "−12.3 ac-ft (−16%)". NEW-3 (B1034):
+// with the percentage suppressed (a requirement below the floor) it states the absolute against
+// the requirement — "+29.4 ac-ft over a 0.2 ac-ft requirement" — never a bare number and never a
+// five-digit percentage. Pure.
 export function fmtMargin(margin) {
   if (!margin) return null;
   const abs = fmtSignedAcFt(margin.absAcFt);
-  if (margin.pct == null) return `${abs} ac-ft`;
+  if (margin.pct == null) {
+    return Number.isFinite(margin.requiredAcFt) && margin.requiredAcFt > EPS
+      ? `${abs} ac-ft over a ${fmtAcFt(margin.requiredAcFt)} ac-ft requirement`
+      : `${abs} ac-ft`;
+  }
   const p = Math.abs(margin.pct * 100);
   const pStr = p >= 10 ? Math.round(p) : (Math.round(p * 10) / 10).toFixed(1);
   const sign = margin.absAcFt < -EPS ? "−" : margin.absAcFt > EPS ? "+" : "";
@@ -103,13 +120,15 @@ const pairRow = (key, label, provided, required, short, opts = {}) => {
   }
   // NEW-7 — the signed margin + banded chip. A thin surplus is amber "THIN", never green "OK":
   // the reader must be able to see that half an acre-foot of headroom is not a passing design.
-  const margin = marginFor(provided, required, { key, overrides: opts.thinOverrides });
+  const margin = marginFor(provided, required, { key, overrides: opts.thinOverrides, pctFloorAcFt: opts.pctFloorAcFt });
   const thin = !short && margin && margin.band === "thin";
   return finish({
     key, label,
     pill: short ? "SHORT" : thin ? "THIN" : "OK",
     tone: short ? "danger" : thin ? "warn" : "good",
-    pair: { provided, required }, sentence: `${provStr} of ${reqStr} ac-ft`,
+    // NEW-2 (B1033) — `pairText` is the bare provided/required pair, kept stable so later clauses
+    // can append to `sentence` without the renderer having to unpick them back out again.
+    pair: { provided, required }, pairText: `${provStr} of ${reqStr} ac-ft`, sentence: `${provStr} of ${reqStr} ac-ft`,
     margin, marginText: fmtMargin(margin), thin,
     short, action: short, sortRank: short ? 0 : thin ? 1.5 : 2,
   });
@@ -129,7 +148,7 @@ function detentionVerdict(d) {
   }
   if (usableAcFt == null) return loadingRow("det", "Detention");
   const short = usableAcFt < requiredAcFt - EPS || inundated;
-  const v = pairRow("det", "Detention", usableAcFt, requiredAcFt, short, { thinOverrides: d.thinMarginPct });
+  const v = pairRow("det", "Detention", usableAcFt, requiredAcFt, short, { thinOverrides: d.thinMarginPct, pctFloorAcFt: d.marginPctFloorAcFt });
   // R1 — when the (ASSUMED) coincident-storm policy MATERIALLY drives this usable number, the
   // verdict carries the assumption (R-PRINCIPLE: an assumed criterion never silently drives a
   // number). The default ship is non-coincident (the pond recovers to normal tailwater between
@@ -166,7 +185,7 @@ function mitigationVerdict(d) {
       return finish({ key: "mit", label: "Mitigation", pill: "SHORT", tone: "danger", sentence: "fill in the floodway (stop)", short: true, action: true, sortRank: 0 });
     }
     const provAcFt = provCf / AC_FT;
-    const row = pairRow("mit", "Mitigation", provAcFt, mitV.volumeAcFt, provAcFt < mitV.volumeAcFt - EPS, { thinOverrides: d.thinMarginPct });
+    const row = pairRow("mit", "Mitigation", provAcFt, mitV.volumeAcFt, provAcFt < mitV.volumeAcFt - EPS, { thinOverrides: d.thinMarginPct, pctFloorAcFt: d.marginPctFloorAcFt });
     // NEW-3 — a total that ties is NOT compliance: FBC's offset is hydraulically equivalent, an
     // elevation-matched test. A band ledger that fails demotes the row to SHORT even when the
     // acre-foot totals net positive, and says which is which.
@@ -174,6 +193,8 @@ function mitigationVerdict(d) {
       const n = d.mitBands.shortBands.length;
       row.pill = "SHORT"; row.tone = "danger"; row.short = true; row.action = true; row.sortRank = 0;
       row.bandFail = { shortBands: n, totalWouldPass: d.mitBands.totalWouldPass, shortCf: d.mitBands.totals.shortCf };
+      // NEW-2 (B1033) — carried as a wrappable SUFFIX as well as in the legacy one-line sentence.
+      row.suffix = `${n} elevation band${n === 1 ? "" : "s"} short`;
       row.sentence = `${row.sentence} — ${n} elevation band${n === 1 ? "" : "s"} short`;
       row.text = `${row.label}: ${row.sentence}`;
     }
@@ -181,6 +202,14 @@ function mitigationVerdict(d) {
     // (no 0.2% surface resolvable), so it UNDERSTATES. Never let that read as a clean pass.
     if (d.mitigation && Array.isArray(d.mitigation.flags) && d.mitigation.flags.includes("offset-basis-unresolved")) {
       row.understated = true;
+      if (row.pill === "OK") { row.pill = "THIN"; row.tone = "warn"; row.thin = true; row.sortRank = 1.5; }
+    }
+    // NEW-5 (B1036) — the pond-berm prism couldn't be priced (no existing grade, no flood
+    // elevation, or an unanchored pond), so the requirement is a FLOOR of unknown size. A
+    // requirement with an unpriceable term must never render as a clean pass.
+    if (d.mitigation && Array.isArray(d.mitigation.flags) && d.mitigation.flags.includes("berm-contribution-unknown")) {
+      row.understated = true;
+      row.bermUnknown = d.mitigation.bermState || true;
       if (row.pill === "OK") { row.pill = "THIN"; row.tone = "warn"; row.thin = true; row.sortRank = 1.5; }
     }
     return row;
@@ -214,8 +243,15 @@ function buildabilityVerdict(d) {
 function applyReconciliation(rows, d) {
   const rec = d.reconcile;
   if (!rec || rec.state !== "fail") return rows;
+  // NEW-4 (B1035) — the reconciliation is a SITE-level failure, so its paragraph is stated ONCE.
+  // It used to render verbatim three times (under Detention, under Mitigation, and again under
+  // Storage reconciles). The FIRST affected row carries the sentence (`primary`); the others carry
+  // a back-reference naming the row that has it, so the reader is pointed, not repeated at.
+  let primaryLabel = null;
   return rows.map((r) => {
     if (r.key !== "det" && r.key !== "mit") return r;
+    const primary = primaryLabel == null;
+    if (primary) primaryLabel = r.label;
     const v = {
       ...r,
       pill: "FAIL", tone: "danger", short: true, action: true, sortRank: -1,
@@ -225,8 +261,17 @@ function applyReconciliation(rows, d) {
         claimedAcFt: rec.claimedCf != null ? rec.claimedCf / AC_FT : null,
         ponds: (rec.offenders && rec.offenders.length ? rec.offenders : rec.undeclared || []).map((p) => p.name || p.id),
         undeclared: (rec.undeclared || []).length > 0,
-        message: rec.message,
+        primary,
+        // The one sentence, on the primary row only; every other affected row points at it.
+        message: primary ? rec.message : `Same storage reconciliation as ${primaryLabel} above.`,
+        fullMessage: rec.message,
       },
+      // NEW-2 (B1033) — the reconciliation clause is a SUFFIX, kept apart from the bold nowrap
+      // provided/required pair so it can WRAP. Concatenated into one nowrap headline it was
+      // clipped mid-word at the panel edge ("…12.2 ac-ft counted twi").
+      suffix: rec.overlapCf > 0
+        ? `${fmtAcFt(rec.overlapCf / AC_FT)} ac-ft counted twice`
+        : "duty split not declared",
       sentence: rec.overlapCf > 0
         ? `${r.sentence} — ${fmtAcFt(rec.overlapCf / AC_FT)} ac-ft counted twice`
         : `${r.sentence} — duty split not declared`,

@@ -9,11 +9,17 @@ const src = readFileSync(fileURLToPath(new URL("../src/workspaces/site-planner/S
 
 describe("NEW-15 — the detention explainer matches the numbers above it (partial vs total dead)", () => {
   it("computes the dead share and branches on total-vs-partial dead", () => {
-    expect(src).toContain("const deadAcFt = siteCounts != null ? siteHolds - siteCounts : null;");
+    // NEW-1 (B1032) — renamed `gapAcFt`: the difference between what the outline could hold and
+    // what counts is NOT all dead storage (berm ring, dedicated compensating storage), and calling
+    // it "dead" is what produced the wrong "17.4 sits below the flood level" sentence.
+    expect(src).toContain("const gapAcFt = siteCounts != null ? siteHolds - siteCounts : null;");
     expect(src).toContain("const totalDead = siteCounts < ACFT_EPS;");
   });
   it("the PARTIAL sentence names the dead share and its holds total (no more 'none counts' lie)", () => {
-    expect(src).toContain("`${f1(deadAcFt)} of its ${f1(siteHolds)} ac-ft sits below the flood level and doesn't count.${rimClause}`");
+    // NEW-1 (B1032) — the partial sentence now names each term of the gap and closes on what is
+    // left to count, so it can never claim volume is "below the flood level" when it isn't.
+    expect(src).toContain("Of the ${f1(siteHolds)} ac-ft the outline could hold, ${terms.join(\", \")}");
+    expect(src).toContain("left to count for detention.${rimClause}");
   });
   it("the TOTAL-dead sentence keeps the original 'none counts yet' wording", () => {
     expect(src).toContain("`All of its storage sits below the flood level, so none counts yet.${rimClause}`");

@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-07-28 @ `1e0c151` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-07-28 @ `a3c67e8` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -486,7 +486,7 @@ _321 source files mapped._
 - **`src/workspaces/site-planner/lib/pondInspectorCopy.js`** — FINAL UI SPEC Part A pond-inspector visible copy as pure data (chip vocabulary A3, collapsed-group titles/summaries, at-a-glance labels, purpose tooltips) so the chip set and word budget unit-test without a browser
   - _exports_: `POND_CHIP_DEFS`, `POND_DIMENSION_LABELS`, `POND_FLOOD_NOTES`, `POND_GROUPS`, `POND_PURPOSE_DESCRIPTOR`, `POND_PURPOSE_TOOLTIP`, `pondGroupSummary`, `pondInspectorChips`
 - **`src/workspaces/site-planner/lib/pondLedger.js`** — Site-level pond-ledger accumulator + pond roles: folds per-pond usable/dead splits into the detention totals (unknown facts poison usable to null — never gross-as-usable) and gates which ponds' below-WSE cut credits the mitigation Provided ledger. Exports `accumulatePondLedger`, `suggestPondRole`, `effectivePondRole`, `POND_ROLES`.
-  - _exports_: `accumulatePondLedger`, `effectivePondRole`, `mitigationCredit`, `POND_DISPLAY_NAME`, `POND_ROLE_LABEL`, `POND_ROLES`, `pondDisplayName`, `pondDisplayNameFor`, `ROLE_SHARE`, `suggestPondRole`
+  - _exports_: `accumulatePondLedger`, `allocatePondDuty`, `effectivePondRole`, `mitigationCredit`, `POND_DISPLAY_NAME`, `POND_ROLE_LABEL`, `POND_ROLES`, `pondDisplayName`, `pondDisplayNameFor`, `ROLE_SHARE`, `suggestPondRole`
 - **`src/workspaces/site-planner/lib/pondOffset.js`** — Robust inward polygon offset via clipper-lib for pond grading contours: pinch-off, basin split, max inscribed reach
   - _exports_: `maxInwardOffset`, `offsetInward`, `offsetOutward`, `ringsArea`
 - **`src/workspaces/site-planner/lib/pondOptimizer.js`** — Pond economics optimizer (NEW-D / Phase D): searches depth × placement pond configurations under constraints (max depth, groundwater ceiling, maintenance berm, pipeline-corridor exclusions) and ranks by earthwork $, land-take, and buildable-SF recovered. Exports `solveScaleForVolume`, `evaluateCandidate`, `optimizePond`.
@@ -580,7 +580,7 @@ _321 source files mapped._
 - **`src/workspaces/site-planner/lib/yieldBar.js`** — B862: the shared required-vs-provided bullet-bar geometry + primitive marks for the Yield → Stormwater readout; one source consumed by the on-screen SVG (SitePlanner `BulletBar`) AND the PDF export string (`printSheet.bulletBarSvg`) so they can't drift (PDF-PARITY). `bulletBarLayout`/`stackedBarLayout` (pure geometry), `bulletBarMarks`/`stackedBarMarks` (render primitives), `bulletBarSvg` (PDF string), `stormwaterBarSpecs` (the det/mit bar specs from the drainage object).
   - _exports_: `ACFT_EPS`, `bulletBarLayout`, `bulletBarMarks`, `bulletBarSvg`, `stackedBarLayout`, `stackedBarMarks`, `stormwaterBarSpecs`
 - **`src/workspaces/site-planner/lib/yieldVerdicts.js`** — FINAL UI SPEC Part B pure Yield-panel verdict strip (B1.1) + number format (B2/B3): maps the drainage object to up-to-four one-line detention/mitigation/buildability verdicts, and `fmtAcFt` (1 decimal, signed-zero collapsed so −0.00 never renders)
-  - _exports_: `DEFAULT_THIN_PCT`, `fmtAcFt`, `fmtMargin`, `fmtProvidedOfRequired`, `fmtSignedAcFt`, `marginFor`, `THIN_PCT_BY_CHECK`, `thinThresholdFor`, `TRACE_ACFT`, `yieldVerdictStrip`
+  - _exports_: `DEFAULT_MARGIN_PCT_FLOOR_ACFT`, `DEFAULT_THIN_PCT`, `fmtAcFt`, `fmtMargin`, `fmtProvidedOfRequired`, `fmtSignedAcFt`, `marginFor`, `THIN_PCT_BY_CHECK`, `thinThresholdFor`, `TRACE_ACFT`, `yieldVerdictStrip`
 - **`src/workspaces/site-planner/lib/zOrder.js`** — explicit z_index utilities (B671): assign/sort/renormalize the within-type-layer stacking tiebreak that replaced implicit array position
   - _exports_: `byZAsc`, `ensureZ`, `needsZ`, `nextZ`, `normalizeZ`, `sortByZ`, `Z_GAP`
 - **`src/workspaces/site-planner/MapFinder.jsx`** — Leaflet map finder: aerial basemaps + labels, GIS overlay panel, eager county/statewide parcel identify, and status-pinned site markers for picking/opening sites

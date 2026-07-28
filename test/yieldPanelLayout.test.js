@@ -102,10 +102,15 @@ describe("punch 4 — DETENTION DETAIL: prior detail folds into Assumptions & me
     expect(src).toContain("method: detR");
     expect(src).toContain("Requirement basis");
     expect(src).toContain("ac-ft counts");
-    // NEW-15 — the explainer now has partial + total variants; the total-dead branch keeps the
+    // NEW-15 — the explainer has partial + total variants; the total-dead branch keeps the
     // original "none counts yet" wording (the rim clause is feasibility-gated, not unconditional).
+    // NEW-1 (B1032) — the PARTIAL branch now ACCOUNTS for the gap term by term (berm ring / below
+    // the standing water level / dedicated to compensating storage) instead of blaming all of it
+    // on the flood level, which on Tsakiris was flatly untrue (that pond has zero dead storage).
     expect(src).toContain("All of its storage sits below the flood level, so none counts yet.");
-    expect(src).toContain("sits below the flood level and doesn't count.");
+    expect(src).toContain("Of the ${f1(siteHolds)} ac-ft the outline could hold");
+    expect(src).toContain("is taken up by the earthen berm ring built inside the outline");
+    expect(src).toContain("is set aside for floodplain compensating storage");
   });
 });
 
