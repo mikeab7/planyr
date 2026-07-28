@@ -98,7 +98,9 @@ async function openYield(page) {
 
 async function run() {
   const browser = await chromium.launch({ executablePath: EXEC, args: ["--no-sandbox", "--ignore-certificate-errors"] });
-  const ctx = await browser.newContext({ viewport: { width: 1500, height: 980 } });
+  // The sandbox egress proxy intercepts TLS, so a REMOTE BASE_URL (a Cloudflare branch preview)
+  // needs ignoreHTTPSErrors as well as the launch flag, or page.goto throws ERR_CERT_AUTHORITY_INVALID.
+  const ctx = await browser.newContext({ viewport: { width: 1500, height: 980 }, ignoreHTTPSErrors: true });
   await ctx.addInitScript(`(() => { try {
     localStorage.setItem('planarfit:sites:v1', JSON.stringify({ s_rev: ${JSON.stringify(site("s_rev", "Storage Review Site"))} }));
     localStorage.setItem('planarfit:currentSite:v1', 's_rev');
