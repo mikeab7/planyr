@@ -1,0 +1,2355 @@
+{
+  "projection": {
+    "crs": "EPSG:2278",
+    "feetWkid": 2278,
+    "points": {
+      "houstonDowntown": {
+        "lat": 29.7604,
+        "lon": -95.3698,
+        "x": 3120099.087756,
+        "y": 13841900.858474,
+        "backLat": 29.7604,
+        "backLon": -95.3698
+      },
+      "harrisNW": {
+        "lat": 29.98,
+        "lon": -95.62,
+        "x": 3038444.072931,
+        "y": 13919345.701351,
+        "backLat": 29.98,
+        "backLon": -95.62
+      },
+      "fortBendSugarland": {
+        "lat": 29.5994,
+        "lon": -95.6142,
+        "x": 3044285.790613,
+        "y": 13781055.746384,
+        "backLat": 29.5994,
+        "backLon": -95.6142
+      },
+      "chambersAnahuac": {
+        "lat": 29.7355,
+        "lon": -94.6816,
+        "x": 3338657.959931,
+        "y": 13840271.235919,
+        "backLat": 29.7355,
+        "backLon": -94.6816
+      },
+      "wallerKaty": {
+        "lat": 29.9,
+        "lon": -95.9,
+        "x": 2950602.40812,
+        "y": 13887807.927238,
+        "backLat": 29.9,
+        "backLon": -95.9
+      },
+      "outsideEveryBbox": {
+        "lat": 35.222,
+        "lon": -101.8313,
+        "x": 1118464.7214,
+        "y": 15824958.164071,
+        "backLat": 35.222,
+        "backLon": -101.8313
+      }
+    },
+    "units": {
+      "ftToAcres_43560": 1,
+      "metersToFeet_1000": 3280.8333333333
+    }
+  },
+  "plannerFrame": {
+    "origins": {
+      "houstonDowntown": {
+        "ftPerDeg": 317053.27463271,
+        "mercDeg": 31.1965901285,
+        "offsetFt": {
+          "x": 3170.53274633,
+          "y": -3652.41226931
+        },
+        "backLatLng": [
+          29.754923744,
+          -95.3666459559
+        ],
+        "zoomAt1ppf": 18.7662188483,
+        "ppfAtZoom18": 0.5879564289
+      },
+      "harrisNW": {
+        "ftPerDeg": 316356.12021398,
+        "mercDeg": 31.4498320465,
+        "offsetFt": {
+          "x": 3163.56120214,
+          "y": -3652.41389405
+        },
+        "backLatLng": [
+          29.9745237427,
+          -95.6168390054
+        ],
+        "zoomAt1ppf": 18.7630430772,
+        "ppfAtZoom18": 0.5892521093
+      },
+      "fortBendSugarland": {
+        "ftPerDeg": 317561.43575445,
+        "mercDeg": 31.0112780773,
+        "offsetFt": {
+          "x": 3175.61435755,
+          "y": -3652.41108266
+        },
+        "backLatLng": [
+          29.593923745,
+          -95.611051003
+        ],
+        "zoomAt1ppf": 18.7685292949,
+        "ppfAtZoom18": 0.5870155823
+      },
+      "chambersAnahuac": {
+        "ftPerDeg": 317132.02976165,
+        "mercDeg": 31.1679106478,
+        "offsetFt": {
+          "x": 3171.32029762,
+          "y": -3652.41208554
+        },
+        "backLatLng": [
+          29.7300237441,
+          -94.6784467392
+        ],
+        "zoomAt1ppf": 18.7665771652,
+        "ppfAtZoom18": 0.5878104184
+      },
+      "wallerKaty": {
+        "ftPerDeg": 316610.63133651,
+        "mercDeg": 31.3575117571,
+        "offsetFt": {
+          "x": 3166.10631337,
+          "y": -3652.41330132
+        },
+        "backLatLng": [
+          29.8945237431,
+          -95.8968415464
+        ],
+        "zoomAt1ppf": 18.7642032707,
+        "ppfAtZoom18": 0.5887784321
+      },
+      "outsideEveryBbox": {
+        "ftPerDeg": 298359.25289498,
+        "mercDeg": 37.676161669,
+        "offsetFt": {
+          "x": 2983.59252895,
+          "y": -3652.45505059
+        },
+        "backLatLng": [
+          35.2165237089,
+          -101.8279483359
+        ],
+        "zoomAt1ppf": 18.6785440901,
+        "ppfAtZoom18": 0.6247954749
+      }
+    }
+  },
+  "countyRouting": {
+    "configuredKeys": [
+      "harris",
+      "fortbend",
+      "chambers",
+      "waller"
+    ],
+    "mapKeys": [
+      "harris",
+      "fortbend",
+      "chambers",
+      "waller",
+      "txgio_statewide"
+    ],
+    "statewideKeys": [
+      "txgio_statewide"
+    ],
+    "statewideParcelLayer": "https://feature.geographic.texas.gov/arcgis/rest/services/Parcels/stratmap_land_parcels_48_most_recent/MapServer/0",
+    "layerUrls": {
+      "harris": "https://www.gis.hctx.net/arcgis/rest/services/HCAD/Parcels/MapServer/0",
+      "fortbend": "https://services2.arcgis.com/D4saGHECICkCeoJm/arcgis/rest/services/FBCAD_Public_Data/FeatureServer/0",
+      "chambers": "https://gisdata.pandai.com/pamaps02/rest/services/Chambers/ChambersCADPublic/MapServer/0",
+      "waller": "https://feature.geographic.texas.gov/arcgis/rest/services/Parcels/stratmap_land_parcels_48_most_recent/MapServer/0"
+    },
+    "candidates": {
+      "houstonDowntown": [
+        "harris",
+        "txgio_statewide"
+      ],
+      "harrisNW": [
+        "harris",
+        "waller",
+        "txgio_statewide"
+      ],
+      "fortBendSugarland": [
+        "harris",
+        "fortbend",
+        "txgio_statewide"
+      ],
+      "chambersAnahuac": [
+        "chambers",
+        "txgio_statewide"
+      ],
+      "wallerKaty": [
+        "harris",
+        "waller",
+        "txgio_statewide"
+      ],
+      "outsideEveryBbox": [
+        "harris",
+        "fortbend",
+        "chambers",
+        "waller",
+        "txgio_statewide"
+      ]
+    },
+    "countyKeyForName": {
+      "Harris": "harris",
+      "Fort Bend": "fortbend",
+      "Chambers County": "chambers",
+      "Waller": "waller",
+      "Montgomery": null,
+      "Adams": null,
+      "Denver": null,
+      "nonsense": null
+    },
+    "statewideFallback": {
+      "harris": {
+        "layerUrl": "https://feature.geographic.texas.gov/arcgis/rest/services/Parcels/stratmap_land_parcels_48_most_recent/MapServer/0",
+        "scopeWhere": "county='HARRIS'",
+        "idField": "prop_id",
+        "addrField": "situs_addr",
+        "countyName": "HARRIS",
+        "label": "Statewide backup (TxGIO)"
+      },
+      "fortbend": {
+        "layerUrl": "https://feature.geographic.texas.gov/arcgis/rest/services/Parcels/stratmap_land_parcels_48_most_recent/MapServer/0",
+        "scopeWhere": "county='FORT BEND'",
+        "idField": "prop_id",
+        "addrField": "situs_addr",
+        "countyName": "FORT BEND",
+        "label": "Statewide backup (TxGIO)"
+      },
+      "chambers": {
+        "layerUrl": "https://feature.geographic.texas.gov/arcgis/rest/services/Parcels/stratmap_land_parcels_48_most_recent/MapServer/0",
+        "scopeWhere": "county='CHAMBERS'",
+        "idField": "prop_id",
+        "addrField": "situs_addr",
+        "countyName": "CHAMBERS",
+        "label": "Statewide backup (TxGIO)"
+      },
+      "waller": null
+    }
+  },
+  "drainageAuthority": {
+    "countyAuthority": {
+      "harris": "hcfcd",
+      "fort bend": "fortbend",
+      "montgomery": "montgomery",
+      "chambers": "chambers",
+      "waller": "waller"
+    },
+    "authorityShort": {
+      "hcfcd": "HCFCD",
+      "fortbend": "FBCDD",
+      "coh": "City of Houston",
+      "montgomery": "Montgomery Co.",
+      "chambers": "Chambers Co.",
+      "waller": "Waller Co."
+    },
+    "authorityChoices": [
+      {
+        "id": "hcfcd",
+        "label": "Harris County Flood Control District"
+      },
+      {
+        "id": "coh",
+        "label": "City of Houston"
+      },
+      {
+        "id": "fortbend",
+        "label": "Fort Bend County Drainage District"
+      },
+      {
+        "id": "montgomery",
+        "label": "Montgomery County"
+      },
+      {
+        "id": "chambers",
+        "label": "Chambers County"
+      },
+      {
+        "id": "waller",
+        "label": "Waller County"
+      },
+      {
+        "id": "missouricity",
+        "label": "Missouri City"
+      },
+      {
+        "id": "magnolia",
+        "label": "City of Magnolia"
+      }
+    ],
+    "cases": {
+      "unincorporatedHarris": {
+        "primary": "hcfcd",
+        "channelAuthority": "hcfcd",
+        "flags": [],
+        "overlayKinds": [],
+        "overlayShorts": [],
+        "ambiguous": []
+      },
+      "houstonCityLimits": {
+        "primary": "coh",
+        "channelAuthority": "hcfcd",
+        "flags": [],
+        "overlayKinds": [],
+        "overlayShorts": [],
+        "ambiguous": []
+      },
+      "houstonEtjFortBend": {
+        "primary": "fortbend",
+        "channelAuthority": null,
+        "flags": [
+          "houston-etj"
+        ],
+        "overlayKinds": [
+          "etj:Houston"
+        ],
+        "overlayShorts": [
+          "Houston ETJ — county (FBCDD) criteria govern detention"
+        ],
+        "ambiguous": []
+      },
+      "katySliverHoustonEtj": {
+        "primary": "fortbend",
+        "channelAuthority": null,
+        "flags": [
+          "houston-etj"
+        ],
+        "overlayKinds": [
+          "etj:Houston"
+        ],
+        "overlayShorts": [
+          "Houston ETJ — county (FBCDD) criteria govern detention"
+        ],
+        "ambiguous": []
+      },
+      "katyMateriallyInside": {
+        "primary": "fortbend",
+        "channelAuthority": null,
+        "flags": [
+          "city-criteria-unverified"
+        ],
+        "overlayKinds": [],
+        "overlayShorts": [],
+        "ambiguous": []
+      },
+      "missouriCity": {
+        "primary": "missouricity",
+        "channelAuthority": null,
+        "flags": [],
+        "overlayKinds": [
+          "municipal:missouricity"
+        ],
+        "overlayShorts": [
+          null
+        ],
+        "ambiguous": []
+      },
+      "countyStraddle": {
+        "primary": null,
+        "channelAuthority": "hcfcd",
+        "flags": [],
+        "overlayKinds": [],
+        "overlayShorts": [],
+        "ambiguous": [
+          {
+            "kind": "straddle",
+            "candidates": [
+              "hcfcd",
+              "fortbend"
+            ],
+            "detail": "Parcel straddles Harris + Fort Bend — county criteria differ; both shown, none assumed."
+          }
+        ]
+      },
+      "cityStraddle": {
+        "primary": null,
+        "channelAuthority": "hcfcd",
+        "flags": [],
+        "overlayKinds": [],
+        "overlayShorts": [],
+        "ambiguous": [
+          {
+            "kind": "straddle",
+            "candidates": [
+              "coh",
+              "hcfcd"
+            ],
+            "detail": "Parcel straddles Houston + Pasadena city limits — reviewing city ambiguous."
+          }
+        ]
+      },
+      "unincorporatedWaller": {
+        "primary": "waller",
+        "channelAuthority": null,
+        "flags": [],
+        "overlayKinds": [],
+        "overlayShorts": [],
+        "ambiguous": []
+      },
+      "unincorporatedChambers": {
+        "primary": "chambers",
+        "channelAuthority": null,
+        "flags": [],
+        "overlayKinds": [],
+        "overlayShorts": [],
+        "ambiguous": []
+      },
+      "legacyNoCentroidField": {
+        "primary": "fortbend",
+        "channelAuthority": null,
+        "flags": [
+          "city-criteria-unverified"
+        ],
+        "overlayKinds": [],
+        "overlayShorts": [],
+        "ambiguous": []
+      }
+    }
+  },
+  "detention": {
+    "rules": {
+      "hcfcd": {
+        "id": "hcfcd-pcpm-atlas14-2021",
+        "ruleType": "rate",
+        "effectiveDate": "2019-07-09",
+        "authorityLabel": "Harris County Flood Control District"
+      },
+      "coh": {
+        "id": "coh-idm9-2026",
+        "ruleType": "tiered",
+        "effectiveDate": "2026-06-01",
+        "authorityLabel": "City of Houston"
+      },
+      "fortbend": {
+        "id": "fbcdd-dcm-atlas14-2020",
+        "ruleType": "table-band",
+        "effectiveDate": "2020-01-01",
+        "authorityLabel": "Fort Bend County Drainage District"
+      },
+      "montgomery": {
+        "id": "moco-dcm-2025",
+        "ruleType": "policy-band",
+        "effectiveDate": "2025-08-26",
+        "authorityLabel": "Montgomery County"
+      },
+      "chambers": {
+        "id": "chambers-dcm-2005",
+        "ruleType": "policy-band",
+        "effectiveDate": "2005-01-01",
+        "authorityLabel": "Chambers County"
+      },
+      "waller": {
+        "id": "waller-subdiv-2023",
+        "ruleType": "policy-band",
+        "effectiveDate": "2023-12-06",
+        "authorityLabel": "Waller County"
+      },
+      "bkdd": {
+        "id": "bkdd-rules-2022",
+        "ruleType": "rate-match",
+        "effectiveDate": "2022-02-28",
+        "authorityLabel": "Brookshire–Katy Drainage District"
+      },
+      "missouricity": {
+        "id": "missouricity-adopt",
+        "ruleType": "overlay",
+        "effectiveDate": "2022-06-20",
+        "authorityLabel": "Missouri City"
+      },
+      "magnolia": {
+        "id": "magnolia-adopt",
+        "ruleType": "overlay",
+        "effectiveDate": "2025-08-26",
+        "authorityLabel": "City of Magnolia"
+      }
+    },
+    "matrix": {
+      "hcfcd|5ac|impNA": {
+        "kind": "band",
+        "requiredAcFt": null,
+        "bandAcFt": [
+          3.75,
+          5
+        ],
+        "rateAcFtPerAc": null,
+        "rateBandAcFtPerAc": [
+          0.75,
+          1
+        ],
+        "rateBandLabel": "by outfall",
+        "basis": "0.75–1 ac-ft/ac (unincorporated Harris outfall-type minimum — storm-sewer 0.75 vs roadside-ditch 1; set the outfall type for the exact point) × 5.00 ac",
+        "ruleId": "hcfcd-pcpm-atlas14-2021",
+        "ruleType": "rate",
+        "flags": [
+          "hced-infra-outfall-min",
+          "outfall-type-unknown"
+        ],
+        "governing": null
+      },
+      "hcfcd|5ac|65%": {
+        "kind": "band",
+        "requiredAcFt": null,
+        "bandAcFt": [
+          3.75,
+          5
+        ],
+        "rateAcFtPerAc": null,
+        "rateBandAcFtPerAc": [
+          0.75,
+          1
+        ],
+        "rateBandLabel": "by outfall",
+        "basis": "0.75–1 ac-ft/ac (unincorporated Harris outfall-type minimum — storm-sewer 0.75 vs roadside-ditch 1; set the outfall type for the exact point) × 5.00 ac",
+        "ruleId": "hcfcd-pcpm-atlas14-2021",
+        "ruleType": "rate",
+        "flags": [
+          "hced-infra-outfall-min",
+          "outfall-type-unknown"
+        ],
+        "governing": null
+      },
+      "hcfcd|25ac|70%": {
+        "kind": "band",
+        "requiredAcFt": null,
+        "bandAcFt": [
+          18.75,
+          25
+        ],
+        "rateAcFtPerAc": null,
+        "rateBandAcFtPerAc": [
+          0.75,
+          1
+        ],
+        "rateBandLabel": "by outfall",
+        "basis": "0.75–1 ac-ft/ac (unincorporated Harris outfall-type minimum — storm-sewer 0.75 vs roadside-ditch 1; set the outfall type for the exact point) × 25.00 ac",
+        "ruleId": "hcfcd-pcpm-atlas14-2021",
+        "ruleType": "rate",
+        "flags": [
+          "hced-infra-outfall-min",
+          "outfall-type-unknown"
+        ],
+        "governing": null
+      },
+      "hcfcd|80.34ac|72%": {
+        "kind": "band",
+        "requiredAcFt": null,
+        "bandAcFt": [
+          60.255,
+          80.34
+        ],
+        "rateAcFtPerAc": null,
+        "rateBandAcFtPerAc": [
+          0.75,
+          1
+        ],
+        "rateBandLabel": "by outfall",
+        "basis": "0.75–1 ac-ft/ac (unincorporated Harris outfall-type minimum — storm-sewer 0.75 vs roadside-ditch 1; set the outfall type for the exact point) × 80.34 ac",
+        "ruleId": "hcfcd-pcpm-atlas14-2021",
+        "ruleType": "rate",
+        "flags": [
+          "hced-infra-outfall-min",
+          "outfall-type-unknown"
+        ],
+        "governing": null
+      },
+      "hcfcd|300ac|85%": {
+        "kind": "band",
+        "requiredAcFt": null,
+        "bandAcFt": [
+          225,
+          300
+        ],
+        "rateAcFtPerAc": null,
+        "rateBandAcFtPerAc": [
+          0.75,
+          1
+        ],
+        "rateBandLabel": "by outfall",
+        "basis": "0.75–1 ac-ft/ac (unincorporated Harris outfall-type minimum — storm-sewer 0.75 vs roadside-ditch 1; set the outfall type for the exact point) × 300.00 ac",
+        "ruleId": "hcfcd-pcpm-atlas14-2021",
+        "ruleType": "rate",
+        "flags": [
+          "hced-infra-outfall-min",
+          "outfall-type-unknown"
+        ],
+        "governing": null
+      },
+      "hcfcd|700ac|60%": {
+        "kind": "band",
+        "requiredAcFt": null,
+        "bandAcFt": [
+          525,
+          700
+        ],
+        "rateAcFtPerAc": null,
+        "rateBandAcFtPerAc": [
+          0.75,
+          1
+        ],
+        "rateBandLabel": "by outfall",
+        "basis": "0.75–1 ac-ft/ac (unincorporated Harris outfall-type minimum — storm-sewer 0.75 vs roadside-ditch 1; set the outfall type for the exact point) × 700.00 ac",
+        "ruleId": "hcfcd-pcpm-atlas14-2021",
+        "ruleType": "rate",
+        "flags": [
+          "hced-infra-outfall-min",
+          "outfall-type-unknown"
+        ],
+        "governing": null
+      },
+      "coh|5ac|impNA": {
+        "kind": "point",
+        "requiredAcFt": 4,
+        "bandAcFt": null,
+        "rateAcFtPerAc": 0.8,
+        "rateBandAcFtPerAc": null,
+        "rateBandLabel": null,
+        "basis": "0.8 ac-ft/ac × 5.00 ac (full tract — impervious % unknown, conservative upper bound)",
+        "ruleId": "coh-idm9-2026",
+        "ruleType": "tiered",
+        "flags": [
+          "impervious-unknown"
+        ],
+        "governing": null
+      },
+      "coh|5ac|65%": {
+        "kind": "point",
+        "requiredAcFt": 2.6,
+        "bandAcFt": null,
+        "rateAcFtPerAc": 0.8,
+        "rateBandAcFtPerAc": null,
+        "rateBandLabel": null,
+        "basis": "0.8 ac-ft/ac × 3.25 ac impervious",
+        "ruleId": "coh-idm9-2026",
+        "ruleType": "tiered",
+        "flags": [],
+        "governing": null
+      },
+      "coh|25ac|70%": {
+        "kind": "point",
+        "requiredAcFt": 16.25,
+        "bandAcFt": null,
+        "rateAcFtPerAc": 0.65,
+        "rateBandAcFtPerAc": null,
+        "rateBandLabel": null,
+        "basis": ">20 ac — Table 9.5: >20 ac follows the current HCFCD PCPM (0.65 min + impact analysis); COH minimum rate 0.75 ac-ft/ac: 0.65 ac-ft/ac × 25.00 ac (entire tract)",
+        "ruleId": "hcfcd-pcpm-atlas14-2021",
+        "ruleType": "rate",
+        "flags": [],
+        "governing": null
+      },
+      "coh|80.34ac|72%": {
+        "kind": "point",
+        "requiredAcFt": 52.22,
+        "bandAcFt": null,
+        "rateAcFtPerAc": 0.65,
+        "rateBandAcFtPerAc": null,
+        "rateBandLabel": null,
+        "basis": ">20 ac — Table 9.5: >20 ac follows the current HCFCD PCPM (0.65 min + impact analysis); COH minimum rate 0.75 ac-ft/ac: 0.65 ac-ft/ac × 80.34 ac (entire tract)",
+        "ruleId": "hcfcd-pcpm-atlas14-2021",
+        "ruleType": "rate",
+        "flags": [],
+        "governing": null
+      },
+      "coh|300ac|85%": {
+        "kind": "point",
+        "requiredAcFt": 195,
+        "bandAcFt": null,
+        "rateAcFtPerAc": 0.65,
+        "rateBandAcFtPerAc": null,
+        "rateBandLabel": null,
+        "basis": ">20 ac — Table 9.5: >20 ac follows the current HCFCD PCPM (0.65 min + impact analysis); COH minimum rate 0.75 ac-ft/ac: 0.65 ac-ft/ac × 300.00 ac (entire tract)",
+        "ruleId": "hcfcd-pcpm-atlas14-2021",
+        "ruleType": "rate",
+        "flags": [],
+        "governing": null
+      },
+      "coh|700ac|60%": {
+        "kind": "point",
+        "requiredAcFt": 455,
+        "bandAcFt": null,
+        "rateAcFtPerAc": 0.65,
+        "rateBandAcFtPerAc": null,
+        "rateBandLabel": null,
+        "basis": ">20 ac — Table 9.5: >20 ac follows the current HCFCD PCPM (0.65 min + impact analysis); COH minimum rate 0.75 ac-ft/ac: 0.65 ac-ft/ac × 700.00 ac (entire tract)",
+        "ruleId": "hcfcd-pcpm-atlas14-2021",
+        "ruleType": "rate",
+        "flags": [],
+        "governing": null
+      },
+      "fortbend|5ac|impNA": {
+        "kind": "band",
+        "requiredAcFt": null,
+        "bandAcFt": [
+          3.1,
+          4.9
+        ],
+        "rateAcFtPerAc": null,
+        "rateBandAcFtPerAc": [
+          0.62,
+          0.98
+        ],
+        "rateBandLabel": "screening band",
+        "basis": "0.62–0.98 ac-ft/ac (spans the published rate range because impervious % isn't set — enter a test-fit for the exact Table 6-1 point) × 5.00 ac",
+        "ruleId": "fbcdd-dcm-atlas14-2020",
+        "ruleType": "table-band",
+        "flags": [
+          "impervious-unknown",
+          "screening-band"
+        ],
+        "governing": null
+      },
+      "fortbend|5ac|65%": {
+        "kind": "point",
+        "requiredAcFt": 4.2,
+        "bandAcFt": null,
+        "rateAcFtPerAc": 0.84,
+        "rateBandAcFtPerAc": null,
+        "rateBandLabel": null,
+        "basis": "0.84 ac-ft/ac (FBCDD Table 6-1 at 65% impervious) × 5.00 ac",
+        "ruleId": "fbcdd-dcm-atlas14-2020",
+        "ruleType": "table-band",
+        "flags": [
+          "from-published-table"
+        ],
+        "governing": null
+      },
+      "fortbend|25ac|70%": {
+        "kind": "point",
+        "requiredAcFt": 21.5,
+        "bandAcFt": null,
+        "rateAcFtPerAc": 0.86,
+        "rateBandAcFtPerAc": null,
+        "rateBandLabel": null,
+        "basis": "0.86 ac-ft/ac (FBCDD Table 6-1 at 70% impervious) × 25.00 ac",
+        "ruleId": "fbcdd-dcm-atlas14-2020",
+        "ruleType": "table-band",
+        "flags": [
+          "from-published-table"
+        ],
+        "governing": null
+      },
+      "fortbend|80.34ac|72%": {
+        "kind": "point",
+        "requiredAcFt": 69.7351,
+        "bandAcFt": null,
+        "rateAcFtPerAc": 0.868,
+        "rateBandAcFtPerAc": null,
+        "rateBandLabel": null,
+        "basis": "0.87 ac-ft/ac (FBCDD Table 6-1 at 72% impervious) × 80.34 ac",
+        "ruleId": "fbcdd-dcm-atlas14-2020",
+        "ruleType": "table-band",
+        "flags": [
+          "from-published-table"
+        ],
+        "governing": null
+      },
+      "fortbend|300ac|85%": {
+        "kind": "point",
+        "requiredAcFt": 276,
+        "bandAcFt": null,
+        "rateAcFtPerAc": 0.92,
+        "rateBandAcFtPerAc": null,
+        "rateBandLabel": null,
+        "basis": "0.92 ac-ft/ac (FBCDD Table 6-1 at 85% impervious) × 300.00 ac",
+        "ruleId": "fbcdd-dcm-atlas14-2020",
+        "ruleType": "table-band",
+        "flags": [
+          "from-published-table"
+        ],
+        "governing": null
+      },
+      "fortbend|700ac|60%": {
+        "kind": "band",
+        "requiredAcFt": null,
+        "bandAcFt": [
+          434,
+          686
+        ],
+        "rateAcFtPerAc": null,
+        "rateBandAcFtPerAc": [
+          0.62,
+          0.98
+        ],
+        "rateBandLabel": "screening band",
+        "basis": "0.62–0.98 ac-ft/ac (simplified rate method doesn't apply at 700 ac — full drainage modeling required) × 700.00 ac",
+        "ruleId": "fbcdd-dcm-atlas14-2020",
+        "ruleType": "table-band",
+        "flags": [
+          "large-tract-modeling",
+          "screening-band"
+        ],
+        "governing": null
+      },
+      "montgomery|5ac|impNA": {
+        "kind": "band",
+        "requiredAcFt": null,
+        "bandAcFt": [
+          1.75,
+          4.5
+        ],
+        "rateAcFtPerAc": null,
+        "rateBandAcFtPerAc": [
+          0.35,
+          0.9
+        ],
+        "rateBandLabel": "screening band",
+        "basis": "0.35–0.9 ac-ft/ac (spans the published rate range because impervious % isn't set — enter a test-fit for the exact Eq. 6-2 point) × 5.00 ac",
+        "ruleId": "moco-dcm-2025",
+        "ruleType": "policy-band",
+        "flags": [
+          "impervious-unknown",
+          "screening-band"
+        ],
+        "governing": null
+      },
+      "montgomery|5ac|65%": {
+        "kind": "point",
+        "requiredAcFt": 3.206,
+        "bandAcFt": null,
+        "rateAcFtPerAc": 0.6412,
+        "rateBandAcFtPerAc": null,
+        "rateBandLabel": null,
+        "basis": "0.64 ac-ft/ac (MoCo DCM Eq. 6-2 at 65% impervious) × 5.00 ac",
+        "ruleId": "moco-dcm-2025",
+        "ruleType": "policy-band",
+        "flags": [
+          "from-published-formula"
+        ],
+        "governing": null
+      },
+      "montgomery|25ac|70%": {
+        "kind": "band",
+        "requiredAcFt": null,
+        "bandAcFt": [
+          8.75,
+          22.5
+        ],
+        "rateAcFtPerAc": null,
+        "rateBandAcFtPerAc": [
+          0.35,
+          0.9
+        ],
+        "rateBandLabel": "screening band",
+        "basis": "0.35–0.9 ac-ft/ac (simplified rate method doesn't apply at 25 ac — full drainage modeling required (min 0.55 ac-ft/ac)) × 25.00 ac",
+        "ruleId": "moco-dcm-2025",
+        "ruleType": "policy-band",
+        "flags": [
+          "large-tract-modeling",
+          "screening-band"
+        ],
+        "governing": null
+      },
+      "montgomery|80.34ac|72%": {
+        "kind": "band",
+        "requiredAcFt": null,
+        "bandAcFt": [
+          28.119,
+          72.306
+        ],
+        "rateAcFtPerAc": null,
+        "rateBandAcFtPerAc": [
+          0.35,
+          0.9
+        ],
+        "rateBandLabel": "screening band",
+        "basis": "0.35–0.9 ac-ft/ac (simplified rate method doesn't apply at 80.34 ac — full drainage modeling required (min 0.55 ac-ft/ac)) × 80.34 ac",
+        "ruleId": "moco-dcm-2025",
+        "ruleType": "policy-band",
+        "flags": [
+          "large-tract-modeling",
+          "screening-band"
+        ],
+        "governing": null
+      },
+      "montgomery|300ac|85%": {
+        "kind": "band",
+        "requiredAcFt": null,
+        "bandAcFt": [
+          105,
+          270
+        ],
+        "rateAcFtPerAc": null,
+        "rateBandAcFtPerAc": [
+          0.35,
+          0.9
+        ],
+        "rateBandLabel": "screening band",
+        "basis": "0.35–0.9 ac-ft/ac (simplified rate method doesn't apply at 300 ac — full drainage modeling required (min 0.55 ac-ft/ac)) × 300.00 ac",
+        "ruleId": "moco-dcm-2025",
+        "ruleType": "policy-band",
+        "flags": [
+          "large-tract-modeling",
+          "screening-band"
+        ],
+        "governing": null
+      },
+      "montgomery|700ac|60%": {
+        "kind": "band",
+        "requiredAcFt": null,
+        "bandAcFt": [
+          245,
+          630
+        ],
+        "rateAcFtPerAc": null,
+        "rateBandAcFtPerAc": [
+          0.35,
+          0.9
+        ],
+        "rateBandLabel": "screening band",
+        "basis": "0.35–0.9 ac-ft/ac (simplified rate method doesn't apply at 700 ac — full drainage modeling required (min 0.55 ac-ft/ac)) × 700.00 ac",
+        "ruleId": "moco-dcm-2025",
+        "ruleType": "policy-band",
+        "flags": [
+          "large-tract-modeling",
+          "screening-band"
+        ],
+        "governing": null
+      },
+      "chambers|5ac|impNA": {
+        "kind": "band",
+        "requiredAcFt": null,
+        "bandAcFt": [
+          2.5,
+          6
+        ],
+        "rateAcFtPerAc": null,
+        "rateBandAcFtPerAc": [
+          0.5,
+          1.2
+        ],
+        "rateBandLabel": "screening band",
+        "basis": "0.5–1.2 ac-ft/ac (Planyr screening band — no published flat rate) × 5.00 ac",
+        "ruleId": "chambers-dcm-2005",
+        "ruleType": "policy-band",
+        "flags": [
+          "screening-band",
+          "verify-with-county-engineer"
+        ],
+        "governing": null
+      },
+      "chambers|5ac|65%": {
+        "kind": "band",
+        "requiredAcFt": null,
+        "bandAcFt": [
+          2.5,
+          6
+        ],
+        "rateAcFtPerAc": null,
+        "rateBandAcFtPerAc": [
+          0.5,
+          1.2
+        ],
+        "rateBandLabel": "screening band",
+        "basis": "0.5–1.2 ac-ft/ac (Planyr screening band — no published flat rate) × 5.00 ac",
+        "ruleId": "chambers-dcm-2005",
+        "ruleType": "policy-band",
+        "flags": [
+          "screening-band",
+          "verify-with-county-engineer"
+        ],
+        "governing": null
+      },
+      "chambers|25ac|70%": {
+        "kind": "band",
+        "requiredAcFt": null,
+        "bandAcFt": [
+          12.5,
+          30
+        ],
+        "rateAcFtPerAc": null,
+        "rateBandAcFtPerAc": [
+          0.5,
+          1.2
+        ],
+        "rateBandLabel": "screening band",
+        "basis": "0.5–1.2 ac-ft/ac (Planyr screening band — no published flat rate) × 25.00 ac",
+        "ruleId": "chambers-dcm-2005",
+        "ruleType": "policy-band",
+        "flags": [
+          "screening-band",
+          "verify-with-county-engineer"
+        ],
+        "governing": null
+      },
+      "chambers|80.34ac|72%": {
+        "kind": "band",
+        "requiredAcFt": null,
+        "bandAcFt": [
+          40.17,
+          96.408
+        ],
+        "rateAcFtPerAc": null,
+        "rateBandAcFtPerAc": [
+          0.5,
+          1.2
+        ],
+        "rateBandLabel": "screening band",
+        "basis": "0.5–1.2 ac-ft/ac (Planyr screening band — no published flat rate) × 80.34 ac",
+        "ruleId": "chambers-dcm-2005",
+        "ruleType": "policy-band",
+        "flags": [
+          "screening-band",
+          "verify-with-county-engineer"
+        ],
+        "governing": null
+      },
+      "chambers|300ac|85%": {
+        "kind": "band",
+        "requiredAcFt": null,
+        "bandAcFt": [
+          150,
+          360
+        ],
+        "rateAcFtPerAc": null,
+        "rateBandAcFtPerAc": [
+          0.5,
+          1.2
+        ],
+        "rateBandLabel": "screening band",
+        "basis": "0.5–1.2 ac-ft/ac (Planyr screening band — no published flat rate) × 300.00 ac",
+        "ruleId": "chambers-dcm-2005",
+        "ruleType": "policy-band",
+        "flags": [
+          "screening-band",
+          "verify-with-county-engineer"
+        ],
+        "governing": null
+      },
+      "chambers|700ac|60%": {
+        "kind": "band",
+        "requiredAcFt": null,
+        "bandAcFt": [
+          350,
+          840
+        ],
+        "rateAcFtPerAc": null,
+        "rateBandAcFtPerAc": [
+          0.5,
+          1.2
+        ],
+        "rateBandLabel": "screening band",
+        "basis": "0.5–1.2 ac-ft/ac (Planyr screening band — no published flat rate) × 700.00 ac",
+        "ruleId": "chambers-dcm-2005",
+        "ruleType": "policy-band",
+        "flags": [
+          "screening-band",
+          "verify-with-county-engineer"
+        ],
+        "governing": null
+      },
+      "waller|5ac|impNA": {
+        "kind": "band",
+        "requiredAcFt": null,
+        "bandAcFt": [
+          2.75,
+          3.25
+        ],
+        "rateAcFtPerAc": null,
+        "rateBandAcFtPerAc": [
+          0.55,
+          0.65
+        ],
+        "rateBandLabel": "screening band",
+        "basis": "0.55–0.65 ac-ft/ac (published range — 0.55 ac-ft/ac floor to the 0.65 coefficient rate; exact volume is method/analysis-dependent) × 5.00 ac",
+        "ruleId": "waller-subdiv-2023",
+        "ruleType": "policy-band",
+        "flags": [
+          "screening-band",
+          "verify-with-county-engineer"
+        ],
+        "governing": null
+      },
+      "waller|5ac|65%": {
+        "kind": "band",
+        "requiredAcFt": null,
+        "bandAcFt": [
+          2.75,
+          3.25
+        ],
+        "rateAcFtPerAc": null,
+        "rateBandAcFtPerAc": [
+          0.55,
+          0.65
+        ],
+        "rateBandLabel": "screening band",
+        "basis": "0.55–0.65 ac-ft/ac (published range — 0.55 ac-ft/ac floor to the 0.65 coefficient rate; exact volume is method/analysis-dependent) × 5.00 ac",
+        "ruleId": "waller-subdiv-2023",
+        "ruleType": "policy-band",
+        "flags": [
+          "screening-band",
+          "verify-with-county-engineer"
+        ],
+        "governing": null
+      },
+      "waller|25ac|70%": {
+        "kind": "band",
+        "requiredAcFt": null,
+        "bandAcFt": [
+          13.75,
+          16.25
+        ],
+        "rateAcFtPerAc": null,
+        "rateBandAcFtPerAc": [
+          0.55,
+          0.65
+        ],
+        "rateBandLabel": "screening band",
+        "basis": "0.55–0.65 ac-ft/ac (published range — 0.55 ac-ft/ac floor to the 0.65 coefficient rate; exact volume is method/analysis-dependent) × 25.00 ac",
+        "ruleId": "waller-subdiv-2023",
+        "ruleType": "policy-band",
+        "flags": [
+          "screening-band",
+          "verify-with-county-engineer"
+        ],
+        "governing": null
+      },
+      "waller|80.34ac|72%": {
+        "kind": "band",
+        "requiredAcFt": null,
+        "bandAcFt": [
+          44.187,
+          52.221
+        ],
+        "rateAcFtPerAc": null,
+        "rateBandAcFtPerAc": [
+          0.55,
+          0.65
+        ],
+        "rateBandLabel": "screening band",
+        "basis": "0.55–0.65 ac-ft/ac (published range — 0.55 ac-ft/ac floor to the 0.65 coefficient rate; exact volume is method/analysis-dependent) × 80.34 ac",
+        "ruleId": "waller-subdiv-2023",
+        "ruleType": "policy-band",
+        "flags": [
+          "screening-band",
+          "verify-with-county-engineer"
+        ],
+        "governing": null
+      },
+      "waller|300ac|85%": {
+        "kind": "band",
+        "requiredAcFt": null,
+        "bandAcFt": [
+          165,
+          195
+        ],
+        "rateAcFtPerAc": null,
+        "rateBandAcFtPerAc": [
+          0.55,
+          0.65
+        ],
+        "rateBandLabel": "screening band",
+        "basis": "0.55–0.65 ac-ft/ac (published range — 0.55 ac-ft/ac floor to the 0.65 coefficient rate; exact volume is method/analysis-dependent) × 300.00 ac",
+        "ruleId": "waller-subdiv-2023",
+        "ruleType": "policy-band",
+        "flags": [
+          "screening-band",
+          "verify-with-county-engineer"
+        ],
+        "governing": null
+      },
+      "waller|700ac|60%": {
+        "kind": "band",
+        "requiredAcFt": null,
+        "bandAcFt": [
+          385,
+          455
+        ],
+        "rateAcFtPerAc": null,
+        "rateBandAcFtPerAc": [
+          0.55,
+          0.65
+        ],
+        "rateBandLabel": "screening band",
+        "basis": "0.55–0.65 ac-ft/ac (published range — 0.55 ac-ft/ac floor to the 0.65 coefficient rate; exact volume is method/analysis-dependent) × 700.00 ac",
+        "ruleId": "waller-subdiv-2023",
+        "ruleType": "policy-band",
+        "flags": [
+          "screening-band",
+          "verify-with-county-engineer"
+        ],
+        "governing": null
+      },
+      "bkdd|5ac|impNA": {
+        "kind": "unknown",
+        "requiredAcFt": null,
+        "bandAcFt": null,
+        "rateAcFtPerAc": null,
+        "rateBandAcFtPerAc": null,
+        "rateBandLabel": null,
+        "basis": "Brookshire–Katy Drainage District: rate control (Post ≤ Pre peak at 2/10/100-yr) — no volumetric rate; sizing by hydrograph routing (HEC-HMS)",
+        "ruleId": "bkdd-rules-2022",
+        "ruleType": "rate-match",
+        "flags": [
+          "rate-match",
+          "verify-with-county-engineer"
+        ],
+        "governing": null
+      },
+      "bkdd|5ac|65%": {
+        "kind": "unknown",
+        "requiredAcFt": null,
+        "bandAcFt": null,
+        "rateAcFtPerAc": null,
+        "rateBandAcFtPerAc": null,
+        "rateBandLabel": null,
+        "basis": "Brookshire–Katy Drainage District: rate control (Post ≤ Pre peak at 2/10/100-yr) — no volumetric rate; sizing by hydrograph routing (HEC-HMS)",
+        "ruleId": "bkdd-rules-2022",
+        "ruleType": "rate-match",
+        "flags": [
+          "rate-match",
+          "verify-with-county-engineer"
+        ],
+        "governing": null
+      },
+      "bkdd|25ac|70%": {
+        "kind": "unknown",
+        "requiredAcFt": null,
+        "bandAcFt": null,
+        "rateAcFtPerAc": null,
+        "rateBandAcFtPerAc": null,
+        "rateBandLabel": null,
+        "basis": "Brookshire–Katy Drainage District: rate control (Post ≤ Pre peak at 2/10/100-yr) — no volumetric rate; sizing by hydrograph routing (HEC-HMS)",
+        "ruleId": "bkdd-rules-2022",
+        "ruleType": "rate-match",
+        "flags": [
+          "rate-match",
+          "verify-with-county-engineer"
+        ],
+        "governing": null
+      },
+      "bkdd|80.34ac|72%": {
+        "kind": "unknown",
+        "requiredAcFt": null,
+        "bandAcFt": null,
+        "rateAcFtPerAc": null,
+        "rateBandAcFtPerAc": null,
+        "rateBandLabel": null,
+        "basis": "Brookshire–Katy Drainage District: rate control (Post ≤ Pre peak at 2/10/100-yr) — no volumetric rate; sizing by hydrograph routing (HEC-HMS)",
+        "ruleId": "bkdd-rules-2022",
+        "ruleType": "rate-match",
+        "flags": [
+          "rate-match",
+          "verify-with-county-engineer"
+        ],
+        "governing": null
+      },
+      "bkdd|300ac|85%": {
+        "kind": "unknown",
+        "requiredAcFt": null,
+        "bandAcFt": null,
+        "rateAcFtPerAc": null,
+        "rateBandAcFtPerAc": null,
+        "rateBandLabel": null,
+        "basis": "Brookshire–Katy Drainage District: rate control (Post ≤ Pre peak at 2/10/100-yr) — no volumetric rate; sizing by hydrograph routing (HEC-HMS)",
+        "ruleId": "bkdd-rules-2022",
+        "ruleType": "rate-match",
+        "flags": [
+          "rate-match",
+          "verify-with-county-engineer"
+        ],
+        "governing": null
+      },
+      "bkdd|700ac|60%": {
+        "kind": "unknown",
+        "requiredAcFt": null,
+        "bandAcFt": null,
+        "rateAcFtPerAc": null,
+        "rateBandAcFtPerAc": null,
+        "rateBandLabel": null,
+        "basis": "Brookshire–Katy Drainage District: rate control (Post ≤ Pre peak at 2/10/100-yr) — no volumetric rate; sizing by hydrograph routing (HEC-HMS)",
+        "ruleId": "bkdd-rules-2022",
+        "ruleType": "rate-match",
+        "flags": [
+          "rate-match",
+          "verify-with-county-engineer"
+        ],
+        "governing": null
+      },
+      "missouricity|5ac|impNA": {
+        "kind": "point",
+        "requiredAcFt": 3.75,
+        "bandAcFt": null,
+        "rateAcFtPerAc": 0.75,
+        "rateBandAcFtPerAc": null,
+        "rateBandLabel": null,
+        "basis": "0.75 ac-ft/ac × 5.00 ac impervious (screening — the Missouri City rate applies to ADDED impervious on redevelopment; full impervious used here)",
+        "ruleId": "missouricity-adopt",
+        "ruleType": "overlay",
+        "flags": [
+          "added-impervious-unknown",
+          "municipal-overlay"
+        ],
+        "governing": null
+      },
+      "missouricity|5ac|65%": {
+        "kind": "point",
+        "requiredAcFt": 2.4375,
+        "bandAcFt": null,
+        "rateAcFtPerAc": 0.75,
+        "rateBandAcFtPerAc": null,
+        "rateBandLabel": null,
+        "basis": "0.75 ac-ft/ac × 3.25 ac impervious (screening — the Missouri City rate applies to ADDED impervious on redevelopment; full impervious used here)",
+        "ruleId": "missouricity-adopt",
+        "ruleType": "overlay",
+        "flags": [
+          "added-impervious-unknown",
+          "municipal-overlay"
+        ],
+        "governing": null
+      },
+      "missouricity|25ac|70%": {
+        "kind": "unknown",
+        "requiredAcFt": null,
+        "bandAcFt": null,
+        "rateAcFtPerAc": null,
+        "rateBandAcFtPerAc": null,
+        "rateBandLabel": null,
+        "basis": "≥20 ac in Missouri City: parent authority depends on the watershed drained to",
+        "ruleId": "missouricity-adopt",
+        "ruleType": "overlay",
+        "flags": [
+          "municipal-overlay",
+          "overlay-parent-ambiguous"
+        ],
+        "governing": {
+          "picked": null,
+          "reason": "parent authority unresolved (watershed drained to)"
+        }
+      },
+      "missouricity|80.34ac|72%": {
+        "kind": "unknown",
+        "requiredAcFt": null,
+        "bandAcFt": null,
+        "rateAcFtPerAc": null,
+        "rateBandAcFtPerAc": null,
+        "rateBandLabel": null,
+        "basis": "≥20 ac in Missouri City: parent authority depends on the watershed drained to",
+        "ruleId": "missouricity-adopt",
+        "ruleType": "overlay",
+        "flags": [
+          "municipal-overlay",
+          "overlay-parent-ambiguous"
+        ],
+        "governing": {
+          "picked": null,
+          "reason": "parent authority unresolved (watershed drained to)"
+        }
+      },
+      "missouricity|300ac|85%": {
+        "kind": "unknown",
+        "requiredAcFt": null,
+        "bandAcFt": null,
+        "rateAcFtPerAc": null,
+        "rateBandAcFtPerAc": null,
+        "rateBandLabel": null,
+        "basis": "≥20 ac in Missouri City: parent authority depends on the watershed drained to",
+        "ruleId": "missouricity-adopt",
+        "ruleType": "overlay",
+        "flags": [
+          "municipal-overlay",
+          "overlay-parent-ambiguous"
+        ],
+        "governing": {
+          "picked": null,
+          "reason": "parent authority unresolved (watershed drained to)"
+        }
+      },
+      "missouricity|700ac|60%": {
+        "kind": "unknown",
+        "requiredAcFt": null,
+        "bandAcFt": null,
+        "rateAcFtPerAc": null,
+        "rateBandAcFtPerAc": null,
+        "rateBandLabel": null,
+        "basis": "≥20 ac in Missouri City: parent authority depends on the watershed drained to",
+        "ruleId": "missouricity-adopt",
+        "ruleType": "overlay",
+        "flags": [
+          "municipal-overlay",
+          "overlay-parent-ambiguous"
+        ],
+        "governing": {
+          "picked": null,
+          "reason": "parent authority unresolved (watershed drained to)"
+        }
+      },
+      "magnolia|5ac|impNA": {
+        "kind": "band",
+        "requiredAcFt": null,
+        "bandAcFt": [
+          1.75,
+          4.5
+        ],
+        "rateAcFtPerAc": null,
+        "rateBandAcFtPerAc": [
+          0.35,
+          0.9
+        ],
+        "rateBandLabel": "screening band",
+        "basis": "0.35–0.9 ac-ft/ac (spans the published rate range because impervious % isn't set — enter a test-fit for the exact Eq. 6-2 point) × 5.00 ac · via City of Magnolia adopt-by-reference (+10% runoff-reduction requirement)",
+        "ruleId": "moco-dcm-2025",
+        "ruleType": "policy-band",
+        "flags": [
+          "impervious-unknown",
+          "municipal-overlay",
+          "screening-band"
+        ],
+        "governing": null
+      },
+      "magnolia|5ac|65%": {
+        "kind": "point",
+        "requiredAcFt": 3.206,
+        "bandAcFt": null,
+        "rateAcFtPerAc": 0.6412,
+        "rateBandAcFtPerAc": null,
+        "rateBandLabel": null,
+        "basis": "0.64 ac-ft/ac (MoCo DCM Eq. 6-2 at 65% impervious) × 5.00 ac · via City of Magnolia adopt-by-reference (+10% runoff-reduction requirement)",
+        "ruleId": "moco-dcm-2025",
+        "ruleType": "policy-band",
+        "flags": [
+          "from-published-formula",
+          "municipal-overlay"
+        ],
+        "governing": null
+      },
+      "magnolia|25ac|70%": {
+        "kind": "band",
+        "requiredAcFt": null,
+        "bandAcFt": [
+          8.75,
+          22.5
+        ],
+        "rateAcFtPerAc": null,
+        "rateBandAcFtPerAc": [
+          0.35,
+          0.9
+        ],
+        "rateBandLabel": "screening band",
+        "basis": "0.35–0.9 ac-ft/ac (simplified rate method doesn't apply at 25 ac — full drainage modeling required (min 0.55 ac-ft/ac)) × 25.00 ac · via City of Magnolia adopt-by-reference (+10% runoff-reduction requirement)",
+        "ruleId": "moco-dcm-2025",
+        "ruleType": "policy-band",
+        "flags": [
+          "large-tract-modeling",
+          "municipal-overlay",
+          "screening-band"
+        ],
+        "governing": null
+      },
+      "magnolia|80.34ac|72%": {
+        "kind": "band",
+        "requiredAcFt": null,
+        "bandAcFt": [
+          28.119,
+          72.306
+        ],
+        "rateAcFtPerAc": null,
+        "rateBandAcFtPerAc": [
+          0.35,
+          0.9
+        ],
+        "rateBandLabel": "screening band",
+        "basis": "0.35–0.9 ac-ft/ac (simplified rate method doesn't apply at 80.34 ac — full drainage modeling required (min 0.55 ac-ft/ac)) × 80.34 ac · via City of Magnolia adopt-by-reference (+10% runoff-reduction requirement)",
+        "ruleId": "moco-dcm-2025",
+        "ruleType": "policy-band",
+        "flags": [
+          "large-tract-modeling",
+          "municipal-overlay",
+          "screening-band"
+        ],
+        "governing": null
+      },
+      "magnolia|300ac|85%": {
+        "kind": "band",
+        "requiredAcFt": null,
+        "bandAcFt": [
+          105,
+          270
+        ],
+        "rateAcFtPerAc": null,
+        "rateBandAcFtPerAc": [
+          0.35,
+          0.9
+        ],
+        "rateBandLabel": "screening band",
+        "basis": "0.35–0.9 ac-ft/ac (simplified rate method doesn't apply at 300 ac — full drainage modeling required (min 0.55 ac-ft/ac)) × 300.00 ac · via City of Magnolia adopt-by-reference (+10% runoff-reduction requirement)",
+        "ruleId": "moco-dcm-2025",
+        "ruleType": "policy-band",
+        "flags": [
+          "large-tract-modeling",
+          "municipal-overlay",
+          "screening-band"
+        ],
+        "governing": null
+      },
+      "magnolia|700ac|60%": {
+        "kind": "band",
+        "requiredAcFt": null,
+        "bandAcFt": [
+          245,
+          630
+        ],
+        "rateAcFtPerAc": null,
+        "rateBandAcFtPerAc": [
+          0.35,
+          0.9
+        ],
+        "rateBandLabel": "screening band",
+        "basis": "0.35–0.9 ac-ft/ac (simplified rate method doesn't apply at 700 ac — full drainage modeling required (min 0.55 ac-ft/ac)) × 700.00 ac · via City of Magnolia adopt-by-reference (+10% runoff-reduction requirement)",
+        "ruleId": "moco-dcm-2025",
+        "ruleType": "policy-band",
+        "flags": [
+          "large-tract-modeling",
+          "municipal-overlay",
+          "screening-band"
+        ],
+        "governing": null
+      }
+    },
+    "harrisVariants": {
+      "stormSewer": {
+        "kind": "point",
+        "requiredAcFt": 30,
+        "bandAcFt": null,
+        "rateAcFtPerAc": 0.75,
+        "rateBandAcFtPerAc": null,
+        "rateBandLabel": null,
+        "basis": "0.75 ac-ft/ac × 40.00 ac (unincorporated Harris — storm-sewer outfall minimum, HCED Infra Regs)",
+        "ruleId": "hcfcd-pcpm-atlas14-2021",
+        "ruleType": "rate",
+        "flags": [
+          "hced-infra-outfall-min"
+        ],
+        "governing": null
+      },
+      "roadsideDitch": {
+        "kind": "point",
+        "requiredAcFt": 40,
+        "bandAcFt": null,
+        "rateAcFtPerAc": 1,
+        "rateBandAcFtPerAc": null,
+        "rateBandLabel": null,
+        "basis": "1 ac-ft/ac × 40.00 ac (unincorporated Harris — roadside-ditch outfall minimum, HCED Infra Regs)",
+        "ruleId": "hcfcd-pcpm-atlas14-2021",
+        "ruleType": "rate",
+        "flags": [
+          "hced-infra-outfall-min"
+        ],
+        "governing": null
+      },
+      "unknownOutfall": {
+        "kind": "band",
+        "requiredAcFt": null,
+        "bandAcFt": [
+          30,
+          40
+        ],
+        "rateAcFtPerAc": null,
+        "rateBandAcFtPerAc": [
+          0.75,
+          1
+        ],
+        "rateBandLabel": "by outfall",
+        "basis": "0.75–1 ac-ft/ac (unincorporated Harris outfall-type minimum — storm-sewer 0.75 vs roadside-ditch 1; set the outfall type for the exact point) × 40.00 ac",
+        "ruleId": "hcfcd-pcpm-atlas14-2021",
+        "ruleType": "rate",
+        "flags": [
+          "hced-infra-outfall-min",
+          "outfall-type-unknown"
+        ],
+        "governing": null
+      },
+      "pcpmMethod": {
+        "kind": "point",
+        "requiredAcFt": 26,
+        "bandAcFt": null,
+        "rateAcFtPerAc": 0.65,
+        "rateBandAcFtPerAc": null,
+        "rateBandLabel": null,
+        "basis": "0.65 ac-ft/ac × 40.00 ac (entire tract — HCFCD PCPM methods baseline)",
+        "ruleId": "hcfcd-pcpm-atlas14-2021",
+        "ruleType": "rate",
+        "flags": [
+          "hcfcd-pcpm-baseline"
+        ],
+        "governing": null
+      },
+      "hcfcdNotApplicable": {
+        "kind": "band",
+        "requiredAcFt": null,
+        "bandAcFt": [
+          30,
+          40
+        ],
+        "rateAcFtPerAc": null,
+        "rateBandAcFtPerAc": [
+          0.75,
+          1
+        ],
+        "rateBandLabel": "by outfall",
+        "basis": "0.75–1 ac-ft/ac (unincorporated Harris outfall-type minimum — storm-sewer 0.75 vs roadside-ditch 1; set the outfall type for the exact point) × 40.00 ac",
+        "ruleId": "hcfcd-pcpm-atlas14-2021",
+        "ruleType": "rate",
+        "flags": [
+          "hced-infra-outfall-min",
+          "outfall-type-unknown"
+        ],
+        "governing": null
+      },
+      "inCityLimits": {
+        "kind": "band",
+        "requiredAcFt": null,
+        "bandAcFt": [
+          30,
+          40
+        ],
+        "rateAcFtPerAc": null,
+        "rateBandAcFtPerAc": [
+          0.75,
+          1
+        ],
+        "rateBandLabel": "by outfall",
+        "basis": "0.75–1 ac-ft/ac (unincorporated Harris outfall-type minimum — storm-sewer 0.75 vs roadside-ditch 1; set the outfall type for the exact point) × 40.00 ac",
+        "ruleId": "hcfcd-pcpm-atlas14-2021",
+        "ruleType": "rate",
+        "flags": [
+          "hced-infra-outfall-min",
+          "outfall-type-unknown"
+        ],
+        "governing": null
+      }
+    },
+    "rateFromImpervious": {
+      "fortbend|0": 0.62,
+      "fortbend|25": 0.68,
+      "fortbend|50": 0.78,
+      "fortbend|65": 0.84,
+      "fortbend|80": 0.9,
+      "fortbend|95": 0.96,
+      "fortbend|100": 0.98,
+      "montgomery|0": 0.35,
+      "montgomery|25": 0.35,
+      "montgomery|50": 0.5317,
+      "montgomery|65": 0.6412,
+      "montgomery|80": 0.7507,
+      "montgomery|95": 0.8602,
+      "montgomery|100": 0.8967,
+      "hcfcd|0": null,
+      "hcfcd|25": null,
+      "hcfcd|50": null,
+      "hcfcd|65": null,
+      "hcfcd|80": null,
+      "hcfcd|95": null,
+      "hcfcd|100": null,
+      "chambers|0": null,
+      "chambers|25": null,
+      "chambers|50": null,
+      "chambers|65": null,
+      "chambers|80": null,
+      "chambers|95": null,
+      "chambers|100": null
+    },
+    "storms": {
+      "runoffCoefficient": {
+        "0": 0.05,
+        "25": 0.27499999999999997,
+        "50": 0.49999999999999994,
+        "72": 0.698,
+        "100": 0.95
+      },
+      "depth24hr": {
+        "2": 4.32,
+        "10": 6.96,
+        "25": 8.4,
+        "100": 12.96
+      },
+      "intensity": {
+        "100yr|60min": {
+          "inPerHr": 3.9,
+          "source": {
+            "name": "NOAA Atlas 14 Vol. 11 (Texas) — point precipitation frequency, Houston area",
+            "section": "Partial-duration intensity (in/hr)",
+            "url": "https://hdsc.nws.noaa.gov/pfds/"
+          },
+          "secondarySource": true
+        },
+        "100yr|15min": {
+          "inPerHr": 7.4,
+          "source": {
+            "name": "NOAA Atlas 14 Vol. 11 (Texas) — point precipitation frequency, Houston area",
+            "section": "Partial-duration intensity (in/hr)",
+            "url": "https://hdsc.nws.noaa.gov/pfds/"
+          },
+          "secondarySource": true
+        },
+        "25yr|60min": {
+          "inPerHr": 3.1,
+          "source": {
+            "name": "NOAA Atlas 14 Vol. 11 (Texas) — point precipitation frequency, Houston area",
+            "section": "Partial-duration intensity (in/hr)",
+            "url": "https://hdsc.nws.noaa.gov/pfds/"
+          },
+          "secondarySource": true
+        },
+        "2yr|5min": {
+          "inPerHr": 5.5,
+          "source": {
+            "name": "NOAA Atlas 14 Vol. 11 (Texas) — point precipitation frequency, Houston area",
+            "section": "Partial-duration intensity (in/hr)",
+            "url": "https://hdsc.nws.noaa.gov/pfds/"
+          },
+          "secondarySource": true
+        }
+      }
+    },
+    "analysisTier": {
+      "hcfcd|25ac": {
+        "tier": "dia",
+        "triggerIds": [
+          "floodplain",
+          "tract-size"
+        ],
+        "unknownIds": []
+      },
+      "hcfcd|800ac": {
+        "tier": "dia",
+        "triggerIds": [
+          "floodplain",
+          "tract-size"
+        ],
+        "unknownIds": []
+      },
+      "fortbend|60ac": {
+        "tier": "dia",
+        "triggerIds": [
+          "floodplain",
+          "tract-size"
+        ],
+        "unknownIds": []
+      },
+      "chambers|150ac": {
+        "tier": "dia",
+        "triggerIds": [
+          "floodplain"
+        ],
+        "unknownIds": []
+      },
+      "montgomery|700ac": {
+        "tier": "dia",
+        "triggerIds": [
+          "floodplain",
+          "master-plan",
+          "tract-size"
+        ],
+        "unknownIds": []
+      }
+    },
+    "pondAuto": {
+      "hcfcd": {
+        "freeboard": {
+          "value": 1,
+          "source": "Planyr screening convention",
+          "verified": false
+        },
+        "slope": {
+          "value": 3,
+          "source": "HCFCD",
+          "verified": true
+        },
+        "tobElev": {
+          "value": 100,
+          "source": "3DEP site median",
+          "verified": false
+        }
+      },
+      "fortbend": {
+        "freeboard": {
+          "value": 1,
+          "source": "FBCDD DCM §6.4.7",
+          "verified": true
+        },
+        "slope": {
+          "value": 3,
+          "source": "Planyr screening convention",
+          "verified": false
+        },
+        "tobElev": {
+          "value": 100,
+          "source": "3DEP site median",
+          "verified": false
+        }
+      },
+      "coh": {
+        "freeboard": {
+          "value": 1,
+          "source": "Planyr screening convention",
+          "verified": false
+        },
+        "slope": {
+          "value": 3,
+          "source": "Planyr screening convention",
+          "verified": false
+        },
+        "tobElev": {
+          "value": 100,
+          "source": "3DEP site median",
+          "verified": false
+        }
+      },
+      "montgomery": {
+        "freeboard": {
+          "value": 1,
+          "source": "Planyr screening convention",
+          "verified": false
+        },
+        "slope": {
+          "value": 3,
+          "source": "Planyr screening convention",
+          "verified": false
+        },
+        "tobElev": {
+          "value": 100,
+          "source": "3DEP site median",
+          "verified": false
+        }
+      }
+    }
+  },
+  "drawdown": {
+    "release": {
+      "cfs": 10.0425,
+      "basis": "rate",
+      "rateCfsPerAc": 0.125,
+      "acres": 80.34
+    },
+    "noRate": null,
+    "assessed": {
+      "known": true,
+      "releaseCfs": 10.0425,
+      "maxHr": 72,
+      "optimistic": true,
+      "site": {
+        "hours": 248.566592,
+        "days": 10.356941,
+        "tone": "red",
+        "label": "10 days"
+      },
+      "ponds": [
+        {
+          "id": "p1",
+          "hours": 248.566592,
+          "tone": "red",
+          "label": "10 days"
+        },
+        {
+          "id": "p2",
+          "hours": 248.566592,
+          "tone": "red",
+          "label": "10 days"
+        }
+      ],
+      "worstTone": "red",
+      "note": "Optimistic bound: outflow decays as the water level drops, so the real drawdown is longer than this constant-rate figure."
+    },
+    "unknown": {
+      "known": false,
+      "reason": "allowable release rate not set — enter the jurisdiction's release rate (or the pond's outlet capacity) to screen drawdown time."
+    }
+  },
+  "floodplainRules": {
+    "coh": {
+      "label": "City of Houston",
+      "trigger": "1pct_plus_02pct",
+      "ratio": 1,
+      "floodwayPolicy": "prohibit_fill",
+      "offsetScope": "storage",
+      "offsetElevBasis": null,
+      "floodwayBufferFt": null,
+      "verified": false,
+      "source": "COH Code of Ordinances Ch. 19 (Floodplain), as amended eff. 9/1/2018 — fill triggers extend to the 0.2% (500-yr) floodplain.",
+      "sourceDate": "2018-09-01"
+    },
+    "harris": {
+      "label": "Harris County (unincorporated)",
+      "trigger": "1pct_plus_02pct",
+      "ratio": 1,
+      "floodwayPolicy": "prohibit_fill",
+      "offsetScope": "storage_and_conveyance",
+      "offsetElevBasis": null,
+      "floodwayBufferFt": null,
+      "verified": true,
+      "source": "Harris County Regulations for Floodplain Management & Infrastructure Regulations, eff. 7/9/2019 (Atlas-14 ed.); §4.07(e) 1:1 offset.",
+      "sourceDate": "2019-07-09"
+    },
+    "fortbend": {
+      "label": "Fort Bend County",
+      "trigger": "1pct_plus_02pct",
+      "ratio": 1,
+      "floodwayPolicy": "prohibit_fill",
+      "offsetScope": "storage_and_conveyance",
+      "offsetElevBasis": "02pct",
+      "floodwayBufferFt": null,
+      "verified": true,
+      "source": "FBC Flood Damage Prevention Regs §5.02(h)(1) (adopted 3/4/2014, am. 10/8/2024) + FBCDD Interim Atlas-14 Criteria §9 (eff. 2020-01-01, rev. 9/2021).",
+      "sourceDate": "2024-10-08"
+    },
+    "montgomery": {
+      "label": "Montgomery County",
+      "trigger": "1pct",
+      "ratio": 1,
+      "floodwayPolicy": "prohibit_fill",
+      "offsetScope": "storage",
+      "offsetElevBasis": null,
+      "floodwayBufferFt": null,
+      "verified": false,
+      "source": "Montgomery County drainage criteria (not yet transcribed).",
+      "sourceDate": null
+    },
+    "chambers": {
+      "label": "Chambers County",
+      "trigger": "1pct",
+      "ratio": 1,
+      "floodwayPolicy": "prohibit_fill",
+      "offsetScope": "storage",
+      "offsetElevBasis": null,
+      "floodwayBufferFt": null,
+      "verified": false,
+      "source": "Chambers County floodplain order (not yet transcribed).",
+      "sourceDate": null
+    },
+    "waller": {
+      "label": "Waller County (unincorporated)",
+      "trigger": "1pct_plus_02pct",
+      "ratio": 1,
+      "floodwayPolicy": "prohibit_fill",
+      "offsetScope": "storage",
+      "offsetElevBasis": null,
+      "floodwayBufferFt": 100,
+      "verified": true,
+      "source": "Waller County Flood Damage Prevention Ordinance, Art. 5 §A(8)/§A(9)/§C(3)/§E (effective 2/28/2013; Waller County participates in the NFIP). Owner primary-source pull 2026-07-15; §5.C(3) read verbatim from the county-posted ordinance 2026-07-29.",
+      "sourceDate": "2013-02-28"
+    },
+    "generic": {
+      "label": "Generic / unknown",
+      "trigger": "1pct",
+      "ratio": 1,
+      "floodwayPolicy": "prohibit_fill",
+      "offsetScope": "storage",
+      "offsetElevBasis": null,
+      "floodwayBufferFt": null,
+      "verified": false,
+      "source": "No jurisdiction matched.",
+      "sourceDate": null
+    }
+  },
+  "ffe": {
+    "rules": {
+      "coh": {
+        "label": "City of Houston",
+        "verified": false,
+        "ffeRule": {
+          "kind": "single",
+          "basis": "wse02pct",
+          "plusFt": 2
+        }
+      },
+      "harris": {
+        "label": "Harris County (unincorporated)",
+        "verified": true,
+        "ffeRule": {
+          "kind": "single",
+          "basis": "wse02pct",
+          "plusFt": 2
+        }
+      },
+      "fortbend": {
+        "label": "Fort Bend County",
+        "verified": true,
+        "ffeRule": {
+          "kind": "bases",
+          "bases": [
+            {
+              "basis": "atlas14_100yr",
+              "plusFt": 2,
+              "when": null
+            },
+            {
+              "basis": "pre_atlas14_100yr",
+              "plusFt": 2.5,
+              "when": null
+            },
+            {
+              "basis": "wse02pct",
+              "plusFt": 2,
+              "when": null
+            },
+            {
+              "basis": "wse1pct",
+              "plusFt": 2,
+              "when": null
+            },
+            {
+              "basis": "zone_a_est_bfe",
+              "plusFt": 4,
+              "when": null
+            },
+            {
+              "basis": "site",
+              "plusFt": 2,
+              "when": null
+            }
+          ]
+        }
+      },
+      "montgomery": {
+        "label": "Montgomery County",
+        "verified": false,
+        "ffeRule": null
+      },
+      "chambers": {
+        "label": "Chambers County",
+        "verified": false,
+        "ffeRule": null
+      },
+      "waller": {
+        "label": "Waller County (unincorporated)",
+        "verified": true,
+        "ffeRule": {
+          "kind": "bases",
+          "bases": [
+            {
+              "basis": "wse02pct",
+              "plusFt": 2,
+              "when": "in_1pct"
+            },
+            {
+              "basis": "wse02pct",
+              "plusFt": 1,
+              "when": "in_02pct_only"
+            },
+            {
+              "basis": "hag",
+              "plusFt": 4,
+              "when": "zone_a_no_bfe"
+            }
+          ]
+        }
+      },
+      "generic": {
+        "label": "Generic / unknown",
+        "verified": false,
+        "ffeRule": null
+      }
+    },
+    "required": {
+      "coh": {
+        "requiredFfeFt": 144.8,
+        "basis": "wse02pct",
+        "plusFt": 2,
+        "governingBasis": null,
+        "pendingBases": [],
+        "losingBases": [],
+        "unknownReason": null
+      },
+      "coh|noInputs": {
+        "requiredFfeFt": null,
+        "basis": "wse02pct",
+        "plusFt": 2,
+        "governingBasis": null,
+        "pendingBases": [],
+        "losingBases": [],
+        "unknownReason": "0.2% (500-yr) water-surface elevation not entered — the FFE rule measures from it"
+      },
+      "harris": {
+        "requiredFfeFt": 144.8,
+        "basis": "wse02pct",
+        "plusFt": 2,
+        "governingBasis": null,
+        "pendingBases": [],
+        "losingBases": [],
+        "unknownReason": null
+      },
+      "harris|noInputs": {
+        "requiredFfeFt": null,
+        "basis": "wse02pct",
+        "plusFt": 2,
+        "governingBasis": null,
+        "pendingBases": [],
+        "losingBases": [],
+        "unknownReason": "0.2% (500-yr) water-surface elevation not entered — the FFE rule measures from it"
+      },
+      "fortbend": {
+        "requiredFfeFt": 145,
+        "basis": "site",
+        "plusFt": 2,
+        "governingBasis": {
+          "basis": "site",
+          "plusFt": 2
+        },
+        "pendingBases": [
+          "zone_a_est_bfe"
+        ],
+        "losingBases": [
+          "atlas14_100yr",
+          "pre_atlas14_100yr",
+          "wse02pct",
+          "wse1pct"
+        ],
+        "unknownReason": null
+      },
+      "fortbend|noInputs": {
+        "requiredFfeFt": null,
+        "basis": null,
+        "plusFt": null,
+        "governingBasis": null,
+        "pendingBases": [
+          "atlas14_100yr",
+          "pre_atlas14_100yr",
+          "wse02pct",
+          "wse1pct",
+          "zone_a_est_bfe",
+          "site"
+        ],
+        "losingBases": [],
+        "unknownReason": "no water-surface elevation available for any FFE basis — need one of: Atlas-14 100-yr WSE; pre-Atlas-14 100-yr WSE / legacy pond; 0.2% (500-yr) water-surface elevation; 1% water-surface elevation (BFE); Zone A estimated BFE; outside-SFHA site basis (pond 100-yr WSE / top of curb / natural ground)"
+      },
+      "montgomery": {
+        "requiredFfeFt": null,
+        "basis": null,
+        "plusFt": null,
+        "governingBasis": null,
+        "pendingBases": [],
+        "losingBases": [],
+        "unknownReason": "no FFE rule modeled for this jurisdiction — verify locally"
+      },
+      "montgomery|noInputs": {
+        "requiredFfeFt": null,
+        "basis": null,
+        "plusFt": null,
+        "governingBasis": null,
+        "pendingBases": [],
+        "losingBases": [],
+        "unknownReason": "no FFE rule modeled for this jurisdiction — verify locally"
+      },
+      "chambers": {
+        "requiredFfeFt": null,
+        "basis": null,
+        "plusFt": null,
+        "governingBasis": null,
+        "pendingBases": [],
+        "losingBases": [],
+        "unknownReason": "no FFE rule modeled for this jurisdiction — verify locally"
+      },
+      "chambers|noInputs": {
+        "requiredFfeFt": null,
+        "basis": null,
+        "plusFt": null,
+        "governingBasis": null,
+        "pendingBases": [],
+        "losingBases": [],
+        "unknownReason": "no FFE rule modeled for this jurisdiction — verify locally"
+      },
+      "waller": {
+        "requiredFfeFt": 144.8,
+        "basis": "wse02pct",
+        "plusFt": 2,
+        "governingBasis": {
+          "basis": "wse02pct",
+          "plusFt": 2
+        },
+        "pendingBases": [],
+        "losingBases": [
+          "wse02pct"
+        ],
+        "unknownReason": null
+      },
+      "waller|noInputs": {
+        "requiredFfeFt": null,
+        "basis": null,
+        "plusFt": null,
+        "governingBasis": null,
+        "pendingBases": [
+          "wse02pct",
+          "wse02pct"
+        ],
+        "losingBases": [],
+        "unknownReason": "no water-surface elevation available for any FFE basis — need one of: 0.2% (500-yr) water-surface elevation"
+      },
+      "generic": {
+        "requiredFfeFt": null,
+        "basis": null,
+        "plusFt": null,
+        "governingBasis": null,
+        "pendingBases": [],
+        "losingBases": [],
+        "unknownReason": "no FFE rule modeled for this jurisdiction — verify locally"
+      },
+      "generic|noInputs": {
+        "requiredFfeFt": null,
+        "basis": null,
+        "plusFt": null,
+        "governingBasis": null,
+        "pendingBases": [],
+        "losingBases": [],
+        "unknownReason": "no FFE rule modeled for this jurisdiction — verify locally"
+      }
+    },
+    "administrator": {
+      "bainFortBendHoustonEtj": {
+        "governingKey": "fortbend",
+        "governingLabel": "Fort Bend County",
+        "governingRuleText": "highest of 6 bases",
+        "governingVerified": true,
+        "ambiguous": true,
+        "selectionReason": "3 candidate floodplain authorities are in play; the stricter standard was chosen deliberately (highest declared freeboard).",
+        "spreadFt": null,
+        "candidates": [
+          "edge:katy:false",
+          "etj:coh:true",
+          "primary:fortbend:true"
+        ],
+        "impliedFloodElevFt": 140.8
+      },
+      "unincorporatedHarris": {
+        "governingKey": "harris",
+        "governingLabel": "Harris County (unincorporated)",
+        "governingRuleText": "wse02pct + 2 ft",
+        "governingVerified": true,
+        "ambiguous": false,
+        "selectionReason": "one floodplain administrator resolved.",
+        "spreadFt": null,
+        "candidates": [
+          "primary:harris:true"
+        ],
+        "impliedFloodElevFt": 58
+      },
+      "houstonCity": {
+        "governingKey": "coh",
+        "governingLabel": "City of Houston",
+        "governingRuleText": "wse02pct + 2 ft",
+        "governingVerified": false,
+        "ambiguous": false,
+        "selectionReason": "2 candidate floodplain authorities are in play; the stricter standard was chosen deliberately (highest declared freeboard).",
+        "spreadFt": 0,
+        "candidates": [
+          "primary:coh:true",
+          "primary:harris:true"
+        ],
+        "impliedFloodElevFt": 60.5
+      },
+      "wallerUnincorporated": {
+        "governingKey": "waller",
+        "governingLabel": "Waller County (unincorporated)",
+        "governingRuleText": "highest of 3 bases",
+        "governingVerified": true,
+        "ambiguous": false,
+        "selectionReason": "one floodplain administrator resolved.",
+        "spreadFt": null,
+        "candidates": [
+          "primary:waller:true"
+        ],
+        "impliedFloodElevFt": 206
+      }
+    }
+  },
+  "roadTakeoff": {
+    "quantities": {
+      "r1": {
+        "lengthFt": 400,
+        "fcfcWidth": 30,
+        "curbType": "curb-gutter",
+        "curbedSides": 2,
+        "panWidth": 2,
+        "curbCategory": "linear",
+        "pavingWidth": 26,
+        "pavingSf": 10400,
+        "pavingSy": 1155.55555556,
+        "curbLf": 800
+      },
+      "r2": {
+        "lengthFt": 250,
+        "fcfcWidth": 24,
+        "curbType": "barrier",
+        "curbedSides": 2,
+        "panWidth": 0,
+        "curbCategory": "linear",
+        "pavingWidth": 24,
+        "pavingSf": 6000,
+        "pavingSy": 666.66666667,
+        "curbLf": 500
+      },
+      "r3": {
+        "lengthFt": 180,
+        "fcfcWidth": 28,
+        "curbType": "none",
+        "curbedSides": 0,
+        "panWidth": 0,
+        "curbCategory": "linear",
+        "pavingWidth": 28,
+        "pavingSf": 5040,
+        "pavingSy": 560,
+        "curbLf": 0
+      }
+    },
+    "rollup": {
+      "segments": 3,
+      "pavingSy": 2382.22222222,
+      "curbBarrierLf": 500,
+      "curbGutterLf": 800,
+      "pavingCost": 101244.44444444,
+      "curbBarrierCost": 9000,
+      "curbGutterCost": 21400,
+      "total": 131644.44444444
+    },
+    "unpriced": {
+      "segments": 3,
+      "pavingSy": 2382.22222222,
+      "curbBarrierLf": 500,
+      "curbGutterLf": 800,
+      "pavingCost": null,
+      "curbBarrierCost": null,
+      "curbGutterCost": null,
+      "total": null
+    }
+  },
+  "pondStorage": {
+    "d8|fb1|s3": {
+      "aTop": 240000,
+      "aWater": 234036,
+      "aBottom": 194304,
+      "dw": 7,
+      "vol": 1497174,
+      "feasible": true,
+      "maxDepth": 66.665
+    },
+    "d10|fb1|s4": {
+      "aTop": 240000,
+      "aWater": 232064,
+      "aBottom": 166400,
+      "dw": 9,
+      "vol": 1785408,
+      "feasible": true,
+      "maxDepth": 49.99875
+    },
+    "d6|fb2|s3": {
+      "aTop": 240000,
+      "aWater": 228144,
+      "aBottom": 205296,
+      "dw": 4,
+      "vol": 866520,
+      "feasible": true,
+      "maxDepth": 66.665
+    }
+  }
+}
