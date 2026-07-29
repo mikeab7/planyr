@@ -82,6 +82,14 @@ export const NOT_MODELED = [
 
 /* The regulatory pathway a developer-derived BFE runs through when it changes the mapped
  * floodplain. Reused verbatim from the B710 lineage rather than forked — one sentence, one home. */
+/* B1089 — the ONE wording of the screening disclaimer. It was written out independently in
+ * `screeningBfeSite.screeningStudyNote` and in `floodplainMitigation.EST_SCREENING_BFE_NOTE`, so the
+ * same sentence shipped three times. Composing from here is PANEL-BREVITY rule 5 (state a fact once)
+ * doing double duty as a bundle optimization — and it means the disclaimer can never drift between
+ * the two surfaces that show it. */
+export const SCREENING_DISCLAIMER =
+  "SCREENING ONLY — not engineering-grade and not a substitute for a sealed engineer's study.";
+
 export const CLOMR_NOTE =
   "A developer-derived flood elevation that changes the mapped floodplain goes to FEMA as a CLOMR before construction and a LOMR after it, on a sealed engineer's study.";
 

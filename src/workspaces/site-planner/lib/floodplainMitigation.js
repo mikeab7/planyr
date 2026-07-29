@@ -19,6 +19,7 @@
  * only); hydrograph routing; conveyance hydraulics (Harris' offsetScope notes when
  * conveyance also governs).
  */
+import { NOT_MODELED, SCREENING_DISCLAIMER } from "./screeningBfe.js";
 import { pointInRing } from "./pondGeom.js";
 import { lngLatRingToFeet } from "./arcgis.js";
 import { isSFHA } from "./siteAnalysis.js";
@@ -1158,7 +1159,15 @@ export const EST_MAAPNEXT_NOTE =
  * The NOT_MODELED list and the CLOMR/LOMR sentence ride the result object itself (screeningBfe.js)
  * so a call site cannot show the elevation without them. */
 export const EST_SCREENING_BFE_NOTE =
-  "SCREENING ESTIMATE computed by Planyr — NOT engineering-grade and NOT a substitute for a sealed engineer's study. Hydrology: NRCS unit-hydrograph peak over an SCS curve-number runoff, NOAA Atlas 14 rainfall, and a watershed delineated from the USGS 3DEP terrain grid. Hydraulics: Manning normal depth (steady uniform flow) over a cross-section sampled from that same terrain. NOT modelled: no field survey, no bridges or culverts, no ineffective-flow areas, no floodway encroachment analysis, no gauge calibration, and no backwater profile. The value carries an uncertainty RANGE (from the peak-rate-factor band) — read the range, not the midpoint. Type a BFE to override.";
+  // B1089 — the NOT-MODELLED list is COMPOSED from screeningBfe.NOT_MODELED rather than restated.
+  // It was written out here verbatim in B1057 and so shipped twice; that duplicate is what paid for
+  // B1089's copy when `largestChunkBytes` went 0.2 KB over ceiling. One fact, one home (PANEL-BREVITY
+  // rule 5) — and the list can no longer drift from the one the engine actually returns.
+  SCREENING_DISCLAIMER + " Computed by Planyr. " +
+  "Hydrology: NRCS unit-hydrograph peak over an SCS curve-number runoff, NOAA Atlas 14 rainfall, and a watershed delineated from the USGS 3DEP terrain grid. " +
+  "Hydraulics: Manning normal depth over a cross-section sampled from that same terrain. NOT modelled: " +
+  NOT_MODELED.map((n) => n.split(" — ")[0]).join(", ") + ". " +
+  "The value carries an uncertainty RANGE (from the peak-rate-factor band) — read the range, not the midpoint. Type a BFE to override.";
 export const DERIVED_WSE100_DRAFT_NOTE =
   "This 1% (100-yr) water surface was read from Fort Bend County's Atlas-14 watershed-study rasters — DRAFT study results, a screening value only, never an effective or published elevation. Note the basis: Fort Bend's mitigation and FFE rules reference the EFFECTIVE (pre-Atlas-14) floodplain — the Atlas-14 value is a labeled stand-in for that basis, not the same number. Confirm before design; type a BFE to override.";
 

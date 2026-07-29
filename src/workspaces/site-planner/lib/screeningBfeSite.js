@@ -33,7 +33,7 @@
  * it did not compute. There is no default rainfall, no default soil group, no assumed channel.
  *
  * Pure — no DOM, no network. The caller performs the fetches and injects their results. */
-import { screeningBfe, NOT_MODELED, CLOMR_NOTE } from "./screeningBfe.js";
+import { screeningBfe, NOT_MODELED, CLOMR_NOTE, SCREENING_DISCLAIMER } from "./screeningBfe.js";
 import { flowAccumulation, contributingAcres } from "./upstreamArea.js";
 import { channelCell, flowBearing, channelSlope, cutSection, gridCellFt, siteMaskFromLatLngRings, upstreamEdgeFlags } from "./channelSection.js";
 import { computeTimeOfConcentration } from "./timeOfConcentration.js";
@@ -299,18 +299,67 @@ export function screeningBfeHeadline(result, femaFt = null) {
  * panel hangs on a hover / disclosure, which is why it may be long where the visible line may not
  * (PANEL-BREVITY: honesty stays REACHABLE, brevity applies to the DEFAULT VIEW). Returns "" when
  * there is nothing to say, so a caller can concatenate it unconditionally. Pure. */
+/* NEW-1 (B1089) — THE DECLINE STATE, as a NAMED STATE plus a reason-specific implication.
+ *
+ * Why this exists: the honest UNKNOWN this engine returns was only reachable through the hover on
+ * the accept-gated estimate row, and that row renders ONLY when no elevation has been committed. On
+ * the one site that motivated the whole feature — Tsakiris, which already carries a committed
+ * grade-derived estimate — the study ran, declined, and said NOTHING. Same defect class as B1036's
+ * silent zero: the app knowing something and not saying it. It lands hardest exactly where it
+ * matters most, because the terrain that defeats a screening method is the terrain that most needs
+ * a sealed study.
+ *
+ * PANEL-BREVITY: `state` is a SHORT named state for the visible line (rule 3 — a named state beats
+ * a sentence explaining the state); `detail` is the behind-the-fold reason + implication.
+ *
+ * THE IMPLICATION IS REASON-SPECIFIC ON PURPOSE. "Flat ground with no defined channel" genuinely
+ * means screening methods have run out and an engineer's H&H model is required — and on a Waller
+ * site that is the SAME sealed Atlas-14 study §5.C(3) already demands, so the two are connected
+ * rather than left for the reader to join up. An unreachable data source means nothing of the kind;
+ * it means try again. Asserting "you need an engineer" for a network timeout would be a lie.
+ *
+ * The sentences are COMPOSED from the shared fragments below rather than written out per branch —
+ * each phrase ships in the bundle ONCE. That is also PANEL-BREVITY rule 5 (state a fact once) doing
+ * double duty as a bundle optimization: B1089 first landed 0.2 KB over `largestChunkBytes`, and the
+ * budget is met by de-duplicating the copy, never by dropping a fact. */
+const D_TRIED = "Planyr's screening study was attempted here and";
+const D_STANDS = "No elevation was derived from it, so any flood level shown above rests on its original source, unchallenged.";
+const D_SEALED = "A sealed engineering (H&H / Atlas-14) study is what settles the value.";
+
+export function screeningDeclined(result) {
+  if (!result || result.ok) return null;
+  const why = (result.missing?.length ? result.missing : [result.reason || "inputs incomplete"]).join("; ");
+  const has = (re) => re.test(why);
+  const mk = (reason, state, body) => ({ reason, state, detail: `${body} (${why}.)` });
+
+  // Ordered most-specific first: a truncated watershed and a flat reach are different diagnoses.
+  if (has(/could not run:/i)) {
+    // Deliberately NOT the sealed-study implication: an outage is not a finding about the site.
+    return mk("unreachable", "data sources unreachable",
+      `${D_TRIED} could not run at all — a data-availability problem, not a finding about this site. Press ↻ Re-check to try again. ${D_STANDS}`);
+  }
+  if (has(/runs past the edge/i)) {
+    return mk("watershed-truncated", "watershed larger than the terrain window",
+      `${D_TRIED} DECLINED: the land draining to this reach runs past the edge of the available terrain window, so the contributing area it could measure is only a LOWER BOUND — a flood level derived from it would be understated, which is worse than no number. ${D_STANDS} ${D_SEALED}`);
+  }
+  if (has(/flat|no measurable amount|flow direction/i)) {
+    return mk("flat-reach", "flat reach, no defined channel",
+      `${D_TRIED} DECLINED: the ground across this reach falls no measurable amount over the sampled run and no channel direction can be determined. That is the honest limit of the method, not a data outage. TERRAIN LIKE THIS IS EXACTLY WHERE SCREENING RUNS OUT AND AN ENGINEER'S SEALED H&H MODEL IS REQUIRED — and where Waller County applies that is the same Atlas-14 study §5.C(3) already demands with the submittal, so it is one piece of work, not two. ${D_STANDS}`);
+  }
+  return mk("inputs-missing", "inputs unavailable", `${D_TRIED} could not answer. ${D_STANDS} ${D_SEALED}`);
+}
+
 export function screeningStudyNote(result) {
   if (!result) return "";
-  if (!result.ok) {
-    const why = result.missing?.length ? result.missing.join("; ") : (result.reason || "inputs incomplete");
-    return ` Planyr's own screening flood-level study could not run here — ${why}. No elevation was derived from it; anything shown above comes from the source named on its row.`;
-  }
+  // B1089 — DELEGATE. The decline wording has exactly one home (screeningDeclined); a second copy
+  // here would be the same fact stated twice, in the bundle and on the screen.
+  if (!result.ok) return ` ${screeningDeclined(result).detail}`;
   const band = result.band1pctFt || {};
   const rangeTxt = band.loFt != null && band.hiFt != null && band.hiFt > band.loFt
     ? `${band.loFt.toFixed(1)}′–${band.hiFt.toFixed(1)}′`
     : band.openEnded ? "open-ended (one end of the range overtops the sampled section)" : "no spread at this section";
   const i = result.inputs || {};
-  return ` PLANYR SCREENING STUDY (Atlas 14): 1% ≈ ${result.wse1pctFt?.toFixed(1)}′, 0.2% (500-yr) ≈ ${result.wse02pctFt != null ? `${result.wse02pctFt.toFixed(1)}′` : "not solvable at this section"}; RANGE on the 1% ${rangeTxt} — read the range, not the midpoint. Inputs: a ${i.areaAcres} ac contributing watershed delineated from USGS 3DEP terrain, NOAA Atlas 14 rainfall (${i.rainfall1pctIn}″ / ${i.rainfall02pctIn}″ over 24 hr), SSURGO soil group ${i.hsg || "—"}, time of concentration ${i.tcMin} min, channel grade ${(i.slopeFtPerFt * 100).toFixed(2)}%, and a cross-section sampled from that same terrain. ${result.notModeled.map((n) => n.charAt(0).toUpperCase() + n.slice(1)).join(". ")}. ${result.clomrNote} SCREENING ONLY — not engineering-grade and not a substitute for a sealed engineer's study.`;
+  return ` PLANYR SCREENING STUDY (Atlas 14): 1% ≈ ${result.wse1pctFt?.toFixed(1)}′, 0.2% (500-yr) ≈ ${result.wse02pctFt != null ? `${result.wse02pctFt.toFixed(1)}′` : "not solvable at this section"}; RANGE on the 1% ${rangeTxt} — read the range, not the midpoint. Inputs: a ${i.areaAcres} ac contributing watershed delineated from USGS 3DEP terrain, NOAA Atlas 14 rainfall (${i.rainfall1pctIn}″ / ${i.rainfall02pctIn}″ over 24 hr), SSURGO soil group ${i.hsg || "—"}, time of concentration ${i.tcMin} min, channel grade ${(i.slopeFtPerFt * 100).toFixed(2)}%, and a cross-section sampled from that same terrain. ${result.notModeled.map((n) => n.charAt(0).toUpperCase() + n.slice(1)).join(". ")}. ${result.clomrNote} ${SCREENING_DISCLAIMER}`;
 }
 
 export default screeningBfeForSite;

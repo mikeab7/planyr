@@ -11,10 +11,24 @@
  * for the point parse and drive the storms, that real SSURGO returns a hydrologic soil group, and
  * that the composed 1% / 0.2% elevations are physically sane against the real ground at the site.
  *
- *   node ui-audit/verify-screening-bfe-live.mjs [lat] [lng]
+ *   node ui-audit/verify-screening-bfe-live.mjs <lat> <lng> [label]
  *
- * Defaults to a Waller County point (the jurisdiction whose §5.C(3) drove this work). Network-bound
- * by design: this is the live gate, not a unit test, and it is not wired into CI.
+ * ⛔ THE LOCATION IS REQUIRED, AND IT IS REQUIRED BECAUSE OF A NEAR-MISS (B1089).
+ * This script used to DEFAULT to 29.9 / -95.98 and describe it in code only as "a Waller County
+ * point". A run against that default produced a clean 1% of 165.9 ft — and that number was then
+ * summarised as coming from "a real Waller point", which read as if it were the owner's site. It
+ * was not: it is ~10 miles from Tsakiris and in a different watershed. Tsakiris itself, run
+ * properly, produces NO number at all (flat reach, no defined channel). A convenience default
+ * nearly turned one site's number into another site's answer.
+ *
+ * So: no default. Every run must name where it is, every line of output is stamped with the
+ * coordinates and the label, and the summary block repeats them — so no report of this script's
+ * output can say "a real Waller point" without saying WHICH point.
+ *
+ * Known sites (pass the label to have it echoed, or just pass coordinates):
+ *   Tsakiris / Concept A   29.77938  -95.89503   (Waller, in BKDD — the §5.C(3) site)
+ *
+ * Network-bound by design: this is the live gate, not a unit test, and it is not wired into CI.
  */
 import { gridRequest, exportUrl, looksLikeLerc, sampleAtLatLng, mercPerPx, groundScale } from "../src/workspaces/site-planner/lib/demGrid.js";
 import { DEP_URL } from "../src/workspaces/site-planner/lib/elevation.js";
@@ -22,7 +36,7 @@ import { decodeGrid } from "../src/workspaces/site-planner/lib/lercGrid.js";
 import { parsePfdsText } from "../src/workspaces/site-planner/lib/pfds.js";
 import { parseSoilResponse, buildSdaRequest } from "../src/workspaces/site-planner/lib/soils.js";
 import {
-  terrainInputsForScreeningBfe, atlas14Depths, screeningBfeForSite, screeningStudyNote,
+  terrainInputsForScreeningBfe, atlas14Depths, screeningBfeForSite, screeningStudyNote, screeningDeclined,
   WATERSHED_GRID_ZOOM, WATERSHED_PAD_DEG,
 } from "../src/workspaces/site-planner/lib/screeningBfeSite.js";
 // terrainLayers.js can't load in Node (it static-imports a Vite `?worker` specifier), and this
@@ -34,13 +48,26 @@ const siteGridZoom = (lat) => {
   return 19;
 };
 
-const LAT = Number(process.argv[2] ?? 29.9);
-const LNG = Number(process.argv[3] ?? -95.98);
+const LAT = Number(process.argv[2]);
+const LNG = Number(process.argv[3]);
+const LABEL = process.argv[4] || null;
+if (!Number.isFinite(LAT) || !Number.isFinite(LNG)) {
+  console.error(
+    "\n⛔ This probe REQUIRES an explicit location — there is deliberately no default.\n" +
+    "   A default of 29.9 / -95.98 once produced a number that was reported as though it were\n" +
+    "   the owner's site; it was ten miles away. Name the point you mean.\n\n" +
+    "   node ui-audit/verify-screening-bfe-live.mjs <lat> <lng> [label]\n" +
+    "   e.g. node ui-audit/verify-screening-bfe-live.mjs 29.77938 -95.89503 \"Tsakiris / Concept A\"\n",
+  );
+  process.exit(2);
+}
+// Every output line carries WHERE it came from, so a quoted figure can never lose its provenance.
+const WHERE = `${LABEL ? `${LABEL} @ ` : ""}${LAT}, ${LNG}`;
 // This branch's Cloudflare preview — the only place the NEW /api/soils Function is deployed.
 const PREVIEW = process.env.PREVIEW_URL || "https://claude-waller-county-flood-o.planyr.pages.dev";
 
-const fail = (m) => { console.error(`✗ ${m}`); process.exitCode = 1; };
-const pass = (m) => console.log(`✓ ${m}`);
+const fail = (m) => { console.error(`✗ [${WHERE}] ${m}`); process.exitCode = 1; };
+const pass = (m) => console.log(`✓ [${WHERE}] ${m}`);
 const f1 = (v) => (Number.isFinite(v) ? v.toFixed(1) : "—");
 
 async function fetchGrid(bounds, zoom, label) {
@@ -59,7 +86,8 @@ async function fetchGrid(bounds, zoom, label) {
   return { grid, req };
 }
 
-console.log(`\nScreening BFE — REAL-DATA run at ${LAT}, ${LNG}\n`);
+console.log(`\nScreening BFE — REAL-DATA run at ${WHERE}\n`);
+if (!LABEL) console.log("  (no site label given — quote this run as the coordinates above, never as \"a Waller point\")\n");
 
 // ── 1. Terrain: the fine site grid (section) + the wide coarse grid (watershed). One source.
 console.log("USGS 3DEP");
@@ -144,5 +172,15 @@ if (!result.ok) {
   else pass("NOT_MODELED + the CLOMR/LOMR note ride the real answer, as they must");
 }
 
-console.log(`\n— the note the panel would show —\n${screeningStudyNote(result).trim()}\n`);
-console.log(process.exitCode ? "FAILED" : "REAL-DATA RUN COMPLETE.");
+// B1089 — the panel's DEFAULT-VIEW state and its behind-the-fold detail, printed separately,
+// because the visible half is now a named state and the reason/implication ride the ⓘ.
+const declined = screeningDeclined(result);
+if (declined) {
+  console.log(`\n— what the owner SEES on the panel (default view) —\n  "… — screening can't improve it: ${declined.state}"`);
+  console.log(`\n— behind the ⓘ —\n${declined.detail}\n`);
+} else {
+  console.log(`\n— the note the panel would show —\n${screeningStudyNote(result).trim()}\n`);
+}
+console.log(process.exitCode
+  ? `FAILED — ${WHERE}`
+  : `REAL-DATA RUN COMPLETE — every figure above is for ${WHERE} and for nowhere else.`);
