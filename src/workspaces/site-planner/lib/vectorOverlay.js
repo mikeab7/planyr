@@ -28,8 +28,85 @@ import { gisCache } from "./gisCache.js";
 import { VECTOR_SOURCES, fetchCached, decideVectorOrImage, pickTier, snapBbox, vectorKey, styleFor } from "./vectorLayers.js";
 import { labelAnchors, placeLabels, labelsVisible, titleCaseName } from "./boundaryLabels.js";
 import { corridorRingLngLat, DEFAULT_CORRIDOR_WIDTH_FT } from "./pipelineCorridor.js";
+import { ftypeLabel } from "./nhdFlowline.js";
 
 const LABEL_PANE = "boundarylabels";
+
+/* Shared identify-row renderer (B1075/B1078) — the ONE place a `source.identifyFields`
+ * row becomes DOM, used by both the polygon (cachedVectorLayer) and line
+ * (cachedPipelineLayer) identify popovers so the two can't drift.
+ *
+ * Field options:
+ *   unit    — appended to a bare number ("70" + "ft" → "70 ft"; "in" renders as ″)
+ *   decode  — "nhdFtype": an integer code → plain English ("336" → "canal / ditch")
+ *   kind    — "link": render as an anchor when the value IS a URL, or when the source
+ *             declares a `linkBase`/`exhibitBase` to build one from. With neither, the
+ *             value renders as plain TEXT — a document reference we can't resolve is
+ *             still worth showing, and a fabricated URL never is.
+ *
+ * External attribute values always go through textContent / a built href — never
+ * innerHTML (the same rule the rest of this module follows). */
+export function decodeFieldValue(raw, f = {}) {
+  if (f.decode === "nhdFtype") return ftypeLabel(raw) || String(raw);
+  if (f.unit === "in" && /^[\d.]+$/.test(String(raw))) return `${raw}″`;
+  if (f.unit && /^[\d.]+$/.test(String(raw))) return `${raw} ${f.unit}`;
+  return String(raw);
+}
+
+/* Resolve an identify link field to an href, or null when we can't honestly build one. */
+export function identifyHref(raw, source = {}) {
+  const v = String(raw || "").trim();
+  if (/^https?:\/\//i.test(v)) return v;
+  const base = source.exhibitBase || source.linkBase || null;
+  if (!base || !v) return null;
+  return base.replace(/\/+$/, "") + "/" + v.replace(/^\/+/, "");
+}
+
+/* The headline for a LINE identify popover. Registry-driven (B1078) so one popover code
+ * path serves pipelines ("Crude oil"), hydrography ("Willow Fork"), and anything added
+ * later: prefer the source's declared title field, decode it if it's a code, else fall
+ * back to the source's own honest "not stated" wording. Pure. */
+export function identifyTitle(source = {}, props = {}) {
+  // The pipeline layer's original behaviour, preserved verbatim as the default.
+  if (!source.identifyTitleField) {
+    const commodity = props[source.commodityField];
+    return commodity == null || commodity === "" ? "Pipeline (commodity not stated)" : String(commodity);
+  }
+  const raw = props[source.identifyTitleField];
+  if (raw != null && String(raw).trim() !== "") return String(raw).trim();
+  if (source.identifyTitleDecode === "nhdFtype") {
+    const decoded = ftypeLabel(props.ftype ?? props.FTYPE);
+    if (decoded) return decoded;
+  }
+  return source.identifyFallbackTitle || source.label || "Feature";
+}
+
+export function appendIdentifyRows(el, source, props) {
+  const p = props || {};
+  for (const f of source.identifyFields || []) {
+    const raw = p[f.field];
+    if (raw == null || raw === "") continue;
+    const row = document.createElement("div");
+    const lab = document.createElement("span");
+    lab.style.cssText = "opacity:0.7;";
+    lab.textContent = `${f.label}: `;
+    row.append(lab);
+    const text = decodeFieldValue(raw, f);
+    const href = f.kind === "link" ? identifyHref(raw, source) : null;
+    if (href) {
+      const a = document.createElement("a");
+      a.href = href; a.target = "_blank"; a.rel = "noopener noreferrer";
+      a.textContent = text;
+      row.append(a);
+    } else {
+      const val = document.createElement("span");
+      val.textContent = text;
+      row.append(val);
+    }
+    el.append(row);
+  }
+  return el;
+}
 
 const escapeHtml = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
@@ -104,13 +181,18 @@ export function cachedVectorLayer(k, cfg, initialOpacity, pane, onStatus, opts =
       const head = document.createElement("div");
       head.style.cssText = "font-weight:700;font-size:12.5px;margin-bottom:3px;";
       head.textContent = displayName(feature);
+      el.append(head);
+      // B1075: registry-declared detail rows (BKDD easement width + its recorded exhibit) —
+      // an easement is a hard buildable-area constraint, so its width has to REACH the user,
+      // not sit invisibly behind a band on the map.
+      appendIdentifyRows(el, source, feature && feature.properties);
       const note = document.createElement("div");
-      note.style.cssText = "opacity:0.85;";
+      note.style.cssText = "opacity:0.85;margin-top:4px;";
       note.textContent = source.identifyNote || "";
       const src = document.createElement("div");
       src.style.cssText = "opacity:0.7;font-size:10.5px;margin-top:4px;";
       src.textContent = source.sourceName ? `Source: ${source.sourceName}` : "";
-      el.append(head, note, src);
+      el.append(note, src);
       openPopup = L.popup({ maxWidth: 280, autoPan: false }).setLatLng(e.latlng).setContent(el).openOn(map);
     });
   };
@@ -296,7 +378,6 @@ export function cachedPipelineLayer(k, cfg, initialOpacity, pane, onStatus, opts
   // Identify popover DOM (external attribute values → textContent, never innerHTML).
   const identifyEl = (props) => {
     const p = props || {};
-    const commodity = p[source.commodityField];
     const color = (styleFor(source, p) || {}).color || "#333";
     const el = document.createElement("div");
     el.style.cssText = "font-size:12px;line-height:1.5;max-width:260px;";
@@ -305,21 +386,10 @@ export function cachedPipelineLayer(k, cfg, initialOpacity, pane, onStatus, opts
     const sw = document.createElement("span");
     sw.style.cssText = `width:14px;height:0;border-top:3px solid ${color};flex:none;`;
     const ct = document.createElement("span");
-    ct.textContent = commodity == null || commodity === "" ? "Pipeline (commodity not stated)" : String(commodity);
+    ct.textContent = identifyTitle(source, p);
     head.append(sw, ct);
     el.append(head);
-    for (const f of source.identifyFields || []) {
-      const raw = p[f.field];
-      if (raw == null || raw === "") continue;
-      const row = document.createElement("div");
-      const lab = document.createElement("span");
-      lab.style.cssText = "opacity:0.7;";
-      lab.textContent = `${f.label}: `;
-      const val = document.createElement("span");
-      val.textContent = f.unit && /^[\d.]+$/.test(String(raw)) ? `${raw}″` : String(raw);
-      row.append(lab, val);
-      el.append(row);
-    }
+    appendIdentifyRows(el, source, p);
     const note = document.createElement("div");
     note.style.cssText = "opacity:0.85;margin-top:4px;";
     note.textContent = source.identifyNote || "";
@@ -355,7 +425,9 @@ export function cachedPipelineLayer(k, cfg, initialOpacity, pane, onStatus, opts
     geo.clearLayers();
     const n = (fc && fc.features && fc.features.length) || 0;
     if (n) geo.addData(fc);
-    report(n ? "loaded" : "empty", n ? null : "No pipelines in this view.", { ts: ts ?? null, stale: !!stale });
+    // B1078: the empty message is registry-declared, so a hydrography layer says "no mapped
+    // watercourse" rather than the pipeline layer's wording.
+    report(n ? "loaded" : "empty", n ? null : (source.emptyNote || "No pipelines in this view."), { ts: ts ?? null, stale: !!stale });
   };
 
   // Show the far-out raster. Report HONESTLY: "loaded" only if the raster actually mounted; if the
