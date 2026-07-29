@@ -1648,6 +1648,54 @@ physical row is a later polish," so **B104** is that remaining polish for the *m
 - **A tooling bug this work exposed and fixed (LOUD-FAILURE).** Deferring `exportSheet` made it import back into the planner's chunk, which costs that chunk its Rollup facade, so Vite re-keys the manifest entry from the source path to `_SitePlannerApp-<hash>.js`. `perf-bundle-audit.mjs` looked the route up by source path and, finding nothing, **silently `continue`d** — dropping `siteRouteJsBytes`, `siteRouteChunks` AND the allowlist guard while still printing "✓ All bundle budgets within ceiling". It now resolves a route by source path OR chunk stem, and a route it cannot find is a **hard failure**, never a quiet omission.
 - **Guards:** new `ui-audit/verify-b1042-export-lazy.mjs` drives the REAL built app logged-out and asserts the chunk is absent at boot, warmed by the File menu, and that Export PNG, the full print-frame → **Download PDF** pipeline, the async aspect refit, and Export project file all still produce real bytes with no uncaught errors. The five source-scan guards for B544/B735/B839/B840/B841 were repointed at the new file so they still protect the moved code.
 - **Parity evidence:** the exported PNG is **byte-identical before and after the split** (543,640 B on both builds, same scenario) — the strongest available proof the sheet composition did not drift.
+### B1060 — Standards only seeds NEW objects: no way to apply a standard to what's already drawn, and no cross-project default `[Standards]` (feature) #site-planner #ui #persistence  *(owner chat block 2026-07-28, provisional NEW-3. Minted **B1060** via `npm run next-id -- --against-main`. DEDUPE-FIRST: B730 (Standards teaching lines) and B929 (parcel style defaults) are the panel this EXTENDS, not duplicates; B740 is the multi-select workaround the owner is trying to stop needing. No existing scope/apply item.)*
+`[ ]` Per-standard chips: Apply (retroactive, one undo frame + an Undo toast) and the scope the default lives at — this project or all projects.
+- Verify: live — **the account ("All projects") scope round-trip needs a signed-in session.** → **V489**
+- Origin: filed 2026-07-28 from chat (NEW-3)
+- **AUDIT — the brief's premise is right for parcels and only half-right for elements**, and the fix
+  differs accordingly. **Parcels are STAMPED at creation** (`parcelDefaultStyle` copies the default onto
+  the new parcel), so changing the parcel outline standard genuinely leaves every existing parcel
+  untouched — exactly as reported. **Elements are RESOLVED AT RENDER** (`typeStyle` reads settings every
+  frame), so a changed type color ALREADY shows on existing elements — except where a per-element
+  override from the Properties panel outranks it. So "Apply" means WRITE for parcels and CLEAR THE
+  OVERRIDE for elements; writing the value onto each element instead would freeze today's default onto
+  them and defeat the next Standards change.
+- **The "all projects" dependency was RESOLVED, not shipped as a disguised localStorage default.** The
+  brief warned that `localStorage` (the B403 precedent) would make it per-machine — wrong for an owner
+  working from two PCs — and said to ship per-project and file the dependency if no user-prefs store
+  exists. Rather than stop there: `public.profiles` already exists as the one-row-per-user record with
+  own-row RLS, and its own header anticipated "display prefs". So the store is a `prefs jsonb` column on
+  it (`db/user_prefs.sql`, additive + idempotent), **applied to the production project this session** —
+  verified present as `prefs · jsonb · NOT NULL · '{}'::jsonb`, inheriting the existing own-row policies.
+  `lib/userPrefs.js` reads/writes it with a localStorage MIRROR used only for instant first paint and a
+  signed-out fallback; a failed cloud write reports "saved on this computer only" rather than a false
+  "saved" (LOUD-FAILURE), and the "All" chip's own tooltip says so when signed out. **Nothing is on the
+  owner's plate — the SQL was applied, not handed over.**
+- **Precedence ladder** (new, in `planStyle.js`): built-in `TYPE` < account default < project setting <
+  per-object override. The account layer is a module-level register (`setAccountStyleDefaults`) rather
+  than an argument threaded through 14+ call sites, so the canvas, the site-list thumbnail, the KMZ
+  export, the print sheet and the multi-select panel all resolve style identically and cannot drift.
+  Promoting a standard to "All" DROPS the project's own copy, so the plan keeps following the account
+  default when it later changes.
+- **Short labels, per the owner's explicit rule.** Each standard gets one chip row: `Apply N` +
+  a `Project | All` segment. No sentences — every explanation is a tooltip. B730's prose intro was
+  replaced with a one-line clause naming the two new controls, not a paragraph.
+- **Destructive half handled as specified:** Apply lands in ONE undo frame across every affected object
+  and confirms with a brief toast carrying an **Undo** ("Applied to 12 parcels · Undo") — no modal, no
+  warning copy in the panel. The chip's count is the REAL impact (objects already matching are not
+  counted), so the toast never overstates, and the chip disables at zero.
+- **Scope of "Apply", stated:** it covers the standards the owner named — parcel outline color, line
+  weight, line style, fill and translucence, plus each element type's Fill and Line. It does NOT cover
+  the numeric standards that are inputs to DERIVED geometry (default setback, dock-zone depths, parking
+  rows, road widths) — applying those retroactively means re-deriving drawn geometry, which is a much
+  larger change and its own item if wanted.
+- Files: new `lib/standardsApply.js`, `lib/userPrefs.js`, `components/StandardScope.jsx`,
+  `db/user_prefs.sql`; `lib/planStyle.js` (account layer + `standardScope`); `SitePlanner.jsx` (Standards
+  panel wiring + the Undo toast). `test/standardsApply.test.js` — 24 tests.
+- **Verified in the sandbox 2026-07-28** — build green, 5784 unit tests green, and two logged-out
+  Playwright drives: changing the parcel outline standard surfaces `Apply N`, restyles every existing
+  parcel, shows "Applied to N parcels" and the Undo reverts it; and switching a standard to `All` moves
+  the value out of the project's settings into the account store with the chip state following.
 
 ### B1053 — The pond Optimize / design-pond affordance vanished from the pond inspector `[Site Planner / pond]` (bug) #pond #ui #site-planner  *(owner chat block 2026-07-28, provisional NEW-1 + the same-day amendment B. Minted **B1053**. DEDUPE-FIRST: no existing item covers the affordance's mount condition — B909/B910 placed the button, B1031 changed the tone it keyed off. P0 regression introduced the same day by B1030/B1031 + B1032–B1036.)*
 `[x]` **Shipped.** Owner: *"i lost the optimized pond or design pond or whatever button i had, i don't know why that left."*

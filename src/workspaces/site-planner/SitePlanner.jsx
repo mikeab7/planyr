@@ -64,7 +64,12 @@ import { clampToBounds, initialFloatPos, reconcileForNarrow, shouldInspectorTake
 import AppHeader from "../../shared/ui/AppHeader.jsx";
 import RotationStepper, { normalizeDeg } from "../../shared/ui/RotationStepper.jsx";
 import { worldToScreen, screenToWorld, zoomAround, midpoint, distance, pinchZoom } from "../../shared/viewport/viewportTransform.js";
-import { centerOn } from "../../shared/geometry/pasteGeom.js";
+import ColorField, { ColorRecentsRow } from "../../shared/ui/ColorField.jsx";
+import StandardScope from "./components/StandardScope.jsx";
+import { loadUserPrefs, saveUserPrefs, applyPrefs, readMirror, setStandardPref, getStandardPref } from "./lib/userPrefs.js";
+import { applyParcelStandard, applyTypeStandard, parcelStandardImpact, typeStandardImpact, appliedLabel } from "./lib/standardsApply.js";
+import { pushRecent } from "../../shared/ui/colorRecents.js";
+import { CLIP_KINDS, collectClipboard, clipboardBBox, pasteClipboard, translateCalloutBy, translateParcelBy } from "./lib/planClipboard.js";
 import { usePalette } from "../../shared/theme/ThemeProvider.jsx";
 import { NUM_FONT, TABULAR_NUMS } from "../../shared/theme/typography.js";
 import { pickInMarquee, hasSelMod, nextSelection } from "../../shared/markup/selection.js";
@@ -86,7 +91,7 @@ import {
 import { apprRows, apprAll, apprVal, findAttr } from "./lib/appraisal.js";
 import { makeParcelDisplayLayer, ADD_CURSOR, PARCEL_MINZOOM } from "./lib/parcelDisplay.js";
 import { geocodeAddress } from "./lib/geocode.js";
-import { TYPE, typeStyle, elStyle, parcelDefaultStyle, toHex6, byZ, zOrder } from "./lib/planStyle.js";
+import { TYPE, typeStyle, elStyle, parcelDefaultStyle, toHex6, byZ, zOrder, standardScope } from "./lib/planStyle.js";
 import { byZAsc, nextZ, Z_GAP } from "./lib/zOrder.js";
 import { reorderByZ, arrangeFlags } from "./lib/arrange.js";
 import { commonStyleState, selectionRingFeet } from "./lib/multiStyle.js";
@@ -367,10 +372,16 @@ const MAX_DIM = 100000; // ft — sane upper clamp so a fat-fingered size can't 
 // whole group is a separate path that re-stamps a fresh shared group id (duplicateGroup).
 const ORPHAN_TAGS = ["attachedTo", "groupId", "truckCourt", "forCourt", "forTrailer", "dogEar", "oppSide", "sideParkSide", "sidewalkSide"];
 const detachClone = (src) => { const c = { ...src }; for (const k of ORPHAN_TAGS) delete c[k]; return c; };
+// Platform-correct modifier name for keyboard hints in prose ("⌘V" vs "Ctrl+V").
+const MOD_LABEL = (typeof navigator !== "undefined" && /Mac|iPhone|iPad|iPod/.test(navigator.platform || navigator.userAgent || "")) ? "⌘" : "Ctrl+";
 // NEW-1 — this TAB's pending-edit journal session id (sessionStorage-backed: survives a reload in
 // place, distinct across tabs — two live writers never share a journal key; see elementJournal.js).
 const journalSid = journalSessionId();
 const MK_DEFAULT = { stroke: "#c2410c", weight: 2, dash: "solid", fill: "#c2410c", fillOpacity: 0 };
+// NEW-4 — what the recently-used swatch row shows on a fresh browser: the plan's own default
+// palette (every element type's fill + line, plus the markup accent), so the row is never blank.
+// Derived from TYPE, never a second hardcoded list that could drift from it.
+const COLOR_SEED = [...new Set([MK_DEFAULT.stroke, ...Object.values(TYPE).flatMap((t) => [t.fill, t.stroke])].map((c) => (c || "").toLowerCase()))].filter(Boolean);
 const dashArray = (d, w) => d === "dashed" ? `${w * 3} ${w * 2.4}` : d === "dotted" ? `${w} ${w * 2}` : undefined;
 
 // B619 — neutral, handle-based selection chrome for the planner canvas. Selecting an object must
@@ -3714,9 +3725,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if (t && !(isSliderFocus && isUndoRedoChord) && (t.tagName === "INPUT" || t.tagName === "SELECT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return; // don't hijack keys while typing in a field
       if ((e.ctrlKey || e.metaKey) && (e.key === "z" || e.key === "Z")) { e.preventDefault(); if (e.shiftKey) redo(); else if (!removeLastVertex()) undo(); return; } // Bluebeam: mid-draw Ctrl-Z peels the last placed vertex; only a no-draft Ctrl-Z does a global undo (matches Doc Review / Stitcher)
       if ((e.ctrlKey || e.metaKey) && (e.key === "y" || e.key === "Y")) { e.preventDefault(); redo(); return; }
-      if ((e.ctrlKey || e.metaKey) && (e.key === "c" || e.key === "C")) { if (sel?.kind === "el") { e.preventDefault(); copySel(); } else if (selOverlay) { e.preventDefault(); copyOverlay(selOverlay); } return; }
-      if ((e.ctrlKey || e.metaKey) && (e.key === "x" || e.key === "X")) { if (sel?.kind === "el") { e.preventDefault(); cutSel(); } return; }
-      if ((e.ctrlKey || e.metaKey) && (e.key === "v" || e.key === "V")) { if (clip.current) { e.preventDefault(); pasteClip(); } else if (overlayClip.current) { e.preventDefault(); pasteOverlay(); } return; }
+      // NEW-6 — Ctrl+C/X now copy WHATEVER is selected (element, markup, measurement, callout,
+      // parcel, or a mixed multi-selection), not just a single element. The overlay clipboard keeps
+      // its own path because a backdrop copy has to clone the raster payload, not just geometry.
+      if ((e.ctrlKey || e.metaKey) && (e.key === "c" || e.key === "C")) { if (hasCopyableSel()) { e.preventDefault(); copySel(); } else if (selOverlay) { e.preventDefault(); copyOverlay(selOverlay); } return; }
+      if ((e.ctrlKey || e.metaKey) && (e.key === "x" || e.key === "X")) { if (hasCopyableSel()) { e.preventDefault(); cutSel(); } return; }
+      if ((e.ctrlKey || e.metaKey) && (e.key === "v" || e.key === "V")) { if (clip.current?.items?.length) { e.preventDefault(); pasteClip(); } else if (overlayClip.current) { e.preventDefault(); pasteOverlay(); } return; }
       if ((e.ctrlKey || e.metaKey) && (e.key === "d" || e.key === "D")) { const gid = selectedGroupId(); if (gid) { e.preventDefault(); duplicateGroup(gid); } else if (multi.length > 1) { e.preventDefault(); multi.filter((m) => m.kind === "el").forEach((m) => duplicateEl(m.id)); } else if (sel?.kind === "el") { e.preventDefault(); duplicateEl(sel.id); } else if (selOverlay) { e.preventDefault(); duplicateOverlay(selOverlay); } return; }
       if ((e.ctrlKey || e.metaKey) && (e.key === "g" || e.key === "G")) { e.preventDefault(); if (e.shiftKey) ungroupSel(); else groupSel(); return; } // B261: Group / Ungroup
       // B820 — Arrange (z-order) chords, matching Document Review / Bluebeam. e.code (not e.key)
@@ -3805,6 +3819,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       multi.filter((m) => m.kind === "el").forEach((m) => assemblyOf(m.id).forEach((x) => elIds.add(x.id)));
       const mkIds = new Set(multi.filter((m) => m.kind === "markup").map((m) => m.id));
       const measIds = new Set(multi.filter((m) => m.kind === "measure").map((m) => m.id)); // B569: measures join the multi-delete
+      // NEW-6 — callouts and parcels can now ride in a multi-selection (a pasted mixed set selects
+      // itself), so the multi-delete has to cover them too or Delete would silently skip them.
+      const coIds = new Set(multi.filter((m) => m.kind === "callout").map((m) => m.id));
+      const pcIds = new Set(multi.filter((m) => m.kind === "parcel").map((m) => m.id));
       // B556 — tombstone exactly what the filter removes (selected els, their bonded children, markups,
       // AND measures — measures carry a stable uid() id and count in contentCount, so a multi-measure
       // delete otherwise trips the thin-clobber guard and resurrects on merge, same as any other item).
@@ -3812,8 +3830,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       setEls((a) => a.filter((e) => !elIds.has(e.id) && !elIds.has(e.attachedTo)));
       setMarkups((a) => a.filter((m) => !mkIds.has(m.id)));
       if (measIds.size) setMeasures((a) => a.filter((m) => !measIds.has(m.id)));
+      if (coIds.size) setCallouts((a) => a.filter((c) => !coIds.has(c.id)));
+      if (pcIds.size) setParcels((a) => a.filter((p) => !pcIds.has(p.id)));
       setMulti([]); setSel(null);
-      tombstone([...removedEls, ...mkIds, ...measIds]);
+      tombstone([...removedEls, ...mkIds, ...measIds, ...coIds, ...pcIds]);
       return;
     }
     if (!sel) return;
@@ -3842,9 +3862,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       const elIds = new Set(); multi.filter((m) => m.kind === "el").forEach((m) => assemblyOf(m.id).forEach((x) => elIds.add(x.id)));
       const mkIds = new Set(multi.filter((m) => m.kind === "markup").map((m) => m.id));
       const measIds = new Set(multi.filter((m) => m.kind === "measure").map((m) => m.id));
+      const coIds = new Set(multi.filter((m) => m.kind === "callout").map((m) => m.id));   // NEW-6
+      const pcIds = new Set(multi.filter((m) => m.kind === "parcel").map((m) => m.id));    // NEW-6
       setEls((a) => a.map((el) => elIds.has(el.id) ? shiftEl(el, dx, dy) : el));
       setMarkups((a) => a.map((m) => mkIds.has(m.id) ? translateMarkup(m, dx, dy) : m));
       if (measIds.size) setMeasures((a) => a.map((m) => measIds.has(m.id) ? translateMeasure(m, dx, dy) : m)); // B569
+      if (coIds.size) setCallouts((a) => a.map((c) => coIds.has(c.id) ? translateCalloutBy(c, dx, dy) : c));
+      if (pcIds.size) setParcels((a) => a.map((p) => pcIds.has(p.id) ? translateParcelBy(p, dx, dy) : p));
     } else if (sel?.kind === "el") {
       const ids = new Set(assemblyOf(sel.id).map((x) => x.id));
       setEls((a) => a.map((el) => ids.has(el.id) ? shiftEl(el, dx, dy) : el));
@@ -3858,36 +3882,74 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     points: el.points.map((p) => ({ x: p.x + dx, y: p.y + dy })),
     ...(el.footEdit ? { cx: el.cx + dx, cy: el.cy + dy, dockLines: translateDockLines(el.dockLines, dx, dy) } : {}),
   });
-  // Copy / cut / paste the selected element (rectangles or polygons).
-  const copySel = () => { if (sel?.kind === "el") clip.current = els.find((x) => x.id === sel.id) || clip.current; };
-  const cutSel = () => { if (sel?.kind === "el") { copySel(); deleteSel(); } };
+  /* ---- NEW-2 / NEW-6: ONE general clipboard, driven by the current selection ----
+   * Was: a single-element clipboard (`clip.current` held one `els` entry) that stripped the host
+   * bond on paste — so a copied building arrived WITHOUT its truck court / trailer parking / dock
+   * zones / sidewalks / bump-outs, and callouts, parcels, markups and measurements could not be
+   * copied at all. Now `clip.current` holds a payload `{ items, counts }` from planClipboard.js:
+   * every selected kind, with each element expanded to its bonded ASSEMBLY (the explicit
+   * `attachedTo` relation the delete/nudge/duplicate paths already cascade over — never a
+   * geometric-containment guess). Paste re-mints ids, remaps the bonds INSIDE the copied set,
+   * moves the whole set by one delta (relative geometry preserved), lands it under the cursor,
+   * selects it, and does it all in ONE undo frame. */
+  const elTranslate = (el, dx, dy) => (el.points ? shiftPointsEl(el, dx, dy) : shiftEl(el, dx, dy));
+  // Built lazily inside paste: translateMarkup / translateMeasure are declared further down the
+  // component body, so reading them at this point during render would hit the temporal dead zone.
+  const clipTranslate = () => ({ el: elTranslate, markup: translateMarkup, measure: translateMeasure });
+  // The refs the clipboard should act on: the whole multi-selection, else the single selection.
+  const copyRefs = () => {
+    const m = multiRef.current;
+    if (m && m.length) return m;
+    const s = selRef.current;
+    return s && CLIP_KINDS.includes(s.kind) ? [s] : [];
+  };
+  const hasCopyableSel = () => copyRefs().length > 0;
+  const copySel = () => {
+    const refs = copyRefs();
+    if (!refs.length) return null;
+    const payload = collectClipboard(refs, stateRef.current);
+    if (!payload.items.length) return null;
+    clip.current = payload;
+    return payload;
+  };
+  // Copy an EXPLICIT ref (a right-click menu's just-clicked item) without waiting for the
+  // selection state to land — the same escape hatch `deleteSel(target)` uses.
+  const copyRef = (ref) => {
+    const payload = collectClipboard([ref], stateRef.current);
+    if (!payload.items.length) return null;
+    clip.current = payload;
+    flashWarn(`Copied — ${MOD_LABEL}V pastes it where your cursor is.`, 3500);
+    return payload;
+  };
+  const cutSel = () => { if (copySel()) deleteSel(); };
   const pasteClip = () => {
-    if (!clip.current) return;
-    const src = detachClone(clip.current); // a pasted copy starts standalone (no host/court links)
-    const anchor = lastPtrFt.current;      // live cursor in feet (B417) — paste lands centered here, Bluebeam-style
-    let el;
-    if (anchor && Number.isFinite(anchor.x) && Number.isFinite(anchor.y)) {
-      const a = snapPt(anchor);            // honor the grid/snap toggle (held-Alt bypasses, same as a drag)
-      if (isCenterlineRoad(src)) {
-        el = { ...shiftEl(src, a.x - src.cx, a.y - src.cy), id: uid() }; // road: bbox centre under the cursor (pts move too)
-      } else if (src.points) {
-        const np = centerOn(src.points, a);                         // polygon: bbox center sits under the cursor
-        const dxp = np[0].x - src.points[0].x, dyp = np[0].y - src.points[0].y; // uniform translation → same delta for the frame
-        el = { ...shiftPointsEl(src, dxp, dyp), id: uid() };
-      } else {
-        el = { ...src, id: uid(), cx: a.x, cy: a.y }; // a rect's cx/cy IS its center
-      }
+    const payload = clip.current;
+    if (!payload?.items?.length) return;
+    // Where the set lands: its bbox center under the live cursor (B417 paste-at-cursor), honoring
+    // the grid/snap toggle. No pointer seen yet → the old fixed nudge, so paste is never a no-op.
+    const bb = clipboardBBox(payload.items, featBBox);
+    const anchor = lastPtrFt.current;
+    let dx, dy;
+    if (bb && anchor && Number.isFinite(anchor.x) && Number.isFinite(anchor.y)) {
+      const a = snapPt(anchor);
+      dx = a.x - (bb.x0 + bb.x1) / 2;
+      dy = a.y - (bb.y0 + bb.y1) / 2;
     } else {
-      const off = (settings.gridSize || 10) * 2; // fallback (no pointer seen yet): the old fixed nudge — never a no-op
-      el = isCenterlineRoad(src)
-        ? { ...shiftEl(src, off, off), id: uid() }
-        : src.points
-          ? { ...shiftPointsEl(src, off, off), id: uid() }
-          : { ...src, id: uid(), cx: src.cx + off, cy: src.cy + off };
+      dx = dy = (settings.gridSize || 10) * 2;
     }
-    pushHistory();
-    setEls((a) => [...a, el]);
-    setSel({ kind: "el", id: el.id });
+    const made = pasteClipboard(payload.items, { mint: uid, translate: clipTranslate(), dx, dy });
+    pushHistory(); // ONE frame for the whole paste, however many objects it carries
+    if (made.els.length) setEls((a) => [...a, ...made.els]);
+    if (made.markups.length) setMarkups((a) => [...a, ...withStackZ(a, made.markups)]);
+    if (made.measures.length) setMeasures((a) => [...a, ...made.measures]);
+    if (made.callouts.length) setCallouts((a) => [...a, ...made.callouts]);
+    if (made.parcels.length) setParcels((a) => [...a, ...made.parcels]);
+    // The pasted set IS the new selection (bonded children stay folded into their host's ref).
+    const refs = made.refs;
+    setMulti(refs.length > 1 ? refs : []);
+    setSel(refs[0] || null);
+    setDrillId(null);
+    if (made.parcels.length) flashWarn(`Pasted parcel${made.parcels.length > 1 ? "s" : ""} start Off — turn one On to count it in the site area.`, 5000);
   };
   // Duplicate an element (offset ~10′, unattached). Used constantly from the menu.
   const duplicateEl = (id) => {
@@ -12493,6 +12555,111 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // so not undoable (no pushHistory dead frame); consumed at creation by parcelDefaultStyle().
   const setParcelStd = (patch) => setSettings((s) => ({ ...s, parcelStyle: { ...(s.parcelStyle || {}), ...patch } }));
 
+  /* ---- NEW-3: Standards scope + retroactive apply ----
+   * Standards seeded NEW objects only. Two axes were missing and both are one click now:
+   *   Apply — push the value onto the objects ALREADY on the plan (one undo frame + an Undo toast)
+   *   Scope — where the DEFAULT lives: this project (settings) or this ACCOUNT (every project).
+   * The account layer is a real cross-machine store (public.profiles.prefs, own-row RLS — see
+   * lib/userPrefs.js). Signed out, the "All" scope falls back to a machine-local mirror and SAYS
+   * so rather than passing a per-computer value off as a cross-machine default. */
+  const [userPrefs, setUserPrefs] = useState(() => applyPrefs(readMirror()));
+  const [prefsSource, setPrefsSource] = useState("local"); // "cloud" once the account row loads
+  useEffect(() => {
+    let live = true;
+    loadUserPrefs(activeUid()).then((res) => {
+      if (!live) return;
+      setUserPrefs(res.prefs);
+      setPrefsSource(res.source);
+    });
+    return () => { live = false; };
+  }, [accountActive]);
+  const cloudPrefsReady = prefsSource === "cloud";
+  // Persist an account-scope preference change, LOUDLY on failure (never a silent "saved").
+  const commitUserPrefs = (next) => {
+    setUserPrefs(next);
+    saveUserPrefs(activeUid(), next).then((res) => {
+      if (!res.ok) flashWarn(`⚠ Saved on this computer only — couldn't reach your account (${res.error}).`, 7000);
+    });
+  };
+  // A toast that carries an Undo, for the destructive half (overwriting existing objects).
+  const [stdToast, setStdToast] = useState(null); // { msg, onUndo }
+  const stdToastTimer = useRef(null);
+  const flashStdToast = (msg, onUndo, ms = 7000) => {
+    if (stdToastTimer.current) clearTimeout(stdToastTimer.current);
+    setStdToast({ msg, onUndo });
+    stdToastTimer.current = setTimeout(() => { stdToastTimer.current = null; setStdToast(null); }, ms);
+  };
+  useEffect(() => () => { if (stdToastTimer.current) clearTimeout(stdToastTimer.current); }, []);
+
+  // Where a parcel standard's value comes from, and the two actions on it.
+  const parcelStdScope = (key) => standardScope(settings.parcelStyle?.[key], getStandardPref(userPrefs, "parcelStyle", key));
+  const parcelStdValue = (key) => settings.parcelStyle?.[key] ?? getStandardPref(userPrefs, "parcelStyle", key);
+  const setParcelStdScope = (key, next) => {
+    const val = parcelStdValue(key);
+    if (next === "all") {
+      // Promote: the account carries it, and the project's own copy is dropped so this plan keeps
+      // following the account default when it changes later.
+      commitUserPrefs(setStandardPref(userPrefs, "parcelStyle", key, val ?? null));
+      setSettings((s) => { const ps = { ...(s.parcelStyle || {}) }; delete ps[key]; return { ...s, parcelStyle: ps }; });
+      if (!cloudPrefsReady) flashWarn("Saved on this computer — sign in to make it a default across your account.", 6000);
+    } else {
+      // Demote: keep the value as this plan's own, leave the account default alone.
+      if (val !== undefined && val !== null) setParcelStd({ [key]: val });
+    }
+  };
+  const applyParcelStd = (key, noun = "parcel") => {
+    const val = parcelStdValue(key) ?? null;
+    const res = applyParcelStandard(stateRef.current.parcels, key, val);
+    if (!res.count) return;
+    const before = stateRef.current.parcels;
+    pushHistory();                       // ONE frame for every parcel touched
+    setParcels(res.parcels);
+    flashStdToast(appliedLabel(res.count, noun), () => { setParcels(before); setStdToast(null); });
+  };
+
+  // Element-type colors. Elements resolve their type style at RENDER, so a changed default already
+  // shows — except on elements carrying a per-element override. "Apply" clears those overrides.
+  const typeStdScope = (type, key) => standardScope(settings.typeStyles?.[type]?.[key], getStandardPref(userPrefs, "typeStyles", key, type));
+  const typeStdValue = (type, key) => settings.typeStyles?.[type]?.[key] ?? getStandardPref(userPrefs, "typeStyles", key, type);
+  const setTypeStdScope = (type, key, next) => {
+    const val = typeStdValue(type, key);
+    if (next === "all") {
+      commitUserPrefs(setStandardPref(userPrefs, "typeStyles", key, val ?? null, type));
+      setSettings((s) => {
+        const all = { ...(s.typeStyles || {}) };
+        const bag = { ...(all[type] || {}) };
+        delete bag[key];
+        if (Object.keys(bag).length) all[type] = bag; else delete all[type];
+        return { ...s, typeStyles: all };
+      });
+      if (!cloudPrefsReady) flashWarn("Saved on this computer — sign in to make it a default across your account.", 6000);
+    } else if (val !== undefined && val !== null) {
+      liveTypeStyle(type, { [key]: val });
+    }
+  };
+  const applyTypeStd = (type, key) => {
+    const res = applyTypeStandard(stateRef.current.els, type, key);
+    if (!res.count) return;
+    const before = stateRef.current.els;
+    pushHistory();
+    setEls(res.els);
+    flashStdToast(appliedLabel(res.count, TYPE[type].label.split(" / ")[0].toLowerCase()), () => { setEls(before); setStdToast(null); });
+  };
+  // The chip row rendered under each Standards field (short by design — no prose per setting).
+  const parcelStdChips = (key) => (
+    <StandardScope scope={parcelStdScope(key)} onScope={(next) => setParcelStdScope(key, next)}
+      applyCount={parcelStandardImpact(parcels, key, parcelStdValue(key) ?? null)}
+      onApply={() => applyParcelStd(key)} noun="parcel" cloudReady={cloudPrefsReady} />
+  );
+  const typeStdChips = (type, key, label) => (
+    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+      <span style={{ fontSize: 10.5, color: PAL.muted, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", minWidth: 26 }}>{label}</span>
+      <StandardScope scope={typeStdScope(type, key)} onScope={(next) => setTypeStdScope(type, key, next)}
+        applyCount={typeStandardImpact(els, type, key)} onApply={() => applyTypeStd(type, key)}
+        noun={TYPE[type].label.split(" / ")[0].toLowerCase()} cloudReady={cloudPrefsReady} />
+    </div>
+  );
+
   /* ---- live color picking (B567) ----
    * A native <input type="color"> fires `change` only when the OS palette CLOSES, but fires
    * `input` continuously as you click/drag through swatches. Wiring `onInput` makes the selected
@@ -12508,7 +12675,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const livePick = (apply, hist = true) => ({
     onFocus: () => { pickSnapRef.current = false; },
     onInput:  (e) => { if (hist && !pickSnapRef.current) { pushHistory(); pickSnapRef.current = true; } apply(e.target.value); },
-    onChange: (e) => { if (hist && !pickSnapRef.current) { pushHistory(); pickSnapRef.current = true; } apply(e.target.value); },
+    // NEW-4 — `change` fires once, when the wheel CLOSES, so the color you settled on is recorded
+    // in the shared recents exactly once (dragging through 40 shades doesn't flood the row).
+    onChange: (e) => { if (hist && !pickSnapRef.current) { pushHistory(); pickSnapRef.current = true; } apply(e.target.value); pushRecent(e.target.value); },
+  });
+  /* NEW-4 — one color CONTROL = the wheel (live picking, above) + the shared recently-used row.
+   * `pick` drives the wheel; `onSwatch` is the discrete click path: exactly one undo frame, apply,
+   * and move that color back to the front of the shared list. `hist=false` for Standards defaults,
+   * which live in `settings` (outside the undo snapshot) — pushing there leaves a dead frame (RC-6). */
+  const colorCtl = (apply, hist = true) => ({
+    pick: livePick(apply, hist),
+    onSwatch: (v) => { if (hist) pushHistory(); apply(v); pushRecent(v); },
   });
   const liveMarkup    = (patch) => { setMarkups((a) => a.map((m) => (selMarkup && m.id === selMarkup.id ? { ...m, ...patch } : m))); setMkStyle((s) => ({ ...s, ...patch })); };
   const liveCallout   = (patch) => { if (selCallout) setCallout(selCallout.id, patch); };
@@ -13311,7 +13488,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   </Field>
                   <Field label="Fill color">
                     <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                      <input type="color" value={toHex6(selParcel.fill)} {...livePick((v) => setSelParcel({ fill: v }))} style={{ width: 34, height: 26, padding: 0, border: `1px solid var(--border-default)`, borderRadius: 6, background: "var(--surface-raised)", cursor: "pointer" }} />
+                      <ColorField value={toHex6(selParcel.fill)} {...colorCtl((v) => setSelParcel({ fill: v }))} seed={COLOR_SEED} title="Fill color" />
                     </span>
                   </Field>
                 </>
@@ -13321,7 +13498,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   does not). Renders live via pc.stroke/pc.weight/pc.dash at the parcel <polygon>. */}
               <Field label="Outline color">
                 <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                  <input type="color" value={toHex6(selParcel.stroke ?? PAL.parcel)} {...livePick((v) => setSelParcel({ stroke: v }))} style={{ width: 34, height: 26, padding: 0, border: `1px solid var(--border-default)`, borderRadius: 6, background: "var(--surface-raised)", cursor: "pointer" }} />
+                  <ColorField value={toHex6(selParcel.stroke ?? PAL.parcel)} {...colorCtl((v) => setSelParcel({ stroke: v }))} seed={COLOR_SEED} title="Outline color" />
                 </span>
               </Field>
               <Field label="Line weight">
@@ -13621,8 +13798,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               standardsFocus (the remount key opens the focused section). */}
           {_pid === "standards" && (<>
           <div style={{ fontSize: 11.5, color: PAL.muted, lineHeight: 1.55, margin: "2px 2px 10px" }}>
-            <b style={{ color: PAL.ink }}>Defaults for new elements</b> — select an element to override just that one.
-            Show/hide toggles and grid &amp; snap moved to the <b>View</b> (eye) menu on the canvas.
+            <b style={{ color: PAL.ink }}>Starting values</b> — <b>Apply</b> pushes one onto what's already drawn;
+            <b> Project / All</b> sets where that default lives. Select an object to override just that one.
           </div>
 
           <div data-std-sec="parcels">
@@ -13631,34 +13808,42 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             {/* B929 — the rest of a parcel's own properties, now settable as defaults for NEW parcels
                 (stamped at creation via parcelDefaultStyle; each mirrors a control in the parcel
                 inspector). livePick uses hist=false since these touch settings only (RC-6). */}
+            {/* NEW-3 — each standard now carries its own short chip row: Apply (retroactive, one
+                undo frame + an Undo toast) and the scope this default lives at (Project / All).
+                Values read project-first, then the account default (see parcelStdValue). */}
             <Field label="Outline color">
               <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                <input type="color" value={toHex6(settings.parcelStyle?.stroke ?? PAL.parcel)} {...livePick((v) => setParcelStd({ stroke: v }), false)} style={{ width: 34, height: 26, padding: 0, border: `1px solid var(--border-default)`, borderRadius: 6, background: "var(--surface-raised)", cursor: "pointer" }} />
+                <ColorField value={toHex6(parcelStdValue("stroke") ?? PAL.parcel)} {...colorCtl((v) => setParcelStd({ stroke: v }), false)} seed={COLOR_SEED} title="Outline color" />
               </span>
             </Field>
+            {parcelStdChips("stroke")}
             <Field label="Line weight">
-              <NumInput style={numInput} value={settings.parcelStyle?.weight ?? 2} min={0.5} step={0.5} coarse={2} onCommit={(n) => setParcelStd({ weight: n })} />
+              <NumInput style={numInput} value={parcelStdValue("weight") ?? 2} min={0.5} step={0.5} coarse={2} onCommit={(n) => setParcelStd({ weight: n })} />
             </Field>
+            {parcelStdChips("weight")}
             <Field label="Line style">
-              <select value={settings.parcelStyle?.dash ?? "solid"} onChange={(e) => setParcelStd({ dash: e.target.value })}
+              <select value={parcelStdValue("dash") ?? "solid"} onChange={(e) => setParcelStd({ dash: e.target.value })}
                 style={{ ...numInput, width: "auto", cursor: "pointer" }}>
                 <option value="solid">Solid</option>
                 <option value="dashed">Dashed</option>
                 <option value="dotted">Dotted</option>
               </select>
             </Field>
+            {parcelStdChips("dash")}
             <label style={{ display: "flex", gap: 8, fontSize: 12, color: PAL.muted, margin: "2px 2px 8px", cursor: "pointer" }}>
-              <input type="checkbox" checked={!!settings.parcelStyle?.fill} onChange={(e) => setParcelStd(e.target.checked ? { fill: "#5b6650" } : { fill: null, fillOpacity: null })} /> Fill new parcels (off by default)
+              <input type="checkbox" checked={!!parcelStdValue("fill")} onChange={(e) => setParcelStd(e.target.checked ? { fill: "#5b6650" } : { fill: null, fillOpacity: null })} /> Fill new parcels (off by default)
             </label>
-            {settings.parcelStyle?.fill && (
+            {parcelStdChips("fill")}
+            {parcelStdValue("fill") && (
               <>
                 <Field label="Translucence">
-                  <input type="range" min={0} max={0.6} step={0.02} value={settings.parcelStyle?.fillOpacity ?? 0.12}
+                  <input type="range" min={0} max={0.6} step={0.02} value={parcelStdValue("fillOpacity") ?? 0.12}
                     onChange={(e) => setParcelStd({ fillOpacity: +e.target.value })} />
                 </Field>
+                {parcelStdChips("fillOpacity")}
                 <Field label="Fill color">
                   <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                    <input type="color" value={toHex6(settings.parcelStyle?.fill)} {...livePick((v) => setParcelStd({ fill: v }), false)} style={{ width: 34, height: 26, padding: 0, border: `1px solid var(--border-default)`, borderRadius: 6, background: "var(--surface-raised)", cursor: "pointer" }} />
+                    <ColorField value={toHex6(parcelStdValue("fill"))} {...colorCtl((v) => setParcelStd({ fill: v }), false)} seed={COLOR_SEED} title="Fill color" />
                   </span>
                 </Field>
               </>
@@ -13781,10 +13966,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             {Object.keys(TYPE).map((k) => {
               const st = typeStyle(k, settings);
               return (
-                <div key={k} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 7 }}>
-                  <span style={{ flex: 1, fontSize: 12, color: PAL.ink }}>{TYPE[k].label.split(" / ")[0]}</span>
-                  <input type="color" title="Fill" value={toHex6(st.fill)} {...livePick((v) => liveTypeStyle(k, { fill: v }), false)} style={{ width: 30, height: 24, padding: 0, border: `1px solid var(--border-default)`, borderRadius: 6, background: "var(--surface-raised)", cursor: "pointer" }} />
-                  <input type="color" title="Line" value={toHex6(st.stroke)} {...livePick((v) => liveTypeStyle(k, { stroke: v }), false)} style={{ width: 30, height: 24, padding: 0, border: `1px solid var(--border-default)`, borderRadius: 6, background: "var(--surface-raised)", cursor: "pointer" }} />
+                <div key={k} style={{ marginBottom: 7 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                    <span style={{ flex: 1, fontSize: 12, color: PAL.ink, minWidth: 90 }}>{TYPE[k].label.split(" / ")[0]}</span>
+                    <ColorField title="Fill" value={toHex6(st.fill)} {...colorCtl((v) => liveTypeStyle(k, { fill: v }), false)} seed={COLOR_SEED} style={{ width: 30, height: 24 }} />
+                    <ColorField title="Line" value={toHex6(st.stroke)} {...colorCtl((v) => liveTypeStyle(k, { stroke: v }), false)} seed={COLOR_SEED} style={{ width: 30, height: 24 }} />
+                  </div>
+                  {/* NEW-3 — an element resolves its type color at render, so a changed default
+                      already shows; "Apply" is what clears the per-element overrides still winning
+                      over it. Fill and Line each get their own scope, per the owner's rule. */}
+                  {typeStdChips(k, "fill", "Fill")}
+                  {typeStdChips(k, "stroke", "Line")}
                 </div>
               );
             })}
@@ -14729,10 +14921,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               {multi.length > 1 && (
                 <g data-export="skip" pointerEvents="none">
                   {multi.map((m) => {
-                    if (m.kind === "measure") {
-                      // measures are index/line features with no styleable footprint — keep the AABB box.
-                      const o = measures.find((x) => x.id === m.id);
-                      const bb = o && featBBox(o); if (!bb) return null;
+                    // NEW-6 — measures, callouts and parcels have no styleable footprint ring, so
+                    // they show the AABB selection box. (Callouts + parcels can now join a
+                    // multi-selection because a pasted mixed set selects itself.)
+                    if (m.kind === "measure" || m.kind === "callout" || m.kind === "parcel") {
+                      const o = m.kind === "measure" ? measures.find((x) => x.id === m.id)
+                        : m.kind === "callout" ? callouts.find((x) => x.id === m.id)
+                          : parcels.find((x) => x.id === m.id);
+                      const bb = o && (m.kind === "callout" ? clipboardBBox([{ kind: "callout", obj: o }], featBBox) : featBBox(o));
+                      if (!bb) return null;
                       const p0 = f2p({ x: bb.x0, y: bb.y0 }), p1 = f2p({ x: bb.x1, y: bb.y1 });
                       return <SelectionChrome key={`ms${m.kind}${m.id}`} x={Math.min(p0.x, p1.x) - 2} y={Math.min(p0.y, p1.y) - 2} w={Math.abs(p1.x - p0.x) + 4} h={Math.abs(p1.y - p0.y) + 4} casing={PAL.selCasing} line={PAL.selLine} grips />;
                     }
@@ -15038,24 +15235,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         </g>
                       );
                     })()}
-                    {/* per-leader re-aim grip + a small × delete affordance at its midpoint
-                        (Bluebeam-style), shown per leader while this callout is selected. */}
-                    {isSel && tool === "select" && tips.map((tp, i) => {
-                      const origin = nearestRectPerimeterPoint(boxRect, tp);
-                      const mx = (origin.x + tp.x) / 2, my = (origin.y + tp.y) / 2;
-                      return (
-                        <g key={i} data-export="skip">
-                          <circle cx={tp.x} cy={tp.y} r={5} fill={SEL_HANDLE_FILL} stroke={SEL_BLUE} strokeWidth={2}
-                            style={{ cursor: "move" }} onPointerDown={(e) => startMoveCallout(e, c.id, "tip", i)} />
-                          <g style={{ cursor: "pointer" }} aria-label="Delete this leader" data-testid={`callout-delete-leader-${c.id}-${i}`}
-                            onPointerDown={(e) => { e.stopPropagation(); removeLeaderFromCallout(c.id, i); }}>
-                            <circle cx={mx} cy={my} r={8} fill="var(--surface-raised)" stroke={PAL.danger} strokeWidth={1.25} />
-                            <line x1={mx - 3} y1={my - 3} x2={mx + 3} y2={my + 3} stroke={PAL.danger} strokeWidth={1.5} />
-                            <line x1={mx - 3} y1={my + 3} x2={mx + 3} y2={my - 3} stroke={PAL.danger} strokeWidth={1.5} />
-                          </g>
-                        </g>
-                      );
-                    })}
+                    {/* Per-leader re-aim grip, shown per leader while this callout is selected.
+                        NEW-5 — the × delete badge that used to sit at the leader's midpoint is GONE
+                        (owner rule, same as NEW-1 on measurements): it hovered over the leader line
+                        and read as part of the drawing. A single leader is still removable by
+                        right-clicking it → "Delete Leader"; Delete removes the whole callout. */}
+                    {isSel && tool === "select" && tips.map((tp, i) => (
+                      <g key={i} data-export="skip">
+                        <circle cx={tp.x} cy={tp.y} r={5} fill={SEL_HANDLE_FILL} stroke={SEL_BLUE} strokeWidth={2}
+                          style={{ cursor: "move" }} onPointerDown={(e) => startMoveCallout(e, c.id, "tip", i)} />
+                      </g>
+                    ))}
                   </g>
                 );
               })}
@@ -15177,10 +15367,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                                 style={{ cursor: "move" }} onPointerDown={(e) => startMeasureVertex(e, i, k)} />
                             );
                           })}
-                          <g style={{ cursor: "pointer" }} onPointerDown={(e) => { e.stopPropagation(); pushHistory(); const gid = (measures[i] || {}).id; setMeasures((arr) => arr.filter((_, idx) => idx !== i)); if (gid) tombstone(gid); setSel(null); }}>
-                            <circle cx={lastPt.x} cy={lastPt.y - 26} r={8.5} fill={PAL.paper} stroke={PAL.accent} strokeWidth={1.5} />
-                            <text x={lastPt.x} y={lastPt.y - 26} dy={3.5} textAnchor="middle" fontSize="12" fontWeight="700" fill={PAL.accent} pointerEvents="none">×</text>
-                          </g>
+                          {/* NEW-1 — no × delete badge on a measurement (owner rule): a selected
+                              measurement is deleted with the Delete key or the right-click menu.
+                              The badge sat right where the count markers do and read as part of
+                              the measurement itself. */}
                         </g>
                       )}
                     </g>
@@ -15236,11 +15426,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                               style={{ cursor: "move" }} onPointerDown={(e) => startMeasureVertex(e, i, k)} />
                           );
                         })}
-                        {/* delete the whole measurement */}
-                        <g style={{ cursor: "pointer" }} onPointerDown={(e) => { e.stopPropagation(); pushHistory(); const gid = (measures[i] || {}).id; setMeasures((arr) => arr.filter((_, idx) => idx !== i)); if (gid) tombstone(gid); setSel(null); }}>
-                          <circle cx={anchor.x} cy={anchor.y - 22} r={8.5} fill={PAL.paper} stroke={PAL.accent} strokeWidth={1.5} />
-                          <text x={anchor.x} y={anchor.y - 22} dy={3.5} textAnchor="middle" fontSize="12" fontWeight="700" fill={PAL.accent} pointerEvents="none">×</text>
-                        </g>
+                        {/* NEW-1 — no × delete badge on a measurement (owner rule). Delete key or
+                            the right-click menu ("Delete measurement") removes it; the badge used
+                            to float over the dimension label and read as part of the measurement. */}
                       </g>
                     )}
                   </g>
@@ -16092,6 +16280,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         style={{ position: "absolute", inset: 0, width: "100%", height: "100%", opacity: 0, cursor: "pointer", padding: 0, border: "none" }} />
                     </span>
                     {st.mixed && <span style={mixNote}>Mixed</span>}
+                    {/* NEW-4 — the recents row works on a multi-selection too: one click paints the
+                        whole selection, in ONE undo frame (applyMultiStyle), same as the wheel. */}
+                    <ColorRecentsRow seed={COLOR_SEED} current={st.mixed ? null : toHex6(st.value)}
+                      onPick={(v) => { applyMultiStyle({ [prop]: v }); pushRecent(v); }} />
                   </span>
                 </Field>
               );
@@ -16209,7 +16401,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               // NEW-1 — plain wrapper (see the multi-select branch above for why the duplicate testid was removed).
               <div>
               <Section title={`Markup · ${selMarkup.kind[0].toUpperCase()}${selMarkup.kind.slice(1)}`}>
-                <Field label="Outline"><input type="color" value={toHex6(selMarkup.stroke)} {...livePick((v) => liveMarkup({ stroke: v }))} style={swatch} /></Field>
+                <Field label="Outline"><ColorField value={toHex6(selMarkup.stroke)} {...colorCtl((v) => liveMarkup({ stroke: v }))} seed={COLOR_SEED} title="Outline color" style={swatch} /></Field>
                 <Field label="Line weight"><NumInput style={numInput} value={selMarkup.weight ?? 2} min={0.5} step={0.5} coarse={2} onCommit={(n) => setSelMarkup({ weight: n })} /></Field>
                 <Field label="Dash">
                   <select style={{ ...numInput, width: 100, fontFamily: "inherit" }} value={selMarkup.dash || "solid"} onChange={(e) => setSelMarkup({ dash: e.target.value })}>
@@ -16228,7 +16420,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   {inlineLabelControls(selMarkup, selMarkup.kind, coalesceLabelWrite(selMarkup.id, (p) => setMarkups((a) => a.map((m) => (m.id === selMarkup.id ? { ...m, ...p } : m)))))}
                 </>)}
                 {closed && <>
-                  <Field label="Fill"><input type="color" value={toHex6(selMarkup.fill)} {...livePick((v) => liveMarkup({ fill: v }))} style={swatch} /></Field>
+                  <Field label="Fill"><ColorField value={toHex6(selMarkup.fill)} {...colorCtl((v) => liveMarkup({ fill: v }))} seed={COLOR_SEED} title="Fill color" style={swatch} /></Field>
                   <Field label="Fill opacity"><input type="range" min={0} max={1} step={0.05} value={selMarkup.fillOpacity ?? 0} {...sliderHistory((e) => liveMarkup({ fillOpacity: +e.target.value }))} /></Field>
                 </>}
                 {MK_BOX_KINDS.includes(selMarkup.kind) && <>
@@ -16303,9 +16495,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 7 }}>
                   <span style={{ ...cap, marginRight: 1 }}>Size</span>
                   <NumInput style={{ ...numInput, width: 48 }} value={cs.size} min={6} max={96} step={1} coarse={4} onCommit={(n) => setSelCallout({ size: n })} />
-                  <span style={swatchCap} title="Text color"><input type="color" value={toHex6(cs.color)} {...livePick((v) => liveCallout({ color: v }))} style={swatch} /><span style={cap}>Text</span></span>
-                  <span style={swatchCap} title="Fill color"><input type="color" value={toHex6(cs.fill)} {...livePick((v) => liveCallout({ fill: v }))} style={swatch} /><span style={cap}>Fill</span></span>
-                  <span style={swatchCap} title="Outline color"><input type="color" value={toHex6(cs.stroke)} {...livePick((v) => liveCallout({ stroke: v }))} style={swatch} /><span style={cap}>Outline</span></span>
+                  <span style={swatchCap} title="Text color"><ColorField value={toHex6(cs.color)} {...colorCtl((v) => liveCallout({ color: v }))} seed={COLOR_SEED} title="Text color" style={swatch} /><span style={cap}>Text</span></span>
+                  <span style={swatchCap} title="Fill color"><ColorField value={toHex6(cs.fill)} {...colorCtl((v) => liveCallout({ fill: v }))} seed={COLOR_SEED} title="Fill color" style={swatch} /><span style={cap}>Fill</span></span>
+                  <span style={swatchCap} title="Outline color"><ColorField value={toHex6(cs.stroke)} {...colorCtl((v) => liveCallout({ stroke: v }))} seed={COLOR_SEED} title="Outline color" style={swatch} /><span style={cap}>Outline</span></span>
                 </div>
                 {/* row 2: B / I / U · align L C R */}
                 <div style={{ display: "flex", gap: 5, marginBottom: 7 }}>
@@ -17980,15 +18172,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                             <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 700, marginBottom: 5 }}>Fill colors</div>
                             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
                               <span style={{ fontSize: 11.5, color: PAL.muted }}>Existing basin</span>
-                              <input type="color" value={toHex6(det.existFill ?? curStyle?.fill ?? "#5B97A5")}
-                                {...livePick((v) => setDetLive({ existFill: v }))}
-                                style={{ width: 30, height: 22, padding: 0, border: `1px solid var(--border-default)`, borderRadius: 5, cursor: "pointer" }} />
+                              <ColorField value={toHex6(det.existFill ?? curStyle?.fill ?? "#5B97A5")} title="Existing basin fill"
+                                {...colorCtl((v) => setDetLive({ existFill: v }))} seed={COLOR_SEED} swatchSize={12}
+                                style={{ width: 30, height: 22, borderRadius: 5 }} />
                             </div>
                             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                               <span style={{ fontSize: 11.5, color: PAL.muted }}>Added area</span>
-                              <input type="color" value={toHex6(det.addFill ?? POND_ADD_FILL_DEFAULT)}
-                                {...livePick((v) => setDetLive({ addFill: v }))}
-                                style={{ width: 30, height: 22, padding: 0, border: `1px solid var(--border-default)`, borderRadius: 5, cursor: "pointer" }} />
+                              <ColorField value={toHex6(det.addFill ?? POND_ADD_FILL_DEFAULT)} title="Added area fill"
+                                {...colorCtl((v) => setDetLive({ addFill: v }))} seed={COLOR_SEED} swatchSize={12}
+                                style={{ width: 30, height: 22, borderRadius: 5 }} />
                             </div>
                           </div>
                           <div style={{ display: "flex", gap: 6, marginTop: 9 }}>
@@ -18387,12 +18579,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     <Collapse sectionId="pond-appearance" title="Appearance" defaultOpen={false} summary="fill · outline · opacity">
                       <Field label="Fill">
                         <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                          <input type="color" value={toHex6(curStyle.fill)} {...livePick((v) => setSelEl({ fill: v }))} style={{ width: 34, height: 26, padding: 0, border: `1px solid var(--border-default)`, borderRadius: 6, background: "var(--surface-raised)", cursor: "pointer" }} />
+                          <ColorField value={toHex6(curStyle.fill)} {...colorCtl((v) => setSelEl({ fill: v }))} seed={COLOR_SEED} title="Fill color" />
                         </span>
                       </Field>
                       <Field label="Outline">
                         <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                          <input type="color" value={toHex6(curStyle.stroke)} {...livePick((v) => setSelEl({ stroke: v }))} style={{ width: 34, height: 26, padding: 0, border: `1px solid var(--border-default)`, borderRadius: 6, background: "var(--surface-raised)", cursor: "pointer" }} />
+                          <ColorField value={toHex6(curStyle.stroke)} {...colorCtl((v) => setSelEl({ stroke: v }))} seed={COLOR_SEED} title="Outline color" />
                         </span>
                       </Field>
                       <Field label="Fill opacity">
@@ -18422,12 +18614,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             <Section title="Properties">
               <Field label="Fill">
                 <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                  <input type="color" value={toHex6(curStyle.fill)} {...livePick((v) => setSelEl({ fill: v }))} style={{ width: 34, height: 26, padding: 0, border: `1px solid var(--border-default)`, borderRadius: 6, background: "var(--surface-raised)", cursor: "pointer" }} />
+                  <ColorField value={toHex6(curStyle.fill)} {...colorCtl((v) => setSelEl({ fill: v }))} seed={COLOR_SEED} title="Fill color" />
                 </span>
               </Field>
               <Field label="Outline">
                 <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                  <input type="color" value={toHex6(curStyle.stroke)} {...livePick((v) => setSelEl({ stroke: v }))} style={{ width: 34, height: 26, padding: 0, border: `1px solid var(--border-default)`, borderRadius: 6, background: "var(--surface-raised)", cursor: "pointer" }} />
+                  <ColorField value={toHex6(curStyle.stroke)} {...colorCtl((v) => setSelEl({ stroke: v }))} seed={COLOR_SEED} title="Outline color" />
                 </span>
               </Field>
               <Field label="Fill opacity">
@@ -18737,6 +18929,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         </div>
       )}
 
+      {/* NEW-3 — the "Apply" confirmation. Overwriting objects already on the plan is destructive,
+          so it lands in ONE undo frame and confirms with a short toast carrying an Undo — never a
+          modal, never a paragraph of warning copy in the panel. */}
+      {stdToast && (
+        <div style={{ position: "fixed", left: "50%", bottom: 138, transform: "translateX(-50%)", zIndex: 2500, maxWidth: "80vw",
+          background: PAL.accent, color: "var(--on-accent)", padding: "9px 16px", borderRadius: 99, fontSize: 12.5, fontWeight: 600,
+          boxShadow: "0 8px 28px rgba(0,0,0,0.3)", display: "flex", gap: 12, alignItems: "center" }}>
+          <span>{stdToast.msg}</span>
+          <button data-testid="standards-apply-undo" onClick={stdToast.onUndo} style={{ border: "none", background: "var(--surface-raised)", color: PAL.accent, borderRadius: 7, padding: "4px 12px", cursor: "pointer", fontSize: 11.5, fontWeight: 700 }}>Undo</button>
+        </div>
+      )}
+
       {(pobMode || routeMode || overlapWarn || deedAlignHint) && (
         <div style={{ position: "fixed", left: "50%", bottom: 84, transform: "translateX(-50%)", zIndex: 2500, maxWidth: "80vw",
           background: (deedAlignHint && !pobMode) ? PAL.accent : overlapWarn.startsWith("⚠") ? "#7f1d1d" : (pobMode || routeMode ? PAL.accent : "#15803d"),
@@ -18810,6 +19014,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           body = <>
             {isDeed && row({ text: hasParcel ? "Align to county parcel" : "Rotate to grid north", dis: !!m.locked, title: m.locked ? "Unlock this deed first" : "", on: () => { alignDeedToParcel(dm.id); close(); } })}
             {row({ text: m.locked ? "Unlock" : "Lock", hint: m.locked ? "🔒" : "🔓", on: () => { toggleMarkupLock(m.id); close(); } })}
+            {/* NEW-6 — every drawn kind is copyable, and says so in its own menu. */}
+            {row({ text: "Copy", hint: `${MOD}C`, on: () => { copyRef({ kind: "markup", id: m.id }); close(); } })}
             <div style={{ borderTop: `1px solid ${PAL.panelLine}`, marginTop: 4, paddingTop: 4 }} />
             {af && af.count > 1 && <>
               {row({ text: "Bring to Front", hint: `${MOD}⇧]`, dis: af.atTop, on: () => { arrangeSel("front", { kind: "markup", id: m.id }); close(); } })}
@@ -18829,6 +19035,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           body = <>
             {row({ text: "Properties…", on: () => { setSel({ kind: "measure", i: mapMenu.i }); setPropsFor({ kind: "measure", i: mapMenu.i }); if (narrow) setNarrowProps(true); close(); } })}
             {row({ text: m.locked ? "Unlock" : "Lock", hint: m.locked ? "🔒" : "🔓", on: () => { toggleMeasureLock(m.id); close(); } })}
+            {row({ text: "Copy", hint: `${MOD}C`, on: () => { copyRef({ kind: "measure", id: m.id, i: mapMenu.i }); close(); } })}
             <div style={{ borderTop: `1px solid ${PAL.panelLine}`, marginTop: 4, paddingTop: 4 }} />
             {row({ text: "Delete measurement", hint: "Del", danger: true, on: () => { deleteSel({ kind: "measure", i: mapMenu.i }); close(); } })}
           </>;
@@ -18840,15 +19047,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           body = <>
             {row({ text: "Add Leader", on: () => { setAddLeaderFor(c.id); flashWarn("Add Leader: click where the new leader should point — Esc to cancel.", 0); close(); } })}
             {mapMenu.leaderIndex >= 0 && row({ text: "Delete Leader", danger: true, on: () => { removeLeaderFromCallout(c.id, mapMenu.leaderIndex); close(); } })}
+            {row({ text: "Copy", hint: `${MOD}C`, on: () => { copyRef({ kind: "callout", id: c.id }); close(); } })}
             <div style={{ borderTop: `1px solid ${PAL.panelLine}`, marginTop: 4, paddingTop: 4 }} />
             {row({ text: c.noLeader ? "Delete text box" : "Delete callout", hint: "Del", danger: true, on: () => { deleteSel({ kind: "callout", id: c.id }); close(); } })}
           </>;
         } else {
-          const hasClip = !!(clip.current || overlayClip.current);
+          const hasClip = !!(clip.current?.items?.length || overlayClip.current);
           header = "Map";
           body = <>
             {row({ text: "Zoom to fit", on: () => { fit(); close(); } })}
-            {row({ text: "Paste", hint: `${MOD}V`, dis: !hasClip, title: hasClip ? "" : "Copy a shape or drawing first", on: () => { if (clip.current) pasteClip(); else if (overlayClip.current) pasteOverlay(); close(); } })}
+            {row({ text: "Paste", hint: `${MOD}V`, dis: !hasClip, title: hasClip ? "" : "Copy a shape or drawing first", on: () => { if (clip.current?.items?.length) pasteClip(); else if (overlayClip.current) pasteOverlay(); close(); } })}
             <div style={{ borderTop: `1px solid ${PAL.panelLine}`, marginTop: 4, paddingTop: 4 }} />
             {row({ text: "Export to Google Earth (KMZ)", dis: !origin, title: origin ? "Download this site as a Google Earth file" : "Place this plan on the map first", on: () => { exportKmz(false); close(); } })}
             {row({ text: "Export with 3D buildings", dis: !origin, title: origin ? "Building massing lifted to real height in Earth's 3D view" : "Place this plan on the map first", on: () => { exportKmz(true); close(); } })}

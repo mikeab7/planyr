@@ -27,6 +27,16 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
 - `elementSync.js` / `elementRows.js` / `elementJournal.js` — the element-level sync engine, the
   rows↔model fold layer (incl. `foldJournal`), and the persisted pending-edit journal (NEW-F4:
   a failed commit survives a reload instead of being reverted by the rows-canonical refetch).
+- `planClipboard.js` — the ONE general canvas clipboard (NEW-2/NEW-6): collect the current selection
+  (elements expanded to their `attachedTo` assembly, so a building brings its truck court / trailer
+  parking / dock zones / bump-outs), then paste with fresh ids, bonds remapped INSIDE the copy, and
+  relative geometry preserved. A pasted parcel arrives INACTIVE by design (can't double-count site area).
+- `standardsApply.js` + `userPrefs.js` + `components/StandardScope.jsx` — Standards scope + retroactive
+  apply (NEW-3). `standardsApply` is the pure engine (parcels are stamped → WRITE the value; elements
+  resolve at render → CLEAR the per-element override). `userPrefs` is the account-level store
+  (`public.profiles.prefs` jsonb, own-row RLS — `db/user_prefs.sql`) behind the "All projects" scope,
+  published into `planStyle`'s account layer (`setAccountStyleDefaults`). Precedence: built-in <
+  account < project < per-object.
 - `zOrder.js` — per-element `z` stacking key utilities (`nextZ`/`sortByZ`/`normalizeZ`/`ensureZ`, B671).
   `arrange.js` — pure z-order "Arrange" (`reorderByZ`/`arrangeFlags`, B820): Bring-to-Front/Send-to-Back
   over a peer set (a building reorders within its `Z_LAYER` band, a markup within the markup layer;

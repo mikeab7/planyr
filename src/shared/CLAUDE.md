@@ -29,6 +29,9 @@ into every consumer. Root rules in `/CLAUDE.md`; deep detail in `/docs/REFERENCE
   `var()`). `ui/statusTokens.js` — the single project-status palette source. `ui/controls.jsx` —
   shared control primitives (Button/ToggleChip/IconButton/Field/Section/MenuItem) + the one
   radius/padding/type scale; token-driven, an `accent` prop keeps each module's hue (B657-5B).
+  `ui/ColorField.jsx` + pure `ui/colorRecents.js` — the color control: the native wheel PLUS the ONE
+  shared recently-used swatch row (NEW-4), seeded from the app palette so it's never blank, persisted
+  and live-shared across every picker (`ColorRecentsRow` is the row alone, for a bespoke wheel).
   `ui/AnchoredMenu.jsx` — the portal-to-body clamped flyout (placement math is pure, unit-tested
   `ui/anchoredMenuPlacement.js` — `placeMenu`, which hides rather than corner-pins a
   zero-sized/`display:none` anchor, B734). `ui/FloatingPanel.jsx` +
