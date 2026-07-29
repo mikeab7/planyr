@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-07-29 @ `975c1c0` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-07-29 @ `cae4baf` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_341 source files mapped._
+_343 source files mapped._
 
 ## infra
 
@@ -291,6 +291,8 @@ _341 source files mapped._
   - _exports_: `calloutLayout`, `minCalloutWidthFt`, `wrapLines`
 - **`src/workspaces/site-planner/lib/ccnClassify.js`** — Pure water/sewer CCN screening classifier (PHASE 1): infers the utility KIND (city/MUD/WSC/…) from the provider name and turns a CCN /query result into an `info` finding (who is certificated to serve, or an honest well/septic flag when none)
   - _exports_: `CCN_UTILITY_TYPES`, `ccnHolders`, `classifyCcn`, `describeHolder`, `inferUtilityType`
+- **`src/workspaces/site-planner/lib/channelSection.js`** — Cuts a ground cross-section across the channel from the existing 3DEP DEM grid (pixel-space bilinear sampling), plus the channel's flow bearing, longitudinal slope, the site mask, and the watershed-truncation guard. The missing fourth input to the screening-BFE engine; same terrain source as the berm-height sampler, indexed as a line rather than as points.
+  - _exports_: `channelCell`, `channelSlope`, `cutSection`, `flowBearing`, `gridCellFt`, `sampleAtPixel`, `siteMaskFromLatLngRings`, `upstreamEdgeFlags`
 - **`src/workspaces/site-planner/lib/cloudSync.js`** — RLS-scoped Supabase site read/write: per-tab version CAS + thin-clobber guard, keepalive push, delete-tombstone reconcile
   - _exports_: `_lastHeaderSig`, `_siteVersions`, `clearSiteVersions`, `cloudDelete`, `cloudDeletedRows`, `cloudHardDelete`, `cloudList`, `cloudRestore`, `cloudUpsert`, `fetchSiteForReconcile`, `headerSig`, `interpretDelete`, `keepaliveCloudPush`, `siteRowFor`, `slimForCloud`
 - **`src/workspaces/site-planner/lib/conceptName.js`** — Default plan naming: bijective base-26 Concept A/B/.../AA sequence continuing past the highest existing concept per site
@@ -386,9 +388,9 @@ _341 source files mapped._
 - **`src/workspaces/site-planner/lib/floodGroup.js`** — Flood & drainage layer-group model (B1070/B1071, pure): four provenance tiers, point-in-district auto-scoping of local drainage authorities, master-toggle state, and the honest empty-state copy (what FEMA actually reported, why a district isn't listed, the governing-district drainage line)
   - _exports_: `COUNTY_DISTRICT`, `districtDrainageNote`, `districtName`, `districtShort`, `districtSwapNote`, `DRAINAGE_DISTRICTS`, `emptyReason`, `FEMA_ZONES_NOT_CHANNELS`, `femaZoneVerdict`, `FLOOD_TIER_ORDER`, `FLOOD_TIERS`, `floodMasterState`, `floodTierLabel`, `governingDistrict`, `isSfhaZone`, `scopeFloodEntries`
 - **`src/workspaces/site-planner/lib/floodplainMitigation.js`** — B707 pure engine: NFHL zone classifier (AO/AH/floodway/unstudied-A), lon/lat→site-feet zones, grid-sampled fill∩zone compensating-storage volume with pluggable elevation providers, UNKNOWN-never-zero states, expert bypass, straddle worst-case
-  - _exports_: `BFE_SENTINEL_MIN`, `bfeLinesFromFeatureCollection`, `BKDD_DATUM_NOTE`, `bufferedFloodway`, `classifyNfhlFeature`, `combineMitigation`, `computeMitigation`, `crossSectionWselFromFeatureCollection`, `deriveBfeFromLines`, `DERIVED_BFE_NOTE`, `DERIVED_WSE02_DRAFT_NOTE`, `DERIVED_WSE02_NOTE`, `DERIVED_WSE100_DRAFT_NOTE`, `DERIVED_XS_WSEL_NOTE`, `distToPolyline`, `effectivePadElev`, `EST_BOUNDARY_WSE_NOTE`, `EST_EBFE_NOTE`, `EST_MAAPNEXT_NOTE`, `EST_WSE_SRCS`, `estimateZoneAWse`, `estWseNote`, `EXCLUSIONS_NOTE`, `EXPERT_BYPASS_LABEL`, `FFE_BASIS_LABEL`, `ffeBasisText`, `floodGeoBbox`, `governingCrossSectionWsel`, `gridIntersect`, `hagForRing`, `isEstimatedWseSrc`, `NAVD88_NOTE`, `NEWER_MODEL_NOTE`, `OFFSITE_NOTE`, `pickWorstCase`, `pointInZone`, `pondFloodplainTier`, `ringInFloodway`, `ringInTrigger`, `sampleRingGrades`, `wedgeMitigation`, `WSE_PROVIDER_LABEL`, `wse1pctForRing`, `wseProvLabel`, `zonesFromFeatureCollection`, `zoneWaterSurface`
+  - _exports_: `BFE_SENTINEL_MIN`, `bfeLinesFromFeatureCollection`, `BKDD_DATUM_NOTE`, `bufferedFloodway`, `classifyNfhlFeature`, `combineMitigation`, `computeMitigation`, `crossSectionWselFromFeatureCollection`, `deriveBfeFromLines`, `DERIVED_BFE_NOTE`, `DERIVED_WSE02_DRAFT_NOTE`, `DERIVED_WSE02_NOTE`, `DERIVED_WSE100_DRAFT_NOTE`, `DERIVED_XS_WSEL_NOTE`, `distToPolyline`, `effectivePadElev`, `EST_BOUNDARY_WSE_NOTE`, `EST_EBFE_NOTE`, `EST_MAAPNEXT_NOTE`, `EST_SCREENING_BFE_NOTE`, `EST_WSE_SRCS`, `estimateZoneAWse`, `estWseNote`, `EXCLUSIONS_NOTE`, `EXPERT_BYPASS_LABEL`, `FFE_BASIS_LABEL`, `ffeBasisText`, `floodGeoBbox`, `governingCrossSectionWsel`, `gridIntersect`, `hagForRing`, `isEstimatedWseSrc`, `NAVD88_NOTE`, `NEWER_MODEL_NOTE`, `OFFSITE_NOTE`, `pickWorstCase`, `pointInZone`, `pondFloodplainTier`, `ringInFloodway`, `ringInTrigger`, `sampleRingGrades`, `wedgeMitigation`, `WSE_PROVIDER_LABEL`, `wse1pctForRing`, `wseProvLabel`, `zonesFromFeatureCollection`, `zoneWaterSurface`
 - **`src/workspaces/site-planner/lib/floodplainRules.js`** — B707 editable per-jurisdiction floodplain-mitigation rules (trigger band / ratio / floodway policy / offset scope, verified-flagged placeholder seeds) with drainage-authority + county defaulting
-  - _exports_: `DEFAULT_FLOODPLAIN_RULES`, `defaultFloodJurForAuthority`, `defaultFloodJurForCounty`, `floodJurCounty`, `loadFloodplainRules`, `mitigationOffsetBasis`, `offsetSurfaceBasis`, `offsetSurfaceLabel`, `saveFloodplainRules`, `triggerClasses`
+  - _exports_: `atlas14Mandated`, `bfeDataRequirementFor`, `DEFAULT_FLOODPLAIN_RULES`, `defaultFloodJurForAuthority`, `defaultFloodJurForCounty`, `floodJurCounty`, `loadFloodplainRules`, `mitigationOffsetBasis`, `offsetSurfaceBasis`, `offsetSurfaceLabel`, `saveFloodplainRules`, `triggerClasses`
 - **`src/workspaces/site-planner/lib/flowField.js`** — Pure drainage flow-direction math (B705): windowed-gradient downhill arrows on a spaced lattice (no arrow on flat/void ground) + classic D8 kept as the future flow-accumulation seed
   - _exports_: `d8Direction`, `flowArrows`
 - **`src/workspaces/site-planner/lib/footprintEdit.js`** — Building footprint reshape (NEW-1/B872): rect→polygon promotion + dock-frame preservation — pins loaded walls as fixed lines, projects/clips vertex drags, recomputes the dock-frame bbox, and repoints doors/grid to the true wall (pure geometry)
@@ -559,6 +561,8 @@ _341 source files mapped._
   - _exports_: `clipPolylineOutside`, `clusterIds`, `dissolveRings`, `rectOutlineCutSegments`, `regionPathD`
 - **`src/workspaces/site-planner/lib/screeningBfe.js`** — independent SCREENING base-flood-elevation engine: SCS/NRCS unit-hydrograph peak discharge (hydrology) + Manning normal-depth solve over a terrain-sampled cross-section (hydraulics), with a peak-rate-factor uncertainty band, the not-modelled list, the CLOMR/LOMR note, and the 44 CFR 60.3(b)(3) BFE-data threshold research. Returns an explicit unknown rather than any elevation it did not compute.
   - _exports_: `BFE_DATA_REQUIREMENT`, `bfeDataLikelyRequired`, `CLOMR_NOTE`, `default`, `MANNING_N`, `manningDischarge`, `normalDepthWse`, `NOT_MODELED`, `PRF_FLAT_COASTAL`, `PRF_STANDARD`, `screeningBfe`, `screeningPeakDischarge`, `sectionAtWse`
+- **`src/workspaces/site-planner/lib/screeningBfeSite.js`** — The live-wiring layer for `screeningBfe.js`: turns a real site (terrain grid, footprint, Atlas-14 rainfall, SSURGO soils) into the engine's four inputs and runs BOTH the 1% and the 0.2% (500-yr) storms Waller ordinance §5.C(3) requires, from one derivation. Also the panel headline + the behind-the-fold method note.
+  - _exports_: `atlas14Depths`, `default`, `SCREENING_STORMS`, `screeningBfeForSite`, `screeningBfeHeadline`, `screeningStudyNote`, `SECTION_HALF_WIDTH_FT`, `terrainInputsForScreeningBfe`, `WATERSHED_GRID_ZOOM`, `WATERSHED_PAD_DEG`
 - **`src/workspaces/site-planner/lib/sharing.js`** — Project team sharing: stamp/clear team_id on a group's sites, doc_reviews, and file_facts then re-pull the local cache
   - _exports_: `makeProjectPrivate`, `shareProject`
 - **`src/workspaces/site-planner/lib/sheetFurniture.js`** — Map sheet furniture: graphic scale bar and two-tone north arrow, output-unit sized with no-occlude corner placement, screen + export
