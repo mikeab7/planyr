@@ -309,13 +309,14 @@ describe("markup hit-area / callout padding / live color picker (B155 open-path 
     // session commit hook (Standards uses it to promote to the account scope once, not per shade).
     expect(src).toMatch(/const livePick = \(apply, hist = true, commit = null\) =>/);
     expect(src).toMatch(/onInput:\s+\(e\) => \{ if \(hist && !pickSnapRef\.current\) \{ pushHistory\(\); pickSnapRef\.current = true; \}/);
-    // Every colour control goes through `colorCtl` = livePick plus the discrete swatch path. 17 are
-    // the full <ColorField>; the 18th is the multi-selection "Mixed" picker, which spreads livePick
+    // Every colour control goes through `colorCtl` = livePick plus the discrete swatch path. 19 are
+    // the full <ColorField>; the 20th is the multi-selection "Mixed" picker, which spreads livePick
     // into the same <ColorField> so the chip can carry its hatched no-single-colour state.
+    // (NEW-1 added two: the setback line's colour as a Standards default and as a per-parcel override.)
     expect(src).toMatch(/const colorCtl = \(apply, hist = true, commit = null\) => \(\{\s*\n\s*pick: livePick\(apply, hist, commit\),/);
-    expect((src.match(/\{\.\.\.colorCtl\(\(v\) =>/g) || []).length).toBe(17);
+    expect((src.match(/\{\.\.\.colorCtl\(\(v\) =>/g) || []).length).toBe(19);
     expect((src.match(/pick=\{livePick\(\(v\) =>/g) || []).length).toBe(1);
-    expect((src.match(/<ColorField /g) || []).length).toBe(18);
+    expect((src.match(/<ColorField /g) || []).length).toBe(20);
     // A swatch click is a DISCRETE commit: exactly one undo frame, then the color is recorded.
     expect(src).toMatch(/onSwatch: \(v\) => \{ if \(hist\) pushHistory\(\); apply\(v\); pushRecent\(v\);/);
     // NEW-4 (bug) — the wheel picks LIVE, so `change` fires for EVERY shade the cursor crosses.
@@ -324,10 +325,15 @@ describe("markup hit-area / callout padding / live color picker (B155 open-path 
     expect(src).toMatch(/onChange: \(e\) => \{ if \(hist && !pickSnapRef\.current\).*notePick\(e\.target\.value\); \}/);
     expect(src).toMatch(/onBlur:\s+\(e\) => \{ const v = e\.target\.value; commitPick\(\);/);
     expect(src).not.toMatch(/pushRecent\(e\.target\.value\)/);
-    // the two Standards element-Colors swatches opt out of history (settings-only, RC-6)
-    expect((src.match(/colorCtl\(\(v\) => liveTypeStyle\([^)]*\), false,/g) || []).length).toBe(2);
-    // B929: the two Standards → Parcels default swatches are settings-only too (hist=false)
-    expect((src.match(/colorCtl\(\(v\) => setParcelStd\([^)]*\), false,/g) || []).length).toBe(2);
+    // NEW-2: every Standards swatch now writes the PENDING DRAFT, never `settings` directly — an
+    // edit is not stored until one of the footer's three actions commits it. They still opt out of
+    // history (hist=false): the draft lives outside the undo snapshot, so pushing there would only
+    // leave a dead frame (RC-6). There is no third arg any more — the old one promoted to the
+    // account scope per picking session, which is exactly the silent commit the draft removes.
+    expect((src.match(/colorCtl\(\(v\) => draftTypeStd\([^)]*\), false\)/g) || []).length).toBe(2);
+    // the three Standards → Parcels default swatches (boundary colour, boundary fill, setback colour)
+    expect((src.match(/colorCtl\(\(v\) => draftParcelStd\([^)]*\), false\)/g) || []).length).toBe(3);
+    expect(src).not.toMatch(/setParcelStd|liveTypeStyle/);
     // the per-pixel undo floods are gone: the OLD color-input handlers (inline pushHistory) no
     // longer exist (discrete controls like the "Fill the parcel" checkbox keep their pushHistory)
     expect(src).not.toMatch(/onChange=\{\(e\) => \{ pushHistory\(\); setSelEl\(\{ fill: e\.target\.value/);
@@ -394,9 +400,13 @@ describe("markup hit-area / callout padding / live color picker (B155 open-path 
     // NEW-1 (V481(f)): on `labelPpf`, not `view.ppf` — the same sub-pixel rule, evaluated at the
     // SHEET's scale on an export pass so a wide-zoom PDF can't silently lose the setback ring.
     expect(src).toMatch(/if \(!insetRingVisible\(Math\.min\(\.\.\.posSb\), labelPpf\)\) return null;/);
-    // the visible dashed ring uses strokeZoom + dashZoom — NOT the old fixed 1.25px / "7 6"
-    expect(src).toMatch(/stroke=\{PAL\.setback\} strokeWidth=\{strokeZoom\(1\.25, zk\)\} strokeDasharray=\{dashZoom\("7 6", zk\)\}/);
-    expect(src).not.toMatch(/stroke=\{PAL\.setback\} strokeWidth=\{1\.25\} strokeDasharray="7 6"/);
+    // the visible dashed ring uses strokeZoom + dashZoom — NOT a fixed 1.25px / "7 6".
+    // NEW-1: the colour / weight / dash are no longer hardcoded either — they resolve through
+    // setbackLineStyle (the parcel's own setback standards over the theme default), and the zoom
+    // helpers still wrap the result, so B880's behaviour is unchanged.
+    expect(src).toMatch(/const sbs = setbackLineStyle\(pc, PAL\.setback\);/);
+    expect(src).toMatch(/stroke=\{sbs\.stroke\} strokeWidth=\{strokeZoom\(sbs\.weight, zk\)\} strokeDasharray=\{dashZoom\(sbs\.dash, zk\)\}/);
+    expect(src).not.toMatch(/strokeWidth=\{1\.25\} strokeDasharray="7 6"/);
     // the B617-sibling dashes fold through dashZoom too (markup source, easement/deed spines)
     expect(src).toMatch(/da = dashZoom\(dashArray\(m\.dash, sw\), zk\)/);
   });

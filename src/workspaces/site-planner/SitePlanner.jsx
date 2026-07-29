@@ -69,7 +69,10 @@ import { worldToScreen, screenToWorld, zoomAround, midpoint, distance, pinchZoom
 import ColorField from "../../shared/ui/ColorField.jsx";
 import StandardsBar from "./components/StandardsBar.jsx";
 import { loadUserPrefs, saveUserPrefs, applyPrefs, readMirror, setStandardPref, getStandardPref } from "./lib/userPrefs.js";
-import { PARCEL_STD_KEYS, applyAllStandards, allStandardsImpact, appliedObjectsLabel, derivedPanelScope } from "./lib/standardsApply.js";
+import {
+  PARCEL_STD_KEYS, TYPE_STD_KEYS, applyAllStandards, allStandardsImpact, appliedObjectsLabel,
+  EMPTY_STD_DRAFT, draftParcelValue, draftTypeValue, withParcelDraft, withTypeDraft, draftDirty, mergeDraftIntoSettings,
+} from "./lib/standardsApply.js";
 import { pushRecent, notePick, commitPick } from "../../shared/ui/colorRecents.js";
 import { CLIP_KINDS, collectClipboard, clipboardBBox, pasteClipboard, translateCalloutBy, translateParcelBy } from "./lib/planClipboard.js";
 import { usePalette } from "../../shared/theme/ThemeProvider.jsx";
@@ -93,7 +96,7 @@ import {
 import { apprRows, apprAll, apprVal, findAttr } from "./lib/appraisal.js";
 import { makeParcelDisplayLayer, ADD_CURSOR, PARCEL_MINZOOM } from "./lib/parcelDisplay.js";
 import { geocodeAddress } from "./lib/geocode.js";
-import { TYPE, typeStyle, elStyle, parcelDefaultStyle, toHex6, byZ, zOrder, standardScope } from "./lib/planStyle.js";
+import { TYPE, typeStyle, elStyle, parcelDefaultStyle, toHex6, byZ, zOrder, setPreviewStyleDefaults, setbackLineStyle, SETBACK_LINE } from "./lib/planStyle.js";
 import { byZAsc, nextZ, Z_GAP } from "./lib/zOrder.js";
 import { reorderByZ, arrangeFlags } from "./lib/arrange.js";
 import { commonStyleState, selectionRingFeet } from "./lib/multiStyle.js";
@@ -12860,9 +12863,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const multiStyle = multiStyleable ? commonStyleState(multiMembers, settings) : null;
   // Merge a default-color patch for one type into settings.typeStyles.
   const setTypeStyle = (type, patch) => setSettings((s) => ({ ...s, typeStyles: { ...(s.typeStyles || {}), [type]: { ...((s.typeStyles || {})[type] || {}), ...patch } } })); // RC-6: settings-only → not undoable (no pushHistory dead frame)
-  // B929 — merge a patch into the default style for NEW parcels (Standards → Parcels). Settings-only,
-  // so not undoable (no pushHistory dead frame); consumed at creation by parcelDefaultStyle().
-  const setParcelStd = (patch) => setSettings((s) => ({ ...s, parcelStyle: { ...(s.parcelStyle || {}), ...patch } }));
 
   /* ---- NEW-3: Standards scope + retroactive apply ----
    * Standards seeded NEW objects only. Two axes were missing and both are one click now:
@@ -12900,73 +12900,96 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   };
   useEffect(() => () => { if (stdToastTimer.current) clearTimeout(stdToastTimer.current); }, []);
 
-  // Where a parcel / element-type standard's value comes from (project copy first, then account).
-  const parcelStdScope = (key) => standardScope(settings.parcelStyle?.[key], getStandardPref(userPrefs, "parcelStyle", key));
-  const parcelStdValue = (key) => settings.parcelStyle?.[key] ?? getStandardPref(userPrefs, "parcelStyle", key);
-  const typeStdScope = (type, key) => standardScope(settings.typeStyles?.[type]?.[key], getStandardPref(userPrefs, "typeStyles", key, type));
-  const typeStdValue = (type, key) => settings.typeStyles?.[type]?.[key] ?? getStandardPref(userPrefs, "typeStyles", key, type);
+  // What is COMMITTED for a parcel / element-type standard (this plan's own copy first, then the
+  // account default). The panel shows the pending draft over the top of these — see below.
+  const committedParcelStd = (key) => settings.parcelStyle?.[key] ?? getStandardPref(userPrefs, "parcelStyle", key);
+  const committedTypeStd = (type, key) => settings.typeStyles?.[type]?.[key] ?? getStandardPref(userPrefs, "typeStyles", key, type);
 
-  /* ---- ONE scope for the whole panel (owner rule, this round) ----
-   * Scope was stored PER KEY and rendered per FIELD. Collapsing it to one panel control must not
-   * MOVE anything that is already stored — so nothing is rewritten on the way in: the control's
-   * value is DERIVED from the per-key scopes already in force (any standard sitting at the account
-   * level ⇒ "All"), and an explicit choice is remembered in `settings.stdScope` and wins from then
-   * on. The choice governs where a SUBSEQUENT change is stored, nothing retroactive. */
-  const stdScopeKeys = () => [
-    ...PARCEL_STD_KEYS.map((k) => parcelStdScope(k)),
-    ...Object.keys(TYPE).flatMap((t) => ["fill", "stroke"].map((k) => typeStdScope(t, k))),
-  ];
-  const stdScope = settings.stdScope === "all" || settings.stdScope === "project"
-    ? settings.stdScope
-    : derivedPanelScope(stdScopeKeys());
-  const setStdScope = (next) => {
-    setSettings((s) => ({ ...s, stdScope: next }));
-    if (next === "all" && !cloudPrefsReady) flashWarn("Saved on this computer — sign in to make these defaults across your account.", 6000);
+  /* ---- NEW-2: Standards edits are a PENDING DRAFT ----
+   * The footer's three actions are named outright (Apply to this plan · Save for this plan · Save
+   * for all projects), replacing the Project|All scope toggle that read as an axis it wasn't. The
+   * consequence: once "Save for this plan" is an explicit button, a field edit can no longer
+   * silently commit as the plan default, or that button means nothing. So every Standards edit
+   * lands in `stdDraft` and NOTHING is stored until a button commits it.
+   *
+   * The draft is kept in sessionStorage keyed by PLAN, for two reasons: closing the panel,
+   * switching workspace or reloading must not silently throw the edits away, and a draft must
+   * never leak onto a different plan when you switch plans. */
+  const stdDraftKey = `planyr:stdDraft:${siteId || "unsaved"}`;
+  const readStdDraft = (key) => {
+    try { const raw = sessionStorage.getItem(key); const d = raw ? JSON.parse(raw) : null; return d && d.parcelStyle && d.typeStyles ? d : EMPTY_STD_DRAFT; } catch { return EMPTY_STD_DRAFT; }
   };
-  /* A COMMITTED standards edit, routed by that one scope. Live edits (a colour wheel mid-drag)
-   * always write the plan's own copy — cheap and local; only the commit promotes, so an "All"
-   * scope can't fire one account write per intermediate shade. Promoting drops the plan's own copy
-   * so this plan keeps following the account default when it changes later. */
-  const promoteParcelStd = (patch) => {
-    let up = userPrefs;
-    Object.entries(patch).forEach(([k, v]) => { up = setStandardPref(up, "parcelStyle", k, v ?? null); });
-    commitUserPrefs(up);
-    setSettings((s) => {
-      const ps = { ...(s.parcelStyle || {}) };
-      Object.keys(patch).forEach((k) => delete ps[k]);
-      return { ...s, parcelStyle: ps };
-    });
+  const [stdDraft, setStdDraftState] = useState(() => readStdDraft(stdDraftKey));
+  // Re-read on a plan switch, so each plan keeps its own pending edits (and never inherits another's).
+  useEffect(() => { setStdDraftState(readStdDraft(stdDraftKey)); }, [stdDraftKey]);
+  const setStdDraft = (next) => {
+    setStdDraftState(next);
+    try {
+      if (next && (Object.keys(next.parcelStyle || {}).length || Object.keys(next.typeStyles || {}).length)) sessionStorage.setItem(stdDraftKey, JSON.stringify(next));
+      else sessionStorage.removeItem(stdDraftKey);
+    } catch { /* private mode / quota — the draft still lives in state for this session */ }
   };
-  const promoteTypeStd = (type, patch) => {
-    let up = userPrefs;
-    Object.entries(patch).forEach(([k, v]) => { up = setStandardPref(up, "typeStyles", k, v ?? null, type); });
-    commitUserPrefs(up);
-    setSettings((s) => {
-      const all = { ...(s.typeStyles || {}) };
-      const bag = { ...(all[type] || {}) };
-      Object.keys(patch).forEach((k) => delete bag[k]);
-      if (Object.keys(bag).length) all[type] = bag; else delete all[type];
-      return { ...s, typeStyles: all };
-    });
-  };
-  const commitParcelStd = (patch) => { setParcelStd(patch); if (stdScope === "all") promoteParcelStd(patch); };
-  const commitTypeStd = (type, patch) => { liveTypeStyle(type, patch); if (stdScope === "all") promoteTypeStd(type, patch); };
+  const clearStdDraft = () => setStdDraft(EMPTY_STD_DRAFT);
 
-  /* ---- ONE Apply for the whole panel ----
-   * Pushes EVERY standard onto what's already drawn in ONE undo frame, counted in distinct objects
-   * across parcels AND elements (so "Applied to 12 objects" is honest, not a sum of per-key hits).
-   * Parcels are stamped at creation → the value is written; elements resolve their type style at
-   * render → their per-element overrides are cleared (see lib/standardsApply.js). */
+  // The values the PANEL shows = the draft over what's committed.
+  const parcelStdValue = (key) => draftParcelValue(stdDraft, key, committedParcelStd(key));
+  const typeStdValue = (type, key) => draftTypeValue(stdDraft, type, key, committedTypeStd(type, key));
+  const draftParcelStd = (patch) => setStdDraft(withParcelDraft(stdDraft, patch));
+  const draftTypeStd = (type, patch) => setStdDraft(withTypeDraft(stdDraft, type, patch));
+  const stdDirty = draftDirty(stdDraft, committedParcelStd, committedTypeStd);
+  /* Element type styles resolve at RENDER, so the canvas can preview the draft — publish it into
+   * the style resolver's preview layer (planStyle.setPreviewStyleDefaults). Visual only: a draft
+   * is never STAMPED into a new parcel, so an uncommitted value can't reach stored geometry.
+   * Assigned during render (idempotent) so the canvas paints the draft in the same frame. */
+  setPreviewStyleDefaults(stdDraft);
+  useEffect(() => () => setPreviewStyleDefaults(EMPTY_STD_DRAFT), []);
+
+  /* ---- the THREE footer actions ----
+   * Apply to this plan — commits the draft as the plan's defaults AND pushes every standard onto
+   *   what's already drawn, in ONE undo frame, counted in distinct objects across parcels AND
+   *   elements (so "Applied to 12 objects" is honest, not a sum of per-key hits). Parcels are
+   *   stamped at creation → the value is written; elements resolve their type style at render →
+   *   their per-element overrides are cleared (see lib/standardsApply.js). The only action that
+   *   touches geometry, so the only one with an Undo.
+   * Save for this plan / Save for all projects — store the same values and change nothing drawn,
+   *   so they confirm briefly with no Undo. */
   const stdParcelValues = () => Object.fromEntries(PARCEL_STD_KEYS.map((k) => [k, parcelStdValue(k) ?? null]));
   const stdApplyCount = allStandardsImpact(parcels, els, stdParcelValues(), Object.keys(TYPE));
+  const saveStdForPlan = () => {
+    if (!stdDirty) return;
+    setSettings((s) => mergeDraftIntoSettings(s, stdDraft));
+    clearStdDraft();
+    flashStdToast("Saved as this plan's defaults", null, 3500);
+  };
+  const saveStdForAllProjects = () => {
+    // Promote what the panel currently SHOWS to the account, then drop this plan's own copies so
+    // the plan keeps following the account default when it changes later (the old promote rule).
+    let up = userPrefs;
+    PARCEL_STD_KEYS.forEach((k) => { up = setStandardPref(up, "parcelStyle", k, parcelStdValue(k) ?? null); });
+    Object.keys(TYPE).forEach((t) => TYPE_STD_KEYS.forEach((k) => { up = setStandardPref(up, "typeStyles", k, typeStdValue(t, k) ?? null, t); }));
+    commitUserPrefs(up);
+    setSettings((s) => ({ ...s, parcelStyle: {}, typeStyles: {} }));
+    clearStdDraft();
+    flashStdToast("Saved as your defaults for all projects", null, 3500);
+  };
   const applyAllStd = () => {
     const beforeParcels = stateRef.current.parcels, beforeEls = stateRef.current.els;
+    const beforeSettings = settings;
+    const beforeDraft = stdDraft;
     const res = applyAllStandards(beforeParcels, beforeEls, stdParcelValues(), Object.keys(TYPE));
     if (!res.count) return;
+    // Applying implies keeping them: commit the plan defaults AND restyle, in one click / one frame.
+    if (stdDirty) { setSettings((s) => mergeDraftIntoSettings(s, stdDraft)); clearStdDraft(); }
     pushHistory();                       // ONE frame for every object touched
     setParcels(res.parcels);
     setEls(res.els);
-    flashStdToast(appliedObjectsLabel(res.count), () => { setParcels(beforeParcels); setEls(beforeEls); setStdToast(null); });
+    flashStdToast(appliedObjectsLabel(res.count), () => {
+      setParcels(beforeParcels); setEls(beforeEls);
+      // Undo the whole action, not half of it: the stored defaults and the pending edits come back too.
+      setSettings((s) => ({ ...s, parcelStyle: beforeSettings.parcelStyle, typeStyles: beforeSettings.typeStyles }));
+      setStdDraft(beforeDraft);
+      setStdToast(null);
+    });
   };
 
   /* ---- live color picking (B567) ----
@@ -13006,7 +13029,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   });
   const liveMarkup    = (patch) => { setMarkups((a) => a.map((m) => (selMarkup && m.id === selMarkup.id ? { ...m, ...patch } : m))); setMkStyle((s) => ({ ...s, ...patch })); };
   const liveCallout   = (patch) => { if (selCallout) setCallout(selCallout.id, patch); };
-  const liveTypeStyle = (type, patch) => setSettings((s) => ({ ...s, typeStyles: { ...(s.typeStyles || {}), [type]: { ...((s.typeStyles || {})[type] || {}), ...patch } } }));
   // Make the selected element's current colors the default for its type — and say so (B653).
   const setStyleDefault = () => {
     if (!selEl || !curStyle) return;
@@ -13830,6 +13852,27 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 </select>
               </Field>
               <button style={{ ...chip, marginTop: 2 }} onClick={() => { pushHistory(); setSelParcel({ stroke: null, weight: null, dash: null }); }} title="Reset the outline back to the default color, weight and solid line">Reset outline</button>
+              {/* NEW-1 — the SETBACK line gets the same three controls as the boundary above, on
+                  this parcel only. Renders live via pc.sbStroke/pc.sbWeight/pc.sbDash at the
+                  setback <polygon> (and its dimension chips follow the colour). */}
+              <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", margin: "12px 0 6px" }}>Setback line</div>
+              <Field label="Line color">
+                <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <ColorField value={toHex6(selParcel.sbStroke ?? PAL.setback)} {...colorCtl((v) => setSelParcel({ sbStroke: v }))} seed={COLOR_SEED} title="Setback line color" />
+                </span>
+              </Field>
+              <Field label="Line weight">
+                <NumInput style={numInput} value={selParcel.sbWeight ?? SETBACK_LINE.weight} min={0.25} step={0.25} coarse={2} onCommit={(n) => { pushHistory(); setSelParcel({ sbWeight: n }); }} />
+              </Field>
+              <Field label="Line style">
+                <select value={selParcel.sbDash || SETBACK_LINE.dash} onChange={(e) => { pushHistory(); setSelParcel({ sbDash: e.target.value }); }}
+                  style={{ ...numInput, width: "auto", cursor: "pointer" }}>
+                  <option value="solid">Solid</option>
+                  <option value="dashed">Dashed</option>
+                  <option value="dotted">Dotted</option>
+                </select>
+              </Field>
+              <button style={{ ...chip, marginTop: 2 }} onClick={() => { pushHistory(); setSelParcel({ sbStroke: null, sbWeight: null, sbDash: null }); }} title="Reset the setback line back to the default color, weight and dashes">Reset setback line</button>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", margin: "10px 0 4px" }}>
                 <span style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em" }}>Setbacks per edge</span>
                 <label style={{ display: "flex", gap: 6, fontSize: 11, color: PAL.muted, cursor: "pointer" }} title="Show the setback line inside the parcel boundary"><input type="checkbox" checked={settings.showSetback} onChange={(e) => setSettings((s) => ({ ...s, showSetback: e.target.checked }))} /> Show setback line</label>
@@ -14124,19 +14167,22 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             {/* B929 — the rest of a parcel's own properties, now settable as defaults for NEW parcels
                 (stamped at creation via parcelDefaultStyle; each mirrors a control in the parcel
                 inspector). livePick uses hist=false since these touch settings only (RC-6). */}
-            {/* Every committed edit here routes through commitParcelStd, which honours the ONE
-                panel scope in the sticky footer (this plan, or the whole account). Live edits (a
-                wheel mid-drag) write the plan's copy only; the promotion happens once, on commit.
-                Values read project-first, then the account default (see parcelStdValue). */}
+            {/* NEW-2 — every edit here lands in the PENDING DRAFT (draftParcelStd). Nothing is
+                stored until one of the footer's three actions commits it, which is what makes
+                "Save for this plan" mean something. Values read draft-first, then this plan's
+                copy, then the account default (see parcelStdValue).
+                NEW-1 — the section styles TWO different lines, so each group is labelled: an
+                unlabelled pair of colour rows left it guessing which line you were editing. */}
+            <StdSubLabel>Parcel line</StdSubLabel>
             <Field label="Outline color">
               <ColorField value={toHex6(parcelStdValue("stroke") ?? PAL.parcel)} title="Outline color" seed={COLOR_SEED}
-                {...colorCtl((v) => setParcelStd({ stroke: v }), false, (v) => commitParcelStd({ stroke: v }))} />
+                {...colorCtl((v) => draftParcelStd({ stroke: v }), false)} />
             </Field>
             <Field label="Line weight">
-              <NumInput style={numInput} value={parcelStdValue("weight") ?? 2} min={0.5} step={0.5} coarse={2} onCommit={(n) => commitParcelStd({ weight: n })} />
+              <NumInput style={numInput} value={parcelStdValue("weight") ?? 2} min={0.5} step={0.5} coarse={2} onCommit={(n) => draftParcelStd({ weight: n })} />
             </Field>
             <Field label="Line style">
-              <select value={parcelStdValue("dash") ?? "solid"} onChange={(e) => commitParcelStd({ dash: e.target.value })}
+              <select value={parcelStdValue("dash") ?? "solid"} onChange={(e) => draftParcelStd({ dash: e.target.value })}
                 style={{ ...numInput, width: "auto", cursor: "pointer" }}>
                 <option value="solid">Solid</option>
                 <option value="dashed">Dashed</option>
@@ -14144,24 +14190,39 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               </select>
             </Field>
             <label style={{ display: "flex", gap: 8, fontSize: 12, color: PAL.muted, margin: "2px 2px 8px", cursor: "pointer" }}>
-              <input type="checkbox" checked={!!parcelStdValue("fill")} onChange={(e) => commitParcelStd(e.target.checked ? { fill: "#5b6650" } : { fill: null, fillOpacity: null })} /> Fill new parcels (off by default)
+              <input type="checkbox" checked={!!parcelStdValue("fill")} onChange={(e) => draftParcelStd(e.target.checked ? { fill: "#5b6650" } : { fill: null, fillOpacity: null })} /> Fill new parcels (off by default)
             </label>
             {parcelStdValue("fill") && (
               <>
                 <Field label="Translucence">
-                  {/* Drag writes the plan's copy live; the account promotion (if the scope is All)
-                      fires once on release, never once per slider tick. */}
                   <input type="range" min={0} max={0.6} step={0.02} value={parcelStdValue("fillOpacity") ?? 0.12}
-                    onChange={(e) => setParcelStd({ fillOpacity: +e.target.value })}
-                    onPointerUp={(e) => commitParcelStd({ fillOpacity: +e.target.value })}
-                    onKeyUp={(e) => commitParcelStd({ fillOpacity: +e.target.value })} />
+                    onChange={(e) => draftParcelStd({ fillOpacity: +e.target.value })} />
                 </Field>
                 <Field label="Fill color">
                   <ColorField value={toHex6(parcelStdValue("fill"))} title="Fill color" seed={COLOR_SEED}
-                    {...colorCtl((v) => setParcelStd({ fill: v }), false, (v) => commitParcelStd({ fill: v }))} />
+                    {...colorCtl((v) => draftParcelStd({ fill: v }), false)} />
                 </Field>
               </>
             )}
+            {/* NEW-1 — the SETBACK line, with the same three controls as the boundary above. It
+                had none at all: colour, weight and dash were hardcoded at the one place it was
+                drawn. Defaults match today's look exactly, so an existing plan is unchanged. */}
+            <StdSubLabel>Setback line</StdSubLabel>
+            <Field label="Line color">
+              <ColorField value={toHex6(parcelStdValue("sbStroke") ?? PAL.setback)} title="Setback line color" seed={COLOR_SEED}
+                {...colorCtl((v) => draftParcelStd({ sbStroke: v }), false)} />
+            </Field>
+            <Field label="Line weight">
+              <NumInput style={numInput} value={parcelStdValue("sbWeight") ?? SETBACK_LINE.weight} min={0.25} step={0.25} coarse={2} onCommit={(n) => draftParcelStd({ sbWeight: n })} />
+            </Field>
+            <Field label="Line style">
+              <select value={parcelStdValue("sbDash") ?? SETBACK_LINE.dash} onChange={(e) => draftParcelStd({ sbDash: e.target.value })}
+                style={{ ...numInput, width: "auto", cursor: "pointer" }}>
+                <option value="solid">Solid</option>
+                <option value="dashed">Dashed</option>
+                <option value="dotted">Dotted</option>
+              </select>
+            </Field>
             {/* B721 cross-link (consistent with B164's placement): per-edge setbacks are a
                 property of the parcel itself, not a global default — say so here so nobody hunts
                 for a per-edge control on this panel. */}
@@ -14283,26 +14344,36 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 <div key={k} style={{ marginBottom: 7 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                     <span style={{ flex: 1, fontSize: 12, color: PAL.ink, minWidth: 90 }}>{TYPE[k].label.split(" / ")[0]}</span>
+                    {/* NEW-2 — draft edits. The canvas still previews them live (typeStyle reads
+                        the draft's preview layer), but nothing is stored until a footer action. */}
                     <ColorField title="Fill" value={toHex6(st.fill)} seed={COLOR_SEED} style={{ width: 30, height: 24 }}
-                      {...colorCtl((v) => liveTypeStyle(k, { fill: v }), false, (v) => commitTypeStd(k, { fill: v }))} />
+                      {...colorCtl((v) => draftTypeStd(k, { fill: v }), false)} />
                     <ColorField title="Line" value={toHex6(st.stroke)} seed={COLOR_SEED} style={{ width: 30, height: 24 }}
-                      {...colorCtl((v) => liveTypeStyle(k, { stroke: v }), false, (v) => commitTypeStd(k, { stroke: v }))} />
+                      {...colorCtl((v) => draftTypeStd(k, { stroke: v }), false)} />
                   </div>
                 </div>
               );
             })}
-            <button style={{ ...chip, marginTop: 4, color: PAL.accent }} onClick={() => setSettings((s) => ({ ...s, typeStyles: {} }))}>Reset all to built-in</button>
+            {/* NEW-2 — a reset is a draft edit like any other (a null per key = "clear it"), so it
+                previews immediately but still goes through one of the footer's three actions. */}
+            <button style={{ ...chip, marginTop: 4, color: PAL.accent }}
+              onClick={() => setStdDraft({ ...stdDraft, typeStyles: Object.fromEntries(Object.keys(TYPE).map((t) => [t, { fill: null, stroke: null }])) })}>Reset all to built-in</button>
           </Section>
           </div>
 
-          {/* ONE control set for the whole panel, in a sticky footer so it stays reachable while
-              the settings list scrolls: where a subsequent change is stored, and one Apply that
-              pushes every standard onto what is already drawn (one undo frame, counted in
-              objects). Replaces the per-field Apply + scope row that was most of the panel. */}
-          <StandardsBar scope={stdScope} onScope={setStdScope} applyCount={stdApplyCount}
-            onApply={applyAllStd} cloudReady={cloudPrefsReady} />
           </>)}
   </>);
+
+  /* NEW-2 — the Standards footer, rendered as a real footer BELOW the panel's scrolling body
+   * (a sibling of the scroll container, in BOTH the docked and the floating host) rather than as
+   * a sticky element inside it. The sticky version floated over the settings list and cut
+   * whatever row sat at the bottom of the scrollport in half; as a sibling it spans the panel's
+   * full width, reserves its own space, and can never occlude a row at any scroll position. */
+  const standardsFooter = (
+    <StandardsBar dirty={stdDirty} onDiscard={clearStdDraft} applyCount={stdApplyCount}
+      onApply={applyAllStd} onSavePlan={saveStdForPlan} onSaveAll={saveStdForAllProjects}
+      cloudReady={cloudPrefsReady} />
+  );
 
   // B820 — markups sorted for z-order render (byZAsc): every markup shares one type-layer band, so
   // this degenerates to z-then-id. Rendered in TWO passes below — markups flagged `behindEls` paint
@@ -15022,8 +15093,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 if (!o) return null;
                 const zk = strokeZk; // B617/B880 zoom factor — hold the setback weight + dash constant relative to the drawing (NEW-1: 1 on an export pass)
                 const ring = o.map((p) => `${f2p(p).x},${f2p(p).y}`).join(" ");
+                // NEW-1 — the setback line's own standards (colour / weight / style), stamped at
+                // creation like the boundary's and overridable per parcel. An untouched parcel
+                // resolves to exactly the old hardcoded look (PAL.setback, 1.25, "7 6").
+                const sbs = setbackLineStyle(pc, PAL.setback);
                 return <g key={`sb${pc.id}`}>
-                  <polygon points={ring} fill="none" stroke={PAL.setback} strokeWidth={strokeZoom(1.25, zk)} strokeDasharray={dashZoom("7 6", zk)} pointerEvents="none" />
+                  <polygon data-testid="setback-ring" points={ring} fill="none" stroke={sbs.stroke} strokeWidth={strokeZoom(sbs.weight, zk)} strokeDasharray={dashZoom(sbs.dash, zk)} pointerEvents="none" />
                   <polygon points={ring} fill="none" stroke="rgba(0,0,0,0.001)" strokeWidth={12} strokeLinejoin="round" pointerEvents="stroke"
                     style={{ cursor: tool === "select" ? (pc.locked ? "default" : "move") : "crosshair" }}
                     onPointerDown={(e) => startMoveParcel(e, pc.id)}
@@ -15037,10 +15112,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   reading "—" means the side's segments disagree (a per-segment override). */}
               {settings.showSetback && selParcel && selRuns && (() => {
                 const sb = parcelSetbacks(selParcel);
+                // NEW-1 — the dimension chip follows the setback LINE's colour instead of staying
+                // hardcoded, so recolouring the line takes its numbers with it.
+                const sbCol = setbackLineStyle(selParcel, PAL.setback).stroke;
                 const pill = (key, anchor, txt, onEdit) => (
                   <g key={key} style={{ cursor: "pointer" }} onPointerDown={(e) => { e.stopPropagation(); const fp = p2f(e.clientX, e.clientY); onEdit(fp, e.altKey); }}>
-                    <rect x={anchor.x - 13} y={anchor.y - 9} width={26} height={16} rx={4} fill="#fff" stroke={PAL.setback} strokeWidth={1} />
-                    <text x={anchor.x} y={anchor.y + 3.5} textAnchor="middle" fontSize="10.5" fontFamily={NUM_FONT} fontVariantNumeric={TABULAR_NUMS} fill={PAL.setback} fontWeight="700">{txt}</text>
+                    <rect x={anchor.x - 13} y={anchor.y - 9} width={26} height={16} rx={4} fill="#fff" stroke={sbCol} strokeWidth={1} />
+                    <text x={anchor.x} y={anchor.y + 3.5} textAnchor="middle" fontSize="10.5" fontFamily={NUM_FONT} fontVariantNumeric={TABULAR_NUMS} fill={sbCol} fontWeight="700">{txt}</text>
                   </g>
                 );
                 if (sbEditMode === "segment") {
@@ -16030,7 +16108,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               fontSize: 12.5, fontWeight: 600, boxShadow: "0 8px 28px rgba(0,0,0,0.3)",
               display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
               <span>{stdToast.msg}</span>
+              {/* Only the action that changed drawn geometry carries an Undo. The two Save
+                  actions store a default and change nothing on the canvas, so they confirm
+                  briefly and there is nothing to take back. */}
+              {stdToast.onUndo && (
               <button data-testid="standards-apply-undo" onClick={stdToast.onUndo} style={{ border: "none", background: "var(--surface-raised)", color: PAL.accent, borderRadius: 7, padding: "4px 12px", cursor: "pointer", fontSize: 11.5, fontWeight: 700 }}>Undo</button>
+              )}
             </div>
           )}
 
@@ -19061,6 +19144,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           <div data-wheelscroll="1" style={{ flex: "1 1 auto", minHeight: 0, overflowY: "auto", padding: "13px 13px 24px" }}>
           {renderPanelBody(leftPanel)}
           </div>
+          {leftPanel === "standards" && standardsFooter}
           </>)}
           </div>
           {/* drag handle to resize the menu (desktop only — on phones the panel is a fixed-width overlay) */}
@@ -19076,7 +19160,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       {!narrow && Object.keys(floating).map((id) => (
         <FloatingPanel key={id} title={panelTitle[id]} pos={floating[id]}
           onMove={(p) => moveFloating(id, p)} onDock={() => dockPanel(id)} onClose={() => closeFloating(id)}
-          boundsRef={wrapRef} width={leftWidth} data-testid={`floating-panel-${id}`}>
+          boundsRef={wrapRef} width={leftWidth} data-testid={`floating-panel-${id}`}
+          footer={id === "standards" ? standardsFooter : null}>
           {renderPanelBody(id)}
         </FloatingPanel>
       ))}
@@ -20257,6 +20342,15 @@ function Field({ label, children, title }) {
     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, marginBottom: 8 }}>
       <span style={{ fontSize: 12, color: "var(--text-secondary)", ...(title ? { cursor: "help" } : null) }} title={title}>{label}</span>{children}
     </div>
+  );
+}
+/* NEW-1 — a sub-heading INSIDE a Standards section, for a section that styles more than one
+ * thing. The Parcels section now drives two different lines (the boundary and the setback), and
+ * two unlabelled colour rows gave no way to tell which was which. Hierarchy comes from weight +
+ * uppercase letter-spacing, never from fading the text toward the background (theme rule). */
+function StdSubLabel({ children }) {
+  return (
+    <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: "0.07em", textTransform: "uppercase", color: "var(--text-secondary)", margin: "10px 2px 7px" }}>{children}</div>
   );
 }
 // B681 — familiar Word-style paragraph-alignment glyph: four stacked rows, long rows spanning the

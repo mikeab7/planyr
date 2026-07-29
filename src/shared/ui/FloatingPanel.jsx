@@ -28,7 +28,11 @@ import { clampToBounds, FLOAT_SIZE } from "./floatingPanel.js";
  *  - children    : the panel body.
  *  - data-testid : string.
  */
-export default function FloatingPanel({ title, pos, onMove, onDock, onClose, boundsRef, width = 340, zIndex = 1500, children, "data-testid": testId }) {
+/* `footer` (NEW-2) is an optional chrome strip pinned BELOW the scrolling body — a sibling of
+ * the scroll container, so it always spans the card's full width and can never occlude a row of
+ * the body at any scroll position (what a sticky-inside-the-body footer does). Used by the Site
+ * Planner's Standards panel, which keeps the same footer docked or floating. */
+export default function FloatingPanel({ title, pos, onMove, onDock, onClose, boundsRef, width = 340, zIndex = 1500, children, footer = null, "data-testid": testId }) {
   const cardRef = useRef(null);
   const posRef = useRef(pos);
   posRef.current = pos;
@@ -93,6 +97,7 @@ export default function FloatingPanel({ title, pos, onMove, onDock, onClose, bou
       <div data-wheelscroll="1" style={{ flex: "1 1 auto", minHeight: 0, overflowY: "auto", padding: "12px 13px 18px" }}>
         {children}
       </div>
+      {footer}
     </div>,
     document.body,
   );
