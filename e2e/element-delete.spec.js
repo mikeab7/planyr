@@ -12,8 +12,8 @@
  * in the unit tests (test/elementApi.test.js) + VERIFICATION.md V### for a live click-through.
  *
  * Drawing a CENTERLINE road (the variant with editable control points + the selVtx trap) needs a real
- * travel width picked first (SitePlanner.jsx:3092 gates the centerline path on roadWidth !== "free"),
- * so the helper opens Road presets → "24′ travel" before clicking centerline points. finishRoad
+ * road width picked first, so the helper opens Road presets → "24′" before clicking centerline
+ * points (NEW-3 retired the Free-draw entry; a road is always a clicked centerline). finishRoad
  * auto-selects the new road, so its control-point handles (data-testid road-vtx-N) render immediately. */
 import { test, expect } from "@playwright/test";
 
@@ -47,7 +47,7 @@ async function startBlank(page) {
 async function drawRoad(page) {
   const box = await canvas(page).boundingBox();
   await page.getByRole("button", { name: "Road presets" }).click();
-  await page.getByText(/24′ travel/).click();
+  await page.getByRole("button", { name: /^24′$/ }).click();
   for (const [dx, dy] of ROAD_PTS) await page.mouse.click(box.x + dx, box.y + dy);
   await page.keyboard.press("Enter");
   await expect.poll(() => readEls(page).then((r) => r.clRoads)).toBe(1);

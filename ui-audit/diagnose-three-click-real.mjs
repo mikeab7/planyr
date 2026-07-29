@@ -40,7 +40,7 @@ const before = await page.evaluate(() => {
 
 await page.getByRole("button", { name: "Road", exact: true }).click();
 await page.getByRole("button", { name: "Road presets" }).click();
-await page.getByRole("button", { name: /travel — click points/i }).first().click();
+await page.getByRole("button", { name: /^\d+′$/ }).first().click();
 
 // 1. start in open ground north of the loop  2. the turn  3. final point ON the truck loop centerline (y=461 near x=1200)
 const P = [ f2s(760, 60), f2s(1200, 60), f2s(1200, 461) ];

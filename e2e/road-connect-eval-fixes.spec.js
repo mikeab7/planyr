@@ -31,12 +31,12 @@ async function startBlank(page) {
   await page.getByRole("button", { name: /Start blank/i }).click();
   await expect(canvas(page)).toBeVisible();
 }
-// Pick the Road tool at a specific travel-width preset (or the first — 24 ft — when w is omitted).
+// Pick the Road tool at a specific road-width preset (or the first — 24 ft — when w is omitted).
 async function pickRoad(page, w) {
   await page.getByRole("button", { name: "Road", exact: true }).click();
   await page.getByRole("button", { name: "Road presets" }).click();
-  if (w) await page.getByRole("button", { name: new RegExp(`${w}.*travel — click points`, "i") }).click();
-  else await page.getByRole("button", { name: /travel — click points/i }).first().click();
+  if (w) await page.getByRole("button", { name: new RegExp(`^${w}′$`) }).click();
+  else await page.getByRole("button", { name: /^\d+′$/ }).first().click();
 }
 
 test.describe("B959/B960/B961 — road connect evaluation fixes", () => {
