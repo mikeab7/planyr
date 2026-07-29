@@ -19,7 +19,8 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { createElementSync, stableStringify } from "../src/workspaces/site-planner/lib/elementSync.js";
 import { rowsToModel } from "../src/workspaces/site-planner/lib/elementRows.js";
-import { strandedFromHost, normalizeBondedChildren } from "../src/workspaces/site-planner/lib/siteModel.js";
+import { strandedFromHost, normalizeBondedChildren, offAnchor } from "../src/workspaces/site-planner/lib/siteModel.js";
+import { toastForSyncEvent } from "../src/workspaces/site-planner/lib/conflictToasts.js";
 
 const tick = () => new Promise((r) => setTimeout(r, 0));
 
@@ -289,6 +290,193 @@ describe("NEW-1 — a late echo of an undone commit can never re-tear the assemb
     const block = src.slice(idx, src.indexOf("\n  };", idx));
     expect(block).toMatch(/pendingRemoteRef\.current\.filter\(\(i\) => i && i\.action === "remove"\)/);
     expect(block).toMatch(/noteLocalAuthority\(\)/);
+  });
+});
+
+/* Round 3 (2026-07-29, live re-verification of V509b) — the STALE CACHE, the MISSED tear, and the
+ * HOT LOOP. A plan opened in a profile holding an older cached copy wrote that cached geometry back
+ * over canonical rows in FOUR transactions across six seconds, for four members of a twelve-member
+ * assembly; the bonded healer did not catch a 218 ft displacement; and a stale tab hammered the RPC
+ * once a second with every op rejected. */
+describe("NEW-1 (round 3) — rows are canonical across a seed; a stale cache never wins", () => {
+  const rowsFor = (els, rev = 4) => els.map((e, i) => ({ kind: "el", id: e.id, data: e, rev, z_index: i * 1024 }));
+
+  it("a divergent cached copy of 4 of 12 assembly members commits NOTHING — the rows are adopted", async () => {
+    const adopted = [];
+    const h = makeHarness({ sync: { onRowsCanonical: (a) => adopted.push(...a) } });
+    const canonical = assembly();
+    h.sync.seed(rowsFor(canonical));                       // the server's current truth
+
+    // The on-device cache replays an old drag for a SUBSET of the assembly (the measured shape:
+    // a uniform stale delta on four members while the rest hold canonical values).
+    const staleIds = new Set(["k1", "k2", "k4", "k5"]);
+    h.canvas.els = canonical.map((e) => (staleIds.has(e.id) ? { ...e, cx: e.cx - 218, cy: e.cy - 223 } : e));
+
+    h.sync.reconcile(h.canvas, { afterSeed: true });
+    h.runTimers(); await tick();
+
+    expect(h.commits, "a stale cache must not write anything back").toEqual([]);
+    expect(adopted.map((a) => a.id).sort()).toEqual(["k1", "k2", "k4", "k5"]);
+    for (const a of adopted) {
+      const want = canonical.find((e) => e.id === a.id);
+      expect(a.el.cx).toBe(want.cx);
+      expect(a.el.cy).toBe(want.cy);
+    }
+  });
+
+  it("NEVER a 4-op commit: whatever goes out after a seed is the whole assembly or nothing", async () => {
+    const h = makeHarness();
+    const canonical = assembly();
+    h.sync.seed(rowsFor(canonical));
+    const staleIds = new Set(["k1", "k2", "k4", "k5"]);
+    h.canvas.els = canonical.map((e) => (staleIds.has(e.id) ? { ...e, cx: e.cx - 218 } : e));
+    h.sync.reconcile(h.canvas, { afterSeed: true });
+    h.runTimers(); await tick();
+    for (const batch of h.commits) expect(batch.length === 6 || batch.length === 0).toBe(true);
+    expect(h.commits.flat().length).toBe(0);
+  });
+
+  it("a PENDING local edit is still protected — it explains the divergence, so it commits", async () => {
+    const h = makeHarness();
+    const canonical = assembly();
+    h.sync.seed(rowsFor(canonical));
+    h.canvas.els = canonical.map((e) => (e.id === "k1" ? { ...e, cy: e.cy + 40 } : e));
+    h.sync.reconcile(h.canvas, {});                        // a real edit, diffed normally…
+    h.canvas.els = h.canvas.els.map((e) => (e.id === "k1" ? { ...e, cy: e.cy + 1 } : e));
+    h.sync.reconcile(h.canvas, { afterSeed: true });        // …then a refetch lands
+    h.runTimers(); await tick();
+    expect(h.commits.flat().map((o) => o.id)).toContain("k1"); // not discarded as a cache replay
+  });
+
+  it("an element the server has NEVER seen still wins locally (B124 / B756 unchanged)", async () => {
+    const h = makeHarness();
+    const canonical = assembly();
+    h.sync.seed(rowsFor(canonical));
+    const born = { id: "local-only", type: "parking", cx: 10, cy: 20, w: 100, h: 60, rot: 0, z: 0 };
+    h.canvas.els = [...canonical, born];
+    h.sync.reconcile(h.canvas, { afterSeed: true });
+    h.runTimers(); await tick();
+    expect(h.commits.flat().map((o) => o.id)).toEqual(["local-only"]);
+    expect(h.commits.flat()[0].op).toBe("create");
+  });
+});
+
+describe("NEW-2 (round 3) — strandedness is measured against the COMPUTED anchor, not a distance", () => {
+  const planWithStack = () => ([
+    { id: "b1", type: "building", cx: 0, cy: 0, w: 600, h: 300, rot: 0, dock: "single", dockSide: "bottom" },
+    { id: "court", type: "paving", attachedTo: "b1", truckCourt: { side: "bottom" }, noFit: true, cx: 0, cy: 217.5, w: 600, h: 135, rot: 0 },
+    { id: "trailer", type: "trailer", attachedTo: "b1", forCourt: "court", prevZone: "court", noFit: true, cx: 0, cy: 310, w: 600, h: 50, rot: 0 },
+  ]);
+  const byId = (list, id) => list.find((e) => e.id === id);
+
+  // The reported displacement: 218 ft along the wall, 223 ft across it — big, but nowhere near the
+  // 2,086 ft the V508 case used, and the old absolute-distance test let it straight through.
+  for (const d of [50, 200, 2000]) {
+    it(`a stack member displaced ${d} ft is healed back onto its host`, () => {
+      const torn = planWithStack().map((e) => (e.id === "court" || e.id === "trailer" ? { ...e, cx: e.cx - d, cy: e.cy - d } : e));
+      const healed = normalizeBondedChildren(torn);
+      expect(byId(healed, "court").cx).toBeCloseTo(0, 6);
+      expect(byId(healed, "court").cy).toBeCloseTo(217.5, 6);
+      expect(byId(healed, "trailer").cx).toBeCloseTo(0, 6);
+      expect(byId(healed, "trailer").cy).toBeCloseTo(310, 6);
+    });
+  }
+
+  it("the EXACT reported displacement (218 west / 223 north) heals — it did not before", () => {
+    const torn = planWithStack().map((e) => (e.id === "court" || e.id === "trailer" ? { ...e, cx: e.cx - 218, cy: e.cy - 223 } : e));
+    const healed = normalizeBondedChildren(torn);
+    expect(byId(healed, "court").cy).toBeCloseTo(217.5, 6);
+    expect(byId(healed, "trailer").cy).toBeCloseTo(310, 6);
+  });
+
+  it("a correct stack is returned UNCHANGED, and a resized depth is respected not reset", () => {
+    const ok = planWithStack();
+    expect(stableStringify(normalizeBondedChildren(ok))).toBe(stableStringify(ok));
+    // A deeper court (the user dragged its depth) re-anchors the trailer without resetting anything.
+    const deeper = ok.map((e) => (e.id === "court" ? { ...e, h: 200, cy: 150 + 100 } : e));
+    const healed = normalizeBondedChildren(deeper);
+    expect(byId(healed, "court").h).toBe(200);
+    expect(byId(healed, "court").cy).toBeCloseTo(250, 6);
+  });
+
+  it("a legitimately SLID side-parking row keeps its slide; one slid off the wall is re-centred", () => {
+    const b = { id: "b1", type: "building", cx: 0, cy: 0, w: 600, h: 300, rot: 0 };
+    const walk = { id: "w", type: "sidewalk", attachedTo: "b1", sidewalkSide: "left", cx: -152.5, cy: 0, w: 5, h: 300, rot: 0 };
+    const park = { id: "p", type: "parking", attachedTo: "b1", sideParkSide: "left", cx: -335, cy: 60, w: 60, h: 300, rot: 0 };
+    expect(byId(normalizeBondedChildren([b, walk, park]), "p").cy).toBeCloseTo(60, 6);
+    // Slid clean off the wall it is bonded to → the number is wreckage, so it re-centres.
+    const off = byId(normalizeBondedChildren([b, walk, { ...park, cy: 900 }]), "p");
+    expect(off.cy).toBeCloseTo(0, 6);
+  });
+
+  it("offAnchor is pure and never claims a tear it cannot measure", () => {
+    expect(offAnchor({ acrossHave: 217.5, acrossWant: 217.5, alongHave: 0, alongLimit: 600 })).toBe(false);
+    expect(offAnchor({ acrossHave: 217.5, acrossWant: 217.5, alongHave: 900, alongLimit: 600 })).toBe(true);
+    expect(offAnchor({ acrossHave: -5.5, acrossWant: 217.5, alongHave: 0, alongLimit: 600 })).toBe(true);
+    expect(offAnchor({ acrossHave: NaN, acrossWant: 217.5 })).toBe(false);
+  });
+});
+
+describe("NEW-3 (round 3) — a rejected commit backs off and eventually gives up", () => {
+  // Every op rejected, forever — a tab running against a plan that has moved on.
+  const allRejected = (ops) => ({ ok: true, results: ops.map((o) => ({ id: o.id, status: "conflict", row: { rev: 99, data: { id: o.id, type: "building", cx: -1, cy: -1, w: 1, h: 1, rot: 0 }, z_index: 0 } })) });
+
+  it("the retry interval GROWS instead of hammering at the debounce rate", async () => {
+    // Record the delay the engine asks for each time it schedules a retry. Pre-fix every rejected
+    // batch re-queued on the plain 750 ms debounce — the ~1 RPC/s hot loop that was measured live.
+    const delays = [];
+    const timers = [];
+    const h = makeHarness({
+      responder: allRejected,
+      sync: {
+        maxRejectStreak: 99,                                  // don't give up — we're measuring the curve
+        setTimer: (fn, ms) => { delays.push(ms); timers.push(fn); return timers.length; },
+        clearTimer: () => {},
+      },
+    });
+    h.canvas.els = [host("b1")];
+    h.sync.reconcile(h.canvas, {}); await tick();              // create → every op rejected
+    for (let i = 0; i < 4; i++) { const fn = timers.pop(); if (fn) fn(); await tick(); }
+
+    const retries = delays.filter((ms) => ms !== 750);         // the debounce is not a retry
+    expect(retries.length).toBeGreaterThanOrEqual(3);
+    for (let i = 1; i < retries.length; i++) expect(retries[i]).toBeGreaterThan(retries[i - 1]);
+    expect(retries[0]).toBeGreaterThanOrEqual(1000);           // …and the first wait already exceeds the old debounce
+  });
+
+  it("after N consecutive all-rejected batches it STOPS and reports that the tab is out of date", async () => {
+    const events = [];
+    const h = makeHarness({ responder: allRejected, sync: { onEvent: (e) => events.push(e), maxRejectStreak: 3 } });
+    h.canvas.els = [host("b1")];
+    h.sync.reconcile(h.canvas, {}); await tick();
+    for (let i = 0; i < 8; i++) { h.runTimers(); await tick(); }
+    expect(h.sync.state).toBe("stale");
+    expect(events.filter((e) => e.type === "client-stale").length).toBeGreaterThan(0);
+    const before = h.commits.length;
+    h.runTimers(); await tick();                              // no timer left to fire
+    expect(h.commits.length).toBe(before);                    // the hot loop has stopped
+    expect(before).toBeLessThan(8);                           // and it stopped EARLY, not after 8 tries
+  });
+
+  it("a client-stale event becomes a plain-English reload prompt", () => {
+    const t = toastForSyncEvent({ type: "client-stale", streak: 4, pending: 8 }, { name: "you", label: "a building" });
+    expect(t).toBeTruthy();
+    expect(t.text).toMatch(/out of date/i);
+    expect(t.text).toMatch(/[Rr]eload/);
+    expect(t.action).toBe(null);                              // nothing to zoom to — it is not about one element
+  });
+
+  it("one accepted op breaks the streak (a healthy client never goes stale)", async () => {
+    let rejectNext = true;
+    const h = makeHarness({
+      responder: (ops) => (rejectNext ? allRejected(ops) : { ok: true, results: ops.map((o) => ({ id: o.id, status: "ok", rev: (o.expected || 0) + 1 })) }),
+      sync: { maxRejectStreak: 2 },
+    });
+    h.canvas.els = [host("b1")];
+    h.sync.reconcile(h.canvas, {}); await tick();
+    rejectNext = false;
+    h.runTimers(); await tick();
+    expect(h.sync.state).not.toBe("stale");
   });
 });
 

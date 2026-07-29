@@ -87,7 +87,13 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   DERIVED op — derived churn is never re-pushed over another writer — while a pending DIRECT user
   edit still wins and still toasts (the B673 matrix, unchanged). **B1097:** `rowsToModel` runs the
   SAME `normalizeBondedChildren` heal as `createSiteModel` — never wire a load-time repair to only
-  one of the two read paths (the B1012 trap).
+  one of the two read paths (the B1012 trap). **B1113 — which ledger wins on a load:** rows are
+  canonical for an element the server already has (`reconcile(..., {afterSeed:true})` →
+  `onRowsCanonical`), local wins only for one the server has NEVER seen; and the bonded heal runs
+  AFTER the journal / never-synced folds in `refetchReplace`, never before — a fold can otherwise
+  substitute a stale copy back over a healed row. Full rule in `/CLAUDE.md` → ROWS-CANONICAL-ON-SEED.
+  **B1115:** an all-rejected batch backs off exponentially and, after `maxRejectStreak`, stops and
+  emits `client-stale` — never re-queue a rejected batch on the plain debounce.
 - `planClipboard.js` — the ONE general canvas clipboard (NEW-2/NEW-6): collect the current selection
   (elements expanded to their `attachedTo` assembly, so a building brings its truck court / trailer
   parking / dock zones / bump-outs), then paste with fresh ids, bonds remapped INSIDE the copy, and

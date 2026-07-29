@@ -127,6 +127,16 @@ export function createElementSync(opts = {}) {
     // Optional: omitted (tests, any caller without a canvas) → both behaviours are simply off and
     // the engine is byte-for-byte its pre-NEW-1 self.
     liveCollections = null,
+    // NEW-1 (the stale-cache replay) — (adoptions) => void, where each entry is
+    // { kind, id, el } carrying the SERVER's row data. Called when the first diff after a seed
+    // finds an element the server already has whose canvas copy diverges with nothing pending to
+    // explain it — a stale on-device cache replaying an old edit. Rows are canonical there, so the
+    // canvas adopts them instead of the divergence being committed as a fresh edit.
+    onRowsCanonical = null,
+    // NEW-3 — how many consecutive ALL-REJECTED batches before this tab stops re-committing and
+    // declares itself out of date. A stale client's ops are rejected by the rev guard forever;
+    // re-queueing them on the plain debounce is a ~1 RPC/s hot loop with no exit.
+    maxRejectStreak = 4,
   } = opts;
 
   // key -> { kind, id, json, rev, z }  (last COMMITTED state)
@@ -262,6 +272,7 @@ export function createElementSync(opts = {}) {
   let backoffHandle = null;
   let inflight = false;
   let attempt = 0;
+  let rejectStreak = 0;   // NEW-3 — consecutive batches in which NOT ONE op was accepted
   let state = "idle";               // 'idle'|'syncing'|'retrying'|'failed'
   let stopped = false;
   let ready = false;                // true once the shadow is seeded from the DB (or an empty seed)
@@ -274,6 +285,27 @@ export function createElementSync(opts = {}) {
   // Seeds the shadow from the site's current DB rows so the first diff sees NO change for an
   // unchanged element (no spurious create→'exists'→update churn on every load). Marks the engine
   // ready — reconcile() is a no-op until this runs (even with an empty/failed seed).
+  /* ---- NEW-1: ROWS ARE CANONICAL ACROSS A SEED -------------------------------------------------
+   * The rule, written down because it was never decided explicitly and the ambiguity cost a plan:
+   *
+   *   On the first diff after a seed, an element the SERVER ALREADY HAS wins over the local canvas
+   *   unless there is a pending local op to explain the difference. An element the server has NEVER
+   *   seen still wins locally — that, and only that, is what the B124 / B756 "never drop local work"
+   *   guarantee covers.
+   *
+   * Why: after `seed(rows)` the shadow holds the server's current bytes AND its current revs. A
+   * canvas copy that diverges at that instant is one of exactly two things — a genuine local edit,
+   * which is in the dirty/in-flight queue (the refetch substitutes those back deliberately), or a
+   * STALE ON-DEVICE CACHE replaying an edit that was already undone or superseded. The engine used
+   * to treat both as an edit, and because the shadow had just adopted the FRESH rev, the stale copy
+   * committed CLEANLY — the rev guard cannot help, since the client legitimately holds the current
+   * rev. Measured on production: a plan opened in a profile with an old cache wrote the cached
+   * geometry back over canonical rows in FOUR transactions across six seconds, for four members of a
+   * twelve-member assembly, leaving the canvas torn.
+   * That is also why the subset was never assembly-closed: `closeAssemblies` folds in members whose
+   * live data disagrees with the shadow, and the other eight agreed — so the closure was correct and
+   * the divergence was the bug. Adopting rows here fixes the subset problem at the root: nothing is
+   * committed at all. */
   function seed(rows) {
     shadow.clear();
     for (const r of rows || []) {
@@ -309,11 +341,17 @@ export function createElementSync(opts = {}) {
 
   // ---- diff the live collections against the shadow, enqueue ops --------------
   // `busy` (a gesture is in flight) defers the diff; the caller re-invokes on gesture end.
-  function reconcile(collections, { busy } = {}) {
+  function reconcile(collections, { busy, afterSeed } = {}) {
     if (stopped || !ready) return;  // not until the shadow is seeded from the DB (avoids load churn)
     if (busy) return;               // mid-drag: the flushGesture() hook re-runs this at gesture end
     const seen = new Set();
     let sawCreateOrDelete = false;
+    // NEW-1 — `afterSeed` marks the ONE diff the seeder itself runs against the canvas it just
+    // rebuilt (refetchReplace: rows ∪ pending local edits ∪ the never-synced fold). At that instant
+    // any divergence on a server-known element with nothing pending is a stale cache replay, not an
+    // edit. It is opt-in on purpose: a later, ordinary diff carries genuine post-seed edits that
+    // must never be silently reverted, and only the seeder knows which call is which.
+    const rowsWin = afterSeed ? [] : null;
 
     for (const [kind, field] of FIELDS) {
       const list = (collections && collections[field]) || [];
@@ -348,6 +386,15 @@ export function createElementSync(opts = {}) {
         }
         const json = stableStringify(el);
         if (shad.json !== json) {
+          // NEW-1 — rows are canonical across a seed. The server already has this element (it has a
+          // shadow entry), and NOTHING is pending to explain the difference, so the canvas copy is a
+          // stale cache replay: adopt the row instead of committing the divergence. `shad.stale`
+          // marks a mixed json↔rev pairing (a conflict/echo adoption), which is not a trustworthy
+          // adoption source — leave those to the normal diff.
+          if (rowsWin && !pend && !inf && shad.json && !shad.stale) {
+            try { rowsWin.push({ kind, id: el.id, el: JSON.parse(shad.json) }); } catch (_) { /* unparseable → fall through */ }
+            continue;
+          }
           if (inf && inf.el && stableStringify(inf.el) === json) continue; // this exact data is already in flight
           // changed since last commit → update (unless an identical update is already queued)
           if (!pend || pend.cls === "delete" || stableStringify(pend.el) !== json) {
@@ -366,6 +413,10 @@ export function createElementSync(opts = {}) {
         enqueue(key, { kind: shad.kind, id: shad.id, cls: "delete", el: null, z: shad.z, direct: directTag(shad.kind, shad.id, null) });
         sawCreateOrDelete = true;
       }
+    }
+    if (rowsWin && rowsWin.length) {
+      report("element-rows-canonical", "stale cached copies overruled by the server's rows on seed", { siteId, count: rowsWin.length, ids: rowsWin.slice(0, 20).map((r) => r.id) });
+      if (onRowsCanonical) { try { onRowsCanonical(rowsWin); } catch (_) { /* adoption is best-effort — never break the diff */ } }
     }
     schedule(sawCreateOrDelete);
   }
@@ -493,7 +544,31 @@ export function createElementSync(opts = {}) {
       }
       if (!res || !res.ok) return onTransportFailure(batch, res);
       attempt = 0;
-      processResults(batch, res.results || []);
+      const accepted = processResults(batch, res.results || []);
+      // NEW-3 — a batch in which NOT ONE op was accepted is a client that is out of date: its ops
+      // will be rejected on the rev guard again, and again. Re-queueing them on the plain debounce
+      // is a ~1 RPC/s hot loop with no exit (measured live: a stale tab issued an 8-op
+      // `commit_elements` every ~1 s for at least 7 s, every op rejected, the rows never moving —
+      // the CAS did its job, but nothing stopped the client). Back off exponentially, and after
+      // `maxRejectStreak` consecutive all-rejected batches STOP and say so.
+      if (batch.length && !accepted) {
+        rejectStreak += 1;
+        if (dirty.size > 0) {
+          if (rejectStreak >= maxRejectStreak) {
+            setState("stale");
+            report("element-client-stale", "every op rejected repeatedly — this tab is out of date", { siteId, streak: rejectStreak, pending: dirty.size });
+            onEvent({ type: "client-stale", streak: rejectStreak, pending: dirty.size });
+            return;                                    // no further commits until retryNow() / a reload
+          }
+          const wait = backoff[Math.min(rejectStreak - 1, backoff.length - 1)];
+          if (backoffHandle != null) clearTimer(backoffHandle);
+          setState("retrying");
+          backoffHandle = setTimer(() => { backoffHandle = null; flush(); }, wait);
+          return;
+        }
+      } else if (accepted) {
+        rejectStreak = 0;                              // progress — the streak is broken
+      }
       // Anything re-queued during processing (a LWW re-commit, a re-applied delete, a missing-row
       // re-create) reschedules through the DEBOUNCE timer, never a synchronous immediate flush — a
       // server that keeps returning conflict must not become a hot re-commit loop (LOUD-FAILURE, not
@@ -511,13 +586,16 @@ export function createElementSync(opts = {}) {
   const revOf = (e) => { const s = shadow.get(skey(e.kind, e.id)); return s ? s.rev : 1; };
 
   // Apply the RPC's per-op results back onto the shadow + emit conflict events.
+  // Returns TRUE if at least one op was ACCEPTED (NEW-3 — a batch with none is a stale client).
   function processResults(batch, results) {
+    let accepted = false;
     const byId = new Map();
     for (const r of results) if (r && r.id) byId.set(r.id, r); // ids are unique within a batch
     for (const e of batch) {
       const r = byId.get(e.id) || {};
       const key = skey(e.kind, e.id);
       if (r.status === "ok") {
+        accepted = true;
         if (e.cls === "delete") { shadow.delete(key); recordTombstone(e.kind, e.id, r.rev); } // remember the delete's rev → a stale pre-delete self-echo can't resurrect it (B757)
         else {
           // keep the shadow rev MONOTONIC: a foreign realtime row may have advanced it past this
@@ -626,6 +704,7 @@ export function createElementSync(opts = {}) {
         report("element-no-result", "op had no result in the batch response", { siteId, id: e.id, kind: e.kind });
       }
     }
+    return accepted;
   }
 
   // Transport failure: nothing committed. Re-queue the whole batch and back off; give up loudly
@@ -642,7 +721,7 @@ export function createElementSync(opts = {}) {
   }
 
   // Manual retry (the badge's "Retry now").
-  function retryNow() { attempt = 0; if (backoffHandle != null) { clearTimer(backoffHandle); backoffHandle = null; } flush(); }
+  function retryNow() { attempt = 0; rejectStreak = 0; if (backoffHandle != null) { clearTimer(backoffHandle); backoffHandle = null; } flush(); }
 
   // Ops still pending, for the keepalive unload flush (elementApi.keepaliveCommit).
   function pendingOps() { return [...dirty.values()].map(opFor); }
