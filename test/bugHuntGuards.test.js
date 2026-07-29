@@ -372,11 +372,14 @@ describe("markup hit-area / callout padding / live color picker (B155 open-path 
     expect(src).toMatch(/const CURB_STROKE_MIN_PX = 0\.75;/);
     expect(src).toMatch(/import \{[^}]*curbStrokePx[^}]*\} from "\.\/lib\/roadGeometry\.js";/);
     // the road pavement edge (back-of-curb outline) uses the real-world curb width, NOT strokeZoom
-    expect(src).toMatch(/key="edge"[^\n]*strokeWidth=\{curbStrokePx\(roadCurbWidth\(el\), ppf, CURB_STROKE_MIN_PX\)\}/);
+    // (NEW-1 / V481(f): the min-px FLOOR rides the label frame — `* lfK` — so an export sheet's
+    // curb line is a function of the paper, not of the zoom the export was taken at. The width
+    // itself is still curbFt × ppf, to scale, which is what this guard is about.)
+    expect(src).toMatch(/key="edge"[^\n]*strokeWidth=\{curbStrokePx\(roadCurbWidth\(el\), ppf, CURB_STROKE_MIN_PX \* lfK\)\}/);
     // the face-of-curb stripes too
-    expect(src).toMatch(/key=\{`curb\$\{i\}`\}[^\n]*strokeWidth=\{curbStrokePx\(roadCurbWidth\(el\), ppf, CURB_STROKE_MIN_PX\)\}/);
+    expect(src).toMatch(/key=\{`curb\$\{i\}`\}[^\n]*strokeWidth=\{curbStrokePx\(roadCurbWidth\(el\), ppf, CURB_STROKE_MIN_PX \* lfK\)\}/);
     // and the legacy rect road border/stripes are on the same to-scale width (no strokeZoom for roads)
-    expect(src).toMatch(/cw = curbStrokePx\(el\.curb \?\? CURB, ppf, CURB_STROKE_MIN_PX\)/);
+    expect(src).toMatch(/cw = curbStrokePx\(el\.curb \?\? CURB, ppf, CURB_STROKE_MIN_PX \* lfK\)/);
     expect(src).not.toMatch(/el\.type === "road" \? strokeZoom\(/);
   });
 
@@ -385,7 +388,9 @@ describe("markup hit-area / callout padding / live color picker (B155 open-path 
     // the pure zoom helpers are imported from the dedicated lib
     expect(src).toMatch(/import \{ dashZoom, insetRingVisible \} from "\.\/lib\/lineZoom\.js";/);
     // sub-pixel-inset suppression guards the setback map (kills the garbled double-line on zoom-out)
-    expect(src).toMatch(/if \(!insetRingVisible\(Math\.min\(\.\.\.posSb\), view\.ppf\)\) return null;/);
+    // NEW-1 (V481(f)): on `labelPpf`, not `view.ppf` — the same sub-pixel rule, evaluated at the
+    // SHEET's scale on an export pass so a wide-zoom PDF can't silently lose the setback ring.
+    expect(src).toMatch(/if \(!insetRingVisible\(Math\.min\(\.\.\.posSb\), labelPpf\)\) return null;/);
     // the visible dashed ring uses strokeZoom + dashZoom — NOT the old fixed 1.25px / "7 6"
     expect(src).toMatch(/stroke=\{PAL\.setback\} strokeWidth=\{strokeZoom\(1\.25, zk\)\} strokeDasharray=\{dashZoom\("7 6", zk\)\}/);
     expect(src).not.toMatch(/stroke=\{PAL\.setback\} strokeWidth=\{1\.25\} strokeDasharray="7 6"/);
@@ -469,7 +474,9 @@ describe("markup hit-area / callout padding / live color picker (B155 open-path 
     expect(src).toMatch(/const effSpacingFt = Math\.max\([\s\S]{0,80}minGapPx \/ Math\.max\(ppf/);
     // every render site threads the feature's own spacing override + { size, halo } opts (the road also
     // carries the B935 `insetFt` for "Inside" placement, so don't require the object to close right after)
-    expect(src).toMatch(/m\.labelSpacing \|\| INLINE_LABEL_SPACING\.line[\s\S]{0,80}\{ size: m\.labelSize, halo: m\.labelHalo \}/);
+    // NEW-1 (V481(f)): every site also threads the LABEL FRAME (`lf`) so an export sizes/thins
+    // these inline labels from the sheet's scale, not from the zoom the canvas happened to be at.
+    expect(src).toMatch(/m\.labelSpacing \|\| INLINE_LABEL_SPACING\.line[\s\S]{0,80}\{ size: m\.labelSize, halo: m\.labelHalo, lf: labelFrame \}/);
     expect(src).toMatch(/el\.labelSpacing \|\| INLINE_LABEL_SPACING\.road[\s\S]{0,80}\{ size: el\.labelSize, halo: el\.labelHalo/);
     // the panel controls exist and their writers stay NON-STICKY (direct setMarkups / setSelEl, never mkStyle)
     expect(src).toMatch(/const inlineLabelControls = \(feat, typeKey, write\) =>/);
