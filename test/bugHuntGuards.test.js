@@ -301,30 +301,33 @@ describe("markup hit-area / callout padding / live color picker (B155 open-path 
     expect(sp).not.toMatch(/tw = Math\.max\(fontPx, \.\.\.lines\.map\(\(l\) => l\.length \* charW\)\)/);
   });
 
-  it("B567 + NEW-4: every Site Planner color control picks live (onInput) with one-frame undo, and carries the shared recents row", () => {
+  it("B567 + NEW-4: every Site Planner color control picks live (onInput) with one-frame undo, and records ONE recent per session", () => {
     const src = read("../src/workspaces/site-planner/SitePlanner.jsx");
-    // livePick now takes an optional hist flag (default on); Standards-default swatches pass false
-    // so a settings-only pick doesn't leave a dead undo frame (RC-6). Element/markup pickers are
-    // unchanged — they still push one frame per picking session.
-    expect(src).toMatch(/const livePick = \(apply, hist = true\) =>/);
+    // livePick takes an optional hist flag (default on); Standards-default swatches pass false so a
+    // settings-only pick doesn't leave a dead undo frame (RC-6). Element/markup pickers are
+    // unchanged — they still push one frame per picking session. The third arg is the end-of-
+    // session commit hook (Standards uses it to promote to the account scope once, not per shade).
+    expect(src).toMatch(/const livePick = \(apply, hist = true, commit = null\) =>/);
     expect(src).toMatch(/onInput:\s+\(e\) => \{ if \(hist && !pickSnapRef\.current\) \{ pushHistory\(\); pickSnapRef\.current = true; \}/);
-    // NEW-4 — the 18 controls now go through `colorCtl`, which IS livePick plus the shared
-    // recently-used swatch row (one wheel + one recents row per control). 17 are the full
-    // <ColorField> control; the 18th is the multi-selection "Mixed" picker, whose wheel is a
-    // bespoke hidden overlay, so it spreads livePick directly and gets ColorRecentsRow beside it.
-    expect(src).toMatch(/const colorCtl = \(apply, hist = true\) => \(\{\s*\n\s*pick: livePick\(apply, hist\),/);
+    // Every colour control goes through `colorCtl` = livePick plus the discrete swatch path. 17 are
+    // the full <ColorField>; the 18th is the multi-selection "Mixed" picker, which spreads livePick
+    // into the same <ColorField> so the chip can carry its hatched no-single-colour state.
+    expect(src).toMatch(/const colorCtl = \(apply, hist = true, commit = null\) => \(\{\s*\n\s*pick: livePick\(apply, hist, commit\),/);
     expect((src.match(/\{\.\.\.colorCtl\(\(v\) =>/g) || []).length).toBe(17);
-    expect((src.match(/\{\.\.\.livePick\(\(v\) =>/g) || []).length).toBe(1);
-    expect((src.match(/<ColorField /g) || []).length).toBe(17);
-    expect(src).toMatch(/<ColorRecentsRow seed=\{COLOR_SEED\}/);
+    expect((src.match(/pick=\{livePick\(\(v\) =>/g) || []).length).toBe(1);
+    expect((src.match(/<ColorField /g) || []).length).toBe(18);
     // A swatch click is a DISCRETE commit: exactly one undo frame, then the color is recorded.
-    expect(src).toMatch(/onSwatch: \(v\) => \{ if \(hist\) pushHistory\(\); apply\(v\); pushRecent\(v\); \}/);
-    // The wheel records into recents once, on `change` (when it closes) — not per drag frame.
-    expect(src).toMatch(/onChange: \(e\) => \{ if \(hist && !pickSnapRef\.current\).*pushRecent\(e\.target\.value\); \}/);
+    expect(src).toMatch(/onSwatch: \(v\) => \{ if \(hist\) pushHistory\(\); apply\(v\); pushRecent\(v\);/);
+    // NEW-4 (bug) — the wheel picks LIVE, so `change` fires for EVERY shade the cursor crosses.
+    // Recording each one filled all ten recents slots from a single drag. The live handlers must
+    // therefore only NOTE the value; exactly one entry is recorded at the session boundary.
+    expect(src).toMatch(/onChange: \(e\) => \{ if \(hist && !pickSnapRef\.current\).*notePick\(e\.target\.value\); \}/);
+    expect(src).toMatch(/onBlur:\s+\(e\) => \{ const v = e\.target\.value; commitPick\(\);/);
+    expect(src).not.toMatch(/pushRecent\(e\.target\.value\)/);
     // the two Standards element-Colors swatches opt out of history (settings-only, RC-6)
-    expect((src.match(/\{\.\.\.colorCtl\(\(v\) => liveTypeStyle\([^)]*\), false\)\}/g) || []).length).toBe(2);
+    expect((src.match(/colorCtl\(\(v\) => liveTypeStyle\([^)]*\), false,/g) || []).length).toBe(2);
     // B929: the two Standards → Parcels default swatches are settings-only too (hist=false)
-    expect((src.match(/\{\.\.\.colorCtl\(\(v\) => setParcelStd\([^)]*\), false\)\}/g) || []).length).toBe(2);
+    expect((src.match(/colorCtl\(\(v\) => setParcelStd\([^)]*\), false,/g) || []).length).toBe(2);
     // the per-pixel undo floods are gone: the OLD color-input handlers (inline pushHistory) no
     // longer exist (discrete controls like the "Fill the parcel" checkbox keep their pushHistory)
     expect(src).not.toMatch(/onChange=\{\(e\) => \{ pushHistory\(\); setSelEl\(\{ fill: e\.target\.value/);
@@ -474,13 +477,13 @@ describe("markup hit-area / callout padding / live color picker (B155 open-path 
     expect(src).toMatch(/const effSpacingFt = Math\.max\([\s\S]{0,80}minGapPx \/ Math\.max\(ppf/);
     // every render site threads the feature's own spacing override + { size, halo } opts (the road also
     // carries the B935 `insetFt` for "Inside" placement, so don't require the object to close right after)
-    // NEW-9 added a third opt (`place` — centre / beside / inside) and B1069 a fourth (`lf`, the
+    // NEW-9 added a third opt (`place` — centre / beside / inside) and B1075 a fourth (`lf`, the
     // label frame), so these pin that the per-feature size + halo overrides still reach
     // inlineLabelEls WITHOUT pinning the exact opt list, which would make the guard fail on every
     // future addition rather than on the regression it exists to catch.
     expect(src).toMatch(/m\.labelSpacing \|\| INLINE_LABEL_SPACING\.line[\s\S]{0,160}size: m\.labelSize, halo: m\.labelHalo/);
     expect(src).toMatch(/el\.labelSpacing \|\| INLINE_LABEL_SPACING\.road[\s\S]{0,160}size: el\.labelSize, halo: el\.labelHalo/);
-    // B1069 (V481(f)) — but DO pin that every render site threads the LABEL FRAME, or an export
+    // B1075 (V481(f)) — but DO pin that every render site threads the LABEL FRAME, or an export
     // silently sizes and thins these labels from the zoom the canvas happened to be at.
     expect(src.match(/inlineLabelEls\([^\n]*\blf\b/g) || []).toHaveLength(4);
     // the panel controls exist and their writers stay NON-STICKY (direct setMarkups / setSelEl, never mkStyle)

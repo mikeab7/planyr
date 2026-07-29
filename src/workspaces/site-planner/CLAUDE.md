@@ -31,9 +31,12 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   (elements expanded to their `attachedTo` assembly, so a building brings its truck court / trailer
   parking / dock zones / bump-outs), then paste with fresh ids, bonds remapped INSIDE the copy, and
   relative geometry preserved. A pasted parcel arrives INACTIVE by design (can't double-count site area).
-- `standardsApply.js` + `userPrefs.js` + `components/StandardScope.jsx` — Standards scope + retroactive
-  apply (NEW-3). `standardsApply` is the pure engine (parcels are stamped → WRITE the value; elements
-  resolve at render → CLEAR the per-element override). `userPrefs` is the account-level store
+- `standardsApply.js` + `userPrefs.js` + `components/StandardsBar.jsx` — Standards scope + retroactive
+  apply. `standardsApply` is the pure engine (parcels are stamped → WRITE the value; elements
+  resolve at render → CLEAR the per-element override) plus `applyAllStandards` — ONE Apply for the
+  whole panel, counted in distinct OBJECTS — and `derivedPanelScope`, which reads (never writes)
+  where the account already carries a default. `StandardsBar` is the panel's sticky footer: ONE
+  scope + ONE Apply, replacing the per-field chip row that was most of the panel's height. `userPrefs` is the account-level store
   (`public.profiles.prefs` jsonb, own-row RLS — `db/user_prefs.sql`) behind the "All projects" scope,
   published into `planStyle`'s account layer (`setAccountStyleDefaults`). Precedence: built-in <
   account < project < per-object.
@@ -151,7 +154,7 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   through a `ctx` object rebuilt per call — add a key there, never a new closure capture. Its
   helpers (`printSheet.js`, `sheetFurniture.js`, `exportStyle.js`, `imagePdf.js`, `kmzExport.js`,
   `overlayVectorSvg.js`) must NOT gain a static importer on the boot path or they rejoin the
-  critical-path chunk. `exportLabelScale.js` (B1069) is the ONE place that decides what scale the
+  critical-path chunk. `exportLabelScale.js` (B1075) is the ONE place that decides what scale the
   LABEL tier reasons at: the view on screen, the SHEET's own px-per-foot on an export pass — so
   declutter/LOD/collision, label sizes and stroke-zoom are a function of the plan and the paper,
   never of the live zoom. It IS on the boot path (SitePlanner imports it statically, ~1 KB pure). PDF-PARITY: `printMetricPairs`/`printStormwaterBars` deliberately stay in

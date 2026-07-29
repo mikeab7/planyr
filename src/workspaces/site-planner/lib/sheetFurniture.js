@@ -261,6 +261,18 @@ export function calibBadgePlacement({
   return { raise, left, bottom, maxWidth };
 }
 
+// How high a transient canvas pill (the Standards "Applied · Undo" toast) must sit so it clears
+// every piece of bottom furniture already on the canvas — the north arrow, the scale bar and the
+// calibration badge (which itself may have lifted to its own row). Returned as a CSS `bottom`
+// offset inside the canvas pane. The toast used to be viewport-centred, which put it in the
+// optical middle of the plan, right over the buildings; anchoring it to the pane and stacking it
+// above the furniture keeps it out of both the drawing and the side panel. Pure → unit-testable.
+export function canvasPillBottom({ northH = 0, scaleBarH = 0, calibBottom = null, calibH = 26, row = 40, gap = 10 }) {
+  const tops = [row + northH, row + scaleBarH];
+  if (calibBottom != null) tops.push(calibBottom + calibH);
+  return Math.max(...tops) + gap;
+}
+
 export function buildSheetFurnitureSvg(opts) {
   const L = furnitureLayout(opts);
   return translate(L.scaleBar.tx, L.scaleBar.ty, L.scaleBar.markup) +

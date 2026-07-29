@@ -7,6 +7,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import {
   PARCEL_STD_KEYS, TYPE_STD_KEYS,
   applyParcelStandard, applyTypeStandard, parcelStandardImpact, typeStandardImpact, appliedLabel,
+  applyAllStandards, allStandardsImpact, appliedObjectsLabel, derivedPanelScope,
 } from "../src/workspaces/site-planner/lib/standardsApply.js";
 import {
   typeStyle, parcelDefaultStyle, standardScope, setAccountStyleDefaults, getAccountStyleDefaults,
@@ -158,5 +159,92 @@ describe("account preference edits (pure)", () => {
   it("normalizes a missing / garbage prefs blob into the empty shape", () => {
     expect(_normalizePrefs(null).planStandards).toEqual({ parcelStyle: {}, typeStyles: {} });
     expect(_normalizePrefs("nope").planStandards).toEqual({ parcelStyle: {}, typeStyles: {} });
+  });
+});
+
+/* ------------------------------------------------ ONE Apply for the whole panel (owner rule)
+ *
+ * "I didn't mean that for every individual setting. I meant all, like, to apply them to the
+ * project… not each individual setting. It's taking up way too much space as is."
+ *
+ * So: one Apply that pushes EVERY standard onto what's already drawn, in one undo frame, reported
+ * in distinct OBJECTS — a parcel whose outline colour and weight both change is one object, not two.
+ */
+describe("applyAllStandards — every standard at once, counted in objects", () => {
+  const parcelValues = { stroke: "#0000ff", weight: 3, dash: "dashed", fill: null, fillOpacity: null };
+
+  it("writes every parcel key and clears every element override in ONE pass", () => {
+    const parcels = [
+      { id: "p1", stroke: "#ff0000", weight: 2 },
+      { id: "p2", stroke: "#0000ff", weight: 3, dash: "dashed" },   // already matches
+    ];
+    const els = [
+      { id: "e1", type: "building", fill: "#123456", stroke: "#654321" },
+      { id: "e2", type: "building" },                                // no override to clear
+      { id: "e3", type: "pond", fill: "#abcdef" },                   // type not in the list
+    ];
+    const res = applyAllStandards(parcels, els, parcelValues, ["building"]);
+    expect(res.parcels[0]).toEqual({ id: "p1", stroke: "#0000ff", weight: 3, dash: "dashed" });
+    expect(res.parcels[1]).toBe(parcels[1]);                         // untouched row keeps identity
+    expect(res.els[0]).toEqual({ id: "e1", type: "building" });
+    expect(res.els[2]).toBe(els[2]);
+    expect(res.count).toBe(2);                                       // p1 + e1 — DISTINCT objects
+  });
+
+  it("counts an object ONCE even when several standards change it (no inflated toast)", () => {
+    const parcels = [{ id: "p1", stroke: "#ff0000", weight: 2, dash: "solid" }];
+    expect(applyAllStandards(parcels, [], parcelValues, []).count).toBe(1);
+  });
+
+  it("nothing to do → same array references, count 0, so the Apply chip stays disabled", () => {
+    const parcels = [{ id: "p1", stroke: "#0000ff", weight: 3, dash: "dashed" }];
+    const els = [{ id: "e1", type: "building" }];
+    const res = applyAllStandards(parcels, els, parcelValues, ["building"]);
+    expect(res.count).toBe(0);
+    expect(res.parcels).toBe(parcels);
+    expect(res.els).toBe(els);
+    expect(allStandardsImpact(parcels, els, parcelValues, ["building"])).toBe(0);
+  });
+
+  it("the impact count is exactly what an Apply would change", () => {
+    const parcels = [{ id: "p1", stroke: "#ff0000" }, { id: "p2", stroke: "#00ff00" }];
+    const els = [{ id: "e1", type: "building", fill: "#111111" }];
+    expect(allStandardsImpact(parcels, els, parcelValues, ["building"]))
+      .toBe(applyAllStandards(parcels, els, parcelValues, ["building"]).count);
+  });
+
+  it("a key absent from the values bag is left alone (an unset standard doesn't wipe anything)", () => {
+    const parcels = [{ id: "p1", stroke: "#ff0000", weight: 2 }];
+    const res = applyAllStandards(parcels, [], { stroke: "#0000ff" }, []);
+    expect(res.parcels[0]).toEqual({ id: "p1", stroke: "#0000ff", weight: 2 });
+  });
+
+  it("handles empty/missing inputs without throwing", () => {
+    expect(applyAllStandards(undefined, undefined, {}, []).count).toBe(0);
+  });
+
+  it("says OBJECTS, because it spans parcels AND elements", () => {
+    expect(appliedObjectsLabel(1)).toBe("Applied to 1 object");
+    expect(appliedObjectsLabel(12)).toBe("Applied to 12 objects");
+  });
+});
+
+describe("derivedPanelScope — collapsing per-key scopes must MOVE nothing", () => {
+  it("reports All when any standard already lives on the account", () => {
+    expect(derivedPanelScope(["project", "builtin", "all"])).toBe("all");
+  });
+  it("reports Project when none does", () => {
+    expect(derivedPanelScope(["project", "builtin", "builtin"])).toBe("project");
+    expect(derivedPanelScope([])).toBe("project");
+    expect(derivedPanelScope()).toBe("project");
+  });
+  it("is a READ, never a write — an account-scope default a user already has is not demoted", () => {
+    // The hazard this exists for: the panel-level control must not retroactively pull an
+    // account-wide default back onto one plan just because the UI collapsed. Nothing here
+    // returns a mutation; the caller only renders the value.
+    const scopes = ["all", "project"];
+    const snapshot = [...scopes];
+    derivedPanelScope(scopes);
+    expect(scopes).toEqual(snapshot);
   });
 });

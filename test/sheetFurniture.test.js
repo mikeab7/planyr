@@ -220,3 +220,53 @@ describe("calibBadgePlacement — badge/scale-bar/zoom never collide at any pane
     }
   });
 });
+
+/* ------------------------------------------ where a transient canvas pill may sit (the Apply toast)
+ *
+ * "The banner doesn't need to pop up in the middle of the site, it's a little too centered."
+ *
+ * The Standards Apply toast was viewport-centred (left:50%, translateX(-50%)), which put it in the
+ * optical middle of the plan, over the buildings — and, being viewport-anchored, it could sit over
+ * an open side panel. It is now anchored to the CANVAS pane, bottom-left, stacked clear of every
+ * piece of bottom furniture. This is that stacking rule.
+ */
+import { canvasPillBottom } from "../src/workspaces/site-planner/lib/sheetFurniture.js";
+
+describe("canvasPillBottom — the toast clears the north arrow, scale bar and calibration badge", () => {
+  it("clears the TALLEST piece of furniture on the bottom row", () => {
+    expect(canvasPillBottom({ northH: 44, scaleBarH: 32 })).toBe(40 + 44 + 10);
+    expect(canvasPillBottom({ northH: 20, scaleBarH: 32 })).toBe(40 + 32 + 10);
+  });
+  it("clears the calibration badge when one is showing", () => {
+    expect(canvasPillBottom({ northH: 20, scaleBarH: 20, calibBottom: 40, calibH: 26 })).toBe(40 + 26 + 10);
+  });
+  it("clears the calibration badge even when it has LIFTED to its own row above the bar", () => {
+    const lifted = calibBadgePlacement({ paneW: 400, badgeW: 300, scaleBarW: 160, scaleBarH: 32 });
+    expect(lifted.raise).toBe(true);
+    expect(canvasPillBottom({ northH: 20, scaleBarH: 32, calibBottom: lifted.bottom }))
+      .toBeGreaterThan(lifted.bottom + 20);
+  });
+  it("no calibration badge → the badge never contributes", () => {
+    expect(canvasPillBottom({ northH: 44, scaleBarH: 32, calibBottom: null })).toBe(94);
+  });
+  it("is always a positive offset inside the pane, never a viewport centre", () => {
+    expect(canvasPillBottom({})).toBeGreaterThan(0);
+  });
+});
+
+/* Placement guard at the source: the toast must be anchored to the canvas pane, never re-centred
+ * on the viewport. (The exact regression: position:fixed; left:50%; transform:translateX(-50%).) */
+describe("the Standards Apply toast is anchored to the canvas, not the viewport", () => {
+  it("renders absolutely inside the pane, low and to one side", async () => {
+    const fs = await import("node:fs");
+    const src = fs.readFileSync(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url), "utf8");
+    const i = src.indexOf('data-testid="standards-apply-toast"');
+    expect(i).toBeGreaterThan(-1);
+    const block = src.slice(i, src.indexOf("</div>", i));
+    expect(block).toContain('position: "absolute"');
+    expect(block).toContain("canvasPillBottom(");
+    expect(block).not.toContain('left: "50%"');
+    expect(block).not.toContain("translateX(-50%)");
+    expect(block).not.toContain('position: "fixed"');
+  });
+});
