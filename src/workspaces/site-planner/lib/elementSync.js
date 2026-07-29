@@ -177,24 +177,35 @@ export function createElementSync(opts = {}) {
   // ownRevs already suppress the echo; this backstops the ok:false-but-actually-committed case where no
   // rev was ever learned. Pruned per entry to the recent window so it stays tiny.
   const recentSent = new Map();
+  // NEW-1 (the straggler re-tear) — LOCAL-AUTHORITY EPOCH. Bumped by noteLocalAuthority() whenever
+  // the app applies a whole-canvas snapshot (undo / redo / mid-drag cancel). Every serialization we
+  // put on the wire is tagged with the epoch it was sent in, so a late echo of a write the user has
+  // since UNDONE is identifiable as "our own bytes, from a world that no longer exists" and can be
+  // kept off the canvas. Without it, such an echo re-applied pre-undo geometry to a couple of
+  // elements after the restore, and the next diff dutifully committed that torn canvas back
+  // (measured live: a 2-op straggler ~4 s after a 12-op undo, carrying pre-undo coordinates).
+  let localEpoch = 0;
+  function noteLocalAuthority() { localEpoch += 1; }
   function recordSent(kind, id, el) {
     if (!el) return; // deletes carry no data to match an echo against
     const t = now();
     const k = skey(kind, id);
     let m = recentSent.get(k);
     if (!m) { m = new Map(); recentSent.set(k, m); }
-    m.set(stableStringify(el), t);
+    m.set(stableStringify(el), { at: t, epoch: localEpoch });
     for (const [key, jm] of recentSent) { // bound memory: drop aged serializations, then empty keys
-      for (const [j, at] of jm) if (t - at > recentWindowMs) jm.delete(j);
+      for (const [j, r] of jm) if (t - r.at > recentWindowMs) jm.delete(j);
       if (jm.size === 0) recentSent.delete(key);
     }
   }
-  const sentMatches = (kind, id, json) => {
+  // The in-window send record for these exact bytes ({ at, epoch }), or null.
+  const sentRecord = (kind, id, json) => {
     const m = recentSent.get(skey(kind, id));
-    if (!m) return false;
-    const at = m.get(json);
-    return at != null && now() - at <= recentWindowMs;
+    if (!m) return null;
+    const r = m.get(json);
+    return r != null && now() - r.at <= recentWindowMs ? r : null;
   };
+  const sentMatches = (kind, id, json) => !!sentRecord(kind, id, json);
 
   // key -> Map(rev -> at)  (EVERY server rev THIS tab's OWN commits produced within the window). Revs
   // are globally unique + monotonic per element (server-assigned), so an incoming realtime row whose
@@ -795,7 +806,21 @@ export function createElementSync(opts = {}) {
     // the upsert still runs so a stale-seed canvas re-trues. A genuine foreign write carries DIFFERENT
     // data (→ still toasts per the B673 matrix); a byte-identical write is not a conflict anyway (same
     // LWW result, nothing lost).
-    if (!sentMatches(row.kind, row.id, upJson) && !semEqShadow)
+    const sent = sentRecord(row.kind, row.id, upJson);
+    // NEW-1 — STALE OWN ECHO: these are bytes THIS TAB put on the wire, sent BEFORE the app applied
+    // a whole-canvas snapshot (an undo / redo / mid-drag cancel). The user has explicitly discarded
+    // that state, so re-applying it here would resurrect exactly what they just undid — and the next
+    // diff would then commit the resurrected geometry back as a fresh edit, which is how a 12-member
+    // assembly ended up with 10 members restored and 2 stranded. Adopt the rev (so the next commit
+    // still targets the fresh row) but keep it OFF the canvas, with no event. The shadow now
+    // disagrees with the canvas, which is correct: the next reconcile re-asserts the SNAPSHOT's
+    // geometry — assembly-closed, as one batch. A foreign row, or an own echo from the CURRENT
+    // epoch, is untouched by this and still upserts exactly as before.
+    if (sent && sent.epoch < localEpoch) {
+      report("element-stale-own-echo", "own echo predating an applied snapshot kept off the canvas", { siteId, id: row.id, kind: row.kind, rev });
+      return { action: "ignore" };
+    }
+    if (!sent && !semEqShadow)
       onEvent({ type: "remote-upsert", id: row.id, kind: row.kind, remote: row, existed: !!shad, authoredRecently: isRecent(row.kind, row.id) });
     return { action: "upsert", kind: row.kind, id: row.id, el: row.data, row };
   }
@@ -807,7 +832,7 @@ export function createElementSync(opts = {}) {
   }
 
   return {
-    reconcile, flushGesture, retryNow, seed, stop, restore,
+    reconcile, flushGesture, retryNow, seed, stop, restore, noteLocalAuthority,
     pendingOps, pendingCount, dirtyEntries, applyRemoteRow,
     isSeeded: () => ready,
     // introspection for tests / B672-B673
