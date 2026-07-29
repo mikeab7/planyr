@@ -602,11 +602,17 @@ function inlineLabelEls(ptsFeet, text, color, spacingFt, ppf, f2p, keyPrefix, op
   // interior; without it (roads / strip easements) it rides the consistent screen-"up" side. Zero
   // inset = the classic on-the-line ride, byte-for-byte unchanged.
   const insetFt = (opts && Number.isFinite(opts.insetFt) && opts.insetFt > 0) ? opts.insetFt : 0;
-  // On the line: a ~1-font perpendicular clearance so the text sits just off the stroke (unchanged).
-  // Inside: use the feet inset ALONE (a midway-into-the-body distance that scales with zoom) — it
-  // already clears the line, and stacking the font clearance on top could shove a narrow feature's
-  // label past its own edge.
-  const offsetPx = insetFt > 0 ? insetFt * Math.max(ppf, 0) : fs * 1.05;
+  // NEW-9 — placement is a THREE-way choice, not a toggle (owner, 2026-07-25: "I'd like an option to
+  // put it on the center line… that's what I thought this would do, but it's not putting it there").
+  // The old pair was "just off the stroke" and "inside the body"; NEITHER rides the line itself, which
+  // is the classic street-name look and the one he expected.
+  //   center — offset ZERO: the text sits ON the alignment, its halo carrying it over the stroke.
+  //   off    — a ~1-font perpendicular clearance so it sits just beside the stroke (the old default).
+  //   inside — the feet inset ALONE (a midway-into-the-body distance that scales with zoom); it
+  //            already clears the line, and stacking the font clearance on top could shove a narrow
+  //            feature's label past its own edge.
+  const place = (opts && opts.place) || (insetFt > 0 ? "inside" : "off");
+  const offsetPx = place === "center" ? 0 : (place === "inside" && insetFt > 0 ? insetFt * Math.max(ppf, 0) : fs * 1.05);
   const interiorScreen = (opts && opts.interiorFeet) ? f2p(opts.interiorFeet) : null;
   const minSegPx = label.length * fs * 0.6;                        // LOD: the on-screen segment must fit the text (CW_RATIO 0.6)
   // B678 — screen-space self-thinning is an ANTI-OVERLAP floor, nothing more: keep restamps at least
@@ -647,11 +653,20 @@ function ringLabelInsetFt(ptsFeet) {
 // set to "Inside" placement. A STRIP (open centerline) tucks toward one side by a quarter of its
 // width; a BOUNDARY ring aims at its centroid, inset a fraction of its smaller extent. Returns {} for
 // the classic on-the-line ride (labelInside off).
+/* NEW-9 — where a feature's repeating inline label rides, resolved once for every caller.
+ * "center" | "off" | "inside". Back-compatible by construction: a record saved before this existed
+ * carries only the old `labelInside` boolean, which maps to "inside"/"off" exactly as it rendered. */
+function labelPlaceOf(feat) {
+  const p = feat && feat.labelPlace;
+  if (p === "center" || p === "off" || p === "inside") return p;
+  return feat && feat.labelInside ? "inside" : "off";
+}
 function easementInsetOpts(m) {
-  if (!m || !m.labelInside) return {};
+  const place = labelPlaceOf(m);
+  if (place !== "inside") return { place };
   const strip = m.centerline && m.mode !== "boundary" && m.centerline.length >= 2;
-  if (strip) return { insetFt: Math.max(0, (+m.width || 0) / 4) };
-  return { insetFt: ringLabelInsetFt(m.pts), interiorFeet: centroid(m.pts) };
+  if (strip) return { place, insetFt: Math.max(0, (+m.width || 0) / 4) };
+  return { place, insetFt: ringLabelInsetFt(m.pts), interiorFeet: centroid(m.pts) };
 }
 
 function lineIntersect(x1, y1, x2, y2, x3, y3, x4, y4) {
@@ -3802,7 +3817,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if (e.key === "Enter" && finishActiveDrawing()) { e.preventDefault(); return; }
       // B875 — Enter on a selected pond opens its inspector (keyboard peer of double-click).
       if (e.key === "Enter" && tool === "select" && sel?.kind === "el") { const se = els.find((x) => x.id === sel.id); if (se && se.type === "pond") { e.preventDefault(); revealPondInspector(se.id); return; } }
-      if (e.key === "Escape") { setDraftPoly(null); setDraftRect(null); setDraftElPoly(null); setDraftRoadPts(null); setRoadVtxSel(null); setMeasDraft([]); setSplitPath([]); setCombineSel([]); setCalloutDraft(null); setAddLeaderFor(null); cancelEditCallout(); setMkRect(null); setMkPoly(null); setEaseDraft(null); setEaseEdges(null); setEaseMenu(false); setMarquee(null); setMulti([]); setDrillId(null); setPrintMode(false); setPrintFrame(null); setIdentifyMode(false); setIdentifyRes(null); setAttachFor(null); setAlignFor(null); setPobMode(null); setOvCalib(null); setTraceMode(false); setTracePts([]); setRouteMode(null); setXsecMode(false); setXsecPts([]); setOverlapWarn(""); setSel(null); setTypeMenu(null); setParcelMenu(null); setSelVtx(null); setVtxMenu(null); setInsHint(null); setToolMenu(false); setMeasureMenu(false); setOvMenu(null); setOvAlignBase(null); setParcelMode("add"); setMergePick(false); spaceRef.current = false; setSpacePan(false); abortGesture(); setTool("select"); lastTapRef.current = { id: null, t: 0, x: 0, y: 0, wasSel: false }; }
+      if (e.key === "Escape") { setDraftPoly(null); setDraftRect(null); setDraftElPoly(null); setDraftRoadPts(null); branchSeedRef.current = null; setRoadVtxSel(null); setMeasDraft([]); setSplitPath([]); setCombineSel([]); setCalloutDraft(null); setAddLeaderFor(null); cancelEditCallout(); setMkRect(null); setMkPoly(null); setEaseDraft(null); setEaseEdges(null); setEaseMenu(false); setMarquee(null); setMulti([]); setDrillId(null); setPrintMode(false); setPrintFrame(null); setIdentifyMode(false); setIdentifyRes(null); setAttachFor(null); setAlignFor(null); setPobMode(null); setOvCalib(null); setTraceMode(false); setTracePts([]); setRouteMode(null); setXsecMode(false); setXsecPts([]); setOverlapWarn(""); setSel(null); setTypeMenu(null); setParcelMenu(null); setSelVtx(null); setVtxMenu(null); setInsHint(null); setToolMenu(false); setMeasureMenu(false); setOvMenu(null); setOvAlignBase(null); setParcelMode("add"); setMergePick(false); spaceRef.current = false; setSpacePan(false); abortGesture(); setTool("select"); lastTapRef.current = { id: null, t: 0, x: 0, y: 0, wasSel: false }; }
       if (e.key.startsWith("Arrow") && (multi.length > 1 || sel?.kind === "el")) { e.preventDefault(); nudgeSel(e.key, e.shiftKey ? 10 : 1); return; }
       if ((e.key === "Backspace" || e.key === "Delete") && removeLastVertex()) { e.preventDefault(); return; } // undo the last placed vertex mid-draw
       if ((e.key === "Delete" || e.key === "Backspace") && selVtxRef.current && deleteVtx(selVtxRef.current.layer, selVtxRef.current.id, selVtxRef.current.index)) { e.preventDefault(); return; } // B230: an armed control point → delete just that vertex. NEW-1: deleteVtx returns false on a no-op (endpoint/min/stale) → we DON'T consume the key; it falls through to the whole-element delete below so Delete can never silently wedge.
@@ -5661,9 +5676,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const finishRoad = () => {
     const raw = (draftRoadPts || []).filter((p, i, a) => i === 0 || Math.hypot(p.x - a[i - 1].x, p.y - a[i - 1].y) > 0.5);
     if (raw.length < 2) { setDraftRoadPts(null); setRoadSnapTarget(null); return; }
-    const curb = +settings.roadCurb || CURB;
-    const travelW = roadWidth !== "free" && +roadWidth > 0 ? +roadWidth : 24;
-    const roadClass = DEFAULT_ROAD_CLASS;
+    const seed = branchSeedRef.current;                       // NEW-8 — set by "Branch a road from here"
+    branchSeedRef.current = null;
+    const curb = seed && Number.isFinite(+seed.curb) ? +seed.curb : (+settings.roadCurb || CURB);
+    const travelW = seed && +seed.travelW > 0 ? +seed.travelW : (roadWidth !== "free" && +roadWidth > 0 ? +roadWidth : 24);
+    const roadClass = seed && seed.roadClass ? seed.roadClass : DEFAULT_ROAD_CLASS;
     const defR = classDefaultRadius(roadClassOf(settings, roadClass));
     const vtx = raw.map((_, i) => (i === 0 || i === raw.length - 1) ? {} : { treatment: "arc", radius: defR });
     const bbox = roadStripBBox(raw, vtx, travelW, curb, { defaultRadius: defR });
@@ -7493,7 +7510,53 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     e.preventDefault();
     e.stopPropagation();
     if (!(multi.length > 1 && inMulti("el", id))) setSel({ kind: "el", id });
-    setTypeMenu({ id, x: e.clientX, y: e.clientY });
+    // NEW-8 — carry the WORLD point of the right-click. "Branch a road from here" means from the
+    // spot the user actually pointed at, not from the element's centre.
+    let w = null;
+    try { w = p2f(e.clientX, e.clientY); } catch (_) { w = null; }
+    setTypeMenu({ id, x: e.clientX, y: e.clientY, w });
+  };
+  /* NEW-8 — start a NEW road branching off an existing one, tee'd at the point clicked.
+   *
+   * Owner: "add a feature where I can right click on a road and, basically, add a road coming out of
+   * it like a t." Drawing one by hand meant starting a road in open ground and landing its END on the
+   * through road and hoping the connect caught — this starts FROM the junction instead, which is how a
+   * designer thinks about it and removes the guesswork entirely.
+   *
+   * Two halves, and the first is what makes the junction real: a tee is recognised where a road's
+   * endpoint sits on another road's INTERIOR VERTEX (teeJunctionsOf), so the branch point must BE a
+   * vertex on the parent. We splice one there first (reusing a nearby existing vertex rather than
+   * stacking a new one — B1052's lesson), then seed the draft at exactly that coordinate. The draft
+   * then rides the ordinary road-drawing path, so ✓ Done / Enter / Esc / Backspace all behave as
+   * usual and the junction geometry solves itself on the next render. */
+  const branchSeedRef = useRef(null);            // {roadClass, travelW, curb} for the road being drawn
+  const startRoadBranch = (parent, at) => {
+    if (!isCenterlineRoad(parent) || !at) return;
+    // Nearest point on the parent's SPARSE centerline — that is the polyline a tee keys off.
+    let bestSeg = -1, bestPt = null, bestD = Infinity;
+    for (let i = 0; i < parent.pts.length - 1; i++) {
+      const a = parent.pts[i], b = parent.pts[i + 1];
+      const dx = b.x - a.x, dy = b.y - a.y, L2 = dx * dx + dy * dy;
+      const t = L2 < 1e-9 ? 0 : Math.max(0, Math.min(1, ((at.x - a.x) * dx + (at.y - a.y) * dy) / L2));
+      const q = { x: a.x + dx * t, y: a.y + dy * t };
+      const d = Math.hypot(at.x - q.x, at.y - q.y);
+      if (d < bestD) { bestD = d; bestSeg = i; bestPt = q; }
+    }
+    if (bestSeg < 0 || !bestPt) return;
+    pushHistory();
+    // Reuse a vertex already within a collapse distance instead of stacking another one beside it.
+    const ins = insertRoadVertex(parent.pts, parent.vtx, bestSeg, bestPt, {
+      collapseFt: Math.max(1.5, (+parent.travelW || 0) / 4),   // reuse a vertex already essentially here
+    });
+    const node = ins ? ins.pts[ins.index] : bestPt;
+    if (ins) setEls((a) => a.map((x) => (x.id === parent.id && isCenterlineRoad(x) ? reRoad({ ...x, pts: ins.pts, vtx: ins.vtx }) : x)));
+    // The branch inherits the parent's cross-section — the least surprising default, and editable after.
+    branchSeedRef.current = { roadClass: parent.roadClass || DEFAULT_ROAD_CLASS, travelW: +parent.travelW || 24, curb: parent.curb };
+    setSel(null);
+    setTool("road");
+    setRoadWidth(String(+parent.travelW || 24));
+    setDraftRoadPts([{ x: node.x, y: node.y }]);
+    flashWarn(`Branching a ${roadClassOf(settings, parent.roadClass).label.toLowerCase()} off ${parent.label || "this road"} — click where it should go, then ✓ Done. Esc cancels.`, 6000);
   };
   // B875 — reveal a pond's inspector card (open the Properties companion) and scroll-flash it.
   // `target` optionally focuses a sub-card ("assistant" | "purpose"). Selecting a pond does this
@@ -11792,13 +11855,21 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       </span></Field>
       <Field label="Label text size"><NumInput style={{ ...numInput, width: 70 }} value={feat.labelSize ?? 11} min={5} max={48} step={1} coarse={4} onCommit={(n) => write({ labelSize: n })} /></Field>
       <Field label="Label background"><label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: PAL.ink, cursor: "pointer" }}><input type="checkbox" checked={haloOn} onChange={(e) => write({ labelHalo: e.target.checked })} style={{ accentColor: PAL.accent, width: 14, height: 14 }} /><span>{haloOn ? "Halo (legible over aerial)" : "None"}</span></label></Field>
-      {/* B935 — a road / easement has a body (a paved width, a strip, a bounded area), so its inline
-          label can either ride the centerline (default) or tuck INSIDE that body — off the drawn line
-          so it doesn't sit on top of the feature. A plain line/polyline has no interior, so this
-          control only shows for road + easement. */}
-      {(typeKey === "road" || typeKey === "easement") && (
-        <Field label="Label position"><label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: PAL.ink, cursor: "pointer" }}><input type="checkbox" checked={!!feat.labelInside} onChange={(e) => write({ labelInside: e.target.checked })} style={{ accentColor: PAL.accent, width: 14, height: 14 }} /><span>{feat.labelInside ? `Inside the ${typeKey} (off the line)` : "On the line"}</span></label></Field>
-      )}
+      {/* NEW-9 — placement is a THREE-way choice, and it now shows for EVERY label-bearing feature.
+          It used to be a checkbox between "just off the stroke" and "inside the body" — and neither
+          rides the alignment itself, which is the classic street-name look and the one the owner
+          expected "Inside" to give him. "Inside the body" still only makes sense for a feature that
+          HAS a body (a paved width, a strip, a bounded area), so that option alone stays road/easement.
+          (B935 introduced the pair; this supersedes it without changing what either old value drew.) */}
+      <Field label="Label position">
+        <select style={{ ...numInput, width: 190, fontFamily: "inherit" }} value={labelPlaceOf(feat)}
+          onChange={(e) => write({ labelPlace: e.target.value, labelInside: e.target.value === "inside" })}
+          title="Where the repeating name rides: centred on the line itself, just beside it, or tucked into the body">
+          <option value="center">On the centre line</option>
+          <option value="off">Just beside the line</option>
+          {(typeKey === "road" || typeKey === "easement") && <option value="inside">{`Inside the ${typeKey}`}</option>}
+        </select>
+      </Field>
     </>);
   };
   // B682 — build a NON-STICKY label writer that coalesces a live slider drag into one undo frame:
@@ -14283,7 +14354,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="rgba(0,0,0,0.001)" strokeWidth={MK_HIT_PX} strokeLinecap="round" pointerEvents="stroke" />
                       <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke={nStroke} strokeWidth={vsw} strokeDasharray={da} fill="none" pointerEvents="none" />
                       {/* B620 — inline label riding the line (own color + white halo; appears in exports) */}
-                      {inlineLabelEls(mkPts(m), m.inlineLabel, m.stroke, m.labelSpacing || INLINE_LABEL_SPACING.line, view.ppf, f2p, `il${m.id}-`, { size: m.labelSize, halo: m.labelHalo })}
+                      {inlineLabelEls(mkPts(m), m.inlineLabel, m.stroke, m.labelSpacing || INLINE_LABEL_SPACING.line, view.ppf, f2p, `il${m.id}-`, { size: m.labelSize, halo: m.labelHalo, place: labelPlaceOf(m) })}
                     </g>
                   );
                 }
@@ -14293,7 +14364,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     <g key={m.id} style={common.style} onPointerDown={common.onPointerDown} onDoubleClick={(e) => onMarkupDouble(e, m.id)}>
                       <polyline points={s} fill="none" stroke="rgba(0,0,0,0.001)" strokeWidth={MK_HIT_PX} strokeLinecap="round" strokeLinejoin="round" pointerEvents="stroke" />
                       <polyline points={s} fill="none" stroke={nStroke} strokeWidth={vsw} strokeDasharray={da} pointerEvents="none" />
-                      {inlineLabelEls(mkPts(m), m.inlineLabel, m.stroke, m.labelSpacing || INLINE_LABEL_SPACING.polyline, view.ppf, f2p, `il${m.id}-`, { size: m.labelSize, halo: m.labelHalo })}
+                      {inlineLabelEls(mkPts(m), m.inlineLabel, m.stroke, m.labelSpacing || INLINE_LABEL_SPACING.polyline, view.ppf, f2p, `il${m.id}-`, { size: m.labelSize, halo: m.labelHalo, place: labelPlaceOf(m) })}
                     </g>
                   );
                 }
@@ -14524,7 +14595,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             onPointerDown={onBgDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={(e) => abortGesture(e.pointerId)} onDoubleClick={onBgDouble}
             onContextMenu={(e) => {
               e.preventDefault(); // a right-click on the map ALWAYS opens our menu, never the browser's (B627)
-              if (draftRoadPts) { setDraftRoadPts(null); return; } // cancel an in-progress road draw
+              if (draftRoadPts) { setDraftRoadPts(null); branchSeedRef.current = null; return; } // cancel an in-progress road draw
               // during a placement/draw mode a right-click just eats the native menu (each mode has its own Esc/exit)
               if ((tool !== "select" && tool !== "pan") || routeMode || traceMode || xsecMode || pobMode || ovCalib || identifyMode || attachFor || alignFor) return;
               setParcelMenu(null); setOvMenu(null);
@@ -19181,6 +19252,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       })}
                     </>
                   )}
+                  {/* NEW-8 — branch a road off this one, tee'd at the point that was right-clicked.
+                      Beats drawing one in open ground and hoping its far end catches the connect. */}
+                  {isCenterlineRoad(t) && !t.locked && (
+                    <>
+                      <div style={hdr(true)}>Road</div>
+                      <button style={menuItem(false)} data-testid="road-branch-here"
+                        title="Start a new road here, joined to this one as a T. It inherits this road's class and width; click where it should go, then ✓ Done."
+                        onClick={() => { const at = typeMenu.w; setTypeMenu(null); startRoadBranch(t, at); }}>
+                        ⌐ Branch a road from here
+                      </button>
+                    </>
+                  )}
                   <div style={hdr(true)}>Edit</div>
                   <button style={menuItem(false)} onClick={() => { duplicateEl(typeMenu.id); setTypeMenu(null); }}>Duplicate</button>
                   <button style={menuItem(!!t.locked)} onClick={() => { toggleLock(typeMenu.id); setTypeMenu(null); }}>{t.locked ? "Unpin" : "Pin"}</button>
@@ -19571,7 +19654,7 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
     // B620 — inline label riding the road centerline (own color + white halo; sparse spacing).
     // B935 — "Inside" placement tucks it a quarter of the travel-width off the centerline (into clear
     // pavement) so it doesn't sit on the drawn centerline; default rides the centerline as before.
-    rparts.push(...inlineLabelEls(roadDenseCenterline(el, settings), el.inlineLabel, st.stroke, el.labelSpacing || INLINE_LABEL_SPACING.road, ppf, f2p, `il${el.id}-`, { size: el.labelSize, halo: el.labelHalo, insetFt: el.labelInside ? Math.max(0, (+el.travelW || 0) / 4) : 0 }));
+    rparts.push(...inlineLabelEls(roadDenseCenterline(el, settings), el.inlineLabel, st.stroke, el.labelSpacing || INLINE_LABEL_SPACING.road, ppf, f2p, `il${el.id}-`, { size: el.labelSize, halo: el.labelHalo, place: labelPlaceOf(el), insetFt: labelPlaceOf(el) === "inside" ? Math.max(0, (+el.travelW || 0) / 4) : 0 }));
     return (
       <g key={el.id} filter={st.shadow ? "url(#bldgShadow)" : undefined} style={{ cursor: tool === "select" ? (el.locked ? "pointer" : "move") : "crosshair" }}
         onPointerDown={(e) => startMoveEl(e, el.id)} onDoubleClick={(e) => onElDouble && onElDouble(e, el.id)}

@@ -469,8 +469,11 @@ describe("markup hit-area / callout padding / live color picker (B155 open-path 
     expect(src).toMatch(/const effSpacingFt = Math\.max\([\s\S]{0,80}minGapPx \/ Math\.max\(ppf/);
     // every render site threads the feature's own spacing override + { size, halo } opts (the road also
     // carries the B935 `insetFt` for "Inside" placement, so don't require the object to close right after)
-    expect(src).toMatch(/m\.labelSpacing \|\| INLINE_LABEL_SPACING\.line[\s\S]{0,80}\{ size: m\.labelSize, halo: m\.labelHalo \}/);
-    expect(src).toMatch(/el\.labelSpacing \|\| INLINE_LABEL_SPACING\.road[\s\S]{0,80}\{ size: el\.labelSize, halo: el\.labelHalo/);
+    // NEW-9 added a third opt (`place` — centre / beside / inside), so these pin that the per-feature
+    // size + halo overrides still reach inlineLabelEls WITHOUT pinning the exact opt list, which would
+    // make the guard fail on every future addition rather than on the regression it exists to catch.
+    expect(src).toMatch(/m\.labelSpacing \|\| INLINE_LABEL_SPACING\.line[\s\S]{0,120}size: m\.labelSize, halo: m\.labelHalo/);
+    expect(src).toMatch(/el\.labelSpacing \|\| INLINE_LABEL_SPACING\.road[\s\S]{0,120}size: el\.labelSize, halo: el\.labelHalo/);
     // the panel controls exist and their writers stay NON-STICKY (direct setMarkups / setSelEl, never mkStyle)
     expect(src).toMatch(/const inlineLabelControls = \(feat, typeKey, write\) =>/);
     expect(src).not.toMatch(/setSelMarkup\(\{ labelSpacing/);
@@ -519,7 +522,10 @@ describe("markup hit-area / callout padding / live color picker (B155 open-path 
     // type/actions menu moved off double-click and stays on right-click via onElContext.
     expect(src).toMatch(/const onElDouble = \(e, id\) => \{[\s\S]*?setPropsFor\(\{ kind: "el", id \}\);\s*\n\s*\};/);
     expect(src).toMatch(/const onMarkupDouble = \(e, id\) => \{[\s\S]*?setPropsFor\(\{ kind: "markup", id \}\);\s*\n\s*\};/);
-    expect(src).toMatch(/const onElContext = \(e, id\) => \{[\s\S]*?setTypeMenu\(\{ id, x: e\.clientX, y: e\.clientY \}\);/);
+    // NEW-8 also records the WORLD point of the right-click (`w`) so "Branch a road from here" starts
+    // from the spot the user pointed at, not the element's centre — so the menu payload is now
+    // { id, x, y, w }. The guard still pins that the SCREEN position drives the menu placement.
+    expect(src).toMatch(/const onElContext = \(e, id\) => \{[\s\S]*?setTypeMenu\(\{ id, x: e\.clientX, y: e\.clientY, w \}\);/);
   });
 
   it("NEW-1: single-occupancy left dock — inspector TAKES OVER the dock when it opens, never stacks", () => {
