@@ -133,8 +133,8 @@
     "$comment": "Backlog items that own closing an ABOVE TARGET gap. The harness prints these next to the gap so a reader knows the work is tracked, not forgotten.",
     "runtime.timeToFirstDragMs": "B1040 / V477 live check (re-seed the provisional ceiling from a production run on the real Sylvestri scenario)",
     "runtime.firstAerialCoverageMs": "B1040 / V477 live check (re-seed the provisional ceiling from a production run; tile hosts are unreachable from the sandbox)",
-    "bundle.siteRouteJsBytes": "B1062 (extract SitePlanner's panels into lazily-loaded child components) -- B1042 did the dynamic-import half and is Done",
-    "bundle.largestChunkBytes": "B1062 (extract SitePlanner's panels into lazily-loaded child components) -- B1042 did the dynamic-import half and is Done; see this metric's note for the measured floor that blocks the rest",
+    "bundle.siteRouteJsBytes": "B1064 (extract SitePlanner's panels into lazily-loaded child components) -- B1042 did the dynamic-import half and is Done",
+    "bundle.largestChunkBytes": "B1064 (extract SitePlanner's panels into lazily-loaded child components) -- B1042 did the dynamic-import half and is Done; see this metric's note for the measured floor that blocks the rest",
     "runtime.frameMedianMs": "companion map-side perf session, 2026-07-28 nine-item run (drift / overlay lifecycle / SVG culling) — tighten to 60fps once that render work lands",
     "runtime.frameP90Ms": "companion map-side perf session, 2026-07-28 nine-item run (drift / overlay lifecycle / SVG culling) — tighten to 60fps once that render work lands",
     "runtime.aerialTileRequests": "companion map-side perf session, 2026-07-28 nine-item run (tile-footprint reduction)"
