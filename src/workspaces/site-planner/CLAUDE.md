@@ -74,7 +74,16 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   (`freshen`, via the injected `liveCollections()`) so a payload captured before a gesture can't
   reach the server — those two together are what stops a drag tearing a building off its truck
   court. Undo/redo is a gesture boundary: `applySnapshot` flushes against the SNAPSHOT (never
-  `stateRef`, which React hasn't re-rendered yet). **B1099:** a genuine foreign row beats a pending
+  `stateRef`, which React hasn't re-rendered yet). **B1098(×2), the trap that re-tore it once:** a
+  remote row arriving MID-GESTURE is turned into a canvas instruction with its payload FROZEN at
+  arrival and parked in `pendingRemoteRef` — replaying that across an undo puts pre-undo geometry
+  back on the restored canvas, and the next diff commits the re-torn canvas. So an applied snapshot
+  is the AUTHORITY: `applySnapshot` drops buffered upserts (keeping buffered REMOVEs — a remote
+  tombstone is not undone by a local undo) and calls `noteLocalAuthority()`, which bumps
+  `elementSync`'s local-authority EPOCH; every serialization put on the wire carries its epoch, and
+  `applyRemoteRow` keeps an own echo from an OLDER epoch off the canvas while still adopting its
+  rev. Never widen that suppression to foreign rows or to the current epoch — the B672 stale-seed
+  re-true depends on both still upserting. **B1099:** a genuine foreign row beats a pending
   DERIVED op — derived churn is never re-pushed over another writer — while a pending DIRECT user
   edit still wins and still toasts (the B673 matrix, unchanged). **B1097:** `rowsToModel` runs the
   SAME `normalizeBondedChildren` heal as `createSiteModel` — never wire a load-time repair to only

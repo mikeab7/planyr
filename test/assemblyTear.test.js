@@ -193,6 +193,105 @@ describe("NEW-2 — an undo/redo is a gesture boundary and commits immediately",
   });
 });
 
+/* NEW-1 (2026-07-29 live verification of V509) — the STRAGGLER re-tear.
+ *
+ * The undo's own flush was proven correct on production: the drag committed as one 12-op batch and
+ * Ctrl+Z committed immediately as one 12-op batch at pre-move coordinates. But ~4 s later a THIRD
+ * batch of 2 ops went out carrying the PRE-UNDO coordinates, and the assembly was torn again — 10
+ * members restored, 2 stranded.
+ *
+ * The straggler escapes `closeAssemblies` and `freshen` legitimately, and that is the point: BOTH
+ * ran, and both were right. A late echo of the pre-undo commit had been put back on the canvas for
+ * those two elements, so by flush time the canvas itself was torn — `freshen` faithfully read the
+ * torn bytes, and `closeAssemblies` correctly folded in nothing because only those two disagreed
+ * with the server. The defect is upstream of the write path: our own bytes, from a state the user
+ * has explicitly undone, must never reach the canvas again. */
+describe("NEW-1 — a late echo of an undone commit can never re-tear the assembly", () => {
+  const rowFor = (el, rev, uid) => ({ kind: "el", id: el.id, data: el, rev, z_index: 0, updated_by: uid });
+
+  it("commit A → snapshot → commit B → the delayed echo of A: no third commit, nothing resurrected", async () => {
+    const h = makeHarness({ sync: { selfUid: "me" } });
+    h.canvas.els = assembly();
+    h.reconcile(false); await tick();
+    h.commits.length = 0;
+
+    const restored = h.canvas.els;                       // the pre-move snapshot the history holds
+    // Commit A — the drag. One batch, the whole assembly, moved coordinates.
+    const moved = move(restored, -218, -223);
+    h.canvas.els = moved;
+    h.reconcile(false); h.sync.flushGesture(); await tick();
+    expect(h.commits).toHaveLength(1);
+    expect(h.commits[0]).toHaveLength(6);
+
+    // Ctrl+Z — applySnapshot restores the canvas and declares itself the authority, then flushes.
+    h.canvas.els = restored;
+    h.sync.noteLocalAuthority();
+    h.sync.reconcile({ els: restored }, {});
+    h.sync.flushGesture(); await tick();
+    expect(h.commits).toHaveLength(2);                   // commit B — immediate
+    expect(h.commits[1]).toHaveLength(6);                // the WHOLE assembly…
+    for (const o of h.commits[1]) expect(o.data.cx).toBe(restored.find((e) => e.id === o.id).cx); // …restored
+
+    // …and NOW the delayed realtime echo of commit A arrives for two members.
+    for (const id of ["k4", "k5"]) {
+      const stale = moved.find((e) => e.id === id);
+      const res = h.sync.applyRemoteRow(rowFor(stale, 99, "me"));
+      expect(res.action, `${id}: an undone commit's echo must not reach the canvas`).toBe("ignore");
+    }
+
+    // The canvas is untouched, so no third batch is minted.
+    h.reconcile(false); h.runTimers(); await tick();
+    const straggler = h.commits.slice(2).flat();
+    const resurrected = straggler.filter((o) => o.data && o.data.cx === moved.find((e) => e.id === o.id)?.cx);
+    expect(resurrected, "no op may carry the undone geometry").toEqual([]);
+    for (const o of straggler) expect(o.data.cx).toBe(restored.find((e) => e.id === o.id).cx);
+  });
+
+  it("if the shadow adopted the echo's rev, the re-assertion goes out as the WHOLE assembly", async () => {
+    const h = makeHarness({ sync: { selfUid: "me" } });
+    h.canvas.els = assembly();
+    h.reconcile(false); await tick();
+    const restored = h.canvas.els;
+    h.canvas.els = move(restored, -218, -223);
+    h.reconcile(false); h.sync.flushGesture(); await tick();
+    h.canvas.els = restored;
+    h.sync.noteLocalAuthority();
+    h.sync.reconcile({ els: restored }, {}); h.sync.flushGesture(); await tick();
+    h.commits.length = 0;
+    // A late FOREIGN row for one bonded child (not our bytes) — it upserts, the canvas is re-trued
+    // by the app, and the correction commits assembly-closed rather than as a lone straggler.
+    const foreign = { ...restored.find((e) => e.id === "k4"), cx: restored[0].cx - 999 };
+    expect(h.sync.applyRemoteRow(rowFor(foreign, 120, "someone-else")).action).toBe("upsert");
+    h.canvas.els = restored.map((e) => (e.id === "k4" ? { ...e, w: e.w + 1 } : e)); // a later real edit
+    h.reconcile(false); h.sync.flushGesture(); await tick();
+    expect(h.commits).toHaveLength(1);
+    expect(h.commits[0].length).toBeGreaterThanOrEqual(1);
+    for (const o of h.commits[0]) expect(o.data.cx).toBe(restored.find((e) => e.id === o.id).cx);
+  });
+
+  it("an own echo from the CURRENT epoch still upserts (the stale-seed re-true is unchanged)", async () => {
+    const h = makeHarness({ sync: { selfUid: "me" } });
+    h.canvas.els = [host("b1")];
+    h.reconcile(false); await tick();
+    h.sync.seed([{ kind: "el", id: "b1", data: host("b1"), rev: 1, z_index: 0 }]); // stale re-seed
+    const mine = host("b1", { cx: 7 });
+    h.canvas.els = [mine];
+    h.reconcile(false); h.sync.flushGesture(); await tick();
+    h.sync.seed([{ kind: "el", id: "b1", data: host("b1"), rev: 1, z_index: 0 }]); // stale re-seed again
+    // No snapshot has been applied, so this echo is still current truth → it re-trues the canvas.
+    expect(h.sync.applyRemoteRow(rowFor(mine, 50, "me")).action).toBe("upsert");
+  });
+
+  it("a buffered REMOVE survives a snapshot — a remote delete is not undone by a local undo", () => {
+    // The SitePlanner-side rule, asserted on the shipped source (the buffer lives in the component).
+    const src = readFileSync(fileURLToPath(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url)), "utf8");
+    const idx = src.indexOf("const applySnapshot = (s) => {");
+    const block = src.slice(idx, src.indexOf("\n  };", idx));
+    expect(block).toMatch(/pendingRemoteRef\.current\.filter\(\(i\) => i && i\.action === "remove"\)/);
+    expect(block).toMatch(/noteLocalAuthority\(\)/);
+  });
+});
+
 describe("NEW-3 — a foreign row can win", () => {
   const rowFor = (el, rev, uid) => ({ kind: "el", id: el.id, data: el, rev, z_index: 0, updated_by: uid });
 

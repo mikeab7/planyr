@@ -3391,6 +3391,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     else setMarkups((a) => a.map((m) => (patch[m.id] != null ? { ...m, z: patch[m.id] } : m)));
   };
   const applySnapshot = (s) => {
+    // NEW-1 (the straggler re-tear) — THIS SNAPSHOT IS NOW THE AUTHORITY. A remote instruction that
+    // arrived MID-GESTURE was computed with its payload FROZEN at arrival time and parked in
+    // `pendingRemoteRef`; draining it after an undo puts pre-undo geometry back on a canvas the user
+    // has just restored, and the next diff commits that torn canvas as a fresh edit. Measured live:
+    // a 12-op undo followed ~4 s later by a 2-op straggler carrying pre-undo coordinates, leaving 10
+    // assembly members restored and 2 stranded. So a buffered UPSERT minted before this snapshot is
+    // dropped — it describes a world the user has discarded. A buffered REMOVE is KEPT: a remote
+    // tombstone is not undone by a local undo, and dropping it would resurrect a deleted element
+    // (TOMBSTONE-DELETES). `noteLocalAuthority` closes the same hole on the LIVE (unbuffered) path:
+    // an echo landing in the window right after the restore is kept off the canvas too.
+    pendingRemoteRef.current = pendingRemoteRef.current.filter((i) => i && i.action === "remove");
+    try { const e = elSyncRef.current; if (e) e.noteLocalAuthority(); } catch (_) {}
     setParcels(s.parcels); setEls(s.els); setMeasures(s.measures); setCallouts(s.callouts || []); setMarkups(s.markups || []); setUnderlay(s.underlay); setSheetOverlays(s.sheetOverlays || []); setDeletedIds(s.deletedIds || []);
     // NEW-1 — restore the GIS Layers-panel visibility too (it lives in the app-shared overlays). Merge
     // the snapshot's on/off onto the LIVE overlays so opacity isn't disturbed, and pre-set prevLayerSig
