@@ -1,6 +1,6 @@
 /* Contour PAINT-TIME helpers — the MAIN-THREAD half of the terrain pipeline (B704).
  *
- * The marching-squares tracer moved to `contourTrace.js` (B1093) because it is worker-only
+ * The marching-squares tracer moved to `contourTrace.js` (B1095) because it is worker-only
  * and is the only consumer of `d3-contour`; keeping the two halves in one module put that
  * whole dependency on the Site route's boot bundle for nothing. Nothing here imports it.
  *

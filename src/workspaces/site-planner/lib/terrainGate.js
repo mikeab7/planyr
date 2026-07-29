@@ -1,4 +1,4 @@
-/* The terrain zoom gate, alone in a leaf module (B1093).
+/* The terrain zoom gate, alone in a leaf module (B1095).
  *
  * `layers.js` needs this number to write the two terrain layers' registry notes, and the
  * terrain pipeline itself needs it to decide what to paint — but the pipeline is now

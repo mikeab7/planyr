@@ -411,7 +411,7 @@ describe("markup hit-area / callout padding / live color picker (B155 open-path 
     expect(src).toMatch(/const crossSectionsP = bfeSearchBbox\s*\n\s*\? fetchCached\(VECTOR_SOURCES\.crossSections, bfeSearchBbox,/);
     // the zone polygon + DEM grid fetches deliberately stay on the tight fmBbox (unchanged)
     expect(src).toMatch(/const floodGeoP = fmBbox\s*\n\s*\? fetchCached\(VECTOR_SOURCES\.fema, fmBbox,/);
-    // (B1093 moved the terrain pipeline behind an on-demand import; the point of THIS
+    // (B1095 moved the terrain pipeline behind an on-demand import; the point of THIS
     // guard is the bbox, so it still pins that the grid is fetched over the tight fmBbox.)
     expect(src).toMatch(/const siteGridP = fmBbox\s*\n\s*\? loadTerrain\(\)\.then\(\(t\) => t\.fetchSiteGrid\(\{ west: fmBbox\.w,/);
   });

@@ -961,7 +961,7 @@ export function syncOverlayLayers(map, overlays, refs, opts = {}) {
         // costs ONE fetch). No health probe — the pipeline self-reports through
         // `report`, with proxy→direct fallback inside. Plain vector groups, so the
         // layerGroup constraint on esri RASTER layers doesn't apply.
-        // B1093 — the pipeline (demGrid + contours + the worker glue) is imported HERE, the
+        // B1095 — the pipeline (demGrid + contours + the worker glue) is imported HERE, the
         // first time a terrain layer is actually switched on, instead of riding the boot
         // bundle. `refs[k]` is already "pending"; if the user toggles back off while the
         // chunk is in flight that slot is cleared, and this resolve must not resurrect the

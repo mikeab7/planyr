@@ -83,7 +83,7 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   (clipper union of every connected strip + wedge → one region, one outline, per cluster) plus the
   curb-stripe trimmer. A road connection is a boolean union, NOT a patch painted over a seam — read
   roadNetwork.js's header before touching anything junction-shaped.
-- Terrain pipeline (B703–B706) — **LOADED ON DEMAND (B1093): `terrainLazy.js` is the ONE entry
+- Terrain pipeline (B703–B706) — **LOADED ON DEMAND (B1095): `terrainLazy.js` is the ONE entry
   point** (`loadTerrain()` cached import + the synchronous `terrainNow()` the per-move cursor
   sample reads + the `contourHover` router); nothing on the boot path may static-import
   `terrainLayers.js` again, and `terrainGate.js` exists so the layer registry can read the zoom

@@ -1,6 +1,6 @@
 /* Contour TRACING — the marching-squares half of the terrain pipeline (B704).
  *
- * SPLIT OUT OF `contours.js` (B1093): this half is WORKER-ONLY — `terrainWorker.js` is
+ * SPLIT OUT OF `contours.js` (B1095): this half is WORKER-ONLY — `terrainWorker.js` is
  * its sole caller — and it is the only consumer of the `d3-contour` dependency. While it
  * lived alongside the paint-time helpers, every byte of the tracer AND of d3-contour rode
  * the Site route's boot bundle purely so the worker could import them, which is exactly

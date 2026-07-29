@@ -26,7 +26,7 @@
  *     paint a stale number under a new cursor position.
  */
 import { useEffect, useRef, useState } from "react";
-// B1093 — the terrain pipeline is loaded ON DEMAND (the first cursor move over a map),
+// B1095 — the terrain pipeline is loaded ON DEMAND (the first cursor move over a map),
 // not on boot. `terrainNow()` is synchronous, so once the chunk has landed the per-move
 // local sample is exactly the plain function call it always was.
 import { loadTerrain, terrainNow } from "../lib/terrainLazy.js";

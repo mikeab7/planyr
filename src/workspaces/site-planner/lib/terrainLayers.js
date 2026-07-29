@@ -56,7 +56,7 @@ import {
 } from "./contours.js";
 
 // The gate lives in a leaf module so `layers.js` can read it without static-importing this
-// whole pipeline (B1093 — the pipeline is loaded on demand via terrainLazy.js).
+// whole pipeline (B1095 — the pipeline is loaded on demand via terrainLazy.js).
 export { TERRAIN_MIN_ZOOM } from "./terrainGate.js";
 const TERRAIN_TTL = 7 * 24 * 60 * 60 * 1000; // DEM vintage moves slowly — a week is generous
 const GRID_LRU_MAX = 12;                     // lattice tiles: ~1.4 MB each, a laptop view is ~4–6
