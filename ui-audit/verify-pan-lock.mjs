@@ -93,12 +93,18 @@ try {
     const sx = box.x + box.width * 0.85, sy = box.y + box.height * 0.85;
     await page.mouse.move(sx, sy);
     await page.evaluate(() => { window.__panLock.samples = []; });
-    await page.mouse.down({ button: "middle" }).catch(async () => { await page.mouse.down(); });
+    // The planner's map-pan gesture is SPACE-HELD hand-pan (`spaceRef` in SitePlanner), not a
+    // middle-drag — the first version of this harness used middle-drag, the map never moved, and the
+    // result was a vacuous 0px "locked". The pane translates on panBy whether or not tiles have
+    // loaded, so this measures the commit path even with no imagery.
+    await page.keyboard.down("Space");
+    await page.mouse.down();
     for (let i = 1; i <= leg.steps; i++) {
       await page.mouse.move(sx + (leg.dx * i) / leg.steps, sy + (leg.dy * i) / leg.steps);
       await page.evaluate(() => { window.__panLock.samples.push(window.__panLock.read()); });
     }
-    await page.mouse.up({ button: "middle" }).catch(async () => { await page.mouse.up(); });
+    await page.mouse.up();
+    await page.keyboard.up("Space");
     await page.waitForTimeout(900); // let the debounced commit settle
     await page.evaluate(() => { window.__panLock.samples.push({ ...window.__panLock.read(), settled: true }); });
 
@@ -136,7 +142,7 @@ try {
   out.usableLegs = usable.length;
   out.worst = usable.length ? Math.max(...usable.map((l) => l.worstDivergencePx)) : null;
   out.ok = usable.length > 0 && out.worst <= EPS;
-  if (!usable.length) out.error = "NO LEG ACTUALLY PANNED BOTH SURFACES — the measurement did NOT run. A 0px result here is vacuous, not a pass. Most likely the aerial map is absent (this sandbox's Chromium cannot reach the tile host) so there is no map pane to move, or middle-drag is not the pan gesture on this surface.";
+  if (!usable.length) out.error = "NO LEG ACTUALLY PANNED BOTH SURFACES — the measurement did NOT run. A 0px result here is VACUOUS, not a pass. Tried and ruled out in the sandbox: middle-drag (not the gesture) and Space+drag (the real one — `spaceRef` in SitePlanner — which still produced no pane travel, most likely because a logged-out blank site has no geo map to pan and/or the canvas never took keyboard focus). Run this against an origin where the AERIAL IS ACTUALLY PAINTING, on a plan with drawn geometry, and confirm non-zero pane AND drawn travel per leg before trusting any divergence number.";
 } catch (e) {
   out.error = (e && e.message) || String(e);
 } finally {
