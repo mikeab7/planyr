@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-07-29 @ `2c47431` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-07-29 @ `afbb1b6` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_349 source files mapped._
+_355 source files mapped._
 
 ## infra
 
@@ -50,6 +50,10 @@ _349 source files mapped._
   - _exports_: `makeWriteSerializer`
 - **`src/shared/coordinates/index.js`** — Shared EPSG:2278 Texas South Central project grid: unit helpers plus Lambert Conformal Conic projectToGrid/gridToProject validated against pyproj
   - _exports_: `FT_PER_M`, `ftToAcres`, `gridToProject`, `makePoint`, `metersToFeet`, `PROJECT_CRS`, `projectToGrid`, `SQFT_PER_ACRE`
+- **`src/shared/coordinates/scaleFactor.js`** — NEW-4 grid-vs-ground: per-zone grid scale factor × elevation factor = the site's combined factor (with what it is worth per mile), plus `detectSurveyFrame` — grid / ground / other-scale from corresponding survey↔grid distances. Reports the factor; deliberately never applies it
+  - _exports_: `combinedScaleFactor`, `detectSurveyFrame`, `earthRadiusFt`, `elevationFactor`, `MATERIAL_THRESHOLD`
+- **`src/shared/coordinates/statePlane.js`** — NEW-3 multi-zone state plane: the zone registry (TX South Central 2278 · CO North 2231 · CO Central 2232), per-county assignment incl. the documented Broomfield decision, a generic Lambert engine that reproduces the hardcoded EPSG:2278 path bit-for-bit, and the LCC grid scale factor
+  - _exports_: `COUNTY_ZONE`, `gridScaleFactor`, `projectToZone`, `resolveZone`, `SP_ZONES`, `ZONE_IDS`, `zoneById`, `zoneForCounty`, `zoneForPoint`, `zoneToProject`
 - **`src/shared/files/chunkedUpload.js`** — Chunked any-size file upload to Google Drive through the same-origin /api/uploads/* proxy: pure 16 MiB chunk math plus the sequential upload loop with retry/backoff, resume-from-offset, and byte progress (B409 rework)
   - _exports_: `backoffMs`, `CHUNK_SIZE`, `chunkPlan`, `contentRangeFor`, `DRIVE_CHUNK_GRANULE`, `QUOTA_MESSAGE`, `uploadFileInChunks`
 - **`src/shared/files/detailRefs.js`** — Parses CAD detail/section callout bubbles ("5/A-3") and detail definition anchors from positioned PDF page text so the Stitcher can drop clickable detail hotspots
@@ -297,6 +301,8 @@ _349 source files mapped._
   - _exports_: `channelCell`, `channelSlope`, `cutSection`, `flowBearing`, `gridCellFt`, `sampleAtPixel`, `siteMaskFromLatLngRings`, `upstreamEdgeFlags`
 - **`src/workspaces/site-planner/lib/cloudSync.js`** — RLS-scoped Supabase site read/write: per-tab version CAS + thin-clobber guard, keepalive push, delete-tombstone reconcile
   - _exports_: `_lastHeaderSig`, `_siteVersions`, `clearSiteVersions`, `cloudDelete`, `cloudDeletedRows`, `cloudHardDelete`, `cloudList`, `cloudRestore`, `cloudUpsert`, `fetchSiteForReconcile`, `headerSig`, `interpretDelete`, `keepaliveCloudPush`, `siteRowFor`, `slimForCloud`
+- **`src/workspaces/site-planner/lib/coloradoRegions.js`** — NEW-8 Colorado region model + THE CAPABILITY GUARD: network-free site→state resolution, the four drainage regimes (MHFD · Larimer · Weld · El Paso) with detention deliberately unmodeled, the CWCB 2 CCR 408-1 statewide floodplain floor, and the capability matrix that makes an unwired capability render a named 'not available in Colorado yet' state instead of a number
+  - _exports_: `CAPABILITIES`, `capabilityFor`, `CO_COUNTY_REGIME`, `CO_DRAINAGE_REGIMES`, `CO_STATE_FLOOD_STANDARD`, `COLORADO_DETENTION_DETAIL`, `coloradoGaps`, `coloradoRegimeFor`
 - **`src/workspaces/site-planner/lib/conceptName.js`** — Default plan naming: bijective base-26 Concept A/B/.../AA sequence continuing past the highest existing concept per site
   - _exports_: `conceptLettersToNumber`, `nextConceptName`, `numberToConcept`, `parseConceptIndex`
 - **`src/workspaces/site-planner/lib/conflictToasts.js`** — the B673 conflict policy matrix as a pure mapping: elementSync event → toast spec (who gets told what, which action rides along)
@@ -312,7 +318,9 @@ _349 source files mapped._
 - **`src/workspaces/site-planner/lib/costTakeoff.js`** — Priced road takeoff: FC-FC asphalt paving (SY, pan-trimmed) + both-side curb (LF by type) rolled up at user unit prices
   - _exports_: `costRollup`, `CURB_TYPE_META`, `CURB_TYPES`, `DEFAULT_PAN_WIDTH`, `roadCurbedSides`, `roadCurbType`, `roadPanWidth`, `roadQuantities`, `SF_PER_SY`
 - **`src/workspaces/site-planner/lib/counties.js`** — County parcel/GIS registry: CAD endpoints, TxGIO statewide fallback, jurisdiction utility layers, click-routing bboxes, tax-unit resolver
-  - _exports_: `candidateCountiesForPoint`, `COUNTIES`, `COUNTIES_MAP`, `countyKeyForName`, `detectField`, `FEET_WKID`, `JURISDICTION_LAYERS`, `resolveTaxRates`, `SNAPSHOT_COUNTIES`, `STATEWIDE_KEYS`, `STATEWIDE_PARCEL_LAYER`, `statewideFallbackFor`, `TAX_RATE_SOURCES`
+  - _exports_: `candidateCountiesForPoint`, `COUNTIES`, `COUNTIES_MAP`, `countyKeyForName`, `countyKeysForState`, `detectField`, `FEET_WKID`, `JURISDICTION_LAYERS`, `resolveTaxRates`, `SNAPSHOT_COUNTIES`, `stateForCountyKey`, `STATEWIDE_KEYS`, `STATEWIDE_PARCEL_LAYER`, `statewideFallbackFor`, `TAX_RATE_SOURCES`
+- **`src/workspaces/site-planner/lib/countiesProvenance.js`** — NEW-5 build-time endpoint verification record for every county parcel source (probe dates, parked candidate URLs, provenance) — read by the GIS source audit, NEVER by the browser, which is why it is split out of counties.js: its prose has no business on the Site route's bundle
+  - _exports_: `candidateUrlFor`, `COUNTY_VERIFICATION`, `provenanceFor`, `verifiedOnFor`
 - **`src/workspaces/site-planner/lib/coverage.js`** — Picker-only layer coverage engine: reproject regional service extents vs viewport to flag in-view/empty/out-of-coverage plus relevance prefs
   - _exports_: `_resetCoverageCache`, `_resetRelevancePrefs`, `boundsFromLeaflet`, `boundsIntersect`, `bufferBounds`, `computeCoverage`, `COVERAGE_STATE`, `DEFAULT_RADIUS_MI`, `DEFAULT_RELEVANCE`, `displayCoverage`, `esriExtentToBounds`, `getCachedExtent`, `getNearbyRadiusMiles`, `getRelevanceMode`, `isRegional`, `LAYER_SCOPE`, `layerScope`, `normalizeMode`, `normalizeRadius`, `prefetchExtents`, `regionCoverage`, `RELEVANCE_MODES`, `setLayerExtent`, `setNearbyRadiusMiles`, `setRelevanceMode`, `srPointToLatLon`, `subscribeRelevance`
 - **`src/workspaces/site-planner/lib/curveNumber.js`** — SCS/NRCS Curve-Number runoff method (NEW-B1): composite CN from hydrologic soil group + impervious %, runoff depth/volume from an Atlas-14 rainfall depth, post-minus-pre increase. Pure TR-55.
@@ -339,6 +347,8 @@ _349 source files mapped._
   - _exports_: `bumpSidewalkSide`, `bumpsOfHost`, `DOGEAR_D`, `DOGEAR_W`, `dogEarDesc`, `dogEarGeom`, `dogEarSize`, `hostAxisExtents`, `isDogEarSide`, `localToWorld`, `ownExtents`, `sideOfBondedBox`, `sidewalkSpanForBumps`, `wallKidAlong`, `wallKidBox`, `wallKidPerp`, `wallStripBox`
 - **`src/workspaces/site-planner/lib/drafts.js`** — Pure resolver for Bluebeam-style mid-draw undo: decides which in-progress multi-point draft to trim by one vertex (Backspace + Ctrl-Z), and returns null when no draft is active so Ctrl-Z falls through to a global undo
   - _exports_: `resolveDraftStepBack`
+- **`src/workspaces/site-planner/lib/drawdownStatute.js`** — NEW-7 C.R.S. 37-92-602(8) as a rule record — 97% of a 5-year storm out in 72 hr, 99% of larger events in 120 hr — turning the existing drawdown number into a Colorado water-rights verdict (fail / not-ruled-out / unknown, never 'pass') plus the post-2015 State Engineer notification. Texas is untouched
+  - _exports_: `assessStatutoryDrawdown`, `DRAWDOWN_STATUTES`, `statuteForState`
 - **`src/workspaces/site-planner/lib/drawdownTime.js`** — NEW-2 drawdown time at the jurisdiction's allowable release rate: allowable release from the per-acre criterion (or an outlet override), optimistic time-to-empty per pond and site-wide with a prorated capped outfall, and threshold banding
   - _exports_: `allowableReleaseCfs`, `assessDrawdown`, `DEFAULT_DRAWDOWN_MAX_HR`, `drawdownHours`, `drawdownTone`, `fmtDrawdown`
 - **`src/workspaces/site-planner/lib/dxf/dxfGeom.js`** — B747 pure DXF geometry primitives (bulge/arc/ellipse flattening, INSERT affine composition, $INSUNITS→feet); no imports, worker-safe, unit-tested.
@@ -426,7 +436,7 @@ _349 source files mapped._
 - **`src/workspaces/site-planner/lib/inwardBerm.js`** — v3 D1/D5 INWARD berm geometry (outer-toe model): the drawn polygon is the FIXED outer toe; a rim above grade builds the berm INWARD (crest = toe inset by extSlope·h), shrinking the water surface with diminishing returns up to a geometric ceiling where the footprint pinches closed. Also the COMPUTED berm cap (drainage cap vs geometric ceiling, D5). Pure — feeds pondGeom the crest ring; no storage math of its own.
   - _exports_: `bermNeedsInlets`, `bermPinched`, `bermRingAreaSf`, `bermWaterAreaSf`, `bindingBermCap`, `crestRingForBerm`, `crestTopRing`, `drainageBermCapFt`, `EXT_BERM_SLOPE`, `geometricMaxBermFt`, `INFLOW_HEAD_ALLOWANCE_FT`, `INLETS_THROUGH_BERM_NOTE`, `inwardBermSplit`
 - **`src/workspaces/site-planner/lib/jurisdiction.js`** — Registry-driven ArcGIS jurisdiction/road-authority identify (city/ETJ/county intersect + nearest-road maintainer) over the SWR cache with map-overlay styling
-  - _exports_: `buildIdentifyParams`, `countyAtPoint`, `ETJ_SOURCES`, `etjSourcesForPoint`, `formatHighway`, `formatJurisdictionBadge`, `identifyJurisdiction`, `identifyRoadAuthority`, `identifySource`, `JURISDICTION_SOURCES`, `normalizeFeature`, `polylineDistMeters`, `polylineLengthMeters`, `proxiedQueryUrl`, `ROAD_AUTHORITY_COLORS`, `ROAD_AUTHORITY_LEGEND`, `ROAD_MAINT_AGENCY`, `roadAuthority`, `roadAuthorityStyle`, `roadDisplayName`, `simplifyRing`
+  - _exports_: `buildIdentifyParams`, `countyAtPoint`, `countySourcesForPoint`, `ETJ_SOURCES`, `etjSourcesForPoint`, `formatHighway`, `formatJurisdictionBadge`, `identifyJurisdiction`, `identifyRoadAuthority`, `identifySource`, `JURISDICTION_SOURCES`, `normalizeFeature`, `polylineDistMeters`, `polylineLengthMeters`, `proxiedQueryUrl`, `ROAD_AUTHORITY_COLORS`, `ROAD_AUTHORITY_LEGEND`, `ROAD_MAINT_AGENCY`, `roadAuthority`, `roadAuthorityStyle`, `roadDisplayName`, `simplifyRing`
 - **`src/workspaces/site-planner/lib/kmzExport.js`** — Google Earth (.kmz) export (B684): pure, dependency-free CRC32 + hand-rolled STORE-only ZIP writer, KML builder (lon,lat order, ring closure/holes, per-layer styles, building extrude), and the site→layer feature mapping; reprojection is injected (the shared feetToLatLng), so it never drifts from the map render.
   - _exports_: `buildKml`, `buildKmz`, `crc32`, `elToRingFeet`, `KMZ_MIME`, `kmzFilename`, `siteToFeatures`, `xmlEscape`, `zipStore`
 - **`src/workspaces/site-planner/lib/labelLayout.js`** — Pure label level-of-detail plus collision engine: line-dropping by priority, greedy overlap resolution, leader overflow, and dimension-callout zoom gates
@@ -579,6 +589,8 @@ _349 source files mapped._
   - _exports_: `ANALYSIS_SOURCES`, `analyzeProximitySource`, `analyzeSource`, `buildAnalysisParams`, `buildJurisdictionFinding`, `buildProximityParams`, `buildQueryUrl`, `buildRoadFinding`, `classifyFlood`, `classifyStatus`, `deriveZoning`, `epaProgram`, `isSFHA`, `normalizeAttrs`, `pipelineSummary`, `representativeRing`, `ringCentroid`, `ringsBBox`, `ringsSignature`, `runSiteAnalysis`, `simplifyRing`, `wetlandSummary`, `zoneSummary`
 - **`src/workspaces/site-planner/lib/siteModel.js`** — Canonical per-plan Site Model schema v10: createSiteModel/migrate, semantic selectors, cross-copy union merge with delete-tombstones, and bonded-child/dog-ear/road-centerline load-time repairs
   - _exports_: `activeParcelsOf`, `ANNOTATION_KINDS`, `annotationsOf`, `bondedChildRot`, `buildingNumbers`, `constraintsOf`, `contentCount`, `countJunkEntries`, `createSiteModel`, `crossSectionsOf`, `developableArea`, `EASEMENT_KINDS`, `easementsOf`, `elementsOf`, `exclusionZonesOf`, `isBuilding`, `lineageConflicts`, `mergeSiteContent`, `migrate`, `migrateRoads`, `normalizeBondedChildren`, `parcelAncestors`, `parcelChildrenMap`, `parcelDescendants`, `parcelDisplayInfo`, `parcelDrawingsOf`, `parcelOutline`, `parcelsOf`, `quarterOffset`, `rectRoadEndpoints`, `roadStripBBox`, `roadTravelWidth`, `setbacksOf`, `sheetOverlaysOf`, `SITE_MODEL_VERSION`, `STATUS_META`, `STATUSES`, `statusOf`, `strandedFromHost`, `teamShareOf`, `toMs`, `utilitiesOf`, `UTILITY_KINDS`
+- **`src/workspaces/site-planner/lib/siteRegion.js`** — NEW-8 the synchronous half of the Colorado tier: geometric, network-free site→state resolution ('TX' \| 'CO' \| null) that the detention guard keys off. Its own module so the Colorado PROSE (coloradoRegions.js) can load on demand while this stays on the boot path
+  - _exports_: `isColorado`, `siteState`, `STATE_ENVELOPES`
 - **`src/workspaces/site-planner/lib/soils.js`** — USDA SSURGO soils via Soil Data Access (NEW-B2): pure SDA SQL query builder + response parser (hydrologic soil group + seasonal-high water table) + bounded-fetch client. SDA proxy-blocked in sandbox → live-verify.
   - _exports_: `buildSdaRequest`, `buildSoilQuery`, `parseSoilResponse`, `resolveSoils`, `SDA_ENDPOINT`, `SDA_PROXY_PATH`
 - **`src/workspaces/site-planner/lib/sourceHealth.js`** — Per-source circuit breaker for county parcel servers: track consecutive failures, open/cooldown/half-open, filter healthy candidates, and decide the honest statewide-backup badge

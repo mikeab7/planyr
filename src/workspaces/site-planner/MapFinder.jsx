@@ -418,7 +418,13 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
     // to the bottom-left (clear there) instead of leaving it half-hidden behind the bar.
     // Desktop is unchanged (top-left, where the Your-sites panel sits over it as before).
     const phone = (() => { try { return window.matchMedia("(max-width: 760px)").matches; } catch (_) { return false; } })();
-    const map = L.map(elRef.current, { zoomControl: false, minZoom: 8, maxZoom: 21 }).setView(cfg.center, cfg.zoom);
+    // NEW-6 — "I can't zoom out far enough" was THIS, and only this: a hard `minZoom: 8` floor on
+    // the Leaflet map. It was not the tile sources (both Esri World Imagery and USGS serve from
+    // z0), not a bounds clamp (no `maxBounds` is ever set), and not the projection (one Web
+    // Mercator for the whole world). At z8 the view spans a few counties, so there was no way to
+    // pull back and see another state at all — you could only jump by picking a site.
+    // z3 puts the continent on screen, which is what a two-state product needs.
+    const map = L.map(elRef.current, { zoomControl: false, minZoom: 3, maxZoom: 21 }).setView(cfg.center, cfg.zoom);
     L.control.zoom({ position: phone ? "bottomleft" : "topleft" }).addTo(map);
     mapRef.current = map;
     L.control.scale({ imperial: true, metric: false, position: "bottomright", maxWidth: 130 }).addTo(map); // graphic scale (B96b)

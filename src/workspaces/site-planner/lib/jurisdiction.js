@@ -47,6 +47,17 @@ export const JURISDICTION_SOURCES = {
     sourceName: "TxDOT TPP (statewide)",
     note: "Texas county boundary (TxDOT). Screening only — verify with the jurisdiction.",
   },
+  /* NEW-5 — Colorado's county boundaries. Same `role: "county"` so every downstream consumer
+   * (authorityForJurisdiction, the badge, the flood-group scoping) reads it identically; only the
+   * endpoint and field names differ. Routed to by `countySourcesForPoint`, never by default. */
+  countyCo: {
+    id: "countyCo", role: "county", label: "County", kind: "polygon",
+    url: GIS_SOURCES.countyCo.serviceUrl,
+    fields: { name: "NAME20", fips: "GEOID20" },
+    ttl: 30 * 24 * 3600 * 1000,
+    sourceName: "Colorado statewide county boundaries",
+    note: "Colorado county boundary. Screening only — verify with the jurisdiction.",
+  },
   city: {
     id: "city", role: "city", label: "City limits", kind: "polygon",
     url: GIS_SOURCES.city.serviceUrl,
@@ -133,6 +144,24 @@ const bboxHas = (b, lat, lng) => b && lat >= b[0] && lat <= b[2] && lng >= b[1] 
  * This is what keeps a Houston click at exactly one ETJ query. Pure. */
 export function etjSourcesForPoint(lat, lng) {
   return ETJ_SOURCES.filter((s) => bboxHas(s.bbox, lat, lng));
+}
+
+/* NEW-5 — the COUNTY role becomes region-routed too, exactly the way ETJ already is.
+ *
+ * The default county source is TxDOT's Texas layer, which of course answers nothing in Colorado —
+ * and "nothing" is the dangerous outcome, because an empty county list is what lets a Colorado
+ * site fall through to a Texas default further down the chain. So a Colorado point resolves
+ * against Colorado's own statewide county layer instead.
+ *
+ * ⛔ TEXAS IS UNTOUCHED, BY CONSTRUCTION: this returns the SAME `JURISDICTION_SOURCES.county`
+ * object for every Texas point AND for every point outside Colorado's envelope. Only a point
+ * inside Colorado sees a different source. (`test/coloradoRegistry.test.js` asserts identity, not
+ * equality — the very same object reference.) */
+const CO_ENVELOPE = { latMin: 36.9, latMax: 41.1, lonMin: -109.2, lonMax: -101.9 };
+export function countySourcesForPoint(lat, lng) {
+  const inCo = Number.isFinite(lat) && Number.isFinite(lng) &&
+    lat >= CO_ENVELOPE.latMin && lat <= CO_ENVELOPE.latMax && lng >= CO_ENVELOPE.lonMin && lng <= CO_ENVELOPE.lonMax;
+  return [inCo ? JURISDICTION_SOURCES.countyCo : JURISDICTION_SOURCES.county];
 }
 
 // ---------------------------------------------------------------------------
@@ -448,7 +477,9 @@ export async function identifyJurisdiction(lng, lat, opts = {}) {
   };
   // Each role resolves to ONE source (county/city/isd) or a region-routed LIST (etj).
   const sourcesForRole = (role) =>
-    role === "etj" ? etjSourcesForPoint(lat, lng) : (JURISDICTION_SOURCES[role] ? [JURISDICTION_SOURCES[role]] : []);
+    role === "etj" ? etjSourcesForPoint(lat, lng)
+    : role === "county" ? countySourcesForPoint(lat, lng)   // NEW-5 — Texas-identical outside Colorado
+    : (JURISDICTION_SOURCES[role] ? [JURISDICTION_SOURCES[role]] : []);
   await Promise.all(roles.map(async (role) => {
     const srcs = sourcesForRole(role).filter((s) => s && !s.unavailable && s.url);
     if (!srcs.length) {
@@ -537,6 +568,15 @@ export function formatJurisdictionBadge(j, opts = {}) {
 // county name back onto the app's routing keys for the B36(a) label correction.
 const COUNTY_NAME_TO_KEY = { harris: "harris", "fort bend": "fortbend", chambers: "chambers" };
 
+/* NEW-5 — the Colorado name→key map. SEPARATE from the Texas one on purpose: both states have a
+ * Jefferson County and an El Paso County, so one merged map would silently mis-key them. The
+ * routed source tells us which state answered, so the right map is never in doubt. */
+const CO_COUNTY_NAME_TO_KEY = {
+  adams: "co_adams", denver: "co_denver", arapahoe: "co_arapahoe", larimer: "co_larimer",
+  weld: "co_weld", jefferson: "co_jefferson", "el paso": "co_elpaso", boulder: "co_boulder",
+  broomfield: "co_broomfield",
+};
+
 /* The true county at a point, via the verified TxDOT county-boundary layer (cached).
  * Returns { name, key } — `key` is the app's configured CAD key when recognized,
  * else null (county known but not a wired CAD). This is the point-in-county
@@ -546,13 +586,24 @@ const COUNTY_NAME_TO_KEY = { harris: "harris", "fort bend": "fortbend", chambers
  * parallel "query candidates, answerer wins" identify is faster + more resilient
  * than a blocking county lookup; this only corrects a label after the fact.) */
 export async function countyAtPoint(lng, lat, opts = {}) {
-  const src = JURISDICTION_SOURCES.county;
+  // NEW-5 — the same region routing the identify uses, so a Colorado point is answered by
+  // Colorado's boundary layer. Outside Colorado this is the exact TxDOT source it always was.
+  const src = countySourcesForPoint(lat, lng)[0];
+  const isCo = src === JURISDICTION_SOURCES.countyCo;
   const r = await identifySource(src, { lng, lat }, opts).fresh;
   const feat = r.items.map((it) => normalizeFeature(src, it.attrs)).find((f) => f.name) || null;
-  if (!feat) return { name: null, key: null, fips: null, ageMs: r.ageMs, error: r.error ? humanize(r.error) : null };
+  if (!feat) return { name: null, key: null, fips: null, state: isCo ? "CO" : "TX", ageMs: r.ageMs, error: r.error ? humanize(r.error) : null };
   // B792 — fips rides along (48157 = Fort Bend, …) so persistence-side callers can
-  // cross-check parcel attributes against the boundary answer.
-  return { name: String(feat.name), key: COUNTY_NAME_TO_KEY[String(feat.name).toLowerCase()] || null, fips: feat.fips ? String(feat.fips) : null, ageMs: r.ageMs, ts: r.ts };
+  // cross-check parcel attributes against the boundary answer. (Colorado's GEOID20 is the
+  // same 5-digit state+county FIPS, so the field means the same thing on both sources.)
+  const nameMap = isCo ? CO_COUNTY_NAME_TO_KEY : COUNTY_NAME_TO_KEY;
+  return {
+    name: String(feat.name),
+    key: nameMap[String(feat.name).toLowerCase()] || null,
+    fips: feat.fips ? String(feat.fips) : null,
+    state: isCo ? "CO" : "TX",
+    ageMs: r.ageMs, ts: r.ts,
+  };
 }
 
 // ---------------------------------------------------------------------------

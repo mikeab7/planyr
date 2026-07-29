@@ -14,7 +14,11 @@ describe("candidateCountiesForPoint — click routing (B11/B130/B787)", () => {
   const STATEWIDE = Object.entries(COUNTIES_MAP).filter(([, c]) => c.statewide).map(([k]) => k);
 
   it("the statewide source is its own `txgio_statewide` key, not chambers (B787)", () => {
-    expect(STATEWIDE).toEqual(["txgio_statewide"]);
+    // NEW-5: there is now ONE statewide source PER STATE (Texas's TxGIO layer and Colorado's
+    // state OIT composite), so this is no longer a single-element list. Texas's stays first —
+    // config order — and chambers is still a real CAD, never the statewide stand-in.
+    expect(STATEWIDE[0]).toBe("txgio_statewide");
+    expect(STATEWIDE).toContain("co_statewide");
     expect(STATEWIDE).not.toContain("chambers"); // chambers is now a real CAD (CCAD)
   });
 
@@ -57,10 +61,46 @@ describe("candidateCountiesForPoint — click routing (B11/B130/B787)", () => {
     // away-from-Houston default), while still including the statewide source so a click out
     // there still has coverage. txgio_statewide has NO bbox, so it can only ever arrive via
     // this "return all" branch or the trailing append — never as candidate[0].
-    const cand = candidateCountiesForPoint(31.7619, -106.485); // El Paso
+    const cand = candidateCountiesForPoint(31.7619, -106.485); // El Paso, TX
     expect(cand[0]).toBe("harris");
     expect(cand).toContain("txgio_statewide");
-    expect(cand).toEqual(Object.keys(COUNTIES_MAP));
+    // NEW-5: the fallback is now scoped to the point's STATE rather than "every configured
+    // county". For a Texas point the list is byte-identical to the pre-Colorado one (the Texas
+    // keys are first and unchanged) — it simply no longer drags nine Colorado servers along.
+    expect(cand).toEqual(Object.entries(COUNTIES_MAP).filter(([, c]) => c.state === "TX").map(([k]) => k));
+    expect(cand.some((k) => k.startsWith("co_"))).toBe(false);
+  });
+
+  // NEW-5 — the Colorado half of the same contract, including the one that matters most:
+  // a Colorado click must never be handed `harris` as candidate[0]. The Layers-panel
+  // jurisdiction resolver reads that element, so inheriting Harris County there is exactly how
+  // a Colorado site would end up priced against Texas drainage criteria.
+  it("a Colorado point routes to Colorado counties, never harris-first", () => {
+    const denver = candidateCountiesForPoint(39.7392, -104.9903);
+    // Every candidate is Colorado, and Denver's own service is among them. The FIRST element is
+    // not pinned to co_denver on purpose: bboxes are a coarse pre-filter and the Front Range
+    // boxes genuinely overlap (Denver's own extent is unusually wide — the airport annexation
+    // strip reaches deep into Adams), exactly as harris+fortbend overlap around Sugar Land in
+    // Texas. The parcel service that returns a lot is the source of truth, and `countyAtPoint`
+    // corrects the label afterwards. What must NEVER happen is a Texas key appearing here.
+    expect(denver.every((k) => COUNTIES_MAP[k].state === "CO")).toBe(true);
+    expect(denver).toContain("co_denver");
+    expect(denver).toContain("co_statewide");
+    expect(denver).not.toContain("harris");
+    expect(denver).not.toContain("txgio_statewide");
+  });
+
+  it("a Colorado point outside every county bbox stays in Colorado", () => {
+    const grandJunction = candidateCountiesForPoint(39.0639, -108.5506); // Mesa County — unconfigured
+    expect(grandJunction[0]).not.toBe("harris");
+    expect(grandJunction.every((k) => COUNTIES_MAP[k].state === "CO")).toBe(true);
+    expect(grandJunction).toContain("co_statewide");
+  });
+
+  it("Colorado's statewide composite is appended last, like Texas's", () => {
+    const cand = candidateCountiesForPoint(39.7392, -104.9903);
+    const lastReal = Math.max(...cand.filter((k) => !COUNTIES_MAP[k].statewide).map((k) => cand.indexOf(k)));
+    expect(lastReal).toBeLessThan(cand.indexOf("co_statewide"));
   });
 });
 
@@ -69,7 +109,8 @@ describe("candidateCountiesForPoint — click routing (B11/B130/B787)", () => {
 // an ID/address search can't leak into another county (B244).
 describe("statewideFallbackFor — county-scoped TxGIO backup (B244/B787)", () => {
   it("exposes the statewide key(s) and the all-Texas layer URL", () => {
-    expect(STATEWIDE_KEYS).toEqual(["txgio_statewide"]); // B787: its own key, not chambers
+    expect(STATEWIDE_KEYS[0]).toBe("txgio_statewide"); // B787: its own key, not chambers
+    expect(STATEWIDE_KEYS).toContain("co_statewide");  // NEW-5: one statewide source per state
     expect(STATEWIDE_PARCEL_LAYER).toMatch(/stratmap_land_parcels/);
   });
 

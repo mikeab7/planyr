@@ -12,8 +12,13 @@ into every consumer. Root rules in `/CLAUDE.md`; deep detail in `/docs/REFERENCE
   unbroken long word, `calloutBoxMetrics` sizes the box to the longest actual line; heuristic +
   real-`<canvas>` measurers, B909); renderers `MarkupRenderer.jsx`, `PropertyPanel.jsx`,
   `SelectionChrome.jsx`.
-- `coordinates/` — the EPSG:2278 ↔ WGS84 projection (shared coordinate spine). Read-only
-  screening use today; grow additively, not a planner rewrite.
+- `coordinates/` — the shared coordinate spine. `index.js` is the original hardcoded EPSG:2278
+  projection — **leave it alone**; `statePlane.js` (NEW-3) is the multi-zone engine beside it
+  (TX South Central 2278 · CO North 2231 · CO Central 2232, per-county resolution incl. the
+  documented Broomfield decision) and reproduces `index.js` **bit-for-bit** for Texas, which is
+  what makes Colorado additive rather than a refactor — the statePlane suite asserts that with `Object.is`. `scaleFactor.js` (NEW-4) reports the grid × elevation combined factor and detects a
+  ground-coordinate survey; it deliberately never APPLIES the factor. Read-only screening use
+  today; grow additively, not a planner rewrite.
 - `files/` — `chunkedUpload.js` (any-size chunked Drive upload via /api/uploads/* — pure chunk
   math + the retry/resume loop, B409 rework) + `uploadQueue.js` (the upload-tray queue model).
   Pure PDF/sheet parsers: `titleBlockParse.js`, `sheetMeta.js`, `sheetTitleSet.js`

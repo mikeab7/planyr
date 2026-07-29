@@ -28,7 +28,30 @@
     "    disagreement note (0 new lines); the study's method, live inputs, uncertainty range and the",
     "    NOT-MODELLED list ride that row's hover (screeningStudyNote); the study's failure/incomplete",
     "    states were folded into that same hover instead of taking a warn line of their own; and the",
-    "    trigger sentence itself was collapsed from a two-branch ternary to one string."
+    "    trigger sentence itself was collapsed from a two-branch ternary to one string.",
+    "",
+    "RAISE 2026-07-29 (B1104, NEW-8/NEW-7 — Colorado): yield-detention-detail 11→12 lines,",
+    "500→557 chars; yield-stormwater-notes 146→150 lines, 12576→12779 chars.",
+    "Justification, per the rule:",
+    "  ADDED (detention, 2 counted literals from one ternary): 'MHFD governs here — Planyr does not",
+    "    yet carry Colorado detention criteria.' / the regime-less variant. This is the single most",
+    "    important line in the Colorado work and it CANNOT be collapsed: the owner's constraint is",
+    "    that a Colorado site must render a hard, unmistakable 'not available yet' state rather than",
+    "    a Texas-derived number or a blank that reads as zero. A folded method note would be exactly",
+    "    the silent gap the constraint forbids.",
+    "  ADDED (drawdown, 1 counted literal): 'Fails Colorado's 72-hour drawdown statute (C.R.S.",
+    "    37-92-602(8)).' A statutory failure — detention that drains too slowly is an out-of-priority",
+    "    diversion in a prior-appropriation state. A failed legal test is not a method note.",
+    "  COLLAPSED instead of spending budget: the other TWO drawdown-statute verdicts (not-ruled-out",
+    "    and unknown) are keyedNote, i.e. budget-exempt; and ALL of the substance — both statutory",
+    "    tests, the rebuttable presumption, the post-2015 State Engineer notification, the optimism",
+    "    caveat, the governing regime's criteria manual, and the WQCV+EURV explanation of WHY the",
+    "    Texas engine cannot answer — rides the notes' info argument, which is exempt.",
+    "  REMOVED: nothing, and deliberately so. Every literal added here is MUTUALLY EXCLUSIVE with the",
+    "    Texas copy it sits beside: a Colorado site shows the Colorado line and never the rate badge,",
+    "    the band note or the outfall note, and a Texas site never renders any of these. The static",
+    "    audit counts every literal in the file, so the budget grows even though the DEFAULT VIEW OF",
+    "    ANY GIVEN SITE does not grow by a single line. That is the honest reading of this raise."
   ],
   "measuredOn": "2026-07-28",
   "regions": {
@@ -37,12 +60,12 @@
       "maxChars": 0
     },
     "yield-detention-detail": {
-      "maxLines": 11,
-      "maxChars": 500
+      "maxLines": 12,
+      "maxChars": 557
     },
     "yield-stormwater-notes": {
-      "maxLines": 146,
-      "maxChars": 12576
+      "maxLines": 150,
+      "maxChars": 12779
     },
     "lib-pond-verdict": {
       "maxLines": 5,

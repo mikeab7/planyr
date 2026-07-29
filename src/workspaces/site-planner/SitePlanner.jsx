@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo, Fragment } from "react";
+import { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo, Fragment, lazy, Suspense } from "react";
 import { flushSync } from "react-dom";
 import ContextMenu from "../../shared/ui/ContextMenu.jsx";
 import L from "leaflet";
@@ -158,7 +158,10 @@ import { assessCutFill } from "./lib/cutFillBalance.js";
 import { corridorRingLngLat, DEFAULT_CORRIDOR_WIDTH_FT } from "./lib/pipelineCorridor.js";
 import { ringsArea, offsetOutward } from "./lib/pondOffset.js";
 import { buildChangeSummaryRows, gapProposalNote, bermCapProposalNote } from "./lib/pondChangeSummary.js";
-import PondSection from "./components/PondSection.jsx";
+/* PR-L pond cross-section. LAZY (bundle budget, 2026-07-29 — the B1092 precedent): it renders
+ * ONLY inside the pond inspector and the Optimize card, both reached by an explicit user action,
+ * so a plain Site load has no use for it. Both call sites wrap it in one shared Suspense. */
+const PondSection = lazy(() => import("./components/PondSection.jsx"));
 import { pondScreeningGuards } from "./lib/pondScreeningGuards.js";
 import { geometricMaxBermFt, drainageBermCapFt, bindingBermCap, bermNeedsInlets, INLETS_THROUGH_BERM_NOTE, inwardBermSplit, crestRingForBerm, EXT_BERM_SLOPE, INFLOW_HEAD_ALLOWANCE_FT } from "./lib/inwardBerm.js";
 import { gisCache } from "./lib/gisCache.js";
@@ -219,6 +222,13 @@ import {
   effectiveChannelDischarge, effectiveReviewer, DETENTION_AUTHORITY_CHOICES,
   slimDrainageContext, hydrateDrainageContext,
 } from "./lib/detentionRules.js";
+/* NEW-8 — only the STATE resolution is on the boot path. The Colorado tier proper (regime
+ * records, the CWCB standard, the capability matrix, the drawdown statute) is mostly PROSE that a
+ * Texas user has no use for, and importing it statically breached the Site route's bundle budget.
+ * It now loads on demand the first time a site resolves to Colorado — the lib/exportSheet.js
+ * precedent. The GUARD itself is unaffected: its verdict and copy live in detentionRules.js and
+ * render immediately; this lazy tier only ENRICHES that line with the regime name and the statute. */
+import { siteState as resolveSiteState } from "./lib/siteRegion.js";
 import { splitPolygonByLine, splitPolygonByPath } from "./lib/polygonSplit.js";
 import { overlappingParcelPairs, dissolvedParcelSqft, polyIntersectArea } from "./lib/polyClip.js";
 import { screenFurniturePlates, calibBadgePlacement, canvasPillBottom } from "./lib/sheetFurniture.js";
@@ -8318,12 +8328,39 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // limits" and priced Houston's large-tract branch on a Fort Bend site).
   const drainCityHouston = (drainCtxData?.authority?.jurisdiction?.city || []).some((c) => /houston/i.test(String(c)));
   const drainInCity = authOverride === "coh" ? true : drainCityHouston;
-  const detReqInputs = { acres: acresActive, impPct, inCityLimits: drainInCity, drainsToHcfcdChannel: drainsToChanEff, outfallType: outfallTypeEff, hcfcdApplicable: drainCountyHarris };
-  const detReq = drainCtxData && siteSqft > 0 && drainAuthorityId
-    ? computeRequiredDetention({ ...detReqInputs, authorityId: drainAuthorityId })
+  /* NEW-8 — WHICH STATE this site is in, from its own coordinates. Deliberately geometric and
+   * network-free: the Colorado guard has to hold when every GIS endpoint is down, which is exactly
+   * when a site is most likely to fall through to a default. A plan with no origin resolves to
+   * null, which behaves exactly as it did before Colorado existed. */
+  const siteStateId = origin ? resolveSiteState({ lat: origin.lat, lng: origin.lon }) : null;
+  // The lazily-loaded Colorado tier. `null` until the chunk arrives (and forever on a Texas site,
+  // where it is never requested at all), which the render already handles: the guard's own line
+  // has a regime-less variant, and the statute simply does not render until it can.
+  const [coTier, setCoTier] = useState(null);
+  useEffect(() => {
+    if (siteStateId !== "CO" || coTier) return;
+    let alive = true;
+    Promise.all([import("./lib/coloradoRegions.js"), import("./lib/drawdownStatute.js")])
+      .then(([regions, statute]) => { if (alive) setCoTier({ regions, statute }); })
+      // LOUD-FAILURE — a chunk that never arrives must be visible in telemetry, not a silent gap.
+      .catch((e) => reportClientEvent("colorado-tier-load-failed", String((e && e.message) || e), { state: siteStateId }));
+    return () => { alive = false; };
+  }, [siteStateId, coTier]);
+  const coRegime = coTier && siteStateId === "CO"
+    ? coTier.regions.coloradoRegimeFor((drainCtxData?.authority?.jurisdiction?.county || [])[0] || null)
     : null;
+  const detReqInputs = { acres: acresActive, impPct, inCityLimits: drainInCity, drainsToHcfcdChannel: drainsToChanEff, outfallType: outfallTypeEff, hcfcdApplicable: drainCountyHarris, siteState: siteStateId };
+  // A Colorado site has no modeled authority, so the normal `drainAuthorityId` precondition would
+  // leave `detReq` null and the group would render NOTHING — a blank that reads as zero, which is
+  // precisely the failure mode the guard exists to prevent. So Colorado short-circuits to the
+  // guard's explicit unavailable carrier regardless of whether an authority resolved.
+  const detReq = siteStateId === "CO"
+    ? computeRequiredDetention({ ...detReqInputs, authorityId: null })
+    : drainCtxData && siteSqft > 0 && drainAuthorityId
+      ? computeRequiredDetention({ ...detReqInputs, authorityId: drainAuthorityId })
+      : null;
   // A boundary straddle leaves primary null — compute EVERY candidate, labeled (never default).
-  const detReqCandidates = drainCtxData && siteSqft > 0 && !drainAuthorityId && drainCtxData.authority?.ambiguous?.length
+  const detReqCandidates = siteStateId !== "CO" && drainCtxData && siteSqft > 0 && !drainAuthorityId && drainCtxData.authority?.ambiguous?.length
     ? drainCtxData.authority.ambiguous[0].candidates.filter(Boolean).map((aid) => ({ aid, r: computeRequiredDetention({ ...detReqInputs, authorityId: aid }) }))
     : null;
   // Tier + regime need flood facts — a FAILED flood query is an unknown, never "clean".
@@ -10279,6 +10316,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     release: yRelease,
     maxHr: ycriteria.drawdownMaxHr?.value ?? DEFAULT_DRAWDOWN_MAX_HR,
   });
+  /* NEW-7 — in Colorado the same drawdown number is a WATER-RIGHTS TEST, not a note:
+   * C.R.S. 37-92-602(8). Texas is untouched — `assessStatutoryDrawdown` returns applies:false for
+   * any state but CO, so the existing informational readout renders exactly as before. */
+  const yDrawdownStatute = coTier
+    ? coTier.statute.assessStatutoryDrawdown({ state: siteStateId, drawdown: yDrawdown })
+    : null;
   // NEW-3/4 — the elevation-matched (hydraulically equivalent) band ledger. The governing offset
   // surface follows the JURISDICTION (Fort Bend: the pre-Atlas-14 500-yr line), not a hardcoded 100-yr.
   const yOffsetBasis = offsetSurfaceBasis(fmRule);
@@ -10380,6 +10423,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       return holds - counts > 0.05 * 43560 && !p.inTrigger;
     }),
     req: detReq, reqCandidates: detReqCandidates,
+    // NEW-8 — the Colorado regime rides the bag like every other fact the panel renders, so the
+    // detail chain reads it from `d` rather than closing over the component body.
+    coRegime, siteStateId,
+    coDetail: coTier ? coTier.regions.COLORADO_DETENTION_DETAIL : null,
     // B907 — the typical screening pond depth used ONLY to ESTIMATE additional land take
     // from a detention shortfall (never to size a pond) — criteria-configurable.
     screeningPondDepthFt: criteriaFor(critJurKey, { overrides: criteriaOverrides }).screeningPondDepthFt?.value ?? 8,
@@ -10441,6 +10488,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // ── Cowork yield review (NEW-1 … NEW-10) — all read the ONE per-pond stage model above ──
     reconcile: yReconcile,          // NEW-1: claimed service vs storage that physically exists
     drawdown: yDrawdown,            // NEW-2: time-to-empty at the allowable release rate
+    drawdownStatute: yDrawdownStatute, // NEW-7: the same number as a Colorado water-rights test
     mitBands: yMitBands,            // NEW-3: the 1-ft elevation-matched cut/fill band ledger
     offsetSurface: yOffsetBasis,    // NEW-4: WHICH flood line the offset is owed to, per jurisdiction
     offsetElevFt: yOffsetElevFt,
@@ -18165,7 +18213,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         visual); collapsible for space. */}
                     <Collapse sectionId="pond-section" title="Section" defaultOpen={true} summary="grade · berm · storage bands">
                       <div style={{ padding: "4px 0 2px" }}>
-                        <PondSection facts={sectionFactsFor(selEl)} />
+                        <Suspense fallback={null}><PondSection facts={sectionFactsFor(selEl)} /></Suspense>
                       </div>
                     </Collapse>
                     {/* PR-J — "Engineering assumptions" is an ENGINEER-ONLY override section: it must
@@ -20821,7 +20869,7 @@ function DesignChangeSummaryCard({ summary, onDismiss, onUndo }) {
       )}
       {summary.sectionFacts && (
         <div style={{ marginTop: 9 }}>
-          <PondSection facts={summary.sectionFacts} />
+          <Suspense fallback={null}><PondSection facts={summary.sectionFacts} /></Suspense>
         </div>
       )}
       {!summary.infeasible && (
@@ -21185,7 +21233,24 @@ function YieldPanel({
                 </div>
               );
             };
-            if (req && (req.kind === "point" || req.kind === "none")) {
+            if (req && req.kind === "unavailable") {
+              /* NEW-8 — Colorado. ONE visible line (PANEL-BREVITY: the verdict strip already
+               * carries the state, so this adds a single named line, not a paragraph); the full
+               * why — WQCV + EURV, the four regimes, what to do instead — rides the ⓘ, which is
+               * exempt from the copy budget. Never a number, never a blank. */
+              detR.push(warnNote(
+                d.coRegime
+                  ? `${d.coRegime.short} governs here — Planyr does not yet carry Colorado detention criteria.`
+                  : "Planyr does not yet carry Colorado detention criteria.",
+                "co-detention",
+                // The explanation rides the lazily-loaded Colorado tier (with the rest of the
+                // Colorado prose). Until it lands, the visible line and its verdict are already
+                // correct — only the ⓘ fills in a moment later.
+                d.coDetail
+                  ? `${d.coDetail}${d.coRegime ? ` Reviewing regime: ${d.coRegime.label} (${d.coRegime.criteria}). ${d.coRegime.note}` : ""}`
+                  : null,
+              ));
+            } else if (req && (req.kind === "point" || req.kind === "none")) {
               // v3 A3 — the numeric "Detention required" row is deleted (the required number lives
               // once, in the verdict strip, G1). The requirement BASIS (adopted rule/authority)
               // stays as the CODE-provenance note below.
@@ -22176,6 +22241,17 @@ function YieldPanel({
               detChip = covered ? "COVERED" : shortBand ? "SHORT" : "NEEDS INPUT";
               detTone = covered ? "good" : shortBand ? "danger" : "warn";
               detVerdict = `${f1(req.bandAcFt[0])}–${f1(req.bandAcFt[1])} ac-ft`; detSub = "";
+            } else if (req && req.kind === "unavailable") {
+              // NEW-8 — the hard, unmistakable Colorado state. The CHIP is what actually reaches
+              // the screen here: `detVerdict`/`detTone`/`detSub` are computed by every branch in
+              // this block but read by NONE of them (only `detChip` is consumed, below and at the
+              // group header) — a pre-existing dead-store left behind when the v3 A2/A3 rework
+              // moved the requirement pair out to the verdict strip. Filed as B1110; the
+              // assignments are kept in step with their neighbours rather than diverging here.
+              // "N/A · CO" is a NAMED state, not a failure to compute: "UNKNOWN" would read as
+              // "we could not look it up", inviting the reader to wait for a number that is never
+              // coming. The explanation renders on its own line in the detail chain above.
+              detVerdict = "not in Colorado yet"; detTone = "warn"; detChip = "N/A · CO";
             } else if (req && req.kind === "unknown") { detVerdict = "required unknown"; detTone = "warn"; detChip = "UNKNOWN"; }
             else if (d.reqCandidates) { detVerdict = "boundary straddle"; detTone = "warn"; detChip = "STRADDLE"; }
             else { detVerdict = "unresolved"; detTone = "warn"; detChip = "SET AGENCY"; }
@@ -22402,6 +22478,28 @@ function YieldPanel({
                 );
               } else if (d.drawdown && !d.drawdown.known && (d.pondCount || 0) > 0) {
                 rows.push(keyedNote("Time to empty needs the allowed release rate — set it in Standards or give the pond an outlet.", "dd-unk"));
+              }
+              /* ── NEW-7 — in COLORADO the same number is a water-rights TEST, not a note.
+               * C.R.S. 37-92-602(8): 97% of a 5-year storm out in 72 hr, 99% of larger events in
+               * 120 hr. Detention that misses it is an out-of-priority diversion. Texas renders
+               * nothing here — `applies` is false — so its presentation is untouched.
+               * PANEL-BREVITY: ONE line, whichever way it goes; the statute text, the rebuttable
+               * presumption, the State Engineer notification and the optimism caveat all live in
+               * the ⓘ. */
+              if (d.drawdownStatute && d.drawdownStatute.applies) {
+                const st = d.drawdownStatute;
+                const detail = [
+                  ...st.statute.tests.map((t) => t.text),
+                  st.presumption,
+                  st.notification.text,
+                  st.proxyNote,
+                  st.statute.note,
+                ].join(" ");
+                rows.push(st.verdict === "fail"
+                  ? warnNote(`Fails Colorado's 72-hour drawdown statute (${st.statute.citation}).`, "co-drawdown", detail)
+                  : st.verdict === "unknown"
+                    ? keyedNote(`Colorado's 72-hour drawdown statute (${st.statute.citation}) needs the allowed release rate.`, "co-drawdown", detail)
+                    : keyedNote(`Inside Colorado's 72/120-hour drawdown limits (${st.statute.citation}) — screening, not compliance.`, "co-drawdown", detail));
               }
               // ── NEW-6 — the two gravity-drain tests, and NEW-5's prism-vs-extrusion honesty delta.
               {

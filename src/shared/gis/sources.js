@@ -452,6 +452,23 @@ export const GIS_SOURCES = {
     lastVerified: "2026-06-16",
     fixtures: [{ label: "Harris County", point: [-95.37, 29.76], expectMinCount: 1 }],
   },
+  /* NEW-5 — the Colorado counterpart of `county`. Kept as its OWN row rather than widening the
+   * Texas row, so the TxDOT source a Texas site resolves against is untouched; jurisdiction.js
+   * routes by location exactly the way it already routes ETJ sources. VERIFIED LIVE 2026-07-29:
+   * 64 county polygons, name field NAME20, ArcGIS-Online hosted (CORS-open, no key). */
+  countyCo: {
+    key: "countyCo",
+    label: "County boundaries (Colorado)",
+    provider: "Colorado statewide county boundaries (Esri-hosted)",
+    serviceUrl: "https://services2.arcgis.com/fnCPHPvll1r80nFV/arcgis/rest/services/Colorado_Counties/FeatureServer/127",
+    layerId: null,
+    geometryType: "polygon",
+    fields: { name: "NAME20", fips: "GEOID20" },
+    coverage: "colorado",
+    tier: "production",
+    lastVerified: "2026-07-29",
+    fixtures: [{ label: "Denver County", point: [-104.9903, 39.7392], expectMinCount: 1 }],
+  },
   city: {
     key: "city",
     label: "City limits",
