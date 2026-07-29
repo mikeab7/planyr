@@ -2189,6 +2189,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const geoBaseRef = useRef(null);
   const geoBackfillRef = useRef(null); // coarse low-zoom layer for instant blurry coverage
   const geoCapRef = useRef(null);      // detach fn for the bounded tile cache (NEW-7)
+  const geoBfCapRef = useRef(null);    // NEW-1 — the same ceiling for the COARSE BACKFILL layer, which had none
   const overlayStagedRef = useRef(false); // has the staged first-load pass finished? (NEW-3)
   const overlayRefs = useRef({});
   const [coverage, setCoverage] = useState({}); // id -> "in"|"out"|"unknown" (NEW-1; picker-only)
@@ -2250,7 +2251,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // NEW-6/NEW-7 — a real release: drop the retained tiles and their DOM now rather than
       // waiting for an incidental prune, and detach the cache-cap listeners with them.
       try { if (geoCapRef.current) geoCapRef.current(); } catch (_) {}
-      geoCapRef.current = null;
+      try { if (geoBfCapRef.current) geoBfCapRef.current(); } catch (_) {}
+      geoCapRef.current = null; geoBfCapRef.current = null;
       if (geoBaseRef.current) releaseLayer(map, geoBaseRef.current);
       if (geoBackfillRef.current) releaseLayer(map, geoBackfillRef.current);
       geoBaseRef.current = null; geoBackfillRef.current = null;
@@ -2271,6 +2273,24 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const bf = withTileRetry(L.tileLayer(bm.tiles, { maxNativeZoom: 13, maxZoom: 24, attribution: bm.attr, keepBuffer: Math.max(2, geoKeepBuffer + 2), crossOrigin: true }));
     preserveTilesAcrossSetView(bf); // NEW-7: a same-native-zoom commit must not wipe these
     bf.setZIndex(0); bf.addTo(map); geoBackfillRef.current = bf;
+    /* NEW-1 — CAP THE BACKFILL TOO. This layer had `preserveTilesAcrossSetView` and a keepBuffer
+     * two rings LARGER than the detail layer, but no ceiling at all — so its `_tiles` map grew for
+     * as long as the session lasted, shedding only when Leaflet's incidental pruning happened to
+     * fire. That is retained DECODED-IMAGE memory, which a JS heap snapshot cannot see, which is
+     * why the 2026-07-28 "not a leak, steady-state high" verdict could not have caught it: that run
+     * measured the ~135 MB of JS and not the ~420 MB of tiles/GPU where this lives.
+     *
+     * Shedding here costs NOTHING visually and does not touch render quality (the owner's standing
+     * constraint): the detail layer covers the view at full resolution, and this coarse layer only
+     * has to cover the current view plus a ring while detail loads. `capTileCache` never evicts a
+     * CURRENT tile, so it cannot punch a hole. Its own (larger) keepBuffer is passed through, so the
+     * ceiling is computed for THIS layer rather than borrowed from the detail layer's. */
+    geoBfCapRef.current = boundTileCache(bf, () => tileCacheLimit({
+      containerW: (geoWrapRef.current && geoWrapRef.current.clientWidth) || size.w,
+      containerH: (geoWrapRef.current && geoWrapRef.current.clientHeight) || size.h,
+      tileSizePx: (bf.getTileSize && bf.getTileSize().x) || 256,
+      keepBuffer: Math.max(2, geoKeepBuffer + 2),
+    }));
     // Honest status dot for the Basemap row: "loaded" only on a REAL painted tile
     // (`tileload`) — Leaflet's layer-level `load` fires even when every tile errored
     // (errored tiles count as settled), which would show a green dot over a gray

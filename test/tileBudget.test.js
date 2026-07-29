@@ -8,6 +8,8 @@
  *   • toggling 23 overlays off released 780 of 782 SVG elements but 0 of 51 tiles.
  */
 import { describe, it, expect } from "vitest";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import {
   tileWeight, overscanPx, keepBufferFor, retinaForZoom, tileCacheLimit, tilesToEvict,
   OVERSCAN_FULL, OVERSCAN_REDUCED, RETINA_MIN_ZOOM,
@@ -156,5 +158,50 @@ describe("overlay load order (NEW-3)", () => {
     expect(s1.size).toBe(LAYER_STAGE_SIZE);
     [...s1].forEach((id) => expect(s2.has(id)).toBe(true));
     expect(admittedAfter(order, 99).size).toBe(order.length);
+  });
+});
+
+/* NEW-1 (2026-07-29) — the COARSE BACKFILL layer had no ceiling at all.
+ *
+ * `SitePlanner` bound `boundTileCache` to the DETAIL layer only. The backfill was created with
+ * `preserveTilesAcrossSetView` and a keepBuffer two rings LARGER than the detail layer, and nothing
+ * ever capped it — so its `_tiles` map grew for the length of the session, shedding only when
+ * Leaflet's incidental pruning happened to fire. That is retained DECODED-IMAGE memory, which a JS
+ * heap snapshot cannot see, which is why the 2026-07-28 "not a leak" verdict could not have caught
+ * it: that run measured the ~135 MB of JS, not the ~420 MB of tiles/GPU where this lives.
+ *
+ * These assert the budget maths the backfill now uses, and that shedding never touches a CURRENT
+ * tile — i.e. eviction cannot cost render quality, which is the owner's standing constraint. */
+describe("NEW-1 — the coarse backfill layer's ceiling", () => {
+  it("a larger keepBuffer earns a larger ceiling, but still a FINITE one", () => {
+    const detail = tileCacheLimit({ containerW: 1280, containerH: 900, tileSizePx: 256, keepBuffer: 2 });
+    const backfill = tileCacheLimit({ containerW: 1280, containerH: 900, tileSizePx: 256, keepBuffer: 4 });
+    expect(backfill).toBeGreaterThan(detail);          // its own buffer is respected…
+    expect(Number.isFinite(backfill)).toBe(true);      // …but it is bounded, which it was not
+    expect(backfill).toBeLessThan(2000);
+  });
+
+  it("eviction NEVER sheds a current tile, so capping cannot degrade the aerial", () => {
+    // 400 retained tiles, 30 of them current — the shape of a long panning session.
+    const entries = Array.from({ length: 400 }, (_, i) => ({
+      key: `k${i}`, current: i < 30, active: i < 30, loaded: true, distance: i,
+    }));
+    const drop = tilesToEvict(entries, 60);
+    expect(drop.length).toBeGreaterThan(0);                                  // it really sheds…
+    for (const k of drop) {
+      const e = entries.find((x) => x.key === k);
+      expect(e.current, `${k} is current and must never be evicted`).toBe(false);
+    }
+    // …and it sheds the FURTHEST first, so what goes is what the user is least likely to pan back to.
+    const droppedDistances = drop.map((k) => entries.find((x) => x.key === k).distance);
+    expect(Math.min(...droppedDistances)).toBeGreaterThan(29);
+  });
+
+  it("the planner binds a cap to BOTH tile layers (anti-drift source guard)", () => {
+    const src = readFileSync(fileURLToPath(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url)), "utf8");
+    const caps = [...src.matchAll(/boundTileCache\(/g)];
+    expect(caps.length, "detail AND backfill must each be capped").toBeGreaterThanOrEqual(2);
+    expect(src).toMatch(/geoBfCapRef\.current = boundTileCache\(bf,/);
+    expect(src).toMatch(/geoBfCapRef\.current\(\)/);   // and detached on teardown
   });
 });
