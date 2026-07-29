@@ -62,7 +62,16 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   (`freshen`, via the injected `liveCollections()`) so a payload captured before a gesture can't
   reach the server — those two together are what stops a drag tearing a building off its truck
   court. Undo/redo is a gesture boundary: `applySnapshot` flushes against the SNAPSHOT (never
-  `stateRef`, which React hasn't re-rendered yet). **B1099:** a genuine foreign row beats a pending
+  `stateRef`, which React hasn't re-rendered yet). **B1098(×2), the trap that re-tore it once:** a
+  remote row arriving MID-GESTURE is turned into a canvas instruction with its payload FROZEN at
+  arrival and parked in `pendingRemoteRef` — replaying that across an undo puts pre-undo geometry
+  back on the restored canvas, and the next diff commits the re-torn canvas. So an applied snapshot
+  is the AUTHORITY: `applySnapshot` drops buffered upserts (keeping buffered REMOVEs — a remote
+  tombstone is not undone by a local undo) and calls `noteLocalAuthority()`, which bumps
+  `elementSync`'s local-authority EPOCH; every serialization put on the wire carries its epoch, and
+  `applyRemoteRow` keeps an own echo from an OLDER epoch off the canvas while still adopting its
+  rev. Never widen that suppression to foreign rows or to the current epoch — the B672 stale-seed
+  re-true depends on both still upserting. **B1099:** a genuine foreign row beats a pending
   DERIVED op — derived churn is never re-pushed over another writer — while a pending DIRECT user
   edit still wins and still toasts (the B673 matrix, unchanged). **B1097:** `rowsToModel` runs the
   SAME `normalizeBondedChildren` heal as `createSiteModel` — never wire a load-time repair to only
@@ -71,15 +80,31 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   (elements expanded to their `attachedTo` assembly, so a building brings its truck court / trailer
   parking / dock zones / bump-outs), then paste with fresh ids, bonds remapped INSIDE the copy, and
   relative geometry preserved. A pasted parcel arrives INACTIVE by design (can't double-count site area).
-- `standardsApply.js` + `userPrefs.js` + `components/StandardsBar.jsx` — Standards scope + retroactive
-  apply. `standardsApply` is the pure engine (parcels are stamped → WRITE the value; elements
-  resolve at render → CLEAR the per-element override) plus `applyAllStandards` — ONE Apply for the
-  whole panel, counted in distinct OBJECTS — and `derivedPanelScope`, which reads (never writes)
-  where the account already carries a default. `StandardsBar` is the panel's sticky footer: ONE
-  scope + ONE Apply, replacing the per-field chip row that was most of the panel's height. `userPrefs` is the account-level store
-  (`public.profiles.prefs` jsonb, own-row RLS — `db/user_prefs.sql`) behind the "All projects" scope,
-  published into `planStyle`'s account layer (`setAccountStyleDefaults`). Precedence: built-in <
-  account < project < per-object.
+- `standardsApply.js` + `userPrefs.js` + `components/StandardsBar.jsx` — Standards commit model +
+  retroactive apply. `standardsApply` is the pure engine (parcels are stamped → WRITE the value;
+  elements resolve at render → CLEAR the per-element override) plus `applyAllStandards` — ONE Apply
+  for the whole panel, counted in distinct OBJECTS — plus the **pending DRAFT** model (NEW-2:
+  `EMPTY_STD_DRAFT` / `withParcelDraft` / `withTypeDraft` / `draftParcelValue` / `draftTypeValue` /
+  `draftDirty` / `mergeDraftIntoSettings`). The `Project | All` scope toggle is **gone** — it read as
+  one axis with Apply and was two (where a value is STORED vs pushing it onto what is DRAWN).
+  `StandardsBar` is now a real footer BELOW the panel's scrolling body (a sibling of the scroll
+  container in both the docked host and `FloatingPanel`'s new `footer` slot — never sticky INSIDE
+  the list, which sliced the row at the bottom of the scrollport in half) carrying three named
+  actions: **Apply to this plan (N)** · **Save for this plan** · **Save for all projects**. Because
+  "Save for this plan" is explicit, a field edit can no longer silently commit: edits land in the
+  draft, the footer shows a quiet "Unsaved changes" + Discard, and the draft is persisted per plan
+  in `sessionStorage` so closing the panel / reloading can't throw it away. `planStyle`'s PREVIEW
+  layer (`setPreviewStyleDefaults`) is how the canvas shows an uncommitted draft — **visual only:
+  `parcelDefaultStyle` deliberately ignores it, so an uncommitted value can never be stamped into
+  geometry.** `userPrefs` is the account-level store (`public.profiles.prefs` jsonb, own-row RLS —
+  `db/user_prefs.sql`) behind "Save for all projects", published into `planStyle`'s account layer
+  (`setAccountStyleDefaults`). Precedence: built-in < account < project < draft (preview) < per-object.
+- `planStyle.js` also owns the **setback line's** resolved style (NEW-1: `setbackLineStyle` /
+  `setbackDashArray` / `SETBACK_LINE`) — colour, weight and dash were hardcoded at the one place the
+  ring was drawn while the boundary beside it had full standards. Both the ring AND its dimension
+  chip read this one derivation; the defaults ARE the historic look (weight 1.25, `dashed` = "7 6"),
+  and `parcelDefaultStyle` stamps `sbStroke`/`sbWeight`/`sbDash` only when they DIFFER from it, so an
+  upgraded plan gains no keys and renders unchanged.
 - `zOrder.js` — per-element `z` stacking key utilities (`nextZ`/`sortByZ`/`normalizeZ`/`ensureZ`, B671).
   `arrange.js` — pure z-order "Arrange" (`reorderByZ`/`arrangeFlags`, B820): Bring-to-Front/Send-to-Back
   over a peer set (a building reorders within its `Z_LAYER` band, a markup within the markup layer;

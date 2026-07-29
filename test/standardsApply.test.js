@@ -7,14 +7,17 @@ import { describe, it, expect, beforeEach } from "vitest";
 import {
   PARCEL_STD_KEYS, TYPE_STD_KEYS,
   applyParcelStandard, applyTypeStandard, parcelStandardImpact, typeStandardImpact, appliedLabel,
-  applyAllStandards, allStandardsImpact, appliedObjectsLabel, derivedPanelScope,
+  applyAllStandards, allStandardsImpact, appliedObjectsLabel,
+  EMPTY_STD_DRAFT, draftHasParcel, draftHasType, draftParcelValue, draftTypeValue,
+  withParcelDraft, withTypeDraft, draftDirty, mergeDraftIntoSettings,
 } from "../src/workspaces/site-planner/lib/standardsApply.js";
 import {
   typeStyle, parcelDefaultStyle, standardScope, setAccountStyleDefaults, getAccountStyleDefaults,
+  setPreviewStyleDefaults, setbackLineStyle, setbackDashArray, SETBACK_LINE,
 } from "../src/workspaces/site-planner/lib/planStyle.js";
 import { setStandardPref, getStandardPref, _normalizePrefs } from "../src/workspaces/site-planner/lib/userPrefs.js";
 
-beforeEach(() => setAccountStyleDefaults({}));
+beforeEach(() => { setAccountStyleDefaults({}); setPreviewStyleDefaults({}); });
 
 const parcels = () => ([
   { id: "p1", points: [], stroke: "#111111", weight: 2 },
@@ -29,7 +32,7 @@ const els = () => ([
 
 describe("key sets", () => {
   it("cover the standards the owner named (outline color, line weight, fill, dash, …)", () => {
-    expect(PARCEL_STD_KEYS).toEqual(["stroke", "weight", "dash", "fill", "fillOpacity"]);
+    expect(PARCEL_STD_KEYS).toEqual(["stroke", "weight", "dash", "fill", "fillOpacity", "sbStroke", "sbWeight", "sbDash"]);
     expect(TYPE_STD_KEYS).toEqual(["fill", "stroke"]);
   });
 });
@@ -229,22 +232,160 @@ describe("applyAllStandards — every standard at once, counted in objects", () 
   });
 });
 
-describe("derivedPanelScope — collapsing per-key scopes must MOVE nothing", () => {
-  it("reports All when any standard already lives on the account", () => {
-    expect(derivedPanelScope(["project", "builtin", "all"])).toBe("all");
+/* ---------------------------------------------------------------- NEW-1: the SETBACK line
+ *
+ * It had no controls at all — colour, weight and dash were hardcoded at the one place it was
+ * drawn, while the parcel BOUNDARY beside it carried a full set of standards. These guards pin
+ * the two halves that matter: the new keys round-trip through the retroactive Apply path, and a
+ * plan that never set them renders EXACTLY as it did before (the upgrade must be invisible).
+ */
+describe("setback line standards", () => {
+  it("an untouched parcel resolves to the OLD hardcoded look, byte for byte", () => {
+    const s = setbackLineStyle({ id: "p1" }, "#b45309");
+    expect(s.stroke).toBe("#b45309");   // PAL.setback, exactly as before
+    expect(s.weight).toBe(1.25);
+    expect(s.dash).toBe("7 6");
   });
-  it("reports Project when none does", () => {
-    expect(derivedPanelScope(["project", "builtin", "builtin"])).toBe("project");
-    expect(derivedPanelScope([])).toBe("project");
-    expect(derivedPanelScope()).toBe("project");
+  it("an empty / missing parcel is the same default (no crash on an unstyled ring)", () => {
+    expect(setbackLineStyle(null, "#b45309")).toEqual({ stroke: "#b45309", weight: 1.25, dash: "7 6" });
+    expect(setbackLineStyle({}, "#b45309").dash).toBe("7 6");
   });
-  it("is a READ, never a write — an account-scope default a user already has is not demoted", () => {
-    // The hazard this exists for: the panel-level control must not retroactively pull an
-    // account-wide default back onto one plan just because the UI collapsed. Nothing here
-    // returns a mutation; the caller only renders the value.
-    const scopes = ["all", "project"];
-    const snapshot = [...scopes];
-    derivedPanelScope(scopes);
-    expect(scopes).toEqual(snapshot);
+  it("a per-parcel override wins over the theme default, key by key", () => {
+    expect(setbackLineStyle({ sbStroke: "#ff0000" }, "#b45309").stroke).toBe("#ff0000");
+    expect(setbackLineStyle({ sbWeight: 3 }, "#b45309").weight).toBe(3);
+    expect(setbackLineStyle({ sbDash: "solid" }, "#b45309").dash).toBeUndefined();
+    // a partial override leaves the other two at the default
+    expect(setbackLineStyle({ sbStroke: "#ff0000" }, "#b45309").weight).toBe(SETBACK_LINE.weight);
+  });
+  it("the dash pattern scales with the weight, so a heavier line keeps its rhythm", () => {
+    expect(setbackDashArray("dashed", 1.25)).toBe("7 6");
+    expect(setbackDashArray("dashed", 2.5)).toBe("14 12");
+    expect(setbackDashArray("dotted", 1.25)).toBe("1.25 3");
+    expect(setbackDashArray("solid", 1.25)).toBeUndefined();
+    expect(setbackDashArray(undefined, undefined)).toBe("7 6"); // unset === today's ring
+  });
+  it("is STAMPED onto a new parcel from the standards, exactly like the boundary style", () => {
+    expect(parcelDefaultStyle({ parcelStyle: { sbStroke: "#123456", sbWeight: 2, sbDash: "dotted" } }))
+      .toEqual({ sbStroke: "#123456", sbWeight: 2, sbDash: "dotted" });
+  });
+  it("stamps NOTHING when the standards match the built-in look — an upgraded plan gains no keys", () => {
+    expect(parcelDefaultStyle({})).toEqual({});
+    expect(parcelDefaultStyle({ parcelStyle: { sbWeight: SETBACK_LINE.weight, sbDash: SETBACK_LINE.dash } })).toEqual({});
+  });
+  it("follows the account default under the project's own (same ladder as the boundary)", () => {
+    setAccountStyleDefaults({ parcelStyle: { sbStroke: "#aaaaaa", sbDash: "dotted" } });
+    expect(parcelDefaultStyle({}).sbStroke).toBe("#aaaaaa");
+    expect(parcelDefaultStyle({ parcelStyle: { sbStroke: "#bbbbbb" } }).sbStroke).toBe("#bbbbbb");
+  });
+  it("round-trips through the retroactive Apply path like any other parcel standard", () => {
+    const list = [{ id: "a", points: [] }, { id: "b", points: [], sbStroke: "#ff0000" }];
+    const one = applyParcelStandard(list, "sbStroke", "#ff0000");
+    expect(one.count).toBe(1);                     // only the one that differed
+    expect(one.parcels.every((p) => p.sbStroke === "#ff0000")).toBe(true);
+    const all = applyAllStandards(list, [], { sbStroke: "#00ff00", sbWeight: 3, sbDash: "solid" }, []);
+    expect(all.count).toBe(2);                     // DISTINCT objects, not 6 key hits
+    expect(all.parcels[0]).toMatchObject({ sbStroke: "#00ff00", sbWeight: 3, sbDash: "solid" });
+    expect(allStandardsImpact(all.parcels, [], { sbStroke: "#00ff00", sbWeight: 3, sbDash: "solid" }, [])).toBe(0);
+  });
+  it("applying an UNSET setback standard clears the key rather than storing a null", () => {
+    const { parcels: out } = applyAllStandards([{ id: "a", sbStroke: "#ff0000" }], [], { sbStroke: null }, []);
+    expect("sbStroke" in out[0]).toBe(false);
+  });
+});
+
+/* ---------------------------------------------------------------- NEW-2: the PENDING DRAFT
+ *
+ * The footer's Project|All scope toggle is gone, replaced by three actions named outright. Once
+ * "Save for this plan" is an explicit button, a field edit can no longer silently commit as the
+ * plan default — so edits land in a draft and only a button stores them. These guards cover the
+ * trap that model creates: an edit that is neither visible nor recoverable.
+ */
+describe("the Standards draft", () => {
+  const committedParcel = (k) => ({ stroke: "#111111", weight: 2 })[k];
+  const committedType = (t, k) => (t === "building" && k === "fill" ? "#f3ece1" : undefined);
+
+  it("starts empty and reads straight through to what is committed", () => {
+    expect(draftParcelValue(EMPTY_STD_DRAFT, "stroke", "#111111")).toBe("#111111");
+    expect(draftHasParcel(EMPTY_STD_DRAFT, "stroke")).toBe(false);
+    expect(draftDirty(EMPTY_STD_DRAFT, committedParcel, committedType)).toBe(false);
+  });
+  it("shows the pending value once a field is touched, without storing it", () => {
+    const d = withParcelDraft(EMPTY_STD_DRAFT, { stroke: "#ff0000" });
+    expect(draftParcelValue(d, "stroke", "#111111")).toBe("#ff0000");
+    expect(draftParcelValue(d, "weight", 2)).toBe(2);        // untouched keys still read committed
+    expect(draftDirty(d, committedParcel, committedType)).toBe(true);
+  });
+  it("is NOT dirty when an edit lands back on the committed value — no permanent nag", () => {
+    const d = withParcelDraft(EMPTY_STD_DRAFT, { stroke: "#ff0000" });
+    const back = withParcelDraft(d, { stroke: "#111111" });
+    expect(draftHasParcel(back, "stroke")).toBe(true);       // still touched…
+    expect(draftDirty(back, committedParcel, committedType)).toBe(false); // …but nothing to save
+  });
+  it("treats a null as a real pending change — clearing a standard is an edit", () => {
+    const d = withParcelDraft(EMPTY_STD_DRAFT, { stroke: null });
+    expect(draftParcelValue(d, "stroke", "#111111")).toBe(null);
+    expect(draftDirty(d, committedParcel, committedType)).toBe(true);
+  });
+  it("carries element-type edits on the same footing", () => {
+    const d = withTypeDraft(EMPTY_STD_DRAFT, "building", { fill: "#ff0000" });
+    expect(draftHasType(d, "building", "fill")).toBe(true);
+    expect(draftTypeValue(d, "building", "fill", "#f3ece1")).toBe("#ff0000");
+    expect(draftTypeValue(d, "parking", "fill", "#cdd7dd")).toBe("#cdd7dd");
+    expect(draftDirty(d, committedParcel, committedType)).toBe(true);
+  });
+  it("never mutates the draft it was handed (Discard restores by dropping it)", () => {
+    const d = withParcelDraft(EMPTY_STD_DRAFT, { stroke: "#ff0000" });
+    const snapshot = JSON.parse(JSON.stringify(d));
+    withParcelDraft(d, { weight: 4 });
+    withTypeDraft(d, "building", { fill: "#000000" });
+    expect(d).toEqual(snapshot);
+    expect(EMPTY_STD_DRAFT).toEqual({ parcelStyle: {}, typeStyles: {} });
+  });
+
+  describe("committing it into the plan (Save for this plan / the commit half of Apply)", () => {
+    it("folds every pending key into settings", () => {
+      const d = withTypeDraft(withParcelDraft(EMPTY_STD_DRAFT, { stroke: "#ff0000", sbDash: "dotted" }), "building", { fill: "#00ff00" });
+      const next = mergeDraftIntoSettings({ setback: 25, parcelStyle: { weight: 3 } }, d);
+      expect(next.parcelStyle).toEqual({ weight: 3, stroke: "#ff0000", sbDash: "dotted" });
+      expect(next.typeStyles).toEqual({ building: { fill: "#00ff00" } });
+      expect(next.setback).toBe(25);   // untouched settings ride through
+    });
+    it("a null DELETES the stored key — cleared means 'follow the default', not 'stored null'", () => {
+      const next = mergeDraftIntoSettings({ parcelStyle: { stroke: "#111111" }, typeStyles: { building: { fill: "#f00", stroke: "#0f0" } } },
+        { parcelStyle: { stroke: null }, typeStyles: { building: { fill: null } } });
+      expect("stroke" in next.parcelStyle).toBe(false);
+      expect(next.typeStyles.building).toEqual({ stroke: "#0f0" });
+    });
+    it("drops a type bag that ends up empty, so settings never accumulate husks", () => {
+      const next = mergeDraftIntoSettings({ typeStyles: { building: { fill: "#f00" } } }, { parcelStyle: {}, typeStyles: { building: { fill: null } } });
+      expect("building" in next.typeStyles).toBe(false);
+    });
+    it("does not mutate the settings it was handed", () => {
+      const settings = { parcelStyle: { stroke: "#111111" }, typeStyles: { building: { fill: "#f00" } } };
+      const snapshot = JSON.parse(JSON.stringify(settings));
+      mergeDraftIntoSettings(settings, withParcelDraft(EMPTY_STD_DRAFT, { stroke: "#ff0000" }));
+      expect(settings).toEqual(snapshot);
+    });
+    it("committing then re-checking leaves nothing dirty", () => {
+      const d = withParcelDraft(EMPTY_STD_DRAFT, { stroke: "#ff0000" });
+      const next = mergeDraftIntoSettings({}, d);
+      expect(draftDirty(d, (k) => next.parcelStyle[k], () => undefined)).toBe(false);
+    });
+  });
+
+  describe("previewing it (a draft changes what you SEE, never what gets STORED)", () => {
+    it("an element type previews the pending colour without it being in settings", () => {
+      setPreviewStyleDefaults({ typeStyles: { building: { fill: "#ff0000" } } });
+      expect(typeStyle("building", {}).fill).toBe("#ff0000");
+      expect(typeStyle("building", {}).stroke).toBe("#33302b");   // untouched key keeps the built-in
+    });
+    it("a null in the preview CLEARS back to the built-in instead of painting nothing", () => {
+      setPreviewStyleDefaults({ typeStyles: { building: { fill: null } } });
+      expect(typeStyle("building", { typeStyles: { building: { fill: "#00ff00" } } }).fill).toBe("#f3ece1");
+    });
+    it("does NOT reach parcelDefaultStyle — an uncommitted value can never be stamped into geometry", () => {
+      setPreviewStyleDefaults({ typeStyles: {}, parcelStyle: { stroke: "#ff0000" } });
+      expect(parcelDefaultStyle({})).toEqual({});
+    });
   });
 });
