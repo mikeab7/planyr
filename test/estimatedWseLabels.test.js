@@ -11,13 +11,15 @@ import {
 
 describe("isEstimatedWseSrc", () => {
   it("recognizes every accepted-estimate provider tag", () => {
-    for (const src of ["est-boundary-grade", "est-ebfe", "est-fbcdd", "est-maapnext"]) {
+    // NEW-1 (B1057 completion) added "est-screening-bfe" — Planyr's own Atlas-14 screening study,
+    // the first provider in this set whose value the app COMPUTES rather than reads.
+    for (const src of ["est-boundary-grade", "est-ebfe", "est-fbcdd", "est-maapnext", "est-screening-bfe"]) {
       expect(isEstimatedWseSrc(src), src).toBe(true);
     }
-    expect(EST_WSE_SRCS.size).toBe(4);
+    expect(EST_WSE_SRCS.size).toBe(5);
   });
   it("does NOT treat published/derived/manual as an estimate", () => {
-    for (const src of ["static-bfe", "manual", "fbcdd-wse100-draft", "ebfe-wse02", null, undefined]) {
+    for (const src of ["static-bfe", "manual", "fbcdd-wse100-draft", "ebfe-wse02", "screening-bfe-wse02", null, undefined]) {
       expect(isEstimatedWseSrc(src), String(src)).toBe(false);
     }
   });

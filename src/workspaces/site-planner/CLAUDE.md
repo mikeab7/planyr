@@ -19,6 +19,13 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   `boundaryLabels.js` (pure label math) — the B694/B695 tier; `basemaps.js` — the shared Esri/USGS
   aerial-source registry (B693). Pipelines (B751/B752): `pipelineCommodity.js` (commodity crosswalk +
   fixed hazard symbology + legend) + `pipelineCorridor.js` (pure assumed-easement buffer geometry).
+  Flood & drainage group (B1075–B1080): `floodGroup.js` — the pure group model (four provenance
+  tiers, point-in-district auto-scoping of the governing drainage authority, master-toggle state,
+  and the honest empty-state copy: what FEMA actually reported, why a district isn't listed, the
+  governing-district drainage line). `nhdFlowline.js` — the USGS NHD FType → plain-English
+  crosswalk (336 → "canal / ditch"), the universal channel fallback's decoder. The BKDD
+  (Brookshire–Katy Drainage District) endpoints live in the shared GIS source registry like every
+  other source; `detentionRules.js` owns the district-aware `resolveDrainageContext`.
 - Site-plan overlay import (B72/B73/B747/B748/B749): `overlayPdf.js` (PDF+DXF raster, banded
   white-knockout, zoom-aware re-raster) + `overlayScale.js` (scale/trace math) + `overlayStorage.js`
   (Storage backup) + `dxf/` (worker parse via `dxf-parser` + entity→SVG render + true-units auto-scale)
@@ -31,9 +38,12 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   (elements expanded to their `attachedTo` assembly, so a building brings its truck court / trailer
   parking / dock zones / bump-outs), then paste with fresh ids, bonds remapped INSIDE the copy, and
   relative geometry preserved. A pasted parcel arrives INACTIVE by design (can't double-count site area).
-- `standardsApply.js` + `userPrefs.js` + `components/StandardScope.jsx` — Standards scope + retroactive
-  apply (NEW-3). `standardsApply` is the pure engine (parcels are stamped → WRITE the value; elements
-  resolve at render → CLEAR the per-element override). `userPrefs` is the account-level store
+- `standardsApply.js` + `userPrefs.js` + `components/StandardsBar.jsx` — Standards scope + retroactive
+  apply. `standardsApply` is the pure engine (parcels are stamped → WRITE the value; elements
+  resolve at render → CLEAR the per-element override) plus `applyAllStandards` — ONE Apply for the
+  whole panel, counted in distinct OBJECTS — and `derivedPanelScope`, which reads (never writes)
+  where the account already carries a default. `StandardsBar` is the panel's sticky footer: ONE
+  scope + ONE Apply, replacing the per-field chip row that was most of the panel's height. `userPrefs` is the account-level store
   (`public.profiles.prefs` jsonb, own-row RLS — `db/user_prefs.sql`) behind the "All projects" scope,
   published into `planStyle`'s account layer (`setAccountStyleDefaults`). Precedence: built-in <
   account < project < per-object.
@@ -86,10 +96,18 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   whether a smaller basin is worth a line (`materialAlternative` → null means render NOTHING).
 - Flood-level sensitivity (NEW-4): `wseSensitivity.js` — sweeps the SAME `evalAtWse` the live panel
   uses across criteria-configurable steps above the governing flood surface; absolute deltas only.
-- Screening BFE (NEW-3): `screeningBfe.js` — the app's FIRST real hydrology + hydraulics (SCS unit-
-  hydrograph peak, Manning normal depth over a terrain-sampled section). Every other "derived" WSE
-  in this codebase reads FEMA's published number; this one computes one. Engine only so far — the
-  live inputs (watershed delineation, Atlas-14 fetch, section sampler) are not yet wired.
+- Screening BFE (NEW-3 → completed): `screeningBfe.js` — the app's FIRST real hydrology + hydraulics
+  (SCS unit-hydrograph peak, Manning normal depth over a terrain-sampled section). Every other
+  "derived" WSE in this codebase reads FEMA's published number; this one computes one. **Now LIVE-WIRED**
+  by `screeningBfeSite.js` (the four inputs: a D8 watershed delineated over a WIDE coarse 3DEP window,
+  NOAA Atlas-14 rainfall via `pfdsClient`, SSURGO soils via `soils.js` + the `functions/api/soils.js`
+  proxy, and a section from `channelSection.js`) — producing BOTH the 1% and the 0.2% (500-yr)
+  elevations Waller ordinance §5.C(3) mandates, from ONE derivation. It reaches the panel as a
+  `wseProviders` registry entry (`screening-bfe`), so the existing estimate row, provider labels and
+  cross-provider delta render it with no new surface. `channelSection.js` also carries the
+  watershed-TRUNCATION guard: a basin running off the terrain window returns an honest unknown rather
+  than an understated flood level. The §5.C(3) submittal trigger itself is a VERIFIED, firing rule —
+  `floodplainRules.waller.bfeDataRequirement` + `bfeDataRequirementFor` / `atlas14Mandated`.
 - Pond economics optimizer (NEW-D, Phase D): `pondOptimizer.js` — searches depth × placement pond
   configurations (deeper-smaller vs shallower-bigger, pond-cut-as-pad-fill dirt balance) under
   constraints (max depth, Phase-B groundwater ceiling, 30-ft maintenance berm, pipeline-corridor

@@ -1152,18 +1152,26 @@ export const EST_EBFE_NOTE =
   "Estimated BFE — FEMA InFRM Base Level Engineering (regional screening estimate), screening only. This is an ESTIMATE for a FEMA Zone A / unstudied area, NOT a regulatory or published BFE: a sealed engineering (H&H / Atlas-14) study and the reviewing agency set the final value. Type a BFE to override.";
 export const EST_MAAPNEXT_NOTE =
   "Estimated BFE — HCFCD MAAPnext model (Harris County), screening only. MAAPnext model elevations often run higher than the effective FIRM and are enforced by Harris-area reviewers, so this takes precedence over the InFRM / grade estimates here — but it is still an ESTIMATE, not a regulatory or published BFE: a sealed engineering study and the reviewing agency set the final value. Type a BFE to override.";
+/* NEW-1 (B1057 completion) — Planyr's own screening study. The honesty requirements for this one
+ * are stricter than for the agency estimates, because this number is OURS: it names the method, it
+ * names what is NOT modelled, and it says outright that it is not a substitute for a sealed study.
+ * The NOT_MODELED list and the CLOMR/LOMR sentence ride the result object itself (screeningBfe.js)
+ * so a call site cannot show the elevation without them. */
+export const EST_SCREENING_BFE_NOTE =
+  "SCREENING ESTIMATE computed by Planyr — NOT engineering-grade and NOT a substitute for a sealed engineer's study. Hydrology: NRCS unit-hydrograph peak over an SCS curve-number runoff, NOAA Atlas 14 rainfall, and a watershed delineated from the USGS 3DEP terrain grid. Hydraulics: Manning normal depth (steady uniform flow) over a cross-section sampled from that same terrain. NOT modelled: no field survey, no bridges or culverts, no ineffective-flow areas, no floodway encroachment analysis, no gauge calibration, and no backwater profile. The value carries an uncertainty RANGE (from the peak-rate-factor band) — read the range, not the midpoint. Type a BFE to override.";
 export const DERIVED_WSE100_DRAFT_NOTE =
   "This 1% (100-yr) water surface was read from Fort Bend County's Atlas-14 watershed-study rasters — DRAFT study results, a screening value only, never an effective or published elevation. Note the basis: Fort Bend's mitigation and FFE rules reference the EFFECTIVE (pre-Atlas-14) floodplain — the Atlas-14 value is a labeled stand-in for that basis, not the same number. Confirm before design; type a BFE to override.";
 
 /* B882 — the estimated-WSE source tags the accept-gated ghost writes as bfeSrc (one per
  * provider in the wseProviders registry). Uniform handling downstream: any of these is an
  * ESTIMATE (screening) — the warn-note + label are chosen by source, not hardcoded to one. */
-export const EST_WSE_SRCS = new Set(["est-boundary-grade", "est-ebfe", "est-fbcdd", "est-maapnext"]);
+export const EST_WSE_SRCS = new Set(["est-boundary-grade", "est-ebfe", "est-fbcdd", "est-maapnext", "est-screening-bfe"]);
 export const isEstimatedWseSrc = (src) => EST_WSE_SRCS.has(src);
 export const estWseNote = (src) => (
   src === "est-ebfe" ? EST_EBFE_NOTE
     : src === "est-maapnext" ? EST_MAAPNEXT_NOTE
     : src === "est-fbcdd" ? DERIVED_WSE100_DRAFT_NOTE
+    : src === "est-screening-bfe" ? EST_SCREENING_BFE_NOTE
     : EST_BOUNDARY_WSE_NOTE
 );
 
@@ -1180,6 +1188,12 @@ export const WSE_PROVIDER_LABEL = {
   "est-maapnext": "ESTIMATED (HCFCD MAAPnext model)", // B882
   "ebfe-wse02": "derived (FEMA InFRM EBFE — screening)", "ebfe-1pct": "derived (FEMA InFRM EBFE — screening)",
   "maapnext-wse02": "derived (HCFCD MAAPnext — screening)", // B882
+  // NEW-1 (B1057 completion). The 1% tag is an ACCEPTED-ESTIMATE src, so it must already read
+  // "ESTIMATED (…)" — callers render wseProvLabel's result directly rather than re-wrapping it
+  // (the B895 doubled-word bug). The 0.2% tag is a derived, non-accept-gated seam, so it follows
+  // the "derived (…)" style of its siblings.
+  "est-screening-bfe": "ESTIMATED (Planyr Atlas-14 screening study)",
+  "screening-bfe-wse02": "derived (Planyr Atlas-14 screening study)",
   "mixed": "mixed",
 };
 export const wseProvLabel = (p) => WSE_PROVIDER_LABEL[p] || p || "—";

@@ -7,6 +7,8 @@
  *
  * Precedence (highest → lowest):
  *   1. LOCAL DISTRICT model data where published, per county —
+ *   (NEW-1: Planyr's own screening study slots in at tier 2.5 — below the agency products, above
+ *    the grade proxy. See its registry entry for why.)
  *        • Harris:    HCFCD MAAPnext model  (often HIGHER than effective FIRM and enforced by
  *                     Harris-area reviewers, so it outranks EBFE and effective-style data)
  *        • Fort Bend: FBCDD Atlas-14 watershed study (DRAFT)
@@ -43,6 +45,18 @@ export const WSE_PROVIDERS = [
     id: "fema-ebfe", key: "ebfe", tier: "ebfe", county: null,
     label: "FEMA InFRM BLE (screening estimate)",
     wse1pctSrc: "est-ebfe", wse02Src: "ebfe-wse02",
+  },
+  {
+    /* NEW-1 (B1057 completion) — Planyr's OWN screening hydrology + hydraulics (screeningBfe.js
+     * driven by live inputs: a D8-delineated watershed, NOAA Atlas 14 rainfall, SSURGO soils and
+     * a 3DEP-sampled channel section). It ranks BELOW the published district models and FEMA's
+     * InFRM BLE — those are agency products and a reviewer will weigh them first — but ABOVE the
+     * grade estimate, because grade-at-the-Zone-A-boundary is a topographic proxy with no flow in
+     * it at all, whereas this actually routes a discharge through a section. It is the only
+     * provider that carries a 0.2% (500-yr) value derived from the SAME method as its 1%. */
+    id: "screening-bfe", key: "screeningBfe", tier: "screening", county: null,
+    label: "Planyr screening study (Atlas 14)",
+    wse1pctSrc: "est-screening-bfe", wse02Src: "screening-bfe-wse02",
   },
   {
     id: "grade", key: "grade", tier: "grade", county: null,

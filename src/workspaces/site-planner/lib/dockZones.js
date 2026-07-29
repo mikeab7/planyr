@@ -86,6 +86,44 @@ export function usableCourtSpan(full, bumpStart = 0, bumpEnd = 0) {
   return { along: Math.max(1, full - (bumpStart || 0) - (bumpEnd || 0)), shift: ((bumpStart || 0) - (bumpEnd || 0)) / 2 };
 }
 
+/* ---- Per-zone LENGTH along the wall (the trailer-parking fix).
+ *
+ * The chain shares ONE span by default — that is the deliberate 2026-06-30 owner fix that stopped
+ * the trailer parking over-hanging the truck court, and it stays the DEFAULT. What was missing is
+ * that it was also the ONLY behaviour: a trailer could never be any length other than exactly the
+ * court's, so "I can't make the trailer parking any different of a length than the truck court"
+ * was structurally true.
+ *
+ * Same derive-by-default / preserve-once-touched pattern as side parking and the dog-ears:
+ *   · no stored length  → the zone tracks the chain span (unchanged behaviour, to the foot);
+ *   · a stored length   → it is kept, CLAMPED to the wall but never reset, so shrinking the host
+ *                         past it renders the clamp and growing the host back springs it out again.
+ * PURE — the whole point is that this rule is unit-testable apart from the React canvas.
+ */
+export function zoneAlongSpan(stored, chainAlong, fullAlong) {
+  const v = Number(stored);
+  if (!Number.isFinite(v) || v <= 0) return chainAlong;   // untouched → tracks the court
+  return Math.min(v, fullAlong);                          // clamped to the wall, never forgotten
+}
+
+/** Extent of a rotated box {w,h,rot} projected onto a unit direction {x,y} — feet. */
+export function boxExtentAlong(box, unit) {
+  const ax = rot2((box.w || 0) / 2, 0, box.rot || 0);
+  const ay = rot2(0, (box.h || 0) / 2, box.rot || 0);
+  return 2 * (Math.abs(ax.x * unit.x + ax.y * unit.y) + Math.abs(ay.x * unit.x + ay.y * unit.y));
+}
+
+/**
+ * Did a resize actually change the zone's ALONG-wall extent (i.e. did the user drag THAT axis)?
+ * Returns the length to STORE, or null to leave the zone tracking the chain. Without this test a
+ * plain depth drag would silently pin the length at whatever it happened to be, and the zone would
+ * stop following the court from then on.
+ */
+export function resizedAlongLen(prevAlong, nextAlong, tol = 0.5) {
+  if (!Number.isFinite(prevAlong) || !Number.isFinite(nextAlong)) return null;
+  return Math.abs(nextAlong - prevAlong) > tol ? Math.max(1, Math.round(nextAlong)) : null;
+}
+
 // Geometry of the i-th zone (0..2) on `side` of building box `b` ({cx,cy,w,h,rot}),
 // given the ordered `depths` of the zones present on that side. Each zone sits
 // flush beyond the previous one (cumulative inner depth), full wall length along
@@ -95,10 +133,12 @@ export function usableCourtSpan(full, bumpStart = 0, bumpEnd = 0) {
 // overrides its wall-length span and {alongShift} offsets its centre along the wall. Omit it and the
 // zone keeps the full wall length, so a 4-arg call (and every existing caller/test) is unchanged.
 // The truck court (zone 0) AND every zone stacked outward from it (trailer parking, buffer, appended
-// road/landscape) honour the SAME override, so the whole stack tracks the court's clear span between
-// the bump-outs — the trailer parking no longer over-hangs the court (owner fix, 2026-06-30). The
-// caller chooses which zones to trim by passing or withholding `opts` (relayoutSide passes the
-// court's resolved span to every chain member).
+// road/landscape) honour the SAME override BY DEFAULT, so the whole stack tracks the court's clear
+// span between the bump-outs — the trailer parking no longer over-hangs the court (owner fix,
+// 2026-06-30). The caller chooses which zones to trim by passing or withholding `opts`
+// (relayoutSide passes the court's resolved span to every chain member). `opts.alongs[i]` is the
+// per-zone ESCAPE from that shared span: a length the user set on that zone specifically, which
+// wins over the chain span and is clamped (never reset) to the wall — see zoneAlongSpan.
 // Generalized (B495): lay the i-th zone of an ARBITRARY chain whose per-zone layout kinds are
 // `kinds` ("strip" | "trailer"; road/buffer/sidewalk/court are all "strip" — a road along a wall is
 // geometrically a strip). The cumulative-outward math is identical to the old layoutZone.
@@ -107,7 +147,10 @@ export function layoutZoneByKind(b, side, i, depths, kinds = [], opts = {}) {
   const horiz = ny !== 0;                       // top/bottom wall → zones run along X
   const fullAlong = horiz ? b.w : b.h;          // full wall length
   const useOverride = Number.isFinite(opts.along); // any zone may pull in to the clear bump-out span
-  const along = useOverride ? opts.along : fullAlong;
+  const chainAlong = useOverride ? opts.along : fullAlong;
+  // Per-zone length override (`opts.alongs[i]`): a zone the user has actually dragged/typed a
+  // length onto keeps it, instead of being forced to the chain span. Absent → tracks the chain.
+  const along = zoneAlongSpan(opts.alongs && opts.alongs[i], chainAlong, fullAlong);
   const alongShift = useOverride && Number.isFinite(opts.alongShift) ? opts.alongShift : 0;
   const inner = depths.slice(0, i).reduce((s, d) => s + (d || 0), 0); // depth nearer the wall
   const d = depths[i];

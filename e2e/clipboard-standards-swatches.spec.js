@@ -4,7 +4,7 @@
  *               so removing the badge strands nothing.
  *  NEW-2/NEW-6  ONE general clipboard: Ctrl+C/Ctrl+V copies whatever is selected (a callout, a
  *               parcel, a building with the elements bonded to it) with fresh ids, in one undo frame.
- *  NEW-4        the recently-used swatch row sits beside the color wheel and applies on click.
+ *  NEW-4        the colour chip opens a picker whose palette + recently-used grids apply on click.
  *
  * Everything here is reachable signed-out with no external GIS, so it runs in this sandbox rather
  * than being parked for a live pass (ATTEMPT-BEFORE-YOU-PARK).
@@ -236,10 +236,15 @@ test.describe("Ctrl+C / Ctrl+V copies whatever is selected (NEW-2 / NEW-6)", () 
   });
 });
 
-/* ------------------------------------------- NEW-3: Standards scope + retroactive apply */
+/* ---------------- Standards: ONE Apply + ONE scope for the whole panel, in a sticky footer */
 
-test.describe("Standards: Apply to existing + default scope (NEW-3)", () => {
-  test("changing a parcel standard offers Apply, which restyles EVERY existing parcel in one undo frame", async ({ page }) => {
+const openPicker = async (page, nth = 0) => {
+  await page.getByRole("button", { name: /color$/i }).nth(nth).click();
+  return page.getByRole("group", { name: "Palette colors" }).first();
+};
+
+test.describe("Standards: one Apply + one scope for the whole panel", () => {
+  test("changing a parcel standard offers ONE Apply, which restyles EVERY existing parcel in one undo frame", async ({ page }) => {
     const errors = [];
     page.on("pageerror", (e) => errors.push(String(e)));
     await startBlank(page);
@@ -259,16 +264,21 @@ test.describe("Standards: Apply to existing + default scope (NEW-3)", () => {
     await page.getByRole("button", { name: "Standards", exact: true }).click();
     await page.getByRole("button", { name: /^Parcels/ }).click();
 
-    // Change the parcel outline standard through its color wheel's recents row (one click).
-    const outline = page.getByRole("group", { name: "Recently used colors" }).first();
-    await expect(outline).toBeVisible();
-    const swatch = outline.getByRole("button").nth(2);
+    // No setting carries its own Apply / scope row any more — there is exactly ONE of each.
+    await expect(page.getByTestId("standards-bar")).toHaveCount(1);
+    await expect(page.getByTestId("standards-apply")).toHaveCount(1);
+
+    // Change the parcel outline standard from inside the picker the colour chip opens.
+    const palette = await openPicker(page, 0);
+    await expect(palette).toBeVisible();
+    const swatch = palette.getByRole("button").nth(2);
     const wanted = (await swatch.getAttribute("title")).toLowerCase();
     await swatch.click();
+    await expect(palette).toBeHidden();                     // a pick closes the popover
 
-    // The Apply chip appears with a live count of what it would change — and applies it.
-    const apply = page.getByRole("button", { name: /^Apply \d+$/ }).first();
-    await expect(apply).toBeVisible();
+    // The ONE Apply carries a live count of the objects it would change — and applies them.
+    const apply = page.getByTestId("standards-apply");
+    await expect(apply).toBeEnabled();
     await apply.click();
 
     await expect.poll(async () => {
@@ -276,10 +286,35 @@ test.describe("Standards: Apply to existing + default scope (NEW-3)", () => {
       return (s.parcels || []).every((p) => (p.stroke || "").toLowerCase() === wanted);
     }).toBe(true);
 
-    // A short toast confirms it and carries an Undo (never a modal, never a paragraph).
-    const undo = page.getByTestId("standards-apply-undo");
-    await expect(page.getByText(/^Applied to \d+ parcels?$/)).toBeVisible();
-    await undo.click();
+    // A short toast confirms it and carries an Undo (never a modal, never a paragraph) — and it
+    // is anchored LOW AND LEFT in the canvas, not over the middle of the plan.
+    const toast = page.getByTestId("standards-apply-toast");
+    await expect(page.getByText(/^Applied to \d+ objects?$/)).toBeVisible();
+    const tb = await toast.boundingBox();
+    const cb = await canvas(page).boundingBox();
+    expect(tb.x).toBeLessThan(cb.x + cb.width * 0.4);        // to one side, not optically centred
+    expect(tb.y).toBeGreaterThan(cb.y + cb.height * 0.6);    // low
+    expect(tb.x).toBeGreaterThanOrEqual(cb.x - 1);           // inside the canvas, never over a panel
+
+    // …and it stays out of the plan's centre when the panel CLOSES (the pane widens under it)
+    // and at a narrow window, where the pane is the whole width.
+    await page.getByRole("button", { name: "Standards", exact: true }).click();   // close the panel
+    await expect(toast).toBeVisible();
+    const cb2 = await canvas(page).boundingBox();
+    const tb2 = await toast.boundingBox();
+    expect(tb2.x).toBeGreaterThanOrEqual(cb2.x - 1);
+    expect(tb2.x).toBeLessThan(cb2.x + cb2.width * 0.4);
+    expect(tb2.y + tb2.height).toBeLessThan(cb2.y + cb2.height);   // never off the bottom
+
+    await page.setViewportSize({ width: 720, height: 800 });
+    await expect(toast).toBeVisible();
+    const cb3 = await canvas(page).boundingBox();
+    const tb3 = await toast.boundingBox();
+    expect(tb3.x).toBeGreaterThanOrEqual(cb3.x - 1);
+    expect(tb3.x + tb3.width).toBeLessThanOrEqual(cb3.x + cb3.width + 1);         // never overflows
+    expect(tb3.y).toBeGreaterThan(cb3.y + cb3.height * 0.5);                      // still low
+
+    await page.getByTestId("standards-apply-undo").click();
     await expect.poll(async () => {
       const s = await site(page);
       return (s.parcels || []).some((p) => (p.stroke || "").toLowerCase() !== wanted);
@@ -287,45 +322,59 @@ test.describe("Standards: Apply to existing + default scope (NEW-3)", () => {
     expect(errors).toEqual([]);
   });
 
-  test("the scope chips are short, and switching to All moves the default off this project", async ({ page }) => {
+  test("ONE scope governs where the NEXT change is stored — and switching it moves nothing", async ({ page }) => {
     const errors = [];
     page.on("pageerror", (e) => errors.push(String(e)));
     await startBlank(page);
     await page.getByRole("button", { name: "Standards", exact: true }).click();
     await page.getByRole("button", { name: /^Parcels/ }).click();
 
-    const project = page.getByRole("button", { name: "Project", exact: true }).first();
-    const all = page.getByRole("button", { name: "All", exact: true }).first();
+    const bar = page.getByTestId("standards-bar");
+    const project = bar.getByRole("button", { name: "Project", exact: true });
+    const all = bar.getByRole("button", { name: "All", exact: true });
     await expect(project).toBeVisible();
     await expect(all).toBeVisible();
+    // The scope pair exists ONCE for the panel, not once per setting.
+    await expect(page.getByRole("button", { name: "Project", exact: true })).toHaveCount(1);
 
-    // Set a project-scope value first, then promote it to the account scope.
-    const row = page.getByRole("group", { name: "Recently used colors" }).first();
-    const swatch = row.getByRole("button").nth(3);
-    const wanted = (await swatch.getAttribute("title")).toLowerCase();
-    await swatch.click();
-    await expect(project).toHaveAttribute("aria-pressed", "true");
-
-    await all.click();
-    await expect(all).toHaveAttribute("aria-pressed", "true");
-    // Promoting DROPS the project's own copy, so this plan keeps following the account default.
-    await expect.poll(async () => {
-      const s = await site(page);
-      return (s.settings?.parcelStyle || {}).stroke;
-    }).toBeUndefined();
-    // …and the value itself is still what's in force (read back through the account store).
-    await expect.poll(() => page.evaluate(() => {
+    const accountStroke = () => page.evaluate(() => {
       const p = JSON.parse(localStorage.getItem("planyr:userPrefs:v1") || "{}");
       return (p.planStandards?.parcelStyle?.stroke || "").toLowerCase();
-    })).toBe(wanted);
+    });
+    const chipColor = () => page.getByRole("button", { name: /^Outline color$/i }).first()
+      .evaluate((el) => getComputedStyle(el).backgroundColor);
+    const rgb = (hex) => `rgb(${[1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16)).join(", ")})`;
+
+    // Set a value at Project scope: it lands on the PLAN, not on the account.
+    const palette = await openPicker(page, 0);
+    const swatch = palette.getByRole("button").nth(3);
+    const first = (await swatch.getAttribute("title")).toLowerCase();
+    await swatch.click();
+    await expect(project).toHaveAttribute("aria-pressed", "true");
+    await expect.poll(chipColor).toBe(rgb(first));
+    expect(await accountStroke()).toBe("");                 // nothing went account-wide
+
+    // Flipping the scope to All must MOVE NOTHING — it only governs where the NEXT change goes.
+    await all.click();
+    await expect(all).toHaveAttribute("aria-pressed", "true");
+    expect(await accountStroke()).toBe("");
+    await expect.poll(chipColor).toBe(rgb(first));          // the value in force is unchanged
+
+    // …and the NEXT change DOES go to the account store.
+    const palette2 = await openPicker(page, 0);
+    const swatch2 = palette2.getByRole("button").nth(5);
+    const wanted = (await swatch2.getAttribute("title")).toLowerCase();
+    await swatch2.click();
+    await expect.poll(accountStroke).toBe(wanted);
+    await expect.poll(chipColor).toBe(rgb(wanted));         // …and it is what's in force here too
     expect(errors).toEqual([]);
   });
 });
 
-/* ----------------------------------------------------- NEW-4: recently-used swatches */
+/* ------------------------------ the colour picker: swatches live INSIDE it, recents mean recents */
 
-test.describe("recently-used color swatches (NEW-4)", () => {
-  test("the row sits beside the wheel, is seeded so it's never blank, and applies on click", async ({ page }) => {
+test.describe("the colour control is a chip that opens a picker", () => {
+  test("the panel row shows only the chip; the palette + recents live in the popover", async ({ page }) => {
     const errors = [];
     page.on("pageerror", (e) => errors.push(String(e)));
     await startBlank(page);
@@ -334,26 +383,73 @@ test.describe("recently-used color swatches (NEW-4)", () => {
     const b = await drawBuilding(page, box.x + 260, box.y + 200, box.x + 500, box.y + 340);
     await page.mouse.dblclick(b.cx, b.cy);                          // open Properties
 
-    const row = page.getByRole("group", { name: "Recently used colors" }).first();
-    await expect(row).toBeVisible();                                 // seeded from the default palette
-    const swatches = row.getByRole("button");
-    expect(await swatches.count()).toBeGreaterThan(1);
+    // Nothing is on the panel but the chip — no swatch row beside it.
+    await expect(page.getByRole("group", { name: "Palette colors" })).toHaveCount(0);
+    await expect(page.getByRole("group", { name: "Recently used colors" })).toHaveCount(0);
 
-    const target = swatches.nth(1);
-    const wanted = await target.getAttribute("title");
+    const chip = page.getByRole("button", { name: /^Fill color$/i }).first();
+    await chip.click();
+    const palette = page.getByRole("group", { name: "Palette colors" }).first();
+    await expect(palette).toBeVisible();
+    // On a fresh browser nothing has been used yet, so the RECENTS section is absent entirely
+    // (never padded out of the palette — that made the list lie about what had been used).
+    await expect(page.getByRole("group", { name: "Recently used colors" })).toHaveCount(0);
+
+    const target = palette.getByRole("button").nth(1);
+    const wanted = (await target.getAttribute("title")).toLowerCase();
     await target.click();                                            // applies immediately
 
     await expect.poll(async () => {
       const s = await site(page);
       const el = (s.els || []).find((e) => e.type === "building");
       return (el?.fill || el?.stroke || "").toLowerCase();
-    }).toBe(wanted.toLowerCase());
+    }).toBe(wanted);
 
-    // The color just used is now FIRST in the shared list — that's the whole point of the row.
+    // The colour just used is now recorded — and shows up as a RECENTS section next time.
     await expect.poll(() => page.evaluate(() => {
       const l = JSON.parse(localStorage.getItem("planyr:colorRecents:v1") || "[]");
       return l[0] || "";
-    })).toBe(wanted.toLowerCase());
+    })).toBe(wanted);
+    await chip.click();
+    await expect(page.getByRole("group", { name: "Recently used colors" }).first()).toBeVisible();
+
+    // Escape closes it, and focus is not trapped.
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("group", { name: "Palette colors" })).toHaveCount(0);
+    expect(errors).toEqual([]);
+  });
+
+  test("a live picking session records ONE recent, not one per shade the cursor crosses", async ({ page }) => {
+    const errors = [];
+    page.on("pageerror", (e) => errors.push(String(e)));
+    await startBlank(page);
+    const box = await canvas(page).boundingBox();
+
+    const b = await drawBuilding(page, box.x + 260, box.y + 200, box.x + 500, box.y + 340);
+    await page.mouse.dblclick(b.cx, b.cy);
+    await page.getByRole("button", { name: /^Fill color$/i }).first().click();
+
+    const wheel = page.getByLabel("Custom color").first();
+    const shades = ["#ff0000", "#ff3300", "#ff6600", "#ff9900", "#ffcc00", "#ffff00"];
+    for (const hex of shades) {
+      // What the OS wheel does while the cursor moves through the spectrum: fire per shade.
+      await wheel.evaluate((el, v) => {
+        el.value = v;
+        el.dispatchEvent(new Event("input", { bubbles: true }));
+        el.dispatchEvent(new Event("change", { bubbles: true }));
+      }, hex);
+    }
+    // Live preview still recolours the object — that behaviour is intentional and stays.
+    await expect.poll(async () => {
+      const el = ((await site(page)).els || []).find((e) => e.type === "building");
+      return (el?.fill || "").toLowerCase();
+    }).toBe("#ffff00");
+    // …but nothing has reached the recents list yet.
+    expect(await page.evaluate(() => JSON.parse(localStorage.getItem("planyr:colorRecents:v1") || "[]"))).toEqual([]);
+
+    await page.keyboard.press("Escape");                             // end the picking session
+    await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem("planyr:colorRecents:v1") || "[]")))
+      .toEqual(["#ffff00"]);                                         // exactly ONE, the final value
     expect(errors).toEqual([]);
   });
 });

@@ -3,6 +3,7 @@ import {
   DOCK_ZONES, MAX_DOCK_ZONES, ZONE_CATALOG, zoneDepthDefaults, zoneDepthDefault, catalogDepthDefault,
   layoutZone, layoutZoneByKind, layoutStack,
   usableCourtSpan, dockSidesFor, footprintDepth, footprintLength, footprintAxes, strandedZoneIds, pruneStrandedZones,
+  zoneAlongSpan, boxExtentAlong, resizedAlongLen,
 } from "../src/workspaces/site-planner/lib/dockZones.js";
 
 const near = (a, b, eps = 1e-6) => Math.abs(a - b) < eps;
@@ -388,5 +389,127 @@ describe("pruneStrandedZones — trailer parking is dock-side-only (B416, reques
     const dock = new Set(dockSidesFor(b).dockSides);
     for (const side of trailerSidesIn(out, b)) expect(dock.has(side)).toBe(true);
     expect(trailerSidesIn(out, b)).toEqual(["bottom"]); // only the single dock side remains
+  });
+});
+
+/* ------------------------------------------------- per-zone LENGTH along the wall (the owner bug)
+ *
+ * "I can't make the trailer parking any different of a length than the truck court, and I should
+ * be able to adjust it."
+ *
+ * The chain sharing ONE span is the deliberate 2026-06-30 fix that stopped the trailer over-hanging
+ * the court, so it STAYS the default. What was missing is the escape: a zone the user actually
+ * sized keeps its length — the same derive-by-default / preserve-once-touched rule side parking and
+ * the dog-ears already use.
+ */
+describe("zoneAlongSpan — derive by default, preserve once touched", () => {
+  const WALL = 900, COURT = 772;
+
+  it("an untouched zone TRACKS the court's resolved span (unchanged behaviour)", () => {
+    expect(zoneAlongSpan(undefined, COURT, WALL)).toBe(COURT);
+    expect(zoneAlongSpan(null, COURT, WALL)).toBe(COURT);
+    expect(zoneAlongSpan(0, COURT, WALL)).toBe(COURT);
+    expect(zoneAlongSpan("x", COURT, WALL)).toBe(COURT);
+  });
+  it("a user-set length WINS over the court's span — shorter…", () => {
+    expect(zoneAlongSpan(500, COURT, WALL)).toBe(500);
+  });
+  it("…and LONGER, which the shared-span model made structurally impossible", () => {
+    expect(zoneAlongSpan(860, COURT, WALL)).toBe(860);
+  });
+  it("is CLAMPED to the wall when the host shrinks past it — but never RESET", () => {
+    // Host shrinks: the wall is now 700, so 900 renders as 700…
+    expect(zoneAlongSpan(900, 700, 700)).toBe(700);
+    // …and the stored 900 is still the stored value, so growing the host springs it back out.
+    expect(zoneAlongSpan(900, 700, 1000)).toBe(900);
+  });
+});
+
+describe("layoutZoneByKind — a trailer whose length was set stops tracking the court", () => {
+  const b = { cx: 0, cy: 0, w: 900, h: 400, rot: 0 };
+  const depths = [135, 50];
+  const kinds = ["strip", "trailer"];
+  const courtOpts = { along: 772, alongShift: 0 };   // the court's clear span between bump-outs
+
+  it("DEFAULT: the trailer is exactly as long as the court (the live-plan symptom)", () => {
+    const court = layoutZoneByKind(b, "bottom", 0, depths, kinds, courtOpts);
+    const trailer = layoutZoneByKind(b, "bottom", 1, depths, kinds, courtOpts);
+    expect(court.w).toBe(772);
+    expect(trailer.w).toBe(772);                    // court e26duuwgj w=772 / trailer e27duuwgj w=772
+  });
+
+  it("a stored trailer length is honoured while the court keeps its own span", () => {
+    const opts = { ...courtOpts, alongs: [null, 520] };
+    expect(layoutZoneByKind(b, "bottom", 0, depths, kinds, opts).w).toBe(772);
+    expect(layoutZoneByKind(b, "bottom", 1, depths, kinds, opts).w).toBe(520);
+  });
+
+  it("survives a COURT DEPTH change — the trailer keeps its length and just moves outward", () => {
+    const opts = { ...courtOpts, alongs: [null, 520] };
+    const before = layoutZoneByKind(b, "bottom", 1, depths, kinds, opts);
+    const after = layoutZoneByKind(b, "bottom", 1, [200, 50], kinds, opts);
+    expect(after.w).toBe(520);
+    expect(after.cy).toBeGreaterThan(before.cy);    // pushed out by the deeper court, not resized
+  });
+
+  it("survives a BUMP-OUT add and delete — the court's span moves, the trailer's does not", () => {
+    const opts = { alongs: [null, 520] };
+    const withBumps = layoutZoneByKind(b, "bottom", 1, depths, kinds, { ...opts, along: 640, alongShift: 12 });
+    const noBumps = layoutZoneByKind(b, "bottom", 1, depths, kinds, { ...opts, along: 900, alongShift: 0 });
+    expect(withBumps.w).toBe(520);
+    expect(noBumps.w).toBe(520);
+    // …while an UNTOUCHED trailer does follow both, exactly as it does today.
+    expect(layoutZoneByKind(b, "bottom", 1, depths, kinds, { along: 640, alongShift: 12 }).w).toBe(640);
+    expect(layoutZoneByKind(b, "bottom", 1, depths, kinds, { along: 900, alongShift: 0 }).w).toBe(900);
+  });
+
+  it("survives a HOST RESIZE, clamping to the wall rather than forgetting the length", () => {
+    const opts = { along: 772, alongShift: 0, alongs: [null, 860] };
+    expect(layoutZoneByKind(b, "bottom", 1, depths, kinds, opts).w).toBe(860);
+    const small = { ...b, w: 700 };                 // host shrinks past the set length
+    expect(layoutZoneByKind(small, "bottom", 1, depths, kinds, { along: 640, alongShift: 0, alongs: [null, 860] }).w).toBe(700);
+    const grown = { ...b, w: 1200 };                // …and springs back when it grows again
+    expect(layoutZoneByKind(grown, "bottom", 1, depths, kinds, { along: 1100, alongShift: 0, alongs: [null, 860] }).w).toBe(860);
+  });
+
+  it("works on a VERTICAL dock wall too (the trailer is rotated, its w is still the length)", () => {
+    const tall = { cx: 0, cy: 0, w: 400, h: 900, rot: 0 };
+    const g = layoutZoneByKind(tall, "left", 1, depths, kinds, { along: 772, alongShift: 0, alongs: [null, 520] });
+    expect(g.w).toBe(520);
+    expect(g.rot).toBe(90);
+  });
+
+  it("leaves every existing 5-arg / no-alongs caller byte-identical", () => {
+    const a = layoutZoneByKind(b, "bottom", 1, depths, kinds, courtOpts);
+    const c = layoutZoneByKind(b, "bottom", 1, depths, kinds, { ...courtOpts, alongs: [] });
+    expect(c).toEqual(a);
+  });
+});
+
+describe("resizedAlongLen — only a drag on the LENGTH axis pins a length", () => {
+  it("a pure depth drag stores nothing, so the zone keeps tracking the court", () => {
+    expect(resizedAlongLen(772, 772)).toBe(null);
+    expect(resizedAlongLen(772, 772.3)).toBe(null);   // sub-foot jitter is not intent
+  });
+  it("a real length drag returns the rounded feet to store", () => {
+    expect(resizedAlongLen(772, 640.4)).toBe(640);
+    expect(resizedAlongLen(772, 861.6)).toBe(862);
+  });
+  it("never returns a degenerate length", () => {
+    expect(resizedAlongLen(772, 0.2)).toBe(1);
+  });
+  it("is null when either extent is unknown", () => {
+    expect(resizedAlongLen(NaN, 640)).toBe(null);
+    expect(resizedAlongLen(772, undefined)).toBe(null);
+  });
+});
+
+describe("boxExtentAlong — the projection both the resize capture and the layout share", () => {
+  it("measures an unrotated box on each axis", () => {
+    expect(boxExtentAlong({ w: 772, h: 50, rot: 0 }, { x: 1, y: 0 })).toBeCloseTo(772, 6);
+    expect(boxExtentAlong({ w: 772, h: 50, rot: 0 }, { x: 0, y: 1 })).toBeCloseTo(50, 6);
+  });
+  it("follows the box's rotation, so an angled building measures its own axes", () => {
+    expect(boxExtentAlong({ w: 772, h: 50, rot: 90 }, { x: 0, y: 1 })).toBeCloseTo(772, 6);
   });
 });

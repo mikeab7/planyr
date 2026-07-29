@@ -1,10 +1,10 @@
 {
   "_": [
-    "NEW-5 \u2014 the PANEL-BREVITY budgets. See /CLAUDE.md \u2192 PANEL-BREVITY for the rule.",
+    "NEW-5 — the PANEL-BREVITY budgets. See /CLAUDE.md → PANEL-BREVITY for the rule.",
     "Set at the measured value with ZERO headroom, deliberately: adding a visible sentence to any",
     "of these surfaces turns CI red, so the accumulation has to be a decision instead of a drift.",
     "",
-    "To get back under budget, COLLAPSE \u2014 move the sentence into the group's 'Assumptions & method'",
+    "To get back under budget, COLLAPSE — move the sentence into the group's 'Assumptions & method'",
     "disclosure (keyedNote), into a title=/basis= hover, or inside a <Collapse>. All three are",
     "budget-exempt because all three keep the fact reachable. DELETING a fact to fit is forbidden.",
     "",
@@ -12,7 +12,23 @@
     "saying which sentence was added, why it must be visible by default, and what was removed.",
     "",
     "Baseline history (jsx regions, total): 171 lines / 14728 chars before NEW-2's consolidation;",
-    "156 / 13002 after \u2014 a net reduction even though NEW-4 added the flood-level sensitivity ladder."
+    "156 / 13002 after — a net reduction even though NEW-4 added the flood-level sensitivity ladder.",
+    "",
+    "RAISE 2026-07-29 (B1057 completion, NEW-2/NEW-3): yield-stormwater-notes 145→146 lines,",
+    "12502→12576 chars — +1 line / +74 chars, and this is the WHOLE increase for a feature that",
+    "added an entire hydrology+hydraulics readout. Justification, per the rule:",
+    "  ADDED: one sentence — 'Atlas-14 BFE + 500-yr data REQUIRED with the submittal — Waller County",
+    "    Flood Damage Prevention Ordinance §5.C(3).' It must be VISIBLE, not folded: it is not an",
+    "    explanation of a number already on screen, it is a SUBMITTAL REQUIREMENT that changes the",
+    "    project's schedule and budget, and its whole value is being seen early rather than in review.",
+    "    It renders ONLY where it actually fires (approximate A zone, over the >50-lot / >5-acre",
+    "    threshold), so it costs nothing on any other site.",
+    "  COLLAPSED TO ZERO instead of spending budget: the screening study's VALUE and its DELTA vs the",
+    "    other sources reuse the existing estimated-WSE provider row + the existing cross-provider",
+    "    disagreement note (0 new lines); the study's method, live inputs, uncertainty range and the",
+    "    NOT-MODELLED list ride that row's hover (screeningStudyNote); the study's failure/incomplete",
+    "    states were folded into that same hover instead of taking a warn line of their own; and the",
+    "    trigger sentence itself was collapsed from a two-branch ternary to one string."
   ],
   "measuredOn": "2026-07-28",
   "regions": {
@@ -25,8 +41,8 @@
       "maxChars": 500
     },
     "yield-stormwater-notes": {
-      "maxLines": 145,
-      "maxChars": 12502
+      "maxLines": 146,
+      "maxChars": 12576
     },
     "lib-pond-verdict": {
       "maxLines": 5,

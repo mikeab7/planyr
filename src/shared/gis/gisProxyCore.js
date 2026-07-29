@@ -30,8 +30,11 @@ export const DEFAULT_TTL_MS = 24 * 60 * 60 * 1000;
 // B518: hctx.net (HCFCD ROW raster), nationalmap.gov (USGS 3DEP elevation), harcresearch.org
 // (HARC MUD boundaries) were missing, so those raster overlays 400'd at the proxy and never got
 // B445 outage caching (they fell back to a direct uncached fetch every paint). Added here.
+// B1079: quiddity.com hosts the Brookshire–Katy Drainage District's GIS (gisclient.quiddity.com).
+// It MUST be here or BKDD gets zero outage caching AND, worse, pays its 16.5–18.3 s cold ArcGIS
+// Server spin-up in the user's browser on every first view instead of once, server-side.
 export const ALLOWED_GIS_HOST_RE =
-  /(?:^|\.)(?:arcgis\.com|arcgisonline\.com|fema\.gov|fws\.gov|usgs\.gov|epa\.gov|texas\.gov|tnris\.org|tx\.gov|houstontx\.gov|harriscountytx\.gov|hcfcd\.org|fortbendcountytx\.gov|fbcad\.org|chambers-county\.com|h-gac\.com|hctx\.net|nationalmap\.gov|harcresearch\.org)$/i;
+  /(?:^|\.)(?:arcgis\.com|arcgisonline\.com|fema\.gov|fws\.gov|usgs\.gov|epa\.gov|texas\.gov|tnris\.org|tx\.gov|houstontx\.gov|harriscountytx\.gov|hcfcd\.org|fortbendcountytx\.gov|fbcad\.org|chambers-county\.com|h-gac\.com|hctx\.net|nationalmap\.gov|harcresearch\.org|quiddity\.com)$/i;
 
 /* URL-safe base64 (no +,/,= so it survives a URL path segment untouched). The values encoded
  * here are plain ASCII https URLs, so btoa/atob (present in browsers, Cloudflare Workers, and

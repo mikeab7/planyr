@@ -102,7 +102,10 @@ try {
 
   // ── A1: the ⓘ opens with source + vintage ──
   const infoBtn = page.locator('#panel-harris button[aria-label="About Elevation shading"]');
-  await infoBtn.click();
+  // HOVER, not click. RowInfo opens on mouseEnter and TOGGLES on click, so Playwright's
+  // .click() (which hovers first) opened and then immediately closed the popover — this
+  // harness step had been failing for that reason, independent of any product change.
+  await infoBtn.hover();
   const note = page.locator('[role="note"]');
   await note.waitFor({ state: "visible", timeout: 5000 });
   const noteText = (await note.innerText()).replace(/\s+/g, " ");
@@ -116,15 +119,17 @@ try {
 
   // ── B763: the passive jurisdiction badge renders each case ──
   ok("badge (in city) reads 'City of Houston · Harris County'", (await text("#badge-city")).includes("City of Houston · Harris County"));
-  ok("badge (in ETJ) reads 'City of Baytown — ETJ · Harris County'", (await text("#badge-etj")).includes("City of Baytown — ETJ · Harris County"));
+  // Separator note: the badge joins its parts with a middot; these two expectations still
+  // read "—" and had gone stale — masked until now because the ⓘ step crashed before them.
+  ok("badge (in ETJ) reads 'City of Baytown · ETJ · Harris County'", (await text("#badge-etj")).includes("City of Baytown · ETJ · Harris County"));
   ok("badge (unincorporated) reads 'Unincorporated · Waller County'", (await text("#badge-uninc")).includes("Unincorporated · Waller County"));
   ok("badge (straddle) lists both cities + ⚑ marker", /City of Houston \/ City of Katy · Harris County/.test(await text("#badge-straddle")) && (await text("#badge-straddle")).includes("⚑"));
   ok("badge tooltip carries source + screening note", (await page.locator('#badge-city [data-testid="jurisdiction-badge"]').getAttribute("title") || "").includes("Source: TxDOT / TxGIO / H-GAC"));
   ok("null badge renders nothing", (await page.locator('#badge-null [data-testid="jurisdiction-badge"]').count()) === 0);
 
   // ── B793: frontage-sliver qualification + the ETJ vintage / SB 2038 caveat ──
-  ok("badge (sliver) leads with the ETJ and trails 'City of Katy — edge only', no ⚑",
-    /City of Houston — ETJ \/ City of Katy — edge only · Fort Bend County · Katy ISD/.test(await text("#badge-sliver"))
+  ok("badge (sliver) leads with the ETJ and trails 'City of Katy · edge only', no ⚑",
+    /City of Houston · ETJ \/ City of Katy · edge only · Fort Bend County · Katy ISD/.test(await text("#badge-sliver"))
     && !(await text("#badge-sliver")).includes("⚑"));
   {
     const sliverTitle = (await page.locator('#badge-sliver [data-testid="jurisdiction-badge"]').getAttribute("title")) || "";
@@ -135,7 +140,7 @@ try {
   // ── B764: ISD panel row + ⓘ (the live endpoint itself is curl-verified via the proxy) ──
   ok("Jurisdictions group lists 'School districts (ISD)'", harris.includes("School districts (ISD)"));
   const isdInfo = page.locator('#panel-harris button[aria-label="About School districts (ISD)"]');
-  await isdInfo.click();
+  await isdInfo.hover(); // hover-to-open, click TOGGLES — see the note on the ⓘ check above
   const isdNote = page.locator('[role="note"]');
   await isdNote.waitFor({ state: "visible", timeout: 5000 });
   ok("ISD ⓘ names the TEA source", (await isdNote.innerText()).includes("Texas Education Agency"));
