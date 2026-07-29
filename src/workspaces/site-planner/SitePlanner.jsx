@@ -2400,7 +2400,33 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
      accumulated zoom delta passes ~0.75 levels, so the transform never scales the
      aerial into a blurry mess — but because the commit is ghost-buffered, that
      mid-gesture re-base no longer flashes. */
-  useEffect(() => {
+  /* B1122 — ONE TRANSFORM SOURCE, APPLIED IN THE SAME FRAME. This must be a LAYOUT effect.
+   *
+   * The owner: "grab the map and sling it, and it will move, and the buildings will move
+   * separately and then kinda sling back into position." Both surfaces are already driven from the
+   * SAME value (`view`) — the bug was never that they disagreed about where to be, it was WHEN each
+   * one got there. The SVG is rendered from `view` during the React commit and paints immediately;
+   * this effect then set the basemap wrapper's transform from the same `view` — but as a PASSIVE
+   * `useEffect`, which runs AFTER paint. So every pan frame painted the drawing at the new offset
+   * with the aerial still at the previous one: one frame of separation per frame, proportional to
+   * the per-frame delta, which is why a fast SLING shows it and a slow drag barely does. The
+   * debounced re-base then lands and the two line up — "slings back into position" — and that is
+   * exactly why every before/after probe reads zero and why V483(b) going unrun mattered.
+   *
+   * `useLayoutEffect` closes the window structurally rather than narrowing it: the wrapper's
+   * transform is written before the browser paints, in the SAME frame as the SVG that shares its
+   * source value, so there is no instant at which the two hold different values. Shortening the
+   * commit debounce would NOT have fixed this — it would have shortened the snap-back while leaving
+   * the per-frame lag untouched, and it would have read as fixed on a slow drag.
+   *
+   * This is `CLAUDE.md` → VIEWPORT-STABLE, which already says it in as many words: fold the delta
+   * in a layout effect, "never a passive (after-paint) `useEffect` (that skips the content sideways
+   * for one-plus frames)". This effect predates that rule and violated it.
+   *
+   * NOT a re-open of B1043/B1062 (the cumulative scale drift). Nothing about the projection or the
+   * origin-anchored scale changes here — only the frame in which an already-correct value is applied.
+   */
+  useLayoutEffect(() => {
     const map = geoMapRef.current;
     const wrap = geoWrapRef.current;
     if (!map || !wrap || !origin) return;
