@@ -71,15 +71,31 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   (elements expanded to their `attachedTo` assembly, so a building brings its truck court / trailer
   parking / dock zones / bump-outs), then paste with fresh ids, bonds remapped INSIDE the copy, and
   relative geometry preserved. A pasted parcel arrives INACTIVE by design (can't double-count site area).
-- `standardsApply.js` + `userPrefs.js` + `components/StandardsBar.jsx` — Standards scope + retroactive
-  apply. `standardsApply` is the pure engine (parcels are stamped → WRITE the value; elements
-  resolve at render → CLEAR the per-element override) plus `applyAllStandards` — ONE Apply for the
-  whole panel, counted in distinct OBJECTS — and `derivedPanelScope`, which reads (never writes)
-  where the account already carries a default. `StandardsBar` is the panel's sticky footer: ONE
-  scope + ONE Apply, replacing the per-field chip row that was most of the panel's height. `userPrefs` is the account-level store
-  (`public.profiles.prefs` jsonb, own-row RLS — `db/user_prefs.sql`) behind the "All projects" scope,
-  published into `planStyle`'s account layer (`setAccountStyleDefaults`). Precedence: built-in <
-  account < project < per-object.
+- `standardsApply.js` + `userPrefs.js` + `components/StandardsBar.jsx` — Standards commit model +
+  retroactive apply. `standardsApply` is the pure engine (parcels are stamped → WRITE the value;
+  elements resolve at render → CLEAR the per-element override) plus `applyAllStandards` — ONE Apply
+  for the whole panel, counted in distinct OBJECTS — plus the **pending DRAFT** model (NEW-2:
+  `EMPTY_STD_DRAFT` / `withParcelDraft` / `withTypeDraft` / `draftParcelValue` / `draftTypeValue` /
+  `draftDirty` / `mergeDraftIntoSettings`). The `Project | All` scope toggle is **gone** — it read as
+  one axis with Apply and was two (where a value is STORED vs pushing it onto what is DRAWN).
+  `StandardsBar` is now a real footer BELOW the panel's scrolling body (a sibling of the scroll
+  container in both the docked host and `FloatingPanel`'s new `footer` slot — never sticky INSIDE
+  the list, which sliced the row at the bottom of the scrollport in half) carrying three named
+  actions: **Apply to this plan (N)** · **Save for this plan** · **Save for all projects**. Because
+  "Save for this plan" is explicit, a field edit can no longer silently commit: edits land in the
+  draft, the footer shows a quiet "Unsaved changes" + Discard, and the draft is persisted per plan
+  in `sessionStorage` so closing the panel / reloading can't throw it away. `planStyle`'s PREVIEW
+  layer (`setPreviewStyleDefaults`) is how the canvas shows an uncommitted draft — **visual only:
+  `parcelDefaultStyle` deliberately ignores it, so an uncommitted value can never be stamped into
+  geometry.** `userPrefs` is the account-level store (`public.profiles.prefs` jsonb, own-row RLS —
+  `db/user_prefs.sql`) behind "Save for all projects", published into `planStyle`'s account layer
+  (`setAccountStyleDefaults`). Precedence: built-in < account < project < draft (preview) < per-object.
+- `planStyle.js` also owns the **setback line's** resolved style (NEW-1: `setbackLineStyle` /
+  `setbackDashArray` / `SETBACK_LINE`) — colour, weight and dash were hardcoded at the one place the
+  ring was drawn while the boundary beside it had full standards. Both the ring AND its dimension
+  chip read this one derivation; the defaults ARE the historic look (weight 1.25, `dashed` = "7 6"),
+  and `parcelDefaultStyle` stamps `sbStroke`/`sbWeight`/`sbDash` only when they DIFFER from it, so an
+  upgraded plan gains no keys and renders unchanged.
 - `zOrder.js` — per-element `z` stacking key utilities (`nextZ`/`sortByZ`/`normalizeZ`/`ensureZ`, B671).
   `arrange.js` — pure z-order "Arrange" (`reorderByZ`/`arrangeFlags`, B820): Bring-to-Front/Send-to-Back
   over a peer set (a building reorders within its `Z_LAYER` band, a markup within the markup layer;

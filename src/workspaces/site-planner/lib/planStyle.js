@@ -46,6 +46,24 @@ export const setAccountStyleDefaults = (v) => {
 };
 export const getAccountStyleDefaults = () => ACCOUNT_STD;
 
+/* NEW-2 — the PREVIEW layer: the Standards panel's uncommitted DRAFT.
+ *
+ * Standards edits are now a pending draft (nothing is stored until one of the three footer
+ * buttons commits it), but a colour you are picking still has to be visible while you pick it.
+ * So the draft rides here, ABOVE the project setting and BELOW a per-object override.
+ *
+ * The rule that keeps this honest: a draft changes what you SEE, never what gets STORED. Only
+ * `typeStyle` reads it, because element type styles resolve at RENDER. `parcelDefaultStyle`
+ * deliberately does NOT — it STAMPS a value into a new parcel, and an uncommitted value must
+ * never be written into geometry.
+ *
+ * A `null` in the draft means "clear this override", so it deletes rather than overwrites — a
+ * plain spread would have written `fill: null` and painted the element with nothing.
+ */
+let PREVIEW_STD = { typeStyles: {} };
+export const setPreviewStyleDefaults = (v) => { PREVIEW_STD = { typeStyles: { ...(v?.typeStyles || {}) } }; };
+export const getPreviewStyleDefaults = () => PREVIEW_STD;
+
 /**
  * Where a given standard's current value comes from — what the Standards scope chips read.
  * @returns "project" (this plan overrides it) · "all" (an account default, every project) · "builtin"
@@ -59,11 +77,16 @@ export const standardScope = (projectVal, accountVal) => {
 // Resolved style for a type = built-in default, under the account default (NEW-3), under any
 // project-level default (settings.typeStyles). An individual element may further override
 // fill/stroke/fillOpacity on itself (the Bluebeam-style per-element Properties).
-export const typeStyle = (type, settings) => ({
-  ...TYPE[type],
-  ...((ACCOUNT_STD.typeStyles || {})[type] || {}),
-  ...((settings && settings.typeStyles && settings.typeStyles[type]) || {}),
-});
+export const typeStyle = (type, settings) => {
+  const over = {
+    ...((ACCOUNT_STD.typeStyles || {})[type] || {}),
+    ...((settings && settings.typeStyles && settings.typeStyles[type]) || {}),
+  };
+  // The uncommitted Standards draft sits on top; a null there CLEARS back to the built-in.
+  const draft = (PREVIEW_STD.typeStyles || {})[type];
+  if (draft) Object.entries(draft).forEach(([k, v]) => { if (v === null || v === undefined) delete over[k]; else over[k] = v; });
+  return { ...TYPE[type], ...over };
+};
 
 export const elStyle = (el, settings) => {
   const base = typeStyle(el.type, settings);
@@ -99,7 +122,45 @@ export const parcelDefaultStyle = (settings) => {
     out.fill = ps.fill;
     if (ps.fillOpacity != null) out.fillOpacity = ps.fillOpacity;
   }
+  // NEW-1 — the SETBACK line's own colour / weight / style, stamped exactly like the boundary's.
+  // A value equal to the render default is deliberately NOT stamped, so a parcel drawn with
+  // untouched standards carries no setback keys at all and renders exactly as it always has.
+  if (ps.sbStroke) out.sbStroke = ps.sbStroke;
+  if (ps.sbWeight != null && ps.sbWeight !== SETBACK_LINE.weight) out.sbWeight = ps.sbWeight;
+  if (ps.sbDash && ps.sbDash !== SETBACK_LINE.dash) out.sbDash = ps.sbDash;
   return out;
+};
+
+/* ---------------------------------------------------------------- the SETBACK line (NEW-1)
+ *
+ * The setback ring used to be hardcoded at the one place it was drawn — a fixed colour, a fixed
+ * weight and a fixed "7 6" dash — while the parcel BOUNDARY beside it carried a full set of
+ * standards. This is the one derivation both the ring and its dimension chip read, so the two
+ * can never drift, and it is pure so the "existing plan renders byte-identically" guard is a
+ * unit test rather than a screenshot.
+ *
+ * The defaults ARE today's look: weight 1.25, and `dashed` at that weight is exactly "7 6".
+ */
+export const SETBACK_LINE = { weight: 1.25, dash: "dashed" };
+
+const round3 = (n) => +n.toFixed(3);
+/** Line style name → SVG dash pattern, scaled off the line weight (so "7 6" holds at 1.25). */
+export const setbackDashArray = (dash, weight) => {
+  const w = weight != null ? weight : SETBACK_LINE.weight;
+  if (dash === "solid") return undefined;
+  if (dash === "dotted") return `${round3(w)} ${round3(w * 2.4)}`;
+  return `${round3(w * 5.6)} ${round3(w * 4.8)}`; // "dashed" — the historic ring
+};
+
+/**
+ * Resolved setback-line style for one parcel. `fallbackStroke` is the theme's setback colour
+ * (PAL.setback), passed in because SVG attributes can't read a CSS var.
+ * @returns { stroke, weight, dash } — `dash` is the ready-to-use strokeDasharray (undefined = solid)
+ */
+export const setbackLineStyle = (pc, fallbackStroke) => {
+  const weight = pc && pc.sbWeight != null ? pc.sbWeight : SETBACK_LINE.weight;
+  const dash = (pc && pc.sbDash) || SETBACK_LINE.dash;
+  return { stroke: (pc && pc.sbStroke) || fallbackStroke, weight, dash: setbackDashArray(dash, weight) };
 };
 
 // Coerce any CSS color we store into the #rrggbb form an <input type=color> needs.

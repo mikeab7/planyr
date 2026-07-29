@@ -22,8 +22,11 @@
  * Pure; unit tests in test/standardsApply.test.js.
  */
 
-// The parcel style keys Standards → Parcels can set, in panel order.
-export const PARCEL_STD_KEYS = ["stroke", "weight", "dash", "fill", "fillOpacity"];
+// The parcel style keys Standards → Parcels can set, in panel order. The `sb*` trio is the
+// SETBACK line (NEW-1) — same three controls as the boundary, on the other line the section
+// draws. They are in this list so the retroactive Apply picks them up and its count stays
+// honest; a plan that never set them stores nothing and renders exactly as before.
+export const PARCEL_STD_KEYS = ["stroke", "weight", "dash", "fill", "fillOpacity", "sbStroke", "sbWeight", "sbDash"];
 // The per-element-type keys Standards → Colors can set.
 export const TYPE_STD_KEYS = ["fill", "stroke"];
 
@@ -134,14 +137,81 @@ export function appliedObjectsLabel(count) {
   return `Applied to ${count} object${count === 1 ? "" : "s"}`;
 }
 
-/**
- * Where the ONE panel-level scope control starts, DERIVED from the per-key scopes already stored.
+/* ------------------------------------------------------------------ the PENDING DRAFT (NEW-2)
  *
- * Migration rule (the hazard): collapsing per-key scopes into one control must not move anything.
- * So nothing is written on the way in — the control simply REPORTS where the account already
- * carries a default ("all" if any standard is account-level), and from then on governs where
- * SUBSEQUENT changes are stored. An explicit choice is remembered and wins over this.
+ * WHY a draft exists at all. The footer used to pair a Project|All segmented control with an
+ * Apply chip, which read left-to-right as "apply to this project or to all" — but those are two
+ * different axes: the toggle chose WHERE A VALUE IS STORED, Apply PUSHED IT ONTO WHAT IS ALREADY
+ * DRAWN (and could never reach plans you haven't opened). The toggle is gone; the footer now
+ * names its three actions outright: Apply to this plan · Save for this plan · Save for all
+ * projects.
+ *
+ * The consequence, which is what this module models: once "Save for this plan" is an explicit
+ * button, editing a field can no longer silently commit as the plan default — or that button
+ * means nothing. So an edit lands HERE, in a draft, and only a button commits it.
+ *
+ * Shape: { parcelStyle: { key: value }, typeStyles: { type: { key: value } } }. A key is present
+ * only once the user has touched it; `null` means "clear this standard" (back to the built-in),
+ * which is why every read tests key PRESENCE rather than truthiness.
  */
-export function derivedPanelScope(scopes) {
-  return (scopes || []).some((s) => s === "all") ? "all" : "project";
+export const EMPTY_STD_DRAFT = { parcelStyle: {}, typeStyles: {} };
+
+const parcelBag = (d) => (d && d.parcelStyle) || {};
+const typeBag = (d, type) => ((d && d.typeStyles) || {})[type] || {};
+
+/** Has the user touched this standard in the current draft? */
+export function draftHasParcel(draft, key) { return Object.prototype.hasOwnProperty.call(parcelBag(draft), key); }
+export function draftHasType(draft, type, key) { return Object.prototype.hasOwnProperty.call(typeBag(draft, type), key); }
+
+/** The value the PANEL shows: the draft when it has touched the key, else what is committed. */
+export function draftParcelValue(draft, key, committed) {
+  return draftHasParcel(draft, key) ? parcelBag(draft)[key] : committed;
+}
+export function draftTypeValue(draft, type, key, committed) {
+  return draftHasType(draft, type, key) ? typeBag(draft, type)[key] : committed;
+}
+
+/** Merge one patch into the draft (immutable). `null` in the patch = "clear this standard". */
+export function withParcelDraft(draft, patch) {
+  return { ...(draft || EMPTY_STD_DRAFT), parcelStyle: { ...parcelBag(draft), ...patch } };
+}
+export function withTypeDraft(draft, type, patch) {
+  const d = draft || EMPTY_STD_DRAFT;
+  return { ...d, typeStyles: { ...(d.typeStyles || {}), [type]: { ...typeBag(d, type), ...patch } } };
+}
+
+const nz = (v) => (v === undefined ? null : v);
+
+/**
+ * Is anything actually UNSAVED? A draft entry that matches what is already committed is not a
+ * change — so editing a colour and putting it back clears the indicator instead of leaving a
+ * permanent "unsaved" nag.
+ * @param committedParcel (key) => the committed effective value
+ * @param committedType   (type, key) => the committed effective value
+ */
+export function draftDirty(draft, committedParcel, committedType) {
+  const d = draft || EMPTY_STD_DRAFT;
+  if (Object.entries(parcelBag(d)).some(([k, v]) => nz(v) !== nz(committedParcel(k)))) return true;
+  return Object.entries(d.typeStyles || {}).some(([type, bag]) =>
+    Object.entries(bag).some(([k, v]) => nz(v) !== nz(committedType(type, k))));
+}
+
+/**
+ * Fold the draft into a plan's `settings` — what "Save for this plan" (and the commit half of
+ * "Apply to this plan") stores. `null` DELETES the key rather than storing a null, so clearing a
+ * standard leaves the plan following the account default / built-in, exactly as if it had never
+ * been set. Pure: returns a new settings object.
+ */
+export function mergeDraftIntoSettings(settings, draft) {
+  const s = settings || {};
+  const d = draft || EMPTY_STD_DRAFT;
+  const parcelStyle = { ...(s.parcelStyle || {}) };
+  Object.entries(parcelBag(d)).forEach(([k, v]) => { if (v === null || v === undefined) delete parcelStyle[k]; else parcelStyle[k] = v; });
+  const typeStyles = { ...(s.typeStyles || {}) };
+  Object.entries(d.typeStyles || {}).forEach(([type, patch]) => {
+    const bag = { ...(typeStyles[type] || {}) };
+    Object.entries(patch).forEach(([k, v]) => { if (v === null || v === undefined) delete bag[k]; else bag[k] = v; });
+    if (Object.keys(bag).length) typeStyles[type] = bag; else delete typeStyles[type];
+  });
+  return { ...s, parcelStyle, typeStyles };
 }
