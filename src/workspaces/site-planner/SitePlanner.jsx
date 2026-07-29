@@ -21,7 +21,7 @@ import { loadProfile } from "./lib/profile.js";
 import { commitElements, fetchElements, keepaliveCommit } from "./lib/elementApi.js";
 import { supabase, supabaseRest, currentAccessToken } from "./lib/supabase.js";
 import { createIdMinter, randomIdSalt } from "../../shared/ids.js";
-import { mergeSiteContent, createSiteModel } from "./lib/siteModel.js";
+import { mergeSiteContent, createSiteModel, normalizeBondedChildren } from "./lib/siteModel.js";
 import { extendMergeSelection } from "./lib/parcelSelect.js";
 import { parcelSelectHintDecision, PARCEL_HINT_COOLDOWN_MS } from "./lib/parcelSelectHint.js";
 import { measuresUnderPoint, nextMeasureSelection } from "./lib/measureHit.js";
@@ -3047,7 +3047,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // repair is a repair nobody can audit (LOUD-FAILURE).
     const healed = [];
     const model = rowsToModel({}, rows, { onHeal: (h) => healed.push(h) });
-    if (healed.length) reportClientEvent("bonded-children-healed", "bonded children re-fitted to their host on read", { id: siteId, count: healed.length, healed: healed.slice(0, 20) });
     // dirtyEntries includes the batch in flight, so a refetch landing mid-commit keeps that
     // edit on the canvas too (it re-trues from its own RPC result, not from pre-commit rows).
     const dirtyByKey = new Map(eng.dirtyEntries().map((d) => [d.kind + ":" + d.id, d]));
@@ -3102,6 +3101,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       onDiscard: (e, row) => reportClientEvent("journal-superseded", "pending-edit journal entry discarded — a newer copy won", { id: siteId, kind: e.kind, el: e.id, baseRev: e.baseRev, rowRev: row && row.rev }),
     });
     sweepJournals(siteId, journalSid, journalNow); // consume own + adopted-stale keys; a live sibling's (or fresh legacy) journal stays
+    // NEW-1 — HEAL AFTER THE FOLDS, not before. `rowsToModel` already healed the ROWS, but the two
+    // folds above can substitute a local copy over a healed row: the never-synced fold, and — the
+    // measured case — an ORPHANED pending-edit journal from a stale tab. A tab hot-looping rejected
+    // commits (NEW-3) keeps adopting the freshest rev, so its journal's `baseRev` tracks the current
+    // row and its entries sail through foldJournal's rev test carrying geometry that was undone long
+    // ago. Re-running the heal on the FINAL canvas is what stops such a fold putting a geometrically
+    // impossible assembly on screen (and then committing it): a child off its computed anchor is
+    // re-fitted here, whatever ledger it came from. Identity-preserving on a coherent plan.
+    merged.els = normalizeBondedChildren(merged.els, (h) => healed.push(h));
+    if (healed.length) reportClientEvent("bonded-children-healed", "bonded children re-fitted to their host on read", { id: siteId, count: healed.length, healed: healed.slice(0, 20) });
     const replace = (setter, val) => setter((prev) => (stableStringify(prev) === stableStringify(val) ? prev : val));
     replace(setEls, merged.els); replace(setMarkups, merged.markups); replace(setMeasures, merged.measures);
     replace(setCallouts, merged.callouts); replace(setParcels, merged.parcels);
@@ -3121,7 +3130,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // (every canvas edit reconciles through the autosave effect), so nothing is lost by diffing
     // the substituted result instead. `merged` folds in never-synced local-only elements (B756) so a
     // brand-new site's parcels are enqueued as creates here instead of being silently dropped.
-    try { eng.reconcile(merged, { busy: false }); } catch (_) {}
+    // NEW-1 — `afterSeed`: this is the seeder's OWN diff against the canvas it just rebuilt, so
+    // rows are canonical for any server-known element with nothing pending to explain a difference.
+    try { eng.reconcile(merged, { busy: false, afterSeed: true }); } catch (_) {}
   };
   useEffect(() => {
     if (!isCloudActive() || !siteId || !supabase) {
@@ -3166,6 +3177,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // assembly into ONE commit and re-reads every op's bytes from here, so a move can neither
       // straddle two transactions nor ship pre-gesture coordinates. `stateRef` is assigned during
       // render, so this is always the latest COMMITTED React state.
+      // NEW-1 — the server's rows overruled a stale on-device cache for these elements: put the row
+      // data on the canvas, replacing the cached copy outright (a merge would keep stale keys the
+      // row doesn't carry). Same channel a remote upsert uses, so z ordering and husk-parcel
+      // filtering behave identically.
+      onRowsCanonical: (adoptions) => {
+        for (const a of adoptions) applyRemoteInstr({ action: "upsert", kind: a.kind, id: a.id, el: a.el });
+        reportClientEvent("stale-cache-overruled", "server rows replaced stale cached elements on load", { id: siteId, count: adoptions.length, ids: adoptions.slice(0, 20).map((x) => x.id) });
+      },
       liveCollections: () => {
         const s = syncStateOverride.current || stateRef.current;
         return { els: s.els, markups: s.markups, measures: s.measures, callouts: s.callouts, parcels: s.parcels };

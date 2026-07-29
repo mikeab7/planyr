@@ -337,11 +337,14 @@ function normalizeWallKids(list, onHeal) {
       const strip = stripFor(host, side);
       const gap = strip ? (isVert ? hostAxisExtents(host, strip).dimBX : hostAxisExtents(host, strip).dimBY) : 0;
       const cur = wallKidAlong(host, side, e);            // along-wall position + run kept verbatim
-      // NEW-4 — …unless the row has been TORN off its host entirely (a parking field left behind
-      // ~2,000 ft away when its building's move committed in a separate transaction). The owner's
-      // along-wall placement is intent worth preserving only while the row is still ON the wall;
-      // once it is stranded that number is wreckage, so the re-fit re-centres it.
-      const alongShift = strandedFromHost(host, e) ? 0 : cur.alongShift;
+      // NEW-4 — …unless the row has been TORN off its host (a parking field left behind when its
+      // building's move committed in a separate transaction). The owner's along-wall placement is
+      // intent worth preserving only while the row still OVERLAPS the wall it is bonded to; past
+      // that the number is wreckage, so the re-fit re-centres it. NEW-2: the bound is the COMPUTED
+      // overlap limit, not an absolute distance — a 200 ft displacement is every bit as impossible
+      // as a 2,000 ft one, and the old magnitude test let the smaller one through.
+      const alongLimit = (isVert ? host.h : host.w) / 2 + (Number(cur.run) || 0) / 2;
+      const alongShift = Math.abs(cur.alongShift) > alongLimit ? 0 : cur.alongShift;
       box = wallKidBox(host, side, { depth, gap, run: cur.run, alongShift });
     }
     const c = localToWorld(host, box.lx, box.ly);
@@ -375,6 +378,30 @@ function normalizeWallKids(list, onHeal) {
 // Generous: the reach below is already the maximum geometrically legal separation, so the slack
 // only has to swallow rounding + a hand-nudged zone. A real tear is orders of magnitude past it.
 const STRAND_SLACK_FT = 100;
+/* NEW-2 — the ABSOLUTE-distance test above is a blunt fallback, and it let a real tear through: an
+ * apron 218 ft off its host's centreline and its trailer strip 218 ft west / 223 ft north both
+ * loaded and rendered unhealed, because a big building's own half-diagonal plus the chain depth
+ * plus the slack is comfortably more than 300 ft. The V508 case that PASSED used 2,086 ft, so the
+ * threshold sat somewhere between — which is the tell that magnitude is the wrong question.
+ *
+ * A bond's legal position is COMPUTABLE, so compare against the computed anchor instead, and the
+ * magnitude stops mattering:
+ *   • ACROSS the wall (the outward normal) a stack member's offset is fully determined —
+ *     host_depth/2 + the depths of everything inboard of it + its own depth/2. There is no user
+ *     freedom on this axis at all, so any error beyond a small tolerance is a tear.
+ *   • ALONG the wall there IS user freedom (the owner slides a field to line up a curb return —
+ *     B1039), but it is bounded: the member must still OVERLAP the wall it is bonded to.
+ * Tolerance is generous enough to absorb stored rounding and a legacy record's sub-foot drift, and
+ * far tighter than any real displacement. */
+const ANCHOR_TOL_FT = 10;
+/** Is a bonded child off its COMPUTED anchor? `across` is the signed outward-normal offset it has
+ *  vs. the one its bond dictates; `along`/`alongLimit` bound its slide to the wall. Pure. */
+export function offAnchor({ acrossHave, acrossWant, alongHave, alongLimit, tol = ANCHOR_TOL_FT }) {
+  if (![acrossHave, acrossWant].every((v) => Number.isFinite(v))) return false; // nothing to compare → never claim a tear
+  if (Math.abs(acrossHave - acrossWant) > tol) return true;
+  if (Number.isFinite(alongHave) && Number.isFinite(alongLimit) && Math.abs(alongHave) > alongLimit) return true;
+  return false;
+}
 const halfDiagOf = (b) => Math.hypot(Number(b && b.w) || 0, Number(b && b.h) || 0) / 2;
 /** Is `child` further from `host` than its bond could ever legally put it? `extraReach` is the
  *  kind-specific allowance (a dock stack's cumulative depth); pure + exported for the tests. */
@@ -424,8 +451,17 @@ function normalizeStrandedZones(list, onHeal) {
       // the user's intent (a resized court keeps its depth) and it is what makes the re-fit a pure
       // re-placement rather than a re-design.
       const depths = chain.map((z) => boxExtentAlong(z, u));
-      const totalDepth = depths.reduce((s, d) => s + (d || 0), 0);
-      const strandedAt = chain.map((z) => strandedFromHost(host, z, totalDepth));
+      const fullAlong = horiz ? host.w : host.h;
+      const halfAcross = (horiz ? host.h : host.w) / 2;
+      // NEW-2 — each member against its COMPUTED anchor, not an absolute distance. The across-axis
+      // offset is dictated entirely by the chain's own depths; the along-axis offset only has to
+      // keep the member overlapping the wall it is bonded to.
+      const strandedAt = chain.map((z, i) => offAnchor({
+        acrossHave: (z.cx - host.cx) * u.x + (z.cy - host.cy) * u.y,
+        acrossWant: halfAcross + depths.slice(0, i).reduce((s, d) => s + (d || 0), 0) + (depths[i] || 0) / 2,
+        alongHave: (z.cx - host.cx) * tan.x + (z.cy - host.cy) * tan.y,
+        alongLimit: fullAlong / 2 + boxExtentAlong(z, tan) / 2,
+      }));
       if (!strandedAt.some(Boolean)) continue;                      // nothing torn on this side
       const kinds = chain.map((z) => (z.type === "trailer" || z.forCourt ? "trailer" : "strip"));
       // Span along the wall: taken from the HEAD when the head is still where it belongs (that

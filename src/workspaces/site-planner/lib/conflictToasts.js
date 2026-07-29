@@ -47,6 +47,12 @@ export function toastForSyncEvent(ev, { name, label }) {
     case "restore-conflict":
       // our Restore raced someone who got there first — current row is the truth
       return { text: `${label} was already restored or edited by ${name} — their version is showing.`, action: "zoom" };
+    case "client-stale":
+      // NEW-3 — every op in several consecutive batches was rejected on the rev guard: this tab is
+      // running against a plan that has moved on, so it has STOPPED re-committing rather than
+      // hot-looping the RPC. This one is not about a single element and never zooms — it is the one
+      // state the user must act on, so it is always shown, with no `authoredRecently` gate.
+      return { text: "This tab is out of date — your recent changes here can't be saved. Reload the page to catch up.", action: null };
     case "delete-reapplied":
     default:
       return null; // silent: telemetry-only classes
