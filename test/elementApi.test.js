@@ -16,6 +16,64 @@ describe("commitElements", () => {
     expect(r).toEqual({ ok: true, results: [{ id: "e1", status: "ok", rev: 2 }] });
   });
 
+  // B1117 — the atomic overload. The migration is live on production (applied + rollback-verified
+  // 2026-07-29); these lock the client contract, including the two DIFFERENT wire shapes.
+  it("opts.atomic sends p_atomic and normalises the OBJECT shape the atomic overload returns", async () => {
+    let seen;
+    const client = fakeClient(async (name, args) => {
+      seen = args;
+      return { data: { applied: false, results: [{ id: "e1", status: "ok", rev: 64 }, { id: "e2", status: "conflict", row: { rev: 66 } }] }, error: null };
+    });
+    const r = await commitElements(client, "s", [{ op: "update", id: "e1" }, { op: "update", id: "e2" }], { atomic: true });
+    expect(seen.p_atomic).toBe(true);
+    expect(r.ok).toBe(true);
+    expect(r.applied).toBe(false);                       // the whole call was rolled back
+    expect(r.results).toHaveLength(2);
+  });
+
+  it("an atomic call that APPLIED reports applied:true", async () => {
+    const client = fakeClient(async () => ({ data: { applied: true, results: [{ id: "e1", status: "ok", rev: 2 }] }, error: null }));
+    const r = await commitElements(client, "s", [{ op: "update", id: "e1" }], { atomic: true });
+    expect(r.applied).toBe(true);
+    expect(r.results).toEqual([{ id: "e1", status: "ok", rev: 2 }]);
+  });
+
+  it("without opts.atomic the call is the plain 2-arg form and the bare ARRAY shape still works", async () => {
+    let seen;
+    const client = fakeClient(async (name, args) => { seen = args; return { data: [{ id: "e1", status: "ok", rev: 2 }], error: null }; });
+    const r = await commitElements(client, "s", [{ op: "update", id: "e1" }]);
+    expect(seen).not.toHaveProperty("p_atomic");
+    expect(r).toEqual({ ok: true, results: [{ id: "e1", status: "ok", rev: 2 }] });
+  });
+
+  it("a REAL rpc error is still reported, not mistaken for a missing overload", async () => {
+    const client = fakeClient(async () => ({ data: null, error: { code: "42501", message: "permission denied for function commit_elements" } }));
+    const r = await commitElements(client, "s", [{ op: "update", id: "e1" }], { atomic: true });
+    expect(r.ok).toBe(false);
+    expect(r.error).toMatch(/permission denied/);
+  });
+
+  it("an environment WITHOUT the migration falls back to the 2-arg call instead of failing every write", async () => {
+    // The owner's rollout caution: a 3-arg call against a project that has not run the migration
+    // gets a PostgREST "function not found". That must degrade, never break.
+    const calls = [];
+    const client = fakeClient(async (name, args) => {
+      calls.push(args);
+      if (args.p_atomic) return { data: null, error: { code: "PGRST202", message: "Could not find the function public.commit_elements(p_atomic, p_ops, p_site)" } };
+      return { data: [{ id: "e1", status: "ok", rev: 2 }], error: null };
+    });
+    const r = await commitElements(client, "s", [{ op: "update", id: "e1" }], { atomic: true });
+    expect(r.ok).toBe(true);                             // the write still lands…
+    expect(r.results).toHaveLength(1);
+    expect(calls).toHaveLength(2);                       // …via a retry on the plain path
+    expect(calls[1]).not.toHaveProperty("p_atomic");
+    // …and it is LATCHED, so the next batch does not pay the failed probe again.
+    const r2 = await commitElements(client, "s", [{ op: "update", id: "e2" }], { atomic: true });
+    expect(r2.ok).toBe(true);
+    expect(calls).toHaveLength(3);
+    expect(calls[2]).not.toHaveProperty("p_atomic");
+  });
+
   it("short-circuits an empty batch without calling the RPC", async () => {
     let called = false;
     const client = fakeClient(async () => { called = true; return { data: [], error: null }; });

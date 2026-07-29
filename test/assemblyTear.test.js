@@ -563,6 +563,109 @@ describe("NEW-1 (round 4) — a partially-accepted batch is never settled", () =
   });
 });
 
+/* B1117 — the SERVER-side all-or-nothing group commit is live (migration applied and
+ * rollback-verified against the real Tsakiris assembly 2026-07-29: a two-op atomic call with one
+ * good rev and one stale one left BOTH rows untouched). These cover the client half. */
+describe("B1117 — the client asks for atomic group commits and honours the rollback", () => {
+  // Capture what the engine asked for alongside the ops.
+  function atomicHarness(responder) {
+    const asked = [];
+    const events = [];
+    const timers = [];
+    let clock = 1000;
+    const canvas = { els: [], markups: [], measures: [], callouts: [], parcels: [] };
+    const sync = createElementSync({
+      siteId: "s",
+      commit: async (ops, opts) => { asked.push({ ops, atomic: !!(opts && opts.atomic) }); return responder(ops); },
+      now: () => clock,
+      setTimer: (fn, ms) => { timers.push({ fn, ms }); return timers.length; },
+      clearTimer: () => {},
+      onEvent: (e) => events.push(e),
+      liveCollections: () => canvas,
+      patchElement: (kind, id, patch) => { canvas.els = canvas.els.map((e) => (e.id === id ? { ...e, ...patch } : e)); },
+      selfUid: "me",
+    });
+    sync.seed([]);
+    return { sync, asked, events, canvas, runTimers: () => { const d = timers.splice(0); d.forEach((t) => t.fn()); } };
+  }
+  const allOk = (ops) => ({ ok: true, results: ops.map((o) => ({ id: o.id, status: "ok", rev: (o.expected || 0) + 1 })) });
+
+  it("asks for atomic ONLY when the batch spans more than one member of an assembly", async () => {
+    const h = atomicHarness(allOk);
+    h.canvas.els = assembly();
+    h.sync.reconcile(h.canvas, {}); await tick();
+    expect(h.asked[0].atomic, "a 6-op assembly batch is atomic").toBe(true);
+
+    const h2 = atomicHarness(allOk);
+    h2.canvas.els = [host("b1")];
+    h2.sync.reconcile(h2.canvas, {}); await tick();
+    expect(h2.asked[0].atomic, "a lone element has nothing to be atomic about").toBe(false);
+
+    const h3 = atomicHarness(allOk);
+    h3.canvas.els = [host("b1"), { id: "solo", type: "parking", cx: 9, cy: 9, w: 10, h: 10, rot: 0 }];
+    h3.sync.reconcile(h3.canvas, {}); await tick();
+    expect(h3.asked[0].atomic, "two UNRELATED elements are not an assembly").toBe(false);
+  });
+
+  it("`applied:false` means NOTHING landed — an op whose own status says ok is NOT treated as committed", async () => {
+    // The exact shape the live rollback test returned: one op ok, one conflict, nothing written.
+    let firstCall = true;
+    const h = atomicHarness((ops) => {
+      if (!firstCall) return allOk(ops);
+      firstCall = false;
+      return {
+        ok: true,
+        applied: false,
+        results: ops.map((o, i) => (i === 0
+          ? { id: o.id, status: "ok", rev: 64 }
+          : { id: o.id, status: "conflict", row: { rev: 66, data: o.data, z_index: 0, updated_by: "me" } })),
+      };
+    });
+    h.canvas.els = assembly();
+    h.sync.reconcile(h.canvas, {}); await tick();
+
+    expect(h.asked).toHaveLength(1);
+    // Every op is re-queued, including the one the server reported "ok" — because it was rolled back.
+    expect(h.sync.pendingCount()).toBe(assembly().length);
+    expect(h.events.some((e) => e.type === "assembly-split" && e.rolledBack === true)).toBe(true);
+    // …and the retry carries the whole group again.
+    h.runTimers(); await tick();
+    expect(h.asked).toHaveLength(2);
+    expect(h.asked[1].ops).toHaveLength(assembly().length);
+    expect(h.sync.pendingCount()).toBe(0);
+  });
+
+  it("the rollback adopts the FRESH revs so the retry does not repeat the same stale expectation", async () => {
+    let firstCall = true;
+    const h = atomicHarness((ops) => {
+      if (!firstCall) return allOk(ops);
+      firstCall = false;
+      return { ok: true, applied: false, results: ops.map((o) => ({ id: o.id, status: "conflict", row: { rev: 500, data: o.data, z_index: 0, updated_by: "me" } })) };
+    });
+    h.canvas.els = assembly();
+    h.sync.reconcile(h.canvas, {}); await tick();
+    h.runTimers(); await tick();
+    for (const o of h.asked[1].ops) if (o.op === "update") expect(o.expected).toBe(500);
+  });
+
+  it("a group that will not commit whole escalates loudly rather than retrying forever", async () => {
+    const h = atomicHarness((ops) => ({ ok: true, applied: false, results: ops.map((o) => ({ id: o.id, status: "conflict", row: { rev: 500, data: o.data, z_index: 0, updated_by: "me" } })) }));
+    h.canvas.els = assembly();
+    h.sync.reconcile(h.canvas, {}); await tick();
+    for (let i = 0; i < 8; i++) { h.runTimers(); await tick(); }
+    expect(h.sync.state).toBe("stale");
+    expect(h.events.some((e) => e.type === "client-stale" && e.reason === "assembly-split")).toBe(true);
+  });
+
+  it("the plain (non-atomic) bare-array shape still works exactly as before", async () => {
+    const h = atomicHarness(allOk);
+    h.canvas.els = [host("b1")];
+    h.sync.reconcile(h.canvas, {}); await tick();
+    expect(h.asked[0].atomic).toBe(false);
+    expect(h.sync.pendingCount()).toBe(0);              // settled normally, no rollback path taken
+  });
+});
+
 describe("NEW-2 (round 4) — the heal catches a whole-assembly translation on a LARGE host", () => {
   // 882 × 510 — the owner's real building. Its half-diagonal alone is over 500 ft, so the coarse
   // distance test tolerated a 236/180 ft tear: the bigger the building, the bigger the tear it
