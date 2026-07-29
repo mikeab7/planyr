@@ -552,6 +552,26 @@ export function computeRequiredDetention({
   hcfcdApplicable = true, // B789 — false when the identify county excludes Harris: HCFCD ends at the Harris line, so neither the greater-of candidate nor the PCPM deferral may price
   onDate = null,
   siteState = null, // NEW-8 — "TX" | "CO" | null. The region guard below; null keeps pre-Colorado behaviour exactly.
+  /* NEW-1 (B1105) — the COLORADO REGIME SEAM, and it is deliberately fail-CLOSED.
+   *
+   * `coRegime` is the regime id from `coloradoRegions.coloradoRegimeFor()` ("mhfd" | "larimer" |
+   * "weld" | "elpaso" | null) and `coDetention` is the injected MHFD evaluator
+   * (`mhfdDetention.computeMhfdDetention`). BOTH must be present, and the regime must be exactly
+   * "mhfd", for a Colorado site to price at all.
+   *
+   * Why injection rather than an import: `mhfdDetention.js` is Colorado prose + a Colorado engine,
+   * and this module is on the boot path. Importing it here would drag the whole Colorado tier into
+   * the entry chunk for every Texas user — the same bundle-budget reason `siteRegion.js` was split
+   * out of `coloradoRegions.js`. The caller composes the two (SitePlanner's lazily-loaded `coTier`),
+   * exactly as it already does for the regime label and the drawdown statute.
+   *
+   * Why fail-closed matters: absent either argument — a chunk that has not landed, a caller that
+   * does not know about the seam, a regime that is Larimer/Weld/El Paso, a `coRegime` that failed to
+   * resolve because every GIS endpoint is down — the ORIGINAL hard guard runs unchanged. Larimer,
+   * Weld and El Paso can therefore never receive an MHFD number by omission, only by someone
+   * deliberately mis-wiring the regime, and the evaluator itself re-checks membership. */
+  coRegime = null,
+  coDetention = null,
 } = {}) {
   /* ⛔ NEW-8 — THE COLORADO GUARD, and it is deliberately the FIRST thing this function does.
    *
@@ -569,6 +589,32 @@ export function computeRequiredDetention({
    * `siteState` null (a plan with no coordinates, every legacy saved plan) behaves exactly as
    * before — the guard fires on a POSITIVE Colorado answer, never on the absence of one. */
   if (String(siteState || "").toUpperCase() === "CO") {
+    /* NEW-1 (B1105) — MHFD is now WIRED, and it is the only Colorado regime that is.
+     *
+     * A positive match on both the regime AND the injected evaluator hands off to the
+     * `volume-curve` engine; anything else falls through to the original hard guard below,
+     * byte-for-byte unchanged. The evaluator returns a carrier in this function's own vocabulary
+     * ("point" with a governing total, or "unavailable" with its components), so no consumer needs
+     * to learn a new `kind`. */
+    if (String(coRegime || "").toLowerCase() === "mhfd" && typeof coDetention === "function") {
+      const co = coDetention({ acres, impPct, onDate });
+      /* RULES-AS-DATA, enforced rather than assumed: no volume may be computed or displayed without
+       * carrying its rule record. A malformed carrier (no record, or a number with no record behind
+       * it) is a LOUD failure that falls back to the guard — never a naked number on the canvas. */
+      if (co && co.rule && (co.kind !== "point" || co.requiredAcFt != null)) {
+        return { ...co, flags: [...(co.flags || []), "colorado-regime-wired"] };
+      }
+      return {
+        kind: "unavailable",
+        requiredAcFt: null, bandAcFt: null, rateAcFtPerAc: null,
+        basis: "MHFD detention evaluator returned no usable rule record",
+        headline: "Detention criteria not yet available in Colorado",
+        detailFrom: "coloradoRegions.COLORADO_DETENTION_DETAIL",
+        rule: null, governing: null,
+        flags: ["colorado-not-wired", "no-criteria-modeled", "co-evaluator-malformed"],
+        caveat: SCREENING_CAVEAT,
+      };
+    }
     return {
       kind: "unavailable",
       requiredAcFt: null, bandAcFt: null, rateAcFtPerAc: null,
@@ -642,6 +688,22 @@ export function computeRequiredDetention({
       kind: "unknown", requiredAcFt: null, bandAcFt: null, rateAcFtPerAc: null,
       basis: `${rule.authorityLabel}: rate control (Post ≤ Pre peak${storms ? ` at ${storms}-yr` : ""}) — no volumetric rate; sizing by hydrograph routing (HEC-HMS)`,
       rule, governing: null, flags: ["rate-match", "verify-with-county-engineer"], caveat: SCREENING_CAVEAT,
+    };
+  }
+
+  // ---- volume-curve records (B1105, MHFD): components, never a rate ------
+  // A `volume-curve` rule sizes by named volume COMPONENTS (MHFD: WQCV + EURV + the 100-yr), not by
+  // ac-ft per acre. Reaching one here means a volume-curve record was resolved through the normal
+  // authority path instead of the Colorado regime seam above — the evaluator that knows how to
+  // combine its components was never injected, so there is nothing to compute. Refuse EXPLICITLY:
+  // without this the record would fall to the generic "no dispatch path" at the bottom, which is
+  // the right answer for the wrong reason and would go quiet if someone later added a rate fallback.
+  if (rule.ruleType === "volume-curve") {
+    const comps = (p.components || []).map((c) => c.short || c.id).join(" + ");
+    return {
+      kind: "unknown", requiredAcFt: null, bandAcFt: null, rateAcFtPerAc: null,
+      basis: `${rule.authorityLabel}: sizes by volume components${comps ? ` (${comps})` : ""}, not a per-acre rate — no rate-method answer exists`,
+      rule, governing: null, flags: ["volume-curve", "no-rate-method", "no-criteria-modeled"], caveat: SCREENING_CAVEAT,
     };
   }
 
@@ -820,7 +882,12 @@ export function ruleBadge(rule, rateAcFtPerAc = null, rateBandLabel = null) {
   // only a fallback for point results (the hcfcd record's 0.65 is the PCPM methods
   // baseline, NOT the unset-outfall 0.75–1.0 minimum shown above the badge).
   const bandNum = (n) => (Number.isInteger(n) ? n.toFixed(1) : String(n)); // 1 → "1.0" so a band reads 0.75–1.0
+  // B1105 — a `volume-curve` rule has NO per-acre rate, and the badge must not leave the slot blank
+  // (which reads as a missing record). It names the METHOD instead: "full spectrum (WQCV + EURV)".
+  // Back-computing a rate to fill this slot would invent a criterion MHFD does not publish.
   const rate =
+    rule.ruleType === "volume-curve"
+      ? `${rule.params?.combine === "full-spectrum" ? "full spectrum" : "volume method"}${rule.params?.components?.length ? ` (${rule.params.components.filter((c) => c.required !== false && c.role !== "flood-control").map((c) => c.short || c.id).join(" + ")})` : ""}` :
     Array.isArray(rateAcFtPerAc) ? `${bandNum(rateAcFtPerAc[0])}–${bandNum(rateAcFtPerAc[1])} ac-ft/ac ${rateBandLabel || "screening band"}` :
     rateAcFtPerAc != null ? `${rateAcFtPerAc} ac-ft/ac` :
     rule.params?.rateAcFtPerAc != null ? `${rule.params.rateAcFtPerAc} ac-ft/ac` :
