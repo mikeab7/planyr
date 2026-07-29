@@ -83,11 +83,16 @@ describe("verified seeds (B758 Fort Bend, B760 Harris)", () => {
     expect(w.offsetScope).toBe("storage");
     expect(w.locationRule).toMatch(/on the development site/i); // §A(8) on-site placement
     expect(w.verified).toBe(true);
-    expect(w.sourceDate).toBe("2026-07-15");                // owner primary-source pull date
+    // NEW-3 (B1057 completion) — sourceDate is now the ORDINANCE'S OWN EFFECTIVE DATE, matching
+    // how every other verified seed dates itself (Harris 2019-07-09, Fort Bend 2024-10-08); the
+    // old value was the date the owner happened to pull the PDF. The versioning ambiguity that
+    // caveat recorded is resolved: 2/28/2013 is the effective edition.
+    expect(w.sourceDate).toBe("2013-02-28");
+    expect(w.url).toMatch(/co\.waller\.tx\.us/);           // the county-posted ordinance itself
     expect(w.note).toMatch(/no net fill up to 500-year floodplain elevation/); // §A(8) verbatim
-    expect(w.note).toMatch(/§C\(3\)/);                      // Atlas-14 study threshold noted
+    expect(w.note).toMatch(/§5\.C\(3\)/);                   // now a FIRING rule, pointed at from the note
     expect(w.note).toMatch(/Brookshire–Katy|BKDD/);         // BKDD flagged unresolved, never fabricated
-    expect(w.note).toMatch(/VERSIONING/i);                  // 2009/2013/2021 ambiguity recorded
+    expect(w.note).toMatch(/VERSIONING/i);                  // versioning resolved, and recorded as resolved
     expect(triggerClasses(w)).toEqual(["1pct", "02pct"]);
     // No OTHER seed gained a buffer — the field is Waller-specific until transcribed elsewhere.
     for (const [k, r] of Object.entries(DEFAULT_FLOODPLAIN_RULES)) {

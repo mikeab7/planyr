@@ -158,7 +158,16 @@ import { geometricMaxBermFt, drainageBermCapFt, bindingBermCap, bermNeedsInlets,
 import { gisCache } from "./lib/gisCache.js";
 import { VECTOR_SOURCES, fetchCached } from "./lib/vectorLayers.js";
 import { sampleAtLatLng } from "./lib/demGrid.js";
-import { fetchSiteGrid } from "./lib/terrainLayers.js";
+import { fetchSiteGrid, siteGridZoom } from "./lib/terrainLayers.js";
+// NEW-1 (B1057 completion) — the screening-BFE live wiring: Atlas-14 rainfall, SSURGO soils, and
+// the terrain→watershed/section derivation that feeds screeningBfe.js.
+import { resolvePfds } from "./lib/pfdsClient.js";
+import { resolveSoils } from "./lib/soils.js";
+import {
+  terrainInputsForScreeningBfe, atlas14Depths, screeningBfeForSite, screeningBfeHeadline,
+  screeningStudyNote, WATERSHED_GRID_ZOOM, WATERSHED_PAD_DEG,
+} from "./lib/screeningBfeSite.js";
+import { bfeDataLikelyRequired, NOT_MODELED, CLOMR_NOTE } from "./lib/screeningBfe.js";
 import { paintHeatmap, heatmapLegend, heatmapTotals, cellAt as heatCellAt, cutFillPaint, cutFillLegend, cutFillTotals } from "./lib/mitigationHeatmap.js";
 import { buildProposedSurface, balanceAssist, netImportCy, classifyGradeElement, TIE_DROP_FT } from "./lib/proposedSurface.js";
 import { solveBalanceFfe, ffeDualDisplay } from "./lib/ffeBalance.js";
@@ -175,7 +184,7 @@ import {
   isEstimatedWseSrc, estWseNote,
   wseProvLabel, ffeBasisText,
 } from "./lib/floodplainMitigation.js";
-import { loadFloodplainRules, saveFloodplainRules, defaultFloodJurForAuthority, defaultFloodJurForCounty, floodJurCounty, triggerClasses, offsetSurfaceBasis } from "./lib/floodplainRules.js";
+import { loadFloodplainRules, saveFloodplainRules, defaultFloodJurForAuthority, defaultFloodJurForCounty, floodJurCounty, triggerClasses, offsetSurfaceBasis, bfeDataRequirementFor } from "./lib/floodplainRules.js";
 import { loadPondCriteria, checkPondCriteria } from "./lib/pondCriteriaRules.js";
 import { GRADING_RULES, chipLabel as gradingChipLabel } from "./lib/gradingRules.js";
 import { loadBuildabilityRules, assessBuildability, requiredFfe, suggestedFfe, OUTSIDE_FLOODPLAIN_FFE_NOTE, SITE_BASED_FFE_NOTE } from "./lib/buildability.js";
@@ -7979,6 +7988,70 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           if (tok !== drainTok.current) return; // superseded while sampling
         }
       }
+      // NEW-1 (B1057 completion) — PLANYR'S OWN SCREENING STUDY. Everything above reads somebody
+      // else's published or modelled number; this DERIVES one, and it is the only rung that can
+      // answer at all where nobody publishes anything. It rides the same explicit user action (the
+      // house fetch rule: never view-driven), the same 30 s outer race, and the same per-source
+      // failure isolation — an outage reads as an honest UNKNOWN naming the input that is missing,
+      // never a fabricated elevation.
+      //
+      // Gated to unstudied Zone A with no published/manual 1% surface: exactly the "if not
+      // otherwise provided" case Waller §5.C(3) addresses, and the only case where the cost of
+      // three extra point fetches buys anything the app doesn't already have.
+      floodGeo.screeningBfe = null;
+      floodGeo.screeningBfeFlags = { state: "not-applicable" };
+      if ((floodGeo.zones || []).some((z) => z.unstudiedA && z.zone === "A")) {
+        const [sLat, sLng] = feetToLatLng(bfePt, origin.lat, origin.lon);
+        try {
+          // The WIDE, COARSE delineation window — the SAME 3DEP sampler as the site DEM, a
+          // different extent (a site-envelope grid would delineate a few acres of a basin that
+          // really runs for miles, and hand back a confidently understated discharge).
+          const wideBounds = {
+            west: sLng - WATERSHED_PAD_DEG, east: sLng + WATERSHED_PAD_DEG,
+            south: sLat - WATERSHED_PAD_DEG, north: sLat + WATERSHED_PAD_DEG,
+          };
+          const [wideR, pfdsR, soilsR] = await Promise.allSettled([
+            fetchSiteGrid(wideBounds, { zoom: Math.min(WATERSHED_GRID_ZOOM, siteGridZoom(sLat)) }),
+            resolvePfds({ lat: sLat, lng: sLng }),
+            resolveSoils({ lat: sLat, lng: sLng }),
+          ]);
+          const wide = wideR.status === "fulfilled" ? wideR.value : null;
+          const pfds = pfdsR.status === "fulfilled" && pfdsR.value?.ok ? pfdsR.value : null;
+          const soils = soilsR.status === "fulfilled" && soilsR.value?.ok ? soilsR.value : null;
+
+          const terrain = terrainInputsForScreeningBfe({
+            sectionGrid: siteGrid?.grid || null,
+            sectionReq: siteGrid?.req || null,
+            watershedGrid: wide?.grid || null,
+            watershedReq: wide?.req || null,
+            siteRingsLatLng: act.map((p) => p.points.map((pt) => feetToLatLng(pt, origin.lat, origin.lon))),
+            lat: sLat,
+          });
+          const result = screeningBfeForSite({
+            terrain,
+            rainfall: atlas14Depths(pfds ? pfds.table : null),
+            hsg: soils ? soils.soils.hsg : null,
+          });
+          floodGeo.screeningBfe = {
+            ...result,
+            sources: {
+              rainfall: pfds ? pfds.source : null,
+              soils: soils ? soils.source : null,
+              hsg: soils ? soils.soils.hsg : null,
+              watershedGrid: wide ? "3DEP (wide delineation window)" : null,
+            },
+          };
+          floodGeo.screeningBfeFlags = { state: result.ok ? "loaded" : "incomplete" };
+        } catch (e) {
+          // LOUD-FAILURE: a throw is recorded as an explicit {ok:false} RESULT, not just a flag, so
+          // the panel's provenance hover states it in the same place it states every other outcome
+          // — never a quiet no-op that reads as "nothing to worry about here".
+          const reason = e && e.message ? e.message : String(e);
+          floodGeo.screeningBfe = { ok: false, stage: "fetch", missing: [`the screening study could not run: ${reason}`], notModeled: NOT_MODELED, clomrNote: CLOMR_NOTE, screening: true };
+          floodGeo.screeningBfeFlags = { state: "failed", reason };
+        }
+        if (tok !== drainTok.current) return; // superseded while sampling
+      }
       const checkedAt = Date.now();
       // B832 — an AUTO run that came back materially DEGRADED (the authority lookup
       // was unavailable, or the flood pull failed where the remembered check had it
@@ -8141,11 +8214,20 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const fmMaapnextWse1pctFt = fmMaapnext && Number.isFinite(fmMaapnext.wse1pctFt) ? fmMaapnext.wse1pctFt : null;
   const fmMaapnextWse02Ft = fmMaapnext && Number.isFinite(fmMaapnext.wse02Ft) ? fmMaapnext.wse02Ft : null;
   const fmDrainCounty = drainCtxData?.authority?.jurisdiction?.county || [];
+  // NEW-1 (B1057 completion) — Planyr's own screening study, computed at check time from live
+  // inputs (D8 watershed + Atlas 14 + SSURGO + a 3DEP section). It is the ONLY provider whose 1%
+  // and 0.2% come from one derivation, which is what lets the two fields agree by construction.
+  // A `{ok:false}` result contributes NOTHING to the registry — an unknown never becomes a value.
+  const fmScreeningBfe = floodGeo?.screeningBfe || null;
+  const fmScreeningOk = !!(fmScreeningBfe && fmScreeningBfe.ok);
+  const fmScreeningWse1pctFt = fmScreeningOk && Number.isFinite(fmScreeningBfe.wse1pctFt) ? fmScreeningBfe.wse1pctFt : null;
+  const fmScreeningWse02Ft = fmScreeningOk && Number.isFinite(fmScreeningBfe.wse02pctFt) ? fmScreeningBfe.wse02pctFt : null;
   // The registry candidates that carry a 0.2% (grade has none) — resolved by county precedence.
   const fmWse02Candidates = {
     maapnext: fmMaapnext ? { wse1pctFt: fmMaapnextWse1pctFt, wse02Ft: fmMaapnextWse02Ft } : null,
     fbcdd: (fmDerivedWse100Ft != null || fmDerivedWse02Ft != null) ? { wse1pctFt: fmDerivedWse100Ft, wse02Ft: fmDerivedWse02Ft } : null,
     ebfe: (fmEbfeBfe1pctFt != null || fmEbfeWse02Ft != null) ? { wse1pctFt: fmEbfeBfe1pctFt, wse02Ft: fmEbfeWse02Ft } : null,
+    screeningBfe: (fmScreeningWse1pctFt != null || fmScreeningWse02Ft != null) ? { wse1pctFt: fmScreeningWse1pctFt, wse02Ft: fmScreeningWse02Ft } : null,
     grade: null,
   };
   const fmWse02Resolved = resolveEstimatedWse({ county: fmDrainCounty, candidates: fmWse02Candidates });
@@ -9043,7 +9125,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   //     highest estimates and their disagreement (scope addition c), cross-provider.
   //   • The ghost is WANTED whenever ANY candidate is available (a district/EBFE value can offer
   //     a number even when the DEM is out — an improvement over the old !!fmGradeAt gate).
-  const fmEstAnyCandidate = !!fmGradeAt || fmEbfeBfe1pctFt != null || fmMaapnextWse1pctFt != null || fmDerivedWse100Ft != null;
+  const fmEstAnyCandidate = !!fmGradeAt || fmEbfeBfe1pctFt != null || fmMaapnextWse1pctFt != null || fmDerivedWse100Ft != null || fmScreeningWse1pctFt != null;
   const fmEstWseWanted = fmGoverningBfe == null && fmZonesUnstudiedA.length > 0 && fmEstAnyCandidate;
   const fmDemGridKey = fmDemGrid ? fmDemGrid.req.key : "";
   const fmEstWse = useMemo(
@@ -9078,6 +9160,22 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [fmEstWseWanted, floodGeo, fmDemGridKey, drainSigNow],
   );
+  // NEW-3 (B1057 completion) — the BFE-DATA SUBMITTAL TRIGGER, as a rule that fires on THIS site
+  // rather than a sentence in a tooltip. In Waller this is the county's own adopted §5.C(3)
+  // (verified against the ordinance text); elsewhere it falls back to the 44 CFR 60.3(b)(3)
+  // minimum, which the engine flags as unverified research so the two can never read alike.
+  // Only meaningful in an approximate A zone: a studied zone already publishes an elevation.
+  const fmBfeDataReq = bfeDataLikelyRequired({
+    acres: acresActive > 0 ? acresActive : null,
+    inApproximateAZone: fmZonesUnstudiedA.length > 0,
+    requirement: bfeDataRequirementFor(fmRule),
+  });
+  // NEW-2 — the one default-view line for the screening study: VERDICT + NUMBER, with the delta
+  // against whatever 1% surface the app is otherwise governing by. Everything else (method,
+  // inputs, uncertainty band, what is NOT modelled) lives behind the fold.
+  const fmScreeningHeadline = fmScreeningBfe
+    ? screeningBfeHeadline(fmScreeningBfe, fmGoverningBfe ?? fmEstWse?.wseFt ?? null)
+    : null;
   // B882 (scope addition) — the "challenge the estimate" layer. A go/no-go decision can ride on
   // this screening number and it can be wrong in either direction, so:
   //   (a) sanity-check the estimated WSE against site grade (implausible depth / below invert),
@@ -10201,6 +10299,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       estSensitivity: fmEstSensitivity, // B882 — (b) BFE ±1 ft sensitivity band (estimate-sensitive flag)
       wseSweep: fmWseSweep, // NEW-4 — the multi-step flood-level sensitivity ladder (same evaluator)
       estDisagreement: fmEstDisagreement, // B882 — (c) cross-provider disagreement (show both + delta)
+      screening: fmScreeningBfe, // NEW-1 — Planyr's own screening study (both storms) or its honest unknown
+      screeningFlags: floodGeo?.screeningBfeFlags || null,
+      screeningHeadline: fmScreeningHeadline, // NEW-2 — verdict + number + delta, one line
+      bfeDataReq: fmBfeDataReq, // NEW-3 — the ordinance BFE/500-yr data-generation trigger, fired
       bfeSrc: fmBfeSrc, // NEW-2 — "est-boundary-grade" when the committed BFE is the accepted estimate
       hagFt: fmHagFt, // NEW-3 — the HAG screening proxy feeding the Waller §D(5) basis
       // NEW-1 — auto-resolved values shown as grey "value · source" text until tapped to edit.
@@ -21457,7 +21559,7 @@ function YieldPanel({
                       ? ` (sampled ${f1(gradeDet.minFt)}–${f1(gradeDet.maxFt)}′${gradeDet.spreadFt > 2 ? " · sloped reach — coarse" : ""})` : "";
                     return (
                       <div key="fm-est-wse" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "2px 0" }}
-                        title={`${estWseNote(est.provider)}`}>
+                        title={`${estWseNote(est.provider)}${screeningStudyNote(fm.screening)}`}>
                         <span style={{ fontSize: 10.5, color: "var(--warn-text)", lineHeight: 1.4 }}>
                           Est. BFE ≈ {f1(est.wseFt)}′ — {est.providerLabel || wseProvLabel(est.provider)} (screening estimate){gradeSuffix}
                         </span>
@@ -21479,13 +21581,35 @@ function YieldPanel({
                     warnNote(`⚠ ESTIMATE-SENSITIVE — ${fm.estSensitivity.flips.map((fl) => EST_FLIP_LABEL[fl.key] || fl.key).join(", ")} changes within ±1 ft.`, "fm-est-sensitive", "The mitigation volume, required finished-floor, buildability verdict and/or detention split flip within a ±1-ft band around this screening estimate — exactly the range a sealed H&H / Atlas-14 study resolves. Don't kill or commit the deal on the screening number alone.")}
                   {isEstimatedWseSrc(fm.bfeSrc) && Number.isFinite(fm.settings.bfeFt) &&
                     warnNote(`BFE is ${wseProvLabel(fm.bfeSrc)} — screening only`, "fm-est-bfe", estWseNote(fm.bfeSrc))}
+                  {/* NEW-3 (B1057 completion) — THE ORDINANCE TRIGGER. One line, because this is a
+                      SUBMITTAL REQUIREMENT that belongs in schedule and budget at the front of a
+                      project rather than surfacing in review: on an approximate A zone over the
+                      threshold, the county requires the developer to GENERATE the base flood and
+                      500-year elevations with Atlas 14. PANEL-BREVITY: the verbatim citation, the
+                      thresholds and the provenance ride the ⓘ hover, never the default view. The
+                      `verified` flag decides the wording — a county ordinance we have read states
+                      it; the federal fallback says "likely" and names itself as unconfirmed. */}
+                  {fm.bfeDataReq && warnNote(
+                    `Atlas-14 BFE + 500-yr data ${fm.bfeDataReq.verified ? "REQUIRED" : "likely required"} with the submittal — ${fm.bfeDataReq.citation}.`,
+                    "fm-bfe-data-req",
+                    `${fm.bfeDataReq.plain} Verbatim: “${fm.bfeDataReq.quote}” — ${fm.bfeDataReq.source}${fm.bfeDataReq.note ? ` ${fm.bfeDataReq.note}` : ""}${fm.bfeDataReq.verified ? "" : " NOT confirmed against this county's adopted ordinance — 44 CFR 60.3 binds the COMMUNITY and reaches a developer only through the local ordinance, which may be stricter."} Trigger: more than ${fm.bfeDataReq.lotsThreshold} lots or ${fm.bfeDataReq.acresThreshold} acres, whichever is lesser${Number.isFinite(fm.bfeDataReq.acres) ? ` — this site measures ${f1(fm.bfeDataReq.acres)} ac` : ""}.`,
+                  )}
+                  {/* NEW-1 — the screening study's outcome (ran / incomplete / threw) is carried in
+                      the estimate row's own hover via screeningStudyNote, not on a line of its own:
+                      in an approximate A zone another provider still answers and is named on its
+                      row, so a second "unavailable" line would spend default-view budget repeating
+                      that. PANEL-BREVITY: reachable, not visible — and the catch below records the
+                      throw as an {ok:false} result precisely so the hover can state it. */}
                   {/* B794 — the ⓘ names WHERE the number comes from, county-specific: Fort Bend's
                       mitigation basis is the effective FIRM 48157C FIS (2014-04-02, pre-Atlas-14). */}
                   {autoField("0.2% (500-yr) WSE", "wse02Ft",
                     Number.isFinite(fm.derivedWse02Ft) ? fm.derivedWse02Ft : null,
                     fm.derivedWse02Src === "fbcdd-wse02-draft" ? "DRAFT (FBCDD)"
                       : fm.derivedWse02Src === "maapnext-wse02" ? "MAAPnext (screening)"
-                      : fm.derivedWse02Src === "ebfe-wse02" ? "InFRM BLE (screening)" : "screening",
+                      : fm.derivedWse02Src === "ebfe-wse02" ? "InFRM BLE (screening)"
+                      // NEW-1 — Planyr's own study fills BOTH fields from ONE derivation, so the
+                      // 1% and the 0.2% here cannot come from mismatched methods or vintages.
+                      : fm.derivedWse02Src === "screening-bfe-wse02" ? "Planyr Atlas-14 (screening)" : "screening",
                     fmFortBend
                       ? "From the EFFECTIVE FIS profile — Fort Bend: countywide FIRM 48157C, eff. 2014-04-02 (pre-Atlas-14, the basis FBCDD Interim §9 references). The Atlas-14 DRAFT raster auto-fills a labeled stand-in when it can (screening only); tap edit to enter the FIS value."
                       : "Not an NFHL attribute — from the effective FEMA FIS profile, HCFCD MAAPnext model, or FEMA InFRM Base Level Engineering (screening estimate, B882); tap edit to enter the effective FIS value.",

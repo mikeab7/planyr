@@ -10,7 +10,10 @@ const OTHER = ["Montgomery County"];
 
 describe("precedence order", () => {
   it("declares district → ebfe → grade in that order", () => {
-    expect(WSE_PROVIDERS.map((p) => p.id)).toEqual(["maapnext", "fbcdd", "fema-ebfe", "grade"]);
+    // NEW-1 (B1057 completion) — Planyr's own screening study slots BELOW the agency products
+    // (a reviewer weighs those first) and ABOVE the grade proxy (which has no flow in it at all).
+    expect(WSE_PROVIDERS.map((p) => p.id)).toEqual(["maapnext", "fbcdd", "fema-ebfe", "screening-bfe", "grade"]);
+    expect(wseProviderMeta("screening-bfe").tier).toBe("screening");
     expect(wseProviderMeta("fema-ebfe").tier).toBe("ebfe");
   });
 });
