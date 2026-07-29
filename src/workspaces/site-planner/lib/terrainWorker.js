@@ -52,18 +52,25 @@ self.onmessage = (e) => {
       return [round6(lat), round6(lng)];
     };
 
+    // NEW-2: a lattice tile carries its own INTERIOR square; everything outside it is
+    // margin that exists only to feed the stencil. Contours are CUT to that square (so
+    // the neighbouring tile's half meets this one exactly) and the flow lattice is
+    // phased to the WORLD cell index (so arrows don't bunch or gap at a seam).
+    const clip = req.interior || null;
     const sigmaC = Math.min(SIGMA_CAP_CELLS, (opts.contourSigmaM ?? CONTOUR_SIGMA_M) / groundCell);
     const c = buildContours({
       values: maskedSmooth(values, mask, width, height, sigmaC),
       mask, width, height,
-    });
+    }, { clip });
     const contours = {
       interval: c.interval,
       levels: c.levels.map((l) => ({
         level: l.level, isIndex: l.isIndex,
         lines: l.lines.map((line) => line.map((p) => toLL(p[0], p[1]))),
       })),
-      labels: c.labels.map((lb) => ({ ll: toLL(lb.px, lb.py), level: lb.level })),
+      // `anchor` + the tile key are the label's identity: the render path dedupes on
+      // them, so one contour cannot stamp its number twice.
+      labels: c.labels.map((lb) => ({ ll: toLL(lb.px, lb.py), level: lb.level, anchor: lb.anchor })),
     };
 
     const sigmaF = Math.min(SIGMA_CAP_CELLS, (opts.flowSigmaM ?? FLOW_SIGMA_M) / groundCell);
@@ -74,6 +81,8 @@ self.onmessage = (e) => {
         spacingCells: opts.arrowSpacingCells ?? 35,   // ≈70 screen px at 2 px/cell
         minSlope: opts.minSlope ?? 0.0008,
         marginCells: MARGIN_CELLS,
+        region: clip,
+        originCellX: req.originCellX, originCellY: req.originCellY,
       },
     ).map((a) => ({ ll: toLL(a.px, a.py), dir: Math.round(a.dir * 1e3) / 1e3, slope: Math.round(a.slope * 1e5) / 1e5 }));
 

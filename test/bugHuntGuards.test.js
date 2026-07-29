@@ -689,9 +689,14 @@ describe("B36(e)/B843: view-driven map layers guard against stale post-unmount r
   });
   it("B843: terrainLayer has the post-await mount guard before paint (same class as overpass)", () => {
     const src = read("../src/workspaces/site-planner/lib/terrainLayers.js");
-    expect(src).toMatch(/The layer may have been toggled off \/ the map torn down during the \(heavy/);
     // `if (!map) return` appears at least twice: the top-of-refresh guard AND the post-await guard.
     expect((src.match(/if \(!map\) return;/g) || []).length).toBeGreaterThanOrEqual(2);
+    // NEW-1 STRENGTHENED IT. The mount guard alone was never enough: a superseded compute
+    // on a STILL-MOUNTED layer sails past `!map` and paints over the live view (that is
+    // how two "150 ft" labels ended up stacked). The supersession token is now the first
+    // gate, and the mount guard sits behind it — pinned in test/terrainLattice.test.js.
+    expect(src).toMatch(/if \(mySeq !== paintSeq\) return;/);
+    expect(src).toMatch(/A SUPERSESSION TOKEN, NOT JUST A MOUNT GUARD/);
   });
 });
 
