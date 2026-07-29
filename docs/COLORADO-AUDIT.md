@@ -173,7 +173,7 @@ Jefferson County. Texas keys are persisted in saved plans and could not be renam
 Colorado keys are `co_`-prefixed and `countyKeyForName(name)` stays **Texas-only** unless a state is
 passed. An unqualified `"El Paso"` returns `null` rather than guessing.
 
-**Verification pending:** `V511` — probe the five blocked endpoints from an unblocked network and
+**Verification pending:** `V513` — probe the five blocked endpoints from an unblocked network and
 promote each to its own service (a one-line change per row).
 
 ---
@@ -215,7 +215,7 @@ mile. On the Front Range it is not: **Denver at ~5,280 ft is roughly 0.99975 com
 mile, about nine inches across a 3,000-ft site.** A "within 1,000 ft" proximity screen in Denver is
 really measuring about 1,000.25 ground ft. Small, but it is a *bias*, not noise.
 
-**B1100 / NEW-4 ships the surfacing, not the transform.** `shared/coordinates/scaleFactor.js`
+**B1112 / NEW-4 ships the surfacing, not the transform.** `shared/coordinates/scaleFactor.js`
 computes the grid factor, the elevation factor (with optional geoid separation — the Front Range
 geoid sits ~55–60 ft below the ellipsoid, worth ~3 ppm) and their product, plus what it is worth per
 mile and over any run, and `detectSurveyFrame` classifies a survey as `grid` / `ground` /
@@ -443,7 +443,7 @@ exactly that reason.
 
 ## 10. Suggested order of work for a teammate
 
-1. **`V511` — probe the five blocked county endpoints** from an unblocked network; promote each
+1. **`V513` — probe the five blocked county endpoints** from an unblocked network; promote each
    (one line per row). Cheapest possible win, and it removes the composite dependency for four
    counties.
 2. **MHFD detention (B1105, part 1)** — the new `ruleType` + WQCV/EURV calculator. Covers **6 of the

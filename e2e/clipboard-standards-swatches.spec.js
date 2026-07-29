@@ -236,14 +236,18 @@ test.describe("Ctrl+C / Ctrl+V copies whatever is selected (NEW-2 / NEW-6)", () 
   });
 });
 
-/* ---------------- Standards: ONE Apply + ONE scope for the whole panel, in a sticky footer */
+/* ---------------- Standards: ONE Apply for the whole panel.
+ *
+ * NEW-2 note: the panel-level Project|All SCOPE toggle this file also used to cover is gone —
+ * it read as one axis with Apply and was two. The footer's three named actions and the pending
+ * draft that replaced it are covered in e2e/standards-footer-setback.spec.js. */
 
 const openPicker = async (page, nth = 0) => {
   await page.getByRole("button", { name: /color$/i }).nth(nth).click();
   return page.getByRole("group", { name: "Palette colors" }).first();
 };
 
-test.describe("Standards: one Apply + one scope for the whole panel", () => {
+test.describe("Standards: one Apply for the whole panel", () => {
   test("changing a parcel standard offers ONE Apply, which restyles EVERY existing parcel in one undo frame", async ({ page }) => {
     const errors = [];
     page.on("pageerror", (e) => errors.push(String(e)));
@@ -264,7 +268,7 @@ test.describe("Standards: one Apply + one scope for the whole panel", () => {
     await page.getByRole("button", { name: "Standards", exact: true }).click();
     await page.getByRole("button", { name: /^Parcels/ }).click();
 
-    // No setting carries its own Apply / scope row any more — there is exactly ONE of each.
+    // No setting carries its own Apply row any more — there is exactly ONE for the panel.
     await expect(page.getByTestId("standards-bar")).toHaveCount(1);
     await expect(page.getByTestId("standards-apply")).toHaveCount(1);
 
@@ -322,53 +326,6 @@ test.describe("Standards: one Apply + one scope for the whole panel", () => {
     expect(errors).toEqual([]);
   });
 
-  test("ONE scope governs where the NEXT change is stored — and switching it moves nothing", async ({ page }) => {
-    const errors = [];
-    page.on("pageerror", (e) => errors.push(String(e)));
-    await startBlank(page);
-    await page.getByRole("button", { name: "Standards", exact: true }).click();
-    await page.getByRole("button", { name: /^Parcels/ }).click();
-
-    const bar = page.getByTestId("standards-bar");
-    const project = bar.getByRole("button", { name: "Project", exact: true });
-    const all = bar.getByRole("button", { name: "All", exact: true });
-    await expect(project).toBeVisible();
-    await expect(all).toBeVisible();
-    // The scope pair exists ONCE for the panel, not once per setting.
-    await expect(page.getByRole("button", { name: "Project", exact: true })).toHaveCount(1);
-
-    const accountStroke = () => page.evaluate(() => {
-      const p = JSON.parse(localStorage.getItem("planyr:userPrefs:v1") || "{}");
-      return (p.planStandards?.parcelStyle?.stroke || "").toLowerCase();
-    });
-    const chipColor = () => page.getByRole("button", { name: /^Outline color$/i }).first()
-      .evaluate((el) => getComputedStyle(el).backgroundColor);
-    const rgb = (hex) => `rgb(${[1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16)).join(", ")})`;
-
-    // Set a value at Project scope: it lands on the PLAN, not on the account.
-    const palette = await openPicker(page, 0);
-    const swatch = palette.getByRole("button").nth(3);
-    const first = (await swatch.getAttribute("title")).toLowerCase();
-    await swatch.click();
-    await expect(project).toHaveAttribute("aria-pressed", "true");
-    await expect.poll(chipColor).toBe(rgb(first));
-    expect(await accountStroke()).toBe("");                 // nothing went account-wide
-
-    // Flipping the scope to All must MOVE NOTHING — it only governs where the NEXT change goes.
-    await all.click();
-    await expect(all).toHaveAttribute("aria-pressed", "true");
-    expect(await accountStroke()).toBe("");
-    await expect.poll(chipColor).toBe(rgb(first));          // the value in force is unchanged
-
-    // …and the NEXT change DOES go to the account store.
-    const palette2 = await openPicker(page, 0);
-    const swatch2 = palette2.getByRole("button").nth(5);
-    const wanted = (await swatch2.getAttribute("title")).toLowerCase();
-    await swatch2.click();
-    await expect.poll(accountStroke).toBe(wanted);
-    await expect.poll(chipColor).toBe(rgb(wanted));         // …and it is what's in force here too
-    expect(errors).toEqual([]);
-  });
 });
 
 /* ------------------------------ the colour picker: swatches live INSIDE it, recents mean recents */

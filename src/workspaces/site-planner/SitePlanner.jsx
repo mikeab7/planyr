@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo, Fragment } from "react";
+import { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo, Fragment, lazy, Suspense } from "react";
 import { flushSync } from "react-dom";
 import ContextMenu from "../../shared/ui/ContextMenu.jsx";
 import L from "leaflet";
@@ -71,7 +71,10 @@ import { worldToScreen, screenToWorld, zoomAround, midpoint, distance, pinchZoom
 import ColorField from "../../shared/ui/ColorField.jsx";
 import StandardsBar from "./components/StandardsBar.jsx";
 import { loadUserPrefs, saveUserPrefs, applyPrefs, readMirror, setStandardPref, getStandardPref } from "./lib/userPrefs.js";
-import { PARCEL_STD_KEYS, applyAllStandards, allStandardsImpact, appliedObjectsLabel, derivedPanelScope } from "./lib/standardsApply.js";
+import {
+  PARCEL_STD_KEYS, TYPE_STD_KEYS, applyAllStandards, allStandardsImpact, appliedObjectsLabel,
+  EMPTY_STD_DRAFT, draftParcelValue, draftTypeValue, withParcelDraft, withTypeDraft, draftDirty, mergeDraftIntoSettings,
+} from "./lib/standardsApply.js";
 import { pushRecent, notePick, commitPick } from "../../shared/ui/colorRecents.js";
 import { CLIP_KINDS, collectClipboard, clipboardBBox, pasteClipboard, translateCalloutBy, translateParcelBy } from "./lib/planClipboard.js";
 import { usePalette } from "../../shared/theme/ThemeProvider.jsx";
@@ -95,7 +98,7 @@ import {
 import { apprRows, apprAll, apprVal, findAttr } from "./lib/appraisal.js";
 import { makeParcelDisplayLayer, ADD_CURSOR, PARCEL_MINZOOM } from "./lib/parcelDisplay.js";
 import { geocodeAddress } from "./lib/geocode.js";
-import { TYPE, typeStyle, elStyle, parcelDefaultStyle, toHex6, byZ, zOrder, standardScope } from "./lib/planStyle.js";
+import { TYPE, typeStyle, elStyle, parcelDefaultStyle, toHex6, byZ, zOrder, setPreviewStyleDefaults, setbackLineStyle, SETBACK_LINE } from "./lib/planStyle.js";
 import { byZAsc, nextZ, Z_GAP } from "./lib/zOrder.js";
 import { reorderByZ, arrangeFlags } from "./lib/arrange.js";
 import { commonStyleState, selectionRingFeet } from "./lib/multiStyle.js";
@@ -155,7 +158,10 @@ import { assessCutFill } from "./lib/cutFillBalance.js";
 import { corridorRingLngLat, DEFAULT_CORRIDOR_WIDTH_FT } from "./lib/pipelineCorridor.js";
 import { ringsArea, offsetOutward } from "./lib/pondOffset.js";
 import { buildChangeSummaryRows, gapProposalNote, bermCapProposalNote } from "./lib/pondChangeSummary.js";
-import PondSection from "./components/PondSection.jsx";
+/* PR-L pond cross-section. LAZY (bundle budget, 2026-07-29 — the B1092 precedent): it renders
+ * ONLY inside the pond inspector and the Optimize card, both reached by an explicit user action,
+ * so a plain Site load has no use for it. Both call sites wrap it in one shared Suspense. */
+const PondSection = lazy(() => import("./components/PondSection.jsx"));
 import { pondScreeningGuards } from "./lib/pondScreeningGuards.js";
 import { geometricMaxBermFt, drainageBermCapFt, bindingBermCap, bermNeedsInlets, INLETS_THROUGH_BERM_NOTE, inwardBermSplit, crestRingForBerm, EXT_BERM_SLOPE, INFLOW_HEAD_ALLOWANCE_FT } from "./lib/inwardBerm.js";
 import { gisCache } from "./lib/gisCache.js";
@@ -583,6 +589,23 @@ const INLINE_LABEL_SPACING = { line: 150, polyline: 150, easement: 350, road: 70
 // B935 — when `interiorScreen` (a projected point) is given, the perpendicular offset aims TOWARD it
 // (into a closed easement ring's body) instead of the screen-"up" side, so an "Inside" label tucks
 // within the boundary rather than riding on top of it.
+/* Shared inline-style atoms (NEW-2 perf pass, the B1093 pattern). These exact object literals were
+ * repeated dozens of times across the panels — each copy is its own object in the bundle AND a new
+ * identity every render. One definition each: byte-identical output, stable identity, smaller chunk.
+ * Pure values only — anything reading PAL (theme) has to stay inside the component. */
+const ROW6 = { display: "flex", alignItems: "center", gap: 6 };
+const ROW4 = { display: "flex", alignItems: "center", gap: 4 };
+const ROWB6 = { display: "flex", alignItems: "baseline", gap: 6 };
+const ROWSB = { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "2px 0" };
+const INK_HALO = { paintOrder: "stroke", stroke: "#fff", strokeWidth: 3 };
+/* The one line-style choice list, shared by every dash <select> (parcel boundary + setback, as a
+ * Standards default and as a per-object override, plus the markup/easement pickers). */
+const DASH_OPTIONS = [
+  <option key="solid" value="solid">Solid</option>,
+  <option key="dashed" value="dashed">Dashed</option>,
+  <option key="dotted" value="dotted">Dotted</option>,
+];
+
 function inlineLabelPlaces(ptsFeet, spacingFt, offsetPx, f2p, interiorScreen) {
   if (!ptsFeet || ptsFeet.length < 2) return [];
   const segs = []; let total = 0;
@@ -12210,6 +12233,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // B653: link-styled jump from an inspector's "default" value to its Standards section.
   const linkBtn = { padding: 0, border: "none", background: "transparent", color: PAL.accentText, cursor: "pointer", fontFamily: "inherit", fontSize: 10.5, fontWeight: 600, textDecoration: "underline", textUnderlineOffset: 2 };
   const numInput = { width: 58, padding: "6px 9px", fontSize: 12, fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS, border: `1px solid var(--border-default)`, borderRadius: 8, color: PAL.ink, background: "var(--surface-raised)" };
+  // Repeated panel-control variants — one definition each rather than a fresh object literal at
+  // every call site (same NEW-2 perf pass as the module-scope ROW*/DASH_OPTIONS atoms above).
+  const chipSm = { ...chip, padding: "2px 8px", fontSize: 10.5 };
+  const textInput = { ...numInput, width: 150, fontFamily: "inherit" };
+  const subHead = { fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", margin: "2px 0 6px" };
   // B678/B682 — the per-label style controls (repeat spacing · text size · background halo) shown under an
   // "Inline label" field once the feature actually carries a label. `write(patch, {live})` is the
   // feature-specific, NON-STICKY writer (direct setMarkups / setSelEl, never mkStyle) so a tweak never
@@ -12688,7 +12716,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const metricRow = (label, value, sub, tag) => (
     <div key={label} style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", padding: "5.5px 0", borderBottom: "1px solid #f3efe5", gap: 8 }}>
       <span style={{ fontSize: 12, color: PAL.muted }}>{label}</span>
-      <span style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
+      <span style={ROWB6}>
         <span style={{ fontFamily: NUM_FONT, fontSize: 13, color: PAL.ink, fontWeight: 650, fontVariantNumeric: TABULAR_NUMS }}>{value}{sub && <span style={{ color: PAL.muted, fontWeight: 400, fontSize: 10.5 }}> {sub}</span>}</span>
         {tag ? <SourceTag code={tag.code} label={label} basis={tag.basis} /> : null}
       </span>
@@ -13021,9 +13049,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const multiStyle = multiStyleable ? commonStyleState(multiMembers, settings) : null;
   // Merge a default-color patch for one type into settings.typeStyles.
   const setTypeStyle = (type, patch) => setSettings((s) => ({ ...s, typeStyles: { ...(s.typeStyles || {}), [type]: { ...((s.typeStyles || {})[type] || {}), ...patch } } })); // RC-6: settings-only → not undoable (no pushHistory dead frame)
-  // B929 — merge a patch into the default style for NEW parcels (Standards → Parcels). Settings-only,
-  // so not undoable (no pushHistory dead frame); consumed at creation by parcelDefaultStyle().
-  const setParcelStd = (patch) => setSettings((s) => ({ ...s, parcelStyle: { ...(s.parcelStyle || {}), ...patch } }));
 
   /* ---- NEW-3: Standards scope + retroactive apply ----
    * Standards seeded NEW objects only. Two axes were missing and both are one click now:
@@ -13061,73 +13086,96 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   };
   useEffect(() => () => { if (stdToastTimer.current) clearTimeout(stdToastTimer.current); }, []);
 
-  // Where a parcel / element-type standard's value comes from (project copy first, then account).
-  const parcelStdScope = (key) => standardScope(settings.parcelStyle?.[key], getStandardPref(userPrefs, "parcelStyle", key));
-  const parcelStdValue = (key) => settings.parcelStyle?.[key] ?? getStandardPref(userPrefs, "parcelStyle", key);
-  const typeStdScope = (type, key) => standardScope(settings.typeStyles?.[type]?.[key], getStandardPref(userPrefs, "typeStyles", key, type));
-  const typeStdValue = (type, key) => settings.typeStyles?.[type]?.[key] ?? getStandardPref(userPrefs, "typeStyles", key, type);
+  // What is COMMITTED for a parcel / element-type standard (this plan's own copy first, then the
+  // account default). The panel shows the pending draft over the top of these — see below.
+  const committedParcelStd = (key) => settings.parcelStyle?.[key] ?? getStandardPref(userPrefs, "parcelStyle", key);
+  const committedTypeStd = (type, key) => settings.typeStyles?.[type]?.[key] ?? getStandardPref(userPrefs, "typeStyles", key, type);
 
-  /* ---- ONE scope for the whole panel (owner rule, this round) ----
-   * Scope was stored PER KEY and rendered per FIELD. Collapsing it to one panel control must not
-   * MOVE anything that is already stored — so nothing is rewritten on the way in: the control's
-   * value is DERIVED from the per-key scopes already in force (any standard sitting at the account
-   * level ⇒ "All"), and an explicit choice is remembered in `settings.stdScope` and wins from then
-   * on. The choice governs where a SUBSEQUENT change is stored, nothing retroactive. */
-  const stdScopeKeys = () => [
-    ...PARCEL_STD_KEYS.map((k) => parcelStdScope(k)),
-    ...Object.keys(TYPE).flatMap((t) => ["fill", "stroke"].map((k) => typeStdScope(t, k))),
-  ];
-  const stdScope = settings.stdScope === "all" || settings.stdScope === "project"
-    ? settings.stdScope
-    : derivedPanelScope(stdScopeKeys());
-  const setStdScope = (next) => {
-    setSettings((s) => ({ ...s, stdScope: next }));
-    if (next === "all" && !cloudPrefsReady) flashWarn("Saved on this computer — sign in to make these defaults across your account.", 6000);
+  /* ---- NEW-2: Standards edits are a PENDING DRAFT ----
+   * The footer's three actions are named outright (Apply to this plan · Save for this plan · Save
+   * for all projects), replacing the Project|All scope toggle that read as an axis it wasn't. The
+   * consequence: once "Save for this plan" is an explicit button, a field edit can no longer
+   * silently commit as the plan default, or that button means nothing. So every Standards edit
+   * lands in `stdDraft` and NOTHING is stored until a button commits it.
+   *
+   * The draft is kept in sessionStorage keyed by PLAN, for two reasons: closing the panel,
+   * switching workspace or reloading must not silently throw the edits away, and a draft must
+   * never leak onto a different plan when you switch plans. */
+  const stdDraftKey = `planyr:stdDraft:${siteId || "unsaved"}`;
+  const readStdDraft = (key) => {
+    try { const raw = sessionStorage.getItem(key); const d = raw ? JSON.parse(raw) : null; return d && d.parcelStyle && d.typeStyles ? d : EMPTY_STD_DRAFT; } catch { return EMPTY_STD_DRAFT; }
   };
-  /* A COMMITTED standards edit, routed by that one scope. Live edits (a colour wheel mid-drag)
-   * always write the plan's own copy — cheap and local; only the commit promotes, so an "All"
-   * scope can't fire one account write per intermediate shade. Promoting drops the plan's own copy
-   * so this plan keeps following the account default when it changes later. */
-  const promoteParcelStd = (patch) => {
-    let up = userPrefs;
-    Object.entries(patch).forEach(([k, v]) => { up = setStandardPref(up, "parcelStyle", k, v ?? null); });
-    commitUserPrefs(up);
-    setSettings((s) => {
-      const ps = { ...(s.parcelStyle || {}) };
-      Object.keys(patch).forEach((k) => delete ps[k]);
-      return { ...s, parcelStyle: ps };
-    });
+  const [stdDraft, setStdDraftState] = useState(() => readStdDraft(stdDraftKey));
+  // Re-read on a plan switch, so each plan keeps its own pending edits (and never inherits another's).
+  useEffect(() => { setStdDraftState(readStdDraft(stdDraftKey)); }, [stdDraftKey]);
+  const setStdDraft = (next) => {
+    setStdDraftState(next);
+    try {
+      if (next && (Object.keys(next.parcelStyle || {}).length || Object.keys(next.typeStyles || {}).length)) sessionStorage.setItem(stdDraftKey, JSON.stringify(next));
+      else sessionStorage.removeItem(stdDraftKey);
+    } catch { /* private mode / quota — the draft still lives in state for this session */ }
   };
-  const promoteTypeStd = (type, patch) => {
-    let up = userPrefs;
-    Object.entries(patch).forEach(([k, v]) => { up = setStandardPref(up, "typeStyles", k, v ?? null, type); });
-    commitUserPrefs(up);
-    setSettings((s) => {
-      const all = { ...(s.typeStyles || {}) };
-      const bag = { ...(all[type] || {}) };
-      Object.keys(patch).forEach((k) => delete bag[k]);
-      if (Object.keys(bag).length) all[type] = bag; else delete all[type];
-      return { ...s, typeStyles: all };
-    });
-  };
-  const commitParcelStd = (patch) => { setParcelStd(patch); if (stdScope === "all") promoteParcelStd(patch); };
-  const commitTypeStd = (type, patch) => { liveTypeStyle(type, patch); if (stdScope === "all") promoteTypeStd(type, patch); };
+  const clearStdDraft = () => setStdDraft(EMPTY_STD_DRAFT);
 
-  /* ---- ONE Apply for the whole panel ----
-   * Pushes EVERY standard onto what's already drawn in ONE undo frame, counted in distinct objects
-   * across parcels AND elements (so "Applied to 12 objects" is honest, not a sum of per-key hits).
-   * Parcels are stamped at creation → the value is written; elements resolve their type style at
-   * render → their per-element overrides are cleared (see lib/standardsApply.js). */
+  // The values the PANEL shows = the draft over what's committed.
+  const parcelStdValue = (key) => draftParcelValue(stdDraft, key, committedParcelStd(key));
+  const typeStdValue = (type, key) => draftTypeValue(stdDraft, type, key, committedTypeStd(type, key));
+  const draftParcelStd = (patch) => setStdDraft(withParcelDraft(stdDraft, patch));
+  const draftTypeStd = (type, patch) => setStdDraft(withTypeDraft(stdDraft, type, patch));
+  const stdDirty = draftDirty(stdDraft, committedParcelStd, committedTypeStd);
+  /* Element type styles resolve at RENDER, so the canvas can preview the draft — publish it into
+   * the style resolver's preview layer (planStyle.setPreviewStyleDefaults). Visual only: a draft
+   * is never STAMPED into a new parcel, so an uncommitted value can't reach stored geometry.
+   * Assigned during render (idempotent) so the canvas paints the draft in the same frame. */
+  setPreviewStyleDefaults(stdDraft);
+  useEffect(() => () => setPreviewStyleDefaults(EMPTY_STD_DRAFT), []);
+
+  /* ---- the THREE footer actions ----
+   * Apply to this plan — commits the draft as the plan's defaults AND pushes every standard onto
+   *   what's already drawn, in ONE undo frame, counted in distinct objects across parcels AND
+   *   elements (so "Applied to 12 objects" is honest, not a sum of per-key hits). Parcels are
+   *   stamped at creation → the value is written; elements resolve their type style at render →
+   *   their per-element overrides are cleared (see lib/standardsApply.js). The only action that
+   *   touches geometry, so the only one with an Undo.
+   * Save for this plan / Save for all projects — store the same values and change nothing drawn,
+   *   so they confirm briefly with no Undo. */
   const stdParcelValues = () => Object.fromEntries(PARCEL_STD_KEYS.map((k) => [k, parcelStdValue(k) ?? null]));
   const stdApplyCount = allStandardsImpact(parcels, els, stdParcelValues(), Object.keys(TYPE));
+  const saveStdForPlan = () => {
+    if (!stdDirty) return;
+    setSettings((s) => mergeDraftIntoSettings(s, stdDraft));
+    clearStdDraft();
+    flashStdToast("Saved as this plan's defaults", null, 3500);
+  };
+  const saveStdForAllProjects = () => {
+    // Promote what the panel currently SHOWS to the account, then drop this plan's own copies so
+    // the plan keeps following the account default when it changes later (the old promote rule).
+    let up = userPrefs;
+    PARCEL_STD_KEYS.forEach((k) => { up = setStandardPref(up, "parcelStyle", k, parcelStdValue(k) ?? null); });
+    Object.keys(TYPE).forEach((t) => TYPE_STD_KEYS.forEach((k) => { up = setStandardPref(up, "typeStyles", k, typeStdValue(t, k) ?? null, t); }));
+    commitUserPrefs(up);
+    setSettings((s) => ({ ...s, parcelStyle: {}, typeStyles: {} }));
+    clearStdDraft();
+    flashStdToast("Saved as your defaults for all projects", null, 3500);
+  };
   const applyAllStd = () => {
     const beforeParcels = stateRef.current.parcels, beforeEls = stateRef.current.els;
+    const beforeSettings = settings;
+    const beforeDraft = stdDraft;
     const res = applyAllStandards(beforeParcels, beforeEls, stdParcelValues(), Object.keys(TYPE));
     if (!res.count) return;
+    // Applying implies keeping them: commit the plan defaults AND restyle, in one click / one frame.
+    if (stdDirty) { setSettings((s) => mergeDraftIntoSettings(s, stdDraft)); clearStdDraft(); }
     pushHistory();                       // ONE frame for every object touched
     setParcels(res.parcels);
     setEls(res.els);
-    flashStdToast(appliedObjectsLabel(res.count), () => { setParcels(beforeParcels); setEls(beforeEls); setStdToast(null); });
+    flashStdToast(appliedObjectsLabel(res.count), () => {
+      setParcels(beforeParcels); setEls(beforeEls);
+      // Undo the whole action, not half of it: the stored defaults and the pending edits come back too.
+      setSettings((s) => ({ ...s, parcelStyle: beforeSettings.parcelStyle, typeStyles: beforeSettings.typeStyles }));
+      setStdDraft(beforeDraft);
+      setStdToast(null);
+    });
   };
 
   /* ---- live color picking (B567) ----
@@ -13167,7 +13215,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   });
   const liveMarkup    = (patch) => { setMarkups((a) => a.map((m) => (selMarkup && m.id === selMarkup.id ? { ...m, ...patch } : m))); setMkStyle((s) => ({ ...s, ...patch })); };
   const liveCallout   = (patch) => { if (selCallout) setCallout(selCallout.id, patch); };
-  const liveTypeStyle = (type, patch) => setSettings((s) => ({ ...s, typeStyles: { ...(s.typeStyles || {}), [type]: { ...((s.typeStyles || {})[type] || {}), ...patch } } }));
   // Make the selected element's current colors the default for its type — and say so (B653).
   const setStyleDefault = () => {
     if (!selEl || !curStyle) return;
@@ -13587,7 +13634,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                               <div style={{ borderTop: `1px dashed var(--planner-border)`, paddingTop: 8, display: "flex", flexDirection: "column", gap: 6 }}>
                                 <div style={{ fontSize: 11, color: PAL.muted }}>Sheet: <b style={{ color: PAL.ink }}>{o.sheet.label}</b>{!o.sheet.std && <span style={{ color: PAL.accent }}> · non-standard (may be shrunk) — scale below assumes true plot size</span>}</div>
                                 <label style={ovRow}><span style={{ width: 48 }}>Scale</span>
-                                  <select data-testid="overlay-scale-preset" style={{ ...numInput, width: 150, fontFamily: "inherit" }} value={selVal}
+                                  <select data-testid="overlay-scale-preset" style={textInput} value={selVal}
                                     onChange={(e) => {
                                       const v = e.target.value;
                                       if (v === "custom") { setOvEditFor(o.id, { scaleMode: "custom", page: pageVal, pageUnit, real: realVal, realUnit }); return; }
@@ -13972,7 +14019,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       {...sliderHistory((e) => setSelParcel({ fillOpacity: +e.target.value }))} />
                   </Field>
                   <Field label="Fill color">
-                    <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <span style={ROW6}>
                       <ColorField value={toHex6(selParcel.fill)} {...colorCtl((v) => setSelParcel({ fill: v }))} seed={COLOR_SEED} title="Fill color" />
                     </span>
                   </Field>
@@ -13982,7 +14029,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   one-frame undo; the discrete weight/style/reset commits push their own frame (setSelParcel
                   does not). Renders live via pc.stroke/pc.weight/pc.dash at the parcel <polygon>. */}
               <Field label="Outline color">
-                <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <span style={ROW6}>
                   <ColorField value={toHex6(selParcel.stroke ?? PAL.parcel)} {...colorCtl((v) => setSelParcel({ stroke: v }))} seed={COLOR_SEED} title="Outline color" />
                 </span>
               </Field>
@@ -13992,12 +14039,29 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               <Field label="Line style">
                 <select value={selParcel.dash || "solid"} onChange={(e) => { pushHistory(); setSelParcel({ dash: e.target.value }); }}
                   style={{ ...numInput, width: "auto", cursor: "pointer" }}>
-                  <option value="solid">Solid</option>
-                  <option value="dashed">Dashed</option>
-                  <option value="dotted">Dotted</option>
+                  {DASH_OPTIONS}
                 </select>
               </Field>
               <button style={{ ...chip, marginTop: 2 }} onClick={() => { pushHistory(); setSelParcel({ stroke: null, weight: null, dash: null }); }} title="Reset the outline back to the default color, weight and solid line">Reset outline</button>
+              {/* NEW-1 — the SETBACK line gets the same three controls as the boundary above, on
+                  this parcel only. Renders live via pc.sbStroke/pc.sbWeight/pc.sbDash at the
+                  setback <polygon> (and its dimension chips follow the colour). */}
+              <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", margin: "12px 0 6px" }}>Setback line</div>
+              <Field label="Line color">
+                <span style={ROW6}>
+                  <ColorField value={toHex6(selParcel.sbStroke ?? PAL.setback)} {...colorCtl((v) => setSelParcel({ sbStroke: v }))} seed={COLOR_SEED} title="Setback line color" />
+                </span>
+              </Field>
+              <Field label="Line weight">
+                <NumInput style={numInput} value={selParcel.sbWeight ?? SETBACK_LINE.weight} min={0.25} step={0.25} coarse={2} onCommit={(n) => { pushHistory(); setSelParcel({ sbWeight: n }); }} />
+              </Field>
+              <Field label="Line style">
+                <select value={selParcel.sbDash || SETBACK_LINE.dash} onChange={(e) => { pushHistory(); setSelParcel({ sbDash: e.target.value }); }}
+                  style={{ ...numInput, width: "auto", cursor: "pointer" }}>
+                  {DASH_OPTIONS}
+                </select>
+              </Field>
+              <button style={{ ...chip, marginTop: 2 }} onClick={() => { pushHistory(); setSelParcel({ sbStroke: null, sbWeight: null, sbDash: null }); }} title="Reset the setback line back to the default color, weight and dashes">Reset setback line</button>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", margin: "10px 0 4px" }}>
                 <span style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em" }}>Setbacks per edge</span>
                 <label style={{ display: "flex", gap: 6, fontSize: 11, color: PAL.muted, cursor: "pointer" }} title="Show the setback line inside the parcel boundary"><input type="checkbox" checked={settings.showSetback} onChange={(e) => setSettings((s) => ({ ...s, showSetback: e.target.checked }))} /> Show setback line</label>
@@ -14198,7 +14262,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", margin: "10px 0 6px" }}>Unit prices (your bids)</div>
                 <div id="price-field-earthworkCy">
                   <Field label="Excavation / cut">
-                    <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                    <span style={ROW4}>
                       <span style={{ fontSize: 12, color: PAL.muted }}>$</span>
                       <NumInput style={{ ...numInput, width: 70 }} value={prices.earthworkCy ?? null} min={0} placeholder="—" onCommit={(n) => setPrice("earthworkCy", n)} />
                       <span style={{ fontSize: 11, color: PAL.muted }}>/CY</span>
@@ -14207,7 +14271,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 </div>
                 {gsG && (
                   <Field label="Fill shrink/swell (%)">
-                    <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                    <span style={ROW4}>
                       <NumInput allowClear style={{ ...numInput, width: 70 }} value={gsShrinkPct ?? null} min={0} placeholder="0"
                         onCommit={(n) => setGrading({ shrinkPct: Number.isFinite(n) ? n : null })} />
                       <span style={{ fontSize: 11, color: PAL.muted }} title="Compacted fill needs MORE bank dirt than its placed volume (clay placed at 95% Proctor commonly shrinks 10–25%). Blank = none applied — enter your geotech's number.">bank→placed ⓘ</span>
@@ -14238,7 +14302,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             const priceField = (label, k, unit) => (
               <div id={`price-field-${k}`}>
                 <Field label={label}>
-                  <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                  <span style={ROW4}>
                     <span style={{ fontSize: 12, color: PAL.muted }}>$</span>
                     <NumInput style={{ ...numInput, width: 70 }} value={prices[k] ?? null} min={0} placeholder="—" onCommit={(n) => setPrice(k, n)} />
                     <span style={{ fontSize: 11, color: PAL.muted }}>{unit}</span>
@@ -14292,44 +14356,58 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             {/* B929 — the rest of a parcel's own properties, now settable as defaults for NEW parcels
                 (stamped at creation via parcelDefaultStyle; each mirrors a control in the parcel
                 inspector). livePick uses hist=false since these touch settings only (RC-6). */}
-            {/* Every committed edit here routes through commitParcelStd, which honours the ONE
-                panel scope in the sticky footer (this plan, or the whole account). Live edits (a
-                wheel mid-drag) write the plan's copy only; the promotion happens once, on commit.
-                Values read project-first, then the account default (see parcelStdValue). */}
+            {/* NEW-2 — every edit here lands in the PENDING DRAFT (draftParcelStd). Nothing is
+                stored until one of the footer's three actions commits it, which is what makes
+                "Save for this plan" mean something. Values read draft-first, then this plan's
+                copy, then the account default (see parcelStdValue).
+                NEW-1 — the section styles TWO different lines, so each group is labelled: an
+                unlabelled pair of colour rows left it guessing which line you were editing. */}
+            <StdSubLabel>Parcel line</StdSubLabel>
             <Field label="Outline color">
               <ColorField value={toHex6(parcelStdValue("stroke") ?? PAL.parcel)} title="Outline color" seed={COLOR_SEED}
-                {...colorCtl((v) => setParcelStd({ stroke: v }), false, (v) => commitParcelStd({ stroke: v }))} />
+                {...colorCtl((v) => draftParcelStd({ stroke: v }), false)} />
             </Field>
             <Field label="Line weight">
-              <NumInput style={numInput} value={parcelStdValue("weight") ?? 2} min={0.5} step={0.5} coarse={2} onCommit={(n) => commitParcelStd({ weight: n })} />
+              <NumInput style={numInput} value={parcelStdValue("weight") ?? 2} min={0.5} step={0.5} coarse={2} onCommit={(n) => draftParcelStd({ weight: n })} />
             </Field>
             <Field label="Line style">
-              <select value={parcelStdValue("dash") ?? "solid"} onChange={(e) => commitParcelStd({ dash: e.target.value })}
+              <select value={parcelStdValue("dash") ?? "solid"} onChange={(e) => draftParcelStd({ dash: e.target.value })}
                 style={{ ...numInput, width: "auto", cursor: "pointer" }}>
-                <option value="solid">Solid</option>
-                <option value="dashed">Dashed</option>
-                <option value="dotted">Dotted</option>
+                {DASH_OPTIONS}
               </select>
             </Field>
             <label style={{ display: "flex", gap: 8, fontSize: 12, color: PAL.muted, margin: "2px 2px 8px", cursor: "pointer" }}>
-              <input type="checkbox" checked={!!parcelStdValue("fill")} onChange={(e) => commitParcelStd(e.target.checked ? { fill: "#5b6650" } : { fill: null, fillOpacity: null })} /> Fill new parcels (off by default)
+              <input type="checkbox" checked={!!parcelStdValue("fill")} onChange={(e) => draftParcelStd(e.target.checked ? { fill: "#5b6650" } : { fill: null, fillOpacity: null })} /> Fill new parcels (off by default)
             </label>
             {parcelStdValue("fill") && (
               <>
                 <Field label="Translucence">
-                  {/* Drag writes the plan's copy live; the account promotion (if the scope is All)
-                      fires once on release, never once per slider tick. */}
                   <input type="range" min={0} max={0.6} step={0.02} value={parcelStdValue("fillOpacity") ?? 0.12}
-                    onChange={(e) => setParcelStd({ fillOpacity: +e.target.value })}
-                    onPointerUp={(e) => commitParcelStd({ fillOpacity: +e.target.value })}
-                    onKeyUp={(e) => commitParcelStd({ fillOpacity: +e.target.value })} />
+                    onChange={(e) => draftParcelStd({ fillOpacity: +e.target.value })} />
                 </Field>
                 <Field label="Fill color">
                   <ColorField value={toHex6(parcelStdValue("fill"))} title="Fill color" seed={COLOR_SEED}
-                    {...colorCtl((v) => setParcelStd({ fill: v }), false, (v) => commitParcelStd({ fill: v }))} />
+                    {...colorCtl((v) => draftParcelStd({ fill: v }), false)} />
                 </Field>
               </>
             )}
+            {/* NEW-1 — the SETBACK line, with the same three controls as the boundary above. It
+                had none at all: colour, weight and dash were hardcoded at the one place it was
+                drawn. Defaults match today's look exactly, so an existing plan is unchanged. */}
+            <StdSubLabel>Setback line</StdSubLabel>
+            <Field label="Line color">
+              <ColorField value={toHex6(parcelStdValue("sbStroke") ?? PAL.setback)} title="Setback line color" seed={COLOR_SEED}
+                {...colorCtl((v) => draftParcelStd({ sbStroke: v }), false)} />
+            </Field>
+            <Field label="Line weight">
+              <NumInput style={numInput} value={parcelStdValue("sbWeight") ?? SETBACK_LINE.weight} min={0.25} step={0.25} coarse={2} onCommit={(n) => draftParcelStd({ sbWeight: n })} />
+            </Field>
+            <Field label="Line style">
+              <select value={parcelStdValue("sbDash") ?? SETBACK_LINE.dash} onChange={(e) => draftParcelStd({ sbDash: e.target.value })}
+                style={{ ...numInput, width: "auto", cursor: "pointer" }}>
+                {DASH_OPTIONS}
+              </select>
+            </Field>
             {/* B721 cross-link (consistent with B164's placement): per-edge setbacks are a
                 property of the parcel itself, not a global default — say so here so nobody hunts
                 for a per-edge control on this panel. */}
@@ -14451,26 +14529,36 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 <div key={k} style={{ marginBottom: 7 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                     <span style={{ flex: 1, fontSize: 12, color: PAL.ink, minWidth: 90 }}>{TYPE[k].label.split(" / ")[0]}</span>
+                    {/* NEW-2 — draft edits. The canvas still previews them live (typeStyle reads
+                        the draft's preview layer), but nothing is stored until a footer action. */}
                     <ColorField title="Fill" value={toHex6(st.fill)} seed={COLOR_SEED} style={{ width: 30, height: 24 }}
-                      {...colorCtl((v) => liveTypeStyle(k, { fill: v }), false, (v) => commitTypeStd(k, { fill: v }))} />
+                      {...colorCtl((v) => draftTypeStd(k, { fill: v }), false)} />
                     <ColorField title="Line" value={toHex6(st.stroke)} seed={COLOR_SEED} style={{ width: 30, height: 24 }}
-                      {...colorCtl((v) => liveTypeStyle(k, { stroke: v }), false, (v) => commitTypeStd(k, { stroke: v }))} />
+                      {...colorCtl((v) => draftTypeStd(k, { stroke: v }), false)} />
                   </div>
                 </div>
               );
             })}
-            <button style={{ ...chip, marginTop: 4, color: PAL.accent }} onClick={() => setSettings((s) => ({ ...s, typeStyles: {} }))}>Reset all to built-in</button>
+            {/* NEW-2 — a reset is a draft edit like any other (a null per key = "clear it"), so it
+                previews immediately but still goes through one of the footer's three actions. */}
+            <button style={{ ...chip, marginTop: 4, color: PAL.accent }}
+              onClick={() => setStdDraft({ ...stdDraft, typeStyles: Object.fromEntries(Object.keys(TYPE).map((t) => [t, { fill: null, stroke: null }])) })}>Reset all to built-in</button>
           </Section>
           </div>
 
-          {/* ONE control set for the whole panel, in a sticky footer so it stays reachable while
-              the settings list scrolls: where a subsequent change is stored, and one Apply that
-              pushes every standard onto what is already drawn (one undo frame, counted in
-              objects). Replaces the per-field Apply + scope row that was most of the panel. */}
-          <StandardsBar scope={stdScope} onScope={setStdScope} applyCount={stdApplyCount}
-            onApply={applyAllStd} cloudReady={cloudPrefsReady} />
           </>)}
   </>);
+
+  /* NEW-2 — the Standards footer, rendered as a real footer BELOW the panel's scrolling body
+   * (a sibling of the scroll container, in BOTH the docked and the floating host) rather than as
+   * a sticky element inside it. The sticky version floated over the settings list and cut
+   * whatever row sat at the bottom of the scrollport in half; as a sibling it spans the panel's
+   * full width, reserves its own space, and can never occlude a row at any scroll position. */
+  const standardsFooter = (
+    <StandardsBar dirty={stdDirty} onDiscard={clearStdDraft} applyCount={stdApplyCount}
+      onApply={applyAllStd} onSavePlan={saveStdForPlan} onSaveAll={saveStdForAllProjects}
+      cloudReady={cloudPrefsReady} />
+  );
 
   // B820 — markups sorted for z-order render (byZAsc): every markup shares one type-layer band, so
   // this degenerates to z-then-id. Rendered in TWO passes below — markups flagged `behindEls` paint
@@ -14668,7 +14756,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       <polyline points={clStr} fill="none" stroke={col} strokeWidth={clW} />
                       <polygon points={pad} fill={col} fillOpacity={0.88} stroke="#fff" strokeWidth={1} />
                       <text x={padC.x} y={padC.y + 3} textAnchor="middle" fontSize="8" fontWeight="800" fill="#fff" pointerEvents="none">{m.fitting}</text>
-                      <text x={mid.x} y={mid.y - 5} textAnchor="middle" fontSize="9.5" fontWeight="700" fill={col} pointerEvents="none" style={{ paintOrder: "stroke", stroke: "#fff", strokeWidth: 3 }}>{m.label}</text>
+                      <text x={mid.x} y={mid.y - 5} textAnchor="middle" fontSize="9.5" fontWeight="700" fill={col} pointerEvents="none" style={INK_HALO}>{m.label}</text>
                     </g>
                   );
                 }
@@ -14684,7 +14772,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       <polyline points={s} fill="none" stroke={col} strokeWidth={tw} strokeDasharray={dashArray(m.dash, m.weight ?? 2.4)} strokeLinejoin="round" />
                       {m.kind === "infwater" && pp.map((q, i) => <circle key={i} cx={q.x} cy={q.y} r={3} fill="#dc2626" stroke="#fff" strokeWidth={1} />)}
                       {m.kind === "traced" && pp.map((q, i) => <rect key={i} x={q.x - 2} y={q.y - 2} width={4} height={4} fill={col} stroke="#fff" strokeWidth={0.8} />)}
-                      {mid && <text x={mid.x} y={mid.y - 6} textAnchor="middle" fontSize="9.5" fontWeight="700" fill={col} pointerEvents="none" style={{ paintOrder: "stroke", stroke: "#fff", strokeWidth: 3 }}>{m.label}</text>}
+                      {mid && <text x={mid.x} y={mid.y - 6} textAnchor="middle" fontSize="9.5" fontWeight="700" fill={col} pointerEvents="none" style={INK_HALO}>{m.label}</text>}
                     </g>
                   );
                 }
@@ -14703,7 +14791,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
                         return <text key={i} x={mx} y={my - 3} textAnchor="middle" fontSize="9" fontFamily={NUM_FONT} fontVariantNumeric={TABULAR_NUMS} fill={stroke} pointerEvents="none" style={{ paintOrder: "stroke", stroke: "#fff", strokeWidth: 2.5 }}>{c.label}</text>;
                       })}
-                      <text x={cp.x} y={cp.y} textAnchor="middle" fontSize="11" fontWeight="700" fill={stroke} pointerEvents="none" style={{ paintOrder: "stroke", stroke: "#fff", strokeWidth: 3 }}>{m.label}</text>
+                      <text x={cp.x} y={cp.y} textAnchor="middle" fontSize="11" fontWeight="700" fill={stroke} pointerEvents="none" style={INK_HALO}>{m.label}</text>
                     </g>
                   );
                 }
@@ -14731,7 +14819,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           like the auto dims + measurement labels and reveals on zoom-in; the hatched fill +
                           centerline geometry always stay (keep-geometry, avoid the on/off flicker). A
                           selected easement keeps its label at any zoom (edit handles never vanish mid-edit). */}
-                      {(isSel || dimCalloutVisible(labelPpf)) && <text x={cp.x} y={cp.y} textAnchor="middle" fontSize={10.5 * labelK} fontWeight="700" fill={ecol} pointerEvents="none" style={{ paintOrder: "stroke", stroke: "#fff", strokeWidth: 3 }}>{easementLabel(m)}{proposed ? " (proposed)" : ""}</text>}
+                      {(isSel || dimCalloutVisible(labelPpf)) && <text x={cp.x} y={cp.y} textAnchor="middle" fontSize={10.5 * labelK} fontWeight="700" fill={ecol} pointerEvents="none" style={INK_HALO}>{easementLabel(m)}{proposed ? " (proposed)" : ""}</text>}
                       {isSel && labelPpf > 0.05 && <text x={cp.x} y={cp.y + 12 * labelK} textAnchor="middle" fontSize={9 * labelK} fontWeight="600" fill={ecol} pointerEvents="none" style={{ paintOrder: "stroke", stroke: "#fff", strokeWidth: 2.5 }}>{Math.round(area).toLocaleString()} sf · {(area / SQFT_PER_ACRE).toFixed(2)} ac</text>}
                       {inlineLabelEls(easePathFeet, m.inlineLabel, ecol, m.labelSpacing || INLINE_LABEL_SPACING.easement, view.ppf, f2p, `il${m.id}-`, { size: m.labelSize, halo: m.labelHalo, lf: labelFrame, ...easementInsetOpts(m) })}
                     </g>
@@ -15190,8 +15278,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 if (!o) return null;
                 const zk = strokeZk; // B617/B880 zoom factor — hold the setback weight + dash constant relative to the drawing (NEW-1: 1 on an export pass)
                 const ring = o.map((p) => `${f2p(p).x},${f2p(p).y}`).join(" ");
+                // NEW-1 — the setback line's own standards (colour / weight / style), stamped at
+                // creation like the boundary's and overridable per parcel. An untouched parcel
+                // resolves to exactly the old hardcoded look (PAL.setback, 1.25, "7 6").
+                const sbs = setbackLineStyle(pc, PAL.setback);
                 return <g key={`sb${pc.id}`}>
-                  <polygon points={ring} fill="none" stroke={PAL.setback} strokeWidth={strokeZoom(1.25, zk)} strokeDasharray={dashZoom("7 6", zk)} pointerEvents="none" />
+                  <polygon data-testid="setback-ring" points={ring} fill="none" stroke={sbs.stroke} strokeWidth={strokeZoom(sbs.weight, zk)} strokeDasharray={dashZoom(sbs.dash, zk)} pointerEvents="none" />
                   <polygon points={ring} fill="none" stroke="rgba(0,0,0,0.001)" strokeWidth={12} strokeLinejoin="round" pointerEvents="stroke"
                     style={{ cursor: tool === "select" ? (pc.locked ? "default" : "move") : "crosshair" }}
                     onPointerDown={(e) => startMoveParcel(e, pc.id)}
@@ -15205,10 +15297,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   reading "—" means the side's segments disagree (a per-segment override). */}
               {settings.showSetback && selParcel && selRuns && (() => {
                 const sb = parcelSetbacks(selParcel);
+                // NEW-1 — the dimension chip follows the setback LINE's colour instead of staying
+                // hardcoded, so recolouring the line takes its numbers with it.
+                const sbCol = setbackLineStyle(selParcel, PAL.setback).stroke;
                 const pill = (key, anchor, txt, onEdit) => (
                   <g key={key} style={{ cursor: "pointer" }} onPointerDown={(e) => { e.stopPropagation(); const fp = p2f(e.clientX, e.clientY); onEdit(fp, e.altKey); }}>
-                    <rect x={anchor.x - 13} y={anchor.y - 9} width={26} height={16} rx={4} fill="#fff" stroke={PAL.setback} strokeWidth={1} />
-                    <text x={anchor.x} y={anchor.y + 3.5} textAnchor="middle" fontSize="10.5" fontFamily={NUM_FONT} fontVariantNumeric={TABULAR_NUMS} fill={PAL.setback} fontWeight="700">{txt}</text>
+                    <rect x={anchor.x - 13} y={anchor.y - 9} width={26} height={16} rx={4} fill="#fff" stroke={sbCol} strokeWidth={1} />
+                    <text x={anchor.x} y={anchor.y + 3.5} textAnchor="middle" fontSize="10.5" fontFamily={NUM_FONT} fontVariantNumeric={TABULAR_NUMS} fill={sbCol} fontWeight="700">{txt}</text>
                   </g>
                 );
                 if (sbEditMode === "segment") {
@@ -16198,7 +16293,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               fontSize: 12.5, fontWeight: 600, boxShadow: "0 8px 28px rgba(0,0,0,0.3)",
               display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
               <span>{stdToast.msg}</span>
+              {/* Only the action that changed drawn geometry carries an Undo. The two Save
+                  actions store a default and change nothing on the canvas, so they confirm
+                  briefly and there is nothing to take back. */}
+              {stdToast.onUndo && (
               <button data-testid="standards-apply-undo" onClick={stdToast.onUndo} style={{ border: "none", background: "var(--surface-raised)", color: PAL.accent, borderRadius: 7, padding: "4px 12px", cursor: "pointer", fontSize: 11.5, fontWeight: 700 }}>Undo</button>
+              )}
             </div>
           )}
 
@@ -16475,14 +16575,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                               <span style={{ fontSize: 11, color: PAL.muted, fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS, whiteSpace: "nowrap" }}>{f0(r.sf)} sf</span>
                             </div>
                             <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                              <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                              <span style={ROW4}>
                                 <span style={{ fontSize: 11, color: PAL.muted }}>Clear</span>
                                 <NumInput style={valNum} value={r.clearHeight.value} min={1} onCommit={(n) => setBuildingProp(r.id, "clearHeightOverride", n)} /><span style={{ fontSize: 11, color: PAL.muted }}>ft</span>
                                 {r.clearHeight.overridden
                                   ? <button title="Revert to auto" onClick={() => setBuildingProp(r.id, "clearHeightOverride", null)} style={{ ...chip, padding: "2px 6px", fontSize: 10, color: PAL.accent }}>set ↺</button>
                                   : <span style={{ fontSize: 10, color: PAL.muted }}>auto</span>}
                               </span>
-                              <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                              <span style={ROW4}>
                                 <span style={{ fontSize: 11, color: PAL.muted }}>Slab</span>
                                 <NumInput style={valNum} value={r.slab.value} min={1} onCommit={(n) => setBuildingProp(r.id, "slabThicknessOverride", n)} /><span style={{ fontSize: 11, color: PAL.muted }}>in</span>
                                 {r.slab.overridden
@@ -16872,7 +16972,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   <Field label="Dash">
                     <select style={{ ...numInput, width: 100, fontFamily: "inherit" }} value={props.dash.mixed ? "" : (props.dash.value || "solid")} onChange={(e) => { if (e.target.value) applyMultiStyle({ dash: e.target.value }); }}>
                       {props.dash.mixed && <option value="" disabled>Mixed</option>}
-                      <option value="solid">Solid</option><option value="dashed">Dashed</option><option value="dotted">Dotted</option>
+                      {DASH_OPTIONS}
                     </select>
                   </Field>
                 )}
@@ -16960,7 +17060,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 <Field label="Line weight"><NumInput style={numInput} value={selMarkup.weight ?? 2} min={0.5} step={0.5} coarse={2} onCommit={(n) => setSelMarkup({ weight: n })} /></Field>
                 <Field label="Dash">
                   <select style={{ ...numInput, width: 100, fontFamily: "inherit" }} value={selMarkup.dash || "solid"} onChange={(e) => setSelMarkup({ dash: e.target.value })}>
-                    <option value="solid">Solid</option><option value="dashed">Dashed</option><option value="dotted">Dotted</option>
+                    {DASH_OPTIONS}
                   </select>
                 </Field>
                 {/* B620 — inline label riding the line (open paths only; double-click the line also opens this in
@@ -16970,7 +17070,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   <Field label="Inline label"><input value={selMarkup.inlineLabel || ""} maxLength={120}
                     onFocus={() => pushHistory()}
                     onChange={(e) => setMarkups((a) => a.map((m) => (m.id === selMarkup.id ? { ...m, inlineLabel: e.target.value } : m)))}
-                    placeholder={'e.g. 18" SANITARY SEWER'} style={{ ...numInput, width: 150, fontFamily: "inherit" }} /></Field>
+                    placeholder={'e.g. 18" SANITARY SEWER'} style={textInput} /></Field>
                   {/* B678 — per-label repeat spacing / text size / background halo (only once a label is typed) */}
                   {inlineLabelControls(selMarkup, selMarkup.kind, coalesceLabelWrite(selMarkup.id, (p) => setMarkups((a) => a.map((m) => (m.id === selMarkup.id ? { ...m, ...p } : m)))))}
                 </>)}
@@ -17094,7 +17194,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 <Field label="Label"><input value={m.label || ""} maxLength={80}
                   onFocus={() => pushHistory()}
                   onChange={(ev) => setMeasures((a) => a.map((x) => (x.id === m.id ? { ...x, label: ev.target.value } : x)))}
-                  placeholder="e.g. Front setback" style={{ ...numInput, width: 150, fontFamily: "inherit" }} /></Field>
+                  placeholder="e.g. Front setback" style={textInput} /></Field>
                 <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.5, marginTop: 8 }}>
                   {m.locked
                     ? "Locked — click 🔓 Unlock below to move or reshape it."
@@ -17145,14 +17245,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         <Field label="Inline label"><input value={selEl.inlineLabel || ""} maxLength={120}
                           onFocus={() => pushHistory()}
                           onChange={(e) => setSelEl({ inlineLabel: e.target.value })}
-                          placeholder="e.g. MAIN STREET" style={{ ...numInput, width: 150, fontFamily: "inherit" }} /></Field>
+                          placeholder="e.g. MAIN STREET" style={textInput} /></Field>
                         {/* B678 — per-label repeat spacing / text size / background halo (only once a label is typed) */}
                         {inlineLabelControls(selEl, "road", coalesceLabelWrite(selEl.id, (p) => setSelEl(p)))}
                       </>)}
                       {cl && (
                         <Field label="Road class">
                           <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
-                            <select style={{ ...numInput, width: 150, fontFamily: "inherit" }} value={selEl.roadClass || DEFAULT_ROAD_CLASS} onChange={(e) => setRoadClass(selEl, e.target.value)}>
+                            <select style={textInput} value={selEl.roadClass || DEFAULT_ROAD_CLASS} onChange={(e) => setRoadClass(selEl, e.target.value)}>
                               {roadClassesOf(settings).map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}
                             </select>
                             <button title="Class defaults (radius, design speed) — edit in Standards" onClick={() => jumpToStandards("roads")} style={{ ...linkBtn, fontSize: 10 }}>↗</button>
@@ -17180,7 +17280,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       )}
                       {cl && (
                         <div style={{ marginTop: 8 }}>
-                          <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", margin: "2px 0 6px" }}>Curve at vertex</div>
+                          <div style={subHead}>Curve at vertex</div>
                           {vsel == null ? (
                             <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.45 }}>Click a road vertex on the canvas to set it sharp · arc · smooth.{selEl.pts.length <= 2 ? " A straight 2-point road has no interior vertex." : ""}</div>
                           ) : (
@@ -17211,7 +17311,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         const curFlare = selEl.tee && selEl.tee.throughId === tj.throughId && selEl.tee.flare > 0 ? selEl.tee.flare : 0;
                         return (
                           <div style={{ marginTop: 8 }}>
-                            <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", margin: "2px 0 6px" }}>Tee intersection</div>
+                            <div style={subHead}>Tee intersection</div>
                             <Field label="Curb return (ft)"><NumInput style={numInput} value={Math.round(curR)} min={0} onCommit={(n) => setRoadTee(selEl, tj.throughId, { returnR: n })} /></Field>
                             <Field label="Throat flare (ft)"><NumInput style={numInput} value={Math.round(curFlare)} min={0} onCommit={(n) => setRoadTee(selEl, tj.throughId, { flare: n })} /></Field>
                             <div style={{ fontSize: 10.5, color: PAL.muted, marginTop: 4, lineHeight: 1.4 }}>Rounds the curb returns where this road meets the through road{myTees.length > 1 ? ` (${myTees.length} tees)` : ""}. Larger return / flare widens the throat. Seeded from the road class; returns clamp to fit.</div>
@@ -17229,7 +17329,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         const curFlare = selEl.driveTee && selEl.driveTee.flare > 0 ? selEl.driveTee.flare : 0;
                         return (
                           <div style={{ marginTop: 8 }}>
-                            <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", margin: "2px 0 6px" }}>Drive intersection · {kindLbl}</div>
+                            <div style={subHead}>Drive intersection · {kindLbl}</div>
                             <Field label="Curb return (ft)"><NumInput style={numInput} value={Math.round(curR)} min={0} onCommit={(n) => setRoadDrive(selEl, { returnR: n })} /></Field>
                             <Field label="Throat flare (ft)"><NumInput style={numInput} value={Math.round(curFlare)} min={0} onCommit={(n) => setRoadDrive(selEl, { flare: n })} /></Field>
                             <div style={{ fontSize: 10.5, color: PAL.muted, marginTop: 4, lineHeight: 1.4 }}>Where this road meets the {kindLbl}. Seeded {dj.kind === "truckcourt" ? "truck-scale (≈50′)" : "car-scale (≈20′)"}; returns clamp to fit.</div>
@@ -17408,7 +17508,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
 
                         {grpHdr("Structure")}
                         <Field label="Clear height (ft)">
-                          <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                          <span style={ROW4}>
                             <NumInput style={{ ...numInput, width: 52 }} value={props.clearHeight.value} min={1} onCommit={(n) => { pushHistory(); setSelEl({ clearHeightOverride: n }); }} />
                             {props.clearHeight.overridden
                               ? <button title="Revert to auto (by size)" onClick={() => { pushHistory(); setSelEl({ clearHeightOverride: null }); }} style={resetBtn}>set ↺</button>
@@ -17416,7 +17516,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           </span>
                         </Field>
                         <Field label="Slab (in)">
-                          <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                          <span style={ROW4}>
                             <NumInput style={{ ...numInput, width: 52 }} value={props.slab.value} min={1} onCommit={(n) => { pushHistory(); setSelEl({ slabThicknessOverride: n }); }} />
                             {props.slab.overridden
                               ? <button title="Revert to auto (by size)" onClick={() => { pushHistory(); setSelEl({ slabThicknessOverride: null }); }} style={resetBtn}>set ↺</button>
@@ -17432,7 +17532,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           const gg = computeBuildingGrid({ length: footprintLength(b), depth: footprintDepth(b), dock: b.dock || "cross", grid: grd });
                           const ovRow = (label, valueShown, ovKey, floor) => (
                             <Field label={label} key={ovKey}>
-                              <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                              <span style={ROW4}>
                                 <NumInput style={{ ...numInput, width: 52 }} value={Math.round(valueShown)} min={floor} onCommit={(n) => { pushHistory(); setSelEl({ [ovKey]: n }); }} />
                                 {b[ovKey] != null
                                   ? <button title="Revert to plan default" onClick={() => { pushHistory(); setSelEl({ [ovKey]: null }); }} style={resetBtn}>set ↺</button>
@@ -17524,7 +17624,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     const q = roadQuantities(selEl, roadTravel(selEl), roadLengthOf(selEl));
                     return (
                       <div style={{ marginTop: 8 }}>
-                        <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", margin: "2px 0 6px" }}>Curb &amp; paving (cost)</div>
+                        <div style={subHead}>Curb &amp; paving (cost)</div>
                         <Field label="Curb type">
                           <select style={{ ...numInput, width: 120, fontFamily: "inherit" }} value={ct} onChange={(e) => setRoadCost(selEl, { curbType: e.target.value })}>
                             {COST_CURB_TYPES.map((k) => <option key={k} value={k}>{CURB_TYPE_META[k].label}</option>)}
@@ -17551,7 +17651,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   })()}
                   {selEl.type === "trailer" && !selEl.points && (
                     <div style={{ marginTop: 4 }}>
-                      <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", margin: "2px 0 6px" }}>Terminal curb</div>
+                      <div style={subHead}>Terminal curb</div>
                       <div style={{ display: "flex", gap: 6 }}>
                         <button style={{ ...chip, flex: 1, ...(curbWidthOf(selEl) === CURB_6 ? { borderColor: PAL.accent, color: PAL.accent, fontWeight: 600 } : {}) }} onClick={() => setCurbW(selEl, CURB_6)}>6″ mono</button>
                         <button style={{ ...chip, flex: 1, ...(curbWidthOf(selEl) === CURB_12 ? { borderColor: PAL.accent, color: PAL.accent, fontWeight: 600 } : {}) }} onClick={() => setCurbW(selEl, CURB_12)}>12″ heavy</button>
@@ -17609,9 +17709,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 return (
                   <div style={{ marginTop: 8 }}>
                     <Field label="Pad elev. (ft NAVD88)">
-                      <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <span style={ROW6}>
                         <NumInput allowClear style={{ ...numInput, width: 64 }} value={selEl.padElevFt ?? ""} placeholder={auto != null ? `auto ${f1(auto)}` : "auto"} onCommit={(n) => { pushHistory(); setSelEl({ padElevFt: Number.isFinite(n) ? n : null }); }} />
-                        {selEl.padElevFt != null && <button style={{ ...chip, padding: "2px 8px", fontSize: 10.5 }} title="Back to automatic (slab FF, dock zones minus the dock drop)" onClick={() => { pushHistory(); setSelEl({ padElevFt: null }); }}>Auto</button>}
+                        {selEl.padElevFt != null && <button style={chipSm} title="Back to automatic (slab FF, dock zones minus the dock drop)" onClick={() => { pushHistory(); setSelEl({ padElevFt: null }); }}>Auto</button>}
                       </span>
                     </Field>
                     <div style={{ fontSize: 10, color: PAL.muted, lineHeight: 1.45, marginTop: 2 }}>
@@ -17639,11 +17739,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       </label>
                     )}
                     <Field label="Grading slope (%)">
-                      <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <span style={ROW6}>
                         <NumInput allowClear style={{ ...numInput, width: 64 }} value={g.slopePct ?? ""} min={0}
                           placeholder={rule ? `auto ${gradingChipLabel(rule).split(" — ")[0]}` : "auto"}
                           onCommit={(n) => setGradingEl({ slopePct: Number.isFinite(n) ? n : null })} />
-                        {g.slopePct != null && <button style={{ ...chip, padding: "2px 8px", fontSize: 10.5 }} title="Back to automatic (the class band)" onClick={() => setGradingEl({ slopePct: null })}>Auto</button>}
+                        {g.slopePct != null && <button style={chipSm} title="Back to automatic (the class band)" onClick={() => setGradingEl({ slopePct: null })}>Auto</button>}
                       </span>
                     </Field>
                     <div style={{ fontSize: 10, color: PAL.muted, lineHeight: 1.45, marginTop: 2 }}>
@@ -17725,7 +17825,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 const pondRow = (label, val, tag) => (
                   <div key={label} style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", padding: "3px 0", gap: 8 }}>
                     <span style={{ fontSize: 11.5, color: PAL.muted }}>{label}</span>
-                    <span style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
+                    <span style={ROWB6}>
                       <span style={{ fontFamily: NUM_FONT, fontSize: 12.5, color: PAL.ink, fontWeight: 650, fontVariantNumeric: TABULAR_NUMS }}>{val}</span>
                       {tag ? <SourceTag code={tag.code} label={label} basis={tag.basis} /> : null}
                     </span>
@@ -17914,14 +18014,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       <span style={{ display: "flex", alignItems: "center", gap: 6, whiteSpace: "nowrap" }}>
                         <NumInput allowClear style={{ ...numInput, width: 60 }} value={det.depth ?? ""} placeholder={`~${f1(depth)}`} min={1} onCommit={(n) => setDet({ depth: Number.isFinite(n) ? n : null })} />
                         <span style={{ fontSize: 11, color: PAL.muted }}>ft</span>
-                        {det.depth != null && <button style={{ ...chip, padding: "2px 8px", fontSize: 10.5 }} title="Clear: back to the screening default / solver suggestion" onClick={() => setDet({ depth: null })}>×</button>}
+                        {det.depth != null && <button style={chipSm} title="Clear: back to the screening default / solver suggestion" onClick={() => setDet({ depth: null })}>×</button>}
                       </span>,
                       "water depth + freeboard")}
                     {g_glanceRow("Rim",
                       <span style={{ display: "flex", alignItems: "center", gap: 6, whiteSpace: "nowrap" }}>
                         <NumInput allowClear style={{ ...numInput, width: 58 }} value={det.tobElev ?? ""} placeholder={pondAuto.tobElev ? `~${f1(pondAuto.tobElev.value)}` : "opt."} onCommit={(n) => setDet({ tobElev: Number.isFinite(n) ? n : null })} />
                         <span style={{ fontSize: 10.5, color: PAL.muted, whiteSpace: "nowrap" }}>{g_rimText}{g_floodLevel != null ? ` · flood ${f1(g_floodLevel)}′${g_facts.floodEstimated ? " est." : ""}` : ""}</span>
-                        {det.tobElev != null && <button style={{ ...chip, padding: "2px 8px", fontSize: 10.5 }} title={pondAuto.tobElev ? `Clear: back to auto (${pondAuto.tobElev.source})` : "Clear: label rings by depth instead of elevation"} onClick={() => setDet({ tobElev: null })}>×</button>}
+                        {det.tobElev != null && <button style={chipSm} title={pondAuto.tobElev ? `Clear: back to auto (${pondAuto.tobElev.source})` : "Clear: label rings by depth instead of elevation"} onClick={() => setDet({ tobElev: null })}>×</button>}
                       </span>,
                       "Set the top-of-bank elevation to label rings as real elevations instead of depths. Rim vs grade and the flood level read to the right.")}
                     {g_glanceRow("Holds (gross)", g_glanceNum(`${f1(g_holdsAcFt)} ac-ft`), "The full geometric tub volume before the flood / tailwater dead-storage split. The USABLE / achievable storage (what counts toward detention, and what the map + verdict report) is lower; see the verdict.", `${f0(r.vol)} cf stored`)}
@@ -18101,7 +18201,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         visual); collapsible for space. */}
                     <Collapse sectionId="pond-section" title="Section" defaultOpen={true} summary="grade · berm · storage bands">
                       <div style={{ padding: "4px 0 2px" }}>
-                        <PondSection facts={sectionFactsFor(selEl)} />
+                        <Suspense fallback={null}><PondSection facts={sectionFactsFor(selEl)} /></Suspense>
                       </div>
                     </Collapse>
                     {/* PR-J — "Engineering assumptions" is an ENGINEER-ONLY override section: it must
@@ -18126,18 +18226,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       </div>
                     )}
                     <Field label="Freeboard (ft)">
-                      <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <span style={ROW6}>
                         <NumInput allowClear style={numInput} value={det.freeboard ?? ""} placeholder={`~${f1(pondAuto.freeboard.value)}`} min={0} onCommit={(n) => setDet({ freeboard: Number.isFinite(n) ? n : null })} />
                         {det.freeboard != null
-                          ? <button style={{ ...chip, padding: "2px 8px", fontSize: 10.5 }} title={`Clear: back to auto (${pondAuto.freeboard.source})`} onClick={() => setDet({ freeboard: null })}>×</button>
+                          ? <button style={chipSm} title={`Clear: back to auto (${pondAuto.freeboard.source})`} onClick={() => setDet({ freeboard: null })}>×</button>
                           : <span style={{ fontSize: 10, color: PAL.muted, whiteSpace: "nowrap" }} title={pondAuto.freeboard.verified ? "Verified criteria value" : "Unverified — confirm against the criteria manual"}>· {pondAuto.freeboard.source}</span>}
                       </span>
                     </Field>
                     <Field label="Side slope (n:1 H:V)">
-                      <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <span style={ROW6}>
                         <NumInput allowClear style={numInput} value={det.slope ?? ""} placeholder={`~${f1(pondAuto.slope.value)}`} min={1} onCommit={(n) => setDet({ slope: Number.isFinite(n) ? n : null })} />
                         {det.slope != null
-                          ? <button style={{ ...chip, padding: "2px 8px", fontSize: 10.5 }} title={`Clear: back to auto (${pondAuto.slope.source})`} onClick={() => setDet({ slope: null })}>×</button>
+                          ? <button style={chipSm} title={`Clear: back to auto (${pondAuto.slope.source})`} onClick={() => setDet({ slope: null })}>×</button>
                           : <span style={{ fontSize: 10, color: PAL.muted, whiteSpace: "nowrap" }} title={pondAuto.slope.verified ? "Verified criteria value" : "Unverified — confirm against the criteria manual"}>· {pondAuto.slope.source}</span>}
                       </span>
                     </Field>
@@ -18158,10 +18258,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           {on && (
                             <div style={{ marginTop: 6 }}>
                               <Field label="Contour interval (ft)">
-                                <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                                <span style={ROW6}>
                                   <NumInput style={{ ...numInput, width: 56 }} value={det.contourInterval ?? autoContourInterval(depth)} min={0.5} onCommit={(n) => setDet({ contourInterval: Math.max(0.5, n) })} />
                                   {det.contourInterval != null && (
-                                    <button style={{ ...chip, padding: "2px 8px", fontSize: 10.5 }} title="Back to the smart automatic spacing" onClick={() => setDet({ contourInterval: null })}>Auto</button>
+                                    <button style={chipSm} title="Back to the smart automatic spacing" onClick={() => setDet({ contourInterval: null })}>Auto</button>
                                   )}
                                 </span>
                               </Field>
@@ -18180,10 +18280,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       const usingEst = det.poolElev == null && Number.isFinite(poolEst);
                       return (
                         <Field label="Permanent pool elev. (ft)">
-                          <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                          <span style={ROW6}>
                             <NumInput allowClear style={{ ...numInput, width: 64 }} value={det.poolElev ?? (Number.isFinite(poolEst) ? poolEst : "")} placeholder="water table" onCommit={(n) => setDet({ poolElev: Number.isFinite(n) ? n : null })} />
                             {det.poolElev != null
-                              ? <button style={{ ...chip, padding: "2px 8px", fontSize: 10.5 }} title="Clear: back to the estimated water-table pool" onClick={() => setDet({ poolElev: null })}>×</button>
+                              ? <button style={chipSm} title="Clear: back to the estimated water-table pool" onClick={() => setDet({ poolElev: null })}>×</button>
                               : usingEst && <span title="Screening estimate: the seasonal-high water table (grade minus depth to water). Refine with a geotech boring." style={estPillStyle}>EST</span>}
                           </span>
                         </Field>
@@ -18194,10 +18294,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         estimate (the flood WSE, else existing grade) so it's never a blank demanding an
                         expert value — the developer's typed value overrides. */}
                     <Field label="Receiving water (100-yr tailwater) elev. (ft)">
-                      <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <span style={ROW6}>
                         <NumInput allowClear style={{ ...numInput, width: 64 }} value={det.receivingFlowlineElev ?? (Number.isFinite(g_twEst.valueFt) ? Math.round(g_twEst.valueFt * 10) / 10 : "")} placeholder="outfall elev" onCommit={(n) => setDet({ receivingFlowlineElev: Number.isFinite(n) ? n : null })} />
                         {det.receivingFlowlineElev != null
-                          ? <button style={{ ...chip, padding: "2px 8px", fontSize: 10.5 }} title="Clear: back to the estimate" onClick={() => setDet({ receivingFlowlineElev: null })}>×</button>
+                          ? <button style={chipSm} title="Clear: back to the estimate" onClick={() => setDet({ receivingFlowlineElev: null })}>×</button>
                           : Number.isFinite(g_twEst.valueFt)
                             ? <span title={`Estimated from ${g_twEst.sourceLabel || "channel data"}. ${g_twEst.sourceTip || ""} The receiving channel's stage at the outfall; refine with the outfall survey. Storage below it can't drain by gravity (dead).`} style={estPillStyle}>EST</span>
                             : <span title="The receiving-water level comes from the drainage district channel, FEMA InFRM, a USGS gauge, or a terrain-derived channel flowline (never site grade). None resolved here, so enter the outfall elevation or check the Drainage district group. Leaving it blank means the gravity-discharge check is skipped, not failed." style={{ ...estPillStyle, color: PAL.warn }}>needs channel data</span>}
@@ -18217,10 +18317,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     {/* PR-G/PR-I — SOFT geotech screen: pre-filled with the depth to water ("don't dig
                         below groundwater"), else the 12-ft fallback. A warning, never a hard block. */}
                     <Field label="Max excavation depth (ft)">
-                      <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <span style={ROW6}>
                         <NumInput allowClear style={{ ...numInput, width: 64 }} value={det.maxExcavDepthFt ?? (Number.isFinite(g_maxExcavEst.valueFt) ? Math.round(g_maxExcavEst.valueFt * 10) / 10 : "")} placeholder={`${DEFAULT_MAX_EXCAV_DEPTH_FT}`} onCommit={(n) => setDet({ maxExcavDepthFt: Number.isFinite(n) ? n : null })} />
                         {det.maxExcavDepthFt != null
-                          ? <button style={{ ...chip, padding: "2px 8px", fontSize: 10.5 }} title="Clear: back to the estimate" onClick={() => setDet({ maxExcavDepthFt: null })}>×</button>
+                          ? <button style={chipSm} title="Clear: back to the estimate" onClick={() => setDet({ maxExcavDepthFt: null })}>×</button>
                           : Number.isFinite(g_maxExcavEst.valueFt) && <span title={`Screening estimate: ${g_maxExcavEst.source === "depth-to-water" ? "the seasonal-high depth to water (don't dig below groundwater)" : "a conservative default"}. Refine with a geotech boring.`} style={estPillStyle}>EST</span>}
                       </span>
                     </Field>
@@ -18328,7 +18428,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         out.push(
                           <div key="gw-dtw" style={{ marginTop: 6 }}>
                             <Field label="Depth to water (ft)">
-                              <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                              <span style={ROW6}>
                                 <NumInput allowClear style={{ ...numInput, width: 64 }} value={dtw ?? (Number.isFinite(dtwEstField.valueFt) ? dtwEstField.valueFt : "")} placeholder="—" min={0} onCommit={(n) => setDet({ depthToWaterFt: Number.isFinite(n) && n >= 0 ? n : null })} />
                                 {dtw == null && dtwEstField.estimated && <span title="Screening estimate: a shallow Gulf-Coast seasonal-high water table. Refine with SSURGO / a TWDB well / a geotech boring." style={estPillStyle}>EST</span>}
                                 <RowInfo label="Depth to water (ft)" sections={[{ text: "Seasonal high water table (SSURGO / TWDB well). Pre-filled with a regional screening estimate until a measured value is entered." }]} />
@@ -18551,15 +18651,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         <div style={{ marginTop: 12, borderTop: `1px solid ${PAL.panelLine}`, paddingTop: 9 }}>
                           <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 700, marginBottom: 7 }}>Sizing inputs (screening)</div>
                           <Field label="Drainage area (ac)">
-                            <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                            <span style={ROW6}>
                               <NumInput allowClear style={{ ...numInput, width: 64 }} value={Math.round(da * 100) / 100} min={0} onCommit={(n) => setDet({ daAcres: n > 0 ? n : null })} />
-                              {det.daAcres != null && <button style={{ ...chip, padding: "2px 8px", fontSize: 10.5 }} title="Back to the whole site" onClick={() => setDet({ daAcres: null })}>Site</button>}
+                              {det.daAcres != null && <button style={chipSm} title="Back to the whole site" onClick={() => setDet({ daAcres: null })}>Site</button>}
                             </span>
                           </Field>
                           <Field label="Impervious %">
-                            <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                            <span style={ROW6}>
                               <NumInput allowClear style={{ ...numInput, width: 64 }} value={Math.round(imp * 10) / 10} min={0} max={100} onCommit={(n) => setDet({ daImpPct: Number.isFinite(n) ? Math.max(0, Math.min(100, n)) : null })} />
-                              {det.daImpPct != null && <button style={{ ...chip, padding: "2px 8px", fontSize: 10.5 }} title="Back to the plan's auto value" onClick={() => setDet({ daImpPct: null })}>Auto</button>}
+                              {det.daImpPct != null && <button style={chipSm} title="Back to the plan's auto value" onClick={() => setDet({ daImpPct: null })}>Auto</button>}
                             </span>
                           </Field>
                           {det.daImpPct == null && <div style={smallNote}>Impervious % auto from the plan.</div>}
@@ -18570,7 +18670,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           </Field>
                           <div id={`pond-release-field-${selEl.id}`}>
                             <Field label="Allowable release (cfs)">
-                              <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                              <span style={ROW6}>
                                 <NumInput allowClear style={{ ...numInput, width: 64 }} value={rel ?? ""} placeholder={suggested ? `≈${suggested.cfs}` : "—"} min={0} onCommit={(n) => setDet({ releaseRateCfs: Number.isFinite(n) ? n : null })} />
                                 {suggested && (
                                   <SourceTag code="estimate" label="Allowable release (cfs)" basis={`Suggested — pre-development (undeveloped/pasture) peak discharge, Modified Rational method (runoff coefficient ${suggested.runoffC}, ${suggested.tcMin}-min time of concentration), evaluated at each of ${detCriteria.label}'s required design storms (${detCriteria.requiredStorms.join("/")}-yr) — the smallest (most restrictive), the ${suggested.governingStormYr}-yr storm, governs. ${detCriteria.label} publishes no cfs/ac release cap, so Post ≤ Pre screens the outlet against the site's own computed pre-development peak. A screening estimate — type your own release to override.`} />
@@ -18905,9 +19005,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                               : `Gravity outfall looks feasible here, so a pump is optional (up to ${f1(pumpAllow.allowedPumpCfs)} cfs if used).`}
                           </div>
                           <Field label="Override pump rate (cfs, optional)">
-                            <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                            <span style={ROW6}>
                               <NumInput allowClear style={{ ...numInput, width: 72 }} value={det.pumpRateCfs ?? ""} placeholder={`≈${f1(pumpAllow.derivedCfs)}`} min={0} onCommit={(n) => setDet({ pumpRateCfs: Number.isFinite(n) && n >= 0 ? n : null })} />
-                              {pumpAllow.overridden && <button style={{ ...chip, padding: "2px 8px", fontSize: 10.5 }} title="Clear: back to the criteria-derived rate" onClick={() => setDet({ pumpRateCfs: null })}>×</button>}
+                              {pumpAllow.overridden && <button style={chipSm} title="Clear: back to the criteria-derived rate" onClick={() => setDet({ pumpRateCfs: null })}>×</button>}
                             </span>
                           </Field>
                         </div>
@@ -19104,7 +19204,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       const critRow = (label, cell, unit) => (cell && Number.isFinite(cell.value)) ? (
                         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "3px 0", borderBottom: `1px solid ${PAL.panelLine}` }}>
                           <span style={{ fontSize: 11.5, color: PAL.muted }}>{label}</span>
-                          <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                          <span style={ROW6}>
                             <span style={{ fontFamily: NUM_FONT, fontSize: 12, color: PAL.ink, fontWeight: 650 }}>{cell.value}{unit}</span>
                             <SourceTag code={cell.verified ? "code" : "unverified"} label={label} basis={cell.source ? [{ text: String(cell.source) }] : undefined} />
                           </span>
@@ -19125,7 +19225,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                             )}
                             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "3px 0", borderTop: `1px solid ${PAL.panelLine}`, marginTop: 2 }}>
                               <span style={{ fontSize: 11.5, color: PAL.muted }}>Receiving water (outfall)</span>
-                              <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                              <span style={ROW6}>
                                 {Number.isFinite(twR.valueFt)
                                   ? <><span style={{ fontFamily: NUM_FONT, fontSize: 12, color: PAL.ink, fontWeight: 650 }}>{f1(twR.valueFt)}′</span><SourceTag code={twR.estimated ? "estimate" : "yours"} label={twR.sourceLabel || "Receiving water"} basis={twR.sourceTip ? [{ text: twR.sourceTip }] : undefined} /></>
                                   : <span style={{ fontSize: 11, color: PAL.warn, fontWeight: 600, cursor: "help" }} title={tailwaterNote(twR)}>needs channel data</span>}
@@ -19141,12 +19241,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     {curStyle && (
                     <Collapse sectionId="pond-appearance" title="Appearance" defaultOpen={false} summary="fill · outline · opacity">
                       <Field label="Fill">
-                        <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                        <span style={ROW6}>
                           <ColorField value={toHex6(curStyle.fill)} {...colorCtl((v) => setSelEl({ fill: v }))} seed={COLOR_SEED} title="Fill color" />
                         </span>
                       </Field>
                       <Field label="Outline">
-                        <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                        <span style={ROW6}>
                           <ColorField value={toHex6(curStyle.stroke)} {...colorCtl((v) => setSelEl({ stroke: v }))} seed={COLOR_SEED} title="Outline color" />
                         </span>
                       </Field>
@@ -19176,12 +19276,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           {!multiStyleable && selEl && curStyle && selEl.type !== "pond" && (
             <Section title="Properties">
               <Field label="Fill">
-                <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <span style={ROW6}>
                   <ColorField value={toHex6(curStyle.fill)} {...colorCtl((v) => setSelEl({ fill: v }))} seed={COLOR_SEED} title="Fill color" />
                 </span>
               </Field>
               <Field label="Outline">
-                <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <span style={ROW6}>
                   <ColorField value={toHex6(curStyle.stroke)} {...colorCtl((v) => setSelEl({ stroke: v }))} seed={COLOR_SEED} title="Outline color" />
                 </span>
               </Field>
@@ -19225,6 +19325,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           <div data-wheelscroll="1" style={{ flex: "1 1 auto", minHeight: 0, overflowY: "auto", padding: "13px 13px 24px" }}>
           {renderPanelBody(leftPanel)}
           </div>
+          {leftPanel === "standards" && standardsFooter}
           </>)}
           </div>
           {/* drag handle to resize the menu (desktop only — on phones the panel is a fixed-width overlay) */}
@@ -19240,7 +19341,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       {!narrow && Object.keys(floating).map((id) => (
         <FloatingPanel key={id} title={panelTitle[id]} pos={floating[id]}
           onMove={(p) => moveFloating(id, p)} onDock={() => dockPanel(id)} onClose={() => closeFloating(id)}
-          boundsRef={wrapRef} width={leftWidth} data-testid={`floating-panel-${id}`}>
+          boundsRef={wrapRef} width={leftWidth} data-testid={`floating-panel-${id}`}
+          footer={id === "standards" ? standardsFooter : null}>
           {renderPanelBody(id)}
         </FloatingPanel>
       ))}
@@ -20434,6 +20536,15 @@ function Field({ label, children, title }) {
     </div>
   );
 }
+/* NEW-1 — a sub-heading INSIDE a Standards section, for a section that styles more than one
+ * thing. The Parcels section now drives two different lines (the boundary and the setback), and
+ * two unlabelled colour rows gave no way to tell which was which. Hierarchy comes from weight +
+ * uppercase letter-spacing, never from fading the text toward the background (theme rule). */
+function StdSubLabel({ children }) {
+  return (
+    <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: "0.07em", textTransform: "uppercase", color: "var(--text-secondary)", margin: "10px 2px 7px" }}>{children}</div>
+  );
+}
 // B681 — familiar Word-style paragraph-alignment glyph: four stacked rows, long rows spanning the
 // width and short rows anchored left / centre / right per `dir`. Replaces the cryptic ⇤ ≣ ⇥ unicode.
 // `currentColor` makes it inherit the button's active/idle text colour.
@@ -20746,7 +20857,7 @@ function DesignChangeSummaryCard({ summary, onDismiss, onUndo }) {
       )}
       {summary.sectionFacts && (
         <div style={{ marginTop: 9 }}>
-          <PondSection facts={summary.sectionFacts} />
+          <Suspense fallback={null}><PondSection facts={summary.sectionFacts} /></Suspense>
         </div>
       )}
       {!summary.infeasible && (
@@ -20828,7 +20939,7 @@ function YieldPanel({
   const row = (label, value, sub, muted, tag) => (
     <div key={label} style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", padding: "5px 0", borderBottom: `1px solid ${Y.hairline}`, gap: 8 }}>
       <span style={{ fontSize: 12, color: muted ? Y.muted : Y.rowLabel }}>{label}</span>
-      <span style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
+      <span style={ROWB6}>
         <span style={{ fontFamily: NUM_FONT, fontSize: 13, color: muted ? Y.muted : Y.text, fontWeight: 650, fontVariantNumeric: TABULAR_NUMS }}>
           {value}{sub ? <span style={{ color: Y.muted, fontWeight: 400, fontSize: 10.5 }}> {sub}</span> : null}
         </span>
@@ -20867,7 +20978,7 @@ function YieldPanel({
               return (
                 <div key={key || label} title={info || ""} style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 10, padding: "5px 0", borderBottom: `1px solid ${Y.hairline}`, cursor: info ? "help" : "default" }}>
                   <span style={{ fontSize: 12, color: Y.rowLabel }}>{label}{info ? <span style={{ fontSize: 9.5, color: Y.muted, marginLeft: 4 }} aria-hidden="true">ⓘ</span> : null}</span>
-                  <span style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
+                  <span style={ROWB6}>
                     <span style={{ fontFamily: NUM_FONT, fontSize: 13, color: vColor, fontWeight: 650, fontVariantNumeric: TABULAR_NUMS, textAlign: "right" }}>
                       {value}{sub ? <span style={{ color: Y.muted, fontWeight: 400, fontSize: 10.5 }}> {sub}</span> : null}
                     </span>
@@ -20914,7 +21025,7 @@ function YieldPanel({
               if (!showAuth && !showChan && !showOutfall && !dn) return null;
               const rows = [];
               if (showAuth) rows.push(
-                <div key="auth" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "2px 0" }}>
+                <div key="auth" style={ROWSB}>
                   <span style={{ fontSize: 11, color: Y.rowLabel }}>Reviewing agency</span>
                   <select value={ac.override || ""} onChange={(e) => ac.onSet(e.target.value || null)}
                     style={{ fontSize: 11, padding: "2px 6px", borderRadius: 6, border: `1px solid ${Y.border}`, background: Y.cardBg, color: Y.text, fontFamily: "inherit", maxWidth: 180 }}>
@@ -20938,7 +21049,7 @@ function YieldPanel({
                 else { msg = "Couldn't confirm from HCFCD's map server whether a channel is adjacent — the stricter reading is shown. Set Yes or No to tell the tool directly."; warn = true; }
                 rows.push(
                   <div key="chan" style={{ marginTop: showAuth ? 6 : 0 }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "2px 0" }}>
+                    <div style={ROWSB}>
                       <span style={{ fontSize: 11, color: Y.rowLabel }}>Drains to HCFCD channel</span>
                       <span style={{ display: "flex", gap: 4, width: 156 }}>
                         {seg("Auto", cd.override == null, () => cd.onSet(null), "a")}
@@ -20965,7 +21076,7 @@ function YieldPanel({
                   : "Unincorporated Harris County sets the minimum detention by how the site drains out: to a storm sewer → 0.75, to a roadside ditch → 1.0 ac-ft/ac. Pick one for a single number; left on Auto, the 0.75–1.0 range is shown.";
                 rows.push(
                   <div key="outfall" style={{ marginTop: rows.length ? 6 : 0 }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "2px 0" }}>
+                    <div style={ROWSB}>
                       <span style={{ fontSize: 11, color: Y.rowLabel }}>Outfall type</span>
                       <span style={{ display: "flex", gap: 4, width: 200 }}>
                         {seg("Auto", ov == null || ov === "unknown", () => ot.onSet(null), "a", "Outfall type")}
@@ -21425,7 +21536,7 @@ function YieldPanel({
                           { text: "It matters because the higher line means more storage was taken away, so more has to be given back. A design that is barely over the requirement can flip to short on this one choice." },
                         ]} />
                       </span>
-                      <span style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
+                      <span style={ROWB6}>
                         <span style={{ fontSize: 12, fontWeight: 600, color: mismatch ? Y.warnText : Y.text, whiteSpace: "nowrap" }}>
                           {d.offsetSurface.label}{d.offsetElevFt != null ? ` · ${f1(d.offsetElevFt)}′` : ""}
                         </span>
@@ -21555,7 +21666,7 @@ function YieldPanel({
                         ]} />
                       </div>
                       {sw.rows.map((r) => (
-                        <div key={`ws-${r.stepFt}`} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "2px 0" }}>
+                        <div key={`ws-${r.stepFt}`} style={ROWSB}>
                           <span style={{ fontFamily: NUM_FONT, fontSize: 11, color: r.stepFt === 0 ? Y.text : Y.muted, fontVariantNumeric: TABULAR_NUMS, whiteSpace: "nowrap", minWidth: 62 }}>
                             {r.stepFt === 0 ? "now" : `+${f1(r.stepFt)}′`} · {f1(r.wseFt)}′
                           </span>
@@ -21691,7 +21802,7 @@ function YieldPanel({
               // every "blank = auto/unknown" input carries an explicit Clear chip — the
               // expert bypass especially must never be one-way.
               const fmRow = (label, key, placeholder, title) => (
-                <div key={"fm-" + key} id={"drain-field-" + key} title={title || ""} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "2px 0" }}>
+                <div key={"fm-" + key} id={"drain-field-" + key} title={title || ""} style={ROWSB}>
                   <span style={{ fontSize: 11, color: Y.muted }}>{label}</span>
                   <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
                     {Number.isFinite(fm.settings[key]) && (
@@ -21729,7 +21840,7 @@ function YieldPanel({
                   : (hasAuto ? opts.tag : null);
                 if (manual == null && hasAuto && !editing) {
                   return (
-                    <div key={"fm-" + key} id={"drain-field-" + key} title={title || ""} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "2px 0" }}>
+                    <div key={"fm-" + key} id={"drain-field-" + key} title={title || ""} style={ROWSB}>
                       <span style={{ fontSize: 11, color: Y.muted }}>{label}</span>
                       <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
                         {/* NEW-3 — the one-click accept: writes the suggestion into the field
@@ -21748,7 +21859,7 @@ function YieldPanel({
                   );
                 }
                 return (
-                  <div key={"fm-" + key} id={"drain-field-" + key} title={title || ""} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "2px 0" }}>
+                  <div key={"fm-" + key} id={"drain-field-" + key} title={title || ""} style={ROWSB}>
                     <span style={{ fontSize: 11, color: Y.muted }}>{label}</span>
                     <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
                       {manual != null && (
@@ -21773,7 +21884,7 @@ function YieldPanel({
                     style={{ fontSize: 10, fontWeight: 800, letterSpacing: "0.05em", textTransform: "uppercase", color: Y.rowLabel, marginBottom: 4, cursor: "help" }}>
                     Floodplain mitigation inputs (ft NAVD88)<span style={{ fontSize: 9, marginLeft: 4, letterSpacing: 0 }} aria-hidden="true">ⓘ</span>
                   </div>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "2px 0" }}>
+                  <div style={ROWSB}>
                     <span style={{ fontSize: 11, color: Y.muted }}>Jurisdiction</span>
                     {/* B790 — Auto is a real, reachable state (the B750 agency-picker pattern):
                         selecting it writes jurKey:null so detection re-engages; a hand-pick
@@ -21899,7 +22010,7 @@ function YieldPanel({
                     const gradeSuffix = isGrade && gradeDet
                       ? ` (sampled ${f1(gradeDet.minFt)}–${f1(gradeDet.maxFt)}′${gradeDet.spreadFt > 2 ? " · sloped reach — coarse" : ""})` : "";
                     return (
-                      <div key="fm-est-wse" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "2px 0" }}
+                      <div key="fm-est-wse" style={ROWSB}
                         title={`${estWseNote(est.provider)}${screeningStudyNote(fm.screening)}`}>
                         <span style={{ fontSize: 10.5, color: "var(--warn-text)", lineHeight: 1.4 }}>
                           Est. BFE ≈ {f1(est.wseFt)}′ — {est.providerLabel || wseProvLabel(est.provider)} (screening estimate){gradeSuffix}
@@ -22423,7 +22534,7 @@ function YieldPanel({
                 rows.push(
                   <div key="det-basis" style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8, padding: "5px 0" }}>
                     <span style={{ fontSize: 12, color: Y.rowLabel }}>Requirement basis</span>
-                    <span style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
+                    <span style={ROWB6}>
                       <span style={{ fontSize: 12, color: Y.text, fontWeight: 600, whiteSpace: "nowrap" }}>{basisVal}</span>
                       <SourceTag code="code" label="Requirement basis" basis={basisTitle} />
                     </span>
