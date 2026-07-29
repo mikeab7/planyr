@@ -14,15 +14,35 @@ import { formatJurisdictionBadge } from "../src/workspaces/site-planner/lib/juri
 // because headless Chromium in this sandbox has no external-network egress (it doesn't use the
 // proxy), so any in-page fetch to an agency host fails — that on-map render check is owed live.
 
-function Panel({ id, county, mutate }) {
+function Panel({ id, county, mutate, floodContext = null, layerStatus = {}, coverage = {} }) {
   const [ov, setOv] = useState(() => { const o = defaultOverlayState(); if (mutate) mutate(o); return o; });
   return (
     <div id={id} data-panel style={{ width: 300, border: "1px solid var(--border-default)", borderRadius: 10, padding: 12, background: "var(--surface-overlay)" }}>
       <div style={{ fontWeight: 700, marginBottom: 6 }}>{id}</div>
-      <LayerPanel overlays={ov} setOverlays={setOv} county={county} layerStatus={{}} coverage={{}} />
+      <LayerPanel overlays={ov} setOverlays={setOv} county={county} layerStatus={layerStatus} coverage={coverage} floodContext={floodContext} />
     </div>
   );
 }
+
+/* B1075–B1080 — the Tsakiris drainage context, verbatim from the live 2026-07-29 probes:
+ * Waller County, inside the Brookshire–Katy Drainage District, FEMA Zone X (SFHA_TF=F,
+ * ZONE_SUBTY "AREA OF MINIMAL FLOOD HAZARD"), the Willow Fork channel at the tract, and a
+ * 70-ft district drainage easement with recorded exhibit WF-10.pdf. */
+const TSAKIRIS_CTX = {
+  drainageDistrict: { id: "bkdd", source: "boundary" },
+  flood: { state: "loaded", zones: [{ zone: "X", subtype: "AREA OF MINIMAL FLOOD HAZARD", staticBfeFt: null }] },
+  channel: { state: "loaded", near: true, name: "Willow Fork", kindLabel: "canal / ditch", distFt: 42, authority: "bkdd", sourceId: "bkddChannel", inventoryOnly: false },
+  easements: { present: true, maxWidthFt: 70, items: [{ widthFt: 70, exhibit: "WF-10.pdf" }], state: "loaded" },
+  watershed: { state: "loaded", names: ["Willow Fork"], sqMiles: 23 },
+};
+// A Harris site with an SFHA mapped — the opposite verdict, and the opposite district scoping.
+const HARRIS_CTX = {
+  drainageDistrict: { id: "hcfcd", source: "county" },
+  flood: { state: "loaded", zones: [{ zone: "AE", subtype: "FLOODWAY" }] },
+  channel: { state: "loaded", near: true, unitNo: "W100-00-00", name: "BUFFALO BAYOU", distFt: 120, authority: "hcfcd" },
+};
+// FEMA unreachable — must read "unknown, not clear", never as a clean all-clear.
+const OUTAGE_CTX = { drainageDistrict: { id: null, source: null }, flood: { state: "failed", zones: [] } };
 
 function badgeOf(j, opts) {
   const b = formatJurisdictionBadge(j, opts);
@@ -49,6 +69,21 @@ function App() {
         <Panel id="panel-chambers" county="chambers" />
         {/* "old saved state with jur_etj on" → the merged row must load ON */}
         <Panel id="panel-etjon" county="harris" mutate={(o) => { o.jur_etj.on = true; }} />
+      </div>
+      {/* B1075–B1080 — the Flood & drainage group: master toggle, four provenance tiers,
+          district auto-scoping and the honest empty states. */}
+      <div style={{ display: "flex", gap: 16, alignItems: "flex-start", flexWrap: "wrap", marginTop: 20 }}>
+        <Panel id="panel-bkdd" county="waller" floodContext={TSAKIRIS_CTX} />
+        <Panel id="panel-hcfcd" county="harris" floodContext={HARRIS_CTX} />
+        <Panel id="panel-flood-outage" county="waller" floodContext={OUTAGE_CTX} />
+        {/* The advisory master-plan layer ON, reporting empty, with its study area out of
+            view — the exact Tsakiris shape that must read "outside this study area". */}
+        <Panel id="panel-dmp-empty" county="waller" floodContext={TSAKIRIS_CTX}
+          mutate={(o) => { o.bkdd_dmp.on = true; }}
+          layerStatus={{ bkdd_dmp: { state: "empty" } }}
+          coverage={{ bkdd_dmp: "out" }} />
+        {/* No flood context at all (the map finder): nothing suppressed, no verdict claimed. */}
+        <Panel id="panel-flood-nocontext" county="waller" />
       </div>
     </div>
   );

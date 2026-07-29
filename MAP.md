@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_338 source files mapped._
+_340 source files mapped._
 
 ## infra
 
@@ -381,6 +381,8 @@ _338 source files mapped._
   - _exports_: `ffeDualDisplay`, `solveBalanceFfe`
 - **`src/workspaces/site-planner/lib/floodAdministrator.js`** — NEW-8 governing floodplain administrator: candidate resolution from county/city/ETJ/edge signals, deliberate strictest-wins selection with an ambiguity flag, and the BFE back-solved from an assumed FFE
   - _exports_: `administratorCandidates`, `assessAdministrator`, `ffeSummary`, `impliedFloodElevation`, `resolveAdministrator`, `ruleKeyFor`
+- **`src/workspaces/site-planner/lib/floodGroup.js`** — Flood & drainage layer-group model (B1070/B1071, pure): four provenance tiers, point-in-district auto-scoping of local drainage authorities, master-toggle state, and the honest empty-state copy (what FEMA actually reported, why a district isn't listed, the governing-district drainage line)
+  - _exports_: `COUNTY_DISTRICT`, `districtDrainageNote`, `districtName`, `districtShort`, `districtSwapNote`, `DRAINAGE_DISTRICTS`, `emptyReason`, `FEMA_ZONES_NOT_CHANNELS`, `femaZoneVerdict`, `FLOOD_TIER_ORDER`, `FLOOD_TIERS`, `floodMasterState`, `floodTierLabel`, `governingDistrict`, `isSfhaZone`, `scopeFloodEntries`
 - **`src/workspaces/site-planner/lib/floodplainMitigation.js`** — B707 pure engine: NFHL zone classifier (AO/AH/floodway/unstudied-A), lon/lat→site-feet zones, grid-sampled fill∩zone compensating-storage volume with pluggable elevation providers, UNKNOWN-never-zero states, expert bypass, straddle worst-case
   - _exports_: `BFE_SENTINEL_MIN`, `bfeLinesFromFeatureCollection`, `BKDD_DATUM_NOTE`, `bufferedFloodway`, `classifyNfhlFeature`, `combineMitigation`, `computeMitigation`, `crossSectionWselFromFeatureCollection`, `deriveBfeFromLines`, `DERIVED_BFE_NOTE`, `DERIVED_WSE02_DRAFT_NOTE`, `DERIVED_WSE02_NOTE`, `DERIVED_WSE100_DRAFT_NOTE`, `DERIVED_XS_WSEL_NOTE`, `distToPolyline`, `effectivePadElev`, `EST_BOUNDARY_WSE_NOTE`, `EST_EBFE_NOTE`, `EST_MAAPNEXT_NOTE`, `EST_WSE_SRCS`, `estimateZoneAWse`, `estWseNote`, `EXCLUSIONS_NOTE`, `EXPERT_BYPASS_LABEL`, `FFE_BASIS_LABEL`, `ffeBasisText`, `floodGeoBbox`, `governingCrossSectionWsel`, `gridIntersect`, `hagForRing`, `isEstimatedWseSrc`, `NAVD88_NOTE`, `NEWER_MODEL_NOTE`, `OFFSITE_NOTE`, `pickWorstCase`, `pointInZone`, `pondFloodplainTier`, `ringInFloodway`, `ringInTrigger`, `sampleRingGrades`, `wedgeMitigation`, `WSE_PROVIDER_LABEL`, `wse1pctForRing`, `wseProvLabel`, `zonesFromFeatureCollection`, `zoneWaterSurface`
 - **`src/workspaces/site-planner/lib/floodplainRules.js`** — B707 editable per-jurisdiction floodplain-mitigation rules (trigger band / ratio / floodway policy / offset scope, verified-flagged placeholder seeds) with drainage-authority + county defaulting
@@ -414,7 +416,7 @@ _338 source files mapped._
 - **`src/workspaces/site-planner/lib/inwardBerm.js`** — v3 D1/D5 INWARD berm geometry (outer-toe model): the drawn polygon is the FIXED outer toe; a rim above grade builds the berm INWARD (crest = toe inset by extSlope·h), shrinking the water surface with diminishing returns up to a geometric ceiling where the footprint pinches closed. Also the COMPUTED berm cap (drainage cap vs geometric ceiling, D5). Pure — feeds pondGeom the crest ring; no storage math of its own.
   - _exports_: `bermNeedsInlets`, `bermPinched`, `bermRingAreaSf`, `bermWaterAreaSf`, `bindingBermCap`, `crestRingForBerm`, `crestTopRing`, `drainageBermCapFt`, `EXT_BERM_SLOPE`, `geometricMaxBermFt`, `INFLOW_HEAD_ALLOWANCE_FT`, `INLETS_THROUGH_BERM_NOTE`, `inwardBermSplit`
 - **`src/workspaces/site-planner/lib/jurisdiction.js`** — Registry-driven ArcGIS jurisdiction/road-authority identify (city/ETJ/county intersect + nearest-road maintainer) over the SWR cache with map-overlay styling
-  - _exports_: `buildIdentifyParams`, `countyAtPoint`, `ETJ_SOURCES`, `etjSourcesForPoint`, `formatHighway`, `formatJurisdictionBadge`, `identifyJurisdiction`, `identifyRoadAuthority`, `identifySource`, `JURISDICTION_SOURCES`, `normalizeFeature`, `polylineDistMeters`, `polylineLengthMeters`, `ROAD_AUTHORITY_COLORS`, `ROAD_AUTHORITY_LEGEND`, `ROAD_MAINT_AGENCY`, `roadAuthority`, `roadAuthorityStyle`, `roadDisplayName`, `simplifyRing`
+  - _exports_: `buildIdentifyParams`, `countyAtPoint`, `ETJ_SOURCES`, `etjSourcesForPoint`, `formatHighway`, `formatJurisdictionBadge`, `identifyJurisdiction`, `identifyRoadAuthority`, `identifySource`, `JURISDICTION_SOURCES`, `normalizeFeature`, `polylineDistMeters`, `polylineLengthMeters`, `proxiedQueryUrl`, `ROAD_AUTHORITY_COLORS`, `ROAD_AUTHORITY_LEGEND`, `ROAD_MAINT_AGENCY`, `roadAuthority`, `roadAuthorityStyle`, `roadDisplayName`, `simplifyRing`
 - **`src/workspaces/site-planner/lib/kmzExport.js`** — Google Earth (.kmz) export (B684): pure, dependency-free CRC32 + hand-rolled STORE-only ZIP writer, KML builder (lon,lat order, ring closure/holes, per-layer styles, building extrude), and the site→layer feature mapping; reprojection is injected (the shared feetToLatLng), so it never drifts from the map render.
   - _exports_: `buildKml`, `buildKmz`, `crc32`, `elToRingFeet`, `KMZ_MIME`, `kmzFilename`, `siteToFeatures`, `xmlEscape`, `zipStore`
 - **`src/workspaces/site-planner/lib/labelLayout.js`** — Pure label level-of-detail plus collision engine: line-dropping by priority, greedy overlap resolution, leader overflow, and dimension-callout zoom gates
@@ -455,6 +457,8 @@ _338 source files mapped._
   - _exports_: `commonStyleState`, `selectionRingFeet`, `styleCapsOf`
 - **`src/workspaces/site-planner/lib/multiwriter.js`** — the B674 multi-writer switch: default-ON code constant + the `planyr.multiwriter=off` localStorage escape hatch (no build-time env var)
   - _exports_: `MULTIWRITER_DEFAULT`, `MULTIWRITER_KEY`, `multiwriterEnabled`
+- **`src/workspaces/site-planner/lib/nhdFlowline.js`** — USGS NHD hydrography decoding (B1072, pure): FType code → plain English (canal/ditch, stream/river…), watercourse title/summary, and the standing inventory-not-a-regulatory-product caveat
+  - _exports_: `flowlineSummary`, `flowlineTitle`, `ftypeLabel`, `NHD_FTYPE`, `NHD_INVENTORY_NOTE`
 - **`src/workspaces/site-planner/lib/outletStructure.js`** — Pond OUTLET STRUCTURE model + stage→discharge rating curve (NEW-A2): orifice / weir / restrictor / multistage discharge (with tailwater submergence), inverse orifice sizing, default-outlet proposal, validation. Pure hydraulics.
   - _exports_: `DEFAULT_ORIFICE_C`, `DEFAULT_WEIR_C`, `defaultOutletForPond`, `orificeAreaSf`, `OUTLET_KINDS`, `outletDischarge`, `outletLowestElev`, `outletProblems`, `sizeOrificeForRelease`, `sizeWeirForRelease`, `stageDischarge`
 - **`src/workspaces/site-planner/lib/overlayAlign.js`** — Pure overlay alignment math: image-point-to-world, scale-about-a-point, 2-point and least-squares Procrustes similarity transforms (scale+rotate+translate) with RMS residual
@@ -602,7 +606,7 @@ _338 source files mapped._
 - **`src/workspaces/site-planner/lib/vectorLayers.js`** — Pure registry-driven vector GIS engine (FEMA/NWI + county/city/ETJ boundaries): paged ArcGIS pull, detail tiers with server-side generalization, grid-snapped SWR cache keys, Esri-to-GeoJSON, Douglas-Peucker, vector-vs-image decision
   - _exports_: `buildQueryUrl`, `buildVectorQuery`, `decideVectorOrImage`, `douglasPeucker`, `featuresToGeoJson`, `fetchCached`, `fetchVectorFeatures`, `pickTier`, `simplifyGeoJson`, `snapBbox`, `styleFor`, `VECTOR_SOURCES`, `vectorKey`
 - **`src/workspaces/site-planner/lib/vectorOverlay.js`** — Leaflet glue over the vector cache tier: cachedVectorLayer paints last-good boundaries instantly, background-refreshes, hover/click identify (identifyOk-gated), zoom-gated divIcon name labels, live esri-leaflet fallback
-  - _exports_: `cachedCorridorLayer`, `cachedPipelineLayer`, `cachedVectorLayer`
+  - _exports_: `appendIdentifyRows`, `cachedCorridorLayer`, `cachedPipelineLayer`, `cachedVectorLayer`, `decodeFieldValue`, `identifyHref`, `identifyTitle`
 - **`src/workspaces/site-planner/lib/viewCull.js`** — Viewport culling for the feet-frame SVG (screen only — the export always renders the complete model)
   - _exports_: `boundsIntersect`, `CULL_MARGIN`, `CULL_MIN_ELEMENTS`, `cullToView`, `elementBounds`, `shouldCull`, `visibleWorldRect`
 - **`src/workspaces/site-planner/lib/wellStatus.js`** — Pure RRC well status classifier (PHASE 4): SYMNUM/description → producing/plugged/dry/abandoned/injection, and `summarizeWells` turns a proximity result into a status breakdown + an on-site offset/replug risk flag
