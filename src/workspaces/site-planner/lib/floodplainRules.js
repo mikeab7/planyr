@@ -101,10 +101,37 @@ export const DEFAULT_FLOODPLAIN_RULES = {
     floodwayBufferFt: 100,
     offsetScope: "storage",
     locationRule: "On the development site (Art. 5 §A(8): compensating storage “on the development site”) — no net fill up to the 500-year floodplain elevation.",
-    source: "Waller County Flood Damage Prevention Ordinance, Art. 5 §A(8)/§A(9)/§E (adopted 1/13/2009; cover states revised eff. 2/28/2013; county-posted PDF filename says “REVISED_FINAL-2021” — versioning ambiguous, see note). Owner primary-source pull 2026-07-15.",
-    sourceDate: "2026-07-15",
+    source: "Waller County Flood Damage Prevention Ordinance, Art. 5 §A(8)/§A(9)/§C(3)/§E (effective 2/28/2013; Waller County participates in the NFIP). Owner primary-source pull 2026-07-15; §5.C(3) read verbatim from the county-posted ordinance 2026-07-29.",
+    sourceDate: "2013-02-28",
+    url: "https://www.co.waller.tx.us/upload/page/0265/Flood%20Damage%20Prevention%20Ordinance%20REVISED_FINAL-2021.pdf",
     verified: true,
-    note: "Art. 5 §A(8) (verbatim, search-triangulated + owner-read 2026-07-15): compensating floodplain storage volume “on the development site at a 1:1 ratio for any fill placed within these flood hazard areas (no net fill up to 500-year floodplain elevation)” — trigger extends to the SFHA AND the moderate (0.2% / 500-yr) flood hazard area. §E: encroachment/fill is prohibited in the regulatory floodway PLUS a 100-ft buffer zone (Waller-specific — modeled as floodwayBufferFt). §A(9): NO structural fill in the SFHA or the 500-yr band — open foundations (pier and beam) only (see the buildability record's fillToElevate: “prohibited”). §C(3): developments >50 lots or >5 ac must generate BFE/500-yr elevations via an Atlas-14 study — Planyr's numbers are screening ahead of that study. VERSIONING: the county PDF cover says adopted 1/13/2009, revised eff. 2/28/2013, but the posted filename implies a 2021 repost — confirm the currently-enforced edition with the County Engineer. BKDD (B861): the Brookshire–Katy Drainage District is now DETECTED (its published boundary polygon) and MODELED (a rate-control record) — a site inside it shows an ADDITIVE drainage-district tier in the detention readout; the district's rate-control criteria are additive to this county floodplain record, never a replacement. Sandbox note: co.waller.tx.us blocks automated fetch (403) — transcription rests on the owner's 2026-07-15 pull + search-indexed verbatim text.",
+    /* NEW-3 (B1057 completion) — the BFE/500-yr DATA-GENERATION requirement, as a rule that FIRES
+     * rather than a sentence in a note. Read verbatim from the county's own adopted ordinance
+     * 2026-07-29, which is why this record is `verified:true` where the generic 44 CFR 60.3(b)(3)
+     * fallback in screeningBfe.js stays `verified:false`: the CFR binds the COMMUNITY and reaches a
+     * developer only through the ordinance the community adopted — and Waller's adopted text has
+     * now been read. Two things it settles that the CFR did not: Atlas 14 is MANDATED as the
+     * hydrology (not one acceptable option among several), and the 500-YEAR elevation is required
+     * alongside the base flood elevation. "if not otherwise provided" is exactly the unmapped-Zone-A
+     * case — no published BFE means the developer generates one. */
+    bfeDataRequirement: {
+      citation: "Waller County Flood Damage Prevention Ordinance §5.C(3)",
+      url: "https://www.co.waller.tx.us/upload/page/0265/Flood%20Damage%20Prevention%20Ordinance%20REVISED_FINAL-2021.pdf",
+      source: "Waller County Flood Damage Prevention Ordinance, Section 5.C(3) (effective 2/28/2013; Waller County participates in the NFIP).",
+      sourceDate: "2013-02-28",
+      verified: true,
+      lotsThreshold: 50,
+      acresThreshold: 5,
+      atlas14Required: true,
+      requires02pct: true,
+      quote:
+        "Base flood elevation and 500-year floodplain elevation data shall be generated utilizing Atlas 14 for subdivision proposals and other proposed development including the placement of manufactured home parks and subdivisions which is greater than 50 lots or 5 acres, whichever is lesser, if not otherwise provided",
+      plain:
+        "Waller County requires this development to GENERATE base flood elevation AND 500-year floodplain elevation data using NOAA Atlas 14, and submit it with the proposal — the trigger is more than 50 lots or 5 acres, whichever is smaller. “If not otherwise provided” means it applies wherever no elevation is already published, which is the case in an approximate A zone.",
+      note:
+        "A submittal requirement, not a nicety: budget and schedule the sealed Atlas-14 study at the front of the project rather than discovering it in review. Planyr's screening elevations are a look-ahead at what that study will produce — never a substitute for it.",
+    },
+    note: "Art. 5 §A(8) (verbatim, search-triangulated + owner-read 2026-07-15): compensating floodplain storage volume “on the development site at a 1:1 ratio for any fill placed within these flood hazard areas (no net fill up to 500-year floodplain elevation)” — trigger extends to the SFHA AND the moderate (0.2% / 500-yr) flood hazard area. §E: encroachment/fill is prohibited in the regulatory floodway PLUS a 100-ft buffer zone (Waller-specific — modeled as floodwayBufferFt). §A(9): NO structural fill in the SFHA or the 500-yr band — open foundations (pier and beam) only (see the buildability record's fillToElevate: “prohibited”). §5.C(3) is modeled as the `bfeDataRequirement` record above (verbatim text + thresholds there) — it FIRES on this site rather than sitting in prose. VERSIONING: effective 2/28/2013 per the county-posted ordinance (the “REVISED_FINAL-2021” filename is a repost of that edition, not a later one). BKDD (B861): the Brookshire–Katy Drainage District is now DETECTED (its published boundary polygon) and MODELED (a rate-control record) — a site inside it shows an ADDITIVE drainage-district tier in the detention readout; the district's rate-control criteria are additive to this county floodplain record, never a replacement. Sandbox note: co.waller.tx.us blocks automated fetch (403) — transcription rests on the owner's 2026-07-15 pull + search-indexed verbatim text.",
   },
   generic: {
     label: "Generic / unknown",
@@ -204,6 +231,16 @@ export function offsetSurfaceBasis(rule) {
     note: rule && rule.offsetElevNote ? rule.offsetElevNote : null,
   };
 }
+
+/* NEW-3 (B1057 completion) — the jurisdiction's own BFE/500-yr DATA-GENERATION requirement, when
+ * its adopted ordinance has actually been read. Returns the record or null; a null means "no
+ * jurisdiction text on file", NOT "no requirement" — the caller falls back to the generic NFIP
+ * minimum (screeningBfe.BFE_DATA_REQUIREMENT, verified:false) and says so. Pure. */
+export const bfeDataRequirementFor = (rule) => (rule && rule.bfeDataRequirement) || null;
+
+/* Does the jurisdiction MANDATE Atlas 14 as the hydrology for that data? Waller §5.C(3) does, so a
+ * regional-regression discharge can only ever be a labelled cross-check there. Pure. */
+export const atlas14Mandated = (rule) => !!(rule && rule.bfeDataRequirement && rule.bfeDataRequirement.atlas14Required);
 
 /* B790 — the county a rules key IMPLIES (lowercase display name), for the picker's
  * county-mismatch warning: a hand-picked "harris" rule on a site whose identify county

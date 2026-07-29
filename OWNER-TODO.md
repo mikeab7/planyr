@@ -55,28 +55,26 @@ are in hand. Details for the next Claude session: BACKLOG.md B916/B917, VERIFICA
       don't paste them anywhere in this repo's files or a commit, since anyone who can read the code could
       then read it back.)
 
-## ☎️ One question for the county — it may make an engineer's flood study REQUIRED on Tsakiris, not optional (B1057)
+## ✅ ANSWERED — nothing for you to do (was: the county flood-study question, B1057 / B1069)
 
-While building the independent flood-level estimate you asked for, I found a federal rule worth checking with
-Waller County (or whoever reviews Tsakiris) before you plan around it.
+**This is closed.** I asked you to check with Waller County whether their floodplain ordinance carries the
+"50 lots or 5 acres" requirement. That question has since been answered by reading the county's **own adopted
+ordinance** — the Waller County Flood Damage Prevention Ordinance, in force since February 2013 — so nothing
+is needed from you.
 
-**What the federal rule says.** Where FEMA has drawn a floodplain but never published a flood elevation — exactly
-Tsakiris's situation — the national flood-insurance rules say a community has to require any development **bigger
-than 50 lots or 5 acres, whichever is smaller**, to submit flood-elevation data with the proposal. Tsakiris is far
-over that.
+**What it says, and it is stricter than the federal minimum I'd flagged.** For a development bigger than
+50 lots or 5 acres — whichever is smaller — Waller requires the flood elevation to be **generated and submitted
+with the proposal**, using the national rainfall data set called Atlas 14, and it requires the **500-year** level
+too, not just the 100-year one. It applies wherever no elevation is already published, which is exactly
+Tsakiris. So on Tsakiris this is a **submittal requirement**, not a nice-to-have: budget and schedule the
+engineer's flood study at the front of the project.
 
-**Why it matters to you.** If Waller adopted that wording, then having an engineer determine the flood level isn't
-a nice-to-have on this deal — it's a submittal requirement, and it belongs in the schedule and the budget from the
-start rather than turning up late in review.
-
-**The one thing I need from you:** ask the county (or your civil engineer) whether their floodplain ordinance
-carries that "50 lots or 5 acres" requirement, and tell me what they say. I've written the rule into the code as
-**research, clearly marked unconfirmed for this county** — I won't let the app state it as fact until you've
-confirmed it. The federal text is 44 CFR 60.3(b)(3) if your engineer wants the citation.
-
-**Worth knowing:** the federal rule binds the *county*, not you directly — it reaches you through whatever the
-county actually wrote into its own ordinance, which can be stricter. So the county's own document is the answer,
-not the federal one.
+**What changed in the app.** It now says so on the flood panel, in one line with the citation behind the ⓘ,
+and it says **required** rather than the old hedged wording — because this is the county's own document, read
+directly. Anywhere the county's ordinance has *not* been read, the app still says "likely required" and names
+itself as unconfirmed, so the two can never be mistaken for each other. The app also now works out its own
+screening flood level (both the 100-year and the 500-year) from real rainfall, soil and ground-elevation data —
+a look-ahead at what that study will produce, clearly labelled as screening and never a substitute for it.
 
 ## 🗓 Optional — one Scheduler date to sanity-check on Grand Port (B835)
 - [ ] **Nothing broken; just a judgment call only you can make.** The task you flagged — Grand Port →
