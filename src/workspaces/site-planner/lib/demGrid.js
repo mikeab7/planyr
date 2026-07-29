@@ -139,6 +139,15 @@ export function latticeTile(band, tx, ty) {
   };
 }
 
+/* The ONE lattice tile that contains a WGS84 point at `band`. Same purity as
+ * latticeTile — the tile a point falls in never depends on the viewport, which is what
+ * lets the cursor-warm grid (NEW-2) be a plain cache HIT of the tile the contour layer
+ * already asked for at that zoom. */
+export function latticeTileAt(lat, lng, band) {
+  const span = TILE_CELLS * bandCellMeters(band);
+  return latticeTile(band, Math.floor(lngToMercX(lng) / span), Math.floor(latToMercY(lat) / span));
+}
+
 /* Every lattice tile covering a WGS84 view, plus the band actually used.
  * The band comes from the ZOOM, so a pan can never change it. It steps DOWN (coarser)
  * only when a very large window would need more tiles than `maxTiles` — the one

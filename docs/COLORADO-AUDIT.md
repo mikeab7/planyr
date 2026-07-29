@@ -1,6 +1,6 @@
 # Colorado readiness audit — what is Texas-hardcoded, what is registry-driven
 
-**Date:** 2026-07-29 · **Item:** B1098 (NEW-2) · **Scope:** Adams, Denver, Arapahoe, Larimer, Weld,
+**Date:** 2026-07-29 · **Item:** B1108 (NEW-2) · **Scope:** Adams, Denver, Arapahoe, Larimer, Weld,
 Jefferson, El Paso, Boulder, Broomfield.
 
 This is a sizing document. It inventories, with file and line references, every place Planyr assumes
@@ -42,7 +42,7 @@ different feet frames**, and only one of them is ground-true (§4).
 
 ---
 
-## 1. The regression harness (B1097 / NEW-1) — read this before changing anything
+## 1. The regression harness (B1107 / NEW-1) — read this before changing anything
 
 **Files:** `test/support/texasGoldenMaster.js` · `test/fixtures/texasGoldenMaster.json` ·
 `test/goldenMasterTexas.test.js` · `scripts/build-texas-golden-master.mjs`
@@ -173,7 +173,7 @@ Jefferson County. Texas keys are persisted in saved plans and could not be renam
 Colorado keys are `co_`-prefixed and `countyKeyForName(name)` stays **Texas-only** unless a state is
 passed. An unqualified `"El Paso"` returns `null` rather than guessing.
 
-**Verification pending:** `V508` — probe the five blocked endpoints from an unblocked network and
+**Verification pending:** `V511` — probe the five blocked endpoints from an unblocked network and
 promote each to its own service (a one-line change per row).
 
 ---
@@ -189,7 +189,7 @@ constants** (`index.js:57–62`) and the cone constants precomputed once at impo
 everywhere else. `FEET_WKID = 2278` in `counties.js:30` is a second hardcoded statement of the same
 thing, used to request ArcGIS geometry already in feet.
 
-**Now (B1099 / NEW-3):** `src/shared/coordinates/statePlane.js` carries a **zone registry** (TX South
+**Now (B1109 / NEW-3):** `src/shared/coordinates/statePlane.js` carries a **zone registry** (TX South
 Central 2278, CO North 2231, CO Central 2232), per-county assignment, and `resolveZone({state,
 county, lat, lon})` — county first (Colorado's zone boundaries *are* county lines), coarse extent
 second, honest `null` last. `index.js` was **not refactored**; the new generic Lambert engine is
@@ -447,7 +447,7 @@ exactly that reason.
 
 ## 10. Suggested order of work for a teammate
 
-1. **`V508` — probe the five blocked county endpoints** from an unblocked network; promote each
+1. **`V511` — probe the five blocked county endpoints** from an unblocked network; promote each
    (one line per row). Cheapest possible win, and it removes the composite dependency for four
    counties.
 2. **MHFD detention (B1105, part 1)** — the new `ruleType` + WQCV/EURV calculator. Covers **6 of the

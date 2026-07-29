@@ -6445,24 +6445,24 @@ Origin: filed 2026-07-11 from owner chat (screenshot of the ＋ Add parcel menu)
   the shared persisted list.
 
 
-### B1097 — Texas golden-master regression harness (lands FIRST, gates everything else) `[Platform / test]` (task) #testing #infra  *(minted via `git fetch origin main && npm run next-id -- --against-main`. Origin: filed 2026-07-29 from chat (NEW-1).)*
+### B1107 — Texas golden-master regression harness (lands FIRST, gates everything else) `[Platform / test]` (task) #testing #infra  *(minted via `git fetch origin main && npm run next-id -- --against-main`. Origin: filed 2026-07-29 from chat (NEW-1).)*
 `[x]` **Done 2026-07-29 — built and green BEFORE any Colorado work changed a line of behaviour.**
 - Verify: sandbox
-- **Why it exists.** The Colorado work (B1098–B1106) reaches into the projection frame, the county registry, the drainage-authority resolver, the floodplain rules and the detention engine — every one of which a Texas plan already depends on. The owner's constraint was that Texas comes out **provably** unchanged, not carefully changed.
+- **Why it exists.** The Colorado work (B1108–B1106) reaches into the projection frame, the county registry, the drainage-authority resolver, the floodplain rules and the detention engine — every one of which a Texas plan already depends on. The owner's constraint was that Texas comes out **provably** unchanged, not carefully changed.
 - **Files:** `test/support/texasGoldenMaster.js` (the pure builder) · `test/fixtures/texasGoldenMaster.json` (the snapshot) · `test/goldenMasterTexas.test.js` (the gate) · `scripts/build-texas-golden-master.mjs` (regeneration, deliberately awkward).
 - **Coverage:** EPSG:2278 projection + round trip at six Texas points; the planner's own feet frame (`mapLock`) at each; county click-routing and the statewide-backup resolver; jurisdiction→authority resolution across eleven signal shapes (straddles, ETJ, unmodeled city, frontage sliver); the **full detention matrix** — nine authorities × six site sizes, plus the Harris outfall-type / PCPM variants and the published rate curves; drawdown; the floodplain-mitigation rule records; FFE rules, required-FFE evaluation and flood-administrator resolution; road/paving quantities and the cost rollup; pond storage geometry. Every rule lookup is pinned to a fixed `ON_DATE`, and a second build in-process must be identical (proves no wall-clock or randomness leaked in).
 - **What it deliberately cannot cover, stated on the item:** anything needing a live GIS answer (it freezes the pure DECISION those feed, because a network fixture would freeze a county server's data rather than our behaviour); React rendering and the export sheet (own suites); persisted-model migration (nothing was renamed this pass, but the harness would not have caught it).
 - **It earned its keep the same session — twice.** It caught Colorado's statewide composite leaking into Texas click candidates, and a Texas out-of-bbox click losing its `harris`-first ordering. Both fixed, neither accepted.
 - Failure output names the first differing **paths**, not a 68 KB diff. `npm test` green.
 
-### B1098 — Colorado readiness audit: what is Texas-hardcoded vs registry-driven `[Platform]` (task) #infra #gis  *(minted via `--against-main`. Origin: filed 2026-07-29 from chat (NEW-2).)*
+### B1108 — Colorado readiness audit: what is Texas-hardcoded vs registry-driven `[Platform]` (task) #infra #gis  *(minted via `--against-main`. Origin: filed 2026-07-29 from chat (NEW-2).)*
 `[x]` **Done 2026-07-29 — `docs/COLORADO-AUDIT.md`, written as a sizing document for a teammate, not a scratchpad.**
 - Verify: sandbox
 - Ten sections with file and line references: the GIS source registry and its per-source field mapping; the ACTUAL source-priority fallback chain; `identifyJurisdiction` / `authorityForJurisdiction`; the projection frame and where it was chosen; `detentionRules.js` and whether `ruleType` can carry a volume-curve rule without surgery; `floodAdministrator.js` / `floodplainRules.js`; the map viewer's extent/bounds/tile story; everything else the sweep turned up; and a suggested order of work.
 - **Three brief premises recorded as wrong or incomplete**, since the brief asked for exactly that: Colorado DOES have a statewide bottom tier (the OIT composite); the fallback chain is two tiers, not three (no city tier, no regional tier); and the zoom problem was none of extent, bounds or tile coverage.
 - **One finding the brief did not ask for and a teammate must know:** the app measures in **two different feet frames** and only one is ground-true (§4) — see B1100 / B1106.
 
-### B1099 — Multi-zone state plane: the projection resolves per site, not per module load `[Platform / geo]` (feature) #coordinates  *(minted via `--against-main`. Origin: filed 2026-07-29 from chat (NEW-3).)*
+### B1109 — Multi-zone state plane: the projection resolves per site, not per module load `[Platform / geo]` (feature) #coordinates  *(minted via `--against-main`. Origin: filed 2026-07-29 from chat (NEW-3).)*
 `[x]` **Done 2026-07-29.**
 - Verify: sandbox
 - **The premise was understated, not wrong.** The zone was not chosen per app *or* per site — it was a **module constant** (`shared/coordinates/index.js:16`, with the Texas South Central Lambert parameters at :57–62 and the cone constants precomputed at import). Correct for Houston/Katy, wrong everywhere else.

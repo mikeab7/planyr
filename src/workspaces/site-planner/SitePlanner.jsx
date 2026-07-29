@@ -23,6 +23,7 @@ import { supabase, supabaseRest, currentAccessToken } from "./lib/supabase.js";
 import { createIdMinter, randomIdSalt } from "../../shared/ids.js";
 import { mergeSiteContent, createSiteModel } from "./lib/siteModel.js";
 import { extendMergeSelection } from "./lib/parcelSelect.js";
+import { parcelSelectHintDecision, PARCEL_HINT_COOLDOWN_MS } from "./lib/parcelSelectHint.js";
 import { measuresUnderPoint, nextMeasureSelection } from "./lib/measureHit.js";
 import { nearestBoundaryEdge, constrainToEdgeAngle } from "./lib/edgeConstrain.js";
 import { markupsUnderPoint, nextMarkupSelection, boxCorners } from "./lib/markupPick.js";
@@ -56,7 +57,8 @@ import { sanityCheckEstimate, sensitivityBand } from "./lib/estimateChallenge.js
 import { wseSensitivity } from "./lib/wseSensitivity.js";
 import LayerPanel from "./components/LayerPanel.jsx";
 import { districtDrainageNote } from "./lib/floodGroup.js";
-import { useGroundElevation, GROUND_EL_TITLE } from "./components/useGroundElevation.js";
+import { useGroundElevation } from "./components/useGroundElevation.js";
+import CursorChip from "./components/CursorChip.jsx";
 import ViewMenu from "./components/ViewMenu.jsx";
 import SiteAnalysis from "./components/SiteAnalysis.jsx";
 import AnchoredMenu from "../../shared/ui/AnchoredMenu.jsx";
@@ -159,7 +161,10 @@ import { geometricMaxBermFt, drainageBermCapFt, bindingBermCap, bermNeedsInlets,
 import { gisCache } from "./lib/gisCache.js";
 import { VECTOR_SOURCES, fetchCached } from "./lib/vectorLayers.js";
 import { sampleAtLatLng } from "./lib/demGrid.js";
-import { fetchSiteGrid, siteGridZoom } from "./lib/terrainLayers.js";
+// B1095 — the terrain pipeline loads on demand: the site DEM grid rides the explicit
+// drainage check (already async), and the contour hover only acts once the cursor readout
+// has pulled the chunk in.
+import { loadTerrain, contourHover } from "./lib/terrainLazy.js";
 // NEW-1 (B1057 completion) — the screening-BFE live wiring: Atlas-14 rainfall, SSURGO soils, and
 // the terrain→watershed/section derivation that feeds screeningBfe.js.
 import { resolvePfds } from "./lib/pfdsClient.js";
@@ -170,7 +175,7 @@ import {
 } from "./lib/screeningBfeSite.js";
 import { bfeDataLikelyRequired, NOT_MODELED, CLOMR_NOTE } from "./lib/screeningBfe.js";
 import { paintHeatmap, heatmapLegend, heatmapTotals, cellAt as heatCellAt, cutFillPaint, cutFillLegend, cutFillTotals } from "./lib/mitigationHeatmap.js";
-import { buildProposedSurface, balanceAssist, netImportCy, classifyGradeElement, TIE_DROP_FT } from "./lib/proposedSurface.js";
+import { buildProposedSurface, balanceAssist, netImportCy, classifyGradeElement, sampleProposedAt, TIE_DROP_FT } from "./lib/proposedSurface.js";
 import { solveBalanceFfe, ffeDualDisplay } from "./lib/ffeBalance.js";
 import {
   zonesFromFeatureCollection, computeMitigation, combineMitigation, wse1pctForRing, ringInTrigger, ringInFloodway,
@@ -2038,6 +2043,32 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (msg && ms > 0) warnTimerRef.current = setTimeout(() => { warnTimerRef.current = null; setOverlapWarn(""); }, ms);
   }, []);
   useEffect(() => () => { if (warnTimerRef.current) clearTimeout(warnTimerRef.current); }, []);
+  // NEW-1 — feedback at the point of failure when "Select parcels" is OFF. B311 deliberately lets
+  // the press fall through to a background pan (that behaviour is untouched); this only ADDS a
+  // short, non-blocking hint on the same bottom-center toast surface the rest of the canvas uses,
+  // with an inline "Turn it on" so the fix is one click from where the click failed. All the
+  // "should we say something?" rules live in the pure lib/parcelSelectHint.js.
+  const [parcelHint, setParcelHint] = useState(false);
+  const parcelHintRef = useRef({ at: 0, gestureId: null }); // last showing (for the per-gesture + cooldown guards)
+  const parcelHintTimerRef = useRef(null);
+  const noteParcelSelectBlocked = useCallback((gestureId) => {
+    const now = Date.now();
+    const last = parcelHintRef.current;
+    const { show } = parcelSelectHintDecision({
+      parcelSelect: false, hitParcel: true, now,
+      lastShownAt: last.at, lastGestureId: last.gestureId, gestureId,
+    });
+    if (!show) return;
+    parcelHintRef.current = { at: now, gestureId };
+    setParcelHint(true);
+    if (parcelHintTimerRef.current) clearTimeout(parcelHintTimerRef.current);
+    parcelHintTimerRef.current = setTimeout(() => { parcelHintTimerRef.current = null; setParcelHint(false); }, PARCEL_HINT_COOLDOWN_MS);
+  }, []);
+  const dismissParcelHint = useCallback(() => {
+    if (parcelHintTimerRef.current) { clearTimeout(parcelHintTimerRef.current); parcelHintTimerRef.current = null; }
+    setParcelHint(false);
+  }, []);
+  useEffect(() => () => { if (parcelHintTimerRef.current) clearTimeout(parcelHintTimerRef.current); }, []);
   // Auto-dismiss the transient "couldn't explode that field" notice (B472).
   useEffect(() => { if (!splitNote) return; const t = setTimeout(() => setSplitNote(null), 4500); return () => clearTimeout(t); }, [splitNote]);
   // Block the browser's default file-drop (navigate to / open the dropped PDF) anywhere in
@@ -2095,7 +2126,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const [la, ln] = feetToLatLng(cursor, origin.lat, origin.lon);
     return { lat: la, lng: ln };
   }, [cursor, origin]);
-  const cursorElFt = useGroundElevation(cursorLL);
+  // NEW-2 — the readout is a STATE now (value / in-flight / no-data / unavailable), never
+  // silence; `zoom` picks the lattice band the cursor tile is warmed at (the same tile the
+  // contour layer asks for here, so it's a cache hit when contours are on).
+  const cursorEl = useGroundElevation(cursorLL, { zoom: origin ? ppfToZoom(view.ppf, origin.lat) : null });
+  // NEW-1 — hand the SAME already-throttled cursor position to the contour layer, so
+  // hovering any line (not just the labelled every-5-ft ones) answers with its elevation.
+  useEffect(() => { contourHover(geoMapRef.current, cursorLL); }, [cursorLL]);
   /* B1092 — the GIS identify CARD on the planner canvas: {x, y (wrapper-local px), items}.
    * The backdrop Leaflet map is pointer-events:none (the SVG owns every click), so the
    * click-identify the BKDD easement layer was made VECTOR for could never fire here —
@@ -2976,7 +3013,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // and feed the SAME reconciled rows to seed + rowsToModel so shadow and canvas stay in lockstep.
     const rows = reconcileSeedRows(r.rows, eng.shadowSnapshot(), eng.tombstonedSnapshot());
     eng.seed(rows);
-    const model = rowsToModel({}, rows);
+    // NEW-4 — the rows read path now runs the bonded-child heal too, so an assembly torn apart on
+    // disk (a building committed away from its own truck court) is re-fitted to its host the moment
+    // the plan is read, not left broken across every reload. Report what was healed — a silent
+    // repair is a repair nobody can audit (LOUD-FAILURE).
+    const healed = [];
+    const model = rowsToModel({}, rows, { onHeal: (h) => healed.push(h) });
+    if (healed.length) reportClientEvent("bonded-children-healed", "bonded children re-fitted to their host on read", { id: siteId, count: healed.length, healed: healed.slice(0, 20) });
     // dirtyEntries includes the batch in flight, so a refetch landing mid-commit keeps that
     // edit on the canvas too (it re-trues from its own RPC result, not from pre-commit rows).
     const dirtyByKey = new Map(eng.dirtyEntries().map((d) => [d.kind + ":" + d.id, d]));
@@ -3091,6 +3134,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // NEW-1 — bonded (attachedTo) elements are cascade-DERIVED unless the current gesture /
       // selection targets them; everything else (incl. deletes, el = null) stays direct.
       isDirectEdit: (kind, id, el) => kind !== "el" || !el || el.attachedTo == null || isDirectTouched(kind, id),
+      // NEW-1 — the live canvas, read at the moment of the write: the engine closes each bonded
+      // assembly into ONE commit and re-reads every op's bytes from here, so a move can neither
+      // straddle two transactions nor ship pre-gesture coordinates. `stateRef` is assigned during
+      // render, so this is always the latest COMMITTED React state.
+      liveCollections: () => {
+        const s = syncStateOverride.current || stateRef.current;
+        return { els: s.els, markups: s.markups, measures: s.measures, callouts: s.callouts, parcels: s.parcels };
+      },
     });
     elSyncRef.current = eng;
     // B673 — who to blame in a conflict toast: self → "you (another window)"; teammates via the
@@ -3149,15 +3200,30 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   }, [siteId]); // eslint-disable-line react-hooks/exhaustive-deps
   // Diff the live collections and enqueue per-element commits. `busy` (a geometry gesture is in
   // flight) defers the diff — flushElems() at gesture end (onUp) commits the settled result.
-  const reconcileElems = (busy) => {
+  // NEW-2 — the collections the sync engine must treat as LIVE for the duration of one synchronous
+  // flush. `stateRef` is assigned during render, so a handler that has JUST called setEls (an
+  // undo/redo restoring a whole snapshot) still sees the PRE-change state there. Installing the
+  // snapshot here for the length of the flush is what lets an undo commit itself immediately
+  // instead of trailing on the debounce behind the move it is undoing.
+  const syncStateOverride = useRef(null);
+  const reconcileElems = (busy, override) => {
     const e = elSyncRef.current;
     if (!e || !isCloudActive()) return;
-    if (!busy) drainRemote(); // apply remote rows that arrived mid-gesture before diffing
+    // A snapshot flush already knows exactly what the canvas holds; draining remote rows into it
+    // would re-apply rows the snapshot just superseded.
+    if (!busy && !override) drainRemote(); // apply remote rows that arrived mid-gesture before diffing
     stampDirectTargets(); // NEW-1 — refresh direct-touch stamps in the SAME tick the ops are enqueued
-    const s = stateRef.current;
+    const s = override || stateRef.current;
     try { e.reconcile({ els: s.els, markups: s.markups, measures: s.measures, callouts: s.callouts, parcels: s.parcels }, { busy }); } catch (_) {}
   };
-  const flushElems = () => { const e = elSyncRef.current; if (e && isCloudActive()) { reconcileElems(false); try { e.flushGesture(); } catch (_) {} } };
+  const flushElems = (override) => {
+    const e = elSyncRef.current;
+    if (!e || !isCloudActive()) return;
+    const prev = syncStateOverride.current;
+    if (override) syncStateOverride.current = override;
+    try { reconcileElems(false, override); try { e.flushGesture(); } catch (_) {} }
+    finally { syncStateOverride.current = prev; }
+  };
   const retryElems = () => { const e = elSyncRef.current; if (e) e.retryNow(); };
   // Last-ditch flush of pending element commits during page unload (the supabase-js client can't do
   // keepalive) — hits the commit_elements RPC endpoint directly. Composes with the whole-doc unload
@@ -3314,6 +3380,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // points floating over the reverted geometry. Mirrors DocReview/Stitcher applySnapshot (RC-2).
     setDraftPoly(null); setDraftElPoly(null); setDraftRoadPts(null); setMkPoly(null); setMeasDraft([]);
     setEaseDraft(null); setEaseEdges(null); setTracePts([]); setXsecPts([]); setCalloutDraft(null); setDraftRect(null); setMkRect(null);
+    // NEW-2 — an undo/redo is a GESTURE BOUNDARY, exactly like pointer-up, and must commit NOW.
+    // It used to be the only edit path with no flush: the restore landed locally, then trailed on
+    // the engine's ~750 ms debounce while the move it was undoing was still being committed — so
+    // the server received a mix of moved and restored members and the plan tore. Flushed against
+    // the SNAPSHOT (not `stateRef`, which React has not re-rendered yet), so the diff is built from
+    // the state we just applied. Safe when there is nothing to sync — flushElems no-ops.
+    try { flushElems(s); } catch (_) {}
   };
   const undo = () => { const prev = histRef.current.undo(stateRef.current); if (prev) { applySnapshot(prev); touchHist(); } };
   const redo = () => { const next = histRef.current.redo(stateRef.current); if (next) { applySnapshot(next); touchHist(); } };
@@ -7315,6 +7388,19 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     drag.current = { mode: "move", kind: "el", id, fx: fp.x, fy: fp.y, members, canceler: stateRef.current };
     svgRef.current.setPointerCapture(e.pointerId);
   };
+  // NEW-1 — the ONE place "Select parcels" flips, shared by the header toggle and the hint's
+  // inline "Turn it on" action, so the two can never drift. Turning it OFF now ANNOUNCES itself:
+  // the flag is saved per plan, so a flip nobody noticed used to persist across sessions and
+  // devices and read as "the app stopped letting me click my parcels".
+  const setParcelSelect = (on) => {
+    setSettings((s) => ({ ...s, parcelSelect: on }));
+    if (!on && sel?.kind === "parcel") { setSel(null); setMulti([]); setDrillId(null); } // entering pure-browse → drop any parcel selection
+    dismissParcelHint();
+    parcelHintRef.current = { at: 0, gestureId: null }; // a deliberate flip re-arms the hint immediately
+    flashWarn(on
+      ? "Select parcels is ON — click a lot's edge or setback line to select it."
+      : "Select parcels is OFF — clicks pan the map instead of selecting a lot.", 4500);
+  };
   const startMoveParcel = (e, id) => {
     if (e.button !== 0) return;
     if (identifyMode) { e.stopPropagation(); beginIdentifyPress(e); return; } // B383: in identify→add mode, a press on an existing lot toggles/adds via the same path (click adds, drag pans)
@@ -7326,7 +7412,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // B311: "Select parcels" OFF → parcels are click-through for pure browse/measure. Don't
     // stop propagation: let the press fall through to the background pan (no select, no move),
     // exactly as if the click had landed on empty canvas.
-    if (!settings.parcelSelect) return;
+    // NEW-1: the click-through STAYS — but it no longer happens in silence. This press provably
+    // landed on a parcel's boundary / setback hit-stroke, so say why nothing happened (rate-limited
+    // in lib/parcelSelectHint.js: once per press gesture, and not again for several seconds, so a
+    // genuine pan across a subdivision never turns into a stream of hints).
+    if (!settings.parcelSelect) { noteParcelSelectBlocked(e.timeStamp); return; }
     if (mergePick) { e.stopPropagation(); toggleMerge(id); setSel({ kind: "parcel", id }); return; } // B720: plain click picks in merge mode
     if (e.shiftKey) { e.stopPropagation(); shiftPickParcel(id); return; } // Shift-click: additive multi-select to merge (B735 seeds from `sel`; shiftPickParcel owns `sel`)
     e.stopPropagation();
@@ -7950,7 +8040,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // explicit click. Failure isolation: an outage reads state "failed" and the engine
       // falls back to the labeled flat median — never a silent flat price.
       const siteGridP = fmBbox
-        ? fetchSiteGrid({ west: fmBbox.w, south: fmBbox.s, east: fmBbox.e, north: fmBbox.n })
+        ? loadTerrain().then((t) => t.fetchSiteGrid({ west: fmBbox.w, south: fmBbox.s, east: fmBbox.e, north: fmBbox.n }))
             .then((r) => ({ grid: r.grid, req: r.req, state: "loaded" }))
             .catch(() => ({ grid: null, req: null, state: "failed" }))
         : Promise.resolve({ grid: null, req: null, state: "empty" });
@@ -8082,7 +8172,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             south: sLat - WATERSHED_PAD_DEG, north: sLat + WATERSHED_PAD_DEG,
           };
           const [wideR, pfdsR, soilsR] = await Promise.allSettled([
-            fetchSiteGrid(wideBounds, { zoom: Math.min(WATERSHED_GRID_ZOOM, siteGridZoom(sLat)) }),
+            loadTerrain().then((t) => t.fetchSiteGrid(wideBounds, { zoom: Math.min(WATERSHED_GRID_ZOOM, t.siteGridZoom(sLat)) })),
             resolvePfds({ lat: sLat, lng: sLng }),
             resolveSoils({ lat: sLat, lng: sLng }),
           ]);
@@ -8519,6 +8609,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     return buildProposedSurface(gsInputs);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gsSig]);
+  /* NEW-2(c/e) — the PROPOSED elevation under the cursor, read from the very surface the
+   * earthwork rows price off (`gradeSurface.grid.owners`) rather than re-derived, so the
+   * chip and the ledger cannot disagree. `null` reasons are honest, never a plane
+   * extrapolated past its own element: no FFE anywhere → "nosurface"; bare ground outside
+   * every graded element and its daylight wedge → "outside"; a pond interior → "pond"
+   * (that dirt is borrow in the excavation ledger). */
+  const cursorProp = useMemo(() => {
+    if (!cursor) return null;
+    if (!gradeSurface || !gradeSurface.grid) return { status: "none", reason: "nosurface" };
+    return sampleProposedAt(gradeSurface.grid, cursor, gsExistAt);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cursor, gradeSurface, gsExistKey]);
   // The balance assist re-builds the grid a couple dozen times at different fieldT —
   // one CLICK, never per render (a per-frame bisection would jank drags).
   const gsBuildAtT = (t) => {
@@ -12067,6 +12169,20 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // ghost buttons on the DARK top bar
   const dGhost = { padding: "6px 11px", fontSize: 12.5, borderRadius: 8, border: "1px solid transparent", background: "transparent", color: PAL.chromeInk, cursor: "pointer", fontFamily: "inherit", fontWeight: 500, whiteSpace: "nowrap" };
   const dIcon = { ...dGhost, width: 30, height: 30, padding: 0, display: "grid", placeItems: "center", fontSize: 15 };
+  // NEW-1 — the bottom-center canvas toast chrome, defined ONCE. The pill geometry and its two
+  // button treatments were copied inline at every toast site (the pob/route/warn/deed-align pill,
+  // the overlay-calibration pill, and now the parcel-select hint), so each new message re-shipped
+  // the same style objects. One definition each: callers override only what genuinely differs
+  // (the background, and the hint's stacked `bottom`). Pixel-identical to what shipped before.
+  const toastPill = { position: "fixed", left: "50%", bottom: 84, transform: "translateX(-50%)", zIndex: 2500, maxWidth: "80vw", color: "#fff", padding: "9px 16px", borderRadius: 99, fontSize: 12.5, fontWeight: 600, boxShadow: "0 8px 28px rgba(0,0,0,0.3)", display: "flex", gap: 12, alignItems: "center" };
+  const toastActionBtn = { border: "none", background: "var(--surface-raised)", color: PAL.accent, borderRadius: 7, padding: "4px 12px", cursor: "pointer", fontSize: 11.5, fontWeight: 700, whiteSpace: "nowrap" };
+  const toastGhostBtn = { border: "1px solid rgba(255,255,255,0.5)", background: "transparent", color: "#fff", borderRadius: 7, padding: "3px 9px", cursor: "pointer", fontSize: 11.5, fontWeight: 600, whiteSpace: "nowrap" };
+  // NEW-1 — same treatment for the top-center save/status banner family (read-only · cloud-save
+  // failed · saved-to-cloud-only · local-save failed · save-now confirmation · split note). Six
+  // copies of one near-identical object; each now overrides only its own tone, width and z-band.
+  const topBanner = { position: "fixed", top: 79, left: "50%", transform: "translateX(-50%)", zIndex: 6000, maxWidth: "min(740px, calc(100vw - 16px))", display: "flex", alignItems: "center", gap: 12, background: "#3f3a2a", color: "#fff", border: "1px solid #d6b24a", borderRadius: 10, padding: "9px 13px", fontSize: 12.5, fontWeight: 600, fontFamily: "system-ui, sans-serif", boxShadow: "0 8px 28px rgba(0,0,0,0.35)" };
+  const bannerText = { flex: 1 };
+  const bannerX = { flex: "none", cursor: "pointer", background: "rgba(255,255,255,0.18)", color: "#fff", border: "none", borderRadius: 6, padding: "2px 8px", fontFamily: "inherit", fontSize: 12, fontWeight: 700 };
   // Editable Site/Plan labels that sit inline in the dark top bar.
   // Site/Plan dropdown trigger buttons in the dark top bar.
   const hdrTab = (fs, color, weight) => ({ display: "flex", alignItems: "center", gap: 5, background: "var(--chrome-bg-elev)", border: "1px solid var(--chrome-divider)", borderRadius: 6, color, fontSize: fs, fontWeight: weight, fontFamily: "inherit", padding: "4px 9px", cursor: "pointer", maxWidth: 220, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" });
@@ -13165,16 +13281,23 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       </div>
       {/* Snap's interactive toggle moved to the on-canvas View (eye) menu with the other
           view/drawing aids (B653) — the top-bar duplicate is gone. S still toggles it. */}
+      {/* NEW-1 — the readout IS the control. This pill was already a <button>, but styled as a
+          borderless ghost with muted text in its OFF state it read as a passive status label, so
+          the one thing that told you selection was off looked like the one thing you couldn't
+          change. It now carries a real pill border + full-contrast chrome text in BOTH states,
+          spells the state out either way, and keeps aria-pressed + the native focus ring (index.css
+          gives every button a :focus-visible outline) so it's reachable by keyboard. */}
       {parcels.length > 0 && (
-        <button className="dbtn" aria-pressed={settings.parcelSelect} style={{ ...dGhost, display: "flex", alignItems: "center", gap: 7, color: settings.parcelSelect ? PAL.chromeInk : PAL.chromeMuted, fontWeight: 600 }}
-          onClick={() => {
-            const turningOff = settings.parcelSelect;
-            setSettings((s) => ({ ...s, parcelSelect: !s.parcelSelect }));
-            if (turningOff && sel?.kind === "parcel") { setSel(null); setMulti([]); setDrillId(null); } // entering pure-browse → drop any parcel selection
-          }}
-          title="Select parcels — ON: click a lot's edge or setback line to select it; its interior stays free for building work (dragging always pans the map, never selects). OFF: pure browse/measure, so a click never selects a parcel. Saved per project.">
-          <span style={{ width: 7, height: 7, borderRadius: 99, background: settings.parcelSelect ? "#22c55e" : "var(--chrome-tab-inactive)", display: "inline-block", boxShadow: settings.parcelSelect ? "0 0 7px rgba(34,197,94,0.7)" : "none" }} />
-          {settings.parcelSelect ? "Select parcels" : "Select parcels: off"}
+        <button type="button" className="dbtn" data-testid="parcel-select-toggle"
+          aria-pressed={settings.parcelSelect}
+          aria-label={`Select parcels — currently ${settings.parcelSelect ? "on" : "off"}`}
+          style={{ ...dGhost, display: "flex", alignItems: "center", gap: 7, fontWeight: 600, color: PAL.chromeInk,
+            border: `1px solid ${settings.parcelSelect ? PAL.accent : PAL.chromeLine}`,
+            background: settings.parcelSelect ? "var(--hover-chrome)" : "transparent" }}
+          onClick={() => setParcelSelect(!settings.parcelSelect)}
+          title="Select parcels — click to turn it on or off. ON: click a lot's edge or setback line to select it; its interior stays free for building work (dragging always pans the map, never selects). OFF: pure browse/measure, so a click never selects a parcel. Saved per project.">
+          <span aria-hidden style={{ width: 7, height: 7, borderRadius: 99, background: settings.parcelSelect ? "#22c55e" : "var(--chrome-tab-inactive)", display: "inline-block", boxShadow: settings.parcelSelect ? "0 0 7px rgba(34,197,94,0.7)" : "none" }} />
+          {settings.parcelSelect ? "Select parcels: on" : "Select parcels: off"}
         </button>
       )}
       {tool === "select" && (() => {
@@ -14739,46 +14862,46 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           hit — so we say so and offer "Take over editing here" (steal the lock + push the pent-up work)
           instead. Closes automatically (lock hand-off) when the other tab is closed. */}
       {readOnly && !localSaveFailed && (
-        <div role="alert" data-testid="readonly-banner" style={{ position: "fixed", top: 79, left: "50%", transform: "translateX(-50%)", zIndex: 6000, maxWidth: "min(740px, calc(100vw - 16px))", display: "flex", alignItems: "center", gap: 12, background: "#3f3a2a", color: "#fff", border: "1px solid #d6b24a", borderRadius: 10, padding: "9px 13px", fontSize: 12.5, fontWeight: 600, fontFamily: "system-ui, sans-serif", boxShadow: "0 8px 28px rgba(0,0,0,0.35)" }}>
-          <span style={{ flex: 1 }}>👁 <b>Read-only</b> — this plan is open in another tab, which is the active editor. Your changes here are saved on <b>this device</b> but <b>aren't syncing to the cloud</b> yet. <b>Reloading won't help</b> while the other tab is open — take over here, or close the other tab.</span>
+        <div role="alert" data-testid="readonly-banner" style={topBanner}>
+          <span style={bannerText}>👁 <b>Read-only</b> — this plan is open in another tab, which is the active editor. Your changes here are saved on <b>this device</b> but <b>aren't syncing to the cloud</b> yet. <b>Reloading won't help</b> while the other tab is open — take over here, or close the other tab.</span>
           <button onClick={takeOverEditing} data-testid="takeover-btn" title="Make this the active tab and save your changes to the cloud now" style={{ flex: "none", cursor: "pointer", background: "#d6b24a", color: "#2a2410", border: "none", borderRadius: 7, padding: "5px 11px", fontFamily: "inherit", fontSize: 12, fontWeight: 800 }}>Take over editing here</button>
         </div>
       )}
       {/* B474 review (#8): gated on !localSaveFailed — "saved on this device" is false when the device
           write failed too; the red local-save-failed banner is the authoritative message in that case. */}
       {cloudSaveFailed && !localSaveFailed && (
-        <div role="alert" style={{ position: "fixed", top: 79, left: "50%", transform: "translateX(-50%)", zIndex: 6000, maxWidth: "min(620px, calc(100vw - 16px))", display: "flex", alignItems: "center", gap: 12, background: "#7c2d12", color: "#fff", border: "1px solid #f59e0b", borderRadius: 10, padding: "9px 13px", fontSize: 12.5, fontWeight: 600, fontFamily: "system-ui, sans-serif", boxShadow: "0 8px 28px rgba(0,0,0,0.35)" }}>
-          <span style={{ flex: 1 }}>⚠ Your last change <b>didn't reach the cloud</b>. It's saved on this device and will retry on your next edit — your work is not lost.</span>
+        <div role="alert" style={{ ...topBanner, maxWidth: "min(620px, calc(100vw - 16px))", background: "#7c2d12", border: "1px solid #f59e0b" }}>
+          <span style={bannerText}>⚠ Your last change <b>didn't reach the cloud</b>. It's saved on this device and will retry on your next edit — your work is not lost.</span>
           <button onClick={retryCloudSave} title="Try saving to the cloud again now" style={{ flex: "none", cursor: "pointer", background: "#f59e0b", color: "#1a1206", border: "none", borderRadius: 7, padding: "5px 11px", fontFamily: "inherit", fontSize: 12, fontWeight: 800 }}>Retry now</button>
-          <button onClick={() => setCloudSaveFailed(false)} title="Dismiss" style={{ flex: "none", cursor: "pointer", background: "rgba(255,255,255,0.18)", color: "#fff", border: "none", borderRadius: 6, padding: "2px 8px", fontFamily: "inherit", fontSize: 12, fontWeight: 700 }}>✕</button>
+          <button onClick={() => setCloudSaveFailed(false)} title="Dismiss" style={bannerX}>✕</button>
         </div>
       )}
       {/* B473 — device-write health. AMBER = the device storage is full but the work IS saved to the
           cloud account (safe + reloads fine; only action is freeing space for an offline copy). RED =
           the work is NOT safe anywhere yet (device write failed AND the cloud hasn't confirmed). */}
       {savedToCloudOnly ? (
-        <div role="status" data-testid="saved-cloud-only" style={{ position: "fixed", top: 79, left: "50%", transform: "translateX(-50%)", zIndex: 6002, maxWidth: "min(740px, calc(100vw - 16px))", display: "flex", alignItems: "center", gap: 12, background: "#3f3a2a", color: "#fff", border: "1px solid #d6b24a", borderRadius: 10, padding: "9px 13px", fontSize: 12.5, fontWeight: 600, fontFamily: "system-ui, sans-serif", boxShadow: "0 8px 28px rgba(0,0,0,0.35)" }}>
-          <span style={{ flex: 1 }}>✔ <b>Saved to your account</b> — your work is safe in the cloud and will reload fine. This <b>device's storage is full</b>, so there's no offline copy; free up space (or Export) to keep one.</span>
+        <div role="status" data-testid="saved-cloud-only" style={{ ...topBanner, zIndex: 6002 }}>
+          <span style={bannerText}>✔ <b>Saved to your account</b> — your work is safe in the cloud and will reload fine. This <b>device's storage is full</b>, so there's no offline copy; free up space (or Export) to keep one.</span>
           <button onClick={saveNow} title="Try saving on this device again" style={{ flex: "none", cursor: "pointer", background: "rgba(255,255,255,0.18)", color: "#fff", border: "none", borderRadius: 6, padding: "4px 10px", fontFamily: "inherit", fontSize: 12, fontWeight: 700 }}>Retry device save</button>
         </div>
       ) : localSaveFailed && (
-        <div role="alert" data-testid="local-save-failed" style={{ position: "fixed", top: 79, left: "50%", transform: "translateX(-50%)", zIndex: 6002, maxWidth: "min(720px, calc(100vw - 16px))", display: "flex", alignItems: "center", gap: 12, background: "#7c1d1d", color: "#fff", border: "1px solid #f87171", borderRadius: 10, padding: "9px 13px", fontSize: 12.5, fontWeight: 700, fontFamily: "system-ui, sans-serif", boxShadow: "0 8px 28px rgba(0,0,0,0.4)" }}>
-          <span style={{ flex: 1 }}>⛔ Your last change <b>could not be saved on this device</b> — your browser storage may be full or blocked. Use <b>Save now</b> (or Export) to keep your work, then free up space.</span>
+        <div role="alert" data-testid="local-save-failed" style={{ ...topBanner, zIndex: 6002, maxWidth: "min(720px, calc(100vw - 16px))", background: "#7c1d1d", border: "1px solid #f87171", fontWeight: 700, boxShadow: "0 8px 28px rgba(0,0,0,0.4)" }}>
+          <span style={bannerText}>⛔ Your last change <b>could not be saved on this device</b> — your browser storage may be full or blocked. Use <b>Save now</b> (or Export) to keep your work, then free up space.</span>
           <button onClick={saveNow} title="Try saving again now" style={{ flex: "none", cursor: "pointer", background: "#f87171", color: "#3a0a0a", border: "none", borderRadius: 7, padding: "5px 11px", fontFamily: "inherit", fontSize: 12, fontWeight: 800 }}>Save now</button>
         </div>
       )}
       {/* B473 — provable confirmation for an explicit Save now (a save you can SEE, not just trust). */}
       {saveNowMsg && (
-        <div role="status" data-testid="save-now-msg" style={{ position: "fixed", top: 79, left: "50%", transform: "translateX(-50%)", zIndex: 6002, display: "flex", alignItems: "center", gap: 10, background: "#14532d", color: "#fff", border: "1px solid #4ade80", borderRadius: 10, padding: "8px 13px", fontSize: 12.5, fontWeight: 700, fontFamily: "system-ui, sans-serif", boxShadow: "0 8px 28px rgba(0,0,0,0.35)" }}>
+        <div role="status" data-testid="save-now-msg" style={{ ...topBanner, zIndex: 6002, maxWidth: undefined, gap: 10, background: "#14532d", border: "1px solid #4ade80", padding: "8px 13px", fontWeight: 700 }}>
           <span>{saveNowMsg}</span>
         </div>
       )}
 
       {/* B472 — transient "couldn't explode that field" notice (the loud surface for a degenerate split, never a silent no-op) */}
       {splitNote && (
-        <div role="alert" data-testid="split-note" style={{ position: "fixed", top: 79, left: "50%", transform: "translateX(-50%)", zIndex: 6000, maxWidth: "min(620px, calc(100vw - 16px))", display: "flex", alignItems: "center", gap: 12, background: "#3f3a2a", color: "#fff", border: "1px solid #d6b24a", borderRadius: 10, padding: "9px 13px", fontSize: 12.5, fontWeight: 600, fontFamily: "system-ui, sans-serif", boxShadow: "0 8px 28px rgba(0,0,0,0.35)" }}>
-          <span style={{ flex: 1 }}>{splitNote}</span>
-          <button onClick={() => setSplitNote(null)} title="Dismiss" style={{ flex: "none", cursor: "pointer", background: "rgba(255,255,255,0.18)", color: "#fff", border: "none", borderRadius: 6, padding: "2px 8px", fontFamily: "inherit", fontSize: 12, fontWeight: 700 }}>✕</button>
+        <div role="alert" data-testid="split-note" style={{ ...topBanner, maxWidth: "min(620px, calc(100vw - 16px))" }}>
+          <span style={bannerText}>{splitNote}</span>
+          <button onClick={() => setSplitNote(null)} title="Dismiss" style={bannerX}>✕</button>
         </div>
       )}
 
@@ -16424,12 +16547,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               lat/long (the coordinate Google Earth / a phone GPS uses), reprojected from the
               planner's feet frame via the SAME feetToLatLng the map render + KMZ export use.
               EPSG:2278 stays the internal frame for all geometry — this is display-only. */}
-          {cursorLL && (
-            <div title={GROUND_EL_TITLE} style={{ position: "absolute", bottom: 8, left: 10, zIndex: 5, pointerEvents: "none", fontFamily: NUM_FONT, fontSize: 11, color: "rgba(255,255,255,0.82)", background: "rgba(0,0,0,0.42)", backdropFilter: "blur(4px)", WebkitBackdropFilter: "blur(4px)", padding: "3px 8px", borderRadius: 5, lineHeight: 1.4, fontVariantNumeric: TABULAR_NUMS, maxWidth: "calc(100% - 20px)", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis", boxSizing: "border-box" }}>
-              {cursorLL.lat.toFixed(6)}°,&nbsp;{cursorLL.lng.toFixed(6)}°
-              {cursorElFt != null && <span data-ground-el> · El ≈ {cursorElFt.toFixed(1)} ft NAVD88</span>}
-            </div>
-          )}
+          <CursorChip ll={cursorLL} el={cursorEl} prop={cursorProp}
+            style={{ bottom: 8, left: 10, maxWidth: "calc(100% - 20px)" }} />
         </div>
 
         {/* phone-only floating button to summon the tool rail (B113) */}
@@ -19354,26 +19473,37 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       )}
 
       {(pobMode || routeMode || overlapWarn || deedAlignHint) && (
-        <div style={{ position: "fixed", left: "50%", bottom: 84, transform: "translateX(-50%)", zIndex: 2500, maxWidth: "80vw",
-          background: (deedAlignHint && !pobMode) ? PAL.accent : overlapWarn.startsWith("⚠") ? "#7f1d1d" : (pobMode || routeMode ? PAL.accent : "#15803d"),
-          color: "#fff", padding: "9px 16px", borderRadius: 99, fontSize: 12.5, fontWeight: 600, boxShadow: "0 8px 28px rgba(0,0,0,0.3)", display: "flex", gap: 12, alignItems: "center" }}>
+        <div style={{ ...toastPill, background: (deedAlignHint && !pobMode) ? PAL.accent : overlapWarn.startsWith("⚠") ? "#7f1d1d" : (pobMode || routeMode ? PAL.accent : "#15803d") }}>
           <span>{pobMode ? (pobMode.queueTotal ? `Deed ${(pobMode.placed || 0) + 1} of ${pobMode.queueTotal}${pobMode.name ? ` — ${pobMode.name}` : ""}: click its point of beginning (Esc cancels all).` : "Click the point of beginning on the plan to anchor the description (Esc to cancel).") : (deedAlignHint ? deedAlignHint.msg : overlapWarn)}</span>
-          {(pobMode || routeMode) && <button onClick={() => { setPobMode(null); setRouteMode(null); setOverlapWarn(""); }} style={{ border: "1px solid rgba(255,255,255,0.5)", background: "transparent", color: "#fff", borderRadius: 7, padding: "3px 9px", cursor: "pointer", fontSize: 11.5, fontWeight: 600 }}>Cancel</button>}
+          {(pobMode || routeMode) && <button onClick={() => { setPobMode(null); setRouteMode(null); setOverlapWarn(""); }} style={toastGhostBtn}>Cancel</button>}
           {deedAlignHint && !pobMode && !routeMode && <>
-            <button onClick={() => alignDeedToParcel(deedAlignHint.id)} style={{ border: "none", background: "var(--surface-raised)", color: PAL.accent, borderRadius: 7, padding: "4px 12px", cursor: "pointer", fontSize: 11.5, fontWeight: 700, whiteSpace: "nowrap" }}>Align to parcel</button>
-            <button onClick={() => setDeedAlignHint(null)} style={{ border: "1px solid rgba(255,255,255,0.5)", background: "transparent", color: "#fff", borderRadius: 7, padding: "3px 9px", cursor: "pointer", fontSize: 11.5, fontWeight: 600, whiteSpace: "nowrap" }}>Dismiss</button>
+            <button onClick={() => alignDeedToParcel(deedAlignHint.id)} style={toastActionBtn}>Align to parcel</button>
+            <button onClick={() => setDeedAlignHint(null)} style={toastGhostBtn}>Dismiss</button>
           </>}
         </div>
       )}
 
+      {/* NEW-1 — "you clicked a parcel and nothing happened, here's why" — the same bottom-center
+          toast surface as the pill above (same geometry, same type, same shadow), riding one notch
+          higher when that one is already occupied so neither message can swallow the other. The
+          inline action turns selection back ON right where the click failed, so the user never has
+          to go find the header control. Only ever raised by a press that actually hit a parcel. */}
+      {parcelHint && (
+        <div data-testid="parcel-select-hint" role="status"
+          style={{ ...toastPill, background: PAL.accent, bottom: (pobMode || routeMode || overlapWarn || deedAlignHint) ? 132 : 84 }}>
+          <span>Parcel selection is off — that click panned the map.</span>
+          <button data-testid="parcel-select-hint-on" onClick={() => setParcelSelect(true)} style={toastActionBtn}>Turn it on</button>
+          <button aria-label="Dismiss" onClick={dismissParcelHint} style={toastGhostBtn}>Dismiss</button>
+        </div>
+      )}
+
       {ovCalib && (
-        <div style={{ position: "fixed", left: "50%", bottom: 84, transform: "translateX(-50%)", zIndex: 2500, maxWidth: "80vw",
-          background: PAL.accent, color: "#fff", padding: "9px 16px", borderRadius: 99, fontSize: 12.5, fontWeight: 600, boxShadow: "0 8px 28px rgba(0,0,0,0.3)", display: "flex", gap: 12, alignItems: "center" }}>
+        <div style={{ ...toastPill, background: PAL.accent }}>
           <span>{ovCalibMsg()} {ovCalib.kind === "align" && Math.floor(ovCalib.pts.length / 2) >= 2 ? <span style={{ opacity: 0.75 }}>· or add more pairs for a better fit</span> : null} <span style={{ opacity: 0.75 }}>(Esc to cancel)</span></span>
           {ovCalib.kind === "align" && Math.floor(ovCalib.pts.length / 2) >= 2 && (
-            <button onClick={applyOvAlign} style={{ border: "1px solid #fff", background: "var(--surface-raised)", color: PAL.accent, borderRadius: 7, padding: "3px 11px", cursor: "pointer", fontSize: 11.5, fontWeight: 700 }}>Apply {Math.floor(ovCalib.pts.length / 2)} pts</button>
+            <button onClick={applyOvAlign} style={{ ...toastActionBtn, border: "1px solid #fff", padding: "3px 11px" }}>Apply {Math.floor(ovCalib.pts.length / 2)} pts</button>
           )}
-          <button onClick={() => setOvCalib(null)} style={{ border: "1px solid rgba(255,255,255,0.5)", background: "transparent", color: "#fff", borderRadius: 7, padding: "3px 9px", cursor: "pointer", fontSize: 11.5, fontWeight: 600 }}>Cancel</button>
+          <button onClick={() => setOvCalib(null)} style={toastGhostBtn}>Cancel</button>
         </div>
       )}
 

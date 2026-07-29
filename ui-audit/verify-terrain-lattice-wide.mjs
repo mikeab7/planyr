@@ -10,7 +10,8 @@ import {
   mercYToLat, pixelToLatLng, lngToMercX, latToMercY, mercPerPx, MARGIN_CELLS,
 } from "../src/workspaces/site-planner/lib/demGrid.js";
 import { decodeGrid } from "../src/workspaces/site-planner/lib/lercGrid.js";
-import { buildContours, composeContourPaint } from "../src/workspaces/site-planner/lib/contours.js";
+import { buildContours } from "../src/workspaces/site-planner/lib/contourTrace.js";
+import { composeContourPaint } from "../src/workspaces/site-planner/lib/contours.js";
 
 const DEP = "https://elevation.nationalmap.gov/arcgis/rest/services/3DEPElevation/ImageServer";
 const LAT = 29.7820, LNG = -95.7950, Z = 17;

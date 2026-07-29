@@ -118,6 +118,15 @@ export function createElementSync(opts = {}) {
     // element the user never touched. Defaults to "everything is direct" (single-caller opt-in;
     // pre-NEW-1 behavior for tests and any caller that doesn't distinguish).
     isDirectEdit = () => true,
+    // NEW-1 — () => the LIVE canvas collections ({ els, markups, … }) at the moment of the write.
+    // Two things depend on it, and both are the assembly-tear fix:
+    //   • ops are built from the state AT FLUSH TIME, not from the payload captured when the diff
+    //     enqueued them — so a queued op can never put PRE-GESTURE coordinates on the wire;
+    //   • an assembly (a host + everything `attachedTo` it) is closed over before the batch is
+    //     built, so every member lands in the SAME commit instead of dribbling out across two.
+    // Optional: omitted (tests, any caller without a canvas) → both behaviours are simply off and
+    // the engine is byte-for-byte its pre-NEW-1 self.
+    liveCollections = null,
   } = opts;
 
   // key -> { kind, id, json, rev, z }  (last COMMITTED state)
@@ -228,6 +237,15 @@ export function createElementSync(opts = {}) {
   // rev <= the highest rev we ever committed → definitively ours or already superseded by our own later
   // commit (monotonic revs); a live foreign edit always arrives strictly above it.
   const atOrBelowOwnHighWater = (kind, id, rev) => rev <= (maxOwnRev.get(skey(kind, id)) ?? 0);
+  // NEW-3 — a row stamped with a DIFFERENT writer is definitively NOT our echo, whatever its rev.
+  // The high-water guard above claims every row at/below our own max rev as ours; that is right for
+  // an echo of our own write, but it also swallowed a genuine foreign row whose rev happened to sit
+  // below our high-water (an out-of-band repair, or a writer whose rev landed under ours after a
+  // stale refetch rolled our shadow backward). Swallowing it is half of why a torn plan never
+  // converged: the client ignored the incoming rows and re-pushed its own copy over them. Fails
+  // OPEN — no `selfUid` configured, or a row with no `updated_by`, is treated as possibly ours, so
+  // every pre-existing self-echo guarantee (B757 / B812) is untouched.
+  const foreignAuthor = (row) => !!(selfUid && row && row.updated_by && row.updated_by !== selfUid);
 
   let debounceHandle = null;
   let backoffHandle = null;
@@ -377,11 +395,79 @@ export function createElementSync(opts = {}) {
   // Force a commit of whatever is dirty (gesture end / inline-edit commit).
   function flushGesture() { clearDebounce(); flush(); }
 
+  /* ---- NEW-1: an assembly is ATOMIC on the wire ------------------------------------------
+   * A bonded assembly — a building plus every element `attachedTo` it (truck court, trailer
+   * parking, sidewalks, side parking, corner bump-outs) — is ONE object as far as the user is
+   * concerned: dragging the building moves all of it. The engine had no notion of that. A batch
+   * was simply "whatever happened to be dirty", so a move could commit the host and part of its
+   * children in one transaction and the rest in another seconds later — and the later one carried
+   * whatever payload had been captured earlier. On the owner's plan that shipped the building
+   * ~2,000 ft east while its truck court, trailer parking and three dock bump-outs stayed put.
+   *
+   * Two guarantees, applied in `flush()` immediately before the batch is built:
+   *  (a) CLOSURE — if any member of an assembly is dirty, EVERY member whose live data disagrees
+   *      with the server joins the same batch. One gesture → one commit → N+1 ops.
+   *  (b) FRESHNESS — every op's data is re-read from the live canvas, so the bytes on the wire are
+   *      the state at flush time. A payload captured before the gesture can no longer be sent. */
+  function liveIndex() {
+    if (!liveCollections) return null;
+    let c;
+    try { c = liveCollections(); } catch (_) { return null; }
+    if (!c) return null;
+    const byKey = new Map();
+    for (const [kind, field] of FIELDS) {
+      for (const el of c[field] || []) if (el && typeof el.id === "string") byKey.set(skey(kind, el.id), el);
+    }
+    return { byKey, els: Array.isArray(c.els) ? c.els : [] };
+  }
+  // An element's assembly root: its host when it is bonded, itself otherwise. (Same rule as
+  // planClipboard's `rootIdOf` and the delete / nudge paths — one definition of "assembly".)
+  const rootIdOf = (el, fallbackId) => (el && el.attachedTo != null ? el.attachedTo : (el ? el.id : fallbackId));
+
+  function closeAssemblies(live) {
+    if (!live || live.els.length < 2) return;
+    const roots = new Set();
+    for (const e of dirty.values()) {
+      if (e.kind !== "el" || e.cls === "delete") continue; // a delete cascades through TOMBSTONE-DELETES, not here
+      const r = rootIdOf(live.byKey.get(skey("el", e.id)) || e.el, e.id);
+      if (r != null) roots.add(r);
+    }
+    if (!roots.size) return;
+    for (const m of live.els) {
+      if (!m || typeof m.id !== "string" || !roots.has(rootIdOf(m, m.id))) continue;
+      const key = skey("el", m.id);
+      if (dirty.has(key) || inflightKeys.has(key)) continue;
+      const shad = shadow.get(key);
+      if (!shad) continue;                        // never seen by the server → the normal diff mints its create
+      const json = stableStringify(m);
+      if (shad.json === json) continue;           // the server already agrees — nothing to send
+      enqueue(key, { kind: "el", id: m.id, cls: "update", el: m, z: m.z, direct: false });
+      report("element-assembly-joined", "assembly member folded into the same commit", { siteId, id: m.id, root: rootIdOf(m, m.id) });
+    }
+  }
+
+  // Re-read an op's data from the live canvas so the bytes committed are the state at flush time.
+  function freshen(e, live) {
+    if (!live || e.cls === "delete") return e;
+    let cur = live.byKey.get(skey(e.kind, e.id));
+    if (!cur) return e;                            // gone from the canvas → the delete diff owns it
+    // Keep the z the diff ASSIGNED to a z-less new element (patchElement writes it back to the
+    // canvas asynchronously, so the live copy can still be missing it) — refreshing geometry must
+    // never undo the stacking key this very op is carrying.
+    if (typeof cur.z !== "number" && typeof e.z === "number") cur = { ...cur, z: e.z };
+    const json = stableStringify(cur);
+    if (json === stableStringify(e.el)) return e;  // already current
+    report("element-op-refreshed", "queued op re-read from live state at flush time", { siteId, id: e.id, kind: e.kind, cls: e.cls });
+    return { ...e, el: cur, z: typeof cur.z === "number" ? cur.z : e.z };
+  }
+
   // Build ops from the dirty queue and commit them as ONE batch, serialized per site.
   function flush() {
     if (stopped || inflight || dirty.size === 0) return;
     clearDebounce();
-    const batch = [...dirty.values()];
+    const live = liveIndex();
+    closeAssemblies(live);                          // NEW-1 (a) — no assembly may straddle two commits
+    const batch = [...dirty.values()].map((e) => freshen(e, live)); // NEW-1 (b) — state at flush time
     dirty.clear();
     for (const e of batch) { inflightKeys.set(skey(e.kind, e.id), e); recordSent(e.kind, e.id, e.el); } // protected like dirty until the result lands; recentSent survives a transport failure (B757)
     inflight = true;
@@ -487,6 +573,17 @@ export function createElementSync(opts = {}) {
           clearDeleteFloor(key);
           if (e.direct !== false) recent.set(key, { at: now(), rev: row.rev });
           report("element-conflict-sem-eq", "conflict row is semantically identical — silent adopt", { siteId, id: e.id, kind: e.kind });
+        } else if (e.direct === false) {
+          // NEW-3 — the commit-result half of the derived-yield rule above. A DERIVED op that lost a
+          // race must NOT be re-committed: re-pushing app-derived geometry over a foreign row is
+          // exactly the loop that kept the owner's repaired rows from surviving ("queued 3 commit
+          // batches to push its own copy back over mine"). Adopt the remote rev with OUR bytes as the
+          // diff baseline, so the next reconcile is quiet and there is no ping-pong; the realtime row
+          // for that rev now reaches the canvas through the (no-longer-pending) read path above.
+          shadow.set(key, { kind: e.kind, id: e.id, json: stableStringify(e.el), rev: row.rev, z: e.z });
+          clearDeleteFloor(key);
+          report("element-conflict-derived-yield", "derived op lost the race — not re-committed", { siteId, id: e.id, kind: e.kind, remoteRev: row.rev });
+          onEvent({ type: "edit-vs-edit-lost-race", id: e.id, kind: e.kind, remote: row, authoredRecently: isRecent(e.kind, e.id) });
         } else {
           // edit-vs-edit: second writer wins — adopt the remote rev and re-commit local on top (LWW).
           // `stale`: json "" at the adopted rev is a mixed pairing — never a re-seed substitution source.
@@ -578,7 +675,10 @@ export function createElementSync(opts = {}) {
     // A foreign write carries an unrecorded rev ABOVE our high-water → falls through to the conflict
     // matrix unchanged. (isOwnRev is the exact-rev, in-window match; the high-water floor also catches a
     // self-echo that outlived the 15s window — Angle-4 — since anything at/below our max is ours.)
-    if (!row.deleted_at && (isOwnRev(row.kind, row.id, rev) || atOrBelowOwnHighWater(row.kind, row.id, rev))) {
+    // NEW-3 — `!foreignAuthor(row)`: a row written by somebody else is never our echo, so it must
+    // reach the conflict matrix below instead of being ignored on rev arithmetic alone.
+    if (!row.deleted_at && !foreignAuthor(row) &&
+        (isOwnRev(row.kind, row.id, rev) || atOrBelowOwnHighWater(row.kind, row.id, rev))) {
       const cur = shadow.get(key);
       // `stale` when an existing entry's json is KEPT under the bumped rev (the kept json can be an
       // older copy than the rev now claims — a mixed pairing reconcileSeedRows must never substitute
@@ -626,6 +726,23 @@ export function createElementSync(opts = {}) {
         (pendInflight && pendInflight.el && semanticallyEqual(row.data, pendInflight.el)) ||
         (pendDirty && pendDirty.el && semanticallyEqual(row.data, pendDirty.el))
       );
+      // NEW-3 — DERIVED churn must never beat a genuine foreign row. "Local wins" below is the right
+      // rule for an edit the user just made by hand, but most pending ops on a bonded plan are
+      // app-DERIVED relayout output (the paving / sidewalks / parking a building edit re-fits). When
+      // the only thing pending is derived, re-pushing it over another writer's deliberate row is how
+      // a torn assembly stopped converging: whichever client held the stale copy kept winning, so a
+      // repaired row was overwritten within seconds, forever. So a foreign row (bytes we never sent,
+      // a rev we never produced, and — where the writer is stamped — someone else's) WINS: drop our
+      // derived op, adopt the row's bytes and rev, and put it on the canvas.
+      const pendDirect = (pendDirty && pendDirty.direct !== false) || (pendInflight && pendInflight.direct !== false);
+      if (!sameData && !semEq && rowJson != null && !pendDirect) {
+        shadow.set(key, { kind: row.kind, id: row.id, json: rowJson, rev, z: row.z_index });
+        dirty.delete(key);
+        clearDeleteFloor(key);
+        report("element-derived-yield", "derived local op yielded to a foreign row", { siteId, id: row.id, kind: row.kind, rev });
+        onEvent({ type: "remote-upsert", id: row.id, kind: row.kind, remote: row, existed: !!shad, authoredRecently: isRecent(row.kind, row.id) });
+        return { action: "upsert", kind: row.kind, id: row.id, el: row.data, row };
+      }
       // A queued identical update can be dropped outright (server already has it); otherwise local data
       // stays on canvas, the commit re-targets the fresh rev (LWW re-commit), and B673 gets the event.
       // `stale` on the kept-json pairing (NEW-1 hardening — see the own-echo branch above).

@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import {
   buildContours, pickInterval, dilateVoids, stripRing,
-} from "../src/workspaces/site-planner/lib/contours.js";
+} from "../src/workspaces/site-planner/lib/contourTrace.js";
 import {
   maskedSmooth, pixelToMerc,
 } from "../src/workspaces/site-planner/lib/demGrid.js";
