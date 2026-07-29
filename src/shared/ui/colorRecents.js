@@ -1,7 +1,8 @@
 /* Recently-used colors (NEW-4) — ONE shared most-recently-used list across the whole app.
  *
- * The color wheel (the native `<input type="color">`) stays exactly as it is; this is the fast-reuse
- * row that sits beside it, so a color used a moment ago is one click away instead of a re-pick.
+ * The list lives INSIDE the colour picker (a section of the popover the current-colour chip opens),
+ * not permanently beside it in the panel, so a colour used a moment ago is one click away at the
+ * moment you are choosing one.
  * Deliberately ONE list, not one per control: a color just used on a parcel outline is immediately
  * available on a markup, a callout, or an element fill — which is how a plan ends up internally
  * consistent instead of drifting a shade per surface.
@@ -36,14 +37,15 @@ export function mergeRecent(list, color, max = RECENTS_MAX) {
 }
 
 /**
- * What the row actually shows: your real recents first, then enough of the app's default palette to
- * fill the row — so it is never blank on a fresh browser, and never silently shrinks as you use it.
- * Seed entries already in your recents aren't repeated.
+ * Normalize + de-duplicate a list of colours for rendering (the standard palette grid, or the
+ * recents row). NOT padded: the recents section shows only colours actually used, and hides
+ * itself when there are none — the default palette is its own row above it, so padding recents
+ * out of the palette would only make the list lie about what you had used.
  */
-export function recentsWithSeed(list, seed = [], max = RECENTS_MAX) {
+export function uniqueHexes(list, max = RECENTS_MAX) {
   const out = [];
   const seen = new Set();
-  for (const c of [...(list || []), ...(seed || [])]) {
+  for (const c of list || []) {
     const hex = normalizeHex(c);
     if (!hex || seen.has(hex)) continue;
     seen.add(hex);
@@ -103,5 +105,38 @@ export function subscribeRecents(fn) {
   return () => subs.delete(fn);
 }
 
+/* --------------------------------------------------- the picking SESSION (NEW-4 bug)
+ *
+ * The colour wheel picks LIVE — that is deliberate and stays. The consequence is that the
+ * browser fires a change event for EVERY shade the cursor passes through, so recording each one
+ * filled all ten slots with near-identical intermediates from a single drag. The list then
+ * described where the cursor travelled, not what the plan actually uses.
+ *
+ * So a picking session records exactly ONE entry, at commit: `notePick` on every live value
+ * (recorded nowhere yet — the object still recolors live, that is the caller's `apply`), and
+ * `commitPick` at the session boundary (the wheel blurs, or the picker closes/unmounts), which
+ * pushes the value it SETTLED on. Discrete paths — a swatch click — never open a session; they
+ * call `pushRecent` straight, one entry per click, as before.
+ */
+
+let pendingPick = null;
+
+/** The colour the open picking session is currently on. Applied live, NOT recorded yet. */
+export function notePick(color) {
+  const hex = normalizeHex(color);
+  if (hex) pendingPick = hex;
+  return hex;
+}
+
+/** End the session: record EXACTLY ONE entry — the colour it settled on. No-op if none. */
+export function commitPick() {
+  const hex = pendingPick;
+  pendingPick = null;
+  return hex ? pushRecent(hex) : getRecents();
+}
+
+/** The value a session would commit right now (test/debug introspection). */
+export function pendingPickValue() { return pendingPick; }
+
 /** Test-only: drop the in-memory cache so a suite can start from a known state. */
-export function _resetRecentsCache() { cache = null; subs.clear(); }
+export function _resetRecentsCache() { cache = null; pendingPick = null; subs.clear(); }

@@ -55,7 +55,7 @@ are in hand. Details for the next Claude session: BACKLOG.md B916/B917, VERIFICA
       don't paste them anywhere in this repo's files or a commit, since anyone who can read the code could
       then read it back.)
 
-## ✅ ANSWERED — nothing for you to do (was: the county flood-study question, B1057 / B1069)
+## ✅ ANSWERED — nothing for you to do (was: the county flood-study question, B1057 / B1074)
 
 **This is closed.** I asked you to check with Waller County whether their floodplain ordinance carries the
 "50 lots or 5 acres" requirement. That question has since been answered by reading the county's **own adopted
