@@ -421,7 +421,9 @@ describe("markup hit-area / callout padding / live color picker (B155 open-path 
     expect(src).toMatch(/const crossSectionsP = bfeSearchBbox\s*\n\s*\? fetchCached\(VECTOR_SOURCES\.crossSections, bfeSearchBbox,/);
     // the zone polygon + DEM grid fetches deliberately stay on the tight fmBbox (unchanged)
     expect(src).toMatch(/const floodGeoP = fmBbox\s*\n\s*\? fetchCached\(VECTOR_SOURCES\.fema, fmBbox,/);
-    expect(src).toMatch(/const siteGridP = fmBbox\s*\n\s*\? fetchSiteGrid\(/);
+    // (B1095 moved the terrain pipeline behind an on-demand import; the point of THIS
+    // guard is the bbox, so it still pins that the grid is fetched over the tight fmBbox.)
+    expect(src).toMatch(/const siteGridP = fmBbox\s*\n\s*\? loadTerrain\(\)\.then\(\(t\) => t\.fetchSiteGrid\(\{ west: fmBbox\.w,/);
   });
 
   it("B755 fix, round 3 (Bain live-verify 2026-07-18): the 'BFE (1% WSE)' input's auto-value ternary reads the cross-section-derived estimate (derivedXsWsel), which the field omitted entirely even though it's a real, already-priced provider", () => {

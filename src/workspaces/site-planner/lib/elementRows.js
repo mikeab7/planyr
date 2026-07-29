@@ -30,7 +30,7 @@ const arr = (x) => (Array.isArray(x) ? x : []);
 // mergeSiteContent's filter + the SQL backfill) and lands as a tombstone row instead.
 // Returns { rows, problems }: problems lists items skipped for having no string id —
 // callers must surface a non-empty problems list loudly (LOUD-FAILURE), never drop it.
-import { migrateRoads } from "./siteModel.js";
+import { migrateRoads, normalizeBondedChildren } from "./siteModel.js";
 
 export function explodeModel(model) {
   const m = model || {};
@@ -83,7 +83,7 @@ export const byRowOrder = (a, b) =>
 // surviving (non-element) tombstones ∪ the rows' tombstoned ids, deduped + sorted —
 // deletedIds is a SET, its order carries no meaning. Pure merge: callers still pass the
 // result through migrate()/createSiteModel() for normalization.
-export function rowsToModel(header, rows) {
+export function rowsToModel(header, rows, { onHeal } = {}) {
   const h = header || {};
   const live = arr(rows).filter((r) => r && !r.deleted_at && r.data);
   const out = { ...h };
@@ -109,6 +109,15 @@ export function rowsToModel(header, rows) {
   // debris intact) while the localStorage cache showed the cleaned 18. Same function, both paths, so
   // the two can never disagree again — which is exactly the failure mode that produced this line.
   out.els = migrateRoads(out.els);
+  // NEW-4 — and run the BONDED-CHILD HEAL here too, for exactly the reason the road migration
+  // moved here: a site has TWO read paths, and only the site-record blob (via `createSiteModel`)
+  // ever ran the normalizers. So on a signed-in, element-synced plan a bonded child whose geometry
+  // had drifted — or, worse, been TORN off its host when an assembly's move committed across two
+  // transactions (NEW-1) — was never repaired, and the broken layout survived every reload. That
+  // is why the owner's building stayed ~2,000 ft from its own truck court. Same function as the
+  // blob path (`normalizeBondedChildren`), so the two can never disagree again. Every pass is
+  // identity-preserving on a correct record, so this costs a clean plan nothing.
+  out.els = normalizeBondedChildren(out.els, onHeal);
   return out;
 }
 

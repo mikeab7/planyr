@@ -57,7 +57,8 @@ import { sanityCheckEstimate, sensitivityBand } from "./lib/estimateChallenge.js
 import { wseSensitivity } from "./lib/wseSensitivity.js";
 import LayerPanel from "./components/LayerPanel.jsx";
 import { districtDrainageNote } from "./lib/floodGroup.js";
-import { useGroundElevation, GROUND_EL_TITLE } from "./components/useGroundElevation.js";
+import { useGroundElevation } from "./components/useGroundElevation.js";
+import CursorChip from "./components/CursorChip.jsx";
 import ViewMenu from "./components/ViewMenu.jsx";
 import SiteAnalysis from "./components/SiteAnalysis.jsx";
 import AnchoredMenu from "../../shared/ui/AnchoredMenu.jsx";
@@ -163,7 +164,10 @@ import { geometricMaxBermFt, drainageBermCapFt, bindingBermCap, bermNeedsInlets,
 import { gisCache } from "./lib/gisCache.js";
 import { VECTOR_SOURCES, fetchCached } from "./lib/vectorLayers.js";
 import { sampleAtLatLng } from "./lib/demGrid.js";
-import { fetchSiteGrid, siteGridZoom } from "./lib/terrainLayers.js";
+// B1095 — the terrain pipeline loads on demand: the site DEM grid rides the explicit
+// drainage check (already async), and the contour hover only acts once the cursor readout
+// has pulled the chunk in.
+import { loadTerrain, contourHover } from "./lib/terrainLazy.js";
 // NEW-1 (B1057 completion) — the screening-BFE live wiring: Atlas-14 rainfall, SSURGO soils, and
 // the terrain→watershed/section derivation that feeds screeningBfe.js.
 import { resolvePfds } from "./lib/pfdsClient.js";
@@ -174,7 +178,7 @@ import {
 } from "./lib/screeningBfeSite.js";
 import { bfeDataLikelyRequired, NOT_MODELED, CLOMR_NOTE } from "./lib/screeningBfe.js";
 import { paintHeatmap, heatmapLegend, heatmapTotals, cellAt as heatCellAt, cutFillPaint, cutFillLegend, cutFillTotals } from "./lib/mitigationHeatmap.js";
-import { buildProposedSurface, balanceAssist, netImportCy, classifyGradeElement, TIE_DROP_FT } from "./lib/proposedSurface.js";
+import { buildProposedSurface, balanceAssist, netImportCy, classifyGradeElement, sampleProposedAt, TIE_DROP_FT } from "./lib/proposedSurface.js";
 import { solveBalanceFfe, ffeDualDisplay } from "./lib/ffeBalance.js";
 import {
   zonesFromFeatureCollection, computeMitigation, combineMitigation, wse1pctForRing, ringInTrigger, ringInFloodway,
@@ -2140,7 +2144,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const [la, ln] = feetToLatLng(cursor, origin.lat, origin.lon);
     return { lat: la, lng: ln };
   }, [cursor, origin]);
-  const cursorElFt = useGroundElevation(cursorLL);
+  // NEW-2 — the readout is a STATE now (value / in-flight / no-data / unavailable), never
+  // silence; `zoom` picks the lattice band the cursor tile is warmed at (the same tile the
+  // contour layer asks for here, so it's a cache hit when contours are on).
+  const cursorEl = useGroundElevation(cursorLL, { zoom: origin ? ppfToZoom(view.ppf, origin.lat) : null });
+  // NEW-1 — hand the SAME already-throttled cursor position to the contour layer, so
+  // hovering any line (not just the labelled every-5-ft ones) answers with its elevation.
+  useEffect(() => { contourHover(geoMapRef.current, cursorLL); }, [cursorLL]);
   /* B1092 — the GIS identify CARD on the planner canvas: {x, y (wrapper-local px), items}.
    * The backdrop Leaflet map is pointer-events:none (the SVG owns every click), so the
    * click-identify the BKDD easement layer was made VECTOR for could never fire here —
@@ -3021,7 +3031,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // and feed the SAME reconciled rows to seed + rowsToModel so shadow and canvas stay in lockstep.
     const rows = reconcileSeedRows(r.rows, eng.shadowSnapshot(), eng.tombstonedSnapshot());
     eng.seed(rows);
-    const model = rowsToModel({}, rows);
+    // NEW-4 — the rows read path now runs the bonded-child heal too, so an assembly torn apart on
+    // disk (a building committed away from its own truck court) is re-fitted to its host the moment
+    // the plan is read, not left broken across every reload. Report what was healed — a silent
+    // repair is a repair nobody can audit (LOUD-FAILURE).
+    const healed = [];
+    const model = rowsToModel({}, rows, { onHeal: (h) => healed.push(h) });
+    if (healed.length) reportClientEvent("bonded-children-healed", "bonded children re-fitted to their host on read", { id: siteId, count: healed.length, healed: healed.slice(0, 20) });
     // dirtyEntries includes the batch in flight, so a refetch landing mid-commit keeps that
     // edit on the canvas too (it re-trues from its own RPC result, not from pre-commit rows).
     const dirtyByKey = new Map(eng.dirtyEntries().map((d) => [d.kind + ":" + d.id, d]));
@@ -3136,6 +3152,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // NEW-1 — bonded (attachedTo) elements are cascade-DERIVED unless the current gesture /
       // selection targets them; everything else (incl. deletes, el = null) stays direct.
       isDirectEdit: (kind, id, el) => kind !== "el" || !el || el.attachedTo == null || isDirectTouched(kind, id),
+      // NEW-1 — the live canvas, read at the moment of the write: the engine closes each bonded
+      // assembly into ONE commit and re-reads every op's bytes from here, so a move can neither
+      // straddle two transactions nor ship pre-gesture coordinates. `stateRef` is assigned during
+      // render, so this is always the latest COMMITTED React state.
+      liveCollections: () => {
+        const s = syncStateOverride.current || stateRef.current;
+        return { els: s.els, markups: s.markups, measures: s.measures, callouts: s.callouts, parcels: s.parcels };
+      },
     });
     elSyncRef.current = eng;
     // B673 — who to blame in a conflict toast: self → "you (another window)"; teammates via the
@@ -3194,15 +3218,30 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   }, [siteId]); // eslint-disable-line react-hooks/exhaustive-deps
   // Diff the live collections and enqueue per-element commits. `busy` (a geometry gesture is in
   // flight) defers the diff — flushElems() at gesture end (onUp) commits the settled result.
-  const reconcileElems = (busy) => {
+  // NEW-2 — the collections the sync engine must treat as LIVE for the duration of one synchronous
+  // flush. `stateRef` is assigned during render, so a handler that has JUST called setEls (an
+  // undo/redo restoring a whole snapshot) still sees the PRE-change state there. Installing the
+  // snapshot here for the length of the flush is what lets an undo commit itself immediately
+  // instead of trailing on the debounce behind the move it is undoing.
+  const syncStateOverride = useRef(null);
+  const reconcileElems = (busy, override) => {
     const e = elSyncRef.current;
     if (!e || !isCloudActive()) return;
-    if (!busy) drainRemote(); // apply remote rows that arrived mid-gesture before diffing
+    // A snapshot flush already knows exactly what the canvas holds; draining remote rows into it
+    // would re-apply rows the snapshot just superseded.
+    if (!busy && !override) drainRemote(); // apply remote rows that arrived mid-gesture before diffing
     stampDirectTargets(); // NEW-1 — refresh direct-touch stamps in the SAME tick the ops are enqueued
-    const s = stateRef.current;
+    const s = override || stateRef.current;
     try { e.reconcile({ els: s.els, markups: s.markups, measures: s.measures, callouts: s.callouts, parcels: s.parcels }, { busy }); } catch (_) {}
   };
-  const flushElems = () => { const e = elSyncRef.current; if (e && isCloudActive()) { reconcileElems(false); try { e.flushGesture(); } catch (_) {} } };
+  const flushElems = (override) => {
+    const e = elSyncRef.current;
+    if (!e || !isCloudActive()) return;
+    const prev = syncStateOverride.current;
+    if (override) syncStateOverride.current = override;
+    try { reconcileElems(false, override); try { e.flushGesture(); } catch (_) {} }
+    finally { syncStateOverride.current = prev; }
+  };
   const retryElems = () => { const e = elSyncRef.current; if (e) e.retryNow(); };
   // Last-ditch flush of pending element commits during page unload (the supabase-js client can't do
   // keepalive) — hits the commit_elements RPC endpoint directly. Composes with the whole-doc unload
@@ -3359,6 +3398,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // points floating over the reverted geometry. Mirrors DocReview/Stitcher applySnapshot (RC-2).
     setDraftPoly(null); setDraftElPoly(null); setDraftRoadPts(null); setMkPoly(null); setMeasDraft([]);
     setEaseDraft(null); setEaseEdges(null); setTracePts([]); setXsecPts([]); setCalloutDraft(null); setDraftRect(null); setMkRect(null);
+    // NEW-2 — an undo/redo is a GESTURE BOUNDARY, exactly like pointer-up, and must commit NOW.
+    // It used to be the only edit path with no flush: the restore landed locally, then trailed on
+    // the engine's ~750 ms debounce while the move it was undoing was still being committed — so
+    // the server received a mix of moved and restored members and the plan tore. Flushed against
+    // the SNAPSHOT (not `stateRef`, which React has not re-rendered yet), so the diff is built from
+    // the state we just applied. Safe when there is nothing to sync — flushElems no-ops.
+    try { flushElems(s); } catch (_) {}
   };
   const undo = () => { const prev = histRef.current.undo(stateRef.current); if (prev) { applySnapshot(prev); touchHist(); } };
   const redo = () => { const next = histRef.current.redo(stateRef.current); if (next) { applySnapshot(next); touchHist(); } };
@@ -8012,7 +8058,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // explicit click. Failure isolation: an outage reads state "failed" and the engine
       // falls back to the labeled flat median — never a silent flat price.
       const siteGridP = fmBbox
-        ? fetchSiteGrid({ west: fmBbox.w, south: fmBbox.s, east: fmBbox.e, north: fmBbox.n })
+        ? loadTerrain().then((t) => t.fetchSiteGrid({ west: fmBbox.w, south: fmBbox.s, east: fmBbox.e, north: fmBbox.n }))
             .then((r) => ({ grid: r.grid, req: r.req, state: "loaded" }))
             .catch(() => ({ grid: null, req: null, state: "failed" }))
         : Promise.resolve({ grid: null, req: null, state: "empty" });
@@ -8144,7 +8190,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             south: sLat - WATERSHED_PAD_DEG, north: sLat + WATERSHED_PAD_DEG,
           };
           const [wideR, pfdsR, soilsR] = await Promise.allSettled([
-            fetchSiteGrid(wideBounds, { zoom: Math.min(WATERSHED_GRID_ZOOM, siteGridZoom(sLat)) }),
+            loadTerrain().then((t) => t.fetchSiteGrid(wideBounds, { zoom: Math.min(WATERSHED_GRID_ZOOM, t.siteGridZoom(sLat)) })),
             resolvePfds({ lat: sLat, lng: sLng }),
             resolveSoils({ lat: sLat, lng: sLng }),
           ]);
@@ -8566,6 +8612,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     return buildProposedSurface(gsInputs);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gsSig]);
+  /* NEW-2(c/e) — the PROPOSED elevation under the cursor, read from the very surface the
+   * earthwork rows price off (`gradeSurface.grid.owners`) rather than re-derived, so the
+   * chip and the ledger cannot disagree. `null` reasons are honest, never a plane
+   * extrapolated past its own element: no FFE anywhere → "nosurface"; bare ground outside
+   * every graded element and its daylight wedge → "outside"; a pond interior → "pond"
+   * (that dirt is borrow in the excavation ledger). */
+  const cursorProp = useMemo(() => {
+    if (!cursor) return null;
+    if (!gradeSurface || !gradeSurface.grid) return { status: "none", reason: "nosurface" };
+    return sampleProposedAt(gradeSurface.grid, cursor, gsExistAt);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cursor, gradeSurface, gsExistKey]);
   // The balance assist re-builds the grid a couple dozen times at different fieldT —
   // one CLICK, never per render (a per-frame bisection would jank drags).
   const gsBuildAtT = (t) => {
@@ -16561,12 +16619,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               lat/long (the coordinate Google Earth / a phone GPS uses), reprojected from the
               planner's feet frame via the SAME feetToLatLng the map render + KMZ export use.
               EPSG:2278 stays the internal frame for all geometry — this is display-only. */}
-          {cursorLL && (
-            <div title={GROUND_EL_TITLE} style={{ position: "absolute", bottom: 8, left: 10, zIndex: 5, pointerEvents: "none", fontFamily: NUM_FONT, fontSize: 11, color: "rgba(255,255,255,0.82)", background: "rgba(0,0,0,0.42)", backdropFilter: "blur(4px)", WebkitBackdropFilter: "blur(4px)", padding: "3px 8px", borderRadius: 5, lineHeight: 1.4, fontVariantNumeric: TABULAR_NUMS, maxWidth: "calc(100% - 20px)", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis", boxSizing: "border-box" }}>
-              {cursorLL.lat.toFixed(6)}°,&nbsp;{cursorLL.lng.toFixed(6)}°
-              {cursorElFt != null && <span data-ground-el> · El ≈ {cursorElFt.toFixed(1)} ft NAVD88</span>}
-            </div>
-          )}
+          <CursorChip ll={cursorLL} el={cursorEl} prop={cursorProp}
+            style={{ bottom: 8, left: 10, maxWidth: "calc(100% - 20px)" }} />
         </div>
 
         {/* phone-only floating button to summon the tool rail (B113) */}

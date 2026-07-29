@@ -339,6 +339,10 @@ export function surfaceGrid({ planes, els = [], existAt = null, parcelRings = []
   const priced = pricedCells > 0;
   return {
     cells,
+    // NEW-2(e) — the ownership set the lattice priced off, kept so a POINT can be sampled
+    // through exactly the same precedence, planes and apron reaches. The map readout and
+    // the earthwork rows therefore cannot disagree: they read one array.
+    owners: graded, pondRings, apronsOn,
     gradedSf,
     pricedCells, voidCells,
     cutCf: priced ? cutCf : null, fillCf: priced ? fillCf : null,
@@ -353,6 +357,51 @@ export function surfaceGrid({ planes, els = [], existAt = null, parcelRings = []
     apronRatio,
     dockBreaks: { count: breakCount, maxFt: maxBreakFt },
   };
+}
+
+/* NEW-2(c/e) — the PROPOSED elevation at ONE point, for the map's cursor readout.
+ *
+ * This is deliberately not a second derivation: it walks `grid.owners` — the very array
+ * surfaceGrid built and priced its lattice from — through the same precedence (building
+ * pad → dock stack → the rest), the same pond exclusion, and the same B833 transition
+ * taper. A readout that disagreed with the earthwork ledger would be a defect, so the
+ * two share one surface by construction rather than by care.
+ *
+ * NEVER extrapolates a plane past its own element: outside every footprint the answer is
+ * either the daylight wedge (which tapers to existing ground and stops) or an honest
+ * "nothing proposed here", never `plane.zAt` of the nearest element.
+ *
+ * Returns { status:"value", ft, elId, cls, wedge } or { status:"none", reason } where
+ * reason ∈ "nosurface" | "pond" | "outside" | "void". Pure. */
+export function sampleProposedAt(grid, pt, existAt) {
+  if (!grid || !Array.isArray(grid.owners) || !grid.owners.length || !pt ||
+    !Number.isFinite(pt.x) || !Number.isFinite(pt.y)) return { status: "none", reason: "nosurface" };
+  for (const pr of grid.pondRings || []) if (pointInRing(pt, pr)) return { status: "none", reason: "pond" };
+  for (const g of grid.owners) {
+    if (pt.x < g.bbox[0] || pt.x > g.bbox[2] || pt.y < g.bbox[1] || pt.y > g.bbox[3]) continue;
+    if (pointInRing(pt, g.el.ring)) {
+      return { status: "value", ft: g.plane.zAt(pt), elId: g.el.id, cls: g.plane.classId, wedge: false };
+    }
+  }
+  if (!grid.apronsOn || typeof existAt !== "function") return { status: "none", reason: "outside" };
+  const apronRatio = grid.apronRatio || GRADING_RULES.landscapeTieDown.maxSlopeRatio;
+  let own = null, od = Infinity, oq = null;
+  for (const g of grid.owners) {
+    if (!(g.apron > 0)) continue;
+    if (pt.x < g.bbox[0] - g.apron || pt.x > g.bbox[2] + g.apron ||
+      pt.y < g.bbox[1] - g.apron || pt.y > g.bbox[3] + g.apron) continue;
+    const q = nearestOnRing(pt, g.el.ring);
+    if (!q) continue;
+    const d = Math.hypot(pt.x - q.x, pt.y - q.y);
+    if (d <= g.apron && d < od) { od = d; own = g; oq = q; }
+  }
+  if (!own) return { status: "none", reason: "outside" };
+  const g0 = existAt(pt);
+  if (g0 == null || !isFinite(g0)) return { status: "none", reason: "void" };
+  const delta = own.plane.zAt(oq) - g0;
+  const taper = od / apronRatio;
+  const dz = Math.abs(delta) <= taper ? 0 : delta > 0 ? delta - taper : delta + taper;
+  return { status: "value", ft: g0 + dz, elId: own.el.id, cls: "transition", wedge: true };
 }
 
 /* B833(c) — the daylight line: where each element's transition taper meets existing
