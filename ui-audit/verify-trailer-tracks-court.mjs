@@ -80,6 +80,18 @@ const clickByTitle = async (re, { optional = false } = {}) => {
   return r;
 };
 
+// The inspector is a docked panel that a canvas click no longer opens on its own — open it
+// explicitly so the building's dock controls are reachable.
+const openProps = async () => {
+  const has = await page.evaluate(() => /Extend every dock side|Dock zones|Zone depths/.test(document.body.innerText));
+  if (has) return;
+  await page.evaluate(() => {
+    for (const b of document.querySelectorAll("button")) {
+      if ((b.textContent || "").trim() === "Properties") { b.click(); return; }
+    }
+  });
+  await page.waitForTimeout(450);
+};
 const selectBuilding = async () => {
   const bsel = await page.evaluate(() => {
     const r = [...document.querySelectorAll("svg rect")].find((x) => (x.getAttribute("fill") || "").toLowerCase() === "#f3ece1");
@@ -88,6 +100,7 @@ const selectBuilding = async () => {
   if (!bsel) { console.log("✗ building rect not found"); process.exit(1); }
   await page.mouse.click(bsel.x, bsel.y);
   await page.waitForTimeout(400);
+  await openProps();
 };
 
 await selectBuilding();
