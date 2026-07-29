@@ -299,6 +299,60 @@ export function screeningBfeHeadline(result, femaFt = null) {
  * panel hangs on a hover / disclosure, which is why it may be long where the visible line may not
  * (PANEL-BREVITY: honesty stays REACHABLE, brevity applies to the DEFAULT VIEW). Returns "" when
  * there is nothing to say, so a caller can concatenate it unconditionally. Pure. */
+/* NEW-1 (B1089) — THE DECLINE STATE, as a NAMED STATE plus a reason-specific implication.
+ *
+ * Why this exists: the honest UNKNOWN this engine returns was only reachable through the hover on
+ * the accept-gated estimate row, and that row renders ONLY when no elevation has been committed. On
+ * the one site that motivated the whole feature — Tsakiris, which already carries a committed
+ * grade-derived estimate — the study ran, declined, and said NOTHING. Same defect class as B1036's
+ * silent zero: the app knowing something and not saying it. It lands hardest exactly where it
+ * matters most, because the terrain that defeats a screening method is the terrain that most needs
+ * a sealed study.
+ *
+ * PANEL-BREVITY: `state` is a SHORT named state for the visible line (rule 3 — a named state beats
+ * a sentence explaining the state); `detail` is the behind-the-fold reason + implication.
+ *
+ * THE IMPLICATION IS REASON-SPECIFIC ON PURPOSE. "Flat ground with no defined channel" genuinely
+ * means screening methods have run out and an engineer's H&H model is required — and on a Waller
+ * site that is the SAME sealed Atlas-14 study §5.C(3) already demands, so the two are connected
+ * rather than left for the reader to join up. An unreachable data source means nothing of the kind;
+ * it means try again. Asserting "you need an engineer" for a network timeout would be a lie.
+ *
+ * Returns null when the study did not run or DID answer. Pure. */
+export function screeningDeclined(result) {
+  if (!result || result.ok) return null;
+  const why = (result.missing?.length ? result.missing : [result.reason || "inputs incomplete"]).join("; ");
+  const has = (re) => re.test(why);
+
+  // Ordered most-specific first: a truncated watershed and a flat reach are different diagnoses.
+  if (has(/could not run:/i)) {
+    return {
+      reason: "unreachable",
+      state: "data sources unreachable",
+      detail: `Planyr's own screening flood-level study could not run: ${why}. That is a data-availability problem, not a finding about this site — press ↻ Re-check to try again. No elevation was derived from it, and nothing here is a judgement about the flood risk.`,
+    };
+  }
+  if (has(/runs past the edge/i)) {
+    return {
+      reason: "watershed-truncated",
+      state: "watershed larger than the terrain window",
+      detail: `Planyr's screening study declined because the land draining to this reach runs past the edge of the available terrain window, so the contributing area it could measure is only a LOWER BOUND — any flood level derived from it would be understated, which is worse than no number. A basin this size is a sealed-study problem: an engineer's H&H model, not a screening tool, is what resolves it. (${why}.)`,
+    };
+  }
+  if (has(/flat|no measurable amount|flow direction/i)) {
+    return {
+      reason: "flat-reach",
+      state: "flat reach, no defined channel",
+      detail: `Planyr's screening study was attempted here and DECLINED to answer: the ground across this reach falls no measurable amount over the sampled run and no channel direction can be determined — flat ground with no clearly defined channel. This is the honest limit of the method, not a data outage. TERRAIN LIKE THIS IS EXACTLY WHERE SCREENING RUNS OUT AND AN ENGINEER'S SEALED H&H MODEL IS REQUIRED — and where Waller County applies, that is the same Atlas-14 study §5.C(3) already demands with the submittal, so it is one piece of work, not two. Any flood level shown above therefore still rests on its original source, unchallenged. (${why}.)`,
+    };
+  }
+  return {
+    reason: "inputs-missing",
+    state: "inputs unavailable",
+    detail: `Planyr's screening study was attempted here and could not answer — ${why}. No elevation was derived from it, so any flood level shown above rests on its original source, unchallenged. A sealed engineering (H&H / Atlas-14) study is what settles the value.`,
+  };
+}
+
 export function screeningStudyNote(result) {
   if (!result) return "";
   if (!result.ok) {

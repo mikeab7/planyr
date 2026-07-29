@@ -166,7 +166,7 @@ import { resolvePfds } from "./lib/pfdsClient.js";
 import { resolveSoils } from "./lib/soils.js";
 import {
   terrainInputsForScreeningBfe, atlas14Depths, screeningBfeForSite, screeningBfeHeadline,
-  screeningStudyNote, WATERSHED_GRID_ZOOM, WATERSHED_PAD_DEG,
+  screeningStudyNote, screeningDeclined, WATERSHED_GRID_ZOOM, WATERSHED_PAD_DEG,
 } from "./lib/screeningBfeSite.js";
 import { bfeDataLikelyRequired, NOT_MODELED, CLOMR_NOTE } from "./lib/screeningBfe.js";
 import { paintHeatmap, heatmapLegend, heatmapTotals, cellAt as heatCellAt, cutFillPaint, cutFillLegend, cutFillTotals } from "./lib/mitigationHeatmap.js";
@@ -21656,8 +21656,30 @@ function YieldPanel({
                     warnNote(`Estimates disagree — ${`${fm.estDisagreement.winner.label} ${f1(fm.estDisagreement.winner.wseFt)}′ vs ${fm.estDisagreement.other.label} ${f1(fm.estDisagreement.other.wseFt)}′ (Δ ${f1(fm.estDisagreement.absDeltaFt)}′)`}; higher used.`, "fm-est-disagree", "Both are screening estimates, not published BFEs — the higher source is used here. Disagreement between sources is itself a caution; a site-specific H&H / Atlas-14 study and the reviewing agency set the final value.")}
                   {fm.estWse && !Number.isFinite(fm.settings.bfeFt) && fm.estSensitivity && fm.estSensitivity.sensitive &&
                     warnNote(`⚠ ESTIMATE-SENSITIVE — ${fm.estSensitivity.flips.map((fl) => EST_FLIP_LABEL[fl.key] || fl.key).join(", ")} changes within ±1 ft.`, "fm-est-sensitive", "The mitigation volume, required finished-floor, buildability verdict and/or detention split flip within a ±1-ft band around this screening estimate — exactly the range a sealed H&H / Atlas-14 study resolves. Don't kill or commit the deal on the screening number alone.")}
-                  {isEstimatedWseSrc(fm.bfeSrc) && Number.isFinite(fm.settings.bfeFt) &&
-                    warnNote(`BFE is ${wseProvLabel(fm.bfeSrc)} — screening only`, "fm-est-bfe", estWseNote(fm.bfeSrc))}
+                  {/* NEW-1 (B1089) — THE SCREENING STUDY'S DECLINE IS NEVER SILENT, and a committed
+                      estimate can no longer suppress it. Previously this fact reached the user ONLY
+                      through the hover on the accept-gated estimate row above, which renders only
+                      while NO elevation has been committed — so on a site that already carries one
+                      (Tsakiris), the study ran, declined, and said nothing at all. B1036's silent-zero
+                      class, and worst exactly where it matters most: the terrain that defeats a
+                      screening method is the terrain that most needs a sealed study.
+
+                      PANEL-BREVITY, and this is why it is ONE template rather than branches: the two
+                      facts are the same story ("your flood level is a screening estimate, and the
+                      better method could not improve on it"), so they CONSOLIDATE into the line that
+                      already existed instead of adding one. Net ZERO new lines in the case that
+                      motivated the fix. The named state carries the visible half (rule 3); the reason
+                      and its implication — including the §5.C(3) connection — ride the ⓘ. */}
+                  {(() => {
+                    const declined = screeningDeclined(fm.screening);
+                    const estCommitted = isEstimatedWseSrc(fm.bfeSrc) && Number.isFinite(fm.settings.bfeFt);
+                    if (!declined && !estCommitted) return null;
+                    return warnNote(
+                      `${estCommitted ? `BFE is ${wseProvLabel(fm.bfeSrc)}` : "Flood level"} — ${declined ? `screening can't improve it: ${declined.state}` : "screening only"}`,
+                      "fm-est-bfe",
+                      `${estCommitted ? estWseNote(fm.bfeSrc) : ""}${declined ? `${estCommitted ? " " : ""}${declined.detail}` : ""}`,
+                    );
+                  })()}
                   {/* NEW-3 (B1057 completion) — THE ORDINANCE TRIGGER. One line, because this is a
                       SUBMITTAL REQUIREMENT that belongs in schedule and budget at the front of a
                       project rather than surfacing in review: on an approximate A zone over the
@@ -21671,12 +21693,6 @@ function YieldPanel({
                     "fm-bfe-data-req",
                     `${fm.bfeDataReq.plain} Verbatim: “${fm.bfeDataReq.quote}” — ${fm.bfeDataReq.source}${fm.bfeDataReq.note ? ` ${fm.bfeDataReq.note}` : ""}${fm.bfeDataReq.verified ? "" : " NOT confirmed against this county's adopted ordinance — 44 CFR 60.3 binds the COMMUNITY and reaches a developer only through the local ordinance, which may be stricter."} Trigger: more than ${fm.bfeDataReq.lotsThreshold} lots or ${fm.bfeDataReq.acresThreshold} acres, whichever is lesser${Number.isFinite(fm.bfeDataReq.acres) ? ` — this site measures ${f1(fm.bfeDataReq.acres)} ac` : ""}.`,
                   )}
-                  {/* NEW-1 — the screening study's outcome (ran / incomplete / threw) is carried in
-                      the estimate row's own hover via screeningStudyNote, not on a line of its own:
-                      in an approximate A zone another provider still answers and is named on its
-                      row, so a second "unavailable" line would spend default-view budget repeating
-                      that. PANEL-BREVITY: reachable, not visible — and the catch below records the
-                      throw as an {ok:false} result precisely so the hover can state it. */}
                   {/* B794 — the ⓘ names WHERE the number comes from, county-specific: Fort Bend's
                       mitigation basis is the effective FIRM 48157C FIS (2014-04-02, pre-Atlas-14). */}
                   {autoField("0.2% (500-yr) WSE", "wse02Ft",

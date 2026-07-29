@@ -1,9 +1,11 @@
 // NEW-1 / NEW-3 (B1057 completion) — the LIVE WIRING layer: real site → the engine's four inputs
 // → BOTH the 1% and the 0.2% elevations the Waller ordinance requires. Pure; no network.
 import { describe, it, expect } from "vitest";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import {
   terrainInputsForScreeningBfe, atlas14Depths, screeningBfeForSite, screeningBfeHeadline,
-  SCREENING_STORMS,
+  screeningDeclined, SCREENING_STORMS,
 } from "../src/workspaces/site-planner/lib/screeningBfeSite.js";
 import { bfeDataLikelyRequired, BFE_DATA_REQUIREMENT } from "../src/workspaces/site-planner/lib/screeningBfe.js";
 import {
@@ -305,5 +307,100 @@ describe("NEW-3 — the Waller §5.C(3) BFE-data requirement FIRES on the site",
     expect(bfeDataRequirementFor(DEFAULT_FLOODPLAIN_RULES.harris)).toBe(null);
     expect(bfeDataRequirementFor(DEFAULT_FLOODPLAIN_RULES.montgomery)).toBe(null);
     expect(atlas14Mandated(DEFAULT_FLOODPLAIN_RULES.fortbend)).toBe(false);
+  });
+});
+
+/* ─── NEW-1 (B1089) — THE DECLINE MUST NEVER BE SILENT ────────────────────────────────────────
+ * The defect: the honest UNKNOWN was only reachable through the hover on the accept-gated estimate
+ * row, and that row renders ONLY while no elevation has been committed. Tsakiris carries a
+ * committed grade-derived estimate, so the study ran, declined, and said nothing at all. */
+describe("screeningDeclined — the named state + reason-specific implication", () => {
+  const OPEN_TRUNCATED = terrainInputsForScreeningBfe({ sectionGrid: OPEN, sectionReq: REQ, siteRingsLatLng: SITE_RINGS, lat: 29.91, halfWidthFt: HALF });
+
+  it("returns null when the study never ran, and when it ANSWERED — no false alarm", () => {
+    expect(screeningDeclined(null)).toBe(null);
+    expect(screeningDeclined(undefined)).toBe(null);
+    const good = screeningBfeForSite({
+      terrain: terrainInputsForScreeningBfe({ sectionGrid: GRID, sectionReq: REQ, siteRingsLatLng: SITE_RINGS, lat: 29.91, halfWidthFt: HALF }),
+      rainfall: atlas14Depths(PFDS), hsg: "C",
+    });
+    expect(good.ok).toBe(true);
+    expect(screeningDeclined(good)).toBe(null);
+  });
+
+  /* THE TSAKIRIS CASE, reproduced from the engine's own output: flat ground, no channel direction.
+   * This is the exact shape the live run at 29.77938 / -95.89503 returns. */
+  it("names the FLAT-REACH state and ties it to the sealed H&H study the ordinance already demands", () => {
+    const flat = { values: new Float32Array(W * H), mask: new Uint8Array(W * H).fill(1), width: W, height: H };
+    const t = terrainInputsForScreeningBfe({ sectionGrid: flat, sectionReq: REQ, siteRingsLatLng: SITE_RINGS, lat: 29.91 });
+    const r = screeningBfeForSite({ terrain: t, rainfall: atlas14Depths(PFDS), hsg: "C" });
+    const d = screeningDeclined(r);
+    expect(d).not.toBe(null);
+    expect(d.reason).toBe("flat-reach");
+    // A NAMED STATE, not a sentence (PANEL-BREVITY rule 3) — short enough for the visible line.
+    expect(d.state).toBe("flat reach, no defined channel");
+    expect(d.state.length).toBeLessThan(40);
+    // The useful half: it was ATTEMPTED, it DECLINED, and what that implies.
+    expect(d.detail).toMatch(/attempted/i);
+    expect(d.detail).toMatch(/DECLINED/);
+    expect(d.detail).toMatch(/H&H/);
+    expect(d.detail).toMatch(/5\.C\(3\)/);          // connected, not left to infer
+    expect(d.detail).toMatch(/unchallenged/i);        // the committed value still stands alone
+  });
+
+  it("distinguishes a TRUNCATED watershed from a flat reach — different diagnoses, different words", () => {
+    const r = screeningBfeForSite({ terrain: OPEN_TRUNCATED, rainfall: atlas14Depths(PFDS), hsg: "C" });
+    const d = screeningDeclined(r);
+    expect(d.reason).toBe("watershed-truncated");
+    expect(d.state).toMatch(/watershed/i);
+    expect(d.detail).toMatch(/LOWER BOUND/);
+  });
+
+  it("does NOT claim an engineer is needed when the cause is an unreachable data source", () => {
+    const d = screeningDeclined({ ok: false, missing: ["the screening study could not run: network timeout"] });
+    expect(d.reason).toBe("unreachable");
+    expect(d.state).toMatch(/unreachable/i);
+    expect(d.detail).toMatch(/Re-check/);
+    // Honesty: a network outage is not a finding about the site.
+    expect(d.detail).toMatch(/not a finding about this site/i);
+    expect(d.detail).not.toMatch(/H&H/);
+  });
+
+  it("a missing soil group reads as inputs-unavailable, still naming what is missing", () => {
+    const d = screeningDeclined({ ok: false, missing: ["soil hydrologic group (SSURGO) — needed for the runoff curve number"] });
+    expect(d.reason).toBe("inputs-missing");
+    expect(d.detail).toMatch(/soil hydrologic group/);
+  });
+});
+
+/* THE REGRESSION THAT LOCKS THE FIX — asserted against the SHIPPED JSX, because the defect was not
+ * in the engine (which correctly returned a named unknown) but in the render condition that hid it.
+ * The combination that produced the silence: study attempted + honest unknown + an elevation ALREADY
+ * COMMITTED. */
+describe("B1089 regression — a committed estimate cannot suppress the decline", () => {
+  const jsx = readFileSync(fileURLToPath(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url)), "utf8");
+
+  it("the decline line's render condition does NOT depend on bfeFt being absent", () => {
+    // The old bug shape, verbatim, must be gone from the est-BFE line: it gated the whole fact on
+    // `!Number.isFinite(fm.settings.bfeFt)`.
+    const block = jsx.slice(jsx.indexOf("const declined = screeningDeclined(fm.screening)"), jsx.indexOf('"fm-est-bfe"') + 200);
+    expect(block).toBeTruthy();
+    expect(block).not.toMatch(/!Number\.isFinite\(fm\.settings\.bfeFt\)/);
+    // It renders when EITHER a decline exists OR a committed estimate exists — never only the latter.
+    expect(block).toMatch(/if \(!declined && !estCommitted\) return null;/);
+  });
+
+  it("SitePlanner actually calls screeningDeclined — the engine state reaches the panel", () => {
+    expect(jsx).toMatch(/screeningDeclined,/);                 // imported
+    expect(jsx).toMatch(/screeningDeclined\(fm\.screening\)/); // and called on the live result
+  });
+
+  it("the visible line carries the NAMED STATE, and the reason+implication ride the hover", () => {
+    expect(jsx).toMatch(/screening can't improve it: \$\{declined\.state\}/);
+    expect(jsx).toMatch(/declined\.detail/);
+  });
+
+  it("the superseded comment claiming the outcome is hover-only is gone", () => {
+    expect(jsx).not.toMatch(/carried in\s*\n?\s*the estimate row's own hover via screeningStudyNote, not on a line of its own/);
   });
 });
