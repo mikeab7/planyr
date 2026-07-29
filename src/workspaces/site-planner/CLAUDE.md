@@ -112,7 +112,13 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   `wseProviders` registry entry (`screening-bfe`), so the existing estimate row, provider labels and
   cross-provider delta render it with no new surface. `channelSection.js` also carries the
   watershed-TRUNCATION guard: a basin running off the terrain window returns an honest unknown rather
-  than an understated flood level. The §5.C(3) submittal trigger itself is a VERIFIED, firing rule —
+  than an understated flood level. `screeningDeclined` (B1089) is the ONE place the study's honest UNKNOWN becomes owner-facing copy:
+  a short NAMED STATE for the visible line plus a REASON-SPECIFIC implication behind the fold — a flat
+  reach says outright that screening has run out and a sealed H&H model is required (tied to §5.C(3)),
+  while an unreachable source deliberately says the opposite. It is rendered by the est-BFE line, whose
+  condition reads `bfeFt` only POSITIVELY: a committed estimate must never suppress the fact that a
+  better method was tried and declined (that suppression WAS the B1089 bug).
+  The §5.C(3) submittal trigger itself is a VERIFIED, firing rule —
   `floodplainRules.waller.bfeDataRequirement` + `bfeDataRequirementFor` / `atlas14Mandated`.
 - Pond economics optimizer (NEW-D, Phase D): `pondOptimizer.js` — searches depth × placement pond
   configurations (deeper-smaller vs shallower-bigger, pond-cut-as-pad-fill dirt balance) under
