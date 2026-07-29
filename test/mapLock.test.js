@@ -15,7 +15,7 @@
 import { describe, it, expect } from "vitest";
 import {
   FT_PER_DEG, mercDeg, invMercDeg, lngLatToFeet, feetToLatLngPair,
-  ppfToZoom, zoomToPpf, lockOffsetPx,
+  ppfToZoom, zoomToPpf, lockOffsetPx, exactContainerPoint,
 } from "../src/workspaces/site-planner/lib/mapLock.js";
 import { lngLatRingToFeet, feetToLatLng } from "../src/workspaces/site-planner/lib/arcgis.js";
 
@@ -135,6 +135,59 @@ describe("the drawing stays locked to the imagery", () => {
       for (let i = 0; i < 8; i++) v = panBy(v, 0, -3900);
     }
     expect(Math.hypot(...Object.values(lockOffsetPx(probe, v, size, ORIGIN)))).toBeLessThan(0.1);
+  });
+
+  /* The basemap's whole-pixel floor (V478's residual). Leaflet can only place the map on
+   * whole screen pixels, so the drawing↔imagery registration is quantised — bounded and
+   * non-cumulative, deliberately NOT compensated (see the note in mapLock.js). What we can
+   * still remove is a SECOND rounding at our own call sites, which is what
+   * `exactContainerPoint` is for. These pin its honest scope so the claim can't rot. */
+  describe("exactContainerPoint — the unsnapped container-frame conversion", () => {
+    const PO = { x: 1000, y: 2000 };   // map.getPixelOrigin() — always integer
+    const PP = { x: -7, y: 13 };       // map pane position — always integer
+
+    it("is the plain frame shift, with no rounding of its own", () => {
+      const p = exactContainerPoint({ x: 1234.37, y: 2345.62 }, PO, PP);
+      expect(p.x).toBeCloseTo(1234.37 - 1000 - 7, 10);
+      expect(p.y).toBeCloseTo(2345.62 - 2000 + 13, 10);
+    });
+
+    it("is a NO-OP against Leaflet's rounded route when the container is even-sized", () => {
+      // What `commit` computes: (containerPoint - halfSize), then panBy rounds it. With an
+      // even container, half is an integer, and round(round(w) - k) === round(w) - k. So
+      // dropping the inner round changes nothing — which is exactly what the live gate
+      // measured. This is the "it did not move the residual" claim, made checkable.
+      const half = { x: 720, y: 450 }; // 1440 x 900 → integer halves
+      for (const w of [{ x: 1234.37, y: 2345.62 }, { x: 1000.5, y: 2000.5 }, { x: 999.499, y: 2001.501 }]) {
+        const snapped = { x: Math.round(w.x) - PO.x + PP.x, y: Math.round(w.y) - PO.y + PP.y };
+        const exact = exactContainerPoint(w, PO, PP);
+        expect(Math.round(snapped.x - half.x)).toBe(Math.round(exact.x - half.x));
+        expect(Math.round(snapped.y - half.y)).toBe(Math.round(exact.y - half.y));
+      }
+    });
+
+    it("DOES differ on an odd-sized container — the case it exists to remove", () => {
+      // An odd dimension makes half a .5, and then the two roundings can disagree by a whole
+      // pixel. If this ever stopped differing, the helper would be pure ceremony.
+      const half = { x: 720.5, y: 450.5 }; // 1441 x 901
+      const w = { x: 1000.5, y: 2000.5 };
+      const snapped = { x: Math.round(w.x) - PO.x + PP.x, y: Math.round(w.y) - PO.y + PP.y };
+      const exact = exactContainerPoint(w, PO, PP);
+      const dx = Math.round(snapped.x - half.x) - Math.round(exact.x - half.x);
+      const dy = Math.round(snapped.y - half.y) - Math.round(exact.y - half.y);
+      expect(Math.abs(dx) + Math.abs(dy)).toBeGreaterThan(0);
+    });
+
+    it("never introduces error larger than the one snap Leaflet has to make", () => {
+      // The floor: a single nearest-pixel snap, i.e. half a pixel per axis. Feeding an
+      // unrounded target guarantees we stay at that floor instead of stacking two snaps.
+      for (let i = 0; i < 200; i++) {
+        const w = { x: 1000 + i * 0.137, y: 2000 + i * 0.611 };
+        const exact = exactContainerPoint(w, PO, PP);
+        expect(Math.abs(Math.round(exact.x) - exact.x)).toBeLessThanOrEqual(0.5);
+        expect(Math.abs(Math.round(exact.y) - exact.y)).toBeLessThanOrEqual(0.5);
+      }
+    });
   });
 
   it("the OLD mixed model would have failed this — proof the test has teeth", () => {

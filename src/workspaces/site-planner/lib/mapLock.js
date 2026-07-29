@@ -94,6 +94,38 @@ export const ppfToZoom = (ppf, lat0) =>
 export const zoomToPpf = (zoom, lat0) =>
   (Math.pow(2, zoom) * PX_PER_WORLD_DEG_Z0) / ftPerDeg(lat0);
 
+/* ── the basemap's whole-pixel floor ──────────────────────────────────────────────────
+ * Leaflet can only place the basemap on WHOLE screen pixels: `_getNewPixelOrigin` ends in
+ * `.round()`, the map pane's position is set in integer pixels, and `panBy` rounds the
+ * offset it is given. The drawing has no such constraint — its offsets are arbitrary
+ * floats — so drawing-vs-imagery registration is quantised at half a pixel per axis, and
+ * two different moments can differ by a whole pixel. That floor is Leaflet's, not ours,
+ * and it is bounded and non-cumulative (see NEW-1 in ui-audit/diagnose-map-lock.mjs).
+ * MEASURED, so nobody has to re-chase it: a pure PAN never changes the registration at all
+ * (mouse drags move by whole pixels, so the pan the basemap needs is a whole number and
+ * rounds to itself — an out-and-back pan returns to 0.000 ft, twice over, exactly as the
+ * live V478 pass found). A ZOOM commit re-snaps the basemap onto a fresh whole-pixel grid,
+ * so the registration hops to a new sub-pixel remainder each time — bounded, never growing.
+ *
+ * What IS ours is a second, avoidable rounding: Leaflet's public
+ * `latLngToContainerPoint` rounds the projection (`latLngToLayerPoint` calls `_round()`),
+ * so aiming a pan with it rounds once there and again inside `panBy`.
+ * `exactContainerPoint` is the same conversion with the snap left out: project exactly, and
+ * let the ONE unavoidable snap happen where Leaflet actually needs it. Also used for the
+ * live gesture transform, which is fractional by nature and never wanted a rounded target.
+ * Honest scope: on an EVEN-sized map container this is provably a no-op
+ * (`round(round(w) - k) === round(w) - k` for integer k, and half-the-size is then an
+ * integer), and it measured as one. It removes the odd-dimension case, where the two
+ * roundings can disagree by a pixel. It does not, and cannot, reach the zoom-commit snap.
+ *
+ * `worldPx` = map.project(latlng, zoom) · `pixelOrigin` = map.getPixelOrigin() ·
+ * `panePos` = map.layerPointToContainerPoint([0, 0]).
+ */
+export const exactContainerPoint = (worldPx, pixelOrigin, panePos) => ({
+  x: worldPx.x - pixelOrigin.x + panePos.x,
+  y: worldPx.y - pixelOrigin.y + panePos.y,
+});
+
 /* ── the lock invariant ───────────────────────────────────────────────────────────────
  * Where a feet point lands on screen, computed TWO independent ways:
  *   • the planner's own SVG transform (feet × ppf + offset), and
