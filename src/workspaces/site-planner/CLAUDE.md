@@ -19,6 +19,13 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   `boundaryLabels.js` (pure label math) — the B694/B695 tier; `basemaps.js` — the shared Esri/USGS
   aerial-source registry (B693). Pipelines (B751/B752): `pipelineCommodity.js` (commodity crosswalk +
   fixed hazard symbology + legend) + `pipelineCorridor.js` (pure assumed-easement buffer geometry).
+  Flood & drainage group (B1075–B1080): `floodGroup.js` — the pure group model (four provenance
+  tiers, point-in-district auto-scoping of the governing drainage authority, master-toggle state,
+  and the honest empty-state copy: what FEMA actually reported, why a district isn't listed, the
+  governing-district drainage line). `nhdFlowline.js` — the USGS NHD FType → plain-English
+  crosswalk (336 → "canal / ditch"), the universal channel fallback's decoder. The BKDD
+  (Brookshire–Katy Drainage District) endpoints live in the shared GIS source registry like every
+  other source; `detentionRules.js` owns the district-aware `resolveDrainageContext`.
 - Site-plan overlay import (B72/B73/B747/B748/B749): `overlayPdf.js` (PDF+DXF raster, banded
   white-knockout, zoom-aware re-raster) + `overlayScale.js` (scale/trace math) + `overlayStorage.js`
   (Storage backup) + `dxf/` (worker parse via `dxf-parser` + entity→SVG render + true-units auto-scale)
@@ -154,7 +161,7 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   through a `ctx` object rebuilt per call — add a key there, never a new closure capture. Its
   helpers (`printSheet.js`, `sheetFurniture.js`, `exportStyle.js`, `imagePdf.js`, `kmzExport.js`,
   `overlayVectorSvg.js`) must NOT gain a static importer on the boot path or they rejoin the
-  critical-path chunk. `exportLabelScale.js` (B1075) is the ONE place that decides what scale the
+  critical-path chunk. `exportLabelScale.js` (B1081) is the ONE place that decides what scale the
   LABEL tier reasons at: the view on screen, the SHEET's own px-per-foot on an export pass — so
   declutter/LOD/collision, label sizes and stroke-zoom are a function of the plan and the paper,
   never of the live zoom. It IS on the boot path (SitePlanner imports it statically, ~1 KB pure). PDF-PARITY: `printMetricPairs`/`printStormwaterBars` deliberately stay in

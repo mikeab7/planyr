@@ -477,13 +477,13 @@ describe("markup hit-area / callout padding / live color picker (B155 open-path 
     expect(src).toMatch(/const effSpacingFt = Math\.max\([\s\S]{0,80}minGapPx \/ Math\.max\(ppf/);
     // every render site threads the feature's own spacing override + { size, halo } opts (the road also
     // carries the B935 `insetFt` for "Inside" placement, so don't require the object to close right after)
-    // NEW-9 added a third opt (`place` — centre / beside / inside) and B1075 a fourth (`lf`, the
+    // NEW-9 added a third opt (`place` — centre / beside / inside) and B1081 a fourth (`lf`, the
     // label frame), so these pin that the per-feature size + halo overrides still reach
     // inlineLabelEls WITHOUT pinning the exact opt list, which would make the guard fail on every
     // future addition rather than on the regression it exists to catch.
     expect(src).toMatch(/m\.labelSpacing \|\| INLINE_LABEL_SPACING\.line[\s\S]{0,160}size: m\.labelSize, halo: m\.labelHalo/);
     expect(src).toMatch(/el\.labelSpacing \|\| INLINE_LABEL_SPACING\.road[\s\S]{0,160}size: el\.labelSize, halo: el\.labelHalo/);
-    // B1075 (V481(f)) — but DO pin that every render site threads the LABEL FRAME, or an export
+    // B1081 (V481(f)) — but DO pin that every render site threads the LABEL FRAME, or an export
     // silently sizes and thins these labels from the zoom the canvas happened to be at.
     expect(src.match(/inlineLabelEls\([^\n]*\blf\b/g) || []).toHaveLength(4);
     // the panel controls exist and their writers stay NON-STICKY (direct setMarkups / setSelEl, never mkStyle)

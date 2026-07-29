@@ -303,6 +303,95 @@ export const VECTOR_SOURCES = {
     },
     note: "TEA school-district boundaries (SY 2022-23).",
   },
+
+  /* NEW-4 / B1078 — USGS NHD flowlines: the UNIVERSAL channel fallback. Before this, a
+   * site whose drainage district publishes no GIS had an INVISIBLE channel — the app drew
+   * nothing next to an obvious ditch and said nothing about it (the Tsakiris report).
+   * National coverage means that can't happen anywhere again.
+   *
+   * Rides the `vectorLine` tier (cachedPipelineLayer): crisp identifiable polylines at
+   * working zoom, USGS's own hydrography cartography as the raster fallback when zoomed
+   * far out. Click-identify decodes ftype to plain English (nhdFlowline.js) — a popup that
+   * reads "336" teaches nothing; "canal / ditch" answers what the user actually asked. */
+  nhd_flowlines: {
+    id: "nhd_flowlines",
+    label: "Streams, canals & ditches (USGS)",
+    style: "hydro",
+    geometryType: "line",
+    sourceName: GIS_SOURCES.nhdHydro.provider,
+    // The popup headline is the watercourse's own name where USGS has one (live at
+    // Tsakiris: "Willow Fork"), falling back to the decoded ftype.
+    identifyTitleField: GIS_SOURCES.nhdHydro.fields.name, // gnis_name
+    identifyTitleDecode: "nhdFtype",
+    identifyFallbackTitle: "Watercourse",
+    identifyFields: [
+      { label: "Type", field: GIS_SOURCES.nhdHydro.fields.ftype, decode: "nhdFtype" },
+    ],
+    identifyNote:
+      "USGS national hydrography — an inventory of where water runs. NOT a regulatory floodplain, " +
+      "and it says nothing about how much the channel can carry.",
+    emptyNote: "No mapped watercourse in this view.",
+    query: {
+      url: GIS_SOURCES.nhdHydro.serviceUrl + "/" + GIS_SOURCES.nhdHydro.layerId + "/query",
+      outFields: Object.values(GIS_SOURCES.nhdHydro.fields), // gnis_name, ftype, fcode
+      where: "1=1",
+      pageSize: 1000,
+      maxFeatures: 4000,
+      ttl: 30 * 24 * 3600 * 1000, // hydrography changes on a survey cycle, not a news cycle
+      minVectorZoom: 12,
+      maxAreaDeg: 0.35,
+    },
+    // Zoomed out, hand it to USGS's own rendering (all sublayers: flowlines, waterbodies
+    // and wide-channel areas, each in the agency's standard symbology). `layers` is
+    // deliberately omitted so the server draws its default visible set — that keeps the
+    // fallback correct through any USGS sublayer renumber.
+    imageFallback: { url: GIS_SOURCES.nhdHydro.serviceUrl, layers: null },
+    note: "USGS National Hydrography Dataset — screening inventory only.",
+  },
+
+  /* NEW-1 / B1075 — BKDD drainage easements. A district drainage easement is a HARD
+   * buildable-area constraint (the Tsakiris tract carries a 70-ft one with recorded
+   * exhibit WF-10.pdf), so this is a vector layer with identify — the width and the
+   * recorded-exhibit reference must reach the user, not just a band on the map.
+   *
+   * Renders layer 109; the drainage-context easement screen (B1080) queries 109 AND its
+   * companion 107 so a parcel touching only the other layer still reports its easement. */
+  bkdd_easements: {
+    id: "bkdd_easements",
+    label: "District drainage easements",
+    // No labelField / labelZoom on purpose: the popup headline falls back to the layer
+    // label, and the exhibit name renders ONCE as its own identify row (never twice).
+    // Nothing is worth painting as an on-map name label here.
+    identifyFields: [
+      { label: "Easement width", field: GIS_SOURCES.bkddEasements.fields.width, unit: "ft" },
+      { label: "Recorded exhibit", field: GIS_SOURCES.bkddEasements.fields.file, kind: "link" },
+    ],
+    identifyNote:
+      "A district drainage easement is a hard constraint on what you can build — treat it as unbuildable " +
+      "until the recorded instrument says otherwise. Screening only; the recorded exhibit governs.",
+    sourceName: GIS_SOURCES.bkddEasements.provider,
+    // ⚠ LIVE-RECON TODO: the district publishes the exhibit filename (e.g. "WF-10.pdf"), not a
+    // URL. No document base URL has been confirmed, so nothing is fabricated — the popup shows
+    // the exhibit NAME as plain text unless the value itself is already an http(s) URL. Fill
+    // this in only once a real base is verified live.
+    exhibitBase: null,
+    liveFallback: true,
+    query: {
+      url: GIS_SOURCES.bkddEasements.serviceUrl + "/" + GIS_SOURCES.bkddEasements.layerId + "/query",
+      outFields: Object.values(GIS_SOURCES.bkddEasements.fields), // width, file
+      where: "1=1",
+      pageSize: 1000,
+      maxFeatures: 2000,
+      ttl: 30 * 24 * 3600 * 1000,
+      minVectorZoom: 13,
+      maxAreaDeg: 0.35,
+      // B1079 — BKDD's first call to a cold ArcGIS Server instance took 16.5–18.3 s; every
+      // call after was under a tenth of a second. Without this the source would look dead
+      // on every first visit while being perfectly healthy.
+      timeoutMs: GIS_SOURCES.bkddEasements.timeoutMs,
+    },
+    note: "Brookshire–Katy Drainage District recorded drainage easements.",
+  },
 };
 
 // ---------------------------------------------------------------------------
@@ -378,12 +467,24 @@ export function buildQueryUrl(baseUrl, params) {
 
 // Default browser fetch → parsed ArcGIS JSON (throws on HTTP / ArcGIS error). The
 // app injects this; tests inject a fake. Kept here so the engine is self-contained.
-async function defaultFetchJson(url) {
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`Server returned HTTP ${res.status}.`);
-  const j = await res.json();
-  if (j.error) throw new Error(j.error.message || "ArcGIS query error.");
-  return j;
+/* B1079 — an OPTIONAL per-source abort cap. Historically this path had NO timeout at
+ * all, and it stays that way unless a registry row asks for one (`query.timeoutMs`), so
+ * no existing source changes behaviour. BKDD sets 25 s: its first-ever call to a cold
+ * ArcGIS Server instance measured 16.5–18.3 s, every call after under a tenth of a
+ * second, so the cap must be generous enough to survive the spin-up yet still bounded —
+ * an unbounded fetch that never resolves is the silent-hang failure mode. */
+async function defaultFetchJson(url, { timeoutMs = null } = {}) {
+  const ctrl = timeoutMs && typeof AbortController !== "undefined" ? new AbortController() : null;
+  const timer = ctrl ? setTimeout(() => ctrl.abort(), timeoutMs) : null;
+  try {
+    const res = await fetch(url, ctrl ? { signal: ctrl.signal } : undefined);
+    if (!res.ok) throw new Error(`Server returned HTTP ${res.status}.`);
+    const j = await res.json();
+    if (j.error) throw new Error(j.error.message || "ArcGIS query error.");
+    return j;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 /* Page through a vector source's features over a bbox. Loops the /query, throwing
@@ -399,7 +500,8 @@ export async function fetchVectorFeatures(source, bbox, { fetchJson = defaultFet
   let truncated = false;
   // Loop guard: paging can't exceed cap/pageSize rounds + 1; never spin forever.
   for (;;) {
-    const j = await fetchJson(buildQueryUrl(q.url, buildVectorQuery(source, bbox, { offset, tier })));
+    // B1079: forward the row's own abort cap (undefined for every source that declares none).
+    const j = await fetchJson(buildQueryUrl(q.url, buildVectorQuery(source, bbox, { offset, tier })), { timeoutMs: q.timeoutMs ?? null });
     if (j && j.error) throw new Error(j.error.message || "ArcGIS query error.");
     const batch = (j && j.features) || [];
     if (!batch.length) break; // empty page → nothing left (also guards a server that wrongly keeps flagging more)
@@ -569,6 +671,14 @@ export function styleFor(source, props) {
   if (style === "nwi") {
     const c = NWI_COLORS[p.WETLAND_TYPE] || NWI_COLORS.Other;
     return { color: c, weight: 1, fillColor: c, fillOpacity: 0.4 };
+  }
+  if (style === "hydro") {
+    // NEW-4/B1078 — hydrography reads as WATER, never as a hazard: a calm blue line, with
+    // an engineered channel (canal/ditch, ftype 336) drawn crisper than a natural stream so
+    // the two are distinguishable at a glance without a legend.
+    const ft = Number(p.ftype ?? p.FTYPE);
+    const engineered = ft === 336 || ft === 420 || ft === 428;
+    return { color: "#0e7490", weight: engineered ? 2.4 : 1.8, dashArray: ft === 420 ? "5 4" : null, fillOpacity: 0 };
   }
   if (style === "pipeline") {
     // B751: color/weight/dash by commodity (fixed map symbology, hazard-encoded). The
