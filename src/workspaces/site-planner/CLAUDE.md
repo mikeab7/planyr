@@ -19,7 +19,7 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   `boundaryLabels.js` (pure label math) — the B694/B695 tier; `basemaps.js` — the shared Esri/USGS
   aerial-source registry (B693). Pipelines (B751/B752): `pipelineCommodity.js` (commodity crosswalk +
   fixed hazard symbology + legend) + `pipelineCorridor.js` (pure assumed-easement buffer geometry).
-  Flood & drainage group (B1069–B1074): `floodGroup.js` — the pure group model (four provenance
+  Flood & drainage group (B1075–B1080): `floodGroup.js` — the pure group model (four provenance
   tiers, point-in-district auto-scoping of the governing drainage authority, master-toggle state,
   and the honest empty-state copy: what FEMA actually reported, why a district isn't listed, the
   governing-district drainage line). `nhdFlowline.js` — the USGS NHD FType → plain-English
@@ -38,9 +38,12 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   (elements expanded to their `attachedTo` assembly, so a building brings its truck court / trailer
   parking / dock zones / bump-outs), then paste with fresh ids, bonds remapped INSIDE the copy, and
   relative geometry preserved. A pasted parcel arrives INACTIVE by design (can't double-count site area).
-- `standardsApply.js` + `userPrefs.js` + `components/StandardScope.jsx` — Standards scope + retroactive
-  apply (NEW-3). `standardsApply` is the pure engine (parcels are stamped → WRITE the value; elements
-  resolve at render → CLEAR the per-element override). `userPrefs` is the account-level store
+- `standardsApply.js` + `userPrefs.js` + `components/StandardsBar.jsx` — Standards scope + retroactive
+  apply. `standardsApply` is the pure engine (parcels are stamped → WRITE the value; elements
+  resolve at render → CLEAR the per-element override) plus `applyAllStandards` — ONE Apply for the
+  whole panel, counted in distinct OBJECTS — and `derivedPanelScope`, which reads (never writes)
+  where the account already carries a default. `StandardsBar` is the panel's sticky footer: ONE
+  scope + ONE Apply, replacing the per-field chip row that was most of the panel's height. `userPrefs` is the account-level store
   (`public.profiles.prefs` jsonb, own-row RLS — `db/user_prefs.sql`) behind the "All projects" scope,
   published into `planStyle`'s account layer (`setAccountStyleDefaults`). Precedence: built-in <
   account < project < per-object.

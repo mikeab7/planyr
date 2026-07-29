@@ -50,13 +50,13 @@ export const LAYER_SCOPE = {
   hcfcd_row: "regional",        // Harris County Flood Control District
   coh_ww: "regional", coh_storm: "regional", coh_water: "regional", // City of Houston utilities
   fb_contours: "regional",      // Fort Bend Drainage District
-  // B1069 — the Brookshire–Katy DD family. All three are regional: their extents are the
+  // B1075 — the Brookshire–Katy DD family. All three are regional: their extents are the
   // district (and, for the master plan, a much SMALLER western-Waller study area). The DMP
   // gate is the one that matters most: every DMP layer correctly returned nothing at the
   // Tsakiris tract because the study area doesn't reach it, and an ungated blank there
   // would read as "no floodplain" instead of "outside this study area".
   bkdd_drainage: "regional", bkdd_easements: "regional", bkdd_dmp: "regional",
-  // B1072 — NHD is national by construction; that universality is the whole point.
+  // B1078 — NHD is national by construction; that universality is the whole point.
   nhd_flowlines: "national",
 };
 export const layerScope = (id) => LAYER_SCOPE[id] || "national";

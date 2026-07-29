@@ -296,7 +296,7 @@ export function buildIdentifyParams(source, geom) {
   return p;
 }
 
-/* The same /query, addressed through the same-origin B445 cache proxy (B1073). Returns
+/* The same /query, addressed through the same-origin B445 cache proxy (B1079). Returns
  * null when there's no page origin to anchor the same-origin path to (the Node test env),
  * so the caller simply queries the agency directly — the proxy is an optimisation, never
  * a dependency. Exported for the unit test that locks the round-trip. */
@@ -344,7 +344,7 @@ export function identifySource(source, geom, opts = {}) {
   const key = "juris:" + source.id + ":" + where;
   const fetcher = async () => {
     const params = buildIdentifyParams(source, geom);
-    // B1073 — per-source abort cap. The shared default is 9 s (GIS_FETCH_TIMEOUT_MS),
+    // B1079 — per-source abort cap. The shared default is 9 s (GIS_FETCH_TIMEOUT_MS),
     // which is correct for a warm agency service and FATAL for a cold one: BKDD's first
     // call to a sleeping ArcGIS Server instance measured 16.5–18.3 s (every call after it,
     // under a tenth of a second). At 9 s the very first identify against any BKDD source

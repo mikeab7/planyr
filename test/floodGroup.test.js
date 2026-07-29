@@ -1,4 +1,4 @@
-/* B1069–B1074 — the Flood & drainage group model + the NHD decoder.
+/* B1075–B1080 — the Flood & drainage group model + the NHD decoder.
  *
  * These lock the behaviour the 2026-07-29 Tsakiris report demanded: the panel must
  * auto-scope to the district that actually governs, must SAY why a source came back
@@ -25,7 +25,7 @@ vi.mock("../src/workspaces/site-planner/lib/vectorOverlay.js", () => ({ cachedVe
 import { ALL_LAYERS, LAYER_GROUP_LABEL } from "../src/workspaces/site-planner/lib/layers.js";
 
 // ---------------------------------------------------------------------------
-describe("NHD ftype decoding (B1072)", () => {
+describe("NHD ftype decoding (B1078)", () => {
   it("decodes the Tsakiris case — 336 is a canal / ditch, never the bare number", () => {
     expect(ftypeLabel(336)).toBe("canal / ditch");
     expect(ftypeLabel("336")).toBe("canal / ditch");
@@ -51,7 +51,7 @@ describe("NHD ftype decoding (B1072)", () => {
 });
 
 // ---------------------------------------------------------------------------
-describe("governingDistrict (B1070) — which drainage authority governs", () => {
+describe("governingDistrict (B1076) — which drainage authority governs", () => {
   it("a BOUNDARY hit WINS: it is a fact, a county map is a heuristic", () => {
     // The Tsakiris case exactly: Waller County has no county-wide district, but the
     // BKDD boundary polygon contains the site.
@@ -81,7 +81,7 @@ describe("governingDistrict (B1070) — which drainage authority governs", () =>
 });
 
 // ---------------------------------------------------------------------------
-describe("scopeFloodEntries (B1070) — tiers + district auto-scoping", () => {
+describe("scopeFloodEntries (B1076) — tiers + district auto-scoping", () => {
   const entries = [
     ["fema", { floodTier: "regulatory", order: 1, agency: "FEMA" }],
     ["hcfcd_row", { floodTier: "local", district: "hcfcd", order: 1 }],
@@ -139,7 +139,7 @@ describe("scopeFloodEntries (B1070) — tiers + district auto-scoping", () => {
 });
 
 // ---------------------------------------------------------------------------
-describe("districtSwapNote (B1069b) — name BOTH the source that doesn't cover and the one that does", () => {
+describe("districtSwapNote (B1077b) — name BOTH the source that doesn't cover and the one that does", () => {
   it("the exact Tsakiris sentence", () => {
     const n = districtSwapNote({ governing: "bkdd", suppressed: ["hcfcd"], county: "waller" });
     expect(n).toBe("Harris County Flood Control District doesn't cover Waller County — showing Brookshire–Katy Drainage District instead.");
@@ -154,7 +154,7 @@ describe("districtSwapNote (B1069b) — name BOTH the source that doesn't cover 
 });
 
 // ---------------------------------------------------------------------------
-describe("floodMasterState (B1070) — one master toggle over the whole bundle", () => {
+describe("floodMasterState (B1076) — one master toggle over the whole bundle", () => {
   const tiers = [{ rows: [["a", {}], ["b", {}]] }, { rows: [["c", {}]] }];
   it("all on → checked; some on → indeterminate, not checked (clicking turns the REST on)", () => {
     expect(floodMasterState(tiers, { a: { on: true }, b: { on: true }, c: { on: true } })).toMatchObject({ all: true, any: true, onCount: 3 });
@@ -170,7 +170,7 @@ describe("floodMasterState (B1070) — one master toggle over the whole bundle",
 });
 
 // ---------------------------------------------------------------------------
-describe("femaZoneVerdict (B1069a) — the answer that was missing entirely", () => {
+describe("femaZoneVerdict (B1077a) — the answer that was missing entirely", () => {
   it("Zone X: says minimal hazard AND that no SFHA is mapped (the live Tsakiris answer)", () => {
     const v = femaZoneVerdict({ state: "loaded", zones: [{ zone: "X", subtype: "AREA OF MINIMAL FLOOD HAZARD" }] });
     expect(v.tone).toBe("ok");
@@ -201,7 +201,7 @@ describe("femaZoneVerdict (B1069a) — the answer that was missing entirely", ()
 });
 
 // ---------------------------------------------------------------------------
-describe("emptyReason (B1071) — 'no features' must say WHY", () => {
+describe("emptyReason (B1077) — 'no features' must say WHY", () => {
   it("a STUDY-AREA layer outside its extent says so — never a clean 'no floodplain'", () => {
     const r = emptyReason({ studyArea: true, agency: "BKDD" }, { coverage: "out" });
     expect(r).toMatch(/Outside this study area/);
@@ -219,7 +219,7 @@ describe("emptyReason (B1071) — 'no features' must say WHY", () => {
 });
 
 // ---------------------------------------------------------------------------
-describe("districtDrainageNote (B1074) — the readout's governing-district line", () => {
+describe("districtDrainageNote (B1080) — the readout's governing-district line", () => {
   it("BKDD: names the channel, the easement width + exhibit, and the sub-watershed", () => {
     const n = districtDrainageNote({
       drainageDistrict: { id: "bkdd" },
@@ -280,7 +280,7 @@ describe("the registered layers actually satisfy the group contract", () => {
     expect(ALL_LAYERS.bkdd_dmp.floodTier).toBe("advisory");
     expect(ALL_LAYERS.bkdd_dmp.studyArea).toBe(true);
   });
-  it("every BKDD layer carries the cold-start stall override (B1073)", () => {
+  it("every BKDD layer carries the cold-start stall override (B1079)", () => {
     for (const id of ["bkdd_drainage", "bkdd_easements", "bkdd_dmp"]) {
       // BKDD's first call to a cold ArcGIS Server measured 16.5–18.3 s; the shared 15 s
       // watchdog would go amber on every first visit to a perfectly healthy source.

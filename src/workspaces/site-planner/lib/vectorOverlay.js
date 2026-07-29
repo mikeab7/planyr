@@ -32,7 +32,7 @@ import { ftypeLabel } from "./nhdFlowline.js";
 
 const LABEL_PANE = "boundarylabels";
 
-/* Shared identify-row renderer (B1069/B1072) — the ONE place a `source.identifyFields`
+/* Shared identify-row renderer (B1075/B1078) — the ONE place a `source.identifyFields`
  * row becomes DOM, used by both the polygon (cachedVectorLayer) and line
  * (cachedPipelineLayer) identify popovers so the two can't drift.
  *
@@ -62,7 +62,7 @@ export function identifyHref(raw, source = {}) {
   return base.replace(/\/+$/, "") + "/" + v.replace(/^\/+/, "");
 }
 
-/* The headline for a LINE identify popover. Registry-driven (B1072) so one popover code
+/* The headline for a LINE identify popover. Registry-driven (B1078) so one popover code
  * path serves pipelines ("Crude oil"), hydrography ("Willow Fork"), and anything added
  * later: prefer the source's declared title field, decode it if it's a code, else fall
  * back to the source's own honest "not stated" wording. Pure. */
@@ -182,7 +182,7 @@ export function cachedVectorLayer(k, cfg, initialOpacity, pane, onStatus, opts =
       head.style.cssText = "font-weight:700;font-size:12.5px;margin-bottom:3px;";
       head.textContent = displayName(feature);
       el.append(head);
-      // B1069: registry-declared detail rows (BKDD easement width + its recorded exhibit) —
+      // B1075: registry-declared detail rows (BKDD easement width + its recorded exhibit) —
       // an easement is a hard buildable-area constraint, so its width has to REACH the user,
       // not sit invisibly behind a band on the map.
       appendIdentifyRows(el, source, feature && feature.properties);
@@ -425,7 +425,7 @@ export function cachedPipelineLayer(k, cfg, initialOpacity, pane, onStatus, opts
     geo.clearLayers();
     const n = (fc && fc.features && fc.features.length) || 0;
     if (n) geo.addData(fc);
-    // B1072: the empty message is registry-declared, so a hydrography layer says "no mapped
+    // B1078: the empty message is registry-declared, so a hydrography layer says "no mapped
     // watercourse" rather than the pipeline layer's wording.
     report(n ? "loaded" : "empty", n ? null : (source.emptyNote || "No pipelines in this view."), { ts: ts ?? null, stale: !!stale });
   };

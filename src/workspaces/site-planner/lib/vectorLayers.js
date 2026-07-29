@@ -304,7 +304,7 @@ export const VECTOR_SOURCES = {
     note: "TEA school-district boundaries (SY 2022-23).",
   },
 
-  /* NEW-4 / B1072 — USGS NHD flowlines: the UNIVERSAL channel fallback. Before this, a
+  /* NEW-4 / B1078 — USGS NHD flowlines: the UNIVERSAL channel fallback. Before this, a
    * site whose drainage district publishes no GIS had an INVISIBLE channel — the app drew
    * nothing next to an obvious ditch and said nothing about it (the Tsakiris report).
    * National coverage means that can't happen anywhere again.
@@ -349,12 +349,12 @@ export const VECTOR_SOURCES = {
     note: "USGS National Hydrography Dataset — screening inventory only.",
   },
 
-  /* NEW-1 / B1069 — BKDD drainage easements. A district drainage easement is a HARD
+  /* NEW-1 / B1075 — BKDD drainage easements. A district drainage easement is a HARD
    * buildable-area constraint (the Tsakiris tract carries a 70-ft one with recorded
    * exhibit WF-10.pdf), so this is a vector layer with identify — the width and the
    * recorded-exhibit reference must reach the user, not just a band on the map.
    *
-   * Renders layer 109; the drainage-context easement screen (B1074) queries 109 AND its
+   * Renders layer 109; the drainage-context easement screen (B1080) queries 109 AND its
    * companion 107 so a parcel touching only the other layer still reports its easement. */
   bkdd_easements: {
     id: "bkdd_easements",
@@ -385,7 +385,7 @@ export const VECTOR_SOURCES = {
       ttl: 30 * 24 * 3600 * 1000,
       minVectorZoom: 13,
       maxAreaDeg: 0.35,
-      // B1073 — BKDD's first call to a cold ArcGIS Server instance took 16.5–18.3 s; every
+      // B1079 — BKDD's first call to a cold ArcGIS Server instance took 16.5–18.3 s; every
       // call after was under a tenth of a second. Without this the source would look dead
       // on every first visit while being perfectly healthy.
       timeoutMs: GIS_SOURCES.bkddEasements.timeoutMs,
@@ -467,7 +467,7 @@ export function buildQueryUrl(baseUrl, params) {
 
 // Default browser fetch → parsed ArcGIS JSON (throws on HTTP / ArcGIS error). The
 // app injects this; tests inject a fake. Kept here so the engine is self-contained.
-/* B1073 — an OPTIONAL per-source abort cap. Historically this path had NO timeout at
+/* B1079 — an OPTIONAL per-source abort cap. Historically this path had NO timeout at
  * all, and it stays that way unless a registry row asks for one (`query.timeoutMs`), so
  * no existing source changes behaviour. BKDD sets 25 s: its first-ever call to a cold
  * ArcGIS Server instance measured 16.5–18.3 s, every call after under a tenth of a
@@ -500,7 +500,7 @@ export async function fetchVectorFeatures(source, bbox, { fetchJson = defaultFet
   let truncated = false;
   // Loop guard: paging can't exceed cap/pageSize rounds + 1; never spin forever.
   for (;;) {
-    // B1073: forward the row's own abort cap (undefined for every source that declares none).
+    // B1079: forward the row's own abort cap (undefined for every source that declares none).
     const j = await fetchJson(buildQueryUrl(q.url, buildVectorQuery(source, bbox, { offset, tier })), { timeoutMs: q.timeoutMs ?? null });
     if (j && j.error) throw new Error(j.error.message || "ArcGIS query error.");
     const batch = (j && j.features) || [];
@@ -673,7 +673,7 @@ export function styleFor(source, props) {
     return { color: c, weight: 1, fillColor: c, fillOpacity: 0.4 };
   }
   if (style === "hydro") {
-    // NEW-4/B1072 — hydrography reads as WATER, never as a hazard: a calm blue line, with
+    // NEW-4/B1078 — hydrography reads as WATER, never as a hazard: a calm blue line, with
     // an engineered channel (canal/ditch, ftype 336) drawn crisper than a natural stream so
     // the two are distinguishable at a glance without a legend.
     const ft = Number(p.ftype ?? p.FTYPE);

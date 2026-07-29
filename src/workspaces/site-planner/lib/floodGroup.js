@@ -1,4 +1,4 @@
-/* Flood & drainage layer GROUP model (NEW-2 / NEW-3, B1070 / B1071) — pure.
+/* Flood & drainage layer GROUP model (NEW-2 / NEW-3, B1076 / B1077) — pure.
  *
  * THE PROBLEM THIS SOLVES. The owner turned flood layers on at a Waller-County site
  * (Tsakiris) next to an obvious drainage channel and nothing painted. Nothing was broken:
@@ -86,7 +86,7 @@ export const COUNTY_DISTRICT = { harris: "hcfcd", "fort bend": "fbcdd" };
 /* Which local drainage authority governs this site?
  *
  *   detected  — district ids whose BOUNDARY POLYGON contains the site (the BKDD
- *               Boundaries/129 point test, B1069). Authoritative: a boundary hit is a
+ *               Boundaries/129 point test, B1075). Authoritative: a boundary hit is a
  *               fact, and it WINS over any county heuristic.
  *   county    — the identify county, lowercased. The fallback for county-wide districts.
  *
@@ -207,7 +207,7 @@ export function femaZoneVerdict(flood) {
 }
 
 // ---------------------------------------------------------------------------
-// (NEW-6 / B1074) The Stormwater readout's district line.
+// (NEW-6 / B1080) The Stormwater readout's district line.
 // ---------------------------------------------------------------------------
 
 /* ONE line naming who governs drainage here and what was actually found — the answer the

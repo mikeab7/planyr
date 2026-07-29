@@ -65,11 +65,11 @@ import { clampToBounds, initialFloatPos, reconcileForNarrow, shouldInspectorTake
 import AppHeader from "../../shared/ui/AppHeader.jsx";
 import RotationStepper, { normalizeDeg } from "../../shared/ui/RotationStepper.jsx";
 import { worldToScreen, screenToWorld, zoomAround, midpoint, distance, pinchZoom } from "../../shared/viewport/viewportTransform.js";
-import ColorField, { ColorRecentsRow } from "../../shared/ui/ColorField.jsx";
-import StandardScope from "./components/StandardScope.jsx";
+import ColorField from "../../shared/ui/ColorField.jsx";
+import StandardsBar from "./components/StandardsBar.jsx";
 import { loadUserPrefs, saveUserPrefs, applyPrefs, readMirror, setStandardPref, getStandardPref } from "./lib/userPrefs.js";
-import { applyParcelStandard, applyTypeStandard, parcelStandardImpact, typeStandardImpact, appliedLabel } from "./lib/standardsApply.js";
-import { pushRecent } from "../../shared/ui/colorRecents.js";
+import { PARCEL_STD_KEYS, applyAllStandards, allStandardsImpact, appliedObjectsLabel, derivedPanelScope } from "./lib/standardsApply.js";
+import { pushRecent, notePick, commitPick } from "../../shared/ui/colorRecents.js";
 import { CLIP_KINDS, collectClipboard, clipboardBBox, pasteClipboard, translateCalloutBy, translateParcelBy } from "./lib/planClipboard.js";
 import { usePalette } from "../../shared/theme/ThemeProvider.jsx";
 import { NUM_FONT, TABULAR_NUMS } from "../../shared/theme/typography.js";
@@ -125,7 +125,7 @@ import { DOGEAR_W, DOGEAR_D, dogEarGeom, dogEarSize, sidewalkSpanForBumps, isDog
 import { CURB_TYPES as COST_CURB_TYPES, CURB_TYPE_META, roadCurbType, roadCurbedSides, roadPanWidth, roadQuantities, costRollup } from "./lib/costTakeoff.js";
 import { layoutLabels, buildingLabelLines, dimCalloutVisible, detailLabelVisible, pondParamLabelVisible, pondParamFontPx, suppressedDimIds, dimFontScale, dimFontPx, boxOf } from "./lib/labelLayout.js";
 import { calloutLayout, minCalloutWidthFt } from "./lib/calloutLayout.js";
-import { DOCK_ZONES, MAX_DOCK_ZONES, ZONE_CATALOG, zoneDepthDefaults, catalogDepthDefault, layoutZoneByKind, usableCourtSpan, dockSidesFor, footprintDepth, footprintLength, footprintAxes, strandedZoneIds, pruneStrandedZones } from "./lib/dockZones.js";
+import { DOCK_ZONES, MAX_DOCK_ZONES, ZONE_CATALOG, zoneDepthDefaults, catalogDepthDefault, layoutZoneByKind, usableCourtSpan, zoneAlongSpan, boxExtentAlong, resizedAlongLen, dockSidesFor, footprintDepth, footprintLength, footprintAxes, strandedZoneIds, pruneStrandedZones } from "./lib/dockZones.js";
 import { computeBuildingGrid, resolveGridSettings, placeDockDoors } from "./lib/buildingGrid.js";
 import { convertBuildingToPolygon, dockLineAt, dockEdgeLine, projectOntoLine, frameBBox, translateDockLines, dockSegExtent, clipSegmentToRing } from "./lib/footprintEdit.js";
 import { dimSlideRange, clampDimOffset, DIM_POS_F_DEFAULT, DIM_POS_F_ROAD, dimNumberBox } from "./lib/dimSlide.js";
@@ -203,7 +203,7 @@ import {
 } from "./lib/detentionRules.js";
 import { splitPolygonByLine, splitPolygonByPath } from "./lib/polygonSplit.js";
 import { overlappingParcelPairs, dissolvedParcelSqft, polyIntersectArea } from "./lib/polyClip.js";
-import { screenFurniturePlates, calibBadgePlacement } from "./lib/sheetFurniture.js";
+import { screenFurniturePlates, calibBadgePlacement, canvasPillBottom } from "./lib/sheetFurniture.js";
 import { normalizeRules, effectiveBuildingProps, fmtClearHeight, fmtSlab } from "./lib/buildingProps.js";
 import { createHistoryStack } from "./lib/history.js";
 import { resolveDraftStepBack } from "./lib/drafts.js";
@@ -6619,9 +6619,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const kinds = zones.map(chainKindOf);
     const depths = zones.map((z, i) => zoneDepthOf(z, b, side, i));
     const courtOpts = courtBumpOpts(arr, b, side);
+    // Per-zone LENGTH override. The chain still shares the court's span BY DEFAULT (the 2026-06-30
+    // fix that stopped the trailer over-hanging the court), but a zone the user has actually given
+    // a length keeps it — clamped to the wall, never reset. Index 0 is excluded: the court's own
+    // alongLen is already folded into courtOpts.along, capped to the clear bump-out face (B492).
+    const alongs = zones.map((z, i) => (i === 0 ? null : (Number.isFinite(z.alongLen) && z.alongLen > 0 ? z.alongLen : null)));
     const patch = new Map();
     zones.forEach((z, i) => {
-      const g = layoutZoneByKind(b, side, i, depths, kinds, courtOpts);
+      const g = layoutZoneByKind(b, side, i, depths, kinds, { ...courtOpts, alongs });
       patch.set(z.id, z.type === "trailer"
         ? { ...g, cfg: { ...(z.cfg || {}), trailerW: (z.cfg && z.cfg.trailerW) || settings.trailerW || OPP_TRAILER_W, trailerL: depths[i], trailerAisle: 0, single: true } }
         : g);
@@ -6828,6 +6833,28 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   };
   // The truck-court length shown (the laid-out along-wall extent on the first dock side that has one).
   const courtLengthShown = (b) => { const { dockSides } = dockSidesOf(b); for (const s of dockSides) { const c = findCourtIn(els, b, s); if (c) return Math.round(s === "top" || s === "bottom" ? c.w : c.h); } return Math.round(b.w >= b.h ? b.w : b.h); };
+  /* Inline LENGTH edit for an OUTWARD zone (trailer parking, buffer, an appended layer) — the same
+   * control the truck court has had, now for the zones stacked beyond it. Stores the typed length
+   * on that zone's `alongLen`; relayoutSide clamps it to the wall but never resets it, so the
+   * trailer can be shorter OR longer than the court and stays where it was put. `null` clears the
+   * override and the zone goes back to tracking the court. */
+  const setZoneLengthAll = (b, i, newLen) => {
+    const { dockSides } = dockSidesOf(b);
+    const nl = newLen == null ? null : Math.max(1, Math.round(newLen));
+    pushHistory();
+    setEls((a) => {
+      let next = a;
+      dockSides.forEach((side) => {
+        const z = findZoneIn(next, b, side, i);
+        if (z) next = next.map((x) => (x.id === z.id ? (nl == null ? (() => { const { alongLen: _drop, ...rest } = x; return rest; })() : { ...x, alongLen: nl }) : x));
+      });
+      dockSides.forEach((side) => { next = relayoutSide(next, b, side); });
+      return next;
+    });
+  };
+  // The laid-out along-wall extent of zone `i` (what the user sees), and whether it's been pinned.
+  const zoneLengthShown = (b, i) => { const { dockSides } = dockSidesOf(b); for (const s of dockSides) { const z = findZoneIn(els, b, s, i); if (z) return Math.round(s === "top" || s === "bottom" ? z.w : z.h); } return courtLengthShown(b); };
+  const zoneLengthPinned = (b, i) => { const { dockSides } = dockSidesOf(b); return dockSides.some((s) => { const z = findZoneIn(els, b, s, i); return !!(z && Number.isFinite(z.alongLen) && z.alongLen > 0); }); };
   // Per-side "+" used by the on-canvas add nodes — adds that side's next zone, stack-compatible.
   const addZoneOnSide = (b, side) => {
     pushHistory();
@@ -6934,9 +6961,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       const side = zoneSideOf(next, resized);
       if (b && side) {
         const u = outwardUnit(b, side), rr = nb.rot != null ? nb.rot : resized.rot;
-        const ax = rot2(nb.w / 2, 0, rr), ay = rot2(0, nb.h / 2, rr);
-        const newDepth = Math.max(1, Math.round(2 * (Math.abs(ax.x * u.x + ax.y * u.y) + Math.abs(ay.x * u.x + ay.y * u.y))));
-        next = next.map((x) => (x.id === buildingId ? { ...x, zd: newDepth } : x));
+        const box = { w: nb.w, h: nb.h, rot: rr };
+        const newDepth = Math.max(1, Math.round(boxExtentAlong(box, u)));
+        // Did the drag change the ALONG-wall axis too? If so the user is setting this zone's
+        // LENGTH, so remember it on the zone (derive-by-default / preserve-once-touched) instead of
+        // letting the relayout snap it back to the court's span. A pure depth drag stores nothing,
+        // so an untouched trailer keeps tracking the court exactly as before. The court head keeps
+        // its own alongLen path (B492), which is capped to the clear bump-out face.
+        const tan = alongUnit(b, side);
+        const setLen = resized.truckCourt ? null : resizedAlongLen(boxExtentAlong(resized, tan), boxExtentAlong(box, tan));
+        next = next.map((x) => (x.id === buildingId ? { ...x, zd: newDepth, ...(setLen ? { alongLen: setLen } : {}) } : x));
         next = relayoutSide(next, b, side);
       }
     } else if (resized && (isWallStrip(resized) || resized.sideParkSide)) {
@@ -7100,6 +7134,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     });
   };
   const outwardUnit = (b, side) => { const [nx, ny] = SIDE_N[side]; return rot2(nx, ny, b.rot); };
+  // The ALONG-wall unit for a side (perpendicular to outwardUnit) — the axis a dock zone's LENGTH
+  // runs on. Mirrors the `tan` vector layoutZoneByKind uses, so screen math and layout math agree.
+  const alongUnit = (b, side) => { const horiz = side === "top" || side === "bottom"; return rot2(horiz ? 1 : 0, horiz ? 0 : 1, b.rot); };
   // Edit a sidewalk's Width (thickness): grow OUTWARD (inner face stays flush to
   // the building) and slide any pads beyond it out by the same delta.
   const setSidewalkWidth = (el, newT) => {
@@ -10242,7 +10279,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       detected: drainCtxData?.channel || null, // { near, unitNo, name, distFt, state }
       onSet: (v) => setSettings((sx) => ({ ...sx, drainage: { ...(sx.drainage || {}), drainsToHcfcdChannel: v } })),
     },
-    // B1074 — the NON-HCFCD district line. The B798 guard above correctly suppresses the
+    // B1080 — the NON-HCFCD district line. The B798 guard above correctly suppresses the
     // HCFCD question off-Harris; this fills the hole it left, so a BKDD (or no-district)
     // site names its governing authority, its channel and its drainage easement instead of
     // reading "unknown". Null for Harris — HCFCD keeps its own wording, never doubled.
@@ -12687,74 +12724,74 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   };
   useEffect(() => () => { if (stdToastTimer.current) clearTimeout(stdToastTimer.current); }, []);
 
-  // Where a parcel standard's value comes from, and the two actions on it.
+  // Where a parcel / element-type standard's value comes from (project copy first, then account).
   const parcelStdScope = (key) => standardScope(settings.parcelStyle?.[key], getStandardPref(userPrefs, "parcelStyle", key));
   const parcelStdValue = (key) => settings.parcelStyle?.[key] ?? getStandardPref(userPrefs, "parcelStyle", key);
-  const setParcelStdScope = (key, next) => {
-    const val = parcelStdValue(key);
-    if (next === "all") {
-      // Promote: the account carries it, and the project's own copy is dropped so this plan keeps
-      // following the account default when it changes later.
-      commitUserPrefs(setStandardPref(userPrefs, "parcelStyle", key, val ?? null));
-      setSettings((s) => { const ps = { ...(s.parcelStyle || {}) }; delete ps[key]; return { ...s, parcelStyle: ps }; });
-      if (!cloudPrefsReady) flashWarn("Saved on this computer — sign in to make it a default across your account.", 6000);
-    } else {
-      // Demote: keep the value as this plan's own, leave the account default alone.
-      if (val !== undefined && val !== null) setParcelStd({ [key]: val });
-    }
-  };
-  const applyParcelStd = (key, noun = "parcel") => {
-    const val = parcelStdValue(key) ?? null;
-    const res = applyParcelStandard(stateRef.current.parcels, key, val);
-    if (!res.count) return;
-    const before = stateRef.current.parcels;
-    pushHistory();                       // ONE frame for every parcel touched
-    setParcels(res.parcels);
-    flashStdToast(appliedLabel(res.count, noun), () => { setParcels(before); setStdToast(null); });
-  };
-
-  // Element-type colors. Elements resolve their type style at RENDER, so a changed default already
-  // shows — except on elements carrying a per-element override. "Apply" clears those overrides.
   const typeStdScope = (type, key) => standardScope(settings.typeStyles?.[type]?.[key], getStandardPref(userPrefs, "typeStyles", key, type));
   const typeStdValue = (type, key) => settings.typeStyles?.[type]?.[key] ?? getStandardPref(userPrefs, "typeStyles", key, type);
-  const setTypeStdScope = (type, key, next) => {
-    const val = typeStdValue(type, key);
-    if (next === "all") {
-      commitUserPrefs(setStandardPref(userPrefs, "typeStyles", key, val ?? null, type));
-      setSettings((s) => {
-        const all = { ...(s.typeStyles || {}) };
-        const bag = { ...(all[type] || {}) };
-        delete bag[key];
-        if (Object.keys(bag).length) all[type] = bag; else delete all[type];
-        return { ...s, typeStyles: all };
-      });
-      if (!cloudPrefsReady) flashWarn("Saved on this computer — sign in to make it a default across your account.", 6000);
-    } else if (val !== undefined && val !== null) {
-      liveTypeStyle(type, { [key]: val });
-    }
+
+  /* ---- ONE scope for the whole panel (owner rule, this round) ----
+   * Scope was stored PER KEY and rendered per FIELD. Collapsing it to one panel control must not
+   * MOVE anything that is already stored — so nothing is rewritten on the way in: the control's
+   * value is DERIVED from the per-key scopes already in force (any standard sitting at the account
+   * level ⇒ "All"), and an explicit choice is remembered in `settings.stdScope` and wins from then
+   * on. The choice governs where a SUBSEQUENT change is stored, nothing retroactive. */
+  const stdScopeKeys = () => [
+    ...PARCEL_STD_KEYS.map((k) => parcelStdScope(k)),
+    ...Object.keys(TYPE).flatMap((t) => ["fill", "stroke"].map((k) => typeStdScope(t, k))),
+  ];
+  const stdScope = settings.stdScope === "all" || settings.stdScope === "project"
+    ? settings.stdScope
+    : derivedPanelScope(stdScopeKeys());
+  const setStdScope = (next) => {
+    setSettings((s) => ({ ...s, stdScope: next }));
+    if (next === "all" && !cloudPrefsReady) flashWarn("Saved on this computer — sign in to make these defaults across your account.", 6000);
   };
-  const applyTypeStd = (type, key) => {
-    const res = applyTypeStandard(stateRef.current.els, type, key);
+  /* A COMMITTED standards edit, routed by that one scope. Live edits (a colour wheel mid-drag)
+   * always write the plan's own copy — cheap and local; only the commit promotes, so an "All"
+   * scope can't fire one account write per intermediate shade. Promoting drops the plan's own copy
+   * so this plan keeps following the account default when it changes later. */
+  const promoteParcelStd = (patch) => {
+    let up = userPrefs;
+    Object.entries(patch).forEach(([k, v]) => { up = setStandardPref(up, "parcelStyle", k, v ?? null); });
+    commitUserPrefs(up);
+    setSettings((s) => {
+      const ps = { ...(s.parcelStyle || {}) };
+      Object.keys(patch).forEach((k) => delete ps[k]);
+      return { ...s, parcelStyle: ps };
+    });
+  };
+  const promoteTypeStd = (type, patch) => {
+    let up = userPrefs;
+    Object.entries(patch).forEach(([k, v]) => { up = setStandardPref(up, "typeStyles", k, v ?? null, type); });
+    commitUserPrefs(up);
+    setSettings((s) => {
+      const all = { ...(s.typeStyles || {}) };
+      const bag = { ...(all[type] || {}) };
+      Object.keys(patch).forEach((k) => delete bag[k]);
+      if (Object.keys(bag).length) all[type] = bag; else delete all[type];
+      return { ...s, typeStyles: all };
+    });
+  };
+  const commitParcelStd = (patch) => { setParcelStd(patch); if (stdScope === "all") promoteParcelStd(patch); };
+  const commitTypeStd = (type, patch) => { liveTypeStyle(type, patch); if (stdScope === "all") promoteTypeStd(type, patch); };
+
+  /* ---- ONE Apply for the whole panel ----
+   * Pushes EVERY standard onto what's already drawn in ONE undo frame, counted in distinct objects
+   * across parcels AND elements (so "Applied to 12 objects" is honest, not a sum of per-key hits).
+   * Parcels are stamped at creation → the value is written; elements resolve their type style at
+   * render → their per-element overrides are cleared (see lib/standardsApply.js). */
+  const stdParcelValues = () => Object.fromEntries(PARCEL_STD_KEYS.map((k) => [k, parcelStdValue(k) ?? null]));
+  const stdApplyCount = allStandardsImpact(parcels, els, stdParcelValues(), Object.keys(TYPE));
+  const applyAllStd = () => {
+    const beforeParcels = stateRef.current.parcels, beforeEls = stateRef.current.els;
+    const res = applyAllStandards(beforeParcels, beforeEls, stdParcelValues(), Object.keys(TYPE));
     if (!res.count) return;
-    const before = stateRef.current.els;
-    pushHistory();
+    pushHistory();                       // ONE frame for every object touched
+    setParcels(res.parcels);
     setEls(res.els);
-    flashStdToast(appliedLabel(res.count, TYPE[type].label.split(" / ")[0].toLowerCase()), () => { setEls(before); setStdToast(null); });
+    flashStdToast(appliedObjectsLabel(res.count), () => { setParcels(beforeParcels); setEls(beforeEls); setStdToast(null); });
   };
-  // The chip row rendered under each Standards field (short by design — no prose per setting).
-  const parcelStdChips = (key) => (
-    <StandardScope scope={parcelStdScope(key)} onScope={(next) => setParcelStdScope(key, next)}
-      applyCount={parcelStandardImpact(parcels, key, parcelStdValue(key) ?? null)}
-      onApply={() => applyParcelStd(key)} noun="parcel" cloudReady={cloudPrefsReady} />
-  );
-  const typeStdChips = (type, key, label) => (
-    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-      <span style={{ fontSize: 10.5, color: PAL.muted, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", minWidth: 26 }}>{label}</span>
-      <StandardScope scope={typeStdScope(type, key)} onScope={(next) => setTypeStdScope(type, key, next)}
-        applyCount={typeStandardImpact(els, type, key)} onApply={() => applyTypeStd(type, key)}
-        noun={TYPE[type].label.split(" / ")[0].toLowerCase()} cloudReady={cloudPrefsReady} />
-    </div>
-  );
 
   /* ---- live color picking (B567) ----
    * A native <input type="color"> fires `change` only when the OS palette CLOSES, but fires
@@ -12768,20 +12805,28 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // `hist` (default on) pushes one undo frame per picking session; pass hist=false for pickers that
   // only touch `settings` (Standards defaults), which isn't in the undo snapshot — pushing there
   // just leaves a dead frame that misdirects the next Ctrl-Z (RC-6).
-  const livePick = (apply, hist = true) => ({
-    onFocus: () => { pickSnapRef.current = false; },
-    onInput:  (e) => { if (hist && !pickSnapRef.current) { pushHistory(); pickSnapRef.current = true; } apply(e.target.value); },
-    // NEW-4 — `change` fires once, when the wheel CLOSES, so the color you settled on is recorded
-    // in the shared recents exactly once (dragging through 40 shades doesn't flood the row).
-    onChange: (e) => { if (hist && !pickSnapRef.current) { pushHistory(); pickSnapRef.current = true; } apply(e.target.value); pushRecent(e.target.value); },
+  /* NEW-4 (bug) — the wheel picks LIVE, so the browser fires a change for EVERY shade the cursor
+   * passes through. Recording each one filled all ten recents slots from a single drag, which is
+   * what the owner saw ("it filled up the entire colour swatch… it's to actually use stuff that I
+   * used"). Live preview is intentional and STAYS — `apply` still runs on every event — but the
+   * recents list is touched only at the session boundary: `notePick` remembers the value the
+   * session is currently on, and `commitPick` (on blur, and when the picker closes/unmounts)
+   * records exactly ONE entry, the one it settled on. `commit` is the caller's own end-of-session
+   * hook (Standards uses it to promote the value to the account scope once, not per shade). */
+  const livePick = (apply, hist = true, commit = null) => ({
+    onFocus: () => { commitPick(); pickSnapRef.current = false; },
+    onInput:  (e) => { if (hist && !pickSnapRef.current) { pushHistory(); pickSnapRef.current = true; } apply(e.target.value); notePick(e.target.value); },
+    onChange: (e) => { if (hist && !pickSnapRef.current) { pushHistory(); pickSnapRef.current = true; } apply(e.target.value); notePick(e.target.value); },
+    onBlur:   (e) => { const v = e.target.value; commitPick(); if (commit) commit(v); },
   });
-  /* NEW-4 — one color CONTROL = the wheel (live picking, above) + the shared recently-used row.
-   * `pick` drives the wheel; `onSwatch` is the discrete click path: exactly one undo frame, apply,
-   * and move that color back to the front of the shared list. `hist=false` for Standards defaults,
-   * which live in `settings` (outside the undo snapshot) — pushing there leaves a dead frame (RC-6). */
-  const colorCtl = (apply, hist = true) => ({
-    pick: livePick(apply, hist),
-    onSwatch: (v) => { if (hist) pushHistory(); apply(v); pushRecent(v); },
+  /* One color CONTROL = the current-colour chip, whose picker carries the palette, the recently
+   * used colours and the "Custom…" wheel. `pick` drives that wheel; `onSwatch` is the discrete
+   * click path: exactly one undo frame, apply, and move that color to the front of the shared list.
+   * `hist=false` for Standards defaults, which live in `settings` (outside the undo snapshot) —
+   * pushing there leaves a dead frame (RC-6). */
+  const colorCtl = (apply, hist = true, commit = null) => ({
+    pick: livePick(apply, hist, commit),
+    onSwatch: (v) => { if (hist) pushHistory(); apply(v); pushRecent(v); if (commit) commit(v); },
   });
   const liveMarkup    = (patch) => { setMarkups((a) => a.map((m) => (selMarkup && m.id === selMarkup.id ? { ...m, ...patch } : m))); setMkStyle((s) => ({ ...s, ...patch })); };
   const liveCallout   = (patch) => { if (selCallout) setCallout(selCallout.id, patch); };
@@ -13894,8 +13939,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               standardsFocus (the remount key opens the focused section). */}
           {_pid === "standards" && (<>
           <div style={{ fontSize: 11.5, color: PAL.muted, lineHeight: 1.55, margin: "2px 2px 10px" }}>
-            <b style={{ color: PAL.ink }}>Starting values</b> — <b>Apply</b> pushes one onto what's already drawn;
-            <b> Project / All</b> sets where that default lives. Select an object to override just that one.
+            <b style={{ color: PAL.ink }}>Starting values</b> for new objects. Select an object to override just that one.
           </div>
 
           <div data-std-sec="parcels">
@@ -13904,43 +13948,41 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             {/* B929 — the rest of a parcel's own properties, now settable as defaults for NEW parcels
                 (stamped at creation via parcelDefaultStyle; each mirrors a control in the parcel
                 inspector). livePick uses hist=false since these touch settings only (RC-6). */}
-            {/* NEW-3 — each standard now carries its own short chip row: Apply (retroactive, one
-                undo frame + an Undo toast) and the scope this default lives at (Project / All).
+            {/* Every committed edit here routes through commitParcelStd, which honours the ONE
+                panel scope in the sticky footer (this plan, or the whole account). Live edits (a
+                wheel mid-drag) write the plan's copy only; the promotion happens once, on commit.
                 Values read project-first, then the account default (see parcelStdValue). */}
             <Field label="Outline color">
-              <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                <ColorField value={toHex6(parcelStdValue("stroke") ?? PAL.parcel)} {...colorCtl((v) => setParcelStd({ stroke: v }), false)} seed={COLOR_SEED} title="Outline color" />
-              </span>
+              <ColorField value={toHex6(parcelStdValue("stroke") ?? PAL.parcel)} title="Outline color" seed={COLOR_SEED}
+                {...colorCtl((v) => setParcelStd({ stroke: v }), false, (v) => commitParcelStd({ stroke: v }))} />
             </Field>
-            {parcelStdChips("stroke")}
             <Field label="Line weight">
-              <NumInput style={numInput} value={parcelStdValue("weight") ?? 2} min={0.5} step={0.5} coarse={2} onCommit={(n) => setParcelStd({ weight: n })} />
+              <NumInput style={numInput} value={parcelStdValue("weight") ?? 2} min={0.5} step={0.5} coarse={2} onCommit={(n) => commitParcelStd({ weight: n })} />
             </Field>
-            {parcelStdChips("weight")}
             <Field label="Line style">
-              <select value={parcelStdValue("dash") ?? "solid"} onChange={(e) => setParcelStd({ dash: e.target.value })}
+              <select value={parcelStdValue("dash") ?? "solid"} onChange={(e) => commitParcelStd({ dash: e.target.value })}
                 style={{ ...numInput, width: "auto", cursor: "pointer" }}>
                 <option value="solid">Solid</option>
                 <option value="dashed">Dashed</option>
                 <option value="dotted">Dotted</option>
               </select>
             </Field>
-            {parcelStdChips("dash")}
             <label style={{ display: "flex", gap: 8, fontSize: 12, color: PAL.muted, margin: "2px 2px 8px", cursor: "pointer" }}>
-              <input type="checkbox" checked={!!parcelStdValue("fill")} onChange={(e) => setParcelStd(e.target.checked ? { fill: "#5b6650" } : { fill: null, fillOpacity: null })} /> Fill new parcels (off by default)
+              <input type="checkbox" checked={!!parcelStdValue("fill")} onChange={(e) => commitParcelStd(e.target.checked ? { fill: "#5b6650" } : { fill: null, fillOpacity: null })} /> Fill new parcels (off by default)
             </label>
-            {parcelStdChips("fill")}
             {parcelStdValue("fill") && (
               <>
                 <Field label="Translucence">
+                  {/* Drag writes the plan's copy live; the account promotion (if the scope is All)
+                      fires once on release, never once per slider tick. */}
                   <input type="range" min={0} max={0.6} step={0.02} value={parcelStdValue("fillOpacity") ?? 0.12}
-                    onChange={(e) => setParcelStd({ fillOpacity: +e.target.value })} />
+                    onChange={(e) => setParcelStd({ fillOpacity: +e.target.value })}
+                    onPointerUp={(e) => commitParcelStd({ fillOpacity: +e.target.value })}
+                    onKeyUp={(e) => commitParcelStd({ fillOpacity: +e.target.value })} />
                 </Field>
-                {parcelStdChips("fillOpacity")}
                 <Field label="Fill color">
-                  <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                    <ColorField value={toHex6(parcelStdValue("fill"))} {...colorCtl((v) => setParcelStd({ fill: v }), false)} seed={COLOR_SEED} title="Fill color" />
-                  </span>
+                  <ColorField value={toHex6(parcelStdValue("fill"))} title="Fill color" seed={COLOR_SEED}
+                    {...colorCtl((v) => setParcelStd({ fill: v }), false, (v) => commitParcelStd({ fill: v }))} />
                 </Field>
               </>
             )}
@@ -14065,20 +14107,24 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 <div key={k} style={{ marginBottom: 7 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                     <span style={{ flex: 1, fontSize: 12, color: PAL.ink, minWidth: 90 }}>{TYPE[k].label.split(" / ")[0]}</span>
-                    <ColorField title="Fill" value={toHex6(st.fill)} {...colorCtl((v) => liveTypeStyle(k, { fill: v }), false)} seed={COLOR_SEED} style={{ width: 30, height: 24 }} />
-                    <ColorField title="Line" value={toHex6(st.stroke)} {...colorCtl((v) => liveTypeStyle(k, { stroke: v }), false)} seed={COLOR_SEED} style={{ width: 30, height: 24 }} />
+                    <ColorField title="Fill" value={toHex6(st.fill)} seed={COLOR_SEED} style={{ width: 30, height: 24 }}
+                      {...colorCtl((v) => liveTypeStyle(k, { fill: v }), false, (v) => commitTypeStd(k, { fill: v }))} />
+                    <ColorField title="Line" value={toHex6(st.stroke)} seed={COLOR_SEED} style={{ width: 30, height: 24 }}
+                      {...colorCtl((v) => liveTypeStyle(k, { stroke: v }), false, (v) => commitTypeStd(k, { stroke: v }))} />
                   </div>
-                  {/* NEW-3 — an element resolves its type color at render, so a changed default
-                      already shows; "Apply" is what clears the per-element overrides still winning
-                      over it. Fill and Line each get their own scope, per the owner's rule. */}
-                  {typeStdChips(k, "fill", "Fill")}
-                  {typeStdChips(k, "stroke", "Line")}
                 </div>
               );
             })}
             <button style={{ ...chip, marginTop: 4, color: PAL.accent }} onClick={() => setSettings((s) => ({ ...s, typeStyles: {} }))}>Reset all to built-in</button>
           </Section>
           </div>
+
+          {/* ONE control set for the whole panel, in a sticky footer so it stays reachable while
+              the settings list scrolls: where a subsequent change is stored, and one Apply that
+              pushes every standard onto what is already drawn (one undo frame, counted in
+              objects). Replaces the per-field Apply + scope row that was most of the panel. */}
+          <StandardsBar scope={stdScope} onScope={setStdScope} applyCount={stdApplyCount}
+            onApply={applyAllStd} cloudReady={cloudPrefsReady} />
           </>)}
   </>);
 
@@ -15759,6 +15805,26 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             );
           })()}
 
+          {/* The Standards "Apply" confirmation. Overwriting objects already on the plan is
+              destructive, so it lands in ONE undo frame and confirms with a short transient pill
+              carrying an Undo — never a modal, never a paragraph of warning copy in the panel.
+              PLACEMENT: anchored to the CANVAS pane, not the viewport. Viewport-centred put it in
+              the optical middle of the plan, right over the buildings ("a little too centered"),
+              and it could drift over an open side panel. Bottom-left of the pane, stacked clear of
+              the bottom furniture (north arrow, scale bar, calibration badge) by canvasPillBottom.
+              Behaviour is untouched: same 7s life, same single undo frame. */}
+          {stdToast && (
+            <div data-testid="standards-apply-toast" style={{
+              position: "absolute", left: 14, zIndex: 8, maxWidth: "min(340px, calc(100% - 28px))",
+              bottom: canvasPillBottom({ northH: furnPlates.north.plateH, scaleBarH: furnPlates.scaleBar.plateH, calibBottom: calibrationState ? calibPlace.bottom : null }),
+              background: PAL.accent, color: "var(--on-accent)", padding: "8px 14px", borderRadius: 99,
+              fontSize: 12.5, fontWeight: 600, boxShadow: "0 8px 28px rgba(0,0,0,0.3)",
+              display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+              <span>{stdToast.msg}</span>
+              <button data-testid="standards-apply-undo" onClick={stdToast.onUndo} style={{ border: "none", background: "var(--surface-raised)", color: PAL.accent, borderRadius: 7, padding: "4px 12px", cursor: "pointer", fontSize: 11.5, fontWeight: 700 }}>Undo</button>
+            </div>
+          )}
+
           {/* Top-right on-canvas controls — one anchored row: View (eye, B653) + Layers.
               The container owns the position so the two cards can never overlap; each
               card keeps its own open/closed width and scrolling. */}
@@ -15777,7 +15843,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               {layersOpen && (
                 <div style={{ padding: "2px 11px 10px", maxHeight: "62vh", overflowY: "auto" }}>
                   <LayerPanel overlays={overlays} setOverlays={setOverlays} county={restored?.county || county} layerStatus={layerStatus} coverage={coverage}
-                    /* B1070/B1071 — the flood group scopes its district rows off the SAME
+                    /* B1076/B1077 — the flood group scopes its district rows off the SAME
                        drainage context the Stormwater readout uses, so the panel and the
                        readout can never disagree about who governs drainage here. */
                     floodContext={drainCtxData}
@@ -16364,26 +16430,19 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             const { caps, props } = multiStyle;
             const hasEl = multiMembers.some((m) => m.kind === "el");
             const mixNote = { fontSize: 11, color: PAL.muted };
-            // A color control that shows a hatched "Mixed" swatch when the selection disagrees. The
-            // native <input type=color> (which has no indeterminate state) is overlaid but visually
-            // hidden, so a pick still opens the OS palette and the first choice applies to ALL — no
-            // dialog box (honours the inline-editors-only rule).
+            // The SAME one-chip colour control as everywhere else, with a hatched "Mixed" chip when
+            // the selection disagrees (a colour has no indeterminate state). Its picker paints the
+            // WHOLE selection: a swatch click in ONE undo frame (applyMultiStyle), the "Custom…"
+            // wheel live with one frame per picking session — no dialog box (inline-editors rule).
             const colorField = (label, prop) => {
               const st = props[prop]; if (!st) return null;
               return (
                 <Field label={label} key={prop}>
-                  <span style={{ position: "relative", display: "inline-flex", alignItems: "center", gap: 6 }}>
-                    <span style={{ position: "relative", width: 34, height: 26, borderRadius: 6, overflow: "hidden", border: `1px solid var(--border-default)`,
-                      background: st.mixed ? "repeating-linear-gradient(45deg, var(--surface-raised) 0 5px, var(--border-default) 5px 10px)" : toHex6(st.value) }}>
-                      <input type="color" aria-label={label} value={st.mixed ? "#808080" : toHex6(st.value)}
-                        {...livePick((v) => liveMultiStyle({ [prop]: v }))}
-                        style={{ position: "absolute", inset: 0, width: "100%", height: "100%", opacity: 0, cursor: "pointer", padding: 0, border: "none" }} />
-                    </span>
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                    <ColorField title={label} value={st.mixed ? "#808080" : toHex6(st.value)} mixed={st.mixed} seed={COLOR_SEED}
+                      pick={livePick((v) => liveMultiStyle({ [prop]: v }))}
+                      onSwatch={(v) => { applyMultiStyle({ [prop]: v }); pushRecent(v); }} />
                     {st.mixed && <span style={mixNote}>Mixed</span>}
-                    {/* NEW-4 — the recents row works on a multi-selection too: one click paints the
-                        whole selection, in ONE undo frame (applyMultiStyle), same as the wheel. */}
-                    <ColorRecentsRow seed={COLOR_SEED} current={st.mixed ? null : toHex6(st.value)}
-                      onPick={(v) => { applyMultiStyle({ [prop]: v }); pushRecent(v); }} />
                   </span>
                 </Field>
               );
@@ -16800,9 +16859,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                             <button title="Plan standard depths for new dock zones — edit in Standards" onClick={() => jumpToStandards("dockzones")} style={{ ...linkBtn, fontSize: 10 }}>↗</button>
                           </span>
                         </Field>
-                        {i === 0 && b && side && (
-                          <Field label="Truck court length (ft)">
-                            <NumInput style={numInput} value={courtLengthShown(b)} min={1} onCommit={(n2) => setCourtLengthAll(b, n2)} />
+                        {b && side && (
+                          <Field label={`${DOCK_ZONES[i].label} length (ft)`}>
+                            <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                              <NumInput style={numInput} value={i === 0 ? courtLengthShown(b) : zoneLengthShown(b, i)} min={1}
+                                onCommit={(n2) => (i === 0 ? setCourtLengthAll(b, n2) : setZoneLengthAll(b, i, n2))} />
+                              {i > 0 && (zoneLengthPinned(b, i)
+                                ? <button title="Go back to matching the truck court's length" onClick={() => setZoneLengthAll(b, i, null)} style={{ ...chip, padding: "2px 6px", fontSize: 10, color: PAL.accent }}>set ↺</button>
+                                : <span style={{ fontSize: 10, color: PAL.muted }} title="Matches the truck court until you set a length">auto</span>)}
+                            </span>
                           </Field>
                         )}
                         {b && side && (
@@ -19029,18 +19094,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         </div>
       )}
 
-      {/* NEW-3 — the "Apply" confirmation. Overwriting objects already on the plan is destructive,
-          so it lands in ONE undo frame and confirms with a short toast carrying an Undo — never a
-          modal, never a paragraph of warning copy in the panel. */}
-      {stdToast && (
-        <div style={{ position: "fixed", left: "50%", bottom: 138, transform: "translateX(-50%)", zIndex: 2500, maxWidth: "80vw",
-          background: PAL.accent, color: "var(--on-accent)", padding: "9px 16px", borderRadius: 99, fontSize: 12.5, fontWeight: 600,
-          boxShadow: "0 8px 28px rgba(0,0,0,0.3)", display: "flex", gap: 12, alignItems: "center" }}>
-          <span>{stdToast.msg}</span>
-          <button data-testid="standards-apply-undo" onClick={stdToast.onUndo} style={{ border: "none", background: "var(--surface-raised)", color: PAL.accent, borderRadius: 7, padding: "4px 12px", cursor: "pointer", fontSize: 11.5, fontWeight: 700 }}>Undo</button>
-        </div>
-      )}
-
       {(pobMode || routeMode || overlapWarn || deedAlignHint) && (
         <div style={{ position: "fixed", left: "50%", bottom: 84, transform: "translateX(-50%)", zIndex: 2500, maxWidth: "80vw",
           background: (deedAlignHint && !pobMode) ? PAL.accent : overlapWarn.startsWith("⚠") ? "#7f1d1d" : (pobMode || routeMode ? PAL.accent : "#15803d"),
@@ -20430,7 +20483,7 @@ function YieldPanel({
               const showAuth = ac && (ac.detectedId || ac.override);
               const showChan = cd && cd.relevant;
               const showOutfall = ot && ot.relevant;
-              // B1074 — the governing-district line for a NON-HCFCD site (BKDD, or nowhere).
+              // B1080 — the governing-district line for a NON-HCFCD site (BKDD, or nowhere).
               const dn = d.districtNote;
               if (!showAuth && !showChan && !showOutfall && !dn) return null;
               const rows = [];

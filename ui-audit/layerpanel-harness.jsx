@@ -24,7 +24,7 @@ function Panel({ id, county, mutate, floodContext = null, layerStatus = {}, cove
   );
 }
 
-/* B1069–B1074 — the Tsakiris drainage context, verbatim from the live 2026-07-29 probes:
+/* B1075–B1080 — the Tsakiris drainage context, verbatim from the live 2026-07-29 probes:
  * Waller County, inside the Brookshire–Katy Drainage District, FEMA Zone X (SFHA_TF=F,
  * ZONE_SUBTY "AREA OF MINIMAL FLOOD HAZARD"), the Willow Fork channel at the tract, and a
  * 70-ft district drainage easement with recorded exhibit WF-10.pdf. */
@@ -70,7 +70,7 @@ function App() {
         {/* "old saved state with jur_etj on" → the merged row must load ON */}
         <Panel id="panel-etjon" county="harris" mutate={(o) => { o.jur_etj.on = true; }} />
       </div>
-      {/* B1069–B1074 — the Flood & drainage group: master toggle, four provenance tiers,
+      {/* B1075–B1080 — the Flood & drainage group: master toggle, four provenance tiers,
           district auto-scoping and the honest empty states. */}
       <div style={{ display: "flex", gap: 16, alignItems: "flex-start", flexWrap: "wrap", marginTop: 20 }}>
         <Panel id="panel-bkdd" county="waller" floodContext={TSAKIRIS_CTX} />

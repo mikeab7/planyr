@@ -1,4 +1,4 @@
-/* USGS NHD hydrography decoding (NEW-4 / B1072) — pure.
+/* USGS NHD hydrography decoding (NEW-4 / B1078) — pure.
  *
  * WHY this exists: NHD reports what a channel IS as a bare integer (`ftype` 336,
  * `fcode` 33600). A popup that shows "336" teaches the user nothing; a popup that says

@@ -1321,13 +1321,13 @@ export const DETENTION_SOURCES = {
     ttl: 30 * DAY,
     sourceName: GIS_SOURCES.hcfcdWatersheds.provider,
   },
-  /* NEW-6 / B1074 — the BKDD drainage tier. Before this, `resolveDrainageContext` queried
+  /* NEW-6 / B1080 — the BKDD drainage tier. Before this, `resolveDrainageContext` queried
    * ONE channel layer (HCFCD, Harris-only), so a Waller site inside the Brookshire–Katy
    * Drainage District — with a district drainage easement crossing it and the Willow Fork
    * of Buffalo Bayou at the tract — could only ever report "unknown". The district's own
    * GIS answers all three questions; it just was never asked.
    *
-   * `viaProxy` + `timeoutMs` (B1073): BKDD's first call to a cold ArcGIS Server instance
+   * `viaProxy` + `timeoutMs` (B1079): BKDD's first call to a cold ArcGIS Server instance
    * measured 16.5–18.3 s. The 9 s shared default would abort it on every site, forever. */
   bkddBoundaryQ: {
     id: "bkddBoundaryQ",
@@ -1398,7 +1398,7 @@ export const DETENTION_SOURCES = {
     sourceName: GIS_SOURCES.bkddEasements107.provider,
   },
 
-  /* NEW-4 / B1072 — the UNIVERSAL fallback. Where no district GIS exists (or the district's
+  /* NEW-4 / B1078 — the UNIVERSAL fallback. Where no district GIS exists (or the district's
    * own service is down), this still answers "is there a watercourse at this site, and what
    * kind?" — nationally. Live-verified at the Tsakiris tract 2026-07-29: one flowline,
    * gnis_name "Willow Fork", ftype 336 (canal / ditch). It is an INVENTORY: it never states
@@ -1660,7 +1660,7 @@ export async function resolveDrainageContext({ lng, lat, ring = null } = {}, opt
   const authority = await authorityP;
   const inHarris = authority.channelAuthority === "hcfcd";
 
-  /* NEW-6 / B1074 — WHICH drainage authority's layers do we ask?
+  /* NEW-6 / B1080 — WHICH drainage authority's layers do we ask?
    *
    * The bug this replaces: this function queried HCFCD and nothing else. On the Tsakiris
    * tract (Waller County, inside the Brookshire–Katy Drainage District, a 70-ft district
@@ -1670,10 +1670,10 @@ export async function resolveDrainageContext({ lng, lat, ring = null } = {}, opt
    *
    * Order of authority, most-certain first:
    *   1. the district BOUNDARY test — `bkdd-district-present` comes from
-   *      resolveDrainageAuthority's membership query (B861), and B1069 adds the district's
+   *      resolveDrainageAuthority's membership query (B861), and B1075 adds the district's
    *      own boundary publication as a second, independent confirmation;
    *   2. the county's own flood-control district (Harris → HCFCD);
-   *   3. no district at all → tier 3, the national NHD fallback (B1072), which still
+   *   3. no district at all → tier 3, the national NHD fallback (B1078), which still
    *      answers "there IS a watercourse here and it's a canal/ditch" honestly, rather
    *      than the old silent "unknown". */
   const inBkdd = (authority.flags || []).includes("bkdd-district-present");
@@ -1718,7 +1718,7 @@ export async function resolveDrainageContext({ lng, lat, ring = null } = {}, opt
     channel = best
       ? {
           near: true, unitNo: best.unitNo, name: best.name, type: best.type,
-          // B1072: NHD reports WHAT a watercourse is as an integer code; carry the plain
+          // B1078: NHD reports WHAT a watercourse is as an integer code; carry the plain
           // English so the readout can name it ("canal / ditch") instead of printing 336.
           kindLabel: chanSource.id === "nhdChannel" ? ftypeLabel(best.ftype) : (best.type || null),
           distFt: best.distM === Infinity ? null : Math.round(best.distM * FT_PER_M),
@@ -1775,7 +1775,7 @@ export async function resolveDrainageContext({ lng, lat, ring = null } = {}, opt
   return {
     authority,
     // Which local drainage authority actually governs here, and how we know. Consumers must
-    // read THIS rather than re-deriving from the county (the exact mistake B1074 fixes).
+    // read THIS rather than re-deriving from the county (the exact mistake B1080 fixes).
     drainageDistrict: drainageDistrictId
       ? { id: drainageDistrictId, source: inBkdd ? "boundary" : "county" }
       : { id: null, source: null },
@@ -1857,20 +1857,20 @@ export function slimDrainageContext(ctx) {
         ...(a.jurisdiction && "cityCentroid" in a.jurisdiction ? { cityCentroid: a.jurisdiction.cityCentroid ?? null } : {}),
       },
     },
-    // B1074 — WHICH district governs rides the slim, so a reloaded readout doesn't fall
+    // B1080 — WHICH district governs rides the slim, so a reloaded readout doesn't fall
     // back to the county heuristic and quietly contradict the boundary test.
     drainageDistrict: ctx.drainageDistrict ? { id: ctx.drainageDistrict.id ?? null, source: ctx.drainageDistrict.source ?? null } : null,
     flood: ctx.flood ? { zones: ctx.flood.zones || [], state: ctx.flood.state, ageMs: ctx.flood.ageMs ?? null } : null,
     channel: ch ? {
       near: ch.near ?? null, unitNo: ch.unitNo ?? null, name: ch.name ?? null, type: ch.type ?? null,
       distFt: ch.distFt ?? null, state: ch.state ?? null,
-      // B1072/B1074 — which authority answered, and whether the hit is an inventory-only
+      // B1078/B1080 — which authority answered, and whether the hit is an inventory-only
       // NHD watercourse. Without these a restored check can't tell a district channel from
       // a national-inventory ditch, and would over-claim.
       kindLabel: ch.kindLabel ?? null, authority: ch.authority ?? null,
       sourceId: ch.sourceId ?? null, inventoryOnly: ch.inventoryOnly ?? null,
     } : null,
-    // B1074 — a recorded district drainage easement is a hard buildable-area constraint;
+    // B1080 — a recorded district drainage easement is a hard buildable-area constraint;
     // it must survive a reload, not vanish until the next manual re-check.
     easements: ctx.easements ? {
       present: ctx.easements.present ?? null, items: ctx.easements.items || [],
@@ -1933,7 +1933,7 @@ export function hydrateDrainageContext(slim) {
     flags = storedFlags;
   }
   const watershedNames = slim.watershed?.names || [];
-  // B1074 — the HCFCD-keyed watershed overlays (Addicks/Barker, Upper Cypress) only mean
+  // B1080 — the HCFCD-keyed watershed overlays (Addicks/Barker, Upper Cypress) only mean
   // anything against HCFCD basin names. A district's own sub-watershed names must never be
   // matched into them, or a BKDD basin could inherit a Harris reservoir caveat.
   const restoredDistrictId = slim.drainageDistrict?.id ?? (channelAuthority === "hcfcd" ? "hcfcd" : null);

@@ -122,7 +122,7 @@ export const STATEWIDE = {
     note: "Flood zones appear once you zoom in to about street level — hidden at city-wide zoom.",
     opacity: 0.55,
     group: "flood", order: 1,
-    // B1070 — the flood group's four tiers. FEMA is the REGULATORY tier: an adopted map a
+    // B1076 — the flood group's four tiers. FEMA is the REGULATORY tier: an adopted map a
     // floodplain administrator enforces. Never merge it with an advisory model.
     floodTier: "regulatory", agency: "FEMA",
   },
@@ -524,7 +524,7 @@ export const AHJ_LAYERS = {
     note: "Flood-control channel right-of-way (HCFCD).",
     opacity: 0.8, county: "harris",
     group: "flood", order: 2,
-    // B1070 — district-scoped: this row is listed ONLY when HCFCD is the governing
+    // B1076 — district-scoped: this row is listed ONLY when HCFCD is the governing
     // drainage authority. Before this, it was offered on a Waller site where HCFCD
     // (correctly) has no data, and its silent blank read as a broken layer.
     floodTier: "local", district: "hcfcd", agency: "HCFCD",
@@ -576,7 +576,7 @@ export const AHJ_LAYERS = {
     group: "utilities", mergeGroup: "water_sewer", order: 1,
   },
 
-  /* NEW-1 / B1069 — the BROOKSHIRE–KATY DRAINAGE DISTRICT map layers. Until now the app
+  /* NEW-1 / B1075 — the BROOKSHIRE–KATY DRAINAGE DISTRICT map layers. Until now the app
    * had ZERO non-Harris drainage sources, so every Waller/BKDD site read as "no drainage
    * data" — the app drew nothing beside an obvious district channel and explained nothing.
    *
@@ -585,7 +585,7 @@ export const AHJ_LAYERS = {
    * exist). Service SR is WKID 2278 — Planyr's own spine — and the export honours
    * bboxSR/imageSR, so a dynamicMapLayer paints these with no reprojection work.
    *
-   * B1073: `stallMs` overrides the shared 15 s "source slow" watchdog. BKDD's first call to
+   * B1079: `stallMs` overrides the shared 15 s "source slow" watchdog. BKDD's first call to
    * a cold ArcGIS Server instance measured 16.5–18.3 s (every call after: under a tenth of a
    * second), so at 15 s the panel would have gone amber on EVERY first visit for a source
    * that is perfectly healthy — a false alarm is as dishonest as a false all-clear. */
@@ -628,7 +628,7 @@ export const AHJ_LAYERS = {
     opacity: 0.6, county: "waller",
     group: "flood", order: 5,
     floodTier: "advisory", district: "bkdd", agency: "BKDD",
-    // EXPLICIT STUDY-AREA GATE (B1069). Every DMP layer returned nothing at Tsakiris
+    // EXPLICIT STUDY-AREA GATE (B1075). Every DMP layer returned nothing at Tsakiris
     // because the study area is WESTERN Waller — a correct empty that must read as
     // "outside this study area", never as a clean "no floodplain here". `studyArea`
     // makes the panel say so; `regional` scope makes coverage.js read the service's
@@ -637,7 +637,7 @@ export const AHJ_LAYERS = {
     stallMs: 25000,
   },
 
-  /* NEW-4 / B1072 — USGS NHD: the universal channel fallback, available at EVERY site in
+  /* NEW-4 / B1078 — USGS NHD: the universal channel fallback, available at EVERY site in
    * the country. This is what guarantees no site is ever again left with an invisible
    * channel just because its drainage district publishes no GIS. Tier 3 (physical
    * hydrography), never district-scoped, explicitly labelled an inventory. */
@@ -707,7 +707,7 @@ export const LAYER_VINTAGE = {
   jur_road_authority: "TxDOT Roadway Inventory — current edition",
   // Per-county utility layers
   hcfcd_row: "HCFCD channels & ROW — current edition",
-  // B1069/B1072 — the new drainage families.
+  // B1075/B1078 — the new drainage families.
   bkdd_drainage: "BKDD district GIS (Quiddity) — current edition",
   bkdd_easements: "BKDD recorded easements (Quiddity) — current edition",
   bkdd_dmp: "BKDD Drainage Master Plan — study results (advisory)",
@@ -1008,7 +1008,7 @@ export function syncOverlayLayers(map, overlays, refs, opts = {}) {
                 onStatus: (id, s, msg) => onStatus && onStatus(id, s, msg),
                 reportAge: () => reportCacheAge(l, k, onStatus),
                 isActive: () => refs[k] === l,
-                // B1073 — a registry row may set its own stall window. BKDD's cold ArcGIS
+                // B1079 — a registry row may set its own stall window. BKDD's cold ArcGIS
                 // Server spin-up runs 16.5–18.3 s; at the shared 15 s default the row would go
                 // amber on every first visit to a perfectly healthy source.
                 stallMs: cfg.stallMs ?? RASTER_STALL_MS,

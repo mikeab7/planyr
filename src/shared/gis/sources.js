@@ -904,7 +904,7 @@ export const GIS_SOURCES = {
   },
 
   // -------------------------------------------------------------------------
-  // NEW-1 (B1069) — the BROOKSHIRE–KATY DRAINAGE DISTRICT (BKDD) source family, hosted
+  // NEW-1 (B1075) — the BROOKSHIRE–KATY DRAINAGE DISTRICT (BKDD) source family, hosted
   // by the district's engineer (Quiddity) on gisclient.quiddity.com. This is the FIRST
   // non-Harris drainage-authority family in the registry: before it, a Waller / BKDD site
   // read as "no drainage data" because HCFCD (correctly) returns n=0 outside Harris and
@@ -927,7 +927,7 @@ export const GIS_SOURCES = {
   //       70-ft easement with recorded exhibit WF-10.pdf). Re-confirm on any lastVerified
   //       refresh before repointing.
   //
-  // COLD START (see B1073): BKDD's FIRST call to any of these services took 16.5–18.3 s
+  // COLD START (see B1079): BKDD's FIRST call to any of these services took 16.5–18.3 s
   // (ArcGIS Server instance spin-up); every call after was 72–88 ms. The 9 s shared default
   // would abort that first hit on every BKDD source forever, so each row sets timeoutMs:
   // 25000 and the map layers route through the same-origin cache proxy (which pays the
@@ -1091,7 +1091,7 @@ export const GIS_SOURCES = {
     tier: "production",
     lastVerified: "2026-07-29",
     fixtures: [
-      // The point-in-district test that drives district auto-selection (B1070 / B1074).
+      // The point-in-district test that drives district auto-selection (B1076 / B1080).
       { label: "Tsakiris inside BKDD", point: [-95.89503, 29.77938], expectMinCount: 1 },
     ],
     notes:
@@ -1107,7 +1107,7 @@ export const GIS_SOURCES = {
   // (Bucks Bayou / Cotton Creek / Hardeman Slough) — the tract sits outside it. That empty
   // is CORRECT and must never read as "no floodplain here"; `studyArea: true` marks the
   // family so the layer panel gates it on the service's published fullExtent and says
-  // "outside this study area" instead (B1069 / B1070).
+  // "outside this study area" instead (B1075 / B1076).
   bkddDmpFloodplain: {
     key: "bkddDmpFloodplain",
     label: "BKDD Drainage Master Plan floodplains (advisory)",
@@ -1154,7 +1154,7 @@ export const GIS_SOURCES = {
   },
 
   // -------------------------------------------------------------------------
-  // NEW-4 (B1072) — USGS NHD national hydrography. The UNIVERSAL channel fallback: national
+  // NEW-4 (B1078) — USGS NHD national hydrography. The UNIVERSAL channel fallback: national
   // coverage means no site anywhere is left with an invisible channel just because its
   // drainage district publishes no GIS. Live-probed 2026-07-29 at Tsakiris: n=6 in 577 ms,
   // CORS-clean, ftype 336 / fcode 33600 = Canal/Ditch.

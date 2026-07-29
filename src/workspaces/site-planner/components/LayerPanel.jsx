@@ -58,7 +58,7 @@ const RELEVANCE_LABEL = { all: "Show all", dim: "Dim", hide: "Hide" };
 
 export default function LayerPanel({
   overlays, setOverlays, county, layerStatus = {}, coverage = {}, compact = false, basemap = null, gisNote = null,
-  // B1070/B1071 — the drainage facts the Flood & drainage group needs to be HONEST:
+  // B1076/B1077 — the drainage facts the Flood & drainage group needs to be HONEST:
   // `floodContext` is a resolveDrainageContext result (or its restored slim) — its
   // `drainageDistrict` picks which district's rows are listed, and its `flood.zones` let
   // the group say what FEMA actually reported instead of going silent. Absent (map finder,
@@ -314,7 +314,7 @@ export default function LayerPanel({
   // they render folded into their primary's composite row (B761); `buildGroupSlots` (B898)
   // additionally folds any `mergeGroup` members (Water & sewer / Electric / Fire hydrants)
   // into one slot each.
-  // B1070: `render` lets a group supply its own row renderer (the Flood & drainage group
+  // B1076: `render` lets a group supply its own row renderer (the Flood & drainage group
   // wraps each row with an agency badge + an honest empty-state reason) while keeping ALL
   // of the relevance ordering / dim / hide behaviour identical.
   const groupRows = (entries, groupKey, render = renderSlot) => {
@@ -366,7 +366,7 @@ export default function LayerPanel({
   };
 
   /* ---------------------------------------------------------------------------
-   * B1070 / B1071 — the Flood & drainage GROUP.
+   * B1076 / B1077 — the Flood & drainage GROUP.
    *
    * The owner's ask was "I kinda wanted something where it just showed flood elements
    * altogether." That is built here as a GROUP WITH ONE MASTER TOGGLE — deliberately NOT
@@ -412,7 +412,7 @@ export default function LayerPanel({
   ) : null);
 
   /* One flood row = the ordinary row, plus its agency badge and — the whole point of
-   * B1071 — an HONEST reason when it comes back with nothing. A silent blank is what made
+   * B1077 — an HONEST reason when it comes back with nothing. A silent blank is what made
    * a correct "no flood hazard here" indistinguishable from a broken layer. */
   const floodRow = (slot, opts) => {
     if (slot.kind === "merge") return renderSlot(slot, opts);

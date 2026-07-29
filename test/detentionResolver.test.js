@@ -37,7 +37,7 @@ function fakeFetch(routes) {
 const COUNTY = "Texas_County_Boundaries", CITY = "Texas_City_Boundaries", ETJ = "HGAC_City_ETJ";
 const MUD = "TCEQ_Water_Districts", CHAN = "HCFCD/Channels", WS = "HCFCD/Watershed", FLOOD = "NFHL";
 const BKDD = "Brookshire_Katy"; // B861 — the drainage-district boundary source (added to every route set)
-// B1069/B1072/B1074 — the district-aware tier: the district's OWN GIS (Quiddity) + the
+// B1075/B1078/B1080 — the district-aware tier: the district's OWN GIS (Quiddity) + the
 // national NHD fallback that answers "is there a channel here at all?" everywhere else.
 const BKDD_BOUND = "Boundaries/MapServer/129", BKDD_CHAN = "Drainage_Information/MapServer/108";
 const BKDD_WS = "Drainage_Information/MapServer/116";
@@ -54,7 +54,7 @@ const baseRoutes = ({ county = "Harris", city = null, etj = null, mud = [], bkdd
   [ETJ]: () => (etj ? [{ attributes: { CITY: etj } }] : []),
   [MUD]: () => mud,
   [BKDD]: () => { if (bkdd === "error") throw new Error("bkdd source down"); return bkdd; },
-  // B1074 — the NHD fallback is queried wherever no drainage district governs, so it
+  // B1080 — the NHD fallback is queried wherever no drainage district governs, so it
   // belongs in the BASE route set (a site outside Harris/BKDD hits it, not "no route").
   [NHD]: () => [],
   ...extra,
@@ -297,7 +297,7 @@ describe("resolveDrainageContext — the full stormwater context", () => {
     expect(ctx.channel.state).toBe("empty");
   });
 
-  /* B1074 CONTRACT CHANGE (was: "outside Harris → channel not-applicable"). Reporting
+  /* B1080 CONTRACT CHANGE (was: "outside Harris → channel not-applicable"). Reporting
    * "not-applicable" was the whole bug: on a Waller/BKDD site beside an obvious channel the
    * readout could only say "unknown". Outside Harris we now query the governing district —
    * or, where none publishes GIS, the national NHD inventory. HCFCD's watershed layer is

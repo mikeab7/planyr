@@ -30,7 +30,7 @@ export const DEFAULT_TTL_MS = 24 * 60 * 60 * 1000;
 // B518: hctx.net (HCFCD ROW raster), nationalmap.gov (USGS 3DEP elevation), harcresearch.org
 // (HARC MUD boundaries) were missing, so those raster overlays 400'd at the proxy and never got
 // B445 outage caching (they fell back to a direct uncached fetch every paint). Added here.
-// B1073: quiddity.com hosts the Brookshire–Katy Drainage District's GIS (gisclient.quiddity.com).
+// B1079: quiddity.com hosts the Brookshire–Katy Drainage District's GIS (gisclient.quiddity.com).
 // It MUST be here or BKDD gets zero outage caching AND, worse, pays its 16.5–18.3 s cold ArcGIS
 // Server spin-up in the user's browser on every first view instead of once, server-side.
 export const ALLOWED_GIS_HOST_RE =
