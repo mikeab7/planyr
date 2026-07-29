@@ -54,6 +54,11 @@ export async function commitElements(client, siteId, ops, opts = {}) {
   if (!client) return { ok: false, results: [], error: "no client" };
   if (!Array.isArray(ops) || ops.length === 0) return { ok: true, results: [] };
   const wantAtomic = !!opts.atomic && !atomicUnavailable;
+  const latched = !!opts.atomic && atomicUnavailable;   // asked, but this project has no overload
+  // Annotate the result ONLY when the caller asked for atomic: a plain call's return shape stays
+  // exactly what it was before B1120, so no existing caller or test sees a new field. `sentAtomic`
+  // is what actually went on the wire; `fellBack` marks the one legitimate un-atomic send.
+  const tag = (r) => (opts.atomic ? { ...r, sentAtomic: wantAtomic, ...(latched ? { fellBack: true } : {}) } : r);
   const args = wantAtomic
     ? { p_site: siteId, p_ops: ops, p_atomic: true }
     : { p_site: siteId, p_ops: ops };
@@ -64,17 +69,23 @@ export async function commitElements(client, siteId, ops, opts = {}) {
       if (wantAtomic && missingFunction(error)) {
         atomicUnavailable = true;                       // latch, then retry this batch un-atomically
         t.done();
-        return commitElements(client, siteId, ops, { ...opts, atomic: false });
+        // `fellBack` marks this as the ONE legitimate reason a batch goes out un-atomically after
+        // asking: the project has no 3-arg overload. B1120's wiring guard must not flag it.
+        const r = await commitElements(client, siteId, ops, { ...opts, atomic: false });
+        return { ...r, fellBack: true };
       }
-      return { ok: false, results: [], error: error.message || String(error) };
+      return tag({ ok: false, results: [], error: error.message || String(error) });
     }
     // Atomic mode answers { applied, results }; the plain path answers the bare results array.
+    // `sentAtomic` reports what actually went ON THE WIRE (B1120) — not what the caller asked for —
+    // so the engine can catch its own request being lost between here and there. That exact loss
+    // shipped silently once already.
     if (data && !Array.isArray(data) && typeof data === "object") {
-      return { ok: true, results: Array.isArray(data.results) ? data.results : [], applied: data.applied !== false };
+      return tag({ ok: true, results: Array.isArray(data.results) ? data.results : [], applied: data.applied !== false });
     }
-    return { ok: true, results: Array.isArray(data) ? data : [] };
+    return tag({ ok: true, results: Array.isArray(data) ? data : [] });
   } catch (e) {
-    return { ok: false, results: [], error: (e && e.message) || "commit threw" };
+    return tag({ ok: false, results: [], error: (e && e.message) || "commit threw" });
   } finally { t.done(); }
 }
 

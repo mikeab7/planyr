@@ -3145,7 +3145,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     }
     const eng = createElementSync({
       siteId,
-      commit: (ops) => commitElements(supabase, siteId, ops),
+      // B1120 — MUST forward `opts`. This adapter took only `(ops)` and called commitElements with
+      // three arguments, so the engine's `{ atomic }` was silently DISCARDED: every batch went out
+      // as the plain 2-arg RPC, HTTP 200, no error, no fallback — and B1116/B1117's whole
+      // all-or-nothing guarantee did nothing in production while its unit tests stayed green,
+      // because the test harness's own `commit` accepted `(ops, opts)` and the real one did not.
+      // Never write this adapter with a fixed arity again.
+      commit: (ops, opts) => commitElements(supabase, siteId, ops, opts),
       now: () => Date.now(),
       setTimer: (fn, ms) => setTimeout(fn, ms),
       clearTimer: (h) => clearTimeout(h),

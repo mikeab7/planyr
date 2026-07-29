@@ -106,7 +106,15 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   batch, adopting only the fresh REVS, never the json. The two modes return DIFFERENT wire shapes
   (atomic → an object, plain → a bare array); `elementApi` normalises both. A project without the
   migration answers a 3-arg call with PGRST202, so `elementApi` latches a fallback to the 2-arg
-  call — never let that error reach the engine as a write failure. **B1118:** the load-time heal's `exempt` set — a repaired element must diff and COMMIT, or
+  call — never let that error reach the engine as a write failure. **B1120, the one that made B1116/
+  B1117 INERT in production for a release:** the engine's `commit` adapter in `SitePlanner.jsx` MUST
+  be `(ops, opts) => commitElements(supabase, siteId, ops, opts)`. A fixed-arity `(ops) => …` silently
+  drops `{ atomic }`, so every batch goes out as the plain 2-arg RPC at HTTP 200 with nothing to
+  notice. `commitElements` now returns `sentAtomic` (what went ON THE WIRE) + `fellBack`, and the
+  engine reports `element-atomic-request-lost` when intent ≠ reality — gated on `sentAtomic !== true`,
+  because a fixed-arity adapter reports `undefined`, not `false`. **Test the REQUEST BODY through the
+  real transport**, never through a mock `commit` that accepts more parameters than the shipped
+  adapter does — that mismatch is exactly what shipped a dead feature green. **B1118:** the load-time heal's `exempt` set — a repaired element must diff and COMMIT, or
   rows-canonical-on-seed adopts the torn rows straight back over the repair.
 - `planClipboard.js` — the ONE general canvas clipboard (NEW-2/NEW-6): collect the current selection
   (elements expanded to their `attachedTo` assembly, so a building brings its truck court / trailer
