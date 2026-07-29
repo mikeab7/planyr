@@ -23,6 +23,7 @@ import { supabase, supabaseRest, currentAccessToken } from "./lib/supabase.js";
 import { createIdMinter, randomIdSalt } from "../../shared/ids.js";
 import { mergeSiteContent, createSiteModel } from "./lib/siteModel.js";
 import { extendMergeSelection } from "./lib/parcelSelect.js";
+import { parcelSelectHintDecision, PARCEL_HINT_COOLDOWN_MS } from "./lib/parcelSelectHint.js";
 import { measuresUnderPoint, nextMeasureSelection } from "./lib/measureHit.js";
 import { nearestBoundaryEdge, constrainToEdgeAngle } from "./lib/edgeConstrain.js";
 import { markupsUnderPoint, nextMarkupSelection, boxCorners } from "./lib/markupPick.js";
@@ -574,6 +575,23 @@ const INLINE_LABEL_SPACING = { line: 150, polyline: 150, easement: 350, road: 70
 // B935 — when `interiorScreen` (a projected point) is given, the perpendicular offset aims TOWARD it
 // (into a closed easement ring's body) instead of the screen-"up" side, so an "Inside" label tucks
 // within the boundary rather than riding on top of it.
+/* Shared inline-style atoms (NEW-2 perf pass, the B1093 pattern). These exact object literals were
+ * repeated dozens of times across the panels — each copy is its own object in the bundle AND a new
+ * identity every render. One definition each: byte-identical output, stable identity, smaller chunk.
+ * Pure values only — anything reading PAL (theme) has to stay inside the component. */
+const ROW6 = { display: "flex", alignItems: "center", gap: 6 };
+const ROW4 = { display: "flex", alignItems: "center", gap: 4 };
+const ROWB6 = { display: "flex", alignItems: "baseline", gap: 6 };
+const ROWSB = { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "2px 0" };
+const INK_HALO = { paintOrder: "stroke", stroke: "#fff", strokeWidth: 3 };
+/* The one line-style choice list, shared by every dash <select> (parcel boundary + setback, as a
+ * Standards default and as a per-object override, plus the markup/easement pickers). */
+const DASH_OPTIONS = [
+  <option key="solid" value="solid">Solid</option>,
+  <option key="dashed" value="dashed">Dashed</option>,
+  <option key="dotted" value="dotted">Dotted</option>,
+];
+
 function inlineLabelPlaces(ptsFeet, spacingFt, offsetPx, f2p, interiorScreen) {
   if (!ptsFeet || ptsFeet.length < 2) return [];
   const segs = []; let total = 0;
@@ -2039,6 +2057,32 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (msg && ms > 0) warnTimerRef.current = setTimeout(() => { warnTimerRef.current = null; setOverlapWarn(""); }, ms);
   }, []);
   useEffect(() => () => { if (warnTimerRef.current) clearTimeout(warnTimerRef.current); }, []);
+  // NEW-1 — feedback at the point of failure when "Select parcels" is OFF. B311 deliberately lets
+  // the press fall through to a background pan (that behaviour is untouched); this only ADDS a
+  // short, non-blocking hint on the same bottom-center toast surface the rest of the canvas uses,
+  // with an inline "Turn it on" so the fix is one click from where the click failed. All the
+  // "should we say something?" rules live in the pure lib/parcelSelectHint.js.
+  const [parcelHint, setParcelHint] = useState(false);
+  const parcelHintRef = useRef({ at: 0, gestureId: null }); // last showing (for the per-gesture + cooldown guards)
+  const parcelHintTimerRef = useRef(null);
+  const noteParcelSelectBlocked = useCallback((gestureId) => {
+    const now = Date.now();
+    const last = parcelHintRef.current;
+    const { show } = parcelSelectHintDecision({
+      parcelSelect: false, hitParcel: true, now,
+      lastShownAt: last.at, lastGestureId: last.gestureId, gestureId,
+    });
+    if (!show) return;
+    parcelHintRef.current = { at: now, gestureId };
+    setParcelHint(true);
+    if (parcelHintTimerRef.current) clearTimeout(parcelHintTimerRef.current);
+    parcelHintTimerRef.current = setTimeout(() => { parcelHintTimerRef.current = null; setParcelHint(false); }, PARCEL_HINT_COOLDOWN_MS);
+  }, []);
+  const dismissParcelHint = useCallback(() => {
+    if (parcelHintTimerRef.current) { clearTimeout(parcelHintTimerRef.current); parcelHintTimerRef.current = null; }
+    setParcelHint(false);
+  }, []);
+  useEffect(() => () => { if (parcelHintTimerRef.current) clearTimeout(parcelHintTimerRef.current); }, []);
   // Auto-dismiss the transient "couldn't explode that field" notice (B472).
   useEffect(() => { if (!splitNote) return; const t = setTimeout(() => setSplitNote(null), 4500); return () => clearTimeout(t); }, [splitNote]);
   // Block the browser's default file-drop (navigate to / open the dropped PDF) anywhere in
@@ -7316,6 +7360,19 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     drag.current = { mode: "move", kind: "el", id, fx: fp.x, fy: fp.y, members, canceler: stateRef.current };
     svgRef.current.setPointerCapture(e.pointerId);
   };
+  // NEW-1 — the ONE place "Select parcels" flips, shared by the header toggle and the hint's
+  // inline "Turn it on" action, so the two can never drift. Turning it OFF now ANNOUNCES itself:
+  // the flag is saved per plan, so a flip nobody noticed used to persist across sessions and
+  // devices and read as "the app stopped letting me click my parcels".
+  const setParcelSelect = (on) => {
+    setSettings((s) => ({ ...s, parcelSelect: on }));
+    if (!on && sel?.kind === "parcel") { setSel(null); setMulti([]); setDrillId(null); } // entering pure-browse → drop any parcel selection
+    dismissParcelHint();
+    parcelHintRef.current = { at: 0, gestureId: null }; // a deliberate flip re-arms the hint immediately
+    flashWarn(on
+      ? "Select parcels is ON — click a lot's edge or setback line to select it."
+      : "Select parcels is OFF — clicks pan the map instead of selecting a lot.", 4500);
+  };
   const startMoveParcel = (e, id) => {
     if (e.button !== 0) return;
     if (identifyMode) { e.stopPropagation(); beginIdentifyPress(e); return; } // B383: in identify→add mode, a press on an existing lot toggles/adds via the same path (click adds, drag pans)
@@ -7327,7 +7384,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // B311: "Select parcels" OFF → parcels are click-through for pure browse/measure. Don't
     // stop propagation: let the press fall through to the background pan (no select, no move),
     // exactly as if the click had landed on empty canvas.
-    if (!settings.parcelSelect) return;
+    // NEW-1: the click-through STAYS — but it no longer happens in silence. This press provably
+    // landed on a parcel's boundary / setback hit-stroke, so say why nothing happened (rate-limited
+    // in lib/parcelSelectHint.js: once per press gesture, and not again for several seconds, so a
+    // genuine pan across a subdivision never turns into a stream of hints).
+    if (!settings.parcelSelect) { noteParcelSelectBlocked(e.timeStamp); return; }
     if (mergePick) { e.stopPropagation(); toggleMerge(id); setSel({ kind: "parcel", id }); return; } // B720: plain click picks in merge mode
     if (e.shiftKey) { e.stopPropagation(); shiftPickParcel(id); return; } // Shift-click: additive multi-select to merge (B735 seeds from `sel`; shiftPickParcel owns `sel`)
     e.stopPropagation();
@@ -12045,6 +12106,20 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // ghost buttons on the DARK top bar
   const dGhost = { padding: "6px 11px", fontSize: 12.5, borderRadius: 8, border: "1px solid transparent", background: "transparent", color: PAL.chromeInk, cursor: "pointer", fontFamily: "inherit", fontWeight: 500, whiteSpace: "nowrap" };
   const dIcon = { ...dGhost, width: 30, height: 30, padding: 0, display: "grid", placeItems: "center", fontSize: 15 };
+  // NEW-1 — the bottom-center canvas toast chrome, defined ONCE. The pill geometry and its two
+  // button treatments were copied inline at every toast site (the pob/route/warn/deed-align pill,
+  // the overlay-calibration pill, and now the parcel-select hint), so each new message re-shipped
+  // the same style objects. One definition each: callers override only what genuinely differs
+  // (the background, and the hint's stacked `bottom`). Pixel-identical to what shipped before.
+  const toastPill = { position: "fixed", left: "50%", bottom: 84, transform: "translateX(-50%)", zIndex: 2500, maxWidth: "80vw", color: "#fff", padding: "9px 16px", borderRadius: 99, fontSize: 12.5, fontWeight: 600, boxShadow: "0 8px 28px rgba(0,0,0,0.3)", display: "flex", gap: 12, alignItems: "center" };
+  const toastActionBtn = { border: "none", background: "var(--surface-raised)", color: PAL.accent, borderRadius: 7, padding: "4px 12px", cursor: "pointer", fontSize: 11.5, fontWeight: 700, whiteSpace: "nowrap" };
+  const toastGhostBtn = { border: "1px solid rgba(255,255,255,0.5)", background: "transparent", color: "#fff", borderRadius: 7, padding: "3px 9px", cursor: "pointer", fontSize: 11.5, fontWeight: 600, whiteSpace: "nowrap" };
+  // NEW-1 — same treatment for the top-center save/status banner family (read-only · cloud-save
+  // failed · saved-to-cloud-only · local-save failed · save-now confirmation · split note). Six
+  // copies of one near-identical object; each now overrides only its own tone, width and z-band.
+  const topBanner = { position: "fixed", top: 79, left: "50%", transform: "translateX(-50%)", zIndex: 6000, maxWidth: "min(740px, calc(100vw - 16px))", display: "flex", alignItems: "center", gap: 12, background: "#3f3a2a", color: "#fff", border: "1px solid #d6b24a", borderRadius: 10, padding: "9px 13px", fontSize: 12.5, fontWeight: 600, fontFamily: "system-ui, sans-serif", boxShadow: "0 8px 28px rgba(0,0,0,0.35)" };
+  const bannerText = { flex: 1 };
+  const bannerX = { flex: "none", cursor: "pointer", background: "rgba(255,255,255,0.18)", color: "#fff", border: "none", borderRadius: 6, padding: "2px 8px", fontFamily: "inherit", fontSize: 12, fontWeight: 700 };
   // Editable Site/Plan labels that sit inline in the dark top bar.
   // Site/Plan dropdown trigger buttons in the dark top bar.
   const hdrTab = (fs, color, weight) => ({ display: "flex", alignItems: "center", gap: 5, background: "var(--chrome-bg-elev)", border: "1px solid var(--chrome-divider)", borderRadius: 6, color, fontSize: fs, fontWeight: weight, fontFamily: "inherit", padding: "4px 9px", cursor: "pointer", maxWidth: 220, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" });
@@ -12052,6 +12127,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // B653: link-styled jump from an inspector's "default" value to its Standards section.
   const linkBtn = { padding: 0, border: "none", background: "transparent", color: PAL.accentText, cursor: "pointer", fontFamily: "inherit", fontSize: 10.5, fontWeight: 600, textDecoration: "underline", textUnderlineOffset: 2 };
   const numInput = { width: 58, padding: "6px 9px", fontSize: 12, fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS, border: `1px solid var(--border-default)`, borderRadius: 8, color: PAL.ink, background: "var(--surface-raised)" };
+  // Repeated panel-control variants — one definition each rather than a fresh object literal at
+  // every call site (same NEW-2 perf pass as the module-scope ROW*/DASH_OPTIONS atoms above).
+  const chipSm = { ...chip, padding: "2px 8px", fontSize: 10.5 };
+  const textInput = { ...numInput, width: 150, fontFamily: "inherit" };
+  const subHead = { fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", margin: "2px 0 6px" };
   // B678/B682 — the per-label style controls (repeat spacing · text size · background halo) shown under an
   // "Inline label" field once the feature actually carries a label. `write(patch, {live})` is the
   // feature-specific, NON-STICKY writer (direct setMarkups / setSelEl, never mkStyle) so a tweak never
@@ -12530,7 +12610,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const metricRow = (label, value, sub, tag) => (
     <div key={label} style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", padding: "5.5px 0", borderBottom: "1px solid #f3efe5", gap: 8 }}>
       <span style={{ fontSize: 12, color: PAL.muted }}>{label}</span>
-      <span style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
+      <span style={ROWB6}>
         <span style={{ fontFamily: NUM_FONT, fontSize: 13, color: PAL.ink, fontWeight: 650, fontVariantNumeric: TABULAR_NUMS }}>{value}{sub && <span style={{ color: PAL.muted, fontWeight: 400, fontSize: 10.5 }}> {sub}</span>}</span>
         {tag ? <SourceTag code={tag.code} label={label} basis={tag.basis} /> : null}
       </span>
@@ -13162,16 +13242,23 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       </div>
       {/* Snap's interactive toggle moved to the on-canvas View (eye) menu with the other
           view/drawing aids (B653) — the top-bar duplicate is gone. S still toggles it. */}
+      {/* NEW-1 — the readout IS the control. This pill was already a <button>, but styled as a
+          borderless ghost with muted text in its OFF state it read as a passive status label, so
+          the one thing that told you selection was off looked like the one thing you couldn't
+          change. It now carries a real pill border + full-contrast chrome text in BOTH states,
+          spells the state out either way, and keeps aria-pressed + the native focus ring (index.css
+          gives every button a :focus-visible outline) so it's reachable by keyboard. */}
       {parcels.length > 0 && (
-        <button className="dbtn" aria-pressed={settings.parcelSelect} style={{ ...dGhost, display: "flex", alignItems: "center", gap: 7, color: settings.parcelSelect ? PAL.chromeInk : PAL.chromeMuted, fontWeight: 600 }}
-          onClick={() => {
-            const turningOff = settings.parcelSelect;
-            setSettings((s) => ({ ...s, parcelSelect: !s.parcelSelect }));
-            if (turningOff && sel?.kind === "parcel") { setSel(null); setMulti([]); setDrillId(null); } // entering pure-browse → drop any parcel selection
-          }}
-          title="Select parcels — ON: click a lot's edge or setback line to select it; its interior stays free for building work (dragging always pans the map, never selects). OFF: pure browse/measure, so a click never selects a parcel. Saved per project.">
-          <span style={{ width: 7, height: 7, borderRadius: 99, background: settings.parcelSelect ? "#22c55e" : "var(--chrome-tab-inactive)", display: "inline-block", boxShadow: settings.parcelSelect ? "0 0 7px rgba(34,197,94,0.7)" : "none" }} />
-          {settings.parcelSelect ? "Select parcels" : "Select parcels: off"}
+        <button type="button" className="dbtn" data-testid="parcel-select-toggle"
+          aria-pressed={settings.parcelSelect}
+          aria-label={`Select parcels — currently ${settings.parcelSelect ? "on" : "off"}`}
+          style={{ ...dGhost, display: "flex", alignItems: "center", gap: 7, fontWeight: 600, color: PAL.chromeInk,
+            border: `1px solid ${settings.parcelSelect ? PAL.accent : PAL.chromeLine}`,
+            background: settings.parcelSelect ? "var(--hover-chrome)" : "transparent" }}
+          onClick={() => setParcelSelect(!settings.parcelSelect)}
+          title="Select parcels — click to turn it on or off. ON: click a lot's edge or setback line to select it; its interior stays free for building work (dragging always pans the map, never selects). OFF: pure browse/measure, so a click never selects a parcel. Saved per project.">
+          <span aria-hidden style={{ width: 7, height: 7, borderRadius: 99, background: settings.parcelSelect ? "#22c55e" : "var(--chrome-tab-inactive)", display: "inline-block", boxShadow: settings.parcelSelect ? "0 0 7px rgba(34,197,94,0.7)" : "none" }} />
+          {settings.parcelSelect ? "Select parcels: on" : "Select parcels: off"}
         </button>
       )}
       {tool === "select" && (() => {
@@ -13441,7 +13528,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                               <div style={{ borderTop: `1px dashed var(--planner-border)`, paddingTop: 8, display: "flex", flexDirection: "column", gap: 6 }}>
                                 <div style={{ fontSize: 11, color: PAL.muted }}>Sheet: <b style={{ color: PAL.ink }}>{o.sheet.label}</b>{!o.sheet.std && <span style={{ color: PAL.accent }}> · non-standard (may be shrunk) — scale below assumes true plot size</span>}</div>
                                 <label style={ovRow}><span style={{ width: 48 }}>Scale</span>
-                                  <select data-testid="overlay-scale-preset" style={{ ...numInput, width: 150, fontFamily: "inherit" }} value={selVal}
+                                  <select data-testid="overlay-scale-preset" style={textInput} value={selVal}
                                     onChange={(e) => {
                                       const v = e.target.value;
                                       if (v === "custom") { setOvEditFor(o.id, { scaleMode: "custom", page: pageVal, pageUnit, real: realVal, realUnit }); return; }
@@ -13826,7 +13913,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       {...sliderHistory((e) => setSelParcel({ fillOpacity: +e.target.value }))} />
                   </Field>
                   <Field label="Fill color">
-                    <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <span style={ROW6}>
                       <ColorField value={toHex6(selParcel.fill)} {...colorCtl((v) => setSelParcel({ fill: v }))} seed={COLOR_SEED} title="Fill color" />
                     </span>
                   </Field>
@@ -13836,7 +13923,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   one-frame undo; the discrete weight/style/reset commits push their own frame (setSelParcel
                   does not). Renders live via pc.stroke/pc.weight/pc.dash at the parcel <polygon>. */}
               <Field label="Outline color">
-                <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <span style={ROW6}>
                   <ColorField value={toHex6(selParcel.stroke ?? PAL.parcel)} {...colorCtl((v) => setSelParcel({ stroke: v }))} seed={COLOR_SEED} title="Outline color" />
                 </span>
               </Field>
@@ -13846,9 +13933,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               <Field label="Line style">
                 <select value={selParcel.dash || "solid"} onChange={(e) => { pushHistory(); setSelParcel({ dash: e.target.value }); }}
                   style={{ ...numInput, width: "auto", cursor: "pointer" }}>
-                  <option value="solid">Solid</option>
-                  <option value="dashed">Dashed</option>
-                  <option value="dotted">Dotted</option>
+                  {DASH_OPTIONS}
                 </select>
               </Field>
               <button style={{ ...chip, marginTop: 2 }} onClick={() => { pushHistory(); setSelParcel({ stroke: null, weight: null, dash: null }); }} title="Reset the outline back to the default color, weight and solid line">Reset outline</button>
@@ -13857,7 +13942,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   setback <polygon> (and its dimension chips follow the colour). */}
               <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", margin: "12px 0 6px" }}>Setback line</div>
               <Field label="Line color">
-                <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <span style={ROW6}>
                   <ColorField value={toHex6(selParcel.sbStroke ?? PAL.setback)} {...colorCtl((v) => setSelParcel({ sbStroke: v }))} seed={COLOR_SEED} title="Setback line color" />
                 </span>
               </Field>
@@ -13867,9 +13952,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               <Field label="Line style">
                 <select value={selParcel.sbDash || SETBACK_LINE.dash} onChange={(e) => { pushHistory(); setSelParcel({ sbDash: e.target.value }); }}
                   style={{ ...numInput, width: "auto", cursor: "pointer" }}>
-                  <option value="solid">Solid</option>
-                  <option value="dashed">Dashed</option>
-                  <option value="dotted">Dotted</option>
+                  {DASH_OPTIONS}
                 </select>
               </Field>
               <button style={{ ...chip, marginTop: 2 }} onClick={() => { pushHistory(); setSelParcel({ sbStroke: null, sbWeight: null, sbDash: null }); }} title="Reset the setback line back to the default color, weight and dashes">Reset setback line</button>
@@ -14073,7 +14156,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", margin: "10px 0 6px" }}>Unit prices (your bids)</div>
                 <div id="price-field-earthworkCy">
                   <Field label="Excavation / cut">
-                    <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                    <span style={ROW4}>
                       <span style={{ fontSize: 12, color: PAL.muted }}>$</span>
                       <NumInput style={{ ...numInput, width: 70 }} value={prices.earthworkCy ?? null} min={0} placeholder="—" onCommit={(n) => setPrice("earthworkCy", n)} />
                       <span style={{ fontSize: 11, color: PAL.muted }}>/CY</span>
@@ -14082,7 +14165,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 </div>
                 {gsG && (
                   <Field label="Fill shrink/swell (%)">
-                    <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                    <span style={ROW4}>
                       <NumInput allowClear style={{ ...numInput, width: 70 }} value={gsShrinkPct ?? null} min={0} placeholder="0"
                         onCommit={(n) => setGrading({ shrinkPct: Number.isFinite(n) ? n : null })} />
                       <span style={{ fontSize: 11, color: PAL.muted }} title="Compacted fill needs MORE bank dirt than its placed volume (clay placed at 95% Proctor commonly shrinks 10–25%). Blank = none applied — enter your geotech's number.">bank→placed ⓘ</span>
@@ -14113,7 +14196,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             const priceField = (label, k, unit) => (
               <div id={`price-field-${k}`}>
                 <Field label={label}>
-                  <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                  <span style={ROW4}>
                     <span style={{ fontSize: 12, color: PAL.muted }}>$</span>
                     <NumInput style={{ ...numInput, width: 70 }} value={prices[k] ?? null} min={0} placeholder="—" onCommit={(n) => setPrice(k, n)} />
                     <span style={{ fontSize: 11, color: PAL.muted }}>{unit}</span>
@@ -14184,9 +14267,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             <Field label="Line style">
               <select value={parcelStdValue("dash") ?? "solid"} onChange={(e) => draftParcelStd({ dash: e.target.value })}
                 style={{ ...numInput, width: "auto", cursor: "pointer" }}>
-                <option value="solid">Solid</option>
-                <option value="dashed">Dashed</option>
-                <option value="dotted">Dotted</option>
+                {DASH_OPTIONS}
               </select>
             </Field>
             <label style={{ display: "flex", gap: 8, fontSize: 12, color: PAL.muted, margin: "2px 2px 8px", cursor: "pointer" }}>
@@ -14218,9 +14299,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             <Field label="Line style">
               <select value={parcelStdValue("sbDash") ?? SETBACK_LINE.dash} onChange={(e) => draftParcelStd({ sbDash: e.target.value })}
                 style={{ ...numInput, width: "auto", cursor: "pointer" }}>
-                <option value="solid">Solid</option>
-                <option value="dashed">Dashed</option>
-                <option value="dotted">Dotted</option>
+                {DASH_OPTIONS}
               </select>
             </Field>
             {/* B721 cross-link (consistent with B164's placement): per-edge setbacks are a
@@ -14571,7 +14650,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       <polyline points={clStr} fill="none" stroke={col} strokeWidth={clW} />
                       <polygon points={pad} fill={col} fillOpacity={0.88} stroke="#fff" strokeWidth={1} />
                       <text x={padC.x} y={padC.y + 3} textAnchor="middle" fontSize="8" fontWeight="800" fill="#fff" pointerEvents="none">{m.fitting}</text>
-                      <text x={mid.x} y={mid.y - 5} textAnchor="middle" fontSize="9.5" fontWeight="700" fill={col} pointerEvents="none" style={{ paintOrder: "stroke", stroke: "#fff", strokeWidth: 3 }}>{m.label}</text>
+                      <text x={mid.x} y={mid.y - 5} textAnchor="middle" fontSize="9.5" fontWeight="700" fill={col} pointerEvents="none" style={INK_HALO}>{m.label}</text>
                     </g>
                   );
                 }
@@ -14587,7 +14666,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       <polyline points={s} fill="none" stroke={col} strokeWidth={tw} strokeDasharray={dashArray(m.dash, m.weight ?? 2.4)} strokeLinejoin="round" />
                       {m.kind === "infwater" && pp.map((q, i) => <circle key={i} cx={q.x} cy={q.y} r={3} fill="#dc2626" stroke="#fff" strokeWidth={1} />)}
                       {m.kind === "traced" && pp.map((q, i) => <rect key={i} x={q.x - 2} y={q.y - 2} width={4} height={4} fill={col} stroke="#fff" strokeWidth={0.8} />)}
-                      {mid && <text x={mid.x} y={mid.y - 6} textAnchor="middle" fontSize="9.5" fontWeight="700" fill={col} pointerEvents="none" style={{ paintOrder: "stroke", stroke: "#fff", strokeWidth: 3 }}>{m.label}</text>}
+                      {mid && <text x={mid.x} y={mid.y - 6} textAnchor="middle" fontSize="9.5" fontWeight="700" fill={col} pointerEvents="none" style={INK_HALO}>{m.label}</text>}
                     </g>
                   );
                 }
@@ -14606,7 +14685,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
                         return <text key={i} x={mx} y={my - 3} textAnchor="middle" fontSize="9" fontFamily={NUM_FONT} fontVariantNumeric={TABULAR_NUMS} fill={stroke} pointerEvents="none" style={{ paintOrder: "stroke", stroke: "#fff", strokeWidth: 2.5 }}>{c.label}</text>;
                       })}
-                      <text x={cp.x} y={cp.y} textAnchor="middle" fontSize="11" fontWeight="700" fill={stroke} pointerEvents="none" style={{ paintOrder: "stroke", stroke: "#fff", strokeWidth: 3 }}>{m.label}</text>
+                      <text x={cp.x} y={cp.y} textAnchor="middle" fontSize="11" fontWeight="700" fill={stroke} pointerEvents="none" style={INK_HALO}>{m.label}</text>
                     </g>
                   );
                 }
@@ -14634,7 +14713,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           like the auto dims + measurement labels and reveals on zoom-in; the hatched fill +
                           centerline geometry always stay (keep-geometry, avoid the on/off flicker). A
                           selected easement keeps its label at any zoom (edit handles never vanish mid-edit). */}
-                      {(isSel || dimCalloutVisible(labelPpf)) && <text x={cp.x} y={cp.y} textAnchor="middle" fontSize={10.5 * labelK} fontWeight="700" fill={ecol} pointerEvents="none" style={{ paintOrder: "stroke", stroke: "#fff", strokeWidth: 3 }}>{easementLabel(m)}{proposed ? " (proposed)" : ""}</text>}
+                      {(isSel || dimCalloutVisible(labelPpf)) && <text x={cp.x} y={cp.y} textAnchor="middle" fontSize={10.5 * labelK} fontWeight="700" fill={ecol} pointerEvents="none" style={INK_HALO}>{easementLabel(m)}{proposed ? " (proposed)" : ""}</text>}
                       {isSel && labelPpf > 0.05 && <text x={cp.x} y={cp.y + 12 * labelK} textAnchor="middle" fontSize={9 * labelK} fontWeight="600" fill={ecol} pointerEvents="none" style={{ paintOrder: "stroke", stroke: "#fff", strokeWidth: 2.5 }}>{Math.round(area).toLocaleString()} sf · {(area / SQFT_PER_ACRE).toFixed(2)} ac</text>}
                       {inlineLabelEls(easePathFeet, m.inlineLabel, ecol, m.labelSpacing || INLINE_LABEL_SPACING.easement, view.ppf, f2p, `il${m.id}-`, { size: m.labelSize, halo: m.labelHalo, lf: labelFrame, ...easementInsetOpts(m) })}
                     </g>
@@ -14785,46 +14864,46 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           hit — so we say so and offer "Take over editing here" (steal the lock + push the pent-up work)
           instead. Closes automatically (lock hand-off) when the other tab is closed. */}
       {readOnly && !localSaveFailed && (
-        <div role="alert" data-testid="readonly-banner" style={{ position: "fixed", top: 79, left: "50%", transform: "translateX(-50%)", zIndex: 6000, maxWidth: "min(740px, calc(100vw - 16px))", display: "flex", alignItems: "center", gap: 12, background: "#3f3a2a", color: "#fff", border: "1px solid #d6b24a", borderRadius: 10, padding: "9px 13px", fontSize: 12.5, fontWeight: 600, fontFamily: "system-ui, sans-serif", boxShadow: "0 8px 28px rgba(0,0,0,0.35)" }}>
-          <span style={{ flex: 1 }}>👁 <b>Read-only</b> — this plan is open in another tab, which is the active editor. Your changes here are saved on <b>this device</b> but <b>aren't syncing to the cloud</b> yet. <b>Reloading won't help</b> while the other tab is open — take over here, or close the other tab.</span>
+        <div role="alert" data-testid="readonly-banner" style={topBanner}>
+          <span style={bannerText}>👁 <b>Read-only</b> — this plan is open in another tab, which is the active editor. Your changes here are saved on <b>this device</b> but <b>aren't syncing to the cloud</b> yet. <b>Reloading won't help</b> while the other tab is open — take over here, or close the other tab.</span>
           <button onClick={takeOverEditing} data-testid="takeover-btn" title="Make this the active tab and save your changes to the cloud now" style={{ flex: "none", cursor: "pointer", background: "#d6b24a", color: "#2a2410", border: "none", borderRadius: 7, padding: "5px 11px", fontFamily: "inherit", fontSize: 12, fontWeight: 800 }}>Take over editing here</button>
         </div>
       )}
       {/* B474 review (#8): gated on !localSaveFailed — "saved on this device" is false when the device
           write failed too; the red local-save-failed banner is the authoritative message in that case. */}
       {cloudSaveFailed && !localSaveFailed && (
-        <div role="alert" style={{ position: "fixed", top: 79, left: "50%", transform: "translateX(-50%)", zIndex: 6000, maxWidth: "min(620px, calc(100vw - 16px))", display: "flex", alignItems: "center", gap: 12, background: "#7c2d12", color: "#fff", border: "1px solid #f59e0b", borderRadius: 10, padding: "9px 13px", fontSize: 12.5, fontWeight: 600, fontFamily: "system-ui, sans-serif", boxShadow: "0 8px 28px rgba(0,0,0,0.35)" }}>
-          <span style={{ flex: 1 }}>⚠ Your last change <b>didn't reach the cloud</b>. It's saved on this device and will retry on your next edit — your work is not lost.</span>
+        <div role="alert" style={{ ...topBanner, maxWidth: "min(620px, calc(100vw - 16px))", background: "#7c2d12", border: "1px solid #f59e0b" }}>
+          <span style={bannerText}>⚠ Your last change <b>didn't reach the cloud</b>. It's saved on this device and will retry on your next edit — your work is not lost.</span>
           <button onClick={retryCloudSave} title="Try saving to the cloud again now" style={{ flex: "none", cursor: "pointer", background: "#f59e0b", color: "#1a1206", border: "none", borderRadius: 7, padding: "5px 11px", fontFamily: "inherit", fontSize: 12, fontWeight: 800 }}>Retry now</button>
-          <button onClick={() => setCloudSaveFailed(false)} title="Dismiss" style={{ flex: "none", cursor: "pointer", background: "rgba(255,255,255,0.18)", color: "#fff", border: "none", borderRadius: 6, padding: "2px 8px", fontFamily: "inherit", fontSize: 12, fontWeight: 700 }}>✕</button>
+          <button onClick={() => setCloudSaveFailed(false)} title="Dismiss" style={bannerX}>✕</button>
         </div>
       )}
       {/* B473 — device-write health. AMBER = the device storage is full but the work IS saved to the
           cloud account (safe + reloads fine; only action is freeing space for an offline copy). RED =
           the work is NOT safe anywhere yet (device write failed AND the cloud hasn't confirmed). */}
       {savedToCloudOnly ? (
-        <div role="status" data-testid="saved-cloud-only" style={{ position: "fixed", top: 79, left: "50%", transform: "translateX(-50%)", zIndex: 6002, maxWidth: "min(740px, calc(100vw - 16px))", display: "flex", alignItems: "center", gap: 12, background: "#3f3a2a", color: "#fff", border: "1px solid #d6b24a", borderRadius: 10, padding: "9px 13px", fontSize: 12.5, fontWeight: 600, fontFamily: "system-ui, sans-serif", boxShadow: "0 8px 28px rgba(0,0,0,0.35)" }}>
-          <span style={{ flex: 1 }}>✔ <b>Saved to your account</b> — your work is safe in the cloud and will reload fine. This <b>device's storage is full</b>, so there's no offline copy; free up space (or Export) to keep one.</span>
+        <div role="status" data-testid="saved-cloud-only" style={{ ...topBanner, zIndex: 6002 }}>
+          <span style={bannerText}>✔ <b>Saved to your account</b> — your work is safe in the cloud and will reload fine. This <b>device's storage is full</b>, so there's no offline copy; free up space (or Export) to keep one.</span>
           <button onClick={saveNow} title="Try saving on this device again" style={{ flex: "none", cursor: "pointer", background: "rgba(255,255,255,0.18)", color: "#fff", border: "none", borderRadius: 6, padding: "4px 10px", fontFamily: "inherit", fontSize: 12, fontWeight: 700 }}>Retry device save</button>
         </div>
       ) : localSaveFailed && (
-        <div role="alert" data-testid="local-save-failed" style={{ position: "fixed", top: 79, left: "50%", transform: "translateX(-50%)", zIndex: 6002, maxWidth: "min(720px, calc(100vw - 16px))", display: "flex", alignItems: "center", gap: 12, background: "#7c1d1d", color: "#fff", border: "1px solid #f87171", borderRadius: 10, padding: "9px 13px", fontSize: 12.5, fontWeight: 700, fontFamily: "system-ui, sans-serif", boxShadow: "0 8px 28px rgba(0,0,0,0.4)" }}>
-          <span style={{ flex: 1 }}>⛔ Your last change <b>could not be saved on this device</b> — your browser storage may be full or blocked. Use <b>Save now</b> (or Export) to keep your work, then free up space.</span>
+        <div role="alert" data-testid="local-save-failed" style={{ ...topBanner, zIndex: 6002, maxWidth: "min(720px, calc(100vw - 16px))", background: "#7c1d1d", border: "1px solid #f87171", fontWeight: 700, boxShadow: "0 8px 28px rgba(0,0,0,0.4)" }}>
+          <span style={bannerText}>⛔ Your last change <b>could not be saved on this device</b> — your browser storage may be full or blocked. Use <b>Save now</b> (or Export) to keep your work, then free up space.</span>
           <button onClick={saveNow} title="Try saving again now" style={{ flex: "none", cursor: "pointer", background: "#f87171", color: "#3a0a0a", border: "none", borderRadius: 7, padding: "5px 11px", fontFamily: "inherit", fontSize: 12, fontWeight: 800 }}>Save now</button>
         </div>
       )}
       {/* B473 — provable confirmation for an explicit Save now (a save you can SEE, not just trust). */}
       {saveNowMsg && (
-        <div role="status" data-testid="save-now-msg" style={{ position: "fixed", top: 79, left: "50%", transform: "translateX(-50%)", zIndex: 6002, display: "flex", alignItems: "center", gap: 10, background: "#14532d", color: "#fff", border: "1px solid #4ade80", borderRadius: 10, padding: "8px 13px", fontSize: 12.5, fontWeight: 700, fontFamily: "system-ui, sans-serif", boxShadow: "0 8px 28px rgba(0,0,0,0.35)" }}>
+        <div role="status" data-testid="save-now-msg" style={{ ...topBanner, zIndex: 6002, maxWidth: undefined, gap: 10, background: "#14532d", border: "1px solid #4ade80", padding: "8px 13px", fontWeight: 700 }}>
           <span>{saveNowMsg}</span>
         </div>
       )}
 
       {/* B472 — transient "couldn't explode that field" notice (the loud surface for a degenerate split, never a silent no-op) */}
       {splitNote && (
-        <div role="alert" data-testid="split-note" style={{ position: "fixed", top: 79, left: "50%", transform: "translateX(-50%)", zIndex: 6000, maxWidth: "min(620px, calc(100vw - 16px))", display: "flex", alignItems: "center", gap: 12, background: "#3f3a2a", color: "#fff", border: "1px solid #d6b24a", borderRadius: 10, padding: "9px 13px", fontSize: 12.5, fontWeight: 600, fontFamily: "system-ui, sans-serif", boxShadow: "0 8px 28px rgba(0,0,0,0.35)" }}>
-          <span style={{ flex: 1 }}>{splitNote}</span>
-          <button onClick={() => setSplitNote(null)} title="Dismiss" style={{ flex: "none", cursor: "pointer", background: "rgba(255,255,255,0.18)", color: "#fff", border: "none", borderRadius: 6, padding: "2px 8px", fontFamily: "inherit", fontSize: 12, fontWeight: 700 }}>✕</button>
+        <div role="alert" data-testid="split-note" style={{ ...topBanner, maxWidth: "min(620px, calc(100vw - 16px))" }}>
+          <span style={bannerText}>{splitNote}</span>
+          <button onClick={() => setSplitNote(null)} title="Dismiss" style={bannerX}>✕</button>
         </div>
       )}
 
@@ -16390,14 +16469,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                               <span style={{ fontSize: 11, color: PAL.muted, fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS, whiteSpace: "nowrap" }}>{f0(r.sf)} sf</span>
                             </div>
                             <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                              <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                              <span style={ROW4}>
                                 <span style={{ fontSize: 11, color: PAL.muted }}>Clear</span>
                                 <NumInput style={valNum} value={r.clearHeight.value} min={1} onCommit={(n) => setBuildingProp(r.id, "clearHeightOverride", n)} /><span style={{ fontSize: 11, color: PAL.muted }}>ft</span>
                                 {r.clearHeight.overridden
                                   ? <button title="Revert to auto" onClick={() => setBuildingProp(r.id, "clearHeightOverride", null)} style={{ ...chip, padding: "2px 6px", fontSize: 10, color: PAL.accent }}>set ↺</button>
                                   : <span style={{ fontSize: 10, color: PAL.muted }}>auto</span>}
                               </span>
-                              <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                              <span style={ROW4}>
                                 <span style={{ fontSize: 11, color: PAL.muted }}>Slab</span>
                                 <NumInput style={valNum} value={r.slab.value} min={1} onCommit={(n) => setBuildingProp(r.id, "slabThicknessOverride", n)} /><span style={{ fontSize: 11, color: PAL.muted }}>in</span>
                                 {r.slab.overridden
@@ -16791,7 +16870,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   <Field label="Dash">
                     <select style={{ ...numInput, width: 100, fontFamily: "inherit" }} value={props.dash.mixed ? "" : (props.dash.value || "solid")} onChange={(e) => { if (e.target.value) applyMultiStyle({ dash: e.target.value }); }}>
                       {props.dash.mixed && <option value="" disabled>Mixed</option>}
-                      <option value="solid">Solid</option><option value="dashed">Dashed</option><option value="dotted">Dotted</option>
+                      {DASH_OPTIONS}
                     </select>
                   </Field>
                 )}
@@ -16879,7 +16958,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 <Field label="Line weight"><NumInput style={numInput} value={selMarkup.weight ?? 2} min={0.5} step={0.5} coarse={2} onCommit={(n) => setSelMarkup({ weight: n })} /></Field>
                 <Field label="Dash">
                   <select style={{ ...numInput, width: 100, fontFamily: "inherit" }} value={selMarkup.dash || "solid"} onChange={(e) => setSelMarkup({ dash: e.target.value })}>
-                    <option value="solid">Solid</option><option value="dashed">Dashed</option><option value="dotted">Dotted</option>
+                    {DASH_OPTIONS}
                   </select>
                 </Field>
                 {/* B620 — inline label riding the line (open paths only; double-click the line also opens this in
@@ -16889,7 +16968,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   <Field label="Inline label"><input value={selMarkup.inlineLabel || ""} maxLength={120}
                     onFocus={() => pushHistory()}
                     onChange={(e) => setMarkups((a) => a.map((m) => (m.id === selMarkup.id ? { ...m, inlineLabel: e.target.value } : m)))}
-                    placeholder={'e.g. 18" SANITARY SEWER'} style={{ ...numInput, width: 150, fontFamily: "inherit" }} /></Field>
+                    placeholder={'e.g. 18" SANITARY SEWER'} style={textInput} /></Field>
                   {/* B678 — per-label repeat spacing / text size / background halo (only once a label is typed) */}
                   {inlineLabelControls(selMarkup, selMarkup.kind, coalesceLabelWrite(selMarkup.id, (p) => setMarkups((a) => a.map((m) => (m.id === selMarkup.id ? { ...m, ...p } : m)))))}
                 </>)}
@@ -17013,7 +17092,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 <Field label="Label"><input value={m.label || ""} maxLength={80}
                   onFocus={() => pushHistory()}
                   onChange={(ev) => setMeasures((a) => a.map((x) => (x.id === m.id ? { ...x, label: ev.target.value } : x)))}
-                  placeholder="e.g. Front setback" style={{ ...numInput, width: 150, fontFamily: "inherit" }} /></Field>
+                  placeholder="e.g. Front setback" style={textInput} /></Field>
                 <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.5, marginTop: 8 }}>
                   {m.locked
                     ? "Locked — click 🔓 Unlock below to move or reshape it."
@@ -17064,14 +17143,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         <Field label="Inline label"><input value={selEl.inlineLabel || ""} maxLength={120}
                           onFocus={() => pushHistory()}
                           onChange={(e) => setSelEl({ inlineLabel: e.target.value })}
-                          placeholder="e.g. MAIN STREET" style={{ ...numInput, width: 150, fontFamily: "inherit" }} /></Field>
+                          placeholder="e.g. MAIN STREET" style={textInput} /></Field>
                         {/* B678 — per-label repeat spacing / text size / background halo (only once a label is typed) */}
                         {inlineLabelControls(selEl, "road", coalesceLabelWrite(selEl.id, (p) => setSelEl(p)))}
                       </>)}
                       {cl && (
                         <Field label="Road class">
                           <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
-                            <select style={{ ...numInput, width: 150, fontFamily: "inherit" }} value={selEl.roadClass || DEFAULT_ROAD_CLASS} onChange={(e) => setRoadClass(selEl, e.target.value)}>
+                            <select style={textInput} value={selEl.roadClass || DEFAULT_ROAD_CLASS} onChange={(e) => setRoadClass(selEl, e.target.value)}>
                               {roadClassesOf(settings).map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}
                             </select>
                             <button title="Class defaults (radius, design speed) — edit in Standards" onClick={() => jumpToStandards("roads")} style={{ ...linkBtn, fontSize: 10 }}>↗</button>
@@ -17099,7 +17178,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       )}
                       {cl && (
                         <div style={{ marginTop: 8 }}>
-                          <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", margin: "2px 0 6px" }}>Curve at vertex</div>
+                          <div style={subHead}>Curve at vertex</div>
                           {vsel == null ? (
                             <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.45 }}>Click a road vertex on the canvas to set it sharp · arc · smooth.{selEl.pts.length <= 2 ? " A straight 2-point road has no interior vertex." : ""}</div>
                           ) : (
@@ -17130,7 +17209,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         const curFlare = selEl.tee && selEl.tee.throughId === tj.throughId && selEl.tee.flare > 0 ? selEl.tee.flare : 0;
                         return (
                           <div style={{ marginTop: 8 }}>
-                            <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", margin: "2px 0 6px" }}>Tee intersection</div>
+                            <div style={subHead}>Tee intersection</div>
                             <Field label="Curb return (ft)"><NumInput style={numInput} value={Math.round(curR)} min={0} onCommit={(n) => setRoadTee(selEl, tj.throughId, { returnR: n })} /></Field>
                             <Field label="Throat flare (ft)"><NumInput style={numInput} value={Math.round(curFlare)} min={0} onCommit={(n) => setRoadTee(selEl, tj.throughId, { flare: n })} /></Field>
                             <div style={{ fontSize: 10.5, color: PAL.muted, marginTop: 4, lineHeight: 1.4 }}>Rounds the curb returns where this road meets the through road{myTees.length > 1 ? ` (${myTees.length} tees)` : ""}. Larger return / flare widens the throat. Seeded from the road class; returns clamp to fit.</div>
@@ -17148,7 +17227,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         const curFlare = selEl.driveTee && selEl.driveTee.flare > 0 ? selEl.driveTee.flare : 0;
                         return (
                           <div style={{ marginTop: 8 }}>
-                            <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", margin: "2px 0 6px" }}>Drive intersection · {kindLbl}</div>
+                            <div style={subHead}>Drive intersection · {kindLbl}</div>
                             <Field label="Curb return (ft)"><NumInput style={numInput} value={Math.round(curR)} min={0} onCommit={(n) => setRoadDrive(selEl, { returnR: n })} /></Field>
                             <Field label="Throat flare (ft)"><NumInput style={numInput} value={Math.round(curFlare)} min={0} onCommit={(n) => setRoadDrive(selEl, { flare: n })} /></Field>
                             <div style={{ fontSize: 10.5, color: PAL.muted, marginTop: 4, lineHeight: 1.4 }}>Where this road meets the {kindLbl}. Seeded {dj.kind === "truckcourt" ? "truck-scale (≈50′)" : "car-scale (≈20′)"}; returns clamp to fit.</div>
@@ -17327,7 +17406,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
 
                         {grpHdr("Structure")}
                         <Field label="Clear height (ft)">
-                          <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                          <span style={ROW4}>
                             <NumInput style={{ ...numInput, width: 52 }} value={props.clearHeight.value} min={1} onCommit={(n) => { pushHistory(); setSelEl({ clearHeightOverride: n }); }} />
                             {props.clearHeight.overridden
                               ? <button title="Revert to auto (by size)" onClick={() => { pushHistory(); setSelEl({ clearHeightOverride: null }); }} style={resetBtn}>set ↺</button>
@@ -17335,7 +17414,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           </span>
                         </Field>
                         <Field label="Slab (in)">
-                          <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                          <span style={ROW4}>
                             <NumInput style={{ ...numInput, width: 52 }} value={props.slab.value} min={1} onCommit={(n) => { pushHistory(); setSelEl({ slabThicknessOverride: n }); }} />
                             {props.slab.overridden
                               ? <button title="Revert to auto (by size)" onClick={() => { pushHistory(); setSelEl({ slabThicknessOverride: null }); }} style={resetBtn}>set ↺</button>
@@ -17351,7 +17430,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           const gg = computeBuildingGrid({ length: footprintLength(b), depth: footprintDepth(b), dock: b.dock || "cross", grid: grd });
                           const ovRow = (label, valueShown, ovKey, floor) => (
                             <Field label={label} key={ovKey}>
-                              <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                              <span style={ROW4}>
                                 <NumInput style={{ ...numInput, width: 52 }} value={Math.round(valueShown)} min={floor} onCommit={(n) => { pushHistory(); setSelEl({ [ovKey]: n }); }} />
                                 {b[ovKey] != null
                                   ? <button title="Revert to plan default" onClick={() => { pushHistory(); setSelEl({ [ovKey]: null }); }} style={resetBtn}>set ↺</button>
@@ -17443,7 +17522,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     const q = roadQuantities(selEl, roadTravel(selEl), roadLengthOf(selEl));
                     return (
                       <div style={{ marginTop: 8 }}>
-                        <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", margin: "2px 0 6px" }}>Curb &amp; paving (cost)</div>
+                        <div style={subHead}>Curb &amp; paving (cost)</div>
                         <Field label="Curb type">
                           <select style={{ ...numInput, width: 120, fontFamily: "inherit" }} value={ct} onChange={(e) => setRoadCost(selEl, { curbType: e.target.value })}>
                             {COST_CURB_TYPES.map((k) => <option key={k} value={k}>{CURB_TYPE_META[k].label}</option>)}
@@ -17470,7 +17549,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   })()}
                   {selEl.type === "trailer" && !selEl.points && (
                     <div style={{ marginTop: 4 }}>
-                      <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", margin: "2px 0 6px" }}>Terminal curb</div>
+                      <div style={subHead}>Terminal curb</div>
                       <div style={{ display: "flex", gap: 6 }}>
                         <button style={{ ...chip, flex: 1, ...(curbWidthOf(selEl) === CURB_6 ? { borderColor: PAL.accent, color: PAL.accent, fontWeight: 600 } : {}) }} onClick={() => setCurbW(selEl, CURB_6)}>6″ mono</button>
                         <button style={{ ...chip, flex: 1, ...(curbWidthOf(selEl) === CURB_12 ? { borderColor: PAL.accent, color: PAL.accent, fontWeight: 600 } : {}) }} onClick={() => setCurbW(selEl, CURB_12)}>12″ heavy</button>
@@ -17528,9 +17607,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 return (
                   <div style={{ marginTop: 8 }}>
                     <Field label="Pad elev. (ft NAVD88)">
-                      <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <span style={ROW6}>
                         <NumInput allowClear style={{ ...numInput, width: 64 }} value={selEl.padElevFt ?? ""} placeholder={auto != null ? `auto ${f1(auto)}` : "auto"} onCommit={(n) => { pushHistory(); setSelEl({ padElevFt: Number.isFinite(n) ? n : null }); }} />
-                        {selEl.padElevFt != null && <button style={{ ...chip, padding: "2px 8px", fontSize: 10.5 }} title="Back to automatic (slab FF, dock zones minus the dock drop)" onClick={() => { pushHistory(); setSelEl({ padElevFt: null }); }}>Auto</button>}
+                        {selEl.padElevFt != null && <button style={chipSm} title="Back to automatic (slab FF, dock zones minus the dock drop)" onClick={() => { pushHistory(); setSelEl({ padElevFt: null }); }}>Auto</button>}
                       </span>
                     </Field>
                     <div style={{ fontSize: 10, color: PAL.muted, lineHeight: 1.45, marginTop: 2 }}>
@@ -17558,11 +17637,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       </label>
                     )}
                     <Field label="Grading slope (%)">
-                      <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <span style={ROW6}>
                         <NumInput allowClear style={{ ...numInput, width: 64 }} value={g.slopePct ?? ""} min={0}
                           placeholder={rule ? `auto ${gradingChipLabel(rule).split(" — ")[0]}` : "auto"}
                           onCommit={(n) => setGradingEl({ slopePct: Number.isFinite(n) ? n : null })} />
-                        {g.slopePct != null && <button style={{ ...chip, padding: "2px 8px", fontSize: 10.5 }} title="Back to automatic (the class band)" onClick={() => setGradingEl({ slopePct: null })}>Auto</button>}
+                        {g.slopePct != null && <button style={chipSm} title="Back to automatic (the class band)" onClick={() => setGradingEl({ slopePct: null })}>Auto</button>}
                       </span>
                     </Field>
                     <div style={{ fontSize: 10, color: PAL.muted, lineHeight: 1.45, marginTop: 2 }}>
@@ -17644,7 +17723,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 const pondRow = (label, val, tag) => (
                   <div key={label} style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", padding: "3px 0", gap: 8 }}>
                     <span style={{ fontSize: 11.5, color: PAL.muted }}>{label}</span>
-                    <span style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
+                    <span style={ROWB6}>
                       <span style={{ fontFamily: NUM_FONT, fontSize: 12.5, color: PAL.ink, fontWeight: 650, fontVariantNumeric: TABULAR_NUMS }}>{val}</span>
                       {tag ? <SourceTag code={tag.code} label={label} basis={tag.basis} /> : null}
                     </span>
@@ -17833,14 +17912,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       <span style={{ display: "flex", alignItems: "center", gap: 6, whiteSpace: "nowrap" }}>
                         <NumInput allowClear style={{ ...numInput, width: 60 }} value={det.depth ?? ""} placeholder={`~${f1(depth)}`} min={1} onCommit={(n) => setDet({ depth: Number.isFinite(n) ? n : null })} />
                         <span style={{ fontSize: 11, color: PAL.muted }}>ft</span>
-                        {det.depth != null && <button style={{ ...chip, padding: "2px 8px", fontSize: 10.5 }} title="Clear: back to the screening default / solver suggestion" onClick={() => setDet({ depth: null })}>×</button>}
+                        {det.depth != null && <button style={chipSm} title="Clear: back to the screening default / solver suggestion" onClick={() => setDet({ depth: null })}>×</button>}
                       </span>,
                       "water depth + freeboard")}
                     {g_glanceRow("Rim",
                       <span style={{ display: "flex", alignItems: "center", gap: 6, whiteSpace: "nowrap" }}>
                         <NumInput allowClear style={{ ...numInput, width: 58 }} value={det.tobElev ?? ""} placeholder={pondAuto.tobElev ? `~${f1(pondAuto.tobElev.value)}` : "opt."} onCommit={(n) => setDet({ tobElev: Number.isFinite(n) ? n : null })} />
                         <span style={{ fontSize: 10.5, color: PAL.muted, whiteSpace: "nowrap" }}>{g_rimText}{g_floodLevel != null ? ` · flood ${f1(g_floodLevel)}′${g_facts.floodEstimated ? " est." : ""}` : ""}</span>
-                        {det.tobElev != null && <button style={{ ...chip, padding: "2px 8px", fontSize: 10.5 }} title={pondAuto.tobElev ? `Clear: back to auto (${pondAuto.tobElev.source})` : "Clear: label rings by depth instead of elevation"} onClick={() => setDet({ tobElev: null })}>×</button>}
+                        {det.tobElev != null && <button style={chipSm} title={pondAuto.tobElev ? `Clear: back to auto (${pondAuto.tobElev.source})` : "Clear: label rings by depth instead of elevation"} onClick={() => setDet({ tobElev: null })}>×</button>}
                       </span>,
                       "Set the top-of-bank elevation to label rings as real elevations instead of depths. Rim vs grade and the flood level read to the right.")}
                     {g_glanceRow("Holds (gross)", g_glanceNum(`${f1(g_holdsAcFt)} ac-ft`), "The full geometric tub volume before the flood / tailwater dead-storage split. The USABLE / achievable storage (what counts toward detention, and what the map + verdict report) is lower; see the verdict.", `${f0(r.vol)} cf stored`)}
@@ -18045,18 +18124,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       </div>
                     )}
                     <Field label="Freeboard (ft)">
-                      <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <span style={ROW6}>
                         <NumInput allowClear style={numInput} value={det.freeboard ?? ""} placeholder={`~${f1(pondAuto.freeboard.value)}`} min={0} onCommit={(n) => setDet({ freeboard: Number.isFinite(n) ? n : null })} />
                         {det.freeboard != null
-                          ? <button style={{ ...chip, padding: "2px 8px", fontSize: 10.5 }} title={`Clear: back to auto (${pondAuto.freeboard.source})`} onClick={() => setDet({ freeboard: null })}>×</button>
+                          ? <button style={chipSm} title={`Clear: back to auto (${pondAuto.freeboard.source})`} onClick={() => setDet({ freeboard: null })}>×</button>
                           : <span style={{ fontSize: 10, color: PAL.muted, whiteSpace: "nowrap" }} title={pondAuto.freeboard.verified ? "Verified criteria value" : "Unverified — confirm against the criteria manual"}>· {pondAuto.freeboard.source}</span>}
                       </span>
                     </Field>
                     <Field label="Side slope (n:1 H:V)">
-                      <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <span style={ROW6}>
                         <NumInput allowClear style={numInput} value={det.slope ?? ""} placeholder={`~${f1(pondAuto.slope.value)}`} min={1} onCommit={(n) => setDet({ slope: Number.isFinite(n) ? n : null })} />
                         {det.slope != null
-                          ? <button style={{ ...chip, padding: "2px 8px", fontSize: 10.5 }} title={`Clear: back to auto (${pondAuto.slope.source})`} onClick={() => setDet({ slope: null })}>×</button>
+                          ? <button style={chipSm} title={`Clear: back to auto (${pondAuto.slope.source})`} onClick={() => setDet({ slope: null })}>×</button>
                           : <span style={{ fontSize: 10, color: PAL.muted, whiteSpace: "nowrap" }} title={pondAuto.slope.verified ? "Verified criteria value" : "Unverified — confirm against the criteria manual"}>· {pondAuto.slope.source}</span>}
                       </span>
                     </Field>
@@ -18077,10 +18156,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           {on && (
                             <div style={{ marginTop: 6 }}>
                               <Field label="Contour interval (ft)">
-                                <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                                <span style={ROW6}>
                                   <NumInput style={{ ...numInput, width: 56 }} value={det.contourInterval ?? autoContourInterval(depth)} min={0.5} onCommit={(n) => setDet({ contourInterval: Math.max(0.5, n) })} />
                                   {det.contourInterval != null && (
-                                    <button style={{ ...chip, padding: "2px 8px", fontSize: 10.5 }} title="Back to the smart automatic spacing" onClick={() => setDet({ contourInterval: null })}>Auto</button>
+                                    <button style={chipSm} title="Back to the smart automatic spacing" onClick={() => setDet({ contourInterval: null })}>Auto</button>
                                   )}
                                 </span>
                               </Field>
@@ -18099,10 +18178,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       const usingEst = det.poolElev == null && Number.isFinite(poolEst);
                       return (
                         <Field label="Permanent pool elev. (ft)">
-                          <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                          <span style={ROW6}>
                             <NumInput allowClear style={{ ...numInput, width: 64 }} value={det.poolElev ?? (Number.isFinite(poolEst) ? poolEst : "")} placeholder="water table" onCommit={(n) => setDet({ poolElev: Number.isFinite(n) ? n : null })} />
                             {det.poolElev != null
-                              ? <button style={{ ...chip, padding: "2px 8px", fontSize: 10.5 }} title="Clear: back to the estimated water-table pool" onClick={() => setDet({ poolElev: null })}>×</button>
+                              ? <button style={chipSm} title="Clear: back to the estimated water-table pool" onClick={() => setDet({ poolElev: null })}>×</button>
                               : usingEst && <span title="Screening estimate: the seasonal-high water table (grade minus depth to water). Refine with a geotech boring." style={estPillStyle}>EST</span>}
                           </span>
                         </Field>
@@ -18113,10 +18192,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         estimate (the flood WSE, else existing grade) so it's never a blank demanding an
                         expert value — the developer's typed value overrides. */}
                     <Field label="Receiving water (100-yr tailwater) elev. (ft)">
-                      <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <span style={ROW6}>
                         <NumInput allowClear style={{ ...numInput, width: 64 }} value={det.receivingFlowlineElev ?? (Number.isFinite(g_twEst.valueFt) ? Math.round(g_twEst.valueFt * 10) / 10 : "")} placeholder="outfall elev" onCommit={(n) => setDet({ receivingFlowlineElev: Number.isFinite(n) ? n : null })} />
                         {det.receivingFlowlineElev != null
-                          ? <button style={{ ...chip, padding: "2px 8px", fontSize: 10.5 }} title="Clear: back to the estimate" onClick={() => setDet({ receivingFlowlineElev: null })}>×</button>
+                          ? <button style={chipSm} title="Clear: back to the estimate" onClick={() => setDet({ receivingFlowlineElev: null })}>×</button>
                           : Number.isFinite(g_twEst.valueFt)
                             ? <span title={`Estimated from ${g_twEst.sourceLabel || "channel data"}. ${g_twEst.sourceTip || ""} The receiving channel's stage at the outfall; refine with the outfall survey. Storage below it can't drain by gravity (dead).`} style={estPillStyle}>EST</span>
                             : <span title="The receiving-water level comes from the drainage district channel, FEMA InFRM, a USGS gauge, or a terrain-derived channel flowline (never site grade). None resolved here, so enter the outfall elevation or check the Drainage district group. Leaving it blank means the gravity-discharge check is skipped, not failed." style={{ ...estPillStyle, color: PAL.warn }}>needs channel data</span>}
@@ -18136,10 +18215,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     {/* PR-G/PR-I — SOFT geotech screen: pre-filled with the depth to water ("don't dig
                         below groundwater"), else the 12-ft fallback. A warning, never a hard block. */}
                     <Field label="Max excavation depth (ft)">
-                      <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <span style={ROW6}>
                         <NumInput allowClear style={{ ...numInput, width: 64 }} value={det.maxExcavDepthFt ?? (Number.isFinite(g_maxExcavEst.valueFt) ? Math.round(g_maxExcavEst.valueFt * 10) / 10 : "")} placeholder={`${DEFAULT_MAX_EXCAV_DEPTH_FT}`} onCommit={(n) => setDet({ maxExcavDepthFt: Number.isFinite(n) ? n : null })} />
                         {det.maxExcavDepthFt != null
-                          ? <button style={{ ...chip, padding: "2px 8px", fontSize: 10.5 }} title="Clear: back to the estimate" onClick={() => setDet({ maxExcavDepthFt: null })}>×</button>
+                          ? <button style={chipSm} title="Clear: back to the estimate" onClick={() => setDet({ maxExcavDepthFt: null })}>×</button>
                           : Number.isFinite(g_maxExcavEst.valueFt) && <span title={`Screening estimate: ${g_maxExcavEst.source === "depth-to-water" ? "the seasonal-high depth to water (don't dig below groundwater)" : "a conservative default"}. Refine with a geotech boring.`} style={estPillStyle}>EST</span>}
                       </span>
                     </Field>
@@ -18247,7 +18326,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         out.push(
                           <div key="gw-dtw" style={{ marginTop: 6 }}>
                             <Field label="Depth to water (ft)">
-                              <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                              <span style={ROW6}>
                                 <NumInput allowClear style={{ ...numInput, width: 64 }} value={dtw ?? (Number.isFinite(dtwEstField.valueFt) ? dtwEstField.valueFt : "")} placeholder="—" min={0} onCommit={(n) => setDet({ depthToWaterFt: Number.isFinite(n) && n >= 0 ? n : null })} />
                                 {dtw == null && dtwEstField.estimated && <span title="Screening estimate: a shallow Gulf-Coast seasonal-high water table. Refine with SSURGO / a TWDB well / a geotech boring." style={estPillStyle}>EST</span>}
                                 <RowInfo label="Depth to water (ft)" sections={[{ text: "Seasonal high water table (SSURGO / TWDB well). Pre-filled with a regional screening estimate until a measured value is entered." }]} />
@@ -18470,15 +18549,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         <div style={{ marginTop: 12, borderTop: `1px solid ${PAL.panelLine}`, paddingTop: 9 }}>
                           <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 700, marginBottom: 7 }}>Sizing inputs (screening)</div>
                           <Field label="Drainage area (ac)">
-                            <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                            <span style={ROW6}>
                               <NumInput allowClear style={{ ...numInput, width: 64 }} value={Math.round(da * 100) / 100} min={0} onCommit={(n) => setDet({ daAcres: n > 0 ? n : null })} />
-                              {det.daAcres != null && <button style={{ ...chip, padding: "2px 8px", fontSize: 10.5 }} title="Back to the whole site" onClick={() => setDet({ daAcres: null })}>Site</button>}
+                              {det.daAcres != null && <button style={chipSm} title="Back to the whole site" onClick={() => setDet({ daAcres: null })}>Site</button>}
                             </span>
                           </Field>
                           <Field label="Impervious %">
-                            <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                            <span style={ROW6}>
                               <NumInput allowClear style={{ ...numInput, width: 64 }} value={Math.round(imp * 10) / 10} min={0} max={100} onCommit={(n) => setDet({ daImpPct: Number.isFinite(n) ? Math.max(0, Math.min(100, n)) : null })} />
-                              {det.daImpPct != null && <button style={{ ...chip, padding: "2px 8px", fontSize: 10.5 }} title="Back to the plan's auto value" onClick={() => setDet({ daImpPct: null })}>Auto</button>}
+                              {det.daImpPct != null && <button style={chipSm} title="Back to the plan's auto value" onClick={() => setDet({ daImpPct: null })}>Auto</button>}
                             </span>
                           </Field>
                           {det.daImpPct == null && <div style={smallNote}>Impervious % auto from the plan.</div>}
@@ -18489,7 +18568,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           </Field>
                           <div id={`pond-release-field-${selEl.id}`}>
                             <Field label="Allowable release (cfs)">
-                              <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                              <span style={ROW6}>
                                 <NumInput allowClear style={{ ...numInput, width: 64 }} value={rel ?? ""} placeholder={suggested ? `≈${suggested.cfs}` : "—"} min={0} onCommit={(n) => setDet({ releaseRateCfs: Number.isFinite(n) ? n : null })} />
                                 {suggested && (
                                   <SourceTag code="estimate" label="Allowable release (cfs)" basis={`Suggested — pre-development (undeveloped/pasture) peak discharge, Modified Rational method (runoff coefficient ${suggested.runoffC}, ${suggested.tcMin}-min time of concentration), evaluated at each of ${detCriteria.label}'s required design storms (${detCriteria.requiredStorms.join("/")}-yr) — the smallest (most restrictive), the ${suggested.governingStormYr}-yr storm, governs. ${detCriteria.label} publishes no cfs/ac release cap, so Post ≤ Pre screens the outlet against the site's own computed pre-development peak. A screening estimate — type your own release to override.`} />
@@ -18824,9 +18903,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                               : `Gravity outfall looks feasible here, so a pump is optional (up to ${f1(pumpAllow.allowedPumpCfs)} cfs if used).`}
                           </div>
                           <Field label="Override pump rate (cfs, optional)">
-                            <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                            <span style={ROW6}>
                               <NumInput allowClear style={{ ...numInput, width: 72 }} value={det.pumpRateCfs ?? ""} placeholder={`≈${f1(pumpAllow.derivedCfs)}`} min={0} onCommit={(n) => setDet({ pumpRateCfs: Number.isFinite(n) && n >= 0 ? n : null })} />
-                              {pumpAllow.overridden && <button style={{ ...chip, padding: "2px 8px", fontSize: 10.5 }} title="Clear: back to the criteria-derived rate" onClick={() => setDet({ pumpRateCfs: null })}>×</button>}
+                              {pumpAllow.overridden && <button style={chipSm} title="Clear: back to the criteria-derived rate" onClick={() => setDet({ pumpRateCfs: null })}>×</button>}
                             </span>
                           </Field>
                         </div>
@@ -19023,7 +19102,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       const critRow = (label, cell, unit) => (cell && Number.isFinite(cell.value)) ? (
                         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "3px 0", borderBottom: `1px solid ${PAL.panelLine}` }}>
                           <span style={{ fontSize: 11.5, color: PAL.muted }}>{label}</span>
-                          <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                          <span style={ROW6}>
                             <span style={{ fontFamily: NUM_FONT, fontSize: 12, color: PAL.ink, fontWeight: 650 }}>{cell.value}{unit}</span>
                             <SourceTag code={cell.verified ? "code" : "unverified"} label={label} basis={cell.source ? [{ text: String(cell.source) }] : undefined} />
                           </span>
@@ -19044,7 +19123,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                             )}
                             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "3px 0", borderTop: `1px solid ${PAL.panelLine}`, marginTop: 2 }}>
                               <span style={{ fontSize: 11.5, color: PAL.muted }}>Receiving water (outfall)</span>
-                              <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                              <span style={ROW6}>
                                 {Number.isFinite(twR.valueFt)
                                   ? <><span style={{ fontFamily: NUM_FONT, fontSize: 12, color: PAL.ink, fontWeight: 650 }}>{f1(twR.valueFt)}′</span><SourceTag code={twR.estimated ? "estimate" : "yours"} label={twR.sourceLabel || "Receiving water"} basis={twR.sourceTip ? [{ text: twR.sourceTip }] : undefined} /></>
                                   : <span style={{ fontSize: 11, color: PAL.warn, fontWeight: 600, cursor: "help" }} title={tailwaterNote(twR)}>needs channel data</span>}
@@ -19060,12 +19139,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     {curStyle && (
                     <Collapse sectionId="pond-appearance" title="Appearance" defaultOpen={false} summary="fill · outline · opacity">
                       <Field label="Fill">
-                        <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                        <span style={ROW6}>
                           <ColorField value={toHex6(curStyle.fill)} {...colorCtl((v) => setSelEl({ fill: v }))} seed={COLOR_SEED} title="Fill color" />
                         </span>
                       </Field>
                       <Field label="Outline">
-                        <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                        <span style={ROW6}>
                           <ColorField value={toHex6(curStyle.stroke)} {...colorCtl((v) => setSelEl({ stroke: v }))} seed={COLOR_SEED} title="Outline color" />
                         </span>
                       </Field>
@@ -19095,12 +19174,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           {!multiStyleable && selEl && curStyle && selEl.type !== "pond" && (
             <Section title="Properties">
               <Field label="Fill">
-                <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <span style={ROW6}>
                   <ColorField value={toHex6(curStyle.fill)} {...colorCtl((v) => setSelEl({ fill: v }))} seed={COLOR_SEED} title="Fill color" />
                 </span>
               </Field>
               <Field label="Outline">
-                <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <span style={ROW6}>
                   <ColorField value={toHex6(curStyle.stroke)} {...colorCtl((v) => setSelEl({ stroke: v }))} seed={COLOR_SEED} title="Outline color" />
                 </span>
               </Field>
@@ -19414,26 +19493,37 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       )}
 
       {(pobMode || routeMode || overlapWarn || deedAlignHint) && (
-        <div style={{ position: "fixed", left: "50%", bottom: 84, transform: "translateX(-50%)", zIndex: 2500, maxWidth: "80vw",
-          background: (deedAlignHint && !pobMode) ? PAL.accent : overlapWarn.startsWith("⚠") ? "#7f1d1d" : (pobMode || routeMode ? PAL.accent : "#15803d"),
-          color: "#fff", padding: "9px 16px", borderRadius: 99, fontSize: 12.5, fontWeight: 600, boxShadow: "0 8px 28px rgba(0,0,0,0.3)", display: "flex", gap: 12, alignItems: "center" }}>
+        <div style={{ ...toastPill, background: (deedAlignHint && !pobMode) ? PAL.accent : overlapWarn.startsWith("⚠") ? "#7f1d1d" : (pobMode || routeMode ? PAL.accent : "#15803d") }}>
           <span>{pobMode ? (pobMode.queueTotal ? `Deed ${(pobMode.placed || 0) + 1} of ${pobMode.queueTotal}${pobMode.name ? ` — ${pobMode.name}` : ""}: click its point of beginning (Esc cancels all).` : "Click the point of beginning on the plan to anchor the description (Esc to cancel).") : (deedAlignHint ? deedAlignHint.msg : overlapWarn)}</span>
-          {(pobMode || routeMode) && <button onClick={() => { setPobMode(null); setRouteMode(null); setOverlapWarn(""); }} style={{ border: "1px solid rgba(255,255,255,0.5)", background: "transparent", color: "#fff", borderRadius: 7, padding: "3px 9px", cursor: "pointer", fontSize: 11.5, fontWeight: 600 }}>Cancel</button>}
+          {(pobMode || routeMode) && <button onClick={() => { setPobMode(null); setRouteMode(null); setOverlapWarn(""); }} style={toastGhostBtn}>Cancel</button>}
           {deedAlignHint && !pobMode && !routeMode && <>
-            <button onClick={() => alignDeedToParcel(deedAlignHint.id)} style={{ border: "none", background: "var(--surface-raised)", color: PAL.accent, borderRadius: 7, padding: "4px 12px", cursor: "pointer", fontSize: 11.5, fontWeight: 700, whiteSpace: "nowrap" }}>Align to parcel</button>
-            <button onClick={() => setDeedAlignHint(null)} style={{ border: "1px solid rgba(255,255,255,0.5)", background: "transparent", color: "#fff", borderRadius: 7, padding: "3px 9px", cursor: "pointer", fontSize: 11.5, fontWeight: 600, whiteSpace: "nowrap" }}>Dismiss</button>
+            <button onClick={() => alignDeedToParcel(deedAlignHint.id)} style={toastActionBtn}>Align to parcel</button>
+            <button onClick={() => setDeedAlignHint(null)} style={toastGhostBtn}>Dismiss</button>
           </>}
         </div>
       )}
 
+      {/* NEW-1 — "you clicked a parcel and nothing happened, here's why" — the same bottom-center
+          toast surface as the pill above (same geometry, same type, same shadow), riding one notch
+          higher when that one is already occupied so neither message can swallow the other. The
+          inline action turns selection back ON right where the click failed, so the user never has
+          to go find the header control. Only ever raised by a press that actually hit a parcel. */}
+      {parcelHint && (
+        <div data-testid="parcel-select-hint" role="status"
+          style={{ ...toastPill, background: PAL.accent, bottom: (pobMode || routeMode || overlapWarn || deedAlignHint) ? 132 : 84 }}>
+          <span>Parcel selection is off — that click panned the map.</span>
+          <button data-testid="parcel-select-hint-on" onClick={() => setParcelSelect(true)} style={toastActionBtn}>Turn it on</button>
+          <button aria-label="Dismiss" onClick={dismissParcelHint} style={toastGhostBtn}>Dismiss</button>
+        </div>
+      )}
+
       {ovCalib && (
-        <div style={{ position: "fixed", left: "50%", bottom: 84, transform: "translateX(-50%)", zIndex: 2500, maxWidth: "80vw",
-          background: PAL.accent, color: "#fff", padding: "9px 16px", borderRadius: 99, fontSize: 12.5, fontWeight: 600, boxShadow: "0 8px 28px rgba(0,0,0,0.3)", display: "flex", gap: 12, alignItems: "center" }}>
+        <div style={{ ...toastPill, background: PAL.accent }}>
           <span>{ovCalibMsg()} {ovCalib.kind === "align" && Math.floor(ovCalib.pts.length / 2) >= 2 ? <span style={{ opacity: 0.75 }}>· or add more pairs for a better fit</span> : null} <span style={{ opacity: 0.75 }}>(Esc to cancel)</span></span>
           {ovCalib.kind === "align" && Math.floor(ovCalib.pts.length / 2) >= 2 && (
-            <button onClick={applyOvAlign} style={{ border: "1px solid #fff", background: "var(--surface-raised)", color: PAL.accent, borderRadius: 7, padding: "3px 11px", cursor: "pointer", fontSize: 11.5, fontWeight: 700 }}>Apply {Math.floor(ovCalib.pts.length / 2)} pts</button>
+            <button onClick={applyOvAlign} style={{ ...toastActionBtn, border: "1px solid #fff", padding: "3px 11px" }}>Apply {Math.floor(ovCalib.pts.length / 2)} pts</button>
           )}
-          <button onClick={() => setOvCalib(null)} style={{ border: "1px solid rgba(255,255,255,0.5)", background: "transparent", color: "#fff", borderRadius: 7, padding: "3px 9px", cursor: "pointer", fontSize: 11.5, fontWeight: 600 }}>Cancel</button>
+          <button onClick={() => setOvCalib(null)} style={toastGhostBtn}>Cancel</button>
         </div>
       )}
 
@@ -20747,7 +20837,7 @@ function YieldPanel({
   const row = (label, value, sub, muted, tag) => (
     <div key={label} style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", padding: "5px 0", borderBottom: `1px solid ${Y.hairline}`, gap: 8 }}>
       <span style={{ fontSize: 12, color: muted ? Y.muted : Y.rowLabel }}>{label}</span>
-      <span style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
+      <span style={ROWB6}>
         <span style={{ fontFamily: NUM_FONT, fontSize: 13, color: muted ? Y.muted : Y.text, fontWeight: 650, fontVariantNumeric: TABULAR_NUMS }}>
           {value}{sub ? <span style={{ color: Y.muted, fontWeight: 400, fontSize: 10.5 }}> {sub}</span> : null}
         </span>
@@ -20786,7 +20876,7 @@ function YieldPanel({
               return (
                 <div key={key || label} title={info || ""} style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 10, padding: "5px 0", borderBottom: `1px solid ${Y.hairline}`, cursor: info ? "help" : "default" }}>
                   <span style={{ fontSize: 12, color: Y.rowLabel }}>{label}{info ? <span style={{ fontSize: 9.5, color: Y.muted, marginLeft: 4 }} aria-hidden="true">ⓘ</span> : null}</span>
-                  <span style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
+                  <span style={ROWB6}>
                     <span style={{ fontFamily: NUM_FONT, fontSize: 13, color: vColor, fontWeight: 650, fontVariantNumeric: TABULAR_NUMS, textAlign: "right" }}>
                       {value}{sub ? <span style={{ color: Y.muted, fontWeight: 400, fontSize: 10.5 }}> {sub}</span> : null}
                     </span>
@@ -20833,7 +20923,7 @@ function YieldPanel({
               if (!showAuth && !showChan && !showOutfall && !dn) return null;
               const rows = [];
               if (showAuth) rows.push(
-                <div key="auth" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "2px 0" }}>
+                <div key="auth" style={ROWSB}>
                   <span style={{ fontSize: 11, color: Y.rowLabel }}>Reviewing agency</span>
                   <select value={ac.override || ""} onChange={(e) => ac.onSet(e.target.value || null)}
                     style={{ fontSize: 11, padding: "2px 6px", borderRadius: 6, border: `1px solid ${Y.border}`, background: Y.cardBg, color: Y.text, fontFamily: "inherit", maxWidth: 180 }}>
@@ -20857,7 +20947,7 @@ function YieldPanel({
                 else { msg = "Couldn't confirm from HCFCD's map server whether a channel is adjacent — the stricter reading is shown. Set Yes or No to tell the tool directly."; warn = true; }
                 rows.push(
                   <div key="chan" style={{ marginTop: showAuth ? 6 : 0 }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "2px 0" }}>
+                    <div style={ROWSB}>
                       <span style={{ fontSize: 11, color: Y.rowLabel }}>Drains to HCFCD channel</span>
                       <span style={{ display: "flex", gap: 4, width: 156 }}>
                         {seg("Auto", cd.override == null, () => cd.onSet(null), "a")}
@@ -20884,7 +20974,7 @@ function YieldPanel({
                   : "Unincorporated Harris County sets the minimum detention by how the site drains out: to a storm sewer → 0.75, to a roadside ditch → 1.0 ac-ft/ac. Pick one for a single number; left on Auto, the 0.75–1.0 range is shown.";
                 rows.push(
                   <div key="outfall" style={{ marginTop: rows.length ? 6 : 0 }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "2px 0" }}>
+                    <div style={ROWSB}>
                       <span style={{ fontSize: 11, color: Y.rowLabel }}>Outfall type</span>
                       <span style={{ display: "flex", gap: 4, width: 200 }}>
                         {seg("Auto", ov == null || ov === "unknown", () => ot.onSet(null), "a", "Outfall type")}
@@ -21327,7 +21417,7 @@ function YieldPanel({
                           { text: "It matters because the higher line means more storage was taken away, so more has to be given back. A design that is barely over the requirement can flip to short on this one choice." },
                         ]} />
                       </span>
-                      <span style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
+                      <span style={ROWB6}>
                         <span style={{ fontSize: 12, fontWeight: 600, color: mismatch ? Y.warnText : Y.text, whiteSpace: "nowrap" }}>
                           {d.offsetSurface.label}{d.offsetElevFt != null ? ` · ${f1(d.offsetElevFt)}′` : ""}
                         </span>
@@ -21457,7 +21547,7 @@ function YieldPanel({
                         ]} />
                       </div>
                       {sw.rows.map((r) => (
-                        <div key={`ws-${r.stepFt}`} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "2px 0" }}>
+                        <div key={`ws-${r.stepFt}`} style={ROWSB}>
                           <span style={{ fontFamily: NUM_FONT, fontSize: 11, color: r.stepFt === 0 ? Y.text : Y.muted, fontVariantNumeric: TABULAR_NUMS, whiteSpace: "nowrap", minWidth: 62 }}>
                             {r.stepFt === 0 ? "now" : `+${f1(r.stepFt)}′`} · {f1(r.wseFt)}′
                           </span>
@@ -21593,7 +21683,7 @@ function YieldPanel({
               // every "blank = auto/unknown" input carries an explicit Clear chip — the
               // expert bypass especially must never be one-way.
               const fmRow = (label, key, placeholder, title) => (
-                <div key={"fm-" + key} id={"drain-field-" + key} title={title || ""} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "2px 0" }}>
+                <div key={"fm-" + key} id={"drain-field-" + key} title={title || ""} style={ROWSB}>
                   <span style={{ fontSize: 11, color: Y.muted }}>{label}</span>
                   <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
                     {Number.isFinite(fm.settings[key]) && (
@@ -21631,7 +21721,7 @@ function YieldPanel({
                   : (hasAuto ? opts.tag : null);
                 if (manual == null && hasAuto && !editing) {
                   return (
-                    <div key={"fm-" + key} id={"drain-field-" + key} title={title || ""} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "2px 0" }}>
+                    <div key={"fm-" + key} id={"drain-field-" + key} title={title || ""} style={ROWSB}>
                       <span style={{ fontSize: 11, color: Y.muted }}>{label}</span>
                       <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
                         {/* NEW-3 — the one-click accept: writes the suggestion into the field
@@ -21650,7 +21740,7 @@ function YieldPanel({
                   );
                 }
                 return (
-                  <div key={"fm-" + key} id={"drain-field-" + key} title={title || ""} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "2px 0" }}>
+                  <div key={"fm-" + key} id={"drain-field-" + key} title={title || ""} style={ROWSB}>
                     <span style={{ fontSize: 11, color: Y.muted }}>{label}</span>
                     <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
                       {manual != null && (
@@ -21675,7 +21765,7 @@ function YieldPanel({
                     style={{ fontSize: 10, fontWeight: 800, letterSpacing: "0.05em", textTransform: "uppercase", color: Y.rowLabel, marginBottom: 4, cursor: "help" }}>
                     Floodplain mitigation inputs (ft NAVD88)<span style={{ fontSize: 9, marginLeft: 4, letterSpacing: 0 }} aria-hidden="true">ⓘ</span>
                   </div>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "2px 0" }}>
+                  <div style={ROWSB}>
                     <span style={{ fontSize: 11, color: Y.muted }}>Jurisdiction</span>
                     {/* B790 — Auto is a real, reachable state (the B750 agency-picker pattern):
                         selecting it writes jurKey:null so detection re-engages; a hand-pick
@@ -21801,7 +21891,7 @@ function YieldPanel({
                     const gradeSuffix = isGrade && gradeDet
                       ? ` (sampled ${f1(gradeDet.minFt)}–${f1(gradeDet.maxFt)}′${gradeDet.spreadFt > 2 ? " · sloped reach — coarse" : ""})` : "";
                     return (
-                      <div key="fm-est-wse" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "2px 0" }}
+                      <div key="fm-est-wse" style={ROWSB}
                         title={`${estWseNote(est.provider)}${screeningStudyNote(fm.screening)}`}>
                         <span style={{ fontSize: 10.5, color: "var(--warn-text)", lineHeight: 1.4 }}>
                           Est. BFE ≈ {f1(est.wseFt)}′ — {est.providerLabel || wseProvLabel(est.provider)} (screening estimate){gradeSuffix}
@@ -22292,7 +22382,7 @@ function YieldPanel({
                 rows.push(
                   <div key="det-basis" style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8, padding: "5px 0" }}>
                     <span style={{ fontSize: 12, color: Y.rowLabel }}>Requirement basis</span>
-                    <span style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
+                    <span style={ROWB6}>
                       <span style={{ fontSize: 12, color: Y.text, fontWeight: 600, whiteSpace: "nowrap" }}>{basisVal}</span>
                       <SourceTag code="code" label="Requirement basis" basis={basisTitle} />
                     </span>
