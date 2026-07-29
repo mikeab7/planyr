@@ -91,7 +91,14 @@ test.describe("NEW-9 — a road's name label can ride the centre line", () => {
     return label(page);
   };
 
+  // Each placement is measured in its OWN freshly-seeded page — a reload silently reverts the setting
+  // through the harness's init script and makes all three measure identically, which is the false pass
+  // this harness hit first. That means two-to-three full loads of the owner's REAL plan per test, and
+  // one load alone runs to a good fraction of the 30s default. Budget for the reloads, as
+  // project-delete-bin.spec.js does, rather than trading away the freshly-seeded page that makes the
+  // measurement honest.
   test("centre / beside / inside are three DISTINCT places, and centre is the one that rides the line", async ({ page }) => {
+    test.setTimeout(150_000);
     const center = await at(page, "center");
     expect(center.length, "the label must render at all").toBeGreaterThan(0);
     const off = await at(page, "off");
@@ -111,6 +118,7 @@ test.describe("NEW-9 — a road's name label can ride the centre line", () => {
   });
 
   test("a plan saved before this existed renders exactly as it did", async ({ page }) => {
+    test.setTimeout(150_000);
     // Only the old boolean present: true → inside, absent/false → just beside. No new field, no change.
     await loadPlan(page, (e) => (e.id === LOOP ? { ...e, inlineLabel: "BAUER HOCKLEY", labelSpacing: 600, labelInside: true } : e));
     await page.evaluate(() => window.__plannerView.centerOn(1645, 50, 0.6));
