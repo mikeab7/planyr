@@ -4,7 +4,7 @@ import {
   buildVectorQuery, buildQueryUrl, fetchVectorFeatures,
   featuresToGeoJson, simplifyGeoJson, styleFor,
   decideVectorOrImage, fetchCached,
-  pickTier, snapBbox, vectorKey,
+  pickTier, snapBbox, vectorKey, hitFeature, identifyRows,
 } from "../src/workspaces/site-planner/lib/vectorLayers.js";
 import { createGisCache } from "../src/workspaces/site-planner/lib/gisCache.js";
 
@@ -651,5 +651,83 @@ describe("VECTOR_SOURCES.txrrc_pipe — pipeline vector source (B751)", () => {
     const r = await fetchCached(s, { w: -95.1, s: 29.6, e: -94.9, n: 29.8 }, { cache, fetchJson, zoom: 15 });
     expect(r.data.features[0].geometry.type).toBe("LineString");
     expect(r.data.features[0].properties.COMMODITY_DESCRIPTION).toBe("CRUDE OIL");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// B1092 — the pure identify half: what is under a point, and what does its card say?
+// The report: clicking the BKDD easement band on the planner canvas produced only the
+// coordinate readout. The planner's Leaflet backdrop is pointer-events:none, so Leaflet
+// could never see that click; these are the primitives that let the canvas answer it
+// itself, off the same geometry and the same registry rows the map finder uses.
+// ---------------------------------------------------------------------------
+describe("hitFeature (B1092) — which feature is under the tap", () => {
+  const band = {
+    type: "Feature", properties: { width: 70, file: "WF-10.pdf" },
+    geometry: { type: "Polygon", coordinates: [[[-95.9, 29.77], [-95.89, 29.77], [-95.89, 29.78], [-95.9, 29.78], [-95.9, 29.77]]] },
+  };
+  const channel = {
+    type: "Feature", properties: { gnis_name: "Willow Fork", ftype: 336 },
+    geometry: { type: "LineString", coordinates: [[-95.895, 29.76], [-95.895, 29.79]] },
+  };
+  const fc = { type: "FeatureCollection", features: [band, channel] };
+
+  it("a polygon hits by CONTAINMENT — the easement band answers a tap inside it", () => {
+    expect(hitFeature(fc, { lat: 29.775, lng: -95.895 })).toBe(band);
+    expect(hitFeature(fc, { lat: 29.75, lng: -95.88 })).toBeNull();
+  });
+  it("a HOLE is not a hit (a doughnut's middle is outside the polygon)", () => {
+    const donut = { type: "Feature", properties: {}, geometry: { type: "Polygon", coordinates: [
+      [[0, 0], [4, 0], [4, 4], [0, 4], [0, 0]],
+      [[1, 1], [3, 1], [3, 3], [1, 3], [1, 1]],
+    ] } };
+    const one = { type: "FeatureCollection", features: [donut] };
+    expect(hitFeature(one, { lat: 0.5, lng: 0.5 })).toBe(donut);
+    expect(hitFeature(one, { lat: 2, lng: 2 })).toBeNull();
+  });
+  it("a line hits by DISTANCE within the caller's tolerance — a centreline is thin on the ground", () => {
+    const near = { lat: 29.77, lng: -95.8951, tolDeg: 0.0002 };
+    // The band contains that point too, and it is first in draw order — test the line alone.
+    const lines = { type: "FeatureCollection", features: [channel] };
+    expect(hitFeature(lines, near)).toBe(channel);
+    expect(hitFeature(lines, { lat: 29.77, lng: -95.8951, tolDeg: 0.00001 })).toBeNull();
+    expect(hitFeature(lines, { lat: 29.85, lng: -95.895, tolDeg: 0.0002 })).toBeNull(); // past the end
+  });
+  it("MultiPolygon / MultiLineString parts are each tested", () => {
+    const mp = { type: "Feature", properties: {}, geometry: { type: "MultiPolygon", coordinates: [
+      [[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]], [[[5, 5], [6, 5], [6, 6], [5, 6], [5, 5]]],
+    ] } };
+    const ml = { type: "Feature", properties: {}, geometry: { type: "MultiLineString", coordinates: [
+      [[0, 0], [0, 1]], [[9, 9], [9, 10]],
+    ] } };
+    expect(hitFeature({ features: [mp] }, { lat: 5.5, lng: 5.5 })).toBe(mp);
+    expect(hitFeature({ features: [ml] }, { lat: 9.5, lng: 9.0001, tolDeg: 0.001 })).toBe(ml);
+  });
+  it("nothing to test → null, never a throw (an empty/absent layer declines honestly)", () => {
+    expect(hitFeature(null, { lat: 1, lng: 1 })).toBeNull();
+    expect(hitFeature({ features: [] }, { lat: 1, lng: 1 })).toBeNull();
+    expect(hitFeature(fc, {})).toBeNull();
+    expect(hitFeature(fc, { lat: 29.775, lng: null })).toBeNull();
+  });
+});
+
+describe("identifyRows (B1092) — the registry rows behind BOTH identify surfaces", () => {
+  const source = VECTOR_SOURCES.bkdd_easements;
+  it("the Tsakiris easement: its recorded WIDTH and EXHIBIT, which is the point of the layer", () => {
+    const rows = identifyRows(source, { width: 70, file: "WF-10.pdf" }, { decode: (raw, f) => (f.unit ? `${raw} ${f.unit}` : String(raw)) });
+    expect(rows).toEqual([
+      { label: "Easement width", text: "70 ft", href: null },
+      { label: "Recorded exhibit", text: "WF-10.pdf", href: null },
+    ]);
+  });
+  it("an empty / absent attribute drops its row — never a labelled blank", () => {
+    expect(identifyRows(source, { width: 70, file: "" })).toHaveLength(1);
+    expect(identifyRows(source, {})).toEqual([]);
+  });
+  it("a link row is only a link when an href can be built HONESTLY", () => {
+    const withUrl = identifyRows(source, { file: "https://x.test/WF-10.pdf" }, { href: (raw) => (/^https?:/.test(raw) ? raw : null) });
+    expect(withUrl[0].href).toBe("https://x.test/WF-10.pdf");
+    // No document base is confirmed for BKDD, so a bare filename stays TEXT — never a fabricated URL.
+    expect(identifyRows(source, { file: "WF-10.pdf" }, { href: () => null })[0].href).toBeNull();
   });
 });

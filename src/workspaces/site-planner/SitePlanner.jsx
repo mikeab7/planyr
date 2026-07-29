@@ -34,7 +34,7 @@ import { uploadOverlayFile, uploadUnderlayDataUrl, downloadOverlayBytes, downloa
 import { ftPerPointForScale, scaleForFtPerPoint, chooseOverlayScale, SCALE_PRESETS, feetPerInchForPreset, matchScalePreset, feetPerInchFromPair, PAGE_UNITS, REAL_UNITS } from "./lib/overlayScale.js";
 import { solveSimilarityLSQ, applySimilarityToOverlay, scaleOverlayAbout, calibrateUnderlayScale } from "./lib/overlayAlign.js";
 import { hasPrintableOverlay } from "./lib/overlayPrint.js";
-import { syncOverlayLayers, withTileRetry, ALL_LAYERS, probeService, layerVintage } from "./lib/layers.js";
+import { syncOverlayLayers, withTileRetry, ALL_LAYERS, probeService, layerVintage, identifyOverlaysAt } from "./lib/layers.js";
 import { sanitizeLayerOverrides, overridesFromOverlays, overlaysWithOverrides, applyOnOverrides, overridesSig } from "./lib/layerPrefs.js";
 import { BASEMAPS } from "./lib/basemaps.js";
 import { ppfToZoom, exactContainerPoint } from "./lib/mapLock.js";
@@ -277,6 +277,12 @@ const CURB = 0.5;    // 6" curb on each side of a road (added to its true width)
 // real drag pans. This is the hand-rolled fallback the standard map engines use internally.
 const PARCEL_CLICK_SLOP_PX = 5;   // max pointer travel (px) to still count as a click, not a pan
 const PARCEL_CLICK_MS = 400;      // max press duration (ms) to still count as a click
+// B1092 — how close a tap must land to a GIS LINE feature (a channel centreline) to
+// identify it, on screen. Polygons hit-test by containment and ignore this.
+const CANVAS_IDENTIFY_SLOP_PX = 14;
+// Feet per degree, the SHORTER of the two axes at this latitude band (longitude at ~30°N),
+// so a tolerance in degrees is never tighter than the on-screen slop it came from.
+const FT_PER_DEG_MIN = 300000;
 
 // PAL (the canvas + panel palette) is now theme-derived inside the SitePlanner
 // component from usePalette() — see the adapter at the top of the component body.
@@ -2088,6 +2094,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     return { lat: la, lng: ln };
   }, [cursor, origin]);
   const cursorElFt = useGroundElevation(cursorLL);
+  /* B1092 — the GIS identify CARD on the planner canvas: {x, y (wrapper-local px), items}.
+   * The backdrop Leaflet map is pointer-events:none (the SVG owns every click), so the
+   * click-identify the BKDD easement layer was made VECTOR for could never fire here —
+   * only the coordinate chip answered. A plain tap on empty canvas now asks the on-map
+   * vector layers what's under it and shows the same facts the map finder's popover does:
+   * the easement's recorded width and exhibit, the channel's name and class. */
+  const [gisHit, setGisHit] = useState(null);
+  // The card is anchored in SCREEN space, so a zoom would leave it pointing at ground it
+  // no longer covers. A pan already dismisses it (the press does); this covers the wheel.
+  useEffect(() => { setGisHit(null); }, [view.ppf]);
   // overlays / setOverlays are app-shared (props from App) — one source of truth across pages.
   // Aerial basemap SOURCE (B693): "off" | "esri" | "usgs" — a three-way control in the
   // Layers panel's Basemap group (was a bare on/off checkbox). Located sites default to
@@ -3860,7 +3876,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if (e.key === "Enter" && finishActiveDrawing()) { e.preventDefault(); return; }
       // B875 — Enter on a selected pond opens its inspector (keyboard peer of double-click).
       if (e.key === "Enter" && tool === "select" && sel?.kind === "el") { const se = els.find((x) => x.id === sel.id); if (se && se.type === "pond") { e.preventDefault(); revealPondInspector(se.id); return; } }
-      if (e.key === "Escape") { setDraftPoly(null); setDraftRect(null); setDraftElPoly(null); setDraftRoadPts(null); branchSeedRef.current = null; setRoadVtxSel(null); setMeasDraft([]); setSplitPath([]); setCombineSel([]); setCalloutDraft(null); setAddLeaderFor(null); cancelEditCallout(); setMkRect(null); setMkPoly(null); setEaseDraft(null); setEaseEdges(null); setEaseMenu(false); setMarquee(null); setMulti([]); setDrillId(null); setPrintMode(false); setPrintFrame(null); setIdentifyMode(false); setIdentifyRes(null); setAttachFor(null); setAlignFor(null); setPobMode(null); setOvCalib(null); setTraceMode(false); setTracePts([]); setRouteMode(null); setXsecMode(false); setXsecPts([]); setOverlapWarn(""); setSel(null); setTypeMenu(null); setParcelMenu(null); setSelVtx(null); setVtxMenu(null); setInsHint(null); setToolMenu(false); setMeasureMenu(false); setOvMenu(null); setOvAlignBase(null); setParcelMode("add"); setMergePick(false); spaceRef.current = false; setSpacePan(false); abortGesture(); setTool("select"); lastTapRef.current = { id: null, t: 0, x: 0, y: 0, wasSel: false }; }
+      if (e.key === "Escape") { setDraftPoly(null); setDraftRect(null); setDraftElPoly(null); setDraftRoadPts(null); branchSeedRef.current = null; setRoadVtxSel(null); setMeasDraft([]); setSplitPath([]); setCombineSel([]); setCalloutDraft(null); setAddLeaderFor(null); cancelEditCallout(); setMkRect(null); setMkPoly(null); setEaseDraft(null); setEaseEdges(null); setEaseMenu(false); setMarquee(null); setMulti([]); setDrillId(null); setPrintMode(false); setPrintFrame(null); setIdentifyMode(false); setIdentifyRes(null); setAttachFor(null); setAlignFor(null); setPobMode(null); setOvCalib(null); setTraceMode(false); setTracePts([]); setRouteMode(null); setXsecMode(false); setXsecPts([]); setOverlapWarn(""); setSel(null); setTypeMenu(null); setParcelMenu(null); setSelVtx(null); setVtxMenu(null); setInsHint(null); setToolMenu(false); setMeasureMenu(false); setOvMenu(null); setOvAlignBase(null); setParcelMode("add"); setMergePick(false); setGisHit(null); spaceRef.current = false; setSpacePan(false); abortGesture(); setTool("select"); lastTapRef.current = { id: null, t: 0, x: 0, y: 0, wasSel: false }; }
       if (e.key.startsWith("Arrow") && (multi.length > 1 || sel?.kind === "el")) { e.preventDefault(); nudgeSel(e.key, e.shiftKey ? 10 : 1); return; }
       if ((e.key === "Backspace" || e.key === "Delete") && removeLastVertex()) { e.preventDefault(); return; } // undo the last placed vertex mid-draw
       if ((e.key === "Delete" || e.key === "Backspace") && selVtxRef.current && deleteVtx(selVtxRef.current.layer, selVtxRef.current.id, selVtxRef.current.index)) { e.preventDefault(); return; } // B230: an armed control point → delete just that vertex. NEW-1: deleteVtx returns false on a no-op (endpoint/min/stale) → we DON'T consume the key; it falls through to the whole-element delete below so Delete can never silently wedge.
@@ -4189,9 +4205,28 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     capturePidRef.current = e.pointerId;
     try { svgRef.current.setPointerCapture(e.pointerId); } catch (_) {}
   };
+  /* B1092 — what GIS feature is under this tap? Runs only for a genuine tap on empty
+   * canvas (onUp decides that), against the layers that opted in via `canvasIdentify` and
+   * are currently ON. Nothing under the point → the card just closes; a layer with no
+   * geometry in hand (raster tier / live fallback) declines rather than guessing. */
+  const identifyGisAt = (e) => {
+    if (!origin) { setGisHit(null); return; }
+    const fp = p2f(e.clientX, e.clientY);
+    const [lat, lng] = feetToLatLng(fp, origin.lat, origin.lon);
+    // A forgiving click target for LINE features at any zoom: a fixed on-screen slop
+    // converted to feet, then to degrees (the smaller ft-per-degree of the two axes, so
+    // the tolerance is never tighter than it looks on screen).
+    const tolFt = CANVAS_IDENTIFY_SLOP_PX / Math.max(0.0001, view.ppf);
+    const items = identifyOverlaysAt(overlayRefs.current, overlays, { lat, lng, tolDeg: tolFt / FT_PER_DEG_MIN });
+    if (!items.length) { setGisHit(null); return; }
+    const r = wrapRef.current ? wrapRef.current.getBoundingClientRect() : null;
+    setGisHit({ x: e.clientX - (r ? r.left : 0), y: e.clientY - (r ? r.top : 0), items });
+  };
+
   const onBgDown = (e) => {
     if (e.button !== 0) return;
     if (touchCountRef.current >= 2) return; // a two-finger pinch owns the gesture (B555)
+    if (gisHit) setGisHit(null); // any new press dismisses the identify card (a tap re-opens it in onUp)
     capturePidRef.current = e.pointerId; // remember the pointer so an interrupted gesture (pointercancel / blur) can still release capture (NEW-1)
     altSnapOffRef.current = !!e.altKey; // Alt at placement → drop free (no grid snap), matching the drag bypass
     const fp = p2f(e.clientX, e.clientY);
@@ -5611,6 +5646,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         && Math.hypot(e.clientX - d.downX, e.clientY - d.downY) <= PARCEL_CLICK_SLOP_PX
         && Date.now() - d.downT <= PARCEL_CLICK_MS) {
       setCombineSel([]);
+      identifyGisAt(e); // B1092 — the same tap asks what GIS feature is under it
     }
     // B383: a press that began in identify→add mode and barely moved was a deliberate
     // click → add (or toggle) the lot under it; any real drag just panned to find more.
@@ -14759,6 +14795,37 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           {canvasDropOver && (
             <div data-export="skip" style={{ position: "absolute", inset: 0, zIndex: 50, pointerEvents: "none", border: `2.5px dashed ${PAL.accent}`, background: `color-mix(in srgb, ${PAL.accent} 18%, transparent)`, display: "grid", placeItems: "center" }}>
               <span style={{ background: "var(--surface-raised)", color: PAL.ink, fontWeight: 700, fontSize: 14, padding: "10px 20px", borderRadius: 999, border: `1px solid ${PAL.accent}`, boxShadow: "0 4px 16px rgba(0,0,0,0.18)" }}>Drop site plan to place it on the map</span>
+            </div>
+          )}
+          {/* B1092 — the GIS identify card. Tap the easement band (or a channel centreline)
+              on the canvas and the facts that make that layer worth being VECTOR arrive:
+              the recorded easement width and its exhibit, the watercourse's name and class.
+              Anchored at the tap, clamped inside the canvas, dismissed by the next press. */}
+          {gisHit && (
+            <div data-export="skip" data-testid="gis-identify"
+              style={{ position: "absolute", zIndex: 45, maxWidth: 260,
+                left: Math.max(6, Math.min(gisHit.x + 10, (size.w || 0) - 268)),
+                top: Math.max(6, Math.min(gisHit.y + 10, (size.h || 0) - 120)),
+                background: "var(--surface-overlay)", color: PAL.ink, border: `1px solid ${PAL.panelLine}`,
+                borderRadius: 9, boxShadow: "0 8px 26px rgba(28,25,20,0.24)", padding: "9px 11px",
+                fontSize: 11.5, lineHeight: 1.45 }}>
+              <button onClick={() => setGisHit(null)} title="Close" aria-label="Close feature details"
+                style={{ float: "right", marginLeft: 8, background: "transparent", border: "none", color: PAL.muted, cursor: "pointer", fontFamily: "inherit", fontSize: 12, lineHeight: 1, padding: 0 }}>✕</button>
+              {gisHit.items.map((it, i) => (
+                <div key={it.id} style={{ marginTop: i ? 8 : 0 }}>
+                  <div style={{ fontWeight: 700, fontSize: 12.5, marginBottom: 2 }}>{it.title}</div>
+                  {it.rows.map((r, j) => (
+                    <div key={j}>
+                      <span style={{ color: PAL.muted }}>{r.label}: </span>
+                      {r.href
+                        ? <a href={r.href} target="_blank" rel="noopener noreferrer" style={{ color: PAL.accent }}>{r.text}</a>
+                        : <span>{r.text}</span>}
+                    </div>
+                  ))}
+                  {it.note && <div style={{ color: PAL.muted, marginTop: 3 }}>{it.note}</div>}
+                  {it.sourceName && <div style={{ color: PAL.muted, fontSize: 10.5, marginTop: 3 }}>Source: {it.sourceName}</div>}
+                </div>
+              ))}
             </div>
           )}
           <svg ref={svgRef} data-testid="planner-canvas" width="100%" height="100%" viewBox={`0 0 ${size.w} ${size.h}`} role="application" aria-label="Site plan canvas"

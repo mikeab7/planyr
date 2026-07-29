@@ -564,6 +564,13 @@ export const AHJ_LAYERS = {
     // storm system isn't a drainage district, so it must never be suppressed by the
     // district picker — its own export already paints nothing outside the city.
     floodTier: "local", agency: "City of Houston",
+    // B1091 — the SERVICE AREA, declared. The `county` tag above is documentation only
+    // (B898 rule), so before this the row was offered on a Waller-County site where the
+    // City of Houston has no storm sewer and never will: a Harris-only municipal system
+    // listed under LOCAL DRAINAGE AUTHORITY with nothing said. `areaCounties` is the
+    // non-district equivalent of DRAINAGE_DISTRICTS[].counties and feeds the SAME
+    // floodRowRelevance gate, so there is one scoping mechanism, not two.
+    areaCounties: ["harris"],
   },
   coh_water: {
     // B898: MEMBER of the consolidated "Water & sewer" layer (mergeGroup water_sewer).
@@ -614,6 +621,13 @@ export const AHJ_LAYERS = {
     note: "Recorded district drainage easements — click one for its width and recorded exhibit.",
     opacity: 0.85, county: "waller",
     group: "flood", order: 4,
+    // B1092 — clickable ON THE PLANNER CANVAS too, not just the map finder. The planner's
+    // Leaflet backdrop is pointer-events:none (the SVG canvas owns every click), so the
+    // Leaflet popover this layer was made vector FOR could never fire there. `canvasIdentify`
+    // opts a layer into the canvas's own identify: precise features only (an easement band,
+    // a channel centreline) — never the wide-area boundary polygons, where every empty click
+    // would land on something and the card would become noise.
+    canvasIdentify: true,
     floodTier: "local", district: "bkdd", agency: "BKDD",
     stallMs: 25000,
   },
@@ -650,6 +664,7 @@ export const AHJ_LAYERS = {
     opacity: 0.85,
     group: "flood", order: 1,
     floodTier: "hydrography", agency: "USGS",
+    canvasIdentify: true, // B1092 — the channel centreline answers a click on the planner canvas
   },
 };
 
@@ -869,6 +884,37 @@ export function attachFeatureRetry(lyr, k, cfg, onStatus, max = 3) {
  * Image/feature layers are health-PROBED first (catches 200-with-error-body), and
  * nothing is added until the map has a real, non-zero size (kills the degenerate
  * zero-area export esri-leaflet fires before the map is ready). */
+/* (B1092) WHICH on-map GIS feature is under this point?
+ *
+ * The gap this closes: the BKDD easement layer was made VECTOR precisely so a click could
+ * report its recorded width and exhibit — but that click only ever worked on the map
+ * finder. The planner's Leaflet backdrop sits inside a pointer-events:none box (its SVG
+ * canvas owns every pointer event), so no Leaflet handler there can ever fire. This lets
+ * the canvas ask the same question with a lat/lng it already computes for its coordinate
+ * chip, and get the same answer the map finder's popover would give.
+ *
+ * Opt-in per layer (`cfg.canvasIdentify`), and ON layers only. Deliberately NOT every
+ * vector layer: county / city / ETJ / ISD polygons blanket the view, so every empty click
+ * would hit one and the card would become noise instead of an answer.
+ *
+ * `refs` is the same id→layer object syncOverlayLayers maintains. Returns [] when nothing
+ * is under the point (or when a layer has no geometry in hand — a raster/fallback layer
+ * honestly declines rather than guessing). */
+export function identifyOverlaysAt(refs, overlays, at, { limit = 3 } = {}) {
+  const out = [];
+  for (const [k, cfg] of Object.entries(ALL_LAYERS)) {
+    if (!cfg.canvasIdentify || !(overlays && overlays[k] && overlays[k].on)) continue;
+    const lyr = refs && refs[k];
+    if (!lyr || typeof lyr.identifyAt !== "function") continue;
+    try {
+      const hit = lyr.identifyAt(at);
+      if (hit) out.push({ id: k, layerLabel: cfg.label, ...hit });
+    } catch (_) { /* one bad layer never breaks the identify */ }
+    if (out.length >= limit) break;
+  }
+  return out;
+}
+
 export function syncOverlayLayers(map, overlays, refs, opts = {}) {
   const { pane = "envpane", paneZ = 350, onError, onStatus, admit } = opts;
   if (!map) return;

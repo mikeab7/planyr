@@ -50,7 +50,10 @@ try {
   await master.check();
   await page.waitForTimeout(60);
   const afterOn = await text("#panel-bkdd");
-  ok("one click turns the whole bundle on", /\d+ on/i.test(afterOn) && afterOn.includes("6/6"), afterOn.slice(0, 200));
+  // 5 rows at Tsakiris: FEMA · 2 BKDD · NHD · the BKDD master plan. HCFCD and the City's
+  // storm sewer are demoted (B1091), so the master switch never turns on a source that
+  // cannot paint here — "show all" means all of what applies.
+  ok("one click turns the whole bundle on", /\d+ on/i.test(afterOn) && afterOn.includes("5/5"), afterOn.slice(0, 200));
   ok("master reads checked once every child is on", (await master.isChecked()) === true);
   await master.uncheck();
   await page.waitForTimeout(60);
@@ -70,17 +73,41 @@ try {
   ok("inside BKDD: HCFCD's row is NOT rendered at all", !bkdd.includes("Drainage channels & ROW"), bkdd.slice(0, 600));
   ok("in Harris: HCFCD's row IS rendered", harris.includes("Drainage channels & ROW"));
   ok("in Harris: BKDD's rows are NOT rendered", !harris.includes("District drainage easements"));
-  ok("no flood context → nothing suppressed (fail open, never hide the right one)",
-    nocontext.includes("Drainage channels & ROW") && nocontext.includes("District drainage easements"));
+
+  // ── B1091: the county alone scopes the group, with NO drainage check at all ───
+  // The live failure: the drainage context hadn't resolved a district, the old scoping
+  // fell fully open, and a Waller site listed a Harris-County channel layer and a
+  // City-of-Houston storm sewer under LOCAL DRAINAGE AUTHORITY with nothing said.
+  ok("B1091 — no flood context, Waller county: HCFCD is NOT in the list",
+    !nocontext.includes("Drainage channels & ROW"), nocontext.slice(0, 700));
+  ok("B1091 — no flood context, Waller county: City-of-Houston storm sewer is NOT in the list",
+    !nocontext.includes("Storm sewer"), nocontext.slice(0, 700));
+  ok("B1091 — BKDD's own rows (which DO reach Waller) still render with no context",
+    nocontext.includes("District drainage easements"));
+  ok("B1091 — the demoted sources are DISCLOSED, never silently dropped",
+    /2 sources that don.t cover this site/i.test(nocontext), nocontext.slice(0, 700));
 
   // ── NEW-2: agency badges — whose data this is, at a glance ────────────────────
   ok("agency badges rendered (FEMA / BKDD / USGS)", bkdd.includes("FEMA") && bkdd.includes("BKDD") && bkdd.includes("USGS"));
 
-  // ── NEW-3b: the off-district explanation, in the owner's own terms ────────────
-  ok("names the source that doesn't cover here AND the one that does",
-    bkdd.includes("Harris County Flood Control District doesn't cover Waller County — showing Brookshire–Katy Drainage District instead."),
-    bkdd.slice(0, 900));
-  ok("no swap line where nothing was suppressed", !nocontext.includes("doesn't cover"));
+  // ── NEW-3b / B1091: the off-district explanation, in the owner's own terms ────
+  // It now rides the demoted row itself (one collapsed line in the default view), so the
+  // reason sits WITH the source it explains instead of floating above the group.
+  const offToggle = page.locator('#panel-bkdd button[aria-label*="don\'t cover this site"]');
+  ok("the demoted sources sit behind ONE collapsed line", (await offToggle.count()) === 1);
+  await offToggle.click();
+  await page.waitForTimeout(60);
+  const bkddOpen = await text("#panel-bkdd");
+  ok("opening it names the source that doesn't cover here AND the one that does",
+    bkddOpen.includes("Harris County Flood Control District doesn't cover Waller County — Brookshire–Katy Drainage District is shown instead."),
+    bkddOpen.slice(0, 1200));
+  ok("…and the city storm sewer names its own service area",
+    bkddOpen.includes("City of Houston's system doesn't reach Waller County — it maps Harris County only."),
+    bkddOpen.slice(0, 1400));
+  ok("a demoted row is still THERE, toggle and all — demoted, never removed",
+    bkddOpen.includes("Drainage channels & ROW") && bkddOpen.includes("Storm sewer"),
+    bkddOpen.slice(0, 1400));
+  await offToggle.click(); // leave the panel as we found it
 
   // ── NEW-3a: what FEMA actually reported — the answer that was missing ─────────
   ok("Zone X is stated as a FINDING, not left as silence",

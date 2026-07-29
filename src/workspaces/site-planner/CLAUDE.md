@@ -19,10 +19,16 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   `boundaryLabels.js` (pure label math) — the B694/B695 tier; `basemaps.js` — the shared Esri/USGS
   aerial-source registry (B693). Pipelines (B751/B752): `pipelineCommodity.js` (commodity crosswalk +
   fixed hazard symbology + legend) + `pipelineCorridor.js` (pure assumed-easement buffer geometry).
-  Flood & drainage group (B1075–B1080): `floodGroup.js` — the pure group model (four provenance
-  tiers, point-in-district auto-scoping of the governing drainage authority, master-toggle state,
-  and the honest empty-state copy: what FEMA actually reported, why a district isn't listed, the
-  governing-district drainage line). `nhdFlowline.js` — the USGS NHD FType → plain-English
+  Flood & drainage group (B1075–B1080, B1091): `floodGroup.js` — the pure group model (four
+  provenance tiers, master-toggle state, and the honest empty-state copy: what FEMA actually
+  reported, why a district isn't listed, the governing-district drainage line). `floodRowRelevance`
+  is the ONE scoping gate — governing district → district county reach → the row's own declared
+  `areaCounties` → the coverage engine's published-extent verdict — so a source that cannot cover
+  this site is demoted (behind one collapsed line, WITH its reason), never silently listed.
+  Canvas identify (B1092): `vectorLayers.hitFeature` / `identifyRows` are the pure half,
+  `vectorOverlay`'s `group.identifyAt` the accessor, `layers.identifyOverlaysAt` the opt-in gate
+  (`cfg.canvasIdentify`) — the planner's SVG canvas owns every click, so this is how a tap there
+  reaches the same answer the map finder's Leaflet popover gives. `nhdFlowline.js` — the USGS NHD FType → plain-English
   crosswalk (336 → "canal / ditch"), the universal channel fallback's decoder. The BKDD
   (Brookshire–Katy Drainage District) endpoints live in the shared GIS source registry like every
   other source; `detentionRules.js` owns the district-aware `resolveDrainageContext`.
