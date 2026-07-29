@@ -36,7 +36,7 @@ import {
 } from "../lib/coverage.js";
 import {
   governingDistrict, scopeFloodEntries, floodMasterState,
-  femaZoneVerdict, emptyReason, FEMA_ZONES_NOT_CHANNELS,
+  femaZoneVerdict, floodFactsNote, emptyReason, FEMA_ZONES_NOT_CHANNELS,
 } from "../lib/floodGroup.js";
 
 // This panel rides on the themed var(--surface-overlay) container, so its text must
@@ -68,6 +68,12 @@ export default function LayerPanel({
   // the group say what FEMA actually reported instead of going silent. Absent (map finder,
   // or before any check) → nothing is suppressed and no verdict line is claimed.
   floodContext = null,
+  /* (NEW-1) WHICH copy of this panel this is. Both hosts mount one, and the inactive host
+   * stays mounted (display:none) so its map isn't rebuilt — so the DOM always holds TWO
+   * Flood & drainage groups, and the hidden one has no `floodContext`. A page-level text
+   * check that doesn't distinguish them reads the silent copy and concludes the live panel
+   * went quiet. Stamped on the root as `data-surface` so any check can target the real one. */
+  surface = "planner",
 }) {
   const jur = jurisdictionFor(county);
   /* B1091(×2) — WHICH county the flood group reasons about.
@@ -415,6 +421,9 @@ export default function LayerPanel({
   });
   const floodMaster = floodMasterState(floodScope.tiers, overlays);
   const femaVerdict = femaZoneVerdict(floodContext?.flood);
+  /* (NEW-1/NEW-2) The one line that fires when the facts AREN'T in hand — the state that
+   * used to render nothing at all. Mutually exclusive with the FEMA verdict below. */
+  const factsNote = floodFactsNote({ hasContext: !!floodContext?.flood?.state, county: floodCounty });
   const TONE = { ok: "var(--text-secondary)", warn: "var(--warn-text)", alert: "var(--danger)" };
 
   const floodMasterRow = (
@@ -513,8 +522,16 @@ export default function LayerPanel({
       {floodOffRows}
       {/* (NEW-3a) What FEMA actually said — the answer that was missing entirely. */}
       {femaVerdict && (
-        <div style={{ fontSize: 10.5, color: TONE[femaVerdict.tone] || MUTED, lineHeight: 1.45, marginTop: 6 }}>
+        <div data-testid="flood-fema-verdict" style={{ fontSize: 10.5, color: TONE[femaVerdict.tone] || MUTED, lineHeight: 1.45, marginTop: 6 }}>
           {femaVerdict.text}
+        </div>
+      )}
+      {/* (NEW-1/NEW-2) …and what's HONESTLY not known yet. `femaVerdict` is null exactly when
+          there is no context, so these two never both speak about FEMA; the county-open
+          variant rides alongside a real verdict because it reports a different fact. */}
+      {factsNote && (
+        <div data-testid="flood-facts-note" style={{ fontSize: 10.5, color: TONE[factsNote.tone] || MUTED, lineHeight: 1.45, marginTop: 6 }}>
+          {factsNote.text}
         </div>
       )}
       {/* The one standing line that would have answered the original report on its own.
@@ -580,7 +597,7 @@ export default function LayerPanel({
   // group below pulls its rows from the flat ALL_LAYERS registry via `groupEntries`/`groupRows`
   // — purely data-driven off each layer's `group`/`order` (see LAYER_GROUP_ORDER in layers.js).
   return (
-    <div>
+    <div data-testid="layer-panel" data-surface={surface}>
       {/* 1) Base & terrain — the planner's aerial source (B693) + terrain (B696) + any
              single-layer county fold (B762, e.g. Fort Bend contours). Kept as its own
              special-cased section (the segmented Off/Aerial/USGS control isn't a layer row). */}

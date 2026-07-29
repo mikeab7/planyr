@@ -118,4 +118,63 @@ test.describe("flood & drainage district scoping (B1091(×2))", () => {
       await expect(page.getByRole("checkbox", { name: label, exact: true })).toBeVisible({ timeout: 10000 });
     }
   });
+
+  /* (NEW-1/NEW-2) THE VISIBLE PANEL IS THE ONE UNDER TEST — and it must never be blank.
+   *
+   * A live pass reported the whole Flood & drainage group gone silent after B1091(×2): no
+   * governing/not-governing note anywhere, and the Zone A sentence missing. Driving the real
+   * planner with the tract's ACTUAL production snapshot (sites.id smrjdgmlinea, flood zones
+   * X + A) shows the VISIBLE panel rendering all of it correctly — while the map finder,
+   * which stays mounted (display:none) behind the planner so its map isn't rebuilt, holds a
+   * second copy of the same group with no flood context, no site county, and therefore
+   * nothing to say. That silent copy is FIRST in the document, so any page-level text scan
+   * reads it instead. This test pins both halves: the live panel says everything, and the
+   * hidden copy is out of the a11y tree and marked as the inactive mode. */
+  test("the VISIBLE panel carries the zone verdict and the scoping reasons; the hidden copy is inert", async ({ page }) => {
+    const errors = [];
+    page.on("pageerror", (e) => errors.push(String(e)));
+    const real = {
+      ...SITE, id: "new1-visible-panel", groupId: "new1-visible-panel",
+      site: "NEW-1 Visible Panel", name: "NEW-1 Visible Panel",
+      settings: { drainage: { lastCheck: { ...LAST_CHECK, sig: "new1-visible", flood: { state: "loaded", ageMs: 2470644, zones: [
+        { zone: "X", subtype: "AREA OF MINIMAL FLOOD HAZARD", staticBfeFt: null, vdatum: null },
+        { zone: "A", subtype: null, staticBfeFt: null, vdatum: null },
+      ] } } } },
+    };
+    await page.route("**/*.jpg", (route) => route.abort());
+    await page.addInitScript((s) => { try { localStorage.setItem("planarfit:sites:v1", s); } catch (_) {} }, JSON.stringify({ [real.id]: real }));
+    await page.goto("/#/site-planner", { waitUntil: "load" });
+    await page.getByText("NEW-1 Visible Panel", { exact: false }).first().click();
+    await expect(page.getByTestId("planner-canvas")).toBeVisible({ timeout: 20000 });
+    await page.waitForTimeout(900);
+
+    await page.getByRole("button", { name: /Layers/ }).first().click();
+    const live = page.locator('[data-testid="layer-panel"][data-surface="planner"]');
+    await expect(live).toBeVisible({ timeout: 10000 });
+    const groupHead = live.getByRole("button", { name: /(Show|Hide) Flood & drainage layers/ });
+    if (await groupHead.getAttribute("aria-expanded") === "false") await groupHead.click();
+
+    // 1. The single most useful line in the panel — the zone-specific SFHA sentence.
+    await expect(live.getByTestId("flood-fema-verdict")).toHaveText(
+      "FEMA effective FIRM: Zone A — a special flood hazard area IS mapped here.", { timeout: 10000 });
+    // …and the facts ARE in hand, so the not-checked state stays quiet.
+    await expect(live.getByTestId("flood-facts-note")).toHaveCount(0);
+
+    // 2. The scoping reasons are there, on the rows they explain.
+    const collapsed = live.getByRole("button", { name: /sources? that don't cover this site/i });
+    await expect(collapsed).toBeVisible({ timeout: 10000 });
+    await collapsed.click();
+    await expect(live.getByText(/Harris County Flood Control District doesn.{0,3}t cover Waller County/i)).toBeVisible();
+
+    // 3. The keep-alive copy: same component, no facts — so it says the honest thing rather
+    //    than nothing, and it is out of the accessibility tree entirely.
+    const finder = page.locator('[data-testid="layer-panel"][data-surface="finder"]');
+    await expect(finder).toHaveCount(1);
+    await expect(finder).toBeHidden();
+    await expect(page.locator('[data-mode="map"][data-mode-active="false"][aria-hidden="true"]')).toHaveCount(1);
+    await expect(page.locator('[data-mode="plan"][data-mode-active="true"]')).toHaveCount(1);
+    expect(await finder.getByTestId("flood-facts-note").first().textContent()).toMatch(/not checked here yet/i);
+
+    expect(errors, errors.join(" | ")).toHaveLength(0);
+  });
 });

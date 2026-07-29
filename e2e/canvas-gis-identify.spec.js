@@ -104,4 +104,69 @@ test.describe("canvas GIS identify (B1092)", () => {
 
     expect(errors, errors.join(" | ")).toHaveLength(0);
   });
+
+  /* (NEW-3) THE STRAND V503 NEVER GOT: the easement PAYLOAD on a REALISTICALLY THIN band.
+   *
+   * Three live attempts at the Tsakiris tract came back with the coordinate readout instead
+   * of the easement card. The layer was in the hit-test set the whole time — the audit found
+   * that polygons hit-tested by CONTAINMENT ALONE, so a recorded easement (a 70 ft band, a
+   * few pixels wide at the default site zoom) had a click target exactly its own drawn width
+   * while the channel centreline beside it carried a forgiving band on both sides. The tap
+   * below lands OUTSIDE the band but inside the planner's own on-screen slop — the miss that
+   * used to return nothing at all. */
+  test("a near-miss tap on a REAL-WIDTH (70 ft) easement band still answers", async ({ page }) => {
+    const errors = [];
+    page.on("pageerror", (e) => errors.push(String(e)));
+
+    // 70 ft of latitude ≈ 0.000192° here; the strip runs wide in longitude so the tap's
+    // x position is never the variable under test.
+    const HALF_LAT = 35 / 364000, WIDE = 0.01;
+    const THIN_JSON = {
+      features: [{
+        attributes: { width: 70, file: "WF-10.pdf" },
+        geometry: { rings: [[
+          [LON - WIDE, LAT - HALF_LAT], [LON + WIDE, LAT - HALF_LAT],
+          [LON + WIDE, LAT + HALF_LAT], [LON - WIDE, LAT + HALF_LAT], [LON - WIDE, LAT - HALF_LAT],
+        ]] },
+      }],
+    };
+    await page.route("**gisclient.quiddity.com/**", (route) =>
+      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(THIN_JSON) }));
+    await page.route("**/*.jpg", (route) => route.abort());
+
+    const site = { ...SITE, id: "new3-thin-easement", groupId: "new3-thin-easement", site: "NEW-3 Thin Easement", name: "NEW-3 Thin Easement" };
+    await page.addInitScript((s) => { try { localStorage.setItem("planarfit:sites:v1", s); } catch (_) {} }, JSON.stringify({ [site.id]: site }));
+    await page.goto("/#/site-planner", { waitUntil: "load" });
+    await page.getByText("NEW-3 Thin Easement", { exact: false }).first().click();
+    await expect(page.getByTestId("planner-canvas")).toBeVisible({ timeout: 20000 });
+    await page.waitForTimeout(900);
+
+    await page.getByRole("button", { name: /Layers/ }).first().click();
+    const easementRow = page.getByRole("checkbox", { name: "District drainage easements", exact: true });
+    await expect(easementRow).toBeVisible({ timeout: 10000 });
+    await easementRow.click();
+    await page.waitForTimeout(1500);
+
+    // The planner's own click slop, in feet at the CURRENT zoom — read off the canvas rather
+    // than assumed, so this stays true whatever the fit-on-load lands at.
+    const tolFt = await page.evaluate(() => {
+      const svg = document.querySelector('[data-testid="planner-canvas"]');
+      return 14 / parseFloat(svg.getAttribute("data-view-ppf"));
+    });
+    expect(tolFt).toBeGreaterThan(1);
+
+    // Just OUTSIDE the 70 ft band (its edge is 35 ft from the origin), inside the slop.
+    const near = await feetToScreen(page, 300, 35 + tolFt * 0.4);
+    await page.mouse.click(near.x, near.y);
+    await expect(card(page)).toBeVisible({ timeout: 5000 });
+    await expect(card(page)).toContainText("70 ft");
+    await expect(card(page)).toContainText("WF-10.pdf");
+
+    // Well outside the slop → still an honest miss. The tolerance is forgiveness, not a magnet.
+    const far = await feetToScreen(page, 300, 35 + tolFt * 6);
+    await page.mouse.click(far.x, far.y);
+    await expect(card(page)).toHaveCount(0);
+
+    expect(errors, errors.join(" | ")).toHaveLength(0);
+  });
 });

@@ -95,6 +95,25 @@ function App() {
         {/* No flood context at all — no drainage check has run. The SITE county is still a
             fact, so what cannot reach Waller is still demoted; what governs is left open. */}
         <Panel id="panel-flood-nocontext" county="waller" siteCounty="waller" />
+        {/* (NEW-1/NEW-2) THE SILENT SHAPE. No flood context AND no site county — which is
+            exactly the map finder's copy of this panel, the copy that stays mounted (hidden)
+            behind the planner and sits FIRST in the document. Every conditional line in the
+            group is off here, so the group used to render with nothing said at all. */}
+        <Panel id="panel-flood-blank" county="harris" siteCounty={null} />
+        {/* (NEW-1/NEW-2) A check that RAN but whose county never resolved (a straddle, or an
+            identify that didn't answer): the FEMA verdict speaks, the scoping fails open, and
+            the panel has to admit the list isn't scoped. */}
+        <Panel id="panel-flood-nocounty" county="harris" siteCounty={null}
+          floodContext={{ ...TSAKIRIS_CTX, authority: { ...TSAKIRIS_CTX.authority, jurisdiction: { ...TSAKIRIS_CTX.authority.jurisdiction, county: [] } } }} />
+        {/* (NEW-2) The tract's REAL flood block, verbatim from the production row
+            (sites.id smrjdgmlinea, read 2026-07-29): the ring covers Zone X AND Zone A, so
+            part of the tract IS in a special flood hazard area. The zone-specific sentence is
+            the single most useful line in this panel — it went missing from a live pass. */}
+        <Panel id="panel-flood-zonea" county="waller" siteCounty="waller"
+          floodContext={{ ...TSAKIRIS_CTX, flood: { state: "loaded", ageMs: 2470644, zones: [
+            { zone: "X", subtype: "AREA OF MINIMAL FLOOD HAZARD", staticBfeFt: null, vdatum: null },
+            { zone: "A", subtype: null, staticBfeFt: null, vdatum: null },
+          ] } }} />
         {/* B1091(×2) — the regression shape: the site record's county is STALE ("harris", the
             lookup default) while the identify says Waller and the boundary test found BKDD.
             The panel must follow the facts, never the stale selector. */}

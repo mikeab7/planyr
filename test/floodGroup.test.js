@@ -9,7 +9,7 @@ import {
   FLOOD_TIERS, FLOOD_TIER_ORDER, FEMA_ZONES_NOT_CHANNELS,
   DRAINAGE_DISTRICTS, COUNTY_DISTRICT, districtName, districtShort,
   governingDistrict, scopeFloodEntries, floodRowRelevance, districtReaches, floodMasterState,
-  countyKey, countyName, femaZoneVerdict, isSfhaZone, emptyReason, districtDrainageNote,
+  countyKey, countyName, femaZoneVerdict, floodFactsNote, isSfhaZone, emptyReason, districtDrainageNote,
 } from "../src/workspaces/site-planner/lib/floodGroup.js";
 import { NHD_FTYPE, ftypeLabel, flowlineTitle, flowlineSummary } from "../src/workspaces/site-planner/lib/nhdFlowline.js";
 import { GIS_SOURCES } from "../src/shared/gis/sources.js";
@@ -324,9 +324,32 @@ describe("femaZoneVerdict (B1077a) — the answer that was missing entirely", ()
     expect(v.tone).toBe("warn");
     expect(v.text).toMatch(/unknown, not clear/);
   });
-  it("no check has run → NO claim at all", () => {
+  it("no check has run → NO claim at all (floodFactsNote owns that state instead)", () => {
     expect(femaZoneVerdict(null)).toBeNull();
     expect(femaZoneVerdict({})).toBeNull();
+  });
+  /* (NEW-2) THE LINE THE OWNER READS FIRST, pinned by zone. The Tsakiris tract's own
+   * remembered check (production sites.id smrjdgmlinea) reports Zone X AND Zone A over the
+   * ring — part of the tract IS in a special flood hazard area, and that sentence is the
+   * single most useful line in the panel. It went missing from a live pass; nothing but a
+   * test can stop it going missing again. */
+  it("Zone A at the Tsakiris tract: the zone-specific SFHA sentence, verbatim", () => {
+    const v = femaZoneVerdict({
+      state: "loaded",
+      zones: [
+        { zone: "X", subtype: "AREA OF MINIMAL FLOOD HAZARD", staticBfeFt: null, vdatum: null },
+        { zone: "A", subtype: null, staticBfeFt: null, vdatum: null },
+      ],
+    });
+    expect(v.tone).toBe("alert");
+    expect(v.text).toBe("FEMA effective FIRM: Zone A — a special flood hazard area IS mapped here.");
+    // The X half must NOT be allowed to speak for the tract: an SFHA anywhere in the ring
+    // outranks "minimal hazard" somewhere else in it.
+    expect(v.text).not.toMatch(/no special flood hazard area/);
+  });
+  it("both an X and an A: the SFHA wins whatever order the service returns them in", () => {
+    const flipped = femaZoneVerdict({ state: "loaded", zones: [{ zone: "A" }, { zone: "X", subtype: "AREA OF MINIMAL FLOOD HAZARD" }] });
+    expect(flipped.text).toBe("FEMA effective FIRM: Zone A — a special flood hazard area IS mapped here.");
   });
   it("A and V zones are SFHA; X and D are not", () => {
     expect(isSfhaZone("AE")).toBe(true);
@@ -335,6 +358,40 @@ describe("femaZoneVerdict (B1077a) — the answer that was missing entirely", ()
     expect(isSfhaZone("X")).toBe(false);
     expect(isSfhaZone("D")).toBe(false);
     expect(isSfhaZone(null)).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+/* (NEW-1/NEW-2) THE GROUP MUST NEVER BE BLANK.
+ *
+ * Every honest line in this module is conditional on a resolved drainage context: the FEMA
+ * verdict needs `flood.state`, and a row can only be demoted WITH A REASON once the county
+ * or the governing district is known. A surface with no context — the map finder's copy of
+ * the panel, or any site whose flood check has never run — therefore rendered the whole
+ * group with no verdict and no reasons at all. Silence is the one state B1077 exists to
+ * abolish, and it was still reachable. */
+describe("floodFactsNote (NEW-1/NEW-2) — the honest state when the facts aren't in hand", () => {
+  it("no context at all → says nothing has been checked here yet", () => {
+    const n = floodFactsNote({ hasContext: false, county: null });
+    expect(n).toBeTruthy();
+    expect(n.tone).toBe("warn");
+    expect(n.text).toMatch(/not checked here yet/i);
+  });
+  it("a context but no county → names the open scoping, so a full list can't read as a scoped one", () => {
+    const n = floodFactsNote({ hasContext: true, county: null });
+    expect(n.text).toMatch(/every drainage source is listed/i);
+  });
+  it("facts in hand → SILENT, so it never accumulates on top of a working readout", () => {
+    expect(floodFactsNote({ hasContext: true, county: "waller" })).toBeNull();
+    expect(floodFactsNote({ hasContext: true, county: "Fort Bend County" })).toBeNull();
+  });
+  it("called with nothing at all still answers (a panel that hasn't been handed props)", () => {
+    expect(floodFactsNote()).toMatchObject({ tone: "warn" });
+  });
+  it("ONE line, never a paragraph — the panel's scarcest space", () => {
+    for (const args of [{ hasContext: false }, { hasContext: true, county: null }]) {
+      expect(floodFactsNote(args).text.length).toBeLessThanOrEqual(80);
+    }
   });
 });
 

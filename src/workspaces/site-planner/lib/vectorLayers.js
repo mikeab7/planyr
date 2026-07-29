@@ -745,22 +745,55 @@ const lineNear = (line, lng, lat, tolDeg) => {
   return false;
 };
 
-/* Which feature of a GeoJSON FeatureCollection is at {lat, lng}? Polygons hit-test by
- * containment; lines by distance within `tolDeg` (the caller converts its own pixel /
- * foot tolerance to degrees, since only the caller knows the view scale). Returns the
- * FIRST match — features arrive in the service's own draw order — or null. Pure. */
+/* (NEW-3) Is the point within `tolDeg` of any EDGE of this polygon's rings? A NARROW
+ * polygon needs the same forgiveness a line gets — see hitFeature's note below. */
+const polygonEdgeNear = (rings, lng, lat, tolDeg) =>
+  Array.isArray(rings) && rings.some((ring) => lineNear(ring, lng, lat, tolDeg));
+
+/* Which feature of a GeoJSON FeatureCollection is at {lat, lng}? Lines hit by distance
+ * within `tolDeg`; polygons hit by containment OR within `tolDeg` of an edge (the caller
+ * converts its own pixel / foot tolerance to degrees, since only the caller knows the view
+ * scale). Returns the FIRST match — features arrive in the service's own draw order — or
+ * null. Pure.
+ *
+ * (NEW-3) WHY POLYGONS GET THE TOLERANCE TOO. They used to hit-test by containment ALONE:
+ * `tolDeg` was accepted and then ignored for every polygon, so a polygon had a click target
+ * exactly its own drawn size and not one pixel more, while a line beside it had a forgiving
+ * band on both sides. That is fine for a county boundary and useless for the geometry this
+ * repo made vector ON PURPOSE so it could be clicked: a BKDD drainage easement is a ~70 ft
+ * band, which at the planner's default site zoom is a ribbon a few pixels wide. Three live
+ * attempts to tap one returned the coordinate readout instead of the easement card — the
+ * taps were landing beside the band, and containment-only means "beside" is a miss with no
+ * near-miss recovery. Applying the SAME tolerance to the ring edges makes a thin band as
+ * reachable as the channel centreline next to it, and changes nothing for a wide polygon
+ * (a tap in its middle was already a hit; a tap just outside its edge now hits it, which is
+ * what a user pointing at a boundary means anyway). */
 export function hitFeature(fc, { lat, lng, tolDeg = 0.00005 } = {}) {
   if (!fc || !Array.isArray(fc.features) || !Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  /* TWO PASSES, and the order matters. An EXACT hit anywhere in the collection beats a
+   * near-miss anywhere else: with adjacent polygons (two counties sharing a border) a tap
+   * just inside one is within tolerance of the other's edge, and a single-pass loop would
+   * hand back whichever came first in draw order. Containment first keeps that answer exact
+   * and confines the new tolerance to taps that previously hit NOTHING at all. */
+  let edgeHit = null;
   for (const f of fc.features) {
     const g = f && f.geometry;
     if (!g) continue;
     const c = g.coordinates;
-    if (g.type === "Polygon" && inPolygon(c, lng, lat)) return f;
-    if (g.type === "MultiPolygon" && (c || []).some((poly) => inPolygon(poly, lng, lat))) return f;
+    if (g.type === "Polygon") {
+      if (inPolygon(c, lng, lat)) return f;
+      if (!edgeHit && polygonEdgeNear(c, lng, lat, tolDeg)) edgeHit = f;
+      continue;
+    }
+    if (g.type === "MultiPolygon") {
+      if ((c || []).some((poly) => inPolygon(poly, lng, lat))) return f;
+      if (!edgeHit && (c || []).some((poly) => polygonEdgeNear(poly, lng, lat, tolDeg))) edgeHit = f;
+      continue;
+    }
     if (g.type === "LineString" && lineNear(c, lng, lat, tolDeg)) return f;
     if (g.type === "MultiLineString" && (c || []).some((ln) => lineNear(ln, lng, lat, tolDeg))) return f;
   }
-  return null;
+  return edgeHit;
 }
 
 // ---------------------------------------------------------------------------

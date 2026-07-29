@@ -508,8 +508,22 @@ export default function App({
 
   return (
     <>
-      {/* Map mode — AppHeader sits above MapFinder's own toolbar */}
-      <div style={{ display: mode === "map" ? "flex" : "none", flexDirection: "column", height: "100%" }}>
+      {/* Map mode — AppHeader sits above MapFinder's own toolbar.
+       *
+       * (NEW-1) BOTH modes stay MOUNTED — the hidden one keeps its Leaflet map alive so
+       * switching back doesn't rebuild it. The cost, until now unpaid: the hidden mode is a
+       * complete SECOND copy of shared chrome (the Layers panel above all), still in the
+       * document, still in the accessibility tree, and FIRST in document order when the
+       * planner is the visible one. A screen reader read a whole duplicate layers panel, and
+       * a page-level text check reads the hidden copy's answers instead of the live panel's —
+       * which is how the Flood & drainage group came to be reported silent while the visible
+       * panel was rendering every line correctly. `inert` + `aria-hidden` take the hidden
+       * mode out of the a11y tree, out of focus order, and out of role-based queries, without
+       * unmounting it (which is what keeps the map alive). `data-mode-active` lets any
+       * remaining raw-text check target the live mode. */}
+      <div data-mode="map" data-mode-active={mode === "map" ? "true" : "false"}
+        aria-hidden={mode === "map" ? undefined : "true"} inert={mode === "map" ? undefined : ""}
+        style={{ display: mode === "map" ? "flex" : "none", flexDirection: "column", height: "100%" }}>
         <AppHeader
           module={shellModule || "site-planner"}
           onSwitch={onShellSwitch}
@@ -559,8 +573,10 @@ export default function App({
           />
         </div>
       </div>
-      {/* Plan mode — SitePlanner renders its own AppHeader */}
-      <div style={{ display: mode === "plan" ? "block" : "none", height: "100%" }}>
+      {/* Plan mode — SitePlanner renders its own AppHeader (same inert/aria-hidden rule). */}
+      <div data-mode="plan" data-mode-active={mode === "plan" ? "true" : "false"}
+        aria-hidden={mode === "plan" ? undefined : "true"} inert={mode === "plan" ? undefined : ""}
+        style={{ display: mode === "plan" ? "block" : "none", height: "100%" }}>
         {activeSiteId && (
           <SitePlanner
             key={`${activeSiteId}:${loadEpoch}`}

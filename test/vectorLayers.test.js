@@ -676,6 +676,34 @@ describe("hitFeature (B1092) — which feature is under the tap", () => {
     expect(hitFeature(fc, { lat: 29.775, lng: -95.895 })).toBe(band);
     expect(hitFeature(fc, { lat: 29.75, lng: -95.88 })).toBeNull();
   });
+  /* (NEW-3) The V503 strand that never landed: three live taps at the Tsakiris tract hit the
+   * coordinate readout instead of the BKDD easement card. The layer WAS in the hit-test set
+   * (canvasIdentify + vector tier + on) — but polygons hit by containment ALONE, so a ~70 ft
+   * band (a few pixels wide at the default site zoom) had a click target exactly its own
+   * drawn width, while the channel centreline beside it carried a forgiving band. */
+  it("a NARROW polygon is as forgiving as a line — a tap just outside the easement band still hits it", () => {
+    // A 70 ft band ≈ 0.00019° of longitude here. The tap lands OUTSIDE it, inside the
+    // caller's slop (the planner's fixed on-screen tolerance, converted to degrees).
+    const thin = { type: "Feature", properties: { width: 70, file: "WF-10.pdf" }, geometry: { type: "Polygon", coordinates: [
+      [[-95.8951, 29.77], [-95.89491, 29.77], [-95.89491, 29.78], [-95.8951, 29.78], [-95.8951, 29.77]],
+    ] } };
+    const one = { type: "FeatureCollection", features: [thin] };
+    expect(hitFeature(one, { lat: 29.775, lng: -95.895 })).toBe(thin);              // inside — always worked
+    expect(hitFeature(one, { lat: 29.775, lng: -95.89525, tolDeg: 0.0002 })).toBe(thin); // just outside, within slop
+    expect(hitFeature(one, { lat: 29.775, lng: -95.89525, tolDeg: 0.00001 })).toBeNull(); // outside the slop → honest miss
+    expect(hitFeature(one, { lat: 29.775, lng: -95.92, tolDeg: 0.0002 })).toBeNull();    // nowhere near
+  });
+  it("an EXACT containment anywhere beats a near-miss anywhere — adjacent polygons keep their answer", () => {
+    // Two counties sharing a border: a tap just inside B is within tolerance of A's edge.
+    // Draw order puts A first, so a single-pass tolerance test would hand back the WRONG one.
+    const a = { type: "Feature", properties: { n: "A" }, geometry: { type: "Polygon", coordinates: [[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]] } };
+    const b = { type: "Feature", properties: { n: "B" }, geometry: { type: "Polygon", coordinates: [[[1, 0], [2, 0], [2, 1], [1, 1], [1, 0]]] } };
+    const two = { type: "FeatureCollection", features: [a, b] };
+    expect(hitFeature(two, { lat: 0.5, lng: 1.001, tolDeg: 0.01 })).toBe(b);
+    expect(hitFeature(two, { lat: 0.5, lng: 0.999, tolDeg: 0.01 })).toBe(a);
+    // Outside BOTH but within tolerance of A's outer edge → the near-miss fallback answers.
+    expect(hitFeature(two, { lat: 0.5, lng: -0.005, tolDeg: 0.01 })).toBe(a);
+  });
   it("a HOLE is not a hit (a doughnut's middle is outside the polygon)", () => {
     const donut = { type: "Feature", properties: {}, geometry: { type: "Polygon", coordinates: [
       [[0, 0], [4, 0], [4, 4], [0, 4], [0, 0]],

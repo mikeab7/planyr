@@ -331,6 +331,39 @@ export function femaZoneVerdict(flood) {
   return { text: `FEMA effective FIRM: Zone ${z.zone}${subtle} — no special flood hazard area mapped here.`, tone: "ok" };
 }
 
+/* (NEW-2) THE GROUP MUST NEVER BE BLANK — the honest state when the facts aren't in hand.
+ *
+ * The gap this closes, found by driving the real panel with the Tsakiris tract's actual
+ * remembered check (sites.id smrjdgmlinea): every honest line in this group is conditional
+ * on a resolved drainage context. `femaZoneVerdict` returns null without one, and
+ * `floodRowRelevance` can only demote a row once the county (or the governing district) is
+ * known. So a surface that has NO context — the map finder's copy of this panel, or any
+ * site whose flood check has never run — renders the group with NO verdict line and NO
+ * row reasons: it goes completely silent, which is the exact failure B1077 was written to
+ * end. Every OTHER state in this file says something; this is the one that said nothing.
+ *
+ * Two states, one short line each, and they are MUTUALLY EXCLUSIVE with the FEMA verdict
+ * (LayerPanel renders this OR that, never both — panel-brevity: this replaces silence, it
+ * never accumulates on top of a working readout):
+ *
+ *   no context at all      → nothing has been checked here yet. Say so.
+ *   context, county open   → the check ran but the site's county didn't resolve (a straddle,
+ *                            or an identify that never answered), so the district scoping
+ *                            deliberately fails OPEN and lists every source. Name that,
+ *                            rather than letting a full list read as a scoped one.
+ *
+ * Returns { text, tone } or null once the facts ARE in hand (the verdict lines speak then).
+ * Pure. */
+export function floodFactsNote({ hasContext = false, county = null } = {}) {
+  if (!hasContext) {
+    return { text: "Flood zone and drainage district not checked here yet.", tone: "warn" };
+  }
+  if (!countyKey(county)) {
+    return { text: "County here didn't resolve — every drainage source is listed until it does.", tone: "warn" };
+  }
+  return null;
+}
+
 // ---------------------------------------------------------------------------
 // (NEW-6 / B1080) The Stormwater readout's district line.
 // ---------------------------------------------------------------------------
