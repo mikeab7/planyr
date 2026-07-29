@@ -10,6 +10,19 @@ import {
   DEFAULT_FLOODPLAIN_RULES, bfeDataRequirementFor, atlas14Mandated,
 } from "../src/workspaces/site-planner/lib/floodplainRules.js";
 import { gridRequest, pixelToLatLng } from "../src/workspaces/site-planner/lib/demGrid.js";
+import { channelCell, flowBearing, gridCellFt, siteMaskFromLatLngRings } from "../src/workspaces/site-planner/lib/channelSection.js";
+import { flowAccumulation } from "../src/workspaces/site-planner/lib/upstreamArea.js";
+
+/* Does the fine grid genuinely have NO D8 direction at the crossing it would pick INSIDE THE SITE?
+ * Used to prove the pit fixture below actually reproduces the real-data defect rather than passing
+ * vacuously. Must use the same site mask the real call does, or it inspects a different cell. */
+function flowBearingIsNullAt(grid) {
+  const cellFt = gridCellFt(REQ, 29.91);
+  const g = { values: grid.values, mask: grid.mask, width: grid.width, height: grid.height, cellFt };
+  const siteMask = siteMaskFromLatLngRings(REQ, SITE_RINGS, g.width, g.height);
+  const i = channelCell({ acc: flowAccumulation(g), mask: g.mask, width: g.width, height: g.height }, siteMask);
+  return flowBearing(g, i) === null;
+}
 
 const W = 61, H = 61, CENTER = 30;
 const REQ = { ...gridRequest({ west: -96.0, south: 29.9, east: -95.97, north: 29.93 }, 15), width: W, height: H };
@@ -101,6 +114,28 @@ describe("terrainInputsForScreeningBfe — the three terrain-derived inputs", ()
     });
     expect(r.ok).toBe(true);
     expect(r.watershed.wideGrid).toBe(true);
+  });
+
+  /* REGRESSION — caught by the REAL-DATA run (`ui-audit/verify-screening-bfe-live.mjs`), not by any
+   * synthetic fixture. Taking the flow bearing from the FINE grid returned null outright at a real
+   * Waller point, because on flat Gulf-Coast ground an ~8-ft LiDAR cell is very often a D8 pit with
+   * no downhill neighbour. The bearing is a REACH-scale property and now comes from the wide grid.
+   * Modelled here by pitting the fine grid's channel column while the wide grid stays clean. */
+  it("a D8 pit at the fine-grid crossing does NOT kill the section — the bearing comes from the reach", () => {
+    const pitted = { values: Float32Array.from(GRID.values), mask: Uint8Array.from(GRID.mask), width: W, height: H };
+    // Sink the channel column into a FLAT trench well below its banks: every centre cell has no
+    // strictly-lower neighbour (the trench is level, the banks are higher), which is exactly the
+    // no-downhill-neighbour condition d8Direction reports as null.
+    for (let y = 8; y < H - 8; y++) pitted.values[y * W + CENTER] = 120;
+    expect(flowBearingIsNullAt(pitted)).toBe(true); // the fixture really does reproduce the defect
+
+    const r = terrainInputsForScreeningBfe({
+      sectionGrid: pitted, sectionReq: REQ,
+      watershedGrid: GRID, watershedReq: REQ,   // the reach-scale grid is clean
+      siteRingsLatLng: SITE_RINGS, lat: 29.91, halfWidthFt: HALF,
+    });
+    expect(r.ok).toBe(true);
+    expect(r.station.length).toBeGreaterThan(20);
   });
 
   it("LOUD-FAILURE: a flat grid names the slope AND the section as missing", () => {

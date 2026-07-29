@@ -106,22 +106,23 @@ export function terrainInputsForScreeningBfe({
     return { ok: false, missing: ["a channel crossing on this site (no drainable cell inside the footprint)"] };
   }
 
-  // ── THE SECTION and its bearing: fine grid.
-  const bearing = flowBearing(sec, cell);
-  if (!bearing) missing.push("channel flow direction (the terrain reads flat or void at the crossing)");
-  const section = bearing ? cutSection(sectionGrid, sectionReq, cell, bearing, { halfWidthFt, samples: sectionSamples, cellFt: secCellFt, lat }) : null;
-  if (!section || !section.ok) missing.push(section && section.reason ? section.reason : "ground cross-section across the channel");
-
-  // ── THE WATERSHED and the longitudinal slope: the wide grid where one was fetched. Both want
-  // reach rather than resolution — a channel grade measured over a few hundred feet of 3 m LiDAR
-  // on flat Gulf-Coast ground is mostly noise.
+  // ── THE WATERSHED, the longitudinal slope, AND THE FLOW BEARING: the wide grid where one was
+  // fetched. All three are REACH-SCALE properties, and this ordering is not cosmetic — it is the
+  // fix for a defect a real-data run caught (`ui-audit/verify-screening-bfe-live.mjs` at a Waller
+  // point): taking the bearing from the FINE grid returned null outright, because on flat
+  // Gulf-Coast ground an ~8-ft LiDAR cell is very often a D8 pit with no downhill neighbour at all.
+  // That is the same lesson `flowField.js` already records in its header — "raw per-cell D8 at
+  // sparse sample points reads as random on near-flat Houston terrain" — and the same reason a
+  // channel GRADE measured over a few hundred feet of fine LiDAR is mostly noise. So the direction
+  // the water runs is read at reach scale and the SECTION is then cut on the fine grid at the
+  // site's own crossing, which is the only thing the fine grid is actually better at.
   const wideOk = !!(usable(watershedGrid) && watershedReq);
   const wReq = wideOk ? watershedReq : sectionReq;
   const wSrc = wideOk ? watershedGrid : sectionGrid;
   const wCellFt = gridCellFt(wReq, lat);
   const wide = { values: wSrc.values, mask: wSrc.mask, width: wSrc.width, height: wSrc.height, cellFt: wCellFt };
 
-  let areaAcres = null, truncated = false, wCell = -1, slope = null;
+  let areaAcres = null, truncated = false, wCell = -1, slope = null, bearing = null;
   if (!(wCellFt > 0)) {
     missing.push("watershed grid cell size");
   } else {
@@ -134,6 +135,9 @@ export function terrainInputsForScreeningBfe({
       areaAcres = contributingAcres(wAcc, wCell, wCellFt);
       truncated = !!upstreamEdgeFlags(wide)[wCell];
       slope = channelSlope(wide, wCell);
+      // Both grids are Web Mercator with x→east and y→south, so a unit bearing transfers between
+      // them unchanged. Fall back to the fine grid only if the reach itself yields no direction.
+      bearing = flowBearing(wide, wCell) || flowBearing(sec, cell);
       if (!(areaAcres > 0)) missing.push("contributing watershed area (no delineable basin from the terrain grid)");
       if (truncated) {
         missing.push(
@@ -143,6 +147,11 @@ export function terrainInputsForScreeningBfe({
       if (!slope) missing.push("channel slope (the reach falls no measurable amount over the sampled run)");
     }
   }
+  if (!bearing) missing.push("channel flow direction (the terrain reads flat or void at the crossing)");
+
+  // ── THE SECTION: cut on the FINE grid, at the site's own crossing, across the reach bearing.
+  const section = bearing ? cutSection(sectionGrid, sectionReq, cell, bearing, { halfWidthFt, samples: sectionSamples, cellFt: secCellFt, lat }) : null;
+  if (bearing && (!section || !section.ok)) missing.push(section && section.reason ? section.reason : "ground cross-section across the channel");
 
   if (missing.length) {
     return { ok: false, missing, channelCell: cell, areaAcres: areaAcres > 0 ? Math.round(areaAcres * 100) / 100 : null, watershedTruncated: truncated };
