@@ -480,6 +480,153 @@ describe("NEW-3 (round 3) — a rejected commit backs off and eventually gives u
   });
 });
 
+/* Round 4 (2026-07-29, live re-verification of V509b on 2bdc985) — the client was CORRECT on the
+ * wire (exactly two 12-op commits, nothing else) and the plan still landed torn: of the undo
+ * batch's twelve ops the server accepted ONE (the host) and refused eleven, and the client treated
+ * that as settled. Client-side atomicity does not survive a partially-rejected batch. */
+describe("NEW-1 (round 4) — a partially-accepted batch is never settled", () => {
+  const conflictRow = (o) => ({ rev: 500, data: { ...o.data, cx: (o.data.cx || 0) - 236, cy: (o.data.cy || 0) + 180 }, z_index: 0, updated_by: "me" });
+  // The measured server behaviour: the host's op lands, every bonded child is refused.
+  const onlyHostAccepted = (ops) => ({
+    ok: true,
+    results: ops.map((o) => (o.id === "b1"
+      ? { id: o.id, status: "ok", rev: 79 }
+      : { id: o.id, status: "conflict", row: conflictRow(o) })),
+  });
+
+  it("1-of-12 accepted → the client re-commits the rest of the assembly instead of going quiet", async () => {
+    const events = [];
+    const h = makeHarness({ sync: { selfUid: "me", isDirectEdit: () => false, onEvent: (e) => events.push(e) } });
+    h.canvas.els = assembly();
+    h.reconcile(false); await tick();
+    h.commits.length = 0;
+
+    h.setResponder(onlyHostAccepted);
+    h.canvas.els = move(h.canvas.els, -236, 180);
+    h.reconcile(false); h.sync.flushGesture(); await tick();
+
+    expect(h.commits).toHaveLength(1);
+    expect(h.commits[0]).toHaveLength(6);
+    // The split is DETECTED and said out loud…
+    const split = events.filter((e) => e.type === "assembly-split");
+    expect(split.length).toBeGreaterThan(0);
+    expect(split[0].ids.length).toBe(5);                       // every refused child, not just some
+    // …and the refused members are re-queued rather than abandoned.
+    expect(h.sync.pendingCount()).toBe(5);
+    h.setResponder((ops) => ({ ok: true, results: ops.map((o) => ({ id: o.id, status: "ok", rev: 600 })) }));
+    h.runTimers(); await tick();
+    expect(h.commits).toHaveLength(2);
+    expect(h.commits[1]).toHaveLength(5);                      // the retry carries the whole remainder
+    for (const o of h.commits[1]) expect(o.data.cx).toBe(h.canvas.els.find((e) => e.id === o.id).cx);
+  });
+
+  it("a DERIVED op never yields to OUR OWN earlier write — that was the silence", async () => {
+    // The B1099 yield is right against another writer and catastrophic against ourselves: on an undo
+    // every bonded child conflicts with the move being undone, and yielding left eleven of twelve
+    // ops standing down while the host's went through.
+    const h = makeHarness({ sync: { selfUid: "me", isDirectEdit: () => false } });
+    h.canvas.els = assembly();
+    h.reconcile(false); await tick();
+    h.commits.length = 0;
+    h.setResponder(onlyHostAccepted);
+    h.canvas.els = move(h.canvas.els, -236, 180);
+    h.reconcile(false); h.sync.flushGesture(); await tick();
+    expect(h.sync.pendingCount()).toBeGreaterThan(0);          // NOT settled
+  });
+
+  it("a genuinely FOREIGN row still wins over derived churn (B1099 unregressed)", async () => {
+    const h = makeHarness({ sync: { selfUid: "me", isDirectEdit: () => false } });
+    h.canvas.els = assembly();
+    h.reconcile(false); await tick();
+    h.commits.length = 0;
+    h.setResponder((ops) => ({ ok: true, results: ops.map((o) => ({ id: o.id, status: "conflict", row: { rev: 500, data: { ...o.data, cx: 9 }, z_index: 0, updated_by: "someone-else" } })) }));
+    h.canvas.els = move(h.canvas.els, -236, 180);
+    h.reconcile(false); h.sync.flushGesture(); await tick();
+    expect(h.sync.pendingCount()).toBe(0);                     // all refused by ANOTHER writer → yield, no re-push
+  });
+
+  it("an assembly that will not commit whole escalates loudly instead of looping", async () => {
+    const events = [];
+    const h = makeHarness({ sync: { selfUid: "me", isDirectEdit: () => false, onEvent: (e) => events.push(e), maxRejectStreak: 2 } });
+    h.canvas.els = assembly();
+    h.reconcile(false); await tick();
+    h.setResponder(onlyHostAccepted);
+    h.canvas.els = move(h.canvas.els, -236, 180);
+    h.reconcile(false); h.sync.flushGesture(); await tick();
+    for (let i = 0; i < 6; i++) { h.runTimers(); await tick(); }
+    expect(h.sync.state).toBe("stale");
+    // It goes loud, and the split itself was reported on the way — the escalation may arrive via
+    // the split counter or, once the retry contains only refused ops, via the all-rejected counter.
+    // Either is correct; what matters is that it stops and tells the user, and never falls silent.
+    expect(events.some((e) => e.type === "client-stale")).toBe(true);
+    expect(events.some((e) => e.type === "assembly-split")).toBe(true);
+  });
+});
+
+describe("NEW-2 (round 4) — the heal catches a whole-assembly translation on a LARGE host", () => {
+  // 882 × 510 — the owner's real building. Its half-diagonal alone is over 500 ft, so the coarse
+  // distance test tolerated a 236/180 ft tear: the bigger the building, the bigger the tear it
+  // allowed, which is backwards. The computed anchor does not scale with host size.
+  const bigPlan = () => {
+    const b = { id: "b1", type: "building", cx: 1117.2, cy: -13.85, w: 882, h: 510, rot: 0, dock: "cross" };
+    const mk = (id, cy, h, extra) => ({ id, type: "paving", attachedTo: "b1", noFit: true, cx: 1117.2, cy, w: 882, h, rot: 0, ...extra });
+    return [
+      b,
+      mk("court-n", -13.85 - 255 - 67.5, 135, { truckCourt: { side: "top" } }),
+      { ...mk("trailer-n", -13.85 - 255 - 135 - 25, 50, { forCourt: "court-n", prevZone: "court-n" }), type: "trailer" },
+      mk("court-s", -13.85 + 255 + 67.5, 135, { truckCourt: { side: "bottom" } }),
+      { ...mk("trailer-s", -13.85 + 255 + 135 + 25, 50, { forCourt: "court-s", prevZone: "court-s" }), type: "trailer" },
+    ];
+  };
+  const byId = (list, id) => list.find((e) => e.id === id);
+
+  it("every child translated 236 ft west / 180 ft north is re-fitted on load", () => {
+    const ok = bigPlan();
+    const torn = ok.map((e) => (e.id === "b1" ? e : { ...e, cx: e.cx - 236, cy: e.cy - 180 }));
+    const healed = [];
+    const out = normalizeBondedChildren(torn, (h) => healed.push(h));
+    for (const e of ok.slice(1)) {
+      expect(byId(out, e.id).cx, `${e.id} x`).toBeCloseTo(e.cx, 6);
+      expect(byId(out, e.id).cy, `${e.id} y`).toBeCloseTo(e.cy, 6);
+    }
+    expect(healed.map((x) => x.id).sort()).toEqual(["court-n", "court-s", "trailer-n", "trailer-s"]);
+  });
+
+  it("the same large plan, untorn, is returned byte-identical (no churn on a big building)", () => {
+    const ok = bigPlan();
+    expect(stableStringify(normalizeBondedChildren(ok))).toBe(stableStringify(ok));
+  });
+
+  it("a stack member on NO chain is still anchored (it used to be skipped entirely)", () => {
+    const b = { id: "b1", type: "building", cx: 0, cy: 0, w: 882, h: 510, rot: 0 };
+    // noFit, bonded, but heading no recognised dock chain and carrying no truckCourt tag.
+    const orphan = { id: "orphan", type: "paving", attachedTo: "b1", noFit: true, cx: 0, cy: 255 + 67.5, w: 882, h: 135, rot: 0 };
+    expect(stableStringify(normalizeBondedChildren([b, orphan]))).toBe(stableStringify([b, orphan])); // correct → untouched
+    const torn = normalizeBondedChildren([b, { ...orphan, cx: -236, cy: orphan.cy - 180 }]);
+    expect(byId(torn, "orphan").cx).toBeCloseTo(0, 6);
+    expect(byId(torn, "orphan").cy).toBeCloseTo(322.5, 6);
+  });
+
+  it("a healed element is EXEMPT from rows-canonical, so the repair commits instead of being reverted", async () => {
+    // The two guarantees would otherwise fight: the heal repairs the canvas, then rows-canonical
+    // adopts the TORN rows straight back over it — and the broken copy wins.
+    const h = makeHarness();
+    const canonical = assembly();
+    h.sync.seed(canonical.map((e, i) => ({ kind: "el", id: e.id, data: e, rev: 4, z_index: i * 1024 })));
+    h.canvas.els = canonical.map((e) => (e.id === "k1" ? { ...e, cy: e.cy + 5 } : e)); // "healed" copy
+    h.sync.reconcile(h.canvas, { afterSeed: true, exempt: new Set(["el:k1"]) });
+    h.runTimers(); await tick();
+    expect(h.commits.flat().map((o) => o.id)).toContain("k1");   // the repair is committed…
+    // …while a NON-exempt stale divergence is still overruled by the rows.
+    const h2 = makeHarness();
+    h2.sync.seed(canonical.map((e, i) => ({ kind: "el", id: e.id, data: e, rev: 4, z_index: i * 1024 })));
+    h2.canvas.els = canonical.map((e) => (e.id === "k1" ? { ...e, cy: e.cy + 5 } : e));
+    h2.sync.reconcile(h2.canvas, { afterSeed: true });
+    h2.runTimers(); await tick();
+    expect(h2.commits).toEqual([]);
+  });
+});
+
 describe("NEW-3 — a foreign row can win", () => {
   const rowFor = (el, rev, uid) => ({ kind: "el", id: el.id, data: el, rev, z_index: 0, updated_by: uid });
 

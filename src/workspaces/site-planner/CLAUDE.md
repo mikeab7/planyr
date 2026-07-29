@@ -93,7 +93,16 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   AFTER the journal / never-synced folds in `refetchReplace`, never before — a fold can otherwise
   substitute a stale copy back over a healed row. Full rule in `/CLAUDE.md` → ROWS-CANONICAL-ON-SEED.
   **B1115:** an all-rejected batch backs off exponentially and, after `maxRejectStreak`, stops and
-  emits `client-stale` — never re-queue a rejected batch on the plain debounce.
+  emits `client-stale` — never re-queue a rejected batch on the plain debounce. **B1116, the
+  subtlest one yet:** the B1099 derived-yield rule is gated on `foreignAuthor(row)` — an op must
+  NEVER stand down against this tab's OWN earlier write (on an undo every bonded child conflicts
+  with the move being undone, and yielding left 11 of 12 ops silent while the host's landed). And a
+  batch that lands only PARTLY across an assembly is never settled: `processResults` re-enqueues
+  every refused member of a partly-accepted assembly and emits `assembly-split`. The server half —
+  all-or-nothing group commit — is `db/commit_elements_atomic.sql`, which the owner must run; the
+  client does NOT pass `p_atomic` until then (B1117), because a missing 3-arg overload 404s every
+  write. **B1118:** the load-time heal's `exempt` set — a repaired element must diff and COMMIT, or
+  rows-canonical-on-seed adopts the torn rows straight back over the repair.
 - `planClipboard.js` — the ONE general canvas clipboard (NEW-2/NEW-6): collect the current selection
   (elements expanded to their `attachedTo` assembly, so a building brings its truck court / trailer
   parking / dock zones / bump-outs), then paste with fresh ids, bonds remapped INSIDE the copy, and
