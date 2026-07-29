@@ -14,7 +14,16 @@
     "            toward the target as optimizations land — never up to accommodate a regression.",
     "",
     "Baseline provenance: measured on production planyr.io in a signed-in Chrome session on",
-    "Sylvestri / 'Concept C - Full 275ft Frontage', 2026-07-28, dpr 2.15, viewport 1600x465."
+    "Sylvestri / 'Concept C - Full 275ft Frontage', 2026-07-28, dpr 2.15, viewport 1600x465.",
+    "",
+    "EXCEPT the two FRAME-TIME metrics, whose 2026-07-28 seed is WITHDRAWN (2026-07-29). That",
+    "session's tab reports visibilityState 'hidden', and Chrome suspends requestAnimationFrame in",
+    "a backgrounded tab, so its frame medians were computed from a starved sample of unknown",
+    "provenance. They are re-seeded from ui-audit/perf-harness.mjs running headless, where the",
+    "page is guaranteed visible - and the harness now refuses to report a median at all when the",
+    "tab is not visible or the frame rate is implausible (ui-audit/lib/frameSampling.mjs). Every",
+    "OTHER metric here is a DOM / network / bundle / heap measurement and does not depend on rAF",
+    "or tab visibility, so the 2026-07-28 provenance stands for all of them."
   ],
 
   "bundle": {
@@ -84,22 +93,22 @@
       "note": "Requires live external tile hosts, which this sandbox blocks. Reported as SKIPPED, never silently passed. Ceiling is provisional until a production run seeds it."
     },
     "frameMedianMs": {
-      "ceiling": 24,
+      "ceiling": 25,
       "target": 16.7,
-      "measured": 20,
-      "localFloor": 16.7,
+      "measured": 16.7,
       "unit": "ms",
       "what": "Median frame time during a scripted drag across the planner canvas.",
-      "note": "ABOVE TARGET — 20ms on the owner's production/Sylvestri baseline vs the 16.7ms (60fps) target. The ceiling is set so a regression trips it while the standing gap stays visible every run. localFloor is the stand-in scenario on an idle sandbox CPU; it hits 60fps because that scene is lighter than Sylvestri, which is exactly why the ceiling is seeded from the owner's number and not from a local run."
+      "seededFrom": "ui-audit/perf-harness.mjs, headless, reference scenario, 2026-07-29 (3 reps: 16.7 / 16.7 / 16.7; 145-171 samples at 59.1-59.6 fps, tab visible)",
+      "note": "RE-SEEDED 2026-07-29, and the previous seed is WITHDRAWN. The old numbers (ceiling 24, measured 20) came from a browser session whose tab visibility could not be guaranteed; that surface reports document.visibilityState === 'hidden', and Chrome SUSPENDS requestAnimationFrame in a backgrounded tab — six real drag gestures there produced ZERO frames, and sample counts wandering 1525 -> 316 -> 0 across otherwise-identical runs are the signature of that throttling, not of a performance change. So the 20ms was a median over a starved sample, of unknown provenance, and it must not be treated as measured truth. The instrument of record is now perf-harness.mjs run headless, where the page is guaranteed visible and rAF runs at full rate, and where the harness now REFUSES to report a median at all if the tab is not visible or the observed rate falls below 30 fps (ui-audit/lib/frameSampling.mjs). SCOPE, stated plainly: this ceiling describes the committed reference scenario in that harness, which is LIGHTER than Sylvestri / Concept C — it catches a render regression in the reference scene, it is NOT a claim about the owner's plan on production. Confirming production needs a signed-in live run on an instrument with guaranteed visibility, which a Cowork browser session is not (V480(e) / V481(g))."
     },
     "frameP90Ms": {
-      "ceiling": 96,
+      "ceiling": 40,
       "target": 33,
-      "measured": 80,
-      "localFloor": 16.7,
+      "measured": 16.7,
       "unit": "ms",
       "what": "90th-percentile frame time during the same scripted drag — the stutter the owner actually feels.",
-      "note": "ABOVE TARGET — 80ms on the owner's baseline vs 33ms. The single worst number in the baseline. See frameMedianMs on why localFloor is far lower."
+      "seededFrom": "ui-audit/perf-harness.mjs, headless, reference scenario, 2026-07-29 (3 reps: 16.7 / 16.7 / 16.7)",
+      "note": "RE-SEEDED 2026-07-29 alongside frameMedianMs, same withdrawal of the same untrustworthy seed — the old 96 ceiling / 80 measured came from that hidden-tab session (its later 'post-fix' sample of p90 120 over 316 frames is the same artefact, which is why neither is kept). The reference scene runs a clean 60fps headless, so the ceiling is the measurement plus real headroom rather than pinned to it: p90 is the metric a single scheduler hiccup on a shared runner moves most, and a ceiling that trips on machine noise teaches people to re-run until green. Read the SCOPE note on frameMedianMs before quoting this number for production."
     },
     "peakHeapMB": {
       "ceiling": 160,
@@ -135,8 +144,8 @@
     "runtime.firstAerialCoverageMs": "B1040 / V477 live check (re-seed the provisional ceiling from a production run; tile hosts are unreachable from the sandbox)",
     "bundle.siteRouteJsBytes": "B1064 (extract SitePlanner's panels into lazily-loaded child components) -- B1042 did the dynamic-import half and is Done",
     "bundle.largestChunkBytes": "B1064 (extract SitePlanner's panels into lazily-loaded child components) -- B1042 did the dynamic-import half and is Done; see this metric's note for the measured floor that blocks the rest",
-    "runtime.frameMedianMs": "companion map-side perf session, 2026-07-28 nine-item run (drift / overlay lifecycle / SVG culling) — tighten to 60fps once that render work lands",
-    "runtime.frameP90Ms": "companion map-side perf session, 2026-07-28 nine-item run (drift / overlay lifecycle / SVG culling) — tighten to 60fps once that render work lands",
+    "runtime.frameMedianMs": "V480(e) / V481(g) — a PRODUCTION frame-time reading on the real Sylvestri scenario, from an instrument with guaranteed tab visibility (NOT a Cowork browser session; see this metric's note). The reference scene already meets the 16.7ms target headless, so the remaining gap between ceiling and target is measurement headroom, not known slowness.",
+    "runtime.frameP90Ms": "V480(e) / V481(g) — a PRODUCTION frame-time reading on the real Sylvestri scenario, from an instrument with guaranteed tab visibility (NOT a Cowork browser session; see this metric's note). Until that exists the ceiling describes the reference scene only.",
     "runtime.aerialTileRequests": "companion map-side perf session, 2026-07-28 nine-item run (tile-footprint reduction)"
   }
 }

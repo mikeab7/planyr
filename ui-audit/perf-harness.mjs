@@ -50,11 +50,16 @@ const NO_TILES = process.argv.includes("--no-tiles");
 
 const budgets = JSON.parse(readFileSync(join(HERE, "perf-budgets.json"), "utf8"));
 
+/* Set when the frame sampler cannot be trusted (see MEASUREMENT BLOCKER #4 below); non-null
+ * suppresses the frame medians entirely rather than reporting a starved figure. */
+let frameSamplingFault = null;
+
 /* ---- Reference scenario ------------------------------------------------------------------
  * Owned by ui-audit/lib/perf-scenario.mjs — see the long note there for why this is a
  * purpose-built scenario rather than the e2e dense-testfit fixture (that fixture carries the
  * pure-engine geometry schema and crashes the live render path). */
 const { ORIGIN, SCENARIO_ID, perfScenarioSite, perfScenarioSeed } = await import("./lib/perf-scenario.mjs");
+const { frameSamplingFault: frameSamplingFaultFor, observedFps, MIN_PLAUSIBLE_FPS } = await import("./lib/frameSampling.mjs");
 const site = perfScenarioSite();
 const seed = perfScenarioSeed();
 
@@ -195,20 +200,48 @@ if (NO_TILES) {
   }
 }
 
-/* ---- scripted drag → frame timing ---------------------------------------------------------- */
+/* ---- scripted drag → frame timing ----------------------------------------------------------
+ * MEASUREMENT BLOCKER #4 — rAF IS SUSPENDED IN A BACKGROUNDED TAB, AND SAYS NOTHING ABOUT IT.
+ *
+ * The frame budget was originally seeded from a browser session whose tab visibility could not
+ * be guaranteed. Re-checked 2026-07-29: that surface reports document.visibilityState ===
+ * "hidden", and Chrome suspends requestAnimationFrame entirely in that state — six real drag
+ * gestures produced ZERO frames, and a 1500 ms idle sample produced zero as well. Taking a
+ * screenshot does not foreground the tab. Sample counts wandering 1525 → 316 → 0 across
+ * otherwise-identical runs is the signature of that throttling, not of a performance change.
+ *
+ * The failure mode that matters is not the zero — it is the MIDDLE of that range. A partly
+ * throttled run still yields a perfectly plausible-looking median from a starved sample, and
+ * that number is how a bad ceiling gets committed. So the harness now REFUSES to report a
+ * frame figure it cannot stand behind: the tab must be visible, and the observed frame rate
+ * across the gesture must be at least MIN_PLAUSIBLE_FPS. Anything less is reported as an
+ * unreliable measurement (loudly, with the reason), never as a median. The rule itself lives
+ * in ui-audit/lib/frameSampling.mjs so it is unit-tested and cannot drift from the docs. */
 await page.evaluate(() => { window.__frames.length = 0; });
+const visibility = await page.evaluate(() => document.visibilityState);
+const dragT0 = Date.now();
 await page.mouse.move(cx, cy);
 await page.mouse.down();
 for (let i = 0; i < 40; i++) {
   await page.mouse.move(cx + Math.sin(i / 5) * 260, cy + Math.cos(i / 7) * 160, { steps: 2 });
 }
 await page.mouse.up();
+const dragMs = Date.now() - dragT0;
 const drag = await page.evaluate(() => window.__frames.map((f) => f.d));
 /* Drop the first sample: its delta spans the idle gap before the gesture, not a rendered frame. */
 const dragFrames = drag.slice(1);
-results.frameMedianMs = dragFrames.length ? +pct(dragFrames, 50).toFixed(1) : null;
-results.frameP90Ms = dragFrames.length ? +pct(dragFrames, 90).toFixed(1) : null;
 results.frameSamples = dragFrames.length;
+results.frameGestureMs = dragMs;
+results.frameObservedFps = observedFps(dragFrames.length, dragMs);
+results.frameVisibility = visibility;
+frameSamplingFault = frameSamplingFaultFor({ visibility, samples: dragFrames.length, gestureMs: dragMs });
+if (frameSamplingFault) {
+  results.frameMedianMs = null;
+  results.frameP90Ms = null;
+} else {
+  results.frameMedianMs = dragFrames.length ? +pct(dragFrames, 50).toFixed(1) : null;
+  results.frameP90Ms = dragFrames.length ? +pct(dragFrames, 90).toFixed(1) : null;
+}
 
 /* ---- pan / zoom / overlay-toggle loop → peak heap -------------------------------------------
  * MEASUREMENT BLOCKER #3 — performance.measureUserAgentSpecificMemory() is unavailable on
@@ -254,7 +287,13 @@ for (const m of METRICS) {
   const spec = r[m];
   const value = results[m];
   if (!spec) continue;
-  if (value == null) { skipped.push({ metric: `runtime.${m}` }); continue; }
+  if (value == null) {
+    // A frame metric suppressed by the sampling guard is NOT the same as "not measurable here" —
+    // say which, and say why, so nobody re-seeds a ceiling from a throttled run again.
+    const why = (m === "frameMedianMs" || m === "frameP90Ms") && frameSamplingFault ? frameSamplingFault : null;
+    skipped.push({ metric: `runtime.${m}`, why });
+    continue;
+  }
   const row = { metric: `runtime.${m}`, value, ceiling: spec.ceiling, target: spec.target, unit: spec.unit };
   if (LOAD_SENSITIVE.has(m) && !loadTimingsTrustworthy) { unreliable.push(row); continue; }
   if (value > spec.ceiling) failures.push({ ...row, delta: +(value - spec.ceiling).toFixed(1), pct: (value / spec.ceiling - 1) * 100 });
@@ -278,17 +317,20 @@ if (intruders.length) {
 }
 
 if (JSON_OUT) {
-  console.log(JSON.stringify({ base: BASE, scenario: site.id, results, failures, aboveTarget, passes, skipped, unreliable, notes }, null, 2));
+  console.log(JSON.stringify({ base: BASE, scenario: site.id, results, frameSamplingFault, failures, aboveTarget, passes, skipped, unreliable, notes }, null, 2));
 } else {
   console.log(`Planyr runtime performance harness (NEW-8)\n  target: ${BASE}\n  scenario: ${site.id} @ ${ORIGIN.lat},${ORIGIN.lon} (stands in for Sylvestri / Concept C)\n`);
   console.log(`  site-route chunks fetched: ${results.siteRouteChunks.length} — ${results.siteRouteChunks.map(stem).join(", ")}`);
-  console.log(`  frame samples during drag: ${results.frameSamples}\n`);
+  console.log(`  frame samples during drag: ${results.frameSamples} over ${results.frameGestureMs} ms (${results.frameObservedFps} fps, tab "${results.frameVisibility}")\n`);
   for (const p of passes) console.log(`  ✓ ${p.metric} — ${p.value} ${p.unit} (ceiling ${p.ceiling})`);
   for (const a of aboveTarget) {
     console.log(`  ⚠ ${a.metric} — ${a.value} ${a.unit} is within its ${a.ceiling} ceiling but ABOVE the ${a.target} target (gap ${a.gap})`);
     if (a.owner) console.log(`      tracked by: ${a.owner}`);
   }
-  for (const s of skipped) console.log(`  – ${s.metric} — SKIPPED (not measurable in this run)`);
+  for (const s of skipped) {
+    console.log(`  – ${s.metric} — ${s.why ? "NOT REPORTED (measurement invalid)" : "SKIPPED (not measurable in this run)"}`);
+    if (s.why) console.log(`      ${s.why}`);
+  }
   for (const u of unreliable) console.log(`  – ${u.metric} — ${u.value} ${u.unit} MEASURED BUT NOT JUDGED (see note below; ceiling ${u.ceiling})`);
   for (const f of failures) {
     if (f.named) {

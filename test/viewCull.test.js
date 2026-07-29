@@ -14,6 +14,8 @@ import {
   visibleWorldRect, elementBounds, boundsIntersect, cullToView, shouldCull,
   CULL_MARGIN, CULL_MIN_ELEMENTS,
 } from "../src/workspaces/site-planner/lib/viewCull.js";
+import { sheetLabelPpf, makeLabelFrame, MIN_LABEL_PPF, MAX_LABEL_PPF } from "../src/workspaces/site-planner/lib/exportLabelScale.js";
+import { layoutLabels, buildingLabelLines, dimCalloutVisible, detailLabelVisible } from "../src/workspaces/site-planner/lib/labelLayout.js";
 
 const view = { ppf: 0.35, offX: 60, offY: 60 };
 const size = { w: 1600, h: 465 };
@@ -111,5 +113,128 @@ describe("the export renders the COMPLETE model, whatever the view (hard constra
       cullToView(model, visibleWorldRect(v, size), { enabled: true }).forEach((e) => seen.add(e.id));
     }
     expect(seen.size).toBe(model.length);
+  });
+});
+
+/* ── the LABEL half of the same constraint (NEW-1, closing the V481(f) gap) ────────────────
+ *
+ * The assertions above are about DRAWN GEOMETRY, and on the owner's live measurement they
+ * were all TRUE: rects 1,251 / polygons 34 / images 6, identical from a corner zoom and from
+ * a wide zoom. What was FALSE at the same moment was the TEXT — 151 label nodes from the
+ * corner export against 118 from the wide one, with "Building 12" carrying no label at all
+ * on the wide-zoom sheet. Geometry-only counting is exactly why this guard didn't catch it.
+ *
+ * So this block asserts the thing the old one couldn't: that the LABEL tier's decisions —
+ * which labels survive, and how many lines each keeps — are a function of the sheet, not of
+ * the view. It models the real pipeline from SitePlanner's label pass (the `ls` ramp → per
+ * candidate `fs`/`lh`/`charW`/`halfW`/`halfH` → `layoutLabels`), because that pass lives
+ * inside the component; the two pure ends of it (the label frame and the collision engine)
+ * are the parts a regression would actually break.
+ */
+describe("the export renders the COMPLETE LABEL SET, whatever the view (V481(f))", () => {
+  // Buildings packed tightly enough that a zoomed-OUT screen render genuinely has to start
+  // dropping labels — the condition that produced the live defect.
+  const plan = Array.from({ length: 12 }, (_, i) => ({
+    id: `b${i + 1}`, name: `Building ${i + 1}`,
+    cx: (i % 4) * 760, cy: Math.floor(i / 4) * 520, w: 620, h: 380,
+  }));
+  const extent = { wFt: 3 * 760 + 620, hFt: 2 * 520 + 380 };
+  const SHEET = { planW: 764, planH: 470 }; // a letter-landscape plan box, in centi-inches
+
+  // The views the owner actually exported from: deep into a corner, and the whole site.
+  const views = [
+    { ppf: 0.40, offX: -900, offY: -400 },   // corner zoom
+    { ppf: 0.025, offX: 60, offY: 60 },      // wide zoom (scale bar 0–5,000 ft — the whole site on screen)
+    { ppf: 1.60, offX: -8000, offY: -3000 }, // zoomed right in on one building
+  ];
+
+  // One label pass, mirroring SitePlanner's. `sheetPpf` null == the pre-NEW-1 behaviour
+  // (the label tier reads the live view), a number == an export pass on that sheet.
+  const labelPass = (view, sheetPpf) => {
+    const lf = makeLabelFrame(view.ppf, sheetPpf);
+    const ls = Math.max(0.34, Math.min(1, lf.ppf / 0.45));
+    const fs = 11 * ls * lf.k, lh = 14.5 * ls * lf.k, charW = fs * 0.6;
+    const f2p = (p) => ({ x: p.x * view.ppf + view.offX, y: p.y * view.ppf + view.offY });
+    const items = plan.map((el) => {
+      const c = f2p({ x: el.cx, y: el.cy });
+      return {
+        id: el.id, cx: c.x, cy: c.y,
+        lines: buildingLabelLines({ name: el.name, sqft: `${el.w * el.h} sf`, dims: `${el.w}′ × ${el.h}′` }),
+        lh, charW, halfW: (el.w / 2) * view.ppf, halfH: (el.h / 2) * view.ppf, importance: el.w * el.h,
+      };
+    });
+    const placed = layoutLabels(items, { pad: 2 * lf.k, gap: 4 * lf.k });
+    return {
+      // What a diff of the exported SVG would see: which labels exist, and what they say.
+      labels: plan.map((el) => (placed.has(el.id) ? placed.get(el.id).lines.join("|") : null)),
+      names: plan.filter((el) => placed.has(el.id)).map((el) => el.id),
+      dims: dimCalloutVisible(lf.ppf),
+      detail: detailLabelVisible(24, lf.ppf),
+    };
+  };
+
+  const sheetPpf = sheetLabelPpf({ extentWft: extent.wFt, extentHft: extent.hFt, ...SHEET });
+
+  it("the sheet's own scale doesn't depend on the view at all", () => {
+    expect(sheetPpf).toBeGreaterThan(0);
+    // Same plan, same paper → same number, however the caller is zoomed. (There is no `view`
+    // parameter to pass; that IS the guarantee, and this pins it against a future signature.)
+    expect(sheetLabelPpf({ extentWft: extent.wFt, extentHft: extent.hFt, ...SHEET })).toBe(sheetPpf);
+    expect(sheetLabelPpf({ extentWft: 0, extentHft: 0, ...SHEET })).toBeNull();
+    // A pathological extent can't hand the label tier a nonsense zoom.
+    expect(sheetLabelPpf({ extentWft: 1e9, extentHft: 1e9, ...SHEET })).toBe(MIN_LABEL_PPF);
+    expect(sheetLabelPpf({ extentWft: 0.001, extentHft: 0.001, ...SHEET })).toBe(MAX_LABEL_PPF);
+  });
+
+  it("an export pass places EVERY building label — none is silently dropped", () => {
+    for (const v of views) {
+      const { names } = labelPass(v, sheetPpf);
+      expect(names).toEqual(plan.map((e) => e.id));
+    }
+  });
+
+  it("every label present at one view is present, WORD FOR WORD, at every other view", () => {
+    const ref = labelPass(views[0], sheetPpf);
+    for (const v of views.slice(1)) {
+      const got = labelPass(v, sheetPpf);
+      expect(got.labels).toEqual(ref.labels); // content, not just count — the LOD line-drop too
+      expect(got.dims).toBe(ref.dims);        // …and the declutter gates the sheet inherited
+      expect(got.detail).toBe(ref.detail);
+    }
+  });
+
+  it("…and would have FAILED before the fix — the pre-NEW-1 pass read the live view", () => {
+    // Same plan, same two exports, label tier on `view.ppf`: the wide-zoom pass loses labels
+    // the corner pass kept. This is the live V481(f) reading (151 texts → 118, Building 12
+    // gone) reproduced in the pure layer, so the guard is known to bite.
+    const corner = labelPass(views[0], null), wide = labelPass(views[1], null);
+    expect(wide.labels).not.toEqual(corner.labels);
+    expect(wide.names.length).toBeLessThan(corner.names.length);
+  });
+
+  it("on screen the label frame is the identity — no screen render moves a pixel", () => {
+    for (const v of views) {
+      const lf = makeLabelFrame(v.ppf, null);
+      expect(lf).toEqual({ ppf: v.ppf, k: 1, sheet: false, strokeZk: v.ppf / 0.35 });
+    }
+  });
+
+  it("k converts a label px back into a canvas px, so the sheet's text is paper-sized", () => {
+    const lf = makeLabelFrame(0.025, sheetPpf);
+    expect(lf.ppf).toBe(sheetPpf);
+    expect(lf.k).toBeCloseTo(0.025 / sheetPpf, 12);
+    // A canvas px is `k` label px, so a font authored at the sheet's scale lands at the same
+    // PHYSICAL size once the viewBox rescales the clone — which is why two exports of the
+    // same plan match in text size as well as in text content.
+    expect(makeLabelFrame(0.25, sheetPpf).k / makeLabelFrame(0.025, sheetPpf).k).toBeCloseTo(10, 9);
+  });
+
+  it("an export authors zoom-scaled LINE WORK at its base weight, so the sheet prints one weight", () => {
+    // `restyleExportClone` retargets each stroke to a physical drafting weight, but it reads the
+    // AUTHORED width — which carried the live zoom — through a CLAMPED map it cannot invert. So
+    // the export pass authors at zk = 1 and the clamp lands identically from any zoom.
+    for (const v of views) expect(makeLabelFrame(v.ppf, sheetPpf).strokeZk).toBe(1);
+    // …and on screen the B617 zoom multiplier is untouched.
+    expect(makeLabelFrame(0.7, null).strokeZk).toBeCloseTo(2, 12);
   });
 });

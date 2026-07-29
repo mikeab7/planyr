@@ -48,12 +48,13 @@ therefore meaningless; a single budget set to the aspiration is red from day one
 Ratchet the ceiling **down** toward the target as optimizations land. Raising a ceiling to make a
 red build green is a product decision and needs the same justification as any other.
 
-Metrics currently above target: `frameMedianMs`, `frameP90Ms`, `aerialTileRequests`,
-`siteRouteJsBytes`, `largestChunkBytes`.
+Metrics currently above target: `aerialTileRequests`, `siteRouteJsBytes`, `largestChunkBytes`.
+(`frameMedianMs` / `frameP90Ms` left that list on 2026-07-29 — not because anything got faster,
+but because their old numbers were withdrawn. See blocker 4.)
 
-## ⚠ Three measurement blockers — read before touching the harness
+## ⚠ Four measurement blockers — read before touching the harness
 
-These cost real time to rediscover, and **two of them fail silently**, which is worse than
+These cost real time to rediscover, and **three of them fail silently**, which is worse than
 failing loudly: they produce a number that looks fine and is wrong.
 
 **1. The resource-timing buffer holds 250 entries and fills during load.**
@@ -75,6 +76,35 @@ Decoded tile bitmaps and GPU memory sit entirely outside it: the owner observed 
 the tab while the JS heap peaked at 134.6 MB, so about 420 MB is invisible to this harness. Never
 present `peakHeapMB` as tab memory. Chrome also quantises `performance.memory` unless launched
 with `--enable-precise-memory-info`; without that flag you are budgeting rounded noise.
+
+**4. `requestAnimationFrame` is SUSPENDED in a backgrounded tab, and says nothing about it.**
+This one already cost us a committed budget. The original `frameMedianMs` / `frameP90Ms` ceilings
+were seeded from a browser session whose tab visibility could not be guaranteed. Re-checked
+2026-07-29: that surface reports `document.visibilityState === "hidden"`, and Chrome suspends rAF
+entirely in that state — **six real drag gestures produced zero frames**, and a 1500 ms idle
+sample produced zero as well. Taking a screenshot does **not** foreground the tab. Sample counts
+wandering 1525 → 316 → 0 across otherwise-identical gesture runs are the signature of that
+throttling, not of a performance change.
+
+The dangerous case is not the zero. It is the **middle** of that range: a partly throttled run
+still yields a perfectly plausible-looking median from a starved sample, and that is exactly how a
+bad ceiling gets committed. So the harness now **refuses to report a frame figure it cannot stand
+behind** — the tab must be `visible`, and the observed rate across the gesture must clear a 30 fps
+plausibility floor (deliberately well under 60, because a genuinely slow frame is the thing we are
+trying to *measure*). A failing run prints `NOT REPORTED (measurement invalid)` with the reason,
+never a median. The rule is `ui-audit/lib/frameSampling.mjs`, unit-tested in
+`test/perfBudgets.test.js`, so it cannot drift from this page.
+
+**The frame metrics are therefore NOT verifiable from a Cowork browser session** (V480(e) /
+V481(g) record this). The instrument of record is `perf-harness.mjs` run **headless**, where the
+page is guaranteed visible and rAF runs at full rate — and frame timing is a pure render-cost
+measurement, so it needs no sign-in and no live data. What headless *cannot* tell you is how the
+owner's real plan behaves: the reference scene is lighter than Sylvestri / Concept C, so the
+re-seeded ceilings guard **the reference scene**, and a production frame reading still wants an
+instrument with guaranteed visibility.
+
+Every other metric in this file — DOM, network, bundle weight, heap — is independent of rAF and of
+tab visibility, so blocker 4 does not touch their provenance.
 
 ## The reference scenario
 
@@ -143,3 +173,8 @@ BASE_URL=https://planyr.io node ui-audit/perf-harness.mjs   # against production
    intent changes, not to make a report look better.
 4. Re-seeding after a production measurement: update `measured`, and drop `localFloor` /
    provisional notes for any metric that now has a defensible production number.
+5. **Withdrawing a seed** (what happened to the frame metrics on 2026-07-29): when a number turns
+   out to have come from an instrument that cannot be trusted, say so in the metric's `note` —
+   what the old number was, why it is withdrawn, and which instrument replaced it — and add a
+   `seededFrom` naming that instrument and the run. Do not quietly overwrite it: the next reader
+   needs to know the history, or they will re-seed from the same bad surface.
