@@ -573,13 +573,14 @@ export function computeRequiredDetention({
       kind: "unavailable",
       requiredAcFt: null, bandAcFt: null, rateAcFtPerAc: null,
       basis: "detention criteria not yet available for Colorado",
+      // The two SHORT strings stay here, on the boot path, because they are what makes the state
+      // unmistakable and they must render the instant a Colorado site opens — the carrier stays
+      // self-describing (a carrier that needs another module to say what it means is exactly the
+      // silent-gap shape this codebase bans). The long EXPLANATION lives in `coloradoRegions.js`
+      // (`COLORADO_DETENTION_DETAIL`), which loads on demand with the rest of the Colorado prose:
+      // it is ⓘ content, and a Texas user should not download it. Bundle budget, 2026-07-29.
       headline: "Detention criteria not yet available in Colorado",
-      detail:
-        "Planyr's detention engine models Texas rate-method criteria (ac-ft per acre × site area). " +
-        "Colorado sizes detention differently — the Mile High Flood District by WQCV plus EURV under " +
-        "Full Spectrum Detention, and Larimer, Weld and El Paso each under their own criteria manual — " +
-        "so there is no honest way to convert one into the other. Nothing is shown rather than " +
-        "something wrong. Size detention with your engineer against the reviewing jurisdiction's manual.",
+      detailFrom: "coloradoRegions.COLORADO_DETENTION_DETAIL",
       rule: null, governing: null,
       flags: ["colorado-not-wired", "no-criteria-modeled"],
       caveat: SCREENING_CAVEAT,

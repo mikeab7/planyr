@@ -9,10 +9,11 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import {
   COUNTIES, COUNTIES_MAP, candidateCountiesForPoint, statewideFallbackFor,
-  countyKeyForName, countyKeysForState, stateForCountyKey, STATEWIDE_LAYER_BY_STATE,
+  countyKeyForName, countyKeysForState, stateForCountyKey,
 } from "../src/workspaces/site-planner/lib/counties.js";
 import { JURISDICTION_SOURCES, countySourcesForPoint } from "../src/workspaces/site-planner/lib/jurisdiction.js";
 import { GIS_SOURCES } from "../src/shared/gis/sources.js";
+import { COUNTY_VERIFICATION, verifiedOnFor, candidateUrlFor, provenanceFor } from "../src/workspaces/site-planner/lib/countiesProvenance.js";
 
 const CO_KEYS = ["co_adams", "co_denver", "co_arapahoe", "co_larimer", "co_weld", "co_jefferson", "co_elpaso", "co_boulder", "co_broomfield"];
 const CO_STATEWIDE = "https://gis.colorado.gov/public/rest/services/Address_and_Parcel/Colorado_Public_Parcels/FeatureServer/0";
@@ -54,26 +55,28 @@ describe("NEW-5 · endpoint provenance is recorded, never assumed", () => {
   it("every shipped primary is either live-probed or the statewide composite", () => {
     for (const k of CO_KEYS) {
       const c = COUNTIES[k];
-      const probed = !!c.verifiedOn;
+      const probed = !!verifiedOnFor(k);
       const onComposite = c.layerUrl === CO_STATEWIDE;
       expect(probed || onComposite, `${k} ships an endpoint that is neither probed nor the composite`).toBe(true);
-      if (probed) expect(c.verifiedOn, k).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+      if (probed) expect(verifiedOnFor(k), k).toMatch(/^\d{4}-\d{2}-\d{2}$/);
     }
   });
 
   it("records a candidate endpoint WITH its provenance rather than shipping it unverified", () => {
     for (const k of CO_KEYS) {
       const c = COUNTIES[k];
-      if (!c.candidateUrl) continue;
+      if (!candidateUrlFor(k)) continue;
       expect(c.layerUrl, `${k} shipped its unverified candidate as the primary`).toBe(CO_STATEWIDE);
-      expect(c.candidateProvenance, k).toBeTruthy();
-      expect(c.candidateProvenance, k).toMatch(/ArcGIS Online item|blocked|pending/i);
+      // Provenance lives in a Node-only sidecar so its prose stays off the browser bundle; it is
+      // no less required for that, and the audit fails the build without it.
+      expect(provenanceFor(k), k).toBeTruthy();
+      expect(provenanceFor(k), k).toMatch(/ArcGIS Online item|blocked|pending/i);
     }
   });
 
   it("has the four live-probed counties pointing at their own service", () => {
     for (const k of ["co_adams", "co_denver", "co_weld", "co_broomfield"]) {
-      expect(COUNTIES[k].verifiedOn, k).toBe("2026-07-29");
+      expect(verifiedOnFor(k), k).toBe("2026-07-29");
       expect(COUNTIES[k].layerUrl, k).not.toBe(CO_STATEWIDE);
       expect(COUNTIES[k].layerUrl, k).toMatch(/arcgis\.com/);   // AGOL-hosted → CORS-open, no key
     }
@@ -105,9 +108,10 @@ describe("NEW-5 · the fallback chain has a Colorado bottom tier", () => {
   });
 
   it("keeps the two states' statewide layers distinct", () => {
-    expect(STATEWIDE_LAYER_BY_STATE.CO).toBe(CO_STATEWIDE);
-    expect(STATEWIDE_LAYER_BY_STATE.TX).toMatch(/stratmap_land_parcels/);
-    expect(statewideFallbackFor("harris").layerUrl).toBe(STATEWIDE_LAYER_BY_STATE.TX);
+    expect(statewideFallbackFor("co_adams").layerUrl).toBe(CO_STATEWIDE);
+    expect(statewideFallbackFor("harris").layerUrl).toMatch(/stratmap_land_parcels/);
+    expect(statewideFallbackFor("harris").label).toMatch(/TxGIO/);
+    expect(statewideFallbackFor("co_adams").label).toMatch(/Colorado/);
   });
 
   it("never mixes a Texas backup into a Colorado click, or vice versa", () => {
@@ -137,6 +141,13 @@ describe("NEW-5 · county identify is region-routed, and Texas gets the SAME obj
     }
     expect(JURISDICTION_SOURCES.countyCo.role).toBe("county");  // downstream consumers read `role`
     expect(JURISDICTION_SOURCES.countyCo.url).toBe(GIS_SOURCES.countyCo.serviceUrl);
+  });
+
+  it("keeps the verification record OFF the browser bundle but still complete", () => {
+    // The sidecar is Node-only by design (bundle budget). "Not shipped" must not become
+    // "not recorded", so every county still has an entry.
+    for (const k of [...CO_KEYS, "harris", "fortbend", "chambers"]) expect(COUNTY_VERIFICATION[k], k).toBeTruthy();
+    for (const k of CO_KEYS) expect(COUNTIES[k].verifiedOn, `${k} leaked its verification date into the browser module`).toBeUndefined();
   });
 
   it("registers the Colorado boundary layer as a production, live-verified source", () => {

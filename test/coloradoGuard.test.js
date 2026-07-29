@@ -8,9 +8,13 @@
 import { describe, it, expect } from "vitest";
 import { computeRequiredDetention, DETENTION_RULES } from "../src/workspaces/site-planner/lib/detentionRules.js";
 import {
-  siteState, isColorado, capabilityFor, capabilityAtSite, coloradoRegimeFor,
+  capabilityFor, coloradoRegimeFor,
   coloradoGaps, CO_DRAINAGE_REGIMES, CO_COUNTY_REGIME, CO_STATE_FLOOD_STANDARD,
+  COLORADO_DETENTION_DETAIL,
 } from "../src/workspaces/site-planner/lib/coloradoRegions.js";
+// The guard's state resolution lives in its own tiny module — the synchronous half that stays on
+// the boot path while the Colorado prose loads on demand. Deliberately not re-exported.
+import { siteState, isColorado } from "../src/workspaces/site-planner/lib/siteRegion.js";
 import { assessStatutoryDrawdown, statuteForState, DRAWDOWN_STATUTES } from "../src/workspaces/site-planner/lib/drawdownStatute.js";
 import { assessDrawdown, allowableReleaseCfs } from "../src/workspaces/site-planner/lib/drawdownTime.js";
 
@@ -49,8 +53,12 @@ describe("NEW-8 · detention refuses to price a Colorado site", () => {
     expect(r.flags).toContain("colorado-not-wired");
     // The copy is the deliverable here — a bare null would be the blank that reads as zero.
     expect(r.headline).toMatch(/not yet available in Colorado/i);
-    expect(r.detail).toMatch(/WQCV/);
-    expect(r.detail).toMatch(/Full Spectrum/);
+    // The long explanation moved to the lazily-loaded Colorado tier (bundle budget) — the carrier
+    // still NAMES where it lives, so the link is explicit rather than implied, and the short
+    // headline that makes the state unmistakable stays on the carrier itself.
+    expect(r.detailFrom).toBe("coloradoRegions.COLORADO_DETENTION_DETAIL");
+    expect(COLORADO_DETENTION_DETAIL).toMatch(/WQCV/);
+    expect(COLORADO_DETENTION_DETAIL).toMatch(/Full Spectrum/);
   });
 
   it("STILL refuses when a Texas authority is forced onto a Colorado site", () => {
@@ -89,14 +97,14 @@ describe("NEW-8 · the capability matrix enumerates the gaps honestly", () => {
   it("marks detention unavailable in Colorado and available in Texas", () => {
     expect(capabilityFor("detentionVolume", "CO").available).toBe(false);
     expect(capabilityFor("detentionVolume", "TX").available).toBe(true);
-    expect(capabilityAtSite("detentionVolume", DENVER).available).toBe(false);
-    expect(capabilityAtSite("detentionVolume", HOUSTON).available).toBe(true);
+    expect(capabilityFor("detentionVolume", siteState(DENVER)).available).toBe(false);
+    expect(capabilityFor("detentionVolume", siteState(HOUSTON)).available).toBe(true);
   });
 
   it("treats an unknown state as available — the pre-Colorado world", () => {
     // Every legacy saved plan without coordinates must behave exactly as it did before.
     expect(capabilityFor("detentionVolume", null).available).toBe(true);
-    expect(capabilityAtSite("detentionVolume", {}).available).toBe(true);
+    expect(capabilityFor("detentionVolume", siteState({})).available).toBe(true);
   });
 
   it("carries copy for every gap — a gap with no words is a blank", () => {

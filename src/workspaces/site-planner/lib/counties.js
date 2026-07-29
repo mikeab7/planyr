@@ -27,6 +27,8 @@
 // NAD83 / Texas South Central (US survey feet) — the State Plane zone covering
 // Harris, Fort Bend and Chambers. Requesting geometry in this SR means returned
 // x/y are already in feet, so on-screen distances are true (no Web-Mercator stretch).
+import { siteState } from "./siteRegion.js";
+
 export const FEET_WKID = 2278;
 
 // The TxGIO (Texas statewide) parcel MapServer layer — one public, CORS-open layer
@@ -52,10 +54,19 @@ const TXGIO_STATEWIDE_LAYER =
 const CO_STATEWIDE_LAYER =
   "https://gis.colorado.gov/public/rest/services/Address_and_Parcel/Colorado_Public_Parcels/FeatureServer/0";
 
+/* Five of the nine Colorado counties ride the statewide composite until their own endpoint is
+ * probed (V511), and each was repeating the same ~130-character help string verbatim. One builder
+ * instead of five literals — the same words, a fraction of the bytes on the Site route's bundle.
+ * (Bundle budget, 2026-07-29: deduplication, not abbreviation. Nothing was shortened.) */
+const compositeHelp = (county) =>
+  `Colorado statewide parcels (state OIT composite) — searches are limited to ${county} County until the county's own endpoint is confirmed.`;
+
+/* The four counties whose OWN parcel service is live-verified share one help shape too. */
+const ownHelp = (source, idKind) => `${source}. Search by ${idKind} or a site address.`;
+
 export const COUNTIES = {
   harris: {
     state: "TX",
-    verifiedOn: "2026-07-29", // re-probed: 1,548,457 parcel polygons
     label: "Harris County · HCAD",
     layerUrl:
       "https://www.gis.hctx.net/arcgis/rest/services/HCAD/Parcels/MapServer/0",
@@ -65,7 +76,6 @@ export const COUNTIES = {
   },
   fortbend: {
     state: "TX",
-    verifiedOn: "2026-07-29", // re-probed: 385,648 parcel polygons
     label: "Fort Bend · FBCAD",
     // FBCAD's OWN parcel data, served from Esri's ArcGIS Online cloud (services*.
     // arcgis.com) — reliable, CORS-open, no key — instead of FBCAD's self-hosted
@@ -85,13 +95,6 @@ export const COUNTIES = {
   },
   chambers: {
     state: "TX",
-    verifiedOn: null,
-    verifiedNote:
-      "Live-verified at the B787 CCAD repoint, and it is the same service the CCAD website's own map " +
-      "draws. It could NOT be re-probed on 2026-07-29 because gisdata.pandai.com is blocked by this " +
-      "build environment's egress policy — a sandbox limitation, not a sign the endpoint moved. Kept " +
-      "as the primary: demoting a working Texas source to the statewide composite would be a " +
-      "behaviour change, which the Colorado work is not permitted to make.",
     label: "Chambers County · CCAD",
     // CCAD's OWN live public parcel service (ChambersCADPublic, Pandai-hosted). This is the
     // exact MapServer the CCAD website's map draws, so Planyr's Chambers parcels match what
@@ -149,69 +152,59 @@ export const COUNTIES = {
     label: "Adams County, CO",
     // VERIFIED LIVE 2026-07-29: 188,723 parcel polygons, ArcGIS-Online hosted (CORS-open, no key).
     layerUrl: "https://services3.arcgis.com/4PNQOtAivErR7nbT/arcgis/rest/services/Parcels/FeatureServer/0",
-    verifiedOn: "2026-07-29",
     idField: "PIN",
     addrField: "concataddr1",
-    help: "Adams County parcels (county GIS, Esri-hosted). Search by PIN / parcel number or a site address.",
+    help: ownHelp("Adams County parcels (county GIS, Esri-hosted)", "PIN / parcel number"),
   },
   co_denver: {
     state: "CO",
-    label: "City &amp; County of Denver, CO",
+    label: "City & County of Denver, CO",
     // VERIFIED LIVE 2026-07-29: 240,360 parcels; the layer id is 245, not 0 (Denver's open-data
     // catalogue keeps one service per table with the catalogue's own id). Native SR is EPSG:2877 —
     // NAD83(HARN) / Colorado CENTRAL (ftUS), independent confirmation of the NEW-3 zone assignment.
     layerUrl: "https://services1.arcgis.com/zdB7qR0BtYrg0Xpl/arcgis/rest/services/ODC_PROP_PARCELS_A/FeatureServer/245",
-    verifiedOn: "2026-07-29",
     idField: "SCHEDNUM",
     addrField: "SITUS_ADDRESS_LINE1",
-    help: "Denver parcels (city & county open data). Search by schedule number or a site address.",
+    help: ownHelp("Denver parcels (city & county open data)", "schedule number"),
   },
   co_weld: {
     state: "CO",
     label: "Weld County, CO",
     // VERIFIED LIVE 2026-07-29: 163,685 parcels, county open-data FeatureServer.
     layerUrl: "https://services.arcgis.com/ewjSqmSyHJnkfBLL/arcgis/rest/services/Parcels_open_data/FeatureServer/0",
-    verifiedOn: "2026-07-29",
     idField: "ACCOUNTNO",
     addrField: "SITUS",
-    help: "Weld County parcels (county open data). Search by account number or a site address.",
+    help: ownHelp("Weld County parcels (county open data)", "account number"),
   },
   co_broomfield: {
     state: "CO",
-    label: "City &amp; County of Broomfield, CO",
+    label: "City & County of Broomfield, CO",
     // VERIFIED LIVE 2026-07-29: 27,531 parcels. Native SR is EPSG:2876 — NAD83(HARN) / Colorado
     // NORTH (ftUS). That is the evidence behind the NEW-3 Broomfield zone DECISION: the statute
     // (C.R.S. 38-52-101) predates the county and never names it, but the county's own GIS works in
     // Colorado North. See src/shared/coordinates/statePlane.js.
     layerUrl: "https://services1.arcgis.com/vXSRPZbyyOmH9pek/arcgis/rest/services/Parcels/FeatureServer/0",
-    verifiedOn: "2026-07-29",
     idField: "PARCELNUMBER",
     addrField: "SITUS_FULL_ADDRESS",
-    help: "Broomfield parcels (city & county open data). Search by parcel/account number or a site address.",
+    help: ownHelp("Broomfield parcels (city & county open data)", "parcel/account number"),
   },
   co_arapahoe: {
     state: "CO",
     label: "Arapahoe County, CO",
     layerUrl: CO_STATEWIDE_LAYER,
-    candidateUrl: "https://gis.arapahoegov.com/arcgis/rest/services/OpenDataService/FeatureServer/0",
-    candidateProvenance: "ArcGIS Online item 'Parcels - Arapahoe County' (owner gis@mhfd); host gis.arapahoegov.com blocked by build-environment egress policy — probe pending (V507).",
-    verifiedOn: null,
     idField: "parcel_id",
     addrField: "situsAdd",
     scopeWhere: "countyName='Arapahoe'",
-    help: "Colorado statewide parcels (state OIT composite) — searches are limited to Arapahoe County until the county's own endpoint is confirmed.",
+    help: compositeHelp("Arapahoe"),
   },
   co_larimer: {
     state: "CO",
     label: "Larimer County, CO",
     layerUrl: CO_STATEWIDE_LAYER,
-    candidateUrl: "https://maps1.larimer.org/arcgis/rest/services/MapServices/Parcels/MapServer/3",
-    candidateProvenance: "ArcGIS Online item 'Larimer County Tax Parcels' (owner ftc_geoevent); host maps1.larimer.org blocked by build-environment egress policy — probe pending (V507).",
-    verifiedOn: null,
     idField: "parcel_id",
     addrField: "situsAdd",
     scopeWhere: "countyName='Larimer'",
-    help: "Colorado statewide parcels (state OIT composite) — searches are limited to Larimer County until the county's own endpoint is confirmed.",
+    help: compositeHelp("Larimer"),
   },
   co_jefferson: {
     state: "CO",
@@ -221,35 +214,28 @@ export const COUNTIES = {
     // layers, not the parcel fabric. Rather than ship a plausible-looking guessed URL, Jefferson
     // rides the statewide composite outright — exactly what Waller does in Texas.
     layerUrl: CO_STATEWIDE_LAYER,
-    verifiedOn: null,
     idField: "parcel_id",
     addrField: "situsAdd",
     scopeWhere: "countyName='Jefferson'",
-    help: "Colorado statewide parcels (state OIT composite) — searches are limited to Jefferson County. Jefferson publishes no public parcel service of its own that we could locate.",
+    help: compositeHelp("Jefferson") + " Jefferson publishes no public parcel service of its own that we could locate.",
   },
   co_elpaso: {
     state: "CO",
     label: "El Paso County, CO",
     layerUrl: CO_STATEWIDE_LAYER,
-    candidateUrl: "https://gisservices.elpasoco.com/arcgis2/rest/services/HubPublic/Parcels/MapServer",
-    candidateProvenance: "ArcGIS Online item 'Parcels' (owner BaileyG, El Paso County); host gisservices.elpasoco.com blocked by build-environment egress policy — probe pending (V507). A regional alternative WAS verified live 2026-07-29 — PPACG Parcels (2025), https://services1.arcgis.com/0plDVQODvYjBRQXP/arcgis/rest/services/PPACG_Parcels/FeatureServer/0, native SR EPSG:2232 — but it is the MPO's derived planning layer, not the assessor's fabric, so it is not shipped as a parcel source.",
-    verifiedOn: null,
     idField: "parcel_id",
     addrField: "situsAdd",
     scopeWhere: "countyName='El Paso'",
-    help: "Colorado statewide parcels (state OIT composite) — searches are limited to El Paso County until the county's own endpoint is confirmed.",
+    help: compositeHelp("El Paso"),
   },
   co_boulder: {
     state: "CO",
     label: "Boulder County, CO",
     layerUrl: CO_STATEWIDE_LAYER,
-    candidateUrl: "https://maps.bouldercounty.org/arcgis/rest/services/PARCELS/PARCELS_OWNER/FeatureServer/0",
-    candidateProvenance: "ArcGIS Online item 'Parcels - Boulder County' (owner gis@mhfd); host maps.bouldercounty.org blocked by build-environment egress policy — probe pending (V507).",
-    verifiedOn: null,
     idField: "parcel_id",
     addrField: "situsAdd",
     scopeWhere: "countyName='Boulder'",
-    help: "Colorado statewide parcels (state OIT composite) — searches are limited to Boulder County until the county's own endpoint is confirmed.",
+    help: compositeHelp("Boulder"),
   },
 };
 
@@ -495,18 +481,11 @@ export const COUNTIES_MAP = {
 // the statewide source is among them, so a click still gets its coverage there too.
 // The statewide append only AUGMENTS the in-bbox case (where Fort Bend lives — it
 // matches harris+fortbend but not the chambers bbox), so candidate[0] is unchanged.
-/* NEW-5 — coarse STATE envelopes, used only by the out-of-every-county-bbox branch below.
- * Deliberately generous; a point in neither returns the pre-Colorado all-counties behaviour. */
-const STATE_BOUNDS = {
-  TX: [25.5, -107.0, 36.8, -93.3],
-  CO: [36.9, -109.2, 41.1, -101.9],
-};
-const stateForPoint = (lat, lng) => {
-  for (const [st, b] of Object.entries(STATE_BOUNDS)) {
-    if (lat >= b[0] && lat <= b[2] && lng >= b[1] && lng <= b[3]) return st;
-  }
-  return null;
-};
+/* NEW-5 — which state a point is in, for the out-of-every-county-bbox branch below. ONE definition,
+ * shared with the Colorado capability guard (`siteRegion.js`) rather than a second copy here: two
+ * envelopes that could drift apart would mean click routing and the guard disagreeing about what
+ * state a site is in, which is precisely the failure this work exists to prevent. */
+const stateForPoint = (lat, lng) => siteState({ lat, lng });
 
 export function candidateCountiesForPoint(lat, lng) {
   const entries = Object.entries(COUNTIES_MAP);
@@ -634,6 +613,6 @@ export function statewideFallbackFor(county) {
   };
 }
 
-/* NEW-5 — the statewide parcel layer for a state, or null. Exported so a surface can NAME the
- * backup tier it fell through to rather than showing an unattributed outline. */
-export const STATEWIDE_LAYER_BY_STATE = { TX: TXGIO_STATEWIDE_LAYER, CO: CO_STATEWIDE_LAYER };
+/* (A `STATEWIDE_LAYER_BY_STATE` map was dropped before shipping: no app code read it, and
+ * speculative API has no business on the Site route's critical-path bundle. `statewideFallbackFor`
+ * already NAMES the tier it returns via its `label`, which is what a surface actually needs.) */

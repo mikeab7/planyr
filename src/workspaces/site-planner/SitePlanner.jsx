@@ -216,8 +216,13 @@ import {
   effectiveChannelDischarge, effectiveReviewer, DETENTION_AUTHORITY_CHOICES,
   slimDrainageContext, hydrateDrainageContext,
 } from "./lib/detentionRules.js";
-import { siteState as resolveSiteState, capabilityFor, coloradoRegimeFor, CO_STATE_FLOOD_STANDARD } from "./lib/coloradoRegions.js";
-import { assessStatutoryDrawdown } from "./lib/drawdownStatute.js";
+/* NEW-8 — only the STATE resolution is on the boot path. The Colorado tier proper (regime
+ * records, the CWCB standard, the capability matrix, the drawdown statute) is mostly PROSE that a
+ * Texas user has no use for, and importing it statically breached the Site route's bundle budget.
+ * It now loads on demand the first time a site resolves to Colorado — the lib/exportSheet.js
+ * precedent. The GUARD itself is unaffected: its verdict and copy live in detentionRules.js and
+ * render immediately; this lazy tier only ENRICHES that line with the regime name and the statute. */
+import { siteState as resolveSiteState } from "./lib/siteRegion.js";
 import { splitPolygonByLine, splitPolygonByPath } from "./lib/polygonSplit.js";
 import { overlappingParcelPairs, dissolvedParcelSqft, polyIntersectArea } from "./lib/polyClip.js";
 import { screenFurniturePlates, calibBadgePlacement, canvasPillBottom } from "./lib/sheetFurniture.js";
@@ -8293,9 +8298,21 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
    * when a site is most likely to fall through to a default. A plan with no origin resolves to
    * null, which behaves exactly as it did before Colorado existed. */
   const siteStateId = origin ? resolveSiteState({ lat: origin.lat, lng: origin.lon }) : null;
-  const detentionCap = capabilityFor("detentionVolume", siteStateId);
-  const coRegime = siteStateId === "CO"
-    ? coloradoRegimeFor((drainCtxData?.authority?.jurisdiction?.county || [])[0] || null)
+  // The lazily-loaded Colorado tier. `null` until the chunk arrives (and forever on a Texas site,
+  // where it is never requested at all), which the render already handles: the guard's own line
+  // has a regime-less variant, and the statute simply does not render until it can.
+  const [coTier, setCoTier] = useState(null);
+  useEffect(() => {
+    if (siteStateId !== "CO" || coTier) return;
+    let alive = true;
+    Promise.all([import("./lib/coloradoRegions.js"), import("./lib/drawdownStatute.js")])
+      .then(([regions, statute]) => { if (alive) setCoTier({ regions, statute }); })
+      // LOUD-FAILURE — a chunk that never arrives must be visible in telemetry, not a silent gap.
+      .catch((e) => reportClientEvent("colorado-tier-load-failed", String((e && e.message) || e), { state: siteStateId }));
+    return () => { alive = false; };
+  }, [siteStateId, coTier]);
+  const coRegime = coTier && siteStateId === "CO"
+    ? coTier.regions.coloradoRegimeFor((drainCtxData?.authority?.jurisdiction?.county || [])[0] || null)
     : null;
   const detReqInputs = { acres: acresActive, impPct, inCityLimits: drainInCity, drainsToHcfcdChannel: drainsToChanEff, outfallType: outfallTypeEff, hcfcdApplicable: drainCountyHarris, siteState: siteStateId };
   // A Colorado site has no modeled authority, so the normal `drainAuthorityId` precondition would
@@ -10267,7 +10284,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   /* NEW-7 — in Colorado the same drawdown number is a WATER-RIGHTS TEST, not a note:
    * C.R.S. 37-92-602(8). Texas is untouched — `assessStatutoryDrawdown` returns applies:false for
    * any state but CO, so the existing informational readout renders exactly as before. */
-  const yDrawdownStatute = assessStatutoryDrawdown({ state: siteStateId, drawdown: yDrawdown });
+  const yDrawdownStatute = coTier
+    ? coTier.statute.assessStatutoryDrawdown({ state: siteStateId, drawdown: yDrawdown })
+    : null;
   // NEW-3/4 — the elevation-matched (hydraulically equivalent) band ledger. The governing offset
   // surface follows the JURISDICTION (Fort Bend: the pre-Atlas-14 500-yr line), not a hardcoded 100-yr.
   const yOffsetBasis = offsetSurfaceBasis(fmRule);
@@ -10372,6 +10391,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // NEW-8 — the Colorado regime rides the bag like every other fact the panel renders, so the
     // detail chain reads it from `d` rather than closing over the component body.
     coRegime, siteStateId,
+    coDetail: coTier ? coTier.regions.COLORADO_DETENTION_DETAIL : null,
     // B907 — the typical screening pond depth used ONLY to ESTIMATE additional land take
     // from a detention shortfall (never to size a pond) — criteria-configurable.
     screeningPondDepthFt: criteriaFor(critJurKey, { overrides: criteriaOverrides }).screeningPondDepthFt?.value ?? 8,
@@ -21100,7 +21120,12 @@ function YieldPanel({
                   ? `${d.coRegime.short} governs here — Planyr does not yet carry Colorado detention criteria.`
                   : "Planyr does not yet carry Colorado detention criteria.",
                 "co-detention",
-                `${req.detail}${d.coRegime ? ` Reviewing regime: ${d.coRegime.label} (${d.coRegime.criteria}). ${d.coRegime.note}` : ""}`,
+                // The explanation rides the lazily-loaded Colorado tier (with the rest of the
+                // Colorado prose). Until it lands, the visible line and its verdict are already
+                // correct — only the ⓘ fills in a moment later.
+                d.coDetail
+                  ? `${d.coDetail}${d.coRegime ? ` Reviewing regime: ${d.coRegime.label} (${d.coRegime.criteria}). ${d.coRegime.note}` : ""}`
+                  : null,
               ));
             } else if (req && (req.kind === "point" || req.kind === "none")) {
               // v3 A3 — the numeric "Detention required" row is deleted (the required number lives
@@ -22094,10 +22119,15 @@ function YieldPanel({
               detTone = covered ? "good" : shortBand ? "danger" : "warn";
               detVerdict = `${f1(req.bandAcFt[0])}–${f1(req.bandAcFt[1])} ac-ft`; detSub = "";
             } else if (req && req.kind === "unavailable") {
-              // NEW-8 — the hard, unmistakable Colorado state. "not in Colorado yet" is a NAMED
-              // state, not a failure to compute: an "unknown"/"unresolved" here would read as
-              // "we could not look it up", inviting the reader to wait for a number that is
-              // never coming.
+              // NEW-8 — the hard, unmistakable Colorado state. The CHIP is what actually reaches
+              // the screen here: `detVerdict`/`detTone`/`detSub` are computed by every branch in
+              // this block but read by NONE of them (only `detChip` is consumed, below and at the
+              // group header) — a pre-existing dead-store left behind when the v3 A2/A3 rework
+              // moved the requirement pair out to the verdict strip. Filed as B1110; the
+              // assignments are kept in step with their neighbours rather than diverging here.
+              // "N/A · CO" is a NAMED state, not a failure to compute: "UNKNOWN" would read as
+              // "we could not look it up", inviting the reader to wait for a number that is never
+              // coming. The explanation renders on its own line in the detail chain above.
               detVerdict = "not in Colorado yet"; detTone = "warn"; detChip = "N/A · CO";
             } else if (req && req.kind === "unknown") { detVerdict = "required unknown"; detTone = "warn"; detChip = "UNKNOWN"; }
             else if (d.reqCandidates) { detVerdict = "boundary straddle"; detTone = "warn"; detChip = "STRADDLE"; }

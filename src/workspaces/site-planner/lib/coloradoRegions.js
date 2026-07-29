@@ -21,28 +21,26 @@
  * Pure. No React, no DOM, no network. Node-testable.
  */
 
-/* ---------------------------------------------------------------------------
- * Where is this site? Geography, not a GIS identify.
+/* Where is this site? Geography, not a GIS identify — and it lives in its own tiny module
+ * (`siteRegion.js`) rather than here, because everything BELOW this line is prose a Texas user
+ * should never download. The guard keys off `siteState`, so that half must stay synchronous and
+ * on the boot path; this file is loaded on demand once a site resolves to Colorado. Re-exported
+ * boot path; this file is loaded on demand once a site resolves to Colorado.
  *
- * Deliberately local and network-free: the Colorado guard must hold even when every GIS endpoint
- * is down, because "the identify failed" is precisely when a site is most likely to fall through
- * to a default. A guard that depends on a fetch is not a guard.
- * ------------------------------------------------------------------------- */
-const STATE_ENVELOPES = {
-  TX: [25.5, -107.0, 36.8, -93.3],
-  CO: [36.9, -109.2, 41.1, -101.9],
-};
+ * It is deliberately NOT re-exported from here: a re-export entangles the two tiers, and the
+ * bundler then has to hoist the synchronous half into the shared entry chunk to satisfy both
+ * importers. Import `siteState` from `./siteRegion.js` directly. */
 
-export function siteState({ lat = null, lng = null, lon = null } = {}) {
-  const la = Number(lat), lo = Number(lng != null ? lng : lon);
-  if (!Number.isFinite(la) || !Number.isFinite(lo)) return null;
-  for (const [st, b] of Object.entries(STATE_ENVELOPES)) {
-    if (la >= b[0] && la <= b[2] && lo >= b[1] && lo <= b[3]) return st;
-  }
-  return null;
-}
-
-export const isColorado = (pt) => siteState(pt) === "CO";
+/* The long-form WHY behind the detention guard's one visible line. It lives here, with the rest of
+ * the Colorado prose, rather than in `detentionRules.js`: it is ⓘ content, and putting it on the
+ * boot path meant every Texas user downloaded it. `computeRequiredDetention`'s carrier names this
+ * constant in `detailFrom`, so the link is explicit rather than implied. */
+export const COLORADO_DETENTION_DETAIL =
+  "Planyr's detention engine models Texas rate-method criteria (ac-ft per acre × site area). " +
+  "Colorado sizes detention differently — the Mile High Flood District by WQCV plus EURV under " +
+  "Full Spectrum Detention, and Larimer, Weld and El Paso each under their own criteria manual — " +
+  "so there is no honest way to convert one into the other. Nothing is shown rather than " +
+  "something wrong. Size detention with your engineer against the reviewing jurisdiction's manual.";
 
 /* ---------------------------------------------------------------------------
  * The four Colorado drainage regimes.
@@ -304,8 +302,10 @@ export function capabilityFor(id, state) {
   };
 }
 
-/* Convenience for the common site-shaped call. */
-export const capabilityAtSite = (id, pt) => capabilityFor(id, siteState(pt));
+/* NOTE — there is deliberately no `capabilityAtSite(id, point)` convenience here. It would make
+ * this module import `siteRegion.js`, which the SYNCHRONOUS half already imports; the bundler then
+ * has to hoist that shared module into the entry chunk, putting it on every route's critical path
+ * for the sake of one wrapper. Callers compose the two: `capabilityFor(id, siteState(pt))`. */
 
 /* Everything Colorado does NOT have, for the one place that should enumerate it honestly (the
  * audit doc, a settings panel, a release note) rather than each surface discovering it alone. */

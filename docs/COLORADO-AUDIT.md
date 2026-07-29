@@ -325,11 +325,7 @@ The site's state is resolved **geometrically and without a network call**
 (`coloradoRegions.siteState`), because the guard has to hold when every GIS endpoint is down —
 which is exactly when a site is most likely to fall through to a default.
 
-The panel renders a named verdict, **`not in Colorado yet` / chip `N/A · CO`** — deliberately not
-"unknown" or "unresolved", which would read as *we could not look it up* and invite the reader to
-wait for a number that is never coming. In Colorado `detReq` is computed **regardless of whether an
-authority resolved**, because the normal precondition would otherwise leave the group rendering
-nothing at all — a blank that reads as zero.
+The panel renders a named state: the **`N/A · CO` chip** in warn tone, plus the explicit line. Worth recording precisely, because verifying against the SHIPPED bundle rather than the source is what surfaced it: the `detVerdict` / `detTone` / `detSub` locals in that block are computed by every branch and read by **none** — only `detChip` is consumed — a pre-existing dead store from the v3 A2/A3 rework that moved the requirement pair out to the verdict strip. Filed as **B1110**. It affects the Texas branches identically, so it is not a Colorado regression; but it does mean the guard's visible output is the chip and the line, and any claim about verdict TEXT would have been wrong. `N/A · CO` is deliberately not "UNKNOWN", which would read as *we could not look it up* and invite the reader to wait for a number that is never coming. In Colorado `detReq` is computed **regardless of whether an authority resolved**, because the normal precondition would otherwise leave the group rendering nothing at all — a blank that reads as zero.
 
 ---
 

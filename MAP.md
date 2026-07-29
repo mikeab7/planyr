@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-07-29 @ `9f5ba76` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-07-29 @ `6d79fce` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_353 source files mapped._
+_355 source files mapped._
 
 ## infra
 
@@ -302,7 +302,7 @@ _353 source files mapped._
 - **`src/workspaces/site-planner/lib/cloudSync.js`** — RLS-scoped Supabase site read/write: per-tab version CAS + thin-clobber guard, keepalive push, delete-tombstone reconcile
   - _exports_: `_lastHeaderSig`, `_siteVersions`, `clearSiteVersions`, `cloudDelete`, `cloudDeletedRows`, `cloudHardDelete`, `cloudList`, `cloudRestore`, `cloudUpsert`, `fetchSiteForReconcile`, `headerSig`, `interpretDelete`, `keepaliveCloudPush`, `siteRowFor`, `slimForCloud`
 - **`src/workspaces/site-planner/lib/coloradoRegions.js`** — NEW-8 Colorado region model + THE CAPABILITY GUARD: network-free site→state resolution, the four drainage regimes (MHFD · Larimer · Weld · El Paso) with detention deliberately unmodeled, the CWCB 2 CCR 408-1 statewide floodplain floor, and the capability matrix that makes an unwired capability render a named 'not available in Colorado yet' state instead of a number
-  - _exports_: `CAPABILITIES`, `capabilityAtSite`, `capabilityFor`, `CO_COUNTY_REGIME`, `CO_DRAINAGE_REGIMES`, `CO_STATE_FLOOD_STANDARD`, `coloradoGaps`, `coloradoRegimeFor`, `isColorado`, `siteState`
+  - _exports_: `CAPABILITIES`, `capabilityFor`, `CO_COUNTY_REGIME`, `CO_DRAINAGE_REGIMES`, `CO_STATE_FLOOD_STANDARD`, `COLORADO_DETENTION_DETAIL`, `coloradoGaps`, `coloradoRegimeFor`
 - **`src/workspaces/site-planner/lib/conceptName.js`** — Default plan naming: bijective base-26 Concept A/B/.../AA sequence continuing past the highest existing concept per site
   - _exports_: `conceptLettersToNumber`, `nextConceptName`, `numberToConcept`, `parseConceptIndex`
 - **`src/workspaces/site-planner/lib/conflictToasts.js`** — the B673 conflict policy matrix as a pure mapping: elementSync event → toast spec (who gets told what, which action rides along)
@@ -318,7 +318,9 @@ _353 source files mapped._
 - **`src/workspaces/site-planner/lib/costTakeoff.js`** — Priced road takeoff: FC-FC asphalt paving (SY, pan-trimmed) + both-side curb (LF by type) rolled up at user unit prices
   - _exports_: `costRollup`, `CURB_TYPE_META`, `CURB_TYPES`, `DEFAULT_PAN_WIDTH`, `roadCurbedSides`, `roadCurbType`, `roadPanWidth`, `roadQuantities`, `SF_PER_SY`
 - **`src/workspaces/site-planner/lib/counties.js`** — County parcel/GIS registry: CAD endpoints, TxGIO statewide fallback, jurisdiction utility layers, click-routing bboxes, tax-unit resolver
-  - _exports_: `candidateCountiesForPoint`, `COUNTIES`, `COUNTIES_MAP`, `countyKeyForName`, `countyKeysForState`, `detectField`, `FEET_WKID`, `JURISDICTION_LAYERS`, `resolveTaxRates`, `SNAPSHOT_COUNTIES`, `stateForCountyKey`, `STATEWIDE_KEYS`, `STATEWIDE_LAYER_BY_STATE`, `STATEWIDE_PARCEL_LAYER`, `statewideFallbackFor`, `TAX_RATE_SOURCES`
+  - _exports_: `candidateCountiesForPoint`, `COUNTIES`, `COUNTIES_MAP`, `countyKeyForName`, `countyKeysForState`, `detectField`, `FEET_WKID`, `JURISDICTION_LAYERS`, `resolveTaxRates`, `SNAPSHOT_COUNTIES`, `stateForCountyKey`, `STATEWIDE_KEYS`, `STATEWIDE_PARCEL_LAYER`, `statewideFallbackFor`, `TAX_RATE_SOURCES`
+- **`src/workspaces/site-planner/lib/countiesProvenance.js`** — NEW-5 build-time endpoint verification record for every county parcel source (probe dates, parked candidate URLs, provenance) — read by the GIS source audit, NEVER by the browser, which is why it is split out of counties.js: its prose has no business on the Site route's bundle
+  - _exports_: `candidateUrlFor`, `COUNTY_VERIFICATION`, `provenanceFor`, `verifiedOnFor`
 - **`src/workspaces/site-planner/lib/coverage.js`** — Picker-only layer coverage engine: reproject regional service extents vs viewport to flag in-view/empty/out-of-coverage plus relevance prefs
   - _exports_: `_resetCoverageCache`, `_resetRelevancePrefs`, `boundsFromLeaflet`, `boundsIntersect`, `bufferBounds`, `computeCoverage`, `COVERAGE_STATE`, `DEFAULT_RADIUS_MI`, `DEFAULT_RELEVANCE`, `displayCoverage`, `esriExtentToBounds`, `getCachedExtent`, `getNearbyRadiusMiles`, `getRelevanceMode`, `isRegional`, `LAYER_SCOPE`, `layerScope`, `normalizeMode`, `normalizeRadius`, `prefetchExtents`, `regionCoverage`, `RELEVANCE_MODES`, `setLayerExtent`, `setNearbyRadiusMiles`, `setRelevanceMode`, `srPointToLatLon`, `subscribeRelevance`
 - **`src/workspaces/site-planner/lib/curveNumber.js`** — SCS/NRCS Curve-Number runoff method (NEW-B1): composite CN from hydrologic soil group + impervious %, runoff depth/volume from an Atlas-14 rainfall depth, post-minus-pre increase. Pure TR-55.
@@ -587,6 +589,8 @@ _353 source files mapped._
   - _exports_: `ANALYSIS_SOURCES`, `analyzeProximitySource`, `analyzeSource`, `buildAnalysisParams`, `buildJurisdictionFinding`, `buildProximityParams`, `buildQueryUrl`, `buildRoadFinding`, `classifyFlood`, `classifyStatus`, `deriveZoning`, `epaProgram`, `isSFHA`, `normalizeAttrs`, `pipelineSummary`, `representativeRing`, `ringCentroid`, `ringsBBox`, `ringsSignature`, `runSiteAnalysis`, `simplifyRing`, `wetlandSummary`, `zoneSummary`
 - **`src/workspaces/site-planner/lib/siteModel.js`** — Canonical per-plan Site Model schema v10: createSiteModel/migrate, semantic selectors, cross-copy union merge with delete-tombstones, and bonded-child/dog-ear/road-centerline load-time repairs
   - _exports_: `activeParcelsOf`, `ANNOTATION_KINDS`, `annotationsOf`, `bondedChildRot`, `buildingNumbers`, `constraintsOf`, `contentCount`, `countJunkEntries`, `createSiteModel`, `crossSectionsOf`, `developableArea`, `EASEMENT_KINDS`, `easementsOf`, `elementsOf`, `exclusionZonesOf`, `isBuilding`, `lineageConflicts`, `mergeSiteContent`, `migrate`, `migrateRoads`, `normalizeBondedChildren`, `parcelAncestors`, `parcelChildrenMap`, `parcelDescendants`, `parcelDisplayInfo`, `parcelDrawingsOf`, `parcelOutline`, `parcelsOf`, `quarterOffset`, `rectRoadEndpoints`, `roadStripBBox`, `roadTravelWidth`, `setbacksOf`, `sheetOverlaysOf`, `SITE_MODEL_VERSION`, `STATUS_META`, `STATUSES`, `statusOf`, `strandedFromHost`, `teamShareOf`, `toMs`, `utilitiesOf`, `UTILITY_KINDS`
+- **`src/workspaces/site-planner/lib/siteRegion.js`** — NEW-8 the synchronous half of the Colorado tier: geometric, network-free site→state resolution ('TX' \| 'CO' \| null) that the detention guard keys off. Its own module so the Colorado PROSE (coloradoRegions.js) can load on demand while this stays on the boot path
+  - _exports_: `isColorado`, `siteState`, `STATE_ENVELOPES`
 - **`src/workspaces/site-planner/lib/soils.js`** — USDA SSURGO soils via Soil Data Access (NEW-B2): pure SDA SQL query builder + response parser (hydrologic soil group + seasonal-high water table) + bounded-fetch client. SDA proxy-blocked in sandbox → live-verify.
   - _exports_: `buildSdaRequest`, `buildSoilQuery`, `parseSoilResponse`, `resolveSoils`, `SDA_ENDPOINT`, `SDA_PROXY_PATH`
 - **`src/workspaces/site-planner/lib/sourceHealth.js`** — Per-source circuit breaker for county parcel servers: track consecutive failures, open/cooldown/half-open, filter healthy candidates, and decide the honest statewide-backup badge

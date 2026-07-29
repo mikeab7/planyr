@@ -21,6 +21,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { auditRegistry, GIS_SOURCES, looksNonProduction } from "../src/shared/gis/sources.js";
 import { COUNTIES } from "../src/workspaces/site-planner/lib/counties.js";
+import { verifiedOnFor, candidateUrlFor, provenanceFor } from "../src/workspaces/site-planner/lib/countiesProvenance.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, "..");
@@ -82,20 +83,25 @@ export function scanCountyProvenance() {
     if (!c.state) problems.push(`counties.js ${key}: no \`state\` declared — click routing and the statewide-backup tier both key off it.`);
     if (!c.layerUrl) { problems.push(`counties.js ${key}: no layerUrl.`); continue; }
     if (looksNonProduction(c.layerUrl)) problems.push(`counties.js ${key}: layerUrl looks non-production (${c.layerUrl}).`);
-    const verified = !!c.verifiedOn;
+    // The verification record lives in the Node-only sidecar (countiesProvenance.js) so its dates
+    // and prose stay off the browser bundle. It is no less REQUIRED for that: a county with no
+    // entry, no composite and no explanation still fails the build.
+    const verifiedOn = verifiedOnFor(key);
+    const candidateUrl = candidateUrlFor(key);
+    const provenance = provenanceFor(key);
     const composite = onComposite(c.layerUrl);
-    // A THIRD honest state: a row verified in an earlier session whose host this build
-    // environment cannot reach. It must SAY SO in `verifiedNote` — the point of the check is that
-    // no row may be silent about where its URL came from, not that every row must be probed today.
-    const declared = typeof c.verifiedNote === "string" && c.verifiedNote.length > 20;
-    if (!verified && !composite && !declared) {
-      problems.push(`counties.js ${key}: ships an endpoint that is neither live-verified (\`verifiedOn\`), nor the statewide composite, nor explained (\`verifiedNote\`) — verify it, park it in \`candidateUrl\`, or say why it could not be probed.`);
+    // The third honest state: a row verified in an earlier session whose host this build
+    // environment cannot reach. It must SAY SO. The point of the check is that no row may be
+    // SILENT about where its URL came from — not that every row must be probed today.
+    const declared = typeof provenance === "string" && provenance.length > 20;
+    if (!verifiedOn && !composite && !declared) {
+      problems.push(`counties.js ${key}: ships an endpoint that is neither live-verified, nor the statewide composite, nor explained — verify it, park it in \`candidateUrl\`, or say why it could not be probed (countiesProvenance.js).`);
     }
-    if (verified && !/^\d{4}-\d{2}-\d{2}$/.test(String(c.verifiedOn))) {
-      problems.push(`counties.js ${key}: verifiedOn "${c.verifiedOn}" is not an ISO date.`);
+    if (verifiedOn && !/^\d{4}-\d{2}-\d{2}$/.test(String(verifiedOn))) {
+      problems.push(`countiesProvenance.js ${key}: verifiedOn "${verifiedOn}" is not an ISO date.`);
     }
-    if (c.candidateUrl) {
-      if (!c.candidateProvenance) problems.push(`counties.js ${key}: candidateUrl with no \`candidateProvenance\` — an unverified URL must say where it came from and why it was not probed.`);
+    if (candidateUrl) {
+      if (!declared) problems.push(`countiesProvenance.js ${key}: candidateUrl with no provenance — an unverified URL must say where it came from and why it was not probed.`);
       if (!composite) problems.push(`counties.js ${key}: has a candidateUrl but its primary is not the statewide composite — an unverified candidate must not be the fallback for a shipped endpoint.`);
     }
     if (composite && !c.scopeWhere) {
