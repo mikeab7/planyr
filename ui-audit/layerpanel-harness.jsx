@@ -14,12 +14,12 @@ import { formatJurisdictionBadge } from "../src/workspaces/site-planner/lib/juri
 // because headless Chromium in this sandbox has no external-network egress (it doesn't use the
 // proxy), so any in-page fetch to an agency host fails — that on-map render check is owed live.
 
-function Panel({ id, county, mutate, floodContext = null, layerStatus = {}, coverage = {} }) {
+function Panel({ id, county, siteCounty = null, mutate, floodContext = null, layerStatus = {}, coverage = {} }) {
   const [ov, setOv] = useState(() => { const o = defaultOverlayState(); if (mutate) mutate(o); return o; });
   return (
     <div id={id} data-panel style={{ width: 300, border: "1px solid var(--border-default)", borderRadius: 10, padding: 12, background: "var(--surface-overlay)" }}>
       <div style={{ fontWeight: 700, marginBottom: 6 }}>{id}</div>
-      <LayerPanel overlays={ov} setOverlays={setOv} county={county} layerStatus={layerStatus} coverage={coverage} floodContext={floodContext} />
+      <LayerPanel overlays={ov} setOverlays={setOv} county={county} siteCounty={siteCounty} layerStatus={layerStatus} coverage={coverage} floodContext={floodContext} />
     </div>
   );
 }
@@ -29,7 +29,10 @@ function Panel({ id, county, mutate, floodContext = null, layerStatus = {}, cove
  * ZONE_SUBTY "AREA OF MINIMAL FLOOD HAZARD"), the Willow Fork channel at the tract, and a
  * 70-ft district drainage easement with recorded exhibit WF-10.pdf. */
 const TSAKIRIS_CTX = {
-  drainageDistrict: { id: "bkdd", source: "boundary" },
+  // B1091(×2) — the district boundary query ANSWERED, and it answered yes. `tested` records
+  // that it ran cleanly; the identify county is the fact the scoping reasons over.
+  drainageDistrict: { id: "bkdd", source: "boundary", tested: ["bkdd"] },
+  authority: { jurisdiction: { city: ["Katy"], county: ["Waller"], etj: [] } },
   flood: { state: "loaded", zones: [{ zone: "X", subtype: "AREA OF MINIMAL FLOOD HAZARD", staticBfeFt: null }] },
   channel: { state: "loaded", near: true, name: "Willow Fork", kindLabel: "canal / ditch", distFt: 42, authority: "bkdd", sourceId: "bkddChannel", inventoryOnly: false },
   easements: { present: true, maxWidthFt: 70, items: [{ widthFt: 70, exhibit: "WF-10.pdf" }], state: "loaded" },
@@ -37,12 +40,19 @@ const TSAKIRIS_CTX = {
 };
 // A Harris site with an SFHA mapped — the opposite verdict, and the opposite district scoping.
 const HARRIS_CTX = {
-  drainageDistrict: { id: "hcfcd", source: "county" },
+  // The mirror: no district contains this point, and the BKDD boundary query came back
+  // CLEANLY empty — the only thing that lets a county answer exclude a rival district.
+  drainageDistrict: { id: "hcfcd", source: "county", tested: ["bkdd"] },
+  authority: { jurisdiction: { city: [], county: ["Harris"], etj: [] } },
   flood: { state: "loaded", zones: [{ zone: "AE", subtype: "FLOODWAY" }] },
   channel: { state: "loaded", near: true, unitNo: "W100-00-00", name: "BUFFALO BAYOU", distFt: 120, authority: "hcfcd" },
 };
 // FEMA unreachable — must read "unknown, not clear", never as a clean all-clear.
-const OUTAGE_CTX = { drainageDistrict: { id: null, source: null }, flood: { state: "failed", zones: [] } };
+const OUTAGE_CTX = {
+  drainageDistrict: { id: null, source: null, tested: [] },
+  authority: { jurisdiction: { city: [], county: ["Waller"], etj: [] } },
+  flood: { state: "failed", zones: [] },
+};
 
 function badgeOf(j, opts) {
   const b = formatJurisdictionBadge(j, opts);
@@ -73,17 +83,22 @@ function App() {
       {/* B1075–B1080 — the Flood & drainage group: master toggle, four provenance tiers,
           district auto-scoping and the honest empty states. */}
       <div style={{ display: "flex", gap: 16, alignItems: "flex-start", flexWrap: "wrap", marginTop: 20 }}>
-        <Panel id="panel-bkdd" county="waller" floodContext={TSAKIRIS_CTX} />
-        <Panel id="panel-hcfcd" county="harris" floodContext={HARRIS_CTX} />
-        <Panel id="panel-flood-outage" county="waller" floodContext={OUTAGE_CTX} />
+        <Panel id="panel-bkdd" county="waller" siteCounty="waller" floodContext={TSAKIRIS_CTX} />
+        <Panel id="panel-hcfcd" county="harris" siteCounty="harris" floodContext={HARRIS_CTX} />
+        <Panel id="panel-flood-outage" county="waller" siteCounty="waller" floodContext={OUTAGE_CTX} />
         {/* The advisory master-plan layer ON, reporting empty, with its study area out of
             view — the exact Tsakiris shape that must read "outside this study area". */}
-        <Panel id="panel-dmp-empty" county="waller" floodContext={TSAKIRIS_CTX}
+        <Panel id="panel-dmp-empty" county="waller" siteCounty="waller" floodContext={TSAKIRIS_CTX}
           mutate={(o) => { o.bkdd_dmp.on = true; }}
           layerStatus={{ bkdd_dmp: { state: "empty" } }}
           coverage={{ bkdd_dmp: "out" }} />
-        {/* No flood context at all (the map finder): nothing suppressed, no verdict claimed. */}
-        <Panel id="panel-flood-nocontext" county="waller" />
+        {/* No flood context at all — no drainage check has run. The SITE county is still a
+            fact, so what cannot reach Waller is still demoted; what governs is left open. */}
+        <Panel id="panel-flood-nocontext" county="waller" siteCounty="waller" />
+        {/* B1091(×2) — the regression shape: the site record's county is STALE ("harris", the
+            lookup default) while the identify says Waller and the boundary test found BKDD.
+            The panel must follow the facts, never the stale selector. */}
+        <Panel id="panel-flood-stalecounty" county="harris" siteCounty="harris" floodContext={TSAKIRIS_CTX} />
       </div>
     </div>
   );

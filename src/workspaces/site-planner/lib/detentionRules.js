@@ -1678,6 +1678,12 @@ export async function resolveDrainageContext({ lng, lat, ring = null } = {}, opt
    *      than the old silent "unknown". */
   const inBkdd = (authority.flags || []).includes("bkdd-district-present");
   const drainageDistrictId = inBkdd ? "bkdd" : inHarris ? "hcfcd" : null;
+  /* B1091(×2) — WHICH district boundary tests actually ANSWERED this check. A clean empty is a
+   * fact ("the site is not in BKDD"); a failed query is not. Only a clean negative licenses
+   * the county fallback above to claim another district doesn't govern (governingDistrict's
+   * `exclusive`). Without this, a district-membership OUTAGE was indistinguishable from a
+   * negative, and the county heuristic asserted HCFCD over a district it had never reached. */
+  const districtsTested = (authority.flags || []).includes("bkdd-unverified") ? [] : ["bkdd"];
   // The channel/watershed source set for the governing authority. NHD is the fallback when
   // no district publishes GIS here — an inventory, clearly labelled as one, never "unknown".
   const chanSource = inBkdd ? DETENTION_SOURCES.bkddChannel : inHarris ? DETENTION_SOURCES.hcfcdChannel : DETENTION_SOURCES.nhdChannel;
@@ -1777,8 +1783,8 @@ export async function resolveDrainageContext({ lng, lat, ring = null } = {}, opt
     // Which local drainage authority actually governs here, and how we know. Consumers must
     // read THIS rather than re-deriving from the county (the exact mistake B1080 fixes).
     drainageDistrict: drainageDistrictId
-      ? { id: drainageDistrictId, source: inBkdd ? "boundary" : "county" }
-      : { id: null, source: null },
+      ? { id: drainageDistrictId, source: inBkdd ? "boundary" : "county", tested: districtsTested }
+      : { id: null, source: null, tested: districtsTested },
     flood: { zones, state: floodRes.error ? "failed" : zones.length ? "loaded" : "empty", ageMs: floodRes.ageMs },
     channel,
     easements,
@@ -1859,7 +1865,9 @@ export function slimDrainageContext(ctx) {
     },
     // B1080 — WHICH district governs rides the slim, so a reloaded readout doesn't fall
     // back to the county heuristic and quietly contradict the boundary test.
-    drainageDistrict: ctx.drainageDistrict ? { id: ctx.drainageDistrict.id ?? null, source: ctx.drainageDistrict.source ?? null } : null,
+    drainageDistrict: ctx.drainageDistrict
+      ? { id: ctx.drainageDistrict.id ?? null, source: ctx.drainageDistrict.source ?? null, tested: ctx.drainageDistrict.tested || [] }
+      : null,
     flood: ctx.flood ? { zones: ctx.flood.zones || [], state: ctx.flood.state, ageMs: ctx.flood.ageMs ?? null } : null,
     channel: ch ? {
       near: ch.near ?? null, unitNo: ch.unitNo ?? null, name: ch.name ?? null, type: ch.type ?? null,
@@ -1933,10 +1941,27 @@ export function hydrateDrainageContext(slim) {
     flags = storedFlags;
   }
   const watershedNames = slim.watershed?.names || [];
+  /* B1091(×2) — a LEGACY slim (saved before B1080 added the field) carries NO drainageDistrict,
+   * and the fallback used to read the county-derived `channelAuthority` alone. That threw
+   * away a boundary FACT the same snapshot was already carrying: the Tsakiris tract's stored
+   * check has flags ["mud-district-present","bkdd-district-present"] — the district's own
+   * boundary query having answered YES — yet rehydrated as "no district governs", leaving the
+   * county heuristic free to name HCFCD. Read the flag (and the stored drainage-district
+   * overlay) FIRST, so a boundary hit survives a reload with its provenance intact. */
+  const storedDistrictOverlay = storedOverlays.find((ov) => ov?.kind === "drainage-district" && ov.id);
+  const flaggedBkdd = flags.includes("bkdd-district-present") || storedDistrictOverlay?.id === "bkdd";
+  const restoredDistrictId = slim.drainageDistrict?.id
+    ?? (flaggedBkdd ? "bkdd" : storedDistrictOverlay?.id ?? (channelAuthority === "hcfcd" ? "hcfcd" : null));
+  const restoredDistrictSource = slim.drainageDistrict?.id
+    ? (slim.drainageDistrict.source ?? null)
+    : (flaggedBkdd || storedDistrictOverlay ? "boundary" : restoredDistrictId ? "county" : null);
+  /* Which boundary tests a RESTORED check may claim came back clean. Only a positive stored
+   * result proves the query ran at all — a legacy slim predating the membership tier simply
+   * never asked, and an absent flag must never be read as a negative. Unknown → fail open. */
+  const restoredTested = slim.drainageDistrict?.tested ?? (flaggedBkdd ? ["bkdd"] : []);
   // B1080 — the HCFCD-keyed watershed overlays (Addicks/Barker, Upper Cypress) only mean
   // anything against HCFCD basin names. A district's own sub-watershed names must never be
   // matched into them, or a BKDD basin could inherit a Harris reservoir caveat.
-  const restoredDistrictId = slim.drainageDistrict?.id ?? (channelAuthority === "hcfcd" ? "hcfcd" : null);
   const watershedOverlays = restoredDistrictId === "hcfcd"
     ? WATERSHED_OVERLAYS.filter((ov) => watershedNames.some((n) => ov.match.test(n)))
     : [];
@@ -1954,7 +1979,11 @@ export function hydrateDrainageContext(slim) {
       note: SCREENING_CAVEAT,
     },
     flood: slim.flood ? { zones: slim.flood.zones || [], state: slim.flood.state, ageMs: slim.flood.ageMs ?? null } : { zones: [], state: "empty", ageMs: null },
-    drainageDistrict: slim.drainageDistrict || { id: restoredDistrictId, source: restoredDistrictId ? "county" : null },
+    drainageDistrict: {
+      id: restoredDistrictId,
+      source: restoredDistrictSource,
+      tested: restoredTested,
+    },
     channel: slim.channel ? { ...slim.channel, geometry: null } : { near: null, state: "not-applicable" },
     easements: slim.easements ? { ...slim.easements, items: slim.easements.items || [] } : null,
     watershed: slim.watershed ? { names: watershedNames, sqMiles: slim.watershed.sqMiles ?? null, state: slim.watershed.state, ageMs: slim.watershed.ageMs ?? null } : null,

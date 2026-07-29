@@ -106,21 +106,47 @@ export const COUNTY_DISTRICT = { harris: "hcfcd", fortbend: "fbcdd" };
  *               Boundaries/129 point test, B1075). Authoritative: a boundary hit is a
  *               fact, and it WINS over any county heuristic.
  *   county    — the identify county, lowercased. The fallback for county-wide districts.
+ *   tested    — district ids whose boundary test ACTUALLY RAN and answered cleanly this
+ *               check (B1091(×2)). A clean NEGATIVE is a fact too: it is the only thing that
+ *               licenses a county-derived answer to say another district does NOT govern.
+ *               An outage leaves the id out, so a failed query can never masquerade as a
+ *               negative (LOUD-FAILURE).
  *
- * Returns { id, source: "boundary"|"county"|null, reason }. A null id is an honest "we
- * don't know which district governs" — the panel then shows every district row rather
- * than hiding data behind a guess (fail open, the coverage-engine rule). Pure. */
-export function governingDistrict({ detected = null, county = null } = {}) {
+ * Returns { id, source: "boundary"|"county"|null, reason, exclusive }.
+ *
+ * `exclusive` (B1091(×2)) is the fix for the inversion this function shipped at Tsakiris: it
+ * answers "may this result be used to say some OTHER district doesn't govern?" A boundary
+ * containment is exclusive — the site is inside THAT district. A county heuristic is NOT,
+ * because districts overlap counties: BKDD spans Waller, Harris and Fort Bend, so
+ * "the site is in Harris → HCFCD" is no evidence whatsoever that BKDD doesn't govern.
+ * Reading a county guess as exclusive is exactly how the panel came to tell the owner
+ * that HCFCD governs a Waller-County tract that sits inside BKDD. A county-derived answer
+ * becomes exclusive only once every OTHER district's boundary test has cleanly excluded
+ * the site (`tested`).
+ *
+ * A null id is an honest "we don't know which district governs" — the panel then shows
+ * every district row rather than hiding data behind a guess (fail open, the
+ * coverage-engine rule). Pure. */
+export function governingDistrict({ detected = null, county = null, tested = null } = {}) {
   const hits = (Array.isArray(detected) ? detected : []).filter((d) => DRAINAGE_DISTRICTS[d]);
   if (hits.length) {
-    return { id: hits[0], source: "boundary", reason: `${districtName(hits[0])} boundary contains this site` };
+    return { id: hits[0], source: "boundary", exclusive: true, reason: `${districtName(hits[0])} boundary contains this site` };
   }
   const c = countyKey(county);
   const byCounty = c ? COUNTY_DISTRICT[c] : null;
   if (byCounty) {
-    return { id: byCounty, source: "county", reason: `${districtName(byCounty)} covers ${countyName(c)}` };
+    // Every district that could ALSO reach this county must have been boundary-tested and
+    // come back empty before this guess may exclude anything.
+    const cleared = Array.isArray(tested) ? tested : [];
+    const rivals = Object.keys(DRAINAGE_DISTRICTS)
+      .filter((d) => d !== byCounty && districtReaches(d, c) !== false);
+    return {
+      id: byCounty, source: "county",
+      exclusive: rivals.length > 0 && rivals.every((d) => cleared.includes(d)),
+      reason: `${districtName(byCounty)} covers ${countyName(c)}`,
+    };
   }
-  return { id: null, source: null, reason: c ? `no county-wide flood-control district in ${countyName(c)}` : "site location not resolved yet" };
+  return { id: null, source: null, exclusive: false, reason: c ? `no county-wide flood-control district in ${countyName(c)}` : "site location not resolved yet" };
 }
 
 // ---------------------------------------------------------------------------
@@ -164,8 +190,22 @@ const listCounties = (arr) => {
  *   4. a row whose service's own published extent misses the view    (coverage engine —
  *      the SAME signal that gates the Master Plan row, reused rather than reinvented)
  *
+ * (B1091(×2)) SIGNAL 1 IS NOT ALWAYS AVAILABLE, AND PRETENDING IT IS INVERTS THE ANSWER.
+ * B1091 shipped reason 1 against ANY non-null `governing`, including one the county
+ * heuristic merely guessed. Districts overlap counties — BKDD spans Waller, Harris and
+ * Fort Bend — so "this county's flood-control district is HCFCD" is no evidence at all
+ * that BKDD doesn't govern. At the Tsakiris tract that guess suppressed every BKDD row
+ * with the sentence "Brookshire–Katy Drainage District doesn't govern drainage at this
+ * site — Harris County Flood Control District does", which is the exact reverse of the
+ * truth (the district's own boundary layer contains that point; HCFCD's jurisdiction
+ * stops at the Harris County line). Saying nothing was bad; asserting the opposite is
+ * worse. So reason 1 now requires `governingExclusive` — a boundary containment, or a
+ * county answer whose rivals have each been boundary-tested and cleanly excluded. A guess
+ * may still demote a district that CANNOT reach this county (reason 2, checkable), and
+ * otherwise fails OPEN.
+ *
  * Returns { relevant, reason }. `reason` is null when relevant. Pure. */
-export function floodRowRelevance(cfg = {}, { governing = null, county = null, coverage = null } = {}) {
+export function floodRowRelevance(cfg = {}, { governing = null, governingExclusive = false, county = null, coverage = null } = {}) {
   const agency = cfg.agency || cfg.source || "This source";
   const gov = governing ? districtName(governing) : null;
   const where = countyName(county);
@@ -173,16 +213,19 @@ export function floodRowRelevance(cfg = {}, { governing = null, county = null, c
   if (cfg.district) {
     const reaches = districtReaches(cfg.district, county);
     const name = districtName(cfg.district) || agency;
-    if (governing && cfg.district !== governing) {
+    // Checkable on its own: this district's published data cannot reach this county at
+    // all. True whether or not anything is known about who governs.
+    if (reaches === false) {
       return {
         relevant: false,
-        reason: reaches === false
+        reason: governing && cfg.district !== governing
           ? `${name} doesn't cover ${where} — ${gov} is shown instead.`
-          : `${name} doesn't govern drainage at this site — ${gov} does.`,
+          : `${name} doesn't cover ${where}.`,
       };
     }
-    if (!governing && reaches === false) {
-      return { relevant: false, reason: `${name} doesn't cover ${where}.` };
+    // Both districts reach this county — only an EXCLUSIVE answer can pick between them.
+    if (governing && cfg.district !== governing && governingExclusive) {
+      return { relevant: false, reason: `${name} doesn't govern drainage at this site — ${gov} does.` };
     }
     return { relevant: true, reason: null };
   }
@@ -211,7 +254,7 @@ export function floodRowRelevance(cfg = {}, { governing = null, county = null, c
  *
  * Returns { tiers: [{ key, label, note, rows }], offRows: [[id, cfg]], notes: {id: reason},
  *           suppressed: [districtId] }. */
-export function scopeFloodEntries(entries = [], { governing = null, county = null, coverage = null, isOn = null } = {}) {
+export function scopeFloodEntries(entries = [], { governing = null, governingExclusive = false, county = null, coverage = null, isOn = null } = {}) {
   const suppressed = new Set();
   const notes = {};
   const kept = [];
@@ -219,7 +262,7 @@ export function scopeFloodEntries(entries = [], { governing = null, county = nul
   for (const e of entries) {
     const [id, cfg = {}] = e;
     const cov = coverage && typeof coverage === "object" ? coverage[id] : null;
-    const { relevant, reason } = floodRowRelevance(cfg, { governing, county, coverage: cov });
+    const { relevant, reason } = floodRowRelevance(cfg, { governing, governingExclusive, county, coverage: cov });
     if (relevant) { kept.push(e); continue; }
     notes[id] = reason;
     if (cfg.district) suppressed.add(cfg.district);

@@ -25,6 +25,12 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   is the ONE scoping gate — governing district → district county reach → the row's own declared
   `areaCounties` → the coverage engine's published-extent verdict — so a source that cannot cover
   this site is demoted (behind one collapsed line, WITH its reason), never silently listed.
+  **B1091(×2), read before touching the scoping:** a district-vs-district exclusion requires an
+  EXCLUSIVE answer (`governingDistrict().exclusive`) — a boundary containment, or a county answer
+  whose rivals were each boundary-tested and cleanly excluded (`drainageDistrict.tested`). A bare
+  county guess may only demote a district that cannot REACH the county; otherwise it fails open.
+  And the county it reasons over is the site IDENTIFY county / `LayerPanel`'s `siteCounty` prop —
+  **never the `county` prop**, which is the layer-registry key and defaults to Harris on every site.
   Canvas identify (B1092): `vectorLayers.hitFeature` / `identifyRows` are the pure half,
   `vectorOverlay`'s `group.identifyAt` the accessor, `layers.identifyOverlaysAt` the opt-in gate
   (`cfg.canvasIdentify`) — the planner's SVG canvas owns every click, so this is how a tap there

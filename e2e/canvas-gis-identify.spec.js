@@ -76,9 +76,14 @@ test.describe("canvas GIS identify (B1092)", () => {
 
     // Turn the easement layer on through the real Layers panel.
     await page.getByRole("button", { name: /Layers/ }).first().click();
-    const easementRow = page.getByText("District drainage easements", { exact: true }).first();
+    // Target the VISIBLE checkbox by role, not the first matching text node: the map finder
+    // stays mounted behind the planner and renders its own copy of this row, so `.first()`
+    // can resolve into that zero-sized panel. (Before B1091(×2) the finder's copy was demoted by
+    // the district scoping and there was only ever one node — this spec was quietly relying
+    // on that bug.)
+    const easementRow = page.getByRole("checkbox", { name: "District drainage easements", exact: true });
     await expect(easementRow).toBeVisible({ timeout: 10000 });
-    await easementRow.click(); // the row's <label> wraps the checkbox
+    await easementRow.click();
     await page.waitForTimeout(1500); // the (stubbed) pull + paint
 
     // A tap ON the band: inside the stubbed easement polygon, and inside the parcel BODY
