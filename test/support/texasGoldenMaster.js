@@ -141,20 +141,25 @@ export function buildTexasGoldenMaster() {
   // NEW-5 adds Colorado rows to this same registry. `candidateCountiesForPoint` is the
   // click-routing spine and its first element is read by the Layers-panel jurisdiction
   // resolver — the single most breakable thing in an additive registry change.
+  // The registry is expected to GROW (that is what NEW-5 does), so this pins the TEXAS SUBSET and
+  // the Texas ANSWERS, not the total key count. `candidates` is the load-bearing one: it is the
+  // click-routing spine, and its first element is what the Layers-panel jurisdiction resolver reads.
+  // A Colorado row that perturbed any of these lists would be a Texas regression, additive or not.
+  const TX_KEYS = ["harris", "fortbend", "chambers", "waller"];
   out.countyRouting = {
-    configuredKeys: Object.keys(COUNTIES),
-    mapKeys: Object.keys(COUNTIES_MAP),
-    statewideKeys: [...STATEWIDE_KEYS],
+    texasKeysPresent: TX_KEYS.filter((k) => k in COUNTIES),
+    texasMapKeysPresent: [...TX_KEYS, "txgio_statewide"].filter((k) => k in COUNTIES_MAP),
+    txgioIsStatewide: STATEWIDE_KEYS.includes("txgio_statewide"),
     statewideParcelLayer: STATEWIDE_PARCEL_LAYER,
-    layerUrls: Object.fromEntries(Object.entries(COUNTIES).map(([k, c]) => [k, c.layerUrl])),
+    layerUrls: Object.fromEntries(TX_KEYS.map((k) => [k, COUNTIES[k] ? COUNTIES[k].layerUrl : null])),
+    mapLayerUrls: Object.fromEntries([...TX_KEYS, "txgio_statewide"].map((k) => [k, COUNTIES_MAP[k] ? COUNTIES_MAP[k].layerUrl : null])),
+    bboxes: Object.fromEntries(TX_KEYS.map((k) => [k, COUNTIES_MAP[k] ? COUNTIES_MAP[k].bbox : null])),
     candidates: Object.fromEntries(Object.entries(TX_POINTS).map(([k, p]) => [k, candidateCountiesForPoint(p.lat, p.lon)])),
     countyKeyForName: Object.fromEntries(
-      ["Harris", "Fort Bend", "Chambers County", "Waller", "Montgomery", "Adams", "Denver", "nonsense"]
+      ["Harris", "Fort Bend", "Chambers County", "Waller", "Montgomery", "nonsense"]
         .map((n) => [n, countyKeyForName(n)]),
     ),
-    statewideFallback: Object.fromEntries(
-      ["harris", "fortbend", "chambers", "waller"].map((k) => [k, statewideFallbackFor(k)]),
-    ),
+    statewideFallback: Object.fromEntries(TX_KEYS.map((k) => [k, statewideFallbackFor(k)])),
   };
 
   // ── 4. Jurisdiction → drainage-authority resolution (the pure half) ──────

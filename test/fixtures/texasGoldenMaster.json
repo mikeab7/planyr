@@ -146,28 +146,59 @@
     }
   },
   "countyRouting": {
-    "configuredKeys": [
+    "texasKeysPresent": [
       "harris",
       "fortbend",
       "chambers",
       "waller"
     ],
-    "mapKeys": [
+    "texasMapKeysPresent": [
       "harris",
       "fortbend",
       "chambers",
       "waller",
       "txgio_statewide"
     ],
-    "statewideKeys": [
-      "txgio_statewide"
-    ],
+    "txgioIsStatewide": true,
     "statewideParcelLayer": "https://feature.geographic.texas.gov/arcgis/rest/services/Parcels/stratmap_land_parcels_48_most_recent/MapServer/0",
     "layerUrls": {
       "harris": "https://www.gis.hctx.net/arcgis/rest/services/HCAD/Parcels/MapServer/0",
       "fortbend": "https://services2.arcgis.com/D4saGHECICkCeoJm/arcgis/rest/services/FBCAD_Public_Data/FeatureServer/0",
       "chambers": "https://gisdata.pandai.com/pamaps02/rest/services/Chambers/ChambersCADPublic/MapServer/0",
       "waller": "https://feature.geographic.texas.gov/arcgis/rest/services/Parcels/stratmap_land_parcels_48_most_recent/MapServer/0"
+    },
+    "mapLayerUrls": {
+      "harris": "https://www.gis.hctx.net/arcgis/rest/services/HCAD/Parcels/MapServer/0",
+      "fortbend": "https://services2.arcgis.com/D4saGHECICkCeoJm/arcgis/rest/services/FBCAD_Public_Data/FeatureServer/0",
+      "chambers": "https://gisdata.pandai.com/pamaps02/rest/services/Chambers/ChambersCADPublic/MapServer/0",
+      "waller": "https://feature.geographic.texas.gov/arcgis/rest/services/Parcels/stratmap_land_parcels_48_most_recent/MapServer/0",
+      "txgio_statewide": "https://feature.geographic.texas.gov/arcgis/rest/services/Parcels/stratmap_land_parcels_48_most_recent/MapServer/0"
+    },
+    "bboxes": {
+      "harris": [
+        29.49,
+        -95.96,
+        30.17,
+        -94.9
+      ],
+      "fortbend": [
+        29.25,
+        -96.13,
+        29.85,
+        -95.51
+      ],
+      "chambers": [
+        29.36,
+        -94.92,
+        29.92,
+        -94.39
+      ],
+      "waller": [
+        29.75,
+        -96.05,
+        30.2,
+        -95.62
+      ]
     },
     "candidates": {
       "houstonDowntown": [
@@ -207,8 +238,6 @@
       "Chambers County": "chambers",
       "Waller": "waller",
       "Montgomery": null,
-      "Adams": null,
-      "Denver": null,
       "nonsense": null
     },
     "statewideFallback": {
