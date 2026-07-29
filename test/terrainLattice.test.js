@@ -17,6 +17,8 @@ import {
 } from "../src/workspaces/site-planner/lib/demGrid.js";
 import {
   buildContours, clipSegment, clipRun, anchorLabels,
+} from "../src/workspaces/site-planner/lib/contourTrace.js";
+import {
   contourLabelText, pickLabels, joinSeams, composeContourPaint,
 } from "../src/workspaces/site-planner/lib/contours.js";
 import { maskedSmooth, pixelToLatLng } from "../src/workspaces/site-planner/lib/demGrid.js";

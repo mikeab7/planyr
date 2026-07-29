@@ -56,13 +56,13 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
 - `elementSync.js` / `elementRows.js` / `elementJournal.js` — the element-level sync engine, the
   rows↔model fold layer (incl. `foldJournal`), and the persisted pending-edit journal (NEW-F4:
   a failed commit survives a reload instead of being reverted by the rows-canonical refetch).
-  **B1094/B1095, read before touching the write path:** a bonded assembly (a host + everything
+  **B1094/B1098, read before touching the write path:** a bonded assembly (a host + everything
   `attachedTo` it) is ATOMIC on the wire. `flush()` first closes the assembly (`closeAssemblies`)
   so every member lands in ONE commit, then re-reads each op's bytes from the live canvas
   (`freshen`, via the injected `liveCollections()`) so a payload captured before a gesture can't
   reach the server — those two together are what stops a drag tearing a building off its truck
   court. Undo/redo is a gesture boundary: `applySnapshot` flushes against the SNAPSHOT (never
-  `stateRef`, which React hasn't re-rendered yet). **B1096:** a genuine foreign row beats a pending
+  `stateRef`, which React hasn't re-rendered yet). **B1099:** a genuine foreign row beats a pending
   DERIVED op — derived churn is never re-pushed over another writer — while a pending DIRECT user
   edit still wins and still toasts (the B673 matrix, unchanged). **B1097:** `rowsToModel` runs the
   SAME `normalizeBondedChildren` heal as `createSiteModel` — never wire a load-time repair to only
@@ -94,12 +94,29 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   (clipper union of every connected strip + wedge → one region, one outline, per cluster) plus the
   curb-stripe trimmer. A road connection is a boolean union, NOT a patch painted over a seam — read
   roadNetwork.js's header before touching anything junction-shaped.
-- Terrain pipeline (B703–B706): `demGrid.js` / `contours.js` / `flowField.js` (pure math,
+- Terrain pipeline (B703–B706) — **LOADED ON DEMAND (B1095): `terrainLazy.js` is the ONE entry
+  point** (`loadTerrain()` cached import + the synchronous `terrainNow()` the per-move cursor
+  sample reads + the `contourHover` router); nothing on the boot path may static-import
+  `terrainLayers.js` again, and `terrainGate.js` exists so the layer registry can read the zoom
+  gate without dragging the pipeline back in. `contourTrace.js` holds the worker-only
+  marching-squares tracer (the sole `d3-contour` consumer) — keep it out of `contours.js`.
+  `demGrid.js` / `contours.js` / `flowField.js` (pure math,
   worker-safe) + `lercGrid.js` (the LERC codec, split out in B1042 so `lerc` stays OFF the boot
   bundle — static-imported by the worker, dynamic-imported on the main thread)
   + `terrainWorker.js` (the repo's first Web Worker — import list is test-guarded)
   + `terrainLayers.js` (Leaflet glue, grid LRU for the hover elevation readout);
-  `elevation.js` — 3DEP getSamples (cross-section tool + point readout, survey-ft);
+  `elevation.js` — 3DEP getSamples (cross-section tool + point readout, survey-ft; a caller
+  signal NEVER disables the timeout — that is how a hung socket used to leave the readout
+  in-flight forever). Cursor readouts (NEW-1/NEW-2): `contours.js` owns the pure hover
+  HIT-TEST (`buildContourIndex`/`hitContour`) so the polylines stay `interactive:false`;
+  `terrainLayers.js` owns the ONE transient hover label (its own sublayer + `setContourHover`,
+  fed from each surface's EXISTING throttled cursor move — never a second listener) and
+  `warmCursorGrid` (the cursor's lattice tile, pulled regardless of layer toggles and of the
+  z16 gate — that gate is a cartography rule about 1-ft LINES, not a reason to refuse a POINT);
+  `groundReadout.js` + `components/CursorChip.jsx` are the ONE composition + the ONE chip both
+  surfaces paint (four honest existing-grade states — it may never render as ABSENCE — plus
+  Prop from `proposedSurface.sampleProposedAt`, which walks the SAME `grid.owners` the B826
+  earthwork rows price off, so chip and ledger cannot drift).
   `fbcdWse.js` — FBCDD Atlas-14 DRAFT WSE samplers (Fort Bend): 0.2% mosaic → `derivedWse02Ft`,
   per-watershed 100-yr multiplex → `derivedWse1pctFt` (B807).
 - Detention outlet / routing / criteria tier (NEW-A, Phase A): `detentionCriteria.js` (the versioned

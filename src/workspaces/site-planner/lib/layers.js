@@ -17,7 +17,8 @@ import { JURISDICTION_LAYERS } from "./counties.js";
 import { JURISDICTION_SOURCES, ETJ_SOURCES, roadAuthorityStyle, ROAD_AUTHORITY_LEGEND } from "./jurisdiction.js";
 import { GIS_SOURCES } from "../../../shared/gis/sources.js";
 import { overpassLayer, mapillaryLayer } from "./evidenceLayers.js";
-import { contourLayer, flowLayer, TERRAIN_MIN_ZOOM } from "./terrainLayers.js";
+import { TERRAIN_MIN_ZOOM } from "./terrainGate.js";
+import { loadTerrain } from "./terrainLazy.js";
 import {
   isTransientStatus, dynamicLayerOptions, imageLayerOptions, featureLayerOptions, featureRetryDecision,
   wireRasterStatus, RASTER_STALL_MS,
@@ -960,8 +961,16 @@ export function syncOverlayLayers(map, overlays, refs, opts = {}) {
         // costs ONE fetch). No health probe — the pipeline self-reports through
         // `report`, with proxy→direct fallback inside. Plain vector groups, so the
         // layerGroup constraint on esri RASTER layers doesn't apply.
-        const lyr = cfg.kind === "contours" ? contourLayer(cfg, report) : flowLayer(cfg, report);
-        lyr.setOpacity(st.opacity); lyr.addTo(map); refs[k] = lyr;
+        // B1095 — the pipeline (demGrid + contours + the worker glue) is imported HERE, the
+        // first time a terrain layer is actually switched on, instead of riding the boot
+        // bundle. `refs[k]` is already "pending"; if the user toggles back off while the
+        // chunk is in flight that slot is cleared, and this resolve must not resurrect the
+        // layer (the releaseLayer discipline). A failed import fails LOUDLY, like a probe.
+        loadTerrain().then(({ contourLayer, flowLayer }) => {
+          if (refs[k] !== "pending" || !overlays[k] || !overlays[k].on) return;
+          const lyr = cfg.kind === "contours" ? contourLayer(cfg, report) : flowLayer(cfg, report);
+          lyr.setOpacity(st.opacity); lyr.addTo(map); refs[k] = lyr;
+        }, (e) => { if (refs[k] === "pending") fail(k, cfg, `${cfg.label}: ${(e && e.message) || "terrain module failed to load"}`); });
       } else if (cfg.kind === "vector") {
         // Cached boundary layer (B694): paints the last-good copy from the browser
         // cache instantly, refreshes in the background, and carries hover/click
