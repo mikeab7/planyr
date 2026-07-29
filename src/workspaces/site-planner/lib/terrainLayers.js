@@ -47,9 +47,12 @@ import { DEP_URL, M_TO_FT } from "./elevation.js";
 import {
   gridRequest, exportUrl, looksLikeLerc, sampleAtLatLng, mercToPixel,
   lngToMercX, latToMercY, groundScale, mercPerPx, mercYToLat,
-  latticeCover, LATTICE_MAX_BAND,
+  latticeCover, latticeTileAt, LATTICE_MAX_BAND, LATTICE_MIN_BAND,
 } from "./demGrid.js";
-import { composeContourPaint } from "./contours.js";
+import {
+  composeContourPaint, contourLabelText, buildContourIndex, hitContour,
+  HOVER_TOL_PX, DOUBLE_STAMP_PX,
+} from "./contours.js";
 
 export const TERRAIN_MIN_ZOOM = 16; // ~3 m ground cells at Houston; z15 would be 1-ft-contour mush
 const TERRAIN_TTL = 7 * 24 * 60 * 60 * 1000; // DEM vintage moves slowly — a week is generous
@@ -96,6 +99,15 @@ const rememberGrid = (key, req, grid) => {
   while (gridLru.size > GRID_LRU_MAX) gridLru.delete(gridLru.keys().next().value);
 };
 export function sampleTerrainGrids(lat, lng) {
+  const r = sampleTerrainGridsInfo(lat, lng);
+  return r.status === "value" ? r.ft : r.status === "void" ? null : undefined;
+}
+
+/* The same local sample, with the provenance the NEW-2 readout needs: which of the
+ * three honest states this point is in, and how much GROUND one cell of the grid that
+ * answered covers. A coarse cell is not a reason to refuse to sample a point — it is a
+ * reason to SAY the sample is coarse (the chip marks it and the tooltip explains). */
+export function sampleTerrainGridsInfo(lat, lng) {
   const x = lngToMercX(lng), y = latToMercY(lat);
   let covered = false;
   for (const { req, grid } of [...gridLru.values()].reverse()) {
@@ -103,9 +115,45 @@ export function sampleTerrainGrids(lat, lng) {
     if (px < 1 || py < 1 || px > req.width - 1 || py > req.height - 1) continue;
     covered = true;
     const v = sampleAtLatLng(grid, req, lat, lng);
-    if (v != null) return v;
+    if (v != null) return { status: "value", ft: v, cellFt: req.cellMeters * groundScale(lat) * M_TO_FT };
   }
-  return covered ? null : undefined;
+  return covered ? { status: "void" } : { status: "uncovered" };
+}
+
+/* NEW-2(b) — keep ONE lattice tile under the cursor warm, whatever the layer toggles
+ * say and whatever the zoom is. The z16 gate exists because 1-ft CONTOUR LINES traced
+ * off a coarse cell are cartographic mush; that is no reason to refuse to SAMPLE A
+ * POINT, which is why this path is deliberately ungated. The tile is the SAME
+ * `latticeTile` the contour layer asks for at this zoom, so with contours on this is a
+ * plain cache hit and costs no extra fetch.
+ *
+ * It calls computeTile DIRECTLY rather than through gisCache.swr: swr serves the cached
+ * JSON contour artifact WITHOUT ever running the fetch, so a view painted from cache
+ * leaves the grid registry empty — which is exactly why the readout's fast path went
+ * missing after a reload even with contours on. The grid only ever lands in the LRU by
+ * way of a real computeTile run.
+ *
+ * Returns a promise that settles when the tile's grid is in the registry (or rejects
+ * LOUDLY). A failed tile is not retried for FAIL_COOLDOWN_MS, so a dead endpoint can't
+ * be hammered once per cursor move. */
+const WARM_FAIL_COOLDOWN_MS = 30000;
+const warmFailed = new Map(); // tile key -> ts of the last failure
+export function warmCursorGrid(lat, lng, zoom, { fetchImpl, now = Date.now } = {}) {
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return Promise.reject(new Error("no position"));
+  const band = Math.min(LATTICE_MAX_BAND, Math.max(LATTICE_MIN_BAND,
+    Number.isFinite(zoom) ? Math.round(zoom) : LATTICE_MAX_BAND));
+  const tile = latticeTileAt(lat, lng, band);
+  if (gridLru.has(tile.key)) return Promise.resolve(tile.key);
+  const cur = inflight.get(tile.key);
+  if (cur) return cur.then(() => tile.key);
+  const failedAt = warmFailed.get(tile.key);
+  if (failedAt != null && now() - failedAt < WARM_FAIL_COOLDOWN_MS) {
+    return Promise.reject(new Error("terrain grid unavailable here"));
+  }
+  return computeTile(tile, { fetchImpl }).then(
+    () => { warmFailed.delete(tile.key); return tile.key; },
+    (e) => { warmFailed.set(tile.key, now()); throw e; },
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -217,9 +265,10 @@ export function fetchSiteGrid(bounds, { fetchImpl, zoom } = {}) {
 const CONTOUR_COL = "#7C3F12";        // topo brown, readable on green imagery
 const CONTOUR_INDEX_COL = "#5B2E0D";
 const ARROW_COL = "#0369A1";          // drainage blue (not the status palette)
+export const CONTOUR_HOVER_CLASS = "planyr-contour-hover"; // marks the ONE transient hover label
 
-const labelIcon = (text) => L.divIcon({
-  className: "",
+const labelIcon = (text, className = "") => L.divIcon({
+  className,
   iconSize: [0, 0],
   html: `<span style="display:inline-block;transform:translate(-50%,-50%);white-space:nowrap;pointer-events:none;` +
     `font:700 10px/1.2 Inter,system-ui,sans-serif;font-variant-numeric:tabular-nums slashed-zero;color:${CONTOUR_INDEX_COL};` +
@@ -232,12 +281,13 @@ const labelIcon = (text) => L.divIcon({
  * then labels are deduped and thinned by pickLabels. Both sublayers are built inside
  * this ONE call, into a group the caller just cleared — so a label can never outlive
  * the geometry it names (NEW-1). */
-function renderContours(parts, group, { opacity, canvas }) {
+function renderContours(parts, group, { opacity, canvas, onComposed }) {
   // composeContourPaint is the shared, PURE composition (contours.js) — the dedupe, the
   // seam-join, the label thinning and the ONE unit formatter all live there, so the
   // fixture-driven test exercises exactly what the map paints. This function only turns
   // its output into Leaflet objects.
   const { lines, labels } = composeContourPaint(parts);
+  if (onComposed) onComposed({ lines, labels });
   for (const ln of lines) {
     // Line hierarchy by WEIGHT (index heavier), never by fading (salience rule).
     L.polyline(ln.coords, {
@@ -289,10 +339,15 @@ function coarseNote(cover) {
 // ---------------------------------------------------------------------------
 /* The shared view-driven factory. `render` is one of the two above; both layers key
  * the SAME lattice tiles, so toggling both costs one fetch + one worker job per tile. */
-function terrainLayer(cfg, onStatus, render, emptyMsg) {
+function terrainLayer(cfg, onStatus, render, emptyMsg, { hover = false } = {}) {
   const group = L.layerGroup();
   let map = null, canvas = null, lastKey = null, opacity = cfg.opacity ?? 0.9;
   let busy = false, pendingMove = false, lastPainted = null;
+  // NEW-1 — the hover readout's OWN sublayer. It is a child group so the transient label
+  // is cleared (and re-parented) independently of the geometry, and so a repaint can
+  // never leave one stranded over lines it no longer names.
+  const hoverGroup = L.layerGroup();
+  let composed = null, hoverIndex = null, hoverKey = null;
   // NEW-1: the SUPERSESSION token vectorOverlay.js already uses. `!map` alone only
   // catches an unmounted group — a superseded compute on a STILL-MOUNTED layer sailed
   // past it and painted its lines and labels over the newer view's.
@@ -308,7 +363,14 @@ function terrainLayer(cfg, onStatus, render, emptyMsg) {
   // outlive the lines it names (NEW-1 (2)).
   const paint = (parts, ts, opts = {}) => {
     group.clearLayers();
-    const n = render(parts, group, { map, opacity, canvas });
+    const n = render(parts, group, {
+      map, opacity, canvas,
+      onComposed: (c) => { composed = c; hoverIndex = null; },
+    });
+    // Re-parent the (now emptied) hover sublayer: the label named the geometry that was
+    // just replaced, so it goes with it — the same "no label outlives its lines" rule the
+    // permanent labels follow (B1087).
+    if (hover) { hoverGroup.clearLayers(); hoverKey = null; group.addLayer(hoverGroup); }
     lastPainted = parts;
     const msg = opts.note || (n ? null : emptyMsg);
     onStatus && onStatus(n ? "loaded" : "empty", msg, { ts, stale: !!opts.stale });
@@ -320,6 +382,8 @@ function terrainLayer(cfg, onStatus, render, emptyMsg) {
     if (z < TERRAIN_MIN_ZOOM) {
       paintSeq++; // a slow in-flight compute from above the gate must not paint below it
       group.clearLayers(); lastKey = "zoomed-out"; lastPainted = null;
+      composed = null; hoverIndex = null; hoverKey = null;
+      if (hover) group.addLayer(hoverGroup);
       onStatus && onStatus("empty", `Zoom in to ≥ ${TERRAIN_MIN_ZOOM} to load (1-ft detail needs close zoom)`);
       return;
     }
@@ -378,10 +442,52 @@ function terrainLayer(cfg, onStatus, render, emptyMsg) {
     }
     if (pendingMove) { pendingMove = false; refresh(); } // trailing edge (B56d)
   };
+  /* NEW-1 — answer "what elevation is the line under my cursor?" without making a single
+   * polyline interactive. The cursor position arrives from the coordinate readout's
+   * ALREADY-throttled mousemove (no second listener anywhere); `forMap` identifies which
+   * surface sent it, so the other surface's layer clears instead of painting a label for
+   * a cursor that isn't over it. Exactly one label, in its own sublayer, cleared on every
+   * move — a ghost or a stacked pair is structurally impossible. */
+  group.hoverAt = (ll, forMap) => {
+    if (!hover) return null;
+    const want = ll && map && (!forMap || forMap === map) && composed && composed.lines.length &&
+      map.getZoom() >= TERRAIN_MIN_ZOOM ? ll : null;
+    if (!want) {
+      if (hoverKey !== null) { hoverGroup.clearLayers(); hoverKey = null; }
+      return null;
+    }
+    const here = L.latLng(want.lat, want.lng);
+    const p = map.latLngToContainerPoint(here);
+    // The tolerance is a constant number of SCREEN pixels — convert it through the live
+    // map scale so it means the same thing at every zoom.
+    const tolDeg = Math.abs(map.containerPointToLatLng(L.point(p.x, p.y + HOVER_TOL_PX)).lat - here.lat);
+    if (!hoverIndex) hoverIndex = buildContourIndex(composed.lines);
+    const hit = hitContour(hoverIndex, here.lat, here.lng, tolDeg);
+    // NO DOUBLE-STAMP: if this contour already carries a permanent index label close by,
+    // the question is answered — a second label would just crowd the first.
+    const answered = hit && (composed.labels || []).some((lab) =>
+      lab.level === hit.level &&
+      map.latLngToContainerPoint(L.latLng(lab.ll[0], lab.ll[1])).distanceTo(p) <= DOUBLE_STAMP_PX);
+    const key = hit && !answered ? `${hit.level}|${hit.ll[0].toFixed(6)},${hit.ll[1].toFixed(6)}` : null;
+    if (key === hoverKey) return hit && !answered ? hit : null;
+    hoverGroup.clearLayers();
+    hoverKey = key;
+    if (!key) return null;
+    // Same white-halo divIcon, same size and colour as the permanent index labels — the
+    // hovered line reads exactly like a labelled one, which is the whole ask.
+    L.marker(hit.ll, {
+      // the class exists so a harness can tell the ONE transient label from the permanent
+      // index labels — a ghost or a stacked pair is otherwise invisible to a DOM check
+      icon: labelIcon(contourLabelText(hit.level), CONTOUR_HOVER_CLASS),
+      interactive: false, keyboard: false,
+    }).addTo(hoverGroup);
+    return hit;
+  };
   group.onAdd = function (m) {
     L.LayerGroup.prototype.onAdd.call(this, m);
     map = m;
     canvas = L.canvas();
+    if (hover) { group.addLayer(hoverGroup); hoverGroups.add(group); }
     m.on("moveend", refresh);
     refresh();
     return this;
@@ -389,13 +495,31 @@ function terrainLayer(cfg, onStatus, render, emptyMsg) {
   group.onRemove = function (m) {
     paintSeq++; // invalidate every in-flight compute — nothing may paint into a removed group
     m.off("moveend", refresh);
+    hoverGroups.delete(group);
+    hoverGroup.clearLayers(); hoverKey = null; composed = null; hoverIndex = null;
     map = null; lastKey = null; lastPainted = null; pendingMove = false; busy = false;
     L.LayerGroup.prototype.onRemove.call(this, m);
   };
   return group;
 }
 
+// Every mounted contour layer, so the coordinate readout can hand its (already
+// throttled) cursor position to whichever one belongs to the map it came from.
+const hoverGroups = new Set();
+
+/* NEW-1 — the ONE entry point a map surface calls from its existing cursor-move path.
+ * `map` is that surface's Leaflet map; `ll` is {lat,lng} or null on mouse-out. Layers on
+ * other maps clear, so two mounted surfaces can never both show a hover label. Returns
+ * the hit ({level, ll, …}) when one was painted. */
+export function setContourHover(map, ll) {
+  let hit = null;
+  for (const g of hoverGroups) {
+    try { const h = g.hoverAt(ll, map); if (h) hit = h; } catch (_) { /* never break a mousemove */ }
+  }
+  return hit;
+}
+
 export const contourLayer = (cfg, onStatus) =>
-  terrainLayer(cfg, onStatus, renderContours, "No contour lines in view");
+  terrainLayer(cfg, onStatus, renderContours, "No contour lines in view", { hover: true });
 export const flowLayer = (cfg, onStatus) =>
   terrainLayer(cfg, onStatus, renderArrows, "Ground too flat to call — no confident direction");

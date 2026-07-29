@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-07-29 @ `fa6702e` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-07-29 @ `c9c0665` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_343 source files mapped._
+_345 source files mapped._
 
 ## infra
 
@@ -233,6 +233,8 @@ _343 source files mapped._
   - _exports_: `default (Chip)`
 - **`src/workspaces/site-planner/components/Collapse.jsx`** — FINAL UI SPEC collapsible section primitive (title · count · closed-state summary · chevron) with per-sectionId localStorage open/closed persistence; header is a keyboard-toggleable button
   - _exports_: `collapseStorageKey`, `default (Collapse)`, `readOpen`
+- **`src/workspaces/site-planner/components/CursorChip.jsx`** — the ONE cursor chip both map surfaces paint: coordinate pair + the always-present elevation readout (coords give way first so no elevation field is ever truncated)
+  - _exports_: `default (CursorChip)`
 - **`src/workspaces/site-planner/components/JurisdictionBadge.jsx`** — Passive site-header chip showing the active parcel's jurisdiction (city/ETJ/county) from the auto-run B93 identify; display-only, ⚑ on straddle (B763)
   - _exports_: `default (JurisdictionBadge)`
 - **`src/workspaces/site-planner/components/LayerPanel.jsx`** — Shared map-layer toggle UI (both finder + planner): checkbox/opacity/status/vintage per layer + coverage relevance picker
@@ -253,7 +255,7 @@ _343 source files mapped._
   - _exports_: `default (StandardsBar)`
 - **`src/workspaces/site-planner/components/TeamPanel.jsx`** — Team workspace management tab: roster, invite-by-email, role changes, rename/delete/leave team via RLS-scoped teams.js
   - _exports_: `default (TeamPanel)`
-- **`src/workspaces/site-planner/components/useGroundElevation.js`** — B706 hook: cursor ground-elevation readout (bilinear from the cached terrain grid, else one debounced 3DEP point sample; aborts superseded requests, suppresses over no-data)
+- **`src/workspaces/site-planner/components/useGroundElevation.js`** — B706 hook: cursor ground-elevation readout as a STATE, never silence (bilinear from the cached terrain grid; warms the cursor lattice tile whatever the layer toggles/zoom say; one debounced 3DEP point sample meanwhile; aborts superseded requests)
   - _exports_: `GROUND_EL_TITLE`, `useGroundElevation`
 - **`src/workspaces/site-planner/components/ViewMenu.jsx`** — On-canvas View (eye) menu card (B653): show/hide toggles (docks, column grid, dims, areas) + grid size & snap — snap's single interactive home
   - _exports_: `default (ViewMenu)`
@@ -300,7 +302,7 @@ _343 source files mapped._
 - **`src/workspaces/site-planner/lib/conflictToasts.js`** — the B673 conflict policy matrix as a pure mapping: elementSync event → toast spec (who gets told what, which action rides along)
   - _exports_: `toastForSyncEvent`
 - **`src/workspaces/site-planner/lib/contours.js`** — Pure contour-line math (B704): 1-ft interval auto-pick, sentinel-embedded voids, d3-contour marching squares, grid-border + dilated-void strip passes, pixel-space simplify, index flags + sparse labels
-  - _exports_: `anchorLabels`, `buildContours`, `clipRun`, `clipSegment`, `composeContourPaint`, `contourLabelText`, `dilateVoids`, `joinSeams`, `LABEL_CAP`, `LABEL_MIN_SEP_CELLS`, `pickInterval`, `pickLabels`, `stripRing`
+  - _exports_: `anchorLabels`, `buildContourIndex`, `buildContours`, `clipRun`, `clipSegment`, `composeContourPaint`, `contourLabelText`, `dilateVoids`, `DOUBLE_STAMP_PX`, `hitContour`, `HOVER_TOL_PX`, `joinSeams`, `LABEL_CAP`, `LABEL_MIN_SEP_CELLS`, `pickInterval`, `pickLabels`, `stripRing`
 - **`src/workspaces/site-planner/lib/convertClient.js`** — B748 client for the B238 DWG→DXF convert service (VITE_CONVERT_URL); round-trips DWG bytes → DXF with a visible, distinct state for every failure (unset URL / 422 / 413 / unreachable).
   - _exports_: `CONVERT_URL`, `convertConfigured`, `convertDwgToDxf`, `isDwgFile`
 - **`src/workspaces/site-planner/lib/corridorConflicts.js`** — Pond/basin vs easement + pipeline-corridor overlap screen (B831): bbox-prefiltered polyIntersectArea over rings in planner feet; ring-only API is the B826 cut/fill-cells seam. Exports `pondEncumbranceConflicts`.
@@ -318,7 +320,7 @@ _343 source files mapped._
 - **`src/workspaces/site-planner/lib/deedAlign.js`** — Deed-to-parcel basis-of-bearings fix: rigid rotate+translate best-fit overlay plus theoretical grid-convergence fallback
   - _exports_: `CONFIDENT_FRAC`, `describeRotation`, `gridConvergenceDeg`, `MAX_ALIGN_ROT_DEG`, `openRing`, `ringCentroid`, `rotatePointsAbout`, `solveDeedAlignment`
 - **`src/workspaces/site-planner/lib/demGrid.js`** — Pure DEM grid plumbing (B704/B706): deterministic snapped-tile exportImage requests, LERC sniff/decode to survey-feet with validity mask, masked gaussian smooth, cell-center pixel/mercator/WGS84 transforms, mask-aware bilinear sampling
-  - _exports_: `bandCellMeters`, `CELL_PX`, `exportUrl`, `gridRequest`, `groundScale`, `LATTICE_MAX_BAND`, `LATTICE_MAX_TILES`, `LATTICE_MIN_BAND`, `latticeCover`, `latticeTile`, `latToMercY`, `lngToMercX`, `looksLikeLerc`, `MARGIN_CELLS`, `maskedSmooth`, `MAX_GRID`, `mercPerPx`, `mercToPixel`, `mercXToLng`, `mercYToLat`, `pixelToLatLng`, `pixelToMerc`, `sampleAtLatLng`, `TILE_CELLS`, `WEB_MERC_R`
+  - _exports_: `bandCellMeters`, `CELL_PX`, `exportUrl`, `gridRequest`, `groundScale`, `LATTICE_MAX_BAND`, `LATTICE_MAX_TILES`, `LATTICE_MIN_BAND`, `latticeCover`, `latticeTile`, `latticeTileAt`, `latToMercY`, `lngToMercX`, `looksLikeLerc`, `MARGIN_CELLS`, `maskedSmooth`, `MAX_GRID`, `mercPerPx`, `mercToPixel`, `mercXToLng`, `mercYToLat`, `pixelToLatLng`, `pixelToMerc`, `sampleAtLatLng`, `TILE_CELLS`, `WEB_MERC_R`
 - **`src/workspaces/site-planner/lib/detentionCriteria.js`** — Versioned jurisdiction detention-criteria registry (NEW-A1): cited per-district outlet-hydraulics + pond-geometry criteria (release, storms, freeboard, slope, berm, orifice/weir C, drawdown), referencing DETENTION_RULES for the verified release/storm/freeboard facts; audit guard + user overrides.
   - _exports_: `bkddMaintBermWidthFt`, `coincidentStormPolicy`, `CRITERIA_JUR_KEYS`, `criteriaAuthorityShort`, `criteriaFor`, `DETENTION_CRITERIA`, `jurKeyForAuthority`, `loadCriteriaOverrides`, `problems`, `pumpAllowance`, `requiredStormsFor`, `saveCriteriaOverrides`
 - **`src/workspaces/site-planner/lib/detentionMethod.js`** — Rational-vs-NRCS method-by-area guardrail (B904): picks the runoff method by tributary area against a criteria-configurable ceiling (default 200 ac) and flags when NRCS is indicated but the routing pass still rides the Rational proxy.
@@ -405,6 +407,8 @@ _343 source files mapped._
   - _exports_: `backoffMs`, `classifyGisError`, `clearCoalesced`, `COALESCE_TTL_MS`, `coalesceRequest`, `fetchArcgisJson`, `GIS_FETCH_RETRIES`, `GIS_FETCH_TIMEOUT_MS`, `GIS_MAX_GET_URL`, `gisErrorMessage`, `GisFetchError`, `pLimit`
 - **`src/workspaces/site-planner/lib/gradingRules.js`** — Grading-standards registry (B825): per-surface-class slope limits with provenance (verified/basis/source), override merge, percent/ratio validation seam, chip labels
   - _exports_: `chipLabel`, `GRADING_RULES`, `gradingRuleFor`, `JURISDICTION_OVERRIDES`, `mergeGradeOverride`, `validateSlopeAgainstRule`
+- **`src/workspaces/site-planner/lib/groundReadout.js`** — pure composition of the cursor elevation readout: the four honest existing-grade states (value / in-flight / no-data / unavailable), the proposed value, and the signed Fill/Cut delta on the cut-fill ramp
+  - _exports_: `COARSE_CELL_FT`, `deltaColor`, `groundReadout`
 - **`src/workspaces/site-planner/lib/groundwater.js`** — Depth-to-water screen for pond feasibility (NEW-B3): combines SSURGO seasonal-high water table + TWDB well signals (provenanced), screens wet-vs-dry pond (permanent-pool depth, suggested pool elev). Pure.
   - _exports_: `combineDepthToWater`, `pondGroundwaterScreen`
 - **`src/workspaces/site-planner/lib/hcfcdWse.js`** — HCFCD MAAPnext model WSE sampler (B882, Harris County): registry-driven ImageServer getSamples for the 1% + 0.2% WSE rasters; no-op until the provisional endpoints are confirmed live. `sampleMaapnextWse`/`maapnextEndpoints`/`clearMaapnextCache`.
@@ -542,7 +546,7 @@ _343 source files mapped._
 - **`src/workspaces/site-planner/lib/profile.js`** — Signed-in user profile I/O against Supabase public.profiles (load/upsert first/last/org, mirrors names to auth metadata)
   - _exports_: `loadProfile`, `saveProfile`
 - **`src/workspaces/site-planner/lib/proposedSurface.js`** — B826 proposed-surface engine (pure): per-element grading planes from the B825 class records, composite cut/fill lattice, balance assist, violation classing (ADA legal vs screening)
-  - _exports_: `balanceAssist`, `buildPlanes`, `buildProposedSurface`, `classifyGradeElement`, `daylightRings`, `distToRingEdges`, `DOCK_BREAK_FT`, `nearestOnRing`, `netImportCy`, `PL_FILL_EPS_FT`, `slopeBand`, `surfaceGrid`, `surfaceViolations`, `TIE_DROP_FT`
+  - _exports_: `balanceAssist`, `buildPlanes`, `buildProposedSurface`, `classifyGradeElement`, `daylightRings`, `distToRingEdges`, `DOCK_BREAK_FT`, `nearestOnRing`, `netImportCy`, `PL_FILL_EPS_FT`, `sampleProposedAt`, `slopeBand`, `surfaceGrid`, `surfaceViolations`, `TIE_DROP_FT`
 - **`src/workspaces/site-planner/lib/provenance.js`** — B895 pure six-word SourceTag vocabulary (CODE/PLAN/SURVEY/ESTIMATE/YOURS/UNVERIFIED) + color-token map + classifiers from existing engine signals
   - _exports_: `classifyVerified`, `classifyWseSource`, `SOURCE_TAG_COLOR_VAR`, `SOURCE_TAG_ORDER`, `SOURCE_TAGS`, `sourceTag`
 - **`src/workspaces/site-planner/lib/proximityScreen.js`** — Pure proximity-screen core (PHASE 2, reused by later distance screens): projects parcel rings + feature points to EPSG:2278 feet and returns count + nearest-distance + ranked names within a buffer (0 ft = on/under the site), plus the `fmtDistFt` display helper
@@ -592,7 +596,7 @@ _343 source files mapped._
 - **`src/workspaces/site-planner/lib/teams.js`** — Team-workspace I/O over the anon Supabase client: create/list teams, roster + role management, email invites and claim, all RLS-scoped with SECURITY DEFINER RPC preferred paths
   - _exports_: `cancelInvite`, `claimInvites`, `createTeam`, `currentIdentity`, `deleteTeam`, `inviteByEmail`, `leaveTeam`, `listInvites`, `listMembers`, `listMyTeams`, `removeMember`, `renameTeam`, `setRole`
 - **`src/workspaces/site-planner/lib/terrainLayers.js`** — Main-thread terrain glue (B704/B705/B706): view-driven contour + drainage-arrow layerGroups (canvas renderer, swr last-good, proxy-direct fallback), singleton terrain worker with crash rebuild, shared grid LRU sampled by the hover readout
-  - _exports_: `contourLayer`, `fetchSiteGrid`, `flowLayer`, `sampleTerrainGrids`, `siteGridZoom`, `TERRAIN_MIN_ZOOM`
+  - _exports_: `CONTOUR_HOVER_CLASS`, `contourLayer`, `fetchSiteGrid`, `flowLayer`, `sampleTerrainGrids`, `sampleTerrainGridsInfo`, `setContourHover`, `siteGridZoom`, `TERRAIN_MIN_ZOOM`, `warmCursorGrid`
 - **`src/workspaces/site-planner/lib/terrainWorker.js`** — Terrain Web Worker (B704/B705): LERC decode -> masked smooth -> contours + flow arrows off the main thread; imports pure modules only (guarded by test/terrainWorker.test.js)
   - _exports_: _(none)_
 - **`src/workspaces/site-planner/lib/tileBudget.js`** — Pure tile/overscan budget: how much basemap is held off-screen, how many tiles are retained, and when the retina uplift is worth its cost

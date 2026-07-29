@@ -56,7 +56,8 @@ import { sanityCheckEstimate, sensitivityBand } from "./lib/estimateChallenge.js
 import { wseSensitivity } from "./lib/wseSensitivity.js";
 import LayerPanel from "./components/LayerPanel.jsx";
 import { districtDrainageNote } from "./lib/floodGroup.js";
-import { useGroundElevation, GROUND_EL_TITLE } from "./components/useGroundElevation.js";
+import { useGroundElevation } from "./components/useGroundElevation.js";
+import CursorChip from "./components/CursorChip.jsx";
 import ViewMenu from "./components/ViewMenu.jsx";
 import SiteAnalysis from "./components/SiteAnalysis.jsx";
 import AnchoredMenu from "../../shared/ui/AnchoredMenu.jsx";
@@ -159,7 +160,7 @@ import { geometricMaxBermFt, drainageBermCapFt, bindingBermCap, bermNeedsInlets,
 import { gisCache } from "./lib/gisCache.js";
 import { VECTOR_SOURCES, fetchCached } from "./lib/vectorLayers.js";
 import { sampleAtLatLng } from "./lib/demGrid.js";
-import { fetchSiteGrid, siteGridZoom } from "./lib/terrainLayers.js";
+import { fetchSiteGrid, siteGridZoom, setContourHover } from "./lib/terrainLayers.js";
 // NEW-1 (B1057 completion) — the screening-BFE live wiring: Atlas-14 rainfall, SSURGO soils, and
 // the terrain→watershed/section derivation that feeds screeningBfe.js.
 import { resolvePfds } from "./lib/pfdsClient.js";
@@ -170,7 +171,7 @@ import {
 } from "./lib/screeningBfeSite.js";
 import { bfeDataLikelyRequired, NOT_MODELED, CLOMR_NOTE } from "./lib/screeningBfe.js";
 import { paintHeatmap, heatmapLegend, heatmapTotals, cellAt as heatCellAt, cutFillPaint, cutFillLegend, cutFillTotals } from "./lib/mitigationHeatmap.js";
-import { buildProposedSurface, balanceAssist, netImportCy, classifyGradeElement, TIE_DROP_FT } from "./lib/proposedSurface.js";
+import { buildProposedSurface, balanceAssist, netImportCy, classifyGradeElement, sampleProposedAt, TIE_DROP_FT } from "./lib/proposedSurface.js";
 import { solveBalanceFfe, ffeDualDisplay } from "./lib/ffeBalance.js";
 import {
   zonesFromFeatureCollection, computeMitigation, combineMitigation, wse1pctForRing, ringInTrigger, ringInFloodway,
@@ -2093,7 +2094,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const [la, ln] = feetToLatLng(cursor, origin.lat, origin.lon);
     return { lat: la, lng: ln };
   }, [cursor, origin]);
-  const cursorElFt = useGroundElevation(cursorLL);
+  // NEW-2 — the readout is a STATE now (value / in-flight / no-data / unavailable), never
+  // silence; `zoom` picks the lattice band the cursor tile is warmed at (the same tile the
+  // contour layer asks for here, so it's a cache hit when contours are on).
+  const cursorEl = useGroundElevation(cursorLL, { zoom: origin ? ppfToZoom(view.ppf, origin.lat) : null });
+  // NEW-1 — hand the SAME already-throttled cursor position to the contour layer, so
+  // hovering any line (not just the labelled every-5-ft ones) answers with its elevation.
+  useEffect(() => { setContourHover(geoMapRef.current, cursorLL); }, [cursorLL]);
   /* B1092 — the GIS identify CARD on the planner canvas: {x, y (wrapper-local px), items}.
    * The backdrop Leaflet map is pointer-events:none (the SVG owns every click), so the
    * click-identify the BKDD easement layer was made VECTOR for could never fire here —
@@ -8502,6 +8509,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     return buildProposedSurface(gsInputs);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gsSig]);
+  /* NEW-2(c/e) — the PROPOSED elevation under the cursor, read from the very surface the
+   * earthwork rows price off (`gradeSurface.grid.owners`) rather than re-derived, so the
+   * chip and the ledger cannot disagree. `null` reasons are honest, never a plane
+   * extrapolated past its own element: no FFE anywhere → "nosurface"; bare ground outside
+   * every graded element and its daylight wedge → "outside"; a pond interior → "pond"
+   * (that dirt is borrow in the excavation ledger). */
+  const cursorProp = useMemo(() => {
+    if (!cursor) return null;
+    if (!gradeSurface || !gradeSurface.grid) return { status: "none", reason: "nosurface" };
+    return sampleProposedAt(gradeSurface.grid, cursor, gsExistAt);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cursor, gradeSurface, gsExistKey]);
   // The balance assist re-builds the grid a couple dozen times at different fieldT —
   // one CLICK, never per render (a per-frame bisection would jank drags).
   const gsBuildAtT = (t) => {
@@ -16399,12 +16418,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               lat/long (the coordinate Google Earth / a phone GPS uses), reprojected from the
               planner's feet frame via the SAME feetToLatLng the map render + KMZ export use.
               EPSG:2278 stays the internal frame for all geometry — this is display-only. */}
-          {cursorLL && (
-            <div title={GROUND_EL_TITLE} style={{ position: "absolute", bottom: 8, left: 10, zIndex: 5, pointerEvents: "none", fontFamily: NUM_FONT, fontSize: 11, color: "rgba(255,255,255,0.82)", background: "rgba(0,0,0,0.42)", backdropFilter: "blur(4px)", WebkitBackdropFilter: "blur(4px)", padding: "3px 8px", borderRadius: 5, lineHeight: 1.4, fontVariantNumeric: TABULAR_NUMS, maxWidth: "calc(100% - 20px)", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis", boxSizing: "border-box" }}>
-              {cursorLL.lat.toFixed(6)}°,&nbsp;{cursorLL.lng.toFixed(6)}°
-              {cursorElFt != null && <span data-ground-el> · El ≈ {cursorElFt.toFixed(1)} ft NAVD88</span>}
-            </div>
-          )}
+          <CursorChip ll={cursorLL} el={cursorEl} prop={cursorProp}
+            style={{ bottom: 8, left: 10, maxWidth: "calc(100% - 20px)" }} />
         </div>
 
         {/* phone-only floating button to summon the tool rail (B113) */}

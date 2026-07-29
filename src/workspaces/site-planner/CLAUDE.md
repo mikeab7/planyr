@@ -88,7 +88,18 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   bundle — static-imported by the worker, dynamic-imported on the main thread)
   + `terrainWorker.js` (the repo's first Web Worker — import list is test-guarded)
   + `terrainLayers.js` (Leaflet glue, grid LRU for the hover elevation readout);
-  `elevation.js` — 3DEP getSamples (cross-section tool + point readout, survey-ft);
+  `elevation.js` — 3DEP getSamples (cross-section tool + point readout, survey-ft; a caller
+  signal NEVER disables the timeout — that is how a hung socket used to leave the readout
+  in-flight forever). Cursor readouts (NEW-1/NEW-2): `contours.js` owns the pure hover
+  HIT-TEST (`buildContourIndex`/`hitContour`) so the polylines stay `interactive:false`;
+  `terrainLayers.js` owns the ONE transient hover label (its own sublayer + `setContourHover`,
+  fed from each surface's EXISTING throttled cursor move — never a second listener) and
+  `warmCursorGrid` (the cursor's lattice tile, pulled regardless of layer toggles and of the
+  z16 gate — that gate is a cartography rule about 1-ft LINES, not a reason to refuse a POINT);
+  `groundReadout.js` + `components/CursorChip.jsx` are the ONE composition + the ONE chip both
+  surfaces paint (four honest existing-grade states — it may never render as ABSENCE — plus
+  Prop from `proposedSurface.sampleProposedAt`, which walks the SAME `grid.owners` the B826
+  earthwork rows price off, so chip and ledger cannot drift).
   `fbcdWse.js` — FBCDD Atlas-14 DRAFT WSE samplers (Fort Bend): 0.2% mosaic → `derivedWse02Ft`,
   per-watershed 100-yr multiplex → `derivedWse1pctFt` (B807).
 - Detention outlet / routing / criteria tier (NEW-A, Phase A): `detentionCriteria.js` (the versioned
