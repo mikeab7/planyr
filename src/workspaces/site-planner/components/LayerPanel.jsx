@@ -58,6 +58,10 @@ const RELEVANCE_LABEL = { all: "Show all", dim: "Dim", hide: "Hide" };
 
 export default function LayerPanel({
   overlays, setOverlays, county, layerStatus = {}, coverage = {}, compact = false, basemap = null, gisNote = null,
+  // B1091(×2) — the county this SITE is actually in (the saved site record's own county), kept
+  // separate from `county` above, which is the layer-registry key / lookup selector. Only
+  // used as the fallback when no identify has resolved. Absent (map finder) → null.
+  siteCounty = null,
   // B1076/B1077 — the drainage facts the Flood & drainage group needs to be HONEST:
   // `floodContext` is a resolveDrainageContext result (or its restored slim) — its
   // `drainageDistrict` picks which district's rows are listed, and its `flood.zones` let
@@ -66,6 +70,19 @@ export default function LayerPanel({
   floodContext = null,
 }) {
   const jur = jurisdictionFor(county);
+  /* B1091(×2) — WHICH county the flood group reasons about.
+   *
+   * `county` is the parcel-lookup / jurisdiction-layer REGISTRY KEY. It is a UI selector
+   * that defaults to "harris" for every site and only ever names a county Planyr publishes
+   * local layers for — it is not a fact about where this site is. Feeding it to the district
+   * scoping is how a Waller-County tract came to be told that Harris County Flood Control
+   * District governs its drainage. The site IDENTIFY county (TxDOT boundaries — the same
+   * value the header renders as "Waller County") is the fact, so it wins; a straddle or an
+   * unresolved identify yields null, and null fails OPEN (nothing is demoted). */
+  const identifyCounty = Array.isArray(floodContext?.authority?.jurisdiction?.county)
+    ? floodContext.authority.jurisdiction.county
+    : [];
+  const floodCounty = identifyCounty.length === 1 ? identifyCounty[0] : identifyCounty.length ? null : siteCounty;
   const set = (k, patch) => setOverlays((o) => ({ ...o, [k]: { ...o[k], ...patch } }));
   const [tok, setTok] = useState(() => mapillaryToken());
   useEffect(() => subscribeMapillaryToken(setTok), []); // keep both LayerPanel copies in sync (B46)
@@ -378,15 +395,22 @@ export default function LayerPanel({
    * ------------------------------------------------------------------------- */
   const floodDistrict = governingDistrict({
     detected: floodContext?.drainageDistrict?.id ? [floodContext.drainageDistrict.id] : null,
-    county,
+    county: floodCounty,
+    tested: floodContext?.drainageDistrict?.tested || null,
   });
   /* B1091 — scoping now runs on THREE signals, not one: the boundary test (`governing`),
    * the county the site is in, and the coverage engine's published-extent verdict (the
    * same gate the Master Plan row already uses). The county half is what fixes the live
    * report: a Waller site listed HCFCD + City-of-Houston rows whenever the drainage check
-   * hadn't resolved a district — and neither agency has anything in Waller County ever. */
+   * hadn't resolved a district — and neither agency has anything in Waller County ever.
+   *
+   * B1091(×2) — but only an EXCLUSIVE answer may pick between two districts that both reach
+   * this county (see governingDistrict / floodRowRelevance), and the county it reasons over
+   * is `floodCounty` — the county the site IDENTIFY resolved — never the `county` prop,
+   * which is the parcel-lookup registry key and defaults to Harris on every site. */
   const floodScope = scopeFloodEntries(groupEntries("flood"), {
-    governing: floodDistrict.id, county, coverage,
+    governing: floodDistrict.id, governingExclusive: floodDistrict.exclusive,
+    county: floodCounty, coverage,
     isOn: (id) => !!overlays[id]?.on, // a layer you already turned on always stays listed
   });
   const floodMaster = floodMasterState(floodScope.tiers, overlays);

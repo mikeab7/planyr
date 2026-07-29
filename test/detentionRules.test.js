@@ -701,6 +701,83 @@ describe("B788 — hydrate RE-DERIVES the authority verdict from the stored raw 
   });
 });
 
+/* B1091(×2) — a REMEMBERED check must not forget WHICH DISTRICT the boundary test found.
+ *
+ * Verbatim from the Tsakiris site's production row (sites.id smrjdgmlinea, read 2026-07-29):
+ * the saved snapshot has NO `drainageDistrict` key at all (it predates B1080) while its own
+ * flags carry "bkdd-district-present" — the district boundary query having answered YES.
+ * Hydrate used to read only the county-derived channelAuthority, so that boundary FACT was
+ * dropped on every reload and the panel fell back to a county guess. Combined with B1091's
+ * scoping that was enough to print "BKDD doesn't govern drainage at this site — HCFCD does"
+ * over a tract the district's own boundary layer contains. */
+describe("B1091(×2) — hydrate keeps the district the boundary test actually found", () => {
+  // The real stored shape, trimmed to the fields hydrate reads.
+  const tsakirisLegacySlim = () => ({
+    authority: {
+      primaryReviewerId: "waller",
+      channelAuthority: null,
+      flags: ["mud-district-present", "bkdd-district-present"],
+      overlays: [
+        { kind: "mud", name: "Brookshire Katy Drainage District", type: "Drainage District" },
+        { kind: "drainage-district", id: "bkdd", name: "Brookshire–Katy Drainage District" },
+      ],
+      ambiguous: [],
+      mudState: "loaded",
+      jurisdiction: { city: ["Katy"], county: ["Waller"], etj: [], cityCentroid: [] },
+    },
+    flood: { zones: [], state: "loaded", ageMs: 0 },
+    channel: { near: null, state: "not-applicable" },
+    watershed: null,
+    groundElevFt: null,
+    groundDatum: "NAVD88",
+    // NB: no `drainageDistrict` key — this is the legacy shape, exactly as stored.
+  });
+
+  it("the legacy Tsakiris snapshot rehydrates as BKDD-governed, off its own stored flag", () => {
+    const h = hydrateDrainageContext(tsakirisLegacySlim());
+    expect(h.drainageDistrict).toMatchObject({ id: "bkdd", source: "boundary" });
+    expect(h.drainageDistrict.tested).toContain("bkdd");
+    expect(h.authority.channelAuthority).toBeNull(); // Waller — HCFCD has no jurisdiction here
+  });
+
+  it("the district overlay alone is enough when the flag is missing", () => {
+    const slim = tsakirisLegacySlim();
+    slim.authority.flags = ["mud-district-present"];
+    expect(hydrateDrainageContext(slim).drainageDistrict).toMatchObject({ id: "bkdd", source: "boundary" });
+  });
+
+  it("a modern slim round-trips its district AND its tested set", () => {
+    const ctx = {
+      authority: { primaryReviewer: { authorityId: "waller" }, channelAuthority: null, overlays: [], ambiguous: [], flags: [], jurisdiction: { city: [], county: ["Waller"], etj: [] } },
+      drainageDistrict: { id: "bkdd", source: "boundary", tested: ["bkdd"] },
+      flood: { zones: [], state: "empty" },
+      channel: null, watershed: null,
+    };
+    const h = hydrateDrainageContext(JSON.parse(JSON.stringify(slimDrainageContext(ctx))));
+    expect(h.drainageDistrict).toMatchObject({ id: "bkdd", source: "boundary", tested: ["bkdd"] });
+  });
+
+  it("no district found stays honestly empty, and claims NOTHING was cleanly excluded", () => {
+    const slim = tsakirisLegacySlim();
+    slim.authority.flags = [];
+    slim.authority.overlays = [{ kind: "mud", name: "Some MUD", type: "MUD" }];
+    const h = hydrateDrainageContext(slim);
+    expect(h.drainageDistrict.id).toBeNull();
+    // An absent flag is not a negative — a legacy slim may simply never have asked.
+    expect(h.drainageDistrict.tested).toEqual([]);
+  });
+
+  it("a Harris snapshot with no district still restores HCFCD by county, marked as a guess", () => {
+    const slim = tsakirisLegacySlim();
+    slim.authority.flags = [];
+    slim.authority.overlays = [];
+    slim.authority.jurisdiction = { city: [], county: ["Harris"], etj: [] };
+    const h = hydrateDrainageContext(slim);
+    expect(h.drainageDistrict).toMatchObject({ id: "hcfcd", source: "county" });
+    expect(h.drainageDistrict.tested).toEqual([]);
+  });
+});
+
 describe("B789 — the COH >20-ac branch county-gates its HCFCD compare", () => {
   const base = { acres: 109, impPct: 20, authorityId: "coh", inCityLimits: true, drainsToHcfcdChannel: true };
   it("hcfcdApplicable:false prices COH's own impervious rate — no HCFCD candidate, no PCPM deferral", () => {

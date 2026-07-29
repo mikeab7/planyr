@@ -1541,7 +1541,10 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
                 resolved from the view centre on every moveend — so the right utility
                 overlays are offered outside Houston too; per-site jurisdiction still
                 follows the site's own county once one is opened in the planner. */}
-            <LayerPanel overlays={overlays} setOverlays={setOverlays} county={viewCounty} layerStatus={layerStatus} coverage={coverage} />
+            {/* B1091(×2) — on the finder the view county IS the best county fact available (no
+                site, no drainage identify), so it feeds the flood scoping too. In the
+                planner the two are deliberately different signals. */}
+            <LayerPanel overlays={overlays} setOverlays={setOverlays} county={viewCounty} siteCounty={viewCounty} layerStatus={layerStatus} coverage={coverage} />
           </div>
           </>)}
         </div>

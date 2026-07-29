@@ -39,6 +39,7 @@ try {
   const outage = await text("#panel-flood-outage");
   const dmp = await text("#panel-dmp-empty");
   const nocontext = await text("#panel-flood-nocontext");
+  const stale = await text("#panel-flood-stalecounty");
 
   ok("no page errors while rendering", errors.length === 0, errors.join(" | "));
 
@@ -108,6 +109,27 @@ try {
     bkddOpen.includes("Drainage channels & ROW") && bkddOpen.includes("Storm sewer"),
     bkddOpen.slice(0, 1400));
   await offToggle.click(); // leave the panel as we found it
+
+  /* ── B1091(×2): THE INVERSION. B1091 shipped and the live panel at Tsakiris asserted the
+   * exact reverse — every BKDD row carrying "Brookshire–Katy Drainage District doesn't
+   * govern drainage at this site — Harris County Flood Control District does", with the
+   * HCFCD row carrying none. Ground truth, re-checked live 2026-07-29: BKDD's own boundary
+   * layer returns n=1 at this point; HCFCD returns n=0 (its jurisdiction ends at the Harris
+   * County line). Root cause: a district-vs-district exclusion drawn from the COUNTY guess,
+   * which says nothing about a district spanning three counties. ─────────────────────── */
+  ok("B1091(×2) — no panel anywhere says BKDD doesn't govern a site inside BKDD",
+    [bkdd, bkddOpen, nocontext, stale, outage, dmp].every((t) => !/Brookshire.{0,3}Katy Drainage District doesn.{0,3}t govern/i.test(t)),
+    stale.slice(0, 900));
+  ok("B1091(×2) — a STALE saved county can't flip the governing district",
+    stale.includes("District streams, watersheds & BFE") && stale.includes("District drainage easements")
+      && stale.includes("Master Plan floodplains & improvements"),
+    stale.slice(0, 900));
+  ok("B1091(×2) — …and HCFCD is the one demoted there, off the boundary fact",
+    !/LOCAL DRAINAGE AUTHORITY[\s\S]*?Drainage channels & ROW[\s\S]*?PHYSICAL HYDROGRAPHY/i.test(stale),
+    stale.slice(0, 900));
+  ok("B1091(×2) — the MIRROR still holds: in Harris, BKDD is the demoted one",
+    !harris.includes("District drainage easements") && harris.includes("Drainage channels & ROW"),
+    harris.slice(0, 900));
 
   // ── NEW-3a: what FEMA actually reported — the answer that was missing ─────────
   ok("Zone X is stated as a FINDING, not left as silence",

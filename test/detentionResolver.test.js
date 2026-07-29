@@ -346,7 +346,9 @@ describe("resolveDrainageContext — the full stormwater context", () => {
       },
     });
     const ctx = await resolveDrainageContext({ lng: -95.89503, lat: 29.77938, ring }, optsFor(routes));
-    expect(ctx.drainageDistrict).toEqual({ id: "bkdd", source: "boundary" });
+    // B1091(×2) — `tested` records which district boundary queries answered cleanly; only a
+    // clean negative may ever exclude a rival district (governingDistrict's `exclusive`).
+    expect(ctx.drainageDistrict).toEqual({ id: "bkdd", source: "boundary", tested: ["bkdd"] });
     expect(ctx.channel.sourceId).toBe("bkddChannel");
     expect(ctx.channel.name).toBe("Willow Fork");
     expect(ctx.channel.inventoryOnly).toBe(false);

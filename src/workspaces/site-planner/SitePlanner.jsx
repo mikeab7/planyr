@@ -16056,6 +16056,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                        drainage context the Stormwater readout uses, so the panel and the
                        readout can never disagree about who governs drainage here. */
                     floodContext={drainCtxData}
+                    /* B1091(×2) — the county this SITE is in, distinct from the `county` prop
+                       above (the parcel-lookup registry key, which defaults to Harris).
+                       The flood group's district scoping reasons over the identify county
+                       and falls back to THIS, never to the selector. */
+                    siteCounty={restored?.county || null}
                     basemap={{
                       value: origin ? basemapSrc : "off",
                       onChange: setBasemapSrc,
