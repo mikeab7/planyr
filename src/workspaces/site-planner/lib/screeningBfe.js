@@ -85,7 +85,18 @@ export const NOT_MODELED = [
 export const CLOMR_NOTE =
   "A developer-derived flood elevation that changes the mapped floodplain goes to FEMA as a CLOMR before construction and a LOMR after it, on a sealed engineer's study.";
 
-/* ─── WHY THIS MAY NOT BE OPTIONAL ───────────────────────────────────────────────────────────
+/* ─── WHY THIS IS NOT OPTIONAL WHERE THE ORDINANCE HAS BEEN READ ─────────────────────────────
+ * UPDATE (NEW-3, 2026-07-29): for WALLER COUNTY this is no longer open research. The county's own
+ * adopted Flood Damage Prevention Ordinance §5.C(3) (eff. 2/28/2013) was read verbatim and is
+ * modeled as a VERIFIED, FIRING rule in floodplainRules.waller.bfeDataRequirement. It goes further
+ * than the CFR minimum below in two ways that change the engine's job: it MANDATES NOAA Atlas 14
+ * as the hydrology, and it requires the 500-YEAR elevation alongside the base flood elevation.
+ * Callers should prefer `floodplainRules.bfeDataRequirementFor(rule)` and fall back to the generic
+ * record below only where no adopted ordinance text is on file for the jurisdiction.
+ *
+ * The record below therefore stays the GENERIC NFIP-minimum fallback, and stays `verified:false`
+ * on purpose — it is the federal floor, not any particular county's adopted text.
+ *
  * RESEARCH, sourced — and deliberately NOT asserted as settled law in product copy.
  *
  * 44 CFR 60.3(b)(3) is the NFIP minimum floodplain-management standard for a community whose map
@@ -123,21 +134,33 @@ export const BFE_DATA_REQUIREMENT = {
     "In an approximate A zone with no published flood elevation, the NFIP minimum standard most communities adopt makes a development over 50 lots or 5 acres (whichever is smaller) submit base flood elevation data with the proposal. Confirm the exact wording in this county's own floodplain ordinance.",
 };
 
-/* Does the NFIP subdivision threshold appear to bite on this site? Returns null when it cannot be
- * answered honestly (no acreage, or the site isn't in an approximate A zone). Screening research
- * flag only — never a determination. */
-export function bfeDataLikelyRequired({ acres = null, lots = null, inApproximateAZone = false } = {}) {
+/* Does the BFE-data threshold bite on this site? ONE engine, two provenances: pass the
+ * jurisdiction's own `requirement` record (floodplainRules.bfeDataRequirementFor) and the answer
+ * is a VERIFIED ordinance determination; omit it and the generic NFIP-minimum record applies as
+ * unverified research. There is deliberately no second code path for the county case.
+ *
+ * Returns null when it cannot be answered honestly (no acreage/lot count, or the site isn't in an
+ * approximate A zone — a studied zone already HAS a published elevation, so nothing is triggered).
+ * The returned `verified` flag is the record's own, so a call site can never present unconfirmed
+ * research as settled law. */
+export function bfeDataLikelyRequired({ acres = null, lots = null, inApproximateAZone = false, requirement = null } = {}) {
   if (!inApproximateAZone) return null;
+  const rec = requirement || BFE_DATA_REQUIREMENT;
   const a = Number.isFinite(acres) ? acres : null;
   const l = Number.isFinite(lots) ? lots : null;
   if (a == null && l == null) return null;
-  const overAcres = a != null && a > BFE_DATA_REQUIREMENT.acresThreshold;
-  const overLots = l != null && l > BFE_DATA_REQUIREMENT.lotsThreshold;
+  const acresThreshold = Number.isFinite(rec.acresThreshold) ? rec.acresThreshold : BFE_DATA_REQUIREMENT.acresThreshold;
+  const lotsThreshold = Number.isFinite(rec.lotsThreshold) ? rec.lotsThreshold : BFE_DATA_REQUIREMENT.lotsThreshold;
+  const overAcres = a != null && a > acresThreshold;
+  const overLots = l != null && l > lotsThreshold;
   if (!overAcres && !overLots) return null;
   return {
     likely: true,
     by: overAcres && overLots ? "both" : overAcres ? "acres" : "lots",
-    ...BFE_DATA_REQUIREMENT,
+    // The measured value that tripped it, so the panel can say WHY without recomputing.
+    acres: a, lots: l,
+    jurisdictional: !!requirement,
+    ...rec,
   };
 }
 
