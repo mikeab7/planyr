@@ -52,6 +52,18 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   white-knockout, zoom-aware re-raster) + `overlayScale.js` (scale/trace math) + `overlayStorage.js`
   (Storage backup) + `dxf/` (worker parse via `dxf-parser` + entity→SVG render + true-units auto-scale)
   + `convertClient.js` (DWG→DXF through the B238 convert service, gated on `VITE_CONVERT_URL`).
+- **Colorado (NEW-5/7/8):** `coloradoRegions.js` is THE guard — a network-free site→state
+  resolution (it must hold when every GIS endpoint is down, which is exactly when a site falls
+  through to a default), the four drainage regimes (MHFD covers 6 of the 9 target counties;
+  Larimer, Weld and El Paso each say outright they are NOT MHFD), the CWCB 2 CCR 408-1 statewide
+  floodplain floor (stricter than FEMA on freeboard, critical facilities and floodway rise), and
+  the `CAPABILITIES` matrix that makes an unwired capability render a NAMED "not available in
+  Colorado yet" state. `computeRequiredDetention`'s `siteState` guard is its enforcement point and
+  runs **before** the acreage check and the authority lookup, so a Texas authority forced onto a
+  Colorado site still cannot price. `drawdownStatute.js` turns the existing drawdown number into
+  C.R.S. 37-92-602(8) — and never reports "pass", because the screening figure is an optimistic
+  lower bound. Colorado counties live in `counties.js` under `co_`-prefixed keys (both states have
+  an El Paso and a Jefferson). **Any change here is gated on the Texas golden-master suite under test/.**
 - `supabase.js` / `auth.js` / `cloudSync.js` — cloud data + auth (shared across workspaces).
 - `elementSync.js` / `elementRows.js` / `elementJournal.js` — the element-level sync engine, the
   rows↔model fold layer (incl. `foldJournal`), and the persisted pending-edit journal (NEW-F4:
