@@ -5,10 +5,27 @@
  * (evidenceLayers.js): L.layerGroup + moveend refresh + busy/pending trailing-edge
  * guard (B56d) + gisCache.swr last-good painting — with the terrain-specific parts:
  *
- *  - ONE grid fetch per snapped tile, shared by both layers AND the hover readout:
+ *  - THE GRID IS ANCHORED TO THE GROUND, NOT THE VIEWPORT (NEW-2). A refresh asks
+ *    demGrid for the FIXED LATTICE TILES covering the view (`latticeCover`) and traces
+ *    each one independently. A tile is a pure function of (zoom band, tx, ty), so the
+ *    same ground is always traced from the same cells: pan away and back and the lines,
+ *    the labels, and their positions are identical, and an already-traced tile is a
+ *    plain cache hit. The predecessor requested ONE viewport-sized tile and coarsened
+ *    it for that viewport, so every gesture moved the cell lattice AND the tile border
+ *    — which is what made 1-ft contours (traced off ±0.1–0.3 ft LiDAR noise) visibly
+ *    re-roll, and what put a moving line-break wherever the last tile happened to end.
+ *  - A SUPERSESSION TOKEN, NOT JUST A MOUNT GUARD (NEW-1). Every refresh takes
+ *    `mySeq = ++seq` and bails after EVERY await when a newer refresh (or an onRemove)
+ *    has bumped it — exact parity with vectorOverlay.js. The old `if (!map) return`
+ *    mount guard alone let a superseded compute paint into a still-mounted group, which
+ *    is how two "150 ft" labels ended up stacked three characters apart and how a
+ *    previous view's "155 ft" lingered over ground the live view traces as 150 ft.
+ *    The fetch still rides gisCache.swr UNCANCELLED (aborting would poison the shared
+ *    cache — B36(e)'s decision); a superseded result is simply never painted.
+ *  - ONE grid fetch per lattice tile, shared by both layers AND the hover readout:
  *    the in-flight map dedupes concurrent refreshes (contours + arrows toggled
- *    together fire a single exportImage + a single worker job), and both layers read
- *    the same swr artifact key.
+ *    together fire a single exportImage + a single worker job per tile), and both
+ *    layers read the same swr artifact key.
  *  - The fetch runs HERE (not in the worker): gisCache is localStorage-backed and the
  *    proxy→direct fallback belongs beside its wireRaster precedent. Bytes transfer to
  *    the singleton worker; the decoded grid transfers back and lands in a small LRU
@@ -26,16 +43,20 @@ import L from "leaflet";
 import TerrainWorker from "./terrainWorker.js?worker";
 import { gisCache } from "./gisCache.js";
 import { proxyServiceUrl } from "../../../shared/gis/gisProxyCore.js";
-import { DEP_URL } from "./elevation.js";
+import { DEP_URL, M_TO_FT } from "./elevation.js";
 import {
   gridRequest, exportUrl, looksLikeLerc, sampleAtLatLng, mercToPixel,
-  lngToMercX, latToMercY, groundScale, mercPerPx,
+  lngToMercX, latToMercY, groundScale, mercPerPx, mercYToLat,
+  latticeCover, LATTICE_MAX_BAND,
 } from "./demGrid.js";
+import { composeContourPaint } from "./contours.js";
 
 export const TERRAIN_MIN_ZOOM = 16; // ~3 m ground cells at Houston; z15 would be 1-ft-contour mush
 const TERRAIN_TTL = 7 * 24 * 60 * 60 * 1000; // DEM vintage moves slowly — a week is generous
-const GRID_LRU_MAX = 4;                      // ~4 MB F32 each — plenty for hover + both maps
+const GRID_LRU_MAX = 12;                     // lattice tiles: ~1.4 MB each, a laptop view is ~4–6
+const SITE_GRID_LRU_MAX = 4;                 // site envelopes: up to ~5 MB each — keep few
 const FETCH_TIMEOUT_MS = 20000;
+const MAX_CONCURRENT_TILES = 4;              // a wide view wants ~12 tiles; don't open 12 sockets
 
 // ---------------------------------------------------------------------------
 // Singleton worker with lazy rebuild after a crash (a crashed worker stays crashed —
@@ -109,12 +130,32 @@ async function fetchGridBytes(req, fetchImpl) {
   catch (_) { return await tryBase(DEP_URL); }
 }
 
+// A view now asks for SEVERAL lattice tiles at once (NEW-2). Fetching them all at the
+// same instant would stall the browser's per-host connection pool and the map's own tile
+// requests, so tile jobs queue behind a small semaphore. Order is FIFO — the tiles the
+// cover listed first (top row, west→east) land first.
+let running = 0;
+const waiters = [];
+const acquireSlot = () => {
+  if (running < MAX_CONCURRENT_TILES) { running++; return Promise.resolve(); }
+  return new Promise((res) => waiters.push(res));
+};
+const releaseSlot = () => {
+  const next = waiters.shift();
+  if (next) next(); // hand the slot straight on
+  else running--;
+};
+
 const inflight = new Map(); // req.key -> Promise<artifact>
 function computeTile(req, { fetchImpl } = {}) {
   const cur = inflight.get(req.key);
   if (cur) return cur;
   const job = (async () => {
-    const buf = await fetchGridBytes(req, fetchImpl);
+    await acquireSlot();
+    let buf;
+    try { buf = await fetchGridBytes(req, fetchImpl); }
+    catch (e) { releaseSlot(); throw e; }
+    releaseSlot();
     const id = ++seq;
     const res = await new Promise((resolve, reject) => {
       pending.set(id, { resolve, reject });
@@ -166,7 +207,7 @@ export function fetchSiteGrid(bounds, { fetchImpl, zoom } = {}) {
   // a failed fetch must not poison the cache — the next check retries
   job.catch(() => { if (_siteGrids.get(req.key) === job) _siteGrids.delete(req.key); });
   _siteGrids.set(req.key, job);
-  if (_siteGrids.size > GRID_LRU_MAX) _siteGrids.delete(_siteGrids.keys().next().value);
+  if (_siteGrids.size > SITE_GRID_LRU_MAX) _siteGrids.delete(_siteGrids.keys().next().value);
   return job;
 }
 
@@ -185,30 +226,35 @@ const labelIcon = (text) => L.divIcon({
     `text-shadow:0 0 2px #fff,0 0 2px #fff,0 0 3px #fff,0 0 4px #fff;">${text}</span>`,
 });
 
-function renderContours(data, group, { opacity, canvas }) {
-  const c = data.contours;
-  if (!c || !c.levels) return 0;
-  let n = 0;
-  for (const lv of c.levels) {
-    for (const line of lv.lines) {
-      // Line hierarchy by WEIGHT (index heavier), never by fading (salience rule).
-      L.polyline(line, {
-        renderer: canvas, color: lv.isIndex ? CONTOUR_INDEX_COL : CONTOUR_COL,
-        weight: lv.isIndex ? 2.2 : 1.1, opacity, interactive: false,
-      }).addTo(group);
-      n++;
-    }
+/* `parts` is [{ tile, data }] — one entry per lattice tile in the current cover.
+ * Lines are merged by level across tiles and seam-joined (the tile clip cut each
+ * contour at the shared lattice edge; this stitches the halves back into one polyline),
+ * then labels are deduped and thinned by pickLabels. Both sublayers are built inside
+ * this ONE call, into a group the caller just cleared — so a label can never outlive
+ * the geometry it names (NEW-1). */
+function renderContours(parts, group, { opacity, canvas }) {
+  // composeContourPaint is the shared, PURE composition (contours.js) — the dedupe, the
+  // seam-join, the label thinning and the ONE unit formatter all live there, so the
+  // fixture-driven test exercises exactly what the map paints. This function only turns
+  // its output into Leaflet objects.
+  const { lines, labels } = composeContourPaint(parts);
+  for (const ln of lines) {
+    // Line hierarchy by WEIGHT (index heavier), never by fading (salience rule).
+    L.polyline(ln.coords, {
+      renderer: canvas, color: ln.isIndex ? CONTOUR_INDEX_COL : CONTOUR_COL,
+      weight: ln.isIndex ? 2.2 : 1.1, opacity, interactive: false,
+    }).addTo(group);
   }
-  for (const lab of c.labels || []) {
-    L.marker(lab.ll, { icon: labelIcon(`${lab.level} ft`), interactive: false, keyboard: false })
-      .addTo(group);
+  for (const lab of labels) {
+    L.marker(lab.ll, { icon: labelIcon(lab.text), interactive: false, keyboard: false }).addTo(group);
   }
-  return n;
+  return lines.length;
 }
 
-function renderArrows(data, group, { map, opacity, canvas }) {
-  const arrows = data.arrows;
-  if (!arrows || !map) return 0;
+function renderArrows(parts, group, { map, opacity, canvas }) {
+  if (!map) return 0;
+  const arrows = [];
+  for (const { data } of parts) if (data && data.arrows) for (const a of data.arrows) arrows.push(a);
   let n = 0;
   for (const a of arrows) {
     // Steeper = longer + bolder (salience tracks importance). Normalized 0 at the
@@ -230,13 +276,27 @@ function renderArrows(data, group, { map, opacity, canvas }) {
   return n;
 }
 
+/* The honesty line for a view whose band had to step down (NEW-2 (3)). Says the ground
+ * size of one grid cell, so nobody reads 1-ft lines traced from a coarse grid as if
+ * they were surveyed — same register as the z16 gate's own message. */
+function coarseNote(cover) {
+  const lat = cover.tiles.length
+    ? mercYToLat((cover.tiles[0].bbox.ymin + cover.tiles[0].bbox.ymax) / 2) : 30;
+  const ft = cover.cellMeters * groundScale(lat) * M_TO_FT;
+  return `Wide view — grid coarsened to about ${Math.round(ft)} ft per sample, so the 1-ft lines are smoothed. Zoom in for full detail.`;
+}
+
 // ---------------------------------------------------------------------------
 /* The shared view-driven factory. `render` is one of the two above; both layers key
- * the SAME tile artifact, so toggling both costs one fetch + one worker job. */
+ * the SAME lattice tiles, so toggling both costs one fetch + one worker job per tile. */
 function terrainLayer(cfg, onStatus, render, emptyMsg) {
   const group = L.layerGroup();
   let map = null, canvas = null, lastKey = null, opacity = cfg.opacity ?? 0.9;
   let busy = false, pendingMove = false, lastPainted = null;
+  // NEW-1: the SUPERSESSION token vectorOverlay.js already uses. `!map` alone only
+  // catches an unmounted group — a superseded compute on a STILL-MOUNTED layer sailed
+  // past it and painted its lines and labels over the newer view's.
+  let paintSeq = 0;
   group.setOpacity = (o) => {
     opacity = o;
     group.eachLayer((l) => {
@@ -244,10 +304,12 @@ function terrainLayer(cfg, onStatus, render, emptyMsg) {
       else if (l.getElement) { const el = l.getElement(); if (el) el.style.opacity = o; }
     });
   };
-  const paint = (data, ts, opts = {}) => {
+  // Geometry and labels are cleared and rebuilt in ONE synchronous pass, so no label can
+  // outlive the lines it names (NEW-1 (2)).
+  const paint = (parts, ts, opts = {}) => {
     group.clearLayers();
-    const n = render(data, group, { map, opacity, canvas });
-    lastPainted = data;
+    const n = render(parts, group, { map, opacity, canvas });
+    lastPainted = parts;
     const msg = opts.note || (n ? null : emptyMsg);
     onStatus && onStatus(n ? "loaded" : "empty", msg, { ts, stale: !!opts.stale });
   };
@@ -256,32 +318,63 @@ function terrainLayer(cfg, onStatus, render, emptyMsg) {
     if (busy) { pendingMove = true; return; } // moveend mid-job — serve the latest view after (B56d)
     const z = map.getZoom();
     if (z < TERRAIN_MIN_ZOOM) {
-      group.clearLayers(); lastKey = "zoomed-out";
+      paintSeq++; // a slow in-flight compute from above the gate must not paint below it
+      group.clearLayers(); lastKey = "zoomed-out"; lastPainted = null;
       onStatus && onStatus("empty", `Zoom in to ≥ ${TERRAIN_MIN_ZOOM} to load (1-ft detail needs close zoom)`);
       return;
     }
     const b = map.getBounds();
-    const req = gridRequest({ west: b.getWest(), south: b.getSouth(), east: b.getEast(), north: b.getNorth() }, z);
-    if (req.key === lastKey && lastPainted) return;
-    lastKey = req.key;
-    const { cached, stale, fresh } = gisCache.swr(`terrain:${req.key}`, () => computeTile(req), { ttl: TERRAIN_TTL });
-    if (cached) paint(cached.data, cached.ts, { stale });
-    else onStatus && onStatus("loading");
+    const cover = latticeCover(
+      { west: b.getWest(), south: b.getSouth(), east: b.getEast(), north: b.getNorth() },
+      z, { maxBand: LATTICE_MAX_BAND },
+    );
+    // The key is the ground the view covers, not the view — pan inside one tile and
+    // nothing recomputes; pan back across a boundary and the tiles are cache hits.
+    const key = cover.tiles.map((t) => t.key).join("|");
+    if (key === lastKey && lastPainted) return;
+    lastKey = key;
+    const mySeq = ++paintSeq;
+    const entries = cover.tiles.map((tile) => ({
+      tile, ...gisCache.swr(`terrain:${tile.key}`, () => computeTile(tile), { ttl: TERRAIN_TTL }),
+    }));
+    const coarse = cover.coarsened ? coarseNote(cover) : null;
+    const cachedParts = entries.filter((e) => e.cached).map((e) => ({ tile: e.tile, data: e.cached.data }));
+    if (cachedParts.length) {
+      const ts = Math.min(...entries.filter((e) => e.cached).map((e) => e.cached.ts));
+      paint(cachedParts, ts, { stale: entries.some((e) => e.stale), note: coarse });
+    } else onStatus && onStatus("loading");
     busy = true;
-    const r = await fresh;
+    const settled = await Promise.all(entries.map((e) =>
+      e.fresh.then((r) => ({ tile: e.tile, r }), (error) => ({ tile: e.tile, r: { error } }))));
+    // Bail before painting or reporting status when a newer refresh (or an onRemove)
+    // has taken over, so a superseded compute never renders — the NEW-1 fix. `busy` is
+    // deliberately NOT reset here: onRemove owns it once it has bumped the token, and a
+    // newer refresh could not have started while this one held it. The fetch rides
+    // gisCache.swr uncancelled (aborting would poison the shared cache — B36e).
+    if (mySeq !== paintSeq) return;
     busy = false;
-    // The layer may have been toggled off / the map torn down during the (heavy — DEM decode +
-    // contour/flow compute) job; onRemove nulls `map`. Bail before painting or reporting status,
-    // so a stale response never renders into a detached group or fires "loaded" for an off layer.
-    // Same guard as evidenceLayers' overpass path (B36e); the fetch rides gisCache.swr (cached),
-    // so — like overpass — it is NOT aborted (that would poison the shared cache), just not painted.
     if (!map) return;
-    if (r.updated) paint(r.data, r.ts);
-    else if (r.error && !cached) {
+    const parts = [], errs = [];
+    let ts = null, anyUpdated = false, anyStale = false;
+    for (const { tile, r } of settled) {
+      if (r && r.data) {
+        parts.push({ tile, data: r.data });
+        if (typeof r.ts === "number") ts = ts == null ? r.ts : Math.min(ts, r.ts);
+        if (r.error) anyStale = true;          // served from cache because the refresh failed
+      } else if (r && r.error) errs.push(r.error);
+      if (r && r.updated) anyUpdated = true;
+    }
+    if (!parts.length) {
       lastKey = null; lastPainted = null;
-      onStatus && onStatus("failed", `${cfg.label}: ${(r.error && r.error.message) || "terrain fetch failed"}`);
-    } else if (r.error && cached) {
-      paint(cached.data, cached.ts, { stale: true, note: "Showing last-good — refresh failed" });
+      onStatus && onStatus("failed", `${cfg.label}: ${(errs[0] && errs[0].message) || "terrain fetch failed"}`);
+    } else if (anyUpdated || parts.length !== cachedParts.length) {
+      // A tile that came back empty-handed leaves a hole — clear lastKey so the next
+      // map move retries it instead of trusting a partial picture forever (LOUD-FAILURE).
+      if (errs.length) lastKey = null;
+      const notes = [];
+      if (errs.length) notes.push(`${errs.length} of ${settled.length} terrain tiles unavailable — showing what loaded`);
+      if (coarse) notes.push(coarse);
+      paint(parts, ts, { stale: anyStale || errs.length > 0, note: notes.join(" · ") || null });
     }
     if (pendingMove) { pendingMove = false; refresh(); } // trailing edge (B56d)
   };
@@ -294,8 +387,9 @@ function terrainLayer(cfg, onStatus, render, emptyMsg) {
     return this;
   };
   group.onRemove = function (m) {
+    paintSeq++; // invalidate every in-flight compute — nothing may paint into a removed group
     m.off("moveend", refresh);
-    map = null; lastKey = null; lastPainted = null; pendingMove = false;
+    map = null; lastKey = null; lastPainted = null; pendingMove = false; busy = false;
     L.LayerGroup.prototype.onRemove.call(this, m);
   };
   return group;

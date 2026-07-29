@@ -12,12 +12,22 @@
  * captured LERC tile (test/fixtures/dep-katy-463x400.lerc).
  *
  * Geometry model: everything is Web Mercator (EPSG:3857) meters — the service's native
- * SR (probed 2026-07-07) and what the Leaflet map draws in. A grid request snaps the
- * view outward to a deterministic cell-aligned tile (key ↔ bbox is a bijection, so a
- * pan inside the tile is a pure cache hit and the smoothing margin is baked in — no
- * seams: ONE grid covers the view). Elevations convert to survey feet on decode
- * (M_TO_FT — every 3DEP consumer converts identically; NAVD88 orthometric heights,
- * the same vertical datum FEMA BFEs use).
+ * SR (probed 2026-07-07) and what the Leaflet map draws in. Elevations convert to survey
+ * feet on decode (M_TO_FT — every 3DEP consumer converts identically; NAVD88 orthometric
+ * heights, the same vertical datum FEMA BFEs use).
+ *
+ * TWO request shapes, and the difference is the whole point of NEW-2:
+ *  - `latticeTile` / `latticeCover` — the FIXED GEOGRAPHIC LATTICE the view-driven
+ *    terrain layers use. A tile is a pure function of (band, tx, ty): same ground →
+ *    same tile → same cells → same contours, no matter where the viewport sits. The
+ *    cell size is quantized to a small set of ZOOM BANDS, so panning cannot change it
+ *    and the traced network cannot re-roll. (The predecessor sized the tile TO THE
+ *    VIEWPORT and coarsened for it, so every pan/zoom moved the cell lattice and the
+ *    tile border — which is why 1-ft contours traced off ±0.1–0.3 ft LiDAR noise
+ *    visibly changed over identical ground.)
+ *  - `gridRequest` — the viewport/envelope-snapped tile, still used by the SITE grid
+ *    (`fetchSiteGrid`, B808). That caller passes a site envelope, not a map view, so it
+ *    is already deterministic and deliberately keeps its tight-fitting bbox.
  */
 import { DEP_URL } from "./elevation.js";
 
@@ -80,6 +90,79 @@ export function gridRequest(bounds, zoom) {
     ymax: (iy1 + MARGIN_CELLS) * cell,
   };
   return { key: `dem:z${z}k${k}:${ix0},${iy0},${ix1},${iy1}`, zoom: z, cellMeters: cell, width, height, bbox };
+}
+
+// ---------------------------------------------------------------------------
+// THE FIXED GEOGRAPHIC LATTICE (NEW-2).
+//
+// Plain-English: the ground is carved into fixed squares that never move. Panning the
+// map changes WHICH squares you're looking at, never WHERE the squares are — so the
+// same piece of ground is always traced from exactly the same height samples, and the
+// contour lines stop changing when you move.
+//
+// A band is one quantized cell size (cell = mercPerPx(band) · CELL_PX). Bands are the
+// integer zooms, so a tile's ground span shrinks with zoom at the same rate the
+// viewport does — the tile count per view stays roughly constant across zoom.
+export const TILE_CELLS = 512;          // interior cells per lattice tile (margin sits OUTSIDE this)
+export const LATTICE_MAX_BAND = 19;     // finer than this buys nothing over ~1 m LiDAR
+export const LATTICE_MIN_BAND = 12;     // floor for the coarsening ladder
+export const LATTICE_MAX_TILES = 20;    // per view; beyond this the band steps down (and says so).
+                                        // 512 cells ≈ 1024 screen px, so a 4K pane still fits without coarsening.
+
+/* Cell size (mercator meters) for a band. Depends on the band ALONE — never on the view. */
+export const bandCellMeters = (band) => mercPerPx(band) * CELL_PX;
+
+/* One lattice tile. Pure function of (band, tx, ty): the key ↔ bbox bijection now has
+ * NOTHING viewport-derived in it. `interior` is the tile's own square in grid-pixel
+ * coords; the MARGIN_CELLS ring outside it exists only so the smoothing kernel and the
+ * marching-squares stencil have real data on every side — contours are CLIPPED to the
+ * interior so neighbouring tiles butt up exactly instead of overlapping. */
+export function latticeTile(band, tx, ty) {
+  const cell = bandCellMeters(band);
+  const span = TILE_CELLS * cell;
+  const width = TILE_CELLS + 2 * MARGIN_CELLS;
+  const height = width;
+  const bbox = {
+    xmin: tx * span - MARGIN_CELLS * cell,
+    ymin: ty * span - MARGIN_CELLS * cell,
+    xmax: (tx + 1) * span + MARGIN_CELLS * cell,
+    ymax: (ty + 1) * span + MARGIN_CELLS * cell,
+  };
+  return {
+    key: `dem:L${band}:${tx},${ty}`,
+    zoom: band, band, tx, ty, cellMeters: cell, width, height, bbox,
+    interior: { x0: MARGIN_CELLS, y0: MARGIN_CELLS, x1: MARGIN_CELLS + TILE_CELLS, y1: MARGIN_CELLS + TILE_CELLS },
+    // Global cell index of local pixel (0,0) — lets the flow pass phase its sample
+    // lattice to the WORLD, so arrows don't bunch or gap at a tile seam.
+    originCellX: tx * TILE_CELLS - MARGIN_CELLS,
+    originCellY: ty * TILE_CELLS - MARGIN_CELLS,
+  };
+}
+
+/* Every lattice tile covering a WGS84 view, plus the band actually used.
+ * The band comes from the ZOOM, so a pan can never change it. It steps DOWN (coarser)
+ * only when a very large window would need more tiles than `maxTiles` — the one
+ * remaining viewport dependence, and the caller states it in the layer note
+ * (`coarsened`) rather than quietly painting 1-ft lines off a coarse grid. */
+export function latticeCover(bounds, zoom, {
+  maxTiles = LATTICE_MAX_TILES, maxBand = LATTICE_MAX_BAND, minBand = LATTICE_MIN_BAND,
+} = {}) {
+  const nominal = Math.min(maxBand, Math.max(minBand, Math.round(zoom)));
+  const x0 = lngToMercX(bounds.west), x1 = lngToMercX(bounds.east);
+  const y0 = latToMercY(bounds.south), y1 = latToMercY(bounds.north);
+  let band = nominal;
+  for (;;) {
+    const span = TILE_CELLS * bandCellMeters(band);
+    const tx0 = Math.floor(x0 / span), tx1 = Math.floor(x1 / span);
+    const ty0 = Math.floor(y0 / span), ty1 = Math.floor(y1 / span);
+    const n = (tx1 - tx0 + 1) * (ty1 - ty0 + 1);
+    if (n <= maxTiles || band <= minBand) {
+      const tiles = [];
+      for (let ty = ty1; ty >= ty0; ty--) for (let tx = tx0; tx <= tx1; tx++) tiles.push(latticeTile(band, tx, ty));
+      return { band, nominal, coarsened: band < nominal, cellMeters: bandCellMeters(band), tiles };
+    }
+    band--;
+  }
 }
 
 /* The exportImage URL for a grid request. `base` is the service root — the caller picks

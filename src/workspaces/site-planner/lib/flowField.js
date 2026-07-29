@@ -41,12 +41,18 @@ export function d8Direction(values, mask, width, height, x, y, cellFt) {
 
 /* Sample downhill arrows on a regular lattice.
  * grid: { values (FEET, hard-smoothed), mask, width, height }.
- * opts: { cellMeters, groundK, spacingCells, windowCells, minSlope, marginCells }.
+ * opts: { cellMeters, groundK, spacingCells, windowCells, minSlope, marginCells,
+ *         region?: {x0,y0,x1,y1}, originCellX?, originCellY? }.
+ * `region` restricts sampling to a sub-rectangle (a lattice tile's interior square) so
+ * neighbouring tiles don't both place an arrow in their shared margin. `originCellX/Y`
+ * — the WORLD cell index of local pixel (0,0) — phases the sample lattice to the world
+ * instead of to the tile, so the arrow spacing stays even ACROSS a tile seam (NEW-2).
  * Returns [{ px, py, dir, slope }] — `dir` in radians, screen convention (y down),
  * pointing DOWNHILL; `slope` dimensionless ft/ft. */
 export function flowArrows(grid, {
   cellMeters, groundK = 1, spacingCells = 32,
   windowCells, minSlope = 0.0008, marginCells = 0,
+  region = null, originCellX = null, originCellY = null,
 } = {}) {
   const { values, mask, width, height } = grid;
   const g = Math.max(1, Math.round(windowCells ?? spacingCells / 2));
@@ -54,9 +60,17 @@ export function flowArrows(grid, {
   const arrows = [];
   const at = (x, y) => values[y * width + x];
   const ok = (x, y) => x >= 0 && x < width && y >= 0 && y < height && mask[y * width + x] === 1;
-  const start = Math.max(marginCells, g);
-  for (let y = start; y < height - Math.max(marginCells, g); y += spacingCells) {
-    for (let x = start; x < width - Math.max(marginCells, g); x += spacingCells) {
+  const lo = Math.max(marginCells, g);
+  const x0 = Math.max(lo, region ? region.x0 : 0), x1 = Math.min(width - lo, region ? region.x1 : width);
+  const y0 = Math.max(lo, region ? region.y0 : 0), y1 = Math.min(height - lo, region ? region.y1 : height);
+  // First sample ≥ the window start whose WORLD cell index is a multiple of the spacing.
+  const phased = (start, origin) => {
+    if (origin == null) return start;
+    const mod = ((origin + start) % spacingCells + spacingCells) % spacingCells;
+    return mod === 0 ? start : start + (spacingCells - mod);
+  };
+  for (let y = phased(y0, originCellY); y < y1; y += spacingCells) {
+    for (let x = phased(x0, originCellX); x < x1; x += spacingCells) {
       if (!ok(x, y) || !ok(x - g, y) || !ok(x + g, y) || !ok(x, y - g) || !ok(x, y + g)) continue;
       const dist = 2 * g * cellFt;
       const gx = (at(x + g, y) - at(x - g, y)) / dist;  // ft/ft, +x = east
