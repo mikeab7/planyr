@@ -2189,6 +2189,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const geoBaseRef = useRef(null);
   const geoBackfillRef = useRef(null); // coarse low-zoom layer for instant blurry coverage
   const geoCapRef = useRef(null);      // detach fn for the bounded tile cache (NEW-7)
+  const geoBfCapRef = useRef(null);    // NEW-1 — the same ceiling for the COARSE BACKFILL layer, which had none
   const overlayStagedRef = useRef(false); // has the staged first-load pass finished? (NEW-3)
   const overlayRefs = useRef({});
   const [coverage, setCoverage] = useState({}); // id -> "in"|"out"|"unknown" (NEW-1; picker-only)
@@ -2250,7 +2251,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // NEW-6/NEW-7 — a real release: drop the retained tiles and their DOM now rather than
       // waiting for an incidental prune, and detach the cache-cap listeners with them.
       try { if (geoCapRef.current) geoCapRef.current(); } catch (_) {}
-      geoCapRef.current = null;
+      try { if (geoBfCapRef.current) geoBfCapRef.current(); } catch (_) {}
+      geoCapRef.current = null; geoBfCapRef.current = null;
       if (geoBaseRef.current) releaseLayer(map, geoBaseRef.current);
       if (geoBackfillRef.current) releaseLayer(map, geoBackfillRef.current);
       geoBaseRef.current = null; geoBackfillRef.current = null;
@@ -2271,6 +2273,24 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const bf = withTileRetry(L.tileLayer(bm.tiles, { maxNativeZoom: 13, maxZoom: 24, attribution: bm.attr, keepBuffer: Math.max(2, geoKeepBuffer + 2), crossOrigin: true }));
     preserveTilesAcrossSetView(bf); // NEW-7: a same-native-zoom commit must not wipe these
     bf.setZIndex(0); bf.addTo(map); geoBackfillRef.current = bf;
+    /* NEW-1 — CAP THE BACKFILL TOO. This layer had `preserveTilesAcrossSetView` and a keepBuffer
+     * two rings LARGER than the detail layer, but no ceiling at all — so its `_tiles` map grew for
+     * as long as the session lasted, shedding only when Leaflet's incidental pruning happened to
+     * fire. That is retained DECODED-IMAGE memory, which a JS heap snapshot cannot see, which is
+     * why the 2026-07-28 "not a leak, steady-state high" verdict could not have caught it: that run
+     * measured the ~135 MB of JS and not the ~420 MB of tiles/GPU where this lives.
+     *
+     * Shedding here costs NOTHING visually and does not touch render quality (the owner's standing
+     * constraint): the detail layer covers the view at full resolution, and this coarse layer only
+     * has to cover the current view plus a ring while detail loads. `capTileCache` never evicts a
+     * CURRENT tile, so it cannot punch a hole. Its own (larger) keepBuffer is passed through, so the
+     * ceiling is computed for THIS layer rather than borrowed from the detail layer's. */
+    geoBfCapRef.current = boundTileCache(bf, () => tileCacheLimit({
+      containerW: (geoWrapRef.current && geoWrapRef.current.clientWidth) || size.w,
+      containerH: (geoWrapRef.current && geoWrapRef.current.clientHeight) || size.h,
+      tileSizePx: (bf.getTileSize && bf.getTileSize().x) || 256,
+      keepBuffer: Math.max(2, geoKeepBuffer + 2),
+    }));
     // Honest status dot for the Basemap row: "loaded" only on a REAL painted tile
     // (`tileload`) — Leaflet's layer-level `load` fires even when every tile errored
     // (errored tiles count as settled), which would show a green dot over a gray
@@ -2380,7 +2400,33 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
      accumulated zoom delta passes ~0.75 levels, so the transform never scales the
      aerial into a blurry mess — but because the commit is ghost-buffered, that
      mid-gesture re-base no longer flashes. */
-  useEffect(() => {
+  /* B1122 — ONE TRANSFORM SOURCE, APPLIED IN THE SAME FRAME. This must be a LAYOUT effect.
+   *
+   * The owner: "grab the map and sling it, and it will move, and the buildings will move
+   * separately and then kinda sling back into position." Both surfaces are already driven from the
+   * SAME value (`view`) — the bug was never that they disagreed about where to be, it was WHEN each
+   * one got there. The SVG is rendered from `view` during the React commit and paints immediately;
+   * this effect then set the basemap wrapper's transform from the same `view` — but as a PASSIVE
+   * `useEffect`, which runs AFTER paint. So every pan frame painted the drawing at the new offset
+   * with the aerial still at the previous one: one frame of separation per frame, proportional to
+   * the per-frame delta, which is why a fast SLING shows it and a slow drag barely does. The
+   * debounced re-base then lands and the two line up — "slings back into position" — and that is
+   * exactly why every before/after probe reads zero and why V483(b) going unrun mattered.
+   *
+   * `useLayoutEffect` closes the window structurally rather than narrowing it: the wrapper's
+   * transform is written before the browser paints, in the SAME frame as the SVG that shares its
+   * source value, so there is no instant at which the two hold different values. Shortening the
+   * commit debounce would NOT have fixed this — it would have shortened the snap-back while leaving
+   * the per-frame lag untouched, and it would have read as fixed on a slow drag.
+   *
+   * This is `CLAUDE.md` → VIEWPORT-STABLE, which already says it in as many words: fold the delta
+   * in a layout effect, "never a passive (after-paint) `useEffect` (that skips the content sideways
+   * for one-plus frames)". This effect predates that rule and violated it.
+   *
+   * NOT a re-open of B1043/B1062 (the cumulative scale drift). Nothing about the projection or the
+   * origin-anchored scale changes here — only the frame in which an already-correct value is applied.
+   */
+  useLayoutEffect(() => {
     const map = geoMapRef.current;
     const wrap = geoWrapRef.current;
     if (!map || !wrap || !origin) return;
