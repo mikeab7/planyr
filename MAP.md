@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-07-29 @ `7d987bf` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-07-29 @ `0efc5ab` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_342 source files mapped._
+_343 source files mapped._
 
 ## infra
 
@@ -371,6 +371,8 @@ _342 source files mapped._
   - _exports_: `BELOW_INVERT_TOL_FT`, `compareEstimates`, `DISAGREE_THRESHOLD_FT`, `IMPLAUSIBLE_DEPTH_FT`, `impliedDepthFt`, `MATERIAL_ABS_FLOOR`, `MATERIAL_REL`, `sanityCheckEstimate`, `SENSITIVITY_DELTA_FT`, `sensitivityBand`
 - **`src/workspaces/site-planner/lib/evidenceLayers.js`** — View-driven Leaflet utility-evidence overlays (OSM Overpass power/hydrants + Mapillary detections) with SWR cache and per-layer status
   - _exports_: `fetchOverpass`, `mapillaryLayer`, `mapillaryToken`, `overpassLayer`, `setMapillaryToken`, `subscribeMapillaryToken`
+- **`src/workspaces/site-planner/lib/exportLabelScale.js`** — The scale the LABEL tier reasons at on an export pass: the sheet's own px-per-foot (framed extent vs plan box), so declutter/LOD/collision, label sizes and stroke-zoom are a function of the plan and the paper, never of the live zoom.
+  - _exports_: `makeLabelFrame`, `MAX_LABEL_PPF`, `MIN_LABEL_PPF`, `SHEET_PX_PER_CENTI_INCH`, `sheetLabelPpf`, `STROKE_ZOOM_REF`
 - **`src/workspaces/site-planner/lib/exportSheet.js`** — the on-demand export path: PDF/PNG/KMZ sheet composition, the B839 aerial tile Stitcher, and GIS raster/vector layer capture. Loaded via dynamic import() from SitePlanner (B1042) so it never rides the boot bundle; reads planner state through a per-call `ctx` object
   - _exports_: `createExportSheet`, `sheetPlanAspect`
 - **`src/workspaces/site-planner/lib/exportStyle.js`** — Pure print stroke-weight retargeting: convert authored screen-pixel line widths to zoom-independent physical drafting points for PDF/PNG export

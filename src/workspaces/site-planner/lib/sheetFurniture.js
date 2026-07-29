@@ -21,7 +21,13 @@
 
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-const r2 = (n) => Number(n.toFixed(2));
+// Markup rounding. SIGNIFICANT figures, not fixed decimals (NEW-1 / V481(f)): a user unit
+// here is a screen pixel on the live canvas but "one foot × the live zoom" in an export
+// clone, so a fixed 2-decimal round is a ~0.01 px nudge on screen and a ~1% distortion on a
+// wide-zoom export frame that is only tens of units across — enough to make two exports of
+// the same plan disagree on their furniture sizes. Six significant figures is unit-agnostic
+// and strictly finer than the old rounding at every scale we draw at.
+const r2 = (n) => Number(Number(n).toPrecision(6));
 const translate = (tx, ty, inner) => `<g transform="translate(${r2(tx)},${r2(ty)})">${inner}</g>`;
 
 // Preferred round distances (ft) the spec calls out, plus a few smaller/larger steps
@@ -56,8 +62,18 @@ export function pickScaleBar({ frameW, ftPerUnit, targetFrac = 0.22, maxFrac = 0
 // cartoonish. So the glyph shrinks a touch (0.06→0.05·refS) and, more importantly, the
 // padding / type / plate strokes all tighten so the plate hugs its content (~0.45–0.5 in
 // total) and reads as a restrained engineering exhibit instead of a screen widget.
-export function furnitureMetrics(refS) {
-  const fs = clamp(refS * 0.0165, 6, refS * 0.05); // label text — smaller
+//
+// NEW-1 (V481(f), 2026-07-29): the three ABSOLUTE floors below (6-unit type, 0.4/0.35-unit
+// hairlines) are SCREEN-PIXEL legibility floors and only make sense when a user unit IS a
+// screen pixel — which is true on the live canvas and false in an export clone, whose units
+// are "one foot × the live zoom". On an export they made the furniture zoom-dependent: at a
+// wide zoom the frame is only tens of units across, the 6-unit floor bit, and the scale bar's
+// numbers printed ~9× larger than the same sheet exported from a working zoom. `unitIsPx:
+// false` drops the floors, leaving the sizing purely frame-relative — which is what the
+// module's own sizing model says it should be ("a fixed physical size on the page that never
+// depends on the screen zoom").
+export function furnitureMetrics(refS, { unitIsPx = true } = {}) {
+  const fs = unitIsPx ? clamp(refS * 0.0165, 6, refS * 0.05) : refS * 0.0165; // label text — smaller
   const arrowH = refS * 0.05; // glyph ≈ 0.32–0.4 in on a sheet (was 0.06 → ~0.5 in)
   return {
     fs,
@@ -65,8 +81,8 @@ export function furnitureMetrics(refS) {
     barTh: refS * 0.009, // thin cartographic bar (was 0.0105)
     tickLen: refS * 0.0072,
     pad: fs * 0.5, // tighter plate padding (was 0.7) → the plate hugs its content
-    plateStroke: Math.max(0.4, refS * 0.001), // hairline plate border
-    segStroke: Math.max(0.35, refS * 0.001), // hairline segment / needle outline
+    plateStroke: unitIsPx ? Math.max(0.4, refS * 0.001) : refS * 0.001, // hairline plate border
+    segStroke: unitIsPx ? Math.max(0.35, refS * 0.001) : refS * 0.001, // hairline segment / needle outline
     rx: fs * 0.45,
     arrowH,
     arrowW: arrowH * 0.32, // slim needle (was 0.34)
@@ -203,7 +219,10 @@ export function chooseFurnitureCorners({ x, y, w, h, inset, bar, north, obstacle
 // are unit-testable.
 export function furnitureLayout({ x, y, w, h, ftPerUnit, fmtFeet, pal = {}, bearingDeg = 0, obstacles = null }) {
   const refS = Math.min(w, h);
-  const m = furnitureMetrics(refS);
+  // The EXPORT frame's user unit is "one foot × the live zoom", not a screen pixel — so the
+  // absolute px floors are off here (NEW-1 / V481(f)). Everything the furniture draws is then
+  // a pure fraction of the frame, so the sheet is identical whatever zoom it was taken from.
+  const m = furnitureMetrics(refS, { unitIsPx: false });
   const inset = refS * 0.035;
   const { feet, lengthU } = pickScaleBar({ frameW: w, ftPerUnit });
   const sb = scaleBarPlate({ lengthU, feet, m, pal, fmtFeet });

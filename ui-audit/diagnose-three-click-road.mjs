@@ -37,7 +37,7 @@ const box = await canvas.boundingBox();
 async function pickRoad() {
   await page.getByRole("button", { name: "Road", exact: true }).click();
   await page.getByRole("button", { name: "Road presets" }).click();
-  await page.getByRole("button", { name: /travel — click points/i }).first().click();
+  await page.getByRole("button", { name: /^\d+′$/ }).first().click();
 }
 const roads = () => page.evaluate(() => {
   const m = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");

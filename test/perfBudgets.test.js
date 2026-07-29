@@ -13,6 +13,7 @@
  */
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
+import { frameSamplingFault, observedFps, MIN_PLAUSIBLE_FPS } from "../ui-audit/lib/frameSampling.mjs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -96,5 +97,53 @@ describe("no workspace is warmed at boot (NEW-9)", () => {
     const header = read("src/shared/ui/AppHeader.jsx");
     expect(header).toMatch(/onMouseEnter[^\n]*prefetchModule/);
     expect(header).toMatch(/onPointerDown[^\n]*prefetchModule/);
+  });
+});
+
+/* ── the frame-sampling guard (2026-07-29) ─────────────────────────────────────────────────
+ * rAF is SUSPENDED in a backgrounded tab and reports nothing about it, so a frame median can
+ * be computed from a starved sample and look entirely plausible — which is how the previous
+ * frame ceilings were seeded. These pin the rule that now refuses to report such a sample.
+ */
+describe("a frame-time sample is only reported when it can be stood behind", () => {
+  const good = { visibility: "visible", samples: 160, gestureMs: 2700 };
+
+  it("passes a genuine ~60fps sample from a visible tab", () => {
+    expect(frameSamplingFault(good)).toBeNull();
+    expect(observedFps(160, 2700)).toBeCloseTo(59.3, 1);
+  });
+
+  it("REFUSES a hidden tab, whatever the sample looks like", () => {
+    // The exact live reading: the tab reported "hidden" and six real drags produced 0 frames.
+    expect(frameSamplingFault({ ...good, visibility: "hidden", samples: 0 })).toMatch(/suspends requestAnimationFrame/);
+    // …and it refuses even when the starved sample would have produced a plausible median,
+    // which is the case that actually committed a bad ceiling.
+    expect(frameSamplingFault({ ...good, visibility: "hidden" })).toMatch(/"hidden", not "visible"/);
+  });
+
+  it("REFUSES a visible tab whose frame rate is implausible for the gesture", () => {
+    // 316 frames where ~1500 were due — the middle of the throttling range, the dangerous one.
+    expect(frameSamplingFault({ visibility: "visible", samples: 316, gestureMs: 25000 })).toMatch(/plausibility floor/);
+    expect(frameSamplingFault({ visibility: "visible", samples: 0, gestureMs: 1500 })).toMatch(/0 frames/);
+  });
+
+  it("a zero-length gesture reads as starved, never as a silent pass", () => {
+    expect(observedFps(10, 0)).toBe(0);
+    expect(frameSamplingFault({ visibility: "visible", samples: 10, gestureMs: 0 })).toMatch(/plausibility floor/);
+  });
+
+  it("the floor sits below any plausible REAL frame cost, so it catches suspension only", () => {
+    // A genuinely bad 20ms median (50fps) must still be measurable — that is the thing the
+    // budget exists to see. Only suspension-grade starvation is rejected.
+    expect(MIN_PLAUSIBLE_FPS).toBeLessThan(50);
+    expect(frameSamplingFault({ visibility: "visible", samples: 135, gestureMs: 2700 })).toBeNull();
+  });
+
+  it("the committed frame budgets record the withdrawn seed and the instrument that replaced it", () => {
+    for (const k of ["frameMedianMs", "frameP90Ms"]) {
+      const spec = budgets.runtime[k];
+      expect(spec.seededFrom, `${k} must name the instrument it was seeded from`).toMatch(/perf-harness\.mjs/);
+      expect(spec.note, `${k} must say the old seed is withdrawn`).toMatch(/WITHDRAWN|withdrawal/);
+    }
   });
 });

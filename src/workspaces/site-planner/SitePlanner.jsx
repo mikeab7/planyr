@@ -42,6 +42,7 @@ import { overscanPx, keepBufferFor, retinaForZoom, tileWeight, tileCacheLimit } 
 import { preserveTilesAcrossSetView, announceSetView, boundTileCache, releaseLayer } from "./lib/tileLifecycle.js";
 import { buildGhost } from "./lib/ghostSnapshot.js";
 import { visibleWorldRect, cullToView, shouldCull } from "./lib/viewCull.js";
+import { makeLabelFrame } from "./lib/exportLabelScale.js";
 import { orderLayersByPriority, LAYER_STAGE_SIZE } from "./lib/layerSchedule.js";
 import { prefetchExtents, computeCoverage, boundsFromLeaflet, getNearbyRadiusMiles, subscribeRelevance } from "./lib/coverage.js";
 import { fetchOverpass } from "./lib/evidenceLayers.js";
@@ -358,7 +359,7 @@ const TOOLS = [
   { id: "parking", label: "Car Parking", hint: "Pick a row preset from Car Parking ▾ (single 42′ / double 60′) and drag to set the length, or use Free draw for any rectangle / click points for an irregular field; stalls auto-count" },
   { id: "trailer", label: "Trailer Parking", hint: "Drag for a rectangle, or click points to outline irregular trailer storage (double-click to close); auto-counts" },
   { id: "pond", label: "Detention Pond", hint: "Drag for a rectangle, or click points to outline an irregular detention area (double-click to close)" },
-  { id: "road", label: "Road", hint: "Pick a width, then click to drop centerline points — Enter or double-click to finish, Backspace to undo a point, Esc to cancel. Curve each vertex sharp / arc / smooth in the panel. Free draw still drags a rectangle. 6″ curb each side (24′ road = 25′ wide)" },
+  { id: "road", label: "Road", hint: "Pick a width (or Custom width…), then click to drop centerline points — Enter or double-click to finish, Backspace to undo a point, Esc to cancel. Curve each vertex sharp / arc / smooth in the panel. The width is the pavement measured CURB FACE TO CURB FACE; the 6″ curb rides outside it (a 24′ road covers 25′ back-of-curb to back-of-curb)" },
   { id: "easement", label: "Easement", hint: "Draw an easement (Easement ▾ for mode). Centerline+width: click a path, double-click/Enter to finish — it builds a strip of the set width. Boundary: click points, close on the first dot. Offset from parcel edge: click a parcel's edges then Enter. Edit attributes (type/holder/width…) in the Element panel; width re-offsets the strip live" },
   { id: "measure", label: "Measure", hint: "Pick a mode from Measure ▾ — Length (two-point distance), Polylength (click a path, double-click / Enter to finish), Area (outline a region, click the first dot or double-click to close), or Count (click to mark items, Enter to finish)" },
   { id: "mline", label: "Line", hint: "Markup line (L): drag end-to-end. Hold Shift for 45° increments" },
@@ -373,6 +374,11 @@ const MARKUP_TOOLS = ["mpolyline", "mline", "mrect", "mellipse", "mpolygon"];
 // internal mode value stays line/polyline/area (persisted in localStorage), so this is
 // label-only; "Polylength" also disambiguates the measurement from the markup "Polyline".
 const MEASURE_MODES = [["line", "Length"], ["polyline", "Polylength"], ["area", "Area"], ["count", "Count"]];
+// Road width presets (feet), from the user-editable Standards → Roads "Road widths (ft)" list.
+// The number is the pavement CURB FACE TO CURB FACE (B180) — the curb is added outside it.
+const DEFAULT_ROAD_WIDTHS = "24, 26, 30, 36, 40";
+const roadWidthPresets = (settings) => (settings?.roadWidths ?? DEFAULT_ROAD_WIDTHS).split(",").map((s) => s.trim()).filter((s) => Number.isFinite(+s) && +s > 0);
+const DEFAULT_ROAD_WIDTH = roadWidthPresets(null)[0]; // "24"
 const measureModeLabel = (m) => { const e = MEASURE_MODES.find(([k]) => k === m); return e ? e[1] : m; };
 const MAX_DIM = 100000; // ft — sane upper clamp so a fat-fingered size can't make absurd geometry / SVG stalls
 // Relational tags that point at OTHER elements (a host building or a truck court). A copy/paste
@@ -604,8 +610,18 @@ function inlineLabelEls(ptsFeet, text, color, spacingFt, ppf, f2p, keyPrefix, op
   if (!label || !ptsFeet || ptsFeet.length < 2) return [];
   const baseSize = (opts && Number.isFinite(opts.size) && opts.size > 0) ? opts.size : 11; // default matches the pre-B678 look
   const halo = !(opts && opts.halo === false);                     // background on by default (existing lines unchanged)
-  const k = Math.max(0.34, Math.min(1, ppf / 0.45));               // gentle, capped at 1 (matches the road-dim clamp)
-  const fs = baseSize * k, haloW = Math.max(2, fs * 0.3);
+  // NEW-1 (V481(f)) — the LABEL frame: `lf.ppf` is the zoom this label tier reasons at (the
+  // view on screen, the SHEET on an export pass) and `lf.k` converts a label px back into a
+  // canvas px. Everything else here stays on the real `ppf` because it is world geometry
+  // (the feet inset, the spacing→feet conversion) — and because minSegPx / minGapPx are both
+  // proportional to `fs`, they self-scale and the thinning becomes view-independent too.
+  const lfPpf = (opts && opts.lf && opts.lf.ppf > 0) ? opts.lf.ppf : ppf;
+  const lfK = (opts && opts.lf && opts.lf.k > 0) ? opts.lf.k : 1;
+  const k = Math.max(0.34, Math.min(1, lfPpf / 0.45));             // gentle, capped at 1 (matches the road-dim clamp)
+  // The halo is authored in LABEL space (no lfK): the export's physical stroke retarget
+  // rewrites it from the AUTHORED number, so scaling it here would make that retarget's
+  // clamp land differently per zoom. The FONT does carry lfK — it isn't retargeted.
+  const fsL = baseSize * k, fs = fsL * lfK, haloW = Math.max(2, fsL * 0.3);
   // B935 — "Inside" placement: push the label perpendicular into the body of the road/easement by a
   // per-feature FEET inset (so it scales with zoom and stays within the band), on top of the base
   // font clearance. `interiorFeet` (a closed easement ring's centroid) aims that push toward the
@@ -1711,7 +1727,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   }, []);
   const lsGet = (k, d) => { try { return localStorage.getItem("planarfit:" + k) || d; } catch (_) { return d; } };
   const [parkingRows, setParkingRows] = useState(() => lsGet("parkingRows", "free")); // drawn-parking depth preset
-  const [roadWidth, setRoadWidth] = useState(() => lsGet("roadWidth", "free"));    // drawn-road width preset
+  // Drawn-road width, in feet, as a string. NEW-3: the Road tool no longer has a "free" (drag-a-
+  // rectangle) mode — a road is always a clicked centerline at a known width, preset or custom. A
+  // stored "free" from before that change (or any junk) is coerced to the first preset on read, so
+  // an existing browser can't land in a mode the menu no longer offers.
+  const [roadWidth, setRoadWidth] = useState(() => { const v = lsGet("roadWidth", ""); return +v > 0 ? v : DEFAULT_ROAD_WIDTH; });
+  const [roadCustom, setRoadCustom] = useState(false); // NEW-3: the Custom width… entry field is showing
   // Easement tool (NEW-1/2/3): a first-class easement object on the editable layer.
   // `easeMode` is the input mode; easeType/easeWidth are sticky tool defaults.
   const [easeMode, setEaseMode] = useState(() => lsGet("easeMode", "centerline")); // centerline | boundary | parceledge
@@ -1803,7 +1824,19 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // An EXPORT pass must render the complete model whatever the view is (NEW-5's hard
   // constraint). buildExportSvg clones the LIVE svg, so it flips this off, flushes a full
   // render, clones, and flips it back — see `withFullRender`.
-  const [exportPass, setExportPass] = useState(false);
+  //
+  // NEW-1 (V481(f)): the same pass also re-frames the LABEL tier. Culling covered the
+  // geometry, but every label gate / LOD drop / collision decision still read `view.ppf`,
+  // so a sheet exported while zoomed OUT inherited the on-screen declutter and silently
+  // shipped without a building's name (measured live: 118 text nodes vs 151, "Building 12"
+  // unlabelled). `exportPass` therefore carries the SHEET's own px-per-foot — a function of
+  // the framed extent and the paper only — and `labelFrame` is what the whole label tier
+  // reasons at. `null` (every screen render) → the frame is the view, k = 1, output unchanged.
+  const [exportPass, setExportPass] = useState(null);
+  const labelFrame = useMemo(() => makeLabelFrame(view.ppf, exportPass && exportPass.ppf), [view.ppf, exportPass]);
+  const labelPpf = labelFrame.ppf;   // the px-per-foot label DECISIONS are made at
+  const labelK = labelFrame.k;       // label-space px → canvas px (1 on screen)
+  const strokeZk = labelFrame.strokeZk; // the zoom factor `strokeZoom` uses (1 on an export pass)
   const cullActive = !exportPass && shouldCull(drawableCount);
   const cullRect = useMemo(
     () => (cullActive ? visibleWorldRect(view, size) : null),
@@ -11092,12 +11125,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   /* labels + handles in screen space */
   // Labels scale with zoom so they stay proportional to the plan when zoomed
   // out (no ballooning chips), capping at a comfortable size when zoomed in.
-  const ls = Math.max(0.34, Math.min(1, view.ppf / 0.45));
+  // NEW-1: the RAMP reads the label frame (the view on screen, the SHEET on an export pass)
+  // and the emitted size is converted back into canvas px with `labelK` — so a sheet's text
+  // size is a function of the paper, not of the zoom the user happened to be at. On screen
+  // labelPpf === view.ppf and labelK === 1, so this is the old expression exactly.
+  const ls = Math.max(0.34, Math.min(1, labelPpf / 0.45));
   const NO_LABEL = ["paving", "parking", "road"]; // truck courts / employee parking / roads stay unlabelled
   // B122: each standalone building shows a sequential "Building N" by placement order,
   // derived from list position (a delete renumbers the rest 1…N); identity stays el.id.
   const bldgNo = buildingNumbers(els);
-  const fs = 11 * ls, lh = 14.5 * ls, charW = fs * 0.6;
+  const fs = 11 * ls * labelK, lh = 14.5 * ls * labelK, charW = fs * 0.6;
   // NEW-2 / NEW-5: a thin buffer strip (landscape / sidewalk / trailer) whose width label
   // is wider than the strip is narrow runs the label ALONG the strip's long axis — vertical
   // text on a vertical strip, horizontal on a horizontal one — so it stops eating canvas
@@ -11134,8 +11171,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const chars = Math.max(1, ...lns.map((t) => String(t).length));
     const byH = (TRAILER_LABEL.fracShort * shortFt * view.ppf) / (lns.length * LH_RATIO); // stack across the short side
     const byW = (TRAILER_LABEL.fracLong * longFt * view.ppf) / (chars * CW_RATIO);         // text along the long side
-    const cap = Math.max(fs, TRAILER_LABEL.minPx); // never cap below the legibility floor
-    const f = Math.min(cap, Math.max(TRAILER_LABEL.minPx, Math.min(byH, byW)));
+    const minPx = TRAILER_LABEL.minPx * labelK; // NEW-1: an absolute legibility floor → label frame
+    const cap = Math.max(fs, minPx); // never cap below the legibility floor
+    const f = Math.min(cap, Math.max(minPx, Math.min(byH, byW)));
     return { fs: f, lh: f * LH_RATIO, charW: f * CW_RATIO };
   };
   // B121: build each element's centred label as priority-ordered lines (name → area →
@@ -11169,7 +11207,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       const stripW = poly
         ? (() => { let lo = Infinity, hi = -Infinity, lo2 = Infinity, hi2 = -Infinity; for (const p of el.points) { lo = Math.min(lo, p.x); hi = Math.max(hi, p.x); lo2 = Math.min(lo2, p.y); hi2 = Math.max(hi2, p.y); } return Math.min(hi - lo, hi2 - lo2); })()
         : Math.min(el.w, el.h);
-      if (!detailLabelVisible(stripW, view.ppf)) continue; // hidden at overview, returns on zoom-in
+      if (!detailLabelVisible(stripW, labelPpf)) continue; // hidden at overview, returns on zoom-in
       lines = [poly ? name : `${f0(Math.min(el.w, el.h))}′ ${name}`];
     } else if (el.type === "pond") {
       // B140/B157: label shows acres + sf (was sf only). In expansion mode (B139) the
@@ -11212,7 +11250,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             : Math.min(el.w, el.h);
           const dw = detWithAuto(el.det);
           const slopeBandFt = (Number.isFinite(dw.slope) ? dw.slope : 3) * (Number.isFinite(dw.depth) ? dw.depth : 8);
-          if (detailLabelVisible(pminFt, view.ppf) && pondParamLabelVisible(slopeBandFt, view.ppf)) {
+          if (detailLabelVisible(pminFt, labelPpf) && pondParamLabelVisible(slopeBandFt, labelPpf)) {
             // PR-Q/O3 — ONE source of truth: the map "Holds" reports the SAME USABLE/achievable storage
             // the panel + verdict report (pondSplitFor.usableCf), NOT the gross geometric tub volume
             // (which over-stated it ~4x). Depth is the rim-to-floor the SECTION shows (det.depth), so
@@ -11293,14 +11331,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // PR-Q/O4 — the parcel badge is labeled "Parcel", so a large parcel acreage sitting near a pond
     // (the "15.35 ac" chip) can't be mistaken for a pond water/footprint area. No bare acreage.
     const txt = `Parcel ${f2(polyArea(pc.points) / SQFT_PER_ACRE)} ac`;
-    const fs = 12 * ls, padX = 9 * ls, padY = 5 * ls, charW = fs * 0.6;
+    const fs = 12 * ls * labelK, padX = 9 * ls * labelK, padY = 5 * ls * labelK, charW = fs * 0.6;
     const boxW = txt.length * charW + padX * 2, boxH = fs + padY * 2;
     return { pc, c, txt, fs, padX, padY, boxW, boxH, box: boxOf(c.x, c.y, boxW, boxH) };
   }).filter(Boolean);
   const parcelChipBoxes = parcelChips.map((p) => p.box);
   const labelShow = layoutLabels(
     labelCands.map((d) => ({ id: d.lid, cx: d.c.x, cy: d.c.y, lines: d.lines, lh: d.lh, charW: d.charW, halfW: d.halfW, halfH: d.halfH, rot: d.rot, noLeader: d.noLeader })),
-    { pad: 2, obstacles: parcelChipBoxes },
+    { pad: 2 * labelK, gap: 4 * labelK, obstacles: parcelChipBoxes },
   );
   // B121 (round 3): fold the red per-edge dimension callouts into the collision pool. The dimension
   // number is the lowest tier — if its screen box would overprint a committed centred name/area
@@ -11316,7 +11354,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (!(el.type === "building" || el.type === "paving" || el.type === "road") || el.points || el.noLabel) continue;
     const dimW = el.type === "road" ? roadTravelWidth(el.w, el.h, el.curb ?? (+settings.roadCurb || CURB))
       : el.type === "building" ? footprintDepth(el) : Math.min(el.w, el.h);
-    const dimVisible = el.type === "building" ? dimCalloutVisible(view.ppf) : detailLabelVisible(dimW, view.ppf);
+    const dimVisible = el.type === "building" ? dimCalloutVisible(labelPpf) : detailLabelVisible(dimW, labelPpf);
     if (!dimVisible) continue;
     const tl = f2p({ x: el.cx - el.w / 2, y: el.cy - el.h / 2 });
     const c = f2p({ x: el.cx, y: el.cy });
@@ -11328,7 +11366,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         rot: el.rot || 0, horizLong: el.w >= el.h,
         posF: el.type === "road" ? DIM_POS_F_ROAD : DIM_POS_F_DEFAULT,
         ox: dimOff.x * view.ppf, oy: dimOff.y * view.ppf,
-        textLen: `${f0(dimW)}′`.length, fz: dimFontPx(view.ppf),
+        textLen: `${f0(dimW)}′`.length, fz: dimFontPx(labelPpf) * labelK,
       }),
     });
   }
@@ -11339,7 +11377,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const { lines, x, y, leader, rot } = place;
     // Per-candidate metrics (B195: a trailer label is world-scaled, so it has its own fs/lh);
     // dls is its scale relative to the 11px base, replacing the global `ls` for the halo/lock.
-    const dfs = d.fs, dlh = d.lh, dls = dfs / 11;
+    const dfs = d.fs, dlh = d.lh, dls = dfs / 11, dlsL = dls / labelK; // dlsL = label space (halos are authored there — see exportLabelScale.js)
     const top = y - (lines.length * dlh) / 2, first = top + dfs * 0.82;
     // Inside labels contrast against the element fill; a leadered label sits OUT on the paper,
     // so ink it dark with a white halo to read over any background (B121 round 2b).
@@ -11368,7 +11406,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         <text x={x} y={first} textAnchor="middle" fontSize={dfs}
           transform={rot ? `rotate(${rot} ${x} ${y})` : undefined}
           fontFamily={fam} fill={ink}
-          stroke={halo ? "#fff" : undefined} strokeWidth={halo ? (carto ? 2.75 : 3) * dls : undefined} paintOrder={halo ? "stroke" : undefined}
+          stroke={halo ? "#fff" : undefined} strokeWidth={halo ? (carto ? 2.75 : 3) * dlsL : undefined} paintOrder={halo ? "stroke" : undefined}
           style={{ fontWeight: 600, letterSpacing: carto ? "0" : "0.02em" }}>
           {lines.map((t, i) => <tspan key={i} x={x} dy={i === 0 ? 0 : dlh}>{t}</tspan>)}
         </text>
@@ -11758,11 +11796,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // though it isn't wrapped in an interactive group.
   const parcelEdgeLabels = (() => {
     if (!selParcel || !selRuns) return null;
-    const dfz = dimFontPx(view.ppf);
+    const dfz = dimFontPx(labelPpf) * labelK;
     const locked = selParcel.locked;
     const editable = tool === "select";
     return selRuns.map((run, ri) => {
-      if (!detailLabelVisible(run.lengthFt, view.ppf)) return null; // hide on zoom-out, return on zoom-in
+      if (!detailLabelVisible(run.lengthFt, labelPpf)) return null; // hide on zoom-out, return on zoom-in
       const { out } = runLabelAnchors(selParcel, run);
       const on = selEdgeRun === ri;
       const onDown = editable ? (e) => {
@@ -11782,7 +11820,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       } : undefined;
       return (
         <text key={`pe${ri}`} data-testid="parcel-edge-dim" x={out.x} y={out.y} dy={dfz * 0.27} textAnchor="middle" fontSize={dfz}
-          fontFamily={NUM_FONT} fontVariantNumeric={TABULAR_NUMS} fill={on ? SEL_BLUE : PAL.ink} stroke={PAL.paper} strokeWidth={3 * dimFontScale(view.ppf)}
+          fontFamily={NUM_FONT} fontVariantNumeric={TABULAR_NUMS} fill={on ? SEL_BLUE : PAL.ink} stroke={PAL.paper} strokeWidth={3 * dimFontScale(labelPpf)}
           paintOrder="stroke" pointerEvents={editable ? "all" : "none"} style={editable ? { cursor: locked ? "pointer" : "text" } : undefined} onPointerDown={onDown} fontWeight="600">{f0(run.lengthFt)}′</text>
       );
     });
@@ -14366,7 +14404,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // plain render helper invoked via .map(renderMarkupNode) — NOT a component, so no remount concern.
   const renderMarkupNode = (m) => {
                 const isSel = sel?.kind === "markup" && sel.id === m.id;
-                const zk = view.ppf / 0.35; // B617 zoom multiplier (matches the callout scale)
+                const zk = strokeZk; // B617 zoom multiplier (matches the callout scale); NEW-1: 1 on an export pass so a sheet's line weights don't ride the live zoom
                 const sw = (m.weight ?? 2), da = dashZoom(dashArray(m.dash, sw), zk); // B880 — scale the dash period with zoom too (B617 scaled only the weight)
                 // B619: NEVER recolor a markup on select — every markup keeps its own authored stroke
                 // (so a live color-picker change shows instantly instead of hiding under an accent tint);
@@ -14456,7 +14494,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       <polygon data-testid={m.except ? "deed-except" : "deed-boundary"} points={ring} fill="url(#pat-encumber)" stroke={stroke} strokeWidth={strokeZoom(sw, zk)} strokeDasharray={da} pointerEvents="all" />
                       {/* centerline + per-call bearing/distance labels */}
                       {cen.length > 1 && <polyline points={cen.map((p) => `${p.x},${p.y}`).join(" ")} fill="none" stroke={stroke} strokeWidth={strokeZoom(0.8, zk)} strokeDasharray={dashZoom("4 3", zk)} opacity={0.7} pointerEvents="none" />}
-                      {view.ppf > 0.12 && (m.calls || []).map((c, i) => {
+                      {labelPpf > 0.12 && (m.calls || []).map((c, i) => {
                         const a = cen[i], b = cen[i + 1]; if (!a || !b) return null;
                         const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
                         return <text key={i} x={mx} y={my - 3} textAnchor="middle" fontSize="9" fontFamily={NUM_FONT} fontVariantNumeric={TABULAR_NUMS} fill={stroke} pointerEvents="none" style={{ paintOrder: "stroke", stroke: "#fff", strokeWidth: 2.5 }}>{c.label}</text>;
@@ -14489,9 +14527,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           like the auto dims + measurement labels and reveals on zoom-in; the hatched fill +
                           centerline geometry always stay (keep-geometry, avoid the on/off flicker). A
                           selected easement keeps its label at any zoom (edit handles never vanish mid-edit). */}
-                      {(isSel || dimCalloutVisible(view.ppf)) && <text x={cp.x} y={cp.y} textAnchor="middle" fontSize="10.5" fontWeight="700" fill={ecol} pointerEvents="none" style={{ paintOrder: "stroke", stroke: "#fff", strokeWidth: 3 }}>{easementLabel(m)}{proposed ? " (proposed)" : ""}</text>}
-                      {isSel && view.ppf > 0.05 && <text x={cp.x} y={cp.y + 12} textAnchor="middle" fontSize="9" fontWeight="600" fill={ecol} pointerEvents="none" style={{ paintOrder: "stroke", stroke: "#fff", strokeWidth: 2.5 }}>{Math.round(area).toLocaleString()} sf · {(area / SQFT_PER_ACRE).toFixed(2)} ac</text>}
-                      {inlineLabelEls(easePathFeet, m.inlineLabel, ecol, m.labelSpacing || INLINE_LABEL_SPACING.easement, view.ppf, f2p, `il${m.id}-`, { size: m.labelSize, halo: m.labelHalo, ...easementInsetOpts(m) })}
+                      {(isSel || dimCalloutVisible(labelPpf)) && <text x={cp.x} y={cp.y} textAnchor="middle" fontSize={10.5 * labelK} fontWeight="700" fill={ecol} pointerEvents="none" style={{ paintOrder: "stroke", stroke: "#fff", strokeWidth: 3 }}>{easementLabel(m)}{proposed ? " (proposed)" : ""}</text>}
+                      {isSel && labelPpf > 0.05 && <text x={cp.x} y={cp.y + 12 * labelK} textAnchor="middle" fontSize={9 * labelK} fontWeight="600" fill={ecol} pointerEvents="none" style={{ paintOrder: "stroke", stroke: "#fff", strokeWidth: 2.5 }}>{Math.round(area).toLocaleString()} sf · {(area / SQFT_PER_ACRE).toFixed(2)} ac</text>}
+                      {inlineLabelEls(easePathFeet, m.inlineLabel, ecol, m.labelSpacing || INLINE_LABEL_SPACING.easement, view.ppf, f2p, `il${m.id}-`, { size: m.labelSize, halo: m.labelHalo, lf: labelFrame, ...easementInsetOpts(m) })}
                     </g>
                   );
                 }
@@ -14508,7 +14546,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="rgba(0,0,0,0.001)" strokeWidth={MK_HIT_PX} strokeLinecap="round" pointerEvents="stroke" />
                       <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke={nStroke} strokeWidth={vsw} strokeDasharray={da} fill="none" pointerEvents="none" />
                       {/* B620 — inline label riding the line (own color + white halo; appears in exports) */}
-                      {inlineLabelEls(mkPts(m), m.inlineLabel, m.stroke, m.labelSpacing || INLINE_LABEL_SPACING.line, view.ppf, f2p, `il${m.id}-`, { size: m.labelSize, halo: m.labelHalo, place: labelPlaceOf(m) })}
+                      {inlineLabelEls(mkPts(m), m.inlineLabel, m.stroke, m.labelSpacing || INLINE_LABEL_SPACING.line, view.ppf, f2p, `il${m.id}-`, { size: m.labelSize, halo: m.labelHalo, place: labelPlaceOf(m), lf: labelFrame })}
                     </g>
                   );
                 }
@@ -14518,7 +14556,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     <g key={m.id} style={common.style} onPointerDown={common.onPointerDown} onDoubleClick={(e) => onMarkupDouble(e, m.id)}>
                       <polyline points={s} fill="none" stroke="rgba(0,0,0,0.001)" strokeWidth={MK_HIT_PX} strokeLinecap="round" strokeLinejoin="round" pointerEvents="stroke" />
                       <polyline points={s} fill="none" stroke={nStroke} strokeWidth={vsw} strokeDasharray={da} pointerEvents="none" />
-                      {inlineLabelEls(mkPts(m), m.inlineLabel, m.stroke, m.labelSpacing || INLINE_LABEL_SPACING.polyline, view.ppf, f2p, `il${m.id}-`, { size: m.labelSize, halo: m.labelHalo, place: labelPlaceOf(m) })}
+                      {inlineLabelEls(mkPts(m), m.inlineLabel, m.stroke, m.labelSpacing || INLINE_LABEL_SPACING.polyline, view.ppf, f2p, `il${m.id}-`, { size: m.labelSize, halo: m.labelHalo, place: labelPlaceOf(m), lf: labelFrame })}
                     </g>
                   );
                 }
@@ -14889,11 +14927,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               {/* connectors: trace = the measured line; align = each drawing→map pair */}
               {ovCalib && ovCalib.kind === "trace" && ovCalib.pts.length >= 2 && (() => {
                 const a = f2p(ovCalib.pts[0]), b = f2p(ovCalib.pts[1]);
-                return <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke={PAL.accent} strokeWidth={1.5} strokeDasharray={dashZoom("5 4", view.ppf / 0.35)} pointerEvents="none" />;
+                return <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke={PAL.accent} strokeWidth={1.5} strokeDasharray={dashZoom("5 4", strokeZk)} pointerEvents="none" />;
               })()}
               {ovCalib && ovCalib.kind === "align" && Array.from({ length: Math.floor(ovCalib.pts.length / 2) }, (_, k) => {
                 const a = f2p(ovCalib.pts[2 * k]), b = f2p(ovCalib.pts[2 * k + 1]);
-                return <line key={`ovl${k}`} x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="#2563eb" strokeWidth={1.25} strokeDasharray={dashZoom("4 3", view.ppf / 0.35)} pointerEvents="none" />;
+                return <line key={`ovl${k}`} x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="#2563eb" strokeWidth={1.25} strokeDasharray={dashZoom("4 3", strokeZk)} pointerEvents="none" />;
               })}
 
               {/* setback outlines (per-edge) — anchored to the parcel, so an INACTIVE
@@ -14910,10 +14948,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 // B880 — when the smallest setback's on-screen inset drops below ~3 px the dashed ring
                 // collapses onto the parcel boundary → the garbled double-line the owner saw on zoom-out.
                 // Suppress it there (it reappears on zoom-in), the same way a sub-pixel 6" curb drops (B719).
-                if (!insetRingVisible(Math.min(...posSb), view.ppf)) return null;
+                // NEW-1 (V481(f)): on the LABEL frame, so an export sheet keeps the setback ring
+                // whatever the live zoom — this sub-pixel gate silently dropped it from a wide-zoom PDF.
+                if (!insetRingVisible(Math.min(...posSb), labelPpf)) return null;
                 const o = offsetPolygon(pc.points, sb);
                 if (!o) return null;
-                const zk = view.ppf / 0.35; // B617/B880 zoom factor — hold the setback weight + dash constant relative to the drawing
+                const zk = strokeZk; // B617/B880 zoom factor — hold the setback weight + dash constant relative to the drawing (NEW-1: 1 on an export pass)
                 const ring = o.map((p) => `${f2p(p).x},${f2p(p).y}`).join(" ");
                 return <g key={`sb${pc.id}`}>
                   <polygon points={ring} fill="none" stroke={PAL.setback} strokeWidth={strokeZoom(1.25, zk)} strokeDasharray={dashZoom("7 6", zk)} pointerEvents="none" />
@@ -14980,7 +15020,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 const removeHover = pc.id === parcelRemoveHoverId; // B598: about to be deleted in Remove mode
                 const inactive = pc.active === false; // excluded from calcs → dim + dash so it's clearly "context only" (B100)
                 const ring = pc.points.map((p) => `${f2p(p).x},${f2p(p).y}`).join(" ");
-                const zk = view.ppf / 0.35;
+                const zk = strokeZk; // NEW-1: 1 on an export pass — a parcel outline prints one weight, whatever the zoom
                 const baseW = pc.weight ?? 2; // per-parcel outline weight (authored); default 2
                 // B619: no accent recolor on select — the property line keeps its own color; the square
                 // vertex handles carry the selection. B617: the boundary weight holds constant relative
@@ -15022,14 +15062,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         <path data-testid="road-network-surface" data-export="road-network" d={d} fillRule="evenodd"
                           fill={st.fill} fillOpacity={st.fillOpacity ?? 1} stroke="none" />
                         <path data-testid="road-network-edge" d={d} fillRule="evenodd" fill="none"
-                          stroke={st.stroke} strokeWidth={curbStrokePx(roadCurbWidth(styleEl || {}), ppf, CURB_STROKE_MIN_PX)}
+                          stroke={st.stroke} strokeWidth={curbStrokePx(roadCurbWidth(styleEl || {}), ppf, CURB_STROKE_MIN_PX * labelK)}
                           strokeLinejoin="round" />
                       </g>
                     );
                   })}
                 </g>
               )}
-              {[...drawEls].sort(byZ).filter((el) => zOrder(el) < BUILDING_Z).map((el) => renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, els, startDimMove, onDimNumberDown, onElContext, dimSuppressed, roadNet))}
+              {[...drawEls].sort(byZ).filter((el) => zOrder(el) < BUILDING_Z).map((el) => renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, els, startDimMove, onDimNumberDown, onElContext, dimSuppressed, roadNet, labelFrame))}
               {/* NEW-4 — civil radius conflict flags. A corner the leg is too short to carry gets marked
                   ON THE PLAN, so a non-compliant turn can't hide until someone selects the road. Review
                   chrome: data-export="skip" keeps it out of the PDF a consultant receives. */}
@@ -15115,8 +15155,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                             berm remains visible at overview — only its number waits for inspect
                             zoom. (Was a flat ppf>0.16 gate at a FIXED 11px, which painted a tag
                             louder than the building dimensions over a hairline-thin band.) */}
-                        {pondParamLabelVisible(EXT_BERM_SLOPE * bermH, view.ppf) && (() => {
-                          const fs = pondParamFontPx(view.ppf, 11);
+                        {pondParamLabelVisible(EXT_BERM_SLOPE * bermH, labelPpf) && (() => {
+                          const fs = pondParamFontPx(labelPpf, 11) * labelK;
                           return (
                             <text x={top.x} y={top.y + fs + 2} textAnchor="middle" style={{ fontSize: fs, fontWeight: 700, fill: "#5c4626", paintOrder: "stroke", stroke: "#f4ecdd", strokeWidth: fs * 0.27, strokeLinejoin: "round" }}>
                               berm {(Math.round(bermH * 10) / 10).toFixed(1)} ft
@@ -15132,7 +15172,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   strokes and the tee-cover knockout mask are all superseded by the dissolved road network
                   painted above: a junction is now a boolean union of pavement, not a patch over a seam. */}
               {/* buildings + any layer at/above the building band, painted OVER the overlay. */}
-              {[...drawEls].sort(byZ).filter((el) => zOrder(el) >= BUILDING_Z).map((el) => renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, els, startDimMove, onDimNumberDown, onElContext, dimSuppressed))}
+              {[...drawEls].sort(byZ).filter((el) => zOrder(el) >= BUILDING_Z).map((el) => renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, els, startDimMove, onDimNumberDown, onElContext, dimSuppressed, null, labelFrame))}
               {/* markup shapes (neutral line/polyline/rect/ellipse/polygon) on top of the elements */}
               {drawMarkupsZ.filter((m) => !m.behindEls).map(renderMarkupNode)}
               {/* ditch cross-section line (in-progress + last result) */}
@@ -15585,16 +15625,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   const countLbl = (m.label ? `${m.label}  ` : "") + `${fpts.length} item${fpts.length !== 1 ? "s" : ""}`;
                   // LOD (B911 family): the total label hides at overview zoom just like every other
                   // dimension callout — an unselected count's tally shows only past the callout gate.
-                  const labelVisible = isSel || dimCalloutVisible(view.ppf);
+                  const labelVisible = isSel || dimCalloutVisible(labelPpf);
                   return (
                     <g key={m.id || `m${i}`}>
                       {pts.map((p, k) => (
                         <g key={k} pointerEvents="none">
-                          <circle cx={p.x} cy={p.y} r={8} fill={mcolor + "28"} stroke={mcolor} strokeWidth={1.5} />
-                          <text x={p.x} y={p.y + 3.5} fontSize="8.5" textAnchor="middle" fill={mcolor} fontWeight="700">{k + 1}</text>
+                          <circle cx={p.x} cy={p.y} r={8 * labelK} fill={mcolor + "28"} stroke={mcolor} strokeWidth={1.5} />
+                          <text x={p.x} y={p.y + 3.5 * labelK} fontSize={8.5 * labelK} textAnchor="middle" fill={mcolor} fontWeight="700">{k + 1}</text>
                         </g>
                       ))}
-                      {labelVisible && <text x={lastPt.x} y={lastPt.y - 14} textAnchor="middle" fontSize="12" fontFamily={NUM_FONT} fontVariantNumeric={TABULAR_NUMS}
+                      {labelVisible && <text x={lastPt.x} y={lastPt.y - 14 * labelK} textAnchor="middle" fontSize={12 * labelK} fontFamily={NUM_FONT} fontVariantNumeric={TABULAR_NUMS}
                         fill={mcolor} stroke={PAL.paper} strokeWidth={3} paintOrder="stroke" fontWeight="700" pointerEvents="none">{countLbl}</text>}
                       {/* hit targets — one transparent circle per marker */}
                       {pts.map((p, k) => (
@@ -15642,14 +15682,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 // catch the always-on overview tier (building name/SF, site-summary chip, acreage
                 // chips). A selected measurement always shows its value so you can read what you're
                 // editing (parity with B149 / B121 / B225-B226 selected-element exception).
-                const labelVisible = isSel || dimCalloutVisible(view.ppf);
+                const labelVisible = isSel || dimCalloutVisible(labelPpf);
                 return (
                   <g key={m.id || `m${i}`}>
                     {isArea
                       ? <polygon points={ptsStr} fill={mcolor} fillOpacity={isSel ? 0.16 : 0.1} stroke={mcolor} strokeWidth={isSel ? 2.5 : 1.5} pointerEvents="none" />
                       : <polyline points={ptsStr} fill="none" stroke={mcolor} strokeWidth={isSel ? 2.5 : 1.5} pointerEvents="none" />}
                     {pts.map((p, k) => <circle key={k} cx={p.x} cy={p.y} r={3} fill={mcolor} pointerEvents="none" />)}
-                    {labelVisible && <text x={anchor.x} y={anchor.y - 5} textAnchor="middle" fontSize="12" fontFamily={NUM_FONT} fontVariantNumeric={TABULAR_NUMS}
+                    {labelVisible && <text x={anchor.x} y={anchor.y - 5 * labelK} textAnchor="middle" fontSize={12 * labelK} fontFamily={NUM_FONT} fontVariantNumeric={TABULAR_NUMS}
                       fill={mcolor} stroke={PAL.paper} strokeWidth={3} paintOrder="stroke" fontWeight="700" pointerEvents="none">{lbl}</text>}
                     {/* wide invisible hit path to select the measurement (Select OR Measure tool — B910) */}
                     {isArea
@@ -15730,7 +15770,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 const curb = +settings.roadCurb || CURB, dw = draftRect.type === "road" ? Math.max(0, Math.min(draftRect.w, draftRect.h) - 2 * curb) : 0;
                 return (
                 <g pointerEvents="none"><rect x={a.x} y={a.y} width={pw} height={ph} fill={typeStyle(draftRect.type, settings).fill} fillOpacity={0.5} stroke={PAL.accent} strokeWidth={1.5} strokeDasharray="5 4" />
-                  {(draftRect.w > 2 || draftRect.h > 2) && <text x={a.x + pw + 6} y={a.y + ph + 14} fontSize="11.5" fontFamily={NUM_FONT} fontVariantNumeric={TABULAR_NUMS} fill={PAL.accent} stroke={PAL.paper} strokeWidth={3} paintOrder="stroke" fontWeight="700">{draftRect.type === "road" ? `${f0(dw)}′ travel` : `${f0(draftRect.w)}′ × ${f0(draftRect.h)}′`}</text>}
+                  {(draftRect.w > 2 || draftRect.h > 2) && <text x={a.x + pw + 6} y={a.y + ph + 14} fontSize="11.5" fontFamily={NUM_FONT} fontVariantNumeric={TABULAR_NUMS} fill={PAL.accent} stroke={PAL.paper} strokeWidth={3} paintOrder="stroke" fontWeight="700">{draftRect.type === "road" ? `${f0(dw)}′ road` : `${f0(draftRect.w)}′ × ${f0(draftRect.h)}′`}</text>}
                 </g>
               ); })()}
               {/* centerline road preview (B596/NEW-1): live tessellated centerline + the
@@ -15766,7 +15806,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     {ring && ring.length >= 3 && <polygon points={ring.map((p) => { const c = f2p(p); return `${c.x},${c.y}`; }).join(" ")} fill={typeStyle("road", settings).fill} fillOpacity={0.4} stroke={PAL.accent} strokeWidth={1.25} strokeDasharray="5 4" />}
                     <polyline points={centerStr} fill="none" stroke={PAL.accent} strokeWidth={1} strokeDasharray="4 4" />
                     {draftRoadPts.map((p, i) => { const c = f2p(p); return <circle key={i} cx={c.x} cy={c.y} r={i === 0 ? 5 : 3.5} fill={i === 0 ? PAL.paper : PAL.accent} stroke={PAL.accent} strokeWidth={1.5} />; })}
-                    {total > 1 && <text x={lp.x} y={lp.y - 8} textAnchor="middle" fontSize="11.5" fontFamily={NUM_FONT} fontVariantNumeric={TABULAR_NUMS} fill={PAL.accent} stroke={PAL.paper} strokeWidth={3} paintOrder="stroke" fontWeight="700">{f0(travelW)}′ travel · {f0(total)}′</text>}
+                    {total > 1 && <text x={lp.x} y={lp.y - 8} textAnchor="middle" fontSize="11.5" fontFamily={NUM_FONT} fontVariantNumeric={TABULAR_NUMS} fill={PAL.accent} stroke={PAL.paper} strokeWidth={3} paintOrder="stroke" fontWeight="700">{f0(travelW)}′ wide · {f0(total)}′ long</text>}
                     {magnet && (() => { const c = f2p(magnet); return <g><circle cx={c.x} cy={c.y} r={9} fill="none" stroke={SEL_BLUE} strokeWidth={2.5} /><circle cx={c.x} cy={c.y} r={3.5} fill={SEL_BLUE} /></g>; })()}
                     {/* NEW-1, owner report 2026-07-25: "I should be able to just press three points…
                         but it doesn't seem like I can do that." He could — three clicks stores three
@@ -16395,6 +16435,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               );
             }
             if (id === "road") {
+              const roadPresets = roadWidthPresets(settings);
+              const roadIsCustom = +roadWidth > 0 && !roadPresets.includes(String(roadWidth));
               return (
                 <div key={id} ref={roadAnchor} style={{ position: "relative" }}>
                   <div style={{ display: "flex", gap: 2 }}>
@@ -16403,12 +16445,28 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     </button>
                     <button className={`rbtn${tool === "road" ? " on" : ""}`} style={{ ...rbtn(tool === "road"), width: 26, flex: "none", padding: 0, justifyContent: "center" }} onClick={() => setRoadMenu((o) => !o)} aria-haspopup="menu" aria-expanded={roadMenu} aria-label="Road presets">▾</button>
                   </div>
-                  <AnchoredMenu open={roadMenu} onClose={() => setRoadMenu(false)} anchorRef={roadAnchor} placement="left" width={230} panelStyle={menuPanel}>
+                  {/* NEW-1/NEW-2/NEW-3/NEW-4 — a row is JUST the width (no per-row how-to repeated five
+                      times), the how-to + the curb-face-to-curb-face meaning live once in the footer,
+                      "Free draw" is gone (a road is always a clicked centerline), and "Custom width…"
+                      keeps an off-preset width (28′, 32′) reachable by the same centerline method. */}
+                  <AnchoredMenu open={roadMenu} onClose={() => { setRoadMenu(false); setRoadCustom(false); }} anchorRef={roadAnchor} placement="left" width={230} panelStyle={menuPanel}>
                     <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, padding: "4px 8px 6px" }}>Road width</div>
-                    <button style={menuItem(tool === "road" && roadWidth === "free")} onClick={() => { setRoadWidth("free"); selectTool("road"); setRoadMenu(false); }}>Free draw (any size)</button>
-                    {(settings.roadWidths ?? "24, 26, 30, 36, 40").split(",").map((s) => s.trim()).filter((s) => Number.isFinite(+s) && +s > 0).map((w) => (
-                      <button key={w} style={menuItem(tool === "road" && roadWidth === w)} onClick={() => { setRoadWidth(w); selectTool("road"); setRoadMenu(false); }}>{w}′ travel — click points, Enter to finish</button>
+                    {roadPresets.map((w) => (
+                      <button key={w} style={menuItem(tool === "road" && roadWidth === w)} onClick={() => { setRoadWidth(w); setRoadCustom(false); selectTool("road"); setRoadMenu(false); }}>{w}′</button>
                     ))}
+                    <button style={menuItem(tool === "road" && roadIsCustom)} onClick={() => setRoadCustom((o) => !o)} aria-expanded={roadCustom || roadIsCustom} aria-haspopup="true">
+                      {roadIsCustom ? `Custom — ${Math.round(+roadWidth)}′` : "Custom width…"}
+                    </button>
+                    {(roadCustom || roadIsCustom) && (
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 10px 6px" }}>
+                        <NumInput style={{ ...numInput, width: 64 }} ariaLabel="Custom road width (ft)" value={Math.round(+roadWidth) || +DEFAULT_ROAD_WIDTH} min={1} max={MAX_DIM}
+                          onCommit={(n) => { if (n > 0) { setRoadWidth(String(n)); selectTool("road"); setRoadMenu(false); setRoadCustom(false); } }} />
+                        <span style={{ fontSize: 12, color: PAL.muted }}>ft</span>
+                      </div>
+                    )}
+                    <div style={{ fontSize: 11, color: PAL.muted, padding: "6px 8px 2px", lineHeight: 1.5, borderTop: `1px solid ${PAL.panelLine}`, marginTop: 4 }}>
+                      Width is curb face to curb face. Click centerline points; double-click / Enter to finish.
+                    </div>
                   </AnchoredMenu>
                 </div>
               );
@@ -16842,7 +16900,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     return (
                     <>
                       <Field label="Length (ft)"><NumInput style={numInput} value={Math.round(roadLengthOf(selEl))} min={1} onCommit={(n) => setRoadLength(selEl, n)} /></Field>
-                      <Field label="Travel width (ft)"><NumInput style={numInput} value={Math.round(roadTravel(selEl))} min={1} onCommit={(n) => setRoadTravel(selEl, n)} /></Field>
+                      {/* NEW-2/NEW-4 — "Road width", never "travel width", and the hover states the
+                          dimension explicitly: it is the pavement between the curb faces (B180). */}
+                      <Field label="Road width (ft)" title="Curb face to curb face — the pavement between the curbs. The curb is added outside this width."><NumInput style={numInput} value={Math.round(roadTravel(selEl))} min={1} onCommit={(n) => setRoadTravel(selEl, n)} /></Field>
                       {/* B620 — inline label riding the road centerline (double-click the road also opens this in place).
                           setSelEl is non-sticky (patches the selected el only); onFocus pushes one undo frame per edit. */}
                       {cl && (<>
@@ -19493,7 +19553,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
    overview stays clean; rings whose offset is sub-pixel are skipped (B149 anti-flicker).
    Points are world feet → f2p; the caller counter-rotates this group for a rotated rect
    pond. Returns [] when nothing to draw. */
-function pondContourEls(el, f2p, ppf, keyPfx = "") {
+// NEW-1 (V481(f)) — `lf` is the LABEL frame ({ ppf, k }); see lib/exportLabelScale.js. It is
+// null on a screen render (→ the live ppf, k = 1) and the SHEET's own scale on an export pass,
+// so a printed pond's contour tier is a function of the plan and the paper, never of the zoom
+// the user was at. The sub-pixel ring gate rides it too — an export dropped or grew contour
+// paths with the zoom before this (the paths 44 → 96 half of the V481(f) report).
+function pondContourEls(el, f2p, ppf, keyPfx = "", lf = null) {
+  const lfPpf = lf && lf.ppf > 0 ? lf.ppf : ppf;
+  const lfK = lf && lf.k > 0 ? lf.k : 1;
   if (el.type !== "pond") return [];
   const det = el.det || {};
   if (det.contours === false) return []; // owner toggled off (default on)
@@ -19503,7 +19570,7 @@ function pondContourEls(el, f2p, ppf, keyPfx = "") {
   let minFt;
   if (el.points) { let lo = Infinity, hi = -Infinity, lo2 = Infinity, hi2 = -Infinity; for (const p of ring) { lo = Math.min(lo, p.x); hi = Math.max(hi, p.x); lo2 = Math.min(lo2, p.y); hi2 = Math.max(hi2, p.y); } minFt = Math.min(hi - lo, hi2 - lo2); }
   else minFt = Math.min(el.w, el.h);
-  if (!detailLabelVisible(minFt, ppf)) return [];
+  if (!detailLabelVisible(minFt, lfPpf)) return [];
   const cont = pondContours(ring, det);
   const slope = cont.meta.slope;
   const toPath = (r) => r.map((p, i) => { const q = f2p(p); return `${i ? "L" : "M"}${q.x},${q.y}`; }).join(" ") + "Z";
@@ -19512,7 +19579,7 @@ function pondContourEls(el, f2p, ppf, keyPfx = "") {
   // Rings — outer (down=0) is the drawn edge already; skip sub-pixel offsets (anti-flicker).
   // Each level can hold MULTIPLE rings (a split basin), so draw a path per ring.
   cont.levels.forEach((lv, idx) => {
-    if (lv.down <= 0 || slope * lv.down * ppf < 2) return;
+    if (lv.down <= 0 || slope * lv.down * lfPpf < 2) return;
     lv.rings.forEach((r, ri) => {
       const d = toPath(r);
       if (lv.isWater) {
@@ -19533,19 +19600,19 @@ function pondContourEls(el, f2p, ppf, keyPfx = "") {
   // font + halo ride the shared dimension zoom scale. The rings keep their own sub-pixel gate and
   // still draw at overview zoom — only the numbers wait until you're actually inspecting the basin.
   cont.levels.forEach((lv, idx) => {
-    if (lv.down <= 0 || slope * lv.down * ppf < 2) return;
+    if (lv.down <= 0 || slope * lv.down * lfPpf < 2) return;
     if (!lv.isWater && !lv.isBottom) return;
-    if (!pondParamLabelVisible(slope * lv.down, ppf)) return;
+    if (!pondParamLabelVisible(slope * lv.down, lfPpf)) return;
     const lp = contourLabelPoint(largestRing(lv.rings), lv.isBottom ? "bottom" : "top");
     if (!lp) return;
     const q = f2p(lp);
     const lead = lv.isWater ? "WS " : "Floor ";
     const txt = lv.elev != null ? `${lead}${f1(lv.elev)}` : `${lead}−${f1(lv.down)}′`;
-    const fs = pondParamFontPx(ppf, 9);
+    const fsL = pondParamFontPx(lfPpf, 9), fs = fsL * lfK; // fsL is label space: the halo is authored there
     out.push(
       <text key={`${keyPfx}t${idx}`} x={q.x} y={q.y} textAnchor="middle" dominantBaseline="middle"
         fontSize={fs} fontFamily="Inter, system-ui, sans-serif" fill="#0E2E36"
-        stroke="#fff" strokeWidth={fs * 0.29} paintOrder="stroke" pointerEvents="none"
+        stroke="#fff" strokeWidth={fsL * 0.29} paintOrder="stroke" pointerEvents="none"
         data-contour-label={lv.isWater ? "water" : "bottom"}
         style={{ fontWeight: 700 }}>{txt}</text>,
     );
@@ -19556,7 +19623,7 @@ function pondContourEls(el, f2p, ppf, keyPfx = "") {
     const q = f2p(centroid(ring));
     out.push(
       <text key={`${keyPfx}xt`} x={q.x} y={q.y} textAnchor="middle" dominantBaseline="middle"
-        fontSize={9.5} fontFamily="Inter, system-ui, sans-serif" fill="#B3361B" stroke="#fff"
+        fontSize={9.5 * lfK} fontFamily="Inter, system-ui, sans-serif" fill="#B3361B" stroke="#fff"
         strokeWidth={2.9} paintOrder="stroke" pointerEvents="none" data-contour="infeasible"
         style={{ fontWeight: 800 }}>⚠ Too deep — max ≈ {f1(cont.maxDepth)}′ at {f0(slope)}:1</text>,
     );
@@ -19609,10 +19676,15 @@ function dimSlideFor(el, allEls) {
 
 /* element renderer working in PIXEL space (points pre-transformed by f2p).
    We draw the rect via the rotated group around the element's pixel center. */
-function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEls, startDimMove, onDimNumberDown, onElContext, dimSuppressed, roadNet) {
+function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEls, startDimMove, onDimNumberDown, onElContext, dimSuppressed, roadNet, lf = null) {
+  // NEW-1 (V481(f)) — the LABEL frame (lib/exportLabelScale.js). Null on screen. On an export
+  // pass it carries the SHEET's px-per-foot, so this element's dimension/width callouts make
+  // the same show/hide + size decisions no matter where the canvas happened to be zoomed.
+  const lfPpf = lf && lf.ppf > 0 ? lf.ppf : null;
+  const lfK = lf && lf.k > 0 ? lf.k : 1;
   // B617 — zoom multiplier (px/ft ÷ the default 0.35) so a road's curb/edge stroke holds constant
   // relative to the drawing across zoom, exactly like the in-component markup/utility strokes.
-  const zk = (f2p({ x: 1, y: 0 }).x - f2p({ x: 0, y: 0 }).x) / 0.35;
+  const zk = lf && lf.strokeZk > 0 ? lf.strokeZk : (f2p({ x: 1, y: 0 }).x - f2p({ x: 0, y: 0 }).x) / 0.35;
   // Per-element striping config. renderElPx is a MODULE-level fn, so it can't close
   // over the component-scoped cfgOf — referencing that one here threw "cfgOf is not
   // defined" inside the els.map during render and blanked the whole page on any
@@ -19713,7 +19785,7 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
       return out.length ? out : null;
     })() : null;
     return (
-      <g key={el.id} filter={st.shadow ? "url(#bldgShadow)" : undefined} style={{ cursor: tool === "select" ? (el.locked ? "pointer" : "move") : "crosshair" }}
+      <g key={el.id} data-el-id={el.id} filter={st.shadow ? "url(#bldgShadow)" : undefined} style={{ cursor: tool === "select" ? (el.locked ? "pointer" : "move") : "crosshair" }}
         onPointerDown={(e) => startMoveEl(e, el.id)} onDoubleClick={(e) => onElDouble && onElDouble(e, el.id)}
         onContextMenu={(e) => { if (onElContext) onElContext(e, el.id); }}>
         <path d={dPath} fill={ghostPath ? addF : waterFill} fillOpacity={waterOp} stroke="none" />
@@ -19725,7 +19797,7 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
             shape). Only linear features (roads, markup/utility lines) scale. */}
         <path d={dPath} fill="none" stroke={elStroke} strokeWidth={st.cartoWater ? (isSel ? 3 : 2) : (isSel ? st.weight + 1.25 : st.weight)} />
         {ghostPath && ghostEl("ghost")}
-        {el.type === "pond" && pondContourEls(el, f2p, f2p({ x: 1, y: 0 }).x - f2p({ x: 0, y: 0 }).x, "pc")}
+        {el.type === "pond" && pondContourEls(el, f2p, f2p({ x: 1, y: 0 }).x - f2p({ x: 0, y: 0 }).x, "pc", lf)}
       </g>
     );
   }
@@ -19753,7 +19825,7 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
         // floored), not a fixed pixel weight — so the road border reads as a thin curb at site zoom
         // and grows proportionally on zoom-in, instead of the old fat ~5–7px band. Selection is cued
         // by the blue vertex handles (B619), so no on-select weight bump here.
-        rparts.push(<path key="edge" d={dPath} fill="none" stroke={stroke} strokeWidth={curbStrokePx(roadCurbWidth(el), ppf, CURB_STROKE_MIN_PX)} />);
+        rparts.push(<path key="edge" d={dPath} fill="none" stroke={stroke} strokeWidth={curbStrokePx(roadCurbWidth(el), ppf, CURB_STROKE_MIN_PX * lfK)} />);
       }
       if (texFill) rparts.push(<path key="tex" d={dPath} fill={texFill} stroke="none" pointerEvents="none" />);
     }
@@ -19763,7 +19835,7 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
     const stripeLines = inNetwork ? (roadNet.stripes.get(el.id) || []) : roadCurbLines(el, settings);
     stripeLines.forEach((cl, i) => {
       if (!cl || cl.length < 2) return;
-      rparts.push(<polyline key={`curb${i}`} points={cl.map((p) => { const q = f2p(p); return `${q.x},${q.y}`; }).join(" ")} fill="none" stroke={st.stroke} strokeWidth={curbStrokePx(roadCurbWidth(el), ppf, CURB_STROKE_MIN_PX)} pointerEvents="none" />);
+      rparts.push(<polyline key={`curb${i}`} points={cl.map((p) => { const q = f2p(p); return `${q.x},${q.y}`; }).join(" ")} fill="none" stroke={st.stroke} strokeWidth={curbStrokePx(roadCurbWidth(el), ppf, CURB_STROKE_MIN_PX * lfK)} pointerEvents="none" />);
     });
     // Travel-width dimension anchored to the CENTERLINE MIDPOINT (excludes the curb — reads the
     // true travel width). B149 detail tier (a road width hides at site-overview zoom); kept while
@@ -19789,9 +19861,9 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
       const A = f2p({ x: midPt.x + nrm.x * hw + off.x, y: midPt.y + nrm.y * hw + off.y });
       const B = f2p({ x: midPt.x - nrm.x * hw + off.x, y: midPt.y - nrm.y * hw + off.y });
       const M = f2p({ x: midPt.x + off.x, y: midPt.y + off.y });
-      const RED = "#dc2626", k = dimFontScale(ppf), tick = 4 * k, fz = 11 * k, txt = `${f0(+el.travelW || 0)}′`; // B911: shared zoom→font scale
+      const RED = "#dc2626", k = dimFontScale(lfPpf || ppf) * lfK, tick = 4 * k, fz = 11 * k, txt = `${f0(+el.travelW || 0)}′`; // B911: shared zoom→font scale — NEW-1: on the LABEL frame, so a sheet's width callout is paper-sized, not zoom-sized
       const dimSel = isSel && tool === "select";
-      const dimVisible = detailLabelVisible(+el.travelW || 0, ppf);
+      const dimVisible = detailLabelVisible(+el.travelW || 0, lfPpf || ppf);
       const moved = Math.hypot(off.x, off.y) > 0.5;
       // B912 — the width number is a click target (select on single, edit length on double-tap),
       // active whenever the select tool is up; pointerEvents="all" so it's clickable even before the
@@ -19819,9 +19891,9 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
     // B620 — inline label riding the road centerline (own color + white halo; sparse spacing).
     // B935 — "Inside" placement tucks it a quarter of the travel-width off the centerline (into clear
     // pavement) so it doesn't sit on the drawn centerline; default rides the centerline as before.
-    rparts.push(...inlineLabelEls(roadDenseCenterline(el, settings), el.inlineLabel, st.stroke, el.labelSpacing || INLINE_LABEL_SPACING.road, ppf, f2p, `il${el.id}-`, { size: el.labelSize, halo: el.labelHalo, place: labelPlaceOf(el), insetFt: labelPlaceOf(el) === "inside" ? Math.max(0, (+el.travelW || 0) / 4) : 0 }));
+    rparts.push(...inlineLabelEls(roadDenseCenterline(el, settings), el.inlineLabel, st.stroke, el.labelSpacing || INLINE_LABEL_SPACING.road, ppf, f2p, `il${el.id}-`, { size: el.labelSize, halo: el.labelHalo, place: labelPlaceOf(el), lf, insetFt: labelPlaceOf(el) === "inside" ? Math.max(0, (+el.travelW || 0) / 4) : 0 }));
     return (
-      <g key={el.id} filter={st.shadow ? "url(#bldgShadow)" : undefined} style={{ cursor: tool === "select" ? (el.locked ? "pointer" : "move") : "crosshair" }}
+      <g key={el.id} data-el-id={el.id} filter={st.shadow ? "url(#bldgShadow)" : undefined} style={{ cursor: tool === "select" ? (el.locked ? "pointer" : "move") : "crosshair" }}
         onPointerDown={(e) => startMoveEl(e, el.id)} onDoubleClick={(e) => onElDouble && onElDouble(e, el.id)}
         onContextMenu={(e) => { if (onElContext) onElContext(e, el.id); }}>{rparts}</g>
     );
@@ -19839,7 +19911,7 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
   // NEW-4 — a rect a drive tees into paints its FILL here but its OUTLINE as interrupted edges below,
   // so the entrance reads as one continuous curb instead of a line ruled across the opening.
   const outlineCut = roadNet && roadNet.outlineCuts ? roadNet.outlineCuts.get(el.id) : null;
-  const rectStrokeW = st.cartoWater ? (isSel ? 3 : 2) : el.type === "road" ? curbStrokePx(roadCurbWidth(el), ppf, CURB_STROKE_MIN_PX) /* B719: legacy rect road border to scale */ : (isSel ? st.weight + 0.75 : st.weight);
+  const rectStrokeW = st.cartoWater ? (isSel ? 3 : 2) : el.type === "road" ? curbStrokePx(roadCurbWidth(el), ppf, CURB_STROKE_MIN_PX * lfK) /* B719: legacy rect road border to scale */ : (isSel ? st.weight + 0.75 : st.weight);
   parts.push(<rect key="r" x={tl.x} y={tl.y} width={w} height={h} fill={ghostPath ? rectAddF : waterFill} fillOpacity={waterOp}
     stroke={outlineCut ? "none" : st.stroke /* B619: no accent recolor on select */} strokeWidth={outlineCut ? 0 : rectStrokeW} rx={rx} />);
   if (outlineCut) {
@@ -19867,7 +19939,7 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
   if (ghostPath) parts.push(<g key="ghost" transform={`rotate(${-el.rot} ${c.x} ${c.y})`}>{ghostEl("g")}</g>);
   // Stage contours: built from elCorners (world feet, rotation baked in), so counter-rotate
   // this branch's el.rot group — same trick as the ghost — to land them true on the basin.
-  if (el.type === "pond") parts.push(<g key="pondc" transform={`rotate(${-(el.rot || 0)} ${c.x} ${c.y})`}>{pondContourEls(el, f2p, ppf, "pc")}</g>);
+  if (el.type === "pond") parts.push(<g key="pondc" transform={`rotate(${-(el.rot || 0)} ${c.x} ${c.y})`}>{pondContourEls(el, f2p, ppf, "pc", lf)}</g>);
 
   if (el.type === "parking") {
     const cs = carStalls(el.w, el.h, cfgOf(el));
@@ -19929,7 +20001,10 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
     // ---- Column grid (B568) — drawn for real buildings only (never a dog-ear bump-out),
     // zoom-gated on the rendered footprint px (the FEAT_BTN_MIN_PX precedent) so it reveals
     // when legible and never clutters at site-overview zoom.
-    if (settings.showGrid && !el.dogEar && grid.summary && Math.min(w, h) >= FEAT_BTN_MIN_PX) {
+    // NEW-1 (V481(f)): the reveal gate is a MIN-ON-SCREEN-SIZE rule, so on an export pass it
+    // measures the footprint at the SHEET's scale (canvas px ÷ lfK) — otherwise a wide-zoom PDF
+    // silently dropped the column grid a working-zoom PDF of the same plan drew.
+    if (settings.showGrid && !el.dogEar && grid.summary && Math.min(w, h) / lfK >= FEAT_BTN_MIN_PX) {
       const lineStyle = (role) => role === "flex"
         ? { stroke: GRID_FLEX, strokeWidth: 0.6, strokeDasharray: "5 4", opacity: 0.85 } // end/rear/centre flex boundary
         : { stroke: GRID_LINE, strokeWidth: 0.5, opacity: 0.8 };                     // interior column line (speed bay renders the same — no orange emphasis)
@@ -19979,7 +20054,7 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
     }
   }
   if (el.type === "road") { // curb lines inside each long edge; pavement between
-    const cp = (el.curb ?? CURB) * ppf, cw = curbStrokePx(el.curb ?? CURB, ppf, CURB_STROKE_MIN_PX); // B719: curb stripe drawn to scale (true 6")
+    const cp = (el.curb ?? CURB) * ppf, cw = curbStrokePx(el.curb ?? CURB, ppf, CURB_STROKE_MIN_PX * lfK); // B719: curb stripe drawn to scale (true 6")
     if (el.w >= el.h) {
       parts.push(<line key="cu0" x1={tl.x} y1={tl.y + cp} x2={tl.x + w} y2={tl.y + cp} stroke={st.stroke} strokeWidth={cw} />);
       parts.push(<line key="cu1" x1={tl.x} y1={tl.y + h - cp} x2={tl.x + w} y2={tl.y + h - cp} stroke={st.stroke} strokeWidth={cw} />);
@@ -19996,7 +20071,7 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
     // (stays on the global dimCalloutVisible zoom gate); a PAVING/ROAD width is DETAIL tier,
     // so it only draws once the measured span projects past DETAIL_LABEL_MIN_PX (~30px) on screen
     // (detailLabelVisible) — a drive-aisle / road width drops at site-overview zoom, reveals on zoom-in.
-    const k = dimFontScale(ppf); // B911: shared zoom→font scale (building dims + parcel-edge labels)
+    const k = dimFontScale(lfPpf || ppf) * lfK; // B911: shared zoom→font scale (building dims + parcel-edge labels); NEW-1: on the LABEL frame so an export sheet sizes it from the paper, not the live zoom
     const fullMin = Math.min(el.w, el.h);
     // B417: a building's depth is read off its dock axis (dockSidesFor → footprintDepth):
     // the footprint span perpendicular to the dock face (dock wall → dock wall / → rear wall),
@@ -20009,7 +20084,7 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
     // B149 tier gate (see comment above): building dims are site-tier; paving/road widths
     // are detail-tier and ride the self-tuning min-on-screen-length rule keyed on the span
     // they actually measure (dimW). Reuses dimCalloutVisible as the shared floor — no new gate.
-    const dimVisible = el.type === "building" ? dimCalloutVisible(ppf) : detailLabelVisible(dimW, ppf);
+    const dimVisible = el.type === "building" ? dimCalloutVisible(lfPpf || ppf) : detailLabelVisible(dimW, lfPpf || ppf);
     const RED = "#dc2626", tick = 4 * k, fz = 11 * k, txt = `${f0(dimW)}′`;
     const horizLong = el.w >= el.h;
     // B146/B592: user reposition (local feet → px). Clamp the stored offset to the slide
@@ -20042,7 +20117,7 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
       dim.push(<line key="t1" x1={X - tick} y1={Y1} x2={X + tick} y2={Y1} stroke={RED} strokeWidth={1.25} />);
       if (dimSel) dim.push(<line key="grab" x1={X} y1={Y0} x2={X} y2={Y1} stroke="transparent" strokeWidth={14} />); // fat invisible grab target
       // number OUTBOARD of the line (away from the centred label) so it doesn't clutter by default
-      dim.push(<text key="tx" data-testid="el-dim" x={X - 6} y={MY} transform={`rotate(${-el.rot} ${X - 6} ${MY})`} textAnchor="end" fontSize={fz} fontFamily={NUM_FONT} fontVariantNumeric={TABULAR_NUMS} fill={RED} stroke="#fff" strokeWidth={2.5} paintOrder="stroke" dominantBaseline="middle" fontWeight="600" {...numHandlers}>{txt}</text>);
+      dim.push(<text key="tx" data-testid="el-dim" x={X - 6 * lfK} y={MY} transform={`rotate(${-el.rot} ${X - 6 * lfK} ${MY})`} textAnchor="end" fontSize={fz} fontFamily={NUM_FONT} fontVariantNumeric={TABULAR_NUMS} fill={RED} stroke="#fff" strokeWidth={2.5} paintOrder="stroke" dominantBaseline="middle" fontWeight="600" {...numHandlers}>{txt}</text>);
     } else { // short side is horizontal (w)
       const y = tl.y + h * posF, x0 = tl.x, x1 = tl.x + w, mx = (x0 + x1) / 2;
       // B592: no leader line — the dimension slides ALONG the length and stays on the footprint
@@ -20052,7 +20127,7 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
       dim.push(<line key="t0" x1={X0} y1={Y - tick} x2={X0} y2={Y + tick} stroke={RED} strokeWidth={1.25} />);
       dim.push(<line key="t1" x1={X1} y1={Y - tick} x2={X1} y2={Y + tick} stroke={RED} strokeWidth={1.25} />);
       if (dimSel) dim.push(<line key="grab" x1={X0} y1={Y} x2={X1} y2={Y} stroke="transparent" strokeWidth={14} />); // fat invisible grab target
-      dim.push(<text key="tx" data-testid="el-dim" x={MX} y={Y - 6} transform={`rotate(${-el.rot} ${MX} ${Y - 6})`} textAnchor="middle" fontSize={fz} fontFamily={NUM_FONT} fontVariantNumeric={TABULAR_NUMS} fill={RED} stroke="#fff" strokeWidth={2.5} paintOrder="stroke" fontWeight="600" {...numHandlers}>{txt}</text>);
+      dim.push(<text key="tx" data-testid="el-dim" x={MX} y={Y - 6 * lfK} transform={`rotate(${-el.rot} ${MX} ${Y - 6 * lfK})`} textAnchor="middle" fontSize={fz} fontFamily={NUM_FONT} fontVariantNumeric={TABULAR_NUMS} fill={RED} stroke="#fff" strokeWidth={2.5} paintOrder="stroke" fontWeight="600" {...numHandlers}>{txt}</text>);
     }
     // When the element is selected the dimension is grab-to-move (the red line/ticks are the handle);
     // otherwise it ignores pointers so a click falls through to select/move the element itself.
@@ -20105,10 +20180,10 @@ function Section({ title, children, collapsed, accent }) {
     </div>
   );
 }
-function Field({ label, children }) {
+function Field({ label, children, title }) {
   return (
     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, marginBottom: 8 }}>
-      <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>{label}</span>{children}
+      <span style={{ fontSize: 12, color: "var(--text-secondary)", ...(title ? { cursor: "help" } : null) }} title={title}>{label}</span>{children}
     </div>
   );
 }
@@ -20129,7 +20204,9 @@ function AlignIcon({ dir }) {
 }
 // A numeric input you can edit freely (clear it, type partial values) — it only
 // commits (parse + clamp) on Enter or blur, never live on each keystroke.
-function NumInput({ value, onCommit, min, max, style, placeholder, step, coarse, allowClear = false }) {
+// `ariaLabel` names the input for a screen reader (and for a headless check) when it does NOT sit
+// behind a visible <Field> label — e.g. the Custom width… entry inside the Road flyout.
+function NumInput({ value, onCommit, min, max, style, placeholder, step, coarse, ariaLabel, allowClear = false }) {
   const [draft, setDraft] = useState(value == null ? "" : String(value));
   const editing = useRef(false);
   useEffect(() => { if (!editing.current) setDraft(value == null ? "" : String(value)); }, [value]);
@@ -20177,7 +20254,7 @@ function NumInput({ value, onCommit, min, max, style, placeholder, step, coarse,
   };
   const coarseStep = coarse != null ? coarse : (step != null ? step * 5 : 0);
   const input = (
-    <input style={style} value={draft} placeholder={placeholder} inputMode="decimal"
+    <input style={style} value={draft} placeholder={placeholder} inputMode="decimal" aria-label={ariaLabel}
       onFocus={() => { editing.current = true; }}
       onChange={(e) => setDraft(e.target.value)}
       onBlur={commit}

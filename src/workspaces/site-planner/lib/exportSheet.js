@@ -37,6 +37,7 @@ import { siteToFeatures, buildKmz, kmzFilename, KMZ_MIME } from "./kmzExport.js"
 import { buildSheetFurnitureSvg } from "./sheetFurniture.js";
 import { printSheetLayout, buildPrintSheetSvg, sheetFileName, formatDateStamp } from "./printSheet.js";
 import { printStrokeWidth, sheetFitScale } from "./exportStyle.js";
+import { sheetLabelPpf } from "./exportLabelScale.js";
 import { jpegToPdf } from "./imagePdf.js";
 import { buildOverlayVectorFragment, esriLineFeatures, esriPolygonFeatures, contourFeatures, arrowGlyphFeatures, swapLatLng } from "./overlayVectorSvg.js";
 import { labelAnchors, placeLabels } from "./boundaryLabels.js";
@@ -129,22 +130,55 @@ export function createExportSheet(ctx) {
       minY: Math.min(...pts.map((p) => p.y)) - PAD, maxY: Math.max(...pts.map((p) => p.y)) + PAD,
     };
   };
+  /* The SHEET's own px-per-foot for a given frame + paper (NEW-1, V481(f)). Depends ONLY on
+     the framed extent and the plan box — never on `view` — which is the whole point: it is
+     what the label tier reasons at during an export pass, so two exports of the same plan
+     taken at different zooms make identical label decisions. Falls back to the notional
+     letter-landscape plan box the PNG path uses when no paper is named. Null → nothing to
+     frame, and the label tier stays on the live view (the pre-NEW-1 behaviour). */
+  const sheetLabelPpfFor = (frame, paper, orient) => {
+    const fe = exportFeetExtent(frame);
+    if (!fe) return null;
+    let plan;
+    try {
+      plan = printSheetLayout({
+        paper: paper || "letter", orient: orient || "landscape",
+        buildingCount: buildingRows().length, metricsPairs: printMetricPairs(), stormwaterBars: printStormwaterBars().length,
+      }).plan;
+    } catch (_) { return null; } // a sheet-layout hiccup must never block the export itself
+    return sheetLabelPpf({ extentWft: fe.maxX - fe.minX, extentHft: fe.maxY - fe.minY, planW: plan.w, planH: plan.h });
+  };
+
   /* NEW-5's hard constraint, enforced in ONE place. Screen rendering culls to the viewport;
      an export must not. `buildExportSvg` clones the LIVE `<svg>`, so before it reads the DOM
      it flips the cull off and flushes a synchronous full render, then restores culling after
      the clone. flushSync is the whole point — a normal setState would land a frame later,
      i.e. after the clone, and the PDF would quietly print only what was on screen. If the
      flush can't run (an export triggered from inside a render/lifecycle), we fall back to
-     rendering uncrossed rather than silently exporting a partial drawing. */
-  const withFullRender = (fn) => {
-    if (!cullActive) return fn();
+     rendering uncrossed rather than silently exporting a partial drawing.
+
+     NEW-1 (V481(f)) — the SAME flush now also re-frames the LABEL tier onto the sheet's own
+     scale (`labelPpf`), because culling only ever covered the geometry: every declutter gate,
+     LOD line-drop and collision decision still read the live zoom, so a sheet exported while
+     zoomed out silently shipped a building with no label. Note the pass runs even when
+     culling is OFF (a small plan) — the label re-frame is needed on every export, not just
+     the ones big enough to cull. */
+  const withFullRender = (fn, labelPpf = null) => {
+    if (!cullActive && !(labelPpf > 0)) return fn();
     let flushed = false;
-    try { flushSync(() => setExportPass(true)); flushed = true; } catch (_) { /* fall through */ }
+    try { flushSync(() => setExportPass({ ppf: labelPpf > 0 ? labelPpf : 0 })); flushed = true; } catch (_) { /* fall through */ }
     try { return fn(); }
-    finally { if (flushed) { try { flushSync(() => setExportPass(false)); } catch (_) { setExportPass(false); } } }
+    finally { if (flushed) { try { flushSync(() => setExportPass(null)); } catch (_) { setExportPass(null); } } }
   };
 
-  const buildExportSvg = (...args) => withFullRender(() => buildExportSvgRaw(...args));
+  // `paper`/`orient` (the last two args) name the sheet the plan is headed for, so the label
+  // tier can size itself to that paper. Omitted → the notional letter-landscape box (the PNG
+  // case, and any caller that just wants the plan SVG).
+  const buildExportSvg = (frame, includeOverlay, paper, exportAerial, exportOverlays, includeMapLayers, exportVectorOverlays, sheetPaper, sheetOrient) =>
+    withFullRender(
+      () => buildExportSvgRaw(frame, includeOverlay, paper, exportAerial, exportOverlays, includeMapLayers, exportVectorOverlays),
+      sheetLabelPpfFor(frame, sheetPaper, sheetOrient),
+    );
 
   const buildExportSvgRaw = (frame, includeOverlay = true, paper = PAL.paper, exportAerial = null, exportOverlays = null, includeMapLayers = true, exportVectorOverlays = null) => {
     if (!svgRef.current) return null;
@@ -319,18 +353,24 @@ export function createExportSheet(ctx) {
     // NEW-3 secondary: drop the building drop-shadow on paper (crisp poché, not a blur).
     root.querySelectorAll('[filter="url(#bldgShadow)"]').forEach((g) => g.removeAttribute("filter"));
     // NEW-2: retarget every stroke to a physical drafting weight (skip the furniture).
+    // NEW-1 (V481(f)): round to SIGNIFICANT figures, not fixed decimals. A clone unit is
+    // "one foot × the live zoom", so on a wide-zoom export the retargeted widths are all a
+    // few hundredths of a unit — and a 3-decimal round collapsed distinct drafting weights
+    // (parcel outline, setback dash, striping) onto the SAME number, flattening the line
+    // hierarchy the retarget exists to preserve. Six significant figures is unit-agnostic.
+    const r6 = (n) => String(Number(Number(n).toPrecision(6)));
     if (sheetScale > 0) {
       root.querySelectorAll("*").forEach((node) => {
         if (typeof node.closest === "function" && node.closest("[data-furniture]")) return;
         const cur = node.getAttribute && node.getAttribute("stroke-width");
         if (cur != null && cur !== "") {
           const nw = printStrokeWidth(parseFloat(cur), sheetScale);
-          if (Number.isFinite(nw)) node.setAttribute("stroke-width", String(Number(nw.toFixed(3))));
+          if (Number.isFinite(nw)) node.setAttribute("stroke-width", r6(nw));
         }
         // Inline-style stroke widths (rare here, but the chip/label paths use style).
         if (node.style && node.style.strokeWidth) {
           const nw = printStrokeWidth(parseFloat(node.style.strokeWidth), sheetScale);
-          if (Number.isFinite(nw)) node.style.strokeWidth = `${Number(nw.toFixed(3))}px`;
+          if (Number.isFinite(nw)) node.style.strokeWidth = `${r6(nw)}px`;
         }
         // Keep dashes proportional to the now-thinner strokes. Filter out any token
         // that doesn't parse (a stray/trailing separator) so we never emit "NaN".
@@ -338,7 +378,7 @@ export function createExportSheet(ctx) {
         if (da && /[\d.]/.test(da) && cur != null && cur !== "") {
           const f = parseFloat(cur) > 0 ? printStrokeWidth(parseFloat(cur), sheetScale) / parseFloat(cur) : 1;
           if (Number.isFinite(f) && f > 0) {
-            const scaled = da.trim().split(/[\s,]+/).map((n) => parseFloat(n) * f).filter((v) => Number.isFinite(v)).map((v) => Number(v.toFixed(2)));
+            const scaled = da.trim().split(/[\s,]+/).map((n) => parseFloat(n) * f).filter((v) => Number.isFinite(v)).map((v) => Number(Number(v).toPrecision(6)));
             if (scaled.length) node.setAttribute("stroke-dasharray", scaled.join(" "));
           }
         }
@@ -761,7 +801,7 @@ export function createExportSheet(ctx) {
     const exportAerial = await exportAerialForFrame(printFrame); // B735/B839 — capture the live basemap (a Leaflet <div> the SVG can't clone) as a frame-exact image: stitched cached tiles, or the dynamic /export fallback
     const exportOverlays = exportOverlaysForFrame(printFrame); // B739 — capture the live GIS raster layers (floodplain, pipelines, …) for the print frame
     const exportVectorOverlays = exportVectorOverlaysForFrame(); // B745 — capture the live GIS vector layers (boundaries, transmission, contours, …)
-    const built = buildExportSvg(printFrame, includeOverlay, "#ffffff", exportAerial, exportOverlays, includeMapLayers, exportVectorOverlays); // force WHITE paper for print/PDF
+    const built = buildExportSvg(printFrame, includeOverlay, "#ffffff", exportAerial, exportOverlays, includeMapLayers, exportVectorOverlays, paper, orient); // force WHITE paper for print/PDF; paper/orient size the label tier (NEW-1)
     if (!built) { alert("Nothing to export yet — add a parcel or some elements first."); return; }
     setExportingPDF(true);
     try {
