@@ -87,18 +87,29 @@ export function needsScheduleCarryIn(projects, siteId, activeId) {
   return true;
 }
 
-/* ---- B1050: the Dashboard escape from the link-resolution panel -------------------------
+/* ---- B1050 / NEW-1 / NEW-2: leaving the Schedule tab's empty state ------------------------
  *
- * The trap: pressing Dashboard used to ONLY post planar:nav-dashboard into the iframe. The
- * embedded app obeyed (its nav-state came back with section "reports", so the breadcrumb read
- * "Dashboard / Select a project") but the OUTER route kept its projectId — and the resolution
- * panel's gate is derived purely from the outer route, so the panel stayed up, dimming and
- * blocking the dashboard the user had just navigated to. With no X, no Escape and no
- * click-outside, that was a dead end.
+ * The original trap (B1050): pressing Dashboard used to ONLY post planar:nav-dashboard into the
+ * iframe. The embedded app obeyed (its nav-state came back with section "reports", so the
+ * breadcrumb read "Dashboard / Select a project") but the OUTER route kept its projectId — and the
+ * link surface's gate is derived purely from the outer route, so it stayed up, dimming and blocking
+ * the dashboard the user had just navigated to. `dashboardNavActions` fixed that half by moving the
+ * route as well.
  *
- * The three pure predicates below are the decision layer for the fix, kept out of the component
- * so the Node runner can exercise the exact sequence (route a project → press Dashboard → the
- * route clears → the panel is gone) without a DOM.
+ * The two suppressors B1050 added to belt-and-brace it turned out to be strands of their own — both
+ * reproduced headless against the shipped build (ui-audit/diagnose-schedule-strand.mjs):
+ *   • `dismissed` (X / Escape) was per-project component state in a KEPT-ALIVE workspace, so one
+ *     dismissal removed the ONLY create/link entry point for that project for the whole session.
+ *     That is the owner's Tsakiris-broken / Sylvestri-fine report, exactly.
+ *   • `section !== "projects"` suppressed it whenever the embed reported its dashboard section —
+ *     and a routed site with no link is never switched off that section, because the embed's
+ *     nav-select-by-site handler returns its state UNCHANGED when it can't resolve the link.
+ *
+ * NEW-2 removes the need for both: the surface is no longer an overlay, it is the Schedule tab's
+ * EMPTY STATE, rendered instead of the iframe. Nothing is covered, so there is nothing to dismiss,
+ * and clearing the routed project (what Dashboard does) is the single, always-available way out.
+ * So the gate below is derived purely from the OUTER route — the iframe's internal section has no
+ * say, because an unlinked project gives the embed nothing useful to show anyway.
  */
 
 // What pressing Dashboard must do. The post alone is what trapped the user: the outer route has
@@ -108,22 +119,22 @@ export function dashboardNavActions({ projectId } = {}) {
   return { post: { type: "planar:nav-dashboard" }, clearRoute: projectId != null };
 }
 
-// Whether the "no schedule linked yet" resolution panel may render.
+// Whether the Schedule tab shows its "no schedule for this project" EMPTY STATE (in place of the
+// embedded Gantt) rather than the grid.
 //
-// Belt-and-braces beyond clearing the route: this is a PROJECT-SCOPED panel, so it must never
-// render while the embedded app is on its dashboard/reports section. That way ANY future
-// route↔iframe desync degrades to a missing panel instead of a trapped user. `dismissed` is the
-// user's own X / Escape close — it hides the panel without linking or creating anything.
+// Purely a function of the OUTER route: the route points at a site, that site has no linked
+// schedule, and we know its display name. There is deliberately NO dismissal input and NO
+// dependence on the iframe's internal section — either one can strand the project, because this is
+// the only surface from which a schedule can be created or linked (the breadcrumb's New project
+// makes an UNLINKED schedule). Pressing Dashboard clears `projectId`, which is what closes this.
 export function shouldShowLinkPanel({
-  ready = false, section = "projects", projectId = null,
-  linkedSchedule = null, routedSiteName = null, dismissed = false,
+  ready = false, projectId = null, linkedSchedule = null, routedSiteName = null,
 } = {}) {
   if (!ready) return false;              // never flash before the iframe reports in
-  if (section !== "projects") return false; // dashboard/reports → not a project-scoped surface
   if (projectId == null) return false;   // no routed site → nothing to resolve
   if (linkedSchedule) return false;      // already linked → the grid is the answer
   if (!routedSiteName) return false;     // never surface (or create) a schedule named the raw id (B560)
-  return !dismissed;
+  return true;
 }
 
 // Whether the carry-OUT effect may adopt the iframe's active schedule's linked site into an empty
