@@ -8,7 +8,9 @@ import { syncOverlayLayers, withTileRetry, ALL_LAYERS, probeService } from "./li
 import { BASEMAPS } from "./lib/basemaps.js";
 import { prefetchExtents, computeCoverage, boundsFromLeaflet, getNearbyRadiusMiles, subscribeRelevance } from "./lib/coverage.js";
 import LayerPanel from "./components/LayerPanel.jsx";
-import { useGroundElevation, GROUND_EL_TITLE } from "./components/useGroundElevation.js";
+import { useGroundElevation } from "./components/useGroundElevation.js";
+import CursorChip from "./components/CursorChip.jsx";
+import { contourHover } from "./lib/terrainLazy.js";
 import { NUM_FONT, TABULAR_NUMS } from "../../shared/theme/typography.js";
 import ContextMenu from "../../shared/ui/ContextMenu.jsx";
 import {
@@ -287,7 +289,9 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
   const [statusMenu, setStatusMenu] = useState(null); // {site, x, y} — right-click status picker
   const [mapMenu, setMapMenu] = useState(null);       // {x, y} — right-click-on-empty-map menu (KMZ export) (B684)
   const [hoverLL, setHoverLL] = useState(null);       // {lat, lng} — live "you are here" GPS readout (B683)
-  const hoverElFt = useGroundElevation(hoverLL);      // ground elevation at the cursor, ft NAVD88 (B706)
+  // B706 / NEW-2: always a STATE, never silence. `zoom` picks the lattice band the cursor
+  // tile is warmed at, so with contours on it's the tile they already fetched.
+  const hoverEl = useGroundElevation(hoverLL, { zoom });
   const [renaming, setRenaming] = useState(null);     // {id, name} — the site row being inline-renamed (B158)
   const skipRenameBlurRef = useRef(false);            // Esc cancels without the trailing blur committing
   const [parcelInfo, setParcelInfo] = useState(null); // {status:'found'|'none'|'unavailable', label, addr, acct, acres, attrs, county, key, backup} — address-search result (B233)
@@ -435,14 +439,21 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
     const onDragEnd = () => { draggingRef.current = false; map.getContainer().style.cursor = selectModeRef.current ? ADD_CURSOR : ""; };
     // Live "you are here" GPS readout (B683): the cursor's WGS84 lat/long, coalesced to one
     // update per animation frame so a fast mousemove can't thrash React. Cleared on mouse-out.
+    // NEW-1 rides THIS handler — the contour under the cursor is answered from the same
+    // already-throttled position, never a second mousemove listener.
     let llLatest = null, llPending = false;
     const onCoordMove = (e) => {
       llLatest = { lat: e.latlng.lat, lng: e.latlng.lng };
       if (llPending) return;
       llPending = true;
-      requestAnimationFrame(() => { llPending = false; if (llLatest) setHoverLL(llLatest); });
+      requestAnimationFrame(() => {
+        llPending = false;
+        if (!llLatest) return;
+        setHoverLL(llLatest);
+        contourHover(map, llLatest);
+      });
     };
-    const onCoordOut = () => setHoverLL(null);
+    const onCoordOut = () => { setHoverLL(null); contourHover(map, null); };
     // Right-click on EMPTY map → the KMZ export menu (B684). A right-click ON a site keeps its own
     // status menu: skip when the DOM target is an interactive site layer / marker, so the two never fight.
     const onMapCtx = (e) => {
@@ -1242,12 +1253,10 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
             zoom control (corner) and the scale bar (bottom-right). Display-only; the app's frame
             stays EPSG:2278 feet. B706 appends the ground elevation when a reading exists (cached
             terrain grid, else one debounced 3DEP point sample) — suppressed over no-data. */}
-        {hoverLL && (
-          <div title={GROUND_EL_TITLE} style={{ position: "absolute", bottom: 8, left: "50%", transform: "translateX(-50%)", zIndex: 900, pointerEvents: "none", fontFamily: NUM_FONT, fontSize: 11, color: "rgba(255,255,255,0.9)", background: "rgba(0,0,0,0.5)", backdropFilter: "blur(4px)", WebkitBackdropFilter: "blur(4px)", padding: "3px 9px", borderRadius: 5, lineHeight: 1.4, fontVariantNumeric: TABULAR_NUMS, whiteSpace: "nowrap" }}>
-            {hoverLL.lat.toFixed(6)}°,&nbsp;{hoverLL.lng.toFixed(6)}°
-            {hoverElFt != null && <span data-ground-el> · El ≈ {hoverElFt.toFixed(1)} ft NAVD88</span>}
-          </div>
-        )}
+        <CursorChip ll={hoverLL} el={hoverEl} style={{
+          bottom: 8, left: "50%", transform: "translateX(-50%)", zIndex: 900, maxWidth: "calc(100% - 20px)",
+          color: "rgba(255,255,255,0.9)", background: "rgba(0,0,0,0.5)", padding: "3px 9px",
+        }} />
 
         {/* Right-click-on-empty-map menu → export the map's sites to Google Earth (B684).
             Shared viewport-aware ContextMenu (B915) — flips/clamps at any edge. */}

@@ -47,13 +47,29 @@ export async function samplePoint(lat, lng, { timeoutMs = 8000, fetchImpl, signa
   const geometry = JSON.stringify({ x: lng, y: lat, spatialReference: { wkid: 4326 } });
   const u = `${DEP_URL}/getSamples?geometry=${encodeURIComponent(geometry)}&geometryType=esriGeometryPoint` +
     `&interpolation=RSP_BilinearInterpolation&returnFirstValueOnly=true&f=json`;
-  const ctrl = !signal && typeof AbortController !== "undefined" ? new AbortController() : null;
-  const timer = ctrl ? setTimeout(() => ctrl.abort(), timeoutMs) : null;
+  // A caller-supplied signal used to REPLACE our controller, which silently disabled the
+  // timeout with it — so a socket that hung (a stalled proxy tunnel, an agency host that
+  // accepts and never answers) never settled at all, and the hover readout sat "in flight"
+  // forever with no way to ever report a failure. Own the controller always, chain the
+  // caller's signal onto it, and DISTINGUISH the two aborts: a timeout is a real failure
+  // and throws as one (LOUD-FAILURE), a caller abort stays an AbortError the caller ignores.
+  const ctrl = typeof AbortController !== "undefined" ? new AbortController() : null;
+  const onAbort = () => { try { ctrl.abort(); } catch (_) { /* already gone */ } };
+  if (signal && ctrl) {
+    if (signal.aborted) onAbort();
+    else if (signal.addEventListener) signal.addEventListener("abort", onAbort);
+  }
+  let timedOut = false;
+  const timer = ctrl ? setTimeout(() => { timedOut = true; ctrl.abort(); }, timeoutMs) : null;
   let r;
   try {
-    r = await (fetchImpl || fetch)(u, { signal: signal || (ctrl && ctrl.signal) || undefined });
+    r = await (fetchImpl || fetch)(u, { signal: (ctrl && ctrl.signal) || undefined });
+  } catch (e) {
+    if (timedOut) throw new Error(`3DEP timed out after ${timeoutMs} ms`);
+    throw e;
   } finally {
     if (timer) clearTimeout(timer);
+    if (signal && ctrl && signal.removeEventListener) signal.removeEventListener("abort", onAbort);
   }
   if (!r.ok) throw new Error(`3DEP HTTP ${r.status}`);
   const j = await r.json();

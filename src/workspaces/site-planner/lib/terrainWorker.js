@@ -25,7 +25,10 @@ import {
 // bundle. Here it is a STATIC import on purpose: the worker is its own bundle, so the
 // decoder costs the page nothing, and a dynamic import would only add a round-trip.
 import { decodeGrid } from "./lercGrid.js";
-import { buildContours } from "./contours.js";
+// The marching-squares tracer is worker-only and is the only `d3-contour` consumer, so
+// it lives in its own module (B1095) — same reasoning as lercGrid.js above. Static here:
+// the worker is its own bundle, so it costs the page nothing.
+import { buildContours } from "./contourTrace.js";
 import { flowArrows } from "./flowField.js";
 
 // Smoothing sigmas are spec'd in GROUND METERS (same terrain detail at every zoom)
