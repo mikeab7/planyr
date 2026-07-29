@@ -37,7 +37,7 @@ import { hasPrintableOverlay } from "./lib/overlayPrint.js";
 import { syncOverlayLayers, withTileRetry, ALL_LAYERS, probeService, layerVintage } from "./lib/layers.js";
 import { sanitizeLayerOverrides, overridesFromOverlays, overlaysWithOverrides, applyOnOverrides, overridesSig } from "./lib/layerPrefs.js";
 import { BASEMAPS } from "./lib/basemaps.js";
-import { ppfToZoom } from "./lib/mapLock.js";
+import { ppfToZoom, exactContainerPoint } from "./lib/mapLock.js";
 import { overscanPx, keepBufferFor, retinaForZoom, tileWeight, tileCacheLimit } from "./lib/tileBudget.js";
 import { preserveTilesAcrossSetView, announceSetView, boundTileCache, releaseLayer } from "./lib/tileLifecycle.js";
 import { buildGhost } from "./lib/ghostSnapshot.js";
@@ -2255,6 +2255,25 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // distance returns the drawing to exactly where it started.
     const z = ppfToZoom(view.ppf, origin.lat);
 
+    /* NEW-1 (V478 residual) — where a lat/lng sits in the container frame WITHOUT Leaflet's
+       whole-pixel snap. `map.latLngToContainerPoint` rounds the projection, so using it to
+       aim a pan rounds once here and again inside `panBy`, and using it to build the live
+       gesture transform rounds a target that is fractional by nature. Leaflet's pane is
+       integer-only and THAT floor is unavoidable — a second rounding on top of it is not.
+       HONEST SCOPE: measured on the real page this moves nothing on an even-sized map, and
+       provably cannot — `round(round(w) - k) === round(w) - k` for integer k, and the half-
+       size term is an integer whenever the container has even dimensions. It bites only on
+       an ODD container dimension (half = x.5), where the two roundings can disagree by a
+       pixel, and it removes a rounded input from the gesture transform, which is fractional
+       by nature and never wanted one. It is NOT the source of the V478 residual — that is
+       Leaflet's `_getNewPixelOrigin(...)._round()` on the zoom-commit path, which no call-
+       site change can reach (see the NEW-1 block in ui-audit/diagnose-map-lock.mjs). */
+    const exactPt = (ll) => exactContainerPoint(
+      map.project(L.latLng(ll), map.getZoom()),
+      map.getPixelOrigin(),
+      map.layerPointToContainerPoint(L.point(0, 0)),
+    );
+
     // Snapshot the current tiles as a static overlay (cloned WITH the live
     // transform, so it sits exactly where the basemap looks right now) and keep
     // it until the post-setView reload reports `load` — then drop it. The new
@@ -2302,9 +2321,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if (Math.abs(zoom - cur) < 1e-3) {
         wrap.style.transform = "";
         try {
-          const target = map.latLngToContainerPoint(c);
+          const target = exactPt(c);
           const half = map.getSize().divideBy(2);
-          map.panBy(target.subtract(half), { animate: false, noMoveStart: true });
+          map.panBy(L.point(target.x - half.x, target.y - half.y), { animate: false, noMoveStart: true });
         } catch (_) { try { map.setView(c, zoom, { animate: false }); } catch (_) {} }
         // Store the map's ACTUAL settled center (panBy rounds to whole pixels), so the
         // next sizeChanged test compares against reality, not the pre-round target.
@@ -2361,7 +2380,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // Track the gesture by transforming the committed tiles to match.
     try {
       const scale = map.getZoomScale(z, prev.zoom);                 // 2^(z - prev.zoom)
-      const p = map.latLngToContainerPoint(L.latLng(center));        // where `center` sits now
+      const p = exactPt(center);                                     // where `center` sits now (unsnapped)
       const half = map.getSize().divideBy(2);
       const tx = half.x - p.x * scale;
       const ty = half.y - p.y * scale;
