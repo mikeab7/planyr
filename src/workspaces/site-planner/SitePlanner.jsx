@@ -12086,6 +12086,20 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // ghost buttons on the DARK top bar
   const dGhost = { padding: "6px 11px", fontSize: 12.5, borderRadius: 8, border: "1px solid transparent", background: "transparent", color: PAL.chromeInk, cursor: "pointer", fontFamily: "inherit", fontWeight: 500, whiteSpace: "nowrap" };
   const dIcon = { ...dGhost, width: 30, height: 30, padding: 0, display: "grid", placeItems: "center", fontSize: 15 };
+  // NEW-1 — the bottom-center canvas toast chrome, defined ONCE. The pill geometry and its two
+  // button treatments were copied inline at every toast site (the pob/route/warn/deed-align pill,
+  // the overlay-calibration pill, and now the parcel-select hint), so each new message re-shipped
+  // the same style objects. One definition each: callers override only what genuinely differs
+  // (the background, and the hint's stacked `bottom`). Pixel-identical to what shipped before.
+  const toastPill = { position: "fixed", left: "50%", bottom: 84, transform: "translateX(-50%)", zIndex: 2500, maxWidth: "80vw", color: "#fff", padding: "9px 16px", borderRadius: 99, fontSize: 12.5, fontWeight: 600, boxShadow: "0 8px 28px rgba(0,0,0,0.3)", display: "flex", gap: 12, alignItems: "center" };
+  const toastActionBtn = { border: "none", background: "var(--surface-raised)", color: PAL.accent, borderRadius: 7, padding: "4px 12px", cursor: "pointer", fontSize: 11.5, fontWeight: 700, whiteSpace: "nowrap" };
+  const toastGhostBtn = { border: "1px solid rgba(255,255,255,0.5)", background: "transparent", color: "#fff", borderRadius: 7, padding: "3px 9px", cursor: "pointer", fontSize: 11.5, fontWeight: 600, whiteSpace: "nowrap" };
+  // NEW-1 — same treatment for the top-center save/status banner family (read-only · cloud-save
+  // failed · saved-to-cloud-only · local-save failed · save-now confirmation · split note). Six
+  // copies of one near-identical object; each now overrides only its own tone, width and z-band.
+  const topBanner = { position: "fixed", top: 79, left: "50%", transform: "translateX(-50%)", zIndex: 6000, maxWidth: "min(740px, calc(100vw - 16px))", display: "flex", alignItems: "center", gap: 12, background: "#3f3a2a", color: "#fff", border: "1px solid #d6b24a", borderRadius: 10, padding: "9px 13px", fontSize: 12.5, fontWeight: 600, fontFamily: "system-ui, sans-serif", boxShadow: "0 8px 28px rgba(0,0,0,0.35)" };
+  const bannerText = { flex: 1 };
+  const bannerX = { flex: "none", cursor: "pointer", background: "rgba(255,255,255,0.18)", color: "#fff", border: "none", borderRadius: 6, padding: "2px 8px", fontFamily: "inherit", fontSize: 12, fontWeight: 700 };
   // Editable Site/Plan labels that sit inline in the dark top bar.
   // Site/Plan dropdown trigger buttons in the dark top bar.
   const hdrTab = (fs, color, weight) => ({ display: "flex", alignItems: "center", gap: 5, background: "var(--chrome-bg-elev)", border: "1px solid var(--chrome-divider)", borderRadius: 6, color, fontSize: fs, fontWeight: weight, fontFamily: "inherit", padding: "4px 9px", cursor: "pointer", maxWidth: 220, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" });
@@ -14765,46 +14779,46 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           hit — so we say so and offer "Take over editing here" (steal the lock + push the pent-up work)
           instead. Closes automatically (lock hand-off) when the other tab is closed. */}
       {readOnly && !localSaveFailed && (
-        <div role="alert" data-testid="readonly-banner" style={{ position: "fixed", top: 79, left: "50%", transform: "translateX(-50%)", zIndex: 6000, maxWidth: "min(740px, calc(100vw - 16px))", display: "flex", alignItems: "center", gap: 12, background: "#3f3a2a", color: "#fff", border: "1px solid #d6b24a", borderRadius: 10, padding: "9px 13px", fontSize: 12.5, fontWeight: 600, fontFamily: "system-ui, sans-serif", boxShadow: "0 8px 28px rgba(0,0,0,0.35)" }}>
-          <span style={{ flex: 1 }}>👁 <b>Read-only</b> — this plan is open in another tab, which is the active editor. Your changes here are saved on <b>this device</b> but <b>aren't syncing to the cloud</b> yet. <b>Reloading won't help</b> while the other tab is open — take over here, or close the other tab.</span>
+        <div role="alert" data-testid="readonly-banner" style={topBanner}>
+          <span style={bannerText}>👁 <b>Read-only</b> — this plan is open in another tab, which is the active editor. Your changes here are saved on <b>this device</b> but <b>aren't syncing to the cloud</b> yet. <b>Reloading won't help</b> while the other tab is open — take over here, or close the other tab.</span>
           <button onClick={takeOverEditing} data-testid="takeover-btn" title="Make this the active tab and save your changes to the cloud now" style={{ flex: "none", cursor: "pointer", background: "#d6b24a", color: "#2a2410", border: "none", borderRadius: 7, padding: "5px 11px", fontFamily: "inherit", fontSize: 12, fontWeight: 800 }}>Take over editing here</button>
         </div>
       )}
       {/* B474 review (#8): gated on !localSaveFailed — "saved on this device" is false when the device
           write failed too; the red local-save-failed banner is the authoritative message in that case. */}
       {cloudSaveFailed && !localSaveFailed && (
-        <div role="alert" style={{ position: "fixed", top: 79, left: "50%", transform: "translateX(-50%)", zIndex: 6000, maxWidth: "min(620px, calc(100vw - 16px))", display: "flex", alignItems: "center", gap: 12, background: "#7c2d12", color: "#fff", border: "1px solid #f59e0b", borderRadius: 10, padding: "9px 13px", fontSize: 12.5, fontWeight: 600, fontFamily: "system-ui, sans-serif", boxShadow: "0 8px 28px rgba(0,0,0,0.35)" }}>
-          <span style={{ flex: 1 }}>⚠ Your last change <b>didn't reach the cloud</b>. It's saved on this device and will retry on your next edit — your work is not lost.</span>
+        <div role="alert" style={{ ...topBanner, maxWidth: "min(620px, calc(100vw - 16px))", background: "#7c2d12", border: "1px solid #f59e0b" }}>
+          <span style={bannerText}>⚠ Your last change <b>didn't reach the cloud</b>. It's saved on this device and will retry on your next edit — your work is not lost.</span>
           <button onClick={retryCloudSave} title="Try saving to the cloud again now" style={{ flex: "none", cursor: "pointer", background: "#f59e0b", color: "#1a1206", border: "none", borderRadius: 7, padding: "5px 11px", fontFamily: "inherit", fontSize: 12, fontWeight: 800 }}>Retry now</button>
-          <button onClick={() => setCloudSaveFailed(false)} title="Dismiss" style={{ flex: "none", cursor: "pointer", background: "rgba(255,255,255,0.18)", color: "#fff", border: "none", borderRadius: 6, padding: "2px 8px", fontFamily: "inherit", fontSize: 12, fontWeight: 700 }}>✕</button>
+          <button onClick={() => setCloudSaveFailed(false)} title="Dismiss" style={bannerX}>✕</button>
         </div>
       )}
       {/* B473 — device-write health. AMBER = the device storage is full but the work IS saved to the
           cloud account (safe + reloads fine; only action is freeing space for an offline copy). RED =
           the work is NOT safe anywhere yet (device write failed AND the cloud hasn't confirmed). */}
       {savedToCloudOnly ? (
-        <div role="status" data-testid="saved-cloud-only" style={{ position: "fixed", top: 79, left: "50%", transform: "translateX(-50%)", zIndex: 6002, maxWidth: "min(740px, calc(100vw - 16px))", display: "flex", alignItems: "center", gap: 12, background: "#3f3a2a", color: "#fff", border: "1px solid #d6b24a", borderRadius: 10, padding: "9px 13px", fontSize: 12.5, fontWeight: 600, fontFamily: "system-ui, sans-serif", boxShadow: "0 8px 28px rgba(0,0,0,0.35)" }}>
-          <span style={{ flex: 1 }}>✔ <b>Saved to your account</b> — your work is safe in the cloud and will reload fine. This <b>device's storage is full</b>, so there's no offline copy; free up space (or Export) to keep one.</span>
+        <div role="status" data-testid="saved-cloud-only" style={{ ...topBanner, zIndex: 6002 }}>
+          <span style={bannerText}>✔ <b>Saved to your account</b> — your work is safe in the cloud and will reload fine. This <b>device's storage is full</b>, so there's no offline copy; free up space (or Export) to keep one.</span>
           <button onClick={saveNow} title="Try saving on this device again" style={{ flex: "none", cursor: "pointer", background: "rgba(255,255,255,0.18)", color: "#fff", border: "none", borderRadius: 6, padding: "4px 10px", fontFamily: "inherit", fontSize: 12, fontWeight: 700 }}>Retry device save</button>
         </div>
       ) : localSaveFailed && (
-        <div role="alert" data-testid="local-save-failed" style={{ position: "fixed", top: 79, left: "50%", transform: "translateX(-50%)", zIndex: 6002, maxWidth: "min(720px, calc(100vw - 16px))", display: "flex", alignItems: "center", gap: 12, background: "#7c1d1d", color: "#fff", border: "1px solid #f87171", borderRadius: 10, padding: "9px 13px", fontSize: 12.5, fontWeight: 700, fontFamily: "system-ui, sans-serif", boxShadow: "0 8px 28px rgba(0,0,0,0.4)" }}>
-          <span style={{ flex: 1 }}>⛔ Your last change <b>could not be saved on this device</b> — your browser storage may be full or blocked. Use <b>Save now</b> (or Export) to keep your work, then free up space.</span>
+        <div role="alert" data-testid="local-save-failed" style={{ ...topBanner, zIndex: 6002, maxWidth: "min(720px, calc(100vw - 16px))", background: "#7c1d1d", border: "1px solid #f87171", fontWeight: 700, boxShadow: "0 8px 28px rgba(0,0,0,0.4)" }}>
+          <span style={bannerText}>⛔ Your last change <b>could not be saved on this device</b> — your browser storage may be full or blocked. Use <b>Save now</b> (or Export) to keep your work, then free up space.</span>
           <button onClick={saveNow} title="Try saving again now" style={{ flex: "none", cursor: "pointer", background: "#f87171", color: "#3a0a0a", border: "none", borderRadius: 7, padding: "5px 11px", fontFamily: "inherit", fontSize: 12, fontWeight: 800 }}>Save now</button>
         </div>
       )}
       {/* B473 — provable confirmation for an explicit Save now (a save you can SEE, not just trust). */}
       {saveNowMsg && (
-        <div role="status" data-testid="save-now-msg" style={{ position: "fixed", top: 79, left: "50%", transform: "translateX(-50%)", zIndex: 6002, display: "flex", alignItems: "center", gap: 10, background: "#14532d", color: "#fff", border: "1px solid #4ade80", borderRadius: 10, padding: "8px 13px", fontSize: 12.5, fontWeight: 700, fontFamily: "system-ui, sans-serif", boxShadow: "0 8px 28px rgba(0,0,0,0.35)" }}>
+        <div role="status" data-testid="save-now-msg" style={{ ...topBanner, zIndex: 6002, maxWidth: undefined, gap: 10, background: "#14532d", border: "1px solid #4ade80", padding: "8px 13px", fontWeight: 700 }}>
           <span>{saveNowMsg}</span>
         </div>
       )}
 
       {/* B472 — transient "couldn't explode that field" notice (the loud surface for a degenerate split, never a silent no-op) */}
       {splitNote && (
-        <div role="alert" data-testid="split-note" style={{ position: "fixed", top: 79, left: "50%", transform: "translateX(-50%)", zIndex: 6000, maxWidth: "min(620px, calc(100vw - 16px))", display: "flex", alignItems: "center", gap: 12, background: "#3f3a2a", color: "#fff", border: "1px solid #d6b24a", borderRadius: 10, padding: "9px 13px", fontSize: 12.5, fontWeight: 600, fontFamily: "system-ui, sans-serif", boxShadow: "0 8px 28px rgba(0,0,0,0.35)" }}>
-          <span style={{ flex: 1 }}>{splitNote}</span>
-          <button onClick={() => setSplitNote(null)} title="Dismiss" style={{ flex: "none", cursor: "pointer", background: "rgba(255,255,255,0.18)", color: "#fff", border: "none", borderRadius: 6, padding: "2px 8px", fontFamily: "inherit", fontSize: 12, fontWeight: 700 }}>✕</button>
+        <div role="alert" data-testid="split-note" style={{ ...topBanner, maxWidth: "min(620px, calc(100vw - 16px))" }}>
+          <span style={bannerText}>{splitNote}</span>
+          <button onClick={() => setSplitNote(null)} title="Dismiss" style={bannerX}>✕</button>
         </div>
       )}
 
@@ -19380,14 +19394,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       )}
 
       {(pobMode || routeMode || overlapWarn || deedAlignHint) && (
-        <div style={{ position: "fixed", left: "50%", bottom: 84, transform: "translateX(-50%)", zIndex: 2500, maxWidth: "80vw",
-          background: (deedAlignHint && !pobMode) ? PAL.accent : overlapWarn.startsWith("⚠") ? "#7f1d1d" : (pobMode || routeMode ? PAL.accent : "#15803d"),
-          color: "#fff", padding: "9px 16px", borderRadius: 99, fontSize: 12.5, fontWeight: 600, boxShadow: "0 8px 28px rgba(0,0,0,0.3)", display: "flex", gap: 12, alignItems: "center" }}>
+        <div style={{ ...toastPill, background: (deedAlignHint && !pobMode) ? PAL.accent : overlapWarn.startsWith("⚠") ? "#7f1d1d" : (pobMode || routeMode ? PAL.accent : "#15803d") }}>
           <span>{pobMode ? (pobMode.queueTotal ? `Deed ${(pobMode.placed || 0) + 1} of ${pobMode.queueTotal}${pobMode.name ? ` — ${pobMode.name}` : ""}: click its point of beginning (Esc cancels all).` : "Click the point of beginning on the plan to anchor the description (Esc to cancel).") : (deedAlignHint ? deedAlignHint.msg : overlapWarn)}</span>
-          {(pobMode || routeMode) && <button onClick={() => { setPobMode(null); setRouteMode(null); setOverlapWarn(""); }} style={{ border: "1px solid rgba(255,255,255,0.5)", background: "transparent", color: "#fff", borderRadius: 7, padding: "3px 9px", cursor: "pointer", fontSize: 11.5, fontWeight: 600 }}>Cancel</button>}
+          {(pobMode || routeMode) && <button onClick={() => { setPobMode(null); setRouteMode(null); setOverlapWarn(""); }} style={toastGhostBtn}>Cancel</button>}
           {deedAlignHint && !pobMode && !routeMode && <>
-            <button onClick={() => alignDeedToParcel(deedAlignHint.id)} style={{ border: "none", background: "var(--surface-raised)", color: PAL.accent, borderRadius: 7, padding: "4px 12px", cursor: "pointer", fontSize: 11.5, fontWeight: 700, whiteSpace: "nowrap" }}>Align to parcel</button>
-            <button onClick={() => setDeedAlignHint(null)} style={{ border: "1px solid rgba(255,255,255,0.5)", background: "transparent", color: "#fff", borderRadius: 7, padding: "3px 9px", cursor: "pointer", fontSize: 11.5, fontWeight: 600, whiteSpace: "nowrap" }}>Dismiss</button>
+            <button onClick={() => alignDeedToParcel(deedAlignHint.id)} style={toastActionBtn}>Align to parcel</button>
+            <button onClick={() => setDeedAlignHint(null)} style={toastGhostBtn}>Dismiss</button>
           </>}
         </div>
       )}
@@ -19399,24 +19411,20 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           to go find the header control. Only ever raised by a press that actually hit a parcel. */}
       {parcelHint && (
         <div data-testid="parcel-select-hint" role="status"
-          style={{ position: "fixed", left: "50%", bottom: (pobMode || routeMode || overlapWarn || deedAlignHint) ? 132 : 84, transform: "translateX(-50%)", zIndex: 2500, maxWidth: "80vw",
-            background: PAL.accent, color: "#fff", padding: "9px 16px", borderRadius: 99, fontSize: 12.5, fontWeight: 600, boxShadow: "0 8px 28px rgba(0,0,0,0.3)", display: "flex", gap: 12, alignItems: "center" }}>
+          style={{ ...toastPill, background: PAL.accent, bottom: (pobMode || routeMode || overlapWarn || deedAlignHint) ? 132 : 84 }}>
           <span>Parcel selection is off — that click panned the map.</span>
-          <button data-testid="parcel-select-hint-on" onClick={() => setParcelSelect(true)}
-            style={{ border: "none", background: "var(--surface-raised)", color: PAL.accent, borderRadius: 7, padding: "4px 12px", cursor: "pointer", fontSize: 11.5, fontWeight: 700, whiteSpace: "nowrap" }}>Turn it on</button>
-          <button aria-label="Dismiss" onClick={dismissParcelHint}
-            style={{ border: "1px solid rgba(255,255,255,0.5)", background: "transparent", color: "#fff", borderRadius: 7, padding: "3px 9px", cursor: "pointer", fontSize: 11.5, fontWeight: 600, whiteSpace: "nowrap" }}>Dismiss</button>
+          <button data-testid="parcel-select-hint-on" onClick={() => setParcelSelect(true)} style={toastActionBtn}>Turn it on</button>
+          <button aria-label="Dismiss" onClick={dismissParcelHint} style={toastGhostBtn}>Dismiss</button>
         </div>
       )}
 
       {ovCalib && (
-        <div style={{ position: "fixed", left: "50%", bottom: 84, transform: "translateX(-50%)", zIndex: 2500, maxWidth: "80vw",
-          background: PAL.accent, color: "#fff", padding: "9px 16px", borderRadius: 99, fontSize: 12.5, fontWeight: 600, boxShadow: "0 8px 28px rgba(0,0,0,0.3)", display: "flex", gap: 12, alignItems: "center" }}>
+        <div style={{ ...toastPill, background: PAL.accent }}>
           <span>{ovCalibMsg()} {ovCalib.kind === "align" && Math.floor(ovCalib.pts.length / 2) >= 2 ? <span style={{ opacity: 0.75 }}>· or add more pairs for a better fit</span> : null} <span style={{ opacity: 0.75 }}>(Esc to cancel)</span></span>
           {ovCalib.kind === "align" && Math.floor(ovCalib.pts.length / 2) >= 2 && (
-            <button onClick={applyOvAlign} style={{ border: "1px solid #fff", background: "var(--surface-raised)", color: PAL.accent, borderRadius: 7, padding: "3px 11px", cursor: "pointer", fontSize: 11.5, fontWeight: 700 }}>Apply {Math.floor(ovCalib.pts.length / 2)} pts</button>
+            <button onClick={applyOvAlign} style={{ ...toastActionBtn, border: "1px solid #fff", padding: "3px 11px" }}>Apply {Math.floor(ovCalib.pts.length / 2)} pts</button>
           )}
-          <button onClick={() => setOvCalib(null)} style={{ border: "1px solid rgba(255,255,255,0.5)", background: "transparent", color: "#fff", borderRadius: 7, padding: "3px 9px", cursor: "pointer", fontSize: 11.5, fontWeight: 600 }}>Cancel</button>
+          <button onClick={() => setOvCalib(null)} style={toastGhostBtn}>Cancel</button>
         </div>
       )}
 
