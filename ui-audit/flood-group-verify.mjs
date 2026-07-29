@@ -40,6 +40,9 @@ try {
   const dmp = await text("#panel-dmp-empty");
   const nocontext = await text("#panel-flood-nocontext");
   const stale = await text("#panel-flood-stalecounty");
+  const blank = await text("#panel-flood-blank");
+  const nocounty = await text("#panel-flood-nocounty");
+  const zonea = await text("#panel-flood-zonea");
 
   ok("no page errors while rendering", errors.length === 0, errors.join(" | "));
 
@@ -138,6 +141,31 @@ try {
   ok("an SFHA site says so instead", /a special flood hazard area IS mapped here/.test(harris) && /including regulatory floodway/.test(harris));
   ok("a FEMA OUTAGE reads 'unknown, not clear' — never a clean all-clear", /unknown, not clear/.test(outage), outage.slice(0, 900));
   ok("no FEMA verdict is claimed with no context at all", !/FEMA effective FIRM/.test(nocontext));
+  ok("NEW-2 — the Zone A sentence, verbatim, when FEMA reports an SFHA over the ring",
+    zonea.includes("FEMA effective FIRM: Zone A — a special flood hazard area IS mapped here."),
+    zonea.slice(0, 900));
+  ok("NEW-2 — …and the X half never speaks for the tract instead",
+    !/no special flood hazard area mapped here/.test(zonea), zonea.slice(0, 900));
+
+  /* ── NEW-1/NEW-2: THE GROUP IS NEVER BLANK ────────────────────────────────────
+   * Found by driving the real panel with the Tsakiris tract's ACTUAL remembered check: the
+   * visible planner panel renders every line correctly, but the map finder's hidden copy —
+   * same component, no floodContext, no site county, and FIRST in the document — renders the
+   * whole group with no verdict and no row reasons. That silent copy is what a page-level
+   * text scan reads. Silence is the one state this group exists to abolish. */
+  ok("NEW-1 — a panel with NO facts at all still says something",
+    /not checked here yet/i.test(blank), blank.slice(0, 700));
+  ok("NEW-1 — …and it does NOT invent a FEMA verdict to fill the space",
+    !/FEMA effective FIRM/.test(blank));
+  ok("NEW-1 — a check whose county never resolved admits the list isn't scoped",
+    /every drainage source is listed/i.test(nocounty), nocounty.slice(0, 700));
+  ok("NEW-1 — a panel WITH its facts stays quiet (the note never accumulates)",
+    !/not checked here yet/i.test(bkdd) && !/every drainage source is listed/i.test(bkdd));
+  ok("NEW-1 — the state line is ONE line, never a paragraph",
+    (blank.match(/not checked here yet/g) || []).length === 1);
+  ok("NEW-1 — every panel carries its surface marker, so a check can target the live one",
+    (await page.locator('[data-testid="layer-panel"][data-surface="planner"]').count()) >= 8,
+    String(await page.locator('[data-testid="layer-panel"]').count()));
 
   // ── NEW-3: the standing line — the root cause of the whole report ─────────────
   ok("states once that FEMA maps zones, not channels",

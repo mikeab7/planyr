@@ -31,7 +31,17 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   county guess may only demote a district that cannot REACH the county; otherwise it fails open.
   And the county it reasons over is the site IDENTIFY county / `LayerPanel`'s `siteCounty` prop —
   **never the `county` prop**, which is the layer-registry key and defaults to Harris on every site.
-  Canvas identify (B1092): `vectorLayers.hitFeature` / `identifyRows` are the pure half,
+  **B1091(×3): the group may never render BLANK.** Every other line here is conditional on a resolved
+  drainage context, so a surface without one said nothing at all — `floodFactsNote` owns that state
+  (not-checked / county-unresolved) and goes silent once the facts are in, so it can't accumulate.
+  Related trap: **BOTH hosts stay mounted** (`SitePlannerApp` hides the inactive one with
+  `display:none` to keep its map alive), so the DOM always holds TWO copies of this panel and the
+  hidden one has no context. The inactive mode is now `inert` + `aria-hidden`, and each panel stamps
+  `data-surface="planner"|"finder"` — **assert against the surface, never against page text.**
+  Canvas identify (B1092; tolerance fixed in the NEW-3 strand — `hitFeature` applies the caller's
+  slop to polygon ring EDGES as well as lines, two-pass so an exact containment still wins, because
+  containment-only gave a 70 ft easement band a click target its own width and no more):
+  `vectorLayers.hitFeature` / `identifyRows` are the pure half,
   `vectorOverlay`'s `group.identifyAt` the accessor, `layers.identifyOverlaysAt` the opt-in gate
   (`cfg.canvasIdentify`) — the planner's SVG canvas owns every click, so this is how a tap there
   reaches the same answer the map finder's Leaflet popover gives. `nhdFlowline.js` — the USGS NHD FType → plain-English

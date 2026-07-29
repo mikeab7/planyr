@@ -1544,7 +1544,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
             {/* B1091(×2) — on the finder the view county IS the best county fact available (no
                 site, no drainage identify), so it feeds the flood scoping too. In the
                 planner the two are deliberately different signals. */}
-            <LayerPanel overlays={overlays} setOverlays={setOverlays} county={viewCounty} siteCounty={viewCounty} layerStatus={layerStatus} coverage={coverage} />
+            <LayerPanel overlays={overlays} setOverlays={setOverlays} county={viewCounty} siteCounty={viewCounty} layerStatus={layerStatus} coverage={coverage} surface="finder" />
           </div>
           </>)}
         </div>
