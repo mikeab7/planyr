@@ -30,7 +30,7 @@
     "    states were folded into that same hover instead of taking a warn line of their own; and the",
     "    trigger sentence itself was collapsed from a two-branch ternary to one string.",
     "",
-    "RAISE 2026-07-29 (B1101, NEW-8/NEW-7 — Colorado): yield-detention-detail 11→12 lines,",
+    "RAISE 2026-07-29 (B1104, NEW-8/NEW-7 — Colorado): yield-detention-detail 11→12 lines,",
     "500→557 chars; yield-stormwater-notes 146→150 lines, 12576→12779 chars.",
     "Justification, per the rule:",
     "  ADDED (detention, 2 counted literals from one ternary): 'MHFD governs here — Planyr does not",
