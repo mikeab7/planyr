@@ -5,8 +5,9 @@ import {
   buildContours, pickInterval, dilateVoids, stripRing,
 } from "../src/workspaces/site-planner/lib/contours.js";
 import {
-  decodeGrid, maskedSmooth, pixelToMerc,
+  maskedSmooth, pixelToMerc,
 } from "../src/workspaces/site-planner/lib/demGrid.js";
+import { decodeGrid } from "../src/workspaces/site-planner/lib/lercGrid.js";
 
 const grid = (width, height, fn) => {
   const values = new Float32Array(width * height);

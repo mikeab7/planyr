@@ -42,7 +42,9 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   curb-stripe trimmer. A road connection is a boolean union, NOT a patch painted over a seam — read
   roadNetwork.js's header before touching anything junction-shaped.
 - Terrain pipeline (B703–B706): `demGrid.js` / `contours.js` / `flowField.js` (pure math,
-  worker-safe) + `terrainWorker.js` (the repo's first Web Worker — import list is test-guarded)
+  worker-safe) + `lercGrid.js` (the LERC codec, split out in B1042 so `lerc` stays OFF the boot
+  bundle — static-imported by the worker, dynamic-imported on the main thread)
+  + `terrainWorker.js` (the repo's first Web Worker — import list is test-guarded)
   + `terrainLayers.js` (Leaflet glue, grid LRU for the hover elevation readout);
   `elevation.js` — 3DEP getSamples (cross-section tool + point readout, survey-ft);
   `fbcdWse.js` — FBCDD Atlas-14 DRAFT WSE samplers (Fort Bend): 0.2% mosaic → `derivedWse02Ft`,
@@ -132,6 +134,15 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   legend), `components/WatchOutChip.jsx` (the one ⚠ item-specific-risk rendering), `components/
   ActionLink.jsx` (the accent-colored "do something" affordance, distinct from a passive tag), and
   `components/YieldFooterDisclaimer.jsx` (the ONE persistent screening disclaimer).
+
+- Export path (B1042): `exportSheet.js` is the ONE home for PDF/PNG/KMZ sheet composition, the
+  B839 aerial tile Stitcher, and GIS raster/vector capture. It is **loaded on demand** (dynamic
+  `import()` from `SitePlanner.jsx`, warmed when the File menu opens) and reads planner state
+  through a `ctx` object rebuilt per call — add a key there, never a new closure capture. Its
+  helpers (`printSheet.js`, `sheetFurniture.js`, `exportStyle.js`, `imagePdf.js`, `kmzExport.js`,
+  `overlayVectorSvg.js`) must NOT gain a static importer on the boot path or they rejoin the
+  critical-path chunk. PDF-PARITY: `printMetricPairs`/`printStormwaterBars` deliberately stay in
+  `SitePlanner.jsx` so screen and sheet read one derivation.
 
 **Conventions:** feet everywhere internal (convert only at the map boundary); theme tokens
 never raw hex; inline editors never `window.prompt/confirm/alert`. See `/CLAUDE.md` KEY DECISIONS.

@@ -2,11 +2,13 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import {
-  gridRequest, exportUrl, looksLikeLerc, decodeGrid, maskedSmooth,
+  gridRequest, exportUrl, looksLikeLerc, maskedSmooth,
   pixelToMerc, mercToPixel, pixelToLatLng, sampleAtLatLng,
   lngToMercX, latToMercY, mercXToLng, mercYToLat, groundScale, mercPerPx,
   CELL_PX, MARGIN_CELLS, MAX_GRID,
 } from "../src/workspaces/site-planner/lib/demGrid.js";
+// B1042 — the LERC codec moved to its own module so it stays off the Site route bundle.
+import { decodeGrid } from "../src/workspaces/site-planner/lib/lercGrid.js";
 import { M_TO_FT } from "../src/workspaces/site-planner/lib/elevation.js";
 
 const fixturePath = fileURLToPath(new URL("./fixtures/dep-katy-463x400.lerc", import.meta.url));

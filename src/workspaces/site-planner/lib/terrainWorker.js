@@ -19,8 +19,12 @@
  *   or   { id, ok: false, error }           (LOUD — the layer shows a failed status)
  */
 import {
-  decodeGrid, maskedSmooth, pixelToLatLng, groundScale, mercYToLat, MARGIN_CELLS,
+  maskedSmooth, pixelToLatLng, groundScale, mercYToLat, MARGIN_CELLS,
 } from "./demGrid.js";
+// The LERC codec lives in its own module (B1042) so it stays off the main thread's boot
+// bundle. Here it is a STATIC import on purpose: the worker is its own bundle, so the
+// decoder costs the page nothing, and a dynamic import would only add a round-trip.
+import { decodeGrid } from "./lercGrid.js";
 import { buildContours } from "./contours.js";
 import { flowArrows } from "./flowField.js";
 
