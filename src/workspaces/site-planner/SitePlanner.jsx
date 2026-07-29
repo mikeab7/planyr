@@ -359,7 +359,7 @@ const TOOLS = [
   { id: "parking", label: "Car Parking", hint: "Pick a row preset from Car Parking ▾ (single 42′ / double 60′) and drag to set the length, or use Free draw for any rectangle / click points for an irregular field; stalls auto-count" },
   { id: "trailer", label: "Trailer Parking", hint: "Drag for a rectangle, or click points to outline irregular trailer storage (double-click to close); auto-counts" },
   { id: "pond", label: "Detention Pond", hint: "Drag for a rectangle, or click points to outline an irregular detention area (double-click to close)" },
-  { id: "road", label: "Road", hint: "Pick a width, then click to drop centerline points — Enter or double-click to finish, Backspace to undo a point, Esc to cancel. Curve each vertex sharp / arc / smooth in the panel. Free draw still drags a rectangle. 6″ curb each side (24′ road = 25′ wide)" },
+  { id: "road", label: "Road", hint: "Pick a width (or Custom width…), then click to drop centerline points — Enter or double-click to finish, Backspace to undo a point, Esc to cancel. Curve each vertex sharp / arc / smooth in the panel. The width is the pavement measured CURB FACE TO CURB FACE; the 6″ curb rides outside it (a 24′ road covers 25′ back-of-curb to back-of-curb)" },
   { id: "easement", label: "Easement", hint: "Draw an easement (Easement ▾ for mode). Centerline+width: click a path, double-click/Enter to finish — it builds a strip of the set width. Boundary: click points, close on the first dot. Offset from parcel edge: click a parcel's edges then Enter. Edit attributes (type/holder/width…) in the Element panel; width re-offsets the strip live" },
   { id: "measure", label: "Measure", hint: "Pick a mode from Measure ▾ — Length (two-point distance), Polylength (click a path, double-click / Enter to finish), Area (outline a region, click the first dot or double-click to close), or Count (click to mark items, Enter to finish)" },
   { id: "mline", label: "Line", hint: "Markup line (L): drag end-to-end. Hold Shift for 45° increments" },
@@ -374,6 +374,11 @@ const MARKUP_TOOLS = ["mpolyline", "mline", "mrect", "mellipse", "mpolygon"];
 // internal mode value stays line/polyline/area (persisted in localStorage), so this is
 // label-only; "Polylength" also disambiguates the measurement from the markup "Polyline".
 const MEASURE_MODES = [["line", "Length"], ["polyline", "Polylength"], ["area", "Area"], ["count", "Count"]];
+// Road width presets (feet), from the user-editable Standards → Roads "Road widths (ft)" list.
+// The number is the pavement CURB FACE TO CURB FACE (B180) — the curb is added outside it.
+const DEFAULT_ROAD_WIDTHS = "24, 26, 30, 36, 40";
+const roadWidthPresets = (settings) => (settings?.roadWidths ?? DEFAULT_ROAD_WIDTHS).split(",").map((s) => s.trim()).filter((s) => Number.isFinite(+s) && +s > 0);
+const DEFAULT_ROAD_WIDTH = roadWidthPresets(null)[0]; // "24"
 const measureModeLabel = (m) => { const e = MEASURE_MODES.find(([k]) => k === m); return e ? e[1] : m; };
 const MAX_DIM = 100000; // ft — sane upper clamp so a fat-fingered size can't make absurd geometry / SVG stalls
 // Relational tags that point at OTHER elements (a host building or a truck court). A copy/paste
@@ -1722,7 +1727,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   }, []);
   const lsGet = (k, d) => { try { return localStorage.getItem("planarfit:" + k) || d; } catch (_) { return d; } };
   const [parkingRows, setParkingRows] = useState(() => lsGet("parkingRows", "free")); // drawn-parking depth preset
-  const [roadWidth, setRoadWidth] = useState(() => lsGet("roadWidth", "free"));    // drawn-road width preset
+  // Drawn-road width, in feet, as a string. NEW-3: the Road tool no longer has a "free" (drag-a-
+  // rectangle) mode — a road is always a clicked centerline at a known width, preset or custom. A
+  // stored "free" from before that change (or any junk) is coerced to the first preset on read, so
+  // an existing browser can't land in a mode the menu no longer offers.
+  const [roadWidth, setRoadWidth] = useState(() => { const v = lsGet("roadWidth", ""); return +v > 0 ? v : DEFAULT_ROAD_WIDTH; });
+  const [roadCustom, setRoadCustom] = useState(false); // NEW-3: the Custom width… entry field is showing
   // Easement tool (NEW-1/2/3): a first-class easement object on the editable layer.
   // `easeMode` is the input mode; easeType/easeWidth are sticky tool defaults.
   const [easeMode, setEaseMode] = useState(() => lsGet("easeMode", "centerline")); // centerline | boundary | parceledge
@@ -15760,7 +15770,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 const curb = +settings.roadCurb || CURB, dw = draftRect.type === "road" ? Math.max(0, Math.min(draftRect.w, draftRect.h) - 2 * curb) : 0;
                 return (
                 <g pointerEvents="none"><rect x={a.x} y={a.y} width={pw} height={ph} fill={typeStyle(draftRect.type, settings).fill} fillOpacity={0.5} stroke={PAL.accent} strokeWidth={1.5} strokeDasharray="5 4" />
-                  {(draftRect.w > 2 || draftRect.h > 2) && <text x={a.x + pw + 6} y={a.y + ph + 14} fontSize="11.5" fontFamily={NUM_FONT} fontVariantNumeric={TABULAR_NUMS} fill={PAL.accent} stroke={PAL.paper} strokeWidth={3} paintOrder="stroke" fontWeight="700">{draftRect.type === "road" ? `${f0(dw)}′ travel` : `${f0(draftRect.w)}′ × ${f0(draftRect.h)}′`}</text>}
+                  {(draftRect.w > 2 || draftRect.h > 2) && <text x={a.x + pw + 6} y={a.y + ph + 14} fontSize="11.5" fontFamily={NUM_FONT} fontVariantNumeric={TABULAR_NUMS} fill={PAL.accent} stroke={PAL.paper} strokeWidth={3} paintOrder="stroke" fontWeight="700">{draftRect.type === "road" ? `${f0(dw)}′ road` : `${f0(draftRect.w)}′ × ${f0(draftRect.h)}′`}</text>}
                 </g>
               ); })()}
               {/* centerline road preview (B596/NEW-1): live tessellated centerline + the
@@ -15796,7 +15806,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     {ring && ring.length >= 3 && <polygon points={ring.map((p) => { const c = f2p(p); return `${c.x},${c.y}`; }).join(" ")} fill={typeStyle("road", settings).fill} fillOpacity={0.4} stroke={PAL.accent} strokeWidth={1.25} strokeDasharray="5 4" />}
                     <polyline points={centerStr} fill="none" stroke={PAL.accent} strokeWidth={1} strokeDasharray="4 4" />
                     {draftRoadPts.map((p, i) => { const c = f2p(p); return <circle key={i} cx={c.x} cy={c.y} r={i === 0 ? 5 : 3.5} fill={i === 0 ? PAL.paper : PAL.accent} stroke={PAL.accent} strokeWidth={1.5} />; })}
-                    {total > 1 && <text x={lp.x} y={lp.y - 8} textAnchor="middle" fontSize="11.5" fontFamily={NUM_FONT} fontVariantNumeric={TABULAR_NUMS} fill={PAL.accent} stroke={PAL.paper} strokeWidth={3} paintOrder="stroke" fontWeight="700">{f0(travelW)}′ travel · {f0(total)}′</text>}
+                    {total > 1 && <text x={lp.x} y={lp.y - 8} textAnchor="middle" fontSize="11.5" fontFamily={NUM_FONT} fontVariantNumeric={TABULAR_NUMS} fill={PAL.accent} stroke={PAL.paper} strokeWidth={3} paintOrder="stroke" fontWeight="700">{f0(travelW)}′ wide · {f0(total)}′ long</text>}
                     {magnet && (() => { const c = f2p(magnet); return <g><circle cx={c.x} cy={c.y} r={9} fill="none" stroke={SEL_BLUE} strokeWidth={2.5} /><circle cx={c.x} cy={c.y} r={3.5} fill={SEL_BLUE} /></g>; })()}
                     {/* NEW-1, owner report 2026-07-25: "I should be able to just press three points…
                         but it doesn't seem like I can do that." He could — three clicks stores three
@@ -16425,6 +16435,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               );
             }
             if (id === "road") {
+              const roadPresets = roadWidthPresets(settings);
+              const roadIsCustom = +roadWidth > 0 && !roadPresets.includes(String(roadWidth));
               return (
                 <div key={id} ref={roadAnchor} style={{ position: "relative" }}>
                   <div style={{ display: "flex", gap: 2 }}>
@@ -16433,12 +16445,28 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     </button>
                     <button className={`rbtn${tool === "road" ? " on" : ""}`} style={{ ...rbtn(tool === "road"), width: 26, flex: "none", padding: 0, justifyContent: "center" }} onClick={() => setRoadMenu((o) => !o)} aria-haspopup="menu" aria-expanded={roadMenu} aria-label="Road presets">▾</button>
                   </div>
-                  <AnchoredMenu open={roadMenu} onClose={() => setRoadMenu(false)} anchorRef={roadAnchor} placement="left" width={230} panelStyle={menuPanel}>
+                  {/* NEW-1/NEW-2/NEW-3/NEW-4 — a row is JUST the width (no per-row how-to repeated five
+                      times), the how-to + the curb-face-to-curb-face meaning live once in the footer,
+                      "Free draw" is gone (a road is always a clicked centerline), and "Custom width…"
+                      keeps an off-preset width (28′, 32′) reachable by the same centerline method. */}
+                  <AnchoredMenu open={roadMenu} onClose={() => { setRoadMenu(false); setRoadCustom(false); }} anchorRef={roadAnchor} placement="left" width={230} panelStyle={menuPanel}>
                     <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, padding: "4px 8px 6px" }}>Road width</div>
-                    <button style={menuItem(tool === "road" && roadWidth === "free")} onClick={() => { setRoadWidth("free"); selectTool("road"); setRoadMenu(false); }}>Free draw (any size)</button>
-                    {(settings.roadWidths ?? "24, 26, 30, 36, 40").split(",").map((s) => s.trim()).filter((s) => Number.isFinite(+s) && +s > 0).map((w) => (
-                      <button key={w} style={menuItem(tool === "road" && roadWidth === w)} onClick={() => { setRoadWidth(w); selectTool("road"); setRoadMenu(false); }}>{w}′ travel — click points, Enter to finish</button>
+                    {roadPresets.map((w) => (
+                      <button key={w} style={menuItem(tool === "road" && roadWidth === w)} onClick={() => { setRoadWidth(w); setRoadCustom(false); selectTool("road"); setRoadMenu(false); }}>{w}′</button>
                     ))}
+                    <button style={menuItem(tool === "road" && roadIsCustom)} onClick={() => setRoadCustom((o) => !o)} aria-expanded={roadCustom || roadIsCustom} aria-haspopup="true">
+                      {roadIsCustom ? `Custom — ${Math.round(+roadWidth)}′` : "Custom width…"}
+                    </button>
+                    {(roadCustom || roadIsCustom) && (
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 10px 6px" }}>
+                        <NumInput style={{ ...numInput, width: 64 }} ariaLabel="Custom road width (ft)" value={Math.round(+roadWidth) || +DEFAULT_ROAD_WIDTH} min={1} max={MAX_DIM}
+                          onCommit={(n) => { if (n > 0) { setRoadWidth(String(n)); selectTool("road"); setRoadMenu(false); setRoadCustom(false); } }} />
+                        <span style={{ fontSize: 12, color: PAL.muted }}>ft</span>
+                      </div>
+                    )}
+                    <div style={{ fontSize: 11, color: PAL.muted, padding: "6px 8px 2px", lineHeight: 1.5, borderTop: `1px solid ${PAL.panelLine}`, marginTop: 4 }}>
+                      Width is curb face to curb face. Click centerline points; double-click / Enter to finish.
+                    </div>
                   </AnchoredMenu>
                 </div>
               );
@@ -16872,7 +16900,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     return (
                     <>
                       <Field label="Length (ft)"><NumInput style={numInput} value={Math.round(roadLengthOf(selEl))} min={1} onCommit={(n) => setRoadLength(selEl, n)} /></Field>
-                      <Field label="Travel width (ft)"><NumInput style={numInput} value={Math.round(roadTravel(selEl))} min={1} onCommit={(n) => setRoadTravel(selEl, n)} /></Field>
+                      {/* NEW-2/NEW-4 — "Road width", never "travel width", and the hover states the
+                          dimension explicitly: it is the pavement between the curb faces (B180). */}
+                      <Field label="Road width (ft)" title="Curb face to curb face — the pavement between the curbs. The curb is added outside this width."><NumInput style={numInput} value={Math.round(roadTravel(selEl))} min={1} onCommit={(n) => setRoadTravel(selEl, n)} /></Field>
                       {/* B620 — inline label riding the road centerline (double-click the road also opens this in place).
                           setSelEl is non-sticky (patches the selected el only); onFocus pushes one undo frame per edit. */}
                       {cl && (<>
@@ -19755,7 +19785,7 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
       return out.length ? out : null;
     })() : null;
     return (
-      <g key={el.id} filter={st.shadow ? "url(#bldgShadow)" : undefined} style={{ cursor: tool === "select" ? (el.locked ? "pointer" : "move") : "crosshair" }}
+      <g key={el.id} data-el-id={el.id} filter={st.shadow ? "url(#bldgShadow)" : undefined} style={{ cursor: tool === "select" ? (el.locked ? "pointer" : "move") : "crosshair" }}
         onPointerDown={(e) => startMoveEl(e, el.id)} onDoubleClick={(e) => onElDouble && onElDouble(e, el.id)}
         onContextMenu={(e) => { if (onElContext) onElContext(e, el.id); }}>
         <path d={dPath} fill={ghostPath ? addF : waterFill} fillOpacity={waterOp} stroke="none" />
@@ -19863,7 +19893,7 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
     // pavement) so it doesn't sit on the drawn centerline; default rides the centerline as before.
     rparts.push(...inlineLabelEls(roadDenseCenterline(el, settings), el.inlineLabel, st.stroke, el.labelSpacing || INLINE_LABEL_SPACING.road, ppf, f2p, `il${el.id}-`, { size: el.labelSize, halo: el.labelHalo, place: labelPlaceOf(el), lf, insetFt: labelPlaceOf(el) === "inside" ? Math.max(0, (+el.travelW || 0) / 4) : 0 }));
     return (
-      <g key={el.id} filter={st.shadow ? "url(#bldgShadow)" : undefined} style={{ cursor: tool === "select" ? (el.locked ? "pointer" : "move") : "crosshair" }}
+      <g key={el.id} data-el-id={el.id} filter={st.shadow ? "url(#bldgShadow)" : undefined} style={{ cursor: tool === "select" ? (el.locked ? "pointer" : "move") : "crosshair" }}
         onPointerDown={(e) => startMoveEl(e, el.id)} onDoubleClick={(e) => onElDouble && onElDouble(e, el.id)}
         onContextMenu={(e) => { if (onElContext) onElContext(e, el.id); }}>{rparts}</g>
     );
@@ -20150,10 +20180,10 @@ function Section({ title, children, collapsed, accent }) {
     </div>
   );
 }
-function Field({ label, children }) {
+function Field({ label, children, title }) {
   return (
     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, marginBottom: 8 }}>
-      <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>{label}</span>{children}
+      <span style={{ fontSize: 12, color: "var(--text-secondary)", ...(title ? { cursor: "help" } : null) }} title={title}>{label}</span>{children}
     </div>
   );
 }
@@ -20174,7 +20204,9 @@ function AlignIcon({ dir }) {
 }
 // A numeric input you can edit freely (clear it, type partial values) — it only
 // commits (parse + clamp) on Enter or blur, never live on each keystroke.
-function NumInput({ value, onCommit, min, max, style, placeholder, step, coarse, allowClear = false }) {
+// `ariaLabel` names the input for a screen reader (and for a headless check) when it does NOT sit
+// behind a visible <Field> label — e.g. the Custom width… entry inside the Road flyout.
+function NumInput({ value, onCommit, min, max, style, placeholder, step, coarse, ariaLabel, allowClear = false }) {
   const [draft, setDraft] = useState(value == null ? "" : String(value));
   const editing = useRef(false);
   useEffect(() => { if (!editing.current) setDraft(value == null ? "" : String(value)); }, [value]);
@@ -20222,7 +20254,7 @@ function NumInput({ value, onCommit, min, max, style, placeholder, step, coarse,
   };
   const coarseStep = coarse != null ? coarse : (step != null ? step * 5 : 0);
   const input = (
-    <input style={style} value={draft} placeholder={placeholder} inputMode="decimal"
+    <input style={style} value={draft} placeholder={placeholder} inputMode="decimal" aria-label={ariaLabel}
       onFocus={() => { editing.current = true; }}
       onChange={(e) => setDraft(e.target.value)}
       onBlur={commit}

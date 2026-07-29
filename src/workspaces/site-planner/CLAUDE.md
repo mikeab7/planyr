@@ -169,7 +169,7 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   through a `ctx` object rebuilt per call — add a key there, never a new closure capture. Its
   helpers (`printSheet.js`, `sheetFurniture.js`, `exportStyle.js`, `imagePdf.js`, `kmzExport.js`,
   `overlayVectorSvg.js`) must NOT gain a static importer on the boot path or they rejoin the
-  critical-path chunk. `exportLabelScale.js` (B1081) is the ONE place that decides what scale the
+  critical-path chunk. `exportLabelScale.js` (B1085) is the ONE place that decides what scale the
   LABEL tier reasons at: the view on screen, the SHEET's own px-per-foot on an export pass — so
   declutter/LOD/collision, label sizes and stroke-zoom are a function of the plan and the paper,
   never of the live zoom. It IS on the boot path (SitePlanner imports it statically, ~1 KB pure). PDF-PARITY: `printMetricPairs`/`printStormwaterBars` deliberately stay in

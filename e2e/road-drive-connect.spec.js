@@ -18,7 +18,7 @@ async function startBlank(page) {
 async function pickRoadPreset(page) {
   await page.getByRole("button", { name: "Road", exact: true }).click();
   await page.getByRole("button", { name: "Road presets" }).click();
-  await page.getByRole("button", { name: /travel — click points/i }).first().click();
+  await page.getByRole("button", { name: /^\d+′$/ }).first().click();
 }
 function driveRoad(page) {
   return page.evaluate(() => {

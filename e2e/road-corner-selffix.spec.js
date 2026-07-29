@@ -52,7 +52,7 @@ test.describe("NEW-1 — three clicks make a road", () => {
 
     await page.getByRole("button", { name: "Road", exact: true }).click();
     await page.getByRole("button", { name: "Road presets" }).click();
-    await page.getByRole("button", { name: /travel — click points/i }).first().click();
+    await page.getByRole("button", { name: /^\d+′$/ }).first().click();
 
     // Keep every click well inside the canvas — the bottom strip carries the scale/north chips.
     const cx = (fx) => box.x + box.width * fx, cy = (fy) => box.y + box.height * fy;

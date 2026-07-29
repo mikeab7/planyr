@@ -140,7 +140,7 @@ await page.keyboard.press("Escape");
 await page.waitForTimeout(200);
 await page.evaluate(() => { const b = document.querySelector('button[aria-label="Road presets"]'); if (b) b.click(); });
 await page.waitForTimeout(250);
-await page.evaluate(() => { for (const b of document.querySelectorAll("button")) { if (/24′ travel — click points/.test(b.textContent || "")) { b.click(); return; } } });
+await page.evaluate(() => { for (const b of document.querySelectorAll("button")) { if (/^24′$/.test((b.textContent || "").trim())) { b.click(); return; } } });
 await page.waitForTimeout(250);
 const svgBox = await page.evaluate(() => { const r = document.querySelector("svg").getBoundingClientRect(); return { x: r.x, y: r.y }; });
 const drawPts = [{ x: svgBox.x + 230, y: svgBox.y + 640 }, { x: svgBox.x + 430, y: svgBox.y + 640 }, { x: svgBox.x + 430, y: svgBox.y + 790 }];

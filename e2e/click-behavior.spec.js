@@ -72,7 +72,7 @@ async function drawCenterlineRoad(page) {
   const box = await canvas(page).boundingBox();
   await page.getByRole("button", { name: "Road", exact: true }).click();
   await page.getByRole("button", { name: "Road presets" }).click();
-  await page.getByRole("button", { name: /travel — click points/i }).first().click();
+  await page.getByRole("button", { name: /^\d+′$/ }).first().click();
   const x1 = box.x + 260, y1 = box.y + 300, x2 = box.x + 560, y2 = y1;
   await page.mouse.click(x1, y1);
   await page.mouse.click(x2, y2);
