@@ -3011,7 +3011,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // and feed the SAME reconciled rows to seed + rowsToModel so shadow and canvas stay in lockstep.
     const rows = reconcileSeedRows(r.rows, eng.shadowSnapshot(), eng.tombstonedSnapshot());
     eng.seed(rows);
-    const model = rowsToModel({}, rows);
+    // NEW-4 — the rows read path now runs the bonded-child heal too, so an assembly torn apart on
+    // disk (a building committed away from its own truck court) is re-fitted to its host the moment
+    // the plan is read, not left broken across every reload. Report what was healed — a silent
+    // repair is a repair nobody can audit (LOUD-FAILURE).
+    const healed = [];
+    const model = rowsToModel({}, rows, { onHeal: (h) => healed.push(h) });
+    if (healed.length) reportClientEvent("bonded-children-healed", "bonded children re-fitted to their host on read", { id: siteId, count: healed.length, healed: healed.slice(0, 20) });
     // dirtyEntries includes the batch in flight, so a refetch landing mid-commit keeps that
     // edit on the canvas too (it re-trues from its own RPC result, not from pre-commit rows).
     const dirtyByKey = new Map(eng.dirtyEntries().map((d) => [d.kind + ":" + d.id, d]));
@@ -3126,6 +3132,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // NEW-1 — bonded (attachedTo) elements are cascade-DERIVED unless the current gesture /
       // selection targets them; everything else (incl. deletes, el = null) stays direct.
       isDirectEdit: (kind, id, el) => kind !== "el" || !el || el.attachedTo == null || isDirectTouched(kind, id),
+      // NEW-1 — the live canvas, read at the moment of the write: the engine closes each bonded
+      // assembly into ONE commit and re-reads every op's bytes from here, so a move can neither
+      // straddle two transactions nor ship pre-gesture coordinates. `stateRef` is assigned during
+      // render, so this is always the latest COMMITTED React state.
+      liveCollections: () => {
+        const s = syncStateOverride.current || stateRef.current;
+        return { els: s.els, markups: s.markups, measures: s.measures, callouts: s.callouts, parcels: s.parcels };
+      },
     });
     elSyncRef.current = eng;
     // B673 — who to blame in a conflict toast: self → "you (another window)"; teammates via the
@@ -3184,15 +3198,30 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   }, [siteId]); // eslint-disable-line react-hooks/exhaustive-deps
   // Diff the live collections and enqueue per-element commits. `busy` (a geometry gesture is in
   // flight) defers the diff — flushElems() at gesture end (onUp) commits the settled result.
-  const reconcileElems = (busy) => {
+  // NEW-2 — the collections the sync engine must treat as LIVE for the duration of one synchronous
+  // flush. `stateRef` is assigned during render, so a handler that has JUST called setEls (an
+  // undo/redo restoring a whole snapshot) still sees the PRE-change state there. Installing the
+  // snapshot here for the length of the flush is what lets an undo commit itself immediately
+  // instead of trailing on the debounce behind the move it is undoing.
+  const syncStateOverride = useRef(null);
+  const reconcileElems = (busy, override) => {
     const e = elSyncRef.current;
     if (!e || !isCloudActive()) return;
-    if (!busy) drainRemote(); // apply remote rows that arrived mid-gesture before diffing
+    // A snapshot flush already knows exactly what the canvas holds; draining remote rows into it
+    // would re-apply rows the snapshot just superseded.
+    if (!busy && !override) drainRemote(); // apply remote rows that arrived mid-gesture before diffing
     stampDirectTargets(); // NEW-1 — refresh direct-touch stamps in the SAME tick the ops are enqueued
-    const s = stateRef.current;
+    const s = override || stateRef.current;
     try { e.reconcile({ els: s.els, markups: s.markups, measures: s.measures, callouts: s.callouts, parcels: s.parcels }, { busy }); } catch (_) {}
   };
-  const flushElems = () => { const e = elSyncRef.current; if (e && isCloudActive()) { reconcileElems(false); try { e.flushGesture(); } catch (_) {} } };
+  const flushElems = (override) => {
+    const e = elSyncRef.current;
+    if (!e || !isCloudActive()) return;
+    const prev = syncStateOverride.current;
+    if (override) syncStateOverride.current = override;
+    try { reconcileElems(false, override); try { e.flushGesture(); } catch (_) {} }
+    finally { syncStateOverride.current = prev; }
+  };
   const retryElems = () => { const e = elSyncRef.current; if (e) e.retryNow(); };
   // Last-ditch flush of pending element commits during page unload (the supabase-js client can't do
   // keepalive) — hits the commit_elements RPC endpoint directly. Composes with the whole-doc unload
@@ -3349,6 +3378,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // points floating over the reverted geometry. Mirrors DocReview/Stitcher applySnapshot (RC-2).
     setDraftPoly(null); setDraftElPoly(null); setDraftRoadPts(null); setMkPoly(null); setMeasDraft([]);
     setEaseDraft(null); setEaseEdges(null); setTracePts([]); setXsecPts([]); setCalloutDraft(null); setDraftRect(null); setMkRect(null);
+    // NEW-2 — an undo/redo is a GESTURE BOUNDARY, exactly like pointer-up, and must commit NOW.
+    // It used to be the only edit path with no flush: the restore landed locally, then trailed on
+    // the engine's ~750 ms debounce while the move it was undoing was still being committed — so
+    // the server received a mix of moved and restored members and the plan tore. Flushed against
+    // the SNAPSHOT (not `stateRef`, which React has not re-rendered yet), so the diff is built from
+    // the state we just applied. Safe when there is nothing to sync — flushElems no-ops.
+    try { flushElems(s); } catch (_) {}
   };
   const undo = () => { const prev = histRef.current.undo(stateRef.current); if (prev) { applySnapshot(prev); touchHist(); } };
   const redo = () => { const next = histRef.current.redo(stateRef.current); if (next) { applySnapshot(next); touchHist(); } };

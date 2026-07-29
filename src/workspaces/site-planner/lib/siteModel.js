@@ -18,6 +18,7 @@
 import { dogEarGeom, dogEarSize, isDogEarSide,
   wallStripBox, wallKidBox, wallKidAlong, hostAxisExtents, ownExtents, bumpsOfHost,
   sideOfBondedBox, localToWorld } from "./dogEar.js";
+import { layoutZoneByKind, boxExtentAlong } from "./dockZones.js";
 import { roadCenterline, dedupeRoadVertices, repairBakedRadii, simplifyRoadVertices, ROAD_SIMPLIFY_TOL_FT, ROAD_VERTEX_COLLAPSE_FT } from "./roadGeometry.js";
 import { bufferPolyline } from "./metesAndBounds.js";
 import { DEFAULT_ROAD_CLASS, roadClassOf } from "./roadClasses.js";
@@ -259,7 +260,7 @@ function normalizeBondedRotations(list) {
 // into the truck-court band (real Jacintoport bug, 2026-06-26 Cowork audit). We snap them back at
 // load-time; idempotent (a correctly-anchored dog-ear re-anchors to itself with no change). Only
 // touches children with a `dogEar` tag; leaves everything else alone.
-function normalizeDogEarPositions(list) {
+function normalizeDogEarPositions(list, onHeal) {
   const els = arr(list);
   if (els.length < 2) return els;
   const byId = new Map();
@@ -277,6 +278,7 @@ function normalizeDogEarPositions(list) {
     if (Math.abs((e.cx || 0) - g.cx) < 1e-6 && Math.abs((e.cy || 0) - g.cy) < 1e-6 &&
         Math.abs((e.w || 0) - g.w) < 1e-6 && Math.abs((e.h || 0) - g.h) < 1e-6) return e;
     changed = true;
+    if (onHeal) onHeal({ id: e.id, host: host.id, kind: "dog-ear", type: e.type, from: { cx: e.cx, cy: e.cy }, to: { cx: g.cx, cy: g.cy } });
     return { ...e, cx: g.cx, cy: g.cy, w: g.w, h: g.h, rot: g.rot };
   });
   return changed ? out : els;
@@ -300,7 +302,7 @@ function normalizeDogEarPositions(list) {
  * appended "Add layer" zone, all `noFit`) is positioned by its own layout and is left alone. */
 const WALL_STRIP_TYPES = new Set(["sidewalk", "landscape"]);
 const isStackMember = (e) => !!(e.noFit || e.truckCourt || e.forCourt || e.forTrailer || e.prevZone);
-function normalizeWallKids(list) {
+function normalizeWallKids(list, onHeal) {
   const els = arr(list);
   if (els.length < 2) return els;
   const byId = new Map();
@@ -335,22 +337,134 @@ function normalizeWallKids(list) {
       const strip = stripFor(host, side);
       const gap = strip ? (isVert ? hostAxisExtents(host, strip).dimBX : hostAxisExtents(host, strip).dimBY) : 0;
       const cur = wallKidAlong(host, side, e);            // along-wall position + run kept verbatim
-      box = wallKidBox(host, side, { depth, gap, run: cur.run, alongShift: cur.alongShift });
+      // NEW-4 — …unless the row has been TORN off its host entirely (a parking field left behind
+      // ~2,000 ft away when its building's move committed in a separate transaction). The owner's
+      // along-wall placement is intent worth preserving only while the row is still ON the wall;
+      // once it is stranded that number is wreckage, so the re-fit re-centres it.
+      const alongShift = strandedFromHost(host, e) ? 0 : cur.alongShift;
+      box = wallKidBox(host, side, { depth, gap, run: cur.run, alongShift });
     }
     const c = localToWorld(host, box.lx, box.ly);
     const g = { cx: c.x, cy: c.y, ...ownExtents(cross, box.dimBX, box.dimBY) };
     const near = (a, b) => Math.abs(a - b) <= 1e-6;
     if (near(e.cx, g.cx) && near(e.cy, g.cy) && near(e.w, g.w) && near(e.h, g.h)) return e;
     changed = true;
+    if (onHeal) onHeal({ id: e.id, host: host.id, kind: WALL_STRIP_TYPES.has(e.type) ? "wall-strip" : "side-parking", type: e.type, side, from: { cx: e.cx, cy: e.cy }, to: { cx: g.cx, cy: g.cy } });
     return { ...e, ...g };
   });
   return changed ? out : els;
 }
 
+/* ---- NEW-4: heal a bonded child that has been TORN AWAY from its host ---------------------
+ * The three passes above re-derive a child that has DRIFTED — a stale angle, an old edge, a host
+ * resized behind its back. None of them can see a child that is simply somewhere ELSE: the write
+ * path was able to commit a host's move in one transaction and part of its bonded assembly in
+ * another (NEW-1), leaving the building ~2,000 ft from its own truck court — an empty drive loop
+ * with orphaned dock squares where it used to be. That state survived every reload, because the
+ * `site_elements` read path healed nothing (NEW-4).
+ *
+ * "Impossible for its kind" is MEASURED, never guessed. A dock-stack member (truck court →
+ * trailer parking → buffer → any appended layer) sits flush OUTWARD from its host's wall, so its
+ * centre can never be further from the host centre than
+ *     host half-diagonal + the whole chain's depth + its own half-diagonal + slack
+ * and a wall kid can never be further than host half-diagonal + its own half-diagonal + slack.
+ * Past THAT is a tear, not a placement. Only members past the reach are re-fitted (through the
+ * same pure `layoutZoneByKind` the canvas lays the stack out with); everything inside it is
+ * returned BY IDENTITY, so a correct record churns nothing — the idempotency contract B499 asks
+ * for, and the reason this can run on every load and every refetch. */
+// Generous: the reach below is already the maximum geometrically legal separation, so the slack
+// only has to swallow rounding + a hand-nudged zone. A real tear is orders of magnitude past it.
+const STRAND_SLACK_FT = 100;
+const halfDiagOf = (b) => Math.hypot(Number(b && b.w) || 0, Number(b && b.h) || 0) / 2;
+/** Is `child` further from `host` than its bond could ever legally put it? `extraReach` is the
+ *  kind-specific allowance (a dock stack's cumulative depth); pure + exported for the tests. */
+export function strandedFromHost(host, child, extraReach = 0) {
+  if (!host || !child) return false;
+  const pts = [host.cx, host.cy, child.cx, child.cy];
+  if (!pts.every((v) => Number.isFinite(v))) return false; // no centre to reason about → never claim a tear
+  const reach = halfDiagOf(host) + halfDiagOf(child) + (Number(extraReach) || 0) + STRAND_SLACK_FT;
+  return Math.hypot(child.cx - host.cx, child.cy - host.cy) > reach;
+}
+
+const rot2d = (x, y, deg) => {
+  const r = ((deg || 0) * Math.PI) / 180, c = Math.cos(r), s = Math.sin(r);
+  return { x: x * c - y * s, y: x * s + y * c };
+};
+const SIDE_NORMAL = { top: [0, -1], bottom: [0, 1], left: [-1, 0], right: [1, 0] };
+const finiteBoxEl = (o) => o && ["cx", "cy", "w", "h"].every((k) => Number.isFinite(o[k]));
+
+// Re-fit every dock-stack member that has been torn off its host. Walks each host's per-side
+// chain exactly as the canvas does (`prevZone` first, falling back to the legacy forCourt /
+// forTrailer bonds), re-derives the chain's geometry from the members' OWN stored depths, and
+// writes back ONLY the stranded ones. `onHeal` receives one record per re-fitted element.
+function normalizeStrandedZones(list, onHeal) {
+  const els = arr(list);
+  if (els.length < 2) return els;
+  const patch = new Map();
+  const nextInChain = (el) => els.find((x) => x && !x.points && !patch.has(x.id) && (
+    x.prevZone === el.id ||
+    (el.truckCourt && x.forCourt === el.id) ||
+    (el.type === "trailer" && x.forTrailer === el.id))) || null;
+
+  for (const host of els) {
+    if (!host || host.type !== "building" || host.dogEar || !finiteBoxEl(host)) continue;
+    const courts = els.filter((x) => x && x.attachedTo === host.id && x.truckCourt && !x.points &&
+      SIDE_NORMAL[x.truckCourt.side] && finiteBoxEl(x));
+    for (const head of courts) {
+      const side = head.truckCourt.side;
+      const chain = [];
+      const seen = new Set();
+      for (let cur = head; cur && !seen.has(cur.id); cur = nextInChain(cur)) { seen.add(cur.id); chain.push(cur); }
+      if (!chain.every(finiteBoxEl)) continue;
+      const [nx, ny] = SIDE_NORMAL[side];
+      const horiz = ny !== 0;
+      const u = rot2d(nx, ny, host.rot || 0);                       // outward normal, world feet
+      const tan = rot2d(horiz ? 1 : 0, horiz ? 0 : 1, host.rot || 0); // along-wall unit
+      // Each member's own DEPTH survives a translation, so read it off the stored box — that is
+      // the user's intent (a resized court keeps its depth) and it is what makes the re-fit a pure
+      // re-placement rather than a re-design.
+      const depths = chain.map((z) => boxExtentAlong(z, u));
+      const totalDepth = depths.reduce((s, d) => s + (d || 0), 0);
+      const strandedAt = chain.map((z) => strandedFromHost(host, z, totalDepth));
+      if (!strandedAt.some(Boolean)) continue;                      // nothing torn on this side
+      const kinds = chain.map((z) => (z.type === "trailer" || z.forCourt ? "trailer" : "strip"));
+      // Span along the wall: taken from the HEAD when the head is still where it belongs (that
+      // span is the B492 clear-face intent); a torn head falls back to the full wall.
+      const headOk = !strandedAt[0];
+      const opts = headOk
+        ? { along: boxExtentAlong(head, tan),
+            alongShift: (head.cx - host.cx) * tan.x + (head.cy - host.cy) * tan.y,
+            alongs: chain.map((z, i) => (i === 0 || strandedAt[i] ? null : boxExtentAlong(z, tan))) }
+        : { alongs: chain.map(() => null) };
+      chain.forEach((z, i) => {
+        if (!strandedAt[i]) return;                                 // in reach → untouched, same object
+        const g = layoutZoneByKind(host, side, i, depths, kinds, opts);
+        patch.set(z.id, g);
+        if (onHeal) onHeal({ id: z.id, host: host.id, kind: "dock-zone", type: z.type, side, from: { cx: z.cx, cy: z.cy }, to: { cx: g.cx, cy: g.cy } });
+      });
+    }
+  }
+  if (!patch.size) return els;
+  return els.map((e) => (e && patch.has(e.id) ? { ...e, ...patch.get(e.id) } : e));
+}
+
+/* The ONE bonded-child heal, shared by BOTH read paths (NEW-4). `createSiteModel` (the site-record
+ * blob) and `rowsToModel` (the signed-in `site_elements` rows) used to disagree: the blob path ran
+ * the normalizers, the rows path ran only `migrateRoads` — so an element-synced plan whose assembly
+ * had been torn stayed broken across every reload. Same function, both paths, so they can never
+ * drift again. `onHeal` is optional telemetry (LOUD-FAILURE: a silent repair is a repair nobody
+ * can audit). */
+export function normalizeBondedChildren(els, onHeal) {
+  return normalizeStrandedZones(
+    normalizeWallKids(normalizeDogEarPositions(normalizeBondedRotations(els), onHeal), onHeal),
+    onHeal,
+  );
+}
+
 /* Build / normalize a Site Model from a (possibly legacy / partial) record.
  * Additive only — never renames or drops the legacy flat fields, so it is also a
  * lossless, idempotent migration. */
-export function createSiteModel(p = {}) {
+export function createSiteModel(p = {}, { onHeal } = {}) {
   return {
     schemaVersion: SITE_MODEL_VERSION,
     // identity
@@ -394,11 +508,12 @@ export function createSiteModel(p = {}) {
     // page,pageCount,intrinsic:{w,h},src(local raster dataURL),markups:[],createdAt,updatedAt}.
     parcelDrawings: objArr(p.parcelDrawings),
     settings: obj(p.settings),
-    // drawn layout + shapes (kept flat; selectors classify markups). Three idempotent passes,
-    // each only touching records that need it: legacy rect roads → centerline model (B596);
-    // bonded children re-anchored to their host's angle (B363); dog-ear children snapped to
-    // their host's current edge (B487, Jacintoport orphan-bumpout).
-    els: ensureZ(normalizeWallKids(normalizeDogEarPositions(normalizeBondedRotations(migrateRoads(objArr(Array.isArray(p.els) ? p.els : p.elements)))))),
+    // drawn layout + shapes (kept flat; selectors classify markups). Idempotent passes, each only
+    // touching records that need it: legacy rect roads → centerline model (B596); then the shared
+    // bonded-child heal — angle re-anchor (B363), dog-ears snapped to the host's current edge
+    // (B487), wall kids re-flushed (B1038/B1039), assemblies torn across transactions re-fitted
+    // (NEW-4). `normalizeBondedChildren` is the SAME function the rows read path runs.
+    els: ensureZ(normalizeBondedChildren(migrateRoads(objArr(Array.isArray(p.els) ? p.els : p.elements)), onHeal)),
     markups: ensureZ(objArr(p.markups)),
     measures: ensureZ(objArr(p.measures)),
     callouts: ensureZ(objArr(p.callouts)),

@@ -56,6 +56,17 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
 - `elementSync.js` / `elementRows.js` / `elementJournal.js` — the element-level sync engine, the
   rows↔model fold layer (incl. `foldJournal`), and the persisted pending-edit journal (NEW-F4:
   a failed commit survives a reload instead of being reverted by the rows-canonical refetch).
+  **B1094/B1098, read before touching the write path:** a bonded assembly (a host + everything
+  `attachedTo` it) is ATOMIC on the wire. `flush()` first closes the assembly (`closeAssemblies`)
+  so every member lands in ONE commit, then re-reads each op's bytes from the live canvas
+  (`freshen`, via the injected `liveCollections()`) so a payload captured before a gesture can't
+  reach the server — those two together are what stops a drag tearing a building off its truck
+  court. Undo/redo is a gesture boundary: `applySnapshot` flushes against the SNAPSHOT (never
+  `stateRef`, which React hasn't re-rendered yet). **B1099:** a genuine foreign row beats a pending
+  DERIVED op — derived churn is never re-pushed over another writer — while a pending DIRECT user
+  edit still wins and still toasts (the B673 matrix, unchanged). **B1097:** `rowsToModel` runs the
+  SAME `normalizeBondedChildren` heal as `createSiteModel` — never wire a load-time repair to only
+  one of the two read paths (the B1012 trap).
 - `planClipboard.js` — the ONE general canvas clipboard (NEW-2/NEW-6): collect the current selection
   (elements expanded to their `attachedTo` assembly, so a building brings its truck court / trailer
   parking / dock zones / bump-outs), then paste with fresh ids, bonds remapped INSIDE the copy, and

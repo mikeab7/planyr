@@ -4,7 +4,7 @@
 > One line per Open / Verify item so project-knowledge sync indexes the live open list and a
 > chat session can see what's already filed without opening the 200 KB backlog. Regenerate it
 > in the SAME commit as any `BACKLOG.md` edit; CI runs `--check` and fails the build on drift.
-> _81 open · 192 awaiting live verification._
+> _81 open · 196 awaiting live verification._
 
 ## 🔲 Open
 
@@ -97,6 +97,10 @@
 | B# | Title | Module | Tags | Verify |
 |---|---|---|---|---|
 | B1093 | "Select parcels: off" strands the user: clicking a parcel does nothing, with no feedback | [Site Planner / parcelSelect] | #site-planner #selection #ui | ⏳ live — awaiting |
+| B1094 | Moving a building splits its bonded assembly across transactions | [Site Planner / sync] | #site-planner #sync #persistence #selection | ⏳ live — awaiting |
+| B1098 | Undo never flushes, so it races the in-flight commit | [Site Planner / sync] | #site-planner #sync #persistence | ⏳ live — awaiting |
+| B1099 | A torn assembly never converges: the client re-pushes its own copy over a foreign row | [Site Planner / sync] | #site-planner #sync #persistence | ⏳ live — awaiting |
+| B1097 | Bonded-child geometry is never healed on the `site_elements` read path | [Site Planner / Site Model] | #site-planner #persistence #sync | ⏳ live — awaiting |
 | B1095 | Hover ANY contour to read its elevation, not just the labelled every-5-ft index lines | [Site Planner / GIS] | #site-planner #gis #ui | ⏳ live — awaiting |
 | B1096 | The ground-elevation readout must ALWAYS show a state (it silently vanished), and must also show PROPOSED elevation + cut/fill | [Site Planner / GIS · grading] | #site-planner #gis #grading #ui | ⏳ live — awaiting |
 | B1092 | The BKDD easement identify never fires on the planner canvas: identify was wired for the map finder only | [Site Planner / GIS] | #site-planner #gis #floodplain | ⏳ live — awaiting |
@@ -308,14 +312,14 @@
 - **#library** — B663, B662, B952, B792, B699, B701, B676, B668, B664, B659
 - **#markup** — B423, B422, B267, B268, B947, B948, B918, B919, B913, B820, B746, B737
 - **#perf** — B1064, B1063, B495, B484, B479, B1086, B1042, B1043, B1045, B1046, B1047, B1048, B1049, B1040, B842, B860, B839, B837, B832, B821, B816, B669
-- **#persistence** — B994, B916, B662, B648, B499, B495, B483, B474, B479, B163, B128, B134, B20, B38, B1070, B1060, B984, B956, B914, B860, B863, B864, B836, B832, B791, B792, B793, B784, B785, B786, B812, B811, B759, B757, B756, B751, B746, B742, B743, B716, B701, B692, B682, B676, B667, B673, B674, B714
+- **#persistence** — B994, B916, B662, B648, B499, B495, B483, B474, B479, B163, B128, B134, B20, B38, B1094, B1098, B1099, B1097, B1070, B1060, B984, B956, B914, B860, B863, B864, B836, B832, B791, B792, B793, B784, B785, B786, B812, B811, B759, B757, B756, B751, B746, B742, B743, B716, B701, B692, B682, B676, B667, B673, B674, B714
 - **#pond** — B1000, B1001, B1002, B1003, B1004, B993, B995, B986, B988, B954, B950, B943, B937, B934, B906, B1053, B1032, B1036, B1030, B1031, B1019, B1020, B1021, B1023, B1024, B1028, B1016, B1007, B999, B997, B996, B990, B992, B983, B982, B987, B980, B981, B978, B977, B976, B975, B974, B973, B972, B970, B969, B968, B967, B965, B963, B958, B957, B909, B907, B905, B904, B903, B902, B901, B900, B888, B884, B883, B870, B871, B707
 - **#road** — B1083, B1067, B1068, B1052, B1017, B1005, B1006, B1010, B1011, B1015, B1014, B1013, B1012, B1009, B1008, B989, B971, B964, B961, B960, B959, B955, B953, B945, B946, B742
 - **#scheduler** — B908, B818, B778, B495, B1050, B1065, B1066, B865, B863, B864, B836, B816
-- **#selection** — B1093, B1038, B1039, B948, B912, B880, B820, B746, B742, B743, B737, B682, B651
-- **#site-planner** — B1064, B1063, B998, B1000, B1001, B1002, B1003, B1004, B993, B994, B995, B986, B985, B988, B966, B954, B950, B944, B943, B937, B936, B934, B906, B810, B776, B777, B752, B753, B723, B724, B725, B629, B499, B484, B474, B479, B423, B406, B370, B309, B182, B183, B178, B177, B171, B163, B147, B115, B13, B95, B1093, B1095, B1096, B1092, B1089, B1087, B1088, B1085, B1074, B1057, B1075, B1076, B1079, B1080, B1070, B1073, B1083, B1067, B1068, B1042, B1060, B1053, B1054, B1056, B1052, B1043, B1045, B1046, B1047, B1048, B1049, B1038, B1039, B1032, B1036, B1030, B1031, B1019, B1020, B1021, B1022, B1023, B1024, B1025, B1026, B1027, B1028, B1029, B1017, B1016, B1007, B1005, B1006, B1010, B1011, B1015, B1014, B1013, B1012, B1009, B1008, B999, B997, B996, B990, B992, B983, B982, B987, B984, B989, B980, B981, B978, B977, B976, B975, B974, B973, B972, B971, B970, B969, B968, B967, B965, B842, B964, B963, B961, B960, B959, B958, B957, B956, B955, B953, B951, B952, B947, B948, B945, B946, B919, B911, B912, B913, B909, B907, B905, B904, B903, B902, B901, B900, B888, B885, B884, B882, B883, B880, B879, B878, B868, B870, B871, B860, B861, B862, B839, B840, B837, B832, B821, B691, B820, B802, B793, B789, B787, B784, B785, B786, B812, B811, B759, B757, B756, B625, B751, B747, B748, B745, B746, B742, B743, B738, B737, B716, B707, B712, B692, B684, B682, B651, B673, B674, B714
+- **#selection** — B1093, B1094, B1038, B1039, B948, B912, B880, B820, B746, B742, B743, B737, B682, B651
+- **#site-planner** — B1064, B1063, B998, B1000, B1001, B1002, B1003, B1004, B993, B994, B995, B986, B985, B988, B966, B954, B950, B944, B943, B937, B936, B934, B906, B810, B776, B777, B752, B753, B723, B724, B725, B629, B499, B484, B474, B479, B423, B406, B370, B309, B182, B183, B178, B177, B171, B163, B147, B115, B13, B95, B1093, B1094, B1098, B1099, B1097, B1095, B1096, B1092, B1089, B1087, B1088, B1085, B1074, B1057, B1075, B1076, B1079, B1080, B1070, B1073, B1083, B1067, B1068, B1042, B1060, B1053, B1054, B1056, B1052, B1043, B1045, B1046, B1047, B1048, B1049, B1038, B1039, B1032, B1036, B1030, B1031, B1019, B1020, B1021, B1022, B1023, B1024, B1025, B1026, B1027, B1028, B1029, B1017, B1016, B1007, B1005, B1006, B1010, B1011, B1015, B1014, B1013, B1012, B1009, B1008, B999, B997, B996, B990, B992, B983, B982, B987, B984, B989, B980, B981, B978, B977, B976, B975, B974, B973, B972, B971, B970, B969, B968, B967, B965, B842, B964, B963, B961, B960, B959, B958, B957, B956, B955, B953, B951, B952, B947, B948, B945, B946, B919, B911, B912, B913, B909, B907, B905, B904, B903, B902, B901, B900, B888, B885, B884, B882, B883, B880, B879, B878, B868, B870, B871, B860, B861, B862, B839, B840, B837, B832, B821, B691, B820, B802, B793, B789, B787, B784, B785, B786, B812, B811, B759, B757, B756, B625, B751, B747, B748, B745, B746, B742, B743, B738, B737, B716, B707, B712, B692, B684, B682, B651, B673, B674, B714
 - **#stitching** — B413, B839
-- **#sync** — B1012
+- **#sync** — B1094, B1098, B1099, B1097, B1012
 - **#testing** — B966, B269, B63, B1086, B1040, B878, B863, B836, B743
 - **#thoroughfare** — B722, B723, B724, B725, B726
 - **#ui** — B998, B995, B985, B954, B950, B944, B943, B937, B936, B934, B917, B810, B735, B723, B115, B1093, B1095, B1096, B1089, B1087, B1088, B1085, B1076, B1070, B1073, B1083, B1067, B1068, B1060, B1053, B1054, B1050, B1065, B1066, B1052, B1030, B1031, B1025, B1029, B1016, B1006, B1015, B1014, B992, B980, B981, B978, B977, B976, B975, B974, B973, B972, B971, B970, B969, B968, B967, B965, B842, B964, B963, B961, B960, B959, B958, B957, B956, B955, B953, B951, B952, B947, B948, B945, B946, B928, B914, B911, B912, B913, B909, B903, B902, B901, B900, B882, B880, B879, B865, B862, B837, B821, B820, B802, B746, B742, B712, B669, B668, B673, B674
