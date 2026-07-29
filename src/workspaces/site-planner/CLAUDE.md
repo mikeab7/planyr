@@ -71,7 +71,7 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   separately and then sling back". Keep EVERY `wrap.style.transform` write pre-paint, and do NOT
   "fix" a recurrence by shortening the 160 ms commit debounce: that narrows the window without
   closing it and reads as fixed on a slow drag while still slinging on a flick. Guard:
-  `test/panLockInvariant.test.js` (2 of its 4 cases go red on the passive-effect model). This is
+  the repo-root `test/` suite `panLockInvariant` (2 of its 4 cases go red on the passive-effect model). This is
   VIEWPORT-STABLE in `/CLAUDE.md`, which the effect predated and violated.
 - `supabase.js` / `auth.js` / `cloudSync.js` — cloud data + auth (shared across workspaces).
 - `elementSync.js` / `elementRows.js` / `elementJournal.js` — the element-level sync engine, the
