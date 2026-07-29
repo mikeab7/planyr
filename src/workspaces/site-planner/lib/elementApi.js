@@ -31,13 +31,47 @@ function raceWithTimeout(build, label, { timeoutMs = COMMIT_TIMEOUT_MS, setTimer
 
 // Commit a batch of ops in one round trip. Returns { ok, results, error }.
 // `results` is the RPC's per-op array (same order as `ops`); [] on failure.
+// B1117 — the 3-arg ATOMIC overload is not available everywhere. Production has the migration
+// (`db/commit_elements_atomic.sql`, applied + rollback-verified 2026-07-29), but any other project
+// that has not run it answers a 3-arg call with a PostgREST "function not found" — which would fail
+// EVERY write. So the first such error latches this flag and every later batch falls back to the
+// plain 2-arg call for the rest of the session: the B1116 client-side split detector is still the
+// backstop, so a project without the migration degrades to the previous behaviour rather than
+// breaking. Module-scoped on purpose (one probe per page load, not one per site).
+let atomicUnavailable = false;
+const missingFunction = (err) => {
+  const m = ((err && (err.message || err.hint || err.details)) || "").toLowerCase();
+  return (err && err.code === "PGRST202") || m.includes("could not find the function") ||
+    m.includes("does not exist") || m.includes("no function matches");
+};
+
+/** `opts.atomic` asks for all-or-nothing group semantics (B1116/B1117). Returns
+ *  { ok, results, applied } — `applied === false` means the server rolled the WHOLE call back and
+ *  NOTHING landed, including ops whose own status reads "ok". `applied` is undefined on the plain
+ *  path. The two modes return different shapes on the wire (atomic → an object, plain → a bare
+ *  array), so both are normalised here rather than at the call site. */
 export async function commitElements(client, siteId, ops, opts = {}) {
   if (!client) return { ok: false, results: [], error: "no client" };
   if (!Array.isArray(ops) || ops.length === 0) return { ok: true, results: [] };
-  const t = raceWithTimeout(() => client.rpc("commit_elements", { p_site: siteId, p_ops: ops }), "commit", opts);
+  const wantAtomic = !!opts.atomic && !atomicUnavailable;
+  const args = wantAtomic
+    ? { p_site: siteId, p_ops: ops, p_atomic: true }
+    : { p_site: siteId, p_ops: ops };
+  const t = raceWithTimeout(() => client.rpc("commit_elements", args), "commit", opts);
   try {
     const { data, error } = await t.race;
-    if (error) return { ok: false, results: [], error: error.message || String(error) };
+    if (error) {
+      if (wantAtomic && missingFunction(error)) {
+        atomicUnavailable = true;                       // latch, then retry this batch un-atomically
+        t.done();
+        return commitElements(client, siteId, ops, { ...opts, atomic: false });
+      }
+      return { ok: false, results: [], error: error.message || String(error) };
+    }
+    // Atomic mode answers { applied, results }; the plain path answers the bare results array.
+    if (data && !Array.isArray(data) && typeof data === "object") {
+      return { ok: true, results: Array.isArray(data.results) ? data.results : [], applied: data.applied !== false };
+    }
     return { ok: true, results: Array.isArray(data) ? data : [] };
   } catch (e) {
     return { ok: false, results: [], error: (e && e.message) || "commit threw" };

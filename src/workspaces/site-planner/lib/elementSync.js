@@ -540,16 +540,27 @@ export function createElementSync(opts = {}) {
     for (const e of batch) { inflightKeys.set(skey(e.kind, e.id), e); recordSent(e.kind, e.id, e.el); } // protected like dirty until the result lands; recentSent survives a transport failure (B757)
     inflight = true;
     setState("syncing");
+    // B1117 — ask for ALL-OR-NOTHING semantics when this batch carries more than one member of a
+    // single assembly. That is exactly the case the server-side rollback exists for (verified live:
+    // a two-op call with one good rev and one stale one left BOTH rows untouched). A single-element
+    // batch has nothing to be atomic about, so it keeps the plain 2-arg call and the blast radius
+    // of the new overload stays small.
+    const atomic = batchSpansAssembly(batch);
     serialize(siteId, async () => {
       const ops = batch.map(opFor);
       let res;
-      try { res = await commit(ops); }
+      try { res = await commit(ops, { atomic }); }
       finally {
         inflight = false;
         for (const e of batch) inflightKeys.delete(skey(e.kind, e.id));
       }
       if (!res || !res.ok) return onTransportFailure(batch, res);
       attempt = 0;
+      // B1117 — `applied === false`: the server rolled the WHOLE call back, so nothing landed —
+      // including ops whose own per-op status reads "ok". Treating those as committed is precisely
+      // the tear this mode exists to prevent, so the entire batch is re-queued at the fresh revs the
+      // conflict rows carry, and it is said out loud.
+      if (res.applied === false) return onAtomicRollback(batch, res.results || []);
       const accepted = processResults(batch, res.results || []);
       // NEW-3 — a batch in which NOT ONE op was accepted is a client that is out of date: its ops
       // will be rejected on the rev guard again, and again. Re-queueing them on the plain debounce
@@ -581,6 +592,54 @@ export function createElementSync(opts = {}) {
       // runaway). At the ~debounceMs cadence LWW still converges within a fraction of a second.
       if (dirty.size > 0) schedule(false); else setState("idle");
     });
+  }
+
+  // Does this batch carry more than one member of the same assembly? (B1117 — the atomic gate.)
+  function batchSpansAssembly(batch) {
+    if (batch.length < 2) return false;
+    const live = liveIndex();
+    const seen = new Set();
+    for (const e of batch) {
+      if (e.kind !== "el") continue;
+      const cur = (live && live.byKey.get(skey("el", e.id))) || e.el;
+      const root = rootIdOf(cur, e.id);
+      if (root == null) continue;
+      if (seen.has(root)) return true;
+      seen.add(root);
+    }
+    return false;
+  }
+
+  // B1117 — an atomic call the server rolled back. NOTHING was written, so no shadow json may be
+  // advanced; only the REVS are adopted (from the conflict rows) so the retry targets the current
+  // rows instead of repeating the same stale expectation. The whole batch is re-queued.
+  function onAtomicRollback(batch, results) {
+    const byId = new Map();
+    for (const r of results) if (r && r.id) byId.set(r.id, r);
+    for (const e of batch) {
+      const key = skey(e.kind, e.id);
+      const row = (byId.get(e.id) || {}).row;
+      if (row && typeof row.rev === "number") {
+        const cur = shadow.get(key);
+        // Keep OUR json as the diff baseline (our data is still what the canvas holds and what we
+        // intend to write); adopt only the rev, flagged `stale` because json and rev now disagree.
+        if (cur) shadow.set(key, { ...cur, rev: row.rev, stale: true });
+      }
+      if (!dirty.has(key)) enqueue(key, e);
+    }
+    splitStreak += 1;
+    report("element-atomic-rollback", "the server rolled the whole group back — re-committing at fresh revs", { siteId, ops: batch.length, streak: splitStreak });
+    onEvent({ type: "assembly-split", ids: batch.map((e) => e.id), streak: splitStreak, rolledBack: true });
+    if (splitStreak >= maxRejectStreak) {
+      setState("stale");
+      report("element-assembly-split-unresolved", "an assembly would not commit whole", { siteId, streak: splitStreak });
+      onEvent({ type: "client-stale", streak: splitStreak, pending: dirty.size, reason: "assembly-split" });
+      return;
+    }
+    const wait = backoff[Math.min(splitStreak - 1, backoff.length - 1)];
+    if (backoffHandle != null) clearTimer(backoffHandle);
+    setState("retrying");
+    backoffHandle = setTimer(() => { backoffHandle = null; flush(); }, wait);
   }
 
   function opFor(e) {

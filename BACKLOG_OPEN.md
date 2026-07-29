@@ -100,7 +100,7 @@
 | B# | Title | Module | Tags | Verify |
 |---|---|---|---|---|
 | B1116 | A partially-accepted batch tears the assembly the batch existed to protect | [Site Planner / sync] | #site-planner #sync #persistence | ⏳ live — awaiting |
-| B1117 | Send `p_atomic` once the atomic group commit is live | [Site Planner / sync] | #site-planner #sync #persistence | ⏳ live — awaiting |
+| B1117 | Send `p_atomic` now that the atomic group commit is LIVE | [Site Planner / sync] | #site-planner #sync #persistence | ⏳ live — awaiting |
 | B1118 | The heal misses a whole-assembly translation, because reach scales with the host | [Site Planner / Site Model] | #site-planner #persistence | ⏳ live — awaiting |
 | B1113 | A stale local cache still wins on load, for a SUBSET of an assembly, dribbled across transactions | [Site Planner / sync] | #site-planner #sync #persistence | ⏳ live — awaiting |
 | B1114 | `strandedFromHost` missed a large-but-not-absurd displacement | [Site Planner / Site Model] | #site-planner #persistence | ⏳ live — awaiting |

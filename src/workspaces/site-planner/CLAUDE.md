@@ -99,9 +99,14 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   with the move being undone, and yielding left 11 of 12 ops silent while the host's landed). And a
   batch that lands only PARTLY across an assembly is never settled: `processResults` re-enqueues
   every refused member of a partly-accepted assembly and emits `assembly-split`. The server half —
-  all-or-nothing group commit — is `db/commit_elements_atomic.sql`, which the owner must run; the
-  client does NOT pass `p_atomic` until then (B1117), because a missing 3-arg overload 404s every
-  write. **B1118:** the load-time heal's `exempt` set — a repaired element must diff and COMMIT, or
+  all-or-nothing group commit — is `db/commit_elements_atomic.sql`, **applied to production and
+  rollback-verified 2026-07-29**. **B1117:** the client passes `p_atomic: true` for a batch that
+  spans more than one member of one assembly (`batchSpansAssembly`); `applied:false` means NOTHING
+  landed — including ops whose own status reads `ok` — so `onAtomicRollback` re-queues the WHOLE
+  batch, adopting only the fresh REVS, never the json. The two modes return DIFFERENT wire shapes
+  (atomic → an object, plain → a bare array); `elementApi` normalises both. A project without the
+  migration answers a 3-arg call with PGRST202, so `elementApi` latches a fallback to the 2-arg
+  call — never let that error reach the engine as a write failure. **B1118:** the load-time heal's `exempt` set — a repaired element must diff and COMMIT, or
   rows-canonical-on-seed adopts the torn rows straight back over the repair.
 - `planClipboard.js` — the ONE general canvas clipboard (NEW-2/NEW-6): collect the current selection
   (elements expanded to their `attachedTo` assembly, so a building brings its truck court / trailer
