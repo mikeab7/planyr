@@ -23,6 +23,7 @@ import { supabase, supabaseRest, currentAccessToken } from "./lib/supabase.js";
 import { createIdMinter, randomIdSalt } from "../../shared/ids.js";
 import { mergeSiteContent, createSiteModel } from "./lib/siteModel.js";
 import { extendMergeSelection } from "./lib/parcelSelect.js";
+import { parcelSelectHintDecision, PARCEL_HINT_COOLDOWN_MS } from "./lib/parcelSelectHint.js";
 import { measuresUnderPoint, nextMeasureSelection } from "./lib/measureHit.js";
 import { nearestBoundaryEdge, constrainToEdgeAngle } from "./lib/edgeConstrain.js";
 import { markupsUnderPoint, nextMarkupSelection, boxCorners } from "./lib/markupPick.js";
@@ -2036,6 +2037,32 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (msg && ms > 0) warnTimerRef.current = setTimeout(() => { warnTimerRef.current = null; setOverlapWarn(""); }, ms);
   }, []);
   useEffect(() => () => { if (warnTimerRef.current) clearTimeout(warnTimerRef.current); }, []);
+  // NEW-1 — feedback at the point of failure when "Select parcels" is OFF. B311 deliberately lets
+  // the press fall through to a background pan (that behaviour is untouched); this only ADDS a
+  // short, non-blocking hint on the same bottom-center toast surface the rest of the canvas uses,
+  // with an inline "Turn it on" so the fix is one click from where the click failed. All the
+  // "should we say something?" rules live in the pure lib/parcelSelectHint.js.
+  const [parcelHint, setParcelHint] = useState(false);
+  const parcelHintRef = useRef({ at: 0, gestureId: null }); // last showing (for the per-gesture + cooldown guards)
+  const parcelHintTimerRef = useRef(null);
+  const noteParcelSelectBlocked = useCallback((gestureId) => {
+    const now = Date.now();
+    const last = parcelHintRef.current;
+    const { show } = parcelSelectHintDecision({
+      parcelSelect: false, hitParcel: true, now,
+      lastShownAt: last.at, lastGestureId: last.gestureId, gestureId,
+    });
+    if (!show) return;
+    parcelHintRef.current = { at: now, gestureId };
+    setParcelHint(true);
+    if (parcelHintTimerRef.current) clearTimeout(parcelHintTimerRef.current);
+    parcelHintTimerRef.current = setTimeout(() => { parcelHintTimerRef.current = null; setParcelHint(false); }, PARCEL_HINT_COOLDOWN_MS);
+  }, []);
+  const dismissParcelHint = useCallback(() => {
+    if (parcelHintTimerRef.current) { clearTimeout(parcelHintTimerRef.current); parcelHintTimerRef.current = null; }
+    setParcelHint(false);
+  }, []);
+  useEffect(() => () => { if (parcelHintTimerRef.current) clearTimeout(parcelHintTimerRef.current); }, []);
   // Auto-dismiss the transient "couldn't explode that field" notice (B472).
   useEffect(() => { if (!splitNote) return; const t = setTimeout(() => setSplitNote(null), 4500); return () => clearTimeout(t); }, [splitNote]);
   // Block the browser's default file-drop (navigate to / open the dropped PDF) anywhere in
@@ -7313,6 +7340,19 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     drag.current = { mode: "move", kind: "el", id, fx: fp.x, fy: fp.y, members, canceler: stateRef.current };
     svgRef.current.setPointerCapture(e.pointerId);
   };
+  // NEW-1 — the ONE place "Select parcels" flips, shared by the header toggle and the hint's
+  // inline "Turn it on" action, so the two can never drift. Turning it OFF now ANNOUNCES itself:
+  // the flag is saved per plan, so a flip nobody noticed used to persist across sessions and
+  // devices and read as "the app stopped letting me click my parcels".
+  const setParcelSelect = (on) => {
+    setSettings((s) => ({ ...s, parcelSelect: on }));
+    if (!on && sel?.kind === "parcel") { setSel(null); setMulti([]); setDrillId(null); } // entering pure-browse → drop any parcel selection
+    dismissParcelHint();
+    parcelHintRef.current = { at: 0, gestureId: null }; // a deliberate flip re-arms the hint immediately
+    flashWarn(on
+      ? "Select parcels is ON — click a lot's edge or setback line to select it."
+      : "Select parcels is OFF — clicks pan the map instead of selecting a lot.", 4500);
+  };
   const startMoveParcel = (e, id) => {
     if (e.button !== 0) return;
     if (identifyMode) { e.stopPropagation(); beginIdentifyPress(e); return; } // B383: in identify→add mode, a press on an existing lot toggles/adds via the same path (click adds, drag pans)
@@ -7324,7 +7364,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // B311: "Select parcels" OFF → parcels are click-through for pure browse/measure. Don't
     // stop propagation: let the press fall through to the background pan (no select, no move),
     // exactly as if the click had landed on empty canvas.
-    if (!settings.parcelSelect) return;
+    // NEW-1: the click-through STAYS — but it no longer happens in silence. This press provably
+    // landed on a parcel's boundary / setback hit-stroke, so say why nothing happened (rate-limited
+    // in lib/parcelSelectHint.js: once per press gesture, and not again for several seconds, so a
+    // genuine pan across a subdivision never turns into a stream of hints).
+    if (!settings.parcelSelect) { noteParcelSelectBlocked(e.timeStamp); return; }
     if (mergePick) { e.stopPropagation(); toggleMerge(id); setSel({ kind: "parcel", id }); return; } // B720: plain click picks in merge mode
     if (e.shiftKey) { e.stopPropagation(); shiftPickParcel(id); return; } // Shift-click: additive multi-select to merge (B735 seeds from `sel`; shiftPickParcel owns `sel`)
     e.stopPropagation();
@@ -13140,16 +13184,23 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       </div>
       {/* Snap's interactive toggle moved to the on-canvas View (eye) menu with the other
           view/drawing aids (B653) — the top-bar duplicate is gone. S still toggles it. */}
+      {/* NEW-1 — the readout IS the control. This pill was already a <button>, but styled as a
+          borderless ghost with muted text in its OFF state it read as a passive status label, so
+          the one thing that told you selection was off looked like the one thing you couldn't
+          change. It now carries a real pill border + full-contrast chrome text in BOTH states,
+          spells the state out either way, and keeps aria-pressed + the native focus ring (index.css
+          gives every button a :focus-visible outline) so it's reachable by keyboard. */}
       {parcels.length > 0 && (
-        <button className="dbtn" aria-pressed={settings.parcelSelect} style={{ ...dGhost, display: "flex", alignItems: "center", gap: 7, color: settings.parcelSelect ? PAL.chromeInk : PAL.chromeMuted, fontWeight: 600 }}
-          onClick={() => {
-            const turningOff = settings.parcelSelect;
-            setSettings((s) => ({ ...s, parcelSelect: !s.parcelSelect }));
-            if (turningOff && sel?.kind === "parcel") { setSel(null); setMulti([]); setDrillId(null); } // entering pure-browse → drop any parcel selection
-          }}
-          title="Select parcels — ON: click a lot's edge or setback line to select it; its interior stays free for building work (dragging always pans the map, never selects). OFF: pure browse/measure, so a click never selects a parcel. Saved per project.">
-          <span style={{ width: 7, height: 7, borderRadius: 99, background: settings.parcelSelect ? "#22c55e" : "var(--chrome-tab-inactive)", display: "inline-block", boxShadow: settings.parcelSelect ? "0 0 7px rgba(34,197,94,0.7)" : "none" }} />
-          {settings.parcelSelect ? "Select parcels" : "Select parcels: off"}
+        <button type="button" className="dbtn" data-testid="parcel-select-toggle"
+          aria-pressed={settings.parcelSelect}
+          aria-label={`Select parcels — currently ${settings.parcelSelect ? "on" : "off"}`}
+          style={{ ...dGhost, display: "flex", alignItems: "center", gap: 7, fontWeight: 600, color: PAL.chromeInk,
+            border: `1px solid ${settings.parcelSelect ? PAL.accent : PAL.chromeLine}`,
+            background: settings.parcelSelect ? "var(--hover-chrome)" : "transparent" }}
+          onClick={() => setParcelSelect(!settings.parcelSelect)}
+          title="Select parcels — click to turn it on or off. ON: click a lot's edge or setback line to select it; its interior stays free for building work (dragging always pans the map, never selects). OFF: pure browse/measure, so a click never selects a parcel. Saved per project.">
+          <span aria-hidden style={{ width: 7, height: 7, borderRadius: 99, background: settings.parcelSelect ? "#22c55e" : "var(--chrome-tab-inactive)", display: "inline-block", boxShadow: settings.parcelSelect ? "0 0 7px rgba(34,197,94,0.7)" : "none" }} />
+          {settings.parcelSelect ? "Select parcels: on" : "Select parcels: off"}
         </button>
       )}
       {tool === "select" && (() => {
@@ -19338,6 +19389,23 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             <button onClick={() => alignDeedToParcel(deedAlignHint.id)} style={{ border: "none", background: "var(--surface-raised)", color: PAL.accent, borderRadius: 7, padding: "4px 12px", cursor: "pointer", fontSize: 11.5, fontWeight: 700, whiteSpace: "nowrap" }}>Align to parcel</button>
             <button onClick={() => setDeedAlignHint(null)} style={{ border: "1px solid rgba(255,255,255,0.5)", background: "transparent", color: "#fff", borderRadius: 7, padding: "3px 9px", cursor: "pointer", fontSize: 11.5, fontWeight: 600, whiteSpace: "nowrap" }}>Dismiss</button>
           </>}
+        </div>
+      )}
+
+      {/* NEW-1 — "you clicked a parcel and nothing happened, here's why" — the same bottom-center
+          toast surface as the pill above (same geometry, same type, same shadow), riding one notch
+          higher when that one is already occupied so neither message can swallow the other. The
+          inline action turns selection back ON right where the click failed, so the user never has
+          to go find the header control. Only ever raised by a press that actually hit a parcel. */}
+      {parcelHint && (
+        <div data-testid="parcel-select-hint" role="status"
+          style={{ position: "fixed", left: "50%", bottom: (pobMode || routeMode || overlapWarn || deedAlignHint) ? 132 : 84, transform: "translateX(-50%)", zIndex: 2500, maxWidth: "80vw",
+            background: PAL.accent, color: "#fff", padding: "9px 16px", borderRadius: 99, fontSize: 12.5, fontWeight: 600, boxShadow: "0 8px 28px rgba(0,0,0,0.3)", display: "flex", gap: 12, alignItems: "center" }}>
+          <span>Parcel selection is off — that click panned the map.</span>
+          <button data-testid="parcel-select-hint-on" onClick={() => setParcelSelect(true)}
+            style={{ border: "none", background: "var(--surface-raised)", color: PAL.accent, borderRadius: 7, padding: "4px 12px", cursor: "pointer", fontSize: 11.5, fontWeight: 700, whiteSpace: "nowrap" }}>Turn it on</button>
+          <button aria-label="Dismiss" onClick={dismissParcelHint}
+            style={{ border: "1px solid rgba(255,255,255,0.5)", background: "transparent", color: "#fff", borderRadius: 7, padding: "3px 9px", cursor: "pointer", fontSize: 11.5, fontWeight: 600, whiteSpace: "nowrap" }}>Dismiss</button>
         </div>
       )}
 
