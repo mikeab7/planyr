@@ -77,3 +77,71 @@ export function typeStandardImpact(els, type, key) {
 export function appliedLabel(count, noun) {
   return `Applied to ${count} ${noun}${count === 1 ? "" : "s"}`;
 }
+
+/* ------------------------------------------------------------------ ONE Apply for the panel
+ *
+ * The per-FIELD Apply + scope row was the owner's complaint: every setting carried its own chip
+ * stack, and that stack was most of the panel's height. Standards is now ONE control set for the
+ * whole panel — one Apply that pushes EVERY standard onto what's already drawn, in ONE undo frame.
+ *
+ * The count is DISTINCT OBJECTS, not the sum of per-key impacts: a parcel whose outline colour and
+ * line weight both change is one object, so "Applied to 12 objects" is honest rather than inflated.
+ * Built on the two per-key primitives above, so there is one engine, not two.
+ */
+
+/**
+ * Apply every standard at once.
+ * @param parcels       current parcels
+ * @param els           current elements
+ * @param parcelValues  { key: value } for the PARCEL_STD_KEYS currently in force
+ * @param types         element types whose per-element overrides should be cleared
+ * @returns { parcels, els, count } — the SAME array references when nothing changed.
+ */
+export function applyAllStandards(parcels, els, parcelValues = {}, types = []) {
+  const touched = new Set();
+  let nextParcels = parcels || [];
+  PARCEL_STD_KEYS.forEach((key) => {
+    if (!(key in parcelValues)) return;
+    const before = nextParcels;
+    const res = applyParcelStandard(before, key, parcelValues[key] ?? null);
+    if (!res.count) return;
+    // Identity comparison finds exactly the rows this key rewrote (the primitives return the same
+    // object for an untouched row), so an object changed by two keys is still counted once.
+    res.parcels.forEach((p, i) => { if (p !== before[i]) touched.add(p.id); });
+    nextParcels = res.parcels;
+  });
+  let nextEls = els || [];
+  (types || []).forEach((type) => {
+    TYPE_STD_KEYS.forEach((key) => {
+      const before = nextEls;
+      const res = applyTypeStandard(before, type, key);
+      if (!res.count) return;
+      res.els.forEach((e, i) => { if (e !== before[i]) touched.add(e.id); });
+      nextEls = res.els;
+    });
+  });
+  const count = touched.size;
+  return count ? { parcels: nextParcels, els: nextEls, count } : { parcels: parcels || [], els: els || [], count: 0 };
+}
+
+/** How many OBJECTS the single Apply would change — drives its count + disabled state. */
+export function allStandardsImpact(parcels, els, parcelValues, types) {
+  return applyAllStandards(parcels, els, parcelValues, types).count;
+}
+
+/** Toast copy for the whole-panel Apply — objects, because it spans parcels AND elements. */
+export function appliedObjectsLabel(count) {
+  return `Applied to ${count} object${count === 1 ? "" : "s"}`;
+}
+
+/**
+ * Where the ONE panel-level scope control starts, DERIVED from the per-key scopes already stored.
+ *
+ * Migration rule (the hazard): collapsing per-key scopes into one control must not move anything.
+ * So nothing is written on the way in — the control simply REPORTS where the account already
+ * carries a default ("all" if any standard is account-level), and from then on governs where
+ * SUBSEQUENT changes are stored. An explicit choice is remembered and wins over this.
+ */
+export function derivedPanelScope(scopes) {
+  return (scopes || []).some((s) => s === "all") ? "all" : "project";
+}
