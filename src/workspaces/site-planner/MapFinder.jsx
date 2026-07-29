@@ -10,7 +10,7 @@ import { prefetchExtents, computeCoverage, boundsFromLeaflet, getNearbyRadiusMil
 import LayerPanel from "./components/LayerPanel.jsx";
 import { useGroundElevation } from "./components/useGroundElevation.js";
 import CursorChip from "./components/CursorChip.jsx";
-import { setContourHover } from "./lib/terrainLayers.js";
+import { contourHover } from "./lib/terrainLazy.js";
 import { NUM_FONT, TABULAR_NUMS } from "../../shared/theme/typography.js";
 import ContextMenu from "../../shared/ui/ContextMenu.jsx";
 import {
@@ -450,10 +450,10 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
         llPending = false;
         if (!llLatest) return;
         setHoverLL(llLatest);
-        setContourHover(map, llLatest);
+        contourHover(map, llLatest);
       });
     };
-    const onCoordOut = () => { setHoverLL(null); setContourHover(map, null); };
+    const onCoordOut = () => { setHoverLL(null); contourHover(map, null); };
     // Right-click on EMPTY map → the KMZ export menu (B684). A right-click ON a site keeps its own
     // status menu: skip when the DOM target is an interactive site layer / marker, so the two never fight.
     const onMapCtx = (e) => {

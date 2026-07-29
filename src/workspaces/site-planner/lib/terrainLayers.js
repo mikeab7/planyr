@@ -42,6 +42,7 @@
 import L from "leaflet";
 import TerrainWorker from "./terrainWorker.js?worker";
 import { gisCache } from "./gisCache.js";
+import { TERRAIN_MIN_ZOOM } from "./terrainGate.js";
 import { proxyServiceUrl } from "../../../shared/gis/gisProxyCore.js";
 import { DEP_URL, M_TO_FT } from "./elevation.js";
 import {
@@ -54,7 +55,9 @@ import {
   HOVER_TOL_PX, DOUBLE_STAMP_PX,
 } from "./contours.js";
 
-export const TERRAIN_MIN_ZOOM = 16; // ~3 m ground cells at Houston; z15 would be 1-ft-contour mush
+// The gate lives in a leaf module so `layers.js` can read it without static-importing this
+// whole pipeline (B1093 — the pipeline is loaded on demand via terrainLazy.js).
+export { TERRAIN_MIN_ZOOM } from "./terrainGate.js";
 const TERRAIN_TTL = 7 * 24 * 60 * 60 * 1000; // DEM vintage moves slowly — a week is generous
 const GRID_LRU_MAX = 12;                     // lattice tiles: ~1.4 MB each, a laptop view is ~4–6
 const SITE_GRID_LRU_MAX = 4;                 // site envelopes: up to ~5 MB each — keep few

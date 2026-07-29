@@ -26,7 +26,10 @@
  *     paint a stale number under a new cursor position.
  */
 import { useEffect, useRef, useState } from "react";
-import { sampleTerrainGridsInfo, warmCursorGrid } from "../lib/terrainLayers.js";
+// B1093 — the terrain pipeline is loaded ON DEMAND (the first cursor move over a map),
+// not on boot. `terrainNow()` is synchronous, so once the chunk has landed the per-move
+// local sample is exactly the plain function call it always was.
+import { loadTerrain, terrainNow } from "../lib/terrainLazy.js";
 import { samplePoint } from "../lib/elevation.js";
 
 const DEBOUNCE_MS = 300;
@@ -47,16 +50,18 @@ export function useGroundElevation(pos, { zoom = null } = {}) {
     if (ctrlRef.current) { ctrlRef.current.abort(); ctrlRef.current = null; }
     if (lat == null || lng == null) { setSt(IDLE); return undefined; }
     const here = () => { const c = posRef.current; return !!c && c.lat === lat && c.lng === lng; };
-    const local = sampleTerrainGridsInfo(lat, lng);
+    const loaded = terrainNow();
+    const local = loaded ? loaded.sampleTerrainGridsInfo(lat, lng) : { status: "uncovered" };
     if (local.status === "value") { setSt({ status: "value", ft: local.ft, cellFt: local.cellFt }); return undefined; }
     if (local.status === "void") { setSt({ status: "void" }); return undefined; }
     // Uncovered: say so honestly while both the tile pull and the point sample run.
     setSt({ status: "pending" });
     let alive = true;
-    warmCursorGrid(lat, lng, band).then(
+    loadTerrain().then((t) => t.warmCursorGrid(lat, lng, band)).then(
       () => {
         if (!alive || !here()) return;
-        const again = sampleTerrainGridsInfo(lat, lng);
+        const t = terrainNow();
+        const again = t ? t.sampleTerrainGridsInfo(lat, lng) : { status: "uncovered" };
         if (again.status === "value") setSt({ status: "value", ft: again.ft, cellFt: again.cellFt });
         else if (again.status === "void") setSt({ status: "void" });
       },

@@ -160,7 +160,10 @@ import { geometricMaxBermFt, drainageBermCapFt, bindingBermCap, bermNeedsInlets,
 import { gisCache } from "./lib/gisCache.js";
 import { VECTOR_SOURCES, fetchCached } from "./lib/vectorLayers.js";
 import { sampleAtLatLng } from "./lib/demGrid.js";
-import { fetchSiteGrid, siteGridZoom, setContourHover } from "./lib/terrainLayers.js";
+// B1093 — the terrain pipeline loads on demand: the site DEM grid rides the explicit
+// drainage check (already async), and the contour hover only acts once the cursor readout
+// has pulled the chunk in.
+import { loadTerrain, contourHover } from "./lib/terrainLazy.js";
 // NEW-1 (B1057 completion) — the screening-BFE live wiring: Atlas-14 rainfall, SSURGO soils, and
 // the terrain→watershed/section derivation that feeds screeningBfe.js.
 import { resolvePfds } from "./lib/pfdsClient.js";
@@ -2100,7 +2103,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const cursorEl = useGroundElevation(cursorLL, { zoom: origin ? ppfToZoom(view.ppf, origin.lat) : null });
   // NEW-1 — hand the SAME already-throttled cursor position to the contour layer, so
   // hovering any line (not just the labelled every-5-ft ones) answers with its elevation.
-  useEffect(() => { setContourHover(geoMapRef.current, cursorLL); }, [cursorLL]);
+  useEffect(() => { contourHover(geoMapRef.current, cursorLL); }, [cursorLL]);
   /* B1092 — the GIS identify CARD on the planner canvas: {x, y (wrapper-local px), items}.
    * The backdrop Leaflet map is pointer-events:none (the SVG owns every click), so the
    * click-identify the BKDD easement layer was made VECTOR for could never fire here —
@@ -7955,7 +7958,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // explicit click. Failure isolation: an outage reads state "failed" and the engine
       // falls back to the labeled flat median — never a silent flat price.
       const siteGridP = fmBbox
-        ? fetchSiteGrid({ west: fmBbox.w, south: fmBbox.s, east: fmBbox.e, north: fmBbox.n })
+        ? loadTerrain().then((t) => t.fetchSiteGrid({ west: fmBbox.w, south: fmBbox.s, east: fmBbox.e, north: fmBbox.n }))
             .then((r) => ({ grid: r.grid, req: r.req, state: "loaded" }))
             .catch(() => ({ grid: null, req: null, state: "failed" }))
         : Promise.resolve({ grid: null, req: null, state: "empty" });
@@ -8087,7 +8090,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             south: sLat - WATERSHED_PAD_DEG, north: sLat + WATERSHED_PAD_DEG,
           };
           const [wideR, pfdsR, soilsR] = await Promise.allSettled([
-            fetchSiteGrid(wideBounds, { zoom: Math.min(WATERSHED_GRID_ZOOM, siteGridZoom(sLat)) }),
+            loadTerrain().then((t) => t.fetchSiteGrid(wideBounds, { zoom: Math.min(WATERSHED_GRID_ZOOM, t.siteGridZoom(sLat)) })),
             resolvePfds({ lat: sLat, lng: sLng }),
             resolveSoils({ lat: sLat, lng: sLng }),
           ]);

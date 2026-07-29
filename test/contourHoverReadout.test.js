@@ -10,6 +10,8 @@
  * earthwork rows price off, so the chip and the ledger cannot disagree.
  */
 import { describe, it, expect } from "vitest";
+import { readdirSync, readFileSync, statSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import {
   buildContourIndex, hitContour, composeContourPaint, contourLabelText,
   HOVER_TOL_PX, DOUBLE_STAMP_PX,
@@ -329,5 +331,48 @@ describe("NEW-2 — a hung elevation request must FAIL, not hang forever (LOUD-F
   it("no-data still reads as null (never a fabricated zero)", async () => {
     const fetchImpl = async () => ({ ok: true, json: async () => ({ samples: [{ value: "NoData" }] }) });
     expect(await samplePoint(29.7, -95.8, { fetchImpl })).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+describe("NEW-1/NEW-2 ship with their matching optimization (the perf-budget rule)", () => {
+  // The hover hit-test and the always-on readout added real bytes to the Site route, which
+  // breached `bundle.largestChunkBytes`. The matching optimization is that the terrain
+  // pipeline (terrainLayers + demGrid + contours + the worker glue) now loads ON DEMAND —
+  // at the first terrain-layer toggle or the first cursor move — instead of on boot. That
+  // only holds while nothing on the boot path static-imports it again, which is exactly the
+  // kind of thing a later change re-introduces by accident. So: pin it.
+  const ROOT = fileURLToPath(new URL("../src/", import.meta.url));
+  const walk = (dir) => readdirSync(dir).flatMap((f) => {
+    const p = dir + f;
+    return statSync(p).isDirectory() ? walk(p + "/") : p.match(/\.(js|jsx)$/) ? [p] : [];
+  });
+  const files = walk(ROOT);
+
+  it("ONLY terrainLazy.js reaches terrainLayers.js, and only dynamically", () => {
+    const offenders = [];
+    for (const f of files) {
+      if (f.endsWith("lib/terrainLayers.js")) continue;
+      const src = readFileSync(f, "utf8");
+      if (/from\s+"[^"]*terrainLayers\.js"/.test(src)) offenders.push(f.slice(ROOT.length));
+      if (/import\("[^"]*terrainLayers\.js"\)/.test(src) && !f.endsWith("lib/terrainLazy.js")) {
+        offenders.push(`${f.slice(ROOT.length)} (dynamic, but not through terrainLazy)`);
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
+
+  it("the zoom gate is readable without the pipeline — terrainGate.js imports nothing", () => {
+    const gate = readFileSync(fileURLToPath(new URL("../src/workspaces/site-planner/lib/terrainGate.js", import.meta.url)), "utf8");
+    expect(gate).not.toMatch(/^\s*import\s/m);
+    expect(gate).toMatch(/export const TERRAIN_MIN_ZOOM = 16;/);
+  });
+
+  it("the d3-contour tracer stays worker-only — contours.js must not import it back", () => {
+    const paint = readFileSync(fileURLToPath(new URL("../src/workspaces/site-planner/lib/contours.js", import.meta.url)), "utf8");
+    expect(paint).not.toMatch(/from "d3-contour"/);
+    expect(paint).not.toMatch(/from "\.\/contourTrace\.js"/);
+    const trace = readFileSync(fileURLToPath(new URL("../src/workspaces/site-planner/lib/contourTrace.js", import.meta.url)), "utf8");
+    expect(trace).toMatch(/from "d3-contour"/);
   });
 });

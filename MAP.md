@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-07-29 @ `c9c0665` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-07-29 @ `67d4a27` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_345 source files mapped._
+_348 source files mapped._
 
 ## infra
 
@@ -302,7 +302,9 @@ _345 source files mapped._
 - **`src/workspaces/site-planner/lib/conflictToasts.js`** — the B673 conflict policy matrix as a pure mapping: elementSync event → toast spec (who gets told what, which action rides along)
   - _exports_: `toastForSyncEvent`
 - **`src/workspaces/site-planner/lib/contours.js`** — Pure contour-line math (B704): 1-ft interval auto-pick, sentinel-embedded voids, d3-contour marching squares, grid-border + dilated-void strip passes, pixel-space simplify, index flags + sparse labels
-  - _exports_: `anchorLabels`, `buildContourIndex`, `buildContours`, `clipRun`, `clipSegment`, `composeContourPaint`, `contourLabelText`, `dilateVoids`, `DOUBLE_STAMP_PX`, `hitContour`, `HOVER_TOL_PX`, `joinSeams`, `LABEL_CAP`, `LABEL_MIN_SEP_CELLS`, `pickInterval`, `pickLabels`, `stripRing`
+  - _exports_: `buildContourIndex`, `composeContourPaint`, `contourLabelText`, `DOUBLE_STAMP_PX`, `hitContour`, `HOVER_TOL_PX`, `joinSeams`, `LABEL_CAP`, `LABEL_MIN_SEP_CELLS`, `pickLabels`
+- **`src/workspaces/site-planner/lib/contourTrace.js`** — worker-only marching-squares contour tracer (the sole `d3-contour` consumer): border/void strips, tile-interior clip, deterministic label anchors
+  - _exports_: `anchorLabels`, `buildContours`, `clipRun`, `clipSegment`, `dilateVoids`, `pickInterval`, `stripRing`
 - **`src/workspaces/site-planner/lib/convertClient.js`** — B748 client for the B238 DWG→DXF convert service (VITE_CONVERT_URL); round-trips DWG bytes → DXF with a visible, distinct state for every failure (unset URL / 422 / 413 / unreachable).
   - _exports_: `CONVERT_URL`, `convertConfigured`, `convertDwgToDxf`, `isDwgFile`
 - **`src/workspaces/site-planner/lib/corridorConflicts.js`** — Pond/basin vs easement + pipeline-corridor overlap screen (B831): bbox-prefiltered polyIntersectArea over rings in planner feet; ring-only API is the B826 cut/fill-cells seam. Exports `pondEncumbranceConflicts`.
@@ -595,8 +597,12 @@ _345 source files mapped._
   - _exports_: `channelTerrainWse`, `deriveTailwater`, `GRADE_PLACEHOLDER_EPS_FT`, `normalDepthWse`, `resolveTailwater`, `TAILWATER_SOURCES`, `tailwaterNote`
 - **`src/workspaces/site-planner/lib/teams.js`** — Team-workspace I/O over the anon Supabase client: create/list teams, roster + role management, email invites and claim, all RLS-scoped with SECURITY DEFINER RPC preferred paths
   - _exports_: `cancelInvite`, `claimInvites`, `createTeam`, `currentIdentity`, `deleteTeam`, `inviteByEmail`, `leaveTeam`, `listInvites`, `listMembers`, `listMyTeams`, `removeMember`, `renameTeam`, `setRole`
+- **`src/workspaces/site-planner/lib/terrainGate.js`** — the terrain zoom gate alone in a leaf module, so the layer registry can read it without static-importing the on-demand pipeline
+  - _exports_: `TERRAIN_MIN_ZOOM`
 - **`src/workspaces/site-planner/lib/terrainLayers.js`** — Main-thread terrain glue (B704/B705/B706): view-driven contour + drainage-arrow layerGroups (canvas renderer, swr last-good, proxy-direct fallback), singleton terrain worker with crash rebuild, shared grid LRU sampled by the hover readout
   - _exports_: `CONTOUR_HOVER_CLASS`, `contourLayer`, `fetchSiteGrid`, `flowLayer`, `sampleTerrainGrids`, `sampleTerrainGridsInfo`, `setContourHover`, `siteGridZoom`, `TERRAIN_MIN_ZOOM`, `warmCursorGrid`
+- **`src/workspaces/site-planner/lib/terrainLazy.js`** — the ONE on-demand loader for the terrain pipeline: `loadTerrain()` (cached import, retries after a failure) + the synchronous `terrainNow()` the per-move cursor sample reads + the `contourHover` router
+  - _exports_: `contourHover`, `loadTerrain`, `terrainNow`
 - **`src/workspaces/site-planner/lib/terrainWorker.js`** — Terrain Web Worker (B704/B705): LERC decode -> masked smooth -> contours + flow arrows off the main thread; imports pure modules only (guarded by test/terrainWorker.test.js)
   - _exports_: _(none)_
 - **`src/workspaces/site-planner/lib/tileBudget.js`** — Pure tile/overscan budget: how much basemap is held off-screen, how many tiles are retained, and when the retina uplift is worth its cost

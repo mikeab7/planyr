@@ -83,7 +83,13 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   (clipper union of every connected strip + wedge → one region, one outline, per cluster) plus the
   curb-stripe trimmer. A road connection is a boolean union, NOT a patch painted over a seam — read
   roadNetwork.js's header before touching anything junction-shaped.
-- Terrain pipeline (B703–B706): `demGrid.js` / `contours.js` / `flowField.js` (pure math,
+- Terrain pipeline (B703–B706) — **LOADED ON DEMAND (B1093): `terrainLazy.js` is the ONE entry
+  point** (`loadTerrain()` cached import + the synchronous `terrainNow()` the per-move cursor
+  sample reads + the `contourHover` router); nothing on the boot path may static-import
+  `terrainLayers.js` again, and `terrainGate.js` exists so the layer registry can read the zoom
+  gate without dragging the pipeline back in. `contourTrace.js` holds the worker-only
+  marching-squares tracer (the sole `d3-contour` consumer) — keep it out of `contours.js`.
+  `demGrid.js` / `contours.js` / `flowField.js` (pure math,
   worker-safe) + `lercGrid.js` (the LERC codec, split out in B1042 so `lerc` stays OFF the boot
   bundle — static-imported by the worker, dynamic-imported on the main thread)
   + `terrainWorker.js` (the repo's first Web Worker — import list is test-guarded)
