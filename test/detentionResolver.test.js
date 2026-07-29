@@ -37,6 +37,12 @@ function fakeFetch(routes) {
 const COUNTY = "Texas_County_Boundaries", CITY = "Texas_City_Boundaries", ETJ = "HGAC_City_ETJ";
 const MUD = "TCEQ_Water_Districts", CHAN = "HCFCD/Channels", WS = "HCFCD/Watershed", FLOOD = "NFHL";
 const BKDD = "Brookshire_Katy"; // B861 — the drainage-district boundary source (added to every route set)
+// B1069/B1072/B1074 — the district-aware tier: the district's OWN GIS (Quiddity) + the
+// national NHD fallback that answers "is there a channel here at all?" everywhere else.
+const BKDD_BOUND = "Boundaries/MapServer/129", BKDD_CHAN = "Drainage_Information/MapServer/108";
+const BKDD_WS = "Drainage_Information/MapServer/116";
+const BKDD_ESMT = "Drainage_Information/MapServer/109", BKDD_ESMT107 = "Drainage_Information/MapServer/107";
+const NHD = "services/nhd/MapServer/6";
 
 // A Houston-area point (keeps the H-GAC ETJ source in etjSourcesForPoint's region).
 const LNG = -95.37, LAT = 29.76;
@@ -48,6 +54,9 @@ const baseRoutes = ({ county = "Harris", city = null, etj = null, mud = [], bkdd
   [ETJ]: () => (etj ? [{ attributes: { CITY: etj } }] : []),
   [MUD]: () => mud,
   [BKDD]: () => { if (bkdd === "error") throw new Error("bkdd source down"); return bkdd; },
+  // B1074 — the NHD fallback is queried wherever no drainage district governs, so it
+  // belongs in the BASE route set (a site outside Harris/BKDD hits it, not "no route").
+  [NHD]: () => [],
   ...extra,
 });
 const optsFor = (routes) => ({ cache: freshCache(), fetchJson: fakeFetch(routes) });
@@ -288,12 +297,99 @@ describe("resolveDrainageContext — the full stormwater context", () => {
     expect(ctx.channel.state).toBe("empty");
   });
 
-  it("outside Harris: channel not-applicable, watershed null — no wasted queries", async () => {
+  /* B1074 CONTRACT CHANGE (was: "outside Harris → channel not-applicable"). Reporting
+   * "not-applicable" was the whole bug: on a Waller/BKDD site beside an obvious channel the
+   * readout could only say "unknown". Outside Harris we now query the governing district —
+   * or, where none publishes GIS, the national NHD inventory. HCFCD's watershed layer is
+   * still skipped (it is Harris-only), so the "no wasted queries" half of this test stands. */
+  it("outside Harris and outside any district: NHD answers instead of 'not-applicable'", async () => {
     const routes = baseRoutes({ county: "Fort Bend", extra: { [FLOOD]: () => [] } });
     const ctx = await resolveDrainageContext({ lng: -95.8, lat: 29.6, ring }, optsFor(routes));
     expect(ctx.authority.primaryReviewer.authorityId).toBe("fortbend");
-    expect(ctx.channel.state).toBe("not-applicable");
-    expect(ctx.watershed).toBeNull();
+    expect(ctx.drainageDistrict.id).toBeNull();
+    expect(ctx.channel.sourceId).toBe("nhdChannel");
+    expect(ctx.channel.state).toBe("empty"); // the NHD route returns [] — a real empty
+    expect(ctx.watershed).toBeNull();        // HCFCD's watershed layer is still not queried
+    expect(ctx.watershedOverlays).toEqual([]);
+  });
+
+  it("NHD names the watercourse and decodes its type — the Tsakiris case, and it is INVENTORY-flagged", async () => {
+    const routes = baseRoutes({
+      county: "Waller",
+      extra: {
+        [FLOOD]: () => [],
+        // Live-verified 2026-07-29 at the Tsakiris tract: gnis_name "Willow Fork", ftype 336.
+        [NHD]: () => [{ attributes: { gnis_name: "Willow Fork", ftype: 336, fcode: 33600 }, geometry: { paths: [[[-95.8, 29.6], [-95.8, 29.61]]] } }],
+      },
+    });
+    const ctx = await resolveDrainageContext({ lng: -95.8, lat: 29.6, ring }, optsFor(routes));
+    expect(ctx.channel.near).toBe(true);
+    expect(ctx.channel.name).toBe("Willow Fork");
+    expect(ctx.channel.kindLabel).toBe("canal / ditch"); // never the bare code 336
+    // An NHD hit proves the channel EXISTS; it must never be promoted to a district channel.
+    expect(ctx.channel.inventoryOnly).toBe(true);
+  });
+
+  it("inside BKDD: the DISTRICT's own channel / watershed / easement layers are queried, not HCFCD's", async () => {
+    const routes = baseRoutes({
+      county: "Waller",
+      bkdd: [{ attributes: { Name: "Brookshire-Katy Drainage District" } }],
+      extra: {
+        [FLOOD]: () => [],
+        [BKDD_CHAN]: () => [{ attributes: { streamname: "Willow Fork" }, geometry: { paths: [[[-95.895, 29.779], [-95.895, 29.78]]] } }],
+        [BKDD_WS]: () => [{ attributes: { subwatersh: "Willow Fork", sq_miles: 23 } }],
+        [BKDD_ESMT]: () => [{ attributes: { width: 70, file: "WF-10.pdf" } }],
+        [BKDD_ESMT107]: () => [],
+        // If the resolver wrongly reached for HCFCD or NHD here, these would answer instead.
+        [CHAN]: () => { throw new Error("HCFCD must NOT be queried inside BKDD"); },
+        [NHD]: () => { throw new Error("NHD must NOT be queried when a district governs"); },
+      },
+    });
+    const ctx = await resolveDrainageContext({ lng: -95.89503, lat: 29.77938, ring }, optsFor(routes));
+    expect(ctx.drainageDistrict).toEqual({ id: "bkdd", source: "boundary" });
+    expect(ctx.channel.sourceId).toBe("bkddChannel");
+    expect(ctx.channel.name).toBe("Willow Fork");
+    expect(ctx.channel.inventoryOnly).toBe(false);
+    expect(ctx.watershed.names).toEqual(["Willow Fork"]);
+    expect(ctx.watershed.sqMiles).toBe(23);
+    // The 70-ft easement + its recorded exhibit — a hard buildable-area constraint.
+    expect(ctx.easements.present).toBe(true);
+    expect(ctx.easements.maxWidthFt).toBe(70);
+    expect(ctx.easements.items[0].exhibit).toBe("WF-10.pdf");
+  });
+
+  it("a BKDD easement-layer OUTAGE is an honest unknown, never 'no easement'", async () => {
+    const routes = baseRoutes({
+      county: "Waller",
+      bkdd: [{ attributes: { Name: "BKDD" } }],
+      extra: {
+        [FLOOD]: () => [],
+        [BKDD_CHAN]: () => [],
+        [BKDD_WS]: () => [],
+        [BKDD_ESMT]: () => { throw new Error("district GIS down"); },
+        [BKDD_ESMT107]: () => { throw new Error("district GIS down"); },
+      },
+    });
+    const ctx = await resolveDrainageContext({ lng: -95.89503, lat: 29.77938, ring }, optsFor(routes));
+    expect(ctx.easements.state).toBe("failed");
+    expect(ctx.easements.present).toBeNull(); // NOT false — an outage is never a clean "no"
+  });
+
+  it("a district's OWN sub-watershed name can never inherit an HCFCD watershed overlay", async () => {
+    // WATERSHED_OVERLAYS are HCFCD-keyed (Addicks/Barker, Upper Cypress). A BKDD basin that
+    // happened to match one of those regexes must NOT pick up a Harris reservoir caveat.
+    const routes = baseRoutes({
+      county: "Waller",
+      bkdd: [{ attributes: { Name: "BKDD" } }],
+      extra: {
+        [FLOOD]: () => [],
+        [BKDD_CHAN]: () => [],
+        [BKDD_WS]: () => [{ attributes: { subwatersh: "ADDICKS RESERVOIR", sq_miles: 9 } }],
+        [BKDD_ESMT]: () => [], [BKDD_ESMT107]: () => [],
+      },
+    });
+    const ctx = await resolveDrainageContext({ lng: -95.89503, lat: 29.77938, ring }, optsFor(routes));
+    expect(ctx.watershed.names).toEqual(["ADDICKS RESERVOIR"]);
     expect(ctx.watershedOverlays).toEqual([]);
   });
 

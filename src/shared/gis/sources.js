@@ -902,6 +902,322 @@ export const GIS_SOURCES = {
       "confirmed; 1% / 0.2% WSE ImageServer endpoints PROVISIONAL (wseLayers null) pending the live " +
       "directory probe (V363). Sampler: site-planner/lib/hcfcdWse.js; resolver: lib/wseProviders.js.",
   },
+
+  // -------------------------------------------------------------------------
+  // NEW-1 (B1069) — the BROOKSHIRE–KATY DRAINAGE DISTRICT (BKDD) source family, hosted
+  // by the district's engineer (Quiddity) on gisclient.quiddity.com. This is the FIRST
+  // non-Harris drainage-authority family in the registry: before it, a Waller / BKDD site
+  // read as "no drainage data" because HCFCD (correctly) returns n=0 outside Harris and
+  // FEMA never maps channels at all — the exact silence the 2026-07-29 Tsakiris report hit.
+  //
+  // ALL rows below were live-probed 2026-07-29 from the owner's browser on the planyr.io
+  // origin (CORS-clean, anonymous). Service SR is WKID 2278 (NAD83 / Texas South Central,
+  // US survey feet — Planyr's own spine); the /export honours bboxSR=4326&imageSR=3857, so
+  // a dynamicMapLayer paints them with no client-side reprojection.
+  //
+  // ⚠ TWO REGISTRY TRAPS, encoded deliberately:
+  //   (a) LAYER NUMBERS ARE NOT GLOBAL. Layer 121 is "All Streams (TNRIS)" in
+  //       Drainage_Information and "MUD boundary" in Boundaries. Every row therefore
+  //       carries its FULL service path — never a bare layer number, and never a shared
+  //       "BKDD layer id" constant.
+  //   (b) STALE SIBLINGS EXIST. Layers 0 and 5 of Drainage_Information are named "…-OLD",
+  //       and a sibling service `Easement_Current_updated/MapServer` lives on the same
+  //       host. The authoritative easement layers are 109 + 107 ("BKDD Easements Current")
+  //       inside Drainage_Information — confirmed live 2026-07-29 (n≥1 at Tsakiris, the
+  //       70-ft easement with recorded exhibit WF-10.pdf). Re-confirm on any lastVerified
+  //       refresh before repointing.
+  //
+  // COLD START (see B1073): BKDD's FIRST call to any of these services took 16.5–18.3 s
+  // (ArcGIS Server instance spin-up); every call after was 72–88 ms. The 9 s shared default
+  // would abort that first hit on every BKDD source forever, so each row sets timeoutMs:
+  // 25000 and the map layers route through the same-origin cache proxy (which pays the
+  // cold start once, server-side, under its own 25 s upstream bound).
+  bkddStreams: {
+    key: "bkddStreams",
+    label: "BKDD major streams & channels",
+    provider: "Brookshire–Katy Drainage District (via Quiddity)",
+    serviceUrl: "https://gisclient.quiddity.com/server/rest/services/Drainage_Information/MapServer",
+    layerId: 108, // Major Streams. 121 = All Streams (TNRIS) — the wider inventory, see notes.
+    geometryType: "line",
+    fields: { name: "streamname" },
+    timeoutMs: 25000,
+    coverage: "Brookshire–Katy Drainage District (Waller / Harris / Fort Bend)",
+    tier: "production",
+    lastVerified: "2026-07-29",
+    fixtures: [
+      // The Tsakiris tract — the site whose "nothing shows" report produced this family.
+      { label: "Tsakiris (Waller, in BKDD)", point: [-95.89503, 29.77938], expectMinCount: 1 },
+    ],
+    notes:
+      "District stream/channel centerlines. Layer 121 in this SAME service is 'All Streams " +
+      "(TNRIS)' (fields ftype, fcode) — a wider inventory, registered as bkddAllStreams. Do NOT " +
+      "confuse 121 here with Boundaries/121 (MUD boundary).",
+  },
+
+  bkddAllStreams: {
+    key: "bkddAllStreams",
+    label: "BKDD all streams (TNRIS inventory)",
+    provider: "Brookshire–Katy Drainage District (via Quiddity; TNRIS data)",
+    serviceUrl: "https://gisclient.quiddity.com/server/rest/services/Drainage_Information/MapServer",
+    layerId: 121, // NB: 121 here = All Streams. Boundaries/121 = MUD boundary. Trap (a) above.
+    geometryType: "line",
+    fields: { ftype: "ftype", fcode: "fcode" },
+    timeoutMs: 25000,
+    coverage: "Brookshire–Katy Drainage District (Waller / Harris / Fort Bend)",
+    tier: "production",
+    lastVerified: "2026-07-29",
+    fixtures: [
+      { label: "Tsakiris (Waller, in BKDD)", point: [-95.89503, 29.77938], expectMinCount: 1 },
+    ],
+    notes:
+      "The TNRIS-sourced stream inventory the district republishes — an INVENTORY, never a " +
+      "regulatory or engineered alignment. ftype/fcode decode via NHD_FTYPE (nhdFlowline.js).",
+  },
+
+  bkddEasements: {
+    key: "bkddEasements",
+    label: "BKDD drainage easements (current)",
+    provider: "Brookshire–Katy Drainage District (via Quiddity)",
+    serviceUrl: "https://gisclient.quiddity.com/server/rest/services/Drainage_Information/MapServer",
+    layerId: 109, // "BKDD Easements Current". 107 is its companion (registered as bkddEasements107).
+    geometryType: "polygon",
+    // `file` names the RECORDED EXHIBIT (e.g. "WF-10.pdf") for the easement instrument — the
+    // document that actually fixes the width on the ground. Surfaced in the feature popup.
+    fields: { width: "width", file: "file" },
+    timeoutMs: 25000,
+    coverage: "Brookshire–Katy Drainage District (Waller / Harris / Fort Bend)",
+    tier: "production",
+    lastVerified: "2026-07-29",
+    fixtures: [
+      // The 70-ft easement + recorded exhibit WF-10.pdf found at the Tsakiris tract.
+      { label: "Tsakiris BKDD easement", point: [-95.89503, 29.77938], expectMinCount: 1 },
+    ],
+    notes:
+      "A district drainage easement is a HARD BUILDABLE-AREA CONSTRAINT, not decoration — the " +
+      "width AND the recorded exhibit reference must reach the user, never just a line on the " +
+      "map. TRAP (b): layers 0 and 5 of this service are named '…-OLD', and a sibling service " +
+      "Easement_Current_updated/MapServer exists on the same host; 109 (+107) are the live-" +
+      "confirmed current layers as of lastVerified. Screening only — the recorded instrument governs.",
+  },
+
+  bkddEasements107: {
+    key: "bkddEasements107",
+    label: "BKDD drainage easements (current, companion layer)",
+    provider: "Brookshire–Katy Drainage District (via Quiddity)",
+    serviceUrl: "https://gisclient.quiddity.com/server/rest/services/Drainage_Information/MapServer",
+    layerId: 107,
+    geometryType: "polygon",
+    fields: { width: "width", file: "file" },
+    timeoutMs: 25000,
+    coverage: "Brookshire–Katy Drainage District (Waller / Harris / Fort Bend)",
+    tier: "production",
+    lastVerified: "2026-07-29",
+    fixtures: [],
+    notes:
+      "The companion 'BKDD Easements Current' layer to 109 — the district publishes the set " +
+      "across both. Queried together by the drainage-context easement screen so a parcel " +
+      "touching only one of the two still reports its easement.",
+  },
+
+  bkddSubwatersheds: {
+    key: "bkddSubwatersheds",
+    label: "BKDD sub-watersheds (Drainage Master Plan)",
+    provider: "Brookshire–Katy Drainage District (via Quiddity)",
+    serviceUrl: "https://gisclient.quiddity.com/server/rest/services/Drainage_Information/MapServer",
+    layerId: 116,
+    geometryType: "polygon",
+    fields: { name: "subwatersh", sqMiles: "sq_miles" },
+    timeoutMs: 25000,
+    coverage: "Brookshire–Katy Drainage District (Waller / Harris / Fort Bend)",
+    tier: "production",
+    lastVerified: "2026-07-29",
+    fixtures: [
+      { label: "Tsakiris sub-watershed", point: [-95.89503, 29.77938], expectMinCount: 1 },
+    ],
+    notes:
+      "The district's own sub-watershed delineation — the BKDD analogue of HCFCD's watershed " +
+      "polygons; names the basin a site drains to (e.g. 'Willow Fork').",
+  },
+
+  bkddFloodplainBfe: {
+    key: "bkddFloodplainBfe",
+    label: "BKDD floodplain BFE",
+    provider: "Brookshire–Katy Drainage District (via Quiddity)",
+    serviceUrl: "https://gisclient.quiddity.com/server/rest/services/Drainage_Information/MapServer",
+    layerId: 112,
+    geometryType: "line",
+    fields: {},
+    outFields: ["*"], // field names unconfirmed in the 2026-07-29 probe — read them all
+    timeoutMs: 25000,
+    coverage: "Brookshire–Katy Drainage District (Waller / Harris / Fort Bend)",
+    tier: "production",
+    lastVerified: "2026-07-29",
+    fixtures: [],
+    notes:
+      "District-published BFE lines. Rendered only; NOT wired into any WSE provider — the " +
+      "elevation field/datum are unconfirmed, and BKDD's own forms carry the '1988 NGVD (2001 " +
+      "Adj.)' datum contradiction documented in detentionRules.js BKDD_OVERLAY_DETAIL. Confirm " +
+      "the datum with the district before any elevation is READ from this layer.",
+  },
+
+  bkddOutfalls: {
+    key: "bkddOutfalls",
+    label: "BKDD NPDES outfalls",
+    provider: "Brookshire–Katy Drainage District (via Quiddity)",
+    serviceUrl: "https://gisclient.quiddity.com/server/rest/services/Drainage_Information/MapServer",
+    layerId: 2,
+    geometryType: "point",
+    fields: {},
+    outFields: ["*"],
+    timeoutMs: 25000,
+    coverage: "Brookshire–Katy Drainage District (Waller / Harris / Fort Bend)",
+    tier: "production",
+    lastVerified: "2026-07-29",
+    fixtures: [],
+    notes: "Permitted stormwater outfall points published by the district. Screening only.",
+  },
+
+  bkddBoundary: {
+    key: "bkddBoundary",
+    label: "BKDD district boundary (Quiddity)",
+    provider: "Brookshire–Katy Drainage District (via Quiddity)",
+    serviceUrl: "https://gisclient.quiddity.com/server/rest/services/Boundaries/MapServer",
+    layerId: 129,
+    geometryType: "polygon",
+    fields: {},
+    outFields: ["*"],
+    timeoutMs: 25000,
+    coverage: "Brookshire–Katy Drainage District (Waller / Harris / Fort Bend)",
+    tier: "production",
+    lastVerified: "2026-07-29",
+    fixtures: [
+      // The point-in-district test that drives district auto-selection (B1070 / B1074).
+      { label: "Tsakiris inside BKDD", point: [-95.89503, 29.77938], expectMinCount: 1 },
+    ],
+    notes:
+      "The district's OWN boundary publication — the point-in-district test that picks which " +
+      "local drainage authority governs a site (live n=1 at Tsakiris 2026-07-29). Distinct from " +
+      "the `bkdd` row above, which is Waller County's AGOL republication of the same district " +
+      "(kept as the detention-tier membership source it already feeds). TRAP (a): 121 in THIS " +
+      "service is a MUD boundary, not All Streams.",
+  },
+
+  // ---- BKDD Drainage Master Plan — ADVISORY MODEL RESULTS, extent-gated -------------
+  // Every DMP layer returned n=0 at Tsakiris because the DMP study area is WESTERN Waller
+  // (Bucks Bayou / Cotton Creek / Hardeman Slough) — the tract sits outside it. That empty
+  // is CORRECT and must never read as "no floodplain here"; `studyArea: true` marks the
+  // family so the layer panel gates it on the service's published fullExtent and says
+  // "outside this study area" instead (B1069 / B1070).
+  bkddDmpFloodplain: {
+    key: "bkddDmpFloodplain",
+    label: "BKDD Drainage Master Plan floodplains (advisory)",
+    provider: "Brookshire–Katy Drainage District (via Quiddity) — Drainage Master Plan",
+    serviceUrl: "https://gisclient.quiddity.com/server/rest/services/Drainage_Master_Plan/MapServer",
+    layerId: 19, // 100-yr Atlas-14 floodplain. 20 = Harvey, 17 = 10-yr (same service).
+    geometryType: "polygon",
+    fields: {},
+    outFields: ["*"],
+    timeoutMs: 25000,
+    studyArea: true,
+    coverage: "BKDD Drainage Master Plan study area — WESTERN Waller (Bucks Bayou / Cotton Creek / Hardeman Slough)",
+    tier: "production",
+    lastVerified: "2026-07-29",
+    fixtures: [], // no in-extent fixture point confirmed yet — see notes
+    notes:
+      "ADVISORY MODEL RESULTS, never regulatory: an Atlas-14 master-plan floodplain is not the " +
+      "effective FIRM SFHA and must never be styled like one. Live 2026-07-29: n=0 at Tsakiris — " +
+      "CORRECT (outside the study area), which is exactly why this row is studyArea-gated. " +
+      "Companion layers in the same service: 20 Harvey floodplain, 17 10-yr, 5 Conveyance " +
+      "Channel, 6 Proposed Channel Improvements, 4/10 Proposed Detention, 27 LiDAR. " +
+      "TODO on the next live pass: bake an in-extent fixture point (western Waller) so the " +
+      "weekly drift verifier can prove the layer still returns data where it should.",
+  },
+
+  bkddDmpImprovements: {
+    key: "bkddDmpImprovements",
+    label: "BKDD Drainage Master Plan proposed improvements (advisory)",
+    provider: "Brookshire–Katy Drainage District (via Quiddity) — Drainage Master Plan",
+    serviceUrl: "https://gisclient.quiddity.com/server/rest/services/Drainage_Master_Plan/MapServer",
+    layerId: 6, // Proposed Channel Improvements. 4/10 = Proposed Detention, 5 = Conveyance Channel.
+    geometryType: "line",
+    fields: {},
+    outFields: ["*"],
+    timeoutMs: 25000,
+    studyArea: true,
+    coverage: "BKDD Drainage Master Plan study area — WESTERN Waller (Bucks Bayou / Cotton Creek / Hardeman Slough)",
+    tier: "production",
+    lastVerified: "2026-07-29",
+    fixtures: [],
+    notes:
+      "PROPOSED (unbuilt) district improvements — a planning intent, never an existing facility " +
+      "and never a regulatory line. studyArea-gated like the floodplain row above.",
+  },
+
+  // -------------------------------------------------------------------------
+  // NEW-4 (B1072) — USGS NHD national hydrography. The UNIVERSAL channel fallback: national
+  // coverage means no site anywhere is left with an invisible channel just because its
+  // drainage district publishes no GIS. Live-probed 2026-07-29 at Tsakiris: n=6 in 577 ms,
+  // CORS-clean, ftype 336 / fcode 33600 = Canal/Ditch.
+  //
+  // ⚠ An INVENTORY, not a regulatory or engineering product: NHD says "there is a channel
+  // here and this is roughly what kind," never how big, how deep, or what it can carry.
+  //
+  // ⚠ NOT the same row as `nhdFlowline` above, and deliberately not merged with it. That row
+  // is NHDPlus HR (NHDPlus_HR/MapServer/3, NetworkNHDFlowline) — the ROUTED network used by
+  // the outfall receiving-water screen, with UPPERCASE GNIS_NAME/FCODE and no `ftype`. This
+  // family is the plain NHD service (nhd/MapServer), whose large-scale layers carry lowercase
+  // gnis_name + the ftype classification the map popup decodes. Two different services with
+  // two different schemas and two different jobs; collapsing them would break one of them.
+  // -------------------------------------------------------------------------
+  nhdHydro: {
+    key: "nhdHydro",
+    label: "USGS NHD flowlines (streams, canals & ditches)",
+    provider: "U.S. Geological Survey — National Hydrography Dataset",
+    serviceUrl: "https://hydro.nationalmap.gov/arcgis/rest/services/nhd/MapServer",
+    // 6 = "Flowline - Large Scale" (1:24k high-resolution NHD). 4 is the SMALL-scale
+    // (1:100k) flowline — a coarser dataset that would silently under-report channels.
+    // Layer list re-read live 2026-07-29 from /nhd/MapServer/layers.
+    layerId: 6,
+    geometryType: "line",
+    fields: { name: "gnis_name", ftype: "ftype", fcode: "fcode" },
+    coverage: "national",
+    tier: "production",
+    lastVerified: "2026-07-29",
+    fixtures: [
+      // The Tsakiris tract — the channel the owner could see but the app never drew.
+      // Re-verified live from the build sandbox 2026-07-29: n=1, gnis_name "Willow Fork",
+      // ftype 336 / fcode 33600 (canal/ditch).
+      { label: "Tsakiris flowlines (Willow Fork, ftype 336 canal/ditch)", point: [-95.89503, 29.77938], expectMinCount: 1 },
+      { label: "Buffalo Bayou downtown", point: [-95.37, 29.76], expectMinCount: 1 },
+    ],
+    notes:
+      "National hydrography INVENTORY — screening only, never a regulatory floodplain nor an " +
+      "engineered channel capacity. ftype decodes to plain English via NHD_FTYPE " +
+      "(site-planner/lib/nhdFlowline.js). Tier-3 fallback in the Flood & drainage group: it " +
+      "answers 'is there a channel at this site at all?' where no district GIS exists.",
+  },
+
+  nhdHydroWaterbody: {
+    key: "nhdHydroWaterbody",
+    label: "USGS NHD waterbodies (ponds, lakes & reservoirs)",
+    provider: "U.S. Geological Survey — National Hydrography Dataset",
+    serviceUrl: "https://hydro.nationalmap.gov/arcgis/rest/services/nhd/MapServer",
+    // ⚠ 12 = "Waterbody - Large Scale". 10 is "Waterbody - SMALL Scale" (1:100k, a
+    // different, coarser dataset) — reading 10 by mistake would silently serve the wrong
+    // resolution. Layer list re-read live 2026-07-29 from /nhd/MapServer/layers.
+    layerId: 12,
+    geometryType: "polygon",
+    fields: { name: "gnis_name", ftype: "ftype", fcode: "fcode" },
+    coverage: "national",
+    tier: "production",
+    lastVerified: "2026-07-29",
+    fixtures: [],
+    notes:
+      "The waterbody companion to nhdHydro — screening inventory only. Sibling large-scale " +
+      "layers in the same service: 9 Area (wide-channel polygons), 2 Line. USGS renumbers NHD " +
+      "sublayers occasionally (the FEMA-NFHL caveat class) — re-read /layers on any " +
+      "lastVerified refresh and check the '- Large Scale' suffix, not just the index.",
+  },
 };
 
 // Keys grouped by the surface that consumes them (handy for the audit + tests).

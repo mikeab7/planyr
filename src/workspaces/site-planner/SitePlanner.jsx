@@ -54,6 +54,7 @@ import { resolveEstimatedWse } from "./lib/wseProviders.js";
 import { sanityCheckEstimate, sensitivityBand } from "./lib/estimateChallenge.js";
 import { wseSensitivity } from "./lib/wseSensitivity.js";
 import LayerPanel from "./components/LayerPanel.jsx";
+import { districtDrainageNote } from "./lib/floodGroup.js";
 import { useGroundElevation, GROUND_EL_TITLE } from "./components/useGroundElevation.js";
 import ViewMenu from "./components/ViewMenu.jsx";
 import SiteAnalysis from "./components/SiteAnalysis.jsx";
@@ -10241,6 +10242,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       detected: drainCtxData?.channel || null, // { near, unitNo, name, distFt, state }
       onSet: (v) => setSettings((sx) => ({ ...sx, drainage: { ...(sx.drainage || {}), drainsToHcfcdChannel: v } })),
     },
+    // B1074 — the NON-HCFCD district line. The B798 guard above correctly suppresses the
+    // HCFCD question off-Harris; this fills the hole it left, so a BKDD (or no-district)
+    // site names its governing authority, its channel and its drainage easement instead of
+    // reading "unknown". Null for Harris — HCFCD keeps its own wording, never doubled.
+    districtNote: districtDrainageNote(drainCtxData),
     // B761 — the outfall-type picker for unincorporated Harris (HCED Infra Regs). Relevant
     // only where the county drainage minimum is outfall-type-driven (the HCFCD authority).
     // Unset → the readout shows the 0.75–1.0 band; a pick resolves it to 0.75 or 1.0.
@@ -15771,6 +15777,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               {layersOpen && (
                 <div style={{ padding: "2px 11px 10px", maxHeight: "62vh", overflowY: "auto" }}>
                   <LayerPanel overlays={overlays} setOverlays={setOverlays} county={restored?.county || county} layerStatus={layerStatus} coverage={coverage}
+                    /* B1070/B1071 — the flood group scopes its district rows off the SAME
+                       drainage context the Stormwater readout uses, so the panel and the
+                       readout can never disagree about who governs drainage here. */
+                    floodContext={drainCtxData}
                     basemap={{
                       value: origin ? basemapSrc : "off",
                       onChange: setBasemapSrc,
@@ -20420,7 +20430,9 @@ function YieldPanel({
               const showAuth = ac && (ac.detectedId || ac.override);
               const showChan = cd && cd.relevant;
               const showOutfall = ot && ot.relevant;
-              if (!showAuth && !showChan && !showOutfall) return null;
+              // B1074 — the governing-district line for a NON-HCFCD site (BKDD, or nowhere).
+              const dn = d.districtNote;
+              if (!showAuth && !showChan && !showOutfall && !dn) return null;
               const rows = [];
               if (showAuth) rows.push(
                 <div key="auth" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "2px 0" }}>
@@ -20459,6 +20471,12 @@ function YieldPanel({
                   </div>
                 );
               }
+              // PANEL-BREVITY: NO label row. The sentence names the governing authority in its
+              // own first words ("BKDD governs drainage here — …"), so a "Drainage authority"
+              // caption above it would restate the line it labels. Net visible-copy change: zero.
+              if (dn) rows.push(
+                <div key="district" style={{ marginTop: rows.length ? 6 : 0, fontSize: 10.5, color: dn.tone === "warn" ? Y.warnText : Y.muted, lineHeight: 1.45, fontStyle: dn.tone === "warn" ? "italic" : "normal" }}>{dn.text}</div>
+              );
               if (showOutfall) {
                 const ov = ot.value;
                 const otNote = ov === "stormSewer"

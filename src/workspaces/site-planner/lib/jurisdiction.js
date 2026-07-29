@@ -30,6 +30,7 @@
 import { gisCache as defaultCache } from "./gisCache.js";
 import { GIS_SOURCES } from "../../../shared/gis/sources.js";
 import { fetchArcgisJson, gisErrorMessage } from "./gisFetch.js";
+import { proxyServiceUrl } from "../../../shared/gis/gisProxyCore.js";
 
 // ---------------------------------------------------------------------------
 // Source registry — one row per layer. `kind` picks the query: "polygon" = a
@@ -295,6 +296,16 @@ export function buildIdentifyParams(source, geom) {
   return p;
 }
 
+/* The same /query, addressed through the same-origin B445 cache proxy (B1073). Returns
+ * null when there's no page origin to anchor the same-origin path to (the Node test env),
+ * so the caller simply queries the agency directly — the proxy is an optimisation, never
+ * a dependency. Exported for the unit test that locks the round-trip. */
+export function proxiedQueryUrl(serviceUrl, params, origin = null) {
+  const o = origin || (typeof location !== "undefined" && location && location.origin) || null;
+  if (!o) return null;
+  return buildQueryUrl(proxyServiceUrl(serviceUrl, `${o}/api/gis-cache`), params);
+}
+
 // Title-case an ALL-CAPS source value for display ("MISSOURI CITY" → "Missouri City").
 const titleCase = (s) => String(s).toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
 
@@ -332,7 +343,28 @@ export function identifySource(source, geom, opts = {}) {
   const where = geom.ring ? "poly:" + ringKey(geom.ring) : Number(geom.lng).toFixed(4) + "," + Number(geom.lat).toFixed(4);
   const key = "juris:" + source.id + ":" + where;
   const fetcher = async () => {
-    const j = await fetchJson(buildQueryUrl(source.url, buildIdentifyParams(source, geom)));
+    const params = buildIdentifyParams(source, geom);
+    // B1073 — per-source abort cap. The shared default is 9 s (GIS_FETCH_TIMEOUT_MS),
+    // which is correct for a warm agency service and FATAL for a cold one: BKDD's first
+    // call to a sleeping ArcGIS Server instance measured 16.5–18.3 s (every call after it,
+    // under a tenth of a second). At 9 s the very first identify against any BKDD source
+    // aborts on EVERY site, forever — the source would read as dead while being perfectly
+    // healthy. A row that declares `timeoutMs` gets it; everything else is unchanged.
+    const fetchOpts = source.timeoutMs ? { timeoutMs: source.timeoutMs } : undefined;
+    // …and pay that cold start ONCE, SERVER-SIDE, not in every user's browser: a row
+    // flagged `viaProxy` goes through the same-origin B445 Drive-backed cache proxy
+    // (which bounds its own upstream at 25 s and keeps a durable copy). Proxy-FIRST for
+    // exactly that reason, with a direct-to-agency retry so a dev environment without the
+    // Function deployed — or a proxy hiccup — can never break the identify.
+    const direct = buildQueryUrl(source.url, params);
+    const proxied = source.viaProxy ? proxiedQueryUrl(source.url, params) : null;
+    let j;
+    if (proxied) {
+      try { j = await fetchJson(proxied, fetchOpts); }
+      catch (_) { j = await fetchJson(direct, fetchOpts); }
+    } else {
+      j = await fetchJson(direct, fetchOpts);
+    }
     return (j.features || []).map((f) => ({ attrs: f.attributes || {}, geometry: f.geometry || null }));
   };
   const { cached, stale, fresh } = cache.swr(key, fetcher, { ttl: source.ttl || 0 });

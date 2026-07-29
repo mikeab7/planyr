@@ -122,6 +122,9 @@ export const STATEWIDE = {
     note: "Flood zones appear once you zoom in to about street level — hidden at city-wide zoom.",
     opacity: 0.55,
     group: "flood", order: 1,
+    // B1070 — the flood group's four tiers. FEMA is the REGULATORY tier: an adopted map a
+    // floodplain administrator enforces. Never merge it with an advisory model.
+    floodTier: "regulatory", agency: "FEMA",
   },
   wetlands: {
     kind: "dynamic", label: "Wetlands",
@@ -521,6 +524,10 @@ export const AHJ_LAYERS = {
     note: "Flood-control channel right-of-way (HCFCD).",
     opacity: 0.8, county: "harris",
     group: "flood", order: 2,
+    // B1070 — district-scoped: this row is listed ONLY when HCFCD is the governing
+    // drainage authority. Before this, it was offered on a Waller site where HCFCD
+    // (correctly) has no data, and its silent blank read as a broken layer.
+    floodTier: "local", district: "hcfcd", agency: "HCFCD",
   },
   // City of Houston water/wastewater/storm. The mycity2/pubgis02 HPW host was
   // stale (intermittent "service not started"); geogimsprod runs only the
@@ -552,7 +559,11 @@ export const AHJ_LAYERS = {
     layers: [22, 23, 24, 904], // Pipe (≥~1:40k), Open Channel, Culvert, Linear Drain
     note: "City of Houston storm drainage (geogimstest). COH only — blank outside the city. Zoom in (~1:40k) to see pipes.",
     opacity: 0.85, county: "harris",
-    group: "flood", order: 3,
+    group: "flood", order: 6,
+    // Local tier, but NOT district-scoped (`district` deliberately absent): a municipal
+    // storm system isn't a drainage district, so it must never be suppressed by the
+    // district picker — its own export already paints nothing outside the city.
+    floodTier: "local", agency: "City of Houston",
   },
   coh_water: {
     // B898: MEMBER of the consolidated "Water & sewer" layer (mergeGroup water_sewer).
@@ -563,6 +574,82 @@ export const AHJ_LAYERS = {
     note: "City of Houston potable water (geogimstest). COH only — blank outside the city.",
     opacity: 0.85, county: "harris",
     group: "utilities", mergeGroup: "water_sewer", order: 1,
+  },
+
+  /* NEW-1 / B1069 — the BROOKSHIRE–KATY DRAINAGE DISTRICT map layers. Until now the app
+   * had ZERO non-Harris drainage sources, so every Waller/BKDD site read as "no drainage
+   * data" — the app drew nothing beside an obvious district channel and explained nothing.
+   *
+   * Endpoints, sublayer ids and SR all live in GIS_SOURCES (one source of truth, and the
+   * home of the two registry TRAPS: layer numbers are service-scoped, and "…-OLD" siblings
+   * exist). Service SR is WKID 2278 — Planyr's own spine — and the export honours
+   * bboxSR/imageSR, so a dynamicMapLayer paints these with no reprojection work.
+   *
+   * B1073: `stallMs` overrides the shared 15 s "source slow" watchdog. BKDD's first call to
+   * a cold ArcGIS Server instance measured 16.5–18.3 s (every call after: under a tenth of a
+   * second), so at 15 s the panel would have gone amber on EVERY first visit for a source
+   * that is perfectly healthy — a false alarm is as dishonest as a false all-clear. */
+  bkdd_drainage: {
+    kind: "dynamic", label: "District streams, watersheds & BFE",
+    source: "Brookshire–Katy Drainage District (via Quiddity)",
+    url: GIS_SOURCES.bkddStreams.serviceUrl, // …/Drainage_Information/MapServer
+    // 108 Major Streams · 121 All Streams (TNRIS) · 116 Sub-Watersheds (DMP) ·
+    // 112 Floodplain BFE · 2 NPDES outfalls. NB 121 means All Streams in THIS service
+    // and MUD boundary in Boundaries — never move a bare layer number between services.
+    layers: [108, 121, 116, 112, 2],
+    note: "The district's own streams, sub-watersheds, published BFE lines and permitted outfalls.",
+    opacity: 0.8, county: "waller",
+    group: "flood", order: 3,
+    floodTier: "local", district: "bkdd", agency: "BKDD",
+    stallMs: 25000,
+  },
+  bkdd_easements: {
+    // VECTOR (not raster) on purpose: a district drainage easement is a hard
+    // buildable-area constraint, so its width + recorded exhibit have to be clickable —
+    // a band on the map that can't tell you it's 70 ft wide is half the answer.
+    kind: "vector", label: "District drainage easements",
+    source: "Brookshire–Katy Drainage District (via Quiddity)",
+    url: GIS_SOURCES.bkddEasements.serviceUrl + "/" + GIS_SOURCES.bkddEasements.layerId,
+    color: "#b45309", weight: 2,
+    note: "Recorded district drainage easements — click one for its width and recorded exhibit.",
+    opacity: 0.85, county: "waller",
+    group: "flood", order: 4,
+    floodTier: "local", district: "bkdd", agency: "BKDD",
+    stallMs: 25000,
+  },
+  bkdd_dmp: {
+    kind: "dynamic", label: "Master Plan floodplains & improvements",
+    source: "Brookshire–Katy Drainage District (via Quiddity) — Drainage Master Plan",
+    url: GIS_SOURCES.bkddDmpFloodplain.serviceUrl, // …/Drainage_Master_Plan/MapServer
+    // 19 100-yr Atlas-14 · 20 Harvey · 17 10-yr · 5 Conveyance Channel ·
+    // 6 Proposed Channel Improvements · 4 + 10 Proposed Detention.
+    layers: [19, 20, 17, 5, 6, 4, 10],
+    note: "Master-plan study results and proposed (unbuilt) works — advisory, never the regulatory flood map.",
+    opacity: 0.6, county: "waller",
+    group: "flood", order: 5,
+    floodTier: "advisory", district: "bkdd", agency: "BKDD",
+    // EXPLICIT STUDY-AREA GATE (B1069). Every DMP layer returned nothing at Tsakiris
+    // because the study area is WESTERN Waller — a correct empty that must read as
+    // "outside this study area", never as a clean "no floodplain here". `studyArea`
+    // makes the panel say so; `regional` scope makes coverage.js read the service's
+    // published fullExtent and decide in/out.
+    studyArea: true,
+    stallMs: 25000,
+  },
+
+  /* NEW-4 / B1072 — USGS NHD: the universal channel fallback, available at EVERY site in
+   * the country. This is what guarantees no site is ever again left with an invisible
+   * channel just because its drainage district publishes no GIS. Tier 3 (physical
+   * hydrography), never district-scoped, explicitly labelled an inventory. */
+  nhd_flowlines: {
+    kind: "vectorLine", label: "Streams, canals & ditches",
+    source: "U.S. Geological Survey — National Hydrography Dataset",
+    url: GIS_SOURCES.nhdHydro.serviceUrl + "/" + GIS_SOURCES.nhdHydro.layerId,
+    imageFallback: { url: GIS_SOURCES.nhdHydro.serviceUrl, layers: null },
+    note: "Where water physically runs — an inventory, not a regulatory floodplain and not a channel capacity.",
+    opacity: 0.85,
+    group: "flood", order: 1,
+    floodTier: "hydrography", agency: "USGS",
   },
 };
 
@@ -620,6 +707,11 @@ export const LAYER_VINTAGE = {
   jur_road_authority: "TxDOT Roadway Inventory — current edition",
   // Per-county utility layers
   hcfcd_row: "HCFCD channels & ROW — current edition",
+  // B1069/B1072 — the new drainage families.
+  bkdd_drainage: "BKDD district GIS (Quiddity) — current edition",
+  bkdd_easements: "BKDD recorded easements (Quiddity) — current edition",
+  bkdd_dmp: "BKDD Drainage Master Plan — study results (advisory)",
+  nhd_flowlines: "USGS NHD — collection date varies by area",
   coh_ww: "City of Houston GIS (test host) — current edition",
   coh_storm: "City of Houston GIS (test host) — current edition",
   coh_water: "City of Houston GIS (test host) — current edition",
@@ -916,7 +1008,10 @@ export function syncOverlayLayers(map, overlays, refs, opts = {}) {
                 onStatus: (id, s, msg) => onStatus && onStatus(id, s, msg),
                 reportAge: () => reportCacheAge(l, k, onStatus),
                 isActive: () => refs[k] === l,
-                stallMs: RASTER_STALL_MS,
+                // B1073 — a registry row may set its own stall window. BKDD's cold ArcGIS
+                // Server spin-up runs 16.5–18.3 s; at the shared 15 s default the row would go
+                // amber on every first visit to a perfectly healthy source.
+                stallMs: cfg.stallMs ?? RASTER_STALL_MS,
                 onProxyFallback: () => {
                   try { map.removeLayer(l); } catch (_) {}
                   const direct = buildRaster(false);

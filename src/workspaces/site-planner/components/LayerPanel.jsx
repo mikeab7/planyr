@@ -34,6 +34,10 @@ import { formatAge } from "../lib/gisCache.js";
 import {
   getRelevanceMode, setRelevanceMode, getNearbyRadiusMiles, setNearbyRadiusMiles, subscribeRelevance,
 } from "../lib/coverage.js";
+import {
+  governingDistrict, scopeFloodEntries, districtSwapNote, floodMasterState,
+  femaZoneVerdict, emptyReason, FEMA_ZONES_NOT_CHANNELS,
+} from "../lib/floodGroup.js";
 
 // This panel rides on the themed var(--surface-overlay) container, so its text must
 // be theme tokens — the old warm cream-era hexes were dark-on-dark in dark mode (B341).
@@ -52,7 +56,15 @@ const STATUS = {
 };
 const RELEVANCE_LABEL = { all: "Show all", dim: "Dim", hide: "Hide" };
 
-export default function LayerPanel({ overlays, setOverlays, county, layerStatus = {}, coverage = {}, compact = false, basemap = null, gisNote = null }) {
+export default function LayerPanel({
+  overlays, setOverlays, county, layerStatus = {}, coverage = {}, compact = false, basemap = null, gisNote = null,
+  // B1070/B1071 — the drainage facts the Flood & drainage group needs to be HONEST:
+  // `floodContext` is a resolveDrainageContext result (or its restored slim) — its
+  // `drainageDistrict` picks which district's rows are listed, and its `flood.zones` let
+  // the group say what FEMA actually reported instead of going silent. Absent (map finder,
+  // or before any check) → nothing is suppressed and no verdict line is claimed.
+  floodContext = null,
+}) {
   const jur = jurisdictionFor(county);
   const set = (k, patch) => setOverlays((o) => ({ ...o, [k]: { ...o[k], ...patch } }));
   const [tok, setTok] = useState(() => mapillaryToken());
@@ -302,16 +314,19 @@ export default function LayerPanel({ overlays, setOverlays, county, layerStatus 
   // they render folded into their primary's composite row (B761); `buildGroupSlots` (B898)
   // additionally folds any `mergeGroup` members (Water & sewer / Electric / Fire hydrants)
   // into one slot each.
-  const groupRows = (entries, groupKey) => {
+  // B1070: `render` lets a group supply its own row renderer (the Flood & drainage group
+  // wraps each row with an agency badge + an honest empty-state reason) while keeping ALL
+  // of the relevance ordering / dim / hide behaviour identical.
+  const groupRows = (entries, groupKey, render = renderSlot) => {
     const slots = buildGroupSlots(entries.filter(([k]) => !mergeSecondaries.has(k)));
-    if (mode === "all") return slots.map((sl) => renderSlot(sl));
+    if (mode === "all") return slots.map((sl) => render(sl));
     const hi = [], lo = [];
     for (const sl of slots) (slotLowRel(sl) ? lo : hi).push(sl);
     return (
       <>
-        {hi.map((sl) => renderSlot(sl))}
+        {hi.map((sl) => render(sl))}
         {lo.length > 0 && (mode === "dim"
-          ? lo.map((sl) => renderSlot(sl, { dim: true }))
+          ? lo.map((sl) => render(sl, { dim: true }))
           : (
             <>
               <button onClick={() => setRevealHidden((s) => ({ ...s, [groupKey]: !s[groupKey] }))}
@@ -319,7 +334,7 @@ export default function LayerPanel({ overlays, setOverlays, county, layerStatus 
                 style={{ background: "transparent", border: "none", color: MUTED, fontSize: 10.5, cursor: "pointer", padding: "2px 0", textAlign: "left", width: "100%" }}>
                 {revealHidden[groupKey] ? "▾ Hide" : "▸ Show"} {lo.length} layer{lo.length > 1 ? "s" : ""} with no local data here
               </button>
-              {revealHidden[groupKey] && lo.map((sl) => renderSlot(sl, { dim: true }))}
+              {revealHidden[groupKey] && lo.map((sl) => render(sl, { dim: true }))}
             </>
           ))}
       </>
@@ -349,6 +364,110 @@ export default function LayerPanel({ overlays, setOverlays, county, layerStatus 
     if (!placed) out.push(foldEntry);
     return out;
   };
+
+  /* ---------------------------------------------------------------------------
+   * B1070 / B1071 — the Flood & drainage GROUP.
+   *
+   * The owner's ask was "I kinda wanted something where it just showed flood elements
+   * altogether." That is built here as a GROUP WITH ONE MASTER TOGGLE — deliberately NOT
+   * as one merged layer, because merging would erase the difference between a REGULATORY
+   * line somebody enforces and an ADVISORY MODEL nobody does. Four labelled tiers keep
+   * that difference visible; the master switch still turns the whole relevant bundle on in
+   * one click. Every child keeps its own status dot (the B790 machine), opacity slider,
+   * ordering and per-row ⓘ — nothing about a row's own behaviour changes here.
+   * ------------------------------------------------------------------------- */
+  const floodDistrict = governingDistrict({
+    detected: floodContext?.drainageDistrict?.id ? [floodContext.drainageDistrict.id] : null,
+    county,
+  });
+  const floodScope = scopeFloodEntries(groupEntries("flood"), { governing: floodDistrict.id });
+  const floodMaster = floodMasterState(floodScope.tiers, overlays);
+  const floodSwap = districtSwapNote({ governing: floodDistrict.id, suppressed: floodScope.suppressed, county });
+  const femaVerdict = femaZoneVerdict(floodContext?.flood);
+  const TONE = { ok: "var(--text-secondary)", warn: "var(--warn-text)", alert: "var(--danger)" };
+
+  const floodMasterRow = (
+    <div style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 4 }}>
+      <label style={{ display: "flex", gap: 6, alignItems: "center", cursor: "pointer", flex: 1, minWidth: 0 }}>
+        <input type="checkbox" checked={floodMaster.all}
+          ref={(el) => { if (el) el.indeterminate = floodMaster.any && !floodMaster.all; }}
+          aria-label="Show all flood and drainage layers"
+          onChange={(e) => { const on = e.target.checked; floodMaster.ids.forEach((id) => set(id, { on })); }} />
+        <span style={{ flex: 1, fontSize: compact ? 12 : 12.5, color: INK, fontWeight: 600 }}>Show all flood & drainage</span>
+      </label>
+      {floodMaster.any && (
+        <span style={{ fontSize: 10, color: MUTED, flex: "none" }}>{floodMaster.onCount}/{floodMaster.ids.length}</span>
+      )}
+    </div>
+  );
+
+  // The agency badge — WHOSE data this row is, at a glance. Provider names never became
+  // group headings (the B898 rule), so they earn their place here instead, as a chip.
+  const agencyBadge = (cfg) => (cfg.agency ? (
+    <span title={cfg.source || cfg.agency}
+      style={{ fontSize: 9, fontWeight: 700, letterSpacing: "0.04em", color: MUTED, border: `1px solid ${LINE}`,
+        borderRadius: 4, padding: "0 3px", flex: "none", whiteSpace: "nowrap" }}>
+      {cfg.agency}
+    </span>
+  ) : null);
+
+  /* One flood row = the ordinary row, plus its agency badge and — the whole point of
+   * B1071 — an HONEST reason when it comes back with nothing. A silent blank is what made
+   * a correct "no flood hazard here" indistinguishable from a broken layer. */
+  const floodRow = (slot, opts) => {
+    if (slot.kind === "merge") return renderSlot(slot, opts);
+    const [k, cfg] = slot.entry;
+    const st = overlays[k];
+    if (!st) return null;
+    const ls = st.on ? layerStatus[k] : null;
+    const showWhy = st.on && ls && ls.state === "empty";
+    return (
+      <div key={k}>
+        <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+          <div style={{ flex: 1, minWidth: 0 }}>{renderSlot(slot, opts)}</div>
+          {agencyBadge(cfg)}
+        </div>
+        {showWhy && (
+          <div style={{ fontSize: 10, color: MUTED, lineHeight: 1.4, margin: "0 0 5px 22px" }}>
+            {emptyReason(cfg, { coverage: coverage[k] })}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const floodGroupBody = (
+    <>
+      {floodMasterRow}
+      {/* (NEW-3b) Why a district you'd expect isn't listed — named in the user's own terms,
+          naming BOTH the source that doesn't cover here and the one that does. */}
+      {floodSwap && (
+        <div style={{ fontSize: 10.5, color: MUTED, lineHeight: 1.45, margin: "0 0 5px" }}>{floodSwap}</div>
+      )}
+      {floodScope.tiers.map((t) => (
+        <div key={t.key}>
+          <div title={t.note} style={{ ...groupHdr, margin: "6px 0 3px", display: "flex", alignItems: "center", gap: 5 }}>
+            <span>{t.label}</span>
+            {t.key === "advisory" && (
+              <span style={{ color: "var(--warn-text)", fontWeight: 700, letterSpacing: 0 }}>· not regulatory</span>
+            )}
+          </div>
+          {groupRows(t.rows, `flood-${t.key}`, floodRow)}
+        </div>
+      ))}
+      {/* (NEW-3a) What FEMA actually said — the answer that was missing entirely. */}
+      {femaVerdict && (
+        <div style={{ fontSize: 10.5, color: TONE[femaVerdict.tone] || MUTED, lineHeight: 1.45, marginTop: 6 }}>
+          {femaVerdict.text}
+        </div>
+      )}
+      {/* The one standing line that would have answered the original report on its own.
+          Stated ONCE for the group, never repeated per row. */}
+      <div style={{ fontSize: 10, color: MUTED, lineHeight: 1.45, marginTop: 4, fontStyle: "italic" }}>
+        {FEMA_ZONES_NOT_CHANNELS}
+      </div>
+    </>
+  );
 
   const segBtn = (active) => ({
     flex: 1, padding: "3px 6px", fontSize: 10.5, fontWeight: active ? 700 : 500, cursor: "pointer",
@@ -427,8 +546,8 @@ export default function LayerPanel({ overlays, setOverlays, county, layerStatus 
       {/* 2) Flood & drainage — deal-killer first: FEMA zones, drainage channels & ROW, storm
              sewer (auto-scoped by AHJ — no hard-coded "Houston" label; today's only adapter is
              Harris/COH, more can be added incrementally per layers.js AHJ_LAYERS). */}
-      {groupHead("flood", LAYER_GROUP_LABEL.flood, groupOnCount("flood"))}
-      {!collapsed.flood && groupRows(groupEntries("flood"), "flood")}
+      {groupHead("flood", LAYER_GROUP_LABEL.flood, floodMaster.onCount)}
+      {!collapsed.flood && floodGroupBody}
 
       {/* 3) Utilities serving the site — the THREE consolidations (B898): Water & sewer
              (mains + who's entitled to serve, every provider that reaches here — never just
