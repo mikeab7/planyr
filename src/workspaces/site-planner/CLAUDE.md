@@ -116,6 +116,14 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   real transport**, never through a mock `commit` that accepts more parameters than the shipped
   adapter does — that mismatch is exactly what shipped a dead feature green. **B1118:** the load-time heal's `exempt` set — a repaired element must diff and COMMIT, or
   rows-canonical-on-seed adopts the torn rows straight back over the repair.
+- `bondRemap.js` — the ONE id-bearing bond inventory (`attachedTo` · `forCourt` · `forTrailer` ·
+  `prevZone`) + the remap rule EVERY copy path must use (B1124). Both copy paths used to remap only
+  `attachedTo`, so a duplicated building's trailer parking stayed bonded to the ORIGINAL building's
+  truck court — and `relayoutSide` walks the chain from the court, so that trailer was never laid out
+  at all ("hovering by itself"). Rule: a reference inside the copied set is remapped; one outside it
+  is DROPPED, never left dangling to a foreign element. A non-string value is an inert legacy flag,
+  not a bond. `siteModel.normalizeCrossHostBonds` is the load-time repair for plans already copied,
+  and it must run BEFORE `normalizeZoneAlongLen` (which needs a walkable chain to judge a pin against).
 - `planClipboard.js` — the ONE general canvas clipboard (NEW-2/NEW-6): collect the current selection
   (elements expanded to their `attachedTo` assembly, so a building brings its truck court / trailer
   parking / dock zones / bump-outs), then paste with fresh ids, bonds remapped INSIDE the copy, and

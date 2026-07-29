@@ -77,6 +77,7 @@ import {
 } from "./lib/standardsApply.js";
 import { pushRecent, notePick, commitPick } from "../../shared/ui/colorRecents.js";
 import { CLIP_KINDS, collectClipboard, clipboardBBox, pasteClipboard, translateCalloutBy, translateParcelBy } from "./lib/planClipboard.js";
+import { remapBondRefs } from "./lib/bondRemap.js";
 import { usePalette } from "../../shared/theme/ThemeProvider.jsx";
 import { NUM_FONT, TABULAR_NUMS } from "../../shared/theme/typography.js";
 import { pickInMarquee, hasSelMod, nextSelection } from "../../shared/markup/selection.js";
@@ -131,7 +132,7 @@ import { DOGEAR_W, DOGEAR_D, dogEarGeom, dogEarSize, sidewalkSpanForBumps, isDog
 import { CURB_TYPES as COST_CURB_TYPES, CURB_TYPE_META, roadCurbType, roadCurbedSides, roadPanWidth, roadQuantities, costRollup } from "./lib/costTakeoff.js";
 import { layoutLabels, buildingLabelLines, dimCalloutVisible, detailLabelVisible, pondParamLabelVisible, pondParamFontPx, suppressedDimIds, dimFontScale, dimFontPx, boxOf } from "./lib/labelLayout.js";
 import { calloutLayout, minCalloutWidthFt } from "./lib/calloutLayout.js";
-import { DOCK_ZONES, MAX_DOCK_ZONES, ZONE_CATALOG, zoneDepthDefaults, catalogDepthDefault, layoutZoneByKind, usableCourtSpan, zoneAlongSpan, boxExtentAlong, resizedAlongLen, dockSidesFor, footprintDepth, footprintLength, footprintAxes, strandedZoneIds, pruneStrandedZones } from "./lib/dockZones.js";
+import { DOCK_ZONES, MAX_DOCK_ZONES, ZONE_CATALOG, zoneDepthDefaults, catalogDepthDefault, layoutZoneByKind, usableCourtSpan, zoneAlongSpan, boxExtentAlong, resizedZoneAlongLen, dockSidesFor, footprintDepth, footprintLength, footprintAxes, strandedZoneIds, pruneStrandedZones } from "./lib/dockZones.js";
 import { computeBuildingGrid, resolveGridSettings, placeDockDoors } from "./lib/buildingGrid.js";
 import { convertBuildingToPolygon, dockLineAt, dockEdgeLine, projectOntoLine, frameBBox, translateDockLines, dockSegExtent, clipSegmentToRing } from "./lib/footprintEdit.js";
 import { dimSlideRange, clampDimOffset, DIM_POS_F_DEFAULT, DIM_POS_F_ROAD, dimNumberBox } from "./lib/dimSlide.js";
@@ -410,7 +411,9 @@ const MAX_DIM = 100000; // ft — sane upper clamp so a fat-fingered size can't 
 // element that wasn't cloned (orphan court / dog-ear metadata that refit/trailer logic reads).
 // `groupId` is included so a LONE paste/duplicate starts ungrouped (B261) — duplicating a
 // whole group is a separate path that re-stamps a fresh shared group id (duplicateGroup).
-const ORPHAN_TAGS = ["attachedTo", "groupId", "truckCourt", "forCourt", "forTrailer", "dogEar", "oppSide", "sideParkSide", "sidewalkSide"];
+// B1124 — `prevZone` (the generic outward-stack bond added in B495) was MISSING from this list, so a
+// lone duplicate of a chain zone kept a link to the original chain. It is an element id like the rest.
+const ORPHAN_TAGS = ["attachedTo", "groupId", "truckCourt", "forCourt", "forTrailer", "prevZone", "dogEar", "oppSide", "sideParkSide", "sidewalkSide"];
 const detachClone = (src) => { const c = { ...src }; for (const k of ORPHAN_TAGS) delete c[k]; return c; };
 // Platform-correct modifier name for keyboard hints in prose ("⌘V" vs "Ctrl+V").
 const MOD_LABEL = (typeof navigator !== "undefined" && /Mac|iPhone|iPad|iPod/.test(navigator.platform || navigator.userAgent || "")) ? "⌘" : "Ctrl+";
@@ -1817,6 +1820,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // Delete path reads these refs instead, so it always sees the current selection.
   // Synced during render (idempotent; a passive effect would lag the same window).
   const selRef = useRef(sel); selRef.current = sel;
+  // B1125 — is the element inspector actually SHOWING right now? Synced during render (below, where
+  // companionOpen/propsTab are derived) so the window keydown listener's Escape hatch reads the live
+  // truth rather than the closure it was last bound with — the panel's visibility turns on
+  // `leftPanel`, which is not in that listener's dep list.
+  const inspectorShowingRef = useRef(false);
   const multiRef = useRef(multi); multiRef.current = multi;
   // NEW-1: live mirrors read by the takeover / restore layout effects (whose deps intentionally
   // EXCLUDE leftPanel/dockMemo so a deliberate manual rail switch can't re-trigger a takeover).
@@ -3794,6 +3802,36 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if (memo) { setLeftPanel((p) => dockAfterRelinquish({ leftPanel: p, restore: memo.restore })); setDockMemo(null); }
     }
   }, [propsMatches, narrow]);
+  /* B1125 — the ONE inspector dismissal, so the close control can NEVER read as dead.
+   *
+   * The bug: the ✕ only dropped the explicit-open marker (`propsFor`). That is enough while the
+   * inspector holds the dock through the takeover memo, but NOT when the dock is held by the
+   * Properties rail TAB — and any deliberate rail click clears the memo (`setDockMemo(null)`), so
+   * `leftPanel` stayed "properties" and the panel kept rendering through its `propsTab &&
+   * companionSel` branch. From the owner's seat the ✕ was "literally not responding": every click
+   * landed, every handler ran, and nothing changed. (The relinquish in the takeover effect above
+   * can't cover this — it must NOT fire when the tab was opened deliberately with nothing selected,
+   * or the docked Properties tab could never stay open at all. So dismissal is explicit, here.)
+   *
+   * Reproduced logged-out and pinned by e2e/inspector-close.spec.js. */
+  const closeInspector = () => {
+    if (narrow && narrowProps && !leftPanelRef.current) { setNarrowProps(false); }
+    else {
+      setPropsFor(null);
+      setNarrowProps(false);
+      // Release the dock too — back to whatever the inspector replaced when there is a memo,
+      // otherwise to nothing. Either way the panel is GONE, which is what ✕ promises.
+      if (!narrow && leftPanelRef.current === "properties") {
+        const memo = dockMemoRef.current;
+        setLeftPanel(memo ? dockAfterRelinquish({ leftPanel: "properties", restore: memo.restore }) : null);
+        setDockMemo(null);
+      }
+    }
+    // Drop the pending tap history: without this, a plain single click on the same feature shortly
+    // after closing could still pair with the double-click that just opened this panel (the fast-3-
+    // click re-arm in isDoubleTap is deliberately generous) and misfire as another double-tap.
+    lastTapRef.current = { id: null, t: 0, x: 0, y: 0, wasSel: false };
+  };
   // B653 cross-links: after a "default ↗" jump lands on Standards, scroll the focused
   // section into view (it opens via its remount key); drop the focus when the panel closes
   // so a later manual visit opens with the normal all-collapsed overview.
@@ -4039,6 +4077,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if (e.key === "Enter" && finishActiveDrawing()) { e.preventDefault(); return; }
       // B875 — Enter on a selected pond opens its inspector (keyboard peer of double-click).
       if (e.key === "Enter" && tool === "select" && sel?.kind === "el") { const se = els.find((x) => x.id === sel.id); if (se && se.type === "pond") { e.preventDefault(); revealPondInspector(se.id); return; } }
+      // B1125 — Escape is the GUARANTEED escape hatch for the element inspector: whatever state the
+      // panel or the pointer is in, one key closes it, with the element left selected (exactly what
+      // the ✕ does). It runs BEFORE the catch-all below and consumes the key, so the panel can never
+      // be a place you get stuck; a second Escape then falls through and deselects as always.
+      if (e.key === "Escape" && inspectorShowingRef.current) { e.preventDefault(); closeInspector(); return; }
       if (e.key === "Escape") { setDraftPoly(null); setDraftRect(null); setDraftElPoly(null); setDraftRoadPts(null); branchSeedRef.current = null; setRoadVtxSel(null); setMeasDraft([]); setSplitPath([]); setCombineSel([]); setCalloutDraft(null); setAddLeaderFor(null); cancelEditCallout(); setMkRect(null); setMkPoly(null); setEaseDraft(null); setEaseEdges(null); setEaseMenu(false); setMarquee(null); setMulti([]); setDrillId(null); setPrintMode(false); setPrintFrame(null); setIdentifyMode(false); setIdentifyRes(null); setAttachFor(null); setAlignFor(null); setPobMode(null); setOvCalib(null); setTraceMode(false); setTracePts([]); setRouteMode(null); setXsecMode(false); setXsecPts([]); setOverlapWarn(""); setSel(null); setTypeMenu(null); setParcelMenu(null); setSelVtx(null); setVtxMenu(null); setInsHint(null); setToolMenu(false); setMeasureMenu(false); setOvMenu(null); setOvAlignBase(null); setParcelMode("add"); setMergePick(false); setGisHit(null); spaceRef.current = false; setSpacePan(false); abortGesture(); setTool("select"); lastTapRef.current = { id: null, t: 0, x: 0, y: 0, wasSel: false }; }
       if (e.key.startsWith("Arrow") && (multi.length > 1 || sel?.kind === "el")) { e.preventDefault(); nudgeSel(e.key, e.shiftKey ? 10 : 1); return; }
       if ((e.key === "Backspace" || e.key === "Delete") && removeLastVertex()) { e.preventDefault(); return; } // undo the last placed vertex mid-draw
@@ -4291,7 +4334,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const idMap = new Map(allEls.map((e) => [e.id, uid()]));
     const cloneEl = (e) => {
       const c = { ...e, id: idMap.get(e.id) };
-      if (e.attachedTo && idMap.has(e.attachedTo)) c.attachedTo = idMap.get(e.attachedTo); else if (e.attachedTo) delete c.attachedTo;
+      // B1124 — EVERY id-bearing bond, not just `attachedTo`: a copied trailer must point at the
+      // COPY's truck court, never the original's (that cross-link is what left the duplicate's
+      // trailer parking unable to track its own host). Out-of-copy references are dropped.
+      remapBondRefs(c, e, idMap);
       if (memElIds.has(e.id)) c.groupId = ng; else delete c.groupId; // top-level members carry the new group; children ride their host
       if (e.points) c.points = e.points.map((p) => ({ x: p.x + off, y: p.y + off }));
       else { c.cx = e.cx + off; c.cy = e.cy + off; }
@@ -5616,7 +5662,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       const newCenter = { x: opp.x + half.x / 2, y: opp.y + half.y / 2 };
       const nb = { cx: newCenter.x, cy: newCenter.y, w: nw, h: nh, rot: el.rot };
       if (d.hostClamp) clampToHost(nb, d.hostClamp); // grow away from the host building
-      setEls((a) => applySwShift(refitChildren(a, d.id, nb, d.kids), d.swShift, nb));
+      // B1123 — a CORNER drag legitimately moves both axes, so no dragAxis hint: the exact
+      // host-local along measurement decides whether a dock zone's length was really set.
+      setEls((a) => applySwShift(refitChildren(a, d.id, nb, d.kids, { userResize: true }), d.swShift, nb));
       return;
     }
     if (d.mode === "edgeResize") {
@@ -5632,7 +5680,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       const newCenter = { x: opp.x + half.x / 2, y: opp.y + half.y / 2 };
       const nb = { cx: newCenter.x, cy: newCenter.y, w: nw, h: nh, rot: el.rot };
       if (d.hostClamp) clampToHost(nb, d.hostClamp); // grow away from the host building
-      setEls((a) => applySwShift(refitChildren(a, d.id, nb, d.kids), d.swShift, nb));
+      // B1123 — an EDGE drag knows exactly which local dimension it moved, so a depth-only drag on a
+      // dock zone can never be read as the owner setting that zone's length.
+      setEls((a) => applySwShift(refitChildren(a, d.id, nb, d.kids, { userResize: true, dragAxis: { w: nx !== 0, h: ny !== 0 } }), d.swShift, nb));
       return;
     }
     if (d.mode === "rotate") {
@@ -7148,7 +7198,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // stuck together: dog-ears slide to the corner, wall strips scale, the
   // opposite-side trailer re-hugs its wall, and a court's trailer follows the
   // (re-scaled) court's far edge.
-  const refitChildren = (a, buildingId, nb, kids) => {
+  // `opts` (B1123) carries the GESTURE's intent, which the geometry alone cannot express:
+  //   · userResize      — this refit is a resize aimed AT `buildingId`. Only then may a dock zone
+  //                       pin its along-wall length. A relayout / rotation / heal passes nothing.
+  //   · dragAxis        — {w,h}: which local dimension an EDGE drag moved, so a depth-only drag can
+  //                       never be mistaken for a length drag. Absent for a corner drag / a typed
+  //                       dimension (both may legitimately change the length).
+  const refitChildren = (a, buildingId, nb, kids, opts = {}) => {
     const resized = a.find((x) => x.id === buildingId);
     const hostIsBuilding = !!resized && resized.type === "building" && !resized.dogEar;
     let next = a.map((x) => {
@@ -7209,8 +7265,24 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         // letting the relayout snap it back to the court's span. A pure depth drag stores nothing,
         // so an untouched trailer keeps tracking the court exactly as before. The court head keeps
         // its own alongLen path (B492), which is capped to the clear bump-out face.
-        const tan = alongUnit(b, side);
-        const setLen = resized.truckCourt ? null : resizedAlongLen(boxExtentAlong(resized, tan), boxExtentAlong(box, tan));
+        //
+        // B1123 — two things were wrong here, and the SECOND is the one that mattered.
+        //  (1) The spans were compared as bounding-box PROJECTIONS (`boxExtentAlong(…, alongUnit(b,
+        //      side))`), which leak the depth into the along measurement as h·|sin δ| once the zone's
+        //      angle drifts off its host's — and it does drift in real plans. `zoneAlongExtent` reads
+        //      the along DIMENSION in the host's frame instead, so a depth change moves it by zero.
+        //  (2) There was no notion of INTENT at all: whether the owner had set a length was inferred
+        //      from geometry alone, so anything that reached this branch could pin `alongLen` — and a
+        //      pin is by design never reset, which is why the trailer never tracked its court again.
+        //      The stamp now requires the gesture to BE a user resize OF THIS ZONE, and an edge drag
+        //      must have moved the along axis. A host refit, a relayout, a rotation, a court depth
+        //      change and the load-time heal are all structurally incapable of stamping.
+        const isTrailerZone = resized.type === "trailer" || !!resized.forCourt;
+        const alongIsW = isTrailerZone || side === "top" || side === "bottom";
+        const alongAxisDragged = opts.dragAxis ? !!(alongIsW ? opts.dragAxis.w : opts.dragAxis.h) : null;
+        const setLen = resized.truckCourt ? null : resizedZoneAlongLen(resized, box, {
+          hostRot: b.rot, side, userResize: !!opts.userResize, alongAxisDragged,
+        });
         next = next.map((x) => (x.id === buildingId ? { ...x, zd: newDepth, ...(setLen ? { alongLen: setLen } : {}) } : x));
         next = relayoutSide(next, b, side);
       }
@@ -12240,6 +12312,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // + its own empty state). Properties is dock-only (it reuses the companion, which is outside the B717
   // float system), so it's excluded from the PanelChrome detach path below.
   const propsTab = leftPanel === "properties";
+  // B1125 — the exact condition the inspector's own render branch uses, mirrored to a ref for the
+  // keydown Escape hatch. Keep the two in lockstep: they are one fact.
+  inspectorShowingRef.current = !!(companionOpen || (propsTab && companionSel));
   const railBtn = (on) => ({
     display: "flex", flexDirection: "column", alignItems: "center", gap: 3, width: "100%",
     padding: "10px 2px", border: "none", borderLeft: `3px solid ${on ? PAL.ember : "transparent"}`,
@@ -12873,7 +12948,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // host-edge clamp the resize grips use; refitChildren then drags the trailer along.
     const hc = hostClampOf(selEl);
     if (hc) clampToHost(nb, hc);
-    setEls((a) => refitChildren(a, selEl.id, nb, kids));
+    // B1123 — a typed W/H IS a deliberate resize of this element, so a dock zone may pin its length
+    // from it; `patch` names the axis the owner typed, which is exactly the dragAxis hint.
+    setEls((a) => refitChildren(a, selEl.id, nb, kids, { userResize: true, dragAxis: { w: patch.w != null, h: patch.h != null } }));
   };
   // B912 — resize a SPECIFIC element to a typed dimension (double-tap its on-canvas dimension label).
   // Mirrors resizeSelEl but targets `el` by value rather than the current selection, so it can be
@@ -12887,7 +12964,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const kids = wallKids(el);
     const hc = hostClampOf(el);
     if (hc) clampToHost(nb, hc);
-    setEls((a) => refitChildren(a, el.id, nb, kids));
+    // B1123 — a typed on-canvas dimension is a deliberate resize of ONE axis (`axisKey`).
+    setEls((a) => refitChildren(a, el.id, nb, kids, { userResize: true, dragAxis: { w: axisKey === "w", h: axisKey === "h" } }));
   };
   // B912 — open the inline numeric editor on an element's on-canvas dimension NUMBER (double-tap).
   // The geometry resizes to the typed feet: road = travel width; building = depth about its dock
@@ -16974,7 +17052,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 history: without this, a plain single click on the same feature shortly after closing
                 could still pair with the double-click that just opened this panel (the fast-3-click
                 re-arm in isDoubleTap is deliberately generous) and misfire as another double-tap. */}
-            {(!narrow || !propsTab) && <button style={{ border: "none", background: "transparent", color: PAL.muted, cursor: "pointer", fontSize: 13, fontFamily: "inherit", lineHeight: 1, padding: "0 2px" }} title="Close (the element stays selected; double-click it to reopen)" aria-label="Close properties" onClick={(e) => { e.stopPropagation(); if (narrow && narrowProps && !leftPanel) setNarrowProps(false); else setPropsFor(null); lastTapRef.current = { id: null, t: 0, x: 0, y: 0, wasSel: false }; }}>✕</button>}
+            {(!narrow || !propsTab) && <button style={{ border: "none", background: "transparent", color: PAL.muted, cursor: "pointer", fontSize: 13, fontFamily: "inherit", lineHeight: 1, padding: "0 2px" }} title="Close (the element stays selected; double-click it to reopen) — Esc" aria-label="Close properties" onClick={(e) => { e.stopPropagation(); closeInspector(); }}>✕</button>}
             <span style={{ fontSize: 10.5, color: PAL.muted, transform: propsCollapsed ? "none" : "rotate(90deg)", transition: "transform .18s ease", width: 9 }}>▶</span>
           </div>
           {!propsCollapsed && (<>
