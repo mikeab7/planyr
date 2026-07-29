@@ -166,7 +166,9 @@ describe("bug-hunt B505–B509: the fixes still exist in source", () => {
   });
 
   it("B544: PDF export revokes its blob URL immediately (no 8s leak window)", () => {
-    const src = read("../src/workspaces/site-planner/SitePlanner.jsx");
+    // B1042 — the export path moved from SitePlanner.jsx into lib/exportSheet.js (loaded on
+    // demand). Same code, new home; this guard follows it.
+    const src = read("../src/workspaces/site-planner/lib/exportSheet.js");
     expect(src).not.toMatch(/setTimeout\(\(\) => URL\.revokeObjectURL\(aEl\.href\), 8000\)/);
     expect(src).toMatch(/URL\.revokeObjectURL\(aEl\.href\); \/\/ B544/);
   });
@@ -600,7 +602,9 @@ describe("markup hit-area / callout padding / live color picker (B155 open-path 
   });
 
   it("B735: the export aerial + viewBox share ONE extent (no dev-only guard that blanks a parcels-only site)", () => {
-    const src = read("../src/workspaces/site-planner/SitePlanner.jsx");
+    // B1042 — the export path moved from SitePlanner.jsx into lib/exportSheet.js (loaded on
+    // demand). Same code, new home; this guard follows it.
+    const src = read("../src/workspaces/site-planner/lib/exportSheet.js");
     // buildExportSvg AND exportAerialForFrame both crop to exportFeetExtent(frame) — the single
     // source of truth. If a future edit re-adds a dev-only `if (!dev) return null` in the aerial
     // path, a parcels-only site over the live basemap silently exports white again (the confirmed
@@ -613,7 +617,9 @@ describe("markup hit-area / callout padding / live color picker (B155 open-path 
   });
 
   it("B839: the export aerial stitches cached tiles (fast) with a dynamic-/export fallback", () => {
-    const src = read("../src/workspaces/site-planner/SitePlanner.jsx");
+    // B1042 — the Stitcher moved into lib/exportSheet.js, but the live tile layers it reuses
+    // (crossOrigin, so their bytes are canvas-readable) are still SitePlanner's. Guard both.
+    const src = read("../src/workspaces/site-planner/lib/exportSheet.js") + read("../src/workspaces/site-planner/SitePlanner.jsx");
     // The fast path reuses cached XYZ tiles instead of a slow dynamic /export render, and the live
     // tile layers request CORS so those bytes are canvas-readable and shared with the stitch.
     expect(src).toMatch(/stitchAerialDataUrl/);
@@ -626,7 +632,9 @@ describe("markup hit-area / callout padding / live color picker (B155 open-path 
   });
 
   it("B840: the aerial fetch has its own longer budget + retry + alternate-source fallback", () => {
-    const src = read("../src/workspaces/site-planner/SitePlanner.jsx");
+    // B1042 — the export path moved from SitePlanner.jsx into lib/exportSheet.js (loaded on
+    // demand). Same code, new home; this guard follows it.
+    const src = read("../src/workspaces/site-planner/lib/exportSheet.js");
     expect(src).toMatch(/AERIAL_INLINE_TIMEOUT_MS/);               // aerial-specific budget, not the shared 8s
     expect(src).toMatch(/isOverlay \|\| isAerial\) && fallback/);  // aerial retries its data-fallback-href (alt source)
     // fetchAsDataUrl accepts a per-call timeout + retries.
@@ -634,7 +642,9 @@ describe("markup hit-area / callout padding / live color picker (B155 open-path 
   });
 
   it("B841: the aerial-drop banner no longer blames the connection (PDF + PNG parity)", () => {
-    const src = read("../src/workspaces/site-planner/SitePlanner.jsx");
+    // B1042 — the export path moved from SitePlanner.jsx into lib/exportSheet.js (loaded on
+    // demand). Same code, new home; this guard follows it.
+    const src = read("../src/workspaces/site-planner/lib/exportSheet.js");
     // New copy on BOTH export paths (PDF-PARITY), and the misleading "Check your connection" tail
     // is gone from the aerial banner specifically.
     expect(src).toMatch(/took too long to load, so the PNG was exported without it/);

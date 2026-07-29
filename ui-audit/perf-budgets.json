@@ -20,12 +20,12 @@
   "bundle": {
     "$comment": "Static, deterministic, no browser. Computed from dist/.vite/manifest.json by ui-audit/perf-bundle-audit.mjs. Gated in CI.",
     "siteRouteJsBytes": {
-      "ceiling": 2400000,
+      "ceiling": 2320000,
       "target": 1600000,
-      "measured": 2270513,
+      "measured": 2242725,
       "unit": "bytes",
       "what": "Total JS a plain Site route must download: the entry chunk plus SitePlannerApp and its static-import closure.",
-      "note": "Was 3094689 before NEW-9 removed the boot-time idle prefetch of the other workspaces. Target assumes the SitePlannerApp split (see targetOwner)."
+      "note": "Was 3094689 before NEW-9 removed the boot-time idle prefetch of the other workspaces, and 2270513 before B1042 deferred the export path + the LERC codec. Ceiling ratcheted 2400000 -> 2320000 with that landing (measured 2242725 after merging main, which is why the ceiling is not pinned tighter -- the budget file's rule is baseline PLUS headroom, so it trips on a real regression rather than on ordinary feature churn). STILL ABOVE TARGET, and dynamic imports alone cannot close the rest — see largestChunkBytes.note for the measured floor, plus ~200 KB of Supabase client in the shared entry chunk (auth-js/realtime-js/phoenix/storage-js) that only a signed-in-verifiable change can defer."
     },
     "siteRouteChunks": {
       "ceiling": 4,
@@ -40,20 +40,20 @@
       "allow": ["index", "SitePlannerApp", "hitTest", "AppHeader"]
     },
     "totalJsBytes": {
-      "ceiling": 4050000,
-      "target": 4050000,
-      "measured": 3774188,
+      "ceiling": 3960000,
+      "target": 3960000,
+      "measured": 3809954,
       "unit": "bytes",
       "what": "Every JS chunk EMITTED into dist/assets, summed. Catches overall bundle growth even when it lands off the Site route.",
       "note": "Larger than the 3016 KB the owner's 2026-07-28 pass reported, and correctly so: that figure counted the 11 chunks a browser actually FETCHED, while this counts all 20 emitted — the extra 5 are Web Worker bundles (terrainWorker, dxfWorker) and small helper chunks that only a dynamic import ever pulls. Two different questions; the per-route budgets above answer the owner's."
     },
     "largestChunkBytes": {
-      "ceiling": 1800000,
+      "ceiling": 1750000,
       "target": 900000,
-      "measured": 1711381,
+      "measured": 1680007,
       "unit": "bytes",
       "what": "The single biggest chunk (today SitePlannerApp).",
-      "note": "SitePlannerApp is 55% of all JS and sits on the critical path. Splitting it is the target's owner."
+      "note": "SitePlannerApp sits on the critical path. B1042 deferred the export path, the aerial Stitcher, the KMZ writer and the LERC codec (1711381 -> 1667946; 1680007 after merging main) and ratcheted the ceiling 1800000 -> 1750000. THE TARGET IS DELIBERATELY LEFT UNMET, because it cannot be reached with dynamic imports and the reader should know why: source-map attribution of the remaining chunk shows an INDIVISIBLE FLOOR of ~1085000 bytes that no import() can move -- SitePlanner.jsx itself 703 KB (ONE React component; a dynamic import cannot split a component), leaflet 148 KB, clipper-lib 98 KB (road-network dissolve, needed at first paint), esri-leaflet 59 KB, MapFinder.jsx 46 KB (mounted in both modes), @terraformer 5 KB. That floor alone is 24% above the 900000 target. The remaining ~580 KB is the drainage/pond/criteria analysis stack, which is called synchronously during render. Closing the gap therefore needs a DIFFERENT kind of work -- extracting panels out of the SitePlanner component into lazily-loaded children -- which is what targetOwner now names."
     }
   },
 
@@ -133,8 +133,8 @@
     "$comment": "Backlog items that own closing an ABOVE TARGET gap. The harness prints these next to the gap so a reader knows the work is tracked, not forgotten.",
     "runtime.timeToFirstDragMs": "B1040 / V477 live check (re-seed the provisional ceiling from a production run on the real Sylvestri scenario)",
     "runtime.firstAerialCoverageMs": "B1040 / V477 live check (re-seed the provisional ceiling from a production run; tile hosts are unreachable from the sandbox)",
-    "bundle.siteRouteJsBytes": "B1042 (split SitePlannerApp behind dynamic imports)",
-    "bundle.largestChunkBytes": "B1042 (split SitePlannerApp behind dynamic imports)",
+    "bundle.siteRouteJsBytes": "B1064 (extract SitePlanner's panels into lazily-loaded child components) -- B1042 did the dynamic-import half and is Done",
+    "bundle.largestChunkBytes": "B1064 (extract SitePlanner's panels into lazily-loaded child components) -- B1042 did the dynamic-import half and is Done; see this metric's note for the measured floor that blocks the rest",
     "runtime.frameMedianMs": "companion map-side perf session, 2026-07-28 nine-item run (drift / overlay lifecycle / SVG culling) — tighten to 60fps once that render work lands",
     "runtime.frameP90Ms": "companion map-side perf session, 2026-07-28 nine-item run (drift / overlay lifecycle / SVG culling) — tighten to 60fps once that render work lands",
     "runtime.aerialTileRequests": "companion map-side perf session, 2026-07-28 nine-item run (tile-footprint reduction)"

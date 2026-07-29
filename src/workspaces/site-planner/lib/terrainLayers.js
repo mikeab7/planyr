@@ -29,7 +29,7 @@ import { proxyServiceUrl } from "../../../shared/gis/gisProxyCore.js";
 import { DEP_URL } from "./elevation.js";
 import {
   gridRequest, exportUrl, looksLikeLerc, sampleAtLatLng, mercToPixel,
-  lngToMercX, latToMercY, decodeGrid, groundScale, mercPerPx,
+  lngToMercX, latToMercY, groundScale, mercPerPx,
 } from "./demGrid.js";
 
 export const TERRAIN_MIN_ZOOM = 16; // ~3 m ground cells at Houston; z15 would be 1-ft-contour mush
@@ -156,6 +156,10 @@ export function fetchSiteGrid(bounds, { fetchImpl, zoom } = {}) {
   if (cur) return cur;
   const job = (async () => {
     const buf = await fetchGridBytes(req, fetchImpl);
+    // B1042 — the LERC codec loads only now, alongside the bytes it decodes, so it never
+    // rides the planner's boot bundle. We're already inside an await; the chunk fetch
+    // overlaps nothing the user is waiting on beyond the grid request itself.
+    const { decodeGrid } = await import("./lercGrid.js");
     const grid = decodeGrid(buf, req);
     return { grid, req };
   })();

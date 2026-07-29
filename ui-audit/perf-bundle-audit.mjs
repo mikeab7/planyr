@@ -72,16 +72,37 @@ function staticClosure(startKeys) {
 }
 
 const entryKey = Object.keys(manifest).find((k) => manifest[k].isEntry) || "index.html";
+/* Each route names its source module AND the chunk stem that module ends up as. Both are
+ * needed: Vite keys a lazy chunk by its source path ONLY while that chunk stays a pure
+ * facade of that one module. The moment the chunk also has to expose exports to another
+ * chunk — which is exactly what happens when a lazily-imported module (B1042's
+ * exportSheet) imports back into the planner's chunk — Rollup drops the facade and Vite
+ * re-keys the entry by chunk name (`_SitePlannerApp-<hash>.js`, no `src`). The graph is
+ * unchanged; only the lookup key is. Resolving by stem as well keeps the route budgets
+ * measuring the same thing across that transition. */
 const ROUTE_KEYS = {
-  site: "src/workspaces/site-planner/SitePlannerApp.jsx",
-  review: "src/workspaces/doc-review/DocReview.jsx",
-  library: "src/workspaces/library/Library.jsx",
-  scheduler: "src/workspaces/scheduler/Scheduler.jsx",
+  site: { src: "src/workspaces/site-planner/SitePlannerApp.jsx", stem: "SitePlannerApp" },
+  review: { src: "src/workspaces/doc-review/DocReview.jsx", stem: "DocReview" },
+  library: { src: "src/workspaces/library/Library.jsx", stem: "Library" },
+  scheduler: { src: "src/workspaces/scheduler/Scheduler.jsx", stem: "Scheduler" },
 };
 
+/* Resolve a route to its manifest key. Returns null only when the chunk genuinely is not
+ * in the build — which the caller treats as a FAILURE, never a quiet omission: a route
+ * that silently vanishes from this report takes its allowlist guard with it. */
+function routeKey({ src, stem }) {
+  if (manifest[src]) return src;
+  return Object.keys(manifest).find((k) => {
+    const f = manifest[k].file;
+    return f && f.endsWith(".js") && stemOf(f) === stem;
+  }) || null;
+}
+
 const routes = {};
-for (const [name, key] of Object.entries(ROUTE_KEYS)) {
-  if (!manifest[key]) continue; // a workspace that was renamed/removed simply drops out of the report
+const missingRoutes = [];
+for (const [name, spec] of Object.entries(ROUTE_KEYS)) {
+  const key = routeKey(spec);
+  if (!key) { missingRoutes.push({ name, ...spec }); continue; }
   const closure = staticClosure([entryKey, key]);
   routes[name] = {
     chunks: [...closure.keys()].map((f) => ({ file: f, stem: stemOf(f), bytes: closure.get(f) }))
@@ -116,6 +137,21 @@ function check(path, value, spec) {
   } else {
     passes.push(row);
   }
+}
+
+/* A route we can't find at all is a HARD failure. It used to be a silent `continue`, which
+ * meant a renamed/re-keyed chunk quietly took the siteRouteJsBytes + siteRouteChunks +
+ * allowlist guards offline while the audit still printed "✓ all budgets within ceiling"
+ * (B1042 hit exactly this). Never again: no route, no pass. */
+for (const r of missingRoutes) {
+  failures.push({
+    metric: `bundle.route.${r.name}`,
+    value: "NOT FOUND in the build",
+    ceiling: `${r.src} (or a chunk named ${r.stem})`,
+    delta: 0,
+    unit: "chunks",
+    missingRoute: r,
+  });
 }
 
 const b = budgets.bundle;
@@ -159,7 +195,13 @@ if (JSON_OUT) {
     if (a.owner) console.log(`      tracked by: ${a.owner}`);
   }
   for (const f of failures) {
-    if (f.named) {
+    if (f.missingRoute) {
+      console.log(`\n  ✗ ${f.metric} — the ${f.missingRoute.name} route's chunk is NOT in this build`);
+      console.log(`      looked for: ${f.ceiling}`);
+      console.log("      Its per-route budgets (bytes / chunk count / allowlist) could not be evaluated, so");
+      console.log("      this run proves nothing about that route. Either the workspace was renamed (update");
+      console.log("      ROUTE_KEYS in this file, both `src` and `stem`) or the build genuinely lost it.");
+    } else if (f.named) {
       console.log(`\n  ✗ ${f.metric} — UNEXPECTED CHUNK(S) ON THE SITE ROUTE: ${f.value}`);
       for (const c of f.named) console.log(`      ${c.stem} (+${kb(c.bytes)})`);
       console.log(`      allowed: ${f.ceiling}`);

@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-07-29 @ `e049e8b` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-07-29 @ `cc81ad0` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_336 source files mapped._
+_338 source files mapped._
 
 ## infra
 
@@ -316,7 +316,7 @@ _336 source files mapped._
 - **`src/workspaces/site-planner/lib/deedAlign.js`** — Deed-to-parcel basis-of-bearings fix: rigid rotate+translate best-fit overlay plus theoretical grid-convergence fallback
   - _exports_: `CONFIDENT_FRAC`, `describeRotation`, `gridConvergenceDeg`, `MAX_ALIGN_ROT_DEG`, `openRing`, `ringCentroid`, `rotatePointsAbout`, `solveDeedAlignment`
 - **`src/workspaces/site-planner/lib/demGrid.js`** — Pure DEM grid plumbing (B704/B706): deterministic snapped-tile exportImage requests, LERC sniff/decode to survey-feet with validity mask, masked gaussian smooth, cell-center pixel/mercator/WGS84 transforms, mask-aware bilinear sampling
-  - _exports_: `CELL_PX`, `decodeGrid`, `exportUrl`, `gridRequest`, `groundScale`, `latToMercY`, `lngToMercX`, `looksLikeLerc`, `MARGIN_CELLS`, `maskedSmooth`, `MAX_GRID`, `mercPerPx`, `mercToPixel`, `mercXToLng`, `mercYToLat`, `pixelToLatLng`, `pixelToMerc`, `sampleAtLatLng`, `WEB_MERC_R`
+  - _exports_: `CELL_PX`, `exportUrl`, `gridRequest`, `groundScale`, `latToMercY`, `lngToMercX`, `looksLikeLerc`, `MARGIN_CELLS`, `maskedSmooth`, `MAX_GRID`, `mercPerPx`, `mercToPixel`, `mercXToLng`, `mercYToLat`, `pixelToLatLng`, `pixelToMerc`, `sampleAtLatLng`, `WEB_MERC_R`
 - **`src/workspaces/site-planner/lib/detentionCriteria.js`** — Versioned jurisdiction detention-criteria registry (NEW-A1): cited per-district outlet-hydraulics + pond-geometry criteria (release, storms, freeboard, slope, berm, orifice/weir C, drawdown), referencing DETENTION_RULES for the verified release/storm/freeboard facts; audit guard + user overrides.
   - _exports_: `bkddMaintBermWidthFt`, `coincidentStormPolicy`, `CRITERIA_JUR_KEYS`, `criteriaAuthorityShort`, `criteriaFor`, `DETENTION_CRITERIA`, `jurKeyForAuthority`, `loadCriteriaOverrides`, `problems`, `pumpAllowance`, `requiredStormsFor`, `saveCriteriaOverrides`
 - **`src/workspaces/site-planner/lib/detentionMethod.js`** — Rational-vs-NRCS method-by-area guardrail (B904): picks the runoff method by tributary area against a criteria-configurable ceiling (default 200 ac) and flags when NRCS is indicated but the routing pass still rides the Rational proxy.
@@ -369,6 +369,8 @@ _336 source files mapped._
   - _exports_: `BELOW_INVERT_TOL_FT`, `compareEstimates`, `DISAGREE_THRESHOLD_FT`, `IMPLAUSIBLE_DEPTH_FT`, `impliedDepthFt`, `MATERIAL_ABS_FLOOR`, `MATERIAL_REL`, `sanityCheckEstimate`, `SENSITIVITY_DELTA_FT`, `sensitivityBand`
 - **`src/workspaces/site-planner/lib/evidenceLayers.js`** — View-driven Leaflet utility-evidence overlays (OSM Overpass power/hydrants + Mapillary detections) with SWR cache and per-layer status
   - _exports_: `fetchOverpass`, `mapillaryLayer`, `mapillaryToken`, `overpassLayer`, `setMapillaryToken`, `subscribeMapillaryToken`
+- **`src/workspaces/site-planner/lib/exportSheet.js`** — the on-demand export path: PDF/PNG/KMZ sheet composition, the B839 aerial tile Stitcher, and GIS raster/vector layer capture. Loaded via dynamic import() from SitePlanner (B1042) so it never rides the boot bundle; reads planner state through a per-call `ctx` object
+  - _exports_: `createExportSheet`, `sheetPlanAspect`
 - **`src/workspaces/site-planner/lib/exportStyle.js`** — Pure print stroke-weight retargeting: convert authored screen-pixel line widths to zoom-independent physical drafting points for PDF/PNG export
   - _exports_: `PRINT_WEIGHTS`, `printStrokeWidth`, `PT_PER_CENTI_INCH`, `sheetFitScale`
 - **`src/workspaces/site-planner/lib/factRevalidation.js`** — Drainage facts auto-revalidation decision layer (B832): load-kind (missing/stale/incomplete snapshot) vs edit-kind (fetch-envelope exit, point-anchor drift >100 ft) triggers with stable retry keys. Exports `revalidationNeed`, `envelopeOf`, `envelopeContains`, `anchorDriftFt`.
@@ -429,6 +431,8 @@ _336 source files mapped._
   - _exports_: `admittedAfter`, `LAYER_STAGE_SIZE`, `layerTier`, `orderLayersByPriority`
 - **`src/workspaces/site-planner/lib/ledgerBalancer.js`** — Ledger balancer (B830): ranks screening moves that close detention + mitigation together (shrink over-dug, joint berm solve with apply payload, parcel phase-out, building-to-basin, pumped what-if). Exports `rankLedgerMoves`, `solveBermRaise`.
   - _exports_: `BERM_MAX_RAISE_FT`, `overdugAcFt`, `rankLedgerMoves`, `solveBermRaise`
+- **`src/workspaces/site-planner/lib/lercGrid.js`** — LERC payload decode (`decodeGrid`), split out of demGrid.js (B1042) so the `lerc` codec stays off the Site route's boot bundle; static-imported by the terrain worker, dynamic-imported on the main thread
+  - _exports_: `decodeGrid`
 - **`src/workspaces/site-planner/lib/lineZoom.js`** — B880: dash-period + inset-visibility zoom helpers (the B617 siblings for dashed feet-frame lines) — `dashZoom` scales an SVG dash spec with zoom (floored sub-pixel, capped), `insetRingVisible` suppresses a setback/inset ring when it collapses onto its boundary. Exports: `dashZoom`, `insetRingVisible`, `DASH_ZOOM_FLOOR_PX`, `DASH_ZOOM_CEIL`, `INSET_MIN_VISIBLE_PX`.
   - _exports_: `DASH_ZOOM_CEIL`, `DASH_ZOOM_FLOOR_PX`, `dashZoom`, `INSET_MIN_VISIBLE_PX`, `insetRingVisible`
 - **`src/workspaces/site-planner/lib/localDb.js`** — IndexedDB async key/value store (get/put/delete/deleteByPrefix + durable persist), self-healing open, no-op fallback where IDB is unavailable; durable home for the version-history ring and cached rasters

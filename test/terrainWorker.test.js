@@ -13,7 +13,7 @@ describe("terrainWorker — worker-safe import discipline", () => {
   const src = read("../src/workspaces/site-planner/lib/terrainWorker.js");
   it("imports ONLY the pure terrain modules", () => {
     const imports = [...src.matchAll(/from\s+"([^"]+)"/g)].map((m) => m[1]).sort();
-    expect(imports).toEqual(["./contours.js", "./demGrid.js", "./flowField.js"]);
+    expect(imports).toEqual(["./contours.js", "./demGrid.js", "./flowField.js", "./lercGrid.js"]);
   });
   it("never touches Leaflet / React / the DOM", () => {
     expect(src).not.toMatch(/from\s+"leaflet"/);
@@ -32,7 +32,7 @@ describe("terrainWorker — worker-safe import discipline", () => {
 });
 
 describe("the pure terrain modules stay worker-safe too", () => {
-  for (const f of ["demGrid.js", "contours.js", "flowField.js"]) {
+  for (const f of ["demGrid.js", "contours.js", "flowField.js", "lercGrid.js"]) {
     it(`${f} has no Leaflet/React/DOM imports`, () => {
       const src = read(`../src/workspaces/site-planner/lib/${f}`);
       expect(src).not.toMatch(/from\s+"leaflet"/);

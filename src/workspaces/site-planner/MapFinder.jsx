@@ -22,7 +22,6 @@ import {
   humanizeError,
 } from "./lib/arcgis.js";
 import { elStyle, elRingFeet, byZ } from "./lib/planStyle.js";
-import { siteToFeatures, buildKmz, kmzFilename, KMZ_MIME } from "./lib/kmzExport.js";
 import { STATUSES, STATUS_META, statusOf } from "./lib/siteModel.js";
 import { countyAtPoint } from "./lib/jurisdiction.js";
 import { apprRows, apprVal, findAttr } from "./lib/appraisal.js";
@@ -347,9 +346,12 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
   // to WGS84 via the SAME feetToLatLng the map render uses (KML is lon,lat, so we flip [lat,lng]).
   // Selected parcels are already lon/lat. Honors the status-chip filter. LOUD-FAILURE: siteToFeatures
   // throws on a non-finite reprojection → caught, surfaced via setErr, no partial file written.
-  const exportSitesKmz = (extrude = false) => {
+  const exportSitesKmz = async (extrude = false) => {
     setMapMenu(null);
     try {
+      // B1042 — the KMZ writer loads only when a Google Earth export is actually asked for,
+      // so it never rides the planner's boot bundle. It is the one dependency here.
+      const { siteToFeatures, buildKmz, kmzFilename, KMZ_MIME } = await import("./lib/kmzExport.js");
       const projectFor = (o) => (pt) => { const [la, ln] = feetToLatLng(pt, o.lat, o.lon); return [ln, la]; };
       const features = [];
       sites.forEach((site) => {
