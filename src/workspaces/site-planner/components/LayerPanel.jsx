@@ -35,7 +35,7 @@ import {
   getRelevanceMode, setRelevanceMode, getNearbyRadiusMiles, setNearbyRadiusMiles, subscribeRelevance,
 } from "../lib/coverage.js";
 import {
-  governingDistrict, scopeFloodEntries, districtSwapNote, floodMasterState,
+  governingDistrict, scopeFloodEntries, floodMasterState,
   femaZoneVerdict, emptyReason, FEMA_ZONES_NOT_CHANNELS,
 } from "../lib/floodGroup.js";
 
@@ -380,9 +380,16 @@ export default function LayerPanel({
     detected: floodContext?.drainageDistrict?.id ? [floodContext.drainageDistrict.id] : null,
     county,
   });
-  const floodScope = scopeFloodEntries(groupEntries("flood"), { governing: floodDistrict.id });
+  /* B1091 — scoping now runs on THREE signals, not one: the boundary test (`governing`),
+   * the county the site is in, and the coverage engine's published-extent verdict (the
+   * same gate the Master Plan row already uses). The county half is what fixes the live
+   * report: a Waller site listed HCFCD + City-of-Houston rows whenever the drainage check
+   * hadn't resolved a district — and neither agency has anything in Waller County ever. */
+  const floodScope = scopeFloodEntries(groupEntries("flood"), {
+    governing: floodDistrict.id, county, coverage,
+    isOn: (id) => !!overlays[id]?.on, // a layer you already turned on always stays listed
+  });
   const floodMaster = floodMasterState(floodScope.tiers, overlays);
-  const floodSwap = districtSwapNote({ governing: floodDistrict.id, suppressed: floodScope.suppressed, county });
   const femaVerdict = femaZoneVerdict(floodContext?.flood);
   const TONE = { ok: "var(--text-secondary)", warn: "var(--warn-text)", alert: "var(--danger)" };
 
@@ -414,36 +421,59 @@ export default function LayerPanel({
   /* One flood row = the ordinary row, plus its agency badge and — the whole point of
    * B1077 — an HONEST reason when it comes back with nothing. A silent blank is what made
    * a correct "no flood hazard here" indistinguishable from a broken layer. */
+  const whyLine = (text) => (
+    <div style={{ fontSize: 10, color: MUTED, lineHeight: 1.4, margin: "0 0 5px 22px" }}>{text}</div>
+  );
   const floodRow = (slot, opts) => {
     if (slot.kind === "merge") return renderSlot(slot, opts);
     const [k, cfg] = slot.entry;
     const st = overlays[k];
     if (!st) return null;
     const ls = st.on ? layerStatus[k] : null;
-    const showWhy = st.on && ls && ls.state === "empty";
+    // B1091 — the out-of-area reason outranks the empty-here one: if this source can't
+    // cover the site at all, "covers this area and reports nothing" would be a lie.
+    const why = floodScope.notes[k] || (st.on && ls && ls.state === "empty"
+      ? emptyReason(cfg, { coverage: coverage[k] })
+      : null);
     return (
       <div key={k}>
         <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
           <div style={{ flex: 1, minWidth: 0 }}>{renderSlot(slot, opts)}</div>
           {agencyBadge(cfg)}
         </div>
-        {showWhy && (
-          <div style={{ fontSize: 10, color: MUTED, lineHeight: 1.4, margin: "0 0 5px 22px" }}>
-            {emptyReason(cfg, { coverage: coverage[k] })}
-          </div>
-        )}
+        {why && whyLine(why)}
       </div>
     );
   };
 
+  /* (B1091) The demoted rows — sources that cannot have anything to say at this site.
+   * ONE collapsed line in the default view; open it and every row is there, still
+   * toggleable, each naming WHY it isn't in the list above. Hiding them outright would
+   * have been the other sanctioned branch; this one keeps discoverability, so a scoping
+   * call the user disagrees with is one click from being overridden. */
+  const floodOffRows = floodScope.offRows.length > 0 && (
+    <div style={{ marginTop: 6 }}>
+      <button onClick={() => setRevealHidden((s) => ({ ...s, floodOff: !s.floodOff }))}
+        aria-expanded={!!revealHidden.floodOff}
+        aria-label={`${revealHidden.floodOff ? "Hide" : "Show"} ${floodScope.offRows.length} flood and drainage source${floodScope.offRows.length > 1 ? "s" : ""} that don't cover this site`}
+        style={{ background: "transparent", border: "none", color: MUTED, fontSize: 10.5, cursor: "pointer", padding: "2px 0", textAlign: "left", width: "100%" }}>
+        {revealHidden.floodOff ? "▾" : "▸"} {floodScope.offRows.length} source{floodScope.offRows.length > 1 ? "s" : ""} that don&rsquo;t cover this site
+      </button>
+      {revealHidden.floodOff && floodScope.offRows.map(([k, cfg]) => (
+        <div key={k} style={{ opacity: 0.72 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+            <div style={{ flex: 1, minWidth: 0 }}>{renderEntry([k, cfg], { dim: false })}</div>
+            {agencyBadge(cfg)}
+          </div>
+          {floodScope.notes[k] && whyLine(floodScope.notes[k])}
+        </div>
+      ))}
+    </div>
+  );
+
   const floodGroupBody = (
     <>
       {floodMasterRow}
-      {/* (NEW-3b) Why a district you'd expect isn't listed — named in the user's own terms,
-          naming BOTH the source that doesn't cover here and the one that does. */}
-      {floodSwap && (
-        <div style={{ fontSize: 10.5, color: MUTED, lineHeight: 1.45, margin: "0 0 5px" }}>{floodSwap}</div>
-      )}
       {floodScope.tiers.map((t) => (
         <div key={t.key}>
           <div title={t.note} style={{ ...groupHdr, margin: "6px 0 3px", display: "flex", alignItems: "center", gap: 5 }}>
@@ -455,6 +485,8 @@ export default function LayerPanel({
           {groupRows(t.rows, `flood-${t.key}`, floodRow)}
         </div>
       ))}
+      {/* (B1091) Everything the scoping demoted, behind one line — with its reason. */}
+      {floodOffRows}
       {/* (NEW-3a) What FEMA actually said — the answer that was missing entirely. */}
       {femaVerdict && (
         <div style={{ fontSize: 10.5, color: TONE[femaVerdict.tone] || MUTED, lineHeight: 1.45, marginTop: 6 }}>

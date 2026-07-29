@@ -64,24 +64,41 @@ export const FEMA_ZONES_NOT_CHANNELS =
 // ---------------------------------------------------------------------------
 export const DRAINAGE_DISTRICTS = {
   hcfcd: { id: "hcfcd", name: "Harris County Flood Control District", short: "HCFCD", counties: ["harris"] },
-  fbcdd: { id: "fbcdd", name: "Fort Bend County Drainage District", short: "FBCDD", counties: ["fort bend"] },
+  fbcdd: { id: "fbcdd", name: "Fort Bend County Drainage District", short: "FBCDD", counties: ["fortbend"] },
   bkdd: {
     id: "bkdd",
     name: "Brookshire–Katy Drainage District",
     short: "BKDD",
     // BKDD spans three counties, which is exactly why a county lookup alone can never
-    // decide it — only the point-in-district boundary test can (see governingDistrict).
-    counties: ["waller", "harris", "fort bend"],
+    // decide WHICH district governs — only the point-in-district boundary test can (see
+    // governingDistrict). It can still decide which districts are IMPOSSIBLE here, which
+    // is what districtReaches does when no boundary answer has arrived (B1091).
+    counties: ["waller", "harris", "fortbend"],
   },
 };
 
 export const districtName = (id) => (DRAINAGE_DISTRICTS[id] || {}).name || null;
 export const districtShort = (id) => (DRAINAGE_DISTRICTS[id] || {}).short || null;
 
-/* County (lowercased TxDOT CNTY_NM) → the county-wide flood-control district, where one
- * exists. Waller deliberately has NO entry: the county has no county-wide flood-control
- * district, so a Waller site's authority can only come from the district boundary test. */
-export const COUNTY_DISTRICT = { harris: "hcfcd", "fort bend": "fbcdd" };
+/* (B1091) COUNTY KEYS. The same county arrives spelled three ways — the panel's
+ * jurisdiction key ("fortbend"), the identify field's CNTY_NM ("Fort Bend"), and free
+ * text ("Fort Bend County"). Canonicalise to letters-only so a lookup can never miss on
+ * a space: the pre-B1091 COUNTY_DISTRICT key "fort bend" NEVER matched the panel's own
+ * "fortbend", so a Fort Bend site silently resolved no district at all. */
+export const countyKey = (c) => String(c || "").toLowerCase().replace(/county/g, "").replace(/[^a-z]/g, "") || null;
+
+/* Display spellings for the counties whose canonical key isn't just a capitalised word. */
+export const COUNTY_LABEL = { fortbend: "Fort Bend", sanjacinto: "San Jacinto" };
+export const countyName = (c) => {
+  const k = countyKey(c);
+  if (!k) return "this area";
+  return `${COUNTY_LABEL[k] || k.replace(/\b\w/g, (m) => m.toUpperCase())} County`;
+};
+
+/* County key → the county-wide flood-control district, where one exists. Waller
+ * deliberately has NO entry: the county has no county-wide flood-control district, so a
+ * Waller site's authority can only come from the district boundary test. */
+export const COUNTY_DISTRICT = { harris: "hcfcd", fortbend: "fbcdd" };
 
 /* Which local drainage authority governs this site?
  *
@@ -98,59 +115,124 @@ export function governingDistrict({ detected = null, county = null } = {}) {
   if (hits.length) {
     return { id: hits[0], source: "boundary", reason: `${districtName(hits[0])} boundary contains this site` };
   }
-  const c = county ? String(county).toLowerCase().trim() : null;
+  const c = countyKey(county);
   const byCounty = c ? COUNTY_DISTRICT[c] : null;
   if (byCounty) {
-    return { id: byCounty, source: "county", reason: `${districtName(byCounty)} covers ${titleCounty(c)}` };
+    return { id: byCounty, source: "county", reason: `${districtName(byCounty)} covers ${countyName(c)}` };
   }
-  return { id: null, source: null, reason: c ? `no county-wide flood-control district in ${titleCounty(c)}` : "site location not resolved yet" };
+  return { id: null, source: null, reason: c ? `no county-wide flood-control district in ${countyName(c)}` : "site location not resolved yet" };
 }
-
-const titleCounty = (c) => String(c || "").replace(/\b\w/g, (m) => m.toUpperCase()) + " County";
 
 // ---------------------------------------------------------------------------
 // Tiering + district scoping of the flood group's rows.
 // ---------------------------------------------------------------------------
 
-/* Split the flood group's [id, cfg] entries into ordered tiers, dropping rows that belong
- * to a district that does NOT govern this site.
- *
- * A row opts into district scoping with `cfg.district`. Rows with no `district` are always
- * listed (FEMA, NHD, city storm sewer — none of them are district-exclusive).
- *
- * When the governing district is UNKNOWN (`governing` null) nothing is suppressed: showing
- * every district beats hiding the right one behind a guess. Pure.
- *
- * Returns { tiers: [{ key, label, note, rows }], suppressed: [districtId] }. */
-export function scopeFloodEntries(entries = [], { governing = null } = {}) {
-  const suppressed = new Set();
-  const kept = [];
-  for (const e of entries) {
-    const cfg = e[1] || {};
-    if (cfg.district && governing && cfg.district !== governing) { suppressed.add(cfg.district); continue; }
-    kept.push(e);
-  }
-  const tiers = FLOOD_TIERS.map((t) => ({
-    ...t,
-    rows: kept
-      .filter(([, cfg]) => (cfg.floodTier || "regulatory") === t.key)
-      .sort((a, b) => (a[1].order ?? 99) - (b[1].order ?? 99)),
-  })).filter((t) => t.rows.length);
-  return { tiers, suppressed: [...suppressed] };
+/* Does this district's published data REACH this county at all?
+ *   true  — the county is in the district's service area
+ *   false — it is not, so nothing this district publishes can ever paint here
+ *   null  — county unknown (or the district declares no counties) → fail open
+ * This is the cheap, always-available half of the scoping question. The boundary test in
+ * governingDistrict answers "which district governs"; this answers "which districts are
+ * IMPOSSIBLE here", and it needs no network and no drainage check. Pure. */
+export function districtReaches(districtId, county) {
+  const d = DRAINAGE_DISTRICTS[districtId];
+  const c = countyKey(county);
+  if (!d || !c || !Array.isArray(d.counties) || !d.counties.length) return null;
+  return d.counties.map(countyKey).includes(c);
 }
 
-/* (NEW-3b) The off-district explanation, in the owner's own terms: name the source that
- * does NOT cover here AND the one that does. Returns null when nothing was suppressed (so
- * the panel renders no line at all rather than an empty one). Pure. */
-export function districtSwapNote({ governing = null, suppressed = [], county = null } = {}) {
-  const others = (suppressed || []).filter((d) => d && d !== governing);
-  if (!others.length) return null;
-  const away = others.map((d) => districtName(d)).filter(Boolean);
-  if (!away.length) return null;
-  const where = county ? titleCounty(String(county).toLowerCase()) : "this area";
+const listCounties = (arr) => {
+  const names = (arr || []).map((c) => countyName(c)).filter(Boolean);
+  if (!names.length) return "its own area";
+  if (names.length === 1) return names[0];
+  return `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+};
+
+/* (B1091) IS THIS ROW RELEVANT AT THIS SITE — and if not, WHY, in the user's own terms?
+ *
+ * The bug this exists for: at the Tsakiris tract (Waller County, inside BKDD) the panel
+ * listed "Drainage channels & ROW — HCFCD" and "Storm sewer — City of Houston" under LOCAL
+ * DRAINAGE AUTHORITY with no explanation. Neither agency has so much as a pipe in Waller
+ * County. The pre-B1091 scoping could only act on `governing`, so the moment the drainage
+ * check hadn't run (or ran before B1080 saved a district into the remembered snapshot) it
+ * fell open and showed everything — which is exactly the confusion B1071 set out to end.
+ *
+ * ONE mechanism, four ordered reasons, all of them already-computed signals:
+ *   1. a district row for a district that is NOT the governing one   (boundary test)
+ *   2. a district row whose district does not reach this county      (county reach)
+ *   3. a row whose agency's service area is another county entirely  (cfg.areaCounties)
+ *   4. a row whose service's own published extent misses the view    (coverage engine —
+ *      the SAME signal that gates the Master Plan row, reused rather than reinvented)
+ *
+ * Returns { relevant, reason }. `reason` is null when relevant. Pure. */
+export function floodRowRelevance(cfg = {}, { governing = null, county = null, coverage = null } = {}) {
+  const agency = cfg.agency || cfg.source || "This source";
   const gov = governing ? districtName(governing) : null;
-  const doesnt = away.length === 1 ? `${away[0]} doesn't cover ${where}` : `${away.join(" and ")} don't cover ${where}`;
-  return gov ? `${doesnt} — showing ${gov} instead.` : `${doesnt}.`;
+  const where = countyName(county);
+
+  if (cfg.district) {
+    const reaches = districtReaches(cfg.district, county);
+    const name = districtName(cfg.district) || agency;
+    if (governing && cfg.district !== governing) {
+      return {
+        relevant: false,
+        reason: reaches === false
+          ? `${name} doesn't cover ${where} — ${gov} is shown instead.`
+          : `${name} doesn't govern drainage at this site — ${gov} does.`,
+      };
+    }
+    if (!governing && reaches === false) {
+      return { relevant: false, reason: `${name} doesn't cover ${where}.` };
+    }
+    return { relevant: true, reason: null };
+  }
+
+  const area = Array.isArray(cfg.areaCounties) ? cfg.areaCounties : null;
+  const c = countyKey(county);
+  if (area && area.length && c && !area.map(countyKey).includes(c)) {
+    return { relevant: false, reason: `${agency}'s system doesn't reach ${where} — it maps ${listCounties(area)} only.` };
+  }
+
+  if (coverage === "out") return { relevant: false, reason: `${agency}'s data doesn't reach this area.` };
+
+  return { relevant: true, reason: null };
+}
+
+/* Split the flood group's [id, cfg] entries into ordered tiers, DEMOTING every row that
+ * can't have anything to say at this site (floodRowRelevance above).
+ *
+ * A demoted row is never deleted — it moves to `offRows` so the panel can list it behind
+ * one collapsed line WITH its reason, which keeps discoverability (you can still turn it
+ * on if you think the scoping is wrong) while the default view stays short.
+ *
+ * `isOn(id)` is the one exception: a row the user has ALREADY TURNED ON stays in its tier
+ * whatever the scoping says — you must always see what you enabled — and carries its
+ * reason as a caption instead. Injected, so this stays pure.
+ *
+ * Returns { tiers: [{ key, label, note, rows }], offRows: [[id, cfg]], notes: {id: reason},
+ *           suppressed: [districtId] }. */
+export function scopeFloodEntries(entries = [], { governing = null, county = null, coverage = null, isOn = null } = {}) {
+  const suppressed = new Set();
+  const notes = {};
+  const kept = [];
+  const offRows = [];
+  for (const e of entries) {
+    const [id, cfg = {}] = e;
+    const cov = coverage && typeof coverage === "object" ? coverage[id] : null;
+    const { relevant, reason } = floodRowRelevance(cfg, { governing, county, coverage: cov });
+    if (relevant) { kept.push(e); continue; }
+    notes[id] = reason;
+    if (cfg.district) suppressed.add(cfg.district);
+    if (isOn && isOn(id)) kept.push(e); else offRows.push(e);
+  }
+  const inTier = (list, key) => list
+    .filter(([, cfg]) => ((cfg || {}).floodTier || "regulatory") === key)
+    .sort((a, b) => ((a[1] || {}).order ?? 99) - ((b[1] || {}).order ?? 99));
+  const tiers = FLOOD_TIERS.map((t) => ({ ...t, rows: inTier(kept, t.key) })).filter((t) => t.rows.length);
+  offRows.sort((a, b) => FLOOD_TIER_ORDER.indexOf((a[1] || {}).floodTier || "regulatory")
+    - FLOOD_TIER_ORDER.indexOf((b[1] || {}).floodTier || "regulatory")
+    || ((a[1] || {}).order ?? 99) - ((b[1] || {}).order ?? 99));
+  return { tiers, offRows, notes, suppressed: [...suppressed] };
 }
 
 /* (NEW-2) Master-toggle state for the whole group: the ids it drives, and whether it

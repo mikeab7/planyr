@@ -8,8 +8,8 @@ import { describe, it, expect, vi } from "vitest";
 import {
   FLOOD_TIERS, FLOOD_TIER_ORDER, FEMA_ZONES_NOT_CHANNELS,
   DRAINAGE_DISTRICTS, COUNTY_DISTRICT, districtName, districtShort,
-  governingDistrict, scopeFloodEntries, districtSwapNote, floodMasterState,
-  femaZoneVerdict, isSfhaZone, emptyReason, districtDrainageNote,
+  governingDistrict, scopeFloodEntries, floodRowRelevance, districtReaches, floodMasterState,
+  countyKey, countyName, femaZoneVerdict, isSfhaZone, emptyReason, districtDrainageNote,
 } from "../src/workspaces/site-planner/lib/floodGroup.js";
 import { NHD_FTYPE, ftypeLabel, flowlineTitle, flowlineSummary } from "../src/workspaces/site-planner/lib/nhdFlowline.js";
 import { GIS_SOURCES } from "../src/shared/gis/sources.js";
@@ -73,7 +73,7 @@ describe("governingDistrict (B1076) — which drainage authority governs", () =>
     expect(governingDistrict({ detected: ["nonsense"], county: null }).id).toBeNull();
   });
   it("BKDD spans three counties — which is exactly why a county lookup alone can't decide it", () => {
-    expect(DRAINAGE_DISTRICTS.bkdd.counties).toEqual(expect.arrayContaining(["waller", "harris", "fort bend"]));
+    expect(DRAINAGE_DISTRICTS.bkdd.counties).toEqual(expect.arrayContaining(["waller", "harris", "fortbend"]));
     expect(COUNTY_DISTRICT.waller).toBeUndefined();
     expect(districtName("bkdd")).toMatch(/Brookshire/);
     expect(districtShort("hcfcd")).toBe("HCFCD");
@@ -84,14 +84,15 @@ describe("governingDistrict (B1076) — which drainage authority governs", () =>
 describe("scopeFloodEntries (B1076) — tiers + district auto-scoping", () => {
   const entries = [
     ["fema", { floodTier: "regulatory", order: 1, agency: "FEMA" }],
-    ["hcfcd_row", { floodTier: "local", district: "hcfcd", order: 1 }],
+    ["hcfcd_row", { floodTier: "local", district: "hcfcd", order: 1, agency: "HCFCD" }],
     ["bkdd_drainage", { floodTier: "local", district: "bkdd", order: 3 }],
     ["bkdd_easements", { floodTier: "local", district: "bkdd", order: 4 }],
-    ["coh_storm", { floodTier: "local", order: 6 }],
+    ["coh_storm", { floodTier: "local", order: 6, agency: "City of Houston", areaCounties: ["harris"] }],
     ["nhd_flowlines", { floodTier: "hydrography", order: 1 }],
     ["bkdd_dmp", { floodTier: "advisory", district: "bkdd", order: 5 }],
   ];
   const ids = (r) => r.tiers.flatMap((t) => t.rows.map(([id]) => id));
+  const offIds = (r) => r.offRows.map(([id]) => id);
 
   it("inside BKDD: HCFCD's row is not rendered at all, and BKDD's are", () => {
     const r = scopeFloodEntries(entries, { governing: "bkdd" });
@@ -105,20 +106,51 @@ describe("scopeFloodEntries (B1076) — tiers + district auto-scoping", () => {
     expect(ids(r)).not.toContain("bkdd_drainage");
     expect(r.suppressed).toEqual(["bkdd"]);
   });
-  it("UNKNOWN district → suppress NOTHING (showing every district beats hiding the right one)", () => {
+  it("UNKNOWN district, county unknown → suppress NOTHING (never hide the right one on a guess)", () => {
     const r = scopeFloodEntries(entries, { governing: null });
     expect(ids(r)).toEqual(expect.arrayContaining(["hcfcd_row", "bkdd_drainage"]));
     expect(r.suppressed).toEqual([]);
+    expect(r.offRows).toEqual([]);
   });
-  it("a NON-district local row (city storm sewer) survives every scoping", () => {
+  /* B1091 — the live Tsakiris failure: the drainage check hadn't resolved a district, so
+   * the old scoping fell fully open and a Waller site listed a Harris-County channel layer
+   * and a City-of-Houston storm sewer with no explanation. The county alone is enough to
+   * know both are impossible here. */
+  it("UNKNOWN district but a KNOWN county still demotes what can't reach that county", () => {
+    const r = scopeFloodEntries(entries, { governing: null, county: "waller" });
+    expect(ids(r)).not.toContain("hcfcd_row");
+    expect(ids(r)).not.toContain("coh_storm");
+    expect(offIds(r)).toEqual(expect.arrayContaining(["hcfcd_row", "coh_storm"]));
+    // …and BKDD, which DOES reach Waller, is untouched.
+    expect(ids(r)).toEqual(expect.arrayContaining(["bkdd_drainage", "bkdd_easements", "bkdd_dmp"]));
+  });
+  it("every demoted row carries its own reason, naming the county — never a silent drop", () => {
+    const r = scopeFloodEntries(entries, { governing: "bkdd", county: "waller" });
+    expect(r.notes.hcfcd_row).toBe("Harris County Flood Control District doesn't cover Waller County — Brookshire–Katy Drainage District is shown instead.");
+    expect(r.notes.coh_storm).toBe("City of Houston's system doesn't reach Waller County — it maps Harris County only.");
+  });
+  it("a row you have ALREADY TURNED ON stays listed (with its reason), never yanked away", () => {
+    const r = scopeFloodEntries(entries, { governing: "bkdd", county: "waller", isOn: (id) => id === "hcfcd_row" });
+    expect(ids(r)).toContain("hcfcd_row");
+    expect(offIds(r)).not.toContain("hcfcd_row");
+    expect(r.notes.hcfcd_row).toMatch(/doesn't cover Waller County/);
+  });
+  it("a NON-district local row survives scoping wherever its own service area reaches", () => {
     for (const g of ["bkdd", "hcfcd", "fbcdd", null]) {
-      expect(ids(scopeFloodEntries(entries, { governing: g }))).toContain("coh_storm");
+      expect(ids(scopeFloodEntries(entries, { governing: g, county: "harris" }))).toContain("coh_storm");
     }
   });
-  it("national hydrography is never district-scoped — that universality is the point", () => {
+  it("national hydrography is never district- or county-scoped — that universality is the point", () => {
     for (const g of ["bkdd", "hcfcd", null]) {
-      expect(ids(scopeFloodEntries(entries, { governing: g }))).toContain("nhd_flowlines");
+      for (const c of ["harris", "waller", "fortbend", null]) {
+        expect(ids(scopeFloodEntries(entries, { governing: g, county: c }))).toContain("nhd_flowlines");
+      }
     }
+  });
+  it("the coverage engine's published-extent verdict demotes too — ONE mechanism, not two", () => {
+    const r = scopeFloodEntries(entries, { governing: null, county: "harris", coverage: { fema: "out" } });
+    expect(offIds(r)).toContain("fema");
+    expect(r.notes.fema).toBe("FEMA's data doesn't reach this area.");
   });
   it("tiers come back in decision order and empty tiers are dropped", () => {
     const r = scopeFloodEntries(entries, { governing: "bkdd" });
@@ -139,17 +171,37 @@ describe("scopeFloodEntries (B1076) — tiers + district auto-scoping", () => {
 });
 
 // ---------------------------------------------------------------------------
-describe("districtSwapNote (B1077b) — name BOTH the source that doesn't cover and the one that does", () => {
-  it("the exact Tsakiris sentence", () => {
-    const n = districtSwapNote({ governing: "bkdd", suppressed: ["hcfcd"], county: "waller" });
-    expect(n).toBe("Harris County Flood Control District doesn't cover Waller County — showing Brookshire–Katy Drainage District instead.");
+describe("floodRowRelevance / districtReaches (B1091) — can this source say anything here?", () => {
+  it("county reach is a FACT about the data, independent of any drainage check", () => {
+    expect(districtReaches("hcfcd", "waller")).toBe(false);
+    expect(districtReaches("hcfcd", "Harris")).toBe(true);
+    // BKDD spans three counties: reaching Waller is true, which is why reach alone can
+    // never decide WHICH district governs — only that HCFCD is impossible here.
+    expect(districtReaches("bkdd", "waller")).toBe(true);
+    expect(districtReaches("bkdd", "chambers")).toBe(false);
   });
-  it("nothing suppressed → NO line at all (never an empty caption)", () => {
-    expect(districtSwapNote({ governing: "bkdd", suppressed: [] })).toBeNull();
-    expect(districtSwapNote({})).toBeNull();
+  it("county spellings can't miss: the panel key, CNTY_NM and free text all canonicalise", () => {
+    expect(countyKey("Fort Bend")).toBe("fortbend");
+    expect(countyKey("fortbend")).toBe("fortbend");
+    expect(countyKey("Fort Bend County")).toBe("fortbend");
+    expect(districtReaches("fbcdd", "fortbend")).toBe(true);
+    expect(districtReaches("fbcdd", "Fort Bend")).toBe(true);
+    expect(countyName("fortbend")).toBe("Fort Bend County");
+    expect(countyName("waller")).toBe("Waller County");
   });
-  it("the governing district is never listed as suppressed against itself", () => {
-    expect(districtSwapNote({ governing: "bkdd", suppressed: ["bkdd"], county: "waller" })).toBeNull();
+  it("an unknown county fails OPEN — never hide a source on a guess", () => {
+    expect(districtReaches("hcfcd", null)).toBeNull();
+    expect(floodRowRelevance({ district: "hcfcd" }, { county: null }).relevant).toBe(true);
+  });
+  it("the governing district wins over county reach where the two disagree", () => {
+    // A Harris site inside BKDD: HCFCD reaches Harris, but BKDD governs — so the reason
+    // says GOVERNS, not COVERS. Getting this wrong would print a falsehood.
+    const r = floodRowRelevance({ district: "hcfcd" }, { governing: "bkdd", county: "harris" });
+    expect(r.relevant).toBe(false);
+    expect(r.reason).toBe("Harris County Flood Control District doesn't govern drainage at this site — Brookshire–Katy Drainage District does.");
+  });
+  it("a row with no district and no declared service area is always relevant", () => {
+    expect(floodRowRelevance({ agency: "USGS" }, { county: "waller" })).toEqual({ relevant: true, reason: null });
   });
 });
 

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import MapFinder from "./MapFinder.jsx";
 import SitePlanner from "./SitePlanner.jsx";
 import AppHeader from "../../shared/ui/AppHeader.jsx";
@@ -8,7 +8,12 @@ import { onAuthChange } from "./lib/auth.js";
 import { claimInvites } from "./lib/teams.js";
 import { migrateOldAutosave, migrateSiteGroups, migrateScenarios, initHistoryStore, loadSitesList, loadPlansOfGroup, renameSiteGroup, groupOf, loadSite, saveSite, deleteSite, getCurrentSiteId, setCurrentSiteId, setActiveUser, pushSiteToCloud, pullCloud, importLegacyIntoCloud, pendingLegacyCount, stageLegacySite, discardLegacySite } from "./lib/storage.js";
 import { idbPersist } from "./lib/localDb.js";
-import { SiteReviewModal } from "./components/SiteReviewModal.jsx";
+/* LOADED ON DEMAND (B1092). The legacy-import review modal is signed-in-only and opens
+ * from a menu — it has no business riding the planner's critical-path chunk, which is the
+ * chunk the perf budget gates. Same pattern as lib/exportSheet.js (B1042): a dynamic
+ * import behind the one conditional that renders it. Named export, so the promise is
+ * mapped to a default for React.lazy. */
+const SiteReviewModal = lazy(() => import("./components/SiteReviewModal.jsx").then((m) => ({ default: m.SiteReviewModal })));
 import { nextConceptName } from "./lib/conceptName.js";
 import { reportClientEvent } from "../../shared/telemetry/clientErrors.js";
 import { initialBootResolved, mayReconcileUrl, pickResumeTarget } from "./lib/bootResume.js";
@@ -638,6 +643,7 @@ export default function App({
           On the map, signed-in state is shown by the shell account control. */}
 
       {showReviewModal && signedInUid && (
+        <Suspense fallback={null}>
         <SiteReviewModal
           uid={signedInUid}
           onOpen={(siteId) => {
@@ -652,6 +658,7 @@ export default function App({
             }
           }}
         />
+        </Suspense>
       )}
 
       {/* In-planner migration decision banner — shown when the user opened a legacy site

@@ -25,7 +25,7 @@
  */
 import L from "leaflet";
 import { gisCache } from "./gisCache.js";
-import { VECTOR_SOURCES, fetchCached, decideVectorOrImage, pickTier, snapBbox, vectorKey, styleFor } from "./vectorLayers.js";
+import { VECTOR_SOURCES, fetchCached, decideVectorOrImage, pickTier, snapBbox, vectorKey, styleFor, identifyRows, hitFeature } from "./vectorLayers.js";
 import { labelAnchors, placeLabels, labelsVisible, titleCaseName } from "./boundaryLabels.js";
 import { corridorRingLngLat, DEFAULT_CORRIDOR_WIDTH_FT } from "./pipelineCorridor.js";
 import { ftypeLabel } from "./nhdFlowline.js";
@@ -81,18 +81,20 @@ export function identifyTitle(source = {}, props = {}) {
   return source.identifyFallbackTitle || source.label || "Feature";
 }
 
+/* The registry rows for one feature, as plain data (B1092). The DOM builder below and
+ * the planner's own identify card both render THIS, so the map finder's popover and the
+ * canvas card can never drift. */
+export const identifyRowsFor = (source, props) =>
+  identifyRows(source, props, { decode: decodeFieldValue, href: identifyHref });
+
 export function appendIdentifyRows(el, source, props) {
-  const p = props || {};
-  for (const f of source.identifyFields || []) {
-    const raw = p[f.field];
-    if (raw == null || raw === "") continue;
+  for (const r of identifyRowsFor(source, props)) {
     const row = document.createElement("div");
     const lab = document.createElement("span");
     lab.style.cssText = "opacity:0.7;";
-    lab.textContent = `${f.label}: `;
+    lab.textContent = `${r.label}: `;
     row.append(lab);
-    const text = decodeFieldValue(raw, f);
-    const href = f.kind === "link" ? identifyHref(raw, source) : null;
+    const text = r.text, href = r.href;
     if (href) {
       const a = document.createElement("a");
       a.href = href; a.target = "_blank"; a.rel = "noopener noreferrer";
@@ -132,7 +134,7 @@ export function cachedVectorLayer(k, cfg, initialOpacity, pane, onStatus, opts =
 
   let map = null, opacity = initialOpacity, lastVectorError = null;
   let fellBack = false, fallbackLayer = null, openPopup = null;
-  let seq = 0, lastKey = null, anchors = [];
+  let seq = 0, lastKey = null, anchors = [], lastFc = null;
   const labelMarkers = [];
   const report = (state, msg, extra) => onStatus && onStatus(k, state, msg, extra);
   const lineColor = cfg.color || "#374151";
@@ -229,6 +231,7 @@ export function cachedVectorLayer(k, cfg, initialOpacity, pane, onStatus, opts =
 
   const paint = (fc, ts, stale) => {
     geo.clearLayers();
+    lastFc = fc || null; // B1092 — kept so a non-Leaflet surface can hit-test what's painted
     const n = (fc && fc.features && fc.features.length) || 0;
     if (n) geo.addData(fc);
     anchors = source.labelField && fc ? labelAnchors(fc, { labelField: source.labelField, titleCase: !!source.titleCaseLabel }) : [];
@@ -331,8 +334,33 @@ export function cachedVectorLayer(k, cfg, initialOpacity, pane, onStatus, opts =
     try { geo.setStyle(baseStyle); } catch (_) {}
     if (fallbackLayer && fallbackLayer.setOpacity) { try { fallbackLayer.setOpacity(o); } catch (_) {} }
   };
+  /* (B1092) Identify WITHOUT a Leaflet click. The planner's backdrop map is
+   * pointer-events:none — its SVG canvas owns every pointer event — so the click that
+   * opens this layer's popover on the map finder can never reach Leaflet there. This
+   * hands the same answer to any surface that can supply a lat/lng: null when nothing
+   * is under the point, or when the layer has fallen back to the raster/live path (no
+   * geometry in hand to test, and claiming otherwise would be a guess). */
+  group.identifyAt = (at) => identifyPayload(source, lastFc, at, fellBack, (f) => displayName(f));
 
   return group;
+}
+
+/* The shared shape an identify hands back — one place, so a Leaflet popover and a
+ * canvas card describe a feature identically. `titleOf` is the layer's OWN headline
+ * rule (a boundary layer's label field vs. a line layer's registry title), so neither
+ * borrows the other's wording. Pure given `fc`. */
+function identifyPayload(source, fc, at, disabled, titleOf) {
+  if (disabled || !fc) return null;
+  const f = hitFeature(fc, at || {});
+  if (!f) return null;
+  const props = f.properties || {};
+  return {
+    sourceId: source.id || null,
+    title: titleOf(f),
+    rows: identifyRows(source, props, { decode: decodeFieldValue, href: identifyHref }),
+    note: source.identifyNote || null,
+    sourceName: source.sourceName || null,
+  };
 }
 
 const CORRIDOR_PANE = "pipecorridorpane";
@@ -358,7 +386,7 @@ export function cachedPipelineLayer(k, cfg, initialOpacity, pane, onStatus, opts
 
   let map = null, opacity = initialOpacity;
   let seq = 0, lastKey = null, mode = null; // 'vector' | 'image'
-  let rasterLayer = null, openPopup = null;
+  let rasterLayer = null, openPopup = null, lastFc = null;
   const report = (state, msg, extra) => onStatus && onStatus(k, state, msg, extra);
 
   const group = L.layerGroup([], { pane });
@@ -423,6 +451,7 @@ export function cachedPipelineLayer(k, cfg, initialOpacity, pane, onStatus, opts
 
   const paintVector = (fc, ts, stale) => {
     geo.clearLayers();
+    lastFc = fc || null; // B1092 — hit-testable by a non-Leaflet surface (the planner canvas)
     const n = (fc && fc.features && fc.features.length) || 0;
     if (n) geo.addData(fc);
     // B1078: the empty message is registry-declared, so a hydrography layer says "no mapped
@@ -499,6 +528,10 @@ export function cachedPipelineLayer(k, cfg, initialOpacity, pane, onStatus, opts
   };
   // The export gatherer reads this to know which class to composite (vector SVG vs raster image).
   group.getExportMode = () => mode;
+  /* (B1092) Identify without a Leaflet click — see cachedVectorLayer.identifyAt. In the
+   * far-out RASTER mode there is no geometry in hand, so this honestly answers null
+   * rather than guessing from a picture. */
+  group.identifyAt = (at) => identifyPayload(source, lastFc, at, mode !== "vector", (f) => identifyTitle(source, f.properties || {}));
   return group;
 }
 

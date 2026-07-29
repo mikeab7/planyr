@@ -691,6 +691,79 @@ export function styleFor(source, props) {
 }
 
 // ---------------------------------------------------------------------------
+// (B1092) IDENTIFY — the pure half: which feature is under a point, and what does
+// its popover say? Split out of vectorOverlay.js's DOM builders so the planner
+// canvas (which has no Leaflet interaction of its own — the SVG owns every click)
+// can ask the same questions the map finder's popover asks, off the same answers.
+// ---------------------------------------------------------------------------
+
+/* One source's identify rows for a feature's properties: [{ label, text, href }].
+ * `href` is null unless the value IS a URL or the source declares a base to build one
+ * from — a document reference we can't resolve still shows as text, and a fabricated
+ * URL never does. `decode`/`unit` handling lives in the caller-supplied `decode`
+ * function so this module stays free of the ftype crosswalk. Pure. */
+export function identifyRows(source = {}, props = {}, { decode = (raw) => String(raw), href = () => null } = {}) {
+  const out = [];
+  for (const f of source.identifyFields || []) {
+    const raw = (props || {})[f.field];
+    if (raw == null || raw === "") continue;
+    out.push({ label: f.label, text: decode(raw, f), href: f.kind === "link" ? href(raw, source) : null });
+  }
+  return out;
+}
+
+// Point-in-ring (ray casting) over a [lng, lat] ring. Pure.
+function inRing(ring, lng, lat) {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const [xi, yi] = ring[i] || [], [xj, yj] = ring[j] || [];
+    if (yi > lat !== yj > lat && lng < ((xj - xi) * (lat - yi)) / (yj - yi || 1e-12) + xi) inside = !inside;
+  }
+  return inside;
+}
+// A polygon = outer ring minus holes.
+const inPolygon = (rings, lng, lat) =>
+  Array.isArray(rings) && rings.length > 0 && inRing(rings[0], lng, lat)
+  && !rings.slice(1).some((h) => inRing(h, lng, lat));
+
+// Squared distance from a point to a segment, in degrees (small-area planar is fine at
+// screening tolerances — a few feet across one tract).
+function segDist2(px, py, ax, ay, bx, by) {
+  const dx = bx - ax, dy = by - ay;
+  const L2 = dx * dx + dy * dy;
+  const t = L2 <= 0 ? 0 : Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / L2));
+  const cx = ax + t * dx, cy = ay + t * dy;
+  return (px - cx) * (px - cx) + (py - cy) * (py - cy);
+}
+const lineNear = (line, lng, lat, tolDeg) => {
+  const t2 = tolDeg * tolDeg;
+  for (let i = 1; i < (line || []).length; i++) {
+    const a = line[i - 1], b = line[i];
+    if (!a || !b) continue;
+    if (segDist2(lng, lat, a[0], a[1], b[0], b[1]) <= t2) return true;
+  }
+  return false;
+};
+
+/* Which feature of a GeoJSON FeatureCollection is at {lat, lng}? Polygons hit-test by
+ * containment; lines by distance within `tolDeg` (the caller converts its own pixel /
+ * foot tolerance to degrees, since only the caller knows the view scale). Returns the
+ * FIRST match — features arrive in the service's own draw order — or null. Pure. */
+export function hitFeature(fc, { lat, lng, tolDeg = 0.00005 } = {}) {
+  if (!fc || !Array.isArray(fc.features) || !Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  for (const f of fc.features) {
+    const g = f && f.geometry;
+    if (!g) continue;
+    const c = g.coordinates;
+    if (g.type === "Polygon" && inPolygon(c, lng, lat)) return f;
+    if (g.type === "MultiPolygon" && (c || []).some((poly) => inPolygon(poly, lng, lat))) return f;
+    if (g.type === "LineString" && lineNear(c, lng, lat, tolDeg)) return f;
+    if (g.type === "MultiLineString" && (c || []).some((ln) => lineNear(ln, lng, lat, tolDeg))) return f;
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------------------
 // Vector vs. flat-image decision — keep the map fast and the server happy.
 // ---------------------------------------------------------------------------
 

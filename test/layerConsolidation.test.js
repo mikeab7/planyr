@@ -7,7 +7,7 @@ vi.mock("../src/workspaces/site-planner/lib/evidenceLayers.js", () => ({ overpas
 vi.mock("../src/workspaces/site-planner/lib/terrainLayers.js", () => ({ contourLayer: vi.fn(), flowLayer: vi.fn(), TERRAIN_MIN_ZOOM: 13 }));
 vi.mock("../src/workspaces/site-planner/lib/vectorOverlay.js", () => ({ cachedVectorLayer: vi.fn(), cachedPipelineLayer: vi.fn(), cachedCorridorLayer: vi.fn() }));
 
-import { ALL_LAYERS, MERGE_GROUPS, LAYER_GROUP_ORDER, LAYER_GROUP_LABEL } from "../src/workspaces/site-planner/lib/layers.js";
+import { ALL_LAYERS, MERGE_GROUPS, LAYER_GROUP_ORDER, LAYER_GROUP_LABEL, identifyOverlaysAt } from "../src/workspaces/site-planner/lib/layers.js";
 import { buildGroupSlots } from "../src/workspaces/site-planner/lib/layerPanelInfo.js";
 import { JURISDICTION_LAYERS } from "../src/workspaces/site-planner/lib/counties.js";
 
@@ -148,5 +148,47 @@ describe("B898 — Flood & drainage rename (auto by AHJ, no hard-coded 'Houston'
   it("provider stays available for the ⓘ via cfg.source", () => {
     expect(ALL_LAYERS.hcfcd_row.source).toBeTruthy();
     expect(ALL_LAYERS.coh_storm.source).toBeTruthy();
+  });
+});
+
+/* ---------------------------------------------------------------------------
+ * B1092 — identifyOverlaysAt: the canvas's own identify.
+ *
+ * The report: on the planner, clicking the BKDD easement band gave only the coordinate
+ * readout. Its Leaflet backdrop is pointer-events:none (the SVG owns every click), so no
+ * Leaflet handler there can ever fire — the identify that layer was made VECTOR for was a
+ * map-finder-only feature. These guard the gate: opt-in layers only, ON layers only, and a
+ * layer with no geometry in hand declines rather than guessing.
+ * ------------------------------------------------------------------------- */
+describe("identifyOverlaysAt (B1092)", () => {
+  const HIT = { title: "District drainage easements", rows: [{ label: "Easement width", text: "70 ft", href: null }], note: "hard constraint", sourceName: "BKDD" };
+  const layer = (hit) => ({ identifyAt: () => hit });
+  const at = { lat: 29.77938, lng: -95.89503, tolDeg: 0.0001 };
+
+  it("returns the feature under the point, tagged with the layer it came from", () => {
+    const out = identifyOverlaysAt({ bkdd_easements: layer(HIT) }, { bkdd_easements: { on: true } }, at);
+    expect(out).toHaveLength(1);
+    expect(out[0]).toMatchObject({ id: "bkdd_easements", layerLabel: "District drainage easements", title: "District drainage easements" });
+    expect(out[0].rows[0].text).toBe("70 ft");
+  });
+  it("a layer that is OFF is never identified — you can't click what isn't drawn", () => {
+    expect(identifyOverlaysAt({ bkdd_easements: layer(HIT) }, { bkdd_easements: { on: false } }, at)).toEqual([]);
+  });
+  it("OPT-IN only: a wide-area boundary layer is never canvas-identified", () => {
+    // Every empty click lands inside a county/city/ISD polygon, so identifying those would
+    // turn the card into noise instead of an answer. The flag is what keeps it precise.
+    expect(ALL_LAYERS.jur_county.canvasIdentify).toBeFalsy();
+    expect(ALL_LAYERS.jur_city.canvasIdentify).toBeFalsy();
+    expect(identifyOverlaysAt({ jur_county: layer(HIT) }, { jur_county: { on: true } }, at)).toEqual([]);
+  });
+  it("the precise flood-group features ARE opted in — the band and the centreline", () => {
+    expect(ALL_LAYERS.bkdd_easements.canvasIdentify).toBe(true);
+    expect(ALL_LAYERS.nhd_flowlines.canvasIdentify).toBe(true);
+  });
+  it("nothing under the point, no identify support, or a throwing layer → [] (never a crash)", () => {
+    expect(identifyOverlaysAt({ bkdd_easements: layer(null) }, { bkdd_easements: { on: true } }, at)).toEqual([]);
+    expect(identifyOverlaysAt({ bkdd_easements: {} }, { bkdd_easements: { on: true } }, at)).toEqual([]);
+    expect(identifyOverlaysAt({ bkdd_easements: { identifyAt: () => { throw new Error("boom"); } } }, { bkdd_easements: { on: true } }, at)).toEqual([]);
+    expect(identifyOverlaysAt(null, null, at)).toEqual([]);
   });
 });
