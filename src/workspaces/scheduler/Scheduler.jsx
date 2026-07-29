@@ -67,9 +67,6 @@ export default function Scheduler({
   // re-adopt the site we just cleared and put the trapping panel straight back up. Cleared by the
   // very next nav-state (see the message handler), so it can never wedge the route permanently.
   const dashboardIntentRef = useRef(false);
-  // The user's own dismissal of the resolution panel (X / Escape), remembered per routed project so
-  // routing to a DIFFERENT unlinked project still offers to resolve it. Dismissing links nothing.
-  const [dismissedFor, setDismissedFor] = useState(null);
 
   // Receive the embedded scheduler's nav state (its own projects — not the Site
   // Planner's). It re-emits on load and on every project add/rename/delete/switch.
@@ -270,16 +267,14 @@ export default function Scheduler({
     currentProject = deriveCurrentProject(projects, activeId, section);
   }
 
-  // Resolution panel (suggest-and-confirm): the route points at a site that has NO linked schedule
-  // yet. Gated on `ready` AND a RESOLVED name, so it never flashes before the iframe reports in and
-  // never shows — or creates a schedule named — the raw group_id. B1050 adds two more gates: the
-  // embedded app must be on its PROJECTS section (this is a project-scoped panel — never render it
-  // over the dashboard), and the user's own X/Escape dismissal wins.
-  const showLinkPanel = shouldShowLinkPanel({
-    ready, section, projectId, linkedSchedule, routedSiteName,
-    dismissed: dismissedFor != null && dismissedFor === projectId,
-  });
-  const suggestedMatch = showLinkPanel ? suggestNameMatch(routedSiteName, projects) : null;
+  // The Schedule tab's EMPTY STATE (NEW-2): the route points at a site that has NO linked schedule
+  // yet, so there is no grid to show — we render the create/link surface INSTEAD OF the iframe
+  // (hidden just below), not over it. Still gated on `ready` AND a RESOLVED name, so it never
+  // flashes before the iframe reports in and never shows — or creates a schedule named — the raw
+  // group_id (B560). Deliberately NOT gated on a dismissal or on the iframe's section: either one
+  // could suppress the ONLY create/link entry point and strand the project (NEW-1).
+  const showEmptyState = shouldShowLinkPanel({ ready, projectId, linkedSchedule, routedSiteName });
+  const suggestedMatch = showEmptyState ? suggestNameMatch(routedSiteName, projects) : null;
 
   // B566 — the Schedule workspace now shows the SAME unified top-right cloud sync badge as the
   // Site Planner (Row-1 right zone of AppHeader), driven by the embedded app's already-reported
@@ -336,12 +331,23 @@ export default function Scheduler({
         toolbarContent={<ScheduleActions toolbar={toolbar} post={post} />}
       />
       <div style={{ position: "relative", flex: 1, minHeight: 0 }}>
+        {/* NEW-2 — while the empty state applies the iframe is HIDDEN, not covered: there is no
+            grid worth showing for a project with no schedule. `visibility` (not `display`) keeps
+            its layout box, so the embedded Gantt's width measurements survive and it needs no
+            re-layout when it comes back; and it stays MOUNTED, so the ~2 s boot + its nav/toolbar
+            bridge are never lost (the keep-alive guarantee). Clearing the routed project — what
+            Dashboard does — brings it straight back. */}
         <iframe
           ref={iframeRef}
           src="/sequence/"
           title="Sequence Planyr"
           onLoad={onIframeLoad}
-          style={{ position: "absolute", inset: 0, border: "none", width: "100%", height: "100%", display: "block" }}
+          aria-hidden={showEmptyState || undefined}
+          style={{
+            position: "absolute", inset: 0, border: "none", width: "100%", height: "100%", display: "block",
+            visibility: showEmptyState ? "hidden" : "visible",
+            pointerEvents: showEmptyState ? "none" : "auto",
+          }}
         />
         {showLoader && (
           <div
@@ -356,16 +362,13 @@ export default function Scheduler({
             <ModuleLoader module="scheduler" />
           </div>
         )}
-        {showLinkPanel && (
+        {showEmptyState && (
           <LinkSchedulePanel
             siteName={routedSiteName}
             schedules={projects}
             suggestedMatch={suggestedMatch}
             onCreate={() => post({ type: "planar:nav-create-linked", name: routedSiteName, siteId: projectId, siteName: routedSiteName })}
             onLink={(scheduleId) => post({ type: "planar:nav-link", id: scheduleId, siteId: projectId, siteName: routedSiteName })}
-            // B1050 — a real escape hatch. Dismissing links and creates NOTHING; it just reveals the
-            // empty Schedule tab underneath, and only for THIS routed project.
-            onDismiss={() => setDismissedFor(projectId)}
           />
         )}
       </div>

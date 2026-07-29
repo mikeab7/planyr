@@ -66,11 +66,13 @@ async function scenarioLinkFlow(browser) {
   await page.waitForTimeout(500);
   await postSeq(page, navState([{ id: SID, name: NAME }], SID)); // unlinked
 
-  const panel = page.getByRole("dialog", { name: /connect this site to a schedule/i });
-  try { await panel.waitFor({ state: "visible", timeout: 8000 }); ok("resolution panel shown for an unlinked site"); }
-  catch (_) { bad("resolution panel never appeared"); }
+  // NEW-2 — the create/link surface is the Schedule tab's empty state (a labelled region rendered
+  // instead of the iframe), no longer a dialog over it.
+  const panel = page.getByRole("region", { name: /no schedule for/i });
+  try { await panel.waitFor({ state: "visible", timeout: 8000 }); ok("empty state shown for an unlinked site"); }
+  catch (_) { bad("empty state never appeared"); }
 
-  const suggest = page.getByRole("button", { name: new RegExp("Link the existing schedule .*" + NAME, "i") });
+  const suggest = page.getByRole("button", { name: new RegExp("Link .*" + NAME, "i") });
   try { await suggest.waitFor({ state: "visible", timeout: 4000 }); ok("same-named schedule surfaced as a suggested match"); }
   catch (_) { bad("no suggested same-named match button"); }
 
