@@ -551,7 +551,40 @@ export function computeRequiredDetention({
   hcfcdMethod = null, // null (default → outfall-type minimum) | "pcpm" (→ 0.65 HCFCD PCPM methods baseline)
   hcfcdApplicable = true, // B789 — false when the identify county excludes Harris: HCFCD ends at the Harris line, so neither the greater-of candidate nor the PCPM deferral may price
   onDate = null,
+  siteState = null, // NEW-8 — "TX" | "CO" | null. The region guard below; null keeps pre-Colorado behaviour exactly.
 } = {}) {
+  /* ⛔ NEW-8 — THE COLORADO GUARD, and it is deliberately the FIRST thing this function does.
+   *
+   * Every rule record below is a Texas rate method. Colorado sizes detention by a different
+   * formula shape entirely (MHFD: WQCV + EURV under Full Spectrum Detention; Larimer, Weld and
+   * El Paso each under their own manual), so there is no conversion, no nearest equivalent, and
+   * no defensible band. The owner's constraint is absolute: a Colorado site may never render a
+   * Texas-derived number.
+   *
+   * Placed above the `acres > 0` check on purpose — "no site area" is a Texas-shaped answer too,
+   * and a Colorado site should be told what is actually true about it. Placed above the authority
+   * lookup on purpose as well: even if a user manually overrides the reviewer to a Texas authority
+   * on a Colorado site, this fires first and no Texas rate can leak through.
+   *
+   * `siteState` null (a plan with no coordinates, every legacy saved plan) behaves exactly as
+   * before — the guard fires on a POSITIVE Colorado answer, never on the absence of one. */
+  if (String(siteState || "").toUpperCase() === "CO") {
+    return {
+      kind: "unavailable",
+      requiredAcFt: null, bandAcFt: null, rateAcFtPerAc: null,
+      basis: "detention criteria not yet available for Colorado",
+      headline: "Detention criteria not yet available in Colorado",
+      detail:
+        "Planyr's detention engine models Texas rate-method criteria (ac-ft per acre × site area). " +
+        "Colorado sizes detention differently — the Mile High Flood District by WQCV plus EURV under " +
+        "Full Spectrum Detention, and Larimer, Weld and El Paso each under their own criteria manual — " +
+        "so there is no honest way to convert one into the other. Nothing is shown rather than " +
+        "something wrong. Size detention with your engineer against the reviewing jurisdiction's manual.",
+      rule: null, governing: null,
+      flags: ["colorado-not-wired", "no-criteria-modeled"],
+      caveat: SCREENING_CAVEAT,
+    };
+  }
   if (!(acres > 0)) return { kind: "none", requiredAcFt: null, bandAcFt: null, rateAcFtPerAc: null, basis: "no site area", rule: null, governing: null, flags: [], caveat: SCREENING_CAVEAT };
   const rule = ruleFor(authorityId, onDate);
   if (!rule) {
@@ -614,7 +647,7 @@ export function computeRequiredDetention({
   // ---- municipal overlays: dispatch through the parent -------------------
   if (rule.ruleType === "overlay") {
     if (p.parentAuthority) {
-      const parent = computeRequiredDetention({ acres, impPct, authorityId: p.parentAuthority, inCityLimits, drainsToHcfcdChannel, outfallType, hcfcdMethod, onDate });
+      const parent = computeRequiredDetention({ acres, impPct, authorityId: p.parentAuthority, inCityLimits, drainsToHcfcdChannel, outfallType, hcfcdMethod, onDate, siteState });
       parent.flags = [...parent.flags, "municipal-overlay"];
       parent.basis += ` · via ${rule.authorityLabel} adopt-by-reference${p.runoffReductionPct ? ` (+${p.runoffReductionPct}% runoff-reduction requirement)` : ""}`;
       parent.overlayRule = rule;
@@ -635,7 +668,7 @@ export function computeRequiredDetention({
     }
     // ≥ 20 ac: parent is hcfcd|fortbend by watershed drained to — surfaced, not guessed.
     const candidates = (p.largeParent?.parentAuthorities || []).map((pa) => {
-      const c = computeRequiredDetention({ acres, impPct, authorityId: pa, inCityLimits, drainsToHcfcdChannel, outfallType, hcfcdMethod, onDate });
+      const c = computeRequiredDetention({ acres, impPct, authorityId: pa, inCityLimits, drainsToHcfcdChannel, outfallType, hcfcdMethod, onDate, siteState });
       return { authorityId: pa, acFt: c.requiredAcFt ?? (c.bandAcFt ? c.bandAcFt[1] : 0), basis: c.basis, rule: c.rule, result: c };
     });
     return {

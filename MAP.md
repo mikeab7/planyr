@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-07-29 @ `003e255` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-07-29 @ `1975fc7` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_345 source files mapped._
+_347 source files mapped._
 
 ## infra
 
@@ -50,9 +50,9 @@ _345 source files mapped._
   - _exports_: `makeWriteSerializer`
 - **`src/shared/coordinates/index.js`** — Shared EPSG:2278 Texas South Central project grid: unit helpers plus Lambert Conformal Conic projectToGrid/gridToProject validated against pyproj
   - _exports_: `FT_PER_M`, `ftToAcres`, `gridToProject`, `makePoint`, `metersToFeet`, `PROJECT_CRS`, `projectToGrid`, `SQFT_PER_ACRE`
-- **`src/shared/coordinates/scaleFactor.js`** — TODO — describe
+- **`src/shared/coordinates/scaleFactor.js`** — NEW-4 grid-vs-ground: per-zone grid scale factor × elevation factor = the site's combined factor (with what it is worth per mile), plus `detectSurveyFrame` — grid / ground / other-scale from corresponding survey↔grid distances. Reports the factor; deliberately never applies it
   - _exports_: `combinedScaleFactor`, `detectSurveyFrame`, `earthRadiusFt`, `elevationFactor`, `MATERIAL_THRESHOLD`
-- **`src/shared/coordinates/statePlane.js`** — TODO — describe
+- **`src/shared/coordinates/statePlane.js`** — NEW-3 multi-zone state plane: the zone registry (TX South Central 2278 · CO North 2231 · CO Central 2232), per-county assignment incl. the documented Broomfield decision, a generic Lambert engine that reproduces the hardcoded EPSG:2278 path bit-for-bit, and the LCC grid scale factor
   - _exports_: `COUNTY_ZONE`, `gridScaleFactor`, `projectToZone`, `resolveZone`, `SP_ZONES`, `ZONE_IDS`, `zoneById`, `zoneForCounty`, `zoneForPoint`, `zoneToProject`
 - **`src/shared/files/chunkedUpload.js`** — Chunked any-size file upload to Google Drive through the same-origin /api/uploads/* proxy: pure 16 MiB chunk math plus the sequential upload loop with retry/backoff, resume-from-offset, and byte progress (B409 rework)
   - _exports_: `backoffMs`, `CHUNK_SIZE`, `chunkPlan`, `contentRangeFor`, `DRIVE_CHUNK_GRANULE`, `QUOTA_MESSAGE`, `uploadFileInChunks`
@@ -299,6 +299,8 @@ _345 source files mapped._
   - _exports_: `channelCell`, `channelSlope`, `cutSection`, `flowBearing`, `gridCellFt`, `sampleAtPixel`, `siteMaskFromLatLngRings`, `upstreamEdgeFlags`
 - **`src/workspaces/site-planner/lib/cloudSync.js`** — RLS-scoped Supabase site read/write: per-tab version CAS + thin-clobber guard, keepalive push, delete-tombstone reconcile
   - _exports_: `_lastHeaderSig`, `_siteVersions`, `clearSiteVersions`, `cloudDelete`, `cloudDeletedRows`, `cloudHardDelete`, `cloudList`, `cloudRestore`, `cloudUpsert`, `fetchSiteForReconcile`, `headerSig`, `interpretDelete`, `keepaliveCloudPush`, `siteRowFor`, `slimForCloud`
+- **`src/workspaces/site-planner/lib/coloradoRegions.js`** — NEW-8 Colorado region model + THE CAPABILITY GUARD: network-free site→state resolution, the four drainage regimes (MHFD · Larimer · Weld · El Paso) with detention deliberately unmodeled, the CWCB 2 CCR 408-1 statewide floodplain floor, and the capability matrix that makes an unwired capability render a named 'not available in Colorado yet' state instead of a number
+  - _exports_: `CAPABILITIES`, `capabilityAtSite`, `capabilityFor`, `CO_COUNTY_REGIME`, `CO_DRAINAGE_REGIMES`, `CO_STATE_FLOOD_STANDARD`, `coloradoGaps`, `coloradoRegimeFor`, `isColorado`, `siteState`
 - **`src/workspaces/site-planner/lib/conceptName.js`** — Default plan naming: bijective base-26 Concept A/B/.../AA sequence continuing past the highest existing concept per site
   - _exports_: `conceptLettersToNumber`, `nextConceptName`, `numberToConcept`, `parseConceptIndex`
 - **`src/workspaces/site-planner/lib/conflictToasts.js`** — the B673 conflict policy matrix as a pure mapping: elementSync event → toast spec (who gets told what, which action rides along)
@@ -339,6 +341,8 @@ _345 source files mapped._
   - _exports_: `bumpSidewalkSide`, `bumpsOfHost`, `DOGEAR_D`, `DOGEAR_W`, `dogEarDesc`, `dogEarGeom`, `dogEarSize`, `hostAxisExtents`, `isDogEarSide`, `localToWorld`, `ownExtents`, `sideOfBondedBox`, `sidewalkSpanForBumps`, `wallKidAlong`, `wallKidBox`, `wallKidPerp`, `wallStripBox`
 - **`src/workspaces/site-planner/lib/drafts.js`** — Pure resolver for Bluebeam-style mid-draw undo: decides which in-progress multi-point draft to trim by one vertex (Backspace + Ctrl-Z), and returns null when no draft is active so Ctrl-Z falls through to a global undo
   - _exports_: `resolveDraftStepBack`
+- **`src/workspaces/site-planner/lib/drawdownStatute.js`** — NEW-7 C.R.S. 37-92-602(8) as a rule record — 97% of a 5-year storm out in 72 hr, 99% of larger events in 120 hr — turning the existing drawdown number into a Colorado water-rights verdict (fail / not-ruled-out / unknown, never 'pass') plus the post-2015 State Engineer notification. Texas is untouched
+  - _exports_: `assessStatutoryDrawdown`, `DRAWDOWN_STATUTES`, `statuteForState`
 - **`src/workspaces/site-planner/lib/drawdownTime.js`** — NEW-2 drawdown time at the jurisdiction's allowable release rate: allowable release from the per-acre criterion (or an outlet override), optimistic time-to-empty per pond and site-wide with a prorated capped outfall, and threshold banding
   - _exports_: `allowableReleaseCfs`, `assessDrawdown`, `DEFAULT_DRAWDOWN_MAX_HR`, `drawdownHours`, `drawdownTone`, `fmtDrawdown`
 - **`src/workspaces/site-planner/lib/dxf/dxfGeom.js`** — B747 pure DXF geometry primitives (bulge/arc/ellipse flattening, INSERT affine composition, $INSUNITS→feet); no imports, worker-safe, unit-tested.

@@ -7,9 +7,25 @@ import {
   GIS_SOURCES, ANALYSIS_KEYS, JURISDICTION_KEYS, auditRegistry, tierProblems,
   looksNonProduction, outFieldsFor, gisSource,
 } from "../src/shared/gis/sources.js";
-import { auditSources, scanInlineUrls } from "../ui-audit/gis-source-audit.mjs";
+import { auditSources, scanInlineUrls, scanCountyProvenance } from "../ui-audit/gis-source-audit.mjs";
 
 const audit = auditSources();
+
+/* NEW-5 — county parcel provenance. counties.js is deliberately exempt from the inline-URL rule
+ * (its endpoints ARE per-county parcel services), and that exemption is exactly what would let a
+ * guessed URL ship. Adding nine Colorado counties at once is when that would have bitten, so the
+ * audit now enforces the discipline the exemption removed. */
+describe("county parcel provenance (NEW-5)", () => {
+  it("every county row is live-verified, on its state's composite, or explains why not", () => {
+    const problems = scanCountyProvenance();
+    expect(problems, problems.join("\n")).toEqual([]);
+  });
+
+  it("the whole audit — registry, inline URLs and county provenance — is clean", () => {
+    expect(audit.countyProblems, JSON.stringify(audit.countyProblems, null, 2)).toEqual([]);
+    expect(audit.ok).toBe(true);
+  });
+});
 
 describe("registry tier integrity", () => {
   it("the whole registry passes the shape + tier audit (no problems)", () => {

@@ -55,6 +55,7 @@ const CO_STATEWIDE_LAYER =
 export const COUNTIES = {
   harris: {
     state: "TX",
+    verifiedOn: "2026-07-29", // re-probed: 1,548,457 parcel polygons
     label: "Harris County · HCAD",
     layerUrl:
       "https://www.gis.hctx.net/arcgis/rest/services/HCAD/Parcels/MapServer/0",
@@ -64,6 +65,7 @@ export const COUNTIES = {
   },
   fortbend: {
     state: "TX",
+    verifiedOn: "2026-07-29", // re-probed: 385,648 parcel polygons
     label: "Fort Bend · FBCAD",
     // FBCAD's OWN parcel data, served from Esri's ArcGIS Online cloud (services*.
     // arcgis.com) — reliable, CORS-open, no key — instead of FBCAD's self-hosted
@@ -83,6 +85,13 @@ export const COUNTIES = {
   },
   chambers: {
     state: "TX",
+    verifiedOn: null,
+    verifiedNote:
+      "Live-verified at the B787 CCAD repoint, and it is the same service the CCAD website's own map " +
+      "draws. It could NOT be re-probed on 2026-07-29 because gisdata.pandai.com is blocked by this " +
+      "build environment's egress policy — a sandbox limitation, not a sign the endpoint moved. Kept " +
+      "as the primary: demoting a working Texas source to the statewide composite would be a " +
+      "behaviour change, which the Colorado work is not permitted to make.",
     label: "Chambers County · CCAD",
     // CCAD's OWN live public parcel service (ChambersCADPublic, Pandai-hosted). This is the
     // exact MapServer the CCAD website's map draws, so Planyr's Chambers parcels match what

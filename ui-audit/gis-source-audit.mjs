@@ -19,7 +19,8 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { auditRegistry, GIS_SOURCES } from "../src/shared/gis/sources.js";
+import { auditRegistry, GIS_SOURCES, looksNonProduction } from "../src/shared/gis/sources.js";
+import { COUNTIES } from "../src/workspaces/site-planner/lib/counties.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, "..");
@@ -57,19 +58,68 @@ export function scanInlineUrls() {
   return problems;
 }
 
+/* CHECK #3 (NEW-5) — COUNTY PARCEL PROVENANCE.
+ *
+ * The county registry (counties.js) is deliberately NOT in ANALYSIS_PATH_FILES: its endpoints are
+ * per-county parcel services, and inlining them there is the established pattern. But that
+ * exemption is exactly what let an unverified URL ship, and adding nine Colorado counties at once
+ * is when that would have bitten. So this check enforces the discipline the URLs themselves
+ * cannot: every county row must declare its STATE, and every row must either
+ *   • carry a `verifiedOn` date (the endpoint was actually queried and answered), or
+ *   • sit on its state's statewide composite (an honest, working stand-in), in which case any
+ *     county-own endpoint it knows about must be parked in `candidateUrl` WITH provenance —
+ *     recorded, not shipped.
+ * A row with neither is a guessed URL, and that is the thing this check exists to stop. */
+const STATEWIDE_COMPOSITES = [
+  "stratmap_land_parcels",       // TxGIO
+  "Colorado_Public_Parcels",     // Colorado OIT
+];
+const onComposite = (url) => STATEWIDE_COMPOSITES.some((frag) => String(url || "").includes(frag));
+
+export function scanCountyProvenance() {
+  const problems = [];
+  for (const [key, c] of Object.entries(COUNTIES)) {
+    if (!c.state) problems.push(`counties.js ${key}: no \`state\` declared — click routing and the statewide-backup tier both key off it.`);
+    if (!c.layerUrl) { problems.push(`counties.js ${key}: no layerUrl.`); continue; }
+    if (looksNonProduction(c.layerUrl)) problems.push(`counties.js ${key}: layerUrl looks non-production (${c.layerUrl}).`);
+    const verified = !!c.verifiedOn;
+    const composite = onComposite(c.layerUrl);
+    // A THIRD honest state: a row verified in an earlier session whose host this build
+    // environment cannot reach. It must SAY SO in `verifiedNote` — the point of the check is that
+    // no row may be silent about where its URL came from, not that every row must be probed today.
+    const declared = typeof c.verifiedNote === "string" && c.verifiedNote.length > 20;
+    if (!verified && !composite && !declared) {
+      problems.push(`counties.js ${key}: ships an endpoint that is neither live-verified (\`verifiedOn\`), nor the statewide composite, nor explained (\`verifiedNote\`) — verify it, park it in \`candidateUrl\`, or say why it could not be probed.`);
+    }
+    if (verified && !/^\d{4}-\d{2}-\d{2}$/.test(String(c.verifiedOn))) {
+      problems.push(`counties.js ${key}: verifiedOn "${c.verifiedOn}" is not an ISO date.`);
+    }
+    if (c.candidateUrl) {
+      if (!c.candidateProvenance) problems.push(`counties.js ${key}: candidateUrl with no \`candidateProvenance\` — an unverified URL must say where it came from and why it was not probed.`);
+      if (!composite) problems.push(`counties.js ${key}: has a candidateUrl but its primary is not the statewide composite — an unverified candidate must not be the fallback for a shipped endpoint.`);
+    }
+    if (composite && !c.scopeWhere) {
+      problems.push(`counties.js ${key}: rides the statewide composite with no \`scopeWhere\` — an unscoped search can match a like-named parcel in another county.`);
+    }
+  }
+  return problems;
+}
+
 export function auditSources() {
   const registryProblems = auditRegistry(GIS_SOURCES).problems;
   const inlineUrlProblems = scanInlineUrls();
+  const countyProblems = scanCountyProvenance();
   return {
     registryProblems,
     inlineUrlProblems,
-    ok: registryProblems.length === 0 && inlineUrlProblems.length === 0,
+    countyProblems,
+    ok: registryProblems.length === 0 && inlineUrlProblems.length === 0 && countyProblems.length === 0,
   };
 }
 
 // Run as a script → print + exit non-zero on any problem.
 if (import.meta.url === `file://${process.argv[1]}`) {
-  const { registryProblems, inlineUrlProblems, ok } = auditSources();
+  const { registryProblems, inlineUrlProblems, countyProblems, ok } = auditSources();
   if (registryProblems.length) {
     console.error("✗ Registry tier problems:");
     for (const p of registryProblems) console.error("  - " + p);
@@ -78,9 +128,15 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     console.error("✗ Inline-URL problems (endpoints must come from the registry):");
     for (const p of inlineUrlProblems) console.error("  - " + p);
   }
+  if (countyProblems.length) {
+    console.error("✗ County parcel provenance problems (a shipped endpoint must be verified or a composite stand-in):");
+    for (const p of countyProblems) console.error("  - " + p);
+  }
   if (ok) {
     const n = Object.keys(GIS_SOURCES).length;
+    const cn = Object.keys(COUNTIES).length;
     console.log(`✓ GIS source registry OK — ${n} sources, all production or acknowledged exceptions, no inline URLs in the analysis path.`);
+    console.log(`✓ County parcel provenance OK — ${cn} counties, every endpoint live-verified or on its state's statewide composite.`);
   }
   process.exit(ok ? 0 : 1);
 }
