@@ -108,7 +108,11 @@ import { solveDeedAlignment, gridConvergenceDeg, rotatePointsAbout, ringCentroid
 import { readDeedFile } from "../../shared/files/docxText.js";
 import { EASEMENT_TYPES, easementType, easementColor, easementLabel, easementArea, DEFAULT_EASEMENT_ATTRS, deriveEasementRing, buildParcelEdgeStrip } from "./lib/easements.js";
 import { edgeRuns, runSetbackValue, resizeRunLength } from "./lib/edgeRuns.js";
-import { readTitlePDF, fileToBase64, getKey, setKey } from "./lib/titleReader.js";
+// B1123 bundle-budget offset — the title reader is loaded ON DEMAND (dynamic import in
+// `runTitleExtract`). Its Claude schema + prompt are KB of string literals that minify to
+// themselves and are needed only once someone uploads a title commitment; only the tiny stored-key
+// helpers stay on the critical path.
+import { getKey, setKey } from "./lib/titleKey.js";
 import { identifyJurisdiction, identifyRoadAuthority, polylineDistMeters, formatJurisdictionBadge, countyAtPoint } from "./lib/jurisdiction.js";
 import { representativeRing, ringCentroid, ringsSignature } from "./lib/siteAnalysis.js";
 import JurisdictionBadge from "./components/JurisdictionBadge.jsx";
@@ -12861,6 +12865,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (!apiKey) { setTitleErr("Paste your Anthropic API key first."); return; }
     setTitleBusy(true); setTitleErr("");
     try {
+      const { readTitlePDF, fileToBase64 } = await import("./lib/titleReader.js");
       const b64 = await fileToBase64(file);
       const doc = await readTitlePDF(b64, { apiKey });
       setTitleDoc(doc);

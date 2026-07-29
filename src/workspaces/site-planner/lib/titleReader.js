@@ -11,9 +11,10 @@
  * code-split out of the main bundle — only fetched when someone actually reads
  * a title PDF, keeping the planner's initial load light.
  */
-export const KEY_LS = "planarfit:anthropicKey";
-export const getKey = () => { try { return localStorage.getItem(KEY_LS) || ""; } catch (_) { return ""; } };
-export const setKey = (k) => { try { k ? localStorage.setItem(KEY_LS, k) : localStorage.removeItem(KEY_LS); } catch (_) {} };
+// The stored-key helpers live in `titleKey.js` so a caller can read the key without loading this
+// module's schema + prompt text (several KB of string literals). Re-exported, so every existing
+// consumer of `titleReader.js` is unchanged.
+export { KEY_LS, getKey, setKey } from "./titleKey.js";
 
 // Structured-output schema: a Schedule B checklist + the legal description.
 const SCHEMA = {

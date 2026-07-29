@@ -69,21 +69,3 @@ export function remapBondRefs(clone, src, idMap, { dropRoleTagsWhenHostLost = tr
  * plain "this is a buffer" flag. Such a value points at nothing, so it cannot dangle and is left
  * exactly as it is; only a real id is remapped or dropped. */
 const isRef = (v) => typeof v === "string" && v.length > 0;
-
-/**
- * Does `els` still hold a bond that points at an element OUTSIDE the given id set? The guard the
- * copy tests assert on, and a cheap self-check for any future copy path.
- * @returns [{ id, tag, ref }] — empty when every bond lands inside the set.
- */
-export function danglingBonds(els, ids) {
-  const set = ids instanceof Set ? ids : new Set(ids || []);
-  const out = [];
-  for (const e of els || []) {
-    if (!e) continue;
-    for (const tag of ID_BOND_TAGS) {
-      const ref = e[tag];
-      if (isRef(ref) && !set.has(ref)) out.push({ id: e.id, tag, ref });
-    }
-  }
-  return out;
-}

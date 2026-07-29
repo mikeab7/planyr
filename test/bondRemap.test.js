@@ -19,10 +19,27 @@
  * host resize either. That is the owner's "trailer parking just hovering by itself".
  */
 import { describe, it, expect } from "vitest";
-import { ID_BOND_TAGS, HOST_ROLE_TAGS, remapBondRefs, danglingBonds } from "../src/workspaces/site-planner/lib/bondRemap.js";
+import { ID_BOND_TAGS, HOST_ROLE_TAGS, remapBondRefs } from "../src/workspaces/site-planner/lib/bondRemap.js";
 import { collectClipboard, pasteClipboard } from "../src/workspaces/site-planner/lib/planClipboard.js";
 import { normalizeCrossHostBonds, normalizeBondedChildren } from "../src/workspaces/site-planner/lib/siteModel.js";
 import { layoutZoneByKind, zoneAlongExtent } from "../src/workspaces/site-planner/lib/dockZones.js";
+
+/* The assertion these tests are really about: does `els` still hold a bond pointing at an element
+ * OUTSIDE the given id set? It lives HERE rather than in the shipped module — it is a test guard, and
+ * the site route is on a byte budget (`ui-audit/perf-bundle-audit.mjs`), so nothing that only tests
+ * ever calls belongs in the bundle. */
+const danglingBonds = (els, ids) => {
+  const set = ids instanceof Set ? ids : new Set(ids || []);
+  const out = [];
+  for (const e of els || []) {
+    if (!e) continue;
+    for (const tag of ID_BOND_TAGS) {
+      const ref = e[tag];
+      if (typeof ref === "string" && ref && !set.has(ref)) out.push({ id: e.id, tag, ref });
+    }
+  }
+  return out;
+};
 
 /* A building with a FULL dock stack on both sides: court → trailer → buffer, bonded exactly the way
  * `buildNextZone` bonds them (legacy forCourt/forTrailer AND the generic prevZone chain). */
