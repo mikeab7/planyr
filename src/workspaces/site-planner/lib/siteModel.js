@@ -435,10 +435,22 @@ function normalizeStrandedZones(list, onHeal) {
 
   for (const host of els) {
     if (!host || host.type !== "building" || host.dogEar || !finiteBoxEl(host)) continue;
-    const courts = els.filter((x) => x && x.attachedTo === host.id && x.truckCourt && !x.points &&
-      SIDE_NORMAL[x.truckCourt.side] && finiteBoxEl(x));
-    for (const head of courts) {
-      const side = head.truckCourt.side;
+    // NEW-2 (round 4) — every stack-like bonded child of this host, not just ones heading a
+    // recognised dock chain. The reported tear translated ALL eleven children of an 882×510
+    // building and survived a reload: the coarse `strandedFromHost` reach is
+    // `halfDiag(host) + halfDiag(child) + …`, and that host's half-diagonal ALONE is over 500 ft —
+    // so the bigger the building, the bigger the tear it tolerates, which is backwards. The
+    // COMPUTED anchor below does not scale with host size, so it is now the primary test, and a
+    // stack member belonging to no chain is walked as a chain of ONE rooted at its own side
+    // instead of being skipped entirely.
+    const heads = els.filter((x) => x && x.attachedTo === host.id && !x.points && finiteBoxEl(x) &&
+      isStackMember(x) && !x.dogEar &&
+      !els.some((y) => y && y.id != null && (y.id === x.prevZone || y.id === x.forCourt || y.id === x.forTrailer)));
+    const sideOfHead = (x) => (x.truckCourt && SIDE_NORMAL[x.truckCourt.side] ? x.truckCourt.side
+      : (SIDE_NORMAL[x.sidewalkSide] ? x.sidewalkSide : sideOfBondedBox(host, x)));
+    for (const head of heads) {
+      const side = sideOfHead(head);
+      if (!SIDE_NORMAL[side]) continue;
       const chain = [];
       const seen = new Set();
       for (let cur = head; cur && !seen.has(cur.id); cur = nextInChain(cur)) { seen.add(cur.id); chain.push(cur); }

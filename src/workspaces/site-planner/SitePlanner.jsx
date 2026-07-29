@@ -3132,7 +3132,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // brand-new site's parcels are enqueued as creates here instead of being silently dropped.
     // NEW-1 — `afterSeed`: this is the seeder's OWN diff against the canvas it just rebuilt, so
     // rows are canonical for any server-known element with nothing pending to explain a difference.
-    try { eng.reconcile(merged, { busy: false, afterSeed: true }); } catch (_) {}
+    // NEW-2 (round 4) — `exempt`: the elements the heal just repaired must diff and COMMIT, not be
+    // overwritten by the very rows that were torn. Without this the two guarantees fight and the
+    // broken copy wins, which is why a real tear survived a full reload on the previous build.
+    try { eng.reconcile(merged, { busy: false, afterSeed: true, exempt: new Set(healed.map((h) => "el:" + h.id)) }); } catch (_) {}
   };
   useEffect(() => {
     if (!isCloudActive() || !siteId || !supabase) {

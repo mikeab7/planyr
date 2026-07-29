@@ -273,6 +273,7 @@ export function createElementSync(opts = {}) {
   let inflight = false;
   let attempt = 0;
   let rejectStreak = 0;   // NEW-3 — consecutive batches in which NOT ONE op was accepted
+  let splitStreak = 0;    // NEW-1 (round 4) — consecutive batches that landed only PARTLY across an assembly
   let state = "idle";               // 'idle'|'syncing'|'retrying'|'failed'
   let stopped = false;
   let ready = false;                // true once the shadow is seeded from the DB (or an empty seed)
@@ -341,7 +342,12 @@ export function createElementSync(opts = {}) {
 
   // ---- diff the live collections against the shadow, enqueue ops --------------
   // `busy` (a gesture is in flight) defers the diff; the caller re-invokes on gesture end.
-  function reconcile(collections, { busy, afterSeed } = {}) {
+  // `exempt` — keys ("kind:id") that must diff NORMALLY even under `afterSeed`. NEW-2 (round 4):
+  // the load-time bonded heal repairs a torn assembly on the canvas, and rows-canonical-on-seed
+  // would immediately adopt the TORN rows back over that repair — the two fixes would fight, and
+  // the rows (which are the broken copy in this case) would win. A healed element is not a stale
+  // cache replay; it is a deliberate repair that must diff and COMMIT.
+  function reconcile(collections, { busy, afterSeed, exempt } = {}) {
     if (stopped || !ready) return;  // not until the shadow is seeded from the DB (avoids load churn)
     if (busy) return;               // mid-drag: the flushGesture() hook re-runs this at gesture end
     const seen = new Set();
@@ -391,7 +397,7 @@ export function createElementSync(opts = {}) {
           // stale cache replay: adopt the row instead of committing the divergence. `shad.stale`
           // marks a mixed json↔rev pairing (a conflict/echo adoption), which is not a trustworthy
           // adoption source — leave those to the normal diff.
-          if (rowsWin && !pend && !inf && shad.json && !shad.stale) {
+          if (rowsWin && !pend && !inf && shad.json && !shad.stale && !(exempt && exempt.has(key))) {
             try { rowsWin.push({ kind, id: el.id, el: JSON.parse(shad.json) }); } catch (_) { /* unparseable → fall through */ }
             continue;
           }
@@ -589,6 +595,8 @@ export function createElementSync(opts = {}) {
   // Returns TRUE if at least one op was ACCEPTED (NEW-3 — a batch with none is a stale client).
   function processResults(batch, results) {
     let accepted = false;
+    const acceptedKeys = new Set();   // NEW-1 (round 4) — which ops the server actually took…
+    const refusedKeys = new Map();    // …and which it refused (key -> entry), for the split check
     const byId = new Map();
     for (const r of results) if (r && r.id) byId.set(r.id, r); // ids are unique within a batch
     for (const e of batch) {
@@ -596,6 +604,7 @@ export function createElementSync(opts = {}) {
       const key = skey(e.kind, e.id);
       if (r.status === "ok") {
         accepted = true;
+        acceptedKeys.add(key);
         if (e.cls === "delete") { shadow.delete(key); recordTombstone(e.kind, e.id, r.rev); } // remember the delete's rev → a stale pre-delete self-echo can't resurrect it (B757)
         else {
           // keep the shadow rev MONOTONIC: a foreign realtime row may have advanced it past this
@@ -612,6 +621,7 @@ export function createElementSync(opts = {}) {
         if (e.direct !== false) recent.set(key, { at: now(), rev: r.rev });
         recordOwnRev(e.kind, e.id, r.rev); // B812 — this rev is one OUR commit produced; its echo is ours
       } else if (r.status === "conflict") {
+        refusedKeys.set(key, e);
         const row = r.row || {};
         if (e.cls === "restore") {
           // someone restored/edited it first — the live row is the truth; adopt it, don't re-push. BUT
@@ -662,7 +672,15 @@ export function createElementSync(opts = {}) {
           clearDeleteFloor(key);
           if (e.direct !== false) recent.set(key, { at: now(), rev: row.rev });
           report("element-conflict-sem-eq", "conflict row is semantically identical — silent adopt", { siteId, id: e.id, kind: e.kind });
-        } else if (e.direct === false) {
+        } else if (e.direct === false && foreignAuthor(row)) {
+          // NEW-1 (round 4) — `foreignAuthor(row)` is the correction that makes this rule safe. The
+          // yield below is right when ANOTHER writer's row lost us the race. It is catastrophically
+          // wrong when the row is OUR OWN TAB'S earlier write: on an undo, the whole assembly's ops
+          // conflict against the move we are undoing, every bonded child is DERIVED, and yielding
+          // meant eleven of twelve ops stood down in silence while the host's single accepted op
+          // went through — the plan left with the building restored and every child still moved.
+          // Never yield to yourself; a self-conflict is a torn write, not a foreign edit.
+          //
           // NEW-3 — the commit-result half of the derived-yield rule above. A DERIVED op that lost a
           // race must NOT be re-committed: re-pushing app-derived geometry over a foreign row is
           // exactly the loop that kept the owner's repaired rows from surviving ("queued 3 commit
@@ -704,6 +722,46 @@ export function createElementSync(opts = {}) {
         report("element-no-result", "op had no result in the batch response", { siteId, id: e.id, kind: e.kind });
       }
     }
+    /* NEW-1 (round 4) — ASSEMBLY SPLIT. A batch that lands only PARTLY is the exact tear this whole
+     * effort exists to prevent: measured on production, an undo's 12-op batch had ONE op accepted
+     * (the host) and eleven refused, so the plan was left with the building restored and every
+     * child still moved — and the client treated the commit as settled and went quiet.
+     *
+     * Client-side atomicity is not enough on its own, because atomicity has to hold at the SERVER
+     * too; `db/commit_elements_atomic.sql` is the all-or-nothing group commit that closes the
+     * window properly. This is the half that is ours to enforce unilaterally: if any member of an
+     * assembly was accepted while another was refused, the assembly is TORN, so nothing is settled
+     * — re-enqueue every refused member of that assembly (the conflict branches above have already
+     * adopted the fresh revs, so the retry targets the current rows) and say so out loud. */
+    if (acceptedKeys.size && refusedKeys.size) {
+      const live = liveIndex();
+      const rootOf = (e) => {
+        if (e.kind !== "el") return e.kind + ":" + e.id;                 // only elements form assemblies
+        const cur = (live && live.byKey.get(skey("el", e.id))) || e.el;
+        return "el:" + rootIdOf(cur, e.id);
+      };
+      const acceptedRoots = new Set();
+      for (const e of batch) if (acceptedKeys.has(skey(e.kind, e.id))) acceptedRoots.add(rootOf(e));
+      const torn = [];
+      for (const [key, e] of refusedKeys) {
+        if (!acceptedRoots.has(rootOf(e))) continue;                    // wholly-refused group: the normal paths own it
+        torn.push(e.id);
+        if (!dirty.has(key)) enqueue(key, { kind: e.kind, id: e.id, cls: "update", el: e.el, z: e.z, direct: e.direct });
+      }
+      if (torn.length) {
+        splitStreak += 1;
+        report("element-assembly-split", "a batch landed only partly across an assembly — re-committing the rest", { siteId, ids: torn.slice(0, 20), streak: splitStreak });
+        onEvent({ type: "assembly-split", ids: torn, streak: splitStreak });
+        // Not converging after several rounds is a genuine dead end — go loud rather than loop.
+        if (splitStreak >= maxRejectStreak) {
+          setState("stale");
+          report("element-assembly-split-unresolved", "an assembly would not commit whole", { siteId, streak: splitStreak });
+          onEvent({ type: "client-stale", streak: splitStreak, pending: dirty.size, reason: "assembly-split" });
+        }
+      }
+    } else if (acceptedKeys.size && !refusedKeys.size) {
+      splitStreak = 0;                                                   // a clean batch clears the streak
+    }
     return accepted;
   }
 
@@ -721,7 +779,7 @@ export function createElementSync(opts = {}) {
   }
 
   // Manual retry (the badge's "Retry now").
-  function retryNow() { attempt = 0; rejectStreak = 0; if (backoffHandle != null) { clearTimer(backoffHandle); backoffHandle = null; } flush(); }
+  function retryNow() { attempt = 0; rejectStreak = 0; splitStreak = 0; if (backoffHandle != null) { clearTimer(backoffHandle); backoffHandle = null; } flush(); }
 
   // Ops still pending, for the keepalive unload flush (elementApi.keepaliveCommit).
   function pendingOps() { return [...dirty.values()].map(opFor); }
