@@ -19,6 +19,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { createElementSync, stableStringify } from "../src/workspaces/site-planner/lib/elementSync.js";
 import { rowsToModel } from "../src/workspaces/site-planner/lib/elementRows.js";
+import { commitElements } from "../src/workspaces/site-planner/lib/elementApi.js";
 import { strandedFromHost, normalizeBondedChildren, offAnchor } from "../src/workspaces/site-planner/lib/siteModel.js";
 import { toastForSyncEvent } from "../src/workspaces/site-planner/lib/conflictToasts.js";
 
@@ -663,6 +664,128 @@ describe("B1117 — the client asks for atomic group commits and honours the rol
     h.sync.reconcile(h.canvas, {}); await tick();
     expect(h.asked[0].atomic).toBe(false);
     expect(h.sync.pendingCount()).toBe(0);              // settled normally, no rollback path taken
+  });
+});
+
+/* B1120 — the gap that let a dead feature ship green.
+ *
+ * Every B1117 test drove the engine through a harness whose own `commit` accepted `(ops, opts)`.
+ * The REAL adapter in SitePlanner.jsx was `commit: (ops) => commitElements(supabase, siteId, ops)` —
+ * fixed arity, so the engine's `{ atomic }` was silently DISCARDED and every batch went out as the
+ * plain 2-arg RPC with HTTP 200 and no error. Measured on production: eight commit_elements calls
+ * across two drag+undo runs, every one with body keys `p_site` + `p_ops` only.
+ *
+ * So these tests assert the REQUEST BODY, not the gate's return value, with the real `commitElements`
+ * in the loop. A mock that is more capable than the shipped adapter proves nothing about the
+ * shipped adapter. */
+describe("B1120 — the p_atomic REQUEST BODY, with the real transport in the loop", () => {
+  // The engine → the real commitElements → a fake supabase client. Only the network is faked.
+  function wiredHarness({ adapter } = {}) {
+    const rpcCalls = [];
+    const timers = [];
+    const canvas = { els: [], markups: [], measures: [], callouts: [], parcels: [] };
+    const client = {
+      rpc: async (name, args) => {
+        rpcCalls.push({ name, args });
+        const results = (args.p_ops || []).map((o) => ({ id: o.id, status: "ok", rev: (o.expected || 0) + 1 }));
+        return { data: args.p_atomic ? { applied: true, results } : results, error: null };
+      },
+    };
+    // `adapter` lets a test wire the engine's commit hook EXACTLY as the app does — including the
+    // broken fixed-arity form, so the guard can be proven to fire on it.
+    const commit = adapter === "fixed-arity"
+      ? (ops) => commitElements(client, "s", ops)
+      : (ops, opts) => commitElements(client, "s", ops, opts);
+    const reports = [];
+    const events = [];
+    const sync = createElementSync({
+      siteId: "s",
+      commit,
+      now: () => 1000,
+      setTimer: (fn, ms) => { timers.push({ fn, ms }); return timers.length; },
+      clearTimer: () => {},
+      report: (code, msg, ctx) => reports.push({ code, msg, ctx }),
+      onEvent: (e) => events.push(e),
+      liveCollections: () => canvas,
+      patchElement: (kind, id, patch) => { canvas.els = canvas.els.map((e) => (e.id === id ? { ...e, ...patch } : e)); },
+      selfUid: "me",
+    });
+    sync.seed([]);
+    return { sync, rpcCalls, reports, events, canvas, runTimers: () => { const d = timers.splice(0); d.forEach((t) => t.fn()); } };
+  }
+
+  it("a 12-member assembly batch puts p_atomic ON THE WIRE", async () => {
+    const h = wiredHarness();
+    h.canvas.els = assembly();
+    h.sync.reconcile(h.canvas, {}); await tick();
+    expect(h.rpcCalls).toHaveLength(1);
+    expect(Object.keys(h.rpcCalls[0].args).sort()).toEqual(["p_atomic", "p_ops", "p_site"]);
+    expect(h.rpcCalls[0].args.p_atomic).toBe(true);
+    expect(h.rpcCalls[0].args.p_ops).toHaveLength(6);
+  });
+
+  it("a single-element batch does NOT carry p_atomic (the production body shape, verbatim)", async () => {
+    const h = wiredHarness();
+    h.canvas.els = [host("b1")];
+    h.sync.reconcile(h.canvas, {}); await tick();
+    expect(Object.keys(h.rpcCalls[0].args).sort()).toEqual(["p_ops", "p_site"]);
+  });
+
+  it("THE REGRESSION ITSELF: a fixed-arity adapter drops the request — and is now caught LOUDLY", async () => {
+    const h = wiredHarness({ adapter: "fixed-arity" });   // exactly the shipped bug
+    h.canvas.els = assembly();
+    h.sync.reconcile(h.canvas, {}); await tick();
+    // The body really does go out without it — that is the production observation reproduced…
+    expect(Object.keys(h.rpcCalls[0].args).sort()).toEqual(["p_ops", "p_site"]);
+    // …and it can no longer happen in silence.
+    expect(h.reports.some((r) => r.code === "element-atomic-request-lost")).toBe(true);
+    expect(h.events.some((e) => e.type === "atomic-request-lost")).toBe(true);
+  });
+
+  it("the CORRECT adapter fires no such warning", async () => {
+    const h = wiredHarness();
+    h.canvas.els = assembly();
+    h.sync.reconcile(h.canvas, {}); await tick();
+    expect(h.reports.some((r) => r.code === "element-atomic-request-lost")).toBe(false);
+  });
+
+  it("a project WITHOUT the migration falls back quietly and is not reported as a wiring bug", async () => {
+    // The one legitimate mismatch: PGRST202 → the latched 2-arg fallback. It reports itself via the
+    // fallback path, so it must not also be flagged as a lost request.
+    const rpcCalls = [];
+    const timers = [];
+    const canvas = { els: assembly(), markups: [], measures: [], callouts: [], parcels: [] };
+    const client = {
+      rpc: async (name, args) => {
+        rpcCalls.push(args);
+        if (args.p_atomic) return { data: null, error: { code: "PGRST202", message: "Could not find the function" } };
+        return { data: (args.p_ops || []).map((o) => ({ id: o.id, status: "ok", rev: 1 })), error: null };
+      },
+    };
+    const reports = [];
+    const sync = createElementSync({
+      siteId: "s2",
+      commit: (ops, opts) => commitElements(client, "s2", ops, opts),
+      now: () => 1000,
+      setTimer: (fn, ms) => { timers.push({ fn, ms }); return timers.length; },
+      clearTimer: () => {},
+      report: (code) => reports.push(code),
+      liveCollections: () => canvas,
+      patchElement: () => {},
+      selfUid: "me",
+    });
+    sync.seed([]);
+    sync.reconcile(canvas, {}); await tick();
+    expect(rpcCalls.some((a) => a.p_atomic)).toBe(true);            // it did try…
+    expect(rpcCalls.some((a) => !("p_atomic" in a))).toBe(true);    // …then fell back and the write landed
+    expect(reports.includes("element-atomic-request-lost")).toBe(false); // not a wiring bug
+  });
+
+  it("the shipped adapter forwards opts (anti-drift source guard)", () => {
+    const src = readFileSync(fileURLToPath(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url)), "utf8");
+    // A fixed-arity adapter is the exact shape of the bug; require the two-parameter form.
+    expect(src).toMatch(/commit:\s*\(ops,\s*opts\)\s*=>\s*commitElements\(supabase,\s*siteId,\s*ops,\s*opts\)/);
+    expect(src).not.toMatch(/commit:\s*\(ops\)\s*=>\s*commitElements/);
   });
 });
 

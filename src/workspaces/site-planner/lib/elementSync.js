@@ -554,6 +554,20 @@ export function createElementSync(opts = {}) {
         inflight = false;
         for (const e of batch) inflightKeys.delete(skey(e.kind, e.id));
       }
+      // B1120 — LOUD when our own atomicity request does not reach the wire. `sentAtomic` is what
+      // the transport actually sent; `atomic` is what we asked for. A silent mismatch is how a
+      // 12-op single-assembly batch went out un-atomically in production for a whole release while
+      // every unit test stayed green — the adapter had a fixed arity and dropped the option. The
+      // ONE legitimate mismatch is the latched PGRST202 fallback on a project without the
+      // migration, which reports itself separately; anything else is a wiring bug and says so.
+      // `!== true` on purpose, not `=== false`: a FIXED-ARITY adapter never forwards the option at
+      // all, so the transport never learns we asked and cannot report on it — `sentAtomic` comes
+      // back UNDEFINED. That is precisely the shape of the shipped bug, so silence must not be read
+      // as success. Only an explicit `true` counts as "it went out atomically".
+      if (atomic && res && res.sentAtomic !== true && !res.fellBack) {
+        report("element-atomic-request-lost", "an assembly batch asked for atomic and went out WITHOUT it", { siteId, ops: batch.length, ids: batch.slice(0, 20).map((e) => e.id) });
+        onEvent({ type: "atomic-request-lost", ops: batch.length, ids: batch.map((e) => e.id) });
+      }
       if (!res || !res.ok) return onTransportFailure(batch, res);
       attempt = 0;
       // B1117 — `applied === false`: the server rolled the WHOLE call back, so nothing landed —
