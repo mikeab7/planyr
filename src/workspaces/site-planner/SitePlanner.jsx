@@ -108,7 +108,10 @@ import { reorderByZ, arrangeFlags } from "./lib/arrange.js";
 import { commonStyleState, selectionRingFeet } from "./lib/multiStyle.js";
 import { parseTracts, callsToPath, pathCloses, misclosure, bufferPolyline, offsetPolyline, ringsOverlap } from "./lib/metesAndBounds.js";
 import { solveDeedAlignment, gridConvergenceDeg, rotatePointsAbout, ringCentroid as deedCentroid, describeRotation } from "./lib/deedAlign.js";
-import { readDeedFile } from "../../shared/files/docxText.js";
+/* B1131 bundle-budget offset — the deed reader is loaded ON DEMAND (dynamic import at its one
+ * call site in the deed-drop handler). It is a self-contained .docx/ZIP reader that only runs
+ * once someone drops a deed or survey file, so it has no business on the boot path; the same
+ * treatment B1123 gave the title reader and B1042 gave the export path. */
 import { EASEMENT_TYPES, easementType, easementColor, easementLabel, easementArea, DEFAULT_EASEMENT_ATTRS, deriveEasementRing, buildParcelEdgeStrip } from "./lib/easements.js";
 import { edgeRuns, runSetbackValue, resizeRunLength } from "./lib/edgeRuns.js";
 // B1123 bundle-budget offset — the title reader is loaded ON DEMAND (dynamic import in
@@ -12684,6 +12687,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       for (const file of list) {
         const row = { id: uid(), name: file.name || "deed", text: "", boundaryCalls: 0, exCount: 0, closes: false, gap: 0, error: "" };
         try {
+          const { readDeedFile } = await import("../../shared/files/docxText.js");
           const text = await readDeedFile(file);
           row.text = text;
           const tracts = parseTracts(text);
