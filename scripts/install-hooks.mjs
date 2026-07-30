@@ -61,7 +61,7 @@ export function git(repo, args) {
  * Actions: "install" · "already" · "foreign" · "not-a-repo" · "missing-hooks".
  * `armed` answers the only question that matters: will a push actually run the mint gate?
  */
-export function hooksPlan({ isRepo, configured, scope = null, hookFiles = REQUIRED_HOOKS, repo = "", desired = HOOKS_DIR }) {
+export function hooksPlan({ isRepo, configured, scope = null, hookFiles = REQUIRED_HOOKS, repo = "", desired = HOOKS_DIR, gitError = null }) {
   const missing = REQUIRED_HOOKS.filter((h) => !hookFiles.includes(h));
   if (missing.length)
     return {
@@ -69,6 +69,17 @@ export function hooksPlan({ isRepo, configured, scope = null, hookFiles = REQUIR
       message:
         `the committed hooks directory is incomplete — ${missing.map((h) => `${desired}/${h}`).join(", ")} not found.\n` +
         `   Nothing was wired, because wiring an empty directory would look like success and arm nothing.`,
+    };
+
+  // A repo whose git is BROKEN (an unreadable/corrupt config, a bad `.git` file) answers the
+  // work-tree question with an error, not with "false". Reporting that as "not a git repo" would
+  // send someone looking for the wrong problem, so it gets its own verdict carrying git's own words.
+  if (gitError)
+    return {
+      action: "git-unusable", armed: false, ok: false,
+      message:
+        `git could not answer whether this is a work tree — ${gitError}\n` +
+        `   Nothing was changed. Fix git here, then re-run: npm run hooks:install`,
     };
 
   if (!isRepo)
@@ -133,13 +144,17 @@ function ensureExecutable(repo) {
  * `write:false` makes it a pure inspection — used by `--check`.
  */
 export function installHooks(repo = REPO_DEFAULT, { write = true, force = false } = {}) {
-  const isRepo = git(repo, ["rev-parse", "--is-inside-work-tree"]).out.trim() === "true";
+  const probe = git(repo, ["rev-parse", "--is-inside-work-tree"]);
+  const isRepo = probe.out.trim() === "true";
+  // Only a git that ERRORED is a broken git. A plain "false" (or a directory outside any repo) is
+  // the ordinary not-a-repo answer and must not be dressed up as a fault.
+  const gitError = !probe.ok && !/not a git repository/i.test(probe.reason || "") ? probe.reason : null;
   const cfg = git(repo, ["config", "--get", "core.hooksPath"]);
   const configured = cfg.ok && cfg.out.trim() ? cfg.out.trim() : null;
   const hookFiles = ensureExecutable(repo);
   const scope = isRepo && configured ? configScope(repo) : null;
 
-  const plan = hooksPlan({ isRepo, configured, scope, hookFiles, repo });
+  const plan = hooksPlan({ isRepo, configured, scope, hookFiles, repo, gitError });
 
   if (plan.action === "foreign" && force) {
     // Explicit opt-in only. `npm run hooks:install -- --force` is the documented escape hatch out

@@ -146,6 +146,19 @@ describe("(c) it NEVER silently no-ops — every un-armed outcome is loud", () =
     expect(err).toMatch(/NOT ARMED \(not-a-repo\)/);
   });
 
+  it("a BROKEN git (unreadable config) is reported as such — not mislabelled 'not a git repo'", () => {
+    // Observed while proving this in a scratch clone: with `.git/config` unusable, git answers the
+    // work-tree question with an ERROR, and the first cut reported it as "not a git repo" — which
+    // would send someone hunting the wrong problem. The verdict now carries git's own words.
+    const dir = scratchRepo("broken-git");
+    rmSync(join(dir, ".git", "config"));
+    mkdirSync(join(dir, ".git", "config")); // a directory where the config file belongs
+    const res = installHooks(dir);
+    expect(res.action).toBe("git-unusable");
+    expect(res.armed).toBe(false);
+    expect(res.message).toMatch(/unable to access|unknown error/i); // git's own complaint, verbatim
+  });
+
   it("a MISSING committed hook fails loudly instead of wiring an empty directory", () => {
     // Wiring core.hooksPath at an empty directory is the perfect silent no-op: git is happy, the
     // config looks right, and no hook ever runs.
@@ -212,6 +225,11 @@ describe("hooksPlan — the pure decision, pinned branch by branch", () => {
     expect(p.armed).toBe(false);
   });
   it("no work tree → not-a-repo", () => expect(hooksPlan({ ...ok, isRepo: false, configured: null }).action).toBe("not-a-repo"));
+  it("git itself errored → git-unusable, which is a different problem from not-a-repo", () => {
+    const p = hooksPlan({ ...ok, isRepo: false, configured: null, gitError: "fatal: unknown error" });
+    expect(p.action).toBe("git-unusable");
+    expect(p.message).toMatch(/fatal: unknown error/);
+  });
   it("missing hook file beats every other verdict — it is checked first", () => {
     // Even a perfectly-configured hooksPath means nothing if the hook is not there.
     expect(hooksPlan({ ...ok, configured: HOOKS_DIR, hookFiles: [] }).action).toBe("missing-hooks");
