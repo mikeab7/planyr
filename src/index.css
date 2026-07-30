@@ -105,13 +105,22 @@
   --canvas-bg:          #EDF1F6;   /* cool drafting field (retires the warm cream) */
   --canvas-grid-minor:  #DCE3EB;
   --canvas-grid-major:  #C5CED9;
-  /* NEW-4 — the drafting INDIGO. Not a new hue: this is the design system's existing indigo,
-     the value already carried by --accent-schedule-text / --source-code-text. It gets its own
-     neutral name because it is now a DRAWING colour (parcel boundary + setback ring), not a
-     module accent, so the two can never be coupled by accident. */
-  --indigo:             #534AB7;
-  --canvas-parcel:      var(--indigo);   /* owner default 2026-07-30 (was the olive #5b6650) */
-  --canvas-setback:     var(--indigo);   /* owner default 2026-07-30 (was the amber #b45309) */
+  /* NEW-2 — the drafting PROPERTY-LINE GREEN, #34E802, picked by the owner in the live colour
+     picker (R 52 · G 232 · B 2) and set as the default for every new account. It SUPERSEDES the
+     indigo default shipped hours earlier the same day (B1187) — the `--indigo` alias that carried
+     it is retired, so there is ONE source of truth for this default and nothing to drift from.
+     Identical in both themes: it is a drawing colour read against aerial imagery, not against the
+     app surface, and imagery does not change with the app theme.
+     Its legibility over green crop / dark asphalt / the USGS topo sheet comes from the CASING —
+     see --canvas-line-casing below — not from re-tinting it per theme. */
+  --canvas-parcel:      #34E802;   /* owner default 2026-07-30 (was indigo, was the olive #5b6650) */
+  --canvas-setback:     var(--canvas-parcel);   /* the two are one default, set together */
+  /* The dark under-stroke drawn beneath the parcel boundary and the setback ring. A bright,
+     highly-saturated line lands on green fields and irrigated crop on many of these sites; the
+     casing is what keeps the line readable there, and on asphalt and on a topo basemap, without
+     touching the colour itself. Deliberately translucent black rather than a token colour: it has
+     to darken whatever is underneath it, in either theme. */
+  --canvas-line-casing: rgba(0, 0, 0, 0.55);
   /* Ink for the small white value plates drawn on the canvas (the setback chip). The plate is
      white in BOTH themes, so its border + numerals are a fixed near-black — owner default
      2026-07-30, replacing the amber-on-amber that was unreadable over the setback band. */
@@ -225,11 +234,11 @@
   --canvas-bg:          #0E1014;
   --canvas-grid-minor:  rgba(232, 235, 240, 0.05);
   --canvas-grid-major:  rgba(232, 235, 240, 0.10);
-  /* NEW-4 — the dark-theme indigo, again the value the system already uses for its indigo
-     text tokens, light enough to stay legible on the dark canvas and on a dark aerial. */
-  --indigo:             #AFA9EC;
-  --canvas-parcel:      var(--indigo);
-  --canvas-setback:     var(--indigo);
+  /* NEW-2 — the property-line green is the SAME value on dark. It is read against aerial
+     imagery, which does not follow the app theme, and its contrast comes from the casing. */
+  --canvas-parcel:      #34E802;
+  --canvas-setback:     var(--canvas-parcel);
+  --canvas-line-casing: rgba(0, 0, 0, 0.55);
   --canvas-chip-ink:    #15171C;   /* the chip plate stays white on dark too — same near-black ink */
   --canvas-selection:   #F26B3A;
   --canvas-accent-soft: rgba(242, 107, 58, 0.18);

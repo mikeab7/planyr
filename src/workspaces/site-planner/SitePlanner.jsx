@@ -136,7 +136,16 @@ import { edgeRuns, runSetbackValue, resizeRunLength } from "./lib/edgeRuns.js";
 // `cornerTurns` are the shared screen-space thinning used by BOTH the setback chips and the vertex
 // handles; `polylabel` puts the acreage badge at the parcel's visual centre instead of its
 // vertex average. All three are pure + unit-tested; see their module headers for the why.
-import { setbackChipRuns, CHIP_MIN_EDGE_PX, CHIP_MIN_SEP_PX } from "./lib/setbackChips.js";
+import { setbackChipRuns, CHIP_MIN_EDGE_PX, CHIP_MIN_SEP_PX, CHIP_MIN_GAP_PX } from "./lib/setbackChips.js";
+// NEW-1 — the setback ring's inward offset (and the line-intersection primitive it is built on)
+// moved out of this file unchanged, so the buildable envelope a parcel's setbacks produce can be
+// proven in a unit test against real production geometry instead of only by rendering.
+import { offsetPolygon, lineIntersect } from "./lib/parcelOffset.js";
+// NEW-1 — the REGULATORY tier above the two geometric ones: a zoning ordinance names four
+// setbacks (Front / Side / Street side / Rear), not fifteen digitized sides. Pure + unit-tested;
+// roles are labels over edges and never an input to a measurement, so the canonical per-edge
+// `pc.setbacks` array the yield engine reads is untouched by anything in here.
+import { SETBACK_ROLES, ROLE_LABEL, ROLE_SHORT, resolveRoles, runRole, setRunRole, roleGroups } from "./lib/setbackRoles.js";
 import { spaceOut, cornerTurns } from "./lib/screenDeclutter.js";
 import { polylabel } from "./lib/polylabel.js";
 // B1123 bundle-budget offset — the title reader is loaded ON DEMAND (dynamic import in
@@ -779,54 +788,6 @@ function easementInsetOpts(m) {
   const strip = m.centerline && m.mode !== "boundary" && m.centerline.length >= 2;
   if (strip) return { place, insetFt: Math.max(0, (+m.width || 0) / 4) };
   return { place, insetFt: ringLabelInsetFt(m.pts), interiorFeet: centroid(m.pts) };
-}
-
-function lineIntersect(x1, y1, x2, y2, x3, y3, x4, y4) {
-  const d = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4);
-  if (Math.abs(d) < 1e-9) return null;
-  const t = ((x1 - x3) * (y3 - y4) - (y1 - y3) * (x3 - x4)) / d;
-  return { x: x1 + t * (x2 - x1), y: y1 + t * (y2 - y1) };
-}
-
-// Inward offset of a polygon. `d` is a scalar OR a per-edge array (one value per
-// edge i = segment pts[i]→pts[i+1]). Robust: offsets each edge by its left normal
-// × sign; where adjacent offset edges don't intersect cleanly (concave spikes) it
-// falls back to a beveled corner instead of bailing on the whole ring. Never
-// returns null for a valid lot. Self-checks the sign by shrink (area) test.
-function offsetPolygon(pts, d) {
-  const n = pts.length;
-  if (n < 3) return null;
-  const dist = (i) => (Array.isArray(d) ? (d[i] ?? 0) : d);
-  const build = (sign) => {
-    const off = [];
-    for (let i = 0; i < n; i++) {
-      const a = pts[i], b = pts[(i + 1) % n];
-      let ex = -(b.y - a.y), ey = b.x - a.x; // left normal of edge a→b
-      const len = Math.hypot(ex, ey);
-      if (len === 0) { off.push(null); continue; }
-      const k = (sign * dist(i)) / len;
-      off.push({ ax: a.x + ex * k, ay: a.y + ey * k, bx: b.x + ex * k, by: b.y + ey * k });
-    }
-    const out = [];
-    for (let i = 0; i < n; i++) {
-      const e1 = off[(i - 1 + n) % n], e2 = off[i];
-      if (!e1 && !e2) { out.push(pts[i]); continue; }
-      if (!e1) { out.push({ x: e2.ax, y: e2.ay }); continue; }
-      if (!e2) { out.push({ x: e1.bx, y: e1.by }); continue; }
-      const p = lineIntersect(e1.ax, e1.ay, e1.bx, e1.by, e2.ax, e2.ay, e2.bx, e2.by);
-      // Parallel / failed miter → bevel: use the two offset endpoints at this corner.
-      if (!p) { out.push({ x: e1.bx, y: e1.by }, { x: e2.ax, y: e2.ay }); continue; }
-      // Reject a runaway spike (miter way past a sane bevel); bevel instead.
-      const lim = Math.max(Math.abs(dist(i)), Math.abs(dist((i - 1 + n) % n))) * 6 + 1;
-      if (Math.hypot(p.x - e1.bx, p.y - e1.by) > lim) out.push({ x: e1.bx, y: e1.by }, { x: e2.ax, y: e2.ay });
-      else out.push(p);
-    }
-    return out.length >= 3 ? out : null;
-  };
-  const a1 = build(1);
-  if (!a1) return build(-1);
-  // Inward offset must shrink the ring; if it grew, we offset the wrong way.
-  return polyArea(a1) <= polyArea(pts) ? a1 : (build(-1) || a1);
 }
 
 /* Outward (EXPANDING) offset by d>0 — pushes every edge out along its outward normal,
@@ -1756,6 +1717,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // NEW-4 — ink for the small WHITE value plates painted on the canvas (the setback chip).
     // The plate is white in both themes, so its border + numerals are a fixed near-black.
     chipInk: themePal.canvasChipInk,
+    // NEW-2 — the dark under-stroke drawn beneath the parcel boundary + setback ring. The default
+    // line colour is a very saturated green and many of these sites are farmland and irrigated
+    // field, so the casing is what stops a green property line disappearing into green ground —
+    // and it does the same job on dark asphalt and on the USGS topo sheet. It is applied to EVERY
+    // parcel line, not only the default-coloured one, so a user's own colour survives its worst
+    // background too.
+    lineCasing: themePal.canvasLineCasing,
     panelLine: themePal.borderDefault, muted: themePal.textSecondary,
     chrome: themePal.chromeBg, chromeLine: themePal.chromeDivider, chromeInk: themePal.chromeText,
     chromeMuted: themePal.chromeMuted, ember: themePal.accent, onAccent: themePal.onAccent,
@@ -1900,7 +1868,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [easeWidth, setEaseWidth] = useState(() => Math.max(1, +lsGet("easeWidth", "10") || 10));
   const [easeDraft, setEaseDraft] = useState(null); // {pts:[{x,y}]} centerline/boundary click-draw in progress
   const [easeEdges, setEaseEdges] = useState(null); // {parcelId, idx:[edge#]} parcel-edge run in progress (NEW-3)
-  const [sbEditMode, setSbEditMode] = useState("side"); // B214 setback editor: "side" (whole run) | "segment" (one edge)
+  // Setback editor tier. NEW-1 — "role" is the DEFAULT: the four setbacks a zoning ordinance
+  // actually writes (Front / Side / Street side / Rear), one input each, writing to every side in
+  // that role. "side" (one row per labelled run) is the middle tier and "segment" (one row per
+  // digitized edge) the exception tier; both behave exactly as they did.
+  const [sbEditMode, setSbEditMode] = useState("role"); // "role" | "side" (whole run) | "segment" (one edge)
   const [easeMenu, setEaseMenu] = useState(false);        // Easement ▾ rail menu open
   const [easeTypeMenu, setEaseTypeMenu] = useState(false); // attributes-panel type popover open
   const [attachFor, setAttachFor] = useState(null);     // element id awaiting a "click a host" to attach to
@@ -12867,6 +12839,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // ACTIVE parcel is selected (an inactive parcel's anchored chrome is hidden — B213).
   const SETBACK_RUN_TOL_DEG = 7; // an edge within ±7° of the run's first edge stays in the run
   const PARCEL_DIM_MIN_SEP_PX = 44; // NEW-2: min on-screen spacing between two side-length numbers
+  /* NEW-2 — how much wider the dark CASING is than the line it sits under, in the same weight
+     units as pc.weight (so it scales with zoom exactly like the line does). Just enough to read
+     as a halo on a busy aerial; any more and the boundary starts reading as a double line. */
+  const PARCEL_CASING_W = 1.4;
   const selParcel = sel?.kind === "parcel" ? parcels.find((p) => p.id === sel.id) : null;
   const selRuns = (selParcel && selParcel.active !== false) ? edgeRuns(selParcel.points, SETBACK_RUN_TOL_DEG) : null;
   // Screen anchors for a run's fanned labels (B215): the boundary/run-length dimension sits
@@ -14008,6 +13984,39 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     run.edges.forEach((i) => { arr[i] = Math.max(0, v); });
     setParcels((a) => a.map((p) => p.id === pc.id ? { ...p, setbacks: arr } : p));
   };
+  /* NEW-1 — the REGULATORY tier. Roles resolve from geometry on load for EVERY side (not just
+   * one), and the user's own assignment (`pc.roles`, per edge) always wins. Nothing here writes a
+   * setback VALUE, so a parcel that has only ever been auto-assigned keeps a byte-identical
+   * `setbacks` array and its buildable area cannot move. */
+  // Road centerlines that lie OUTSIDE this lot — the evidence for "fronts the access street" and
+  // for the corner-lot Street side. A drive drawn INSIDE the lot is not a public street, so it is
+  // excluded (a road is outside when most of its vertices fall outside the ring).
+  const parcelStreets = (pc) => {
+    if (!pc || !Array.isArray(pc.points) || pc.points.length < 3) return [];
+    const out = [];
+    for (const el of els) {
+      if (!isCenterlineRoad(el)) continue;
+      const outside = el.pts.reduce((k, p) => k + (pointInRing(p, pc.points) ? 0 : 1), 0);
+      if (outside >= el.pts.length * 0.6) out.push(el.pts);
+    }
+    return out;
+  };
+  const parcelRoles = (pc) => (pc ? resolveRoles(pc.points, pc.roles, { streets: parcelStreets(pc) }) : []);
+  // Reassign one whole SIDE's role. Stores the full per-edge vector (aligned to the ring, exactly
+  // like `pc.setbacks`), so a run can never display a role its own edges disagree with.
+  const setRunRoleOn = (pc, run, role) => {
+    pushHistory();
+    const next = setRunRole(parcelRoles(pc), run, role, pc.points.length);
+    setParcels((a) => a.map((p) => p.id === pc.id ? { ...p, roles: next } : p));
+  };
+  // One ordinance number → every edge that carries that role, through the same canonical
+  // per-edge `setbacks` array `setRunSetback` writes.
+  const setRoleSetback = (pc, edges, v) => {
+    pushHistory();
+    const arr = parcelSetbacks(pc).slice();
+    edges.forEach((i) => { arr[i] = Math.max(0, v); });
+    setParcels((a) => a.map((p) => p.id === pc.id ? { ...p, setbacks: arr } : p));
+  };
   // "Front" = the longest edge (street frontage heuristic).
   const frontEdge = (pc) => {
     let best = 0, bl = -1;
@@ -15005,17 +15014,19 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 <button style={chip} onClick={() => toggleParcelActive(selParcel.id)} title={selParcel.active === false ? "Excluded from yield / coverage / detention — click to include" : "Counted in yield / coverage / detention — click to exclude (stays visible, dimmed)"}>{selParcel.active === false ? "◯ Inactive" : "✓ Active"}</button>
                 <button style={chip} onClick={() => toggleParcelLock(selParcel.id)} title="Lock the boundary so it can't be moved or reshaped">{selParcel.locked ? "🔒 Unlock" : "🔓 Lock"}</button>
               </div>
-              {/* B214 — setback editor mode. Only shown when a side is built from MORE than
-                  one segment (where "by side" actually saves clicks); otherwise every side is
-                  a single edge and the two modes are identical. */}
-              {/* NEW-1 — gate on the CHIP runs, not the geometric sides. On a curved boundary every
-                  geometric side is a single segment (each turns past the ±7° tolerance), so the old
-                  gate hid the toggle on exactly the parcel that needs it most. */}
-              {settings.showSetback && selRuns && parcelChipRuns(selParcel).some((r) => r.edges.length > 1) && (
+              {/* B214 — setback editor mode. NEW-1: THREE tiers, not two, and the toggle is no
+                  longer gated on the boundary being multi-segment — "By role" changes what the
+                  list means on every parcel, including a four-sided one.
+                    By role     the four setbacks a zoning ordinance writes (DEFAULT)
+                    By side     one row per labelled run — the middle tier
+                    Per segment one row per digitized edge — the exception tier */}
+              {settings.showSetback && selRuns && (
                 <div style={{ fontSize: 12, color: PAL.muted, marginBottom: 9, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
                   <span>Edit setbacks:</span>
+                  <button style={{ ...chip, ...(sbEditMode === "role" ? { background: PAL.accent, color: "#fff", borderColor: PAL.accent } : {}) }}
+                    onClick={() => setSbEditMode("role")} title="One value per zoning role — Front, Side, Street side, Rear. Each input writes to every side carrying that role.">By role</button>
                   <button style={{ ...chip, ...(sbEditMode === "side" ? { background: PAL.accent, color: "#fff", borderColor: PAL.accent } : {}) }}
-                    onClick={() => setSbEditMode("side")} title="One value per whole side — a side digitized as many segments edits in a single click (Alt-click a side to override just one segment)">By side</button>
+                    onClick={() => setSbEditMode("side")} title="One value per whole side — a side digitized as many segments edits in a single click (Alt-click a side to override just one segment). Each row also shows the side's role, and you can change it here.">By side</button>
                   <button style={{ ...chip, ...(sbEditMode === "segment" ? { background: PAL.accent, color: "#fff", borderColor: PAL.accent } : {}) }}
                     onClick={() => setSbEditMode("segment")} title="Each segment on its own — for a notch or jog that needs its own setback">Per segment</button>
                 </div>
@@ -15078,7 +15089,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               </Field>
               <button style={{ ...chip, marginTop: 2 }} onClick={() => { pushHistory(); setSelParcel({ sbStroke: null, sbWeight: null, sbDash: null }); }} title="Reset the setback line back to the default color, weight and dashes">Reset setback line</button>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", margin: "10px 0 4px" }}>
-                <span style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em" }}>{sbEditMode === "segment" ? "Setbacks per edge" : "Setbacks by side"}</span>
+                <span style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em" }}>{sbEditMode === "segment" ? "Setbacks per edge" : sbEditMode === "side" ? "Setbacks by side" : "Setbacks by role"}</span>
                 <label style={{ display: "flex", gap: 6, fontSize: 11, color: PAL.muted, cursor: "pointer" }} title="Show the setback line inside the parcel boundary"><input type="checkbox" checked={settings.showSetback} onChange={(e) => setSettings((s) => ({ ...s, showSetback: e.target.checked }))} /> Show setback line</label>
               </div>
               {/* NEW-1 — in "By side" mode this list is ONE ROW PER RUN, not one per edge. A
@@ -15088,18 +15099,39 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   edge in the run at once through the same canonical `setRunSetback`, and the row
                   count now matches the on-canvas chip count exactly — the two surfaces read the
                   same grouping. "Per segment" still lists every edge, for a notch or jog. */}
+              {/* NEW-1 — "By role" is the DEFAULT list: four rows, the ordinance's own vocabulary,
+                  each input writing to every side that carries the role. A role no side currently
+                  carries still gets its row (so the four are always the four) but shows an em-dash
+                  instead of an input — there is nothing to write to yet. Reassignment happens on
+                  the "By side" rows, where each side shows its resolved role in a picker. */}
               {(() => {
                 const sb = parcelSetbacks(selParcel), fe = frontEdge(selParcel);
+                const roles = parcelRoles(selParcel);
+                const chipRuns = parcelChipRuns(selParcel);
                 const rows = sbEditMode === "segment"
                   ? sb.map((v, i) => ({ key: `e${i}`, label: i === fe ? "Front" : `Edge ${i + 1}`, note: "", value: v, commit: (n) => setEdgeSetback(selParcel, i, n) }))
-                  : parcelChipRuns(selParcel).map((run, ri) => {
+                  : sbEditMode === "role"
+                  ? roleGroups(chipRuns, roles, sb).map((g) => ({
+                      key: `g${g.role}`,
+                      role: g.role,
+                      label: g.label,
+                      // Only worth saying when the role covers more than one side; the row's job
+                      // is the number, not an explanation.
+                      note: g.sides > 1 ? `${g.sides} sides` : "",
+                      value: g.value ?? 0,
+                      mixed: g.mixed,
+                      empty: g.empty,
+                      commit: (n) => setRoleSetback(selParcel, g.edges, n),
+                    }))
+                  : chipRuns.map((run, ri) => {
                       const shared = runSetbackValue(run, sb);
                       return {
                         key: `r${ri}`,
-                        label: run.edges.includes(fe) ? "Front" : `Side ${ri + 1}`,
-                        // Only worth saying when it isn't 1:1 with an edge, and only ever these
-                        // few characters — the row's job is the number, not an explanation.
+                        label: `Side ${ri + 1}`,
                         note: run.edges.length > 1 ? `${run.edges.length} seg` : "",
+                        // The resolved role, visible AND correctable on the side it belongs to.
+                        role: runRole(run, roles),
+                        setRole: (role) => setRunRoleOn(selParcel, run, role),
                         value: shared == null ? (sb[run.edges[0]] ?? 0) : shared,
                         mixed: shared == null,
                         commit: (n) => setRunSetback(selParcel, run, n),
@@ -15108,12 +15140,22 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 return (
                   <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                     {rows.map((r) => (
-                      <div key={r.key} style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                        <span style={{ flex: 1, fontSize: 12, color: PAL.ink }}>{r.label}
+                      <div key={r.key} data-testid="setback-row" data-role={r.role}
+                        style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <span style={{ flex: 1, fontSize: 12, color: r.empty ? PAL.muted : PAL.ink }}>{r.label}
                           {r.note && <span style={{ color: PAL.muted, fontSize: 11 }}> · {r.note}</span>}
                           {r.mixed && <span style={{ color: PAL.warn, fontSize: 11 }} title="This side's segments carry different setbacks — typing a value here sets them all"> · mixed</span>}
                         </span>
-                        <NumInput style={{ ...numInput, width: 54 }} value={Math.round(r.value)} min={0} onCommit={r.commit} />
+                        {r.setRole && (
+                          <select value={r.role} onChange={(e) => r.setRole(e.target.value)} data-testid="side-role"
+                            title="Which setback this side takes — Front, Side, Street side (a corner lot's second street) or Rear. Set from the boundary on load; change it here and the By-role rows follow."
+                            style={{ ...numInput, width: "auto", padding: "1px 4px", fontSize: 11, cursor: "pointer" }}>
+                            {SETBACK_ROLES.map((k) => <option key={k} value={k}>{ROLE_LABEL[k]}</option>)}
+                          </select>
+                        )}
+                        {r.empty
+                          ? <span style={{ width: 54, textAlign: "center", fontSize: 12, color: PAL.muted }} title="No side currently carries this role — assign one on a By side row">—</span>
+                          : <NumInput style={{ ...numInput, width: 54 }} value={Math.round(r.value)} min={0} onCommit={r.commit} />}
                       </div>
                     ))}
                     <button style={{ ...chip, marginTop: 4 }} onClick={() => { pushHistory(); setParcels((a) => a.map((p) => p.id === selParcel.id ? { ...p, setbacks: Array.from({ length: p.points.length }, () => +settings.setback || 0) } : p)); }}>Reset to default ({settings.setback}′)</button>
@@ -16417,7 +16459,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 // creation like the boundary's and overridable per parcel. An untouched parcel
                 // resolves to exactly the old hardcoded look (PAL.setback, 1.25, "7 6").
                 const sbs = setbackLineStyle(pc, PAL.setback);
+                // NEW-2 — CASING under the ring, on the same dash so the halo dashes with it.
+                const sbCase = strokeZoom(sbs.weight + PARCEL_CASING_W, zk);
                 return <g key={`sb${pc.id}`}>
+                  <polygon data-testid="setback-casing" points={ring} fill="none" stroke={PAL.lineCasing} strokeWidth={sbCase} strokeDasharray={dashZoom(sbs.dash, zk)} strokeLinejoin="round" pointerEvents="none" />
                   <polygon data-testid="setback-ring" points={ring} fill="none" stroke={sbs.stroke} strokeWidth={strokeZoom(sbs.weight, zk)} strokeDasharray={dashZoom(sbs.dash, zk)} pointerEvents="none" />
                   <polygon points={ring} fill="none" stroke="rgba(0,0,0,0.001)" strokeWidth={12} strokeLinejoin="round" pointerEvents="stroke"
                     style={{ cursor: tool === "select" ? (pc.locked ? "default" : "move") : "crosshair" }}
@@ -16451,36 +16496,53 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 // recoloured still takes its chip with it — that is B1100's behaviour and an
                 // explicit override, which this default must not stomp.
                 const sbCol = selParcel.sbStroke || PAL.chipInk;
-                const pill = (key, anchor, txt, onEdit) => (
-                  <g key={key} style={{ cursor: "pointer" }} onPointerDown={(e) => { e.stopPropagation(); const fp = p2f(e.clientX, e.clientY); onEdit(fp, e.altKey); }}>
-                    <rect data-testid="setback-chip" x={anchor.x - 13} y={anchor.y - 9} width={26} height={16} rx={4} fill="#fff" stroke={sbCol} strokeWidth={1} />
-                    <text x={anchor.x} y={anchor.y + 3.5} textAnchor="middle" fontSize="10.5" fontFamily={NUM_FONT} fontVariantNumeric={TABULAR_NUMS} fill={sbCol} fontWeight="700">{txt}</text>
-                  </g>
-                );
+                // NEW-1 — the chip now reads its ROLE, not a bare number: "Front · 25′" says which
+                // ordinance setback the line is, which is the whole point of the role layer. The
+                // plate therefore has to size itself to its text instead of the old fixed 26-wide
+                // number plate, and the declutter pass switches to the box metric so two wide
+                // chips can't overlap side-by-side while vertically-stacked ones survive.
+                const roles = parcelRoles(selParcel);
+                const chipW = (txt) => Math.max(26, Math.round(txt.length * 5.9 + 11));
+                const pill = (key, anchor, txt, onEdit) => {
+                  const w = chipW(txt);
+                  return (
+                    <g key={key} style={{ cursor: "pointer" }} onPointerDown={(e) => { e.stopPropagation(); const fp = p2f(e.clientX, e.clientY); onEdit(fp, e.altKey); }}>
+                      <rect data-testid="setback-chip" x={anchor.x - w / 2} y={anchor.y - 9} width={w} height={16} rx={4} fill="#fff" stroke={sbCol} strokeWidth={1} />
+                      <text x={anchor.x} y={anchor.y + 3.5} textAnchor="middle" fontSize="10.5" fontFamily={NUM_FONT} fontVariantNumeric={TABULAR_NUMS} fill={sbCol} fontWeight="700">{txt}</text>
+                    </g>
+                  );
+                };
+                const roleTxt = (edge, v) => `${ROLE_SHORT[roles[edge]] || "Side"} · ${v}`;
                 const n = selParcel.points.length;
                 // Inboard screen anchor for the midpoint of edge `ei` (the point-in-ring inward
                 // step from B216 — correct on concave / L-shaped / flag lots, where "toward the
                 // centroid" threw a chip outside the lot).
-                const anchorForEdge = (ei) => {
+                // NEW-1 — the inboard step now clears the PLATE, not a fixed 13 px. A role chip is
+                // three times the width of the old number plate, so a fixed step let a wide chip
+                // straddle the boundary line and land on the OUTBOARD side-length dimension (B215
+                // put the two on opposite sides of the edge precisely so they never collide). The
+                // step is the plate's own half-extent along the inward normal, plus a small margin.
+                const anchorForEdge = (ei, w = 26) => {
                   const a = selParcel.points[ei], b = selParcel.points[(ei + 1) % n];
                   const am = f2p(a), bm = f2p(b);
                   const m = { x: (am.x + bm.x) / 2, y: (am.y + bm.y) / 2 };
                   const { sx, sy } = inwardScreenNormal(selParcel, { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }, b.x - a.x, b.y - a.y);
-                  return { x: m.x + sx * 13, y: m.y + sy * 13 };
+                  const step = 6 + (Math.abs(sx) * w + Math.abs(sy) * 16) / 2;
+                  return { x: m.x + sx * step, y: m.y + sy * step };
                 };
                 const edgeLenFt = (ei) => dist(selParcel.points[ei], selParcel.points[(ei + 1) % n]);
                 // The candidate set differs by mode; the two guards below are identical for both,
                 // so per-segment mode is decluttered too (it was the worst case of all).
                 const cands = sbEditMode === "segment"
                   ? selParcel.points.map((_, i) => ({
-                      key: `sbl${i}`, anchorEdge: i, lenFt: edgeLenFt(i), txt: `${f0(sb[i])}′`,
+                      key: `sbl${i}`, anchorEdge: i, lenFt: edgeLenFt(i), txt: roleTxt(i, `${f0(sb[i])}′`),
                       onEdit: (fp) => setNumEdit({ fx: fp.x, fy: fp.y, value: String(sb[i]), onCommit: (v) => setEdgeSetback(selParcel, i, v) }),
                     }))
                   : parcelChipRuns(selParcel).map((run, ri) => {
                       const val = runSetbackValue(run, sb);
                       return {
                         key: `sbr${ri}`, anchorEdge: run.anchorEdge, lenFt: run.anchorLenFt,
-                        txt: val == null ? "—" : `${f0(val)}′`,
+                        txt: roleTxt(run.anchorEdge, val == null ? "—" : `${f0(val)}′`),
                         // Alt-click still overrides just the nearest SEGMENT of the run, so a notch
                         // inside a grouped side is reachable without leaving side mode.
                         onEdit: (fp, alt) => {
@@ -16496,8 +16558,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 const shown = spaceOut(
                   cands
                     .filter((c) => c.lenFt * labelPpf >= CHIP_MIN_EDGE_PX)     // guard (a)
-                    .map((c) => ({ ...c, ...anchorForEdge(c.anchorEdge), priority: c.lenFt })),
-                  CHIP_MIN_SEP_PX,                                             // guard (b)
+                    .map((c) => ({ ...c, ...anchorForEdge(c.anchorEdge, chipW(c.txt)), priority: c.lenFt, w: chipW(c.txt), h: 16 })),
+                  CHIP_MIN_SEP_PX,                                             // guard (b) — box metric
+                  CHIP_MIN_GAP_PX,
                 );
                 if (!shown.length) return null;
                 return <g data-export="skip">{shown.map((c) => pill(c.key, { x: c.x, y: c.y }, c.txt, c.onEdit))}</g>;
@@ -16523,7 +16586,20 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 // B619: no accent recolor on select — the property line keeps its own color; the square
                 // vertex handles carry the selection. B617: the boundary weight holds constant relative
                 // to the drawing across zoom (dominant property outline → scaled, not fixed pixels).
+                // NEW-2 — CASING: a dark under-stroke a touch wider than the line itself. The
+                // default boundary colour is a very saturated green and many of these sites are
+                // farmland, so without it a green property line can vanish into green ground; it
+                // does the same work on dark asphalt and on the topo basemap. Skipped while the
+                // line is already carrying a state colour of its own (remove-hover / multi-pick),
+                // where the colour IS the message, and on an inactive parcel, which is deliberately
+                // faint context.
+                const cased = !removeHover && !picked && !inactive;
                 return <g key={pc.id}>
+                  {cased && (
+                    <polygon data-testid="parcel-casing" points={ring} fill="none" stroke={PAL.lineCasing}
+                      strokeWidth={strokeZoom(((isSel) ? Math.max(3, baseW) : baseW) + PARCEL_CASING_W, zk)}
+                      strokeDasharray={dashArray(pc.dash, baseW)} strokeLinejoin="round" pointerEvents="none" />
+                  )}
                   <polygon data-testid="parcel-outline" points={ring}
                     fill={removeHover ? PAL.danger : picked ? "#2563eb" : (pc.fill || "none")} fillOpacity={removeHover ? 0.16 : picked ? 0.16 : (pc.fill ? (pc.fillOpacity ?? 0.12) : 1)}
                     stroke={removeHover ? PAL.danger : picked ? "#2563eb" : (pc.stroke || PAL.parcel)} strokeWidth={strokeZoom((removeHover || picked || isSel) ? Math.max(3, baseW) : baseW, zk)}

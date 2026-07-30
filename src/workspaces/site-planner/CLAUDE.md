@@ -311,6 +311,20 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   `polylabel.js` — pole of inaccessibility; the parcel acreage badge's anchor (always inside the ring, unlike
   the vertex average it replaced). Guards: the repo-root `test/` suite **parcelDeclutter** + the ui-audit harness
   **verify-parcel-declutter** (the Weld County curved-corner repro, with screenshots).
+  **`setbackRoles.js` is the REGULATORY tier ABOVE both of those (B1191) — read it before touching how a
+  setback is edited.** A zoning ordinance names FOUR setbacks (Front / Side / Street side / Rear); the two
+  geometric groupers still produced fifteen rows on the owner's real parcel. It auto-assigns a role to EVERY
+  edge from frontage geometry (street abutment → front → corner street side → rear → side), the user's own
+  assignment in `pc.roles` always wins, and `roleGroups` is the four-row panel model. **A role is a LABEL
+  and never an input to a measurement** — nothing here writes a setback VALUE, which is what keeps the
+  NON-NEGOTIABLE ("no site's computed buildable area may change") true by construction. Street side is only
+  ever assigned from real road geometry, never guessed. Roles reason over runs built from a FLAT value
+  vector on purpose, so typing a setback can't reshuffle the labels. `parcelOffset.js` holds the setback
+  ring's inward offset + `lineIntersect`, lifted out of `SitePlanner.jsx` unchanged so the buildable envelope
+  is provable in a unit test. Guards: the repo-root `test/` suite **setbackRoles** (which runs the REAL
+  production snapshot `test/fixtures/weldParcelProduction.json`, site `sms7v3ua7ksy`) + the ui-audit harness
+  **verify-setback-roles** (that same geometry, driven in a browser: default tier, auto-assignment,
+  correction, one-input-many-sides, role chips, and the ring proven identical across all of it).
   `roadGeometry.js` — centerline road curves + junction primitives (pure): `teeGeometry` returns the
   ADDITIVE curb-return `wedges` a junction contributes. `roadNetwork.js` — the DISSOLVED road surface
   (clipper union of every connected strip + wedge → one region, one outline, per cluster) plus the

@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-07-30 @ `19d9fa4` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-07-30 @ `85f9062` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_380 source files mapped._
+_382 source files mapped._
 
 ## infra
 
@@ -527,6 +527,8 @@ _380 source files mapped._
   - _exports_: `arrowGlyphFeatures`, `buildOverlayVectorFragment`, `contourFeatures`, `esriLineFeatures`, `esriPolygonFeatures`, `featureToSvg`, `overlayVectorSvg`, `swapLatLng`
 - **`src/workspaces/site-planner/lib/parcelDisplay.js`** — Shared parcel-outline display layers for map and planner: styleable esri vector layer, image-export layer for query-disabled TxGIO, Drive-snapshot geoJSON layer, add/remove cursors
   - _exports_: `ADD_CURSOR`, `makeParcelDisplayLayer`, `makeParcelImageLayer`, `makeParcelLayer`, `makeSnapshotLayer`, `PARCEL_MINZOOM`, `parcelDisplayIsImageOnly`, `REMOVE_CURSOR`
+- **`src/workspaces/site-planner/lib/parcelOffset.js`** — the setback ring's inward polygon offset (miter with bevel fallback) plus the buildable-envelope area it encloses; lifted out of SitePlanner so the envelope is provable in a unit test
+  - _exports_: `lineIntersect`, `offsetPolygon`, `setbackRingArea`
 - **`src/workspaces/site-planner/lib/parcelQuery.js`** — Shared parcel ID/address lookup: SQL-injection-safe where-clause builder with county scoping and primary-CAD to statewide-TxGIO outage fallback plus circuit-breaker health recording
   - _exports_: `buildParcelWhere`, `isDefaultLookupUrl`, `lookupParcels`, `okField`
 - **`src/workspaces/site-planner/lib/parcelSelect.js`** — Pure parcel merge-selection reducer: seeds the Combine set from the current single selection so plain-click-then-Shift-click accumulates, reusing shared nextSelection for toggle math plus the B170 inactive-parcel guard
@@ -626,7 +628,9 @@ _380 source files mapped._
 - **`src/workspaces/site-planner/lib/screeningBfeSite.js`** — The live-wiring layer for `screeningBfe.js`: turns a real site (terrain grid, footprint, Atlas-14 rainfall, SSURGO soils) into the engine's four inputs and runs BOTH the 1% and the 0.2% (500-yr) storms Waller ordinance §5.C(3) requires, from one derivation. Also the panel headline + the behind-the-fold method note.
   - _exports_: `atlas14Depths`, `default`, `SCREENING_STORMS`, `screeningBfeForSite`, `screeningBfeHeadline`, `screeningDeclined`, `screeningStudyNote`, `SECTION_HALF_WIDTH_FT`, `terrainInputsForScreeningBfe`, `WATERSHED_GRID_ZOOM`, `WATERSHED_PAD_DEG`
 - **`src/workspaces/site-planner/lib/setbackChips.js`** — groups parcel edges into one LABELLED setback run per side (shared value + direction spread), so a digitized curve reads as a handful of chips, not one per segment
-  - _exports_: `CHIP_MIN_EDGE_PX`, `CHIP_MIN_SEP_PX`, `CHIP_TURN_BREAK_DEG`, `chipRunOfEdge`, `setbackChipRuns`
+  - _exports_: `CHIP_MIN_EDGE_PX`, `CHIP_MIN_GAP_PX`, `CHIP_MIN_SEP_PX`, `CHIP_TURN_BREAK_DEG`, `chipRunOfEdge`, `setbackChipRuns`
+- **`src/workspaces/site-planner/lib/setbackRoles.js`** — the regulatory setback tier: auto-assigns Front / Side / Street side / Rear to every side from frontage geometry, honours the user's own assignment, and groups the boundary into the four ordinance rows
+  - _exports_: `autoAssignRoles`, `isRole`, `resolveRoles`, `ROLE_LABEL`, `ROLE_SHORT`, `roleGroups`, `roleRuns`, `runRole`, `SETBACK_ROLES`, `setRunRole`, `STREET_ABUT_FT`
 - **`src/workspaces/site-planner/lib/sharing.js`** — Project team sharing: stamp/clear team_id on a group's sites, doc_reviews, and file_facts then re-pull the local cache
   - _exports_: `makeProjectPrivate`, `shareProject`
 - **`src/workspaces/site-planner/lib/sheetFurniture.js`** — Map sheet furniture: graphic scale bar and two-tone north arrow, output-unit sized with no-occlude corner placement, screen + export
