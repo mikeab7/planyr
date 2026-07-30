@@ -12,7 +12,9 @@
     "next-id": "node scripts/next-id.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
-    "e2e": "playwright test"
+    "e2e": "playwright test",
+    "check-mint": "node scripts/check-mint.mjs",
+    "hooks:install": "git config core.hooksPath .githooks && echo \"pre-push mint gate installed (B1144)\""
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.104.1",

@@ -1,0 +1,8 @@
+#!/bin/sh
+# Mint gate (B779) — blocks a push whose new backlog ids are already claimed on origin/main or on
+# another session's in-flight branch. This is the mechanical enforcement of B779's late-bind rule:
+# six consecutive dispatches collided while the rule was merely written down in CLAUDE.md.
+#
+# Install: npm run hooks:install    (sets core.hooksPath to .githooks)
+# Bypass:  git push --no-verify     (git's own escape valve — you own the collision)
+exec node "$(git rev-parse --show-toplevel)/scripts/check-mint.mjs"

@@ -4,7 +4,7 @@
  * ranges — and (b) be IMMUNE to a stray inline prose mention inflating the max (the one dangerous
  * error is UNDER-counting, i.e. reusing a live number; over-counting from a typo is what we prevent). */
 import { describe, it, expect } from "vitest";
-import { maxId, computeNextIds, findDuplicateIdsIn, maxAgainstMain, readOriginMain, B_FILES, V_FILES } from "../scripts/next-id.mjs";
+import { maxId, computeNextIds, findDuplicateIdsIn, maxAgainstMain, readRefFile, GIT_MAX_BUFFER, B_FILES, V_FILES } from "../scripts/next-id.mjs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import { execSync } from "node:child_process";
@@ -102,10 +102,10 @@ describe("maxAgainstMain — folds in origin/main (B779)", () => {
   });
 });
 
-describe("readOriginMain — must not silently degrade on a large archive (B896 regression)", () => {
+describe("the git reader — must not silently degrade on a large archive (B896 regression)", () => {
   // BACKLOG-DONE.md is a write-only, ever-growing archive (1.7 MB+ as of B896) — comfortably
   // past Node's DEFAULT execSync maxBuffer (1 MB). Before this fix, exceeding it threw ENOBUFS,
-  // which readOriginMain's catch swallowed silently, so `--against-main` quietly fell back to a
+  // which the reader's catch swallowed silently, so `--against-main` quietly fell back to a
   // stale LOCAL-ONLY max — the exact failure that let two sessions both mint B896 on 2026-07-18
   // (this redesign, and an unrelated typeface/bug-fix item already merged to main). This guards
   // the regression directly: a real git repo, a real oversized file, no mocks.
@@ -115,17 +115,31 @@ describe("readOriginMain — must not silently degrade on a large archive (B896 
   const maybeIt = hasOriginMain ? it : it.skip; // sandboxes without a fetched origin/main skip, never false-fail
 
   maybeIt("reads BACKLOG-DONE.md from origin/main in full, without an ENOBUFS-triggered null", () => {
-    const text = readOriginMain(REPO, "BACKLOG-DONE.md");
-    expect(text).not.toBeNull();
-    expect(text.length).toBeGreaterThan(1024 * 1024); // bigger than the default 1 MB buffer that used to choke
+    const r = readRefFile(REPO, "refs/remotes/origin/main", "BACKLOG-DONE.md");
+    expect(r.ok, r.reason).toBe(true);
+    expect(r.text.length).toBeGreaterThan(1024 * 1024); // bigger than the default 1 MB buffer that used to choke
   });
 
   it("passes an explicit maxBuffer comfortably above BACKLOG-DONE.md's on-disk size", () => {
     const onDiskBytes = readFileSync(resolve(REPO, "BACKLOG-DONE.md")).length;
-    const src = readFileSync(resolve(REPO, "scripts/next-id.mjs"), "utf8");
-    const m = src.match(/maxBuffer:\s*([0-9_]+(?:\s*\*\s*[0-9_]+)*)/);
-    expect(m, "readOriginMain must pass an explicit maxBuffer to execSync").toBeTruthy();
-    const configuredBuffer = m[1].split("*").map((n) => parseInt(n.replace(/_/g, ""), 10)).reduce((a, b) => a * b, 1);
-    expect(configuredBuffer).toBeGreaterThan(onDiskBytes);
+    expect(GIT_MAX_BUFFER, "every git read must use an explicit maxBuffer above the archive size").toBeGreaterThan(onDiskBytes);
+  });
+
+  // B779: B898 fixed the ENOBUFS path but left the OTHER degradations silent — a missing
+  // origin/main ref, or git itself failing, still returned "null" and were folded into a
+  // local-only max that printed as if it had consulted main. `readRefFile` now distinguishes the
+  // ONE benign case (the ref is fine, the file isn't in it) from every failure, so no caller can
+  // mistake "couldn't read" for "nothing there".
+  it("a bad ref reports failure — it does not read as an empty file", () => {
+    const r = readRefFile(REPO, "refs/remotes/origin/definitely-no-such-ref-b1144", "BACKLOG.md");
+    expect(r.ok).toBe(false);
+    expect(r.reason).toMatch(/definitely-no-such-ref-b1144/);
+  });
+
+  maybeIt("a file genuinely absent from a real ref is the one tolerated empty", () => {
+    const r = readRefFile(REPO, "refs/remotes/origin/main", "NO-SUCH-FILE-b1144.md");
+    expect(r.ok).toBe(true);
+    expect(r.absent).toBe(true);
+    expect(r.text).toBe("");
   });
 });
