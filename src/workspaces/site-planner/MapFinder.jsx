@@ -29,7 +29,7 @@ import {
 import { elStyle, elRingFeet, byZ } from "./lib/planStyle.js";
 import { STATUSES, STATUS_META, statusOf } from "./lib/siteModel.js";
 import { countyAtPoint } from "./lib/jurisdiction.js";
-import { findAttr } from "./lib/appraisal.js";
+import { findAttr, situsAddress, siteNameFromParcel } from "./lib/appraisal.js";
 import ParcelInfoCard from "./components/ParcelInfoCard.jsx";
 import { makeParcelDisplayLayer, makeSnapshotLayer, PARCEL_MINZOOM, ADD_CURSOR, REMOVE_CURSOR } from "./lib/parcelDisplay.js";
 import { dissolvedParcelSqft } from "./lib/polyClip.js";
@@ -185,7 +185,12 @@ function pointInPoly(lat, lng, ring) {
   return inside;
 }
 
-const ADDR_RE = /(situs|site_?addr|prop_?addr|loc_?addr|location|^addr|str_?name|full_?addr|address)/i;
+/* NEW-2 — the address the card and the plan NAME use is the SITUS, resolved by the shared ordered
+ * ladder in lib/appraisal.js. The local `ADDR_RE` this replaced was a single alternation applied
+ * "first key wins", so on Weld County's schema the owner's mailing address (`ADDRESS1`) beat the
+ * situs (`SITUS`) purely because the service lists it first — every plan started that way was named
+ * after the owner's head office. Null means "this record has no situs", which the callers answer
+ * with what the user searched, never with a mailing address. */
 const ID_RE = /(hcad_?num|^acct|account|parcel_?id|prop_?id|^pid$|quick_?ref|geo_?id|^pin$|^gid$|objectid)/i;
 // findAttr (imported from lib/appraisal.js) is the shared "first non-empty attr
 // matching this regex, as a string" helper — formerly a local findVal duplicate.
@@ -1046,7 +1051,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
       // Multipolygon nesting ([[part],[part]]) so each separate tract draws as its own
       // filled shape — not as a hole punched out of the first (Leaflet's 2-level form).
       hilitesRef.current[key] = L.polygon(latlngsList.map((ll) => [ll]), { color: PAL.accent, weight: 2.5, fillColor: PAL.accent, fillOpacity: 0.14, interactive: false }).addTo(map);
-      setSelected((s) => (s.some((x) => x.key === key) ? s : [...s, { key, rings, latlngsList, addr: findAttr(attrs, ADDR_RE), acct: findAttr(attrs, ID_RE), attrs, county }])); // dedupe by key (B22)
+      setSelected((s) => (s.some((x) => x.key === key) ? s : [...s, { key, rings, latlngsList, addr: situsAddress(attrs), acct: findAttr(attrs, ID_RE), attrs, county }])); // dedupe by key (B22)
       // B36(a): the statewide TxGIO layer can answer for a Harris/FB lot — relabel via a
       // true point-in-county lookup (non-blocking). Keyed off STATEWIDE_KEYS, not a
       // hardcoded "chambers": B787 moved the statewide role from the `chambers` key to the
@@ -1217,7 +1222,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
           const v = snapshotVintage(cached.county);
           setParcelInfo({
             status: "found", label, key: added.key, county: cached.county, attrs: added.attrs,
-            addr: findAttr(added.attrs, ADDR_RE), acct: findAttr(added.attrs, ID_RE), acres: ringsAcres(added.rings),
+            addr: situsAddress(added.attrs), acct: findAttr(added.attrs, ID_RE), acres: ringsAcres(added.rings),
             cached: { asOf: v ? v.asOf : null },
           });
           return;
@@ -1235,7 +1240,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
     if (!added) { setParcelInfo({ status: "none", label }); return; }
     setParcelInfo({
       status: "found", label, key: added.key, county: hit.county, attrs: added.attrs,
-      addr: findAttr(added.attrs, ADDR_RE), acct: findAttr(added.attrs, ID_RE), acres: ringsAcres(added.rings),
+      addr: situsAddress(added.attrs), acct: findAttr(added.attrs, ID_RE), acres: ringsAcres(added.rings),
       backup: viaBackup ? backupCountyLabel(hit.feature.attributes || {}) : null,
     });
   };
@@ -1287,7 +1292,15 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
       const key = ans?.name ? countyKeyForName(ans.name) : null;
       if (key && key !== county) county = key;
     } catch (_) { /* keep the click-time key */ }
-    onUseParcels({ ...asm, name: selected[selected.length - 1]?.addr || "Untitled site", county });
+    /* NEW-2 — the plan's NAME is the parcel's SITUS, then what the user actually searched, then its
+     * account id. `siteNameFromParcel` also refuses any candidate that equals a value the record
+     * files under a mailing key, so a schema we have not seen still cannot name a Colorado plan
+     * after an Arlington, TX head office. */
+    const last = selected[selected.length - 1];
+    const name = siteNameFromParcel(last?.attrs, {
+      addr: last?.addr, searched: parcelInfo?.label || addr.trim(), acct: last?.acct,
+    });
+    onUseParcels({ ...asm, name, county });
   };
 
   const asm = selected.length ? computeAssembly(selected, BASEMAPS.esri.export) : null;

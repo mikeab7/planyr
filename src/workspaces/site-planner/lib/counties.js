@@ -28,6 +28,7 @@
 // Harris, Fort Bend and Chambers. Requesting geometry in this SR means returned
 // x/y are already in feet, so on-screen distances are true (no Web-Mercator stretch).
 import { siteState } from "./siteRegion.js";
+import { situsKey } from "./appraisal.js";
 
 export const FEET_WKID = 2278;
 
@@ -248,8 +249,9 @@ export const SNAPSHOT_COUNTIES = new Set(["chambers", "waller", "fortbend"]);
 
 const ID_RE =
   /(hcad_?num|^acct|account|parcel_?id|prop_?id|^pid$|quick_?ref|geo_?id|^pin$|^gid$)/i;
-const ADDR_RE =
-  /(situs|site_?addr|prop_?addr|loc_?addr|location|^addr|str_?name|full_?addr|address)/i;
+/* NEW-2 — the field an address SEARCH runs against is picked by the shared situs LADDER
+ * (lib/appraisal.js), not by a flat alternation: searching "4050 County Road 50" must query the
+ * column that holds the land's address, never the one that holds the owner's mailing address. */
 
 /* Taxing-jurisdiction + rate resolver — ONE place to wire each county's tax-unit /
  * rate source as endpoints are confirmed. No public per-parcel rate endpoint is
@@ -340,11 +342,15 @@ export const JURISDICTION_LAYERS = {
   },
 };
 
-// Find the first field whose name looks like an id or address field.
+// Find the field whose name looks like an id or address field. The address side walks the shared
+// SITUS ladder in rung order — every field is tested against rung 1 before any is tested against
+// rung 2 — so a service that lists its mailing column first can no longer win the search field.
 export function detectField(fields, kind) {
-  const re = kind === "id" ? ID_RE : ADDR_RE;
-  const f = (fields || []).find((x) => re.test(x.name));
-  return f ? f.name : null;
+  const names = (fields || []).map((x) => x && x.name).filter(Boolean);
+  if (kind === "id") { const f = names.find((n) => ID_RE.test(n)); return f || null; }
+  // situsKey resolves over an attribute BAG, so present the field names as one (value = the name,
+  // which is non-empty by construction — this asks "which key wins", not "what does it hold").
+  return situsKey(Object.fromEntries(names.map((n) => [n, n])));
 }
 
 /* Map-view config per county: where to center the slippy map, and which ArcGIS

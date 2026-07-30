@@ -224,6 +224,29 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   is DROPPED, never left dangling to a foreign element. A non-string value is an inert legacy flag,
   not a bond. `siteModel.normalizeCrossHostBonds` is the load-time repair for plans already copied,
   and it must run BEFORE `normalizeZoneAlongLen` (which needs a walkable chain to judge a pin against).
+- **`dogEar.js` `sideParkAlongRun` + `siteModel.js` `normalizeHostRuns` — the ONE answer to "is this
+  along-wall run USER INTENT?" (NEW-1).** A run LONGER than the wall it hugs is never intent, it is staleness:
+  every gesture that can set one clamps it to the wall, so an over-length run can only have come from a longer
+  host (a resize, or a copy of a longer building). The canvas refit (`relayoutWallKids`) and the load-time heal
+  both call the SAME pure rule, and only a gesture aimed AT THAT FIELD (`pinAllowed` — B1123's `userResize` by
+  another name) may pin one. **The trap this closes:** `relayoutWallKids` runs on a host resize with the NEW host
+  box and the OLD child boxes, so a field faithfully TRACKING the old span measured different from the new one,
+  was read as hand-positioned, and had the pre-resize run stamped onto `sideParkFit` — the owner's Weld plan
+  carries `sideParkFit { run: 708.58 }` on a 577 ft building. `normalizeHostRuns` is the load-time half: it
+  re-lays any dock-zone chain member or side-parking row that outruns its host through the same
+  `layoutZoneByKind` / `wallKidBox` the canvas uses. **A run that FITS is left completely alone** — that is the
+  B1039 hand-positioned field, and flattening it is the regression to avoid. Fixtures + guards:
+  the repo-root fixture **ui-audit/fixtures/weld-concept-a.json** (the owner's real rows — the defect IS the
+  fixture, do not "fix" the numbers), the repo-root `test/` suite **hostRunHeal** and the e2e spec
+  **dock-zone-host-run**.
+- **`appraisal.js` `situsAddress` / `situsKey` / `siteNameFromParcel` — the SITUS ladder (NEW-2).** The address a
+  card, a plan NAME and a parcel search resolve is the LAND's, never the owner's mailing address. It is an ORDERED
+  ladder (every key tested against "says situs" before any key is tested against the generic `address` catch-all),
+  not one alternation — Weld County lists `ADDRESS1` (Forestar's Arlington head office) before `SITUS`, and
+  "first matching key wins" named a Colorado plan after a Texas office. **Nothing in `ADDRESS1` says "mail", so a
+  mail/owner key exclusion alone does not close this**; the precedence does, plus a refusal of numbered address
+  LINES on the generic rung. No situs → NULL, and the callers fall back to what the user searched. `MapFinder`,
+  `SitePlanner`'s identify and `counties.detectField` all share it — do not reintroduce a local `ADDR_RE`.
 - `planClipboard.js` — the ONE general canvas clipboard (NEW-2/NEW-6): collect the current selection
   (elements expanded to their `attachedTo` assembly, so a building brings its truck court / trailer
   parking / dock zones / bump-outs), then paste with fresh ids, bonds remapped INSIDE the copy, and

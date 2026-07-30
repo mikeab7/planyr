@@ -114,7 +114,7 @@ import {
   feetToLatLng,
   humanizeError,
 } from "./lib/arcgis.js";
-import { apprRows, apprAll, apprVal, findAttr } from "./lib/appraisal.js";
+import { apprRows, apprAll, apprVal, findAttr, situsAddress } from "./lib/appraisal.js";
 import { makeParcelDisplayLayer, ADD_CURSOR, PARCEL_MINZOOM } from "./lib/parcelDisplay.js";
 import { geocodeAddress } from "./lib/geocode.js";
 import { TYPE, typeStyle, elStyle, parcelDefaultStyle, toHex6, byZ, zOrder, setPreviewStyleDefaults, setbackLineStyle, SETBACK_LINE } from "./lib/planStyle.js";
@@ -172,7 +172,7 @@ import { dissolveRings, clipPolylineOutside, clusterIds, regionPathD, rectOutlin
 import { dashZoom, insetRingVisible } from "./lib/lineZoom.js";
 import { roadClassesOf, roadClassOf, classMinRadius, classDefaultRadius, classReturnRadius, DEFAULT_ROAD_CLASS, ROAD_CLASS_SEEDS, speedMinRadius } from "./lib/roadClasses.js";
 import { DOGEAR_W, DOGEAR_D, dogEarGeom, dogEarSize, sidewalkSpanForBumps, isDogEarSide,
-  wallStripBox, wallKidBox, wallKidPerp, wallKidAlong, hostAxisExtents, ownExtents, bumpsOfHost } from "./lib/dogEar.js";
+  wallStripBox, wallKidBox, wallKidPerp, wallKidAlong, hostAxisExtents, ownExtents, bumpsOfHost, sideParkAlongRun } from "./lib/dogEar.js";
 import { CURB_TYPES as COST_CURB_TYPES, CURB_TYPE_META, roadCurbType, roadCurbedSides, roadPanWidth, roadQuantities, costRollup } from "./lib/costTakeoff.js";
 import { layoutLabels, buildingLabelLines, dimCalloutVisible, detailLabelVisible, pondParamLabelVisible, pondParamFontPx, suppressedDimIds, dimFontScale, dimFontPx, boxOf, DIM_CALLOUT_MIN_PPF } from "./lib/labelLayout.js";
 import { inlineLines } from "./lib/labelFitLadder.js";
@@ -7810,7 +7810,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // A resize of the parking field's RUN is user intent, so the pin rule in relayoutWallKids
       // keeps it; only its distance out from the wall is re-resolved.
       const host = next.find((x) => x.id === resized.attachedTo);
-      if (host && host.type === "building" && !host.dogEar) next = relayoutWallKids(next, host);
+      // NEW-1 — this gesture IS aimed at the row, so it (and only it) may pin an over-length run.
+      if (host && host.type === "building" && !host.dogEar) next = relayoutWallKids(next, host, host, { pinFrom: resized.id });
     }
     // Keep every bonded child's angle locked to the building's (B363) — closes the gap where a
     // strip kept a stale angle through a resize (fitKid preserves rot0, so drift would survive).
@@ -7859,8 +7860,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
          refit unchanged, only its run clamped to the span — with the unclamped intent stamped on
          `sideParkFit` so it springs back when the host grows again, exactly like a dog-ear's
          stored along/proj. */
-  const SIDE_PARK_PIN_TOL = 0.5; // ft — below this a field still counts as sitting on the default
-  const relayoutWallKids = (arr, b, sideRef = b) => {
+  /* NEW-1 — `pinFrom` is the id of the field the CURRENT gesture is aimed at, and it is the only
+     thing allowed to pin an over-length run (lib/dogEar `sideParkAlongRun`). A host refit passes
+     nothing, so a resize can no longer stamp a `sideParkFit` remembering the host's OLD length. */
+  const relayoutWallKids = (arr, b, sideRef = b, { pinFrom = null } = {}) => {
     const bumps = bumpsOfHost(arr, b);
     // The strip (if any) each parking row has to clear, keyed by side — resolved from the array
     // being built, so a just-added / just-deleted / just-widened sidewalk is already reflected.
@@ -7878,21 +7881,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // otherwise leak a wall-length value here, the swThick guard from addParkingRowSide).
       const gap = strip ? (isVert ? hostAxisExtents(b, strip).dimBX : hostAxisExtents(b, strip).dimBY) : 0;
       const span = sidewalkSpanForBumps(b, side, bumps);
-      const untouched = Math.abs(cur.run - span.run) <= SIDE_PARK_PIN_TOL
-        && Math.abs(cur.alongShift - span.alongShift) <= SIDE_PARK_PIN_TOL;
-      let extra = null, run, alongShift;
-      if (untouched) {                                            // still on the default → track the span
-        ({ run, alongShift } = span);
-      } else {                                                    // hand-positioned → preserve, clamp only
-        const want = x.sideParkFit || { run: cur.run, alongShift: cur.alongShift };
-        run = Math.min(want.run, span.run);
-        alongShift = want.alongShift;
-        // Stamp the unclamped intent only once the clamp actually bites, so it springs back.
-        if (run !== want.run) extra = { sideParkFit: want };
-      }
-      const box = wallKidBox(b, side, { depth: cur.depth, gap, run, alongShift });
+      // NEW-1 — the along-wall decision is the ONE shared rule (lib/dogEar `sideParkAlongRun`), so
+      // the canvas refit and the load-time heal cannot answer "is this run user intent?" differently.
+      const res = sideParkAlongRun({ cur, span, stamp: x.sideParkFit || null, pinAllowed: pinFrom === x.id });
+      const box = wallKidBox(b, side, { depth: cur.depth, gap, run: res.run, alongShift: res.alongShift });
       const off = rot2(box.lx, box.ly, b.rot);
-      return { ...x, ...(extra || {}), ...ownExtents(cross, box.dimBX, box.dimBY), cx: b.cx + off.x, cy: b.cy + off.y };
+      const out = { ...x, ...ownExtents(cross, box.dimBX, box.dimBY), cx: b.cx + off.x, cy: b.cy + off.y };
+      if (res.stamp === null) delete out.sideParkFit;             // an impossible stamp is dropped, not clamped
+      else if (res.stamp) out.sideParkFit = res.stamp;
+      return out;
     });
     // Preserve object identity when nothing actually moved (no dirty flag / no cloud re-save
     // churn on a plan that is already correct — the same idempotency contract as dogEarGeom).
@@ -11477,7 +11474,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const identifyTok = useRef(0);
   const parcelOutlineRef = useRef(null);       // the lit county parcel-outline layer (esri-leaflet) while identify mode is on
   const identifyAddedRef = useRef(new Map());   // gisKey -> [parcel ids] added THIS session, so a re-click toggles it off
-  const ADDR_RE = /(situs|site_?addr|prop_?addr|loc_?addr|full_?addr|^addr|address)/i;
   // Resolve (once) the site county's parcel layer URL — shared by the lit outlines AND
   // the click query, so what you SEE is what you can ADD (the B137 rule).
   const resolveCountyLayer = async () => {
@@ -11590,7 +11586,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       const rings = outerRingsLngLat(feat); // every part of a multipart parcel
       if (!rings.length) { setIdentifyRes({ error: "That record has no polygon shape — try an adjacent lot." }); return; }
       const attrs = feat.attributes || {};
-      const addr = findAttr(attrs, ADDR_RE);
+      const addr = situsAddress(attrs); // NEW-2 — the SITUS, never the owner's mailing address (shared ladder)
       const key = parcelGisKey(attrs, rings);
       // Re-click a lot added THIS session → toggle it back off.
       if (identifyAddedRef.current.has(key)) {

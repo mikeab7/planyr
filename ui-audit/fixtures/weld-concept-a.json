@@ -1,0 +1,306 @@
+{
+ "_note": "The owner's REAL Weld County, CO plan (site sms7v3ua7ksy, \"Concept A\"), copied verbatim out of site_elements on 2026-07-30. Three buildings at the identical rotation 354.81766642639934 (duplicated from one another): e7373 260x708.58, e7381 260x577, e7389 260x514. e7389's truck court (e7390) and west parking row (e7394) both carry 708.58 - e7373's length - overhanging their own 514 ft host by 194.58 ft; e7381's west parking carries a sideParkFit stamp remembering the same foreign 708.58. Used by test/hostRunHeal.test.js and e2e/dock-zone-host-run.spec.js. Do NOT \"fix\" the numbers here: the defect IS the fixture.",
+ "els": [
+  {
+   "h": 708.58,
+   "w": 260,
+   "z": 0,
+   "cx": -422.09,
+   "cy": -728.75,
+   "id": "e7373vqgilf",
+   "rot": 354.81766642639934,
+   "dock": "single",
+   "type": "building",
+   "dockSide": "right"
+  },
+  {
+   "h": 708.58,
+   "w": 135,
+   "z": 1024,
+   "cx": -225.39732140550444,
+   "cy": -746.589287747062,
+   "id": "e7374vqgilf",
+   "zd": 135,
+   "rot": 354.81766642639934,
+   "type": "paving",
+   "attachedTo": "e7373vqgilf",
+   "truckCourt": {
+    "side": "right"
+   }
+  },
+  {
+   "h": 5,
+   "w": 260,
+   "z": 2048,
+   "cx": -454.31723784948986,
+   "cy": -1084.0815483328106,
+   "id": "e7375vqgilf",
+   "rot": 354.81766642639934,
+   "type": "sidewalk",
+   "attachedTo": "e7373vqgilf",
+   "sidewalkSide": "top"
+  },
+  {
+   "h": 60,
+   "w": 260,
+   "z": 3072,
+   "cx": -457.2528168458419,
+   "cy": -1116.4486979749427,
+   "id": "e7376vqgilf",
+   "rot": 174.81766642639934,
+   "type": "parking",
+   "attachedTo": "e7373vqgilf",
+   "sideParkSide": "top"
+  },
+  {
+   "h": 708.58,
+   "w": 5,
+   "z": 4096,
+   "cx": -554.0483793102312,
+   "cy": -716.7818702456419,
+   "id": "e7377vqgilf",
+   "rot": 354.81766642639934,
+   "type": "sidewalk",
+   "attachedTo": "e7373vqgilf",
+   "sidewalkSide": "left"
+  },
+  {
+   "h": 60,
+   "w": 708.58,
+   "z": 5120,
+   "cx": -586.4155289523633,
+   "cy": -713.84629124929,
+   "id": "e7378vqgilf",
+   "rot": 84.81766642639934,
+   "type": "parking",
+   "attachedTo": "e7373vqgilf",
+   "sideParkSide": "left"
+  },
+  {
+   "h": 5,
+   "w": 260,
+   "z": 6144,
+   "cx": -389.8627621505101,
+   "cy": -373.4184516671896,
+   "id": "e7379vqgilf",
+   "rot": 354.81766642639934,
+   "type": "sidewalk",
+   "attachedTo": "e7373vqgilf",
+   "sidewalkSide": "bottom"
+  },
+  {
+   "h": 60,
+   "w": 260,
+   "z": 7168,
+   "cx": -386.92718315415806,
+   "cy": -341.0513020250574,
+   "id": "e7380vqgilf",
+   "rot": 354.81766642639934,
+   "type": "parking",
+   "attachedTo": "e7373vqgilf",
+   "sideParkSide": "bottom"
+  },
+  {
+   "h": 577,
+   "w": 260,
+   "z": 0,
+   "cx": -336.54,
+   "cy": 80.9,
+   "id": "e7381vqgilf",
+   "rot": 354.81766642639934,
+   "dock": "single",
+   "type": "building",
+   "dockSide": "right"
+  },
+  {
+   "h": 577,
+   "w": 135,
+   "z": 1024,
+   "cx": -139.8473214055045,
+   "cy": 63.06071225293799,
+   "id": "e7382vqgilf",
+   "zd": 135,
+   "rot": 354.81766642639934,
+   "type": "paving",
+   "attachedTo": "e7381vqgilf",
+   "truckCourt": {
+    "side": "right"
+   }
+  },
+  {
+   "h": 5,
+   "w": 260,
+   "z": 2048,
+   "cx": -362.8247227057977,
+   "cy": -208.91047833416812,
+   "id": "e7383vqgilf",
+   "rot": 354.81766642639934,
+   "type": "sidewalk",
+   "attachedTo": "e7381vqgilf",
+   "sidewalkSide": "top"
+  },
+  {
+   "h": 60,
+   "w": 260,
+   "z": 3072,
+   "cx": -365.7603017021497,
+   "cy": -241.2776279763004,
+   "id": "e7384vqgilf",
+   "rot": 174.81766642639934,
+   "type": "parking",
+   "attachedTo": "e7381vqgilf",
+   "sideParkSide": "top"
+  },
+  {
+   "h": 577,
+   "w": 5,
+   "z": 4096,
+   "cx": -468.4983793102312,
+   "cy": 92.86812975435805,
+   "id": "e7385vqgilf",
+   "rot": 354.81766642639934,
+   "type": "sidewalk",
+   "attachedTo": "e7381vqgilf",
+   "sidewalkSide": "left"
+  },
+  {
+   "h": 60,
+   "w": 577,
+   "z": 5120,
+   "cx": -500.52319527863494,
+   "cy": 99.57821635513099,
+   "id": "e7386vqgilf",
+   "rot": 84.81766642639934,
+   "type": "parking",
+   "attachedTo": "e7381vqgilf",
+   "sideParkFit": {
+    "run": 708.58,
+    "alongShift": 3.790000000000001
+   },
+   "sideParkSide": "left"
+  },
+  {
+   "h": 5,
+   "w": 260,
+   "z": 6144,
+   "cx": -310.2552772942023,
+   "cy": 370.7104783341681,
+   "id": "e7387vqgilf",
+   "rot": 354.81766642639934,
+   "type": "sidewalk",
+   "attachedTo": "e7381vqgilf",
+   "sidewalkSide": "bottom"
+  },
+  {
+   "h": 60,
+   "w": 260,
+   "z": 7168,
+   "cx": -307.3196982978503,
+   "cy": 403.0776279763003,
+   "id": "e7388vqgilf",
+   "rot": 354.81766642639934,
+   "type": "parking",
+   "attachedTo": "e7381vqgilf",
+   "sideParkSide": "bottom"
+  },
+  {
+   "h": 514,
+   "w": 260,
+   "z": 0,
+   "cx": -251.81,
+   "cy": 810.66,
+   "id": "e7389vqgilf",
+   "rot": 354.81766642639934,
+   "dock": "single",
+   "type": "building",
+   "dockSide": "right"
+  },
+  {
+   "h": 708.58,
+   "w": 135,
+   "z": 1024,
+   "cx": -46.32955277304035,
+   "cy": 889.7130195970313,
+   "id": "e7390vqgilf",
+   "zd": 135,
+   "rot": 354.81766642639934,
+   "type": "paving",
+   "attachedTo": "e7389vqgilf",
+   "truckCourt": {
+    "side": "right"
+   }
+  },
+  {
+   "h": 5,
+   "w": 260,
+   "z": 2048,
+   "cx": -275.24946921702576,
+   "cy": 552.2207590112829,
+   "id": "e7391vqgilf",
+   "rot": 354.81766642639934,
+   "type": "sidewalk",
+   "attachedTo": "e7389vqgilf",
+   "sidewalkSide": "top"
+  },
+  {
+   "h": 60,
+   "w": 260,
+   "z": 3072,
+   "cx": -278.18504821337774,
+   "cy": 519.8536093691506,
+   "id": "e7392vqgilf",
+   "rot": 174.81766642639934,
+   "type": "parking",
+   "attachedTo": "e7389vqgilf",
+   "sideParkSide": "top"
+  },
+  {
+   "h": 514,
+   "w": 5,
+   "z": 4096,
+   "cx": -383.7683793102312,
+   "cy": 822.628129754358,
+   "id": "e7393vqgilf",
+   "rot": 354.81766642639934,
+   "type": "sidewalk",
+   "attachedTo": "e7389vqgilf",
+   "sidewalkSide": "left"
+  },
+  {
+   "h": 60,
+   "w": 708.58,
+   "z": 5120,
+   "cx": -407.3477603198992,
+   "cy": 922.4560160948034,
+   "id": "e7394vqgilf",
+   "rot": 84.81766642639934,
+   "type": "parking",
+   "attachedTo": "e7389vqgilf",
+   "sideParkSide": "left"
+  },
+  {
+   "h": 5,
+   "w": 260,
+   "z": 6144,
+   "cx": -228.3705307829742,
+   "cy": 1069.099240988717,
+   "id": "e7395vqgilf",
+   "rot": 354.81766642639934,
+   "type": "sidewalk",
+   "attachedTo": "e7389vqgilf",
+   "sidewalkSide": "bottom"
+  },
+  {
+   "h": 60,
+   "w": 260,
+   "z": 7168,
+   "cx": -225.43495178662218,
+   "cy": 1101.466390630849,
+   "id": "e7396vqgilf",
+   "rot": 354.81766642639934,
+   "type": "parking",
+   "attachedTo": "e7389vqgilf",
+   "sideParkSide": "bottom"
+  }
+ ]
+}

@@ -17,8 +17,8 @@
 
 import { dogEarGeom, dogEarSize, isDogEarSide,
   wallStripBox, wallKidBox, wallKidAlong, hostAxisExtents, ownExtents, bumpsOfHost,
-  sideOfBondedBox, localToWorld } from "./dogEar.js";
-import { layoutZoneByKind, boxExtentAlong, zoneAlongExtent, zoneDepthExtent, alongLenIsChainEcho } from "./dockZones.js";
+  sideOfBondedBox, localToWorld, sidewalkSpanForBumps, sideParkAlongRun } from "./dogEar.js";
+import { layoutZoneByKind, boxExtentAlong, zoneAlongExtent, zoneDepthExtent, alongLenIsChainEcho, usableCourtSpan } from "./dockZones.js";
 import { roadCenterline, dedupeRoadVertices, repairBakedRadii, simplifyRoadVertices, ROAD_SIMPLIFY_TOL_FT, ROAD_VERTEX_COLLAPSE_FT } from "./roadGeometry.js";
 import { bufferPolyline } from "./metesAndBounds.js";
 import { DEFAULT_ROAD_CLASS, roadClassOf } from "./roadClasses.js";
@@ -561,6 +561,149 @@ export function normalizeZoneAlongLen(list, onHeal) {
   });
 }
 
+/* ---- NEW-1: a child carrying a DIFFERENT (longer) host's along-wall run --------------------------
+ *
+ * THE OWNER'S REPORT: "obviously my building is super messed up." On his Weld County plan, Building
+ * 3 is 260 × 514 and its label reads 133,640 sf (260 × 514 — the BUILDING is right), but its truck
+ * court measures 135 × 708.58 and its west parking row 708.58 × 60. 708.58 ft is the length of a
+ * DIFFERENT building on the same plan — the one this one was duplicated from — so both children
+ * overhang the end of their host by 194.58 ft.
+ *
+ * WHAT THE SAVED ROWS PROVE (`site_elements`, read before writing a line of this):
+ *   · Both children sit EXACTLY where the layout would have put them for a 708.58-long host at that
+ *     host's pre-shorten centre — off by half the shrink along the wall, to the foot. They were
+ *     never re-laid after the host got shorter; they are not "recomputed wrong", they are untouched.
+ *   · The wall STRIPS on the same building are correct (5 × 514) — but their `rev`/`updated_at` say
+ *     they were corrected TWO MINUTES after the host's own commit, in a separate write. That is
+ *     `normalizeWallKids` (the load-time heal) fixing them on the next open. So the strips being
+ *     right is NOT evidence that the resize re-laid anything; it is evidence that a heal already
+ *     exists for strips and for nothing else.
+ *   · Building 2 (577 ft) carries `sideParkFit: { run: 708.58 }` — a stored "the owner set this
+ *     length" intent whose value is, again, the OTHER building's length. See lib/dogEar
+ *     `sideParkAlongRun` for how a host resize manufactured that.
+ *
+ * Which gesture skipped the refit is not recoverable from the rows, and chasing it further would
+ * not change the fix: NO write path may leave a child claiming more wall than its host has, so the
+ * invariant belongs where it can be enforced regardless of how it was broken. The write path is
+ * hardened separately (the `sideParkFit` stamp above; a dock zone's `alongLen` was already gated by
+ * B1123); this pass is the load-time half, so the owner's existing plan corrects itself on open.
+ *
+ * WHY THE EXISTING PASSES DON'T CATCH IT, precisely:
+ *   · `normalizeStrandedZones` measures the ACROSS axis against its computed anchor and the ALONG
+ *     axis only for wall OVERLAP — deliberately, because a zone may legitimately slide along the
+ *     wall. The court here is 197.5 ft out (exactly right) and overlaps its wall, so it passes.
+ *   · `normalizeZoneAlongLen` drops a spurious `alongLen`; these children have none — their run is
+ *     baked into `w`/`h`, not into an intent field.
+ *   · `normalizeWallKids` heals a side-parking row's PERPENDICULAR axis only, and keeps its run +
+ *     along-wall centre verbatim as user intent. That is right for a hand-placed field and wrong
+ *     for one that outruns the wall.
+ *
+ * THE TEST, stated once: an along-wall run LONGER than the wall it hugs is impossible as intent —
+ * every gesture that can set one clamps it to the wall — so it can only be a longer host's number.
+ * Such a child is re-laid from the rule. A run that FITS is left completely alone, so a
+ * hand-positioned field (the owner's fire-lane curb return) still survives every load. */
+const HOST_RUN_TOL_FT = 1; // ft — a run must exceed the wall by MORE than this to count as stale
+const nearBox = (a, b) => ["cx", "cy", "w", "h"].every((k) => Math.abs((a[k] || 0) - (b[k] || 0)) <= 1e-6);
+
+export function normalizeHostRuns(list, onHeal) {
+  const els = arr(list);
+  if (els.length < 2) return els;
+  const byId = new Map();
+  for (const e of els) if (e && e.id != null) byId.set(e.id, e);
+  const patch = new Map();
+  const dropAlongLen = new Set();
+  const dropStamp = new Set();
+
+  /* ---- dock-zone chains (truck court → trailer parking → buffer → any appended layer) */
+  const nextInChain = (el) => els.find((x) => x && !x.points && x.id !== el.id && (
+    x.prevZone === el.id ||
+    (el.truckCourt && x.forCourt === el.id) ||
+    (el.type === "trailer" && x.forTrailer === el.id))) || null;
+
+  for (const host of els) {
+    if (!host || host.type !== "building" || host.dogEar || !finiteBoxEl(host)) continue;
+    const bumps = bumpsOfHost(els, host);
+    const courts = els.filter((x) => x && x.attachedTo === host.id && x.truckCourt && !x.points && finiteBoxEl(x));
+    for (const head of courts) {
+      const side = head.truckCourt.side;
+      if (!SIDE_NORMAL[side]) continue;
+      const chain = [head];
+      const seen = new Set([head.id]);
+      for (let z = nextInChain(head); z && !seen.has(z.id); z = nextInChain(z)) { seen.add(z.id); chain.push(z); }
+      if (!chain.every(finiteBoxEl)) continue;
+      const [, ny] = SIDE_NORMAL[side];
+      const horiz = ny !== 0;
+      const wall = horiz ? host.w : host.h;
+      if (!(wall > 0)) continue;
+      // The B492 clear face between the corner bump-outs — the SAME span the canvas lays the chain
+      // on (`courtBumpOpts`), so a healed chain lands byte-identical to a freshly laid one.
+      const bumpAt = (sign) => { const bp = bumps.find((d) => d.side === side && d.sign === sign); return bp ? Math.max(0, bp.along || 0) : 0; };
+      const { along: usable, shift } = usableCourtSpan(wall, bumpAt(-1), bumpAt(1));
+      // A stored `alongLen` longer than the wall is the same impossibility, one field over.
+      const badLen = chain.map((z, i) => i > 0 && Number.isFinite(z.alongLen) && z.alongLen > wall + HOST_RUN_TOL_FT);
+      // The head is laid on the clear face; everything outward of it may legally reach the full wall.
+      const over = chain.map((z, i) => zoneAlongExtent(z, host.rot || 0, side) > (i === 0 ? usable : wall) + HOST_RUN_TOL_FT);
+      if (!over.some(Boolean) && !badLen.some(Boolean)) continue;
+      const headLen = Number.isFinite(head.alongLen) && head.alongLen > 0 && !over[0] ? Math.min(head.alongLen, usable) : usable;
+      const kinds = chain.map((z) => (z.type === "trailer" || z.forCourt ? "trailer" : "strip"));
+      const depths = chain.map((z) => (Number.isFinite(z.zd) && z.zd > 0 ? z.zd : zoneDepthExtent(z, host.rot || 0, side)));
+      const opts = {
+        along: headLen,
+        alongShift: shift,
+        // A surviving genuine per-zone length still wins; an impossible one goes back to the chain.
+        alongs: chain.map((z, i) => (i === 0 || badLen[i] || !(Number.isFinite(z.alongLen) && z.alongLen > 0) ? null : z.alongLen)),
+      };
+      chain.forEach((z, i) => {
+        if (badLen[i]) dropAlongLen.add(z.id);
+        const g = layoutZoneByKind(host, side, i, depths, kinds, opts);
+        if (nearBox(z, g) && !badLen[i]) return;                 // already right → same object, no churn
+        patch.set(z.id, g);
+        if (onHeal) onHeal({ id: z.id, host: host.id, kind: "host-run-zone", type: z.type, side,
+          from: { w: z.w, h: z.h, cx: z.cx, cy: z.cy }, to: { w: g.w, h: g.h, cx: g.cx, cy: g.cy }, wall });
+      });
+    }
+  }
+
+  /* ---- side-parking rows. Same test, the wall-kid geometry instead of the stack layout. */
+  for (const e of els) {
+    if (!e || e.points || !e.sideParkSide || isStackMember(e) || !finiteBoxEl(e)) continue;
+    const side = e.sideParkSide;
+    if (!SIDE_NORMAL[side]) continue;
+    const host = e.attachedTo != null ? byId.get(e.attachedTo) : null;
+    if (!host || host.type !== "building" || host.dogEar || host.points || !finiteBoxEl(host)) continue;
+    const span = sidewalkSpanForBumps(host, side, bumpsOfHost(els, host));
+    const cur = wallKidAlong(host, side, e);
+    // `pinAllowed: false` — a load can never be a gesture aimed at this field (B1123's rule, applied
+    // to the run instead of to `alongLen`), so the heal is structurally incapable of stamping intent.
+    const res = sideParkAlongRun({ cur, span, stamp: e.sideParkFit || null, pinAllowed: false, tol: HOST_RUN_TOL_FT });
+    if (!res.stale) continue;                                     // only the impossible case is healed
+    const isVert = side === "left" || side === "right";
+    const strip = els.find((x) => x && !x.points && WALL_STRIP_TYPES.has(x.type) && !isStackMember(x)
+      && x.attachedTo === host.id && finiteBoxEl(x) && (x.sidewalkSide || sideOfBondedBox(host, x)) === side);
+    const gap = strip ? (isVert ? hostAxisExtents(host, strip).dimBX : hostAxisExtents(host, strip).dimBY) : 0;
+    const { cross } = hostAxisExtents(host, e);
+    const box = wallKidBox(host, side, { depth: cur.depth, gap, run: res.run, alongShift: res.alongShift });
+    const c = localToWorld(host, box.lx, box.ly);
+    const g = { cx: c.x, cy: c.y, ...ownExtents(cross, box.dimBX, box.dimBY) };
+    if (res.stamp === null) dropStamp.add(e.id);
+    if (nearBox(e, g) && !dropStamp.has(e.id)) continue;
+    patch.set(e.id, g);
+    if (onHeal) onHeal({ id: e.id, host: host.id, kind: "host-run-side-parking", type: e.type, side,
+      from: { run: cur.run, alongShift: cur.alongShift, sideParkFit: e.sideParkFit || null },
+      to: { run: res.run, alongShift: res.alongShift }, wall: span.run });
+  }
+
+  if (!patch.size && !dropAlongLen.size && !dropStamp.size) return els;
+  return els.map((e) => {
+    if (!e || e.id == null) return e;
+    if (!patch.has(e.id) && !dropAlongLen.has(e.id) && !dropStamp.has(e.id)) return e;
+    const out = { ...e, ...(patch.get(e.id) || {}) };
+    if (dropAlongLen.has(e.id)) delete out.alongLen;
+    if (dropStamp.has(e.id)) delete out.sideParkFit;
+    return out;
+  });
+}
+
 /* ---- B1124: re-bond a dock zone whose back-reference points at ANOTHER building's stack ----------
  * A duplicate used to remap only `attachedTo`, so the copy's trailer parking stayed bonded (via
  * `forCourt` / `forTrailer` / `prevZone`) to the ORIGINAL building's courts. A trailer bonded to a
@@ -629,10 +772,15 @@ export function normalizeCrossHostBonds(list, onHeal) {
 export function normalizeBondedChildren(els, onHeal) {
   // Order matters: the cross-host bond repair (B1124) runs FIRST, so every later pass walks a chain
   // that actually belongs to its host; the spurious-length drop (B1123) then runs on the repaired
-  // chain; the stranded re-fit stays last (it re-places whatever is still geometrically impossible).
+  // chain; the foreign-host RUN heal (NEW-1) runs after that drop, so it judges a member's length
+  // against the chain it will actually be laid on; the stranded re-fit stays last (it re-places
+  // whatever is still geometrically impossible).
   return normalizeStrandedZones(
-    normalizeZoneAlongLen(
-      normalizeWallKids(normalizeDogEarPositions(normalizeBondedRotations(normalizeCrossHostBonds(els, onHeal)), onHeal), onHeal),
+    normalizeHostRuns(
+      normalizeZoneAlongLen(
+        normalizeWallKids(normalizeDogEarPositions(normalizeBondedRotations(normalizeCrossHostBonds(els, onHeal)), onHeal), onHeal),
+        onHeal,
+      ),
       onHeal,
     ),
     onHeal,

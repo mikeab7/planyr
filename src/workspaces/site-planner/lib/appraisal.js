@@ -5,6 +5,134 @@
  * (MapFinder.jsx), so the two never diverge (B233). No React here — just data.
  */
 
+/* ---- SITUS vs. the OWNER'S MAILING address (NEW-2) ---------------------------------------------
+ *
+ * A parcel record carries at least two addresses: where the LAND is (the situs) and where the tax
+ * bill goes (the owner's mailing address). Everything user-facing — the address-search card's
+ * title, the "Situs address" row, the name a new plan is seeded with — means the FIRST one.
+ *
+ * WHAT WENT WRONG, from the live record (Weld County, CO — site `sms7v3ua7ksy`, owner FORESTAR
+ * (USA) REAL ESTATE GROUP INC). The county returns BOTH:
+ *     SITUS    : "4050 CR 50   JOHNSTOWN"          ← the land
+ *     ADDRESS1 : "2221 E LAMAR BLVD STE 790"       ← Forestar's head office, Arlington TX
+ *     CITY/STATE/ZIPCODE: ARLINGTON / TX / 76006…  ← the MAILING city, on a Colorado parcel
+ * The old resolver was ONE regex with `situs|…|^addr|address` alternatives, applied by
+ * `findAttr` — "the first KEY in object order that matches ANY alternative". `ADDRESS1` matched
+ * `address`, came first, and won. The plan was therefore named after the owner's head office, in
+ * front of a client, on a site 800 miles away.
+ *
+ * Note what this was NOT: nothing in `ADDRESS1` says "mail". Excluding a mail/owner/billing key
+ * family — the obvious fix — would not have caught this one. The defect is the MISSING PRECEDENCE:
+ * with alternation there is no such thing as a preferred field, only whichever column the service
+ * happened to list first.
+ *
+ * THE RULE: an ordered LADDER. Every key is tested against rung 1 before any key is tested against
+ * rung 2, so a real situs column always beats a generic one no matter what order the service lists
+ * them in. Mailing columns are excluded outright at every rung. When no rung answers, the result is
+ * NULL — the caller falls back to what the user searched, never to the owner's address.
+ */
+
+/** Keys that are an OWNER / BILLING address by name. Excluded at every rung of the ladder. */
+export const MAILING_KEY_RE =
+  /(mail|owner_?addr|own_?addr|care_?of|^c_?o$|^c_?o_|billing|bill_?to|remit|correspond|agent_?addr|tax_?addr)/i;
+
+/* Keys that are a NUMBERED address LINE (ADDRESS1 / ADDRESS2 / ADDR_LINE_2 / ADDR2). A line
+ * number is the hallmark of a mailing block — a situs column is a single field, never "line 2" —
+ * and Weld's `ADDRESS1` is exactly this shape while carrying no "mail" token at all. Excluded from
+ * the generic rung only; a key that also says `situs`/`site`/`prop` still matches its own rung. */
+export const ADDR_LINE_RE = /^(addr|address|addr_?line|address_?line)_?\d+$/i;
+
+/** The ladder, most specific first. Applied in order across ALL keys — see the note above. */
+export const SITUS_LADDER = [
+  // 1 — a column that says outright that it is the situs.
+  /situs/i,
+  // 2 — the land's own address under another name. `prop_?street(?!_)` matches CCAD's Prop_Street
+  //     (the situs street NAME) but not its Prop_Street_Number/Dir/Suffix sub-columns.
+  /(site_?addr|prop(erty)?_?addr|prop_?street(?!_)|phys(ical)?_?addr|loc(ation)?_?addr|street_?addr|^location$)/i,
+  // 3 — the generic catch-all, LAST. Plenty of CADs do name their situs column plainly
+  //     ("ADDRESS", "FULL_ADDR"), so dropping this rung would regress them; it is simply no longer
+  //     allowed to outrank rungs 1–2, and never sees a mailing key or a numbered line.
+  /(full_?addr|^addr$|^address$|^addr_?\d?$|address)/i,
+];
+
+/** Union of the ladder's rungs — used only where a single pattern is required (see APPR_FIELDS). */
+export const SITUS_FIELD = new RegExp(SITUS_LADDER.map((r) => r.source).join("|"), "i");
+
+/** Is this key an owner-mailing column (by name or by being a numbered line)? Pure. */
+const isMailingKey = (key, rung) => MAILING_KEY_RE.test(key) || (rung === 2 && ADDR_LINE_RE.test(key));
+
+/**
+ * The KEY holding the parcel's situs address, or null when the record does not carry one.
+ * `skip` lets a caller exclude keys another row has already claimed (see `apprRows`). Pure.
+ */
+export function situsKey(attrs, { skip = null } = {}) {
+  if (!attrs) return null;
+  const keys = Object.keys(attrs);
+  for (let rung = 0; rung < SITUS_LADDER.length; rung++) {
+    const re = SITUS_LADDER[rung];
+    for (const key of keys) {
+      if (skip && skip.has(key)) continue;
+      if (isMailingKey(key, rung)) continue;
+      if (!re.test(key)) continue;
+      const v = attrs[key];
+      if (v == null) continue;
+      if (String(v).replace(/\s+/g, " ").trim()) return key;
+    }
+  }
+  return null;
+}
+
+/**
+ * The parcel's SITUS address, or null when the record does not carry one.
+ *
+ * Never returns an owner-mailing value: a mailing key is excluded at every rung, and the generic
+ * rung additionally refuses numbered address lines. Null is a real, useful answer — the callers
+ * fall back to what the user typed, which is about the LAND by definition.
+ *
+ * @param attrs the county's raw attribute bag
+ * @returns string | null  (whitespace collapsed — county columns are fixed-width padded)
+ */
+export function situsAddress(attrs, opts) {
+  const k = situsKey(attrs, opts);
+  return k ? String(attrs[k]).replace(/\s+/g, " ").trim() : null;
+}
+
+/** Every value the record files under a mailing / owner-address key, normalised for comparison. */
+export function mailingAddressValues(attrs) {
+  const out = new Set();
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (v == null || v === "") continue;
+    if (!MAILING_KEY_RE.test(k) && !ADDR_LINE_RE.test(k)) continue;
+    const s = String(v).replace(/\s+/g, " ").trim();
+    if (s) out.add(s.toUpperCase());
+  }
+  return out;
+}
+
+/**
+ * The name a new plan is seeded with from a picked parcel — the SITUS, else what the user actually
+ * searched, else the account id, else "Untitled site".
+ *
+ * The last guard is deliberate belt-and-braces (LOUD-FAILURE's quieter cousin): whatever the
+ * candidate is, if it EQUALS a value the record files under a mailing key it is refused and the
+ * next fallback is taken. The ladder already prevents that on every schema we have seen; this
+ * catches the one we have not.
+ *
+ * @param attrs      the parcel's attributes (may be null)
+ * @param opts.addr  a situs already resolved by the caller (skips re-resolving)
+ * @param opts.searched  the address string the user typed / the geocoder's label
+ * @param opts.acct  the parcel's account id
+ */
+export function siteNameFromParcel(attrs, { addr = null, searched = null, acct = null } = {}) {
+  const mailed = mailingAddressValues(attrs);
+  const clean = (v) => (v == null ? null : String(v).replace(/\s+/g, " ").trim() || null);
+  const ok = (v) => v && !mailed.has(v.toUpperCase());
+  for (const cand of [clean(addr) || situsAddress(attrs), clean(searched), clean(acct)]) {
+    if (ok(cand)) return cand;
+  }
+  return "Untitled site";
+}
+
 // Curated field order: regex that matches a county's column name → the label we show.
 // Patterns cover the per-county CAD columns (HCAD / FBCAD / CCAD) AND the statewide TxGIO
 // columns (prop_id, owner_name, situs_addr, legal_area/gis_area, land_value, imp_value,
@@ -13,9 +141,11 @@
 export const APPR_FIELDS = [
   // ...|owner_?name matches TxGIO owner_name AND CCAD's Owner_Name.
   [/^(owner|own_?name|owner_?name|name|owner1)$/i, "Owner"],
-  // ...|prop_?street(?!_) matches CCAD's Prop_Street (the situs street name) but NOT its
-  // Prop_Street_Number/Dir/Suffix sub-columns, so the row shows the name, not just a number.
-  [/(situs|site_?addr|prop_?addr|prop_?street(?!_)|loc_?addr|full_?addr|^addr|address)/i, "Situs address"],
+  // The situs row is NOT a plain regex — it is the ordered ladder below (`situsAddress`), because a
+  // single alternation plus "first key wins" resolved the OWNER'S MAILING address on real county
+  // schemas. `SITUS_FIELD` is the union of the ladder's rungs, kept only so the row still claims its
+  // key in `apprRows`' used-key bookkeeping; the VALUE always comes from `situsAddress`.
+  [SITUS_FIELD, "Situs address"],
   // ...|parcel_?id matches CCAD's Parcel_Id; |account matches CCAD's Account.
   [/(hcad_?num|^acct|account|parcel_?id|prop_?id|geo_?id|quick_?ref|^pid)/i, "Account / ID"],
   // ...|land_?size_?ac matches FBCAD's LANDSIZEAC (acres) — NOT LANDSIZEFT (square feet);
@@ -41,8 +171,12 @@ export const apprRows = (attrs) => {
   if (!attrs) return [];
   const used = new Set(), rows = [];
   for (const [re, label] of APPR_FIELDS) {
-    const k = Object.keys(attrs).find((key) => !used.has(key) && re.test(key) && attrs[key] != null && attrs[key] !== "");
-    if (k) { used.add(k); rows.push({ label, value: attrs[k] }); }
+    // The situs row resolves through the ORDERED ladder, never "first key that matches" — that is
+    // the whole point of `situsAddress` (a mailing column would otherwise win the row too).
+    const k = label === "Situs address"
+      ? situsKey(attrs, { skip: used })
+      : Object.keys(attrs).find((key) => !used.has(key) && re.test(key) && attrs[key] != null && attrs[key] !== "");
+    if (k) { used.add(k); rows.push({ label, value: label === "Situs address" ? String(attrs[k]).replace(/\s+/g, " ").trim() : attrs[k] }); }
   }
   return rows;
 };
