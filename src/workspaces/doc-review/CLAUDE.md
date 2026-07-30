@@ -18,6 +18,14 @@ internals in `/docs/REFERENCE.md` (Document Review persistence section).
   auto-group/stitch/crop/calibrate pipeline (Tesseract OCR for scanned sheets). `stitchGeom.js` —
   pure stitch geometry + the align-gate classifiers (`isReferenceSet`/`alignBadgeMetrics`, B630/B632);
   `stitchDedupe.js` — collapse duplicate placed sheets (B633). `takeoff.js` — measure rollup.
+- `releaseCanvas.js` (NEW-5) — hand an offscreen canvas's backing store back once its pixels have
+  been consumed. This workspace is the biggest producer of them: `pdf.js`'s `renderInto` runs on a
+  throttle DURING a continuous pan, so a minute of panning used to leave hundreds of full-density
+  buffers to the GC — and canvas pixels are renderer/GPU memory the GC barely feels. Released after
+  the copying `drawImage` / `toBlob` / `getImageData`; the OCR raster is released by `ocr.js` (its
+  real owner) rather than by the module that rendered it. A byte-identical copy lives in the site
+  planner's `lib/` — **deliberately duplicated, not shared**: a module reachable from both routes
+  is hoisted into its own chunk and breaches the Site route's chunk budget. Keep the two identical.
 - `components/ReviewsBar.jsx` — project/discipline/item/revision filing UI. The file *browser* is
   now its own **Library** workspace (`/src/workspaces/library/`, B496); the storage data layer
   (`reviewStore`/`autofiling`/`fileIndex`) stays here and Library imports it cross-workspace.

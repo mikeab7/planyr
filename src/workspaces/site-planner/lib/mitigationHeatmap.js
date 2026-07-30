@@ -13,6 +13,7 @@
  * Colors are FIXED HEX by design — the overlay draws over aerial imagery, which doesn't
  * theme (the terrain-layer / coordinate-chip rule). Pure except paintHeatmap, which
  * needs a DOM canvas and returns null where none exists (tests, SSR). */
+import { releaseCanvas } from "./releaseCanvas.js";
 
 export const DEPTH_BIN_FT = 0.5;
 
@@ -213,5 +214,9 @@ export function paintHeatmap(cells, { maxPx = 1600, paint = cellPaint } = {}) {
     }
   }
   ctx.globalAlpha = 1;
-  return { dataUrl: canvas.toDataURL("image/png"), bboxFt, pxPerFt };
+  // NEW-5 — up to maxPx square of RGBA, repainted whenever the mitigation/cut-fill ledger
+  // changes; the PNG holds the pixels from here on.
+  const dataUrl = canvas.toDataURL("image/png");
+  releaseCanvas(canvas);
+  return { dataUrl, bboxFt, pxPerFt };
 }

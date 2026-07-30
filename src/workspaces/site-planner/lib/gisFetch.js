@@ -122,6 +122,22 @@ export function backoffMs(attempt, base = 300, rng = Math.random) {
 export const COALESCE_TTL_MS = 5000;
 const _inFlight = new Map(); // key → Promise
 const _recent = new Map();   // key → { value, ts }
+/* NEW-7(a) — a hard ceiling on the just-finished map, as a backstop to the sweep below. Entries
+ * are only ever useful for COALESCE_TTL_MS, but the key embeds the bbox, so a panning session
+ * minted a unique key per view and nothing ever removed one: `clearCoalesced()` is called by the
+ * tests and by nothing in app code (grep it). Every dead entry was pinning a whole parsed ArcGIS
+ * response whose usefulness expired five seconds after it arrived. Behaviourally invisible — an
+ * entry past its TTL is already never returned. */
+const RECENT_MAX = 64;
+
+/* Drop every entry whose coalescing window has closed. Called on each write: the entries are
+ * already timestamped, so this is a walk over a map that the cap below keeps small. */
+function sweepRecent(t, ttlMs) {
+  for (const [k, v] of _recent) { if (t - v.ts >= ttlMs) _recent.delete(k); }
+  // Insertion order is recency here (a re-set key is deleted first, below), so the oldest
+  // surviving entries are at the front if the sweep alone didn't get us under the cap.
+  while (_recent.size > RECENT_MAX) { const oldest = _recent.keys().next(); if (oldest.done) break; _recent.delete(oldest.value); }
+}
 
 /* Exported for the test suite and for callers that want to coalesce their own request. */
 export function coalesceRequest(key, fn, { ttlMs = COALESCE_TTL_MS, now = Date.now } = {}) {
@@ -132,7 +148,13 @@ export function coalesceRequest(key, fn, { ttlMs = COALESCE_TTL_MS, now = Date.n
   if (live) return live;
   const p = Promise.resolve()
     .then(fn)
-    .then((value) => { _recent.set(key, { value, ts: now() }); return value; })
+    .then((value) => {
+      const ts = now();
+      _recent.delete(key);            // re-insert so map order stays newest-last
+      _recent.set(key, { value, ts });
+      sweepRecent(ts, ttlMs);         // NEW-7(a) — expire on write; nothing else ever would
+      return value;
+    })
     .finally(() => { _inFlight.delete(key); });
   _inFlight.set(key, p);
   return p;

@@ -50,9 +50,11 @@ describe("D3 — the berm ring is drawn INWARD, over the pond, inside the outlin
   });
   it("it renders AFTER the ground-surface elements pass (so it sits on top of the pond water, not under it)", () => {
     // The element pass is split at the building layer (B959); the berm ring follows the ground pass.
-    const groundPass = src.indexOf("zOrder(el) < BUILDING_Z).map((el) => renderElPx(");
+    // NEW-4(b) — the two passes read one memoised split (`drawElsZ`) instead of copying and
+    // sorting `drawEls` twice. The ORDER this guard exists to protect is unchanged.
+    const groundPass = src.indexOf("drawElsZ.below.map((el) => renderElPx(");
     const bermLayer = src.indexOf('data-testid="pond-berm-ring-layer"');
-    const buildingPass = src.indexOf("zOrder(el) >= BUILDING_Z).map((el) => renderElPx(");
+    const buildingPass = src.indexOf("drawElsZ.above.map((el) => renderElPx(");
     expect(groundPass).toBeGreaterThan(-1);
     expect(bermLayer).toBeGreaterThan(groundPass); // over the pond (a ground surface)
     expect(buildingPass).toBeGreaterThan(bermLayer); // buildings still paint on top of it
@@ -61,7 +63,9 @@ describe("D3 — the berm ring is drawn INWARD, over the pond, inside the outlin
 
 describe("D4 — the on-screen pond noun follows the resolved purpose at every render site", () => {
   it("the property-panel chrome header uses pondDisplayNameFor for a pond", () => {
-    expect(src).toContain('selEl.type === "pond" ? pondDisplayNameFor(detWithAuto(selEl.det), pondSplitFor(selEl))');
+    // NEW-4 — the split is read off the ledger pass that already computed it (`pondSplitOf`),
+    // which returns the very object `pondSplitFor` built. The render site is unchanged.
+    expect(src).toContain('selEl.type === "pond" ? pondDisplayNameFor(detWithAuto(selEl.det), pondSplitOf(selEl))');
   });
   it("the map/canvas label uses the resolved pond noun (never a hardcoded 'Detention Pond')", () => {
     expect(src).toContain("const pondName = pondDisplayNameFor(detWithAuto(el.det), pondSplit);"); // PR-Q hoisted pondSplit

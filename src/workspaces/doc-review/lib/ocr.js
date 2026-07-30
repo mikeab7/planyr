@@ -16,6 +16,8 @@
  * worker-creation are injectable so the conversion + orchestration are unit-tested without WASM.
  */
 
+import { releaseCanvas } from "./releaseCanvas.js";
+
 // Pinned model/engine assets (jsDelivr). Overridable via createOcrRunner({ cdnBase, version }).
 const CDN = "https://cdn.jsdelivr.net/npm";
 const TJS_VERSION = "5.1.1";
@@ -110,14 +112,20 @@ export function createOcrRunner(opts = {}) {
     return (canvas) => worker.recognize(canvas, {}, { blocks: true }).then((r) => r.data);
   };
   const run = async (doc, pageNum) => {
+    // NEW-5 — an OCR raster is a full page at ~2× and Tesseract has finished with it the moment
+    // recognize() resolves, so the backing store is released here (this is where its owner is
+    // done with it — `renderPageToOcrCanvas` hands the canvas out and cannot release its own).
+    let ocrCanvas = null;
     try {
       const { canvas, baseW, baseH, scale } = await renderPage(doc, pageNum);
+      ocrCanvas = canvas;
       const rec = await getRecognizer();
       const data = await rec(canvas);
       const words = extractWords(data);
       if (!words.length) return null;
       return wordsToItems(words, scale, baseW, baseH, minConfidence);
     } catch (_) { return null; }
+    finally { releaseCanvas(ocrCanvas); }
   };
   const dispose = async () => {
     if (!workerP) return;

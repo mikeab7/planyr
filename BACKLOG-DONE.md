@@ -1,5 +1,67 @@
 ## ✅ Done
 
+### B1159 — Five provably-safe memos in the SitePlanner render body (and four deliberately NOT memoised) `[Site Planner]` (task) #site-planner #perf  *(owner chat 2026-07-30, provisional NEW-4. Minted **B1159** via `git fetch origin main && npm run next-id -- --against-main`, late. DEDUPE-FIRST — searched Open + ⏳ Verify + Done for `memo`, `useMemo`, `render body`, `pondContours`, `criteriaFor`, and the perf family B1040/B1042/B1063/B1064/B1126/B1146: B1064 is code-splitting, B1126 is computed-but-never-rendered, B1158 is the panel gate. Nothing owns per-render recomputation of these specific values. Net-new.)*
+`[x]` **✅ DONE 2026-07-30 — `Verify: sandbox`, and the proof is a unit suite that pins each memo's input set, not a claim.** Build green, 6,562 tests green, lint 0 errors, bundle budgets within ceiling.
+- Verify: sandbox
+- Origin: filed 2026-07-30 from chat (NEW-4).
+
+**A CORRECTION carried onto the record, because the dispatch that raised it corrected itself.** An earlier
+brief said the drainage/detention engines are NONE memoised. **That is wrong.** Several already carry
+module-level LRU memos — `lib/pondGeom.js`'s `_detMemo` (DET_MEMO_MAX 32), `_bandMemo`, `_excMemo`, and
+`SitePlanner.jsx`'s `MIT_MEMO_MAX` guarding `_mitMemo` and `_pondFactsMemo` — and five `useMemo`s already key
+correctly on hand-built signature strings (`gsSig`, `wedgeMitSig`, `pondConflictsSig`, `balancerSig`,
+`drainSigNow`). What IS true is that 52 of 118 call sites across those modules run on every render. The
+genuinely-unmemoised hot set is smaller and more actionable than the original claim, and that is what shipped.
+
+**The five, each with a provably complete and enumerable input set:**
+- **(a) `markupsZ`** was a fresh array identity every render, so the `useMemo` on the very next line
+  (`drawMarkupsZ`) could **never** hit and `cullToView` re-scanned the whole markup layer on every frame of
+  an unrelated drag. Memoised in name only. Now keyed on `[markups]` — the raw state value. One line.
+- **(b) `drawEls`** was copied and sorted **twice per render** to split the same array at one z threshold.
+  One memo over `[drawEls]` returning `{ below, above }`. Order within each half is unchanged (one stable
+  sort over the whole set, then partitioned).
+- **(c) `overlappingParcelPairs(parcels)` + `dissolvedParcelSqft(parcels, pairs)`** — both pure, both take
+  `parcels` and nothing else, both O(n²) with ear-clip triangulation and Sutherland–Hodgman per pair and no
+  memo anywhere in `lib/polyClip.js`. Keyed on `[parcels]`. This is also the single biggest contributor to
+  B1157's vertex-drag cost.
+- **(d) `criteriaFor(critJurKey, { overrides: criteriaOverrides })`** was called **11×** per render with
+  byte-identical arguments — each `{ overrides: … }` literal being a fresh allocation of its own — and
+  `lib/detentionCriteria.js` rebuilds a ~30-field object with nested provenance carriers each time. One memo
+  on `[critJurKey, criteriaOverrides]`; a guard asserts exactly one `criteriaFor(critJurKey` survives.
+- **(e) `pondContours`** had no memo, unlike every one of its neighbours in the same file — and it is the most
+  expensive of them: `maxInwardOffset` alone is a 28-iteration binary search whose EVERY iteration runs a full
+  `ClipperOffset.execute` with round joins, plus one `offsetInward` per contour level. Roughly **38 clipper
+  runs per pond, per render**, worst exactly when you are zoomed in working on ponds. Given a module-level LRU
+  keyed the way `detentionStorage` already keys itself in the same file. `opts` is accepted for call-site
+  symmetry but never read, so `(ring, det)` is the whole input set — asserted by a test that changes each of
+  depth / freeboard / slope / contourInterval / tobElev / the ring and requires a fresh result for each.
+
+**Two de-duplications alongside them:**
+- **`DET_MEMO_MAX` 32 → 128, with the reason.** Each pond generates roughly three distinct signatures per
+  render (`pondSplitFor`, the `pondLedgerEntries` pass, and the map label loop each ask at a different
+  depth/freeboard), so 32 held barely ten ponds and a real multi-pond plan evicted entries it was about to ask
+  for again — the classic thrash where a cache costs and never pays. 128 covers ~40 ponds with headroom;
+  entries are five-number objects, so the memory is noise. A test walks 40 rings and requires every one to
+  still be resolvable.
+- **`pondSplitOf`** reads a pond's split off the ledger pass that already computed it, instead of re-deriving
+  it at three further sites. Pure de-duplication, no new dependency surface, and it falls back to a direct
+  derivation for anything not in that pass (a probe element built as `{ ...el, det }`, or a pond that arrived
+  after it) — so it can only ever save work, never change an answer.
+
+**The four that were audited and REJECTED, and are asserted to STAY un-memoised.** A missed dependency over
+flood/detention inputs produces a **stale engineering number**, which is worse than a slow correct one — so
+this is written into the test suite rather than into a comment that rots:
+- **`detReq` / `computeRequiredDetention`** — its input set includes `coDetention`, a closure over a lazily
+  imported chunk, so the dep set is not enumerable; and it is arithmetic over a rules table, not geometry, so
+  the payoff is near zero.
+- **`pondLedgerEntries`**, **`pondBermScreen`**, **`fmEvalAtWse`** — same class. Each wants its own diff and a
+  numeric regression test, not a line in a batch.
+
+**Tests.** `test/renderBudgetMemos.test.js` (new, 39 assertions) pins each memo's exact dependency array, the
+`pondContours` key completeness and its LRU behaviour, the raised `_detMemo` ceiling, and the four rejections.
+Three pre-existing source-shape guards (`wseSensitivity`, `pondV3PrD`, `pondV3PrR5`) were updated to the
+refactored source with their INTENT unchanged and the reason recorded inline at each.
+
 ### B1154 — Right-click "Add control point" missed wherever the road CURVED: the hit test projected onto the chords, not the road `[Site Planner / roads]` (bug) #site-planner #road #ui  *(owner chat block 2026-07-30, provisional NEW-1, with a root-caused diagnosis: "I tried right clicking and I can't extend the road for whatever reason, but if I try and click on a different portion of it then it does work, so it's kinda iffy." Minted **B1154** via `git fetch origin main && npm run next-id -- --against-main`. Branch `claude/road-curve-hit-test-u74avz`. DEDUPE-FIRST — searched Open + ⏳ Verify + Done for `hitEditPath` / `projToSeg` / `insertRoadVertex` / "control point": **B230** built the shared vertex-editing hit test, **B718** taught it about centerline roads and gave roads their wide pavement tolerance, **B872** added the dock-wall refusal. None of them projects onto anything but the chords, and none is a fix that failed to stick — this is the net-new curved case they all share.)* *(RENUMBERED on merge: minted B1149/B1150/V533 against a fresh `origin/main`, but the B779 mint gate found B1153/V534 already claimed on other in-flight branches — the documented late-bind race, caught RED before merge exactly as designed. Landed at **B1154 / B1155 / V535**, leaving a gap because a gap is free and a second renumber pass is not. Code, tests and the harness carry the provisional NEW-1/NEW-2 labels throughout, so only heading lines moved.)*
 `[x]` **DONE — sandbox-verified 2026-07-30 (Verify: sandbox).** Driven through the REAL render path on the owner's REAL geometry: right-clicking the apex of the truck loop's 120 ft return on Tsakiris / Concept A now offers "Add control point" (it did not before), and the insertion hint appears with it.
 - Verify: sandbox

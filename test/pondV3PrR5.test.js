@@ -172,7 +172,9 @@ describe("R1 — SitePlanner wires the policy into the split, the solvers, and t
     // B1005 — detention criteria key off the drainage AUTHORITY (critJurKey), not the floodplain county
     // (floodJurKey), so a Brookshire–Katy site shows the BKDD criteria row (not the generic/Waller fallback).
     expect(src).toContain('const critJurKey = critInDrainageDistrict ? "bkdd" : (drainAuthorityId ? jurKeyForAuthority(drainAuthorityId) : floodJurKey);');
-    expect(src).toContain("const coincidentPolicy = coincidentStormPolicy(criteriaFor(critJurKey, { overrides: criteriaOverrides }));");
+    // NEW-4(d) — one memoised criteria record (`critAll`) feeds every consumer; same value.
+    expect(src).toContain("const critAll = useMemo(() => criteriaFor(critJurKey, { overrides: criteriaOverrides }), [critJurKey, criteriaOverrides]);");
+    expect(src).toContain("const coincidentPolicy = coincidentStormPolicy(critAll);");
     expect(src).toContain("const coincidentStorm = coincidentPolicy.coincident;");
     expect(src).toContain("const coincidentAssumed = !coincidentPolicy.verified;");
   });

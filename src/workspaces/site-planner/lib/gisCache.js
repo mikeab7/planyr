@@ -66,6 +66,25 @@ export function createGisCache(opts = {}) {
 
   const sk = (key) => ns + key;            // storage key
   const mem = new Map();                   // L1: key -> { data, ts } (per-session, instant)
+  /* NEW-7(b) — a size bound on L1. The localStorage tier below is bounded twice over
+   * (maxEntryBytes per entry, maxTotalBytes overall, evictOldest to enforce both); L1 had no
+   * bound at all, and worse, the two interact badly: a payload over `maxEntryBytes` returns
+   * early from `write` WITHOUT ever entering the store, so it never appears in `ourKeys()`, so
+   * `evictOldest` can never reach it. The >512 KB GeoJSON responses — precisely the biggest
+   * objects in the app — were the ones that lived forever. Keys are per-source-per-bbox rounded
+   * to three decimals, so every meaningful pan mints a new one.
+   *
+   * Same recency-touch idiom as pondGeom's _detMemo: a read re-inserts, so `mem`'s insertion
+   * order IS the LRU order and the front is the least recently used. A miss simply re-fetches
+   * through the existing stale-while-revalidate path, so this costs a request at worst and can
+   * never change an answer. */
+  const maxMemEntries = opts.maxMemEntries ?? 48;
+
+  function touchMem(key, entry) {
+    mem.delete(key);                       // re-insert at the back = most recently used
+    mem.set(key, entry);
+    while (mem.size > maxMemEntries) { const lru = mem.keys().next(); if (lru.done) break; mem.delete(lru.value); }
+  }
 
   // All namespace keys currently in the store.
   function ourKeys() {
@@ -81,13 +100,13 @@ export function createGisCache(opts = {}) {
   // Read an entry (L1 first, then storage). Returns { data, ts, ageMs } | null.
   function read(key) {
     const m = mem.get(key);
-    if (m) return { data: m.data, ts: m.ts, ageMs: now() - m.ts };
+    if (m) { touchMem(key, m); return { data: m.data, ts: m.ts, ageMs: now() - m.ts }; }
     if (!store) return null;
     let raw; try { raw = store.getItem(sk(key)); } catch (_) { return null; }
     if (!raw) return null;
     let e; try { e = JSON.parse(raw); } catch (_) { return null; }
     if (!e || typeof e.ts !== "number") return null;
-    mem.set(key, { data: e.data, ts: e.ts });   // promote to L1
+    touchMem(key, { data: e.data, ts: e.ts });  // promote to L1 (bounded, most-recent)
     return { data: e.data, ts: e.ts, ageMs: now() - e.ts };
   }
 
@@ -120,7 +139,7 @@ export function createGisCache(opts = {}) {
    * oldest-first. Returns { ts } so callers can stamp the age. */
   function write(key, data) {
     const ts = now();
-    mem.set(key, { data, ts });
+    touchMem(key, { data, ts });
     if (!store) return { ts };
     let payload;
     try { payload = JSON.stringify({ data, ts }); } catch (_) { return { ts }; }

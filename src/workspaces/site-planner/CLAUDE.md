@@ -149,6 +149,21 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   NOT mirrored into the export (the sheet has no such quantisation). Gate:
   the repo-root ui-audit harness **diagnose-pointer-accuracy** (tile-grid ground truth, readout AND placed point, three
   device pixel ratios incl. 2.15) plus **diagnose-map-lock** — both repo-root ui-audit harnesses.
+- `releaseCanvas.js` (NEW-5) — hand an offscreen canvas's backing store back the moment its pixels
+  have been consumed. Canvas pixels are renderer/GPU memory, not JS heap, and the GC barely feels
+  them (measured ~555 MB of tab against a ~134 MB heap, with this idiom appearing NOWHERE in the
+  tree). Call it only AFTER the last `toDataURL` / `toBlob` / `getImageData` / copying `drawImage`,
+  and never on a canvas you are handing to a caller or one that is on screen. **Deliberately
+  duplicated in `doc-review/lib/` rather than shared** — a module reachable from both routes gets
+  hoisted into its own chunk and breaches the Site route's chunk budget; keep the two identical.
+- `tileBudget.js` / `tileLifecycle.js` — the tile-memory tier: pure policy (overscan, keepBuffer,
+  cache ceiling, which tiles to evict) and the Leaflet-bound half (`preserveTilesAcrossSetView`,
+  `boundTileCache`/`capTileCache`, `releaseLayer`). **NEW-6: `MapFinder` uses them too now.** The
+  Map view has its OWN Leaflet map and is never unmounted (`SitePlannerApp` hides it with
+  `display:none` on purpose), so its two tile layers and its DUPLICATE set of esri raster overlays
+  grew for the whole session; they are now capped, squeezed while hidden, and the 45 s overlay
+  re-probe is gated on `visible`. All EVICTION — nothing caps what is drawn, and `detectRetina` is
+  untouched (the owner has ruled out any retina downgrade).
 - `supabase.js` / `auth.js` / `cloudSync.js` — cloud data + auth (shared across workspaces).
 - `elementSync.js` / `elementRows.js` / `elementJournal.js` — the element-level sync engine, the
   rows↔model fold layer (incl. `foldJournal`), and the persisted pending-edit journal (NEW-F4:

@@ -2891,6 +2891,40 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const wrapRef = useRef(null);
   const svgRef = useRef(null);
   const drag = useRef(null);
+  /* ── NEW-2 — one state commit per animation FRAME on the hot pointer paths ──────────────────
+   * A pointermove can fire faster than the display refreshes (120 Hz panels, and browsers deliver
+   * coalesced moves at higher rates still). Every setState on that path re-runs this component's
+   * whole render body and rebuilds the whole JSX tree, so a vertex drag was doing that work more
+   * than once per painted frame — the "the point lags behind my cursor" report.
+   *
+   * A job is keyed, and a later job with the same key REPLACES the earlier one: the work these
+   * paths do is an ABSOLUTE write (put vertex i at this point / the cursor is here), never an
+   * increment, so dropping a superseded intermediate is not a lost update — it is a frame that
+   * was never going to be painted. Correctness rules that keep it that way:
+   *   · only absolute, idempotent updaters may be scheduled here;
+   *   · a gesture END (`onUp` / `abortGesture`) FLUSHES synchronously via flushSync, so `stateRef`
+   *     and the committed geometry are settled before the release logic (and the sync engine's
+   *     flushElems) reads them — never one move stale;
+   *   · the frame is cancelled on unmount. */
+  const frameRaf = useRef(0);
+  const frameJobs = useRef(new Map());
+  const runFrameJobs = () => {
+    frameRaf.current = 0;
+    if (!frameJobs.current.size) return;
+    const jobs = [...frameJobs.current.values()];
+    frameJobs.current.clear();
+    for (const j of jobs) j();
+  };
+  const scheduleFrameJob = (key, job) => {
+    frameJobs.current.set(key, job);
+    if (!frameRaf.current) frameRaf.current = requestAnimationFrame(runFrameJobs);
+  };
+  const flushFrameJobs = () => {
+    if (!frameRaf.current) return;              // nothing pending → byte-identical to the old path
+    cancelAnimationFrame(frameRaf.current);
+    flushSync(runFrameJobs);                    // commit + re-render NOW, so stateRef is current
+  };
+  useEffect(() => () => { if (frameRaf.current) cancelAnimationFrame(frameRaf.current); }, []);
   const pointersRef = useRef(new Map()); // (vestigial — kept for abortGesture's clear; pinch is native-touch now)
   const pinchRef = useRef(null);         // (vestigial)
   const touchPinchedRef = useRef(false); // (vestigial)
@@ -4246,6 +4280,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // never ran, so `panning` stayed true (stuck grab cursor) with pointer-capture held and the
   // canvas swallowed every click. This tears the whole gesture down so it can self-recover.
   const abortGesture = (pid = capturePidRef.current) => {
+    // NEW-2 — settle any frame-coalesced move BEFORE the teardown, so the ordering is exactly the
+    // old one (the move committed, then the abort reverted it) — never a pending job landing back
+    // on the canvas after cancelActiveMove has already put it back.
+    flushFrameJobs();
     if (pid != null && svgRef.current) { try { svgRef.current.releasePointerCapture(pid); } catch (_) {} }
     capturePidRef.current = null;
     cancelActiveMove(); // a drag-move torn down without a clean pointer-up reverts to pre-drag (B315); no-op otherwise
@@ -5779,7 +5817,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const fp = p2f(e.clientX, e.clientY);
     lastPtrFt.current = fp; // remember the live cursor in feet so a paste lands here (B417); ref-only — no setState in this hot path
     lastPtrClient.current = { x: e.clientX, y: e.clientY }; // NEW-2: where to anchor the hover identify card; ref-only, same hot-path rule
-    setCursor(fp);
+    // NEW-2 — the coordinate READOUT is a display value: it cannot go stale by anything a reader
+    // could notice, and nothing derives geometry from it. Coalesced to one commit per frame so a
+    // hover (or a pan, or a drag) can't re-run the whole render body several times per painted
+    // frame just to move a number. The two lines above stay ref-only, as their comments say.
+    scheduleFrameJob("cursor", () => setCursor(fp));
     // (Centerline-road preview renders from draftRoadPts + the live cursor — no per-move state.)
     // Click-to-finish for line/rect/ellipse: the anchored shape tracks the cursor between the first
     // and second click (no button held, so there's no drag.current to drive it).
@@ -5796,11 +5838,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // hover never flickers off. Only runs while idle in select mode with no
       // selection (selection otherwise drives the buttons), so there's no churn.
       if (tool === "select" && !sel) {
-        const hovered = [...els].sort(byZ).reverse().find((x) => {
-          if (x.attachedTo || x.dogEar || x.locked || x.points || x.w == null) return false;
+        // NEW-2 — ONE linear scan, no copy and no sort. This used to spread, sort and reverse the
+        // whole element array on every pointermove just to answer "which building is under me".
+        // Exactly equivalent to the old spread-sort-reverse-find: that returned the
+        // greatest match under `byZ`, and `byZ` is a TOTAL order (it ends in an id comparison, so
+        // two distinct elements never tie) — so "the max under byZ" is the same single element.
+        let hovered = null;
+        for (const x of els) {
+          if (x.attachedTo || x.dogEar || x.locked || x.points || x.w == null) continue;
           const hw = Math.abs(x.w) / 2, hh = Math.abs(x.h) / 2; // unrotated footprint bbox (generous on rotation — fine for hover)
-          return fp.x >= x.cx - hw && fp.x <= x.cx + hw && fp.y >= x.cy - hh && fp.y <= x.cy + hh;
-        });
+          if (!(fp.x >= x.cx - hw && fp.x <= x.cx + hw && fp.y >= x.cy - hh && fp.y <= x.cy + hh)) continue;
+          if (!hovered || byZ(x, hovered) >= 0) hovered = x;
+        }
         const hid = hovered ? hovered.id : null;
         if (hid !== hoverElId) setHoverElId(hid);
       } else if (hoverElId) setHoverElId(null);
@@ -6024,24 +6073,29 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       }
       return;
     }
+    // NEW-2 — the three point-drag branches. Each writes ONE vertex to an ABSOLUTE position, so
+    // coalescing to a frame commits the newest position and drops only positions the display was
+    // never going to show. Each invalidates geometry the render body derives (parcel overlap +
+    // dissolve, the element metrics loop), which is why more than one commit per frame was the
+    // expensive half of the lag.
     if (d.mode === "vertex") {
       const sp = snapPt(fp);
-      setParcels((a) => a.map((pc) => pc.id === d.id
-        ? { ...pc, points: pc.points.map((p, i) => (i === d.index ? sp : p)) } : pc));
+      scheduleFrameJob("geom", () => setParcels((a) => a.map((pc) => pc.id === d.id
+        ? { ...pc, points: pc.points.map((p, i) => (i === d.index ? sp : p)) } : pc)));
       return;
     }
     if (d.mode === "elVertex") {
       // A dock-wall corner projects onto its stored wall line (slides along it, no grid snap so it
       // never kinks off the wall); every other vertex grid-snaps as usual. (NEW-1/B872)
       const sp = d.dockLine ? projectOntoLine(d.dockLine, fp) : snapPt(fp);
-      setEls((a) => a.map((x) => x.id === d.id && x.points
-        ? { ...x, points: x.points.map((p, i) => (i === d.index ? sp : p)) } : x));
+      scheduleFrameJob("geom", () => setEls((a) => a.map((x) => x.id === d.id && x.points
+        ? { ...x, points: x.points.map((p, i) => (i === d.index ? sp : p)) } : x)));
       return;
     }
     if (d.mode === "measureVertex") { // B141: drag a measurement control point
       const sp = snapPt(fp);
-      setMeasures((arr) => arr.map((mm, k) => k === d.i
-        ? { ...mm, mode: measMode(mm), pts: measPts(mm).map((p, j) => (j === d.index ? sp : p)) } : mm));
+      scheduleFrameJob("geom", () => setMeasures((arr) => arr.map((mm, k) => k === d.i
+        ? { ...mm, mode: measMode(mm), pts: measPts(mm).map((p, j) => (j === d.index ? sp : p)) } : mm)));
       return;
     }
     if (d.mode === "resize") {
@@ -6168,6 +6222,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   };
   const onUp = (e) => {
     if (e.pointerType === "touch" && touchCountRef.current >= 2) return; // pinch owns a 2-finger gesture (B555)
+    // NEW-2 — a gesture that ends inside the same frame as its last move still has that move
+    // pending. Commit it SYNCHRONOUSLY first: everything below (and flushElems at the end) must
+    // see the settled geometry, never a canvas one move short of where the finger let go.
+    flushFrameJobs();
     const d = drag.current;
     if (d && d.mode === "marquee") {
       // Crossing/touch box-select via the shared selection model (B569/B570) — one box-test for
@@ -6306,7 +6364,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // outline so every downstream consumer keeps reading correct dims, and relay the dock-zone stack
     // onto the (possibly re-lengthened) walls. Rotation stays fixed — the dock frame never spins.
     if (d && d.mode === "elVertex" && d.footEdit) {
-      const b = els.find((x) => x.id === d.id);
+      // NEW-2 — read the SETTLED elements, not this handler's render closure. `flushFrameJobs()`
+      // at the top of onUp commits the last coalesced move via flushSync, which re-renders and
+      // therefore refreshes `stateRef`; the closure captured at the previous render cannot see it.
+      // This is the one release path that judges the FINAL ring (self-crossing / zero area) and
+      // rebuilds the dock frame off it, so a one-move-stale read here would be a real wrong answer.
+      const elsNow = stateRef.current.els;
+      const b = elsNow.find((x) => x.id === d.id);
       if (b && b.points) {
         if (b.points.length < 3 || polyArea(b.points) < 1 || polySelfIntersects(b.points)) {
           setEls((a) => a.map((x) => x.id === d.id ? { ...x, points: d.origPoints } : x));
@@ -6314,7 +6378,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         } else {
           const bb = frameBBox(b.points, b.rot || 0);
           const nbCalc = { ...b, cx: bb.cx, cy: bb.cy, w: bb.w, h: bb.h };
-          const stranded = strandedZoneIds(els, nbCalc);
+          const stranded = strandedZoneIds(elsNow, nbCalc);
           setEls((a) => {
             let next = a.map((x) => x.id === d.id ? { ...x, cx: bb.cx, cy: bb.cy, w: bb.w, h: bb.h } : x);
             const nb = next.find((x) => x.id === d.id);
@@ -8392,8 +8456,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // the real parcels used to double-count → 176.6 vs ~88.6 ac). Overlap pairs are computed here ONCE and
   // reused by the B652 warning below (they were the same O(n²) scan run twice). Non-overlapping sites get
   // the exact additive sum, unchanged.
-  const parcelOverlapPairs = overlappingParcelPairs(parcels);
-  const siteSqft = dissolvedParcelSqft(parcels, parcelOverlapPairs);
+  // NEW-4(c) — both are pure functions of `parcels` and NOTHING else (ear-clip triangulation +
+  // Sutherland-Hodgman per overlapping pair, O(n²), no memo inside lib/polyClip.js). They used to
+  // re-run on every render, including every frame of a vertex drag that never touched a parcel.
+  const parcelOverlapPairs = useMemo(() => overlappingParcelPairs(parcels), [parcels]);
+  const siteSqft = useMemo(() => dissolvedParcelSqft(parcels, parcelOverlapPairs), [parcels, parcelOverlapPairs]);
   let bldg = 0, paving = 0, parkArea = 0, trailArea = 0, pondArea = 0, stalls = 0, trailers = 0;
   let bumpCount = 0, bumpArea = 0, bumpsUniform = true; // dog-ear / bump-out tally (counted within bldg)
   let providedDetCf = 0, pondCount = 0, maxPondDepthFt = 0; // B630: provided detention across ALL ponds (cubic feet; pondGeom's Map memo keeps this cheap per render)
@@ -8957,6 +9024,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // only drainage district modeled in the criteria registry today.
   const critInDrainageDistrict = (drainCtxData?.authority?.overlays || []).some((o) => o.kind === "drainage-district");
   const critJurKey = critInDrainageDistrict ? "bkdd" : (drainAuthorityId ? jurKeyForAuthority(drainAuthorityId) : floodJurKey);
+  /* NEW-4(d) — ONE resolved criteria record per (jurisdiction, overrides) pair. `criteriaFor`
+   * rebuilds a ~30-field object with nested provenance carriers on every call, and this render
+   * body called it 11× with byte-identical arguments (each `{ overrides: criteriaOverrides }`
+   * literal being a fresh allocation of its own). The input set is complete and enumerable:
+   * the jurisdiction key and the override map, nothing else. */
+  const critAll = useMemo(() => criteriaFor(critJurKey, { overrides: criteriaOverrides }), [critJurKey, criteriaOverrides]);
   const fmRule = floodRules[floodJurKey] || floodRules.generic;
   // Derived BFE (B755): the FEMA-BFE-line estimate computed at check time. It NEVER
   // overwrites the manual bfeFt (which would masquerade as user entry) — it rides its
@@ -9257,7 +9330,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // default NO: the pond recovers to normal (dry-weather) tailwater between storms, so the whole
   // recovered column is usable detention and the 100-yr flood WSE is only a routing / outfall condition.
   // When the policy is ASSUMED (unverified) the verdict states the assumption (coincidentAssumed).
-  const coincidentPolicy = coincidentStormPolicy(criteriaFor(critJurKey, { overrides: criteriaOverrides }));
+  const coincidentPolicy = coincidentStormPolicy(critAll);
   const coincidentStorm = coincidentPolicy.coincident;
   // The policy is ASSUMED (either way) until the governing code text lands — verified:false. The verdict
   // states the assumption whenever it MATERIALLY drives the usable number (a flood-affected pond whose
@@ -9410,15 +9483,22 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // "unknown facts poison the usable total" honesty rule is unit-testable. Entries are
   // built here (this component owns detWithAuto/pondAuto and the flood context).
   const pondLedgerEntries = [];
+  // NEW-4 — the split each ledger entry was built from, kept by element id so the render body
+  // never re-derives one it already has (`pondSplitOf` below). Pure de-duplication: same object,
+  // same inputs, no new dependency surface. Only valid for an UNMODIFIED pond out of `els` —
+  // every call site that passes a probe element (`{ ...el, det: d }`) still calls pondSplitFor.
+  const pondSplitById = new Map();
   for (const e of els) {
     if (e.type !== "pond") continue;
     // B907 — INCREMENTAL excavation when this basin reuses an existing pond/depression
     // (the "Expand this pond" flow's det.baseline): prices only the added cut, not a
     // from-scratch re-dig of ground already excavated once.
     const exc = incrementalExcavationCf(ringOf(e), detWithAuto(e.det));
+    const eSplit = pondSplitFor(e);
+    pondSplitById.set(e.id, eSplit);
     pondLedgerEntries.push({
       id: e.id,
-      ...pondSplitFor(e),
+      ...eSplit,
       // NEW-23 — the DRAWN-ring gross (the full footprint hold, the SAME formula the site total
       // providedDetCf sums), so the per-pond "holds" chip ties out to the explainer's "holds"
       // exactly (never a mismatched pair). Distinct from the split's crest gross (`grossCf`),
@@ -9443,6 +9523,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const p = pondLedgerEntries[i];
     p.displayName = pondLedgerEntries.length === 1 ? pondDisplayNameFor(p.det, p) : (p.name || `Pond ${i + 1}`);
   }
+  /* NEW-4 — read a pond's split off the ledger pass that already computed it. Falls back to a
+     direct derivation for anything not in that pass (a probe element, or a pond that arrived
+     after it), so this can only ever save work, never change an answer. */
+  const pondSplitOf = (e) => (e && pondSplitById.get(e.id)) || pondSplitFor(e);
   // NEW-1 (B1032) — the GEOMETRY-ONLY fold, available before the mitigation requirement is known.
   // It carries only facts the duty split can't move (gross, excavation, anchor/inundation flags,
   // the unknown-facts poison). The DETENTION + MITIGATION totals come from `pondLedger` below,
@@ -10040,7 +10124,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const fmWseSweep = useMemo(() => {
     const baseWse = Number.isFinite(fmEstWse?.wseFt) ? fmEstWse.wseFt : null;
     if (baseWse == null) return null;
-    const steps = criteriaFor(critJurKey, { overrides: criteriaOverrides }).wseSensitivityStepsFt?.value;
+    const steps = critAll.wseSensitivityStepsFt?.value;
     return wseSensitivity(fmEvalAtWse, baseWse, { stepsFt: steps });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fmEvalAtWse, fmEstWse, critJurKey, criteriaOverrides, floodGeo, fmDemGridKey, drainSigNow]);
@@ -10436,7 +10520,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // basin that still holds the requirement and hand the difference back as buildable land.
     if (!needsDet && !needsMit) { rightSizePond(); return; }
 
-    const criteria = criteriaFor(critJurKey, { overrides: criteriaOverrides });
+    const criteria = critAll;
     const avgDepthFt = criteria.screeningPondDepthFt?.value ?? 8;
     const mitRatio = fmRule && Number.isFinite(fmRule.ratio) ? fmRule.ratio : 1;
     const gradeFt = Number.isFinite(fmElev.existGradeFt) ? fmElev.existGradeFt : null;
@@ -10801,13 +10885,34 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const coincidentAssumption = coincidentAssumed && coincidentMaterial
     ? { coincident: coincidentStorm, source: coincidentPolicy.source }
     : null;
+  /* ── NEW-3 — the yield / stormwater derivation is DEMAND-DRIVEN ────────────────────────────
+   * `leftPanel` starts at null, so on first paint (and for the whole time nobody has a panel
+   * docked) NO surface below consumes any of this — yet the ~400 lines that follow, the pond
+   * stage models, the reconciliation, the drawdown, the band ledger, the administrator, the
+   * apron, the cut/fill balance and the `drainage` object itself, all ran on EVERY render
+   * anyway, including every frame of a drag.
+   *
+   * This is deliberately GATING, not memoising. `drainFacts()` computes the bundle fresh, ONCE
+   * PER RENDER, the first time a consumer actually reads it, and never caches across renders —
+   * so a gated value is either computed from this render's inputs or not rendered at all, and
+   * is structurally incapable of holding a stale engineering number. Demand-driving it (rather
+   * than testing a hand-written list of "which panels are open") is what makes it safe: a
+   * consumer cannot be forgotten, because READING it is what triggers the work. The two
+   * non-obvious consumers — `exportCtx()` and the pond inspector's `floodFailed` — are on that
+   * footing like every other one, so the exported sheet and the inspector cannot silently lose
+   * their drainage content.
+   *
+   * The body below is UNCHANGED and deliberately keeps its original indentation, so the diff
+   * that introduced this shows the gate and nothing else. */
+  let _drainFacts;                          // per-render only — never read across renders
+  const buildDrainFacts = () => {
   /* ── Cowork yield review (NEW-1 … NEW-10) ──────────────────────────────────────────────────
    * ONE pass over the pond ledger builds the shared stage/elevation model, and every check below
    * reads it — no consumer re-derives storage from a footprint. Ordered deliberately: the models
    * first, then reconciliation (NEW-1), drawdown (NEW-2), the mitigation band ledger (NEW-3/4),
    * the administrator + apron (NEW-8/9), and the cut/fill balance (NEW-10).
    * Everything degrades to an explicit unknown rather than a fabricated pass. */
-  const ycriteria = criteriaFor(critJurKey, { overrides: criteriaOverrides });
+  const ycriteria = critAll;
   // The governing flood surface at each pond, and its lowest outlet invert — the two facts the
   // duty split and the gravity tests turn on.
   // NEW-6 — the gravity share the jurisdiction requires. FBCDD's Interim Atlas-14 §5 record already
@@ -10997,7 +11102,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       : null,
     // B907 — the typical screening pond depth used ONLY to ESTIMATE additional land take
     // from a detention shortfall (never to size a pond) — criteria-configurable.
-    screeningPondDepthFt: criteriaFor(critJurKey, { overrides: criteriaOverrides }).screeningPondDepthFt?.value ?? 8,
+    screeningPondDepthFt: critAll.screeningPondDepthFt?.value ?? 8,
     tier: detTier, regime: detRegime, outfall: outfallNote,
     // B707/B708/B710/B712 — the floodplain-mitigation ledger + pond split + buildability.
     // NEW-2 — the DISPLAY ledger holds last-known-good while the fetch is stale (never a fresh
@@ -11215,6 +11320,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     },
     onCheck: () => checkDrainage({ auto: false }), // B832 — ↻ is the explicit "force refresh now" override
   } : null;
+    return drainage;
+  };
+  const drainFacts = () => { if (_drainFacts === undefined) _drainFacts = buildDrainFacts(); return _drainFacts; };
 
   // Building properties (B198): clear height + slab thickness, auto-assigned from each
   // building's footprint sf via an editable per-plan rule (`settings.buildingRules`),
@@ -11664,7 +11772,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     basemapOn, basemapSrc, overlays, layerStatus,
     PAL, f0,
     siteName, siteLabel, planLabel, printFrame, buildingRows,
-    printMetricPairs, printStormwaterBars, drainage,
+    printMetricPairs, printStormwaterBars,
+    // NEW-3 — resolved HERE, at export time. `exportCtx()` is rebuilt on every call, so this
+    // reads the current render's facts; the sheet keeps its drainage content whether or not a
+    // panel happened to be open when Download was pressed (PDF-PARITY).
+    drainage: drainFacts(),
     cullActive, setExportPass, setExportingPDF, flashWarn,
   });
   const withExportSheet = async (fn) => {
@@ -11700,7 +11812,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       ["Detention", `${f0(pondArea)} sf`],
       ["Open / green", `${f2(open / SQFT_PER_ACRE)} ac`],
     ];
-    const d = drainage;
+    const d = drainFacts();
     const reqAcFt = d && d.req && d.req.kind === "point" && d.req.requiredAcFt > 0 ? d.req.requiredAcFt : null;
     // The sheet carries the SAME cautions the readout shows (PDF-PARITY): an
     // unanchored in-floodplain pond marks the provided figure, a truncated pull
@@ -11718,7 +11830,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // With no $/CY entered the sheet prints the volume only; a cost is never fabricated.
       const detOverText = (() => {
         if (d.providedUsableCf == null) return "";
-        const cx = criteriaFor(critJurKey, { overrides: criteriaOverrides });
+        const cx = critAll;
         const over = overdugAcFt(d.providedUsableCf / 43560, reqAcFt, { slackAcFt: cx.overdugSlackAcFt?.value, slackPct: cx.overdugSlackPct?.value });
         const pRaw = (settings.prices || {}).earthworkCy;
         const op = overProvision(over, { earthPerCy: pRaw == null || pRaw === "" || !Number.isFinite(+pRaw) ? null : +pRaw });
@@ -11802,7 +11914,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // Same shared derivation (yieldBar.js stormwaterBarSpecs) the on-screen readout uses, so the
   // printed bars match the screen exactly (PDF-PARITY).
   const printStormwaterBars = () => {
-    const specs = stormwaterBarSpecs(drainage);
+    const specs = stormwaterBarSpecs(drainFacts());
     const bars = [];
     if (specs.det) bars.push({ label: specs.det.label, verdict: specs.det.verdict, status: specs.det.status, layout: specs.det.layout, unit: "ac-ft" });
     if (specs.mit) bars.push({ label: specs.mit.label, verdict: specs.mit.verdict, status: specs.mit.status, layout: specs.mit.layout, unit: "ac-ft" });
@@ -12014,7 +12126,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // back to the inline "+/−" increment so the delta still shows.
       // D4 — the pond's on-screen NOUN follows its resolved purpose (Detention / Mitigation /
       // Detention + Mitigation Pond), so a mitigation pond is never mislabeled "Detention Pond".
-      const pondSplit = pondSplitFor(el);
+      const pondSplit = pondSplitOf(el);
       const pondName = pondDisplayNameFor(detWithAuto(el.det), pondSplit);
       const base = el.det?.baseline;
       if (base?.ring?.length >= 3) {
@@ -12724,7 +12836,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // handles are gone: Shift-click (or right-click) an edge inserts a control point at the click
   // point instead. The active control point (the Delete-key target) is shown inverted.
   const vtxRect = (key, c, on, cursor, onDown) => (
-    <rect key={key} x={c.x - 5} y={c.y - 5} width={10} height={10} rx={2} data-export="skip"
+    // data-testid: the NEW-2 frame-time harness has to GRAB a real control point, and picking one
+    // by geometry alone is exactly the kind of brittle selector that rots. `data-export="skip"`
+    // already keeps this rect out of the exported sheet, so this attribute is review chrome too.
+    <rect key={key} x={c.x - 5} y={c.y - 5} width={10} height={10} rx={2} data-export="skip" data-testid="vtx-handle"
       fill={on ? SEL_BLUE : SEL_HANDLE_FILL} stroke={on ? SEL_HANDLE_FILL : SEL_BLUE} strokeWidth={on ? 2 : 1.5}
       style={{ cursor }} onPointerDown={onDown} />
   );
@@ -14819,7 +14934,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             bumpCount={bumpCount} bumpArea={bumpArea} bumpsUniform={bumpsUniform}
             inactiveCount={parcels.filter((p) => p.active === false).length}
             easeAll={easeAll} easeArea={easeArea} easeBldgArea={easeBldgArea} easePaveArea={easePaveArea}
-            drainage={drainage} parcelOverlaps={parcelOverlaps}
+            drainage={drainFacts()} parcelOverlaps={parcelOverlaps}
             heat={{ available: !!fmHeat, on: fmHeatOn, user: fmHeatUser, onToggle: setFmHeatUser, totals: fmHeatTotals, ledgerAcFt: fmResultView?.volumeAcFt ?? null }}
             onMitOpenChange={setFmMitOpen}
           />
@@ -15336,7 +15451,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // this degenerates to z-then-id. Rendered in TWO passes below — markups flagged `behindEls` paint
   // BEFORE the elements (sent behind the buildings), the rest after. Hit-testing is native SVG DOM
   // order, so reordering the DOM reorders clicks too — what looks on top is what you grab.
-  const markupsZ = [...markups].sort(byZAsc);
+  // NEW-4(a) — memoised on `markups` alone (the raw state value). Without this the array had a
+  // fresh identity every render, so `drawMarkupsZ`'s useMemo below could NEVER hit and cullToView
+  // re-scanned the whole markup layer on every frame of an unrelated drag: memoised in name only.
+  const markupsZ = useMemo(() => [...markups].sort(byZAsc), [markups]);
   /* NEW-5 — viewport culling. What is drawn is the model filtered to what the viewport can
      reach (plus a generous margin, so nothing pops in at the edge mid-drag); frame cost then
      tracks what is ON SCREEN instead of how big the plan has grown. Three guards make it
@@ -15352,6 +15470,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     return s;
   }, [sel, multi]);
   const drawEls = useMemo(() => cullToView(els, cullRect, { enabled: !!cullRect, keep: cullKeep }), [els, cullRect, cullKeep]);
+  /* NEW-4(b) — the render body split the SAME array at the SAME z threshold in two places, and did
+     it by copying and sorting `drawEls` twice per render. One sort, one split, one memo; `zOrder`
+     and BUILDING_Z are module-level constants, so `drawEls` is the complete input set. Order within
+     each half is unchanged (a stable sort over the whole set, then partitioned). */
+  const drawElsZ = useMemo(() => {
+    const sorted = [...drawEls].sort(byZ);
+    return { below: sorted.filter((el) => zOrder(el) < BUILDING_Z), above: sorted.filter((el) => zOrder(el) >= BUILDING_Z) };
+  }, [drawEls]);
   const drawMarkupsZ = useMemo(() => cullToView(markupsZ, cullRect, { enabled: !!cullRect, keep: cullKeep }), [markupsZ, cullRect, cullKeep]);
   const drawParcels = useMemo(() => cullToView(parcels, cullRect, { enabled: !!cullRect, keep: cullKeep }), [parcels, cullRect, cullKeep]);
   // B953/NEW-1 — clean-tee junction geometry (world feet), recomputed only when els/settings change;
@@ -16204,7 +16330,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   })}
                 </g>
               )}
-              {[...drawEls].sort(byZ).filter((el) => zOrder(el) < BUILDING_Z).map((el) => renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, els, startDimMove, onDimNumberDown, onElContext, dimSuppressed, roadNet, labelFrame))}
+              {drawElsZ.below.map((el) => renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, els, startDimMove, onDimNumberDown, onElContext, dimSuppressed, roadNet, labelFrame))}
               {/* NEW-4 — civil radius conflict flags. A corner the leg is too short to carry gets marked
                   ON THE PLAN, so a non-compliant turn can't hide until someone selects the road. Review
                   chrome: data-export="skip" keeps it out of the PDF a consultant receives. */}
@@ -16307,7 +16433,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   strokes and the tee-cover knockout mask are all superseded by the dissolved road network
                   painted above: a junction is now a boolean union of pavement, not a patch over a seam. */}
               {/* buildings + any layer at/above the building band, painted OVER the overlay. */}
-              {[...drawEls].sort(byZ).filter((el) => zOrder(el) >= BUILDING_Z).map((el) => renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, els, startDimMove, onDimNumberDown, onElContext, dimSuppressed, null, labelFrame))}
+              {drawElsZ.above.map((el) => renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, els, startDimMove, onDimNumberDown, onElContext, dimSuppressed, null, labelFrame))}
               {/* markup shapes (neutral line/polyline/rect/ellipse/polygon) on top of the elements */}
               {drawMarkupsZ.filter((m) => !m.behindEls).map(renderMarkupNode)}
               {/* ditch cross-section line (in-progress + last result) */}
@@ -17742,7 +17868,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setPropsCollapsed((c) => !c); } }}
             style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", userSelect: "none", padding: "2px 0 6px" }}>
             <span style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: "0.09em", textTransform: "uppercase", color: PAL.muted, flex: 1 }}>
-              {multiStyleable ? `${multi.length} selected` : selMeasure ? "Measurement" : <>Element{(() => { const l = selEl ? (selEl.type === "pond" ? pondDisplayNameFor(detWithAuto(selEl.det), pondSplitFor(selEl)) : (TYPE[selEl.type]?.label || "").split(" / ")[0]) : selCallout ? "Callout" : selMarkup ? (selMarkup.kind === "easement" ? "Easement" : "Markup") : ""; return l ? ` · ${l}` : ""; })()}</>}
+              {multiStyleable ? `${multi.length} selected` : selMeasure ? "Measurement" : <>Element{(() => { const l = selEl ? (selEl.type === "pond" ? pondDisplayNameFor(detWithAuto(selEl.det), pondSplitOf(selEl)) : (TYPE[selEl.type]?.label || "").split(" / ")[0]) : selCallout ? "Callout" : selMarkup ? (selMarkup.kind === "easement" ? "Easement" : "Markup") : ""; return l ? ` · ${l}` : ""; })()}</>}
             </span>
             {/* Explicit close. The element STAYS selected — double-click it again to reopen. ✕ drops the
                 explicit-open marker (setPropsFor(null)); on DESKTOP that closes propsMatches, so the
@@ -18800,7 +18926,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     const vSlack = (() => {
                       // NEW-2 — the over-provision threshold is CRITERIA-CONFIGURABLE (the
                       // screeningPondDepthFt precedent), never an inline constant here.
-                      const cx = criteriaFor(critJurKey, { overrides: criteriaOverrides });
+                      const cx = critAll;
                       return { slackAcFt: cx.overdugSlackAcFt?.value, slackPct: cx.overdugSlackPct?.value };
                     })();
                     const earthPerCyRaw = (settings.prices || {}).earthworkCy;
@@ -18952,7 +19078,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   if (g_outletStages === 0) return null;
                   const effDetO = detWithAuto(selEl.det);
                   if (!(effDetO.tobElev != null && Number.isFinite(effDetO.tobElev))) return null;
-                  const critO = criteriaFor(critJurKey, { overrides: criteriaOverrides });
+                  const critO = critAll;
                   const daO = Number.isFinite(det.daAcres) ? det.daAcres : acresActive;
                   const impO = Number.isFinite(det.daImpPct) ? det.daImpPct : impPct;
                   const tcO = computeTimeOfConcentration({ areaAcres: daO, impPct: impO, criteria: critO });
@@ -19536,7 +19662,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       // B902 — AUTO-SUGGEST: the site's own pre-development peak discharge (a
                       // screening estimate), offered as a placeholder + one-click "Use" for districts
                       // (Waller, BKDD) that publish no cfs/ac cap. Never overrides a stored release.
-                      const detCriteria = criteriaFor(critJurKey, { overrides: criteriaOverrides });
+                      const detCriteria = critAll;
                       // B905 — COMPUTED time of concentration (Kirpich) — see the RATE CONTROL
                       // section below for the full explanation; used here so this card's suggested
                       // release agrees with the one the outlet solver actually targets.
@@ -19624,7 +19750,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           const otherUsableCf = Math.max(0, providedUsableCf - thisUsableCf);
                           const targetUsableCf = requiredCf - otherUsableCf;
                           if (targetUsableCf <= thisUsableCf) return null; // this pond already covers its share
-                          const regimeUnsure = !detRegime || detRegime.regime === "unknown" || drainage?.floodFailed;
+                          const regimeUnsure = !detRegime || detRegime.regime === "unknown" || drainFacts()?.floodFailed;
                           const authDefaults = drainAuthorityId ? pondDefaultsFor(drainAuthorityId) : null;
                           const defaultsDiffer = authDefaults && (authDefaults.sideSlope !== slope || authDefaults.freeboardFt !== fb);
                           const sizeForRequired = () => {
@@ -19765,7 +19891,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     {(() => {
                       const effDet = detWithAuto(selEl.det);
                       const split = pondSplitFor(selEl);
-                      const criteria = criteriaFor(critJurKey, { overrides: criteriaOverrides });
+                      const criteria = critAll;
                       const da = Number.isFinite(det.daAcres) ? det.daAcres : acresActive;
                       const imp = Number.isFinite(det.daImpPct) ? det.daImpPct : impPct;
                       // B905 — COMPUTED time of concentration (Kirpich), replacing the flat 15-min
@@ -20098,7 +20224,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       const dOverlays = (drainCtxData?.authority?.overlays || []).filter((o) => o.kind === "drainage-district");
                       const dFailed = (drainCtxData?.authority?.flags || []).includes("bkdd-unverified");
                       const inDistrict = dOverlays.length > 0;
-                      const critD = criteriaFor(critJurKey, { overrides: criteriaOverrides });
+                      const critD = critAll;
                       const authLabel = dOverlays[0]?.name || detReq?.rule?.authorityLabel || null;
                       const twR = g_twEst;
                       const dSummary = inDistrict ? dOverlays[0].name.replace("Drainage District", "DD") : dFailed ? "membership unverified" : "county criteria";
@@ -20717,7 +20843,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       actions (was a generic Duplicate/Pin/Attach/Delete menu only). */}
                   {t.type === "pond" && (
                     <>
-                      <div style={hdr(true)}>{pondDisplayNameFor(detWithAuto(t.det), pondSplitFor(t))}</div>
+                      <div style={hdr(true)}>{pondDisplayNameFor(detWithAuto(t.det), pondSplitOf(t))}</div>
                       <button style={menuItem(false)} onClick={() => { revealPondInspector(t.id, null); setTypeMenu(null); }} title="Open this pond's inspector — anchor, depth, purpose, usable/dead split">⚙ Pond settings…</button>
                       <button style={menuItem(false)} onClick={() => { revealPondInspector(t.id, "assistant"); setTypeMenu(null); }} title="Size this pond toward its detention + mitigation targets (one-click Apply)">📐 Sizing assistant…</button>
                       <div style={hdr(false)}>Set purpose</div>
