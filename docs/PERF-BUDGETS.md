@@ -33,20 +33,63 @@ its numbers are recorded on the backlog item.
 If you want the runtime half in CI later, the honest way is a dedicated self-hosted runner with a
 pinned CPU, not the shared `ubuntu-latest` pool.
 
-## Ceilings vs targets
+## Baseline, band, ceiling, target
 
-Every metric in `ui-audit/perf-budgets.json` carries two numbers:
+> **Changed 2026-07-30 (NEW-1).** The bundle metrics used to carry a hand-written `ceiling`.
+> They no longer do, and this section describes what replaced it and why.
 
-- **`ceiling`** — the committed maximum. Breaching it **fails the check**. Seeded from the
-  measured baseline *plus headroom*, so it is green on day one and only trips on a real regression.
-- **`target`** — where the metric *should* be. Where `target` is below `ceiling`, the metric is
-  knowingly out of budget today; the tools report it as `⚠ ABOVE TARGET` on every run and name the
-  backlog item that owns closing it.
+**What went wrong with hand-pinned ceilings.** Each one was seeded from a measurement and then
+never left it. By 30 July `largestChunkBytes` measured 1707.9 KB against a 1709.0 KB ceiling —
+**1.1 KB, 0.06% of headroom** — and `totalJsBytes` sat 3 KB under its own. Three consecutive pull
+requests (#858 four times, #859 twice, #860 once) failed the gate on growth of **0.8–0.9%**. None
+of them was a regression. They were features hitting a budget with no room in it, and the file's
+own stated rule — *"seeded from the baseline PLUS headroom, so it is green on day one and only
+trips on a real regression"* — was not true of the numbers in it.
 
-This two-number shape is deliberate. A single budget set to today's number is unbreachable and
-therefore meaningless; a single budget set to the aspiration is red from day one and gets ignored.
-Ratchet the ceiling **down** toward the target as optimizations land. Raising a ceiling to make a
-red build green is a product decision and needs the same justification as any other.
+Bumping the three ceilings would have been the same mistake a fourth time. So the shape changed:
+
+- **`baseline`** — the last *deliberately recorded* measurement. Only `npm run perf:ratchet`
+  writes it, and only with a `--reason` and an `--item`, both of which land in
+  `bundle.ratchetLog`. Nothing in an ordinary merge path can move it.
+- **`bundle.headroom`** — the band, committed **once**: `max(2% of baseline, 32 KB)`. One place,
+  not three drifting numbers. The 32 KB floor exists because 2% of a small chunk is not enough
+  room for one honest feature.
+- **`ceiling`** — **derived, never stored**: `baseline + band`. Breaching it still **fails the
+  check**.
+- **`target`** — where the metric *should* be. Where `target` is below `baseline`, the metric is
+  knowingly out of budget; the tools report `⚠ ABOVE TARGET` and name the owning backlog item.
+
+That gives four outcomes per metric, and only the last one is red:
+
+| Measured | Reported | Build |
+|---|---|---|
+| ≤ target | `✓` | green |
+| target … baseline | `⚠ ABOVE TARGET`, names the owner | green |
+| baseline … ceiling | `⚠ ABOVE BASELINE`, says how much band is left | green |
+| > ceiling | `✗` breach, with the derivation spelled out | **red** |
+
+`siteRouteChunks` is deliberately excluded from the band: a chunk count is a structural guard,
+not a size, and "four chunks plus two percent" is not a sentence. It keeps a hard `ceiling`.
+
+**Ratcheting is a named step.** `npm run perf:ratchet -- --metric bundle.largestChunkBytes --item
+B1064 --reason "…"` measures a fresh build itself (you cannot ratchet to a number you typed),
+lowers the baseline, and appends the reason to the log. Raising a baseline additionally needs
+`--allow-raise`, because that is a product decision and should read like one on the diff.
+`test/perfBudgetPolicy.test.js` asserts every baseline equals the `to` of its own latest log
+entry — **so a baseline edited by hand, with no reason on the record, goes red in CI.**
+
+## Why a breach names its cause
+
+A bare *"2286.3 KB exceeds 2265.6 KB by 20.7 KB"* reads identically for a 20 KB feature and a
+20 KB dependency bump, and cost a local build to disambiguate every time. Two additions fix that:
+
+- `vite.config.js` writes `dist/.vite/chunk-modules.json` (each chunk's per-module size, straight
+  out of rollup — no new dependency), and the audit folds it into **vendor / app-shared /
+  app-route** buckets per route.
+- `scripts/perf-base-stats.mjs` builds the PR's base ref in a throwaway git worktree and snapshots
+  it, so `perf-bundle-audit.mjs --compare` names **which modules and packages moved, and by how
+  much**. It is diagnosis, not a gate: it never exits non-zero, and it prints why when it cannot
+  run (a shallow clone, a base that does not build, a base older than the stats plugin).
 
 Metrics currently above target: `aerialTileRequests`, `siteRouteJsBytes`, `largestChunkBytes`.
 (`frameMedianMs` / `frameP90Ms` left that list on 2026-07-29 — not because anything got faster,
@@ -160,20 +203,39 @@ npx vite preview --port 4173 &
 node ui-audit/perf-harness.mjs                 # full runtime pass
 node ui-audit/perf-harness.mjs --no-tiles      # offline: aborts cross-origin, skips aerial metrics
 node ui-audit/verify-new9-lazy-modules.mjs     # deferred workspaces still open on first click
+node ui-audit/verify-lazy-panels.mjs          # the lazy planner panels: deferred at boot, present on open
 BASE_URL=https://planyr.io node ui-audit/perf-harness.mjs   # against production
+
+# byte attribution against the base ref (what CI runs)
+node scripts/perf-base-stats.mjs --out .perf/base-stats.json
+node ui-audit/perf-bundle-audit.mjs --compare .perf/base-stats.json
 ```
 
 ## Changing a budget
 
-1. Lowering a **ceiling** after an optimization: do it in the same pull request, and update
-   `measured`.
-2. Raising a **ceiling**: needs a stated reason on the backlog item. "The feature needed it" is a
-   reason; "CI was red" is not.
-3. Changing a **target**: it encodes a product intent (60 fps, a bundle size). Change it when the
-   intent changes, not to make a report look better.
-4. Re-seeding after a production measurement: update `measured`, and drop `localFloor` /
+1. Lowering a bundle **baseline** after an optimization — the good direction, and the only
+   routine one:
+   ```sh
+   npm run build
+   npm run perf:ratchet -- --metric bundle.largestChunkBytes --item B1064 \
+     --reason "what optimization landed, in a sentence someone can check"
+   npm run perf:ratchet -- --all --item B1064 --reason "…"   # every metric that improved
+   ```
+   Commit `ui-audit/perf-budgets.json` in the same commit as the change it describes. Never edit
+   a `baseline` by hand — `test/perfBudgetPolicy.test.js` fails an unlogged edit.
+2. Raising a bundle **baseline**: same command plus `--allow-raise`, and the reason has to say
+   what shipped **and** what was optimized first. "The feature needed it" is a reason; "CI was
+   red" is not. Note that growth inside the headroom band needs no ratchet at all — it is
+   annotated and passes.
+3. Changing a **runtime** ceiling (those are still hand-written literals — they are browser
+   measurements, not build outputs): same standard of justification, stated on the item.
+4. Changing a **target**: it encodes a product intent (60 fps, a bundle size). Change it when the
+   intent changes, not to make a report look better. One automatic exception: where a target
+   *equals* its baseline the metric is asserting "no known gap", and the ratchet moves both
+   together so it cannot silently acquire an unowned one.
+5. Re-seeding after a production measurement: update `measured`, and drop `localFloor` /
    provisional notes for any metric that now has a defensible production number.
-5. **Withdrawing a seed** (what happened to the frame metrics on 2026-07-29): when a number turns
+6. **Withdrawing a seed** (what happened to the frame metrics on 2026-07-29): when a number turns
    out to have come from an instrument that cannot be trusted, say so in the metric's `note` —
    what the old number was, why it is withdrawn, and which instrument replaced it — and add a
    `seededFrom` naming that instrument and the run. Do not quietly overwrite it: the next reader

@@ -12,7 +12,7 @@
 |---|---|---|---|---|
 | B1126 | "Computed but never RENDERED" is a class, and the ratchet only catches half of it: the unmounted-JSX half has no guard | [Site Planner / Yield] | #ui #yield #testing | sandbox |
 | B1106 | Ground vs grid: a real project-coordinate transform (combined factor + project origin on the site model) | [Platform / geo] | #coordinates | sandbox |
-| B1064 | Finish the SitePlannerApp split: extract SitePlanner's panels into lazily-loaded child components (the remaining ~750 KB that dynamic imports provably cannot move) | [Infra / Build] | #infra #perf #site-planner | sandbox |
+| B1064 | Finish the SitePlannerApp split: extract SitePlanner's panels into lazily-loaded child components (the remaining ~750 KB that dynamic imports provably cannot move) | [Infra / Build] | #infra #perf #site-planner | live |
 | B1063 | The reference scenario now issues 513 aerial tile requests where the committed floor was 182 — a 2.8× jump that landed with the map-side perf merge, not with any bundle work | [Site Planner / map] | #site-planner #perf #gis | live |
 | B998 | NEW-28: consolidate ALL flood information into ONE "Flood" panel (FEMA zones + floodway + governing WSEs + check state/vintage + governing district + downstream implications) | [Site Planner / yield · floodplain] | #site-planner #yield #floodplain #ui | live |
 | B1000 | BKDD outfall/gravity feasibility should use the 25-YR receiving WSE, not the 100-yr (§5.D.2/§5.D.3) | [Site Planner / stormwater · pond] | #site-planner #yield #pond #floodplain | live |
