@@ -29,13 +29,16 @@ import { flushSync } from "react-dom";
 import { BASEMAPS } from "./basemaps.js";
 import { releaseCanvas } from "./releaseCanvas.js";
 import { ALL_LAYERS, gisProxyEnabled } from "./layers.js";
+// PDF-PARITY for the NEW-1 stacking model: the sheet has to composite the two GIS bands the
+// screen does — fills UNDER the drawn plan, strokes and points OVER it.
+import { rolesOf, exportsOverPlan } from "./mapStack.js";
 import { overlayExportRequest } from "./layerRequest.js";
 import {
   lngLatRingToFeet, feetToLatLng, aerialPlacement, overlayExportPlacement,
   feetExtentToBbox, aerialTileGrid, pickAerialTileZoom,
 } from "./arcgis.js";
 import { siteToFeatures, buildKmz, kmzFilename, KMZ_MIME } from "./kmzExport.js";
-import { buildSheetFurnitureSvg } from "./sheetFurniture.js";
+import { buildSheetFurnitureSvg } from "./sheetFurnitureLayout.js";
 import { printSheetLayout, buildPrintSheetSvg, sheetFileName, formatDateStamp } from "./printSheet.js";
 import { printStrokeWidth, sheetFitScale } from "./exportStyle.js";
 import { sheetLabelPpf } from "./exportLabelScale.js";
@@ -251,8 +254,14 @@ export function createExportSheet(ctx) {
     // array's bottom→top order. Tagged data-export-overlay so inlineImages warns loudly (never
     // silently) if a layer's fetch is dropped; data-fallback-href = the direct-agency URL to retry
     // before dropping (when the same-origin proxy isn't serving).
-    if (includeMapLayers && exportOverlays && exportOverlays.length) {
-      for (const o of exportOverlays) {
+    /* NEW-1 — the sheet composites the SAME two bands the screen does (PDF-PARITY). `under`
+     * goes in at the running backdrop anchor as before; `over` is appended AFTER the drawn plan,
+     * so a contour crosses a printed building exactly as it does on screen and a floodplain fill
+     * still can't bury one. Both emitters below take the band as an argument, so screen order and
+     * sheet order cannot drift apart. */
+    const overRaster = [], overVector = [];
+    const placeRaster = (list, append) => {
+      for (const o of list) {
         const tl = f2p({ x: o.x, y: o.y });
         const sy = o.ftPerPxY || o.ftPerPx;
         const im = document.createElementNS("http://www.w3.org/2000/svg", "image");
@@ -267,9 +276,13 @@ export function createExportSheet(ctx) {
         im.setAttribute("data-layer-id", o.id);
         if (o.label) im.setAttribute("data-layer-label", o.label);
         if (o.fallbackSrc) im.setAttribute("data-fallback-href", o.fallbackSrc);
-        clone.insertBefore(im, anchor.nextSibling);
-        anchor = im;
+        if (append) clone.appendChild(im);
+        else { clone.insertBefore(im, anchor.nextSibling); anchor = im; }
       }
+    };
+    if (includeMapLayers && exportOverlays && exportOverlays.length) {
+      placeRaster(exportOverlays.filter((o) => !o.over), false);
+      overRaster.push(...exportOverlays.filter((o) => o.over));
     }
     // GIS VECTOR/client layers (B745): transmission, road-authority, county/city/ETJ boundaries,
     // contours, drainage arrows, OSM/Mapillary points. No server image — each layer's lat/lon
@@ -277,9 +290,9 @@ export function createExportSheet(ctx) {
     // frame via lngLatRingToFeet → f2p and redrawn as styled SVG, composited at the SAME z-anchor
     // as the raster overlays (above them, below the drawn geometry). Colors/weights ride from the
     // live layer (PDF-PARITY); stroke weights ride the export thinning pass like every plan line.
-    if (includeMapLayers && exportVectorOverlays && exportVectorOverlays.length) {
-      const projectLngLat = (ll) => f2p(lngLatRingToFeet([ll], origin.lon, origin.lat)[0]); // the ONE projection seam
-      for (const v of exportVectorOverlays) {
+    const projectLngLat = (ll) => f2p(lngLatRingToFeet([ll], origin.lon, origin.lat)[0]); // the ONE projection seam
+    const placeVector = (list, append) => {
+      for (const v of list) {
         const { svg, skipped } = buildOverlayVectorFragment(v.features, projectLngLat, { opacity: v.opacity, labels: v.labels });
         if (skipped) console.warn(`[export] ${v.label || v.id}: ${skipped} vector feature(s) skipped (non-finite projection)`);
         if (!svg) continue;
@@ -288,9 +301,13 @@ export function createExportSheet(ctx) {
         g.setAttribute("data-layer-id", v.id);
         if (v.label) g.setAttribute("data-layer-label", v.label);
         g.innerHTML = svg; // inline SVG fragment — same innerHTML idiom as the sheet furniture below
-        clone.insertBefore(g, anchor.nextSibling);
-        anchor = g;
+        if (append) clone.appendChild(g);
+        else { clone.insertBefore(g, anchor.nextSibling); anchor = g; }
       }
+    };
+    if (includeMapLayers && exportVectorOverlays && exportVectorOverlays.length) {
+      placeVector(exportVectorOverlays.filter((v) => !v.over), false);
+      overVector.push(...exportVectorOverlays.filter((v) => v.over));
     }
     // Site-plan overlays (B72) obey the print dialog's "Print overlay" toggle (B131):
     // off → drop every placed overlay raster (its editor chrome + any unsynced
@@ -319,6 +336,10 @@ export function createExportSheet(ctx) {
       ring.forEach((p) => { const q = f2p(p); x0 = Math.min(x0, q.x); y0 = Math.min(y0, q.y); x1 = Math.max(x1, q.x); y1 = Math.max(y1, q.y); });
       obstacles.push({ x: x0 - dimPad, y: y0 - dimPad, w: (x1 - x0) + 2 * dimPad, h: (y1 - y0) + 2 * dimPad });
     });
+    /* The OVER band — appended after every drawn element, before the sheet furniture, so the
+     * scale bar and north arrow still read on top of everything (they are chrome, not data). */
+    if (overRaster.length) placeRaster(overRaster, true);
+    if (overVector.length) placeVector(overVector, true);
     const furn = document.createElementNS("http://www.w3.org/2000/svg", "g");
     furn.setAttribute("font-family", "Inter, system-ui, sans-serif");
     furn.setAttribute("data-furniture", "1"); // skip the export stroke-thinning pass — sized with its own hairlines
@@ -589,18 +610,27 @@ export function createExportSheet(ctx) {
         } else continue;
       }
       if (layerStatus?.[id]?.state === "failed") continue; // confirmed-dead host — requesting it would only drop+warn
-      const req = overlayExportRequest(rasterCfg, { proxy });
-      const geomOpts = { layersParam: req.layersParam, renderingRule: req.renderingRule, maxPx: 2400 };
-      const p = overlayExportPlacement(bbox, origin.lon, origin.lat, { exportBase: `${req.url}/${req.endpoint}`, ...geomOpts });
-      // Proxy→direct CORS fallback for the export inliner (mirrors the live layer's fail-open):
-      // the same-origin proxy image is always canvas-clean, but if it isn't serving (e.g. a
-      // preview deploy) the inliner retries the direct-agency URL before dropping the layer.
-      const pDirect = proxy && req.direct !== req.url
-        ? overlayExportPlacement(bbox, origin.lon, origin.lat, { exportBase: `${req.direct}/${req.endpoint}`, ...geomOpts })
-        : null;
-      out.push({ ...p, id, label: cfg.label, opacity: st.opacity ?? cfg.opacity ?? 0.8, fallbackSrc: pDirect ? pDirect.src : null });
+      /* NEW-1 — ONE request per declared ROLE, exactly like the screen. A role-split source
+         (FEMA zones + boundaries, BKDD watersheds + streams) therefore prints as two images:
+         the fill under the plan, the strokes over it. A single-role source is one image, as
+         before. `over` is the band; the composer inserts each set at its own anchor. */
+      const parts = rolesOf(cfg);
+      const roleParts = parts.length ? parts : [{ role: "area", layers: rasterCfg.layers ?? null }];
+      for (const part of roleParts) {
+        const partCfg = part.layers == null || part.layers === rasterCfg.layers ? rasterCfg : { ...rasterCfg, layers: part.layers };
+        const req = overlayExportRequest(partCfg, { proxy });
+        const geomOpts = { layersParam: req.layersParam, renderingRule: req.renderingRule, maxPx: 2400 };
+        const p = overlayExportPlacement(bbox, origin.lon, origin.lat, { exportBase: `${req.url}/${req.endpoint}`, ...geomOpts });
+        // Proxy→direct CORS fallback for the export inliner (mirrors the live layer's fail-open):
+        // the same-origin proxy image is always canvas-clean, but if it isn't serving (e.g. a
+        // preview deploy) the inliner retries the direct-agency URL before dropping the layer.
+        const pDirect = proxy && req.direct !== req.url
+          ? overlayExportPlacement(bbox, origin.lon, origin.lat, { exportBase: `${req.direct}/${req.endpoint}`, ...geomOpts })
+          : null;
+        out.push({ ...p, id, label: cfg.label, over: exportsOverPlan(part.role), opacity: st.opacity ?? cfg.opacity ?? 0.8, fallbackSrc: pDirect ? pDirect.src : null });
+      }
     }
-    return out; // ordered bottom→top
+    return out; // ordered bottom→top within each band
   };
   // B745 — a Leaflet path style ({color,weight,opacity,dashArray}) → our normalized style. Base
   // opacity stays 1 here (per-layer opacity is applied once, via the pure emitter's opts.opacity).
@@ -739,7 +769,10 @@ export function createExportSheet(ctx) {
       const features = (norm && norm.features) || [];
       const labels = (norm && norm.labels) || [];
       if (!features.length && !labels.length) continue; // on but nothing in view → honest omission
-      out.push({ id, label: cfg.label, features, labels, opacity: st.opacity ?? cfg.opacity ?? 0.9 });
+      // NEW-1 — the band this layer prints in, from its declared role (a vector layer is never
+      // role-split; only a multi-sublayer raster export is).
+      const vRole = (rolesOf(cfg)[0] || {}).role || "area";
+      out.push({ id, label: cfg.label, features, labels, over: exportsOverPlan(vRole), opacity: st.opacity ?? cfg.opacity ?? 0.9 });
     }
     return out; // ALL_LAYERS registry order == on-screen paint order
   };

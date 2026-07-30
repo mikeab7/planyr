@@ -122,6 +122,27 @@ export default function LayerPanel({
   // currently ON (you should always see what you've enabled). Picker-only signal.
   const lowRel = (k, cfg) => !overlays[k]?.on && (coverage[k] === "out" || (cfg.needsSetup && !tok));
 
+  /* NEW-2 — THE ONE OPACITY CONTROL, used by every row shape in this panel (solo, the
+   * pairwise City-limits-&-ETJ composite, and the N-ary merge groups). Per-layer opacity is
+   * the ONLY escape hatch in the stacking model (lib/mapStack.js): the draw order is fixed and
+   * there is no z-order picker anywhere, so "I want to see through this" must have exactly ONE
+   * answer, in exactly the same place, on every layer in every group. Named ◐ so it reads as a
+   * see-through control rather than an anonymous slider — the discoverability half of the ask —
+   * and the live percentage is the feedback that it did something. */
+  const opacityControl = (label, value, onChange) => (
+    <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 2 }}
+      title="See through this layer">
+      <span aria-hidden="true" style={{ fontSize: 11, color: MUTED, flex: "none", lineHeight: 1 }}>◐</span>
+      <input type="range" min={0.1} max={1} step={0.05} value={value}
+        aria-label={`${label} opacity`}
+        onChange={(e) => onChange(+e.target.value)}
+        style={{ flex: 1, minWidth: 0 }} />
+      <span style={{ fontSize: 10, color: MUTED, flex: "none", width: 26, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
+        {Math.round(value * 100)}%
+      </span>
+    </div>
+  );
+
   const row = (k, cfg, { dim = false } = {}) => {
     const st = overlays[k];
     if (!st) return null;
@@ -148,12 +169,7 @@ export default function LayerPanel({
               animation: ls.state === "loading" ? "pf-pulse 1.1s ease-in-out infinite" : "none" }} />
           )}
         </div>
-        {st.on && (
-          <input type="range" min={0.1} max={1} step={0.05} value={st.opacity}
-            title="Layer opacity" aria-label={`${cfg.label} opacity`}
-            onChange={(e) => set(k, { opacity: +e.target.value })}
-            style={{ width: "100%", marginTop: 2 }} />
-        )}
+        {st.on && opacityControl(cfg.label, st.opacity, (v) => set(k, { opacity: v }))}
         {/* B752: inline width control for the assumed easement corridor — no dialog (inline-editor
             rule); commits on change, clamped to the editable bounds. */}
         {st.on && cfg.corridorWidth && (
@@ -249,12 +265,7 @@ export default function LayerPanel({
               animation: combined.state === "loading" ? "pf-pulse 1.1s ease-in-out infinite" : "none" }} />
           )}
         </div>
-        {anyOn && (
-          <input type="range" min={0.1} max={1} step={0.05} value={opacity}
-            title="Layer opacity" aria-label={`${label} opacity`}
-            onChange={(e) => setBoth({ opacity: +e.target.value })}
-            style={{ width: "100%", marginTop: 2 }} />
-        )}
+        {anyOn && opacityControl(label, opacity, (v) => setBoth({ opacity: v }))}
         {/* SIGNAL: solid = city limits, dashed = ETJ — names the two on-map line styles */}
         {anyOn && (
           <div style={{ display: "flex", flexWrap: "wrap", gap: "3px 12px", margin: "4px 0 1px 22px" }}>
@@ -304,12 +315,7 @@ export default function LayerPanel({
               animation: combined.state === "loading" ? "pf-pulse 1.1s ease-in-out infinite" : "none" }} />
           )}
         </div>
-        {anyOn && (
-          <input type="range" min={0.1} max={1} step={0.05} value={opacity}
-            title="Layer opacity" aria-label={`${label} opacity`}
-            onChange={(e) => setAll({ opacity: +e.target.value })}
-            style={{ width: "100%", marginTop: 2 }} />
-        )}
+        {anyOn && opacityControl(label, opacity, (v) => setAll({ opacity: v }))}
         {statusMeta && (combined.state === "failed" || combined.state === "slow" || combined.state === "empty") && (
           <div style={{ fontSize: 10, color: statusMeta.color, lineHeight: 1.35, marginTop: 1 }}>{combined.msg || statusMeta.label}</div>
         )}

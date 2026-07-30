@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { pickScaleBar, furnitureLayout, buildSheetFurnitureSvg, buildScreenFurnitureSvg, chooseFurnitureCorners } from "../src/workspaces/site-planner/lib/sheetFurniture.js";
+import { pickScaleBar } from "../src/workspaces/site-planner/lib/sheetFurniture.js";
+// The corner-placement + SVG-string tier now lives in its own module so it rides the LAZY
+// export chunk instead of the Site route's boot chunk (see sheetFurnitureLayout.js's header).
+// Same functions, moved — every assertion below is unchanged.
+import { furnitureLayout, buildSheetFurnitureSvg, buildScreenFurnitureSvg, chooseFurnitureCorners } from "../src/workspaces/site-planner/lib/sheetFurnitureLayout.js";
 
 const NICE = [10, 20, 25, 50, 100, 200, 250, 500, 1000, 2000, 5000];
 

@@ -329,7 +329,7 @@ function visibleBox(map, { bottom = HOVER_BOTTOM_RESERVE_PX } = {}) {
  * then labels are deduped and thinned by pickLabels. Both sublayers are built inside
  * this ONE call, into a group the caller just cleared — so a label can never outlive
  * the geometry it names (NEW-1). */
-function renderContours(parts, group, { opacity, canvas, onComposed }) {
+function renderContours(parts, group, { opacity, canvas, onComposed, labelPane = null }) {
   // composeContourPaint is the shared, PURE composition (contours.js) — the dedupe, the
   // seam-join, the label thinning and the ONE unit formatter all live there, so the
   // fixture-driven test exercises exactly what the map paints. This function only turns
@@ -344,7 +344,7 @@ function renderContours(parts, group, { opacity, canvas, onComposed }) {
     }).addTo(group);
   }
   for (const lab of labels) {
-    L.marker(lab.ll, { icon: labelIcon(lab.text), interactive: false, keyboard: false }).addTo(group);
+    L.marker(lab.ll, { icon: labelIcon(lab.text), interactive: false, keyboard: false, ...(labelPane ? { pane: labelPane } : null) }).addTo(group);
   }
   return lines.length;
 }
@@ -387,7 +387,11 @@ function coarseNote(cover) {
 // ---------------------------------------------------------------------------
 /* The shared view-driven factory. `render` is one of the two above; both layers key
  * the SAME lattice tiles, so toggling both costs one fetch + one worker job per tile. */
-function terrainLayer(cfg, onStatus, render, emptyMsg, { hover = false } = {}) {
+/* NEW-1 — `pane` / `labelPane` put a terrain layer in a STACKING BAND (lib/mapStack.js).
+ * Contours are declared a LINE role, so on the planner they render in the band ABOVE the
+ * site elements: the whole point of the owner's report — place a building, still see the
+ * ground it sits on. Absent → Leaflet's default overlay/marker panes (the map finder). */
+function terrainLayer(cfg, onStatus, render, emptyMsg, { hover = false, pane = null, labelPane = null } = {}) {
   const group = L.layerGroup();
   let map = null, canvas = null, lastKey = null, opacity = cfg.opacity ?? 0.9;
   let busy = false, pendingMove = false, lastPainted = null;
@@ -412,7 +416,7 @@ function terrainLayer(cfg, onStatus, render, emptyMsg, { hover = false } = {}) {
   const paint = (parts, ts, opts = {}) => {
     group.clearLayers();
     const n = render(parts, group, {
-      map, opacity, canvas,
+      map, opacity, canvas, labelPane,
       onComposed: (c) => { composed = c; hoverIndex = null; },
     });
     // Re-parent the (now emptied) hover sublayer: the label named the geometry that was
@@ -544,7 +548,7 @@ function terrainLayer(cfg, onStatus, render, emptyMsg, { hover = false } = {}) {
   group.onAdd = function (m) {
     L.LayerGroup.prototype.onAdd.call(this, m);
     map = m;
-    canvas = L.canvas();
+    canvas = L.canvas(pane ? { pane } : {});
     if (hover) { group.addLayer(hoverGroup); hoverGroups.add(group); }
     m.on("moveend", refresh);
     refresh();
@@ -577,7 +581,7 @@ export function setContourHover(map, ll) {
   return hit;
 }
 
-export const contourLayer = (cfg, onStatus) =>
-  terrainLayer(cfg, onStatus, renderContours, "No contour lines in view", { hover: true });
-export const flowLayer = (cfg, onStatus) =>
-  terrainLayer(cfg, onStatus, renderArrows, "Ground too flat to call — no confident direction");
+export const contourLayer = (cfg, onStatus, opts = {}) =>
+  terrainLayer(cfg, onStatus, renderContours, "No contour lines in view", { hover: true, ...opts });
+export const flowLayer = (cfg, onStatus, opts = {}) =>
+  terrainLayer(cfg, onStatus, renderArrows, "Ground too flat to call — no confident direction", opts);

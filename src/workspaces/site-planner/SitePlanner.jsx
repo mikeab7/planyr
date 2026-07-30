@@ -36,6 +36,11 @@ import { ftPerPointForScale, scaleForFtPerPoint, chooseOverlayScale, SCALE_PRESE
 import { solveSimilarityLSQ, applySimilarityToOverlay, scaleOverlayAbout, calibrateUnderlayScale } from "./lib/overlayAlign.js";
 import { hasPrintableOverlay } from "./lib/overlayPrint.js";
 import { syncOverlayLayers, withTileRetry, ALL_LAYERS, probeService, layerVintage, identifyOverlaysAt, rasterIdentifyLayers } from "./lib/layers.js";
+// NEW-3 — the per-building floodplain answer, off the SAME geometry the mitigation ledger uses.
+import { buildingFloodExposure, exposureHeadline, FLOOD_CLASS_LABEL } from "./lib/buildingFloodExposure.js";
+// NEW-1 — the ONE map stacking model: filled GIS layers under the site elements, line/point
+// GIS layers over them. No mode, no shortcut, no per-layer z-order picker.
+import { CANVAS_Z, PANE_AREA, PANE_LINE, PANE_AREA_LABEL, PANE_LINE_LABEL } from "./lib/mapStack.js";
 import { loadRasterIdentify, makeHoverIdentify, rasterIdentifyNow } from "./lib/rasterIdentifyLazy.js";
 import { sanitizeLayerOverrides, overridesFromOverlays, overlaysWithOverrides, applyOnOverrides, overridesSig } from "./lib/layerPrefs.js";
 import { BASEMAPS } from "./lib/basemaps.js";
@@ -122,7 +127,7 @@ import {
 import { apprRows, apprAll, apprVal, findAttr, situsAddress, ownerName, parcelPanelRows } from "./lib/appraisal.js";
 import { makeParcelDisplayLayer, ADD_CURSOR, PARCEL_MINZOOM } from "./lib/parcelDisplay.js";
 import { geocodeAddress } from "./lib/geocode.js";
-import { TYPE, typeStyle, elStyle, parcelDefaultStyle, toHex6, byZ, zOrder, setPreviewStyleDefaults, setbackLineStyle, SETBACK_LINE } from "./lib/planStyle.js";
+import { TYPE, typeStyle, elStyle, parcelDefaultStyle, toHex6, byZ, zOrder, setPreviewStyleDefaults, setbackLineStyle, setbackChipStyle, SETBACK_LINE } from "./lib/planStyle.js";
 import { byZAsc, nextZ, Z_GAP } from "./lib/zOrder.js";
 import { reorderByZ, arrangeFlags } from "./lib/arrange.js";
 import { commonStyleState, selectionRingFeet } from "./lib/multiStyle.js";
@@ -182,6 +187,7 @@ import { CURB_TYPES as COST_CURB_TYPES, CURB_TYPE_META, roadCurbType, roadCurbed
 import { layoutLabels, buildingLabelLines, dimCalloutVisible, detailLabelVisible, pondParamLabelVisible, pondParamFontPx, suppressedDimIds, dimFontScale, dimFontPx, boxOf, DIM_CALLOUT_MIN_PPF } from "./lib/labelLayout.js";
 import { inlineLines } from "./lib/labelFitLadder.js";
 import { calloutLayout, minCalloutWidthFt } from "./lib/calloutLayout.js";
+import { splitOverlayBands, overlayPanelOrder, overlayOrderFlags, reorderOverlays, setOverlayBand, overlayBand } from "./lib/overlayOrder.js";
 import { DOCK_ZONES, MAX_DOCK_ZONES, ZONE_CATALOG, zoneDepthDefaults, catalogDepthDefault, layoutZoneByKind, usableCourtSpan, zoneAlongSpan, boxExtentAlong, resizedZoneAlongLen, dockSidesFor, footprintDepth, footprintLength, footprintAxes, strandedZoneIds, pruneStrandedZones } from "./lib/dockZones.js";
 import { computeBuildingGrid, resolveGridSettings, placeDockDoors } from "./lib/buildingGrid.js";
 import { convertBuildingToPolygon, dockLineAt, dockEdgeLine, projectOntoLine, frameBBox, translateDockLines, dockSegExtent, clipSegmentToRing } from "./lib/footprintEdit.js";
@@ -315,6 +321,16 @@ import { resolveDraftStepBack } from "./lib/drafts.js";
  *  feet -> pixels via pxPerFoot + pan offsets. Labels & handles are
  *  drawn in screen (pixel) space for crisp, zoom-independent UI.
  * ------------------------------------------------------------------ */
+
+/* NEW-1 — the one spelling of the panel-surface token. A minifier does NOT dedupe string
+ * literals, so a CSS custom property written out inline once per style object ships one full
+ * copy per site: this file spelled `var(--surface-raised)` forty-one separate times. Hoisting
+ * it is byte-identical at runtime (same string, same value, resolved by the same stylesheet)
+ * and is this change's matching optimization for the bundle budget — the site chunk had 0.3 KB
+ * of headroom band left when the setback-chip fix landed on it. Spell new uses `SURF_RAISED`. */
+const SURF_RAISED = "var(--surface-raised)";
+const MONO_FONT = "ui-monospace, monospace";   // same reason — spelled out 21× before this
+const BORDER_1 = "1px solid var(--border-default)"; // …and this hairline 15× (4 quoted, 11 templated)
 
 const SQFT_PER_ACRE = 43560;
 const POND_ADD_MIN_SF = 50; // B157: below this, an expansion is too small to seat its own added-area label
@@ -2309,6 +2325,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
    * contributors. Zero whenever there is no basemap frame to register against. */
   const [regShift, setRegShift] = useState({ dx: 0, dy: 0 });
   const geoWrapRef = useRef(null);
+  /* NEW-1 — the MAP-TOP HOST. Leaflet keeps every pane inside its own `_mapPane`, which
+   * carries the pan transform and therefore its own stacking context, so NO z-index on a
+   * pane can lift it above the planner SVG. The line-role GIS layers get a pane hosted
+   * OUTSIDE the map instead, in a sibling box above the SVG, with the two transforms that
+   * position it mirrored: the wrap's live gesture transform (geoTopWrapRef) and Leaflet's
+   * own map-pane translate (geoTopPaneRef). Both mirrors are written in the SAME frame as
+   * the original (VIEWPORT-STABLE), so the contours never lag the imagery they trace. */
+  const geoTopWrapRef = useRef(null);
+  const geoTopPaneRef = useRef(null);
   const geoMapRef = useRef(null);
   const geoBaseRef = useRef(null);
   const geoBackfillRef = useRef(null); // coarse low-zoom layer for instant blurry coverage
@@ -2354,6 +2379,27 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       zoomSnap: 0, fadeAnimation: false, zoomAnimation: false, inertia: false,
     }).setView([origin.lat, origin.lon], 17);
     geoMapRef.current = map;
+    /* NEW-1 — the two stacking bands, created ONCE, each in its own host:
+     *   AREA (fills) → a pane inside Leaflet's map pane, under the planner SVG
+     *   LINE (strokes/points) → a pane in the map-top host, over the planner SVG
+     * Everything after this just names a pane; nothing anywhere picks a z-order. */
+    const areaPane = map.createPane(PANE_AREA); areaPane.style.zIndex = 350;
+    const areaLabelPane = map.createPane(PANE_AREA_LABEL); areaLabelPane.style.zIndex = 360; areaLabelPane.style.pointerEvents = "none";
+    const topHost = geoTopPaneRef.current;
+    if (topHost) {
+      topHost.replaceChildren(); // a re-created map must not stack a second set of panes here
+      const linePane = map.createPane(PANE_LINE, topHost); linePane.style.zIndex = 400; linePane.style.pointerEvents = "none";
+      const lineLabelPane = map.createPane(PANE_LINE_LABEL, topHost); lineLabelPane.style.zIndex = 410; lineLabelPane.style.pointerEvents = "none";
+      // Mirror Leaflet's map-pane translate onto the external host. Zoom + fade animation are
+      // off on this map (it is a slaved backdrop), so the transform only ever changes on a
+      // commit — one assignment per commit, no interpolation to chase.
+      const mirrorPane = () => {
+        const el = geoTopPaneRef.current, mp = map._mapPane;
+        if (el && mp) el.style.transform = mp.style.transform || "";
+      };
+      map.on("move zoom viewreset moveend zoomend resize load", mirrorPane);
+      mirrorPane();
+    }
     geoCommitRef.current = null; // fresh map → no committed view yet (forces a snap on first sync)
     // E2E-only hook (never runs in production): expose the backdrop map so the panel-toggle
     // flash spec can count Leaflet `viewreset` events — a tile-wipe fires one, a panBy doesn't.
@@ -2553,9 +2599,27 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   useLayoutEffect(() => {
     const map = geoMapRef.current;
     const wrap = geoWrapRef.current;
+    /* NEW-1 — every write to the wrap's gesture transform is mirrored onto the map-top host
+     * in the SAME statement, so the line-role GIS pane (contours, streams, mains) tracks the
+     * imagery frame-for-frame instead of lagging a gesture behind it. One helper, so a future
+     * write site cannot forget the mirror. VIEWPORT-STABLE: this whole effect is a LAYOUT
+     * effect, so both writes land before paint. */
+    const setWrapTransform = (value, origin = null) => {
+      const top = geoTopWrapRef.current;
+      if (origin != null) { wrap.style.transformOrigin = origin; if (top) top.style.transformOrigin = origin; }
+      wrap.style.transform = value;
+      if (top) top.style.transform = value;
+    };
     // No basemap frame → nothing to register against, so the drawing sits at its own
     // natural position (NEW-2). An un-located plan is drawn in feet against nothing.
-    if (!map || !wrap || !origin) { setRegShift((r) => (r.dx || r.dy ? { dx: 0, dy: 0 } : r)); return; }
+    // B1189 — GUARD the dispatch, don't just make the updater a no-op. A `setState` whose
+    // updater returns the same value is still a DISPATCH: React only skips scheduling via the
+    // eager-bailout path, which requires the fiber to have no other pending work — and during a
+    // panel close there always is some. So the un-located path (a blank plan: `origin` null) used
+    // to schedule a render on EVERY run of this effect, which is the pump half of the runaway
+    // loop below. Reading `regShift` from the closure is safe (an effect always closes over the
+    // current render's values) and the functional updater still guards the write itself.
+    if (!map || !wrap || !origin) { if (regShift.dx || regShift.dy) setRegShift({ dx: 0, dy: 0 }); return; }
     const fx = (size.w / 2 - view.offX) / view.ppf;
     const fy = (size.h / 2 - view.offY) / view.ppf;
     const center = feetToLatLng({ x: fx, y: fy }, origin.lat, origin.lon);
@@ -2581,11 +2645,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
        by nature and never wanted one. It is NOT the source of the V478 residual — that is
        Leaflet's `_getNewPixelOrigin(...)._round()` on the zoom-commit path, which no call-
        site change can reach (see the NEW-1 block in ui-audit/diagnose-map-lock.mjs). */
-    const exactPt = (ll) => exactContainerPoint(
-      map.project(L.latLng(ll), map.getZoom()),
-      map.getPixelOrigin(),
-      map.layerPointToContainerPoint(L.point(0, 0)),
-    );
+    /* B1189 — the map's current FRAME (its pixel origin + where the layer origin sits in the
+     * container), read fresh at call time. Both reference builders below needed exactly this
+     * pair and each spelled the three Leaflet calls out in full; naming it once means the two
+     * cannot drift, and it is the same read either way. */
+    const mapFrame = () => [map.getPixelOrigin(), map.layerPointToContainerPoint(L.point(0, 0))];
+    const projectAt = (ll) => map.project(L.latLng(ll), map.getZoom());
+    const exactPt = (ll) => exactContainerPoint(projectAt(ll), ...mapFrame());
 
     /* NEW-2 — MEASURE the drawing-vs-imagery registration and hand the residual to the
      * canvas. The reference point is the view centre, whose feet coordinate the drawing
@@ -2636,19 +2702,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // Fallback when there is no tile to read (aerial off, or none arrived yet): the map's own
     // projection, which is the frame every Leaflet VECTOR overlay is placed in.
     const projRef = (c) => ({
-      imgPt: basemapWrapPoint(
-        map.project(L.latLng(c), map.getZoom()),
-        map.getPixelOrigin(),
-        map.layerPointToContainerPoint(L.point(0, 0)),
-        geoOverscan,
-      ),
+      imgPt: basemapWrapPoint(projectAt(c), ...mapFrame(), geoOverscan),
       drawPt: { x: size.w / 2, y: size.h / 2 },
     });
     const syncReg = (c) => {
       try {
         const t = tileRef();
         if (t) noteReg(t.imgPt, t.drawPt, "tile");
-        else noteReg(projRef(c).imgPt, projRef(c).drawPt, "projection");
+        else { const p = projRef(c); noteReg(p.imgPt, p.drawPt, "projection"); } // B1189 — build the reference ONCE (it was projecting twice for one measurement)
       } catch (_) { /* never let a measurement break a commit */ }
     };
 
@@ -2697,7 +2758,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const commit = (c, zoom, ghost) => {
       const cur = map.getZoom();
       if (Math.abs(zoom - cur) < 1e-3) {
-        wrap.style.transform = "";
+        setWrapTransform("");
         try {
           const target = exactPt(c);
           const half = map.getSize().divideBy(2);
@@ -2710,7 +2771,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         return;
       }
       if (ghost) spawnGhost();
-      wrap.style.transform = "";
+      setWrapTransform("");
       // NEW-7 — tell the tile layers the zoom we're about to set. Leaflet wipes every tile
       // on `viewprereset` regardless of whether the NATIVE (rounded) tile zoom actually
       // moved, so a fractional-zoom commit used to throw away tiles it immediately asked
@@ -2774,7 +2835,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // FLASH but not of the SIZE: the container can already have resized between the map's
       // creation and that first commit, and skipping the re-sync baked the stale size in
       // permanently — 86 px of misregistration at rest, with nothing left to compare against.
-      wrap.style.transform = "";
+      setWrapTransform("");
       try { map.invalidateSize({ animate: false, pan: false }); } catch (_) {}
       commit(center, z, false);
       return;
@@ -2795,8 +2856,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       const half = map.getSize().divideBy(2);
       const tx = half.x - p.x * scale;
       const ty = half.y - p.y * scale;
-      wrap.style.transformOrigin = "0 0";
-      wrap.style.transform = `translate3d(${tx}px, ${ty}px, 0) scale(${scale})`;
+      setWrapTransform(`translate3d(${tx}px, ${ty}px, 0) scale(${scale})`, "0 0");
       // NEW-2 — re-measure mid-gesture too, so the drawing stays welded through the drag and
       // not only once it settles. Reading a tile's rect needs no special case for the transform
       // just written above: the rect already includes it.
@@ -2812,7 +2872,39 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     clearTimeout(geoCommitTimer.current);
     if (Math.abs(z - prev.zoom) > 0.75) { commit(center, z, true); }
     else { geoCommitTimer.current = setTimeout(() => commit(center, z, true), 160); }
-  }, [view, size, origin, geoOverscan]); // eslint-disable-line react-hooks/exhaustive-deps
+    /* B1189 — DEPEND ON `size`'s NUMBERS, NEVER ON THE STATE OBJECT'S IDENTITY.
+     *
+     * This effect used to list `[view, size, origin, geoOverscan]`. It reads only NUMBERS out of
+     * the first three, but taking the whole object made it re-run whenever a value-identical
+     * replacement object appeared — and one does. `setSize`'s updater ALLOCATES whenever the
+     * measured width differs from the state it is applied to, and React re-applies a retained
+     * updater against its base state on every subsequent render; once a panel close leaves one
+     * retained, every render minted a NEW `{w:1058,h:640,…}` holding the SAME numbers.
+     *
+     * That closed a cycle with nothing wrong at either end: new `size` object → this effect
+     * re-runs → it dispatches `setRegShift` → React schedules a render → a new `size` object …
+     * Fifty round trips later React aborts the whole subtree with "Maximum update depth
+     * exceeded" (minified #185) and the error boundary replaces the planner. MEASURED on the
+     * unmodified baseline: ~50 runs of this effect with every dep VALUE identical (view
+     * {0.35,60,60}, 1058×640, overscan 213), one component instance, and only FIVE `setSize`
+     * dispatches in the whole trace — the allocations came from re-application, not from writes.
+     *
+     * Comparing `size`'s numbers makes an allocation-only change invisible here, which is exactly
+     * right: nothing in the body can tell two `{w:1058,h:640}` objects apart. The B837 pan
+     * compensation below already depends on `size.w` this way; this effect was the outlier.
+     *
+     * SCOPED TO `size` DELIBERATELY. `view` and `origin` stay whole-object deps: the trace showed
+     * both hold their identity across the loop (only `size` churned), and their writers replace
+     * them only on a real change, so a new object there IS new information. Listing their fields
+     * too would be belt-and-braces against a churn nothing has ever exhibited, and it is not free
+     * — it cost enough bytes to push `largestChunkBytes` past its ceiling in CI.
+     *
+     * NOT fixed by quantising `setSize` (the previous session's proposed next step): the widths
+     * never disagreed — RO and the layout effect both reported 1058 exactly — and rounding
+     * `size.w` would put a whole pixel of slop into the view maths that
+     * `ui-audit/diagnose-pointer-accuracy.mjs` asserts to a quarter of a pixel.
+     */
+  }, [view, size.w, size.h, origin, geoOverscan]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => () => { clearTimeout(geoCommitTimer.current); if (geoGhostRef.current) { try { geoGhostRef.current.remove(); } catch (_) {} geoGhostRef.current = null; } }, []);
 
@@ -2840,6 +2932,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     let idleId = null, idleTimer = null;
     const order = orderLayersByPriority(overlays, ALL_LAYERS);
     const sync = () => syncOverlayLayers(geoMapRef.current, overlays, overlayRefs.current, {
+      // NEW-1 — the two stacking bands (lib/mapStack.js). Each layer lands in the one its
+      // declared ROLE names: fills under the plan, strokes and points over it.
+      panes: { area: PANE_AREA, areaLabel: PANE_AREA_LABEL, line: PANE_LINE, lineLabel: PANE_LINE_LABEL },
       admit: (id) => order.indexOf(id) < staged * LAYER_STAGE_SIZE,
       onStatus: (id, state, msg, extra) => setLayerStatus && setLayerStatus((s) => ({ ...s, [id]: state ? { state, msg, ts: extra?.ts ?? null, stale: extra?.stale ?? false } : null })),
       onError: (cfg, msg) => { flashWarn(`⚠ “${cfg.label}” layer failed: ${msg || "service may be down or moved"}.`, 6000); },
@@ -3716,7 +3811,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const histKey = (s) =>
     JSON.stringify({ p: s.parcels, e: s.els, m: s.measures, c: s.callouts, k: s.markups }) +
     "|" + (s.underlay ? `${s.underlay.x},${s.underlay.y},${s.underlay.ftPerPx},${s.underlay.ftPerPxY},${s.underlay.opacity},${s.underlay.locked},${s.underlay.src?.length}` : "none") +
-    "|" + ((s.sheetOverlays || []).map((o) => `${o.id}:${o.x},${o.y},${o.ftPerPx},${o.rotation},${o.opacity},${o.locked},${o.page},${o.src ? o.src.length : 0},${o.visible === false ? 0 : 1}`).join(";") || "no") + // RC-8: no Math.round — a sub-foot overlay nudge must be a distinct undo frame (underlay pos isn't rounded either)
+    "|" + ((s.sheetOverlays || []).map((o) => `${o.id}:${o.x},${o.y},${o.ftPerPx},${o.rotation},${o.opacity},${o.locked},${o.page},${o.src ? o.src.length : 0},${o.visible === false ? 0 : 1},${o.aboveParcel === true ? 1 : 0}`).join(";") || "no") + // NEW-2: aboveParcel is in the signature so promoting a reference over the plan is its own undo frame (like `visible`). RC-8: no Math.round — a sub-foot overlay nudge must be a distinct undo frame (underlay pos isn't rounded either)
     "|L:" + overridesSig(s.layerOverrides); // NEW-1 — GIS Layers-panel visibility set, so a layer toggle is a distinct, undoable frame (matches sheetOverlays.visible)
   // Pure snapshot stack (lib/history.js) — dedups no-op frames (B32) and always
   // compares against the live state we pass in (stateRef.current), so undo/redo
@@ -6828,14 +6923,22 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     flashWarn(`Pasted “${o.name}”.`, 3000);
   };
   // Draw order = array order (later paints on top), so front = end, back = start. No-op at the ends.
+  // NEW-2 — front/back within the reference's OWN band (below-the-plan vs above-the-plan). Crossing
+  // the parcel is the explicit toggle's job, never a side effect of "bring to front". The pure
+  // engine returns the SAME array on a no-op, so an at-the-end press costs no history frame.
   const reorderOverlay = (id, mode) => {
-    const idx = sheetOverlays.findIndex((o) => o.id === id);
-    if (idx < 0) return;
-    if ((mode === "front" && idx === sheetOverlays.length - 1) || (mode === "back" && idx === 0)) return;
+    const next = reorderOverlays(sheetOverlays, id, mode);
+    if (next === sheetOverlays) return;
     pushHistory();
-    const next = sheetOverlays.slice();
-    const [item] = next.splice(idx, 1);
-    if (mode === "front") next.push(item); else next.unshift(item);
+    setSheetOverlays(next);
+  };
+  // NEW-2 — promote / demote ONE reference across the parcel + site elements. Persisted on the
+  // reference record (`aboveParcel`), so it survives a reload and rides the same save/sync path as
+  // every other overlay field; the moved reference lands at the front of its new band.
+  const toggleOverlayBand = (id, above) => {
+    const next = setOverlayBand(sheetOverlays, id, above);
+    if (next === sheetOverlays) return;
+    pushHistory();
     setSheetOverlays(next);
   };
   // B462 — "Align to base edge": snap the overlay's rotation parallel to the nearest parcel boundary
@@ -9290,6 +9393,26 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     },
   };
   const fmZonesSig = `${(floodGeo && floodGeo.ts) || 0}:${fmZones.length}`;
+  /* NEW-3 — "is my building in the floodplain?" as a NUMBER. The owner's real question when he
+   * turns a flood layer on over his plan is a computation, and the geometry is already in hand:
+   * this reuses the SAME classified zones and the SAME intersect the B707/B712 mitigation ledger
+   * runs on, reported per building. Memoized on the footprints + the zone signature (the
+   * mitigationForFootprint discipline), so a canvas drag re-screens once per geometry change. */
+  const fmBuildings = els.filter((e) => e.type === "building" && !e.dogEar).map((e) => {
+    const ring = ringOf(e);
+    return ring && ring.length >= 3 ? { id: e.id, label: e.name || e.label || null, ring } : null;
+  }).filter(Boolean);
+  const fmExposureSig = [
+    fmZonesSig, floodGeo?.state || "",
+    fmBuildings.map((b) => `${b.id}:${b.ring.length}:${ringHash(b.ring)}`).join(","),
+    fmElev.bfeFt ?? "", fmElev.existGradeFt ?? "", fmElev.wse02Ft ?? "",
+    fmElev.derivedBfeFt ?? "", fmElev.derivedXsWselFt ?? "", fmElev.derivedWse02Ft ?? "", fmElev.derivedWse1pctFt ?? "",
+  ].join("~");
+  const floodExposure = useMemo(
+    () => buildingFloodExposure({ buildings: fmBuildings, zones: fmZones, floodState: floodGeo?.state || null, elev: fmElev }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [fmExposureSig],
+  );
   // ---- B826 — the proposed-surface engine: auto-grade the concept off the plan FFE +
   // the B825 class records, on the B808 lattice idiom. The expensive grid build is
   // memoized on a cheap signature (the mitigationForFootprint discipline) so canvas
@@ -13084,6 +13207,190 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     return <g>{px.map((p, i) => vtxRect(`mkv${i}`, p, isSelVtx("markup", m.id, i), "move", (e) => startMarkupVertex(e, m.id, i)))}</g>;
   })();
 
+  /* ================= NEW-1 — THE ALWAYS-ON-TOP HANDLE LAYER =================================
+   * A manipulation handle is CHROME, not content. It must render above every map layer and win
+   * the hit test whenever the pointer is over it, whatever is drawn underneath — otherwise a
+   * handle that happens to fall under the parcel line (the owner's Weld County repro: a
+   * reference overlay's top-right corner grip sitting under the boundary at the E County Rd 14
+   * corner) is invisible AND ungrabbable, and the object cannot be resized from that corner.
+   *
+   * The parcel / element / markup handles were already correct — they are built as consts here
+   * and rendered from the ONE `data-handle-layer` group at the very end of the feet-space
+   * transform. Three sets were NOT, because they were authored inline inside the content pass
+   * that draws their object: the REFERENCE overlay's scale/rotate grips + its calibration marks,
+   * the CALLOUT's width grips + leader grips, and the MEASUREMENT's vertex grips. Those three are
+   * hoisted below so every handle in the planner lives in one layer with one rule.
+   *
+   * Paint order IS hit-test order in SVG (a later sibling wins a point it covers), so being last
+   * inside the top group buys both properties at once — there is no second hit-test rule to keep
+   * in sync. Every handle still carries data-export="skip", so none of this reaches a sheet.
+   * ⛔ Do NOT author a new handle inline next to the thing it manipulates — add it here.
+   * B1184/B1185 are untouched by this: the screen-space thinning and the smaller mark with the
+   * unchanged grab area are decisions about SIZE and COUNT, not about which layer they live in.
+   * ========================================================================================= */
+
+  // The two reference-overlay draw bands (NEW-2). The array is the draw order, bottom → top, and
+  // `splitOverlayBands` keeps each band's relative order — so the canvas paints `below` under the
+  // plan and `above` over it from the same renderer.
+  const overlayBands = splitOverlayBands(sheetOverlays);
+
+  // The reference overlay's CONTENT only (raster or its honest placeholder). All of its selection
+  // chrome moved to overlayChrome below, so this renderer can be dropped into either band pass.
+  const renderSheetOverlay = (o) => {
+    if (o.visible === false) return null; // B277 — hidden overlays don't render on the map (still listed in the References panel, with the eye toggle to bring them back)
+    const tl = f2p({ x: o.x, y: o.y });
+    const w = o.imgW * o.ftPerPx * view.ppf;
+    const h = o.imgH * o.ftPerPx * view.ppf;
+    const cx = tl.x + w / 2, cy = tl.y + h / 2;
+    return (
+      <g key={o.id} transform={o.rotation ? `rotate(${o.rotation} ${cx} ${cy})` : undefined}
+        style={{ cursor: ovAlignBase === o.id ? "crosshair" : (tool === "select" && !o.locked ? "move" : "default") }}
+        pointerEvents={o.locked ? "none" : "auto"}
+        onPointerDown={(e) => startMoveSheetOverlay(e, o.id)}
+        onContextMenu={(e) => onOverlayContext(e, o.id)}>
+        {o.src ? (
+          // data-overlay-image marks the printable raster so buildExportSvg can include/exclude it per the "Print overlay" toggle (B131).
+          // B749 — a live hi-res object URL overrides the base raster while zoomed in (transient; the record's src is unchanged).
+          // data-overlay-id lets the export swap a transient blob: hi-res back to the persisted base raster before inlining.
+          <image data-overlay-image="1" data-overlay-id={o.id} href={hiresById[o.id] || o.src} x={tl.x} y={tl.y} width={w} height={h} opacity={o.opacity} preserveAspectRatio="none" />
+        ) : (() => {
+          // B784 — an honest, TERMINAL placeholder for an overlay with no raster. "missing" (or a
+          // healed dead pointer) and the never-uploaded "no copy on this device" case are clickable
+          // to re-add the file (transform preserved); a transient "network" failure is clickable to
+          // retry. Only a genuinely-in-flight fetch shows the (now brief) "Loading drawing…".
+          const ovErr = overlayLoadErr[o.id];
+          const ovLoading = !ovErr && !o.storageMissing && (o.idbKey || o.storageKey);
+          const label = (ovErr === "missing" || o.storageMissing)
+            ? `Couldn't load “${o.name}” — click to re-add the file`
+            : ovErr === "network"
+              ? "Couldn't reach storage — click to retry"
+              : ovLoading ? "Loading drawing…"
+              : `Re-add “${o.name}” — image not on this device`;
+          return (<g data-export="skip"
+            style={{ cursor: ovLoading ? "default" : "pointer" }}
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={ovLoading ? undefined : (e) => { e.stopPropagation(); if (ovErr === "network") retryOverlay(o.id); else reAddOverlay(o.id); }}>
+            <rect x={tl.x} y={tl.y} width={w} height={h} fill="#fbf3ee" fillOpacity={0.55} stroke={PAL.accent} strokeWidth={1.5} strokeDasharray="8 5" />
+            <text x={cx} y={cy} textAnchor="middle" fontSize={13} fill={PAL.accent}>{label}</text>
+          </g>);
+        })()}
+      </g>
+    );
+  };
+
+  // Selection chrome + scale/rotate grips for the SELECTED reference overlay, plus the B73
+  // calibration marks. Wrapped in the overlay's own rotation transform so the grips stay on its
+  // corners — the transform is the only thing that had to come along from the content pass.
+  const overlayChrome = (() => {
+    const o = sheetOverlays.find((x) => x.id === selOverlay && x.visible !== false);
+    const calib = ovCalib && (
+      <g key="ovcalib">
+        {ovCalib.pts.map((p, i) => {
+          const sp = f2p(p), isMap = ovCalib.kind === "align" && i % 2 === 1;
+          const label = ovCalib.kind === "align" ? (isMap ? "map" : `${i / 2 + 1}`) : `${i + 1}`;
+          return (
+            <g key={`ovc${i}`} pointerEvents="none">
+              <circle cx={sp.x} cy={sp.y} r={5} fill={isMap ? "#2563eb" : PAL.accent} stroke="#fff" strokeWidth={1.5} />
+              <text x={sp.x + 8} y={sp.y - 6} fontSize={11} fontWeight={700} fill={isMap ? "#2563eb" : PAL.accent} stroke="#fff" strokeWidth={0.5} paintOrder="stroke">{label}</text>
+            </g>
+          );
+        })}
+        {/* connectors: trace = the measured line; align = each drawing→map pair */}
+        {ovCalib.kind === "trace" && ovCalib.pts.length >= 2 && (() => {
+          const a = f2p(ovCalib.pts[0]), b = f2p(ovCalib.pts[1]);
+          return <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke={PAL.accent} strokeWidth={1.5} strokeDasharray={dashZoom("5 4", strokeZk)} pointerEvents="none" />;
+        })()}
+        {ovCalib.kind === "align" && Array.from({ length: Math.floor(ovCalib.pts.length / 2) }, (_, k) => {
+          const a = f2p(ovCalib.pts[2 * k]), b = f2p(ovCalib.pts[2 * k + 1]);
+          return <line key={`ovl${k}`} x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="#2563eb" strokeWidth={1.25} strokeDasharray={dashZoom("4 3", strokeZk)} pointerEvents="none" />;
+        })}
+      </g>
+    );
+    if (!o || tool !== "select") return calib || null;
+    const tl = f2p({ x: o.x, y: o.y });
+    const w = o.imgW * o.ftPerPx * view.ppf;
+    const h = o.imgH * o.ftPerPx * view.ppf;
+    const cx = tl.x + w / 2, cy = tl.y + h / 2;
+    return (
+      <g data-export="skip">
+        <g transform={o.rotation ? `rotate(${o.rotation} ${cx} ${cy})` : undefined}>
+          <rect x={tl.x} y={tl.y} width={w} height={h} fill="none" stroke={PAL.accent} strokeWidth={1.5} strokeDasharray="6 4" pointerEvents="none" />
+          {!o.locked && !ovCalib && (<>
+            {[[tl.x, tl.y], [tl.x + w, tl.y], [tl.x + w, tl.y + h], [tl.x, tl.y + h]].map(([hx, hy], hi) => (
+              <rect key={`hsc${hi}`} data-handle="overlay-scale" x={hx - 5} y={hy - 5} width={10} height={10} rx={2} fill="#fff" stroke={PAL.accent} strokeWidth={1.5}
+                style={{ cursor: hi % 2 === 0 ? "nwse-resize" : "nesw-resize" }} onPointerDown={(e) => startScaleOverlay(e, o.id)} />
+            ))}
+            <line x1={cx} y1={tl.y} x2={cx} y2={tl.y - 22} stroke={PAL.accent} strokeWidth={1.5} pointerEvents="none" />
+            <circle data-handle="overlay-rotate" cx={cx} cy={tl.y - 22} r={5.5} fill="#fff" stroke={PAL.accent} strokeWidth={1.5}
+              style={{ cursor: "grab" }} onPointerDown={(e) => startRotateOverlay(e, o.id)} />
+          </>)}
+        </g>
+        {calib}
+      </g>
+    );
+  })();
+
+  // B619/B913 width grips + per-leader re-aim grips for the SELECTED callout. Hidden while its
+  // text editor is open (the editor's own accent outline cues focus).
+  const calloutHandles = (() => {
+    if (sel?.kind !== "callout" || tool !== "select") return null;
+    const c = callouts.find((x) => x.id === sel.id);
+    if (!c || editCallout?.id === c.id) return null;
+    const st = calloutStyle(c);
+    const { w, h } = calloutLayout(c, st, view.ppf);
+    const bp = f2p(c.box);
+    const cr = calloutCornerRadius(w, h);
+    const gx = bp.x - w / 2, gy = bp.y - h / 2;
+    // [x, y, hx] — hx (∈ {-1,+1}) is which vertical edge this handle drives (width only).
+    const grips = [
+      [gx, gy, -1], [gx + w, gy, 1], [gx + w, gy + h, 1], [gx, gy + h, -1], // corners
+      [gx, gy + h / 2, -1], [gx + w, gy + h / 2, 1],                        // left / right mids (the width must-have)
+    ];
+    const canResize = !c.locked;
+    return (
+      <g data-export="skip">
+        <rect x={gx - 2} y={gy - 2} width={w + 4} height={h + 4} rx={cr + 2} ry={cr + 2} fill="none" stroke={SEL_BLUE} strokeWidth={1.25} pointerEvents="none" />
+        {grips.map(([hx, hy, dir], i) => (
+          <rect key={i} data-handle="callout-width" data-testid={`callout-handle-${dir > 0 ? "r" : "l"}`} x={hx - 4} y={hy - 4} width={8} height={8} fill={SEL_HANDLE_FILL} stroke={SEL_BLUE} strokeWidth={1.25}
+            pointerEvents={canResize ? "all" : "none"} style={canResize ? { cursor: "ew-resize" } : undefined}
+            onPointerDown={canResize ? (e) => startCalloutResize(e, c.id, dir) : undefined} />
+        ))}
+        {/* Per-leader re-aim grip. NEW-5 — no × delete badge (owner rule): a single leader is
+            removed by right-clicking it → "Delete Leader"; Delete removes the whole callout. */}
+        {calloutTips(c).map((tp0, i) => { const tp = f2p(tp0); return (
+          <circle key={`ct${i}`} data-handle="callout-tip" cx={tp.x} cy={tp.y} r={5} fill={SEL_HANDLE_FILL} stroke={SEL_BLUE} strokeWidth={2}
+            style={{ cursor: "move" }} onPointerDown={(e) => startMoveCallout(e, c.id, "tip", i)} />
+        ); })}
+      </g>
+    );
+  })();
+
+  // B230 draggable control points on the SELECTED measurement (every mode — line, polyline,
+  // area, count). Shift-click / right-click an edge inserts a point; right-click / Delete removes
+  // one. The active control point (the Delete target) is shown inverted.
+  // NEW-1 — no × delete badge on a measurement (owner rule): it sat right where the count markers
+  // do and read as part of the measurement itself. Delete key or the right-click menu removes it.
+  const measureHandles = (() => {
+    if (sel?.kind !== "measure" || tool !== "select") return null;
+    const m = measures[sel.i];
+    if (!m || m.locked) return null;
+    const fpts = measPts(m);
+    if (measMode(m) === "count" ? fpts.length < 1 : fpts.length < 2) return null;
+    const st = measureStyle(m, { accent: PAL.accent, uncalibrated: calibrationState === "uncalibrated", selected: true });
+    return (
+      <g data-export="skip" data-testid="measure-selected" data-sel-i={sel.i}>
+        {fpts.map(f2p).map((p, k) => {
+          const on = !!selVtx && selVtx.layer === "measure" && selVtx.id === sel.i && selVtx.index === k;
+          return (
+            <rect key={`mv${k}`} data-handle="measure-vertex" x={p.x - 5} y={p.y - 5} width={10} height={10} rx={2}
+              fill={on ? PAL.paper : st.stroke} stroke={on ? st.stroke : PAL.paper} strokeWidth={on ? 2 : 1.5}
+              style={{ cursor: "move" }} onPointerDown={(e) => startMeasureVertex(e, sel.i, k)} />
+          );
+        })}
+      </g>
+    );
+  })();
+
   /* ----------------------------- UI ----------------------------- */
   // Bluebeam-style left rail: a thin column of small buttons, each opening one menu.
   const railHdr = (t) => <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: PAL.chromeMuted, padding: "8px 4px 4px" }}>{t}</div>;
@@ -13157,7 +13464,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // the same style objects. One definition each: callers override only what genuinely differs
   // (the background, and the hint's stacked `bottom`). Pixel-identical to what shipped before.
   const toastPill = { position: "fixed", left: "50%", bottom: 84, transform: "translateX(-50%)", zIndex: 2500, maxWidth: "80vw", color: "#fff", padding: "9px 16px", borderRadius: 99, fontSize: 12.5, fontWeight: 600, boxShadow: "0 8px 28px rgba(0,0,0,0.3)", display: "flex", gap: 12, alignItems: "center" };
-  const toastActionBtn = { border: "none", background: "var(--surface-raised)", color: PAL.accent, borderRadius: 7, padding: "4px 12px", cursor: "pointer", fontSize: 11.5, fontWeight: 700, whiteSpace: "nowrap" };
+  const toastActionBtn = { border: "none", background: SURF_RAISED, color: PAL.accent, borderRadius: 7, padding: "4px 12px", cursor: "pointer", fontSize: 11.5, fontWeight: 700, whiteSpace: "nowrap" };
   const toastGhostBtn = { border: "1px solid rgba(255,255,255,0.5)", background: "transparent", color: "#fff", borderRadius: 7, padding: "3px 9px", cursor: "pointer", fontSize: 11.5, fontWeight: 600, whiteSpace: "nowrap" };
   // NEW-1 — same treatment for the top-center save/status banner family (read-only · cloud-save
   // failed · saved-to-cloud-only · local-save failed · save-now confirmation · split note). Six
@@ -13168,10 +13475,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // Editable Site/Plan labels that sit inline in the dark top bar.
   // Site/Plan dropdown trigger buttons in the dark top bar.
   const hdrTab = (fs, color, weight) => ({ display: "flex", alignItems: "center", gap: 5, background: "var(--chrome-bg-elev)", border: "1px solid var(--chrome-divider)", borderRadius: 6, color, fontSize: fs, fontWeight: weight, fontFamily: "inherit", padding: "4px 9px", cursor: "pointer", maxWidth: 220, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" });
-  const chip = { padding: "6px 11px", fontSize: 12, borderRadius: 8, border: `1px solid var(--border-default)`, background: "var(--surface-raised)", color: PAL.ink, cursor: "pointer", fontFamily: "inherit", fontWeight: 500, boxShadow: "0 1px 2px rgba(28,25,20,0.04)" };
+  const chip = { padding: "6px 11px", fontSize: 12, borderRadius: 8, border: BORDER_1, background: SURF_RAISED, color: PAL.ink, cursor: "pointer", fontFamily: "inherit", fontWeight: 500, boxShadow: "0 1px 2px rgba(28,25,20,0.04)" };
   // B653: link-styled jump from an inspector's "default" value to its Standards section.
   const linkBtn = { padding: 0, border: "none", background: "transparent", color: PAL.accentText, cursor: "pointer", fontFamily: "inherit", fontSize: 10.5, fontWeight: 600, textDecoration: "underline", textUnderlineOffset: 2 };
-  const numInput = { width: 58, padding: "6px 9px", fontSize: 12, fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS, border: `1px solid var(--border-default)`, borderRadius: 8, color: PAL.ink, background: "var(--surface-raised)" };
+  const numInput = { width: 58, padding: "6px 9px", fontSize: 12, fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS, border: BORDER_1, borderRadius: 8, color: PAL.ink, background: SURF_RAISED };
   // Repeated panel-control variants — one definition each rather than a fresh object literal at
   // every call site (same NEW-2 perf pass as the module-scope ROW*/DASH_OPTIONS atoms above).
   const chipSm = { ...chip, padding: "2px 8px", fontSize: 10.5 };
@@ -13229,10 +13536,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const ovRow = { display: "flex", alignItems: "center", gap: 6, fontSize: 11.5, color: PAL.muted };
   // One shared square icon-button (B574) — identical width/height/padding/hit-target for the overlay
   // header's hide / lock / remove controls, so they can never render at mismatched sizes again.
-  const iconBtn = { width: 30, height: 30, padding: 0, flex: "none", display: "inline-flex", alignItems: "center", justifyContent: "center", borderRadius: 8, border: `1px solid var(--border-default)`, background: "var(--surface-raised)", color: PAL.ink, cursor: "pointer", boxShadow: "0 1px 2px rgba(28,25,20,0.04)" };
-  const spinBtn = { width: 20, height: 13, padding: 0, display: "grid", placeItems: "center", fontSize: 10.5, lineHeight: 1, border: `1px solid var(--border-default)`, borderRadius: 4, background: "var(--surface-raised)", color: PAL.muted, cursor: "pointer", fontFamily: "inherit" };
+  const iconBtn = { width: 30, height: 30, padding: 0, flex: "none", display: "inline-flex", alignItems: "center", justifyContent: "center", borderRadius: 8, border: BORDER_1, background: SURF_RAISED, color: PAL.ink, cursor: "pointer", boxShadow: "0 1px 2px rgba(28,25,20,0.04)" };
+  const spinBtn = { width: 20, height: 13, padding: 0, display: "grid", placeItems: "center", fontSize: 10.5, lineHeight: 1, border: BORDER_1, borderRadius: 4, background: SURF_RAISED, color: PAL.muted, cursor: "pointer", fontFamily: "inherit" };
   const menuItem = (on) => ({ display: "block", width: "100%", textAlign: "left", padding: "7px 10px", fontSize: 12.5, borderRadius: 7, cursor: "pointer", border: "none", background: on ? PAL.accentSoft : "transparent", color: PAL.ink, fontFamily: "inherit", fontWeight: on ? 650 : 500 });
-  const menuPanel = { background: "var(--surface-raised)", border: `1px solid ${PAL.panelLine}`, borderRadius: 12, boxShadow: "0 16px 44px rgba(28,25,20,0.22), 0 3px 10px rgba(28,25,20,0.1)", padding: 6 };
+  const menuPanel = { background: SURF_RAISED, border: `1px solid ${PAL.panelLine}`, borderRadius: 12, boxShadow: "0 16px 44px rgba(28,25,20,0.22), 0 3px 10px rgba(28,25,20,0.1)", padding: 6 };
   const vSep = <span style={{ width: 1, height: 18, background: "rgba(255,255,255,0.12)", margin: "0 6px" }} />;
   // Switch tools and reset any in-progress drafting; also closes the Parcel menu.
   const selectTool = (id) => {
@@ -14065,13 +14372,21 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (!setbackChipsVisible(labelPpf, { editing })) return null;
     const sb = parcelSetbacks(selParcel);
     /* NEW-1 — the chip's TEXT is ALWAYS the standard high-contrast ink, whatever colour the user
-       gave the setback line. The colour identifies the LINE and rides the chip's BORDER only.
-       Before this the numerals inherited `sbStroke`, so the owner's bright-green setback line
-       produced bright-green text on a white plate that he could not read (2026-07-30) — and
-       "Reset setback line", which put the colour back to the default near-black, was what made it
-       legible again. Darkening the user's colour is deliberately NOT the fix: it still fails on a
-       pale yellow or a near-white, and it makes legibility depend on a decoration. */
-    const sbCol = selParcel.sbStroke || PAL.chipInk;
+       gave the setback line. Before this it was `pc.sbStroke || PAL.chipInk`, so the owner's
+       bright-green setback line produced bright-green numerals on a white plate that he could not
+       read (2026-07-30) — and "Reset setback line", which put the colour back to the default
+       near-black, was what made it legible again. Darkening the user's colour is deliberately NOT
+       the fix: it still fails on a pale yellow or a near-white, and it makes legibility depend on
+       a decoration.
+       `setbackChipStyle` (B1205's strand, landed on main while this was in flight) is the ONE
+       place that answers this, and it takes no parcel — so there is nothing here left to couple
+       to. It carries the border as well as the text, which goes one step further than this item's
+       brief asked ("the colour belongs on the line and the chip's border"): the same green-on-white
+       unreadability it was minted to end applies to a saturated border on a chip this small, and
+       reverting it would re-open that. A recoloured setback LINE still takes its own colour (B1100);
+       its CHIP never follows. NEW-3's quieting rides on top as an OPACITY, which is what makes the
+       border read as the neutral hairline that item asked for. */
+    const chipStyle = setbackChipStyle(PAL.chipInk);
     const roles = parcelRoles(selParcel);
     /* NEW-3 — the chip recedes. Smaller numerals, a quieter border on the same neutral plate, and
        the role word dropped wherever it is redundant (`chipRoleWords`): four saturated "Side · 25′"
@@ -14083,9 +14398,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       return (
         <g key={key} style={{ cursor: "pointer" }} onPointerDown={(e) => { e.stopPropagation(); const fp = p2f(e.clientX, e.clientY); onEdit(fp, e.altKey); }}>
           <rect data-testid="setback-chip" x={anchor.x - w / 2} y={anchor.y - CHIP_H / 2 - 1} width={w} height={CHIP_H} rx={3.5}
-            fill="#fff" stroke={sbCol} strokeWidth={1} strokeOpacity={0.5} />
+            fill={chipStyle.plate} stroke={chipStyle.stroke} strokeWidth={1} strokeOpacity={0.5} />
           <text data-testid="setback-chip-text" x={anchor.x} y={anchor.y + 3} textAnchor="middle" fontSize="9.5"
-            fontFamily={NUM_FONT} fontVariantNumeric={TABULAR_NUMS} fill={PAL.chipInk} fontWeight="600">{txt}</text>
+            fontFamily={NUM_FONT} fontVariantNumeric={TABULAR_NUMS} fill={chipStyle.text} fontWeight="600">{txt}</text>
         </g>
       );
     };
@@ -14636,7 +14951,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               onDragOver={(e) => { if (Array.from(e.dataTransfer?.types || []).includes("Files")) e.preventDefault(); }}
               onDragLeave={(e) => { if (!Array.from(e.dataTransfer?.types || []).includes("Files")) return; overlayDragDepth.current = Math.max(0, overlayDragDepth.current - 1); if (overlayDragDepth.current === 0) setOverlayDropOver(false); }}
               onDrop={(e) => { e.preventDefault(); e.stopPropagation(); overlayDragDepth.current = 0; setOverlayDropOver(false); const fs = e.dataTransfer?.files; const f = fs?.[0]; if (f && (isPdfFile(f) || isDxfFile(f) || isDwgFile(f) || (f.type || "").startsWith("image/"))) { if (fs.length > 1) flashWarn("Added the first file — one reference is added at a time.", 6000); addOverlayFile(f); } }}
-              style={{ border: `2px dashed ${overlayDropOver ? PAL.accent : PAL.panelLine}`, borderRadius: 10, padding: 12, textAlign: "center", cursor: overlayBusy ? "default" : "pointer", background: overlayDropOver ? PAL.accentSoft : "var(--surface-raised)", transition: "border-color 120ms, background 120ms" }}>
+              style={{ border: `2px dashed ${overlayDropOver ? PAL.accent : PAL.panelLine}`, borderRadius: 10, padding: 12, textAlign: "center", cursor: overlayBusy ? "default" : "pointer", background: overlayDropOver ? PAL.accentSoft : SURF_RAISED, transition: "border-color 120ms, background 120ms" }}>
               <button style={{ ...btn(false), width: "100%" }} disabled={overlayBusy} onClick={(e) => { e.stopPropagation(); overlayFileRef.current?.click(); }}>{overlayBusy ? "Loading…" : "Add reference (PDF / image / CAD)…"}</button>
               <input ref={overlayFileRef} type="file" accept="application/pdf,image/*,.dxf,.dwg" style={{ display: "none" }} onChange={(e) => { addOverlayFile(e.target.files?.[0]); e.target.value = ""; }} />
               <div style={{ fontSize: 11, color: PAL.muted, marginTop: 9, lineHeight: 1.5 }}>
@@ -14648,7 +14963,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 object all along (render honours both); the CONTROLS are new here. */}
             <div style={{ marginTop: 12 }}>
               {!underlay ? (
-                <div style={{ border: "1px dashed var(--border-default)", borderRadius: 9, padding: 9, background: "var(--surface-raised)" }}>
+                <div style={{ border: "1px dashed var(--border-default)", borderRadius: 9, padding: 9, background: SURF_RAISED }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                     <span style={{ fontSize: 12, color: PAL.ink, fontWeight: 600 }}>Aerial backdrop</span>
                     <span style={{ flex: 1 }} />
@@ -14657,7 +14972,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   <div style={{ fontSize: 10.5, color: PAL.muted, marginTop: 5, lineHeight: 1.45 }}>The aerial sits beneath everything — drop in a screenshot and calibrate it, or capture one from the Map (top-left) already to scale.</div>
                 </div>
               ) : (
-                <div style={{ border: `1px solid ${aerialSel ? PAL.accent : "var(--border-default)"}`, borderRadius: 9, padding: 9, background: "var(--surface-raised)" }}>
+                <div style={{ border: `1px solid ${aerialSel ? PAL.accent : "var(--border-default)"}`, borderRadius: 9, padding: 9, background: SURF_RAISED }}>
                   <button style={{ ...chip, width: "100%", textAlign: "left", borderColor: aerialSel ? PAL.accent : "var(--border-default)", color: aerialSel ? PAL.accent : PAL.ink }} title="Aerial backdrop — image-only, always beneath everything" onClick={() => setAerialSel((v) => !v)}>Aerial backdrop</button>
                   <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 6 }}>
                     <button style={{ ...iconBtn, color: showAerial ? PAL.ink : PAL.muted }} title={showAerial ? "Hide aerial" : "Show aerial"} onClick={() => setShowAerial((v) => !v)}>{showAerial ? <EyeIcon /> : <EyeOffIcon />}</button>
@@ -14697,10 +15012,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.45 }}>
                   Map references are managed here, separate from your Library documents — deleting a Library file won't remove a reference from the map, and adding a Library file won't add one.
                 </div>
-                {sheetOverlays.map((o) => {
+                {/* NEW-2 — the list IS the stacking order, front-most first (the way every layers
+                    panel reads), so what draws over what is visible without opening a menu. */}
+                {sheetOverlays.length > 1 && (
+                  <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.45 }}>Listed front to back — the top one draws over the others.</div>
+                )}
+                {overlayPanelOrder(sheetOverlays).map((o) => {
                   const on = selOverlay === o.id;
+                  const zf = overlayOrderFlags(sheetOverlays, o.id);
                   return (
-                    <div key={o.id} style={{ border: `1px solid ${on ? PAL.accent : "var(--border-default)"}`, borderRadius: 9, padding: 9, background: "var(--surface-raised)" }}>
+                    <div key={o.id} data-testid={`reference-row-${o.id}`} data-reference-band={overlayBand(o)} style={{ border: `1px solid ${on ? PAL.accent : "var(--border-default)"}`, borderRadius: 9, padding: 9, background: SURF_RAISED }}>
                       {/* Filename gets its own full-width row (B578) and WRAPS instead of truncating, so a long
                           sheet name is fully readable; the hide / lock / remove controls drop to their own row. */}
                       <button style={{ ...chip, width: "100%", textAlign: "left", whiteSpace: "normal", overflowWrap: "anywhere", lineHeight: 1.35, borderColor: on ? PAL.accent : "var(--border-default)", color: on ? PAL.accent : PAL.ink }} title={`${o.name} — right-click for Copy, Duplicate, z-order, Lock, Align to base`} onClick={() => setSelOverlay(on ? null : o.id)} onContextMenu={(e) => onOverlayContext(e, o.id)}>{o.name}</button>
@@ -14765,11 +15086,20 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                             <button style={{ ...chip, flex: 1 }} title="Click two ends of a known dimension on the drawing, then enter its real length" onClick={() => { setSelOverlay(o.id); setOvCalib({ id: o.id, kind: "trace", pts: [] }); }}>Trace a length</button>
                             <button style={{ ...chip, flex: 1 }} title="Click a point on the drawing then its spot on the map; repeat for 2+ pairs, then Apply (moves, rotates & scales; 3+ pairs = robust best-fit + residual)" onClick={() => { setSelOverlay(o.id); setOvCalib({ id: o.id, kind: "align", pts: [] }); }}>Align to map</button>
                           </div>
-                          {/* B654: above/below moved into the panel (the right-click menu keeps them too) */}
+                          {/* B654: above/below moved into the panel (the right-click menu keeps them too).
+                              NEW-2 — these order a reference against the OTHER references, within its band. */}
                           <div style={{ display: "flex", gap: 6 }}>
-                            <button style={{ ...chip, flex: 1 }} title="Draw this reference above the other references" onClick={() => reorderOverlay(o.id, "front")}>Bring to front</button>
-                            <button style={{ ...chip, flex: 1 }} title="Draw this reference beneath the other references" onClick={() => reorderOverlay(o.id, "back")}>Send to back</button>
+                            <button style={{ ...chip, flex: 1, opacity: zf.atFront ? 0.5 : 1 }} disabled={zf.atFront} title="Draw this reference above the other references" onClick={() => reorderOverlay(o.id, "front")}>Bring to front</button>
+                            <button style={{ ...chip, flex: 1, opacity: zf.atBack ? 0.5 : 1 }} disabled={zf.atBack} title="Draw this reference beneath the other references" onClick={() => reorderOverlay(o.id, "back")}>Send to back</button>
                           </div>
+                          {/* NEW-2 — the cross-layer control the owner asked for. Off by default: the usual
+                              job is tracing over a scanned plan, where your own property line has to stay on
+                              top. Turn it on for an exhibit you're working ON and the whole reference —
+                              including its resize corners — comes over the parcel and the site elements. */}
+                          <label style={{ ...ovRow, cursor: "pointer" }} title="Draw this reference over the parcel boundary, the setback ring and the site elements instead of underneath them">
+                            <input type="checkbox" data-testid={`reference-above-${o.id}`} checked={overlayBand(o) === "above"} onChange={(e) => toggleOverlayBand(o.id, e.target.checked)} />
+                            <span>Draw above the plan</span>
+                          </label>
                           {/* B654: per-sheet white knockout — re-renders the page, so it needs a PDF source */}
                           {(overlayDocs.current.has(o.id) || (o.storageKey || "").toLowerCase().endsWith(".pdf")) && (
                             <label style={{ ...ovRow, cursor: "pointer" }} title="Make the sheet's white paper transparent so the map shows through the linework">
@@ -14938,11 +15268,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           onChange={(e) => setAddrQuery(e.target.value)}
                           onKeyDown={(e) => { e.stopPropagation(); if (e.key === "Enter") addByAddress(); }}
                           placeholder="123 Main St, Katy TX"
-                          style={{ flex: 1, minWidth: 0, padding: "6px 8px", fontSize: 12, fontFamily: "inherit", border: `1px solid ${PAL.panelLine || "var(--border-default)"}`, borderRadius: 6, outline: "none", color: PAL.ink, background: "var(--surface-raised)" }} />
+                          style={{ flex: 1, minWidth: 0, padding: "6px 8px", fontSize: 12, fontFamily: "inherit", border: `1px solid ${PAL.panelLine || "var(--border-default)"}`, borderRadius: 6, outline: "none", color: PAL.ink, background: SURF_RAISED }} />
                         <button
                           onClick={addByAddress} disabled={addrBusy || !addrQuery.trim()}
                           title="Find this address and add its parcel"
-                          style={{ flex: "none", padding: "6px 11px", fontSize: 12, fontWeight: 600, borderRadius: 6, border: `1px solid ${PAL.accent}`, background: addrBusy || !addrQuery.trim() ? "var(--surface-raised)" : PAL.accent, color: addrBusy || !addrQuery.trim() ? PAL.muted : "var(--surface-raised)", cursor: addrBusy || !addrQuery.trim() ? "default" : "pointer" }}>
+                          style={{ flex: "none", padding: "6px 11px", fontSize: 12, fontWeight: 600, borderRadius: 6, border: `1px solid ${PAL.accent}`, background: addrBusy || !addrQuery.trim() ? SURF_RAISED : PAL.accent, color: addrBusy || !addrQuery.trim() ? PAL.muted : SURF_RAISED, cursor: addrBusy || !addrQuery.trim() ? "default" : "pointer" }}>
                           {addrBusy ? "…" : "Find"}
                         </button>
                       </div>
@@ -15007,7 +15337,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                             style={{ width: 15, height: 15, cursor: "pointer" }} />
                         </label>
                         <button onClick={(e) => { if (mergePick) { toggleMerge(pc.id); setSel({ kind: "parcel", id: pc.id }); } else if (e.shiftKey) { shiftPickParcel(pc.id); } else { setCombineSel([]); setSel({ kind: "parcel", id: pc.id }); } }}
-                          style={{ flex: 1, minWidth: 0, textAlign: "left", padding: "7px 9px", borderRadius: 8, borderLeft: depth ? `2px solid ${PAL.panelLine || "var(--border-default)"}` : undefined, border: `1px solid ${picked ? "#2563eb" : on ? PAL.accent : "var(--border-default)"}`, background: picked ? "rgba(37,99,235,0.14)" : on ? PAL.accentSoft : "var(--surface-raised)", cursor: "pointer", fontFamily: "inherit", opacity: superseded ? 0.5 : inactive ? 0.55 : 1 }}>
+                          style={{ flex: 1, minWidth: 0, textAlign: "left", padding: "7px 9px", borderRadius: 8, borderLeft: depth ? `2px solid ${PAL.panelLine || "var(--border-default)"}` : undefined, border: `1px solid ${picked ? "#2563eb" : on ? PAL.accent : "var(--border-default)"}`, background: picked ? "rgba(37,99,235,0.14)" : on ? PAL.accentSoft : SURF_RAISED, cursor: "pointer", fontFamily: "inherit", opacity: superseded ? 0.5 : inactive ? 0.55 : 1 }}>
                           <div style={{ fontSize: 12.5, fontWeight: 600, color: PAL.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{name}{tag}{picked ? " ✓" : ""}</div>
                           <div style={{ fontSize: 10.5, color: PAL.muted, fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS }}>{f2(polyArea(pc.points) / SQFT_PER_ACRE)} ac{pc.acct ? ` · ${pc.acct}` : ""}</div>
                         </button>
@@ -15016,7 +15346,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                             to remove a parcel, alongside the Parcel tool's Remove mode. */}
                         <button title="Remove this parcel" aria-label={`Remove ${name}`}
                           onClick={(e) => { e.stopPropagation(); removeParcelById(pc.id); }}
-                          style={{ flex: "none", width: 30, alignSelf: "stretch", border: `1px solid var(--border-default)`, borderRadius: 8, background: "var(--surface-raised)", color: PAL.danger, cursor: "pointer", fontFamily: "inherit", fontSize: 15, fontWeight: 700, lineHeight: 1 }}>✕</button>
+                          style={{ flex: "none", width: 30, alignSelf: "stretch", border: BORDER_1, borderRadius: 8, background: SURF_RAISED, color: PAL.danger, cursor: "pointer", fontFamily: "inherit", fontSize: 15, fontWeight: 700, lineHeight: 1 }}>✕</button>
                       </div>
                     );
                   })}
@@ -15313,6 +15643,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             easeAll={easeAll} easeArea={easeArea} easeBldgArea={easeBldgArea} easePaveArea={easePaveArea}
             drainage={drainFacts()} parcelOverlaps={parcelOverlaps}
             heat={{ available: !!fmHeat, on: fmHeatOn, user: fmHeatUser, onToggle: setFmHeatUser, totals: fmHeatTotals, ledgerAcFt: fmResultView?.volumeAcFt ?? null }}
+            floodExposure={floodExposure} // NEW-3 — per-building floodplain exposure, rendered inside the Buildings group
             onMitOpenChange={setFmMitOpen}
           />
           {/* v3 A8 — ④ Costs: the road + earthwork cards fold into one group. Closed summary is
@@ -16213,7 +16544,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           <span
             title={peers.names.join(" · ")}
             data-testid="presence-pill"
-            style={{ display: "inline-flex", alignItems: "center", gap: 5, background: "var(--surface-raised)",
+            style={{ display: "inline-flex", alignItems: "center", gap: 5, background: SURF_RAISED,
               border: "1px solid var(--border-strong)", borderRadius: 999, padding: "2px 9px",
               fontSize: 11.5, fontWeight: 800, color: "var(--text-primary)", whiteSpace: "nowrap" }}
           >
@@ -16319,13 +16650,27 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               <div ref={geoWrapRef} style={{ position: "absolute", inset: -geoOverscan, background: basemapOn ? "#3f3f3f" : PAL.paper }} />
             </div>
           )}
+          {/* NEW-1 — the MAP-TOP HOST: the stacking band that sits ABOVE the plan. It holds the
+              LINE-role GIS panes (contours, streams and canals, easement centrelines, BFE lines,
+              storm/utility mains), so a contour crosses a building as a hairline instead of
+              disappearing behind it — while every filled layer (floodplain, wetlands, districts)
+              stays below in the map's own pane, where it can't bury the plan. Geometry mirrors
+              the backdrop exactly (same clip, same overscan, same gesture transform); it never
+              takes a pointer event, so it can neither block a click nor steal a handle. */}
+          {origin && (
+            <div data-export="skip" style={{ position: "absolute", inset: 0, zIndex: CANVAS_Z.gisLine, overflow: "hidden", pointerEvents: "none" }}>
+              <div ref={geoTopWrapRef} style={{ position: "absolute", inset: -geoOverscan }}>
+                <div ref={geoTopPaneRef} style={{ position: "absolute", left: 0, top: 0, width: 0, height: 0 }} />
+              </div>
+            </div>
+          )}
           {/* "Drop to place" hint — mounts only during an active file drag over the canvas
               (B445; depth-counter + non-obscuring fill B736). pointerEvents:none so it never
               blocks map interaction; a translucent accent wash (both themes) keeps existing
               geometry visible under it; sits above the SVG (zIndex 1) so the cue reads clearly. */}
           {canvasDropOver && (
             <div data-export="skip" style={{ position: "absolute", inset: 0, zIndex: 50, pointerEvents: "none", border: `2.5px dashed ${PAL.accent}`, background: `color-mix(in srgb, ${PAL.accent} 18%, transparent)`, display: "grid", placeItems: "center" }}>
-              <span style={{ background: "var(--surface-raised)", color: PAL.ink, fontWeight: 700, fontSize: 14, padding: "10px 20px", borderRadius: 999, border: `1px solid ${PAL.accent}`, boxShadow: "0 4px 16px rgba(0,0,0,0.18)" }}>Drop site plan to place it on the map</span>
+              <span style={{ background: SURF_RAISED, color: PAL.ink, fontWeight: 700, fontSize: 14, padding: "10px 20px", borderRadius: 999, border: `1px solid ${PAL.accent}`, boxShadow: "0 4px 16px rgba(0,0,0,0.18)" }}>Drop site plan to place it on the map</span>
             </div>
           )}
           {/* B1092 — the GIS identify card. Tap the easement band (or a channel centreline)
@@ -16486,84 +16831,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   onPointerDown={startMoveUnderlay} />;
               })()}
 
-              {/* site-plan overlays (B72) — placed PDF/image backdrops in feet space,
-                  above the basemap/underlay and below parcels/massing/markup; shown
-                  even with the basemap on (the point is to overlay onto the aerial). */}
-              {sheetOverlays.map((o) => {
-                if (o.visible === false) return null; // B277 — hidden overlays don't render on the map (still listed in the Overlay panel, with the eye toggle to bring them back)
-                const tl = f2p({ x: o.x, y: o.y });
-                const w = o.imgW * o.ftPerPx * view.ppf;
-                const h = o.imgH * o.ftPerPx * view.ppf;
-                const cx = tl.x + w / 2, cy = tl.y + h / 2;
-                const isSel = selOverlay === o.id;
-                return (
-                  <g key={o.id} transform={o.rotation ? `rotate(${o.rotation} ${cx} ${cy})` : undefined}
-                    style={{ cursor: ovAlignBase === o.id ? "crosshair" : (tool === "select" && !o.locked ? "move" : "default") }}
-                    pointerEvents={o.locked ? "none" : "auto"}
-                    onPointerDown={(e) => startMoveSheetOverlay(e, o.id)}
-                    onContextMenu={(e) => onOverlayContext(e, o.id)}>
-                    {o.src ? (
-                      // data-overlay-image marks the printable raster so buildExportSvg can include/exclude it per the "Print overlay" toggle (B131).
-                      // B749 — a live hi-res object URL overrides the base raster while zoomed in (transient; the record's src is unchanged).
-                      // data-overlay-id lets the export swap a transient blob: hi-res back to the persisted base raster before inlining.
-                      <image data-overlay-image="1" data-overlay-id={o.id} href={hiresById[o.id] || o.src} x={tl.x} y={tl.y} width={w} height={h} opacity={o.opacity} preserveAspectRatio="none" />
-                    ) : (() => {
-                      // B784 — an honest, TERMINAL placeholder for an overlay with no raster. "missing" (or a
-                      // healed dead pointer) and the never-uploaded "no copy on this device" case are clickable
-                      // to re-add the file (transform preserved); a transient "network" failure is clickable to
-                      // retry. Only a genuinely-in-flight fetch shows the (now brief) "Loading drawing…".
-                      const ovErr = overlayLoadErr[o.id];
-                      const ovLoading = !ovErr && !o.storageMissing && (o.idbKey || o.storageKey);
-                      const label = (ovErr === "missing" || o.storageMissing)
-                        ? `Couldn't load “${o.name}” — click to re-add the file`
-                        : ovErr === "network"
-                          ? "Couldn't reach storage — click to retry"
-                          : ovLoading ? "Loading drawing…"
-                          : `Re-add “${o.name}” — image not on this device`;
-                      return (<g data-export="skip"
-                        style={{ cursor: ovLoading ? "default" : "pointer" }}
-                        onPointerDown={(e) => e.stopPropagation()}
-                        onClick={ovLoading ? undefined : (e) => { e.stopPropagation(); if (ovErr === "network") retryOverlay(o.id); else reAddOverlay(o.id); }}>
-                        <rect x={tl.x} y={tl.y} width={w} height={h} fill="#fbf3ee" fillOpacity={0.55} stroke={PAL.accent} strokeWidth={1.5} strokeDasharray="8 5" />
-                        <text x={cx} y={cy} textAnchor="middle" fontSize={13} fill={PAL.accent}>{label}</text>
-                      </g>);
-                    })()}
-                    {isSel && tool === "select" && (
-                      <rect data-export="skip" x={tl.x} y={tl.y} width={w} height={h} fill="none" stroke={PAL.accent} strokeWidth={1.5} strokeDasharray="6 4" pointerEvents="none" />
-                    )}
-                    {isSel && tool === "select" && !o.locked && !ovCalib && (<g data-export="skip">
-                      {[[tl.x, tl.y], [tl.x + w, tl.y], [tl.x + w, tl.y + h], [tl.x, tl.y + h]].map(([hx, hy], hi) => (
-                        <rect key={`hsc${hi}`} x={hx - 5} y={hy - 5} width={10} height={10} rx={2} fill="#fff" stroke={PAL.accent} strokeWidth={1.5}
-                          style={{ cursor: hi % 2 === 0 ? "nwse-resize" : "nesw-resize" }} onPointerDown={(e) => startScaleOverlay(e, o.id)} />
-                      ))}
-                      <line x1={cx} y1={tl.y} x2={cx} y2={tl.y - 22} stroke={PAL.accent} strokeWidth={1.5} pointerEvents="none" />
-                      <circle cx={cx} cy={tl.y - 22} r={5.5} fill="#fff" stroke={PAL.accent} strokeWidth={1.5}
-                        style={{ cursor: "grab" }} onPointerDown={(e) => startRotateOverlay(e, o.id)} />
-                    </g>)}
-                  </g>
-                );
-              })}
+              {/* site-plan overlays (B72) — placed PDF/image backdrops in feet space, above the
+                  basemap/underlay; shown even with the basemap on (the point is to overlay onto
+                  the aerial). NEW-2 — this is the DEFAULT "below" band: beneath the parcel, the
+                  setback ring, the elements and the markups, so your own property line stays
+                  legible over a scanned plan. A reference the user has explicitly promoted paints
+                  from the SECOND pass further down (overlayBands.above). The selection outline,
+                  the scale/rotate handles and the calibration marks are no longer drawn here —
+                  every manipulation handle lives in the one always-on-top handle layer (NEW-1). */}
+              {overlayBands.below.map(renderSheetOverlay)}
 
-              {/* overlay calibration feedback (B73): clicked points + the traced line */}
-              {ovCalib && ovCalib.pts.map((p, i) => {
-                const sp = f2p(p), isMap = ovCalib.kind === "align" && i % 2 === 1;
-                const label = ovCalib.kind === "align" ? (isMap ? "map" : `${i / 2 + 1}`) : `${i + 1}`;
-                return (
-                  <g key={`ovc${i}`} pointerEvents="none">
-                    <circle cx={sp.x} cy={sp.y} r={5} fill={isMap ? "#2563eb" : PAL.accent} stroke="#fff" strokeWidth={1.5} />
-                    <text x={sp.x + 8} y={sp.y - 6} fontSize={11} fontWeight={700} fill={isMap ? "#2563eb" : PAL.accent} stroke="#fff" strokeWidth={0.5} paintOrder="stroke">{label}</text>
-                  </g>
-                );
-              })}
-              {/* connectors: trace = the measured line; align = each drawing→map pair */}
-              {ovCalib && ovCalib.kind === "trace" && ovCalib.pts.length >= 2 && (() => {
-                const a = f2p(ovCalib.pts[0]), b = f2p(ovCalib.pts[1]);
-                return <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke={PAL.accent} strokeWidth={1.5} strokeDasharray={dashZoom("5 4", strokeZk)} pointerEvents="none" />;
-              })()}
-              {ovCalib && ovCalib.kind === "align" && Array.from({ length: Math.floor(ovCalib.pts.length / 2) }, (_, k) => {
-                const a = f2p(ovCalib.pts[2 * k]), b = f2p(ovCalib.pts[2 * k + 1]);
-                return <line key={`ovl${k}`} x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="#2563eb" strokeWidth={1.25} strokeDasharray={dashZoom("4 3", strokeZk)} pointerEvents="none" />;
-              })}
 
               {/* setback outlines (per-edge) — anchored to the parcel, so an INACTIVE
                   parcel draws none (B213: inherits active state, like the yield math).
@@ -16790,6 +17067,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               {drawElsZ.above.map((el) => renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, els, startDimMove, onDimNumberDown, onElContext, dimSuppressed, null, labelFrame))}
               {/* markup shapes (neutral line/polyline/rect/ellipse/polygon) on top of the elements */}
               {drawMarkupsZ.filter((m) => !m.behindEls).map(renderMarkupNode)}
+              {/* NEW-2 — references the user has explicitly promoted ("Draw above the plan"). Same
+                  renderer, second pass: over the parcel, the setback ring, the elements and the
+                  markups. Opt-in per reference and OFF by default, because the common case is a
+                  scanned plan you trace over — the uncommon one is a finished land-plan exhibit you
+                  are working ON, where the property line drawn across it is what's in the way. */}
+              {overlayBands.above.map(renderSheetOverlay)}
               {/* ditch cross-section line (in-progress + last result) */}
               {(xsecMode && xsecPts.length === 1 && cursor) && (() => { const a = f2p(xsecPts[0]), b = f2p(cursor); return <line data-export="skip" x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="#0e7490" strokeWidth={2} strokeDasharray="6 4" pointerEvents="none" />; })()}
               {xsec && (() => { const a = f2p(xsec.p0), b = f2p(xsec.p1); return <g data-export="skip" pointerEvents="none"><line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="#0e7490" strokeWidth={2.4} /><circle cx={a.x} cy={a.y} r={3.5} fill="#0e7490" stroke="#fff" strokeWidth={1} /><circle cx={b.x} cy={b.y} r={3.5} fill="#0e7490" stroke="#fff" strokeWidth={1} /></g>; })()}
@@ -16949,21 +17232,21 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     <image href={fmHeat.dataUrl} x={tl.x} y={tl.y} width={wPx} height={hPx} opacity={0.68} preserveAspectRatio="none" pointerEvents="none" />
                     <g pointerEvents="none">
                       <rect x={lx - 6} y={ly - 14} width={236} height={legend.length * 14 + (fmResultView && isEstimatedWseSrc(fmResultView.providers?.wse1pct) ? 52 : 40)} rx={6} fill="#ffffff" opacity={0.88} />
-                      <text x={lx} y={ly} fontSize={10.5} fontWeight="700" fill="#1B1E26" fontFamily="ui-monospace, monospace">Fill depth (priced cells)</text>
+                      <text x={lx} y={ly} fontSize={10.5} fontWeight="700" fill="#1B1E26" fontFamily={MONO_FONT}>Fill depth (priced cells)</text>
                       {legend.map((r, i) => (
                         <g key={r.label}>
                           <rect x={lx} y={ly + 6 + i * 14} width={10} height={10} fill={r.color} opacity={r.kind === "depth" ? 0.9 : 0.45} />
                           {r.kind !== "depth" && <line x1={lx} y1={ly + 16 + i * 14} x2={lx + 10} y2={ly + 6 + i * 14} stroke={r.color} strokeWidth={1.4} />}
-                          <text x={lx + 15} y={ly + 15 + i * 14} fontSize={9.5} fill="#1B1E26" fontFamily="ui-monospace, monospace">{r.label}</text>
+                          <text x={lx + 15} y={ly + 15 + i * 14} fontSize={9.5} fill="#1B1E26" fontFamily={MONO_FONT}>{r.label}</text>
                         </g>
                       ))}
-                      <text x={lx} y={ly + 6 + legend.length * 14 + 12} fontSize={9.5} fontWeight="700" fill="#1B1E26" fontFamily="ui-monospace, monospace">
+                      <text x={lx} y={ly + 6 + legend.length * 14 + 12} fontSize={9.5} fontWeight="700" fill="#1B1E26" fontFamily={MONO_FONT}>
                         {`Σ cells ${fmHeatTotals ? fmHeatTotals.volumeAcFt.toFixed(2) : "—"} ac-ft = ledger ${fmResultView && fmResultView.volumeAcFt != null ? fmResultView.volumeAcFt.toFixed(2) : "—"} ac-ft`}
                       </text>
                       {/* NEW-2 / B882 — the ESTIMATED stamp rides the legend (and the export clone,
                           PDF-PARITY) whenever ANY accepted estimate priced the depths. */}
                       {fmResultView && isEstimatedWseSrc(fmResultView.providers?.wse1pct) && (
-                        <text x={lx} y={ly + 6 + legend.length * 14 + 24} fontSize={9} fontWeight="700" fill="#8A5A00" fontFamily="ui-monospace, monospace">
+                        <text x={lx} y={ly + 6 + legend.length * 14 + 24} fontSize={9} fontWeight="700" fill="#8A5A00" fontFamily={MONO_FONT}>
                           1% WSE ESTIMATED — screening
                         </text>
                       )}
@@ -16971,11 +17254,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     {hovCell && hovPt && (
                       <g data-export="skip" pointerEvents="none" transform={`translate(${hovPt.x + 14}, ${hovPt.y - 10})`}>
                         <rect x={0} y={-26} width={190} height={hovCell.depthFt != null ? 40 : 28} rx={5} fill="#1B1E26" opacity={0.86} />
-                        <text x={7} y={-12} fontSize={10} fill="#fff" fontFamily="ui-monospace, monospace">
+                        <text x={7} y={-12} fontSize={10} fill="#fff" fontFamily={MONO_FONT}>
                           {hovCell.cls === "floodway" ? "FLOODWAY — fill prohibited" : hovCell.depthFt != null ? `${hovCell.depthFt.toFixed(2)}′ fill · ${hovCell.cls === "02pct" ? "0.2% band" : "1% floodplain"}` : `not priced (${hovCell.cls === "02pct" ? "0.2% band" : "1%"} — see ledger)`}
                         </text>
                         {hovCell.depthFt != null && (
-                          <text x={7} y={1} fontSize={9} fill="#E5E7EB" fontFamily="ui-monospace, monospace">
+                          <text x={7} y={1} fontSize={9} fill="#E5E7EB" fontFamily={MONO_FONT}>
                             {`grade ${fmResultView && fmResultView.gradeBasis === "grid" ? "3DEP grid" : fmResultView && fmResultView.gradeBasis === "manual" ? "manual" : "median"} · cell ${Math.round(hovCell.wFt * hovCell.hFt)} sf · fp ${fmHeatTotals && fmHeatTotals.perFpAcFt[hovCell.fpId] != null ? fmHeatTotals.perFpAcFt[hovCell.fpId].toFixed(2) : "—"} ac-ft`}
                           </text>
                         )}
@@ -17017,26 +17300,26 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     <image href={cfHeat.dataUrl} x={tl.x} y={tl.y} width={wPx} height={hPx} opacity={0.68} preserveAspectRatio="none" pointerEvents="none" />
                     <g pointerEvents="none">
                       <rect x={lx - 6} y={ly - 14} width={252} height={legend.length * 14 + 40} rx={6} fill="#ffffff" opacity={0.88} />
-                      <text x={lx} y={ly} fontSize={10.5} fontWeight="700" fill="#1B1E26" fontFamily="ui-monospace, monospace">Cut / fill (proposed − existing)</text>
+                      <text x={lx} y={ly} fontSize={10.5} fontWeight="700" fill="#1B1E26" fontFamily={MONO_FONT}>Cut / fill (proposed − existing)</text>
                       {legend.map((r, i) => (
                         <g key={r.label}>
                           <rect x={lx} y={ly + 6 + i * 14} width={10} height={10} fill={r.color} opacity={r.kind === "unknown" ? 0.45 : r.kind === "zero" ? 0.5 : 0.9} />
                           {r.kind === "unknown" && <line x1={lx} y1={ly + 16 + i * 14} x2={lx + 10} y2={ly + 6 + i * 14} stroke={r.color} strokeWidth={1.4} />}
-                          <text x={lx + 15} y={ly + 15 + i * 14} fontSize={9.5} fill="#1B1E26" fontFamily="ui-monospace, monospace">{r.label}</text>
+                          <text x={lx + 15} y={ly + 15 + i * 14} fontSize={9.5} fill="#1B1E26" fontFamily={MONO_FONT}>{r.label}</text>
                         </g>
                       ))}
-                      <text x={lx} y={ly + 6 + legend.length * 14 + 12} fontSize={9.5} fontWeight="700" fill="#1B1E26" fontFamily="ui-monospace, monospace">
+                      <text x={lx} y={ly + 6 + legend.length * 14 + 12} fontSize={9.5} fontWeight="700" fill="#1B1E26" fontFamily={MONO_FONT}>
                         {`Σ cells cut ${f0(tot.cutCy)} · fill ${f0(tot.fillCy)} CY = earthwork rows`}
                       </text>
                     </g>
                     {hovCell && hovPt && (
                       <g data-export="skip" pointerEvents="none" transform={`translate(${hovPt.x + 14}, ${hovPt.y - 10})`}>
                         <rect x={0} y={-26} width={210} height={hovCell.dzFt != null ? 40 : 28} rx={5} fill="#1B1E26" opacity={0.86} />
-                        <text x={7} y={-12} fontSize={10} fill="#fff" fontFamily="ui-monospace, monospace">
+                        <text x={7} y={-12} fontSize={10} fill="#fff" fontFamily={MONO_FONT}>
                           {hovCell.dzFt == null ? "no ground data (DEM void)" : `${Math.abs(hovCell.dzFt).toFixed(2)}′ ${hovCell.dzFt > 0 ? "fill" : "cut"} · ${hovPlane ? hovPlane.label : hovCell.cls}`}
                         </text>
                         {hovCell.dzFt != null && hovPlane && (
-                          <text x={7} y={1} fontSize={9} fill="#E5E7EB" fontFamily="ui-monospace, monospace">
+                          <text x={7} y={1} fontSize={9} fill="#E5E7EB" fontFamily={MONO_FONT}>
                             {`plane ${hovPlane.slopePct.toFixed(2)}% · proposed ${(hovPlane.zAt({ x: hovCell.x, y: hovCell.y })).toFixed(1)}′ · cell ${Math.round(hovCell.wFt * hovCell.hFt)} sf`}
                           </text>
                         )}
@@ -17049,7 +17332,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   zoom) so they don't balloon when you zoom out. */}
               {callouts.map((c) => {
                 const bp = f2p(c.box);
-                const isSel = sel?.kind === "callout" && sel.id === c.id;
                 const st = calloutStyle(c);
                 // B913 — one shared geometry helper (auto-size, OR wrap-to-c.boxW when the user has
                 // dragged a width handle). fontPx/lineH/padX/padY/lines/w/h all come from it, so the
@@ -17110,41 +17392,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         fontSize={fontPx} fill={st.color} textDecoration={st.underline ? "underline" : undefined}
                         fontWeight={st.bold ? 700 : 500} fontStyle={st.italic ? "italic" : "normal"} pointerEvents="none">{ln}</text>
                     ))}
-                    {/* B619 — blue selection chrome (outline + resize handles + tip grip); never exported. B680: also
-                        hidden while this callout's text editor is open (the editor's own accent outline cues focus).
-                        B913 — the corner + left/right-edge handles are now interactive WIDTH handles: drag one and
-                        the box gets an explicit width and the text wraps to it (auto-height). A locked callout keeps
-                        pointer-inert handles (visual only). */}
-                    {isSel && tool === "select" && editCallout?.id !== c.id && (() => {
-                      const gx = bp.x - w / 2, gy = bp.y - h / 2;
-                      // [x, y, hx] — hx (∈ {-1,+1}) is which vertical edge this handle drives (width only).
-                      const grips = [
-                        [gx, gy, -1], [gx + w, gy, 1], [gx + w, gy + h, 1], [gx, gy + h, -1], // corners
-                        [gx, gy + h / 2, -1], [gx + w, gy + h / 2, 1],                          // left / right mids (the width must-have)
-                      ];
-                      const canResize = !c.locked;
-                      return (
-                        <g data-export="skip">
-                          <rect x={gx - 2} y={gy - 2} width={w + 4} height={h + 4} rx={cr + 2} ry={cr + 2} fill="none" stroke={SEL_BLUE} strokeWidth={1.25} pointerEvents="none" />
-                          {grips.map(([hx, hy, dir], i) => (
-                            <rect key={i} data-testid={`callout-handle-${dir > 0 ? "r" : "l"}`} x={hx - 4} y={hy - 4} width={8} height={8} fill={SEL_HANDLE_FILL} stroke={SEL_BLUE} strokeWidth={1.25}
-                              pointerEvents={canResize ? "all" : "none"} style={canResize ? { cursor: "ew-resize" } : undefined}
-                              onPointerDown={canResize ? (e) => startCalloutResize(e, c.id, dir) : undefined} />
-                          ))}
-                        </g>
-                      );
-                    })()}
-                    {/* Per-leader re-aim grip, shown per leader while this callout is selected.
-                        NEW-5 — the × delete badge that used to sit at the leader's midpoint is GONE
-                        (owner rule, same as NEW-1 on measurements): it hovered over the leader line
-                        and read as part of the drawing. A single leader is still removable by
-                        right-clicking it → "Delete Leader"; Delete removes the whole callout. */}
-                    {isSel && tool === "select" && tips.map((tp, i) => (
-                      <g key={i} data-export="skip">
-                        <circle cx={tp.x} cy={tp.y} r={5} fill={SEL_HANDLE_FILL} stroke={SEL_BLUE} strokeWidth={2}
-                          style={{ cursor: "move" }} onPointerDown={(e) => startMoveCallout(e, c.id, "tip", i)} />
-                      </g>
-                    ))}
+                    {/* NEW-1 — the callout's selection outline, its B913 width grips and the
+                        per-leader re-aim grips are no longer drawn here: they live in the
+                        always-on-top handle layer (calloutHandles), so a grip can never end up
+                        under a measurement, a label or a promoted reference. */}
                   </g>
                 );
               })}
@@ -17212,7 +17463,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       onBlur={commitNumEdit}
                       onPointerDown={(e) => e.stopPropagation()}
                       onKeyDown={(e) => { e.stopPropagation(); if (e.key === "Enter") { e.preventDefault(); commitNumEdit(); } else if (e.key === "Escape") { e.preventDefault(); cancelNumEdit(); } }}
-                      style={{ width: W, height: H, border: `2px solid ${PAL.accent}`, borderRadius: 6, padding: "2px 6px", fontSize: 13, fontFamily: "ui-monospace, Menlo, monospace", fontWeight: 600, color: PAL.ink, background: "var(--surface-raised)", outline: "none", boxSizing: "border-box", boxShadow: "0 4px 14px rgba(0,0,0,0.18)" }} />
+                      style={{ width: W, height: H, border: `2px solid ${PAL.accent}`, borderRadius: 6, padding: "2px 6px", fontSize: 13, fontFamily: "ui-monospace, Menlo, monospace", fontWeight: 600, color: PAL.ink, background: SURF_RAISED, outline: "none", boxSizing: "border-box", boxShadow: "0 4px 14px rgba(0,0,0,0.18)" }} />
                   </foreignObject>
                 );
               })()}
@@ -17288,22 +17539,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       {/* NEW-3 — the chip paints AFTER the hit targets, or the transparent grab
                           layer sits on top of it in document order and swallows the chip drag. */}
                       {chipNode}
-                      {isSel && tool === "select" && !m.locked && (
-                        <g data-testid="measure-selected" data-sel-i={i}>
-                          {pts.map((p, k) => {
-                            const on = !!selVtx && selVtx.layer === "measure" && selVtx.id === i && selVtx.index === k;
-                            return (
-                              <rect key={`mv${k}`} x={p.x - 5} y={p.y - 5} width={10} height={10} rx={2}
-                                fill={on ? PAL.paper : mcolor} stroke={on ? mcolor : PAL.paper} strokeWidth={on ? 2 : 1.5}
-                                style={{ cursor: "move" }} onPointerDown={(e) => startMeasureVertex(e, i, k)} />
-                            );
-                          })}
-                          {/* NEW-1 — no × delete badge on a measurement (owner rule): a selected
-                              measurement is deleted with the Delete key or the right-click menu.
-                              The badge sat right where the count markers do and read as part of
-                              the measurement itself. */}
-                        </g>
-                      )}
+                      {/* NEW-1 — the B230 control-point grips moved to the always-on-top handle
+                          layer (measureHandles); a grip under a label or a promoted reference
+                          used to be unreachable. */}
                     </g>
                   );
                 }
@@ -17346,24 +17584,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         it was unreachable: every press over the chip landed on the grab layer and
                         moved the measurement instead of the label. */}
                     {chipNode}
-                    {isSel && tool === "select" && !m.locked && (
-                      <g data-testid="measure-selected" data-sel-i={i}>
-                        {/* B230: draggable SQUARE control points (no "+" dots) — Shift-click /
-                            right-click an edge inserts a point; right-click / Delete removes one.
-                            The active control point (Delete target) is shown inverted. */}
-                        {pts.map((p, k) => {
-                          const on = !!selVtx && selVtx.layer === "measure" && selVtx.id === i && selVtx.index === k;
-                          return (
-                            <rect key={`mv${k}`} x={p.x - 5} y={p.y - 5} width={10} height={10} rx={2}
-                              fill={on ? PAL.paper : mcolor} stroke={on ? mcolor : PAL.paper} strokeWidth={on ? 2 : 1.5}
-                              style={{ cursor: "move" }} onPointerDown={(e) => startMeasureVertex(e, i, k)} />
-                          );
-                        })}
-                        {/* NEW-1 — no × delete badge on a measurement (owner rule). Delete key or
-                            the right-click menu ("Delete measurement") removes it; the badge used
-                            to float over the dimension label and read as part of the measurement. */}
-                      </g>
-                    )}
+                    {/* NEW-1 — the B230 control-point grips moved to the always-on-top handle
+                        layer (measureHandles); a grip under a label or a promoted reference
+                        used to be unreachable. */}
                   </g>
                 );
               })}
@@ -17514,12 +17737,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
 
               {parcelLabels}
               {labelEls}
-              {/* selection / editing chrome — stripped from exports */}
-              <g data-export="skip">
-                {/* NEW-4 — the selected lot's setback chrome, raised above every site element.
-                    Order inside the group matters: the grab band first, so the chips painted after
-                    it keep their own click target, and the vertex handles last so nothing covers
-                    the smallest targets on the canvas. */}
+              {/* NEW-1 — THE HANDLE LAYER. Selection / editing chrome, stripped from exports, and the
+                  LAST child of the feet-space transform: in SVG a later sibling both paints over and
+                  hit-tests ahead of everything before it, so a handle here is always visible AND always
+                  grabbable regardless of what is drawn underneath. Every manipulation handle in the
+                  planner belongs in this group — see the block that builds them for the rule. */}
+              <g data-export="skip" data-handle-layer="1">
+                {/* NEW-4 — the selected lot's setback chrome joins the same layer, for the same
+                    reason one line up: a chip and a grab band ARE manipulation affordances, and on a
+                    plan whose buildings sit hard against the setback line they were painted over and
+                    hit-tested behind a building's fill. Order inside the group matters: the grab band
+                    first, so the chips painted after it keep their own click target, and the vertex
+                    handles after both, so nothing covers the smallest targets on the canvas. */}
                 {setbackGrabNode}
                 {setbackChipNodes}
                 {parcelEdgeHighlight}
@@ -17534,6 +17763,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 {elSelOutline}
                 {elPolyHandles}
                 {markupHandles}
+                {/* NEW-1 — hoisted out of their content passes so they stop being buried: the
+                    reference overlay's scale/rotate grips + calibration marks, the callout's width
+                    and leader grips, and the measurement's control points. */}
+                {calloutHandles}
+                {measureHandles}
+                {overlayChrome}
                 {/* B230 — transient candidate-insertion dot, snapped to the nearest point on the
                     edge under the cursor; faint on hover, brighter while Shift arms the insert. */}
                 {insHint && <circle cx={insHint.x} cy={insHint.y} r={shiftHeld ? 4.5 : 3.5} fill={PAL.accent} fillOpacity={shiftHeld ? 0.9 : 0.42} stroke="#fff" strokeWidth={1} pointerEvents="none" />}
@@ -17622,7 +17857,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   actions store a default and change nothing on the canvas, so they confirm
                   briefly and there is nothing to take back. */}
               {stdToast.onUndo && (
-              <button data-testid="standards-apply-undo" onClick={stdToast.onUndo} style={{ border: "none", background: "var(--surface-raised)", color: PAL.accent, borderRadius: 7, padding: "4px 12px", cursor: "pointer", fontSize: 11.5, fontWeight: 700 }}>Undo</button>
+              <button data-testid="standards-apply-undo" onClick={stdToast.onUndo} style={{ border: "none", background: SURF_RAISED, color: PAL.accent, borderRadius: 7, padding: "4px 12px", cursor: "pointer", fontSize: 11.5, fontWeight: 700 }}>Undo</button>
               )}
             </div>
           )}
@@ -17671,24 +17906,24 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   <div style={{ borderTop: `1px solid ${PAL.panelLine}`, marginTop: 8, paddingTop: 7 }}>
                     <div style={{ fontSize: 10, color: PAL.muted, fontWeight: 700, letterSpacing: "0.05em", textTransform: "uppercase", marginBottom: 5 }}>Evidence tools</div>
                     <button onClick={() => { setTracePts([]); setTraceMode((m) => !m); }} title="Click along a visible pole line on the aerial; double-click or Enter to finish"
-                      style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 8px", marginBottom: 4, borderRadius: 7, fontSize: 11.5, fontFamily: "inherit", cursor: "pointer", border: `1px solid ${traceMode ? "var(--accent)" : PAL.panelLine}`, background: traceMode ? "var(--accent)" : "var(--surface-raised)", color: traceMode ? "var(--on-accent)" : PAL.ink, fontWeight: 600 }}>
+                      style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 8px", marginBottom: 4, borderRadius: 7, fontSize: 11.5, fontFamily: "inherit", cursor: "pointer", border: `1px solid ${traceMode ? "var(--accent)" : PAL.panelLine}`, background: traceMode ? "var(--accent)" : SURF_RAISED, color: traceMode ? "var(--on-accent)" : PAL.ink, fontWeight: 600 }}>
                       {traceMode ? "✏ Tracing… (Esc / dbl-click to finish)" : "✏ Trace overhead electric"}
                     </button>
                     <button onClick={() => startRoute("elec")} title="Route electric service from a traced pole line to a building (10′ easement + transformer pad)"
-                      style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 8px", marginBottom: 4, borderRadius: 7, fontSize: 11.5, fontFamily: "inherit", cursor: "pointer", border: `1px solid ${routeMode?.util === "elec" ? "var(--accent)" : PAL.panelLine}`, background: routeMode?.util === "elec" ? "var(--accent)" : "var(--surface-raised)", color: routeMode?.util === "elec" ? "var(--on-accent)" : PAL.ink, fontWeight: 600 }}>
+                      style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 8px", marginBottom: 4, borderRadius: 7, fontSize: 11.5, fontFamily: "inherit", cursor: "pointer", border: `1px solid ${routeMode?.util === "elec" ? "var(--accent)" : PAL.panelLine}`, background: routeMode?.util === "elec" ? "var(--accent)" : SURF_RAISED, color: routeMode?.util === "elec" ? "var(--on-accent)" : PAL.ink, fontWeight: 600 }}>
                       ⚡ Route electric service
                     </button>
                     <button onClick={startWaterRoute} title="Route water service from a main to a building, easement width from the jurisdiction rule below"
-                      style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 8px", marginBottom: 4, borderRadius: 7, fontSize: 11.5, fontFamily: "inherit", cursor: "pointer", border: `1px solid ${routeMode?.util === "water" ? "var(--accent)" : PAL.panelLine}`, background: routeMode?.util === "water" ? "var(--accent)" : "var(--surface-raised)", color: routeMode?.util === "water" ? "var(--on-accent)" : PAL.ink, fontWeight: 600 }}>
+                      style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 8px", marginBottom: 4, borderRadius: 7, fontSize: 11.5, fontFamily: "inherit", cursor: "pointer", border: `1px solid ${routeMode?.util === "water" ? "var(--accent)" : PAL.panelLine}`, background: routeMode?.util === "water" ? "var(--accent)" : SURF_RAISED, color: routeMode?.util === "water" ? "var(--on-accent)" : PAL.ink, fontWeight: 600 }}>
                       🚰 Route water service
                     </button>
                     <button onClick={inferWaterMain} disabled={evidenceBusy} title="Connect the fire hydrants in view into a screening-only water main"
-                      style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 8px", marginBottom: 4, borderRadius: 7, fontSize: 11.5, fontFamily: "inherit", cursor: "pointer", border: `1px solid ${PAL.panelLine}`, background: "var(--surface-raised)", color: PAL.ink, fontWeight: 600, opacity: evidenceBusy ? 0.6 : 1 }}>
+                      style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 8px", marginBottom: 4, borderRadius: 7, fontSize: 11.5, fontFamily: "inherit", cursor: "pointer", border: `1px solid ${PAL.panelLine}`, background: SURF_RAISED, color: PAL.ink, fontWeight: 600, opacity: evidenceBusy ? 0.6 : 1 }}>
                       {evidenceBusy ? "Inferring…" : "⌁ Infer water main from hydrants"}
                     </button>
                     <button onClick={() => { const on = !xsecMode; setXsecMode(on); setXsecPts([]); if (on) { setXsec(null); flashWarn("Click one bank of the ditch, then the other side.", 0); } else setOverlapWarn(""); }}
                       title="Draw a line across a ditch to sample USGS 3DEP elevation and estimate depth/invert"
-                      style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 8px", marginBottom: 4, borderRadius: 7, fontSize: 11.5, fontFamily: "inherit", cursor: "pointer", border: `1px solid ${xsecMode ? "var(--accent)" : PAL.panelLine}`, background: xsecMode ? "var(--accent)" : "var(--surface-raised)", color: xsecMode ? "var(--on-accent)" : PAL.ink, fontWeight: 600 }}>
+                      style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 8px", marginBottom: 4, borderRadius: 7, fontSize: 11.5, fontFamily: "inherit", cursor: "pointer", border: `1px solid ${xsecMode ? "var(--accent)" : PAL.panelLine}`, background: xsecMode ? "var(--accent)" : SURF_RAISED, color: xsecMode ? "var(--on-accent)" : PAL.ink, fontWeight: 600 }}>
                       {xsecMode ? "📏 Click both banks… (Esc to cancel)" : "📏 Cross-section (ditch)"}
                     </button>
                     {/* per-jurisdiction easement-rule table (editable; placeholders marked VERIFY) */}
@@ -17825,9 +18060,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
 
           {/* print-frame toolbar */}
           {printMode && (() => {
-            const seg = (on) => ({ padding: "5px 11px", fontSize: 12, fontWeight: 600, borderRadius: 7, cursor: "pointer", fontFamily: "inherit", border: `1px solid ${on ? PAL.accent : "var(--border-default)"}`, background: on ? PAL.accent : "var(--surface-raised)", color: on ? "#fff" : PAL.ink });
+            const seg = (on) => ({ padding: "5px 11px", fontSize: 12, fontWeight: 600, borderRadius: 7, cursor: "pointer", fontFamily: "inherit", border: `1px solid ${on ? PAL.accent : "var(--border-default)"}`, background: on ? PAL.accent : SURF_RAISED, color: on ? "#fff" : PAL.ink });
             return (
-              <div style={{ position: "absolute", top: 14, left: "50%", transform: "translateX(-50%)", display: "flex", alignItems: "center", gap: 12, background: "var(--surface-raised)", border: `1px solid ${PAL.panelLine}`, borderRadius: 11, boxShadow: "0 8px 26px rgba(0,0,0,0.22)", padding: "8px 12px", zIndex: 9 }}>
+              <div style={{ position: "absolute", top: 14, left: "50%", transform: "translateX(-50%)", display: "flex", alignItems: "center", gap: 12, background: SURF_RAISED, border: `1px solid ${PAL.panelLine}`, borderRadius: 11, boxShadow: "0 8px 26px rgba(0,0,0,0.22)", padding: "8px 12px", zIndex: 9 }}>
                 <span style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: PAL.muted }}>Print frame</span>
                 <span style={{ display: "flex", gap: 4 }}>
                   <button style={seg(printPaper === "letter")} onClick={() => setPrintPaper("letter")}>Letter</button>
@@ -18163,7 +18398,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, padding: "8px 8px 6px", borderTop: `1px solid ${PAL.panelLine}`, marginTop: 4 }}>Type (default)</div>
               <div style={{ display: "flex", flexWrap: "wrap", gap: 4, padding: "0 6px 4px" }}>
                 {EASEMENT_TYPES.map((ty) => (
-                  <button key={ty.key} title={ty.label} onClick={() => setEaseType(ty.key)} style={{ display: "flex", alignItems: "center", gap: 5, padding: "4px 7px", borderRadius: 7, cursor: "pointer", fontFamily: "inherit", fontSize: 11, border: `1px solid ${easeType === ty.key ? ty.color : "var(--border-default)"}`, background: easeType === ty.key ? ty.color : "var(--surface-raised)", color: easeType === ty.key ? "#fff" : PAL.ink, fontWeight: easeType === ty.key ? 650 : 500 }}>
+                  <button key={ty.key} title={ty.label} onClick={() => setEaseType(ty.key)} style={{ display: "flex", alignItems: "center", gap: 5, padding: "4px 7px", borderRadius: 7, cursor: "pointer", fontFamily: "inherit", fontSize: 11, border: `1px solid ${easeType === ty.key ? ty.color : "var(--border-default)"}`, background: easeType === ty.key ? ty.color : SURF_RAISED, color: easeType === ty.key ? "#fff" : PAL.ink, fontWeight: easeType === ty.key ? 650 : 500 }}>
                     <span style={{ width: 8, height: 8, borderRadius: 2, background: easeType === ty.key ? "#fff" : ty.color }} /> {ty.label}
                   </button>
                 ))}
@@ -18232,7 +18467,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               panel. The two branches carry the same data-testid: one of them is always present while
               the inspector is open. */}
           {(companionOpen || propsTab) && companionSel && (
-          <div data-testid="property-panel" style={{ flex: (narrow && leftPanel && !propsTab) ? "0 1 auto" : "1 1 auto", maxHeight: (narrow && leftPanel && !propsTab) ? "45%" : "none", minHeight: 0, overflowY: "auto", padding: "13px 13px 12px", borderBottom: (narrow && leftPanel && !propsTab) ? "1px solid var(--border-default)" : "none" }}>
+          <div data-testid="property-panel" style={{ flex: (narrow && leftPanel && !propsTab) ? "0 1 auto" : "1 1 auto", maxHeight: (narrow && leftPanel && !propsTab) ? "45%" : "none", minHeight: 0, overflowY: "auto", padding: "13px 13px 12px", borderBottom: (narrow && leftPanel && !propsTab) ? BORDER_1 : "none" }}>
           <div role="button" tabIndex={0} aria-expanded={!propsCollapsed} onClick={() => setPropsCollapsed((c) => !c)}
             onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setPropsCollapsed((c) => !c); } }}
             style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", userSelect: "none", padding: "2px 0 6px" }}>
@@ -18326,7 +18561,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             const t = easementType(e.easeType);
             const area = easementArea(e);
             const isStrip = e.mode !== "boundary";
-            const seg = (on) => ({ ...chip, flex: 1, padding: "6px 0", textAlign: "center", background: on ? PAL.accent : "var(--surface-raised)", color: on ? "#fff" : PAL.ink, borderColor: on ? PAL.accent : "var(--border-default)" });
+            const seg = (on) => ({ ...chip, flex: 1, padding: "6px 0", textAlign: "center", background: on ? PAL.accent : SURF_RAISED, color: on ? "#fff" : PAL.ink, borderColor: on ? PAL.accent : "var(--border-default)" });
             const txt = { ...numInput, width: 150, fontFamily: "inherit" };
             const check = (label, val, key) => (
               <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 12, color: PAL.ink, marginBottom: 7, cursor: "pointer" }}>
@@ -18372,7 +18607,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   placeholder='e.g. 20&#39; DRAINAGE ESMT' style={txt} /></Field>
                 {/* B678 — per-label repeat spacing / text size / background halo (only once a label is typed) */}
                 {inlineLabelControls(e, "easement", coalesceLabelWrite(selMarkup.id, (p) => setMarkups((a) => a.map((m) => (m.id === selMarkup.id ? { ...m, ...p } : m)))))}
-                <Field label="Notes"><textarea value={e.notes || ""} onChange={(ev) => setSelEasement({ notes: ev.target.value })} rows={2} style={{ width: 150, boxSizing: "border-box", padding: "5px 7px", fontSize: 12, fontFamily: "inherit", border: `1px solid var(--border-default)`, borderRadius: 8, color: PAL.ink, resize: "vertical" }} /></Field>
+                <Field label="Notes"><textarea value={e.notes || ""} onChange={(ev) => setSelEasement({ notes: ev.target.value })} rows={2} style={{ width: 150, boxSizing: "border-box", padding: "5px 7px", fontSize: 12, fontFamily: "inherit", border: BORDER_1, borderRadius: 8, color: PAL.ink, resize: "vertical" }} /></Field>
                 <div style={{ fontSize: 11.5, color: PAL.muted, marginTop: 6 }}>Area: <b style={{ color: PAL.ink }}>{Math.round(area).toLocaleString()} sf</b> · {(area / SQFT_PER_ACRE).toFixed(2)} ac</div>
                 <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.5, marginTop: 6 }}>{isStrip ? "Drag a centerline dot to reshape (the strip re-offsets); ＋ adds a point, Shift-click removes one." : "Drag a boundary dot to reshape; ＋ adds a point, Shift-click removes one."}</div>
                 <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
@@ -18388,7 +18623,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             // paints the CURRENT COLOUR as the chip's background and then spreads this override on
             // top, so a hardcoded surface colour blanked every colour chip in these panels: the
             // control you click to change a colour showed no colour. Leave it to ColorField.
-            const swatch = { width: 34, height: 26, padding: 0, border: `1px solid var(--border-default)`, borderRadius: 6, cursor: "pointer" };
+            const swatch = { width: 34, height: 26, padding: 0, border: BORDER_1, borderRadius: 6, cursor: "pointer" };
             const closed = selMarkup.kind === "rect" || selMarkup.kind === "ellipse" || selMarkup.kind === "polygon";
             return (
               // NEW-1 — plain wrapper (see the multi-select branch above for why the duplicate testid was removed).
@@ -18429,7 +18664,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   const hasParcel = parcels.some((p) => p.active !== false && (p.points?.length || 0) >= 3);
                   const dm = deedMainOf(deedGroupMembers(selMarkup), selMarkup);
                   return (
-                    <div style={{ marginTop: 6, paddingTop: 8, borderTop: `1px solid var(--border-default)` }}>
+                    <div style={{ marginTop: 6, paddingTop: 8, borderTop: BORDER_1 }}>
                       <button style={{ ...chip, width: "100%", fontWeight: 700 }} disabled={!!selMarkup.locked}
                         onClick={() => alignDeedToParcel(dm.id)}>
                         📐 {hasParcel ? "Align to county parcel" : "Rotate to grid north"}
@@ -18473,11 +18708,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             // paints the CURRENT COLOUR as the chip's background and then spreads this override on
             // top, so a hardcoded surface colour blanked every colour chip in these panels: the
             // control you click to change a colour showed no colour. Leave it to ColorField.
-            const swatch = { width: 34, height: 26, padding: 0, border: `1px solid var(--border-default)`, borderRadius: 6, cursor: "pointer" };
+            const swatch = { width: 34, height: 26, padding: 0, border: BORDER_1, borderRadius: 6, cursor: "pointer" };
             // B615 — persistent captions under each swatch so you don't have to hover to tell them apart.
             const cap = { fontSize: 9.5, color: PAL.muted, lineHeight: 1, textAlign: "center", letterSpacing: "0.02em" };
             const swatchCap = { display: "flex", flexDirection: "column", alignItems: "center", gap: 3 };
-            const seg = (on) => ({ ...chip, flex: 1, padding: "6px 0", textAlign: "center", background: on ? PAL.accent : "var(--surface-raised)", color: on ? "#fff" : PAL.ink, borderColor: on ? PAL.accent : "var(--border-default)" });
+            const seg = (on) => ({ ...chip, flex: 1, padding: "6px 0", textAlign: "center", background: on ? PAL.accent : SURF_RAISED, color: on ? "#fff" : PAL.ink, borderColor: on ? PAL.accent : "var(--border-default)" });
             return (
               // NEW-1 — plain wrapper (see the multi-select branch above for why the duplicate testid was removed).
               <div>
@@ -18536,7 +18771,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             // paints the CURRENT COLOUR as the chip's background and then spreads this override on
             // top, so a hardcoded surface colour blanked every colour chip in these panels: the
             // control you click to change a colour showed no colour. Leave it to ColorField.
-            const swatch = { width: 34, height: 26, padding: 0, border: `1px solid var(--border-default)`, borderRadius: 6, cursor: "pointer" };
+            const swatch = { width: 34, height: 26, padding: 0, border: BORDER_1, borderRadius: 6, cursor: "pointer" };
             const closed = mode === "area";
             const stylable = mode !== "count";
             const uncal = calibrationState === "uncalibrated";
@@ -18810,7 +19045,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     const note = { fontSize: 10.5, color: PAL.muted, lineHeight: 1.4, marginTop: 4 };
                     // B549 — compact single-line feature stepper: "label · [−] count [＋]". Replaces the old
                     // tall label/sub-label/two-big-buttons row; the sub-caption moves to the button title.
-                    const stepBtn = (on, danger) => ({ width: 24, height: 24, padding: 0, display: "grid", placeItems: "center", fontSize: 15, lineHeight: 1, fontWeight: 700, borderRadius: 6, border: "1px solid var(--border-default)", background: "var(--surface-raised)", fontFamily: "inherit", cursor: on ? "pointer" : "default", color: danger ? (on ? "#b3361b" : "#e3cfc9") : (on ? PAL.ink : "#cfc7b5"), opacity: on ? 1 : 0.6 });
+                    const stepBtn = (on, danger) => ({ width: 24, height: 24, padding: 0, display: "grid", placeItems: "center", fontSize: 15, lineHeight: 1, fontWeight: 700, borderRadius: 6, border: BORDER_1, background: SURF_RAISED, fontFamily: "inherit", cursor: on ? "pointer" : "default", color: danger ? (on ? "#b3361b" : "#e3cfc9") : (on ? PAL.ink : "#cfc7b5"), opacity: on ? 1 : 0.6 });
                     const featRow = (label, count, { onAdd, addOn, addTitle, onRem, remOn, remTitle }) => (
                       <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 6 }}>
                         <span style={{ flex: 1, minWidth: 0, fontSize: 12, color: PAL.ink }}>{label}</span>
@@ -18819,7 +19054,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         <button disabled={!addOn} title={addTitle} onClick={addOn ? onAdd : undefined} style={stepBtn(addOn, false)}>＋</button>
                       </div>
                     );
-                    const layerChip = { fontSize: 11.5, padding: "4px 8px", borderRadius: 6, border: "1px solid var(--border-default)", background: "var(--surface-raised)", color: PAL.ink, cursor: "pointer", fontFamily: "inherit" };
+                    const layerChip = { fontSize: 11.5, padding: "4px 8px", borderRadius: 6, border: BORDER_1, background: SURF_RAISED, color: PAL.ink, cursor: "pointer", fontFamily: "inherit" };
                     const layerChooserRow = (label, groupKey, sides) => {
                       const opts = sides.length ? layersForSides(b, sides) : [];
                       if (!opts.length) return null;
@@ -19865,7 +20100,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         table (with per-option tooltips); the "Auto from elevation ~X%…" explanation
                         paragraph is deleted. The one-time Hybrid teaching hint is preserved here. */}
                     {g_roleInfo.role === "dual" && !hybridHintSeen && (
-                      <div style={{ fontSize: 10.5, color: PAL.ink, lineHeight: 1.45, background: "var(--surface-raised)", border: `1px solid ${PAL.panelLine}`, borderRadius: 8, padding: "7px 9px", margin: "8px 0 0", display: "flex", justifyContent: "space-between", gap: 8, alignItems: "baseline" }}>
+                      <div style={{ fontSize: 10.5, color: PAL.ink, lineHeight: 1.45, background: SURF_RAISED, border: `1px solid ${PAL.panelLine}`, borderRadius: 8, padding: "7px 9px", margin: "8px 0 0", display: "flex", justifyContent: "space-between", gap: 8, alignItems: "baseline" }}>
                         <span><strong>Hybrid</strong> = this pond serves BOTH ledgers: usable detention above the flood water surface, and compensating-storage mitigation for the cut below it. Set it to Detention or Mitigation to force one.</span>
                         <button type="button" onClick={dismissHybridHint} style={{ flex: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 10, fontWeight: 700, padding: "1px 8px", borderRadius: 999, border: `1px solid ${PAL.border}`, background: "transparent", color: PAL.muted, whiteSpace: "nowrap" }}>Got it</button>
                       </div>
@@ -20380,7 +20615,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       });
                       const gravityImpaired = Number.isFinite(tailwaterElevFt) && floorApprox < tailwaterElevFt;
                       const pumpBlock = relCap != null && pumpAllow.sharePct != null ? (
-                        <div style={{ marginTop: 10, background: "var(--surface-raised)", border: `1px solid ${PAL.panelLine}`, borderRadius: 8, padding: "8px 10px" }}>
+                        <div style={{ marginTop: 10, background: SURF_RAISED, border: `1px solid ${PAL.panelLine}`, borderRadius: 8, padding: "8px 10px" }}>
                           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
                             <span style={{ fontSize: 10, color: PAL.muted, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em" }}>Pumped outfall (screening)</span>
                             {pumpAllow.overridden
@@ -20496,7 +20731,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           </div>
                           {oProbs.length > 0 && <div style={{ ...smallNote, color: PAL.warn }}>Outlet incomplete: {oProbs.join("; ")}.</div>}
                           {routed.kind === "routed" ? (
-                            <div style={{ marginTop: 8, background: "var(--surface-raised)", border: `1px solid ${PAL.panelLine}`, borderRadius: 8, padding: "8px 10px" }}>
+                            <div style={{ marginTop: 8, background: SURF_RAISED, border: `1px solid ${PAL.panelLine}`, borderRadius: 8, padding: "8px 10px" }}>
                               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
                                 <span style={{ fontSize: 10, color: PAL.muted, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em" }}>Overall: Post ≤ Pre</span>
                                 <span style={{ fontSize: 10, fontWeight: 800, letterSpacing: "0.04em", padding: "2px 8px", borderRadius: 5, color: "var(--on-accent)", background: routed.allPass ? PAL.success : PAL.danger }}>{routed.allPass ? "PASS: every storm" : "FAIL"}</span>
@@ -20751,7 +20986,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
 
       {showShortcuts && (
         <div onClick={() => setShowShortcuts(false)} style={{ position: "fixed", inset: 0, zIndex: 3000, background: "rgba(20,18,15,0.55)", display: "grid", placeItems: "center" }}>
-          <div onClick={(e) => e.stopPropagation()} style={{ background: "var(--surface-raised)", borderRadius: 14, boxShadow: "0 20px 60px rgba(0,0,0,0.35)", padding: 22, width: 560, maxWidth: "92vw", maxHeight: "86vh", overflowY: "auto" }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ background: SURF_RAISED, borderRadius: 14, boxShadow: "0 20px 60px rgba(0,0,0,0.35)", padding: 22, width: 560, maxWidth: "92vw", maxHeight: "86vh", overflowY: "auto" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 14 }}>
               <h2 style={{ margin: 0, fontSize: 16, color: PAL.ink }}>Keyboard & gestures</h2>
               <button className="gbtn" onClick={() => setShowShortcuts(false)} style={{ ...chip }}>Close ✕</button>
@@ -20779,7 +21014,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       {/* Version history (automatic local backups, B126) — restore an earlier saved version */}
       {versionsOpen && (
         <div onClick={() => setVersionsOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 3000, background: "rgba(20,18,15,0.55)", display: "grid", placeItems: "center" }}>
-          <div onClick={(e) => e.stopPropagation()} style={{ background: "var(--surface-raised)", borderRadius: 14, boxShadow: "0 20px 60px rgba(0,0,0,0.35)", padding: 22, width: 460, maxWidth: "92vw", maxHeight: "82vh", overflowY: "auto" }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ background: SURF_RAISED, borderRadius: 14, boxShadow: "0 20px 60px rgba(0,0,0,0.35)", padding: 22, width: 460, maxWidth: "92vw", maxHeight: "82vh", overflowY: "auto" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }}>
               <h2 style={{ margin: 0, fontSize: 16, color: PAL.ink }}>Version history</h2>
               <button className="gbtn" onClick={() => setVersionsOpen(false)} style={{ ...chip }}>Close ✕</button>
@@ -20826,7 +21061,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         const exCount = Math.max(0, tracts.length - 1);
         return (
         <div onClick={() => setTitleOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 3000, background: "rgba(20,18,15,0.55)", display: "grid", placeItems: "center" }}>
-          <div onClick={(e) => e.stopPropagation()} style={{ background: "var(--surface-raised)", borderRadius: 14, boxShadow: "0 20px 60px rgba(0,0,0,0.35)", padding: 22, width: 720, maxWidth: "94vw", maxHeight: "90vh", overflowY: "auto" }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ background: SURF_RAISED, borderRadius: 14, boxShadow: "0 20px 60px rgba(0,0,0,0.35)", padding: 22, width: 720, maxWidth: "94vw", maxHeight: "90vh", overflowY: "auto" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 4 }}>
               <h2 style={{ margin: 0, fontSize: 16, color: PAL.ink }}>Title reader &amp; metes-and-bounds plotter</h2>
               <button className="gbtn" onClick={() => setTitleOpen(false)} style={{ ...chip }}>Close ✕</button>
@@ -20841,7 +21076,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                 <input type="password" value={apiKey} placeholder="sk-ant-…" autoComplete="off"
                   onChange={(e) => { setApiKey(e.target.value); setKey(e.target.value.trim()); }}
-                  style={{ ...numInput, width: "auto", flex: 1, fontFamily: "ui-monospace, monospace" }} />
+                  style={{ ...numInput, width: "auto", flex: 1, fontFamily: MONO_FONT }} />
                 {apiKey && <button className="gbtn" style={chip} onClick={() => { setApiKey(""); setKey(""); }}>Clear</button>}
               </div>
               <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.5, marginTop: 5 }}>
@@ -20869,12 +21104,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         <input type="checkbox" checked={!!excChecked[i]} onChange={(e) => setExcChecked((s) => ({ ...s, [i]: e.target.checked }))} style={{ marginTop: 2 }} />
                         <div style={{ flex: 1, minWidth: 0 }}>
                           <div style={{ display: "flex", gap: 7, alignItems: "baseline", flexWrap: "wrap" }}>
-                            <span style={{ fontFamily: "ui-monospace, monospace", fontSize: 11, fontWeight: 700, color: PAL.ink }}>{x.number ? `#${x.number}` : `#${i + 1}`}</span>
+                            <span style={{ fontFamily: MONO_FONT, fontSize: 11, fontWeight: 700, color: PAL.ink }}>{x.number ? `#${x.number}` : `#${i + 1}`}</span>
                             <span style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em", color: "#fff", background: x.plottable ? "#7c3aed" : PAL.muted, borderRadius: 5, padding: "1px 6px" }}>{x.type}</span>
                             {x.plottable && <span style={{ fontSize: 10, color: PAL.purple, fontWeight: 600 }}>plottable</span>}
                           </div>
                           <div style={{ fontSize: 12.5, color: PAL.ink, marginTop: 2, lineHeight: 1.4 }}>{x.description}</div>
-                          {x.recordingReference && <div style={{ fontSize: 11, color: PAL.muted, fontFamily: "ui-monospace, monospace", marginTop: 1 }}>{x.recordingReference}</div>}
+                          {x.recordingReference && <div style={{ fontSize: 11, color: PAL.muted, fontFamily: MONO_FONT, marginTop: 1 }}>{x.recordingReference}</div>}
                         </div>
                       </label>
                     ))}
@@ -20897,7 +21132,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 style={{ border: `1.5px dashed ${deedDrag ? PAL.accent : PAL.panelLine}`, background: deedDrag ? "rgba(124,58,237,0.06)" : "transparent", borderRadius: 10, padding: "13px 12px", textAlign: "center", cursor: deedBusy ? "default" : "pointer", marginBottom: 10 }}>
                 <div style={{ fontSize: 12.5, fontWeight: 600, color: PAL.ink }}>{deedBusy ? "Reading…" : "Drop a deed file here, or click to choose"}</div>
                 <div style={{ fontSize: 11, color: PAL.muted, marginTop: 3, lineHeight: 1.4 }}>Word (.doc / .docx), PDF, or text (.txt) — drop one or several; bearings, distances, curves, and save-and-except are read automatically.</div>
-                {deedName && !deedBusy && <div style={{ fontSize: 11, color: PAL.purple, marginTop: 4, fontFamily: "ui-monospace, monospace", wordBreak: "break-all" }}>📄 {deedName}</div>}
+                {deedName && !deedBusy && <div style={{ fontSize: 11, color: PAL.purple, marginTop: 4, fontFamily: MONO_FONT, wordBreak: "break-all" }}>📄 {deedName}</div>}
               </div>
               {deedErr && <div style={{ fontSize: 12, color: PAL.danger, marginBottom: 8, lineHeight: 1.45 }}>{deedErr}</div>}
               {deedQueue.length > 1 && (
@@ -20907,7 +21142,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     return (
                       <div key={r.id} data-testid="deed-queue-row" onClick={() => { if (r.error) return; setDeedActiveId(r.id); setDeedName(r.name); if (r.text) setMbText(r.text); setDeedErr(""); }}
                         style={{ display: "flex", alignItems: "baseline", gap: 8, padding: "7px 10px", cursor: r.error ? "default" : "pointer", borderTop: i ? `1px solid ${PAL.panelLine}` : "none", background: active ? "rgba(124,58,237,0.08)" : "transparent" }}>
-                        <span style={{ fontSize: 11.5, fontWeight: 600, color: r.error ? PAL.danger : PAL.ink, fontFamily: "ui-monospace, monospace", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "50%" }}>📄 {r.name}</span>
+                        <span style={{ fontSize: 11.5, fontWeight: 600, color: r.error ? PAL.danger : PAL.ink, fontFamily: MONO_FONT, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "50%" }}>📄 {r.name}</span>
                         <span style={{ fontSize: 11, color: r.error ? PAL.danger : PAL.muted, flex: 1, lineHeight: 1.4 }}>{r.error ? r.error : `${r.boundaryCalls} call${r.boundaryCalls > 1 ? "s" : ""}${r.exCount ? ` · +${r.exCount} save-and-except` : ""} · ${r.closes ? "closes" : `gap ${r.gap.toFixed(1)}′`}`}</span>
                         {active && ok && <span style={{ fontSize: 10.5, color: PAL.accent, fontWeight: 700, whiteSpace: "nowrap" }}>LOADED</span>}
                       </div>
@@ -20917,7 +21152,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               )}
               <textarea value={mbText} onChange={(e) => { const v = e.target.value; setMbText(v); setDeedQueue((q) => q.map((r) => (r.id === deedActiveId ? { ...r, text: v } : r))); }} rows={5}
                 placeholder={'Paste a legal description, e.g.\nBEGINNING at a point… THENCE N 45°30′00″ E, 150.00 feet;\nTHENCE S 44°30′00″ E, 300.00 feet; …'}
-                style={{ width: "100%", boxSizing: "border-box", padding: "9px 11px", fontSize: 12, fontFamily: "ui-monospace, monospace", border: `1px solid var(--border-default)`, borderRadius: 8, color: PAL.ink, resize: "vertical", lineHeight: 1.5 }} />
+                style={{ width: "100%", boxSizing: "border-box", padding: "9px 11px", fontSize: 12, fontFamily: MONO_FONT, border: BORDER_1, borderRadius: 8, color: PAL.ink, resize: "vertical", lineHeight: 1.5 }} />
               <div style={{ display: "flex", gap: 12, alignItems: "center", marginTop: 10, flexWrap: "wrap" }}>
                 <div style={{ fontSize: 12, color: calls.length ? PAL.ink : PAL.muted, fontWeight: 600 }}>
                   {calls.length
@@ -20953,7 +21188,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 <button style={{ ...btn(true), padding: "8px 15px", opacity: calls.length ? 1 : 0.5 }} disabled={!calls.length} onClick={() => startPlotMetes(false)}>Plot on canvas →</button>
               </div>
               {calls.length > 0 && (
-                <div style={{ marginTop: 10, maxHeight: 130, overflowY: "auto", border: `1px solid ${PAL.panelLine}`, borderRadius: 8, fontSize: 11.5, fontFamily: "ui-monospace, monospace" }}>
+                <div style={{ marginTop: 10, maxHeight: 130, overflowY: "auto", border: `1px solid ${PAL.panelLine}`, borderRadius: 8, fontSize: 11.5, fontFamily: MONO_FONT }}>
                   {calls.map((c, i) => (
                     <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "4px 10px", borderBottom: i < calls.length - 1 ? "1px solid #f3efe5" : "none", color: PAL.ink }}>
                       <span>{i + 1}. {c.bearing}{c.curve ? (c.curveMeta && (c.curveMeta.radiusFt > 0 || c.curveMeta.centralAngleDeg > 0) ? " ⤾ (arc)" : " ⤿ (chord)") : ""}</span><span>{c.distFt.toFixed(2)}′</span>
@@ -20970,7 +21205,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       {/* POB / overlap banner (after plotting or while awaiting a POB click) */}
       {/* ditch cross-section result */}
       {xsec && (
-        <div style={{ position: "fixed", left: 16, bottom: 16, zIndex: 2600, width: 286, background: "var(--surface-raised)", border: `1px solid ${PAL.panelLine}`, borderRadius: 12, boxShadow: "0 12px 36px rgba(0,0,0,0.22)", padding: 13 }}>
+        <div style={{ position: "fixed", left: 16, bottom: 16, zIndex: 2600, width: 286, background: SURF_RAISED, border: `1px solid ${PAL.panelLine}`, borderRadius: 12, boxShadow: "0 12px 36px rgba(0,0,0,0.22)", padding: 13 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }}>
             <span style={{ fontSize: 12.5, fontWeight: 700, color: PAL.ink }}>Ditch cross-section</span>
             <button onClick={() => setXsec(null)} style={{ ...chip, padding: "3px 8px", fontSize: 11 }}>✕</button>
@@ -20985,7 +21220,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 <svg width={W} height={H} style={{ display: "block", background: "var(--planner-raised)", borderRadius: 6 }}>
                   <polyline points={pts} fill="none" stroke="#0e7490" strokeWidth={1.6} />
                 </svg>
-                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11.5, color: PAL.ink, marginTop: 7, fontFamily: "ui-monospace, monospace" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11.5, color: PAL.ink, marginTop: 7, fontFamily: MONO_FONT }}>
                   <span>Depth ≈ <b>{f1(s.depthFt)}′</b></span>
                   <span>Invert {f1(s.invertFt)}′</span>
                   <span>Bank {f1(s.bankFt)}′</span>
@@ -21266,8 +21501,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         const MW = 220;
         const o = sheetOverlays.find((x) => x.id === ovMenu.id);
         if (!o) return null;
-        const idx = sheetOverlays.findIndex((x) => x.id === ovMenu.id);
-        const atFront = idx === sheetOverlays.length - 1, atBack = idx === 0;
+        // NEW-2 — front/back are WITHIN this reference's band (below vs above the plan), so the
+        // greying matches what the ops actually do; crossing the plan is the separate toggle below.
+        const { atFront, atBack } = overlayOrderFlags(sheetOverlays, ovMenu.id);
+        const isAbove = overlayBand(o) === "above";
         const locked = !!o.locked, hasParcel = parcels.length > 0;
         const MOD = (typeof navigator !== "undefined" && /Mac|iPhone|iPad|iPod/.test(navigator.platform || navigator.userAgent || "")) ? "⌘" : "Ctrl+";
         const hdr = (top) => ({ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", padding: top ? "8px 8px 6px" : "4px 8px 6px", ...(top ? { borderTop: `1px solid ${PAL.panelLine}`, marginTop: 4 } : {}) });
@@ -21287,6 +21524,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             <div style={hdr(true)}>Arrange</div>
             {item({ text: "Bring to front", dis: atFront, on: () => { reorderOverlay(ovMenu.id, "front"); setOvMenu(null); } })}
             {item({ text: "Send to back", dis: atBack, on: () => { reorderOverlay(ovMenu.id, "back"); setOvMenu(null); } })}
+            {item({ text: isAbove ? "Draw below the plan" : "Draw above the plan", title: isAbove ? "Put this reference back under the parcel and the site elements" : "Lift this reference over the parcel boundary, the setback ring and the site elements", on: () => { toggleOverlayBand(ovMenu.id, !isAbove); setOvMenu(null); } })}
             <div style={hdr(true)}>Place</div>
             {item({ text: locked ? "Unlock" : "Lock", hint: locked ? "🔒" : "🔓", on: () => { patchOverlay(ovMenu.id, { locked: !locked }); setOvMenu(null); } })}
             {item({ text: "Align to base edge…", dis: locked || !hasParcel, title: locked ? "Unlock to align" : (!hasParcel ? "Draw or load a parcel first" : "Click a parcel edge to snap this drawing parallel to it"), on: () => { setSelOverlay(ovMenu.id); setOvAlignBase(ovMenu.id); setOvMenu(null); flashWarn("Click a parcel boundary to align this drawing parallel to it.", 6000); } })}
@@ -21920,13 +22158,13 @@ function Section({ title, children, collapsed, accent }) {
   // render a bare, always-open card.
   if (title == null || title === false) {
     return (
-      <div style={{ marginBottom: 9, background: "var(--surface-raised)", border: "1px solid var(--planner-border)", borderRadius: 12, boxShadow: "0 1px 2px rgba(28,25,20,0.04)", overflow: "hidden" }}>
+      <div style={{ marginBottom: 9, background: SURF_RAISED, border: "1px solid var(--planner-border)", borderRadius: 12, boxShadow: "0 1px 2px rgba(28,25,20,0.04)", overflow: "hidden" }}>
         <div style={{ padding: 12 }}>{children}</div>
       </div>
     );
   }
   return (
-    <div style={{ marginBottom: 9, background: "var(--surface-raised)", border: "1px solid var(--planner-border)", borderRadius: 12, boxShadow: "0 1px 2px rgba(28,25,20,0.04)", overflow: "hidden" }}>
+    <div style={{ marginBottom: 9, background: SURF_RAISED, border: "1px solid var(--planner-border)", borderRadius: 12, boxShadow: "0 1px 2px rgba(28,25,20,0.04)", overflow: "hidden" }}>
       <div className="sec-head" onClick={() => setOpen((o) => !o)}
         role="button" tabIndex={0} aria-expanded={open} aria-label={title}
         onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setOpen((o) => !o); } }} /* B531: keyboard-toggle the section */
@@ -22039,8 +22277,8 @@ function NumInput({ value, onCommit, min, max, style, placeholder, step, coarse,
   // blur-commit on a half-typed draft first (same trick as RotationStepper's spinner).
   const spinBtn = {
     width: 18, height: 12, padding: 0, display: "grid", placeItems: "center", fontSize: 9,
-    lineHeight: 1, border: "1px solid var(--border-default)", borderRadius: 4,
-    background: "var(--surface-raised)", color: "var(--text-secondary)", cursor: "pointer", fontFamily: "inherit",
+    lineHeight: 1, border: BORDER_1, borderRadius: 4,
+    background: SURF_RAISED, color: "var(--text-secondary)", cursor: "pointer", fontFamily: "inherit",
   };
   return (
     <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
@@ -22290,6 +22528,7 @@ function YieldPanel({
   parcelOverlaps, // B652: {count,names,overlapAcres} when active parcels overlap, else null
   heat, // B809: { available, on, user, onToggle, totals, ledgerAcFt } — the fill-depth heat map
   onMitOpenChange, // B809: mirrors the mit group's expansion up (heat map defaults ON while open)
+  floodExposure, // NEW-3: buildingFloodExposure() result — per-building footprint ∩ flood zone
 }) {
   const [openPanel, setOpenPanel] = useState(!collapsed);
   // NEW-1 — the drainage/mitigation readout redesign: an "Advanced" fold for the expert
@@ -24310,6 +24549,36 @@ function YieldPanel({
             {row("Coverage", `${f0(cov)}%`)}
             {row("Car stalls", f0(stalls), ratio ? `· ${f2(ratio)}/1k sf` : "")}
             {row("Trailer stalls", f0(trailers))}
+            {/* NEW-3 — IN THE FLOODPLAIN? The number, not the picture. Verdict + one figure on the
+                headline row; the per-building breakdown only when a building is actually exposed,
+                and the honest non-answers ("didn't answer", "not pulled yet") never read as a
+                clean zero. Lives inside this Collapse, so it costs the default view nothing. */}
+            {(() => {
+              const fx = floodExposure;
+              if (!fx || fx.state === "no-buildings") return null;
+              const head = exposureHeadline(fx);
+              if (!head) return null;
+              const TONE = { ok: Y.muted, warn: "var(--warn-text)", alert: "var(--danger)", unknown: "var(--warn-text)" };
+              const hit = fx.state === "ok" ? fx.buildings.filter((b) => b.governing) : [];
+              return (
+                <>
+                  {row("In the floodplain?", <span style={{ color: TONE[head.tone] || Y.text }}>{head.text}</span>,
+                    fx.state === "ok" && fx.total.touched ? `${head.detail} · ${f0(fx.total.areaSf)} sf` : head.detail || "")}
+                  {/* One line per EXPOSED building only — a clear building is already covered by
+                      the headline, so listing it again would be words for no information. */}
+                  {hit.map((b) => row(
+                    `· ${b.label || `Building ${fx.buildings.indexOf(b) + 1}`}`,
+                    `${b.pct.toFixed(b.pct < 10 ? 1 : 0)}%`,
+                    [FLOOD_CLASS_LABEL[b.governing.cls] || b.governing.cls,
+                      b.governing.zone ? `Zone ${b.governing.zone}` : null,
+                      b.governing.unstudied ? "BFE undetermined" : (b.governing.bfeFt != null ? `BFE ${b.governing.bfeFt.toFixed(1)}′` : "no published BFE"),
+                    ].filter(Boolean).join(" · "),
+                    true,
+                  ))}
+                  {fx.state === "ok" && fx.total.touched > 0 && note("Screening overlap sampled off the FEMA map — good to about a percent, not a survey.")}
+                </>
+              );
+            })()}
           </Collapse>
           {/* v3 B2 — the BUILDABILITY group is DELETED. Buildability is now a permanent verdict-
               strip row (see yieldVerdicts.buildabilityVerdict) — "not checked yet" with a ↻ when

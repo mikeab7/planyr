@@ -144,8 +144,17 @@ for (const theme of ["light", "dark"]) {
        contrast(c.textFill, OWNER_GREEN) > 2, `text ${c.textFill} vs line ${OWNER_GREEN}`);
     ok(`${theme} · NEW-1 chip text clears WCAG AA on its plate`,
        contrast(c.textFill, c.plateFill) >= 4.5, `${contrast(c.textFill, c.plateFill).toFixed(1)}:1 (${c.textFill} on ${c.plateFill})`);
-    ok(`${theme} · NEW-1 the setback colour IS on the chip border`,
-       contrast(c.borderStroke, OWNER_GREEN) < 1.2, `border ${c.borderStroke}`);
+    /* The brief for NEW-1 read "the colour belongs on the setback LINE and on the chip's border
+       only". While this was in flight, `setbackChipStyle` landed on main and took the border off
+       the line colour too — same reason, one step further: a saturated border on a chip this small
+       reproduces the green-on-white unreadability the ink default exists to end. That is kept, so
+       the assertion is the stronger one: NOTHING on the chip follows the user's line colour, and
+       the border is a neutral hairline (softened by opacity, per NEW-3). */
+    ok(`${theme} · NEW-1 the chip BORDER does not follow the user's line colour either`,
+       contrast(c.borderStroke, OWNER_GREEN) > 2, `border ${c.borderStroke}`);
+    ok(`${theme} · NEW-1 the setback LINE still carries the user's colour`,
+       await page.evaluate(() => document.querySelector('[data-testid="setback-ring"]')?.getAttribute("stroke") || "")
+         .then((v) => v.toLowerCase() === "#22c55e"), "");
     // --- NEW-3: quieter — smaller type and a softened border ----------------------------------
     ok(`${theme} · NEW-3 the numerals are smaller than the old plate's`,
        parseFloat(c.fontSize) <= 10, `${c.fontSize}`);

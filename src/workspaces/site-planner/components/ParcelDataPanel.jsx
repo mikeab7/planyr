@@ -26,6 +26,11 @@
  */
 import { apprAll, ownerName, parcelPanelRows } from "../lib/appraisal.js";
 
+/* Same value SitePlanner spells once as MONO_FONT — repeated here rather than imported, because a
+ * module reachable from both the planner and this lazy chunk gets hoisted back onto the boot
+ * bundle, which is the one thing this extraction exists to avoid. */
+const MONO_FONT = "ui-monospace, monospace";
+
 /* The Legal description is the one unbounded value in a county record; cap it and let it scroll
  * in place, so opening the disclosure can never turn the panel into a wall of text again. */
 const LEGAL_MAX_H = 76;
@@ -66,7 +71,7 @@ export function ParcelAppraisal({ attrs, PAL }) {
           {apprAll(attrs).map((r) => (
             <div key={r.label} style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "baseline", padding: "3px 0" }}>
               <span style={{ fontSize: 10.5, color: PAL.muted, flex: "none" }}>{r.label}</span>
-              <span style={{ fontSize: 10.5, color: PAL.ink, fontFamily: "ui-monospace, monospace", textAlign: "right", wordBreak: "break-word" }}>{String(r.value)}</span>
+              <span style={{ fontSize: 10.5, color: PAL.ink, fontFamily: MONO_FONT, textAlign: "right", wordBreak: "break-word" }}>{String(r.value)}</span>
             </div>
           ))}
         </div>
@@ -84,7 +89,7 @@ export function ParcelTaxes({ taxInfo, PAL }) {
       {taxInfo.units.length > 0 ? taxInfo.units.map((u, i) => (
         <div key={i} style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "baseline", padding: "4px 0", borderBottom: "1px solid #f3efe5" }}>
           <span style={{ fontSize: 11.5, color: PAL.ink }}>{u.name}</span>
-          <span style={{ fontSize: 11.5, color: PAL.muted, fontFamily: "ui-monospace, monospace" }}>{u.value}</span>
+          <span style={{ fontSize: 11.5, color: PAL.muted, fontFamily: MONO_FONT }}>{u.value}</span>
         </div>
       )) : <div style={{ fontSize: 11.5, color: PAL.muted }}>No taxing-unit fields in the county record.</div>}
       {taxInfo.connected && taxInfo.total != null ? (

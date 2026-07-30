@@ -71,6 +71,51 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   white-knockout, zoom-aware re-raster) + `overlayScale.js` (scale/trace math) + `overlayStorage.js`
   (Storage backup) + `dxf/` (worker parse via `dxf-parser` + entity→SVG render + true-units auto-scale)
   + `convertClient.js` (DWG→DXF through the B238 convert service, gated on `VITE_CONVERT_URL`).
+  **`overlayOrder.js` (NEW-2) is the ONE draw-order model for placed references** — a two-BAND
+  split (`below` the plan, the unchanged default, vs an explicitly promoted `above`), the
+  band-grouped array that IS the draw order bottom→top, the panel's front-first listing, and the
+  identity-on-no-op reorder / promote mutators. Front/back move within a band; crossing the plan is
+  only ever the explicit `aboveParcel` toggle, so "bring to front" can never silently lift a
+  backdrop over the property line. Screen, References panel and right-click menu all read it.
+- **⛔ NEW-1 (B1205) — `mapStack.js` is THE map stacking model, and it is the ONLY place a draw
+  order is decided.** Bottom→top: basemap → GIS AREA fills → references → parcel → setback →
+  elements → references promoted above the plan (B1198) → GIS LINE strokes → labels → handles.
+  **The load-bearing rule: FILLED area layers draw UNDER the site elements; LINE/stroke layers draw
+  OVER them** — a contour crossing a building is a hairline, a floodplain fill over one buries it.
+  There is deliberately **no mode, no shortcut and no per-layer z-order UI** (Google/Apple both use
+  a fixed hierarchy + opacity); per-layer opacity is the one escape hatch and every row has the same
+  `opacityControl` (B1206, guarded by the repo-root `test/` suite **layerOpacityCoverage**). Every GIS source
+  **declares** `role: "area" | "line" | "point"` — never inferred at render time — and a service
+  publishing both splits via `roleLayers` (FEMA zones vs boundaries; BKDD watersheds vs streams/BFE):
+  one panel row, one opacity, two export requests. **The trap to know:** Leaflet keeps every pane
+  inside `_mapPane`, which carries the pan transform and so its own stacking context, so **no
+  z-index can lift a pane above the planner SVG** — the line band is hosted OUTSIDE the map in a
+  sibling box (`geoTopWrapRef`/`geoTopPaneRef`), with the wrap's gesture transform and Leaflet's
+  map-pane translate mirrored in the SAME statement as the original (VIEWPORT-STABLE; `setWrapTransform`).
+  PDF-PARITY lives in `exportSheet.js`, which composites the same two bands. **Known deviation:** the
+  handle layer is inside the plan SVG, so the line band paints above it — bounded (the band is
+  `pointer-events:none`) and owned by **B1208**; do not "fix" it by moving the handle group out of
+  the SVG without moving its pointer plumbing, or every drag loses the moves that pass over a handle.
+  Guards: the repo-root `test/` suite **mapStack** and the e2e spec **map-layer-stacking**.
+- **`buildingFloodExposure.js` (B1207) answers "is my building in the floodplain?" as a NUMBER** —
+  per footprint: overlap by area and percent, the governing zone and its BFE. It **reuses** the
+  B707/B712 `zonesFromFeatureCollection` + `gridIntersect` + `zoneWaterSurface` chain (never a second
+  derivation, so it cannot disagree with the mitigation ledger's flood elevation), and it keeps four
+  distinct honest-unknown states — `not checked` / `UNKNOWN` / `none mapped` / the answer — so a
+  failed or un-run query can never read as a clean 0%. Rendered inside the Yield → Buildings
+  `<Collapse>`, which is why it costs the default view nothing (PANEL-BREVITY).
+- **⛔ NEW-1 — A MANIPULATION HANDLE IS CHROME: it belongs in the ONE always-on-top handle layer,
+  never in the content pass that draws its object.** `SitePlanner.jsx` renders every handle set
+  (`handleNodes`, `parcelHandles`, `elPolyHandles`, `markupHandles`, `calloutHandles`,
+  `measureHandles`, `overlayChrome`, the add-nodes) from a single `data-handle-layer="1"` group
+  that is the LAST child of the feet-space transform. In SVG a later sibling both paints over and
+  hit-tests ahead of everything before it, so that one position buys visibility and grabbability
+  together — there is no second hit-test rule to keep in sync. Authoring a grip inline next to its
+  object is what buried the reference overlay's corner grip under the parcel line (ungrabbable, so
+  the overlay could not be resized from that corner) and had the same trap waiting under the
+  callout and measurement grips. Guards: the repo-root `test/` suite **handleLayerOrder** (source
+  order + the ex-inline drag-starters) and the e2e spec **references-handle-layer** (real render:
+  every grip answers `elementsFromPoint`, with parcel geometry proven to be stacked underneath).
 - **Colorado (NEW-5/7/8):** `coloradoRegions.js` is THE guard — a network-free site→state
   resolution (it must hold when every GIS endpoint is down, which is exactly when a site falls
   through to a default), the four drainage regimes (MHFD covers 6 of the 9 target counties;
@@ -106,6 +151,22 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   branch is a silent spinner** — wire the branch in the same commit. Guards live in ui-audit:
   verify-colorado-guard (bytes, both directions) + verify-b1105-mhfd-panel (pixels, asserted on the
   `data-surface="planner"` host's innerText, so a zero-height or hidden node fails).
+- **⛔ B1189 — AN EFFECT THAT WRITES STATE MUST DEPEND ON VALUES, NEVER ON A STATE OBJECT'S IDENTITY.**
+  The drawing↔basemap registration layout effect listed `[view, size, origin, geoOverscan]` while reading
+  only NUMBERS out of the first three. `setSize`'s updater ALLOCATES when the measured width differs from
+  the state it is applied to, and React re-applies a retained updater against its base state on every
+  later render — so a panel close left every render minting a fresh `{w,h}` holding the SAME numbers, the
+  effect re-ran on identity alone, its `setRegShift` scheduled another render, and fifty round trips later
+  React aborted the whole planner to the error boundary. Depend on `view.ppf/offX/offY`, `size.w/h`,
+  `origin.lat/lon` — and **guard a dispatch rather than relying on a no-op updater**: a `setState` that
+  returns the same value is still a DISPATCH, and React only skips scheduling it when the fiber has no
+  other pending work, which during a panel reflow it always has. **Do NOT re-chase this as a `setSize`
+  ping-pong** — that lead was measured and refuted (both writers reported the same width; five dispatches
+  across a fifty-render loop), and quantising `size` would put a whole pixel of slop into view maths the
+  pointer-accuracy harness asserts to a quarter of a pixel. Guards: the e2e spec **panel-escape-race**
+  (the real race, proven red on pre-fix) plus the repo-root `test/` suite **errorBoundaryRecovery** (the
+  boundary's bounded self-heal, which is the second, independent half — a measurement loop may never be
+  able to take the planner down).
 - **B1122 — the basemap transform MUST be written in a LAYOUT effect.** The SVG feet-frame and the
   Leaflet basemap are driven from ONE value (`view.offX/offY/ppf`); they never disagreed about WHERE
   to be, only about WHEN. Writing `wrap.style.transform` from a passive `useEffect` paints one frame
@@ -272,10 +333,19 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   (`setAccountStyleDefaults`). Precedence: built-in < account < project < draft (preview) < per-object.
 - `planStyle.js` also owns the **setback line's** resolved style (NEW-1: `setbackLineStyle` /
   `setbackDashArray` / `SETBACK_LINE`) — colour, weight and dash were hardcoded at the one place the
-  ring was drawn while the boundary beside it had full standards. Both the ring AND its dimension
-  chip read this one derivation; the defaults ARE the historic look (weight 1.25, `dashed` = "7 6"),
-  and `parcelDefaultStyle` stamps `sbStroke`/`sbWeight`/`sbDash` only when they DIFFER from it, so an
-  upgraded plan gains no keys and renders unchanged.
+  ring was drawn while the boundary beside it had full standards. The defaults ARE the historic look
+  (weight 1.25, `dashed` = "7 6"), and `parcelDefaultStyle` stamps `sbStroke`/`sbWeight`/`sbDash` only
+  when they DIFFER from it, so an upgraded plan gains no keys and renders unchanged.
+  **⛔ The dimension CHIP does NOT read that derivation — `setbackChipStyle(ink)` is its own, and it
+  takes NO parcel (NEW-1).** The chip is a white plate whose border and numerals are the
+  `--canvas-chip-ink` token and track NOTHING on the parcel; decoupling them from the line is the
+  whole point (owner: *"the setback is orange, and then the chip … the text is orange. I'd like that
+  to all be … black."*). It was re-coupled once, by a `pc.sbStroke || ink` fallback that read black
+  only until someone set a setback colour — so the moment the line default moved indigo → green
+  (B1192) the chip went green on the live map. Never reintroduce a per-parcel value at that render
+  site; the LINE keeps its override, the chip never follows it. Guards: the repo-root `test/` suite
+  **setbackChipInk** (property + source guard, both mutation-checked) + the ui-audit harness
+  **verify-setback-chip-ink** (computed colours, an arbitrary line colour beside an untouched one).
 - **`measureStyle.js` + `measureLabel.js` — measurements, brought up to par with every other object.**
   Measurements were the last drawn object with NO style of their own (the colour was hardcoded to
   `PAL.accent` at the one place they were painted), no per-object label control, and a run-on
@@ -506,9 +576,16 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   B839 aerial tile Stitcher, and GIS raster/vector capture. It is **loaded on demand** (dynamic
   `import()` from `SitePlanner.jsx`, warmed when the File menu opens) and reads planner state
   through a `ctx` object rebuilt per call — add a key there, never a new closure capture. Its
-  helpers (`printSheet.js`, `sheetFurniture.js`, `exportStyle.js`, `imagePdf.js`, `kmzExport.js`,
-  `overlayVectorSvg.js`) must NOT gain a static importer on the boot path or they rejoin the
-  critical-path chunk. `exportLabelScale.js` (B1085) is the ONE place that decides what scale the
+  helpers (`printSheet.js`, `sheetFurnitureLayout.js`, `exportStyle.js`, `imagePdf.js`,
+  `kmzExport.js`, `overlayVectorSvg.js`) must NOT gain a static importer on the boot path or
+  they rejoin the critical-path chunk. **NEW-1 — `sheetFurniture.js` is SPLIT in two, and the
+  reason generalises:** the canvas needs the drawing PRIMITIVES (scale bar, north arrow,
+  metrics, `screenFurniturePlates`, `calibBadgePlacement`) so those stay on the boot path,
+  while the corner-placement + SVG-string tier the SHEET alone uses moved to
+  `sheetFurnitureLayout.js`. A module imported by BOTH the boot path and a lazy chunk is
+  hoisted whole into their common ancestor — tree-shaking drops unused exports, never
+  exports used by a sibling chunk — so a mixed-tier module silently charges the Site route
+  for export-only code. Split by tier, don't hope for shaking. `exportLabelScale.js` (B1085) is the ONE place that decides what scale the
   LABEL tier reasons at: the view on screen, the SHEET's own px-per-foot on an export pass — so
   declutter/LOD/collision, label sizes and stroke-zoom are a function of the plan and the paper,
   never of the live zoom. It IS on the boot path (SitePlanner imports it statically, ~1 KB pure). PDF-PARITY: `printMetricPairs`/`printStormwaterBars` deliberately stay in

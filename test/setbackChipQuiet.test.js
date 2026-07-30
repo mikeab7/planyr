@@ -183,8 +183,8 @@ describe("NEW-4 — setback chrome is raised into the selection-chrome layer", (
     expect(at("{setbackGrabNode}")).toBeGreaterThan(elements);
   });
 
-  it("…inside the export-stripped selection-chrome group, ahead of the vertex handles", () => {
-    const chrome = at("{/* selection / editing chrome — stripped from exports */}");
+  it("…inside the export-stripped HANDLE LAYER, ahead of the vertex handles", () => {
+    const chrome = at('<g data-export="skip" data-handle-layer="1">');
     const grab = at("{setbackGrabNode}");
     const chips = at("{setbackChipNodes}");
     expect(grab).toBeGreaterThan(chrome);
@@ -199,15 +199,21 @@ describe("NEW-4 — setback chrome is raised into the selection-chrome layer", (
   });
 
   it("only the INTERACTIVE chrome moved — the ring, its casing and the fill stay in the parcel band", () => {
-    const chrome = at("{/* selection / editing chrome — stripped from exports */}");
+    const chrome = at('<g data-export="skip" data-handle-layer="1">');
     expect(at('data-testid="setback-ring"')).toBeLessThan(chrome);
     expect(at('data-testid="setback-casing"')).toBeLessThan(chrome);
     expect(at('data-testid="parcel-outline"')).toBeLessThan(chrome);
   });
 
-  it("the chip's TEXT reads the ink token, and only its BORDER takes the setback colour (NEW-1)", () => {
-    expect(SRC).toContain('fill={PAL.chipInk} fontWeight="600">{txt}</text>');
-    expect(SRC).toContain('stroke={sbCol} strokeWidth={1} strokeOpacity={0.5}');
-    expect(SRC).not.toContain('fill={sbCol} fontWeight="700">{txt}</text>');   // the regression
+  /* NEW-1's own guard is `test/setbackChipInk.test.js` (the `setbackChipStyle` source guard that
+     landed on main while this was in flight, and which goes one step further than this item by
+     taking the border off the line colour too). What is asserted HERE is the part NEW-3 added on
+     top: the ink is never re-derived from the parcel, and the border is softened by OPACITY rather
+     than by picking a lighter colour — which is what keeps it a neutral hairline. */
+  it("the chip's TEXT and border read the ink token, never the parcel's line colour (NEW-1)", () => {
+    expect(SRC).toContain('fill={chipStyle.text} fontWeight="600">{txt}</text>');
+    expect(SRC).toContain('stroke={chipStyle.stroke} strokeWidth={1} strokeOpacity={0.5}');
+    expect(SRC).not.toContain('fill={sbCol}');                       // the regression
+    expect(SRC).not.toContain('const sbCol = selParcel.sbStroke');   // …and its source
   });
 });

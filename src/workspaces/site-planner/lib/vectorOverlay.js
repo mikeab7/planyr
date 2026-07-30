@@ -143,7 +143,11 @@ const labelHtml = (text, { uppercase }) =>
 export function cachedVectorLayer(k, cfg, initialOpacity, pane, onStatus, opts = {}) {
   const source = VECTOR_SOURCES[k];
   if (!source) return null;
-  const { cache = gisCache, interactive = false, identifyOk = () => true, buildFallback = null } = opts;
+  // NEW-1 — `labelPane` lets the caller put this layer's name labels in the SAME stacking
+  // band as the layer itself (lib/mapStack.js), so a stream's name is never buried under the
+  // building the stream is drawn over. Absent → the historic shared label pane.
+  const { cache = gisCache, interactive = false, identifyOk = () => true, buildFallback = null, labelPane = LABEL_PANE } = opts;
+  const labelPaneName = labelPane || LABEL_PANE;
 
   let map = null, opacity = initialOpacity, lastVectorError = null;
   let fellBack = false, fallbackLayer = null, openPopup = null;
@@ -255,7 +259,7 @@ export function cachedVectorLayer(k, cfg, initialOpacity, pane, onStatus, opts =
     for (const p of placed) {
       const text = source.id === "jur_etj" ? `${p.name} ETJ` : p.name;
       const icon = L.divIcon({ className: "", html: labelHtml(text, { uppercase: source.id === "jur_county" }), iconSize: [0, 0] });
-      const mk = L.marker([p.lat, p.lng], { icon, interactive: false, keyboard: false, pane: LABEL_PANE });
+      const mk = L.marker([p.lat, p.lng], { icon, interactive: false, keyboard: false, pane: labelPaneName });
       group.addLayer(mk);
       labelMarkers.push(mk);
     }
@@ -343,8 +347,8 @@ export function cachedVectorLayer(k, cfg, initialOpacity, pane, onStatus, opts =
 
   group.onAdd = function (m) {
     map = m;
-    if (!m.getPane(LABEL_PANE)) {
-      const p = m.createPane(LABEL_PANE);
+    if (!m.getPane(labelPaneName)) {
+      const p = m.createPane(labelPaneName);
       p.style.zIndex = 360; // just above the overlay pane (350), below vectors (400)
       p.style.pointerEvents = "none";
     }
