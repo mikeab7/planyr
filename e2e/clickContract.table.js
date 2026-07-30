@@ -51,6 +51,52 @@ export const CLICK_CONTRACT = [
     note: "single click used to auto-open the Parcel panel from a selection effect — removed in NEW-1" },
 ];
 
+/* ---------------------------------------------------------------------------------------------
+ * REVIEW (Document Review) — the same contract, the other workspace (B1190).
+ *
+ * Review's inspector is a rail SECTION rather than a docked panel, so a stray close collapses a
+ * section instead of reflowing the canvas — milder, same rule. Its markup KINDS are declared here
+ * so `test/clickContract.test.js` can fail the build when a new drawable tool ships without a
+ * declared click behaviour, exactly as it already does for the planner's registries.
+ *
+ * `opens` is "inspector" for every row: Review has one Properties section and that is where a
+ * double-click lands. What varies is the EXCEPTION — the kinds whose double-click edits text in
+ * place instead — so that is what each row records.
+ */
+export const REVIEW_CLICK_CONTRACT = [
+  // Redline shapes — double-click opens Properties, nothing else.
+  { tool: "line", label: "Line", opens: "inspector" },
+  { tool: "polyline", label: "Polyline", opens: "inspector" },
+  { tool: "polygon", label: "Polygon", opens: "inspector" },
+  { tool: "rect", label: "Rect", opens: "inspector" },
+  { tool: "ellipse", label: "Ellipse", opens: "inspector" },
+  { tool: "cloud", label: "Cloud", opens: "inspector" },
+  { tool: "arc", label: "Arc", opens: "inspector" },
+  { tool: "dimension", label: "Dimension", opens: "inspector" },
+  { tool: "pen", label: "Pen", opens: "inspector" },
+  { tool: "highlight", label: "Highlight", opens: "inspector" },
+  { tool: "snapshot", label: "Snapshot", opens: "inspector" },
+
+  // Measurements — same contract as the shapes.
+  { tool: "distance", label: "Distance", opens: "inspector" },
+  { tool: "polylength", label: "Length", opens: "inspector" },
+  { tool: "perimeter", label: "Perimeter", opens: "inspector" },
+  { tool: "area", label: "Area", opens: "inspector" },
+  { tool: "count", label: "Count", opens: "inspector" },
+
+  // Text-bearing kinds — the double-click SPLITS, and each splits on a different axis.
+  { tool: "text", label: "Text", opens: "inspector", editsText: true,
+    note: "an ALREADY-selected text note edits its words in place (the B750 temporal rule); otherwise Properties" },
+  { tool: "callout", label: "Callout", opens: "inspector", editsText: true,
+    note: "LOCATION-based (B948): inside the text region edits in place, the border band / a leader opens Properties" },
+];
+
+/* Review tools that draw nothing selectable (modes, not markups) — declared so the completeness
+ * check can tell "deliberately has no click contract" from "somebody forgot a row". */
+export const REVIEW_NON_MARKUP_TOOLS = ["select", "pan", "marquee", "calibrate", "eraser"];
+
+export const reviewContractFor = (tool) => REVIEW_CLICK_CONTRACT.find((c) => c.tool === tool) || null;
+
 /* The subset the live e2e actually drives end-to-end. Everything else is covered by the source guard
  * plus the shared handlers those types already route through (startMoveEl / startMoveMarkup). Kept
  * explicit so a shrinking drive set is a visible edit, never a silent loss of coverage. */

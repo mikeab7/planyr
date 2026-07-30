@@ -30,6 +30,16 @@ internals in `/docs/REFERENCE.md` (Document Review persistence section).
   now its own **Library** workspace (`/src/workspaces/library/`, B496); the storage data layer
   (`reviewStore`/`autofiling`/`fileIndex`) stays here and Library imports it cross-workspace.
 
+**Click contract (B1190, mirrors the planner's B1188):** the Properties rail section's OPEN/CLOSED state
+is `propsOpen`, a boolean only `openMarkupProps` / `closeMarkupProps` write (double-click, a freshly-drawn
+markup, the ✕, Escape). **Selection chooses the BODY only** — with nothing selected the section holds its
+ground on a "Nothing selected" state rather than vanishing. Never reintroduce a marker that has to match
+`sel`, and never add an effect keyed on `sel` that writes the open state: that pairing is the bug, and
+the repo-root `test/` suite **clickContract** fails the build on it. That suite also reads this file's own
+`TOOLS` registry, so **a new markup tool must be declared** in `REVIEW_CLICK_CONTRACT` or
+`REVIEW_NON_MARKUP_TOOLS` (the repo-root shared **clickContract.table** under `e2e/`). Live guard: the
+e2e spec **review-click-contract**.
+
 **Model rule:** the imported drawing is an **immutable backdrop**; measurements/markups/massing
 live on editable layers over it — never write back the engineer's geometry. Shared markup engine
 is in `/src/shared/markup/`. Heavy CAD/PDF parsing belongs in Web Workers.
