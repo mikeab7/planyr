@@ -36,7 +36,7 @@ import {
 } from "../lib/coverage.js";
 import {
   governingDistrict, scopeFloodEntries, floodMasterState,
-  femaZoneVerdict, floodFactsNote, emptyReason, FEMA_ZONES_NOT_CHANNELS,
+  floodFactsNote, emptyReason, FEMA_ZONES_NOT_CHANNELS,
 } from "../lib/floodGroup.js";
 
 // This panel rides on the themed var(--surface-overlay) container, so its text must
@@ -102,6 +102,8 @@ export default function LayerPanel({
   const [radius, setRadius] = useState(getNearbyRadiusMiles);
   useEffect(() => subscribeRelevance((p) => { setMode(p.mode); setRadius(p.radius); }), []);
   const [revealHidden, setRevealHidden] = useState({}); // per-group reveal in "hide" mode
+  const [floodCopy, setFloodCopy] = useState(null);     // the lazily-loaded flood copy tier (below)
+  useEffect(() => { import("../lib/floodZoneCopy.js").then(setFloodCopy).catch(() => {}); }, []);
   // Collapsible groups so the panel fits on one page without scrolling (B97). Collapse state
   // persists per device; each header shows how many layers in the group are currently on.
   const [collapsed, setCollapsed] = useState(() => { try { return JSON.parse(localStorage.getItem("planarfit:layerGroups:v1") || "{}") || {}; } catch (_) { return {}; } });
@@ -426,7 +428,14 @@ export default function LayerPanel({
     isOn: (id) => !!overlays[id]?.on, // a layer you already turned on always stays listed
   });
   const floodMaster = floodMasterState(floodScope.tiers, overlays);
-  const femaVerdict = femaZoneVerdict(floodContext?.flood);
+  /* ⛔ THE FEMA VERDICT'S WORDS ARE LOADED ON DEMAND, and this is a BUNDLE decision, not a
+   * stylistic one. `floodZoneCopy.js` holds every flood sentence plus the NEW-3 FIPS / FIRM
+   * provenance tables; a static import from this panel would pin all of it to the site-route
+   * chunk, which had 0.4 KB of headroom when this landed. The flood group renders behind
+   * `collapsed.flood`, so the import has landed long before anything here is on screen — and
+   * if it somehow has not, the group simply shows its other honest lines for one tick rather
+   * than a spinner. Loaded once per session and cached by the module system. */
+  const femaVerdict = floodCopy ? floodCopy.femaZoneVerdict(floodContext?.flood) : null;
   /* (NEW-1/NEW-2) The one line that fires when the facts AREN'T in hand — the state that
    * used to render nothing at all. Mutually exclusive with the FEMA verdict below. */
   const factsNote = floodFactsNote({ hasContext: !!floodContext?.flood?.state, county: floodCounty });
@@ -496,7 +505,13 @@ export default function LayerPanel({
         aria-expanded={!!revealHidden.floodOff}
         aria-label={`${revealHidden.floodOff ? "Hide" : "Show"} ${floodScope.offRows.length} flood and drainage source${floodScope.offRows.length > 1 ? "s" : ""} that don't cover this site`}
         style={{ background: "transparent", border: "none", color: MUTED, fontSize: 10.5, cursor: "pointer", padding: "2px 0", textAlign: "left", width: "100%" }}>
-        {revealHidden.floodOff ? "▾" : "▸"} {floodScope.offRows.length} source{floodScope.offRows.length > 1 ? "s" : ""} that don&rsquo;t cover this site
+        {/* NEW-4 — the verb, and the same wording as the sibling "no local data here" control
+            above. Without it the line read as a STATEMENT ("5 sources that don't cover this
+            site") rather than a control, so the owner had no cue that the five could be named —
+            and on an out-of-region site "is one of them flood-related?" is exactly the question
+            that decides how much to trust the flood answer. The rows were always here (B1091);
+            only the affordance was missing. */}
+        {revealHidden.floodOff ? "▾ Hide" : "▸ Show"} the {floodScope.offRows.length} source{floodScope.offRows.length > 1 ? "s" : ""} that don&rsquo;t cover this site
       </button>
       {revealHidden.floodOff && floodScope.offRows.map(([k, cfg]) => (
         <div key={k} style={{ opacity: 0.72 }}>
@@ -527,8 +542,13 @@ export default function LayerPanel({
       {/* (B1091) Everything the scoping demoted, behind one line — with its reason. */}
       {floodOffRows}
       {/* (NEW-3a) What FEMA actually said — the answer that was missing entirely. */}
+      {/* NEW-3 — the PROVENANCE rides the line's hover, not the line: the decoded FIRM panel
+          ("Larimer County, Colorado FIRM panel 08069C1405G, effective Jan 15, 2021"), the source,
+          and the data's age, in the app's established basis shape. A study identifier is a
+          click-into-detail fact, never glance-at-the-map furniture. */}
       {femaVerdict && (
-        <div data-testid="flood-fema-verdict" style={{ fontSize: 10.5, color: TONE[femaVerdict.tone] || MUTED, lineHeight: 1.45, marginTop: 6 }}>
+        <div data-testid="flood-fema-verdict" title={femaVerdict.basis || undefined}
+          style={{ fontSize: 10.5, color: TONE[femaVerdict.tone] || MUTED, lineHeight: 1.45, marginTop: 6 }}>
           {femaVerdict.text}
         </div>
       )}

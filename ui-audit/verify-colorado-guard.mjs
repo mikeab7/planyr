@@ -87,7 +87,14 @@ const run = async () => {
   const guardCopy = [
     ["the Colorado unavailable state", /not yet available in Colorado/i],
     ["the named verdict chip", /N\/A · CO/],
-    ["the guard's own short line", /does not yet carry Colorado detention criteria/],
+    /* NEW-5 (2026-07-30) rewrote this sentence. "…does not yet carry Colorado detention criteria"
+     * read as "this app has nothing for you here", which is not what is true: district MEMBERSHIP
+     * and WHICH MANUAL a town has adopted are different questions, and towns outside the Mile
+     * High Flood District commonly adopt MHFD's manuals anyway. The ASSERTION is unchanged in
+     * intent — the guard's own short line must ship EAGERLY so a Colorado site's verdict renders
+     * instantly — only the words moved. Copy only: nothing computed changed. */
+    ["the guard's own short line", /confirm the criteria your town has adopted/],
+    ["the out-of-district subject", /Outside MHFD \(/],
   ];
   for (const [label, re] of guardCopy) check(re.test(js), `eager bundle carries ${label} (it must render instantly)`);
 

@@ -297,39 +297,11 @@ export function floodMasterState(tiers = [], overlays = {}) {
  * floodplain administrator regulates)? A/V zones are; X (and D, undetermined) are not. */
 export const isSfhaZone = (zone) => /^(A|V)/i.test(String(zone || "").trim());
 
-/* Turn resolveDrainageContext's `flood` block ({ zones, state }) into ONE honest line.
- *
- * The three states this function exists to distinguish (NEW-3):
- *   failed          → we could not reach FEMA. NOT "no flood zone."
- *   empty           → FEMA answered, and has no zone polygon mapped at this point.
- *   loaded, no SFHA → FEMA answered Zone X: minimal hazard, no SFHA here. THE ANSWER.
- *   loaded, SFHA    → an SFHA is mapped; name the zone.
- *
- * Returns { text, tone } where tone is "ok" | "warn" | "alert" — or null when there is
- * nothing yet to report (no check has run). Pure. */
-export function femaZoneVerdict(flood) {
-  if (!flood || !flood.state) return null;
-  if (flood.state === "failed") {
-    return { text: "FEMA's flood map service didn't answer — flood status here is unknown, not clear.", tone: "warn" };
-  }
-  const zones = Array.isArray(flood.zones) ? flood.zones : [];
-  if (!zones.length) {
-    return { text: "FEMA's effective map shows no flood zone mapped at this site.", tone: "ok" };
-  }
-  const sfha = zones.filter((z) => isSfhaZone(z.zone));
-  if (sfha.length) {
-    const names = [...new Set(sfha.map((z) => `Zone ${z.zone}`))].join(" + ");
-    const floodway = sfha.some((z) => /FLOODWAY/i.test(String(z.subtype || "")));
-    return {
-      text: `FEMA effective FIRM: ${names}${floodway ? " including regulatory floodway" : ""} — a special flood hazard area IS mapped here.`,
-      tone: "alert",
-    };
-  }
-  const z = zones[0];
-  const sub = String(z.subtype || "").trim();
-  const subtle = sub && !/^AREA OF MINIMAL FLOOD HAZARD$/i.test(sub) ? `, ${sub.toLowerCase()}` : ", area of minimal flood hazard";
-  return { text: `FEMA effective FIRM: Zone ${z.zone}${subtle} — no special flood hazard area mapped here.`, tone: "ok" };
-}
+/* ⛔ `femaZoneVerdict` MOVED to `floodZoneCopy.js` (2026-07-30). It is pure COPY plus NEW-3
+ * provenance, and this module rides the site-route chunk through LayerPanel — keeping the verdict
+ * here would have pinned every flood sentence and the FIPS tables to the boot path. LayerPanel
+ * dynamic-imports it; `isSfhaZone` below stays because the row-scoping logic here uses it.
+ * See floodZoneCopy.js's header for the split rule. */
 
 /* (NEW-2) THE GROUP MUST NEVER BE BLANK — the honest state when the facts aren't in hand.
  *

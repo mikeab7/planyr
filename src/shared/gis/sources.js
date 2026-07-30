@@ -55,7 +55,11 @@ export const GIS_SOURCES = {
     serviceUrl: "https://hazards.fema.gov/arcgis/rest/services/public/NFHL/MapServer",
     layerId: 28, // Flood Hazard Zones (S_Fld_Haz_Ar) — the canonical queryable SFHA polygons
     geometryType: "polygon",
-    fields: { zone: "FLD_ZONE", subtype: "ZONE_SUBTY", elev: "STATIC_BFE", vdatum: "V_DATUM", depth: "DEPTH" },
+    // NEW-3 — `firm` (DFIRM_ID) rides along so a readout can say WHOSE study answered by county
+    // name rather than a bare id, and so a site whose extent spans two studies (a county-line
+    // site: FIRM panels stop at the county line) can be flagged instead of silently reporting
+    // whichever one a point landed in. Decoded by lib/floodZone.js `firmStudy`.
+    fields: { zone: "FLD_ZONE", subtype: "ZONE_SUBTY", elev: "STATIC_BFE", vdatum: "V_DATUM", depth: "DEPTH", firm: "DFIRM_ID" },
     // NEW-2/B789: a per-source screening-fetch timeout that OVERRIDES the 9 s default
     // (GIS_FETCH_TIMEOUT_MS). FEMA's NFHL answered flood /query in ~9.5 s during the
     // 2026-07-11 slowdown, so all three 9 s attempts lost the same race by ~0.5 s. ~20 s

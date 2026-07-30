@@ -22,7 +22,12 @@
 import { NOT_MODELED, SCREENING_DISCLAIMER } from "./screeningBfe.js";
 import { pointInRing } from "./pondGeom.js";
 import { lngLatRingToFeet } from "./arcgis.js";
-import { isSFHA } from "./siteAnalysis.js";
+/* NEW-1 — the `isSFHA` import from siteAnalysis.js is GONE, and that is the optimization that pays
+ * for this strand's bytes. Every SFHA / shaded-X / floodway question now goes through the shared
+ * leaf reader, so this engine no longer has a module edge to `siteAnalysis.js` — the screening
+ * connector, its per-category summarizers and its fetch layer — for one predicate. Same answers,
+ * one fewer heavy edge on the site route. */
+import { resolveFloodZone } from "./floodZone.js";
 import { SQFT_PER_ACRE } from "../../../shared/coordinates/index.js";
 import { triggerClasses, mitigationOffsetBasis } from "./floodplainRules.js";
 
@@ -33,9 +38,13 @@ const CF_PER_CY = 27;
 const num = (v) => (v == null || v === "" ? null : Number(v));
 const realElev = (v) => { const n = num(v); return n != null && isFinite(n) && n > BFE_SENTINEL_MIN ? n : null; };
 
-// Shaded Zone X = the 0.2%-annual-chance (500-yr) band (same regex family as siteAnalysis).
-const isShadedX = (subtype) => /0\.2\s*pct|0\.2\s*%|\b500[-\s]?(?:yr|year)/i.test(String(subtype || ""));
-const isFloodway = (subtype) => /floodway/i.test(String(subtype || ""));
+/* NEW-1 — shaded Zone X and the floodway are resolved by the SHARED reader (`floodZone.js`), not
+ * by a regex kept here. The two local copies of this test (this one and siteAnalysis's) both read
+ * only /0\.2 pct/, and FEMA paints five more X subtypes in its 0.2% class — 54k polygons of
+ * "1 PCT DEPTH LESS THAN 1 FOOT" / "1 PCT DRAINAGE AREA LESS THAN 1 SQUARE MILE" nationally,
+ * measured 2026-07-30. Those are shaded X on the FIRM, so a COH Ch.19 / Fort Bend §9 / Waller
+ * §A(8) 500-yr fill trigger REACHES them, and this engine was classifying them as "no hazard".
+ * One reader, so the map paint, the hover, the panel verdict and this ledger cannot disagree. */
 
 /* Classify ONE NFHL S_Fld_Haz_Ar feature's attributes into a mitigation class.
  *   floodway — regulatory floodway: fill/structures are a HARD STOP (prohibit_fill),
@@ -49,16 +58,22 @@ const isFloodway = (subtype) => /floodway/i.test(String(subtype || ""));
  *              the Site-Analysis screen's "unknown" — it carries no WSE to price.
  * Pure. */
 export function classifyNfhlFeature(attrs = {}) {
-  const zone = String(attrs.FLD_ZONE == null ? "" : attrs.FLD_ZONE).trim().toUpperCase();
-  const subtype = String(attrs.ZONE_SUBTY == null ? "" : attrs.ZONE_SUBTY).trim();
-  const sfha = String(attrs.SFHA_TF == null ? "" : attrs.SFHA_TF).trim().toUpperCase() === "T" || isSFHA(zone);
+  /* NEW-1 — the CLASS comes from the shared reader, so this ledger, the map paint and every
+   * readout answer from one derivation. The reader also settles two orderings this function used
+   * to get wrong on real data: a "1 PCT FUTURE CONDITIONS, FLOODWAY" polygon is NOT the regulatory
+   * floodway (it is FEMA's future-conditions class), and a levee "reduced flood risk" X is not the
+   * 0.2% band. Both used to fall through the bare /floodway/ and /0.2 pct/ regexes. */
+  const r = resolveFloodZone(attrs) || {};
+  const zone = r.zone || "";
+  const subtype = r.subtype || "";
+  const sfha = !!r.sfha;
   const staticBfeFt = realElev(attrs.STATIC_BFE);
   const aoDepthFt = zone === "AO" ? realElev(attrs.DEPTH) : null;
   const vdatum = attrs.V_DATUM != null && String(attrs.V_DATUM).trim() !== "" ? String(attrs.V_DATUM).trim() : null;
   let cls = "none";
-  if (isFloodway(subtype)) cls = "floodway";
+  if (r.variant === "floodway") cls = "floodway";
   else if (sfha) cls = "1pct";
-  else if (isShadedX(subtype)) cls = "02pct";
+  else if (r.variant === "shaded-x") cls = "02pct";
   return {
     cls, zone, subtype, staticBfeFt, aoDepthFt, vdatum,
     // Bare Zone A (or AO with no depth) — in the SFHA but its water surface can't be

@@ -38,6 +38,23 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   `display:none` to keep its map alive), so the DOM always holds TWO copies of this panel and the
   hidden one has no context. The inactive mode is now `inert` + `aria-hidden`, and each panel stamps
   `data-surface="planner"|"finder"` — **assert against the surface, never against page text.**
+  **Flood-zone MEANING (B1235–B1237, B1241) — `floodZone.js` is the CLASSIFIER and
+  `floodZoneCopy.js` is the WORDS, and that split is load-bearing.** In FEMA's NFHL both variants
+  of Zone X carry `FLD_ZONE = "X"`; only `ZONE_SUBTY` separates the 500-year band (a real
+  constraint — COH Ch.19's FFE rule, Fort Bend §9, Waller §A(8)) from the all-clear. `floodZone.js`
+  turns a polygon into one of eight named variants, read on the site route by the mitigation
+  ledger, the screening analysis and the map paint. **Its subtype vocabulary comes from FEMA's own
+  layer-28 renderer, not from a guess:** five X subtypes beyond `0.2 PCT` are painted in the 0.2%
+  class (`1 PCT DEPTH LESS THAN 1 FOOT` and `1 PCT DRAINAGE AREA LESS THAN 1 SQUARE MILE` alone are
+  54k polygons nationally), and future-conditions and levee-reduced X are their own classes and are
+  NOT the 0.2% band — do not narrow any of it back to a substring match. `floodZoneCopy.js` holds
+  every user-facing sentence (the answer-first headline — `No mapped floodplain · FEMA Zone X
+  (unshaded)`, the word **MAPPED** being load-bearing), the representable no-data / unreachable
+  states (absence is never a falsy zone), the FIPS + FIRM-panel provenance, and the Layers-panel
+  verdict. **⛔ It is reached ONLY by dynamic import** (the lazy hover path + `LayerPanel`'s own
+  loader): a static edge from the boot path hoists all of it into the site-route chunk, which is
+  what paid for this work shipping at all. Guard: the ui-audit harness **flood-group-verify**
+  (64 checks on the real rendered panel + readout, fixtures read from the live FEMA service).
   **Point symbology + hover identify (NEW-1/NEW-2), read before touching how a layer paints or
   answers:** `mapSymbols.js` owns the `pointToLayer` circleMarker factory — a GeoJSON POINT built
   WITHOUT one gets Leaflet's default `L.marker`+`L.Icon.Default`, whose PNG never resolved under the

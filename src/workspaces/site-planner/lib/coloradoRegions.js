@@ -40,7 +40,17 @@ export const COLORADO_DETENTION_DETAIL =
   "Colorado sizes detention differently — the Mile High Flood District by WQCV plus EURV under " +
   "Full Spectrum Detention, and Larimer, Weld and El Paso each under their own criteria manual — " +
   "so there is no honest way to convert one into the other. Nothing is shown rather than " +
-  "something wrong. Size detention with your engineer against the reviewing jurisdiction's manual.";
+  "something wrong. Size detention with your engineer against the reviewing jurisdiction's manual. " +
+  /* NEW-5 (copy only — no rule record, no engine, nothing computed changes). Being outside the
+   * district was reading as "this app has nothing for you here", and that is not what is true:
+   * membership and adopted manual are different questions. The Town of Johnstown — in
+   * Weld/Larimer, outside MHFD — governs by its own storm-drainage criteria plus the Town's 2001
+   * Storm Water Master Plan release rates AND MHFD's Drainage Criteria Manuals Volumes 1, 2 and 3.
+   * So the town, not the district boundary, is who to ask. */
+  "Being outside the Mile High Flood District does NOT mean MHFD's manuals are irrelevant here: " +
+  "district membership and which manual a jurisdiction has adopted are separate questions, and " +
+  "towns outside the district commonly adopt MHFD's Drainage Criteria Manuals alongside their own " +
+  "criteria and release rates. Confirm with the town before assuming either way.";
 
 /* NEW-1 (B1105) — the MHFD-specific detail, for the ONE regime that now has an engine.
  *
@@ -109,7 +119,10 @@ export const CO_DRAINAGE_REGIMES = {
     criteria: "Larimer County Stormwater Design Standards; City of Fort Collins and City of Loveland each publish their own criteria within their limits.",
     detentionModeled: false,
     detentionMethod: "Own criteria manual — release-rate and volume standards differ from MHFD's and are not transcribed.",
-    note: "Larimer County is NOT in the Mile High Flood District. Do not apply MHFD criteria here — B1105 wired MHFD only, and this regime keeps the hard 'not available in Colorado yet' guard on purpose.",
+    // NEW-5 — this `note` is RENDERED to the owner (the detention ⓘ appends it), so it says what
+    // is true for them rather than which backlog item wired what: outside the district, but the
+    // town may still have adopted MHFD's manuals. Planyr computes no volume either way.
+    note: "Larimer County is NOT in the Mile High Flood District, so Planyr computes no detention volume here. That is not the same as MHFD being irrelevant — a town inside the county may have adopted MHFD's Drainage Criteria Manuals alongside the county's own Stormwater Design Standards. Confirm with the town or city that reviews your plans.",
   },
   weld: {
     id: "weld",
@@ -119,7 +132,10 @@ export const CO_DRAINAGE_REGIMES = {
     criteria: "Weld County drainage criteria; City of Greeley publishes its own stormwater criteria within its limits.",
     detentionModeled: false,
     detentionMethod: "Own criteria manual — not transcribed.",
-    note: "Weld County is NOT in the Mile High Flood District. B1105 wired MHFD only; this regime keeps the hard 'not available in Colorado yet' guard on purpose.",
+    // NEW-5 — owner-facing (see the Larimer note). Johnstown is the worked example: it sits in
+    // Weld/Larimer, outside the district, and governs by its own storm-drainage criteria plus the
+    // Town's 2001 Storm Water Master Plan release rates AND MHFD Volumes 1-3.
+    note: "Weld County is NOT in the Mile High Flood District, so Planyr computes no detention volume here. Towns in the county commonly adopt MHFD's Drainage Criteria Manuals anyway, alongside their own criteria and release rates — the Town of Johnstown does. Confirm with the town that reviews your plans.",
   },
   elpaso: {
     id: "elpaso",
@@ -129,7 +145,8 @@ export const CO_DRAINAGE_REGIMES = {
     criteria: "El Paso County / City of Colorado Springs Drainage Criteria Manual (DCM), Volumes 1–2.",
     detentionModeled: false,
     detentionMethod: "Own DCM — not transcribed.",
-    note: "El Paso County is NOT in the Mile High Flood District. The county and the City of Colorado Springs jointly maintain the DCM. B1105 wired MHFD only; this regime keeps the hard 'not available in Colorado yet' guard on purpose.",
+    // NEW-5 — owner-facing (see the Larimer note).
+    note: "El Paso County is NOT in the Mile High Flood District, so Planyr computes no detention volume here. The county and the City of Colorado Springs jointly maintain their own Drainage Criteria Manual; confirm with whichever of them reviews your plans which criteria and release rates govern.",
   },
 };
 

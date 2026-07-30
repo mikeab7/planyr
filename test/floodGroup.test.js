@@ -9,8 +9,12 @@ import {
   FLOOD_TIERS, FLOOD_TIER_ORDER, FEMA_ZONES_NOT_CHANNELS,
   DRAINAGE_DISTRICTS, COUNTY_DISTRICT, districtName, districtShort,
   governingDistrict, scopeFloodEntries, floodRowRelevance, districtReaches, floodMasterState,
-  countyKey, countyName, femaZoneVerdict, floodFactsNote, isSfhaZone, emptyReason, districtDrainageNote,
+  countyKey, countyName, floodFactsNote, isSfhaZone, emptyReason, districtDrainageNote,
 } from "../src/workspaces/site-planner/lib/floodGroup.js";
+// NEW-2/NEW-3 — femaZoneVerdict now lives in the LAZY copy tier (floodZoneCopy.js): it is pure
+// user-facing wording plus the FIRM provenance tables, and keeping it in floodGroup.js pinned all
+// of that to the site-route chunk. See floodZoneCopy.js's header for the split rule.
+import { femaZoneVerdict } from "../src/workspaces/site-planner/lib/floodZoneCopy.js";
 import { NHD_FTYPE, ftypeLabel, flowlineTitle, flowlineSummary } from "../src/workspaces/site-planner/lib/nhdFlowline.js";
 import { GIS_SOURCES } from "../src/shared/gis/sources.js";
 
@@ -312,15 +316,28 @@ describe("floodMasterState (B1076) — one master toggle over the whole bundle",
 
 // ---------------------------------------------------------------------------
 describe("femaZoneVerdict (B1077a) — the answer that was missing entirely", () => {
-  it("Zone X: says minimal hazard AND that no SFHA is mapped (the live Tsakiris answer)", () => {
+  /* NEW-1/NEW-2 rewrote this line, deliberately. The old wording lower-cased whatever subtype came
+   * back and asserted "area of minimal flood hazard" when there was none — so it could not tell
+   * unshaded X (the all-clear) from shaded X (INSIDE the 500-year floodplain), which both carry
+   * FLD_ZONE "X". It also left an empty map unexplained, which is what made the owner read a
+   * correct answer as a broken layer. Asserted by MEANING now rather than verbatim, so the copy
+   * can be tuned without a false failure — the variant, the tone and the reason are the contract.
+   * The shaded-X twin lives in test/floodZone.test.js. */
+  it("Zone X: names the UNSHADED variant, says no SFHA, and explains the blank map", () => {
     const v = femaZoneVerdict({ state: "loaded", zones: [{ zone: "X", subtype: "AREA OF MINIMAL FLOOD HAZARD" }] });
     expect(v.tone).toBe("ok");
-    expect(v.text).toBe("FEMA effective FIRM: Zone X, area of minimal flood hazard — no special flood hazard area mapped here.");
+    expect(v.text).toMatch(/^No mapped floodplain · FEMA Zone X \(unshaded\)/);
+    expect(v.text).toMatch(/FEMA maps no flood hazard here/i);
+    expect(v.text).toMatch(/Nothing draws because FEMA paints no colour/);
   });
   it("an SFHA is named, and a floodway is called out", () => {
     expect(femaZoneVerdict({ state: "loaded", zones: [{ zone: "AE" }] })).toMatchObject({ tone: "alert" });
+    expect(femaZoneVerdict({ state: "loaded", zones: [{ zone: "AE" }] }).text)
+      .toMatch(/^100-year floodplain · FEMA Zone AE/);
     const fw = femaZoneVerdict({ state: "loaded", zones: [{ zone: "AE", subtype: "FLOODWAY" }] });
-    expect(fw.text).toMatch(/including regulatory floodway/);
+    // The owner refinement: the ANSWER leads and FEMA's code follows as provenance.
+    expect(fw.text).toMatch(/^Regulatory floodway · FEMA Zone AE/); // still names the A zone it sits in
+    expect(fw.tone).toBe("alert");
   });
   it("an OUTAGE is 'unknown, not clear' — never mistaken for 'no flood hazard'", () => {
     const v = femaZoneVerdict({ state: "failed", zones: [] });
@@ -345,14 +362,15 @@ describe("femaZoneVerdict (B1077a) — the answer that was missing entirely", ()
       ],
     });
     expect(v.tone).toBe("alert");
-    expect(v.text).toBe("FEMA effective FIRM: Zone A — a special flood hazard area IS mapped here.");
+    expect(v.text).toBe("100-year floodplain · FEMA Zone A — a mapped Special Flood Hazard Area — the regulatory 1%-annual-chance floodplain.");
     // The X half must NOT be allowed to speak for the tract: an SFHA anywhere in the ring
     // outranks "minimal hazard" somewhere else in it.
-    expect(v.text).not.toMatch(/no special flood hazard area/);
+    expect(v.text).not.toMatch(/No mapped floodplain/);
   });
   it("both an X and an A: the SFHA wins whatever order the service returns them in", () => {
     const flipped = femaZoneVerdict({ state: "loaded", zones: [{ zone: "A" }, { zone: "X", subtype: "AREA OF MINIMAL FLOOD HAZARD" }] });
-    expect(flipped.text).toBe("FEMA effective FIRM: Zone A — a special flood hazard area IS mapped here.");
+    expect(flipped.text).toMatch(/^100-year floodplain · FEMA Zone A/);
+    expect(flipped.text).not.toMatch(/No mapped floodplain/);
   });
   it("A and V zones are SFHA; X and D are not", () => {
     expect(isSfhaZone("AE")).toBe(true);

@@ -51,7 +51,22 @@
     "    Texas copy it sits beside: a Colorado site shows the Colorado line and never the rate badge,",
     "    the band note or the outfall note, and a Texas site never renders any of these. The static",
     "    audit counts every literal in the file, so the budget grows even though the DEFAULT VIEW OF",
-    "    ANY GIVEN SITE does not grow by a single line. That is the honest reading of this raise."
+    "    ANY GIVEN SITE does not grow by a single line. That is the honest reading of this raise.",
+    "",
+    "LOWERED 2026-07-30 (NEW-5, the Colorado wording fix): yield-stormwater-notes 150->148 lines,",
+    "12779->12682 chars. A copy REPLACEMENT, so the budget follows it DOWN — zero headroom is the",
+    "rule, and leaving the old number would have banked 97 chars of silent room for the next",
+    "accumulation. What changed:",
+    "  REMOVED: '<regime> governs here — Planyr does not yet carry Colorado detention criteria.'",
+    "    (69 counted chars). It read as 'this app has nothing for you here', which is not true:",
+    "    district MEMBERSHIP and WHICH MANUAL a town has adopted are different questions, and towns",
+    "    outside the Mile High Flood District commonly adopt MHFD's manuals anyway.",
+    "  ADDED: '<subject> — confirm the criteria your town has adopted.' (58 counted chars), with",
+    "    the subject computed ('Outside MHFD (Weld County)' / 'MHFD governs here' / 'Colorado') so",
+    "    the budget still counts ONE literal, per PANEL-BREVITY rule 5.",
+    "  COLLAPSED, not deleted: the adoption fact itself, the regime's criteria manual and the",
+    "    'confirm with the town' detail all ride the note's info argument + the regime `note`,",
+    "    both budget-exempt. Nothing computed changed — no rule record, no engine, no new state."
   ],
   "measuredOn": "2026-07-28",
   "regions": {
@@ -64,8 +79,8 @@
       "maxChars": 557
     },
     "yield-stormwater-notes": {
-      "maxLines": 150,
-      "maxChars": 12779
+      "maxLines": 148,
+      "maxChars": 12682
     },
     "lib-pond-verdict": {
       "maxLines": 5,
