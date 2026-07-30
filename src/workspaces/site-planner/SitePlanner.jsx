@@ -36,8 +36,7 @@ import { ftPerPointForScale, scaleForFtPerPoint, chooseOverlayScale, SCALE_PRESE
 import { solveSimilarityLSQ, applySimilarityToOverlay, scaleOverlayAbout, calibrateUnderlayScale } from "./lib/overlayAlign.js";
 import { hasPrintableOverlay } from "./lib/overlayPrint.js";
 import { syncOverlayLayers, withTileRetry, ALL_LAYERS, probeService, layerVintage, identifyOverlaysAt, rasterIdentifyLayers } from "./lib/layers.js";
-import { createHoverIdentify, IDENTIFY_STATE, stateMessage } from "./lib/rasterIdentify.js";
-import { makeIdentifyFetch } from "./lib/rasterIdentifyMap.js";
+import { loadRasterIdentify, makeHoverIdentify, rasterIdentifyNow } from "./lib/rasterIdentifyLazy.js";
 import { sanitizeLayerOverrides, overridesFromOverlays, overlaysWithOverrides, applyOnOverrides, overridesSig } from "./lib/layerPrefs.js";
 import { BASEMAPS } from "./lib/basemaps.js";
 import { ppfToZoom, exactContainerPoint } from "./lib/mapLock.js";
@@ -4499,20 +4498,27 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   };
   const rasterAnchor = useRef(null);
   const rasterHover = useRef(null);
-  if (!rasterHover.current) {
-    rasterHover.current = createHoverIdentify({
-      fetchJson: makeIdentifyFetch(),
+  /* The controller lives in a lazily-loaded chunk (rasterIdentifyLazy.js — it is off the boot
+   * bundle to stay inside the bundle budgets), so it is built on FIRST NEED rather than at mount.
+   * Until the chunk lands this returns null and the hover simply shows nothing for that one rest —
+   * the same honest "not yet" the contour readout already does on its first move. */
+  const ensureRasterHover = () => {
+    if (rasterHover.current) return rasterHover.current;
+    const m = rasterIdentifyNow();
+    if (!m) { loadRasterIdentify().catch(() => {}); return null; }
+    rasterHover.current = makeHoverIdentify({
       debounceMs: 0, // the effect below already debounced on cursor rest
       onState: (state) => {
         const a = rasterAnchor.current;
-        if (!a || state.kind === IDENTIFY_STATE.idle) { setGisHover(null); return; }
-        if (state.kind === IDENTIFY_STATE.hit) { setGisHover({ ...a, items: state.items }); return; }
+        if (!a || state.kind === m.IDENTIFY_STATE.idle) { setGisHover(null); return; }
+        if (state.kind === m.IDENTIFY_STATE.hit) { setGisHover({ ...a, items: state.items }); return; }
         // Honest non-hit: a short stated outcome, never a spinner that never resolves and never
         // a silence that would read as a dead layer.
-        setGisHover({ ...a, note: stateMessage(state) });
+        setGisHover({ ...a, note: m.stateMessage(state) });
       },
     });
-  }
+    return rasterHover.current;
+  };
   useEffect(() => () => rasterHover.current?.destroy(), []);
   useEffect(() => {
     if (!cursorLL || !hoverIdleOk()) { setGisHover(null); return; }
@@ -4536,7 +4542,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       });
       if (!layers.length) { setGisHover(null); return; }
       rasterAnchor.current = anchor;
-      rasterHover.current?.hover({ lat: cursorLL.lat, lng: cursorLL.lng }, plannerIdentifyFrame(), layers, { immediate: true });
+      const ctl = ensureRasterHover();
+      if (!ctl) { setGisHover(null); return; } // chunk still loading — say nothing rather than guess
+      ctl.hover({ lat: cursorLL.lat, lng: cursorLL.lng }, plannerIdentifyFrame(), layers, { immediate: true });
     }, CANVAS_HOVER_IDENTIFY_MS);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps

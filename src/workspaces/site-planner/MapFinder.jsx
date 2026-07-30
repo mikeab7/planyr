@@ -11,7 +11,7 @@ import LayerPanel from "./components/LayerPanel.jsx";
 import { useGroundElevation } from "./components/useGroundElevation.js";
 import CursorChip from "./components/CursorChip.jsx";
 import { contourHover } from "./lib/terrainLazy.js";
-import { attachRasterIdentify } from "./lib/rasterIdentifyMap.js";
+import { attachRasterIdentifyLazy } from "./lib/rasterIdentifyLazy.js";
 import { NUM_FONT, TABULAR_NUMS } from "../../shared/theme/typography.js";
 import ContextMenu from "../../shared/ui/ContextMenu.jsx";
 import {
@@ -500,7 +500,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
     containerEl.addEventListener("pointercancel", onRelease);
     /* NEW-2 — hover/click identify for the RASTER-painted overlays. Bound once with the map;
        every gate is read live per event (see the refs above), so nothing here re-binds. */
-    const detachRasterIdentify = attachRasterIdentify(map, {
+    const detachRasterIdentify = attachRasterIdentifyLazy(map, {
       getOverlays: () => overlaysRef.current || {},
       // Respect the EXISTING per-layer health probe rather than adding a second liveness
       // mechanism: a layer whose dot already reads "failed" is not re-asked on every hover.

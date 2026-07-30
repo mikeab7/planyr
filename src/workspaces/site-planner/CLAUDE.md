@@ -51,6 +51,12 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   (pure — capability gate, request, readout, debounced/cancelling controller, an honest state for
   every outcome) plus `rasterIdentifyMap.js` (leaflet wiring + the direct-then-proxy transport that
   gets past a no-CORS host). The planner reaches BOTH through the canvas, never Leaflet events.
+  **⚠ Both hover paths are DELIBERATELY off the boot bundle** — `rasterIdentifyLazy.js` and
+  `featureHoverAttach.js` are dynamic-imported (at layer-toggle time / first need) because the
+  repo's bundle-budget audit (in the ui-audit folder) charges the Site route for anything static,
+  and this feature breached two ceilings before the split. **Do not "tidy" either back into a
+  static import.** Run that audit before pushing any map change — lint, tests and build can all be
+  green while it fails, which is exactly how it went red in CI on PR #860.
   Canvas identify (B1092; tolerance fixed in the NEW-3 strand — `hitFeature` applies the caller's
   slop to polygon ring EDGES as well as lines, two-pass so an exact containment still wins, because
   containment-only gave a 70 ft easement band a click target its own width and no more):

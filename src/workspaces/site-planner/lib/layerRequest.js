@@ -118,6 +118,31 @@ export function featureLayerOptions(cfg, opacity, pane, opts = {}) {
   return o;
 }
 
+/* Can this layer's service answer an ArcGIS `/identify` at a point (NEW-2)?
+ *
+ * Lives HERE, not in rasterIdentify.js, purely so that asking the question costs nothing: layers.js
+ * needs this predicate on the boot path to decide which layers are even eligible, and importing it
+ * from rasterIdentify.js dragged that whole module's state machine into the planner's boot chunk —
+ * which `ui-audit/perf-bundle-audit.mjs` charges for. rasterIdentify.js re-exports it, so the
+ * identify code still reads as if it owns its own gate.
+ *
+ * It DECLINES anything it cannot honestly answer:
+ *   • a FeatureServer — `/identify` is a MapServer operation; those layers paint as vectors and get
+ *     the featureHover.js tooltip path instead;
+ *   • an ImageServer (`kind: "esriImage"` — elevation shading) — identify returns a PIXEL, not a
+ *     feature, and elevation under the cursor already has its own honest readout;
+ *   • a registry row that opts out (`identify: false`). */
+const VECTOR_KINDS = new Set(["esriFeature", "vector", "vectorLine", "pipelineCorridor",
+  "overpass", "mapillary", "contours", "flowdir"]);
+
+export function identifyCapable(cfg) {
+  if (!cfg || !cfg.url) return false;
+  if (cfg.identify === false) return false;
+  if (VECTOR_KINDS.has(cfg.kind)) return false;
+  if (cfg.kind === "esriImage") return false;
+  return /\/MapServer$/i.test(String(cfg.url).replace(/\/+$/, ""));
+}
+
 /* How long a toggled-on RASTER export waits for its <img> to actually land before the panel
  * tells the truth (NEW-3/B790). Generous, so a healthy-but-slow source (or a big first-ever
  * export) virtually always fires 'load' well under it — only a genuine stall (a degraded agency

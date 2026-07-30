@@ -21,13 +21,13 @@ import { TERRAIN_MIN_ZOOM } from "./terrainGate.js";
 import { loadTerrain } from "./terrainLazy.js";
 import {
   isTransientStatus, dynamicLayerOptions, imageLayerOptions, featureLayerOptions, featureRetryDecision,
-  wireRasterStatus, RASTER_STALL_MS, pointSymbolOptions,
+  wireRasterStatus, RASTER_STALL_MS, pointSymbolOptions, identifyCapable,
 } from "./layerRequest.js";
 import { cachedVectorLayer, cachedPipelineLayer, cachedCorridorLayer, isPointFeature } from "./vectorOverlay.js";
+// One-line predicate, needed synchronously when a layer is built — see featureHoverAttach.js for
+// why the rest of the hover engine is deferred.
+const hoverIdentifyEnabled = (cfg) => !!(cfg && cfg.hoverIdentify);
 import { installDefaultMarkerIcon, pointToLayerFor } from "./mapSymbols.js";
-import { hoverText, hoverIdentifyEnabled } from "./featureHover.js";
-import { hitFeature } from "./vectorLayers.js";
-import { identifyCapable } from "./rasterIdentify.js";
 import { PIPELINE_LEGEND } from "./pipelineCommodity.js";
 import { DEFAULT_CORRIDOR_WIDTH_FT } from "./pipelineCorridor.js";
 import { proxyServiceUrl } from "../../../shared/gis/gisProxyCore.js";
@@ -914,79 +914,29 @@ export function attachFeatureRetry(lyr, k, cfg, onStatus, max = 3) {
   });
 }
 
-/* Bind the hover tooltip + click emphasis for ONE feature on an interactive esri
- * featureLayer (NEW-2). The wording comes from featureHover.js so a HIFLD substation reads
- * exactly like the OSM one two rows above it in the panel.
+/* THE ONE PLACE an esri featureLayer is constructed (NEW-1). Both call sites below go through
+ * here so neither can drift back to the broken default marker: a POINT feature with no
+ * `pointToLayer` gets `L.marker` + `L.Icon.Default`, whose PNG never resolved under the bundler —
+ * which is what painted the owner's broken-image "Mark" glyphs where the HIFLD substations should
+ * have been. `test/pointSymbology.test.js` asserts this stays the only construction site.
  *
- * A sticky tooltip (it follows the cursor) rather than a fixed one: transmission lines are
- * long, and a tooltip pinned to a polyline's centroid can land off-screen entirely. */
-function wireFeatureHover(lyr, cfg, identifyOk) {
-  const ok = () => (typeof identifyOk === "function" ? identifyOk() : true);
-  const restyle = (feature, hovered) => {
-    const base = isPointFeature(feature)
-      ? pointSymbolOptions(cfg, cfg.opacity ?? 1)
-      : { color: cfg.color || "#b91c1c", weight: cfg.weight || 2 };
-    if (!hovered) return base;
-    return { ...base, weight: (cfg.weight || 2) + 1.4, ...(isPointFeature(feature) ? { fillOpacity: 1 } : {}) };
-  };
-  lyr.on("mouseover", (e) => {
-    if (!ok()) return;
-    const feature = e.layer && e.layer.feature;
-    const props = (feature && feature.properties) || {};
-    try { e.layer.setStyle(restyle(feature, true)); } catch (_) {}
-    try { e.layer.bindTooltip(hoverText(cfg, props), { sticky: true, direction: "top" }).openTooltip(); } catch (_) {}
-  });
-  lyr.on("mouseout", (e) => {
-    const feature = e.layer && e.layer.feature;
-    try { e.layer.setStyle(restyle(feature, false)); } catch (_) {}
-    try { e.layer.unbindTooltip(); } catch (_) {}
-  });
-}
-
-/* THE ONE PLACE an esri featureLayer is constructed (NEW-1). Both call sites below go
- * through here so neither can drift back to the broken default marker: a POINT feature with
- * no `pointToLayer` gets `L.marker` + `L.Icon.Default`, whose PNG never resolved under the
- * bundler — which is what painted the owner's broken-image "Mark" glyphs where the HIFLD
- * substations should have been. `test/pointSymbology.test.js` asserts this stays the only
- * construction site. */
+ * The hover/identify wiring is attached from a LAZY chunk (featureHoverAttach.js) rather than
+ * inline: it is only reachable once this layer is on, and keeping its wording engine off the boot
+ * bundle is part of how this feature pays its bundle budget. The import is kicked off here, at
+ * toggle-on — long before a cursor can rest on a feature. */
 function buildFeatureLayer(cfg, opacity, pane, { interactive = false, identifyOk = null } = {}) {
-  const canHover = interactive && hoverIdentifyEnabled(cfg);
+  const canHover = hoverIdentifyEnabled(cfg);
   const lyr = EL.featureLayer(featureLayerOptions(cfg, opacity, pane, {
-    interactive: canHover,
-    pointToLayer: pointToLayerFor(cfg, opacity, { interactive: canHover }),
+    interactive: interactive && canHover,
+    pointToLayer: pointToLayerFor(cfg, opacity, { interactive: interactive && canHover }),
   }));
-  if (canHover) wireFeatureHover(lyr, cfg, identifyOk);
-  attachFeatureCanvasIdentify(lyr, cfg);
+  if (canHover) {
+    import("./featureHoverAttach.js").then((m) => {
+      if (interactive) m.wireFeatureHover(lyr, cfg, identifyOk);
+      m.attachFeatureCanvasIdentify(lyr, cfg);
+    }, () => { /* the layer still paints; only its hover answer is unavailable */ });
+  }
   return lyr;
-}
-
-/* Let the PLANNER canvas ask an esri featureLayer what is under a point (NEW-2).
- *
- * Why this is needed at all: the Leaflet tooltip above can only ever fire on the MAP FINDER.
- * The planner's backdrop map sits inside a pointer-events:none box — its SVG canvas owns every
- * pointer event — so no Leaflet mouseover there will ever run. That is the same wall B1092 hit
- * for the vector boundary layers, and it solved it by having the canvas ask the layer directly
- * through `identifyAt`. So the electric layers implement the SAME accessor, reusing the SAME
- * pure hit-test (`hitFeature`), and the planner's existing identify card renders the answer —
- * rather than a second, parallel identify mechanism for one surface.
- *
- * esri-leaflet keeps the fetched GeoJSON on each child layer's `.feature`, so the hit-test runs
- * over what is genuinely PAINTED right now (a zoom-gated layer with nothing drawn honestly
- * answers nothing) with no extra request. */
-function attachFeatureCanvasIdentify(lyr, cfg) {
-  lyr.identifyAt = (at) => {
-    if (!hoverIdentifyEnabled(cfg)) return null;
-    const features = [];
-    try { lyr.eachFeature((child) => { if (child && child.feature) features.push(child.feature); }); } catch (_) { return null; }
-    if (!features.length) return null;
-    const hit = hitFeature({ type: "FeatureCollection", features }, at);
-    if (!hit) return null;
-    // The SAME one-line wording the map finder's tooltip shows, so the two surfaces cannot
-    // drift and neither restates a fact the other omits. No `rows`: everything worth saying is
-    // already in that line, and a second copy below it would be the accumulation
-    // PANEL-BREVITY exists to prevent.
-    return { title: hoverText(cfg, hit.properties || {}), rows: [], note: null, sourceName: cfg.source || null };
-  };
 }
 
 /* Which currently-ON layers can answer a RASTER identify at a point (NEW-2)? Pure selector,

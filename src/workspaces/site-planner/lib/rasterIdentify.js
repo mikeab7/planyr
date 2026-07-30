@@ -29,6 +29,7 @@
  */
 
 import { titleCaseAgency } from "./featureHover.js";
+import { identifyCapable } from "./layerRequest.js";
 
 const trimUrl = (u) => String(u || "").replace(/\/+$/, "");
 
@@ -47,17 +48,15 @@ export const HOVER_IDENTIFY_DEBOUNCE_MS = 300;
  * readout pending forever, which is exactly the "spinner that never resolves" this must not do. */
 export const IDENTIFY_TIMEOUT_MS = 6000;
 
-/* Can this layer's service answer an identify at a point? */
-export function identifyCapable(cfg) {
-  if (!cfg || !cfg.url) return false;
-  if (cfg.identify === false) return false;
-  // Vector layers answer through featureHover.js / vectorOverlay.js, not here.
-  if (cfg.kind === "esriFeature" || cfg.kind === "vector" || cfg.kind === "vectorLine"
-      || cfg.kind === "pipelineCorridor" || cfg.kind === "overpass" || cfg.kind === "mapillary"
-      || cfg.kind === "contours" || cfg.kind === "flowdir") return false;
-  if (cfg.kind === "esriImage") return false; // ImageServer → a pixel value, not a feature
-  return /\/MapServer$/i.test(trimUrl(cfg.url));
-}
+/* The capability gate. DEFINED in layerRequest.js (which is already on the boot path) and
+ * re-exported here, so layers.js can ask "is this layer identifiable?" without pulling this
+ * module's whole state machine into the planner's boot chunk. See its doc comment there for
+ * what it declines and why.
+ *
+ * NOTE the two-line form: a bare `export { x } from "y"` re-exports WITHOUT creating a local
+ * binding, so `identifyCapable` would be undefined inside `run()` below — which is exactly the
+ * ReferenceError the controller tests caught. Import it, then re-export it. */
+export { identifyCapable };
 
 /* Which sublayers to interrogate. A registry row pins the sublayers it DRAWS (`cfg.layers`);
  * identify must ask about exactly those and no others, or it would report a feature from a

@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-07-30 @ `313b1dd` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-07-30 @ `dab53cb` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_361 source files mapped._
+_363 source files mapped._
 
 ## infra
 
@@ -399,6 +399,8 @@ _361 source files mapped._
   - _exports_: `FBCDD_WSE02_URL`, `sampleWse02Point`, `sampleWse100Point`, `wse02CandidatesForPoint`, `wse100CandidatesForPoint`
 - **`src/workspaces/site-planner/lib/featureHover.js`** — pure hover WORDING for the vector feature overlays: registry-driven `<Title> (<Source>) · <detail>` matching the OSM tooltips, with HIFLD's withheld sentinels treated as absence and ALL-CAPS agency text title-cased.
   - _exports_: `cleanAttr`, `HOVER_CLEANERS`, `HOVER_MAX_CHARS`, `hoverDetails`, `hoverIdentifyEnabled`, `hoverText`, `hoverTitle`, `pickAttr`, `sourceTag`, `titleCaseAgency`
+- **`src/workspaces/site-planner/lib/featureHoverAttach.js`** — lazily-loaded attach layer for the vector overlays' hover identify: binds the sticky tooltip on an esri featureLayer and installs the planner-canvas `identifyAt` accessor, kept off the boot bundle to pay the bundle budget.
+  - _exports_: `attachFeatureCanvasIdentify`, `wireFeatureHover`
 - **`src/workspaces/site-planner/lib/ffeBalance.js`** — grading milestone (DECISION 3): the balance-optimal finished-floor solver (`solveBalanceFfe` floats the pad UP off the regulatory code minimum to reuse basin spoil as fill, never below it) + the dual FFE readout (`ffeDualDisplay`, "FFE X (code floor Y + Z for balance)"). The net earthwork residual is reported in CY (owner preference), not truckloads. Pure, Node-tested.
   - _exports_: `ffeDualDisplay`, `solveBalanceFfe`
 - **`src/workspaces/site-planner/lib/floodAdministrator.js`** — NEW-8 governing floodplain administrator: candidate resolution from county/city/ETJ/edge signals, deliberate strictest-wins selection with an ambiguity flag, and the BFE back-solved from an assumed FFE
@@ -450,7 +452,7 @@ _361 source files mapped._
 - **`src/workspaces/site-planner/lib/layerPrefs.js`** — Per-site GIS Layers-panel toggle memory (NEW-1): project the app-shared overlays to/from a sparse per-site on/off override map (restore on open, persist on toggle, undo-signature)
   - _exports_: `applyOnOverrides`, `overlaysWithOverrides`, `overridesFromOverlays`, `overridesSig`, `sanitizeLayerOverrides`
 - **`src/workspaces/site-planner/lib/layerRequest.js`** — Pure map-layer request shaping: esri dynamic/image/feature layer option builders plus transient-retry policy, with coverage barred from narrowing requests
-  - _exports_: `dynamicLayerOptions`, `featureLayerOptions`, `featureRetryDecision`, `imageLayerOptions`, `isTransientStatus`, `overlayExportRequest`, `pointSymbolOptions`, `RASTER_STALL_MS`, `TRANSIENT_STATUS`, `wireRasterStatus`
+  - _exports_: `dynamicLayerOptions`, `featureLayerOptions`, `featureRetryDecision`, `identifyCapable`, `imageLayerOptions`, `isTransientStatus`, `overlayExportRequest`, `pointSymbolOptions`, `RASTER_STALL_MS`, `TRANSIENT_STATUS`, `wireRasterStatus`
 - **`src/workspaces/site-planner/lib/layers.js`** — Shared GIS overlay registry + syncOverlayLayers: probes/adds/removes esri-leaflet raster & feature layers, retry/backoff, B445 cache-proxy with direct-agency fallback, per-layer status + vintage
   - _exports_: `AHJ_LAYERS`, `ALL_LAYERS`, `attachFeatureRetry`, `defaultOverlayState`, `EVIDENCE`, `fetchWithRetry`, `gisProxyEnabled`, `identifyOverlaysAt`, `JLAYERS`, `JURISDICTION_LAYERS`, `jurisdictionFor`, `JURISDICTIONS`, `LAYER_GROUP_LABEL`, `LAYER_GROUP_ORDER`, `LAYER_VINTAGE`, `layerVintage`, `MERGE_GROUPS`, `probeService`, `rasterIdentifyLayers`, `STATEWIDE`, `syncOverlayLayers`, `TERRAIN`, `withTileRetry`
 - **`src/workspaces/site-planner/lib/layerSchedule.js`** — GIS overlay load ORDER + staging policy so the map is interactive before the overlay fan-out starts
@@ -573,6 +575,8 @@ _361 source files mapped._
   - _exports_: `distPathToRingsFt`, `distPointSegFt`, `distPointToRingsFt`, `distSegSegFt`, `featureDistFt`, `fmtDistFt`, `pointInRingFt`, `ringToGridFt`, `screenProximity`, `segmentsIntersectFt`, `toGrid`
 - **`src/workspaces/site-planner/lib/rasterIdentify.js`** — pure ArcGIS `/identify` decision layer for the RASTER-painted layers: capability gate, request shaping, result→readout, and the debounced/cancelling hover controller with an honest state for every outcome.
   - _exports_: `createHoverIdentify`, `errorMessage`, `HOVER_IDENTIFY_DEBOUNCE_MS`, `IDENTIFY_ROW_SPECS`, `IDENTIFY_STATE`, `IDENTIFY_TIMEOUT_MS`, `IDENTIFY_TOLERANCE_PX`, `identifyCapable`, `identifyLayersParam`, `identifyRequest`, `readoutFromResult`, `readoutsFromJson`, `stateMessage`
+- **`src/workspaces/site-planner/lib/rasterIdentifyLazy.js`** — the one on-demand loader for the raster identify chunk: a synchronous-returning `attachRasterIdentifyLazy` for the map finder plus a `makeHoverIdentify`/`rasterIdentifyNow` pair for the planner's per-move path.
+  - _exports_: `attachRasterIdentifyLazy`, `loadRasterIdentify`, `makeHoverIdentify`, `rasterIdentifyNow`
 - **`src/workspaces/site-planner/lib/rasterIdentifyMap.js`** — leaflet glue for the raster identify: map hover/click wiring, the transient readout DOM, and the direct-then-cache-proxy transport that gets past a no-CORS agency host.
   - _exports_: `attachRasterIdentify`, `makeIdentifyFetch`, `TRANSIENT_MS`
 - **`src/workspaces/site-planner/lib/receivingWater.js`** — Nearest receiving water for a pond outfall from USGS NHDPlus HR flowlines (NEW-A5): SWR identifySource query, nearest-reach + FCODE-type math, and the off-site-conveyance-easement flag when no water is adjacent. Screening only.

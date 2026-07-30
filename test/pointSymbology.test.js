@@ -108,15 +108,19 @@ describe("NEW-1 guard — no construction path can fall back to the default mark
     for (const call of calls) expect(call).toContain("pointToLayer");
   });
 
-  it("configures L.Icon.Default's image paths, so an accidental default marker is a real pin", () => {
+  it("configures L.Icon.Default with a URL that resolves, so an accidental default marker is a real pin", () => {
     const sym = src("lib/mapSymbols.js");
-    // Real bundler-resolved imports, not a hand-written path that would 404 just as hard.
-    expect(sym).toMatch(/import\s+iconUrl\s+from\s+"leaflet\/dist\/images\/marker-icon\.png"/);
-    expect(sym).toMatch(/import\s+shadowUrl\s+from\s+"leaflet\/dist\/images\/marker-shadow\.png"/);
+    // A self-contained data URI — never a bare relative path (which would 404 exactly as hard as
+    // the unconfigured default did) and never leaflet's bundled PNGs, which Vite base64-inlines
+    // into the planner chunk at ~6 KB for a fallback that should never fire (perf-bundle-audit).
+    expect(sym).toContain("data:image/svg+xml,");
+    expect(sym).not.toMatch(/from\s+"leaflet\/dist\/images\//);
     expect(sym).toContain("L.Icon.Default.mergeOptions");
     // Leaflet's own path-guessing hook derives a URL from the <script> location, which is
     // meaningless under a bundler and would win over mergeOptions if left in place.
     expect(sym).toContain("delete L.Icon.Default.prototype._getIconUrl");
+    // No shadow image: a fallback must not add a second <img> that can itself fail to load.
+    expect(sym).toMatch(/shadowUrl:\s*null/);
   });
 
   it("installs that default before any layer is built, on both leaflet-facing modules", () => {
