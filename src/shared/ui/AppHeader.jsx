@@ -53,6 +53,16 @@ import ThemePicker from "../theme/ThemePicker.jsx";
 // (B318): light theme = light chrome, dark theme = dark chrome.
 const CHROME = "var(--chrome-bg-elev)";
 const LINE   = "var(--chrome-divider)";
+
+/* NEW-1 — the fullscreen top-edge reveal, tuned so it can't be triggered by accident.
+ * ARM on the pointer genuinely REACHING the top edge, not merely being in the upper region — the
+ * top row of the screen is a place you only get to deliberately (it is also where the OS parks the
+ * pointer on an overshoot, which is why the intent delay exists). HOLD the reveal for a moment
+ * after the pointer leaves so a hand travelling to a tab or the switcher never races it. */
+const FS_EDGE_PX = 3;        // how close to the very top edge the pointer must come to arm
+const FS_ARM_MS = 220;       // intent delay: a fast cursor crossing the top must not flash it open
+const FS_HIDE_MS = 400;      // grace before it slides away once the pointer has genuinely left
+const FS_HOLD_PX = 60;       // band below the header that still counts as "on it" (covers the exit button)
 // Inactive module tabs: full-opacity, muted-but-legible (meets WCAG AA on the chrome).
 // NOT a low-opacity/disabled treatment — inactive must read as clearly clickable. (B167)
 const TAB_IDLE = "var(--chrome-tab-inactive)";
@@ -343,6 +353,23 @@ export default function AppHeader({
   // the Fullscreen API (and the fullscreenchange that follows) vs. plain React state.
   const nativeFsRef = useRef(false);
   const headerRef = useRef(null); // visibility probe for the keep-alive gate below
+  /* NEW-1 (2026-07-30) — the KEEP-ALIVE probe, and why it is `getClientRects()` and not
+     `offsetParent`. Workspaces are kept mounted-but-hidden (`display:none`), so every workspace's
+     header hears the same window/document events; only the one actually on screen may act. That
+     gate used to read `offsetParent === null`, which needed a `!fullscreen` exception bolted on
+     because a position:fixed element ALWAYS reports a null offsetParent — and the header is now
+     position:fixed for the whole time it is fullscreen, not just while collapsed. `getClientRects()`
+     tells the two cases apart directly: a `display:none` ancestor generates no boxes at all (empty
+     list), while a fixed header merely translated off the top edge still has its box. One rule,
+     no fullscreen exception — which is the hazard #869's own harness caught (two workspaces both
+     answering one `fullscreenchange` and each drawing its own exit button). */
+  const headerOnScreen = () => !!(headerRef.current && headerRef.current.getClientRects().length);
+  /* NEW-1 — TOP-EDGE REVEAL. `f` is a real mode people stay in, so fullscreen can no longer be a
+     dead end: the WHOLE header (breadcrumb, project + plan switcher, module tabs, toolbar) slides
+     down when the pointer reaches the very top edge, and slides away again when it leaves. The
+     canvas stays edge-to-edge while working because the header is out of flow the entire time. */
+  const [fsReveal, setFsReveal] = useState(false);
+  const fsRevealRef = useRef(false); fsRevealRef.current = fsReveal;
   const { resolved } = useTheme();
   const multiTab = useMultiTab(accountActive && currentProject && !multiEditOk ? currentProject.id : null); // B313 — same-project-in-another-tab warning (signed-in only; suppressed when the workspace multi-writes, B674)
   // NEW-1 (2026-07-15) — the banner is dismissible (a small ×), unlike before. `dismissed` resets
@@ -393,9 +420,10 @@ export default function AppHeader({
         // kept mounted-but-hidden, EVERY workspace's header hears this document-level event. Left
         // ungated, all of them collapse and each renders its own floating exit button — caught by
         // ui-audit/verify-new1-fullscreen.mjs, which found two stacked. Only the header that is
-        // actually on screen may take it. (An already-fullscreen header renders only a fixed
-        // button, whose offsetParent is null, which is why the gate is entry-side only.)
-        if (headerRef.current && headerRef.current.offsetParent === null) return;
+        // actually on screen may take it. (NEW-1 2026-07-30: the probe is `headerOnScreen()` —
+        // rect-based — because the header is position:fixed for the whole fullscreen session now,
+        // and `offsetParent` is null for any fixed element. See the probe's own note.)
+        if (!headerOnScreen()) return;
         nativeFsRef.current = true; setFullscreen(true);
       } else if (nativeFsRef.current) { nativeFsRef.current = false; setFullscreen(false); }
     };
@@ -411,13 +439,14 @@ export default function AppHeader({
     const handle = (e) => {
       const tag = e.target.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || e.target.isContentEditable) return;
-      // Keep-alive gate: with workspaces kept mounted-but-hidden, EVERY workspace's header
-      // has this window listener. A hidden header (display:none ancestor ⇒ offsetParent
-      // null) must ignore the shortcut, or one keypress toggles fullscreen in all of them.
-      // (While fullscreen, the header renders only a position:fixed exit button — offsetParent
-      // is null for fixed elements, so only apply the check when NOT fullscreen; a hidden
-      // header can never BE fullscreen since the toggle is ignored while hidden.)
-      if (!fullscreenRef.current && headerRef.current && headerRef.current.offsetParent === null) return;
+      // Keep-alive gate: with workspaces kept mounted-but-hidden, EVERY workspace's header has this
+      // window listener. A hidden header (a `display:none` ancestor ⇒ no client rects) must ignore
+      // the shortcut, or one keypress toggles fullscreen in all of them. NEW-1 (2026-07-30) — this
+      // used to carry a `!fullscreenRef.current` exception, because the collapsed header rendered
+      // only a position:fixed button and `offsetParent` is null for fixed elements. The header is
+      // now fixed for the whole fullscreen session, so the exception would have swallowed `f` (no
+      // way back out) — `headerOnScreen()` needs no exception and is checked unconditionally.
+      if (!headerOnScreen()) return;
       if (e.key === "f" || e.key === "F") toggleRef.current();
       // NEW-1 — do NOT fight Esc. In real fullscreen the browser consumes it and exits on its own;
       // `fullscreenchange` then restores the header. Acting here as well would be a second toggle
@@ -429,31 +458,104 @@ export default function AppHeader({
     return () => window.removeEventListener("keydown", handle);
   }, []);
 
+  /* NEW-1 — drive the top-edge reveal. Bound ONLY while this header is the fullscreen one, and
+     every evaluation re-checks `headerOnScreen()`, so a hidden workspace's header can never reveal
+     itself (the same hazard the shortcut and the fullscreenchange handler are gated for).
+
+     Two guarantees the owner asked for by name:
+       · it arms on the pointer REACHING the top edge (within FS_EDGE_PX), never on being merely
+         "up there", and only after FS_ARM_MS of intent — so a cursor flicking across the top on its
+         way somewhere else never flashes the chrome open;
+       · it does NOT hide while you are reaching for what it revealed. Three things hold it open:
+         the pointer being on the header (or in the band just under it, where the exit button
+         lives), a dropdown opened FROM the header still being on screen (`data-menu-owner`, since
+         AnchoredMenu portals its panel to <body> and so leaves the header's subtree), and keyboard
+         focus living inside it. The hold conditions are re-checked when the hide timer FIRES, not
+         only when it is set, so opening a menu during the grace period cancels the hide. */
+  useEffect(() => {
+    if (!fullscreen) { setFsReveal(false); return undefined; }
+    let timer = 0;
+    const clearT = () => { if (timer) { clearTimeout(timer); timer = 0; } };
+    const holdOpen = () => {
+      const el = headerRef.current;
+      if (!el) return false;
+      if (document.querySelector('[data-menu-owner="app-header"]')) return true;
+      return el.contains(document.activeElement);
+    };
+    const onMove = (e) => {
+      if (!headerOnScreen()) return;
+      if (fsRevealRef.current) {
+        const r = headerRef.current.getBoundingClientRect();
+        if (e.clientY <= r.bottom + FS_HOLD_PX || holdOpen()) { clearT(); return; }
+        if (!timer) timer = setTimeout(() => { timer = 0; if (!holdOpen()) setFsReveal(false); }, FS_HIDE_MS);
+        return;
+      }
+      if (e.clientY > FS_EDGE_PX) { clearT(); return; }
+      if (!timer) timer = setTimeout(() => { timer = 0; if (headerOnScreen()) setFsReveal(true); }, FS_ARM_MS);
+    };
+    window.addEventListener("pointermove", onMove, { passive: true });
+    return () => { window.removeEventListener("pointermove", onMove); clearT(); };
+  }, [fullscreen]);
+
+  /* NEW-1 — HAND THE FULLSCREEN MODE OVER when the workspace changes. Making the module tabs
+     reachable from inside fullscreen creates a case that could not arise before, because you could
+     not switch workspaces at all: every workspace owns its own AppHeader, and the incoming one was
+     `display:none` when `f` was pressed, so the keep-alive gate correctly kept it out of the
+     `fullscreenchange` — leaving it convinced it was NOT fullscreen while the document still was.
+     That would strand you in browser fullscreen behind an ordinary in-flow header, with no exit
+     button and `f` DEAD (requesting fullscreen on an already-fullscreen document resolves without
+     firing another `fullscreenchange`, so nothing would answer the key). The outgoing header has
+     the mirror problem: left claiming fullscreen it renders a second, invisible exit button — the
+     exact "two stacked" defect the #869 harness exists to catch.
+
+     A ResizeObserver is the signal, because becoming visible changes no prop and fires no event:
+     toggling a `display:none` ancestor takes the header from no box at all to a real one. */
+  useEffect(() => {
+    const el = headerRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return undefined;
+    const ro = new ResizeObserver(() => {
+      if (!headerOnScreen()) {
+        if (fullscreenRef.current) { nativeFsRef.current = false; setFullscreen(false); } // relinquish on the way out
+        return;
+      }
+      const real = !!fsElement();
+      // Adopt the DOCUMENT's truth on the way in. The `nativeFsRef` half of the condition protects
+      // the chrome-hide fallback (where `fsElement()` is legitimately null while fullscreen is on)
+      // from being cancelled by its own arrival.
+      if (real !== fullscreenRef.current && (real || nativeFsRef.current)) { nativeFsRef.current = real; setFullscreen(real); }
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
   // The breadcrumb uses `accent` as foreground TEXT ("current" / "New project"), so it
   // must be the AA-passing -text token, never the fill (fill-as-text = 3.4:1, B341/B318).
   const accent = ACCENT_TEXT[module] || "var(--accent)";
 
-  // When fullscreen, render only a floating exit button; the header collapses
-  // to 0 height so the workspace canvas fills the full viewport.
-  if (fullscreen) {
-    return (
-      <button
-        onClick={leaveFullscreen}
-        data-testid="exit-fullscreen"
-        title="Exit fullscreen (Esc)"
-        style={{
-          position: "fixed", top: 10, right: 12, zIndex: 9999,
-          padding: "5px 12px", borderRadius: 8,
-          background: "rgba(20,17,14,0.72)", color: "rgba(255,255,255,0.85)",
-          border: "1px solid rgba(255,255,255,0.18)",
-          cursor: "pointer", fontFamily: "system-ui, sans-serif",
-          fontSize: 11.5, fontWeight: 600,
-        }}
-      >
-        ✕ Exit fullscreen
-      </button>
-    );
-  }
+  /* NEW-1 — the exit affordance. It is a CHILD of the <header>, absolutely positioned just below
+     it, so it rides the same slide transform and needs no measurement of the header's height:
+     while the header sits at translateY(-100%) the button lands at exactly the top-right corner it
+     has always occupied, and when the header slides in the button rides down to sit under it —
+     never overlapping the chrome, never a second thing to keep in sync. `pointerEvents: "auto"`
+     overrides the header's own `none` so it stays clickable the whole time the chrome is hidden. */
+  const exitFullscreenBtn = fullscreen ? (
+    <button
+      onClick={leaveFullscreen}
+      data-testid="exit-fullscreen"
+      title="Exit fullscreen (Esc)"
+      style={{
+        position: "absolute", top: "100%", right: 12, marginTop: 10, zIndex: 1,
+        pointerEvents: "auto",
+        padding: "5px 12px", borderRadius: 8,
+        background: "rgba(20,17,14,0.72)", color: "rgba(255,255,255,0.85)",
+        border: "1px solid rgba(255,255,255,0.18)",
+        cursor: "pointer", fontFamily: "system-ui, sans-serif",
+        fontSize: 11.5, fontWeight: 600,
+      }}
+    >
+      ✕ Exit fullscreen
+    </button>
+  ) : null;
 
   // Module tabs — shared by both Row-2 layouts (with and without the B387 center slot)
   // so the per-tab wiring is defined once.
@@ -465,14 +567,34 @@ export default function AppHeader({
     <>
     <header
       ref={headerRef}
+      /* NEW-1 — the scope marker AnchoredMenu stamps onto its portalled panels, so the reveal can
+         tell "my own dropdown is open" from "nothing is open" (a portal leaves this subtree). */
+      data-menu-scope="app-header"
       style={{
         flex: "none",
         background: CHROME,
         borderBottom: `1px solid ${LINE}`,
-        position: "relative",
-        zIndex: 60,
+        /* NEW-1 — in fullscreen the header leaves the flow entirely and becomes a slide-in panel
+           pinned to the top edge, so the workspace canvas keeps the WHOLE viewport while you work
+           and the chrome costs nothing until you ask for it. `translateY(-100%)` is relative to the
+           header's own height, so nothing needs measuring and the two rows can change height freely.
+           `pointerEvents: none` while hidden is the belt to the transform's braces: even mid-
+           transition the header can never swallow a click meant for the canvas underneath. Out of
+           fullscreen this is byte-identical to what it always was. */
+        ...(fullscreen
+          ? {
+              position: "fixed", top: 0, left: 0, right: 0, zIndex: 9998,
+              transform: fsReveal ? "translateY(0)" : "translateY(-100%)",
+              transition: "transform 170ms cubic-bezier(0.4, 0, 0.2, 1)",
+              pointerEvents: fsReveal ? "auto" : "none",
+              boxShadow: fsReveal ? "0 6px 20px rgba(0,0,0,0.28)" : "none",
+              willChange: "transform",
+            }
+          : { position: "relative", zIndex: 60 }),
       }}
+      data-fs-reveal={fullscreen ? (fsReveal ? "shown" : "hidden") : undefined}
     >
+      {exitFullscreenBtn}
       {/* ── Row 1 — 35px (−20% from 44 per B169; contents stay vertically centered) ── */}
       <div className={narrow ? "no-hscrollbar" : undefined} style={{ height: 35, display: "flex", alignItems: "center", ...rowScroll }}>
 

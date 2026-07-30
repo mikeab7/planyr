@@ -20,6 +20,7 @@ import { snapshotFootprint, _resetSnapshots } from "../src/workspaces/site-plann
 const srcOf = (rel) => readFileSync(fileURLToPath(new URL(rel, import.meta.url)), "utf8");
 const src = srcOf("../src/workspaces/site-planner/SitePlanner.jsx");
 const header = srcOf("../src/shared/ui/AppHeader.jsx");
+const anchored = srcOf("../src/shared/ui/AnchoredMenu.jsx");
 const rect = (w, h) => [{ x: 0, y: 0 }, { x: w, y: 0 }, { x: w, y: h }, { x: 0, y: h }];
 
 describe("NEW-2 — the pointer hot path commits at most once per animation frame", () => {
@@ -49,6 +50,44 @@ describe("NEW-2 — the pointer hot path commits at most once per animation fram
     // An aborted gesture settles first too, so a pending job can't land after cancelActiveMove.
     const abort = src.indexOf("const abortGesture = (pid = capturePidRef.current) => {");
     expect(src.indexOf("flushFrameJobs();", abort)).toBeLessThan(src.indexOf("cancelActiveMove();", abort));
+  });
+
+  /* NEW-4 (2026-07-30) — the guard above named `onUp` and `abortGesture`, and `onTouchStartPinch`
+   * — the THIRD gesture-teardown path — was quietly outside it, so it tore `drag.current` down
+   * with a coalesced 'geom' job still queued and let it commit a frame later, after the pinch had
+   * taken the gesture over. (The stronger claim in the report — that the late job re-applies a
+   * vertex a revert had just undone — is not reachable today and is corrected in full at the call
+   * site; the ordering invariant is what this defends, and it is what stops that claim becoming
+   * true the moment a vertex drag gains a canceler.)
+   *
+   * Same lesson as NEW-2: a guard that names its subjects protects only what it named. So this one
+   * DISCOVERS every teardown instead — whatever function reverts a gesture must settle the pending
+   * frame first, and a fourth such path added later is covered on arrival with no edit here. */
+  it("EVERY gesture-teardown path settles the pending frame BEFORE it reverts", () => {
+    /** Body of `const NAME = (…) => { … }`, by brace matching. */
+    const bodyOf = (name) => {
+      const at = src.indexOf(`const ${name} = (`);
+      if (at < 0) return null;
+      const open = src.indexOf("{", src.indexOf("=>", at));
+      let depth = 0;
+      for (let i = open; i < src.length; i++) {
+        if (src[i] === "{") depth++;
+        else if (src[i] === "}" && --depth === 0) return src.slice(open, i + 1);
+      }
+      return null;
+    };
+    // Every arrow function in the component that REVERTS a gesture. Found, not listed.
+    const names = [...new Set([...src.matchAll(/const (\w+) = \([^)]*\) => \{/g)].map((m) => m[1]))]
+      .filter((n) => n !== "cancelActiveMove" && /(?<!\/\/[^\n]*)\bcancelActiveMove\(\);/.test(bodyOf(n) || ""));
+    expect(names).toContain("abortGesture");
+    expect(names).toContain("onTouchStartPinch");
+    for (const n of names) {
+      const body = bodyOf(n);
+      const flush = body.indexOf("flushFrameJobs();");
+      const cancel = body.indexOf("cancelActiveMove();");
+      expect(flush, `${n} tears a gesture down without settling the coalesced frame first`).toBeGreaterThan(-1);
+      expect(flush, `${n} flushes AFTER the revert — a pending job can land on top of it`).toBeLessThan(cancel);
+    }
   });
 
   it("the frame is cancelled on unmount (no rAF left pointing at a dead component)", () => {
@@ -339,7 +378,7 @@ describe("NEW-1 — F goes to REAL fullscreen, and the header follows the docume
     // keep-alive gate the shortcut does — else each hidden header collapses and renders its own
     // floating exit button (ui-audit/verify-new1-fullscreen.mjs found two stacked).
     const onChange = header.indexOf("const onChange = () => {");
-    expect(header.indexOf("headerRef.current.offsetParent === null) return;", onChange)).toBeGreaterThan(onChange);
+    expect(header.indexOf("if (!headerOnScreen()) return;", onChange)).toBeGreaterThan(onChange);
     // entering never sets the state directly — one owner, so it can't race the event that reports it
     expect(header.includes("requestFs().then(() => setFullscreen(true))")).toBe(false);
   });
@@ -356,6 +395,77 @@ describe("NEW-1 — F goes to REAL fullscreen, and the header follows the docume
   });
 
   it("the keep-alive gate that stops a hidden workspace stealing the shortcut is intact", () => {
-    expect(header).toContain("if (!fullscreenRef.current && headerRef.current && headerRef.current.offsetParent === null) return;");
+    // NEW-1 (2026-07-30) — the gate is UNCHANGED in purpose and STRONGER in reach: it used to
+    // carry a `!fullscreenRef.current` exception (because the collapsed header rendered only a
+    // fixed button and `offsetParent` is null for fixed elements). The header is position:fixed
+    // for the whole fullscreen session now, so that exception would have swallowed `f` and left
+    // no way back out. The probe is rect-based instead, and applies unconditionally.
+    const keydown = header.indexOf("const handle = (e) => {");
+    expect(keydown).toBeGreaterThan(-1);
+    expect(header.indexOf("if (!headerOnScreen()) return;", keydown)).toBeGreaterThan(keydown);
+    expect(header.includes("!fullscreenRef.current && headerRef.current && headerRef.current.offsetParent === null")).toBe(false);
+  });
+
+  it("the visibility probe reads CLIENT RECTS, because offsetParent cannot see a fixed header", () => {
+    // The whole reason the exception above could be dropped. `display:none` ⇒ no boxes at all;
+    // a fixed header parked at translateY(-100%) still has one. `offsetParent` reports null for
+    // BOTH, so reverting this probe silently disables every gate that depends on it.
+    expect(header).toContain("const headerOnScreen = () => !!(headerRef.current && headerRef.current.getClientRects().length);");
+  });
+});
+
+/* NEW-1 (2026-07-30) — fullscreen is a MODE, not a chrome-hide, so it must not be a dead end:
+ * you have to be able to change plan or workspace without leaving it. The header slides in from
+ * the top edge instead of being unmounted. These guard the shape of that; the behaviour itself is
+ * driven end-to-end in ui-audit/verify-new1-fullscreen.mjs. */
+describe("NEW-1 — the fullscreen header slides in at the top edge instead of vanishing", () => {
+  it("the early return that DELETED the header in fullscreen is gone", () => {
+    // The dead end itself: one `if (fullscreen) return <button/>` replaced the breadcrumb, the
+    // plan switcher and the module tabs with a single floating control.
+    expect(header.includes("  if (fullscreen) {\n    return (\n      <button")).toBe(false);
+    // …and the header is now out of FLOW rather than out of the DOM, so the canvas still owns the
+    // whole viewport while you work.
+    expect(header).toContain('position: "fixed", top: 0, left: 0, right: 0, zIndex: 9998,');
+    expect(header).toContain('transform: fsReveal ? "translateY(0)" : "translateY(-100%)"');
+  });
+
+  it("a hidden header cannot steal the canvas's clicks, transform or no transform", () => {
+    expect(header).toContain('pointerEvents: fsReveal ? "auto" : "none"');
+  });
+
+  it("it arms on REACHING the top edge, after an intent delay — not on being in the upper region", () => {
+    expect(header).toContain("if (e.clientY > FS_EDGE_PX) { clearT(); return; }");
+    expect(header).toContain("timer = setTimeout(() => { timer = 0; if (headerOnScreen()) setFsReveal(true); }, FS_ARM_MS);");
+    // The edge band must stay a genuine EDGE — widen it into a "region" and the chrome starts
+    // ambushing anyone reaching for the top row of the workspace toolbar.
+    expect(Number(header.match(/const FS_EDGE_PX = (\d+);/)[1])).toBeLessThanOrEqual(8);
+    expect(Number(header.match(/const FS_ARM_MS = (\d+);/)[1])).toBeGreaterThanOrEqual(120);
+  });
+
+  it("it never hides while you are reaching for what it revealed", () => {
+    // Three holds, and they are re-checked when the timer FIRES, not only when it is set — so
+    // opening a menu during the grace period cancels the hide rather than racing it.
+    expect(header).toContain(`if (document.querySelector('[data-menu-owner="app-header"]')) return true;`);
+    expect(header).toContain("return el.contains(document.activeElement);");
+    expect(header).toContain("if (e.clientY <= r.bottom + FS_HOLD_PX || holdOpen()) { clearT(); return; }");
+    expect(header).toContain("timer = setTimeout(() => { timer = 0; if (!holdOpen()) setFsReveal(false); }, FS_HIDE_MS);");
+    // The portal stamp that makes the first hold possible — AnchoredMenu leaves the header's tree.
+    expect(anchored).toContain(`anchorRef?.current?.closest?.("[data-menu-scope]")?.getAttribute("data-menu-scope")`);
+    expect(anchored).toContain("data-menu-owner={ownerScope}");
+    expect(header).toContain('data-menu-scope="app-header"');
+  });
+
+  it("the exit button rides the same transform, so it needs no measurement and cannot desync", () => {
+    expect(header).toContain('position: "absolute", top: "100%", right: 12, marginTop: 10,');
+    expect(header).toContain('pointerEvents: "auto",'); // beats the header's own `none` while parked
+    expect(header).toContain('data-testid="exit-fullscreen"');
+  });
+
+  it("switching workspace hands the mode over — the incoming header adopts, the outgoing relinquishes", () => {
+    // The case the reveal creates: every workspace owns its own header, and the incoming one was
+    // display:none when `f` was pressed, so it never heard the fullscreenchange.
+    expect(header).toContain("const ro = new ResizeObserver(() => {");
+    expect(header).toContain("if (fullscreenRef.current) { nativeFsRef.current = false; setFullscreen(false); } // relinquish on the way out");
+    expect(header).toContain("if (real !== fullscreenRef.current && (real || nativeFsRef.current)) { nativeFsRef.current = real; setFullscreen(real); }");
   });
 });

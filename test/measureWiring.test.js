@@ -57,6 +57,101 @@ describe("NEW-1: measurements are styled through the ONE resolver, on every mode
   it("double-click a measurement still opens its Properties (parity with every other object)", () => {
     expect(SP).toMatch(/if \(isDoubleTap\(e, m\.id, sel\?\.kind === "measure" && sel\.i === idx\)\) \{[\s\S]{0,200}setPropsFor\(\{ kind: "measure", i: idx \}\)/);
   });
+});
+
+/* NEW-2 (2026-07-30) — the guard above named ONE function, and that is exactly why it did not
+ * protect. It scrapes `startMoveMeasure` and nothing else, so it stayed green while #866 shipped a
+ * pointer-enabled label chip — painted deliberately AFTER the transparent grab layer so its own
+ * drag would not be swallowed — whose handler had no double-tap branch at all. Same click on the
+ * same pixel, previously falling through to the shape and now landing on a dead end.
+ *
+ * So the guard is generalised from "this function has the gesture" to "EVERY interactive
+ * measurement surface has the gesture". It DISCOVERS the surfaces from the render — any
+ * `onPointerDown` bound inside the measurement block — instead of listing them, so adding a new
+ * one without the gesture goes red on arrival rather than shipping and waiting to be reported.
+ */
+describe("NEW-2: EVERY interactive measurement surface opens Properties on double-click", () => {
+  // The measurement render block, sliced exactly as the chip-ordering assertion below slices it.
+  const block = SP.slice(SP.indexOf("{/* measurements — line (distance)"), SP.indexOf("{/* in-progress measure draft */}"));
+
+  /** Extract `const NAME = (…) => { … }` from the component body by brace matching. */
+  function bodyOf(name) {
+    const at = SP.indexOf(`const ${name} = (`);
+    if (at < 0) return null;
+    const open = SP.indexOf("{", SP.indexOf("=>", at));
+    let depth = 0;
+    for (let i = open; i < SP.length; i++) {
+      if (SP[i] === "{") depth++;
+      else if (SP[i] === "}" && --depth === 0) return SP.slice(open, i + 1);
+    }
+    return null;
+  }
+
+  // Every handler the measurement render binds to a pointer press. Discovered, not listed.
+  const pressed = [...new Set([...block.matchAll(/onPointerDown=\{(?:[^}]*?)\b(start\w+)\(e,/g)].map((m) => m[1]))];
+
+  /* Which of those are WHOLE-OBJECT surfaces — the ones a double-click means "inspect this
+   * measurement" on. The discriminator is structural, never a name list (a name list is what
+   * failed): a handler that SELECTS A SUB-PART writes `setSelVtx({…})`, and a vertex grip is a
+   * handle on an already-selected object rather than a way to reach the object itself. That is
+   * a real app-wide invariant, not an excuse carved out for this test — NO vertex handler
+   * anywhere in the planner reconstructs the double-tap (asserted below), so requiring it here
+   * would be inventing a behaviour that exists on no other geometry.
+   * A new whole-object surface is picked up automatically; a new vertex grip is excluded for the
+   * same structural reason, with no edit to this file either way. */
+  const isVertexGrip = (name) => /setSelVtx\(\{/.test(bodyOf(name) || "");
+  const handlers = pressed.filter((n) => !isVertexGrip(n));
+
+  it("finds the press handlers by scanning the render (so a NEW surface is covered automatically)", () => {
+    // Both whole-object surfaces today: the geometry grab layer and the summary label chip. The
+    // count is a floor, not an exact set — a third must be picked up, never quietly dropped.
+    expect(handlers).toContain("startMoveMeasure");
+    expect(handlers).toContain("startMeasChip");
+    expect(handlers.length).toBeGreaterThanOrEqual(2);
+    // …and the vertex grip really is being classified, not merely missing from the scan.
+    expect(pressed).toContain("startMeasureVertex");
+    expect(isVertexGrip("startMeasureVertex")).toBe(true);
+  });
+
+  it("no vertex grip anywhere reconstructs the double-tap — the exclusion tracks the whole app", () => {
+    for (const grip of ["startMeasureVertex", "startMarkupVertex"]) {
+      const body = bodyOf(grip);
+      expect(body, `could not locate ${grip}`).toBeTruthy();
+      expect(body, `${grip} now has a double-tap — the structural exclusion above needs revisiting`).not.toMatch(/isDoubleTap\(/);
+    }
+  });
+
+  it.each(handlers)("%s reconstructs the double-tap and opens the inspector", (name) => {
+    const body = bodyOf(name);
+    expect(body, `could not locate ${name}`).toBeTruthy();
+    expect(body, `${name} never calls isDoubleTap — the gesture is unarmed on that surface`).toMatch(/isDoubleTap\(e, m\.id/);
+    // `i: idx` (the shape surface resolves a cycled index) or shorthand `i` (the chip owns its own).
+    expect(body, `${name} does not open Properties`).toMatch(/setPropsFor\(\{ kind: "measure", i(?::\s*\w+)? \}\)/);
+  });
+
+  it.each(handlers)("%s opens Properties for a LOCKED measurement too (the surfaces must agree)", (name) => {
+    const body = bodyOf(name);
+    const dbl = body.indexOf("isDoubleTap");
+    const lock = body.indexOf("if (m.locked)");
+    expect(dbl).toBeGreaterThan(-1);
+    // A lock guard is optional (a surface may not drag at all), but where it exists the double-tap
+    // branch must precede it — otherwise a locked measurement can be selected but never inspected
+    // from that surface, which is exactly the divergence NEW-2 was.
+    if (lock > -1) expect(dbl, `${name} checks m.locked before its double-tap branch`).toBeLessThan(lock);
+  });
+
+  it("the chip's double-tap keys on the bare id, so chip and shape pair with each other", () => {
+    // `isDoubleTap(e, m.id, …)` on both surfaces is what lets press-on-shape + press-on-chip (in
+    // either order) count as one double-click, rather than two orphaned single presses.
+    const chip = bodyOf("startMeasChip");
+    expect(chip).toMatch(/isDoubleTap\(e, m\.id, sel\?\.kind === "measure" && sel\.i === i\)/);
+    // …and it returns before the drag arms, so a double-click never pushes a no-op undo frame.
+    // (`lastIndexOf` because the branch's own comment names pushHistory() before the call site.)
+    expect(chip.indexOf("isDoubleTap")).toBeLessThan(chip.lastIndexOf("pushHistory()"));
+  });
+});
+
+describe("NEW-1: measurement styling (continued)", () => {
   it("the owner rule holds: NO × delete badge on a selected measurement", () => {
     expect(SP).toMatch(/no × delete badge on a measurement \(owner rule\)/);
   });

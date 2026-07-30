@@ -119,6 +119,16 @@ export default function AnchoredMenu({
 
   if (!open) return null;
 
+  /* NEW-1 — declare which chrome SCOPE this menu was opened from, read off the anchor's nearest
+     `[data-menu-scope]` ancestor. A portal deliberately escapes its trigger's DOM tree, so a
+     surface that auto-hides on pointer-away (the fullscreen header) has no way to tell "my own
+     dropdown is open" from "nothing is open" — and a switcher that vanishes as you reach for it
+     is worse than no switcher at all. Stamping the panel closes that gap generically: any
+     auto-hiding surface marks itself with `data-menu-scope` and holds itself open while a
+     `[data-menu-owner="<scope>"]` panel exists. Menus opened from an unmarked tree stamp nothing
+     and are byte-identical to before. */
+  const ownerScope = anchorRef?.current?.closest?.("[data-menu-scope]")?.getAttribute("data-menu-scope") || undefined;
+
   return createPortal(
     <>
       {/* click-away backdrop (transparent). Skipped in hoverSafe mode — an
@@ -128,10 +138,11 @@ export default function AnchoredMenu({
           app (elementFromPoint over the canvas returns it), which is correct while a visible menu
           needs dismissing and indefensible otherwise: an unplaced menu is invisible, so the layer
           would swallow clicks with nothing on screen to explain why the app stopped responding. */}
-      {!hoverSafe && pos && <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex }} />}
+      {!hoverSafe && pos && <div onClick={onClose} data-menu-owner={ownerScope} style={{ position: "fixed", inset: 0, zIndex }} />}
       <div
         ref={menuRef}
         className={className}
+        data-menu-owner={ownerScope}
         style={{
           maxHeight: "min(72vh, 540px)",
           overflowY: "auto",

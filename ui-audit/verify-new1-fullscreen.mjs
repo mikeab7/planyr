@@ -53,7 +53,20 @@ const state = () => page.evaluate(() => ({
   // Count only a header that is actually ON SCREEN. Workspaces are kept mounted-but-hidden, so
   // the inactive one's <header> is always in the DOM — asserting on `querySelector("header")`
   // would be asserting on a node the user cannot see.
-  header: [...document.querySelectorAll("header")].some((h) => h.offsetParent !== null && h.getBoundingClientRect().height > 0),
+  // NEW-1 (2026-07-30) — "on screen" now needs a THIRD test. The fullscreen header is no longer
+  // unmounted; it is position:fixed and parked at translateY(-100%), so it has a real box that
+  // sits entirely ABOVE the viewport. `offsetParent` cannot see that (it is null for any fixed
+  // element, so it would report every fullscreen header as hidden and every non-fullscreen one by
+  // luck); `getClientRects()` distinguishes display:none (no boxes) from parked-off-screen, and
+  // `bottom > 0.5` is what actually answers "can the user see it".
+  header: [...document.querySelectorAll("header")].some((h) => {
+    if (!h.getClientRects().length) return false;                       // display:none workspace
+    const r = h.getBoundingClientRect();
+    return r.height > 0 && r.bottom > 0.5;                              // parked above the top edge ⇒ not shown
+  }),
+  revealed: !!document.querySelector('header[data-fs-reveal="shown"]'),
+  // What sits under a point — used to prove the parked header steals nothing from the canvas.
+  topEdgeOwner: (() => { const e = document.elementFromPoint(Math.round(window.innerWidth / 2), 4); return e ? (e.closest("header") ? "header" : e.tagName.toLowerCase()) : null; })(),
   exitBtn: !!document.querySelector('[data-testid="exit-fullscreen"]'),
   svg: (() => { const e = document.querySelector("svg[role=application]"); const r = e && e.getBoundingClientRect(); return r ? { w: Math.round(r.width), h: Math.round(r.height) } : null; })(),
   // BOTH the planner's basemap and the (hidden, display:none) Map view's Leaflet map are in the
@@ -161,6 +174,96 @@ const typed = await page.evaluate(() => {
   return still;
 });
 check("typing “f” in a text field toggles nothing", typed);
+
+/* 6 — NEW-1 (2026-07-30): fullscreen is a MODE people stay in, so it must not be a dead end.
+   Pushing the pointer to the very top edge slides the WHOLE header down — breadcrumb, project and
+   plan switcher, module tabs — and moving away hides it again. */
+console.log("\nNEW-1 — the top-edge reveal (fullscreen is no longer a dead end)\n");
+const W = 1400;
+const mid = Math.round(W / 2);
+await page.keyboard.press("f");
+await page.waitForTimeout(500);
+check("re-entered fullscreen with the chrome parked", !(await state()).header && (await state()).exitBtn);
+
+// (c) it must not steal the canvas's pointer events while hidden.
+await page.mouse.move(mid, 400);
+await page.waitForTimeout(120);
+check("a parked header owns nothing at the top edge (the canvas keeps its clicks)",
+  (await state()).topEdgeOwner !== "header", `elementFromPoint(mid, 4) → ${(await state()).topEdgeOwner}`);
+
+// (a) a FAST crossing of the top edge must not flash it open.
+await page.mouse.move(mid, 1);
+await page.mouse.move(mid, 500);          // gone again well inside the intent delay
+await page.waitForTimeout(500);
+check("a cursor flicking across the top does NOT flash the chrome open", !(await state()).revealed);
+
+// (a) reaching the top edge and STAYING reveals it.
+await page.mouse.move(mid, 1);
+await page.waitForTimeout(700);
+const shown = await state();
+check("holding at the very top edge slides the header in", shown.revealed && shown.header);
+const reach = await page.evaluate(() => {
+  const h = [...document.querySelectorAll("header")].find((x) => x.getClientRects().length && x.getBoundingClientRect().bottom > 0.5);
+  const r = h.getBoundingClientRect();
+  const tabs = [...h.querySelectorAll("button")].map((b) => (b.textContent || "").trim()).filter(Boolean);
+  return { top: Math.round(r.top), hasSite: tabs.some((t) => /^Site$/.test(t)), hasReview: tabs.some((t) => /^Review$/.test(t)), buttons: tabs.length };
+});
+check("…the WHOLE header, not a reduced version (module tabs + switcher present)",
+  reach.top === 0 && reach.hasSite && reach.hasReview && reach.buttons > 6,
+  `top=${reach.top}, ${reach.buttons} controls`);
+
+// (b) it must not hide while a dropdown opened FROM it is open, even though that dropdown is
+// portalled to <body> and so leaves the header's own subtree.
+await page.evaluate(() => {
+  const h = [...document.querySelectorAll("header")].find((x) => x.getClientRects().length && x.getBoundingClientRect().bottom > 0.5);
+  h.querySelector('button[aria-label="Settings"]').click();
+});
+await page.waitForTimeout(250);
+const menuStamped = await page.evaluate(() => !!document.querySelector('[data-menu-owner="app-header"]'));
+await page.mouse.move(mid, 600);          // pointer well away from the header
+await page.waitForTimeout(900);           // longer than the hide grace
+check("an open header dropdown holds the chrome open (a switcher must not vanish as you reach for it)",
+  menuStamped && (await state()).revealed, menuStamped ? "" : "no data-menu-owner stamp");
+await page.keyboard.press("Escape");      // close the menu (fallback mode is off, so this is safe)
+await page.evaluate(() => { const b = document.querySelector('[data-menu-owner="app-header"]'); if (b) b.click(); });
+await page.waitForTimeout(200);
+
+// …and once nothing holds it, moving away hides it again.
+await page.mouse.move(mid, 620);
+await page.waitForTimeout(900);
+check("moving away slides it back out of the way", !(await state()).revealed);
+check("…and the exit button is still reachable throughout", (await state()).exitBtn);
+check("…with still exactly ONE of them", (await state()).exitButtons === 1, `${(await state()).exitButtons} found`);
+
+/* 7 — the case the reveal CREATES, and the one most likely to strand the owner: actually using
+   the module tabs it just made reachable. Every workspace owns its own AppHeader, and the incoming
+   one was display:none when `f` was pressed, so it never heard the fullscreenchange. Without the
+   hand-over it would arrive as an ordinary in-flow header inside a still-fullscreen document, with
+   no exit button and `f` dead — a worse dead end than the one this item set out to remove. */
+await page.mouse.move(mid, 1);
+await page.waitForTimeout(700);
+check("the reveal is up so the tabs can be used", (await state()).revealed);
+await page.evaluate(() => {
+  const h = [...document.querySelectorAll("header")].find((x) => x.getClientRects().length && x.getBoundingClientRect().bottom > 0.5);
+  [...h.querySelectorAll("button")].find((b) => (b.textContent || "").trim() === "Review")?.click();
+});
+await page.waitForTimeout(900);
+const switched = await state();
+check("switching workspace from inside fullscreen keeps the DOCUMENT in fullscreen", switched.isRoot);
+check("…and the incoming header adopts the mode (parked chrome, not an in-flow header)",
+  !switched.header, switched.header ? "incoming header rendered in flow" : "");
+check("…with exactly ONE exit button (the outgoing header relinquished)",
+  switched.exitButtons === 1, `${switched.exitButtons} found`);
+await page.mouse.move(mid, 1);
+await page.waitForTimeout(700);
+check("…and the top-edge reveal works in the workspace you switched TO", (await state()).revealed);
+await page.mouse.move(mid, 600);
+await page.waitForTimeout(700);
+await page.keyboard.press("f");
+await page.waitForTimeout(600);
+const outAgain = await state();
+check("…and `f` still exits from there (the key is not dead after a switch)",
+  outAgain.header && !outAgain.fsElement);
 
 await browser.close();
 

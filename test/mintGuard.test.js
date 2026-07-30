@@ -14,7 +14,7 @@
  * alongside test/idUniqueness.test.js (which is deliberately untouched: it is the backstop, and
  * it works — it fired RED pre-merge on both B1140 renumbers). */
 import { describe, it, expect } from "vitest";
-import { mintVerdict } from "../scripts/check-mint.mjs";
+import { mintVerdict, announceVerdict, idsNamedIn } from "../scripts/check-mint.mjs";
 import {
   assessFreshness, headingIdsIn, selectPeerRefs,
   DEFAULT_MAX_FETCH_AGE_S, DEFAULT_PEER_DAYS, PEER_NS,
@@ -164,5 +164,66 @@ describe("selectPeerRefs — which branches still count as racing us", () => {
     expect(kept).toHaveLength(1);
     // and just outside it does not — an aged-out claim only ever leaves a numbering gap, which is free
     expect(selectPeerRefs([{ name: `${NS}/claude/x`, ts: at(DEFAULT_PEER_DAYS + 0.1) }], { now })).toEqual([]);
+  });
+});
+
+/* NEW-H (2026-07-30) — the ANNOUNCEMENT half of the gate.
+ *
+ * The owner's report was that PR #865 and PR #866 both claim B1144 / B1145 / B1146 and both claim
+ * V531. Audited: they do — in their TITLES. In the FILES they do not, and the gate above is why:
+ * #866's ids were renumbered to B1151–B1153 / V534 before merge, `test/idUniqueness.test.js` is
+ * green, and there is no duplicate heading anywhere. What nobody updated was the subject line, so
+ * `git log --oneline` shows two commits announcing the same three numbers for different features.
+ *
+ * That is a real gap and this is the fix: the number a PR ANNOUNCES must be a number it FILED.
+ * Renumbering is precisely when it breaks, because the late-bind rule (B779) moves the heading at
+ * the last moment and the subject was written first. */
+describe("announceVerdict — a commit subject may only name ids this branch actually filed (NEW-H)", () => {
+  const filed = { B: new Set([1151, 1152, 1153]), V: new Set([534]) };
+
+  it("passes when the subject names exactly what was filed", () => {
+    const v = announceVerdict({ subjects: ["Measurements get real style options (B1151 / B1152 / B1153 — V534)"], filed });
+    expect(v.ok).toBe(true);
+    expect(v.offenders).toEqual([]);
+  });
+
+  it("REPRODUCES #866: the stale pre-renumber title goes red, naming every wrong id", () => {
+    const v = announceVerdict({
+      subjects: ["Measurements get real style options, a settable label zoom, and a proper annotation (B1144 / B1145 / B1146 — V531)"],
+      filed,
+    });
+    expect(v.ok).toBe(false);
+    expect(v.offenders.map((o) => o.id)).toEqual(["B1144", "B1145", "B1146", "V531"]);
+  });
+
+  it("a subject naming NO ids is fine — plenty of commits legitimately announce nothing", () => {
+    expect(announceVerdict({ subjects: ["Tidy the road label spacing"], filed }).ok).toBe(true);
+  });
+
+  it("a RECURRENCE passes: it re-opens an existing heading and mints nothing", () => {
+    // The heading is in the working tree (moved back from the archive), so the subject that names
+    // it is truthful — which is the whole property being checked, rather than 'was this new?'.
+    expect(announceVerdict({ subjects: ["Buildings stay welded on a hard sling (B1122 ×2)"], filed: { B: new Set([1122]), V: new Set() } }).ok).toBe(true);
+  });
+
+  it("expands a RANGE the way a real subject writes one", () => {
+    // The #869 subject: "…four memory tiers that let go (B1156–B1163 — V536–V541)".
+    expect([...idsNamedIn("(B1156–B1163 — V536–V541)", "B")]).toEqual([1156, 1157, 1158, 1159, 1160, 1161, 1162, 1163]);
+    expect([...idsNamedIn("(B1156–B1163 — V536–V541)", "V")]).toEqual([536, 537, 538, 539, 540, 541]);
+  });
+
+  it("does not match a SHORTER id inside a longer one", () => {
+    expect([...idsNamedIn("B1144", "B")]).toEqual([1144]);   // not 1, 11, 114…
+    expect([...idsNamedIn("B11 and B1144", "B")].sort((a, b) => a - b)).toEqual([11, 1144]);
+  });
+
+  it("refuses to expand a nonsense range instead of enumerating thousands of ids", () => {
+    expect([...idsNamedIn("B1 – B9999", "B")].sort((a, b) => a - b)).toEqual([1, 9999]);
+  });
+
+  it("checks every commit on the branch, not just the first", () => {
+    const v = announceVerdict({ subjects: ["Fine (B1151)", "Stale (B1144)"], filed });
+    expect(v.ok).toBe(false);
+    expect(v.offenders.map((o) => o.id)).toEqual(["B1144"]);
   });
 });

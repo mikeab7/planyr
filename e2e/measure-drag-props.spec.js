@@ -105,6 +105,52 @@ test.describe("measurement drag / properties / label LOD (logged out)", () => {
     expect(errors, errors.join("\n")).toEqual([]);
   });
 
+  /* NEW-2 (2026-07-30) — double-clicking the measurement's LABEL CHIP must open Properties too.
+   * A regression from the chip's own arrival: the label used to be a `pointerEvents="none"` <text>,
+   * so a double-click on it fell THROUGH to the transparent grab layer and reached the geometry
+   * handler; the chip is pointer-enabled and painted last (deliberately, so its drag is not
+   * swallowed), so the same click started landing on a handler with no double-tap branch and did
+   * nothing at all. Driven here on both an AREA (the reported case) and a LENGTH measurement,
+   * because the line/polyline modes were a pre-existing gap rather than a regression — their old
+   * label sat outside the stroke's hit band and very likely never worked either. */
+  for (const mode of ["Area", "Length"]) {
+    test(`double-clicking the ${mode} measurement's label chip opens Properties (NEW-2)`, async ({ page }) => {
+      const errors = [];
+      page.on("pageerror", (e) => errors.push(String(e)));
+      await startBlank(page);
+      const box = await canvas(page).boundingBox();
+
+      await armMeasure(page, mode);
+      if (mode === "Length") {
+        await drawLength(page, box.x + 300, box.y + 260, box.x + 520, box.y + 260);
+      } else {
+        const pts = [[box.x + 280, box.y + 200], [box.x + 540, box.y + 200], [box.x + 540, box.y + 400], [box.x + 280, box.y + 400]];
+        for (const [x, y] of pts) { await page.mouse.click(x, y); await page.waitForTimeout(60); }
+        await page.mouse.dblclick(pts[0][0], pts[0][1]); // close + finish the area
+        await expect.poll(() => measureCount(page)).toBe(1);
+      }
+      await page.keyboard.press("Escape"); // drop the just-drawn selection AND any armed tool
+
+      // The chip's own centre, read off the plate the render tags for the print/export path.
+      const chip = page.locator('[data-print-chip="measure"] [data-chip-bg]').first();
+      await expect(chip).toBeVisible();
+      const cb = await chip.boundingBox();
+      const cx = Math.round(cb.x + cb.width / 2), cy = Math.round(cb.y + cb.height / 2);
+
+      // Exactly the owner's gesture: two presses on the chip, nothing else.
+      await page.mouse.move(cx, cy);
+      await page.mouse.down(); await page.mouse.up();
+      await page.mouse.down(); await page.mouse.up();
+
+      const panel = page.getByTestId("property-panel");
+      await expect(panel).toBeVisible();
+      await expect(panel.getByText("Measurement", { exact: false }).first()).toBeVisible();
+      // …and the double-click did not also drag the chip off its anchor.
+      expect((await measures(page))[0]?.labelOffset ?? null).toBeNull();
+      expect(errors, errors.join("\n")).toEqual([]);
+    });
+  }
+
   test("Shift locks a measurement perpendicular to the parcel edge it starts on", async ({ page }) => {
     const errors = [];
     page.on("pageerror", (e) => errors.push(String(e)));

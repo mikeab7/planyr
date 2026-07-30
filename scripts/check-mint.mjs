@@ -67,6 +67,56 @@ export function mintVerdict({ letter, added, claimedMax, peerOwners = new Map(),
   return { ok: offenders.length === 0, letter, offenders, claimedMax, nextFree: claimedMax + 1 };
 }
 
+/* ---- the ANNOUNCEMENT check (NEW-H, 2026-07-30) -----------------------------------------
+ *
+ * The gate above proves the ids this branch FILES are unclaimed. It says nothing about the ids
+ * this branch ANNOUNCES — the commit subject, which is what GitHub pre-fills the PR title from and
+ * therefore the only number a human ever reads in `git log --oneline` or in the PR list.
+ *
+ * That gap produced a real, owner-visible defect. PR #865 and PR #866 both announced
+ * "B1144 / B1145 / B1146 — V531". The FILES were fine and this gate did its job: #866's ids were
+ * renumbered to B1151–B1153 / V534 before it merged, and `test/idUniqueness.test.js` is green.
+ * Nobody updated the subject line, so main now carries two commits claiming the same three numbers
+ * for entirely different features — which reads, correctly, as a collision. Renumbering is exactly
+ * when this happens: the late-bind rule (B779) tells you to move the heading at the last moment,
+ * and the subject was written before that.
+ *
+ * So: every B###/V### named in a commit subject this branch adds must actually exist as a heading
+ * in this branch's backlog / verification files. It checks the property ("the number I announce is
+ * the number I filed"), never the ceremony, so a correct late renumber that also fixes the subject
+ * passes untouched, and a recurrence — which re-opens an existing heading and mints nothing —
+ * passes too, because the heading is right there.
+ */
+
+/** Ids of a family named in a block of prose (a commit subject). `B1144 / B1145` → [1144, 1145]. */
+export function idsNamedIn(text, letter) {
+  const out = new Set();
+  // `\b` after the digits so B11 does not match inside B1144; ranges ("B1156–B1163") expand.
+  for (const m of (text || "").matchAll(new RegExp(`\\b${letter}(\\d+)\\s*[–—-]\\s*${letter}?(\\d+)\\b`, "g"))) {
+    const a = Number(m[1]), b = Number(m[2]);
+    if (b >= a && b - a < 64) for (let n = a; n <= b; n++) out.add(n);
+  }
+  for (const m of (text || "").matchAll(new RegExp(`\\b${letter}(\\d+)\\b`, "g"))) out.add(Number(m[1]));
+  return out;
+}
+
+/**
+ * PURE verdict for the announcement check. `subjects` are this branch's commit subject lines;
+ * `filed` maps a letter to the set of heading ids present in the working tree.
+ */
+export function announceVerdict({ subjects = [], filed = {} }) {
+  const offenders = [];
+  for (const letter of ["B", "V"]) {
+    const have = filed[letter] || new Set();
+    for (const subject of subjects) {
+      for (const n of [...idsNamedIn(subject, letter)].sort((a, b) => a - b)) {
+        if (!have.has(n)) offenders.push({ id: `${letter}${n}`, subject });
+      }
+    }
+  }
+  return { ok: offenders.length === 0, offenders };
+}
+
 /** Local (working-tree) heading ids for a family — what this branch actually says today. */
 function localIds(repo, files, letter) {
   const texts = files.map((f) => join(repo, f)).filter(existsSync).map((p) => readFileSync(p, "utf8"));
@@ -148,7 +198,24 @@ export function runGate(repo = REPO, { peerDays = DEFAULT_PEER_DAYS, maxAgeSecon
     });
   }
   releasePeers(); // leave .git/shallow exactly as we found it
-  return { ok: families.every((f) => f.ok), families, branch, sha: fresh.sha, peersScanned: refs.length, baseRef };
+
+  // The ANNOUNCEMENT half: do this branch's commit subjects name ids it actually filed? Read from
+  // the merge base so it covers exactly the commits this push adds. A branch with no readable
+  // ancestry simply skips it rather than inventing a verdict — the mint check above is unaffected.
+  let announce = { ok: true, offenders: [], skipped: "no merge base" };
+  if (baseRef) {
+    const log = tryGit(repo, `git log --format=%s ${baseRef}..HEAD`);
+    if (log.ok) {
+      const subjects = log.out.split("\n").map((s) => s.trim())
+        .filter((s) => s && !/^(Merge |Nudge CI\b)/.test(s)); // merge commits + CI nudges announce nothing
+      announce = announceVerdict({
+        subjects,
+        filed: { B: localIds(repo, B_FILES, "B"), V: localIds(repo, V_FILES, "V") },
+      });
+    }
+  }
+
+  return { ok: families.every((f) => f.ok) && announce.ok, families, announce, branch, sha: fresh.sha, peersScanned: refs.length, baseRef };
 }
 
 // ---- CLI -------------------------------------------------------------------------------
@@ -179,6 +246,24 @@ function main(argv) {
       );
     }
     return 0;
+  }
+
+  if (res.announce && !res.announce.ok) {
+    const lines = [
+      `\n⛔ MINT GATE FAILED — a commit subject ANNOUNCES a backlog id this branch never filed (NEW-H).\n`,
+      `   This is the #865/#866 defect: both PRs announced "B1144 / B1145 / B1146 — V531" in their\n`,
+      `   titles. The FILES were fine — #866's ids were correctly renumbered to B1151–B1153 / V534\n`,
+      `   before it merged — but the subject was written before the renumber and never updated, so\n`,
+      `   main carries two commits claiming the same numbers for different features.\n\n`,
+    ];
+    for (const o of res.announce.offenders) {
+      lines.push(`   ${o.id} is named in a commit subject but has no "### ${o.id}" heading in this branch:\n`);
+      lines.push(`     "${o.subject.length > 96 ? o.subject.slice(0, 93) + "…" : o.subject}"\n`);
+    }
+    lines.push(`\n   → amend the subject to the ids you actually filed (and the PR title with it).\n`,
+      `     git commit --amend   ·   git rebase -i is unavailable here, so squash before amending.\n\n`);
+    process.stderr.write(lines.join(""));
+    if (res.families.every((f) => f.ok)) return 1;
   }
 
   const lines = [`\n⛔ MINT GATE FAILED — this branch claims backlog ids someone else already holds (B779).\n`];
