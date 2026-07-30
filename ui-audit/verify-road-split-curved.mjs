@@ -54,7 +54,7 @@ const SPLITS = [
 // answers 200 to curl but resets every Chromium navigation (ERR_CONNECTION_RESET), with the egress
 // proxy logging no rejection for the host — and neither Playwright's `proxy:` option nor
 // `--proxy-server` + `--proxy-bypass-list=<-loopback>` changes that (both tried 2026-07-30). So run
-// this against `npm run preview` on :4173; the DEPLOYED read is a V533 step, not something to
+// this against `npm run preview` on :4173; the DEPLOYED read is a V535 step, not something to
 // re-attempt here.
 const browser = await chromium.launch({
   executablePath: process.env.PW_CHROME || "/opt/pw-browsers/chromium",
