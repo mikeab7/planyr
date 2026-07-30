@@ -477,7 +477,8 @@ describe("markup hit-area / callout padding / live color picker (B155 open-path 
     // all three render sites are wired: markup line/polyline, easement (centerline/ring), road centerline
     expect(src).toMatch(/inlineLabelEls\(mkPts\(m\), m\.inlineLabel/);
     expect(src).toMatch(/inlineLabelEls\(easePathFeet, m\.inlineLabel/);
-    expect(src).toMatch(/inlineLabelEls\(roadDenseCenterline\(el, settings\), el\.inlineLabel/);
+    // NEW-2 — the road's dense centerline now also takes the junction vertices it must render SHARP.
+    expect(src).toMatch(/inlineLabelEls\(roadDenseCenterline\(el, settings, sharpFor\(el\)\), el\.inlineLabel/);
   });
 
   it("B678: inline-label per-feature controls (spacing/size/halo) + screen-space self-thinning", () => {
