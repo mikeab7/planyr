@@ -144,6 +144,70 @@ export function wallKidAlong(b, side, kid) {
   return { run: isVert ? dimBY : dimBX, alongShift: isVert ? l.y : l.x, depth: isVert ? dimBX : dimBY };
 }
 
+/* ---- NEW-1: WHEN a side-parking row's along-wall run counts as USER INTENT --------------------
+ *
+ * The along axis is "derive by default, preserve once touched": a field still sitting on the span
+ * default tracks the host, and one the owner positioned himself is carried through every refit.
+ * The bug was HOW "touched" was decided — from geometry alone, exactly the disease B1123 fixed for
+ * a dock zone's `alongLen`:
+ *
+ *   `relayoutWallKids` runs on a host resize with the NEW host box but the OLD child boxes, so a
+ *   field that was faithfully tracking the old span now measures different from the new one and is
+ *   read as hand-positioned. Its run is clamped (so the plan LOOKS right) and the pre-resize run is
+ *   stamped onto `sideParkFit` as "intent to spring back to". Nobody ever expressed that intent.
+ *   The receipt is on the owner's Weld County plan: Building 2 is 577 ft long and its west field
+ *   carries `sideParkFit: { run: 708.58 }` — 708.58 ft being the length of a DIFFERENT building,
+ *   the one this one was duplicated from. Grow that host and the field springs out 131 ft past it.
+ *
+ * THE RULE, stated once and shared by the canvas refit AND the load-time heal so they cannot drift:
+ *
+ *   · A run LONGER than the wall it hugs is never intent — it is staleness. Every gesture that can
+ *     set a run clamps it to the span, so a stored over-length run can only have come from a host
+ *     that used to be longer (a resize, or a copy of a longer building). Such a field goes back to
+ *     tracking the span, on BOTH axes: its along-CENTRE is stale by the same arithmetic (half the
+ *     shrink), and keeping it would leave a correctly-sized field hanging off the end of the wall.
+ *   · `pinAllowed` is the intent gate (B1123's `userResize`, by another name). Only a gesture aimed
+ *     AT THIS FIELD may pin an over-length run — the owner dragging its end past the wall is a real
+ *     statement, even though the render clamps it. A host refit, a duplicate, a relayout and the
+ *     load-time heal all pass false and are structurally incapable of stamping.
+ *   · Anything else is unchanged: a run SHORTER than the span, or a shifted centre, is preserved
+ *     exactly as before (that is the owner's amendment — he slides a field to line a curb return up
+ *     with a fire lane, and that must survive every refit).
+ *
+ * PURE, so the rule is unit-testable apart from the React canvas.
+ */
+export const SIDE_PARK_PIN_TOL_FT = 0.5; // below this a field still counts as sitting on the default
+
+/**
+ * @param cur    { run, alongShift } the field has NOW (wallKidAlong)
+ * @param span   { run, alongShift } the span default for its side (sidewalkSpanForBumps)
+ * @param stamp  its stored `sideParkFit` intent, or null
+ * @param pinAllowed  true only for a gesture aimed at THIS field
+ * @returns { run, alongShift, stamp, stale } — `stamp` is the `sideParkFit` to store (undefined =
+ *          leave whatever is there, null = drop it); `stale` flags the over-length case for telemetry.
+ */
+export function sideParkAlongRun({ cur, span, stamp = null, pinAllowed = false, tol = SIDE_PARK_PIN_TOL_FT }) {
+  const spanRun = Math.max(0, Number(span && span.run) || 0);
+  const curRun = Math.max(0, Number(cur && cur.run) || 0);
+  const curShift = Number(cur && cur.alongShift) || 0;
+  const want = stamp && Number.isFinite(stamp.run) && stamp.run > 0 ? stamp : null;
+  // Over-length: the field, or the intent stored for it, claims more wall than the host has.
+  const overRun = (want ? want.run : curRun) > spanRun + tol;
+  if (overRun && !pinAllowed) {
+    // Stale on both axes → back onto the span default, and the impossible stamp goes with it.
+    return { run: spanRun, alongShift: Number(span && span.alongShift) || 0, stamp: want ? null : undefined, stale: true };
+  }
+  const untouched = Math.abs(curRun - spanRun) <= tol
+    && Math.abs(curShift - (Number(span && span.alongShift) || 0)) <= tol;
+  if (untouched && !want) return { run: spanRun, alongShift: Number(span && span.alongShift) || 0, stamp: undefined, stale: false };
+  const intent = want || { run: curRun, alongShift: curShift };
+  const run = Math.min(intent.run, spanRun);
+  // Stamp the unclamped intent only once the clamp actually bites, so it springs back when the host
+  // grows again — and only from a gesture that was allowed to pin in the first place.
+  const stampOut = run !== intent.run && (pinAllowed || want) ? intent : undefined;
+  return { run, alongShift: intent.alongShift, stamp: stampOut, stale: false };
+}
+
 // A host-local point back into world feet (rotate by the host angle, offset by its centre).
 export const localToWorld = (b, lx, ly) => { const o = rot2(lx, ly, b.rot || 0); return { x: b.cx + o.x, y: b.cy + o.y }; };
 

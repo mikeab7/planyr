@@ -7,6 +7,19 @@
 
 _Last updated: 2026-07-30._
 
+## ✏️ Rename one plan — it's called your seller's head office by mistake (B1196)
+
+> **Short version: your Colorado plan is named "2221 E LAMAR BLVD STE 790", which is Forestar's corporate address
+> in Arlington, Texas — not the property.** When you searched "4050 County Road 50", the parcel card picked the
+> owner's *mailing* address out of the county's record instead of the property's own address, and the card's title
+> is what names the plan. It's fixed now: from here on a plan searched that way gets named after the land, and if
+> the county doesn't publish a property address at all it falls back to what you typed rather than the owner's.
+>
+> **What I deliberately did not do:** rename your existing plan for you. Quietly rewriting the name on a saved
+> project is the kind of thing you should never come back to and find already done. It's one click on your side.
+- [ ] **Rename the Weld County plan** (currently `2221 E LAMAR BLVD STE 790 / Concept A`) to whatever you want it
+      called — `4050 CR 50, Johnstown` is what the county has for the property. Nothing else needs touching.
+
 ## ✉️ Decide how Planyr sends its sign-up emails — right now most people can't sign up at all (B1167)
 
 > **Short version: your confirmation emails go out through Supabase's free built-in mailer, and that mailer only
