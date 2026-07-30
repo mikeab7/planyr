@@ -28,6 +28,9 @@ import {
   jurisdictionFor, layerVintage,
 } from "../lib/layers.js";
 import { DEFAULT_CORRIDOR_WIDTH_FT, MIN_CORRIDOR_WIDTH_FT, MAX_CORRIDOR_WIDTH_FT } from "../lib/pipelineCorridor.js";
+// NEW-1 — which layers the "Show above plan" lift can actually move (only an AREA role; a line
+// or point layer is over the plan already). The model, never a local guess.
+import { configCanLift } from "../lib/mapStack.js";
 import { PLANNER_BASEMAP_CHOICES } from "../lib/basemaps.js";
 import { mapillaryToken, setMapillaryToken, subscribeMapillaryToken } from "../lib/evidenceLayers.js";
 import { formatAge } from "../lib/gisCache.js";
@@ -124,13 +127,18 @@ export default function LayerPanel({
   // currently ON (you should always see what you've enabled). Picker-only signal.
   const lowRel = (k, cfg) => !overlays[k]?.on && (coverage[k] === "out" || (cfg.needsSetup && !tok));
 
-  /* NEW-2 — THE ONE OPACITY CONTROL, used by every row shape in this panel (solo, the
-   * pairwise City-limits-&-ETJ composite, and the N-ary merge groups). Per-layer opacity is
-   * the ONLY escape hatch in the stacking model (lib/mapStack.js): the draw order is fixed and
-   * there is no z-order picker anywhere, so "I want to see through this" must have exactly ONE
-   * answer, in exactly the same place, on every layer in every group. Named ◐ so it reads as a
-   * see-through control rather than an anonymous slider — the discoverability half of the ask —
-   * and the live percentage is the feedback that it did something. */
+  /* NEW-2/B1206 — THE ONE OPACITY CONTROL, used by every row shape in this panel (solo, the
+   * pairwise City-limits-&-ETJ composite, and the N-ary merge groups). "I want to see through
+   * this layer" must have exactly ONE answer, in exactly the same place, on every layer in every
+   * group. Named ◐ so it reads as a see-through control rather than an anonymous slider — the
+   * discoverability half of the ask — and the live percentage is the feedback that it did
+   * something.
+   *
+   * ⛔ CORRECTED BY NEW-1 (2026-07-30): this is NOT the answer to "I can't see through my plan".
+   * A layer that draws UNDER the site elements is not helped by its own opacity at all — the
+   * building still covers it, and fading it only dims the parts you could already see. That is
+   * what abovePlanControl below is for. Opacity is for a layer that is ON TOP and too loud, and
+   * the copy here says exactly that much and no more. */
   const opacityControl = (label, value, onChange) => (
     <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 2 }}
       title="See through this layer">
@@ -144,6 +152,47 @@ export default function LayerPanel({
       </span>
     </div>
   );
+
+  /* NEW-1 — THE "SHOW ABOVE PLAN" CONTROL, the real escape hatch in the stacking model, and the
+   * one place in this panel where a draw order is a user decision.
+   *
+   * Why it exists: the model (lib/mapStack.js) puts filled layers UNDER the site elements, which
+   * is right by default — it is what makes contours cross a building with no interaction at all,
+   * and keeps a floodplain wash from burying one. But when the answer is wrong for a particular
+   * layer on a particular plan, OPACITY CANNOT FIX IT: a buried fill stays buried at any opacity.
+   * Only order fixes order. So this is a two-state, semantically-named lift of ONE layer — never
+   * a free-form z-order picker (no front/back, no up/down, no per-layer number), and it stops
+   * below the labels and below the handle layer.
+   *
+   * THE ALREADY-ON STATE, deliberately shown rather than hidden: a line or symbol layer is over
+   * the plan already, so the control has nothing to do on that row. Rendering it checked and
+   * inert says WHICH SIDE the layer is on; hiding it would leave the row's silence to be
+   * interpreted ("already above?" vs "not offered here?"), and reading where a layer sits is the
+   * whole point of adding the control. One place, one meaning, on every row — the B1206 rule. */
+  const abovePlanControl = (label, liftable, checked, onChange) => (
+    <label style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 2, fontSize: 10.5,
+      color: liftable ? INK : MUTED, cursor: liftable ? "pointer" : "default" }}
+      title={liftable
+        ? "Draw this layer over your buildings instead of under them. Opacity can't do this — a layer under the plan stays covered however faint it is."
+        : "Already drawn over your plan — line and symbol layers always are, so there is nothing to lift."}>
+      <input type="checkbox" checked={checked} disabled={!liftable}
+        aria-label={`Show ${label} above plan`}
+        onChange={(e) => onChange(e.target.checked)} />
+      <span>Show above plan</span>
+    </label>
+  );
+  /* The map finder has no site plan for a layer to be above, so the control is meaningless there
+   * — it is a planner-surface affordance. (`overlays` is app-shared: a lift made on the planner
+   * simply has no effect on the finder, where both bands resolve to the same pane.) */
+  const showAbove = surface === "planner";
+  /* ONE call site for all three row shapes, taking the row's layer entries and the row's own
+   * patch writer — so a solo row, the City-limits composite and an N-ary merge group cannot
+   * drift apart in how they read or write the lift (the opacityControl discipline). */
+  const aboveRow = (label, entries, patch) => {
+    const lift = entries.some(([, c]) => configCanLift(c));
+    return abovePlanControl(label, lift, lift ? entries.some(([id]) => overlays[id]?.above === true) : true,
+      (v) => patch({ above: v }));
+  };
 
   const row = (k, cfg, { dim = false } = {}) => {
     const st = overlays[k];
@@ -172,6 +221,7 @@ export default function LayerPanel({
           )}
         </div>
         {st.on && opacityControl(cfg.label, st.opacity, (v) => set(k, { opacity: v }))}
+        {st.on && showAbove && aboveRow(cfg.label, [[k, cfg]], (p) => set(k, p))}
         {/* B752: inline width control for the assumed easement corridor — no dialog (inline-editor
             rule); commits on change, clamped to the editable bounds. */}
         {st.on && cfg.corridorWidth && (
@@ -268,6 +318,7 @@ export default function LayerPanel({
           )}
         </div>
         {anyOn && opacityControl(label, opacity, (v) => setBoth({ opacity: v }))}
+        {anyOn && showAbove && aboveRow(label, [[pk, pcfg], [sk, scfg]], setBoth)}
         {/* SIGNAL: solid = city limits, dashed = ETJ — names the two on-map line styles */}
         {anyOn && (
           <div style={{ display: "flex", flexWrap: "wrap", gap: "3px 12px", margin: "4px 0 1px 22px" }}>
@@ -318,6 +369,7 @@ export default function LayerPanel({
           )}
         </div>
         {anyOn && opacityControl(label, opacity, (v) => setAll({ opacity: v }))}
+        {anyOn && showAbove && aboveRow(label, members, setAll)}
         {statusMeta && (combined.state === "failed" || combined.state === "slow" || combined.state === "empty") && (
           <div style={{ fontSize: 10, color: statusMeta.color, lineHeight: 1.35, marginTop: 1 }}>{combined.msg || statusMeta.label}</div>
         )}

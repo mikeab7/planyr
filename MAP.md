@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-07-30 @ `7b31fa3` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-07-30 @ `238cb82` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_391 source files mapped._
+_392 source files mapped._
 
 ## infra
 
@@ -481,8 +481,8 @@ _391 source files mapped._
   - _exports_: `boundsCenter`, `boundsOf`, `clampedFitZoom`, `CLUSTER_RADIUS_MI`, `clusterSites`, `CONUS_BOUNDS`, `densestCluster`, `fitZoom`, `LANDING_MAX_ZOOM`, `LANDING_MIN_ZOOM`, `LANDING_PAD_FRAC`, `landingView`, `locatedPoints`, `milesBetween`
 - **`src/workspaces/site-planner/lib/layerPanelInfo.js`** — Pure Layers-panel row helpers: per-row ⓘ content assembly + merged City/ETJ combined-status precedence (B760/B761)
   - _exports_: `buildGroupSlots`, `combineLayerStatus`, `mergeGroupInfoSections`, `mergeSlotAnyOn`, `mergeSlotOpacity`, `rowInfoSections`
-- **`src/workspaces/site-planner/lib/layerPrefs.js`** — Per-site GIS Layers-panel toggle memory (NEW-1): project the app-shared overlays to/from a sparse per-site on/off override map (restore on open, persist on toggle, undo-signature)
-  - _exports_: `applyOnOverrides`, `overlaysWithOverrides`, `overridesFromOverlays`, `overridesSig`, `sanitizeLayerOverrides`
+- **`src/workspaces/site-planner/lib/layerPrefs.js`** — Per-site GIS Layers-panel memory (NEW-1): project the app-shared overlays to/from two sparse per-site maps — on/off overrides and the "Show above plan" lift set — restored on open, persisted on toggle, each with its own undo signature
+  - _exports_: `aboveFromOverlays`, `aboveSig`, `applyAboveOverrides`, `applyOnOverrides`, `overlaysWithOverrides`, `overridesFromOverlays`, `overridesSig`, `sanitizeLayerAbove`, `sanitizeLayerOverrides`
 - **`src/workspaces/site-planner/lib/layerRequest.js`** — Pure map-layer request shaping: esri dynamic/image/feature layer option builders plus transient-retry policy, with coverage barred from narrowing requests
   - _exports_: `dynamicLayerOptions`, `featureLayerOptions`, `featureRetryDecision`, `identifyCapable`, `imageLayerOptions`, `isTransientStatus`, `overlayExportRequest`, `pointSymbolOptions`, `RASTER_STALL_MS`, `TRANSIENT_STATUS`, `wireRasterStatus`
 - **`src/workspaces/site-planner/lib/layers.js`** — Shared GIS overlay registry + syncOverlayLayers: probes/adds/removes esri-leaflet raster & feature layers, retry/backoff, B445 cache-proxy with direct-agency fallback, per-layer status + vintage
@@ -501,8 +501,8 @@ _391 source files mapped._
   - _exports_: `mapillaryRequestUrl`, `MLY_FIELDS`, `MLY_LIMIT`, `MLY_PROXY_PATH`, `pickDetections`
 - **`src/workspaces/site-planner/lib/mapLock.js`** — THE projection welding the planner's feet frame to the Web-Mercator basemap — scaled-Mercator feet↔lat/lng plus the matching ppf↔zoom, both anchored at the site origin
   - _exports_: `basemapWrapPoint`, `basemapWrapPointTransformed`, `exactContainerPoint`, `feetToLatLngPair`, `FT_PER_DEG`, `ftPerDeg`, `invMercDeg`, `lngLatToFeet`, `lockOffsetPx`, `mercDeg`, `ppfToZoom`, `REGISTRATION_SANITY_PX`, `registrationShift`, `sanitizeShift`, `tileNwFeet`, `zoomToPpf`
-- **`src/workspaces/site-planner/lib/mapStack.js`** — NEW-1 THE map stacking model: one fixed semantic order (basemap → GIS area fills → references → parcel → setback → elements → promoted references → GIS line strokes → labels → handles), the declared per-source area/line/point role + its role-split form, the two band pane names, and the audit that fails the build on an unclassified GIS source
-  - _exports_: `auditLayerRoles`, `CANVAS_Z`, `exportsOverPlan`, `GIS_ROLES`, `isRoleSplit`, `MAP_STACK`, `PANE_AREA`, `PANE_AREA_LABEL`, `PANE_LINE`, `PANE_LINE_LABEL`, `panesForRole`, `ROLE_SPLIT_NOTE`, `roleOverElements`, `ROLES_OVER_ELEMENTS`, `rolesOf`, `STACK_Z`, `stackOrder`, `SVG_TIERS`, `SVG_Z`, `tierForRole`
+- **`src/workspaces/site-planner/lib/mapStack.js`** — NEW-1 THE map stacking model: one fixed semantic order (basemap → GIS area fills → references → parcel → setback → elements → promoted references → LIFTED GIS area fills → GIS line strokes → labels → handles), the declared per-source area/line/point role + its role-split form, the per-layer "Show above plan" lift (the escape hatch opacity cannot be) with its band pane names + rebuild key, the three export bands, and the audit that fails the build on an unclassified GIS source
+  - _exports_: `auditLayerRoles`, `bandKey`, `canLiftRole`, `CANVAS_Z`, `configCanLift`, `EXPORT_BANDS`, `exportBandFor`, `exportsOverPlan`, `FRONT_BAND_ATTR`, `GIS_ROLES`, `isRoleSplit`, `layerOverPlan`, `LIFTABLE_ROLE`, `MAP_STACK`, `PANE_AREA`, `PANE_AREA_FRONT`, `PANE_AREA_FRONT_LABEL`, `PANE_AREA_LABEL`, `PANE_LINE`, `PANE_LINE_LABEL`, `panesForLayer`, `panesForRole`, `roleOverElements`, `ROLES_OVER_ELEMENTS`, `rolesOf`, `STACK_Z`, `stackOrder`, `SVG_TIERS`, `SVG_Z`, `tierForLayer`, `tierForRole`
 - **`src/workspaces/site-planner/lib/mapSymbols.js`** — leaflet point symbology: the `pointToLayer` circleMarker factory every GeoJSON-consuming layer must pass, plus the `L.Icon.Default` image-path fix so an accidental default marker is a pin, not a broken image.
   - _exports_: `installDefaultMarkerIcon`, `pointToLayerFor`
 - **`src/workspaces/site-planner/lib/markupPick.js`** — pure Site-Planner markup hit-test + z-stack cycle (sibling of measureHit.js): the fill-aware grab rule (B920 — a closed markup grabs by interior only when filled, else stroke-only) and the smaller-area-first under-point stack + repeat/Alt-click cycle (B921)

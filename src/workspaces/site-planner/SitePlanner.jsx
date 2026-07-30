@@ -41,9 +41,15 @@ import { syncOverlayLayers, withTileRetry, ALL_LAYERS, probeService, layerVintag
 import { buildingFloodExposure, exposureHeadline, FLOOD_CLASS_LABEL } from "./lib/buildingFloodExposure.js";
 // NEW-1 — the ONE map stacking model: filled GIS layers under the site elements, line/point
 // GIS layers over them. No mode, no shortcut, no per-layer z-order picker.
-import { CANVAS_Z, PANE_AREA, PANE_LINE, PANE_AREA_LABEL, PANE_LINE_LABEL } from "./lib/mapStack.js";
+import {
+  CANVAS_Z, PANE_AREA, PANE_LINE, PANE_AREA_LABEL, PANE_LINE_LABEL,
+  PANE_AREA_FRONT, PANE_AREA_FRONT_LABEL, FRONT_BAND_ATTR,
+} from "./lib/mapStack.js";
 import { loadRasterIdentify, makeHoverIdentify, rasterIdentifyNow } from "./lib/rasterIdentifyLazy.js";
 import { sanitizeLayerOverrides, overridesFromOverlays, overlaysWithOverrides, applyOnOverrides, overridesSig } from "./lib/layerPrefs.js";
+// NEW-1 — the per-site "Show above plan" twin of the four above: which GIS layers this site had
+// lifted over the site elements. Its own sparse map, so nothing about layerOverrides changes.
+import { sanitizeLayerAbove, aboveFromOverlays, applyAboveOverrides, aboveSig } from "./lib/layerPrefs.js";
 import { BASEMAPS } from "./lib/basemaps.js";
 import {
   ppfToZoom, exactContainerPoint,
@@ -2049,6 +2055,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // frame) from an opacity-only change (which never touches layerOverrides), and lets a programmatic
   // restore (mount / undo) pre-set it so the tracking effect doesn't treat the restore as a toggle.
   const prevLayerSig = useRef(overridesSig(sanitizeLayerOverrides(restored?.layerOverrides)));
+  /* NEW-1 — per-site "Show above plan" memory, exactly the same shape one field over: a sparse map
+   * of the GIS layers this site had LIFTED above the site elements, restored on open and persisted
+   * on toggle. A lift is a visible decision about this plan ("I need to see the flood fill over my
+   * buildings here"), so it belongs to the plan, not to the session. */
+  const [layerAbove, setLayerAbove] = useState(() => sanitizeLayerAbove(restored?.layerAbove));
+  const prevAboveSig = useRef(aboveSig(sanitizeLayerAbove(restored?.layerAbove)));
   const [selOverlay, setSelOverlay] = useState(null);   // id of the overlay shown in the panel
   const [aerialSel, setAerialSel] = useState(false);    // References: aerial row expanded (B654)
   // Transient editor state for the ONE expanded overlay row (B575 opacity field draft + B576 scale
@@ -2338,6 +2350,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
    * the original (VIEWPORT-STABLE), so the contours never lag the imagery they trace. */
   const geoTopWrapRef = useRef(null);
   const geoTopPaneRef = useRef(null);
+  /* NEW-1 — the IN-SVG FRONT HOST, for a GIS AREA layer the user LIFTED with "Show above plan".
+   * The obvious home would have been the map-top host above — one extra pane and done — but that
+   * host sits above the WHOLE plan SVG, so a lifted floodplain WASH would paint over the labels
+   * and over B1197's handle layer and hide the grip you are dragging. A hairline crossing a handle
+   * is tolerable (the documented gisLine deviation, B1208); a fill is not. So this host is mounted
+   * INSIDE the plan SVG, in a screen-space <foreignObject> parked at the `data-gis-front-band`
+   * anchor — after the elements, before the labels and the handle layer — which is exactly the
+   * tier lib/mapStack.js declares. It carries the same two mirrored transforms as the top host,
+   * plus an inverse of the SVG's own registration shift (the SVG is translated onto the imagery;
+   * a Leaflet pane inside it must not be translated twice). */
+  const geoFrontWrapRef = useRef(null);
+  const geoFrontPaneRef = useRef(null);
   const geoMapRef = useRef(null);
   const geoBaseRef = useRef(null);
   const geoBackfillRef = useRef(null); // coarse low-zoom layer for instant blurry coverage
@@ -2383,23 +2407,39 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       zoomSnap: 0, fadeAnimation: false, zoomAnimation: false, inertia: false,
     }).setView([origin.lat, origin.lon], 17);
     geoMapRef.current = map;
-    /* NEW-1 — the two stacking bands, created ONCE, each in its own host:
-     *   AREA (fills) → a pane inside Leaflet's map pane, under the planner SVG
-     *   LINE (strokes/points) → a pane in the map-top host, over the planner SVG
+    /* NEW-1 — the THREE stacking bands, created ONCE, each in its own host:
+     *   AREA (fills)                → a pane inside Leaflet's map pane, under the planner SVG
+     *   AREA-FRONT (lifted fills)   → a pane inside the plan SVG's `data-gis-front-band` group,
+     *                                 above the elements and still under the labels + handles
+     *   LINE (strokes/points)       → a pane in the map-top host, over the planner SVG
      * Everything after this just names a pane; nothing anywhere picks a z-order. */
     const areaPane = map.createPane(PANE_AREA); areaPane.style.zIndex = 350;
     const areaLabelPane = map.createPane(PANE_AREA_LABEL); areaLabelPane.style.zIndex = 360; areaLabelPane.style.pointerEvents = "none";
-    const topHost = geoTopPaneRef.current;
-    if (topHost) {
-      topHost.replaceChildren(); // a re-created map must not stack a second set of panes here
-      const linePane = map.createPane(PANE_LINE, topHost); linePane.style.zIndex = 400; linePane.style.pointerEvents = "none";
-      const lineLabelPane = map.createPane(PANE_LINE_LABEL, topHost); lineLabelPane.style.zIndex = 410; lineLabelPane.style.pointerEvents = "none";
-      // Mirror Leaflet's map-pane translate onto the external host. Zoom + fade animation are
-      // off on this map (it is a slaved backdrop), so the transform only ever changes on a
-      // commit — one assignment per commit, no interpolation to chase.
+    /* Both external hosts mirror Leaflet's own map-pane translate. Zoom + fade animation are off
+     * on this map (it is a slaved backdrop), so the transform only ever changes on a commit — one
+     * assignment per commit, no interpolation to chase. ONE mirror function for both, so a host
+     * added later cannot be the one somebody forgot (the setWrapTransform discipline). */
+    const paneHosts = [];
+    const mountBand = (host, panePrimary, paneLabel, zBase) => {
+      if (!host) return;
+      host.replaceChildren(); // a re-created map must not stack a second set of panes here
+      const p1 = map.createPane(panePrimary, host); p1.style.zIndex = zBase; p1.style.pointerEvents = "none";
+      const p2 = map.createPane(paneLabel, host); p2.style.zIndex = zBase + 10; p2.style.pointerEvents = "none";
+      paneHosts.push(host);
+    };
+    /* LOUD-FAILURE: a missing host would not throw — `syncOverlayLayers` would helpfully create the
+     * pane inside Leaflet's own map pane instead, and a layer the user asked to LIFT would render
+     * silently BELOW the plan, which is the exact bug this feature exists to fix. Say so. */
+    if (!geoFrontPaneRef.current) console.error("[planyr] the lifted GIS band host (data-gis-front-band) is not mounted — a layer set to 'Show above plan' would draw under the plan instead");
+    if (!geoTopPaneRef.current) console.error("[planyr] the map-top GIS band host is not mounted — line layers would draw under the plan instead");
+    mountBand(geoFrontPaneRef.current, PANE_AREA_FRONT, PANE_AREA_FRONT_LABEL, 380);
+    mountBand(geoTopPaneRef.current, PANE_LINE, PANE_LINE_LABEL, 400);
+    if (paneHosts.length) {
       const mirrorPane = () => {
-        const el = geoTopPaneRef.current, mp = map._mapPane;
-        if (el && mp) el.style.transform = mp.style.transform || "";
+        const mp = map._mapPane;
+        if (!mp) return;
+        const t = mp.style.transform || "";
+        for (const el of [geoFrontPaneRef.current, geoTopPaneRef.current]) if (el) el.style.transform = t;
       };
       map.on("move zoom viewreset moveend zoomend resize load", mirrorPane);
       mirrorPane();
@@ -2609,10 +2649,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
      * write site cannot forget the mirror. VIEWPORT-STABLE: this whole effect is a LAYOUT
      * effect, so both writes land before paint. */
     const setWrapTransform = (value, origin = null) => {
-      const top = geoTopWrapRef.current;
-      if (origin != null) { wrap.style.transformOrigin = origin; if (top) top.style.transformOrigin = origin; }
+      // NEW-1 — BOTH external hosts, never just the top one: the lifted-area band tracks the
+      // imagery on exactly the same terms as the line band, so a lifted floodplain edge stays
+      // welded to the aerial through a flick-drag instead of sliding a frame behind it.
+      const mirrors = [geoTopWrapRef.current, geoFrontWrapRef.current];
+      if (origin != null) { wrap.style.transformOrigin = origin; for (const m of mirrors) if (m) m.style.transformOrigin = origin; }
       wrap.style.transform = value;
-      if (top) top.style.transform = value;
+      for (const m of mirrors) if (m) m.style.transform = value;
     };
     // No basemap frame → nothing to register against, so the drawing sits at its own
     // natural position (NEW-2). An un-located plan is drawn in feet against nothing.
@@ -2938,7 +2981,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const sync = () => syncOverlayLayers(geoMapRef.current, overlays, overlayRefs.current, {
       // NEW-1 — the two stacking bands (lib/mapStack.js). Each layer lands in the one its
       // declared ROLE names: fills under the plan, strokes and points over it.
-      panes: { area: PANE_AREA, areaLabel: PANE_AREA_LABEL, line: PANE_LINE, lineLabel: PANE_LINE_LABEL },
+      panes: {
+        area: PANE_AREA, areaLabel: PANE_AREA_LABEL,
+        areaFront: PANE_AREA_FRONT, areaFrontLabel: PANE_AREA_FRONT_LABEL, // NEW-1 — the "Show above plan" band
+        line: PANE_LINE, lineLabel: PANE_LINE_LABEL,
+      },
       admit: (id) => order.indexOf(id) < staged * LAYER_STAGE_SIZE,
       onStatus: (id, state, msg, extra) => setLayerStatus && setLayerStatus((s) => ({ ...s, [id]: state ? { state, msg, ts: extra?.ts ?? null, stale: extra?.stale ?? false } : null })),
       onError: (cfg, msg) => { flashWarn(`⚠ “${cfg.label}” layer failed: ${msg || "service may be down or moved"}.`, 6000); },
@@ -3139,8 +3186,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // current state. A passive-effect mirror lagged a paint behind, so undo right
   // after a drag-move intermittently snapshotted or compared a stale state — the
   // building wouldn't fully snap back, or undo appeared to do nothing (B315).
-  const stateRef = useRef({ parcels: [], els: [], measures: [], callouts: [], markups: [], underlay: null, sheetOverlays: [], deletedIds: [], layerOverrides: {} });
-  stateRef.current = { parcels, els, measures, callouts, markups, underlay, sheetOverlays, deletedIds, layerOverrides };
+  const stateRef = useRef({ parcels: [], els: [], measures: [], callouts: [], markups: [], underlay: null, sheetOverlays: [], deletedIds: [], layerOverrides: {}, layerAbove: {} });
+  stateRef.current = { parcels, els, measures, callouts, markups, underlay, sheetOverlays, deletedIds, layerOverrides, layerAbove };
   // A site with no parcels / elements / measures / callouts / aerial is "blank".
   // We don't want unedited blank sites cluttering the list, so we never persist
   // them, and drop their record on leave (but only un-located blank-planner
@@ -3223,7 +3270,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // ALONGSIDE the whole-doc save below (dual-write; the blob is still the read source until B672).
     reconcileElems(!!drag.current);
     const fresh = !loadSite(siteId); // first save of a brand-new site → tell App to list it
-    const payload = { id: siteId, ...metaRef.current, parcels, els, measures, callouts, markups, settings, underlay, sheetOverlays, deletedIds, layerOverrides };
+    const payload = { id: siteId, ...metaRef.current, parcels, els, measures, callouts, markups, settings, underlay, sheetOverlays, deletedIds, layerOverrides, layerAbove };
     // B458 — write the on-device mirror IMMEDIATELY, decoupled from the debounced cloud push: a reload
     // within the 400ms debounce must still find this edit on the device so boot's union-merge can
     // restore it (the prior structural cause of the 8 South building-loss — the mirror + history were
@@ -3304,7 +3351,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       else setSaveStatus("unsaved"); // logged out + device full: the red localSaveFailed banner (writeMirror) covers it
     }, 400);
     return () => { clearTimeout(t); if (microT) clearTimeout(microT); };
-  }, [siteId, parcels, els, measures, callouts, markups, settings, underlay, sheetOverlays, deletedIds, layerOverrides]);
+  }, [siteId, parcels, els, measures, callouts, markups, settings, underlay, sheetOverlays, deletedIds, layerOverrides, layerAbove]);
   // Manual "Retry now" for the loud cloud-save-failure banner (B125) — also the escape from a
   // watchdog escalation (B455/NEW-7).
   const retryCloudSave = () => {
@@ -3313,7 +3360,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   };
   // Persist on leave; if the site is still blank and un-located, drop it instead.
   const liveRef = useRef({});
-  useEffect(() => { liveRef.current = { parcels, els, measures, callouts, markups, settings, underlay, sheetOverlays, deletedIds, layerOverrides }; });
+  useEffect(() => { liveRef.current = { parcels, els, measures, callouts, markups, settings, underlay, sheetOverlays, deletedIds, layerOverrides, layerAbove }; });
   const persistOrDrop = () => {
     if (!siteId || deletedSelfRef.current) return; // B264: this plan was just deleted — don't resurrect it
     const s = liveRef.current;
@@ -3816,7 +3863,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     JSON.stringify({ p: s.parcels, e: s.els, m: s.measures, c: s.callouts, k: s.markups }) +
     "|" + (s.underlay ? `${s.underlay.x},${s.underlay.y},${s.underlay.ftPerPx},${s.underlay.ftPerPxY},${s.underlay.opacity},${s.underlay.locked},${s.underlay.src?.length}` : "none") +
     "|" + ((s.sheetOverlays || []).map((o) => `${o.id}:${o.x},${o.y},${o.ftPerPx},${o.rotation},${o.opacity},${o.locked},${o.page},${o.src ? o.src.length : 0},${o.visible === false ? 0 : 1},${o.aboveParcel === true ? 1 : 0}`).join(";") || "no") + // NEW-2: aboveParcel is in the signature so promoting a reference over the plan is its own undo frame (like `visible`). RC-8: no Math.round — a sub-foot overlay nudge must be a distinct undo frame (underlay pos isn't rounded either)
-    "|L:" + overridesSig(s.layerOverrides); // NEW-1 — GIS Layers-panel visibility set, so a layer toggle is a distinct, undoable frame (matches sheetOverlays.visible)
+    "|L:" + overridesSig(s.layerOverrides) + // NEW-1 — GIS Layers-panel visibility set, so a layer toggle is a distinct, undoable frame (matches sheetOverlays.visible)
+    "|A:" + aboveSig(s.layerAbove); // NEW-1 — …and which layers are LIFTED above the plan, so "Show above plan" is its own undoable frame too
   // Pure snapshot stack (lib/history.js) — dedups no-op frames (B32) and always
   // compares against the live state we pass in (stateRef.current), so undo/redo
   // can't act on a stale baseline (B315). One stack instance, kept across renders.
@@ -3876,9 +3924,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // so the [overlays] tracking effect sees this programmatic change as already-accounted-for (no new
     // undo frame, no double-save). setLayerOverrides keeps this planner's persisted projection in step.
     const snapOverrides = sanitizeLayerOverrides(s.layerOverrides);
+    // NEW-1 — the same restore for "Show above plan": which layers this frame had lifted. Applied
+    // in the SAME setOverlays update as the visibility, so an undo that spans both lands in one
+    // render rather than two (and one layer rebuild, not two).
+    const snapAbove = sanitizeLayerAbove(s.layerAbove);
     prevLayerSig.current = overridesSig(snapOverrides);
-    if (setOverlays) setOverlays((cur) => applyOnOverrides(cur, snapOverrides));
+    prevAboveSig.current = aboveSig(snapAbove);
+    if (setOverlays) setOverlays((cur) => applyAboveOverrides(applyOnOverrides(cur, snapOverrides), snapAbove));
     setLayerOverrides(snapOverrides);
+    setLayerAbove(snapAbove);
     // (B672: the old noteLocalContent thin-clobber rebase is gone with the guard itself — an
     // undo/redo shrink now just diffs into per-element deletes through the rev-checked path.)
     // NEW-1 — clear the MULTI-selection too, not just `sel`. Clearing only `sel` left `multi`
@@ -3925,23 +3979,34 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
    *     is undoable — matching how sheetOverlays.visible works. Opacity-only changes don't change the
    *     visibility signature, so they neither snapshot nor churn the saved set. */
   useEffect(() => {
-    if (setOverlays) setOverlays(overlaysWithOverrides(layerOverrides));
+    if (setOverlays) setOverlays(overlaysWithOverrides(layerOverrides, layerAbove));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   useEffect(() => {
     const proj = overridesFromOverlays(overlays);
     const sig = overridesSig(proj);
+    // NEW-1 — "Show above plan" rides the SAME bridge, as its own signature. A lift is a
+    // visibility-class decision (it changes what you can see), so it persists and is undoable
+    // exactly like a toggle; opacity still changes neither signature and still churns nothing.
+    const projAbove = aboveFromOverlays(overlays);
+    const sigAbove = aboveSig(projAbove);
     if (!layerApplied.current) {
       // Wait until the restore above has been applied onto the shared overlays (the projection
       // matches this site's saved set) before tracking — so a pre-open toggle left in the shared
       // state can't be captured as this site's.
-      if (sig === overridesSig(layerOverrides)) { layerApplied.current = true; prevLayerSig.current = sig; }
+      if (sig === overridesSig(layerOverrides) && sigAbove === aboveSig(layerAbove)) {
+        layerApplied.current = true; prevLayerSig.current = sig; prevAboveSig.current = sigAbove;
+      }
       return;
     }
-    if (sig === prevLayerSig.current) return; // no visibility change (e.g. opacity-only) → nothing to persist
-    pushHistory(); // capture the PRE-toggle state (stateRef still holds the old layerOverrides) so undo reverts just this toggle
+    const visChanged = sig !== prevLayerSig.current;
+    const liftChanged = sigAbove !== prevAboveSig.current;
+    if (!visChanged && !liftChanged) return; // no visibility/band change (e.g. opacity-only) → nothing to persist
+    pushHistory(); // capture the PRE-toggle state (stateRef still holds the old maps) so undo reverts just this change
     prevLayerSig.current = sig;
-    setLayerOverrides(proj);
+    prevAboveSig.current = sigAbove;
+    if (visChanged) setLayerOverrides(proj);
+    if (liftChanged) setLayerAbove(projAbove);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [overlays]);
 
@@ -17125,6 +17190,31 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   scanned plan you trace over — the uncommon one is a finished land-plan exhibit you
                   are working ON, where the property line drawn across it is what's in the way. */}
               {overlayBands.above.map(renderSheetOverlay)}
+              {/* NEW-1 — THE LIFTED GIS AREA BAND ("Show above plan"), and the reason it is HERE.
+                  Opacity cannot fix occlusion for a layer that draws UNDER the buildings — fading a
+                  buried floodplain fill changes nothing on screen — so the escape hatch is order,
+                  and this is where a lifted fill lands: after the elements and the promoted
+                  references, BEFORE the labels and before the always-on-top handle layer. Putting
+                  it in the map-top host instead would have been one line and would have buried the
+                  grip you are dragging under a blue wash. `data-export="skip"` on the
+                  foreignObject, because the sheet composites its own copy of this band into the
+                  surrounding group instead (PDF-PARITY); the group itself is the export's anchor.
+                  Geometry mirrors the backdrop exactly (same overscan, same gesture transform);
+                  `pointerEvents: none` throughout, so it can neither take a click nor steal a
+                  handle. The inner counter-translate undoes the SVG's own registration shift — the
+                  SVG is nudged onto the imagery, and a map pane inside it must not be nudged twice. */}
+              {origin && (
+                <g {...{ [FRONT_BAND_ATTR]: "1" }}>
+                  <foreignObject data-export="skip" x={0} y={0} width={Math.max(1, size.w)} height={Math.max(1, size.h)} pointerEvents="none" style={{ overflow: "hidden" }}>
+                    <div style={{ position: "absolute", inset: 0, overflow: "hidden", pointerEvents: "none",
+                      transform: (regShift.dx || regShift.dy) ? `translate(${-regShift.dx}px, ${-regShift.dy}px)` : undefined }}>
+                      <div ref={geoFrontWrapRef} style={{ position: "absolute", inset: -geoOverscan }}>
+                        <div ref={geoFrontPaneRef} style={{ position: "absolute", left: 0, top: 0, width: 0, height: 0 }} />
+                      </div>
+                    </div>
+                  </foreignObject>
+                </g>
+              )}
               {/* ditch cross-section line (in-progress + last result) */}
               {(xsecMode && xsecPts.length === 1 && cursor) && (() => { const a = f2p(xsecPts[0]), b = f2p(cursor); return <line data-export="skip" x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="#0e7490" strokeWidth={2} strokeDasharray="6 4" pointerEvents="none" />; })()}
               {xsec && (() => { const a = f2p(xsec.p0), b = f2p(xsec.p1); return <g data-export="skip" pointerEvents="none"><line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="#0e7490" strokeWidth={2.4} /><circle cx={a.x} cy={a.y} r={3.5} fill="#0e7490" stroke="#fff" strokeWidth={1} /><circle cx={b.x} cy={b.y} r={3.5} fill="#0e7490" stroke="#fff" strokeWidth={1} /></g>; })()}

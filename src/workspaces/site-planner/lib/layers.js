@@ -34,7 +34,10 @@ import { proxyServiceUrl } from "../../../shared/gis/gisProxyCore.js";
 import { releaseLayer } from "./tileLifecycle.js";
 // NEW-1 — THE map stacking model. Every layer's pane comes from its declared ROLE
 // (area under the site elements, line/point over them); nothing here picks a z-order.
-import { rolesOf, panesForRole, PANE_AREA, PANE_LINE, PANE_AREA_LABEL, PANE_LINE_LABEL } from "./mapStack.js";
+import {
+  rolesOf, panesForRole, panesForLayer, bandKey, configCanLift,
+  PANE_AREA, PANE_LINE, PANE_AREA_LABEL, PANE_LINE_LABEL, PANE_AREA_FRONT, PANE_AREA_FRONT_LABEL,
+} from "./mapStack.js";
 
 // NEW-1 — resolve Leaflet's default marker images for the bundler before any layer is built,
 // so an accidental default marker degrades to a real pin instead of a broken-image glyph.
@@ -858,6 +861,10 @@ export const defaultOverlayState = () => {
   const o = {};
   Object.entries(ALL_LAYERS).forEach(([k, cfg]) => {
     o[k] = { on: false, opacity: cfg.opacity ?? 0.8 };
+    // NEW-1 — "Show above plan", DEFAULT OFF, and only on a layer the lift can actually move (a
+    // line/point source is over the plan already). The default staying off is the point: the
+    // automatic order answers the owner's contours case with zero clicks.
+    if (configCanLift(cfg)) o[k].above = false;
     if (cfg.corridorWidth) o[k].widthFt = DEFAULT_CORRIDOR_WIDTH_FT;
   });
   return o;
@@ -1089,6 +1096,18 @@ const rasterComposite = (slots) => ({
   setOpacity(o) { slots.forEach((l) => { if (l && l.setOpacity) l.setOpacity(o); }); },
 });
 
+/* NEW-1 — per-surface memory of WHICH BAND each live layer was built into, so a "Show above
+ * plan" flip can be detected and answered with a rebuild (Leaflet fixes a layer's pane at
+ * construction — there is no `setPane`). A WeakMap keyed on the caller's own `refs` object:
+ * scoped exactly like the refs it shadows, collected with them, and — unlike a key stashed on
+ * `refs` itself — invisible to everything that iterates that map. */
+const LAYER_BANDS = new WeakMap();
+const layerBands = (refs) => {
+  let m = LAYER_BANDS.get(refs);
+  if (!m) { m = {}; LAYER_BANDS.set(refs, m); }
+  return m;
+};
+
 export function syncOverlayLayers(map, overlays, refs, opts = {}) {
   /* NEW-1 — panes come from the STACKING MODEL (lib/mapStack.js), not from a caller's
    * preference. `panes` names the host pane per band; a surface with no site elements (the
@@ -1116,21 +1135,57 @@ export function syncOverlayLayers(map, overlays, refs, opts = {}) {
   if (panes) {
     ensurePane(panes.area || PANE_AREA, paneZ);
     ensurePane(panes.areaLabel || PANE_AREA_LABEL, paneZ + 10);
+    ensurePane(panes.areaFront || PANE_AREA_FRONT, paneZ + 12);
+    ensurePane(panes.areaFrontLabel || PANE_AREA_FRONT_LABEL, paneZ + 14);
     ensurePane(panes.line || PANE_LINE, paneZ + 20);
     ensurePane(panes.lineLabel || PANE_LINE_LABEL, paneZ + 30);
   }
-  /* A layer's panes, straight off its declared role. `panes` absent → every layer keeps the
-   * caller's single legacy pane (no behaviour change for a surface not yet migrated). */
-  const paneOf = (role) => (panes ? panesForRole(role, panes) : { pane, labelPane: null });
+  /* A layer's panes, straight off its declared role AND its per-layer "Show above plan" lift
+   * (NEW-1). `panes` absent → every layer keeps the caller's single legacy pane (no behaviour
+   * change for a surface not yet migrated). */
+  const paneOf = (role, above) => (panes ? panesForLayer(role, panes, above) : { pane, labelPane: null });
   const fail = (k, cfg, msg) => { refs[k] = null; onStatus && onStatus(k, "failed", msg); onError && onError(cfg, msg); };
+  /* NEW-1 — WHICH BAND each live layer was BUILT into. Leaflet fixes a layer's pane at
+   * construction, so a "Show above plan" flip is a tear-down-and-re-add, not a property write,
+   * and this is how the pass notices. Keyed on the caller's `refs` object in a WeakMap rather
+   * than stamped onto `refs` itself: `refs` is the caller's own map of layer id → layer, and a
+   * bookkeeping key living in it would show up in every iteration of it elsewhere. */
+  const bands = layerBands(refs);
+  /* ONE release path, used by BOTH the toggle-off branch and NEW-1's band rebuild.
+   * NEW-6 — a real release, not just `map.removeLayer`. The vector half was already correct (780
+   * of 782 SVG elements went), but the raster half released ZERO of its 51 tiles: esri-leaflet
+   * keeps its painted image on the layer, and a request still in flight re-adds a fresh one on
+   * resolve, so a toggled-off layer quietly put itself back. `releaseLayer` drops the raster DOM,
+   * empties the tile cache, and tombstones the layer so a late resolve can't resurrect it.
+   * A role-split layer is TWO live layers — release BOTH, or the band that isn't `refs[k]` keeps
+   * its tiles and its in-flight request (the exact resurrection releaseLayer exists to stop).
+   * A build still "pending" has no layer yet: clearing the slot IS its abort, because every async
+   * branch re-checks `refs[k] === "pending"` before it adds. */
+  const release = (k, lyr) => {
+    if (lyr && lyr !== "pending") {
+      if (lyr.__pfParts) lyr.__pfParts.forEach((p) => { if (p) releaseLayer(map, p); });
+      else releaseLayer(map, lyr);
+    }
+    refs[k] = null;
+    delete bands[k];
+    onStatus && onStatus(k, null);
+  };
 
   Object.entries(ALL_LAYERS).forEach(([k, cfg]) => {
-    const st = overlays[k], cur = refs[k];
+    const st = overlays[k];
     if (!st) return;
-    // Every non-split layer renders in exactly one band; a split one (mapStack
-    // ROLE_SPLIT_NOTE) is handled inside the raster branch, one request per role.
+    const above = !!st.above && configCanLift(cfg);
+    /* NEW-1 — the lift flipped under a LIVE layer: release it here and let the very same pass
+     * re-add it into the other band, so the layer never blinks out for a frame in between. */
+    const wantBand = panes ? bandKey(cfg, panes, above) : "legacy";
+    if (st.on && refs[k] && bands[k] !== undefined && bands[k] !== wantBand) release(k, refs[k]);
+    const cur = refs[k];
+    if (st.on && !cur) bands[k] = wantBand; // recorded at the START of the add, so an in-flight build is attributed to the band it is building into
+    else if (!st.on) delete bands[k];
+    // Every non-split layer renders in exactly one band; a split one (mapStack's ROLE SPLIT)
+    // is handled inside the raster branch, one request per role.
     const cfgRoles = rolesOf(cfg);
-    const primary = paneOf(cfgRoles.length ? cfgRoles[cfgRoles.length - 1].role : "area");
+    const primary = paneOf(cfgRoles.length ? cfgRoles[cfgRoles.length - 1].role : "area", above);
     const lyrPane = primary.pane, lyrLabelPane = primary.labelPane;
     // NEW-3 — `admit` lets the caller stage which layers may START loading on this pass, so
     // the first paint isn't gated behind a fan-out of hundreds of GIS requests. It gates only
@@ -1262,7 +1317,7 @@ export function syncOverlayLayers(map, overlays, refs, opts = {}) {
             const slots = []; // one live layer per role; the proxy→direct swap replaces in place
             const partOf = (part) => (part.layers == null || part.layers === cfg.layers ? cfg : { ...cfg, layers: part.layers });
             const buildRaster = (part, proxy) => {
-              const pc = partOf(part), pp = paneOf(part.role).pane;
+              const pc = partOf(part), pp = paneOf(part.role, above).pane;
               return cfg.kind === "esriImage"
                 ? EL.imageMapLayer(imageLayerOptions(pc, st.opacity, pp, { proxy }))
                 : EL.dynamicMapLayer(dynamicLayerOptions(pc, st.opacity, pp, { proxy }));
@@ -1315,17 +1370,7 @@ export function syncOverlayLayers(map, overlays, refs, opts = {}) {
         }).catch((e) => { if (refs[k] === "pending") fail(k, cfg, `${cfg.label}: ${(e && e.message) || "probe failed"}`); }); // don't leak an unhandled rejection (B55)
       }
     } else if (!st.on && cur) {
-      // NEW-6 — a real release, not just `map.removeLayer`. The vector half was already
-      // correct (780 of 782 SVG elements went), but the raster half released ZERO of its 51
-      // tiles: esri-leaflet keeps its painted image on the layer, and a request still in
-      // flight re-adds a fresh one on resolve, so a toggled-off layer quietly put itself
-      // back. releaseLayer drops the raster DOM, empties the tile cache, and tombstones the
-      // layer so a late resolve can't resurrect it.
-      // NEW-1 — a role-split layer is two live layers; release BOTH, or the band that isn't
-      // refs[k] keeps its tiles and its in-flight request (the exact resurrection releaseLayer exists to stop).
-      if (cur.__pfParts) cur.__pfParts.forEach((p) => { if (p) releaseLayer(map, p); });
-      else releaseLayer(map, cur);
-      refs[k] = null; onStatus && onStatus(k, null);
+      release(k, cur); // see the `release` helper above for what a real teardown has to do
     } else if (cur && cur !== "pending") {
       if (cur.setOpacity) cur.setOpacity(st.opacity);
       // B752: push a live corridor-width change (inline stepper) to the layer — re-buffers the

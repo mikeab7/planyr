@@ -710,7 +710,16 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
      bury the stream running through it. syncOverlayLayers creates the panes it is named. */
   useEffect(() => {
     const sync = () => syncOverlayLayers(mapRef.current, overlays, overlayRefs.current, {
-      panes: { area: PANE_AREA, areaLabel: PANE_AREA_LABEL, line: PANE_LINE, lineLabel: PANE_LINE_LABEL },
+      /* NEW-1 — the map finder has NO site plan, so there is nothing for a layer to be "above":
+         the lifted band collapses back onto the area band here. `overlays` is app-shared, so a
+         layer the user lifted on the planner arrives with its flag set — pointing `areaFront` at
+         the SAME pane is what makes that a no-op instead of a stray extra pane, and because
+         mapStack keys the rebuild check on the RESOLVED pane names, it also costs no rebuild. */
+      panes: {
+        area: PANE_AREA, areaLabel: PANE_AREA_LABEL,
+        areaFront: PANE_AREA, areaFrontLabel: PANE_AREA_LABEL,
+        line: PANE_LINE, lineLabel: PANE_LINE_LABEL,
+      },
       onStatus: (id, state, msg, extra) => setLayerStatus && setLayerStatus((s) => ({ ...s, [id]: state ? { state, msg, ts: extra?.ts ?? null, stale: extra?.stale ?? false } : null })),
       onError: (cfg, msg) => setErr(`“${cfg.label}” layer failed: ${msg || "service may be down or moved"}.`),
       // Boundary hover/click identify (B695) — read live per event; parcel-select mode

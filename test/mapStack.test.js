@@ -14,6 +14,8 @@ import {
   MAP_STACK, STACK_Z, CANVAS_Z, SVG_TIERS, GIS_ROLES, ROLES_OVER_ELEMENTS,
   roleOverElements, tierForRole, panesForRole, rolesOf, isRoleSplit, auditLayerRoles,
   exportsOverPlan, PANE_AREA, PANE_LINE, PANE_AREA_LABEL, PANE_LINE_LABEL,
+  PANE_AREA_FRONT, PANE_AREA_FRONT_LABEL, FRONT_BAND_ATTR,
+  canLiftRole, configCanLift, tierForLayer, layerOverPlan, panesForLayer, bandKey, exportBandFor,
 } from "../src/workspaces/site-planner/lib/mapStack.js";
 import { ALL_LAYERS } from "../src/workspaces/site-planner/lib/layers.js";
 
@@ -28,7 +30,7 @@ const read = (rel) => readFileSync(fileURLToPath(new URL("../src/workspaces/site
 describe("NEW-1 — the stacking model is fixed, ordered, and complete", () => {
   it("the order is bottom→top exactly as the model declares, with no ties", () => {
     expect(MAP_STACK.map((t) => t.id)).toEqual([
-      "basemap", "gisArea", "reference", "parcel", "setback", "elements", "referenceFront", "gisLine", "label", "handle",
+      "basemap", "gisArea", "reference", "parcel", "setback", "elements", "referenceFront", "gisAreaFront", "gisLine", "label", "handle",
     ]);
     const zs = MAP_STACK.map((t) => t.z);
     expect(zs).toEqual([...zs].sort((a, b) => a - b));
@@ -137,8 +139,13 @@ describe("NEW-1 — every registered GIS source declares its role", () => {
   });
 });
 
-describe("NEW-1 — no z-order UI, and no second stacking scheme", () => {
-  it("the layers panel exposes no z-order control", () => {
+describe("NEW-1 — no FREE-FORM z-order UI, and no second stacking scheme", () => {
+  /* AMENDED 2026-07-30 (the "Show above plan" item): the ban was, and stays, on FREE-FORM
+   * ordering — front/back, up/down, a per-layer z-index. What is now sanctioned is exactly ONE
+   * named two-state control, because the original reasoning had a hole: it called opacity the
+   * escape hatch, and opacity cannot move a layer out from under a building. The DEFAULT order
+   * is untouched, which is what keeps the owner's contours case a zero-click case. */
+  it("the layers panel exposes no free-form z-order control", () => {
     // Comments stripped first: this asserts on what the panel RENDERS, and the file's own
     // header comment explains the rule by naming the thing it forbids.
     const panel = read("components/LayerPanel.jsx")
@@ -146,6 +153,8 @@ describe("NEW-1 — no z-order UI, and no second stacking scheme", () => {
     for (const banned of ["Bring to front", "Send to back", "zIndex", "z-order", "Move up", "Move down"]) {
       expect(panel, `LayerPanel must not offer "${banned}" — the model is fixed`).not.toContain(banned);
     }
+    // …and the ONE sanctioned ordering affordance is the named two-state lift.
+    expect(panel).toContain("Show above plan");
   });
 
   it("the planner names panes from the model instead of picking its own z-index", () => {
@@ -158,10 +167,11 @@ describe("NEW-1 — no z-order UI, and no second stacking scheme", () => {
     expect(host).toContain("pointerEvents: \"none\"");
   });
 
-  it("the export composites the same two bands as the screen (PDF-PARITY)", () => {
+  it("the export composites the same THREE bands as the screen (PDF-PARITY)", () => {
     const ex = read("lib/exportSheet.js");
-    expect(ex).toContain("exportsOverPlan");
+    expect(ex).toContain("exportBandFor");
     expect(ex).toContain("overRaster");
     expect(ex).toContain("overVector");
+    expect(ex).toContain("frontAnchor"); // the lifted band prints INTO the plan's own front-band group
   });
 });
