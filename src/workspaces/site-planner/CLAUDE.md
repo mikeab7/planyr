@@ -96,6 +96,22 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   closing it and reads as fixed on a slow drag while still slinging on a flick. Guard:
   the repo-root `test/` suite `panLockInvariant` (2 of its 4 cases go red on the passive-effect model). This is
   VIEWPORT-STABLE in `/CLAUDE.md`, which the effect predated and violated.
+- **B1131/B1132 — the drawing is WELDED to the basemap, and the weld is MEASURED, never assumed.**
+  `mapLock.js` (`tileNwFeet` / `basemapWrapPoint` / `registrationShift` / `sanitizeShift`) computes how
+  far the drawing sits from the imagery; `SitePlanner` applies it as a CSS translate on the SVG canvas
+  **only**. Three rules to keep: **(1)** the reference is a real TILE's rect versus its own z/x/y — not
+  `map.project`, which disagrees with the raster lattice by a scaled sub-pixel at any fractional zoom
+  (the fallback to the projection is only for "no tile on screen"). **(2)** never fold the shift into
+  `view.offX/offY` — that would destroy the exactly-reversible pan V478 proved, and `p2f` reads the
+  SVG's own bounding box so the CSS translate already corrects the readout AND every placed point.
+  **(3)** the re-centre trigger must watch the map CONTAINER (`clientWidth/Height` + a cached-size
+  check), not just the canvas: the container is the canvas plus twice the overscan, and the overscan
+  follows the DRAWABLE ELEMENT COUNT, so it resizes on its own as culling changes with zoom (measured
+  121 px of misregistration when unwatched). A shift larger than the sub-pixel range is a MODEL
+  disagreement — `sanitizeShift` refuses it loudly rather than masking it. The shift is deliberately
+  NOT mirrored into the export (the sheet has no such quantisation). Gate:
+  the repo-root ui-audit harness **diagnose-pointer-accuracy** (tile-grid ground truth, readout AND placed point, three
+  device pixel ratios incl. 2.15) plus **diagnose-map-lock** — both repo-root ui-audit harnesses.
 - `supabase.js` / `auth.js` / `cloudSync.js` — cloud data + auth (shared across workspaces).
 - `elementSync.js` / `elementRows.js` / `elementJournal.js` — the element-level sync engine, the
   rows↔model fold layer (incl. `foldJournal`), and the persisted pending-edit journal (NEW-F4:
@@ -215,7 +231,11 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   in-flight forever). Cursor readouts (NEW-1/NEW-2): `contours.js` owns the pure hover
   HIT-TEST (`buildContourIndex`/`hitContour`) so the polylines stay `interactive:false`;
   `terrainLayers.js` owns the ONE transient hover label (its own sublayer + `setContourHover`,
-  fed from each surface's EXISTING throttled cursor move — never a second listener) and
+  fed from each surface's EXISTING throttled cursor move — never a second listener; **B1130:** it is
+  anchored at the CURSOR and OFFSET off it via `contours.hoverLabelPlacement`, flipping quadrant near
+  a canvas edge and clearing a reserved bottom row, because painting it at the hit point put it under
+  the pointer glyph — and the offset span must be `position:absolute`, or the marker div's line-box
+  strut drifts it a few px and the edge arithmetic stops being exact) and
   `warmCursorGrid` (the cursor's lattice tile, pulled regardless of layer toggles and of the
   z16 gate — that gate is a cartography rule about 1-ft LINES, not a reason to refuse a POINT);
   `groundReadout.js` + `components/CursorChip.jsx` are the ONE composition + the ONE chip both
