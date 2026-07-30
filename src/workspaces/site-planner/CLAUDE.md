@@ -234,6 +234,20 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   and never on a canvas you are handing to a caller or one that is on screen. **Deliberately
   duplicated in `doc-review/lib/` rather than shared** — a module reachable from both routes gets
   hoisted into its own chunk and breaches the Site route's chunk budget; keep the two identical.
+- **`landingView.js` (NEW-1) — WHERE THE MAP OPENS, derived from the user's own sites, never hardcoded
+  and deliberately NOT a setting.** `MapFinder` used to create its map on `COUNTIES_MAP.harris`, so every
+  account on earth opened over Houston. Three cases: no located sites → the continental US · one → that
+  site's AREA · more → the DENSEST CLUSTER (single-linkage at 50 mi, most sites wins, ties to the most
+  recently updated). **Single-linkage is load-bearing, not incidental** — Waller to Chambers is further
+  apart than the threshold and only chains into one market through the Harris sites between them. The fit
+  is padded, FLOORED and clamped to a metro/county ceiling, so a single project never opens on its own
+  lot. Pure (no Leaflet/DOM/React). The component's half is two latches — `landedRef` / `userMovedRef`,
+  keyed on real INPUT rather than Leaflet's `movestart` (our own `setView` fires that) — so a
+  late-arriving cloud site list can never yank a camera the user is already driving. The Layers-panel
+  jurisdiction reads `counties.countyForView`, **never `candidateCountiesForPoint(...)[0]`**, whose
+  out-of-bbox answer is harris-first BY CONTRACT for click routing. Guards: the repo-root `test/` suites
+  **landingView** (incl. a source guard against a fixed county coming back) and **counties**, plus the
+  ui-audit harness **verify-landing-view** (three seeded accounts in a real browser).
 - `tileBudget.js` / `tileLifecycle.js` — the tile-memory tier: pure policy (overscan, keepBuffer,
   cache ceiling, which tiles to evict) and the Leaflet-bound half (`preserveTilesAcrossSetView`,
   `boundTileCache`/`capTileCache`, `releaseLayer`). **NEW-6: `MapFinder` uses them too now.** The

@@ -523,6 +523,48 @@ export function candidateCountiesForPoint(lat, lng) {
   return [...within, ...statewide];
 }
 
+/* NEW-1 — the JURISDICTION shown for a map POSITION, which is a different question from
+ * "which parcel services could answer a click here" and must not be answered by reading
+ * `candidateCountiesForPoint(...)[0]`.
+ *
+ * That first element is deliberately harris-first for any point outside every county bbox
+ * (a documented, tested contract — click routing depends on the order). Reading it as a
+ * jurisdiction is what made the Layers panel say "Harris County" while the map sat over
+ * Phoenix, Atlanta, or the whole continental US — the same hardcoded-Houston class of bug
+ * as the landing view itself.
+ *
+ * The rule here: a real bbox hit wins; when several boxes overlap (they are padded on purpose,
+ * so a click near a shared line queries both neighbours) the NEAREST county center wins rather
+ * than config order — a point in downtown Denver must read Denver, not whichever neighbour was
+ * declared first. With no bbox hit at all, fall back to the nearest configured county WITHIN
+ * the point's own state when the point resolves to one, so a Colorado view can never inherit a
+ * Texas county. Statewide pseudo-keys are never returned: they are parcel SOURCES, not
+ * jurisdictions. Always returns a real key, so the panel always has an answer. Pure. */
+export function countyForView(lat, lng) {
+  const entries = Object.entries(COUNTIES_MAP).filter(([, c]) => !c.statewide);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng) || !entries.length) return "harris";
+  const within = entries.filter(([, c]) => { const b = c.bbox; return b && lat >= b[0] && lat <= b[2] && lng >= b[1] && lng <= b[3]; });
+  let search = within;
+  if (!search.length) {
+    const st = stateForPoint(lat, lng);
+    const inState = st ? entries.filter(([, c]) => c.state === st) : [];
+    search = inState.length ? inState : entries;
+  }
+  // Planar squared distance on the county centers, with longitude scaled by cos(lat) so a
+  // degree of longitude isn't over-weighted at these latitudes. Screening-grade on purpose:
+  // this picks a panel heading, never a parcel.
+  const kx = Math.cos((lat * Math.PI) / 180) || 1;
+  let bestKey = search[0][0], bestD = Infinity;
+  search.forEach(([k, c]) => {
+    const ctr = c.center;
+    if (!ctr) return;
+    const dy = ctr[0] - lat, dx = (ctr[1] - lng) * kx;
+    const d = dy * dy + dx * dx;
+    if (d < bestD) { bestD = d; bestKey = k; }
+  });
+  return bestKey;
+}
+
 // The county keys whose parcel source is the STATEWIDE TxGIO layer (covers all 254
 // Texas counties). The circuit breaker must never skip these (they're the universal
 // fallback), and a hit FROM one of them standing in for a real-CAD county is what the

@@ -1,7 +1,8 @@
 import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
-import { COUNTIES, COUNTIES_MAP, candidateCountiesForPoint, countyKeyForName, STATEWIDE_KEYS, SNAPSHOT_COUNTIES } from "./lib/counties.js";
+import { COUNTIES, COUNTIES_MAP, candidateCountiesForPoint, countyForView, countyKeyForName, STATEWIDE_KEYS, SNAPSHOT_COUNTIES } from "./lib/counties.js";
+import { landingView } from "./lib/landingView.js";
 import { ensureSnapshot, getSnapshot, snapshotVintage, onSnapshotChange, featureAtPoint, preferSnapshotForDisplay } from "./lib/parcelSnapshot.js";
 import { recordSourceResult, filterHealthyCandidates, isSourceOpen, isStatewideBackup } from "./lib/sourceHealth.js";
 import { syncOverlayLayers, withTileRetry, ALL_LAYERS, probeService } from "./lib/layers.js";
@@ -250,6 +251,16 @@ function ringsAcres(rings) {
   } catch (_) { return null; }
 }
 
+/* NEW-1 — the map container's real pixel size, for the landing-view fit. `measured` is false
+ * when the container has no layout yet (the map is created while the PLANNER is the visible
+ * mode, and `SitePlannerApp` keeps this one alive behind `display:none`); the caller uses that
+ * to decide whether the fit it just computed is final or provisional. The fallback is a
+ * plain desktop-ish viewport — the fit only has to be close, and it always errs wide. */
+function viewportOf(el) {
+  const w = (el && el.clientWidth) || 0;
+  const h = (el && el.clientHeight) || 0;
+  return w > 0 && h > 0 ? { width: w, height: h, measured: true } : { width: 1024, height: 768, measured: false };
+}
 
 export default function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatus = {}, setLayerStatus, sites = [], activeSiteId, onOpenSite, onDeleteSite, onSetStatus, onRenameSite, onSharedChange, onUseParcels, onSkip }) {
   const elRef = useRef(null);
@@ -261,6 +272,15 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
   const sitesLayerRef = useRef(null); // saved-site footprints
   const pressedRef = useRef(false);        // a pointer is currently down on the map (B64)
   const pendingRebuildRef = useRef(null);  // a saved-site rebuild deferred until pointer-up (B64)
+  /* NEW-1 — the derived landing view is where the map OPENS, never a leash on the user.
+   * `landedRef` latches once a view derived from real sites has been applied; `userMovedRef`
+   * latches the instant the user touches the map. Either one ends the landing behaviour for
+   * the session, so a late-arriving cloud site list can never yank a camera the user is
+   * already driving. */
+  const landedRef = useRef(false);
+  const userMovedRef = useRef(false);
+  const sitesRef = useRef(sites);
+  sitesRef.current = sites;
   const onOpenSiteRef = useRef(onOpenSite);
   useEffect(() => { onOpenSiteRef.current = onOpenSite; }, [onOpenSite]);
   const onSetStatusRef = useRef(onSetStatus);
@@ -312,7 +332,10 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
   // covering the search bar; desktop keeps it always-open as before.
   const [layersPanelOpen, setLayersPanelOpen] = useState(() => { try { return !window.matchMedia("(max-width: 760px)").matches; } catch (_) { return true; } });
   const [hoverRow, setHoverRow] = useState(null);
-  const [viewCounty, setViewCounty] = useState("harris"); // jurisdiction for the Layers panel — follows the map's current area (B13)
+  // Jurisdiction for the Layers panel — follows the map's current area (B13). NEW-1: seeded
+  // from where the map is about to OPEN rather than from a hardcoded "harris", so a
+  // Colorado-only account never flashes a Harris County panel before the first `moveend`.
+  const [viewCounty, setViewCounty] = useState(() => { const c = landingView(sites).center; return countyForView(c[0], c[1]); });
   const [confirmDel, setConfirmDel] = useState(null); // site pending delete confirmation
   // (B235) The chips are now POSITIVE filters: a status in this set is SHOWN; an
   // empty set shows everything. The filter drives BOTH the list and the map pins,
@@ -457,7 +480,13 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
 
   /* create the map once */
   useEffect(() => {
-    const cfg = COUNTIES_MAP.harris; // default landing view (no pre-picked county)
+    /* NEW-1 — the opening view is DERIVED from the user's own saved sites (see
+     * `lib/landingView.js`), never hardcoded. This used to be `COUNTIES_MAP.harris`, so every
+     * account on earth opened over Houston, Texas. Sites can still be loading at this instant
+     * (the cloud list arrives later), which is fine: an account with nothing located yet is
+     * exactly the continental-US case, and the effect below re-lands once the list is in —
+     * but only while the user hasn't touched the map. */
+    const cfg = landingView(sitesRef.current, viewportOf(elRef.current));
     // Phone: the full-width search bar now owns the top-left, so move the +/- zoom control
     // to the bottom-left (clear there) instead of leaving it half-hidden behind the bar.
     // Desktop is unchanged (top-left, where the Your-sites panel sits over it as before).
@@ -477,9 +506,18 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
     const onZoom = () => setZoom(map.getZoom());
     // Resolve the Layers-panel jurisdiction from the map's current area (B13): pick the
     // county whose extent covers the view centre, so utility overlays are right outside
-    // Houston too. (candidateCountiesForPoint falls back to all → "harris" when away.)
-    const onMove = () => { const c = map.getCenter(); const cand = candidateCountiesForPoint(c.lat, c.lng); if (cand.length) setViewCounty(cand[0]); };
+    // Houston too.
+    // NEW-1 — this read `candidateCountiesForPoint(...)[0]`, whose out-of-bbox answer is
+    // harris-first BY CONTRACT (click routing depends on that order). With the landing view
+    // now derivable to Denver — or to the whole country — that made the panel claim Harris
+    // County over Colorado and over Kansas. `countyForView` answers the jurisdiction question
+    // on its own terms: bbox hit, else the nearest county IN THE POINT'S OWN STATE.
+    const onMove = () => { const c = map.getCenter(); setViewCounty(countyForView(c.lat, c.lng)); };
     onMove();
+    // NEW-1 — the moment the user drives the map themselves, the derived landing view is done
+    // for the session. Deliberately keyed on real INPUT (a press, a wheel, a drag) rather than
+    // Leaflet's `movestart`/`zoomstart`, which our own programmatic `setView` also fires.
+    const markUserMoved = () => { userMovedRef.current = true; landedRef.current = true; };
     const onMouseMove = (e) => {
       if (!selectModeRef.current || draggingRef.current) return; // don't fight the grab cursor while panning
       const inside = selectedRef.current.some((s) => (s.latlngsList || []).some((ll) => pointInPoly(e.latlng.lat, e.latlng.lng, ll)));
@@ -527,7 +565,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
     // the path that received the press and Leaflet swallows the click). On release, run
     // any deferred rebuild a tick later so the pending click dispatches first.
     const containerEl = map.getContainer();
-    const onPress = () => { pressedRef.current = true; };
+    const onPress = () => { pressedRef.current = true; markUserMoved(); };
     const onRelease = () => {
       pressedRef.current = false;
       if (pendingRebuildRef.current) { const fn = pendingRebuildRef.current; pendingRebuildRef.current = null; setTimeout(fn, 0); }
@@ -535,6 +573,8 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
     containerEl.addEventListener("pointerdown", onPress);
     containerEl.addEventListener("pointerup", onRelease);
     containerEl.addEventListener("pointercancel", onRelease);
+    containerEl.addEventListener("wheel", markUserMoved, { passive: true }); // NEW-1 — a scroll-zoom is the user driving too
+    map.on("dragstart", markUserMoved);
     /* NEW-2 — hover/click identify for the RASTER-painted overlays. Bound once with the map;
        every gate is read live per event (see the refs above), so nothing here re-binds. */
     const detachRasterIdentify = attachRasterIdentifyLazy(map, {
@@ -546,11 +586,34 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
       // vector boundary identify reads. Panning is gated inside attachRasterIdentify.
       identifyOk: () => !selectModeRef.current,
     });
-    return () => { detachRasterIdentify(); map.off("click", onClick); map.off("zoomend", onZoom); map.off("moveend", onMove); map.off("mousemove", onMouseMove); map.off("mousemove", onCoordMove); map.off("mouseout", onCoordOut); map.off("contextmenu", onMapCtx); map.off("dragstart", onDragStart); map.off("dragend", onDragEnd); containerEl.removeEventListener("pointerdown", onPress); containerEl.removeEventListener("pointerup", onRelease); containerEl.removeEventListener("pointercancel", onRelease); map.remove(); mapRef.current = null; };
+    return () => { detachRasterIdentify(); map.off("click", onClick); map.off("zoomend", onZoom); map.off("moveend", onMove); map.off("mousemove", onMouseMove); map.off("mousemove", onCoordMove); map.off("mouseout", onCoordOut); map.off("contextmenu", onMapCtx); map.off("dragstart", onDragStart); map.off("dragend", onDragEnd); map.off("dragstart", markUserMoved); containerEl.removeEventListener("pointerdown", onPress); containerEl.removeEventListener("pointerup", onRelease); containerEl.removeEventListener("pointercancel", onRelease); containerEl.removeEventListener("wheel", markUserMoved); map.remove(); mapRef.current = null; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Fit the map to all LOCATED saved sites (blank-planner sites have no origin). (B96b)
+  /* NEW-1 — LAND on the user's own market, once.
+   *
+   * The map is created before the site list is (the cloud list arrives later, and the map can
+   * be created at zero size while the planner is the visible mode), so the derived view is
+   * re-applied here the moment BOTH are real — and then never again. Two latches keep this an
+   * opening position rather than a leash: `landedRef` (we've landed on real sites) and
+   * `userMovedRef` (the user has taken the wheel). The `moveend` handler above re-resolves the
+   * Layers-panel jurisdiction off the resulting position, so a Colorado landing reads Colorado.
+   *
+   * Blank-planner sites carry no `origin` and are filtered out inside `landingView`, so an
+   * account whose only records are un-located plans still gets the honest country view. */
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || landedRef.current || userMovedRef.current) return;
+    const vp = viewportOf(elRef.current);
+    const view = landingView(sites, vp);
+    if (view.source !== "sites") return;   // nothing located yet — stay on the continental-US open
+    map.setView(view.center, view.zoom, { animate: false });
+    // Only LATCH on a real measurement. While the planner is the visible mode this container
+    // has no size, so the fit ran against the fallback viewport; showing the market straight
+    // away is right, but the next run with real dimensions may refine the zoom by a step.
+    if (vp.measured) landedRef.current = true;
+  }, [sites, visible, isActive]);
+
   /* aerial imagery layer (swappable source) */
   useEffect(() => {
     const map = mapRef.current;
