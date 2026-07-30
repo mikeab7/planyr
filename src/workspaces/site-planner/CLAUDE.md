@@ -308,6 +308,24 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   mail/owner key exclusion alone does not close this**; the precedence does, plus a refusal of numbered address
   LINES on the generic rung. No situs → NULL, and the callers fall back to what the user searched. `MapFinder`,
   `SitePlanner`'s identify and `counties.detectField` all share it — do not reintroduce a local `ADDR_RE`.
+- **⛔ `deletePlan.js` (NEW-1/B743×2) — THE one decision behind EVERY delete entry point. Read it before
+  touching any delete path.** "Delete does nothing" came back three times because it was never one bug:
+  `deleteSel` opened with a bare `if (!sel) return;` — a silent no-op with no message and no telemetry,
+  reachable from four ordinary states (a multi-selection of exactly ONE · a stale `multi` left behind by a
+  successful delete · the same left behind by `applySnapshot` · a selection pointing at something already
+  gone) from any of sixteen call sites. Each earlier pass closed one ROUTE to that hole instead of filling
+  it. Three invariants, all machine-enforced: **(1) DELETE IS UNCONDITIONAL** — anything visibly selected
+  is deletable, PINNED included (pinning guards a drag, never a deliberate Delete); **(2) the target is the
+  UNION of `multi` and `sel` at ANY count** — there is no count-dependent branch left, so a one-item marquee
+  behaves exactly like a five-item one; **(3) SILENCE IS IMPOSSIBLE** — nothing removed returns a reason and
+  an owner-facing `message` the caller MUST show. Two rules that are easy to undo by accident: every delete
+  clears **BOTH** selection stores (`setSel(null); setMulti([])`, in `deleteSel` **and** in `applySnapshot`),
+  and a bonded cascade is **downward only** (a building takes its assembly, a truck court takes only itself
+  — the old multi branch resolved to the assembly ROOT and silently took the building). Every entry point
+  names itself via `DELETE_ENTRIES` and reports `delete-attempt` / `delete-outcome` through the
+  `client_errors` channel (B1215), so the next report is a query, not an investigation. Guards: the
+  repo-root `test/` suite **deletePlan** (38 tests incl. a source guard on the wiring) and the e2e spec
+  **delete-unconditional** (9 tests, proven red on the pre-fix build).
 - `planClipboard.js` — the ONE general canvas clipboard (NEW-2/NEW-6): collect the current selection
   (elements expanded to their `attachedTo` assembly, so a building brings its truck court / trailer
   parking / dock zones / bump-outs), then paste with fresh ids, bonds remapped INSIDE the copy, and
