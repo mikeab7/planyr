@@ -32,8 +32,16 @@ import { makeParcelDisplayLayer, makeSnapshotLayer, PARCEL_MINZOOM, ADD_CURSOR, 
 import { dissolvedParcelSqft } from "./lib/polyClip.js";
 import { geocodeAddress } from "./lib/geocode.js";
 import { statusToken, darken } from "../../shared/ui/statusTokens.js";
-import { shareProject, makeProjectPrivate } from "./lib/sharing.js";
+/* lib/sharing.js is loaded ON DEMAND, and the reason is a budget one. This module is the
+   ONLY importer of it, and both of its functions are already reached through an `await`
+   inside `doShare` — so deferring it is mechanical, changes no behaviour, and takes its
+   bytes off the Site route's critical chunk, which nothing can use until someone actually
+   picks a team from the share menu. (teams.js next door is deliberately NOT deferred:
+   SitePlanner.jsx and SitePlannerApp.jsx import it too, so moving it here alone would
+   save nothing.) */
+const sharingLib = () => import("./lib/sharing.js");
 import { listMyTeams, currentIdentity } from "./lib/teams.js";
+import { adminBoundariesVisible, attachAdminBoundaries } from "./lib/adminBoundaryGate.js";
 
 // Theme tokens (var(--…)) — MapFinder is DOM/inline-style only, so CSS vars resolve
 // and the panel themes live with no re-render. (B318)
@@ -217,9 +225,6 @@ function ringsAcres(rings) {
   } catch (_) { return null; }
 }
 
-// Curated "key appraisal attributes" matchers for the search info card (B233) —
-// the headline facts beyond address/account that help identify a tract at a glance.
-const OWNER_RE = /^(owner|own_?name|owner_?name|name|owner1)$/i;
 
 export default function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatus = {}, setLayerStatus, sites = [], activeSiteId, onOpenSite, onDeleteSite, onSetStatus, onRenameSite, onSharedChange, onUseParcels, onSkip }) {
   const elRef = useRef(null);
@@ -396,7 +401,12 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
   const doShare = async (site, teamId) => {
     const gid = site.groupId || site.id;
     setShareBusy(true);
-    const r = teamId ? await shareProject(gid, teamId) : await makeProjectPrivate(gid);
+    const r = await sharingLib().then(
+      ({ shareProject, makeProjectPrivate }) => (teamId ? shareProject(gid, teamId) : makeProjectPrivate(gid)),
+      /* LOUD-FAILURE: a chunk that fails to load must read as a failed share, never as a
+         silent success — the busy state below clears either way. */
+      (e) => ({ ok: false, error: `Couldn't load the sharing tools: ${(e && e.message) || "network error"}.` }),
+    );
     setShareBusy(false);
     setStatusMenu(null);
     if (!r || !r.ok) { setErr((r && r.error) || "Couldn't update sharing."); return; }
@@ -568,6 +578,17 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
     if (!layer) return;
     layer.setOpacity(zoom != null && zoom >= 14 ? 0.4 : 0);
   }, [zoom]);
+
+  /* State + country outlines at wide zoom (NEW-1) — the same shape as the label-opacity
+     gate above and the `showPlans` switch below: one boolean derived from the live zoom,
+     outside the effect, so crossing the band mounts once instead of re-running per zoom
+     step. Everything else (which levels, the geometry, the drawing) lives behind the
+     dynamic import in adminBoundaryGate.js and is never fetched at site zoom. The
+     controller owns its own `zoomend` handling from there, so this fires once. */
+  const wideZoom = adminBoundariesVisible(zoom);
+  useEffect(() => {
+    if (wideZoom && mapRef.current) attachAdminBoundaries(mapRef.current);
+  }, [wideZoom]);
 
   /* overlay layers (FEMA, NWI, TxRRC, local utilities) — toggle + opacity.
      The add/remove/opacity logic is shared with the planner (one source). The
@@ -1207,12 +1228,6 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
 
   const asm = selected.length ? computeAssembly(selected, BASEMAPS.esri.export) : null;
 
-  const btn = (primary) => ({
-    padding: "8px 14px", fontSize: 13, borderRadius: 8, cursor: "pointer", fontFamily: "inherit",
-    border: `1px solid ${primary ? PAL.accent : PAL.panelLine}`, background: primary ? PAL.accent : "#fbfaf6",
-    color: primary ? "#fff" : PAL.ink, fontWeight: primary ? 600 : 500,
-    boxShadow: primary ? "0 2px 8px rgba(232,89,12,0.3)" : "none",
-  });
   const field = { padding: "8px 10px", fontSize: 13, border: `1px solid ${PAL.panelLine}`, borderRadius: 8, color: PAL.ink, background: "var(--surface-raised)", fontFamily: "inherit" };
 
   // One left-rail site row — shared by every status section (B235). Status marker,
