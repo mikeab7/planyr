@@ -84,9 +84,15 @@ import ColorField from "../../shared/ui/ColorField.jsx";
 const StandardsBar = lazy(() => import("./components/StandardsBar.jsx"));
 import { loadUserPrefs, saveUserPrefs, applyPrefs, readMirror, setStandardPref, getStandardPref } from "./lib/userPrefs.js";
 import {
-  PARCEL_STD_KEYS, TYPE_STD_KEYS, applyAllStandards, allStandardsImpact, appliedObjectsLabel,
-  EMPTY_STD_DRAFT, draftParcelValue, draftTypeValue, withParcelDraft, withTypeDraft, draftDirty, mergeDraftIntoSettings,
+  PARCEL_STD_KEYS, TYPE_STD_KEYS, MEASURE_STD_KEYS, applyAllStandards, allStandardsImpact, appliedObjectsLabel,
+  EMPTY_STD_DRAFT, draftParcelValue, draftTypeValue, draftMeasureValue, withParcelDraft, withTypeDraft, withMeasureDraft,
+  draftDirty, mergeDraftIntoSettings,
 } from "./lib/standardsApply.js";
+import {
+  MEASURE_LINE, measureStyle, measureDefaultStyle, measureLabelVisible, measureLabelThreshold,
+  hasLabelThreshold, labelRevealNote,
+} from "./lib/measureStyle.js";
+import { measureLabelModel, measureChipLines, headlineIndex, measureSegments, fmtInt, fmtSf, fmtAcres, fmtFeet } from "./lib/measureLabel.js";
 import { pushRecent, notePick, commitPick } from "../../shared/ui/colorRecents.js";
 import { CLIP_KINDS, collectClipboard, clipboardBBox, pasteClipboard, translateCalloutBy, translateParcelBy } from "./lib/planClipboard.js";
 import { remapBondRefs } from "./lib/bondRemap.js";
@@ -115,8 +121,10 @@ import { TYPE, typeStyle, elStyle, parcelDefaultStyle, toHex6, byZ, zOrder, setP
 import { byZAsc, nextZ, Z_GAP } from "./lib/zOrder.js";
 import { reorderByZ, arrangeFlags } from "./lib/arrange.js";
 import { commonStyleState, selectionRingFeet } from "./lib/multiStyle.js";
-import { parseTracts, callsToPath, pathCloses, misclosure, bufferPolyline, offsetPolyline, ringsOverlap } from "./lib/metesAndBounds.js";
-import { solveDeedAlignment, gridConvergenceDeg, rotatePointsAbout, ringCentroid as deedCentroid, describeRotation } from "./lib/deedAlign.js";
+import { bufferPolyline, offsetPolyline, ringsOverlap } from "./lib/metesAndBounds.js";
+// The deed workflow (parser + parcel-alignment solver) is loaded on demand — nothing on the boot
+// path may static-import deedParse.js / deedAlign.js. See lib/deedLazy.js.
+import { loadDeed, deedNow } from "./lib/deedLazy.js";
 /* B1141 bundle-budget offset — the deed reader is loaded ON DEMAND (dynamic import at its one
  * call site in the deed-drop handler). It is a self-contained .docx/ZIP reader that only runs
  * once someone drops a deed or survey file, so it has no business on the boot path; the same
@@ -149,7 +157,7 @@ import { roadClassesOf, roadClassOf, classMinRadius, classDefaultRadius, classRe
 import { DOGEAR_W, DOGEAR_D, dogEarGeom, dogEarSize, sidewalkSpanForBumps, isDogEarSide,
   wallStripBox, wallKidBox, wallKidPerp, wallKidAlong, hostAxisExtents, ownExtents, bumpsOfHost } from "./lib/dogEar.js";
 import { CURB_TYPES as COST_CURB_TYPES, CURB_TYPE_META, roadCurbType, roadCurbedSides, roadPanWidth, roadQuantities, costRollup } from "./lib/costTakeoff.js";
-import { layoutLabels, buildingLabelLines, dimCalloutVisible, detailLabelVisible, pondParamLabelVisible, pondParamFontPx, suppressedDimIds, dimFontScale, dimFontPx, boxOf } from "./lib/labelLayout.js";
+import { layoutLabels, buildingLabelLines, dimCalloutVisible, detailLabelVisible, pondParamLabelVisible, pondParamFontPx, suppressedDimIds, dimFontScale, dimFontPx, boxOf, DIM_CALLOUT_MIN_PPF } from "./lib/labelLayout.js";
 import { inlineLines } from "./lib/labelFitLadder.js";
 import { calloutLayout, minCalloutWidthFt } from "./lib/calloutLayout.js";
 import { DOCK_ZONES, MAX_DOCK_ZONES, ZONE_CATALOG, zoneDepthDefaults, catalogDepthDefault, layoutZoneByKind, usableCourtSpan, zoneAlongSpan, boxExtentAlong, resizedZoneAlongLen, dockSidesFor, footprintDepth, footprintLength, footprintAxes, strandedZoneIds, pruneStrandedZones } from "./lib/dockZones.js";
@@ -2088,6 +2096,21 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // Title reader + metes-and-bounds plotter (Schedule B → checklist; legal
   // description → drawn encumbrance). All in one modal.
   const [titleOpen, setTitleOpen] = useState(false);
+  /* The deed parser is deferred (deedParseLazy.js), but the title reader shows a LIVE preview of
+   * the pasted description while you type — a synchronous render read. So pull the module the
+   * moment the modal opens and bump a tick to re-render once it lands: by the time anyone can
+   * paste, it is already there, and no bytes ride the boot path. Same shape as terrainLazy's
+   * loadTerrain()/terrainNow() pair. */
+  // `_deedParseTick` is deliberately never READ — it exists only to force one re-render once the
+  // module lands, so the preview above recomputes. The leading underscore is the dead-store
+  // ratchet's sanctioned marker for exactly this (B1128).
+  const [_deedParseTick, setDeedParseTick] = useState(0);
+  useEffect(() => {
+    if (!titleOpen || deedNow()) return;
+    let alive = true;
+    loadDeed().then(() => { if (alive) setDeedParseTick((n) => n + 1); }).catch(() => {});
+    return () => { alive = false; };
+  }, [titleOpen]);
   const [apiKey, setApiKey] = useState(() => getKey());
   const [titleBusy, setTitleBusy] = useState(false);
   const [titleErr, setTitleErr] = useState("");
@@ -4593,6 +4616,23 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     drag.current = { mode: "measureMove", i: idx, fx: fp.x, fy: fp.y, orig: m };
     try { svgRef.current.setPointerCapture(e.pointerId); } catch (_) {}
   };
+  // NEW-3 — drag a measurement's summary chip off its anchor; the offset is stored in feet on the
+  // measurement (so it persists with the plan) and the render draws a leader back to the anchor,
+  // mirroring the parcel acreage chip's labelOffset exactly. Select tool only, so it never blocks
+  // a drawing tool. A press that doesn't travel still selects the measurement.
+  const startMeasChip = (e, i) => {
+    if (e.button !== 0) return;
+    if (tool !== "select") return;
+    e.stopPropagation();
+    const m = measures[i];
+    if (!m) return;
+    setMulti([]); setSelVtx(null);
+    setSel({ kind: "measure", i });
+    if (m.locked) return;
+    pushHistory();
+    drag.current = { mode: "measChip", i, start: p2f(e.clientX, e.clientY), base: m.labelOffset || { x: 0, y: 0 } };
+    try { svgRef.current.setPointerCapture(e.pointerId); } catch (_) {}
+  };
   const onMeasureContext = (e, i) => {
     e.preventDefault(); e.stopPropagation();
     const m = measures[i];
@@ -4871,7 +4911,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if (measureMode === "line") {
         // two-click distance
         if (measDraft.length === 0) setMeasDraft([sp]);
-        else { pushHistory(); setMeasures((m) => [...m, { id: uid(), mode: "line", pts: [measDraft[0], sp] }]); setMeasDraft([]); }
+        // NEW-1 — born with the user's Standards measurement defaults, the same way a parcel is
+        // born with parcelDefaultStyle (B929). All four modes stamp; see finishMeasure.
+        else { pushHistory(); setMeasures((m) => [...m, { id: uid(), mode: "line", pts: [measDraft[0], sp], ...measureDefaultStyle(settings) }]); setMeasDraft([]); }
       } else {
         // polyline / area: accumulate points; close an area by clicking the first dot
         if (measureMode === "area" && measDraft.length >= 3 && dist(f2p(snapPt(fp)), f2p(measDraft[0])) < 12) { finishMeasure(); return; }
@@ -4931,9 +4973,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     else if (polyArea(pts) < 1) { flashWarn(`${label} has almost no area — check the outline.`, 6000); }
   };
   const finishMeasure = () => {
-    if (measureMode === "polyline" && measDraft.length >= 2) { pushHistory(); setMeasures((m) => [...m, { id: uid(), mode: "polyline", pts: measDraft }]); }
-    else if (measureMode === "area" && measDraft.length >= 3) { pushHistory(); setMeasures((m) => [...m, { id: uid(), mode: "area", pts: measDraft }]); flashPolyWarn(measDraft, "Measured area"); }
-    else if (measureMode === "count" && measDraft.length >= 1) { pushHistory(); setMeasures((m) => [...m, { id: uid(), mode: "count", pts: measDraft }]); }
+    const std = measureDefaultStyle(settings); // NEW-1 — Standards defaults, stamped at creation
+    if (measureMode === "polyline" && measDraft.length >= 2) { pushHistory(); setMeasures((m) => [...m, { id: uid(), mode: "polyline", pts: measDraft, ...std }]); }
+    else if (measureMode === "area" && measDraft.length >= 3) { pushHistory(); setMeasures((m) => [...m, { id: uid(), mode: "area", pts: measDraft, ...std }]); flashPolyWarn(measDraft, "Measured area"); }
+    else if (measureMode === "count" && measDraft.length >= 1) { pushHistory(); setMeasures((m) => [...m, { id: uid(), mode: "count", pts: measDraft, ...std }]); }
     setMeasDraft([]);
   };
   // Split the selected parcel (or whichever parcel the cut crosses) along a
@@ -5703,6 +5746,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (d.mode === "acChip") { // NEW-3: drag a parcel's acreage chip (offset stored in feet)
       const dx = fp.x - d.start.x, dy = fp.y - d.start.y;
       setParcels((a) => a.map((pc) => pc.id === d.id ? { ...pc, labelOffset: { x: d.base.x + dx, y: d.base.y + dy } } : pc));
+      return;
+    }
+    if (d.mode === "measChip") { // NEW-3: drag a measurement's summary chip (offset stored in feet)
+      const dx = fp.x - d.start.x, dy = fp.y - d.start.y;
+      setMeasures((a) => a.map((m, k) => k === d.i ? { ...m, labelOffset: { x: d.base.x + dx, y: d.base.y + dy } } : m));
       return;
     }
     if (d.mode === "calloutResize") { // B913: drag a text-box / callout width handle → explicit boxW + text wrap
@@ -11799,6 +11847,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // static p2f that doesn't need the DOM rect (uses view only, origin at svg 0,0)
   const p2fStatic = (px, py) => ({ x: (px - view.offX) / view.ppf, y: (py - view.offY) / view.ppf });
 
+  // Accuracy state — the single source of truth for measurement / acreage trust.
+  // NEW-1 — hoisted above the label/collision block below: a measurement's summary chip is now
+  // part of the collision pool, and its paint depends on whether the drawing is calibrated (the
+  // amber warn state overrides the user's colour), so this has to resolve before chips are sized.
+  const isGeoref = restored?.origin || parcels.some((p) => p.attrs);
+  const calibrationState =
+    underlay
+      ? (underlay.fromMap ? "georef" : underlay.calibrated ? "calibrated" : "uncalibrated")
+      : (isGeoref ? "georef" : "drawn");
+  const calibrated = calibrationState === "georef" || calibrationState === "calibrated" || calibrationState === "drawn";
+
   /* labels + handles in screen space */
   // Labels scale with zoom so they stay proportional to the plan when zoomed
   // out (no ballooning chips), capping at a comfortable size when zoomed in.
@@ -12020,9 +12079,85 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     return { pc, c, txt, fs, padX, padY, boxW, boxH, box: boxOf(c.x, c.y, boxW, boxH) };
   }).filter(Boolean);
   const parcelChipBoxes = parcelChips.map((p) => p.box);
+
+  /* NEW-3 — the MEASUREMENT summary chip.
+   *
+   * Was: one run-on haloed string painted blindly at the polygon centroid, invisible to the
+   * collision engine. Now it is a real chip (a rounded plate with a hairline, the parcel-acreage
+   * chip's treatment and its `data-print-chip` export restyle) laid out through the SAME
+   * labelLayout engine as everything else, and computed here — before the element-label pass — so
+   * a measurement a user deliberately drew is placed FIRST and every other label yields around it.
+   *
+   * `noLeader` is on: the engine may drop the chip's subordinate detail line to resolve a
+   * collision, but it must never fling a measurement's number off to some other part of the plan.
+   * The leader line belongs to the USER's drag (labelOffset), not to auto-placement. And if even
+   * the one-line form still collides we fall back to drawing that one line rather than hiding the
+   * chip — a number the user asked for is never silently dropped, only shortened.
+   */
+  const measureChips = measures.map((m, i) => {
+    const fpts = measPts(m);
+    const mode = measMode(m);
+    if (mode === "count" ? fpts.length < 1 : fpts.length < 2) return null;
+    const isSel = sel?.kind === "measure" && sel.i === i;
+    if (!measureLabelVisible(m, labelPpf, { settings, globalFloor: DIM_CALLOUT_MIN_PPF, selected: isSel })) return null;
+    const isArea = mode === "area";
+    const model = measureLabelModel(mode, {
+      areaSf: isArea ? polyArea(fpts) : 0,
+      perimFt: isArea ? pathLen([...fpts, fpts[0]]) : 0,
+      lengthFt: mode === "line" || mode === "polyline" ? pathLen(fpts) : 0,
+      segments: Math.max(0, fpts.length - 1),
+      count: fpts.length,
+    }, { label: m.label, uncalibrated: calibrationState === "uncalibrated" });
+    const lines = measureChipLines(model);
+    const hi = headlineIndex(model);
+    // The anchor: an area reads from its centroid, an open run from its last segment's midpoint
+    // (where the eye finishes the line) — the two anchors the old label already used.
+    const anchorFt = isArea || mode === "count"
+      ? (mode === "count" ? fpts[fpts.length - 1] : centroid(fpts))
+      : { x: (fpts[fpts.length - 2].x + fpts[fpts.length - 1].x) / 2, y: (fpts[fpts.length - 2].y + fpts[fpts.length - 1].y) / 2 };
+    const off = m.labelOffset || { x: 0, y: 0 };
+    const anchor = f2p(anchorFt);
+    const c = f2p({ x: anchorFt.x + off.x, y: anchorFt.y + off.y });
+    // Type scale: the headline leads, the name and the detail sit a step down. Same zoom ramp
+    // (ls · labelK) every other on-canvas label rides, so the chip shrinks with the drawing.
+    const fsHead = 13.5 * ls * labelK, fsSub = 10 * ls * labelK;
+    const lh = fsHead * 1.16, padX = 9 * ls * labelK, padY = 5 * ls * labelK;
+    // Width off the widest line, each measured at ITS own size (the headline is the wide one).
+    const charW = fsHead * 0.6;
+    return { m, i, isSel, mode, model, lines, hi, c, anchor, moved: !!(off.x || off.y), fsHead, fsSub, lh, padX, padY, charW };
+  }).filter(Boolean);
+  // One layout pass for the measurement chips, avoiding each other AND the parcel badges.
+  const measureChipPlace = layoutLabels(
+    measureChips.map((d) => ({
+      id: d.m.id || `m${d.i}`, cx: d.c.x, cy: d.c.y, lines: d.lines, lh: d.lh, charW: d.charW,
+      halfW: Infinity, halfH: Infinity, noLeader: true,
+      // A selected measurement outranks everything (you must read what you are editing); after
+      // that, a named measurement outranks an unnamed one. Deterministic, so it never flickers.
+      importance: (d.isSel ? 1e9 : 0) + (d.model.name ? 1e6 : 0) + d.lines.length,
+    })),
+    { pad: 2 * labelK, gap: 4 * labelK, obstacles: parcelChipBoxes },
+  );
+  const measureChipBoxes = [];
+  const measureChipDraw = new Map();
+  measureChips.forEach((d) => {
+    const id = d.m.id || `m${d.i}`;
+    const place = measureChipPlace.get(id);
+    // Collision-shortened, never collision-hidden: fall back to the headline alone.
+    const lines = place ? place.lines : [d.model.headline];
+    const hi = place ? d.hi : 0;
+    const boxW = Math.max(1, ...lines.map((t) => String(t).length)) * d.charW + d.padX * 2;
+    const boxH = lines.length * d.lh + d.padY * 2;
+    const box = boxOf(d.c.x, d.c.y, boxW, boxH);
+    measureChipBoxes.push(box);
+    measureChipDraw.set(d.i, { ...d, lines, hi, boxW, boxH, box });
+  });
+
   const labelShow = layoutLabels(
     labelCands.map((d) => ({ id: d.lid, cx: d.c.x, cy: d.c.y, lines: d.lines, lh: d.lh, charW: d.charW, halfW: d.halfW, halfH: d.halfH, rot: d.rot, noLeader: d.noLeader, ring: d.ring, ringOrigin: d.ringOrigin, ringPpf: d.ringPpf, mustLabel: d.mustLabel })),
-    { pad: 2 * labelK, gap: 4 * labelK, obstacles: parcelChipBoxes },
+    // A measurement's summary chip joins the parcel badges as an immovable obstacle, so an element
+    // label yields around it. B1147's fit ladder still guarantees a `mustLabel` element (a pond) an
+    // outside placement, so seeding these can shorten or relocate a label but never blank one.
+    { pad: 2 * labelK, gap: 4 * labelK, obstacles: [...parcelChipBoxes, ...measureChipBoxes] },
   );
   // B121 (round 3): fold the red per-edge dimension callouts into the collision pool. The dimension
   // number is the lowest tier — if its screen box would overprint a committed centred name/area
@@ -12625,14 +12760,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     return <g>{px.map((p, i) => vtxRect(`mkv${i}`, p, isSelVtx("markup", m.id, i), "move", (e) => startMarkupVertex(e, m.id, i)))}</g>;
   })();
 
-  // Accuracy state — the single source of truth for measurement / acreage trust.
-  const isGeoref = restored?.origin || parcels.some((p) => p.attrs);
-  const calibrationState =
-    underlay
-      ? (underlay.fromMap ? "georef" : underlay.calibrated ? "calibrated" : "uncalibrated")
-      : (isGeoref ? "georef" : "drawn");
-  const calibrated = calibrationState === "georef" || calibrationState === "calibrated" || calibrationState === "drawn";
-
   /* ----------------------------- UI ----------------------------- */
   // Bluebeam-style left rail: a thin column of small buttons, each opening one menu.
   const railHdr = (t) => <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: PAL.chromeMuted, padding: "8px 4px 4px" }}>{t}</div>;
@@ -12815,7 +12942,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       for (const file of list) {
         const row = { id: uid(), name: file.name || "deed", text: "", boundaryCalls: 0, exCount: 0, closes: false, gap: 0, error: "" };
         try {
-          const { readDeedFile } = await import("../../shared/files/docxText.js");
+          const [{ readDeedFile }, dp] = await Promise.all([
+            import("../../shared/files/docxText.js"),
+            loadDeed(),        // the parser rides the same on-demand trip as the file reader
+          ]);
+          const { parseTracts, callsToPath, pathCloses, misclosure } = dp;
           const text = await readDeedFile(file);
           row.text = text;
           const tracts = parseTracts(text);
@@ -12878,7 +13009,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     setTitleOpen(false); setSel(null); setTool("select");
     flashWarn(`Deed 1 of ${deeds.length} — ${first.name}: click its point of beginning.`, 0);
   };
-  const plotAllDeeds = () => {
+  const plotAllDeeds = async () => {
+    const { parseTracts } = await loadDeed();
     const deeds = deedQueue
       .map((r) => ({ name: r.name, tracts: parseTracts(r.text || "") }))
       .filter((d) => d.tracts[0] && d.tracts[0].calls.length);
@@ -12890,7 +13022,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // canvas to anchor the point of beginning). Multi-tract aware: the first tract
   // is the boundary; each SAVE-AND-EXCEPT tract is plotted as a hole positioned
   // from its commencing tie relative to the SAME point of beginning.
-  const startPlotMetes = (asEasement = false) => {
+  const startPlotMetes = async (asEasement = false) => {
+    const { parseTracts } = await loadDeed();
     const tracts = parseTracts(mbText);
     const main = tracts[0];
     if (!main || !main.calls.length) { setTitleErr("No bearing/distance calls found. Drop a deed (.docx) or paste a metes-and-bounds description (e.g. “THENCE N 45°30′ E, 150.00 feet”)."); return; }
@@ -12903,10 +13036,21 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     flashWarn(`Click the point of beginning — ${main.calls.length} call${main.calls.length > 1 ? "s" : ""} ready${ex > 0 ? ` (+${ex} save-and-except)` : ""}${asEasement ? " (easement)" : ""}.`, 0);
   };
 
+  /* Every path that reaches the plotting helpers below has ALREADY parsed a description (that is
+   * what produced the calls), so the on-demand parser is necessarily in hand. Assert it rather than
+   * silently no-op: a null here would mean a new caller reached them without loading, and a deed
+   * that plots as nothing is exactly the silent failure LOUD-FAILURE exists to prevent. */
+  const deedLib = () => {
+    const m = deedNow();
+    if (!m) throw new Error("Deed workflow not loaded — call loadDeed() before plotting or aligning.");
+    return m;
+  };
+
   // Build a polygon encumbrance markup from a traverse anchored at `pob`. A tract
   // boundary is ALWAYS a polygon — if the calls don't close, the last→first edge
   // carries the gap (shown honestly) rather than being redrawn as a corridor.
   const buildEncumbranceMarkup = (calls, pob, { label, except, group }) => {
+    const { callsToPath, pathCloses, misclosure } = deedLib();
     const path = callsToPath(calls, pob);
     const closed = pathCloses(path);
     const ring = closed ? path.slice(0, -1) : path;
@@ -12931,6 +13075,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
 
   // Drop the POB at `pob` (feet), build the encumbrance(s), warn on overlaps.
   const anchorEncumbrance = (pob) => {
+    const { callsToPath, pathCloses } = deedLib();
     const { tracts, asEasement } = pobMode;
     const main = tracts && tracts[0];
     if (!main || !main.calls.length) { if (pobMode && pobMode.queueTotal) { advanceDeed({ name: pobMode.name || "deed", bad: true }); return; } flashWarn("No bearings were recognized in that description — check the metes-and-bounds format.", 7000); setPobMode(null); return; }
@@ -13027,7 +13172,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       const inter = polyIntersectArea(deedRing, pc.points);
       if (inter / Math.min(deedA, parcelA) < DEED_FIT_MIN_OVERLAP) continue; // deed isn't on this parcel
       if (Math.min(deedA, parcelA) / Math.max(deedA, parcelA) < DEED_FIT_MIN_AREARATIO) continue; // different-size tract
-      const fit = solveDeedAlignment(deedRing, pc.points);
+      const fit = deedLib().solveDeedAlignment(deedRing, pc.points);
       if (fit.ok && (!best || fit.residualFt < best.fit.residualFt)) best = { fit, parcel: pc };
     }
     return best;
@@ -13038,7 +13183,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const mapDeedGeom = (m, apply) => ({ ...m, pts: (m.pts || []).map(apply), centerline: (m.centerline || []).map(apply) });
   // Snap a plotted deed onto the held county parcel (empirical fit). With no parcel,
   // fall back to the theoretical State Plane grid-north correction for this location.
-  const alignDeedToParcel = (id) => {
+  const alignDeedToParcel = async (id) => {
+    const { describeRotation, ringCentroid: deedCentroid, gridConvergenceDeg } = await loadDeed();
     const m = markups.find((x) => x.id === id && x.kind === "encumbrance");
     if (!m || !(m.pts && m.pts.length >= 3)) { flashWarn("Select a plotted deed boundary first.", 5000); return; }
     const members = deedGroupMembers(m);
@@ -13068,10 +13214,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     setDeedAlignHint(null);
     flashWarn(`No county parcel to fit — rotated the deed ${describeRotation(conv)} for the State Plane grid convergence here (this assumes the survey's bearings are grid north). Verify against the aerial, or nudge by hand.`, 9000);
   };
-  const rotateDeedRigid = (m, deg, pivot) => ({ ...m, pts: rotatePointsAbout(m.pts, deg, pivot), centerline: rotatePointsAbout(m.centerline || [], deg, pivot) });
+  const rotateDeedRigid = (m, deg, pivot) => { const { rotatePointsAbout } = deedLib(); return { ...m, pts: rotatePointsAbout(m.pts, deg, pivot), centerline: rotatePointsAbout(m.centerline || [], deg, pivot) }; };
   // Manual fallback: turn a deed to an absolute "applied since plotting" angle (panel stepper),
   // rotating the whole tract group about the boundary's centroid so holes stay seated.
-  const rotateDeedTo = (id, targetDeg) => {
+  const rotateDeedTo = async (id, targetDeg) => {
+    const { ringCentroid: deedCentroid } = await loadDeed(); // the deed workflow is loaded on demand
     const sel0 = markups.find((x) => x.id === id && x.kind === "encumbrance");
     if (!sel0 || !sel0.pts) return;
     const members = deedGroupMembers(sel0);
@@ -13580,6 +13727,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // account default). The panel shows the pending draft over the top of these — see below.
   const committedParcelStd = (key) => settings.parcelStyle?.[key] ?? getStandardPref(userPrefs, "parcelStyle", key);
   const committedTypeStd = (type, key) => settings.typeStyles?.[type]?.[key] ?? getStandardPref(userPrefs, "typeStyles", key, type);
+  // NEW-1 — measurements, the third standards family, on the parcel ladder (plan copy, then account).
+  const committedMeasureStd = (key) => settings.measureStyle?.[key] ?? getStandardPref(userPrefs, "measureStyle", key);
 
   /* ---- NEW-2: Standards edits are a PENDING DRAFT ----
    * The footer's three actions are named outright (Apply to this plan · Save for this plan · Save
@@ -13610,9 +13759,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // The values the PANEL shows = the draft over what's committed.
   const parcelStdValue = (key) => draftParcelValue(stdDraft, key, committedParcelStd(key));
   const typeStdValue = (type, key) => draftTypeValue(stdDraft, type, key, committedTypeStd(type, key));
+  const measureStdValueUI = (key) => draftMeasureValue(stdDraft, key, committedMeasureStd(key));
   const draftParcelStd = (patch) => setStdDraft(withParcelDraft(stdDraft, patch));
   const draftTypeStd = (type, patch) => setStdDraft(withTypeDraft(stdDraft, type, patch));
-  const stdDirty = draftDirty(stdDraft, committedParcelStd, committedTypeStd);
+  const draftMeasureStd = (patch) => setStdDraft(withMeasureDraft(stdDraft, patch));
+  const stdDirty = draftDirty(stdDraft, committedParcelStd, committedTypeStd, committedMeasureStd);
   /* Element type styles resolve at RENDER, so the canvas can preview the draft — publish it into
    * the style resolver's preview layer (planStyle.setPreviewStyleDefaults). Visual only: a draft
    * is never STAMPED into a new parcel, so an uncommitted value can't reach stored geometry.
@@ -13630,7 +13781,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
    * Save for this plan / Save for all projects — store the same values and change nothing drawn,
    *   so they confirm briefly with no Undo. */
   const stdParcelValues = () => Object.fromEntries(PARCEL_STD_KEYS.map((k) => [k, parcelStdValue(k) ?? null]));
-  const stdApplyCount = allStandardsImpact(parcels, els, stdParcelValues(), Object.keys(TYPE));
+  const stdMeasureValues = () => Object.fromEntries(MEASURE_STD_KEYS.map((k) => [k, measureStdValueUI(k) ?? null]));
+  const stdMeasureOpts = () => ({ measures, measureValues: stdMeasureValues() });
+  const stdApplyCount = allStandardsImpact(parcels, els, stdParcelValues(), Object.keys(TYPE), stdMeasureOpts());
   const saveStdForPlan = () => {
     if (!stdDirty) return;
     setSettings((s) => mergeDraftIntoSettings(s, stdDraft));
@@ -13642,27 +13795,30 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // the plan keeps following the account default when it changes later (the old promote rule).
     let up = userPrefs;
     PARCEL_STD_KEYS.forEach((k) => { up = setStandardPref(up, "parcelStyle", k, parcelStdValue(k) ?? null); });
+    MEASURE_STD_KEYS.forEach((k) => { up = setStandardPref(up, "measureStyle", k, measureStdValueUI(k) ?? null); });
     Object.keys(TYPE).forEach((t) => TYPE_STD_KEYS.forEach((k) => { up = setStandardPref(up, "typeStyles", k, typeStdValue(t, k) ?? null, t); }));
     commitUserPrefs(up);
-    setSettings((s) => ({ ...s, parcelStyle: {}, typeStyles: {} }));
+    setSettings((s) => ({ ...s, parcelStyle: {}, typeStyles: {}, measureStyle: {} }));
     clearStdDraft();
     flashStdToast("Saved as your defaults for all projects", null, 3500);
   };
   const applyAllStd = () => {
     const beforeParcels = stateRef.current.parcels, beforeEls = stateRef.current.els;
+    const beforeMeasures = stateRef.current.measures;
     const beforeSettings = settings;
     const beforeDraft = stdDraft;
-    const res = applyAllStandards(beforeParcels, beforeEls, stdParcelValues(), Object.keys(TYPE));
+    const res = applyAllStandards(beforeParcels, beforeEls, stdParcelValues(), Object.keys(TYPE), { measures: beforeMeasures, measureValues: stdMeasureValues() });
     if (!res.count) return;
     // Applying implies keeping them: commit the plan defaults AND restyle, in one click / one frame.
     if (stdDirty) { setSettings((s) => mergeDraftIntoSettings(s, stdDraft)); clearStdDraft(); }
     pushHistory();                       // ONE frame for every object touched
     setParcels(res.parcels);
     setEls(res.els);
+    setMeasures(res.measures);           // NEW-1 — measurements restyle retroactively too
     flashStdToast(appliedObjectsLabel(res.count), () => {
-      setParcels(beforeParcels); setEls(beforeEls);
+      setParcels(beforeParcels); setEls(beforeEls); setMeasures(beforeMeasures);
       // Undo the whole action, not half of it: the stored defaults and the pending edits come back too.
-      setSettings((s) => ({ ...s, parcelStyle: beforeSettings.parcelStyle, typeStyles: beforeSettings.typeStyles }));
+      setSettings((s) => ({ ...s, parcelStyle: beforeSettings.parcelStyle, typeStyles: beforeSettings.typeStyles, measureStyle: beforeSettings.measureStyle }));
       setStdDraft(beforeDraft);
       setStdToast(null);
     });
@@ -13704,6 +13860,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     onSwatch: (v) => { if (hist) pushHistory(); apply(v); pushRecent(v); if (commit) commit(v); },
   });
   const liveMarkup    = (patch) => { setMarkups((a) => a.map((m) => (selMarkup && m.id === selMarkup.id ? { ...m, ...patch } : m))); setMkStyle((s) => ({ ...s, ...patch })); };
+  // NEW-1 — the SAME two writers for a measurement (a live no-history one for a colour drag /
+  // opacity slide, and a one-undo-frame one for a discrete commit), so the measurement inspector
+  // reuses the markup panel's controls rather than standing up a parallel editing surface.
+  // `null` in a patch CLEARS the key, so "Reset" puts the measurement back on the defaults.
+  const patchSelMeasure = (patch) => setMeasures((a) => a.map((m) => {
+    if (!selMeasure || m.id !== selMeasure.id) return m;
+    const next = { ...m, ...patch };
+    Object.entries(patch).forEach(([k, v]) => { if (v === null || v === undefined) delete next[k]; });
+    return next;
+  }));
+  const liveMeasure = (patch) => patchSelMeasure(patch);
+  const setSelMeasure = (patch) => { pushHistory(); patchSelMeasure(patch); };
   const liveCallout   = (patch) => { if (selCallout) setCallout(selCallout.id, patch); };
   // Make the selected element's current colors the default for its type — and say so (B653).
   const setStyleDefault = () => {
@@ -14904,6 +15072,55 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 property of the parcel itself, not a global default — say so here so nobody hunts
                 for a per-edge control on this panel. */}
             <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.5, margin: "6px 2px 2px" }}>Per-edge setbacks live on the parcel — select it on the canvas.</div>
+          </Section>
+          </div>
+
+          {/* NEW-1 — MEASUREMENTS. Measurements are the only drawn object that had no standards at
+              all: their colour was hardcoded at the one place they were painted. Same shape as the
+              Parcels section above (draft-first reads, one footer Apply), same mechanic (stamped at
+              creation via measureDefaultStyle), so a measurement is born with these and the footer's
+              Apply pushes them onto measurements already drawn. */}
+          <div data-std-sec="measure">
+          <Section key={`std-measure:${standardsFocus === "measure"}`} title="Measurements" collapsed={standardsFocus !== "measure"}>
+            <StdSubLabel>Line</StdSubLabel>
+            <Field label="Line color">
+              <ColorField value={toHex6(measureStdValueUI("stroke") ?? PAL.accent)} title="Measurement line color" seed={COLOR_SEED}
+                {...colorCtl((v) => draftMeasureStd({ stroke: v }), false)} />
+            </Field>
+            <Field label="Line weight">
+              <NumInput style={numInput} value={measureStdValueUI("weight") ?? MEASURE_LINE.weight} min={0.5} step={0.5} coarse={2} onCommit={(n) => draftMeasureStd({ weight: n })} />
+            </Field>
+            <Field label="Line style">
+              <select value={measureStdValueUI("dash") ?? MEASURE_LINE.dash} onChange={(e) => draftMeasureStd({ dash: e.target.value })}
+                style={{ ...numInput, width: "auto", cursor: "pointer" }}>
+                {DASH_OPTIONS}
+              </select>
+            </Field>
+            <StdSubLabel>Area fill</StdSubLabel>
+            <label style={{ display: "flex", gap: 8, fontSize: 12, color: PAL.muted, margin: "2px 2px 8px", cursor: "pointer" }}>
+              <input type="checkbox" checked={!!measureStdValueUI("fill")} onChange={(e) => draftMeasureStd(e.target.checked ? { fill: PAL.accent } : { fill: null, fillOpacity: null })} /> Use a separate fill colour
+            </label>
+            {measureStdValueUI("fill") && (
+              <Field label="Fill color">
+                <ColorField value={toHex6(measureStdValueUI("fill"))} title="Measurement fill color" seed={COLOR_SEED}
+                  {...colorCtl((v) => draftMeasureStd({ fill: v }), false)} />
+              </Field>
+            )}
+            <Field label="Fill opacity">
+              <input type="range" min={0} max={1} step={0.02} value={measureStdValueUI("fillOpacity") ?? MEASURE_LINE.fillOpacity}
+                onChange={(e) => draftMeasureStd({ fillOpacity: +e.target.value })} />
+            </Field>
+            {/* NEW-2 — the project-level reveal zoom. Same one-click capture as the per-measurement
+                control, so nobody ever types a zoom number. */}
+            <StdSubLabel>Labels</StdSubLabel>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", margin: "2px 2px 4px" }}>
+              <button style={chip} title="Zoom to where you want measurement labels to start showing, then click this."
+                onClick={() => draftMeasureStd({ labelPpf: view.ppf })}>Set at current zoom</button>
+              {measureStdValueUI("labelPpf") != null && <button style={chip} onClick={() => draftMeasureStd({ labelPpf: null })}>Reset to default</button>}
+            </div>
+            <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.5, margin: "0 2px 2px" }}>
+              {labelRevealNote({}, { measureStyle: { labelPpf: measureStdValueUI("labelPpf") } }, DIM_CALLOUT_MIN_PPF)} · one measurement can pin its own in its properties.
+            </div>
           </Section>
           </div>
 
@@ -16474,30 +16691,62 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 // drops you back to Select on the click so the grips/×/highlight show (B940: it also
                 // arms a whole-measurement drag on the same press).
                 const canGrab = tool === "select" || tool === "measure";
-                const warn = calibrationState === "uncalibrated";
-                const mcolor = warn ? "#b45309" : PAL.accent;
+                // NEW-1 — per-measurement style, resolved in ONE place (lib/measureStyle.js) for
+                // every mode. The uncalibrated amber still overrides the user's colour there,
+                // because that is a correctness signal rather than decoration.
+                const st = measureStyle(m, { accent: PAL.accent, uncalibrated: calibrationState === "uncalibrated", selected: isSel });
+                const mcolor = st.stroke;
+                const mdash = dashArray(st.dash, st.weight);
+                const chip = measureChipDraw.get(i);
+                // NEW-3 — the summary chip: the parcel-acreage chip's exact treatment (a rounded
+                // plate with a hairline, `data-print-chip` so the export restyles it into haloed
+                // exhibit text), one dominant value with the detail subordinate, placed by the
+                // shared collision engine and draggable with a leader back to its anchor.
+                const chipNode = chip ? (
+                  <g data-print-chip="measure" data-measure-chip={m.id || `m${i}`}
+                    pointerEvents={tool === "select" ? "auto" : "none"}
+                    style={tool === "select" ? { cursor: "move" } : undefined}
+                    onPointerDown={tool === "select" ? (e) => startMeasChip(e, i) : undefined}
+                    onContextMenu={(e) => onMeasureContext(e, i)}>
+                    {chip.moved && <line x1={chip.anchor.x} y1={chip.anchor.y} x2={chip.c.x} y2={chip.c.y} stroke={mcolor} strokeWidth={1} opacity={0.55} />}
+                    {/* Plate + keyline in ONE node: the keyline carries the measurement's colour on
+                        screen, and dropping the plate on paper drops all of the screen chrome at once. */}
+                    <rect data-chip-bg x={chip.c.x - chip.boxW / 2} y={chip.c.y - chip.boxH / 2} width={chip.boxW} height={chip.boxH}
+                      rx={7 * ls} fill="rgba(17,24,39,0.72)" stroke={mcolor} strokeWidth={1.25} />
+                    {chip.lines.map((t, k) => {
+                      const head = k === chip.hi;
+                      const fs = head ? chip.fsHead : chip.fsSub;
+                      const y = chip.c.y - chip.boxH / 2 + chip.padY + chip.lh * k + fs * 0.82;
+                      return (
+                        <text key={k} data-chip-text {...(head ? {} : { "data-chip-sub": "1" })}
+                          x={chip.c.x} y={y} textAnchor="middle" fontSize={fs}
+                          fontFamily={NUM_FONT} fontVariantNumeric={TABULAR_NUMS} pointerEvents="none"
+                          fill={head ? "#f4f7fa" : "#c3ccd6"}
+                          style={{ fontWeight: head ? 700 : 500, letterSpacing: head ? "0" : "0.02em" }}>
+                          {head && st.warn ? `⚠ ${t}` : t}
+                        </text>
+                      );
+                    })}
+                  </g>
+                ) : null;
 
                 if (mode === "count") {
-                  const lastPt = pts[pts.length - 1];
-                  const countLbl = (m.label ? `${m.label}  ` : "") + `${fpts.length} item${fpts.length !== 1 ? "s" : ""}`;
-                  // LOD (B911 family): the total label hides at overview zoom just like every other
-                  // dimension callout — an unselected count's tally shows only past the callout gate.
-                  const labelVisible = isSel || dimCalloutVisible(labelPpf);
                   return (
                     <g key={m.id || `m${i}`}>
                       {pts.map((p, k) => (
                         <g key={k} pointerEvents="none">
-                          <circle cx={p.x} cy={p.y} r={8 * labelK} fill={mcolor + "28"} stroke={mcolor} strokeWidth={1.5} />
+                          <circle cx={p.x} cy={p.y} r={8 * labelK} fill={mcolor + "28"} stroke={mcolor} strokeWidth={st.weight} />
                           <text x={p.x} y={p.y + 3.5 * labelK} fontSize={8.5 * labelK} textAnchor="middle" fill={mcolor} fontWeight="700">{k + 1}</text>
                         </g>
                       ))}
-                      {labelVisible && <text x={lastPt.x} y={lastPt.y - 14 * labelK} textAnchor="middle" fontSize={12 * labelK} fontFamily={NUM_FONT} fontVariantNumeric={TABULAR_NUMS}
-                        fill={mcolor} stroke={PAL.paper} strokeWidth={3} paintOrder="stroke" fontWeight="700" pointerEvents="none">{countLbl}</text>}
                       {/* hit targets — one transparent circle per marker */}
                       {pts.map((p, k) => (
                         <circle key={`h${k}`} cx={p.x} cy={p.y} r={12} fill="transparent" stroke="transparent"
                           pointerEvents={canGrab ? "all" : "none"} style={{ cursor: "move" }} onPointerDown={(e) => startMoveMeasure(e, i)} onContextMenu={(e) => onMeasureContext(e, i)} />
                       ))}
+                      {/* NEW-3 — the chip paints AFTER the hit targets, or the transparent grab
+                          layer sits on top of it in document order and swallows the chip drag. */}
+                      {chipNode}
                       {isSel && tool === "select" && !m.locked && (
                         <g data-testid="measure-selected" data-sel-i={i}>
                           {pts.map((p, k) => {
@@ -16520,40 +16769,42 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
 
                 const isArea = mode === "area";
                 const ptsStr = pts.map((p) => `${p.x},${p.y}`).join(" ");
-                // label + anchor point. Area shows area + perimeter; amber + ⚠ when uncalibrated.
-                const perim = pathLen([...fpts, fpts[0]]);
-                const lbl = (warn ? "⚠ " : "") + (m.label ? `${m.label}  ` : "") + (isArea
-                  ? `${f0(polyArea(fpts))} sf · ${f2(polyArea(fpts) / SQFT_PER_ACRE)} ac · ${f0(perim)}′ perim`
-                  : `${f0(pathLen(fpts))}′`);
-                const anchor = isArea ? f2p(centroid(fpts)) : (() => {
-                  const a = pts[pts.length - 2], b = pts[pts.length - 1];
-                  return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
-                })();
-                // NEW-1 (extends B149/B940) — a measurement's value label rides the shared zoom-FLOOR
-                // gate (dimCalloutVisible), the SAME floor that drops the auto infrastructure dims at
-                // site-overview zoom. We deliberately use the pure floor, NOT a per-feature min-on-
-                // screen-length: a length rule keeps a long run's label (a 3,500′ distance projects to
-                // hundreds of px) painting at overview — exactly the clutter the owner reported —
-                // whereas the floor drops short AND long labels together, and they reveal together on
-                // zoom-in. Scoped to measurement labels only (this `labelVisible`), so it can never
-                // catch the always-on overview tier (building name/SF, site-summary chip, acreage
-                // chips). A selected measurement always shows its value so you can read what you're
-                // editing (parity with B149 / B121 / B225-B226 selected-element exception).
-                const labelVisible = isSel || dimCalloutVisible(labelPpf);
+                /* NEW-3 (d) — per-edge segment lengths, ON the edges. This is what a civil
+                 * reviewer expects to see, and it is the single biggest thing that makes the
+                 * drawing read as a plan rather than a sketch. Gated SEPARATELY from the summary
+                 * chip: it rides `detailLabelVisible`, so an edge has to project as a real run on
+                 * screen before it is dimensioned — a 3-point sketch at site overview stays clean
+                 * while the same shape zoomed in dimensions itself. Skipped for a two-point
+                 * distance, whose one segment IS the headline (printing it twice is noise). */
+                const segs = fpts.length > 2 || isArea ? measureSegments(fpts, isArea) : [];
+                const segFs = 9.5 * ls * labelK;
                 return (
                   <g key={m.id || `m${i}`}>
                     {isArea
-                      ? <polygon points={ptsStr} fill={mcolor} fillOpacity={isSel ? 0.16 : 0.1} stroke={mcolor} strokeWidth={isSel ? 2.5 : 1.5} pointerEvents="none" />
-                      : <polyline points={ptsStr} fill="none" stroke={mcolor} strokeWidth={isSel ? 2.5 : 1.5} pointerEvents="none" />}
+                      ? <polygon points={ptsStr} fill={st.fill} fillOpacity={st.fillOpacity} stroke={mcolor} strokeWidth={st.weight} strokeDasharray={mdash} pointerEvents="none" />
+                      : <polyline points={ptsStr} fill="none" stroke={mcolor} strokeWidth={st.weight} strokeDasharray={mdash} pointerEvents="none" />}
                     {pts.map((p, k) => <circle key={k} cx={p.x} cy={p.y} r={3} fill={mcolor} pointerEvents="none" />)}
-                    {labelVisible && <text x={anchor.x} y={anchor.y - 5 * labelK} textAnchor="middle" fontSize={12 * labelK} fontFamily={NUM_FONT} fontVariantNumeric={TABULAR_NUMS}
-                      fill={mcolor} stroke={PAL.paper} strokeWidth={3} paintOrder="stroke" fontWeight="700" pointerEvents="none">{lbl}</text>}
+                    {segs.map((s) => {
+                      if (!detailLabelVisible(s.ft, labelPpf)) return null;
+                      const q = f2p(s.mid);
+                      return (
+                        <text key={`sg${s.i}`} x={q.x} y={q.y - 3 * labelK} textAnchor="middle" fontSize={segFs}
+                          transform={`rotate(${s.deg.toFixed(2)} ${q.x} ${q.y})`}
+                          fontFamily={NUM_FONT} fontVariantNumeric={TABULAR_NUMS} fill={mcolor}
+                          stroke={PAL.paper} strokeWidth={2.5 * ls} paintOrder="stroke" fontWeight="600" pointerEvents="none">{s.label}</text>
+                      );
+                    })}
                     {/* wide invisible hit path to select the measurement (Select OR Measure tool — B910) */}
                     {isArea
                       ? <polygon points={ptsStr} fill="transparent" stroke="transparent" strokeWidth={14}
                           pointerEvents={canGrab ? "all" : "none"} style={{ cursor: "move" }} onPointerDown={(e) => startMoveMeasure(e, i)} onContextMenu={(e) => onMeasureContext(e, i)} />
                       : <polyline points={ptsStr} fill="none" stroke="transparent" strokeWidth={14}
                           pointerEvents={canGrab ? "stroke" : "none"} style={{ cursor: "move" }} onPointerDown={(e) => startMoveMeasure(e, i)} onContextMenu={(e) => onMeasureContext(e, i)} />}
+                    {/* NEW-3 — the chip paints AFTER the hit path. An AREA's grab layer is a
+                        transparent FILLED polygon covering the whole shape, so a chip drawn before
+                        it was unreachable: every press over the chip landed on the grab layer and
+                        moved the measurement instead of the label. */}
+                    {chipNode}
                     {isSel && tool === "select" && !m.locked && (
                       <g data-testid="measure-selected" data-sel-i={i}>
                         {/* B230: draggable SQUARE control points (no "+" dots) — Shift-click /
@@ -17577,7 +17828,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           })()}
           {/* selected markup shape — geometry + style */}
           {!multiStyleable && selMarkup && selMarkup.kind !== "easement" && (() => {
-            const swatch = { width: 34, height: 26, padding: 0, border: `1px solid var(--border-default)`, borderRadius: 6, background: "var(--surface-raised)", cursor: "pointer" };
+            // NEW-1 (found while wiring the measurement panel) — NO `background` here. ColorField
+            // paints the CURRENT COLOUR as the chip's background and then spreads this override on
+            // top, so a hardcoded surface colour blanked every colour chip in these panels: the
+            // control you click to change a colour showed no colour. Leave it to ColorField.
+            const swatch = { width: 34, height: 26, padding: 0, border: `1px solid var(--border-default)`, borderRadius: 6, cursor: "pointer" };
             const closed = selMarkup.kind === "rect" || selMarkup.kind === "ellipse" || selMarkup.kind === "polygon";
             return (
               // NEW-1 — plain wrapper (see the multi-select branch above for why the duplicate testid was removed).
@@ -17658,7 +17913,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           {/* selected callout — text styling */}
           {!multiStyleable && selCallout && (() => {
             const cs = calloutStyle(selCallout);
-            const swatch = { width: 34, height: 26, padding: 0, border: `1px solid var(--border-default)`, borderRadius: 6, background: "var(--surface-raised)", cursor: "pointer" };
+            // NEW-1 (found while wiring the measurement panel) — NO `background` here. ColorField
+            // paints the CURRENT COLOUR as the chip's background and then spreads this override on
+            // top, so a hardcoded surface colour blanked every colour chip in these panels: the
+            // control you click to change a colour showed no colour. Leave it to ColorField.
+            const swatch = { width: 34, height: 26, padding: 0, border: `1px solid var(--border-default)`, borderRadius: 6, cursor: "pointer" };
             // B615 — persistent captions under each swatch so you don't have to hover to tell them apart.
             const cap = { fontSize: 9.5, color: PAL.muted, lineHeight: 1, textAlign: "center", letterSpacing: "0.02em" };
             const swatchCap = { display: "flex", flexDirection: "column", alignItems: "center", gap: 3 };
@@ -17709,19 +17968,71 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             const fpts = measPts(m);
             const modeLabel = { line: "Distance", polyline: "Polyline length", area: "Area", count: "Count" }[mode] || "Measurement";
             const rows = [];
-            if (mode === "count") rows.push(["Items", `${fpts.length}`]);
-            else if (mode === "area") { rows.push(["Area", `${f0(polyArea(fpts))} sf · ${f2(polyArea(fpts) / SQFT_PER_ACRE)} ac`]); rows.push(["Perimeter", `${f0(pathLen([...fpts, fpts[0]]))}′`]); }
-            else rows.push(["Length", `${f0(pathLen(fpts))}′`]);
+            // NEW-3 (f) — the panel reads the SAME formatters as the canvas chip, so screen,
+            // panel and paper can never disagree about how a number is written.
+            if (mode === "count") rows.push(["Items", fmtInt(fpts.length)]);
+            else if (mode === "area") { rows.push(["Area", `${fmtSf(polyArea(fpts))} · ${fmtAcres(polyArea(fpts) / SQFT_PER_ACRE)}`]); rows.push(["Perimeter", fmtFeet(pathLen([...fpts, fpts[0]]))]); }
+            else rows.push(["Length", fmtFeet(pathLen(fpts))]);
             const valStyle = { fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS, fontWeight: 700, fontSize: 13, color: PAL.ink };
+            // NEW-1 — the SAME style set a markup shape carries, on EVERY measure mode. `closed`
+            // is the only difference: a fill has no meaning on an open run or a count.
+            // NEW-1 (found while wiring the measurement panel) — NO `background` here. ColorField
+            // paints the CURRENT COLOUR as the chip's background and then spreads this override on
+            // top, so a hardcoded surface colour blanked every colour chip in these panels: the
+            // control you click to change a colour showed no colour. Leave it to ColorField.
+            const swatch = { width: 34, height: 26, padding: 0, border: `1px solid var(--border-default)`, borderRadius: 6, cursor: "pointer" };
+            const closed = mode === "area";
+            const stylable = mode !== "count";
+            const uncal = calibrationState === "uncalibrated";
+            const hasOverride = MEASURE_STD_KEYS.some((k) => m[k] !== undefined) || !!m.labelOffset;
             return (
               <div>
               <Section title={`Measurement · ${modeLabel}`}>
-                {calibrationState === "uncalibrated" && <div style={{ fontSize: 11, color: "var(--warn-text)", lineHeight: 1.5, marginBottom: 8 }}>⚠ This drawing isn’t calibrated yet — the value below is in raw units, not real feet. Calibrate to a known distance first.</div>}
+                {uncal && <div style={{ fontSize: 11, color: "var(--warn-text)", lineHeight: 1.5, marginBottom: 8 }}>⚠ This drawing isn’t calibrated yet — the value below is in raw units, not real feet. Calibrate to a known distance first.</div>}
                 {rows.map(([k, v], j) => <Field key={j} label={k}><span style={valStyle}>{v}</span></Field>)}
                 <Field label="Label"><input value={m.label || ""} maxLength={80}
                   onFocus={() => pushHistory()}
                   onChange={(ev) => setMeasures((a) => a.map((x) => (x.id === m.id ? { ...x, label: ev.target.value } : x)))}
                   placeholder="e.g. Front setback" style={textInput} /></Field>
+                {/* Line + fill, routed through the shared ColorField (so it inherits the recently
+                    used colours) and the shared DASH_OPTIONS list — one editing surface, not a
+                    parallel one. Every mode gets the line controls; only a closed area gets fill. */}
+                <StdSubLabel>{mode === "count" ? "Markers" : "Line"}</StdSubLabel>
+                <Field label={mode === "count" ? "Marker color" : "Line color"}>
+                  <ColorField value={toHex6(measureStyle(m, { accent: PAL.accent }).stroke)} {...colorCtl((v) => liveMeasure({ stroke: v }))} seed={COLOR_SEED} title="Line color" style={swatch} />
+                </Field>
+                <Field label="Line weight">
+                  <NumInput style={numInput} value={m.weight ?? MEASURE_LINE.weight} min={0.5} step={0.5} coarse={2} onCommit={(n) => setSelMeasure({ weight: n })} />
+                </Field>
+                {stylable && (
+                  <Field label="Line style">
+                    <select style={{ ...numInput, width: 100, fontFamily: "inherit" }} value={m.dash || MEASURE_LINE.dash} onChange={(e) => setSelMeasure({ dash: e.target.value })}>
+                      {DASH_OPTIONS}
+                    </select>
+                  </Field>
+                )}
+                {closed && (<>
+                  <StdSubLabel>Fill</StdSubLabel>
+                  <Field label="Fill color">
+                    <ColorField value={toHex6(measureStyle(m, { accent: PAL.accent }).fill)} {...colorCtl((v) => liveMeasure({ fill: v }))} seed={COLOR_SEED} title="Fill color" style={swatch} />
+                  </Field>
+                  <Field label="Fill opacity">
+                    <input type="range" min={0} max={1} step={0.05} value={m.fillOpacity ?? MEASURE_LINE.fillOpacity} {...sliderHistory((e) => liveMeasure({ fillOpacity: +e.target.value }))} />
+                  </Field>
+                </>)}
+                {uncal && <div style={{ fontSize: 10.5, color: "var(--warn-text)", lineHeight: 1.45, margin: "2px 2px 6px" }}>Your colour is saved, but this measurement stays amber on the drawing until the sheet is calibrated — that amber means “this number isn’t real feet yet”.</div>}
+                {/* NEW-2 — when this measurement's label appears. Captured from the live view with
+                    one click (never typed as a zoom number, which means nothing to a reader) and
+                    read back as a named zoom band. */}
+                <StdSubLabel>Label</StdSubLabel>
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", margin: "2px 2px 4px" }}>
+                  <button style={chip} title="Zoom to where you want this label to start showing, then click this."
+                    onClick={() => setSelMeasure({ labelPpf: view.ppf })}>Set at current zoom</button>
+                  {m.labelPpf != null && <button style={chip} onClick={() => setSelMeasure({ labelPpf: null })}>Reset to default</button>}
+                </div>
+                <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.5, margin: "0 2px 4px" }}>
+                  {labelRevealNote(m, settings, DIM_CALLOUT_MIN_PPF)} · a selected measurement always shows its label.
+                </div>
                 <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.5, marginTop: 8 }}>
                   {m.locked
                     ? "Locked — click 🔓 Unlock below to move or reshape it."
@@ -17729,8 +18040,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       ? "Drag any marker to move the whole set; drag a grip to reposition one."
                       : "Drag the line to move it, or a square grip to reshape."}
                 </div>
-                <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
+                <div style={{ display: "flex", gap: 6, marginTop: 10, flexWrap: "wrap" }}>
                   <button style={chip} onClick={() => toggleMeasureLock(m.id)}>{m.locked ? "🔒 Unlock" : "🔓 Lock"}</button>
+                  {hasOverride && <button style={chip} title="Back to your Standards defaults, including where the label sits"
+                    onClick={() => setSelMeasure({ ...Object.fromEntries(MEASURE_STD_KEYS.map((k) => [k, null])), labelOffset: null })}>Reset style</button>}
                   <button style={{ ...chip, color: PAL.danger }} onClick={deleteSel}>Delete</button>
                 </div>
               </Section>
@@ -19938,11 +20251,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       )}
       {/* Title reader + metes-and-bounds modal */}
       {titleOpen && (() => {
-        const tracts = parseTracts(mbText);
+        // The parser is loaded on demand (see deedParseLazy.js) — the effect below pulls it the
+        // moment this modal opens, so `dp` is null only for the frame between opening and the
+        // module landing. That frame renders zero counts, which is what an empty textarea shows
+        // anyway; `deedParseTick` re-renders as soon as it arrives.
+        const dp = deedNow();
+        const tracts = dp ? dp.parseTracts(mbText) : [];
         const calls = tracts[0] ? tracts[0].calls : [];
-        const path = calls.length ? callsToPath(calls, { x: 0, y: 0 }) : [];
-        const closes = pathCloses(path);
-        const gap = misclosure(path);
+        const path = dp && calls.length ? dp.callsToPath(calls, { x: 0, y: 0 }) : [];
+        const closes = dp ? dp.pathCloses(path) : false;
+        const gap = dp ? dp.misclosure(path) : 0;
         const exCount = Math.max(0, tracts.length - 1);
         return (
         <div onClick={() => setTitleOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 3000, background: "rgba(20,18,15,0.55)", display: "grid", placeItems: "center" }}>
