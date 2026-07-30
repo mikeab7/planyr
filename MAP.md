@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-07-30 @ `3724f1e` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-07-30 @ `f097dd1` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_375 source files mapped._
+_377 source files mapped._
 
 ## infra
 
@@ -245,6 +245,8 @@ _375 source files mapped._
   - _exports_: `default (LayerPanel)`
 - **`src/workspaces/site-planner/components/LazyPanel.jsx`** — Scaffold every lazily-loaded planner panel mounts behind: a height-reserving Suspense fallback (so a deferred panel cannot jump in) plus a per-panel error boundary that contains a failed chunk to that panel and offers the cache-busting reload on a stale deploy.
   - _exports_: `default (LazyPanel)`, `PanelErrorBoundary`, `PanelFallback`
+- **`src/workspaces/site-planner/components/ParcelInfoCard.jsx`** — The address-search parcel card: three rows by default (owner / account / acreage), everything else behind a height-capped fold
+  - _exports_: `default (ParcelInfoCard)`, `DETAILS_MAX_HEIGHT`, `LEGAL_MAX_HEIGHT`
 - **`src/workspaces/site-planner/components/PondSection.jsx`** — PR-L the one developer-readable pond cross-section component (used by the ⚡ Optimize what-changed card AND the pond inspector): maps pondSectionModel marks to a responsive, theme-tokened SVG (grade, berm hatch, storage bands, flood/groundwater/receiving lines, outlet, depth dimension, collision-free labels)
   - _exports_: `default (PondSection)`
 - **`src/workspaces/site-planner/components/RowInfo.jsx`** — Per-row ⓘ info popover for the Layers panel (source · vintage/age · notes); hover/click, portal via AnchoredMenu (B760)
@@ -278,7 +280,7 @@ _375 source files mapped._
 - **`src/workspaces/site-planner/lib/adminBoundaryLayer.js`** — Lazily-loaded Leaflet glue that paints state/country outlines at wide zoom: own pane below site geometry, canvas renderer, non-interactive. Never static-import this.
   - _exports_: `attachAdminBoundaries`
 - **`src/workspaces/site-planner/lib/appraisal.js`** — Pure CAD-attribute curation: regex-maps raw county/TxGIO parcel columns to labelled owner/value/acreage/use rows for both panels
-  - _exports_: `APPR_FIELDS`, `apprAll`, `apprRows`, `apprVal`, `findAttr`, `prettyKey`
+  - _exports_: `APPR_FIELDS`, `apprAll`, `apprRows`, `apprVal`, `findAttr`, `PARCEL_CARD_PRIMARY_LABELS`, `parcelCardRows`, `prettyKey`
 - **`src/workspaces/site-planner/lib/apronElevation.js`** — NEW-9 dock apron / truck court elevation checked separately from the building pad: apron elevation from FFE + dock drop, exposure banding against the governing flood elevation (exposure language, never code language), and the pavement/court fill set the mitigation demand must include
   - _exports_: `APRON_FILL_TYPES`, `apronElevFt`, `apronFillIncluded`, `assessApron`, `DEFAULT_DOCK_DROP_FT`
 - **`src/workspaces/site-planner/lib/arcgis.js`** — Esri ArcGIS REST client: bounded parcel identify (query+identify fallback, multi-county eager race) and lon/lat↔State-Plane-feet conversion
@@ -287,6 +289,8 @@ _375 source files mapped._
   - _exports_: `ARRANGE_MODES`, `arrangeFlags`, `reorderByZ`
 - **`src/workspaces/site-planner/lib/auth.js`** — Thin Supabase Auth wrappers: signUp/signIn/signOut/reset/updatePassword, getUser, onAuthChange with pinned redirect origin
   - _exports_: `getUser`, `onAuthChange`, `resetPassword`, `signIn`, `signOut`, `signUp`, `updatePassword`
+- **`src/workspaces/site-planner/lib/authMail.js`** — The one source of truth for who auth email comes from, and the confirmation / password-reset copy generated from it
+  - _exports_: `AUTH_SENDER_EMAIL`, `AUTH_SENDER_LABEL`, `AUTH_SENDER_NAME`, `PASSWORD_RESET_MSG`, `SIGNUP_CONFIRM_MSG`
 - **`src/workspaces/site-planner/lib/basemaps.js`** — Shared aerial basemap SOURCE registry (Esri/USGS tiles + export + maxNative ceilings, B220 rule) + the planner's Off/Aerial/USGS choices; used by MapFinder and the planner Basemap control
   - _exports_: `BASEMAPS`, `PLANNER_BASEMAP_CHOICES`
 - **`src/workspaces/site-planner/lib/bondRemap.js`** — The ONE id-bearing bond inventory + remap rule shared by every copy path (B1124): a reference inside the copied set is remapped to the new id, one outside it is dropped, never left dangling to a foreign element.
