@@ -126,6 +126,105 @@ export const exactContainerPoint = (worldPx, pixelOrigin, panePos) => ({
   y: worldPx.y - pixelOrigin.y + panePos.y,
 });
 
+/* ── closing the whole-pixel floor: the registration shift (NEW-2) ────────────────────
+ * MEASURED LIVE 2026-07-29 on a real tract, against an INDEPENDENT ground truth (each Esri
+ * basemap tile carries its z/x/y in its URL and its screen rect is readable, so the exact
+ * lat/lng of any screen pixel is computable without trusting Leaflet or us): the app's
+ * answer for a screen pixel sat about ONE CSS PIXEL away from the imagery's own answer for
+ * that same pixel — 3.7 ft at z18, 4.6 ft at z17, repeatable to a hundredth of a foot, and
+ * pointing a different way at each zoom. A clean offset, not noise and not a scale error.
+ * One pixel is 3.6 ft at z18 and 10–15 ft at the overview zoom real layout is done at, so
+ * "sub-pixel" is the wrong frame: this is the "my measurement lands ten feet from where I
+ * clicked" report, and it is the SAME defect in both directions (what the readout says,
+ * and where a placed point goes) because both run through one conversion.
+ *
+ * TWO CONTRIBUTORS, one of them ours:
+ *   1. LEAFLET'S SNAP (theirs, ±0.5 px/axis, twice over). `_getNewPixelOrigin` ends in
+ *      `._round()` and `panBy` rounds the offset it is handed, so every commit re-seats the
+ *      basemap on a fresh whole-pixel grid with a new sub-pixel remainder.
+ *   2. THE CONTAINER-CENTRE MISMATCH (ours, ±0.25 px/axis). We ask Leaflet to centre on the
+ *      feet point under the DRAWING's centre — `size.w / 2`, a float straight off
+ *      `getBoundingClientRect` — while `commit` (and Leaflet itself) lands that centre at
+ *      the MAP's own half-size, which comes from `clientWidth`, an integer. On a container
+ *      whose CSS width is fractional the two halves differ, and at a fractional device
+ *      pixel ratio (the reporting machine runs 2.15) fractional widths are the norm.
+ * Together those bound the error at roughly one pixel per axis — exactly what was measured.
+ *
+ * THE FIX — weld the DRAWING to wherever the basemap actually landed, and do it in the
+ * render only. `registrationShift` returns the residual between the two frames; the planner
+ * applies it as a CSS translate on the SVG canvas, which self-corrects the pointer path for
+ * free (`p2f` reads `getBoundingClientRect`, so the same translate that moves the drawing
+ * moves the coordinate the cursor reports). `view.offX/offY` are NOT touched: the exactly
+ * reversible pan V478 proved is preserved, nothing accumulates, and the aerial is never
+ * resampled (B1049/V483) because the aerial never moves. The drawing frame is welded to
+ * what the user is actually looking at, which is the only frame their click can mean.
+ *
+ * Deliberately NOT mirrored into the export (PDF-PARITY, stated rather than skipped): the
+ * shift compensates a LIVE-DOM artefact of Leaflet's integer map pane. The sheet composes
+ * its own tile mosaic from `view` with no such quantisation, so copying the shift there
+ * would ADD the very error it removes on screen.
+ */
+
+/* The planner-feet coordinate of a basemap TILE's north-west corner, from the tile's own
+ * z/x/y. This is the exact, external answer: the XYZ scheme fixes a tile's Mercator bounds by
+ * definition, so a tile's corner has a lat/lng nobody has to be trusted about. It shares
+ * `mercDeg` / `ftPerDeg` with `lngLatToFeet`, so a tile corner and a drawn point are expressed
+ * in one frame by construction.
+ *
+ * WHY THIS IS THE REFERENCE POINT (NEW-2). The registration that matters is against what the
+ * user is LOOKING AT, and what they are looking at is the raster lattice. Leaflet places that
+ * lattice from a per-level origin it rounds SEPARATELY from the map's own pixel origin, so at a
+ * fractional zoom (every wheel gesture leaves one) the tiles and `map.project` disagree by a
+ * sub-pixel amount that is then multiplied by the level's scale factor. Measuring against the
+ * projection therefore leaves a residual you can see; measuring against the tiles does not.
+ * MEASURED: after a wheel zoom, ~0.29 CSS px (about 3 ft at an overview zoom) — small, but the
+ * whole point of this item is that a pixel here is feet on the ground. */
+export function tileNwFeet(z, x, y, lat0, lon0) {
+  const k = ftPerDeg(lat0);
+  const n = Math.pow(2, z);
+  return {
+    x: ((x / n) * 360 - 180 - lon0) * k,
+    y: -((180 - (y / n) * 360) - mercDeg(lat0)) * k,
+  };
+}
+
+/* Where the basemap paints `worldPx` in CANVAS-WRAPPER pixels, at settle (the wrap's CSS
+ * transform has been cleared). `overscan` is the wrap's negative inset. Used as the FALLBACK
+ * reference when no tile is on screen to read (the aerial switched off, or before the first
+ * tile arrives) — the map's own projection, which every Leaflet VECTOR layer is placed by. */
+export const basemapWrapPoint = (worldPx, pixelOrigin, panePos, overscan = 0) => {
+  const p = exactContainerPoint(worldPx, pixelOrigin, panePos);
+  return { x: p.x - overscan, y: p.y - overscan };
+};
+
+/* Same, DURING a live gesture, when the wrap carries `translate(tx,ty) scale(s)` about its
+ * own top-left. Kept separate (rather than reading the DOM back) so the gesture branch is
+ * unit-testable and so the two branches can't silently diverge. */
+export const basemapWrapPointTransformed = (worldPx, pixelOrigin, panePos, overscan, { tx = 0, ty = 0, scale = 1 } = {}) => {
+  const p = exactContainerPoint(worldPx, pixelOrigin, panePos);
+  return { x: tx + p.x * scale - overscan, y: ty + p.y * scale - overscan };
+};
+
+/* How far the drawing must move to sit exactly on the imagery. `imgPt` and `drawPt` are
+ * both in canvas-wrapper pixels. */
+export const registrationShift = (imgPt, drawPt) => ({
+  dx: (Number(imgPt && imgPt.x) || 0) - (Number(drawPt && drawPt.x) || 0),
+  dy: (Number(imgPt && imgPt.y) || 0) - (Number(drawPt && drawPt.y) || 0),
+});
+
+/* The compensation is a sub-pixel correction for a quantisation whose whole range is about
+ * one pixel per axis. Anything larger is a MODEL disagreement — a scale mismatch, a stale
+ * container size, a half-applied gesture transform — and nudging the drawing would hide it
+ * instead of fixing it. `sanitizeShift` refuses those loudly (the caller reports and applies
+ * nothing) rather than quietly shoving the drawing across the screen. */
+export const REGISTRATION_SANITY_PX = 2.5;
+export function sanitizeShift(shift, limit = REGISTRATION_SANITY_PX) {
+  const dx = Number(shift && shift.dx), dy = Number(shift && shift.dy);
+  if (!Number.isFinite(dx) || !Number.isFinite(dy)) return { ok: false, reason: "non-finite", shift: { dx: 0, dy: 0 } };
+  if (Math.abs(dx) > limit || Math.abs(dy) > limit) return { ok: false, reason: "out-of-range", shift: { dx: 0, dy: 0 } };
+  return { ok: true, reason: null, shift: { dx, dy } };
+}
+
 /* ── the lock invariant ───────────────────────────────────────────────────────────────
  * Where a feet point lands on screen, computed TWO independent ways:
  *   • the planner's own SVG transform (feet × ppf + offset), and

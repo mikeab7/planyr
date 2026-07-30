@@ -17,6 +17,25 @@ export function projectToSegment(p, a, b) {
   return { pt, t, dist: Math.hypot(p.x - pt.x, p.y - pt.y) };
 }
 
+/* NEW-2(d) — THE tolerance for that magnet, in WORLD FEET, from the live pixels-per-foot.
+ *
+ * A pure screen-pixel tolerance feels the same at every zoom, which is why it is the right
+ * primary. But it is UNBOUNDED in feet as you zoom out: 12 px is a couple of feet at a working
+ * zoom and about 70 ft at the overview zoom real layout is done at — so the first point of a
+ * measurement could be yanked tens of feet onto a nearby property line with nothing on screen
+ * to say so. That is exactly the shape of the owner's report that a placed point lands "five,
+ * ten, fifteen feet from where I'm actually clicking", and it is a far larger effect than the
+ * one-pixel transform offset the same report also contains.
+ *
+ * So: screen tolerance, CAPPED in the world — the same idiom the road-connect magnet already
+ * uses (`ROAD_CONNECT_MAX_FT`); the boundary magnet simply never got one. Holding Alt still
+ * bypasses the snap entirely. The SPLIT tool's separate boundary snap is deliberately NOT
+ * capped: a split has to land ON the line, so being pulled there is the intent, not a surprise.
+ */
+export const EDGE_LOCK_PX = 12;
+export const EDGE_LOCK_MAX_FT = 10;
+export const edgeLockTolFt = (ppf) => Math.min(EDGE_LOCK_PX / (Number(ppf) > 0 ? Number(ppf) : 1), EDGE_LOCK_MAX_FT);
+
 // Find the closest parcel-boundary edge to `p` within `tolFt`. Returns the point projected ONTO
 // that edge (so a measurement can literally begin on the property line) plus the edge's absolute
 // direction angle (radians) — or null when no boundary is close enough. `parcels` are

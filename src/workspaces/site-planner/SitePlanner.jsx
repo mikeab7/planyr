@@ -25,7 +25,7 @@ import { mergeSiteContent, createSiteModel, normalizeBondedChildren } from "./li
 import { extendMergeSelection } from "./lib/parcelSelect.js";
 import { parcelSelectHintDecision, PARCEL_HINT_COOLDOWN_MS } from "./lib/parcelSelectHint.js";
 import { measuresUnderPoint, nextMeasureSelection } from "./lib/measureHit.js";
-import { nearestBoundaryEdge, constrainToEdgeAngle } from "./lib/edgeConstrain.js";
+import { nearestBoundaryEdge, constrainToEdgeAngle, edgeLockTolFt } from "./lib/edgeConstrain.js";
 import { markupsUnderPoint, nextMarkupSelection, boxCorners } from "./lib/markupPick.js";
 import { parkDepthForRows, parkRowsForDepth, explodeParkingBands, edgeAbutsPaving } from "./lib/parking.js";
 import { loadAndDownscaleImage } from "./lib/image.js";
@@ -39,7 +39,10 @@ import { syncOverlayLayers, withTileRetry, ALL_LAYERS, probeService, layerVintag
 import { loadRasterIdentify, makeHoverIdentify, rasterIdentifyNow } from "./lib/rasterIdentifyLazy.js";
 import { sanitizeLayerOverrides, overridesFromOverlays, overlaysWithOverrides, applyOnOverrides, overridesSig } from "./lib/layerPrefs.js";
 import { BASEMAPS } from "./lib/basemaps.js";
-import { ppfToZoom, exactContainerPoint } from "./lib/mapLock.js";
+import {
+  ppfToZoom, exactContainerPoint,
+  basemapWrapPoint, registrationShift, sanitizeShift, tileNwFeet,
+} from "./lib/mapLock.js";
 import { overscanPx, keepBufferFor, retinaForZoom, tileWeight, tileCacheLimit } from "./lib/tileBudget.js";
 import { preserveTilesAcrossSetView, announceSetView, boundTileCache, releaseLayer } from "./lib/tileLifecycle.js";
 import { buildGhost } from "./lib/ghostSnapshot.js";
@@ -106,7 +109,10 @@ import { reorderByZ, arrangeFlags } from "./lib/arrange.js";
 import { commonStyleState, selectionRingFeet } from "./lib/multiStyle.js";
 import { parseTracts, callsToPath, pathCloses, misclosure, bufferPolyline, offsetPolyline, ringsOverlap } from "./lib/metesAndBounds.js";
 import { solveDeedAlignment, gridConvergenceDeg, rotatePointsAbout, ringCentroid as deedCentroid, describeRotation } from "./lib/deedAlign.js";
-import { readDeedFile } from "../../shared/files/docxText.js";
+/* B1141 bundle-budget offset — the deed reader is loaded ON DEMAND (dynamic import at its one
+ * call site in the deed-drop handler). It is a self-contained .docx/ZIP reader that only runs
+ * once someone drops a deed or survey file, so it has no business on the boot path; the same
+ * treatment B1123 gave the title reader and B1042 gave the export path. */
 import { EASEMENT_TYPES, easementType, easementColor, easementLabel, easementArea, DEFAULT_EASEMENT_ATTRS, deriveEasementRing, buildParcelEdgeStrip } from "./lib/easements.js";
 import { edgeRuns, runSetbackValue, resizeRunLength } from "./lib/edgeRuns.js";
 // B1123 bundle-budget offset — the title reader is loaded ON DEMAND (dynamic import in
@@ -574,7 +580,8 @@ const MK_HIT_PX = 12;
 const CALLOUT_BORDER_BAND_PX = 6;
 // How close (px) a measurement/line start-click must be to a parcel boundary to snap onto it and
 // arm the Shift "perpendicular-to-the-property-line" lock (NEW). Same feel as MK_HIT_PX.
-const EDGE_LOCK_PX = 12;
+// EDGE_LOCK_PX / EDGE_LOCK_MAX_FT / edgeLockTolFt now live in lib/edgeConstrain.js beside the
+// magnet they bound (NEW-2(d)), so the cap is unit-tested rather than buried in this file.
 const mkPts = (m) => (m.kind === "line" ? [m.a, m.b] : (m.pts || []));
 const setMkPts = (m, pts) => (m.kind === "line" ? { ...m, a: pts[0], b: pts[1] } : { ...m, pts });
 const mkMinPts = (m) => (m.kind === "polygon" ? 3 : 2);
@@ -2206,6 +2213,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const ensureBasemapOn = useCallback(() => setBasemapSrc((s) => (s === "off" ? "esri" : s)), []);
   const [layersOpen, setLayersOpen] = useState(false); // planner Layers control expanded
   const [viewMenuOpen, setViewMenuOpen] = useState(false); // on-canvas View (eye) menu expanded (B653)
+  /* NEW-2 — the sub-pixel shift that welds the DRAWING onto wherever Leaflet actually
+   * seated the basemap. Measured (never assumed) after every basemap commit and every
+   * gesture transform, and applied as a CSS translate on the SVG canvas only: `view` stays
+   * untouched, so the exactly-reversible pan V478 proved is preserved and nothing
+   * accumulates. Because `p2f` derives the cursor from `svgRef.getBoundingClientRect()`,
+   * the same translate that moves the drawing also moves the coordinate a click reports —
+   * ONE conversion, corrected in ONE place, for the readout and for placed points alike.
+   * See lib/mapLock.js ("closing the whole-pixel floor") for the measurement and the two
+   * contributors. Zero whenever there is no basemap frame to register against. */
+  const [regShift, setRegShift] = useState({ dx: 0, dy: 0 });
   const geoWrapRef = useRef(null);
   const geoMapRef = useRef(null);
   const geoBaseRef = useRef(null);
@@ -2451,7 +2468,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   useLayoutEffect(() => {
     const map = geoMapRef.current;
     const wrap = geoWrapRef.current;
-    if (!map || !wrap || !origin) return;
+    // No basemap frame → nothing to register against, so the drawing sits at its own
+    // natural position (NEW-2). An un-located plan is drawn in feet against nothing.
+    if (!map || !wrap || !origin) { setRegShift((r) => (r.dx || r.dy ? { dx: 0, dy: 0 } : r)); return; }
     const fx = (size.w / 2 - view.offX) / view.ppf;
     const fy = (size.h / 2 - view.offY) / view.ppf;
     const center = feetToLatLng({ x: fx, y: fy }, origin.lat, origin.lon);
@@ -2482,6 +2501,71 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       map.getPixelOrigin(),
       map.layerPointToContainerPoint(L.point(0, 0)),
     );
+
+    /* NEW-2 — MEASURE the drawing-vs-imagery registration and hand the residual to the
+     * canvas. The reference point is the view centre, whose feet coordinate the drawing
+     * paints at exactly (size/2) by construction of `center` above, so one point pins the
+     * whole frame: the two mappings differ only by a translation (their scales agree by
+     * construction — `ppfToZoom` is the shared model). Measured after each of the three
+     * paths that can move the basemap (a resize commit, a gesture transform, a settle
+     * commit), because each seats it on a different sub-pixel remainder. */
+    const noteReg = (imgPt, drawPt, how) => {
+      const s = sanitizeShift(registrationShift(imgPt, drawPt));
+      if (!s.ok) {
+        // LOUD-FAILURE: a shift past the quantisation range is a model disagreement (a scale
+        // mismatch, a stale container size, a half-applied gesture transform), not something
+        // to paper over by shoving the drawing sideways. Report it and apply nothing.
+        reportClientEvent("map-registration-out-of-range", "drawing/basemap registration shift exceeded the sub-pixel range", {
+          how, reason: s.reason, dx: Math.round((imgPt.x - drawPt.x) * 1000) / 1000, dy: Math.round((imgPt.y - drawPt.y) * 1000) / 1000,
+          w: size.w, h: size.h, ppf: view.ppf,
+        });
+      }
+      const next = s.shift;
+      setRegShift((r) => (Math.abs(r.dx - next.dx) < 1e-4 && Math.abs(r.dy - next.dy) < 1e-4 ? r : next));
+    };
+    /* PREFERRED reference: a real TILE on screen. Its z/x/y (straight off the `src` our own
+     * basemap registry builds) fixes its Mercator corner exactly, and its rendered rect is where
+     * that corner actually IS — including the wrap's live gesture transform and Leaflet's
+     * per-level rounding, neither of which any projection call can see. So this ONE formula
+     * serves the gesture branch and the settled branch identically, with no overscan arithmetic
+     * and no Leaflet internals. Scoped to `wrap`, so the frozen ghost clone (a sibling in the
+     * clip) can never be sampled; deepest z wins, so the coarse backfill layer never is either. */
+    const tileRef = () => {
+      const clip = wrap.parentElement;
+      if (!clip) return null;
+      const cr = clip.getBoundingClientRect();
+      let best = null;
+      for (const el of wrap.querySelectorAll("img.leaflet-tile")) {
+        const m = /\/tile\/(\d+)\/(\d+)\/(\d+)(?:[?#]|$)/.exec(el.src || "");
+        if (!m) continue;                         // an unrecognised template → fall back, never guess
+        const z = +m[1];
+        if (best && z <= best.z) continue;
+        const r = el.getBoundingClientRect();
+        if (!(r.width > 0 && r.height > 0)) continue;
+        best = { z, ty: +m[2], tx: +m[3], left: r.left - cr.left, top: r.top - cr.top };
+      }
+      if (!best) return null;
+      const ft = tileNwFeet(best.z, best.tx, best.ty, origin.lat, origin.lon);
+      return { imgPt: { x: best.left, y: best.top }, drawPt: worldToScreen({ scale: view.ppf, tx: view.offX, ty: view.offY }, ft) };
+    };
+    // Fallback when there is no tile to read (aerial off, or none arrived yet): the map's own
+    // projection, which is the frame every Leaflet VECTOR overlay is placed in.
+    const projRef = (c) => ({
+      imgPt: basemapWrapPoint(
+        map.project(L.latLng(c), map.getZoom()),
+        map.getPixelOrigin(),
+        map.layerPointToContainerPoint(L.point(0, 0)),
+        geoOverscan,
+      ),
+      drawPt: { x: size.w / 2, y: size.h / 2 },
+    });
+    const syncReg = (c) => {
+      try {
+        const t = tileRef();
+        if (t) noteReg(t.imgPt, t.drawPt, "tile");
+        else noteReg(projRef(c).imgPt, projRef(c).drawPt, "projection");
+      } catch (_) { /* never let a measurement break a commit */ }
+    };
 
     // Snapshot the current tiles as a static overlay (cloned WITH the live
     // transform, so it sits exactly where the basemap looks right now) and keep
@@ -2536,7 +2620,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         } catch (_) { try { map.setView(c, zoom, { animate: false }); } catch (_) {} }
         // Store the map's ACTUAL settled center (panBy rounds to whole pixels), so the
         // next sizeChanged test compares against reality, not the pre-round target.
-        try { geoCommitRef.current = { center: map.getCenter(), zoom: cur, w: size.w, h: size.h }; } catch (_) { geoCommitRef.current = { center: c, zoom: cur, w: size.w, h: size.h }; }
+        try { geoCommitRef.current = { center: map.getCenter(), zoom: cur, w: size.w, h: size.h, cw, ch }; } catch (_) { geoCommitRef.current = { center: c, zoom: cur, w: size.w, h: size.h, cw, ch }; }
+        syncReg(c); // NEW-2 — panBy rounded its offset; measure where the basemap actually landed
         return;
       }
       if (ghost) spawnGhost();
@@ -2549,32 +2634,64 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       try {
         announceSetView([geoBaseRef.current, geoBackfillRef.current], zoom, () => map.setView(c, zoom, { animate: false }));
       } catch (_) {}
-      geoCommitRef.current = { center: c, zoom, w: size.w, h: size.h };
+      geoCommitRef.current = { center: c, zoom, w: size.w, h: size.h, cw, ch };
+      syncReg(c); // NEW-2 — a zoom commit re-snaps the tile lattice; re-measure
     };
 
     const prev = geoCommitRef.current;
-    const sizeChanged = !prev || prev.w !== size.w || prev.h !== size.h;
+    /* NEW-2 — the re-centre trigger has to watch the MAP CONTAINER, not just the canvas.
+     *
+     * `size.w/h` is the CANVAS. The map container is a different box: the canvas PLUS twice the
+     * overscan (`inset: -geoOverscan`) — and the overscan is a function of the drawable element
+     * count, which changes as culling reveals or hides elements while you zoom. So the container
+     * can resize with the canvas unchanged. When it does, its top-left moves relative to the
+     * clip while `invalidateSize({pan:false})` deliberately doesn't move the map pane, so the
+     * imagery slides by the overscan delta — TENS of pixels, not the sub-pixel quantisation this
+     * item started on. Nothing re-centred it, because nothing was watching that box.
+     *
+     * Measuring the container's own client size and folding it into `sizeChanged` closes it at
+     * the source: the same branch that already handles a panel toggle re-syncs Leaflet's cached
+     * size and re-centres through `commit`, which PANS rather than wiping — so this costs no
+     * flash and no tile churn. Deliberately the DOM's own number rather than `geoOverscan`
+     * arithmetic: the box that matters is the one the browser laid out. (Fixing it here is also
+     * what keeps the registration shift below a genuinely sub-pixel correction —
+     * `sanitizeShift` REFUSES a shift of this size, by design, rather than papering over it.) */
+    const cw = wrap.clientWidth, ch = wrap.clientHeight;
+    // BOTH tests are needed, and each catches a case the other misses. `prev.cw/ch` catches the
+    // container resizing between two commits. `cachedStale` catches the container having resized
+    // BEFORE the very first commit — the map is created at one overscan, the element count
+    // settles it to another a beat later, and the first commit then bakes in a cached size that
+    // was already wrong with nothing left to compare against. MEASURED: that alone left the
+    // basemap 86 px from the drawing on a 60-element plan, at rest, before any gesture.
+    let cachedStale = false;
+    try {
+      const cs = map.getSize();
+      cachedStale = Math.abs(cs.x - cw) > 0.5 || Math.abs(cs.y - ch) > 0.5;
+    } catch (_) { /* a size probe must never break a commit */ }
+    const sizeChanged = !prev || prev.w !== size.w || prev.h !== size.h || prev.cw !== cw || prev.ch !== ch || cachedStale;
     // First paint (`prev` null) → a plain commit; nothing on screen yet. A RESIZE while a prior view
     // IS on screen — a docked panel / left-rail opening/closing shrinks or grows the in-flow canvas —
     // needs Leaflet's cached size re-synced, then a same-zoom re-center. B933 does that WITHOUT a
     // tile-wipe or a ghost (see the sizeChanged branch below).
     if (sizeChanged) {
       clearTimeout(geoCommitTimer.current);
-      if (prev) {
-        // A resize while a view is already on screen — a docked panel / left-rail
-        // opening or closing shrinks or grows the in-flow canvas. Update Leaflet's
-        // cached size WITHOUT panning or wiping (`invalidateSize` with pan:false
-        // fires only `move`/`resize`, never `viewreset`), then re-center through
-        // `commit`, which pans (no wipe) because a toggle never changes the zoom.
-        // Net: opening/closing/switching a panel no longer flashes the aerial at
-        // all — the residual tile-wipe B821/B837 masked with a ghost is now gone
-        // at the source, so no ghost is spawned for a toggle. (B933)
-        wrap.style.transform = "";
-        try { map.invalidateSize({ animate: false, pan: false }); } catch (_) {}
-        commit(center, z, false);
-      } else {
-        commit(center, z, false); // first paint: plain commit, nothing on screen to ghost
-      }
+      // A resize while a view is already on screen — a docked panel / left-rail opening or
+      // closing shrinks or grows the in-flow canvas; or the OVERSCAN changed, which resizes the
+      // map container without touching the canvas at all (NEW-2). Update Leaflet's cached size
+      // WITHOUT panning or wiping (`invalidateSize` with pan:false fires only `move`/`resize`,
+      // never `viewreset`), then re-center through `commit`, which pans (no wipe) because
+      // neither a toggle nor an overscan change alters the zoom. Net: opening/closing/switching
+      // a panel no longer flashes the aerial at all — the residual tile-wipe B821/B837 masked
+      // with a ghost is now gone at the source, so no ghost is spawned for a toggle. (B933)
+      //
+      // NEW-2: the re-sync now runs on the FIRST commit too, not only when a previous one
+      // exists. It used to be skipped there ("nothing on screen yet"), which is true of the
+      // FLASH but not of the SIZE: the container can already have resized between the map's
+      // creation and that first commit, and skipping the re-sync baked the stale size in
+      // permanently — 86 px of misregistration at rest, with nothing left to compare against.
+      wrap.style.transform = "";
+      try { map.invalidateSize({ animate: false, pan: false }); } catch (_) {}
+      commit(center, z, false);
       return;
     }
 
@@ -2595,6 +2712,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       const ty = half.y - p.y * scale;
       wrap.style.transformOrigin = "0 0";
       wrap.style.transform = `translate3d(${tx}px, ${ty}px, 0) scale(${scale})`;
+      // NEW-2 — re-measure mid-gesture too, so the drawing stays welded through the drag and
+      // not only once it settles. Reading a tile's rect needs no special case for the transform
+      // just written above: the rect already includes it.
+      syncReg(center);
     } catch (_) { commit(center, z, true); return; }
 
     // Re-base to crisp tiles once the scale has drifted ~0.75 levels either way
@@ -2606,7 +2727,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     clearTimeout(geoCommitTimer.current);
     if (Math.abs(z - prev.zoom) > 0.75) { commit(center, z, true); }
     else { geoCommitTimer.current = setTimeout(() => commit(center, z, true), 160); }
-  }, [view, size, origin]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [view, size, origin, geoOverscan]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => () => { clearTimeout(geoCommitTimer.current); if (geoGhostRef.current) { try { geoGhostRef.current.remove(); } catch (_) {} geoGhostRef.current = null; } }, []);
 
@@ -3592,11 +3713,25 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // E2E/self-audit hook (same `window.__PLANYR_E2E` gate as the geo-map hook above; never runs in
   // production). Lets a headless harness park the viewport on an EXACT world point at an EXACT
   // scale, so a junction screenshot is reproducible instead of "wheel-scroll and hope".
+  /* NEW-2 — the pointer-accuracy harness (ui-audit/diagnose-pointer-accuracy.mjs) needs the
+   * RAW numbers, not the chip's rounded text: at the accuracy being asserted (a quarter of a
+   * CSS pixel) the displayed decimals are the same order as the error being measured. This
+   * ref carries the live values so the hook below can expose them without re-registering on
+   * every mouse move. */
+  const probeRef = useRef({});
+  useEffect(() => { probeRef.current = { view, size, regShift, cursorFt: cursor, cursorLL, measures }; });
   useEffect(() => {
     if (typeof window === "undefined" || !window.__PLANYR_E2E) return;
     window.__plannerView = {
       get: () => ({ ...view, w: size.w, h: size.h }),
       centerOn: (fx, fy, ppf) => setView(() => ({ ppf, offX: size.w / 2 - fx * ppf, offY: size.h / 2 - fy * ppf })),
+      // read-only probes (NEW-2): the registration shift actually applied, the cursor's own
+      // feet/lat-lng answer, and the committed measure geometry a placed point lands in.
+      registration: () => ({ ...probeRef.current.regShift }),
+      cursor: () => (probeRef.current.cursorLL
+        ? { ft: { ...probeRef.current.cursorFt }, lat: probeRef.current.cursorLL.lat, lng: probeRef.current.cursorLL.lng }
+        : null),
+      measures: () => JSON.parse(JSON.stringify(probeRef.current.measures || [])),
     };
   }, [view, size.w, size.h]);
   const p2f = useCallback((cx, cy) => {
@@ -3723,7 +3858,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // the property line, arming the lock below), else the usual grid snap. Alt bypasses the snap.
   const drawStartPt = (fp) => {
     if (!altSnapOffRef.current) {
-      const edge = nearestBoundaryEdge(fp, parcels, EDGE_LOCK_PX / view.ppf);
+      const edge = nearestBoundaryEdge(fp, parcels, edgeLockTolFt(view.ppf));
       if (edge) return edge.pt;
     }
     return snapPt(fp);
@@ -3732,7 +3867,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // drawStartPt snapped ONTO the edge). null → the draft didn't start on a boundary.
   const anchorEdgeAngle = (firstPt) => {
     if (!firstPt) return null;
-    const edge = nearestBoundaryEdge(firstPt, parcels, EDGE_LOCK_PX / view.ppf);
+    const edge = nearestBoundaryEdge(firstPt, parcels, edgeLockTolFt(view.ppf));
     return edge ? edge.ang : null;
   };
   // Shift-lock for a draft segment: perpendicular / parallel / 45° RELATIVE to the boundary the
@@ -12644,6 +12779,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       for (const file of list) {
         const row = { id: uid(), name: file.name || "deed", text: "", boundaryCalls: 0, exCount: 0, closes: false, gap: 0, error: "" };
         try {
+          const { readDeedFile } = await import("../../shared/files/docxText.js");
           const text = await readDeedFile(file);
           row.text = text;
           const tracts = parseTracts(text);
@@ -15428,9 +15564,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               {gisHover.note && <div style={{ color: PAL.muted }}>{gisHover.note}</div>}
             </div>
           )}
+          {/* NEW-2 — `transform` below is the MEASURED sub-pixel translate that welds the
+              drawing onto wherever Leaflet actually seated the basemap. `p2f` reads this
+              element's own bounding box, so this ONE transform corrects the pointer path
+              (the hover readout AND every placed point) along with the render; `view` is
+              untouched, so the pan stays exactly reversible. The export composes from
+              `view` and deliberately does NOT carry it — see lib/mapLock.js. */}
           <svg ref={svgRef} data-testid="planner-canvas" width="100%" height="100%" viewBox={`0 0 ${size.w} ${size.h}`} role="application" aria-label="Site plan canvas"
             data-view-offx={view.offX} data-view-offy={view.offY} data-view-ppf={view.ppf}
-            style={{ position: "relative", zIndex: 1, background: origin ? "transparent" : PAL.paper, display: "block", touchAction: "none", userSelect: "none", WebkitUserSelect: "none", cursor: spacePan ? (panning ? "grabbing" : "grab") : identifyMode ? ADD_CURSOR : (attachFor || alignFor || traceMode || pobMode || routeMode || xsecMode || ovCalib) ? "crosshair" : (tool === "select" || tool === "pan" || printMode) ? (panning ? "grabbing" : "grab") : "crosshair" }}
+            data-reg-dx={regShift.dx} data-reg-dy={regShift.dy}
+            style={{ position: "relative", zIndex: 1, transform: (regShift.dx || regShift.dy) ? `translate(${regShift.dx}px, ${regShift.dy}px)` : undefined, background: origin ? "transparent" : PAL.paper, display: "block", touchAction: "none", userSelect: "none", WebkitUserSelect: "none", cursor: spacePan ? (panning ? "grabbing" : "grab") : identifyMode ? ADD_CURSOR : (attachFor || alignFor || traceMode || pobMode || routeMode || xsecMode || ovCalib) ? "crosshair" : (tool === "select" || tool === "pan" || printMode) ? (panning ? "grabbing" : "grab") : "crosshair" }}
             onMouseDown={(e) => {
               // Don't cancel the default action when the mousedown lands on an inline text
               // editor (a foreignObject <textarea>/<input> — the callout/text box, the inline

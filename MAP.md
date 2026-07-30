@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-07-30 @ `8459c12` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-07-30 @ `e387d88` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -316,7 +316,7 @@ _367 source files mapped._
 - **`src/workspaces/site-planner/lib/conflictToasts.js`** — the B673 conflict policy matrix as a pure mapping: elementSync event → toast spec (who gets told what, which action rides along)
   - _exports_: `toastForSyncEvent`
 - **`src/workspaces/site-planner/lib/contours.js`** — Pure contour-line math (B704): 1-ft interval auto-pick, sentinel-embedded voids, d3-contour marching squares, grid-border + dilated-void strip passes, pixel-space simplify, index flags + sparse labels
-  - _exports_: `buildContourIndex`, `composeContourPaint`, `contourLabelText`, `DOUBLE_STAMP_PX`, `hitContour`, `HOVER_TOL_PX`, `joinSeams`, `LABEL_CAP`, `LABEL_MIN_SEP_CELLS`, `pickLabels`
+  - _exports_: `buildContourIndex`, `composeContourPaint`, `contourLabelText`, `DOUBLE_STAMP_PX`, `hitContour`, `HOVER_LABEL_GAP_PX`, `HOVER_TOL_PX`, `hoverLabelPlacement`, `hoverLabelSize`, `joinSeams`, `LABEL_CAP`, `LABEL_MIN_SEP_CELLS`, `pickLabels`
 - **`src/workspaces/site-planner/lib/contourTrace.js`** — worker-only marching-squares contour tracer (the sole `d3-contour` consumer): border/void strips, tile-interior clip, deterministic label anchors
   - _exports_: `anchorLabels`, `buildContours`, `clipRun`, `clipSegment`, `dilateVoids`, `pickInterval`, `stripRing`
 - **`src/workspaces/site-planner/lib/convertClient.js`** — B748 client for the B238 DWG→DXF convert service (VITE_CONVERT_URL); round-trips DWG bytes → DXF with a visible, distinct state for every failure (unset URL / 422 / 413 / unreachable).
@@ -374,7 +374,7 @@ _367 source files mapped._
 - **`src/workspaces/site-planner/lib/ebfe.js`** — FEMA/USGS InFRM Estimated BFE (EBFE) point sampler (B882): reads the estimated 1% BFE (layer 17) + 0.2% WSE (layer 21) via ArcGIS MapServer /identify, per-location cache, bounded fetch. `sampleEbfePoint`/`foldIdentify`/`pixelValueOf`/`ebfeIdentifyUrl`.
   - _exports_: `clearEbfeCache`, `EBFE_LAYERS`, `EBFE_URL`, `ebfeIdentifyUrl`, `foldIdentify`, `pixelValueOf`, `sampleEbfePoint`
 - **`src/workspaces/site-planner/lib/edgeConstrain.js`** — pure "start a measurement/line on a parcel boundary, then hold Shift to keep it perpendicular/parallel/45° to that boundary" helpers (the setback lock): project a click onto the nearest parcel edge and snap a drawn direction relative to that edge's angle
-  - _exports_: `constrainToEdgeAngle`, `nearestBoundaryEdge`, `projectToSegment`
+  - _exports_: `constrainToEdgeAngle`, `EDGE_LOCK_MAX_FT`, `EDGE_LOCK_PX`, `edgeLockTolFt`, `nearestBoundaryEdge`, `projectToSegment`
 - **`src/workspaces/site-planner/lib/edgeRuns.js`** — Group parcel boundary edges into logical sides (runs) by bearing tolerance, with per-run length, midpoint, and shared setback value
   - _exports_: `bearingDelta`, `edgeRuns`, `resizeRunLength`, `runOfEdge`, `runSetbackValue`, `segBearing`
 - **`src/workspaces/site-planner/lib/editorNames.js`** — conflict-toast naming (B673): cached editor display names via the team roster RPC (self → "you (another window)") + describeElement labels
@@ -474,7 +474,7 @@ _367 source files mapped._
 - **`src/workspaces/site-planner/lib/mapillaryClient.js`** — Leaflet-free Mapillary request shaping: builds bbox map_features URL (same-origin token-injecting proxy, or direct Graph API with a user token) and filters to pole/hydrant detections
   - _exports_: `mapillaryRequestUrl`, `MLY_FIELDS`, `MLY_LIMIT`, `MLY_PROXY_PATH`, `pickDetections`
 - **`src/workspaces/site-planner/lib/mapLock.js`** — THE projection welding the planner's feet frame to the Web-Mercator basemap — scaled-Mercator feet↔lat/lng plus the matching ppf↔zoom, both anchored at the site origin
-  - _exports_: `exactContainerPoint`, `feetToLatLngPair`, `FT_PER_DEG`, `ftPerDeg`, `invMercDeg`, `lngLatToFeet`, `lockOffsetPx`, `mercDeg`, `ppfToZoom`, `zoomToPpf`
+  - _exports_: `basemapWrapPoint`, `basemapWrapPointTransformed`, `exactContainerPoint`, `feetToLatLngPair`, `FT_PER_DEG`, `ftPerDeg`, `invMercDeg`, `lngLatToFeet`, `lockOffsetPx`, `mercDeg`, `ppfToZoom`, `REGISTRATION_SANITY_PX`, `registrationShift`, `sanitizeShift`, `tileNwFeet`, `zoomToPpf`
 - **`src/workspaces/site-planner/lib/mapSymbols.js`** — leaflet point symbology: the `pointToLayer` circleMarker factory every GeoJSON-consuming layer must pass, plus the `L.Icon.Default` image-path fix so an accidental default marker is a pin, not a broken image.
   - _exports_: `installDefaultMarkerIcon`, `pointToLayerFor`
 - **`src/workspaces/site-planner/lib/markupPick.js`** — pure Site-Planner markup hit-test + z-stack cycle (sibling of measureHit.js): the fill-aware grab rule (B920 — a closed markup grabs by interior only when filled, else stroke-only) and the smaller-area-first under-point stack + repeat/Alt-click cycle (B921)

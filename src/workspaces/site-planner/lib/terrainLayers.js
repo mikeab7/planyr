@@ -52,6 +52,7 @@ import {
 } from "./demGrid.js";
 import {
   composeContourPaint, contourLabelText, buildContourIndex, hitContour,
+  hoverLabelPlacement, hoverLabelSize,
   HOVER_TOL_PX, DOUBLE_STAMP_PX,
 } from "./contours.js";
 
@@ -270,13 +271,57 @@ const CONTOUR_INDEX_COL = "#5B2E0D";
 const ARROW_COL = "#0369A1";          // drainage blue (not the status palette)
 export const CONTOUR_HOVER_CLASS = "planyr-contour-hover"; // marks the ONE transient hover label
 
-const labelIcon = (text, className = "") => L.divIcon({
+/* `offset` (NEW-1) shifts the tag off the anchor by an exact number of SCREEN pixels, with
+ * the span's TOP-LEFT at the offset instead of its centre on the anchor — that is what
+ * gets the hover tag out from under the mouse pointer. Omitted (every permanent index
+ * label) keeps the historic centred placement, byte for byte.
+ *
+ * `position:absolute;left:0;top:0` rides ONLY with an offset, and it matters: an in-flow
+ * inline-block sits on the marker div's LINE BOX, so the inherited font's baseline strut
+ * pushes it a few pixels below the anchor. That slop is invisible when a label is merely
+ * centred "about" its point, but here the placement is exact arithmetic against the canvas
+ * edge — a few pixels of drift is the difference between clearing the bottom furniture and
+ * hiding behind it. Taking the span out of flow makes its top-left the anchor exactly. */
+const labelIcon = (text, className = "", offset = null) => L.divIcon({
   className,
   iconSize: [0, 0],
-  html: `<span style="display:inline-block;transform:translate(-50%,-50%);white-space:nowrap;pointer-events:none;` +
+  html: `<span style="display:inline-block;${offset ? "position:absolute;left:0;top:0;" : ""}` +
+    `transform:translate(${offset ? `${offset.tx}px,${offset.ty}px` : "-50%,-50%"});` +
+    `white-space:nowrap;pointer-events:none;` +
     `font:700 10px/1.2 Inter,system-ui,sans-serif;font-variant-numeric:tabular-nums slashed-zero;color:${CONTOUR_INDEX_COL};` +
     `text-shadow:0 0 2px #fff,0 0 2px #fff,0 0 3px #fff,0 0 4px #fff;">${text}</span>`,
 });
+
+/* NEW-1 — the box the hover tag has to stay inside, in MAP CONTAINER pixels.
+ *
+ * The planner's basemap container is deliberately OVERSCANNED (inset:-overscan inside a
+ * clip box with overflow:hidden), so container coordinates run well past what the user can
+ * see: a tag placed near the visible edge would be silently cut off by the clip, not by the
+ * viewport. Measuring the clip parent against the container recovers the visible window at
+ * whatever overscan is in force, and self-gates to the whole container on a surface that
+ * has no overscan (the map finder, where the clip IS the container).
+ *
+ * `bottom` reserves the row of on-canvas furniture the planner floats over its own bottom
+ * edge — the coordinate/elevation chip bottom-left, the scale bar and zoom cluster
+ * bottom-right — so the tag flips up instead of hiding behind one of them. The right-hand
+ * Tools rail needs no reserve: it is a flex SIBLING of the canvas, so it is outside this
+ * box already and the clip would cut anything that reached it. */
+const HOVER_BOTTOM_RESERVE_PX = 56;
+function visibleBox(map, { bottom = HOVER_BOTTOM_RESERVE_PX } = {}) {
+  const c = map && map.getContainer && map.getContainer();
+  const size = map && map.getSize ? map.getSize() : null;
+  let box = { x0: 0, y0: 0, x1: size ? size.x : 0, y1: size ? size.y : 0 };
+  try {
+    const clip = c && c.parentElement;
+    if (clip && c.getBoundingClientRect && clip.getBoundingClientRect) {
+      const cr = c.getBoundingClientRect(), pr = clip.getBoundingClientRect();
+      if (pr.width > 0 && pr.height > 0) {
+        box = { x0: pr.left - cr.left, y0: pr.top - cr.top, x1: pr.right - cr.left, y1: pr.bottom - cr.top };
+      }
+    }
+  } catch (_) { /* fall back to the full container — never break a mousemove */ }
+  return { ...box, y1: Math.max(box.y0, box.y1 - bottom) };
+}
 
 /* `parts` is [{ tile, data }] — one entry per lattice tile in the current cover.
  * Lines are merged by level across tiles and seam-joined (the tile clip cut each
@@ -471,17 +516,27 @@ function terrainLayer(cfg, onStatus, render, emptyMsg, { hover = false } = {}) {
     const answered = hit && (composed.labels || []).some((lab) =>
       lab.level === hit.level &&
       map.latLngToContainerPoint(L.latLng(lab.ll[0], lab.ll[1])).distanceTo(p) <= DOUBLE_STAMP_PX);
-    const key = hit && !answered ? `${hit.level}|${hit.ll[0].toFixed(6)},${hit.ll[1].toFixed(6)}` : null;
+    // NEW-1 — the tag is anchored at the CURSOR and offset from it, so the key carries the
+    // cursor's whole-pixel position too: the level alone would let the tag sit still while
+    // the pointer moved along one contour (the offset is measured from the pointer, not
+    // from the line). Rounding to whole pixels keeps it to at most one rebuild per pixel.
+    const key = hit && !answered
+      ? `${hit.level}|${Math.round(p.x)},${Math.round(p.y)}`
+      : null;
     if (key === hoverKey) return hit && !answered ? hit : null;
     hoverGroup.clearLayers();
     hoverKey = key;
     if (!key) return null;
     // Same white-halo divIcon, same size and colour as the permanent index labels — the
-    // hovered line reads exactly like a labelled one, which is the whole ask.
-    L.marker(hit.ll, {
+    // hovered line reads exactly like a labelled one, which is the whole ask. What changed
+    // in NEW-1 is only WHERE it sits: beside the pointer instead of under it, flipped near
+    // an edge so the canvas clip (or the bottom furniture) can never eat it.
+    const text = contourLabelText(hit.level);
+    const place = hoverLabelPlacement(p, visibleBox(map), hoverLabelSize(text));
+    L.marker(here, {
       // the class exists so a harness can tell the ONE transient label from the permanent
       // index labels — a ghost or a stacked pair is otherwise invisible to a DOM check
-      icon: labelIcon(contourLabelText(hit.level), CONTOUR_HOVER_CLASS),
+      icon: labelIcon(text, CONTOUR_HOVER_CLASS, place),
       interactive: false, keyboard: false,
     }).addTo(hoverGroup);
     return hit;

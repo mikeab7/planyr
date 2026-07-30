@@ -232,6 +232,99 @@ test.describe("NEW-1 — hovering a contour names its elevation", () => {
     expect(new Set(stamps).size).toBe(stamps.length);
     expect(errors).toEqual([]);
   });
+
+  /* NEW-1 (the 2026-07-29 refinement of B1095) — the tag was painted AT the hit point, i.e.
+   * under the mouse pointer, and the pointer glyph covered the number. With the Pan tool
+   * armed that glyph is a big grab hand, so the elevation was partly or wholly hidden:
+   * "my mouse shows a grab and it ends up covering the elevation that I'm trying to see."
+   *
+   * This drives the real canvas and asserts the two things the fix owes: the tag's painted
+   * rectangle never intersects the pointer's own glyph footprint, and it never leaves the
+   * visible canvas — including the reserved bottom row where the coordinate/elevation chip
+   * and the scale bar float. The sweep deliberately runs a lap just inside all four edges,
+   * so the flip cases are exercised rather than assumed. */
+  test("the tag sits BESIDE the pointer, and flips at the edges instead of clipping", async ({ page }) => {
+    const errors = [];
+    page.on("pageerror", (e) => errors.push(String(e)));
+    await openSite(page, { terrain: true });
+    await page.getByRole("button", { name: /Layers/ }).first().click();
+    const row = page.getByRole("checkbox", { name: /contour/i }).filter({ visible: true }).first();
+    await row.check({ force: true });
+    await page.keyboard.press("Escape").catch(() => {});
+    await expect(async () => {
+      expect(await contourLabels(page).count()).toBeGreaterThan(0);
+    }).toPass({ timeout: 60000 });
+
+    const box = await canvasBox(page);
+    // The gap the tag is placed at, and the bottom row the layer reserves for the floating
+    // chip / scale bar. Kept as literals here on purpose: the spec is the independent check
+    // on the shipped constants, so importing them would make it agree with itself.
+    const GAP = 16, BOTTOM_RESERVE = 56;
+    // A lap just inside every edge, then a diagonal through the middle — so the sweep visits
+    // the top, bottom, left, right and both far corners as well as open canvas.
+    const path = [];
+    const inset = 8, W = box.width, H = box.height;
+    for (let i = 0; i <= 40; i++) path.push({ x: inset + (W - 2 * inset) * (i / 40), y: inset });
+    for (let i = 0; i <= 30; i++) path.push({ x: W - inset, y: inset + (H - 2 * inset) * (i / 30) });
+    for (let i = 0; i <= 40; i++) path.push({ x: W - inset - (W - 2 * inset) * (i / 40), y: H - inset });
+    for (let i = 0; i <= 30; i++) path.push({ x: inset, y: H - inset - (H - 2 * inset) * (i / 30) });
+    for (let i = 0; i <= 40; i++) path.push({ x: inset + (W - 2 * inset) * (i / 40), y: inset + (H - 2 * inset) * (i / 40) });
+
+    // Read the painted tag for the CURRENT cursor. The readout is throttled and the paint is
+    // asynchronous, so a rect identical to the previous read is a STALE frame, not a fresh
+    // answer — measured live, a busy main thread can hold one for several moves. Such a
+    // sample is skipped rather than asserted, because asserting a tag against a cursor it was
+    // never placed for would be measuring nothing (in either direction).
+    const readTag = () => page.evaluate(() => {
+      const sp = document.querySelector(".planyr-contour-hover span");
+      if (!sp) return null;
+      const b = sp.getBoundingClientRect();
+      return { l: b.left, t: b.top, r: b.right, b: b.bottom, text: (sp.textContent || "").trim() };
+    });
+    const same = (a, b2) => !!a && !!b2 && a.l === b2.l && a.t === b2.t && a.text === b2.text;
+    const samples = [];
+    let prev = null;
+    for (const p of path) {
+      const cx = Math.round(box.x + p.x), cy = Math.round(box.y + p.y);
+      await page.mouse.move(cx, cy);
+      await page.waitForTimeout(45);
+      let r = await readTag();
+      if (same(r, prev)) { await page.waitForTimeout(70); r = await readTag(); }
+      const stale = same(r, prev);
+      if (r) prev = r;
+      if (r && !stale && r.r > r.l) samples.push({ cx, cy, r });
+    }
+    expect(samples.length, "a lap of the canvas must land on contour lines").toBeGreaterThan(4);
+
+    const canvasBoxAbs = { x0: box.x, y0: box.y, x1: box.x + box.width, y1: box.y + box.height - BOTTOM_RESERVE };
+    let flippedX = 0, flippedY = 0;
+    for (const s of samples) {
+      // (1) the number is legible without moving the mouse: the tag's rect must not intersect
+      // the pointer glyph's footprint (a square of the placement gap about the hotspot).
+      const g = { l: s.cx - GAP, t: s.cy - GAP, r: s.cx + GAP, b: s.cy + GAP };
+      const hitsGlyph = s.r.l < g.r && g.l < s.r.r && s.r.t < g.b && g.t < s.r.b;
+      expect(hitsGlyph, `tag "${s.r.text}" covers the pointer at ${s.cx},${s.cy}`).toBe(false);
+      // (2) it is never clipped by the canvas edge and never lands in the reserved bottom row
+      // (the coordinate chip bottom-left, the scale bar and zoom cluster bottom-right).
+      expect(s.r.l).toBeGreaterThanOrEqual(canvasBoxAbs.x0 - 0.6);
+      expect(s.r.t).toBeGreaterThanOrEqual(canvasBoxAbs.y0 - 0.6);
+      expect(s.r.r).toBeLessThanOrEqual(canvasBoxAbs.x1 + 0.6);
+      expect(s.r.b).toBeLessThanOrEqual(canvasBoxAbs.y1 + 0.6);
+      if (s.r.r <= s.cx) flippedX++;   // moved to the LEFT of the pointer
+      if (s.r.t >= s.cy) flippedY++;   // dropped BELOW the pointer
+    }
+    // The lap ran along the right edge and along the top, so both flips must have fired —
+    // otherwise the "never clipped" assertion above could be passing vacuously.
+    expect(flippedX, "the tag must flip to the left near the right edge").toBeGreaterThan(0);
+    expect(flippedY, "the tag must flip below the pointer near the top edge").toBeGreaterThan(0);
+
+    // Still exactly one tag, and nothing orphaned once the cursor leaves the lines.
+    expect(await hoverLabels(page).count()).toBeLessThanOrEqual(1);
+    await page.mouse.move(box.x + box.width - 3, box.y + 3);
+    await page.waitForTimeout(400);
+    expect(await hoverLabels(page).count()).toBe(0);
+    expect(errors).toEqual([]);
+  });
 });
 
 /* NEW-2(c/d/e) — PROPOSED + the signed cut/fill, on a seeded concept with a finished
