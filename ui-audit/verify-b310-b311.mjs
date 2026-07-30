@@ -8,7 +8,7 @@
  *
  * Logged-out against the built app (vite preview on :4173). Seeds a single LOCKED parcel — the
  * default every county-pulled / drawn lot carries. Selected parcel = stroke #c2410c (width 3);
- * unselected = stroke #5b6650 (width 2).
+ * unselected = stroke --canvas-parcel (width 2).
  */
 import { chromium } from "playwright";
 import { mkdirSync } from "node:fs";
@@ -54,7 +54,7 @@ const parcelInfo = () => page.evaluate(() => {
   if (!svg) return null;
   const p = [...svg.querySelectorAll("polygon")].find((el) => {
     const s = (el.getAttribute("stroke") || "").toLowerCase();
-    return s === "#5b6650" || s === "#c2410c";
+    return s === "#534ab7" || s === "#c2410c";
   });
   if (!p) return null;
   const r = p.getBoundingClientRect();
@@ -94,7 +94,7 @@ const result = { errors: [] };
 result.toggleDefault = await toggleState();        // should be present + pressed=true
 await deselect();                                  // the lone-parcel auto-select (SitePlanner L~1520) fires on load — clear it first
 let pc = await parcelInfo();
-result.unselectedBeforeClick = pc && !pc.selected; // stroke #5b6650 / width 2
+result.unselectedBeforeClick = pc && !pc.selected; // stroke --canvas-parcel / width 2
 {
   const p = clickPt(pc);
   await page.mouse.click(p.x, p.y);

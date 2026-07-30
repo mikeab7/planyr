@@ -131,6 +131,14 @@ import { loadDeed, deedNow } from "./lib/deedLazy.js";
  * treatment B1123 gave the title reader and B1042 gave the export path. */
 import { EASEMENT_TYPES, easementType, easementColor, easementLabel, easementArea, DEFAULT_EASEMENT_ATTRS, deriveEasementRing, buildParcelEdgeStrip } from "./lib/easements.js";
 import { edgeRuns, runSetbackValue, resizeRunLength } from "./lib/edgeRuns.js";
+// NEW-1 / NEW-2 / NEW-3 — the parcel-chrome declutter trio. `setbackChipRuns` groups the boundary
+// into one LABELLED run per side (value + direction, not per digitized segment); `spaceOut` /
+// `cornerTurns` are the shared screen-space thinning used by BOTH the setback chips and the vertex
+// handles; `polylabel` puts the acreage badge at the parcel's visual centre instead of its
+// vertex average. All three are pure + unit-tested; see their module headers for the why.
+import { setbackChipRuns, CHIP_MIN_EDGE_PX, CHIP_MIN_SEP_PX } from "./lib/setbackChips.js";
+import { spaceOut, cornerTurns } from "./lib/screenDeclutter.js";
+import { polylabel } from "./lib/polylabel.js";
 // B1123 bundle-budget offset — the title reader is loaded ON DEMAND (dynamic import in
 // `runTitleExtract`). Its Claude schema + prompt are KB of string literals that minify to
 // themselves and are needed only once someone uploads a title commitment; only the tiny stored-key
@@ -1745,6 +1753,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     paper: themePal.canvasBg, gridMinor: themePal.canvasGridMinor, gridMajor: themePal.canvasGridMajor,
     ink: themePal.textPrimary, accent: themePal.canvasSelection, accentSoft: themePal.canvasAccentSoft,
     setback: themePal.canvasSetback, parcel: themePal.canvasParcel, panelBg: themePal.surfaceRaised,
+    // NEW-4 — ink for the small WHITE value plates painted on the canvas (the setback chip).
+    // The plate is white in both themes, so its border + numerals are a fixed near-black.
+    chipInk: themePal.canvasChipInk,
     panelLine: themePal.borderDefault, muted: themePal.textSecondary,
     chrome: themePal.chromeBg, chromeLine: themePal.chromeDivider, chromeInk: themePal.chromeText,
     chromeMuted: themePal.chromeMuted, ember: themePal.accent, onAccent: themePal.onAccent,
@@ -12333,7 +12344,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // labels yield around them. Reused by parcelLabels so the obstacle box and the drawn pill agree.
   const parcelChips = parcels.map((pc) => {
     if (pc.active === false) return null; // inactive parcel shows no chip (B213) → not an obstacle
-    const base = centroid(pc.points), off = pc.labelOffset || { x: 0, y: 0 };
+    // NEW-3 — the badge sits at the parcel's VISUAL centre (the pole of inaccessibility: the
+    // centre of the largest circle that fits inside the ring), not at the vertex average. The
+    // vertex average is pulled toward whichever side was digitized with the most points, so on a
+    // long irregular strip whose subdivision edge carries dozens of short segments the badge
+    // floated off the parcel entirely and labelled the neighbour's land. `polylabel` is always
+    // inside the ring and is memoised per points array, so this costs the search once, not once
+    // per frame. `centroid` remains the fallback for a degenerate ring. The user's dragged
+    // labelOffset still applies on top — it is an offset from the anchor, whatever the anchor is.
+    const base = polylabel(pc.points) || centroid(pc.points), off = pc.labelOffset || { x: 0, y: 0 };
     const c = f2p({ x: base.x + off.x, y: base.y + off.y });
     // PR-Q/O4 — the parcel badge is labeled "Parcel", so a large parcel acreage sitting near a pond
     // (the "15.35 ac" chip) can't be mistaken for a pond water/footprint area. No bare acreage.
@@ -12847,6 +12866,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // length dimension instead of one label per segment (B215). selRuns is null unless an
   // ACTIVE parcel is selected (an inactive parcel's anchored chrome is hidden — B213).
   const SETBACK_RUN_TOL_DEG = 7; // an edge within ±7° of the run's first edge stays in the run
+  const PARCEL_DIM_MIN_SEP_PX = 44; // NEW-2: min on-screen spacing between two side-length numbers
   const selParcel = sel?.kind === "parcel" ? parcels.find((p) => p.id === sel.id) : null;
   const selRuns = (selParcel && selParcel.active !== false) ? edgeRuns(selParcel.points, SETBACK_RUN_TOL_DEG) : null;
   // Screen anchors for a run's fanned labels (B215): the boundary/run-length dimension sits
@@ -12893,8 +12913,19 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const dfz = dimFontPx(labelPpf) * labelK;
     const locked = selParcel.locked;
     const editable = tool === "select";
+    // NEW-2 — the SAME screen-space thinning the setback chips get. A curved boundary's short
+    // sides pass detailLabelVisible individually while still landing on top of one another, so
+    // the length numbers piled up exactly like the chips did. Longest side wins the space; the
+    // dropped ones return on zoom-in. Indices are untouched, so B912 side selection is unaffected.
+    const shownRuns = new Set(spaceOut(
+      selRuns
+        .map((run, ri) => ({ ri, run }))
+        .filter(({ run }) => detailLabelVisible(run.lengthFt, labelPpf))
+        .map(({ ri, run }) => { const { out } = runLabelAnchors(selParcel, run); return { ri, x: out.x, y: out.y, priority: run.lengthFt }; }),
+      PARCEL_DIM_MIN_SEP_PX,
+    ).map((s) => s.ri));
     return selRuns.map((run, ri) => {
-      if (!detailLabelVisible(run.lengthFt, labelPpf)) return null; // hide on zoom-out, return on zoom-in
+      if (!shownRuns.has(ri)) return null; // hide on zoom-out / when crowded, return on zoom-in
       const { out } = runLabelAnchors(selParcel, run);
       const on = selEdgeRun === ri;
       const onDown = editable ? (e) => {
@@ -12933,29 +12964,66 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // B230 — draggable SQUARE vertex handles on the selected parcel. The always-on "+" midpoint
   // handles are gone: Shift-click (or right-click) an edge inserts a control point at the click
   // point instead. The active control point (the Delete-key target) is shown inverted.
+  // NEW-2 — the handle is drawn SMALL (the old 10px square buried the geometry it was supposed to
+  // let you edit) but grabbed BIG: a transparent hit square sits under it at the old comfortable
+  // size, so the drag target never shrank even though the mark did. The decimation below
+  // guarantees kept handles are at least VTX_MIN_SEP_PX apart, so two hit squares can't fight
+  // over the same press.
+  const VTX_DRAW = 8, VTX_HIT = 18;
+  const VTX_MIN_SEP_PX = 22;   // min on-screen spacing between two drawn control points (> VTX_HIT, so two hit squares never overlap)
   const vtxRect = (key, c, on, cursor, onDown) => (
-    // data-testid: the NEW-2 frame-time harness has to GRAB a real control point, and picking one
-    // by geometry alone is exactly the kind of brittle selector that rots. `data-export="skip"`
-    // already keeps this rect out of the exported sheet, so this attribute is review chrome too.
-    <rect key={key} x={c.x - 5} y={c.y - 5} width={10} height={10} rx={2} data-export="skip" data-testid="vtx-handle"
-      fill={on ? SEL_BLUE : SEL_HANDLE_FILL} stroke={on ? SEL_HANDLE_FILL : SEL_BLUE} strokeWidth={on ? 2 : 1.5}
-      style={{ cursor }} onPointerDown={onDown} />
+    // data-testid rides the HIT rect: the NEW-2 frame-time harness has to GRAB a real control
+    // point, and picking one by geometry alone is exactly the kind of brittle selector that rots.
+    // `data-export="skip"` already keeps these out of the exported sheet, so it is review chrome too.
+    <g key={key}>
+      <rect x={c.x - VTX_HIT / 2} y={c.y - VTX_HIT / 2} width={VTX_HIT} height={VTX_HIT} data-export="skip" data-testid="vtx-handle"
+        fill="transparent" style={{ cursor }} onPointerDown={onDown} />
+      <rect x={c.x - VTX_DRAW / 2} y={c.y - VTX_DRAW / 2} width={VTX_DRAW} height={VTX_DRAW} rx={1.5} data-export="skip"
+        fill={on ? SEL_BLUE : SEL_HANDLE_FILL} stroke={on ? SEL_HANDLE_FILL : SEL_BLUE} strokeWidth={on ? 1.75 : 1.25}
+        pointerEvents="none" />
+    </g>
   );
   const isSelVtx = (layer, id, i) => !!selVtx && selVtx.layer === layer && String(selVtx.id) === String(id) && selVtx.index === i;
+  /* NEW-2 — SCREEN-SPACE handle decimation. A boundary that follows a subdivision curve is
+   * digitized as dozens of vertices; at anything short of full zoom those project a few pixels
+   * apart, so the handle chain becomes a solid bar that hides the very geometry (and the aerial)
+   * you are editing — and you cannot meaningfully drag a handle whose neighbours are three pixels
+   * away anyway (owner, 2026-07-30: "I don't need that many to show up that big").
+   *
+   * So: keep the handles you could actually use. Priority is CORNER-NESS (how hard the ring turns
+   * at that vertex, `cornerTurns`) so real corners always win over mid-arc points, with the
+   * SELECTED vertex pinned first — it is the Delete-key target and may never be invisible. The
+   * kept set is then thinned to VTX_MIN_SEP_PX spacing by the shared `spaceOut`.
+   *
+   * This is DISPLAY ONLY and re-decided every frame off the live zoom: no vertex is removed from
+   * the ring, and zooming in far enough that a vertex clears the spacing threshold brings its
+   * handle straight back, still fully draggable. */
+  const decimatedHandles = (points, isOn) => {
+    const turns = cornerTurns(points);
+    const cands = points.map((a, i) => {
+      const p = f2p(a);
+      return { i, x: p.x, y: p.y, priority: isOn(i) ? Infinity : (turns[i] || 0) };
+    });
+    return spaceOut(cands, VTX_MIN_SEP_PX);
+  };
   const parcelHandles = (() => {
     if (sel?.kind !== "parcel" || tool !== "select") return null;
     const pc = parcels.find((p) => p.id === sel.id);
     if (!pc) return null;
-    return <g>{pc.points.map((a, i) => vtxRect(`pv${i}`, f2p(a), isSelVtx("parcel", pc.id, i), "move", (e) => startVertex(e, pc.id, i)))}</g>;
+    const on = (i) => isSelVtx("parcel", pc.id, i);
+    return <g>{decimatedHandles(pc.points, on).map((h) => vtxRect(`pv${h.i}`, { x: h.x, y: h.y }, on(h.i), "move", (e) => startVertex(e, pc.id, h.i)))}</g>;
   })();
 
   // Vertex handles on a selected polygon ELEMENT (e.g. a non-rectangular pond): drag a square
   // to move a corner. Add via Shift-click / right-click an edge; delete via right-click / Delete.
+  // NEW-2 — same screen-space decimation: an imported / traced pond outline carries the identical
+  // dense-vertex problem as a surveyed parcel boundary.
   const elPolyHandles = (() => {
     if (sel?.kind !== "el" || tool !== "select" || multi.length > 1) return null; // B740
     const el = els.find((x) => x.id === sel.id);
     if (!el || !el.points || el.locked) return null;
-    return <g>{el.points.map((a, i) => vtxRect(`epv${i}`, f2p(a), isSelVtx("el", el.id, i), "move", (e) => startElVertex(e, el.id, i)))}</g>;
+    const on = (i) => isSelVtx("el", el.id, i);
+    return <g>{decimatedHandles(el.points, on).map((h) => vtxRect(`epv${h.i}`, { x: h.x, y: h.y }, on(h.i), "move", (e) => startElVertex(e, el.id, h.i)))}</g>;
   })();
 
   // B619 — the ONE thin blue selection outline for a selected element (never recolors the element
@@ -13923,6 +13991,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const arr = parcelSetbacks(pc).slice(); arr[i] = Math.max(0, v);
     setParcels((a) => a.map((p) => p.id === pc.id ? { ...p, setbacks: arr } : p));
   };
+  /* NEW-1 — the LABEL/EDIT grouping for setbacks: contiguous edges that share a setback value
+   * and a direction collapse into ONE run. Distinct from `edgeRuns`/`selRuns` (which stays the
+   * ±7° geometric-side model driving run-length dimensions and B912 side resizing): a filleted
+   * corner digitized as a dozen short segments is a dozen geometric sides but ONE thing to
+   * label and ONE thing to edit. Used by both the on-canvas chips and the Parcels panel list,
+   * so the two surfaces can never disagree about what a "side" is. */
+  const parcelChipRuns = (pc) => (pc ? setbackChipRuns(pc.points, parcelSetbacks(pc)) : []);
   // B214 — set the setback uniformly across every segment of one logical SIDE (run), so a
   // multi-segment side is edited in one action. Writes the canonical per-edge pc.setbacks
   // array (what the yield/buildable engine reads via setbacksOf) — no parallel store; the
@@ -14933,7 +15008,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               {/* B214 — setback editor mode. Only shown when a side is built from MORE than
                   one segment (where "by side" actually saves clicks); otherwise every side is
                   a single edge and the two modes are identical. */}
-              {settings.showSetback && selRuns && selRuns.some((r) => r.edges.length > 1) && (
+              {/* NEW-1 — gate on the CHIP runs, not the geometric sides. On a curved boundary every
+                  geometric side is a single segment (each turns past the ±7° tolerance), so the old
+                  gate hid the toggle on exactly the parcel that needs it most. */}
+              {settings.showSetback && selRuns && parcelChipRuns(selParcel).some((r) => r.edges.length > 1) && (
                 <div style={{ fontSize: 12, color: PAL.muted, marginBottom: 9, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
                   <span>Edit setbacks:</span>
                   <button style={{ ...chip, ...(sbEditMode === "side" ? { background: PAL.accent, color: "#fff", borderColor: PAL.accent } : {}) }}
@@ -15000,17 +15078,42 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               </Field>
               <button style={{ ...chip, marginTop: 2 }} onClick={() => { pushHistory(); setSelParcel({ sbStroke: null, sbWeight: null, sbDash: null }); }} title="Reset the setback line back to the default color, weight and dashes">Reset setback line</button>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", margin: "10px 0 4px" }}>
-                <span style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em" }}>Setbacks per edge</span>
+                <span style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em" }}>{sbEditMode === "segment" ? "Setbacks per edge" : "Setbacks by side"}</span>
                 <label style={{ display: "flex", gap: 6, fontSize: 11, color: PAL.muted, cursor: "pointer" }} title="Show the setback line inside the parcel boundary"><input type="checkbox" checked={settings.showSetback} onChange={(e) => setSettings((s) => ({ ...s, showSetback: e.target.checked }))} /> Show setback line</label>
               </div>
+              {/* NEW-1 — in "By side" mode this list is ONE ROW PER RUN, not one per edge. A
+                  subdivision boundary that follows a curve is digitized as dozens of segments, so
+                  the old list was "Edge 18, Edge 19 … Edge 32", thirty-odd identical 25′ inputs
+                  that had to be typed one at a time (owner, 2026-07-30). A run row writes every
+                  edge in the run at once through the same canonical `setRunSetback`, and the row
+                  count now matches the on-canvas chip count exactly — the two surfaces read the
+                  same grouping. "Per segment" still lists every edge, for a notch or jog. */}
               {(() => {
                 const sb = parcelSetbacks(selParcel), fe = frontEdge(selParcel);
+                const rows = sbEditMode === "segment"
+                  ? sb.map((v, i) => ({ key: `e${i}`, label: i === fe ? "Front" : `Edge ${i + 1}`, note: "", value: v, commit: (n) => setEdgeSetback(selParcel, i, n) }))
+                  : parcelChipRuns(selParcel).map((run, ri) => {
+                      const shared = runSetbackValue(run, sb);
+                      return {
+                        key: `r${ri}`,
+                        label: run.edges.includes(fe) ? "Front" : `Side ${ri + 1}`,
+                        // Only worth saying when it isn't 1:1 with an edge, and only ever these
+                        // few characters — the row's job is the number, not an explanation.
+                        note: run.edges.length > 1 ? `${run.edges.length} seg` : "",
+                        value: shared == null ? (sb[run.edges[0]] ?? 0) : shared,
+                        mixed: shared == null,
+                        commit: (n) => setRunSetback(selParcel, run, n),
+                      };
+                    });
                 return (
                   <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                    {sb.map((v, i) => (
-                      <div key={i} style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                        <span style={{ flex: 1, fontSize: 12, color: PAL.ink }}>{i === fe ? "Front" : `Edge ${i + 1}`}</span>
-                        <NumInput style={{ ...numInput, width: 54 }} value={Math.round(v)} min={0} onCommit={(n) => setEdgeSetback(selParcel, i, n)} />
+                    {rows.map((r) => (
+                      <div key={r.key} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <span style={{ flex: 1, fontSize: 12, color: PAL.ink }}>{r.label}
+                          {r.note && <span style={{ color: PAL.muted, fontSize: 11 }}> · {r.note}</span>}
+                          {r.mixed && <span style={{ color: PAL.warn, fontSize: 11 }} title="This side's segments carry different setbacks — typing a value here sets them all"> · mixed</span>}
+                        </span>
+                        <NumInput style={{ ...numInput, width: 54 }} value={Math.round(r.value)} min={0} onCommit={r.commit} />
                       </div>
                     ))}
                     <button style={{ ...chip, marginTop: 4 }} onClick={() => { pushHistory(); setParcels((a) => a.map((p) => p.id === selParcel.id ? { ...p, setbacks: Array.from({ length: p.points.length }, () => +settings.setback || 0) } : p)); }}>Reset to default ({settings.setback}′)</button>
@@ -16322,49 +16425,82 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     onContextMenu={(e) => onParcelContext(e, pc.id)} />
                 </g>;
               })}
-              {/* setback value pills on the selected ACTIVE parcel — ONE per SIDE (run) by
-                  default so a multi-segment side edits in one click (B214); per SEGMENT when
-                  the editor is toggled, for notches/jogs. Placed INBOARD (toward the setback
-                  line) so they never stack on the outboard boundary dimension (B215). A pill
-                  reading "—" means the side's segments disagree (a per-segment override). */}
+              {/* setback value chips on the selected ACTIVE parcel — ONE per labelled RUN by
+                  default (B214/B215/B216 gave one per geometric SIDE; NEW-1 regroups by shared
+                  VALUE + direction so a filleted corner digitized as a dozen segments is one
+                  chip, not a dozen); per SEGMENT when the editor is toggled, for notches/jogs.
+                  Placed INBOARD (toward the setback line) so they never stack on the outboard
+                  boundary dimension (B215). A chip reading "—" means the run's segments disagree.
+
+                  NEW-1 — TWO screen-space guards on top, both re-evaluated every frame from the
+                  live zoom, so zooming in progressively reveals detail instead of painting
+                  everything at every scale:
+                    (a) a chip whose anchor edge is shorter than CHIP_MIN_EDGE_PX on screen is
+                        not drawn — below that the edge is a tick and the chip labels nothing
+                        you can see;
+                    (b) no two drawn chips may sit within CHIP_MIN_SEP_PX of each other; the
+                        lower-priority one drops, and priority is the anchor edge's length, so
+                        the chip on the longest edge in the pile always survives.
+                  Both are display-only: nothing is deleted, and the dropped chip's edges still
+                  carry their setback and still edit from the Parcels panel. */}
               {settings.showSetback && selParcel && selRuns && (() => {
                 const sb = parcelSetbacks(selParcel);
-                // NEW-1 — the dimension chip follows the setback LINE's colour instead of staying
-                // hardcoded, so recolouring the line takes its numbers with it.
-                const sbCol = setbackLineStyle(selParcel, PAL.setback).stroke;
+                // NEW-4 — the chip's border and numerals default to near-black ink on its white
+                // plate (owner, 2026-07-30: the amber-border/amber-text chip sitting on the amber
+                // setback band was unreadable). A parcel whose setback LINE has been explicitly
+                // recoloured still takes its chip with it — that is B1100's behaviour and an
+                // explicit override, which this default must not stomp.
+                const sbCol = selParcel.sbStroke || PAL.chipInk;
                 const pill = (key, anchor, txt, onEdit) => (
                   <g key={key} style={{ cursor: "pointer" }} onPointerDown={(e) => { e.stopPropagation(); const fp = p2f(e.clientX, e.clientY); onEdit(fp, e.altKey); }}>
-                    <rect x={anchor.x - 13} y={anchor.y - 9} width={26} height={16} rx={4} fill="#fff" stroke={sbCol} strokeWidth={1} />
+                    <rect data-testid="setback-chip" x={anchor.x - 13} y={anchor.y - 9} width={26} height={16} rx={4} fill="#fff" stroke={sbCol} strokeWidth={1} />
                     <text x={anchor.x} y={anchor.y + 3.5} textAnchor="middle" fontSize="10.5" fontFamily={NUM_FONT} fontVariantNumeric={TABULAR_NUMS} fill={sbCol} fontWeight="700">{txt}</text>
                   </g>
                 );
-                if (sbEditMode === "segment") {
-                  // Per-segment pills, each on its own edge's inboard side (point-in-ring inward).
-                  const n = selParcel.points.length;
-                  return <g data-export="skip">{selParcel.points.map((a, i) => {
-                    const b = selParcel.points[(i + 1) % n], am = f2p(a), bm = f2p(b);
-                    const m = { x: (am.x + bm.x) / 2, y: (am.y + bm.y) / 2 };
-                    const midF = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
-                    const { sx, sy } = inwardScreenNormal(selParcel, midF, b.x - a.x, b.y - a.y);
-                    const anchor = { x: m.x + sx * 13, y: m.y + sy * 13 };
-                    return pill(`sbl${i}`, anchor, `${f0(sb[i])}′`, (fp) => setNumEdit({ fx: fp.x, fy: fp.y, value: String(sb[i]), onCommit: (v) => setEdgeSetback(selParcel, i, v) }));
-                  })}</g>;
-                }
-                // Per-SIDE pills (default). Alt-click edits just the run's nearest segment (the
-                // modifier-click single-edge override for a notch without leaving side mode).
                 const n = selParcel.points.length;
-                return <g data-export="skip">{selRuns.map((run, ri) => {
-                  const { in: anchor } = runLabelAnchors(selParcel, run);
-                  const val = runSetbackValue(run, sb);
-                  return pill(`sbr${ri}`, anchor, val == null ? "—" : `${f0(val)}′`, (fp, alt) => {
-                    const altSeg = (alt && run.edges.length > 1) ? run.edges.reduce((best, ei) => {
-                      const q = nearestOnSeg(fp, selParcel.points[ei], selParcel.points[(ei + 1) % n]);
-                      const d = Math.hypot(fp.x - q.x, fp.y - q.y); return d < best.d ? { ei, d } : best;
-                    }, { ei: run.edges[0], d: Infinity }).ei : null;
-                    setNumEdit({ fx: fp.x, fy: fp.y, value: String(val == null ? (sb[run.edges[0]] ?? 0) : val),
-                      onCommit: (v) => (altSeg != null ? setEdgeSetback(selParcel, altSeg, v) : setRunSetback(selParcel, run, v)) });
-                  });
-                })}</g>;
+                // Inboard screen anchor for the midpoint of edge `ei` (the point-in-ring inward
+                // step from B216 — correct on concave / L-shaped / flag lots, where "toward the
+                // centroid" threw a chip outside the lot).
+                const anchorForEdge = (ei) => {
+                  const a = selParcel.points[ei], b = selParcel.points[(ei + 1) % n];
+                  const am = f2p(a), bm = f2p(b);
+                  const m = { x: (am.x + bm.x) / 2, y: (am.y + bm.y) / 2 };
+                  const { sx, sy } = inwardScreenNormal(selParcel, { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }, b.x - a.x, b.y - a.y);
+                  return { x: m.x + sx * 13, y: m.y + sy * 13 };
+                };
+                const edgeLenFt = (ei) => dist(selParcel.points[ei], selParcel.points[(ei + 1) % n]);
+                // The candidate set differs by mode; the two guards below are identical for both,
+                // so per-segment mode is decluttered too (it was the worst case of all).
+                const cands = sbEditMode === "segment"
+                  ? selParcel.points.map((_, i) => ({
+                      key: `sbl${i}`, anchorEdge: i, lenFt: edgeLenFt(i), txt: `${f0(sb[i])}′`,
+                      onEdit: (fp) => setNumEdit({ fx: fp.x, fy: fp.y, value: String(sb[i]), onCommit: (v) => setEdgeSetback(selParcel, i, v) }),
+                    }))
+                  : parcelChipRuns(selParcel).map((run, ri) => {
+                      const val = runSetbackValue(run, sb);
+                      return {
+                        key: `sbr${ri}`, anchorEdge: run.anchorEdge, lenFt: run.anchorLenFt,
+                        txt: val == null ? "—" : `${f0(val)}′`,
+                        // Alt-click still overrides just the nearest SEGMENT of the run, so a notch
+                        // inside a grouped side is reachable without leaving side mode.
+                        onEdit: (fp, alt) => {
+                          const altSeg = (alt && run.edges.length > 1) ? run.edges.reduce((best, ei) => {
+                            const q = nearestOnSeg(fp, selParcel.points[ei], selParcel.points[(ei + 1) % n]);
+                            const d = Math.hypot(fp.x - q.x, fp.y - q.y); return d < best.d ? { ei, d } : best;
+                          }, { ei: run.edges[0], d: Infinity }).ei : null;
+                          setNumEdit({ fx: fp.x, fy: fp.y, value: String(val == null ? (sb[run.edges[0]] ?? 0) : val),
+                            onCommit: (v) => (altSeg != null ? setEdgeSetback(selParcel, altSeg, v) : setRunSetback(selParcel, run, v)) });
+                        },
+                      };
+                    });
+                const shown = spaceOut(
+                  cands
+                    .filter((c) => c.lenFt * labelPpf >= CHIP_MIN_EDGE_PX)     // guard (a)
+                    .map((c) => ({ ...c, ...anchorForEdge(c.anchorEdge), priority: c.lenFt })),
+                  CHIP_MIN_SEP_PX,                                             // guard (b)
+                );
+                if (!shown.length) return null;
+                return <g data-export="skip">{shown.map((c) => pill(c.key, { x: c.x, y: c.y }, c.txt, c.onEdit))}</g>;
               })()}
               {/* parcels — the visible polygon is pointer-INERT (its fill never grabs the lot, even
                   when a translucent fill is toggled on); a companion transparent fat hit-stroke on the
