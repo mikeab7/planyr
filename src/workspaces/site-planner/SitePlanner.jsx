@@ -75,6 +75,11 @@ import ViewMenu from "./components/ViewMenu.jsx";
  * Behind LazyPanel: space is reserved so the panel does not jump in, and a chunk that fails to
  * load is contained to this panel instead of taking the planner down. */
 const SiteAnalysis = lazy(() => import("./components/SiteAnalysis.jsx"));
+/* LAZY (B1064 tranche). The county appraisal record + the taxing-unit list render ONLY for a lot
+ * that came from a county identify, and only while the Parcels panel is the open one — never at
+ * first paint. Both bodies come from the same module, so they share one chunk and one load. */
+const ParcelAppraisal = lazy(() => import("./components/ParcelDataPanel.jsx").then((m) => ({ default: m.ParcelAppraisal })));
+const ParcelTaxes = lazy(() => import("./components/ParcelDataPanel.jsx").then((m) => ({ default: m.ParcelTaxes })));
 import LazyPanel from "./components/LazyPanel.jsx";
 import AnchoredMenu from "../../shared/ui/AnchoredMenu.jsx";
 import PanelChrome from "../../shared/ui/PanelChrome.jsx";
@@ -119,7 +124,7 @@ import {
   feetToLatLng,
   humanizeError,
 } from "./lib/arcgis.js";
-import { apprRows, apprAll, apprVal, findAttr, situsAddress } from "./lib/appraisal.js";
+import { apprRows, apprAll, apprVal, findAttr, situsAddress, ownerName, parcelPanelRows } from "./lib/appraisal.js";
 import { makeParcelDisplayLayer, ADD_CURSOR, PARCEL_MINZOOM } from "./lib/parcelDisplay.js";
 import { geocodeAddress } from "./lib/geocode.js";
 import { TYPE, typeStyle, elStyle, parcelDefaultStyle, toHex6, byZ, zOrder, setPreviewStyleDefaults, setbackLineStyle, setbackChipStyle, SETBACK_LINE } from "./lib/planStyle.js";
@@ -141,7 +146,7 @@ import { edgeRuns, runSetbackValue, resizeRunLength } from "./lib/edgeRuns.js";
 // `cornerTurns` are the shared screen-space thinning used by BOTH the setback chips and the vertex
 // handles; `polylabel` puts the acreage badge at the parcel's visual centre instead of its
 // vertex average. All three are pure + unit-tested; see their module headers for the why.
-import { setbackChipRuns, CHIP_MIN_EDGE_PX, CHIP_MIN_SEP_PX, CHIP_MIN_GAP_PX } from "./lib/setbackChips.js";
+import { setbackChipRuns, setbackChipsVisible, chipRoleWords, CHIP_MIN_EDGE_PX, CHIP_MIN_SEP_PX, CHIP_MIN_GAP_PX } from "./lib/setbackChips.js";
 // NEW-1 — the setback ring's inward offset (and the line-intersection primitive it is built on)
 // moved out of this file unchanged, so the buildable envelope a parcel's setbacks produce can be
 // proven in a unit test against real production geometry instead of only by rendering.
@@ -150,7 +155,7 @@ import { offsetPolygon, lineIntersect } from "./lib/parcelOffset.js";
 // setbacks (Front / Side / Street side / Rear), not fifteen digitized sides. Pure + unit-tested;
 // roles are labels over edges and never an input to a measurement, so the canonical per-edge
 // `pc.setbacks` array the yield engine reads is untouched by anything in here.
-import { SETBACK_ROLES, ROLE_LABEL, ROLE_SHORT, resolveRoles, runRole, setRunRole, roleGroups } from "./lib/setbackRoles.js";
+import { SETBACK_ROLES, ROLE_LABEL, ROLE_SHORT, resolveRoles, resolveOverrides, runRole, runOverridden, setRunOverride, hasRoleOverrides, shiftOverridesOnInsert, shiftOverridesOnDelete, roleGroups } from "./lib/setbackRoles.js";
 import { spaceOut, cornerTurns } from "./lib/screenDeclutter.js";
 import { polylabel } from "./lib/polylabel.js";
 // B1123 bundle-budget offset — the title reader is loaded ON DEMAND (dynamic import in
@@ -5805,7 +5810,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const np = snapPt(ptFeet);
     const ins = (arr) => { const a = [...arr]; a.splice(edgeIndex + 1, 0, np); return a; };
     pushHistory();
-    if (layer === "parcel") setParcels((a) => a.map((pc) => pc.id === id ? { ...pc, points: ins(pc.points) } : pc));
+    // NEW-6 — a role override is per EDGE, so inserting a control point has to carry it across the
+    // split (both halves are still the same side). Without this the vector stops matching the ring
+    // and every correction the user made is silently dropped on the next re-derive.
+    if (layer === "parcel") setParcels((a) => a.map((pc) => pc.id === id ? { ...pc, points: ins(pc.points), roleOverrides: shiftOverridesOnInsert(pc.roleOverrides, edgeIndex), roles: shiftOverridesOnInsert(pc.roles, edgeIndex) } : pc));
     else if (layer === "el") setEls((a) => a.map((x) => x.id === id ? { ...x, points: ins(x.points) } : x));
     else if (layer === "measure") setMeasures((arr) => arr.map((mm, k) => k === id ? { ...mm, mode: measMode(mm), pts: ins(measPts(mm)) } : mm));
     else if (layer === "ease") setMarkups((a) => a.map((x) => x.id === id ? setEasePath(x, ins(easeEditPath(x))) : x));
@@ -5853,7 +5861,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (!removable) { setSelVtx(null); setRoadVtxSel(null); return false; }
     const rm = (arr) => arr.filter((_, j) => j !== index);
     pushHistory();
-    if (layer === "parcel") setParcels((a) => a.map((pc) => pc.id === id ? { ...pc, points: rm(pc.points) } : pc));
+    // NEW-6 — deleting a vertex merges two edges into one; the merged edge keeps the first half's
+    // role and the vector stays aligned to the ring (see `shiftOverridesOnDelete`).
+    if (layer === "parcel") setParcels((a) => a.map((pc) => pc.id === id ? { ...pc, points: rm(pc.points), roleOverrides: shiftOverridesOnDelete(pc.roleOverrides, index), roles: shiftOverridesOnDelete(pc.roles, index) } : pc));
     else if (layer === "el") setEls((a) => a.map((x) => x.id === id ? { ...x, points: rm(x.points) } : x));
     else if (layer === "measure") setMeasures((arr) => arr.map((mm, k) => k === id ? { ...mm, mode: measMode(mm), pts: rm(measPts(mm)) } : mm));
     else if (layer === "ease") setMarkups((a) => a.map((x) => x.id === id ? setEasePath(x, rm(easeEditPath(x))) : x));
@@ -14304,13 +14314,23 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     }
     return out;
   };
-  const parcelRoles = (pc) => (pc ? resolveRoles(pc.points, pc.roles, { streets: parcelStreets(pc) }) : []);
-  // Reassign one whole SIDE's role. Stores the full per-edge vector (aligned to the ring, exactly
-  // like `pc.setbacks`), so a run can never display a role its own edges disagree with.
+  const parcelRoles = (pc) => (pc ? resolveRoles(pc.points, pc.roles, { streets: parcelStreets(pc), overrides: pc.roleOverrides }) : []);
+  /* NEW-6 — the SPARSE override vector in force (null = "still tracking the inference"). Legacy
+   * plans carrying the old dense `pc.roles` are narrowed to their genuine corrections on read, so
+   * an untouched side goes back to re-deriving without anything changing on screen. */
+  const parcelRoleOverrides = (pc) => (pc ? resolveOverrides(pc.points, { overrides: pc.roleOverrides, legacy: pc.roles }, { streets: parcelStreets(pc) }) : []);
+  // Reassign one whole SIDE's role — or, with `role == null`, clear it back to the automatic
+  // inference. Writes the sparse override vector (aligned to the ring, exactly like `pc.setbacks`)
+  // and retires the legacy dense array in the same frame, so one Ctrl-Z undoes the whole change.
   const setRunRoleOn = (pc, run, role) => {
     pushHistory();
-    const next = setRunRole(parcelRoles(pc), run, role, pc.points.length);
-    setParcels((a) => a.map((p) => p.id === pc.id ? { ...p, roles: next } : p));
+    const next = setRunOverride(parcelRoleOverrides(pc), run, role, pc.points.length);
+    setParcels((a) => a.map((p) => p.id === pc.id ? { ...p, roleOverrides: next, roles: null } : p));
+  };
+  // Clear EVERY role override on this parcel — the whole boundary goes back to the app's inference.
+  const clearRunRoles = (pc) => {
+    pushHistory();
+    setParcels((a) => a.map((p) => p.id === pc.id ? { ...p, roleOverrides: null, roles: null } : p));
   };
   // One ordinance number → every edge that carries that role, through the same canonical
   // per-edge `setbacks` array `setRunSetback` writes.
@@ -14320,6 +14340,150 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     edges.forEach((i) => { arr[i] = Math.max(0, v); });
     setParcels((a) => a.map((p) => p.id === pc.id ? { ...p, setbacks: arr } : p));
   };
+  /* Setback value chips on the selected ACTIVE parcel — ONE per labelled RUN by default
+     (B214/B215/B216 gave one per geometric SIDE; B1184 regrouped by shared VALUE + direction so a
+     filleted corner digitized as a dozen segments is one chip, not a dozen); per SEGMENT when the
+     editor is toggled, for notches/jogs. Placed INBOARD (toward the setback line) so they never
+     stack on the outboard boundary dimension (B215). A chip reading "—" means the run's segments
+     disagree.
+
+     B1184 — TWO RELATIVE screen-space guards, both re-evaluated every frame from the live zoom:
+       (a) a chip whose anchor edge is shorter than CHIP_MIN_EDGE_PX on screen is not drawn;
+       (b) no two drawn chips may sit within CHIP_MIN_GAP_PX of each other, the chip on the longest
+           edge winning the space.
+     NEW-2 adds the ABSOLUTE floor those two cannot provide (`setbackChipsVisible`): on a 62-acre
+     lot the longest edge clears (a) at ANY zoom, so one full-size chip survived to county zoom and
+     was the loudest thing on the screen. Chips now ride the shared annotation floor and reveal
+     with every other callout — unless the setbacks are actively being edited, which is the one
+     deliberate exception.
+     All three are display-only: nothing is deleted, and a dropped chip's edges still carry their
+     setback and still edit from the Parcels panel.
+
+     NEW-4 — this whole group is CHROME, and it renders in the selection-chrome layer ABOVE the
+     site elements (see the `data-export="skip"` group at the end of the canvas), not down in the
+     parcel band where a building painted straight over it. */
+  const CHIP_H = 15;
+  const chipPlateW = (txt) => Math.max(22, Math.round(String(txt).length * 5.35 + 10));
+  const setbackChipNodes = (() => {
+    if (!settings.showSetback || !selParcel || !selRuns) return null;
+    // The exception to the zoom floor: the user is IN the setback editor (drilled past the
+    // four-role default, or with an inline value editor open), so the chips are the edit surface.
+    const editing = sbEditMode !== "role" || !!numEdit;
+    if (!setbackChipsVisible(labelPpf, { editing })) return null;
+    const sb = parcelSetbacks(selParcel);
+    /* NEW-1 — the chip's TEXT is ALWAYS the standard high-contrast ink, whatever colour the user
+       gave the setback line. Before this it was `pc.sbStroke || PAL.chipInk`, so the owner's
+       bright-green setback line produced bright-green numerals on a white plate that he could not
+       read (2026-07-30) — and "Reset setback line", which put the colour back to the default
+       near-black, was what made it legible again. Darkening the user's colour is deliberately NOT
+       the fix: it still fails on a pale yellow or a near-white, and it makes legibility depend on
+       a decoration.
+       `setbackChipStyle` (B1205's strand, landed on main while this was in flight) is the ONE
+       place that answers this, and it takes no parcel — so there is nothing here left to couple
+       to. It carries the border as well as the text, which goes one step further than this item's
+       brief asked ("the colour belongs on the line and the chip's border"): the same green-on-white
+       unreadability it was minted to end applies to a saturated border on a chip this small, and
+       reverting it would re-open that. A recoloured setback LINE still takes its own colour (B1100);
+       its CHIP never follows. NEW-3's quieting rides on top as an OPACITY, which is what makes the
+       border read as the neutral hairline that item asked for. */
+    const chipStyle = setbackChipStyle(PAL.chipInk);
+    const roles = parcelRoles(selParcel);
+    /* NEW-3 — the chip recedes. Smaller numerals, a quieter border on the same neutral plate, and
+       the role word dropped wherever it is redundant (`chipRoleWords`): four saturated "Side · 25′"
+       pills were competing with the buildings, the property line and the dimension text for
+       attention. It is a control, not a headline — so it stays a click target and keeps its
+       Alt-click segment override, it just stops shouting. */
+    const pill = (key, anchor, txt, onEdit) => {
+      const w = chipPlateW(txt);
+      return (
+        <g key={key} style={{ cursor: "pointer" }} onPointerDown={(e) => { e.stopPropagation(); const fp = p2f(e.clientX, e.clientY); onEdit(fp, e.altKey); }}>
+          <rect data-testid="setback-chip" x={anchor.x - w / 2} y={anchor.y - CHIP_H / 2 - 1} width={w} height={CHIP_H} rx={3.5}
+            fill={chipStyle.plate} stroke={chipStyle.stroke} strokeWidth={1} strokeOpacity={0.5} />
+          <text data-testid="setback-chip-text" x={anchor.x} y={anchor.y + 3} textAnchor="middle" fontSize="9.5"
+            fontFamily={NUM_FONT} fontVariantNumeric={TABULAR_NUMS} fill={chipStyle.text} fontWeight="600">{txt}</text>
+        </g>
+      );
+    };
+    const n = selParcel.points.length;
+    /* Inboard screen anchor for the midpoint of edge `ei` (the point-in-ring inward step from
+       B216 — correct on concave / L-shaped / flag lots, where "toward the centroid" threw a chip
+       outside the lot). B1184: the step clears the PLATE, not a fixed distance, so a wide chip
+       can't straddle the boundary and land on the OUTBOARD side-length dimension. */
+    const anchorForEdge = (ei, w = 22) => {
+      const a = selParcel.points[ei], b = selParcel.points[(ei + 1) % n];
+      const am = f2p(a), bm = f2p(b);
+      const m = { x: (am.x + bm.x) / 2, y: (am.y + bm.y) / 2 };
+      const { sx, sy } = inwardScreenNormal(selParcel, { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }, b.x - a.x, b.y - a.y);
+      const step = 6 + (Math.abs(sx) * w + Math.abs(sy) * CHIP_H) / 2;
+      return { x: m.x + sx * step, y: m.y + sy * step };
+    };
+    const edgeLenFt = (ei) => dist(selParcel.points[ei], selParcel.points[(ei + 1) % n]);
+    // The candidate set differs by mode; the guards below are identical for both, so per-segment
+    // mode is decluttered too (it was the worst case of all).
+    const cands = sbEditMode === "segment"
+      ? selParcel.points.map((_, i) => ({
+          key: `sbl${i}`, anchorEdge: i, lenFt: edgeLenFt(i), role: roles[i], value: sb[i], priority: edgeLenFt(i),
+          onEdit: (fp) => setNumEdit({ fx: fp.x, fy: fp.y, value: String(sb[i]), onCommit: (v) => setEdgeSetback(selParcel, i, v) }),
+        }))
+      : parcelChipRuns(selParcel).map((run, ri) => {
+          const val = runSetbackValue(run, sb);
+          return {
+            key: `sbr${ri}`, anchorEdge: run.anchorEdge, lenFt: run.anchorLenFt,
+            role: roles[run.anchorEdge], value: val, priority: run.anchorLenFt,
+            // Alt-click still overrides just the nearest SEGMENT of the run, so a notch inside a
+            // grouped side is reachable without leaving side mode.
+            onEdit: (fp, alt) => {
+              const altSeg = (alt && run.edges.length > 1) ? run.edges.reduce((best, ei) => {
+                const q = nearestOnSeg(fp, selParcel.points[ei], selParcel.points[(ei + 1) % n]);
+                const d = Math.hypot(fp.x - q.x, fp.y - q.y); return d < best.d ? { ei, d } : best;
+              }, { ei: run.edges[0], d: Infinity }).ei : null;
+              setNumEdit({ fx: fp.x, fy: fp.y, value: String(val == null ? (sb[run.edges[0]] ?? 0) : val),
+                onCommit: (v) => (altSeg != null ? setEdgeSetback(selParcel, altSeg, v) : setRunSetback(selParcel, run, v)) });
+            },
+          };
+        });
+    // The role word is decided over the parcel's whole candidate set (before the declutter drops
+    // any), so what a chip says doesn't change as neighbours come and go with the zoom.
+    const words = chipRoleWords(cands);
+    const labelled = cands.map((c, i) => ({
+      ...c,
+      txt: `${words[i] ? `${ROLE_SHORT[c.role] || "Side"} · ` : ""}${Number.isFinite(c.value) ? `${f0(c.value)}′` : "—"}`,
+    }));
+    const shown = spaceOut(
+      labelled
+        .filter((c) => c.lenFt * labelPpf >= CHIP_MIN_EDGE_PX)          // guard (a)
+        .map((c) => ({ ...c, ...anchorForEdge(c.anchorEdge, chipPlateW(c.txt)), w: chipPlateW(c.txt), h: CHIP_H })),
+      CHIP_MIN_SEP_PX,                                                  // guard (b) — box metric
+      CHIP_MIN_GAP_PX,
+    );
+    if (!shown.length) return null;
+    return <g data-export="skip">{shown.map((c) => pill(c.key, { x: c.x, y: c.y }, c.txt, c.onEdit))}</g>;
+  })();
+
+  /* NEW-4 — the SELECTED lot's setback grab band, raised out of the parcel band into the
+     selection-chrome layer alongside the chips. On the owner's Weld County plan the buildings sit
+     hard against the setback line, so both the chips and this band landed under a building's fill
+     and no press ever reached them ("if I'm already doing the work of clicking on the parcel, then
+     the options to edit the setbacks should be above the elements", 2026-07-30). Selection is the
+     signal of intent, so the lot's own controls win for exactly as long as it is selected and drop
+     back to their normal order the moment it isn't. Only the interactive chrome moves — the ring,
+     its casing and the parcel fill all stay put, so a selected lot can never hide a building. */
+  const setbackGrabNode = (() => {
+    if (!settings.showSetback || !selParcel || selParcel.active === false) return null;
+    const sb = parcelSetbacks(selParcel);
+    const posSb = sb.filter((v) => v > 0);
+    if (!posSb.length || !insetRingVisible(Math.min(...posSb), labelPpf)) return null;
+    const o = offsetPolygon(selParcel.points, sb);
+    if (!o) return null;
+    const ring = o.map((p) => `${f2p(p).x},${f2p(p).y}`).join(" ");
+    return (
+      <polygon data-testid="setback-grab" points={ring} fill="none" stroke="rgba(0,0,0,0.001)" strokeWidth={12} strokeLinejoin="round" pointerEvents="stroke"
+        style={{ cursor: tool === "select" ? (selParcel.locked ? "default" : "move") : "crosshair" }}
+        onPointerDown={(e) => startMoveParcel(e, selParcel.id)}
+        onContextMenu={(e) => onParcelContext(e, selParcel.id)} />
+    );
+  })();
+
   // "Front" = the longest edge (street frontage heuristic).
   const frontEdge = (pc) => {
     let best = 0, bl = -1;
@@ -15248,59 +15412,23 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               )}
             </Section>
           )}
-          {/* appraisal-district property data for the selected parcel */}
+          {/* Appraisal record + taxing units for the selected lot — LAZY (B1064 tranche).
+              Both bodies live in components/ParcelDataPanel.jsx and load only when a lot that
+              came from a county identify is actually selected; they used to ride the planner's
+              boot chunk for every session. NEW-5 fixed the duplicated Owner row and folded the
+              Legal blob away in the same move — see that file's header. */}
           {_pid === "parcel" && selParcel && selParcel.attrs && (
             <Section title="Appraisal data">
-              {(() => {
-                const ok = Object.keys(selParcel.attrs).find((k) => /^(owner|own_?name|owner_?name|owner1|name)$/i.test(k) && selParcel.attrs[k]);
-                return ok ? (
-                  <div style={{ marginBottom: 9, paddingBottom: 8, borderBottom: "1px solid var(--planner-border)" }}>
-                    <div style={{ fontSize: 9.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.07em", fontWeight: 700 }}>Owner</div>
-                    <div style={{ fontSize: 14, fontWeight: 700, color: PAL.ink, lineHeight: 1.3, marginTop: 2 }}>{String(selParcel.attrs[ok])}</div>
-                  </div>
-                ) : null;
-              })()}
-              {apprRows(selParcel.attrs).length === 0 ? (
-                <div style={{ fontSize: 12, color: PAL.muted }}>No recognizable fields in the county record.</div>
-              ) : apprRows(selParcel.attrs).map((r) => (
-                <div key={r.label} style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "baseline", padding: "5px 0", borderBottom: "1px solid #f3efe5" }}>
-                  <span style={{ fontSize: 11.5, color: PAL.muted, flex: "none" }}>{r.label}</span>
-                  <span style={{ fontSize: 12, color: PAL.ink, fontWeight: 600, textAlign: "right", wordBreak: "break-word" }}>{apprVal(r.label, r.value)}</span>
-                </div>
-              ))}
-              <details style={{ marginTop: 8 }}>
-                <summary style={{ fontSize: 11, color: PAL.muted, cursor: "pointer" }}>All county fields</summary>
-                <div style={{ marginTop: 6 }}>
-                  {apprAll(selParcel.attrs).map((r) => (
-                    <div key={r.label} style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "baseline", padding: "3px 0" }}>
-                      <span style={{ fontSize: 10.5, color: PAL.muted, flex: "none" }}>{r.label}</span>
-                      <span style={{ fontSize: 10.5, color: PAL.ink, fontFamily: MONO_FONT, textAlign: "right", wordBreak: "break-word" }}>{String(r.value)}</span>
-                    </div>
-                  ))}
-                </div>
-              </details>
+              <LazyPanel name="Appraisal data" minHeight={140} label="Loading county record…">
+                <ParcelAppraisal attrs={selParcel.attrs} PAL={PAL} />
+              </LazyPanel>
             </Section>
           )}
-          {/* taxing jurisdictions + combined rate (graceful-degrade until wired) */}
           {_pid === "parcel" && selParcel && selParcel.attrs && (
             <Section title="Taxes" collapsed>
-              {!taxInfo ? (
-                <div style={{ fontSize: 11.5, color: PAL.muted }}>Looking up taxing units…</div>
-              ) : (
-                <>
-                  {taxInfo.units.length > 0 ? taxInfo.units.map((u, i) => (
-                    <div key={i} style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "baseline", padding: "4px 0", borderBottom: "1px solid #f3efe5" }}>
-                      <span style={{ fontSize: 11.5, color: PAL.ink }}>{u.name}</span>
-                      <span style={{ fontSize: 11.5, color: PAL.muted, fontFamily: MONO_FONT }}>{u.value}</span>
-                    </div>
-                  )) : <div style={{ fontSize: 11.5, color: PAL.muted }}>No taxing-unit fields in the county record.</div>}
-                  {taxInfo.connected && taxInfo.total != null ? (
-                    <div style={{ marginTop: 8, fontSize: 13, fontWeight: 700, color: PAL.ink }}>Total tax rate: {taxInfo.total} per $100</div>
-                  ) : (
-                    <div style={{ marginTop: 8, fontSize: 11, color: PAL.warn, lineHeight: 1.5 }}>▲ {taxInfo.note} A total tax rate isn't shown until a rate source is wired for this county.</div>
-                  )}
-                </>
-              )}
+              <LazyPanel name="Taxes" minHeight={64} label="Loading taxes…">
+                <ParcelTaxes taxInfo={taxInfo} PAL={PAL} />
+              </LazyPanel>
             </Section>
           )}
           {/* selected parcel — translucence + setback standards */}
@@ -15425,6 +15553,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               {(() => {
                 const sb = parcelSetbacks(selParcel), fe = frontEdge(selParcel);
                 const roles = parcelRoles(selParcel);
+                const overrides = parcelRoleOverrides(selParcel);
                 const chipRuns = parcelChipRuns(selParcel);
                 const rows = sbEditMode === "segment"
                   ? sb.map((v, i) => ({ key: `e${i}`, label: i === fe ? "Front" : `Edge ${i + 1}`, note: "", value: v, commit: (n) => setEdgeSetback(selParcel, i, n) }))
@@ -15448,7 +15577,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         label: `Side ${ri + 1}`,
                         note: run.edges.length > 1 ? `${run.edges.length} seg` : "",
                         // The resolved role, visible AND correctable on the side it belongs to.
+                        // NEW-6 — `overridden` says whether this row is the app's inference or the
+                        // user's own call, so a manual role is never mistaken for a derived one.
                         role: runRole(run, roles),
+                        overridden: runOverridden(run, overrides),
                         setRole: (role) => setRunRoleOn(selParcel, run, role),
                         value: shared == null ? (sb[run.edges[0]] ?? 0) : shared,
                         mixed: shared == null,
@@ -15458,16 +15590,21 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 return (
                   <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                     {rows.map((r) => (
-                      <div key={r.key} data-testid="setback-row" data-role={r.role}
+                      <div key={r.key} data-testid="setback-row" data-role={r.role} data-role-source={r.setRole ? (r.overridden ? "yours" : "auto") : undefined}
                         style={{ display: "flex", alignItems: "center", gap: 8 }}>
                         <span style={{ flex: 1, fontSize: 12, color: r.empty ? PAL.muted : PAL.ink }}>{r.label}
                           {r.note && <span style={{ color: PAL.muted, fontSize: 11 }}> · {r.note}</span>}
                           {r.mixed && <span style={{ color: PAL.warn, fontSize: 11 }} title="This side's segments carry different setbacks — typing a value here sets them all"> · mixed</span>}
+                          {r.overridden && <span style={{ color: PAL.accent, fontSize: 11, fontWeight: 700 }} title="You set this side's role yourself — it stays put when the boundary is re-read. Pick “Automatic” to hand it back to the app."> · yours</span>}
                         </span>
+                        {/* NEW-6 — derive-by-default, preserve-once-touched. "Automatic" is the top
+                            option AND the way back: it names the role the app infers, so choosing it
+                            both clears the override and shows what will take over. */}
                         {r.setRole && (
-                          <select value={r.role} onChange={(e) => r.setRole(e.target.value)} data-testid="side-role"
-                            title="Which setback this side takes — Front, Side, Street side (a corner lot's second street) or Rear. Set from the boundary on load; change it here and the By-role rows follow."
+                          <select value={r.overridden ? r.role : ""} onChange={(e) => r.setRole(e.target.value || null)} data-testid="side-role"
+                            title="Which setback this side takes — Front, Side, Street side (a corner lot's second street) or Rear. The app infers it from the boundary; set it yourself here and your choice is kept, and the By-role rows follow it."
                             style={{ ...numInput, width: "auto", padding: "1px 4px", fontSize: 11, cursor: "pointer" }}>
+                            <option value="">Automatic ({ROLE_LABEL[r.role]})</option>
                             {SETBACK_ROLES.map((k) => <option key={k} value={k}>{ROLE_LABEL[k]}</option>)}
                           </select>
                         )}
@@ -15476,7 +15613,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           : <NumInput style={{ ...numInput, width: 54 }} value={Math.round(r.value)} min={0} onCommit={r.commit} />}
                       </div>
                     ))}
-                    <button style={{ ...chip, marginTop: 4 }} onClick={() => { pushHistory(); setParcels((a) => a.map((p) => p.id === selParcel.id ? { ...p, setbacks: Array.from({ length: p.points.length }, () => +settings.setback || 0) } : p)); }}>Reset to default ({settings.setback}′)</button>
+                    <div style={{ display: "flex", gap: 6, marginTop: 4, flexWrap: "wrap" }}>
+                      <button style={chip} onClick={() => { pushHistory(); setParcels((a) => a.map((p) => p.id === selParcel.id ? { ...p, setbacks: Array.from({ length: p.points.length }, () => +settings.setback || 0) } : p)); }}>Reset to default ({settings.setback}′)</button>
+                      {hasRoleOverrides(overrides) && (
+                        <button style={chip} data-testid="roles-reset" onClick={() => clearRunRoles(selParcel)}
+                          title="Hand every side's role back to the app's own reading of the boundary">Roles: back to automatic</button>
+                      )}
+                    </div>
                   </div>
                 );
               })()}
@@ -16729,109 +16872,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 return <g key={`sb${pc.id}`}>
                   <polygon data-testid="setback-casing" points={ring} fill="none" stroke={PAL.lineCasing} strokeWidth={sbCase} strokeDasharray={dashZoom(sbs.dash, zk)} strokeLinejoin="round" pointerEvents="none" />
                   <polygon data-testid="setback-ring" points={ring} fill="none" stroke={sbs.stroke} strokeWidth={strokeZoom(sbs.weight, zk)} strokeDasharray={dashZoom(sbs.dash, zk)} pointerEvents="none" />
-                  <polygon points={ring} fill="none" stroke="rgba(0,0,0,0.001)" strokeWidth={12} strokeLinejoin="round" pointerEvents="stroke"
-                    style={{ cursor: tool === "select" ? (pc.locked ? "default" : "move") : "crosshair" }}
-                    onPointerDown={(e) => startMoveParcel(e, pc.id)}
-                    onContextMenu={(e) => onParcelContext(e, pc.id)} />
+                  {/* NEW-4 — the SELECTED lot's grab band is not drawn here: it moves up into the
+                      selection-chrome layer with the chips, so it isn't buried under a building
+                      that sits hard against the setback line. Every other parcel keeps it here. */}
+                  {pc.id !== selParcel?.id && (
+                    <polygon points={ring} fill="none" stroke="rgba(0,0,0,0.001)" strokeWidth={12} strokeLinejoin="round" pointerEvents="stroke"
+                      style={{ cursor: tool === "select" ? (pc.locked ? "default" : "move") : "crosshair" }}
+                      onPointerDown={(e) => startMoveParcel(e, pc.id)}
+                      onContextMenu={(e) => onParcelContext(e, pc.id)} />
+                  )}
                 </g>;
               })}
-              {/* setback value chips on the selected ACTIVE parcel — ONE per labelled RUN by
-                  default (B214/B215/B216 gave one per geometric SIDE; NEW-1 regroups by shared
-                  VALUE + direction so a filleted corner digitized as a dozen segments is one
-                  chip, not a dozen); per SEGMENT when the editor is toggled, for notches/jogs.
-                  Placed INBOARD (toward the setback line) so they never stack on the outboard
-                  boundary dimension (B215). A chip reading "—" means the run's segments disagree.
-
-                  NEW-1 — TWO screen-space guards on top, both re-evaluated every frame from the
-                  live zoom, so zooming in progressively reveals detail instead of painting
-                  everything at every scale:
-                    (a) a chip whose anchor edge is shorter than CHIP_MIN_EDGE_PX on screen is
-                        not drawn — below that the edge is a tick and the chip labels nothing
-                        you can see;
-                    (b) no two drawn chips may sit within CHIP_MIN_SEP_PX of each other; the
-                        lower-priority one drops, and priority is the anchor edge's length, so
-                        the chip on the longest edge in the pile always survives.
-                  Both are display-only: nothing is deleted, and the dropped chip's edges still
-                  carry their setback and still edit from the Parcels panel. */}
-              {settings.showSetback && selParcel && selRuns && (() => {
-                const sb = parcelSetbacks(selParcel);
-                // NEW-1 — the chip's border and numerals are near-black ink on its white plate,
-                // FULL STOP: `setbackChipStyle` takes no parcel, so there is nothing here to
-                // couple to. The earlier `selParcel.sbStroke || PAL.chipInk` read as black only
-                // while no setback colour was set — moving the line default indigo → green
-                // (B1192) put a green-on-white chip straight back on the map, which is the exact
-                // amber-on-amber unreadability the ink default was minted to end. A recoloured
-                // setback LINE still takes its own colour (B1100); its CHIP never follows.
-                const chipStyle = setbackChipStyle(PAL.chipInk);
-                // NEW-1 — the chip now reads its ROLE, not a bare number: "Front · 25′" says which
-                // ordinance setback the line is, which is the whole point of the role layer. The
-                // plate therefore has to size itself to its text instead of the old fixed 26-wide
-                // number plate, and the declutter pass switches to the box metric so two wide
-                // chips can't overlap side-by-side while vertically-stacked ones survive.
-                const roles = parcelRoles(selParcel);
-                const chipW = (txt) => Math.max(26, Math.round(txt.length * 5.9 + 11));
-                const pill = (key, anchor, txt, onEdit) => {
-                  const w = chipW(txt);
-                  return (
-                    <g key={key} style={{ cursor: "pointer" }} onPointerDown={(e) => { e.stopPropagation(); const fp = p2f(e.clientX, e.clientY); onEdit(fp, e.altKey); }}>
-                      <rect data-testid="setback-chip" x={anchor.x - w / 2} y={anchor.y - 9} width={w} height={16} rx={4} fill={chipStyle.plate} stroke={chipStyle.stroke} strokeWidth={1} />
-                      <text data-testid="setback-chip-text" x={anchor.x} y={anchor.y + 3.5} textAnchor="middle" fontSize="10.5" fontFamily={NUM_FONT} fontVariantNumeric={TABULAR_NUMS} fill={chipStyle.text} fontWeight="700">{txt}</text>
-                    </g>
-                  );
-                };
-                const roleTxt = (edge, v) => `${ROLE_SHORT[roles[edge]] || "Side"} · ${v}`;
-                const n = selParcel.points.length;
-                // Inboard screen anchor for the midpoint of edge `ei` (the point-in-ring inward
-                // step from B216 — correct on concave / L-shaped / flag lots, where "toward the
-                // centroid" threw a chip outside the lot).
-                // NEW-1 — the inboard step now clears the PLATE, not a fixed 13 px. A role chip is
-                // three times the width of the old number plate, so a fixed step let a wide chip
-                // straddle the boundary line and land on the OUTBOARD side-length dimension (B215
-                // put the two on opposite sides of the edge precisely so they never collide). The
-                // step is the plate's own half-extent along the inward normal, plus a small margin.
-                const anchorForEdge = (ei, w = 26) => {
-                  const a = selParcel.points[ei], b = selParcel.points[(ei + 1) % n];
-                  const am = f2p(a), bm = f2p(b);
-                  const m = { x: (am.x + bm.x) / 2, y: (am.y + bm.y) / 2 };
-                  const { sx, sy } = inwardScreenNormal(selParcel, { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }, b.x - a.x, b.y - a.y);
-                  const step = 6 + (Math.abs(sx) * w + Math.abs(sy) * 16) / 2;
-                  return { x: m.x + sx * step, y: m.y + sy * step };
-                };
-                const edgeLenFt = (ei) => dist(selParcel.points[ei], selParcel.points[(ei + 1) % n]);
-                // The candidate set differs by mode; the two guards below are identical for both,
-                // so per-segment mode is decluttered too (it was the worst case of all).
-                const cands = sbEditMode === "segment"
-                  ? selParcel.points.map((_, i) => ({
-                      key: `sbl${i}`, anchorEdge: i, lenFt: edgeLenFt(i), txt: roleTxt(i, `${f0(sb[i])}′`),
-                      onEdit: (fp) => setNumEdit({ fx: fp.x, fy: fp.y, value: String(sb[i]), onCommit: (v) => setEdgeSetback(selParcel, i, v) }),
-                    }))
-                  : parcelChipRuns(selParcel).map((run, ri) => {
-                      const val = runSetbackValue(run, sb);
-                      return {
-                        key: `sbr${ri}`, anchorEdge: run.anchorEdge, lenFt: run.anchorLenFt,
-                        txt: roleTxt(run.anchorEdge, val == null ? "—" : `${f0(val)}′`),
-                        // Alt-click still overrides just the nearest SEGMENT of the run, so a notch
-                        // inside a grouped side is reachable without leaving side mode.
-                        onEdit: (fp, alt) => {
-                          const altSeg = (alt && run.edges.length > 1) ? run.edges.reduce((best, ei) => {
-                            const q = nearestOnSeg(fp, selParcel.points[ei], selParcel.points[(ei + 1) % n]);
-                            const d = Math.hypot(fp.x - q.x, fp.y - q.y); return d < best.d ? { ei, d } : best;
-                          }, { ei: run.edges[0], d: Infinity }).ei : null;
-                          setNumEdit({ fx: fp.x, fy: fp.y, value: String(val == null ? (sb[run.edges[0]] ?? 0) : val),
-                            onCommit: (v) => (altSeg != null ? setEdgeSetback(selParcel, altSeg, v) : setRunSetback(selParcel, run, v)) });
-                        },
-                      };
-                    });
-                const shown = spaceOut(
-                  cands
-                    .filter((c) => c.lenFt * labelPpf >= CHIP_MIN_EDGE_PX)     // guard (a)
-                    .map((c) => ({ ...c, ...anchorForEdge(c.anchorEdge, chipW(c.txt)), priority: c.lenFt, w: chipW(c.txt), h: 16 })),
-                  CHIP_MIN_SEP_PX,                                             // guard (b) — box metric
-                  CHIP_MIN_GAP_PX,
-                );
-                if (!shown.length) return null;
-                return <g data-export="skip">{shown.map((c) => pill(c.key, { x: c.x, y: c.y }, c.txt, c.onEdit))}</g>;
-              })()}
               {/* parcels — the visible polygon is pointer-INERT (its fill never grabs the lot, even
                   when a translucent fill is toggled on); a companion transparent fat hit-stroke on the
                   SAME ring is the only grab target, so a lot is selectable by its boundary edge, never
@@ -17692,6 +17743,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   grabbable regardless of what is drawn underneath. Every manipulation handle in the
                   planner belongs in this group — see the block that builds them for the rule. */}
               <g data-export="skip" data-handle-layer="1">
+                {/* NEW-4 — the selected lot's setback chrome joins the same layer, for the same
+                    reason one line up: a chip and a grab band ARE manipulation affordances, and on a
+                    plan whose buildings sit hard against the setback line they were painted over and
+                    hit-tested behind a building's fill. Order inside the group matters: the grab band
+                    first, so the chips painted after it keep their own click target, and the vertex
+                    handles after both, so nothing covers the smallest targets on the canvas. */}
+                {setbackGrabNode}
+                {setbackChipNodes}
                 {parcelEdgeHighlight}
                 {parcelEdgeLabels}
                 {handleNodes}

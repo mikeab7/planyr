@@ -194,30 +194,76 @@ export const apprRows = (attrs) => {
  * the CAD's own columns when present, which is what the card has always shown. */
 export const PARCEL_CARD_PRIMARY_LABELS = ["Owner", "Account / ID", "Acreage"];
 
-export const parcelCardRows = (attrs, { acct = null, acres = null } = {}) => {
+/* NEW-5 — the PLANNER's parcel panel (double-click a lot) shows the owner as its own headline, so
+ * its short list starts at the situs address. Same curated data, same splitter, different host. */
+export const PARCEL_PANEL_PRIMARY_LABELS = ["Situs address", "Account / ID", "Acreage"];
+
+/**
+ * NEW-5 — the ONE row split shared by both parcel surfaces: the map-search card (`parcelCardRows`)
+ * and the planner's parcel panel (`parcelPanelRows`). The two are DIFFERENT hosts — a floating
+ * card over the map vs a docked panel Section — so they keep their own rendering, but they must
+ * not drift on WHICH rows are shown, in what order, or how a value is formatted. `apprRows` above
+ * is the field resolution (one row per logical FIELD, first matching column wins); this is the
+ * split into a short default list plus a collapsed tail.
+ *
+ * `hero` is a value the host already renders outside the list (the card's situs title, the panel's
+ * Owner headline). A row repeating it verbatim is dropped — that duplicate is exactly what the
+ * owner saw on 2026-07-30 ("it shows the owner as Forestar USA, and then the next line is just the
+ * owner as Forestar USA again"). Only an EXACT repeat of the hero is dropped; two different fields
+ * that happen to share a value (three money rows all reading $0) are both real and both kept.
+ */
+export function splitCuratedRows(attrs, { primary: primaryLabels = [], hero = null, acct = null, acres = null } = {}) {
   const curated = apprRows(attrs);
   const pick = (label) => curated.find((r) => r.label === label);
+  const norm = (v) => String(v == null ? "" : v).replace(/\s+/g, " ").trim().toUpperCase();
+  const heroVal = norm(hero) || null;
+  const push = (into, label, value) => {
+    const v = value == null ? "" : String(value).replace(/\s+/g, " ").trim();
+    if (!v || (heroVal && norm(v) === heroVal)) return;
+    into.push({ label, value: v });
+  };
+
   const primary = [];
+  for (const label of primaryLabels) {
+    if (label === "Account / ID") {
+      // The identify hit's own account id wins over the CAD column when we have it.
+      const cad = pick("Account / ID");
+      push(primary, "Account / ID", acct != null && String(acct) !== "" ? String(acct) : (cad ? cad.value : null));
+    } else if (label === "Acreage") {
+      // …and the MEASURED acreage (from the returned ring) wins over the CAD's own number.
+      if (Number.isFinite(acres)) push(primary, "Acreage (measured)", `${Number(acres).toFixed(2)} ac`);
+      else { const cad = pick("Acreage"); if (cad) push(primary, "Acreage", apprVal("Acreage", cad.value)); }
+    } else {
+      const r = pick(label);
+      if (r) push(primary, label, apprVal(label, r.value));
+    }
+  }
 
-  const owner = pick("Owner");
-  if (owner) primary.push({ label: "Owner", value: apprVal("Owner", owner.value) });
-
-  const cadAcct = pick("Account / ID");
-  const acctVal = acct != null && String(acct) !== "" ? String(acct) : (cadAcct ? String(cadAcct.value) : null);
-  if (acctVal) primary.push({ label: "Account / ID", value: acctVal });
-
-  const cadAcres = pick("Acreage");
-  if (Number.isFinite(acres)) primary.push({ label: "Acreage (measured)", value: `${Number(acres).toFixed(2)} ac` });
-  else if (cadAcres) primary.push({ label: "Acreage", value: apprVal("Acreage", cadAcres.value) });
-
-  // Everything curated that the three primary rows (and the title) don't already carry,
-  // still in APPR_FIELDS order: Land value → Improvement value → Total value → Land use →
-  // Zoning → Year built → Legal.
-  const more = curated
-    .filter((r) => !/^(situs address|owner|account \/ id|acreage)$/i.test(r.label))
-    .map((r) => ({ label: r.label, value: apprVal(r.label, r.value) }));
-
+  // Everything curated the primary rows (and the hero) don't already carry, still in APPR_FIELDS
+  // order — so the Legal description, the unbounded metes-and-bounds blob, always lands last.
+  const shown = new Set(primaryLabels.map((l) => l.toLowerCase()));
+  const more = [];
+  for (const r of curated) {
+    if (shown.has(r.label.toLowerCase())) continue;
+    push(more, r.label, apprVal(r.label, r.value));
+  }
   return { primary, more };
+}
+
+export const parcelCardRows = (attrs, { acct = null, acres = null } = {}) =>
+  // The situs address is the card's TITLE, so it never repeats as a row.
+  splitCuratedRows(attrs, { primary: PARCEL_CARD_PRIMARY_LABELS, hero: situsAddress(attrs), acct, acres });
+
+/* NEW-5 — the planner panel's split. The Owner is the panel's own headline, so it is the hero
+ * (never a row as well), and the long tail — Land use, Zoning, the values, and the Legal
+ * description — folds behind the panel's collapsed disclosure. */
+export const parcelPanelRows = (attrs, { acct = null, acres = null } = {}) =>
+  splitCuratedRows(attrs, { primary: PARCEL_PANEL_PRIMARY_LABELS, hero: ownerName(attrs), acct, acres });
+
+/** The owner name the curated field map resolves — the ONE answer both surfaces read. */
+export const ownerName = (attrs) => {
+  const r = apprRows(attrs).find((x) => x.label === "Owner");
+  return r ? String(r.value).replace(/\s+/g, " ").trim() : null;
 };
 
 // Everything the county returned (minus geometry/system fields) — the "all fields" expander.

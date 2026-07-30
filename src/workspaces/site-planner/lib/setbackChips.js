@@ -43,6 +43,7 @@
  */
 
 import { turnBetween } from "./screenDeclutter.js";
+import { dimCalloutVisible } from "./labelLayout.js";
 
 /* Direction spread (degrees) at which a run breaks. 50° is chosen so a filleted right-angle
  * corner breaks exactly once (the fillet's total sweep is ~90°, so the spread crosses 50°
@@ -61,6 +62,77 @@ export const CHIP_TURN_BREAK_DEG = 50;
 export const CHIP_MIN_EDGE_PX = 26;
 export const CHIP_MIN_SEP_PX = 40;
 export const CHIP_MIN_GAP_PX = 14;
+
+/**
+ * NEW-2 — the ABSOLUTE zoom floor, on top of the two RELATIVE guards above.
+ *
+ * `CHIP_MIN_EDGE_PX` and `CHIP_MIN_SEP_PX` are both relative to the parcel: they ask "is this
+ * edge long enough on screen" and "are these two chips too close". On a 62-acre lot the longest
+ * edge still clears the edge bar at ANY zoom, so exactly one full-size chip always survived —
+ * and at county zoom, with the whole parcel a thumbnail against several square miles, that one
+ * chip was the largest thing on the screen (owner, 2026-07-30). A relative guard cannot fix
+ * that, because nothing about the parcel got smaller relative to itself.
+ *
+ * So the chip joins the shared annotation floor every other callout and dimension already
+ * rides — `dimCalloutVisible` — and reveals together with them on zoom-in, instead of standing
+ * alone over an empty county. The two relative guards still run after this one.
+ *
+ * The ONE exception is deliberate: a parcel whose setbacks are actively being edited (the user
+ * has drilled into the By-side / Per-segment tier, or has an inline value editor open) keeps its
+ * chips at any zoom — they are the edit surface at that moment, not annotation.
+ */
+export const setbackChipsVisible = (ppf, { editing = false } = {}) => !!editing || dimCalloutVisible(ppf);
+
+/**
+ * NEW-3 — which chips carry their ROLE word, and which drop to a bare value.
+ *
+ * A chip is a control, not a headline (owner, 2026-07-30: "there's too much information almost,
+ * or it's just too much"). Four saturated pills reading "Side · 25′" / "Rear · 25′" compete with
+ * the buildings, the property line and the dimension text — and on a lot with one uniform
+ * setback they are also redundant with one another. Two rules, in order:
+ *
+ *  (a) UNIFORM PARCEL — every chip shows the same value ⇒ NO chip shows a role word. The number
+ *      is the same on every boundary, so the role adds nothing to the number; the panel is where
+ *      roles are read and set.
+ *  (b) REPEATED ROLE — otherwise, within each role whose runs all share one value, only the
+ *      highest-priority run (the longest anchor edge, i.e. the most legible one) keeps the word;
+ *      its siblings drop to the bare value. That is the "don't say Rear · 25′ three times down
+ *      one boundary" rule. A role whose runs carry DIFFERENT values keeps the word on all of
+ *      them — there the role is the only thing distinguishing two different numbers.
+ *
+ * Pure. `items` are the chips about to be drawn, in any order:
+ *   [{ role, value, priority }]  — `value` in feet, or null/NaN for a mixed run ("—")
+ * Returns a boolean array aligned to `items`: true ⇒ render "Rear · 25′", false ⇒ "25′".
+ */
+export function chipRoleWords(items, eps = 0.05) {
+  const list = Array.isArray(items) ? items : [];
+  if (list.length === 0) return [];
+  const same = (a, b) => (a == null || b == null ? a === b : Math.abs(a - b) <= eps);
+  const val = (it) => (Number.isFinite(it?.value) ? it.value : null);
+
+  // (a) one value across the whole parcel — including the single-chip case, where a role word
+  // is pure decoration on the only number there is.
+  const first = val(list[0]);
+  if (list.every((it) => same(val(it), first))) return list.map(() => false);
+
+  // (b) per role: keep the word once when the role's runs agree, on all of them when they don't.
+  const byRole = new Map();
+  list.forEach((it, i) => {
+    const k = it?.role || "side";
+    if (!byRole.has(k)) byRole.set(k, []);
+    byRole.get(k).push(i);
+  });
+  const out = list.map(() => true);
+  for (const idx of byRole.values()) {
+    if (idx.length < 2) continue;
+    const v0 = val(list[idx[0]]);
+    if (!idx.every((i) => same(val(list[i]), v0))) continue;   // genuinely different numbers → all keep the word
+    let keep = idx[0];
+    for (const i of idx) if ((list[i]?.priority ?? 0) > (list[keep]?.priority ?? 0)) keep = i;
+    for (const i of idx) if (i !== keep) out[i] = false;
+  }
+  return out;
+}
 
 /**
  * Group a parcel's edges into setback-chip runs.

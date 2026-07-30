@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { COUNTIES, COUNTIES_MAP, candidateCountiesForPoint, countyKeyForName, STATEWIDE_KEYS, SNAPSHOT_COUNTIES } from "./lib/counties.js";
@@ -31,7 +31,13 @@ import { elStyle, elRingFeet, byZ } from "./lib/planStyle.js";
 import { STATUSES, STATUS_META, statusOf } from "./lib/siteModel.js";
 import { countyAtPoint } from "./lib/jurisdiction.js";
 import { findAttr, situsAddress, siteNameFromParcel } from "./lib/appraisal.js";
-import ParcelInfoCard from "./components/ParcelInfoCard.jsx";
+/* LAZY (B1064 tranche). The address-search parcel card renders only AFTER a search resolves a
+ * lot — an inherently async moment, so there is nothing on screen for its chunk to hold up and
+ * no layout to reserve (the card is absolutely positioned over the map, which is also why the
+ * fallback here is `null` rather than a height-reserving placeholder). `PanelErrorBoundary`
+ * still contains a chunk that fails to load, per LOUD-FAILURE. */
+const ParcelInfoCard = lazy(() => import("./components/ParcelInfoCard.jsx"));
+import { PanelErrorBoundary } from "./components/LazyPanel.jsx";
 import { makeParcelDisplayLayer, makeSnapshotLayer, PARCEL_MINZOOM, ADD_CURSOR, REMOVE_CURSOR } from "./lib/parcelDisplay.js";
 import { dissolvedParcelSqft } from "./lib/polyClip.js";
 import { geocodeAddress } from "./lib/geocode.js";
@@ -1521,6 +1527,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
             which is what lets its three-row default + "More details" fold be unit-tested.
             Keyed on the parcel so every new search re-mounts it with the fold CLOSED. */}
         {parcelInfo && (
+          <PanelErrorBoundary name="Parcel info"><Suspense fallback={null}>
           <ParcelInfoCard
             key={`${parcelInfo.key || ""}|${parcelInfo.acct || ""}|${parcelInfo.addr || ""}`}
             info={parcelInfo}
@@ -1529,6 +1536,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
             onDismiss={() => setParcelInfo(null)}
             onPlan={planSelected}
           />
+          </Suspense></PanelErrorBoundary>
         )}
 
         {/* saved sites */}

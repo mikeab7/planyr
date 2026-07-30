@@ -87,7 +87,9 @@ describe("source guard — the one chip render site cannot recouple", () => {
   const block = (() => {
     const start = src.indexOf("const pill = (key, anchor, txt, onEdit)");
     expect(start, "the setback-chip `pill` factory moved — retarget this guard").toBeGreaterThan(0);
-    const end = src.indexOf("const roleTxt", start);
+    // NEW-3 replaced `const roleTxt` (the old unconditional "<Role> · <n>′" builder) with the
+    // `chipRoleWords` rule, so the factory now ends at the line after it.
+    const end = src.indexOf("const n = selParcel.points.length;", start);
     expect(end, "could not find the end of the chip block").toBeGreaterThan(start);
     return src.slice(start, end);
   })();
