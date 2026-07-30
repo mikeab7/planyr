@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   candidateCountiesForPoint, COUNTIES_MAP, countyKeyForName, STATEWIDE_KEYS,
-  STATEWIDE_PARCEL_LAYER, statewideFallbackFor,
+  STATEWIDE_PARCEL_LAYER, statewideFallbackFor, countyForView,
 } from "../src/workspaces/site-planner/lib/counties.js";
 
 // candidateCountiesForPoint routes a map click to the CAD service(s) that could
@@ -155,5 +155,47 @@ describe("countyKeyForName (B792) — display name → configured routing key, n
     expect(countyKeyForName("txgio_statewide")).toBeNull(); // statewide pseudo-key is excluded
     expect(countyKeyForName("")).toBeNull();
     expect(countyKeyForName(null)).toBeNull();
+  });
+});
+
+/* NEW-1 — the JURISDICTION shown for a map POSITION. Separate from click routing on purpose:
+ * `candidateCountiesForPoint(...)[0]` is harris-first BY CONTRACT for any point outside every
+ * county bbox (the tests above depend on that order), and reading it as a jurisdiction is what
+ * made the Layers panel claim Harris County while the map sat over Denver — the same
+ * hardcoded-Houston class of bug as the landing view this shipped with. */
+describe("countyForView — the Layers-panel jurisdiction for a map position", () => {
+  it("a real bbox hit wins, exactly like click routing", () => {
+    expect(countyForView(29.76, -95.37)).toBe("harris");
+    expect(countyForView(29.6197, -95.6349)).toBe("fortbend");
+  });
+
+  it("a Colorado view resolves to a COLORADO county, never to Harris", () => {
+    expect(countyForView(39.74, -104.99)).toBe("co_denver");   // Denver, in-bbox
+    expect(countyForView(40.42, -104.71)).toBe("co_weld");     // Weld County — the owner's outlier
+  });
+
+  it("a Colorado point outside every county bbox stays in Colorado (nearest, not harris)", () => {
+    // Grand Junction — west slope, outside all nine configured county boxes.
+    const k = countyForView(39.06, -108.55);
+    expect(COUNTIES_MAP[k].state).toBe("CO");
+    expect(k).not.toBe("harris");
+  });
+
+  it("a Texas point outside every county bbox stays in Texas", () => {
+    expect(COUNTIES_MAP[countyForView(31.9686, -102.0779)].state).toBe("TX"); // Midland
+  });
+
+  it("never returns a statewide parcel SOURCE as a jurisdiction", () => {
+    [[29.76, -95.37], [39.74, -104.99], [39.06, -108.55], [36.9, -95.85], [33.45, -112.07]]
+      .forEach(([lat, lng]) => expect(STATEWIDE_KEYS).not.toContain(countyForView(lat, lng)));
+  });
+
+  it("always answers with a real configured county, even for junk input", () => {
+    expect(COUNTIES_MAP[countyForView(NaN, -95.37)]).toBeTruthy();
+    expect(COUNTIES_MAP[countyForView(undefined, undefined)]).toBeTruthy();
+  });
+
+  it("leaves click routing untouched (candidate[0] is still harris-first when away)", () => {
+    expect(candidateCountiesForPoint(31.9686, -102.0779)[0]).toBe("harris");
   });
 });

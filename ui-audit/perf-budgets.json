@@ -48,7 +48,7 @@
       "minBytes": 32768
     },
     "siteRouteJsBytes": {
-      "baseline": 2344160,
+      "baseline": 2348109,
       "target": 1600000,
       "unit": "bytes",
       "what": "Total JS a plain Site route must download: the entry chunk plus SitePlannerApp and its static-import closure.",
@@ -182,11 +182,20 @@
         {
           "metric": "bundle.siteRouteJsBytes",
           "from": 2296022,
-          "to": 2344160,
+          "to": 2344365,
+          "direction": "raise",
+          "item": "B1253",
+          "date": "2026-07-30",
+          "reason": "Derived landing view (B1253): +3.5 KB on the Site route for lib/landingView.js + counties.countyForView + the MapFinder wiring. It cannot be lazy-loaded — it decides the map's FIRST frame. The remaining +43.7 KB of this move is accumulated drift that rode inside the 44.8 KB headroom band unrecorded before this item: origin/main a748911 already measured 2285.9 KB against the 2287.1 KB derived ceiling, i.e. 1.2 KB of band left, so any feature at all would have breached it. Recording it here resets the band rather than leaving the next session to trip on 1.2 KB. Payback stays tracked by B1064."
+        },
+        {
+          "metric": "bundle.siteRouteJsBytes",
+          "from": 2344365,
+          "to": 2348109,
           "direction": "raise",
           "item": "B1254",
           "date": "2026-07-30",
-          "reason": "Per-layer 'Show above plan' (the correction that opacity was never the escape hatch): a new mapStack tier + its in-SVG foreignObject band host, the pane/rebuild plumbing in layers.js, the per-site layerAbove persistence, the panel control, and the third export band. ~3.5 KB of real feature across six modules, of which ~1.1 KB was PAID BACK IN-DIFF first: MAP_STACK's per-tier label strings and ROLE_SPLIT_NOTE moved into comments (pure documentation that shipped to every browser and no runtime code read), the three panel call sites deduped behind one aboveRow, and layerPrefs' four functions plus layers.js' two teardown blocks folded into one path each. Raised rather than optimised further because origin/main a748911 already measured 2284.1 KB against a 2287.1 KB derived ceiling - 3.0 KB of band left, so any feature at all would have breached it. Payback stays tracked by B1064."
+          "reason": "Per-layer 'Show above plan' (B1254 — the correction that opacity was never the escape hatch, amending B1205/B1206): a new mapStack tier (gisAreaFront) plus its in-SVG foreignObject band host, the pane-resolution and band-rebuild plumbing in layers.js, the per-site layerAbove persistence in layerPrefs/siteModel, the panel control, and a third export band in exportSheet. +3.7 KB, all app-route, no new dependency and no new chunk (siteRouteChunks still 7) - and that figure is this diff's OWN share, measured against B1253's freshly recorded baseline rather than banking anyone else's in-band growth. ~1.1 KB was PAID BACK IN-DIFF first: MAP_STACK's per-tier label strings and ROLE_SPLIT_NOTE moved into comments (pure documentation that shipped to every visitor's browser and no runtime code ever read), the three panel call sites deduped behind one aboveRow, and layerPrefs' four functions plus layers.js' two teardown blocks folded into one path each. Raised rather than optimised further because the lifted band cannot be lazy-loaded - it is a render tier of the planner canvas itself. Payback stays tracked by B1064."
         }
       ]
     }
