@@ -35,7 +35,7 @@ import {
   feetExtentToBbox, aerialTileGrid, pickAerialTileZoom,
 } from "./arcgis.js";
 import { siteToFeatures, buildKmz, kmzFilename, KMZ_MIME } from "./kmzExport.js";
-import { buildSheetFurnitureSvg } from "./sheetFurniture.js";
+import { buildSheetFurnitureSvg } from "./sheetFurnitureLayout.js";
 import { printSheetLayout, buildPrintSheetSvg, sheetFileName, formatDateStamp } from "./printSheet.js";
 import { printStrokeWidth, sheetFitScale } from "./exportStyle.js";
 import { sheetLabelPpf } from "./exportLabelScale.js";

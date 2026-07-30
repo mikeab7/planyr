@@ -585,7 +585,10 @@ describe("markup hit-area / callout padding / live color picker (B155 open-path 
     const src = read("../src/workspaces/site-planner/SitePlanner.jsx");
     // the committed box + selection chrome are hidden while THIS callout's editor is open → only ONE box
     expect(src).toMatch(/editCallout\?\.id !== c\.id && <rect data-testid=\{`callout-box-\$\{c\.id\}`\} x=\{boxRect\.x\}/);
-    expect(src).toMatch(/isSel && tool === "select" && editCallout\?\.id !== c\.id/);
+    // NEW-1 — the selection chrome moved OUT of the callout's content pass into the one
+    // always-on-top handle layer (`calloutHandles`), so the "hide it while this callout's editor
+    // is open" rule is now expressed as that const's early return. Same invariant, one place.
+    expect(src).toMatch(/const calloutHandles = \(\(\) => \{[\s\S]{0,400}editCallout\?\.id === c\.id\) return null;/);
     // a screen-px minimum is kept ONLY for typeability — safe now the box is hidden (can't double it).
     // B913 — geometry now comes from calloutLayout (auto-size OR wrap-to-boxW); the 64/30 min is kept
     // for the auto path (a fixed-width box already has an explicit, non-tiny width).
