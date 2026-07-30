@@ -71,6 +71,24 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   white-knockout, zoom-aware re-raster) + `overlayScale.js` (scale/trace math) + `overlayStorage.js`
   (Storage backup) + `dxf/` (worker parse via `dxf-parser` + entity→SVG render + true-units auto-scale)
   + `convertClient.js` (DWG→DXF through the B238 convert service, gated on `VITE_CONVERT_URL`).
+  **`overlayOrder.js` (NEW-2) is the ONE draw-order model for placed references** — a two-BAND
+  split (`below` the plan, the unchanged default, vs an explicitly promoted `above`), the
+  band-grouped array that IS the draw order bottom→top, the panel's front-first listing, and the
+  identity-on-no-op reorder / promote mutators. Front/back move within a band; crossing the plan is
+  only ever the explicit `aboveParcel` toggle, so "bring to front" can never silently lift a
+  backdrop over the property line. Screen, References panel and right-click menu all read it.
+- **⛔ NEW-1 — A MANIPULATION HANDLE IS CHROME: it belongs in the ONE always-on-top handle layer,
+  never in the content pass that draws its object.** `SitePlanner.jsx` renders every handle set
+  (`handleNodes`, `parcelHandles`, `elPolyHandles`, `markupHandles`, `calloutHandles`,
+  `measureHandles`, `overlayChrome`, the add-nodes) from a single `data-handle-layer="1"` group
+  that is the LAST child of the feet-space transform. In SVG a later sibling both paints over and
+  hit-tests ahead of everything before it, so that one position buys visibility and grabbability
+  together — there is no second hit-test rule to keep in sync. Authoring a grip inline next to its
+  object is what buried the reference overlay's corner grip under the parcel line (ungrabbable, so
+  the overlay could not be resized from that corner) and had the same trap waiting under the
+  callout and measurement grips. Guards: the repo-root `test/` suite **handleLayerOrder** (source
+  order + the ex-inline drag-starters) and the e2e spec **references-handle-layer** (real render:
+  every grip answers `elementsFromPoint`, with parcel geometry proven to be stacked underneath).
 - **Colorado (NEW-5/7/8):** `coloradoRegions.js` is THE guard — a network-free site→state
   resolution (it must hold when every GIS endpoint is down, which is exactly when a site falls
   through to a default), the four drainage regimes (MHFD covers 6 of the 9 target counties;
@@ -506,9 +524,16 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   B839 aerial tile Stitcher, and GIS raster/vector capture. It is **loaded on demand** (dynamic
   `import()` from `SitePlanner.jsx`, warmed when the File menu opens) and reads planner state
   through a `ctx` object rebuilt per call — add a key there, never a new closure capture. Its
-  helpers (`printSheet.js`, `sheetFurniture.js`, `exportStyle.js`, `imagePdf.js`, `kmzExport.js`,
-  `overlayVectorSvg.js`) must NOT gain a static importer on the boot path or they rejoin the
-  critical-path chunk. `exportLabelScale.js` (B1085) is the ONE place that decides what scale the
+  helpers (`printSheet.js`, `sheetFurnitureLayout.js`, `exportStyle.js`, `imagePdf.js`,
+  `kmzExport.js`, `overlayVectorSvg.js`) must NOT gain a static importer on the boot path or
+  they rejoin the critical-path chunk. **NEW-1 — `sheetFurniture.js` is SPLIT in two, and the
+  reason generalises:** the canvas needs the drawing PRIMITIVES (scale bar, north arrow,
+  metrics, `screenFurniturePlates`, `calibBadgePlacement`) so those stay on the boot path,
+  while the corner-placement + SVG-string tier the SHEET alone uses moved to
+  `sheetFurnitureLayout.js`. A module imported by BOTH the boot path and a lazy chunk is
+  hoisted whole into their common ancestor — tree-shaking drops unused exports, never
+  exports used by a sibling chunk — so a mixed-tier module silently charges the Site route
+  for export-only code. Split by tier, don't hope for shaking. `exportLabelScale.js` (B1085) is the ONE place that decides what scale the
   LABEL tier reasons at: the view on screen, the SHEET's own px-per-foot on an export pass — so
   declutter/LOD/collision, label sizes and stroke-zoom are a function of the plan and the paper,
   never of the live zoom. It IS on the boot path (SitePlanner imports it statically, ~1 KB pure). PDF-PARITY: `printMetricPairs`/`printStormwaterBars` deliberately stay in

@@ -71,8 +71,13 @@ describe("NEW-1: measurements are styled through the ONE resolver, on every mode
  * one without the gesture goes red on arrival rather than shipping and waiting to be reported.
  */
 describe("NEW-2: EVERY interactive measurement surface opens Properties on double-click", () => {
-  // The measurement render block, sliced exactly as the chip-ordering assertion below slices it.
-  const block = SP.slice(SP.indexOf("{/* measurements — line (distance)"), SP.indexOf("{/* in-progress measure draft */}"));
+  // The measurement render block, sliced exactly as the chip-ordering assertion below slices it,
+  // PLUS the hoisted `measureHandles` const. NEW-1 moved the control-point grips out of the render
+  // block and into the one always-on-top handle layer (a grip drawn inside the content pass could
+  // be buried under a label or a promoted reference and then could not be grabbed) — so the scan
+  // has to cover both halves, or it would silently stop seeing the vertex grip it classifies.
+  const HANDLE_LAYER = SP.slice(SP.indexOf("const measureHandles = (() => {"), SP.indexOf("/* ----------------------------- UI ----------------------------- */"));
+  const block = SP.slice(SP.indexOf("{/* measurements — line (distance)"), SP.indexOf("{/* in-progress measure draft */}")) + HANDLE_LAYER;
 
   /** Extract `const NAME = (…) => { … }` from the component body by brace matching. */
   function bodyOf(name) {

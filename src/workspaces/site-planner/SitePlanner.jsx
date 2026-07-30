@@ -177,6 +177,7 @@ import { CURB_TYPES as COST_CURB_TYPES, CURB_TYPE_META, roadCurbType, roadCurbed
 import { layoutLabels, buildingLabelLines, dimCalloutVisible, detailLabelVisible, pondParamLabelVisible, pondParamFontPx, suppressedDimIds, dimFontScale, dimFontPx, boxOf, DIM_CALLOUT_MIN_PPF } from "./lib/labelLayout.js";
 import { inlineLines } from "./lib/labelFitLadder.js";
 import { calloutLayout, minCalloutWidthFt } from "./lib/calloutLayout.js";
+import { splitOverlayBands, overlayPanelOrder, overlayOrderFlags, reorderOverlays, setOverlayBand, overlayBand } from "./lib/overlayOrder.js";
 import { DOCK_ZONES, MAX_DOCK_ZONES, ZONE_CATALOG, zoneDepthDefaults, catalogDepthDefault, layoutZoneByKind, usableCourtSpan, zoneAlongSpan, boxExtentAlong, resizedZoneAlongLen, dockSidesFor, footprintDepth, footprintLength, footprintAxes, strandedZoneIds, pruneStrandedZones } from "./lib/dockZones.js";
 import { computeBuildingGrid, resolveGridSettings, placeDockDoors } from "./lib/buildingGrid.js";
 import { convertBuildingToPolygon, dockLineAt, dockEdgeLine, projectOntoLine, frameBBox, translateDockLines, dockSegExtent, clipSegmentToRing } from "./lib/footprintEdit.js";
@@ -3711,7 +3712,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const histKey = (s) =>
     JSON.stringify({ p: s.parcels, e: s.els, m: s.measures, c: s.callouts, k: s.markups }) +
     "|" + (s.underlay ? `${s.underlay.x},${s.underlay.y},${s.underlay.ftPerPx},${s.underlay.ftPerPxY},${s.underlay.opacity},${s.underlay.locked},${s.underlay.src?.length}` : "none") +
-    "|" + ((s.sheetOverlays || []).map((o) => `${o.id}:${o.x},${o.y},${o.ftPerPx},${o.rotation},${o.opacity},${o.locked},${o.page},${o.src ? o.src.length : 0},${o.visible === false ? 0 : 1}`).join(";") || "no") + // RC-8: no Math.round — a sub-foot overlay nudge must be a distinct undo frame (underlay pos isn't rounded either)
+    "|" + ((s.sheetOverlays || []).map((o) => `${o.id}:${o.x},${o.y},${o.ftPerPx},${o.rotation},${o.opacity},${o.locked},${o.page},${o.src ? o.src.length : 0},${o.visible === false ? 0 : 1},${o.aboveParcel === true ? 1 : 0}`).join(";") || "no") + // NEW-2: aboveParcel is in the signature so promoting a reference over the plan is its own undo frame (like `visible`). RC-8: no Math.round — a sub-foot overlay nudge must be a distinct undo frame (underlay pos isn't rounded either)
     "|L:" + overridesSig(s.layerOverrides); // NEW-1 — GIS Layers-panel visibility set, so a layer toggle is a distinct, undoable frame (matches sheetOverlays.visible)
   // Pure snapshot stack (lib/history.js) — dedups no-op frames (B32) and always
   // compares against the live state we pass in (stateRef.current), so undo/redo
@@ -6818,14 +6819,22 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     flashWarn(`Pasted “${o.name}”.`, 3000);
   };
   // Draw order = array order (later paints on top), so front = end, back = start. No-op at the ends.
+  // NEW-2 — front/back within the reference's OWN band (below-the-plan vs above-the-plan). Crossing
+  // the parcel is the explicit toggle's job, never a side effect of "bring to front". The pure
+  // engine returns the SAME array on a no-op, so an at-the-end press costs no history frame.
   const reorderOverlay = (id, mode) => {
-    const idx = sheetOverlays.findIndex((o) => o.id === id);
-    if (idx < 0) return;
-    if ((mode === "front" && idx === sheetOverlays.length - 1) || (mode === "back" && idx === 0)) return;
+    const next = reorderOverlays(sheetOverlays, id, mode);
+    if (next === sheetOverlays) return;
     pushHistory();
-    const next = sheetOverlays.slice();
-    const [item] = next.splice(idx, 1);
-    if (mode === "front") next.push(item); else next.unshift(item);
+    setSheetOverlays(next);
+  };
+  // NEW-2 — promote / demote ONE reference across the parcel + site elements. Persisted on the
+  // reference record (`aboveParcel`), so it survives a reload and rides the same save/sync path as
+  // every other overlay field; the moved reference lands at the front of its new band.
+  const toggleOverlayBand = (id, above) => {
+    const next = setOverlayBand(sheetOverlays, id, above);
+    if (next === sheetOverlays) return;
+    pushHistory();
     setSheetOverlays(next);
   };
   // B462 — "Align to base edge": snap the overlay's rotation parallel to the nearest parcel boundary
@@ -13074,6 +13083,190 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     return <g>{px.map((p, i) => vtxRect(`mkv${i}`, p, isSelVtx("markup", m.id, i), "move", (e) => startMarkupVertex(e, m.id, i)))}</g>;
   })();
 
+  /* ================= NEW-1 — THE ALWAYS-ON-TOP HANDLE LAYER =================================
+   * A manipulation handle is CHROME, not content. It must render above every map layer and win
+   * the hit test whenever the pointer is over it, whatever is drawn underneath — otherwise a
+   * handle that happens to fall under the parcel line (the owner's Weld County repro: a
+   * reference overlay's top-right corner grip sitting under the boundary at the E County Rd 14
+   * corner) is invisible AND ungrabbable, and the object cannot be resized from that corner.
+   *
+   * The parcel / element / markup handles were already correct — they are built as consts here
+   * and rendered from the ONE `data-handle-layer` group at the very end of the feet-space
+   * transform. Three sets were NOT, because they were authored inline inside the content pass
+   * that draws their object: the REFERENCE overlay's scale/rotate grips + its calibration marks,
+   * the CALLOUT's width grips + leader grips, and the MEASUREMENT's vertex grips. Those three are
+   * hoisted below so every handle in the planner lives in one layer with one rule.
+   *
+   * Paint order IS hit-test order in SVG (a later sibling wins a point it covers), so being last
+   * inside the top group buys both properties at once — there is no second hit-test rule to keep
+   * in sync. Every handle still carries data-export="skip", so none of this reaches a sheet.
+   * ⛔ Do NOT author a new handle inline next to the thing it manipulates — add it here.
+   * B1184/B1185 are untouched by this: the screen-space thinning and the smaller mark with the
+   * unchanged grab area are decisions about SIZE and COUNT, not about which layer they live in.
+   * ========================================================================================= */
+
+  // The two reference-overlay draw bands (NEW-2). The array is the draw order, bottom → top, and
+  // `splitOverlayBands` keeps each band's relative order — so the canvas paints `below` under the
+  // plan and `above` over it from the same renderer.
+  const overlayBands = splitOverlayBands(sheetOverlays);
+
+  // The reference overlay's CONTENT only (raster or its honest placeholder). All of its selection
+  // chrome moved to overlayChrome below, so this renderer can be dropped into either band pass.
+  const renderSheetOverlay = (o) => {
+    if (o.visible === false) return null; // B277 — hidden overlays don't render on the map (still listed in the References panel, with the eye toggle to bring them back)
+    const tl = f2p({ x: o.x, y: o.y });
+    const w = o.imgW * o.ftPerPx * view.ppf;
+    const h = o.imgH * o.ftPerPx * view.ppf;
+    const cx = tl.x + w / 2, cy = tl.y + h / 2;
+    return (
+      <g key={o.id} transform={o.rotation ? `rotate(${o.rotation} ${cx} ${cy})` : undefined}
+        style={{ cursor: ovAlignBase === o.id ? "crosshair" : (tool === "select" && !o.locked ? "move" : "default") }}
+        pointerEvents={o.locked ? "none" : "auto"}
+        onPointerDown={(e) => startMoveSheetOverlay(e, o.id)}
+        onContextMenu={(e) => onOverlayContext(e, o.id)}>
+        {o.src ? (
+          // data-overlay-image marks the printable raster so buildExportSvg can include/exclude it per the "Print overlay" toggle (B131).
+          // B749 — a live hi-res object URL overrides the base raster while zoomed in (transient; the record's src is unchanged).
+          // data-overlay-id lets the export swap a transient blob: hi-res back to the persisted base raster before inlining.
+          <image data-overlay-image="1" data-overlay-id={o.id} href={hiresById[o.id] || o.src} x={tl.x} y={tl.y} width={w} height={h} opacity={o.opacity} preserveAspectRatio="none" />
+        ) : (() => {
+          // B784 — an honest, TERMINAL placeholder for an overlay with no raster. "missing" (or a
+          // healed dead pointer) and the never-uploaded "no copy on this device" case are clickable
+          // to re-add the file (transform preserved); a transient "network" failure is clickable to
+          // retry. Only a genuinely-in-flight fetch shows the (now brief) "Loading drawing…".
+          const ovErr = overlayLoadErr[o.id];
+          const ovLoading = !ovErr && !o.storageMissing && (o.idbKey || o.storageKey);
+          const label = (ovErr === "missing" || o.storageMissing)
+            ? `Couldn't load “${o.name}” — click to re-add the file`
+            : ovErr === "network"
+              ? "Couldn't reach storage — click to retry"
+              : ovLoading ? "Loading drawing…"
+              : `Re-add “${o.name}” — image not on this device`;
+          return (<g data-export="skip"
+            style={{ cursor: ovLoading ? "default" : "pointer" }}
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={ovLoading ? undefined : (e) => { e.stopPropagation(); if (ovErr === "network") retryOverlay(o.id); else reAddOverlay(o.id); }}>
+            <rect x={tl.x} y={tl.y} width={w} height={h} fill="#fbf3ee" fillOpacity={0.55} stroke={PAL.accent} strokeWidth={1.5} strokeDasharray="8 5" />
+            <text x={cx} y={cy} textAnchor="middle" fontSize={13} fill={PAL.accent}>{label}</text>
+          </g>);
+        })()}
+      </g>
+    );
+  };
+
+  // Selection chrome + scale/rotate grips for the SELECTED reference overlay, plus the B73
+  // calibration marks. Wrapped in the overlay's own rotation transform so the grips stay on its
+  // corners — the transform is the only thing that had to come along from the content pass.
+  const overlayChrome = (() => {
+    const o = sheetOverlays.find((x) => x.id === selOverlay && x.visible !== false);
+    const calib = ovCalib && (
+      <g key="ovcalib">
+        {ovCalib.pts.map((p, i) => {
+          const sp = f2p(p), isMap = ovCalib.kind === "align" && i % 2 === 1;
+          const label = ovCalib.kind === "align" ? (isMap ? "map" : `${i / 2 + 1}`) : `${i + 1}`;
+          return (
+            <g key={`ovc${i}`} pointerEvents="none">
+              <circle cx={sp.x} cy={sp.y} r={5} fill={isMap ? "#2563eb" : PAL.accent} stroke="#fff" strokeWidth={1.5} />
+              <text x={sp.x + 8} y={sp.y - 6} fontSize={11} fontWeight={700} fill={isMap ? "#2563eb" : PAL.accent} stroke="#fff" strokeWidth={0.5} paintOrder="stroke">{label}</text>
+            </g>
+          );
+        })}
+        {/* connectors: trace = the measured line; align = each drawing→map pair */}
+        {ovCalib.kind === "trace" && ovCalib.pts.length >= 2 && (() => {
+          const a = f2p(ovCalib.pts[0]), b = f2p(ovCalib.pts[1]);
+          return <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke={PAL.accent} strokeWidth={1.5} strokeDasharray={dashZoom("5 4", strokeZk)} pointerEvents="none" />;
+        })()}
+        {ovCalib.kind === "align" && Array.from({ length: Math.floor(ovCalib.pts.length / 2) }, (_, k) => {
+          const a = f2p(ovCalib.pts[2 * k]), b = f2p(ovCalib.pts[2 * k + 1]);
+          return <line key={`ovl${k}`} x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="#2563eb" strokeWidth={1.25} strokeDasharray={dashZoom("4 3", strokeZk)} pointerEvents="none" />;
+        })}
+      </g>
+    );
+    if (!o || tool !== "select") return calib || null;
+    const tl = f2p({ x: o.x, y: o.y });
+    const w = o.imgW * o.ftPerPx * view.ppf;
+    const h = o.imgH * o.ftPerPx * view.ppf;
+    const cx = tl.x + w / 2, cy = tl.y + h / 2;
+    return (
+      <g data-export="skip">
+        <g transform={o.rotation ? `rotate(${o.rotation} ${cx} ${cy})` : undefined}>
+          <rect x={tl.x} y={tl.y} width={w} height={h} fill="none" stroke={PAL.accent} strokeWidth={1.5} strokeDasharray="6 4" pointerEvents="none" />
+          {!o.locked && !ovCalib && (<>
+            {[[tl.x, tl.y], [tl.x + w, tl.y], [tl.x + w, tl.y + h], [tl.x, tl.y + h]].map(([hx, hy], hi) => (
+              <rect key={`hsc${hi}`} data-handle="overlay-scale" x={hx - 5} y={hy - 5} width={10} height={10} rx={2} fill="#fff" stroke={PAL.accent} strokeWidth={1.5}
+                style={{ cursor: hi % 2 === 0 ? "nwse-resize" : "nesw-resize" }} onPointerDown={(e) => startScaleOverlay(e, o.id)} />
+            ))}
+            <line x1={cx} y1={tl.y} x2={cx} y2={tl.y - 22} stroke={PAL.accent} strokeWidth={1.5} pointerEvents="none" />
+            <circle data-handle="overlay-rotate" cx={cx} cy={tl.y - 22} r={5.5} fill="#fff" stroke={PAL.accent} strokeWidth={1.5}
+              style={{ cursor: "grab" }} onPointerDown={(e) => startRotateOverlay(e, o.id)} />
+          </>)}
+        </g>
+        {calib}
+      </g>
+    );
+  })();
+
+  // B619/B913 width grips + per-leader re-aim grips for the SELECTED callout. Hidden while its
+  // text editor is open (the editor's own accent outline cues focus).
+  const calloutHandles = (() => {
+    if (sel?.kind !== "callout" || tool !== "select") return null;
+    const c = callouts.find((x) => x.id === sel.id);
+    if (!c || editCallout?.id === c.id) return null;
+    const st = calloutStyle(c);
+    const { w, h } = calloutLayout(c, st, view.ppf);
+    const bp = f2p(c.box);
+    const cr = calloutCornerRadius(w, h);
+    const gx = bp.x - w / 2, gy = bp.y - h / 2;
+    // [x, y, hx] — hx (∈ {-1,+1}) is which vertical edge this handle drives (width only).
+    const grips = [
+      [gx, gy, -1], [gx + w, gy, 1], [gx + w, gy + h, 1], [gx, gy + h, -1], // corners
+      [gx, gy + h / 2, -1], [gx + w, gy + h / 2, 1],                        // left / right mids (the width must-have)
+    ];
+    const canResize = !c.locked;
+    return (
+      <g data-export="skip">
+        <rect x={gx - 2} y={gy - 2} width={w + 4} height={h + 4} rx={cr + 2} ry={cr + 2} fill="none" stroke={SEL_BLUE} strokeWidth={1.25} pointerEvents="none" />
+        {grips.map(([hx, hy, dir], i) => (
+          <rect key={i} data-handle="callout-width" data-testid={`callout-handle-${dir > 0 ? "r" : "l"}`} x={hx - 4} y={hy - 4} width={8} height={8} fill={SEL_HANDLE_FILL} stroke={SEL_BLUE} strokeWidth={1.25}
+            pointerEvents={canResize ? "all" : "none"} style={canResize ? { cursor: "ew-resize" } : undefined}
+            onPointerDown={canResize ? (e) => startCalloutResize(e, c.id, dir) : undefined} />
+        ))}
+        {/* Per-leader re-aim grip. NEW-5 — no × delete badge (owner rule): a single leader is
+            removed by right-clicking it → "Delete Leader"; Delete removes the whole callout. */}
+        {calloutTips(c).map((tp0, i) => { const tp = f2p(tp0); return (
+          <circle key={`ct${i}`} data-handle="callout-tip" cx={tp.x} cy={tp.y} r={5} fill={SEL_HANDLE_FILL} stroke={SEL_BLUE} strokeWidth={2}
+            style={{ cursor: "move" }} onPointerDown={(e) => startMoveCallout(e, c.id, "tip", i)} />
+        ); })}
+      </g>
+    );
+  })();
+
+  // B230 draggable control points on the SELECTED measurement (every mode — line, polyline,
+  // area, count). Shift-click / right-click an edge inserts a point; right-click / Delete removes
+  // one. The active control point (the Delete target) is shown inverted.
+  // NEW-1 — no × delete badge on a measurement (owner rule): it sat right where the count markers
+  // do and read as part of the measurement itself. Delete key or the right-click menu removes it.
+  const measureHandles = (() => {
+    if (sel?.kind !== "measure" || tool !== "select") return null;
+    const m = measures[sel.i];
+    if (!m || m.locked) return null;
+    const fpts = measPts(m);
+    if (measMode(m) === "count" ? fpts.length < 1 : fpts.length < 2) return null;
+    const st = measureStyle(m, { accent: PAL.accent, uncalibrated: calibrationState === "uncalibrated", selected: true });
+    return (
+      <g data-export="skip" data-testid="measure-selected" data-sel-i={sel.i}>
+        {fpts.map(f2p).map((p, k) => {
+          const on = !!selVtx && selVtx.layer === "measure" && selVtx.id === sel.i && selVtx.index === k;
+          return (
+            <rect key={`mv${k}`} data-handle="measure-vertex" x={p.x - 5} y={p.y - 5} width={10} height={10} rx={2}
+              fill={on ? PAL.paper : st.stroke} stroke={on ? st.stroke : PAL.paper} strokeWidth={on ? 2 : 1.5}
+              style={{ cursor: "move" }} onPointerDown={(e) => startMeasureVertex(e, sel.i, k)} />
+          );
+        })}
+      </g>
+    );
+  })();
+
   /* ----------------------------- UI ----------------------------- */
   // Bluebeam-style left rail: a thin column of small buttons, each opening one menu.
   const railHdr = (t) => <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: PAL.chromeMuted, padding: "8px 4px 4px" }}>{t}</div>;
@@ -14541,10 +14734,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.45 }}>
                   Map references are managed here, separate from your Library documents — deleting a Library file won't remove a reference from the map, and adding a Library file won't add one.
                 </div>
-                {sheetOverlays.map((o) => {
+                {/* NEW-2 — the list IS the stacking order, front-most first (the way every layers
+                    panel reads), so what draws over what is visible without opening a menu. */}
+                {sheetOverlays.length > 1 && (
+                  <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.45 }}>Listed front to back — the top one draws over the others.</div>
+                )}
+                {overlayPanelOrder(sheetOverlays).map((o) => {
                   const on = selOverlay === o.id;
+                  const zf = overlayOrderFlags(sheetOverlays, o.id);
                   return (
-                    <div key={o.id} style={{ border: `1px solid ${on ? PAL.accent : "var(--border-default)"}`, borderRadius: 9, padding: 9, background: "var(--surface-raised)" }}>
+                    <div key={o.id} data-testid={`reference-row-${o.id}`} data-reference-band={overlayBand(o)} style={{ border: `1px solid ${on ? PAL.accent : "var(--border-default)"}`, borderRadius: 9, padding: 9, background: "var(--surface-raised)" }}>
                       {/* Filename gets its own full-width row (B578) and WRAPS instead of truncating, so a long
                           sheet name is fully readable; the hide / lock / remove controls drop to their own row. */}
                       <button style={{ ...chip, width: "100%", textAlign: "left", whiteSpace: "normal", overflowWrap: "anywhere", lineHeight: 1.35, borderColor: on ? PAL.accent : "var(--border-default)", color: on ? PAL.accent : PAL.ink }} title={`${o.name} — right-click for Copy, Duplicate, z-order, Lock, Align to base`} onClick={() => setSelOverlay(on ? null : o.id)} onContextMenu={(e) => onOverlayContext(e, o.id)}>{o.name}</button>
@@ -14609,11 +14808,20 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                             <button style={{ ...chip, flex: 1 }} title="Click two ends of a known dimension on the drawing, then enter its real length" onClick={() => { setSelOverlay(o.id); setOvCalib({ id: o.id, kind: "trace", pts: [] }); }}>Trace a length</button>
                             <button style={{ ...chip, flex: 1 }} title="Click a point on the drawing then its spot on the map; repeat for 2+ pairs, then Apply (moves, rotates & scales; 3+ pairs = robust best-fit + residual)" onClick={() => { setSelOverlay(o.id); setOvCalib({ id: o.id, kind: "align", pts: [] }); }}>Align to map</button>
                           </div>
-                          {/* B654: above/below moved into the panel (the right-click menu keeps them too) */}
+                          {/* B654: above/below moved into the panel (the right-click menu keeps them too).
+                              NEW-2 — these order a reference against the OTHER references, within its band. */}
                           <div style={{ display: "flex", gap: 6 }}>
-                            <button style={{ ...chip, flex: 1 }} title="Draw this reference above the other references" onClick={() => reorderOverlay(o.id, "front")}>Bring to front</button>
-                            <button style={{ ...chip, flex: 1 }} title="Draw this reference beneath the other references" onClick={() => reorderOverlay(o.id, "back")}>Send to back</button>
+                            <button style={{ ...chip, flex: 1, opacity: zf.atFront ? 0.5 : 1 }} disabled={zf.atFront} title="Draw this reference above the other references" onClick={() => reorderOverlay(o.id, "front")}>Bring to front</button>
+                            <button style={{ ...chip, flex: 1, opacity: zf.atBack ? 0.5 : 1 }} disabled={zf.atBack} title="Draw this reference beneath the other references" onClick={() => reorderOverlay(o.id, "back")}>Send to back</button>
                           </div>
+                          {/* NEW-2 — the cross-layer control the owner asked for. Off by default: the usual
+                              job is tracing over a scanned plan, where your own property line has to stay on
+                              top. Turn it on for an exhibit you're working ON and the whole reference —
+                              including its resize corners — comes over the parcel and the site elements. */}
+                          <label style={{ ...ovRow, cursor: "pointer" }} title="Draw this reference over the parcel boundary, the setback ring and the site elements instead of underneath them">
+                            <input type="checkbox" data-testid={`reference-above-${o.id}`} checked={overlayBand(o) === "above"} onChange={(e) => toggleOverlayBand(o.id, e.target.checked)} />
+                            <span>Draw above the plan</span>
+                          </label>
                           {/* B654: per-sheet white knockout — re-renders the page, so it needs a PDF source */}
                           {(overlayDocs.current.has(o.id) || (o.storageKey || "").toLowerCase().endsWith(".pdf")) && (
                             <label style={{ ...ovRow, cursor: "pointer" }} title="Make the sheet's white paper transparent so the map shows through the linework">
@@ -16351,84 +16559,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   onPointerDown={startMoveUnderlay} />;
               })()}
 
-              {/* site-plan overlays (B72) — placed PDF/image backdrops in feet space,
-                  above the basemap/underlay and below parcels/massing/markup; shown
-                  even with the basemap on (the point is to overlay onto the aerial). */}
-              {sheetOverlays.map((o) => {
-                if (o.visible === false) return null; // B277 — hidden overlays don't render on the map (still listed in the Overlay panel, with the eye toggle to bring them back)
-                const tl = f2p({ x: o.x, y: o.y });
-                const w = o.imgW * o.ftPerPx * view.ppf;
-                const h = o.imgH * o.ftPerPx * view.ppf;
-                const cx = tl.x + w / 2, cy = tl.y + h / 2;
-                const isSel = selOverlay === o.id;
-                return (
-                  <g key={o.id} transform={o.rotation ? `rotate(${o.rotation} ${cx} ${cy})` : undefined}
-                    style={{ cursor: ovAlignBase === o.id ? "crosshair" : (tool === "select" && !o.locked ? "move" : "default") }}
-                    pointerEvents={o.locked ? "none" : "auto"}
-                    onPointerDown={(e) => startMoveSheetOverlay(e, o.id)}
-                    onContextMenu={(e) => onOverlayContext(e, o.id)}>
-                    {o.src ? (
-                      // data-overlay-image marks the printable raster so buildExportSvg can include/exclude it per the "Print overlay" toggle (B131).
-                      // B749 — a live hi-res object URL overrides the base raster while zoomed in (transient; the record's src is unchanged).
-                      // data-overlay-id lets the export swap a transient blob: hi-res back to the persisted base raster before inlining.
-                      <image data-overlay-image="1" data-overlay-id={o.id} href={hiresById[o.id] || o.src} x={tl.x} y={tl.y} width={w} height={h} opacity={o.opacity} preserveAspectRatio="none" />
-                    ) : (() => {
-                      // B784 — an honest, TERMINAL placeholder for an overlay with no raster. "missing" (or a
-                      // healed dead pointer) and the never-uploaded "no copy on this device" case are clickable
-                      // to re-add the file (transform preserved); a transient "network" failure is clickable to
-                      // retry. Only a genuinely-in-flight fetch shows the (now brief) "Loading drawing…".
-                      const ovErr = overlayLoadErr[o.id];
-                      const ovLoading = !ovErr && !o.storageMissing && (o.idbKey || o.storageKey);
-                      const label = (ovErr === "missing" || o.storageMissing)
-                        ? `Couldn't load “${o.name}” — click to re-add the file`
-                        : ovErr === "network"
-                          ? "Couldn't reach storage — click to retry"
-                          : ovLoading ? "Loading drawing…"
-                          : `Re-add “${o.name}” — image not on this device`;
-                      return (<g data-export="skip"
-                        style={{ cursor: ovLoading ? "default" : "pointer" }}
-                        onPointerDown={(e) => e.stopPropagation()}
-                        onClick={ovLoading ? undefined : (e) => { e.stopPropagation(); if (ovErr === "network") retryOverlay(o.id); else reAddOverlay(o.id); }}>
-                        <rect x={tl.x} y={tl.y} width={w} height={h} fill="#fbf3ee" fillOpacity={0.55} stroke={PAL.accent} strokeWidth={1.5} strokeDasharray="8 5" />
-                        <text x={cx} y={cy} textAnchor="middle" fontSize={13} fill={PAL.accent}>{label}</text>
-                      </g>);
-                    })()}
-                    {isSel && tool === "select" && (
-                      <rect data-export="skip" x={tl.x} y={tl.y} width={w} height={h} fill="none" stroke={PAL.accent} strokeWidth={1.5} strokeDasharray="6 4" pointerEvents="none" />
-                    )}
-                    {isSel && tool === "select" && !o.locked && !ovCalib && (<g data-export="skip">
-                      {[[tl.x, tl.y], [tl.x + w, tl.y], [tl.x + w, tl.y + h], [tl.x, tl.y + h]].map(([hx, hy], hi) => (
-                        <rect key={`hsc${hi}`} x={hx - 5} y={hy - 5} width={10} height={10} rx={2} fill="#fff" stroke={PAL.accent} strokeWidth={1.5}
-                          style={{ cursor: hi % 2 === 0 ? "nwse-resize" : "nesw-resize" }} onPointerDown={(e) => startScaleOverlay(e, o.id)} />
-                      ))}
-                      <line x1={cx} y1={tl.y} x2={cx} y2={tl.y - 22} stroke={PAL.accent} strokeWidth={1.5} pointerEvents="none" />
-                      <circle cx={cx} cy={tl.y - 22} r={5.5} fill="#fff" stroke={PAL.accent} strokeWidth={1.5}
-                        style={{ cursor: "grab" }} onPointerDown={(e) => startRotateOverlay(e, o.id)} />
-                    </g>)}
-                  </g>
-                );
-              })}
+              {/* site-plan overlays (B72) — placed PDF/image backdrops in feet space, above the
+                  basemap/underlay; shown even with the basemap on (the point is to overlay onto
+                  the aerial). NEW-2 — this is the DEFAULT "below" band: beneath the parcel, the
+                  setback ring, the elements and the markups, so your own property line stays
+                  legible over a scanned plan. A reference the user has explicitly promoted paints
+                  from the SECOND pass further down (overlayBands.above). The selection outline,
+                  the scale/rotate handles and the calibration marks are no longer drawn here —
+                  every manipulation handle lives in the one always-on-top handle layer (NEW-1). */}
+              {overlayBands.below.map(renderSheetOverlay)}
 
-              {/* overlay calibration feedback (B73): clicked points + the traced line */}
-              {ovCalib && ovCalib.pts.map((p, i) => {
-                const sp = f2p(p), isMap = ovCalib.kind === "align" && i % 2 === 1;
-                const label = ovCalib.kind === "align" ? (isMap ? "map" : `${i / 2 + 1}`) : `${i + 1}`;
-                return (
-                  <g key={`ovc${i}`} pointerEvents="none">
-                    <circle cx={sp.x} cy={sp.y} r={5} fill={isMap ? "#2563eb" : PAL.accent} stroke="#fff" strokeWidth={1.5} />
-                    <text x={sp.x + 8} y={sp.y - 6} fontSize={11} fontWeight={700} fill={isMap ? "#2563eb" : PAL.accent} stroke="#fff" strokeWidth={0.5} paintOrder="stroke">{label}</text>
-                  </g>
-                );
-              })}
-              {/* connectors: trace = the measured line; align = each drawing→map pair */}
-              {ovCalib && ovCalib.kind === "trace" && ovCalib.pts.length >= 2 && (() => {
-                const a = f2p(ovCalib.pts[0]), b = f2p(ovCalib.pts[1]);
-                return <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke={PAL.accent} strokeWidth={1.5} strokeDasharray={dashZoom("5 4", strokeZk)} pointerEvents="none" />;
-              })()}
-              {ovCalib && ovCalib.kind === "align" && Array.from({ length: Math.floor(ovCalib.pts.length / 2) }, (_, k) => {
-                const a = f2p(ovCalib.pts[2 * k]), b = f2p(ovCalib.pts[2 * k + 1]);
-                return <line key={`ovl${k}`} x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="#2563eb" strokeWidth={1.25} strokeDasharray={dashZoom("4 3", strokeZk)} pointerEvents="none" />;
-              })}
 
               {/* setback outlines (per-edge) — anchored to the parcel, so an INACTIVE
                   parcel draws none (B213: inherits active state, like the yield math).
@@ -16745,6 +16885,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               {drawElsZ.above.map((el) => renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, els, startDimMove, onDimNumberDown, onElContext, dimSuppressed, null, labelFrame))}
               {/* markup shapes (neutral line/polyline/rect/ellipse/polygon) on top of the elements */}
               {drawMarkupsZ.filter((m) => !m.behindEls).map(renderMarkupNode)}
+              {/* NEW-2 — references the user has explicitly promoted ("Draw above the plan"). Same
+                  renderer, second pass: over the parcel, the setback ring, the elements and the
+                  markups. Opt-in per reference and OFF by default, because the common case is a
+                  scanned plan you trace over — the uncommon one is a finished land-plan exhibit you
+                  are working ON, where the property line drawn across it is what's in the way. */}
+              {overlayBands.above.map(renderSheetOverlay)}
               {/* ditch cross-section line (in-progress + last result) */}
               {(xsecMode && xsecPts.length === 1 && cursor) && (() => { const a = f2p(xsecPts[0]), b = f2p(cursor); return <line data-export="skip" x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="#0e7490" strokeWidth={2} strokeDasharray="6 4" pointerEvents="none" />; })()}
               {xsec && (() => { const a = f2p(xsec.p0), b = f2p(xsec.p1); return <g data-export="skip" pointerEvents="none"><line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="#0e7490" strokeWidth={2.4} /><circle cx={a.x} cy={a.y} r={3.5} fill="#0e7490" stroke="#fff" strokeWidth={1} /><circle cx={b.x} cy={b.y} r={3.5} fill="#0e7490" stroke="#fff" strokeWidth={1} /></g>; })()}
@@ -17004,7 +17150,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   zoom) so they don't balloon when you zoom out. */}
               {callouts.map((c) => {
                 const bp = f2p(c.box);
-                const isSel = sel?.kind === "callout" && sel.id === c.id;
                 const st = calloutStyle(c);
                 // B913 — one shared geometry helper (auto-size, OR wrap-to-c.boxW when the user has
                 // dragged a width handle). fontPx/lineH/padX/padY/lines/w/h all come from it, so the
@@ -17065,41 +17210,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         fontSize={fontPx} fill={st.color} textDecoration={st.underline ? "underline" : undefined}
                         fontWeight={st.bold ? 700 : 500} fontStyle={st.italic ? "italic" : "normal"} pointerEvents="none">{ln}</text>
                     ))}
-                    {/* B619 — blue selection chrome (outline + resize handles + tip grip); never exported. B680: also
-                        hidden while this callout's text editor is open (the editor's own accent outline cues focus).
-                        B913 — the corner + left/right-edge handles are now interactive WIDTH handles: drag one and
-                        the box gets an explicit width and the text wraps to it (auto-height). A locked callout keeps
-                        pointer-inert handles (visual only). */}
-                    {isSel && tool === "select" && editCallout?.id !== c.id && (() => {
-                      const gx = bp.x - w / 2, gy = bp.y - h / 2;
-                      // [x, y, hx] — hx (∈ {-1,+1}) is which vertical edge this handle drives (width only).
-                      const grips = [
-                        [gx, gy, -1], [gx + w, gy, 1], [gx + w, gy + h, 1], [gx, gy + h, -1], // corners
-                        [gx, gy + h / 2, -1], [gx + w, gy + h / 2, 1],                          // left / right mids (the width must-have)
-                      ];
-                      const canResize = !c.locked;
-                      return (
-                        <g data-export="skip">
-                          <rect x={gx - 2} y={gy - 2} width={w + 4} height={h + 4} rx={cr + 2} ry={cr + 2} fill="none" stroke={SEL_BLUE} strokeWidth={1.25} pointerEvents="none" />
-                          {grips.map(([hx, hy, dir], i) => (
-                            <rect key={i} data-testid={`callout-handle-${dir > 0 ? "r" : "l"}`} x={hx - 4} y={hy - 4} width={8} height={8} fill={SEL_HANDLE_FILL} stroke={SEL_BLUE} strokeWidth={1.25}
-                              pointerEvents={canResize ? "all" : "none"} style={canResize ? { cursor: "ew-resize" } : undefined}
-                              onPointerDown={canResize ? (e) => startCalloutResize(e, c.id, dir) : undefined} />
-                          ))}
-                        </g>
-                      );
-                    })()}
-                    {/* Per-leader re-aim grip, shown per leader while this callout is selected.
-                        NEW-5 — the × delete badge that used to sit at the leader's midpoint is GONE
-                        (owner rule, same as NEW-1 on measurements): it hovered over the leader line
-                        and read as part of the drawing. A single leader is still removable by
-                        right-clicking it → "Delete Leader"; Delete removes the whole callout. */}
-                    {isSel && tool === "select" && tips.map((tp, i) => (
-                      <g key={i} data-export="skip">
-                        <circle cx={tp.x} cy={tp.y} r={5} fill={SEL_HANDLE_FILL} stroke={SEL_BLUE} strokeWidth={2}
-                          style={{ cursor: "move" }} onPointerDown={(e) => startMoveCallout(e, c.id, "tip", i)} />
-                      </g>
-                    ))}
+                    {/* NEW-1 — the callout's selection outline, its B913 width grips and the
+                        per-leader re-aim grips are no longer drawn here: they live in the
+                        always-on-top handle layer (calloutHandles), so a grip can never end up
+                        under a measurement, a label or a promoted reference. */}
                   </g>
                 );
               })}
@@ -17243,22 +17357,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       {/* NEW-3 — the chip paints AFTER the hit targets, or the transparent grab
                           layer sits on top of it in document order and swallows the chip drag. */}
                       {chipNode}
-                      {isSel && tool === "select" && !m.locked && (
-                        <g data-testid="measure-selected" data-sel-i={i}>
-                          {pts.map((p, k) => {
-                            const on = !!selVtx && selVtx.layer === "measure" && selVtx.id === i && selVtx.index === k;
-                            return (
-                              <rect key={`mv${k}`} x={p.x - 5} y={p.y - 5} width={10} height={10} rx={2}
-                                fill={on ? PAL.paper : mcolor} stroke={on ? mcolor : PAL.paper} strokeWidth={on ? 2 : 1.5}
-                                style={{ cursor: "move" }} onPointerDown={(e) => startMeasureVertex(e, i, k)} />
-                            );
-                          })}
-                          {/* NEW-1 — no × delete badge on a measurement (owner rule): a selected
-                              measurement is deleted with the Delete key or the right-click menu.
-                              The badge sat right where the count markers do and read as part of
-                              the measurement itself. */}
-                        </g>
-                      )}
+                      {/* NEW-1 — the B230 control-point grips moved to the always-on-top handle
+                          layer (measureHandles); a grip under a label or a promoted reference
+                          used to be unreachable. */}
                     </g>
                   );
                 }
@@ -17301,24 +17402,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         it was unreachable: every press over the chip landed on the grab layer and
                         moved the measurement instead of the label. */}
                     {chipNode}
-                    {isSel && tool === "select" && !m.locked && (
-                      <g data-testid="measure-selected" data-sel-i={i}>
-                        {/* B230: draggable SQUARE control points (no "+" dots) — Shift-click /
-                            right-click an edge inserts a point; right-click / Delete removes one.
-                            The active control point (Delete target) is shown inverted. */}
-                        {pts.map((p, k) => {
-                          const on = !!selVtx && selVtx.layer === "measure" && selVtx.id === i && selVtx.index === k;
-                          return (
-                            <rect key={`mv${k}`} x={p.x - 5} y={p.y - 5} width={10} height={10} rx={2}
-                              fill={on ? PAL.paper : mcolor} stroke={on ? mcolor : PAL.paper} strokeWidth={on ? 2 : 1.5}
-                              style={{ cursor: "move" }} onPointerDown={(e) => startMeasureVertex(e, i, k)} />
-                          );
-                        })}
-                        {/* NEW-1 — no × delete badge on a measurement (owner rule). Delete key or
-                            the right-click menu ("Delete measurement") removes it; the badge used
-                            to float over the dimension label and read as part of the measurement. */}
-                      </g>
-                    )}
+                    {/* NEW-1 — the B230 control-point grips moved to the always-on-top handle
+                        layer (measureHandles); a grip under a label or a promoted reference
+                        used to be unreachable. */}
                   </g>
                 );
               })}
@@ -17469,8 +17555,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
 
               {parcelLabels}
               {labelEls}
-              {/* selection / editing chrome — stripped from exports */}
-              <g data-export="skip">
+              {/* NEW-1 — THE HANDLE LAYER. Selection / editing chrome, stripped from exports, and the
+                  LAST child of the feet-space transform: in SVG a later sibling both paints over and
+                  hit-tests ahead of everything before it, so a handle here is always visible AND always
+                  grabbable regardless of what is drawn underneath. Every manipulation handle in the
+                  planner belongs in this group — see the block that builds them for the rule. */}
+              <g data-export="skip" data-handle-layer="1">
                 {parcelEdgeHighlight}
                 {parcelEdgeLabels}
                 {handleNodes}
@@ -17483,6 +17573,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 {elSelOutline}
                 {elPolyHandles}
                 {markupHandles}
+                {/* NEW-1 — hoisted out of their content passes so they stop being buried: the
+                    reference overlay's scale/rotate grips + calibration marks, the callout's width
+                    and leader grips, and the measurement's control points. */}
+                {calloutHandles}
+                {measureHandles}
+                {overlayChrome}
                 {/* B230 — transient candidate-insertion dot, snapped to the nearest point on the
                     edge under the cursor; faint on hover, brighter while Shift arms the insert. */}
                 {insHint && <circle cx={insHint.x} cy={insHint.y} r={shiftHeld ? 4.5 : 3.5} fill={PAL.accent} fillOpacity={shiftHeld ? 0.9 : 0.42} stroke="#fff" strokeWidth={1} pointerEvents="none" />}
@@ -21215,8 +21311,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         const MW = 220;
         const o = sheetOverlays.find((x) => x.id === ovMenu.id);
         if (!o) return null;
-        const idx = sheetOverlays.findIndex((x) => x.id === ovMenu.id);
-        const atFront = idx === sheetOverlays.length - 1, atBack = idx === 0;
+        // NEW-2 — front/back are WITHIN this reference's band (below vs above the plan), so the
+        // greying matches what the ops actually do; crossing the plan is the separate toggle below.
+        const { atFront, atBack } = overlayOrderFlags(sheetOverlays, ovMenu.id);
+        const isAbove = overlayBand(o) === "above";
         const locked = !!o.locked, hasParcel = parcels.length > 0;
         const MOD = (typeof navigator !== "undefined" && /Mac|iPhone|iPad|iPod/.test(navigator.platform || navigator.userAgent || "")) ? "⌘" : "Ctrl+";
         const hdr = (top) => ({ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", padding: top ? "8px 8px 6px" : "4px 8px 6px", ...(top ? { borderTop: `1px solid ${PAL.panelLine}`, marginTop: 4 } : {}) });
@@ -21236,6 +21334,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             <div style={hdr(true)}>Arrange</div>
             {item({ text: "Bring to front", dis: atFront, on: () => { reorderOverlay(ovMenu.id, "front"); setOvMenu(null); } })}
             {item({ text: "Send to back", dis: atBack, on: () => { reorderOverlay(ovMenu.id, "back"); setOvMenu(null); } })}
+            {item({ text: isAbove ? "Draw below the plan" : "Draw above the plan", title: isAbove ? "Put this reference back under the parcel and the site elements" : "Lift this reference over the parcel boundary, the setback ring and the site elements", on: () => { toggleOverlayBand(ovMenu.id, !isAbove); setOvMenu(null); } })}
             <div style={hdr(true)}>Place</div>
             {item({ text: locked ? "Unlock" : "Lock", hint: locked ? "🔒" : "🔓", on: () => { patchOverlay(ovMenu.id, { locked: !locked }); setOvMenu(null); } })}
             {item({ text: "Align to base edge…", dis: locked || !hasParcel, title: locked ? "Unlock to align" : (!hasParcel ? "Draw or load a parcel first" : "Click a parcel edge to snap this drawing parallel to it"), on: () => { setSelOverlay(ovMenu.id); setOvAlignBase(ovMenu.id); setOvMenu(null); flashWarn("Click a parcel boundary to align this drawing parallel to it.", 6000); } })}
