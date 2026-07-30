@@ -64,6 +64,29 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   C.R.S. 37-92-602(8) — and never reports "pass", because the screening figure is an optimistic
   lower bound. Colorado counties live in `counties.js` under `co_`-prefixed keys (both states have
   an El Paso and a Jefferson). **Any change here is gated on the Texas golden-master suite under test/.**
+  **B1105 — `mhfdDetention.js` is the MHFD engine and the `volume-curve` ruleType.** WQCV (water
+  QUALITY) and EURV (FLOOD volume) are **distinct components**, each with its own role, inputs,
+  evidence state and citation — never one merged number — plus the routed 100-yr. **The coefficients
+  are deliberately `null` / `transcribed:false`:** every primary MHFD host is egress-blocked here and
+  two secondary reads of the EURV memo returned DIFFERENT coefficient sets, so the components name the
+  document each needs instead of computing a volume (`OWNER-TODO.md` is the unblock). The MATH is real
+  and tested against synthetic curves, so transcribing is a DATA edit — never fabricate a coefficient,
+  and never a `rateAcFtPerAc` (a full-spectrum volume has no per-acre rate). **⛔ SCOPE: MHFD ONLY.**
+  Larimer, Weld and El Paso keep the hard guard, enforced TWICE on independent facts — the
+  `computeRequiredDetention` seam is fail-CLOSED (needs a positive `coRegime === "mhfd"` **and** an
+  injected `coDetention`; anything else runs the original guard byte-for-byte) and
+  `computeMhfdDetention` re-checks county membership itself. The repo-root coloradoGuard suite's
+  scope-boundary test goes red if anyone generalises it. `reconcileMhfdDrawdown` borrows
+  `drawdownStatute.js`'s vocabulary (`fail`/`not-ruled-out`/`unknown`) and may **never** say
+  "complies" — two modules contradicting each other about one statute on one screen is the failure it
+  prevents. **B1125:** the regime falls back to the plan's SAVED county when GIS is down (identified
+  county still wins) — the guard must hold with every endpoint dead, which is when defaults bite.
+  **B1123, the trap to remember:** `yieldVerdicts.detentionVerdict` had NO branch for
+  `kind:"unavailable"`, so it fell to `loadingRow` and every Colorado site read "Detention: checking
+  flood data" forever while 26 unit tests and the bundle harness passed. **A new `kind` with no render
+  branch is a silent spinner** — wire the branch in the same commit. Guards live in ui-audit:
+  verify-colorado-guard (bytes, both directions) + verify-b1105-mhfd-panel (pixels, asserted on the
+  `data-surface="planner"` host's innerText, so a zero-height or hidden node fails).
 - **B1122 — the basemap transform MUST be written in a LAYOUT effect.** The SVG feet-frame and the
   Leaflet basemap are driven from ONE value (`view.offX/offY/ppf`); they never disagreed about WHERE
   to be, only about WHEN. Writing `wrap.style.transform` from a passive `useEffect` paints one frame

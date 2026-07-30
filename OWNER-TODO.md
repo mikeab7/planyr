@@ -5,7 +5,42 @@
 > step; tick/remove it once he's done it. This is the **owner's** plate only. Browser click-throughs and
 > signed-in spot-checks are the Claude cohort's job (`VERIFICATION.md`), **never** Michael's — do NOT list those here.
 
-_Last updated: 2026-07-21._
+_Last updated: 2026-07-29._
+
+## 📄 Four PDFs I can't download — they're the last piece of Colorado detention sizing (B1105)
+
+> **Short version: Colorado detention now works for the six Denver-area counties, except it can't yet give you a
+> number.** Everything around the number is built and live — it names the two separate volumes Denver-area
+> reviewers require, tells you which one depends on what, checks your design against Colorado's water-rights
+> drawdown law, and points you at the flood district's own sizing workbook. What's missing is the district's
+> **lookup tables** — the actual numbers that turn "how paved is this site" into "this many acre-feet."
+>
+> **Why I couldn't get them.** This build environment can't reach the flood district's website at all — every
+> attempt is refused before it even connects, and the same happens for every other site hosting a copy. I tried
+> a web search instead; it can *describe* the documents but not hand me their text, and when I asked twice about
+> the same document I got **two different sets of numbers back**. That's exactly the situation where I refuse to
+> guess: a made-up detention volume is a number you might buy land on. So I built the whole engine and left the
+> tables blank, with each one saying which document it's waiting for.
+>
+> **What I need from you: download four PDFs in your browser and hand them to a Claude session.** Takes about
+> two minutes. Any ordinary browser can open all four — it's only this sandbox that's walled off. Once I have
+> them, filling in the numbers is a small, safe change (they slot into a table; no new code), and Colorado
+> detention starts giving real volumes.
+- [ ] **1. The water-quality volume tables** (the "WQCV" piece — this is the one I need most):
+      https://www.mhfd.org/files/bfea52e86/Chapter-3-Calculating-the-WQCV-and-Volume-Reduction.pdf
+- [ ] **2. The flood-volume memo** (the "EURV" piece — the one where two searches disagreed, so I need the real thing):
+      https://www.mhfd.org/files/2cf25e4fe/UDFCD_EURV_Determination_Memorandum.pdf
+- [ ] **3. The storage chapter** (allowable release rates + how the outlet has to be built):
+      https://www.mhfd.org/files/473699ead/12_Storage.pdf
+- [ ] **4. Denver's own manual** — only if you care about Denver proper. Denver publishes its own version on top
+      of the district's, and right now the app correctly says "the city may have stricter rules, confirm it"
+      rather than pretending to know:
+      https://denvergov.org/files/assets/public/v/2/doti/documents/permits/sspr-stormsanitary/urban-storm-drainage-manual.pdf
+
+**Nothing is broken while these are missing.** A Denver-area site shows the method, the two volumes by name, the
+drawdown check and where to size it — and shows no volume, rather than a wrong one. And **Fort Collins, Greeley
+and Colorado Springs are untouched on purpose** — they're outside this flood district and each has its own
+separate rulebook, so they still say plainly that Planyr doesn't cover them yet.
 
 ## 🤝 Project sharing (the new "share a project, viewer-only" feature) — two things from you before it can go live
 > This is the big one from your last message (items 2 and 3). The right-click-menu fix (item 1) is **done and
