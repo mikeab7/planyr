@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-07-30 @ `2fb3397` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-07-30 @ `313b1dd` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_359 source files mapped._
+_361 source files mapped._
 
 ## infra
 
@@ -281,6 +281,8 @@ _359 source files mapped._
   - _exports_: `getUser`, `onAuthChange`, `resetPassword`, `signIn`, `signOut`, `signUp`, `updatePassword`
 - **`src/workspaces/site-planner/lib/basemaps.js`** — Shared aerial basemap SOURCE registry (Esri/USGS tiles + export + maxNative ceilings, B220 rule) + the planner's Off/Aerial/USGS choices; used by MapFinder and the planner Basemap control
   - _exports_: `BASEMAPS`, `PLANNER_BASEMAP_CHOICES`
+- **`src/workspaces/site-planner/lib/bondRemap.js`** — The ONE id-bearing bond inventory + remap rule shared by every copy path (B1124): a reference inside the copied set is remapped to the new id, one outside it is dropped, never left dangling to a foreign element.
+  - _exports_: `HOST_ROLE_TAGS`, `ID_BOND_TAGS`, `remapBondRefs`
 - **`src/workspaces/site-planner/lib/bootResume.js`** — Pure boot-resume decisions: gate URL/pointer reconciliation until auth+cloud pull settles, pick which saved plan to resume into
   - _exports_: `initialBootResolved`, `mayReconcileUrl`, `pickResumeTarget`
 - **`src/workspaces/site-planner/lib/boundaryLabels.js`** — Pure label-placement math for boundary overlays: shoelace ring centroid, one anchor per name, greedy collision-drop by on-screen area, zoom gate (Leaflet-free, node-tested)
@@ -342,7 +344,7 @@ _359 source files mapped._
 - **`src/workspaces/site-planner/lib/districtFacilities.js`** — PR-K/K7 drainage-district facilities ingest scaffold: discover BKDD ArcGIS REST services behind its Web AppBuilder viewer (injectable fetch, graceful degradation), classify a DISTRICT floodway/ROW distinct from a FEMA floodway, name the receiving channel
   - _exports_: `ASSUMED_CHANNEL_TAG`, `BKDD_APPVIEWER`, `classifyDistrictFacilities`, `discoverDistrictServices`, `districtFloodwayNote`, `districtIdNote`, `facilityKind`
 - **`src/workspaces/site-planner/lib/dockZones.js`** — Building-anchored dock-zone stack geometry: outward court/trailer/buffer chain, catalog layers, dock-side axes, stranded-zone pruning
-  - _exports_: `boxExtentAlong`, `catalogDepthDefault`, `DOCK_ZONES`, `dockSidesFor`, `footprintAxes`, `footprintDepth`, `footprintLength`, `layoutStack`, `layoutZone`, `layoutZoneByKind`, `MAX_DOCK_ZONES`, `pruneStrandedZones`, `resizedAlongLen`, `strandedZoneIds`, `usableCourtSpan`, `ZONE_CATALOG`, `zoneAlongSpan`, `zoneDepthDefault`, `zoneDepthDefaults`
+  - _exports_: `alongLenIsChainEcho`, `boxExtentAlong`, `catalogDepthDefault`, `DOCK_ZONES`, `dockSidesFor`, `footprintAxes`, `footprintDepth`, `footprintLength`, `layoutStack`, `layoutZone`, `layoutZoneByKind`, `MAX_DOCK_ZONES`, `pruneStrandedZones`, `resizedAlongLen`, `resizedZoneAlongLen`, `strandedZoneIds`, `usableCourtSpan`, `ZONE_CATALOG`, `zoneAlongExtent`, `zoneAlongSpan`, `zoneDepthDefault`, `zoneDepthDefaults`, `zoneDepthExtent`
 - **`src/workspaces/site-planner/lib/dogEar.js`** — Corner bump-out geometry (flush corner placement + resize round-trip) AND the wall-hugging-child placement rule: the sidewalk span over the extended side, plus the always-flush perpendicular offset every wall strip / side-parking row is derived from
   - _exports_: `bumpSidewalkSide`, `bumpsOfHost`, `DOGEAR_D`, `DOGEAR_W`, `dogEarDesc`, `dogEarGeom`, `dogEarSize`, `hostAxisExtents`, `isDogEarSide`, `localToWorld`, `ownExtents`, `sideOfBondedBox`, `sidewalkSpanForBumps`, `wallKidAlong`, `wallKidBox`, `wallKidPerp`, `wallStripBox`
 - **`src/workspaces/site-planner/lib/drafts.js`** — Pure resolver for Bluebeam-style mid-draw undo: decides which in-progress multi-point draft to trim by one vertex (Backspace + Ctrl-Z), and returns null when no draft is active so Ctrl-Z falls through to a global undo
@@ -395,7 +397,7 @@ _359 source files mapped._
   - _exports_: `ANCHOR_DRIFT_FT`, `anchorDriftFt`, `canonEnv`, `DRAIN_STUCK_MS`, `ENV_TOL_FT`, `envelopeContains`, `envelopeOf`, `FETCH_TTL_MS`, `fetchStaleForEdit`, `fetchWatchdogFired`, `revalidationNeed`
 - **`src/workspaces/site-planner/lib/fbcdWse.js`** — FBCDD Atlas-14 watershed-study DRAFT WSE point samplers (getSamples, feet, honest-null out of coverage): 0.2% off the county 500YR_WSE mosaic → derivedWse02Ft; 1% off the per-watershed 100YR rasters via extent-routed multiplex (max-finite governing, LOUD on any candidate failure) → derivedWse1pctFt (B807) — Fort Bend drainage checks
   - _exports_: `FBCDD_WSE02_URL`, `sampleWse02Point`, `sampleWse100Point`, `wse02CandidatesForPoint`, `wse100CandidatesForPoint`
-- **`src/workspaces/site-planner/lib/featureHover.js`** — pure hover WORDING for the vector feature overlays: registry-driven `<Title> (<Source>) · <detail>` matching the OSM tooltips, with HIFLD's withheld sentinels treated as absence.
+- **`src/workspaces/site-planner/lib/featureHover.js`** — pure hover WORDING for the vector feature overlays: registry-driven `<Title> (<Source>) · <detail>` matching the OSM tooltips, with HIFLD's withheld sentinels treated as absence and ALL-CAPS agency text title-cased.
   - _exports_: `cleanAttr`, `HOVER_CLEANERS`, `HOVER_MAX_CHARS`, `hoverDetails`, `hoverIdentifyEnabled`, `hoverText`, `hoverTitle`, `pickAttr`, `sourceTag`, `titleCaseAgency`
 - **`src/workspaces/site-planner/lib/ffeBalance.js`** — grading milestone (DECISION 3): the balance-optimal finished-floor solver (`solveBalanceFfe` floats the pad UP off the regulatory code minimum to reuse basin spoil as fill, never below it) + the dual FFE readout (`ffeDualDisplay`, "FFE X (code floor Y + Z for balance)"). The net earthwork residual is reported in CY (owner preference), not truckloads. Pure, Node-tested.
   - _exports_: `ffeDualDisplay`, `solveBalanceFfe`
@@ -596,7 +598,7 @@ _359 source files mapped._
 - **`src/workspaces/site-planner/lib/siteAnalysis.js`** — Registry-driven environmental/regulatory screen of active-parcel rings (flood, wetlands, wells, pipelines, jurisdiction, road, zoning) with silent-error present/absent/unknown/unavailable states over the SWR cache
   - _exports_: `ANALYSIS_SOURCES`, `analyzeProximitySource`, `analyzeSource`, `buildAnalysisParams`, `buildJurisdictionFinding`, `buildProximityParams`, `buildQueryUrl`, `buildRoadFinding`, `classifyFlood`, `classifyStatus`, `deriveZoning`, `epaProgram`, `isSFHA`, `normalizeAttrs`, `pipelineSummary`, `representativeRing`, `ringCentroid`, `ringsBBox`, `ringsSignature`, `runSiteAnalysis`, `simplifyRing`, `wetlandSummary`, `zoneSummary`
 - **`src/workspaces/site-planner/lib/siteModel.js`** — Canonical per-plan Site Model schema v10: createSiteModel/migrate, semantic selectors, cross-copy union merge with delete-tombstones, and bonded-child/dog-ear/road-centerline load-time repairs
-  - _exports_: `activeParcelsOf`, `ANNOTATION_KINDS`, `annotationsOf`, `bondedChildRot`, `buildingNumbers`, `constraintsOf`, `contentCount`, `countJunkEntries`, `createSiteModel`, `crossSectionsOf`, `developableArea`, `EASEMENT_KINDS`, `easementsOf`, `elementsOf`, `exclusionZonesOf`, `isBuilding`, `lineageConflicts`, `mergeSiteContent`, `migrate`, `migrateRoads`, `normalizeBondedChildren`, `offAnchor`, `parcelAncestors`, `parcelChildrenMap`, `parcelDescendants`, `parcelDisplayInfo`, `parcelDrawingsOf`, `parcelOutline`, `parcelsOf`, `quarterOffset`, `rectRoadEndpoints`, `roadStripBBox`, `roadTravelWidth`, `setbacksOf`, `sheetOverlaysOf`, `SITE_MODEL_VERSION`, `STATUS_META`, `STATUSES`, `statusOf`, `strandedFromHost`, `teamShareOf`, `toMs`, `utilitiesOf`, `UTILITY_KINDS`
+  - _exports_: `activeParcelsOf`, `ANNOTATION_KINDS`, `annotationsOf`, `bondedChildRot`, `buildingNumbers`, `constraintsOf`, `contentCount`, `countJunkEntries`, `createSiteModel`, `crossSectionsOf`, `developableArea`, `EASEMENT_KINDS`, `easementsOf`, `elementsOf`, `exclusionZonesOf`, `isBuilding`, `lineageConflicts`, `mergeSiteContent`, `migrate`, `migrateRoads`, `normalizeBondedChildren`, `normalizeCrossHostBonds`, `normalizeZoneAlongLen`, `offAnchor`, `parcelAncestors`, `parcelChildrenMap`, `parcelDescendants`, `parcelDisplayInfo`, `parcelDrawingsOf`, `parcelOutline`, `parcelsOf`, `quarterOffset`, `rectRoadEndpoints`, `roadStripBBox`, `roadTravelWidth`, `setbacksOf`, `sheetOverlaysOf`, `SITE_MODEL_VERSION`, `STATUS_META`, `STATUSES`, `statusOf`, `strandedFromHost`, `teamShareOf`, `toMs`, `utilitiesOf`, `UTILITY_KINDS`
 - **`src/workspaces/site-planner/lib/siteRegion.js`** — NEW-8 the synchronous half of the Colorado tier: geometric, network-free site→state resolution ('TX' \| 'CO' \| null) that the detention guard keys off. Its own module so the Colorado PROSE (coloradoRegions.js) can load on demand while this stays on the boot path
   - _exports_: `isColorado`, `siteState`, `STATE_ENVELOPES`
 - **`src/workspaces/site-planner/lib/soils.js`** — USDA SSURGO soils via Soil Data Access (NEW-B2): pure SDA SQL query builder + response parser (hydrologic soil group + seasonal-high water table) + bounded-fetch client. SDA proxy-blocked in sandbox → live-verify.
@@ -633,6 +635,8 @@ _359 source files mapped._
   - _exports_: `announceSetView`, `boundTileCache`, `capTileCache`, `preserveTilesAcrossSetView`, `releaseLayer`
 - **`src/workspaces/site-planner/lib/timeOfConcentration.js`** — Computed time of concentration (B905, CE roadmap #3): Kirpich formula + a criteria-configurable urban adjustment/floor, with an area-based flow-path-length fallback and a default-slope fallback when real geometry/grade aren't resolved — replaces the flat 15-min screening assumption everywhere Tc feeds the routing chain.
   - _exports_: `computeTimeOfConcentration`, `DEFAULT_FLOW_PATH_K_FACTOR`, `DEFAULT_KIRPICH_URBAN_ADJUSTMENT`, `DEFAULT_TC_DEFAULT_SLOPE_PCT`, `DEFAULT_TC_FLOOR_MIN`, `estimateFlowPathLengthFt`, `kirpichTcMin`
+- **`src/workspaces/site-planner/lib/titleKey.js`** — The title reader's stored Anthropic key (`KEY_LS`/`getKey`/`setKey`), split out of `titleReader.js` so the planner can read it synchronously without pulling the reader's multi-KB schema + prompt onto the site route.
+  - _exports_: `getKey`, `KEY_LS`, `setKey`
 - **`src/workspaces/site-planner/lib/titleReader.js`** — Client-side title-commitment reader: sends an uploaded PDF to the Claude API with a Schedule-B JSON schema to extract exceptions plus the metes-and-bounds legal description
   - _exports_: `fileToBase64`, `getKey`, `KEY_LS`, `readTitlePDF`, `setKey`
 - **`src/workspaces/site-planner/lib/twdbWells.js`** — TWDB Groundwater Database observation-wells interface (NEW-B6): field-map-driven nearest-well depth-to-water parser + bounded-fetch client; endpoint pending live confirmation (honest "pending", never fabricated). Pure parser.

@@ -77,6 +77,15 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   C.R.S. 37-92-602(8) — and never reports "pass", because the screening figure is an optimistic
   lower bound. Colorado counties live in `counties.js` under `co_`-prefixed keys (both states have
   an El Paso and a Jefferson). **Any change here is gated on the Texas golden-master suite under test/.**
+- **B1122 — the basemap transform MUST be written in a LAYOUT effect.** The SVG feet-frame and the
+  Leaflet basemap are driven from ONE value (`view.offX/offY/ppf`); they never disagreed about WHERE
+  to be, only about WHEN. Writing `wrap.style.transform` from a passive `useEffect` paints one frame
+  of separation per pan frame — the owner's "grab the map and sling it and the buildings move
+  separately and then sling back". Keep EVERY `wrap.style.transform` write pre-paint, and do NOT
+  "fix" a recurrence by shortening the 160 ms commit debounce: that narrows the window without
+  closing it and reads as fixed on a slow drag while still slinging on a flick. Guard:
+  the repo-root `test/` suite `panLockInvariant` (2 of its 4 cases go red on the passive-effect model). This is
+  VIEWPORT-STABLE in `/CLAUDE.md`, which the effect predated and violated.
 - `supabase.js` / `auth.js` / `cloudSync.js` — cloud data + auth (shared across workspaces).
 - `elementSync.js` / `elementRows.js` / `elementJournal.js` — the element-level sync engine, the
   rows↔model fold layer (incl. `foldJournal`), and the persisted pending-edit journal (NEW-F4:
@@ -129,6 +138,14 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   real transport**, never through a mock `commit` that accepts more parameters than the shipped
   adapter does — that mismatch is exactly what shipped a dead feature green. **B1118:** the load-time heal's `exempt` set — a repaired element must diff and COMMIT, or
   rows-canonical-on-seed adopts the torn rows straight back over the repair.
+- `bondRemap.js` — the ONE id-bearing bond inventory (`attachedTo` · `forCourt` · `forTrailer` ·
+  `prevZone`) + the remap rule EVERY copy path must use (B1124). Both copy paths used to remap only
+  `attachedTo`, so a duplicated building's trailer parking stayed bonded to the ORIGINAL building's
+  truck court — and `relayoutSide` walks the chain from the court, so that trailer was never laid out
+  at all ("hovering by itself"). Rule: a reference inside the copied set is remapped; one outside it
+  is DROPPED, never left dangling to a foreign element. A non-string value is an inert legacy flag,
+  not a bond. `siteModel.normalizeCrossHostBonds` is the load-time repair for plans already copied,
+  and it must run BEFORE `normalizeZoneAlongLen` (which needs a walkable chain to judge a pin against).
 - `planClipboard.js` — the ONE general canvas clipboard (NEW-2/NEW-6): collect the current selection
   (elements expanded to their `attachedTo` assembly, so a building brings its truck court / trailer
   parking / dock zones / bump-outs), then paste with fresh ids, bonds remapped INSIDE the copy, and
