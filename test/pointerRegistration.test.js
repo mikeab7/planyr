@@ -22,8 +22,9 @@
 import { describe, it, expect } from "vitest";
 import {
   basemapWrapPoint, basemapWrapPointTransformed, registrationShift, sanitizeShift,
-  REGISTRATION_SANITY_PX,
+  REGISTRATION_SANITY_PX, tileNwFeet, lngLatToFeet, mercDeg, ftPerDeg,
 } from "../src/workspaces/site-planner/lib/mapLock.js";
+import { edgeLockTolFt, EDGE_LOCK_PX, EDGE_LOCK_MAX_FT } from "../src/workspaces/site-planner/lib/edgeConstrain.js";
 import {
   hoverLabelPlacement, hoverLabelSize, HOVER_LABEL_GAP_PX,
 } from "../src/workspaces/site-planner/lib/contours.js";
@@ -236,5 +237,70 @@ describe("NEW-1 — the hover elevation tag sits BESIDE the pointer, never under
     // deliberately above that, because an under-estimate is what would let a tag clip.
     expect(hoverLabelSize("152 ft").w).toBeGreaterThan("152 ft".length * 6);
     expect(hoverLabelSize("").w).toBeGreaterThan(0);
+  });
+});
+
+/* ── the tile lattice as the reference frame ────────────────────────────────────────── */
+
+describe("NEW-2 — a tile's corner in planner feet is the external reference", () => {
+  const LAT0 = 29.77938, LON0 = -95.89503;
+
+  it("agrees with the feet projection for the same corner, exactly", () => {
+    // The whole point of measuring against tiles is that a tile's corner has a lat/lng nobody
+    // has to be trusted about. That is only useful if it lands in the SAME feet frame drawn
+    // geometry lives in — so the two derivations must agree to floating-point noise.
+    for (const [z, x, y] of [[16, 15258, 27070], [17, 30517, 54141], [18, 61034, 108283]]) {
+      const n = Math.pow(2, z);
+      const lng = (x / n) * 360 - 180;
+      const merc = 180 - (y / n) * 360;
+      const lat = (180 / Math.PI) * (2 * Math.atan(Math.exp((merc * Math.PI) / 180)) - Math.PI / 2);
+      const viaTile = tileNwFeet(z, x, y, LAT0, LON0);
+      const viaLatLng = lngLatToFeet(lng, lat, LON0, LAT0);
+      expect(viaTile.x).toBeCloseTo(viaLatLng.x, 6);
+      expect(viaTile.y).toBeCloseTo(viaLatLng.y, 6);
+    }
+  });
+
+  it("a neighbouring tile is exactly one tile-width away, at every zoom", () => {
+    for (const z of [14, 16, 18, 20]) {
+      const a = tileNwFeet(z, 1000, 2000, LAT0, LON0);
+      const b = tileNwFeet(z, 1001, 2000, LAT0, LON0);
+      const widthDeg = 360 / Math.pow(2, z);
+      expect(b.x - a.x).toBeCloseTo(widthDeg * ftPerDeg(LAT0), 6);
+      expect(b.y).toBeCloseTo(a.y, 9);
+    }
+  });
+
+  it("the world's top-left tile sits at the Mercator square's corner", () => {
+    const nw = tileNwFeet(0, 0, 0, LAT0, LON0);
+    expect(nw.x).toBeCloseTo((-180 - LON0) * ftPerDeg(LAT0), 3);
+    expect(nw.y).toBeCloseTo(-(180 - mercDeg(LAT0)) * ftPerDeg(LAT0), 3);
+  });
+});
+
+/* ── NEW-2(d): the placement magnet is bounded in the WORLD, not just on screen ─────── */
+
+describe("NEW-2(d) — the boundary magnet's reach is capped in feet", () => {
+  it("is a plain screen tolerance at a working zoom", () => {
+    // ~0.6 px per foot: 12 px is 20 ft… which is already past the cap, so check a closer zoom.
+    expect(edgeLockTolFt(4)).toBeCloseTo(EDGE_LOCK_PX / 4, 9);   // 3 ft
+    expect(edgeLockTolFt(2)).toBeCloseTo(EDGE_LOCK_PX / 2, 9);   // 6 ft
+  });
+
+  it("STOPS growing as you zoom out — the defect this closes", () => {
+    // The overview zoom the owner lays out at is a small fraction of a pixel per foot, where the
+    // uncapped tolerance reached tens of feet and could pull a placed point that far with nothing
+    // on screen to say so — indistinguishable, from the seat, from "my pointer is off".
+    const overview = 0.1471;                      // ≈ zoom 16 at this latitude
+    expect(EDGE_LOCK_PX / overview).toBeGreaterThan(80);   // what it used to reach
+    expect(edgeLockTolFt(overview)).toBe(EDGE_LOCK_MAX_FT); // what it reaches now
+    expect(edgeLockTolFt(0.02)).toBe(EDGE_LOCK_MAX_FT);     // and at the zoom-out limit
+  });
+
+  it("never returns a nonsense tolerance for a nonsense scale", () => {
+    expect(edgeLockTolFt(0)).toBe(EDGE_LOCK_MAX_FT);
+    expect(edgeLockTolFt(-1)).toBe(EDGE_LOCK_MAX_FT);
+    expect(edgeLockTolFt(undefined)).toBe(EDGE_LOCK_MAX_FT);
+    expect(edgeLockTolFt(NaN)).toBe(EDGE_LOCK_MAX_FT);
   });
 });

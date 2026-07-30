@@ -60,7 +60,16 @@ const SITE = {
   scheduleProjectId: null, scheduleProjectName: null,
   origin: { lat: LAT0, lon: LON0 }, county: "waller", status: "active",
   parcels: [{ id: "p1", points: [{ x: -660, y: -660 }, { x: 660, y: -660 }, { x: 660, y: 660 }, { x: -660, y: 660 }], active: true, z: 0 }],
-  underlay: null, sheetOverlays: [], parcelDrawings: [], settings: { snap: false }, els: [],
+  underlay: null, sheetOverlays: [], parcelDrawings: [], settings: { snap: false },
+  /* Deliberately a plan with REAL CONTENT spread wide, not a bare parcel. The planner's
+   * basemap container is overscanned by an amount derived from the DRAWABLE ELEMENT COUNT, and
+   * culling changes that count as you zoom — so the container resizes with the canvas unchanged.
+   * A test plan with nothing to cull never exercises that, and it is exactly where the largest
+   * misregistration of this whole investigation was hiding (tens of pixels, not one). */
+  els: Array.from({ length: 60 }, (_, i) => ({
+    id: `e${i}`, type: "building", cx: (i % 10) * 900 - 4000, cy: Math.floor(i / 10) * 700 - 2000,
+    w: 420, h: 180, rot: 0,
+  })),
   measures: [], callouts: [], markups: [],
 };
 const seed = `(() => { try {
@@ -142,6 +151,21 @@ async function setZoom(page, zoom) {
   return ppf;
 }
 
+/* The owner's actual gesture. `centerOn` above is a programmatic commit; a WHEEL zoom goes
+ * through the live gesture transform, the debounced re-base, and the culling-driven overscan
+ * change — three moving parts a programmatic set never touches. Reading the resulting
+ * pixels-per-foot back off the live view (rather than computing it) is deliberate: the point is
+ * to measure whatever state the gesture actually left behind. */
+async function wheelZoom(page, box, steps) {
+  await page.mouse.move(Math.round(box.x + box.width / 2), Math.round(box.y + box.height / 2));
+  for (let i = 0; i < Math.abs(steps); i++) {
+    await page.mouse.wheel(0, steps > 0 ? 120 : -120);
+    await page.waitForTimeout(30);
+  }
+  await page.waitForTimeout(900); // past the 160ms re-base + its tile pass
+  return (await page.evaluate(() => window.__plannerView.get())).ppf;
+}
+
 const regApplied = (page) => page.evaluate(() => {
   const s = document.querySelector("svg[role=application]");
   return { dx: +(s?.getAttribute("data-reg-dx") || 0), dy: +(s?.getAttribute("data-reg-dy") || 0) };
@@ -181,28 +205,79 @@ async function measureReadout(page, box, ppf) {
 }
 
 async function measurePlacement(page, box, ppf) {
-  // A real two-click Length measurement — the owner's actual gesture. Its first vertex is the
-  // placed point; where it LANDED (in feet, the frame it is stored in) versus the tile-grid
-  // truth for the pixel that was clicked is the whole question.
-  const a = { x: Math.round(box.x + box.width * 0.42), y: Math.round(box.y + box.height * 0.58) };
-  const b = { x: a.x + 180, y: a.y - 60 };
-  const truth = await truthAt(page, a.x, a.y);
-  if (!truth) return null;
-  const before = await page.evaluate(() => window.__plannerView.measures().length);
+  /* A real two-click Length measurement — the owner's actual gesture. Its first vertex is the
+   * placed point; where it LANDED (in feet, the frame it is stored in) versus the tile-grid truth
+   * for the pixel that was clicked is the whole question.
+   *
+   * The measurement is only meaningful if the frame HELD STILL across the click, and it does not
+   * always: the basemap container is overscanned by an amount derived from the drawable element
+   * count, so the very act of adding the first measurement can resize it and re-register the whole
+   * frame between the truth read and the click. That is a sequencing artefact of measuring, not a
+   * misplaced point — so the registration shift is read on both sides of the gesture and a run
+   * that moved is RETRIED rather than reported. A retry that still moves is reported honestly
+   * instead of quietly averaged away. */
+  /* Deliberately AWAY from a parcel boundary, and specified in FEET so it stays away at every
+   * zoom. The measure tool's first point snaps onto a nearby property line on purpose (so a
+   * setback measurement begins on the line), and at an overview zoom that magnet reaches a long
+   * way in FEET — measured here pulling a click 4.5 ft east, which this harness would otherwise
+   * report as a transform error. It is neither: it is a feature, bounded by `edgeLockTolFt`
+   * (lib/edgeConstrain.js, unit-tested) and bypassable with Alt. What THIS function measures is
+   * the transform, so it clicks where no magnet is in reach: 300, 350 ft inside a ±660 ft parcel
+   * and clear of the seeded buildings. The second click only ends the measurement, so it is a
+   * plain screen offset that stays on canvas at every zoom. */
+  const v = await page.evaluate(() => window.__plannerView.get());
+  const toClient = (ft) => ({ x: Math.round(box.x + ft.x * v.ppf + v.offX), y: Math.round(box.y + ft.y * v.ppf + v.offY) });
+  // …and it must also land on BARE canvas: a press that lands on a drawn feature is that
+  // feature's gesture, not a measurement, so a candidate whose topmost element isn't the canvas
+  // itself is skipped rather than silently mis-measured.
+  const cands = [{ x: 300, y: 350 }, { x: -300, y: 350 }, { x: 300, y: -350 }, { x: -300, y: -350 },
+    { x: 420, y: 480 }, { x: -420, y: 480 }, { x: 480, y: -420 }, { x: -480, y: -420 }];
+  let a = null;
+  for (const ft of cands) {
+    const c = toClient(ft);
+    if (c.x < box.x + 40 || c.x > box.x + box.width - 40 || c.y < box.y + 40 || c.y > box.y + box.height - 60) continue;
+    const bare = await page.evaluate(([x, y]) => {
+      const el = document.elementFromPoint(x, y);
+      return !!el && (el.tagName === "svg" || el.getAttribute("role") === "application");
+    }, [c.x, c.y]);
+    if (bare) { a = c; break; }
+  }
+  if (!a) return { error: "no bare-canvas click point clear of the boundary magnet at this zoom" };
+  const b = { x: a.x, y: a.y - 120 };
   await page.getByRole("button", { name: "Measure modes" }).click();
   await page.getByRole("button", { name: "Length", exact: true }).click();
-  await page.mouse.click(a.x, a.y);
-  await page.mouse.click(b.x, b.y);
-  await page.waitForFunction((n) => window.__plannerView.measures().length > n, before, { timeout: 5000 });
-  const m = await page.evaluate(() => window.__plannerView.measures().slice(-1)[0]);
-  const pt = (m && (m.a || (m.pts && m.pts[0]))) || null;
-  if (!pt) return { error: `measure shape not understood: ${JSON.stringify(m)}` };
-  // Where the placed vertex ACTUALLY is, in the site frame, vs where the clicked pixel is.
-  const want = lngLatToFeet(truthLatLng(truth, a.x, a.y).lng, truthLatLng(truth, a.x, a.y).lat, LON0, LAT0);
-  const ft = { east: pt.x - want.x, north: -(pt.y - want.y) };
-  // Put the canvas back to Select and drop the measurement so the next zoom starts clean.
+  let moved = null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const r0 = await regApplied(page);
+    const truth = await truthAt(page, a.x, a.y);
+    if (!truth) return null;
+    const before = await page.evaluate(() => window.__plannerView.measures().length);
+    await page.mouse.click(a.x, a.y);
+    await page.mouse.click(b.x, b.y);
+    try {
+      await page.waitForFunction((n) => window.__plannerView.measures().length > n, before, { timeout: 5000 });
+    } catch (e) {
+      const at = await page.evaluate(([x, y]) => { const el = document.elementFromPoint(x, y); return el ? `${el.tagName}.${(el.getAttribute("class")||"")}#${el.getAttribute("data-testid")||""}` : "none"; }, [a.x, a.y]);
+      return { error: `no measurement landed from clicks at ${a.x},${a.y} → ${b.x},${b.y} (element under the first click: ${at})` };
+    }
+    await page.waitForTimeout(400); // let any container/overscan re-commit land before judging
+    const r1 = await regApplied(page);
+    const m = await page.evaluate(() => window.__plannerView.measures().slice(-1)[0]);
+    const pt = (m && (m.a || (m.pts && m.pts[0]))) || null;
+    if (!pt) return { error: `measure shape not understood: ${JSON.stringify(m)}` };
+    if (Math.abs(r1.dx - r0.dx) > 0.02 || Math.abs(r1.dy - r0.dy) > 0.02) {
+      moved = { r0, r1 };
+      continue; // the frame re-registered mid-gesture — this reading measures nothing
+    }
+    // Where the placed vertex ACTUALLY is, in the site frame, vs where the clicked pixel is.
+    const ll = truthLatLng(truth, a.x, a.y);
+    const want = lngLatToFeet(ll.lng, ll.lat, LON0, LAT0);
+    const ft = { east: pt.x - want.x, north: -(pt.y - want.y) };
+    await page.keyboard.press("Escape"); // back to Select for the next round
+    return { at: a, ft, px: { x: ft.east * ppf, y: ft.north * ppf }, retried: attempt, moved };
+  }
   await page.keyboard.press("Escape");
-  return { at: a, ft, px: { x: ft.east * ppf, y: ft.north * ppf } };
+  return { error: `the frame re-registered on every attempt (last ${JSON.stringify(moved)}) — placement unmeasurable` };
 }
 
 /* ── the run ───────────────────────────────────────────────────────────────────────────── */
@@ -226,31 +301,36 @@ for (const c of cases) {
   const reported = await page.evaluate(() => window.devicePixelRatio);
   lines.push(`   devicePixelRatio reported by the page: ${reported}`);
   for (const zoom of ZOOMS) {
-    const ppf = await setZoom(page, zoom);
-    const ftPerPx = 1 / ppf;
-    const box = await page.locator("svg[role=application]").boundingBox();
-    const reg = await regApplied(page);
-    const readout = await measureReadout(page, box, ppf);
-    const placed = await measurePlacement(page, box, ppf);
-    lines.push(`   zoom ${zoom}  (1 CSS px = ${f3(ftPerPx)} ft)   compensation applied: dx ${f3(reg.dx)} px · dy ${f3(reg.dy)} px` +
-      `  → without the fix the readings below would sit ${f3(Math.hypot(reg.dx, reg.dy))} px = ${f3(Math.hypot(reg.dx, reg.dy) * ftPerPx)} ft out`);
-    if (!readout.length) { failures++; lines.push("     READOUT: no tile grid under any probe — cannot measure (FAIL)"); }
-    for (const r of readout) {
-      checks++;
-      const worst = Math.max(Math.abs(r.px.x), Math.abs(r.px.y));
-      const ok = worst <= RESIDUAL_MAX_PX;
-      if (!ok) failures++;
-      lines.push(`     readout  @${r.at.x},${r.at.y}  east ${f3(r.ft.east)} ft · north ${f3(r.ft.north)} ft` +
-        `  = ${f3(worst)} px   ${ok ? "ok" : "FAIL"}`);
-    }
-    if (!placed || placed.error) { failures++; lines.push(`     PLACED POINT: ${placed ? placed.error : "no tile grid under the click"} (FAIL)`); }
-    else {
-      checks++;
-      const worst = Math.max(Math.abs(placed.px.x), Math.abs(placed.px.y));
-      const ok = worst <= RESIDUAL_MAX_PX;
-      if (!ok) failures++;
-      lines.push(`     placed   @${placed.at.x},${placed.at.y}  east ${f3(placed.ft.east)} ft · north ${f3(placed.ft.north)} ft` +
-        `  = ${f3(worst)} px   ${ok ? "ok" : "FAIL"}`);
+    let ppf = await setZoom(page, zoom);
+    for (const how of ["set", "wheel"]) {
+      if (how === "wheel") ppf = await wheelZoom(page, await page.locator("svg[role=application]").boundingBox(), 3);
+      const ftPerPx = 1 / ppf;
+      const box = await page.locator("svg[role=application]").boundingBox();
+      const reg = await regApplied(page);
+      const readout = await measureReadout(page, box, ppf);
+      const placed = await measurePlacement(page, box, ppf);
+      lines.push(`   zoom ${zoom} · ${how === "wheel" ? "after a WHEEL zoom" : "view set exactly"}  (1 CSS px = ${f3(ftPerPx)} ft)` +
+        `   compensation applied: dx ${f3(reg.dx)} px · dy ${f3(reg.dy)} px` +
+        `  → without the fix the readings below would sit ${f3(Math.hypot(reg.dx, reg.dy))} px = ${f3(Math.hypot(reg.dx, reg.dy) * ftPerPx)} ft out`);
+      if (!readout.length) { failures++; lines.push("     READOUT: no tile grid under any probe — cannot measure (FAIL)"); }
+      for (const r of readout) {
+        checks++;
+        const worst = Math.max(Math.abs(r.px.x), Math.abs(r.px.y));
+        const ok = worst <= RESIDUAL_MAX_PX;
+        if (!ok) failures++;
+        lines.push(`     readout  @${r.at.x},${r.at.y}  east ${f3(r.ft.east)} ft · north ${f3(r.ft.north)} ft` +
+          `  = ${f3(worst)} px   ${ok ? "ok" : "FAIL"}`);
+      }
+      if (!placed || placed.error) { failures++; lines.push(`     PLACED POINT: ${placed ? placed.error : "no tile grid under the click"} (FAIL)`); }
+      else {
+        checks++;
+        const worst = Math.max(Math.abs(placed.px.x), Math.abs(placed.px.y));
+        const ok = worst <= RESIDUAL_MAX_PX;
+        if (!ok) failures++;
+        lines.push(`     placed   @${placed.at.x},${placed.at.y}  east ${f3(placed.ft.east)} ft · north ${f3(placed.ft.north)} ft` +
+          `  = ${f3(worst)} px   ${ok ? "ok" : "FAIL"}` +
+          (placed.retried ? `   (retried ${placed.retried}× — the frame re-registered mid-gesture)` : ""));
+      }
     }
   }
   if (errors.length) { failures++; lines.push(`   page errors: ${errors.slice(0, 3).join(" | ")} (FAIL)`); }

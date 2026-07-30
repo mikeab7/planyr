@@ -165,8 +165,33 @@ export const exactContainerPoint = (worldPx, pixelOrigin, panePos) => ({
  * would ADD the very error it removes on screen.
  */
 
+/* The planner-feet coordinate of a basemap TILE's north-west corner, from the tile's own
+ * z/x/y. This is the exact, external answer: the XYZ scheme fixes a tile's Mercator bounds by
+ * definition, so a tile's corner has a lat/lng nobody has to be trusted about. It shares
+ * `mercDeg` / `ftPerDeg` with `lngLatToFeet`, so a tile corner and a drawn point are expressed
+ * in one frame by construction.
+ *
+ * WHY THIS IS THE REFERENCE POINT (NEW-2). The registration that matters is against what the
+ * user is LOOKING AT, and what they are looking at is the raster lattice. Leaflet places that
+ * lattice from a per-level origin it rounds SEPARATELY from the map's own pixel origin, so at a
+ * fractional zoom (every wheel gesture leaves one) the tiles and `map.project` disagree by a
+ * sub-pixel amount that is then multiplied by the level's scale factor. Measuring against the
+ * projection therefore leaves a residual you can see; measuring against the tiles does not.
+ * MEASURED: after a wheel zoom, ~0.29 CSS px (about 3 ft at an overview zoom) — small, but the
+ * whole point of this item is that a pixel here is feet on the ground. */
+export function tileNwFeet(z, x, y, lat0, lon0) {
+  const k = ftPerDeg(lat0);
+  const n = Math.pow(2, z);
+  return {
+    x: ((x / n) * 360 - 180 - lon0) * k,
+    y: -((180 - (y / n) * 360) - mercDeg(lat0)) * k,
+  };
+}
+
 /* Where the basemap paints `worldPx` in CANVAS-WRAPPER pixels, at settle (the wrap's CSS
- * transform has been cleared). `overscan` is the wrap's negative inset. */
+ * transform has been cleared). `overscan` is the wrap's negative inset. Used as the FALLBACK
+ * reference when no tile is on screen to read (the aerial switched off, or before the first
+ * tile arrives) — the map's own projection, which every Leaflet VECTOR layer is placed by. */
 export const basemapWrapPoint = (worldPx, pixelOrigin, panePos, overscan = 0) => {
   const p = exactContainerPoint(worldPx, pixelOrigin, panePos);
   return { x: p.x - overscan, y: p.y - overscan };

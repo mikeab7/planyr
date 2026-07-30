@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-07-30 @ `9b2ac93` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-07-30 @ `3654720` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -368,7 +368,7 @@ _357 source files mapped._
 - **`src/workspaces/site-planner/lib/ebfe.js`** — FEMA/USGS InFRM Estimated BFE (EBFE) point sampler (B882): reads the estimated 1% BFE (layer 17) + 0.2% WSE (layer 21) via ArcGIS MapServer /identify, per-location cache, bounded fetch. `sampleEbfePoint`/`foldIdentify`/`pixelValueOf`/`ebfeIdentifyUrl`.
   - _exports_: `clearEbfeCache`, `EBFE_LAYERS`, `EBFE_URL`, `ebfeIdentifyUrl`, `foldIdentify`, `pixelValueOf`, `sampleEbfePoint`
 - **`src/workspaces/site-planner/lib/edgeConstrain.js`** — pure "start a measurement/line on a parcel boundary, then hold Shift to keep it perpendicular/parallel/45° to that boundary" helpers (the setback lock): project a click onto the nearest parcel edge and snap a drawn direction relative to that edge's angle
-  - _exports_: `constrainToEdgeAngle`, `nearestBoundaryEdge`, `projectToSegment`
+  - _exports_: `constrainToEdgeAngle`, `EDGE_LOCK_MAX_FT`, `EDGE_LOCK_PX`, `edgeLockTolFt`, `nearestBoundaryEdge`, `projectToSegment`
 - **`src/workspaces/site-planner/lib/edgeRuns.js`** — Group parcel boundary edges into logical sides (runs) by bearing tolerance, with per-run length, midpoint, and shared setback value
   - _exports_: `bearingDelta`, `edgeRuns`, `resizeRunLength`, `runOfEdge`, `runSetbackValue`, `segBearing`
 - **`src/workspaces/site-planner/lib/editorNames.js`** — conflict-toast naming (B673): cached editor display names via the team roster RPC (self → "you (another window)") + describeElement labels
@@ -464,7 +464,7 @@ _357 source files mapped._
 - **`src/workspaces/site-planner/lib/mapillaryClient.js`** — Leaflet-free Mapillary request shaping: builds bbox map_features URL (same-origin token-injecting proxy, or direct Graph API with a user token) and filters to pole/hydrant detections
   - _exports_: `mapillaryRequestUrl`, `MLY_FIELDS`, `MLY_LIMIT`, `MLY_PROXY_PATH`, `pickDetections`
 - **`src/workspaces/site-planner/lib/mapLock.js`** — THE projection welding the planner's feet frame to the Web-Mercator basemap — scaled-Mercator feet↔lat/lng plus the matching ppf↔zoom, both anchored at the site origin
-  - _exports_: `basemapWrapPoint`, `basemapWrapPointTransformed`, `exactContainerPoint`, `feetToLatLngPair`, `FT_PER_DEG`, `ftPerDeg`, `invMercDeg`, `lngLatToFeet`, `lockOffsetPx`, `mercDeg`, `ppfToZoom`, `REGISTRATION_SANITY_PX`, `registrationShift`, `sanitizeShift`, `zoomToPpf`
+  - _exports_: `basemapWrapPoint`, `basemapWrapPointTransformed`, `exactContainerPoint`, `feetToLatLngPair`, `FT_PER_DEG`, `ftPerDeg`, `invMercDeg`, `lngLatToFeet`, `lockOffsetPx`, `mercDeg`, `ppfToZoom`, `REGISTRATION_SANITY_PX`, `registrationShift`, `sanitizeShift`, `tileNwFeet`, `zoomToPpf`
 - **`src/workspaces/site-planner/lib/markupPick.js`** — pure Site-Planner markup hit-test + z-stack cycle (sibling of measureHit.js): the fill-aware grab rule (B920 — a closed markup grabs by interior only when filled, else stroke-only) and the smaller-area-first under-point stack + repeat/Alt-click cycle (B921)
   - _exports_: `boxCorners`, `distToPolyline`, `distToRing`, `ellipseRing`, `markupHitModel`, `markupsUnderPoint`, `markupUnderPoint`, `nextMarkupSelection`, `pointInRing`, `ringArea`
 - **`src/workspaces/site-planner/lib/measureHit.js`** — Pure hit-test + z-order cycling for on-canvas measurements (B910): which measurement a feet-space click lands on (smaller-area-wins), and the next selection when a stack is re-clicked (wraps)
