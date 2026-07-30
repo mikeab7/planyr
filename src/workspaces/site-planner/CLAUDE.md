@@ -38,6 +38,25 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   `display:none` to keep its map alive), so the DOM always holds TWO copies of this panel and the
   hidden one has no context. The inactive mode is now `inert` + `aria-hidden`, and each panel stamps
   `data-surface="planner"|"finder"` — **assert against the surface, never against page text.**
+  **Point symbology + hover identify (NEW-1/NEW-2), read before touching how a layer paints or
+  answers:** `mapSymbols.js` owns the `pointToLayer` circleMarker factory — a GeoJSON POINT built
+  WITHOUT one gets Leaflet's default `L.marker`+`L.Icon.Default`, whose PNG never resolved under the
+  bundler, so substations painted as broken-image glyphs labelled "Mark"; it also repairs
+  `L.Icon.Default`'s paths as a safety net. `EL.featureLayer` is now constructed in exactly ONE
+  place (`layers.buildFeatureLayer`) and the point-symbology guard test fails if that stops being
+  true or if an `L.geoJSON` loses its `pointToLayer`. Hover answers split by how a layer PAINTS:
+  vector layers get a tooltip whose wording is `featureHover.js` (registry `hoverIdentify` /
+  `hoverTitle` / `hoverSource` / `hoverFields`, matching evidenceLayers' OSM copy); the
+  RASTER-painted layers hold no features at all, so they ask the service via `rasterIdentify.js`
+  (pure — capability gate, request, readout, debounced/cancelling controller, an honest state for
+  every outcome) plus `rasterIdentifyMap.js` (leaflet wiring + the direct-then-proxy transport that
+  gets past a no-CORS host). The planner reaches BOTH through the canvas, never Leaflet events.
+  **⚠ Both hover paths are DELIBERATELY off the boot bundle** — `rasterIdentifyLazy.js` and
+  `featureHoverAttach.js` are dynamic-imported (at layer-toggle time / first need) because the
+  repo's bundle-budget audit (in the ui-audit folder) charges the Site route for anything static,
+  and this feature breached two ceilings before the split. **Do not "tidy" either back into a
+  static import.** Run that audit before pushing any map change — lint, tests and build can all be
+  green while it fails, which is exactly how it went red in CI on PR #860.
   Canvas identify (B1092; tolerance fixed in the NEW-3 strand — `hitFeature` applies the caller's
   slop to polygon ring EDGES as well as lines, two-pass so an exact containment still wins, because
   containment-only gave a 70 ft easement band a click target its own width and no more):
@@ -96,7 +115,7 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   closing it and reads as fixed on a slow drag while still slinging on a flick. Guard:
   the repo-root `test/` suite `panLockInvariant` (2 of its 4 cases go red on the passive-effect model). This is
   VIEWPORT-STABLE in `/CLAUDE.md`, which the effect predated and violated.
-- **B1131/B1132 — the drawing is WELDED to the basemap, and the weld is MEASURED, never assumed.**
+- **B1133/B1134 — the drawing is WELDED to the basemap, and the weld is MEASURED, never assumed.**
   `mapLock.js` (`tileNwFeet` / `basemapWrapPoint` / `registrationShift` / `sanitizeShift`) computes how
   far the drawing sits from the imagery; `SitePlanner` applies it as a CSS translate on the SVG canvas
   **only**. Three rules to keep: **(1)** the reference is a real TILE's rect versus its own z/x/y — not
@@ -231,7 +250,7 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   in-flight forever). Cursor readouts (NEW-1/NEW-2): `contours.js` owns the pure hover
   HIT-TEST (`buildContourIndex`/`hitContour`) so the polylines stay `interactive:false`;
   `terrainLayers.js` owns the ONE transient hover label (its own sublayer + `setContourHover`,
-  fed from each surface's EXISTING throttled cursor move — never a second listener; **B1130:** it is
+  fed from each surface's EXISTING throttled cursor move — never a second listener; **B1132:** it is
   anchored at the CURSOR and OFFSET off it via `contours.hoverLabelPlacement`, flipping quadrant near
   a canvas edge and clearing a reserved bottom row, because painting it at the hit point put it under
   the pointer glyph — and the offset span must be `position:absolute`, or the marker div's line-box

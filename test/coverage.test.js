@@ -8,13 +8,16 @@ import {
 } from "../src/workspaces/site-planner/lib/coverage.js";
 import { dynamicLayerOptions } from "../src/workspaces/site-planner/lib/layerRequest.js";
 
-// layers.js pulls in Leaflet-facing modules that need a DOM — stub the four offenders
+// layers.js pulls in Leaflet-facing modules that need a DOM — stub the five offenders
 // (values unused by ALL_LAYERS, a pure config object) so the module loads in the node test
 // environment. Same pattern as test/probeNoCors.test.js.
 vi.mock("esri-leaflet", () => ({ dynamicMapLayer: vi.fn(), imageMapLayer: vi.fn(), featureLayer: vi.fn(), tiledMapLayer: vi.fn() }));
 vi.mock("../src/workspaces/site-planner/lib/evidenceLayers.js", () => ({ overpassLayer: vi.fn(), mapillaryLayer: vi.fn() }));
 vi.mock("../src/workspaces/site-planner/lib/terrainLayers.js", () => ({ contourLayer: vi.fn(), flowLayer: vi.fn(), TERRAIN_MIN_ZOOM: 13 }));
-vi.mock("../src/workspaces/site-planner/lib/vectorOverlay.js", () => ({ cachedVectorLayer: vi.fn(), cachedPipelineLayer: vi.fn(), cachedCorridorLayer: vi.fn() }));
+vi.mock("../src/workspaces/site-planner/lib/vectorOverlay.js", () => ({ cachedVectorLayer: vi.fn(), cachedPipelineLayer: vi.fn(), cachedCorridorLayer: vi.fn(), isPointFeature: vi.fn() }));
+// NEW-1 — mapSymbols.js is the fifth offender: it imports leaflet AND the bundled marker PNGs
+// so an accidental default marker degrades to a real pin instead of a broken image.
+vi.mock("../src/workspaces/site-planner/lib/mapSymbols.js", () => ({ installDefaultMarkerIcon: vi.fn(), pointToLayerFor: vi.fn() }));
 
 import { ALL_LAYERS } from "../src/workspaces/site-planner/lib/layers.js";
 

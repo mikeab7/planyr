@@ -21,13 +21,21 @@ import { TERRAIN_MIN_ZOOM } from "./terrainGate.js";
 import { loadTerrain } from "./terrainLazy.js";
 import {
   isTransientStatus, dynamicLayerOptions, imageLayerOptions, featureLayerOptions, featureRetryDecision,
-  wireRasterStatus, RASTER_STALL_MS,
+  wireRasterStatus, RASTER_STALL_MS, pointSymbolOptions, identifyCapable,
 } from "./layerRequest.js";
-import { cachedVectorLayer, cachedPipelineLayer, cachedCorridorLayer } from "./vectorOverlay.js";
+import { cachedVectorLayer, cachedPipelineLayer, cachedCorridorLayer, isPointFeature } from "./vectorOverlay.js";
+// One-line predicate, needed synchronously when a layer is built — see featureHoverAttach.js for
+// why the rest of the hover engine is deferred.
+const hoverIdentifyEnabled = (cfg) => !!(cfg && cfg.hoverIdentify);
+import { installDefaultMarkerIcon, pointToLayerFor } from "./mapSymbols.js";
 import { PIPELINE_LEGEND } from "./pipelineCommodity.js";
 import { DEFAULT_CORRIDOR_WIDTH_FT } from "./pipelineCorridor.js";
 import { proxyServiceUrl } from "../../../shared/gis/gisProxyCore.js";
 import { releaseLayer } from "./tileLifecycle.js";
+
+// NEW-1 — resolve Leaflet's default marker images for the bundler before any layer is built,
+// so an accidental default marker degrades to a real pin instead of a broken-image glyph.
+installDefaultMarkerIcon();
 
 export { JURISDICTION_LAYERS };
 
@@ -230,6 +238,8 @@ export const STATEWIDE = {
     kind: "esriFeature", label: "EPA Superfund / RCRA cleanups",
     source: "US EPA",
     url: GIS_SOURCES.epaCleanups.serviceUrl, minZoom: 11, color: "#b45309", weight: 2, opacity: 0.95,
+    hoverIdentify: true, canvasIdentify: true, hoverTitle: "Cleanup site", hoverSource: "US EPA",
+    hoverFields: [{ names: ["PRIMARY_NAME", "NAME", "SITE_NAME"] }, { names: ["SITE_TYPE", "PROGRAM", "TYPE"] }],
     note: "EPA 'Cleanups in My Community' — Superfund (NPL) + RCRA corrective-action sites. A Phase I ESA PRE-SCREEN, not a substitute. Loads zoomed in (national dataset).",
     group: "environmental", order: 7,
   },
@@ -240,6 +250,8 @@ export const STATEWIDE = {
     kind: "esriFeature", label: "Active surface faults",
     source: "USGS SIM 2874, via University of Houston GIS",
     url: GIS_SOURCES.growthFaults.serviceUrl, minZoom: 11, color: "#7c2d12", weight: 2.5, opacity: 0.95,
+    hoverIdentify: true, canvasIdentify: true, hoverTitle: "Surface fault trace", hoverSource: "USGS SIM 2874",
+    hoverFields: [{ names: ["NAME", "FAULT_NAME", "LABEL"] }, { names: ["CERTAINTY", "ACCURACY", "TYPE"] }],
     note: "Houston-area growth-fault surface traces (USGS SIM 2874, via a University of Houston GIS republication). Aseismic slow-slip faults that damage foundations/pavement. Screening only — get a geotechnical/fault study. Loads zoomed in.",
     group: "environmental", order: 5,
   },
@@ -250,6 +262,9 @@ export const STATEWIDE = {
     kind: "esriFeature", label: "Traffic counts (AADT)",
     source: "TxDOT",
     url: GIS_SOURCES.aadt.serviceUrl, minZoom: 11, color: "#0369a1", weight: 2, opacity: 0.95,
+    pointRadius: 3.5,
+    hoverIdentify: true, canvasIdentify: true, hoverTitle: "Traffic count", hoverSource: "TxDOT",
+    hoverFields: [{ names: ["Located_On", "LOCATED_ON", "ROAD_NAME"] }, { names: ["AADT_PRELIM", "AADT"], label: "AADT" }],
     note: "TxDOT preliminary AADT (average annual daily traffic) count points — an access/visibility proxy. Loads zoomed in.",
     group: "access", order: 1,
   },
@@ -260,6 +275,8 @@ export const STATEWIDE = {
     kind: "esriFeature", label: "Rail lines",
     source: "BTS/FRA North American Rail Network",
     url: GIS_SOURCES.rail.serviceUrl, minZoom: 11, color: "#334155", weight: 2.5, opacity: 0.95,
+    hoverIdentify: true, canvasIdentify: true, hoverTitle: "Rail line", hoverSource: "BTS/FRA",
+    hoverFields: [{ names: ["RROWNER1", "OWNER", "RAILROAD"] }, { names: ["SUBDIV", "SUBDIVISIO"] }, { names: ["NET", "TRACKS"] }],
     note: "BTS/FRA North American Rail Network lines — a line adjacent/crossing is a potential rail-served siding. Loads zoomed in.",
     group: "access", order: 2,
   },
@@ -270,6 +287,9 @@ export const STATEWIDE = {
     kind: "esriFeature", label: "Airports (Part 77/FAA)",
     source: "FAA",
     url: GIS_SOURCES.airports.serviceUrl, minZoom: 10, color: "#0f766e", weight: 2, opacity: 0.95,
+    pointRadius: 5,
+    hoverIdentify: true, canvasIdentify: true, hoverTitle: "Airport", hoverSource: "FAA",
+    hoverFields: [{ names: ["NAME", "ARPT_NAME", "FULLNAME"] }, { names: ["IDENT", "ARPT_ID", "LOCID"] }, { names: ["TYPE", "ARPT_TYPE", "FACILITY_TYPE"] }],
     note: "FAA airports — a PROXY for FAA Part 77 height-restriction surfaces near a public-use airport (not the computed Part 77 surfaces). Loads zoomed in.",
     group: "access", order: 3,
   },
@@ -297,6 +317,12 @@ export const EVIDENCE = {
     // any zoom, on a federal-government server. Loads zoomed in (national dataset).
     url: "https://arcgis.netl.doe.gov/server/rest/services/Hosted/Energy_Transition_Atlas_493d6/FeatureServer/18",
     minZoom: 10, color: "#b91c1c", weight: 2.4, opacity: 0.9,
+    // NEW-2 — hover names the line, worded exactly like the OSM tooltip one row above
+    // ("Transmission line (OSM) · 138000 V") so the two sources read identically. The voltage
+    // and owner go through powerScreen's cleaners, which already know HIFLD withholds both as
+    // 0 / "NOT AVAILABLE" on redacted lines — a withheld value is omitted, never shown as fact.
+    hoverIdentify: true, canvasIdentify: true, hoverTitle: "Transmission line", hoverSource: "HIFLD",
+    hoverFields: [{ clean: "voltage" }, { clean: "owner" }],
     note: "HIFLD ≥69 kV electric transmission (US DOE/NETL). Loads at zoom ≥ 10; verify live.",
     group: "utilities", mergeGroup: "electric", order: 2,
   },
@@ -307,6 +333,13 @@ export const EVIDENCE = {
     // dataset). URL from the registry (no inline endpoint).
     kind: "esriFeature", label: "Substations", source: "HIFLD",
     url: GIS_SOURCES.substations.serviceUrl, minZoom: 11, color: "#7c3aed", weight: 2, opacity: 0.95,
+    // NEW-1 — a slightly larger disc than the default: a substation is a deal-shaping asset
+    // (the interconnect proxy), so it should read at a glance rather than as a stray dot.
+    pointRadius: 5,
+    // NEW-2 — MAX_VOLTAG is this layer's voltage field (kV, 0 where withheld); NAME is
+    // anonymised "UNKNOWN#####" on redacted records, which cleanAttr treats as absent.
+    hoverIdentify: true, canvasIdentify: true, hoverTitle: "Substation", hoverSource: "HIFLD",
+    hoverFields: [{ names: ["NAME"] }, { names: ["MAX_VOLTAG", "MAX_VOLT", "VOLTAGE"], unit: "kV" }, { names: ["CITY"] }],
     note: "HIFLD electric substations. Distance to the nearest is a service/interconnect proxy for heavy power. Many names are withheld (redacted national dataset). Loads zoomed in.",
     group: "utilities", mergeGroup: "electric", order: 2,
   },
@@ -503,6 +536,9 @@ export const JURISDICTIONS = {
     url: JURISDICTION_SOURCES.road.url, minZoom: 14, weight: 3, opacity: 0.95,
     fields: ["OBJECTID", "RDWAY_MAINT_AGCY", "HSYS"],
     styleFn: roadAuthorityStyle, legend: ROAD_AUTHORITY_LEGEND,
+    // Only the three `fields` above are fetched, so hover may name no others.
+    hoverIdentify: true, hoverTitle: "Road", hoverSource: "TxDOT Roadway Inventory",
+    hoverFields: [{ names: ["RDWAY_MAINT_AGCY"], label: "maintained by" }, { names: ["HSYS"] }],
     note: "Who maintains each road, from the TxDOT Roadway Inventory — City / County / State (TxDOT) / Toll / Federal, with an honest Unknown where the data can't classify it. Loads zoomed in to about street level (zoom ≥ 14). Verify access/ROW with the jurisdiction.",
     group: "jurisdiction", order: 3,
   },
@@ -878,6 +914,52 @@ export function attachFeatureRetry(lyr, k, cfg, onStatus, max = 3) {
   });
 }
 
+/* THE ONE PLACE an esri featureLayer is constructed (NEW-1). Both call sites below go through
+ * here so neither can drift back to the broken default marker: a POINT feature with no
+ * `pointToLayer` gets `L.marker` + `L.Icon.Default`, whose PNG never resolved under the bundler —
+ * which is what painted the owner's broken-image "Mark" glyphs where the HIFLD substations should
+ * have been. `test/pointSymbology.test.js` asserts this stays the only construction site.
+ *
+ * The hover/identify wiring is attached from a LAZY chunk (featureHoverAttach.js) rather than
+ * inline: it is only reachable once this layer is on, and keeping its wording engine off the boot
+ * bundle is part of how this feature pays its bundle budget. The import is kicked off here, at
+ * toggle-on — long before a cursor can rest on a feature. */
+function buildFeatureLayer(cfg, opacity, pane, { interactive = false, identifyOk = null } = {}) {
+  const canHover = hoverIdentifyEnabled(cfg);
+  const lyr = EL.featureLayer(featureLayerOptions(cfg, opacity, pane, {
+    interactive: interactive && canHover,
+    pointToLayer: pointToLayerFor(cfg, opacity, { interactive: interactive && canHover }),
+  }));
+  if (canHover) {
+    import("./featureHoverAttach.js").then((m) => {
+      if (interactive) m.wireFeatureHover(lyr, cfg, identifyOk);
+      m.attachFeatureCanvasIdentify(lyr, cfg);
+    }, () => { /* the layer still paints; only its hover answer is unavailable */ });
+  }
+  return lyr;
+}
+
+/* Which currently-ON layers can answer a RASTER identify at a point (NEW-2)? Pure selector,
+ * so both surfaces (the map finder's mousemove and the planner's canvas cursor) resolve the
+ * same eligible set the same way, and a unit test can pin it.
+ *
+ * Three gates, all of them the caller's existing mechanisms rather than new ones:
+ *   • the layer is ON (`overlays[k].on`) — never identify something the user turned off;
+ *   • its service can honestly answer (`identifyCapable` — MapServer only, see rasterIdentify.js);
+ *   • its health probe has not already declared it failed (`layerHealthy`) — we do not
+ *     re-probe here; probeService remains the single source of truth on liveness. */
+export function rasterIdentifyLayers(overlays, { layerHealthy = () => true, limit = 4 } = {}) {
+  const out = [];
+  for (const [k, cfg] of Object.entries(ALL_LAYERS)) {
+    if (!(overlays && overlays[k] && overlays[k].on)) continue;
+    if (!identifyCapable(cfg)) continue;
+    if (!layerHealthy(k)) continue;
+    out.push({ id: k, cfg });
+    if (out.length >= limit) break;
+  }
+  return out;
+}
+
 /* Reconcile the live esri/vector layers on `map` with the `overlays` state. `refs`
  * is a plain object (id→layer) the caller owns across renders.
  *   onStatus(id, state, msg): "loading" | "loaded" | "empty" | "failed" | null(off)
@@ -981,7 +1063,7 @@ export function syncOverlayLayers(map, overlays, refs, opts = {}) {
           interactive: !!opts.identifyOk,
           identifyOk: opts.identifyOk,
           buildFallback: () => {
-            const fb = EL.featureLayer(featureLayerOptions(cfg, st.opacity, pane));
+            const fb = buildFeatureLayer(cfg, st.opacity, pane, { interactive: !!opts.identifyOk, identifyOk: opts.identifyOk });
             // esri-leaflet FeatureLayers have no setOpacity (raster-only) — same
             // flat-style shim the primary esriFeature branch installs below, so the
             // panel's opacity slider keeps working after a fallback engagement.
@@ -1031,14 +1113,19 @@ export function syncOverlayLayers(map, overlays, refs, opts = {}) {
           if (!map || !map._loaded) { refs[k] = null; return; } // map torn down mid-probe — don't addTo a dead map (B55)
           let lyr;
           if (cfg.kind === "esriFeature") {
-            lyr = EL.featureLayer(featureLayerOptions(cfg, st.opacity, pane));
+            lyr = buildFeatureLayer(cfg, st.opacity, pane, { interactive: !!opts.identifyOk, identifyOk: opts.identifyOk });
             // A per-feature-styled layer (road authority) must re-derive its WHOLE style on an
             // opacity change — re-applying the style function (not a flat {opacity}) so the
             // per-maintainer colors survive AND newly fetched tiles keep them. A flat-styled
             // layer just merges the new opacity.
+            // NEW-1: the flat shim is now GEOMETRY-AWARE. A flat `{opacity}` dims a polyline's
+            // stroke but leaves a point's FILL at full strength, so a dimmed substation stayed
+            // solid while its neighbours faded. setStyle accepts a per-feature function
+            // (esri-leaflet resolves it against each feature), so points re-derive their whole
+            // disc symbology and everything else keeps the stroke-only behaviour.
             lyr.setOpacity = typeof cfg.styleFn === "function"
               ? (oo) => { try { const sf = (f) => cfg.styleFn(f && f.properties, oo); lyr._originalStyle = sf; lyr.setStyle(sf); } catch (_) {} }
-              : (oo) => { try { lyr.setStyle({ opacity: oo }); } catch (_) {} };
+              : (oo) => { try { lyr.setStyle((f) => (isPointFeature(f) ? pointSymbolOptions(cfg, oo) : { opacity: oo })); } catch (_) {} };
             // FeatureServer GeoJSON queries get retry/backoff (NEW-5/B287): esri-leaflet
             // won't retry its own request, so a transient 5xx/blip on City ETJ or County
             // boundaries would otherwise drop the layer on a single hiccup.

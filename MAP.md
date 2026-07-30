@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-07-30 @ `fddd6db` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-07-30 @ `e016abe` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_358 source files mapped._
+_364 source files mapped._
 
 ## infra
 
@@ -397,6 +397,10 @@ _358 source files mapped._
   - _exports_: `ANCHOR_DRIFT_FT`, `anchorDriftFt`, `canonEnv`, `DRAIN_STUCK_MS`, `ENV_TOL_FT`, `envelopeContains`, `envelopeOf`, `FETCH_TTL_MS`, `fetchStaleForEdit`, `fetchWatchdogFired`, `revalidationNeed`
 - **`src/workspaces/site-planner/lib/fbcdWse.js`** — FBCDD Atlas-14 watershed-study DRAFT WSE point samplers (getSamples, feet, honest-null out of coverage): 0.2% off the county 500YR_WSE mosaic → derivedWse02Ft; 1% off the per-watershed 100YR rasters via extent-routed multiplex (max-finite governing, LOUD on any candidate failure) → derivedWse1pctFt (B807) — Fort Bend drainage checks
   - _exports_: `FBCDD_WSE02_URL`, `sampleWse02Point`, `sampleWse100Point`, `wse02CandidatesForPoint`, `wse100CandidatesForPoint`
+- **`src/workspaces/site-planner/lib/featureHover.js`** — pure hover WORDING for the vector feature overlays: registry-driven `<Title> (<Source>) · <detail>` matching the OSM tooltips, with HIFLD's withheld sentinels treated as absence and ALL-CAPS agency text title-cased.
+  - _exports_: `cleanAttr`, `HOVER_CLEANERS`, `HOVER_MAX_CHARS`, `hoverDetails`, `hoverIdentifyEnabled`, `hoverText`, `hoverTitle`, `pickAttr`, `sourceTag`, `titleCaseAgency`
+- **`src/workspaces/site-planner/lib/featureHoverAttach.js`** — lazily-loaded attach layer for the vector overlays' hover identify: binds the sticky tooltip on an esri featureLayer and installs the planner-canvas `identifyAt` accessor, kept off the boot bundle to pay the bundle budget.
+  - _exports_: `attachFeatureCanvasIdentify`, `wireFeatureHover`
 - **`src/workspaces/site-planner/lib/ffeBalance.js`** — grading milestone (DECISION 3): the balance-optimal finished-floor solver (`solveBalanceFfe` floats the pad UP off the regulatory code minimum to reuse basin spoil as fill, never below it) + the dual FFE readout (`ffeDualDisplay`, "FFE X (code floor Y + Z for balance)"). The net earthwork residual is reported in CY (owner preference), not truckloads. Pure, Node-tested.
   - _exports_: `ffeDualDisplay`, `solveBalanceFfe`
 - **`src/workspaces/site-planner/lib/floodAdministrator.js`** — NEW-8 governing floodplain administrator: candidate resolution from county/city/ETJ/edge signals, deliberate strictest-wins selection with an ambiguity flag, and the BFE back-solved from an assumed FFE
@@ -448,9 +452,9 @@ _358 source files mapped._
 - **`src/workspaces/site-planner/lib/layerPrefs.js`** — Per-site GIS Layers-panel toggle memory (NEW-1): project the app-shared overlays to/from a sparse per-site on/off override map (restore on open, persist on toggle, undo-signature)
   - _exports_: `applyOnOverrides`, `overlaysWithOverrides`, `overridesFromOverlays`, `overridesSig`, `sanitizeLayerOverrides`
 - **`src/workspaces/site-planner/lib/layerRequest.js`** — Pure map-layer request shaping: esri dynamic/image/feature layer option builders plus transient-retry policy, with coverage barred from narrowing requests
-  - _exports_: `dynamicLayerOptions`, `featureLayerOptions`, `featureRetryDecision`, `imageLayerOptions`, `isTransientStatus`, `overlayExportRequest`, `RASTER_STALL_MS`, `TRANSIENT_STATUS`, `wireRasterStatus`
+  - _exports_: `dynamicLayerOptions`, `featureLayerOptions`, `featureRetryDecision`, `identifyCapable`, `imageLayerOptions`, `isTransientStatus`, `overlayExportRequest`, `pointSymbolOptions`, `RASTER_STALL_MS`, `TRANSIENT_STATUS`, `wireRasterStatus`
 - **`src/workspaces/site-planner/lib/layers.js`** — Shared GIS overlay registry + syncOverlayLayers: probes/adds/removes esri-leaflet raster & feature layers, retry/backoff, B445 cache-proxy with direct-agency fallback, per-layer status + vintage
-  - _exports_: `AHJ_LAYERS`, `ALL_LAYERS`, `attachFeatureRetry`, `defaultOverlayState`, `EVIDENCE`, `fetchWithRetry`, `gisProxyEnabled`, `identifyOverlaysAt`, `JLAYERS`, `JURISDICTION_LAYERS`, `jurisdictionFor`, `JURISDICTIONS`, `LAYER_GROUP_LABEL`, `LAYER_GROUP_ORDER`, `LAYER_VINTAGE`, `layerVintage`, `MERGE_GROUPS`, `probeService`, `STATEWIDE`, `syncOverlayLayers`, `TERRAIN`, `withTileRetry`
+  - _exports_: `AHJ_LAYERS`, `ALL_LAYERS`, `attachFeatureRetry`, `defaultOverlayState`, `EVIDENCE`, `fetchWithRetry`, `gisProxyEnabled`, `identifyOverlaysAt`, `JLAYERS`, `JURISDICTION_LAYERS`, `jurisdictionFor`, `JURISDICTIONS`, `LAYER_GROUP_LABEL`, `LAYER_GROUP_ORDER`, `LAYER_VINTAGE`, `layerVintage`, `MERGE_GROUPS`, `probeService`, `rasterIdentifyLayers`, `STATEWIDE`, `syncOverlayLayers`, `TERRAIN`, `withTileRetry`
 - **`src/workspaces/site-planner/lib/layerSchedule.js`** — GIS overlay load ORDER + staging policy so the map is interactive before the overlay fan-out starts
   - _exports_: `admittedAfter`, `LAYER_STAGE_SIZE`, `layerTier`, `orderLayersByPriority`
 - **`src/workspaces/site-planner/lib/ledgerBalancer.js`** — Ledger balancer (B830): ranks screening moves that close detention + mitigation together (shrink over-dug, joint berm solve with apply payload, parcel phase-out, building-to-basin, pumped what-if). Exports `rankLedgerMoves`, `solveBermRaise`.
@@ -465,6 +469,8 @@ _358 source files mapped._
   - _exports_: `mapillaryRequestUrl`, `MLY_FIELDS`, `MLY_LIMIT`, `MLY_PROXY_PATH`, `pickDetections`
 - **`src/workspaces/site-planner/lib/mapLock.js`** — THE projection welding the planner's feet frame to the Web-Mercator basemap — scaled-Mercator feet↔lat/lng plus the matching ppf↔zoom, both anchored at the site origin
   - _exports_: `basemapWrapPoint`, `basemapWrapPointTransformed`, `exactContainerPoint`, `feetToLatLngPair`, `FT_PER_DEG`, `ftPerDeg`, `invMercDeg`, `lngLatToFeet`, `lockOffsetPx`, `mercDeg`, `ppfToZoom`, `REGISTRATION_SANITY_PX`, `registrationShift`, `sanitizeShift`, `tileNwFeet`, `zoomToPpf`
+- **`src/workspaces/site-planner/lib/mapSymbols.js`** — leaflet point symbology: the `pointToLayer` circleMarker factory every GeoJSON-consuming layer must pass, plus the `L.Icon.Default` image-path fix so an accidental default marker is a pin, not a broken image.
+  - _exports_: `installDefaultMarkerIcon`, `pointToLayerFor`
 - **`src/workspaces/site-planner/lib/markupPick.js`** — pure Site-Planner markup hit-test + z-stack cycle (sibling of measureHit.js): the fill-aware grab rule (B920 — a closed markup grabs by interior only when filled, else stroke-only) and the smaller-area-first under-point stack + repeat/Alt-click cycle (B921)
   - _exports_: `boxCorners`, `distToPolyline`, `distToRing`, `ellipseRing`, `markupHitModel`, `markupsUnderPoint`, `markupUnderPoint`, `nextMarkupSelection`, `pointInRing`, `ringArea`
 - **`src/workspaces/site-planner/lib/measureHit.js`** — Pure hit-test + z-order cycling for on-canvas measurements (B910): which measurement a feet-space click lands on (smaller-area-wins), and the next selection when a stack is re-clicked (wraps)
@@ -569,6 +575,12 @@ _358 source files mapped._
   - _exports_: `classifyVerified`, `classifyWseSource`, `SOURCE_TAG_COLOR_VAR`, `SOURCE_TAG_ORDER`, `SOURCE_TAGS`, `sourceTag`
 - **`src/workspaces/site-planner/lib/proximityScreen.js`** — Pure proximity-screen core (PHASE 2, reused by later distance screens): projects parcel rings + feature points to EPSG:2278 feet and returns count + nearest-distance + ranked names within a buffer (0 ft = on/under the site), plus the `fmtDistFt` display helper
   - _exports_: `distPathToRingsFt`, `distPointSegFt`, `distPointToRingsFt`, `distSegSegFt`, `featureDistFt`, `fmtDistFt`, `pointInRingFt`, `ringToGridFt`, `screenProximity`, `segmentsIntersectFt`, `toGrid`
+- **`src/workspaces/site-planner/lib/rasterIdentify.js`** — pure ArcGIS `/identify` decision layer for the RASTER-painted layers: capability gate, request shaping, result→readout, and the debounced/cancelling hover controller with an honest state for every outcome.
+  - _exports_: `createHoverIdentify`, `errorMessage`, `HOVER_IDENTIFY_DEBOUNCE_MS`, `IDENTIFY_ROW_SPECS`, `IDENTIFY_STATE`, `IDENTIFY_TIMEOUT_MS`, `IDENTIFY_TOLERANCE_PX`, `identifyCapable`, `identifyLayersParam`, `identifyRequest`, `readoutFromResult`, `readoutsFromJson`, `stateMessage`
+- **`src/workspaces/site-planner/lib/rasterIdentifyLazy.js`** — the one on-demand loader for the raster identify chunk: a synchronous-returning `attachRasterIdentifyLazy` for the map finder plus a `makeHoverIdentify`/`rasterIdentifyNow` pair for the planner's per-move path.
+  - _exports_: `attachRasterIdentifyLazy`, `loadRasterIdentify`, `makeHoverIdentify`, `rasterIdentifyNow`
+- **`src/workspaces/site-planner/lib/rasterIdentifyMap.js`** — leaflet glue for the raster identify: map hover/click wiring, the transient readout DOM, and the direct-then-cache-proxy transport that gets past a no-CORS agency host.
+  - _exports_: `attachRasterIdentify`, `makeIdentifyFetch`, `TRANSIENT_MS`
 - **`src/workspaces/site-planner/lib/receivingWater.js`** — Nearest receiving water for a pond outfall from USGS NHDPlus HR flowlines (NEW-A5): SWR identifySource query, nearest-reach + FCODE-type math, and the off-site-conveyance-easement flag when no water is adjacent. Screening only.
   - _exports_: `fcodeType`, `nearestReceivingWater`, `OUTFALL_ADJACENT_FT`, `RECEIVING_WATER_SOURCE`, `receivingWaterFlag`, `resolveReceivingWater`
 - **`src/workspaces/site-planner/lib/regionalDetention.js`** — Regional-detention / fee-in-lieu cited registry (NEW-C2): per-authority availability (tri-state) + fee basis with citations, and feeInLieuCompare (on-site pond land-take → buildable-SF recovered vs fee cost). Pure.
@@ -642,7 +654,7 @@ _358 source files mapped._
 - **`src/workspaces/site-planner/lib/vectorLayers.js`** — Pure registry-driven vector GIS engine (FEMA/NWI + county/city/ETJ boundaries): paged ArcGIS pull, detail tiers with server-side generalization, grid-snapped SWR cache keys, Esri-to-GeoJSON, Douglas-Peucker, vector-vs-image decision
   - _exports_: `buildQueryUrl`, `buildVectorQuery`, `decideVectorOrImage`, `douglasPeucker`, `featuresToGeoJson`, `fetchCached`, `fetchVectorFeatures`, `hitFeature`, `identifyRows`, `pickTier`, `simplifyGeoJson`, `snapBbox`, `styleFor`, `VECTOR_SOURCES`, `vectorKey`
 - **`src/workspaces/site-planner/lib/vectorOverlay.js`** — Leaflet glue over the vector cache tier: cachedVectorLayer paints last-good boundaries instantly, background-refreshes, hover/click identify (identifyOk-gated), zoom-gated divIcon name labels, live esri-leaflet fallback
-  - _exports_: `appendIdentifyRows`, `cachedCorridorLayer`, `cachedPipelineLayer`, `cachedVectorLayer`, `decodeFieldValue`, `identifyHref`, `identifyRowsFor`, `identifyTitle`
+  - _exports_: `appendIdentifyRows`, `cachedCorridorLayer`, `cachedPipelineLayer`, `cachedVectorLayer`, `decodeFieldValue`, `identifyHref`, `identifyRowsFor`, `identifyTitle`, `isPointFeature`
 - **`src/workspaces/site-planner/lib/viewCull.js`** — Viewport culling for the feet-frame SVG (screen only — the export always renders the complete model)
   - _exports_: `boundsIntersect`, `CULL_MARGIN`, `CULL_MIN_ELEMENTS`, `cullToView`, `elementBounds`, `shouldCull`, `visibleWorldRect`
 - **`src/workspaces/site-planner/lib/wellStatus.js`** — Pure RRC well status classifier (PHASE 4): SYMNUM/description → producing/plugged/dry/abandoned/injection, and `summarizeWells` turns a proximity result into a status breakdown + an on-site offset/replug risk flag
