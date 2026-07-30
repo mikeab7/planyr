@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-07-30 @ `e016abe` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-07-30 @ `e387d88` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_364 source files mapped._
+_367 source files mapped._
 
 ## infra
 
@@ -269,6 +269,12 @@ _364 source files mapped._
   - _exports_: `default (YieldFooterDisclaimer)`
 - **`src/workspaces/site-planner/lib/accessScreen.js`** — PHASE 6 access-tier screening (pure): turns three public access datasets near the parcel into info findings — TxDOT AADT (nearest counted road's traffic as an access/visibility proxy), BTS/FRA rail lines (nearest line + owner; a crossing/abutting line flags a potential rail-served siding), and FAA airports (distance as a Part 77 height-restriction proxy, with a Form-7460 caution near a public-use airport); expands railroad reporting marks + FAA type codes to plain labels
   - _exports_: `airportTypeLabel`, `railroadName`, `summarizeAadt`, `summarizeAirports`, `summarizeRail`
+- **`src/workspaces/site-planner/lib/adminBoundaryData.js`** — Pure decoder for the wide-zoom boundary asset (delta ints → lat/lng rings) plus the inner half of the zoom band (states join countries from zoom 5).
+  - _exports_: `ADMIN1_MIN_ZOOM`, `adminBoundaryLevels`, `decodeAsset`, `decodeRing`
+- **`src/workspaces/site-planner/lib/adminBoundaryGate.js`** — The wide-zoom gate as a leaf module (imports nothing): the zoom ceiling for political boundaries, and the cached dynamic import that keeps the layer off the boot bundle.
+  - _exports_: `ADMIN_BOUNDARY_MAX_ZOOM`, `adminBoundariesVisible`, `attachAdminBoundaries`
+- **`src/workspaces/site-planner/lib/adminBoundaryLayer.js`** — Lazily-loaded Leaflet glue that paints state/country outlines at wide zoom: own pane below site geometry, canvas renderer, non-interactive. Never static-import this.
+  - _exports_: `attachAdminBoundaries`
 - **`src/workspaces/site-planner/lib/appraisal.js`** — Pure CAD-attribute curation: regex-maps raw county/TxGIO parcel columns to labelled owner/value/acreage/use rows for both panels
   - _exports_: `APPR_FIELDS`, `apprAll`, `apprRows`, `apprVal`, `findAttr`, `prettyKey`
 - **`src/workspaces/site-planner/lib/apronElevation.js`** — NEW-9 dock apron / truck court elevation checked separately from the building pad: apron elevation from FFE + dock drop, exposure banding against the governing flood elevation (exposure language, never code language), and the pavement/court fill set the mitigation demand must include

@@ -109,7 +109,7 @@ import { reorderByZ, arrangeFlags } from "./lib/arrange.js";
 import { commonStyleState, selectionRingFeet } from "./lib/multiStyle.js";
 import { parseTracts, callsToPath, pathCloses, misclosure, bufferPolyline, offsetPolyline, ringsOverlap } from "./lib/metesAndBounds.js";
 import { solveDeedAlignment, gridConvergenceDeg, rotatePointsAbout, ringCentroid as deedCentroid, describeRotation } from "./lib/deedAlign.js";
-/* B1133 bundle-budget offset — the deed reader is loaded ON DEMAND (dynamic import at its one
+/* B1141 bundle-budget offset — the deed reader is loaded ON DEMAND (dynamic import at its one
  * call site in the deed-drop handler). It is a self-contained .docx/ZIP reader that only runs
  * once someone drops a deed or survey file, so it has no business on the boot path; the same
  * treatment B1123 gave the title reader and B1042 gave the export path. */
