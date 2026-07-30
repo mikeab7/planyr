@@ -5,7 +5,29 @@
 > step; tick/remove it once he's done it. This is the **owner's** plate only. Browser click-throughs and
 > signed-in spot-checks are the Claude cohort's job (`VERIFICATION.md`), **never** Michael's — do NOT list those here.
 
-_Last updated: 2026-07-29._
+_Last updated: 2026-07-30._
+
+## ✉️ Decide how Planyr sends its sign-up emails — right now most people can't sign up at all (B1167)
+
+> **Short version: your confirmation emails go out through Supabase's free built-in mailer, and that mailer only
+> delivers to people already on your Supabase team.** Everyone else — a colleague, a broker, anyone you show the
+> app to — gets nothing. The app tells them to check their email, and no email is ever coming. It's also capped at
+> a handful of messages an hour for the whole project, and Supabase says outright it isn't meant for real use.
+>
+> **What I changed today, and what I couldn't.** The sign-up and password-reset messages now name the sender, so
+> whoever does get an email knows what to look for and to check junk. That's a real improvement but it doesn't fix
+> delivery — nothing in the app can. Wiring a proper email service needs an account and a password, which is yours
+> to create, not mine.
+>
+> **What I'd do:** sign up for a sending service — **Resend**, **Postmark** or **Amazon SES** are the usual three,
+> all with a free or near-free tier at your volume — and paste its username and password into Supabase's email
+> settings. Then your emails come **from planyr.io** instead of from a Supabase address, which also means they
+> look like they're from your company and are far less likely to land in junk. It's a settings-page job, roughly
+> fifteen minutes, and I'll switch the app's wording to the new address in one small change afterwards.
+- [ ] **Pick a sending service and set it up in Supabase** (Authentication → Emails → SMTP settings), sending from
+      a planyr.io address. Then tell a Claude session the exact "from" address and I'll update the wording to match.
+- [ ] **Or tell me you're happy leaving it as-is for now** — that's a fine answer while it's only you and Hillwood
+      using it, and I'll stop raising it. Just know that anyone outside your Supabase team currently cannot sign up.
 
 ## 📄 Four PDFs I can't download — they're the last piece of Colorado detention sizing (B1105)
 
