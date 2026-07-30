@@ -2551,7 +2551,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const wrap = geoWrapRef.current;
     // No basemap frame → nothing to register against, so the drawing sits at its own
     // natural position (NEW-2). An un-located plan is drawn in feet against nothing.
-    if (!map || !wrap || !origin) { setRegShift((r) => (r.dx || r.dy ? { dx: 0, dy: 0 } : r)); return; }
+    // B1189 — GUARD the dispatch, don't just make the updater a no-op. A `setState` whose
+    // updater returns the same value is still a DISPATCH: React only skips scheduling via the
+    // eager-bailout path, which requires the fiber to have no other pending work — and during a
+    // panel close there always is some. So the un-located path (a blank plan: `origin` null) used
+    // to schedule a render on EVERY run of this effect, which is the pump half of the runaway
+    // loop below. Reading `regShift` from the closure is safe (an effect always closes over the
+    // current render's values) and the functional updater still guards the write itself.
+    if (!map || !wrap || !origin) { if (regShift.dx || regShift.dy) setRegShift({ dx: 0, dy: 0 }); return; }
     const fx = (size.w / 2 - view.offX) / view.ppf;
     const fy = (size.h / 2 - view.offY) / view.ppf;
     const center = feetToLatLng({ x: fx, y: fy }, origin.lat, origin.lon);
@@ -2577,11 +2584,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
        by nature and never wanted one. It is NOT the source of the V478 residual — that is
        Leaflet's `_getNewPixelOrigin(...)._round()` on the zoom-commit path, which no call-
        site change can reach (see the NEW-1 block in ui-audit/diagnose-map-lock.mjs). */
-    const exactPt = (ll) => exactContainerPoint(
-      map.project(L.latLng(ll), map.getZoom()),
-      map.getPixelOrigin(),
-      map.layerPointToContainerPoint(L.point(0, 0)),
-    );
+    /* B1189 — the map's current FRAME (its pixel origin + where the layer origin sits in the
+     * container), read fresh at call time. Both reference builders below needed exactly this
+     * pair and each spelled the three Leaflet calls out in full; naming it once means the two
+     * cannot drift, and it is the same read either way. */
+    const mapFrame = () => [map.getPixelOrigin(), map.layerPointToContainerPoint(L.point(0, 0))];
+    const projectAt = (ll) => map.project(L.latLng(ll), map.getZoom());
+    const exactPt = (ll) => exactContainerPoint(projectAt(ll), ...mapFrame());
 
     /* NEW-2 — MEASURE the drawing-vs-imagery registration and hand the residual to the
      * canvas. The reference point is the view centre, whose feet coordinate the drawing
@@ -2632,19 +2641,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // Fallback when there is no tile to read (aerial off, or none arrived yet): the map's own
     // projection, which is the frame every Leaflet VECTOR overlay is placed in.
     const projRef = (c) => ({
-      imgPt: basemapWrapPoint(
-        map.project(L.latLng(c), map.getZoom()),
-        map.getPixelOrigin(),
-        map.layerPointToContainerPoint(L.point(0, 0)),
-        geoOverscan,
-      ),
+      imgPt: basemapWrapPoint(projectAt(c), ...mapFrame(), geoOverscan),
       drawPt: { x: size.w / 2, y: size.h / 2 },
     });
     const syncReg = (c) => {
       try {
         const t = tileRef();
         if (t) noteReg(t.imgPt, t.drawPt, "tile");
-        else noteReg(projRef(c).imgPt, projRef(c).drawPt, "projection");
+        else { const p = projRef(c); noteReg(p.imgPt, p.drawPt, "projection"); } // B1189 — build the reference ONCE (it was projecting twice for one measurement)
       } catch (_) { /* never let a measurement break a commit */ }
     };
 
@@ -2808,7 +2812,39 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     clearTimeout(geoCommitTimer.current);
     if (Math.abs(z - prev.zoom) > 0.75) { commit(center, z, true); }
     else { geoCommitTimer.current = setTimeout(() => commit(center, z, true), 160); }
-  }, [view, size, origin, geoOverscan]); // eslint-disable-line react-hooks/exhaustive-deps
+    /* B1189 — DEPEND ON `size`'s NUMBERS, NEVER ON THE STATE OBJECT'S IDENTITY.
+     *
+     * This effect used to list `[view, size, origin, geoOverscan]`. It reads only NUMBERS out of
+     * the first three, but taking the whole object made it re-run whenever a value-identical
+     * replacement object appeared — and one does. `setSize`'s updater ALLOCATES whenever the
+     * measured width differs from the state it is applied to, and React re-applies a retained
+     * updater against its base state on every subsequent render; once a panel close leaves one
+     * retained, every render minted a NEW `{w:1058,h:640,…}` holding the SAME numbers.
+     *
+     * That closed a cycle with nothing wrong at either end: new `size` object → this effect
+     * re-runs → it dispatches `setRegShift` → React schedules a render → a new `size` object …
+     * Fifty round trips later React aborts the whole subtree with "Maximum update depth
+     * exceeded" (minified #185) and the error boundary replaces the planner. MEASURED on the
+     * unmodified baseline: ~50 runs of this effect with every dep VALUE identical (view
+     * {0.35,60,60}, 1058×640, overscan 213), one component instance, and only FIVE `setSize`
+     * dispatches in the whole trace — the allocations came from re-application, not from writes.
+     *
+     * Comparing `size`'s numbers makes an allocation-only change invisible here, which is exactly
+     * right: nothing in the body can tell two `{w:1058,h:640}` objects apart. The B837 pan
+     * compensation below already depends on `size.w` this way; this effect was the outlier.
+     *
+     * SCOPED TO `size` DELIBERATELY. `view` and `origin` stay whole-object deps: the trace showed
+     * both hold their identity across the loop (only `size` churned), and their writers replace
+     * them only on a real change, so a new object there IS new information. Listing their fields
+     * too would be belt-and-braces against a churn nothing has ever exhibited, and it is not free
+     * — it cost enough bytes to push `largestChunkBytes` past its ceiling in CI.
+     *
+     * NOT fixed by quantising `setSize` (the previous session's proposed next step): the widths
+     * never disagreed — RO and the layout effect both reported 1058 exactly — and rounding
+     * `size.w` would put a whole pixel of slop into the view maths that
+     * `ui-audit/diagnose-pointer-accuracy.mjs` asserts to a quarter of a pixel.
+     */
+  }, [view, size.w, size.h, origin, geoOverscan]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => () => { clearTimeout(geoCommitTimer.current); if (geoGhostRef.current) { try { geoGhostRef.current.remove(); } catch (_) {} geoGhostRef.current = null; } }, []);
 

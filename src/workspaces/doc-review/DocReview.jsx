@@ -271,12 +271,33 @@ export default function DocReview({
   const [cursor, setCursor] = useState(null);       // page-unit cursor for live preview
   const [sel, setSel] = useState(null);             // PRIMARY selected markup id (property panel / vertex edit)
   const [selSet, setSelSet] = useState([]);         // B569: the full multi-selection (markup ids, current page)
-  // B750: a single click SELECTS only — the Properties section shows a markup's props only after an
-  // explicit open (double-click, or a freshly-drawn markup). `propsForId` = the selected markup id whose
-  // Properties are open (must equal `sel`), else null. `dblRef` carries, for a double-click, whether the
-  // markup was ALREADY selected at the FIRST press — so an already-selected TEXT note edits its text while
-  // anything else opens Properties ("click to select, then double-click to edit text").
-  const [propsForId, setPropsForId] = useState(null);
+  /* B1190 — THE CLICK CONTRACT, applied to Review (mirrors the Site Planner's B1188).
+   *
+   * B750 established the rule (single click SELECTS, double click OPENS Properties) but implemented
+   * it here the same way it did in the planner: with a `propsForId` marker that had to keep MATCHING
+   * `sel` for the section to render, plus an effect that cleared it on every selection change. So
+   * the section's open/closed state was DERIVED from selection and flapped — the moment the
+   * selection moved off (a click on empty sheet, a marquee, a page change) the Properties the user
+   * had deliberately opened vanished on their own.
+   *
+   * It is now owner-owned, exactly as in the planner: `propsOpen` is a boolean that ONLY an explicit
+   * affordance touches (`openMarkupProps` / `closeMarkupProps`, i.e. a double-click, a freshly-drawn
+   * markup, the ✕, or Escape). Selection chooses the section's CONTENTS only, and with nothing
+   * selected the section HOLDS ITS GROUND and shows a "Nothing selected" state instead of vanishing.
+   * No pointer interaction with the sheet can change it.
+   *
+   * Why it is milder here than in the planner and still worth fixing: Review's inspector is a SECTION
+   * inside an always-present rail, so a vanish collapses a section rather than reflowing the canvas.
+   * The owner's invariant ("a panel he did open must never disappear on its own") is the same one,
+   * and the two workspaces must not diverge on the click contract.
+   *
+   * `dblRef` carries, for a double-click, whether the markup was ALREADY selected at the FIRST press
+   * — so an already-selected TEXT note edits its text while anything else opens Properties ("click to
+   * select, then double-click to edit text").
+   */
+  const [propsOpen, setPropsOpen] = useState(false);
+  const openMarkupProps = () => setPropsOpen(true);
+  const closeMarkupProps = () => setPropsOpen(false);
   const dblRef = useRef({ id: null, t: 0, wasSel: false });
   const [hoverId, setHoverId] = useState(null);     // B156: markup under the cursor in Select mode (pre-click hover preview)
   const [marquee, setMarquee] = useState(null);     // B570: live box-select rubber-band { a, b } in page units
@@ -393,10 +414,14 @@ export default function DocReview({
     setSelSet((s) => { const f = s.filter(onPage); return f.length === s.length ? s : f; });
     setSel((id) => (id && onPage(id) ? id : null));
   }, [markups, page]);
-  // B750: drop the Properties-open marker whenever the selection moves off it (single click to another
-  // markup, deselect, page change) so a plain click can't leave a stale panel open. One effect covers
-  // every selection path — no need to touch selectOne/clearSelection/applySelMods.
-  useEffect(() => { setPropsForId((cur) => (cur && cur === sel ? cur : null)); }, [sel]);
+  /* B1190 — the effect that used to live here is DELETED, not rewritten.
+   *
+   * It was `useEffect(() => setPropsForId((cur) => (cur && cur === sel ? cur : null)), [sel])`: drop
+   * the open marker whenever the selection moves off it. That is precisely the defect — it made a
+   * DESELECT close a section the user had opened, so a click on empty sheet or a marquee drag closed
+   * Properties mid-gesture. Selection may choose what the section SHOWS; it may never decide whether
+   * the section is open. There is deliberately no replacement effect: the open state is `propsOpen`,
+   * and only an explicit affordance writes it. */
 
   /* ---- undo / redo (B303) ----
    * Snapshots of the editable doc state (markups + per-sheet calibration), by reference,
@@ -1127,7 +1152,7 @@ export default function DocReview({
     setDraft(null);
     // Bluebeam: a single-use tool reverts to Select after one markup and selects the new one
     // (so its properties show + you can tweak it); a locked tool stays armed.
-    if (!toolLock) { setTool("select"); selectOne(id); setPropsForId(id); } // B750: a freshly drawn markup shows its Properties (its rail section would be blank otherwise)
+    if (!toolLock) { setTool("select"); selectOne(id); openMarkupProps(); } // B750/B1190: a freshly drawn markup shows its Properties (its rail section would be blank otherwise) — an EXPLICIT open, not a selection side effect
   };
 
   // Erase pen/highlight markups whose points overlap the given box (two corner pts).
@@ -1180,12 +1205,12 @@ export default function DocReview({
       // New callout: pts[0] = leader tip (pointer target), pts[1] = text box anchor
       const id = uid();
       setMarkups((a) => [...a, { id, page: ed.page, kind: "callout", pts: [ed.calloutTip, ed.pt], ...seedStyle("callout"), text }]);
-      if (!toolLock) { setTool("select"); selectOne(id); setPropsForId(id); } // B750: show the new callout's Properties
+      if (!toolLock) { setTool("select"); selectOne(id); openMarkupProps(); } // B750/B1190: show the new callout's Properties
     } else {
       // honor the sticky text style (size/color/bold/…) set before drawing
       const id = uid();
       setMarkups((a) => [...a, { id, page: ed.page, kind: "text", pts: [ed.pt], ...seedStyle("text"), text }]);
-      if (!toolLock) { setTool("select"); selectOne(id); setPropsForId(id); } // B750: revert + select + show the new text's Properties
+      if (!toolLock) { setTool("select"); selectOne(id); openMarkupProps(); } // B750/B1190: revert + select + show the new text's Properties
     }
   };
 
@@ -1530,7 +1555,7 @@ export default function DocReview({
           const zone = calloutDblZone({ x: box.x, y: box.y, w: boxW, h: boxH }, pgpt, 6 / (view.scale || 1));
           if (zone === "interior") { openEditor({ id: m.id, page, pt: box, text: m.text || "" }); return; }
         }
-        setPropsForId(m.id);
+        openMarkupProps();
         return;
       }
       // B750 — every other markup: double-click opens Properties. Exception: an ALREADY-selected TEXT
@@ -1538,7 +1563,7 @@ export default function DocReview({
       // in onDown) says whether it was selected at the FIRST press of this double-click.
       const wasSel = dblRef.current.id === m.id ? dblRef.current.wasSel : false;
       if (wasSel && m.kind === "text") openEditor({ id: m.id, page, pt: (m.pts && m.pts[0]) || { x: 0, y: 0 }, text: m.text || "" });
-      else setPropsForId(m.id);
+      else openMarkupProps();
       return;
     }
     if (!draft) return;
@@ -1678,6 +1703,11 @@ export default function DocReview({
     else if (e.key === "Escape") {
       if (ctxMenu) { setCtxMenu(null); return; } // close the Arrange menu first, keeping the selection (B421)
       if (addLeaderFor) { setAddLeaderFor(null); return; } // cancel "Add Leader" without dropping a tip (B909/NEW-2)
+      // B1190 — Escape closes the Properties section BEFORE it touches the selection, the same
+      // order the planner uses (SitePlanner's `closeInspector` on Escape). Now that a deselect no
+      // longer closes the section, Escape is the keyboard half of the explicit close; the markup
+      // stays selected so a double-click reopens on the same object.
+      if (propsOpen) { setPropsOpen(false); return; }
       setDraft(null); clearSelection(); setDragPreview(null); dragRef.current = null; setCalInput(null); setMarquee(null); marqueeRef.current = null;
     }
     else if (e.key === "Delete" || e.key === "Backspace") {
@@ -2101,29 +2131,53 @@ export default function DocReview({
                 );
               })}
             </div>
-            {/* Properties (B426 + B437; B750) — shows for a markup whose Properties were EXPLICITLY opened
-                (double-click, or a freshly-drawn markup: propsForId===sel), OR for the ARMED drawable tool
-                so you can set color/weight/fill/font BEFORE drawing (new markups inherit the sticky style
-                via commit()). A plain single-click selects only and leaves this closed. Driven by
-                schemaForMarkup → PropertyPanel. */}
+            {/* Properties (B426 + B437; B750; B1190) — OPEN/CLOSED is `propsOpen`, which only an
+                explicit affordance writes (double-click, a freshly-drawn markup, the ✕, Escape).
+                The SELECTION only chooses the body: a selected markup shows its properties, nothing
+                selected shows the "Nothing selected" state — the section never closes itself.
+                Independently of all that, an ARMED drawable tool shows its style so you can set
+                color/weight/fill/font BEFORE drawing (new markups inherit the sticky style via
+                commit()). Driven by schemaForMarkup → PropertyPanel. */}
             {(() => {
               const selM = sel ? pageMarks.find((mm) => mm.id === sel) : null;
-              const showSelProps = !!selM && propsForId === sel; // B750: explicit open gate
+              const showSelProps = propsOpen && !!selM;  // B1190: open state × what to show — never derived from `sel` alone
+              // The armed-tool style keeps its own, unchanged trigger: it is about the tool in your
+              // hand, not about the inspector, so it still appears whenever a drawable tool is armed
+              // and no markup's properties are on screen.
               const armed = (!showSelProps && toolById(tool) && propsForTool(tool).length) ? tool : null;
-              if (!showSelProps && !armed) return null;
+              // B1190 — the section holds its ground when it is open with nothing selected. This is
+              // the branch that used to be a vanish, and it is the whole point of the item.
+              const emptyState = propsOpen && !selM && !armed;
+              if (!showSelProps && !armed && !emptyState) return null;
               // Show the ACTUAL seeded style for an armed tool (seedStyle: propStyle > tool default >
               // kind default > column default) so the panel swatch matches what will be drawn — a
               // bare propStyle would show the generic orange column default for a teal measure (B734).
-              const subject = showSelProps ? selM : { kind: armed, ...seedStyle(armed) };
+              const subject = showSelProps ? selM : armed ? { kind: armed, ...seedStyle(armed) } : null;
               return (
-                <div style={{ flex: "none", borderTop: `1px solid ${PAL.line}` }}>
+                /* `property-panel` is shared with the armed-tool style block, so it alone cannot
+                   answer "is the INSPECTOR open?". This seam names which of the three states the
+                   section is in — markup / tool / empty — so a guard can assert the contract
+                   instead of inferring it from header text. */
+                <div data-props-mode={showSelProps ? "markup" : armed ? "tool" : "empty"} style={{ flex: "none", borderTop: `1px solid ${PAL.line}` }}>
                   <div style={{ padding: "6px 12px 4px", fontSize: 10, color: PAL.muted, fontWeight: 700,
-                    textTransform: "uppercase", letterSpacing: "0.06em", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                    <span>{showSelProps ? "Properties" : "Tool style"}</span>
-                    <span style={{ fontWeight: 500, color: PAL.ink, textTransform: "none", letterSpacing: 0, fontSize: 11 }}>{showSelProps ? selM.kind : `${armed} · default`}</span>
+                    textTransform: "uppercase", letterSpacing: "0.06em", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6 }}>
+                    <span>{armed && !showSelProps ? "Tool style" : "Properties"}</span>
+                    <span style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
+                      <span style={{ fontWeight: 500, color: PAL.ink, textTransform: "none", letterSpacing: 0, fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {showSelProps ? selM.kind : armed ? `${armed} · default` : "none"}
+                      </span>
+                      {/* The explicit close. Without it an owner-owned open state would be a one-way
+                          door — the section could be opened but never put away. */}
+                      {propsOpen && (
+                        <button type="button" onClick={closeMarkupProps} title="Close (the markup stays selected; double-click it to reopen) — Esc" aria-label="Close properties"
+                          style={{ border: "none", background: "transparent", color: PAL.muted, cursor: "pointer", fontSize: 13, fontFamily: "inherit", lineHeight: 1, padding: "0 2px" }}>✕</button>
+                      )}
+                    </span>
                   </div>
                   <div data-testid="property-panel" style={{ maxHeight: 220, overflowY: "auto" }}>
-                    <PropertyPanel markup={subject} onChange={onPropChange} />
+                    {subject
+                      ? <PropertyPanel markup={subject} onChange={onPropChange} />
+                      : <p data-testid="props-nothing-selected" style={{ margin: 0, padding: "8px 12px 12px", fontSize: 12, color: PAL.muted }}>Nothing selected. Click a markup to see its properties.</p>}
                   </div>
                 </div>
               );

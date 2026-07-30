@@ -17,10 +17,25 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { CLICK_CONTRACT, E2E_DRIVEN, contractFor } from "../e2e/clickContract.table.js";
+import { CLICK_CONTRACT, E2E_DRIVEN, contractFor, REVIEW_CLICK_CONTRACT, REVIEW_NON_MARKUP_TOOLS, reviewContractFor } from "../e2e/clickContract.table.js";
 
 const read = (rel) => readFileSync(fileURLToPath(new URL(rel, import.meta.url)), "utf8");
 const SP = read("../src/workspaces/site-planner/SitePlanner.jsx");
+const DR = read("../src/workspaces/doc-review/DocReview.jsx");
+
+/* A source guard must assert about CODE, not about prose. These files document the shapes they
+ * removed — quoting `setPropsForId(...)` in a comment is exactly how a reader learns what not to
+ * reintroduce — so a naive "this string must not appear" check trips on its own documentation.
+ * Strip block comments and whole-line `//` comments first. Deliberately does NOT touch trailing
+ * `//` comments, which would need a real tokeniser to tell from a `https://` inside a string. */
+function stripComments(src) {
+  return src
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .split("\n")
+    .filter((l) => !/^\s*\/\//.test(l))
+    .join("\n");
+}
+const DR_CODE = stripComments(DR);
 
 /* Pull a `const NAME = [ ... ];` array-of-strings registry straight out of the planner source, so the
  * completeness check below reads the SHIPPED list of types rather than a copy that can drift. */
@@ -141,5 +156,86 @@ describe("per-type click wiring (the pond regression, and the types the owner as
     expect(SP).toMatch(/isDoubleTap\(e, m\.id, sel\?\.kind === "measure" && sel\.i === idx\)\) \{[\s\S]{0,200}openInspector\(\)/);
     // callout: interior edits text, border opens the inspector (B948 preserved)
     expect(SP).toMatch(/if \(zone === "interior"\) beginEditCallout\(id\);\s*\n\s*else openInspector\(\);/);
+  });
+});
+
+/* ---------------------------------------------------------------------------------------------
+ * B1190 — THE SAME CONTRACT IN DOCUMENT REVIEW.
+ *
+ * Review carried the identical defect in a different file: a `propsForId` marker that had to keep
+ * matching `sel`, plus an effect that cleared it on every selection change — so a deselect closed
+ * the Properties section the user had deliberately opened. The fix mirrors B1188 (an owner-owned
+ * `propsOpen` flag, selection choosing the BODY only, a "Nothing selected" state instead of a
+ * vanish), and this half of the guard makes it un-regressable at the source.
+ *
+ * It also extends the COMPLETENESS check the item asked for: Review's own TOOLS registry is read
+ * out of the shipped source, so a new drawable tool cannot land without declaring its click
+ * behaviour in the shared table.
+ */
+describe("B1190 — Document Review declares the click contract for every markup tool", () => {
+  /* Pull the `{ id: "...", label: "...", hint: … }` rows out of Review's own TOOLS registry, so the
+   * completeness check reads the SHIPPED list rather than a copy that can drift. */
+  function reviewToolIds() {
+    const m = DR.match(/const TOOLS = \[([\s\S]*?)\n\];/);
+    if (!m) throw new Error("TOOLS registry not found in DocReview.jsx");
+    return [...m[1].matchAll(/\{\s*id:\s*"([^"]+)"/g)].map((x) => x[1]);
+  }
+
+  it("every Review tool is either declared in the contract table or listed as a non-markup mode", () => {
+    for (const id of reviewToolIds()) {
+      const declared = !!reviewContractFor(id) || REVIEW_NON_MARKUP_TOOLS.includes(id);
+      expect(declared, `DocReview TOOLS has "${id}" but e2e/clickContract.table.js declares neither a click contract nor a non-markup mode for it`).toBe(true);
+    }
+  });
+
+  it("the table names no tool Review does not ship, and has no duplicate rows", () => {
+    const ids = new Set(reviewToolIds());
+    for (const c of REVIEW_CLICK_CONTRACT) expect(ids.has(c.tool), `table declares "${c.tool}", which is not in DocReview's TOOLS`).toBe(true);
+    for (const t of REVIEW_NON_MARKUP_TOOLS) expect(ids.has(t), `non-markup list names "${t}", which is not in DocReview's TOOLS`).toBe(true);
+    expect(new Set(REVIEW_CLICK_CONTRACT.map((c) => c.tool)).size).toBe(REVIEW_CLICK_CONTRACT.length);
+    for (const c of REVIEW_CLICK_CONTRACT) expect(c.opens).toBe("inspector");
+  });
+});
+
+describe("B1190 — Review's Properties section is OWNER-owned, never derived from the selection", () => {
+  it("the selection-derived open marker (propsForId) is GONE", () => {
+    // The marker AND its clearing effect are the defect. Neither may come back.
+    expect(DR_CODE).not.toMatch(/\bsetPropsForId\(/);
+    expect(DR_CODE).not.toMatch(/\bpropsForId\b/);
+  });
+
+  it("no EFFECT closes the section off a selection change", () => {
+    // The exact removed shape, pinned so it cannot be reintroduced verbatim…
+    expect(DR_CODE).not.toMatch(/setPropsForId\(\(cur\) => \(cur && cur === sel \? cur : null\)\)/);
+    // …and, more generally, no effect keyed on `sel` may write the open state at all.
+    expect(DR_CODE).not.toMatch(/useEffect\(\(\) => \{[^}]{0,200}setPropsOpen\([\s\S]{0,120}\}, \[sel/);
+  });
+
+  it("open and close are ONE explicit pair, and the render gate reads the open flag", () => {
+    expect(DR).toMatch(/const openMarkupProps = \(\) => setPropsOpen\(true\);/);
+    expect(DR).toMatch(/const closeMarkupProps = \(\) => setPropsOpen\(false\);/);
+    // Visibility is the open flag × what is selected — never `sel` deciding on its own.
+    expect(DR).toMatch(/const showSelProps = propsOpen && !!selM;/);
+  });
+
+  it("a deselect lands on a 'Nothing selected' state INSIDE the still-open section, not on a close", () => {
+    // This is the branch that used to be a vanish: open + nothing selected still renders.
+    expect(DR).toMatch(/const emptyState = propsOpen && !selM && !armed;/);
+    expect(DR).toMatch(/if \(!showSelProps && !armed && !emptyState\) return null;/);
+    expect(DR).toMatch(/data-testid="props-nothing-selected"/);
+  });
+
+  it("there is an explicit CLOSE affordance, so an owner-owned open state is not a one-way door", () => {
+    expect(DR).toMatch(/aria-label="Close properties"/);
+    expect(DR).toMatch(/onClick=\{closeMarkupProps\}/);
+    // Escape closes the section BEFORE it clears the selection — the same order as the planner.
+    expect(DR).toMatch(/if \(propsOpen\) \{ setPropsOpen\(false\); return; \}/);
+  });
+
+  it("every double-click / fresh-draw path routes through the ONE explicit open", () => {
+    // Exactly ONE `setPropsOpen(true)` in the whole file: the body of openMarkupProps. Every
+    // other open path has to go through it, which is what keeps "what opens this" answerable.
+    expect(DR_CODE.match(/setPropsOpen\(true\)/g) || []).toHaveLength(1);
+    expect((DR_CODE.match(/openMarkupProps\(\)/g) || []).length).toBeGreaterThanOrEqual(5);
   });
 });

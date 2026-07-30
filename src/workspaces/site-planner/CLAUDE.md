@@ -124,6 +124,22 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   branch is a silent spinner** — wire the branch in the same commit. Guards live in ui-audit:
   verify-colorado-guard (bytes, both directions) + verify-b1105-mhfd-panel (pixels, asserted on the
   `data-surface="planner"` host's innerText, so a zero-height or hidden node fails).
+- **⛔ B1189 — AN EFFECT THAT WRITES STATE MUST DEPEND ON VALUES, NEVER ON A STATE OBJECT'S IDENTITY.**
+  The drawing↔basemap registration layout effect listed `[view, size, origin, geoOverscan]` while reading
+  only NUMBERS out of the first three. `setSize`'s updater ALLOCATES when the measured width differs from
+  the state it is applied to, and React re-applies a retained updater against its base state on every
+  later render — so a panel close left every render minting a fresh `{w,h}` holding the SAME numbers, the
+  effect re-ran on identity alone, its `setRegShift` scheduled another render, and fifty round trips later
+  React aborted the whole planner to the error boundary. Depend on `view.ppf/offX/offY`, `size.w/h`,
+  `origin.lat/lon` — and **guard a dispatch rather than relying on a no-op updater**: a `setState` that
+  returns the same value is still a DISPATCH, and React only skips scheduling it when the fiber has no
+  other pending work, which during a panel reflow it always has. **Do NOT re-chase this as a `setSize`
+  ping-pong** — that lead was measured and refuted (both writers reported the same width; five dispatches
+  across a fifty-render loop), and quantising `size` would put a whole pixel of slop into view maths the
+  pointer-accuracy harness asserts to a quarter of a pixel. Guards: the e2e spec **panel-escape-race**
+  (the real race, proven red on pre-fix) plus the repo-root `test/` suite **errorBoundaryRecovery** (the
+  boundary's bounded self-heal, which is the second, independent half — a measurement loop may never be
+  able to take the planner down).
 - **B1122 — the basemap transform MUST be written in a LAYOUT effect.** The SVG feet-frame and the
   Leaflet basemap are driven from ONE value (`view.offX/offY/ppf`); they never disagreed about WHERE
   to be, only about WHEN. Writing `wrap.style.transform` from a passive `useEffect` paints one frame
