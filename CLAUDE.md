@@ -50,10 +50,21 @@ the always-loaded core. This merges two tracks of work: the mature **Site Planne
 >   sessions have claimed are on the remote and readable *now*. It also **PROVES `origin/main` is freshly
 >   fetched and REFUSES (exit 2) rather than return a stale number** (this clone was measured 7 days / 169
 >   ids behind while still printing "[incl. origin/main]"), and reports the commit + fetch age it read.
-> - **`npm run check-mint` is a pre-push hook + a required-build step** (`npm run hooks:install` once per
->   clone) that BLOCKS a push whose new ids are already claimed, naming the branch and the id to move to.
->   It checks the property, not the ceremony, so a correct late mint passes untouched and a **recurrence
->   mints nothing and never trips it.** Gaps are free — leaving one beats a second renumber pass (B1140).
+> - **`npm run check-mint` is a pre-push hook + a required-build step** that BLOCKS a push whose new ids
+>   are already claimed, naming the branch and the id to move to. It checks the property, not the
+>   ceremony, so a correct late mint passes untouched and a **recurrence mints nothing and never trips
+>   it.** Gaps are free — leaving one beats a second renumber pass (B1140). **The hook INSTALLS ITSELF —
+>   `npm install` / `npm ci` runs `scripts/install-hooks.mjs` from npm's `prepare` step (B1164), so a
+>   fresh container is armed with no manual step.** It is idempotent, it never clobbers a `core.hooksPath`
+>   you set yourself (it reports and leaves it), and it never fails `npm install` — every outcome that
+>   leaves the gate un-armed prints a loud named block instead. `npm run hooks:install` still works (add
+>   `-- --force` to take over a foreign hooksPath); `-- --check` verifies without writing.
+>   **The gate's REJECTION path is a permanent CI self-test, not a field hope (B1165):**
+>   `test/mintGateE2E.test.js` drives the real CLI against real git refs in throwaway repos (a bare
+>   remote in a temp dir — hermetic, no network) and asserts all four outcomes plus the resilience case:
+>   taken-on-main → rejected · taken-on-an-unmerged-peer-branch → rejected · below-the-mark → rejected ·
+>   clean mint → allowed · recurrence → allowed · unreachable remote → warns and PASSES under `--ci`
+>   (a guard that becomes an outage is worse than the collision).
 >
 > Because only the BACKLOG/VERIFICATION *heading* carries the real number, a late clash renumbers a couple
 > of heading lines — never code. **A collision that still slips through is caught

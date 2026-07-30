@@ -16,7 +16,8 @@
     "perf:ratchet": "node scripts/perf-ratchet.mjs",
     "perf:bundle": "node ui-audit/perf-bundle-audit.mjs",
     "check-mint": "node scripts/check-mint.mjs",
-    "hooks:install": "git config core.hooksPath .githooks && echo \"pre-push mint gate installed (B779)\""
+    "hooks:install": "node scripts/install-hooks.mjs",
+    "prepare": "node scripts/install-hooks.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.104.1",
