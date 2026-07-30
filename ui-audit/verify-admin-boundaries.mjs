@@ -22,8 +22,29 @@
  * dark hairline on the map is this layer. It does mean the check proves the lines are
  * DRAWN, not that they read well over live aerial imagery; that judgement is the live one.
  *
- * Run:  npm run build && npx vite preview --port 4173 &   then
- *       node ui-audit/verify-admin-boundaries.mjs
+ * ⚠ AND THAT LIVE JUDGEMENT WAS ATTEMPTED FROM HERE AND COULD NOT BE MADE — recorded so
+ * nobody spends the same hour twice. `curl` fetches an Esri World_Imagery tile through the
+ * egress proxy quite happily (HTTP 200), and the deployed Cloudflare preview answers too,
+ * so it looks like the imagery pass should be runnable in the sandbox. It is not.
+ * Chromium, pointed at the same proxy with `--ignore-certificate-errors` and a localhost
+ * bypass, issues NO network event whatsoever for the 48 `img.leaflet-tile` elements it
+ * creates — the elements are in the DOM with correct `server.arcgisonline.com` URLs, and
+ * neither a `response` nor a `requestfailed` ever fires for them, while other external
+ * hosts in the same page DO report (`fonts.googleapis.com` ERR_CONNECTION_RESET,
+ * `gisclient.quiddity.com` ERR_TUNNEL_CONNECTION_FAILED). The proxy's own
+ * `__agentproxy/status` logs no rejection for arcgisonline at all. So the basemap cannot
+ * be made to paint in this browser, and V524's imagery strands stay owed.
+ *
+ * Run (sandbox, external hosts blocked — the CI-shaped run):
+ *   npm run build && npx vite preview --port 4173 &   then
+ *   node ui-audit/verify-admin-boundaries.mjs
+ *
+ * Run (a real browser, against a deployed build — for the V524 imagery pass):
+ *   BASE_URL=https://planyr.io/ ALLOW_EXTERNAL=1 THEME=dark node ui-audit/verify-admin-boundaries.mjs
+ * `ALLOW_EXTERNAL=1` stops aborting third-party hosts and routes through HTTPS_PROXY when
+ * one is set; `THEME` seeds light/dark/system. The ink assertions stay valid in that mode —
+ * they read only the boundary layer's own canvas, never the tile pane — so the screenshots
+ * under ui-audit/screens/admin-boundaries/ are the part a human then judges.
  */
 import { chromium } from "playwright";
 import { mkdirSync } from "node:fs";
@@ -35,9 +56,12 @@ mkdirSync(OUT, { recursive: true });
 
 /* No saved sites at all: no pins, no plans, nothing on the map but the layer under test,
  * and no `currentSite` so the app lands on the map finder rather than the planner. */
+const THEME = process.env.THEME || "light";
+const ALLOW_EXTERNAL = process.env.ALLOW_EXTERNAL === "1";
 const seed = `(() => { try {
   localStorage.setItem('planarfit:sites:v1', '{}');
   localStorage.removeItem('planarfit:currentSite:v1');
+  localStorage.setItem('planyr.theme', ${JSON.stringify(THEME)});
 } catch (e) {} })();`;
 
 const results = [];
@@ -73,18 +97,31 @@ const inkAndPane = (page) => page.evaluate(() => {
   };
 });
 
-const browser = await chromium.launch({ executablePath: EXEC, args: ["--no-sandbox", "--ignore-certificate-errors"] });
+/* Against a REMOTE base (the deployed preview), route the browser through this
+ * environment's egress proxy — curl picks it up from the env, Chromium does not, and
+ * without it every request dies as ERR_CONNECTION_RESET. Localhost is left direct. */
+const PROXY = ALLOW_EXTERNAL ? (process.env.HTTPS_PROXY || process.env.https_proxy || null) : null;
+const browser = await chromium.launch({
+  executablePath: EXEC,
+  args: ["--no-sandbox", "--ignore-certificate-errors"],
+  ...(PROXY ? { proxy: { server: PROXY, bypass: "localhost,127.0.0.1" } } : {}),
+});
 const ctx = await browser.newContext({ viewport: { width: 1280, height: 860 }, deviceScaleFactor: 1 });
 await ctx.addInitScript(seed);
 
-/* Every external host is unreachable from the sandbox; abort them outright so a hanging
- * tile request can never be mistaken for a slow app. Same-origin traffic passes through
- * and is what the network assertions below watch. */
+/* External hosts are normally unreachable from the sandbox, so abort them outright — a
+ * hanging tile request must never be mistaken for a slow app. Same-origin traffic passes
+ * through and is what the network assertions below watch.
+ *
+ * ALLOW_EXTERNAL=1 lifts the block, for running this against a deployed preview where the
+ * aerial tile hosts DO answer. The pixel counts then include imagery, so the ink thresholds
+ * below stop being meaningful — that mode is for the SCREENSHOTS (how the hairlines read
+ * over real imagery, the one judgement this harness cannot make), not for the ink asserts. */
 const asked = [];
 await ctx.route("**/*", (route) => {
   const url = route.request().url();
   if (url.startsWith(BASE)) { asked.push(url.slice(BASE.length)); return route.continue(); }
-  if (url.startsWith("http")) return route.abort();
+  if (url.startsWith("http")) return ALLOW_EXTERNAL ? route.continue() : route.abort();
   return route.continue();
 });
 
