@@ -76,7 +76,12 @@ export default function AnchoredMenu({
         gap,
         margin: 8,
       });
-      if (p) setPos(p);
+      // B1125 — and CLEAR a stale position when the anchor stops being measurable (its rail/panel
+      // went `display:none`, e.g. the host workspace was switched away while this popover was open).
+      // Leaving the old `pos` standing floated an orphan menu over unrelated content, and — worse —
+      // kept its full-viewport click-away layer alive with nothing visible to explain it. The
+      // backdrop is now gated on `pos` too (below), so clearing it also frees the pointer.
+      setPos(p || null);
     };
     place();
     window.addEventListener("resize", place);
@@ -118,8 +123,12 @@ export default function AnchoredMenu({
     <>
       {/* click-away backdrop (transparent). Skipped in hoverSafe mode — an
           interactive full-viewport layer over the trigger makes a hover-opened
-          popover flash; hoverSafe dismisses via the document mousedown above. */}
-      {!hoverSafe && <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex }} />}
+          popover flash; hoverSafe dismisses via the document mousedown above.
+          B1125 — also skipped until the menu is actually PLACED (`pos`). This layer covers the whole
+          app (elementFromPoint over the canvas returns it), which is correct while a visible menu
+          needs dismissing and indefensible otherwise: an unplaced menu is invisible, so the layer
+          would swallow clicks with nothing on screen to explain why the app stopped responding. */}
+      {!hoverSafe && pos && <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex }} />}
       <div
         ref={menuRef}
         className={className}

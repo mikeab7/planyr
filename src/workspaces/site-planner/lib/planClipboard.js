@@ -26,11 +26,10 @@
 //    of the assembly of the element that owns them.
 export const CLIP_KINDS = ["el", "markup", "measure", "callout", "parcel"];
 
-// Tags that describe an element's ROLE inside its host's assembly (which face its truck court is
-// on, which side its sidewalk hugs, which dog-ear corner it fills). They are meaningful only next
-// to the host: kept when the host rides along in the same copy, dropped when it doesn't (the old
-// `detachClone` behaviour, which is still right for a lone child).
-const HOST_ROLE_TAGS = ["truckCourt", "forCourt", "forTrailer", "dogEar", "oppSide", "sideParkSide", "sidewalkSide", "stackSide", "noFit", "noLabel"];
+// B1124 — the id-bearing bonds and the host-role tags now live in ONE shared module, so this path
+// and `duplicateGroup` cannot drift again (they already had: BOTH remapped only `attachedTo`, so a
+// copied trailer stayed bonded to the ORIGINAL building's truck court).
+import { remapBondRefs } from "./bondRemap.js";
 
 // A stable string key for a selection ref, so a mixed set dedupes cleanly.
 const refKey = (r) => `${r.kind}:${r.id}`;
@@ -148,20 +147,22 @@ export function pasteClipboard(items, { mint, translate, dx = 0, dy = 0 } = {}) 
   for (const [gid, n] of groupMembers) if (n > 1) groupMap.set(gid, "g" + mint());
 
   const out = { els: [], markups: [], measures: [], callouts: [], parcels: [], refs: [] };
-  const copiedElIds = new Set(list.filter((it) => it.kind === "el").map((it) => it.obj.id));
+  // Element-only id map: a bond names an ELEMENT, so a same-valued id from another collection can
+  // never satisfy it (B1124).
+  const elIdMap = new Map(list.filter((it) => it.kind === "el" && it.obj && it.obj.id != null).map((it) => [it.obj.id, idMap.get(it.obj.id)]));
 
   for (const { kind, obj } of list) {
     const id = idMap.get(obj.id);
     let c;
     if (kind === "el") {
       c = { ...translate.el(obj, dx, dy), id };
-      // The host bond: remapped when the host rides along (NEW-2 — the whole assembly arrives
-      // intact), otherwise dropped so a lone child pastes standalone instead of silently
-      // re-bonding to the ORIGINAL building and being yanked back by the refit engine.
-      if (obj.attachedTo != null) {
-        if (copiedElIds.has(obj.attachedTo)) c.attachedTo = idMap.get(obj.attachedTo);
-        else { delete c.attachedTo; HOST_ROLE_TAGS.forEach((t) => delete c[t]); }
-      }
+      // EVERY id-bearing bond — the host (`attachedTo`) AND the intra-assembly chain
+      // (`forCourt` / `forTrailer` / `prevZone`) — is remapped when its target rides along in the
+      // same copy, and DROPPED when it doesn't, so a lone child pastes standalone instead of
+      // silently re-bonding to the ORIGINAL building and being yanked back by the refit engine
+      // (B1124: only `attachedTo` used to be remapped, which is how a copied building's trailer
+      // parking ended up bonded to a court on the building it was copied FROM).
+      remapBondRefs(c, obj, elIdMap);
     } else if (kind === "markup") {
       c = { ...translate.markup(obj, dx, dy), id };
       // An easement drawn against a parcel follows the copied parcel when one rides along;
