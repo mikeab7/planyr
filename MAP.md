@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-07-30 @ `840e3cc` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-07-30 @ `7879896` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_372 source files mapped._
+_373 source files mapped._
 
 ## infra
 
@@ -457,6 +457,8 @@ _372 source files mapped._
   - _exports_: `buildIdentifyParams`, `countyAtPoint`, `countySourcesForPoint`, `ETJ_SOURCES`, `etjSourcesForPoint`, `formatHighway`, `formatJurisdictionBadge`, `identifyJurisdiction`, `identifyRoadAuthority`, `identifySource`, `JURISDICTION_SOURCES`, `normalizeFeature`, `polylineDistMeters`, `polylineLengthMeters`, `proxiedQueryUrl`, `ROAD_AUTHORITY_COLORS`, `ROAD_AUTHORITY_LEGEND`, `ROAD_MAINT_AGENCY`, `roadAuthority`, `roadAuthorityStyle`, `roadDisplayName`, `simplifyRing`
 - **`src/workspaces/site-planner/lib/kmzExport.js`** — Google Earth (.kmz) export (B684): pure, dependency-free CRC32 + hand-rolled STORE-only ZIP writer, KML builder (lon,lat order, ring closure/holes, per-layer styles, building extrude), and the site→layer feature mapping; reprojection is injected (the shared feetToLatLng), so it never drifts from the map render.
   - _exports_: `buildKml`, `buildKmz`, `crc32`, `elToRingFeet`, `KMZ_MIME`, `kmzFilename`, `siteToFeatures`, `xmlEscape`, `zipStore`
+- **`src/workspaces/site-planner/lib/labelFitLadder.js`** — NEW-1/NEW-2 the ONE ordered fit/fallback ladder for a map label that must sit inside a shape (inline → stacked → abbrev → outside-with-leader) plus the polygon INTERIOR measurer (largest inscribed rectangles, so fit is judged against real room, not a bounding box). Terminates in `outside`, never in a hide — a fit failure may relocate or shorten a label, never blank it.
+  - _exports_: `inlineLines`, `interiorFitter`, `labelForms`, `LADDER_RUNGS`, `pointInRing`
 - **`src/workspaces/site-planner/lib/labelLayout.js`** — Pure label level-of-detail plus collision engine: line-dropping by priority, greedy overlap resolution, leader overflow, and dimension-callout zoom gates
   - _exports_: `boxesOverlap`, `boxOf`, `buildingLabelLines`, `DETAIL_LABEL_MIN_PX`, `detailLabelVisible`, `DIM_CALLOUT_MIN_PPF`, `DIM_FONT_BASE_PX`, `DIM_FONT_MIN_SCALE`, `dimCalloutVisible`, `dimFontPx`, `dimFontScale`, `fitLines`, `layoutLabels`, `POND_PARAM_LABEL_MIN_PX`, `pondParamFontPx`, `pondParamLabelVisible`, `suppressedDimIds`
 - **`src/workspaces/site-planner/lib/layerPanelInfo.js`** — Pure Layers-panel row helpers: per-row ⓘ content assembly + merged City/ETJ combined-status precedence (B760/B761)

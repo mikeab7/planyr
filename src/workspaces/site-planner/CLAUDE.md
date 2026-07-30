@@ -262,6 +262,26 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
 - `labelLayout.js` — LOD label tiering + the shared dimension-number zoom→font scale (`dimFontPx`, B911)
   + the quieter pond design-parameter tier (`pondParamLabelVisible`/`pondParamFontPx`, B1016 — the berm
   tag, floor/WS elevations and the rim-to-floor line reveal only when the band they measure reads on screen).
+  **`labelFitLadder.js` is THE fit decision (NEW-1/NEW-2) — `labelLayout` consumes it, never forks it.**
+  Two rules it exists to keep. **(1) FIT and COLLISION are different axes and must stay apart.** A fit
+  failure may only RELOCATE or SHORTEN a label — the ladder (`inline → stacked → abbrev →
+  outside-with-leader`) always ends in a reachable `outside` rung, so "too wide" can never blank a label.
+  Losing a COLLISION may still hide one (that is B121/B951 declutter, and it is correct) — except for a
+  `mustLabel` element (a pond), which walks its outside placement around and outward until it clears and
+  is never left unnamed. `layoutLabels` tracks this as `fittedSomewhere`; do not collapse the two paths
+  back together, because conflating them is exactly what made Goose Creek's southern pond go silent.
+  **(2) A POLYGON is measured against its real INTERIOR, not its bounding box** — `interiorFitter`
+  rasterises the ring and enumerates the maximal inscribed rectangles, so an irregular pond is never told
+  it has room it does not have, and a label can SLIDE inside that room to dodge an obstacle. Every polygon
+  candidate therefore passes `ring`/`ringOrigin`/`ringPpf`; rect elements pass none and keep the bounding
+  box as their interior (behaviour unchanged). **Rung order is TRIED, not PREFERRED** — the chosen rung is
+  whichever first FITS the measured interior, so a long shallow pond keeps the single wide line while a
+  tall narrow one stacks; never "always stack". A reflowable line is authored as `{parts, sep, keep}`
+  (`footprintLabelLine`) and must never be pre-joined — a joined string has no rungs left to take.
+  Guards: the repo-root `test/` suites **labelFitLadder** (the invariant, over a battery of hostile shapes,
+  plus a source guard that the ring/`mustLabel` keys still reach `layoutLabels`) and **pondLabelFit** (the
+  real Goose Creek / Tsakiris / Bain rings), plus the ui-audit harness **verify-pond-label-fit** (the real
+  plan, a zoom sweep, and the exported sheet — PDF-PARITY).
   `calloutLayout.js` — pure text-box/callout box geometry: auto-size or wrap-to-width (B913).
   `roadGeometry.js` — centerline road curves + junction primitives (pure): `teeGeometry` returns the
   ADDITIVE curb-return `wedges` a junction contributes. `roadNetwork.js` — the DISSOLVED road surface

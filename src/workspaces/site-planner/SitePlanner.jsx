@@ -158,6 +158,7 @@ import { DOGEAR_W, DOGEAR_D, dogEarGeom, dogEarSize, sidewalkSpanForBumps, isDog
   wallStripBox, wallKidBox, wallKidPerp, wallKidAlong, hostAxisExtents, ownExtents, bumpsOfHost } from "./lib/dogEar.js";
 import { CURB_TYPES as COST_CURB_TYPES, CURB_TYPE_META, roadCurbType, roadCurbedSides, roadPanWidth, roadQuantities, costRollup } from "./lib/costTakeoff.js";
 import { layoutLabels, buildingLabelLines, dimCalloutVisible, detailLabelVisible, pondParamLabelVisible, pondParamFontPx, suppressedDimIds, dimFontScale, dimFontPx, boxOf, DIM_CALLOUT_MIN_PPF } from "./lib/labelLayout.js";
+import { inlineLines } from "./lib/labelFitLadder.js";
 import { calloutLayout, minCalloutWidthFt } from "./lib/calloutLayout.js";
 import { DOCK_ZONES, MAX_DOCK_ZONES, ZONE_CATALOG, zoneDepthDefaults, catalogDepthDefault, layoutZoneByKind, usableCourtSpan, zoneAlongSpan, boxExtentAlong, resizedZoneAlongLen, dockSidesFor, footprintDepth, footprintLength, footprintAxes, strandedZoneIds, pruneStrandedZones } from "./lib/dockZones.js";
 import { computeBuildingGrid, resolveGridSettings, placeDockDoors } from "./lib/buildingGrid.js";
@@ -1537,8 +1538,24 @@ function mergeRings(ringA, ringB, tol = 0.75) {
 
 /* ------------------------------ format ----------------------------- */
 const f0 = (n) => Math.round(n).toLocaleString();
+// The plan-view span of a drawn ring, in feet. Five label/LOD call sites had grown their own
+// copy of this loop (three as inline IIFEs); one derivation is both smaller and one thing to fix.
+const ringSpanFt = (pts) => {
+  let lo = Infinity, hi = -Infinity, lo2 = Infinity, hi2 = -Infinity;
+  for (const p of pts) { if (p.x < lo) lo = p.x; if (p.x > hi) hi = p.x; if (p.y < lo2) lo2 = p.y; if (p.y > hi2) hi2 = p.y; }
+  return { w: hi - lo, h: hi2 - lo2 };
+};
+// …and its SHORT plan dimension, which is what every zoom/LOD gate keys off.
+const ringMinSpanFt = (pts) => { const s = ringSpanFt(pts); return Math.min(s.w, s.h); };
 const f1 = (n) => (Math.round(n * 10) / 10).toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 const f2 = (n) => (Math.round(n * 100) / 100).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+// NEW-1 — the pond's footprint line, authored as a REFLOWABLE spec for the shared fit ladder.
+// Acreage and square footage are two ATOMS joined by a middot on the widest rung; the ladder may
+// stack them onto their own lines, or keep only the acreage, when the pond's real interior can't
+// hold the joined line. Never pre-join it here — a joined string has no rungs left to take.
+const footprintLabelLine = (sf) => ({
+  parts: [`footprint ${f2(sf / SQFT_PER_ACRE)} ac`, `${f0(sf)} sf`], sep: " · ", keep: 1,
+});
 
 /* --------------- county appraisal-district attribute view --------------- */
 // The curated attribute view (APPR_FIELDS / apprRows / apprAll / apprVal / findAttr)
@@ -11883,9 +11900,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const trailerLabelFont = (el, lns, poly) => {
     let shortFt, longFt;
     if (poly) {
-      let lo = Infinity, hi = -Infinity, lo2 = Infinity, hi2 = -Infinity;
-      for (const p of el.points) { lo = Math.min(lo, p.x); hi = Math.max(hi, p.x); lo2 = Math.min(lo2, p.y); hi2 = Math.max(hi2, p.y); }
-      shortFt = Math.min(hi - lo, hi2 - lo2); longFt = Math.max(hi - lo, hi2 - lo2);
+      const sp = ringSpanFt(el.points);
+      shortFt = Math.min(sp.w, sp.h); longFt = Math.max(sp.w, sp.h);
     } else { shortFt = Math.min(el.w, el.h); longFt = Math.max(el.w, el.h); }
     const chars = Math.max(1, ...lns.map((t) => String(t).length));
     const byH = (TRAILER_LABEL.fracShort * shortFt * view.ppf) / (lns.length * LH_RATIO); // stack across the short side
@@ -11924,7 +11940,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // family as the dimension callouts, not a parallel one). Building name/SF + the chip are OVERVIEW tier, so
       // they're never added to this gate and stay visible when zoomed out.
       const stripW = poly
-        ? (() => { let lo = Infinity, hi = -Infinity, lo2 = Infinity, hi2 = -Infinity; for (const p of el.points) { lo = Math.min(lo, p.x); hi = Math.max(hi, p.x); lo2 = Math.min(lo2, p.y); hi2 = Math.max(hi2, p.y); } return Math.min(hi - lo, hi2 - lo2); })()
+        ? ringMinSpanFt(el.points)
         : Math.min(el.w, el.h);
       if (!detailLabelVisible(stripW, labelPpf)) continue; // hidden at overview, returns on zoom-in
       lines = [poly ? name : `${f0(Math.min(el.w, el.h))}′ ${name}`];
@@ -11948,12 +11964,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         fc = centroid(base.ring);
         lines = [`Existing ${pondName}`];
         // PR-Q/O4 — no bare acreage: the pond area IS the drawn footprint at the outer toe (label it).
-        if (showAreas) lines.push(`footprint ${f2(exA / SQFT_PER_ACRE)} ac · ${f0(exA)} sf`);
+        // NEW-1 — authored as a REFLOWABLE spec, not a pre-joined string: the shared fit ladder
+        // (lib/labelFitLadder) may stack the two parts onto their own lines, or keep only the
+        // acreage, when the pond's real interior can't hold the wide single line.
+        if (showAreas) lines.push(footprintLabelLine(exA));
         if (pt) pondAdd = { pt, addA };
-        else if (showAreas) { const s = addA >= 0 ? "+" : "−", m = Math.abs(addA); lines.push(`${s}${f2(m / SQFT_PER_ACRE)} ac footprint · ${s}${f0(m)} sf`); }
+        else if (showAreas) { const s = addA >= 0 ? "+" : "−", m = Math.abs(addA); lines.push({ parts: [`${s}${f2(m / SQFT_PER_ACRE)} ac footprint`, `${s}${f0(m)} sf`], sep: " · ", keep: 1 }); }
       } else {
         lines = [pondName];
-        if (showAreas) lines.push(`footprint ${f2(area / SQFT_PER_ACRE)} ac · ${f0(area)} sf`);
+        if (showAreas) lines.push(footprintLabelLine(area));
         // Stage-storage line, seated on the pond with its name (rides the same LOD/collision
         // pool). Same detentionStorage() the side panel reads, so the two can never disagree.
         // Gated on the contours toggle (default on) AND the same zoom floor as the depth-ring
@@ -11965,7 +11984,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         // identity and stay on the overview tier, exactly like a building's name + sf.
         if (el.det?.contours !== false) {
           const pminFt = poly
-            ? (() => { let lo = Infinity, hi = -Infinity, lo2 = Infinity, hi2 = -Infinity; for (const p of el.points) { lo = Math.min(lo, p.x); hi = Math.max(hi, p.x); lo2 = Math.min(lo2, p.y); hi2 = Math.max(hi2, p.y); } return Math.min(hi - lo, hi2 - lo2); })()
+            ? ringMinSpanFt(el.points)
             : Math.min(el.w, el.h);
           const dw = detWithAuto(el.det);
           const slopeBandFt = (Number.isFinite(dw.slope) ? dw.slope : 3) * (Number.isFinite(dw.depth) ? dw.depth : 8);
@@ -11977,7 +11996,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             const usableAcFt = Number.isFinite(pondSplit.usableCf) ? pondSplit.usableCf / 43560 : null;
             const rimToFloorFt = Number.isFinite(dw.depth) ? dw.depth : null;
             if (usableAcFt != null && usableAcFt >= 0.05 && rimToFloorFt != null) {
-              lines.push(`Holds ${f1(usableAcFt)} ac-ft usable · ${f1(rimToFloorFt)}′ rim to floor`);
+              lines.push({ parts: [`Holds ${f1(usableAcFt)} ac-ft usable`, `${f1(rimToFloorFt)}′ rim to floor`], sep: " · ", keep: 1 });
             }
           }
         }
@@ -12015,9 +12034,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // outside the shape with a leader line instead of overflowing a narrow / small shape.
     let halfW, halfH;
     if (poly) {
-      let lo = Infinity, hi = -Infinity, lo2 = Infinity, hi2 = -Infinity;
-      for (const p of el.points) { lo = Math.min(lo, p.x); hi = Math.max(hi, p.x); lo2 = Math.min(lo2, p.y); hi2 = Math.max(hi2, p.y); }
-      halfW = ((hi - lo) / 2) * view.ppf; halfH = ((hi2 - lo2) / 2) * view.ppf;
+      const sp = ringSpanFt(el.points);
+      halfW = (sp.w / 2) * view.ppf; halfH = (sp.h / 2) * view.ppf;
     } else {
       const rad = ((el.rot || 0) * Math.PI) / 180, cw = Math.abs(Math.cos(rad)), sw = Math.abs(Math.sin(rad));
       halfW = ((el.w / 2) * cw + (el.h / 2) * sw) * view.ppf;
@@ -12027,14 +12045,20 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // to its own real-world extent (B195) and opts out of leader-out (a too-small strip overflows
     // in place rather than floating outside). stripLabelRot reads the candidate's own char width.
     let cfs = fs, clh = lh, ccharW = charW, noLeader = false;
-    if (el.type === "trailer") { ({ fs: cfs, lh: clh, charW: ccharW } = trailerLabelFont(el, lines, poly)); noLeader = true; }
-    labelCands.push({ el, lid: el.id, c: f2p(fc), lines, importance: (bldgNo.has(el.id) ? 1e12 : 0) + area, halfW, halfH, rot: stripLabelRot(el, lines, ccharW, view.ppf), fs: cfs, lh: clh, charW: ccharW, noLeader, carto: el.type === "pond" });
+    const flat = inlineLines(lines); // plain strings for the two consumers that measure text directly
+    if (el.type === "trailer") { ({ fs: cfs, lh: clh, charW: ccharW } = trailerLabelFont(el, flat, poly)); noLeader = true; }
+    // NEW-1 — a POLYGON element hands the shared fit ladder its real ring, so "does the label fit"
+    // is answered against the interior that exists rather than a bounding box that overstates it,
+    // and the label may slide within that interior to clear an obstacle. A pond is additionally
+    // `mustLabel`: it may never end a frame unnamed (see lib/labelFitLadder's header).
+    const ringOpts = poly ? { ring: el.points, ringOrigin: fc, ringPpf: view.ppf } : null;
+    labelCands.push({ el, lid: el.id, c: f2p(fc), lines, importance: (bldgNo.has(el.id) ? 1e12 : 0) + area, halfW, halfH, rot: stripLabelRot(el, flat, ccharW, view.ppf), fs: cfs, lh: clh, charW: ccharW, noLeader, carto: el.type === "pond", ...ringOpts, mustLabel: el.type === "pond" });
     if (pondAdd) {
       // B157: the added-detention label, seated on the thickest part of the NEW ground.
       // Rides the SAME LOD/collision pool (its own label id) — not a parallel renderer.
       const a = pondAdd.addA;
       labelCands.push({ el, lid: `${el.id}#add`, added: true, c: f2p(pondAdd.pt),
-        lines: showAreas ? ["Additional Detention", `+${f2(a / SQFT_PER_ACRE)} ac · +${f0(a)} sf`] : ["Additional Detention"], importance: area + 1, halfW, halfH, fs, lh, charW, noLeader: false, carto: true });
+        lines: showAreas ? ["Additional Detention", { parts: [`+${f2(a / SQFT_PER_ACRE)} ac`, `+${f0(a)} sf`], sep: " · ", keep: 1 }] : ["Additional Detention"], importance: area + 1, halfW, halfH, fs, lh, charW, noLeader: false, carto: true, mustLabel: true });
     }
   }
   // B951 — the parcel-area badges ("5.24 ac" pills) are painted as their own fixed layer
@@ -12129,7 +12153,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   });
 
   const labelShow = layoutLabels(
-    labelCands.map((d) => ({ id: d.lid, cx: d.c.x, cy: d.c.y, lines: d.lines, lh: d.lh, charW: d.charW, halfW: d.halfW, halfH: d.halfH, rot: d.rot, noLeader: d.noLeader })),
+    labelCands.map((d) => ({ id: d.lid, cx: d.c.x, cy: d.c.y, lines: d.lines, lh: d.lh, charW: d.charW, halfW: d.halfW, halfH: d.halfH, rot: d.rot, noLeader: d.noLeader, ring: d.ring, ringOrigin: d.ringOrigin, ringPpf: d.ringPpf, mustLabel: d.mustLabel })),
+    // A measurement's summary chip joins the parcel badges as an immovable obstacle, so an element
+    // label yields around it. B1147's fit ladder still guarantees a `mustLabel` element (a pond) an
+    // outside placement, so seeding these can shorten or relocate a label but never blank one.
     { pad: 2 * labelK, gap: 4 * labelK, obstacles: [...parcelChipBoxes, ...measureChipBoxes] },
   );
   // B121 (round 3): fold the red per-edge dimension callouts into the collision pool. The dimension
@@ -12184,8 +12211,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // inspector (a leadered pond label often sits away from the basin, so it's a real second
     // handle). Other labels stay pointer-transparent (clicks fall through to the shape).
     const isPondLabel = tool === "select" && d.el && d.el.type === "pond" && !d.added;
+    // NEW-1 — `data-label-for` / `data-label-rung` / `data-label-leader` stamp WHICH element this
+    // label belongs to and WHICH rung of the shared fit ladder (lib/labelFitLadder) placed it, so a
+    // headless check can assert on our own markup instead of guessing ownership from proximity.
     return (
-      <g key={`lbl${d.lid}`} pointerEvents={isPondLabel ? "auto" : "none"} style={isPondLabel ? { cursor: "pointer" } : undefined}
+      <g key={`lbl${d.lid}`} data-label-for={d.lid} data-label-rung={place.rung || "inline"} data-label-leader={leader ? "1" : "0"}
+        pointerEvents={isPondLabel ? "auto" : "none"} style={isPondLabel ? { cursor: "pointer" } : undefined}
         onPointerDown={isPondLabel ? (e) => { e.stopPropagation(); revealPondInspector(d.el.id); } : undefined}
         onContextMenu={isPondLabel ? (e) => onElContext(e, d.el.id) : undefined}>
         {/* B875 (edit-path recurrence) — a pond label sits OVER the basin and, since #656, is
@@ -20731,7 +20762,7 @@ function pondContourEls(el, f2p, ppf, keyPfx = "", lf = null) {
   if (!ring || ring.length < 3) return [];
   // Zoom gate (B149): reveal only once the basin reads on screen; reuses the detail LOD floor.
   let minFt;
-  if (el.points) { let lo = Infinity, hi = -Infinity, lo2 = Infinity, hi2 = -Infinity; for (const p of ring) { lo = Math.min(lo, p.x); hi = Math.max(hi, p.x); lo2 = Math.min(lo2, p.y); hi2 = Math.max(hi2, p.y); } minFt = Math.min(hi - lo, hi2 - lo2); }
+  if (el.points) minFt = ringMinSpanFt(ring);
   else minFt = Math.min(el.w, el.h);
   if (!detailLabelVisible(minFt, lfPpf)) return [];
   const cont = pondContours(ring, det);

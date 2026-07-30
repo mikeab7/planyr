@@ -18,7 +18,10 @@ describe("O3 — map storage/depth == panel/section, from one source of truth", 
   });
   it("the map depth is the rim-to-floor the section shows (det.depth), labeled 'rim to floor'", () => {
     expect(src).toContain("const rimToFloorFt = Number.isFinite(dw.depth) ? dw.depth : null;");
-    expect(src).toContain("ac-ft usable · ${f1(rimToFloorFt)}′ rim to floor`");
+    // NEW-1 — the line is now authored as a REFLOWABLE spec (two atoms joined by a middot on the
+    // widest rung) so the shared fit ladder can stack it inside a narrow pond. Same two facts,
+    // same wording; it is simply no longer pre-joined into one unbreakable string.
+    expect(src).toContain('`Holds ${f1(usableAcFt)} ac-ft usable`, `${f1(rimToFloorFt)}′ rim to floor`');
     expect(src.includes("′ deep${r.feasible")).toBe(false); // the old "X' deep" is gone
   });
   it("the panel keeps a gross figure but LABELS it 'gross' (O3: gross never unlabeled)", () => {
@@ -29,8 +32,11 @@ describe("O3 — map storage/depth == panel/section, from one source of truth", 
 
 describe("O4 — every acreage says what it measures (no bare numbers on pond map labels / headers)", () => {
   it("the map pond-area line is labeled 'footprint'", () => {
-    expect(src).toContain("lines.push(`footprint ${f2(area / SQFT_PER_ACRE)} ac · ${f0(area)} sf`);");
-    expect(src).toContain("lines.push(`footprint ${f2(exA / SQFT_PER_ACRE)} ac · ${f0(exA)} sf`);");
+    // NEW-1 — the two call sites now share ONE authored line (`footprintLabelLine`), a reflowable
+    // spec the fit ladder may stack or abbreviate. The word "footprint" and both facts are intact.
+    expect(src).toContain("lines.push(footprintLabelLine(area));");
+    expect(src).toContain("lines.push(footprintLabelLine(exA));");
+    expect(src).toContain('parts: [`footprint ${f2(sf / SQFT_PER_ACRE)} ac`, `${f0(sf)} sf`]');
   });
   it("the panel header says 'water surface' (not the ambiguous bare 'water area')", () => {
     expect(src).toContain("ac water surface</span>");
