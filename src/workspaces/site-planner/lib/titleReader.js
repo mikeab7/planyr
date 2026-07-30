@@ -12,9 +12,11 @@
  * a title PDF, keeping the planner's initial load light.
  */
 // The stored-key helpers live in `titleKey.js` so a caller can read the key without loading this
-// module's schema + prompt text (several KB of string literals). Re-exported, so every existing
-// consumer of `titleReader.js` is unchanged.
-export { KEY_LS, getKey, setKey } from "./titleKey.js";
+// module's schema + prompt text (several KB of string literals). IMPORTED and then re-exported, not
+// forwarded with `export … from`: `readTitlePDF` below calls `getKey()` itself, and a bare re-export
+// forwards the name to consumers WITHOUT binding it in this module's own scope.
+import { KEY_LS, getKey, setKey } from "./titleKey.js";
+export { KEY_LS, getKey, setKey };
 
 // Structured-output schema: a Schedule B checklist + the legal description.
 const SCHEMA = {
