@@ -113,15 +113,104 @@ export function boxExtentAlong(box, unit) {
   return 2 * (Math.abs(ax.x * unit.x + ax.y * unit.y) + Math.abs(ay.x * unit.x + ay.y * unit.y));
 }
 
+/* ---- B1123: the zone's TRUE along-wall span, measured in the HOST'S LOCAL FRAME.
+ *
+ * AUDIT NOTE, so nobody re-derives this from the bug report. `boxExtentAlong(zone, alongUnit(host,
+ * side))` is ALREADY host-relative — it dots the zone's own rotated half-axes with the host's along
+ * direction, so what it really returns is w·|cos δ| + h·|sin δ| where δ is the zone's angle MINUS
+ * the host's. It is therefore exact whenever the zone sits at its host's angle, at any host
+ * rotation. The host rotation itself was never the problem, and a measurement that merely un-rotates
+ * by the host would be the identical number.
+ *
+ * What IS wrong with it: it is a bounding-box projection, so the moment δ drifts off a right angle —
+ * and it does drift in real plans; this owner's has a zone at 268.543° under a host at 178.543° and
+ * another at 359° under a host at 269° — the DEPTH leaks into the along measurement as h·|sin δ|.
+ * Comparing two such numbers to answer "did the user drag the LENGTH?" then partly answers "did the
+ * DEPTH change?", and a wrong yes PINS `alongLen`, which by design is never reset: the zone stops
+ * tracking its court for good.
+ *
+ * So take the along-axis DIMENSION rather than the projection whenever the zone is within a snap of
+ * its host's frame (every zone `layoutZoneByKind` produces is: a strip at the host angle, a trailer
+ * +90° on a side wall). Then a depth change moves the along span by EXACTLY zero. A genuinely
+ * off-axis box has no clean along dimension, so it keeps the projection — honest rather than wrong.
+ * PURE, so the rule is unit-testable at 0 / 90 / 178.543 / 269 / 359°. */
+const AXIS_SNAP_DEG = 2; // δ within this of 0/90/180/270 ⇒ read the dimension, not the projection
+function zoneFrameExtent(box, hostRot, side, wantAlong) {
+  if (!box) return NaN;
+  const horiz = side === "top" || side === "bottom";
+  const rel = (Number(box.rot) || 0) - (Number(hostRot) || 0);
+  const r = ((rel % 180) + 180) % 180;                 // a box and its 180° twin have one extent
+  // Which raw dimension runs along the wall: `w` for an aligned box on a horizontal wall (or a
+  // quarter-turned box on a vertical one), `h` for the other two combinations.
+  const quarter = Math.abs(r - 90) <= AXIS_SNAP_DEG;
+  const aligned = r <= AXIS_SNAP_DEG || r >= 180 - AXIS_SNAP_DEG;
+  if (aligned || quarter) {
+    const alongIsW = quarter ? !horiz : horiz;
+    const useW = wantAlong ? alongIsW : !alongIsW;
+    return Math.abs(Number(useW ? box.w : box.h)) || 0;
+  }
+  const unit = horiz === !!wantAlong ? { x: 1, y: 0 } : { x: 0, y: 1 };
+  return boxExtentAlong({ w: box.w, h: box.h, rot: rel }, unit);
+}
+
+/** The zone's along-wall span in its host's frame — see the note above. */
+export function zoneAlongExtent(box, hostRot = 0, side = "bottom") {
+  return zoneFrameExtent(box, hostRot, side, true);
+}
+
+/** The across-wall (DEPTH) counterpart, by the same rule. Used by the load-time heal, which must not
+ *  re-derive a depth from a projection that carries the along span inside it. */
+export function zoneDepthExtent(box, hostRot = 0, side = "bottom") {
+  return zoneFrameExtent(box, hostRot, side, false);
+}
+
 /**
  * Did a resize actually change the zone's ALONG-wall extent (i.e. did the user drag THAT axis)?
  * Returns the length to STORE, or null to leave the zone tracking the chain. Without this test a
  * plain depth drag would silently pin the length at whatever it happened to be, and the zone would
  * stop following the court from then on.
+ *
+ * ⚠ Feed this EXACT along spans (`zoneAlongExtent`), never world-space projections — see B1123 above.
  */
 export function resizedAlongLen(prevAlong, nextAlong, tol = 0.5) {
   if (!Number.isFinite(prevAlong) || !Number.isFinite(nextAlong)) return null;
   return Math.abs(nextAlong - prevAlong) > tol ? Math.max(1, Math.round(nextAlong)) : null;
+}
+
+/**
+ * B1123 — the ONE rule for whether a gesture may PIN a dock zone's along-wall length.
+ * Returns the feet to store on `alongLen`, or null to leave the zone tracking the chain span.
+ *
+ * Two gates, both required, because the old measure could distinguish neither:
+ *  · `userResize` — only a resize gesture aimed AT THIS ZONE may pin it. A host refit, a court
+ *    depth change, a rotation, a relayout and the load-time heal all pass false, so none of them
+ *    can stamp a length the owner never set.
+ *  · `alongAxisDragged` — an edge drag knows which axis it moved; a depth-only drag passes false
+ *    and can never pin. `null` = unknown (a corner drag / a numeric edit), so fall through to the
+ *    measurement.
+ * The measurement itself is the exact host-local along span, so an unchanged along axis compares
+ * equal to the foot at ANY host rotation.
+ */
+export function resizedZoneAlongLen(prevBox, nextBox, { hostRot = 0, side = "bottom", userResize = false, alongAxisDragged = null, tol = 0.5 } = {}) {
+  if (!userResize) return null;
+  if (alongAxisDragged === false) return null;
+  return resizedAlongLen(zoneAlongExtent(prevBox, hostRot, side), zoneAlongExtent(nextBox, hostRot, side), tol);
+}
+
+/**
+ * B1123 load-time heal — is a stored `alongLen` indistinguishable from the chain span the zone would
+ * derive anyway? Such a value carries no user intent (it is what the zone would render regardless),
+ * and keeping it costs the owner the tracking behaviour forever, so it is DROPPED on load. A length
+ * genuinely different from the chain span is real intent and is preserved.
+ *
+ * `eps` is deliberately a couple of feet: the poisoned values this heals were stamped from a
+ * projection that drifts by h·|sin θ| (≈1.3 ft on the reported building) plus the ±0.5 ft rounding
+ * the stamp itself applies, and no owner sets a length within a few feet of the court's on purpose.
+ */
+export function alongLenIsChainEcho(stored, chainAlong, eps = 6) {
+  const v = Number(stored), c = Number(chainAlong);
+  if (!Number.isFinite(v) || v <= 0 || !Number.isFinite(c) || c <= 0) return false;
+  return Math.abs(v - c) <= eps;
 }
 
 // Geometry of the i-th zone (0..2) on `side` of building box `b` ({cx,cy,w,h,rot}),
