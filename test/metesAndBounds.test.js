@@ -1,7 +1,10 @@
 import { describe, it, expect } from "vitest";
+// The deed PARSER moved to deedParse.js so it could be deferred off the boot path; the polyline
+// primitives stayed in metesAndBounds.js because roads / easements / KMZ need them synchronously.
 import {
-  parseCalls, callsToPath, pathCloses, misclosure, ringsOverlap, VARA_FT,
-} from "../src/workspaces/site-planner/lib/metesAndBounds.js";
+  parseCalls, callsToPath, pathCloses, misclosure, VARA_FT,
+} from "../src/workspaces/site-planner/lib/deedParse.js";
+import { ringsOverlap } from "../src/workspaces/site-planner/lib/metesAndBounds.js";
 
 describe("metes-and-bounds parser + plotter", () => {
   it("parses a basic quadrant call to azimuth + feet", () => {

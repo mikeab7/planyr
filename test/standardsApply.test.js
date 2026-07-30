@@ -160,8 +160,10 @@ describe("account preference edits (pure)", () => {
     expect(p0.planStandards.parcelStyle.stroke).toBe("#111111");
   });
   it("normalizes a missing / garbage prefs blob into the empty shape", () => {
-    expect(_normalizePrefs(null).planStandards).toEqual({ parcelStyle: {}, typeStyles: {} });
-    expect(_normalizePrefs("nope").planStandards).toEqual({ parcelStyle: {}, typeStyles: {} });
+    // `measureStyle` joined the shape with the measurement-standards item — additive, so an
+    // older prefs row simply normalizes to an empty bag and nothing needs migrating.
+    expect(_normalizePrefs(null).planStandards).toEqual({ parcelStyle: {}, typeStyles: {}, measureStyle: {} });
+    expect(_normalizePrefs("nope").planStandards).toEqual({ parcelStyle: {}, typeStyles: {}, measureStyle: {} });
   });
 });
 
@@ -339,7 +341,7 @@ describe("the Standards draft", () => {
     withParcelDraft(d, { weight: 4 });
     withTypeDraft(d, "building", { fill: "#000000" });
     expect(d).toEqual(snapshot);
-    expect(EMPTY_STD_DRAFT).toEqual({ parcelStyle: {}, typeStyles: {} });
+    expect(EMPTY_STD_DRAFT).toEqual({ parcelStyle: {}, typeStyles: {}, measureStyle: {} });
   });
 
   describe("committing it into the plan (Save for this plan / the commit half of Apply)", () => {

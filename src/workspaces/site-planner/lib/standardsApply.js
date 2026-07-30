@@ -29,6 +29,11 @@
 export const PARCEL_STD_KEYS = ["stroke", "weight", "dash", "fill", "fillOpacity", "sbStroke", "sbWeight", "sbDash"];
 // The per-element-type keys Standards → Colors can set.
 export const TYPE_STD_KEYS = ["fill", "stroke"];
+// NEW-1 — MEASUREMENTS. Same mechanics as parcels (stamped at creation), so the retroactive
+// Apply WRITES the value onto each measurement. `labelPpf` is NEW-2's per-measurement
+// "show label from this zoom in" threshold; it travels with the style keys because it is
+// defaulted, stamped and applied through this exact machinery.
+export const MEASURE_STD_KEYS = ["stroke", "weight", "dash", "fill", "fillOpacity", "labelPpf"];
 
 const same = (a, b) => a === b || (a == null && b == null);
 
@@ -68,6 +73,24 @@ export function applyTypeStandard(els, type, key) {
   return count ? { els: next, count } : { els: list, count: 0 };
 }
 
+/**
+ * Apply one MEASUREMENT standard to every existing measurement (NEW-1).
+ * Measurements are stamped at creation (`measureDefaultStyle`), exactly like parcels, so
+ * applying WRITES the value — the parcel mechanic, not the element one.
+ * @returns { measures, count } — `measures` is the SAME array reference when nothing changed.
+ */
+export function applyMeasureStandard(measures, key, value) {
+  const list = measures || [];
+  let count = 0;
+  const next = list.map((m) => {
+    if (same(m[key], value)) return m;
+    count++;
+    if (value === null || value === undefined) { const { [key]: _drop, ...rest } = m; return rest; }
+    return { ...m, [key]: value };
+  });
+  return count ? { measures: next, count } : { measures: list, count: 0 };
+}
+
 /** How many objects an "Apply now" would actually change — drives the chip's count + disabled state. */
 export function parcelStandardImpact(parcels, key, value) {
   return (parcels || []).reduce((n, p) => n + (same(p[key], value) ? 0 : 1), 0);
@@ -98,9 +121,11 @@ export function appliedLabel(count, noun) {
  * @param els           current elements
  * @param parcelValues  { key: value } for the PARCEL_STD_KEYS currently in force
  * @param types         element types whose per-element overrides should be cleared
- * @returns { parcels, els, count } — the SAME array references when nothing changed.
+ * @param opts          { measures, measureValues } — NEW-1's measurement family (optional, so
+ *                      every existing caller and test keeps working unchanged)
+ * @returns { parcels, els, measures, count } — the SAME array references when nothing changed.
  */
-export function applyAllStandards(parcels, els, parcelValues = {}, types = []) {
+export function applyAllStandards(parcels, els, parcelValues = {}, types = [], opts = {}) {
   const touched = new Set();
   let nextParcels = parcels || [];
   PARCEL_STD_KEYS.forEach((key) => {
@@ -123,13 +148,26 @@ export function applyAllStandards(parcels, els, parcelValues = {}, types = []) {
       nextEls = res.els;
     });
   });
+  // NEW-1 — measurements, on the parcel mechanic (stamped → written).
+  let nextMeasures = opts.measures || [];
+  const measureValues = opts.measureValues || {};
+  MEASURE_STD_KEYS.forEach((key) => {
+    if (!(key in measureValues)) return;
+    const before = nextMeasures;
+    const res = applyMeasureStandard(before, key, measureValues[key] ?? null);
+    if (!res.count) return;
+    res.measures.forEach((m, i) => { if (m !== before[i]) touched.add(m.id); });
+    nextMeasures = res.measures;
+  });
   const count = touched.size;
-  return count ? { parcels: nextParcels, els: nextEls, count } : { parcels: parcels || [], els: els || [], count: 0 };
+  return count
+    ? { parcels: nextParcels, els: nextEls, measures: nextMeasures, count }
+    : { parcels: parcels || [], els: els || [], measures: opts.measures || [], count: 0 };
 }
 
 /** How many OBJECTS the single Apply would change — drives its count + disabled state. */
-export function allStandardsImpact(parcels, els, parcelValues, types) {
-  return applyAllStandards(parcels, els, parcelValues, types).count;
+export function allStandardsImpact(parcels, els, parcelValues, types, opts) {
+  return applyAllStandards(parcels, els, parcelValues, types, opts).count;
 }
 
 /** Toast copy for the whole-panel Apply — objects, because it spans parcels AND elements. */
@@ -154,14 +192,16 @@ export function appliedObjectsLabel(count) {
  * only once the user has touched it; `null` means "clear this standard" (back to the built-in),
  * which is why every read tests key PRESENCE rather than truthiness.
  */
-export const EMPTY_STD_DRAFT = { parcelStyle: {}, typeStyles: {} };
+export const EMPTY_STD_DRAFT = { parcelStyle: {}, typeStyles: {}, measureStyle: {} };
 
 const parcelBag = (d) => (d && d.parcelStyle) || {};
 const typeBag = (d, type) => ((d && d.typeStyles) || {})[type] || {};
+const measureBag = (d) => (d && d.measureStyle) || {};
 
 /** Has the user touched this standard in the current draft? */
 export function draftHasParcel(draft, key) { return Object.prototype.hasOwnProperty.call(parcelBag(draft), key); }
 export function draftHasType(draft, type, key) { return Object.prototype.hasOwnProperty.call(typeBag(draft, type), key); }
+export function draftHasMeasure(draft, key) { return Object.prototype.hasOwnProperty.call(measureBag(draft), key); }
 
 /** The value the PANEL shows: the draft when it has touched the key, else what is committed. */
 export function draftParcelValue(draft, key, committed) {
@@ -170,10 +210,16 @@ export function draftParcelValue(draft, key, committed) {
 export function draftTypeValue(draft, type, key, committed) {
   return draftHasType(draft, type, key) ? typeBag(draft, type)[key] : committed;
 }
+export function draftMeasureValue(draft, key, committed) {
+  return draftHasMeasure(draft, key) ? measureBag(draft)[key] : committed;
+}
 
 /** Merge one patch into the draft (immutable). `null` in the patch = "clear this standard". */
 export function withParcelDraft(draft, patch) {
   return { ...(draft || EMPTY_STD_DRAFT), parcelStyle: { ...parcelBag(draft), ...patch } };
+}
+export function withMeasureDraft(draft, patch) {
+  return { ...(draft || EMPTY_STD_DRAFT), measureStyle: { ...measureBag(draft), ...patch } };
 }
 export function withTypeDraft(draft, type, patch) {
   const d = draft || EMPTY_STD_DRAFT;
@@ -189,9 +235,10 @@ const nz = (v) => (v === undefined ? null : v);
  * @param committedParcel (key) => the committed effective value
  * @param committedType   (type, key) => the committed effective value
  */
-export function draftDirty(draft, committedParcel, committedType) {
+export function draftDirty(draft, committedParcel, committedType, committedMeasure) {
   const d = draft || EMPTY_STD_DRAFT;
   if (Object.entries(parcelBag(d)).some(([k, v]) => nz(v) !== nz(committedParcel(k)))) return true;
+  if (committedMeasure && Object.entries(measureBag(d)).some(([k, v]) => nz(v) !== nz(committedMeasure(k)))) return true;
   return Object.entries(d.typeStyles || {}).some(([type, bag]) =>
     Object.entries(bag).some(([k, v]) => nz(v) !== nz(committedType(type, k))));
 }
@@ -213,5 +260,7 @@ export function mergeDraftIntoSettings(settings, draft) {
     Object.entries(patch).forEach(([k, v]) => { if (v === null || v === undefined) delete bag[k]; else bag[k] = v; });
     if (Object.keys(bag).length) typeStyles[type] = bag; else delete typeStyles[type];
   });
-  return { ...s, parcelStyle, typeStyles };
+  const measureStyle = { ...(s.measureStyle || {}) };
+  Object.entries(measureBag(d)).forEach(([k, v]) => { if (v === null || v === undefined) delete measureStyle[k]; else measureStyle[k] = v; });
+  return { ...s, parcelStyle, typeStyles, measureStyle };
 }

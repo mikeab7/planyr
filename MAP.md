@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-07-30 @ `e387d88` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-07-30 @ `d5476d0` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_367 source files mapped._
+_371 source files mapped._
 
 ## infra
 
@@ -337,6 +337,10 @@ _367 source files mapped._
   - _exports_: `assessCutFill`, `BALANCE_EXPLAINS_TOL`, `classifyStorageSurplus`, `cutFillBalance`, `DEFAULT_SHRINK_FACTOR`, `padFillDemandCf`
 - **`src/workspaces/site-planner/lib/deedAlign.js`** — Deed-to-parcel basis-of-bearings fix: rigid rotate+translate best-fit overlay plus theoretical grid-convergence fallback
   - _exports_: `CONFIDENT_FRAC`, `describeRotation`, `gridConvergenceDeg`, `MAX_ALIGN_ROT_DEG`, `openRing`, `ringCentroid`, `rotatePointsAbout`, `solveDeedAlignment`
+- **`src/workspaces/site-planner/lib/deedLazy.js`** — The ONE on-demand entry point to the deed workflow's code (cached dynamic import of deedParse + deedAlign, plus a synchronous accessor for the title reader's live preview); nothing on the boot path may static-import either
+  - _exports_: `_resetDeed`, `deedNow`, `loadDeed`
+- **`src/workspaces/site-planner/lib/deedParse.js`** — Deed / metes-and-bounds parser (split out of metesAndBounds.js so it can be deferred): bearing+distance calls, curve courses, SAVE-AND-EXCEPT tracts, dead-reckoned path, closure and misclosure
+  - _exports_: `arcChordPoints`, `callsToPath`, `misclosure`, `parseCalls`, `parseTracts`, `pathCloses`, `VARA_FT`
 - **`src/workspaces/site-planner/lib/demGrid.js`** — Pure DEM grid plumbing (B704/B706): deterministic snapped-tile exportImage requests, LERC sniff/decode to survey-feet with validity mask, masked gaussian smooth, cell-center pixel/mercator/WGS84 transforms, mask-aware bilinear sampling
   - _exports_: `bandCellMeters`, `CELL_PX`, `exportUrl`, `gridRequest`, `groundScale`, `LATTICE_MAX_BAND`, `LATTICE_MAX_TILES`, `LATTICE_MIN_BAND`, `latticeCover`, `latticeTile`, `latticeTileAt`, `latToMercY`, `lngToMercX`, `looksLikeLerc`, `MARGIN_CELLS`, `maskedSmooth`, `MAX_GRID`, `mercPerPx`, `mercToPixel`, `mercXToLng`, `mercYToLat`, `pixelToLatLng`, `pixelToMerc`, `sampleAtLatLng`, `TILE_CELLS`, `WEB_MERC_R`
 - **`src/workspaces/site-planner/lib/detentionCriteria.js`** — Versioned jurisdiction detention-criteria registry (NEW-A1): cited per-district outlet-hydraulics + pond-geometry criteria (release, storms, freeboard, slope, berm, orifice/weir C, drawdown), referencing DETENTION_RULES for the verified release/storm/freeboard facts; audit guard + user overrides.
@@ -481,8 +485,12 @@ _367 source files mapped._
   - _exports_: `boxCorners`, `distToPolyline`, `distToRing`, `ellipseRing`, `markupHitModel`, `markupsUnderPoint`, `markupUnderPoint`, `nextMarkupSelection`, `pointInRing`, `ringArea`
 - **`src/workspaces/site-planner/lib/measureHit.js`** — Pure hit-test + z-order cycling for on-canvas measurements (B910): which measurement a feet-space click lands on (smaller-area-wins), and the next selection when a stack is re-clicked (wraps)
   - _exports_: `distToPolyline`, `measModeOf`, `measPoints`, `measuresUnderPoint`, `nextMeasureSelection`, `pointInRing`, `ringArea`
-- **`src/workspaces/site-planner/lib/metesAndBounds.js`** — Pure metes-and-bounds engine: parses Texas deed bearing/distance calls (curves, SAVE-AND-EXCEPT tracts) to planner-feet paths, closure/misclosure, polyline offset/buffer, ring overlap
-  - _exports_: `arcChordPoints`, `bufferPolyline`, `callsToPath`, `misclosure`, `offsetPolyline`, `parseCalls`, `parseTracts`, `pathCloses`, `ringsOverlap`, `VARA_FT`
+- **`src/workspaces/site-planner/lib/measureLabel.js`** — How a measurement presents its numbers: one dominant headline + a subordinate detail line, the headline area unit chosen by magnitude (sf below an acre, ac above), one feet convention (the prime mark), and the per-edge segment dimensions
+  - _exports_: `ACRE_LEAD_MIN_SF`, `fmt2`, `fmtAcres`, `fmtFeet`, `fmtInt`, `fmtSf`, `headlineIndex`, `measureChipLines`, `measureLabelModel`, `measureSegments`, `SQFT_PER_ACRE`
+- **`src/workspaces/site-planner/lib/measureStyle.js`** — Per-measurement style (stroke/weight/dash/fill/opacity) + the Standards defaults stamped at creation + the per-measurement label-reveal zoom threshold and its named zoom bands; the uncalibrated amber override lives here
+  - _exports_: `getAccountMeasureDefaults`, `hasLabelThreshold`, `labelRevealNote`, `MEASURE_LINE`, `MEASURE_SEL_FILL_BUMP`, `MEASURE_SEL_WEIGHT_BUMP`, `MEASURE_STD_KEYS`, `MEASURE_WARN_COLOR`, `measureDefaultStyle`, `measureLabelThreshold`, `measureLabelVisible`, `measureStdValue`, `measureStyle`, `setAccountMeasureDefaults`, `zoomBandLabel`
+- **`src/workspaces/site-planner/lib/metesAndBounds.js`** — Pure polyline offset / buffer / ring-overlap primitives, shared by easements, road corridors, pipeline corridors and the KMZ export (the deed PARSER that used to live here moved to deedParse.js so it could be deferred)
+  - _exports_: `bufferPolyline`, `offsetPolyline`, `ringsOverlap`
 - **`src/workspaces/site-planner/lib/mhfdDetention.js`** — B1105 the MHFD (Mile High Flood District) detention engine: the `volume-curve` ruleType — WQCV and EURV as DISTINCT cited components plus the routed 100-yr, each carrying its own evidence state — the component combiner, the C.R.S. 37-92-602(8) drawdown reconciliation, and the panel's own copy (`panelLine` / `verdictSubject` / `mhfdPanelBag`, composed here so Colorado prose stays off the boot path). The volume coefficients are deliberately `null`/`transcribed:false` (every primary MHFD host is egress-blocked and two secondary reads of the EURV memo disagreed), so it names what each component needs instead of computing a number. MHFD counties ONLY; Larimer/Weld/El Paso are refused. Lazy-loaded with the Colorado tier.
   - _exports_: `BLOCK_REASONS`, `computeMhfdDetention`, `depthInToAcFt`, `electedDrainTimeHr`, `eurvDepthIn`, `isMhfdCounty`, `MHFD_CAVEAT`, `MHFD_DETENTION_RULES`, `MHFD_MEMBER_COUNTIES`, `MHFD_SOURCES`, `MHFD_TARGET_COUNTIES`, `mhfdJurisdictionNote`, `mhfdMethodNotes`, `mhfdPanelBag`, `mhfdRuleFor`, `NON_MHFD_CO_COUNTIES`, `normalizeHsg`, `reconcileMhfdDrawdown`, `wqcvDepthIn`, `wqcvDrainTimeOptions`
 - **`src/workspaces/site-planner/lib/mitigationBands.js`** — NEW-3 hydraulic-equivalence band ledger: per-cell fill spans bucketed into 1-ft elevation bands, pond-side created storage from the stage model (excluding below-floodplain-bottom borrow), and per-band pass/fail that fails a short band even when the totals net positive
@@ -620,7 +628,7 @@ _367 source files mapped._
 - **`src/workspaces/site-planner/lib/stageStorageDischarge.js`** — Stage-storage-discharge curve (NEW-A3): pairs pondGeom storage (volumeBetween) with the outlet rating curve over the basin's stage range; interpolation helpers feed the reservoir routing. Anchored ponds only. Pure.
   - _exports_: `buildStageStorageDischarge`, `dischargeAtElev`, `dischargeAtStorage`, `elevAtStorage`, `storageAtElev`
 - **`src/workspaces/site-planner/lib/standardsApply.js`** — Standards "Apply now" (NEW-3): push a standard onto existing parcels (stamped → write) or existing elements (render-resolved → clear the per-element override), plus the impact counts the chip shows.
-  - _exports_: `allStandardsImpact`, `appliedLabel`, `appliedObjectsLabel`, `applyAllStandards`, `applyParcelStandard`, `applyTypeStandard`, `draftDirty`, `draftHasParcel`, `draftHasType`, `draftParcelValue`, `draftTypeValue`, `EMPTY_STD_DRAFT`, `mergeDraftIntoSettings`, `PARCEL_STD_KEYS`, `parcelStandardImpact`, `TYPE_STD_KEYS`, `typeStandardImpact`, `withParcelDraft`, `withTypeDraft`
+  - _exports_: `allStandardsImpact`, `appliedLabel`, `appliedObjectsLabel`, `applyAllStandards`, `applyMeasureStandard`, `applyParcelStandard`, `applyTypeStandard`, `draftDirty`, `draftHasMeasure`, `draftHasParcel`, `draftHasType`, `draftMeasureValue`, `draftParcelValue`, `draftTypeValue`, `EMPTY_STD_DRAFT`, `MEASURE_STD_KEYS`, `mergeDraftIntoSettings`, `PARCEL_STD_KEYS`, `parcelStandardImpact`, `TYPE_STD_KEYS`, `typeStandardImpact`, `withMeasureDraft`, `withParcelDraft`, `withTypeDraft`
 - **`src/workspaces/site-planner/lib/storage.js`** — Multi-site persistence layer: localStorage primary with per-user cloud mirror, content-union pull merge, per-tab resurrection guards, and an IndexedDB-backed version-history ring
   - _exports_: `_readSiteTombs`, `_recentlyDeleted`, `_resetHistoryForTest`, `activeUid`, `AUTOSAVE_KEY`, `backupNow`, `clearCloudCache`, `clearHistory`, `clearRecentlyDeleted`, `clearSiteTombstone`, `DELETED_RETENTION_DAYS`, `deleteSite`, `deleteSiteGroup`, `discardLegacySite`, `getCurrentSiteId`, `getVersion`, `groupOf`, `importLegacyIntoCloud`, `importOneSiteToCloud`, `initHistoryStore`, `isCloudActive`, `isEmptySite`, `keepaliveFlushSite`, `legacySitesList`, `listDeletedProjects`, `listVersions`, `loadAutosave`, `loadPlansOfGroup`, `loadSite`, `loadSitesList`, `mergePulledSites`, `migrateOldAutosave`, `migrateScenarios`, `migrateSiteGroups`, `pendingLegacyCount`, `pendingLegacySites`, `pruneMigratedLegacy`, `pullCloud`, `purgeDeletedProject`, `purgeExpiredDeletedProjects`, `pushModelToCloud`, `pushSiteToCloud`, `reconcileSiteFromCloud`, `recordSiteTombstone`, `renameSiteGroup`, `restoreDeletedProject`, `saveAutosave`, `saveSite`, `scheduleLinkOf`, `setActiveUser`, `setCurrentSiteId`, `setScheduleLink`, `SITE_TOMB_GRACE_MS`, `siteNameOf`, `snapshotVersion`, `stageLegacySite`, `storage`, `summarizeVersion`
 - **`src/workspaces/site-planner/lib/storageReconcile.js`** — NEW-1 site storage reconciliation: counted detention plus counted mitigation against total physical pond storage, with a hard FAIL naming the overlap volume and the ponds involved (and undeclared dual-duty ponds)
