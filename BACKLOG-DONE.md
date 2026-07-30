@@ -33,6 +33,114 @@
 - **THE FIX.** `scripts/check-mint.mjs` gains an ANNOUNCEMENT check beside the existing mint check: every `B###`/`V###` named in a commit subject this branch adds (measured from the merge base, so it covers exactly what this push adds) must exist as a `### B###` / `### V###` heading in this branch's backlog / verification files. Merge commits and `Nudge CI` commits announce nothing and are skipped. It checks the PROPERTY ("the number I announce is the number I filed"), never the ceremony — so a correct late renumber that also fixes the subject passes untouched, and a **recurrence passes too**, because a recurrence re-opens an existing heading and the heading is right there. It runs everywhere the gate already runs: the pre-push hook and the required build step.
 - **WHY THE COMMIT SUBJECT IS THE RIGHT THING TO CHECK** even though the defect is visible in the PR title: GitHub pre-fills the PR title from the first commit subject and a squash merge writes the PR title back as the commit subject, so the two are the same string in practice — and the commit subject is the half that is checkable locally, before the push, with no API call.
 - Files: `scripts/check-mint.mjs` (`idsNamedIn` + `announceVerdict` + the CLI failure path), `test/mintGuard.test.js` (+8 cases, one of them the #866 reproduction).
+### B1164 — The mint gate's pre-push hook now installs itself; a fresh container had no local gate `[repo / tooling · workflow]` (bug) #infra  *(owner chat 2026-07-30, provisional NEW-1. Minted **B1164** via `git fetch origin main && npm run next-id -- --against-main`, late, as the last step before push. DEDUPE-FIRST — searched Open + ⏳ Verify + Done for `hooksPath`, `pre-push`, `hooks:install`, `githooks`, `prepare`, `postinstall` and the whole mint family B755 / B779 / B780 / B896 / B898 / B1140: B779×2 shipped the gate itself and its logic is correct — this is purely REACHABILITY, a follow-on, not a recurrence. Nothing else owns hook installation. Net-new.)*
+`[x]` **✅ DONE 2026-07-30 — `Verify: sandbox`, and the sandbox proof is a genuinely fresh clone with a real rejected push, not an assertion.**
+- Verify: sandbox
+- Origin: filed 2026-07-30 from chat (NEW-1).
+
+**The defect, in one line: `.git/hooks` is not cloned and `npm run hooks:install` was a manual step nobody
+runs.** So in a fresh dispatch container — which is EVERY container — `.githooks/pre-push` never fired. The
+required CI step still blocked a bad merge, so `main` was never at risk; what was missing was the fast local
+failure that saves a whole build cycle. Same defect class as the item it follows: **a protection present in
+principle and absent in practice.**
+
+**The fix — `scripts/install-hooks.mjs`, wired to npm's `prepare` lifecycle** (`npm install` and `npm ci`
+both run it; `npm run hooks:install` still works and now calls the same script). Installation becomes a
+property of installing dependencies rather than of somebody remembering. Each of the item's five
+requirements is a `describe` block in `test/installHooks.test.js` (23 cases, real git, real repos in a temp
+dir — a mocked `git config` would prove nothing about whether a push runs the hook):
+- **(a) FRESH CLONE, no prior state** — sets `core.hooksPath` to the committed `.githooks/`, and **chmods
+  the hook executable**, because an installed-but-unrunnable hook is precisely the silent no-op this exists
+  to kill.
+- **(b) IDEMPOTENT** — a second run reports `already` and writes nothing. An ABSOLUTE spelling of the same
+  directory is recognised as the same wiring, not mistaken for someone else's config.
+- **(c) NEVER SILENTLY NO-OPS** (the B898 LOUD-FAILURE rule) — five distinct un-armed verdicts, each with
+  its own named block on stderr saying what is lost: `foreign` · `not-a-repo` · `git-unusable` ·
+  `missing-hooks` · `failed`. The write is **read back** afterwards, so a `git config` that "succeeded" but
+  did not take is reported as the failure it is. `missing-hooks` is checked FIRST: wiring `core.hooksPath`
+  at an empty directory is the perfect silent no-op — git is happy, the config looks right, no hook runs.
+- **(d) NEVER CLOBBERS a deliberate `core.hooksPath`** — a foreign value is left exactly as it was, named
+  along with the config SCOPE it came from, with the one command to opt in. Only an explicit
+  `npm run hooks:install -- --force` replaces it; nothing automatic takes that branch.
+- **(e) THE CI REQUIRED STEP IS UNTOUCHED** — this adds fast local feedback, it does NOT become the
+  guarantee. A test asserts the workflow still runs `node scripts/check-mint.mjs --ci`. Which is also why
+  the installer **never fails `npm install`** (always exit 0; `--check` is the strict, write-nothing mode
+  used by tests): a convenience installer that wedges `npm ci` would take the build down over a nicety.
+
+**One correction found while proving it, kept as a test:** with `.git/config` unusable, git answers the
+work-tree question with an ERROR rather than "false", and the first cut reported that as "not a git repo" —
+which would send someone hunting the wrong problem. There is now a separate `git-unusable` verdict carrying
+git's own words verbatim.
+
+**The verification the item asked for, run end to end in a genuinely fresh clone** (a scratch bare remote
+seeded from `origin/main` at `3e2370b`, then `git clone` → `npm ci`, nothing else):
+- `core.hooksPath` **empty** before `npm ci` (and `.git/hooks` holding only git's samples — the starting
+  state of every container), **`.githooks`** after it, from `prepare`, with the receipt line in npm's output.
+- A real `git push` of a branch minting an already-claimed id was **REJECTED BY THE HOOK, locally, before
+  any CI**: `⛔ MINT GATE FAILED … B1150 is at or below the claimed high-water mark B1163 — minted against a
+  stale view … → renumber this branch's new B# ids starting at B1164`, **push exit 1, nothing left the
+  machine.** Renumbering to the id it named and pushing again: `✅ Mint gate: B1164 is unclaimed…`, exit 0.
+  **This is the first time the gate has ever stopped a real push** — see B1165 for why that is no longer
+  something the field has to discover.
+- Re-running the installer: no-op. A foreign `core.hooksPath`: reported, not clobbered, still `my-own-hooks`
+  afterwards. A broken git: loud, and exit 0 so `npm install` survives.
+- Suite green: **6,688 tests / 393 files**, lint 0 errors, build green.
+
+### B1165 — Prove the mint gate BLOCKS: the rejection path is now a permanent CI self-test against real git refs `[repo / tooling · workflow]` (task) #infra  *(owner chat 2026-07-30, provisional NEW-2. Minted **B1165** the same way, late. DEDUPE-FIRST — extends B779×2 / V531 and its `test/mintGuard.test.js`; builds on B780's uniqueness guard and B898's loud-failure rule. The gate's LOGIC is sound and is not being re-fixed, so this is not a recurrence.)*
+`[x]` **✅ DONE 2026-07-30 — `Verify: sandbox`, proven RED-then-GREEN.**
+- Verify: sandbox
+- Origin: filed 2026-07-30 from chat (NEW-2).
+
+**The gap: the gate had been exercised live exactly ONCE — on PR #864's own push — and that item was a
+recurrence, so it minted nothing and had nothing to block.** `mintGuard.test.js` unit-tests the verdict and
+`nextId.test.js` covers the git reader's edge cases, but the COMPOSED path (fetch → peer mirror → merge base
+→ "added ids" → verdict → exit code) had never run against a genuine collision, and V531 parked the question
+as "watch the field". This area has now failed twice after being declared fixed. **Waiting for an organic
+collision to discover whether the collision-catcher works is the wrong verification strategy.**
+
+**AUDIT FIRST, as the item required.** Read what already existed and added only the genuinely missing layer:
+`mintGuard.test.js` is PURE (no git, no clock, no network) and pins the verdict table; `nextId.test.js` pins
+`readRefFile`/ENOBUFS/bad-ref behaviour against this repo. Neither is duplicated. The missing layer is the
+**end-to-end path against real refs**, which is what shipped.
+
+**`test/mintGateE2E.test.js` — 11 cases, real git, real refs, and still hermetic.** "The remote" is a bare
+repo in a temp dir and every fetch is over the local filesystem, so it runs inside the ordinary required
+build with no network and no dependence on this repo's own branch state. The fixture is a real race: a base
+main at B100/V50, a PEER branch that pushes B103/V53 and never merges, and then main moving on to B102/V52 —
+so work branches fork from the base and genuinely cannot see either. `check-mint.mjs` gained a `--repo=<path>`
+flag whose only caller is this test, so the assertions drive the REAL CLI, not a re-implementation:
+- **(a) taken on `origin/main`** (main merged the number mid-flight — the B1140 case, caught via the merge
+  base) → rejected, exit **1**, names `origin/main`, and the id it tells you to move to steps over the
+  unmerged peer as well as main.
+- **(b) taken on an IN-FLIGHT PEER BRANCH** — the window B779's first pass declared impossible and this fix
+  newly covers → rejected, exit **1**, **names the peer branch**, and both id families are checked, not just B.
+- **below the claimed high-water mark** (free today, minted against a view that is already gone) → rejected
+  with its own distinct wording, because it reads differently to a human than "taken".
+- **(c) a clean mint** above main and above every peer → allowed, exit **0**. A deliberate GAP is allowed too
+  (B1140 established gaps are free; a gate demanding max+1 would have rejected the fix that broke that loop).
+- **(d) a DEDUPE-FIRST RECURRENCE** — a heading moving from the archive back to the live file → `added` is
+  empty, allowed, exit **0**, untouched. So the correct response to a repeat report never meets gate friction.
+- **RESILIENCE:** a dead remote and a missing `origin/main` are UNVERIFIABLE, not a verdict — exit **2**
+  locally, exit **0 with the loud `⚠ MINT GATE UNVERIFIED … UNGUARDED` warning under `--ci`**. A guard that
+  becomes an outage is worse than the collision it prevents. A stale ref refuses rather than grading against
+  a week-old view. And the gate leaves the clone byte-identical: HEAD, branch, shallow state and merge base
+  all unchanged after a run.
+
+**RED-then-GREEN, the discipline used throughout this area.** With `mintVerdict` deliberately neutered to
+always return `ok`, the suite goes RED — 7 failures, the three blocking cases in this file plus the four in
+`mintGuard.test.js` — and every allow-case stays green, so the test discriminates rejection from noise
+rather than merely passing. Restored: 29/29 green.
+
+**Cost:** ~5 s inside `npm test` (which runs ~65 s), no new dependency, no manual step, no network.
+
+**V531 RE-SCOPED, not closed by assertion.** Three of its six strands are now proven on every build and are
+struck from the entry with the reason: **(a) it catches a real one** (all three rejection shapes, red-then-
+green), **(e) `--ci` draws the line in the right place** (the infrastructure split), **(f) the backstop is
+undisturbed** (`idUniqueness` + the B780 cross-file guard run untouched in the same suite). Three remain, and
+they remain because no self-test can reach them: **(b) no false red at REAL scale** — the self-test proves
+the verdict against a handful of synthetic branches; only the field proves it against ~500 real ones with
+their churn; **(c) the peer fetch stays affordable** as the branch count grows; **(d) the refusal is
+actionable, not annoying** — pure ergonomics, observable only in how other sessions actually respond.
 
 ### B1159 — Five provably-safe memos in the SitePlanner render body (and four deliberately NOT memoised) `[Site Planner]` (task) #site-planner #perf  *(owner chat 2026-07-30, provisional NEW-4. Minted **B1159** via `git fetch origin main && npm run next-id -- --against-main`, late. DEDUPE-FIRST — searched Open + ⏳ Verify + Done for `memo`, `useMemo`, `render body`, `pondContours`, `criteriaFor`, and the perf family B1040/B1042/B1063/B1064/B1126/B1146: B1064 is code-splitting, B1126 is computed-but-never-rendered, B1158 is the panel gate. Nothing owns per-render recomputation of these specific values. Net-new.)*
 `[x]` **✅ DONE 2026-07-30 — `Verify: sandbox`, and the proof is a unit suite that pins each memo's input set, not a claim.** Build green, 6,562 tests green, lint 0 errors, bundle budgets within ceiling.

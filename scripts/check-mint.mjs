@@ -28,10 +28,19 @@
  *   node scripts/check-mint.mjs          → gate; exit 0 clean, 1 collision, 2 unverifiable
  *   node scripts/check-mint.mjs --ci     → a collision still fails; unverifiable warns loudly (0)
  *   node scripts/check-mint.mjs --json   → machine-readable verdict
+ *   node scripts/check-mint.mjs --repo=<path>  → run against another checkout (the e2e self-test)
  *
- * Runs as a pre-push hook (`npm run hooks:install`) and as a step in the required build check.
- * Deliberately NOT a vitest case: it needs the network and the live remote, and the unit suite
- * stays hermetic. `test/mintGuard.test.js` covers the pure verdict logic instead.
+ * Runs as a pre-push hook (installed automatically by `npm install` — `scripts/install-hooks.mjs`,
+ * NEW-1) and as a step in the required build check.
+ *
+ * TESTED IN THREE LAYERS, because the first two alone let a broken gate look healthy:
+ *   - `test/mintGuard.test.js` — the pure verdict logic (no git, no clock, no network);
+ *   - `test/mintGateE2E.test.js` (NEW-2) — this whole file end to end, including the CLI's exit
+ *     codes, against REAL git refs in throwaway repos with a local file remote. Still hermetic:
+ *     "the remote" is a bare repo in a temp dir, so it runs in the ordinary required build. This
+ *     is what proves the REJECTION path, which before it had never once fired on a real push;
+ *   - the field (V531) — the parts only concurrent live dispatches can show: no false red at real
+ *     branch counts, and the peer fetch staying affordable.
  */
 import { readFileSync, existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -222,7 +231,14 @@ export function runGate(repo = REPO, { peerDays = DEFAULT_PEER_DAYS, maxAgeSecon
 function main(argv) {
   const ci = argv.includes("--ci");
   const json = argv.includes("--json");
-  const res = runGate(REPO, {
+  // `--repo=<path>` runs the gate against ANOTHER checkout. Its only caller is the end-to-end
+  // self-test (NEW-2, `test/mintGateE2E.test.js`), which builds throwaway repos with real git refs
+  // and asserts this CLI's exit codes and wording — the half `test/mintGuard.test.js` cannot reach
+  // because it is pure. Without it the rejection path could only ever be proven by an organic
+  // collision in the field, which is what B779 already tried and lost a second time.
+  const repoFlag = argv.find((a) => a.startsWith("--repo="));
+  const repo = repoFlag ? resolve(repoFlag.split("=")[1]) : REPO;
+  const res = runGate(repo, {
     peerDays: Number((argv.find((a) => a.startsWith("--peer-days=")) || "=" + DEFAULT_PEER_DAYS).split("=")[1]),
     fetch: !argv.includes("--no-fetch"),
   });

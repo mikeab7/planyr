@@ -9,6 +9,11 @@ import { defineConfig } from "vitest/config";
 // Node environment only: every module under test is pure JS (no DOM, no React, no
 // network), so we deliberately skip the react plugin and jsdom to keep CI quick.
 export default defineConfig({
+  // JSX, automatic runtime. A handful of suites render a small, DOM-free component to
+  // static markup with `react-dom/server` (test/parcelCard.test.js) — that needs the JSX
+  // transform, but NOT jsdom: renderToStaticMarkup produces a string, so the environment
+  // stays "node" and the suite stays fast.
+  esbuild: { jsx: "automatic" },
   test: {
     environment: "node",
     include: ["test/**/*.test.js"],

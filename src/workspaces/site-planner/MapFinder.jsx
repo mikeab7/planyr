@@ -29,7 +29,8 @@ import {
 import { elStyle, elRingFeet, byZ } from "./lib/planStyle.js";
 import { STATUSES, STATUS_META, statusOf } from "./lib/siteModel.js";
 import { countyAtPoint } from "./lib/jurisdiction.js";
-import { apprRows, apprVal, findAttr } from "./lib/appraisal.js";
+import { findAttr } from "./lib/appraisal.js";
+import ParcelInfoCard from "./components/ParcelInfoCard.jsx";
 import { makeParcelDisplayLayer, makeSnapshotLayer, PARCEL_MINZOOM, ADD_CURSOR, REMOVE_CURSOR } from "./lib/parcelDisplay.js";
 import { dissolvedParcelSqft } from "./lib/polyClip.js";
 import { geocodeAddress } from "./lib/geocode.js";
@@ -1348,13 +1349,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
   // Sites matching the active chip + name filters (for the panel header count).
   const shownCount = sites.filter((s) => passStatus(s) && passName(s)).length;
 
-  // One label/value row for the address-search parcel info card (B233).
-  const infoRow = (label, value) => (
-    <div key={label} style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "baseline", padding: "4px 0", borderBottom: "1px solid #f3efe5" }}>
-      <span style={{ fontSize: 11, color: PAL.muted, flex: "none" }}>{label}</span>
-      <span style={{ fontSize: 11.5, color: PAL.ink, fontWeight: 600, textAlign: "right", wordBreak: "break-word" }}>{value}</span>
-    </div>
-  );
+  // (The parcel card's own label/value row moved to components/ParcelInfoCard.jsx — NEW-1.)
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", background: "var(--surface-page)" }}>
@@ -1502,59 +1497,19 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
           <span style={{ width: 4 }} />
         </div>
 
-        {/* NEW-2 (B233): address-search parcel info card — drops in under the search
-            pill after a "Go". Three distinct states: found (parcel ID + key appraisal
-            facts), none (centered, but no parcel at that point), and unavailable
-            (couldn't reach the parcel service) — the last two read differently. */}
+        {/* NEW-2 (B233): address-search parcel info card — drops in under the search pill
+            after a "Go". The card itself lives in components/ParcelInfoCard.jsx (NEW-1),
+            which is what lets its three-row default + "More details" fold be unit-tested.
+            Keyed on the parcel so every new search re-mounts it with the fold CLOSED. */}
         {parcelInfo && (
-          <div style={{ position: "absolute", zIndex: narrow ? 1090 : 1001, background: PAL.panelBg, border: `1px solid ${PAL.panelLine}`, borderRadius: 10, boxShadow: "0 6px 22px rgba(28,25,20,0.22)", overflow: "hidden",
-            ...(narrow
-              ? { top: 58, left: 8, right: 8, transform: "none", width: "auto", maxWidth: "none" }
-              : { top: 64, left: "50%", transform: "translateX(-50%)", width: 348, maxWidth: "calc(100% - 540px)" }) }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 11px", borderBottom: parcelInfo.status === "found" ? `1px solid ${PAL.panelLine}` : "none" }}>
-              <span style={{ flex: "none", fontSize: 13 }}>{parcelInfo.status === "found" ? "📍" : parcelInfo.status === "none" ? "○" : "⚠"}</span>
-              <span style={{ flex: 1, fontSize: 12.5, fontWeight: 700, color: parcelInfo.status === "unavailable" ? PAL.accent : PAL.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                {parcelInfo.status === "found" ? (parcelInfo.addr || parcelInfo.label || "Parcel")
-                  : parcelInfo.status === "none" ? "No parcel at this point"
-                  : "Parcel info unavailable"}
-              </span>
-              <button onClick={() => setParcelInfo(null)} title="Dismiss" aria-label="Dismiss parcel info"
-                style={{ flex: "none", width: 22, height: 22, borderRadius: 5, border: "none", background: "transparent", color: PAL.muted, cursor: "pointer", fontSize: 13, lineHeight: 1 }}>✕</button>
-            </div>
-            {parcelInfo.status === "found" ? (
-              <div style={{ padding: "8px 11px 10px" }}>
-                {parcelInfo.backup && (
-                  <div style={{ marginBottom: 8, padding: "6px 8px", background: "#fdf6e7", border: "1px solid #e6c478", borderRadius: 6, fontSize: 11, color: "#8a5a00", lineHeight: 1.4 }}>
-                    Statewide backup — {parcelInfo.backup} county’s server is unavailable; shown from TxGIO and may lag county updates.
-                  </div>
-                )}
-                {parcelInfo.cached && (
-                  <div style={{ marginBottom: 8, padding: "6px 8px", background: "#fdf6e7", border: "1px solid #e6c478", borderRadius: 6, fontSize: 11, color: "#8a5a00", lineHeight: 1.4 }}>
-                    Cached copy{fmtAsOf(parcelInfo.cached.asOf)} — the county server is unavailable, so this lot came from Planyr’s saved snapshot. Accurate for selection; may lag recent county updates.
-                  </div>
-                )}
-                {parcelInfo.acct && infoRow("Account / ID", parcelInfo.acct)}
-                {parcelInfo.acres != null && infoRow("Acreage (measured)", `${parcelInfo.acres.toFixed(2)} ac`)}
-                {apprRows(parcelInfo.attrs)
-                  .filter((r) => !/^(situs address|account \/ id|acreage)$/i.test(r.label))
-                  .map((r) => infoRow(r.label, apprVal(r.label, r.value)))}
-                <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 10 }}>
-                  <button onClick={planSelected}
-                    style={{ height: 30, padding: "0 12px", borderRadius: 6, border: "none", background: PAL.accent, color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
-                    Plan this site →
-                  </button>
-                </div>
-              </div>
-            ) : parcelInfo.status === "none" ? (
-              <div style={{ padding: "9px 11px", fontSize: 11.5, color: PAL.muted, lineHeight: 1.5 }}>
-                The map centered on the address, but no parcel covers that exact point — it may sit on a road or right-of-way. Click the lot directly, or zoom in and use <b>Select parcels</b>.
-              </div>
-            ) : (
-              <div style={{ padding: "9px 11px", fontSize: 11.5, color: PAL.accent, lineHeight: 1.5 }}>
-                The map centered on the address, but the county parcel service couldn’t be reached for this area right now. Give it a moment, then click the lot or use <b>Select parcels</b>.
-              </div>
-            )}
-          </div>
+          <ParcelInfoCard
+            key={`${parcelInfo.key || ""}|${parcelInfo.acct || ""}|${parcelInfo.addr || ""}`}
+            info={parcelInfo}
+            narrow={narrow}
+            cachedAsOfLabel={parcelInfo.cached ? fmtAsOf(parcelInfo.cached.asOf) : ""}
+            onDismiss={() => setParcelInfo(null)}
+            onPlan={planSelected}
+          />
         )}
 
         {/* saved sites */}

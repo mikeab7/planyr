@@ -6,6 +6,10 @@
  * the profile hook's save/reload passed in via `profileApi`. */
 import { lazy, useEffect, useRef, useState } from "react";
 import { signIn, signUp, signOut, resetPassword, updatePassword } from "../lib/auth.js";
+// The confirmation / reset copy NAMES the address the email arrives from (NEW-2) — a user
+// watching for "planyr.io" never finds it otherwise and assumes the signup failed. Both
+// messages are generated from the one sender constant in lib/authMail.js.
+import { SIGNUP_CONFIRM_MSG, PASSWORD_RESET_MSG } from "../lib/authMail.js";
 /* LAZY (B1064 tranche a). This file is reached from the Shell, so it lands in the shared ENTRY
  * chunk — the one chunk EVERY route downloads, planner or not. The Team tab is signed-in-only
  * and opens on an explicit click (the default tab is Profile), so nothing about it belongs on
@@ -182,11 +186,11 @@ export default function AuthPanel({ user, recovery, profileApi, initialTab, onCl
         if (!first.trim() || !last.trim()) { setMsg({ type: "err", text: "First and last name are required." }); return; }
         const { error, needsConfirm } = await signUp(email.trim(), pw, { firstName: first.trim(), lastName: last.trim(), org: org.trim() });
         if (error) setMsg({ type: "err", text: error });
-        else if (needsConfirm) setMsg({ type: "ok", text: "Account created — check your email for a confirmation link, then sign in." });
+        else if (needsConfirm) setMsg({ type: "ok", text: SIGNUP_CONFIRM_MSG });
         else onClose();
       } else if (mode === "reset") {
         const { error } = await resetPassword(email.trim());
-        setMsg(error ? { type: "err", text: error } : { type: "ok", text: "Password-reset email sent — check your inbox." });
+        setMsg(error ? { type: "err", text: error } : { type: "ok", text: PASSWORD_RESET_MSG });
       } else if (mode === "recovery") {
         const { error } = await updatePassword(pw);
         if (error) setMsg({ type: "err", text: error });

@@ -47,6 +47,45 @@ export const apprRows = (attrs) => {
   return rows;
 };
 
+/* NEW-1 — the address-search parcel card's row split. The card's DEFAULT view is exactly
+ * three rows — Owner, Account / ID, Acreage, in that order — because everything else (and
+ * the Legal description in particular, an unbounded metes-and-bounds blob that routinely
+ * wraps to ten-plus lines) made the card taller than the map controls beside it. The rest
+ * of the curated data is NOT dropped: it moves behind the card's collapsed "More details"
+ * disclosure. The situs address is the card's TITLE, so it never repeats as a row.
+ *
+ * Pure + exported so the card's shape is guarded by unit tests rather than by eyeballing
+ * a rendered card (see test/parcelCard.test.js). `acct` is the identify hit's own account
+ * id and `acres` its MEASURED acreage (computed from the returned ring) — both win over
+ * the CAD's own columns when present, which is what the card has always shown. */
+export const PARCEL_CARD_PRIMARY_LABELS = ["Owner", "Account / ID", "Acreage"];
+
+export const parcelCardRows = (attrs, { acct = null, acres = null } = {}) => {
+  const curated = apprRows(attrs);
+  const pick = (label) => curated.find((r) => r.label === label);
+  const primary = [];
+
+  const owner = pick("Owner");
+  if (owner) primary.push({ label: "Owner", value: apprVal("Owner", owner.value) });
+
+  const cadAcct = pick("Account / ID");
+  const acctVal = acct != null && String(acct) !== "" ? String(acct) : (cadAcct ? String(cadAcct.value) : null);
+  if (acctVal) primary.push({ label: "Account / ID", value: acctVal });
+
+  const cadAcres = pick("Acreage");
+  if (Number.isFinite(acres)) primary.push({ label: "Acreage (measured)", value: `${Number(acres).toFixed(2)} ac` });
+  else if (cadAcres) primary.push({ label: "Acreage", value: apprVal("Acreage", cadAcres.value) });
+
+  // Everything curated that the three primary rows (and the title) don't already carry,
+  // still in APPR_FIELDS order: Land value → Improvement value → Total value → Land use →
+  // Zoning → Year built → Legal.
+  const more = curated
+    .filter((r) => !/^(situs address|owner|account \/ id|acreage)$/i.test(r.label))
+    .map((r) => ({ label: r.label, value: apprVal(r.label, r.value) }));
+
+  return { primary, more };
+};
+
 // Everything the county returned (minus geometry/system fields) — the "all fields" expander.
 export const apprAll = (attrs) => Object.entries(attrs || {})
   .filter(([k, v]) => v != null && v !== "" && !/^(shape|objectid|globalid|geometry|st_area|st_length|shape_?area|shape_?len)/i.test(k))
