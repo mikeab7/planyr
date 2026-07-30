@@ -38,7 +38,10 @@ import { hasPrintableOverlay } from "./lib/overlayPrint.js";
 import { syncOverlayLayers, withTileRetry, ALL_LAYERS, probeService, layerVintage, identifyOverlaysAt } from "./lib/layers.js";
 import { sanitizeLayerOverrides, overridesFromOverlays, overlaysWithOverrides, applyOnOverrides, overridesSig } from "./lib/layerPrefs.js";
 import { BASEMAPS } from "./lib/basemaps.js";
-import { ppfToZoom, exactContainerPoint } from "./lib/mapLock.js";
+import {
+  ppfToZoom, exactContainerPoint,
+  basemapWrapPoint, basemapWrapPointTransformed, registrationShift, sanitizeShift,
+} from "./lib/mapLock.js";
 import { overscanPx, keepBufferFor, retinaForZoom, tileWeight, tileCacheLimit } from "./lib/tileBudget.js";
 import { preserveTilesAcrossSetView, announceSetView, boundTileCache, releaseLayer } from "./lib/tileLifecycle.js";
 import { buildGhost } from "./lib/ghostSnapshot.js";
@@ -2184,6 +2187,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const ensureBasemapOn = useCallback(() => setBasemapSrc((s) => (s === "off" ? "esri" : s)), []);
   const [layersOpen, setLayersOpen] = useState(false); // planner Layers control expanded
   const [viewMenuOpen, setViewMenuOpen] = useState(false); // on-canvas View (eye) menu expanded (B653)
+  /* NEW-2 — the sub-pixel shift that welds the DRAWING onto wherever Leaflet actually
+   * seated the basemap. Measured (never assumed) after every basemap commit and every
+   * gesture transform, and applied as a CSS translate on the SVG canvas only: `view` stays
+   * untouched, so the exactly-reversible pan V478 proved is preserved and nothing
+   * accumulates. Because `p2f` derives the cursor from `svgRef.getBoundingClientRect()`,
+   * the same translate that moves the drawing also moves the coordinate a click reports —
+   * ONE conversion, corrected in ONE place, for the readout and for placed points alike.
+   * See lib/mapLock.js ("closing the whole-pixel floor") for the measurement and the two
+   * contributors. Zero whenever there is no basemap frame to register against. */
+  const [regShift, setRegShift] = useState({ dx: 0, dy: 0 });
   const geoWrapRef = useRef(null);
   const geoMapRef = useRef(null);
   const geoBaseRef = useRef(null);
@@ -2403,7 +2416,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   useEffect(() => {
     const map = geoMapRef.current;
     const wrap = geoWrapRef.current;
-    if (!map || !wrap || !origin) return;
+    // No basemap frame → nothing to register against, so the drawing sits at its own
+    // natural position (NEW-2). An un-located plan is drawn in feet against nothing.
+    if (!map || !wrap || !origin) { setRegShift((r) => (r.dx || r.dy ? { dx: 0, dy: 0 } : r)); return; }
     const fx = (size.w / 2 - view.offX) / view.ppf;
     const fy = (size.h / 2 - view.offY) / view.ppf;
     const center = feetToLatLng({ x: fx, y: fy }, origin.lat, origin.lon);
@@ -2434,6 +2449,39 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       map.getPixelOrigin(),
       map.layerPointToContainerPoint(L.point(0, 0)),
     );
+
+    /* NEW-2 — MEASURE the drawing-vs-imagery registration and hand the residual to the
+     * canvas. The reference point is the view centre, whose feet coordinate the drawing
+     * paints at exactly (size/2) by construction of `center` above, so one point pins the
+     * whole frame: the two mappings differ only by a translation (their scales agree by
+     * construction — `ppfToZoom` is the shared model). Measured after each of the three
+     * paths that can move the basemap (a resize commit, a gesture transform, a settle
+     * commit), because each seats it on a different sub-pixel remainder. */
+    const drawPt = { x: size.w / 2, y: size.h / 2 };
+    const noteReg = (imgPt) => {
+      const s = sanitizeShift(registrationShift(imgPt, drawPt));
+      if (!s.ok) {
+        // LOUD-FAILURE: a shift past the quantisation range is a model disagreement (a scale
+        // mismatch, a stale container size, a half-applied gesture transform), not something
+        // to paper over by shoving the drawing sideways. Report it and apply nothing.
+        reportClientEvent("map-registration-out-of-range", "drawing/basemap registration shift exceeded the sub-pixel range", {
+          reason: s.reason, dx: Math.round((imgPt.x - drawPt.x) * 1000) / 1000, dy: Math.round((imgPt.y - drawPt.y) * 1000) / 1000,
+          w: size.w, h: size.h, ppf: view.ppf,
+        });
+      }
+      const next = s.shift;
+      setRegShift((r) => (Math.abs(r.dx - next.dx) < 1e-4 && Math.abs(r.dy - next.dy) < 1e-4 ? r : next));
+    };
+    const noteRegSettled = (c) => {
+      try {
+        noteReg(basemapWrapPoint(
+          map.project(L.latLng(c), map.getZoom()),
+          map.getPixelOrigin(),
+          map.layerPointToContainerPoint(L.point(0, 0)),
+          geoOverscan,
+        ));
+      } catch (_) { /* never let a measurement break a commit */ }
+    };
 
     // Snapshot the current tiles as a static overlay (cloned WITH the live
     // transform, so it sits exactly where the basemap looks right now) and keep
@@ -2489,6 +2537,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         // Store the map's ACTUAL settled center (panBy rounds to whole pixels), so the
         // next sizeChanged test compares against reality, not the pre-round target.
         try { geoCommitRef.current = { center: map.getCenter(), zoom: cur, w: size.w, h: size.h }; } catch (_) { geoCommitRef.current = { center: c, zoom: cur, w: size.w, h: size.h }; }
+        noteRegSettled(c); // NEW-2 — panBy rounded its offset; measure where it actually landed
         return;
       }
       if (ghost) spawnGhost();
@@ -2502,6 +2551,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         announceSetView([geoBaseRef.current, geoBackfillRef.current], zoom, () => map.setView(c, zoom, { animate: false }));
       } catch (_) {}
       geoCommitRef.current = { center: c, zoom, w: size.w, h: size.h };
+      noteRegSettled(c); // NEW-2 — a zoom commit re-snaps the pixel origin; re-measure
     };
 
     const prev = geoCommitRef.current;
@@ -2547,6 +2597,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       const ty = half.y - p.y * scale;
       wrap.style.transformOrigin = "0 0";
       wrap.style.transform = `translate3d(${tx}px, ${ty}px, 0) scale(${scale})`;
+      // NEW-2 — mid-gesture the transform cancels Leaflet's pixel-origin snap, so the
+      // residual here is just the container-centre mismatch; measure it rather than assume
+      // it, so the drawing stays welded through the gesture as well as at settle.
+      noteReg(basemapWrapPointTransformed(
+        map.project(L.latLng(center), map.getZoom()),
+        map.getPixelOrigin(),
+        map.layerPointToContainerPoint(L.point(0, 0)),
+        geoOverscan,
+        { tx, ty, scale },
+      ));
     } catch (_) { commit(center, z, true); return; }
 
     // Re-base to crisp tiles once the scale has drifted ~0.75 levels either way
@@ -2558,7 +2618,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     clearTimeout(geoCommitTimer.current);
     if (Math.abs(z - prev.zoom) > 0.75) { commit(center, z, true); }
     else { geoCommitTimer.current = setTimeout(() => commit(center, z, true), 160); }
-  }, [view, size, origin]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [view, size, origin, geoOverscan]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => () => { clearTimeout(geoCommitTimer.current); if (geoGhostRef.current) { try { geoGhostRef.current.remove(); } catch (_) {} geoGhostRef.current = null; } }, []);
 
@@ -3543,11 +3603,25 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // E2E/self-audit hook (same `window.__PLANYR_E2E` gate as the geo-map hook above; never runs in
   // production). Lets a headless harness park the viewport on an EXACT world point at an EXACT
   // scale, so a junction screenshot is reproducible instead of "wheel-scroll and hope".
+  /* NEW-2 — the pointer-accuracy harness (ui-audit/diagnose-pointer-accuracy.mjs) needs the
+   * RAW numbers, not the chip's rounded text: at the accuracy being asserted (a quarter of a
+   * CSS pixel) the displayed decimals are the same order as the error being measured. This
+   * ref carries the live values so the hook below can expose them without re-registering on
+   * every mouse move. */
+  const probeRef = useRef({});
+  useEffect(() => { probeRef.current = { view, size, regShift, cursorFt: cursor, cursorLL, measures }; });
   useEffect(() => {
     if (typeof window === "undefined" || !window.__PLANYR_E2E) return;
     window.__plannerView = {
       get: () => ({ ...view, w: size.w, h: size.h }),
       centerOn: (fx, fy, ppf) => setView(() => ({ ppf, offX: size.w / 2 - fx * ppf, offY: size.h / 2 - fy * ppf })),
+      // read-only probes (NEW-2): the registration shift actually applied, the cursor's own
+      // feet/lat-lng answer, and the committed measure geometry a placed point lands in.
+      registration: () => ({ ...probeRef.current.regShift }),
+      cursor: () => (probeRef.current.cursorLL
+        ? { ft: { ...probeRef.current.cursorFt }, lat: probeRef.current.cursorLL.lat, lng: probeRef.current.cursorLL.lng }
+        : null),
+      measures: () => JSON.parse(JSON.stringify(probeRef.current.measures || [])),
     };
   }, [view, size.w, size.h]);
   const p2f = useCallback((cx, cy) => {
@@ -15144,9 +15218,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               ))}
             </div>
           )}
+          {/* NEW-2 — `transform` below is the MEASURED sub-pixel translate that welds the
+              drawing onto wherever Leaflet actually seated the basemap. `p2f` reads this
+              element's own bounding box, so this ONE transform corrects the pointer path
+              (the hover readout AND every placed point) along with the render; `view` is
+              untouched, so the pan stays exactly reversible. The export composes from
+              `view` and deliberately does NOT carry it — see lib/mapLock.js. */}
           <svg ref={svgRef} data-testid="planner-canvas" width="100%" height="100%" viewBox={`0 0 ${size.w} ${size.h}`} role="application" aria-label="Site plan canvas"
             data-view-offx={view.offX} data-view-offy={view.offY} data-view-ppf={view.ppf}
-            style={{ position: "relative", zIndex: 1, background: origin ? "transparent" : PAL.paper, display: "block", touchAction: "none", userSelect: "none", WebkitUserSelect: "none", cursor: spacePan ? (panning ? "grabbing" : "grab") : identifyMode ? ADD_CURSOR : (attachFor || alignFor || traceMode || pobMode || routeMode || xsecMode || ovCalib) ? "crosshair" : (tool === "select" || tool === "pan" || printMode) ? (panning ? "grabbing" : "grab") : "crosshair" }}
+            data-reg-dx={regShift.dx} data-reg-dy={regShift.dy}
+            style={{ position: "relative", zIndex: 1, transform: (regShift.dx || regShift.dy) ? `translate(${regShift.dx}px, ${regShift.dy}px)` : undefined, background: origin ? "transparent" : PAL.paper, display: "block", touchAction: "none", userSelect: "none", WebkitUserSelect: "none", cursor: spacePan ? (panning ? "grabbing" : "grab") : identifyMode ? ADD_CURSOR : (attachFor || alignFor || traceMode || pobMode || routeMode || xsecMode || ovCalib) ? "crosshair" : (tool === "select" || tool === "pan" || printMode) ? (panning ? "grabbing" : "grab") : "crosshair" }}
             onMouseDown={(e) => {
               // Don't cancel the default action when the mousedown lands on an inline text
               // editor (a foreignObject <textarea>/<input> — the callout/text box, the inline

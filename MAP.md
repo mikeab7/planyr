@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-07-29 @ `bc01796` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-07-29 @ `2fb3397` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -308,7 +308,7 @@ _355 source files mapped._
 - **`src/workspaces/site-planner/lib/conflictToasts.js`** — the B673 conflict policy matrix as a pure mapping: elementSync event → toast spec (who gets told what, which action rides along)
   - _exports_: `toastForSyncEvent`
 - **`src/workspaces/site-planner/lib/contours.js`** — Pure contour-line math (B704): 1-ft interval auto-pick, sentinel-embedded voids, d3-contour marching squares, grid-border + dilated-void strip passes, pixel-space simplify, index flags + sparse labels
-  - _exports_: `buildContourIndex`, `composeContourPaint`, `contourLabelText`, `DOUBLE_STAMP_PX`, `hitContour`, `HOVER_TOL_PX`, `joinSeams`, `LABEL_CAP`, `LABEL_MIN_SEP_CELLS`, `pickLabels`
+  - _exports_: `buildContourIndex`, `composeContourPaint`, `contourLabelText`, `DOUBLE_STAMP_PX`, `hitContour`, `HOVER_LABEL_GAP_PX`, `HOVER_TOL_PX`, `hoverLabelPlacement`, `hoverLabelSize`, `joinSeams`, `LABEL_CAP`, `LABEL_MIN_SEP_CELLS`, `pickLabels`
 - **`src/workspaces/site-planner/lib/contourTrace.js`** — worker-only marching-squares contour tracer (the sole `d3-contour` consumer): border/void strips, tile-interior clip, deterministic label anchors
   - _exports_: `anchorLabels`, `buildContours`, `clipRun`, `clipSegment`, `dilateVoids`, `pickInterval`, `stripRing`
 - **`src/workspaces/site-planner/lib/convertClient.js`** — B748 client for the B238 DWG→DXF convert service (VITE_CONVERT_URL); round-trips DWG bytes → DXF with a visible, distinct state for every failure (unset URL / 422 / 413 / unreachable).
@@ -462,7 +462,7 @@ _355 source files mapped._
 - **`src/workspaces/site-planner/lib/mapillaryClient.js`** — Leaflet-free Mapillary request shaping: builds bbox map_features URL (same-origin token-injecting proxy, or direct Graph API with a user token) and filters to pole/hydrant detections
   - _exports_: `mapillaryRequestUrl`, `MLY_FIELDS`, `MLY_LIMIT`, `MLY_PROXY_PATH`, `pickDetections`
 - **`src/workspaces/site-planner/lib/mapLock.js`** — THE projection welding the planner's feet frame to the Web-Mercator basemap — scaled-Mercator feet↔lat/lng plus the matching ppf↔zoom, both anchored at the site origin
-  - _exports_: `exactContainerPoint`, `feetToLatLngPair`, `FT_PER_DEG`, `ftPerDeg`, `invMercDeg`, `lngLatToFeet`, `lockOffsetPx`, `mercDeg`, `ppfToZoom`, `zoomToPpf`
+  - _exports_: `basemapWrapPoint`, `basemapWrapPointTransformed`, `exactContainerPoint`, `feetToLatLngPair`, `FT_PER_DEG`, `ftPerDeg`, `invMercDeg`, `lngLatToFeet`, `lockOffsetPx`, `mercDeg`, `ppfToZoom`, `REGISTRATION_SANITY_PX`, `registrationShift`, `sanitizeShift`, `zoomToPpf`
 - **`src/workspaces/site-planner/lib/markupPick.js`** — pure Site-Planner markup hit-test + z-stack cycle (sibling of measureHit.js): the fill-aware grab rule (B920 — a closed markup grabs by interior only when filled, else stroke-only) and the smaller-area-first under-point stack + repeat/Alt-click cycle (B921)
   - _exports_: `boxCorners`, `distToPolyline`, `distToRing`, `ellipseRing`, `markupHitModel`, `markupsUnderPoint`, `markupUnderPoint`, `nextMarkupSelection`, `pointInRing`, `ringArea`
 - **`src/workspaces/site-planner/lib/measureHit.js`** — Pure hit-test + z-order cycling for on-canvas measurements (B910): which measurement a feet-space click lands on (smaller-area-wins), and the next selection when a stack is re-clicked (wraps)

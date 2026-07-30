@@ -209,6 +209,82 @@ export function hitContour(index, lat, lng, tolDeg) {
   return best;
 }
 
+/* ── where the transient hover tag SITS relative to the cursor (NEW-1) ────────────────
+ * B1095 painted the tag centred ON the hit point, i.e. under the mouse pointer — and the
+ * pointer glyph (a big grab hand whenever the Pan tool is armed, which is most of the
+ * time) covered the number the tag exists to show. So the tag is offset in SCREEN pixels
+ * (it holds at every zoom because it never goes through the map scale) and FLIPPED near an
+ * edge so it can neither be clipped by the canvas nor land under the bottom furniture.
+ *
+ * The gap is sized against the LARGEST cursor glyph in use, not the arrow: a grab/grabbing
+ * hand is drawn about two dozen pixels across with its hotspot near the middle, so the
+ * tag's NEAR EDGE has to clear roughly half of that. Pure — no DOM, no Leaflet — so the
+ * quadrant choice and the clamping are unit-tested rather than eyeballed. */
+export const HOVER_LABEL_GAP_PX = 16;
+
+/* Conservative on-screen size of a rendered tag, for the fit decision only — the CSS does
+ * the exact placement, so an OVER-estimate simply leaves a little extra margin (whereas an
+ * under-estimate could let a wide tag clip). 700 10px Inter with tabular figures advances
+ * just under 6 px per digit; 6.6 is the deliberate over-estimate. */
+export function hoverLabelSize(text) {
+  const n = String(text == null ? "" : text).length;
+  return { w: Math.ceil(n * 6.6) + 4, h: 14 };
+}
+
+/* Place a tag of `size` next to the cursor at `at`, inside the VISIBLE box `box`
+ * ({ x0, y0, x1, y1 } in the same coordinate frame as `at`).
+ *
+ * Preference order is up-and-right (the owner's ask, and the quadrant a right-handed
+ * pointer's own glyph leans away from), then up-left, down-right, down-left; the first
+ * quadrant whose whole rect fits wins. If none fits — a box barely bigger than the tag —
+ * the best-fitting quadrant is kept and its rect CLAMPED inside the box, and when the
+ * clamp would slide the tag back under the cursor glyph the other axis flips instead.
+ * Returns { tx, ty, quadrant, clamped } where (tx, ty) is the offset from `at` to the
+ * tag's TOP-LEFT corner. */
+export function hoverLabelPlacement(at, box, size, { gap = HOVER_LABEL_GAP_PX } = {}) {
+  const { w, h } = size || { w: 0, h: 0 };
+  const x = Number(at && at.x) || 0, y = Number(at && at.y) || 0;
+  const b = {
+    x0: Number(box && box.x0) || 0, y0: Number(box && box.y0) || 0,
+    x1: Number(box && box.x1) || 0, y1: Number(box && box.y1) || 0,
+  };
+  // Offsets that put the tag's near edge `gap` away from the cursor, per quadrant.
+  const off = {
+    "up-right": { tx: gap, ty: -gap - h },
+    "up-left": { tx: -gap - w, ty: -gap - h },
+    "down-right": { tx: gap, ty: gap },
+    "down-left": { tx: -gap - w, ty: gap },
+  };
+  const order = ["up-right", "up-left", "down-right", "down-left"];
+  const overflow = (o) => {
+    const l = x + o.tx, t = y + o.ty;
+    return Math.max(0, b.x0 - l) + Math.max(0, l + w - b.x1)
+      + Math.max(0, b.y0 - t) + Math.max(0, t + h - b.y1);
+  };
+  let bestName = null, bestOver = Infinity;
+  for (const name of order) {
+    const over = overflow(off[name]);
+    if (over === 0) return { tx: off[name].tx, ty: off[name].ty, quadrant: name, clamped: false };
+    if (over < bestOver) { bestOver = over; bestName = name; }
+  }
+  // Nothing fits outright — clamp the least-bad quadrant into the box.
+  const o = off[bestName];
+  let l = Math.min(Math.max(x + o.tx, b.x0), Math.max(b.x0, b.x1 - w));
+  let t = Math.min(Math.max(y + o.ty, b.y0), Math.max(b.y0, b.y1 - h));
+  // A clamp that slides the tag back over the cursor defeats the whole point; when the
+  // horizontal clearance is gone, drop the tag to a pure vertical offset (or lift it),
+  // whichever side of the cursor has more room, so the glyph is still clear of the text.
+  const coversCursor = l - gap < x && x < l + w + gap && t - gap < y && y < t + h + gap;
+  if (coversCursor) {
+    const roomAbove = y - b.y0, roomBelow = b.y1 - y;
+    t = roomAbove >= roomBelow
+      ? Math.max(b.y0, y - gap - h)
+      : Math.min(Math.max(b.y0, b.y1 - h), y + gap);
+    l = Math.min(Math.max(x - w / 2, b.x0), Math.max(b.x0, b.x1 - w));
+  }
+  return { tx: l - x, ty: t - y, quadrant: bestName, clamped: true };
+}
+
 /* THE ONE composition of a painted contour view, shared by every consumer so screen and
  * test can't drift. `parts` is [{ tile, data }] — one per lattice tile in the cover, in
  * any order and possibly containing a duplicate (a superseded artifact that slipped
