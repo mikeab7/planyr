@@ -9,6 +9,7 @@ import { registerFlush } from "../../app/flushRegistry.js";
 import { createEditorLock } from "../../shared/presence/editorLock.js";
 import { reportClientEvent } from "../../shared/telemetry/clientErrors.js";
 import { createElementSync, stableStringify } from "./lib/elementSync.js";
+import { planDelete, shouldHintTypingGuard, TYPING_GUARD_HINT } from "./lib/deletePlan.js";
 import { rowsToModel, KIND_TO_FIELD, foldNeverSyncedLocal, foldJournal, reconcileSeedRows } from "./lib/elementRows.js";
 import { writeJournal, readJournal, clearJournal, sweepJournals, journalSessionId } from "./lib/elementJournal.js";
 import { ToastHost, useToasts } from "../../shared/ui/Toast.jsx";
@@ -1929,6 +1930,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // `leftPanel`, which is not in that listener's dep list.
   const inspectorShowingRef = useRef(false);
   const multiRef = useRef(multi); multiRef.current = multi;
+  // NEW-1 — which focused field we've already told "your Delete went into the box you're typing in",
+  // so the hint fires once per field rather than once per keystroke. Cleared when focus leaves.
+  const typingHintRef = useRef(null);
   // NEW-1: live mirrors read by the takeover / restore layout effects (whose deps intentionally
   // EXCLUDE leftPanel/dockMemo so a deliberate manual rail switch can't re-trigger a takeover).
   const leftPanelRef = useRef(leftPanel); leftPanelRef.current = leftPanel;
@@ -3877,7 +3881,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     setLayerOverrides(snapOverrides);
     // (B672: the old noteLocalContent thin-clobber rebase is gone with the guard itself — an
     // undo/redo shrink now just diffs into per-element deletes through the rev-checked path.)
-    setSel(null); setSplitPath([]); setTypeMenu(null);
+    // NEW-1 — clear the MULTI-selection too, not just `sel`. Clearing only `sel` left `multi`
+    // pointing at whatever was selected before the undo; with `sel` null and `multi` non-empty the
+    // next Delete keypress hit deleteSel's old silent return and the key was dead until an unrelated
+    // click reset it. Every other selection store the snapshot invalidates goes with it.
+    setSel(null); setMulti([]); setDrillId(null); setSelVtx(null); setSplitPath([]); setTypeMenu(null);
     // Drop EVERY in-progress draft: a snapshot restored under a half-drawn shape (on a redo, or an
     // undo while an uncovered draft — callout/rect/ellipse — is pending) would otherwise leave stale
     // points floating over the reverted geometry. Mirrors DocReview/Stitcher applySnapshot (RC-2).
@@ -4438,7 +4446,21 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // element out from under the user).
       const isSliderFocus = t && t.tagName === "INPUT" && t.type === "range";
       const isUndoRedoChord = (e.ctrlKey || e.metaKey) && (e.key === "z" || e.key === "Z" || e.key === "y" || e.key === "Y");
-      if (t && !(isSliderFocus && isUndoRedoChord) && (t.tagName === "INPUT" || t.tagName === "SELECT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return; // don't hijack keys while typing in a field
+      if (t && !(isSliderFocus && isUndoRedoChord) && (t.tagName === "INPUT" || t.tagName === "SELECT" || t.tagName === "TEXTAREA" || t.isContentEditable)) {
+        // NEW-1 — the guard stays (you must be able to type), but it no longer swallows Delete in
+        // SILENCE. Editing a building's width in Properties and then pressing Delete looked exactly
+        // like "delete is broken": the element sat visibly selected and the key did nothing, with no
+        // explanation. shouldHintTypingGuard keeps this from becoming noise — Delete only (never
+        // Backspace, the natural editing key), only with a live selection, once per focused field.
+        const fieldKey = t.id || t.name || t.getAttribute("aria-label") || t.placeholder || t.tagName;
+        if (shouldHintTypingGuard({ key: e.key, hasSelection: !!(selRef.current || multiRef.current.length), fieldKey, lastHintedField: typingHintRef.current })) {
+          typingHintRef.current = fieldKey;
+          flashWarn(TYPING_GUARD_HINT, 4500);
+          reportClientEvent("delete-attempt", "key:delete → swallowed by a focused field", { entry: "key:delete", result: "no-op", reason: "typing-guard", field: String(fieldKey).slice(0, 60) });
+        }
+        return; // don't hijack keys while typing in a field
+      }
+      typingHintRef.current = null; // focus left the field — the hint may fire again next time
       if ((e.ctrlKey || e.metaKey) && (e.key === "z" || e.key === "Z")) { e.preventDefault(); if (e.shiftKey) redo(); else if (!removeLastVertex()) undo(); return; } // Bluebeam: mid-draw Ctrl-Z peels the last placed vertex; only a no-draft Ctrl-Z does a global undo (matches Doc Review / Stitcher)
       if ((e.ctrlKey || e.metaKey) && (e.key === "y" || e.key === "Y")) { e.preventDefault(); redo(); return; }
       // NEW-6 — Ctrl+C/X now copy WHATEVER is selected (element, markup, measurement, callout,
@@ -4508,7 +4530,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if (e.key.startsWith("Arrow") && (multi.length > 1 || sel?.kind === "el")) { e.preventDefault(); nudgeSel(e.key, e.shiftKey ? 10 : 1); return; }
       if ((e.key === "Backspace" || e.key === "Delete") && removeLastVertex()) { e.preventDefault(); return; } // undo the last placed vertex mid-draw
       if ((e.key === "Delete" || e.key === "Backspace") && selVtxRef.current && deleteVtx(selVtxRef.current.layer, selVtxRef.current.id, selVtxRef.current.index)) { e.preventDefault(); return; } // B230: an armed control point → delete just that vertex. NEW-1: deleteVtx returns false on a no-op (endpoint/min/stale) → we DON'T consume the key; it falls through to the whole-element delete below so Delete can never silently wedge.
-      if ((e.key === "Delete" || e.key === "Backspace") && (selRef.current || multiRef.current.length)) { e.preventDefault(); deleteSel(); } // read live selection (refs) — not the listener's possibly-stale closure
+      // NEW-1 — UNCONDITIONAL. The old guard (`&& (selRef.current || multiRef.current.length)`) meant a
+      // Delete with nothing selected never reached deleteSel at all, so it could not say so; and a
+      // one-item `multi` with no `sel` DID reach it and died on the silent return inside. Now the key
+      // always calls through, and deleteSel either removes something or explains why it didn't.
+      if (e.key === "Delete" || e.key === "Backspace") { e.preventDefault(); deleteSel(null, { entry: "key:delete" }); } // read live selection (refs) — not the listener's possibly-stale closure
     };
     const onKeyUp = (e) => { if (e.key === " " || e.code === "Space") { spaceRef.current = false; setSpacePan(false); } };
     window.addEventListener("keydown", onKey);
@@ -4527,51 +4553,60 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     return () => { window.removeEventListener("keydown", sync); window.removeEventListener("keyup", sync); window.removeEventListener("blur", clear); };
   }, []);
 
-  const deleteSel = (target) => {
-    // Optional explicit `target` ({kind,id}) lets a menu handler delete a just-clicked item WITHOUT waiting
-    // for a setSel() state update to land (the stale-selection class the refs were meant to kill, NEW-1).
-    // Guard on `.kind` so the five bare onClick={deleteSel} panel buttons — which pass a React event as
-    // arg 1 — still fall back to the live selection ref (a MouseEvent has no `.kind`).
-    const explicit = !!(target && target.kind);
-    const sel = explicit ? target : selRef.current, multi = explicit ? [] : multiRef.current; // live selection — robust to a stale keydown closure (NEW-1)
-    if (multi.length > 1) { // delete the whole multi-selection (+ each element's assembly)
-      pushHistory();
-      const elIds = new Set();
-      multi.filter((m) => m.kind === "el").forEach((m) => assemblyOf(m.id).forEach((x) => elIds.add(x.id)));
-      const mkIds = new Set(multi.filter((m) => m.kind === "markup").map((m) => m.id));
-      const measIds = new Set(multi.filter((m) => m.kind === "measure").map((m) => m.id)); // B569: measures join the multi-delete
-      // NEW-6 — callouts and parcels can now ride in a multi-selection (a pasted mixed set selects
-      // itself), so the multi-delete has to cover them too or Delete would silently skip them.
-      const coIds = new Set(multi.filter((m) => m.kind === "callout").map((m) => m.id));
-      const pcIds = new Set(multi.filter((m) => m.kind === "parcel").map((m) => m.id));
-      // B556 — tombstone exactly what the filter removes (selected els, their bonded children, markups,
-      // AND measures — measures carry a stable uid() id and count in contentCount, so a multi-measure
-      // delete otherwise trips the thin-clobber guard and resurrects on merge, same as any other item).
-      const removedEls = stateRef.current.els.filter((e) => elIds.has(e.id) || elIds.has(e.attachedTo)).map((e) => e.id);
-      setEls((a) => a.filter((e) => !elIds.has(e.id) && !elIds.has(e.attachedTo)));
-      setMarkups((a) => a.filter((m) => !mkIds.has(m.id)));
-      if (measIds.size) setMeasures((a) => a.filter((m) => !measIds.has(m.id)));
-      if (coIds.size) setCallouts((a) => a.filter((c) => !coIds.has(c.id)));
-      if (pcIds.size) setParcels((a) => a.filter((p) => !pcIds.has(p.id)));
-      setMulti([]); setSel(null);
-      tombstone([...removedEls, ...mkIds, ...measIds, ...coIds, ...pcIds]);
-      return;
+  /* NEW-1 — ONE delete path, and it can never fail in silence.
+   *
+   * Was: a count-dependent branch (`multi.length > 1` … else `if (!sel) return;`) whose fall-through
+   * was a bare `return` with no message, no telemetry, and no way to tell which of its sixteen call
+   * sites had just died. That silent return is the defect behind the owner's recurring "I click
+   * Delete and nothing happens" — see lib/deletePlan.js for the four ordinary states that reach it.
+   *
+   * Now: every entry point calls this with an `entry` id; lib/deletePlan.js resolves WHAT is being
+   * deleted (union of `multi` and `sel`, at ANY count, each ref checked against the live model) and
+   * this applies the result. Nothing was removed → the user is TOLD why, and the attempt + outcome
+   * both land in telemetry so the next report is one query rather than a guessing game.
+   *
+   * `target` is either an explicit ref ({kind,id}) from a menu — which deletes THAT item without
+   * waiting for a setSel() to land — or the React event the bare onClick={deleteSel} buttons pass
+   * (a MouseEvent has no `.kind`, so it falls back to the live selection refs). */
+  const deleteSel = (target, opts) => {
+    const entry = (opts && opts.entry) || (target && target.entry) || "unknown";
+    const explicit = target && target.kind ? { kind: target.kind, id: target.id, i: target.i } : null;
+    const sel = selRef.current, multi = multiRef.current; // live refs — robust to a stale keydown closure
+    const plan = planDelete({ sel, multi, explicit, state: stateRef.current, entry });
+    reportClientEvent("delete-attempt", `${entry} → ${plan.outcome === "removed" ? plan.label : plan.outcome}`, {
+      entry, n: plan.count, kinds: plan.refs.map((r) => r.kind), ids: plan.refs.map((r) => r.id).filter(Boolean).slice(0, 20),
+      selKind: (explicit || sel || {}).kind || null, multiN: multi.length,
+    });
+    if (plan.outcome !== "removed") {
+      // LOUD-FAILURE — a delete that removes nothing SAYS SO. The stale case also clears the dead
+      // selection so the very next Delete isn't refused for the same reason.
+      if (plan.outcome === "stale") { setSel(null); setMulti([]); setDrillId(null); }
+      flashWarn(plan.message, 5000);
+      reportClientEvent("delete-outcome", `${entry} → no-op (${plan.outcome})`, { entry, result: "no-op", reason: plan.outcome, stale: plan.stale.slice(0, 20) });
+      return plan;
     }
-    if (!sel) return;
     pushHistory();
-    // B556/NEW-1 — every branch that drops a drawn item leaves a tombstone so a cloud/cross-tab union-
-    // merge can't resurrect it (and the drop is "explained" to the thin-clobber guard). Measures are
-    // index-keyed in single-selection (sel.i) but DO carry a stable uid() id, so resolve it and tombstone.
-    if (sel.kind === "el") {
-      const removed = stateRef.current.els.filter((e) => e.id === sel.id || e.attachedTo === sel.id).map((e) => e.id);
-      setEls((a) => a.filter((e) => e.id !== sel.id && e.attachedTo !== sel.id));
-      tombstone(removed); // a building drops with its bonded children — tombstone all of them
+    const { els: elIds, markups: mkIds, measures: measIds, measureIdx, callouts: coIds, parcels: pcIds } = plan.remove;
+    // B556/TOMBSTONE-DELETES — tombstone exactly what the filters remove, bonded children included,
+    // so a cloud / cross-tab union merge can't resurrect half an assembly.
+    if (elIds.length) { const s = new Set(elIds); setEls((a) => a.filter((e) => !s.has(e.id))); }
+    if (mkIds.length) { const s = new Set(mkIds); setMarkups((a) => a.filter((m) => !s.has(m.id))); }
+    if (measIds.length || measureIdx.length) {
+      const s = new Set(measIds), ix = new Set(measureIdx);
+      setMeasures((a) => a.filter((m, i) => !(m && m.id && s.has(m.id)) && !ix.has(i)));
     }
-    else if (sel.kind === "measure") { const gid = (stateRef.current.measures[sel.i] || {}).id; setMeasures((a) => a.filter((_, i) => i !== sel.i)); if (gid) tombstone(gid); }
-    else if (sel.kind === "callout") { setCallouts((a) => a.filter((c) => c.id !== sel.id)); tombstone(sel.id); }
-    else if (sel.kind === "markup") { setMarkups((a) => a.filter((m) => m.id !== sel.id)); tombstone(sel.id); }
-    else { setParcels((a) => a.filter((p) => p.id !== sel.id)); tombstone(sel.id); }
-    setSel(null);
+    if (coIds.length) { const s = new Set(coIds); setCallouts((a) => a.filter((c) => !s.has(c.id))); }
+    if (pcIds.length) { const s = new Set(pcIds); setParcels((a) => a.filter((p) => !s.has(p.id))); setCombineSel((c) => c.filter((x) => !s.has(x))); }
+    // ALWAYS clear BOTH selection stores. Clearing only `sel` is what left a one-item `multi`
+    // pointing at the thing we just deleted — and the next Delete keypress then hit the old silent
+    // return, so the key stayed dead until an unrelated click happened to reset it.
+    setSel(null); setMulti([]); setDrillId(null); setSelVtx(null);
+    tombstone(plan.tombstones);
+    reportClientEvent("delete-outcome", `${entry} → removed ${plan.label}`, {
+      entry, result: "removed", n: plan.count, removed: plan.tombstones.length, locked: plan.lockedCount,
+      ids: plan.tombstones.slice(0, 20),
+    });
+    return plan;
   };
   // Arrow-nudge the selection (1′, or 10′ with Shift) — group when multi-selected.
   const nudgeSel = (key, step) => {
@@ -4642,7 +4677,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     flashWarn(`Copied — ${MOD_LABEL}V pastes it where your cursor is.`, 3500);
     return payload;
   };
-  const cutSel = () => { if (copySel()) deleteSel(); };
+  const cutSel = () => { if (copySel()) deleteSel(null, { entry: "cut" }); };
   const pasteClip = () => {
     const payload = clip.current;
     if (!payload?.items?.length) return;
@@ -8259,11 +8294,20 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   };
   // Delete a parcel with a tombstone (B556/B612 — a delete without one resurrects on a cloud/tab merge).
   const deleteParcelById = (id) => {
+    // NEW-1 — the same no-silent-no-op contract as deleteSel: this used to filter on a dead id and
+    // return having removed nothing, tombstoned nothing, and said nothing.
+    if (!parcels.some((p) => p.id === id)) {
+      setParcelMenu(null);
+      flashWarn("That's already gone — nothing left to delete.", 5000);
+      reportClientEvent("delete-outcome", "menu:parcel → no-op (stale)", { entry: "menu:parcel", result: "no-op", reason: "stale", id });
+      return;
+    }
     pushHistory();
     setParcels((a) => a.filter((p) => p.id !== id));
     setCombineSel((s) => s.filter((x) => x !== id));
-    if (sel?.kind === "parcel" && sel.id === id) setSel(null);
+    if (sel?.kind === "parcel" && sel.id === id) { setSel(null); setMulti([]); setDrillId(null); }
     tombstone(id);
+    reportClientEvent("delete-outcome", "menu:parcel → removed parcel", { entry: "menu:parcel", result: "removed", n: 1, ids: [id] });
   };
   /* ------------ dedicated canvas right-click menu (B627) ------------
    * A right-click anywhere on the map opens OUR menu, never the browser's. On a markup
@@ -8291,13 +8335,21 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // Delete a markup — and, for a plotted deed, its whole save-and-except group — with a tombstone.
   const deleteMarkupById = (id) => {
     const m = markups.find((x) => x.id === id);
-    if (!m) return;
+    // NEW-1 — no silent return. A right-click row whose markup has since gone (undo, another tab)
+    // used to close the menu and do nothing at all; now it says so and is traceable.
+    if (!m) {
+      setMapMenu(null);
+      flashWarn("That's already gone — nothing left to delete.", 5000);
+      reportClientEvent("delete-outcome", "menu:markup → no-op (stale)", { entry: "menu:markup", result: "no-op", reason: "stale", id });
+      return;
+    }
     pushHistory();
     const ids = m.deedGroup ? markups.filter((x) => x.deedGroup === m.deedGroup).map((x) => x.id) : [id];
     const idset = new Set(ids);
     setMarkups((a) => a.filter((x) => !idset.has(x.id)));
-    setSel(null); setMapMenu(null);
+    setSel(null); setMulti([]); setDrillId(null); setMapMenu(null);
     tombstone(ids);
+    reportClientEvent("delete-outcome", `menu:markup → removed ${m.kind || "markup"}`, { entry: "menu:markup", result: "removed", n: ids.length, ids: ids.slice(0, 20) });
   };
 
   /* ------------ align rotation to a target (parcel edge / element) ------------ */
@@ -15624,7 +15676,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 );
               })()}
               <div style={{ display: "flex", gap: 6, marginTop: 12 }}>
-                <button style={{ ...chip, color: PAL.danger }} onClick={deleteSel}>Delete parcel</button>
+                <button style={{ ...chip, color: PAL.danger }} onClick={() => deleteSel(null, { entry: "panel:parcel" })}>Delete parcel</button>
               </div>
             </Section>
           )}
@@ -18612,7 +18664,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.5, marginTop: 6 }}>{isStrip ? "Drag a centerline dot to reshape (the strip re-offsets); ＋ adds a point, Shift-click removes one." : "Drag a boundary dot to reshape; ＋ adds a point, Shift-click removes one."}</div>
                 <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
                   <button style={chip} onClick={() => toggleMarkupLock(e.id)}>{e.locked ? "🔒 Unlock" : "🔓 Lock"}</button>
-                  <button style={{ ...chip, color: PAL.danger }} onClick={deleteSel}>Delete</button>
+                  <button style={{ ...chip, color: PAL.danger }} onClick={() => deleteSel(null, { entry: "panel:easement" })}>Delete</button>
                 </div>
               </Section>
             );
@@ -18695,7 +18747,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 </div>
                 <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
                   <button style={chip} onClick={() => toggleMarkupLock(selMarkup.id)}>{selMarkup.locked ? "🔒 Unlock" : "🔓 Lock"}</button>
-                  <button style={{ ...chip, color: PAL.danger }} onClick={deleteSel}>Delete</button>
+                  <button style={{ ...chip, color: PAL.danger }} onClick={() => deleteSel(null, { entry: "panel:markup" })}>Delete</button>
                 </div>
               </Section>
               </div>
@@ -18746,7 +18798,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 <Field label="Padding X / Y"><span style={{ display: "flex", gap: 5 }}><NumInput style={{ ...numInput, width: 42 }} value={cs.padX} min={0} step={1} coarse={4} onCommit={(n) => setSelCallout({ padX: n })} /> <NumInput style={{ ...numInput, width: 42 }} value={cs.padY} min={0} step={1} coarse={4} onCommit={(n) => setSelCallout({ padY: n })} /></span></Field>
                 <Field label="Line spacing"><NumInput style={numInput} value={cs.lineHeight} min={0.8} step={0.1} coarse={0.5} onCommit={(n) => setSelCallout({ lineHeight: n })} /></Field>
                 <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
-                  <button style={{ ...chip, color: PAL.danger }} onClick={deleteSel}>{selCallout.noLeader ? "Delete text box" : "Delete callout"}</button>
+                  <button style={{ ...chip, color: PAL.danger }} onClick={() => deleteSel(null, { entry: "panel:callout" })}>{selCallout.noLeader ? "Delete text box" : "Delete callout"}</button>
                 </div>
               </Section>
               </div>
@@ -18835,7 +18887,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   <button style={chip} onClick={() => toggleMeasureLock(m.id)}>{m.locked ? "🔒 Unlock" : "🔓 Lock"}</button>
                   {hasOverride && <button style={chip} title="Back to your Standards defaults, including where the label sits"
                     onClick={() => setSelMeasure({ ...Object.fromEntries(MEASURE_STD_KEYS.map((k) => [k, null])), labelOffset: null })}>Reset style</button>}
-                  <button style={{ ...chip, color: PAL.danger }} onClick={deleteSel}>Delete</button>
+                  <button style={{ ...chip, color: PAL.danger }} onClick={() => deleteSel(null, { entry: "panel:measure" })}>Delete</button>
                 </div>
               </Section>
               </div>
@@ -19386,7 +19438,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               {selEl.type !== "pond" && (
               <div style={{ display: "flex", gap: 6, marginTop: 9 }}>
                 <button style={chip} onClick={() => toggleLock(selEl.id)} title="Pin in place: prevents accidental moves/edits">{selEl.locked ? "📌 Unpin" : "📌 Pin"}</button>
-                <button style={{ ...chip, color: PAL.danger }} onClick={deleteSel}>Delete element</button>
+                <button style={{ ...chip, color: PAL.danger }} onClick={() => deleteSel(null, { entry: "panel:element" })}>Delete element</button>
               </div>
               )}
               {selEl.type === "pond" && (() => {
@@ -19720,7 +19772,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       <span style={{ display: "flex", alignItems: "center", gap: 8, flex: "none" }}>
                         <RowInfo label={pondDisplayName(g_roleInfo.role)} sections={[{ text: "Drag the body to move. Drag a corner dot to reshape; click + on an edge to add a point; Shift-click to delete one." }]} />
                         <button style={{ ...chip, padding: "3px 8px" }} onClick={() => toggleLock(selEl.id)} title="Pin in place: prevents accidental moves/edits">{selEl.locked ? "📌 Unpin" : "📌 Pin"}</button>
-                        <button type="button" style={{ ...chip, padding: "3px 10px", color: PAL.danger, fontWeight: 700 }} onClick={deleteSel}>Delete</button>
+                        <button type="button" style={{ ...chip, padding: "3px 10px", color: PAL.danger, fontWeight: 700 }} onClick={() => deleteSel(null, { entry: "panel:pond" })}>Delete</button>
                       </span>
                     </div>
                     {/* v3 UI SPEC B2 — status card(s): the ONE provided/required statement in this panel (G1).
@@ -21343,7 +21395,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             {row({ text: m.locked ? "Unlock" : "Lock", hint: m.locked ? "🔒" : "🔓", on: () => { toggleMeasureLock(m.id); close(); } })}
             {row({ text: "Copy", hint: `${MOD}C`, on: () => { copyRef({ kind: "measure", id: m.id, i: mapMenu.i }); close(); } })}
             <div style={{ borderTop: `1px solid ${PAL.panelLine}`, marginTop: 4, paddingTop: 4 }} />
-            {row({ text: "Delete measurement", hint: "Del", danger: true, on: () => { deleteSel({ kind: "measure", i: mapMenu.i }); close(); } })}
+            {row({ text: "Delete measurement", hint: "Del", danger: true, on: () => { deleteSel({ kind: "measure", i: mapMenu.i }, { entry: "menu:measure" }); close(); } })}
           </>;
         } else if (mapMenu.kind === "callout") {
           // Multi-leader — Add / Delete Leader for the SEPARATE `callouts` collection.
@@ -21355,7 +21407,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             {mapMenu.leaderIndex >= 0 && row({ text: "Delete Leader", danger: true, on: () => { removeLeaderFromCallout(c.id, mapMenu.leaderIndex); close(); } })}
             {row({ text: "Copy", hint: `${MOD}C`, on: () => { copyRef({ kind: "callout", id: c.id }); close(); } })}
             <div style={{ borderTop: `1px solid ${PAL.panelLine}`, marginTop: 4, paddingTop: 4 }} />
-            {row({ text: c.noLeader ? "Delete text box" : "Delete callout", hint: "Del", danger: true, on: () => { deleteSel({ kind: "callout", id: c.id }); close(); } })}
+            {row({ text: c.noLeader ? "Delete text box" : "Delete callout", hint: "Del", danger: true, on: () => { deleteSel({ kind: "callout", id: c.id }, { entry: "menu:callout" }); close(); } })}
           </>;
         } else {
           const hasClip = !!(clip.current?.items?.length || overlayClip.current);
@@ -21487,7 +21539,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   {t.attachedTo
                     ? <button style={menuItem(false)} onClick={() => { detach(typeMenu.id); setTypeMenu(null); }}>Detach</button>
                     : <button style={menuItem(false)} onClick={() => { setAttachFor(typeMenu.id); setTypeMenu(null); }}>Attach to…</button>}
-                  <button style={{ ...menuItem(false), color: PAL.danger }} onClick={() => { deleteSel({ kind: "el", id: typeMenu.id }); setTypeMenu(null); }}>Delete</button>
+                  <button style={{ ...menuItem(false), color: PAL.danger }} onClick={() => { deleteSel({ kind: "el", id: typeMenu.id }, { entry: "menu:element" }); setTypeMenu(null); }}>Delete</button>
                 </>
               );
             })()}
