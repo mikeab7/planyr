@@ -10538,15 +10538,22 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     coDetail: coTier
       ? (coRegime && coRegime.id === "mhfd" ? coTier.regions.MHFD_DETENTION_DETAIL : coTier.regions.COLORADO_DETENTION_DETAIL)
       : null,
-    /* The C.R.S. 37-92-602(8) reconciliation (B1105 build requirement): MHFD asks you to hold water,
-     * Colorado water law asks you to let it go, and the panel has to show whether the configuration
-     * can satisfy both. Only ever computed for an MHFD site — the statute readout itself is
-     * statewide and unchanged. */
-    coMhfdDrawdown: coTier && coRegime && coRegime.id === "mhfd"
-      ? coTier.mhfd.reconcileMhfdDrawdown({ drainTimeHr: null, statuteAssessment: yDrawdownStatute })
-      : null,
-    coMhfdJurisdiction: coTier && coRegime && coRegime.id === "mhfd"
-      ? coTier.mhfd.mhfdJurisdictionNote((drainCtxData?.authority?.jurisdiction?.county || [])[0] || restored?.county || null)
+    /* B1105 — ONE lazy-tier call for the whole MHFD panel payload: the C.R.S. 37-92-602(8)
+     * reconciliation (MHFD asks you to hold water, Colorado water law asks you to let it go, and the
+     * panel must show whether the configuration can satisfy both), the city-overlay note, and the
+     * "Assumptions & method" lines.
+     *
+     * Composed THERE rather than here on purpose. Every string in it is Colorado prose that can only
+     * render once that chunk has landed, so building it on the boot path cost every Texas user bytes
+     * for text they can never see — and breached `bundle.siteRouteJsBytes` on CI. Three separate call
+     * sites also each repeated this county-resolution expression. A feature that breaches a budget
+     * ships with a matching optimization; collapsing them to one call is it. Null off an MHFD site. */
+    coMhfdBag: coTier && coRegime && coRegime.id === "mhfd"
+      ? coTier.mhfd.mhfdPanelBag({
+          carrier: detReq,
+          county: (drainCtxData?.authority?.jurisdiction?.county || [])[0] || restored?.county || null,
+          statuteAssessment: yDrawdownStatute,
+        })
       : null,
     // B907 — the typical screening pond depth used ONLY to ESTIMATE additional land take
     // from a detention shortfall (never to size a pond) — criteria-configurable.
@@ -21395,39 +21402,19 @@ function YieldPanel({
               ));
               /* B1105 — the MHFD DETAIL, entirely inside "Assumptions & method ▸".
                *
-               * Every line here is a `keyedNote`, which the copy budget exempts, and that is the
-               * deliberate choice PANEL-BREVITY calls for: honesty stays REACHABLE without the
-               * default view accumulating lines. WQCV and EURV get one line EACH — they are a
-               * water-quality requirement and a flood volume, they are never collapsed into one
-               * number, and each names the document it is still waiting on. */
+               * Every line is a `keyedNote`, which the copy budget exempts — the deliberate choice
+               * PANEL-BREVITY calls for: honesty stays REACHABLE without the default view
+               * accumulating lines. WQCV and EURV get one line EACH (a water-quality requirement and
+               * a flood volume are never collapsed), each naming the document it still waits on.
+               *
+               * ⛔ The lines are COMPOSED IN THE LAZY TIER (`mhfdMethodNotes` → `d.coMhfdNotes`) and
+               * this render only maps them onto the note primitive. Do NOT inline the strings back
+               * here: they are Colorado prose that can only render once that chunk has landed, so on
+               * the boot path they cost every Texas user bytes for text they can never see — which
+               * breached `bundle.siteRouteJsBytes` on CI. */
               if (coMhfd) {
                 detR.push(keyedNote(ruleBadge(req.rule), "mhfd-badge"));
-                for (const c of (req.components || [])) {
-                  detR.push(keyedNote(
-                    `${c.short} — ${c.label.toLowerCase()}${c.state === "computed" && c.acFt != null ? `: ${f1(c.acFt)} ac-ft` : ` · ${c.state === "needs-input" ? "needs input" : "not carried"}`}. ${c.why || ""}${c.needs ? ` Needs: ${c.needs}` : ""}`.trim(),
-                    `mhfd-comp-${c.id}`,
-                  ));
-                }
-                // The statute reconciliation — the one place the two Colorado features must agree
-                // rather than contradict. It borrows the statute module's vocabulary and so can
-                // never read "complies"; see reconcileMhfdDrawdown.
-                const cd = d.coMhfdDrawdown;
-                if (cd) {
-                  detR.push(keyedNote(
-                    `${cd.citation}: ${cd.rows.map((r) => `${r.label} — ${r.reason}`).join(" ")} ${cd.note}`,
-                    "mhfd-statute",
-                  ));
-                }
-                // The audit answer: inside the district is NOT the same as knowing the final rule.
-                if (d.coMhfdJurisdiction) detR.push(keyedNote(d.coMhfdJurisdiction.text, "mhfd-overlay"));
-                // No literal fallback for the workbook NAME: it would put Colorado prose on the boot
-                // path (verify-colorado-guard.mjs catches that), and the record always carries it.
-                if (req.workbook) detR.push(keyedNote([req.workbook.note, req.workbook.source?.name].filter(Boolean).join(" — "), "mhfd-workbook"));
-                // Release rate and outlet configuration are named as NOT carried, so Planyr's own
-                // Texas outlet model is never quietly applied to a full-spectrum basin.
-                if (req.release && !req.release.transcribed) detR.push(keyedNote(req.release.note, "mhfd-release"));
-                if (req.outlet && !req.outlet.transcribed) detR.push(keyedNote(req.outlet.note, "mhfd-outlet"));
-                if (req.rule?.provenanceNote) detR.push(keyedNote(req.rule.provenanceNote, "mhfd-provenance"));
+                for (const n of ((d.coMhfdBag && d.coMhfdBag.notes) || [])) detR.push(keyedNote(n.text, n.key));
               }
             } else if (req && (req.kind === "point" || req.kind === "none")) {
               // v3 A3 — the numeric "Detention required" row is deleted (the required number lives

@@ -149,15 +149,16 @@ const pairRow = (key, label, provided, required, short, opts = {}) => {
  * The row is deliberately NOT a shortfall (nothing is wrong with the design) and NOT an OK (nothing
  * has been checked), so it sorts below the real verdicts and above "not checked yet". */
 function unavailableDetentionRow(req) {
-  const comps = Array.isArray(req.components) ? req.components : [];
-  const named = comps.filter((c) => c.required !== false && c.role !== "flood-control").map((c) => c.short).filter(Boolean);
-  const short = req.rule && req.rule.authorityShort ? req.rule.authorityShort : null;
   /* PANEL-BREVITY: verdict first, ONE short line — and literally one SENTENCE, assembled from a
-   * computed subject so the budget counts a single string rather than one per regime. The component
-   * list IS the named state (a chip-like "WQCV + EURV" beats a sentence explaining that two volumes
-   * govern, rule 3); every word of the why rides the ⓘ, which is exempt. */
-  const who = short ? `${short} ${named.length ? named.join(" + ") : "criteria"}` : "Colorado detention";
-  const sentence = `${who} — not carried yet`;
+   * computed subject so the budget counts a single string rather than one per regime.
+   *
+   * `req.verdictSubject` is composed by the carrier itself (see `mhfdDetention.verdictSubjectFor`)
+   * so the district name and its component short names — "MHFD WQCV + EURV" — stay in the lazily
+   * loaded Colorado tier. This module is on the BOOT PATH because the row has to render instantly,
+   * so deriving that subject here would have put Colorado data in the eager bundle. The fallback IS
+   * eager, and has to be: it is what a Colorado site with no resolved regime reads. */
+  const comps = Array.isArray(req.components) ? req.components : [];
+  const sentence = `${req.verdictSubject || "Colorado detention"} — not carried yet`;
   return finish({
     key: "det",
     label: "Detention",

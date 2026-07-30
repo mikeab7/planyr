@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-07-29 @ `a029336` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-07-30 @ `3c5eab8` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -470,7 +470,7 @@ _356 source files mapped._
 - **`src/workspaces/site-planner/lib/metesAndBounds.js`** — Pure metes-and-bounds engine: parses Texas deed bearing/distance calls (curves, SAVE-AND-EXCEPT tracts) to planner-feet paths, closure/misclosure, polyline offset/buffer, ring overlap
   - _exports_: `arcChordPoints`, `bufferPolyline`, `callsToPath`, `misclosure`, `offsetPolyline`, `parseCalls`, `parseTracts`, `pathCloses`, `ringsOverlap`, `VARA_FT`
 - **`src/workspaces/site-planner/lib/mhfdDetention.js`** — B1105 the MHFD (Mile High Flood District) detention engine: the `volume-curve` ruleType — WQCV and EURV as DISTINCT cited components plus the routed 100-yr, each carrying its own evidence state — the component combiner, and the C.R.S. 37-92-602(8) drawdown reconciliation. The volume coefficients are deliberately `null`/`transcribed:false` (every primary MHFD host is egress-blocked and two secondary reads of the EURV memo disagreed), so it names what each component needs instead of computing a number. MHFD counties ONLY; Larimer/Weld/El Paso are refused. Lazy-loaded with the Colorado tier.
-  - _exports_: `BLOCK_REASONS`, `computeMhfdDetention`, `depthInToAcFt`, `electedDrainTimeHr`, `eurvDepthIn`, `isMhfdCounty`, `MHFD_CAVEAT`, `MHFD_DETENTION_RULES`, `MHFD_MEMBER_COUNTIES`, `MHFD_SOURCES`, `MHFD_TARGET_COUNTIES`, `mhfdJurisdictionNote`, `mhfdRuleFor`, `NON_MHFD_CO_COUNTIES`, `normalizeHsg`, `reconcileMhfdDrawdown`, `wqcvDepthIn`, `wqcvDrainTimeOptions`
+  - _exports_: `BLOCK_REASONS`, `computeMhfdDetention`, `depthInToAcFt`, `electedDrainTimeHr`, `eurvDepthIn`, `isMhfdCounty`, `MHFD_CAVEAT`, `MHFD_DETENTION_RULES`, `MHFD_MEMBER_COUNTIES`, `MHFD_SOURCES`, `MHFD_TARGET_COUNTIES`, `mhfdJurisdictionNote`, `mhfdMethodNotes`, `mhfdPanelBag`, `mhfdRuleFor`, `NON_MHFD_CO_COUNTIES`, `normalizeHsg`, `reconcileMhfdDrawdown`, `wqcvDepthIn`, `wqcvDrainTimeOptions`
 - **`src/workspaces/site-planner/lib/mitigationBands.js`** — NEW-3 hydraulic-equivalence band ledger: per-cell fill spans bucketed into 1-ft elevation bands, pond-side created storage from the stage model (excluding below-floodplain-bottom borrow), and per-band pass/fail that fails a short band even when the totals net positive
   - _exports_: `BAND_TOL_CF`, `bandLedger`, `bandSpans`, `createdBands`, `DEFAULT_BAND_FT`
 - **`src/workspaces/site-planner/lib/mitigationHeatmap.js`** — Fill-depth heat map (B809): bins/ramp/hatch classing, legend, tie-out totals, hover lookup, and the one-canvas painter over the engine-retained cells (engine truth — never re-derives)

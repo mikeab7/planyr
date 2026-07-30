@@ -81,6 +81,18 @@ export const MHFD_CAVEAT =
  * carrier (`panelLine`) so the carrier stays self-describing. */
 const MHFD_PANEL_LINE = "full spectrum — WQCV + EURV; size in the district workbook.";
 
+/* The SUBJECT of the verdict strip's one-line detention row — "MHFD WQCV + EURV".
+ *
+ * Composed here, on the carrier, for the same bundle reason as MHFD_PANEL_LINE: the district name and
+ * the component short names are Colorado data, and deriving them inside `yieldVerdicts.js` (which IS
+ * on the boot path, because the row must render instantly) put that filtering and joining in the
+ * eager bundle for a string only a Colorado site can ever see. The flood-control component is
+ * excluded: the row names the two VOLUMES a reader has to size, not the routed event above them. */
+function verdictSubjectFor(rec, components) {
+  const named = (components || []).filter((c) => c.required !== false && c.role !== "flood-control").map((c) => c.short).filter(Boolean);
+  return `${rec.authorityShort} ${named.length ? named.join(" + ") : "criteria"}`;
+}
+
 /* Why a component cannot produce a number. These are NAMED states, not a generic failure: each one
  * implies a different next action, and the panel says which. */
 export const BLOCK_REASONS = {
@@ -152,6 +164,11 @@ export const MHFD_DETENTION_RULES = {
       authority: "mhfd",
       authorityLabel: "Mile High Flood District",
       authorityShort: "MHFD",
+      /* What `ruleBadge` shows where a rate method shows "0.65 ac-ft/ac". Carried as DATA on the
+       * record — not derived in `detentionRules.ruleBadge`, which is on the boot path — so the string
+       * and its composition stay in this lazily-loaded module. Never a per-acre number: a
+       * full-spectrum volume has none, and inventing one is the failure this whole item guards. */
+      badgeMethod: "full spectrum (WQCV + EURV)",
       // The ruleType that makes this item a new engine rather than a new row. A `volume-curve` rule
       // has NO `rateAcFtPerAc` — there is no per-acre number to show, and inventing one to fill the
       // existing badge would be a fabrication. `ruleBadge` handles that (see detentionRules.js).
@@ -544,6 +561,7 @@ export function computeMhfdDetention({
     rateAcFtPerAc: null, // a full-spectrum volume has NO per-acre rate — never fabricate one
     basis: `${rec.authorityShort} full spectrum detention: ${requiredComps.map((c) => `${c.short} ${c.acFt}`).join(" + ")} ac-ft`,
     panelLine: `${rec.authorityShort} ${MHFD_PANEL_LINE}`,
+    verdictSubject: verdictSubjectFor(rec, components),
     components,
     governingTotal: { acFt: totalAcFt, state: "computed", combine: p.combine || "full-spectrum", note: p.combineNote || null },
     drainTime,
@@ -571,6 +589,7 @@ function unavailableCarrier(rec, components, { basis, headline = null, flags = [
     headline: headline || "Detention criteria not yet available in Colorado",
     // Only an MHFD answer gets the MHFD line; a refused non-member county keeps the plain guard copy.
     panelLine: rec && !(flags || []).includes("not-mhfd-member") ? `${rec.authorityShort} ${MHFD_PANEL_LINE}` : null,
+    verdictSubject: rec && !(flags || []).includes("not-mhfd-member") ? verdictSubjectFor(rec, components) : null,
     components: components || [],
     governingTotal: { acFt: null, state: "unavailable", combine: p.combine || null, note: p.combineNote || null },
     drainTime,
@@ -728,6 +747,63 @@ export function reconcileMhfdDrawdown({ drainTimeHr = null, statuteAssessment = 
       "limit means non-compliance is not ruled out — never that the design complies.",
     contradiction: false,
   };
+}
+
+/* NEW-1 (B1105) — the panel's "Assumptions & method ▸" notes, composed HERE rather than in
+ * `SitePlanner.jsx`, for the same reason as `MHFD_PANEL_LINE` above and then some.
+ *
+ * Every one of these lines is Colorado prose that can ONLY render once this chunk has landed (the
+ * branch that emits them is gated on a flag this module sets), so building them in the planner put
+ * their string literals and their formatting logic on the BOOT PATH — where they cost every Texas
+ * user bytes to show text they can never see. That breached `bundle.siteRouteJsBytes` by a hair on
+ * CI, and the standing rule is that a feature which breaches a budget ships with a matching
+ * optimization rather than a raised ceiling. Moving them here IS that optimization, and it is the
+ * architecturally correct home regardless: the carrier now describes its own presentation.
+ *
+ * Returns `[{ key, text }]` for the caller to map straight onto its note primitive — no JSX, no DOM,
+ * still pure. WQCV and EURV get one line EACH (B1105's build requirement: never collapsed), and each
+ * names the document it is waiting on. */
+/* ONE call for everything the panel needs from this module, so the planner holds a single lazy-tier
+ * call site instead of three. Each of those three separately repeated the county-resolution
+ * expression and its own closure on the BOOT PATH; collapsing them is both simpler and smaller,
+ * which is what the site-route bundle budget needed. Returns null for a non-MHFD carrier. */
+export function mhfdPanelBag({ carrier = null, county = null, statuteAssessment = null } = {}) {
+  if (!carrier || !(carrier.flags || []).includes("colorado-mhfd")) return null;
+  const jurisdiction = mhfdJurisdictionNote(county, carrier.rule);
+  const drawdown = reconcileMhfdDrawdown({ drainTimeHr: carrier.drainTime ? carrier.drainTime.electedHr : null, statuteAssessment, rule: carrier.rule });
+  return { jurisdiction, drawdown, notes: mhfdMethodNotes({ carrier, jurisdiction, drawdown }) };
+}
+
+export function mhfdMethodNotes({ carrier = null, jurisdiction = null, drawdown = null } = {}) {
+  if (!carrier) return [];
+  const out = [];
+  const fmt1 = (n) => (n == null ? null : (Math.round(n * 10) / 10).toFixed(1));
+  for (const c of carrier.components || []) {
+    const value = c.state === "computed" && c.acFt != null
+      ? `: ${fmt1(c.acFt)} ac-ft`
+      : ` · ${c.state === "needs-input" ? "needs input" : "not carried"}`;
+    out.push({
+      key: `mhfd-comp-${c.id}`,
+      text: `${c.short} — ${String(c.label || "").toLowerCase()}${value}. ${c.why || ""}${c.needs ? ` Needs: ${c.needs}` : ""}`.trim(),
+    });
+  }
+  // The statute reconciliation — the one place the two Colorado features must AGREE rather than
+  // contradict. It borrows the statute module's vocabulary, so it can never read "complies".
+  if (drawdown) {
+    out.push({
+      key: "mhfd-statute",
+      text: `${drawdown.citation}: ${(drawdown.rows || []).map((r) => `${r.label} — ${r.reason}`).join(" ")} ${drawdown.note}`,
+    });
+  }
+  // The audit answer: being inside the district is NOT the same as knowing the final rule.
+  if (jurisdiction && jurisdiction.text) out.push({ key: "mhfd-overlay", text: jurisdiction.text });
+  if (carrier.workbook) out.push({ key: "mhfd-workbook", text: [carrier.workbook.note, carrier.workbook.source && carrier.workbook.source.name].filter(Boolean).join(" — ") });
+  // Release rate and outlet configuration named as NOT carried, so Planyr's own Texas outlet model
+  // is never quietly applied to a full-spectrum basin.
+  if (carrier.release && !carrier.release.transcribed) out.push({ key: "mhfd-release", text: carrier.release.note });
+  if (carrier.outlet && !carrier.outlet.transcribed) out.push({ key: "mhfd-outlet", text: carrier.outlet.note });
+  if (carrier.rule && carrier.rule.provenanceNote) out.push({ key: "mhfd-provenance", text: carrier.rule.provenanceNote });
+  return out.filter((n) => n.text);
 }
 
 /* The audit answer B1105 asked for, as data rather than prose in a commit message: being inside the
