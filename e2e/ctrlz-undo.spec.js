@@ -125,14 +125,18 @@ test.describe("Ctrl+Z reliability while the Fill-opacity slider holds focus (B74
     await page.keyboard.press("Control+z");
 
     // Ctrl+Z now reaches the app's real undo — same as the toolbar Undo button, INCLUDING its
-    // documented side effect of deselecting (applySnapshot always clears selection on undo/redo,
-    // which is why the Properties panel closes here too). The bug report's own note confirms this
-    // is the correct, matching behavior: "the toolbar Undo button correctly reverts it (and
-    // deselects as a side effect)". So we read the persisted value rather than the now-unmounted
-    // slider — the panel closing IS the proof undo actually ran (the old bug left it untouched,
-    // open, still focused, still showing the changed value).
+    // documented side effect of deselecting (applySnapshot always clears selection on undo/redo).
+    // So we read the PERSISTED value rather than the slider: the reverted value is the proof undo
+    // actually ran (the old bug left it untouched, open, still focused, still showing the change).
+    //
+    // NEW-1 (the click contract) — the panel no longer VANISHES on that deselect. Its open/closed
+    // state is owner-owned; a deselect only swaps its contents to the "Nothing selected" state, and
+    // the slider unmounts with them. Asserting a close here would be asserting the very
+    // selection-derived visibility the owner asked us to remove.
     await expect.poll(() => rawBuildingFillOpacity(page)).toBe(beforeRaw);
-    await expect(panel(page)).toHaveCount(0);
+    await expect(panel(page)).toBeVisible();
+    await expect(page.getByText(/Nothing selected/i)).toBeVisible();
+    await expect(slider).toHaveCount(0);
 
     // Redo (Ctrl+Shift+Z) brings the change back.
     await page.keyboard.press("Control+Shift+Z");

@@ -1835,24 +1835,33 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [mobileTools, setMobileTools] = useState(false); // right tool rail open as an overlay (narrow only)
   const [narrowProps, setNarrowProps] = useState(false); // B656: phone-only — the ✎ Properties pill opened the companion overlay
   const [propsCollapsed, setPropsCollapsed] = useState(false); // B656: companion header fold
-  // B750: the Properties companion no longer follows raw selection — a single click SELECTS only.
-  // `propsFor` marks the selection whose companion is explicitly open (a double-click, the phone ✎ pill,
-  // or the docked Properties tab set it); `null` = closed. The panel re-checks each render whether this
-  // still matches the current selection (propsMatches), so any OTHER selection path — single click,
-  // marquee, shift-multi, programmatic, undo/redo — leaves the companion closed without touching the
-  // ~70 setSel sites. Holds {kind,id} or the sentinel 'multi' (a styleable multi-selection).
-  const [propsFor, setPropsFor] = useState(null);
-  // NEW-1 (single-occupancy left dock, amends B656/B733): when the element inspector OPENS on desktop
-  // (a double-click / the Properties tab — B750's explicit-open, NOT a plain click) it TAKES OVER the
-  // dock (leftPanel → "properties") instead of stacking above the open panel — the dock holds at most
-  // ONE panel. `dockMemo` remembers the panel the inspector replaced so closing it (deselect / ✕)
-  // restores it. Transient UI state (never persisted). To see the inspector AND another panel at once,
-  // detach one to a floating card (B717) — the only two-at-once path.
+  /* NEW-1 — THE CLICK CONTRACT, and the state separation that makes it hold.
+   *
+   * B750 established the rule (single click SELECTS, double click OPENS Properties) but implemented
+   * it with a `propsFor` marker that had to MATCH the current selection for the panel to render. So
+   * the panel's open/closed state was still DERIVED from selection, and it flapped two ways:
+   *   • it OPENED on a plain click wherever some path set that marker (the B875 pond exception,
+   *     the parcel effect below), and
+   *   • it CLOSED on its own the moment the selection moved off — click-drag on empty canvas
+   *     deselects, so the panel the owner opened evaporated mid-gesture.
+   * Both are the same defect: open/closed was not owner-owned. It now IS. The inspector is open
+   * exactly when the DOCK holds it (`leftPanel === "properties"`) on desktop, or when the phone
+   * companion overlay is up (`narrowProps`) — two pieces of state a user action already owns. There
+   * is no selection-derived marker left to flap, so the invariant is structural: NO pointer
+   * interaction with the canvas (click, drag, marquee, pan, deselect) can change it; only
+   * `openInspector` / `closeInspector` / a rail tab can. Selection drives the panel's CONTENTS only,
+   * and with nothing selected it holds its ground and shows the "Nothing selected" state.
+   *
+   * NEW-1 (single-occupancy left dock, amends B656/B733): when the element inspector OPENS on desktop
+   * it TAKES OVER the dock (leftPanel → "properties") instead of stacking above the open panel — the
+   * dock holds at most ONE panel. `dockMemo` remembers the panel the inspector replaced so the ✕
+   * restores it. Transient UI state (never persisted). To see the inspector AND another panel at once,
+   * detach one to a floating card (B717) — the only two-at-once path. */
   const [dockMemo, setDockMemo] = useState(null);         // null | { restore: <panelId|null> }
-  // B875 — pond discoverability: a plain click / the map label / the right-click menu REVEALS the
-  // pond inspector (opens the Properties companion) and scroll-flashes the relevant card, so a
-  // pond's rich per-element data (purpose · sizing assistant · usable/dead split) isn't buried
-  // behind a double-click nobody discovers. The tick + target ref drive the scroll+flash effect.
+  // B875 — pond discoverability: the map label / the right-click menu / Enter REVEAL the pond
+  // inspector (open the Properties companion) and scroll-flash the relevant card, so a pond's rich
+  // per-element data (purpose · sizing assistant · usable/dead split) isn't buried. NEW-1 removed the
+  // plain-CLICK reveal — that was the owner's reported bug. The tick + target ref drive scroll+flash.
   const [pondRevealTick, setPondRevealTick] = useState(0);
   const pondRevealTargetRef = useRef(null); // null = the card root; "assistant" / "purpose" for a sub-card
   // B875 — a one-time hint the first time a pond auto-classifies as Hybrid (its cut serves both
@@ -1900,12 +1909,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // inspector. Derived from `sel` alone (not the resolved selectors) so early effects can use it.
   // B740 widens it to a styleable multi-selection.
   const companionSel = (!!sel && (sel.kind === "el" || sel.kind === "callout" || sel.kind === "markup" || sel.kind === "measure")) || multiStyleable;
-  // B750: does the explicitly-opened Properties marker still point at the CURRENT selection? Declared
-  // here (right after companionSel) so both the canvas-shift effect and companionOpen can read it.
-  // Measures are selected by index (sel.i, no stable sel.id), so match them on `i` (NEW).
-  const propsMatches = propsFor === "multi"
-    ? multiStyleable
-    : (!!propsFor && !!sel && propsFor.kind === sel.kind && (sel.kind === "measure" ? propsFor.i === sel.i : propsFor.id === sel.id));
   // B261: while a persistent group is selected, double-clicking a member "drills in" to
   // edit just that one element in place (without ungrouping). drillId = that member's id,
   // or null when we're operating on the group as a whole.
@@ -4097,62 +4100,45 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // B656: element/callout/markup selection no longer opens a rail TAB — the Properties
-  // companion derives straight from `sel` and coexists with whatever panel is open.
-  // Parcel selection still opens the Parcel panel (a list+detail destination), with the
-  // B556 phone guard intact: on a narrow screen a tap only selects, never pops the overlay.
-  useEffect(() => {
-    if (narrow && !leftPanel) return; // phone + panel closed → select only, don't pop the overlay
-    if (sel?.kind === "parcel") setLeftPanel("parcel");
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sel?.kind, sel?.id]);
-  // B656: the phone companion overlay follows the selection's lifetime — deselect closes it.
-  useEffect(() => { if (!companionSel) setNarrowProps(false); }, [companionSel]);
-  // B750: when the selection moves OFF the element whose Properties are open, drop the marker so the
-  // companion closes and can't re-pop on a plain re-click. (Replaces the old B656 effect that RE-opened
-  // the companion on every selection change — the exact auto-open behavior we're removing.)
-  useEffect(() => {
-    const keep = propsFor === "multi"
-      ? multiStyleable
-      : (!!propsFor && !!sel && propsFor.kind === sel.kind && (sel.kind === "measure" ? propsFor.i === sel.i : propsFor.id === sel.id));
-    if (propsFor && !keep) { setPropsFor(null); setNarrowProps(false); }
-  }, [sel, multi, propsFor, multiStyleable]);
-  // NEW-1 — single-occupancy left dock (desktop): when the inspector OPENS for the current selection
-  // (propsMatches — B750's explicit open: a double-click, or the Properties tab; a plain click still
-  // just selects) it TAKES OVER the dock (leftPanel → "properties"), memoizing whatever it replaced.
-  // When it closes (deselect / ✕ drops propsFor), the memoized panel is handed back. Two panels never
-  // stack — to keep another panel visible alongside the inspector, detach it to a floating card (B717).
-  // Runs in a LAYOUT effect so the dock swap lands before paint (no stacked-panel flash); B556 keeps
-  // narrow untouched (there the inspector is a companion overlay, never a dock takeover). Deps exclude
-  // leftPanel/dockMemo on purpose (read via refs) so a deliberate manual rail switch can't re-take.
-  useLayoutEffect(() => {
-    if (narrow) return;
-    if (shouldInspectorTakeDock({ inspectorOpen: propsMatches, narrow, alreadyDocked: leftPanelRef.current === "properties" })) {
+  /* NEW-1 — the ONE explicit inspector OPEN. Every "open Properties for this thing" path routes
+   * here: a double-click on any element / markup / callout / measurement, the pond reveal, the
+   * right-click "Properties…" row, and the phone ✎ pill. It is the ONLY way (besides the rail tab)
+   * the inspector can appear, which is what makes the owner-owned invariant hold — there is no
+   * selection-derived marker left that could open it behind the owner's back.
+   *
+   * Desktop: it TAKES OVER the dock (single-occupancy), memoizing whatever panel it replaced so the
+   * ✕ can hand that panel back. Narrow: it raises the companion overlay (B556 — a tap only selects).
+   * Deliberately NOT an effect: an effect keyed off selection is exactly the derived-state shape
+   * this item exists to remove. */
+  const openInspector = () => {
+    setPropsCollapsed(false); // a prior fold shouldn't leave a freshly-opened inspector headers-only
+    if (narrow) { setNarrowProps(true); return; }
+    if (shouldInspectorTakeDock({ inspectorOpen: true, narrow, alreadyDocked: leftPanelRef.current === "properties" })) {
       setDockMemo({ restore: leftPanelRef.current }); // the panel we replace (id, or null = nothing docked)
       setLeftPanel("properties");
-    } else if (!propsMatches) {
-      // inspector closed → hand the dock back to the memoized panel (dockAfterRelinquish no-ops if a
-      // deliberate manual switch already moved leftPanel off "properties", so the manual choice wins).
-      const memo = dockMemoRef.current;
-      if (memo) { setLeftPanel((p) => dockAfterRelinquish({ leftPanel: p, restore: memo.restore })); setDockMemo(null); }
     }
-  }, [propsMatches, narrow]);
+  };
+  // NEW-1 — the parcel peer of openInspector: a parcel's inspector IS the Parcel panel (a list+detail
+  // destination), so a double-click on a lot docks that. A deliberate open ends any takeover memo, the
+  // same as a rail click. B556 phone guard: on a narrow screen with nothing docked, a tap only selects.
+  const openParcelPanel = () => {
+    if (narrow && !leftPanelRef.current) return;
+    setDockMemo(null);
+    setLeftPanel("parcel");
+  };
   /* B1125 — the ONE inspector dismissal, so the close control can NEVER read as dead.
    *
-   * The bug: the ✕ only dropped the explicit-open marker (`propsFor`). That is enough while the
-   * inspector holds the dock through the takeover memo, but NOT when the dock is held by the
-   * Properties rail TAB — and any deliberate rail click clears the memo (`setDockMemo(null)`), so
-   * `leftPanel` stayed "properties" and the panel kept rendering through its `propsTab &&
-   * companionSel` branch. From the owner's seat the ✕ was "literally not responding": every click
-   * landed, every handler ran, and nothing changed. (The relinquish in the takeover effect above
-   * can't cover this — it must NOT fire when the tab was opened deliberately with nothing selected,
-   * or the docked Properties tab could never stay open at all. So dismissal is explicit, here.)
+   * The bug: the ✕ only dropped the (since-removed) explicit-open marker `propsFor`. That was enough
+   * while the inspector held the dock through the takeover memo, but NOT when the dock was held by
+   * the Properties rail TAB — and any deliberate rail click clears the memo (`setDockMemo(null)`), so
+   * `leftPanel` stayed "properties" and the panel kept rendering. From the owner's seat the ✕ was
+   * "literally not responding": every click landed, every handler ran, and nothing changed. So
+   * dismissal is explicit, here, and NEW-1 made it the ONLY way the docked inspector can close.
    *
    * Reproduced logged-out and pinned by e2e/inspector-close.spec.js. */
   const closeInspector = () => {
     if (narrow && narrowProps && !leftPanelRef.current) { setNarrowProps(false); }
     else {
-      setPropsFor(null);
       setNarrowProps(false);
       // Release the dock too — back to whatever the inspector replaced when there is a memo,
       // otherwise to nothing. Either way the panel is GONE, which is what ✕ promises.
@@ -4238,7 +4224,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     }
     // These deps are intentional re-measure TRIGGERS (the body reads only refs, so exhaustive-deps
     // is satisfied by any set): re-run whenever something that can move the canvas's left edge changes.
-  }, [leftPanel, narrow, companionSel, propsMatches, leftWidth, size.w]);
+  }, [leftPanel, narrow, companionSel, narrowProps, leftWidth, size.w]);
   // Remember the left menu width between sessions.
   useEffect(() => { try { localStorage.setItem("planarfit:leftWidth", String(leftWidth)); } catch (_) {} }, [leftWidth]);
   useEffect(() => { try { localStorage.setItem("planarfit:parkingRows", parkingRows); localStorage.setItem("planarfit:roadWidth", roadWidth); localStorage.setItem("planarfit:measureMode", measureMode); localStorage.setItem("planarfit:easeMode", easeMode); localStorage.setItem("planarfit:easeType", easeType); localStorage.setItem("planarfit:easeWidth", String(easeWidth)); } catch (_) {} }, [parkingRows, roadWidth, measureMode, easeMode, easeType, easeWidth]);
@@ -4734,7 +4720,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (isDoubleTap(e, m.id, sel?.kind === "measure" && sel.i === idx)) {
       setMulti([]); setSelVtx(null);
       setSel({ kind: "measure", i: idx });
-      setPropsFor({ kind: "measure", i: idx });
+      openInspector();
       if (narrow) setNarrowProps(true);
       return;
     }
@@ -4767,8 +4753,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (isDoubleTap(e, m.id, sel?.kind === "measure" && sel.i === i)) {
       setMulti([]); setSelVtx(null);
       setSel({ kind: "measure", i });
-      setPropsFor({ kind: "measure", i });
-      if (narrow) setNarrowProps(true);
+      openInspector();
       return;
     }
     setMulti([]); setSelVtx(null);
@@ -5307,7 +5292,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const clickPx = f2p(p2f(e.clientX, e.clientY)); // client → SVG px (identity round-trip; box is in SVG px)
     const zone = calloutDblZone({ x: bp.x - w / 2, y: bp.y - h / 2, w, h }, clickPx, CALLOUT_BORDER_BAND_PX);
     if (zone === "interior") beginEditCallout(id);
-    else { setPropsFor({ kind: "callout", id }); if (narrow) setNarrowProps(true); }
+    else openInspector();
   };
   const commitEditCallout = () => {
     if (!editCallout) return;
@@ -5401,7 +5386,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // features stay select-only.
     if (m && !m.locked && isDoubleTap(e, id, sel?.kind === "markup" && sel.id === id)) {
       setSel({ kind: "markup", id });
-      setPropsFor({ kind: "markup", id }); if (narrow) setNarrowProps(true);
+      openInspector();
       return;
     }
     // B740 — Shift (or Ctrl/⌘) TOGGLES the markup in/out of the multi-selection (see startMoveEl).
@@ -8048,7 +8033,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // double-tap here. Groups keep single-click = select-whole-group (drill-in stays in onElDouble).
     if (!el.groupId && !el.locked && isDoubleTap(e, id, sel?.kind === "el" && sel.id === id)) {
       setSel({ kind: "el", id });
-      setPropsFor({ kind: "el", id }); if (narrow) setNarrowProps(true);
+      // NEW-1 — a pond opens through revealPondInspector so the double-click keeps B875's scroll+flash
+      // onto the pond card; every other type just opens the inspector.
+      if (el.type === "pond") revealPondInspector(id); else openInspector();
       return;
     }
     const fp = p2f(e.clientX, e.clientY);
@@ -8084,13 +8071,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       return;
     }
     if (multi.length) setMulti([]);
-    // B875 — selecting a pond (that wasn't already selected) reveals its inspector card + flash, so
-    // the purpose / sizing assistant / split is discoverable from a plain click. Guarded to the
-    // first select so dragging an already-selected pond doesn't re-flash.
-    const revealPondSel = el.type === "pond" && !(sel?.kind === "el" && sel.id === id);
-    if (el.locked) { setSel({ kind: "el", id }); if (revealPondSel) revealPondInspector(id); return; } // locked: select only, don't move
+    // NEW-1 — B875's plain-click pond reveal is REMOVED. It was the owner's reported bug ("single
+    // clicks open up the left menu on ponds"): the one element type whose single click opened the
+    // left rail, against B750's contract that a single click SELECTS and only a double-click opens.
+    // The pond's discoverability affordances that are NOT a plain click all survive — the double-tap
+    // above (which still routes through revealPondInspector, so the card scroll-flashes), the map
+    // label's double-click, the right-click menu's pond rows, and Enter on a selected pond.
+    if (el.locked) { setSel({ kind: "el", id }); return; } // locked: select only, don't move
     setSel({ kind: "el", id });
-    if (revealPondSel) revealPondInspector(id);
     pushHistory();
     // Snapshot every member of the assembly (attachedTo children) so they move together.
     const members = assemblyOf(id).map((m) => isCenterlineRoad(m)
@@ -8132,6 +8120,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (!settings.parcelSelect) { noteParcelSelectBlocked(e.timeStamp); return; }
     if (mergePick) { e.stopPropagation(); toggleMerge(id); setSel({ kind: "parcel", id }); return; } // B720: plain click picks in merge mode
     if (e.shiftKey) { e.stopPropagation(); shiftPickParcel(id); return; } // Shift-click: additive multi-select to merge (B735 seeds from `sel`; shiftPickParcel owns `sel`)
+    // NEW-1 — parcels join B750's click contract. Selecting a lot used to open the Parcel panel from
+    // an EFFECT on `sel`, so a single click swung the left rail open (and the panel then belonged to
+    // the selection, not to the owner). Now: single click SELECTS, DOUBLE-click opens the Parcel
+    // panel — the parcel's inspector. Checked before the locked/unlocked split so it works on the
+    // county-pulled LOCKED default too (whose single press starts a pan, resolved as a tap in onUp).
+    if (isDoubleTap(e, `parcel:${id}`, sel?.kind === "parcel" && sel.id === id)) {
+      e.stopPropagation();
+      setSel({ kind: "parcel", id });
+      setCombineSel([]);
+      openParcelPanel();
+      return;
+    }
     e.stopPropagation();
     if (!pc.locked) {
       // Unlocked = the user deliberately unlocked this parcel to reshape/move it, so a press
@@ -8412,7 +8412,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // fallback for when pointer capture doesn't suppress the native dblclick; it makes the SAME decision
     // as the reconstructed double-tap in startMoveEl.
     setSel({ kind: "el", id });
-    setPropsFor({ kind: "el", id });
+    if (el.type === "pond") revealPondInspector(id); else openInspector();  // NEW-1 — pond keeps B875's flash
   };
   // B935 — native-dblclick fallback for the markup shapes (easement/line/polyline), mirroring
   // startMoveMarkup: a double-click always opens Properties (never the old on-canvas inline-label
@@ -8422,7 +8422,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const m = markups.find((x) => x.id === id);
     if (!m) return;
     setSel({ kind: "markup", id });
-    setPropsFor({ kind: "markup", id });
+    openInspector();
   };
   // Right-click an element always opens its actions menu (so a grouped element can still
   // reach Ungroup / Duplicate group / etc). Keeps an active group selection intact so the
@@ -8476,13 +8476,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     flashWarn(`Branching a ${roadClassOf(settings, parent.roadClass).label.toLowerCase()} off ${parent.label || "this road"} — click where it should go, then ✓ Done. Esc cancels.`, 6000);
   };
   // B875 — reveal a pond's inspector card (open the Properties companion) and scroll-flash it.
-  // `target` optionally focuses a sub-card ("assistant" | "purpose"). Selecting a pond does this
-  // for ponds only — a deliberate, owner-requested discoverability exception to B750's
-  // "single-click = select only" (a pond carries far more per-element data than other shapes).
+  // `target` optionally focuses a sub-card ("assistant" | "purpose").
+  // ⛔ NEW-1 — this is an EXPLICIT-open path only: a double-click (canvas or map label), the
+  // right-click menu, Enter on a selected pond. B875's plain-single-click reveal was the owner's
+  // reported bug and is gone; do not re-wire this to a select handler.
   const revealPondInspector = (id, target = null) => {
     setSel({ kind: "el", id });
-    setPropsFor({ kind: "el", id });
-    if (narrow) setNarrowProps(true);
+    openInspector();
     pondRevealTargetRef.current = target;
     setPondRevealTick((n) => n + 1);
   };
@@ -12471,9 +12471,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const fam = carto ? "Inter, system-ui, sans-serif" : "ui-monospace, Menlo, monospace";
     const halo = carto || leader;
     const ink = carto ? "#0E2E36" : (leader ? PAL.ink : labelInk(elStyle(d.el, settings).fill));
-    // B875 — a pond's map label is a click target: tapping it selects the pond + reveals its
-    // inspector (a leadered pond label often sits away from the basin, so it's a real second
-    // handle). Other labels stay pointer-transparent (clicks fall through to the shape).
+    // B875 — a pond's map label is a click target (a leadered pond label often sits away from the
+    // basin, so it's a real second handle). NEW-1 — it now honours the SAME contract as the basin
+    // itself: a single click SELECTS, a double-click opens the inspector. Other labels stay
+    // pointer-transparent (clicks fall through to the shape).
     const isPondLabel = tool === "select" && d.el && d.el.type === "pond" && !d.added;
     // NEW-1 — `data-label-for` / `data-label-rung` / `data-label-leader` stamp WHICH element this
     // label belongs to and WHICH rung of the shared fit ladder (lib/labelFitLadder) placed it, so a
@@ -12481,7 +12482,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     return (
       <g key={`lbl${d.lid}`} data-label-for={d.lid} data-label-rung={place.rung || "inline"} data-label-leader={leader ? "1" : "0"}
         pointerEvents={isPondLabel ? "auto" : "none"} style={isPondLabel ? { cursor: "pointer" } : undefined}
-        onPointerDown={isPondLabel ? (e) => { e.stopPropagation(); revealPondInspector(d.el.id); } : undefined}
+        onPointerDown={isPondLabel ? (e) => {
+          if (e.button !== 0) return;
+          e.stopPropagation();
+          const wasSel = sel?.kind === "el" && sel.id === d.el.id;
+          if (isDoubleTap(e, `${d.el.id}:label`, wasSel)) { revealPondInspector(d.el.id); return; }
+          setSel({ kind: "el", id: d.el.id });   // single click: select only (NEW-1)
+        } : undefined}
         onContextMenu={isPondLabel ? (e) => onElContext(e, d.el.id) : undefined}>
         {/* B875 (edit-path recurrence) — a pond label sits OVER the basin and, since #656, is
             pointer-enabled; without its own onContextMenu a right-click on it fell THROUGH to the
@@ -13046,19 +13053,22 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     { id: "standards", label: "Standards" }, // B653: element starting values (view toggles live in the on-canvas View menu)
   ];
   // NEW-1 (single-occupancy left dock, amends B656/B733): on DESKTOP the inspector only ever renders
-  // as the docked "properties" panel — it takes over the dock on selection (the takeover layout effect
-  // above sets leftPanel), it never stacks above another open panel. So the desktop companion is open
-  // exactly when the Properties panel holds the dock with an inspectable selection. NARROW is unchanged
-  // (B556): a tap only selects; the companion opens over the panel via the ✎ pill (narrowProps) or when
-  // a panel is already open.
-  const companionOpen = companionSel && (narrow ? (!!leftPanel || narrowProps) : leftPanel === "properties");
+  // as the docked "properties" panel — `openInspector` takes over the dock, it never stacks above
+  // another open panel. NARROW keeps the B556 model: a tap only selects; the companion overlay is
+  // raised by the ✎ pill (narrowProps).
+  //
+  // ⛔ NEW-1 — this derivation is DELIBERATELY free of `sel` / `companionSel`. It used to require an
+  // inspectable selection, which is what made the panel vanish the instant a drag on empty canvas
+  // deselected. Open/closed is owner-owned; selection only chooses which BODY renders below (and with
+  // nothing selected that body is the "Nothing selected" state). Do not re-couple them.
+  const companionOpen = narrow ? narrowProps : leftPanel === "properties";
   // B733 — the Properties tab is active. When it is, the inspector docks as the MAIN panel (full height
   // + its own empty state). Properties is dock-only (it reuses the companion, which is outside the B717
   // float system), so it's excluded from the PanelChrome detach path below.
   const propsTab = leftPanel === "properties";
   // B1125 — the exact condition the inspector's own render branch uses, mirrored to a ref for the
   // keydown Escape hatch. Keep the two in lockstep: they are one fact.
-  inspectorShowingRef.current = !!(companionOpen || (propsTab && companionSel));
+  inspectorShowingRef.current = !!(companionOpen || propsTab);
   const railBtn = (on) => ({
     display: "flex", flexDirection: "column", alignItems: "center", gap: 3, width: "100%",
     padding: "10px 2px", border: "none", borderLeft: `3px solid ${on ? PAL.ember : "transparent"}`,
@@ -16818,7 +16828,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                             e.stopPropagation();
                             setSel({ kind: "callout", id: c.id });
                             if (isDoubleTap(e, `${c.id}:leader`, sel?.kind === "callout" && sel.id === c.id) && !c.locked) {
-                              setPropsFor({ kind: "callout", id: c.id }); if (narrow) setNarrowProps(true);
+                              openInspector();
                             }
                           }}>
                           <line x1={origin.x} y1={origin.y} x2={tp.x} y2={tp.y} stroke={border} strokeWidth={1.6} />
@@ -17926,13 +17936,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           {/* the rail */}
           <div style={{ width: 54, flex: "none", background: PAL.chrome, borderRight: `1px solid ${PAL.chromeLine}`, display: "flex", flexDirection: "column", paddingTop: 4 }}>
             {leftTabs.map((tb) => (
-              <button key={tb.id} title={tb.label} className="dbtn" style={railBtn(leftPanel === tb.id || isFloating(tb.id))}
+              // NEW-1 — `data-rail-tab` is the stable hook the click-contract guard reads: which panel
+              // (if any) the left dock holds. Asserting on it is how the regression net proves that NO
+              // pointer interaction with the canvas changes the panel's open/closed state.
+              <button key={tb.id} title={tb.label} className="dbtn" data-rail-tab={tb.id} style={railBtn(leftPanel === tb.id || isFloating(tb.id))}
                 aria-pressed={leftPanel === tb.id || isFloating(tb.id)}
                 onClick={() => {
                   if (isFloating(tb.id)) { closeFloating(tb.id); return; } // re-clicking a floating panel's icon closes it
                   // B733/B750: opening the Properties tab expands the inspector (a prior collapse shouldn't
-                  // leave the freshly-opened tab headers-only). The tab renders via `propsTab && companionSel`,
-                  // independent of the double-click `propsFor` marker, so it always shows the current selection.
+                  // leave the freshly-opened tab headers-only). NEW-1 — the rail is one of the only two
+                  // explicit open/close affordances (the other is ✕); it always shows the current selection,
+                  // or the "Nothing selected" state when there isn't one.
                   if (tb.id === "properties") { setPropsCollapsed(false); }
                   // NEW-1: a deliberate rail choice ends any active inspector takeover — the chosen
                   // panel wins over the restore memo, so a later deselect won't yank it back.
@@ -17953,7 +17967,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               "properties" panel (full height) — it never stacks above another panel. The 45%-cap /
               bottom-divider "rides above" layout survives ONLY on NARROW, where the companion still
               shares the overlay column with an open panel (B556/B656). */}
-          {(companionOpen || (propsTab && companionSel)) && (
+          {/* NEW-1 — the inspector's BODY. Its open/closed state is (companionOpen || propsTab), which
+              no longer consults the selection; `companionSel` here only picks BODY vs the "Nothing
+              selected" state directly below, so a deselect swaps the contents instead of closing the
+              panel. The two branches carry the same data-testid: one of them is always present while
+              the inspector is open. */}
+          {(companionOpen || propsTab) && companionSel && (
           <div data-testid="property-panel" style={{ flex: (narrow && leftPanel && !propsTab) ? "0 1 auto" : "1 1 auto", maxHeight: (narrow && leftPanel && !propsTab) ? "45%" : "none", minHeight: 0, overflowY: "auto", padding: "13px 13px 12px", borderBottom: (narrow && leftPanel && !propsTab) ? "1px solid var(--border-default)" : "none" }}>
           <div role="button" tabIndex={0} aria-expanded={!propsCollapsed} onClick={() => setPropsCollapsed((c) => !c)}
             onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setPropsCollapsed((c) => !c); } }}
@@ -17961,10 +17980,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             <span style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: "0.09em", textTransform: "uppercase", color: PAL.muted, flex: 1 }}>
               {multiStyleable ? `${multi.length} selected` : selMeasure ? "Measurement" : <>Element{(() => { const l = selEl ? (selEl.type === "pond" ? pondDisplayNameFor(detWithAuto(selEl.det), pondSplitOf(selEl)) : (TYPE[selEl.type]?.label || "").split(" / ")[0]) : selCallout ? "Callout" : selMarkup ? (selMarkup.kind === "easement" ? "Easement" : "Markup") : ""; return l ? ` · ${l}` : ""; })()}</>}
             </span>
-            {/* Explicit close. The element STAYS selected — double-click it again to reopen. ✕ drops the
-                explicit-open marker (setPropsFor(null)); on DESKTOP that closes propsMatches, so the
-                takeover effect above hands the dock back to whatever panel the inspector replaced. On
-                NARROW it closes the ✎-pill overlay / drops the companion marker (as before). Shown on
+            {/* Explicit close. The element STAYS selected — double-click it again to reopen. On DESKTOP
+                ✕ releases the dock back to whatever panel the inspector replaced; on NARROW it closes
+                the ✎-pill overlay. NEW-1 — with the panel no longer derived from selection, this (and
+                the rail tab, and Esc) is the ONLY way it can close. Shown on
                 desktop (the docked inspector) and the narrow companion; hidden only in the narrow
                 Properties TAB, where the rail is how you close it. NEW-1 — also drops the pending tap
                 history: without this, a plain single click on the same feature shortly after closing
@@ -20420,13 +20439,19 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           </>)}
           </div>
           )}
-          {/* B733 — Properties tab with nothing selected: an explicit empty state so the tab is
-              never a blank column. (Parcels are edited in their own Parcel panel, not here.) */}
-          {propsTab && !companionSel && (
+          {/* B733 — the inspector open with nothing selected: an explicit empty state so it is never a
+              blank column. NEW-1 widened this from the Properties TAB to ANY open inspector: a deselect
+              (a drag on empty canvas) now lands HERE instead of closing the panel, so the owner keeps
+              the panel he opened. Carries the same ✕ as the populated body — an inspector he opened is
+              only ever closed by an explicit affordance. (Parcels have their own Parcel panel.) */}
+          {(companionOpen || propsTab) && !companionSel && (
           <div data-testid="property-panel" style={{ flex: "1 1 auto", minHeight: 0, overflowY: "auto", padding: "15px 14px" }}>
-            <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: "0.09em", textTransform: "uppercase", color: PAL.muted, marginBottom: 9 }}>Properties</div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 9 }}>
+              <span style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: "0.09em", textTransform: "uppercase", color: PAL.muted, flex: 1 }}>Properties</span>
+              {(!narrow || !propsTab) && <button style={{ border: "none", background: "transparent", color: PAL.muted, cursor: "pointer", fontSize: 13, fontFamily: "inherit", lineHeight: 1, padding: "0 2px" }} title="Close — Esc" aria-label="Close properties" onClick={(e) => { e.stopPropagation(); closeInspector(); }}>✕</button>}
+            </div>
             <div style={{ fontSize: 12, color: PAL.muted, lineHeight: 1.65 }}>
-              Nothing selected. Click a building, pond, parking, trailer, road, easement, or markup on the canvas to edit its properties here. Parcels have their own <button style={linkBtn} onClick={() => setLeftPanel("parcel")}>Parcel</button> panel.
+              Nothing selected. Double-click a building, pond, parking, trailer, road, easement, or markup on the canvas to edit its properties here. Parcels have their own <button style={linkBtn} onClick={() => setLeftPanel("parcel")}>Parcel</button> panel.
             </div>
           </div>
           )}
@@ -20820,7 +20845,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           if (!m) return null;
           header = "Measurement";
           body = <>
-            {row({ text: "Properties…", on: () => { setSel({ kind: "measure", i: mapMenu.i }); setPropsFor({ kind: "measure", i: mapMenu.i }); if (narrow) setNarrowProps(true); close(); } })}
+            {row({ text: "Properties…", on: () => { setSel({ kind: "measure", i: mapMenu.i }); openInspector(); close(); } })}
             {row({ text: m.locked ? "Unlock" : "Lock", hint: m.locked ? "🔒" : "🔓", on: () => { toggleMeasureLock(m.id); close(); } })}
             {row({ text: "Copy", hint: `${MOD}C`, on: () => { copyRef({ kind: "measure", id: m.id, i: mapMenu.i }); close(); } })}
             <div style={{ borderTop: `1px solid ${PAL.panelLine}`, marginTop: 4, paddingTop: 4 }} />

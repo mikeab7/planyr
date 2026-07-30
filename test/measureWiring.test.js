@@ -55,7 +55,7 @@ describe("NEW-1: measurements are styled through the ONE resolver, on every mode
     expect(SP).toMatch(/MEASURE_STD_KEYS\.forEach\(\(k\) => \{ up = setStandardPref\(up, "measureStyle", k, measureStdValueUI\(k\) \?\? null\); \}\)/);
   });
   it("double-click a measurement still opens its Properties (parity with every other object)", () => {
-    expect(SP).toMatch(/if \(isDoubleTap\(e, m\.id, sel\?\.kind === "measure" && sel\.i === idx\)\) \{[\s\S]{0,200}setPropsFor\(\{ kind: "measure", i: idx \}\)/);
+    expect(SP).toMatch(/if \(isDoubleTap\(e, m\.id, sel\?\.kind === "measure" && sel\.i === idx\)\) \{[\s\S]{0,200}openInspector\(\)/);
   });
 });
 
@@ -125,8 +125,9 @@ describe("NEW-2: EVERY interactive measurement surface opens Properties on doubl
     const body = bodyOf(name);
     expect(body, `could not locate ${name}`).toBeTruthy();
     expect(body, `${name} never calls isDoubleTap — the gesture is unarmed on that surface`).toMatch(/isDoubleTap\(e, m\.id/);
-    // `i: idx` (the shape surface resolves a cycled index) or shorthand `i` (the chip owns its own).
-    expect(body, `${name} does not open Properties`).toMatch(/setPropsFor\(\{ kind: "measure", i(?::\s*\w+)? \}\)/);
+    // B1188 — every surface now opens through the ONE explicit `openInspector()`; the old
+    // selection-derived `setPropsFor({kind:"measure", i})` marker is gone (see clickContract).
+    expect(body, `${name} does not open the inspector`).toMatch(/openInspector\(\)/);
   });
 
   it.each(handlers)("%s opens Properties for a LOCKED measurement too (the surfaces must agree)", (name) => {
