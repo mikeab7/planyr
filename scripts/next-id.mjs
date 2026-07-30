@@ -26,7 +26,7 @@
  * can never UNDER-count (reuse a live number, the one dangerous error), while it makes us immune to a
  * stray prose typo like "B99999" permanently inflating every future id.
  */
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync, statSync, writeFileSync, rmSync } from "node:fs";
 import { execSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
@@ -138,64 +138,362 @@ export function newCrossFileCollisions(repo, files, letter, baseline = KNOWN_LEG
   return findDuplicateIds(repo, files, letter).filter(({ id, count }) => count > (baseline[id] || 1));
 }
 
-/* Read a file as it exists on origin/main (not the local branch) — so `--against-main` sees ids
- * that other sessions merged AFTER we branched (the concurrent-mint case next-id can't otherwise
- * see). Never throws: no git / no origin/main / missing file → null, and the caller falls back to
- * the local-only max. `git show` only, read-only.
+/* ============================================================================================
+ * B779 — WHY THIS SECTION WAS REWRITTEN. B779 shipped `--against-main` + the late-bind rule and
+ * claimed it "collapses the collision window from a whole session to a few seconds." Six
+ * consecutive dispatches collided anyway (B1030/B1031 · B1032/B1036 · B1081/B1082 · B1093/B1094 ·
+ * B1095/B1096 · B1130–B1132 vs B1140–B1143). The audit found three defects, none of them in the
+ * uniqueness guard (which fired RED pre-merge every time, exactly as designed):
  *
- * maxBuffer is set well above BACKLOG-DONE.md's size (1.4 MB and growing) — the default 1 MB
- * execSync buffer throws ENOBUFS on that file, which this function's catch then swallowed
- * SILENTLY, degrading `--against-main` to a stale local-only max with no indication anything
- * was wrong (a real collision from this: two sessions both minted B896 on 2026-07-18, one for
- * this redesign, one already shipped on main for an unrelated feature). LOUD-FAILURE: a genuine
- * read failure (as opposed to "no origin/main configured") now prints a visible warning instead
- * of failing open unnoticed. */
-export function readOriginMain(repo, file) {
-  try {
-    return execSync(`git show origin/main:${file}`, { cwd: repo, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], maxBuffer: 32 * 1024 * 1024 });
-  } catch (e) {
-    if (e && e.code !== "ENOENT" && !/unknown revision|not a git repository/i.test(String(e.stderr || e.message || ""))) {
-      process.stderr.write(`⚠ next-id: couldn't read origin/main:${file} (${e.code || e.message}) — --against-main is degraded to the local-only max for this file.\n`);
-    }
-    return null;
-  }
+ *   1. WRONG WINDOW. Late-binding closes `mint → push`. The collisions happen in `push → merge`
+ *      — PR open, CI nudge (often two), build, auto-merge — minutes to hours, during which other
+ *      sessions' PRs merge. B1140's own note records the mint being late-bound with
+ *      `--against-main` and main STILL taking B1130/B1131 and B1132 while the PR was in flight.
+ *      Minting later cannot close a window that opens after the mint.
+ *   2. NO PEER VISIBILITY. `--against-main` reads exactly one ref. Two branches in flight are
+ *      invisible to each other until one merges — the structural cause of all six. Fixed by
+ *      `peerClaims()`: the ids other in-flight branches have already claimed are readable from
+ *      the remote RIGHT NOW, no bot and no merge required.
+ *   3. UNANNOUNCED STALENESS. `git show origin/main:…` reads the local remote-tracking ref, which
+ *      is only as fresh as the last fetch — and nothing verified a fetch had happened. Measured in
+ *      this very repo 2026-07-30: `origin/main` sat 7 days / 169 ids behind (maxB 974 vs 1143)
+ *      while the banner still read "[incl. origin/main]". Plus the B898 shape survived in two more
+ *      swallowed paths (missing ref, git-not-found), each degrading to the local-only max silently.
+ *
+ * So `--against-main` is now STRICT: it proves freshness, folds in peer branches, and REFUSES
+ * (exit 2) rather than return a plausible-but-stale number. No path returns a number it can't
+ * stand behind. The B779/B780 uniqueness guards are deliberately UNTOUCHED — they are the
+ * backstop, and they work.
+ * ========================================================================================== */
+
+/** execSync buffer for every git read. Well above BACKLOG-DONE.md (1.4 MB and growing): the
+ * default 1 MB is what threw ENOBUFS in B898, and the swallowed throw degraded `--against-main`
+ * to a stale local-only max that read exactly like success. Exported so the regression test can
+ * assert the real value instead of scraping the source. */
+export const GIT_MAX_BUFFER = 64 * 1024 * 1024;
+const git = (repo, cmd, maxBuffer = GIT_MAX_BUFFER) =>
+  execSync(cmd, { cwd: repo, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], maxBuffer });
+
+/** A git call that reports failure instead of throwing. Never swallows: `ok:false` carries why. */
+export function tryGit(repo, cmd) {
+  try { return { ok: true, out: git(repo, cmd) }; }
+  catch (e) { return { ok: false, reason: `${e.code || "failed"}: ${String(e.stderr || e.message || "").trim().split("\n")[0]}` }; }
 }
 
-/** Max id across BOTH the local files AND their origin/main versions. */
-export function maxAgainstMain(repo, files, letter) {
-  let max = maxAcross(repo, files, letter);
+/* ---- freshness: is the ref we are about to trust actually current? -------------------- */
+
+/** How stale `--against-main` may be before it refuses. A mint should immediately precede a push,
+ * so five minutes is already generous; `--max-age=N` overrides for an unusual workflow. */
+export const DEFAULT_MAX_FETCH_AGE_S = 300;
+/** How far back a peer branch stays "in flight". A PR's open→merge life here is hours, not days. */
+export const DEFAULT_PEER_DAYS = 3;
+/** Peer branch tips land in their own ref namespace so `refs/remotes/origin/*` is never disturbed. */
+export const PEER_NS = "refs/remotes/planyr-peers";
+
+/** Seconds since this repo last fetched (FETCH_HEAD mtime — every `git fetch` rewrites it), or
+ * null if it has never fetched. Impure by nature; the verdict it feeds is pure. */
+export function lastFetchAgeSeconds(repo, now = Date.now()) {
+  const p = tryGit(repo, "git rev-parse --git-path FETCH_HEAD");
+  if (!p.ok) return null;
+  const abs = resolve(repo, p.out.trim());
+  if (!existsSync(abs)) return null;
+  return Math.max(0, Math.round((now - statSync(abs).mtimeMs) / 1000));
+}
+
+/** The commit `origin/main` currently points at locally, or null if the ref doesn't exist. */
+export function originMainSha(repo) {
+  const r = tryGit(repo, "git rev-parse --verify --quiet refs/remotes/origin/main");
+  return r.ok && r.out.trim() ? r.out.trim() : null;
+}
+
+/** PURE verdict on whether origin/main may be trusted. `ok:false` means REFUSE — never warn-and-
+ * continue, because a stale ref silently degrades `--against-main` to the local-only max, which is
+ * indistinguishable from success (defect 3 above). */
+export function assessFreshness({ sha, ageSeconds, maxAgeSeconds = DEFAULT_MAX_FETCH_AGE_S }) {
+  const fix = "run `git fetch origin main` and re-run";
+  if (!sha) return { ok: false, code: "no-ref", message: `refs/remotes/origin/main does not exist in this clone — ${fix}.` };
+  if (ageSeconds == null) return { ok: false, code: "never-fetched", message: `this clone has never fetched (no FETCH_HEAD) — ${fix}.` };
+  if (ageSeconds > maxAgeSeconds)
+    return { ok: false, code: "stale", message: `last fetch was ${ageSeconds}s ago, older than the ${maxAgeSeconds}s freshness limit — ${fix}.` };
+  return { ok: true, code: "fresh", sha, ageSeconds, message: `origin/main ${sha.slice(0, 7)}, fetched ${ageSeconds}s ago` };
+}
+
+/* ---- reading ids out of a git ref ----------------------------------------------------- */
+
+/** Read `<ref>:<file>`. A file genuinely absent from that commit is fine (empty text). ANY other
+ * failure — ENOBUFS, no such ref, git missing — is reported as `ok:false` so the caller refuses.
+ * This is the B898 lesson generalised: the only tolerated "empty" is one we can explain. */
+export function readRefFile(repo, ref, file) {
+  const r = tryGit(repo, `git show ${ref}:${file}`);
+  if (r.ok) return { ok: true, text: r.out };
+  // git's two ways of saying "that ref is fine, the FILE just isn't in it" — the only tolerated empty.
+  if (/path '[^']*' (does not exist|exists on disk, but not) in/i.test(r.reason))
+    return { ok: true, text: "", absent: true };
+  return { ok: false, reason: `${ref}:${file} — ${r.reason}` };
+}
+
+/** Max id of a family across a ref's copies of `files`. `ok:false` on any unexplained read. */
+export function maxOnRef(repo, ref, files, letter) {
+  let max = 0;
   for (const f of files) {
-    const t = readOriginMain(repo, f);
-    if (t != null) { const m = maxId(t, letter); if (m > max) max = m; }
+    const r = readRefFile(repo, ref, f);
+    if (!r.ok) return r;
+    const m = maxId(r.text, letter);
+    if (m > max) max = m;
   }
-  return max;
+  return { ok: true, max };
 }
 
-/** Like computeNextIds but folding in origin/main (for the late-bind / ship-time mint). */
-export function computeNextIdsAgainstMain(repo = REPO) {
-  const maxB = maxAgainstMain(repo, B_FILES, "B");
-  const maxV = maxAgainstMain(repo, V_FILES, "V");
-  return { maxB, maxV, nextB: maxB + 1, nextV: maxV + 1 };
+/** Every id of a family that has a `### <L>###` heading in `texts`, as a Set of numbers. */
+export function headingIdsIn(texts, letter) {
+  const re = new RegExp(`^###\\s+${letter}(\\d+)\\b`, "gm");
+  const out = new Set();
+  for (const t of texts) for (const m of (t || "").matchAll(re)) out.add(Number(m[1]));
+  return out;
+}
+
+/* ---- peer branches: the ids already claimed by other sessions still in flight ---------- */
+
+/** Mirror every remote head into PEER_NS. This is the one network call, and it is the whole fix
+ * for defect 2: the ids other sessions have claimed but not yet merged are sitting on the remote,
+ * readable now. `--depth=1` only when the clone is already shallow (deepening a shallow clone is
+ * expensive; marking a full clone shallow is rude). */
+export function fetchPeers(repo, { exclude = [] } = {}) {
+  const shallow = tryGit(repo, "git rev-parse --is-shallow-repository").out?.trim() === "true";
+  // `--depth=1` keeps the mirror cheap, but in a shallow clone it GRAFTS every tip it fetches into
+  // .git/shallow — and one of those tips is OUR OWN branch, which makes git treat our own HEAD as
+  // parentless and severs `git merge-base` (observed on this very branch: the gate then lost the
+  // merge base it needs for the B1140 case, and `git log` went one commit deep). Two defences:
+  //   (1) negative refspecs so main and this checkout's own branch are never mirrored at all, and
+  //   (2) a snapshot/restore of .git/shallow, so whatever grafts the fetch adds are undone and the
+  //       clone is left byte-identical to how we found it. A tool that inspects the repo must not
+  //       damage it.
+  const neg = ["main", ...exclude].filter(Boolean).map((b) => ` "^refs/heads/${b}"`).join("");
+  const shallowPath = tryGit(repo, "git rev-parse --git-path shallow");
+  const file = shallowPath.ok ? resolve(repo, shallowPath.out.trim()) : null;
+  const before = file && existsSync(file) ? readFileSync(file) : null;
+  const restore = () => {
+    if (!file) return;
+    if (before == null) { if (existsSync(file)) rmSync(file, { force: true }); }
+    else writeFileSync(file, before);
+  };
+  const r = tryGit(repo, `git fetch --no-tags --prune --quiet${shallow ? " --depth=1" : ""} origin "+refs/heads/*:${PEER_NS}/*"${neg}`);
+  if (!r.ok) { restore(); return { ok: false, reason: `peer fetch failed — ${r.reason}`, restore: () => {} }; }
+  return { ok: true, restore };
+}
+
+/** PURE: which mirrored refs count as "in flight" — recent enough to still be racing us, and not
+ * our own branch or main. An abandoned branch ageing out only ever LOWERS the claimed max back
+ * toward main's, and a stale claim just leaves a numbering gap, which costs nothing (B1140). */
+export function selectPeerRefs(rows, { days = DEFAULT_PEER_DAYS, now = Date.now(), exclude = [] } = {}) {
+  const cutoff = now / 1000 - days * 86400;
+  const skip = new Set(["main", ...exclude].map((b) => `${PEER_NS.split("/").pop()}/${b}`));
+  return rows.filter((r) => r.ts >= cutoff && !skip.has(r.name));
+}
+
+/**
+ * Every name this checkout might be known by, so a peer scan never mistakes US for a rival.
+ * `git rev-parse --abbrev-ref HEAD` alone is NOT enough: on a `pull_request` build,
+ * actions/checkout lands on the test-merge commit in DETACHED HEAD, so it returns the literal
+ * string "HEAD" and the branch's own mirrored ref reads as a peer holding our number. That false
+ * red is exactly the failure mode a mint gate must not have — a gate that cries wolf gets
+ * bypassed. GITHUB_HEAD_REF (PR builds) / GITHUB_REF_NAME (push builds) name it correctly there.
+ */
+export function selfBranchNames(repo, env = process.env) {
+  const names = new Set();
+  for (const n of [env.GITHUB_HEAD_REF, env.GITHUB_REF_NAME]) if (n) names.add(n);
+  const local = (tryGit(repo, "git rev-parse --abbrev-ref HEAD").out || "").trim();
+  if (local && local !== "HEAD") names.add(local);
+  return [...names];
+}
+
+/** Drop peer refs already CONTAINED in HEAD — an older push of this same branch, or anything
+ * merged into us. Name-independent, so it catches the detached-HEAD case even if the env vars are
+ * absent. Ancestry is unavailable in some shallow clones; there the name filter carries it. */
+export function dropContainedRefs(repo, refs) {
+  return refs.filter((r) => !tryGit(repo, `git merge-base --is-ancestor ${r.name} HEAD`).ok);
+}
+
+/** The mirrored peer refs with their tip dates. */
+export function peerRefRows(repo) {
+  const r = tryGit(repo, `git for-each-ref "--format=%(refname:short)%09%(committerdate:unix)" ${PEER_NS}`);
+  if (!r.ok) return { ok: false, reason: r.reason };
+  const rows = r.out.trim().split("\n").filter(Boolean).map((l) => {
+    const [name, ts] = l.split("\t");
+    return { name, ts: Number(ts) };
+  });
+  return { ok: true, rows };
+}
+
+/** Blob sha per file at a ref — lets us skip re-reading a file a peer never touched, and cache by
+ * content so the 1.4 MB archive is parsed once no matter how many peers share that blob. */
+function blobShas(repo, ref, files) {
+  const r = tryGit(repo, `git ls-tree ${ref} -- ${files.join(" ")}`);
+  if (!r.ok) return { ok: false, reason: r.reason };
+  const out = {};
+  for (const line of r.out.trim().split("\n").filter(Boolean)) {
+    const m = /^\d+\s+blob\s+(\S+)\t(.+)$/.exec(line);
+    if (m) out[m[2]] = m[1];
+  }
+  return { ok: true, shas: out };
+}
+
+/**
+ * What ids the in-flight peer branches have already claimed for a family.
+ * Returns `{ ok, max, ids:Set, scanned, claimants:[{ref,max}] }` — `claimants` are the branches
+ * that hold an id ABOVE main's max, i.e. the sessions we would have collided with.
+ * Any unexplained read fails the whole scan (`ok:false`) rather than under-reporting the max,
+ * because under-reporting is the one error that hands out a number someone else already has.
+ */
+export function peerClaims(repo, files, letter, { refs, baseRef = "refs/remotes/origin/main", baseMax = 0 } = {}) {
+  const base = blobShas(repo, baseRef, files);
+  if (!base.ok) return { ok: false, reason: `base blobs — ${base.reason}` };
+  const byBlob = new Map();
+  let max = 0; const ids = new Set(); const claimants = [];
+  for (const ref of refs) {
+    const b = blobShas(repo, ref.name, files);
+    if (!b.ok) return { ok: false, reason: `${ref.name} — ${b.reason}` };
+    let refMax = 0;
+    for (const [file, sha] of Object.entries(b.shas)) {
+      if (base.shas[file] === sha) continue; // untouched by this peer — nothing new can be in it
+      if (!byBlob.has(sha)) {
+        const r = tryGit(repo, `git cat-file blob ${sha}`);
+        if (!r.ok) return { ok: false, reason: `${ref.name}:${file} — ${r.reason}` };
+        byBlob.set(sha, { max: maxId(r.out, letter), ids: headingIdsIn([r.out], letter) });
+      }
+      const got = byBlob.get(sha);
+      if (got.max > refMax) refMax = got.max;
+      for (const n of got.ids) if (n > baseMax) ids.add(n);
+    }
+    if (refMax > max) max = refMax;
+    if (refMax > baseMax) claimants.push({ ref: ref.name, max: refMax });
+  }
+  claimants.sort((a, b) => b.max - a.max);
+  return { ok: true, max, ids, scanned: refs.length, claimants };
+}
+
+/* ---- the composed answer --------------------------------------------------------------- */
+
+/**
+ * The ship-time mint: local ∪ origin/main ∪ every in-flight peer branch, with freshness PROVEN.
+ * `{ ok:false, refusal }` when anything cannot be verified — the caller must not print a number.
+ */
+export function computeNextIdsStrict(repo = REPO, {
+  maxAgeSeconds = DEFAULT_MAX_FETCH_AGE_S, peers = true, peerDays = DEFAULT_PEER_DAYS,
+  now = Date.now(), currentBranch = null, fetch = true,
+} = {}) {
+  const fresh = assessFreshness({ sha: originMainSha(repo), ageSeconds: lastFetchAgeSeconds(repo, now), maxAgeSeconds });
+  if (!fresh.ok) return { ok: false, refusal: fresh };
+
+  const provenance = { sha: fresh.sha, fetchedSecondsAgo: fresh.ageSeconds, peers: null };
+  const out = {};
+  for (const [letter, files] of [["B", B_FILES], ["V", V_FILES]]) {
+    const local = maxAcross(repo, files, letter);
+    const onMain = maxOnRef(repo, "refs/remotes/origin/main", files, letter);
+    if (!onMain.ok) return { ok: false, refusal: { code: "read-failed", message: onMain.reason } };
+    out[letter] = { max: Math.max(local, onMain.max), local, main: onMain.max, peer: 0, claimants: [] };
+  }
+
+  let releasePeers = () => {};
+  if (peers) {
+    if (fetch) {
+      const f = fetchPeers(repo, { exclude: currentBranch ? [currentBranch] : selfBranchNames(repo) });
+      if (!f.ok) return { ok: false, refusal: { code: "peer-fetch-failed", message: f.reason } };
+      releasePeers = f.restore;
+    }
+    const rows = peerRefRows(repo);
+    if (!rows.ok) return { ok: false, refusal: { code: "peer-list-failed", message: rows.reason } };
+    const exclude = currentBranch ? [currentBranch] : selfBranchNames(repo);
+    const refs = dropContainedRefs(repo, selectPeerRefs(rows.rows, { days: peerDays, now, exclude }));
+    for (const [letter, files] of [["B", B_FILES], ["V", V_FILES]]) {
+      const c = peerClaims(repo, files, letter, { refs, baseMax: out[letter].main });
+      if (!c.ok) return { ok: false, refusal: { code: "peer-read-failed", message: c.reason } };
+      out[letter].peer = c.max;
+      out[letter].claimants = c.claimants;
+      out[letter].peerIds = c.ids;
+      if (c.max > out[letter].max) out[letter].max = c.max;
+    }
+    provenance.peers = { scanned: refs.length, windowDays: peerDays };
+    releasePeers(); // leave .git/shallow exactly as we found it
+  }
+
+  const maxB = out.B.max, maxV = out.V.max;
+  return { ok: true, maxB, maxV, nextB: maxB + 1, nextV: maxV + 1, provenance, detail: out };
+}
+
+/* Kept for callers/tests that predate the strict path (B779 shape): local ∪ origin/main only, and
+ * it now REPORTS rather than swallows a failed read. Prefer computeNextIdsStrict. */
+export function maxAgainstMain(repo, files, letter) {
+  const local = maxAcross(repo, files, letter);
+  const r = maxOnRef(repo, "refs/remotes/origin/main", files, letter);
+  return r.ok ? Math.max(local, r.max) : local;
 }
 
 // ---- CLI -------------------------------------------------------------------------------
-function main(argv) {
-  // `--against-main` (B779): fold in the numbers on origin/main, so a LATE mint (assign the id as
-  // the last step before push, `git fetch origin main` first) steps around ids another session
-  // merged after we branched — the concurrent-collision fix. Default stays local-only (unchanged).
+const flagNum = (argv, name, dflt) => {
+  const hit = argv.find((a) => a.startsWith(`--${name}=`));
+  return hit ? Number(hit.split("=")[1]) : dflt;
+};
+
+export function main(argv, io = { out: process.stdout, err: process.stderr }) {
+  // `--against-main` (B779, hardened B779): the ship-time mint. Folds in origin/main AND every
+  // in-flight peer branch, after PROVING origin/main was just fetched. Refuses rather than guess.
+  // Default (no flag) stays the cheap local-only read for orientation, and says so.
   const againstMain = argv.includes("--against-main");
-  const { nextB, nextV, maxB, maxV } = againstMain ? computeNextIdsAgainstMain() : computeNextIds();
-  if (argv.includes("--json")) {
-    process.stdout.write(JSON.stringify({ nextB, nextV, maxB, maxV }) + "\n");
-    return;
+  const json = argv.includes("--json");
+  let res;
+  if (againstMain) {
+    res = computeNextIdsStrict(REPO, {
+      maxAgeSeconds: flagNum(argv, "max-age", DEFAULT_MAX_FETCH_AGE_S),
+      peerDays: flagNum(argv, "peer-days", DEFAULT_PEER_DAYS),
+      peers: !argv.includes("--no-peers"),
+    });
+    if (!res.ok) {
+      io.err.write(
+        `\n⛔ next-id --against-main REFUSED (${res.refusal.code}): ${res.refusal.message}\n` +
+          `   No number printed on purpose. A stale answer here is how B1030…B1143 collided —\n` +
+          `   it looks exactly like a correct one. (B779)\n\n`,
+      );
+      if (json) io.out.write(JSON.stringify({ ok: false, refusal: res.refusal }) + "\n");
+      return 2;
+    }
+  } else {
+    res = { ok: true, ...computeNextIds() };
   }
-  if (argv.includes("--b")) return void process.stdout.write(`B${nextB}\n`);
-  if (argv.includes("--v")) return void process.stdout.write(`V${nextV}\n`);
-  process.stdout.write(
-    `Next free → B${nextB} · V${nextV}   (highest assigned: B${maxB} / V${maxV})${againstMain ? "  [incl. origin/main]" : ""}\n` +
+  const { nextB, nextV, maxB, maxV } = res;
+
+  if (json) {
+    io.out.write(JSON.stringify({
+      ok: true, nextB, nextV, maxB, maxV,
+      againstMain, provenance: res.provenance ?? null,
+      claimants: res.detail ? { B: res.detail.B.claimants, V: res.detail.V.claimants } : null,
+    }) + "\n");
+    return 0;
+  }
+  if (argv.includes("--b")) { io.out.write(`B${nextB}\n`); return 0; }
+  if (argv.includes("--v")) { io.out.write(`V${nextV}\n`); return 0; }
+
+  let banner = "";
+  if (againstMain) {
+    const p = res.provenance;
+    banner = `  [origin/main ${p.sha.slice(0, 7)}, fetched ${p.fetchedSecondsAgo}s ago` +
+      (p.peers ? ` · ${p.peers.scanned} in-flight branches` : ` · PEERS NOT SCANNED`) + `]`;
+  }
+  io.out.write(
+    `Next free → B${nextB} · V${nextV}   (highest assigned: B${maxB} / V${maxV})${banner}\n` +
       `Mint from here. Multi-mint runs consecutively (e.g. B${nextB}, B${nextB + 1}). ` +
       `Don't grep the archives — this is the whole answer.\n`,
   );
+  // Name the sessions we just stepped around, so a collision that WAS about to happen is visible.
+  for (const [letter, d] of Object.entries(res.detail || {})) {
+    for (const c of d.claimants || [])
+      io.out.write(`  · ${letter}${c.max} is already claimed on ${c.ref} (unmerged) — stepped over it.\n`);
+  }
+  if (againstMain && argv.includes("--no-peers"))
+    io.err.write(`⚠ --no-peers: other in-flight branches were NOT consulted. This is the exact gap that caused B1030…B1143.\n`);
+  if (!againstMain)
+    io.err.write(`ℹ local-only read. Before you PUSH, re-mint with: git fetch origin main && npm run next-id -- --against-main\n`);
+
   // Loud heads-up if two ACTIVE items share an id (a fresh concurrent-mint collision) — the CI
   // uniqueness guard (test/idUniqueness.test.js) enforces the same on the live files. Scoped to the
   // live surfaces so it's actionable, not drowned by the historical archive collisions.
@@ -203,11 +501,12 @@ function main(argv) {
   const dupV = findDuplicateIds(REPO, LIVE_V_FILES, "V");
   if (dupB.length || dupV.length) {
     const fmt = (d) => d.map((x) => `${x.id}×${x.count}`).join(", ");
-    process.stderr.write(`⚠ DUPLICATE ACTIVE ids — renumber before shipping: ${fmt([...dupB, ...dupV])}\n`);
+    io.err.write(`⚠ DUPLICATE ACTIVE ids — renumber before shipping: ${fmt([...dupB, ...dupV])}\n`);
   }
+  return 0;
 }
 
 // Run only as a script, not when imported by the test.
 if (process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url))) {
-  main(process.argv.slice(2));
+  process.exitCode = main(process.argv.slice(2));
 }
