@@ -252,6 +252,26 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   (clipper union of every connected strip + wedge → one region, one outline, per cluster) plus the
   curb-stripe trimmer. A road connection is a boolean union, NOT a patch painted over a seam — read
   roadNetwork.js's header before touching anything junction-shaped.
+  **NEW-1/NEW-2 — THE ROAD IS THE CURVE, NOT ITS CHORDS. Two rules, one root cause.**
+  **(a)** Anything that hit-tests, projects onto, or branches off a road must go through
+  `projectToRoadCenterline` (or `roadCenterlineTagged`, which pairs the dense polyline with the
+  control-point segment that owns each piece of it) — NEVER `projToSeg` over `el.pts`. A chord cuts
+  the corner, so on the truck-route default radius the drawn pavement stands ~36 ft off the nearest
+  chord on a 40 ft road: the old right-click hit test could not reach it at any zoom, and
+  `startRoadBranch` welded branches to points the road does not pass through.
+  **(b)** A junction VERTEX renders SHARP. `roadJunctionVerticesOf` (SitePlanner) collects every
+  vertex another road tees onto and feeds it to `roadDenseCenterline`'s `sharpAt`, because a
+  junction is where two centerlines MEET and a centerline fillet carries the road clear of the node
+  the branch hangs off. The junction then owns ALL the rounding at that node, including the through
+  road's own turn — which is what `nodeJunction`'s `roundOwnCorner` is for; without it the road's
+  own mitered corner is the one square corner in an intersection full of curb returns. Both are
+  no-ops on a collinear junction vertex, so the ordinary straight tee is untouched.
+  **⛔ Do NOT verify anything here against a two-straight-roads mock** — on a straight road the chord
+  IS the road and every defect in this family is invisible. The repo-root `test/` suite
+  **roadCurvedJunction**, the e2e spec **road-split-curved** and the ui-audit harness
+  **verify-road-split-curved** all drive the owner's real geometry (Goose Creek "Plan 1 (copy)" +
+  Tsakiris / Concept A), and the harness shoots every junction twice — the second pass at reduced
+  fill opacity, where a residual stacked edge shows and full opacity hides it.
 - Terrain pipeline (B703–B706) — **LOADED ON DEMAND (B1095): `terrainLazy.js` is the ONE entry
   point** (`loadTerrain()` cached import + the synchronous `terrainNow()` the per-move cursor
   sample reads + the `contourHover` router); nothing on the boot path may static-import

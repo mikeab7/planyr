@@ -156,53 +156,118 @@ function smoothCorner(A, P, C, tessDeg) {
   return { entry: S, exit: E, pts: [...h1, ...h2.slice(1)] };
 }
 
-/* Drop consecutive duplicate points (within `tol` ft). */
-function dedupe(pts, tol = 1e-6) {
-  const out = [];
-  for (const p of pts) {
-    const last = out[out.length - 1];
-    if (!last || Math.hypot(p.x - last.x, p.y - last.y) > tol) out.push(p);
+/* Drop consecutive duplicate points (within `tol` ft), keeping `tags` index-aligned. */
+function dedupe(pts, tol = 1e-6, tags = null) {
+  const out = [], keptTags = [];
+  for (let i = 0; i < pts.length; i++) {
+    const p = pts[i], last = out[out.length - 1];
+    if (!last || Math.hypot(p.x - last.x, p.y - last.y) > tol) { out.push(p); if (tags) keptTags.push(tags[i]); }
   }
-  return out;
+  return tags ? { pts: out, tags: keptTags } : out;
 }
 
-/* roadCenterline(pts, vtx, opts) — the rendered, tessellated centerline.
+/* roadCenterlineTagged(pts, vtx, opts) — the rendered, tessellated centerline PLUS, for each
+ * dense SEGMENT i (dense[i] → dense[i+1]), the index of the SPARSE control-point segment that
+ * owns it (`segOwn[i]`, an index into the caller's own `pts`).
  *
  *   pts  — the clicked alignment (≥2 points).
  *   vtx  — parallel per-vertex treatment list (optional; defaults to "arc" per interior).
  *   opts.defaultRadius — Arc radius for a vertex that carries none (the class default).
  *   opts.tessDeg       — degrees of arc per tessellation step (smaller = denser).
+ *   opts.sharpAt       — vertex indices (into `pts`) forced to a HARD corner regardless of their
+ *                        stored treatment. This is how a JUNCTION vertex is rendered: a road that
+ *                        another road tees into must physically pass THROUGH the junction node, and
+ *                        a fillet cuts the corner off it — on the owner's Goose Creek plan the arc
+ *                        at the split carried the pavement ~10 ft clear of the node the branch was
+ *                        welded to, so the branch's edges stepped against the through road's. At a
+ *                        real intersection the centerlines meet at a point and the CURB RETURNS do
+ *                        the rounding; that is what this restores. (It is a no-op on a collinear
+ *                        vertex — the overwhelmingly common junction — because `arcCorner` already
+ *                        degenerates to a pass-through there.)
+ *
+ * The `segOwn` map is what lets a click on the DRAWN road be turned back into "insert a control
+ * point into segment k": the pavement follows the dense curve, not the chords between control
+ * points, so projecting a cursor onto the chords misses wherever the road actually bends.
  *
  * A 2-point road returns its two points unchanged (the degenerate "straight road" — it
  * MUST render identically to the legacy rect road). Sharp-only input returns the input
  * polyline. Every corner consumes at most half of each adjacent segment, so the dense
  * result is always simple (no self-overlap from neighbouring corners). */
-export function roadCenterline(pts, vtx, opts = {}) {
-  const clean = (pts || []).filter((p) => p && Number.isFinite(p.x) && Number.isFinite(p.y));
-  if (clean.length < 2) return clean.map((p) => ({ x: p.x, y: p.y }));
-  if (clean.length === 2) return [{ x: clean[0].x, y: clean[0].y }, { x: clean[1].x, y: clean[1].y }];
+export function roadCenterlineTagged(pts, vtx, opts = {}) {
+  const clean = [], keep = [];                       // `keep[j]` = the ORIGINAL index of clean[j]
+  (pts || []).forEach((p, i) => { if (p && Number.isFinite(p.x) && Number.isFinite(p.y)) { clean.push(p); keep.push(i); } });
+  if (clean.length < 2) return { dense: clean.map((p) => ({ x: p.x, y: p.y })), segOwn: [] };
+  if (clean.length === 2) return { dense: [{ x: clean[0].x, y: clean[0].y }, { x: clean[1].x, y: clean[1].y }], segOwn: [keep[0]] };
   const tessDeg = opts.tessDeg > 0 ? opts.tessDeg : DEFAULT_TESS_DEG;
   const defR = opts.defaultRadius > 0 ? opts.defaultRadius : DEFAULT_ARC_RADIUS;
+  const sharp = opts.sharpAt instanceof Set ? opts.sharpAt : new Set(Array.isArray(opts.sharpAt) ? opts.sharpAt : []);
   const N = clean.length;
   // Per interior vertex, compute its corner geometry (entry anchor, dense pts, exit anchor).
   const corners = [];
   const shareAt = typeof opts.shareAt === "function" ? opts.shareAt : (i) => cornerShares(i, N);
   for (let i = 1; i < N - 1; i++) {
     const A = clean[i - 1], P = clean[i], C = clean[i + 1];
-    const t = treatmentAt(vtx, i);
+    const t = sharp.has(keep[i]) ? "sharp" : treatmentAt(vtx, i);
     const sh = shareAt(i) || { a: 0.5, c: 0.5 };
     if (t === "arc") corners.push(arcCorner(A, P, C, radiusAt(vtx, i, defR), tessDeg, sh.a, sh.c));
     else if (t === "smooth") corners.push(smoothCorner(A, P, C, tessDeg));
     else corners.push({ entry: P, exit: P, pts: [P] }); // sharp
   }
   // Stitch: start point → straight to corner1.entry → corner1 dense → straight to
-  // corner2.entry → … → straight to end point.
+  // corner2.entry → … → straight to end point. `inOwn[k]` records which SPARSE segment owns the
+  // dense segment ENDING at point k: a corner at interior vertex v straddles segments v−1 and v,
+  // so its first half is charged to v−1 and its second half to v.
   const out = [{ x: clean[0].x, y: clean[0].y }];
-  for (let i = 0; i < corners.length; i++) {
-    for (const p of corners[i].pts) out.push({ x: p.x, y: p.y });
+  const inOwn = [-1];
+  for (let c = 0; c < corners.length; c++) {
+    const v = c + 1, P = corners[c].pts, m = P.length;
+    for (let k = 0; k < m; k++) { out.push({ x: P[k].x, y: P[k].y }); inOwn.push(keep[k <= (m - 1) / 2 ? v - 1 : v]); }
   }
   out.push({ x: clean[N - 1].x, y: clean[N - 1].y });
-  return dedupe(out);
+  inOwn.push(keep[N - 2]);
+  const d = dedupe(out, 1e-6, inOwn);
+  return { dense: d.pts, segOwn: d.tags.slice(1) };   // segOwn[i] owns dense[i]→dense[i+1]
+}
+
+/* The rendered, tessellated centerline (see roadCenterlineTagged for the options). */
+export function roadCenterline(pts, vtx, opts = {}) {
+  return roadCenterlineTagged(pts, vtx, opts).dense;
+}
+
+/* Nearest point on an OPEN polyline to `p`. Returns { i, pt, d } (segment index + the clamped
+ * projection + its distance), or null for a degenerate line. */
+export function projectToPolyline(line, p) {
+  if (!Array.isArray(line) || line.length < 2 || !p) return null;
+  let best = null;
+  for (let i = 0; i < line.length - 1; i++) {
+    const a = line[i], b = line[i + 1];
+    const dx = b.x - a.x, dy = b.y - a.y, L2 = dx * dx + dy * dy;
+    let t = L2 > EPS ? ((p.x - a.x) * dx + (p.y - a.y) * dy) / L2 : 0;
+    t = t < 0 ? 0 : t > 1 ? 1 : t;
+    const q = { x: a.x + t * dx, y: a.y + t * dy };
+    const d = Math.hypot(p.x - q.x, p.y - q.y);
+    if (!best || d < best.d) best = { i, pt: q, d };
+  }
+  return best;
+}
+
+/* Hit-test a point against the road as DRAWN, mapped back to the control-point segment that owns
+ * the hit. Returns { index, pt, d } where `index` is exactly the `edgeIndex` insertRoadVertex
+ * expects and `pt` lies ON the rendered centerline.
+ *
+ * Why this exists (the "right-click misses wherever the road is curved" bug): the pavement is
+ * generated from the dense, tessellated centerline, but the on-canvas hit test projected onto the
+ * straight CHORD between consecutive control points. On a curve the chord cuts the corner, so the
+ * drawn pavement on the outside of a bend sits further from the chord than the click tolerance —
+ * no edge hit, no "Add control point", and the road's own menu opened instead. Projecting onto the
+ * curve the renderer actually draws makes a click anywhere on the pavement land. */
+export function projectToRoadCenterline(pts, vtx, p, opts = {}) {
+  const { dense, segOwn } = roadCenterlineTagged(pts, vtx, opts);
+  const hit = projectToPolyline(dense, p);
+  if (!hit) return null;
+  const maxEdge = Math.max(0, (pts || []).length - 2);
+  const own = Number.isFinite(segOwn[hit.i]) ? segOwn[hit.i] : hit.i;
+  return { index: Math.max(0, Math.min(maxEdge, own)), pt: hit.pt, d: hit.d };
 }
 
 /* The minimum radius of curvature (ft) anywhere along a dense polyline — the circumradius
@@ -1139,7 +1204,7 @@ export function weldCoverPolygon(P, arms, opts = {}) {
  * span between them. `wedges` are ADDITIVE pavement polygons for the boolean union — same contract as
  * teeGeometry.wedges: never painted over a seam, always unioned. Pure — unit-tested. */
 export function nodeJunction(params) {
-  const { node, arms, R = 0, tessDeg = DEFAULT_TESS_DEG, flatDeg = 178 } = params || {};
+  const { node, arms, R = 0, tessDeg = DEFAULT_TESS_DEG, flatDeg = 178, roundOwnCorner = false } = params || {};
   if (!node || !Array.isArray(arms) || arms.length < 2) return null;
   const prepped = [];
   for (let i = 0; i < arms.length; i++) {
@@ -1170,7 +1235,11 @@ export function nodeJunction(params) {
     if (sweep >= flat) continue;
     // Two arms of the SAME road are the two sides of that road's own bend — its polyline buffer already
     // joins them. Adding a return there would stack pavement on a corner that is not a junction at all.
-    if (A.road != null && A.road === B.road) continue;
+    // …UNLESS the caller has FLATTENED that bend to a hard corner so the centerlines meet at the node
+    // (`roundOwnCorner`, the junction-vertex case). Then the buffer joins them with a square miter and
+    // the junction owns ALL the rounding at this node — including the through road's own turn, which
+    // would otherwise read as the one squared-off corner in an intersection full of curb returns.
+    if (!roundOwnCorner && A.road != null && A.road === B.road) continue;
     // Each arm's edge FACING this gap: A's left (+90° CCW), B's right (−90°).
     const nA = { x: -A.u.y, y: A.u.x }, nB = { x: B.u.y, y: -B.u.x };
     const corner = lineX(add(node, mul(nA, A.half)), A.u, add(node, mul(nB, B.half)), B.u);

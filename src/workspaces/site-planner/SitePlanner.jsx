@@ -134,7 +134,7 @@ import { pondInspectorChips, POND_CHIP_DEFS, pondGroupSummary, POND_FLOOD_NOTES,
 import { classifyWseSource, classifyVerified } from "./lib/provenance.js";
 import { formatAge } from "./lib/gisCache.js";
 import { buildingNumbers, isBuilding, roadTravelWidth, bondedChildRot, roadStripBBox, rectRoadEndpoints, parcelOutline, parcelDisplayInfo, lineageConflicts } from "./lib/siteModel.js";
-import { roadCenterline, roadMinRadius, insertRoadVertex, removeRoadVertex, canRemoveRoadVertex, curbStrokePx, findRoadConnect, planRoadConnect, fixRoadRadii, teeGeometry, rectEdges, nearestRectEdge, weldCoverPolygon, roadRadiusConflicts, fitRoadCorners, nodeJunction } from "./lib/roadGeometry.js";
+import { roadCenterline, projectToRoadCenterline, roadMinRadius, insertRoadVertex, removeRoadVertex, canRemoveRoadVertex, curbStrokePx, findRoadConnect, planRoadConnect, fixRoadRadii, teeGeometry, rectEdges, nearestRectEdge, weldCoverPolygon, roadRadiusConflicts, fitRoadCorners, nodeJunction } from "./lib/roadGeometry.js";
 import { dissolveRings, clipPolylineOutside, clusterIds, regionPathD, rectOutlineCutSegments } from "./lib/roadNetwork.js";
 import { dashZoom, insetRingVisible } from "./lib/lineZoom.js";
 import { roadClassesOf, roadClassOf, classMinRadius, classDefaultRadius, classReturnRadius, DEFAULT_ROAD_CLASS, ROAD_CLASS_SEEDS, speedMinRadius } from "./lib/roadClasses.js";
@@ -1154,22 +1154,28 @@ const ROAD_FLAG_LABEL_PPF = 0.5;
 // Default Arc radius for a road's new vertices = its class default (settings-resolved).
 const roadDefaultRadius = (el, settings) => classDefaultRadius(roadClassOf(settings, el && el.roadClass));
 // The dense, tessellated centerline (the rendered alignment) for a centerline road.
-const roadDenseCenterline = (el, settings) => roadCenterline(el.pts, el.vtx, { defaultRadius: roadDefaultRadius(el, settings) });
+//
+// NEW-2 — `sharpAt` is the set of this road's vertices that ANOTHER road tees onto. Those corners
+// are rendered as hard corners (see roadCenterlineTagged's `sharpAt`): a junction is where two
+// centerlines MEET, so the through road has to pass through the node, and a centerline fillet cuts
+// the corner clean off it. Every caller that draws, measures or dissolves a road passes it, so the
+// pavement, the curb stripes, the paved-area figure and the length all describe the same road.
+const roadDenseCenterline = (el, settings, sharpAt) => roadCenterline(el.pts, el.vtx, { defaultRadius: roadDefaultRadius(el, settings), sharpAt });
 // The pavement+curb OUTER ring (closed polygon) — total width = travelW + a curb each side.
-const roadStripRing = (el, settings) => {
-  const dense = roadDenseCenterline(el, settings);
+const roadStripRing = (el, settings, sharpAt) => {
+  const dense = roadDenseCenterline(el, settings, sharpAt);
   return bufferPolyline(dense, Math.max(0, (+el.travelW || 0) + 2 * roadCurbWidth(el))) || [];
 };
 // The two inner curb lines = the centerline offset by ±travelW/2 (face-of-curb edges).
-const roadCurbLines = (el, settings) => {
-  const dense = roadDenseCenterline(el, settings);
+const roadCurbLines = (el, settings, sharpAt) => {
+  const dense = roadDenseCenterline(el, settings, sharpAt);
   const hw = Math.max(0, (+el.travelW || 0) / 2);
   return [offsetPolyline(dense, hw), offsetPolyline(dense, -hw)].filter(Boolean);
 };
 // Plan-view paved area (sf) of a centerline road = its generated strip polygon area
 // (replaces the old w×h — the curbs are included, matching the B70 three-way contract).
-const roadStripArea = (el, settings) => {
-  const ring = roadStripRing(el, settings);
+const roadStripArea = (el, settings, sharpAt) => {
+  const ring = roadStripRing(el, settings, sharpAt);
   return ring.length >= 3 ? Math.abs(polyArea(ring)) : 0;
 };
 // B953/NEW-1 — detect road tees for the clean-intersection render. A tee = a centerline road's
@@ -1222,21 +1228,49 @@ function roadRunFrom(pts, i, step, noiseFt = VERTEX_NOISE_FT) {
 }
 // The tangent-read scale for a road: half its travel width, floored at the bare noise tolerance.
 const roadTangentNoise = (el) => Math.max(VERTEX_NOISE_FT, (+(el && el.travelW) || 0) / 2);
+// The road (and which of its interior vertices) that `P` — one endpoint of side road `S` — tees onto.
+// ONE definition of "this is a tee", shared by the junction builder and the junction-vertex map, so
+// the corners we FLATTEN can never drift from the junctions we BUILD.
+const teeTargetOf = (roads, S, P) => {
+  for (const H of roads) {
+    if (H.id === S.id) continue;
+    for (let i = 1; i < H.pts.length - 1; i++) {
+      if (Math.hypot(H.pts[i].x - P.x, H.pts[i].y - P.y) <= teeCoincideFt(S, H)) return { G: H, gvi: i };
+    }
+  }
+  return null;
+};
+/* NEW-2 — every vertex a road junction lands on, per road: Map<roadId, Set<vertexIndex>>.
+ *
+ * These corners render SHARP (see roadDenseCenterline). The owner's Goose Creek split is why: his
+ * 36' aisle turns ~88° through an arc-treated vertex, and the branch is welded to that vertex — but
+ * a 25 ft fillet carries the drawn pavement ~10 ft clear of it, so the branch's edges sat 10 ft
+ * inboard of the through road's and the outline stepped. A junction is where two centerlines MEET;
+ * the rounding there belongs to the curb returns, not to a centerline fillet that moves the road
+ * away from the node. No-op on a collinear junction vertex (the common case), so an ordinary
+ * straight tee renders byte-identically to before. Pure over (els); memoized at the call site. */
+function roadJunctionVerticesOf(els) {
+  const roads = (els || []).filter((x) => isCenterlineRoad(x) && !x.attachedTo);
+  const out = new Map();
+  for (const S of roads) {
+    for (const ei of [0, S.pts.length - 1]) {
+      const t = teeTargetOf(roads, S, S.pts[ei]);
+      if (!t) continue;
+      if (!out.has(t.G.id)) out.set(t.G.id, new Set());
+      out.get(t.G.id).add(t.gvi);
+    }
+  }
+  return out;
+}
 function teeJunctionsOf(els, settings) {
   const roads = (els || []).filter((x) => isCenterlineRoad(x) && !x.attachedTo);
   const out = [];
   for (const S of roads) {
     for (const ei of [0, S.pts.length - 1]) {
       const P = S.pts[ei];
-      let G = null, gvi = -1;
-      for (const H of roads) {
-        if (H.id === S.id) continue;
-        for (let i = 1; i < H.pts.length - 1; i++) {
-          if (Math.hypot(H.pts[i].x - P.x, H.pts[i].y - P.y) <= teeCoincideFt(S, H)) { G = H; gvi = i; break; }
-        }
-        if (G) break;
-      }
-      if (!G) continue;
+      const hit = teeTargetOf(roads, S, P);
+      if (!hit) continue;
+      const { G, gvi } = hit;
       const sideRun = roadRunFrom(S.pts, ei, ei === 0 ? 1 : -1, roadTangentNoise(S));   // into the side road's body
       const sideDir = { x: sideRun.far.x - P.x, y: sideRun.far.y - P.y };
       const backRun = roadRunFrom(G.pts, gvi, -1, roadTangentNoise(G)), fwdRun = roadRunFrom(G.pts, gvi, 1, roadTangentNoise(G));
@@ -1263,7 +1297,13 @@ function teeJunctionsOf(els, settings) {
       // stop the road's own bend being mistaken for a junction corner.
       const halfG = roadOuterHalf(G), halfS = roadOuterHalf(S);
       const nj = nodeJunction({
-        node: { x: P.x, y: P.y }, R, flatDeg: 178,
+        // NEW-2 — the through road's own corner at this node is FLATTENED (roadJunctionVerticesOf →
+        // roadDenseCenterline's `sharpAt`) so its centerline passes through the node the branch is
+        // welded to. Its buffer therefore joins the two through arms with a square miter, so the
+        // junction has to round that corner too — otherwise a road that BENDS at its split reads as
+        // one hard corner beside two clean curb returns. On a collinear split the two through arms
+        // are ~180° apart and this changes nothing (the gap is flat and skipped either way).
+        node: { x: P.x, y: P.y }, R, flatDeg: 178, roundOwnCorner: true,
         arms: [
           { dir: { x: a.x - P.x, y: a.y - P.y }, half: halfG, avail: Math.min(backRun.dist, teeObstacle.neg), road: G.id, deep: halfG > 0.01 ? Math.min(halfG * 0.5, 12) : 0 },
           { dir: { x: b.x - P.x, y: b.y - P.y }, half: halfG, avail: Math.min(fwdRun.dist, teeObstacle.pos), road: G.id, deep: halfG > 0.01 ? Math.min(halfG * 0.5, 12) : 0 },
@@ -1432,8 +1472,8 @@ function weldJunctionsOf(els) {
   return out;
 }
 // True length (ft) of a centerline road = its tessellated centerline length.
-const roadCenterlineLength = (el, settings) => {
-  const dense = roadDenseCenterline(el, settings);
+const roadCenterlineLength = (el, settings, sharpAt) => {
+  const dense = roadDenseCenterline(el, settings, sharpAt);
   let L = 0;
   for (let i = 1; i < dense.length; i++) L += Math.hypot(dense[i].x - dense[i - 1].x, dense[i].y - dense[i - 1].y);
   return L;
@@ -1700,6 +1740,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // B416: heal any dock-zone stack stranded on a non-dock side (a court/trailer/buffer left
   // behind when an older plan was reshaped before the guard existed) the moment the plan opens.
   const [els, setEls] = useState(() => pruneStrandedZones(restored?.els || [])); // {id,type,cx,cy,w,h,rot}
+  // NEW-2 — which vertices carry a junction, per road: those corners render SHARP so the through
+  // road's centerline passes through the node its branch is welded to (roadJunctionVerticesOf).
+  // EVERY road-geometry read below takes this, so pavement, curb stripes, paved area and length all
+  // describe the same road. `sharpFor(el)` is the one accessor.
+  const roadJunctionVerts = useMemo(() => roadJunctionVerticesOf(els), [els]);
+  const sharpFor = useCallback((el) => (el && el.id != null ? roadJunctionVerts.get(el.id) : undefined), [roadJunctionVerts]);
   const [measures, setMeasures] = useState(() => restored?.measures || []); // {a,b}
   const [callouts, setCallouts] = useState(() => restored?.callouts || []);  // {id, tip:{x,y}, box:{x,y}, text}
   const [markups, setMarkups] = useState(() => restored?.markups || []);   // neutral shapes: line/polyline/rect/ellipse/polygon
@@ -5444,7 +5490,19 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // B718: a centerline road is vertex-editable too — its editable "path" is its centerline
       // (`pts`, open). A wide `edgeTolFt` (≈ strip half-width) lets a Shift-/right-click land
       // ANYWHERE on the pavement strip and project onto the centerline; endpoints are protected.
-      if (isCenterlineRoad(el)) return { layer: "road", id: el.id, pts: el.pts, closed: false, min: 2, edgeTolFt: (+el.travelW || 0) / 2 + roadCurbWidth(el) + 11 / view.ppf, noEndpointDelete: true };
+      // NEW-1 — a road's editable "path" is its centerline (`pts`, open), but the EDGE hit test runs
+      // against the CURVED centerline the renderer actually draws, not the chords between control
+      // points: on a bend the chord cuts the corner, so the pavement on the outside of the curve sits
+      // further from the chord than the tolerance and a right-click there found no edge at all (no
+      // "Add control point" — the element menu opened instead). `projectEdge` returns the hit ON the
+      // drawn centerline plus the control-point segment that owns it, which is exactly what
+      // insertRoadVertex takes. Endpoints are protected; the wide `edgeTolFt` (≈ strip half-width)
+      // still lets a click land ANYWHERE on the pavement.
+      if (isCenterlineRoad(el)) return {
+        layer: "road", id: el.id, pts: el.pts, closed: false, min: 2, noEndpointDelete: true,
+        edgeTolFt: (+el.travelW || 0) / 2 + roadCurbWidth(el) + 11 / view.ppf,
+        projectEdge: (fp) => projectToRoadCenterline(el.pts, el.vtx, fp, { defaultRadius: roadDefaultRadius(el, settings), sharpAt: sharpFor(el) }),
+      };
       return el.points ? { layer: "el", id: el.id, pts: el.points, closed: true, min: 3 } : null;
     }
     if (sel.kind === "measure") { const m = measures[sel.i]; if (!m || m.locked) return null; const closed = measMode(m) === "area"; const min = closed ? 3 : measMode(m) === "count" ? 1 : 2; return { layer: "measure", id: sel.i, pts: measPts(m), closed, min }; }
@@ -5464,10 +5522,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     let v = null;
     path.pts.forEach((p, i) => { const d = Math.hypot(fp.x - p.x, fp.y - p.y); if (d <= vTol && (!v || d < v.d)) v = { index: i, d }; });
     let e = null;
-    const lastEdge = path.closed ? n : n - 1;
-    for (let i = 0; i < lastEdge; i++) {
-      const pr = projToSeg(fp, path.pts[i], path.pts[(i + 1) % n]);
-      if (pr.d <= eTol && (!e || pr.d < e.d)) e = { index: i, pt: { x: pr.x, y: pr.y }, d: pr.d };
+    if (typeof path.projectEdge === "function") {
+      // NEW-1 — the path carries its own projector because what it DRAWS is not its chords (a road's
+      // curved centerline). One hit, already mapped back to the owning control-point segment.
+      const pr = path.projectEdge(fp);
+      if (pr && pr.d <= eTol) e = { index: pr.index, pt: { x: pr.pt.x, y: pr.pt.y }, d: pr.d };
+    } else {
+      const lastEdge = path.closed ? n : n - 1;
+      for (let i = 0; i < lastEdge; i++) {
+        const pr = projToSeg(fp, path.pts[i], path.pts[(i + 1) % n]);
+        if (pr.d <= eTol && (!e || pr.d < e.d)) e = { index: i, pt: { x: pr.x, y: pr.y }, d: pr.d };
+      }
     }
     return { v, e };
   };
@@ -8160,17 +8225,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const branchSeedRef = useRef(null);            // {roadClass, travelW, curb} for the road being drawn
   const startRoadBranch = (parent, at) => {
     if (!isCenterlineRoad(parent) || !at) return;
-    // Nearest point on the parent's SPARSE centerline — that is the polyline a tee keys off.
-    let bestSeg = -1, bestPt = null, bestD = Infinity;
-    for (let i = 0; i < parent.pts.length - 1; i++) {
-      const a = parent.pts[i], b = parent.pts[i + 1];
-      const dx = b.x - a.x, dy = b.y - a.y, L2 = dx * dx + dy * dy;
-      const t = L2 < 1e-9 ? 0 : Math.max(0, Math.min(1, ((at.x - a.x) * dx + (at.y - a.y) * dy) / L2));
-      const q = { x: a.x + dx * t, y: a.y + dy * t };
-      const d = Math.hypot(at.x - q.x, at.y - q.y);
-      if (d < bestD) { bestD = d; bestSeg = i; bestPt = q; }
-    }
-    if (bestSeg < 0 || !bestPt) return;
+    // Nearest point on the parent's DRAWN centerline, mapped back to the control-point segment that
+    // owns it (NEW-1). Projecting onto the sparse CHORDS instead — which this did — put the branch
+    // node off the pavement wherever the parent curves, which is the other half of the split defect:
+    // the branch was welded to a point the road does not pass through.
+    const hit = projectToRoadCenterline(parent.pts, parent.vtx, at, { defaultRadius: roadDefaultRadius(parent, settings), sharpAt: sharpFor(parent) });
+    if (!hit) return;
+    const bestSeg = hit.index, bestPt = hit.pt;
     pushHistory();
     // Reuse a vertex already within a collapse distance instead of stacking another one beside it.
     const ins = insertRoadVertex(parent.pts, parent.vtx, bestSeg, bestPt, {
@@ -8264,7 +8325,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   let bumpCount = 0, bumpArea = 0, bumpsUniform = true; // dog-ear / bump-out tally (counted within bldg)
   let providedDetCf = 0, pondCount = 0, maxPondDepthFt = 0; // B630: provided detention across ALL ponds (cubic feet; pondGeom's Map memo keeps this cheap per render)
   els.forEach((e) => {
-    const a = isCenterlineRoad(e) ? roadStripArea(e, settings) : e.points ? polyArea(e.points) : e.w * e.h; // road area = its generated strip polygon (B598)
+    const a = isCenterlineRoad(e) ? roadStripArea(e, settings, sharpFor(e)) : e.points ? polyArea(e.points) : e.w * e.h; // road area = its generated strip polygon (B598)
     const curb = curbAreaOf(e, els); // derived curbs count in the SF / impervious math (0 for non-paved types; a road's curb is already inside its strip area)
     if (e.type === "building") {
       bldg += a;
@@ -13337,7 +13398,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (isCenterlineRoad(el)) {
       setEls((a) => a.map((x) => {
         if (x.id !== el.id || !isCenterlineRoad(x)) return x;
-        const cur = roadCenterlineLength(x, settings);
+        const cur = roadCenterlineLength(x, settings, sharpFor(x));
         if (!(cur > 0)) return x;
         const s = L / cur;
         const cx = x.pts.reduce((p, q) => p + q.x, 0) / x.pts.length;
@@ -13450,7 +13511,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // only steer the cost takeoff (the drawn curb band still reads off el.curb).
   const setRoadCost = (el, patch) => { pushHistory(); setEls((a) => a.map((x) => x.id === el.id ? { ...x, ...patch } : x)); };
   // Road length (ft) + FC-FC travel width (ft) for the cost takeoff — live geometry.
-  const roadLengthOf = (el) => isCenterlineRoad(el) ? roadCenterlineLength(el, settings) : Math.max(el.w, el.h);
+  const roadLengthOf = (el) => isCenterlineRoad(el) ? roadCenterlineLength(el, settings, sharpFor(el)) : Math.max(el.w, el.h);
   const setSelParcel = (patch) => setParcels((a) => a.map((p) => p.id === selParcel.id ? { ...p, ...patch } : p));
   // Per-edge setbacks: pc.setbacks aligned to edges (edge i = pts[i]→pts[i+1]);
   // falls back to the global default for any parcel that predates per-edge.
@@ -15052,9 +15113,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // for why every patch-based attempt (B953…B1006) had to fail on topologies it wasn't tuned for.
   const roadNet = useMemo(() => {
     const roads = (els || []).filter((x) => isCenterlineRoad(x) && !x.attachedTo);
-    if (!roads.length) return { regions: [], stripes: new Map(), outlineCuts: new Map(), memberIds: new Set() };
+    if (!roads.length) return { regions: [], stripes: new Map(), outlineCuts: new Map(), memberIds: new Set(), junctionVerts: roadJunctionVerts };
     const byId = new Map(roads.map((r) => [r.id, r]));
-    const strip = new Map(roads.map((r) => [r.id, roadStripRing(r, settings)]));
+    const strip = new Map(roads.map((r) => [r.id, roadStripRing(r, settings, sharpFor(r))]));
     // Extra pavement contributed by each junction, indexed by the road that owns the junction.
     const extra = new Map(roads.map((r) => [r.id, []]));
     // Stripe-only cutters: regions that must INTERRUPT a curb stripe without adding pavement. The one
@@ -15100,7 +15161,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         for (const oid of ids) { if (oid === id) continue; const s = strip.get(oid); if (s && s.length >= 3) others.push(s); }
         for (const oid of ids) others.push(...extra.get(oid));
         others.push(...stripeCut);
-        stripes.set(id, roadCurbLines(byId.get(id), settings).flatMap((cl) => clipPolylineOutside(cl, others)));
+        stripes.set(id, roadCurbLines(byId.get(id), settings, sharpFor(byId.get(id))).flatMap((cl) => clipPolylineOutside(cl, others)));
       }
     }
     regions.sort((a, b) => a.zKey - b.zKey);
@@ -15116,8 +15177,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if (!cutters.length) continue;
       outlineCuts.set(dj.targetId, [...(outlineCuts.get(dj.targetId) || []), ...cutters]);
     }
-    return { regions, stripes, outlineCuts, memberIds: new Set(roads.map((r) => r.id)) };
-  }, [els, settings, teeJunctions, driveJunctions, weldJunctions]);
+    return { regions, stripes, outlineCuts, memberIds: new Set(roads.map((r) => r.id)), junctionVerts: roadJunctionVerts };
+  }, [els, settings, teeJunctions, driveJunctions, weldJunctions, sharpFor, roadJunctionVerts]);
   // NEW-4 — corners the app had to draw TIGHTER than the road's own civil minimum. `arcCorner`
   // feasibility-clamps a corner's radius to half the shorter adjacent leg; that clamp is geometrically
   // necessary (without it two corners overrun each other and the strip self-intersects) but it used to
@@ -18152,7 +18213,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               )}
               {selEl.type !== "pond" && (() => {
                 const poly = !!selEl.points;
-                const area = isCenterlineRoad(selEl) ? roadStripArea(selEl, settings) : poly ? polyArea(selEl.points) : selEl.w * selEl.h;
+                const area = isCenterlineRoad(selEl) ? roadStripArea(selEl, settings, sharpFor(selEl)) : poly ? polyArea(selEl.points) : selEl.w * selEl.h;
                 return (
                   <div style={{ fontSize: 12, color: PAL.muted, marginTop: 6, lineHeight: 1.6 }}>
                     {poly ? "Area" : "Footprint"}: <b style={{ color: PAL.ink }}>{f0(area)} sf</b>{poly ? ` · ${f2(area / SQFT_PER_ACRE)} ac` : ""}<br />
@@ -20513,6 +20574,9 @@ function dimSlideFor(el, allEls) {
 /* element renderer working in PIXEL space (points pre-transformed by f2p).
    We draw the rect via the rotated group around the element's pixel center. */
 function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEls, startDimMove, onDimNumberDown, onElContext, dimSuppressed, roadNet, lf = null) {
+  // NEW-2 — the junction vertices whose corners render SHARP, read off the road-network data this
+  // renderer already receives (renderElPx is module-level, so it cannot close over the memo).
+  const sharpFor = (e) => (roadNet && roadNet.junctionVerts && e && e.id != null ? roadNet.junctionVerts.get(e.id) : undefined);
   // NEW-1 (V481(f)) — the LABEL frame (lib/exportLabelScale.js). Null on screen. On an export
   // pass it carries the SHEET's px-per-foot, so this element's dimension/width callouts make
   // the same show/hide + size decisions no matter where the canvas happened to be zoomed.
@@ -20639,7 +20703,7 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
   }
   if (isCenterlineRoad(el)) { // centerline road (B596–B599): surface + curbs + dimension all from pts
     const ppf = (f2p({ x: 1, y: 0 }).x - f2p({ x: 0, y: 0 }).x);
-    const ring = roadStripRing(el, settings);
+    const ring = roadStripRing(el, settings, sharpFor(el));
     const dPath = ring.length >= 3 ? ring.map((p, i) => { const q = f2p(p); return `${i ? "L" : "M"}${q.x},${q.y}`; }).join(" ") + "Z" : null;
     const stroke = st.stroke; // B619: no accent recolor on select — blue vertex handles cue the selection
     const rparts = [];
@@ -20668,7 +20732,7 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
     // Curb stripe lines = the centerline offset by ±travelW/2 (the inner face-of-curb edges), TRIMMED
     // against the rest of the cluster's pavement (roadNet.stripes) so a stripe stops at the junction
     // instead of drawing a curb straight through the intersection.
-    const stripeLines = inNetwork ? (roadNet.stripes.get(el.id) || []) : roadCurbLines(el, settings);
+    const stripeLines = inNetwork ? (roadNet.stripes.get(el.id) || []) : roadCurbLines(el, settings, sharpFor(el));
     stripeLines.forEach((cl, i) => {
       if (!cl || cl.length < 2) return;
       rparts.push(<polyline key={`curb${i}`} points={cl.map((p) => { const q = f2p(p); return `${q.x},${q.y}`; }).join(" ")} fill="none" stroke={st.stroke} strokeWidth={curbStrokePx(roadCurbWidth(el), ppf, CURB_STROKE_MIN_PX * lfK)} pointerEvents="none" />);
@@ -20677,7 +20741,7 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
     // true travel width). B149 detail tier (a road width hides at site-overview zoom); kept while
     // selected so the click-to-edit / drag handle never vanishes mid-edit.
     if (!el.noLabel) {
-      const dense = roadDenseCenterline(el, settings);
+      const dense = roadDenseCenterline(el, settings, sharpFor(el));
       const segLens = []; let totalLen = 0;
       for (let i = 1; i < dense.length; i++) { const l = Math.hypot(dense[i].x - dense[i - 1].x, dense[i].y - dense[i - 1].y); segLens.push(l); totalLen += l; }
       let acc = totalLen / 2, midPt = dense[0] || { x: el.cx, y: el.cy }, dir = { x: 1, y: 0 };
@@ -20727,7 +20791,7 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
     // B620 — inline label riding the road centerline (own color + white halo; sparse spacing).
     // B935 — "Inside" placement tucks it a quarter of the travel-width off the centerline (into clear
     // pavement) so it doesn't sit on the drawn centerline; default rides the centerline as before.
-    rparts.push(...inlineLabelEls(roadDenseCenterline(el, settings), el.inlineLabel, st.stroke, el.labelSpacing || INLINE_LABEL_SPACING.road, ppf, f2p, `il${el.id}-`, { size: el.labelSize, halo: el.labelHalo, place: labelPlaceOf(el), lf, insetFt: labelPlaceOf(el) === "inside" ? Math.max(0, (+el.travelW || 0) / 4) : 0 }));
+    rparts.push(...inlineLabelEls(roadDenseCenterline(el, settings, sharpFor(el)), el.inlineLabel, st.stroke, el.labelSpacing || INLINE_LABEL_SPACING.road, ppf, f2p, `il${el.id}-`, { size: el.labelSize, halo: el.labelHalo, place: labelPlaceOf(el), lf, insetFt: labelPlaceOf(el) === "inside" ? Math.max(0, (+el.travelW || 0) / 4) : 0 }));
     return (
       <g key={el.id} data-el-id={el.id} filter={st.shadow ? "url(#bldgShadow)" : undefined} style={{ cursor: tool === "select" ? (el.locked ? "pointer" : "move") : "crosshair" }}
         onPointerDown={(e) => startMoveEl(e, el.id)} onDoubleClick={(e) => onElDouble && onElDouble(e, el.id)}
