@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-07-30 @ `f097dd1` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-07-30 @ `435545c` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_377 source files mapped._
+_380 source files mapped._
 
 ## infra
 
@@ -553,6 +553,8 @@ _377 source files mapped._
   - _exports_: `dissolvedParcelSqft`, `overlappingParcelPairs`, `PARCEL_OVERLAP_TOL`, `polyIntersectArea`, `triangulate`
 - **`src/workspaces/site-planner/lib/polygonSplit.js`** — Pure parcel-split geometry: straight-line cut pairing all crossings for concave lots, plus bent-polyline path cut
   - _exports_: `nearestPointOnSeg`, `polyArea`, `segLineIntersect`, `splitPolygonByLine`, `splitPolygonByPath`
+- **`src/workspaces/site-planner/lib/polylabel.js`** — pole of inaccessibility (largest inscribed circle centre) for a ring; the parcel acreage badge's anchor, always inside the polygon
+  - _exports_: `polylabel`, `signedDist`
 - **`src/workspaces/site-planner/lib/pondChangeSummary.js`** — Pure "what changed" support for ⚡ Design pond (B909 round 4): plain-English before/after delta rows, the atomic infeasibility gap-proposal sentence, and schematic (not-to-scale) cross-section marks
   - _exports_: `bermCapProposalNote`, `buildChangeSummaryRows`, `gapProposalNote`
 - **`src/workspaces/site-planner/lib/pondCriteriaRules.js`** — B709 editable per-jurisdiction pond design criteria (max side slope, min freeboard, maintenance-berm width; all verified:false) + drawn-input conformance checks
@@ -617,10 +619,14 @@ _377 source files mapped._
   - _exports_: `canRemoveRoadVertex`, `concatRoads`, `cornerApproachShortfall`, `cornerShares`, `curbStrokePx`, `dedupeRoadVertices`, `DEFAULT_ARC_RADIUS`, `DEFAULT_TESS_DEG`, `findRoadConnect`, `fitRoadCorners`, `fixRoadRadii`, `insertRoadVertex`, `minRadiusOfCurvature`, `nearestRectEdge`, `nodeJunction`, `planRoadConnect`, `polylineLength`, `projectToPolyline`, `projectToRoadCenterline`, `rectEdges`, `removeRoadVertex`, `repairBakedRadii`, `ROAD_SIMPLIFY_TOL_FT`, `ROAD_VERTEX_COLLAPSE_FT`, `roadCenterline`, `roadCenterlineTagged`, `roadCornerRadii`, `roadMinRadius`, `roadRadiusConflicts`, `roadsMergeCompatible`, `simplifyRoadVertices`, `teeGeometry`, `weldCoverPolygon`
 - **`src/workspaces/site-planner/lib/roadNetwork.js`** — Dissolves connected road strips + curb-return wedges into ONE pavement region per cluster (clipper union, orientation-normalised, morphologically closed), and trims curb stripes at junctions. The topology replacement for the old per-junction cover patches.
   - _exports_: `clipPolylineOutside`, `clusterIds`, `dissolveRings`, `rectOutlineCutSegments`, `regionPathD`
+- **`src/workspaces/site-planner/lib/screenDeclutter.js`** — shared screen-space thinning for fixed-size canvas chrome: greedy min-separation (`spaceOut`) + per-vertex corner-ness priority (`cornerTurns`)
+  - _exports_: `cornerTurns`, `spaceOut`, `turnBetween`
 - **`src/workspaces/site-planner/lib/screeningBfe.js`** — independent SCREENING base-flood-elevation engine: SCS/NRCS unit-hydrograph peak discharge (hydrology) + Manning normal-depth solve over a terrain-sampled cross-section (hydraulics), with a peak-rate-factor uncertainty band, the not-modelled list, the CLOMR/LOMR note, and the 44 CFR 60.3(b)(3) BFE-data threshold research. Returns an explicit unknown rather than any elevation it did not compute.
   - _exports_: `BFE_DATA_REQUIREMENT`, `bfeDataLikelyRequired`, `CLOMR_NOTE`, `default`, `MANNING_N`, `manningDischarge`, `normalDepthWse`, `NOT_MODELED`, `PRF_FLAT_COASTAL`, `PRF_STANDARD`, `SCREENING_DISCLAIMER`, `screeningBfe`, `screeningPeakDischarge`, `sectionAtWse`
 - **`src/workspaces/site-planner/lib/screeningBfeSite.js`** — The live-wiring layer for `screeningBfe.js`: turns a real site (terrain grid, footprint, Atlas-14 rainfall, SSURGO soils) into the engine's four inputs and runs BOTH the 1% and the 0.2% (500-yr) storms Waller ordinance §5.C(3) requires, from one derivation. Also the panel headline + the behind-the-fold method note.
   - _exports_: `atlas14Depths`, `default`, `SCREENING_STORMS`, `screeningBfeForSite`, `screeningBfeHeadline`, `screeningDeclined`, `screeningStudyNote`, `SECTION_HALF_WIDTH_FT`, `terrainInputsForScreeningBfe`, `WATERSHED_GRID_ZOOM`, `WATERSHED_PAD_DEG`
+- **`src/workspaces/site-planner/lib/setbackChips.js`** — groups parcel edges into one LABELLED setback run per side (shared value + direction spread), so a digitized curve reads as a handful of chips, not one per segment
+  - _exports_: `CHIP_MIN_EDGE_PX`, `CHIP_MIN_SEP_PX`, `CHIP_TURN_BREAK_DEG`, `chipRunOfEdge`, `setbackChipRuns`
 - **`src/workspaces/site-planner/lib/sharing.js`** — Project team sharing: stamp/clear team_id on a group's sites, doc_reviews, and file_facts then re-pull the local cache
   - _exports_: `makeProjectPrivate`, `shareProject`
 - **`src/workspaces/site-planner/lib/sheetFurniture.js`** — Map sheet furniture: graphic scale bar and two-tone north arrow, output-unit sized with no-occlude corner placement, screen + export

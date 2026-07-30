@@ -24,7 +24,11 @@ const LIGHT = {
   accent: "#C2410C", onAccent: "#FFFFFF",
   /* Work surfaces — drafting canvas + Markup mat */
   canvasBg: "#EDF1F6", canvasGridMinor: "#DCE3EB", canvasGridMajor: "#C5CED9",
-  canvasParcel: "#5b6650", canvasSetback: "#b45309", canvasSelection: "#C2410C",
+  /* NEW-4 — parcel boundary + setback ring default to the system's existing INDIGO
+     (the --indigo alias in index.css; same value as --accent-schedule-text). A parcel that
+     carries its own stroke / sbStroke keeps it — this is only the fallback. */
+  canvasParcel: "#534AB7", canvasSetback: "#534AB7", canvasSelection: "#C2410C",
+  canvasChipInk: "#15171C",   /* border + numerals on the white setback chip plate */
   canvasAccentSoft: "#f0d9cc", canvasMat: "#DCE1E8",
   /* Multi-select / marquee chrome — hue-free two-tone (light casing under a dark line), B569. */
   selCasing: "#FFFFFF", selLine: "#1B1E26",
@@ -53,7 +57,8 @@ const DARK = {
   accent: "#F26B3A", onAccent: "#15171C",
   /* Work surfaces */
   canvasBg: "#0E1014", canvasGridMinor: "rgba(232,235,240,0.05)", canvasGridMajor: "rgba(232,235,240,0.10)",
-  canvasParcel: "#2FBE90", canvasSetback: "#E0954A", canvasSelection: "#F26B3A",
+  canvasParcel: "#AFA9EC", canvasSetback: "#AFA9EC", canvasSelection: "#F26B3A",   // NEW-4 — dark-theme indigo
+  canvasChipInk: "#15171C",
   canvasAccentSoft: "rgba(242,107,58,0.18)", canvasMat: "#0E1014",
   /* Two-tone selection chrome (B569) — light casing + dark line, legible on a dark aerial. */
   selCasing: "#E8EBF0", selLine: "#15171C",

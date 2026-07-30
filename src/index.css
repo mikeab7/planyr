@@ -105,8 +105,17 @@
   --canvas-bg:          #EDF1F6;   /* cool drafting field (retires the warm cream) */
   --canvas-grid-minor:  #DCE3EB;
   --canvas-grid-major:  #C5CED9;
-  --canvas-parcel:      #5b6650;
-  --canvas-setback:     #b45309;
+  /* NEW-4 — the drafting INDIGO. Not a new hue: this is the design system's existing indigo,
+     the value already carried by --accent-schedule-text / --source-code-text. It gets its own
+     neutral name because it is now a DRAWING colour (parcel boundary + setback ring), not a
+     module accent, so the two can never be coupled by accident. */
+  --indigo:             #534AB7;
+  --canvas-parcel:      var(--indigo);   /* owner default 2026-07-30 (was the olive #5b6650) */
+  --canvas-setback:     var(--indigo);   /* owner default 2026-07-30 (was the amber #b45309) */
+  /* Ink for the small white value plates drawn on the canvas (the setback chip). The plate is
+     white in BOTH themes, so its border + numerals are a fixed near-black — owner default
+     2026-07-30, replacing the amber-on-amber that was unreadable over the setback band. */
+  --canvas-chip-ink:    #15171C;
   --canvas-selection:   #C2410C;   /* drafting red-orange — selection + dimension lines */
   --canvas-accent-soft: #f0d9cc;
   --canvas-mat:         #DCE1E8;
@@ -216,8 +225,12 @@
   --canvas-bg:          #0E1014;
   --canvas-grid-minor:  rgba(232, 235, 240, 0.05);
   --canvas-grid-major:  rgba(232, 235, 240, 0.10);
-  --canvas-parcel:      #2FBE90;
-  --canvas-setback:     #E0954A;
+  /* NEW-4 — the dark-theme indigo, again the value the system already uses for its indigo
+     text tokens, light enough to stay legible on the dark canvas and on a dark aerial. */
+  --indigo:             #AFA9EC;
+  --canvas-parcel:      var(--indigo);
+  --canvas-setback:     var(--indigo);
+  --canvas-chip-ink:    #15171C;   /* the chip plate stays white on dark too — same near-black ink */
   --canvas-selection:   #F26B3A;
   --canvas-accent-soft: rgba(242, 107, 58, 0.18);
   --canvas-mat:         #0E1014;
