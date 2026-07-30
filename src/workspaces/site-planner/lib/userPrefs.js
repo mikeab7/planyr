@@ -15,11 +15,12 @@
  */
 import { supabase } from "./supabase.js";
 import { setAccountStyleDefaults } from "./planStyle.js";
+import { setAccountMeasureDefaults } from "./measureStyle.js";
 
 const MIRROR_KEY = "planyr:userPrefs:v1";
 
 /** The shape we care about today. Additive: a new preference is a new key, never a migration. */
-export const EMPTY_PREFS = { planStandards: { parcelStyle: {}, typeStyles: {} } };
+export const EMPTY_PREFS = { planStandards: { parcelStyle: {}, typeStyles: {}, measureStyle: {} } };
 
 const normalize = (p) => ({
   ...EMPTY_PREFS,
@@ -27,6 +28,9 @@ const normalize = (p) => ({
   planStandards: {
     parcelStyle: { ...((p && p.planStandards && p.planStandards.parcelStyle) || {}) },
     typeStyles: { ...((p && p.planStandards && p.planStandards.typeStyles) || {}) },
+    // NEW-1 — measurement defaults joined the account scope. Additive: an older prefs row simply
+    // has no bag here and normalizes to an empty one, so nothing needs migrating.
+    measureStyle: { ...((p && p.planStandards && p.planStandards.measureStyle) || {}) },
   },
 });
 
@@ -45,6 +49,7 @@ function writeMirror(prefs) {
 export function applyPrefs(prefs) {
   const p = normalize(prefs);
   setAccountStyleDefaults(p.planStandards);
+  setAccountMeasureDefaults(p.planStandards.measureStyle);
   return p;
 }
 
@@ -85,25 +90,30 @@ export async function saveUserPrefs(uid, prefs) {
 
 /* ---------------------------------------------------------------- pure edits */
 
-/** Set one plan-standard key at account scope. `value === null` REMOVES it (back to built-in). */
+/**
+ * Set one plan-standard key at account scope. `value === null` REMOVES it (back to built-in).
+ * `group` is "typeStyles" (a nested per-type bag) or any FLAT bag — "parcelStyle",
+ * "measureStyle". The flat branch is keyed by the group name rather than hardcoding parcelStyle,
+ * so adding a family (NEW-1's measurements) is a one-word change, not a new code path.
+ */
 export function setStandardPref(prefs, group, key, value, type) {
   const p = normalize(prefs);
-  const bag = group === "typeStyles"
-    ? { ...(p.planStandards.typeStyles[type] || {}) }
-    : { ...p.planStandards.parcelStyle };
-  if (value === null || value === undefined) delete bag[key]; else bag[key] = value;
   if (group === "typeStyles") {
+    const bag = { ...(p.planStandards.typeStyles[type] || {}) };
+    if (value === null || value === undefined) delete bag[key]; else bag[key] = value;
     const all = { ...p.planStandards.typeStyles };
     if (Object.keys(bag).length) all[type] = bag; else delete all[type];
     return { ...p, planStandards: { ...p.planStandards, typeStyles: all } };
   }
-  return { ...p, planStandards: { ...p.planStandards, parcelStyle: bag } };
+  const bag = { ...(p.planStandards[group] || {}) };
+  if (value === null || value === undefined) delete bag[key]; else bag[key] = value;
+  return { ...p, planStandards: { ...p.planStandards, [group]: bag } };
 }
 
 /** Read one plan-standard key at account scope (undefined = not set here). */
 export function getStandardPref(prefs, group, key, type) {
   const p = normalize(prefs);
-  return group === "typeStyles" ? (p.planStandards.typeStyles[type] || {})[key] : p.planStandards.parcelStyle[key];
+  return group === "typeStyles" ? (p.planStandards.typeStyles[type] || {})[key] : (p.planStandards[group] || {})[key];
 }
 
 export const _normalizePrefs = normalize;

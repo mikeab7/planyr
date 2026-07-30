@@ -238,6 +238,22 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   chip read this one derivation; the defaults ARE the historic look (weight 1.25, `dashed` = "7 6"),
   and `parcelDefaultStyle` stamps `sbStroke`/`sbWeight`/`sbDash` only when they DIFFER from it, so an
   upgraded plan gains no keys and renders unchanged.
+- **`measureStyle.js` + `measureLabel.js` — measurements, brought up to par with every other object.**
+  Measurements were the last drawn object with NO style of their own (the colour was hardcoded to
+  `PAL.accent` at the one place they were painted), no per-object label control, and a run-on
+  one-line label. `measureStyle.js` is the ONE resolver — per-measurement stroke/weight/dash/fill/
+  fillOpacity, the Standards defaults STAMPED at creation (`measureDefaultStyle`, the
+  `parcelDefaultStyle` mechanic, so Standards → Measurements applies retroactively through
+  `standardsApply.applyMeasureStandard`), and the per-measurement label-reveal zoom
+  (`measureLabelVisible` / `measureLabelThreshold`, defaulting to the shared `dimCalloutVisible`
+  floor). **⛔ The uncalibrated AMBER override must stay** — it beats the user's colour because it
+  is a correctness signal ("not real feet yet"), not decoration; a selected measurement likewise
+  always shows its label. `measureLabel.js` is the pure PRESENTATION half: one dominant headline
+  with the detail subordinate, the area unit chosen by magnitude (sf below an acre, ac above —
+  never both at equal weight), one feet convention (the prime mark), and `measureSegments` for the
+  per-edge dimensions. The summary CHIP is laid out by `labelLayout.layoutLabels` (its boxes then
+  become obstacles for the element-label pass) and carries `data-print-chip="measure"`, so
+  `exportSheet`'s one attribute-keyed restyle prints it exactly like a parcel acreage chip.
 - `zOrder.js` — per-element `z` stacking key utilities (`nextZ`/`sortByZ`/`normalizeZ`/`ensureZ`, B671).
   `arrange.js` — pure z-order "Arrange" (`reorderByZ`/`arrangeFlags`, B820): Bring-to-Front/Send-to-Back
   over a peer set (a building reorders within its `Z_LAYER` band, a markup within the markup layer;
