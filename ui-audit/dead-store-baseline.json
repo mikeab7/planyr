@@ -1,6 +1,6 @@
 {
   "note": "Frozen count of assigned-but-never-used locals per file. May only DECREASE — see ui-audit/dead-store-audit.mjs.",
-  "total": 90,
+  "total": 88,
   "files": {
     "src/app/AccountControl.jsx": 1,
     "src/app/Shell.jsx": 1,
@@ -18,7 +18,6 @@
     "src/workspaces/library/components/FileBrowser.jsx": 2,
     "src/workspaces/library/components/LibraryHome.jsx": 1,
     "src/workspaces/scheduler/components/ScheduleToolbar.jsx": 1,
-    "src/workspaces/site-planner/MapFinder.jsx": 2,
     "src/workspaces/site-planner/SitePlanner.jsx": 46,
     "src/workspaces/site-planner/SitePlannerApp.jsx": 2,
     "src/workspaces/site-planner/components/PondSection.jsx": 1,

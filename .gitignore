@@ -163,3 +163,8 @@ e2e/.auth/
 test-results/
 playwright-report/
 ui-audit/.cache-vendor/
+
+# Natural Earth source geometry, re-downloadable on demand by
+# scripts/build-admin-boundaries.mjs --fetch. Its simplified OUTPUT
+# (public/geo/admin-boundaries.json) is what ships and is committed.
+scripts/data/

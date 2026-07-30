@@ -115,6 +115,24 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   closing it and reads as fixed on a slow drag while still slinging on a flick. Guard:
   the repo-root `test/` suite `panLockInvariant` (2 of its 4 cases go red on the passive-effect model). This is
   VIEWPORT-STABLE in `/CLAUDE.md`, which the effect predated and violated.
+- **Wide-zoom political boundaries (NEW-1):** `adminBoundaryGate.js` is the leaf gate (imports
+  nothing) — the zoom CEILING (`ADMIN_BOUNDARY_MAX_ZOOM` 7) plus the cached dynamic import, exactly
+  the `terrainGate.js` / `terrainLazy.js` shape and for the same reason. **This is the repo's first
+  MAX-zoom gate** — every other one (`TERRAIN_MIN_ZOOM`, the registry's `minZoom` fields) means
+  "appear once you zoom IN"; boundaries are orientation furniture and run the other way, so don't
+  "fix" it to a minZoom. `adminBoundaryData.js` is the pure half (delta decoder + `ADMIN1_MIN_ZOOM`,
+  the inner band where states join countries) — split out because a module that imports Leaflet
+  needs a `window` and can then only be tested through a browser. `adminBoundaryLayer.js` is the
+  Leaflet glue: own pane at z-index 250 (above tiles, BELOW the vector-overlay pane and every
+  marker), `pointer-events:none`, canvas renderer, and it stamps `data-levels` on its pane so a
+  headless check has something of ours to assert against. **⛔ Nothing on the boot path may
+  static-import `adminBoundaryLayer.js`** — the Site route had 0.7 KB of budget headroom when this
+  landed, so a static edge is a CI failure, not a style note. The geometry is
+  `public/geo/admin-boundaries.json` (Natural Earth 1:110m, simplified + delta-encoded by the
+  repo-root script build-admin-boundaries), a public/ ASSET rather than a module precisely so it is
+  charged against no bundle budget. 1:110m admin-1 is **US states only** — Canada and Mexico read at
+  the country level by design. Guards: ui-audit verify-admin-boundaries (network + rendered pixels)
+  + the repo-root `test/` suite adminBoundaries.
 - `supabase.js` / `auth.js` / `cloudSync.js` — cloud data + auth (shared across workspaces).
 - `elementSync.js` / `elementRows.js` / `elementJournal.js` — the element-level sync engine, the
   rows↔model fold layer (incl. `foldJournal`), and the persisted pending-edit journal (NEW-F4:
