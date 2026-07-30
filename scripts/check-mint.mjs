@@ -39,7 +39,7 @@ import { dirname, join, resolve } from "node:path";
 import {
   B_FILES, V_FILES, PEER_NS, DEFAULT_MAX_FETCH_AGE_S, DEFAULT_PEER_DAYS,
   headingIdsIn, readRefFile, maxOnRef, assessFreshness, originMainSha, lastFetchAgeSeconds,
-  fetchPeers, peerRefRows, selectPeerRefs, peerClaims, tryGit,
+  fetchPeers, peerRefRows, selectPeerRefs, peerClaims, tryGit, selfBranchNames, dropContainedRefs,
 } from "./next-id.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -97,14 +97,21 @@ export function runGate(repo = REPO, { peerDays = DEFAULT_PEER_DAYS, maxAgeSecon
   const fresh = assessFreshness({ sha: originMainSha(repo), ageSeconds: lastFetchAgeSeconds(repo, now), maxAgeSeconds });
   if (!fresh.ok) return { unverifiable: true, reason: fresh.message };
 
+  // Resolve OUR OWN ancestry before any peer fetch touches the object store, then fetch peers with
+  // this branch and main excluded, and hand back .git/shallow untouched when we are done.
+  const selfNamesEarly = selfBranchNames(repo);
+  const mbEarly = tryGit(repo, `git merge-base ${MAIN} HEAD`);
+  let releasePeers = () => {};
   if (fetch) {
-    const p = fetchPeers(repo);
+    const p = fetchPeers(repo, { exclude: selfNamesEarly });
     if (!p.ok) return { unverifiable: true, reason: p.reason };
+    releasePeers = p.restore;
   }
   const rows = peerRefRows(repo);
   if (!rows.ok) return { unverifiable: true, reason: rows.reason };
-  const branch = (tryGit(repo, "git rev-parse --abbrev-ref HEAD").out || "").trim();
-  const refs = selectPeerRefs(rows.rows, { days: peerDays, now, exclude: branch ? [branch] : [] });
+  const selfNames = selfNamesEarly;
+  const refs = dropContainedRefs(repo, selectPeerRefs(rows.rows, { days: peerDays, now, exclude: selfNames }));
+  const branch = selfNames[0] || "(detached)";
 
   // "Added by this branch" is measured against the MERGE BASE, not against main's tip. That
   // distinction is what catches the B1140 case: main merged an item under B1130 while this branch
@@ -112,8 +119,7 @@ export function runGate(repo = REPO, { peerDays = DEFAULT_PEER_DAYS, maxAgeSecon
   // pre-existing and passes; measured against the base, BOTH sides minted it independently — a
   // guaranteed duplicate heading the moment they meet. Falling back to main's tip is strictly
   // weaker, so when the base can't be computed the gate SAYS so rather than quietly narrowing.
-  const mb = tryGit(repo, `git merge-base ${MAIN} HEAD`);
-  const baseRef = mb.ok && mb.out.trim() ? mb.out.trim() : null;
+  const baseRef = mbEarly.ok && mbEarly.out.trim() ? mbEarly.out.trim() : null;
 
   const families = [];
   for (const [letter, files] of [["B", B_FILES], ["V", V_FILES]]) {
@@ -141,6 +147,7 @@ export function runGate(repo = REPO, { peerDays = DEFAULT_PEER_DAYS, maxAgeSecon
       added, mainMax: mainMax.max, peerMax: claims.max, peersScanned: refs.length,
     });
   }
+  releasePeers(); // leave .git/shallow exactly as we found it
   return { ok: families.every((f) => f.ok), families, branch, sha: fresh.sha, peersScanned: refs.length, baseRef };
 }
 

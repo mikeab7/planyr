@@ -26,7 +26,7 @@
  * can never UNDER-count (reuse a live number, the one dangerous error), while it makes us immune to a
  * stray prose typo like "B99999" permanently inflating every future id.
  */
-import { readFileSync, existsSync, statSync } from "node:fs";
+import { readFileSync, existsSync, statSync, writeFileSync, rmSync } from "node:fs";
 import { execSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
@@ -258,11 +258,28 @@ export function headingIdsIn(texts, letter) {
  * for defect 2: the ids other sessions have claimed but not yet merged are sitting on the remote,
  * readable now. `--depth=1` only when the clone is already shallow (deepening a shallow clone is
  * expensive; marking a full clone shallow is rude). */
-export function fetchPeers(repo) {
-  const shallow = tryGit(repo, "git rev-parse --is-shallow-repository");
-  const depth = shallow.ok && shallow.out.trim() === "true" ? " --depth=1" : "";
-  const r = tryGit(repo, `git fetch --no-tags --prune --quiet${depth} origin "+refs/heads/*:${PEER_NS}/*"`);
-  return r.ok ? { ok: true } : { ok: false, reason: `peer fetch failed — ${r.reason}` };
+export function fetchPeers(repo, { exclude = [] } = {}) {
+  const shallow = tryGit(repo, "git rev-parse --is-shallow-repository").out?.trim() === "true";
+  // `--depth=1` keeps the mirror cheap, but in a shallow clone it GRAFTS every tip it fetches into
+  // .git/shallow — and one of those tips is OUR OWN branch, which makes git treat our own HEAD as
+  // parentless and severs `git merge-base` (observed on this very branch: the gate then lost the
+  // merge base it needs for the B1140 case, and `git log` went one commit deep). Two defences:
+  //   (1) negative refspecs so main and this checkout's own branch are never mirrored at all, and
+  //   (2) a snapshot/restore of .git/shallow, so whatever grafts the fetch adds are undone and the
+  //       clone is left byte-identical to how we found it. A tool that inspects the repo must not
+  //       damage it.
+  const neg = ["main", ...exclude].filter(Boolean).map((b) => ` "^refs/heads/${b}"`).join("");
+  const shallowPath = tryGit(repo, "git rev-parse --git-path shallow");
+  const file = shallowPath.ok ? resolve(repo, shallowPath.out.trim()) : null;
+  const before = file && existsSync(file) ? readFileSync(file) : null;
+  const restore = () => {
+    if (!file) return;
+    if (before == null) { if (existsSync(file)) rmSync(file, { force: true }); }
+    else writeFileSync(file, before);
+  };
+  const r = tryGit(repo, `git fetch --no-tags --prune --quiet${shallow ? " --depth=1" : ""} origin "+refs/heads/*:${PEER_NS}/*"${neg}`);
+  if (!r.ok) { restore(); return { ok: false, reason: `peer fetch failed — ${r.reason}`, restore: () => {} }; }
+  return { ok: true, restore };
 }
 
 /** PURE: which mirrored refs count as "in flight" — recent enough to still be racing us, and not
@@ -272,6 +289,29 @@ export function selectPeerRefs(rows, { days = DEFAULT_PEER_DAYS, now = Date.now(
   const cutoff = now / 1000 - days * 86400;
   const skip = new Set(["main", ...exclude].map((b) => `${PEER_NS.split("/").pop()}/${b}`));
   return rows.filter((r) => r.ts >= cutoff && !skip.has(r.name));
+}
+
+/**
+ * Every name this checkout might be known by, so a peer scan never mistakes US for a rival.
+ * `git rev-parse --abbrev-ref HEAD` alone is NOT enough: on a `pull_request` build,
+ * actions/checkout lands on the test-merge commit in DETACHED HEAD, so it returns the literal
+ * string "HEAD" and the branch's own mirrored ref reads as a peer holding our number. That false
+ * red is exactly the failure mode a mint gate must not have — a gate that cries wolf gets
+ * bypassed. GITHUB_HEAD_REF (PR builds) / GITHUB_REF_NAME (push builds) name it correctly there.
+ */
+export function selfBranchNames(repo, env = process.env) {
+  const names = new Set();
+  for (const n of [env.GITHUB_HEAD_REF, env.GITHUB_REF_NAME]) if (n) names.add(n);
+  const local = (tryGit(repo, "git rev-parse --abbrev-ref HEAD").out || "").trim();
+  if (local && local !== "HEAD") names.add(local);
+  return [...names];
+}
+
+/** Drop peer refs already CONTAINED in HEAD — an older push of this same branch, or anything
+ * merged into us. Name-independent, so it catches the detached-HEAD case even if the env vars are
+ * absent. Ancestry is unavailable in some shallow clones; there the name filter carries it. */
+export function dropContainedRefs(repo, refs) {
+  return refs.filter((r) => !tryGit(repo, `git merge-base --is-ancestor ${r.name} HEAD`).ok);
 }
 
 /** The mirrored peer refs with their tip dates. */
@@ -354,15 +394,17 @@ export function computeNextIdsStrict(repo = REPO, {
     out[letter] = { max: Math.max(local, onMain.max), local, main: onMain.max, peer: 0, claimants: [] };
   }
 
+  let releasePeers = () => {};
   if (peers) {
     if (fetch) {
-      const f = fetchPeers(repo);
+      const f = fetchPeers(repo, { exclude: currentBranch ? [currentBranch] : selfBranchNames(repo) });
       if (!f.ok) return { ok: false, refusal: { code: "peer-fetch-failed", message: f.reason } };
+      releasePeers = f.restore;
     }
     const rows = peerRefRows(repo);
     if (!rows.ok) return { ok: false, refusal: { code: "peer-list-failed", message: rows.reason } };
-    const branch = currentBranch ?? (tryGit(repo, "git rev-parse --abbrev-ref HEAD").out || "").trim();
-    const refs = selectPeerRefs(rows.rows, { days: peerDays, now, exclude: branch ? [branch] : [] });
+    const exclude = currentBranch ? [currentBranch] : selfBranchNames(repo);
+    const refs = dropContainedRefs(repo, selectPeerRefs(rows.rows, { days: peerDays, now, exclude }));
     for (const [letter, files] of [["B", B_FILES], ["V", V_FILES]]) {
       const c = peerClaims(repo, files, letter, { refs, baseMax: out[letter].main });
       if (!c.ok) return { ok: false, refusal: { code: "peer-read-failed", message: c.reason } };
@@ -372,6 +414,7 @@ export function computeNextIdsStrict(repo = REPO, {
       if (c.max > out[letter].max) out[letter].max = c.max;
     }
     provenance.peers = { scanned: refs.length, windowDays: peerDays };
+    releasePeers(); // leave .git/shallow exactly as we found it
   }
 
   const maxB = out.B.max, maxV = out.V.max;

@@ -146,6 +146,19 @@ describe("selectPeerRefs — which branches still count as racing us", () => {
     expect(kept).toEqual([`${NS}/claude/other-live`]);
   });
 
+  it("excludes EVERY name this checkout answers to — the detached-HEAD false red (caught by CI on this item's own PR)", () => {
+    // `actions/checkout` lands on the PR's test-merge commit in DETACHED HEAD, so
+    // `git rev-parse --abbrev-ref HEAD` returns the literal "HEAD" and the branch's own mirrored
+    // ref reads as a peer holding its own number. This PR's first CI run failed exactly that way
+    // (`V531 is ALREADY TAKEN on planyr-peers/claude/backlog-id-collision-recurrence-2z85n2` — our
+    // own branch). A gate that cries wolf gets bypassed with --no-verify, so this stays pinned.
+    const kept = selectPeerRefs(
+      [{ name: `${NS}/claude/mine`, ts: at(0) }, { name: `${NS}/claude/theirs`, ts: at(0) }],
+      { now, exclude: ["claude/mine", "HEAD"] }, // GITHUB_HEAD_REF + the useless abbrev-ref answer
+    ).map((r) => r.name);
+    expect(kept).toEqual([`${NS}/claude/theirs`]);
+  });
+
   it("the window is the PR lifetime, not a guess — a branch just inside it still counts", () => {
     const kept = selectPeerRefs([{ name: `${NS}/claude/x`, ts: at(DEFAULT_PEER_DAYS - 0.1) }], { now });
     expect(kept).toHaveLength(1);
