@@ -27,7 +27,15 @@
  *                                    3-zone tabs|center|toolbar layout (center optically centered
  *                                    like Row 1). Absent (Site/Review) ⇒ unchanged 2-zone layout.
  *
- * Fullscreen: F key hides the header; Esc (or an exit button) restores it.
+ * Fullscreen (NEW-1): F asks the browser for REAL fullscreen — the Fullscreen API on
+ * document.documentElement — and hides the header on top of it, so the workspace fills the
+ * screen edge to edge with no tab strip, no address bar and no OS taskbar. The document ROOT
+ * is deliberately the target: fullscreening a subtree would hide every position:fixed overlay
+ * that lives outside it, the exit button included. Where the request is refused or the API is
+ * absent (iOS Safari has no fullscreen for non-video elements) it falls back to the previous
+ * behaviour — hiding the header alone — rather than doing nothing. The header is driven FROM
+ * the document's real fullscreen state via `fullscreenchange`, so Esc, F11 or the browser's own
+ * exit affordance can never leave the two disagreeing. Esc (or the exit button) restores it.
  * When hidden the workspace's flex: 1 content fills 100 % of viewport height.
  */
 import { useEffect, useRef, useState } from "react";
@@ -240,6 +248,37 @@ function useNarrow() {
   return narrow;
 }
 
+/* ── NEW-1 — the Fullscreen API, wrapped so the component never touches a vendor prefix ────────
+ * Every one of these is a pure DOM accessor with no React in it, so they live at module scope
+ * and are trivially readable from a headless check. `fsElement()` is the single source of truth
+ * for "is the browser ACTUALLY in fullscreen" — the header state is derived from it, never the
+ * other way round. WebKit keeps its prefixed spelling on older iPad/Safari builds, and the
+ * prefixed API predates promises, hence the Promise.resolve() wrapping. */
+export function fsElement() {
+  if (typeof document === "undefined") return null;
+  return document.fullscreenElement || document.webkitFullscreenElement || null;
+}
+export function fsSupported() {
+  if (typeof document === "undefined") return false;
+  const el = document.documentElement;
+  return !!(el && (el.requestFullscreen || el.webkitRequestFullscreen));
+}
+/* Ask for fullscreen on the document ROOT. Resolves when the browser granted it; REJECTS when it
+ * refused (no user activation, a permissions policy, an iframe without allow="fullscreen") or
+ * when the API is absent — the caller falls back to hiding the header alone. */
+export function requestFs() {
+  const el = typeof document !== "undefined" ? document.documentElement : null;
+  const req = el && (el.requestFullscreen || el.webkitRequestFullscreen);
+  if (!req) return Promise.reject(new Error("fullscreen-unsupported"));
+  try { return Promise.resolve(req.call(el)); } catch (err) { return Promise.reject(err); }
+}
+export function exitFs() {
+  if (typeof document === "undefined" || !fsElement()) return Promise.resolve();
+  const ex = document.exitFullscreen || document.webkitExitFullscreen;
+  if (!ex) return Promise.resolve();
+  try { return Promise.resolve(ex.call(document)).catch(() => {}); } catch (_) { return Promise.resolve(); }
+}
+
 export default function AppHeader({
   module = "site-planner",
   onSwitch,
@@ -296,8 +335,13 @@ export default function AppHeader({
   // mobile). Defaults off so any unwired caller stays silent.
   accountActive = false,
 }) {
+  // `fullscreen` means "the header is collapsed and the workspace owns the whole viewport". It is
+  // true in BOTH modes: real browser fullscreen (the normal case) and the chrome-hide fallback.
   const [fullscreen, setFullscreen] = useState(false);
   const fullscreenRef = useRef(false); fullscreenRef.current = fullscreen; // live value for the once-bound key handler
+  // NEW-1 — true only while the BROWSER is really in fullscreen. It decides who owns the exit:
+  // the Fullscreen API (and the fullscreenchange that follows) vs. plain React state.
+  const nativeFsRef = useRef(false);
   const headerRef = useRef(null); // visibility probe for the keep-alive gate below
   const { resolved } = useTheme();
   const multiTab = useMultiTab(accountActive && currentProject && !multiEditOk ? currentProject.id : null); // B313 — same-project-in-another-tab warning (signed-in only; suppressed when the workspace multi-writes, B674)
@@ -318,6 +362,51 @@ export default function AppHeader({
   const rowScroll = narrow ? { overflowX: "auto", overflowY: "hidden" } : null;
   const zoneFixed = narrow ? { flex: "0 0 auto" } : null; // don't let a zone compress its content away
 
+  /* NEW-1 — leave fullscreen. Native mode hands the job to the browser and lets the resulting
+     `fullscreenchange` restore the header; fallback mode (the request was refused, or there is
+     no API) never entered browser fullscreen, so it just puts the chrome back. */
+  const leaveFullscreen = () => {
+    if (nativeFsRef.current) { exitFs(); return; }
+    setFullscreen(false);
+  };
+  /* NEW-1 — enter/leave. The keypress IS the user activation the Fullscreen API requires, so the
+     request is made straight out of the key handler, not deferred. `requestFs()` returns a promise
+     that CAN reject (refused, or unsupported — iOS Safari has no fullscreen for a non-video
+     element): on rejection we still hide the header, which is exactly the behaviour this shortcut
+     had before, rather than the keypress appearing to do nothing. */
+  const toggleFullscreen = () => {
+    if (fullscreenRef.current) { leaveFullscreen(); return; }
+    requestFs().catch(() => { nativeFsRef.current = false; setFullscreen(true); });
+    // On success the header is hidden by the fullscreenchange handler below, not from here —
+    // one owner for the state, so entering can't race the event that reports it.
+  };
+  const toggleRef = useRef(toggleFullscreen); toggleRef.current = toggleFullscreen;
+
+  /* NEW-1 — the header follows the DOCUMENT, never a guess. Whatever ends fullscreen — Esc, the
+     browser's own exit affordance, another script — arrives here, so the chrome comes back with
+     it and the two can never desync. The `nativeFsRef` guard means a fullscreenchange we did not
+     cause (a <video> elsewhere on the page exiting) can't yank the header out of fallback mode. */
+  useEffect(() => {
+    const onChange = () => {
+      if (fsElement()) {
+        // The SAME keep-alive gate the shortcut uses, and for the same reason: with workspaces
+        // kept mounted-but-hidden, EVERY workspace's header hears this document-level event. Left
+        // ungated, all of them collapse and each renders its own floating exit button — caught by
+        // ui-audit/verify-new1-fullscreen.mjs, which found two stacked. Only the header that is
+        // actually on screen may take it. (An already-fullscreen header renders only a fixed
+        // button, whose offsetParent is null, which is why the gate is entry-side only.)
+        if (headerRef.current && headerRef.current.offsetParent === null) return;
+        nativeFsRef.current = true; setFullscreen(true);
+      } else if (nativeFsRef.current) { nativeFsRef.current = false; setFullscreen(false); }
+    };
+    document.addEventListener("fullscreenchange", onChange);
+    document.addEventListener("webkitfullscreenchange", onChange);
+    return () => {
+      document.removeEventListener("fullscreenchange", onChange);
+      document.removeEventListener("webkitfullscreenchange", onChange);
+    };
+  }, []);
+
   useEffect(() => {
     const handle = (e) => {
       const tag = e.target.tagName;
@@ -329,8 +418,12 @@ export default function AppHeader({
       // is null for fixed elements, so only apply the check when NOT fullscreen; a hidden
       // header can never BE fullscreen since the toggle is ignored while hidden.)
       if (!fullscreenRef.current && headerRef.current && headerRef.current.offsetParent === null) return;
-      if (e.key === "f" || e.key === "F") setFullscreen((v) => !v);
-      if (e.key === "Escape") setFullscreen(false);
+      if (e.key === "f" || e.key === "F") toggleRef.current();
+      // NEW-1 — do NOT fight Esc. In real fullscreen the browser consumes it and exits on its own;
+      // `fullscreenchange` then restores the header. Acting here as well would be a second toggle
+      // over the top of that. Esc only does the work in the chrome-hide fallback, where nothing
+      // else is going to.
+      if (e.key === "Escape" && !nativeFsRef.current) setFullscreen(false);
     };
     window.addEventListener("keydown", handle);
     return () => window.removeEventListener("keydown", handle);
@@ -345,7 +438,8 @@ export default function AppHeader({
   if (fullscreen) {
     return (
       <button
-        onClick={() => setFullscreen(false)}
+        onClick={leaveFullscreen}
+        data-testid="exit-fullscreen"
         title="Exit fullscreen (Esc)"
         style={{
           position: "fixed", top: 10, right: 12, zIndex: 9999,

@@ -132,7 +132,11 @@ describe("the SitePlanner wiring feeds it the SAME evaluator as the live panel",
   });
 
   it("the ladder reads its steps from criteria, not from an inline array", () => {
-    expect(src).toContain('criteriaFor(critJurKey, { overrides: criteriaOverrides }).wseSensitivityStepsFt?.value');
+    // NEW-4(d) — the resolved criteria record is now memoised ONCE per (jurisdiction, overrides)
+    // pair as `critAll` and every call site reads that. The guard's intent is unchanged: the steps
+    // come from the jurisdiction criteria, never from an inline array.
+    expect(src).toContain("const critAll = useMemo(() => criteriaFor(critJurKey, { overrides: criteriaOverrides }), [critJurKey, criteriaOverrides]);");
+    expect(src).toContain('const steps = critAll.wseSensitivityStepsFt?.value;');
   });
 
   it("a flat result is one folded line, not a table of identical rows (PANEL-BREVITY)", () => {

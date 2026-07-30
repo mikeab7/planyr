@@ -27,6 +27,7 @@
 import L from "leaflet";
 import { flushSync } from "react-dom";
 import { BASEMAPS } from "./basemaps.js";
+import { releaseCanvas } from "./releaseCanvas.js";
 import { ALL_LAYERS, gisProxyEnabled } from "./layers.js";
 import { overlayExportRequest } from "./layerRequest.js";
 import {
@@ -499,7 +500,10 @@ export function createExportSheet(ctx) {
       const ctx = canvas.getContext("2d");
       if (!ctx) return null;
       for (const { t, img } of loaded) ctx.drawImage(img, Math.round(t.dx), Math.round(t.dy), 256, 256);
-      return canvas.toDataURL("image/jpeg", 0.92);
+      // NEW-5 — the stitched aerial can run to many megapixels; encode, then hand the buffer back.
+      const out = canvas.toDataURL("image/jpeg", 0.92);
+      releaseCanvas(canvas);
+      return out;
     } catch (_) { return null; }
   };
   // Synthesize a frame-exact aerial for the export (B735). The live basemap is a Leaflet tile <div>
@@ -758,6 +762,7 @@ export function createExportSheet(ctx) {
       canvas.width = Math.round(w * scale); canvas.height = Math.round(h * scale);
       canvas.getContext("2d").drawImage(image, 0, 0, canvas.width, canvas.height);
       canvas.toBlob((png) => {
+        releaseCanvas(canvas); // NEW-5 — encoded; the sheet raster's pixels are spent either way
         if (!png) { alert("Couldn't render the PNG (the framed area may be too large). Try a tighter print frame, or use Download PDF."); return; }
         const aEl = document.createElement("a");
         aEl.href = URL.createObjectURL(png);
@@ -856,6 +861,7 @@ export function createExportSheet(ctx) {
         ctx.drawImage(image, 0, 0, pxW, pxH);
         mark("rasterized");
         const jpegBlob = await new Promise((res, rej) => canvas.toBlob((b) => (b ? res(b) : rej(new Error("encode failed"))), "image/jpeg", PDF_JPEG_Q));
+        releaseCanvas(canvas); // NEW-5 — a full-page sheet at print DPI; released once encoded
         const jpeg = new Uint8Array(await jpegBlob.arrayBuffer());
         const fileName = sheetFileName({ project: siteLabel, plan: planLabel }); // B201 — date · project · plan
         const pdf = jpegToPdf({ jpeg, pixelW: pxW, pixelH: pxH, widthIn: page.wIn, heightIn: page.hIn, title: fileName });

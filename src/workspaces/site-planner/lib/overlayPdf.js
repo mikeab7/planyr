@@ -14,6 +14,7 @@
  *               image); the caller destroys it on remove/unmount (cf. B39)
  */
 import { loadAndDownscaleImage } from "./image.js";
+import { releaseCanvas } from "./releaseCanvas.js";
 import { detectSheet, parseScaleNote } from "./overlayScale.js";
 
 // B749 — base raster cap raised 2600 → 4500 px so a 36×24 sheet has headroom to zoom into a
@@ -90,7 +91,12 @@ export async function rasterizePage(pdf, pageNum = 1, { knockout = true, scale }
   const base = page0.getViewport({ scale: 1 });
   const s = scale || baseRasterScale(Math.max(base.width, base.height));
   const { canvas } = await renderPageCanvas(pdf, n, s, knockout);
-  return { src: canvas.toDataURL("image/png"), imgW: Math.round(base.width), imgH: Math.round(base.height), page: n, scale: s };
+  // NEW-5 — this canvas runs to MAX_RERASTER_DIM on a big sheet (an 8192-wide RGBA buffer is
+  // hundreds of megabytes of renderer memory) and it re-renders on every zoom-band change, per
+  // PDF overlay. The PNG has been encoded, so the backing store is handed straight back.
+  const src = canvas.toDataURL("image/png");
+  releaseCanvas(canvas);
+  return { src, imgW: Math.round(base.width), imgH: Math.round(base.height), page: n, scale: s };
 }
 
 /* B749 Tier 2 — re-render a page at a higher device `scale` to a TRANSIENT, revocable object
@@ -106,6 +112,9 @@ export async function rasterizePageHiRes(pdf, pageNum = 1, scale = 2, { knockout
       ? canvas.toBlob((b) => resolve(b && URL.createObjectURL ? URL.createObjectURL(b) : canvas.toDataURL("image/png")), "image/png")
       : resolve(canvas.toDataURL("image/png"))
   );
+  releaseCanvas(canvas); // NEW-5 — the hi-res re-raster is the single biggest allocation in the
+                         // planner (up to MAX_RERASTER_DIM square) and it fires on every zoom-band
+                         // change; the blob/data URL above already holds the pixels.
   const revoke = () => { try { if (typeof src === "string" && src.startsWith("blob:")) URL.revokeObjectURL(src); } catch (_) {} };
   return { src, imgW: Math.round(base.width), imgH: Math.round(base.height), scale, revoke };
 }

@@ -3,6 +3,8 @@
  * JPEG so they stay small enough to live inside a saved scenario in
  * localStorage (~5 MB origin budget) and keep the canvas responsive.
  */
+import { releaseCanvas } from "./releaseCanvas.js";
+
 export function loadAndDownscaleImage(file, maxDim = 2400) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -22,7 +24,9 @@ export function loadAndDownscaleImage(file, maxDim = 2400) {
           canvas.height = ch;
           const ctx = canvas.getContext("2d");
           ctx.drawImage(img, 0, 0, cw, ch);
-          resolve({ src: canvas.toDataURL("image/jpeg", 0.85), w: cw, h: ch });
+          const src = canvas.toDataURL("image/jpeg", 0.85);
+          releaseCanvas(canvas); // NEW-5 — the downscale buffer's pixels are now in the data URL
+          resolve({ src, w: cw, h: ch });
         } else {
           resolve({ src: reader.result, w, h });
         }

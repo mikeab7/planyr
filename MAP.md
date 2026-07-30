@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-07-30 @ `0bea533` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-07-30 @ `52872f5` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_369 source files mapped._
+_371 source files mapped._
 
 ## infra
 
@@ -185,7 +185,7 @@ _369 source files mapped._
 - **`src/shared/ui/anchoredMenuPlacement.js`** — Pure viewport-placement math for AnchoredMenu: left/below-left/below-right anchoring + edge clamp; returns null for a zero-sized (display:none) anchor so a mis-anchored menu hides instead of pinning top-left (B734)
   - _exports_: `placeMenu`
 - **`src/shared/ui/AppHeader.jsx`** — Shared two-row chrome: Row1 brand/breadcrumb/cloud-badge/auth, Row2 module tabs+toolbar, fullscreen F-key, phone sideways-scroll, cross-tab conflict banner
-  - _exports_: `default (AppHeader)`, `MODULE_ACCENT`
+  - _exports_: `default (AppHeader)`, `exitFs`, `fsElement`, `fsSupported`, `MODULE_ACCENT`, `requestFs`
 - **`src/shared/ui/CloudSyncBadge.jsx`** — App-wide cloud-sync glyph driven by real saveState (synced/saving/offline/readonly/error/local); loud never-vanish error via crash boundary + retry popover
   - _exports_: `CloudBadgeBoundary`, `cloudBadgeView`, `default (CloudSyncBadge)`
 - **`src/shared/ui/ColorField.jsx`** — Color control = the native wheel + the shared recently-used swatch row (NEW-4); `ColorRecentsRow` is the row alone, for controls with a bespoke wheel.
@@ -522,7 +522,7 @@ _369 source files mapped._
 - **`src/workspaces/site-planner/lib/parcelSelectHint.js`** — Pure rules for the "Select parcels is off" point-of-failure hint: only on a press that hit a parcel, once per press gesture, rate-limited so a pan across lots can't become a stream.
   - _exports_: `PARCEL_HINT_COOLDOWN_MS`, `parcelSelectHintDecision`
 - **`src/workspaces/site-planner/lib/parcelSnapshot.js`** — Client loader for nightly Drive county parcel-snapshot cache: IndexedDB-held SWR download, pure viewport-filter/point-in-lot hit-test so a flaky county server never blanks the map
-  - _exports_: `_resetSnapshots`, `ensureSnapshot`, `featureAtPoint`, `featureBbox`, `featuresForView`, `getSnapshot`, `onSnapshotChange`, `preferSnapshotForDisplay`, `snapshotEnabled`, `snapshotVintage`
+  - _exports_: `_resetSnapshots`, `ensureSnapshot`, `featureAtPoint`, `featureBbox`, `featuresForView`, `getSnapshot`, `onSnapshotChange`, `preferSnapshotForDisplay`, `snapshotEnabled`, `snapshotFootprint`, `snapshotVintage`
 - **`src/workspaces/site-planner/lib/parking.js`** — Pure parking-layout math: rows-to-depth, split into double-loaded modules, explode into stall-row/aisle bands, curb-adjacency test
   - _exports_: `edgeAbutsPaving`, `explodeParkingBands`, `parkDepthForRows`, `parkRowsForDepth`, `PAVED_NEIGHBOR_TYPES`, `splitParkingPieces`
 - **`src/workspaces/site-planner/lib/pfds.js`** — Pure NOAA Atlas-14 PFDS text parser (0.2%/500-yr + 100-yr design-storm depths) + the wse02pct-provider documentation notes (FBCDD candidate endpoint / MAAPnext / M3 pointers). B763; honest-null on out-of-coverage
@@ -597,6 +597,8 @@ _369 source files mapped._
   - _exports_: `feeInLieuCompare`, `problems`, `REGIONAL_DETENTION`, `regionalDetentionFor`
 - **`src/workspaces/site-planner/lib/registerGisSw.js`** — Boot-time unregister of the retired browser GIS imagery service worker (superseded by server-side Drive cache), fail-safe
   - _exports_: `retireGisSw`
+- **`src/workspaces/site-planner/lib/releaseCanvas.js`** — hand an offscreen canvas's backing store (renderer/GPU memory the GC tracks poorly) back once its pixels have been consumed
+  - _exports_: `releaseCanvas`
 - **`src/workspaces/site-planner/lib/roadClasses.js`** — Road design classes and civil min-radius thresholds (AASHTO speed formula, default arc radius per class, per-plan overrides)
   - _exports_: `classDefaultRadius`, `classMinRadius`, `classReturnRadius`, `DEFAULT_ROAD_CLASS`, `ROAD_CLASS_SEEDS`, `roadClassesOf`, `roadClassOf`, `speedMinRadius`
 - **`src/workspaces/site-planner/lib/roadGeometry.js`** — Pure centerline road geometry: tessellate clicked alignment into arc fillets/smooth splines/sharp corners, min radius of curvature
@@ -739,6 +741,8 @@ _369 source files mapped._
   - _exports_: `extractAllPagesText`, `extractPageItems`, `extractPageText`, `firstPagesText`, `loadPdf`, `renderInto`, `renderPageToImage`, `renderPageToImageData`, `renderPageToOcrCanvas`
 - **`src/workspaces/doc-review/lib/pdfSplit.js`** — Byte-level PDF split by filing plan: lazily use pdf-lib to carve one clean per-discipline PDF from a combined set, no page dropped
   - _exports_: `partFileName`, `splitPdfByPlan`
+- **`src/workspaces/doc-review/lib/releaseCanvas.js`** — the Review workspace's byte-identical copy of the site planner's canvas-release helper (deliberately duplicated, not shared: a cross-route module becomes its own chunk)
+  - _exports_: `releaseCanvas`
 - **`src/workspaces/doc-review/lib/renderBudget.js`** — Pure canvas backing-store budget math: two-layer backdrop/detail density, visible-region tiling and device-pixel rect rounding under a 24MP cap
   - _exports_: `BACKDROP_PX_BUDGET`, `backdropDensity`, `backingPixels`, `backingScale`, `CANVAS_PX_BUDGET`, `DETAIL_DENSITY_CAP`, `DETAIL_DENSITY_TARGET`, `deviceRect`, `tileCovers`, `visibleRegion`
 - **`src/workspaces/doc-review/lib/reviewStore.js`** — Document Review cloud persistence I/O: Supabase doc_reviews + file-facts index, Drive-first byte storage, filing/re-filing, localStorage flush mirror

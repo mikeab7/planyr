@@ -5,6 +5,8 @@ import { COUNTIES, COUNTIES_MAP, candidateCountiesForPoint, countyKeyForName, ST
 import { ensureSnapshot, getSnapshot, snapshotVintage, onSnapshotChange, featureAtPoint, preferSnapshotForDisplay } from "./lib/parcelSnapshot.js";
 import { recordSourceResult, filterHealthyCandidates, isSourceOpen, isStatewideBackup } from "./lib/sourceHealth.js";
 import { syncOverlayLayers, withTileRetry, ALL_LAYERS, probeService } from "./lib/layers.js";
+import { tileCacheLimit } from "./lib/tileBudget.js";
+import { boundTileCache, capTileCache, releaseLayer } from "./lib/tileLifecycle.js";
 import { BASEMAPS } from "./lib/basemaps.js";
 import { prefetchExtents, computeCoverage, boundsFromLeaflet, getNearbyRadiusMiles, subscribeRelevance } from "./lib/coverage.js";
 import LayerPanel from "./components/LayerPanel.jsx";
@@ -57,6 +59,16 @@ const PAL = {
 // layer below clamps fetches to that ceiling (minus the retina offset).
 // Subtle road/place labels overlay (drawn faint over the imagery).
 const LABELS_TILES = "https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}";
+
+/* NEW-6 — the ring count Leaflet actually uses on this map's two tile layers. Neither passes
+ * `keepBuffer`, so both run on Leaflet's default of 2; the cache CEILING is sized from that same
+ * number so the cap is computed for the layers as they really are. Deliberately NOT tuned: this
+ * item is authorised to cap RETAINED memory, not to change how much gets drawn or fetched. */
+const MAP_KEEP_BUFFER = 2;
+/* How far the ceiling is squeezed while the Map view is HIDDEN (SitePlannerApp keeps it mounted
+ * under display:none). A hidden map needs no ring of look-ahead tiles at all, and everything shed
+ * re-fetches the moment it is shown again — the visible result is identical. */
+const HIDDEN_TILE_CAP = 16;
 
 // Parcel-outline display + the +/− cursors are shared with the in-planner "Add parcel"
 // tool (lib/parcelDisplay.js) so both surfaces light up parcels identically.
@@ -230,6 +242,8 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
   const elRef = useRef(null);
   const mapRef = useRef(null);
   const addrTokRef = useRef(0); // B545: address-search generation — a newer search invalidates an older in-flight one
+  const imageryCapRef = useRef(null); // NEW-6 — detach fn for the imagery layer's tile-cache cap
+  const labelsCapRef = useRef(null);  // NEW-6 — ditto for the labels overlay
   const displaysRef = useRef({});    // county -> visible parcel-line layer (all CAD counties)
   const sitesLayerRef = useRef(null); // saved-site footprints
   const pressedRef = useRef(false);        // a pointer is currently down on the map (B64)
@@ -549,7 +563,20 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
     layer.setZIndex(1);
     layer.addTo(map);
     imageryRef.current = layer;
-    return () => { try { map.removeLayer(layer); } catch (_) {} };
+    /* NEW-6 — the SAME explicit ceiling the planner's two layers got in B1121. The Map view has
+       its own Leaflet map and was left out of that work, and it is never unmounted (SitePlannerApp
+       hides it with display:none deliberately, to keep it alive), so its `_tiles` map grew for the
+       whole session with nothing but Leaflet's incidental pruning to shed it. Pure EVICTION: no
+       retina change, no cap on what can be drawn — a shed tile re-fetches on demand, and
+       `capTileCache` never evicts a CURRENT tile, so it cannot punch a hole in the view. */
+    const detachCap = boundTileCache(layer, () => tileCacheLimit({
+      containerW: (elRef.current && elRef.current.clientWidth) || 1024,
+      containerH: (elRef.current && elRef.current.clientHeight) || 768,
+      tileSizePx: (layer.getTileSize && layer.getTileSize().x) || 256,
+      keepBuffer: MAP_KEEP_BUFFER,
+    }));
+    imageryCapRef.current = detachCap;
+    return () => { detachCap(); imageryCapRef.current = null; try { map.removeLayer(layer); } catch (_) {} };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [basemap]);
 
@@ -568,7 +595,14 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
     layer.setZIndex(2);
     layer.addTo(map);
     labelsRef.current = layer;
-    return () => { try { map.removeLayer(layer); } catch (_) {} labelsRef.current = null; };
+    const detachCap = boundTileCache(layer, () => tileCacheLimit({   // NEW-6 — second uncapped layer
+      containerW: (elRef.current && elRef.current.clientWidth) || 1024,
+      containerH: (elRef.current && elRef.current.clientHeight) || 768,
+      tileSizePx: (layer.getTileSize && layer.getTileSize().x) || 256,
+      keepBuffer: MAP_KEEP_BUFFER,
+    }));
+    labelsCapRef.current = detachCap;
+    return () => { detachCap(); labelsCapRef.current = null; try { map.removeLayer(layer); } catch (_) {} labelsRef.current = null; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [labels]);
 
@@ -603,10 +637,39 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
       identifyOk: () => !selectModeRef.current,
     });
     sync();
+    /* NEW-6 — the re-probe is gated on VISIBLE. This map is never unmounted (SitePlannerApp hides
+       it with display:none on purpose, to keep it alive), so this timer used to keep re-syncing —
+       and re-fetching — every enabled GIS raster overlay every 45 s for a map nobody was looking
+       at, for the whole session. It self-heals a stopped service, which only matters while the map
+       is on screen; the effect re-runs on `visible`, so returning to the map syncs immediately and
+       then resumes the heartbeat. */
+    if (!visible) return undefined;
     // periodic re-probe so stopped services self-heal when the City/County restart
     const iv = setInterval(sync, 45000);
     return () => clearInterval(iv);
-  }, [overlays]); // eslint-disable-line
+  }, [overlays, visible]); // eslint-disable-line
+
+  /* NEW-6 — hand memory back while the Map view is hidden. Two things are released, both pure
+     eviction with no visual consequence: the two basemap layers are squeezed to a token ceiling
+     (a hidden map needs no look-ahead ring), and every esri raster OVERLAY this map holds — a
+     DUPLICATE set of the planner's, each keeping a painted full-viewport <img> alive — is torn
+     down through the same `releaseLayer` the planner uses at toggle-off. `syncOverlayLayers`
+     rebuilds whatever is still enabled on the way back in (the sync effect above re-runs on
+     `visible`), so nothing is lost and no quality changes; the tiles simply re-fetch. */
+  useEffect(() => {
+    if (visible) return;
+    const map = mapRef.current;
+    if (!map) return;
+    for (const layer of [imageryRef.current, labelsRef.current]) {
+      if (layer) { try { capTileCache(layer, HIDDEN_TILE_CAP); } catch (_) {} }
+    }
+    for (const key of Object.keys(overlayRefs.current)) {
+      const layer = overlayRefs.current[key];
+      if (!layer) continue;
+      try { releaseLayer(map, layer); } catch (_) {}
+      delete overlayRefs.current[key];
+    }
+  }, [visible]);
 
   /* Hover identify for the RASTER-painted layers (NEW-2). The vector overlays answer a hover
      from their own features (a tooltip bound as they draw — see featureHover.js / vectorOverlay.js),

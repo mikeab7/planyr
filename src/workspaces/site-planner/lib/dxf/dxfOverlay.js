@@ -8,6 +8,7 @@
  * `?worker` import makes `dxf-parser` its own chunk instantiated only on first use, so the CAD
  * parser never rides the initial planner bundle. */
 import DxfWorker from "./dxfWorker.js?worker";
+import { releaseCanvas } from "../releaseCanvas.js";
 
 let worker = null, seq = 0;
 const pending = new Map();
@@ -70,6 +71,7 @@ export function rasterizeSvg(svg, w, h) {
         const ctx = canvas.getContext("2d");
         ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
         const out = canvas.toDataURL("image/png");
+        releaseCanvas(canvas); // NEW-5 — encoded; hand the backing store back with the object URL
         URL.revokeObjectURL(url);
         resolve(out);
       } catch (err) { URL.revokeObjectURL(url); reject(err); }

@@ -107,6 +107,15 @@ export function autoContourInterval(depth) {
 // robust inward offset can split the basin (multiple pools) or pinch it off (none). Stops
 // the moment the offset returns nothing, and reports feasibility: a footprint can only grade
 // to `maxDepth = maxInwardOffset(ring)/slope` before opposing slopes meet.
+/* NEW-4(e) — LRU memo, keyed and evicted exactly like `_detMemo` below. This was the one
+ * clipper-heavy derivation in this file with no cache, and it is the most expensive of them:
+ * `maxInwardOffset` alone is a ~28-iteration binary search whose EVERY iteration runs a full
+ * ClipperOffset execute with round joins, and each contour level adds another offsetInward —
+ * roughly 38 clipper runs per pond, per render, worst exactly when you are zoomed in working on
+ * a pond. `opts` is accepted for call-site symmetry but never read, so (ring, det) is the whole
+ * input set. Like every memo here the returned object is SHARED — treat it as read-only. */
+const _contMemo = new Map();
+const CONT_MEMO_MAX = 96;
 export function pondContours(ring, det = {}, opts = {}) {
   const depth = det.depth != null ? det.depth : 8;
   const freeboard = det.freeboard != null ? det.freeboard : 1;
@@ -115,9 +124,18 @@ export function pondContours(ring, det = {}, opts = {}) {
   const tobElev = det.tobElev;
   const hasElev = tobElev != null && isFinite(tobElev);
   const EPS = 0.05;
+  const ok = Array.isArray(ring) && ring.length >= 3;
+  const sig = ok
+    ? `cont|${depth}|${freeboard}|${slope}|${interval}|${tobElev}|${ring.length}|${ring[0].x.toFixed(2)},${ring[0].y.toFixed(2)}|${polyArea(ring).toFixed(1)}`
+    : null;
+  if (sig && _contMemo.has(sig)) {
+    const hit = _contMemo.get(sig);
+    _contMemo.delete(sig); _contMemo.set(sig, hit); // refresh recency
+    return hit;
+  }
   const maxDepth = slope > 0 ? maxInwardOffset(ring) / slope : 0;
   const out = { levels: [], collapsedAt: null, feasible: depth <= maxDepth + EPS, maxDepth, meta: { depth, freeboard, slope, interval } };
-  if (!Array.isArray(ring) || ring.length < 3) return out;
+  if (!ok) return out;
 
   // Depths below top to draw: the interval grid, plus the water surface and the bottom
   // always (they carry the emphasis), de-duped within EPS so they don't double a grid line.
@@ -147,6 +165,8 @@ export function pondContours(ring, det = {}, opts = {}) {
       elev: elevOf(down),
     });
   }
+  _contMemo.set(sig, out);
+  if (_contMemo.size > CONT_MEMO_MAX) _contMemo.delete(_contMemo.keys().next().value); // evict oldest
   return out;
 }
 
@@ -167,7 +187,12 @@ export function pondContours(ring, det = {}, opts = {}) {
  * calls this for EVERY pond each render, interleaved with the selected-pond
  * panel and map labels, so a 1-entry memo would thrash the clipper offsets. */
 const _detMemo = new Map(); // sig → result, insertion order = recency
-const DET_MEMO_MAX = 32;
+/* NEW-4 — raised 32 → 128. Each pond generates roughly THREE distinct signatures per render
+ * (pondSplitFor, the pondLedgerEntries pass, and the map label loop each ask at a different
+ * depth/freeboard), so 32 held barely ten ponds and a real multi-pond plan evicted entries it
+ * was about to ask for again — the classic thrash where the cache costs and never pays. 128
+ * covers ~40 ponds with headroom; entries are five-number objects, so the memory is noise. */
+const DET_MEMO_MAX = 128;
 export function detentionStorage(ring, depth, freeboard, slope) {
   const sig = `${depth}|${freeboard}|${slope}|${ring.length}|${ring[0] ? `${ring[0].x.toFixed(2)},${ring[0].y.toFixed(2)}` : ""}|${polyArea(ring).toFixed(1)}`;
   if (_detMemo.has(sig)) {

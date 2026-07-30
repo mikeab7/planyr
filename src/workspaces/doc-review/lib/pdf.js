@@ -5,6 +5,7 @@
 import * as pdfjsLib from "pdfjs-dist";
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { deviceRect } from "./renderBudget.js";
+import { releaseCanvas } from "./releaseCanvas.js";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl;
 
@@ -212,10 +213,15 @@ export async function renderInto(pdf, pageNum, canvas, { scale = 1, density = 1,
   const task = page.render(params);
   if (onTask) onTask(task); // expose the RenderTask so the caller can cancel a superseded render (B40)
   await task.promise;
-  if (isStale && isStale()) return null; // a newer render won while we rasterised — don't blit a stale frame
+  // NEW-5 — `off` is the biggest allocation on the hottest path in the app: renderDetail calls
+  // this on a leading-edge throttle DURING a continuous pan, so a minute of panning used to leave
+  // hundreds of full-density backing stores for the GC to notice. Released the moment its pixels
+  // have been copied out (or the frame is abandoned) — the visible `canvas` is untouched.
+  if (isStale && isStale()) { releaseCanvas(off); return null; } // a newer render won while we rasterised — don't blit a stale frame
   if (canvas.width !== bw) canvas.width = bw;   // guard skips a needless clear when dims are unchanged
   if (canvas.height !== bh) canvas.height = bh;
   canvas.getContext("2d").drawImage(off, 0, 0); // same synchronous tick as the resize → no visible blank (B414)
+  releaseCanvas(off);                           // pixels consumed by the drawImage above
   // B489a: return the DEVICE-ROUNDED region (back in page units) so the caller sizes/places the detail
   // tile on exact device-pixel edges — the detail canvas then aligns to the backdrop with no sub-pixel seam.
   return { baseW: base.width, baseH: base.height, w: bw, h: bh, region: { rx: ox / S, ry: oy / S, rw: bw / S, rh: bh / S }, density: S };
@@ -238,6 +244,7 @@ export async function renderPageToImage(pdf, pageNum, scale = 2) {
   const href = await new Promise((resolve) =>
     canvas.toBlob((b) => resolve(b ? URL.createObjectURL(b) : canvas.toDataURL("image/png")), "image/png")
   );
+  releaseCanvas(canvas); // NEW-5 — encoded to a blob/data URL above; the pixels are spent
   return { href, baseW: base.width, baseH: base.height };
 }
 
@@ -254,6 +261,7 @@ export async function renderPageToImageData(pdf, pageNum, scale = 2) {
   const ctx = canvas.getContext("2d", { willReadFrequently: true });
   await page.render({ canvasContext: ctx, viewport }).promise;
   const data = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  releaseCanvas(canvas); // NEW-5 — the caller keeps the ImageData; the canvas is done (its own comment says so)
   return { data, baseW: base.width, baseH: base.height, scale };
 }
 

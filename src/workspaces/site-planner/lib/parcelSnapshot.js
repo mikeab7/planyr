@@ -180,5 +180,39 @@ async function refreshFromDrive(county, doFetch, base) {
   emitChange(county);
 }
 
+/* ── NEW-7 — INSTRUMENTATION, deliberately not a cap ────────────────────────────────────────
+ * `loaded` is county → the county's FULL GeoJSON feature array, and nothing but the test helper
+ * below ever clears it. It could plausibly be tens of megabytes per county, and a session that
+ * touches three counties holds three of them — but that "could" is the whole problem: the size
+ * could not be established from source, and capping a fallback the map depends on, blind, is how
+ * you trade a memory number for a blank map over a county whose live server is down.
+ *
+ * So: MEASURE FIRST. `snapshotFootprint()` reports what is actually retained, per county and in
+ * total. `approxBytes` is the serialized size of the held features — the honest measure of the
+ * retained object graph's scale, though the live JS objects cost more than their JSON text.
+ * It is computed ON DEMAND (serializing a county is not free) and never on a render path.
+ *
+ * If the number turns out to justify a cap, the durable copy is already in IndexedDB (`idbPut`
+ * above / `idbGet` in ensureSnapshot), so an evicted county rehydrates instantly and locally —
+ * the eviction would cost nothing but a disk read. That work is deliberately NOT done here. */
+export function snapshotFootprint() {
+  const counties = [];
+  let totalBytes = 0, totalFeatures = 0;
+  for (const [county, snap] of loaded) {
+    const features = snap && Array.isArray(snap.features) ? snap.features.length : 0;
+    let approxBytes = null;
+    try { approxBytes = JSON.stringify(snap && snap.features ? snap.features : []).length; } catch (_) { approxBytes = null; }
+    counties.push({ county, features, approxBytes, generatedAt: (snap && snap.generatedAt) || null });
+    totalFeatures += features;
+    if (approxBytes != null) totalBytes += approxBytes;
+  }
+  return { counties, totalFeatures, totalBytes };
+}
+
+/* Reachable from a real signed-in session's console (`__planyrSnapshotFootprint()`) so the number
+   can be READ off a live browser with real county data — the sandbox has no Drive access, and this
+   is exactly the class of question a static read of the source could not answer. Read-only. */
+if (typeof window !== "undefined") { try { window.__planyrSnapshotFootprint = snapshotFootprint; } catch (_) {} }
+
 // Test/teardown helper — clear the in-memory registry (IndexedDB untouched).
 export function _resetSnapshots() { loaded.clear(); inflight.clear(); }
