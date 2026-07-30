@@ -4,9 +4,15 @@
  * Settings (change password, cloud-sync note) — with Sign out always available
  * (B297/B298). Auth state is owned by the Shell; this calls the auth wrappers and
  * the profile hook's save/reload passed in via `profileApi`. */
-import { useEffect, useRef, useState } from "react";
+import { lazy, useEffect, useRef, useState } from "react";
 import { signIn, signUp, signOut, resetPassword, updatePassword } from "../lib/auth.js";
-import TeamPanel from "./TeamPanel.jsx";
+/* LAZY (B1064 tranche a). This file is reached from the Shell, so it lands in the shared ENTRY
+ * chunk — the one chunk EVERY route downloads, planner or not. The Team tab is signed-in-only
+ * and opens on an explicit click (the default tab is Profile), so nothing about it belongs on
+ * a first paint of any workspace. Moving it out is the one panel in this tranche whose saving
+ * lands on all four routes rather than only the Site route. */
+const TeamPanel = lazy(() => import("./TeamPanel.jsx"));
+import LazyPanel from "./LazyPanel.jsx";
 import ThemePicker from "../../../shared/theme/ThemePicker.jsx";
 
 const PAL = { ink: "var(--text-primary)", muted: "var(--text-secondary)", line: "var(--border-default)", accent: "var(--accent)", paper: "var(--surface-raised)" };
@@ -117,7 +123,9 @@ function AccountView({ user, profileApi, initialTab, onClose }) {
       </div>
 
       {tab === "team" ? (
-        <TeamPanel user={user} setMsg={setMsg} />
+        <LazyPanel name="The Team tab" minHeight={260} label="Loading team…">
+          <TeamPanel user={user} setMsg={setMsg} />
+        </LazyPanel>
       ) : tab === "profile" ? (
         <div>
           <div style={{ fontSize: 12.5, color: PAL.muted }}>Signed in as</div>
