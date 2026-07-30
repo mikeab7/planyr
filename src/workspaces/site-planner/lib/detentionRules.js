@@ -686,23 +686,13 @@ export function computeRequiredDetention({
     };
   }
 
-  // ---- volume-curve records (B1105, MHFD): components, never a rate ------
-  // A `volume-curve` rule sizes by named volume COMPONENTS (MHFD: WQCV + EURV + the 100-yr), not by
-  // ac-ft per acre. Reaching one here means a volume-curve record was resolved through the normal
-  // authority path instead of the Colorado regime seam above — the evaluator that knows how to
-  // combine its components was never injected, so there is nothing to compute. Refuse EXPLICITLY:
-  // without this the record would fall to the generic "no dispatch path" at the bottom, which is
-  // the right answer for the wrong reason and would go quiet if someone later added a rate fallback.
-  if (rule.ruleType === "volume-curve") {
-    // The component list is NOT interpolated here: it lives on `rule.params.components` for any
-    // caller that wants it, and building the string on the boot path costs a filter/map/join plus
-    // its literals for a message only a Colorado site can reach (site-route bundle budget).
-    return {
-      kind: "unknown", requiredAcFt: null, bandAcFt: null, rateAcFtPerAc: null,
-      basis: `${rule.authorityLabel} sizes by volume components, not a per-acre rate — no rate-method answer exists`,
-      rule, governing: null, flags: ["volume-curve", "no-rate-method", "no-criteria-modeled"], caveat: SCREENING_CAVEAT,
-    };
-  }
+  /* B1105 — there is deliberately NO `volume-curve` dispatch here, and that is a bundle decision.
+   * A volume-curve rule (MHFD) is priced through the Colorado regime seam at the top of this
+   * function, never through the authority path. If one somehow reaches here, the generic
+   * "no dispatch path" refusal at the bottom already returns kind:"unknown" with no number and the
+   * `no-criteria-modeled` flag — safe by construction. A dedicated branch only improved that
+   * message, and its literals sat on the boot path for a case `test/mhfdDetention.test.js` asserts
+   * cannot occur (MHFD is not in DETENTION_RULES). Do not re-add one without a reachable caller. */
 
   // ---- municipal overlays: dispatch through the parent -------------------
   if (rule.ruleType === "overlay") {

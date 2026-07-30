@@ -427,11 +427,11 @@ describe("B1105 · being inside the district does not settle whose criteria are 
   });
 });
 
-describe("B1123 · the Colorado state RENDERS, and is never a spinner", () => {
+describe("B1127 · the Colorado state RENDERS, and is never a spinner", () => {
   const stripFor = (req) => yieldVerdictStrip({ req, providedUsableCf: 0, buildability: null }).find((r) => r.key === "det");
 
   it("an unavailable requirement is a NAMED row, not 'checking flood data'", () => {
-    /* THE REGRESSION GUARD. Before B1123 `kind:"unavailable"` matched no branch and fell through to
+    /* THE REGRESSION GUARD. Before B1127 `kind:"unavailable"` matched no branch and fell through to
      * loadingRow, so every Colorado site's verdict strip read "Detention: checking flood data"
      * forever — a spinner for a number that is never coming, which is precisely what the Colorado
      * guard exists to prevent. */

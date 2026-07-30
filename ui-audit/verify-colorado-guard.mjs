@@ -91,7 +91,7 @@ const run = async () => {
   ];
   for (const [label, re] of guardCopy) check(re.test(js), `eager bundle carries ${label} (it must render instantly)`);
 
-  /* B1123 — the verdict strip's NAMED unavailable row must ship EAGERLY, because it is what
+  /* B1127 — the verdict strip's NAMED unavailable row must ship EAGERLY, because it is what
    * replaced the permanent "Detention: checking flood data" spinner. That sentence and its N/A pill
    * are generic (no Colorado prose), so they belong on the boot path; if they ever move to the lazy
    * tier a Colorado site would show a spinner again until the chunk landed. */

@@ -136,7 +136,7 @@ const pairRow = (key, label, provided, required, short, opts = {}) => {
 
 // Detention: the required number is the point requirement, or the CONSERVATIVE (upper) end of a
 // screening band — a single number in the strip (the band range moves into the A3 basis tag).
-/* NEW-2 (B1123) — the NAMED UNAVAILABLE row.
+/* NEW-2 (B1127) — the NAMED UNAVAILABLE row.
  *
  * ⛔ THIS BRANCH IS THE BUG FIX, AND ITS ABSENCE WAS SEVERE. Before it, a `kind:"unavailable"`
  * requirement (every Colorado site) matched none of the numeric branches below and fell through to

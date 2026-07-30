@@ -1,4 +1,4 @@
-/* NEW-3 (B1124) — THE DEAD-STORE RATCHET.
+/* NEW-3 (B1128) — THE DEAD-STORE RATCHET.
  *
  * WHY THIS EXISTS. Three "computed but never rendered" defects surfaced in five dispatches: the
  * invisible Buildability panel rows (B815-era), a ParcelDrawing swatch row reported missing though

@@ -1,4 +1,4 @@
-/* B1105 / B1123 — DOES THE COLORADO DETENTION STATE ACTUALLY REACH THE DOM?
+/* B1105 / B1127 — DOES THE COLORADO DETENTION STATE ACTUALLY REACH THE DOM?
  *
  * WHY A SEPARATE HARNESS FROM verify-colorado-guard.mjs. That one proves the right BYTES ship in the
  * right chunk. This one proves the right PIXELS render, which is a different question and the one
@@ -138,7 +138,7 @@ const run = async () => {
       check(!has(/ac-ft\/ac/), "MHFD: NO per-acre rate is shown (a full-spectrum volume has none)");
       check(!/Detention[^\n]*\d+\.\d+\s*of\s*\d+\.\d+\s*ac-ft/.test(txt), "MHFD: NO provided/required detention pair is shown (there is no required number)");
       // …and the regime resolved with EVERY GIS endpoint blocked, off the plan's own saved county
-      // (B1125). If this regresses, a Denver site silently drops to the blanket Colorado guard.
+      // (B1129). If this regresses, a Denver site silently drops to the blanket Colorado guard.
       check(has(/MHFD/), "MHFD: the regime resolved with all GIS endpoints down (plan's saved county)");
 
       // Detail-fold content — GIS-gated, see `gated` above.

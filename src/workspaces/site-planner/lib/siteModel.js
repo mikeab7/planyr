@@ -18,7 +18,7 @@
 import { dogEarGeom, dogEarSize, isDogEarSide,
   wallStripBox, wallKidBox, wallKidAlong, hostAxisExtents, ownExtents, bumpsOfHost,
   sideOfBondedBox, localToWorld } from "./dogEar.js";
-import { layoutZoneByKind, boxExtentAlong } from "./dockZones.js";
+import { layoutZoneByKind, boxExtentAlong, zoneAlongExtent, zoneDepthExtent, alongLenIsChainEcho } from "./dockZones.js";
 import { roadCenterline, dedupeRoadVertices, repairBakedRadii, simplifyRoadVertices, ROAD_SIMPLIFY_TOL_FT, ROAD_VERTEX_COLLAPSE_FT } from "./roadGeometry.js";
 import { bufferPolyline } from "./metesAndBounds.js";
 import { DEFAULT_ROAD_CLASS, roadClassOf } from "./roadClasses.js";
@@ -496,6 +496,130 @@ function normalizeStrandedZones(list, onHeal) {
   return els.map((e) => (e && patch.has(e.id) ? { ...e, ...patch.get(e.id) } : e));
 }
 
+/* ---- B1123: drop a SPURIOUS per-zone along-wall length ------------------------------------------
+ * `alongLen` is the deliberate escape from the shared chain span: a trailer the owner actually gave
+ * a length keeps it, clamped but never reset. The stamp that WRITES it used to compare world-space
+ * projections of a rotated box, which drift by h·|sin θ| — so on a building at 178.543° any refit
+ * could pin a length nobody set, and the zone stopped tracking its court permanently.
+ *
+ * The write path is fixed (see dockZones `resizedZoneAlongLen`), but plans already poisoned would
+ * stay broken forever, because a pinned length is by design never reset. So on load: an `alongLen`
+ * indistinguishable from the chain span the zone would derive anyway carries no intent — it is what
+ * the zone would render regardless — and is DROPPED, with the chain re-laid so the geometry catches
+ * up in the same pass. A length genuinely different from the span is real intent and is preserved.
+ * Only OUTWARD zones are considered: the court head's own `alongLen` is the B492 typed-length path,
+ * capped to the clear bump-out face, and is never touched here. */
+export function normalizeZoneAlongLen(list, onHeal) {
+  const els = arr(list);
+  if (els.length < 2) return els;
+  const nextInChain = (el) => els.find((x) => x && !x.points && x.id !== el.id && (
+    x.prevZone === el.id ||
+    (el.truckCourt && x.forCourt === el.id) ||
+    (el.type === "trailer" && x.forTrailer === el.id))) || null;
+  const drop = new Set();
+  const patch = new Map();
+  for (const host of els) {
+    if (!host || host.type !== "building" || host.dogEar || !finiteBoxEl(host)) continue;
+    const courts = els.filter((x) => x && x.attachedTo === host.id && x.truckCourt && !x.points && finiteBoxEl(x));
+    for (const head of courts) {
+      const side = head.truckCourt.side;
+      if (!SIDE_NORMAL[side]) continue;
+      const chain = [head];
+      const seen = new Set([head.id]);
+      for (let z = nextInChain(head); z && !seen.has(z.id); z = nextInChain(z)) { seen.add(z.id); chain.push(z); }
+      if (!chain.every(finiteBoxEl)) continue;
+      const chainAlong = zoneAlongExtent(head, host.rot || 0, side);
+      if (!Number.isFinite(chainAlong) || chainAlong <= 0) continue;
+      const echoes = chain.map((z, i) => i > 0 && alongLenIsChainEcho(z.alongLen, chainAlong));
+      if (!echoes.some(Boolean)) continue;                     // nothing spurious on this side
+      const [, ny] = SIDE_NORMAL[side];   // only the ACROSS component is read here (B1128 ratchet)
+      const horiz = ny !== 0;
+      const tan = rot2d(horiz ? 1 : 0, horiz ? 0 : 1, host.rot || 0);
+      const kinds = chain.map((z) => (z.type === "trailer" || z.forCourt ? "trailer" : "strip"));
+      // Depth is the member's own stored intent; the fallback is the EXACT host-local across extent,
+      // never a world-space projection (the very error this pass exists to undo).
+      const depths = chain.map((z) => (Number.isFinite(z.zd) && z.zd > 0 ? z.zd : zoneDepthExtent(z, host.rot || 0, side)));
+      const opts = {
+        along: chainAlong,
+        alongShift: (head.cx - host.cx) * tan.x + (head.cy - host.cy) * tan.y,
+        // The surviving genuine overrides still win; the dropped ones go back to tracking the chain.
+        alongs: chain.map((z, i) => (i === 0 || echoes[i] || !(Number.isFinite(z.alongLen) && z.alongLen > 0) ? null : z.alongLen)),
+      };
+      chain.forEach((z, i) => {
+        if (!echoes[i]) return;
+        drop.add(z.id);
+        patch.set(z.id, layoutZoneByKind(host, side, i, depths, kinds, opts));
+        if (onHeal) onHeal({ id: z.id, host: host.id, kind: "zone-along-len", type: z.type, side, from: { alongLen: z.alongLen }, to: { alongLen: null, chainAlong } });
+      });
+    }
+  }
+  if (!drop.size) return els;
+  return els.map((e) => {
+    if (!e || !drop.has(e.id)) return e;
+    const { alongLen: _dropped, ...rest } = e;
+    return { ...rest, ...(patch.get(e.id) || {}) };
+  });
+}
+
+/* ---- B1124: re-bond a dock zone whose back-reference points at ANOTHER building's stack ----------
+ * A duplicate used to remap only `attachedTo`, so the copy's trailer parking stayed bonded (via
+ * `forCourt` / `forTrailer` / `prevZone`) to the ORIGINAL building's courts. A trailer bonded to a
+ * court on a different building can never track its own host — that is the owner's "trailer parking
+ * just hovering by itself". The write path is fixed (lib/bondRemap.js), but every plan already
+ * duplicated carries the cross-link, so repair it on load.
+ *
+ * The repair is by SIDE, which is the only stable identity a dock zone has: a zone whose bond names
+ * an element that is NOT a child of the zone's own host is re-pointed at the corresponding member of
+ * the same-side chain on its own host. When no such member exists the dangling reference is DROPPED
+ * rather than left pointing at a foreign element — a bond nobody can walk is strictly better than a
+ * bond that walks somewhere impossible. */
+export function normalizeCrossHostBonds(list, onHeal) {
+  const els = arr(list);
+  if (els.length < 2) return els;
+  const byId = new Map();
+  for (const e of els) if (e && e.id != null) byId.set(e.id, e);
+  const ID_BONDS = ["forCourt", "forTrailer", "prevZone"];
+  // Element ids are always strings; a legacy record's `forTrailer: true` is an inert flag, not a
+  // bond, so it points at nothing, cannot cross hosts, and is left alone (mirrors lib/bondRemap.js).
+  const isRef = (v) => typeof v === "string" && v.length > 0;
+  // The side a stack member sits on, resolved WITHOUT following the (possibly broken) bonds: a court
+  // carries it outright, everything else falls back to the geometric side of its own host's box.
+  const sideOfMember = (host, z) => (z.truckCourt && SIDE_NORMAL[z.truckCourt.side] ? z.truckCourt.side : sideOfBondedBox(host, z));
+  const patch = new Map();
+  for (const z of els) {
+    if (!z || z.points || z.attachedTo == null) continue;
+    if (!ID_BONDS.some((k) => isRef(z[k]))) continue;
+    const host = byId.get(z.attachedTo);
+    if (!host || host.type !== "building" || host.dogEar || host.points || !finiteBoxEl(host)) continue;
+    const fix = {};
+    for (const k of ID_BONDS) {
+      const refId = z[k];
+      if (!isRef(refId)) continue;
+      const ref = byId.get(refId);
+      if (ref && ref.attachedTo === host.id) continue;         // already bonded inside its own host
+      // Find the same-side counterpart on THIS host: a forCourt wants that side's court, a
+      // forTrailer wants that side's trailer, a prevZone wants whatever the previous member is.
+      const side = finiteBoxEl(z) ? sideOfMember(host, z) : null;
+      const wantCourt = k === "forCourt" || (k === "prevZone" && ref && ref.truckCourt);
+      const cand = els.find((x) => x && x.attachedTo === host.id && !x.points && x.id !== z.id
+        && (wantCourt ? !!x.truckCourt : (k === "forTrailer" ? x.type === "trailer" : (ref ? x.type === ref.type : false)))
+        && (!side || !finiteBoxEl(x) || (x.truckCourt ? x.truckCourt.side === side : sideOfBondedBox(host, x) === side)));
+      if (cand) fix[k] = cand.id;
+      else fix[k] = null;                                      // drop rather than dangle abroad
+      if (onHeal) onHeal({ id: z.id, host: host.id, kind: "cross-host-bond", type: z.type, side, from: { [k]: refId }, to: { [k]: fix[k] } });
+    }
+    if (Object.keys(fix).length) patch.set(z.id, fix);
+  }
+  if (!patch.size) return els;
+  return els.map((e) => {
+    if (!e || !patch.has(e.id)) return e;
+    const fix = patch.get(e.id);
+    const out = { ...e };
+    for (const [k, v] of Object.entries(fix)) { if (v == null) delete out[k]; else out[k] = v; }
+    return out;
+  });
+}
+
 /* The ONE bonded-child heal, shared by BOTH read paths (NEW-4). `createSiteModel` (the site-record
  * blob) and `rowsToModel` (the signed-in `site_elements` rows) used to disagree: the blob path ran
  * the normalizers, the rows path ran only `migrateRoads` — so an element-synced plan whose assembly
@@ -503,8 +627,14 @@ function normalizeStrandedZones(list, onHeal) {
  * drift again. `onHeal` is optional telemetry (LOUD-FAILURE: a silent repair is a repair nobody
  * can audit). */
 export function normalizeBondedChildren(els, onHeal) {
+  // Order matters: the cross-host bond repair (B1124) runs FIRST, so every later pass walks a chain
+  // that actually belongs to its host; the spurious-length drop (B1123) then runs on the repaired
+  // chain; the stranded re-fit stays last (it re-places whatever is still geometrically impossible).
   return normalizeStrandedZones(
-    normalizeWallKids(normalizeDogEarPositions(normalizeBondedRotations(els), onHeal), onHeal),
+    normalizeZoneAlongLen(
+      normalizeWallKids(normalizeDogEarPositions(normalizeBondedRotations(normalizeCrossHostBonds(els, onHeal)), onHeal), onHeal),
+      onHeal,
+    ),
     onHeal,
   );
 }

@@ -1,4 +1,4 @@
-/* NEW-3 (B1124) — the dead-store ratchet, as a test so `npm test` carries it too.
+/* NEW-3 (B1128) — the dead-store ratchet, as a test so `npm test` carries it too.
  *
  * A value computed on every render and read by nobody reads as a rendered fact and is not one — the
  * B1110 class (`detVerdict`/`detTone`/`detSub`), and three such defects surfaced in five dispatches.
@@ -15,7 +15,7 @@ import { collect, compare } from "../ui-audit/dead-store-audit.mjs";
 const here = dirname(fileURLToPath(import.meta.url));
 const baseline = JSON.parse(readFileSync(resolve(here, "../ui-audit/dead-store-baseline.json"), "utf8"));
 
-describe("B1124 · no NEW computed-but-never-read value may land", () => {
+describe("B1128 · no NEW computed-but-never-read value may land", () => {
   it("every file is at or below its frozen dead-store count", async () => {
     const { byFile } = await collect();
     const { worse, fresh } = compare(byFile, baseline);
