@@ -32,8 +32,11 @@
  * neither a `response` nor a `requestfailed` ever fires for them, while other external
  * hosts in the same page DO report (`fonts.googleapis.com` ERR_CONNECTION_RESET,
  * `gisclient.quiddity.com` ERR_TUNNEL_CONNECTION_FAILED). The proxy's own
- * `__agentproxy/status` logs no rejection for arcgisonline at all. So the basemap cannot
- * be made to paint in this browser, and V524's imagery strands stay owed.
+ * `__agentproxy/status` logs no rejection for arcgisonline at all. The broader finding, and
+ * the useful one: this Chromium cannot load ANY remote origin — `https://planyr.io/` and the
+ * Cloudflare preview both die on `ERR_CONNECTION_RESET` at `page.goto` through the same
+ * proxy that serves `curl` fine — so the browser here is effectively localhost-only. The
+ * basemap cannot be made to paint, and V524's imagery strands stay owed.
  *
  * Run (sandbox, external hosts blocked — the CI-shaped run):
  *   npm run build && npx vite preview --port 4173 &   then
