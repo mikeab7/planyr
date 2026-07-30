@@ -40,6 +40,7 @@ import { chromium } from "playwright";
 import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { stemOf } from "./lib/bundleMetrics.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, "..");
@@ -310,7 +311,12 @@ if (unreliable.length) {
  * STATIC import edges; the NEW-9 regression was a boot-time runtime import(), which is invisible
  * to it. This assertion is the one that would actually have caught it in the act. */
 const allow = new Set(budgets.bundle.siteRouteAllowlist?.allow || []);
-const stem = (f) => f.replace(/-[A-Za-z0-9_-]{8,}\.js$/, "").replace(/\.js$/, "");
+/* Shared with the bundle audit so the two instruments name a chunk identically. The loose
+ * inline copy this replaced matched "8 OR MORE" hash characters and so ate the tail of any
+ * hyphenated chunk name — it reported `map-vendor` as "map" and `cjs-interop` as "cjs", which
+ * then failed to match the committed allowlist and turned two expected chunks into phantom
+ * intruders. */
+const stem = (f) => stemOf(f);
 const intruders = results.siteRouteChunks.filter((f) => !allow.has(stem(f)));
 if (intruders.length) {
   failures.push({ metric: "runtime.siteRouteChunks", value: intruders.map(stem).join(", "), ceiling: [...allow].join(", "), named: true });

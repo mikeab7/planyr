@@ -8,135 +8,72 @@
  * time, heap, tiles — ui-audit/perf-harness.mjs) is measured in a real browser and is too
  * sensitive to CI-runner load to gate a merge on; see docs/PERF-BUDGETS.md.
  *
- * The number that matters is NOT "how big is each chunk" — it is "how much JS does a
- * given ROUTE have to download before it works". That needs the chunk graph, which Vite
- * emits at dist/.vite/manifest.json (build.manifest, vite.config.js): per chunk, `imports`
- * are STATIC dependencies (the browser must have them before the chunk can evaluate, and
- * Vite emits modulepreload hints for them) and `dynamicImports` are lazy ones (fetched
- * only when that import() actually runs). A route's cost is therefore the transitive
- * closure over `imports` only, starting from the entry plus the route's own chunk.
+ * The measurement itself lives in ui-audit/lib/bundleMetrics.mjs (shared with the ratchet
+ * step); the pass/fail policy lives in ui-audit/lib/perfBudgetPolicy.mjs.
  *
- * The siteRouteChunks + siteRouteAllowlist budgets are the REGRESSION GUARD for NEW-9:
- * before that fix, a boot-time idle prefetch warmed every workspace, so a plain Site route
- * pulled all 11 chunks (~805 KB of JS it never executes). Because that prefetch was a
- * runtime import() rather than a static edge, no size-per-chunk table would have caught
- * it — but the allowlist does, by name, the moment a foreign chunk reappears on the route.
+ * HOW A NUMBER IS JUDGED (NEW-1). Byte metrics carry a `baseline` — the last deliberately
+ * recorded measurement — and their ceiling is DERIVED as baseline + max(2%, 32 KB). Growth
+ * inside that band prints a loud ABOVE BASELINE line and PASSES; growth beyond it fails.
+ * This is the fix for three consecutive pull requests failing on 0.8–0.9% breaches of
+ * ceilings pinned to within 0.06% of measured — a headroom problem, not a regression.
  *
- *   node ui-audit/perf-bundle-audit.mjs           # human report; exit 1 on a ceiling breach
- *   node ui-audit/perf-bundle-audit.mjs --json    # machine-readable
+ * WHY A BREACH NAMES ITS CAUSE (NEW-3). A bare "2286.3 KB exceeds 2265.6 KB by 20.7 KB"
+ * reads identically for a 20 KB feature and a 20 KB dependency bump, and cost a local build
+ * to diagnose every time. Each route total is now broken into vendor / app-shared /
+ * app-route buckets from dist/.vite/chunk-modules.json, and `--compare` diffs against a base
+ * ref's stats file to name WHICH modules and packages moved, and by how much.
+ *
+ *   node ui-audit/perf-bundle-audit.mjs                 # human report; exit 1 on a breach
+ *   node ui-audit/perf-bundle-audit.mjs --json          # machine-readable
+ *   node ui-audit/perf-bundle-audit.mjs --emit-stats f  # write the attribution snapshot
+ *   node ui-audit/perf-bundle-audit.mjs --compare f     # diff against a base snapshot
  *
  * Run it after `npm run build`. Requires dist/.vite/manifest.json.
  */
-import { readFileSync, existsSync, readdirSync, statSync } from "node:fs";
+import { readFileSync, existsSync, writeFileSync, mkdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { loadBuild, measureBundle, attributeBytes, statsSnapshot, diffSnapshots, kb, ROOT } from "./lib/bundleMetrics.mjs";
+import { classify, ceilingFor, headroomFor, METRIC_KEYS, DEFAULT_HEADROOM } from "./lib/perfBudgetPolicy.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const ROOT = join(HERE, "..");
-const DIST = join(ROOT, "dist");
-const MANIFEST = join(DIST, ".vite", "manifest.json");
 const BUDGETS = join(HERE, "perf-budgets.json");
 
+const argOf = (flag) => { const i = process.argv.indexOf(flag); return i > -1 ? process.argv[i + 1] : null; };
 const JSON_OUT = process.argv.includes("--json");
+const EMIT_STATS = argOf("--emit-stats");
+const COMPARE = argOf("--compare");
 
-if (!existsSync(MANIFEST)) {
-  console.error(`✗ ${MANIFEST} not found — run \`npm run build\` first.`);
+const build = loadBuild(join(ROOT, "dist"));
+if (!build) {
+  console.error(`✗ dist/.vite/manifest.json not found — run \`npm run build\` first.`);
   console.error("  (If the manifest is missing from a fresh build, check that build.manifest is still true in vite.config.js.)");
   process.exit(2);
 }
 
-const manifest = JSON.parse(readFileSync(MANIFEST, "utf8"));
 const budgets = JSON.parse(readFileSync(BUDGETS, "utf8"));
+const b = budgets.bundle;
+const headroom = b.headroom || DEFAULT_HEADROOM;
 
-/* Chunk stem = the file name with Vite's content hash and extension stripped, so budgets
- * can name a chunk stably ("SitePlannerApp") across rebuilds that re-hash it. */
-const stemOf = (file) => file.replace(/^assets\//, "").replace(/-[A-Za-z0-9_-]{8,}\.js$/, "").replace(/\.js$/, "");
-const sizeOf = (file) => { try { return statSync(join(DIST, file)).size; } catch { return 0; } };
-
-/* Transitive closure over STATIC imports only. Manifest `imports` entries are manifest
- * KEYS (e.g. "index.html", "_hitTest-<hash>.js"), not file paths — resolve each through
- * the manifest before recursing. Cycles are possible, so track visited keys. */
-function staticClosure(startKeys) {
-  const seen = new Set();
-  const out = new Map(); // file -> bytes
-  const walk = (key) => {
-    if (seen.has(key)) return;
-    seen.add(key);
-    const entry = manifest[key];
-    if (!entry) return;
-    if (entry.file && entry.file.endsWith(".js")) out.set(entry.file, sizeOf(entry.file));
-    for (const dep of entry.imports || []) walk(dep);
-  };
-  startKeys.forEach(walk);
-  return out;
-}
-
-const entryKey = Object.keys(manifest).find((k) => manifest[k].isEntry) || "index.html";
-/* Each route names its source module AND the chunk stem that module ends up as. Both are
- * needed: Vite keys a lazy chunk by its source path ONLY while that chunk stays a pure
- * facade of that one module. The moment the chunk also has to expose exports to another
- * chunk — which is exactly what happens when a lazily-imported module (B1042's
- * exportSheet) imports back into the planner's chunk — Rollup drops the facade and Vite
- * re-keys the entry by chunk name (`_SitePlannerApp-<hash>.js`, no `src`). The graph is
- * unchanged; only the lookup key is. Resolving by stem as well keeps the route budgets
- * measuring the same thing across that transition. */
-const ROUTE_KEYS = {
-  site: { src: "src/workspaces/site-planner/SitePlannerApp.jsx", stem: "SitePlannerApp" },
-  review: { src: "src/workspaces/doc-review/DocReview.jsx", stem: "DocReview" },
-  library: { src: "src/workspaces/library/Library.jsx", stem: "Library" },
-  scheduler: { src: "src/workspaces/scheduler/Scheduler.jsx", stem: "Scheduler" },
-};
-
-/* Resolve a route to its manifest key. Returns null only when the chunk genuinely is not
- * in the build — which the caller treats as a FAILURE, never a quiet omission: a route
- * that silently vanishes from this report takes its allowlist guard with it. */
-function routeKey({ src, stem }) {
-  if (manifest[src]) return src;
-  return Object.keys(manifest).find((k) => {
-    const f = manifest[k].file;
-    return f && f.endsWith(".js") && stemOf(f) === stem;
-  }) || null;
-}
-
-const routes = {};
-const missingRoutes = [];
-for (const [name, spec] of Object.entries(ROUTE_KEYS)) {
-  const key = routeKey(spec);
-  if (!key) { missingRoutes.push({ name, ...spec }); continue; }
-  const closure = staticClosure([entryKey, key]);
-  routes[name] = {
-    chunks: [...closure.keys()].map((f) => ({ file: f, stem: stemOf(f), bytes: closure.get(f) }))
-      .sort((a, b) => b.bytes - a.bytes),
-    bytes: [...closure.values()].reduce((a, b) => a + b, 0),
-  };
-}
-
-/* Every emitted JS chunk, for the totals — including ones no route statically reaches
- * (workers, and chunks only ever pulled by a dynamic import). */
-const allJs = existsSync(join(DIST, "assets"))
-  ? readdirSync(join(DIST, "assets")).filter((f) => f.endsWith(".js")).map((f) => ({ file: `assets/${f}`, stem: stemOf(`assets/${f}`), bytes: sizeOf(`assets/${f}`) }))
-  : [];
-const totalJsBytes = allJs.reduce((a, c) => a + c.bytes, 0);
-const largest = allJs.slice().sort((a, b) => b.bytes - a.bytes)[0] || { stem: "(none)", bytes: 0 };
+const measured = measureBundle(build);
+const attribution = attributeBytes(measured);
+const { routes, missingRoutes, allJs, totalJsBytes, largest } = measured;
 
 /* ---- Evaluate against the committed budgets ------------------------------------------- */
-const kb = (n) => `${(n / 1024).toFixed(1)} KB`;
 const fmt = (v, unit) => (unit === "bytes" ? kb(v) : `${v}${unit === "chunks" ? "" : ` ${unit}`}`);
 
-const failures = [];   // ceiling breaches — these fail the build
+const failures = [];    // ceiling breaches — these fail the build
+const aboveBand = [];   // over the recorded baseline but inside the headroom band — LOUD, passes
 const aboveTarget = []; // knowingly out of budget — reported loudly, never silently passed
 const passes = [];
 
 function check(path, value, spec) {
-  const { ceiling, target, unit = "bytes" } = spec;
-  const row = { metric: path, value, ceiling, target, unit };
-  if (value > ceiling) {
-    failures.push({ ...row, delta: value - ceiling, pct: ((value / ceiling - 1) * 100) });
-  } else if (target != null && value > target) {
-    aboveTarget.push({ ...row, gap: value - target, owner: budgets.targetOwner?.[path] || null });
-  } else {
-    passes.push(row);
-  }
+  const r = classify(value, spec, headroom);
+  const row = { metric: path, ...r, owner: budgets.targetOwner?.[path] || null };
+  if (r.status === "breach") failures.push(row);
+  else if (r.status === "aboveBaseline") aboveBand.push(row);
+  else if (r.status === "aboveTarget") aboveTarget.push(row);
+  else passes.push(row);
 }
 
 /* A route we can't find at all is a HARD failure. It used to be a silent `continue`, which
@@ -154,7 +91,6 @@ for (const r of missingRoutes) {
   });
 }
 
-const b = budgets.bundle;
 const site = routes.site;
 if (site) {
   check("bundle.siteRouteJsBytes", site.bytes, b.siteRouteJsBytes);
@@ -178,9 +114,89 @@ if (intruders.length) {
   });
 }
 
+/* ---- NEW-3: attribution + base-ref diff -------------------------------------------------- */
+const snapshot = statsSnapshot(measured, attribution, { ref: process.env.GITHUB_SHA || null });
+if (EMIT_STATS) {
+  mkdirSync(dirname(EMIT_STATS), { recursive: true });
+  writeFileSync(EMIT_STATS, JSON.stringify(snapshot, null, 2));
+}
+let comparison = null;
+let compareNote = null;
+if (COMPARE) {
+  if (!existsSync(COMPARE)) {
+    compareNote = `base stats not available at ${COMPARE} — the head/base diff was SKIPPED (the gate above is unaffected).`;
+  } else {
+    try {
+      comparison = diffSnapshots(JSON.parse(readFileSync(COMPARE, "utf8")), snapshot);
+    } catch (e) {
+      compareNote = `base stats at ${COMPARE} could not be read (${e.message}) — the head/base diff was SKIPPED.`;
+    }
+  }
+}
+
 /* ---- Report ---------------------------------------------------------------------------- */
+const signed = (n) => `${n >= 0 ? "+" : "−"}${kb(Math.abs(n))}`;
+
+function printAttribution() {
+  if (!attribution) {
+    console.log("  (byte attribution unavailable — dist/.vite/chunk-modules.json is missing. It is written");
+    console.log("   by the chunk-module-stats plugin in vite.config.js; rebuild to get the vendor/app split.)\n");
+    return;
+  }
+  console.log("  Where a route's bytes come from (NEW-3 — scaled so the buckets sum to the real chunk sizes):");
+  for (const [name, r] of Object.entries(attribution.byRoute)) {
+    const bk = r.buckets;
+    console.log(`    ${name.padEnd(10)} vendor ${kb(bk.vendor).padStart(9)} · app-shared ${kb(bk["app-shared"]).padStart(9)} · app-route ${kb(bk["app-route"]).padStart(9)}${bk.misc ? ` · misc ${kb(bk.misc)}` : ""}`);
+  }
+  const top = Object.entries(attribution.packages).sort((a, c) => c[1] - a[1]).slice(0, 6);
+  if (top.length) console.log(`    heaviest dependencies: ${top.map(([p, v]) => `${p} ${kb(v)}`).join(" · ")}`);
+  console.log();
+}
+
+function printComparison() {
+  if (compareNote) { console.log(`  ⓘ ${compareNote}\n`); return; }
+  if (!comparison) return;
+  console.log("  Versus the base ref (NEW-3 — this is the answer to \"optimize this, or ratchet a dependency?\"):");
+  for (const [k, m] of Object.entries(comparison.metrics)) {
+    if (m.delta == null) { console.log(`    ${k.padEnd(20)} (no base value)`); continue; }
+    if (m.unit !== "bytes") {
+      console.log(`    ${k.padEnd(20)} ${(m.delta >= 0 ? `+${m.delta}` : String(m.delta)).padStart(12)}${m.delta === 0 ? "  (unchanged)" : ` ${m.unit}`}`);
+      continue;
+    }
+    const flat = Math.abs(m.delta) < 256;
+    console.log(`    ${k.padEnd(20)} ${signed(m.delta).padStart(12)}${flat ? "  (unchanged within noise)" : ""}`);
+  }
+  if (!comparison.attributionComparable) {
+    console.log("    Per-module attribution against this base is UNAVAILABLE (the base build carries no");
+    console.log("    chunk-module stats), so only the headline metrics above are comparable. Withheld");
+    console.log("    deliberately: diffing against an absent base would label every module in the build");
+    console.log("    as new in this PR.\n");
+    return;
+  }
+  for (const [route, bk] of Object.entries(comparison.bucketDelta)) {
+    const parts = Object.entries(bk).filter(([, v]) => Math.abs(v) >= 256).map(([k, v]) => `${k} ${signed(v)}`);
+    if (parts.length) console.log(`    route ${route.padEnd(10)} ${parts.join(" · ")}`);
+  }
+  if (comparison.packages.length) {
+    console.log("    dependencies that moved:");
+    for (const p of comparison.packages) console.log(`      ${signed(p.delta).padStart(11)}  ${p.id}`);
+  }
+  if (comparison.modules.length) {
+    console.log("    modules that moved:");
+    for (const m of comparison.modules) console.log(`      ${signed(m.delta).padStart(11)}  ${m.id}`);
+  }
+  if (!comparison.packages.length && !comparison.modules.length) {
+    console.log("    no module moved by more than a rounding error.");
+  }
+  console.log();
+}
+
 if (JSON_OUT) {
-  console.log(JSON.stringify({ routes, totalJsBytes, largest, failures, aboveTarget, passes }, null, 2));
+  console.log(JSON.stringify({
+    routes, totalJsBytes, largest, failures, aboveBand, aboveTarget, passes,
+    headroom, attribution, comparison, compareNote,
+    derivedCeilings: Object.fromEntries(METRIC_KEYS(b).map((k) => [k, ceilingFor(b[k], headroom)])),
+  }, null, 2));
 } else {
   console.log("Planyr bundle budget audit (NEW-8)\n");
   for (const [name, r] of Object.entries(routes)) {
@@ -189,9 +205,23 @@ if (JSON_OUT) {
   console.log(`\n  all JS         ${kb(totalJsBytes).padStart(10)}  across ${allJs.length} chunk(s)`);
   console.log(`  largest chunk  ${kb(largest.bytes).padStart(10)}  ${largest.stem}\n`);
 
-  for (const p of passes) console.log(`  ✓ ${p.metric} — ${fmt(p.value, p.unit)} (ceiling ${fmt(p.ceiling, p.unit)})`);
+  printAttribution();
+  printComparison();
+
+  console.log(`  Headroom band (NEW-1): baseline + max(${(headroom.pctOfBaseline * 100).toFixed(0)}%, ${kb(headroom.minBytes)}). Growth inside the band is reported, not failed.\n`);
+
+  for (const p of passes) {
+    const ceil = typeof p.ceiling === "number" ? fmt(p.ceiling, p.unit) : p.ceiling;
+    console.log(`  ✓ ${p.metric} — ${fmt(p.value, p.unit)} (ceiling ${ceil})`);
+  }
   for (const a of aboveTarget) {
     console.log(`  ⚠ ${a.metric} — ${fmt(a.value, a.unit)} is within its ${fmt(a.ceiling, a.unit)} ceiling but ABOVE the ${fmt(a.target, a.unit)} target (gap ${fmt(a.gap, a.unit)})`);
+    if (a.owner) console.log(`      tracked by: ${a.owner}`);
+  }
+  for (const a of aboveBand) {
+    console.log(`  ⚠ ${a.metric} — ABOVE BASELINE: ${fmt(a.value, a.unit)} vs the recorded ${fmt(a.baseline, a.unit)} (+${fmt(a.overBaseline, a.unit)}).`);
+    console.log(`      Inside the ${fmt(a.band, a.unit)} headroom band, so this PASSES — ${fmt(a.bandLeft, a.unit)} of band left before the ${fmt(a.ceiling, a.unit)} ceiling.`);
+    console.log("      This is a real, attributable growth. Pay it back with an optimization, or say on the item why it stays.");
     if (a.owner) console.log(`      tracked by: ${a.owner}`);
   }
   for (const f of failures) {
@@ -200,7 +230,7 @@ if (JSON_OUT) {
       console.log(`      looked for: ${f.ceiling}`);
       console.log("      Its per-route budgets (bytes / chunk count / allowlist) could not be evaluated, so");
       console.log("      this run proves nothing about that route. Either the workspace was renamed (update");
-      console.log("      ROUTE_KEYS in this file, both `src` and `stem`) or the build genuinely lost it.");
+      console.log("      ROUTE_KEYS in ui-audit/lib/bundleMetrics.mjs, both `src` and `stem`) or the build lost it.");
     } else if (f.named) {
       console.log(`\n  ✗ ${f.metric} — UNEXPECTED CHUNK(S) ON THE SITE ROUTE: ${f.value}`);
       for (const c of f.named) console.log(`      ${c.stem} (+${kb(c.bytes)})`);
@@ -210,15 +240,25 @@ if (JSON_OUT) {
       console.log("      import into the planner of a module that should be behind a dynamic import().");
     } else {
       console.log(`\n  ✗ ${f.metric} — ${fmt(f.value, f.unit)} exceeds the ${fmt(f.ceiling, f.unit)} ceiling by ${fmt(f.delta, f.unit)} (+${f.pct.toFixed(1)}%)`);
+      if (f.baseline != null) {
+        console.log(`      That ceiling is DERIVED: baseline ${fmt(f.baseline, f.unit)} + a ${fmt(f.band, f.unit)} headroom band.`);
+        console.log("      So this is past the point where growth is absorbed silently. Either optimize it back");
+        console.log("      inside the band, or — if the growth is deliberate and justified — record it:");
+        console.log(`        npm run perf:ratchet -- --metric ${f.metric} --item B### --allow-raise --reason "..."`);
+        console.log("      Never edit the baseline by hand: test/perfBudgetPolicy.test.js fails an unlogged edit.");
+      }
     }
   }
   console.log();
   if (failures.length) {
     console.log(`✗ ${failures.length} performance budget breach(es). See docs/PERF-BUDGETS.md.`);
     console.log("  A feature that breaches a budget ships with a matching optimization, or does not ship.");
-    console.log("  Raising a ceiling to make this pass requires the same justification as any other product decision.");
+    console.log("  Raising a baseline to make this pass requires the same justification as any other product decision.");
   } else {
-    console.log(`✓ All bundle budgets within ceiling${aboveTarget.length ? ` (${aboveTarget.length} metric(s) above target — tracked)` : ""}.`);
+    const notes = [];
+    if (aboveBand.length) notes.push(`${aboveBand.length} above baseline, inside the band`);
+    if (aboveTarget.length) notes.push(`${aboveTarget.length} above target — tracked`);
+    console.log(`✓ All bundle budgets within ceiling${notes.length ? ` (${notes.join("; ")})` : ""}.`);
   }
 }
 

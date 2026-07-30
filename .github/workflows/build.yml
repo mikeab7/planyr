@@ -25,6 +25,12 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          # Full history so the byte-attribution step (NEW-3) can resolve a merge base with the
+          # PR's base branch and build it for comparison. With the default depth of 1 there is
+          # no base commit to compare against and that step degrades to "unavailable" — which
+          # it reports honestly, but the diagnosis is the point, so pay for the history.
+          fetch-depth: 0
       - name: Setup Node
         uses: actions/setup-node@v6
         with:
@@ -57,5 +63,10 @@ jobs:
       # A breach names the metric and its delta. The runtime half (frame time, heap, tiles)
       # is deliberately NOT gated here: it is too sensitive to shared-runner CPU contention
       # to gate a merge on. See docs/PERF-BUDGETS.md.
+      # NEW-3 — build the base ref and snapshot its bundle, so the budget step below can name
+      # WHICH modules and packages moved rather than only that a number did. Diagnosis, not a
+      # gate: this script never exits non-zero, and it prints why when it cannot run.
+      - name: Base-ref bundle snapshot (byte attribution — NEW-3, never fatal)
+        run: node scripts/perf-base-stats.mjs --out .perf/base-stats.json
       - name: Performance budget (bundle weight + Site-route chunk allowlist — NEW-8)
-        run: node ui-audit/perf-bundle-audit.mjs
+        run: node ui-audit/perf-bundle-audit.mjs --compare .perf/base-stats.json --emit-stats .perf/head-stats.json

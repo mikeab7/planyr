@@ -12,7 +12,9 @@
     "next-id": "node scripts/next-id.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
-    "e2e": "playwright test"
+    "e2e": "playwright test",
+    "perf:ratchet": "node scripts/perf-ratchet.mjs",
+    "perf:bundle": "node ui-audit/perf-bundle-audit.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.104.1",
