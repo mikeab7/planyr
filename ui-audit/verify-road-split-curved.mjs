@@ -50,6 +50,12 @@ const SPLITS = [
   { key: "A5-overview", x: -700, y: 500, ppf: 0.3, note: "the whole road network, for a look at every junction at once" },
 ];
 
+// ⚠ BASE_URL only reaches a LOCAL preview from this sandbox. A Cloudflare preview / production URL
+// answers 200 to curl but resets every Chromium navigation (ERR_CONNECTION_RESET), with the egress
+// proxy logging no rejection for the host — and neither Playwright's `proxy:` option nor
+// `--proxy-server` + `--proxy-bypass-list=<-loopback>` changes that (both tried 2026-07-30). So run
+// this against `npm run preview` on :4173; the DEPLOYED read is a V533 step, not something to
+// re-attempt here.
 const browser = await chromium.launch({
   executablePath: process.env.PW_CHROME || "/opt/pw-browsers/chromium",
   args: ["--no-sandbox", "--ignore-certificate-errors"],
