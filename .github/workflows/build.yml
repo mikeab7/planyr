@@ -26,10 +26,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
         with:
-          # Full history so the byte-attribution step (NEW-3) can resolve a merge base with the
-          # PR's base branch and build it for comparison. With the default depth of 1 there is
-          # no base commit to compare against and that step degrades to "unavailable" — which
-          # it reports honestly, but the diagnosis is the point, so pay for the history.
+          # Full history, for two independent reasons that both need it:
+          #  • the mint gate computes this branch's merge base with main — the shallow default
+          #    hides it, and "added ids" measured against main's tip is strictly weaker (it
+          #    cannot see a number main took while this branch was in flight);
+          #  • the byte-attribution step below resolves that same base and BUILDS it, so a
+          #    breach can name which modules moved. With depth 1 there is no base to compare
+          #    against and that step degrades to "unavailable" — honestly reported, but the
+          #    diagnosis is the point, so pay for the history.
           fetch-depth: 0
       - name: Setup Node
         uses: actions/setup-node@v6
@@ -48,6 +52,13 @@ jobs:
         run: node scripts/build-backlog-index.mjs --check
       - name: e2e fixture drift guard (regenerate with `node scripts/build-fixtures.mjs` — B278/B280 harness)
         run: node scripts/build-fixtures.mjs --check
+      # Mint gate (B779 second pass). The uniqueness tests below catch a collision once both items
+      # are in the same tree; this catches one whose twin is still on an UNMERGED branch, which no
+      # static check of this repo can see. A proven collision fails the build (renumbering is a
+      # few heading lines); an infrastructure problem warns loudly rather than wedging merges —
+      # `--ci` draws exactly that line, and the pre-push hook is the strict first line of defence.
+      - name: Mint gate (new B#/V# unclaimed on main and on in-flight branches — B779)
+        run: node scripts/check-mint.mjs --ci
       - name: Test (pure-logic smoke tests)
         run: npm test
       - name: Build
