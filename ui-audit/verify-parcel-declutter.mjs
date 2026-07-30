@@ -13,7 +13,10 @@
  *   NEW-2  handles are decimated by screen spacing (and shrunk), and MORE appear on zoom-in;
  *          an unselected parcel shows none at all
  *   NEW-3  the "Parcel 62.7 ac" badge sits INSIDE its own parcel ring
- *   NEW-4  boundary + setback ring default to indigo; the chip's border/text is near-black
+ *   NEW-4  the chip's border/text is near-black
+ *   B1192  boundary + setback ring default to the property-line GREEN #34E802, each under a dark
+ *          casing so the line survives green crop / asphalt / topo (supersedes NEW-4's indigo)
+ *   B1191  every setback chip reads its ROLE — "Front · 25′", not a bare number
  *
  * Run:  npm run build && npx vite preview --port 4178   (separate shell)
  *       BASE_URL=http://localhost:4178/ node ui-audit/verify-parcel-declutter.mjs
@@ -26,7 +29,8 @@ const OUT = new URL("./screens/", import.meta.url).pathname;
 mkdirSync(OUT, { recursive: true });
 const now = Date.now();
 
-const INDIGO = "#534ab7";        // --canvas-parcel / --canvas-setback (light theme), NEW-4
+const GREEN = "#34e802";         // --canvas-parcel / --canvas-setback, B1192 (was NEW-4's indigo)
+const CASING = "rgba(0,0,0,0.55)";  // --canvas-line-casing, B1192
 const CHIP_INK = "#15171c";      // --canvas-chip-ink, NEW-4
 
 // Arc of `n` segments — the digitized curve at the heart of the report.
@@ -99,8 +103,12 @@ const readCanvas = () => page.evaluate(() => {
     }
     return inside;
   };
+  // B1191 — the plate now sizes itself to its text, so read its real box (the declutter pass
+  // thins these by box overlap, not by centre distance).
   const chips = [...document.querySelectorAll('rect[data-testid="setback-chip"]')].map((r) => ({
-    x: +r.getAttribute("x") + 13, y: +r.getAttribute("y") + 9, stroke: (r.getAttribute("stroke") || "").toLowerCase(),
+    x: +r.getAttribute("x") + +r.getAttribute("width") / 2, y: +r.getAttribute("y") + 8,
+    w: +r.getAttribute("width"), h: +r.getAttribute("height"),
+    stroke: (r.getAttribute("stroke") || "").toLowerCase(),
   }));
   const handles = [...document.querySelectorAll('rect[data-testid="vtx-handle"]')].map((r) => ({
     x: +r.getAttribute("x") + +r.getAttribute("width") / 2, y: +r.getAttribute("y") + +r.getAttribute("height") / 2,
@@ -111,7 +119,11 @@ const readCanvas = () => page.evaluate(() => {
   const badge = badgeRect ? { x: +badgeRect.getAttribute("x") + +badgeRect.getAttribute("width") / 2,
                               y: +badgeRect.getAttribute("y") + +badgeRect.getAttribute("height") / 2 } : null;
   const badgeText = document.querySelector('[data-print-chip="acre"] [data-chip-text]')?.textContent || "";
-  const chipText = [...document.querySelectorAll("text")].find((t) => /^\d+′$/.test((t.textContent || "").trim()) && t.parentElement?.querySelector('[data-testid="setback-chip"]'));
+  // B1191 — chip copy is "<Role> · <n>′" now.
+  const chipTexts = [...document.querySelectorAll("text")]
+    .filter((t) => t.parentElement?.querySelector('[data-testid="setback-chip"]'))
+    .map((t) => (t.textContent || "").trim());
+  const chipText = [...document.querySelectorAll("text")].find((t) => t.parentElement?.querySelector('[data-testid="setback-chip"]'));
   const minGap = (pts) => {
     let m = Infinity;
     for (let i = 0; i < pts.length; i++) for (let j = i + 1; j < pts.length; j++) m = Math.min(m, Math.hypot(pts[i].x - pts[j].x, pts[i].y - pts[j].y));
@@ -121,7 +133,14 @@ const readCanvas = () => page.evaluate(() => {
     ringLen: ring.length,
     parcelStroke: (poly?.getAttribute("stroke") || "").toLowerCase(),
     setbackStroke: (document.querySelector('[data-testid="setback-ring"]')?.getAttribute("stroke") || "").toLowerCase(),
+    parcelCasing: (document.querySelector('[data-testid="parcel-casing"]')?.getAttribute("stroke") || "").toLowerCase(),
+    setbackCasing: (document.querySelector('[data-testid="setback-casing"]')?.getAttribute("stroke") || "").toLowerCase(),
+    parcelCasingW: +(document.querySelector('[data-testid="parcel-casing"]')?.getAttribute("stroke-width") || 0),
+    parcelLineW: +(poly?.getAttribute("stroke-width") || 0),
     chips: chips.length, chipStroke: chips[0]?.stroke || "", chipMinGap: Math.round(minGap(chips)),
+    chipOverlaps: chips.reduce((k, a, i) => k + chips.slice(i + 1).filter((b) =>
+      Math.abs(a.x - b.x) < (a.w + b.w) / 2 && Math.abs(a.y - b.y) < (a.h + b.h) / 2).length, 0),
+    chipTexts,
     chipTextFill: (chipText?.getAttribute("fill") || "").toLowerCase(),
     handles: handles.length, handleMinGap: Math.round(minGap(handles)),
     handleDrawPx: drawn ? +drawn.getAttribute("width") : null,
@@ -157,9 +176,14 @@ await page.screenshot({ path: OUT + "parcel-declutter-unselected.png" });
 ok(`NEW-3 · the "${before.badgeText}" badge sits INSIDE its own parcel`, before.badgeInside === true,
    before.badge ? `badge at ${Math.round(before.badge.x)},${Math.round(before.badge.y)}` : "no badge");
 
-// NEW-4: the boundary + setback ring default to indigo.
-ok("NEW-4 · parcel outline defaults to indigo", before.parcelStroke === INDIGO, before.parcelStroke);
-ok("NEW-4 · setback ring defaults to indigo", before.setbackStroke === INDIGO, before.setbackStroke);
+// B1192: the boundary + setback ring default to the property-line green, each over a dark casing.
+ok("B1192 · parcel outline defaults to the property-line green", before.parcelStroke === GREEN, before.parcelStroke);
+ok("B1192 · setback ring defaults to the property-line green", before.setbackStroke === GREEN, before.setbackStroke);
+ok("B1192 · the boundary carries a dark casing under it", before.parcelCasing === CASING, before.parcelCasing || "no casing");
+ok("B1192 · the setback ring carries a dark casing too", before.setbackCasing === CASING, before.setbackCasing || "no casing");
+ok("B1192 · the casing is wider than the line it sits under (a halo, not a second line)",
+   before.parcelCasingW > before.parcelLineW && before.parcelCasingW < before.parcelLineW + 6,
+   `casing ${before.parcelCasingW} vs line ${before.parcelLineW}`);
 
 for (let e = 0; e < vertsFor.length; e++) {
   const a = vertsFor[e], b = vertsFor[(e + 1) % vertsFor.length];
@@ -176,7 +200,12 @@ console.log(`  · at fit: ${fit.chips} chips, ${fit.handles} handles of ${fit.ri
 // --- NEW-1: chips ---------------------------------------------------------------------------
 ok("NEW-1 · chips collapse to a handful of runs (was one per edge)", fit.chips > 0 && fit.chips <= 8,
    `${fit.chips} chips for ${fit.ringLen} edges`);
-ok("NEW-1 · no two drawn chips overlap", fit.chipMinGap >= 40, `closest pair ${fit.chipMinGap}px`);
+// B1191 — chips are now variable-width plates, so the real property is that no two BOXES
+// intersect; a single radial threshold can no longer express it.
+ok("NEW-1 · no two drawn chips overlap", fit.chipOverlaps === 0, `${fit.chipOverlaps} overlapping pairs, closest centres ${fit.chipMinGap}px`);
+ok("B1191 · every chip names its setback ROLE, not just a number",
+   fit.chipTexts.length > 0 && fit.chipTexts.every((t) => /^(Front|Side|St side|Rear) · (\d+′|—)$/.test(t)),
+   fit.chipTexts.join(" | "));
 
 // --- NEW-2: handles -------------------------------------------------------------------------
 ok("NEW-2 · handles are decimated by screen spacing", fit.handles > 0 && fit.handles < fit.ringLen * 0.75,
@@ -201,7 +230,7 @@ console.log(`  · zoomed on the corner: ${zoomed.chips} chips, ${zoomed.handles}
 ok("NEW-1/NEW-2 · zooming in REVEALS more detail (chips or handles increase)",
    zoomed.handles > fit.handles || zoomed.chips > fit.chips,
    `handles ${fit.handles}→${zoomed.handles}, chips ${fit.chips}→${zoomed.chips}`);
-ok("NEW-1 · chips still never overlap when zoomed in", zoomed.chips < 2 || zoomed.chipMinGap >= 40, `closest pair ${zoomed.chipMinGap}px`);
+ok("NEW-1 · chips still never overlap when zoomed in", zoomed.chipOverlaps === 0, `${zoomed.chipOverlaps} overlapping pairs`);
 ok("NEW-2 · handles still never crowd when zoomed in", zoomed.handles < 2 || zoomed.handleMinGap >= 22, `closest pair ${zoomed.handleMinGap}px`);
 
 ok("no JS errors during the whole run", jsErrors.length === 0, jsErrors.slice(0, 2).join(" | "));

@@ -53,10 +53,14 @@ export const CHIP_TURN_BREAK_DEG = 50;
 /* Screen-space guards (px), applied by the renderer at the current zoom, never in model space.
  *  · MIN_EDGE — a chip whose anchor edge is shorter than this on screen is not drawn at all.
  *    Below it the edge itself is a tick, so the chip labels something you cannot see.
- *  · MIN_SEP  — two drawn chips may not sit closer than this; the lower-priority one drops.
- *    Comfortably wider than the ~26px chip plate, so kept chips have real air between them. */
+ *  · MIN_SEP  — the RADIAL fallback separation, for a chip with no measured plate.
+ *  · MIN_GAP  — NEW-1: the clear gap required between two chip PLATES. Since a chip started
+ *    carrying its role ("Front · 25′") its width varies with its text while its height does not,
+ *    so `spaceOut` thins these by box overlap rather than by centre distance; 14 px is the same
+ *    clearance the old fixed 26-wide plate got out of the 40 px radial rule. */
 export const CHIP_MIN_EDGE_PX = 26;
 export const CHIP_MIN_SEP_PX = 40;
+export const CHIP_MIN_GAP_PX = 14;
 
 /**
  * Group a parcel's edges into setback-chip runs.
