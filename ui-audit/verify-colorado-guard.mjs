@@ -91,6 +91,17 @@ const run = async () => {
   ];
   for (const [label, re] of guardCopy) check(re.test(js), `eager bundle carries ${label} (it must render instantly)`);
 
+  /* B1127 — the verdict strip's NAMED unavailable row must ship EAGERLY, because it is what
+   * replaced the permanent "Detention: checking flood data" spinner. That sentence and its N/A pill
+   * are generic (no Colorado prose), so they belong on the boot path; if they ever move to the lazy
+   * tier a Colorado site would show a spinner again until the chunk landed. */
+  const eagerFix = [
+    ["the named 'not carried yet' verdict", /not carried yet/],
+    ["the generic Colorado subject (no prose)", /Colorado detention/],
+    ["the MHFD verdict chip", /N\/A · MHFD/],
+  ];
+  for (const [label, re] of eagerFix) check(re.test(js), `eager bundle carries ${label}`);
+
   const lazyOnly = [
     ["the WQCV explanation", /WQCV/],
     ["the EURV explanation", /EURV/],
@@ -101,6 +112,17 @@ const run = async () => {
     ["the State Engineer notification", /State Engineer/],
     ["the CWCB floodplain floor", /2 CCR 408-1/],
     ["the never-says-pass caveat", /not ruled out/i],
+    // B1105 — the MHFD engine joins the lazy tier. Its rule record, component prose and the
+    // district workbook must cost a Texas user nothing.
+    ["the MHFD panel line", /size in the district workbook/],
+    ["the MHFD-Detention Workbook", /MHFD-Detention Workbook/],
+    ["the untranscribed-coefficient explanation", /coefficients have not been transcribed/],
+    // The RULE RECORD, not the ruleType string. `"volume-curve"` itself is a type discriminator that
+    // the boot-path guard in detentionRules.js genuinely needs (its fail-closed dispatch reads it),
+    // and a 12-byte discriminator is not Colorado prose — so the record id is the right thing to
+    // hold lazy, and asserting on the discriminator would only pressure the code to hide its guard.
+    ["the MHFD rule record", /mhfd-usdcm-full-spectrum/],
+    ["the MHFD source citations", /Urban Storm Drainage Criteria Manual/],
   ];
   for (const [label, re] of lazyOnly) check(!re.test(js), `eager bundle does NOT carry ${label} — Texas pays nothing for it`);
 

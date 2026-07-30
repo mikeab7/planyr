@@ -7569,9 +7569,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     });
   };
   const outwardUnit = (b, side) => { const [nx, ny] = SIDE_N[side]; return rot2(nx, ny, b.rot); };
-  // The ALONG-wall unit for a side (perpendicular to outwardUnit) — the axis a dock zone's LENGTH
-  // runs on. Mirrors the `tan` vector layoutZoneByKind uses, so screen math and layout math agree.
-  const alongUnit = (b, side) => { const horiz = side === "top" || side === "bottom"; return rot2(horiz ? 1 : 0, horiz ? 0 : 1, b.rot); };
+  /* B1128's ratchet caught an ALONG-wall unit helper here that nothing called — and its comment
+   * claimed it kept "screen math and layout math" in agreement, which is exactly the kind of dead
+   * code that reads as load-bearing and is not. Deleted rather than `_`-prefixed: it was never
+   * deliberately unused. The live equivalent is the `tan` vector in `siteModel.js`'s alongLen heal
+   * and in `layoutZoneByKind` — if a screen-side caller needs it, take it from there, so there is
+   * ONE derivation rather than a second copy free to drift. */
   // Edit a sidewalk's Width (thickness): grow OUTWARD (inner face stays flush to
   // the building) and slide any pads beyond it out by the same delta.
   const setSidewalkWidth = (el, newT) => {
@@ -8582,22 +8585,52 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   useEffect(() => {
     if (siteStateId !== "CO" || coTier) return;
     let alive = true;
-    Promise.all([import("./lib/coloradoRegions.js"), import("./lib/drawdownStatute.js")])
-      .then(([regions, statute]) => { if (alive) setCoTier({ regions, statute }); })
+    // B1105 — `mhfdDetention.js` joins the Colorado tier rather than the boot path: it is the MHFD
+    // engine plus a lot of Colorado prose, and a Texas user must download none of it.
+    Promise.all([import("./lib/coloradoRegions.js"), import("./lib/drawdownStatute.js"), import("./lib/mhfdDetention.js")])
+      .then(([regions, statute, mhfd]) => { if (alive) setCoTier({ regions, statute, mhfd }); })
       // LOUD-FAILURE — a chunk that never arrives must be visible in telemetry, not a silent gap.
       .catch((e) => reportClientEvent("colorado-tier-load-failed", String((e && e.message) || e), { state: siteStateId }));
     return () => { alive = false; };
   }, [siteStateId, coTier]);
+  /* NEW-1 (B1129) — the regime must resolve with the GIS endpoints DOWN.
+   *
+   * This used to read the identified county ONLY, which comes from the drainage GIS context — so with
+   * that context unresolved (every external host blocked, a county service down, a plan opened
+   * offline) the regime was null and a Denver site fell back to the blanket "not available in
+   * Colorado" guard instead of its MHFD answer. That directly contradicts the principle the whole
+   * Colorado tier is built on: the guard has to hold when every GIS endpoint is down, which is
+   * exactly when a site is most likely to fall through to a default.
+   *
+   * So the plan's OWN saved county is the fallback. This can only ever ADD a correct resolution,
+   * never a wrong one: `coloradoRegimeFor` maps Colorado county slugs and nothing else, so the
+   * `county` field's well-known Harris default (see the folder pointer's B1091 warning) returns null
+   * and falls straight through to the hard guard. Identified county still WINS when it exists — it is
+   * the better fact. */
   const coRegime = coTier && siteStateId === "CO"
-    ? coTier.regions.coloradoRegimeFor((drainCtxData?.authority?.jurisdiction?.county || [])[0] || null)
+    ? (coTier.regions.coloradoRegimeFor((drainCtxData?.authority?.jurisdiction?.county || [])[0] || null)
+       || coTier.regions.coloradoRegimeFor(restored?.county || null))
     : null;
   const detReqInputs = { acres: acresActive, impPct, inCityLimits: drainInCity, drainsToHcfcdChannel: drainsToChanEff, outfallType: outfallTypeEff, hcfcdApplicable: drainCountyHarris, siteState: siteStateId };
   // A Colorado site has no modeled authority, so the normal `drainAuthorityId` precondition would
   // leave `detReq` null and the group would render NOTHING — a blank that reads as zero, which is
   // precisely the failure mode the guard exists to prevent. So Colorado short-circuits to the
   // guard's explicit unavailable carrier regardless of whether an authority resolved.
+  /* NEW-1 (B1105) — the MHFD regime seam. `coTier` is the lazily-loaded Colorado chunk, so on the
+   * first render of a Colorado site (and forever if the chunk fails) this is null and
+   * `computeRequiredDetention` runs its ORIGINAL hard guard — fail-closed by construction. Once the
+   * chunk lands, an MHFD county gets the `volume-curve` engine and Larimer/Weld/El Paso still do
+   * not: the regime id has to match "mhfd" positively, and `computeMhfdDetention` re-checks county
+   * membership itself, so the boundary is enforced twice on independent facts. */
+  const coDetention = coTier && coRegime && coRegime.id === "mhfd"
+    // Same precedence as the regime above, and for the same reason: identified county wins, the
+    // plan's saved county keeps the answer alive with GIS down. `computeMhfdDetention` re-checks
+    // membership against whatever it is given, so a wrong county cannot price — it refuses.
+    ? (a) => coTier.mhfd.computeMhfdDetention({ ...a, county: (drainCtxData?.authority?.jurisdiction?.county || [])[0] || restored?.county || null })
+    : null;
+  const detReqInputsCo = { ...detReqInputs, coRegime: coRegime ? coRegime.id : null, coDetention };
   const detReq = siteStateId === "CO"
-    ? computeRequiredDetention({ ...detReqInputs, authorityId: null })
+    ? computeRequiredDetention({ ...detReqInputsCo, authorityId: null })
     : drainCtxData && siteSqft > 0 && drainAuthorityId
       ? computeRequiredDetention({ ...detReqInputs, authorityId: drainAuthorityId })
       : null;
@@ -10668,7 +10701,31 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // NEW-8 — the Colorado regime rides the bag like every other fact the panel renders, so the
     // detail chain reads it from `d` rather than closing over the component body.
     coRegime, siteStateId,
-    coDetail: coTier ? coTier.regions.COLORADO_DETENTION_DETAIL : null,
+    /* B1105 — MHFD gets its OWN ⓘ detail, and the difference is the point: on an MHFD site the
+     * method IS carried (components, drain-time election, workbook, drawdown statute) and only the
+     * coefficient tables are missing, whereas on a Larimer / Weld / El Paso site nothing is modeled
+     * at all. Showing the blanket "no Colorado detention" text on an MHFD site would now be wrong.
+     * Keyed off the regime, so the three non-members keep the original text verbatim. */
+    coDetail: coTier
+      ? (coRegime && coRegime.id === "mhfd" ? coTier.regions.MHFD_DETENTION_DETAIL : coTier.regions.COLORADO_DETENTION_DETAIL)
+      : null,
+    /* B1105 — ONE lazy-tier call for the whole MHFD panel payload: the C.R.S. 37-92-602(8)
+     * reconciliation (MHFD asks you to hold water, Colorado water law asks you to let it go, and the
+     * panel must show whether the configuration can satisfy both), the city-overlay note, and the
+     * "Assumptions & method" lines.
+     *
+     * Composed THERE rather than here on purpose. Every string in it is Colorado prose that can only
+     * render once that chunk has landed, so building it on the boot path cost every Texas user bytes
+     * for text they can never see — and breached `bundle.siteRouteJsBytes` on CI. Three separate call
+     * sites also each repeated this county-resolution expression. A feature that breaches a budget
+     * ships with a matching optimization; collapsing them to one call is it. Null off an MHFD site. */
+    coMhfdBag: coTier && coRegime && coRegime.id === "mhfd"
+      ? coTier.mhfd.mhfdPanelBag({
+          carrier: detReq,
+          county: (drainCtxData?.authority?.jurisdiction?.county || [])[0] || restored?.county || null,
+          statuteAssessment: yDrawdownStatute,
+        })
+      : null,
     // B907 — the typical screening pond depth used ONLY to ESTIMATE additional land take
     // from a detention shortfall (never to size a pond) — criteria-configurable.
     screeningPondDepthFt: criteriaFor(critJurKey, { overrides: criteriaOverrides }).screeningPondDepthFt?.value ?? 8,
@@ -21509,14 +21566,36 @@ function YieldPanel({
               );
             };
             if (req && req.kind === "unavailable") {
-              /* NEW-8 — Colorado. ONE visible line (PANEL-BREVITY: the verdict strip already
-               * carries the state, so this adds a single named line, not a paragraph); the full
-               * why — WQCV + EURV, the four regimes, what to do instead — rides the ⓘ, which is
-               * exempt from the copy budget. Never a number, never a blank. */
+              /* NEW-8 — Colorado. ONE visible line (PANEL-BREVITY: the verdict strip carries the
+               * state, so this adds a single named line, not a paragraph); the full why — WQCV +
+               * EURV, the four regimes, what to do instead — rides the ⓘ, which is exempt from the
+               * copy budget. Never a number, never a blank.
+               *
+               * ⚠ B1127 CORRECTION to the line above: "the verdict strip already carries the state"
+               * was NOT true when it was written. `yieldVerdicts.detentionVerdict` had no branch for
+               * `kind:"unavailable"`, so the strip fell through to `loadingRow` and read "Detention:
+               * checking flood data" — permanently — on every Colorado site. It is true now, because
+               * B1127 added that branch. Do not delete the branch and leave this comment. */
+              /* B1105 — on an MHFD site the ONE visible line names the two governing volumes and
+               * where to size them, because that is now true and actionable; the blanket "Planyr
+               * does not carry Colorado criteria" would be wrong there. PANEL-BREVITY: this REPLACES
+               * the old sentence rather than adding one (the line count is unchanged), the component
+               * table and the statute reconciliation ride the ⓘ / method notes below, and the
+               * numbers-over-prose rule is why the visible text is "WQCV + EURV" and not a
+               * paragraph explaining that two volumes govern. */
+              const coMhfd = (req.flags || []).includes("colorado-mhfd");
+              /* PANEL-BREVITY rule 5, applied while passing through: the two non-MHFD variants used
+               * to be two separate literals for the SAME sentence (one just prefixed with the regime
+               * name), so they are now one sentence with a computed subject. That pays for the MHFD
+               * variant outright — this branch ends up SHORTER than before B1105 touched it. */
+              const coSubject = d.coRegime ? `${d.coRegime.short} governs here` : "Colorado";
               detR.push(warnNote(
-                d.coRegime
-                  ? `${d.coRegime.short} governs here — Planyr does not yet carry Colorado detention criteria.`
-                  : "Planyr does not yet carry Colorado detention criteria.",
+                // `panelLine` rides the carrier from the lazily-loaded MHFD module — see the note on
+                // MHFD_PANEL_LINE there. It can only be non-null once that chunk has landed, which is
+                // also the only moment this branch can be reached, so there is no first-paint gap.
+                coMhfd && req.panelLine
+                  ? req.panelLine
+                  : `${coSubject} — Planyr does not yet carry Colorado detention criteria.`,
                 "co-detention",
                 // The explanation rides the lazily-loaded Colorado tier (with the rest of the
                 // Colorado prose). Until it lands, the visible line and its verdict are already
@@ -21525,6 +21604,22 @@ function YieldPanel({
                   ? `${d.coDetail}${d.coRegime ? ` Reviewing regime: ${d.coRegime.label} (${d.coRegime.criteria}). ${d.coRegime.note}` : ""}`
                   : null,
               ));
+              /* B1105 — the MHFD DETAIL, entirely inside "Assumptions & method ▸".
+               *
+               * Every line is a `keyedNote`, which the copy budget exempts — the deliberate choice
+               * PANEL-BREVITY calls for: honesty stays REACHABLE without the default view
+               * accumulating lines. WQCV and EURV get one line EACH (a water-quality requirement and
+               * a flood volume are never collapsed), each naming the document it still waits on.
+               *
+               * ⛔ The lines are COMPOSED IN THE LAZY TIER (`mhfdMethodNotes` → `d.coMhfdNotes`) and
+               * this render only maps them onto the note primitive. Do NOT inline the strings back
+               * here: they are Colorado prose that can only render once that chunk has landed, so on
+               * the boot path they cost every Texas user bytes for text they can never see — which
+               * breached `bundle.siteRouteJsBytes` on CI. */
+              if (coMhfd) {
+                detR.push(keyedNote(ruleBadge(req.rule), "mhfd-badge"));
+                for (const n of ((d.coMhfdBag && d.coMhfdBag.notes) || [])) detR.push(keyedNote(n.text, n.key));
+              }
             } else if (req && (req.kind === "point" || req.kind === "none")) {
               // v3 A3 — the numeric "Detention required" row is deleted (the required number lives
               // once, in the verdict strip, G1). The requirement BASIS (adopted rule/authority)
@@ -22488,53 +22583,57 @@ function YieldPanel({
             // straddle, remembered states) is computed here.
             // v3 A2/A3 — no requirement-band bar here; the provided/required pair lives once, in
             // the verdict strip (G1). These groups carry the per-pond DETAIL only.
-            let detVerdict = "—", detTone = null, detSub = "", detChip = null;
+            /* B1110 — `detVerdict` / `detTone` / `detSub` are GONE.
+             *
+             * They were assigned by every branch of this block and read by none of them: the v3
+             * A2/A3 rework moved the requirement pair out to the verdict strip (G1) and left the
+             * locals behind. Rendering them here would now VIOLATE PANEL-BREVITY rule 5 — the same
+             * pair would appear twice in one panel — so the honest resolution of a dead store whose
+             * design moved on is to delete it, not to find it a home. `detChip` is the one value
+             * this block produces that the render consumes, and B1127 makes it actually reach the
+             * DOM (it previously only fed a tone comparison). Do NOT reintroduce a verdict local
+             * here; if a group needs the number, read it from the strip row. */
+            let detChip = null;
             if (req && req.kind === "point" && req.requiredAcFt > ACFT_EPS && usableAcFt == null) {
               // NEW-9 — usable split unknown on a remembered view: an honest non-verdict + the action.
-              detVerdict = "usable unknown"; detTone = "warn"; detChip = "RE-CHECK"; detSub = `req ${f2(req.requiredAcFt)}`;
+              detChip = "RE-CHECK";
             } else if (req && req.kind === "point" && req.requiredAcFt > ACFT_EPS) {
-              const dv = usableAcFt - req.requiredAcFt;
               // B909 round 3 polish — a shortfall inside display-precision epsilon reads as MET,
               // never a "SHORT -0.00 ac-ft" rounding artifact.
-              const short = dv < -ACFT_EPS;
-              detVerdict = `${fmtSignedAcFt(dv)} ac-ft`;
-              detTone = short ? "danger" : "good"; detChip = short ? "SHORT" : "COVERED"; detSub = `req ${f2(req.requiredAcFt)}`;
+              detChip = usableAcFt - req.requiredAcFt < -ACFT_EPS ? "SHORT" : "COVERED";
             } else if (req && req.kind === "point") {
               // A requirement that itself rounds to zero (epsilon residue) is nothing to
               // satisfy — quiet NONE, never a phantom SHORT/COVERED against "req 0.00".
-              detVerdict = "none required"; detChip = "NONE";
+              detChip = "NONE";
             } else if (req && req.kind === "band" && usableAcFt == null) {
               // NEW-1 — a band requirement with an unknown usable split is honestly "unknown",
               // never a gross-fed all-clear.
-              detVerdict = `${f1(req.bandAcFt[0])}–${f1(req.bandAcFt[1])} ac-ft`; detTone = "warn"; detChip = "RE-CHECK"; detSub = "";
+              detChip = "RE-CHECK";
             } else if (req && req.kind === "band") {
               // NEW-1 — the CHIP carries the STATUS (COVERED / SHORT / NEEDS INPUT), computed off
               // USABLE against the band; the requirement TYPE ("screening band") rides the suffix,
               // never the chip. (The old chip literally read "BAND" — a type where a verdict belongs.)
-              const covered = usableAcFt >= req.bandAcFt[1] - ACFT_EPS;
-              const shortBand = usableAcFt < req.bandAcFt[0] - ACFT_EPS;
-              detChip = covered ? "COVERED" : shortBand ? "SHORT" : "NEEDS INPUT";
-              detTone = covered ? "good" : shortBand ? "danger" : "warn";
-              detVerdict = `${f1(req.bandAcFt[0])}–${f1(req.bandAcFt[1])} ac-ft`; detSub = "";
+              detChip = usableAcFt >= req.bandAcFt[1] - ACFT_EPS ? "COVERED"
+                : usableAcFt < req.bandAcFt[0] - ACFT_EPS ? "SHORT" : "NEEDS INPUT";
             } else if (req && req.kind === "unavailable") {
-              // NEW-8 — the hard, unmistakable Colorado state. The CHIP is what actually reaches
-              // the screen here: `detVerdict`/`detTone`/`detSub` are computed by every branch in
-              // this block but read by NONE of them (only `detChip` is consumed, below and at the
-              // group header) — a pre-existing dead-store left behind when the v3 A2/A3 rework
-              // moved the requirement pair out to the verdict strip. Filed as B1110; the
-              // assignments are kept in step with their neighbours rather than diverging here.
-              // "N/A · CO" is a NAMED state, not a failure to compute: "UNKNOWN" would read as
-              // "we could not look it up", inviting the reader to wait for a number that is never
-              // coming. The explanation renders on its own line in the detail chain above.
-              detVerdict = "not in Colorado yet"; detTone = "warn"; detChip = "N/A · CO";
-            } else if (req && req.kind === "unknown") { detVerdict = "required unknown"; detTone = "warn"; detChip = "UNKNOWN"; }
-            else if (d.reqCandidates) { detVerdict = "boundary straddle"; detTone = "warn"; detChip = "STRADDLE"; }
-            else { detVerdict = "unresolved"; detTone = "warn"; detChip = "SET AGENCY"; }
+              /* NEW-8 / B1105 — the hard, unmistakable Colorado state, and B1127 is what finally
+               * puts it on screen: this chip is now PASSED to the group header (see the groupFold
+               * call below), where before it only fed a tone comparison and the closed face read a
+               * bare "0 ponds · check" with no Colorado signal at all.
+               *
+               * A NAMED state, not a failure to compute: "UNKNOWN" would read as "we could not look
+               * it up", inviting the reader to wait for a number that is never coming. MHFD gets its
+               * own chip because its state is genuinely different — the method is carried and the
+               * district's tables are not — and one shared chip would have flattened that. */
+              detChip = (req.flags || []).includes("colorado-mhfd") ? "N/A · MHFD" : "N/A · CO";
+            } else if (req && req.kind === "unknown") { detChip = "UNKNOWN"; }
+            else if (d.reqCandidates) { detChip = "STRADDLE"; }
+            else { detChip = "SET AGENCY"; }
             // NEW-1 — fully-inundated is a crisis, not a covered state: when the flood WSE sits at
             // or above the top of bank, usable detention is ZERO regardless of gross, so the verdict
             // must read SHORT (danger), never "covered". Overrides a stale/optimistic band read.
             if (d.pondFullyInundated && usableAcFt != null && usableAcFt < 1e-6 && req && (req.kind === "point" || req.kind === "band")) {
-              detChip = "SHORT"; detTone = "danger";
+              detChip = "SHORT";
             }
             const mitV = d.mitigation;
             let mitVerdict = "—", mitTone = null, mitSub = "", mitChip = null;
@@ -22833,14 +22932,24 @@ function YieldPanel({
             const detCount = d.pondCount || 0;
             // v3 B7 — the closed summary styles "N pond" as secondary ink and only the status
             // word (short) in its tone color, never the whole line red.
-            const detStatusWord = detShort ? "short" : detChip === "COVERED" ? "ok" : "check";
+            /* B1127 — a Colorado site has no requirement to be "ok" or "short" AGAINST, so the
+             * status word is a named state instead of a check verdict. Before this the closed face
+             * read "0 ponds · check" on every Colorado plan, which says nothing about Colorado and
+             * implies a check is pending. */
+            const detUnavailable = !!(req && req.kind === "unavailable");
+            const detStatusWord = detUnavailable ? "not carried" : detShort ? "short" : detChip === "COVERED" ? "ok" : "check";
             const detClosed = (
               <>
-                <span style={{ color: Y.muted, fontWeight: 400 }}>{detCount} pond{detCount === 1 ? "" : "s"} · </span>
+                {detUnavailable ? null : <span style={{ color: Y.muted, fontWeight: 400 }}>{detCount} pond{detCount === 1 ? "" : "s"} · </span>}
                 <span style={{ color: detShort ? Y.dangerText : detChip === "COVERED" ? "var(--success-text)" : Y.warnText }}>{detStatusWord}</span>
               </>
             );
-            out.push(groupFold("det", "Detention detail", detClosed, detShort ? "danger" : detChip === "COVERED" ? "good" : "warn", detVisible, "", { action: detShort ? designAction : null, open: true, method: detR }));
+            /* B1127 — `chip` is passed ONLY for the unavailable (Colorado) kind. That is what puts
+             * "N/A · MHFD" / "N/A · CO" on screen beside the group label, where the chip string used
+             * to be computed and thrown away. Deliberately NOT passed for the Texas kinds: their
+             * status already reads in the closed face, and adding a chip there would change a Texas
+             * panel — which this item may not do. */
+            out.push(groupFold("det", "Detention detail", detClosed, detShort ? "danger" : detChip === "COVERED" ? "good" : "warn", detVisible, "", { chip: detUnavailable ? detChip : null, action: detShort ? designAction : null, open: true, method: detR }));
             if (mitRequired) out.push(groupFold("mit", "Mitigation detail", mitVerdict, mitTone, mitR, mitSub, { chip: mitChip, action: mitigationAction }));
             // NEW-10/B830 — the ledger balancer: one card of ranked screening moves that
             // close detention + mitigation together. Every move is one line + ⓘ; nothing

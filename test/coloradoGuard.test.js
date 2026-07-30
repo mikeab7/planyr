@@ -157,13 +157,54 @@ describe("NEW-5/NEW-8 · four regulatory regimes across nine counties, not one",
     expect(coloradoRegimeFor(null)).toBeNull();
   });
 
-  it("models NO detention criteria for any regime, and names what would be needed", () => {
-    for (const r of Object.values(CO_DRAINAGE_REGIMES)) {
-      expect(r.detentionModeled, r.id).toBe(false);
-      expect(r.detentionMethod, r.id).toBeTruthy();
+  /* B1105 SCOPE BOUNDARY — the assertion that was "no regime models detention" is now the
+   * assertion that EXACTLY ONE does. This is the test that fails if a future session generalises
+   * MHFD to the three non-member regimes, which the owner named as the worst possible outcome of
+   * that item: partial coverage that silently generalises. */
+  it("models detention for MHFD ONLY — Larimer, Weld and El Paso stay hard-off", () => {
+    expect(CO_DRAINAGE_REGIMES.mhfd.detentionModeled).toBe("partial");
+    expect(CO_DRAINAGE_REGIMES.mhfd.detentionEngine).toBe("mhfdDetention.js");
+    for (const id of ["larimer", "weld", "elpaso"]) {
+      const r = CO_DRAINAGE_REGIMES[id];
+      expect(r.detentionModeled, id).toBe(false);
+      expect(r.detentionEngine, id).toBeUndefined();
+      // Each one says outright that it is not MHFD, so nobody reads the district in by mistake.
+      expect(r.note, id).toMatch(/NOT in the Mile High Flood District/i);
     }
+    for (const r of Object.values(CO_DRAINAGE_REGIMES)) expect(r.detentionMethod, r.id).toBeTruthy();
     expect(CO_DRAINAGE_REGIMES.mhfd.detentionMethod).toMatch(/WQCV/);
     expect(CO_DRAINAGE_REGIMES.mhfd.detentionMethod).toMatch(/EURV/);
+  });
+
+  it("the capability guard turns detention on for MHFD only, and stays fail-closed without a regime", () => {
+    // No regime supplied → the pre-B1105 hard answer, unchanged. This is the case that holds when
+    // the lazy Colorado tier has not landed or every GIS endpoint is down.
+    expect(capabilityFor("detentionVolume", "CO").available).toBe(false);
+    expect(capabilityFor("detentionVolume", "CO").regime).toBeNull();
+    // MHFD → partial, with its own copy.
+    const mh = capabilityFor("detentionVolume", "CO", { regime: "mhfd" });
+    expect(mh.wired).toBe("partial");
+    expect(mh.available).toBe(true);
+    expect(mh.regime).toBe("mhfd");
+    expect(mh.detail).toMatch(/Mile High Flood District/);
+    // The three non-members have no override row, so they get the base record verbatim.
+    for (const regime of ["larimer", "weld", "elpaso", "nonsense"]) {
+      const c = capabilityFor("detentionVolume", "CO", { regime });
+      expect(c.available, regime).toBe(false);
+      expect(c.wired, regime).toBe(false);
+      expect(c.regime, regime).toBeNull();
+      expect(c.headline, regime).toMatch(/not yet available in Colorado/i);
+    }
+    // A regime argument may never change a TEXAS answer.
+    expect(capabilityFor("detentionVolume", "TX", { regime: "mhfd" }).available).toBe(true);
+    expect(capabilityFor("detentionVolume", "TX", { regime: "mhfd" }).regime).toBeNull();
+  });
+
+  it("the honest gap enumeration reports detention as a statewide gap that is partial for MHFD", () => {
+    const det = coloradoGaps().find((g) => g.id === "detentionVolume");
+    expect(det).toBeTruthy();
+    expect(det.wired).toBe(false);          // still a gap statewide
+    expect(det.partialFor).toEqual(["mhfd"]); // ...and honest about the one regime that is better off
   });
 });
 

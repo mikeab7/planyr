@@ -42,12 +42,37 @@ export const COLORADO_DETENTION_DETAIL =
   "so there is no honest way to convert one into the other. Nothing is shown rather than " +
   "something wrong. Size detention with your engineer against the reviewing jurisdiction's manual.";
 
+/* NEW-1 (B1105) — the MHFD-specific detail, for the ONE regime that now has an engine.
+ *
+ * It says something different from the blanket detail above, and the difference is the whole point:
+ * on an MHFD site Planyr names the two volumes, the drain-time election and the district workbook,
+ * and checks the drawdown statute — it is the coefficient TABLES it is missing, not the method. On a
+ * Larimer, Weld or El Paso site nothing at all is modeled and `COLORADO_DETENTION_DETAIL` still
+ * applies verbatim. Never show this one outside MHFD. */
+export const MHFD_DETENTION_DETAIL =
+  "This site is in the Mile High Flood District, which sizes detention by Full Spectrum Detention: " +
+  "a water-quality volume (WQCV, set by how much of the site is paved and the 12-, 24- or 40-hour " +
+  "drain time your engineer elects) plus a separate flood volume (EURV, which also depends on the " +
+  "soil), with the 100-year event routed above both. Planyr carries the method, the district's own " +
+  "sizing workbook and the Colorado drawdown-statute check, but NOT the district's coefficient " +
+  "tables — their document host is unreachable from Planyr, and a second-hand number is not good " +
+  "enough for a volume you would design a site around. So the components are named and no volume " +
+  "is invented. Size it in the MHFD workbook with your engineer.";
+
 /* ---------------------------------------------------------------------------
  * The four Colorado drainage regimes.
  *
- * `detentionModeled: false` on every one of them is the honest state today and is what the guard
- * reads. `detentionMethod` records WHAT would have to be built, so the gap is legible rather than
- * mysterious — a reader sees "MHFD sizes by WQCV + EURV", not "unavailable".
+ * `detentionModeled` is THREE-VALUED as of B1105, and the three values are the whole scope of that
+ * item: `"partial"` for MHFD (the `volume-curve` engine in `mhfdDetention.js` is wired — method,
+ * components, drain-time election, workbook and the drawdown-statute reconciliation — with the
+ * coefficient tables still untranscribed), and hard `false` for Larimer, Weld and El Paso, which
+ * keep the original "not available in Colorado yet" guard untouched.
+ *
+ * ⛔ DO NOT GENERALISE MHFD TO THE OTHER THREE. They are not district members and each publishes its
+ * own criteria manual. A plausible MHFD number on a Larimer, Weld or El Paso site is a worse outcome
+ * than showing nothing, so `detentionModeled: false` there is a deliberate, tested boundary — not a
+ * TODO waiting for someone to feel generous. `detentionMethod` records WHAT would have to be built,
+ * so the gap stays legible rather than mysterious.
  * ------------------------------------------------------------------------- */
 export const CO_DRAINAGE_REGIMES = {
   mhfd: {
@@ -57,12 +82,20 @@ export const CO_DRAINAGE_REGIMES = {
     aka: "formerly UDFCD (Urban Drainage and Flood Control District)",
     counties: ["adams", "arapahoe", "boulder", "broomfield", "denver", "douglas", "jefferson"],
     criteria: "MHFD Urban Storm Drainage Criteria Manual (USDCM), Volumes 1–3",
-    detentionModeled: false,
+    // B1105 — the one regime with an engine. See `mhfdDetention.js`; "partial" because the METHOD is
+    // wired and the district's coefficient TABLES are not (every primary host is egress-blocked).
+    detentionModeled: "partial",
+    detentionEngine: "mhfdDetention.js",
     detentionMethod:
       "Full Spectrum Detention: WQCV (Water Quality Capture Volume — a function of imperviousness " +
       "and the selected 12/24/40-hour drain time) plus EURV (Excess Urban Runoff Volume). This is a " +
-      "different formula SHAPE from Planyr's Texas rate method (ac-ft per acre × area), so it needs " +
-      "its own calculator, not a new rate row.",
+      "different formula SHAPE from Planyr's Texas rate method (ac-ft per acre × area), so it has " +
+      "its own `volume-curve` calculator rather than a new rate row.",
+    detentionState:
+      "Wired as a volume-curve rule: WQCV and EURV are carried as distinct components with their own " +
+      "citations, the 12/24/40-hour drain-time election is reconciled against C.R.S. 37-92-602(8), " +
+      "and the district workbook is named. The coefficient tables are NOT transcribed, so no volume " +
+      "is computed yet — the components report which document each one needs.",
     note:
       "MHFD is a regional district covering seven counties, but the CITY or COUNTY is still the " +
       "permitting authority — MHFD's manual is what they adopt and review against. Verify the local " +
@@ -76,7 +109,7 @@ export const CO_DRAINAGE_REGIMES = {
     criteria: "Larimer County Stormwater Design Standards; City of Fort Collins and City of Loveland each publish their own criteria within their limits.",
     detentionModeled: false,
     detentionMethod: "Own criteria manual — release-rate and volume standards differ from MHFD's and are not transcribed.",
-    note: "Larimer County is NOT in the Mile High Flood District. Do not apply MHFD criteria here.",
+    note: "Larimer County is NOT in the Mile High Flood District. Do not apply MHFD criteria here — B1105 wired MHFD only, and this regime keeps the hard 'not available in Colorado yet' guard on purpose.",
   },
   weld: {
     id: "weld",
@@ -86,7 +119,7 @@ export const CO_DRAINAGE_REGIMES = {
     criteria: "Weld County drainage criteria; City of Greeley publishes its own stormwater criteria within its limits.",
     detentionModeled: false,
     detentionMethod: "Own criteria manual — not transcribed.",
-    note: "Weld County is NOT in the Mile High Flood District.",
+    note: "Weld County is NOT in the Mile High Flood District. B1105 wired MHFD only; this regime keeps the hard 'not available in Colorado yet' guard on purpose.",
   },
   elpaso: {
     id: "elpaso",
@@ -96,7 +129,7 @@ export const CO_DRAINAGE_REGIMES = {
     criteria: "El Paso County / City of Colorado Springs Drainage Criteria Manual (DCM), Volumes 1–2.",
     detentionModeled: false,
     detentionMethod: "Own DCM — not transcribed.",
-    note: "El Paso County is NOT in the Mile High Flood District. The county and the City of Colorado Springs jointly maintain the DCM.",
+    note: "El Paso County is NOT in the Mile High Flood District. The county and the City of Colorado Springs jointly maintain the DCM. B1105 wired MHFD only; this regime keeps the hard 'not available in Colorado yet' guard on purpose.",
   },
 };
 
@@ -184,6 +217,14 @@ export const CAPABILITIES = {
   detentionVolume: {
     label: "Detention volume required",
     TX: { wired: true },
+    /* B1105 — the CO record is now REGIME-KEYED, and the base record is still the hard guard.
+     *
+     * `byRegime` is consulted only when the caller passes a POSITIVELY resolved regime id, so the
+     * base `wired: false` remains the answer for: a Colorado site whose regime has not resolved (the
+     * lazy tier has not landed, or every GIS endpoint is down), an unmapped county, and — the case
+     * this scoping exists to protect — Larimer, Weld and El Paso, which have no `byRegime` row at all
+     * and therefore fall to the base record unchanged. Adding a regime here is the ONLY way to turn
+     * detention on for it; there is no path by which one leaks on. */
     CO: {
       wired: false,
       headline: "Detention criteria not yet available in Colorado",
@@ -193,6 +234,13 @@ export const CAPABILITIES = {
         "and Larimer, Weld and El Paso each under their own criteria manual — so there is no honest " +
         "way to convert. No detention volume is shown for a Colorado site. Size it with your engineer " +
         "against the reviewing jurisdiction's manual.",
+      byRegime: {
+        mhfd: {
+          wired: "partial",
+          headline: "MHFD detention: the method is carried, the district's tables are not",
+          detail: MHFD_DETENTION_DETAIL,
+        },
+      },
     },
   },
   floodplainMitigation: {
@@ -284,21 +332,28 @@ export const CAPABILITIES = {
  * available — that is the pre-Colorado world, where every site was Texas, and it keeps a
  * coordinate-less Texas plan working exactly as before. The guard fires on a POSITIVE Colorado
  * answer, never on the absence of one. */
-export function capabilityFor(id, state) {
+export function capabilityFor(id, state, { regime = null } = {}) {
   const cap = CAPABILITIES[id];
-  if (!cap) return { id, label: id, state: state || null, wired: true, available: true, headline: null, detail: null, notApplicable: false };
+  if (!cap) return { id, label: id, state: state || null, regime: null, wired: true, available: true, headline: null, detail: null, notApplicable: false };
   const st = state === "CO" ? "CO" : state === "TX" ? "TX" : null;
   const rec = st ? cap[st] : null;
-  if (!rec) return { id, label: cap.label, state: st, wired: true, available: true, headline: null, detail: null, notApplicable: false };
+  if (!rec) return { id, label: cap.label, state: st, regime: null, wired: true, available: true, headline: null, detail: null, notApplicable: false };
+  /* B1105 — a regime override applies ONLY on a positive match against a declared `byRegime` row.
+   * An absent regime, an unknown one, or one with no row (Larimer / Weld / El Paso) keeps `rec`
+   * exactly as it was, so every pre-B1105 call site is bit-for-bit unchanged. */
+  const rid = regime == null ? null : String(regime).toLowerCase();
+  const over = rid && rec.byRegime ? rec.byRegime[rid] : null;
+  const eff = over ? { ...rec, ...over } : rec;
   return {
     id,
     label: cap.label,
     state: st,
-    wired: rec.wired,
-    available: rec.wired !== false,
-    headline: rec.headline || null,
-    detail: rec.detail || null,
-    notApplicable: rec.notApplicable === true,
+    regime: over ? rid : null,
+    wired: eff.wired,
+    available: eff.wired !== false,
+    headline: eff.headline || null,
+    detail: eff.detail || null,
+    notApplicable: eff.notApplicable === true,
   };
 }
 
@@ -313,5 +368,12 @@ export function coloradoGaps() {
   return Object.entries(CAPABILITIES)
     .map(([id, cap]) => ({ id, label: cap.label, ...cap.CO }))
     .filter((c) => c.wired !== true)
-    .map((c) => ({ id: c.id, label: c.label, wired: c.wired, headline: c.headline, detail: c.detail, notApplicable: c.notApplicable === true }));
+    .map((c) => ({
+      id: c.id, label: c.label, wired: c.wired, headline: c.headline, detail: c.detail,
+      notApplicable: c.notApplicable === true,
+      /* B1105 — a capability can now be a gap STATEWIDE while being partly wired for one regime, and
+       * an enumeration that hid that would misreport both halves. `partialFor` names the regimes that
+       * do better than the base record; everything not listed gets the base (hard) answer. */
+      partialFor: c.byRegime ? Object.keys(c.byRegime).filter((r) => c.byRegime[r].wired !== false) : [],
+    }));
 }

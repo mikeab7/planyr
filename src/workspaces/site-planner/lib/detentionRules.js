@@ -552,6 +552,26 @@ export function computeRequiredDetention({
   hcfcdApplicable = true, // B789 — false when the identify county excludes Harris: HCFCD ends at the Harris line, so neither the greater-of candidate nor the PCPM deferral may price
   onDate = null,
   siteState = null, // NEW-8 — "TX" | "CO" | null. The region guard below; null keeps pre-Colorado behaviour exactly.
+  /* NEW-1 (B1105) — the COLORADO REGIME SEAM, and it is deliberately fail-CLOSED.
+   *
+   * `coRegime` is the regime id from `coloradoRegions.coloradoRegimeFor()` ("mhfd" | "larimer" |
+   * "weld" | "elpaso" | null) and `coDetention` is the injected MHFD evaluator
+   * (`mhfdDetention.computeMhfdDetention`). BOTH must be present, and the regime must be exactly
+   * "mhfd", for a Colorado site to price at all.
+   *
+   * Why injection rather than an import: `mhfdDetention.js` is Colorado prose + a Colorado engine,
+   * and this module is on the boot path. Importing it here would drag the whole Colorado tier into
+   * the entry chunk for every Texas user — the same bundle-budget reason `siteRegion.js` was split
+   * out of `coloradoRegions.js`. The caller composes the two (SitePlanner's lazily-loaded `coTier`),
+   * exactly as it already does for the regime label and the drawdown statute.
+   *
+   * Why fail-closed matters: absent either argument — a chunk that has not landed, a caller that
+   * does not know about the seam, a regime that is Larimer/Weld/El Paso, a `coRegime` that failed to
+   * resolve because every GIS endpoint is down — the ORIGINAL hard guard runs unchanged. Larimer,
+   * Weld and El Paso can therefore never receive an MHFD number by omission, only by someone
+   * deliberately mis-wiring the regime, and the evaluator itself re-checks membership. */
+  coRegime = null,
+  coDetention = null,
 } = {}) {
   /* ⛔ NEW-8 — THE COLORADO GUARD, and it is deliberately the FIRST thing this function does.
    *
@@ -569,22 +589,43 @@ export function computeRequiredDetention({
    * `siteState` null (a plan with no coordinates, every legacy saved plan) behaves exactly as
    * before — the guard fires on a POSITIVE Colorado answer, never on the absence of one. */
   if (String(siteState || "").toUpperCase() === "CO") {
-    return {
+    /* The ORIGINAL hard guard's carrier, factored so the two exits below cannot drift apart (and so
+     * its strings appear ONCE on the boot path — the site-route bundle budget is measured in a few
+     * hundred bytes here).
+     *
+     * The two SHORT strings stay on the boot path deliberately: they are what makes the state
+     * unmistakable and they must render the instant a Colorado site opens, so the carrier stays
+     * self-describing (a carrier that needs another module to say what it means is exactly the
+     * silent-gap shape this codebase bans). The long EXPLANATION lives in `coloradoRegions.js`
+     * (`COLORADO_DETENTION_DETAIL`), which loads on demand with the rest of the Colorado prose: it is
+     * ⓘ content, and a Texas user should not download it. Bundle budget, 2026-07-29. */
+    const coGuard = (basis, extraFlags = []) => ({
       kind: "unavailable",
       requiredAcFt: null, bandAcFt: null, rateAcFtPerAc: null,
-      basis: "detention criteria not yet available for Colorado",
-      // The two SHORT strings stay here, on the boot path, because they are what makes the state
-      // unmistakable and they must render the instant a Colorado site opens — the carrier stays
-      // self-describing (a carrier that needs another module to say what it means is exactly the
-      // silent-gap shape this codebase bans). The long EXPLANATION lives in `coloradoRegions.js`
-      // (`COLORADO_DETENTION_DETAIL`), which loads on demand with the rest of the Colorado prose:
-      // it is ⓘ content, and a Texas user should not download it. Bundle budget, 2026-07-29.
+      basis,
       headline: "Detention criteria not yet available in Colorado",
       detailFrom: "coloradoRegions.COLORADO_DETENTION_DETAIL",
       rule: null, governing: null,
-      flags: ["colorado-not-wired", "no-criteria-modeled"],
+      flags: ["colorado-not-wired", "no-criteria-modeled", ...extraFlags],
       caveat: SCREENING_CAVEAT,
-    };
+    });
+    /* NEW-1 (B1105) — MHFD is now WIRED, and it is the only Colorado regime that is.
+     *
+     * A positive match on both the regime AND the injected evaluator hands off to the
+     * `volume-curve` engine; anything else falls through to the original hard guard, unchanged. The
+     * evaluator returns a carrier in this function's own vocabulary ("point" with a governing total,
+     * or "unavailable" with its components), so no consumer needs to learn a new `kind`. */
+    if (String(coRegime || "").toLowerCase() === "mhfd" && typeof coDetention === "function") {
+      const co = coDetention({ acres, impPct, onDate });
+      /* RULES-AS-DATA, enforced rather than assumed: no volume may be computed or displayed without
+       * carrying its rule record. A malformed carrier (no record, or a number with no record behind
+       * it) is a LOUD failure that falls back to the guard — never a naked number on the canvas. */
+      if (co && co.rule && (co.kind !== "point" || co.requiredAcFt != null)) {
+        return { ...co, flags: [...(co.flags || []), "colorado-regime-wired"] };
+      }
+      return coGuard("MHFD detention evaluator returned no usable rule record", ["co-evaluator-malformed"]);
+    }
+    return coGuard("detention criteria not yet available for Colorado");
   }
   if (!(acres > 0)) return { kind: "none", requiredAcFt: null, bandAcFt: null, rateAcFtPerAc: null, basis: "no site area", rule: null, governing: null, flags: [], caveat: SCREENING_CAVEAT };
   const rule = ruleFor(authorityId, onDate);
@@ -644,6 +685,14 @@ export function computeRequiredDetention({
       rule, governing: null, flags: ["rate-match", "verify-with-county-engineer"], caveat: SCREENING_CAVEAT,
     };
   }
+
+  /* B1105 — there is deliberately NO `volume-curve` dispatch here, and that is a bundle decision.
+   * A volume-curve rule (MHFD) is priced through the Colorado regime seam at the top of this
+   * function, never through the authority path. If one somehow reaches here, the generic
+   * "no dispatch path" refusal at the bottom already returns kind:"unknown" with no number and the
+   * `no-criteria-modeled` flag — safe by construction. A dedicated branch only improved that
+   * message, and its literals sat on the boot path for a case `test/mhfdDetention.test.js` asserts
+   * cannot occur (MHFD is not in DETENTION_RULES). Do not re-add one without a reachable caller. */
 
   // ---- municipal overlays: dispatch through the parent -------------------
   if (rule.ruleType === "overlay") {
@@ -820,7 +869,14 @@ export function ruleBadge(rule, rateAcFtPerAc = null, rateBandLabel = null) {
   // only a fallback for point results (the hcfcd record's 0.65 is the PCPM methods
   // baseline, NOT the unset-outfall 0.75–1.0 minimum shown above the badge).
   const bandNum = (n) => (Number.isInteger(n) ? n.toFixed(1) : String(n)); // 1 → "1.0" so a band reads 0.75–1.0
+  /* B1105 — a `volume-curve` rule has NO per-acre rate, and the badge must not leave the slot blank
+   * (which reads as a missing record) — nor back-compute a rate, which would invent a criterion MHFD
+   * does not publish. So the rule record carries its own `badgeMethod` ("full spectrum (WQCV +
+   * EURV)"), composed in the lazily-loaded module that owns it. Deriving it here would put that
+   * filtering, joining and its literals on the BOOT PATH for a string only a Colorado site can ever
+   * see — the site-route bundle budget is measured in a few hundred bytes at this point. */
   const rate =
+    rule.badgeMethod ? rule.badgeMethod :
     Array.isArray(rateAcFtPerAc) ? `${bandNum(rateAcFtPerAc[0])}–${bandNum(rateAcFtPerAc[1])} ac-ft/ac ${rateBandLabel || "screening band"}` :
     rateAcFtPerAc != null ? `${rateAcFtPerAc} ac-ft/ac` :
     rule.params?.rateAcFtPerAc != null ? `${rule.params.rateAcFtPerAc} ac-ft/ac` :

@@ -532,7 +532,7 @@ export function normalizeZoneAlongLen(list, onHeal) {
       if (!Number.isFinite(chainAlong) || chainAlong <= 0) continue;
       const echoes = chain.map((z, i) => i > 0 && alongLenIsChainEcho(z.alongLen, chainAlong));
       if (!echoes.some(Boolean)) continue;                     // nothing spurious on this side
-      const [nx, ny] = SIDE_NORMAL[side];
+      const [, ny] = SIDE_NORMAL[side];   // only the ACROSS component is read here (B1128 ratchet)
       const horiz = ny !== 0;
       const tan = rot2d(horiz ? 1 : 0, horiz ? 0 : 1, host.rot || 0);
       const kinds = chain.map((z) => (z.type === "trailer" || z.forCourt ? "trailer" : "strip"));
