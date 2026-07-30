@@ -22,7 +22,11 @@ import { fileURLToPath } from "node:url";
 const src = readFileSync(fileURLToPath(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url)), "utf8");
 
 // The block is identified by the transform write itself, not by a line number.
-const TRANSFORM_WRITE = "wrap.style.transform = `translate3d(${tx}px, ${ty}px, 0) scale(${scale})`";
+// NEW-1 (2026-07-30): the write now goes through `setWrapTransform`, the ONE helper that writes
+// the wrap's transform AND mirrors it onto the map-top host (the line-role GIS pane above the
+// plan) in the same statement. The invariant is unchanged and its teeth are unchanged — the
+// enclosing effect must still be a LAYOUT effect — only the anchor moved with the call site.
+const TRANSFORM_WRITE = "setWrapTransform(`translate3d(${tx}px, ${ty}px, 0) scale(${scale})`";
 
 describe("B1122 — the basemap transform is applied in the same frame as the drawn layer", () => {
   it("the effect that writes the basemap transform is a LAYOUT effect, not a passive one", () => {
@@ -56,6 +60,20 @@ describe("B1122 — the basemap transform is applied in the same frame as the dr
     // what was removed. This pins that intent so a future "perf tweak" can't quietly substitute one
     // for the other.
     expect(src).toMatch(/setTimeout\(\(\) => commit\(center, z, true\), 160\)/);
+  });
+
+  it("the map-top host is mirrored in the SAME statement as the wrap (NEW-1)", () => {
+    // The line-role GIS pane sits above the plan in its own host, positioned by mirroring the
+    // wrap's gesture transform. If that mirror is ever written from somewhere else — a second
+    // effect, a rAF, a passive effect — the contours lag the imagery they trace by a frame,
+    // which is the same class of defect B1122 removed for the basemap itself. ONE helper writes
+    // both, so the two can never be written at different times.
+    const helper = src.slice(src.indexOf("const setWrapTransform = ("), src.indexOf("const setWrapTransform = (") + 500);
+    expect(helper).toMatch(/wrap\.style\.transform = value/);
+    expect(helper).toMatch(/top\.style\.transform = value/);
+    // …and nothing else may write the host's transform on the gesture path.
+    const others = [...src.matchAll(/geoTopWrapRef\.current\.style\.transform\s*=/g)];
+    expect(others.length, "the map-top host transform is written outside setWrapTransform").toBe(0);
   });
 
   it("VIEWPORT-STABLE is not violated elsewhere in the geo transform path", () => {

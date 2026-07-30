@@ -77,6 +77,33 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   identity-on-no-op reorder / promote mutators. Front/back move within a band; crossing the plan is
   only ever the explicit `aboveParcel` toggle, so "bring to front" can never silently lift a
   backdrop over the property line. Screen, References panel and right-click menu all read it.
+- **⛔ NEW-1 (B1205) — `mapStack.js` is THE map stacking model, and it is the ONLY place a draw
+  order is decided.** Bottom→top: basemap → GIS AREA fills → references → parcel → setback →
+  elements → references promoted above the plan (B1198) → GIS LINE strokes → labels → handles.
+  **The load-bearing rule: FILLED area layers draw UNDER the site elements; LINE/stroke layers draw
+  OVER them** — a contour crossing a building is a hairline, a floodplain fill over one buries it.
+  There is deliberately **no mode, no shortcut and no per-layer z-order UI** (Google/Apple both use
+  a fixed hierarchy + opacity); per-layer opacity is the one escape hatch and every row has the same
+  `opacityControl` (B1206, guarded by the repo-root `test/` suite **layerOpacityCoverage**). Every GIS source
+  **declares** `role: "area" | "line" | "point"` — never inferred at render time — and a service
+  publishing both splits via `roleLayers` (FEMA zones vs boundaries; BKDD watersheds vs streams/BFE):
+  one panel row, one opacity, two export requests. **The trap to know:** Leaflet keeps every pane
+  inside `_mapPane`, which carries the pan transform and so its own stacking context, so **no
+  z-index can lift a pane above the planner SVG** — the line band is hosted OUTSIDE the map in a
+  sibling box (`geoTopWrapRef`/`geoTopPaneRef`), with the wrap's gesture transform and Leaflet's
+  map-pane translate mirrored in the SAME statement as the original (VIEWPORT-STABLE; `setWrapTransform`).
+  PDF-PARITY lives in `exportSheet.js`, which composites the same two bands. **Known deviation:** the
+  handle layer is inside the plan SVG, so the line band paints above it — bounded (the band is
+  `pointer-events:none`) and owned by **B1208**; do not "fix" it by moving the handle group out of
+  the SVG without moving its pointer plumbing, or every drag loses the moves that pass over a handle.
+  Guards: the repo-root `test/` suite **mapStack** and the e2e spec **map-layer-stacking**.
+- **`buildingFloodExposure.js` (B1207) answers "is my building in the floodplain?" as a NUMBER** —
+  per footprint: overlap by area and percent, the governing zone and its BFE. It **reuses** the
+  B707/B712 `zonesFromFeatureCollection` + `gridIntersect` + `zoneWaterSurface` chain (never a second
+  derivation, so it cannot disagree with the mitigation ledger's flood elevation), and it keeps four
+  distinct honest-unknown states — `not checked` / `UNKNOWN` / `none mapped` / the answer — so a
+  failed or un-run query can never read as a clean 0%. Rendered inside the Yield → Buildings
+  `<Collapse>`, which is why it costs the default view nothing (PANEL-BREVITY).
 - **⛔ NEW-1 — A MANIPULATION HANDLE IS CHROME: it belongs in the ONE always-on-top handle layer,
   never in the content pass that draws its object.** `SitePlanner.jsx` renders every handle set
   (`handleNodes`, `parcelHandles`, `elPolyHandles`, `markupHandles`, `calloutHandles`,

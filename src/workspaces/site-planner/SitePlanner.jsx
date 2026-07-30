@@ -36,6 +36,11 @@ import { ftPerPointForScale, scaleForFtPerPoint, chooseOverlayScale, SCALE_PRESE
 import { solveSimilarityLSQ, applySimilarityToOverlay, scaleOverlayAbout, calibrateUnderlayScale } from "./lib/overlayAlign.js";
 import { hasPrintableOverlay } from "./lib/overlayPrint.js";
 import { syncOverlayLayers, withTileRetry, ALL_LAYERS, probeService, layerVintage, identifyOverlaysAt, rasterIdentifyLayers } from "./lib/layers.js";
+// NEW-3 — the per-building floodplain answer, off the SAME geometry the mitigation ledger uses.
+import { buildingFloodExposure, exposureHeadline, FLOOD_CLASS_LABEL } from "./lib/buildingFloodExposure.js";
+// NEW-1 — the ONE map stacking model: filled GIS layers under the site elements, line/point
+// GIS layers over them. No mode, no shortcut, no per-layer z-order picker.
+import { CANVAS_Z, PANE_AREA, PANE_LINE, PANE_AREA_LABEL, PANE_LINE_LABEL } from "./lib/mapStack.js";
 import { loadRasterIdentify, makeHoverIdentify, rasterIdentifyNow } from "./lib/rasterIdentifyLazy.js";
 import { sanitizeLayerOverrides, overridesFromOverlays, overlaysWithOverrides, applyOnOverrides, overridesSig } from "./lib/layerPrefs.js";
 import { BASEMAPS } from "./lib/basemaps.js";
@@ -2315,6 +2320,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
    * contributors. Zero whenever there is no basemap frame to register against. */
   const [regShift, setRegShift] = useState({ dx: 0, dy: 0 });
   const geoWrapRef = useRef(null);
+  /* NEW-1 — the MAP-TOP HOST. Leaflet keeps every pane inside its own `_mapPane`, which
+   * carries the pan transform and therefore its own stacking context, so NO z-index on a
+   * pane can lift it above the planner SVG. The line-role GIS layers get a pane hosted
+   * OUTSIDE the map instead, in a sibling box above the SVG, with the two transforms that
+   * position it mirrored: the wrap's live gesture transform (geoTopWrapRef) and Leaflet's
+   * own map-pane translate (geoTopPaneRef). Both mirrors are written in the SAME frame as
+   * the original (VIEWPORT-STABLE), so the contours never lag the imagery they trace. */
+  const geoTopWrapRef = useRef(null);
+  const geoTopPaneRef = useRef(null);
   const geoMapRef = useRef(null);
   const geoBaseRef = useRef(null);
   const geoBackfillRef = useRef(null); // coarse low-zoom layer for instant blurry coverage
@@ -2360,6 +2374,27 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       zoomSnap: 0, fadeAnimation: false, zoomAnimation: false, inertia: false,
     }).setView([origin.lat, origin.lon], 17);
     geoMapRef.current = map;
+    /* NEW-1 — the two stacking bands, created ONCE, each in its own host:
+     *   AREA (fills) → a pane inside Leaflet's map pane, under the planner SVG
+     *   LINE (strokes/points) → a pane in the map-top host, over the planner SVG
+     * Everything after this just names a pane; nothing anywhere picks a z-order. */
+    const areaPane = map.createPane(PANE_AREA); areaPane.style.zIndex = 350;
+    const areaLabelPane = map.createPane(PANE_AREA_LABEL); areaLabelPane.style.zIndex = 360; areaLabelPane.style.pointerEvents = "none";
+    const topHost = geoTopPaneRef.current;
+    if (topHost) {
+      topHost.replaceChildren(); // a re-created map must not stack a second set of panes here
+      const linePane = map.createPane(PANE_LINE, topHost); linePane.style.zIndex = 400; linePane.style.pointerEvents = "none";
+      const lineLabelPane = map.createPane(PANE_LINE_LABEL, topHost); lineLabelPane.style.zIndex = 410; lineLabelPane.style.pointerEvents = "none";
+      // Mirror Leaflet's map-pane translate onto the external host. Zoom + fade animation are
+      // off on this map (it is a slaved backdrop), so the transform only ever changes on a
+      // commit — one assignment per commit, no interpolation to chase.
+      const mirrorPane = () => {
+        const el = geoTopPaneRef.current, mp = map._mapPane;
+        if (el && mp) el.style.transform = mp.style.transform || "";
+      };
+      map.on("move zoom viewreset moveend zoomend resize load", mirrorPane);
+      mirrorPane();
+    }
     geoCommitRef.current = null; // fresh map → no committed view yet (forces a snap on first sync)
     // E2E-only hook (never runs in production): expose the backdrop map so the panel-toggle
     // flash spec can count Leaflet `viewreset` events — a tile-wipe fires one, a panBy doesn't.
@@ -2559,6 +2594,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   useLayoutEffect(() => {
     const map = geoMapRef.current;
     const wrap = geoWrapRef.current;
+    /* NEW-1 — every write to the wrap's gesture transform is mirrored onto the map-top host
+     * in the SAME statement, so the line-role GIS pane (contours, streams, mains) tracks the
+     * imagery frame-for-frame instead of lagging a gesture behind it. One helper, so a future
+     * write site cannot forget the mirror. VIEWPORT-STABLE: this whole effect is a LAYOUT
+     * effect, so both writes land before paint. */
+    const setWrapTransform = (value, origin = null) => {
+      const top = geoTopWrapRef.current;
+      if (origin != null) { wrap.style.transformOrigin = origin; if (top) top.style.transformOrigin = origin; }
+      wrap.style.transform = value;
+      if (top) top.style.transform = value;
+    };
     // No basemap frame → nothing to register against, so the drawing sits at its own
     // natural position (NEW-2). An un-located plan is drawn in feet against nothing.
     // B1189 — GUARD the dispatch, don't just make the updater a no-op. A `setState` whose
@@ -2707,7 +2753,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const commit = (c, zoom, ghost) => {
       const cur = map.getZoom();
       if (Math.abs(zoom - cur) < 1e-3) {
-        wrap.style.transform = "";
+        setWrapTransform("");
         try {
           const target = exactPt(c);
           const half = map.getSize().divideBy(2);
@@ -2720,7 +2766,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         return;
       }
       if (ghost) spawnGhost();
-      wrap.style.transform = "";
+      setWrapTransform("");
       // NEW-7 — tell the tile layers the zoom we're about to set. Leaflet wipes every tile
       // on `viewprereset` regardless of whether the NATIVE (rounded) tile zoom actually
       // moved, so a fractional-zoom commit used to throw away tiles it immediately asked
@@ -2784,7 +2830,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // FLASH but not of the SIZE: the container can already have resized between the map's
       // creation and that first commit, and skipping the re-sync baked the stale size in
       // permanently — 86 px of misregistration at rest, with nothing left to compare against.
-      wrap.style.transform = "";
+      setWrapTransform("");
       try { map.invalidateSize({ animate: false, pan: false }); } catch (_) {}
       commit(center, z, false);
       return;
@@ -2805,8 +2851,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       const half = map.getSize().divideBy(2);
       const tx = half.x - p.x * scale;
       const ty = half.y - p.y * scale;
-      wrap.style.transformOrigin = "0 0";
-      wrap.style.transform = `translate3d(${tx}px, ${ty}px, 0) scale(${scale})`;
+      setWrapTransform(`translate3d(${tx}px, ${ty}px, 0) scale(${scale})`, "0 0");
       // NEW-2 — re-measure mid-gesture too, so the drawing stays welded through the drag and
       // not only once it settles. Reading a tile's rect needs no special case for the transform
       // just written above: the rect already includes it.
@@ -2882,6 +2927,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     let idleId = null, idleTimer = null;
     const order = orderLayersByPriority(overlays, ALL_LAYERS);
     const sync = () => syncOverlayLayers(geoMapRef.current, overlays, overlayRefs.current, {
+      // NEW-1 — the two stacking bands (lib/mapStack.js). Each layer lands in the one its
+      // declared ROLE names: fills under the plan, strokes and points over it.
+      panes: { area: PANE_AREA, areaLabel: PANE_AREA_LABEL, line: PANE_LINE, lineLabel: PANE_LINE_LABEL },
       admit: (id) => order.indexOf(id) < staged * LAYER_STAGE_SIZE,
       onStatus: (id, state, msg, extra) => setLayerStatus && setLayerStatus((s) => ({ ...s, [id]: state ? { state, msg, ts: extra?.ts ?? null, stale: extra?.stale ?? false } : null })),
       onError: (cfg, msg) => { flashWarn(`⚠ “${cfg.label}” layer failed: ${msg || "service may be down or moved"}.`, 6000); },
@@ -9335,6 +9383,26 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     },
   };
   const fmZonesSig = `${(floodGeo && floodGeo.ts) || 0}:${fmZones.length}`;
+  /* NEW-3 — "is my building in the floodplain?" as a NUMBER. The owner's real question when he
+   * turns a flood layer on over his plan is a computation, and the geometry is already in hand:
+   * this reuses the SAME classified zones and the SAME intersect the B707/B712 mitigation ledger
+   * runs on, reported per building. Memoized on the footprints + the zone signature (the
+   * mitigationForFootprint discipline), so a canvas drag re-screens once per geometry change. */
+  const fmBuildings = els.filter((e) => e.type === "building" && !e.dogEar).map((e) => {
+    const ring = ringOf(e);
+    return ring && ring.length >= 3 ? { id: e.id, label: e.name || e.label || null, ring } : null;
+  }).filter(Boolean);
+  const fmExposureSig = [
+    fmZonesSig, floodGeo?.state || "",
+    fmBuildings.map((b) => `${b.id}:${b.ring.length}:${ringHash(b.ring)}`).join(","),
+    fmElev.bfeFt ?? "", fmElev.existGradeFt ?? "", fmElev.wse02Ft ?? "",
+    fmElev.derivedBfeFt ?? "", fmElev.derivedXsWselFt ?? "", fmElev.derivedWse02Ft ?? "", fmElev.derivedWse1pctFt ?? "",
+  ].join("~");
+  const floodExposure = useMemo(
+    () => buildingFloodExposure({ buildings: fmBuildings, zones: fmZones, floodState: floodGeo?.state || null, elev: fmElev }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [fmExposureSig],
+  );
   // ---- B826 — the proposed-surface engine: auto-grade the concept off the plan FFE +
   // the B825 class records, on the B808 lattice idiom. The expensive grid build is
   // memoized on a cheap signature (the mitigationForFootprint discipline) so canvas
@@ -15432,6 +15500,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             easeAll={easeAll} easeArea={easeArea} easeBldgArea={easeBldgArea} easePaveArea={easePaveArea}
             drainage={drainFacts()} parcelOverlaps={parcelOverlaps}
             heat={{ available: !!fmHeat, on: fmHeatOn, user: fmHeatUser, onToggle: setFmHeatUser, totals: fmHeatTotals, ledgerAcFt: fmResultView?.volumeAcFt ?? null }}
+            floodExposure={floodExposure} // NEW-3 — per-building floodplain exposure, rendered inside the Buildings group
             onMitOpenChange={setFmMitOpen}
           />
           {/* v3 A8 — ④ Costs: the road + earthwork cards fold into one group. Closed summary is
@@ -16436,6 +16505,20 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           {origin && (
             <div data-export="skip" style={{ position: "absolute", inset: 0, zIndex: 0, overflow: "hidden", pointerEvents: "none", background: basemapOn ? "#3f3f3f" : PAL.paper }}>
               <div ref={geoWrapRef} style={{ position: "absolute", inset: -geoOverscan, background: basemapOn ? "#3f3f3f" : PAL.paper }} />
+            </div>
+          )}
+          {/* NEW-1 — the MAP-TOP HOST: the stacking band that sits ABOVE the plan. It holds the
+              LINE-role GIS panes (contours, streams and canals, easement centrelines, BFE lines,
+              storm/utility mains), so a contour crosses a building as a hairline instead of
+              disappearing behind it — while every filled layer (floodplain, wetlands, districts)
+              stays below in the map's own pane, where it can't bury the plan. Geometry mirrors
+              the backdrop exactly (same clip, same overscan, same gesture transform); it never
+              takes a pointer event, so it can neither block a click nor steal a handle. */}
+          {origin && (
+            <div data-export="skip" style={{ position: "absolute", inset: 0, zIndex: CANVAS_Z.gisLine, overflow: "hidden", pointerEvents: "none" }}>
+              <div ref={geoTopWrapRef} style={{ position: "absolute", inset: -geoOverscan }}>
+                <div ref={geoTopPaneRef} style={{ position: "absolute", left: 0, top: 0, width: 0, height: 0 }} />
+              </div>
             </div>
           )}
           {/* "Drop to place" hint — mounts only during an active file drag over the canvas
@@ -22386,6 +22469,7 @@ function YieldPanel({
   parcelOverlaps, // B652: {count,names,overlapAcres} when active parcels overlap, else null
   heat, // B809: { available, on, user, onToggle, totals, ledgerAcFt } — the fill-depth heat map
   onMitOpenChange, // B809: mirrors the mit group's expansion up (heat map defaults ON while open)
+  floodExposure, // NEW-3: buildingFloodExposure() result — per-building footprint ∩ flood zone
 }) {
   const [openPanel, setOpenPanel] = useState(!collapsed);
   // NEW-1 — the drainage/mitigation readout redesign: an "Advanced" fold for the expert
@@ -24406,6 +24490,36 @@ function YieldPanel({
             {row("Coverage", `${f0(cov)}%`)}
             {row("Car stalls", f0(stalls), ratio ? `· ${f2(ratio)}/1k sf` : "")}
             {row("Trailer stalls", f0(trailers))}
+            {/* NEW-3 — IN THE FLOODPLAIN? The number, not the picture. Verdict + one figure on the
+                headline row; the per-building breakdown only when a building is actually exposed,
+                and the honest non-answers ("didn't answer", "not pulled yet") never read as a
+                clean zero. Lives inside this Collapse, so it costs the default view nothing. */}
+            {(() => {
+              const fx = floodExposure;
+              if (!fx || fx.state === "no-buildings") return null;
+              const head = exposureHeadline(fx);
+              if (!head) return null;
+              const TONE = { ok: Y.muted, warn: "var(--warn-text)", alert: "var(--danger)", unknown: "var(--warn-text)" };
+              const hit = fx.state === "ok" ? fx.buildings.filter((b) => b.governing) : [];
+              return (
+                <>
+                  {row("In the floodplain?", <span style={{ color: TONE[head.tone] || Y.text }}>{head.text}</span>,
+                    fx.state === "ok" && fx.total.touched ? `${head.detail} · ${f0(fx.total.areaSf)} sf` : head.detail || "")}
+                  {/* One line per EXPOSED building only — a clear building is already covered by
+                      the headline, so listing it again would be words for no information. */}
+                  {hit.map((b) => row(
+                    `· ${b.label || `Building ${fx.buildings.indexOf(b) + 1}`}`,
+                    `${b.pct.toFixed(b.pct < 10 ? 1 : 0)}%`,
+                    [FLOOD_CLASS_LABEL[b.governing.cls] || b.governing.cls,
+                      b.governing.zone ? `Zone ${b.governing.zone}` : null,
+                      b.governing.unstudied ? "BFE undetermined" : (b.governing.bfeFt != null ? `BFE ${b.governing.bfeFt.toFixed(1)}′` : "no published BFE"),
+                    ].filter(Boolean).join(" · "),
+                    true,
+                  ))}
+                  {fx.state === "ok" && fx.total.touched > 0 && note("Screening overlap sampled off the FEMA map — good to about a percent, not a survey.")}
+                </>
+              );
+            })()}
           </Collapse>
           {/* v3 B2 — the BUILDABILITY group is DELETED. Buildability is now a permanent verdict-
               strip row (see yieldVerdicts.buildabilityVerdict) — "not checked yet" with a ↻ when

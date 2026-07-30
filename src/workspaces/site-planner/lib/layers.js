@@ -32,6 +32,9 @@ import { PIPELINE_LEGEND } from "./pipelineCommodity.js";
 import { DEFAULT_CORRIDOR_WIDTH_FT } from "./pipelineCorridor.js";
 import { proxyServiceUrl } from "../../../shared/gis/gisProxyCore.js";
 import { releaseLayer } from "./tileLifecycle.js";
+// NEW-1 — THE map stacking model. Every layer's pane comes from its declared ROLE
+// (area under the site elements, line/point over them); nothing here picks a z-order.
+import { rolesOf, panesForRole, PANE_AREA, PANE_LINE, PANE_AREA_LABEL, PANE_LINE_LABEL } from "./mapStack.js";
 
 // NEW-1 — resolve Leaflet's default marker images for the bundler before any layer is built,
 // so an accidental default marker degrades to a real pin instead of a broken-image glyph.
@@ -130,6 +133,8 @@ export const STATEWIDE = {
     layers: [27, 28],
     note: "Flood zones appear once you zoom in to about street level — hidden at city-wide zoom.",
     opacity: 0.55,
+    // NEW-1 stacking role (lib/mapStack.js): NFHL 28 = Flood Hazard ZONES (filled) → under the plan; 27 = Flood Hazard BOUNDARIES (strokes) → over it.
+    roleLayers: { area: [28], line: [27] },
     group: "flood", order: 1,
     // B1076 — the flood group's four tiers. FEMA is the REGULATORY tier: an adopted map a
     // floodplain administrator enforces. Never merge it with an advisory model.
@@ -160,6 +165,8 @@ export const STATEWIDE = {
     layers: [1, 2],
     note: "NWI is for screening only — not a jurisdictional determination.",
     opacity: 0.55,
+    // NEW-1 stacking role (lib/mapStack.js): NWI Cowardin polygons render as filled shapes.
+    role: "area",
     group: "environmental", order: 1,
   },
   txrrc_pipe: {
@@ -180,6 +187,8 @@ export const STATEWIDE = {
     },
     note: "RRC T-4 permit routes — schematic, not surveyed locations.",
     opacity: 0.9,
+    // NEW-1 stacking role (lib/mapStack.js): Commodity-colored pipeline centrelines.
+    role: "line",
     group: "environmental", order: 2,
   },
   txrrc_pipe_easement: {
@@ -190,6 +199,8 @@ export const STATEWIDE = {
     pipelineSource: "txrrc_pipe", corridorWidth: true, // corridorWidth → LayerPanel shows the inline width control
     opacity: 0.9,
     note: "ASSUMED screening corridor drawn off a SCHEMATIC centerline — NOT a surveyed easement. Doubly approximate (schematic line × assumed width). Confirm via title commitment / recorded easement instrument + an 811 one-call before relying on it.",
+    // NEW-1 stacking role (lib/mapStack.js): A buffered band — a fill, so it goes under the plan (its centreline rides over).
+    role: "area",
     group: "environmental", order: 3,
   },
   txrrc_wells: {
@@ -200,6 +211,8 @@ export const STATEWIDE = {
     layers: [1], // Well Locations (point); RRC symbology shows status
     note: "Well symbols show status — active, plugged, dry hole, injection, etc.",
     opacity: 0.9,
+    // NEW-1 stacking role (lib/mapStack.js): Well symbols.
+    role: "point",
     group: "environmental", order: 4,
   },
   ccn_service: {
@@ -219,6 +232,8 @@ export const STATEWIDE = {
     url: GIS_SOURCES.ccnSewer.serviceUrl, layers: [1, 2], opacity: 0.5,
     note: "PUC water (blue) + sewer (green) certificate-of-convenience service areas — who is certificated to serve retail water/sewer. A boundary is a retail monopoly to serve, NOT proof a line is in the ground. Houston-region coverage. Screening only — confirm with the utility/PUC.",
     infoCaveat: "A CCN boundary means a utility is CERTIFICATED to serve retail water/sewer here — not that a main is already built to a given parcel. Confirm service, capacity, and tap availability with the utility.",
+    // NEW-1 stacking role (lib/mapStack.js): Certificated service TERRITORY polygons.
+    role: "area",
     group: "utilities", mergeGroup: "water_sewer", order: 1,
   },
   env_lpst: {
@@ -229,6 +244,8 @@ export const STATEWIDE = {
     source: "Texas Commission on Environmental Quality (TCEQ)",
     url: GIS_SOURCES.lpst.serviceUrl, layers: [0], opacity: 0.9,
     note: "TCEQ Leaking Petroleum Storage Tank sites — documented petroleum-UST releases. A Phase I ESA PRE-SCREEN, not a substitute. Loads zoomed in.",
+    // NEW-1 stacking role (lib/mapStack.js): LPST site symbols.
+    role: "point",
     group: "environmental", order: 6,
   },
   env_cleanups: {
@@ -241,6 +258,8 @@ export const STATEWIDE = {
     hoverIdentify: true, canvasIdentify: true, hoverTitle: "Cleanup site", hoverSource: "US EPA",
     hoverFields: [{ names: ["PRIMARY_NAME", "NAME", "SITE_NAME"] }, { names: ["SITE_TYPE", "PROGRAM", "TYPE"] }],
     note: "EPA 'Cleanups in My Community' — Superfund (NPL) + RCRA corrective-action sites. A Phase I ESA PRE-SCREEN, not a substitute. Loads zoomed in (national dataset).",
+    // NEW-1 stacking role (lib/mapStack.js): Superfund/RCRA site points.
+    role: "point",
     group: "environmental", order: 7,
   },
   faults: {
@@ -253,6 +272,8 @@ export const STATEWIDE = {
     hoverIdentify: true, canvasIdentify: true, hoverTitle: "Surface fault trace", hoverSource: "USGS SIM 2874",
     hoverFields: [{ names: ["NAME", "FAULT_NAME", "LABEL"] }, { names: ["CERTAINTY", "ACCURACY", "TYPE"] }],
     note: "Houston-area growth-fault surface traces (USGS SIM 2874, via a University of Houston GIS republication). Aseismic slow-slip faults that damage foundations/pavement. Screening only — get a geotechnical/fault study. Loads zoomed in.",
+    // NEW-1 stacking role (lib/mapStack.js): Surface-fault traces.
+    role: "line",
     group: "environmental", order: 5,
   },
   txdot_aadt: {
@@ -266,6 +287,8 @@ export const STATEWIDE = {
     hoverIdentify: true, canvasIdentify: true, hoverTitle: "Traffic count", hoverSource: "TxDOT",
     hoverFields: [{ names: ["Located_On", "LOCATED_ON", "ROAD_NAME"] }, { names: ["AADT_PRELIM", "AADT"], label: "AADT" }],
     note: "TxDOT preliminary AADT (average annual daily traffic) count points — an access/visibility proxy. Loads zoomed in.",
+    // NEW-1 stacking role (lib/mapStack.js): Count segments along the roadway centreline.
+    role: "line",
     group: "access", order: 1,
   },
   bts_rail: {
@@ -278,6 +301,8 @@ export const STATEWIDE = {
     hoverIdentify: true, canvasIdentify: true, hoverTitle: "Rail line", hoverSource: "BTS/FRA",
     hoverFields: [{ names: ["RROWNER1", "OWNER", "RAILROAD"] }, { names: ["SUBDIV", "SUBDIVISIO"] }, { names: ["NET", "TRACKS"] }],
     note: "BTS/FRA North American Rail Network lines — a line adjacent/crossing is a potential rail-served siding. Loads zoomed in.",
+    // NEW-1 stacking role (lib/mapStack.js): Rail centrelines.
+    role: "line",
     group: "access", order: 2,
   },
   faa_airports: {
@@ -291,6 +316,8 @@ export const STATEWIDE = {
     hoverIdentify: true, canvasIdentify: true, hoverTitle: "Airport", hoverSource: "FAA",
     hoverFields: [{ names: ["NAME", "ARPT_NAME", "FULLNAME"] }, { names: ["IDENT", "ARPT_ID", "LOCID"] }, { names: ["TYPE", "ARPT_TYPE", "FACILITY_TYPE"] }],
     note: "FAA airports — a PROXY for FAA Part 77 height-restriction surfaces near a public-use airport (not the computed Part 77 surfaces). Loads zoomed in.",
+    // NEW-1 stacking role (lib/mapStack.js): Airport reference points.
+    role: "point",
     group: "access", order: 3,
   },
 };
@@ -309,6 +336,8 @@ export const EVIDENCE = {
     kind: "overpass", label: "Power lines & poles", source: "OpenStreetMap", opacity: 0.9,
     query: { lines: true, poles: true, substations: true },
     note: "OpenStreetMap — transmission solid, distribution dashed; poles/towers as dots. Loads at zoom ≥ 14.",
+    // NEW-1 stacking role (lib/mapStack.js): Transmission/distribution lines (poles ride the same layer as its nodes).
+    role: "line",
     group: "utilities", mergeGroup: "electric", order: 2,
   },
   hifld_tx: {
@@ -324,6 +353,8 @@ export const EVIDENCE = {
     hoverIdentify: true, canvasIdentify: true, hoverTitle: "Transmission line", hoverSource: "HIFLD",
     hoverFields: [{ clean: "voltage" }, { clean: "owner" }],
     note: "HIFLD ≥69 kV electric transmission (US DOE/NETL). Loads at zoom ≥ 10; verify live.",
+    // NEW-1 stacking role (lib/mapStack.js): Transmission centrelines.
+    role: "line",
     group: "utilities", mergeGroup: "electric", order: 2,
   },
   hifld_substations: {
@@ -341,6 +372,8 @@ export const EVIDENCE = {
     hoverIdentify: true, canvasIdentify: true, hoverTitle: "Substation", hoverSource: "HIFLD",
     hoverFields: [{ names: ["NAME"] }, { names: ["MAX_VOLTAG", "MAX_VOLT", "VOLTAGE"], unit: "kV" }, { names: ["CITY"] }],
     note: "HIFLD electric substations. Distance to the nearest is a service/interconnect proxy for heavy power. Many names are withheld (redacted national dataset). Loads zoomed in.",
+    // NEW-1 stacking role (lib/mapStack.js): Substation points.
+    role: "point",
     group: "utilities", mergeGroup: "electric", order: 2,
   },
   osm_hydrants: {
@@ -349,6 +382,8 @@ export const EVIDENCE = {
     kind: "overpass", label: "Fire hydrants", source: "OpenStreetMap", opacity: 0.9,
     query: { hydrants: true },
     note: "OpenStreetMap fire hydrants. Loads at zoom ≥ 14.",
+    // NEW-1 stacking role (lib/mapStack.js): Hydrant points.
+    role: "point",
     group: "utilities", mergeGroup: "fire_hydrants", order: 3,
   },
   coh_hydrants: {
@@ -356,6 +391,8 @@ export const EVIDENCE = {
     url: "https://mycity2.houstontx.gov/pubgis02/rest/services/HoustonMap/Public_safety/MapServer",
     layers: [9], opacity: 0.95, county: "harris",
     note: "City of Houston Public Works fire hydrants.",
+    // NEW-1 stacking role (lib/mapStack.js): Hydrant symbols (server-rendered).
+    role: "point",
     group: "utilities", mergeGroup: "fire_hydrants", order: 3,
   },
   mapillary: {
@@ -371,6 +408,8 @@ export const EVIDENCE = {
     sublabel: "Detected in crowdsourced street-level photos.",
     source: "Mapillary", opacity: 0.95,
     note: "Pole & fire-hydrant detections from crowdsourced street-level photos. Loads at zoom ≥ 16.",
+    // NEW-1 stacking role (lib/mapStack.js): Street-imagery detections — point symbols.
+    role: "point",
     group: "utilities", mergeGroup: "fire_hydrants", order: 3,
   },
 };
@@ -420,6 +459,8 @@ export const TERRAIN = {
     },
     opacity: 0.55, source: "USGS 3DEP",
     note: "Low = blue, high = red. Colors are RELATIVE TO THE CURRENT VIEW — the ramp re-stretches to the lowest/highest ground on screen, so blue here ≠ blue after panning. LiDAR bare-earth (NAVD88); screening only — verify with survey. The cross-section tool samples the same data. Loads at site/neighborhood zoom.",
+    // NEW-1 stacking role (lib/mapStack.js): A continuous hillshade/relief WASH — the definition of a fill that buries what it covers.
+    role: "area",
     group: "base", order: 1,
   },
   /* B704: labeled 1-ft contour lines generated CLIENT-SIDE from the raw 3DEP grid
@@ -431,6 +472,8 @@ export const TERRAIN = {
     kind: "contours", label: "Contour lines (1 ft)",
     source: "USGS 3DEP", opacity: 0.9,
     note: `1-ft lines traced from LiDAR bare-earth ground heights (NAVD88), heavier line every 5 ft. Lines BREAK where the LiDAR has no data (water). Loads at zoom ≥ ${TERRAIN_MIN_ZOOM}. Screening only — verify with survey; agrees with the cross-section tool (same data).`,
+    // NEW-1 stacking role (lib/mapStack.js): THE owner case: 1-ft contour hairlines must cross his buildings, not hide behind them.
+    role: "line",
     group: "base", order: 2,
   },
   /* B705: downhill drainage-direction arrows from the same worker grid — which way
@@ -440,6 +483,8 @@ export const TERRAIN = {
     kind: "flowdir", label: "Water flow direction", // B760: plain label; arrow semantics live in the ⓘ note
     source: "USGS 3DEP", opacity: 0.9,
     note: `Downhill direction of the ground surface — bolder/longer arrow = steeper fall. Flat or unclear spots get no arrow rather than a guess. Loads at zoom ≥ ${TERRAIN_MIN_ZOOM}. Screening only — confirm drainage with your civil engineer.`,
+    // NEW-1 stacking role (lib/mapStack.js): Flow arrows — strokes, and useless buried under a pad.
+    role: "line",
     group: "base", order: 3,
   },
 };
@@ -466,6 +511,8 @@ export const JURISDICTIONS = {
     kind: "vector", label: "County boundaries",
     url: JURISDICTION_SOURCES.county.url, minZoom: 6, color: "#374151", weight: 2.4, opacity: 0.85,
     note: "Texas county lines (TxDOT). A has-jurisdiction boundary, not a service area.",
+    // NEW-1 stacking role (lib/mapStack.js): Boundary outlines (fill: false).
+    role: "line",
     group: "jurisdiction", order: 1,
   },
   // B761: city limits + ETJ are presented as ONE panel row ("City limits & ETJ") that
@@ -479,12 +526,16 @@ export const JURISDICTIONS = {
     note: "Texas city limits (TxGIO). Inside = in the city; a parcel in no city is unincorporated. NOT proof of utility service.",
     mergeWith: "jur_etj", mergeLabel: "City limits & ETJ", // B761: the composite panel row
     infoCaveat: "A boundary means the city HAS JURISDICTION here (it can tax / regulate) — not that it serves or connects utilities to a parcel.",
+    // NEW-1 stacking role (lib/mapStack.js): Boundary outlines.
+    role: "line",
     group: "jurisdiction", order: 2,
   },
   jur_etj: {
     kind: "vector", label: "City ETJ (Houston region)",
     url: HGAC_ETJ.url, minZoom: 9, color: "#1d4ed8", dash: true, weight: 1.6, opacity: 0.85, // B761: same hue as city, dashed
     note: "City ETJ across the H-GAC 13-county region — blank elsewhere (there is no statewide ETJ layer). ETJ = a city's reach OUTSIDE its limits; not annexation and not utility service.",
+    // NEW-1 stacking role (lib/mapStack.js): Boundary outlines (dashed).
+    role: "line",
     group: "jurisdiction", order: 2,
   },
   jur_isd: {
@@ -496,6 +547,8 @@ export const JURISDICTIONS = {
     url: JURISDICTION_SOURCES.isd.url, minZoom: 8, color: "#7c3aed", weight: 1.6, opacity: 0.85,
     note: "Texas school-district boundaries (TEA, SY 2022-23). A taxing/attendance boundary — NOT a service network. Verify with the district.",
     infoCaveat: "ISD lines are TAXING / attendance boundaries (usually the biggest line on a Texas tax bill) — not a utility service area.",
+    // NEW-1 stacking role (lib/mapStack.js): Boundary outlines.
+    role: "line",
     group: "jurisdiction", order: 4, // last — reference-only, default-hidden like every layer
   },
   jur_mud: {
@@ -519,6 +572,8 @@ export const JURISDICTIONS = {
     // B760: the has-jurisdiction caveat that used to be the Jurisdictions group paragraph now
     // survives ONLY here (and on the merged limits/ETJ row), where a district outline is a real trap.
     infoCaveat: "A boundary means the district HAS JURISDICTION here (it can tax / regulate) — not that it serves or connects water/sewer to a parcel.",
+    // NEW-1 stacking role (lib/mapStack.js): Agency /export paints district boundaries with a tinted fill.
+    role: "area",
     group: "utilities", mergeGroup: "water_sewer", order: 1,
   },
   jur_road_authority: {
@@ -540,6 +595,8 @@ export const JURISDICTIONS = {
     hoverIdentify: true, hoverTitle: "Road", hoverSource: "TxDOT Roadway Inventory",
     hoverFields: [{ names: ["RDWAY_MAINT_AGCY"], label: "maintained by" }, { names: ["HSYS"] }],
     note: "Who maintains each road, from the TxDOT Roadway Inventory — City / County / State (TxDOT) / Toll / Federal, with an honest Unknown where the data can't classify it. Loads zoomed in to about street level (zoom ≥ 14). Verify access/ROW with the jurisdiction.",
+    // NEW-1 stacking role (lib/mapStack.js): Per-maintainer coloured roadway centrelines.
+    role: "line",
     group: "jurisdiction", order: 3,
   },
 };
@@ -560,6 +617,8 @@ export const AHJ_LAYERS = {
     layers: null,
     note: "Flood-control channel right-of-way (HCFCD).",
     opacity: 0.8, county: "harris",
+    // NEW-1 stacking role (lib/mapStack.js): Channel RIGHT-OF-WAY polygons dominate this export (the channel itself is drawn inside its ROW), so it is a fill — under the plan.
+    role: "area",
     group: "flood", order: 2,
     // B1076 — district-scoped: this row is listed ONLY when HCFCD is the governing
     // drainage authority. Before this, it was offered on a Waller site where HCFCD
@@ -587,6 +646,8 @@ export const AHJ_LAYERS = {
     layers: [2, 6], // 2 Gravity Main (≥~1:40k), 6 Force Main
     note: "City of Houston sanitary sewer (geogimstest). COH only — blank outside the city. Zoom in (~1:40k) to see gravity mains.",
     opacity: 0.85, county: "harris",
+    // NEW-1 stacking role (lib/mapStack.js): Wastewater mains.
+    role: "line",
     group: "utilities", mergeGroup: "water_sewer", order: 1,
   },
   coh_storm: {
@@ -596,6 +657,8 @@ export const AHJ_LAYERS = {
     layers: [22, 23, 24, 904], // Pipe (≥~1:40k), Open Channel, Culvert, Linear Drain
     note: "City of Houston storm drainage (geogimstest). COH only — blank outside the city. Zoom in (~1:40k) to see pipes.",
     opacity: 0.85, county: "harris",
+    // NEW-1 stacking role (lib/mapStack.js): Storm sewer lines.
+    role: "line",
     group: "flood", order: 6,
     // Local tier, but NOT district-scoped (`district` deliberately absent): a municipal
     // storm system isn't a drainage district, so it must never be suppressed by the
@@ -617,6 +680,8 @@ export const AHJ_LAYERS = {
     layers: [0, 1], // 0 Water Lines, 1 Water Main (both draw at any zoom)
     note: "City of Houston potable water (geogimstest). COH only — blank outside the city.",
     opacity: 0.85, county: "harris",
+    // NEW-1 stacking role (lib/mapStack.js): Water mains.
+    role: "line",
     group: "utilities", mergeGroup: "water_sewer", order: 1,
   },
 
@@ -643,6 +708,8 @@ export const AHJ_LAYERS = {
     layers: [108, 121, 116, 112, 2],
     note: "The district's own streams, sub-watersheds, published BFE lines and permitted outfalls.",
     opacity: 0.8, county: "waller",
+    // NEW-1 stacking role (lib/mapStack.js): 116 = sub-watershed polygons (fill, under); 108/121 streams, 112 BFE lines, 2 outfalls (strokes/points, over).
+    roleLayers: { area: [116], line: [108, 121, 112, 2] },
     group: "flood", order: 3,
     floodTier: "local", district: "bkdd", agency: "BKDD",
     stallMs: 25000,
@@ -657,6 +724,8 @@ export const AHJ_LAYERS = {
     color: "#b45309", weight: 2,
     note: "Recorded district drainage easements — click one for its width and recorded exhibit.",
     opacity: 0.85, county: "waller",
+    // NEW-1 stacking role (lib/mapStack.js): Recorded easement bands — filled polygons.
+    role: "area",
     group: "flood", order: 4,
     // B1092 — clickable ON THE PLANNER CANVAS too, not just the map finder. The planner's
     // Leaflet backdrop is pointer-events:none (the SVG canvas owns every click), so the
@@ -677,6 +746,8 @@ export const AHJ_LAYERS = {
     layers: [19, 20, 17, 5, 6, 4, 10],
     note: "Master-plan study results and proposed (unbuilt) works — advisory, never the regulatory flood map.",
     opacity: 0.6, county: "waller",
+    // NEW-1 stacking role (lib/mapStack.js): Study floodplains + proposed detention are fills (under); conveyance + proposed channel improvements are strokes (over).
+    roleLayers: { area: [19, 20, 17, 4, 10], line: [5, 6] },
     group: "flood", order: 5,
     floodTier: "advisory", district: "bkdd", agency: "BKDD",
     // EXPLICIT STUDY-AREA GATE (B1075). Every DMP layer returned nothing at Tsakiris
@@ -699,6 +770,8 @@ export const AHJ_LAYERS = {
     imageFallback: { url: GIS_SOURCES.nhdHydro.serviceUrl, layers: null },
     note: "Where water physically runs — an inventory, not a regulatory floodplain and not a channel capacity.",
     opacity: 0.85,
+    // NEW-1 stacking role (lib/mapStack.js): Stream/canal/ditch centrelines.
+    role: "line",
     group: "flood", order: 1,
     floodTier: "hydrography", agency: "USGS",
     canvasIdentify: true, // B1092 — the channel centreline answers a click on the planner canvas
@@ -998,8 +1071,25 @@ export function identifyOverlaysAt(refs, overlays, at, { limit = 3 } = {}) {
   return out;
 }
 
+/* NEW-1 — a ROLE-SPLIT raster layer's ref: two live export layers (one per band), presented
+ * to everything upstream as one. Deliberately NOT an `L.LayerGroup`: layers.js must stay
+ * Leaflet-free at module scope — its unit tests import it in a DOM-less Node environment, and a
+ * static `import L from "leaflet"` here would break every one of them. The composite therefore
+ * implements exactly what a ref is ever asked for: setOpacity, setWidth (a no-op here) and its
+ * parts, which the release path tears down individually. `slots` is live — the proxy→direct
+ * fallback replaces an entry in place, so the composite always points at the current layers. */
+const rasterComposite = (slots) => ({
+  __pfParts: slots,
+  setOpacity(o) { slots.forEach((l) => { if (l && l.setOpacity) l.setOpacity(o); }); },
+});
+
 export function syncOverlayLayers(map, overlays, refs, opts = {}) {
-  const { pane = "envpane", paneZ = 350, onError, onStatus, admit } = opts;
+  /* NEW-1 — panes come from the STACKING MODEL (lib/mapStack.js), not from a caller's
+   * preference. `panes` names the host pane per band; a surface with no site elements (the
+   * map finder) may point both bands at one pane and still gets lines above areas, because
+   * the ORDER is the model's and only the hosting is the surface's. The legacy single
+   * `pane`/`paneZ` pair is still honoured so nothing that hasn't been migrated breaks. */
+  const { pane = "envpane", paneZ = 350, panes = null, onError, onStatus, admit } = opts;
   if (!map) return;
   // wait for a ready, non-zero-size map before adding raster layers
   if (!map._loaded) { map.whenReady(() => syncOverlayLayers(map, overlays, refs, opts)); return; }
@@ -1013,11 +1103,29 @@ export function syncOverlayLayers(map, overlays, refs, opts = {}) {
     return;
   }
   if (!map.getPane(pane)) map.createPane(pane).style.zIndex = paneZ;
+  /* Both band panes must EXIST before any layer asks for one. A pane the host didn't
+   * pre-create (the map finder, an unmigrated surface) is made here inside Leaflet's own
+   * map pane, area below line — the model's order, on one surface. */
+  const ensurePane = (name, z) => { if (name && !map.getPane(name)) map.createPane(name).style.zIndex = z; };
+  if (panes) {
+    ensurePane(panes.area || PANE_AREA, paneZ);
+    ensurePane(panes.areaLabel || PANE_AREA_LABEL, paneZ + 10);
+    ensurePane(panes.line || PANE_LINE, paneZ + 20);
+    ensurePane(panes.lineLabel || PANE_LINE_LABEL, paneZ + 30);
+  }
+  /* A layer's panes, straight off its declared role. `panes` absent → every layer keeps the
+   * caller's single legacy pane (no behaviour change for a surface not yet migrated). */
+  const paneOf = (role) => (panes ? panesForRole(role, panes) : { pane, labelPane: null });
   const fail = (k, cfg, msg) => { refs[k] = null; onStatus && onStatus(k, "failed", msg); onError && onError(cfg, msg); };
 
   Object.entries(ALL_LAYERS).forEach(([k, cfg]) => {
     const st = overlays[k], cur = refs[k];
     if (!st) return;
+    // Every non-split layer renders in exactly one band; a split one (mapStack
+    // ROLE_SPLIT_NOTE) is handled inside the raster branch, one request per role.
+    const cfgRoles = rolesOf(cfg);
+    const primary = paneOf(cfgRoles.length ? cfgRoles[cfgRoles.length - 1].role : "area");
+    const lyrPane = primary.pane, lyrLabelPane = primary.labelPane;
     // NEW-3 — `admit` lets the caller stage which layers may START loading on this pass, so
     // the first paint isn't gated behind a fan-out of hundreds of GIS requests. It gates only
     // the ADD path: a layer turned OFF is still torn down immediately, and a live layer still
@@ -1050,7 +1158,8 @@ export function syncOverlayLayers(map, overlays, refs, opts = {}) {
         // layer (the releaseLayer discipline). A failed import fails LOUDLY, like a probe.
         loadTerrain().then(({ contourLayer, flowLayer }) => {
           if (refs[k] !== "pending" || !overlays[k] || !overlays[k].on) return;
-          const lyr = cfg.kind === "contours" ? contourLayer(cfg, report) : flowLayer(cfg, report);
+          const tOpts = { pane: lyrPane, labelPane: lyrLabelPane };
+          const lyr = cfg.kind === "contours" ? contourLayer(cfg, report, tOpts) : flowLayer(cfg, report, tOpts);
           lyr.setOpacity(st.opacity); lyr.addTo(map); refs[k] = lyr;
         }, (e) => { if (refs[k] === "pending") fail(k, cfg, `${cfg.label}: ${(e && e.message) || "terrain module failed to load"}`); });
       } else if (cfg.kind === "vector") {
@@ -1059,11 +1168,12 @@ export function syncOverlayLayers(map, overlays, refs, opts = {}) {
         // identify + zoom-gated name labels (B695). No health probe — the pull
         // self-reports, and a hard failure engages the injected LIVE fallback (the
         // previous esri-leaflet path, with its retry/backoff) so nothing blanks.
-        const lyr = cachedVectorLayer(k, cfg, st.opacity, pane, onStatus, {
+        const lyr = cachedVectorLayer(k, cfg, st.opacity, lyrPane, onStatus, {
           interactive: !!opts.identifyOk,
           identifyOk: opts.identifyOk,
+          labelPane: lyrLabelPane, // a layer's name labels ride in its own band (mapStack)
           buildFallback: () => {
-            const fb = buildFeatureLayer(cfg, st.opacity, pane, { interactive: !!opts.identifyOk, identifyOk: opts.identifyOk });
+            const fb = buildFeatureLayer(cfg, st.opacity, lyrPane, { interactive: !!opts.identifyOk, identifyOk: opts.identifyOk });
             // esri-leaflet FeatureLayers have no setOpacity (raster-only) — same
             // flat-style shim the primary esriFeature branch installs below, so the
             // panel's opacity slider keeps working after a fallback engagement.
@@ -1082,7 +1192,7 @@ export function syncOverlayLayers(map, overlays, refs, opts = {}) {
         // the agency /export raster (imageFallback) when zoomed far out — switch re-evaluated per
         // moveend. No health probe (the pull self-reports); the raster fallback is built here so
         // vectorOverlay.js stays esri-free.
-        const lyr = cachedPipelineLayer(k, cfg, st.opacity, pane, onStatus, {
+        const lyr = cachedPipelineLayer(k, cfg, st.opacity, lyrPane, onStatus, {
           interactive: !!opts.identifyOk,
           identifyOk: opts.identifyOk,
           // The far-out raster: a direct-to-agency dynamicMapLayer from imageFallback. Direct
@@ -1090,7 +1200,7 @@ export function syncOverlayLayers(map, overlays, refs, opts = {}) {
           // <img> — the proxy caching win isn't worth a swap dance inside a child layerGroup.
           buildRaster: () => {
             const fb = cfg.imageFallback || {};
-            return EL.dynamicMapLayer(dynamicLayerOptions({ url: fb.url, layers: fb.layers }, st.opacity, pane, { proxy: false }));
+            return EL.dynamicMapLayer(dynamicLayerOptions({ url: fb.url, layers: fb.layers }, st.opacity, lyrPane, { proxy: false }));
           },
         });
         if (lyr) { lyr.addTo(map); refs[k] = lyr; }
@@ -1098,7 +1208,7 @@ export function syncOverlayLayers(map, overlays, refs, opts = {}) {
       } else if (cfg.kind === "pipelineCorridor") {
         // Cached easement-corridor bands (B752): buffer the SAME pipeline geometry (shared cache),
         // drawn beneath the centerlines. Vector-only; carries an editable corridor width.
-        const lyr = cachedCorridorLayer(k, cfg, st.opacity, pane, onStatus, { widthFt: st.widthFt });
+        const lyr = cachedCorridorLayer(k, cfg, st.opacity, lyrPane, onStatus, { widthFt: st.widthFt });
         if (lyr) { lyr.addTo(map); refs[k] = lyr; }
         else fail(k, cfg, `${cfg.label}: no pipeline source registered`);
       } else {
@@ -1113,7 +1223,7 @@ export function syncOverlayLayers(map, overlays, refs, opts = {}) {
           if (!map || !map._loaded) { refs[k] = null; return; } // map torn down mid-probe — don't addTo a dead map (B55)
           let lyr;
           if (cfg.kind === "esriFeature") {
-            lyr = buildFeatureLayer(cfg, st.opacity, pane, { interactive: !!opts.identifyOk, identifyOk: opts.identifyOk });
+            lyr = buildFeatureLayer(cfg, st.opacity, lyrPane, { interactive: !!opts.identifyOk, identifyOk: opts.identifyOk });
             // A per-feature-styled layer (road authority) must re-derive its WHOLE style on an
             // opacity change — re-applying the style function (not a flat {opacity}) so the
             // per-maintainer colors survive AND newly fetched tiles keep them. A flat-styled
@@ -1135,43 +1245,66 @@ export function syncOverlayLayers(map, overlays, refs, opts = {}) {
           } else {
             // Raster export-image layer (FEMA/wetlands/utilities). Route it through the B445
             // cache proxy by default; build a direct-to-agency layer as the fallback.
+            //
+            // NEW-1 — ROLE-SPLIT. A service that publishes BOTH fills and strokes (FEMA: zone
+            // polygons + boundary lines; BKDD: sub-watersheds + streams/BFE) is ONE panel row but
+            // TWO export requests, each into its own band's pane, so the fill lands under the plan
+            // and the lines land over it. A single-role layer takes exactly the path it always did
+            // — `parts` has one entry and no composite is built.
             const useProxy = gisProxyEnabled();
-            const buildRaster = (proxy) => (cfg.kind === "esriImage"
-              ? EL.imageMapLayer(imageLayerOptions(cfg, st.opacity, pane, { proxy }))
-              : EL.dynamicMapLayer(dynamicLayerOptions(cfg, st.opacity, pane, { proxy })));
+            const parts = cfgRoles.length ? cfgRoles : [{ role: "area", layers: cfg.layers ?? null }];
+            const slots = []; // one live layer per role; the proxy→direct swap replaces in place
+            const partOf = (part) => (part.layers == null || part.layers === cfg.layers ? cfg : { ...cfg, layers: part.layers });
+            const buildRaster = (part, proxy) => {
+              const pc = partOf(part), pp = paneOf(part.role).pane;
+              return cfg.kind === "esriImage"
+                ? EL.imageMapLayer(imageLayerOptions(pc, st.opacity, pp, { proxy }))
+                : EL.dynamicMapLayer(dynamicLayerOptions(pc, st.opacity, pp, { proxy }));
+            };
             // Honest status wiring (NEW-3/B790): status starts at "loading" and settles ONLY on the
             // real 'load' event; a stall watchdog flips it to amber "slow" if the export never lands
             // (a degraded agency fires no error), and a real error → "failed". The status machine
             // is the pure wireRasterStatus (layerRequest.js); the leaflet-specific proxy→direct swap
             // stays here as onProxyFallback.
-            const wireRaster = (l, proxy) => {
+            const wireRaster = (l, proxy, i) => {
               wireRasterStatus(l, {
                 k, label: cfg.label, proxy,
                 onStatus: (id, s, msg) => onStatus && onStatus(id, s, msg),
                 reportAge: () => reportCacheAge(l, k, onStatus),
-                isActive: () => refs[k] === l,
+                // A split layer's ref is the composite, so "am I still the live layer?" is asked
+                // of this ROLE's slot — never of refs[k], which is never the part itself.
+                isActive: () => slots[i] === l && (refs[k] === l || (refs[k] && refs[k].__pfParts === slots)),
                 // B1079 — a registry row may set its own stall window. BKDD's cold ArcGIS
                 // Server spin-up runs 16.5–18.3 s; at the shared 15 s default the row would go
                 // amber on every first visit to a perfectly healthy source.
                 stallMs: cfg.stallMs ?? RASTER_STALL_MS,
                 onProxyFallback: () => {
                   try { map.removeLayer(l); } catch (_) {}
-                  const direct = buildRaster(false);
-                  wireRaster(direct, false);
+                  const direct = buildRaster(parts[i], false);
+                  slots[i] = direct;
+                  wireRaster(direct, false, i);
                   if (direct.setOpacity) direct.setOpacity(st.opacity);
                   // "loading", not an optimistic "loaded": the direct layer's own load / requesterror /
                   // stall-watchdog settles the honest status (no more false blue on add).
-                  direct.addTo(map); refs[k] = direct; onStatus && onStatus(k, "loading");
+                  direct.addTo(map);
+                  if (refs[k] === l) refs[k] = direct; // single-role: the ref IS the layer
+                  onStatus && onStatus(k, "loading");
                 },
               });
             };
-            lyr = buildRaster(useProxy);
-            wireRaster(lyr, useProxy);
-            if (lyr.setOpacity) lyr.setOpacity(st.opacity);
+            parts.forEach((part, i) => {
+              const l = buildRaster(part, useProxy);
+              slots[i] = l;
+              wireRaster(l, useProxy, i);
+              if (l.setOpacity) l.setOpacity(st.opacity);
+              l.addTo(map);
+            });
             // Report "loading" (NOT an optimistic "loaded"): the real 'load' event flips the row to
             // "loaded", and the stall watchdog flips it to honest "slow" if the export never lands —
             // the fix for the "blue as if it's working over a blank map" bug (NEW-3/B790).
-            lyr.addTo(map); refs[k] = lyr; onStatus && onStatus(k, "loading");
+            refs[k] = slots.length > 1 ? rasterComposite(slots) : slots[0];
+            lyr = refs[k];
+            onStatus && onStatus(k, "loading");
           }
         }).catch((e) => { if (refs[k] === "pending") fail(k, cfg, `${cfg.label}: ${(e && e.message) || "probe failed"}`); }); // don't leak an unhandled rejection (B55)
       }
@@ -1182,7 +1315,10 @@ export function syncOverlayLayers(map, overlays, refs, opts = {}) {
       // flight re-adds a fresh one on resolve, so a toggled-off layer quietly put itself
       // back. releaseLayer drops the raster DOM, empties the tile cache, and tombstones the
       // layer so a late resolve can't resurrect it.
-      releaseLayer(map, cur);
+      // NEW-1 — a role-split layer is two live layers; release BOTH, or the band that isn't
+      // refs[k] keeps its tiles and its in-flight request (the exact resurrection releaseLayer exists to stop).
+      if (cur.__pfParts) cur.__pfParts.forEach((p) => { if (p) releaseLayer(map, p); });
+      else releaseLayer(map, cur);
       refs[k] = null; onStatus && onStatus(k, null);
     } else if (cur && cur !== "pending") {
       if (cur.setOpacity) cur.setOpacity(st.opacity);

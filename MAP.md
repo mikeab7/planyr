@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-07-30 @ `836a14d` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-07-30 @ `89f09c3` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_385 source files mapped._
+_387 source files mapped._
 
 ## infra
 
@@ -305,6 +305,8 @@ _385 source files mapped._
   - _exports_: `assessBuildability`, `DEFAULT_BUILDABILITY_RULES`, `loadBuildabilityRules`, `LOMR_NOTE`, `OUTSIDE_FLOODPLAIN_FFE_NOTE`, `requiredFfe`, `saveBuildabilityRules`, `SITE_BASED_FFE_NOTE`, `siteBasisFfe`, `suggestedFfe`, `WETLANDS_404_NOTE`
 - **`src/workspaces/site-planner/lib/buildableEnvelope.js`** — PR-G buildable envelope: the hard limits a detention pond must live inside (drainage cap · floodway no-fill · outfall/tailwater) + a soft excavation screen; gates the Optimize solver and the green verdict. Exports `rimCapElevFt`, `assessBuildability`, `unbuildableHeading`, `makeItBuildableOptions`, `unbuildableNote`, `DEFAULT_MAX_EXCAV_DEPTH_FT`.
   - _exports_: `assessBuildability`, `DEFAULT_MAX_EXCAV_DEPTH_FT`, `ENVELOPE_TOL_FT`, `makeItBuildableOptions`, `NO_RISE_CERT_DEF`, `requirementNote`, `rimCapElevFt`, `unbuildableHeading`, `unbuildableNote`
+- **`src/workspaces/site-planner/lib/buildingFloodExposure.js`** — NEW-3 per-building floodplain answer as a NUMBER: reuses the B707/B712 zone classification + gridIntersect to report each footprint's overlap by area and percent, its governing zone/BFE off the SAME provider chain the mitigation ledger prices against, and four distinct honest-unknown states so a failed or un-run flood query never reads as clear
+  - _exports_: `buildingFloodExposure`, `EXPOSURE_NOTE`, `EXPOSURE_STATE_LABEL`, `exposureHeadline`, `FLOOD_CLASS_LABEL`, `FLOOD_CLASS_ORDER`, `footprintArea`, `isSfhaClass`, `wseEnvFromElev`
 - **`src/workspaces/site-planner/lib/buildingGrid.js`** — Pure structural column-grid + dock-door layout: uniform in-band bays, pinned speed bays, doors avoiding column lines
   - _exports_: `computeBuildingGrid`, `divideSpan`, `GRID_DEFAULTS`, `placeDockDoors`, `resolveGridSettings`
 - **`src/workspaces/site-planner/lib/buildingProps.js`** — Pure tiered building-property rules: sf-driven clear-height + slab-thickness defaults with per-building manual overrides
@@ -489,6 +491,8 @@ _385 source files mapped._
   - _exports_: `mapillaryRequestUrl`, `MLY_FIELDS`, `MLY_LIMIT`, `MLY_PROXY_PATH`, `pickDetections`
 - **`src/workspaces/site-planner/lib/mapLock.js`** — THE projection welding the planner's feet frame to the Web-Mercator basemap — scaled-Mercator feet↔lat/lng plus the matching ppf↔zoom, both anchored at the site origin
   - _exports_: `basemapWrapPoint`, `basemapWrapPointTransformed`, `exactContainerPoint`, `feetToLatLngPair`, `FT_PER_DEG`, `ftPerDeg`, `invMercDeg`, `lngLatToFeet`, `lockOffsetPx`, `mercDeg`, `ppfToZoom`, `REGISTRATION_SANITY_PX`, `registrationShift`, `sanitizeShift`, `tileNwFeet`, `zoomToPpf`
+- **`src/workspaces/site-planner/lib/mapStack.js`** — NEW-1 THE map stacking model: one fixed semantic order (basemap → GIS area fills → references → parcel → setback → elements → promoted references → GIS line strokes → labels → handles), the declared per-source area/line/point role + its role-split form, the two band pane names, and the audit that fails the build on an unclassified GIS source
+  - _exports_: `auditLayerRoles`, `CANVAS_Z`, `exportsOverPlan`, `GIS_ROLES`, `isRoleSplit`, `MAP_STACK`, `PANE_AREA`, `PANE_AREA_LABEL`, `PANE_LINE`, `PANE_LINE_LABEL`, `panesForRole`, `ROLE_SPLIT_NOTE`, `roleOverElements`, `ROLES_OVER_ELEMENTS`, `rolesOf`, `STACK_Z`, `stackOrder`, `SVG_TIERS`, `SVG_Z`, `tierForRole`
 - **`src/workspaces/site-planner/lib/mapSymbols.js`** — leaflet point symbology: the `pointToLayer` circleMarker factory every GeoJSON-consuming layer must pass, plus the `L.Icon.Default` image-path fix so an accidental default marker is a pin, not a broken image.
   - _exports_: `installDefaultMarkerIcon`, `pointToLayerFor`
 - **`src/workspaces/site-planner/lib/markupPick.js`** — pure Site-Planner markup hit-test + z-stack cycle (sibling of measureHit.js): the fill-aware grab rule (B920 — a closed markup grabs by interior only when filled, else stroke-only) and the smaller-area-first under-point stack + repeat/Alt-click cycle (B921)

@@ -5,6 +5,7 @@ import { COUNTIES, COUNTIES_MAP, candidateCountiesForPoint, countyKeyForName, ST
 import { ensureSnapshot, getSnapshot, snapshotVintage, onSnapshotChange, featureAtPoint, preferSnapshotForDisplay } from "./lib/parcelSnapshot.js";
 import { recordSourceResult, filterHealthyCandidates, isSourceOpen, isStatewideBackup } from "./lib/sourceHealth.js";
 import { syncOverlayLayers, withTileRetry, ALL_LAYERS, probeService } from "./lib/layers.js";
+import { PANE_AREA, PANE_LINE, PANE_AREA_LABEL, PANE_LINE_LABEL } from "./lib/mapStack.js";
 import { tileCacheLimit } from "./lib/tileBudget.js";
 import { boundTileCache, capTileCache, releaseLayer } from "./lib/tileLifecycle.js";
 import { BASEMAPS } from "./lib/basemaps.js";
@@ -633,9 +634,14 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
   /* overlay layers (FEMA, NWI, TxRRC, local utilities) — toggle + opacity.
      The add/remove/opacity logic is shared with the planner (one source). The
      pane sits above imagery tiles (200), below the vector pane (400) so parcel
-     lines / site plans stay on top. */
+     lines / site plans stay on top.
+     NEW-1 — the SAME two stacking bands the planner uses (lib/mapStack.js), both hosted in
+     this map's own pane stack: there are no site elements on the finder, so nothing has to
+     rise above the drawing — but AREA still paints under LINE, so a floodplain fill can't
+     bury the stream running through it. syncOverlayLayers creates the panes it is named. */
   useEffect(() => {
     const sync = () => syncOverlayLayers(mapRef.current, overlays, overlayRefs.current, {
+      panes: { area: PANE_AREA, areaLabel: PANE_AREA_LABEL, line: PANE_LINE, lineLabel: PANE_LINE_LABEL },
       onStatus: (id, state, msg, extra) => setLayerStatus && setLayerStatus((s) => ({ ...s, [id]: state ? { state, msg, ts: extra?.ts ?? null, stale: extra?.stale ?? false } : null })),
       onError: (cfg, msg) => setErr(`“${cfg.label}” layer failed: ${msg || "service may be down or moved"}.`),
       // Boundary hover/click identify (B695) — read live per event; parcel-select mode
