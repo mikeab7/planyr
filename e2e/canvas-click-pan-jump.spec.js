@@ -70,7 +70,7 @@ async function doubleTap(page, x, y) {
 }
 
 test.describe("a click on empty canvas never pans the map (NEW-3, logged out)", () => {
-  test("closing the inspector with a background CLICK holds the drawing still", async ({ page }) => {
+  test("a background CLICK holds the drawing still (and, since B1188, leaves the inspector open)", async ({ page }) => {
     const errors = [];
     page.on("pageerror", (e) => errors.push(String(e)));
     await startBlank(page);
@@ -97,10 +97,17 @@ test.describe("a click on empty canvas never pans the map (NEW-3, logged out)", 
     await page.mouse.up();
     await page.waitForTimeout(350);
 
-    // The panel closing on a background click is intended — assert it still does.
-    await expect(panel(page)).toHaveCount(0);
+    // B1188 — the panel closing on a background click is NO LONGER intended, and asserting it
+    // would now assert the defect. The owner's rule: "NO pointer interaction with the map may
+    // change the panel's open/closed state. Not a click, not a drag, not a marquee, not a pan,
+    // not a deselect." So the inspector STAYS OPEN and swaps to its "Nothing selected" body, the
+    // dock keeps its width, and the deselect still happens. NEW-3's own invariant — the drawing
+    // does not move — is unchanged and still asserted below; it is simply satisfied a stronger
+    // way now, because there is no dock swap left for a gesture to race.
+    await expect(panel(page)).toBeVisible();
+    await expect(page.getByText(/Nothing selected/i)).toBeVisible();
     const closedLeft = await canvasLeft(page);
-    expect(closedLeft).toBeLessThan(openLeft); // the dock really did give the width back
+    expect(closedLeft).toBe(openLeft); // the dock never gave the width back — nothing to compensate
 
     const after = await feetScreenX(page, FX);
     // Diagnostic trail — makes a failure legible instead of "two numbers differ".
