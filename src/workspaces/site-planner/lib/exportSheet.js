@@ -339,7 +339,14 @@ export function createExportSheet(ctx) {
   const restyleExportClone = (root, sheetScale) => {
     if (!root) return;
     // NEW-3: acreage chips → exhibit annotation (dark ink + white halo, no pill).
-    root.querySelectorAll('[data-print-chip="acre"]').forEach((g) => {
+    // NEW-3 (measurements): the selector is the ATTRIBUTE, not one of its values, so a
+    // measurement's summary chip (data-print-chip="measure") restyles for paper through this
+    // exact path — one print treatment for every chip on the drawing, not a parallel one that
+    // could drift. The plate (data-chip-bg) carries both the dark fill AND the measurement's
+    // coloured keyline, so dropping it drops all of the screen chrome in one step; the
+    // measurement's own line keeps the colour on paper. The subordinate detail line is marked
+    // data-chip-sub and prints a shade lighter so the headline still leads.
+    root.querySelectorAll("[data-print-chip]").forEach((g) => {
       g.querySelectorAll("[data-chip-bg]").forEach((bg) => bg.remove());
       g.querySelectorAll("[data-chip-text]").forEach((t) => {
         t.setAttribute("fill", PAL.ink);
@@ -347,6 +354,12 @@ export function createExportSheet(ctx) {
         t.setAttribute("stroke-width", "3"); // normalized by the stroke-thinning pass below
         t.setAttribute("paint-order", "stroke");
         if (t.style) { t.style.fill = ""; t.style.fontWeight = "600"; }
+        // The subordinate line stays subordinate on paper: same ink, lighter weight + opacity,
+        // so the headline number still reads first at arm's length.
+        if (t.hasAttribute("data-chip-sub")) {
+          t.setAttribute("opacity", "0.72");
+          if (t.style) t.style.fontWeight = "500";
+        }
       });
     });
     // NEW-3 secondary: lighten dock aprons so building faces don't read busy.

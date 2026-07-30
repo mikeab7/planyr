@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { docxToText } from "../src/shared/files/docxText.js";
-import { parseTracts, parseCalls, callsToPath, pathCloses } from "../src/workspaces/site-planner/lib/metesAndBounds.js";
+import { parseTracts, parseCalls, callsToPath, pathCloses } from "../src/workspaces/site-planner/lib/deedParse.js";
 
 const ab = (rel) => {
   const b = readFileSync(fileURLToPath(new URL(rel, import.meta.url)));

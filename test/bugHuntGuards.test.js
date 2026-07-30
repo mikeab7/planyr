@@ -309,14 +309,17 @@ describe("markup hit-area / callout padding / live color picker (B155 open-path 
     // session commit hook (Standards uses it to promote to the account scope once, not per shade).
     expect(src).toMatch(/const livePick = \(apply, hist = true, commit = null\) =>/);
     expect(src).toMatch(/onInput:\s+\(e\) => \{ if \(hist && !pickSnapRef\.current\) \{ pushHistory\(\); pickSnapRef\.current = true; \}/);
-    // Every colour control goes through `colorCtl` = livePick plus the discrete swatch path. 19 are
-    // the full <ColorField>; the 20th is the multi-selection "Mixed" picker, which spreads livePick
+    // Every colour control goes through `colorCtl` = livePick plus the discrete swatch path. 23 are
+    // the full <ColorField>; the 24th is the multi-selection "Mixed" picker, which spreads livePick
     // into the same <ColorField> so the chip can carry its hatched no-single-colour state.
-    // (NEW-1 added two: the setback line's colour as a Standards default and as a per-parcel override.)
+    // (NEW-1 added two: the setback line's colour as a Standards default and as a per-parcel override.
+    //  The measurement-styling item added four more — a measurement's line + fill colour in its
+    //  Properties panel, and the same two as Standards defaults — routed through the SAME shared
+    //  control so measurements inherit the recently-used-colours list like everything else.)
     expect(src).toMatch(/const colorCtl = \(apply, hist = true, commit = null\) => \(\{\s*\n\s*pick: livePick\(apply, hist, commit\),/);
-    expect((src.match(/\{\.\.\.colorCtl\(\(v\) =>/g) || []).length).toBe(19);
+    expect((src.match(/\{\.\.\.colorCtl\(\(v\) =>/g) || []).length).toBe(23);
     expect((src.match(/pick=\{livePick\(\(v\) =>/g) || []).length).toBe(1);
-    expect((src.match(/<ColorField /g) || []).length).toBe(20);
+    expect((src.match(/<ColorField /g) || []).length).toBe(24);
     // A swatch click is a DISCRETE commit: exactly one undo frame, then the color is recorded.
     expect(src).toMatch(/onSwatch: \(v\) => \{ if \(hist\) pushHistory\(\); apply\(v\); pushRecent\(v\);/);
     // NEW-4 (bug) — the wheel picks LIVE, so `change` fires for EVERY shade the cursor crosses.
@@ -333,6 +336,9 @@ describe("markup hit-area / callout padding / live color picker (B155 open-path 
     expect((src.match(/colorCtl\(\(v\) => draftTypeStd\([^)]*\), false\)/g) || []).length).toBe(2);
     // the three Standards → Parcels default swatches (boundary colour, boundary fill, setback colour)
     expect((src.match(/colorCtl\(\(v\) => draftParcelStd\([^)]*\), false\)/g) || []).length).toBe(3);
+    // the two Standards → Measurements default swatches (line colour, area fill colour) — same
+    // draft-first, history-free path as every other Standards swatch.
+    expect((src.match(/colorCtl\(\(v\) => draftMeasureStd\([^)]*\), false\)/g) || []).length).toBe(2);
     expect(src).not.toMatch(/setParcelStd|liveTypeStyle/);
     // the per-pixel undo floods are gone: the OLD color-input handlers (inline pushHistory) no
     // longer exist (discrete controls like the "Fill the parcel" checkbox keep their pushHistory)
@@ -471,7 +477,8 @@ describe("markup hit-area / callout padding / live color picker (B155 open-path 
     // all three render sites are wired: markup line/polyline, easement (centerline/ring), road centerline
     expect(src).toMatch(/inlineLabelEls\(mkPts\(m\), m\.inlineLabel/);
     expect(src).toMatch(/inlineLabelEls\(easePathFeet, m\.inlineLabel/);
-    expect(src).toMatch(/inlineLabelEls\(roadDenseCenterline\(el, settings\), el\.inlineLabel/);
+    // NEW-2 — the road's dense centerline now also takes the junction vertices it must render SHARP.
+    expect(src).toMatch(/inlineLabelEls\(roadDenseCenterline\(el, settings, sharpFor\(el\)\), el\.inlineLabel/);
   });
 
   it("B678: inline-label per-feature controls (spacing/size/halo) + screen-space self-thinning", () => {

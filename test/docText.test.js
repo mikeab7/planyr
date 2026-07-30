@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "fs";
 import { fileURLToPath } from "url";
 import { docToText, cleanWordText } from "../src/shared/files/docText.js";
-import { parseTracts } from "../src/workspaces/site-planner/lib/metesAndBounds.js";
+import { parseTracts } from "../src/workspaces/site-planner/lib/deedParse.js";
 
 // Read a fixture file off disk into a clean ArrayBuffer (same helper the docx tests use).
 const ab = (rel) => {

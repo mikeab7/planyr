@@ -84,9 +84,15 @@ import ColorField from "../../shared/ui/ColorField.jsx";
 const StandardsBar = lazy(() => import("./components/StandardsBar.jsx"));
 import { loadUserPrefs, saveUserPrefs, applyPrefs, readMirror, setStandardPref, getStandardPref } from "./lib/userPrefs.js";
 import {
-  PARCEL_STD_KEYS, TYPE_STD_KEYS, applyAllStandards, allStandardsImpact, appliedObjectsLabel,
-  EMPTY_STD_DRAFT, draftParcelValue, draftTypeValue, withParcelDraft, withTypeDraft, draftDirty, mergeDraftIntoSettings,
+  PARCEL_STD_KEYS, TYPE_STD_KEYS, MEASURE_STD_KEYS, applyAllStandards, allStandardsImpact, appliedObjectsLabel,
+  EMPTY_STD_DRAFT, draftParcelValue, draftTypeValue, draftMeasureValue, withParcelDraft, withTypeDraft, withMeasureDraft,
+  draftDirty, mergeDraftIntoSettings,
 } from "./lib/standardsApply.js";
+import {
+  MEASURE_LINE, measureStyle, measureDefaultStyle, measureLabelVisible, measureLabelThreshold,
+  hasLabelThreshold, labelRevealNote,
+} from "./lib/measureStyle.js";
+import { measureLabelModel, measureChipLines, headlineIndex, measureSegments, fmtInt, fmtSf, fmtAcres, fmtFeet } from "./lib/measureLabel.js";
 import { pushRecent, notePick, commitPick } from "../../shared/ui/colorRecents.js";
 import { CLIP_KINDS, collectClipboard, clipboardBBox, pasteClipboard, translateCalloutBy, translateParcelBy } from "./lib/planClipboard.js";
 import { remapBondRefs } from "./lib/bondRemap.js";
@@ -115,8 +121,10 @@ import { TYPE, typeStyle, elStyle, parcelDefaultStyle, toHex6, byZ, zOrder, setP
 import { byZAsc, nextZ, Z_GAP } from "./lib/zOrder.js";
 import { reorderByZ, arrangeFlags } from "./lib/arrange.js";
 import { commonStyleState, selectionRingFeet } from "./lib/multiStyle.js";
-import { parseTracts, callsToPath, pathCloses, misclosure, bufferPolyline, offsetPolyline, ringsOverlap } from "./lib/metesAndBounds.js";
-import { solveDeedAlignment, gridConvergenceDeg, rotatePointsAbout, ringCentroid as deedCentroid, describeRotation } from "./lib/deedAlign.js";
+import { bufferPolyline, offsetPolyline, ringsOverlap } from "./lib/metesAndBounds.js";
+// The deed workflow (parser + parcel-alignment solver) is loaded on demand — nothing on the boot
+// path may static-import deedParse.js / deedAlign.js. See lib/deedLazy.js.
+import { loadDeed, deedNow } from "./lib/deedLazy.js";
 /* B1141 bundle-budget offset — the deed reader is loaded ON DEMAND (dynamic import at its one
  * call site in the deed-drop handler). It is a self-contained .docx/ZIP reader that only runs
  * once someone drops a deed or survey file, so it has no business on the boot path; the same
@@ -142,14 +150,14 @@ import { pondInspectorChips, POND_CHIP_DEFS, pondGroupSummary, POND_FLOOD_NOTES,
 import { classifyWseSource, classifyVerified } from "./lib/provenance.js";
 import { formatAge } from "./lib/gisCache.js";
 import { buildingNumbers, isBuilding, roadTravelWidth, bondedChildRot, roadStripBBox, rectRoadEndpoints, parcelOutline, parcelDisplayInfo, lineageConflicts } from "./lib/siteModel.js";
-import { roadCenterline, roadMinRadius, insertRoadVertex, removeRoadVertex, canRemoveRoadVertex, curbStrokePx, findRoadConnect, planRoadConnect, fixRoadRadii, teeGeometry, rectEdges, nearestRectEdge, weldCoverPolygon, roadRadiusConflicts, fitRoadCorners, nodeJunction } from "./lib/roadGeometry.js";
+import { roadCenterline, projectToRoadCenterline, roadMinRadius, insertRoadVertex, removeRoadVertex, canRemoveRoadVertex, curbStrokePx, findRoadConnect, planRoadConnect, fixRoadRadii, teeGeometry, rectEdges, nearestRectEdge, weldCoverPolygon, roadRadiusConflicts, fitRoadCorners, nodeJunction } from "./lib/roadGeometry.js";
 import { dissolveRings, clipPolylineOutside, clusterIds, regionPathD, rectOutlineCutSegments } from "./lib/roadNetwork.js";
 import { dashZoom, insetRingVisible } from "./lib/lineZoom.js";
 import { roadClassesOf, roadClassOf, classMinRadius, classDefaultRadius, classReturnRadius, DEFAULT_ROAD_CLASS, ROAD_CLASS_SEEDS, speedMinRadius } from "./lib/roadClasses.js";
 import { DOGEAR_W, DOGEAR_D, dogEarGeom, dogEarSize, sidewalkSpanForBumps, isDogEarSide,
   wallStripBox, wallKidBox, wallKidPerp, wallKidAlong, hostAxisExtents, ownExtents, bumpsOfHost } from "./lib/dogEar.js";
 import { CURB_TYPES as COST_CURB_TYPES, CURB_TYPE_META, roadCurbType, roadCurbedSides, roadPanWidth, roadQuantities, costRollup } from "./lib/costTakeoff.js";
-import { layoutLabels, buildingLabelLines, dimCalloutVisible, detailLabelVisible, pondParamLabelVisible, pondParamFontPx, suppressedDimIds, dimFontScale, dimFontPx, boxOf } from "./lib/labelLayout.js";
+import { layoutLabels, buildingLabelLines, dimCalloutVisible, detailLabelVisible, pondParamLabelVisible, pondParamFontPx, suppressedDimIds, dimFontScale, dimFontPx, boxOf, DIM_CALLOUT_MIN_PPF } from "./lib/labelLayout.js";
 import { inlineLines } from "./lib/labelFitLadder.js";
 import { calloutLayout, minCalloutWidthFt } from "./lib/calloutLayout.js";
 import { DOCK_ZONES, MAX_DOCK_ZONES, ZONE_CATALOG, zoneDepthDefaults, catalogDepthDefault, layoutZoneByKind, usableCourtSpan, zoneAlongSpan, boxExtentAlong, resizedZoneAlongLen, dockSidesFor, footprintDepth, footprintLength, footprintAxes, strandedZoneIds, pruneStrandedZones } from "./lib/dockZones.js";
@@ -1163,22 +1171,28 @@ const ROAD_FLAG_LABEL_PPF = 0.5;
 // Default Arc radius for a road's new vertices = its class default (settings-resolved).
 const roadDefaultRadius = (el, settings) => classDefaultRadius(roadClassOf(settings, el && el.roadClass));
 // The dense, tessellated centerline (the rendered alignment) for a centerline road.
-const roadDenseCenterline = (el, settings) => roadCenterline(el.pts, el.vtx, { defaultRadius: roadDefaultRadius(el, settings) });
+//
+// NEW-2 — `sharpAt` is the set of this road's vertices that ANOTHER road tees onto. Those corners
+// are rendered as hard corners (see roadCenterlineTagged's `sharpAt`): a junction is where two
+// centerlines MEET, so the through road has to pass through the node, and a centerline fillet cuts
+// the corner clean off it. Every caller that draws, measures or dissolves a road passes it, so the
+// pavement, the curb stripes, the paved-area figure and the length all describe the same road.
+const roadDenseCenterline = (el, settings, sharpAt) => roadCenterline(el.pts, el.vtx, { defaultRadius: roadDefaultRadius(el, settings), sharpAt });
 // The pavement+curb OUTER ring (closed polygon) — total width = travelW + a curb each side.
-const roadStripRing = (el, settings) => {
-  const dense = roadDenseCenterline(el, settings);
+const roadStripRing = (el, settings, sharpAt) => {
+  const dense = roadDenseCenterline(el, settings, sharpAt);
   return bufferPolyline(dense, Math.max(0, (+el.travelW || 0) + 2 * roadCurbWidth(el))) || [];
 };
 // The two inner curb lines = the centerline offset by ±travelW/2 (face-of-curb edges).
-const roadCurbLines = (el, settings) => {
-  const dense = roadDenseCenterline(el, settings);
+const roadCurbLines = (el, settings, sharpAt) => {
+  const dense = roadDenseCenterline(el, settings, sharpAt);
   const hw = Math.max(0, (+el.travelW || 0) / 2);
   return [offsetPolyline(dense, hw), offsetPolyline(dense, -hw)].filter(Boolean);
 };
 // Plan-view paved area (sf) of a centerline road = its generated strip polygon area
 // (replaces the old w×h — the curbs are included, matching the B70 three-way contract).
-const roadStripArea = (el, settings) => {
-  const ring = roadStripRing(el, settings);
+const roadStripArea = (el, settings, sharpAt) => {
+  const ring = roadStripRing(el, settings, sharpAt);
   return ring.length >= 3 ? Math.abs(polyArea(ring)) : 0;
 };
 // B953/NEW-1 — detect road tees for the clean-intersection render. A tee = a centerline road's
@@ -1231,21 +1245,49 @@ function roadRunFrom(pts, i, step, noiseFt = VERTEX_NOISE_FT) {
 }
 // The tangent-read scale for a road: half its travel width, floored at the bare noise tolerance.
 const roadTangentNoise = (el) => Math.max(VERTEX_NOISE_FT, (+(el && el.travelW) || 0) / 2);
+// The road (and which of its interior vertices) that `P` — one endpoint of side road `S` — tees onto.
+// ONE definition of "this is a tee", shared by the junction builder and the junction-vertex map, so
+// the corners we FLATTEN can never drift from the junctions we BUILD.
+const teeTargetOf = (roads, S, P) => {
+  for (const H of roads) {
+    if (H.id === S.id) continue;
+    for (let i = 1; i < H.pts.length - 1; i++) {
+      if (Math.hypot(H.pts[i].x - P.x, H.pts[i].y - P.y) <= teeCoincideFt(S, H)) return { G: H, gvi: i };
+    }
+  }
+  return null;
+};
+/* NEW-2 — every vertex a road junction lands on, per road: Map<roadId, Set<vertexIndex>>.
+ *
+ * These corners render SHARP (see roadDenseCenterline). The owner's Goose Creek split is why: his
+ * 36' aisle turns ~88° through an arc-treated vertex, and the branch is welded to that vertex — but
+ * a 25 ft fillet carries the drawn pavement ~10 ft clear of it, so the branch's edges sat 10 ft
+ * inboard of the through road's and the outline stepped. A junction is where two centerlines MEET;
+ * the rounding there belongs to the curb returns, not to a centerline fillet that moves the road
+ * away from the node. No-op on a collinear junction vertex (the common case), so an ordinary
+ * straight tee renders byte-identically to before. Pure over (els); memoized at the call site. */
+function roadJunctionVerticesOf(els) {
+  const roads = (els || []).filter((x) => isCenterlineRoad(x) && !x.attachedTo);
+  const out = new Map();
+  for (const S of roads) {
+    for (const ei of [0, S.pts.length - 1]) {
+      const t = teeTargetOf(roads, S, S.pts[ei]);
+      if (!t) continue;
+      if (!out.has(t.G.id)) out.set(t.G.id, new Set());
+      out.get(t.G.id).add(t.gvi);
+    }
+  }
+  return out;
+}
 function teeJunctionsOf(els, settings) {
   const roads = (els || []).filter((x) => isCenterlineRoad(x) && !x.attachedTo);
   const out = [];
   for (const S of roads) {
     for (const ei of [0, S.pts.length - 1]) {
       const P = S.pts[ei];
-      let G = null, gvi = -1;
-      for (const H of roads) {
-        if (H.id === S.id) continue;
-        for (let i = 1; i < H.pts.length - 1; i++) {
-          if (Math.hypot(H.pts[i].x - P.x, H.pts[i].y - P.y) <= teeCoincideFt(S, H)) { G = H; gvi = i; break; }
-        }
-        if (G) break;
-      }
-      if (!G) continue;
+      const hit = teeTargetOf(roads, S, P);
+      if (!hit) continue;
+      const { G, gvi } = hit;
       const sideRun = roadRunFrom(S.pts, ei, ei === 0 ? 1 : -1, roadTangentNoise(S));   // into the side road's body
       const sideDir = { x: sideRun.far.x - P.x, y: sideRun.far.y - P.y };
       const backRun = roadRunFrom(G.pts, gvi, -1, roadTangentNoise(G)), fwdRun = roadRunFrom(G.pts, gvi, 1, roadTangentNoise(G));
@@ -1272,7 +1314,13 @@ function teeJunctionsOf(els, settings) {
       // stop the road's own bend being mistaken for a junction corner.
       const halfG = roadOuterHalf(G), halfS = roadOuterHalf(S);
       const nj = nodeJunction({
-        node: { x: P.x, y: P.y }, R, flatDeg: 178,
+        // NEW-2 — the through road's own corner at this node is FLATTENED (roadJunctionVerticesOf →
+        // roadDenseCenterline's `sharpAt`) so its centerline passes through the node the branch is
+        // welded to. Its buffer therefore joins the two through arms with a square miter, so the
+        // junction has to round that corner too — otherwise a road that BENDS at its split reads as
+        // one hard corner beside two clean curb returns. On a collinear split the two through arms
+        // are ~180° apart and this changes nothing (the gap is flat and skipped either way).
+        node: { x: P.x, y: P.y }, R, flatDeg: 178, roundOwnCorner: true,
         arms: [
           { dir: { x: a.x - P.x, y: a.y - P.y }, half: halfG, avail: Math.min(backRun.dist, teeObstacle.neg), road: G.id, deep: halfG > 0.01 ? Math.min(halfG * 0.5, 12) : 0 },
           { dir: { x: b.x - P.x, y: b.y - P.y }, half: halfG, avail: Math.min(fwdRun.dist, teeObstacle.pos), road: G.id, deep: halfG > 0.01 ? Math.min(halfG * 0.5, 12) : 0 },
@@ -1441,8 +1489,8 @@ function weldJunctionsOf(els) {
   return out;
 }
 // True length (ft) of a centerline road = its tessellated centerline length.
-const roadCenterlineLength = (el, settings) => {
-  const dense = roadDenseCenterline(el, settings);
+const roadCenterlineLength = (el, settings, sharpAt) => {
+  const dense = roadDenseCenterline(el, settings, sharpAt);
   let L = 0;
   for (let i = 1; i < dense.length; i++) L += Math.hypot(dense[i].x - dense[i - 1].x, dense[i].y - dense[i - 1].y);
   return L;
@@ -1725,6 +1773,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // B416: heal any dock-zone stack stranded on a non-dock side (a court/trailer/buffer left
   // behind when an older plan was reshaped before the guard existed) the moment the plan opens.
   const [els, setEls] = useState(() => pruneStrandedZones(restored?.els || [])); // {id,type,cx,cy,w,h,rot}
+  // NEW-2 — which vertices carry a junction, per road: those corners render SHARP so the through
+  // road's centerline passes through the node its branch is welded to (roadJunctionVerticesOf).
+  // EVERY road-geometry read below takes this, so pavement, curb stripes, paved area and length all
+  // describe the same road. `sharpFor(el)` is the one accessor.
+  const roadJunctionVerts = useMemo(() => roadJunctionVerticesOf(els), [els]);
+  const sharpFor = useCallback((el) => (el && el.id != null ? roadJunctionVerts.get(el.id) : undefined), [roadJunctionVerts]);
   const [measures, setMeasures] = useState(() => restored?.measures || []); // {a,b}
   const [callouts, setCallouts] = useState(() => restored?.callouts || []);  // {id, tip:{x,y}, box:{x,y}, text}
   const [markups, setMarkups] = useState(() => restored?.markups || []);   // neutral shapes: line/polyline/rect/ellipse/polygon
@@ -2088,6 +2142,21 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // Title reader + metes-and-bounds plotter (Schedule B → checklist; legal
   // description → drawn encumbrance). All in one modal.
   const [titleOpen, setTitleOpen] = useState(false);
+  /* The deed parser is deferred (deedParseLazy.js), but the title reader shows a LIVE preview of
+   * the pasted description while you type — a synchronous render read. So pull the module the
+   * moment the modal opens and bump a tick to re-render once it lands: by the time anyone can
+   * paste, it is already there, and no bytes ride the boot path. Same shape as terrainLazy's
+   * loadTerrain()/terrainNow() pair. */
+  // `_deedParseTick` is deliberately never READ — it exists only to force one re-render once the
+  // module lands, so the preview above recomputes. The leading underscore is the dead-store
+  // ratchet's sanctioned marker for exactly this (B1128).
+  const [_deedParseTick, setDeedParseTick] = useState(0);
+  useEffect(() => {
+    if (!titleOpen || deedNow()) return;
+    let alive = true;
+    loadDeed().then(() => { if (alive) setDeedParseTick((n) => n + 1); }).catch(() => {});
+    return () => { alive = false; };
+  }, [titleOpen]);
   const [apiKey, setApiKey] = useState(() => getKey());
   const [titleBusy, setTitleBusy] = useState(false);
   const [titleErr, setTitleErr] = useState("");
@@ -4631,6 +4700,23 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     drag.current = { mode: "measureMove", i: idx, fx: fp.x, fy: fp.y, orig: m };
     try { svgRef.current.setPointerCapture(e.pointerId); } catch (_) {}
   };
+  // NEW-3 — drag a measurement's summary chip off its anchor; the offset is stored in feet on the
+  // measurement (so it persists with the plan) and the render draws a leader back to the anchor,
+  // mirroring the parcel acreage chip's labelOffset exactly. Select tool only, so it never blocks
+  // a drawing tool. A press that doesn't travel still selects the measurement.
+  const startMeasChip = (e, i) => {
+    if (e.button !== 0) return;
+    if (tool !== "select") return;
+    e.stopPropagation();
+    const m = measures[i];
+    if (!m) return;
+    setMulti([]); setSelVtx(null);
+    setSel({ kind: "measure", i });
+    if (m.locked) return;
+    pushHistory();
+    drag.current = { mode: "measChip", i, start: p2f(e.clientX, e.clientY), base: m.labelOffset || { x: 0, y: 0 } };
+    try { svgRef.current.setPointerCapture(e.pointerId); } catch (_) {}
+  };
   const onMeasureContext = (e, i) => {
     e.preventDefault(); e.stopPropagation();
     const m = measures[i];
@@ -4909,7 +4995,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if (measureMode === "line") {
         // two-click distance
         if (measDraft.length === 0) setMeasDraft([sp]);
-        else { pushHistory(); setMeasures((m) => [...m, { id: uid(), mode: "line", pts: [measDraft[0], sp] }]); setMeasDraft([]); }
+        // NEW-1 — born with the user's Standards measurement defaults, the same way a parcel is
+        // born with parcelDefaultStyle (B929). All four modes stamp; see finishMeasure.
+        else { pushHistory(); setMeasures((m) => [...m, { id: uid(), mode: "line", pts: [measDraft[0], sp], ...measureDefaultStyle(settings) }]); setMeasDraft([]); }
       } else {
         // polyline / area: accumulate points; close an area by clicking the first dot
         if (measureMode === "area" && measDraft.length >= 3 && dist(f2p(snapPt(fp)), f2p(measDraft[0])) < 12) { finishMeasure(); return; }
@@ -4969,9 +5057,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     else if (polyArea(pts) < 1) { flashWarn(`${label} has almost no area — check the outline.`, 6000); }
   };
   const finishMeasure = () => {
-    if (measureMode === "polyline" && measDraft.length >= 2) { pushHistory(); setMeasures((m) => [...m, { id: uid(), mode: "polyline", pts: measDraft }]); }
-    else if (measureMode === "area" && measDraft.length >= 3) { pushHistory(); setMeasures((m) => [...m, { id: uid(), mode: "area", pts: measDraft }]); flashPolyWarn(measDraft, "Measured area"); }
-    else if (measureMode === "count" && measDraft.length >= 1) { pushHistory(); setMeasures((m) => [...m, { id: uid(), mode: "count", pts: measDraft }]); }
+    const std = measureDefaultStyle(settings); // NEW-1 — Standards defaults, stamped at creation
+    if (measureMode === "polyline" && measDraft.length >= 2) { pushHistory(); setMeasures((m) => [...m, { id: uid(), mode: "polyline", pts: measDraft, ...std }]); }
+    else if (measureMode === "area" && measDraft.length >= 3) { pushHistory(); setMeasures((m) => [...m, { id: uid(), mode: "area", pts: measDraft, ...std }]); flashPolyWarn(measDraft, "Measured area"); }
+    else if (measureMode === "count" && measDraft.length >= 1) { pushHistory(); setMeasures((m) => [...m, { id: uid(), mode: "count", pts: measDraft, ...std }]); }
     setMeasDraft([]);
   };
   // Split the selected parcel (or whichever parcel the cut crosses) along a
@@ -5507,7 +5596,19 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // B718: a centerline road is vertex-editable too — its editable "path" is its centerline
       // (`pts`, open). A wide `edgeTolFt` (≈ strip half-width) lets a Shift-/right-click land
       // ANYWHERE on the pavement strip and project onto the centerline; endpoints are protected.
-      if (isCenterlineRoad(el)) return { layer: "road", id: el.id, pts: el.pts, closed: false, min: 2, edgeTolFt: (+el.travelW || 0) / 2 + roadCurbWidth(el) + 11 / view.ppf, noEndpointDelete: true };
+      // NEW-1 — a road's editable "path" is its centerline (`pts`, open), but the EDGE hit test runs
+      // against the CURVED centerline the renderer actually draws, not the chords between control
+      // points: on a bend the chord cuts the corner, so the pavement on the outside of the curve sits
+      // further from the chord than the tolerance and a right-click there found no edge at all (no
+      // "Add control point" — the element menu opened instead). `projectEdge` returns the hit ON the
+      // drawn centerline plus the control-point segment that owns it, which is exactly what
+      // insertRoadVertex takes. Endpoints are protected; the wide `edgeTolFt` (≈ strip half-width)
+      // still lets a click land ANYWHERE on the pavement.
+      if (isCenterlineRoad(el)) return {
+        layer: "road", id: el.id, pts: el.pts, closed: false, min: 2, noEndpointDelete: true,
+        edgeTolFt: (+el.travelW || 0) / 2 + roadCurbWidth(el) + 11 / view.ppf,
+        projectEdge: (fp) => projectToRoadCenterline(el.pts, el.vtx, fp, { defaultRadius: roadDefaultRadius(el, settings), sharpAt: sharpFor(el) }),
+      };
       return el.points ? { layer: "el", id: el.id, pts: el.points, closed: true, min: 3 } : null;
     }
     if (sel.kind === "measure") { const m = measures[sel.i]; if (!m || m.locked) return null; const closed = measMode(m) === "area"; const min = closed ? 3 : measMode(m) === "count" ? 1 : 2; return { layer: "measure", id: sel.i, pts: measPts(m), closed, min }; }
@@ -5527,10 +5628,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     let v = null;
     path.pts.forEach((p, i) => { const d = Math.hypot(fp.x - p.x, fp.y - p.y); if (d <= vTol && (!v || d < v.d)) v = { index: i, d }; });
     let e = null;
-    const lastEdge = path.closed ? n : n - 1;
-    for (let i = 0; i < lastEdge; i++) {
-      const pr = projToSeg(fp, path.pts[i], path.pts[(i + 1) % n]);
-      if (pr.d <= eTol && (!e || pr.d < e.d)) e = { index: i, pt: { x: pr.x, y: pr.y }, d: pr.d };
+    if (typeof path.projectEdge === "function") {
+      // NEW-1 — the path carries its own projector because what it DRAWS is not its chords (a road's
+      // curved centerline). One hit, already mapped back to the owning control-point segment.
+      const pr = path.projectEdge(fp);
+      if (pr && pr.d <= eTol) e = { index: pr.index, pt: { x: pr.pt.x, y: pr.pt.y }, d: pr.d };
+    } else {
+      const lastEdge = path.closed ? n : n - 1;
+      for (let i = 0; i < lastEdge; i++) {
+        const pr = projToSeg(fp, path.pts[i], path.pts[(i + 1) % n]);
+        if (pr.d <= eTol && (!e || pr.d < e.d)) e = { index: i, pt: { x: pr.x, y: pr.y }, d: pr.d };
+      }
     }
     return { v, e };
   };
@@ -5752,6 +5860,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (d.mode === "acChip") { // NEW-3: drag a parcel's acreage chip (offset stored in feet)
       const dx = fp.x - d.start.x, dy = fp.y - d.start.y;
       setParcels((a) => a.map((pc) => pc.id === d.id ? { ...pc, labelOffset: { x: d.base.x + dx, y: d.base.y + dy } } : pc));
+      return;
+    }
+    if (d.mode === "measChip") { // NEW-3: drag a measurement's summary chip (offset stored in feet)
+      const dx = fp.x - d.start.x, dy = fp.y - d.start.y;
+      setMeasures((a) => a.map((m, k) => k === d.i ? { ...m, labelOffset: { x: d.base.x + dx, y: d.base.y + dy } } : m));
       return;
     }
     if (d.mode === "calloutResize") { // B913: drag a text-box / callout width handle → explicit boxW + text wrap
@@ -8249,17 +8362,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const branchSeedRef = useRef(null);            // {roadClass, travelW, curb} for the road being drawn
   const startRoadBranch = (parent, at) => {
     if (!isCenterlineRoad(parent) || !at) return;
-    // Nearest point on the parent's SPARSE centerline — that is the polyline a tee keys off.
-    let bestSeg = -1, bestPt = null, bestD = Infinity;
-    for (let i = 0; i < parent.pts.length - 1; i++) {
-      const a = parent.pts[i], b = parent.pts[i + 1];
-      const dx = b.x - a.x, dy = b.y - a.y, L2 = dx * dx + dy * dy;
-      const t = L2 < 1e-9 ? 0 : Math.max(0, Math.min(1, ((at.x - a.x) * dx + (at.y - a.y) * dy) / L2));
-      const q = { x: a.x + dx * t, y: a.y + dy * t };
-      const d = Math.hypot(at.x - q.x, at.y - q.y);
-      if (d < bestD) { bestD = d; bestSeg = i; bestPt = q; }
-    }
-    if (bestSeg < 0 || !bestPt) return;
+    // Nearest point on the parent's DRAWN centerline, mapped back to the control-point segment that
+    // owns it (NEW-1). Projecting onto the sparse CHORDS instead — which this did — put the branch
+    // node off the pavement wherever the parent curves, which is the other half of the split defect:
+    // the branch was welded to a point the road does not pass through.
+    const hit = projectToRoadCenterline(parent.pts, parent.vtx, at, { defaultRadius: roadDefaultRadius(parent, settings), sharpAt: sharpFor(parent) });
+    if (!hit) return;
+    const bestSeg = hit.index, bestPt = hit.pt;
     pushHistory();
     // Reuse a vertex already within a collapse distance instead of stacking another one beside it.
     const ins = insertRoadVertex(parent.pts, parent.vtx, bestSeg, bestPt, {
@@ -8356,7 +8465,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   let bumpCount = 0, bumpArea = 0, bumpsUniform = true; // dog-ear / bump-out tally (counted within bldg)
   let providedDetCf = 0, pondCount = 0, maxPondDepthFt = 0; // B630: provided detention across ALL ponds (cubic feet; pondGeom's Map memo keeps this cheap per render)
   els.forEach((e) => {
-    const a = isCenterlineRoad(e) ? roadStripArea(e, settings) : e.points ? polyArea(e.points) : e.w * e.h; // road area = its generated strip polygon (B598)
+    const a = isCenterlineRoad(e) ? roadStripArea(e, settings, sharpFor(e)) : e.points ? polyArea(e.points) : e.w * e.h; // road area = its generated strip polygon (B598)
     const curb = curbAreaOf(e, els); // derived curbs count in the SF / impervious math (0 for non-paved types; a road's curb is already inside its strip area)
     if (e.type === "building") {
       bldg += a;
@@ -11911,6 +12020,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // static p2f that doesn't need the DOM rect (uses view only, origin at svg 0,0)
   const p2fStatic = (px, py) => ({ x: (px - view.offX) / view.ppf, y: (py - view.offY) / view.ppf });
 
+  // Accuracy state — the single source of truth for measurement / acreage trust.
+  // NEW-1 — hoisted above the label/collision block below: a measurement's summary chip is now
+  // part of the collision pool, and its paint depends on whether the drawing is calibrated (the
+  // amber warn state overrides the user's colour), so this has to resolve before chips are sized.
+  const isGeoref = restored?.origin || parcels.some((p) => p.attrs);
+  const calibrationState =
+    underlay
+      ? (underlay.fromMap ? "georef" : underlay.calibrated ? "calibrated" : "uncalibrated")
+      : (isGeoref ? "georef" : "drawn");
+  const calibrated = calibrationState === "georef" || calibrationState === "calibrated" || calibrationState === "drawn";
+
   /* labels + handles in screen space */
   // Labels scale with zoom so they stay proportional to the plan when zoomed
   // out (no ballooning chips), capping at a comfortable size when zoomed in.
@@ -12132,9 +12252,85 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     return { pc, c, txt, fs, padX, padY, boxW, boxH, box: boxOf(c.x, c.y, boxW, boxH) };
   }).filter(Boolean);
   const parcelChipBoxes = parcelChips.map((p) => p.box);
+
+  /* NEW-3 — the MEASUREMENT summary chip.
+   *
+   * Was: one run-on haloed string painted blindly at the polygon centroid, invisible to the
+   * collision engine. Now it is a real chip (a rounded plate with a hairline, the parcel-acreage
+   * chip's treatment and its `data-print-chip` export restyle) laid out through the SAME
+   * labelLayout engine as everything else, and computed here — before the element-label pass — so
+   * a measurement a user deliberately drew is placed FIRST and every other label yields around it.
+   *
+   * `noLeader` is on: the engine may drop the chip's subordinate detail line to resolve a
+   * collision, but it must never fling a measurement's number off to some other part of the plan.
+   * The leader line belongs to the USER's drag (labelOffset), not to auto-placement. And if even
+   * the one-line form still collides we fall back to drawing that one line rather than hiding the
+   * chip — a number the user asked for is never silently dropped, only shortened.
+   */
+  const measureChips = measures.map((m, i) => {
+    const fpts = measPts(m);
+    const mode = measMode(m);
+    if (mode === "count" ? fpts.length < 1 : fpts.length < 2) return null;
+    const isSel = sel?.kind === "measure" && sel.i === i;
+    if (!measureLabelVisible(m, labelPpf, { settings, globalFloor: DIM_CALLOUT_MIN_PPF, selected: isSel })) return null;
+    const isArea = mode === "area";
+    const model = measureLabelModel(mode, {
+      areaSf: isArea ? polyArea(fpts) : 0,
+      perimFt: isArea ? pathLen([...fpts, fpts[0]]) : 0,
+      lengthFt: mode === "line" || mode === "polyline" ? pathLen(fpts) : 0,
+      segments: Math.max(0, fpts.length - 1),
+      count: fpts.length,
+    }, { label: m.label, uncalibrated: calibrationState === "uncalibrated" });
+    const lines = measureChipLines(model);
+    const hi = headlineIndex(model);
+    // The anchor: an area reads from its centroid, an open run from its last segment's midpoint
+    // (where the eye finishes the line) — the two anchors the old label already used.
+    const anchorFt = isArea || mode === "count"
+      ? (mode === "count" ? fpts[fpts.length - 1] : centroid(fpts))
+      : { x: (fpts[fpts.length - 2].x + fpts[fpts.length - 1].x) / 2, y: (fpts[fpts.length - 2].y + fpts[fpts.length - 1].y) / 2 };
+    const off = m.labelOffset || { x: 0, y: 0 };
+    const anchor = f2p(anchorFt);
+    const c = f2p({ x: anchorFt.x + off.x, y: anchorFt.y + off.y });
+    // Type scale: the headline leads, the name and the detail sit a step down. Same zoom ramp
+    // (ls · labelK) every other on-canvas label rides, so the chip shrinks with the drawing.
+    const fsHead = 13.5 * ls * labelK, fsSub = 10 * ls * labelK;
+    const lh = fsHead * 1.16, padX = 9 * ls * labelK, padY = 5 * ls * labelK;
+    // Width off the widest line, each measured at ITS own size (the headline is the wide one).
+    const charW = fsHead * 0.6;
+    return { m, i, isSel, mode, model, lines, hi, c, anchor, moved: !!(off.x || off.y), fsHead, fsSub, lh, padX, padY, charW };
+  }).filter(Boolean);
+  // One layout pass for the measurement chips, avoiding each other AND the parcel badges.
+  const measureChipPlace = layoutLabels(
+    measureChips.map((d) => ({
+      id: d.m.id || `m${d.i}`, cx: d.c.x, cy: d.c.y, lines: d.lines, lh: d.lh, charW: d.charW,
+      halfW: Infinity, halfH: Infinity, noLeader: true,
+      // A selected measurement outranks everything (you must read what you are editing); after
+      // that, a named measurement outranks an unnamed one. Deterministic, so it never flickers.
+      importance: (d.isSel ? 1e9 : 0) + (d.model.name ? 1e6 : 0) + d.lines.length,
+    })),
+    { pad: 2 * labelK, gap: 4 * labelK, obstacles: parcelChipBoxes },
+  );
+  const measureChipBoxes = [];
+  const measureChipDraw = new Map();
+  measureChips.forEach((d) => {
+    const id = d.m.id || `m${d.i}`;
+    const place = measureChipPlace.get(id);
+    // Collision-shortened, never collision-hidden: fall back to the headline alone.
+    const lines = place ? place.lines : [d.model.headline];
+    const hi = place ? d.hi : 0;
+    const boxW = Math.max(1, ...lines.map((t) => String(t).length)) * d.charW + d.padX * 2;
+    const boxH = lines.length * d.lh + d.padY * 2;
+    const box = boxOf(d.c.x, d.c.y, boxW, boxH);
+    measureChipBoxes.push(box);
+    measureChipDraw.set(d.i, { ...d, lines, hi, boxW, boxH, box });
+  });
+
   const labelShow = layoutLabels(
     labelCands.map((d) => ({ id: d.lid, cx: d.c.x, cy: d.c.y, lines: d.lines, lh: d.lh, charW: d.charW, halfW: d.halfW, halfH: d.halfH, rot: d.rot, noLeader: d.noLeader, ring: d.ring, ringOrigin: d.ringOrigin, ringPpf: d.ringPpf, mustLabel: d.mustLabel })),
-    { pad: 2 * labelK, gap: 4 * labelK, obstacles: parcelChipBoxes },
+    // A measurement's summary chip joins the parcel badges as an immovable obstacle, so an element
+    // label yields around it. B1147's fit ladder still guarantees a `mustLabel` element (a pond) an
+    // outside placement, so seeding these can shorten or relocate a label but never blank one.
+    { pad: 2 * labelK, gap: 4 * labelK, obstacles: [...parcelChipBoxes, ...measureChipBoxes] },
   );
   // B121 (round 3): fold the red per-edge dimension callouts into the collision pool. The dimension
   // number is the lowest tier — if its screen box would overprint a committed centred name/area
@@ -12740,14 +12936,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     return <g>{px.map((p, i) => vtxRect(`mkv${i}`, p, isSelVtx("markup", m.id, i), "move", (e) => startMarkupVertex(e, m.id, i)))}</g>;
   })();
 
-  // Accuracy state — the single source of truth for measurement / acreage trust.
-  const isGeoref = restored?.origin || parcels.some((p) => p.attrs);
-  const calibrationState =
-    underlay
-      ? (underlay.fromMap ? "georef" : underlay.calibrated ? "calibrated" : "uncalibrated")
-      : (isGeoref ? "georef" : "drawn");
-  const calibrated = calibrationState === "georef" || calibrationState === "calibrated" || calibrationState === "drawn";
-
   /* ----------------------------- UI ----------------------------- */
   // Bluebeam-style left rail: a thin column of small buttons, each opening one menu.
   const railHdr = (t) => <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: PAL.chromeMuted, padding: "8px 4px 4px" }}>{t}</div>;
@@ -12930,7 +13118,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       for (const file of list) {
         const row = { id: uid(), name: file.name || "deed", text: "", boundaryCalls: 0, exCount: 0, closes: false, gap: 0, error: "" };
         try {
-          const { readDeedFile } = await import("../../shared/files/docxText.js");
+          const [{ readDeedFile }, dp] = await Promise.all([
+            import("../../shared/files/docxText.js"),
+            loadDeed(),        // the parser rides the same on-demand trip as the file reader
+          ]);
+          const { parseTracts, callsToPath, pathCloses, misclosure } = dp;
           const text = await readDeedFile(file);
           row.text = text;
           const tracts = parseTracts(text);
@@ -12993,7 +13185,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     setTitleOpen(false); setSel(null); setTool("select");
     flashWarn(`Deed 1 of ${deeds.length} — ${first.name}: click its point of beginning.`, 0);
   };
-  const plotAllDeeds = () => {
+  const plotAllDeeds = async () => {
+    const { parseTracts } = await loadDeed();
     const deeds = deedQueue
       .map((r) => ({ name: r.name, tracts: parseTracts(r.text || "") }))
       .filter((d) => d.tracts[0] && d.tracts[0].calls.length);
@@ -13005,7 +13198,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // canvas to anchor the point of beginning). Multi-tract aware: the first tract
   // is the boundary; each SAVE-AND-EXCEPT tract is plotted as a hole positioned
   // from its commencing tie relative to the SAME point of beginning.
-  const startPlotMetes = (asEasement = false) => {
+  const startPlotMetes = async (asEasement = false) => {
+    const { parseTracts } = await loadDeed();
     const tracts = parseTracts(mbText);
     const main = tracts[0];
     if (!main || !main.calls.length) { setTitleErr("No bearing/distance calls found. Drop a deed (.docx) or paste a metes-and-bounds description (e.g. “THENCE N 45°30′ E, 150.00 feet”)."); return; }
@@ -13018,10 +13212,21 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     flashWarn(`Click the point of beginning — ${main.calls.length} call${main.calls.length > 1 ? "s" : ""} ready${ex > 0 ? ` (+${ex} save-and-except)` : ""}${asEasement ? " (easement)" : ""}.`, 0);
   };
 
+  /* Every path that reaches the plotting helpers below has ALREADY parsed a description (that is
+   * what produced the calls), so the on-demand parser is necessarily in hand. Assert it rather than
+   * silently no-op: a null here would mean a new caller reached them without loading, and a deed
+   * that plots as nothing is exactly the silent failure LOUD-FAILURE exists to prevent. */
+  const deedLib = () => {
+    const m = deedNow();
+    if (!m) throw new Error("Deed workflow not loaded — call loadDeed() before plotting or aligning.");
+    return m;
+  };
+
   // Build a polygon encumbrance markup from a traverse anchored at `pob`. A tract
   // boundary is ALWAYS a polygon — if the calls don't close, the last→first edge
   // carries the gap (shown honestly) rather than being redrawn as a corridor.
   const buildEncumbranceMarkup = (calls, pob, { label, except, group }) => {
+    const { callsToPath, pathCloses, misclosure } = deedLib();
     const path = callsToPath(calls, pob);
     const closed = pathCloses(path);
     const ring = closed ? path.slice(0, -1) : path;
@@ -13046,6 +13251,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
 
   // Drop the POB at `pob` (feet), build the encumbrance(s), warn on overlaps.
   const anchorEncumbrance = (pob) => {
+    const { callsToPath, pathCloses } = deedLib();
     const { tracts, asEasement } = pobMode;
     const main = tracts && tracts[0];
     if (!main || !main.calls.length) { if (pobMode && pobMode.queueTotal) { advanceDeed({ name: pobMode.name || "deed", bad: true }); return; } flashWarn("No bearings were recognized in that description — check the metes-and-bounds format.", 7000); setPobMode(null); return; }
@@ -13142,7 +13348,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       const inter = polyIntersectArea(deedRing, pc.points);
       if (inter / Math.min(deedA, parcelA) < DEED_FIT_MIN_OVERLAP) continue; // deed isn't on this parcel
       if (Math.min(deedA, parcelA) / Math.max(deedA, parcelA) < DEED_FIT_MIN_AREARATIO) continue; // different-size tract
-      const fit = solveDeedAlignment(deedRing, pc.points);
+      const fit = deedLib().solveDeedAlignment(deedRing, pc.points);
       if (fit.ok && (!best || fit.residualFt < best.fit.residualFt)) best = { fit, parcel: pc };
     }
     return best;
@@ -13153,7 +13359,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const mapDeedGeom = (m, apply) => ({ ...m, pts: (m.pts || []).map(apply), centerline: (m.centerline || []).map(apply) });
   // Snap a plotted deed onto the held county parcel (empirical fit). With no parcel,
   // fall back to the theoretical State Plane grid-north correction for this location.
-  const alignDeedToParcel = (id) => {
+  const alignDeedToParcel = async (id) => {
+    const { describeRotation, ringCentroid: deedCentroid, gridConvergenceDeg } = await loadDeed();
     const m = markups.find((x) => x.id === id && x.kind === "encumbrance");
     if (!m || !(m.pts && m.pts.length >= 3)) { flashWarn("Select a plotted deed boundary first.", 5000); return; }
     const members = deedGroupMembers(m);
@@ -13183,10 +13390,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     setDeedAlignHint(null);
     flashWarn(`No county parcel to fit — rotated the deed ${describeRotation(conv)} for the State Plane grid convergence here (this assumes the survey's bearings are grid north). Verify against the aerial, or nudge by hand.`, 9000);
   };
-  const rotateDeedRigid = (m, deg, pivot) => ({ ...m, pts: rotatePointsAbout(m.pts, deg, pivot), centerline: rotatePointsAbout(m.centerline || [], deg, pivot) });
+  const rotateDeedRigid = (m, deg, pivot) => { const { rotatePointsAbout } = deedLib(); return { ...m, pts: rotatePointsAbout(m.pts, deg, pivot), centerline: rotatePointsAbout(m.centerline || [], deg, pivot) }; };
   // Manual fallback: turn a deed to an absolute "applied since plotting" angle (panel stepper),
   // rotating the whole tract group about the boundary's centroid so holes stay seated.
-  const rotateDeedTo = (id, targetDeg) => {
+  const rotateDeedTo = async (id, targetDeg) => {
+    const { ringCentroid: deedCentroid } = await loadDeed(); // the deed workflow is loaded on demand
     const sel0 = markups.find((x) => x.id === id && x.kind === "encumbrance");
     if (!sel0 || !sel0.pts) return;
     const members = deedGroupMembers(sel0);
@@ -13488,7 +13696,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (isCenterlineRoad(el)) {
       setEls((a) => a.map((x) => {
         if (x.id !== el.id || !isCenterlineRoad(x)) return x;
-        const cur = roadCenterlineLength(x, settings);
+        const cur = roadCenterlineLength(x, settings, sharpFor(x));
         if (!(cur > 0)) return x;
         const s = L / cur;
         const cx = x.pts.reduce((p, q) => p + q.x, 0) / x.pts.length;
@@ -13601,7 +13809,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // only steer the cost takeoff (the drawn curb band still reads off el.curb).
   const setRoadCost = (el, patch) => { pushHistory(); setEls((a) => a.map((x) => x.id === el.id ? { ...x, ...patch } : x)); };
   // Road length (ft) + FC-FC travel width (ft) for the cost takeoff — live geometry.
-  const roadLengthOf = (el) => isCenterlineRoad(el) ? roadCenterlineLength(el, settings) : Math.max(el.w, el.h);
+  const roadLengthOf = (el) => isCenterlineRoad(el) ? roadCenterlineLength(el, settings, sharpFor(el)) : Math.max(el.w, el.h);
   const setSelParcel = (patch) => setParcels((a) => a.map((p) => p.id === selParcel.id ? { ...p, ...patch } : p));
   // Per-edge setbacks: pc.setbacks aligned to edges (edge i = pts[i]→pts[i+1]);
   // falls back to the global default for any parcel that predates per-edge.
@@ -13695,6 +13903,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // account default). The panel shows the pending draft over the top of these — see below.
   const committedParcelStd = (key) => settings.parcelStyle?.[key] ?? getStandardPref(userPrefs, "parcelStyle", key);
   const committedTypeStd = (type, key) => settings.typeStyles?.[type]?.[key] ?? getStandardPref(userPrefs, "typeStyles", key, type);
+  // NEW-1 — measurements, the third standards family, on the parcel ladder (plan copy, then account).
+  const committedMeasureStd = (key) => settings.measureStyle?.[key] ?? getStandardPref(userPrefs, "measureStyle", key);
 
   /* ---- NEW-2: Standards edits are a PENDING DRAFT ----
    * The footer's three actions are named outright (Apply to this plan · Save for this plan · Save
@@ -13725,9 +13935,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // The values the PANEL shows = the draft over what's committed.
   const parcelStdValue = (key) => draftParcelValue(stdDraft, key, committedParcelStd(key));
   const typeStdValue = (type, key) => draftTypeValue(stdDraft, type, key, committedTypeStd(type, key));
+  const measureStdValueUI = (key) => draftMeasureValue(stdDraft, key, committedMeasureStd(key));
   const draftParcelStd = (patch) => setStdDraft(withParcelDraft(stdDraft, patch));
   const draftTypeStd = (type, patch) => setStdDraft(withTypeDraft(stdDraft, type, patch));
-  const stdDirty = draftDirty(stdDraft, committedParcelStd, committedTypeStd);
+  const draftMeasureStd = (patch) => setStdDraft(withMeasureDraft(stdDraft, patch));
+  const stdDirty = draftDirty(stdDraft, committedParcelStd, committedTypeStd, committedMeasureStd);
   /* Element type styles resolve at RENDER, so the canvas can preview the draft — publish it into
    * the style resolver's preview layer (planStyle.setPreviewStyleDefaults). Visual only: a draft
    * is never STAMPED into a new parcel, so an uncommitted value can't reach stored geometry.
@@ -13745,7 +13957,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
    * Save for this plan / Save for all projects — store the same values and change nothing drawn,
    *   so they confirm briefly with no Undo. */
   const stdParcelValues = () => Object.fromEntries(PARCEL_STD_KEYS.map((k) => [k, parcelStdValue(k) ?? null]));
-  const stdApplyCount = allStandardsImpact(parcels, els, stdParcelValues(), Object.keys(TYPE));
+  const stdMeasureValues = () => Object.fromEntries(MEASURE_STD_KEYS.map((k) => [k, measureStdValueUI(k) ?? null]));
+  const stdMeasureOpts = () => ({ measures, measureValues: stdMeasureValues() });
+  const stdApplyCount = allStandardsImpact(parcels, els, stdParcelValues(), Object.keys(TYPE), stdMeasureOpts());
   const saveStdForPlan = () => {
     if (!stdDirty) return;
     setSettings((s) => mergeDraftIntoSettings(s, stdDraft));
@@ -13757,27 +13971,30 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // the plan keeps following the account default when it changes later (the old promote rule).
     let up = userPrefs;
     PARCEL_STD_KEYS.forEach((k) => { up = setStandardPref(up, "parcelStyle", k, parcelStdValue(k) ?? null); });
+    MEASURE_STD_KEYS.forEach((k) => { up = setStandardPref(up, "measureStyle", k, measureStdValueUI(k) ?? null); });
     Object.keys(TYPE).forEach((t) => TYPE_STD_KEYS.forEach((k) => { up = setStandardPref(up, "typeStyles", k, typeStdValue(t, k) ?? null, t); }));
     commitUserPrefs(up);
-    setSettings((s) => ({ ...s, parcelStyle: {}, typeStyles: {} }));
+    setSettings((s) => ({ ...s, parcelStyle: {}, typeStyles: {}, measureStyle: {} }));
     clearStdDraft();
     flashStdToast("Saved as your defaults for all projects", null, 3500);
   };
   const applyAllStd = () => {
     const beforeParcels = stateRef.current.parcels, beforeEls = stateRef.current.els;
+    const beforeMeasures = stateRef.current.measures;
     const beforeSettings = settings;
     const beforeDraft = stdDraft;
-    const res = applyAllStandards(beforeParcels, beforeEls, stdParcelValues(), Object.keys(TYPE));
+    const res = applyAllStandards(beforeParcels, beforeEls, stdParcelValues(), Object.keys(TYPE), { measures: beforeMeasures, measureValues: stdMeasureValues() });
     if (!res.count) return;
     // Applying implies keeping them: commit the plan defaults AND restyle, in one click / one frame.
     if (stdDirty) { setSettings((s) => mergeDraftIntoSettings(s, stdDraft)); clearStdDraft(); }
     pushHistory();                       // ONE frame for every object touched
     setParcels(res.parcels);
     setEls(res.els);
+    setMeasures(res.measures);           // NEW-1 — measurements restyle retroactively too
     flashStdToast(appliedObjectsLabel(res.count), () => {
-      setParcels(beforeParcels); setEls(beforeEls);
+      setParcels(beforeParcels); setEls(beforeEls); setMeasures(beforeMeasures);
       // Undo the whole action, not half of it: the stored defaults and the pending edits come back too.
-      setSettings((s) => ({ ...s, parcelStyle: beforeSettings.parcelStyle, typeStyles: beforeSettings.typeStyles }));
+      setSettings((s) => ({ ...s, parcelStyle: beforeSettings.parcelStyle, typeStyles: beforeSettings.typeStyles, measureStyle: beforeSettings.measureStyle }));
       setStdDraft(beforeDraft);
       setStdToast(null);
     });
@@ -13819,6 +14036,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     onSwatch: (v) => { if (hist) pushHistory(); apply(v); pushRecent(v); if (commit) commit(v); },
   });
   const liveMarkup    = (patch) => { setMarkups((a) => a.map((m) => (selMarkup && m.id === selMarkup.id ? { ...m, ...patch } : m))); setMkStyle((s) => ({ ...s, ...patch })); };
+  // NEW-1 — the SAME two writers for a measurement (a live no-history one for a colour drag /
+  // opacity slide, and a one-undo-frame one for a discrete commit), so the measurement inspector
+  // reuses the markup panel's controls rather than standing up a parallel editing surface.
+  // `null` in a patch CLEARS the key, so "Reset" puts the measurement back on the defaults.
+  const patchSelMeasure = (patch) => setMeasures((a) => a.map((m) => {
+    if (!selMeasure || m.id !== selMeasure.id) return m;
+    const next = { ...m, ...patch };
+    Object.entries(patch).forEach(([k, v]) => { if (v === null || v === undefined) delete next[k]; });
+    return next;
+  }));
+  const liveMeasure = (patch) => patchSelMeasure(patch);
+  const setSelMeasure = (patch) => { pushHistory(); patchSelMeasure(patch); };
   const liveCallout   = (patch) => { if (selCallout) setCallout(selCallout.id, patch); };
   // Make the selected element's current colors the default for its type — and say so (B653).
   const setStyleDefault = () => {
@@ -15022,6 +15251,55 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           </Section>
           </div>
 
+          {/* NEW-1 — MEASUREMENTS. Measurements are the only drawn object that had no standards at
+              all: their colour was hardcoded at the one place they were painted. Same shape as the
+              Parcels section above (draft-first reads, one footer Apply), same mechanic (stamped at
+              creation via measureDefaultStyle), so a measurement is born with these and the footer's
+              Apply pushes them onto measurements already drawn. */}
+          <div data-std-sec="measure">
+          <Section key={`std-measure:${standardsFocus === "measure"}`} title="Measurements" collapsed={standardsFocus !== "measure"}>
+            <StdSubLabel>Line</StdSubLabel>
+            <Field label="Line color">
+              <ColorField value={toHex6(measureStdValueUI("stroke") ?? PAL.accent)} title="Measurement line color" seed={COLOR_SEED}
+                {...colorCtl((v) => draftMeasureStd({ stroke: v }), false)} />
+            </Field>
+            <Field label="Line weight">
+              <NumInput style={numInput} value={measureStdValueUI("weight") ?? MEASURE_LINE.weight} min={0.5} step={0.5} coarse={2} onCommit={(n) => draftMeasureStd({ weight: n })} />
+            </Field>
+            <Field label="Line style">
+              <select value={measureStdValueUI("dash") ?? MEASURE_LINE.dash} onChange={(e) => draftMeasureStd({ dash: e.target.value })}
+                style={{ ...numInput, width: "auto", cursor: "pointer" }}>
+                {DASH_OPTIONS}
+              </select>
+            </Field>
+            <StdSubLabel>Area fill</StdSubLabel>
+            <label style={{ display: "flex", gap: 8, fontSize: 12, color: PAL.muted, margin: "2px 2px 8px", cursor: "pointer" }}>
+              <input type="checkbox" checked={!!measureStdValueUI("fill")} onChange={(e) => draftMeasureStd(e.target.checked ? { fill: PAL.accent } : { fill: null, fillOpacity: null })} /> Use a separate fill colour
+            </label>
+            {measureStdValueUI("fill") && (
+              <Field label="Fill color">
+                <ColorField value={toHex6(measureStdValueUI("fill"))} title="Measurement fill color" seed={COLOR_SEED}
+                  {...colorCtl((v) => draftMeasureStd({ fill: v }), false)} />
+              </Field>
+            )}
+            <Field label="Fill opacity">
+              <input type="range" min={0} max={1} step={0.02} value={measureStdValueUI("fillOpacity") ?? MEASURE_LINE.fillOpacity}
+                onChange={(e) => draftMeasureStd({ fillOpacity: +e.target.value })} />
+            </Field>
+            {/* NEW-2 — the project-level reveal zoom. Same one-click capture as the per-measurement
+                control, so nobody ever types a zoom number. */}
+            <StdSubLabel>Labels</StdSubLabel>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", margin: "2px 2px 4px" }}>
+              <button style={chip} title="Zoom to where you want measurement labels to start showing, then click this."
+                onClick={() => draftMeasureStd({ labelPpf: view.ppf })}>Set at current zoom</button>
+              {measureStdValueUI("labelPpf") != null && <button style={chip} onClick={() => draftMeasureStd({ labelPpf: null })}>Reset to default</button>}
+            </div>
+            <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.5, margin: "0 2px 2px" }}>
+              {labelRevealNote({}, { measureStyle: { labelPpf: measureStdValueUI("labelPpf") } }, DIM_CALLOUT_MIN_PPF)} · one measurement can pin its own in its properties.
+            </div>
+          </Section>
+          </div>
+
           {/* Structural column grid (B568): speed bay + flex-to-band typical bays + dock doors.
               These are the plan-wide defaults; a single building can pin its own in its inspector. */}
           <div data-std-sec="building">
@@ -15218,9 +15496,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // for why every patch-based attempt (B953…B1006) had to fail on topologies it wasn't tuned for.
   const roadNet = useMemo(() => {
     const roads = (els || []).filter((x) => isCenterlineRoad(x) && !x.attachedTo);
-    if (!roads.length) return { regions: [], stripes: new Map(), outlineCuts: new Map(), memberIds: new Set() };
+    if (!roads.length) return { regions: [], stripes: new Map(), outlineCuts: new Map(), memberIds: new Set(), junctionVerts: roadJunctionVerts };
     const byId = new Map(roads.map((r) => [r.id, r]));
-    const strip = new Map(roads.map((r) => [r.id, roadStripRing(r, settings)]));
+    const strip = new Map(roads.map((r) => [r.id, roadStripRing(r, settings, sharpFor(r))]));
     // Extra pavement contributed by each junction, indexed by the road that owns the junction.
     const extra = new Map(roads.map((r) => [r.id, []]));
     // Stripe-only cutters: regions that must INTERRUPT a curb stripe without adding pavement. The one
@@ -15266,7 +15544,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         for (const oid of ids) { if (oid === id) continue; const s = strip.get(oid); if (s && s.length >= 3) others.push(s); }
         for (const oid of ids) others.push(...extra.get(oid));
         others.push(...stripeCut);
-        stripes.set(id, roadCurbLines(byId.get(id), settings).flatMap((cl) => clipPolylineOutside(cl, others)));
+        stripes.set(id, roadCurbLines(byId.get(id), settings, sharpFor(byId.get(id))).flatMap((cl) => clipPolylineOutside(cl, others)));
       }
     }
     regions.sort((a, b) => a.zKey - b.zKey);
@@ -15282,8 +15560,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if (!cutters.length) continue;
       outlineCuts.set(dj.targetId, [...(outlineCuts.get(dj.targetId) || []), ...cutters]);
     }
-    return { regions, stripes, outlineCuts, memberIds: new Set(roads.map((r) => r.id)) };
-  }, [els, settings, teeJunctions, driveJunctions, weldJunctions]);
+    return { regions, stripes, outlineCuts, memberIds: new Set(roads.map((r) => r.id)), junctionVerts: roadJunctionVerts };
+  }, [els, settings, teeJunctions, driveJunctions, weldJunctions, sharpFor, roadJunctionVerts]);
   // NEW-4 — corners the app had to draw TIGHTER than the road's own civil minimum. `arcCorner`
   // feasibility-clamps a corner's radius to half the shorter adjacent leg; that clamp is geometrically
   // necessary (without it two corners overrun each other and the strip self-intersects) but it used to
@@ -16600,30 +16878,62 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 // drops you back to Select on the click so the grips/×/highlight show (B940: it also
                 // arms a whole-measurement drag on the same press).
                 const canGrab = tool === "select" || tool === "measure";
-                const warn = calibrationState === "uncalibrated";
-                const mcolor = warn ? "#b45309" : PAL.accent;
+                // NEW-1 — per-measurement style, resolved in ONE place (lib/measureStyle.js) for
+                // every mode. The uncalibrated amber still overrides the user's colour there,
+                // because that is a correctness signal rather than decoration.
+                const st = measureStyle(m, { accent: PAL.accent, uncalibrated: calibrationState === "uncalibrated", selected: isSel });
+                const mcolor = st.stroke;
+                const mdash = dashArray(st.dash, st.weight);
+                const chip = measureChipDraw.get(i);
+                // NEW-3 — the summary chip: the parcel-acreage chip's exact treatment (a rounded
+                // plate with a hairline, `data-print-chip` so the export restyles it into haloed
+                // exhibit text), one dominant value with the detail subordinate, placed by the
+                // shared collision engine and draggable with a leader back to its anchor.
+                const chipNode = chip ? (
+                  <g data-print-chip="measure" data-measure-chip={m.id || `m${i}`}
+                    pointerEvents={tool === "select" ? "auto" : "none"}
+                    style={tool === "select" ? { cursor: "move" } : undefined}
+                    onPointerDown={tool === "select" ? (e) => startMeasChip(e, i) : undefined}
+                    onContextMenu={(e) => onMeasureContext(e, i)}>
+                    {chip.moved && <line x1={chip.anchor.x} y1={chip.anchor.y} x2={chip.c.x} y2={chip.c.y} stroke={mcolor} strokeWidth={1} opacity={0.55} />}
+                    {/* Plate + keyline in ONE node: the keyline carries the measurement's colour on
+                        screen, and dropping the plate on paper drops all of the screen chrome at once. */}
+                    <rect data-chip-bg x={chip.c.x - chip.boxW / 2} y={chip.c.y - chip.boxH / 2} width={chip.boxW} height={chip.boxH}
+                      rx={7 * ls} fill="rgba(17,24,39,0.72)" stroke={mcolor} strokeWidth={1.25} />
+                    {chip.lines.map((t, k) => {
+                      const head = k === chip.hi;
+                      const fs = head ? chip.fsHead : chip.fsSub;
+                      const y = chip.c.y - chip.boxH / 2 + chip.padY + chip.lh * k + fs * 0.82;
+                      return (
+                        <text key={k} data-chip-text {...(head ? {} : { "data-chip-sub": "1" })}
+                          x={chip.c.x} y={y} textAnchor="middle" fontSize={fs}
+                          fontFamily={NUM_FONT} fontVariantNumeric={TABULAR_NUMS} pointerEvents="none"
+                          fill={head ? "#f4f7fa" : "#c3ccd6"}
+                          style={{ fontWeight: head ? 700 : 500, letterSpacing: head ? "0" : "0.02em" }}>
+                          {head && st.warn ? `⚠ ${t}` : t}
+                        </text>
+                      );
+                    })}
+                  </g>
+                ) : null;
 
                 if (mode === "count") {
-                  const lastPt = pts[pts.length - 1];
-                  const countLbl = (m.label ? `${m.label}  ` : "") + `${fpts.length} item${fpts.length !== 1 ? "s" : ""}`;
-                  // LOD (B911 family): the total label hides at overview zoom just like every other
-                  // dimension callout — an unselected count's tally shows only past the callout gate.
-                  const labelVisible = isSel || dimCalloutVisible(labelPpf);
                   return (
                     <g key={m.id || `m${i}`}>
                       {pts.map((p, k) => (
                         <g key={k} pointerEvents="none">
-                          <circle cx={p.x} cy={p.y} r={8 * labelK} fill={mcolor + "28"} stroke={mcolor} strokeWidth={1.5} />
+                          <circle cx={p.x} cy={p.y} r={8 * labelK} fill={mcolor + "28"} stroke={mcolor} strokeWidth={st.weight} />
                           <text x={p.x} y={p.y + 3.5 * labelK} fontSize={8.5 * labelK} textAnchor="middle" fill={mcolor} fontWeight="700">{k + 1}</text>
                         </g>
                       ))}
-                      {labelVisible && <text x={lastPt.x} y={lastPt.y - 14 * labelK} textAnchor="middle" fontSize={12 * labelK} fontFamily={NUM_FONT} fontVariantNumeric={TABULAR_NUMS}
-                        fill={mcolor} stroke={PAL.paper} strokeWidth={3} paintOrder="stroke" fontWeight="700" pointerEvents="none">{countLbl}</text>}
                       {/* hit targets — one transparent circle per marker */}
                       {pts.map((p, k) => (
                         <circle key={`h${k}`} cx={p.x} cy={p.y} r={12} fill="transparent" stroke="transparent"
                           pointerEvents={canGrab ? "all" : "none"} style={{ cursor: "move" }} onPointerDown={(e) => startMoveMeasure(e, i)} onContextMenu={(e) => onMeasureContext(e, i)} />
                       ))}
+                      {/* NEW-3 — the chip paints AFTER the hit targets, or the transparent grab
+                          layer sits on top of it in document order and swallows the chip drag. */}
+                      {chipNode}
                       {isSel && tool === "select" && !m.locked && (
                         <g data-testid="measure-selected" data-sel-i={i}>
                           {pts.map((p, k) => {
@@ -16646,40 +16956,42 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
 
                 const isArea = mode === "area";
                 const ptsStr = pts.map((p) => `${p.x},${p.y}`).join(" ");
-                // label + anchor point. Area shows area + perimeter; amber + ⚠ when uncalibrated.
-                const perim = pathLen([...fpts, fpts[0]]);
-                const lbl = (warn ? "⚠ " : "") + (m.label ? `${m.label}  ` : "") + (isArea
-                  ? `${f0(polyArea(fpts))} sf · ${f2(polyArea(fpts) / SQFT_PER_ACRE)} ac · ${f0(perim)}′ perim`
-                  : `${f0(pathLen(fpts))}′`);
-                const anchor = isArea ? f2p(centroid(fpts)) : (() => {
-                  const a = pts[pts.length - 2], b = pts[pts.length - 1];
-                  return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
-                })();
-                // NEW-1 (extends B149/B940) — a measurement's value label rides the shared zoom-FLOOR
-                // gate (dimCalloutVisible), the SAME floor that drops the auto infrastructure dims at
-                // site-overview zoom. We deliberately use the pure floor, NOT a per-feature min-on-
-                // screen-length: a length rule keeps a long run's label (a 3,500′ distance projects to
-                // hundreds of px) painting at overview — exactly the clutter the owner reported —
-                // whereas the floor drops short AND long labels together, and they reveal together on
-                // zoom-in. Scoped to measurement labels only (this `labelVisible`), so it can never
-                // catch the always-on overview tier (building name/SF, site-summary chip, acreage
-                // chips). A selected measurement always shows its value so you can read what you're
-                // editing (parity with B149 / B121 / B225-B226 selected-element exception).
-                const labelVisible = isSel || dimCalloutVisible(labelPpf);
+                /* NEW-3 (d) — per-edge segment lengths, ON the edges. This is what a civil
+                 * reviewer expects to see, and it is the single biggest thing that makes the
+                 * drawing read as a plan rather than a sketch. Gated SEPARATELY from the summary
+                 * chip: it rides `detailLabelVisible`, so an edge has to project as a real run on
+                 * screen before it is dimensioned — a 3-point sketch at site overview stays clean
+                 * while the same shape zoomed in dimensions itself. Skipped for a two-point
+                 * distance, whose one segment IS the headline (printing it twice is noise). */
+                const segs = fpts.length > 2 || isArea ? measureSegments(fpts, isArea) : [];
+                const segFs = 9.5 * ls * labelK;
                 return (
                   <g key={m.id || `m${i}`}>
                     {isArea
-                      ? <polygon points={ptsStr} fill={mcolor} fillOpacity={isSel ? 0.16 : 0.1} stroke={mcolor} strokeWidth={isSel ? 2.5 : 1.5} pointerEvents="none" />
-                      : <polyline points={ptsStr} fill="none" stroke={mcolor} strokeWidth={isSel ? 2.5 : 1.5} pointerEvents="none" />}
+                      ? <polygon points={ptsStr} fill={st.fill} fillOpacity={st.fillOpacity} stroke={mcolor} strokeWidth={st.weight} strokeDasharray={mdash} pointerEvents="none" />
+                      : <polyline points={ptsStr} fill="none" stroke={mcolor} strokeWidth={st.weight} strokeDasharray={mdash} pointerEvents="none" />}
                     {pts.map((p, k) => <circle key={k} cx={p.x} cy={p.y} r={3} fill={mcolor} pointerEvents="none" />)}
-                    {labelVisible && <text x={anchor.x} y={anchor.y - 5 * labelK} textAnchor="middle" fontSize={12 * labelK} fontFamily={NUM_FONT} fontVariantNumeric={TABULAR_NUMS}
-                      fill={mcolor} stroke={PAL.paper} strokeWidth={3} paintOrder="stroke" fontWeight="700" pointerEvents="none">{lbl}</text>}
+                    {segs.map((s) => {
+                      if (!detailLabelVisible(s.ft, labelPpf)) return null;
+                      const q = f2p(s.mid);
+                      return (
+                        <text key={`sg${s.i}`} x={q.x} y={q.y - 3 * labelK} textAnchor="middle" fontSize={segFs}
+                          transform={`rotate(${s.deg.toFixed(2)} ${q.x} ${q.y})`}
+                          fontFamily={NUM_FONT} fontVariantNumeric={TABULAR_NUMS} fill={mcolor}
+                          stroke={PAL.paper} strokeWidth={2.5 * ls} paintOrder="stroke" fontWeight="600" pointerEvents="none">{s.label}</text>
+                      );
+                    })}
                     {/* wide invisible hit path to select the measurement (Select OR Measure tool — B910) */}
                     {isArea
                       ? <polygon points={ptsStr} fill="transparent" stroke="transparent" strokeWidth={14}
                           pointerEvents={canGrab ? "all" : "none"} style={{ cursor: "move" }} onPointerDown={(e) => startMoveMeasure(e, i)} onContextMenu={(e) => onMeasureContext(e, i)} />
                       : <polyline points={ptsStr} fill="none" stroke="transparent" strokeWidth={14}
                           pointerEvents={canGrab ? "stroke" : "none"} style={{ cursor: "move" }} onPointerDown={(e) => startMoveMeasure(e, i)} onContextMenu={(e) => onMeasureContext(e, i)} />}
+                    {/* NEW-3 — the chip paints AFTER the hit path. An AREA's grab layer is a
+                        transparent FILLED polygon covering the whole shape, so a chip drawn before
+                        it was unreachable: every press over the chip landed on the grab layer and
+                        moved the measurement instead of the label. */}
+                    {chipNode}
                     {isSel && tool === "select" && !m.locked && (
                       <g data-testid="measure-selected" data-sel-i={i}>
                         {/* B230: draggable SQUARE control points (no "+" dots) — Shift-click /
@@ -17703,7 +18015,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           })()}
           {/* selected markup shape — geometry + style */}
           {!multiStyleable && selMarkup && selMarkup.kind !== "easement" && (() => {
-            const swatch = { width: 34, height: 26, padding: 0, border: `1px solid var(--border-default)`, borderRadius: 6, background: "var(--surface-raised)", cursor: "pointer" };
+            // NEW-1 (found while wiring the measurement panel) — NO `background` here. ColorField
+            // paints the CURRENT COLOUR as the chip's background and then spreads this override on
+            // top, so a hardcoded surface colour blanked every colour chip in these panels: the
+            // control you click to change a colour showed no colour. Leave it to ColorField.
+            const swatch = { width: 34, height: 26, padding: 0, border: `1px solid var(--border-default)`, borderRadius: 6, cursor: "pointer" };
             const closed = selMarkup.kind === "rect" || selMarkup.kind === "ellipse" || selMarkup.kind === "polygon";
             return (
               // NEW-1 — plain wrapper (see the multi-select branch above for why the duplicate testid was removed).
@@ -17784,7 +18100,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           {/* selected callout — text styling */}
           {!multiStyleable && selCallout && (() => {
             const cs = calloutStyle(selCallout);
-            const swatch = { width: 34, height: 26, padding: 0, border: `1px solid var(--border-default)`, borderRadius: 6, background: "var(--surface-raised)", cursor: "pointer" };
+            // NEW-1 (found while wiring the measurement panel) — NO `background` here. ColorField
+            // paints the CURRENT COLOUR as the chip's background and then spreads this override on
+            // top, so a hardcoded surface colour blanked every colour chip in these panels: the
+            // control you click to change a colour showed no colour. Leave it to ColorField.
+            const swatch = { width: 34, height: 26, padding: 0, border: `1px solid var(--border-default)`, borderRadius: 6, cursor: "pointer" };
             // B615 — persistent captions under each swatch so you don't have to hover to tell them apart.
             const cap = { fontSize: 9.5, color: PAL.muted, lineHeight: 1, textAlign: "center", letterSpacing: "0.02em" };
             const swatchCap = { display: "flex", flexDirection: "column", alignItems: "center", gap: 3 };
@@ -17835,19 +18155,71 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             const fpts = measPts(m);
             const modeLabel = { line: "Distance", polyline: "Polyline length", area: "Area", count: "Count" }[mode] || "Measurement";
             const rows = [];
-            if (mode === "count") rows.push(["Items", `${fpts.length}`]);
-            else if (mode === "area") { rows.push(["Area", `${f0(polyArea(fpts))} sf · ${f2(polyArea(fpts) / SQFT_PER_ACRE)} ac`]); rows.push(["Perimeter", `${f0(pathLen([...fpts, fpts[0]]))}′`]); }
-            else rows.push(["Length", `${f0(pathLen(fpts))}′`]);
+            // NEW-3 (f) — the panel reads the SAME formatters as the canvas chip, so screen,
+            // panel and paper can never disagree about how a number is written.
+            if (mode === "count") rows.push(["Items", fmtInt(fpts.length)]);
+            else if (mode === "area") { rows.push(["Area", `${fmtSf(polyArea(fpts))} · ${fmtAcres(polyArea(fpts) / SQFT_PER_ACRE)}`]); rows.push(["Perimeter", fmtFeet(pathLen([...fpts, fpts[0]]))]); }
+            else rows.push(["Length", fmtFeet(pathLen(fpts))]);
             const valStyle = { fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS, fontWeight: 700, fontSize: 13, color: PAL.ink };
+            // NEW-1 — the SAME style set a markup shape carries, on EVERY measure mode. `closed`
+            // is the only difference: a fill has no meaning on an open run or a count.
+            // NEW-1 (found while wiring the measurement panel) — NO `background` here. ColorField
+            // paints the CURRENT COLOUR as the chip's background and then spreads this override on
+            // top, so a hardcoded surface colour blanked every colour chip in these panels: the
+            // control you click to change a colour showed no colour. Leave it to ColorField.
+            const swatch = { width: 34, height: 26, padding: 0, border: `1px solid var(--border-default)`, borderRadius: 6, cursor: "pointer" };
+            const closed = mode === "area";
+            const stylable = mode !== "count";
+            const uncal = calibrationState === "uncalibrated";
+            const hasOverride = MEASURE_STD_KEYS.some((k) => m[k] !== undefined) || !!m.labelOffset;
             return (
               <div>
               <Section title={`Measurement · ${modeLabel}`}>
-                {calibrationState === "uncalibrated" && <div style={{ fontSize: 11, color: "var(--warn-text)", lineHeight: 1.5, marginBottom: 8 }}>⚠ This drawing isn’t calibrated yet — the value below is in raw units, not real feet. Calibrate to a known distance first.</div>}
+                {uncal && <div style={{ fontSize: 11, color: "var(--warn-text)", lineHeight: 1.5, marginBottom: 8 }}>⚠ This drawing isn’t calibrated yet — the value below is in raw units, not real feet. Calibrate to a known distance first.</div>}
                 {rows.map(([k, v], j) => <Field key={j} label={k}><span style={valStyle}>{v}</span></Field>)}
                 <Field label="Label"><input value={m.label || ""} maxLength={80}
                   onFocus={() => pushHistory()}
                   onChange={(ev) => setMeasures((a) => a.map((x) => (x.id === m.id ? { ...x, label: ev.target.value } : x)))}
                   placeholder="e.g. Front setback" style={textInput} /></Field>
+                {/* Line + fill, routed through the shared ColorField (so it inherits the recently
+                    used colours) and the shared DASH_OPTIONS list — one editing surface, not a
+                    parallel one. Every mode gets the line controls; only a closed area gets fill. */}
+                <StdSubLabel>{mode === "count" ? "Markers" : "Line"}</StdSubLabel>
+                <Field label={mode === "count" ? "Marker color" : "Line color"}>
+                  <ColorField value={toHex6(measureStyle(m, { accent: PAL.accent }).stroke)} {...colorCtl((v) => liveMeasure({ stroke: v }))} seed={COLOR_SEED} title="Line color" style={swatch} />
+                </Field>
+                <Field label="Line weight">
+                  <NumInput style={numInput} value={m.weight ?? MEASURE_LINE.weight} min={0.5} step={0.5} coarse={2} onCommit={(n) => setSelMeasure({ weight: n })} />
+                </Field>
+                {stylable && (
+                  <Field label="Line style">
+                    <select style={{ ...numInput, width: 100, fontFamily: "inherit" }} value={m.dash || MEASURE_LINE.dash} onChange={(e) => setSelMeasure({ dash: e.target.value })}>
+                      {DASH_OPTIONS}
+                    </select>
+                  </Field>
+                )}
+                {closed && (<>
+                  <StdSubLabel>Fill</StdSubLabel>
+                  <Field label="Fill color">
+                    <ColorField value={toHex6(measureStyle(m, { accent: PAL.accent }).fill)} {...colorCtl((v) => liveMeasure({ fill: v }))} seed={COLOR_SEED} title="Fill color" style={swatch} />
+                  </Field>
+                  <Field label="Fill opacity">
+                    <input type="range" min={0} max={1} step={0.05} value={m.fillOpacity ?? MEASURE_LINE.fillOpacity} {...sliderHistory((e) => liveMeasure({ fillOpacity: +e.target.value }))} />
+                  </Field>
+                </>)}
+                {uncal && <div style={{ fontSize: 10.5, color: "var(--warn-text)", lineHeight: 1.45, margin: "2px 2px 6px" }}>Your colour is saved, but this measurement stays amber on the drawing until the sheet is calibrated — that amber means “this number isn’t real feet yet”.</div>}
+                {/* NEW-2 — when this measurement's label appears. Captured from the live view with
+                    one click (never typed as a zoom number, which means nothing to a reader) and
+                    read back as a named zoom band. */}
+                <StdSubLabel>Label</StdSubLabel>
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", margin: "2px 2px 4px" }}>
+                  <button style={chip} title="Zoom to where you want this label to start showing, then click this."
+                    onClick={() => setSelMeasure({ labelPpf: view.ppf })}>Set at current zoom</button>
+                  {m.labelPpf != null && <button style={chip} onClick={() => setSelMeasure({ labelPpf: null })}>Reset to default</button>}
+                </div>
+                <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.5, margin: "0 2px 4px" }}>
+                  {labelRevealNote(m, settings, DIM_CALLOUT_MIN_PPF)} · a selected measurement always shows its label.
+                </div>
                 <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.5, marginTop: 8 }}>
                   {m.locked
                     ? "Locked — click 🔓 Unlock below to move or reshape it."
@@ -17855,8 +18227,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       ? "Drag any marker to move the whole set; drag a grip to reposition one."
                       : "Drag the line to move it, or a square grip to reshape."}
                 </div>
-                <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
+                <div style={{ display: "flex", gap: 6, marginTop: 10, flexWrap: "wrap" }}>
                   <button style={chip} onClick={() => toggleMeasureLock(m.id)}>{m.locked ? "🔒 Unlock" : "🔓 Lock"}</button>
+                  {hasOverride && <button style={chip} title="Back to your Standards defaults, including where the label sits"
+                    onClick={() => setSelMeasure({ ...Object.fromEntries(MEASURE_STD_KEYS.map((k) => [k, null])), labelOffset: null })}>Reset style</button>}
                   <button style={{ ...chip, color: PAL.danger }} onClick={deleteSel}>Delete</button>
                 </div>
               </Section>
@@ -18318,7 +18692,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               )}
               {selEl.type !== "pond" && (() => {
                 const poly = !!selEl.points;
-                const area = isCenterlineRoad(selEl) ? roadStripArea(selEl, settings) : poly ? polyArea(selEl.points) : selEl.w * selEl.h;
+                const area = isCenterlineRoad(selEl) ? roadStripArea(selEl, settings, sharpFor(selEl)) : poly ? polyArea(selEl.points) : selEl.w * selEl.h;
                 return (
                   <div style={{ fontSize: 12, color: PAL.muted, marginTop: 6, lineHeight: 1.6 }}>
                     {poly ? "Area" : "Footprint"}: <b style={{ color: PAL.ink }}>{f0(area)} sf</b>{poly ? ` · ${f2(area / SQFT_PER_ACRE)} ac` : ""}<br />
@@ -20064,11 +20438,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       )}
       {/* Title reader + metes-and-bounds modal */}
       {titleOpen && (() => {
-        const tracts = parseTracts(mbText);
+        // The parser is loaded on demand (see deedParseLazy.js) — the effect below pulls it the
+        // moment this modal opens, so `dp` is null only for the frame between opening and the
+        // module landing. That frame renders zero counts, which is what an empty textarea shows
+        // anyway; `deedParseTick` re-renders as soon as it arrives.
+        const dp = deedNow();
+        const tracts = dp ? dp.parseTracts(mbText) : [];
         const calls = tracts[0] ? tracts[0].calls : [];
-        const path = calls.length ? callsToPath(calls, { x: 0, y: 0 }) : [];
-        const closes = pathCloses(path);
-        const gap = misclosure(path);
+        const path = dp && calls.length ? dp.callsToPath(calls, { x: 0, y: 0 }) : [];
+        const closes = dp ? dp.pathCloses(path) : false;
+        const gap = dp ? dp.misclosure(path) : 0;
         const exCount = Math.max(0, tracts.length - 1);
         return (
         <div onClick={() => setTitleOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 3000, background: "rgba(20,18,15,0.55)", display: "grid", placeItems: "center" }}>
@@ -20679,6 +21058,9 @@ function dimSlideFor(el, allEls) {
 /* element renderer working in PIXEL space (points pre-transformed by f2p).
    We draw the rect via the rotated group around the element's pixel center. */
 function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEls, startDimMove, onDimNumberDown, onElContext, dimSuppressed, roadNet, lf = null) {
+  // NEW-2 — the junction vertices whose corners render SHARP, read off the road-network data this
+  // renderer already receives (renderElPx is module-level, so it cannot close over the memo).
+  const sharpFor = (e) => (roadNet && roadNet.junctionVerts && e && e.id != null ? roadNet.junctionVerts.get(e.id) : undefined);
   // NEW-1 (V481(f)) — the LABEL frame (lib/exportLabelScale.js). Null on screen. On an export
   // pass it carries the SHEET's px-per-foot, so this element's dimension/width callouts make
   // the same show/hide + size decisions no matter where the canvas happened to be zoomed.
@@ -20805,7 +21187,7 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
   }
   if (isCenterlineRoad(el)) { // centerline road (B596–B599): surface + curbs + dimension all from pts
     const ppf = (f2p({ x: 1, y: 0 }).x - f2p({ x: 0, y: 0 }).x);
-    const ring = roadStripRing(el, settings);
+    const ring = roadStripRing(el, settings, sharpFor(el));
     const dPath = ring.length >= 3 ? ring.map((p, i) => { const q = f2p(p); return `${i ? "L" : "M"}${q.x},${q.y}`; }).join(" ") + "Z" : null;
     const stroke = st.stroke; // B619: no accent recolor on select — blue vertex handles cue the selection
     const rparts = [];
@@ -20834,7 +21216,7 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
     // Curb stripe lines = the centerline offset by ±travelW/2 (the inner face-of-curb edges), TRIMMED
     // against the rest of the cluster's pavement (roadNet.stripes) so a stripe stops at the junction
     // instead of drawing a curb straight through the intersection.
-    const stripeLines = inNetwork ? (roadNet.stripes.get(el.id) || []) : roadCurbLines(el, settings);
+    const stripeLines = inNetwork ? (roadNet.stripes.get(el.id) || []) : roadCurbLines(el, settings, sharpFor(el));
     stripeLines.forEach((cl, i) => {
       if (!cl || cl.length < 2) return;
       rparts.push(<polyline key={`curb${i}`} points={cl.map((p) => { const q = f2p(p); return `${q.x},${q.y}`; }).join(" ")} fill="none" stroke={st.stroke} strokeWidth={curbStrokePx(roadCurbWidth(el), ppf, CURB_STROKE_MIN_PX * lfK)} pointerEvents="none" />);
@@ -20843,7 +21225,7 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
     // true travel width). B149 detail tier (a road width hides at site-overview zoom); kept while
     // selected so the click-to-edit / drag handle never vanishes mid-edit.
     if (!el.noLabel) {
-      const dense = roadDenseCenterline(el, settings);
+      const dense = roadDenseCenterline(el, settings, sharpFor(el));
       const segLens = []; let totalLen = 0;
       for (let i = 1; i < dense.length; i++) { const l = Math.hypot(dense[i].x - dense[i - 1].x, dense[i].y - dense[i - 1].y); segLens.push(l); totalLen += l; }
       let acc = totalLen / 2, midPt = dense[0] || { x: el.cx, y: el.cy }, dir = { x: 1, y: 0 };
@@ -20893,7 +21275,7 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
     // B620 — inline label riding the road centerline (own color + white halo; sparse spacing).
     // B935 — "Inside" placement tucks it a quarter of the travel-width off the centerline (into clear
     // pavement) so it doesn't sit on the drawn centerline; default rides the centerline as before.
-    rparts.push(...inlineLabelEls(roadDenseCenterline(el, settings), el.inlineLabel, st.stroke, el.labelSpacing || INLINE_LABEL_SPACING.road, ppf, f2p, `il${el.id}-`, { size: el.labelSize, halo: el.labelHalo, place: labelPlaceOf(el), lf, insetFt: labelPlaceOf(el) === "inside" ? Math.max(0, (+el.travelW || 0) / 4) : 0 }));
+    rparts.push(...inlineLabelEls(roadDenseCenterline(el, settings, sharpFor(el)), el.inlineLabel, st.stroke, el.labelSpacing || INLINE_LABEL_SPACING.road, ppf, f2p, `il${el.id}-`, { size: el.labelSize, halo: el.labelHalo, place: labelPlaceOf(el), lf, insetFt: labelPlaceOf(el) === "inside" ? Math.max(0, (+el.travelW || 0) / 4) : 0 }));
     return (
       <g key={el.id} data-el-id={el.id} filter={st.shadow ? "url(#bldgShadow)" : undefined} style={{ cursor: tool === "select" ? (el.locked ? "pointer" : "move") : "crosshair" }}
         onPointerDown={(e) => startMoveEl(e, el.id)} onDoubleClick={(e) => onElDouble && onElDouble(e, el.id)}
