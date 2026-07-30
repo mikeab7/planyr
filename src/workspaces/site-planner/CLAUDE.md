@@ -298,6 +298,19 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   real Goose Creek / Tsakiris / Bain rings), plus the ui-audit harness **verify-pond-label-fit** (the real
   plan, a zoom sweep, and the exported sheet — PDF-PARITY).
   `calloutLayout.js` — pure text-box/callout box geometry: auto-size or wrap-to-width (B913).
+- **Parcel-chrome declutter trio (NEW-1/NEW-2/NEW-3) — the FIXED-SIZE sibling of the label engine above.**
+  `labelLayout` reflows labels; these three govern the chrome that CANNOT reflow, whose count is set by how
+  finely the boundary was digitized rather than by how much room the screen has.
+  `setbackChips.js` — `setbackChipRuns`: contiguous edges sharing a setback VALUE, broken where the running
+  signed heading spreads past ~50°, collapse into ONE labelled run anchored on its LONGEST edge. Distinct
+  from `edgeRuns.js` (the ±7° geometric-SIDE model, which still drives run-length dims + B912 side resizing
+  and is deliberately untouched): a filleted corner is a dozen geometric sides but one thing to label.
+  `screenDeclutter.js` — `spaceOut` (greedy min-separation thinning, grid-hashed) + `cornerTurns` (per-vertex
+  corner-ness). ONE helper, reused by the setback chips, the side-length dims AND the vertex handles — never
+  fork a second one. Display-only and re-decided every frame off the live zoom, so zooming in reveals detail.
+  `polylabel.js` — pole of inaccessibility; the parcel acreage badge's anchor (always inside the ring, unlike
+  the vertex average it replaced). Guards: the repo-root `test/` suite **parcelDeclutter** + the ui-audit harness
+  **verify-parcel-declutter** (the Weld County curved-corner repro, with screenshots).
   `roadGeometry.js` — centerline road curves + junction primitives (pure): `teeGeometry` returns the
   ADDITIVE curb-return `wedges` a junction contributes. `roadNetwork.js` — the DISSOLVED road surface
   (clipper union of every connected strip + wedge → one region, one outline, per cluster) plus the

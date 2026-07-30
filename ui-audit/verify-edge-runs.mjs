@@ -79,7 +79,7 @@ const counts = async () => page.evaluate(() => {
   const chips = all("text").filter((t) => /\bac$/.test((t.textContent || "").trim())).length;
   const setbackLines = all('polygon[stroke-dasharray="7 6"]').length;
   const easements = all("polygon").filter((p) => /url\(#pat-ease/.test(p.getAttribute("fill") || "")).length;
-  const sbPills = all('rect[stroke="#b45309"]').length;
+  const sbPills = all('rect[data-testid="setback-chip"]').length;
   return { chips, setbackLines, easements, sbPills };
 });
 let c = await counts();
@@ -92,12 +92,12 @@ ok("B213 — easement on the inactive parcel hidden; the free one shows (1)", c.
 // parcel by clicking on its boundary EDGE (on the fat boundary hit-stroke), not the dead centre.
 // Use the active parcel's on-screen box (page coords) and try each edge until the pills appear.
 const parcelBox = () => page.evaluate(() => {
-  const p = document.querySelector('polygon[stroke="#5b6650" i], polygon[stroke="#c2410c" i]'); // the active parcel's visible polygon (first in doc order)
+  const p = document.querySelector('polygon[data-testid="parcel-outline"]'); // the active parcel's visible polygon (first in doc order)
   if (!p) return null;
   const r = p.getBoundingClientRect();
   return { left: r.x, top: r.y, w: r.width, h: r.height, cx: r.x + r.width / 2, cy: r.y + r.height / 2 };
 });
-const pillsNow = () => page.evaluate(() => document.querySelectorAll('rect[stroke="#b45309"]').length);
+const pillsNow = () => page.evaluate(() => document.querySelectorAll('rect[data-testid="setback-chip"]').length);
 {
   const b = await parcelBox();
   // Edge points on the boundary hit-stroke (a few px in from each side), header-safe order.
@@ -134,11 +134,10 @@ ok("B214 — toggling back to 'By side' returns to 4 pills", c.sbPills === 4, `p
 
 // ── B215: the run-length dim (outboard) and setback pill (inboard) are fanned apart ──
 const fan = await page.evaluate(() => {
-  const pills = [...document.querySelectorAll('rect[stroke="#b45309"]')].map((r) => ({ x: +r.getAttribute("x") + 13, y: +r.getAttribute("y") + 9 }));
+  const pills = [...document.querySelectorAll('rect[data-testid="setback-chip"]')].map((r) => ({ x: +r.getAttribute("x") + 13, y: +r.getAttribute("y") + 9 }));
   // Boundary run-length dims are ink-colored text; exclude the setback pills' OWN
   // orange (#b45309) value text so we measure pill→boundary-dim distance, not pill→self.
-  const dims = [...document.querySelectorAll("text")]
-    .filter((t) => /^\d+′$/.test((t.textContent || "").trim()) && (t.getAttribute("fill") || "").toLowerCase() !== "#b45309")
+  const dims = [...document.querySelectorAll('text[data-testid="parcel-edge-dim"]')]
     .map((t) => ({ x: +t.getAttribute("x"), y: +t.getAttribute("y") }));
   // For each pill, the nearest boundary dim must be fanned away (never coincident).
   let minGap = Infinity;

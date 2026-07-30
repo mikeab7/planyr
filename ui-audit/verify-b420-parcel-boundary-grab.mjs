@@ -8,7 +8,7 @@
  *
  * Logged-out against the built app (vite preview on :4173). Seeds ONE large LOCKED parcel (the
  * default every county-pulled / drawn lot carries) WITH a 25 ft setback so the setback line renders.
- * Selected parcel = stroke #C2410C; unselected = stroke #5b6650 (light theme). Setback line = #b45309.
+ * Selected parcel = stroke #C2410C; unselected = stroke --canvas-parcel (light theme). Setback line = data-testid setback-ring.
  *
  * Run: BASE_URL=http://localhost:4173/ node ui-audit/verify-b420-parcel-boundary-grab.mjs
  */
@@ -48,14 +48,14 @@ await page.goto(BASE, { waitUntil: "load" });
 await page.waitForTimeout(1700);
 await fit();
 
-// The visible parcel polygon (stroke #5b6650 unselected / #C2410C selected — NOT the transparent
+// The visible parcel polygon (stroke --canvas-parcel unselected / #C2410C selected — NOT the transparent
 // fat hit-stroke, which is rgba(0,0,0,0.001)). Returns its on-screen box + whether it's selected.
 const parcelInfo = () => page.evaluate(() => {
   const svg = document.querySelector('svg[aria-label="Site plan canvas"]');
   if (!svg) return null;
   const p = [...svg.querySelectorAll("polygon")].find((el) => {
     const s = (el.getAttribute("stroke") || "").toLowerCase();
-    return s === "#5b6650" || s === "#c2410c";
+    return s === "#534ab7" || s === "#c2410c";
   });
   if (!p) return null;
   const r = p.getBoundingClientRect();
@@ -65,11 +65,11 @@ const parcelInfo = () => page.evaluate(() => {
     cx: r.x + r.width / 2, cy: r.y + r.height / 2, w: r.width, h: r.height, top: r.y, left: r.x,
   };
 });
-// The visible setback line (dashed, stroke #b45309).
+// The visible setback line (dashed, data-testid setback-ring).
 const setbackInfo = () => page.evaluate(() => {
   const svg = document.querySelector('svg[aria-label="Site plan canvas"]');
   if (!svg) return null;
-  const p = [...svg.querySelectorAll('polygon[stroke-dasharray="7 6"]')].find((el) => (el.getAttribute("stroke") || "").toLowerCase() === "#b45309");
+  const p = [...svg.querySelectorAll('polygon[stroke-dasharray="7 6"]')].find((el) => el.getAttribute("data-testid") === "setback-ring");
   if (!p) return null;
   const r = p.getBoundingClientRect();
   return { cx: r.x + r.width / 2, cy: r.y + r.height / 2, w: r.width, h: r.height, top: r.y };
