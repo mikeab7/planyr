@@ -135,14 +135,19 @@ try {
     harris.slice(0, 900));
 
   // ── NEW-3a: what FEMA actually reported — the answer that was missing ─────────
+  /* NEW-2 rewrote these three sentences, deliberately — the ANSWER now leads and FEMA's code
+   * follows as provenance ("No mapped floodplain · FEMA Zone X (unshaded)"), because the old
+   * form could not tell unshaded X from shaded X and both are "Zone X". The FINDING each one
+   * asserts is unchanged; only its wording moved. */
   ok("Zone X is stated as a FINDING, not left as silence",
-    bkdd.includes("FEMA effective FIRM: Zone X, area of minimal flood hazard — no special flood hazard area mapped here."),
-    bkdd.slice(0, 1200));
-  ok("an SFHA site says so instead", /a special flood hazard area IS mapped here/.test(harris) && /including regulatory floodway/.test(harris));
+    /No mapped floodplain · FEMA Zone X \(unshaded\)/.test(bkdd), bkdd.slice(0, 1200));
+  // The floodway is the higher hazard, so it leads — and it still names the A zone it sits in.
+  ok("an SFHA site says so instead",
+    /Regulatory floodway · FEMA Zone A/.test(harris) && /fill is a hard stop/.test(harris), harris.slice(0, 1200));
   ok("a FEMA OUTAGE reads 'unknown, not clear' — never a clean all-clear", /unknown, not clear/.test(outage), outage.slice(0, 900));
   ok("no FEMA verdict is claimed with no context at all", !/FEMA effective FIRM/.test(nocontext));
   ok("NEW-2 — the Zone A sentence, verbatim, when FEMA reports an SFHA over the ring",
-    zonea.includes("FEMA effective FIRM: Zone A — a special flood hazard area IS mapped here."),
+    zonea.includes("100-year floodplain · FEMA Zone A — a mapped Special Flood Hazard Area — the regulatory 1%-annual-chance floodplain."),
     zonea.slice(0, 900));
   ok("NEW-2 — …and the X half never speaks for the tract instead",
     !/no special flood hazard area mapped here/.test(zonea), zonea.slice(0, 900));
@@ -188,6 +193,72 @@ try {
   })());
   ok("the one screening footer survives", bkdd.includes("Screening data — verify before relying on it."));
   ok("per-row ⓘ buttons survive in the flood group", (await page.locator('#panel-bkdd button[aria-label^="About "]').count()) > 5);
+
+  /* ── NEW-1/NEW-2/NEW-3/NEW-7 — the Colorado report, on the REAL rendered surface ──────────
+   * PR #863's own observation is the reason this block exists: the golden-master harness checks
+   * NUMBERS, not pixels, so a change to what a panel SAYS has to be read back out of the DOM. */
+  const john = await text("#panel-flood-johnstown");
+  const shaded = await text("#panel-flood-shadedx");
+  const nodata = await text("#panel-flood-nodata");
+  const hover = await text("#panel-flood-hover");
+  const johnBasis = await page.locator('#panel-flood-johnstown [data-testid="flood-fema-verdict"]').getAttribute("title");
+
+  // NEW-2 — the ANSWER leads; FEMA's code follows as provenance.
+  ok("NEW-2 — the owner's site leads with the ANSWER, not the code",
+    /No mapped floodplain · FEMA Zone X \(unshaded\)/.test(john), john.slice(0, 700));
+  ok("NEW-3 — the word MAPPED is present, and 'No floodplain' is never claimed",
+    /No mapped floodplain/.test(john) && !/\bNo floodplain\b/.test(john));
+  ok("NEW-2 — an empty map SAYS WHY rather than leaving it to be read as failure",
+    /Nothing draws because FEMA paints no colour/.test(john));
+
+  // NEW-3 — WHOSE study answered, by county name; ids stay off the glance surface.
+  ok("NEW-3 — the verdict names the county whose FIRM answered", /Mapped by Larimer County/.test(john));
+  ok("NEW-3 — no raw study or record id reaches the visible line",
+    !/08069C/i.test(john) && !/08069c_2802/i.test(john), john.slice(0, 700));
+  ok("NEW-3 — the DECODED panel + effective date ride the basis hover",
+    /Larimer County, Colorado FIRM panel 08069C1405G, effective Jan 15, 2021/.test(johnBasis || ""), String(johnBasis));
+  ok("NEW-3 — the county-line site's SECOND study is on the basis too (panels stop at the line)",
+    /Weld County, Colorado FIRM panel 08123C1679F, effective Nov 30, 2023/.test(johnBasis || ""), String(johnBasis));
+  ok("NEW-3 — the basis follows the app's As-of / source / age convention",
+    /source: FEMA National Flood Hazard Layer/.test(johnBasis || "") && /flood data \d+[mhd] ago/.test(johnBasis || ""), String(johnBasis));
+
+  // NEW-1 — the two Zone X states must read as OPPOSITE answers.
+  ok("NEW-1 — shaded X reads as the 500-year floodplain, not the all-clear",
+    /500-year floodplain · FEMA Zone X \(shaded\)/.test(shaded), shaded.slice(0, 700));
+  /* The HEADLINES must differ — not merely the sentences. `john`'s body legitimately contains
+   * the words "500-year floodplains" (it says the site is outside them), so this compares the
+   * answer-first headline forms rather than a loose substring. */
+  ok("NEW-1 — the two X variants do not render the same headline",
+    !/No mapped floodplain · /.test(shaded) && !/500-year floodplain · /.test(john));
+
+  // NEW-7 — three states, and "no data" never wears the all-clear's costume.
+  ok("NEW-7 — a coverage gap says so, in its own words",
+    /FEMA flood data not available here/.test(nodata) && /NOT an all-clear/.test(nodata), nodata.slice(0, 700));
+  ok("NEW-7 — the gap NEVER borrows the all-clear's sentence", !/No mapped floodplain/.test(nodata));
+  ok("NEW-7 — the gap is visually distinct too (warn tone, not the clear tone)", await (async () => {
+    const clr = await page.locator('#panel-flood-johnstown [data-testid="flood-fema-verdict"]').evaluate((el) => getComputedStyle(el).color);
+    const gap = await page.locator('#panel-flood-nodata [data-testid="flood-fema-verdict"]').evaluate((el) => getComputedStyle(el).color);
+    return clr !== gap;
+  })());
+
+  // NEW-2 — the hover readout: the surface the report was actually filed about.
+  ok("NEW-2 — the hover leads with the answer", /No mapped floodplain · FEMA Zone X \(unshaded\)/.test(hover), hover);
+  ok("NEW-2 — the hover carries NO record id, NO study id and NO layer name",
+    !/08069c_2802/i.test(hover) && !/08069C/i.test(hover) && !/Flood Hazard Zones/i.test(hover), hover);
+  ok("NEW-2 — the hover explains the blank map", /empty map here is correct/.test(hover), hover);
+
+  // NEW-4 — the demoted flood sources are NAMEABLE, and the control reads like one.
+  ok("NEW-4 — the out-of-area list is a control with a verb, not a bare count",
+    /(Show|Hide) the \d+ sources? that don/.test(bkdd), (bkdd.match(/\d+ sources? that don[^.]*/) || [""])[0]);
+  ok("NEW-4 — opening it names every demoted source", await (async () => {
+    const btn = page.locator('#panel-bkdd button[aria-label*="that don\'t cover this site"]').first();
+    if (!(await btn.count())) return false;
+    const before = (await page.locator("#panel-bkdd").innerText()).length;
+    await btn.click();
+    await page.waitForTimeout(120);
+    const after = (await page.locator("#panel-bkdd").innerText()).length;
+    return after > before;
+  })());
 } finally {
   await browser.close();
 }

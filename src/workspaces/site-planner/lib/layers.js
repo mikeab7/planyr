@@ -139,6 +139,12 @@ export const STATEWIDE = {
     // B1076 — the flood group's four tiers. FEMA is the REGULATORY tier: an adopted map a
     // floodplain administrator enforces. Never merge it with an advisory model.
     floodTier: "regulatory", agency: "FEMA",
+    /* NEW-7 — an EMPTY identify from THIS layer is not "nothing here". NFHL does not cover
+     * everywhere, so no polygon under the cursor means no effective flood map at that point —
+     * which is the opposite risk position from "checked, and clear". The generic "Nothing here"
+     * reads as the all-clear, so this row opts into the honest gap wording instead (the copy
+     * itself lives in floodZone.js `FLOOD_ABSENCE`, with the panel's, so the two can't drift). */
+    identifyGap: "flood",
   },
   wetlands: {
     kind: "dynamic", label: "Wetlands",

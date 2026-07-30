@@ -30,6 +30,7 @@
 
 import { titleCaseAgency } from "./featureHover.js";
 import { identifyCapable } from "./layerRequest.js";
+import { floodReadout, FLOOD_ABSENCE } from "./floodZoneCopy.js";
 
 const trimUrl = (u) => String(u || "").replace(/\/+$/, "");
 
@@ -131,6 +132,16 @@ const pick = (attrs, names) => {
 export function readoutFromResult(cfg, result) {
   if (!result) return null;
   const attrs = result.attributes || {};
+  /* NEW-2 — a FEMA flood zone answers through its OWN reader before the generic path sees it.
+   * The generic path cannot serve this layer honestly: its headline is the service's display
+   * field, which on NFHL layer 28 is `FLD_AR_ID` (an internal record id — the owner's
+   * "08069c_2802"), and its Type row stops at the first field it recognises, which is FLD_ZONE.
+   * ZONE_SUBTY — the only field that separates the 500-yr band from the all-clear, both of them
+   * "Zone X" — was fetched and then thrown away. See floodZone.js. */
+  if (attrs.FLD_ZONE != null || attrs.ZONE_SUBTY != null) {
+    const flood = floodReadout(attrs);
+    if (flood) return { ...flood, sourceName: cfg.source || null };
+  }
   const display = cleanValue(result.value);
   const layerName = cleanValue(result.layerName);
   const rows = [];
@@ -170,11 +181,20 @@ export const IDENTIFY_STATE = {
 
 /* The honest short message for a non-hit outcome. Deliberately brief — this appears in a
  * transient hover chip, not a report — and never blames the user. */
+/* NEW-7 — the honest wording for a source that ANSWERED with no coverage, keyed by the registry's
+ * `identifyGap`. The copy comes from `floodZone.FLOOD_ABSENCE`, the same constant the Layers-panel
+ * verdict uses, so the hover and the panel cannot say different things about the same gap. */
+export { floodReadout };
+
+export const gapMessage = (key) => (key === "flood" ? FLOOD_ABSENCE["no-data"].answer : null);
+
 export function stateMessage(state) {
   if (!state) return "";
   switch (state.kind) {
     case IDENTIFY_STATE.pending: return "Checking…";
-    case IDENTIFY_STATE.none: return "Nothing here";
+    // A gap message ("FEMA flood data not available here") REPLACES "Nothing here", which reads
+    // as an all-clear and is exactly the confusion NEW-7 exists to end.
+    case IDENTIFY_STATE.none: return state.msg || "Nothing here";
     case IDENTIFY_STATE.unsupported: return "This layer can't be identified";
     case IDENTIFY_STATE.error: return state.msg || "Source didn't answer";
     default: return "";
@@ -260,7 +280,7 @@ export function createHoverIdentify({
         // `cfg` rides along so the injected transport can honour the layer's own flags (the
         // `noCors` hosts must skip the doomed direct attempt — see rasterIdentifyMap.js).
         const json = await fetchJson(url, params, { signal, cfg, id });
-        return { id, kind: IDENTIFY_STATE.hit, items: readoutsFromJson(cfg, json, { limit }) };
+        return { id, kind: IDENTIFY_STATE.hit, items: readoutsFromJson(cfg, json, { limit }), gap: cfg.identifyGap || null };
       } catch (e) {
         if (e && e.name === "AbortError") return { id, kind: "aborted" };
         return { id, kind: IDENTIFY_STATE.error, msg: errorMessage(e) };
@@ -279,7 +299,14 @@ export function createHoverIdentify({
     if (bad) return emit({ kind: IDENTIFY_STATE.error, msg: bad.msg, at: lngLat });
     if (settled.length && settled.every((s) => s.kind === IDENTIFY_STATE.unsupported))
       return emit({ kind: IDENTIFY_STATE.unsupported, at: lngLat });
-    emit({ kind: IDENTIFY_STATE.none, at: lngLat });
+    /* NEW-7 — "no data" must never wear the costume of "no hazard". A layer whose coverage is
+     * not universal (`cfg.identifyGap`) and which ANSWERED with zero features is reporting a
+     * COVERAGE GAP, not empty ground: for FEMA that is "no effective flood map at this point",
+     * which is the opposite risk position from the all-clear the generic "Nothing here" implies.
+     * Keyed off the layers that genuinely answered empty — a sibling layer's silence can't
+     * borrow this wording. */
+    const gap = settled.find((s) => s.kind === IDENTIFY_STATE.hit && !s.items.length && s.gap);
+    emit({ kind: IDENTIFY_STATE.none, msg: gap ? gapMessage(gap.gap) : null, at: lngLat });
   };
 
   return {

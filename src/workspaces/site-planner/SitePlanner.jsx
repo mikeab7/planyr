@@ -22945,14 +22945,26 @@ function YieldPanel({
                * to be two separate literals for the SAME sentence (one just prefixed with the regime
                * name), so they are now one sentence with a computed subject. That pays for the MHFD
                * variant outright — this branch ends up SHORTER than before B1105 touched it. */
-              const coSubject = d.coRegime ? `${d.coRegime.short} governs here` : "Colorado";
+              /* NEW-5 (copy only) — "Planyr does not yet carry Colorado detention criteria" read
+               * as "this app has nothing for you here", which is not what is true. District
+               * MEMBERSHIP and WHICH MANUAL APPLIES are different questions: the Town of
+               * Johnstown sits in Weld/Larimer, outside the Mile High Flood District, and governs
+               * drainage by its own storm-drainage criteria PLUS MHFD's Drainage Criteria Manuals
+               * Volumes 1–3. So for the three non-member regimes the honest line points at the
+               * town, which is who to ask. Nothing computed changes — no rule record, no engine,
+               * no new state; the verdict strip still reads N/A and still carries "not carried
+               * yet", so the guard is untouched. ONE literal with a computed subject
+               * (PANEL-BREVITY rule 5), and SHORTER than the sentence it replaces. */
+              const coSubject = !d.coRegime ? "Colorado"
+                : d.coRegime.id === "mhfd" ? "MHFD governs here"
+                : `Outside MHFD (${d.coRegime.short} County)`;
               detR.push(warnNote(
                 // `panelLine` rides the carrier from the lazily-loaded MHFD module — see the note on
                 // MHFD_PANEL_LINE there. It can only be non-null once that chunk has landed, which is
                 // also the only moment this branch can be reached, so there is no first-paint gap.
                 coMhfd && req.panelLine
                   ? req.panelLine
-                  : `${coSubject} — Planyr does not yet carry Colorado detention criteria.`,
+                  : `${coSubject} — confirm the criteria your town has adopted.`,
                 "co-detention",
                 // The explanation rides the lazily-loaded Colorado tier (with the rest of the
                 // Colorado prose). Until it lands, the visible line and its verdict are already

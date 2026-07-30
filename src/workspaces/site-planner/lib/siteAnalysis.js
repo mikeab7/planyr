@@ -28,6 +28,7 @@ import { identifyJurisdiction, identifyRoadAuthority } from "./jurisdiction.js";
 import { GIS_SOURCES } from "../../../shared/gis/sources.js";
 import { fetchArcgisJson, gisErrorMessage, pLimit, GIS_MAX_GET_URL } from "./gisFetch.js";
 import { classifyCcn } from "./ccnClassify.js";
+import { isSfhaZone, isShadedXSubtype } from "./floodZone.js";
 import { screenProximity, fmtDistFt } from "./proximityScreen.js";
 import { summarizeWells } from "./wellStatus.js";
 import { summarizeTransmission, summarizeSubstations } from "./powerScreen.js";
@@ -368,7 +369,12 @@ function zoneDetail(rows) {
     if (!z) continue;
     const sub = String(r.ZONE_SUBTY ?? "").trim();
     const bfe = r.STATIC_BFE != null && Number(r.STATIC_BFE) > -9000 ? `BFE ${r.STATIC_BFE}′` : "";
-    const label = ["Zone " + z, sub, bfe].filter(Boolean).join(" — ");
+    /* NEW-1 — a bare "Zone X" cannot tell the 500-yr band from the all-clear, so the variant is
+     * tagged onto the zone code. Deliberately an inline tag rather than the shared copy tier's
+     * label: that tier is lazily loaded (see floodZoneCopy.js), and this module is on the site
+     * route. The raw subtype still rides along — on the Analysis card it is the FEMA wording a
+     * reader can search the FIRM for. */
+    const label = ["Zone " + z + (z === "X" ? (isShadedX(r) ? " (shaded)" : " (unshaded)") : ""), sub, bfe].filter(Boolean).join(" — ");
     seen.set(label, true);
   }
   return Array.from(seen.keys());
@@ -378,16 +384,15 @@ function zoneDetail(rows) {
 // (100-yr) floodplain that triggers flood-insurance + floodplain-development rules.
 // Everything ELSE the NFHL returns (X, D, OPEN WATER, AREA NOT INCLUDED) is NOT an SFHA;
 // Zone X in particular is the MINIMAL-risk zone — the all-clear, never a constraint.
-const SFHA_ZONES = new Set(["A", "AE", "AH", "AO", "AR", "A99", "V", "VE", "VO",
-  "AR/AE", "AR/AH", "AR/AO", "AR/A", "AR/A99"]);
-export function isSFHA(zone) {
-  const z = String(zone == null ? "" : zone).trim().toUpperCase();
-  if (!z) return false;
-  if (SFHA_ZONES.has(z)) return true;
-  return /^(A|V)([1-9]|[12][0-9]|30)$/.test(z); // legacy numbered zones A1-A30 / V1-V30
-}
-// Shaded Zone X = the 0.2%-annual-chance (500-yr) area: moderate, but NOT an SFHA.
-const isShadedX = (r) => /0\.2\s*pct|0\.2\s*%|\b500[-\s]?(?:yr|year)/i.test(String(r && r.ZONE_SUBTY != null ? r.ZONE_SUBTY : ""));
+// NEW-1 — the SFHA code list and the shaded-X test both live in `floodZone.js` now (the one
+// flood-zone reader every surface shares); `isSFHA` stays exported here because half the app
+// imports it from this module.
+export const isSFHA = isSfhaZone;
+/* Shaded Zone X = the 0.2%-annual-chance (500-yr) area: moderate, but NOT an SFHA. The subtype
+ * test is the SHARED one — see floodZone.js for the five subtypes FEMA paints as shaded X that
+ * the old local /0.2 pct/ regex missed. Reached only after the SFHA rows are filtered out, so the
+ * full variant ordering (floodway / SFHA first) is already settled by the caller. */
+const isShadedX = (r) => isShadedXSubtype(r && r.ZONE_SUBTY);
 
 /* Flood status, zone-aware (B147 false-positive fix). The generic classifier marks ANY
  * returned feature "present," but the FEMA NFHL returns Zone X (the minimal-risk all-clear)

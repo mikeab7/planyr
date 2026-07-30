@@ -5,6 +5,7 @@
 import React, { useState } from "react";
 import { createRoot } from "react-dom/client";
 import LayerPanel from "../src/workspaces/site-planner/components/LayerPanel.jsx";
+import { floodReadout } from "../src/workspaces/site-planner/lib/floodZoneCopy.js";
 import JurisdictionBadge from "../src/workspaces/site-planner/components/JurisdictionBadge.jsx";
 import { defaultOverlayState } from "../src/workspaces/site-planner/lib/layers.js";
 import { formatJurisdictionBadge } from "../src/workspaces/site-planner/lib/jurisdiction.js";
@@ -118,6 +119,63 @@ function App() {
             lookup default) while the identify says Waller and the boundary test found BKDD.
             The panel must follow the facts, never the stale selector. */}
         <Panel id="panel-flood-stalecounty" county="harris" siteCounty="harris" floodContext={TSAKIRIS_CTX} />
+
+        {/* ── NEW-1/NEW-2/NEW-3/NEW-7 — THE OWNER'S COLORADO SITE, from the live service ──────
+            Every value below was read from FEMA's own NFHL on 2026-07-30 at the Johnstown /
+            E County Rd 14 site the owner reported: the zone identify returns FLD_ZONE "X" with
+            ZONE_SUBTY "AREA OF MINIMAL FLOOD HAZARD" under DFIRM 08069C, and the FIRM Panels
+            layer returns TWO panels over that same point — Larimer 08069C1405G (eff. 2021-01-15)
+            and Weld 08123C1679F (eff. 2023-11-30), because panels stop at the county line and
+            this site sits on it. That county-line straddle is the whole of NEW-3. */}
+        <Panel id="panel-flood-johnstown" county="co_weld" siteCounty="co_larimer"
+          floodContext={{
+            drainageDistrict: { id: null, source: null, tested: [] },
+            authority: { jurisdiction: { city: ["Johnstown"], county: ["Larimer"], etj: [] } },
+            flood: {
+              state: "loaded", ageMs: 3600000,
+              zones: [{ zone: "X", subtype: "AREA OF MINIMAL FLOOD HAZARD", staticBfeFt: null, vdatum: null, firm: "08069C" }],
+              panels: [
+                { firm: "08069C", panel: "08069C1405G", effDate: 1610668800000 },
+                { firm: "08123C", panel: "08123C1679F", effDate: 1701302400000 },
+              ],
+            },
+          }} />
+        {/* The OPPOSITE answer, which used to render identically: shaded X IS the 500-year
+            floodplain. Same FLD_ZONE "X"; only ZONE_SUBTY differs. */}
+        <Panel id="panel-flood-shadedx" county="waller" siteCounty="waller"
+          floodContext={{ ...TSAKIRIS_CTX, flood: { state: "loaded", ageMs: 60000, zones: [
+            { zone: "X", subtype: "0.2 PCT ANNUAL CHANCE FLOOD HAZARD", staticBfeFt: null, vdatum: null, firm: "48473C" },
+          ] } }} />
+        {/* NEW-7 — the THIRD state. FEMA answered and has nothing mapped here: that is
+            we-do-not-know, the opposite risk position from checked-and-clear, and it must not
+            render like the all-clear above. */}
+        <Panel id="panel-flood-nodata" county="waller" siteCounty="waller"
+          floodContext={{ ...TSAKIRIS_CTX, flood: { state: "empty", ageMs: 60000, zones: [], panels: [] } }} />
+
+        {/* NEW-2 — the HOVER readout itself, rendered from the exact attributes FEMA's identify
+            returned at the owner's site (verified live 2026-07-30). This is the surface the
+            report was filed about: it used to read "Flood Hazard Zones: 08069c_2802" / "Type: X".
+            Rendered here rather than fetched, because headless Chromium in this sandbox has no
+            external egress (see the note at the top of this file). */}
+        <div id="panel-flood-hover" data-panel style={{ width: 300, border: "1px solid var(--border-default)", borderRadius: 10, padding: 12, background: "var(--surface-overlay)" }}>
+          <div style={{ fontWeight: 700, marginBottom: 6 }}>panel-flood-hover</div>
+          {(() => {
+            const r = floodReadout({
+              DFIRM_ID: "08069C", FLD_AR_ID: "08069C_2802", FLD_ZONE: "X",
+              ZONE_SUBTY: "AREA OF MINIMAL FLOOD HAZARD", SFHA_TF: "F", STATIC_BFE: "-9999",
+            });
+            return (
+              <div data-testid="flood-hover-readout">
+                <div style={{ fontWeight: 600 }}>{r.title}</div>
+                {r.rows.map((row) => (
+                  <div key={row.label} style={{ fontSize: 11, color: "var(--text-secondary)" }}>
+                    <b>{row.label}:</b> {row.text}
+                  </div>
+                ))}
+              </div>
+            );
+          })()}
+        </div>
       </div>
     </div>
   );

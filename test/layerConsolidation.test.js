@@ -195,3 +195,18 @@ describe("identifyOverlaysAt (B1092)", () => {
     expect(identifyOverlaysAt(null, null, at)).toEqual([]);
   });
 });
+
+/* NEW-7 — "no data" must never look like "no floodplain".
+ *
+ * FEMA's NFHL does not cover everywhere, so an EMPTY identify from the flood layer means "no
+ * effective flood map at this point" — the opposite risk position from the all-clear that the
+ * generic "Nothing here" implies. The registry row is where a layer declares that its coverage is
+ * not universal; `rasterIdentify` turns the flag into the honest wording, and test/floodZone
+ * asserts the wording end to end. This pins the ROW, which that node-env suite cannot import
+ * (layers.js needs a DOM). */
+describe("NEW-7 · coverage-gap opt-in lives on the registry row", () => {
+  it("FEMA declares its coverage gap; a universal-coverage layer does not", () => {
+    expect(ALL_LAYERS.fema.identifyGap).toBe("flood");
+    expect(ALL_LAYERS.wetlands.identifyGap).toBeUndefined();
+  });
+});

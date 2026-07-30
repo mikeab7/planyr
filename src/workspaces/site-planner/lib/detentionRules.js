@@ -1516,6 +1516,25 @@ export const DETENTION_SOURCES = {
     ttl: 7 * DAY,
     sourceName: GIS_SOURCES.flood.provider,
   },
+
+  /* NEW-3 — the FIRM PANEL, which is a different layer from the flood ZONES and the only place
+   * the panel number and its effective date actually live. The id the old hover showed
+   * ("08069C_2802") was layer 28's record id and is NOT a panel: at the owner's Colorado site the
+   * real panel is 08069C1405G, effective 2021-01-15. Fetched in the SAME parallel batch as the
+   * zones, so it costs no added latency, and it feeds the readout's basis hover only — nothing
+   * computed depends on it, so a failure is silently harmless (the basis just names the study).
+   * The county-line case this exists for is live-verified: at that one point FEMA returns TWO
+   * panels, Larimer 08069C1405G (eff. 2021-01-15) AND Weld 08123C1679F (eff. 2023-11-30). */
+  detFirmPanel: {
+    // Deliberately the leanest row in this registry — no label, role or sourceName, because
+    // nothing DISPLAYS this source: it exists only to decode the panel behind the readout's
+    // basis hover, and every byte here rides the site-route chunk.
+    id: "detFirmPanel",
+    url: GIS_SOURCES.flood.serviceUrl + "/3",
+    fields: { firm: "DFIRM_ID", panel: "FIRM_PAN", effDate: "EFF_DATE" },
+    ttl: 30 * DAY, // a panel's effective date changes on a map revision, not on a screening run
+    timeoutMs: GIS_SOURCES.flood.timeoutMs,
+  },
 };
 
 /* TCEQ district TYPE codes whose engineers actually review parcel drainage / can
@@ -1779,8 +1798,11 @@ export async function resolveDrainageContext({ lng, lat, ring = null } = {}, opt
   const chanSource = inBkdd ? DETENTION_SOURCES.bkddChannel : inHarris ? DETENTION_SOURCES.hcfcdChannel : DETENTION_SOURCES.nhdChannel;
   const wsSource = inBkdd ? DETENTION_SOURCES.bkddWatershed : inHarris ? DETENTION_SOURCES.hcfcdWatershed : null;
 
-  const [floodRes, chanRes, wsRes, easeRes, ease107Res, groundElevFt] = await Promise.all([
+  const [floodRes, panelRes, chanRes, wsRes, easeRes, ease107Res, groundElevFt] = await Promise.all([
     floodP,
+    // NEW-3 — the FIRM panel + its effective date, in the SAME parallel batch (no added latency).
+    // It feeds the readout's basis hover only; a failure resolves to null and costs nothing.
+    identifySource(DETENTION_SOURCES.detFirmPanel, geom, opts).fresh.catch(() => null),
     identifySource(chanSource, geom, opts).fresh,
     wsSource ? identifySource(wsSource, geom, opts).fresh : Promise.resolve(null),
     // The easement screen runs BOTH district layers — the district splits its current
@@ -1794,8 +1816,20 @@ export async function resolveDrainageContext({ lng, lat, ring = null } = {}, opt
     ? []
     : floodRes.items.map((it) => {
         const f = normalizeFeature(DETENTION_SOURCES.detFlood, it.attrs);
-        return { zone: f.zone, subtype: f.subtype, staticBfeFt: f.elev != null && f.elev > BFE_SENTINEL_MIN ? f.elev : null, vdatum: f.vdatum || null };
+        // NEW-3 — `firm` is the DFIRM_ID (the FIRM study that published this polygon), carried so
+        // the readout can name the study's COUNTY and flag a site that spans two studies.
+        return { zone: f.zone, subtype: f.subtype, staticBfeFt: f.elev != null && f.elev > BFE_SENTINEL_MIN ? f.elev : null, vdatum: f.vdatum || null, firm: f.firm || null };
       });
+
+  /* NEW-3 — the FIRM panels covering this site, passed through in the source's own normalized
+   * shape ({firm, panel, effDate}). Deliberately NOT decoded or deduped here: `firmPanel` in the
+   * lazily-loaded copy tier does both, and every byte spent on presentation in this module rides
+   * the site-route chunk. A county-line site legitimately returns TWO panels (verified live:
+   * Larimer 08069C1405G and Weld 08123C1679F both cover the owner's point), which is exactly the
+   * fact the readout's basis hover exists to show. */
+  const panels = panelRes && !panelRes.error
+    ? panelRes.items.map((it) => normalizeFeature(DETENTION_SOURCES.detFirmPanel, it.attrs))
+    : [];
 
   let channel = { near: null, state: "unavailable", authority: drainageDistrictId, sourceId: chanSource.id };
   if (chanRes && !chanRes.error) {
@@ -1875,7 +1909,9 @@ export async function resolveDrainageContext({ lng, lat, ring = null } = {}, opt
     drainageDistrict: drainageDistrictId
       ? { id: drainageDistrictId, source: inBkdd ? "boundary" : "county", tested: districtsTested }
       : { id: null, source: null, tested: districtsTested },
-    flood: { zones, state: floodRes.error ? "failed" : zones.length ? "loaded" : "empty", ageMs: floodRes.ageMs },
+    // NEW-3 — `panels` is provenance for the readout's basis hover (decoded FIRM panel + effective
+    // date); nothing computed reads it, so an empty list is never a failure state.
+    flood: { zones, panels, state: floodRes.error ? "failed" : zones.length ? "loaded" : "empty", ageMs: floodRes.ageMs },
     channel,
     easements,
     watershed,
@@ -1958,7 +1994,7 @@ export function slimDrainageContext(ctx) {
     drainageDistrict: ctx.drainageDistrict
       ? { id: ctx.drainageDistrict.id ?? null, source: ctx.drainageDistrict.source ?? null, tested: ctx.drainageDistrict.tested || [] }
       : null,
-    flood: ctx.flood ? { zones: ctx.flood.zones || [], state: ctx.flood.state, ageMs: ctx.flood.ageMs ?? null } : null,
+    flood: ctx.flood ? { zones: ctx.flood.zones || [], panels: ctx.flood.panels || [], state: ctx.flood.state, ageMs: ctx.flood.ageMs ?? null } : null,
     channel: ch ? {
       near: ch.near ?? null, unitNo: ch.unitNo ?? null, name: ch.name ?? null, type: ch.type ?? null,
       distFt: ch.distFt ?? null, state: ch.state ?? null,
@@ -2068,7 +2104,7 @@ export function hydrateDrainageContext(slim) {
       sources: [],
       note: SCREENING_CAVEAT,
     },
-    flood: slim.flood ? { zones: slim.flood.zones || [], state: slim.flood.state, ageMs: slim.flood.ageMs ?? null } : { zones: [], state: "empty", ageMs: null },
+    flood: slim.flood ? { zones: slim.flood.zones || [], panels: slim.flood.panels || [], state: slim.flood.state, ageMs: slim.flood.ageMs ?? null } : { zones: [], panels: [], state: "empty", ageMs: null },
     drainageDistrict: {
       id: restoredDistrictId,
       source: restoredDistrictSource,

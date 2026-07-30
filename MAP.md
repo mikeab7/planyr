@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-07-30 @ `c493f6b` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-07-30 @ `7b31fa3` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_389 source files mapped._
+_391 source files mapped._
 
 ## infra
 
@@ -430,11 +430,15 @@ _389 source files mapped._
 - **`src/workspaces/site-planner/lib/floodAdministrator.js`** — NEW-8 governing floodplain administrator: candidate resolution from county/city/ETJ/edge signals, deliberate strictest-wins selection with an ambiguity flag, and the BFE back-solved from an assumed FFE
   - _exports_: `administratorCandidates`, `assessAdministrator`, `ffeSummary`, `impliedFloodElevation`, `resolveAdministrator`, `ruleKeyFor`
 - **`src/workspaces/site-planner/lib/floodGroup.js`** — Flood & drainage layer-group model (B1070/B1071, pure): four provenance tiers, point-in-district auto-scoping of local drainage authorities, master-toggle state, and the honest empty-state copy (what FEMA actually reported, why a district isn't listed, the governing-district drainage line)
-  - _exports_: `COUNTY_DISTRICT`, `COUNTY_LABEL`, `countyKey`, `countyName`, `districtDrainageNote`, `districtName`, `districtReaches`, `districtShort`, `DRAINAGE_DISTRICTS`, `emptyReason`, `FEMA_ZONES_NOT_CHANNELS`, `femaZoneVerdict`, `FLOOD_TIER_ORDER`, `FLOOD_TIERS`, `floodFactsNote`, `floodMasterState`, `floodRowRelevance`, `floodTierLabel`, `governingDistrict`, `isSfhaZone`, `scopeFloodEntries`
+  - _exports_: `COUNTY_DISTRICT`, `COUNTY_LABEL`, `countyKey`, `countyName`, `districtDrainageNote`, `districtName`, `districtReaches`, `districtShort`, `DRAINAGE_DISTRICTS`, `emptyReason`, `FEMA_ZONES_NOT_CHANNELS`, `FLOOD_TIER_ORDER`, `FLOOD_TIERS`, `floodFactsNote`, `floodMasterState`, `floodRowRelevance`, `floodTierLabel`, `governingDistrict`, `isSfhaZone`, `scopeFloodEntries`
 - **`src/workspaces/site-planner/lib/floodplainMitigation.js`** — B707 pure engine: NFHL zone classifier (AO/AH/floodway/unstudied-A), lon/lat→site-feet zones, grid-sampled fill∩zone compensating-storage volume with pluggable elevation providers, UNKNOWN-never-zero states, expert bypass, straddle worst-case
   - _exports_: `BFE_SENTINEL_MIN`, `bfeLinesFromFeatureCollection`, `BKDD_DATUM_NOTE`, `bufferedFloodway`, `classifyNfhlFeature`, `combineMitigation`, `computeMitigation`, `crossSectionWselFromFeatureCollection`, `deriveBfeFromLines`, `DERIVED_BFE_NOTE`, `DERIVED_WSE02_DRAFT_NOTE`, `DERIVED_WSE02_NOTE`, `DERIVED_WSE100_DRAFT_NOTE`, `DERIVED_XS_WSEL_NOTE`, `distToPolyline`, `effectivePadElev`, `EST_BOUNDARY_WSE_NOTE`, `EST_EBFE_NOTE`, `EST_MAAPNEXT_NOTE`, `EST_SCREENING_BFE_NOTE`, `EST_WSE_SRCS`, `estimateZoneAWse`, `estWseNote`, `EXCLUSIONS_NOTE`, `EXPERT_BYPASS_LABEL`, `FFE_BASIS_LABEL`, `ffeBasisText`, `floodGeoBbox`, `governingCrossSectionWsel`, `gridIntersect`, `hagForRing`, `isEstimatedWseSrc`, `NAVD88_NOTE`, `NEWER_MODEL_NOTE`, `OFFSITE_NOTE`, `pickWorstCase`, `pointInZone`, `pondFloodplainTier`, `ringInFloodway`, `ringInTrigger`, `sampleRingGrades`, `wedgeMitigation`, `WSE_PROVIDER_LABEL`, `wse1pctForRing`, `wseProvLabel`, `zonesFromFeatureCollection`, `zoneWaterSurface`
 - **`src/workspaces/site-planner/lib/floodplainRules.js`** — B707 editable per-jurisdiction floodplain-mitigation rules (trigger band / ratio / floodway policy / offset scope, verified-flagged placeholder seeds) with drainage-authority + county defaulting
   - _exports_: `atlas14Mandated`, `bfeDataRequirementFor`, `DEFAULT_FLOODPLAIN_RULES`, `defaultFloodJurForAuthority`, `defaultFloodJurForCounty`, `floodJurCounty`, `loadFloodplainRules`, `mitigationOffsetBasis`, `offsetSurfaceBasis`, `offsetSurfaceLabel`, `saveFloodplainRules`, `triggerClasses`
+- **`src/workspaces/site-planner/lib/floodZone.js`** — The ONE flood-zone CLASSIFIER (site route, no user-facing strings): which of eight variants a NFHL polygon is, and in particular shaded vs unshaded Zone X — both carry FLD_ZONE 'X' and only ZONE_SUBTY separates the 500-yr band from the all-clear
+  - _exports_: `isSfhaZone`, `isShadedXSubtype`, `resolveFloodZone`
+- **`src/workspaces/site-planner/lib/floodZoneCopy.js`** — LAZY-loaded words + provenance for a FEMA flood answer: the answer-first headline ('No mapped floodplain · FEMA Zone X (unshaded)'), the representable no-data/unreachable states, the DFIRM/FIRM-panel decode with county names, and the Layers-panel verdict — deliberately off the site-route chunk
+  - _exports_: `COUNTY_FIPS`, `describeFloodZone`, `femaZoneVerdict`, `firmPanel`, `firmStudy`, `firmStudySpan`, `FLOOD_ABSENCE`, `floodAbsence`, `floodReadout`, `STATE_FIPS`, `undrawnReason`
 - **`src/workspaces/site-planner/lib/flowField.js`** — Pure drainage flow-direction math (B705): windowed-gradient downhill arrows on a spaced lattice (no arrow on flat/void ground) + classic D8 kept as the future flow-accumulation seed
   - _exports_: `d8Direction`, `flowArrows`
 - **`src/workspaces/site-planner/lib/footprintEdit.js`** — Building footprint reshape (NEW-1/B872): rect→polygon promotion + dock-frame preservation — pins loaded walls as fixed lines, projects/clips vertex drags, recomputes the dock-frame bbox, and repoints doors/grid to the true wall (pure geometry)
@@ -614,7 +618,7 @@ _389 source files mapped._
 - **`src/workspaces/site-planner/lib/proximityScreen.js`** — Pure proximity-screen core (PHASE 2, reused by later distance screens): projects parcel rings + feature points to EPSG:2278 feet and returns count + nearest-distance + ranked names within a buffer (0 ft = on/under the site), plus the `fmtDistFt` display helper
   - _exports_: `distPathToRingsFt`, `distPointSegFt`, `distPointToRingsFt`, `distSegSegFt`, `featureDistFt`, `fmtDistFt`, `pointInRingFt`, `ringToGridFt`, `screenProximity`, `segmentsIntersectFt`, `toGrid`
 - **`src/workspaces/site-planner/lib/rasterIdentify.js`** — pure ArcGIS `/identify` decision layer for the RASTER-painted layers: capability gate, request shaping, result→readout, and the debounced/cancelling hover controller with an honest state for every outcome.
-  - _exports_: `createHoverIdentify`, `errorMessage`, `HOVER_IDENTIFY_DEBOUNCE_MS`, `IDENTIFY_ROW_SPECS`, `IDENTIFY_STATE`, `IDENTIFY_TIMEOUT_MS`, `IDENTIFY_TOLERANCE_PX`, `identifyCapable`, `identifyLayersParam`, `identifyRequest`, `readoutFromResult`, `readoutsFromJson`, `stateMessage`
+  - _exports_: `createHoverIdentify`, `errorMessage`, `floodReadout`, `gapMessage`, `HOVER_IDENTIFY_DEBOUNCE_MS`, `IDENTIFY_ROW_SPECS`, `IDENTIFY_STATE`, `IDENTIFY_TIMEOUT_MS`, `IDENTIFY_TOLERANCE_PX`, `identifyCapable`, `identifyLayersParam`, `identifyRequest`, `readoutFromResult`, `readoutsFromJson`, `stateMessage`
 - **`src/workspaces/site-planner/lib/rasterIdentifyLazy.js`** — the one on-demand loader for the raster identify chunk: a synchronous-returning `attachRasterIdentifyLazy` for the map finder plus a `makeHoverIdentify`/`rasterIdentifyNow` pair for the planner's per-move path.
   - _exports_: `attachRasterIdentifyLazy`, `loadRasterIdentify`, `makeHoverIdentify`, `rasterIdentifyNow`
 - **`src/workspaces/site-planner/lib/rasterIdentifyMap.js`** — leaflet glue for the raster identify: map hover/click wiring, the transient readout DOM, and the direct-then-cache-proxy transport that gets past a no-CORS agency host.

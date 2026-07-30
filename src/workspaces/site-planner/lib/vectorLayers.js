@@ -22,6 +22,7 @@
 
 import { GIS_SOURCES } from "../../../shared/gis/sources.js";
 import { pipelineStyleFor } from "./pipelineCommodity.js";
+import { isShadedXSubtype } from "./floodZone.js";
 
 // ---------------------------------------------------------------------------
 // Source registry — one row per layer. `query` drives the vector pull (endpoint,
@@ -665,7 +666,11 @@ export function styleFor(source, props) {
     if (p.ZONE_SUBTY === "FLOODWAY") return { color: "#991b1b", weight: 1, fillColor: "#dc2626", fillOpacity: 0.45 };
     if (String(p.FLD_ZONE || "").startsWith("V")) return { color: "#5b21b6", weight: 1, fillColor: "#7c3aed", fillOpacity: 0.4 };
     if (p.SFHA_TF === "T") return { color: "#1d4ed8", weight: 1, fillColor: "#2563eb", fillOpacity: 0.35 };
-    if (String(p.ZONE_SUBTY || "").includes("0.2 PCT")) return { color: "#b45309", weight: 1, fillColor: "#f59e0b", fillOpacity: 0.2 };
+    /* NEW-1 — the 0.2% (500-yr) band is decided by the shared reader, not by a substring. FEMA
+     * paints five more X subtypes in this class than `.includes("0.2 PCT")` matched (see
+     * floodZone.js), so a shaded-X polygon spelled any other way used to paint as minimal-risk
+     * grey — the same collapse this whole strand is about, one layer further down. */
+    if (isShadedXSubtype(p.ZONE_SUBTY)) return { color: "#b45309", weight: 1, fillColor: "#f59e0b", fillOpacity: 0.2 };
     return { color: "#9ca3af", weight: 0.5, fillColor: "#9ca3af", fillOpacity: 0.08 }; // X / minimal
   }
   if (style === "nwi") {
