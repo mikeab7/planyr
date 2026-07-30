@@ -17,8 +17,18 @@
  * Deliberately NOT persisted: tiles/features (heavy, view-dependent), per-layer opacity, and the
  * corridor width — the brief scopes this to VISIBILITY (the on/off core); the numeric per-layer
  * settings stay session-only for now.
+ *
+ * NEW-1 — A SECOND, SEPARATE SPARSE MAP: `layerAbove` (site model field of the same name), the
+ * per-site memory of which layers the user LIFTED with "Show above plan". It is deliberately its
+ * own field rather than a richer value inside `layerOverrides`, because every function above and
+ * every saved record already speaks plain booleans there — a second field is purely additive, so
+ * no existing site record, merge or undo frame changes meaning. Same discipline in every respect:
+ * sparse (only layers actually lifted), registry-sanitized on read AND on write (a removed layer's
+ * key self-prunes), absent field = nothing lifted = today's behaviour, and only layers the lift
+ * can actually MOVE are stored (an already-over-the-plan line layer has nothing to remember).
  */
 import { ALL_LAYERS, defaultOverlayState } from "./layers.js";
+import { configCanLift } from "./mapStack.js";
 
 // Coerce any persisted / candidate value into a clean `{ [key]: boolean }` map: keep only boolean
 // values whose key is still a real layer in the registry (a removed layer's key is dropped). Returns
@@ -47,15 +57,58 @@ export function overridesFromOverlays(overlays) {
   return out;
 }
 
+// NEW-1 — the "Show above plan" twin of sanitizeLayerOverrides. Additionally drops any key whose
+// layer CANNOT be lifted (a line/point source is over the plan already), so a stale or nonsensical
+// flag can never reach the renderer and ask for a band that doesn't apply to it.
+const liftable = (k) => !!(ALL_LAYERS[k] && configCanLift(ALL_LAYERS[k]));
+
+export function sanitizeLayerAbove(raw) {
+  const out = {};
+  if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+    for (const [k, v] of Object.entries(raw)) if (v === true && liftable(k)) out[k] = true;
+  }
+  return out;
+}
+
+// Project a full overlays state → the SPARSE lifted map: a layer appears only when it is actually
+// lifted. Sanitised on the way out as well as on the way in, so a key not in the live registry (or
+// one for a layer the lift can't move) can never be emitted and self-prunes on the next save.
+// `false` is simply absence — there is no "off" override to record, because the default is off for
+// every layer and always will be (the whole design).
+export const aboveFromOverlays = (overlays) => sanitizeLayerAbove(
+  Object.fromEntries(Object.entries(overlays || {}).map(([k, st]) => [k, !!(st && st.above === true)])),
+);
+
 // Apply a saved sparse on/off override map ON TOP of a fresh default overlays state, producing a full
 // overlays object (opacity/widthFt at their defaults). Newly-added layers keep their defaults; stale
 // keys are ignored. Used to REBUILD the shared overlays when a site opens.
-export function overlaysWithOverrides(overrides) {
+// NEW-1 — `above` is the second (optional) saved map: which layers this site had lifted above the
+// plan. Absent → every layer sits at its default band, which is exactly the pre-NEW-1 behaviour.
+export function overlaysWithOverrides(overrides, above = null) {
   const base = defaultOverlayState();
   const ov = sanitizeLayerOverrides(overrides);
   for (const [k, on] of Object.entries(ov)) if (base[k]) base[k] = { ...base[k], on };
-  return base;
+  return applyAboveOverrides(base, above); // ONE place decides which layers sit in the lifted band
 }
+
+// Merge a saved lifted map onto an EXISTING overlays object, preserving on/opacity/widthFt — the
+// applyOnOverrides twin, used by the same undo/redo restore so reverting a lift doesn't disturb
+// anything else. A key absent from the map returns that layer to the default band (not lifted).
+// Reference-stable per layer, so React can skip untouched layers.
+export function applyAboveOverrides(overlays, above) {
+  const ab = sanitizeLayerAbove(above);
+  const out = {};
+  for (const [k, st] of Object.entries(overlays || {})) {
+    if (!liftable(k)) { out[k] = st; continue; }
+    const want = ab[k] === true;
+    out[k] = st && !!st.above === want ? st : { ...(st || {}), above: want };
+  }
+  return out;
+}
+
+// Stable string signature of a sparse lifted map — the aboveSig twin of overridesSig, for the
+// undo/redo histKey so a lift is its own undoable frame exactly like a visibility toggle.
+export const aboveSig = (above) => Object.keys(sanitizeLayerAbove(above)).sort().join(",");
 
 // Merge a saved on/off override map onto an EXISTING overlays object, preserving each layer's live
 // opacity / widthFt (unlike overlaysWithOverrides, which resets them). A key absent from the map

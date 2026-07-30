@@ -31,7 +31,7 @@ import { releaseCanvas } from "./releaseCanvas.js";
 import { ALL_LAYERS, gisProxyEnabled } from "./layers.js";
 // PDF-PARITY for the NEW-1 stacking model: the sheet has to composite the two GIS bands the
 // screen does — fills UNDER the drawn plan, strokes and points OVER it.
-import { rolesOf, exportsOverPlan } from "./mapStack.js";
+import { rolesOf, exportsOverPlan, exportBandFor, configCanLift, FRONT_BAND_ATTR } from "./mapStack.js";
 import { overlayExportRequest } from "./layerRequest.js";
 import {
   lngLatRingToFeet, feetToLatLng, aerialPlacement, overlayExportPlacement,
@@ -254,12 +254,26 @@ export function createExportSheet(ctx) {
     // array's bottom→top order. Tagged data-export-overlay so inlineImages warns loudly (never
     // silently) if a layer's fetch is dropped; data-fallback-href = the direct-agency URL to retry
     // before dropping (when the same-origin proxy isn't serving).
-    /* NEW-1 — the sheet composites the SAME two bands the screen does (PDF-PARITY). `under`
-     * goes in at the running backdrop anchor as before; `over` is appended AFTER the drawn plan,
-     * so a contour crosses a printed building exactly as it does on screen and a floodplain fill
-     * still can't bury one. Both emitters below take the band as an argument, so screen order and
-     * sheet order cannot drift apart. */
+    /* NEW-1 — the sheet composites the SAME THREE bands the screen does (PDF-PARITY):
+     *   `under` → the running backdrop anchor, as before;
+     *   `front` → into the plan SVG's own `data-gis-front-band` group, which is where a layer the
+     *             user LIFTED with "Show above plan" sits on screen too: above the buildings,
+     *             still under the printed labels;
+     *   `over`  → appended AFTER the drawn plan, so a contour crosses a printed building exactly
+     *             as it does on screen and a floodplain fill still can't bury one.
+     * All three emitters take the band as an argument, so screen order and sheet order cannot
+     * drift apart. LOUD-FAILURE: if the front anchor is missing from the clone (a canvas without
+     * an origin never renders one), a lifted layer falls back to `over` WITH a console warning
+     * rather than silently printing underneath the plan it was lifted out of. */
     const overRaster = [], overVector = [];
+    const frontAnchor = clone.querySelector(`[${FRONT_BAND_ATTR}]`);
+    const bandOf = (o) => {
+      const want = o.band || (o.over ? "over" : "under");
+      if (want !== "front") return want;
+      if (frontAnchor) return "front";
+      console.warn(`[export] "${o.label || o.id}" is lifted above the plan but the sheet has no ${FRONT_BAND_ATTR} anchor — printing it over the plan instead`);
+      return "over";
+    };
     const placeRaster = (list, append) => {
       for (const o of list) {
         const tl = f2p({ x: o.x, y: o.y });
@@ -276,13 +290,16 @@ export function createExportSheet(ctx) {
         im.setAttribute("data-layer-id", o.id);
         if (o.label) im.setAttribute("data-layer-label", o.label);
         if (o.fallbackSrc) im.setAttribute("data-fallback-href", o.fallbackSrc);
-        if (append) clone.appendChild(im);
+        if (append === "front") frontAnchor.appendChild(im);
+        else if (append) clone.appendChild(im);
         else { clone.insertBefore(im, anchor.nextSibling); anchor = im; }
       }
     };
     if (includeMapLayers && exportOverlays && exportOverlays.length) {
-      placeRaster(exportOverlays.filter((o) => !o.over), false);
-      overRaster.push(...exportOverlays.filter((o) => o.over));
+      const byBand = (b) => exportOverlays.filter((o) => bandOf(o) === b);
+      placeRaster(byBand("under"), false);
+      placeRaster(byBand("front"), "front");
+      overRaster.push(...byBand("over"));
     }
     // GIS VECTOR/client layers (B745): transmission, road-authority, county/city/ETJ boundaries,
     // contours, drainage arrows, OSM/Mapillary points. No server image — each layer's lat/lon
@@ -301,13 +318,16 @@ export function createExportSheet(ctx) {
         g.setAttribute("data-layer-id", v.id);
         if (v.label) g.setAttribute("data-layer-label", v.label);
         g.innerHTML = svg; // inline SVG fragment — same innerHTML idiom as the sheet furniture below
-        if (append) clone.appendChild(g);
+        if (append === "front") frontAnchor.appendChild(g);
+        else if (append) clone.appendChild(g);
         else { clone.insertBefore(g, anchor.nextSibling); anchor = g; }
       }
     };
     if (includeMapLayers && exportVectorOverlays && exportVectorOverlays.length) {
-      placeVector(exportVectorOverlays.filter((v) => !v.over), false);
-      overVector.push(...exportVectorOverlays.filter((v) => v.over));
+      const byBand = (b) => exportVectorOverlays.filter((v) => bandOf(v) === b);
+      placeVector(byBand("under"), false);
+      placeVector(byBand("front"), "front");
+      overVector.push(...byBand("over"));
     }
     // Site-plan overlays (B72) obey the print dialog's "Print overlay" toggle (B131):
     // off → drop every placed overlay raster (its editor chrome + any unsynced
@@ -613,7 +633,10 @@ export function createExportSheet(ctx) {
       /* NEW-1 — ONE request per declared ROLE, exactly like the screen. A role-split source
          (FEMA zones + boundaries, BKDD watersheds + streams) therefore prints as two images:
          the fill under the plan, the strokes over it. A single-role source is one image, as
-         before. `over` is the band; the composer inserts each set at its own anchor. */
+         before. `band` names the anchor the composer inserts each set at.
+         NEW-1 — a THIRD band, `front`: an AREA role the user LIFTED with "Show above plan" prints
+         into the plan SVG's own `data-gis-front-band` group, so on paper it sits above the
+         buildings and still under the printed labels — the same place it sits on screen. */
       const parts = rolesOf(cfg);
       const roleParts = parts.length ? parts : [{ role: "area", layers: rasterCfg.layers ?? null }];
       for (const part of roleParts) {
@@ -627,7 +650,8 @@ export function createExportSheet(ctx) {
         const pDirect = proxy && req.direct !== req.url
           ? overlayExportPlacement(bbox, origin.lon, origin.lat, { exportBase: `${req.direct}/${req.endpoint}`, ...geomOpts })
           : null;
-        out.push({ ...p, id, label: cfg.label, over: exportsOverPlan(part.role), opacity: st.opacity ?? cfg.opacity ?? 0.8, fallbackSrc: pDirect ? pDirect.src : null });
+        const band = exportBandFor(part.role, !!st.above && configCanLift(cfg));
+        out.push({ ...p, id, label: cfg.label, band, over: band === "over", opacity: st.opacity ?? cfg.opacity ?? 0.8, fallbackSrc: pDirect ? pDirect.src : null });
       }
     }
     return out; // ordered bottom→top within each band
@@ -770,9 +794,11 @@ export function createExportSheet(ctx) {
       const labels = (norm && norm.labels) || [];
       if (!features.length && !labels.length) continue; // on but nothing in view → honest omission
       // NEW-1 — the band this layer prints in, from its declared role (a vector layer is never
-      // role-split; only a multi-sublayer raster export is).
+      // role-split; only a multi-sublayer raster export is) PLUS the user's own "Show above plan"
+      // lift, so screen and sheet agree about a lifted layer exactly as they do about a default one.
       const vRole = (rolesOf(cfg)[0] || {}).role || "area";
-      out.push({ id, label: cfg.label, features, labels, over: exportsOverPlan(vRole), opacity: st.opacity ?? cfg.opacity ?? 0.9 });
+      const vBand = exportBandFor(vRole, !!st.above && configCanLift(cfg));
+      out.push({ id, label: cfg.label, features, labels, band: vBand, over: vBand === "over", opacity: st.opacity ?? cfg.opacity ?? 0.9 });
     }
     return out; // ALL_LAYERS registry order == on-screen paint order
   };

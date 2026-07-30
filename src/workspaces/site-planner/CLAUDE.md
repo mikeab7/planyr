@@ -96,24 +96,46 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   backdrop over the property line. Screen, References panel and right-click menu all read it.
 - **⛔ NEW-1 (B1205) — `mapStack.js` is THE map stacking model, and it is the ONLY place a draw
   order is decided.** Bottom→top: basemap → GIS AREA fills → references → parcel → setback →
-  elements → references promoted above the plan (B1198) → GIS LINE strokes → labels → handles.
+  elements → references promoted above the plan (B1198) → **GIS AREA fills the user LIFTED** →
+  GIS LINE strokes → labels → handles.
   **The load-bearing rule: FILLED area layers draw UNDER the site elements; LINE/stroke layers draw
   OVER them** — a contour crossing a building is a hairline, a floodplain fill over one buries it.
-  There is deliberately **no mode, no shortcut and no per-layer z-order UI** (Google/Apple both use
-  a fixed hierarchy + opacity); per-layer opacity is the one escape hatch and every row has the same
-  `opacityControl` (B1206, guarded by the repo-root `test/` suite **layerOpacityCoverage**). Every GIS source
-  **declares** `role: "area" | "line" | "point"` — never inferred at render time — and a service
-  publishing both splits via `roleLayers` (FEMA zones vs boundaries; BKDD watersheds vs streams/BFE):
-  one panel row, one opacity, two export requests. **The trap to know:** Leaflet keeps every pane
-  inside `_mapPane`, which carries the pan transform and so its own stacking context, so **no
-  z-index can lift a pane above the planner SVG** — the line band is hosted OUTSIDE the map in a
-  sibling box (`geoTopWrapRef`/`geoTopPaneRef`), with the wrap's gesture transform and Leaflet's
-  map-pane translate mirrored in the SAME statement as the original (VIEWPORT-STABLE; `setWrapTransform`).
-  PDF-PARITY lives in `exportSheet.js`, which composites the same two bands. **Known deviation:** the
-  handle layer is inside the plan SVG, so the line band paints above it — bounded (the band is
-  `pointer-events:none`) and owned by **B1208**; do not "fix" it by moving the handle group out of
-  the SVG without moving its pointer plumbing, or every drag loses the moves that pass over a handle.
-  Guards: the repo-root `test/` suite **mapStack** and the e2e spec **map-layer-stacking**.
+  That DEFAULT is what makes the owner's contours-behind-buildings case a zero-interaction case, and
+  it must stay the default. There is deliberately **no mode, no shortcut and no FREE-FORM z-order UI**
+  (no front/back, up/down, or per-layer number). Every GIS source **declares**
+  `role: "area" | "line" | "point"` — never inferred at render time — and a service publishing both
+  splits via `roleLayers` (FEMA zones vs boundaries; BKDD watersheds vs streams/BFE): one panel row,
+  one opacity, one lift toggle, two export requests.
+  **⛔ THE ESCAPE HATCH IS *ORDER*, NOT OPACITY — this CORRECTS what B1205/B1206 shipped saying.**
+  Opacity cannot fix occlusion for a layer drawn UNDER the elements: the building still covers it, and
+  fading it only dims the parts you could already see. So the hatch is the per-layer **"Show above
+  plan"** toggle (`abovePlanControl`, default OFF, one implementation and one `aboveRow` call site for
+  all three row shapes) which lifts ONE layer's AREA half into the `gisAreaFront` tier. Per-layer
+  opacity stays (B1206, same `opacityControl` everywhere) — it is just not the answer to "I can't see
+  through my plan", and no copy may say it is. Persisted per plan as the site model's own sparse
+  `layerAbove` map (`layerPrefs.js`, the `layerOverrides` twin) with its own undo frame.
+  **The trap to know:** Leaflet keeps every pane inside `_mapPane`, which carries the pan transform and
+  so its own stacking context, so **no z-index can lift a pane above the planner SVG** — the line band
+  is hosted OUTSIDE the map in a sibling box (`geoTopWrapRef`/`geoTopPaneRef`). **The LIFTED band is
+  hosted differently ON PURPOSE:** a `<foreignObject>` at the plan SVG's `data-gis-front-band` anchor
+  (`geoFrontWrapRef`/`geoFrontPaneRef`), because a fill dropped into the map-top host beside the line
+  band would paint over the labels and over B1197's handle layer and hide the grip you are dragging.
+  ⛔ Do not "simplify" it back into the top host. All three hosts' transforms are written in the SAME
+  statement as the wrap's (VIEWPORT-STABLE; `setWrapTransform`), and the in-SVG one additionally
+  counter-translates the registration shift so it is not nudged onto the imagery twice.
+  Because Leaflet fixes a pane at construction, flipping the lift is a tear-down-and-re-add:
+  `bandKey` (resolved PANE NAMES, not the flag, so a surface that collapses the bands rebuilds
+  nothing) drives it, through the ONE `release` helper the toggle-off path uses.
+  PDF-PARITY lives in `exportSheet.js`, which composites the same THREE bands — `under` at the
+  backdrop anchor, `front` INTO the plan's own `data-gis-front-band` group, `over` after the plan.
+  **Known deviation:** the handle layer is inside the plan SVG, so the LINE band paints above it —
+  bounded (the band is `pointer-events:none`, and a hairline crossing a handle can never make one
+  unreachable) and owned by **B1208**; do not "fix" it by moving the handle group out of the SVG
+  without moving its pointer plumbing, or every drag loses the moves that pass over a handle.
+  Guards: the repo-root `test/` suites **mapStack**, **layerAbovePlan** and **layerOpacityCoverage**,
+  plus the e2e spec **map-layer-stacking** (whose lift case is mutation-checked three ways: hosting
+  the band outside the SVG, rendering it after the handle layer, and dropping its transform mirror
+  each turn it red).
 - **`buildingFloodExposure.js` (B1207) answers "is my building in the floodplain?" as a NUMBER** —
   per footprint: overlap by area and percent, the governing zone and its BFE. It **reuses** the
   B707/B712 `zonesFromFeatureCollection` + `gridIntersect` + `zoneWaterSurface` chain (never a second

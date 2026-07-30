@@ -121,6 +121,23 @@ const layerOverridesObj = (v) => {
   return changed ? out : src;
 };
 
+// NEW-1 — per-site "Show above plan" memory: a sparse `{ layerKey: true }` map of the GIS layers
+// the user lifted above the site elements (see lib/layerPrefs.js). Only `true` is ever stored —
+// not-lifted is absence, because the default is off for every layer. Kept light HERE for the same
+// reason as the map above (siteModel stays registry- and DOM-free for the Node tests): coerce to
+// literal `true` only; layerPrefs does the registry-aware sanitising on apply, so a key for a
+// removed — or for a line-role, already-above — layer is ignored and self-prunes on the next save.
+// Reference-stable when already clean, so an unchanged record never churns.
+const layerAboveObj = (v) => {
+  const src = obj(v);
+  let changed = false;
+  const out = {};
+  for (const [k, up] of Object.entries(src)) {
+    if (up === true) out[k] = true; else changed = true;
+  }
+  return changed ? out : src;
+};
+
 // B682 — every parcel MUST carry a stable `id`. The map-finder hand-off (MapFinder.computeAssembly)
 // and legacy saved sites can hold id-LESS parcels ({points, addr, acct, attrs} with no id). Two bugs
 // flow from that. (1) The acreage-chip drag matches parcels by `pc.id === draggedId`; with both
@@ -857,6 +874,11 @@ export function createSiteModel(p = {}, { onHeal } = {}) {
     // = today's default behavior (every session rebuilds from defaultOverlayState()). Additive +
     // back-compatible; carried newer-wins by mergeSiteContent's `...newer` spread, like any scalar field.
     layerOverrides: layerOverridesObj(p.layerOverrides),
+    // NEW-1 — per-site "Show above plan" memory: a SPARSE { layerKey: true } map of the GIS layers
+    // lifted above the site elements. Absent field / empty map = nothing lifted = the pre-NEW-1
+    // default order. Additive + back-compatible; carried newer-wins by mergeSiteContent's
+    // `...newer` spread, like `layerOverrides` beside it.
+    layerAbove: layerAboveObj(p.layerAbove),
     // constraint metadata. `liveLayers` is RESERVED for future per-site layer
     // memory — populated later; today layer state is a global app preference.
     constraints: { liveLayers: arr(p.constraints && p.constraints.liveLayers) },

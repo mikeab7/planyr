@@ -333,6 +333,7 @@
       "crossSections": []
     },
     "layerOverrides": {},
+    "layerAbove": {},
     "constraints": {
       "liveLayers": []
     }

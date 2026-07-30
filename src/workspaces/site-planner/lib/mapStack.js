@@ -11,17 +11,35 @@
  * building buries it. That ONE distinction answers the complaint with no control at all:
  * contours read through the buildings, and the buildings never vanish under a blue wash.
  *
- * NO new mode, NO keyboard shortcut, NO per-layer z-order picker. A future exception is a
- * deliberate edit to THIS file — never a user setting. Per-layer OPACITY is the one escape
- * hatch (every toggleable layer has it — see test/layerOpacityCoverage.test.js).
+ * NO new mode, NO keyboard shortcut, NO free-form z-order picker (front/back, up/down, a
+ * per-layer number). A future exception to the DEFAULT is a deliberate edit to THIS file.
+ *
+ * ⛔ THE ONE ESCAPE HATCH IS *ORDER*, NOT OPACITY (NEW-1, 2026-07-30 — this CORRECTS the
+ * claim B1205/B1206 shipped with).
+ *   Opacity CANNOT fix occlusion for a layer that sits UNDER the site elements. Fading a
+ *   buried floodplain fill changes nothing on screen — the building still covers it, and all
+ *   the slider does is make the parts you CAN see fainter. Opacity only helps a layer that is
+ *   already ON TOP and too loud. Occlusion order can only be fixed by order.
+ *   So the escape hatch is the per-layer **"Show above plan"** toggle: a two-state,
+ *   semantically-named lift of ONE layer into the `gisAreaFront` tier — above the site
+ *   elements, still below the labels/chips and below B1197's always-on-top handle layer.
+ *   Per-layer opacity stays (B1206) and is still worth having; it is just not the answer to
+ *   "I can't see through my plan".
+ *   The DEFAULT is unchanged and stays the point: an area layer defaults to BELOW and a line
+ *   layer is already above, so the owner's contours-behind-buildings case needs ZERO clicks.
+ *   A toggle you never have to touch beats a toggle you always have to touch.
  *
  * WHERE THE TIERS PHYSICALLY LIVE (planner canvas, SitePlanner.jsx):
- *   basemap · gisArea  → Leaflet panes inside the BACKDROP map <div> (below the SVG)
- *   reference … label  → `<g>` groups INSIDE the one planner SVG, in this order
- *   gisLine            → a Leaflet pane hosted ABOVE the SVG (the map-top host)
- *   handle             → the manipulation-handle tier, the top of the model
- * The SVG is a single DOM node, so it occupies the contiguous reference…label band; the
- * order WITHIN it is realized by its own group order, not by z-index.
+ *   basemap · gisArea      → Leaflet panes inside the BACKDROP map <div> (below the SVG)
+ *   reference … handle     → `<g>` groups INSIDE the one planner SVG, in this order
+ *   gisAreaFront           → a Leaflet pane hosted INSIDE the planner SVG, in a screen-space
+ *                            <foreignObject> sitting at the `data-gis-front-band` anchor —
+ *                            which is how a LIFTED fill gets above the elements and still
+ *                            stays under the labels and the handles (a fill over a handle
+ *                            would hide the grip you are dragging; a hairline never does)
+ *   gisLine                → a Leaflet pane hosted ABOVE the SVG (the map-top host)
+ * The SVG is a single DOM node, so it occupies the contiguous reference…handle band; the
+ * order WITHIN it is realized by its own child order, not by z-index.
  *
  * References (a scanned exhibit the user is aligning) are USER CONTENT, not a data layer,
  * so Figma-style Bring-to-front / Send-to-back ordering is correct for them — that control
@@ -31,30 +49,60 @@
 
 /* Bottom → top. `z` is the CSS z-index each tier's host element takes when it is its own
  * DOM node; tiers that share the planner SVG all resolve to the SVG's own z-index. Gaps of
- * 100 are deliberate: a new tier slots in without renumbering the world. */
+ * 100 are deliberate: a new tier slots in without renumbering the world.
+ *
+ * ⚠ Each tier is `{ id, z }` and NOTHING else: what a tier MEANS is documented here, in comments,
+ * because a human-readable label on every entry is a string that ships to every visitor's browser
+ * and that no runtime code ever reads. (NEW-1 moved them out for exactly that reason, paying for
+ * its own bundle cost rather than raising the site route's budget.)
+ *   basemap        100 — aerial / basemap imagery
+ *   gisArea        200 — GIS AREA layers: filled polygons (floodplain, wetlands, soils, districts)
+ *   reference      300 — references / imported site-plan overlays (the DEFAULT "below" band)
+ *   parcel         400 — parcel boundary
+ *   setback        500 — setback band
+ *   elements       600 — site elements
+ *   referenceFront 650 — B1198's opt-in "Draw above the plan" band. A reference is USER CONTENT, so
+ *                        a user may deliberately promote one over the plan (a coloured land-plan
+ *                        exhibit being worked ON); it still sits inside this model rather than
+ *                        defining a scheme of its own. lib/overlayOrder.js owns the ordering WITHIN
+ *                        both reference bands (front/back among references).
+ *   gisAreaFront   660 — NEW-1: an AREA layer the user explicitly LIFTED with "Show above plan". It
+ *                        clears the site elements — the whole point — but deliberately stops below
+ *                        the labels and the handles: a FILL is not a hairline, and a fill over a
+ *                        grip hides the thing you are dragging.
+ *   gisLine        700 — GIS LINE layers: strokes (contours, streams, easement centrelines, BFE
+ *                        lines, utility lines)
+ *   label          800 — labels & chips
+ *   handle         900 — manipulation handles, always on top */
 export const MAP_STACK = [
-  { id: "basemap", z: 100, label: "Aerial / basemap imagery" },
-  { id: "gisArea", z: 200, label: "GIS AREA layers — filled polygons (floodplain, wetlands, soils, watersheds, districts)" },
-  { id: "reference", z: 300, label: "References / imported site-plan overlays (the DEFAULT 'below' band)" },
-  { id: "parcel", z: 400, label: "Parcel boundary" },
-  { id: "setback", z: 500, label: "Setback band" },
-  { id: "elements", z: 600, label: "Site elements" },
-  // B1198's opt-in "Draw above the plan" band. A reference is USER CONTENT, so a user may
-  // deliberately promote one over the plan (a coloured land-plan exhibit being worked ON); it
-  // still sits inside this model rather than defining a scheme of its own. lib/overlayOrder.js
-  // owns the ordering WITHIN both reference bands (front/back among references).
-  { id: "referenceFront", z: 650, label: "References explicitly promoted above the plan (overlayOrder band 'above')" },
-  { id: "gisLine", z: 700, label: "GIS LINE layers — strokes (contours, streams, easement centrelines, BFE lines, utility lines)" },
-  { id: "label", z: 800, label: "Labels & chips" },
-  { id: "handle", z: 900, label: "Manipulation handles — always on top" },
+  { id: "basemap", z: 100 },
+  { id: "gisArea", z: 200 },
+  { id: "reference", z: 300 },
+  { id: "parcel", z: 400 },
+  { id: "setback", z: 500 },
+  { id: "elements", z: 600 },
+  { id: "referenceFront", z: 650 },
+  { id: "gisAreaFront", z: 660 },
+  { id: "gisLine", z: 700 },
+  { id: "label", z: 800 },
+  { id: "handle", z: 900 },
 ];
 
 export const STACK_Z = Object.freeze(Object.fromEntries(MAP_STACK.map((t) => [t.id, t.z])));
 
 /* The tiers that share the ONE planner SVG element. The SVG's own z-index is the first of
- * them, which is what puts the whole band above gisArea and below gisLine. */
-export const SVG_TIERS = ["reference", "parcel", "setback", "elements", "referenceFront", "label", "handle"];
+ * them, which is what puts the whole band above gisArea. `gisAreaFront` (NEW-1) joins them:
+ * its Leaflet pane is hosted in a screen-space <foreignObject> parked at the SVG's
+ * `data-gis-front-band` anchor, so a lifted fill clears the elements without leaving the one
+ * SVG — which is exactly what keeps it under the labels and under the handle layer. */
+export const SVG_TIERS = ["reference", "parcel", "setback", "elements", "referenceFront", "gisAreaFront", "label", "handle"];
 export const SVG_Z = STACK_Z.reference;
+
+/* The DOM anchor the lifted band is hosted at, inside the plan SVG. Named here (not spelled
+ * inline at each site) because THREE renderers have to agree on it: the canvas mounts the
+ * pane host at it, the PDF/PNG export inserts the lifted layers into it (PDF-PARITY), and the
+ * e2e stacking spec reads it to prove the tier is where the model says it is. */
+export const FRONT_BAND_ATTR = "data-gis-front-band";
 
 /* ⚠ THE ONE KNOWN DEVIATION, stated plainly rather than papered over.
  *
@@ -69,7 +117,14 @@ export const SVG_Z = STACK_Z.reference;
  * and it is bounded: the line band is thin, non-interactive (`pointer-events: none`) and cannot
  * take a click, so a hairline may CROSS a handle but can never make one unreachable. Closing it
  * properly means lifting the handle layer and its pointer plumbing together — a change that must
- * be made with B1197's own guards, not alongside them. */
+ * be made with B1197's own guards, not alongside them.
+ *
+ * ⚠ THE DEVIATION IS BOUNDED TO `gisLine`, AND NEW-1 DELIBERATELY DID NOT WIDEN IT. The cheap way
+ * to build "Show above plan" would have been to drop the lifted layer into the map-top host beside
+ * the line band — one line of code, and it would have inherited this deviation. Refused: the
+ * deviation is only tolerable for a HAIRLINE. A filled floodplain wash painted over the handle
+ * layer would hide the grip you are dragging, which is strictly worse than the occlusion the lift
+ * exists to fix. Hence the in-SVG `gisAreaFront` host. Keep it there. */
 
 /* The planner canvas's ACTUAL CSS z-index for each of its three host elements. The `z`
  * numbers above are the MODEL'S ORDER (and what the export sorts by); these are the numbers
@@ -92,31 +147,60 @@ export const CANVAS_Z = Object.freeze({
  *   point — a marker/symbol. Reads like a line, and burying a well or a hydrant under a
  *           pad defeats the point of turning it on → OVER, with the lines.
  *
- * A source that publishes BOTH (an ArcGIS service whose sublayers are watershed polygons
- * AND stream centrelines) splits into its two roles via `roleLayers` — one request per
- * role, each into its own pane, both driven by the single panel row. See ROLE_SPLIT_NOTE. */
+ * THE ROLE SPLIT: a source that publishes BOTH (an ArcGIS service whose sublayers are watershed
+ * polygons AND stream centrelines) declares `roleLayers: { area: [...], line: [...] }` and renders
+ * as one request per role, each into its own pane — area under the plan, lines over it — both
+ * driven by the single panel row, the single opacity and the single "Show above plan" toggle. */
 export const GIS_ROLES = ["area", "line", "point"];
 
 /* Which roles sit ABOVE the site elements. */
 export const ROLES_OVER_ELEMENTS = Object.freeze(["line", "point"]);
 
-export const ROLE_SPLIT_NOTE =
-  "A source whose sublayers are part polygon and part stroke declares `roleLayers: { area: [...], line: [...] }` " +
-  "— one export request per role, area under the plan and lines over it, both driven by one panel row.";
-
 /** Does this role draw over the site elements? */
 export const roleOverElements = (role) => ROLES_OVER_ELEMENTS.includes(role);
 
-/** The stack tier a role lands in. */
+/** The stack tier a role lands in, by DEFAULT (before any user lift). */
 export const tierForRole = (role) => (roleOverElements(role) ? "gisLine" : "gisArea");
 
-/* Canonical pane names. Two panes, because there are exactly two bands — not one pane per
- * layer, which would be a z-order picker by another name. */
+/* ---------------------------------------------------------------------------------
+ * "SHOW ABOVE PLAN" (NEW-1) — the per-layer, two-state lift.
+ *
+ * Only an AREA role can be lifted, and that is the whole design, not a limitation:
+ *   • an area fill is the ONLY role the default puts under the elements, so it is the only
+ *     one that can be occluded by them — and opacity cannot fix that (see the header);
+ *   • line and point roles are ALREADY over the plan, so for them the control has nothing to
+ *     do. The panel renders it in its already-on state rather than hiding it, so a row's
+ *     silence never has to be interpreted (see LayerPanel's abovePlanControl).
+ * A role-SPLIT source (FEMA zones + hazard boundaries) lifts only its AREA half; its line half
+ * was over the plan already. One row, one toggle, still two export requests. */
+export const LIFTABLE_ROLE = "area";
+
+/** Can this role be lifted above the plan? (Only the one the default puts underneath.) */
+export const canLiftRole = (role) => role === LIFTABLE_ROLE;
+
+/** Does this layer config have anything the lift would actually move? */
+export const configCanLift = (cfg) => rolesOf(cfg).some((r) => canLiftRole(r.role));
+
+/** The stack tier a role lands in GIVEN the user's per-layer lift. */
+export const tierForLayer = (role, above = false) =>
+  (above && canLiftRole(role) ? "gisAreaFront" : tierForRole(role));
+
+/** Does every part of this layer draw above the site elements right now? True for a line/point
+ *  source always, for an area source only once lifted. The panel's checked-state. */
+export const layerOverPlan = (cfg, above = false) => {
+  const roles = rolesOf(cfg);
+  return roles.length > 0 && roles.every((r) => roleOverElements(r.role) || (above && canLiftRole(r.role)));
+};
+
+/* Canonical pane names. One pane per BAND — never one pane per layer, which would be a
+ * free-form z-order picker by another name. */
 export const PANE_AREA = "gisAreaPane";
+export const PANE_AREA_FRONT = "gisAreaFrontPane"; // NEW-1 — the lifted band, hosted inside the plan SVG
 export const PANE_LINE = "gisLinePane";
 /* Name labels belonging to a layer ride in that layer's own band, so a stream's name never
  * ends up under the building the stream is drawn over. */
 export const PANE_AREA_LABEL = "gisAreaLabelPane";
+export const PANE_AREA_FRONT_LABEL = "gisAreaFrontLabelPane";
 export const PANE_LINE_LABEL = "gisLineLabelPane";
 
 /** Pane names for a role, given a caller's pane map. `panes` lets a surface with no site
@@ -129,6 +213,35 @@ export function panesForRole(role, panes = null) {
     pane: (over ? p.line : p.area) || (over ? PANE_LINE : PANE_AREA),
     labelPane: (over ? p.lineLabel : p.areaLabel) || (over ? PANE_LINE_LABEL : PANE_AREA_LABEL),
   };
+}
+
+/** Pane names for a role GIVEN the user's per-layer lift (NEW-1). A lifted AREA role takes the
+ *  front band's panes; every other case is exactly `panesForRole`, unchanged.
+ *
+ *  A surface with no site elements (the map finder) has nothing to be "above", so it may point
+ *  `areaFront` back at its own area pane — the caller's hosting decision. The BAND KEY below is
+ *  read off the resolved pane names for precisely that reason: when the two collapse onto one
+ *  pane there is no rebuild to do, and asking the pane rather than the flag is what knows it. */
+export function panesForLayer(role, panes = null, above = false) {
+  if (!(above && canLiftRole(role))) return panesForRole(role, panes);
+  const p = panes || {};
+  return {
+    pane: p.areaFront || PANE_AREA_FRONT,
+    labelPane: p.areaFrontLabel || PANE_AREA_FRONT_LABEL,
+  };
+}
+
+/** The identity of the band set a live layer was BUILT into. Leaflet fixes a layer's pane at
+ *  construction, so flipping "Show above plan" has to tear the layer down and re-add it — and
+ *  `syncOverlayLayers` needs a cheap, exact way to notice. Comparing resolved pane names (not
+ *  the `above` flag) means a surface that collapses the bands never rebuilds for nothing. */
+export function bandKey(cfg, panes = null, above = false) {
+  const roles = rolesOf(cfg);
+  const parts = roles.length ? roles : [{ role: LIFTABLE_ROLE }];
+  return parts.map(({ role }) => {
+    const { pane, labelPane } = panesForLayer(role, panes, above);
+    return `${pane}/${labelPane || ""}`;
+  }).join("|");
 }
 
 /** Every role a layer config renders in, bottom band first.
@@ -185,3 +298,15 @@ export function stackOrder(tierId) {
 /** Export helper: does this layer config paint ABOVE the drawn plan on the sheet?
  *  Split configs paint in BOTH bands, so the caller asks per role, not per config. */
 export const exportsOverPlan = (role) => roleOverElements(role);
+
+/* The three bands the SHEET composites, named once so screen and paper cannot drift
+ * (PDF-PARITY). `under` inserts at the backdrop anchor, `front` goes into the plan SVG's own
+ * `data-gis-front-band` group — which is why a lifted fill prints above the buildings and still
+ * under the printed labels, exactly as it reads on screen — and `over` appends after the plan. */
+export const EXPORT_BANDS = Object.freeze(["under", "front", "over"]);
+
+/** Which sheet band a role prints in, given the user's per-layer lift (NEW-1). */
+export const exportBandFor = (role, above = false) => {
+  if (roleOverElements(role)) return "over";
+  return above && canLiftRole(role) ? "front" : "under";
+};

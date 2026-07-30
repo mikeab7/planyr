@@ -48,7 +48,7 @@
       "minBytes": 32768
     },
     "siteRouteJsBytes": {
-      "baseline": 2296022,
+      "baseline": 2344160,
       "target": 1600000,
       "unit": "bytes",
       "what": "Total JS a plain Site route must download: the entry chunk plus SitePlannerApp and its static-import closure.",
@@ -178,6 +178,15 @@
           "item": "B1205",
           "date": "2026-07-30",
           "reason": "B1205/B1206/B1207: the map stacking model (mapStack.js), a declared area/line/point role on all 36 GIS sources plus the role-split raster plumbing and the map-top pane host, the one unified layer-opacity control, and the per-building floodplain-exposure engine + its Yield readout. +8.4 KB minified on the Site chunk, all app-route, no new dependency and no new chunk (siteRouteChunks still 7). Raised rather than optimised because origin/main b2cfd08 already measured 1410.5 KB against a 1410.9 KB derived ceiling — 0.4 KB of band left, so any feature at all would have breached; the two lazy-load candidates in this diff's reach were checked and refused (screeningBfeSite.js has three render-path exports, pondOptimizer.js is called during render by the options card). Payback is tracked by B1064."
+        },
+        {
+          "metric": "bundle.siteRouteJsBytes",
+          "from": 2296022,
+          "to": 2344160,
+          "direction": "raise",
+          "item": "B1254",
+          "date": "2026-07-30",
+          "reason": "Per-layer 'Show above plan' (the correction that opacity was never the escape hatch): a new mapStack tier + its in-SVG foreignObject band host, the pane/rebuild plumbing in layers.js, the per-site layerAbove persistence, the panel control, and the third export band. ~3.5 KB of real feature across six modules, of which ~1.1 KB was PAID BACK IN-DIFF first: MAP_STACK's per-tier label strings and ROLE_SPLIT_NOTE moved into comments (pure documentation that shipped to every browser and no runtime code read), the three panel call sites deduped behind one aboveRow, and layerPrefs' four functions plus layers.js' two teardown blocks folded into one path each. Raised rather than optimised further because origin/main a748911 already measured 2284.1 KB against a 2287.1 KB derived ceiling - 3.0 KB of band left, so any feature at all would have breached it. Payback stays tracked by B1064."
         }
       ]
     }

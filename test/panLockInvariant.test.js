@@ -62,18 +62,25 @@ describe("B1122 — the basemap transform is applied in the same frame as the dr
     expect(src).toMatch(/setTimeout\(\(\) => commit\(center, z, true\), 160\)/);
   });
 
-  it("the map-top host is mirrored in the SAME statement as the wrap (NEW-1)", () => {
-    // The line-role GIS pane sits above the plan in its own host, positioned by mirroring the
-    // wrap's gesture transform. If that mirror is ever written from somewhere else — a second
-    // effect, a rAF, a passive effect — the contours lag the imagery they trace by a frame,
-    // which is the same class of defect B1122 removed for the basemap itself. ONE helper writes
-    // both, so the two can never be written at different times.
-    const helper = src.slice(src.indexOf("const setWrapTransform = ("), src.indexOf("const setWrapTransform = (") + 500);
+  it("EVERY out-of-SVG GIS band host is mirrored in the SAME statement as the wrap (NEW-1)", () => {
+    // The GIS bands that do not live inside the backdrop map sit in their own hosts, positioned by
+    // mirroring the wrap's gesture transform: the LINE band above the plan (B1205) and the LIFTED
+    // AREA band inside the plan SVG (the "Show above plan" tier). If either mirror is ever written
+    // from somewhere else — a second effect, a rAF, a passive effect — that band lags the imagery
+    // it traces by a frame, which is the same class of defect B1122 removed for the basemap
+    // itself. ONE helper writes all of them, so they can never be written at different times.
+    const at = src.indexOf("const setWrapTransform = (");
+    expect(at, "setWrapTransform is gone").toBeGreaterThan(-1);
+    const helper = src.slice(at, src.indexOf("\n    };", at));
     expect(helper).toMatch(/wrap\.style\.transform = value/);
-    expect(helper).toMatch(/top\.style\.transform = value/);
-    // …and nothing else may write the host's transform on the gesture path.
-    const others = [...src.matchAll(/geoTopWrapRef\.current\.style\.transform\s*=/g)];
-    expect(others.length, "the map-top host transform is written outside setWrapTransform").toBe(0);
+    expect(helper).toMatch(/geoTopWrapRef\.current/);
+    expect(helper).toMatch(/geoFrontWrapRef\.current/);
+    expect(helper).toMatch(/for \(const m of mirrors\) if \(m\) m\.style\.transform = value/);
+    // …and nothing else may write either host's transform on the gesture path.
+    for (const ref of ["geoTopWrapRef", "geoFrontWrapRef"]) {
+      const others = [...src.matchAll(new RegExp(`${ref}\\.current\\.style\\.transform\\s*=`, "g"))];
+      expect(others.length, `${ref}'s transform is written outside setWrapTransform`).toBe(0);
+    }
   });
 
   it("VIEWPORT-STABLE is not violated elsewhere in the geo transform path", () => {
