@@ -33,17 +33,30 @@ the always-loaded core. This merges two tracks of work: the mature **Site Planne
 > **⏱ LATE-BIND the real number — assign it as the LAST step before you push, against fresh main (B779).**
 > `next-id` reads only YOUR branch, so if you stamp a real `B###`/`V###` at the *start* of a session, a
 > concurrent session (branched from the same main, its mint not merged yet) can honestly grab the same
-> number — and whoever merges second renumbers. That's the collision that keeps happening; it is NOT a
-> `next-id` bug (two branches can't see each other until they merge). To make it rare: **do the work under
-> the provisional `NEW-#` / branch label everywhere in code, tests, and commits** (already the house rule —
-> code/tests keep the provisional label through any renumber), and **assign the real backlog number only
-> when you're about to push**, computed against the just-fetched main:
+> number — and whoever merges second renumbers. So: **do the work under the provisional `NEW-#` / branch
+> label everywhere in code, tests, and commits** (code/tests keep the provisional label through any
+> renumber), and **assign the real backlog number only when you're about to push**, computed against the
+> just-fetched main:
 > ```
-> git fetch origin main && npm run next-id -- --against-main    # folds in ids merged after you branched
+> git fetch origin main && npm run next-id -- --against-main    # main + every in-flight branch
 > ```
-> Assigning seconds before merge (not hours) collapses the collision window from the whole session to a
-> few seconds, and because only the BACKLOG/VERIFICATION *heading* carries the real number, a rare late
-> clash renumbers a couple of heading lines — never code. **A collision that still slips through is caught
+> **⚠ CORRECTED 2026-07-30 (B779 ×2) — the earlier claim here, that late-binding "collapses the window to a
+> few seconds," was WRONG as originally shipped, and six consecutive dispatches collided under it.** Late
+> binding closes `mint → push`; the collisions happen in **`push → merge`** — PR open, CI nudge, build,
+> auto-merge — which is minutes to hours, and other sessions merge during it. Reproduced in a two-clone lab:
+> both sessions fetch a fresh main, both run `--against-main`, **both get the same number.** The rule was
+> being followed and the tool was blind. Two things changed so the claim is now true:
+> - **`--against-main` reads the in-flight PEER BRANCHES too**, not just `origin/main` — the ids other
+>   sessions have claimed are on the remote and readable *now*. It also **PROVES `origin/main` is freshly
+>   fetched and REFUSES (exit 2) rather than return a stale number** (this clone was measured 7 days / 169
+>   ids behind while still printing "[incl. origin/main]"), and reports the commit + fetch age it read.
+> - **`npm run check-mint` is a pre-push hook + a required-build step** (`npm run hooks:install` once per
+>   clone) that BLOCKS a push whose new ids are already claimed, naming the branch and the id to move to.
+>   It checks the property, not the ceremony, so a correct late mint passes untouched and a **recurrence
+>   mints nothing and never trips it.** Gaps are free — leaving one beats a second renumber pass (B1140).
+>
+> Because only the BACKLOG/VERIFICATION *heading* carries the real number, a late clash renumbers a couple
+> of heading lines — never code. **A collision that still slips through is caught
 > LOUDLY:** `test/idUniqueness.test.js` fails the build if two ACTIVE items share a `B#`/`V#` (in
 > `BACKLOG.md` / `VERIFICATION.md`), **and** (B780) if any NEW collision appears across the live+archive
 > pair — the race where one session ships-and-archives its item while the other's same-numbered item stays
