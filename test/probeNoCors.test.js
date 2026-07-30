@@ -7,12 +7,15 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
-// layers.js pulls in Leaflet-facing modules that need a DOM — stub the four offenders
+// layers.js pulls in Leaflet-facing modules that need a DOM — stub the five offenders
 // (values unused by probeService) so the module loads in the node test environment.
 vi.mock("esri-leaflet", () => ({ dynamicMapLayer: vi.fn(), imageMapLayer: vi.fn(), featureLayer: vi.fn(), tiledMapLayer: vi.fn() }));
 vi.mock("../src/workspaces/site-planner/lib/evidenceLayers.js", () => ({ overpassLayer: vi.fn(), mapillaryLayer: vi.fn() }));
 vi.mock("../src/workspaces/site-planner/lib/terrainLayers.js", () => ({ contourLayer: vi.fn(), flowLayer: vi.fn(), TERRAIN_MIN_ZOOM: 13 }));
-vi.mock("../src/workspaces/site-planner/lib/vectorOverlay.js", () => ({ cachedVectorLayer: vi.fn(), cachedPipelineLayer: vi.fn(), cachedCorridorLayer: vi.fn() }));
+vi.mock("../src/workspaces/site-planner/lib/vectorOverlay.js", () => ({ cachedVectorLayer: vi.fn(), cachedPipelineLayer: vi.fn(), cachedCorridorLayer: vi.fn(), isPointFeature: vi.fn() }));
+// NEW-1 — mapSymbols.js is the fifth offender: it imports leaflet AND the bundled marker PNGs
+// so an accidental default marker degrades to a real pin instead of a broken image.
+vi.mock("../src/workspaces/site-planner/lib/mapSymbols.js", () => ({ installDefaultMarkerIcon: vi.fn(), pointToLayerFor: vi.fn() }));
 
 import { probeService } from "../src/workspaces/site-planner/lib/layers.js";
 import { proxyServiceUrl } from "../src/shared/gis/gisProxyCore.js";

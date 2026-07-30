@@ -69,19 +69,78 @@ export function overlayExportRequest(cfg, { proxy = false } = {}) {
   return { url, direct: cfg.url, endpoint, layersParam: layers ? `show:${layers.join(",")}` : null, renderingRule: null };
 }
 
+/* The circleMarker options a POINT feature is drawn with (NEW-1). Pure — the leaflet
+ * `pointToLayer` that consumes this lives in mapSymbols.js, which is the only module allowed
+ * to import leaflet here.
+ *
+ * A point in a vector overlay MUST be given an explicit symbol. Left to Leaflet's default
+ * (`L.marker` + `L.Icon.Default`) it paints the browser's broken-image glyph and the alt text
+ * "Marker" — the owner's "Mark" artefact where the HIFLD substations should be. A filled disc
+ * in the source's own colour is also the right cartography: it matches how evidenceLayers.js
+ * already draws OSM power points, and it reads as a deliberate symbol rather than a pin
+ * dropped by the user.
+ *
+ * `fillOpacity` tracks `opacity` so the panel's slider dims the whole symbol together, and a
+ * `radius` a registry row may override (`cfg.pointRadius`) keeps a dense national point layer
+ * from turning the view into confetti. */
+export function pointSymbolOptions(cfg = {}, opacity = 1) {
+  const color = cfg.color || "#b91c1c";
+  return {
+    radius: cfg.pointRadius || 4,
+    color,
+    weight: cfg.weight || 2,
+    opacity,
+    fillColor: color,
+    fillOpacity: opacity * 0.85,
+  };
+}
+
 /* esri featureLayer (vector FeatureServer) options. The style closure carries the
  * current opacity; nothing here filters features. A layer may supply a PER-FEATURE
  * `styleFn(props, opacity)` (e.g. road authority colored by maintainer) — then the
  * style is derived per feature from its attributes; otherwise a single flat style.
  * `cfg.fields` (optional) limits the attributes fetched (smaller payload for a dense
- * statewide layer); `cfg.minZoom` gates a dense layer so it never paints at metro scale. */
-export function featureLayerOptions(cfg, opacity, pane) {
-  const o = { url: cfg.url, pane, minZoom: cfg.minZoom ?? 10, interactive: false };
+ * statewide layer); `cfg.minZoom` gates a dense layer so it never paints at metro scale.
+ *
+ * `opts` (NEW-1/NEW-2), both supplied by layers.js's buildFeatureLayer:
+ *   pointToLayer — REQUIRED in practice: without it a POINT feature falls back to Leaflet's
+ *                  broken default marker (see pointSymbolOptions). Pure code can't build one
+ *                  (it needs leaflet), so it is injected; `test/pointSymbology.test.js` locks
+ *                  down that every live call site passes one.
+ *   interactive  — enable pointer events so the hover identify can fire on the features. */
+export function featureLayerOptions(cfg, opacity, pane, opts = {}) {
+  const o = { url: cfg.url, pane, minZoom: cfg.minZoom ?? 10, interactive: !!opts.interactive };
   if (cfg.fields) o.fields = cfg.fields;
+  if (typeof opts.pointToLayer === "function") o.pointToLayer = opts.pointToLayer;
   o.style = typeof cfg.styleFn === "function"
     ? (feature) => cfg.styleFn(feature && feature.properties, opacity)
     : () => ({ color: cfg.color || "#b91c1c", weight: cfg.weight || 2, opacity, fillOpacity: 0 });
   return o;
+}
+
+/* Can this layer's service answer an ArcGIS `/identify` at a point (NEW-2)?
+ *
+ * Lives HERE, not in rasterIdentify.js, purely so that asking the question costs nothing: layers.js
+ * needs this predicate on the boot path to decide which layers are even eligible, and importing it
+ * from rasterIdentify.js dragged that whole module's state machine into the planner's boot chunk —
+ * which `ui-audit/perf-bundle-audit.mjs` charges for. rasterIdentify.js re-exports it, so the
+ * identify code still reads as if it owns its own gate.
+ *
+ * It DECLINES anything it cannot honestly answer:
+ *   • a FeatureServer — `/identify` is a MapServer operation; those layers paint as vectors and get
+ *     the featureHover.js tooltip path instead;
+ *   • an ImageServer (`kind: "esriImage"` — elevation shading) — identify returns a PIXEL, not a
+ *     feature, and elevation under the cursor already has its own honest readout;
+ *   • a registry row that opts out (`identify: false`). */
+const VECTOR_KINDS = new Set(["esriFeature", "vector", "vectorLine", "pipelineCorridor",
+  "overpass", "mapillary", "contours", "flowdir"]);
+
+export function identifyCapable(cfg) {
+  if (!cfg || !cfg.url) return false;
+  if (cfg.identify === false) return false;
+  if (VECTOR_KINDS.has(cfg.kind)) return false;
+  if (cfg.kind === "esriImage") return false;
+  return /\/MapServer$/i.test(String(cfg.url).replace(/\/+$/, ""));
 }
 
 /* How long a toggled-on RASTER export waits for its <img> to actually land before the panel

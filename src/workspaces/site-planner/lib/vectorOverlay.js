@@ -29,8 +29,21 @@ import { VECTOR_SOURCES, fetchCached, decideVectorOrImage, pickTier, snapBbox, v
 import { labelAnchors, placeLabels, labelsVisible, titleCaseName } from "./boundaryLabels.js";
 import { corridorRingLngLat, DEFAULT_CORRIDOR_WIDTH_FT } from "./pipelineCorridor.js";
 import { ftypeLabel } from "./nhdFlowline.js";
+import { pointSymbolOptions } from "./layerRequest.js";
+import { installDefaultMarkerIcon, pointToLayerFor } from "./mapSymbols.js";
 
 const LABEL_PANE = "boundarylabels";
+
+// Safety net for any marker this module's callers might still create (see mapSymbols.js).
+installDefaultMarkerIcon();
+
+/* Is this GeoJSON feature a point? Both style and hover emphasis branch on it (NEW-1).
+ * Tolerant of a missing feature: `baseStyle()` is called with no argument from the
+ * non-per-feature paths, and those all want the line/polygon style. */
+export const isPointFeature = (feature) => {
+  const t = feature && feature.geometry && feature.geometry.type;
+  return t === "Point" || t === "MultiPoint";
+};
 
 /* Shared identify-row renderer (B1075/B1078) — the ONE place a `source.identifyFields`
  * row becomes DOM, used by both the polygon (cachedVectorLayer) and line
@@ -138,7 +151,13 @@ export function cachedVectorLayer(k, cfg, initialOpacity, pane, onStatus, opts =
   const labelMarkers = [];
   const report = (state, msg, extra) => onStatus && onStatus(k, state, msg, extra);
   const lineColor = cfg.color || "#374151";
-  const baseStyle = () => ({
+  /* NEW-1 — the style has to be GEOMETRY-AWARE, because L.geoJSON applies `options.style`
+   * to every layer it builds, circleMarkers from `pointToLayer` included. Handing a point
+   * the polygon style below would flatten it to the 0.02 hit-area fill — a symbol you can
+   * barely see. So a point gets the filled-disc symbology instead, and everything else keeps
+   * the boundary style verbatim. */
+  const pointStyle = () => ({ ...pointSymbolOptions(cfg, opacity), className: "pf-boundary-hit" });
+  const lineStyle = () => ({
     color: lineColor, weight: cfg.weight || 2, opacity,
     // B761: a boundary source can request a DASHED stroke (cfg.dash) — used to draw ETJ
     // in the same hue as solid city limits, so line-style (not color) tells them apart.
@@ -150,6 +169,7 @@ export function cachedVectorLayer(k, cfg, initialOpacity, pane, onStatus, opts =
     fill: true, fillColor: lineColor, fillOpacity: interactive ? 0.02 : 0,
     className: "pf-boundary-hit",
   });
+  const baseStyle = (feature) => (isPointFeature(feature) ? pointStyle() : lineStyle());
 
   const group = L.layerGroup([], { pane });
   const nameOf = (feature) => {
@@ -168,11 +188,14 @@ export function cachedVectorLayer(k, cfg, initialOpacity, pane, onStatus, opts =
     if (!interactive) return;
     lyr.on("mouseover", (e) => {
       if (!identifyOk()) return;
-      try { lyr.setStyle({ weight: (cfg.weight || 2) + 1.2, fillOpacity: 0.1 }); } catch (_) {}
+      // A point's emphasis is a fatter ring at full fill — dropping fillOpacity to 0.1 (the
+      // right nudge for a boundary's near-invisible hit fill) would make a hovered disc FAINTER
+      // than an unhovered one, i.e. emphasis backwards.
+      try { lyr.setStyle(isPointFeature(feature) ? { weight: (cfg.weight || 2) + 1.2, fillOpacity: 1 } : { weight: (cfg.weight || 2) + 1.2, fillOpacity: 0.1 }); } catch (_) {}
       try { lyr.bindTooltip(displayName(feature), { sticky: true, direction: "top" }).openTooltip(e.latlng); } catch (_) {}
     });
     lyr.on("mouseout", () => {
-      try { lyr.setStyle(baseStyle()); } catch (_) {}
+      try { lyr.setStyle(baseStyle(feature)); } catch (_) {}
       try { lyr.unbindTooltip(); } catch (_) {}
     });
     lyr.on("click", (e) => {
@@ -205,7 +228,16 @@ export function cachedVectorLayer(k, cfg, initialOpacity, pane, onStatus, opts =
     openPopup = null;
   };
 
-  const geo = L.geoJSON(null, { pane, interactive, style: baseStyle, onEachFeature: wireFeature });
+  /* NEW-1 — `pointToLayer` is NOT optional. A GeoJSON POINT reaching L.geoJSON without one
+   * gets Leaflet's default `L.marker` + `L.Icon.Default`, whose PNG never resolved under the
+   * bundler: the browser painted its broken-image glyph and the marker's "Marker" alt text
+   * (clipped to read "Mark"). Points now become circleMarkers in the source's own colour —
+   * which also hands them to `wireFeature` as ordinary interactive vector layers, so the
+   * hover/click identify below reaches a point with no further wiring. */
+  const geo = L.geoJSON(null, {
+    pane, interactive, style: baseStyle, onEachFeature: wireFeature,
+    pointToLayer: pointToLayerFor(cfg, opacity, { interactive }),
+  });
   group.addLayer(geo);
 
   const clearLabels = () => { for (const m of labelMarkers) { try { group.removeLayer(m); } catch (_) {} } labelMarkers.length = 0; };
@@ -394,6 +426,13 @@ export function cachedPipelineLayer(k, cfg, initialOpacity, pane, onStatus, opts
   // Per-feature commodity style (fixed map symbology, hazard-encoded weight/dash) folded with the
   // live layer opacity. styleFor(pipeline) returns Leaflet path keys ({color,weight,dashArray}).
   const styleFeature = (feature) => {
+    // NEW-1 — a POINT in a line source (a valve, a marker post, a stream gauge) must get the
+    // filled-disc symbology: `fill:false` below is right for a centreline and would render a
+    // point as a hollow ring that disappears over aerial imagery.
+    if (isPointFeature(feature)) {
+      const s = styleFor(source, feature.properties) || {};
+      return { ...pointSymbolOptions({ ...cfg, color: s.color || cfg.color, weight: s.weight || cfg.weight }, opacity) };
+    }
     const s = styleFor(source, feature && feature.properties) || {};
     return { color: s.color, weight: s.weight, dashArray: s.dashArray || null, opacity, fill: false, fillOpacity: 0 };
   };
@@ -438,7 +477,12 @@ export function cachedPipelineLayer(k, cfg, initialOpacity, pane, onStatus, opts
     });
   };
 
-  const geo = L.geoJSON(null, { pane, interactive, style: styleFeature, onEachFeature: wireFeature });
+  // NEW-1 — `pointToLayer` is mandatory here for the same reason as in cachedVectorLayer: a
+  // point with none gets Leaflet's default marker, whose PNG never resolved under the bundler.
+  const geo = L.geoJSON(null, {
+    pane, interactive, style: styleFeature, onEachFeature: wireFeature,
+    pointToLayer: pointToLayerFor(cfg, opacity, { interactive }),
+  });
   group.addLayer(geo);
 
   const ensureRaster = () => {
