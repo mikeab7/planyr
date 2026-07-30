@@ -39,7 +39,9 @@ const sites = {
     settings: { showSetback: true, setback: weld.defaultSetbackFt }, underlay: null, status: "active", updatedAt: now,
   },
 };
-const seed = `(()=>{try{localStorage.setItem('planarfit:sites:v1',JSON.stringify(${JSON.stringify(sites)}));localStorage.removeItem('planarfit:currentSite:v1');}catch(e){}})();`;
+/* Seeded ONCE per context: `addInitScript` runs on every navigation, so an unguarded seed would
+ * re-write the fixture over whatever the app had saved and make a reload check meaningless. */
+const seed = `(()=>{try{if(localStorage.getItem('planyr:harness:seeded'))return;localStorage.setItem('planarfit:sites:v1',JSON.stringify(${JSON.stringify(sites)}));localStorage.removeItem('planarfit:currentSite:v1');localStorage.setItem('planyr:harness:seeded','1');}catch(e){}})();`;
 
 const EXEC = process.env.PW_CHROME || "/opt/pw-browsers/chromium-1194/chrome-linux/chrome";
 const results = [];
@@ -67,19 +69,22 @@ const surface = "";
 
 const read = () => page.evaluate(() => {
   const host = document;
+  const resetRoles = !!document.querySelector('[data-testid="roles-reset"]');
   const rows = [...host.querySelectorAll('[data-testid="setback-row"]')].map((r) => ({
     role: r.getAttribute("data-role") || "",
     label: (r.querySelector("span")?.textContent || "").trim(),
     value: r.querySelector("input")?.value ?? null,
     pickedRole: r.querySelector('[data-testid="side-role"]')?.value ?? null,
+    // NEW-6 — "auto" while the run tracks the inference, "yours" once the user has set it.
+    source: r.getAttribute("data-role-source"),
+    autoLabel: [...(r.querySelector('[data-testid="side-role"]')?.options || [])].find((o) => o.value === "")?.text ?? null,
   }));
   const ring = document.querySelector('[data-testid="setback-ring"]')?.getAttribute("points") || "";
-  const chipTexts = [...document.querySelectorAll("text")]
-    .filter((t) => t.parentElement?.querySelector('[data-testid="setback-chip"]'))
+  const chipTexts = [...document.querySelectorAll('[data-testid="setback-chip-text"]')]
     .map((t) => (t.textContent || "").trim());
   const mode = [...host.querySelectorAll("button")].filter((b) => /^(By role|By side|Per segment)$/.test(b.textContent.trim()))
     .map((b) => ({ label: b.textContent.trim(), on: /rgb\(194, 65, 12\)|rgb\(242, 107, 58\)/.test(getComputedStyle(b).backgroundColor) }));
-  return { rows, ring, chipTexts, mode };
+  return { rows, ring, chipTexts, mode, resetRoles };
 });
 
 // The setback list lives in the left dock's PARCEL panel — open it (the rail tab), then select.
@@ -125,12 +130,17 @@ await page.waitForTimeout(400);
 const sideView = await read();
 await page.screenshot({ path: OUT + "setback-roles-by-side.png" });
 console.log(`  · By side: ${sideView.rows.length} rows, roles ${[...new Set(sideView.rows.map((r) => r.pickedRole))].join("/")}`);
+// NEW-6 — an untouched run reads "Automatic (Rear)": the picker's value is "" (still tracking the
+// inference) and the option NAMES the role in force, so the row is never unlabelled.
 ok("2 · every side row carries a RESOLVED role (the report's fifteen unlabelled sides)",
-   sideView.rows.length > 4 && sideView.rows.every((r) => ["front", "side", "street", "rear"].includes(r.pickedRole)),
-   `${sideView.rows.filter((r) => r.pickedRole).length}/${sideView.rows.length} assigned`);
+   sideView.rows.length > 4 && sideView.rows.every((r) => /^Automatic \((Front|Side|Street side|Rear)\)$/.test(r.autoLabel || "")),
+   `${sideView.rows.filter((r) => r.autoLabel).length}/${sideView.rows.length} assigned`);
 ok("2 · more than one role actually resolved (not everything defaulted to Side)",
-   new Set(sideView.rows.map((r) => r.pickedRole)).size >= 2,
-   [...new Set(sideView.rows.map((r) => r.pickedRole))].join(", "));
+   new Set(sideView.rows.map((r) => r.autoLabel)).size >= 2,
+   [...new Set(sideView.rows.map((r) => r.autoLabel))].join(", "));
+ok("2 · NEW-6 every side starts on AUTOMATIC — derive-by-default, nothing pre-frozen",
+   sideView.rows.every((r) => r.source === "auto") && sideView.resetRoles === false,
+   `${sideView.rows.filter((r) => r.source === "auto").length}/${sideView.rows.length} automatic`);
 
 // --- 6a: the envelope has not moved while roles were assigned ---------------------------------
 ok("6 · the drawn setback ring is UNCHANGED by role assignment", sideView.ring === ringAtStart && !!ringAtStart,
@@ -145,6 +155,12 @@ await page.waitForTimeout(400);
 const afterPick = await read();
 ok("3 · a side's role can be reassigned from its own row",
    afterPick.rows[target]?.pickedRole === "street", afterPick.rows[target]?.pickedRole || "unchanged");
+ok("3 · NEW-6 the corrected side reads as YOURS, and only that side does",
+   afterPick.rows[target]?.source === "yours"
+     && afterPick.rows.filter((r) => r.source === "yours").length === 1,
+   `${afterPick.rows.filter((r) => r.source === "yours").length} overridden of ${afterPick.rows.length}`);
+ok("3 · NEW-6 a way back to automatic appears once something is overridden",
+   afterPick.resetRoles === true);
 await page.locator('button:has-text("By role")').first().click();
 await page.waitForTimeout(400);
 const roleAfterPick = await read();
@@ -163,8 +179,8 @@ await page.waitForTimeout(500);
 await page.locator('button:has-text("By side")').first().click();
 await page.waitForTimeout(400);
 const afterEdit = await read();
-const fronts = afterEdit.rows.filter((r) => r.pickedRole === "front");
-const others = afterEdit.rows.filter((r) => r.pickedRole !== "front");
+const fronts = afterEdit.rows.filter((r) => r.role === "front");
+const others = afterEdit.rows.filter((r) => r.role !== "front");
 await page.screenshot({ path: OUT + "setback-roles-after-front-edit.png" });
 ok("4 · one Front input reached EVERY Front side", fronts.length > 0 && fronts.every((r) => r.value === "40"),
    fronts.map((r) => `${r.label}=${r.value}`).join(", ") || "no front side");
@@ -174,12 +190,48 @@ ok("6 · the ring moved ONLY because a number was typed", afterEdit.ring !== rin
 
 // --- 5: the map chips read their role ---------------------------------------------------------
 console.log(`  · chips: ${afterEdit.chipTexts.join(" | ")}`);
-ok("5 · every map chip names its role, not a bare number",
-   afterEdit.chipTexts.length > 0 && afterEdit.chipTexts.every((t) => /^(Front|Side|St side|Rear) · (\d+′|—)$/.test(t)),
+/* NEW-3 amends what a chip SAYS: the role word is dropped wherever it is redundant. With the
+ * Front now at 40′ against 25′ elsewhere the parcel is no longer uniform, so a role that has more
+ * than one run keeps the word on its most legible run only. Every chip is therefore either
+ * "Role · 25′" or a bare "25′" — never a bare number where the role is the distinguishing fact. */
+ok("5 · every chip reads either its role + value, or a bare value where the role is redundant",
+   afterEdit.chipTexts.length > 0
+     && afterEdit.chipTexts.every((t) => /^((Front|Side|St side|Rear) · )?(\d+′|—)$/.test(t)),
    afterEdit.chipTexts.join(" | "));
+ok("5 · the role word has NOT been repeated for a role whose runs all agree",
+   (() => {
+     const worded = afterEdit.chipTexts.filter((t) => t.includes(" · "));
+     return new Set(worded).size === worded.length;
+   })(), afterEdit.chipTexts.filter((t) => t.includes(" · ")).join(" | ") || "no role words needed");
 ok("5 · the typed Front value shows on the Front chip",
-   afterEdit.chipTexts.some((t) => t === "Front · 40′") || !afterEdit.chipTexts.some((t) => t.startsWith("Front")),
-   afterEdit.chipTexts.filter((t) => t.startsWith("Front")).join(", ") || "front chip decluttered away");
+   afterEdit.chipTexts.some((t) => t === "Front · 40′" || t === "40′"),
+   afterEdit.chipTexts.join(" | "));
+
+// --- NEW-6: the override survives a reload, and "Automatic" hands it back ----------------------
+await page.reload({ waitUntil: "load" });
+await page.waitForTimeout(2200);
+await page.locator('[data-rail-tab="parcel"]').first().click();
+await page.waitForTimeout(400);
+await page.locator('button:has-text("Parcel 1")').first().click();
+await page.waitForTimeout(500);
+await page.locator('button:has-text("By side")').first().click();
+await page.waitForTimeout(400);
+const afterReload = await read();
+await page.screenshot({ path: OUT + "setback-roles-after-reload.png" });
+ok("6 · NEW-6 the role override SURVIVED a reload",
+   afterReload.rows.filter((r) => r.source === "yours").length === 1
+     && afterReload.rows.some((r) => r.pickedRole === "street"),
+   `${afterReload.rows.filter((r) => r.source === "yours").length} overridden after reload`);
+
+const yoursIdx = afterReload.rows.findIndex((r) => r.source === "yours");
+await page.locator('[data-testid="side-role"]').nth(yoursIdx).selectOption("");
+await page.waitForTimeout(400);
+const afterClear = await read();
+ok("6 · NEW-6 choosing \"Automatic\" hands that side back to the inference",
+   afterClear.rows[yoursIdx]?.source === "auto" && afterClear.rows[yoursIdx]?.pickedRole === "",
+   afterClear.rows[yoursIdx]?.source || "?");
+ok("6 · NEW-6 with nothing overridden the way-back control disappears again",
+   afterClear.resetRoles === false && afterClear.rows.every((r) => r.source === "auto"));
 
 ok("no JS errors during the whole run", jsErrors.length === 0, jsErrors.slice(0, 2).join(" | "));
 

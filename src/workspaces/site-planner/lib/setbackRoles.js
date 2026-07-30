@@ -238,16 +238,97 @@ export function autoAssignRoles(points, opts = {}) {
 }
 
 /**
- * The roles actually in force: the auto assignment, with the user's own stored roles on top.
+ * NEW-6 — the per-run role OVERRIDE vector in force.
  *
- * `stored` is `pc.roles` — a per-edge array. It is only honoured when it is aligned to the ring
- * (same length), exactly like `pc.setbacks`: a reshaped boundary re-derives rather than silently
- * shifting every label by one edge.
+ * The automatic assignment above is a good default and it is frequently wrong in the real world:
+ * a corner lot, a flag lot, a double-frontage lot, or simply a reviewer who reads the plat
+ * differently (owner, 2026-07-30: "what if their interpretation of the setbacks is different from
+ * your interpretation"). Being wrong changes the required dimension, so the user must be able to
+ * correct it — and the correction must then be KEPT, not quietly re-derived away.
+ *
+ * The model is the repo's established derive-by-default / preserve-once-touched pattern (dog-ears,
+ * side parking, trailer length): the override vector is SPARSE. `null` at an edge means "keep
+ * tracking the automatic inference"; a role means "the user said so". That is the whole difference
+ * from the dense `pc.roles` array this replaces — writing one run's role used to stamp EVERY edge
+ * with whatever it happened to infer at that moment, freezing the other fourteen sides against
+ * every later re-derivation.
+ *
+ * Legacy plans are migrated in place, without changing a pixel: a dense `pc.roles` array is
+ * narrowed to the entries that actually DIFFER from the automatic assignment. An entry equal to
+ * auto is a no-op either way, so the rendered roles are identical — but everything the user never
+ * actually corrected goes back to tracking the inference.
+ *
+ * Alignment: an override vector is honoured only when it matches the ring, exactly like
+ * `pc.setbacks`. The two in-place reshapes that change the ring length (insert / delete a control
+ * point) remap it through `shiftOverridesOnInsert` / `shiftOverridesOnDelete`, so the common
+ * reshape — including simply dragging a corner, which never changes the length — keeps the
+ * override rather than silently resetting it.
+ */
+export function resolveOverrides(points, { overrides = null, legacy = null, auto = null } = {}, opts = {}) {
+  const n = points ? points.length : 0;
+  const out = new Array(Math.max(0, n)).fill(null);
+  if (n === 0) return out;
+  if (Array.isArray(overrides) && overrides.length === n) {
+    for (let i = 0; i < n; i++) if (isRole(overrides[i])) out[i] = overrides[i];
+    return out;
+  }
+  if (Array.isArray(legacy) && legacy.length === n) {
+    const base = Array.isArray(auto) && auto.length === n ? auto : autoAssignRoles(points, opts);
+    for (let i = 0; i < n; i++) if (isRole(legacy[i]) && legacy[i] !== base[i]) out[i] = legacy[i];
+  }
+  return out;
+}
+
+/**
+ * The roles actually in force: the auto assignment, with the user's own overrides on top.
+ *
+ * `stored` is the LEGACY dense `pc.roles`; `opts.overrides` is the sparse `pc.roleOverrides` that
+ * supersedes it (see `resolveOverrides`). Both are only honoured when aligned to the ring.
  */
 export function resolveRoles(points, stored, opts = {}) {
   const auto = autoAssignRoles(points, opts);
-  if (!Array.isArray(stored) || stored.length !== auto.length) return auto;
-  return auto.map((r, i) => (isRole(stored[i]) ? stored[i] : r));
+  const ov = resolveOverrides(points, { overrides: opts.overrides, legacy: stored, auto }, opts);
+  return auto.map((r, i) => (isRole(ov[i]) ? ov[i] : r));
+}
+
+/** Is this run's role a user override rather than the app's inference? */
+export const runOverridden = (run, overrides) =>
+  !!(run && Array.isArray(overrides) && run.edges.some((e) => isRole(overrides[e])));
+
+/**
+ * Set — or CLEAR — a whole run's role override. `role === null` clears it back to automatic.
+ * Returns a NEW sparse vector; the input is untouched. Every edge in the run moves together, so
+ * a run can never end up internally inconsistent with the label it displays.
+ */
+export function setRunOverride(overrides, run, role, edgeCount) {
+  const len = Number.isFinite(edgeCount) ? edgeCount : (overrides || []).length;
+  const next = Array.from({ length: len }, (_, i) => (isRole(overrides?.[i]) ? overrides[i] : null));
+  if (!run) return next;
+  for (const e of run.edges) if (e >= 0 && e < len) next[e] = isRole(role) ? role : null;
+  return next;
+}
+
+/** Does the parcel carry ANY role override at all? (Drives the "reset to automatic" affordance.) */
+export const hasRoleOverrides = (overrides) => (overrides || []).some((r) => isRole(r));
+
+/* Reshape remaps — keep the sparse vector aligned to the ring across the two edits that change
+ * its length, so a correction survives a reshape instead of being dropped on alignment.
+ *
+ * INSERT: a control point dropped on edge `edgeIndex` splits it into two edges that occupy slots
+ * `edgeIndex` and `edgeIndex + 1`. Both halves are still the same side, so both inherit the role.
+ * DELETE: removing vertex `index` merges edges `index - 1` and `index` into one, which lands in
+ * slot `index - 1` and keeps the first half's role — i.e. drop slot `index`. */
+export function shiftOverridesOnInsert(overrides, edgeIndex) {
+  if (!Array.isArray(overrides)) return overrides;
+  const next = overrides.slice();
+  const at = Math.max(0, Math.min(overrides.length - 1, edgeIndex));
+  next.splice(at + 1, 0, isRole(overrides[at]) ? overrides[at] : null);
+  return next;
+}
+
+export function shiftOverridesOnDelete(overrides, index) {
+  if (!Array.isArray(overrides)) return overrides;
+  return overrides.filter((_, j) => j !== index);
 }
 
 /* A run's role is its ANCHOR edge's role — the anchor is the longest edge in the run, the one

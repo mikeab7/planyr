@@ -77,7 +77,9 @@ await shot("edge-runs-1-loaded.png");
 const counts = async () => page.evaluate(() => {
   const all = (sel) => [...document.querySelectorAll(sel)];
   const chips = all("text").filter((t) => /\bac$/.test((t.textContent || "").trim())).length;
-  const setbackLines = all('polygon[stroke-dasharray="7 6"]').length;
+  /* B617/B880 zoom-scale the dash, so the literal "7 6" this used to match hasn't existed for a
+     while (it silently counted 0 and failed on every run). Count the ring by its test id. */
+  const setbackLines = all('polygon[data-testid="setback-ring"]').length;
   const easements = all("polygon").filter((p) => /url\(#pat-ease/.test(p.getAttribute("fill") || "")).length;
   const sbPills = all('rect[data-testid="setback-chip"]').length;
   return { chips, setbackLines, easements, sbPills };
@@ -114,7 +116,11 @@ const pillsNow = () => page.evaluate(() => document.querySelectorAll('rect[data-
     if ((await pillsNow()) > 0) break;
   }
 }
-await page.waitForTimeout(300);
+/* B1188 made a single click SELECT and a double-click OPEN the panel, so selecting the lot no
+ * longer docks the Parcel panel on its own — open it explicitly (the newer parcel harnesses all
+ * do this). Without it every panel assertion below waits on a control that was never rendered. */
+await page.locator('[data-rail-tab="parcel"]').first().click();
+await page.waitForTimeout(400);
 await shot("edge-runs-2-selected-byside.png");
 c = await counts();
 ok("B214 — ONE setback pill per SIDE: 4 runs (S, E-run, N, W), not 6 edges", c.sbPills === 4, `pills=${c.sbPills}`);

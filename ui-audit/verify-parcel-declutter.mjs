@@ -119,11 +119,13 @@ const readCanvas = () => page.evaluate(() => {
   const badge = badgeRect ? { x: +badgeRect.getAttribute("x") + +badgeRect.getAttribute("width") / 2,
                               y: +badgeRect.getAttribute("y") + +badgeRect.getAttribute("height") / 2 } : null;
   const badgeText = document.querySelector('[data-print-chip="acre"] [data-chip-text]')?.textContent || "";
-  // B1191 — chip copy is "<Role> · <n>′" now.
-  const chipTexts = [...document.querySelectorAll("text")]
-    .filter((t) => t.parentElement?.querySelector('[data-testid="setback-chip"]'))
+  /* B1191 — chip copy became "<Role> · <n>′"; NEW-3 then drops the role word wherever it is
+     redundant, so it is now "<Role> · <n>′" OR a bare "<n>′". NEW-4 moved the chips into the
+     selection-chrome group, which the parcel EDGE DIMENSIONS also live in — so read the chip's
+     own text node by its test id rather than "any text beside a chip plate". */
+  const chipTexts = [...document.querySelectorAll('[data-testid="setback-chip-text"]')]
     .map((t) => (t.textContent || "").trim());
-  const chipText = [...document.querySelectorAll("text")].find((t) => t.parentElement?.querySelector('[data-testid="setback-chip"]'));
+  const chipText = document.querySelector('[data-testid="setback-chip-text"]');
   const minGap = (pts) => {
     let m = Infinity;
     for (let i = 0; i < pts.length; i++) for (let j = i + 1; j < pts.length; j++) m = Math.min(m, Math.hypot(pts[i].x - pts[j].x, pts[i].y - pts[j].y));
@@ -203,9 +205,15 @@ ok("NEW-1 · chips collapse to a handful of runs (was one per edge)", fit.chips 
 // B1191 — chips are now variable-width plates, so the real property is that no two BOXES
 // intersect; a single radial threshold can no longer express it.
 ok("NEW-1 · no two drawn chips overlap", fit.chipOverlaps === 0, `${fit.chipOverlaps} overlapping pairs, closest centres ${fit.chipMinGap}px`);
-ok("B1191 · every chip names its setback ROLE, not just a number",
-   fit.chipTexts.length > 0 && fit.chipTexts.every((t) => /^(Front|Side|St side|Rear) · (\d+′|—)$/.test(t)),
+/* B1191 gave the chip its role; NEW-3 makes the role word conditional — on THIS parcel every
+   side carries the same 25′, so the number is the same everywhere and the role word would add
+   nothing to it. The invariant that survives both: a chip is a role-and-value or a bare value,
+   never anything else, and a role word is never repeated across runs that agree. */
+ok("B1191/NEW-3 · every chip reads a value, with its role only where the role adds something",
+   fit.chipTexts.length > 0 && fit.chipTexts.every((t) => /^((Front|Side|St side|Rear) · )?(\d+′|—)$/.test(t)),
    fit.chipTexts.join(" | "));
+ok("NEW-3 · a uniform-setback parcel says the number once per side, with no repeated role word",
+   fit.chipTexts.every((t) => /^(\d+′|—)$/.test(t)), fit.chipTexts.join(" | "));
 
 // --- NEW-2: handles -------------------------------------------------------------------------
 ok("NEW-2 · handles are decimated by screen spacing", fit.handles > 0 && fit.handles < fit.ringLen * 0.75,

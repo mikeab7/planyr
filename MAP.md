@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-07-30 @ `85f9062` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-07-30 @ `42d7a26` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_382 source files mapped._
+_383 source files mapped._
 
 ## infra
 
@@ -245,6 +245,8 @@ _382 source files mapped._
   - _exports_: `default (LayerPanel)`
 - **`src/workspaces/site-planner/components/LazyPanel.jsx`** — Scaffold every lazily-loaded planner panel mounts behind: a height-reserving Suspense fallback (so a deferred panel cannot jump in) plus a per-panel error boundary that contains a failed chunk to that panel and offers the cache-busting reload on a stale deploy.
   - _exports_: `default (LazyPanel)`, `PanelErrorBoundary`, `PanelFallback`
+- **`src/workspaces/site-planner/components/ParcelDataPanel.jsx`** — The selected lot's county record + taxing units, lazily loaded: an Owner headline that never repeats as a row, three short rows, and the rest (incl. the height-capped Legal description) behind one closed fold — the row split shared with the map-search card
+  - _exports_: `default`, `ParcelAppraisal`, `ParcelTaxes`
 - **`src/workspaces/site-planner/components/ParcelInfoCard.jsx`** — The address-search parcel card: three rows by default (owner / account / acreage), everything else behind a height-capped fold
   - _exports_: `default (ParcelInfoCard)`, `DETAILS_MAX_HEIGHT`, `LEGAL_MAX_HEIGHT`
 - **`src/workspaces/site-planner/components/PondSection.jsx`** — PR-L the one developer-readable pond cross-section component (used by the ⚡ Optimize what-changed card AND the pond inspector): maps pondSectionModel marks to a responsive, theme-tokened SVG (grade, berm hatch, storage bands, flood/groundwater/receiving lines, outlet, depth dimension, collision-free labels)
@@ -280,7 +282,7 @@ _382 source files mapped._
 - **`src/workspaces/site-planner/lib/adminBoundaryLayer.js`** — Lazily-loaded Leaflet glue that paints state/country outlines at wide zoom: own pane below site geometry, canvas renderer, non-interactive. Never static-import this.
   - _exports_: `attachAdminBoundaries`
 - **`src/workspaces/site-planner/lib/appraisal.js`** — Pure CAD-attribute curation: regex-maps raw county/TxGIO parcel columns to labelled owner/value/acreage/use rows for both panels
-  - _exports_: `ADDR_LINE_RE`, `APPR_FIELDS`, `apprAll`, `apprRows`, `apprVal`, `findAttr`, `MAILING_KEY_RE`, `mailingAddressValues`, `PARCEL_CARD_PRIMARY_LABELS`, `parcelCardRows`, `prettyKey`, `siteNameFromParcel`, `SITUS_FIELD`, `SITUS_LADDER`, `situsAddress`, `situsKey`
+  - _exports_: `ADDR_LINE_RE`, `APPR_FIELDS`, `apprAll`, `apprRows`, `apprVal`, `findAttr`, `MAILING_KEY_RE`, `mailingAddressValues`, `ownerName`, `PARCEL_CARD_PRIMARY_LABELS`, `PARCEL_PANEL_PRIMARY_LABELS`, `parcelCardRows`, `parcelPanelRows`, `prettyKey`, `siteNameFromParcel`, `SITUS_FIELD`, `SITUS_LADDER`, `situsAddress`, `situsKey`, `splitCuratedRows`
 - **`src/workspaces/site-planner/lib/apronElevation.js`** — NEW-9 dock apron / truck court elevation checked separately from the building pad: apron elevation from FFE + dock drop, exposure banding against the governing flood elevation (exposure language, never code language), and the pavement/court fill set the mitigation demand must include
   - _exports_: `APRON_FILL_TYPES`, `apronElevFt`, `apronFillIncluded`, `assessApron`, `DEFAULT_DOCK_DROP_FT`
 - **`src/workspaces/site-planner/lib/arcgis.js`** — Esri ArcGIS REST client: bounded parcel identify (query+identify fallback, multi-county eager race) and lon/lat↔State-Plane-feet conversion
@@ -628,9 +630,9 @@ _382 source files mapped._
 - **`src/workspaces/site-planner/lib/screeningBfeSite.js`** — The live-wiring layer for `screeningBfe.js`: turns a real site (terrain grid, footprint, Atlas-14 rainfall, SSURGO soils) into the engine's four inputs and runs BOTH the 1% and the 0.2% (500-yr) storms Waller ordinance §5.C(3) requires, from one derivation. Also the panel headline + the behind-the-fold method note.
   - _exports_: `atlas14Depths`, `default`, `SCREENING_STORMS`, `screeningBfeForSite`, `screeningBfeHeadline`, `screeningDeclined`, `screeningStudyNote`, `SECTION_HALF_WIDTH_FT`, `terrainInputsForScreeningBfe`, `WATERSHED_GRID_ZOOM`, `WATERSHED_PAD_DEG`
 - **`src/workspaces/site-planner/lib/setbackChips.js`** — groups parcel edges into one LABELLED setback run per side (shared value + direction spread), so a digitized curve reads as a handful of chips, not one per segment
-  - _exports_: `CHIP_MIN_EDGE_PX`, `CHIP_MIN_GAP_PX`, `CHIP_MIN_SEP_PX`, `CHIP_TURN_BREAK_DEG`, `chipRunOfEdge`, `setbackChipRuns`
+  - _exports_: `CHIP_MIN_EDGE_PX`, `CHIP_MIN_GAP_PX`, `CHIP_MIN_SEP_PX`, `CHIP_TURN_BREAK_DEG`, `chipRoleWords`, `chipRunOfEdge`, `setbackChipRuns`, `setbackChipsVisible`
 - **`src/workspaces/site-planner/lib/setbackRoles.js`** — the regulatory setback tier: auto-assigns Front / Side / Street side / Rear to every side from frontage geometry, honours the user's own assignment, and groups the boundary into the four ordinance rows
-  - _exports_: `autoAssignRoles`, `isRole`, `resolveRoles`, `ROLE_LABEL`, `ROLE_SHORT`, `roleGroups`, `roleRuns`, `runRole`, `SETBACK_ROLES`, `setRunRole`, `STREET_ABUT_FT`
+  - _exports_: `autoAssignRoles`, `hasRoleOverrides`, `isRole`, `resolveOverrides`, `resolveRoles`, `ROLE_LABEL`, `ROLE_SHORT`, `roleGroups`, `roleRuns`, `runOverridden`, `runRole`, `SETBACK_ROLES`, `setRunOverride`, `setRunRole`, `shiftOverridesOnDelete`, `shiftOverridesOnInsert`, `STREET_ABUT_FT`
 - **`src/workspaces/site-planner/lib/sharing.js`** — Project team sharing: stamp/clear team_id on a group's sites, doc_reviews, and file_facts then re-pull the local cache
   - _exports_: `makeProjectPrivate`, `shareProject`
 - **`src/workspaces/site-planner/lib/sheetFurniture.js`** — Map sheet furniture: graphic scale bar and two-tone north arrow, output-unit sized with no-occlude corner placement, screen + export
