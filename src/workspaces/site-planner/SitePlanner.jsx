@@ -35,7 +35,9 @@ import { uploadOverlayFile, uploadUnderlayDataUrl, downloadOverlayBytes, downloa
 import { ftPerPointForScale, scaleForFtPerPoint, chooseOverlayScale, SCALE_PRESETS, feetPerInchForPreset, matchScalePreset, feetPerInchFromPair, PAGE_UNITS, REAL_UNITS } from "./lib/overlayScale.js";
 import { solveSimilarityLSQ, applySimilarityToOverlay, scaleOverlayAbout, calibrateUnderlayScale } from "./lib/overlayAlign.js";
 import { hasPrintableOverlay } from "./lib/overlayPrint.js";
-import { syncOverlayLayers, withTileRetry, ALL_LAYERS, probeService, layerVintage, identifyOverlaysAt } from "./lib/layers.js";
+import { syncOverlayLayers, withTileRetry, ALL_LAYERS, probeService, layerVintage, identifyOverlaysAt, rasterIdentifyLayers } from "./lib/layers.js";
+import { createHoverIdentify, IDENTIFY_STATE, stateMessage } from "./lib/rasterIdentify.js";
+import { makeIdentifyFetch } from "./lib/rasterIdentifyMap.js";
 import { sanitizeLayerOverrides, overridesFromOverlays, overlaysWithOverrides, applyOnOverrides, overridesSig } from "./lib/layerPrefs.js";
 import { BASEMAPS } from "./lib/basemaps.js";
 import { ppfToZoom, exactContainerPoint } from "./lib/mapLock.js";
@@ -298,6 +300,11 @@ const PARCEL_CLICK_MS = 400;      // max press duration (ms) to still count as a
 // B1092 — how close a tap must land to a GIS LINE feature (a channel centreline) to
 // identify it, on screen. Polygons hit-test by containment and ignore this.
 const CANVAS_IDENTIFY_SLOP_PX = 14;
+/* How long the cursor must REST on the canvas before the hover identify answers (NEW-2). Long
+ * enough that sweeping across the canvas asks nothing at all — the vector pass is a hit-test
+ * over everything painted, and the raster pass is a network request — short enough to feel
+ * like hover rather than a click. */
+const CANVAS_HOVER_IDENTIFY_MS = 320;
 // Feet per degree, the SHORTER of the two axes at this latitude band (longitude at ~30°N),
 // so a tolerance in degrees is never tighter than the on-screen slop it came from.
 const FT_PER_DEG_MIN = 300000;
@@ -2168,6 +2175,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
    * vector layers what's under it and shows the same facts the map finder's popover does:
    * the easement's recorded width and exhibit, the channel's name and class. */
   const [gisHit, setGisHit] = useState(null);
+  /* NEW-2 — the HOVER readout, same shape as gisHit plus an optional `note` for the honest
+   * non-hit states of a raster identify. Never open at the same time as the pinned card: a
+   * deliberate tap always wins (see hoverIdleOk). */
+  const [gisHover, setGisHover] = useState(null);
   // The card is anchored in SCREEN space, so a zoom would leave it pointing at ground it
   // no longer covers. A pan already dismisses it (the press does); this covers the wheel.
   useEffect(() => { setGisHit(null); }, [view.ppf]);
@@ -2714,6 +2725,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const altSnapOffRef = useRef(false); // Alt held during a drag/placement → bypass snap for this one move (re-armed every pointer event)
   const clip = useRef(null); // copied element (for Ctrl+C / X / V)
   const lastPtrFt = useRef(null); // live pointer in WORLD feet (updated every canvas move) → paste-at-cursor (B417)
+  const lastPtrClient = useRef(null); // live pointer in VIEWPORT px → where the NEW-2 hover identify card anchors
 
   // Live mirror of the drawn-layer state for the undo/redo stack. Assigned during
   // render (NOT a passive effect) so pushHistory/undo/redo always read the TRUE
@@ -4386,6 +4398,77 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     setGisHit({ x: e.clientX - (r ? r.left : 0), y: e.clientY - (r ? r.top : 0), items });
   };
 
+  /* NEW-2 — HOVER identify on the planner canvas. The owner's ask was literally "I should be
+   * able to hover over it and see what it is", and on THIS surface a Leaflet mouseover can
+   * never fire: the backdrop map is pointer-events:none, the SVG owns every pointer event. So
+   * the hover is driven from the canvas's own already-throttled cursor position — the same
+   * pipeline that answers the contour elevation under the cursor (contourHover) — and rendered
+   * in the same card the tap identify uses.
+   *
+   * Gates, in order: a located site; the select tool with no drag in progress (never while
+   * drawing, panning or dragging a vertex); and no PINNED card already open, which always wins
+   * — a deliberate tap must not be overwritten by the hover that follows it. */
+  const hoverIdleOk = () => !!origin && tool === "select" && !drag.current && !panning && !gisHit
+    && !draftPoly && !draftRect && !draftElPoly && !draftRoadPts && !identifyMode;
+  /* The map frame an ArcGIS identify resolves its pixel tolerance against. The planner's
+   * backdrop Leaflet map follows the SVG view, so its bounds/size ARE the frame the user is
+   * looking at — even though it can never receive a pointer event itself. */
+  const plannerIdentifyFrame = () => {
+    const m = geoMapRef.current;
+    if (!m) return null;
+    try {
+      const b = m.getBounds(), s = m.getSize();
+      return { west: b.getWest(), south: b.getSouth(), east: b.getEast(), north: b.getNorth(), width: s.x, height: s.y };
+    } catch (_) { return null; }
+  };
+  const rasterAnchor = useRef(null);
+  const rasterHover = useRef(null);
+  if (!rasterHover.current) {
+    rasterHover.current = createHoverIdentify({
+      fetchJson: makeIdentifyFetch(),
+      debounceMs: 0, // the effect below already debounced on cursor rest
+      onState: (state) => {
+        const a = rasterAnchor.current;
+        if (!a || state.kind === IDENTIFY_STATE.idle) { setGisHover(null); return; }
+        if (state.kind === IDENTIFY_STATE.hit) { setGisHover({ ...a, items: state.items }); return; }
+        // Honest non-hit: a short stated outcome, never a spinner that never resolves and never
+        // a silence that would read as a dead layer.
+        setGisHover({ ...a, note: stateMessage(state) });
+      },
+    });
+  }
+  useEffect(() => () => rasterHover.current?.destroy(), []);
+  useEffect(() => {
+    if (!cursorLL || !hoverIdleOk()) { setGisHover(null); return; }
+    const t = setTimeout(() => {
+      if (!hoverIdleOk()) return;
+      const tolFt = CANVAS_IDENTIFY_SLOP_PX / Math.max(0.0001, view.ppf);
+      const at = { lat: cursorLL.lat, lng: cursorLL.lng, tolDeg: tolFt / FT_PER_DEG_MIN };
+      const r = wrapRef.current ? wrapRef.current.getBoundingClientRect() : null;
+      const pt = lastPtrClient.current;
+      if (!pt) { setGisHover(null); return; }
+      const anchor = { x: pt.x - (r ? r.left : 0), y: pt.y - (r ? r.top : 0) };
+      // VECTOR first — it is already in hand, so it answers instantly and for free.
+      const items = identifyOverlaysAt(overlayRefs.current, overlays, at, { limit: 1 });
+      if (items.length) { rasterHover.current?.cancel(); setGisHover({ ...anchor, items }); return; }
+      /* Nothing in the vector layers. The RASTER-painted overlays (FEMA, wetlands, the City
+       * mains, HCFCD, BKDD, the wells) hold no geometry at all — they are pictures — so the
+       * only way to name what is under the cursor is to ask their service. Debounced above,
+       * cancelled on the next move, and always ending in a stated outcome. */
+      const layers = rasterIdentifyLayers(overlays, {
+        layerHealthy: (id) => (layerStatus?.[id]?.state ?? null) !== "failed",
+      });
+      if (!layers.length) { setGisHover(null); return; }
+      rasterAnchor.current = anchor;
+      rasterHover.current?.hover({ lat: cursorLL.lat, lng: cursorLL.lng }, plannerIdentifyFrame(), layers, { immediate: true });
+    }, CANVAS_HOVER_IDENTIFY_MS);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cursorLL, overlays, tool, gisHit, panning, view.ppf]);
+  // A zoom moves the ground out from under a screen-anchored card, exactly as it does for the
+  // pinned one (B1092's note) — drop it rather than let it point at ground it no longer covers.
+  useEffect(() => { setGisHover(null); }, [view.ppf]);
+
   const onBgDown = (e) => {
     if (e.button !== 0) return;
     if (touchCountRef.current >= 2) return; // a two-finger pinch owns the gesture (B555)
@@ -5343,6 +5426,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     altSnapOffRef.current = !!e.altKey; // hold Alt to bypass snap for this drag (re-armed each move); read by snap()/snapPt() below
     const fp = p2f(e.clientX, e.clientY);
     lastPtrFt.current = fp; // remember the live cursor in feet so a paste lands here (B417); ref-only — no setState in this hot path
+    lastPtrClient.current = { x: e.clientX, y: e.clientY }; // NEW-2: where to anchor the hover identify card; ref-only, same hot-path rule
     setCursor(fp);
     // (Centerline-road preview renders from draftRoadPts + the live cursor — no per-move state.)
     // Click-to-finish for line/rect/ellipse: the anchored shape tracks the cursor between the first
@@ -15142,6 +15226,32 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   {it.sourceName && <div style={{ color: PAL.muted, fontSize: 10.5, marginTop: 3 }}>Source: {it.sourceName}</div>}
                 </div>
               ))}
+            </div>
+          )}
+          {/* NEW-2 — the HOVER readout: what is under the cursor, without a click. Same chrome as
+              the pinned card above so the two never read as different features, but no close
+              button (it follows the cursor and clears itself) and pointerEvents:none so it can
+              never swallow the click that would pin it. Suppressed while the pinned card is open. */}
+          {gisHover && !gisHit && (
+            <div data-export="skip" data-testid="gis-identify-hover"
+              style={{ position: "absolute", zIndex: 44, maxWidth: 260, pointerEvents: "none",
+                left: Math.max(6, Math.min(gisHover.x + 12, (size.w || 0) - 268)),
+                top: Math.max(6, Math.min(gisHover.y + 12, (size.h || 0) - 96)),
+                background: "var(--surface-overlay)", color: PAL.ink, border: `1px solid ${PAL.panelLine}`,
+                borderRadius: 9, boxShadow: "0 8px 26px rgba(28,25,20,0.24)", padding: "8px 10px",
+                fontSize: 11.5, lineHeight: 1.45 }}>
+              {(gisHover.items || []).map((it, i) => (
+                <div key={it.id || i} style={{ marginTop: i ? 7 : 0 }}>
+                  <div style={{ fontWeight: 700, fontSize: 12.5 }}>{it.title}</div>
+                  {(it.rows || []).map((r, j) => (
+                    <div key={j}><span style={{ color: PAL.muted }}>{r.label}: </span><span>{r.text}</span></div>
+                  ))}
+                  {it.sourceName && <div style={{ color: PAL.muted, fontSize: 10.5, marginTop: 3 }}>Source: {it.sourceName}</div>}
+                </div>
+              ))}
+              {/* The honest non-hit state of a raster identify ("Nothing here", "Source didn't
+                  answer", "Source is rate-limiting — try again"). */}
+              {gisHover.note && <div style={{ color: PAL.muted }}>{gisHover.note}</div>}
             </div>
           )}
           <svg ref={svgRef} data-testid="planner-canvas" width="100%" height="100%" viewBox={`0 0 ${size.w} ${size.h}`} role="application" aria-label="Site plan canvas"

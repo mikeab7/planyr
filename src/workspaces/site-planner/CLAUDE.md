@@ -38,6 +38,19 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   `display:none` to keep its map alive), so the DOM always holds TWO copies of this panel and the
   hidden one has no context. The inactive mode is now `inert` + `aria-hidden`, and each panel stamps
   `data-surface="planner"|"finder"` — **assert against the surface, never against page text.**
+  **Point symbology + hover identify (NEW-1/NEW-2), read before touching how a layer paints or
+  answers:** `mapSymbols.js` owns the `pointToLayer` circleMarker factory — a GeoJSON POINT built
+  WITHOUT one gets Leaflet's default `L.marker`+`L.Icon.Default`, whose PNG never resolved under the
+  bundler, so substations painted as broken-image glyphs labelled "Mark"; it also repairs
+  `L.Icon.Default`'s paths as a safety net. `EL.featureLayer` is now constructed in exactly ONE
+  place (`layers.buildFeatureLayer`) and the point-symbology guard test fails if that stops being
+  true or if an `L.geoJSON` loses its `pointToLayer`. Hover answers split by how a layer PAINTS:
+  vector layers get a tooltip whose wording is `featureHover.js` (registry `hoverIdentify` /
+  `hoverTitle` / `hoverSource` / `hoverFields`, matching evidenceLayers' OSM copy); the
+  RASTER-painted layers hold no features at all, so they ask the service via `rasterIdentify.js`
+  (pure — capability gate, request, readout, debounced/cancelling controller, an honest state for
+  every outcome) plus `rasterIdentifyMap.js` (leaflet wiring + the direct-then-proxy transport that
+  gets past a no-CORS host). The planner reaches BOTH through the canvas, never Leaflet events.
   Canvas identify (B1092; tolerance fixed in the NEW-3 strand — `hitFeature` applies the caller's
   slop to polygon ring EDGES as well as lines, two-pass so an exact containment still wins, because
   containment-only gave a 70 ft easement band a click target its own width and no more):

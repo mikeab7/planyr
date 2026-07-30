@@ -11,6 +11,7 @@ import LayerPanel from "./components/LayerPanel.jsx";
 import { useGroundElevation } from "./components/useGroundElevation.js";
 import CursorChip from "./components/CursorChip.jsx";
 import { contourHover } from "./lib/terrainLazy.js";
+import { attachRasterIdentify } from "./lib/rasterIdentifyMap.js";
 import { NUM_FONT, TABULAR_NUMS } from "../../shared/theme/typography.js";
 import ContextMenu from "../../shared/ui/ContextMenu.jsx";
 import {
@@ -241,6 +242,12 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
   const selectModeRef = useRef(false); // read by the once-bound map handlers
   const selectedRef = useRef([]);
   const draggingRef = useRef(false);
+  // NEW-2 — read live by the once-bound raster hover-identify handlers, so toggling a layer
+  // (or a health dot flipping) never re-binds a Leaflet listener.
+  const overlaysRef = useRef(overlays);
+  overlaysRef.current = overlays;
+  const layerStatusRef = useRef(layerStatus);
+  layerStatusRef.current = layerStatus;
   const [addr, setAddr] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
@@ -491,7 +498,18 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
     containerEl.addEventListener("pointerdown", onPress);
     containerEl.addEventListener("pointerup", onRelease);
     containerEl.addEventListener("pointercancel", onRelease);
-    return () => { map.off("click", onClick); map.off("zoomend", onZoom); map.off("moveend", onMove); map.off("mousemove", onMouseMove); map.off("mousemove", onCoordMove); map.off("mouseout", onCoordOut); map.off("contextmenu", onMapCtx); map.off("dragstart", onDragStart); map.off("dragend", onDragEnd); containerEl.removeEventListener("pointerdown", onPress); containerEl.removeEventListener("pointerup", onRelease); containerEl.removeEventListener("pointercancel", onRelease); map.remove(); mapRef.current = null; };
+    /* NEW-2 — hover/click identify for the RASTER-painted overlays. Bound once with the map;
+       every gate is read live per event (see the refs above), so nothing here re-binds. */
+    const detachRasterIdentify = attachRasterIdentify(map, {
+      getOverlays: () => overlaysRef.current || {},
+      // Respect the EXISTING per-layer health probe rather than adding a second liveness
+      // mechanism: a layer whose dot already reads "failed" is not re-asked on every hover.
+      layerHealthy: (id) => (layerStatusRef.current?.[id]?.state ?? null) !== "failed",
+      // Parcel-select owns the pointer while it's on (the B98 rule) — the same gate the
+      // vector boundary identify reads. Panning is gated inside attachRasterIdentify.
+      identifyOk: () => !selectModeRef.current,
+    });
+    return () => { detachRasterIdentify(); map.off("click", onClick); map.off("zoomend", onZoom); map.off("moveend", onMove); map.off("mousemove", onMouseMove); map.off("mousemove", onCoordMove); map.off("mouseout", onCoordOut); map.off("contextmenu", onMapCtx); map.off("dragstart", onDragStart); map.off("dragend", onDragEnd); containerEl.removeEventListener("pointerdown", onPress); containerEl.removeEventListener("pointerup", onRelease); containerEl.removeEventListener("pointercancel", onRelease); map.remove(); mapRef.current = null; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -568,6 +586,17 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
     const iv = setInterval(sync, 45000);
     return () => clearInterval(iv);
   }, [overlays]); // eslint-disable-line
+
+  /* Hover identify for the RASTER-painted layers (NEW-2). The vector overlays answer a hover
+     from their own features (a tooltip bound as they draw — see featureHover.js / vectorOverlay.js),
+     but roughly half the registry paints as a server-rendered PICTURE with no features in the
+     DOM at all: FEMA, wetlands, the City mains, HCFCD, BKDD, the wells and the CCN/MUD
+     territories. Those can only be identified by asking the service, which is what this does —
+     debounced on cursor rest, cancelled on move/pan, and always ending in a stated outcome.
+
+     The listeners are bound ONCE with the map (see the map-creation effect above) and read
+     `overlays`, the health verdict and the select-mode gate LIVE through these refs — so
+     toggling a layer never re-binds a Leaflet handler. */
 
   /* Coverage (NEW-1/B283): which layers' DATA reaches the current view, for the
      Layers panel's relevance picker. Recompute on map move (debounced) and when the

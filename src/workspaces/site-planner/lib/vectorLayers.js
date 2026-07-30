@@ -745,6 +745,15 @@ const lineNear = (line, lng, lat, tolDeg) => {
   return false;
 };
 
+/* (NEW-2) Is the cursor within `tolDeg` of this POINT feature's coordinate? The same slop a
+ * line gets, for the same reason: a substation drawn as a small disc needs a click target at
+ * least as big as it looks on screen. */
+const pointNear = (pt, lng, lat, tolDeg) => {
+  if (!pt || pt.length < 2) return false;
+  const dx = pt[0] - lng, dy = pt[1] - lat;
+  return dx * dx + dy * dy <= tolDeg * tolDeg;
+};
+
 /* (NEW-3) Is the point within `tolDeg` of any EDGE of this polygon's rings? A NARROW
  * polygon needs the same forgiveness a line gets — see hitFeature's note below. */
 const polygonEdgeNear = (rings, lng, lat, tolDeg) =>
@@ -792,6 +801,19 @@ export function hitFeature(fc, { lat, lng, tolDeg = 0.00005 } = {}) {
     }
     if (g.type === "LineString" && lineNear(c, lng, lat, tolDeg)) return f;
     if (g.type === "MultiLineString" && (c || []).some((ln) => lineNear(ln, lng, lat, tolDeg))) return f;
+    /* NEW-2 — POINT features. A point has no interior and no edge, so it can only ever be a
+     * tolerance hit; it is recorded as an `edgeHit` (a near-miss) rather than returned
+     * immediately so a genuine containment in a polygon still wins the two-pass ordering
+     * above. Without this branch a substation was simply unhittable on the planner canvas —
+     * the click/hover identify could reach lines and bands but never a point asset. */
+    if (g.type === "Point") {
+      if (!edgeHit && pointNear(c, lng, lat, tolDeg)) edgeHit = f;
+      continue;
+    }
+    if (g.type === "MultiPoint") {
+      if (!edgeHit && (c || []).some((pt) => pointNear(pt, lng, lat, tolDeg))) edgeHit = f;
+      continue;
+    }
   }
   return edgeHit;
 }
