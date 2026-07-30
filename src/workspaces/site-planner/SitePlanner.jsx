@@ -2981,6 +2981,37 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const onTouchStartPinch = (e) => {
     touchCountRef.current = e.touches.length;
     if (e.touches.length < 2) return;
+    /* NEW-4 — settle any frame-coalesced move BEFORE the teardown below, exactly as `onUp` and
+       `abortGesture` do. This was the ONE gesture-ending path that skipped it.
+
+       ⚠ CORRECTING THE REPORTED MECHANISM, because the code does not support it. The report was
+       that a pending 'geom' job lands AFTER `cancelActiveMove()` and re-applies the vertex the
+       cancel just reverted. That cannot happen today, and the two halves never meet: the three
+       drags that schedule a 'geom' job (`vertex` :5590 · `elVertex` :5607 · `measureVertex` :5622)
+       set NO `canceler`, and `cancelActiveMove` is `if (!d || !d.canceler) return false` — a no-op
+       without one. The drags that DO carry a canceler (`move`, `groupMove`) write their geometry
+       synchronously and schedule no frame job at all. So there is no revert for a job to land on
+       top of, and no vertex is resurrected.
+
+       WHAT IS REAL, and why this still ships: a pinch tears down `drag.current` with a 'geom' job
+       still queued, so that job commits one unrequested geometry write on the NEXT animation frame
+       — after the pinch has taken the gesture over and after the view was deliberately restored,
+       and outside any React batch. The committed coordinate happens to match, so today it is an
+       ordering defect rather than a data-loss one. It becomes a data-loss one the moment a vertex
+       drag gains a canceler — which is a natural thing to add (Esc-mid-drag revert, the B315
+       treatment `move` already has) and would silently arm exactly the bug as reported. The
+       invariant is cheap to hold now and expensive to rediscover later.
+
+       FLUSH, not discard, deliberately — the choice the brief asked to be made explicitly:
+         · every other teardown flushes, and one contract beats two. A `discardFrameJobs()` would
+           be a second, subtly different teardown rule, and paths diverging from each other is
+           precisely how this one got missed.
+         · flushing is also the SAFE direction under the latent case above: `cancelActiveMove`
+           reverts by replaying a whole-layer snapshot, not a delta, so commit-then-revert lands on
+           exactly the state a discard would — while discard would additionally throw away jobs the
+           canceler does not own (the coalesced 'cursor' job; a 'geom' job from a canceler-less
+           drag), which is a real behaviour change with nothing asking for it. */
+    flushFrameJobs();
     const a = touchPt(e.touches[0]), b = touchPt(e.touches[1]);
     pinch2Ref.current = { mid: midpoint(a, b), dist: Math.max(1, distance(a, b)) };
     pinchNextRef.current = null;
@@ -4190,6 +4221,20 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (delta !== 0) {
       panelShiftRef.current = left;
       setView((v) => ({ ...v, offX: v.offX - delta }));
+      // NEW-3 — REBASE A LIVE PAN ONTO THE SAME FRAME. A pan captures its origin offset (`ox`) from
+      // the render closure at pointerdown and thereafter writes `offX = ox + travel` absolutely, so
+      // it does not ADD to the compensation above — it REPLACES it. If the canvas's left edge moves
+      // while a pan is in flight, the next pointermove silently discards the whole −delta correction
+      // and the drawing jumps by the panel's width, permanently (this effect will not re-run: `left`
+      // is unchanged, so delta is 0 from here on).
+      //
+      // The owner's repro is the acute case — a background press deselects, which closes the
+      // inspector, which un-docks the left column, all inside the same gesture — but the general
+      // case is any panel opening/closing or the rail being resized MID-DRAG. Folding the same delta
+      // into the captured origin keeps the gesture and the compensation in one frame of reference.
+      // (VIEWPORT-STABLE (a): the surface must neither jump nor flash when a panel changes its edge.)
+      const d = drag.current;
+      if (d && d.mode === "pan" && typeof d.ox === "number") d.ox -= delta;
     }
     // These deps are intentional re-measure TRIGGERS (the body reads only refs, so exhaustive-deps
     // is satisfied by any set): re-run whenever something that can move the canvas's left edge changes.
@@ -4710,6 +4755,22 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     e.stopPropagation();
     const m = measures[i];
     if (!m) return;
+    // NEW-2 — double-click the LABEL CHIP opens Properties, exactly as double-clicking the
+    // measurement's geometry does (startMoveMeasure's branch above). This was a REGRESSION: the
+    // old label was a pointerEvents="none" <text>, so a double-click on it fell THROUGH to the
+    // transparent grab layer and reached startMoveMeasure; the chip is pointer-enabled and paints
+    // last (deliberately, so its drag isn't swallowed), so it now wins the hit test and the gesture
+    // died here. Keyed on the bare `m.id` so a press on the chip pairs with a press on the shape
+    // and vice versa. Placed BEFORE the lock guard because startMoveMeasure opens Properties for a
+    // locked measurement too — the two surfaces must agree. Returning early also skips the
+    // pushHistory() below, which would otherwise push a no-op undo frame for a double-click.
+    if (isDoubleTap(e, m.id, sel?.kind === "measure" && sel.i === i)) {
+      setMulti([]); setSelVtx(null);
+      setSel({ kind: "measure", i });
+      setPropsFor({ kind: "measure", i });
+      if (narrow) setNarrowProps(true);
+      return;
+    }
     setMulti([]); setSelVtx(null);
     setSel({ kind: "measure", i });
     if (m.locked) return;
@@ -4927,12 +4988,22 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         svgRef.current.setPointerCapture(e.pointerId);
         return;
       }
-      setSel(null); setMulti([]); setDrillId(null);
+      // NEW-3 (c) — the deselect happens on RELEASE, not here. It used to fire on pointerdown, which
+      // meant the SAME press that armed a pan also closed the inspector and un-docked the left
+      // column; the resulting reflow rewrote `offX` and the gesture's captured origin then clobbered
+      // it (see the rebase in the canvas-shift layout effect). Deferring it to the tap branch in
+      // `onUp` — under the SAME slop + duration test B310 and B735 already use for their own
+      // release-time decisions — keeps the panel reflow out of a live gesture entirely, and as a
+      // direct consequence DRAGGING the map no longer wipes the selection or closes the inspector
+      // out from under you. A genuine background CLICK still deselects and still closes the
+      // inspector: that behaviour is intended and unchanged, only its timing moved.
       setPanning(true);
       // B735: tag a plain background press so a genuine TAP on empty canvas (tiny travel) clears the
       // merge selection in onUp, while a real pan (larger travel) leaves it untouched. Not in merge-
-      // pick mode — there an empty click intentionally keeps the set (B720).
-      drag.current = { mode: "pan", sx: e.clientX, sy: e.clientY, ox: view.offX, oy: view.offY, tapEmpty: !mergePick, downX: e.clientX, downY: e.clientY, downT: Date.now() };
+      // pick mode — there an empty click intentionally keeps the set (B720). `tapClear` is the
+      // NEW-3 twin and is NOT gated on mergePick, because the deselect it carries used to run on
+      // every plain background press including in merge-pick mode.
+      drag.current = { mode: "pan", sx: e.clientX, sy: e.clientY, ox: view.offX, oy: view.offY, tapEmpty: !mergePick, tapClear: true, downX: e.clientX, downY: e.clientY, downT: Date.now() };
       svgRef.current.setPointerCapture(e.pointerId);
       return;
     }
@@ -5884,6 +5955,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       return;
     }
     if (d.mode === "pan") {
+      // NEW-3 (b) — DEAD-ZONE, so the arm threshold and the tap classifier agree. `PARCEL_CLICK_SLOP_PX`
+      // was previously used only RETROACTIVELY, at release (B310/B735/B383), to reclassify a finished
+      // gesture as a tap; nothing gated the setView write, so the FIRST pointermove panned even at
+      // zero travel — which is how a click that moved no pixels could commit a pan at all. Once armed
+      // the pan stays armed and keeps computing from the ORIGINAL grab point, so the drawing stays
+      // welded to the pointer rather than lagging it by the threshold.
+      //
+      // ⚠ This MASKS the instance, it does not fix it. A genuine pan that starts right after a
+      // deselect still jumps by the panel width on the first move past the threshold — (a) above is
+      // the actual fix, and this rides alongside it, never instead of it.
+      if (!d.panArmed && Math.hypot(e.clientX - d.sx, e.clientY - d.sy) <= PARCEL_CLICK_SLOP_PX) return;
+      d.panArmed = true;
       setView((v) => ({ ...v, offX: d.ox + (e.clientX - d.sx), offY: d.oy + (e.clientY - d.sy) }));
       return;
     }
@@ -6304,6 +6387,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         && Date.now() - d.downT <= PARCEL_CLICK_MS) {
       setSel({ kind: "parcel", id: d.tapParcel });
       setCombineSel([]); // B735: a plain click is a fresh single-select — drop any accumulated merge picks
+    }
+    // NEW-3 (c): a plain TAP on empty canvas clears the SELECTION (and with it the inspector), on
+    // release rather than on press. Same slop + duration test as B310/B735 below, so a real drag of
+    // the map leaves the selection — and the docked inspector — exactly where it was.
+    if (d && d.mode === "pan" && d.tapClear
+        && Math.hypot(e.clientX - d.downX, e.clientY - d.downY) <= PARCEL_CLICK_SLOP_PX
+        && Date.now() - d.downT <= PARCEL_CLICK_MS) {
+      setSel(null); setMulti([]); setDrillId(null);
     }
     // B735: a plain TAP on empty canvas (tiny travel + brief, tagged tapEmpty in onBgDown) clears the
     // merge selection; a real pan (larger travel) leaves it untouched, so dragging the map never wipes
