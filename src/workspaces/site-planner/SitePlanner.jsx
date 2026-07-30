@@ -117,7 +117,7 @@ import {
 import { apprRows, apprAll, apprVal, findAttr, situsAddress } from "./lib/appraisal.js";
 import { makeParcelDisplayLayer, ADD_CURSOR, PARCEL_MINZOOM } from "./lib/parcelDisplay.js";
 import { geocodeAddress } from "./lib/geocode.js";
-import { TYPE, typeStyle, elStyle, parcelDefaultStyle, toHex6, byZ, zOrder, setPreviewStyleDefaults, setbackLineStyle, SETBACK_LINE } from "./lib/planStyle.js";
+import { TYPE, typeStyle, elStyle, parcelDefaultStyle, toHex6, byZ, zOrder, setPreviewStyleDefaults, setbackLineStyle, setbackChipStyle, SETBACK_LINE } from "./lib/planStyle.js";
 import { byZAsc, nextZ, Z_GAP } from "./lib/zOrder.js";
 import { reorderByZ, arrangeFlags } from "./lib/arrange.js";
 import { commonStyleState, selectionRingFeet } from "./lib/multiStyle.js";
@@ -311,6 +311,16 @@ import { resolveDraftStepBack } from "./lib/drafts.js";
  *  feet -> pixels via pxPerFoot + pan offsets. Labels & handles are
  *  drawn in screen (pixel) space for crisp, zoom-independent UI.
  * ------------------------------------------------------------------ */
+
+/* NEW-1 — the one spelling of the panel-surface token. A minifier does NOT dedupe string
+ * literals, so a CSS custom property written out inline once per style object ships one full
+ * copy per site: this file spelled `var(--surface-raised)` forty-one separate times. Hoisting
+ * it is byte-identical at runtime (same string, same value, resolved by the same stylesheet)
+ * and is this change's matching optimization for the bundle budget — the site chunk had 0.3 KB
+ * of headroom band left when the setback-chip fix landed on it. Spell new uses `SURF_RAISED`. */
+const SURF_RAISED = "var(--surface-raised)";
+const MONO_FONT = "ui-monospace, monospace";   // same reason — spelled out 21× before this
+const BORDER_1 = "1px solid var(--border-default)"; // …and this hairline 15× (4 quoted, 11 templated)
 
 const SQFT_PER_ACRE = 43560;
 const POND_ADD_MIN_SF = 50; // B157: below this, an expansion is too small to seat its own added-area label
@@ -13340,7 +13350,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // the same style objects. One definition each: callers override only what genuinely differs
   // (the background, and the hint's stacked `bottom`). Pixel-identical to what shipped before.
   const toastPill = { position: "fixed", left: "50%", bottom: 84, transform: "translateX(-50%)", zIndex: 2500, maxWidth: "80vw", color: "#fff", padding: "9px 16px", borderRadius: 99, fontSize: 12.5, fontWeight: 600, boxShadow: "0 8px 28px rgba(0,0,0,0.3)", display: "flex", gap: 12, alignItems: "center" };
-  const toastActionBtn = { border: "none", background: "var(--surface-raised)", color: PAL.accent, borderRadius: 7, padding: "4px 12px", cursor: "pointer", fontSize: 11.5, fontWeight: 700, whiteSpace: "nowrap" };
+  const toastActionBtn = { border: "none", background: SURF_RAISED, color: PAL.accent, borderRadius: 7, padding: "4px 12px", cursor: "pointer", fontSize: 11.5, fontWeight: 700, whiteSpace: "nowrap" };
   const toastGhostBtn = { border: "1px solid rgba(255,255,255,0.5)", background: "transparent", color: "#fff", borderRadius: 7, padding: "3px 9px", cursor: "pointer", fontSize: 11.5, fontWeight: 600, whiteSpace: "nowrap" };
   // NEW-1 — same treatment for the top-center save/status banner family (read-only · cloud-save
   // failed · saved-to-cloud-only · local-save failed · save-now confirmation · split note). Six
@@ -13351,10 +13361,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // Editable Site/Plan labels that sit inline in the dark top bar.
   // Site/Plan dropdown trigger buttons in the dark top bar.
   const hdrTab = (fs, color, weight) => ({ display: "flex", alignItems: "center", gap: 5, background: "var(--chrome-bg-elev)", border: "1px solid var(--chrome-divider)", borderRadius: 6, color, fontSize: fs, fontWeight: weight, fontFamily: "inherit", padding: "4px 9px", cursor: "pointer", maxWidth: 220, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" });
-  const chip = { padding: "6px 11px", fontSize: 12, borderRadius: 8, border: `1px solid var(--border-default)`, background: "var(--surface-raised)", color: PAL.ink, cursor: "pointer", fontFamily: "inherit", fontWeight: 500, boxShadow: "0 1px 2px rgba(28,25,20,0.04)" };
+  const chip = { padding: "6px 11px", fontSize: 12, borderRadius: 8, border: BORDER_1, background: SURF_RAISED, color: PAL.ink, cursor: "pointer", fontFamily: "inherit", fontWeight: 500, boxShadow: "0 1px 2px rgba(28,25,20,0.04)" };
   // B653: link-styled jump from an inspector's "default" value to its Standards section.
   const linkBtn = { padding: 0, border: "none", background: "transparent", color: PAL.accentText, cursor: "pointer", fontFamily: "inherit", fontSize: 10.5, fontWeight: 600, textDecoration: "underline", textUnderlineOffset: 2 };
-  const numInput = { width: 58, padding: "6px 9px", fontSize: 12, fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS, border: `1px solid var(--border-default)`, borderRadius: 8, color: PAL.ink, background: "var(--surface-raised)" };
+  const numInput = { width: 58, padding: "6px 9px", fontSize: 12, fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS, border: BORDER_1, borderRadius: 8, color: PAL.ink, background: SURF_RAISED };
   // Repeated panel-control variants — one definition each rather than a fresh object literal at
   // every call site (same NEW-2 perf pass as the module-scope ROW*/DASH_OPTIONS atoms above).
   const chipSm = { ...chip, padding: "2px 8px", fontSize: 10.5 };
@@ -13412,10 +13422,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const ovRow = { display: "flex", alignItems: "center", gap: 6, fontSize: 11.5, color: PAL.muted };
   // One shared square icon-button (B574) — identical width/height/padding/hit-target for the overlay
   // header's hide / lock / remove controls, so they can never render at mismatched sizes again.
-  const iconBtn = { width: 30, height: 30, padding: 0, flex: "none", display: "inline-flex", alignItems: "center", justifyContent: "center", borderRadius: 8, border: `1px solid var(--border-default)`, background: "var(--surface-raised)", color: PAL.ink, cursor: "pointer", boxShadow: "0 1px 2px rgba(28,25,20,0.04)" };
-  const spinBtn = { width: 20, height: 13, padding: 0, display: "grid", placeItems: "center", fontSize: 10.5, lineHeight: 1, border: `1px solid var(--border-default)`, borderRadius: 4, background: "var(--surface-raised)", color: PAL.muted, cursor: "pointer", fontFamily: "inherit" };
+  const iconBtn = { width: 30, height: 30, padding: 0, flex: "none", display: "inline-flex", alignItems: "center", justifyContent: "center", borderRadius: 8, border: BORDER_1, background: SURF_RAISED, color: PAL.ink, cursor: "pointer", boxShadow: "0 1px 2px rgba(28,25,20,0.04)" };
+  const spinBtn = { width: 20, height: 13, padding: 0, display: "grid", placeItems: "center", fontSize: 10.5, lineHeight: 1, border: BORDER_1, borderRadius: 4, background: SURF_RAISED, color: PAL.muted, cursor: "pointer", fontFamily: "inherit" };
   const menuItem = (on) => ({ display: "block", width: "100%", textAlign: "left", padding: "7px 10px", fontSize: 12.5, borderRadius: 7, cursor: "pointer", border: "none", background: on ? PAL.accentSoft : "transparent", color: PAL.ink, fontFamily: "inherit", fontWeight: on ? 650 : 500 });
-  const menuPanel = { background: "var(--surface-raised)", border: `1px solid ${PAL.panelLine}`, borderRadius: 12, boxShadow: "0 16px 44px rgba(28,25,20,0.22), 0 3px 10px rgba(28,25,20,0.1)", padding: 6 };
+  const menuPanel = { background: SURF_RAISED, border: `1px solid ${PAL.panelLine}`, borderRadius: 12, boxShadow: "0 16px 44px rgba(28,25,20,0.22), 0 3px 10px rgba(28,25,20,0.1)", padding: 6 };
   const vSep = <span style={{ width: 1, height: 18, background: "rgba(255,255,255,0.12)", margin: "0 6px" }} />;
   // Switch tools and reset any in-progress drafting; also closes the Parcel menu.
   const selectTool = (id) => {
@@ -14673,7 +14683,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               onDragOver={(e) => { if (Array.from(e.dataTransfer?.types || []).includes("Files")) e.preventDefault(); }}
               onDragLeave={(e) => { if (!Array.from(e.dataTransfer?.types || []).includes("Files")) return; overlayDragDepth.current = Math.max(0, overlayDragDepth.current - 1); if (overlayDragDepth.current === 0) setOverlayDropOver(false); }}
               onDrop={(e) => { e.preventDefault(); e.stopPropagation(); overlayDragDepth.current = 0; setOverlayDropOver(false); const fs = e.dataTransfer?.files; const f = fs?.[0]; if (f && (isPdfFile(f) || isDxfFile(f) || isDwgFile(f) || (f.type || "").startsWith("image/"))) { if (fs.length > 1) flashWarn("Added the first file — one reference is added at a time.", 6000); addOverlayFile(f); } }}
-              style={{ border: `2px dashed ${overlayDropOver ? PAL.accent : PAL.panelLine}`, borderRadius: 10, padding: 12, textAlign: "center", cursor: overlayBusy ? "default" : "pointer", background: overlayDropOver ? PAL.accentSoft : "var(--surface-raised)", transition: "border-color 120ms, background 120ms" }}>
+              style={{ border: `2px dashed ${overlayDropOver ? PAL.accent : PAL.panelLine}`, borderRadius: 10, padding: 12, textAlign: "center", cursor: overlayBusy ? "default" : "pointer", background: overlayDropOver ? PAL.accentSoft : SURF_RAISED, transition: "border-color 120ms, background 120ms" }}>
               <button style={{ ...btn(false), width: "100%" }} disabled={overlayBusy} onClick={(e) => { e.stopPropagation(); overlayFileRef.current?.click(); }}>{overlayBusy ? "Loading…" : "Add reference (PDF / image / CAD)…"}</button>
               <input ref={overlayFileRef} type="file" accept="application/pdf,image/*,.dxf,.dwg" style={{ display: "none" }} onChange={(e) => { addOverlayFile(e.target.files?.[0]); e.target.value = ""; }} />
               <div style={{ fontSize: 11, color: PAL.muted, marginTop: 9, lineHeight: 1.5 }}>
@@ -14685,7 +14695,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 object all along (render honours both); the CONTROLS are new here. */}
             <div style={{ marginTop: 12 }}>
               {!underlay ? (
-                <div style={{ border: "1px dashed var(--border-default)", borderRadius: 9, padding: 9, background: "var(--surface-raised)" }}>
+                <div style={{ border: "1px dashed var(--border-default)", borderRadius: 9, padding: 9, background: SURF_RAISED }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                     <span style={{ fontSize: 12, color: PAL.ink, fontWeight: 600 }}>Aerial backdrop</span>
                     <span style={{ flex: 1 }} />
@@ -14694,7 +14704,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   <div style={{ fontSize: 10.5, color: PAL.muted, marginTop: 5, lineHeight: 1.45 }}>The aerial sits beneath everything — drop in a screenshot and calibrate it, or capture one from the Map (top-left) already to scale.</div>
                 </div>
               ) : (
-                <div style={{ border: `1px solid ${aerialSel ? PAL.accent : "var(--border-default)"}`, borderRadius: 9, padding: 9, background: "var(--surface-raised)" }}>
+                <div style={{ border: `1px solid ${aerialSel ? PAL.accent : "var(--border-default)"}`, borderRadius: 9, padding: 9, background: SURF_RAISED }}>
                   <button style={{ ...chip, width: "100%", textAlign: "left", borderColor: aerialSel ? PAL.accent : "var(--border-default)", color: aerialSel ? PAL.accent : PAL.ink }} title="Aerial backdrop — image-only, always beneath everything" onClick={() => setAerialSel((v) => !v)}>Aerial backdrop</button>
                   <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 6 }}>
                     <button style={{ ...iconBtn, color: showAerial ? PAL.ink : PAL.muted }} title={showAerial ? "Hide aerial" : "Show aerial"} onClick={() => setShowAerial((v) => !v)}>{showAerial ? <EyeIcon /> : <EyeOffIcon />}</button>
@@ -14743,7 +14753,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   const on = selOverlay === o.id;
                   const zf = overlayOrderFlags(sheetOverlays, o.id);
                   return (
-                    <div key={o.id} data-testid={`reference-row-${o.id}`} data-reference-band={overlayBand(o)} style={{ border: `1px solid ${on ? PAL.accent : "var(--border-default)"}`, borderRadius: 9, padding: 9, background: "var(--surface-raised)" }}>
+                    <div key={o.id} data-testid={`reference-row-${o.id}`} data-reference-band={overlayBand(o)} style={{ border: `1px solid ${on ? PAL.accent : "var(--border-default)"}`, borderRadius: 9, padding: 9, background: SURF_RAISED }}>
                       {/* Filename gets its own full-width row (B578) and WRAPS instead of truncating, so a long
                           sheet name is fully readable; the hide / lock / remove controls drop to their own row. */}
                       <button style={{ ...chip, width: "100%", textAlign: "left", whiteSpace: "normal", overflowWrap: "anywhere", lineHeight: 1.35, borderColor: on ? PAL.accent : "var(--border-default)", color: on ? PAL.accent : PAL.ink }} title={`${o.name} — right-click for Copy, Duplicate, z-order, Lock, Align to base`} onClick={() => setSelOverlay(on ? null : o.id)} onContextMenu={(e) => onOverlayContext(e, o.id)}>{o.name}</button>
@@ -14990,11 +15000,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           onChange={(e) => setAddrQuery(e.target.value)}
                           onKeyDown={(e) => { e.stopPropagation(); if (e.key === "Enter") addByAddress(); }}
                           placeholder="123 Main St, Katy TX"
-                          style={{ flex: 1, minWidth: 0, padding: "6px 8px", fontSize: 12, fontFamily: "inherit", border: `1px solid ${PAL.panelLine || "var(--border-default)"}`, borderRadius: 6, outline: "none", color: PAL.ink, background: "var(--surface-raised)" }} />
+                          style={{ flex: 1, minWidth: 0, padding: "6px 8px", fontSize: 12, fontFamily: "inherit", border: `1px solid ${PAL.panelLine || "var(--border-default)"}`, borderRadius: 6, outline: "none", color: PAL.ink, background: SURF_RAISED }} />
                         <button
                           onClick={addByAddress} disabled={addrBusy || !addrQuery.trim()}
                           title="Find this address and add its parcel"
-                          style={{ flex: "none", padding: "6px 11px", fontSize: 12, fontWeight: 600, borderRadius: 6, border: `1px solid ${PAL.accent}`, background: addrBusy || !addrQuery.trim() ? "var(--surface-raised)" : PAL.accent, color: addrBusy || !addrQuery.trim() ? PAL.muted : "var(--surface-raised)", cursor: addrBusy || !addrQuery.trim() ? "default" : "pointer" }}>
+                          style={{ flex: "none", padding: "6px 11px", fontSize: 12, fontWeight: 600, borderRadius: 6, border: `1px solid ${PAL.accent}`, background: addrBusy || !addrQuery.trim() ? SURF_RAISED : PAL.accent, color: addrBusy || !addrQuery.trim() ? PAL.muted : SURF_RAISED, cursor: addrBusy || !addrQuery.trim() ? "default" : "pointer" }}>
                           {addrBusy ? "…" : "Find"}
                         </button>
                       </div>
@@ -15059,7 +15069,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                             style={{ width: 15, height: 15, cursor: "pointer" }} />
                         </label>
                         <button onClick={(e) => { if (mergePick) { toggleMerge(pc.id); setSel({ kind: "parcel", id: pc.id }); } else if (e.shiftKey) { shiftPickParcel(pc.id); } else { setCombineSel([]); setSel({ kind: "parcel", id: pc.id }); } }}
-                          style={{ flex: 1, minWidth: 0, textAlign: "left", padding: "7px 9px", borderRadius: 8, borderLeft: depth ? `2px solid ${PAL.panelLine || "var(--border-default)"}` : undefined, border: `1px solid ${picked ? "#2563eb" : on ? PAL.accent : "var(--border-default)"}`, background: picked ? "rgba(37,99,235,0.14)" : on ? PAL.accentSoft : "var(--surface-raised)", cursor: "pointer", fontFamily: "inherit", opacity: superseded ? 0.5 : inactive ? 0.55 : 1 }}>
+                          style={{ flex: 1, minWidth: 0, textAlign: "left", padding: "7px 9px", borderRadius: 8, borderLeft: depth ? `2px solid ${PAL.panelLine || "var(--border-default)"}` : undefined, border: `1px solid ${picked ? "#2563eb" : on ? PAL.accent : "var(--border-default)"}`, background: picked ? "rgba(37,99,235,0.14)" : on ? PAL.accentSoft : SURF_RAISED, cursor: "pointer", fontFamily: "inherit", opacity: superseded ? 0.5 : inactive ? 0.55 : 1 }}>
                           <div style={{ fontSize: 12.5, fontWeight: 600, color: PAL.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{name}{tag}{picked ? " ✓" : ""}</div>
                           <div style={{ fontSize: 10.5, color: PAL.muted, fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS }}>{f2(polyArea(pc.points) / SQFT_PER_ACRE)} ac{pc.acct ? ` · ${pc.acct}` : ""}</div>
                         </button>
@@ -15068,7 +15078,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                             to remove a parcel, alongside the Parcel tool's Remove mode. */}
                         <button title="Remove this parcel" aria-label={`Remove ${name}`}
                           onClick={(e) => { e.stopPropagation(); removeParcelById(pc.id); }}
-                          style={{ flex: "none", width: 30, alignSelf: "stretch", border: `1px solid var(--border-default)`, borderRadius: 8, background: "var(--surface-raised)", color: PAL.danger, cursor: "pointer", fontFamily: "inherit", fontSize: 15, fontWeight: 700, lineHeight: 1 }}>✕</button>
+                          style={{ flex: "none", width: 30, alignSelf: "stretch", border: BORDER_1, borderRadius: 8, background: SURF_RAISED, color: PAL.danger, cursor: "pointer", fontFamily: "inherit", fontSize: 15, fontWeight: 700, lineHeight: 1 }}>✕</button>
                       </div>
                     );
                   })}
@@ -15160,7 +15170,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   {apprAll(selParcel.attrs).map((r) => (
                     <div key={r.label} style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "baseline", padding: "3px 0" }}>
                       <span style={{ fontSize: 10.5, color: PAL.muted, flex: "none" }}>{r.label}</span>
-                      <span style={{ fontSize: 10.5, color: PAL.ink, fontFamily: "ui-monospace, monospace", textAlign: "right", wordBreak: "break-word" }}>{String(r.value)}</span>
+                      <span style={{ fontSize: 10.5, color: PAL.ink, fontFamily: MONO_FONT, textAlign: "right", wordBreak: "break-word" }}>{String(r.value)}</span>
                     </div>
                   ))}
                 </div>
@@ -15177,7 +15187,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   {taxInfo.units.length > 0 ? taxInfo.units.map((u, i) => (
                     <div key={i} style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "baseline", padding: "4px 0", borderBottom: "1px solid #f3efe5" }}>
                       <span style={{ fontSize: 11.5, color: PAL.ink }}>{u.name}</span>
-                      <span style={{ fontSize: 11.5, color: PAL.muted, fontFamily: "ui-monospace, monospace" }}>{u.value}</span>
+                      <span style={{ fontSize: 11.5, color: PAL.muted, fontFamily: MONO_FONT }}>{u.value}</span>
                     </div>
                   )) : <div style={{ fontSize: 11.5, color: PAL.muted }}>No taxing-unit fields in the county record.</div>}
                   {taxInfo.connected && taxInfo.total != null ? (
@@ -16286,7 +16296,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           <span
             title={peers.names.join(" · ")}
             data-testid="presence-pill"
-            style={{ display: "inline-flex", alignItems: "center", gap: 5, background: "var(--surface-raised)",
+            style={{ display: "inline-flex", alignItems: "center", gap: 5, background: SURF_RAISED,
               border: "1px solid var(--border-strong)", borderRadius: 999, padding: "2px 9px",
               fontSize: 11.5, fontWeight: 800, color: "var(--text-primary)", whiteSpace: "nowrap" }}
           >
@@ -16398,7 +16408,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               geometry visible under it; sits above the SVG (zIndex 1) so the cue reads clearly. */}
           {canvasDropOver && (
             <div data-export="skip" style={{ position: "absolute", inset: 0, zIndex: 50, pointerEvents: "none", border: `2.5px dashed ${PAL.accent}`, background: `color-mix(in srgb, ${PAL.accent} 18%, transparent)`, display: "grid", placeItems: "center" }}>
-              <span style={{ background: "var(--surface-raised)", color: PAL.ink, fontWeight: 700, fontSize: 14, padding: "10px 20px", borderRadius: 999, border: `1px solid ${PAL.accent}`, boxShadow: "0 4px 16px rgba(0,0,0,0.18)" }}>Drop site plan to place it on the map</span>
+              <span style={{ background: SURF_RAISED, color: PAL.ink, fontWeight: 700, fontSize: 14, padding: "10px 20px", borderRadius: 999, border: `1px solid ${PAL.accent}`, boxShadow: "0 4px 16px rgba(0,0,0,0.18)" }}>Drop site plan to place it on the map</span>
             </div>
           )}
           {/* B1092 — the GIS identify card. Tap the easement band (or a channel centreline)
@@ -16626,12 +16636,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   carry their setback and still edit from the Parcels panel. */}
               {settings.showSetback && selParcel && selRuns && (() => {
                 const sb = parcelSetbacks(selParcel);
-                // NEW-4 — the chip's border and numerals default to near-black ink on its white
-                // plate (owner, 2026-07-30: the amber-border/amber-text chip sitting on the amber
-                // setback band was unreadable). A parcel whose setback LINE has been explicitly
-                // recoloured still takes its chip with it — that is B1100's behaviour and an
-                // explicit override, which this default must not stomp.
-                const sbCol = selParcel.sbStroke || PAL.chipInk;
+                // NEW-1 — the chip's border and numerals are near-black ink on its white plate,
+                // FULL STOP: `setbackChipStyle` takes no parcel, so there is nothing here to
+                // couple to. The earlier `selParcel.sbStroke || PAL.chipInk` read as black only
+                // while no setback colour was set — moving the line default indigo → green
+                // (B1192) put a green-on-white chip straight back on the map, which is the exact
+                // amber-on-amber unreadability the ink default was minted to end. A recoloured
+                // setback LINE still takes its own colour (B1100); its CHIP never follows.
+                const chipStyle = setbackChipStyle(PAL.chipInk);
                 // NEW-1 — the chip now reads its ROLE, not a bare number: "Front · 25′" says which
                 // ordinance setback the line is, which is the whole point of the role layer. The
                 // plate therefore has to size itself to its text instead of the old fixed 26-wide
@@ -16643,8 +16655,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   const w = chipW(txt);
                   return (
                     <g key={key} style={{ cursor: "pointer" }} onPointerDown={(e) => { e.stopPropagation(); const fp = p2f(e.clientX, e.clientY); onEdit(fp, e.altKey); }}>
-                      <rect data-testid="setback-chip" x={anchor.x - w / 2} y={anchor.y - 9} width={w} height={16} rx={4} fill="#fff" stroke={sbCol} strokeWidth={1} />
-                      <text x={anchor.x} y={anchor.y + 3.5} textAnchor="middle" fontSize="10.5" fontFamily={NUM_FONT} fontVariantNumeric={TABULAR_NUMS} fill={sbCol} fontWeight="700">{txt}</text>
+                      <rect data-testid="setback-chip" x={anchor.x - w / 2} y={anchor.y - 9} width={w} height={16} rx={4} fill={chipStyle.plate} stroke={chipStyle.stroke} strokeWidth={1} />
+                      <text data-testid="setback-chip-text" x={anchor.x} y={anchor.y + 3.5} textAnchor="middle" fontSize="10.5" fontFamily={NUM_FONT} fontVariantNumeric={TABULAR_NUMS} fill={chipStyle.text} fontWeight="700">{txt}</text>
                     </g>
                   );
                 };
@@ -17050,21 +17062,21 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     <image href={fmHeat.dataUrl} x={tl.x} y={tl.y} width={wPx} height={hPx} opacity={0.68} preserveAspectRatio="none" pointerEvents="none" />
                     <g pointerEvents="none">
                       <rect x={lx - 6} y={ly - 14} width={236} height={legend.length * 14 + (fmResultView && isEstimatedWseSrc(fmResultView.providers?.wse1pct) ? 52 : 40)} rx={6} fill="#ffffff" opacity={0.88} />
-                      <text x={lx} y={ly} fontSize={10.5} fontWeight="700" fill="#1B1E26" fontFamily="ui-monospace, monospace">Fill depth (priced cells)</text>
+                      <text x={lx} y={ly} fontSize={10.5} fontWeight="700" fill="#1B1E26" fontFamily={MONO_FONT}>Fill depth (priced cells)</text>
                       {legend.map((r, i) => (
                         <g key={r.label}>
                           <rect x={lx} y={ly + 6 + i * 14} width={10} height={10} fill={r.color} opacity={r.kind === "depth" ? 0.9 : 0.45} />
                           {r.kind !== "depth" && <line x1={lx} y1={ly + 16 + i * 14} x2={lx + 10} y2={ly + 6 + i * 14} stroke={r.color} strokeWidth={1.4} />}
-                          <text x={lx + 15} y={ly + 15 + i * 14} fontSize={9.5} fill="#1B1E26" fontFamily="ui-monospace, monospace">{r.label}</text>
+                          <text x={lx + 15} y={ly + 15 + i * 14} fontSize={9.5} fill="#1B1E26" fontFamily={MONO_FONT}>{r.label}</text>
                         </g>
                       ))}
-                      <text x={lx} y={ly + 6 + legend.length * 14 + 12} fontSize={9.5} fontWeight="700" fill="#1B1E26" fontFamily="ui-monospace, monospace">
+                      <text x={lx} y={ly + 6 + legend.length * 14 + 12} fontSize={9.5} fontWeight="700" fill="#1B1E26" fontFamily={MONO_FONT}>
                         {`Σ cells ${fmHeatTotals ? fmHeatTotals.volumeAcFt.toFixed(2) : "—"} ac-ft = ledger ${fmResultView && fmResultView.volumeAcFt != null ? fmResultView.volumeAcFt.toFixed(2) : "—"} ac-ft`}
                       </text>
                       {/* NEW-2 / B882 — the ESTIMATED stamp rides the legend (and the export clone,
                           PDF-PARITY) whenever ANY accepted estimate priced the depths. */}
                       {fmResultView && isEstimatedWseSrc(fmResultView.providers?.wse1pct) && (
-                        <text x={lx} y={ly + 6 + legend.length * 14 + 24} fontSize={9} fontWeight="700" fill="#8A5A00" fontFamily="ui-monospace, monospace">
+                        <text x={lx} y={ly + 6 + legend.length * 14 + 24} fontSize={9} fontWeight="700" fill="#8A5A00" fontFamily={MONO_FONT}>
                           1% WSE ESTIMATED — screening
                         </text>
                       )}
@@ -17072,11 +17084,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     {hovCell && hovPt && (
                       <g data-export="skip" pointerEvents="none" transform={`translate(${hovPt.x + 14}, ${hovPt.y - 10})`}>
                         <rect x={0} y={-26} width={190} height={hovCell.depthFt != null ? 40 : 28} rx={5} fill="#1B1E26" opacity={0.86} />
-                        <text x={7} y={-12} fontSize={10} fill="#fff" fontFamily="ui-monospace, monospace">
+                        <text x={7} y={-12} fontSize={10} fill="#fff" fontFamily={MONO_FONT}>
                           {hovCell.cls === "floodway" ? "FLOODWAY — fill prohibited" : hovCell.depthFt != null ? `${hovCell.depthFt.toFixed(2)}′ fill · ${hovCell.cls === "02pct" ? "0.2% band" : "1% floodplain"}` : `not priced (${hovCell.cls === "02pct" ? "0.2% band" : "1%"} — see ledger)`}
                         </text>
                         {hovCell.depthFt != null && (
-                          <text x={7} y={1} fontSize={9} fill="#E5E7EB" fontFamily="ui-monospace, monospace">
+                          <text x={7} y={1} fontSize={9} fill="#E5E7EB" fontFamily={MONO_FONT}>
                             {`grade ${fmResultView && fmResultView.gradeBasis === "grid" ? "3DEP grid" : fmResultView && fmResultView.gradeBasis === "manual" ? "manual" : "median"} · cell ${Math.round(hovCell.wFt * hovCell.hFt)} sf · fp ${fmHeatTotals && fmHeatTotals.perFpAcFt[hovCell.fpId] != null ? fmHeatTotals.perFpAcFt[hovCell.fpId].toFixed(2) : "—"} ac-ft`}
                           </text>
                         )}
@@ -17118,26 +17130,26 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     <image href={cfHeat.dataUrl} x={tl.x} y={tl.y} width={wPx} height={hPx} opacity={0.68} preserveAspectRatio="none" pointerEvents="none" />
                     <g pointerEvents="none">
                       <rect x={lx - 6} y={ly - 14} width={252} height={legend.length * 14 + 40} rx={6} fill="#ffffff" opacity={0.88} />
-                      <text x={lx} y={ly} fontSize={10.5} fontWeight="700" fill="#1B1E26" fontFamily="ui-monospace, monospace">Cut / fill (proposed − existing)</text>
+                      <text x={lx} y={ly} fontSize={10.5} fontWeight="700" fill="#1B1E26" fontFamily={MONO_FONT}>Cut / fill (proposed − existing)</text>
                       {legend.map((r, i) => (
                         <g key={r.label}>
                           <rect x={lx} y={ly + 6 + i * 14} width={10} height={10} fill={r.color} opacity={r.kind === "unknown" ? 0.45 : r.kind === "zero" ? 0.5 : 0.9} />
                           {r.kind === "unknown" && <line x1={lx} y1={ly + 16 + i * 14} x2={lx + 10} y2={ly + 6 + i * 14} stroke={r.color} strokeWidth={1.4} />}
-                          <text x={lx + 15} y={ly + 15 + i * 14} fontSize={9.5} fill="#1B1E26" fontFamily="ui-monospace, monospace">{r.label}</text>
+                          <text x={lx + 15} y={ly + 15 + i * 14} fontSize={9.5} fill="#1B1E26" fontFamily={MONO_FONT}>{r.label}</text>
                         </g>
                       ))}
-                      <text x={lx} y={ly + 6 + legend.length * 14 + 12} fontSize={9.5} fontWeight="700" fill="#1B1E26" fontFamily="ui-monospace, monospace">
+                      <text x={lx} y={ly + 6 + legend.length * 14 + 12} fontSize={9.5} fontWeight="700" fill="#1B1E26" fontFamily={MONO_FONT}>
                         {`Σ cells cut ${f0(tot.cutCy)} · fill ${f0(tot.fillCy)} CY = earthwork rows`}
                       </text>
                     </g>
                     {hovCell && hovPt && (
                       <g data-export="skip" pointerEvents="none" transform={`translate(${hovPt.x + 14}, ${hovPt.y - 10})`}>
                         <rect x={0} y={-26} width={210} height={hovCell.dzFt != null ? 40 : 28} rx={5} fill="#1B1E26" opacity={0.86} />
-                        <text x={7} y={-12} fontSize={10} fill="#fff" fontFamily="ui-monospace, monospace">
+                        <text x={7} y={-12} fontSize={10} fill="#fff" fontFamily={MONO_FONT}>
                           {hovCell.dzFt == null ? "no ground data (DEM void)" : `${Math.abs(hovCell.dzFt).toFixed(2)}′ ${hovCell.dzFt > 0 ? "fill" : "cut"} · ${hovPlane ? hovPlane.label : hovCell.cls}`}
                         </text>
                         {hovCell.dzFt != null && hovPlane && (
-                          <text x={7} y={1} fontSize={9} fill="#E5E7EB" fontFamily="ui-monospace, monospace">
+                          <text x={7} y={1} fontSize={9} fill="#E5E7EB" fontFamily={MONO_FONT}>
                             {`plane ${hovPlane.slopePct.toFixed(2)}% · proposed ${(hovPlane.zAt({ x: hovCell.x, y: hovCell.y })).toFixed(1)}′ · cell ${Math.round(hovCell.wFt * hovCell.hFt)} sf`}
                           </text>
                         )}
@@ -17281,7 +17293,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       onBlur={commitNumEdit}
                       onPointerDown={(e) => e.stopPropagation()}
                       onKeyDown={(e) => { e.stopPropagation(); if (e.key === "Enter") { e.preventDefault(); commitNumEdit(); } else if (e.key === "Escape") { e.preventDefault(); cancelNumEdit(); } }}
-                      style={{ width: W, height: H, border: `2px solid ${PAL.accent}`, borderRadius: 6, padding: "2px 6px", fontSize: 13, fontFamily: "ui-monospace, Menlo, monospace", fontWeight: 600, color: PAL.ink, background: "var(--surface-raised)", outline: "none", boxSizing: "border-box", boxShadow: "0 4px 14px rgba(0,0,0,0.18)" }} />
+                      style={{ width: W, height: H, border: `2px solid ${PAL.accent}`, borderRadius: 6, padding: "2px 6px", fontSize: 13, fontFamily: "ui-monospace, Menlo, monospace", fontWeight: 600, color: PAL.ink, background: SURF_RAISED, outline: "none", boxSizing: "border-box", boxShadow: "0 4px 14px rgba(0,0,0,0.18)" }} />
                   </foreignObject>
                 );
               })()}
@@ -17667,7 +17679,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   actions store a default and change nothing on the canvas, so they confirm
                   briefly and there is nothing to take back. */}
               {stdToast.onUndo && (
-              <button data-testid="standards-apply-undo" onClick={stdToast.onUndo} style={{ border: "none", background: "var(--surface-raised)", color: PAL.accent, borderRadius: 7, padding: "4px 12px", cursor: "pointer", fontSize: 11.5, fontWeight: 700 }}>Undo</button>
+              <button data-testid="standards-apply-undo" onClick={stdToast.onUndo} style={{ border: "none", background: SURF_RAISED, color: PAL.accent, borderRadius: 7, padding: "4px 12px", cursor: "pointer", fontSize: 11.5, fontWeight: 700 }}>Undo</button>
               )}
             </div>
           )}
@@ -17716,24 +17728,24 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   <div style={{ borderTop: `1px solid ${PAL.panelLine}`, marginTop: 8, paddingTop: 7 }}>
                     <div style={{ fontSize: 10, color: PAL.muted, fontWeight: 700, letterSpacing: "0.05em", textTransform: "uppercase", marginBottom: 5 }}>Evidence tools</div>
                     <button onClick={() => { setTracePts([]); setTraceMode((m) => !m); }} title="Click along a visible pole line on the aerial; double-click or Enter to finish"
-                      style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 8px", marginBottom: 4, borderRadius: 7, fontSize: 11.5, fontFamily: "inherit", cursor: "pointer", border: `1px solid ${traceMode ? "var(--accent)" : PAL.panelLine}`, background: traceMode ? "var(--accent)" : "var(--surface-raised)", color: traceMode ? "var(--on-accent)" : PAL.ink, fontWeight: 600 }}>
+                      style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 8px", marginBottom: 4, borderRadius: 7, fontSize: 11.5, fontFamily: "inherit", cursor: "pointer", border: `1px solid ${traceMode ? "var(--accent)" : PAL.panelLine}`, background: traceMode ? "var(--accent)" : SURF_RAISED, color: traceMode ? "var(--on-accent)" : PAL.ink, fontWeight: 600 }}>
                       {traceMode ? "✏ Tracing… (Esc / dbl-click to finish)" : "✏ Trace overhead electric"}
                     </button>
                     <button onClick={() => startRoute("elec")} title="Route electric service from a traced pole line to a building (10′ easement + transformer pad)"
-                      style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 8px", marginBottom: 4, borderRadius: 7, fontSize: 11.5, fontFamily: "inherit", cursor: "pointer", border: `1px solid ${routeMode?.util === "elec" ? "var(--accent)" : PAL.panelLine}`, background: routeMode?.util === "elec" ? "var(--accent)" : "var(--surface-raised)", color: routeMode?.util === "elec" ? "var(--on-accent)" : PAL.ink, fontWeight: 600 }}>
+                      style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 8px", marginBottom: 4, borderRadius: 7, fontSize: 11.5, fontFamily: "inherit", cursor: "pointer", border: `1px solid ${routeMode?.util === "elec" ? "var(--accent)" : PAL.panelLine}`, background: routeMode?.util === "elec" ? "var(--accent)" : SURF_RAISED, color: routeMode?.util === "elec" ? "var(--on-accent)" : PAL.ink, fontWeight: 600 }}>
                       ⚡ Route electric service
                     </button>
                     <button onClick={startWaterRoute} title="Route water service from a main to a building, easement width from the jurisdiction rule below"
-                      style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 8px", marginBottom: 4, borderRadius: 7, fontSize: 11.5, fontFamily: "inherit", cursor: "pointer", border: `1px solid ${routeMode?.util === "water" ? "var(--accent)" : PAL.panelLine}`, background: routeMode?.util === "water" ? "var(--accent)" : "var(--surface-raised)", color: routeMode?.util === "water" ? "var(--on-accent)" : PAL.ink, fontWeight: 600 }}>
+                      style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 8px", marginBottom: 4, borderRadius: 7, fontSize: 11.5, fontFamily: "inherit", cursor: "pointer", border: `1px solid ${routeMode?.util === "water" ? "var(--accent)" : PAL.panelLine}`, background: routeMode?.util === "water" ? "var(--accent)" : SURF_RAISED, color: routeMode?.util === "water" ? "var(--on-accent)" : PAL.ink, fontWeight: 600 }}>
                       🚰 Route water service
                     </button>
                     <button onClick={inferWaterMain} disabled={evidenceBusy} title="Connect the fire hydrants in view into a screening-only water main"
-                      style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 8px", marginBottom: 4, borderRadius: 7, fontSize: 11.5, fontFamily: "inherit", cursor: "pointer", border: `1px solid ${PAL.panelLine}`, background: "var(--surface-raised)", color: PAL.ink, fontWeight: 600, opacity: evidenceBusy ? 0.6 : 1 }}>
+                      style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 8px", marginBottom: 4, borderRadius: 7, fontSize: 11.5, fontFamily: "inherit", cursor: "pointer", border: `1px solid ${PAL.panelLine}`, background: SURF_RAISED, color: PAL.ink, fontWeight: 600, opacity: evidenceBusy ? 0.6 : 1 }}>
                       {evidenceBusy ? "Inferring…" : "⌁ Infer water main from hydrants"}
                     </button>
                     <button onClick={() => { const on = !xsecMode; setXsecMode(on); setXsecPts([]); if (on) { setXsec(null); flashWarn("Click one bank of the ditch, then the other side.", 0); } else setOverlapWarn(""); }}
                       title="Draw a line across a ditch to sample USGS 3DEP elevation and estimate depth/invert"
-                      style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 8px", marginBottom: 4, borderRadius: 7, fontSize: 11.5, fontFamily: "inherit", cursor: "pointer", border: `1px solid ${xsecMode ? "var(--accent)" : PAL.panelLine}`, background: xsecMode ? "var(--accent)" : "var(--surface-raised)", color: xsecMode ? "var(--on-accent)" : PAL.ink, fontWeight: 600 }}>
+                      style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 8px", marginBottom: 4, borderRadius: 7, fontSize: 11.5, fontFamily: "inherit", cursor: "pointer", border: `1px solid ${xsecMode ? "var(--accent)" : PAL.panelLine}`, background: xsecMode ? "var(--accent)" : SURF_RAISED, color: xsecMode ? "var(--on-accent)" : PAL.ink, fontWeight: 600 }}>
                       {xsecMode ? "📏 Click both banks… (Esc to cancel)" : "📏 Cross-section (ditch)"}
                     </button>
                     {/* per-jurisdiction easement-rule table (editable; placeholders marked VERIFY) */}
@@ -17870,9 +17882,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
 
           {/* print-frame toolbar */}
           {printMode && (() => {
-            const seg = (on) => ({ padding: "5px 11px", fontSize: 12, fontWeight: 600, borderRadius: 7, cursor: "pointer", fontFamily: "inherit", border: `1px solid ${on ? PAL.accent : "var(--border-default)"}`, background: on ? PAL.accent : "var(--surface-raised)", color: on ? "#fff" : PAL.ink });
+            const seg = (on) => ({ padding: "5px 11px", fontSize: 12, fontWeight: 600, borderRadius: 7, cursor: "pointer", fontFamily: "inherit", border: `1px solid ${on ? PAL.accent : "var(--border-default)"}`, background: on ? PAL.accent : SURF_RAISED, color: on ? "#fff" : PAL.ink });
             return (
-              <div style={{ position: "absolute", top: 14, left: "50%", transform: "translateX(-50%)", display: "flex", alignItems: "center", gap: 12, background: "var(--surface-raised)", border: `1px solid ${PAL.panelLine}`, borderRadius: 11, boxShadow: "0 8px 26px rgba(0,0,0,0.22)", padding: "8px 12px", zIndex: 9 }}>
+              <div style={{ position: "absolute", top: 14, left: "50%", transform: "translateX(-50%)", display: "flex", alignItems: "center", gap: 12, background: SURF_RAISED, border: `1px solid ${PAL.panelLine}`, borderRadius: 11, boxShadow: "0 8px 26px rgba(0,0,0,0.22)", padding: "8px 12px", zIndex: 9 }}>
                 <span style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: PAL.muted }}>Print frame</span>
                 <span style={{ display: "flex", gap: 4 }}>
                   <button style={seg(printPaper === "letter")} onClick={() => setPrintPaper("letter")}>Letter</button>
@@ -18208,7 +18220,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, padding: "8px 8px 6px", borderTop: `1px solid ${PAL.panelLine}`, marginTop: 4 }}>Type (default)</div>
               <div style={{ display: "flex", flexWrap: "wrap", gap: 4, padding: "0 6px 4px" }}>
                 {EASEMENT_TYPES.map((ty) => (
-                  <button key={ty.key} title={ty.label} onClick={() => setEaseType(ty.key)} style={{ display: "flex", alignItems: "center", gap: 5, padding: "4px 7px", borderRadius: 7, cursor: "pointer", fontFamily: "inherit", fontSize: 11, border: `1px solid ${easeType === ty.key ? ty.color : "var(--border-default)"}`, background: easeType === ty.key ? ty.color : "var(--surface-raised)", color: easeType === ty.key ? "#fff" : PAL.ink, fontWeight: easeType === ty.key ? 650 : 500 }}>
+                  <button key={ty.key} title={ty.label} onClick={() => setEaseType(ty.key)} style={{ display: "flex", alignItems: "center", gap: 5, padding: "4px 7px", borderRadius: 7, cursor: "pointer", fontFamily: "inherit", fontSize: 11, border: `1px solid ${easeType === ty.key ? ty.color : "var(--border-default)"}`, background: easeType === ty.key ? ty.color : SURF_RAISED, color: easeType === ty.key ? "#fff" : PAL.ink, fontWeight: easeType === ty.key ? 650 : 500 }}>
                     <span style={{ width: 8, height: 8, borderRadius: 2, background: easeType === ty.key ? "#fff" : ty.color }} /> {ty.label}
                   </button>
                 ))}
@@ -18277,7 +18289,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               panel. The two branches carry the same data-testid: one of them is always present while
               the inspector is open. */}
           {(companionOpen || propsTab) && companionSel && (
-          <div data-testid="property-panel" style={{ flex: (narrow && leftPanel && !propsTab) ? "0 1 auto" : "1 1 auto", maxHeight: (narrow && leftPanel && !propsTab) ? "45%" : "none", minHeight: 0, overflowY: "auto", padding: "13px 13px 12px", borderBottom: (narrow && leftPanel && !propsTab) ? "1px solid var(--border-default)" : "none" }}>
+          <div data-testid="property-panel" style={{ flex: (narrow && leftPanel && !propsTab) ? "0 1 auto" : "1 1 auto", maxHeight: (narrow && leftPanel && !propsTab) ? "45%" : "none", minHeight: 0, overflowY: "auto", padding: "13px 13px 12px", borderBottom: (narrow && leftPanel && !propsTab) ? BORDER_1 : "none" }}>
           <div role="button" tabIndex={0} aria-expanded={!propsCollapsed} onClick={() => setPropsCollapsed((c) => !c)}
             onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setPropsCollapsed((c) => !c); } }}
             style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", userSelect: "none", padding: "2px 0 6px" }}>
@@ -18371,7 +18383,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             const t = easementType(e.easeType);
             const area = easementArea(e);
             const isStrip = e.mode !== "boundary";
-            const seg = (on) => ({ ...chip, flex: 1, padding: "6px 0", textAlign: "center", background: on ? PAL.accent : "var(--surface-raised)", color: on ? "#fff" : PAL.ink, borderColor: on ? PAL.accent : "var(--border-default)" });
+            const seg = (on) => ({ ...chip, flex: 1, padding: "6px 0", textAlign: "center", background: on ? PAL.accent : SURF_RAISED, color: on ? "#fff" : PAL.ink, borderColor: on ? PAL.accent : "var(--border-default)" });
             const txt = { ...numInput, width: 150, fontFamily: "inherit" };
             const check = (label, val, key) => (
               <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 12, color: PAL.ink, marginBottom: 7, cursor: "pointer" }}>
@@ -18417,7 +18429,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   placeholder='e.g. 20&#39; DRAINAGE ESMT' style={txt} /></Field>
                 {/* B678 — per-label repeat spacing / text size / background halo (only once a label is typed) */}
                 {inlineLabelControls(e, "easement", coalesceLabelWrite(selMarkup.id, (p) => setMarkups((a) => a.map((m) => (m.id === selMarkup.id ? { ...m, ...p } : m)))))}
-                <Field label="Notes"><textarea value={e.notes || ""} onChange={(ev) => setSelEasement({ notes: ev.target.value })} rows={2} style={{ width: 150, boxSizing: "border-box", padding: "5px 7px", fontSize: 12, fontFamily: "inherit", border: `1px solid var(--border-default)`, borderRadius: 8, color: PAL.ink, resize: "vertical" }} /></Field>
+                <Field label="Notes"><textarea value={e.notes || ""} onChange={(ev) => setSelEasement({ notes: ev.target.value })} rows={2} style={{ width: 150, boxSizing: "border-box", padding: "5px 7px", fontSize: 12, fontFamily: "inherit", border: BORDER_1, borderRadius: 8, color: PAL.ink, resize: "vertical" }} /></Field>
                 <div style={{ fontSize: 11.5, color: PAL.muted, marginTop: 6 }}>Area: <b style={{ color: PAL.ink }}>{Math.round(area).toLocaleString()} sf</b> · {(area / SQFT_PER_ACRE).toFixed(2)} ac</div>
                 <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.5, marginTop: 6 }}>{isStrip ? "Drag a centerline dot to reshape (the strip re-offsets); ＋ adds a point, Shift-click removes one." : "Drag a boundary dot to reshape; ＋ adds a point, Shift-click removes one."}</div>
                 <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
@@ -18433,7 +18445,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             // paints the CURRENT COLOUR as the chip's background and then spreads this override on
             // top, so a hardcoded surface colour blanked every colour chip in these panels: the
             // control you click to change a colour showed no colour. Leave it to ColorField.
-            const swatch = { width: 34, height: 26, padding: 0, border: `1px solid var(--border-default)`, borderRadius: 6, cursor: "pointer" };
+            const swatch = { width: 34, height: 26, padding: 0, border: BORDER_1, borderRadius: 6, cursor: "pointer" };
             const closed = selMarkup.kind === "rect" || selMarkup.kind === "ellipse" || selMarkup.kind === "polygon";
             return (
               // NEW-1 — plain wrapper (see the multi-select branch above for why the duplicate testid was removed).
@@ -18474,7 +18486,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   const hasParcel = parcels.some((p) => p.active !== false && (p.points?.length || 0) >= 3);
                   const dm = deedMainOf(deedGroupMembers(selMarkup), selMarkup);
                   return (
-                    <div style={{ marginTop: 6, paddingTop: 8, borderTop: `1px solid var(--border-default)` }}>
+                    <div style={{ marginTop: 6, paddingTop: 8, borderTop: BORDER_1 }}>
                       <button style={{ ...chip, width: "100%", fontWeight: 700 }} disabled={!!selMarkup.locked}
                         onClick={() => alignDeedToParcel(dm.id)}>
                         📐 {hasParcel ? "Align to county parcel" : "Rotate to grid north"}
@@ -18518,11 +18530,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             // paints the CURRENT COLOUR as the chip's background and then spreads this override on
             // top, so a hardcoded surface colour blanked every colour chip in these panels: the
             // control you click to change a colour showed no colour. Leave it to ColorField.
-            const swatch = { width: 34, height: 26, padding: 0, border: `1px solid var(--border-default)`, borderRadius: 6, cursor: "pointer" };
+            const swatch = { width: 34, height: 26, padding: 0, border: BORDER_1, borderRadius: 6, cursor: "pointer" };
             // B615 — persistent captions under each swatch so you don't have to hover to tell them apart.
             const cap = { fontSize: 9.5, color: PAL.muted, lineHeight: 1, textAlign: "center", letterSpacing: "0.02em" };
             const swatchCap = { display: "flex", flexDirection: "column", alignItems: "center", gap: 3 };
-            const seg = (on) => ({ ...chip, flex: 1, padding: "6px 0", textAlign: "center", background: on ? PAL.accent : "var(--surface-raised)", color: on ? "#fff" : PAL.ink, borderColor: on ? PAL.accent : "var(--border-default)" });
+            const seg = (on) => ({ ...chip, flex: 1, padding: "6px 0", textAlign: "center", background: on ? PAL.accent : SURF_RAISED, color: on ? "#fff" : PAL.ink, borderColor: on ? PAL.accent : "var(--border-default)" });
             return (
               // NEW-1 — plain wrapper (see the multi-select branch above for why the duplicate testid was removed).
               <div>
@@ -18581,7 +18593,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             // paints the CURRENT COLOUR as the chip's background and then spreads this override on
             // top, so a hardcoded surface colour blanked every colour chip in these panels: the
             // control you click to change a colour showed no colour. Leave it to ColorField.
-            const swatch = { width: 34, height: 26, padding: 0, border: `1px solid var(--border-default)`, borderRadius: 6, cursor: "pointer" };
+            const swatch = { width: 34, height: 26, padding: 0, border: BORDER_1, borderRadius: 6, cursor: "pointer" };
             const closed = mode === "area";
             const stylable = mode !== "count";
             const uncal = calibrationState === "uncalibrated";
@@ -18855,7 +18867,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     const note = { fontSize: 10.5, color: PAL.muted, lineHeight: 1.4, marginTop: 4 };
                     // B549 — compact single-line feature stepper: "label · [−] count [＋]". Replaces the old
                     // tall label/sub-label/two-big-buttons row; the sub-caption moves to the button title.
-                    const stepBtn = (on, danger) => ({ width: 24, height: 24, padding: 0, display: "grid", placeItems: "center", fontSize: 15, lineHeight: 1, fontWeight: 700, borderRadius: 6, border: "1px solid var(--border-default)", background: "var(--surface-raised)", fontFamily: "inherit", cursor: on ? "pointer" : "default", color: danger ? (on ? "#b3361b" : "#e3cfc9") : (on ? PAL.ink : "#cfc7b5"), opacity: on ? 1 : 0.6 });
+                    const stepBtn = (on, danger) => ({ width: 24, height: 24, padding: 0, display: "grid", placeItems: "center", fontSize: 15, lineHeight: 1, fontWeight: 700, borderRadius: 6, border: BORDER_1, background: SURF_RAISED, fontFamily: "inherit", cursor: on ? "pointer" : "default", color: danger ? (on ? "#b3361b" : "#e3cfc9") : (on ? PAL.ink : "#cfc7b5"), opacity: on ? 1 : 0.6 });
                     const featRow = (label, count, { onAdd, addOn, addTitle, onRem, remOn, remTitle }) => (
                       <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 6 }}>
                         <span style={{ flex: 1, minWidth: 0, fontSize: 12, color: PAL.ink }}>{label}</span>
@@ -18864,7 +18876,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         <button disabled={!addOn} title={addTitle} onClick={addOn ? onAdd : undefined} style={stepBtn(addOn, false)}>＋</button>
                       </div>
                     );
-                    const layerChip = { fontSize: 11.5, padding: "4px 8px", borderRadius: 6, border: "1px solid var(--border-default)", background: "var(--surface-raised)", color: PAL.ink, cursor: "pointer", fontFamily: "inherit" };
+                    const layerChip = { fontSize: 11.5, padding: "4px 8px", borderRadius: 6, border: BORDER_1, background: SURF_RAISED, color: PAL.ink, cursor: "pointer", fontFamily: "inherit" };
                     const layerChooserRow = (label, groupKey, sides) => {
                       const opts = sides.length ? layersForSides(b, sides) : [];
                       if (!opts.length) return null;
@@ -19910,7 +19922,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         table (with per-option tooltips); the "Auto from elevation ~X%…" explanation
                         paragraph is deleted. The one-time Hybrid teaching hint is preserved here. */}
                     {g_roleInfo.role === "dual" && !hybridHintSeen && (
-                      <div style={{ fontSize: 10.5, color: PAL.ink, lineHeight: 1.45, background: "var(--surface-raised)", border: `1px solid ${PAL.panelLine}`, borderRadius: 8, padding: "7px 9px", margin: "8px 0 0", display: "flex", justifyContent: "space-between", gap: 8, alignItems: "baseline" }}>
+                      <div style={{ fontSize: 10.5, color: PAL.ink, lineHeight: 1.45, background: SURF_RAISED, border: `1px solid ${PAL.panelLine}`, borderRadius: 8, padding: "7px 9px", margin: "8px 0 0", display: "flex", justifyContent: "space-between", gap: 8, alignItems: "baseline" }}>
                         <span><strong>Hybrid</strong> = this pond serves BOTH ledgers: usable detention above the flood water surface, and compensating-storage mitigation for the cut below it. Set it to Detention or Mitigation to force one.</span>
                         <button type="button" onClick={dismissHybridHint} style={{ flex: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 10, fontWeight: 700, padding: "1px 8px", borderRadius: 999, border: `1px solid ${PAL.border}`, background: "transparent", color: PAL.muted, whiteSpace: "nowrap" }}>Got it</button>
                       </div>
@@ -20425,7 +20437,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       });
                       const gravityImpaired = Number.isFinite(tailwaterElevFt) && floorApprox < tailwaterElevFt;
                       const pumpBlock = relCap != null && pumpAllow.sharePct != null ? (
-                        <div style={{ marginTop: 10, background: "var(--surface-raised)", border: `1px solid ${PAL.panelLine}`, borderRadius: 8, padding: "8px 10px" }}>
+                        <div style={{ marginTop: 10, background: SURF_RAISED, border: `1px solid ${PAL.panelLine}`, borderRadius: 8, padding: "8px 10px" }}>
                           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
                             <span style={{ fontSize: 10, color: PAL.muted, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em" }}>Pumped outfall (screening)</span>
                             {pumpAllow.overridden
@@ -20541,7 +20553,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           </div>
                           {oProbs.length > 0 && <div style={{ ...smallNote, color: PAL.warn }}>Outlet incomplete: {oProbs.join("; ")}.</div>}
                           {routed.kind === "routed" ? (
-                            <div style={{ marginTop: 8, background: "var(--surface-raised)", border: `1px solid ${PAL.panelLine}`, borderRadius: 8, padding: "8px 10px" }}>
+                            <div style={{ marginTop: 8, background: SURF_RAISED, border: `1px solid ${PAL.panelLine}`, borderRadius: 8, padding: "8px 10px" }}>
                               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
                                 <span style={{ fontSize: 10, color: PAL.muted, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em" }}>Overall: Post ≤ Pre</span>
                                 <span style={{ fontSize: 10, fontWeight: 800, letterSpacing: "0.04em", padding: "2px 8px", borderRadius: 5, color: "var(--on-accent)", background: routed.allPass ? PAL.success : PAL.danger }}>{routed.allPass ? "PASS: every storm" : "FAIL"}</span>
@@ -20796,7 +20808,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
 
       {showShortcuts && (
         <div onClick={() => setShowShortcuts(false)} style={{ position: "fixed", inset: 0, zIndex: 3000, background: "rgba(20,18,15,0.55)", display: "grid", placeItems: "center" }}>
-          <div onClick={(e) => e.stopPropagation()} style={{ background: "var(--surface-raised)", borderRadius: 14, boxShadow: "0 20px 60px rgba(0,0,0,0.35)", padding: 22, width: 560, maxWidth: "92vw", maxHeight: "86vh", overflowY: "auto" }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ background: SURF_RAISED, borderRadius: 14, boxShadow: "0 20px 60px rgba(0,0,0,0.35)", padding: 22, width: 560, maxWidth: "92vw", maxHeight: "86vh", overflowY: "auto" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 14 }}>
               <h2 style={{ margin: 0, fontSize: 16, color: PAL.ink }}>Keyboard & gestures</h2>
               <button className="gbtn" onClick={() => setShowShortcuts(false)} style={{ ...chip }}>Close ✕</button>
@@ -20824,7 +20836,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       {/* Version history (automatic local backups, B126) — restore an earlier saved version */}
       {versionsOpen && (
         <div onClick={() => setVersionsOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 3000, background: "rgba(20,18,15,0.55)", display: "grid", placeItems: "center" }}>
-          <div onClick={(e) => e.stopPropagation()} style={{ background: "var(--surface-raised)", borderRadius: 14, boxShadow: "0 20px 60px rgba(0,0,0,0.35)", padding: 22, width: 460, maxWidth: "92vw", maxHeight: "82vh", overflowY: "auto" }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ background: SURF_RAISED, borderRadius: 14, boxShadow: "0 20px 60px rgba(0,0,0,0.35)", padding: 22, width: 460, maxWidth: "92vw", maxHeight: "82vh", overflowY: "auto" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }}>
               <h2 style={{ margin: 0, fontSize: 16, color: PAL.ink }}>Version history</h2>
               <button className="gbtn" onClick={() => setVersionsOpen(false)} style={{ ...chip }}>Close ✕</button>
@@ -20871,7 +20883,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         const exCount = Math.max(0, tracts.length - 1);
         return (
         <div onClick={() => setTitleOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 3000, background: "rgba(20,18,15,0.55)", display: "grid", placeItems: "center" }}>
-          <div onClick={(e) => e.stopPropagation()} style={{ background: "var(--surface-raised)", borderRadius: 14, boxShadow: "0 20px 60px rgba(0,0,0,0.35)", padding: 22, width: 720, maxWidth: "94vw", maxHeight: "90vh", overflowY: "auto" }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ background: SURF_RAISED, borderRadius: 14, boxShadow: "0 20px 60px rgba(0,0,0,0.35)", padding: 22, width: 720, maxWidth: "94vw", maxHeight: "90vh", overflowY: "auto" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 4 }}>
               <h2 style={{ margin: 0, fontSize: 16, color: PAL.ink }}>Title reader &amp; metes-and-bounds plotter</h2>
               <button className="gbtn" onClick={() => setTitleOpen(false)} style={{ ...chip }}>Close ✕</button>
@@ -20886,7 +20898,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                 <input type="password" value={apiKey} placeholder="sk-ant-…" autoComplete="off"
                   onChange={(e) => { setApiKey(e.target.value); setKey(e.target.value.trim()); }}
-                  style={{ ...numInput, width: "auto", flex: 1, fontFamily: "ui-monospace, monospace" }} />
+                  style={{ ...numInput, width: "auto", flex: 1, fontFamily: MONO_FONT }} />
                 {apiKey && <button className="gbtn" style={chip} onClick={() => { setApiKey(""); setKey(""); }}>Clear</button>}
               </div>
               <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.5, marginTop: 5 }}>
@@ -20914,12 +20926,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         <input type="checkbox" checked={!!excChecked[i]} onChange={(e) => setExcChecked((s) => ({ ...s, [i]: e.target.checked }))} style={{ marginTop: 2 }} />
                         <div style={{ flex: 1, minWidth: 0 }}>
                           <div style={{ display: "flex", gap: 7, alignItems: "baseline", flexWrap: "wrap" }}>
-                            <span style={{ fontFamily: "ui-monospace, monospace", fontSize: 11, fontWeight: 700, color: PAL.ink }}>{x.number ? `#${x.number}` : `#${i + 1}`}</span>
+                            <span style={{ fontFamily: MONO_FONT, fontSize: 11, fontWeight: 700, color: PAL.ink }}>{x.number ? `#${x.number}` : `#${i + 1}`}</span>
                             <span style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em", color: "#fff", background: x.plottable ? "#7c3aed" : PAL.muted, borderRadius: 5, padding: "1px 6px" }}>{x.type}</span>
                             {x.plottable && <span style={{ fontSize: 10, color: PAL.purple, fontWeight: 600 }}>plottable</span>}
                           </div>
                           <div style={{ fontSize: 12.5, color: PAL.ink, marginTop: 2, lineHeight: 1.4 }}>{x.description}</div>
-                          {x.recordingReference && <div style={{ fontSize: 11, color: PAL.muted, fontFamily: "ui-monospace, monospace", marginTop: 1 }}>{x.recordingReference}</div>}
+                          {x.recordingReference && <div style={{ fontSize: 11, color: PAL.muted, fontFamily: MONO_FONT, marginTop: 1 }}>{x.recordingReference}</div>}
                         </div>
                       </label>
                     ))}
@@ -20942,7 +20954,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 style={{ border: `1.5px dashed ${deedDrag ? PAL.accent : PAL.panelLine}`, background: deedDrag ? "rgba(124,58,237,0.06)" : "transparent", borderRadius: 10, padding: "13px 12px", textAlign: "center", cursor: deedBusy ? "default" : "pointer", marginBottom: 10 }}>
                 <div style={{ fontSize: 12.5, fontWeight: 600, color: PAL.ink }}>{deedBusy ? "Reading…" : "Drop a deed file here, or click to choose"}</div>
                 <div style={{ fontSize: 11, color: PAL.muted, marginTop: 3, lineHeight: 1.4 }}>Word (.doc / .docx), PDF, or text (.txt) — drop one or several; bearings, distances, curves, and save-and-except are read automatically.</div>
-                {deedName && !deedBusy && <div style={{ fontSize: 11, color: PAL.purple, marginTop: 4, fontFamily: "ui-monospace, monospace", wordBreak: "break-all" }}>📄 {deedName}</div>}
+                {deedName && !deedBusy && <div style={{ fontSize: 11, color: PAL.purple, marginTop: 4, fontFamily: MONO_FONT, wordBreak: "break-all" }}>📄 {deedName}</div>}
               </div>
               {deedErr && <div style={{ fontSize: 12, color: PAL.danger, marginBottom: 8, lineHeight: 1.45 }}>{deedErr}</div>}
               {deedQueue.length > 1 && (
@@ -20952,7 +20964,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     return (
                       <div key={r.id} data-testid="deed-queue-row" onClick={() => { if (r.error) return; setDeedActiveId(r.id); setDeedName(r.name); if (r.text) setMbText(r.text); setDeedErr(""); }}
                         style={{ display: "flex", alignItems: "baseline", gap: 8, padding: "7px 10px", cursor: r.error ? "default" : "pointer", borderTop: i ? `1px solid ${PAL.panelLine}` : "none", background: active ? "rgba(124,58,237,0.08)" : "transparent" }}>
-                        <span style={{ fontSize: 11.5, fontWeight: 600, color: r.error ? PAL.danger : PAL.ink, fontFamily: "ui-monospace, monospace", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "50%" }}>📄 {r.name}</span>
+                        <span style={{ fontSize: 11.5, fontWeight: 600, color: r.error ? PAL.danger : PAL.ink, fontFamily: MONO_FONT, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "50%" }}>📄 {r.name}</span>
                         <span style={{ fontSize: 11, color: r.error ? PAL.danger : PAL.muted, flex: 1, lineHeight: 1.4 }}>{r.error ? r.error : `${r.boundaryCalls} call${r.boundaryCalls > 1 ? "s" : ""}${r.exCount ? ` · +${r.exCount} save-and-except` : ""} · ${r.closes ? "closes" : `gap ${r.gap.toFixed(1)}′`}`}</span>
                         {active && ok && <span style={{ fontSize: 10.5, color: PAL.accent, fontWeight: 700, whiteSpace: "nowrap" }}>LOADED</span>}
                       </div>
@@ -20962,7 +20974,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               )}
               <textarea value={mbText} onChange={(e) => { const v = e.target.value; setMbText(v); setDeedQueue((q) => q.map((r) => (r.id === deedActiveId ? { ...r, text: v } : r))); }} rows={5}
                 placeholder={'Paste a legal description, e.g.\nBEGINNING at a point… THENCE N 45°30′00″ E, 150.00 feet;\nTHENCE S 44°30′00″ E, 300.00 feet; …'}
-                style={{ width: "100%", boxSizing: "border-box", padding: "9px 11px", fontSize: 12, fontFamily: "ui-monospace, monospace", border: `1px solid var(--border-default)`, borderRadius: 8, color: PAL.ink, resize: "vertical", lineHeight: 1.5 }} />
+                style={{ width: "100%", boxSizing: "border-box", padding: "9px 11px", fontSize: 12, fontFamily: MONO_FONT, border: BORDER_1, borderRadius: 8, color: PAL.ink, resize: "vertical", lineHeight: 1.5 }} />
               <div style={{ display: "flex", gap: 12, alignItems: "center", marginTop: 10, flexWrap: "wrap" }}>
                 <div style={{ fontSize: 12, color: calls.length ? PAL.ink : PAL.muted, fontWeight: 600 }}>
                   {calls.length
@@ -20998,7 +21010,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 <button style={{ ...btn(true), padding: "8px 15px", opacity: calls.length ? 1 : 0.5 }} disabled={!calls.length} onClick={() => startPlotMetes(false)}>Plot on canvas →</button>
               </div>
               {calls.length > 0 && (
-                <div style={{ marginTop: 10, maxHeight: 130, overflowY: "auto", border: `1px solid ${PAL.panelLine}`, borderRadius: 8, fontSize: 11.5, fontFamily: "ui-monospace, monospace" }}>
+                <div style={{ marginTop: 10, maxHeight: 130, overflowY: "auto", border: `1px solid ${PAL.panelLine}`, borderRadius: 8, fontSize: 11.5, fontFamily: MONO_FONT }}>
                   {calls.map((c, i) => (
                     <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "4px 10px", borderBottom: i < calls.length - 1 ? "1px solid #f3efe5" : "none", color: PAL.ink }}>
                       <span>{i + 1}. {c.bearing}{c.curve ? (c.curveMeta && (c.curveMeta.radiusFt > 0 || c.curveMeta.centralAngleDeg > 0) ? " ⤾ (arc)" : " ⤿ (chord)") : ""}</span><span>{c.distFt.toFixed(2)}′</span>
@@ -21015,7 +21027,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       {/* POB / overlap banner (after plotting or while awaiting a POB click) */}
       {/* ditch cross-section result */}
       {xsec && (
-        <div style={{ position: "fixed", left: 16, bottom: 16, zIndex: 2600, width: 286, background: "var(--surface-raised)", border: `1px solid ${PAL.panelLine}`, borderRadius: 12, boxShadow: "0 12px 36px rgba(0,0,0,0.22)", padding: 13 }}>
+        <div style={{ position: "fixed", left: 16, bottom: 16, zIndex: 2600, width: 286, background: SURF_RAISED, border: `1px solid ${PAL.panelLine}`, borderRadius: 12, boxShadow: "0 12px 36px rgba(0,0,0,0.22)", padding: 13 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }}>
             <span style={{ fontSize: 12.5, fontWeight: 700, color: PAL.ink }}>Ditch cross-section</span>
             <button onClick={() => setXsec(null)} style={{ ...chip, padding: "3px 8px", fontSize: 11 }}>✕</button>
@@ -21030,7 +21042,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 <svg width={W} height={H} style={{ display: "block", background: "var(--planner-raised)", borderRadius: 6 }}>
                   <polyline points={pts} fill="none" stroke="#0e7490" strokeWidth={1.6} />
                 </svg>
-                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11.5, color: PAL.ink, marginTop: 7, fontFamily: "ui-monospace, monospace" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11.5, color: PAL.ink, marginTop: 7, fontFamily: MONO_FONT }}>
                   <span>Depth ≈ <b>{f1(s.depthFt)}′</b></span>
                   <span>Invert {f1(s.invertFt)}′</span>
                   <span>Bank {f1(s.bankFt)}′</span>
@@ -21968,13 +21980,13 @@ function Section({ title, children, collapsed, accent }) {
   // render a bare, always-open card.
   if (title == null || title === false) {
     return (
-      <div style={{ marginBottom: 9, background: "var(--surface-raised)", border: "1px solid var(--planner-border)", borderRadius: 12, boxShadow: "0 1px 2px rgba(28,25,20,0.04)", overflow: "hidden" }}>
+      <div style={{ marginBottom: 9, background: SURF_RAISED, border: "1px solid var(--planner-border)", borderRadius: 12, boxShadow: "0 1px 2px rgba(28,25,20,0.04)", overflow: "hidden" }}>
         <div style={{ padding: 12 }}>{children}</div>
       </div>
     );
   }
   return (
-    <div style={{ marginBottom: 9, background: "var(--surface-raised)", border: "1px solid var(--planner-border)", borderRadius: 12, boxShadow: "0 1px 2px rgba(28,25,20,0.04)", overflow: "hidden" }}>
+    <div style={{ marginBottom: 9, background: SURF_RAISED, border: "1px solid var(--planner-border)", borderRadius: 12, boxShadow: "0 1px 2px rgba(28,25,20,0.04)", overflow: "hidden" }}>
       <div className="sec-head" onClick={() => setOpen((o) => !o)}
         role="button" tabIndex={0} aria-expanded={open} aria-label={title}
         onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setOpen((o) => !o); } }} /* B531: keyboard-toggle the section */
@@ -22087,8 +22099,8 @@ function NumInput({ value, onCommit, min, max, style, placeholder, step, coarse,
   // blur-commit on a half-typed draft first (same trick as RotationStepper's spinner).
   const spinBtn = {
     width: 18, height: 12, padding: 0, display: "grid", placeItems: "center", fontSize: 9,
-    lineHeight: 1, border: "1px solid var(--border-default)", borderRadius: 4,
-    background: "var(--surface-raised)", color: "var(--text-secondary)", cursor: "pointer", fontFamily: "inherit",
+    lineHeight: 1, border: BORDER_1, borderRadius: 4,
+    background: SURF_RAISED, color: "var(--text-secondary)", cursor: "pointer", fontFamily: "inherit",
   };
   return (
     <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>

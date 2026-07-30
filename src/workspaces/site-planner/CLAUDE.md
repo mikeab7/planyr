@@ -290,10 +290,19 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   (`setAccountStyleDefaults`). Precedence: built-in < account < project < draft (preview) < per-object.
 - `planStyle.js` also owns the **setback line's** resolved style (NEW-1: `setbackLineStyle` /
   `setbackDashArray` / `SETBACK_LINE`) — colour, weight and dash were hardcoded at the one place the
-  ring was drawn while the boundary beside it had full standards. Both the ring AND its dimension
-  chip read this one derivation; the defaults ARE the historic look (weight 1.25, `dashed` = "7 6"),
-  and `parcelDefaultStyle` stamps `sbStroke`/`sbWeight`/`sbDash` only when they DIFFER from it, so an
-  upgraded plan gains no keys and renders unchanged.
+  ring was drawn while the boundary beside it had full standards. The defaults ARE the historic look
+  (weight 1.25, `dashed` = "7 6"), and `parcelDefaultStyle` stamps `sbStroke`/`sbWeight`/`sbDash` only
+  when they DIFFER from it, so an upgraded plan gains no keys and renders unchanged.
+  **⛔ The dimension CHIP does NOT read that derivation — `setbackChipStyle(ink)` is its own, and it
+  takes NO parcel (NEW-1).** The chip is a white plate whose border and numerals are the
+  `--canvas-chip-ink` token and track NOTHING on the parcel; decoupling them from the line is the
+  whole point (owner: *"the setback is orange, and then the chip … the text is orange. I'd like that
+  to all be … black."*). It was re-coupled once, by a `pc.sbStroke || ink` fallback that read black
+  only until someone set a setback colour — so the moment the line default moved indigo → green
+  (B1192) the chip went green on the live map. Never reintroduce a per-parcel value at that render
+  site; the LINE keeps its override, the chip never follows it. Guards: the repo-root `test/` suite
+  **setbackChipInk** (property + source guard, both mutation-checked) + the ui-audit harness
+  **verify-setback-chip-ink** (computed colours, an arbitrary line colour beside an untouched one).
 - **`measureStyle.js` + `measureLabel.js` — measurements, brought up to par with every other object.**
   Measurements were the last drawn object with NO style of their own (the colour was hardcoded to
   `PAL.accent` at the one place they were painted), no per-object label control, and a run-on

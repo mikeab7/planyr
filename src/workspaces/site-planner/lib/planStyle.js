@@ -163,6 +163,28 @@ export const setbackLineStyle = (pc, fallbackStroke) => {
   return { stroke: (pc && pc.sbStroke) || fallbackStroke, weight, dash: setbackDashArray(dash, weight) };
 };
 
+/* ------------------------------------------------------------ the setback CHIP's ink (NEW-1)
+ *
+ * The dimension chip on the map is a WHITE PLATE with a border and numerals, and those two read
+ * a FIXED INK that tracks NOTHING on the parcel — not the setback line's colour, not the
+ * boundary's. That decoupling IS the feature (owner, 2026-07-30, on the amber parcel: "the
+ * setback is orange, and then the chip showing that setback, the outline of the chip is orange,
+ * and then the text is orange. I'd like that to all be … black.").
+ *
+ * It was re-coupled once already: the chip resolved `pc.sbStroke || ink`, which reads as black
+ * only for as long as nobody has set a setback colour. The moment the line default moved
+ * indigo → green (B1192) — or a user picks any colour of their own — the chip inherited it
+ * again and the ink default was dead code on that parcel.
+ *
+ * So this takes **NO parcel**. The independence is structural, not a convention that survives
+ * only while each future edit remembers it: there is no per-parcel value in scope here to
+ * couple to. `ink` is the theme's chip-ink token (`PAL.chipInk`), passed in because an SVG
+ * attribute cannot read a CSS var.
+ *
+ * @returns { plate, stroke, text } — plate fill, border colour, numeral colour
+ */
+export const setbackChipStyle = (ink) => ({ plate: "#fff", stroke: ink, text: ink });
+
 // Coerce any CSS color we store into the #rrggbb form an <input type=color> needs.
 export const toHex6 = (c) => {
   if (!c) return "#000000";
