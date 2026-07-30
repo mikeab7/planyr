@@ -136,10 +136,55 @@ const pairRow = (key, label, provided, required, short, opts = {}) => {
 
 // Detention: the required number is the point requirement, or the CONSERVATIVE (upper) end of a
 // screening band — a single number in the strip (the band range moves into the A3 basis tag).
+/* NEW-2 (B1127) — the NAMED UNAVAILABLE row.
+ *
+ * ⛔ THIS BRANCH IS THE BUG FIX, AND ITS ABSENCE WAS SEVERE. Before it, a `kind:"unavailable"`
+ * requirement (every Colorado site) matched none of the numeric branches below and fell through to
+ * `loadingRow`, so the loudest surface in the panel read **"Detention: checking flood data"** — with
+ * a "…" spinner pill — permanently, on every Colorado plan. That is the precise failure the Colorado
+ * guard was built to prevent: it reads as work in progress and invites the reader to wait for a
+ * number that is never coming. The guard's own carrier was correct the whole time; the strip simply
+ * had no branch for it. `loading` is explicitly false here, and the suite asserts it.
+ *
+ * The row is deliberately NOT a shortfall (nothing is wrong with the design) and NOT an OK (nothing
+ * has been checked), so it sorts below the real verdicts and above "not checked yet". */
+function unavailableDetentionRow(req) {
+  /* PANEL-BREVITY: verdict first, ONE short line — and literally one SENTENCE, assembled from a
+   * computed subject so the budget counts a single string rather than one per regime.
+   *
+   * `req.verdictSubject` is composed by the carrier itself (see `mhfdDetention.verdictSubjectFor`)
+   * so the district name and its component short names — "MHFD WQCV + EURV" — stay in the lazily
+   * loaded Colorado tier. This module is on the BOOT PATH because the row has to render instantly,
+   * so deriving that subject here would have put Colorado data in the eager bundle. The fallback IS
+   * eager, and has to be: it is what a Colorado site with no resolved regime reads. */
+  const comps = Array.isArray(req.components) ? req.components : [];
+  const sentence = `${req.verdictSubject || "Colorado detention"} — not carried yet`;
+  return finish({
+    key: "det",
+    label: "Detention",
+    pill: "N/A",
+    tone: "warn",
+    sentence,
+    unavailable: true,
+    loading: false,       // ← the fix: never a spinner for a state that will not resolve on its own
+    short: false,
+    action: false,
+    headline: req.headline || null,
+    // Carried so the panel can list the components and what each one still needs, without
+    // re-deriving any of it from the carrier.
+    components: comps,
+    needs: comps.filter((c) => c.state !== "computed").map((c) => c.needs).filter(Boolean),
+    sortRank: 2.5,
+  });
+}
+
 function detentionVerdict(d) {
   const req = d.req;
   const usableAcFt = d.providedUsableCf == null ? null : d.providedUsableCf / AC_FT;
   const inundated = d.pondFullyInundated && usableAcFt != null && usableAcFt < 1e-6;
+  // Checked BEFORE the numeric branches: an unavailable requirement has no number to compare, and
+  // falling through to them is what produced the permanent "checking flood data".
+  if (req && req.kind === "unavailable") return unavailableDetentionRow(req);
   const requiredAcFt = req && req.kind === "point" && req.requiredAcFt > EPS ? req.requiredAcFt
     : req && req.kind === "band" ? req.bandAcFt[1] : null;
   if (requiredAcFt == null) {
