@@ -7,4 +7,5 @@ export const MODULE_ACCENT = {
   "scheduler":    "#7F77DD",
   "doc-review":   "#EF9F27",
   "library":      "#0E7490",
+  "notes":        "#B8418C",
 };

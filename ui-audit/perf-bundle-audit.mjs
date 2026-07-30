@@ -96,6 +96,10 @@ if (site) {
   check("bundle.siteRouteJsBytes", site.bytes, b.siteRouteJsBytes);
   check("bundle.siteRouteChunks", site.chunks.length, { ...b.siteRouteChunks, unit: "chunks" });
 }
+/* The Notes route's own budget. Its point is the LAZY EDITOR BOUNDARY: this number covers
+ * the notebook tree and its chrome, never the ~464 KB rich-text engine, which rides its own
+ * on-demand chunk. A rise here means something crossed back onto the static path. */
+if (routes.notes) check("bundle.notesRouteJsBytes", routes.notes.bytes, b.notesRouteJsBytes);
 check("bundle.totalJsBytes", totalJsBytes, b.totalJsBytes);
 check("bundle.largestChunkBytes", largest.bytes, b.largestChunkBytes);
 

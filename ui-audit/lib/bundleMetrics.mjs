@@ -34,6 +34,7 @@ export const ROUTE_KEYS = {
   review: { src: "src/workspaces/doc-review/DocReview.jsx", stem: "DocReview" },
   library: { src: "src/workspaces/library/Library.jsx", stem: "Library" },
   scheduler: { src: "src/workspaces/scheduler/Scheduler.jsx", stem: "Scheduler" },
+  notes: { src: "src/workspaces/notes/Notes.jsx", stem: "Notes" },
 };
 
 /* Chunk stem = the file name with Vite's content hash and extension stripped, so budgets can

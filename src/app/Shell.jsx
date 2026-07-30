@@ -28,6 +28,7 @@ const WORKSPACES = [
   { id: "doc-review",   label: "Review", Comp: lazy(() => import("../workspaces/doc-review/DocReview.jsx")) },
   { id: "library",      label: "Library", Comp: lazy(() => import("../workspaces/library/Library.jsx")) },
   { id: "scheduler",    label: "Sequence Planyr",  Comp: lazy(() => import("../workspaces/scheduler/Scheduler.jsx")) },
+  { id: "notes",        label: "Notes", Comp: lazy(() => import("../workspaces/notes/Notes.jsx")) },
 ];
 
 // Chrome color is a theme token so the shell themes WITH the app (B318). (The account
@@ -156,6 +157,11 @@ export default function Shell() {
                     onShellSwitch={switchModule}
                     authControl={authControl}
                     accountActive={!!user}
+                    // The signed-in user's id, so a workspace can SCOPE its own per-account
+                    // storage without importing the auth/Supabase client onto its route.
+                    // Notes keys its notebooks by this (or `local` when signed out), so two
+                    // accounts on one machine never read each other's notes.
+                    userId={user?.id || null}
                     projectId={projectId}
                     crossProject={cross}
                     onNavigate={navigate}

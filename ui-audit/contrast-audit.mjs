@@ -153,12 +153,15 @@ const PAIRS = [
   ["--accent-review-text", "--chrome-bg-elev", "Review tab text · chrome-elev", T],
   ["--accent-library-text", "--chrome-bg", "Library tab text · chrome", T],
   ["--accent-library-text", "--chrome-bg-elev", "Library tab text · chrome-elev", T],
+  ["--accent-notes-text", "--chrome-bg", "Notes tab text · chrome", T],
+  ["--accent-notes-text", "--chrome-bg-elev", "Notes tab text · chrome-elev", T],
   // Module accent TEXT on a light card (breadcrumb "current"/"New project" labels use
   // the -text token after the B341 fix — verifies accent-as-foreground is legible).
   ["--accent-site-text", "--surface-raised", "Site accent text · card", T],
   ["--accent-schedule-text", "--surface-raised", "Schedule accent text · card", T],
   ["--accent-review-text", "--surface-raised", "Review accent text · card", T],
   ["--accent-library-text", "--surface-raised", "Library accent text · card", T],
+  ["--accent-notes-text", "--surface-raised", "Notes accent text · card", T],
   // Semantic text colors (success/danger/info/warn) — used for colored labels on the
   // themed panels (B354). A hardcoded #15803d/#b3361b/#1d4ed8/#b45309 reads on a light
   // card but fails on a dark card, so these MUST stay tokens. Checked on both surfaces.
@@ -175,6 +178,9 @@ const PAIRS = [
   ["--on-accent-schedule", "--accent-schedule", "on-fill · Schedule", T, "fill locked + white specced (B318); used only as ≥3:1 underline — safe for large/bold only"],
   ["--on-accent-review", "--accent-review", "on-fill · Review (amber→dark)", T],
   ["--on-accent-library", "--accent-library", "on-fill · Library (white on teal)", T],
+  // Notes audits its fill as TEXT, not as a decorative underline, because the fill really
+  // does carry body text: the selected page row in the rail and every active toolbar toggle.
+  ["--on-accent-notes", "--accent-notes", "on-fill · Notes (white on plum)", T],
   // B657-5B: the shared Button primary/active variant — on-accent text on the global accent fill.
   ["--on-accent", "--accent", "on-fill · global accent button", T],
   // The 2px active-tab underline (a UI graphic) — fill on chrome
@@ -182,6 +188,7 @@ const PAIRS = [
   ["--accent-schedule", "--chrome-bg-elev", "Schedule underline · chrome", U],
   ["--accent-review", "--chrome-bg-elev", "Review underline · chrome", U, "decorative 2px indicator on white chrome; active state is also carried by the (passing) review-text label + bold weight"],
   ["--accent-library", "--chrome-bg-elev", "Library underline · chrome", U],
+  ["--accent-notes", "--chrome-bg-elev", "Notes underline · chrome", U],
   // Status as a glyph/dot/border (graphic) on the app surface
   ["--status-pursuit", "--surface-raised", "status Pursuit glyph · card", U],
   ["--status-active", "--surface-raised", "status Active glyph · card", U],
