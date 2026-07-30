@@ -87,8 +87,8 @@
       "allow": ["index", "SitePlannerApp", "hitTest", "AppHeader", "map-vendor", "cjs-interop", "teams"]
     },
     "totalJsBytes": {
-      "baseline": 3979341,
-      "target": 3979341,
+      "baseline": 4059546,
+      "target": 4059546,
       "unit": "bytes",
       "what": "Every JS chunk EMITTED into dist/assets, summed. Catches overall bundle growth even when it lands off the Site route.",
       "note": "Larger than the 3016 KB the owner's 2026-07-28 pass reported, and correctly so: that figure counted the 11 chunks a browser actually FETCHED, while this counts all 20 emitted — the extra 5 are Web Worker bundles (terrainWorker, dxfWorker) and small helper chunks that only a dynamic import ever pulls. Two different questions; the per-route budgets above answer the owner's. CEILING RAISED 3960000 -> 3985000 by B1130/B1131 (2026-07-30), stated in full because raising a ceiling is a product decision. THE KEY POINT: this metric counts EVERY emitted chunk, lazy ones included, BY DESIGN — that is exactly what makes it the honest catch-all. So the four deferrals that paid the two per-route budgets (see siteRouteJsBytes.note) move bytes OFF the critical path without reducing this number at all, and no amount of further code-splitting can. The residual is ~19 KB of genuine minified code implementing two owner-reported defects on the Electric layer: substations painting as broken-image glyphs labelled \"Mark\", and no way to hover a line or substation to learn what it is. WHAT WAS PAID ELSEWHERE FIRST, so this is not a shortcut: largestChunkBytes was brought back UNDER its existing ceiling with no raise at all (1719.5 -> 1706.8 KB), and siteRouteJsBytes was cut from +20.2 KB to +7.4 KB before its ceiling moved. HEADROOM CONTEXT: main was at 3861.4 KB against the 3867.2 KB ceiling — 5.8 KB — so like the other two, this metric now trips on essentially any feature; that is a headroom problem to be closed by B1064, not a regression in this PR. Ceiling and target are kept EQUAL here, as they were before, so this metric continues to assert no known gap rather than quietly acquiring one. NEW-1 (2026-07-30): baseline and target are still kept EQUAL for exactly that reason, and the derived headroom band now applies to this metric too — it was 4.3 KB (0.11%) under its old hand-pinned ceiling and would have been the next surprise."
@@ -196,6 +196,15 @@
           "item": "B1254",
           "date": "2026-07-30",
           "reason": "Per-layer 'Show above plan' (B1254 — the correction that opacity was never the escape hatch, amending B1205/B1206): a new mapStack tier (gisAreaFront) plus its in-SVG foreignObject band host, the pane-resolution and band-rebuild plumbing in layers.js, the per-site layerAbove persistence in layerPrefs/siteModel, the panel control, and a third export band in exportSheet. +3.7 KB, all app-route, no new dependency and no new chunk (siteRouteChunks still 7) - and that figure is this diff's OWN share, measured against B1253's freshly recorded baseline rather than banking anyone else's in-band growth. ~1.1 KB was PAID BACK IN-DIFF first: MAP_STACK's per-tier label strings and ROLE_SPLIT_NOTE moved into comments (pure documentation that shipped to every visitor's browser and no runtime code ever read), the three panel call sites deduped behind one aboveRow, and layerPrefs' four functions plus layers.js' two teardown blocks folded into one path each. Raised rather than optimised further because the lifted band cannot be lazy-loaded - it is a render tier of the planner canvas itself. Payback stays tracked by B1064."
+        },
+        {
+          "metric": "bundle.totalJsBytes",
+          "from": 3979341,
+          "to": 4059546,
+          "direction": "raise",
+          "item": "B1254",
+          "date": "2026-07-30",
+          "reason": "Same bytes as the siteRouteJsBytes raise beside it (the B1254 'Show above plan' tier + its in-SVG band host, the layers.js band plumbing, the layerAbove persistence, the panel control and the third export band) - this metric just counts them a second time, since all of it lands on the Site route. THIS DIFF'S OWN SHARE IS +3.7 KB, MEASURED: origin/main 4e40f13 was built and measured at 3960.7 KB against a 3963.8 KB derived ceiling - 3.1 KB of band left - so any feature at all would have breached it. The recorded baseline move (3886.1 -> 3964.4 KB, +78.3 KB) is 74.6 KB of main's own accumulated in-band growth plus this 3.7 KB; the metric re-baselines to the MEASURED value, so a raise necessarily banks everything absorbed silently since the last one. ~1.1 KB was paid back in-diff first (MAP_STACK's per-tier label strings and ROLE_SPLIT_NOTE moved to comments, the three panel call sites deduped, layerPrefs and the layers.js teardown folded into one path each). Payback stays tracked by B1064."
         }
       ]
     }
