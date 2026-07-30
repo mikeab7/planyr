@@ -46,6 +46,32 @@ const BASELINE = resolve(here, "dead-store-baseline.json");
  * in would triple the baseline and bury the signal this audit exists for. */
 const ASSIGNED_ONLY = /is assigned a value but never used/;
 
+/* ⚠ A FALSE-POSITIVE CLASS, closed 2026-07-30 (B1064 tranche a).
+ *
+ * `no-unused-vars` alone cannot see a JSX reference. ESLint's React plugin supplies that with
+ * `react/jsx-uses-vars`, and this audit's inline config has no plugins at all — so EVERY component
+ * that is declared as a `const` and used only in markup was being counted as a dead store. That is
+ * how the audit came to report "30 look like unused COMPONENTS/constants (cosmetic dead code)": most
+ * of them are not dead at all, they are rendered.
+ *
+ * It stopped being merely cosmetic the moment a component had to be declared rather than imported.
+ * `const SiteAnalysis = lazy(() => import(…))` — the exact shape this repo's own bundle budget asks
+ * for, and the shape `PondSection` and `SiteReviewModal` already use — reads to the rule as an
+ * assignment nobody uses, so moving a panel off the critical path made the ratchet go RED for doing
+ * the right thing. A guard that fires on the fix it is supposed to encourage will be worked around,
+ * and a worked-around guard protects nothing.
+ *
+ * Rather than add eslint-plugin-react as a dependency for one rule, the fix is the rule's own
+ * definition, applied here: an identifier that appears as a JSX tag in the same file IS used. Named
+ * conservatively — it only ever REMOVES reports, and only for a name that literally appears as
+ * `<Name`, `</Name`, `<Name.Sub` or `<Name/>` in that file's source. Everything the audit exists to
+ * catch (the B1110 `detVerdict` / `detTone` / `detSub` shape — plain values, never in markup) is
+ * untouched. */
+export function usedInJsx(source, name) {
+  if (!/^[A-Z_$]/.test(name)) return false; // only a component-shaped identifier can be a JSX tag
+  return new RegExp(`</?${name.replace(/[$]/g, "\\$")}(?=[\\s/>.])`).test(source);
+}
+
 export async function collect() {
   const eslint = new ESLint({
     cwd: repo,
@@ -59,8 +85,10 @@ export async function collect() {
   const detail = [];
   for (const r of results) {
     const rel = r.filePath.replace(repo + "/", "");
+    const source = r.source ?? readFileSync(r.filePath, "utf8");
     for (const m of r.messages) {
       if (m.ruleId !== "no-unused-vars" || !ASSIGNED_ONLY.test(m.message)) continue;
+      if (usedInJsx(source, (m.message.match(/'([^']+)'/) || [])[1] || "")) continue; // rendered, not dead
       byFile[rel] = (byFile[rel] || 0) + 1;
       const name = (m.message.match(/'([^']+)'/) || [])[1] || "?";
       detail.push({ file: rel, line: m.line, name, kind: /^[A-Z]/.test(name) ? "component" : "value" });

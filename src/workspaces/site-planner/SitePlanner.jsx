@@ -64,7 +64,13 @@ import { districtDrainageNote } from "./lib/floodGroup.js";
 import { useGroundElevation } from "./components/useGroundElevation.js";
 import CursorChip from "./components/CursorChip.jsx";
 import ViewMenu from "./components/ViewMenu.jsx";
-import SiteAnalysis from "./components/SiteAnalysis.jsx";
+/* LAZY (B1064 tranche a). Site Analysis mounts ONLY when the Analysis panel is the open one
+ * (`_pid === "analysis"`, and `leftPanel` starts at null), so it is never on the first-paint
+ * path — and it drags lib/siteAnalysis.js with it, which is the larger half of what moves.
+ * Behind LazyPanel: space is reserved so the panel does not jump in, and a chunk that fails to
+ * load is contained to this panel instead of taking the planner down. */
+const SiteAnalysis = lazy(() => import("./components/SiteAnalysis.jsx"));
+import LazyPanel from "./components/LazyPanel.jsx";
 import AnchoredMenu from "../../shared/ui/AnchoredMenu.jsx";
 import PanelChrome from "../../shared/ui/PanelChrome.jsx";
 import FloatingPanel from "../../shared/ui/FloatingPanel.jsx";
@@ -73,7 +79,9 @@ import AppHeader from "../../shared/ui/AppHeader.jsx";
 import RotationStepper, { normalizeDeg } from "../../shared/ui/RotationStepper.jsx";
 import { worldToScreen, screenToWorld, zoomAround, midpoint, distance, pinchZoom } from "../../shared/viewport/viewportTransform.js";
 import ColorField from "../../shared/ui/ColorField.jsx";
-import StandardsBar from "./components/StandardsBar.jsx";
+/* LAZY (B1064 tranche a). The Standards footer renders only while the Standards panel is the
+ * open one, docked or floating — never at first paint. */
+const StandardsBar = lazy(() => import("./components/StandardsBar.jsx"));
 import { loadUserPrefs, saveUserPrefs, applyPrefs, readMirror, setStandardPref, getStandardPref } from "./lib/userPrefs.js";
 import {
   PARCEL_STD_KEYS, TYPE_STD_KEYS, MEASURE_STD_KEYS, applyAllStandards, allStandardsImpact, appliedObjectsLabel,
@@ -14325,9 +14333,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 const acres = dissolvedParcelSqft(act) / SQFT_PER_ACRE; // B715: dissolve overlaps (count shared ground once)
                 return (
                   <>
-                    <SiteAnalysis rings={rings} acres={acres} parcelCount={act.length} PAL={PAL} chip={chip}
-                      isLayerOn={(id) => !!overlays?.[id]?.on} onToggleLayer={toggleAnalysisLayer} layerStatus={layerStatus}
-                      onFindings={(fs) => { const w = fs && fs.find((f) => f.id === "wetlands"); setAnalysisWetlands(w ? w.status : null); }} />
+                    <LazyPanel name="Site Analysis" minHeight={220} label="Loading site analysis…">
+                      <SiteAnalysis rings={rings} acres={acres} parcelCount={act.length} PAL={PAL} chip={chip}
+                        isLayerOn={(id) => !!overlays?.[id]?.on} onToggleLayer={toggleAnalysisLayer} layerStatus={layerStatus}
+                        onFindings={(fs) => { const w = fs && fs.find((f) => f.id === "wetlands"); setAnalysisWetlands(w ? w.status : null); }} />
+                    </LazyPanel>
                     {/* B824 — drainage & mitigation live in ONE home now: Yield → Stormwater
                         (the B712 sibling card was merged there — split-brain fix). Analysis keeps
                         exactly this screening link row, not a duplicate ledger; the auto-refreshing
@@ -15223,9 +15233,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
    * whatever row sat at the bottom of the scrollport in half; as a sibling it spans the panel's
    * full width, reserves its own space, and can never occlude a row at any scroll position. */
   const standardsFooter = (
-    <StandardsBar dirty={stdDirty} onDiscard={clearStdDraft} applyCount={stdApplyCount}
-      onApply={applyAllStd} onSavePlan={saveStdForPlan} onSaveAll={saveStdForAllProjects}
-      cloudReady={cloudPrefsReady} />
+    <LazyPanel name="The Standards footer" minHeight={44} label="Loading…">
+      <StandardsBar dirty={stdDirty} onDiscard={clearStdDraft} applyCount={stdApplyCount}
+        onApply={applyAllStd} onSavePlan={saveStdForPlan} onSaveAll={saveStdForAllProjects}
+        cloudReady={cloudPrefsReady} />
+    </LazyPanel>
   );
 
   // B820 — markups sorted for z-order render (byZAsc): every markup shares one type-layer band, so

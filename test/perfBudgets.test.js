@@ -14,6 +14,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { frameSamplingFault, observedFps, MIN_PLAUSIBLE_FPS } from "../ui-audit/lib/frameSampling.mjs";
+import { ceilingFor } from "../ui-audit/lib/perfBudgetPolicy.mjs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -28,16 +29,25 @@ describe("perf budgets file is well-formed", () => {
     for (const g of groups) expect(budgets[g], `missing group: ${g}`).toBeTruthy();
   });
 
-  it("every metric carries a numeric ceiling, and a target that is not above it", () => {
+  /* NEW-1: a bundle byte metric no longer STORES a ceiling — it stores a `baseline` and the
+   * ceiling is derived from the one committed headroom band. So the well-formedness check asks
+   * for "a resolvable ceiling", via the same function the audit uses, rather than for a literal
+   * number that would forbid the derived shape. `ceilingFor` returns the literal where there is
+   * one (the runtime metrics, and the siteRouteChunks count) — so this still catches a typo'd
+   * or missing ceiling everywhere it was catching one before. */
+  const metricsOf = (g) => Object.entries(budgets[g])
+    .filter(([key]) => !key.startsWith("$") && key !== "siteRouteAllowlist" && key !== "headroom" && key !== "ratchetLog");
+
+  it("every metric has a resolvable ceiling, and a target that is not above it", () => {
     for (const g of groups) {
-      for (const [key, spec] of Object.entries(budgets[g])) {
-        if (key.startsWith("$") || key === "siteRouteAllowlist") continue;
-        expect(typeof spec.ceiling, `${g}.${key}.ceiling must be a number`).toBe("number");
-        expect(Number.isFinite(spec.ceiling), `${g}.${key}.ceiling must be finite`).toBe(true);
+      for (const [key, spec] of metricsOf(g)) {
+        const ceiling = ceilingFor(spec, budgets.bundle.headroom);
+        expect(typeof ceiling, `${g}.${key} must resolve to a numeric ceiling (a literal, or baseline + the headroom band)`).toBe("number");
+        expect(Number.isFinite(ceiling), `${g}.${key}.ceiling must be finite`).toBe(true);
         if (spec.target != null) {
           // A target ABOVE its ceiling is nonsense — it would mean the aspiration is slower than
           // the maximum, and the "above target" report could never fire.
-          expect(spec.target, `${g}.${key}.target must not exceed its ceiling`).toBeLessThanOrEqual(spec.ceiling);
+          expect(spec.target, `${g}.${key}.target must not exceed its ceiling`).toBeLessThanOrEqual(ceiling);
         }
         expect(typeof spec.what, `${g}.${key} needs a "what" describing the metric`).toBe("string");
       }
@@ -47,9 +57,12 @@ describe("perf budgets file is well-formed", () => {
   it("every ABOVE-TARGET metric names the backlog item that owns closing the gap", () => {
     const owners = budgets.targetOwner || {};
     for (const g of groups) {
-      for (const [key, spec] of Object.entries(budgets[g])) {
-        if (key.startsWith("$") || key === "siteRouteAllowlist") continue;
-        if (spec.target != null && spec.target < spec.ceiling) {
+      for (const [key, spec] of metricsOf(g)) {
+        // For a banded metric the honest comparison is against its BASELINE: a target below the
+        // derived ceiling but equal to the baseline asserts no known gap, and inventing an owner
+        // for the headroom band would be noise.
+        const floor = typeof spec.baseline === "number" ? spec.baseline : ceilingFor(spec, budgets.bundle.headroom);
+        if (spec.target != null && spec.target < floor) {
           expect(owners[`${g}.${key}`], `${g}.${key} is above target but has no targetOwner entry`).toBeTruthy();
         }
       }
