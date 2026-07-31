@@ -378,9 +378,22 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   box and the OLD child boxes, so a field faithfully TRACKING the old span measured different from the new one,
   was read as hand-positioned, and had the pre-resize run stamped onto `sideParkFit` — the owner's Weld plan
   carries `sideParkFit { run: 708.58 }` on a 577 ft building. `normalizeHostRuns` is the load-time half: it
-  re-lays any dock-zone chain member or side-parking row that outruns its host through the same
-  `layoutZoneByKind` / `wallKidBox` the canvas uses. **A run that FITS is left completely alone** — that is the
-  B1039 hand-positioned field, and flattening it is the regression to avoid. Fixtures + guards:
+  re-lays any dock-zone chain member or side-parking row that disagrees with its host through the same
+  `layoutZoneByKind` / `wallKidBox` the canvas uses.
+  **⛔ B1340 (×2), 2026-07-31 — "PRESERVE ONCE TOUCHED" IS GONE, and this replaces the old rule that a
+  run which FITS is left completely alone.** That clause survived B1340's position work and produced the
+  owner's Sylvestri report: building `e1454731yyuqqs` had its depth taken 220 → 200, its sidewalks
+  correctly followed to 260 (200 + a 60 ft bump projection) and its end PARKING fields sat at 205
+  against that same wall — 80 against 259 on the building beside it — with PERFECT perpendicular
+  offsets, so B1340's derived-position work was holding and only the SPAN had gone stale. A run is
+  derivable from its host exactly as a position is, so it is derived on the same schedule: **no stamp ⇒
+  the run and the along-wall centre are the span default, in EITHER direction**; a `sideParkFit` stamp
+  is the ONLY intent that counts, it is written ONLY by a gesture aimed at that field (`pinFrom` /
+  `pinAllowed`), and it is RE-CLAMPED to the host's current wall on every host change. Dragging a field
+  back onto the default CLEARS the stamp. B1039's hand-positioned field therefore still survives every
+  refit — it is now RECORDED rather than inferred from geometry, which is the whole difference between
+  intent and staleness. Migration is deliberate and one-way: a legacy unstamped short run is re-derived
+  on the next open, LOUDLY (`assembly-tear-detected`, span half). Fixtures + guards:
   the repo-root fixture **ui-audit/fixtures/weld-concept-a.json** (the owner's real rows — the defect IS the
   fixture, do not "fix" the numbers), the repo-root `test/` suite **hostRunHeal** and the e2e spec
   **dock-zone-host-run**.

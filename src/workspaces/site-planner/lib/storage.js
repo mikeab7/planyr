@@ -974,10 +974,17 @@ const lastSeenAt = {};
  * measured — outrun by the very repair it exists to report. */
 const HEAL_TEAR_TOL_FT = 1;   // mirrors assemblyIntegrity.ASSEMBLY_TEAR_TOL_FT (kept local: this
                               // module must not import a consumer of itself)
+/* How far a single repair moved a child, in feet — POSITION or SPAN, whichever is larger (NEW-2).
+ * The span half matters because the run repairs (`host-run-side-parking`, `zone-along-len`) report
+ * a `run`, not a centre, so a field re-derived from 205 ft to the 260 ft wall it hugs would
+ * otherwise be a repair the load seam could not see and therefore could not report. */
 const healMoveFt = (h) => {
   const f = h && h.from, t = h && h.to;
-  if (!f || !t || !Number.isFinite(f.cx) || !Number.isFinite(t.cx)) return 0;
-  return Math.hypot(t.cx - f.cx, (Number(t.cy) || 0) - (Number(f.cy) || 0));
+  if (!f || !t) return 0;
+  const moved = Number.isFinite(f.cx) && Number.isFinite(t.cx)
+    ? Math.hypot(t.cx - f.cx, (Number(t.cy) || 0) - (Number(f.cy) || 0)) : 0;
+  const ran = Number.isFinite(f.run) && Number.isFinite(t.run) ? Math.abs(t.run - f.run) : 0;
+  return Math.max(moved, ran);
 };
 function bondedHealWatch(id) {
   const heals = [];

@@ -115,14 +115,55 @@ describe("the invariant: a bonded child's position is DERIVED, so the fixture is
     expect(twice.els).toBe(once.els);
   });
 
-  it("a legal hand-slid parking field (B1039) is NOT called a tear — only the across axis is absolute", () => {
-    // Sliding a side-parking row ALONG its wall is the owner lining up a curb return. It stays.
+  /* NEW-2 (2026-07-31) — the owner's amendment, asserted both ways. Sliding or shortening a
+   * side-parking row along its wall is still a real thing he does (B1039) — but the intent must be
+   * RECORDED to count. An unstamped difference is staleness, which is exactly what put a 205 ft
+   * field on a 260 ft wall after a host resize on `sms4zs8unbkg`. */
+  it("a RECORDED hand-slid parking field is NOT a tear; an unstamped slide IS", () => {
     const pk = byId(ASSEMBLY, "pkW");
     const rad = (354.818 * Math.PI) / 180;
-    const slid = ASSEMBLY.map((e) => (e.id === "pkW"
-      ? { ...e, cx: pk.cx + 60 * -Math.sin(rad), cy: pk.cy + 60 * Math.cos(rad) }  // 60 ft along the west wall
-      : e));
-    expect(assemblyTears(slid)).toHaveLength(0);
+    const move = (e) => ({ ...e, cx: pk.cx + 60 * -Math.sin(rad), cy: pk.cy + 60 * Math.cos(rad) }); // 60 ft along the west wall
+    const stamped = ASSEMBLY.map((e) => (e.id === "pkW" ? { ...move(e), sideParkFit: { run: e.h, alongShift: 60 } } : e));
+    expect(assemblyTears(stamped)).toHaveLength(0);
+    const unstamped = ASSEMBLY.map((e) => (e.id === "pkW" ? move(e) : e));
+    expect(assemblyTears(unstamped).map((t) => t.id)).toEqual(["pkW"]);
+  });
+
+  /* THE SYLVESTRI CASE, as the reproduction the owner asked for: resize a building's DEPTH and
+   * assert every bonded child's RUN follows — measured immediately, with nothing reloaded.
+   * Building `e1454731yyuqqs` went 220 → 200 deep; its sidewalks correctly reached 260 while its
+   * end parking sat at 205, with a perfect perpendicular offset. Position was right, span was not. */
+  it("a host DEPTH resize drags every bonded child's SPAN with it, not just its position", () => {
+    /* The reproduction the owner asked to be added: resize the building's depth, then assert every
+     * bonded child's RUN follows — measured immediately, nothing reloaded. The end wall is the one
+     * whose length is the host's depth, so its sidewalk AND its parking row must both move to the
+     * new number. Pre-fix the sidewalk followed and the parking did not, which is precisely what he
+     * was looking at: 205 ft of parking beside a 260 ft sidewalk on the same wall. */
+    const before = assemblyIntegrity(rough()).els;
+    const wallRun = (els, id) => Math.max(byId(els, id).w, byId(els, id).h);
+    expect(wallRun(before, "swN")).toBeCloseTo(wallRun(before, "pkN"), 3);   // they agree to start with
+
+    // Take the depth OUT (the host's `w` is the end wall's length here), touching no child at all.
+    const resized = before.map((e) => (e.id === "b1" ? { ...e, w: 320 } : e));
+    const res = assemblyIntegrity(resized);
+
+    // The detector names it, with a SPAN delta rather than only a position one…
+    expect(res.tears.length, "a depth resize left children the wrong length and nobody noticed").toBeGreaterThan(0);
+    expect(res.repairs.some((r) => Math.abs(r.span) > 1), "no span delta reported").toBe(true);
+    // …and the heal makes the sidewalk and the parking beside it agree again, on the NEW wall.
+    expect(wallRun(res.els, "pkN")).toBeCloseTo(wallRun(res.els, "swN"), 3);
+    expect(wallRun(res.els, "pkN")).toBeGreaterThan(wallRun(before, "pkN") + 1);   // it actually GREW
+    expectCoherent(res.els);
+  });
+
+  it("the detector reports SPAN as well as POSITION — a wrong-length child is as wrong as a misplaced one", () => {
+    // A field the right distance out but the wrong length: position perfect, span stale.
+    const short = ASSEMBLY.map((e) => (e.id === "swW" ? { ...e, h: e.h - 55 } : e));
+    const res = assemblyIntegrity(short);
+    const t = res.tears.find((x) => x.id === "swW");
+    expect(t, `span-only tear not detected: ${JSON.stringify(res.tears)}`).toBeTruthy();
+    expect(Math.abs(t.span)).toBeGreaterThan(50);
+    expect(tearPayload(res.tears).items[0]).toHaveProperty("span");
   });
 
   it("reports the delta and the ids, bounded — a recurrence is a query, not an investigation", () => {
