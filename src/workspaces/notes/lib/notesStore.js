@@ -21,7 +21,7 @@
  * the workspace renders as a named banner, and every write returns a boolean the caller
  * uses to drive the saved/unsaved badge honestly. There is no swallowed catch in here.
  */
-import { docToText } from "./notesMarkdown.js";
+import { docToText, imageIdsInDoc } from "./notesMarkdown.js";
 import { searchTitles, visibleNotebooks } from "./notesModel.js";
 
 export const TREE_KEY_BASE = "planyr:notes:tree:v1";
@@ -183,6 +183,152 @@ export function sweepOrphans(livePageIds) {
   const orphans = listStoredPageIds().filter((id) => !live.has(id));
   if (orphans.length) deletePages(orphans);
   return orphans;
+}
+
+/* ---- images (B1311) ------------------------------------------------------------------
+ *
+ * The document holds an image ID; the BYTES live in IndexedDB. Every function below is the
+ * SAME seam as everything else in this file — no component and no extension ever reaches
+ * for `indexedDB` itself, so the cloud-sync item still has exactly one file to change.
+ *
+ * THE CEILINGS ARE ENFORCED HERE, not at the paste site, so no future intake path can
+ * bypass them. Both are deliberately generous but FINITE: a browser database is large, not
+ * infinite, and an eviction under storage pressure takes the whole origin's data with it.
+ * Going over is a NAMED, VISIBLE refusal (LOUD-FAILURE) — the one behaviour this feature
+ * must never have is dropping a pasted picture on the floor with a shrug.
+ */
+
+/** The most one stored picture may take, after downscaling. A phone photo shrinks well
+ *  under this; a very large scan is refused BY NAME rather than silently. */
+export const MAX_IMAGE_BYTES = 6 * 1024 * 1024;
+/** The most one notebook's pictures may take in total. */
+export const MAX_NOTEBOOK_IMAGE_BYTES = 200 * 1024 * 1024;
+
+/* ⛔ THE IMAGE DATABASE IS LOADED ON DEMAND, and that is a bundle decision, not a style
+ * one. This file is on the Notes route's STATIC path (the rail reads the tree through it),
+ * so anything it imports is downloaded before the notebook list can paint — and the image
+ * plumbing is not needed until a page is opened, a picture is pasted, or something is
+ * purged, all of which are already async. The seam is unchanged: `notesImageDb.js` still
+ * has exactly one importer, it is just reached through a cached `import()`. */
+let imageDbMod = null;
+const imageDb = () => (imageDbMod || (imageDbMod = import("./notesImageDb.js")));
+
+const imageKey = (imageId, s = scope) => `${s}:${imageId}`;
+const mb = (n) => `${(n / (1024 * 1024)).toFixed(n < 10 * 1024 * 1024 ? 1 : 0)} MB`;
+
+/** Broadcast an image failure on the SAME channel as every other storage failure, so the
+ *  workspace's one banner covers it and there is no second, quieter error surface. */
+function failImage(message, detail) {
+  lastError = { op: "image", key: PAGE_KEY_BASE, message, detail: String(detail || ""), at: Date.now() };
+  broadcast(lastError);
+  return lastError;
+}
+
+/** Report an image problem raised OUTSIDE this file (a file the browser could not decode,
+ *  say) on the same one channel, so there is never a second, quieter error surface. */
+export function reportImageProblem(message, detail) { return failImage(message, detail); }
+
+/** Store one image's bytes. `{ ok:true, bytes }` only when they actually landed.
+ *  `notebookPageIds` is the page-id set of the notebook being written into — the per
+ *  notebook ceiling is measured against exactly those pages' images. */
+export async function putNoteImage({ id, pageId, dataUrl, mime = "", w = 0, h = 0, notebookPageIds = null }) {
+  if (!id || !dataUrl) return { ok: false, error: "no image data" };
+  const db = await imageDb();
+  if (!db.notesIdbAvailable()) {
+    return { ok: false, error: failImage("This browser will not let Planyr store images, so the picture was NOT added. Private browsing usually causes this.").message };
+  }
+  const bytes = dataUrl.length;
+  if (bytes > MAX_IMAGE_BYTES) {
+    return { ok: false, error: failImage(`That image is too large to store (${mb(bytes)} after shrinking; the limit is ${mb(MAX_IMAGE_BYTES)}), so it was NOT added. Crop it or save it into the Library instead.`).message };
+  }
+  if (Array.isArray(notebookPageIds)) {
+    const used = await noteImageUsage(notebookPageIds);
+    if (used + bytes > MAX_NOTEBOOK_IMAGE_BYTES) {
+      return { ok: false, error: failImage(`This notebook has reached its picture limit (${mb(used)} of ${mb(MAX_NOTEBOOK_IMAGE_BYTES)}), so the image was NOT added. Delete some pictures, or start another notebook.`).message };
+    }
+  }
+  const r = await db.idbPutImage({ key: imageKey(id), scope, id, pageId: pageId || null, dataUrl, mime, w, h, bytes, createdAt: Date.now() });
+  if (!r.ok) return { ok: false, error: failImage("The picture could NOT be stored, so it was not added to the page.", r.error).message };
+  return { ok: true, bytes };
+}
+
+/** One image's data URL, or null when its bytes are gone. A null here is what makes the
+ *  editor draw a visible BROKEN-IMAGE state — never a blank gap where a figure was. */
+export async function readNoteImage(imageId) {
+  if (!imageId) return null;
+  const rec = await (await imageDb()).idbGetImage(imageKey(imageId));
+  return rec?.dataUrl || null;
+}
+
+/** A map of `imageId → data URL` for a set of ids. Missing ids are simply absent, which is
+ *  the signal the exporter turns into its named broken reference. */
+export async function readNoteImages(imageIds) {
+  const ids = [...new Set((imageIds || []).filter(Boolean))];
+  const out = {};
+  for (const id of ids) {
+    const src = await readNoteImage(id);
+    if (src) out[id] = src;
+  }
+  return out;
+}
+
+/** Total stored image bytes. `null` means the whole scope; an ARRAY means exactly those
+ *  pages — including an EMPTY array, which honestly totals zero. (Treating an empty set as
+ *  "everything" would price a brand-new notebook at the whole account's usage and refuse
+ *  its first picture.) */
+export async function noteImageUsage(pageIds = null) {
+  const want = Array.isArray(pageIds) ? new Set(pageIds) : null;
+  const meta = await (await imageDb()).idbListImageMeta(scope);
+  let total = 0;
+  for (const m of meta) if (!want || want.has(m.pageId)) total += m.bytes || 0;
+  return total;
+}
+
+/** Clear image bytes belonging to a page that no longer exists ANYWHERE — not in the live
+ *  tree and not in the bin. The image twin of `sweepOrphans`, and the safety net for a
+ *  delete interrupted mid-cascade (a tab closed between the tree write and the purge).
+ *
+ *  ⛔ THE CALLER MUST PASS LIVE **AND** BINNED PAGE IDS. A binned page's body and pictures
+ *  are deliberately still on disk — that is the whole point of the bin — so a sweep that
+ *  knew only about the live tree would destroy exactly the thing a restore needs.
+ *
+ *  It judges by PAGE, from the metadata index alone, so it costs no body reads: a picture
+ *  removed from a page that still exists is left alone (it may yet be un-done back in) and
+ *  goes when its page is finally purged. */
+export async function sweepImagesOfMissingPages(pageIdsLiveAndBinned) {
+  const live = new Set(pageIdsLiveAndBinned || []);
+  const meta = await (await imageDb()).idbListImageMeta(scope);
+  const orphans = meta.filter((m) => m.pageId && !live.has(m.pageId)).map((m) => m.id);
+  if (orphans.length) await deleteNoteImages(orphans);
+  return orphans;
+}
+
+/** Destroy image bytes by id. */
+export async function deleteNoteImages(imageIds) {
+  const ids = [...new Set((imageIds || []).filter(Boolean))];
+  if (!ids.length) return { ok: true, removed: 0 };
+  const r = await (await imageDb()).idbDeleteImages(ids.map((id) => imageKey(id)));
+  if (!r.ok) failImage("Some pictures could not be removed from this browser's storage, so they may still be taking up space.", r.error);
+  return r;
+}
+
+/** THE PURGE — the ONE place a note's bytes are actually destroyed (TOMBSTONE-DELETES).
+ *
+ *  Takes the FULL cascade set the model reported at delete time and, for every page in it,
+ *  clears the body AND every image that body referenced. Reading each body first is what
+ *  makes the image half possible at all: nothing else knows which pictures a page owned,
+ *  and an image left behind after its page is gone is storage that can never be reached
+ *  and never be freed — the same leak the body cascade exists to prevent, one layer down. */
+export async function purgePages(pageIds) {
+  const ids = (Array.isArray(pageIds) ? pageIds : [pageIds]).filter(Boolean);
+  if (!ids.length) return { pages: 0, images: 0 };
+  const imageIds = [];
+  for (const id of ids) {
+    for (const imgId of imageIdsInDoc(readPage(id))) imageIds.push(imgId);
+  }
+  const pages = deletePages(ids);
+  const img = await deleteNoteImages(imageIds);
+  return { pages, images: img.removed || 0 };
 }
 
 /* ---- search --------------------------------------------------------------------------- */

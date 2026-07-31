@@ -30,10 +30,25 @@ import { TableKit } from "@tiptap/extension-table";
 import { TaskList, TaskItem } from "@tiptap/extension-list";
 import { Highlight } from "@tiptap/extension-highlight";
 import { TextAlign } from "@tiptap/extension-text-align";
+// `@tiptap/extensions` is now an EXPLICIT dependency rather than a transitive one: this file
+// imports from it directly, and a direct import of a package you have not declared is a
+// version you do not control (per the repo's dependency rule). It adds no new bytes — it was
+// already installed as StarterKit's own dependency, and it rides the lazy editor chunk.
+import { Placeholder } from "@tiptap/extensions";
+import NoteImage from "./notesImageNode.js";
+import NoteSearchHighlight from "./notesSearchHighlight.js";
 
 /** Headings stop at 4. A note is a document, not a spec: levels 5–6 are indistinguishable
  *  from body text at reading size and only add choices to the block-style menu. */
 export const HEADING_LEVELS = [1, 2, 3, 4];
+
+/** What an empty page says (B1313). A new page used to be a blank white void with no
+ *  starting cue at all. AUDIT-FIRST correction to the report that raised this: the CSS rule
+ *  for `p.is-editor-empty::before` was NOT already present either — neither half of the
+ *  placeholder existed, so this landed as the extension AND its style rule (in
+ *  components/NoteEditor.jsx's EDITOR_CSS), together, in one commit. One short line: a
+ *  prompt is a nudge, not an instruction manual. */
+export const NOTE_PLACEHOLDER = "Start typing — or paste a picture straight in.";
 
 export const NOTE_EXTENSIONS = [
   // Document · paragraph · text · bold · italic · strike · code · codeBlock · heading ·
@@ -59,7 +74,29 @@ export const NOTE_EXTENSIONS = [
 
   Highlight.configure({ multicolor: true }),
   TextAlign.configure({ types: ["heading", "paragraph"] }),
+
+  // A picture, held by ID. The bytes are in IndexedDB — see lib/notesImageNode.js.
+  NoteImage,
+
+  // Presentation-only search marking. It writes nothing into the document.
+  NoteSearchHighlight,
+
+  Placeholder.configure({ placeholder: NOTE_PLACEHOLDER }),
 ];
+
+/** The extension list for ONE live editor. Same set as `NOTE_EXTENSIONS` (which stays the
+ *  canonical declaration the schema guard reads), with the two extensions that need to
+ *  know WHICH page they are serving re-configured for it.
+ *
+ *  `imageContext` is a FUNCTION on purpose: the notebook a picture is charged against gains
+ *  and loses pages while the editor is open, so a value captured at mount goes stale. */
+export function noteExtensions({ imageContext = null, onSearchMatches = null } = {}) {
+  return NOTE_EXTENSIONS.map((ext) => {
+    if (ext.name === "noteImage") return NoteImage.configure({ imageContext });
+    if (ext.name === "noteSearchHighlight") return NoteSearchHighlight.configure({ onMatches: onSearchMatches });
+    return ext;
+  });
+}
 
 /** An empty note's document model — one empty paragraph, which is what the editor would
  *  normalise to anyway. Written explicitly so a never-typed page still round-trips through
