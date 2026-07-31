@@ -330,6 +330,37 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   real transport**, never through a mock `commit` that accepts more parameters than the shipped
   adapter does — that mismatch is exactly what shipped a dead feature green. **B1118:** the load-time heal's `exempt` set — a repaired element must diff and COMMIT, or
   rows-canonical-on-seed adopts the torn rows straight back over the repair.
+- **⛔ `assemblyIntegrity.js` (B1340) — THE bonded-assembly invariant, and the reason this bug family
+  is closed rather than patched a ninth time. Read it before touching any write, echo or revert path.**
+  A bonded child's world position is REDUNDANT: it is derived from its host across the wall, and only
+  bounded (by wall overlap) along it. That fact is stored twice — host row and child row — and the N+1
+  rows are written, revved, accepted-or-refused, echoed, journaled, folded and healed INDEPENDENTLY, so
+  some interleaving always lands one without the other. **Eight merged PRs each closed one interleaving
+  and it kept coming back**; the enumeration on B1340 lists twenty-two paths, ELEVEN of which bypass the
+  atomic group commit by construction (the unload keepalive sends `dirty` with no closure, no `freshen`
+  and no atomic flag; every realtime upsert applies ONE row; `onRowsCanonical` can adopt four of eight
+  children; `mergeSiteContent` unions per id and can pair a NEW host with an OLD child). So the fix is
+  not more atomicity — it is removing the redundancy at every seam. `assemblyIntegrity(els)` runs the
+  EXISTING derivation (`siteModel.normalizeBondedChildren`) and returns the healed list plus `repairs`
+  and `tears`. **The detector IS the healer's own diff** — never write a second "where should this child
+  be", that is the next bug in this family. Identity-preserving on a coherent plan, so it is free to run
+  everywhere. Seams in `SitePlanner.jsx`: `assemblyGuard` at **canvas** (one effect over `els`, covering
+  every mutation, so a new write path cannot skip it) · **undo/redo** (`applySnapshot`, because a
+  snapshot can have been RECORDED torn) · **commit** (`reconcileElems`) and **flush-override** (what the
+  engine's `freshen` re-reads) — those two are what make a torn assembly **unpersistable** · **load**
+  (`refetchReplace`) · **post-commit** (`elementSync`'s `afterCommit` hook, once per settled batch,
+  which can never throw into the write path). The on-device load seam lives in **`storage.js`**
+  (`bondedHealWatch`), NOT in the planner: a route-level read normalizes the record before the planner
+  mounts, so a detector inside the planner is outrun by the very repair it reports — measured, not
+  assumed. **Two traps worth knowing:** the heal was never PERSISTED (a planted tear rendered correctly
+  and was still on disk four seconds later — hence `loadSite(id, { persistHeal: true })`), and
+  `applyRemoteRow`'s derived-yield branch was missing the `foreignAuthor` gate B1116 gave its
+  commit-result twin, so a tab could stand down against its OWN earlier write. **LOUD by contract:**
+  every repair reports ids + delta (`assembly-tear-detected` / `-healed` / `-persisted`), because a
+  silent self-heal is why this shipped as fixed eight times. Guards: the repo-root `test/` suite
+  **assemblyIntegrity** (28, incl. all six required races, each proven red with the write seam disabled)
+  and the e2e spec **assembly-tear-detector**, which measures BEFORE any reload — a reload heals this
+  bug, so any check that reloads first proves nothing.
 - `bondRemap.js` — the ONE id-bearing bond inventory (`attachedTo` · `forCourt` · `forTrailer` ·
   `prevZone`) + the remap rule EVERY copy path must use (B1124). Both copy paths used to remap only
   `attachedTo`, so a duplicated building's trailer parking stayed bonded to the ORIGINAL building's

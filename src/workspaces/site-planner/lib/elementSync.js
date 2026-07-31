@@ -133,6 +133,13 @@ export function createElementSync(opts = {}) {
     // explain it — a stale on-device cache replaying an old edit. Rows are canonical there, so the
     // canvas adopts them instead of the divergence being committed as a fresh edit.
     onRowsCanonical = null,
+    // NEW-1 — (summary) => void, called once every batch's result has settled (accepted, refused,
+    // rolled back or transport-failed alike). The caller re-runs the bonded-assembly ASSERTION
+    // against the live canvas there: "after every assembly write" is the moment a tear is newest
+    // and cheapest to name, and it is the moment the previous eight fixes had no observer at all —
+    // which is why eight recurrences were only ever noticed by the owner looking at his plan.
+    // Optional; never allowed to break the commit path.
+    afterCommit = null,
     // NEW-3 — how many consecutive ALL-REJECTED batches before this tab stops re-committing and
     // declares itself out of date. A stale client's ops are rejected by the rev guard forever;
     // re-queueing them on the plain debounce is a ~1 RPC/s hot loop with no exit.
@@ -546,6 +553,15 @@ export function createElementSync(opts = {}) {
     // batch has nothing to be atomic about, so it keeps the plain 2-arg call and the blast radius
     // of the new overload stays small.
     const atomic = batchSpansAssembly(batch);
+    // NEW-1 — the post-write assertion. Runs on EVERY settle path (ok, rejected, rolled back,
+    // transport failure) via the returns below, exactly once per batch, and never throws into the
+    // commit path: a detector that can take the write engine down is worse than the bug it watches.
+    let asserted = false;
+    const assertAssembly = (outcome) => {
+      if (asserted || !afterCommit) return;
+      asserted = true;
+      try { afterCommit({ siteId, outcome, ops: batch.length, ids: batch.map((e) => e.id), atomic }); } catch (_) { /* never break the commit path */ }
+    };
     serialize(siteId, async () => {
       const ops = batch.map(opFor);
       let res;
@@ -553,7 +569,11 @@ export function createElementSync(opts = {}) {
       finally {
         inflight = false;
         for (const e of batch) inflightKeys.delete(skey(e.kind, e.id));
+        // NEW-1 — fires even when the transport THREW (the assertion must not be reachable only on
+        // the happy path); the settle handlers below re-call it and the once-latch keeps it to one.
+        if (!res) assertAssembly("threw");
       }
+      try {
       // B1120 — LOUD when our own atomicity request does not reach the wire. `sentAtomic` is what
       // the transport actually sent; `atomic` is what we asked for. A silent mismatch is how a
       // 12-op single-assembly batch went out un-atomically in production for a whole release while
@@ -605,6 +625,9 @@ export function createElementSync(opts = {}) {
       // server that keeps returning conflict must not become a hot re-commit loop (LOUD-FAILURE, not
       // runaway). At the ~debounceMs cadence LWW still converges within a fraction of a second.
       if (dirty.size > 0) schedule(false); else setState("idle");
+      } finally {
+        assertAssembly(!res || !res.ok ? "transport-failed" : res.applied === false ? "rolled-back" : "settled");
+      }
     });
   }
 
@@ -956,7 +979,17 @@ export function createElementSync(opts = {}) {
       // a rev we never produced, and — where the writer is stamped — someone else's) WINS: drop our
       // derived op, adopt the row's bytes and rev, and put it on the canvas.
       const pendDirect = (pendDirty && pendDirty.direct !== false) || (pendInflight && pendInflight.direct !== false);
-      if (!sameData && !semEq && rowJson != null && !pendDirect) {
+      // NEW-1 — `foreignAuthor(row)` is the SAME correction B1116 made to this rule's twin in
+      // `processResults` (the commit-result half), and it was never applied here, to the realtime
+      // READ half. The asymmetry is a real tear vector: EVERY bonded child op is derived by
+      // construction (`isDirectEdit` returns false for anything `attachedTo` something the gesture
+      // did not target), so on an undo of a host move this branch could drop the undo's child ops
+      // and upsert the row that is being undone — one tab standing down against its OWN earlier
+      // write, which is exactly the "host's revert landed, the children's did not" shape. Yielding
+      // to ANOTHER writer's deliberate row is still right and is unchanged; yielding to yourself
+      // never is. Fails open like `foreignAuthor` everywhere else (no selfUid / no `updated_by` →
+      // treated as possibly ours → local keeps the canvas, as before this change).
+      if (!sameData && !semEq && rowJson != null && !pendDirect && foreignAuthor(row)) {
         shadow.set(key, { kind: row.kind, id: row.id, json: rowJson, rev, z: row.z_index });
         dirty.delete(key);
         clearDeleteFloor(key);

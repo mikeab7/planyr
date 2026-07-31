@@ -57,6 +57,17 @@ Add a new tag to this legend **in the same commit** you first use it (this preve
 
 
 
+### B1341 — One assembly, one revision: make a partial apply unrepresentable in the DATABASE, not only in the client `[Site Planner / Persistence]` (task) #site-planner #persistence #sync #infra  *(spun out of B1340, 2026-07-31, and flagged LOUDLY there and in the session reply rather than left implicit. Minted via `--against-main`. DEDUPE-FIRST: B1117 shipped the all-or-nothing GROUP COMMIT (`db/commit_elements_atomic.sql`) — that is one CALL being atomic. This is the different, larger thing: one REVISION for the assembly, so two calls cannot each be internally atomic and still disagree.)*
+`[ ]` **Open — filed deliberately, not built. The honest reason is below, not buried.**
+- Verify: live
+- **What it is.** Today every element row carries its own `rev`, and a bonded assembly's coherence is a property the client maintains. The end state is a **shared revision per assembly**: a host and its bonded children CAS against one number, so a write that touches part of an assembly is rejected by the database rather than merely re-derived by the client. Then the partial apply is unrepresentable in the STORE, not just unobservable in the app.
+- **Why B1340 did not do it, stated plainly.** It is a schema change (`group_rev`, or an assembly-keyed row), a rewrite of `commit_elements_atomic` to CAS on the group instead of per row, a migration for every existing row with a rollback, AND a rewrite of the client bookkeeping — `shadow` / `revOf` / `ownRevs` / `maxOwnRev` / `maxDeleteRev` / `reconcileSeedRows` / the pending-edit journal's `baseRev` — every one of which the last eight fixes are built on top of. Landing that badly is worse than the bug it closes. B1340's invariant makes the tear invisible and unpersistable TODAY, which is what the owner actually needs; this makes it impossible, which is what the data model deserves.
+- **Staged plan (three sessions, each shippable and reversible on its own):**
+  1. **Name the assembly on the row.** Add a nullable `assembly_id` (the host's id, or the element's own when unbonded), backfilled from `attachedTo`, written by the client, read by nobody. Pure additive; no behaviour change; gives the database the grouping it currently cannot see. Ships with a backfill + a drift test.
+  2. **Group CAS behind a flag.** Extend `commit_elements_atomic` with an optional `p_group_rev`: the call succeeds only if every row of the named assembly is still at the expected group revision, and bumps them together. Client sends it for assembly batches only, behind a kill switch, with the per-row path untouched underneath. Ships with the rejection path self-tested in CI the way `mintGateE2E` tests the mint gate.
+  3. **Make it the only path, and simplify the client.** Once stage 2 has run clean live, retire the per-row expectation for bonded elements and delete the bookkeeping it made necessary. This is the stage that PAYS BACK — several of the eight prior fixes exist only because per-row revs can disagree, and they can go with it.
+- **Do not start at stage 2.** Without stage 1 the server cannot name an assembly, and the client would have to send the membership on every call — which is the same trust-the-client problem in a new place.
+
 ### B1318 — Link a note to a site, a plan element, or a Library file `[Notes]` (feature) #notes #library #site-planner  *(filed 2026-07-31 from an owner review of B1290; minted with B1310. **FILED ONLY, NOT BUILT — deliberately, and flagged loudly here and in the session reply per the intake rule.** DEDUPE-FIRST: notebook→project binding already exists (B1290) and is a different, coarser thing; nothing covers a link from a note to one OBJECT.)*
 `[ ]` A note that points at the thing it is about — this plan's north detention pond, this survey PDF in the Library, this site — and, from the object, the notes that mention it.
 - Verify: live
@@ -1735,6 +1746,69 @@ physical row is a later polish," so **B104** is that remaining polish for the *m
 
 ## ⏳ Verify — awaiting live confirmation
 
+### B1340 — The bonded-assembly tear, at the root: a child's position is DERIVED, so a partial apply can no longer be represented `[Site Planner / Persistence]` (bug) #site-planner #persistence #sync  *(root-cause dive, 2026-07-31, ordered after EIGHT merged PRs failed to stop this. Minted via `--against-main`. **DEDUPE-FIRST:** this is NOT a new symptom and NOT a ninth number for the symptom — the symptom's history is B1094 / B1097 / B1098 ×2 / B1099 / B1113 / B1114 / B1115 / B1116 / B1117 / B1118 / B1120 / B1122, all Done. This takes its own number because it is a different KIND of change: those closed interleavings in the write path, this removes the redundancy that makes the bad state representable. The eight are not re-opened as recurrences — each one's specific fix still holds and is still load-bearing.)*
+`[x]` **Shipped 2026-07-31. Parked in ⏳ Verify — `V660`.** A building's bonded children can no longer sit anywhere other than where the building puts them: the position is re-derived from the host at every boundary where a child can arrive without it, so a transaction that applies to half an assembly is invisible instead of destructive — and it now reports itself instead of healing in silence.
+- Verify: live
+- Origin: owner root-cause request, 2026-07-31 chat ("I feel like I just had this issue yesterday and I thought we fixed it… maybe we just put a band aid on it instead of figuring out the root cause")
+
+**THE EVIDENCE (owner-supplied, from the live rows — not re-derived).** Site `sms7v3ua7ksy`, building `e7373vqgilf` at `cx -411.03, cy -709.35, w 260, h 708.58, rot 354.818`, rev 20, `updated_at 15:58:45.475`. Its seven bonded children (`e7374` truck court · `e7375`/`e7376` north sidewalk + parking · `e7377`/`e7378` west sidewalk + parking · `e7379`/`e7380` south sidewalk + parking) were every one of them displaced from the host-implied position by the SAME vector, ≈ +267 ft east / +4 ft north — and every one is rev 21 or 22 at `15:59:25–26`, **forty seconds after the host**. An earlier snapshot of the same site had `e7377` at `cx -540.29`, correct for the host's current position. So the children were re-written LATER, to the pre-undo coordinates, and won.
+
+**THE ROOT CAUSE.** A bonded child's world position is **REDUNDANT**: it is fully determined by the host's frame (across the wall) and bounded by wall overlap (along it). That one fact is stored **twice** — once in the host row, once in each child row — and the N+1 rows are written, revved, accepted-or-refused, echoed, journaled, folded and healed **independently**. Redundant state that is updated by independent transactions is guaranteed to disagree under some interleaving. Every one of the eight PRs closed a specific interleaving; none removed the redundancy, so the bad state stayed **representable**, and something always found the next interleaving. Two named amplifiers made it invisible: (a) the load-time heal has repaired this since B1097 **in total silence**, so a check that reloaded before it measured saw a clean plan and reported "fixed" (the owner's "looks like it just fixed itself somehow again"); (b) that heal was **never persisted** — measured here in a headless repro, a planted tear rendered correctly and was still on disk, byte for byte, four seconds later.
+
+**THE ENUMERATION — every path that can write, revert, re-apply or echo a child independently of its host** (the deliverable the dive was asked for; `A` = goes through the atomic group path, `—` = bypasses it):
+
+*Write (`lib/elementSync.js`)*
+| # | Path | Atomic? | Note |
+|---|---|---|---|
+| 1 | `reconcile()` diff → `enqueue` → `flush()` | **A** | `closeAssemblies` + `freshen` + `batchSpansAssembly` → `p_atomic` |
+| 2 | `closeAssemblies` sibling fold | **A** | folds only members whose LIVE data disagrees with the shadow — correct, but it means a legitimate batch can hold ONE member |
+| 3 | `processResults` conflict → LWW re-commit | **—** when ≤1 member is refused | re-closes at the next flush; **this is the ~40 s backoff retry in the evidence** |
+| 4 | `processResults` assembly-split re-enqueue (B1116) | **—** same | per refused member |
+| 5 | `onAtomicRollback` (B1117) | **A** | whole batch re-queued |
+| 6 | `onTransportFailure` re-queue | **A** | whole batch |
+| 7 | `restore(kind,id,el)` — the B673 "Restore" toast | **—** | enqueues ONE element, immediate flush |
+| 8 | `pendingOps()` + `keepaliveCommit` (unload / `beforeunload` / `visibilitychange`) | **—** | **hard bypass: no closure, no `freshen`, no atomic flag** |
+| 9 | delete cascade | **—** by design | `closeAssemblies` skips `cls === "delete"`; TOMBSTONE-DELETES owns it, and a delete cannot leave a DISPLACED child |
+| 10 | whole-doc mirror / cloud blob save | n/a | assembly-whole by construction; still a PROPAGATION vector for an already-torn canvas |
+
+*Read / echo*
+| # | Path | Atomic? | Note |
+|---|---|---|---|
+| 11 | `applyRemoteRow` → `upsert` → `applyRemoteInstr` | **—** | one row at a time; the largest class |
+| 12 | `applyRemoteRow` derived-yield branch | **—** | **had no `foreignAuthor` gate** — the correction B1116 made to its commit-result twin was never applied to this half, so a tab could stand down against its OWN earlier write. **Fixed here.** |
+| 13 | `pendingRemoteRef` / `drainRemote` | **—** | buffered mid-gesture instructions, applied one by one |
+| 14 | `onRowsCanonical` (B1113) | **—** | assembly-blind: can adopt 4 of 8 children |
+| 15 | `refetchReplace` | covered | heals after the folds (B1113) — now reports too |
+| 16 | `reconcileSeedRows` | **—** | per-key rev arbitration; the following heal covers it |
+| 17 | `foldJournal` | **—** | per journal entry; post-fold heal covers it |
+| 18 | `foldNeverSyncedLocal` | **—** | per element; same |
+| 19 | `mergeSiteContent` (cross-tab / cloud-vs-local) | **—** | `unionById` per id → can mix a NEW host with an OLD child; ends in `createSiteModel` → heals |
+| 20 | `loadSite` / `loadSitesList` / `migrate` / `bootResume` / version restore | covered | heals — **was silent AND unpersisted.** Both fixed. |
+
+*Revert*
+| # | Path | Atomic? | Note |
+|---|---|---|---|
+| 21 | `applySnapshot` (undo / redo / `cancelActiveMove`) | canvas-whole | but the snapshot can have been RECORDED torn, and the resulting commit is a per-element diff |
+| 22 | `history.js` stack | n/a | whole-canvas snapshots |
+
+*Refit (host-driven, not tear vectors)* — `refitChildren` / `relayoutWallKids` / `relayoutSide` / `layoutZoneByKind` all derive children inside ONE `setEls`; multi-select move expands to the `attachedTo` assembly; `planClipboard` copies whole and remaps bonds.
+
+**Eleven of those bypass the atomic path.** That is the point of the enumeration: no realistic amount of additional atomicity closes eleven, and the twelfth would have been found next.
+
+**THE FIX — the invariant, at every seam.** New pure module `lib/assemblyIntegrity.js`: `assemblyIntegrity(els)` runs the EXISTING derivation (`siteModel.normalizeBondedChildren`) and returns the healed list plus `repairs` (everything rewritten) and `tears` (anything displaced past `ASSEMBLY_TEAR_TOL_FT`, 1 ft). **The detector is the healer's own diff**, so a state called torn is by construction exactly a state the healer repairs — a second "where should this child be" derivation would be the next bug in this family. Identity-preserving on a coherent plan (same array reference), so it is free to run everywhere. Seams wired in `SitePlanner.jsx`:
+- **canvas** — one `useEffect` over `els`, covering EVERY mutation (remote upsert, rows-canonical adoption, buffered drain, journal fold, local edit) so a new write path cannot be added that skips it;
+- **undo/redo** — `applySnapshot` re-derives the snapshot before restoring it, so a frame recorded torn cannot reinstate the tear;
+- **commit** — `reconcileElems` re-derives before the diff, and **flush-override** re-derives what `freshen` re-reads. This is the half that matters: a torn assembly is now **unpersistable**, whatever race produced it locally;
+- **load** — `refetchReplace` (rows) and `storage.loadSite`/`loadSitesList` (on device);
+- **post-commit** — a new `afterCommit` hook on the engine runs the assertion once per settled batch (accepted, refused, rolled back or transport-failed alike) and cannot throw into the write path.
+
+**THE DETECTOR + THE LOUD HEAL** (the addendum: a silent repair is why this kept shipping as fixed). `assembly-tear-detected` on the `client_errors` channel from every seam, carrying the ids, the host, the bond kind and the delta in feet; `assembly-tear-healed` beside it; `assembly-tear-persisted` when the repair is written back. `normalizeBondedRotations` was the one pass that repaired geometry with **no `onHeal` at all** — it reports now, so every pass in the heal is auditable.
+
+**TWO REAL DEFECTS FOUND AND FIXED ON THE WAY** (both named above, neither treated as *the* fix): the missing `foreignAuthor` gate on the realtime derived-yield (#12), and the load-time heal never reaching disk (#20) — the second is why the owner's plan kept "fixing itself" on screen while the stored copy stayed broken. A third, smaller one: `normalizeWallKids` kept a torn row's ALONG-wall value as user intent when the displacement was mostly ACROSS the wall, leaving ~20 ft of arbitrary slide after a heal; the across-axis error now decides whether the along value is intent or wreckage.
+
+**PROOF.** `test/assemblyIntegrity.test.js` — 28 cases on the owner's real geometry, built by canonicalising through the invariant so no coordinate is hand-encoded. The derivation independently reproduces the owner's hand-computed anchors: `e7377` → `(−542.99, −697.38)`, `e7378` → `(−575.36, −694.45)`. The six required races (move→undo · move→redo · move with a second tab echoing mid-gesture · rejected child + accepted host · accepted child + rejected host · undo of a multi-select move spanning two assemblies) each drive the REAL engine with the shipped guard composition, and **all six were proven RED with the write seam disabled**. `e2e/assembly-tear-detector.spec.js` — headless Chromium through the real render path: move → Ctrl+Z → assert **in the same session, before any reload** (a reload heals it and proves nothing — this is the addendum made mechanical), THEN reload and assert it stays; plus the owner's tear planted on disk, proven to self-heal AND to say so with ids and deltas.
+- Bundle: Site route +9.5 KB, total +3.9 KB (the new module + the guard wiring) — inside the headroom band, `perf-bundle-audit` green. Kept: this is a correctness guard on the write path, not a panel.
+- Follow-up filed, NOT built: **B1341** (one row, one revision — the DB-level change, deliberately not attempted in one session).
 ### B1327 — Double-clicking a building does not open Properties: the parcel acreage badge eats the press `[Site Planner]` (bug) #site-planner #selection #ui  *(filed + shipped 2026-07-31 from an owner chat block as NEW-1; minted against a freshly-fetched main. DEDUPE-FIRST: searched Open / ⏳ Verify / Done for `double-click`, `isDoubleTap`, `acreage`, `polylabel`, `pointerEvents`, `swallow` — **B1174** applied this exact rule to measurement chips and **B1189/V562** explains a different inspector-close symptom; neither covers the badge, so this is net-new. It is a REGRESSION FROM **B1186** and says so, rather than re-opening it: B1186's anchor change was correct and stays.)*
 `[x]` *(implemented 2026-07-31; parked for a signed-in pass on the owner's own "site phase two" — see **V648**.)* Double-click a building on Goose Creek site phase two and Properties never opens. Nothing happens at all.
 - Verify: live — **V648**

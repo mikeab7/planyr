@@ -219,7 +219,11 @@ export const bondedChildRot = (childRot, hostRot) => norm360(hostRot + quarterOf
 // host.rot + offset. Idempotent (a correctly-bonded child re-anchors to itself, delta 0) and
 // safe — a bonded box child is only ever at a quarter turn, so any other angle is drift, not
 // intent. Points-based children carry geometry in their points (no single rot/centre) → skipped.
-function normalizeBondedRotations(list) {
+// NEW-2 — `onHeal` added: this was the ONE pass that repaired geometry without telling anyone, so a
+// host re-angled behind its children's back was corrected in total silence. Every repair in this
+// file is now reportable (LOUD-FAILURE), which is what lets the load seam page us instead of the
+// owner noticing.
+function normalizeBondedRotations(list, onHeal) {
   const els = arr(list);
   if (els.length < 2) return els;
   const byId = new Map();
@@ -249,6 +253,7 @@ function normalizeBondedRotations(list) {
       if (near(g.cx, e.cx) && near(g.cy, e.cy) && near(g.w, e.w) && near(g.h, e.h) &&
           near(norm360(g.rot), norm360(e.rot))) return e;
       changed = true;
+      if (onHeal) onHeal({ id: e.id, host: host.id, kind: "bond-rotation-dogear", type: e.type, from: { cx: e.cx, cy: e.cy, rot: e.rot }, to: { cx: g.cx, cy: g.cy, rot: g.rot } });
       return { ...e, cx: g.cx, cy: g.cy, w: g.w, h: g.h, rot: g.rot };
     }
     const offset = quarterOffset(e.rot, host.rot);
@@ -259,12 +264,15 @@ function normalizeBondedRotations(list) {
     if (Math.abs(delta) < 1e-6) {
       if (Math.abs(norm360(e.rot) - wantRot) < 1e-6) return e;
       changed = true;
+      if (onHeal) onHeal({ id: e.id, host: host.id, kind: "bond-rotation", type: e.type, from: { cx: e.cx, cy: e.cy, rot: e.rot }, to: { cx: e.cx, cy: e.cy, rot: wantRot } });
       return { ...e, rot: wantRot };
     }
     const rad = (delta * Math.PI) / 180, cs = Math.cos(rad), sn = Math.sin(rad);
     const dx = e.cx - host.cx, dy = e.cy - host.cy;
     changed = true;
-    return { ...e, cx: host.cx + dx * cs - dy * sn, cy: host.cy + dx * sn + dy * cs, rot: wantRot };
+    const g = { cx: host.cx + dx * cs - dy * sn, cy: host.cy + dx * sn + dy * cs, rot: wantRot };
+    if (onHeal) onHeal({ id: e.id, host: host.id, kind: "bond-rotation", type: e.type, from: { cx: e.cx, cy: e.cy, rot: e.rot }, to: { ...g } });
+    return { ...e, ...g };
   });
   return changed ? out : els;
 }
@@ -361,8 +369,30 @@ function normalizeWallKids(list, onHeal) {
       // overlap limit, not an absolute distance — a 200 ft displacement is every bit as impossible
       // as a 2,000 ft one, and the old magnitude test let the smaller one through.
       const alongLimit = (isVert ? host.h : host.w) / 2 + (Number(cur.run) || 0) / 2;
-      const alongShift = Math.abs(cur.alongShift) > alongLimit ? 0 : cur.alongShift;
+      let alongShift = Math.abs(cur.alongShift) > alongLimit ? 0 : cur.alongShift;
       box = wallKidBox(host, side, { depth, gap, run: cur.run, alongShift });
+      /* NEW-1 — the ACROSS axis is the tell, and it decides whether the ALONG number is intent.
+       * The overlap bound above only catches a displacement big enough to slide the row off the end
+       * of its wall; a translation that is mostly PERPENDICULAR to the wall (the reported case: every
+       * child of one building moved ~267 ft across and ~4 ft along) passes it, so the row healed on
+       * the across axis and kept ~20 ft of along-wall slide it never had — a legal-but-arbitrary
+       * offset that leaves "is the tear gone?" unanswerable and a plan subtly wrong.
+       * There is no user freedom on the across axis, so an error past the anchor tolerance PROVES
+       * the row was TORN rather than hand-placed — and the along value it carries came out of that
+       * same bad write, so it is wreckage too (the rule this file already applies to a dock zone
+       * whose chain head is torn). Re-centre. A row whose across offset is CORRECT is a genuine
+       * B1039 hand-slid field and keeps its position untouched, which is the case that matters. */
+      if (alongShift) {
+        const probe = localToWorld(host, box.lx, box.ly);
+        const [nx, ny] = SIDE_NORMAL[side] || [0, 0];
+        const u = rot2d(nx, ny, host.rot || 0);
+        // `box` preserves this row's own along value, so the residual is purely across-axis.
+        const acrossErr = (e.cx - probe.x) * u.x + (e.cy - probe.y) * u.y;
+        if (Math.abs(acrossErr) > ANCHOR_TOL_FT) {
+          alongShift = 0;
+          box = wallKidBox(host, side, { depth, gap, run: cur.run, alongShift });
+        }
+      }
     }
     const c = localToWorld(host, box.lx, box.ly);
     const g = { cx: c.x, cy: c.y, ...ownExtents(cross, box.dimBX, box.dimBY) };
@@ -795,7 +825,7 @@ export function normalizeBondedChildren(els, onHeal) {
   return normalizeStrandedZones(
     normalizeHostRuns(
       normalizeZoneAlongLen(
-        normalizeWallKids(normalizeDogEarPositions(normalizeBondedRotations(normalizeCrossHostBonds(els, onHeal)), onHeal), onHeal),
+        normalizeWallKids(normalizeDogEarPositions(normalizeBondedRotations(normalizeCrossHostBonds(els, onHeal), onHeal), onHeal), onHeal),
         onHeal,
       ),
       onHeal,
@@ -887,7 +917,7 @@ export function createSiteModel(p = {}, { onHeal } = {}) {
 
 // Idempotent migration: upgrade any record to the current schema. (Additive, so
 // just (re)normalizing is sufficient and lossless.)
-export const migrate = (record) => createSiteModel(record || {});
+export const migrate = (record, opts) => createSiteModel(record || {}, opts);
 
 /* ----------------------- cross-copy reconciliation -----------------------
  * Combining TWO independent copies of the same site (the local cache + the cloud, or
