@@ -38,7 +38,7 @@
  * Chrome is theme tokens only — no literal colours in this file.
  */
 import { useEffect, useMemo, useRef, useState } from "react";
-import { recentPages, trashEntries, visibleNotebooks } from "../lib/notesModel.js";
+import { notebooksInScope, recentPages, trashEntries, SCOPE_ALL, SCOPE_PROJECT } from "../lib/notesModel.js";
 import { absoluteStamp, daysLeft, relativeTime } from "../lib/notesTime.js";
 
 const RADIUS = { control: 8, pill: 999 }; // mirrored from shared/ui/controls.jsx — see NoteToolbar
@@ -171,6 +171,120 @@ function MovePanel({ kind, depth, destinations, onReorder, onMoveTo, onClose, te
           </div>
         </>
       )}
+    </div>
+  );
+}
+
+/** WHICH PROJECT THIS NOTEBOOK BELONGS TO — an inline panel, never a dialog (B1374).
+ *
+ *  Deliberately the SAME shape as the Move panel: it opens under the row, it is a plain
+ *  list of destinations with the current one marked, and it closes on a pick. Binding a
+ *  notebook and moving a page are the same intent ("put this somewhere else"), so they
+ *  should not be two different-feeling interactions.
+ *
+ *  "Loose" is FIRST and is described rather than named, because "loose" is jargon: the row
+ *  says what it will actually do — the notebook shows up everywhere. */
+function ProjectPanel({ projects, currentProjectId, boundTo, onBind, onClose, testid }) {
+  const rows = [
+    { id: "__loose__", label: "Loose — shows in every project", current: boundTo == null, value: null },
+    ...projects.map((p) => ({
+      id: p.id,
+      label: p.id === currentProjectId ? `${p.name} (this project)` : p.name,
+      current: boundTo === p.id,
+      value: p.id,
+    })),
+  ];
+  /* THE PROJECT YOU ARE STANDING IN IS ALWAYS OFFERED, even when the project list has not
+   * resolved it — a fresh device that went straight to Notes has an empty project cache, and
+   * "file this here" must not depend on a lookup succeeding. Without this, the one binding a
+   * user is most likely to want is the one the panel cannot offer. */
+  if (currentProjectId && !projects.some((p) => p.id === currentProjectId)) {
+    rows.splice(1, 0, { id: currentProjectId, label: "This project", current: boundTo === currentProjectId, value: currentProjectId });
+  }
+  /* A binding whose project this device cannot resolve — deleted, or belonging to an
+   * account that is not signed in — is shown AS ITSELF rather than silently dropped. The
+   * user has to be able to see the state they are in before they can change it. */
+  if (boundTo != null && !projects.some((p) => p.id === boundTo)) {
+    rows.push({ id: boundTo, label: `Unknown project (${boundTo})`, current: true, value: boundTo });
+  }
+
+  return (
+    <div
+      data-testid={testid}
+      onClick={(e) => e.stopPropagation()}
+      style={{
+        margin: "2px 6px 6px", marginLeft: 8, padding: 7,
+        borderRadius: RADIUS.control, border: "1px solid var(--accent-notes)",
+        background: "var(--surface-page)", display: "flex", flexDirection: "column", gap: 5,
+      }}
+    >
+      <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
+        <span style={{ flex: 1, fontSize: 10, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--text-tertiary)" }}>
+          Belongs to
+        </span>
+        <MiniButton title="Close" testid={`${testid}-close`} onClick={onClose}>✕</MiniButton>
+      </span>
+      <div style={{ display: "flex", flexDirection: "column", gap: 2, maxHeight: 200, overflow: "auto" }}>
+        {rows.map((r) => (
+          <button
+            key={r.id}
+            type="button"
+            data-testid={`${testid}-to-${r.id}`}
+            disabled={r.current}
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => onBind(r.value)}
+            style={{
+              ...rowBase, fontSize: 12, padding: "4px 7px",
+              opacity: r.current ? 0.45 : 1, cursor: r.current ? "default" : "pointer",
+            }}
+          >
+            <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.label}</span>
+            {r.current ? <span style={{ fontSize: 10, fontWeight: 700, color: "var(--text-tertiary)" }}>HERE</span> : null}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** WHOSE NOTEBOOKS AM I LOOKING AT — and the one click to everything (B1374).
+ *
+ *  Shown only when a project is selected. Two things it must do, and the second is the one
+ *  that matters: say plainly whose notebooks are on screen, and make the ALL scope reachable
+ *  from here. Without the second, a notebook bound to another project is invisible from
+ *  every screen but one, which is exactly the report this exists to answer. */
+function ScopeBar({ scope, projectName, onScope }) {
+  const opts = [
+    { id: SCOPE_PROJECT, label: projectName || "This project" },
+    { id: SCOPE_ALL, label: "All notebooks" },
+  ];
+  return (
+    <div data-testid="notes-scope-switch" role="tablist" aria-label="Which notebooks to show" style={{ display: "flex", gap: 3 }}>
+      {opts.map((o) => {
+        const on = scope === o.id;
+        return (
+          <button
+            key={o.id}
+            type="button"
+            role="tab"
+            aria-selected={on}
+            title={o.id === SCOPE_ALL
+              ? "Every notebook in your account, whichever project it belongs to"
+              : `Notebooks in ${projectName || "this project"}, plus every loose one`}
+            data-testid={`notes-scope-${o.id}`}
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => onScope(o.id)}
+            style={{
+              flex: 1, minWidth: 0, height: 24, padding: "0 8px", borderRadius: RADIUS.control, cursor: "pointer",
+              border: `1px solid ${on ? "var(--accent-notes)" : "var(--border-default)"}`,
+              background: on ? "var(--accent-notes)" : "transparent",
+              color: on ? "var(--on-accent-notes)" : "var(--text-secondary)",
+              font: "inherit", fontSize: 11.5, fontWeight: 650,
+              overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+            }}
+          >{o.label}</button>
+        );
+      })}
     </div>
   );
 }
@@ -495,22 +609,28 @@ function ViewTabs({ view, onView, binCount }) {
 /* ---- the rail --------------------------------------------------------------------------- */
 
 export default function NotesTree({
-  tree, projectId, activePageId, query, results,
+  tree, projectId, projects = [], projectName, scope = SCOPE_PROJECT, onScope,
+  activePageId, query, results,
   onQueryChange, onSelectPage, onSelectHit, onAddNotebook, onAddSection, onAddPage,
-  onRename, onDelete, onExportNotebook, onPrintNotebook,
+  onRename, onDelete, onExportNotebook, onPrintNotebook, onBindNotebook,
   onMovePage, onMoveSection, onMoveNotebook, onRestore, onPurge, onPurgeAll,
 }) {
   const [collapsed, setCollapsed] = useState(() => new Set());
   const [editingId, setEditingId] = useState(null);
   const [confirmingId, setConfirmingId] = useState(null);
   const [movingId, setMovingId] = useState(null);
+  const [bindingId, setBindingId] = useState(null);
   const [view, setView] = useState("tree");
   // The open context menu: { id, x, y, items }. One at a time, by construction.
   const [menu, setMenu] = useState(null);
 
-  const notebooks = useMemo(() => visibleNotebooks(tree, projectId), [tree, projectId]);
+  const notebooks = useMemo(() => notebooksInScope(tree, projectId, scope), [tree, projectId, scope]);
   const bin = useMemo(() => trashEntries(tree), [tree]);
-  const recent = useMemo(() => (view === "recent" ? recentPages(tree, { projectId }) : []), [view, tree, projectId]);
+  const recent = useMemo(
+    () => (view === "recent" ? recentPages(tree, { projectId: scope === SCOPE_ALL ? null : projectId }) : []),
+    [view, tree, projectId, scope],
+  );
+  const projectNameOf = (pid) => projects.find((p) => p.id === pid)?.name || null;
 
   const isOpen = (id) => !collapsed.has(id);
   const toggle = (id) => setCollapsed((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
@@ -518,9 +638,10 @@ export default function NotesTree({
   const commitRename = (id, text) => { setEditingId(null); onRename(id, text); };
   const confirmDelete = (id) => { setConfirmingId(null); onDelete(id); };
 
-  const beginRename = (id) => { setConfirmingId(null); setMovingId(null); setEditingId(id); };
-  const beginDelete = (id) => { setEditingId(null); setMovingId(null); setConfirmingId(id); };
-  const beginMove = (id) => { setEditingId(null); setConfirmingId(null); setMovingId((m) => (m === id ? null : id)); };
+  const beginRename = (id) => { setConfirmingId(null); setMovingId(null); setBindingId(null); setEditingId(id); };
+  const beginDelete = (id) => { setEditingId(null); setMovingId(null); setBindingId(null); setConfirmingId(id); };
+  const beginMove = (id) => { setEditingId(null); setConfirmingId(null); setBindingId(null); setMovingId((m) => (m === id ? null : id)); };
+  const beginBind = (id) => { setEditingId(null); setConfirmingId(null); setMovingId(null); setBindingId((b) => (b === id ? null : id)); };
 
   /* Everything a row can do, in one place, ordered by how often it is wanted and with the
    * destructive one last and marked. `extra` is the per-kind head of the list (Add section /
@@ -585,6 +706,7 @@ export default function NotesTree({
             color: "var(--text-primary)", font: "inherit", fontSize: 13,
           }}
         />
+        {projectId ? <ScopeBar scope={scope} projectName={projectName} onScope={onScope} /> : null}
         <ViewTabs view={view} onView={(v) => { setView(v); onQueryChange(""); }} binCount={bin.length} />
         <button
           type="button"
@@ -606,16 +728,47 @@ export default function NotesTree({
         ) : view === "bin" ? (
           <BinList entries={bin} onRestore={onRestore} onPurge={onPurge} onPurgeAll={onPurgeAll} />
         ) : notebooks.length === 0 ? (
-          <p style={{ margin: "10px 8px", fontSize: 12.5, lineHeight: 1.55, color: "var(--text-secondary)" }}>
-            No notebooks yet. Make one — it starts with a page ready to type in.
-          </p>
+          /* ⛔ AN EMPTY RAIL MUST EXPLAIN ITSELF (B1374). "No notebooks yet" inside a project
+             was a LIE whenever notebooks existed under another project — and it is the exact
+             screen the owner was looking at when he concluded his notes were gone. When a
+             project is selected and the account has notebooks somewhere, the rail says so and
+             offers the one click that shows them. */
+          <div style={{ margin: "10px 8px", display: "flex", flexDirection: "column", gap: 8, alignItems: "flex-start" }}>
+            <p data-testid="notes-empty-scope" style={{ margin: 0, fontSize: 12.5, lineHeight: 1.55, color: "var(--text-secondary)" }}>
+              {projectId && scope === SCOPE_PROJECT && (tree?.notebooks || []).length
+                ? `No notebooks in ${projectName || "this project"} yet. Your other notebooks are still here — they belong to a different project.`
+                : "No notebooks yet. Make one — it starts with a page ready to type in."}
+            </p>
+            {projectId && scope === SCOPE_PROJECT && (tree?.notebooks || []).length ? (
+              <button
+                type="button"
+                data-testid="notes-show-all"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => onScope(SCOPE_ALL)}
+                style={{
+                  ...rowBase, width: "auto", padding: "4px 11px", fontSize: 12, fontWeight: 650,
+                  border: "1px solid var(--accent-notes)", background: "var(--accent-notes)",
+                  color: "var(--on-accent-notes)",
+                }}
+              >Show all notebooks</button>
+            ) : null}
+          </div>
         ) : notebooks.map((nb, nbIdx) => (
           <div key={nb.id} style={{ marginBottom: 3 }}>
             <TreeRow
               id={nb.id} kind="notebook" title={nb.title} depth={0}
               hasChildren expanded={isOpen(nb.id)} onToggle={() => toggle(nb.id)}
               onSelect={() => toggle(nb.id)}
-              badge={nb.projectId == null ? "Loose" : null}
+              /* WHERE THIS NOTEBOOK LIVES, ON THE ROW (B1374). "Loose" when it is bound to
+                 nothing; otherwise the PROJECT'S NAME — but only when that is news, i.e.
+                 when it is not simply the project you are already in. A badge repeating
+                 the header on every row is noise (PANEL-BREVITY); a badge that never says
+                 which project is the state the owner could not see. */
+              badge={nb.projectId == null
+                ? "Loose"
+                : (nb.projectId !== projectId
+                  ? (projectNameOf(nb.projectId) || "Other project")
+                  : null)}
               {...rowProps(nb.id, {
                 /* The notebook's exports moved HERE from a pair of links repeated under
                    every notebook in the rail (B1365). They are notebook-level (the toolbar's
@@ -623,6 +776,10 @@ export default function NotesTree({
                    twice per notebook on a surface whose job is showing names. */
                 extra: [
                   { id: `add-${nb.id}`, label: "Add section", onPick: () => onAddSection(nb.id) },
+                  /* The binding is CHANGEABLE from the row that shows it (B1374) — before
+                     this, a notebook could only ever be bound by being created inside a
+                     project, and `setNotebookProject` had no caller at all. */
+                  { id: `bind-${nb.id}`, label: "Belongs to…", onPick: () => beginBind(nb.id) },
                   { id: `md-${nb.id}`, label: "Export notebook to Markdown", onPick: () => onExportNotebook(nb.id) },
                   { id: `print-${nb.id}`, label: "Print notebook / save as PDF", onPick: () => onPrintNotebook(nb.id) },
                 ],
@@ -634,6 +791,16 @@ export default function NotesTree({
                 onReorder={(d) => onMoveNotebook(nb.id, nbIdx + d)}
                 onMoveTo={() => {}}
                 onClose={() => setMovingId(null)}
+              />
+            )}
+            {bindingId === nb.id && (
+              <ProjectPanel
+                projects={projects}
+                currentProjectId={projectId}
+                boundTo={nb.projectId ?? null}
+                testid={`notes-bind-${nb.id}`}
+                onBind={(pid) => { onBindNotebook(nb.id, pid); setBindingId(null); }}
+                onClose={() => setBindingId(null)}
               />
             )}
             {isOpen(nb.id) && (

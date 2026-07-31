@@ -17,9 +17,17 @@ would let *two phone photos* exhaust it and break every save in every notebook a
 document holds an image **ID** and the bytes live in **IndexedDB**, behind the same one storage
 seam. Do not "simplify" an image back into the document model.
 
+**A notebook BELONGS to a project — and nothing can become unreachable (B1374).** Created inside a
+project it binds to it with no extra step; created from the Dashboard it is **loose**, and a loose
+notebook shows up **everywhere**, inside every project included. Entering a project lands you in that
+project's notebooks (the scope is never sticky), and **one click widens to every notebook you have** —
+that click is what makes "unreachable" impossible rather than unlikely, so do not remove it. The full
+rule, including what migrates and how the bind rides the cloud sync, is written out in the header of
+`lib/notesStore.js`; read it there rather than re-deriving it.
+
 **Files**
-- `Notes.jsx` — workspace root (lazy chunk). Owns the TREE, the BIN, search, export, print and the
-  storage-error banner. Three load-bearing details: the editor is pulled by `lazy()` **from this
+- `Notes.jsx` — workspace root (lazy chunk). Owns the TREE, the BIN, search, export, print, the
+  project SCOPE, and the storage-error banner. Three load-bearing details: the editor is pulled by `lazy()` **from this
   file** so the tree paints before the engine downloads; `<NoteEditor key={activePageId}>` — the
   remount per page is a bug fix, not a style choice; and the print serializer is reached by a
   **dynamic** `import()` only, because it pulls the schema and the schema pulls the engine.
@@ -50,7 +58,8 @@ seam. Do not "simplify" an image back into the document model.
   **drag-to-size grid** (B1372), never a fixed 3×3 and never a dialog. It re-declares the two shared control radii locally
   instead of importing the shared `shared/ui/controls` primitives: that import makes the bundler
   hoist a third shared chunk onto the **Site** route and the perf audit goes red.
-- `lib/notesModel.js` — PURE tree schema + every structural op, page **timestamps**, and the
+- `lib/notesModel.js` — PURE tree schema + every structural op, page **timestamps**, the project
+  **binding** (`visibleNotebooks` · `notebooksInScope` · `setNotebookProject`), and the
   **bin**. `deleteNode` is a SOFT delete: it lifts the node into `tree.trash`, still computes the
   FULL cascade of orphaned page ids (TOMBSTONE-DELETES) and stamps it on the entry; `restoreNode` /
   `purgeTrashEntry` / `expiredTrashIds` are the rest of the 30-day lifecycle.

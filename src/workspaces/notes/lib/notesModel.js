@@ -116,7 +116,16 @@ export function firstPageId(tree) {
   return allPageIds(tree)[0] || null;
 }
 
-/* ---- project visibility ----------------------------------------------------------- */
+/* ---- project visibility -----------------------------------------------------------
+ *
+ * ⛔ WHAT A LOOSE NOTEBOOK DOES WHEN A PROJECT IS SELECTED — DECIDED, IN WRITING (B1374).
+ * A loose notebook (`projectId: null`) is visible from EVERYWHERE, including from inside
+ * every project. It is not a Dashboard-only shelf. The reason is the one this whole item
+ * exists for: a scratch notebook you cannot reach from where you are working is one you
+ * stop using, and the alternative — hiding loose notebooks inside a project — creates a
+ * place notes can be while looking like they are nowhere. The full rule, and the reason
+ * the SCOPE toggle exists beside it, is written out in the header of lib/notesStore.js.
+ */
 
 /** Notebooks visible from a given project: that project's own, PLUS every loose one.
  *  With no project selected (`null`) nothing is out of scope, so all are visible. */
@@ -124,6 +133,31 @@ export function visibleNotebooks(tree, projectId) {
   const list = tree?.notebooks || [];
   if (projectId == null) return list.slice();
   return list.filter((nb) => nb.projectId == null || nb.projectId === projectId);
+}
+
+export const SCOPE_PROJECT = "project";
+export const SCOPE_ALL = "all";
+
+/** The notebooks the rail should show, given the selected project AND the chosen scope.
+ *
+ *  `SCOPE_ALL` is the ESCAPE HATCH, and it is what makes "nothing can become unreachable"
+ *  true rather than aspirational: a notebook bound to a project you are not in — or to a
+ *  project that no longer exists at all — is always one click from here. Without it, a
+ *  mis-bound notebook is invisible from every screen except the one project it names, which
+ *  is exactly how the owner came to open a project, click Notes, and find nothing. */
+export function notebooksInScope(tree, projectId, scope = SCOPE_PROJECT) {
+  if (scope === SCOPE_ALL || projectId == null) return (tree?.notebooks || []).slice();
+  return visibleNotebooks(tree, projectId);
+}
+
+/** Every project id any notebook claims, in tree order. Lets a caller tell an id that
+ *  resolves to a real project from one that no longer does, without guessing. */
+export function boundProjectIds(tree) {
+  const out = [];
+  for (const nb of tree?.notebooks || []) {
+    if (nb?.projectId != null && !out.includes(nb.projectId)) out.push(nb.projectId);
+  }
+  return out;
 }
 
 /* ---- structural ops (all pure) ----------------------------------------------------- */
@@ -393,7 +427,13 @@ export function moveNotebook(tree, notebookId, index) {
   return next;
 }
 
-/** Re-bind a notebook to a project (or to `null` = loose). */
+/** Re-bind a notebook to a project (or to `null` = loose).
+ *
+ *  ⛔ THIS HAD NO CALLER AT ALL until B1374 — the same defect B1316 found in the three move
+ *  ops. The binding existed, was unit-tested, shipped with the module, and was reachable
+ *  from nowhere: a notebook could be bound only by being CREATED inside a project, and once
+ *  bound it could never be re-bound or made loose. That is why the owner's notebooks were
+ *  stranded in the projects they happened to be born in. */
 export function setNotebookProject(tree, notebookId, projectId) {
   const next = clone(tree);
   const nb = next.notebooks.find((n) => n.id === notebookId);

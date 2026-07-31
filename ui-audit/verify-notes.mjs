@@ -29,6 +29,15 @@
  * document, a table sized by sweeping a grid — and a tab running an old deploy admitting it,
  * both from a route it cannot resolve and from the served build stamp.
  *
+ * §22 is the round's biggest item (B1374): a notebook BELONGS to a project. It drives the
+ * owner's own report end to end — make a notebook inside one project, bind the other one to
+ * it too so the account is in exactly his state, then walk into a second project and find an
+ * empty rail. Every half of the fix is asserted there: the empty rail explains itself, one
+ * click reaches every notebook, the row says where it belongs, the binding can be CHANGED
+ * (the call `setNotebookProject` never had), a loose notebook really is visible everywhere,
+ * the scope is never sticky, search follows it, and the binding survives a reload — which is
+ * what proves it rides in the tree blob and therefore syncs.
+ *
  *   npx vite preview --port 4173 &
  *   node ui-audit/verify-notes.mjs
  */
@@ -905,6 +914,141 @@ await page.waitForTimeout(200);
 ok("...and one dismissal silences THAT deploy, not every future one",
   await tb("app-update-banner").count() === 0);
 await ctx.unroute("**/version.json");
+
+/* ════ 22. NOTES BELONG TO A PROJECT (B1374) — the owner's own report, driven end to end.
+ *
+ *   "if I have Grand Port notes, then when I'm in Grand Port project and I click on Notes,
+ *    that's where it should take me."
+ *
+ * He opened a project, clicked Notes, and found nothing — because both of his notebooks were
+ * bound to two OTHER projects and there was no way to see that, no way to change it, and no
+ * way to reach them from where he was standing. This section reproduces exactly that shape
+ * (two projects, a notebook born in one, then walk into the other) and asserts each half of
+ * the fix. It needs no signed-in account: a project is a route id, so the whole flow is
+ * drivable logged out. ══════════════════════════════════════════════════════════════════ */
+
+const PROJ_A = "e2e-project-alpha";
+const PROJ_B = "e2e-project-bravo";
+const goProject = async (pid) => {
+  await page.evaluate((p) => { window.location.hash = p ? `#/project/${p}/notes` : "#/notes"; }, pid);
+  await page.waitForTimeout(700);
+};
+
+await goProject(PROJ_A);
+ok("inside a project, the rail says WHOSE notebooks it is showing and offers the way out",
+  await tb("notes-scope-switch").count() === 1
+  && await tb(`notes-scope-${"project"}`).count() === 1
+  && await tb(`notes-scope-${"all"}`).count() === 1);
+
+await tb("notes-new-notebook").click();
+await page.waitForTimeout(900);
+let scopedTree = await readTree();
+const projNotebook = scopedTree.notebooks.find((n) => n.projectId === PROJ_A);
+ok("A NOTEBOOK CREATED INSIDE A PROJECT BELONGS TO IT, with no extra step",
+  !!projNotebook, projNotebook ? `bound to ${projNotebook.projectId}` : "not bound");
+ok("...and it is on screen where it was made", await tb(`notes-row-${projNotebook.id}`).count() === 1);
+
+/* Bind the pre-existing (loose) notebook to this project too, so the account is in EXACTLY
+ * the state the owner's was: every notebook bound, none loose. That state is what made the
+ * next screen empty, and it is also the first exercise of the re-bind path — which had no
+ * caller at all before this item. */
+const looseNotebook = scopedTree.notebooks.find((n) => n.id !== projNotebook.id && n.projectId == null);
+await tb(`notes-row-${looseNotebook.id}`).click({ button: "right" });
+await page.waitForSelector('[data-testid="notes-row-menu"]', { timeout: 5000 });
+await tb(`notes-menu-bind-${looseNotebook.id}`).click();
+await page.waitForTimeout(300);
+await tb(`notes-bind-${looseNotebook.id}-to-${PROJ_A}`).click();
+await page.waitForTimeout(1000);
+ok("AN EXISTING NOTEBOOK CAN BE RE-BOUND TO A PROJECT — the half that had no caller at all",
+  (await readTree()).notebooks.find((n) => n.id === looseNotebook.id)?.projectId === PROJ_A);
+
+/* Walk into a DIFFERENT project — the owner's exact move. */
+await goProject(PROJ_B);
+ok("in another project, those notebooks are correctly OUT of scope",
+  await tb(`notes-row-${projNotebook.id}`).count() === 0 && await tb(`notes-row-${looseNotebook.id}`).count() === 0);
+const emptyLine = await tb("notes-empty-scope").count() ? await tb("notes-empty-scope").innerText() : "";
+ok("THE EMPTY RAIL EXPLAINS ITSELF instead of implying the notes are gone",
+  /belong to a different project/i.test(emptyLine), emptyLine.slice(0, 90) || "no explanation");
+ok("...and offers the one click that finds them", await tb("notes-show-all").count() === 1);
+
+await tb("notes-show-all").click();
+await page.waitForTimeout(500);
+ok("NOTHING IS UNREACHABLE — one click from inside the wrong project shows every notebook",
+  await tb(`notes-row-${projNotebook.id}`).count() === 1);
+const rowText = await page.evaluate((id) => {
+  const row = document.querySelector(`[data-testid="notes-row-${id}"]`);
+  return (row?.innerText || "").toLowerCase();
+}, projNotebook.id);
+ok("...and the row SAYS where it belongs, rather than leaving you to guess",
+  /other project|alpha/.test(rowText), rowText.replace(/\n/g, " · ").slice(0, 60));
+
+/* The half that never existed: change the binding. `setNotebookProject` shipped with the
+ * module, was unit-tested, and had no caller at all — so a notebook could only ever be bound
+ * by being born inside a project, and never re-bound. */
+await tb(`notes-row-${projNotebook.id}`).click({ button: "right" });
+await page.waitForSelector('[data-testid="notes-row-menu"]', { timeout: 5000 });
+ok("a notebook's menu can change which project it belongs to", await tb(`notes-menu-bind-${projNotebook.id}`).count() === 1);
+await tb(`notes-menu-bind-${projNotebook.id}`).click();
+await page.waitForTimeout(300);
+ok("...through an inline panel on the row, never a dialog box", await tb(`notes-bind-${projNotebook.id}`).count() === 1);
+
+await tb(`notes-bind-${projNotebook.id}-to-__loose__`).click();
+await page.waitForTimeout(1000);
+scopedTree = await readTree();
+ok("BINDING IT LOOSE STICKS, in the stored tree",
+  (scopedTree.notebooks.find((n) => n.id === projNotebook.id) || {}).projectId === null);
+
+/* A loose notebook is visible from EVERYWHERE — the decision written down in the store
+ * header, asserted here rather than left to a comment. */
+await goProject(PROJ_B);
+ok("a LOOSE notebook shows up inside a project you are standing in",
+  await tb(`notes-row-${projNotebook.id}`).count() === 1);
+await goProject(PROJ_A);
+ok("...and inside the one it used to belong to", await tb(`notes-row-${projNotebook.id}`).count() === 1);
+await goProject(null);
+ok("...and from the dashboard", await tb(`notes-row-${projNotebook.id}`).count() === 1);
+
+/* Bind it back to a project, then confirm the scope RESETS on entering a project — the
+ * "take me to Grand Port's notes" half of the report. A sticky ALL would quietly undo it. */
+await goProject(PROJ_A);
+await tb(`notes-row-${projNotebook.id}`).click({ button: "right" });
+await page.waitForSelector('[data-testid="notes-row-menu"]', { timeout: 5000 });
+await tb(`notes-menu-bind-${projNotebook.id}`).click();
+await page.waitForTimeout(300);
+await tb(`notes-bind-${projNotebook.id}-to-${PROJ_A}`).click();
+await page.waitForTimeout(900);
+ok("re-binding it to THIS project puts it back where it was made",
+  (await readTree()).notebooks.find((n) => n.id === projNotebook.id)?.projectId === PROJ_A);
+
+await goProject(PROJ_B);
+await goProject(PROJ_A);
+ok("ENTERING A PROJECT LANDS YOU IN THAT PROJECT'S NOTEBOOKS — the scope is never sticky",
+  await tb("notes-scope-project").getAttribute("aria-selected") === "true"
+  && await tb(`notes-row-${projNotebook.id}`).count() === 1);
+
+/* Search follows the scope both ways, so a mis-filed note is findable rather than hidden. */
+await goProject(PROJ_B);
+await tb("notes-search").fill("Page 1");
+await page.waitForTimeout(600);
+const narrowHits = await page.locator('[data-testid="notes-search-results"] button').count();
+await tb("notes-search").fill("");
+await tb("notes-scope-all").click();
+await page.waitForTimeout(300);
+await tb("notes-search").fill("Page 1");
+await page.waitForTimeout(600);
+const wideHits = await page.locator('[data-testid="notes-search-results"] button').count();
+ok("SEARCH OBEYS THE SAME SCOPE THE RAIL DOES — widen it and the other project's notes are findable",
+  wideHits > narrowHits, `${narrowHits} in this project → ${wideHits} across all`);
+await tb("notes-search").fill("");
+await page.waitForTimeout(300);
+
+/* And the binding is in the TREE BLOB, which is what syncs — so it round-trips a reload. */
+await page.reload({ waitUntil: "load" });
+await page.waitForTimeout(2200);
+await page.locator('[data-testid="module-tab-notes"]:visible').first().click();
+await page.waitForSelector('[data-testid="notes-tree"]', { timeout: 15000 });
+ok("THE BINDING RIDES IN THE TREE BLOB — it survives a reload, which is what makes it sync",
+  (await readTree()).notebooks.find((n) => n.id === projNotebook.id)?.projectId === PROJ_A);
 
 /* ════ Wrap ═══════════════════════════════════════════════════════════════════════════ */
 ok("no uncaught page error across the whole run", pageErrors.length === 0, pageErrors.join(" | ") || "clean");
