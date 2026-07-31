@@ -24,11 +24,18 @@ seam. Do not "simplify" an image back into the document model.
   remount per page is a bug fix, not a style choice; and the print serializer is reached by a
   **dynamic** `import()` only, because it pulls the schema and the schema pulls the engine.
 - `components/NotesTree.jsx` — the left rail, in three views (**Notebooks · Recent · Bin**).
-  Inline rename (Enter commits, Esc cancels), an inline "Delete? ✓ ✕" row, and an inline **Move**
-  panel — **no `window.prompt`/`confirm`/`alert` anywhere** (house rule). Esc in the search box
-  clears the query.
-- `components/NoteEditor.jsx` — one page: title, toolbar, find bar, document. **The only module on
-  this route that imports the React editor binding.** Its header documents the two bugs the live
+  A row shows its **name and nothing else**: Add / Rename / Move / Export / Delete live on a
+  **right-click menu** (B1367), reachable from the keyboard with the context-menu key or
+  Shift+F10. Rename is still an inline field (Enter commits, Esc cancels), delete still asks
+  with an inline "Delete? ✓ ✕" row and still bins — **no `window.prompt`/`confirm`/`alert`
+  anywhere** (house rule). The row's key handler answers Enter/Space and the menu keys and
+  **nothing else** — Delete and Backspace are permanently unhandled here (B1366), because
+  hovering is not intent. Esc in the search box clears the query.
+- `components/NoteEditor.jsx` — one page: title, toolbar, find bar, document. The sheet is
+  **left-aligned, not centred** (B1369 — centring read as "my text is over on the right" on a
+  wide monitor), and the whole pane is a **mat that forwards a press to the caret** (B1368 —
+  clicking below or beside the text used to do nothing). **The only module on this route that
+  imports the React editor binding.** Its header documents the two bugs the live
   checks caught (a page switch inside the save debounce losing the last edit; reopening a note with
   a table crashing on `setContent` against a torn-down instance) — read it before changing the save
   path. There must never be a "sync content on pageId change" effect; the search effect there is
@@ -37,7 +44,10 @@ seam. Do not "simplify" an image back into the document model.
   writing on the row, the long tail behind **More**. Every active state is read from
   `editor.isActive(...)`, never mirrored into React state; every control cancels `mousedown` so the
   caret survives a click. Holds the module's only literal colours — the text/highlight **content**
-  palette, which must not be theme tokens. It re-declares the two shared control radii locally
+  palette, which must not be theme tokens. Text colour and highlight draw **different glyphs**
+  (B1370 — they were the same "A" twice); **font size is on the row**, not in More (B1371 — a
+  control nobody can find is one that does not exist); and the table button opens a
+  **drag-to-size grid** (B1372), never a fixed 3×3 and never a dialog. It re-declares the two shared control radii locally
   instead of importing the shared `shared/ui/controls` primitives: that import makes the bundler
   hoist a third shared chunk onto the **Site** route and the perf audit goes red.
 - `lib/notesModel.js` — PURE tree schema + every structural op, page **timestamps**, and the

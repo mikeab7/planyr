@@ -215,6 +215,35 @@ export default function NoteEditor({
     if (searchTerm) editor.commands.stepNoteSearch(0);
   }, [editor, searchTerm]);
 
+  /* CLICKING THE EMPTY PART OF THE PAGE PUTS THE CARET THERE (B1368).
+   *
+   * The document only claimed the box its own text filled, so on a short note most of the
+   * sheet was dead: clicking below the last line, or out to the side of it, did nothing at
+   * all — the owner's "I'm not sure that I can really edit anywhere on the page". A page you
+   * can only click ON THE WORDS is not a page.
+   *
+   * The mat forwards the press instead: anything that is not already the document, a field
+   * or a control lands the caret at the nearest real position — the same place the browser
+   * would have put it if the document had filled the pane. `preventDefault` on mousedown is
+   * what stops the press blurring the editor before the focus lands. */
+  const focusFromMat = useCallback((e) => {
+    if (!editor || editor.isDestroyed) return;
+    const el = e.target;
+    if (!(el instanceof Element)) return;
+    if (el.closest(".ProseMirror") || el.closest("input, textarea, select, button, a, [contenteditable]")) return;
+    e.preventDefault();
+    const dom = editor.view.dom;
+    const box = dom.getBoundingClientRect();
+    // Clamp the press INTO the text column horizontally and keep its height: a click out to
+    // the right of a short line should land at the end of THAT line, not at the end of the
+    // document, which is what makes this feel like a page rather than a jump.
+    const left = Math.min(Math.max(e.clientX, box.left + 1), box.right - 1);
+    const top = Math.min(Math.max(e.clientY, box.top + 1), box.bottom - 1);
+    const hit = e.clientY > box.bottom ? null : editor.view.posAtCoords({ left, top });
+    if (hit && Number.isFinite(hit.pos)) editor.chain().focus().setTextSelection(hit.pos).run();
+    else editor.commands.focus("end");
+  }, [editor]);
+
   const stepFind = useCallback((d) => {
     if (!editor || editor.isDestroyed) return;
     editor.commands.stepNoteSearch(d);
@@ -258,10 +287,24 @@ export default function NoteEditor({
       <NoteToolbar editor={editor} onExport={exportPage} onPrint={printPage} />
       <FindBar term={find.term} count={find.count} index={find.index} onStep={stepFind} onClear={onClearSearch} />
 
-      <div style={{ flex: 1, minHeight: 0, overflow: "auto" }}>
-        {/* A DOCUMENT page (the owner's choice over a free-form canvas): a fixed-width
-            sheet centred on the mat, so a note reads like a page rather than a wall. */}
-        <div style={{ maxWidth: 820, margin: "0 auto", padding: "22px 18px 96px" }}>
+      {/* The mat. It is the WHOLE pane, and a press anywhere on it lands the caret (B1368) —
+          see focusFromMat. `data-testid` so the headless check can press the dead zone. */}
+      <div
+        data-testid="note-mat"
+        onMouseDown={focusFromMat}
+        style={{ flex: 1, minHeight: 0, overflow: "auto", display: "flex", flexDirection: "column" }}
+      >
+        {/* A DOCUMENT page (the owner's choice over a free-form canvas): a fixed-width sheet.
+            ⛔ IT IS LEFT-ALIGNED, NOT CENTRED (B1369). Centring it read as "my stuff is
+            aligned to the right" on a wide monitor: the toolbar spans the pane, the text
+            column floated to the middle, and the gap between the two left edges grew with
+            every extra inch of screen. A document's left edge does not move when you resize
+            the window. `paddingLeft` matches the toolbar's own inset (its padding plus the
+            first control's), so the two left edges line up and STAY lined up.
+            AUDIT-FIRST: the alternative explanation — a right/centre TextAlign stuck on the
+            paragraphs — was checked against the real stored documents and refuted; not one
+            paragraph carries anything but the default. This is layout, not data. */}
+        <div style={{ maxWidth: 820, width: "100%", flex: "1 0 auto", margin: 0, padding: "22px 20px 96px 13px" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
             <input
               data-testid="note-title"

@@ -48,6 +48,29 @@ export function parseRoute(hash) {
   return { module: MODULE_BY_SLUG[segs[0]] || DEFAULT_MODULE, projectId: null, cross: false };
 }
 
+/* THE ROUTE THAT RESOLVED TO NOTHING — the definitive stale-build signal (B1373).
+ *
+ * `parseRoute` is deliberately tolerant: an unknown slug falls back to the default module so
+ * a hand-typed or stale URL never throws. That tolerance has a cost, and on 2026-07-31 the
+ * owner paid it — `#/notes` opened on a machine running a build from before Notes existed,
+ * whose MODULE_BY_SLUG has no `notes` key, so the route silently resolved to the Site
+ * workspace with no tab, no message and no clue.
+ *
+ * This reports that case WITHOUT changing the route shape (which several call sites compare
+ * by value). A slug that this build cannot resolve is either a typo or — far more likely for
+ * a link the user actually followed — a part of Planyr newer than the code answering it. The
+ * shell offers a reload; it does not force one, and a typo costs at worst one dismissible
+ * line. Returns the offending slug, or null when the hash resolves cleanly.
+ */
+export function unknownModuleSlug(hash) {
+  const segs = String(hash || "").replace(/^#/, "").split("/").filter(Boolean);
+  if (segs.length === 0) return null;
+  const slug = segs[0] === "project" ? segs[2] : segs[0] === "all" ? segs[1] : segs[0];
+  // "#/project/<id>" with no module segment is a legitimate shorthand, not a miss.
+  if (!slug) return null;
+  return MODULE_BY_SLUG[slug] ? null : slug;
+}
+
 /* Pure: { module, projectId, cross } -> a "#/..." hash string. */
 export function buildHash({ module = DEFAULT_MODULE, projectId = null, cross = false } = {}) {
   const slug = slugFor(module);

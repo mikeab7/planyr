@@ -21,6 +21,14 @@
  * including the two exits that matter: undo restores everything, and only "delete forever"
  * frees the bytes.
  *
+ * ROUND THREE is §21 (plus the rewritten table section in §5). Every one of these guards a
+ * thing the owner could not do, or could do by accident: the caret landing when you click the
+ * empty part of a page, the document's left edge staying put as the window widens, a hovered
+ * row surviving a Delete keypress, the rail carrying names instead of controls, colour and
+ * highlight being told apart without hovering, font size on the row and in the saved
+ * document, a table sized by sweeping a grid — and a tab running an old deploy admitting it,
+ * both from a route it cannot resolve and from the served build stamp.
+ *
  *   npx vite preview --port 4173 &
  *   node ui-audit/verify-notes.mjs
  */
@@ -106,12 +114,15 @@ const typeInBody = async (text) => {
   await page.keyboard.type(text, { delay: 8 });
 };
 const tb = (id) => page.locator(`[data-testid="${id}"]`);
-/* A tree row reveals its ＋ / rename / delete controls on HOVER, so a click has to be
- * preceded by a real pointer move onto the row — exactly as a person would do it. */
+/* A tree row's actions live on its RIGHT-CLICK MENU (B1367) — the row itself shows only a
+ * name. Every action in the harness therefore goes the way a person's does: right-click the
+ * row, pick the item. (Before B1367 this hovered the row and clicked one of four controls
+ * that appeared under the pointer.) */
 const rowAction = async (rowId, action) => {
-  await tb(`notes-row-${rowId}`).hover();
+  await tb(`notes-row-${rowId}`).click({ button: "right" });
+  await page.waitForSelector('[data-testid="notes-row-menu"]', { timeout: 5000 });
+  await tb(`notes-menu-${action}-${rowId}`).click();
   await page.waitForTimeout(120);
-  await tb(`notes-${action}-${rowId}`).click();
 };
 /** Settle past the 600 ms autosave debounce. */
 const settle = async () => page.waitForTimeout(1100);
@@ -246,11 +257,34 @@ doc = await readBody(page1);
 ok("the checklist button writes a real task list", nodesOf(doc, "taskList").length === 1 && nodesOf(doc, "taskItem").length === 1);
 ok("a task item carries its checked state", nodesOf(doc, "taskItem")[0]?.attrs?.checked === false);
 
-/* ════ 5. Tables, and controls that appear only inside one ═════════════════════════════ */
+/* ════ 5. Tables — sized by DRAGGING A GRID (B1372) — and controls only inside one ═════ */
 ok("the table controls are HIDDEN while the caret is not in a table", await tb("nt-table-group").count() === 0);
 
 await tb("nt-table").click();
+await page.waitForSelector('[data-testid="nt-table-grid"]', { timeout: 5000 });
+ok("the table button opens a GRID to sweep, not a fixed 3×3 and not a dialog box",
+  await tb("nt-table-grid").count() === 1);
+
+/* Sweep across the grid the way a pointer does, and watch the running size follow. */
+await tb("nt-table-cell-2-3").hover();
+await page.waitForTimeout(90);
+const sweep1 = await tb("nt-table-size").innerText();
+await tb("nt-table-cell-4-5").hover();
+await page.waitForTimeout(90);
+const sweep2 = await tb("nt-table-size").innerText();
+ok("the size follows the pointer and is written out, so nobody counts squares",
+  /3 × 2/.test(sweep1) && /5 × 4/.test(sweep2), `${sweep1} → ${sweep2}`);
+
+/* Reaching the edge of the grid GROWS it — a big table needs no dialog. */
+await tb("nt-table-cell-6-6").hover();
+await page.waitForTimeout(120);
+ok("...and the grid grows when the sweep reaches its edge", await tb("nt-table-cell-7-7").count() === 1);
+
+await tb("nt-table-cell-4-5").hover();
+await page.waitForTimeout(80);
+await tb("nt-table-cell-4-5").click();
 await page.waitForTimeout(400);
+ok("the grid closes on the pick", await tb("nt-table-grid").count() === 0);
 ok("the table controls APPEAR once the caret is inside a table", await tb("nt-table-group").count() === 1);
 
 await settle();
@@ -258,7 +292,9 @@ doc = await readBody(page1);
 ok("inserting a table writes a real table node", nodesOf(doc, "table").length === 1);
 const rows0 = nodesOf(doc, "tableRow").length;
 const cols0 = nodesOf(doc, "tableRow")[0]?.content?.length || 0;
-ok("the inserted table has a header row", nodesOf(doc, "tableHeader").length > 0, `${rows0} rows × ${cols0} cols`);
+ok("THE TABLE IS THE SIZE THAT WAS SWEPT — 5 wide by 4 tall, not a fixed 3×3",
+  rows0 === 4 && cols0 === 5, `${rows0} rows × ${cols0} cols`);
+ok("the inserted table has a header row", nodesOf(doc, "tableHeader").length > 0);
 
 await tb("nt-row-after").click();
 await settle();
@@ -348,7 +384,10 @@ await page.waitForTimeout(400);
 /* ════ 9. Markdown export downloads a REAL file ════════════════════════════════════════ */
 await tb(`notes-row-${page1}`).click();
 await page.waitForTimeout(900);
-await page.locator('[data-testid="note-body"]').click();
+/* Land the caret in the LAST block explicitly rather than clicking the middle of the note
+ * and trusting Ctrl+End: the page now ends in a table, and the middle of a note is a cell.
+ * The bullet has to be a top-level list for this export check to mean anything. */
+await page.locator('[data-testid="note-body"] > *').last().click();
 await page.keyboard.press("Control+End");
 await page.keyboard.press("Enter");
 await tb("nt-bullet").click();
@@ -715,6 +754,157 @@ const afterReload = await readTree();
 ok("a reload with cloud sync in the build restores the same signed-out notebook",
   JSON.stringify(afterReload?.notebooks?.map((n) => n.id)) === JSON.stringify(tree?.notebooks?.map((n) => n.id)),
   `${afterReload?.notebooks?.length ?? 0} notebook(s)`);
+
+/* ════ 21. ROUND THREE — the page you can click, the rail that shows names, the bar you
+        can read, and a build that admits it is old (B1365–B1373) ══════════════════════ */
+
+const r3Page = afterReload?.notebooks?.[0]?.sections?.[0]?.pages?.[0]?.id;
+await tb(`notes-row-${r3Page}`).click();
+await page.waitForSelector('[data-testid="note-body"]', { timeout: 15000 });
+await page.waitForTimeout(500);
+
+/* ---- B1369: the document reads left, and STAYS left as the window widens ---- */
+const edges = async () => page.evaluate(() => {
+  const bar = document.querySelector('[data-testid="note-toolbar"]');
+  const body = document.querySelector('[data-testid="note-body"]');
+  const firstControl = bar?.querySelector("button, select");
+  return {
+    control: firstControl ? firstControl.getBoundingClientRect().left : null,
+    body: body ? body.getBoundingClientRect().left : null,
+  };
+});
+const narrow = await edges();
+await page.setViewportSize({ width: 1900, height: 950 });
+await page.waitForTimeout(400);
+const wide = await edges();
+ok("the text starts at the toolbar's left edge, not adrift in the middle of the pane",
+  Math.abs(wide.body - wide.control) <= 10, `toolbar ${Math.round(wide.control)} · text ${Math.round(wide.body)}`);
+ok("...and it does NOT slide right as the window widens — the whole 'aligned to the right' report",
+  Math.abs(wide.body - narrow.body) <= 2, `${Math.round(narrow.body)} → ${Math.round(wide.body)}`);
+
+/* ---- B1368: the empty part of the page takes the caret ---- */
+const mat = await tb("note-mat").boundingBox();
+const bodyBox = await tb("note-body").boundingBox();
+await page.mouse.click(bodyBox.x + 40, Math.min(mat.y + mat.height - 40, bodyBox.y + bodyBox.height + 60));
+await page.waitForTimeout(200);
+const focusedAfterBlankClick = await page.evaluate(() => !!document.activeElement?.closest?.(".ProseMirror"));
+await page.keyboard.type("CLICKED-THE-BLANK-PART", { delay: 6 });
+await settle();
+ok("clicking the empty space BELOW the text puts the caret in the document",
+  focusedAfterBlankClick && textOf(await readBody(r3Page)).includes("CLICKED-THE-BLANK-PART"));
+
+/* Beside the text, out to the right of a short line — the other half of the dead zone. */
+await page.mouse.click(bodyBox.x + bodyBox.width - 20, bodyBox.y + 12);
+await page.waitForTimeout(200);
+ok("...and clicking BESIDE a line does too, rather than doing nothing at all",
+  await page.evaluate(() => !!document.activeElement?.closest?.(".ProseMirror")));
+
+/* ---- B1367: the rail shows names; actions are on a right-click menu ---- */
+const r3Section = afterReload.notebooks[0].sections[0].id;
+await tb(`notes-row-${r3Section}`).hover();
+await page.waitForTimeout(200);
+const hoverButtons = await page.evaluate((id) => {
+  const row = document.querySelector(`[data-testid="notes-row-${id}"]`);
+  return [...(row?.querySelectorAll("button") || [])].map((b) => b.getAttribute("data-testid") || "");
+}, r3Section);
+ok("a hovered row sprouts NO action controls — only its expand arrow",
+  hoverButtons.every((t) => t.startsWith("notes-toggle-")), hoverButtons.join(", ") || "none");
+
+/* ---- B1366: and the keyboard does not destroy the row the mouse is over ---- */
+const beforeDeleteKey = JSON.stringify(await readTree());
+await page.keyboard.press("Delete");
+await page.waitForTimeout(300);
+await page.keyboard.press("Backspace");
+await page.waitForTimeout(400);
+ok("HOVERING A ROW AND PRESSING DELETE DESTROYS NOTHING — hovering is not intent",
+  JSON.stringify(await readTree()) === beforeDeleteKey);
+ok("...and nothing was even offered to be deleted", await tb("notes-undo-bar").count() === 0);
+
+await tb(`notes-row-${r3Section}`).click({ button: "right" });
+await page.waitForSelector('[data-testid="notes-row-menu"]', { timeout: 5000 });
+ok("right-click opens the row's menu with add / rename / move / delete",
+  await tb(`notes-menu-add-${r3Section}`).count() === 1
+  && await tb(`notes-menu-rn-${r3Section}`).count() === 1
+  && await tb(`notes-menu-mv-${r3Section}`).count() === 1
+  && await tb(`notes-menu-rm-${r3Section}`).count() === 1);
+await tb(`notes-menu-rn-${r3Section}`).click();
+await page.waitForTimeout(250);
+ok("Rename from the menu opens the INLINE field on the row, never a dialog box",
+  await tb(`notes-rename-${r3Section}`).count() === 1);
+await page.keyboard.press("Escape");
+await page.waitForTimeout(150);
+
+/* ---- B1365: the per-notebook export links are off the rail, and on the menu ---- */
+const r3Notebook = afterReload.notebooks[0].id;
+ok("the rail no longer repeats a Markdown + Print pair under every notebook",
+  await tb(`notes-export-${r3Notebook}`).count() === 0 && await tb(`notes-print-${r3Notebook}`).count() === 0);
+await tb(`notes-row-${r3Notebook}`).click({ button: "right" });
+await page.waitForSelector('[data-testid="notes-row-menu"]', { timeout: 5000 });
+ok("...but notebook-level export and print are still reachable, on the notebook's menu",
+  await tb(`notes-menu-md-${r3Notebook}`).count() === 1 && await tb(`notes-menu-print-${r3Notebook}`).count() === 1);
+await page.keyboard.press("Escape");
+await page.waitForTimeout(150);
+
+/* ---- B1370: text colour and highlight are told apart without hovering ---- */
+const glyphs = await page.evaluate(() => {
+  const g = (id) => document.querySelector(`[data-testid="${id}"]`)?.innerHTML || "";
+  return { color: g("nt-color"), highlight: g("nt-highlight") };
+});
+ok("the text-colour and highlight buttons draw DIFFERENT glyphs, not the same 'A' twice",
+  !!glyphs.color && !!glyphs.highlight && glyphs.color !== glyphs.highlight);
+ok("...and only the highlight one is a marker/pen, so which is which is readable at a glance",
+  glyphs.highlight.includes("svg") && !glyphs.color.includes("svg"));
+
+/* ---- B1371: font size is ON the row, and it survives the save ---- */
+ok("the font-size control is on the visible row, not buried in More",
+  await page.locator('[data-testid="note-toolbar"] > [data-testid="nt-size"]').count() === 1);
+ok("...and it is not ALSO in the More drawer — it moved, it did not multiply",
+  await tb("nt-size").count() === 1);
+
+await tb("note-body").click();
+await page.keyboard.press("Control+a");
+await tb("nt-size").selectOption("24");
+await settle();
+const sizedDoc = await readBody(r3Page);
+const sizeMarks = JSON.stringify(sizedDoc).match(/"fontSize":"24px"/g) || [];
+ok("PICKING A SIZE WRITES A REAL MARK INTO THE DOCUMENT that round-trips through storage",
+  sizeMarks.length > 0, `${sizeMarks.length} run(s) at 24px`);
+ok("...and the bar reads the size back off the document rather than remembering it",
+  await tb("nt-size").inputValue() === "24");
+
+/* ---- B1373: a build that admits it is old ---- */
+ok("nothing claims an update on a build that IS the served one", await tb("app-update-banner").count() === 0);
+
+/* A route slug this build has no module for is the definitive skew signal — it is exactly
+ * what `#/notes` looked like from inside the owner's pre-Notes build. */
+await page.evaluate(() => { window.location.hash = "#/amoduleshippedlater"; });
+await page.waitForTimeout(600);
+ok("A ROUTE THIS BUILD CANNOT RESOLVE OFFERS A RELOAD instead of silently falling back to Site",
+  await tb("app-update-banner").count() === 1
+  && await tb("app-update-banner").getAttribute("data-reason") === "route-miss");
+ok("...and it is a dismissible strip with a Reload button, never a takeover",
+  await tb("app-update-reload").count() === 1 && await tb("app-update-dismiss").count() === 1);
+await tb("app-update-dismiss").click();
+await page.waitForTimeout(200);
+ok("...that goes away when dismissed", await tb("app-update-banner").count() === 0);
+
+await page.evaluate(() => { window.location.hash = "#/notes"; });
+await page.waitForTimeout(500);
+
+/* The other half: the server has moved on while this tab stayed open. */
+await ctx.route("**/version.json", (route) => route.fulfill({
+  status: 200, contentType: "application/json", body: JSON.stringify({ build: "a-newer-deploy" }),
+}));
+await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+await page.waitForTimeout(900);
+const skewBanner = await tb("app-update-banner").count();
+ok("a tab left open across a DEPLOY notices and says so, without reloading anything itself",
+  skewBanner === 1 && await tb("app-update-banner").getAttribute("data-reason") === "newer-build");
+await tb("app-update-dismiss").click();
+await page.waitForTimeout(200);
+ok("...and one dismissal silences THAT deploy, not every future one",
+  await tb("app-update-banner").count() === 0);
+await ctx.unroute("**/version.json");
 
 /* ════ Wrap ═══════════════════════════════════════════════════════════════════════════ */
 ok("no uncaught page error across the whole run", pageErrors.length === 0, pageErrors.join(" | ") || "clean");

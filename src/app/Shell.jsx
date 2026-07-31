@@ -13,8 +13,10 @@ import ModuleLoader from "../shared/ui/ModuleLoader.jsx";
 import AccountControl from "./AccountControl.jsx";
 import { useProfile } from "../shared/profile/useProfile.js";
 import { setTelemetryModule } from "../shared/telemetry/clientErrors.js";
-import { useHashRoute, INITIAL_HASH_EMPTY } from "./route.js";
+import { useHashRoute, unknownModuleSlug, INITIAL_HASH_EMPTY } from "./route.js";
 import { writeLastRoute, seedBootRoute } from "./lastRoute.js";
+import { installBuildSkewWatch, shouldOfferReload, LOADED_BUILD } from "./buildSkew.js";
+import { reloadFresh } from "./chunkReload.js";
 
 // "Open where I left off": on an empty-hash boot, seed the URL from the stored last-route
 // pointer BEFORE the first render (so useHashRoute's initial read sees it). Runs at module
@@ -34,6 +36,53 @@ const WORKSPACES = [
 // Chrome color is a theme token so the shell themes WITH the app (B318). (The account
 // pill/dropdown styling moved into AccountControl.jsx with the control itself — B734.)
 const CHROME = "var(--chrome-bg)";
+
+/** "A newer version of Planyr is available" (B1373) — module scope, per
+ *  MODULE-SCOPE-COMPONENTS.
+ *
+ *  Deliberately a THIN STRIP, not a modal: it must be impossible for this to interrupt
+ *  someone mid-sentence or to hide behind an overlay, and it must be dismissible in one
+ *  click. It does not reload on its own — a forced reload of an app someone is typing into
+ *  is a worse bug than the staleness it cures. `reloadFresh` is the same cache-busting
+ *  reload the stale-chunk guard uses, so the reload actually lands on the new build rather
+ *  than re-serving the cached index.html. */
+function UpdateBanner({ reason, onReload, onDismiss }) {
+  if (!reason) return null;
+  return (
+    <div
+      role="status"
+      data-testid="app-update-banner"
+      data-reason={reason}
+      style={{
+        flex: "none", display: "flex", alignItems: "center", gap: 10, padding: "6px 14px",
+        background: "var(--warn-bg)", borderBottom: "1px solid var(--border-default)",
+        color: "var(--warn-text)", fontSize: 12.5, fontWeight: 600,
+      }}
+    >
+      <span style={{ flex: 1, minWidth: 0 }}>
+        {reason === "route-miss"
+          ? "That part of Planyr is newer than the copy this tab has open — reload to get it."
+          : "A newer version of Planyr is available. Reload when you're ready — your work is saved."}
+      </span>
+      <button
+        type="button" data-testid="app-update-reload" onClick={onReload}
+        style={{
+          flex: "0 0 auto", border: "1px solid var(--warn-text)", borderRadius: 999,
+          background: "transparent", color: "var(--warn-text)", font: "inherit",
+          fontSize: 11.5, fontWeight: 700, padding: "2px 12px", cursor: "pointer",
+        }}
+      >Reload</button>
+      <button
+        type="button" data-testid="app-update-dismiss" onClick={onDismiss}
+        style={{
+          flex: "0 0 auto", border: "1px solid var(--border-default)", borderRadius: 999,
+          background: "transparent", color: "var(--text-tertiary)", font: "inherit",
+          fontSize: 11.5, fontWeight: 700, padding: "2px 10px", cursor: "pointer",
+        }}
+      >Dismiss</button>
+    </div>
+  );
+}
 
 export default function Shell() {
   // The active project + workspace now live in the URL hash (Work Item A), so the
@@ -114,6 +163,25 @@ export default function Shell() {
   const [visited, setVisited] = useState(() => new Set([active]));
   useEffect(() => { setVisited((v) => (v.has(active) ? v : new Set(v).add(active))); }, [active]);
 
+  /* DEPLOY SKEW (B1373) — two independent signals, one banner.
+   *
+   *  `servedBuild` is what the SERVER says is current (null while unknown / offline / dev);
+   *  `routeMiss` is the definitive one — this build was handed a route slug it has no module
+   *  for, which is what a link to a workspace shipped after this tab loaded looks like from
+   *  the inside. The route signal is read from the live hash, not from `route`, because
+   *  parseRoute has already resolved the miss away by then. */
+  const [servedBuild, setServedBuild] = useState(null);
+  const [dismissedFor, setDismissedFor] = useState(null);
+  const [routeMiss, setRouteMiss] = useState(() => (typeof window !== "undefined" ? !!unknownModuleSlug(window.location.hash) : false));
+  useEffect(() => installBuildSkewWatch({ onServed: setServedBuild }), []);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    setRouteMiss(!!unknownModuleSlug(window.location.hash));
+  }, [route]);
+  const updateReason = shouldOfferReload({ loaded: LOADED_BUILD, served: servedBuild, dismissedFor, routeMissed: routeMiss })
+    ? (routeMiss && dismissedFor !== "route-miss" ? "route-miss" : "newer-build")
+    : null;
+
   // Profile (name/org) for the signed-in user — sourced from the profiles table via
   // the useProfile hook, with a never-blank display name (B297/B298).
   const profileApi = useProfile(user);
@@ -138,6 +206,11 @@ export default function Shell() {
     <div style={{ height: "100%", overflow: "hidden", display: "flex", flexDirection: "column", background: CHROME }}>
       {/* No shell-level header — each workspace renders AppHeader internally
           so it can own its toolbar-slot content without prop-drilling through here. */}
+      <UpdateBanner
+        reason={updateReason}
+        onReload={() => reloadFresh()}
+        onDismiss={() => setDismissedFor(updateReason === "route-miss" ? "route-miss" : servedBuild)}
+      />
       <main style={{ flex: 1, minHeight: 0, position: "relative", zIndex: 0, background: "var(--surface-page)" }}>
         {/* Keep-alive render: every visited workspace stays mounted in an absolutely-
             positioned wrapper; only the active one is displayed. Each gets its OWN error
