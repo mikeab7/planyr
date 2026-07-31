@@ -1,0 +1,341 @@
+{
+ "_note": "The owner's REAL \"Concept D - Sylvestri Retail\" plan (site sms4zs8unbkg), copied verbatim out of site_elements on 2026-07-31 — the two dock-zone hosts and every one of their children. e1454698mwpaoj is 867.94 x 300 at rot 0, dock 'single' bottom, a 55 ft corner bump-out at each end (clear face 757.94), carrying court e1454699mwpaoj + trailer e1454796yyuqqs. e1454759yyuqqs is 540 x 1041 at rot 33.9589980014822, dock 'cross', four bump-outs, a court + trailer on each long wall (931 ft clear). NOT ONE element here carries an alongLen: this defect needs no poisoned data, it is what a clean plan does the moment you shrink a zone. Used by test/zoneAlongAnchor.test.js and e2e/dock-zone-anchor.spec.js. Do NOT tidy the numbers — they are the owner's.",
+ "els": [
+  {
+   "h": 300,
+   "w": 867.94,
+   "z": 16384,
+   "cx": -803.18,
+   "cy": -2511.59,
+   "id": "e1454698mwpaoj",
+   "rot": 0,
+   "dock": "single",
+   "type": "building",
+   "dockSide": "bottom"
+  },
+  {
+   "h": 135,
+   "w": 757.94,
+   "z": 17408,
+   "cx": -803.18,
+   "cy": -2294.09,
+   "id": "e1454699mwpaoj",
+   "zd": 135,
+   "rot": 0,
+   "type": "paving",
+   "attachedTo": "e1454698mwpaoj",
+   "truckCourt": {
+    "side": "bottom"
+   }
+  },
+  {
+   "h": 360,
+   "w": 5,
+   "z": 18432,
+   "cx": -366.7099999999999,
+   "cy": -2481.59,
+   "id": "e1454700mwpaoj",
+   "rot": 0,
+   "type": "sidewalk",
+   "attachedTo": "e1454698mwpaoj",
+   "sidewalkSide": "right"
+  },
+  {
+   "h": 102,
+   "w": 360,
+   "z": 19456,
+   "cx": -313.2099999999999,
+   "cy": -2481.59,
+   "id": "e1454701mwpaoj",
+   "rot": 270,
+   "type": "parking",
+   "attachedTo": "e1454698mwpaoj",
+   "sideParkSide": "right"
+  },
+  {
+   "h": 60,
+   "w": 55,
+   "z": 20480,
+   "cx": -396.7099999999999,
+   "cy": -2331.59,
+   "id": "e1454702mwpaoj",
+   "rot": 0,
+   "dock": "none",
+   "type": "building",
+   "noFit": true,
+   "dogEar": {
+    "side": "bottom",
+    "sign": 1
+   },
+   "noLabel": true,
+   "attachedTo": "e1454698mwpaoj"
+  },
+  {
+   "h": 60,
+   "w": 55,
+   "z": 21504,
+   "cx": -1209.65,
+   "cy": -2331.59,
+   "id": "e1454703mwpaoj",
+   "rot": 0,
+   "dock": "none",
+   "type": "building",
+   "noFit": true,
+   "dogEar": {
+    "side": "bottom",
+    "sign": -1
+   },
+   "noLabel": true,
+   "attachedTo": "e1454698mwpaoj"
+  },
+  {
+   "h": 360,
+   "w": 5,
+   "z": 22528,
+   "cx": -1239.65,
+   "cy": -2481.59,
+   "id": "e1454704mwpaoj",
+   "rot": 0,
+   "type": "sidewalk",
+   "attachedTo": "e1454698mwpaoj",
+   "sidewalkSide": "left"
+  },
+  {
+   "h": 42,
+   "w": 360,
+   "z": 23552,
+   "cx": -1263.15,
+   "cy": -2481.59,
+   "id": "e1454705mwpaoj",
+   "rot": 90,
+   "type": "parking",
+   "attachedTo": "e1454698mwpaoj",
+   "sideParkSide": "left"
+  },
+  {
+   "h": 1041,
+   "w": 540,
+   "z": 37888,
+   "cx": 862.08,
+   "cy": -1962.6,
+   "id": "e1454759yyuqqs",
+   "rot": 33.9589980014822,
+   "dock": "cross",
+   "type": "building",
+   "dockSide": "right"
+  },
+  {
+   "h": 931,
+   "w": 135,
+   "z": 61440,
+   "cx": 1142.0151663061752,
+   "cy": -1774.072673956442,
+   "id": "e1454760yyuqqs",
+   "zd": 135,
+   "rot": 33.9589980014822,
+   "type": "paving",
+   "attachedTo": "e1454759yyuqqs",
+   "truckCourt": {
+    "side": "right"
+   }
+  },
+  {
+   "h": 931,
+   "w": 135,
+   "z": 62464,
+   "cx": 582.1448336938249,
+   "cy": -2151.127326043558,
+   "id": "e1454761yyuqqs",
+   "zd": 135,
+   "rot": 33.9589980014822,
+   "type": "paving",
+   "attachedTo": "e1454759yyuqqs",
+   "truckCourt": {
+    "side": "left"
+   }
+  },
+  {
+   "h": 50,
+   "w": 931,
+   "z": 63488,
+   "cx": 1218.738137812312,
+   "cy": -1722.4022216333926,
+   "id": "e1454762yyuqqs",
+   "zd": 50,
+   "cfg": {
+    "single": true,
+    "trailerL": 50,
+    "trailerW": 12,
+    "trailerAisle": 0
+   },
+   "rot": 123.9589980014822,
+   "type": "trailer",
+   "noFit": true,
+   "forCourt": "e1454760yyuqqs",
+   "prevZone": "e1454760yyuqqs",
+   "attachedTo": "e1454759yyuqqs"
+  },
+  {
+   "h": 50,
+   "w": 931,
+   "z": 64512,
+   "cx": 505.4218621876879,
+   "cy": -2202.7977783666074,
+   "id": "e1454763yyuqqs",
+   "zd": 50,
+   "cfg": {
+    "single": true,
+    "trailerL": 50,
+    "trailerW": 12,
+    "trailerAisle": 0
+   },
+   "rot": 123.9589980014822,
+   "type": "trailer",
+   "noFit": true,
+   "forCourt": "e1454761yyuqqs",
+   "prevZone": "e1454761yyuqqs",
+   "attachedTo": "e1454759yyuqqs"
+  },
+  {
+   "h": 5,
+   "w": 660,
+   "z": 65536,
+   "cx": 1154.2275304319433,
+   "cy": -2396.3958280833467,
+   "id": "e1454764yyuqqs",
+   "rot": 33.9589980014822,
+   "type": "sidewalk",
+   "attachedTo": "e1454759yyuqqs",
+   "sidewalkSide": "top"
+  },
+  {
+   "h": 60,
+   "w": 660,
+   "z": 66560,
+   "cx": 1172.3820136805825,
+   "cy": -2423.352547801719,
+   "id": "e1454765yyuqqs",
+   "rot": 213.9589980014822,
+   "type": "parking",
+   "attachedTo": "e1454759yyuqqs",
+   "sideParkSide": "top"
+  },
+  {
+   "h": 5,
+   "w": 660,
+   "z": 67584,
+   "cx": 569.9324695680568,
+   "cy": -1528.804171916653,
+   "id": "e1454766yyuqqs",
+   "rot": 33.9589980014822,
+   "type": "sidewalk",
+   "attachedTo": "e1454759yyuqqs",
+   "sidewalkSide": "bottom"
+  },
+  {
+   "h": 60,
+   "w": 660,
+   "z": 68608,
+   "cx": 551.7779863194176,
+   "cy": -1501.8474521982807,
+   "id": "e1454767yyuqqs",
+   "rot": 33.9589980014822,
+   "type": "parking",
+   "attachedTo": "e1454759yyuqqs",
+   "sideParkSide": "bottom"
+  },
+  {
+   "h": 55,
+   "w": 60,
+   "z": 69632,
+   "cx": 888.6382869559159,
+   "cy": -2539.0925475615163,
+   "id": "e1454768yyuqqs",
+   "rot": 33.9589980014822,
+   "dock": "none",
+   "type": "building",
+   "noFit": true,
+   "dogEar": {
+    "side": "left",
+    "sign": -1
+   },
+   "noLabel": true,
+   "attachedTo": "e1454759yyuqqs"
+  },
+  {
+   "h": 55,
+   "w": 60,
+   "z": 70656,
+   "cx": 1386.3008048335605,
+   "cy": -2203.932856817413,
+   "id": "e1454769yyuqqs",
+   "rot": 33.9589980014822,
+   "dock": "none",
+   "type": "building",
+   "noFit": true,
+   "dogEar": {
+    "side": "right",
+    "sign": -1
+   },
+   "noLabel": true,
+   "attachedTo": "e1454759yyuqqs"
+  },
+  {
+   "h": 55,
+   "w": 60,
+   "z": 71680,
+   "cx": 835.5217130440842,
+   "cy": -1386.1074524384835,
+   "id": "e1454770yyuqqs",
+   "rot": 33.9589980014822,
+   "dock": "none",
+   "type": "building",
+   "noFit": true,
+   "dogEar": {
+    "side": "right",
+    "sign": 1
+   },
+   "noLabel": true,
+   "attachedTo": "e1454759yyuqqs"
+  },
+  {
+   "h": 55,
+   "w": 60,
+   "z": 72704,
+   "cx": 337.85919516643946,
+   "cy": -1721.2671431825868,
+   "id": "e1454771yyuqqs",
+   "rot": 33.9589980014822,
+   "dock": "none",
+   "type": "building",
+   "noFit": true,
+   "dogEar": {
+    "side": "left",
+    "sign": 1
+   },
+   "noLabel": true,
+   "attachedTo": "e1454759yyuqqs"
+  },
+  {
+   "h": 50,
+   "w": 757.94,
+   "z": 96256,
+   "cx": -803.18,
+   "cy": -2201.59,
+   "id": "e1454796yyuqqs",
+   "zd": 50,
+   "cfg": {
+    "single": true,
+    "trailerL": 50,
+    "trailerW": 12,
+    "trailerAisle": 0
+   },
+   "rot": 0,
+   "type": "trailer",
+   "noFit": true,
+   "forCourt": "e1454699mwpaoj",
+   "prevZone": "e1454699mwpaoj",
+   "attachedTo": "e1454698mwpaoj"
+  }
+ ]
+}
