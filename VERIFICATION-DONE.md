@@ -1,6 +1,6 @@
 # VERIFICATION-DONE.md — archived verification items (passed / superseded)
 
-### NEW-1/V — NEW-1 (the inline number editor: in place, at the chip's own size, spinner-free): the headless before/during/after pass at two zooms, in both themes, on the owner's real parcel
+### V641 — B1319 (the inline number editor: in place, at the chip's own size, spinner-free): the headless before/during/after pass at two zooms, in both themes, on the owner's real parcel
 
 **✅ PASSED 2026-07-31 — Claude, in-session, headless Chromium (`ui-audit/verify-numedit-inplace.mjs`, 89/89).** Driven logged out, no external GIS, geometry seeded locally — so every strand of this was Claude-doable HERE and none of it was filed as owed. Five passes: light + dark × fit-zoom + zoomed-in on a synthetic 900 × 600 ft parcel with a building hard against the setback line (the owner's case), plus a fifth on his REAL 60-vertex Weld County boundary (`test/fixtures/weldParcelProduction.json`, site `sms7v3ua7ksy`).
 - **SIZE — the field is not bigger than the chip it edits.** Measured `chip 26.0×15.0 @9.5px → field 26.0×15.0 @9.5px`, every pass. The box it replaced was `96×30 @13px`.
