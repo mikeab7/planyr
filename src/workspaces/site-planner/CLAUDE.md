@@ -502,6 +502,21 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   over a peer set (a building reorders within its `Z_LAYER` band, a markup within the markup layer;
   a markup can also be sent behind the elements). Wired via `arrangeSel` + the right-click menus + the
   ⌘/Ctrl+]/[ chords in `SitePlanner.jsx`.
+- **⛔ `labelLayout.js` also holds the GEOMETRY level-of-detail tier (B1345) — read it before "tidying"
+  a stall band back into N `<line>`s.** Every other tier here gates a LABEL; this one is the only one
+  that touches drawn geometry, and it is a change of REPRESENTATION, never decimation: below
+  `STALL_PITCH_MIN_PX` on-sheet pitch the N per-stall dividers become the N subpaths of ONE `<path>`
+  (`segmentsPath`) — identical coordinates, identical stroke, same rasteriser. On the owner's real plan
+  that is **−1,550 nodes, 63% of the canvas DOM**, and the drag frame median HALVED at 4× throttle.
+  Three things not to undo: **(a)** the gate is measured on the LABEL FRAME (`px / lfK`, the
+  `FEAT_BTN_MIN_PX` precedent) so an EXPORT decides at the sheet's scale — get that wrong and a
+  wide-zoom PDF silently loses its stalls; **(b)** an SVG `<pattern>` is NOT an equivalent and was
+  measured as wrong (Chromium rasterises a tile once and repeats it, so a non-integer pitch accumulates
+  sub-pixel phase error — up to 30/255); **(c)** the DOCK-DOOR LEAVES deliberately do NOT collapse
+  (up to 23/255, because a leaf's fill is semi-transparent — B1350 owns the 424 nodes left behind).
+  Guards: the repo-root `test/` suite **geometryLod** (incl. source guards on both call sites and on the
+  rejected door half) and the ui-audit harness **verify-stall-lod-parity** (two real builds compared
+  pixel by pixel via its own dependency-free PNG decoder, plus the exported sheet — PDF-PARITY).
 - `labelLayout.js` — LOD label tiering + the shared dimension-number zoom→font scale (`dimFontPx`, B911)
   + the quieter pond design-parameter tier (`pondParamLabelVisible`/`pondParamFontPx`, B1016 — the berm
   tag, floor/WS elevations and the rim-to-floor line reveal only when the band they measure reads on screen).

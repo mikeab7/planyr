@@ -241,3 +241,48 @@ describe("chunk stems survive a hyphenated chunk name", () => {
     for (const stem of bundle.siteRouteAllowlist.allow) expect(stem).toMatch(/^[A-Za-z][A-Za-z0-9._-]*$/);
   });
 });
+
+/* ── the RUNTIME ratchet log (NEW-1, 2026-07-31) ───────────────────────────────────────────
+ * Same guarantee as the bundle log above, for the metrics that need a browser: a runtime
+ * `measured` may only move through `npm run perf:ratchet -- --from-harness <a real run>`, so a
+ * hand-typed frame number with no reason on the record goes RED here. These metrics had to
+ * learn the lesson twice — once for a hidden-tab sample, once for a scene with the expensive
+ * work taken out — which is exactly why the rule now applies to them too.
+ */
+describe("a runtime measurement moves only through the named ratchet step", () => {
+  const entries = budgets.runtime.ratchetLog?.runtimeRatchetEntries || [];
+
+  it("the log exists, and is kept separate from the bundle log", () => {
+    expect(Array.isArray(entries)).toBe(true);
+    expect(budgets.runtime.ratchetLog.entries, "the two logs must never be confusable").toBeUndefined();
+  });
+
+  it("every entry states metric, from, to, direction, scenario, item, date and a real reason", () => {
+    for (const [i, e] of entries.entries()) {
+      const at = `runtime entry ${i} (${e.metric})`;
+      expect(e.metric, at).toMatch(/^runtime\./);
+      expect(e.to, at).toBeTypeOf("number");
+      expect(["ratchet", "raise", "reseed"], at).toContain(e.direction);
+      expect(String(e.scenario || ""), `${at} — a frame number means nothing without the scene it was measured on`).not.toBe("");
+      expect(String(e.item || ""), at).not.toBe("");
+      expect(String(e.date || ""), at).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+      expect(String(e.reason || "").length, `${at} — the reason is the permanent record`).toBeGreaterThan(23);
+    }
+  });
+
+  it("every harness-seeded metric equals the `to` of its own latest log entry", () => {
+    for (const [key, spec] of Object.entries(budgets.runtime)) {
+      if (!spec || typeof spec !== "object" || !spec.seededFrom) continue;
+      const mine = entries.filter((e) => e.metric === `runtime.${key}`);
+      expect(mine.length, `runtime.${key} carries seededFrom but has no ratchet entry — was it hand-edited?`).toBeGreaterThan(0);
+      expect(spec.measured, `runtime.${key} does not match its latest logged ratchet`).toBe(mine[mine.length - 1].to);
+    }
+  });
+
+  it("the frame specs name the scene they were seeded on, not just the instrument", () => {
+    for (const k of ["frameMedianMs", "frameP90Ms"]) {
+      expect(budgets.runtime[k].seededFrom).toMatch(/perf-harness\.mjs/);
+      expect(budgets.runtime[k].seededFrom, `${k} must record WHICH scenario`).toMatch(/goose-creek/);
+    }
+  });
+});

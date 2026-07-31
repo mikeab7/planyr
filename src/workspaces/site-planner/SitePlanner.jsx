@@ -200,7 +200,7 @@ import { roadClassesOf, roadClassOf, classMinRadius, classDefaultRadius, classRe
 import { DOGEAR_W, DOGEAR_D, dogEarGeom, dogEarSize, sidewalkSpanForBumps, isDogEarSide,
   wallStripBox, wallKidBox, wallKidPerp, wallKidAlong, hostAxisExtents, ownExtents, bumpsOfHost, sideParkAlongRun } from "./lib/dogEar.js";
 import { CURB_TYPES as COST_CURB_TYPES, CURB_TYPE_META, roadCurbType, roadCurbedSides, roadPanWidth, roadQuantities, costRollup } from "./lib/costTakeoff.js";
-import { layoutLabels, buildingLabelLines, dimCalloutVisible, detailLabelVisible, pondParamLabelVisible, pondParamFontPx, suppressedDimIds, dimFontScale, dimFontPx, boxOf, DIM_CALLOUT_MIN_PPF } from "./lib/labelLayout.js";
+import { layoutLabels, buildingLabelLines, dimCalloutVisible, detailLabelVisible, pondParamLabelVisible, pondParamFontPx, suppressedDimIds, dimFontScale, dimFontPx, boxOf, DIM_CALLOUT_MIN_PPF, stallStripesExplicit, segmentsPath } from "./lib/labelLayout.js";
 import { inlineLines } from "./lib/labelFitLadder.js";
 import { calloutLayout, minCalloutWidthFt } from "./lib/calloutLayout.js";
 import { splitOverlayBands, overlayPanelOrder, overlayOrderFlags, reorderOverlays, setOverlayBand, overlayBand } from "./lib/overlayOrder.js";
@@ -22520,28 +22520,47 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
   // this branch's el.rot group — same trick as the ghost — to land them true on the basin.
   if (el.type === "pond") parts.push(<g key="pondc" transform={`rotate(${-(el.rot || 0)} ${c.x} ${c.y})`}>{pondContourEls(el, f2p, ppf, "pc", lf)}</g>);
 
+  /* NEW-2 — GEOMETRY LOD for stall striping. The N per-stall <line>s become the N subpaths of
+   * ONE <path>: identical coordinates, identical stroke, same rasteriser, same pass — so the
+   * picture is byte-identical and only the node count changes. See the GEOMETRY LEVEL-OF-DETAIL
+   * block in lib/labelLayout.js for why this is a change of representation and not decimation,
+   * why an SVG <pattern> was tried first and MEASURED as a real (if small) visible shift, and
+   * why the gate is on the LABEL frame (px / lfK) so an export decides at the sheet's scale
+   * rather than at whatever zoom the canvas happened to be sitting at. */
   if (el.type === "parking") {
     const cs = carStalls(el.w, el.h, cfgOf(el));
+    const collapse = !stallStripesExplicit(cs.pitch * ppf, lfK);
+    const segs = [];
     cs.bands.forEach((b, i) => {
       const bandW = b.n * b.pitch;
       parts.push(<rect key={`b${i}`} x={tl.x} y={tl.y + b.y * ppf} width={bandW * ppf} height={b.depth * ppf} fill="none" stroke={st.stroke} strokeWidth={0.75} />);
       const lean = b.dir * b.slantDx; // angled stalls lean toward their aisle
       for (let k = 1; k < b.n; k++) {
         const x = tl.x + k * b.pitch * ppf;
-        parts.push(<line key={`b${i}d${k}`} x1={x} y1={tl.y + b.y * ppf} x2={x + lean * ppf} y2={tl.y + (b.y + b.depth) * ppf} stroke={st.stroke} strokeWidth={0.5} />);
+        const seg = [x, tl.y + b.y * ppf, x + lean * ppf, tl.y + (b.y + b.depth) * ppf];
+        if (collapse) segs.push(seg);
+        else parts.push(<line key={`b${i}d${k}`} x1={seg[0]} y1={seg[1]} x2={seg[2]} y2={seg[3]} stroke={st.stroke} strokeWidth={0.5} />);
       }
     });
+    if (segs.length) parts.push(<path key="bdiv" d={segmentsPath(segs)} fill="none" stroke={st.stroke} strokeWidth={0.5} />);
     cs.aisles.forEach((a, i) =>
       parts.push(<line key={`a${i}`} x1={tl.x} y1={tl.y + (a.y0 + a.y1) / 2 * ppf} x2={tl.x + w} y2={tl.y + (a.y0 + a.y1) / 2 * ppf} stroke={st.stroke} strokeWidth={0.6} strokeDasharray="6 5" />));
   }
   if (el.type === "trailer") {
     const ts = trailerStalls(el.w, el.h, el.cfg ? { ...settings, ...el.cfg } : settings);
+    const collapse = !stallStripesExplicit(ts.tw * ppf, lfK);
+    const segs = [];
     ts.bands.forEach((b, i) => {
       const bandW = b.n * ts.tw;
       parts.push(<rect key={`tb${i}`} x={tl.x} y={tl.y + b.y * ppf} width={bandW * ppf} height={b.depth * ppf} fill="none" stroke={st.stroke} strokeWidth={0.75} />);
-      for (let k = 1; k < b.n; k++)
-        parts.push(<line key={`tb${i}d${k}`} x1={tl.x + k * ts.tw * ppf} y1={tl.y + b.y * ppf} x2={tl.x + k * ts.tw * ppf} y2={tl.y + (b.y + b.depth) * ppf} stroke={st.stroke} strokeWidth={0.55} />);
+      for (let k = 1; k < b.n; k++) {
+        const x = tl.x + k * ts.tw * ppf;
+        const seg = [x, tl.y + b.y * ppf, x, tl.y + (b.y + b.depth) * ppf];
+        if (collapse) segs.push(seg);
+        else parts.push(<line key={`tb${i}d${k}`} x1={seg[0]} y1={seg[1]} x2={seg[2]} y2={seg[3]} stroke={st.stroke} strokeWidth={0.55} />);
+      }
     });
+    if (segs.length) parts.push(<path key="tbdiv" d={segmentsPath(segs)} fill="none" stroke={st.stroke} strokeWidth={0.55} />);
     ts.aisles.forEach((a, i) =>
       parts.push(<line key={`ta${i}`} x1={tl.x} y1={tl.y + (a.y0 + a.y1) / 2 * ppf} x2={tl.x + w} y2={tl.y + (a.y0 + a.y1) / 2 * ppf} stroke={st.stroke} strokeWidth={0.6} strokeDasharray="8 6" />));
   }
@@ -22622,13 +22641,34 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
           const by = s === "bottom" ? h - Dpx : 0;
           const ax = tl.x + startF * ppf, aw = (endF - startF) * ppf;
           parts.push(<rect key={`db${s}`} data-dock-apron x={ax} y={tl.y + by} width={aw} height={Dpx} fill="#9aa3b0" fillOpacity={0.9} stroke="#5b6470" strokeWidth={1} />);
-          doors.forEach((cF, i) => { const x = tl.x + cF * ppf; parts.push(<rect key={`dd${s}${i}`} x={x - leaf / 2} y={tl.y + by} width={leaf} height={Dpx} fill="#c2c9d2" fillOpacity={0.95} stroke="#5b6470" strokeWidth={0.6} />); });
         } else {
           const bx = s === "right" ? w - Dpx : 0;
           const ay = tl.y + startF * ppf, ah = (endF - startF) * ppf;
           parts.push(<rect key={`db${s}`} data-dock-apron x={tl.x + bx} y={ay} width={Dpx} height={ah} fill="#9aa3b0" fillOpacity={0.9} stroke="#5b6470" strokeWidth={1} />);
-          doors.forEach((cF, i) => { const y = tl.y + cF * ppf; parts.push(<rect key={`dd${s}${i}`} x={tl.x + bx} y={y - leaf / 2} width={Dpx} height={leaf} fill="#c2c9d2" fillOpacity={0.95} stroke="#5b6470" strokeWidth={0.6} />); });
         }
+        /* NEW-2 — THE DOOR LEAVES DELIBERATELY DO **NOT** COLLAPSE, and this is the measurement
+         * that decided it rather than a judgement call. Folding the N leaf <rect>s into the N
+         * subpaths of one <path> — the same transformation that makes the stall striping above
+         * byte-identical — shifts the picture here by up to 23/255 on 0.02–0.41% of canvas
+         * pixels (ui-audit/verify-stall-lod-parity.mjs, four zoom rungs). The cause is specific
+         * and not fixable from this side: a leaf's fill is SEMI-TRANSPARENT (fillOpacity 0.95),
+         * so where two leaves' antialiased edges share pixel coverage — which at any zoom fine
+         * enough to be worth collapsing is always — compositing them one at a time and
+         * compositing their union are genuinely different colours. The stall dividers are
+         * opaque and single-coloured, which is exactly why the same fold is exact for them.
+         * That is 424 nodes left on the table on the owner's plan, knowingly, because the
+         * constraint is "visually identical or it does not ship" and this is not identical. */
+        doors.forEach((cF, i) => {
+          if (horiz) {
+            const by = s === "bottom" ? h - Dpx : 0;
+            const x = tl.x + cF * ppf;
+            parts.push(<rect key={`dd${s}${i}`} x={x - leaf / 2} y={tl.y + by} width={leaf} height={Dpx} fill="#c2c9d2" fillOpacity={0.95} stroke="#5b6470" strokeWidth={0.6} />);
+          } else {
+            const bx = s === "right" ? w - Dpx : 0;
+            const y = tl.y + cF * ppf;
+            parts.push(<rect key={`dd${s}${i}`} x={tl.x + bx} y={y - leaf / 2} width={Dpx} height={leaf} fill="#c2c9d2" fillOpacity={0.95} stroke="#5b6470" strokeWidth={0.6} />);
+          }
+        });
       });
     }
   }

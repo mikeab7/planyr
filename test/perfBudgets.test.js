@@ -13,7 +13,8 @@
  */
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
-import { frameSamplingFault, observedFps, MIN_PLAUSIBLE_FPS } from "../ui-audit/lib/frameSampling.mjs";
+import { frameSamplingFault, idleGestureFault, observedFps, plausibilityFloor, MIN_PLAUSIBLE_FPS, SUSPENSION_FLOOR_FPS } from "../ui-audit/lib/frameSampling.mjs";
+import { scenarioShape } from "../ui-audit/lib/perf-scenario.mjs";
 import { ceilingFor } from "../ui-audit/lib/perfBudgetPolicy.mjs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -158,5 +159,74 @@ describe("a frame-time sample is only reported when it can be stood behind", () 
       expect(spec.seededFrom, `${k} must name the instrument it was seeded from`).toMatch(/perf-harness\.mjs/);
       expect(spec.note, `${k} must say the old seed is withdrawn`).toMatch(/WITHDRAWN|withdrawal/);
     }
+  });
+});
+
+/* ── NEW-1 (2026-07-31): the benchmark could not see the problem ────────────────────────────
+ * Three independent defects, each of which on its own was enough to make a green frame budget
+ * meaningless, and all three of which were live at once:
+ *   1. the reference scene had no centerline road, no pond and no polygon element, so the
+ *      most expensive code in the app ran zero times in the benchmark that certified it;
+ *   2. the scripted drag pressed at the canvas CENTRE, landed on an element, and never panned;
+ *   3. the only measurement point was a fast 1x headless CPU, which has no dynamic range.
+ * These pin all three so none can quietly come back.
+ */
+describe("the reference scenario exercises the expensive paths (NEW-1)", () => {
+  const shape = scenarioShape();
+
+  it("contains centerline roads with arc vertices — roadGeometry.js has work to do", () => {
+    expect(shape.centerlineRoads).toBeGreaterThan(0);
+    expect(shape.arcVertices).toBeGreaterThan(0);
+  });
+
+  it("contains ponds — detentionRules / floodplainMitigation / the pond ledger run at all", () => {
+    expect(shape.ponds).toBeGreaterThan(0);
+  });
+
+  it("contains polygon elements and a real multi-parcel boundary set", () => {
+    expect(shape.polygonEls).toBeGreaterThan(0);
+    expect(shape.parcels).toBeGreaterThan(1);
+    expect(shape.parcelVertices).toBeGreaterThan(20);
+  });
+
+  it("is DERIVED from the committed fixture, never a second hand-authored copy of it", () => {
+    // A duplicated scene drifts from the fixture the moment either is edited, and then two
+    // instruments disagree about what "the reference plan" is.
+    expect(read("ui-audit/lib/perf-scenario.mjs")).toMatch(/fixtures\/goose-creek-plan1copy\.json/);
+    const fixture = JSON.parse(read("ui-audit/fixtures/goose-creek-plan1copy.json"));
+    expect(shape.elements).toBe(fixture.els.length);
+  });
+});
+
+describe("a frame sample from a gesture that did nothing is refused (NEW-1)", () => {
+  it("REFUSES a sample whose view transform never moved", () => {
+    // The measured case: pressing at the canvas centre produced 604 DOM mutations and a
+    // perfect 16.7ms median; the same gesture on bare canvas produced 641,730.
+    expect(idleGestureFault({ before: "774.4|0|0.02", after: "774.4|0|0.02" })).toMatch(/IDLE page/);
+  });
+
+  it("passes a sample whose view transform moved", () => {
+    expect(idleGestureFault({ before: "774.4|0|0.02", after: "1034.1|0|0.02" })).toBeNull();
+  });
+
+  it("does not fire when there is nothing to compare — that is a different fault", () => {
+    expect(idleGestureFault({ before: null, after: null })).toBeNull();
+  });
+});
+
+describe("the plausibility floor tracks the machine being emulated (NEW-1)", () => {
+  it("is EXACTLY the committed 30fps at 1x — emulation buys range, not a lower bar", () => {
+    expect(plausibilityFloor()).toBe(MIN_PLAUSIBLE_FPS);
+    expect(plausibilityFloor(1)).toBe(MIN_PLAUSIBLE_FPS);
+  });
+
+  it("under CPU throttling, only true rAF suspension is refused", () => {
+    // Measured at 4x on the real plan: the pan ran at 14.8fps and the wheel zoom at 6.4fps.
+    // Both are the finding; suppressing them is how the instrument goes blind again.
+    expect(plausibilityFloor(4)).toBe(SUSPENSION_FLOOR_FPS);
+    expect(frameSamplingFault({ visibility: "visible", samples: 46, gestureMs: 7232, minFps: plausibilityFloor(4) })).toBeNull();
+    // …and a genuinely suspended tab is still refused, at any throttle.
+    expect(frameSamplingFault({ visibility: "visible", samples: 4, gestureMs: 7232, minFps: plausibilityFloor(4) })).toMatch(/plausibility floor/);
+    expect(frameSamplingFault({ visibility: "hidden", samples: 46, gestureMs: 7232, minFps: plausibilityFloor(4) })).toMatch(/suspends requestAnimationFrame/);
   });
 });
