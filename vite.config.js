@@ -138,6 +138,35 @@ const BUILD_ID = (() => {
   }
 })();
 
+/* THE DEPLOY'S NAME, SERVED AS A TINY FILE THE APP CAN RE-READ (B1373).
+ *
+ * `__BUILD_ID__` tells a running tab which build IT is. It could not tell it which build the
+ * SERVER now has, so a tab left open across a deploy had no way to know it was out of date —
+ * and a build that predates a whole workspace simply has no tab for it and no route to it,
+ * which is exactly how the owner's second machine showed no Notes tab and silently fell back
+ * to Site. This emits `/version.json` = { build }, served no-store (see public/_headers), so
+ * the app can ask "what is live now?" and compare. It is two dozen bytes and it is the only
+ * thing that makes "it shipped" checkable from the browser.
+ *
+ * Emitted in BOTH dev and build: dev serves it from middleware (nothing is written to disk),
+ * production writes it into dist/ next to index.html. */
+function buildStamp() {
+  const body = () => `${JSON.stringify({ build: BUILD_ID })}\n`;
+  return {
+    name: "planyr-build-stamp",
+    configureServer(server) {
+      server.middlewares.use("/version.json", (_req, res) => {
+        res.setHeader("Content-Type", "application/json");
+        res.setHeader("Cache-Control", "no-store");
+        res.end(body());
+      });
+    },
+    generateBundle() {
+      this.emitFile({ type: "asset", fileName: "version.json", source: body() });
+    },
+  };
+}
+
 // Most Esri ArcGIS services (ArcGIS Online + ArcGIS Server 10.1+) send permissive
 // CORS headers, so the county parcel lookup normally works with direct browser
 // fetches. If a particular county server blocks CORS, uncomment the matching proxy
@@ -172,6 +201,7 @@ export default defineConfig(({ command }) => ({
     react(),
     pdfjsAssets(),
     chunkModuleStats(),
+    buildStamp(),
     // In dev, Vite's SPA fallback would serve the main index.html for /sequence/.
     // This plugin intercepts /sequence/ (and /sequence/index.html) and serves the
     // standalone scheduler HTML directly, matching production Cloudflare behavior.

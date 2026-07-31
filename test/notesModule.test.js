@@ -317,11 +317,17 @@ describe("no dialog boxes anywhere in the module (owner rule)", () => {
   it("toolbar active states are read from the editor, never mirrored into React state", () => {
     const bar = code("components/NoteToolbar.jsx");
     expect(bar).toMatch(/editor\.isActive\(/);
-    // The only useState in the bar belongs to the popovers' open/closed flags.
-    // The only useStates in the bar belong to the popovers' and the overflow drawer's
-    // open/closed flags — never to a formatting state.
+    /* The sharper form of the rule, and the one that actually states it: no piece of React
+     * state here may be SEEDED from the editor. That is what "mirrored" means — a copy taken
+     * once and then drifting every time the caret moves by a route the toolbar didn't
+     * originate. A `useState` that never reads the editor cannot drift. */
+    expect(bar).not.toMatch(/useState\([^)]*editor\s*\./);
+    /* The count stays capped as a second, blunter net. The bar's useStates are: the two
+     * colour popovers' open flags, the link editor's open + href, the overflow drawer's
+     * open flag, and the table grid picker's open + hovered size + grown grid (B1372) —
+     * every one of them a transient control-chrome flag, none of them a formatting state. */
     const states = [...bar.matchAll(/useState\(/g)].length;
-    expect(states, "a mirrored active-state copy drifts the moment the caret moves").toBeLessThanOrEqual(4);
+    expect(states, "a mirrored active-state copy drifts the moment the caret moves").toBeLessThanOrEqual(7);
   });
 });
 

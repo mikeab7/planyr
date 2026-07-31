@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseRoute, buildHash, sameRoute, DEFAULT_MODULE } from "../src/app/route.js";
+import { parseRoute, buildHash, sameRoute, unknownModuleSlug, DEFAULT_MODULE } from "../src/app/route.js";
 
 describe("parseRoute", () => {
   it("empty / root hash is the dashboard (default module, no project)", () => {
@@ -31,6 +31,24 @@ describe("parseRoute", () => {
     expect(parseRoute("#/bogus").module).toBe(DEFAULT_MODULE);
     expect(parseRoute("#/project/x/bogus").module).toBe(DEFAULT_MODULE);
     expect(parseRoute("#/project/x").module).toBe(DEFAULT_MODULE); // missing module slug
+  });
+});
+
+/* B1373 — the fallback above is what let `#/notes` open silently on a build with no Notes.
+ * Tolerance stays (nothing throws); the miss is now REPORTABLE so the shell can offer a
+ * reload instead of pretending the link resolved. */
+describe("unknownModuleSlug", () => {
+  it("reports the slug this build could not resolve, in every hash shape", () => {
+    expect(unknownModuleSlug("#/notquiteamodule")).toBe("notquiteamodule");
+    expect(unknownModuleSlug("#/project/abc/notquiteamodule")).toBe("notquiteamodule");
+    expect(unknownModuleSlug("#/all/notquiteamodule")).toBe("notquiteamodule");
+  });
+
+  it("is silent for every route this build DOES know, including the shorthands", () => {
+    for (const h of ["", "#", "#/", "#/site", "#/notes", "#/markup", "#/schedule", "#/library",
+      "#/project/abc/notes", "#/all/markup", "#/project/abc"]) {
+      expect(unknownModuleSlug(h)).toBe(null);
+    }
   });
 });
 

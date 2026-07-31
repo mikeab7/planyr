@@ -5,6 +5,25 @@
  * itself, and MOVING is an inline panel that opens under the row — never `window.prompt` /
  * `confirm` / `alert`.
  *
+ * ⛔ THE RAIL SHOWS NAMES. ACTIONS ARE ON A RIGHT-CLICK MENU (B1367).
+ * Every row used to sprout four controls the moment the pointer crossed it — ＋ ✎ ⇅ 🗑 —
+ * plus a ↓ Markdown / ⎙ Print pair repeated under EVERY notebook, duplicating the toolbar's
+ * own two buttons. Owner: "I don't know that I like the hover and then add section, rename,
+ * move, delete. We should get rid of that… Delete should be, like, a right click type
+ * thing." So the row now renders its name (and, on a page, when it was edited) and nothing
+ * else; Add / Rename / Move / Export / Delete live on a context menu opened by right-click.
+ * The house rules survive the move intact: Rename still opens the INLINE field, Delete still
+ * asks inline and still BINS rather than destroys, and the menu is reachable from the
+ * keyboard (see `openMenuFromKeyboard`) so this is not a mouse-only product.
+ *
+ * ⛔ AND THE KEYBOARD DOES NOT DESTROY WHAT THE MOUSE IS MERELY OVER (B1366).
+ * A row's key handler answers Enter/Space (select) and the context-menu keys, and NOTHING
+ * else — Delete and Backspace are deliberately, permanently unhandled here. Hovering is not
+ * intent; a destructive key that acts on whatever the pointer happens to be near is a way to
+ * lose a notebook by resting your hand on the desk. The 30-day bin (B1310) still catches it,
+ * but a bin is a safety net, not a licence. `ui-audit/verify-notes.mjs` presses Delete over
+ * a hovered row and asserts the tree is untouched, so this can never quietly grow back.
+ *
  * ⛔ MOVE IS REACHABLE (B1316). `notesModel` has exported `movePage` / `moveSection` /
  * `moveNotebook` since the module shipped, fully unit-tested across a dozen cases — and NO
  * component called any of them. The tests passed and proved nothing a user could do: a page
@@ -156,22 +175,114 @@ function MovePanel({ kind, depth, destinations, onReorder, onMoveTo, onClose, te
   );
 }
 
-/* One row of the tree, at every depth. `kind` only changes weight and indent — the
- * rename / move / delete / add affordances behave identically, so they live in one place. */
-function TreeRow({
-  id, kind, title, depth, selected, expanded, hasChildren,
-  editing, confirming, onToggle, onSelect, onBeginRename, onCommitRename, onCancelRename,
-  onBeginDelete, onConfirmDelete, onCancelDelete, onAdd, addTitle, badge, onBeginMove, stamp,
-}) {
-  const [hover, setHover] = useState(false);
-  const weight = kind === "notebook" ? 700 : kind === "section" ? 600 : 500;
+/** The row context menu (B1367) — where every row action now lives.
+ *
+ *  Positioned at the pointer and flipped back inside the viewport when it would hang off the
+ *  bottom or the right. It closes on Escape, on an outside press and on a pick; arrow keys
+ *  walk it and Enter chooses, so the menu is fully usable without a mouse. It is NOT a
+ *  dialog: nothing is modal, nothing blocks, and picking Rename opens the inline field on
+ *  the row rather than a box (house rule). */
+function RowMenu({ x, y, items, onClose }) {
+  const ref = useRef(null);
+  useEffect(() => {
+    const onDown = (e) => { if (ref.current && !ref.current.contains(e.target)) onClose(); };
+    const onKey = (e) => { if (e.key === "Escape") { e.preventDefault(); onClose(); } };
+    document.addEventListener("pointerdown", onDown, true);
+    document.addEventListener("keydown", onKey, true);
+    const first = ref.current?.querySelector("button");
+    if (first) first.focus();
+    return () => { document.removeEventListener("pointerdown", onDown, true); document.removeEventListener("keydown", onKey, true); };
+  }, [onClose]);
+
+  const step = (e, d) => {
+    const btns = [...(ref.current?.querySelectorAll("button") || [])];
+    if (!btns.length) return;
+    e.preventDefault();
+    const i = btns.indexOf(document.activeElement);
+    btns[(i + d + btns.length) % btns.length].focus();
+  };
+
+  const vw = typeof window !== "undefined" ? window.innerWidth : 1200;
+  const vh = typeof window !== "undefined" ? window.innerHeight : 800;
+  const height = items.length * 27 + 12;
+
   return (
     <div
+      ref={ref}
+      role="menu"
+      data-testid="notes-row-menu"
+      onKeyDown={(e) => { if (e.key === "ArrowDown") step(e, 1); if (e.key === "ArrowUp") step(e, -1); }}
+      style={{
+        position: "fixed", zIndex: 60,
+        left: Math.min(x, Math.max(8, vw - 208)),
+        top: Math.min(y, Math.max(8, vh - height - 8)),
+        minWidth: 196, padding: "5px 0",
+        background: "var(--surface-raised)", border: "1px solid var(--border-default)",
+        borderRadius: RADIUS.control, boxShadow: "0 14px 36px rgba(0,0,0,0.22)",
+        display: "flex", flexDirection: "column",
+      }}
+    >
+      {items.map((it) => (
+        <button
+          key={it.id}
+          type="button"
+          role="menuitem"
+          data-testid={`notes-menu-${it.id}`}
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={() => { onClose(); it.onPick(); }}
+          style={{
+            ...rowBase, borderRadius: 0, padding: "5px 12px", fontSize: 12.5, fontWeight: 600,
+            color: it.danger ? "var(--danger-text)" : "var(--text-primary)",
+          }}
+        >{it.label}</button>
+      ))}
+    </div>
+  );
+}
+
+/* One row of the tree, at every depth. `kind` only changes weight and indent.
+ *
+ * The row renders its NAME and nothing else (B1367) — no hover controls. Its actions come
+ * from the context menu, which right-click opens and which the keyboard reaches through the
+ * dedicated context-menu key or Shift+F10. Delete/Backspace are deliberately not handled
+ * (B1366): see this file's header. */
+function TreeRow({
+  id, kind, title, depth, selected, expanded, hasChildren,
+  editing, confirming, onToggle, onSelect, onCommitRename, onCancelRename,
+  onConfirmDelete, onCancelDelete, badge, stamp, onMenu,
+}) {
+  const [hover, setHover] = useState(false);
+  const ref = useRef(null);
+  const weight = kind === "notebook" ? 700 : kind === "section" ? 600 : 500;
+
+  /* The keyboard route to the same menu. `ContextMenu` is the dedicated key on a PC
+   * keyboard; Shift+F10 is the chord every desktop platform honours for it. Anchored to the
+   * row's own box, because there is no pointer to anchor to. */
+  const openMenuFromKeyboard = (e) => {
+    const box = ref.current?.getBoundingClientRect();
+    e.preventDefault();
+    onMenu({ x: (box?.left ?? 0) + 24, y: (box?.bottom ?? 0) });
+  };
+
+  return (
+    <div
+      ref={ref}
       data-testid={`notes-row-${id}`}
       data-kind={kind}
+      role="treeitem"
+      tabIndex={0}
+      aria-selected={!!selected}
+      aria-expanded={hasChildren ? !!expanded : undefined}
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
       onClick={onSelect}
+      onContextMenu={(e) => { e.preventDefault(); onMenu({ x: e.clientX, y: e.clientY }); }}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onSelect(); return; }
+        if (e.key === "ContextMenu" || (e.shiftKey && e.key === "F10")) openMenuFromKeyboard(e);
+        // Everything else — Delete and Backspace above all — falls through UNHANDLED, on
+        // purpose. See the header: a key must not destroy the row the pointer is over.
+      }}
       style={{
         ...rowBase,
         paddingLeft: 8 + depth * 13,
@@ -202,17 +313,7 @@ function TreeRow({
           ) : null}
           {confirming ? (
             <ConfirmDelete testid={`notes-del-${id}`} onYes={onConfirmDelete} onNo={onCancelDelete} />
-          ) : hover ? (
-            <span style={{ display: "inline-flex", gap: 1, flex: "0 0 auto" }}>
-              {onAdd ? <MiniButton title={addTitle} testid={`notes-add-${id}`} onClick={onAdd}>＋</MiniButton> : null}
-              <MiniButton title="Rename" testid={`notes-rn-${id}`} onClick={onBeginRename}>✎</MiniButton>
-              <MiniButton title="Move" testid={`notes-mv-${id}`} onClick={onBeginMove}>⇅</MiniButton>
-              <MiniButton title="Delete" tone="danger" testid={`notes-rm-${id}`} onClick={onBeginDelete}>🗑</MiniButton>
-            </span>
           ) : stamp ? (
-            /* The edited time takes the SAME slot the hover controls use, so a page row is
-               never taller or wider for having one — and the controls always win, because
-               a time you can read at a glance is worth less than a control you can reach. */
             <span
               data-testid={`notes-when-${id}`}
               title={stamp.title}
@@ -404,6 +505,8 @@ export default function NotesTree({
   const [confirmingId, setConfirmingId] = useState(null);
   const [movingId, setMovingId] = useState(null);
   const [view, setView] = useState("tree");
+  // The open context menu: { id, x, y, items }. One at a time, by construction.
+  const [menu, setMenu] = useState(null);
 
   const notebooks = useMemo(() => visibleNotebooks(tree, projectId), [tree, projectId]);
   const bin = useMemo(() => trashEntries(tree), [tree]);
@@ -415,16 +518,32 @@ export default function NotesTree({
   const commitRename = (id, text) => { setEditingId(null); onRename(id, text); };
   const confirmDelete = (id) => { setConfirmingId(null); onDelete(id); };
 
-  const rowProps = (id) => ({
+  const beginRename = (id) => { setConfirmingId(null); setMovingId(null); setEditingId(id); };
+  const beginDelete = (id) => { setEditingId(null); setMovingId(null); setConfirmingId(id); };
+  const beginMove = (id) => { setEditingId(null); setConfirmingId(null); setMovingId((m) => (m === id ? null : id)); };
+
+  /* Everything a row can do, in one place, ordered by how often it is wanted and with the
+   * destructive one last and marked. `extra` is the per-kind head of the list (Add section /
+   * Add page / the notebook's two exports); Rename · Move · Delete are common to all three
+   * kinds, which is why they are built here rather than per call site. */
+  const rowProps = (id, { extra = [] } = {}) => ({
     editing: editingId === id,
     confirming: confirmingId === id,
-    onBeginRename: () => { setConfirmingId(null); setMovingId(null); setEditingId(id); },
     onCommitRename: (t) => commitRename(id, t),
     onCancelRename: () => setEditingId(null),
-    onBeginDelete: () => { setEditingId(null); setMovingId(null); setConfirmingId(id); },
     onConfirmDelete: () => confirmDelete(id),
     onCancelDelete: () => setConfirmingId(null),
-    onBeginMove: () => { setEditingId(null); setConfirmingId(null); setMovingId((m) => (m === id ? null : id)); },
+    onMenu: ({ x, y }) => setMenu({
+      id,
+      x,
+      y,
+      items: [
+        ...extra,
+        { id: `rn-${id}`, label: "Rename", onPick: () => beginRename(id) },
+        { id: `mv-${id}`, label: "Move…", onPick: () => beginMove(id) },
+        { id: `rm-${id}`, label: "Delete", danger: true, onPick: () => beginDelete(id) },
+      ],
+    }),
   });
 
   /* Where a page or a section may go. Built from the WHOLE tree rather than the visible
@@ -496,9 +615,18 @@ export default function NotesTree({
               id={nb.id} kind="notebook" title={nb.title} depth={0}
               hasChildren expanded={isOpen(nb.id)} onToggle={() => toggle(nb.id)}
               onSelect={() => toggle(nb.id)}
-              onAdd={() => onAddSection(nb.id)} addTitle="Add section"
               badge={nb.projectId == null ? "Loose" : null}
-              {...rowProps(nb.id)}
+              {...rowProps(nb.id, {
+                /* The notebook's exports moved HERE from a pair of links repeated under
+                   every notebook in the rail (B1365). They are notebook-level (the toolbar's
+                   Print / Markdown are page-level), so they are kept — just not printed
+                   twice per notebook on a surface whose job is showing names. */
+                extra: [
+                  { id: `add-${nb.id}`, label: "Add section", onPick: () => onAddSection(nb.id) },
+                  { id: `md-${nb.id}`, label: "Export notebook to Markdown", onPick: () => onExportNotebook(nb.id) },
+                  { id: `print-${nb.id}`, label: "Print notebook / save as PDF", onPick: () => onPrintNotebook(nb.id) },
+                ],
+              })}
             />
             {movingId === nb.id && (
               <MovePanel
@@ -516,8 +644,7 @@ export default function NotesTree({
                       id={sec.id} kind="section" title={sec.title} depth={1}
                       hasChildren expanded={isOpen(sec.id)} onToggle={() => toggle(sec.id)}
                       onSelect={() => toggle(sec.id)}
-                      onAdd={() => onAddPage(sec.id)} addTitle="Add page"
-                      {...rowProps(sec.id)}
+                      {...rowProps(sec.id, { extra: [{ id: `add-${sec.id}`, label: "Add page", onPick: () => onAddPage(sec.id) }] })}
                     />
                     {movingId === sec.id && (
                       <MovePanel
@@ -548,27 +675,18 @@ export default function NotesTree({
                     ))}
                   </div>
                 ))}
-                <div style={{ display: "flex", gap: 2, paddingLeft: 21 }}>
-                  <button
-                    type="button"
-                    data-testid={`notes-export-${nb.id}`}
-                    onMouseDown={(e) => e.preventDefault()}
-                    onClick={() => onExportNotebook(nb.id)}
-                    style={{ ...rowBase, width: "auto", fontSize: 12, color: "var(--text-tertiary)" }}
-                  >↓ Markdown</button>
-                  <button
-                    type="button"
-                    data-testid={`notes-print-${nb.id}`}
-                    onMouseDown={(e) => e.preventDefault()}
-                    onClick={() => onPrintNotebook(nb.id)}
-                    style={{ ...rowBase, width: "auto", fontSize: 12, color: "var(--text-tertiary)" }}
-                  >⎙ Print / PDF</button>
-                </div>
+                {/* ⛔ The per-notebook "↓ Markdown / ⎙ Print / PDF" pair that used to sit
+                    here is GONE (B1365) — two links repeated under every notebook in the
+                    rail, duplicating the toolbar's own Print and Markdown buttons. They now
+                    live on the notebook's context menu, so nothing is lost and the rail
+                    reads as a list of names again. Do not put them back. */}
               </>
             )}
           </div>
         ))}
       </div>
+
+      {menu && <RowMenu x={menu.x} y={menu.y} items={menu.items} onClose={() => setMenu(null)} />}
     </div>
   );
 }

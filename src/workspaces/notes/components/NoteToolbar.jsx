@@ -17,7 +17,14 @@
  * (≡ ⌸ ☰) are unreadable at control size and differ per platform font.
  *
  * NO DIALOG BOXES (house rule): the link control is an inline field — Enter commits, Esc
- * cancels — never `window.prompt`.
+ * cancels — never `window.prompt`. The table size is picked by sweeping a GRID for the same
+ * reason (B1372), not by a box asking for two numbers.
+ *
+ * THREE THINGS HERE ARE FIXES, NOT DECORATION, and each has its note at the code:
+ *   • text colour and highlight draw DIFFERENT glyphs (B1370) — they were identical;
+ *   • font size sits ON the row (B1371) — it existed, buried in "More", which reads to a
+ *     user as "there is no font size";
+ *   • the table button opens a drag-to-size grid (B1372) — it used to insert a fixed 3×3.
  */
 import { useEffect, useRef, useState } from "react";
 import { HEADING_LEVELS } from "../lib/notesExtensions.js";
@@ -54,7 +61,13 @@ const FONTS = [
   { label: "Georgia", value: "Georgia, serif" }, { label: "Times New Roman", value: "'Times New Roman', Times, serif" },
   { label: "Calibri", value: "Calibri, Candara, sans-serif" }, { label: "Courier New", value: "'Courier New', Courier, monospace" },
 ];
-const SIZES = [null, 10, 12, 14, 16, 18, 20, 24, 32, 48];
+const SIZES = [null, 9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 32, 40, 48, 64];
+
+/* The table grid picker's shape (B1372). It OPENS at this size and GROWS as the pointer
+ * reaches its edge, up to the max — the Word/OneNote behaviour, where a big table is
+ * reachable by dragging further rather than by a dialog asking for two numbers. */
+const GRID_START = 6;
+const GRID_MAX = 12;
 
 /* ---- primitives (module scope — MODULE-SCOPE-COMPONENTS) --------------------------------- */
 
@@ -121,8 +134,46 @@ function Sep() {
   return <span aria-hidden="true" style={{ width: 1, height: 18, background: "var(--border-default)", margin: "0 3px", flex: "0 0 auto" }} />;
 }
 
+/* TEXT COLOUR vs HIGHLIGHT, TOLD APART WITHOUT HOVERING (B1370).
+ *
+ * These two controls sat side by side drawing the IDENTICAL glyph — a letter "A" over a
+ * bar — so the only thing distinguishing "colour the letters" from "run a marker behind
+ * them" was a tooltip you had to stop and wait for. Two different actions that look the
+ * same are one control the user has to guess at every time.
+ *
+ * Now the glyph says which is which: text colour is a letter sitting ON its colour bar
+ * (the bar is the ink), highlight is a MARKER PEN laying a band of colour down. Each one
+ * still carries the colour it will apply, so the button also shows what it will DO. */
+const InkGlyph = ({ swatch }) => (
+  <span style={{ display: "inline-flex", flexDirection: "column", alignItems: "center", gap: 2 }}>
+    <span style={{ fontSize: 12, fontWeight: 800, lineHeight: 1, color: swatch || "inherit" }}>A</span>
+    <span style={{
+      width: 14, height: 3, borderRadius: 2,
+      background: swatch || "var(--border-strong)",
+      border: swatch ? "none" : "1px solid var(--border-strong)",
+    }} />
+  </span>
+);
+
+const MarkerGlyph = ({ swatch }) => (
+  <span style={{ display: "inline-flex", flexDirection: "column", alignItems: "center", gap: 2 }}>
+    {/* A marker pen held at an angle, nib down — read at control size as "highlighter",
+        which the letter-over-a-bar never was. */}
+    <Icon size={13}>
+      <path d="M3.2 10.4l5.1-5.1a1.6 1.6 0 0 1 2.3 0l1.1 1.1a1.6 1.6 0 0 1 0 2.3l-5.1 5.1H3.2z" />
+      <path d="M8.3 5.3l2.4 2.4" />
+    </Icon>
+    <span style={{
+      width: 14, height: 4, borderRadius: 1,
+      background: swatch || "var(--border-strong)",
+      border: swatch ? "none" : "1px solid var(--border-strong)",
+      opacity: swatch ? 1 : 0.7,
+    }} />
+  </span>
+);
+
 /** A swatch popover. Closes on pick, on Escape, and on an outside pointer press. */
-function ColorPopover({ title, swatch, colors, onPick, testid }) {
+function ColorPopover({ title, swatch, colors, onPick, testid, glyph = "ink" }) {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef(null);
   useEffect(() => {
@@ -137,14 +188,7 @@ function ColorPopover({ title, swatch, colors, onPick, testid }) {
   return (
     <span ref={wrapRef} style={{ position: "relative", display: "inline-flex" }}>
       <TBButton title={title} testid={testid} onClick={() => setOpen((o) => !o)}>
-        <span style={{ display: "inline-flex", flexDirection: "column", alignItems: "center", gap: 2 }}>
-          <span style={{ fontSize: 12, fontWeight: 700, lineHeight: 1 }}>A</span>
-          <span style={{
-            width: 14, height: 3, borderRadius: 2,
-            background: swatch || "var(--border-strong)",
-            border: swatch ? "none" : "1px solid var(--border-strong)",
-          }} />
-        </span>
+        {glyph === "marker" ? <MarkerGlyph swatch={swatch} /> : <InkGlyph swatch={swatch} />}
       </TBButton>
       {open && (
         <div
@@ -173,6 +217,121 @@ function ColorPopover({ title, swatch, colors, onPick, testid }) {
               }}
             >{c.value ? "" : "✕"}</button>
           ))}
+        </div>
+      )}
+    </span>
+  );
+}
+
+/** INSERT A TABLE BY DRAGGING OVER A GRID (B1372) — the Word / Excel / OneNote gesture.
+ *
+ *  It replaces a one-shot button that always inserted the same 3×3 and left you to add the
+ *  other rows one at a time. Sweeping the pointer across the grid previews the size, the
+ *  running count is written out so you are never counting squares, and releasing inserts.
+ *  The grid GROWS when the pointer reaches its edge, so a big table needs no dialog — which
+ *  is the house rule, not a preference: `window.prompt` is banned in this module.
+ *
+ *  Keyboard-reachable on purpose: arrows resize the preview, Enter inserts, Esc closes. A
+ *  gesture-only control is one a keyboard user simply cannot use. */
+function TableGridPicker({ onInsert }) {
+  const [open, setOpen] = useState(false);
+  const [dim, setDim] = useState({ rows: 0, cols: 0 });
+  const [grid, setGrid] = useState({ rows: GRID_START, cols: GRID_START });
+  const wrapRef = useRef(null);
+  const gridRef = useRef(null);
+
+  useEffect(() => {
+    if (!open) { setDim({ rows: 0, cols: 0 }); setGrid({ rows: GRID_START, cols: GRID_START }); return undefined; }
+    const onDown = (e) => { if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false); };
+    const onKey = (e) => { if (e.key === "Escape") setOpen(false); };
+    document.addEventListener("pointerdown", onDown, true);
+    document.addEventListener("keydown", onKey);
+    if (gridRef.current) gridRef.current.focus();
+    return () => { document.removeEventListener("pointerdown", onDown, true); document.removeEventListener("keydown", onKey); };
+  }, [open]);
+
+  /* Reaching the last row/column pushes the grid one further, up to the cap — the same
+   * "keep dragging for a bigger table" affordance Word has. It never shrinks mid-gesture,
+   * because a grid collapsing under the pointer would move the cell you were aiming at. */
+  const hover = (r, c) => {
+    setDim({ rows: r, cols: c });
+    setGrid((g) => ({
+      rows: Math.min(GRID_MAX, Math.max(g.rows, r === g.rows ? r + 1 : g.rows)),
+      cols: Math.min(GRID_MAX, Math.max(g.cols, c === g.cols ? c + 1 : g.cols)),
+    }));
+  };
+
+  const insert = (r, c) => {
+    if (r < 1 || c < 1) return;
+    onInsert(r, c);
+    setOpen(false);
+  };
+
+  const onGridKey = (e) => {
+    const step = (dr, dc) => {
+      e.preventDefault();
+      const r = Math.min(GRID_MAX, Math.max(1, (dim.rows || 1) + dr));
+      const c = Math.min(GRID_MAX, Math.max(1, (dim.cols || 1) + dc));
+      hover(r, c);
+    };
+    if (e.key === "ArrowDown") return step(1, 0);
+    if (e.key === "ArrowUp") return step(-1, 0);
+    if (e.key === "ArrowRight") return step(0, 1);
+    if (e.key === "ArrowLeft") return step(0, -1);
+    if (e.key === "Enter" || e.key === " ") { e.preventDefault(); insert(dim.rows || 1, dim.cols || 1); }
+    return undefined;
+  };
+
+  const cells = [];
+  for (let r = 1; r <= grid.rows; r += 1) {
+    for (let c = 1; c <= grid.cols; c += 1) {
+      const on = r <= dim.rows && c <= dim.cols;
+      cells.push(
+        <span
+          key={`${r}-${c}`}
+          data-testid={`nt-table-cell-${r}-${c}`}
+          onMouseEnter={() => hover(r, c)}
+          onMouseDown={stop}
+          onClick={() => insert(r, c)}
+          style={{
+            width: 15, height: 15, borderRadius: 2, cursor: "pointer",
+            border: `1px solid ${on ? "var(--accent-notes)" : "var(--border-strong)"}`,
+            background: on ? "var(--accent-notes)" : "var(--surface-page)",
+          }}
+        />,
+      );
+    }
+  }
+
+  return (
+    <span ref={wrapRef} style={{ position: "relative", display: "inline-flex" }}>
+      <TBButton title="Insert table" testid="nt-table" active={open} onClick={() => setOpen((o) => !o)}><TableIcon /></TBButton>
+      {open && (
+        <div
+          data-testid="nt-table-grid"
+          onMouseDown={stop}
+          style={{
+            position: "absolute", top: 32, left: 0, zIndex: 40, padding: 8,
+            display: "flex", flexDirection: "column", gap: 6,
+            background: "var(--surface-raised)", border: "1px solid var(--border-default)",
+            borderRadius: RADIUS.control, boxShadow: "0 12px 32px rgba(0,0,0,0.20)",
+          }}
+        >
+          <div
+            ref={gridRef}
+            role="grid"
+            tabIndex={0}
+            aria-label="Pick a table size"
+            onKeyDown={onGridKey}
+            onMouseLeave={() => setDim({ rows: 0, cols: 0 })}
+            style={{ display: "grid", gridTemplateColumns: `repeat(${grid.cols}, 15px)`, gap: 3, outline: "none" }}
+          >
+            {cells}
+          </div>
+          {/* The running size, written out — nobody should have to count squares. */}
+          <span data-testid="nt-table-size" style={{ fontSize: 11.5, fontWeight: 700, textAlign: "center", color: "var(--text-secondary)" }}>
+            {dim.rows && dim.cols ? `${dim.cols} × ${dim.rows} table` : "Drag to size"}
+          </span>
         </div>
       )}
     </span>
@@ -392,6 +551,17 @@ export default function NoteToolbar({ editor, onExport, onPrint }) {
       <TBSelect title="Block style" testid="nt-block" width={104}
         value={blockValue ? `h${blockValue}` : "p"} onChange={setBlock} options={HEADING_OPTIONS} />
 
+      {/* FONT SIZE LIVES ON THE ROW (B1371). It was built with the module and worked, but it
+          was inside "More" — and a control nobody can find is one that does not exist: the
+          owner's report was simply "it doesn't seem like there's an option to change font
+          size". Changing size is a while-writing action, which is exactly what B1317 says
+          belongs on the row. Moved, not added: it is gone from the overflow drawer, so the
+          control count is unchanged. */}
+      <TBSelect title="Font size" testid="nt-size" width={72}
+        value={currentSize ? String(parseInt(currentSize, 10)) : null}
+        options={SIZES.map((s) => ({ label: s == null ? "Size" : String(s), value: s }))}
+        onChange={(e) => (e.target.value ? chain().setFontSize(`${e.target.value}px`).run() : chain().unsetFontSize().run())} />
+
       <Sep />
 
       <TBButton title="Bold" testid="nt-bold" active={editor.isActive("bold")} onClick={() => chain().toggleBold().run()}>
@@ -407,9 +577,9 @@ export default function NoteToolbar({ editor, onExport, onPrint }) {
         <span style={{ textDecoration: "line-through", fontSize: 13 }}>S</span>
       </TBButton>
 
-      <ColorPopover title="Text colour" testid="nt-color" swatch={currentColor} colors={TEXT_COLORS}
+      <ColorPopover title="Text colour" testid="nt-color" glyph="ink" swatch={currentColor} colors={TEXT_COLORS}
         onPick={(c) => (c ? chain().setColor(c).run() : chain().unsetColor().run())} />
-      <ColorPopover title="Highlight" testid="nt-highlight" swatch={currentHl} colors={HIGHLIGHT_COLORS}
+      <ColorPopover title="Highlight colour" testid="nt-highlight" glyph="marker" swatch={currentHl} colors={HIGHLIGHT_COLORS}
         onPick={(c) => (c ? chain().setHighlight({ color: c }).run() : chain().unsetHighlight().run())} />
 
       <Sep />
@@ -421,7 +591,7 @@ export default function NoteToolbar({ editor, onExport, onPrint }) {
       <Sep />
 
       <LinkControl editor={editor} />
-      <TBButton title="Insert table" testid="nt-table" onClick={() => chain().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()}><TableIcon /></TBButton>
+      <TableGridPicker onInsert={(rows, cols) => chain().insertTable({ rows, cols, withHeaderRow: true }).run()} />
       <TBButton title="Insert a picture" testid="nt-image" onClick={() => fileRef.current?.click()}><ImageIcon /></TBButton>
       {/* The picker is the deliberate alternative to paste/drop, not a replacement: it is
           how a picture gets in on a device where dragging a file is awkward. */}
@@ -442,10 +612,6 @@ export default function NoteToolbar({ editor, onExport, onPrint }) {
           <TBSelect title="Font" testid="nt-font" width={124} value={currentFont}
             options={FONTS.map((f) => ({ label: f.label, value: f.value }))}
             onChange={(e) => (e.target.value ? chain().setFontFamily(e.target.value).run() : chain().unsetFontFamily().run())} />
-          <TBSelect title="Font size" testid="nt-size" width={62}
-            value={currentSize ? String(parseInt(currentSize, 10)) : null}
-            options={SIZES.map((s) => ({ label: s == null ? "Size" : String(s), value: s }))}
-            onChange={(e) => (e.target.value ? chain().setFontSize(`${e.target.value}px`).run() : chain().unsetFontSize().run())} />
           <TBButton title="Inline code" testid="nt-code" active={editor.isActive("code")} onClick={() => chain().toggleCode().run()}>
             <Icon><path d="M6 4.5L3 8l3 3.5" /><path d="M10 4.5L13 8l-3 3.5" /></Icon>
           </TBButton>

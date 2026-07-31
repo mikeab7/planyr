@@ -33,6 +33,14 @@
   X-Frame-Options: DENY
   Content-Security-Policy: frame-ancestors 'none'
 
+# The deploy stamp (B1373). This file is how a tab that has been open across a deploy finds
+# out it is running yesterday's build — so it is the ONE file that must never be answered
+# from a cache. no-store (not merely no-cache): a revalidated 304 would still be truthful,
+# but no-store removes every intermediary's chance to hand back a stale copy, and the file
+# is a couple of dozen bytes fetched a handful of times an hour.
+/version.json
+  Cache-Control: no-store
+
 # The standalone Sequence page is a self-contained HTML document (no hashed chunks),
 # but it's still HTML — keep it revalidated so a redeploy propagates immediately.
 /sequence/

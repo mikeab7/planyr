@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-07-31 @ `f18e178` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-07-31 @ `fa8b791` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,12 +15,14 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_412 source files mapped._
+_413 source files mapped._
 
 ## infra
 
 - **`src/app/AccountControl.jsx`** — Header right-edge auth surface: signed-in account pill + dropdown (Profile/Team/Settings/Sign out), signed-out Sign-in pill, Cloud-off popover; self-contained ref+open state per instance so kept-alive duplicate headers don't share one anchor (B734)
   - _exports_: `default (AccountControl)`
+- **`src/app/buildSkew.js`** — Notices when this tab is running an older deploy than the one the server is serving, and says so without reloading anything itself
+  - _exports_: `fetchServedBuild`, `installBuildSkewWatch`, `isBuildSkewed`, `LOADED_BUILD`, `shouldOfferReload`, `SKEW_FIRST_CHECK_MS`, `SKEW_POLL_MS`, `VERSION_URL`
 - **`src/app/chunkReload.js`** — Stale-chunk-after-deploy recovery: vite:preloadError listener, cache-busting reloadFresh, cooldown/stuck loop guard, flushAll on unload
   - _exports_: `arrivedViaFreshReload`, `clearReloadGuard`, `hasReloadParam`, `installChunkReloadGuard`, `isChunkLoadError`, `recoveryStage`, `RELOAD_COOLDOWN_MS`, `RELOAD_GUARD_KEY`, `RELOAD_PARAM`, `reloadFresh`, `shouldReloadAfterPreloadError`, `stripReloadParam`
 - **`src/app/ErrorBoundary.jsx`** — Per-workspace React class error boundary: contains render crashes, detects chunk-load errors, offers cache-busting reload vs mid-deploy 'try again'
@@ -34,7 +36,7 @@ _412 source files mapped._
 - **`src/app/recoverableError.js`** — Which render crashes the error boundary may clear by remounting instead of showing a dead end (B1189): classifies React's nested-update circuit breaker (dev text + minified #185) and decides recover-vs-show under a bounded, time-windowed retry budget. — `UPDATE_DEPTH_CODE`, `isUpdateDepthError`, `isRecoverableRenderError`, `MAX_AUTO_RECOVERIES`, `RECOVERY_WINDOW_MS`, `planRecovery`
   - _exports_: `isRecoverableRenderError`, `isUpdateDepthError`, `MAX_AUTO_RECOVERIES`, `planRecovery`, `RECOVERY_WINDOW_MS`, `UPDATE_DEPTH_CODE`
 - **`src/app/route.js`** — Hash-route model: parseRoute/buildHash for {module,projectId,cross}, slug maps, useHashRoute hook with merge-navigate, INITIAL_HASH_EMPTY resume flag
-  - _exports_: `buildHash`, `DEFAULT_MODULE`, `INITIAL_HASH_EMPTY`, `MODULE_BY_SLUG`, `parseRoute`, `readRoute`, `sameRoute`, `SLUG_BY_MODULE`, `useHashRoute`
+  - _exports_: `buildHash`, `DEFAULT_MODULE`, `INITIAL_HASH_EMPTY`, `MODULE_BY_SLUG`, `parseRoute`, `readRoute`, `sameRoute`, `SLUG_BY_MODULE`, `unknownModuleSlug`, `useHashRoute`
 - **`src/app/Shell.jsx`** — App shell: auth state, hash-driven module switching, lazy workspace registry with per-id ErrorBoundary+Suspense, builds the AccountControl auth slot, cross-workspace intents
   - _exports_: `default (Shell)`
 - **`src/main.jsx`** — Entry point: installs client-error telemetry + chunk-reload guard, retires old GIS service worker, renders Shell inside ThemeProvider/StrictMode
