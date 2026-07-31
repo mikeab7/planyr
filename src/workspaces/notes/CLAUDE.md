@@ -44,13 +44,25 @@ seam. Do not "simplify" an image back into the document model.
   **bin**. `deleteNode` is a SOFT delete: it lifts the node into `tree.trash`, still computes the
   FULL cascade of orphaned page ids (TOMBSTONE-DELETES) and stamps it on the entry; `restoreNode` /
   `purgeTrashEntry` / `expiredTrashIds` are the rest of the 30-day lifecycle.
-- `lib/notesStore.js` — **the ONE storage seam.** Keys `planyr:notes:tree:v1:<scope>` and
-  `planyr:notes:page:v1:<scope>:<pageId>`, scope = user id or `local`. The tree holds no bodies,
-  so a keystroke's autosave never rewrites the whole notebook. Also the image API and the
-  **ceilings** (`MAX_IMAGE_BYTES`, `MAX_NOTEBOOK_IMAGE_BYTES`), enforced HERE so no intake path can
-  bypass them, and `purgePages` — the ONE place a note's bytes are actually destroyed (body **and**
-  images). Cloud sync is a change **here and nowhere else**.
-- `lib/notesImageDb.js` — the raw IndexedDB tier under the image store. Nothing else may import it.
+- `lib/notesStore.js` — **the ONE storage seam.** Keys `planyr:notes:tree:v1:<scope>`,
+  `planyr:notes:page:v1:<scope>:<pageId>` and (B1291) `planyr:notes:sync:v1:<scope>`, scope = user id
+  or `local`. The tree holds no bodies, so a keystroke's autosave never rewrites the whole notebook.
+  Also the image API and the **ceilings** (`MAX_IMAGE_BYTES`, `MAX_NOTEBOOK_IMAGE_BYTES`), enforced
+  HERE so no intake path can bypass them, and `purgePages` — the ONE place a note's bytes are
+  actually destroyed (body **and** images). **Read its header for `ROWS-CANONICAL-ON-SEED`, the
+  Notes edition** — which copy of a note wins is written down there, not left to accident.
+- `lib/notesCloud.js` — **the cloud tier UNDER the seam (B1291), and the only file that may talk to
+  Supabase.** The store's public surface did not change when sync landed; this is what grew behind
+  it, reached by a cached dynamic `import()` for the same bundle reason as the image DB. Two halves:
+  the PURE decisions (`mergeTrees` · `planPageSeed` · `planImageSync` · `planAdoption`) and the
+  transport, which takes the client as a parameter so a test can hand it a fake. **`rev` is
+  server-owned** — a `notes_touch_rev` trigger bumps it, so a push sends the GUARD `.eq("rev", base)`
+  and never a rev of its own; zero rows back is a CONFLICT, never a retry. Nothing hard-deletes:
+  `deleted_at` = binned (body intact, so a restore works on the other machine), `purged_at` = gone.
+- `db/notes_cloud_sync.sql` — the APPLIED DDL, committed as a record (production, 2026-07-31,
+  migration `notes_cloud_sync_b1291`). Three own-row-RLS tables + the private `notes-images` bucket.
+- `lib/notesImageDb.js` — the raw IndexedDB tier under the image store, and the local CACHE in front
+  of the cloud bucket. Nothing else may import it.
 - `lib/notesImageIntake.js` — a pasted/dropped file → a downscaled, re-encoded data URL. GIF and
   SVG pass through untouched (a canvas would silently flatten them).
 - `lib/notesImageNode.js` — the `noteImage` schema node + the paste/drop plugin + the node view

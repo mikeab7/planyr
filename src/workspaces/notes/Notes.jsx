@@ -31,15 +31,25 @@ import {
   renameNode, restoreNode, touchPage, trashEntries, trashPageIds, visibleNotebooks,
 } from "./lib/notesModel.js";
 import {
-  clearNotesStorageError, notesScopeLabel, onNotesStorageError, purgePages,
-  readNoteImages, readPage, readTreeRaw, searchNotes, setNotesScope,
-  sweepImagesOfMissingPages, sweepOrphans, writeTree,
+  clearNotesStorageError, markPagesBinned, markPagesRestored, notesConflictFor,
+  notesScopeLabel, notesStorageLine, onNotesConflict, onNotesStorageError, onNotesSyncState,
+  purgePages, readNoteImages, readPage, readTreeRaw, resolveNotesConflict, searchNotes,
+  setNotesScope, startNotesSync, stopNotesSync, sweepImagesOfMissingPages, sweepOrphans,
+  writePage, writeTree,
 } from "./lib/notesStore.js";
 import { imageIdsInDocs, notebookToMarkdown, safeFileName } from "./lib/notesMarkdown.js";
 
 const NoteEditor = lazy(() => import("./components/NoteEditor.jsx"));
 
 const RADIUS = { control: 8, pill: 999 }; // mirrored from shared/ui/controls.jsx — see NoteToolbar
+/* The footer's one line is coloured by what it SAYS, never by anything else — a failed sync
+ * has to read as a failure at a glance, not as quiet grey furniture. Tokens only (B341). */
+const TONE_COLOR = {
+  quiet: "var(--text-tertiary)",
+  good: "var(--save-badge)",
+  warn: "var(--warn-text)",
+  error: "var(--danger-text)",
+};
 const TREE_SAVE_MS = 400;
 const UNDO_MS = 14000;
 
@@ -140,6 +150,48 @@ function UndoBar({ deleted, onUndo, onDismiss }) {
   );
 }
 
+/** TWO DEVICES, ONE PAGE, BOTH EDITED — named, never resolved behind your back.
+ *
+ *  This is the visible half of the concurrency rule: a push refused because the revision
+ *  moved does NOT overwrite and does NOT get thrown away. Both copies exist, this bar says
+ *  so in as many words, and the two buttons are the only ways out. "Keep the other
+ *  computer's" parks this device's text as a page beside it first, so choosing cannot lose
+ *  the edit you did not pick either. */
+function ConflictBar({ conflict, onKeepMine, onKeepTheirs }) {
+  if (!conflict) return null;
+  return (
+    <div
+      role="alert"
+      data-testid="notes-conflict-bar"
+      style={{
+        flex: "none", display: "flex", alignItems: "center", gap: 10, padding: "6px 14px",
+        background: "var(--warn-bg)", borderBottom: "1px solid var(--border-default)",
+        color: "var(--warn-text)", fontSize: 12.5, fontWeight: 600,
+      }}
+    >
+      <span style={{ flex: 1, minWidth: 0 }}>
+        “{conflict.title || "Untitled"}” also changed on another device. Nothing was overwritten — pick which one to keep.
+      </span>
+      <button
+        type="button" data-testid="notes-conflict-mine" onClick={onKeepMine}
+        style={{
+          flex: "0 0 auto", border: "1px solid var(--warn-text)", borderRadius: RADIUS.pill,
+          background: "transparent", color: "var(--warn-text)", font: "inherit",
+          fontSize: 11.5, fontWeight: 700, padding: "2px 10px", cursor: "pointer",
+        }}
+      >Keep this computer’s</button>
+      <button
+        type="button" data-testid="notes-conflict-theirs" onClick={onKeepTheirs}
+        style={{
+          flex: "0 0 auto", border: "1px solid var(--warn-text)", borderRadius: RADIUS.pill,
+          background: "transparent", color: "var(--warn-text)", font: "inherit",
+          fontSize: 11.5, fontWeight: 700, padding: "2px 10px", cursor: "pointer",
+        }}
+      >Keep the other computer’s</button>
+    </div>
+  );
+}
+
 function EmptyState({ onCreate }) {
   return (
     <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", padding: 28, background: "var(--surface-page)" }}>
@@ -200,6 +252,8 @@ export default function Notes({
   const [query, setQuery] = useState("");
   const [highlight, setHighlight] = useState("");
   const [deleted, setDeleted] = useState(null);
+  const [storageLine, setStorageLine] = useState(() => notesStorageLine());
+  const [conflictIds, setConflictIds] = useState([]);
   const treeTimer = useRef(0);
   const treeRef = useRef(null);   // the latest tree, captured at edit time (see the flush note below)
   const undoTimer = useRef(0);
@@ -241,7 +295,36 @@ export default function Notes({
     setQuery("");
     setHighlight("");
     setDeleted(null);
+    setConflictIds([]);
+
+    /* CLOUD SYNC (B1291). Signed out this is a no-op and everything above is the whole
+     * story, unchanged. Signed in, it adopts any signed-out notebooks into the account,
+     * pulls what the other machine wrote, and pushes what this one owes — and calls back
+     * whenever it changed the tree underneath us, so the rail shows the account's truth
+     * rather than this device's stale copy. */
+    let live = true;
+    startNotesSync({
+      onTree: () => {
+        if (!live) return;
+        const next = migrate(readTreeRaw());
+        treeRef.current = next;
+        setTree(next);
+        setActivePageId((cur) => (cur && findPage(next, cur) ? cur : firstPageId(next)));
+      },
+    });
+    return () => { live = false; stopNotesSync(); };
   }, [userId]);
+
+  // LOUD-FAILURE, the cloud half: the footer line is whatever the store says is TRUE.
+  useEffect(() => onNotesSyncState(() => setStorageLine(notesStorageLine())), []);
+  useEffect(() => onNotesConflict((ids) => setConflictIds(ids)), []);
+
+  /* The relative "synced 5m ago" would otherwise freeze at the moment of the last sync and
+   * quietly become a lie the longer the tab stays open. */
+  useEffect(() => {
+    const t = setInterval(() => setStorageLine(notesStorageLine()), 30000);
+    return () => clearInterval(t);
+  }, []);
 
   // LOUD-FAILURE: surface every storage failure the store reports, from anywhere.
   useEffect(() => onNotesStorageError((err) => setStorageError(err)), []);
@@ -345,6 +428,9 @@ export default function Notes({
     const { tree: next, removedPageIds, entry } = deleteNode(tree, id);
     if (!entry) return;
     persistTree(next);
+    // The cloud half of the same cascade: the bodies STAY (that is the bin), the rows are
+    // stamped as binned, so the other computer can restore what this one deleted.
+    markPagesBinned(entry.pageIds);
     if (removedPageIds.includes(activePageId)) setActivePageId(firstPageId(next));
     setDeleted({ id: entry.id, title: entry.title, pageIds: entry.pageIds });
     if (undoTimer.current) clearTimeout(undoTimer.current);
@@ -354,6 +440,7 @@ export default function Notes({
   const handleRestore = useCallback((entryId) => {
     const r = restoreNode(tree, entryId);
     persistTree(r.tree);
+    if (r.pageIds.length) markPagesRestored(r.pageIds);   // …and it reaches the other one back
     setDeleted((d) => (d && d.id === entryId ? null : d));
     if (r.restored && r.pageIds.length) setActivePageId(r.pageIds[0]);
   }, [tree, persistTree]);
@@ -394,6 +481,34 @@ export default function Notes({
   const handleSaved = useCallback((pageId) => {
     const next = touchPage(treeRef.current || tree, pageId);
     if (next !== (treeRef.current || tree)) persistTree(next);
+  }, [tree, persistTree]);
+
+  /* ---- conflicts (B1291) ----
+   *
+   * The store hands over page ids; the titles live here, in the tree. Only the first is
+   * shown — a queue of conflict bars would be its own kind of noise, and resolving one
+   * reveals the next. */
+  const conflict = useMemo(() => {
+    const id = conflictIds.find((pid) => findPage(tree, pid)) || conflictIds[0];
+    if (!id) return null;
+    return { pageId: id, title: findPage(tree, id)?.page?.title || "" };
+  }, [conflictIds, tree]);
+
+  const handleConflict = useCallback(async (pageId, choice) => {
+    /* ⛔ "Keep the other computer's" PARKS THIS DEVICE'S TEXT FIRST, as a page beside the
+     * one being replaced. Without that step the choice would destroy an edit the user made
+     * — and "never a lost edit" would be a slogan rather than a property. */
+    if (choice === "theirs") {
+      const base = treeRef.current || tree;
+      const hit = findPage(base, pageId);
+      const localDoc = readPage(pageId);
+      if (hit && localDoc != null) {
+        const r = addPage(base, hit.section.id, { title: `${hit.page.title} (this computer’s copy)` });
+        if (r.pageId && writePage(r.pageId, localDoc)) persistTree(r.tree);
+      }
+    }
+    const res = await resolveNotesConflict(pageId, choice);
+    if (!res.ok) setExportNote(res.error || "That copy could not be saved — nothing was changed.");
   }, [tree, persistTree]);
 
   /* ---- export + print ---- */
@@ -465,6 +580,11 @@ export default function Notes({
       <StorageBanner error={storageError} onDismiss={() => { clearNotesStorageError(); setStorageError(null); }} />
       <ExportNotice note={exportNote} onDismiss={() => setExportNote(null)} />
       <UndoBar deleted={deleted} onUndo={() => handleRestore(deleted.id)} onDismiss={() => setDeleted(null)} />
+      <ConflictBar
+        conflict={conflict}
+        onKeepMine={() => handleConflict(conflict.pageId, "mine")}
+        onKeepTheirs={() => handleConflict(conflict.pageId, "theirs")}
+      />
 
       <div style={{ flex: 1, minHeight: 0, display: "flex" }}>
         <NotesTree
@@ -522,14 +642,19 @@ export default function Notes({
 
           <div
             data-testid="notes-scope-label"
+            data-sync-tone={storageLine.tone}
             style={{
               flex: "none", padding: "5px 14px", borderTop: "1px solid var(--border-default)",
-              background: "var(--surface-raised)", color: "var(--text-tertiary)", fontSize: 11.5, fontWeight: 600,
+              background: "var(--surface-raised)", color: TONE_COLOR[storageLine.tone] || "var(--text-tertiary)",
+              fontSize: 11.5, fontWeight: 600,
             }}
           >
-            {/* Says "on this device" because that is TRUE today. When cloud sync lands this
-                string changes with it — see notesStore.notesScopeLabel(). */}
-            {scopeLabel} · not synced to the cloud yet
+            {/* ONE line, and it is whatever is TRUE right now — saved locally / syncing /
+                synced with a real time / offline / failed with a reason. It REPLACES the
+                old "{scope} · not synced to the cloud yet" sentence rather than joining it
+                (PANEL-BREVITY); the wording is decided once, in notesStore.notesStorageLine,
+                so this surface cannot claim a sync the store did not make. */}
+            {storageLine.text}
           </div>
         </div>
       </div>
