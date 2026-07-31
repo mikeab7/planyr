@@ -113,6 +113,8 @@ import { measureLabelModel, measureChipLines, headlineIndex, measureSegments, fm
 import { pushRecent, notePick, commitPick } from "../../shared/ui/colorRecents.js";
 import { CLIP_KINDS, collectClipboard, clipboardBBox, pasteClipboard, translateCalloutBy, translateParcelBy } from "./lib/planClipboard.js";
 import { remapBondRefs } from "./lib/bondRemap.js";
+import { SETBACK_CHIP, setbackChipPlateW, setbackChipSpawn, numEditBox } from "./lib/numEditBox.js";
+import NumEditField from "./components/NumEditField.jsx";
 import { usePalette } from "../../shared/theme/ThemeProvider.jsx";
 import { NUM_FONT, TABULAR_NUMS } from "../../shared/theme/typography.js";
 import { pickInMarquee, hasSelMod, nextSelection } from "../../shared/markup/selection.js";
@@ -1794,7 +1796,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [calloutDraft, setCalloutDraft] = useState(null); // {tip:{x,y}} while placing a callout
   const [editCallout, setEditCallout] = useState(null);   // {id, text, isNew} while typing a callout inline
   const [addLeaderFor, setAddLeaderFor] = useState(null); // B919: callout id armed by "Add Leader" — the NEXT map click drops the new leader's tip there (feet)
-  const [numEdit, setNumEdit] = useState(null);           // {fx,fy (feet), value, onCommit} — inline numeric edit, NEVER a dialog box
+  const [numEdit, setNumEdit] = useState(null);           // {fx,fy (feet), value, onCommit, chipKey?} — inline numeric edit, NEVER a dialog box. NEW-1: `chipKey` names the setback chip that spawned it, which then renders the editor IN PLACE of itself (and the floating fallback below stands down)
   const [mkRect, setMkRect] = useState(null);   // {kind, a:{x,y}, b:{x,y}} drag-draw a markup rect/ellipse/line
   const [mkPoly, setMkPoly] = useState(null);   // {kind, pts:[{x,y}]} click-draw a markup polygon/polyline
   const [mkStyle, setMkStyle] = useState(MK_DEFAULT); // current markup style (sticky)
@@ -14479,8 +14481,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
      NEW-4 — this whole group is CHROME, and it renders in the selection-chrome layer ABOVE the
      site elements (see the `data-export="skip"` group at the end of the canvas), not down in the
      parcel band where a building painted straight over it. */
-  const CHIP_H = 15;
-  const chipPlateW = (txt) => Math.max(22, Math.round(String(txt).length * 5.35 + 10));
+  // NEW-1 — the plate's metrics moved to `lib/numEditBox.js` (unchanged numbers) so the in-place
+  // editor and the guard test measure themselves against the REAL chip, never a copy of it.
+  const CHIP_H = SETBACK_CHIP.h;
+  const chipPlateW = setbackChipPlateW;
   const setbackChipNodes = (() => {
     if (!settings.showSetback || !selParcel || !selRuns) return null;
     // The exception to the zoom floor: the user is IN the setback editor (drilled past the
@@ -14510,10 +14514,28 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
        pills were competing with the buildings, the property line and the dimension text for
        attention. It is a control, not a headline — so it stays a click target and keeps its
        Alt-click segment override, it just stops shouting. */
+    /* NEW-1 — clicking a chip turns THAT CHIP into the field. The pill keeps its place and its
+       size, its text becomes editable with the value selected, and the static chip is SUPPRESSED
+       while its editor is open (the `if` returns instead of falling through) so the number can
+       never be on screen twice. Nothing grows, nothing moves, and nothing lands on the building,
+       the setback line or the red setback handles — which is what the old 96 × 30 floating box,
+       painted ABOVE the anchor, did to every one of them at once. */
     const pill = (key, anchor, txt, onEdit) => {
       const w = chipPlateW(txt);
+      if (numEdit?.chipKey === key) {
+        // The plate's own box — same centre, same width, same height, same corner, same type scale.
+        const box = numEditBox({ px: anchor.x, py: anchor.y }, { ...setbackChipSpawn(txt), w });
+        return (
+          <g key={key} data-testid="setback-chip-editing">
+            <NumEditField box={box} value={numEdit.value} ariaLabel="Setback (feet)"
+              testId="setback-chip-input" plate={chipStyle.plate} ink={chipStyle.text} border={PAL.accent}
+              onChange={(v) => setNumEdit((s) => (s ? { ...s, value: v } : s))}
+              onCommit={commitNumEdit} onCancel={cancelNumEdit} />
+          </g>
+        );
+      }
       return (
-        <g key={key} style={{ cursor: "pointer" }} onPointerDown={(e) => { e.stopPropagation(); const fp = p2f(e.clientX, e.clientY); onEdit(fp, e.altKey); }}>
+        <g key={key} style={{ cursor: "pointer" }} onPointerDown={(e) => { e.stopPropagation(); const fp = p2f(e.clientX, e.clientY); onEdit(fp, e.altKey, key); }}>
           <rect data-testid="setback-chip" x={anchor.x - w / 2} y={anchor.y - CHIP_H / 2 - 1} width={w} height={CHIP_H} rx={3.5}
             fill={chipStyle.plate} stroke={chipStyle.stroke} strokeWidth={1} strokeOpacity={0.5} />
           <text data-testid="setback-chip-text" x={anchor.x} y={anchor.y + 3} textAnchor="middle" fontSize="9.5"
@@ -14540,7 +14562,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const cands = sbEditMode === "segment"
       ? selParcel.points.map((_, i) => ({
           key: `sbl${i}`, anchorEdge: i, lenFt: edgeLenFt(i), role: roles[i], value: sb[i], priority: edgeLenFt(i),
-          onEdit: (fp) => setNumEdit({ fx: fp.x, fy: fp.y, value: String(sb[i]), onCommit: (v) => setEdgeSetback(selParcel, i, v) }),
+          // `chipKey` comes from the pill that was clicked (never re-derived here), so the
+          // in-place editor and the chip it replaces can never disagree about which one it is.
+          onEdit: (fp, alt, chipKey) => setNumEdit({ fx: fp.x, fy: fp.y, chipKey, value: String(sb[i]), onCommit: (v) => setEdgeSetback(selParcel, i, v) }),
         }))
       : parcelChipRuns(selParcel).map((run, ri) => {
           const val = runSetbackValue(run, sb);
@@ -14549,12 +14573,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             role: roles[run.anchorEdge], value: val, priority: run.anchorLenFt,
             // Alt-click still overrides just the nearest SEGMENT of the run, so a notch inside a
             // grouped side is reachable without leaving side mode.
-            onEdit: (fp, alt) => {
+            onEdit: (fp, alt, chipKey) => {
               const altSeg = (alt && run.edges.length > 1) ? run.edges.reduce((best, ei) => {
                 const q = nearestOnSeg(fp, selParcel.points[ei], selParcel.points[(ei + 1) % n]);
                 const d = Math.hypot(fp.x - q.x, fp.y - q.y); return d < best.d ? { ei, d } : best;
               }, { ei: run.edges[0], d: Infinity }).ei : null;
-              setNumEdit({ fx: fp.x, fy: fp.y, value: String(val == null ? (sb[run.edges[0]] ?? 0) : val),
+              setNumEdit({ fx: fp.x, fy: fp.y, chipKey, value: String(val == null ? (sb[run.edges[0]] ?? 0) : val),
                 onCommit: (v) => (altSeg != null ? setEdgeSetback(selParcel, altSeg, v) : setRunSetback(selParcel, run, v)) });
             },
           };
@@ -17595,18 +17619,21 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
 
               {/* Inline numeric editor — road width / per-edge setback / overlay trace length. NEVER a dialog box. */}
               {numEdit && <rect x={-100000} y={-100000} width={200000} height={200000} fill="transparent" pointerEvents="all" onPointerDown={(e) => { e.stopPropagation(); commitNumEdit(); }} />}
-              {numEdit && (() => {
+              {/* NEW-1 — the FLOATING fallback, for the callers whose anchor is no chip (road
+                  width, overlay trace length, element resize, aerial calibration). A setback chip
+                  renders its own editor IN PLACE of itself, so this stands down for those
+                  (`!numEdit.chipKey`) and the value is never on screen twice. What used to be a
+                  96 × 30 monospace box with a 2px border and a drop shadow, centred over the
+                  anchor and on top of the geometry, is now at chip scale, in the app's own tokens,
+                  and offset up-and-to-the-side so the dimension it is editing stays readable. */}
+              {numEdit && !numEdit.chipKey && (() => {
                 const bp = f2p({ x: numEdit.fx, y: numEdit.fy });
-                const W = 96, H = 30;
+                const box = numEditBox({ px: bp.x, py: bp.y }, null);
                 return (
-                  <foreignObject x={bp.x - W / 2} y={bp.y - H - 8} width={W} height={H} style={{ overflow: "visible" }}>
-                    <input autoFocus type="number" value={numEdit.value}
-                      onChange={(e) => setNumEdit((s) => ({ ...s, value: e.target.value }))}
-                      onBlur={commitNumEdit}
-                      onPointerDown={(e) => e.stopPropagation()}
-                      onKeyDown={(e) => { e.stopPropagation(); if (e.key === "Enter") { e.preventDefault(); commitNumEdit(); } else if (e.key === "Escape") { e.preventDefault(); cancelNumEdit(); } }}
-                      style={{ width: W, height: H, border: `2px solid ${PAL.accent}`, borderRadius: 6, padding: "2px 6px", fontSize: 13, fontFamily: "ui-monospace, Menlo, monospace", fontWeight: 600, color: PAL.ink, background: SURF_RAISED, outline: "none", boxSizing: "border-box", boxShadow: "0 4px 14px rgba(0,0,0,0.18)" }} />
-                  </foreignObject>
+                  <NumEditField box={box} value={numEdit.value} ariaLabel="Value (feet)"
+                    plate={SURF_RAISED} ink={PAL.ink} border={PAL.accent}
+                    onChange={(v) => setNumEdit((s) => (s ? { ...s, value: v } : s))}
+                    onCommit={commitNumEdit} onCancel={cancelNumEdit} />
                 );
               })()}
 

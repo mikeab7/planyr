@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-07-31 @ `aceac10` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-07-31 @ `040a3c4` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_408 source files mapped._
+_410 source files mapped._
 
 ## infra
 
@@ -279,6 +279,8 @@ _408 source files mapped._
   - _exports_: `default (LayerPanel)`
 - **`src/workspaces/site-planner/components/LazyPanel.jsx`** — Scaffold every lazily-loaded planner panel mounts behind: a height-reserving Suspense fallback (so a deferred panel cannot jump in) plus a per-panel error boundary that contains a failed chunk to that panel and offers the cache-busting reload on a stale deploy.
   - _exports_: `default (LazyPanel)`, `PanelErrorBoundary`, `PanelFallback`
+- **`src/workspaces/site-planner/components/NumEditField.jsx`** — the ONE canvas inline numeric editor: chip-scale field, no native spinners, Enter/Escape/blur commit, Arrow nudge
+  - _exports_: `default (NumEditField)`
 - **`src/workspaces/site-planner/components/ParcelDataPanel.jsx`** — The selected lot's county record + taxing units, lazily loaded: an Owner headline that never repeats as a row, three short rows, and the rest (incl. the height-capped Legal description) behind one closed fold — the row split shared with the map-search card
   - _exports_: `default`, `ParcelAppraisal`, `ParcelTaxes`
 - **`src/workspaces/site-planner/components/ParcelInfoCard.jsx`** — The address-search parcel card: three rows by default (owner / account / acreage), everything else behind a height-capped fold
@@ -559,6 +561,8 @@ _408 source files mapped._
   - _exports_: `MULTIWRITER_DEFAULT`, `MULTIWRITER_KEY`, `multiwriterEnabled`
 - **`src/workspaces/site-planner/lib/nhdFlowline.js`** — USGS NHD hydrography decoding (B1072, pure): FType code → plain English (canal/ditch, stream/river…), watercourse title/summary, and the standing inventory-not-a-regulatory-product caveat
   - _exports_: `flowlineSummary`, `flowlineTitle`, `ftypeLabel`, `NHD_FTYPE`, `NHD_INVENTORY_NOTE`
+- **`src/workspaces/site-planner/lib/numEditBox.js`** — where the inline numeric editor paints and at what size: in-place chip box, floating fallback, the not-bigger-than-its-spawn invariant, keyboard nudge
+  - _exports_: `nudgeNumEditValue`, `NUMEDIT_FLOAT`, `numEditBox`, `numEditFitsSpawn`, `SETBACK_CHIP`, `setbackChipPlateW`, `setbackChipSpawn`
 - **`src/workspaces/site-planner/lib/outletStructure.js`** — Pond OUTLET STRUCTURE model + stage→discharge rating curve (NEW-A2): orifice / weir / restrictor / multistage discharge (with tailwater submergence), inverse orifice sizing, default-outlet proposal, validation. Pure hydraulics.
   - _exports_: `DEFAULT_ORIFICE_C`, `DEFAULT_WEIR_C`, `defaultOutletForPond`, `orificeAreaSf`, `OUTLET_KINDS`, `outletDischarge`, `outletLowestElev`, `outletProblems`, `sizeOrificeForRelease`, `sizeWeirForRelease`, `stageDischarge`
 - **`src/workspaces/site-planner/lib/overlayAlign.js`** — Pure overlay alignment math: image-point-to-world, scale-about-a-point, 2-point and least-squares Procrustes similarity transforms (scale+rotate+translate) with RMS residual

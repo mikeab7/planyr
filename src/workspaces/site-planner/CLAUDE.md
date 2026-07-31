@@ -662,6 +662,22 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   never of the live zoom. It IS on the boot path (SitePlanner imports it statically, ~1 KB pure). PDF-PARITY: `printMetricPairs`/`printStormwaterBars` deliberately stay in
   `SitePlanner.jsx` so screen and sheet read one derivation.
 
+- **`lib/numEditBox.js` + `components/NumEditField.jsx` (NEW-1) — the canvas's ONE inline numeric
+  editor, and the rule that it may never be bigger than the control it edits.** Clicking a setback
+  chip turns THAT CHIP into the field: same footprint, same type scale, same corner, and the static
+  chip is suppressed while its editor is open, so the number can never be on screen twice. The
+  editor is SHARED (road width · element dimension · overlay trace length · aerial calibration); a
+  caller with no chip gets the FLOATING fallback — same styling, brought to chip scale, OFFSET off
+  the anchor so it doesn't sit on the geometry being measured. Three things not to undo: **(a)** the
+  chip metrics live in `numEditBox.js`, not at the render site, so plate and field cannot drift;
+  **(b)** the field is `display:block` — an `<input>` is inline-level, so inside a `<foreignObject>`
+  the line-box strut drifts it several px below the plate (measured; the same trap B1140 hit with the
+  contour hover label); **(c)** `input[type=number]` spinners are suppressed app-wide in the
+  global stylesheet (repo-root `src/`) and replaced by ArrowUp/ArrowDown — the UA chevrons are bigger than the digits on a pill this size.
+  Guards: the repo-root `test/` suite **numEditInPlace** + the ui-audit harness
+  **verify-numedit-inplace** (real browser, two zooms × both themes, all three floating callers,
+  with the parcel grips proven still clickable while the editor is open).
+
 **Conventions:** feet everywhere internal (convert only at the map boundary); theme tokens
 never raw hex; inline editors never `window.prompt/confirm/alert`. See `/CLAUDE.md` KEY DECISIONS.
 

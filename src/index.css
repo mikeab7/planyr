@@ -386,6 +386,16 @@ input[type="color"]::-webkit-color-swatch-wrapper { padding: 2px; }
 input[type="color"]::-webkit-color-swatch { border: 1px solid rgba(0,0,0,.18); border-radius: 5px; }
 input[type="color"]::-moz-color-swatch { border: 1px solid rgba(0,0,0,.18); border-radius: 5px; }
 
+/* number inputs — NO browser-painted spinners, anywhere (NEW-1).
+   The canvas's inline numeric editor is a 26px pill sitting on the drawing; the UA's up/down
+   chevrons are bigger than the digits, match nothing else in the app, and were two grey arrows
+   over the geometry in the owner's screenshot. Steppers in this app are the app's own
+   (NumInput / RotationStepper); on the canvas editor it's ArrowUp/ArrowDown instead. Suppressed
+   app-wide rather than per-field so a new number input can't reintroduce them. */
+input[type="number"] { appearance: textfield; -moz-appearance: textfield; }
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; appearance: none; margin: 0; }
+
 /* range sliders — slim track */
 input[type="range"] { height: 18px; }
 
