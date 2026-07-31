@@ -193,6 +193,68 @@ await page.goto(BASE, { waitUntil: "load" });
 await page.waitForSelector("svg[role=application]", { timeout: 60_000 });
 const box = await page.locator("svg[role=application]").boundingBox();
 const cx = box.x + box.width / 2, cy = box.y + box.height / 2;
+
+/* ---- LONG-SESSION DEGRADATION MODE (B1357) ---------------------------------------------------
+ * "Does zoom degrade the longer I stay on a site?" — the owner's question, and one nothing in this
+ * repo could answer, because every instrument here measures a FRESH page. This mode runs the same
+ * reference gestures at t=0 and again after each round of a realistic session workload, records
+ * every counter that could explain a move, states a noise floor measured on this machine in this
+ * run, and refuses to call anything real that does not clear it.
+ *
+ * It short-circuits the rest of the harness deliberately: the budget metrics below all describe a
+ * fresh load and mean nothing after twenty minutes of driving. The protocol lives in
+ * ui-audit/lib/longSession.mjs so it is unit-testable; everything it needs — the seeded Goose Creek
+ * scenario, the rAF frame sampler, the CPU/DPR emulation, the frame-sampling trust rules — is
+ * inherited from the setup above rather than re-derived.
+ *
+ *   node ui-audit/perf-harness.mjs --no-tiles --cpu-throttle 4 --long-session
+ *   node ui-audit/perf-harness.mjs --no-tiles --cpu-throttle 4 --long-session --arm grow --rounds 6
+ */
+if (process.argv.includes("--long-session")) {
+  const { runLongSession, DEFAULT_ROUNDS, DEFAULT_REPS } = await import("./lib/longSession.mjs");
+  const arm = (() => { const i = process.argv.indexOf("--arm"); const v = i >= 0 ? String(process.argv[i + 1]) : "hold"; return ["hold", "grow"].includes(v) ? v : "hold"; })();
+  const out = await runLongSession(page, {
+    cx, cy,
+    visibility: await page.evaluate(() => document.visibilityState),
+    minFps: MIN_FPS,
+    faultFor: frameSamplingFaultFor,
+    rounds: numArg("--rounds", DEFAULT_ROUNDS),
+    reps: numArg("--reps", DEFAULT_REPS),
+    arm,
+  });
+  await browser.close();
+  const res = { base: BASE, scenario: site.id, cpuThrottle: CPU_THROTTLE, deviceScaleFactor: DPR, ...out };
+  if (JSON_OUT) console.log(JSON.stringify(res, null, 2));
+  else {
+    console.log(`Long-session degradation — arm "${out.arm}" (${out.arm === "hold" ? "THE PLAN NEVER CHANGES — anything that moves is retention" : "elements are ADDED — this arm sizes load, not retention"})`);
+    console.log(`  target: ${BASE}  ·  scenario: ${site.id}  ·  cpu ${CPU_THROTTLE}x, dpr ${DPR}  ·  ${out.rounds} rounds after ${out.reps} baseline repeats\n`);
+    console.log(`  NOISE FLOOR, measured here: wheel ±${out.noiseFloor.floorPct ?? "—"}% (${out.noiseFloor.min}–${out.noiseFloor.max} ms across ${out.reps} repeats${out.noiseFloor.quantumFloored ? ", floored at one frame quantum — the repeats were identical" : ""}) · pan ±${out.panNoiseFloor.floorPct ?? "—"}%`);
+    console.log(`  Nothing below the floor is reported as a finding.\n`);
+    console.log(`  round │ wheel med │ pan med │ pan commits/move │  heap │ canvas nodes │ doc nodes │ tiles │ drawn els │ added`);
+    for (const c of out.series) {
+      console.log(`  ${String(c.round).padStart(5)} │ ${String(c.wheelMedianMs ?? "—").padStart(9)} │ ${String(c.panMedianMs ?? "—").padStart(7)} │ ${String(c.panCommitsPerMove).padStart(16)} │ ${String(c.counters.heapMB ?? "—").padStart(5)} │ ${String(c.counters.canvasNodes).padStart(12)} │ ${String(c.counters.documentNodes).padStart(9)} │ ${String(c.counters.tiles).padStart(5)} │ ${String(c.counters.elementsDrawn).padStart(9)} │ ${String(c.added).padStart(5)}`);
+      if (c.wheelFault) console.log(`        ⚠ wheel median SUPPRESSED — ${c.wheelFault}`);
+      if (c.panFault) console.log(`        ⚠ pan median SUPPRESSED — ${c.panFault}`);
+      if (c.round > 0 && !c.wheelMoved) console.log(`        ⚠ the wheel gesture did not move the view — this checkpoint measured an idle page`);
+      if (c.round > 0 && !c.panMoved) console.log(`        ⚠ the pan gesture did not move the view — this checkpoint measured an idle page`);
+    }
+    const totalAdded = out.series.reduce((n, c) => n + (c.added || 0), 0);
+    if (out.arm === "grow" && totalAdded === 0) {
+      console.log(`\n  ⛔ THE "grow" ARM ADDED NOTHING — it could not reach the draw tool, so this run is a second copy of the "hold" arm and says NOTHING about load. Do not read it as one.`);
+    }
+    const v = out.verdict;
+    console.log(`\n  VERDICT — wheel: ${v.wheel.verdict}${v.wheel.changePct == null ? "" : ` (${v.wheel.changePct > 0 ? "+" : ""}${v.wheel.changePct}% vs the ±${out.noiseFloor.floorPct}% floor)`}`);
+    console.log(`           pan:   ${v.pan.verdict}${v.pan.changePct == null ? "" : ` (${v.pan.changePct > 0 ? "+" : ""}${v.pan.changePct}% vs the ±${out.panNoiseFloor.floorPct}% floor)`}`);
+    console.log(`  counters start → end: heap ${v.heapMB.from} → ${v.heapMB.to} MB · canvas nodes ${v.canvasNodes.from} → ${v.canvasNodes.to} · document nodes ${v.documentNodes.from} → ${v.documentNodes.to} · tile <img> ${v.tiles.from} → ${v.tiles.to} (DECODED ${v.tilesLoaded.from} → ${v.tilesLoaded.to}) · drawn elements ${v.elementsDrawn.from} → ${v.elementsDrawn.to}`);
+    if (out.correlations.length) {
+      console.log(`\n  Which counter moved WITH the wheel cost (weak evidence over ${out.series.length} points — a name for a suspect, never a proof):`);
+      for (const c of out.correlations.slice(0, 5)) console.log(`      r=${String(c.r).padStart(5)}  ${c.counter}  (${c.from} → ${c.to})`);
+    }
+    if (out.tileCaveat) console.log(`\n  ⚠ ${out.tileCaveat}`);
+  }
+  process.exit(0);
+}
+
 await page.mouse.move(cx, cy);
 await page.mouse.down();
 await page.mouse.move(cx + 40, cy + 30, { steps: 4 });
@@ -209,6 +271,18 @@ results.timeToFirstDragMs = Math.round(await page.evaluate(() => new Promise((re
  * rasterIdentifyMap, rasterIdentify, featureHover, terrainLayers) turn out to be fetched at
  * BOOT, before any gesture — `lazyChunksAfterBoot` measures empty. So the red is real, not an
  * artefact of when the list was read, and the guard is doing its job. Owned by its own item. */
+/* ⚠ AND IT MUST SETTLE FIRST (B1349, 2026-07-31) — THIS GUARD COULD SILENTLY PASS.
+ * The snapshot was taken the instant the time-to-first-drag gesture returned, which made the
+ * metric a RACE against React's own mount effects: a boot-path `import()` fired from an effect is
+ * only in `jsChunks` if it has been REQUESTED by that moment, and whether it has depends on how
+ * fast the machine is. Measured on this container within one session: the same build reported all
+ * five intruders when time-to-first-drag was 7.1 s and NONE of them when the box warmed up and the
+ * same figure fell to 4.4 s. A guard that reports "clean" because the machine got faster is worse
+ * than no guard — it is the B1086 trap in a new place, and it nearly certified an unverified fix.
+ * B1349's own definition of the defect is "in flight on an idle page, no gesture, four seconds of
+ * idle", so the metric now waits for exactly that: a settle window with no gesture in it. */
+const BOOT_SETTLE_MS = 4000;
+await page.waitForTimeout(BOOT_SETTLE_MS);
 const bootChunks = [...new Set(jsChunks)];
 
 results.firstContentfulPaintMs = Math.round(

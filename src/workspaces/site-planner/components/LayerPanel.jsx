@@ -106,7 +106,21 @@ export default function LayerPanel({
   useEffect(() => subscribeRelevance((p) => { setMode(p.mode); setRadius(p.radius); }), []);
   const [revealHidden, setRevealHidden] = useState({}); // per-group reveal in "hide" mode
   const [floodCopy, setFloodCopy] = useState(null);     // the lazily-loaded flood copy tier (below)
-  useEffect(() => { import("../lib/floodZoneCopy.js").then(setFloodCopy).catch(() => {}); }, []);
+  /* B1349 — LOADED WHEN THERE IS SOMETHING FOR IT TO SAY, not at mount.
+   * This was a bare `[]` effect, so the chunk was fetched the moment ANY LayerPanel mounted —
+   * and the map finder's panel mounts at boot on a desktop width even while the planner is the
+   * visible workspace. The runtime half of the perf harness caught it by name: `floodZoneCopy`
+   * in flight on an idle page with no gesture, which made B1130's "moved off the boot path"
+   * justification untrue as stated.
+   * The gate is EXACT, not a heuristic: this module's only consumer here is `femaZoneVerdict`,
+   * which returns null for anything without `flood.state` (floodZoneCopy.js), so every case we
+   * now skip is a case that rendered nothing anyway. No first-paint gap, no spinner, no honest
+   * line lost — see the `femaVerdict` note below. */
+  const hasFloodFacts = !!floodContext?.flood?.state;
+  useEffect(() => {
+    if (!hasFloodFacts) return;
+    import("../lib/floodZoneCopy.js").then(setFloodCopy).catch(() => {});
+  }, [hasFloodFacts]);
   // Collapsible groups so the panel fits on one page without scrolling (B97). Collapse state
   // persists per device; each header shows how many layers in the group are currently on.
   const [collapsed, setCollapsed] = useState(() => { try { return JSON.parse(localStorage.getItem("planarfit:layerGroups:v1") || "{}") || {}; } catch (_) { return {}; } });
