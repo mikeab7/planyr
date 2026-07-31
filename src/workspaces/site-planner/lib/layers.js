@@ -906,7 +906,19 @@ export async function fetchWithRetry(url, opts = {}, tries = 3) {
  * `.error` as a failure (surfacing the server's message). Cached with a short TTL
  * so re-probing is cheap and stopped services self-heal on the next probe. */
 const PROBE_TTL = 40000;
+/* NEW-4(e) — BOUNDED. This was the last unbounded module-level cache after B1162: one entry per
+ * distinct service URL probed, never evicted, for the whole session. The entries are small
+ * (`{ ok, error, ts }` plus an optional published extent), so the payoff is small too — but an
+ * unbounded Map keyed on strings that arrive from a registry and from user-toggled layers is a leak
+ * by shape, and "small" is not an invariant anyone maintains. Insertion-order eviction over a cap
+ * far above the number of services this app can reach; a probe evicted early simply re-probes,
+ * which is the same thing the TTL already does every 40 s. */
+const PROBE_CACHE_MAX = 400;
 const _probeCache = new Map(); // url -> { ok, error, ts }
+const probeCacheSet = (url, rec) => {
+  if (_probeCache.size >= PROBE_CACHE_MAX && !_probeCache.has(url)) _probeCache.delete(_probeCache.keys().next().value);
+  _probeCache.set(url, rec);
+};
 // One ?f=json read of a service root → a typed health result. Pulled out of probeService so the
 // SAME parse can run against the direct URL or the proxy URL (B469/NEW-6). Never throws.
 async function probeOnce(probeUrl) {
@@ -966,7 +978,7 @@ export async function probeService(url, opts) {
     }
   }
   result.ts = Date.now();
-  _probeCache.set(key, result);
+  probeCacheSet(key, result);   // NEW-4(e) — the one write path, so the cap can't be bypassed
   return result;
 }
 

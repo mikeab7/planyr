@@ -392,6 +392,26 @@ rules are binding shorthand, not optional style. (Full-text home so briefs stay 
   basemap pan-compensation + tile ghost (**B837** `SitePlanner.jsx` `panelShiftRef` / geo `sizeChanged`;
   **B65** `geoGhostRef`) and the Doc Review sheet-rail compensation + stitch-return re-raster
   (**B838** `DocReview.jsx`).
+- **CHROME-NEVER-EATS-A-PRESS** — **Anything that paints ABOVE the content and stops propagation must either be
+  GATED on its own object being selected, or FORWARD the press to `isDoubleTap` keyed on the UNDERLYING
+  feature.** In SVG, paint order IS hit-test order, so a late-painted node with `pointerEvents` on wins every
+  press inside it — and a handler that stops propagation without calling `setSel` or `isDoubleTap` makes that
+  press *invisible*: nothing selects, no double-tap can pair, and an undo frame is often burnt for nothing.
+  Three corollaries, each learned the hard way:
+  1. **A private double-tap key on chrome that sits over its own object is a POISON.** `isDoubleTap` keeps ONE
+     tap record, so `eldim:${id}` / `${id}:label` over a footprint both dissolved the pair AND clobbered the
+     record, so a third press had nothing left to pair with. **One key per feature**; branch the ACTION on
+     which surface took the press, never the key.
+  2. **Chrome that only EXISTS once selected is the worst case, because it is invisible to a static reading.**
+     The dimension grab band renders `if (dimSel)`, so press 2 of a real double-click lands on a layer press 1
+     just created — dead by construction, and no source scan can see it.
+  3. **A guard that names one component protects one component.** Assert it STRUCTURALLY, on the real render:
+     with nothing selected, every element's own centre must answer to that element via `elementFromPoint`.
+  Precedents: **B1174** (measurement chips), **B1327** (the parcel acreage badge — the third instance, and the
+  reason this is a named rule; regressed by B1186 moving the badge anchor to `polylabel`). The deliberate
+  EXCEPTION is user-placed content the user opted into putting on top — a promoted reference (B1198), a markup
+  with `behindEls: false` — which is selectable, lockable and demotable in one click from the menu that put it
+  there. Guard: the e2e spec **chrome-swallows-press** (mutation-checked both ways).
 - **DEDUPE-FIRST** — Search **Open, ⏳ Verify, AND Done** (`^### B` headings + `#tags` + symbols; grep
   `BACKLOG_OPEN.md` for the live set) before minting a `B#`. A matching prior item gets the recurrence
   treatment (back to Open, `Recurrence:` line, `(×N)` title) — never a fresh number. When you DO mint,

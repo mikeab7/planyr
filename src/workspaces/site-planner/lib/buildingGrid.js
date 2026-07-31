@@ -172,7 +172,40 @@ function depthBaysCross(D, g) {
 // Returns local-feet column-line offsets + bay lists + a panel summary. `lengthLines`
 // run across the depth (offsets along the length, 0..L); `depthLines` run across the
 // length (offsets along the depth from the dock face, 0..D).
-export function computeBuildingGrid({ length, depth, dock = "single", grid } = {}) {
+/* NEW-4(b) — MEMOISE THE GRID. `computeBuildingGrid` was called once per building PER RENDER (twice,
+ * in fact — the column-grid pass and the dock-door pass), and `clipSegmentToRing` then ran per grid
+ * LINE. Its inputs contain NO view term at all, so a pan or a zoom recomputed an identical answer for
+ * every building on the plan, every frame.
+ *
+ * The dep set is PROVABLY COMPLETE, which is what separates this from the flood/detention memos we
+ * refused: the function is pure, closes over nothing, and reads exactly `length`, `depth`, `dock` and
+ * five numbers off `grid` (`speedBay`, `bayLengthTarget`, `bayDepthTarget`, `bayMin`, `bayMax`). The
+ * two remaining `grid` fields (`doorWidth`, `doorOC`) belong to `placeDockDoors`, not to this
+ * function — they are folded into the key anyway, so an over-broad key can only ever cost a miss,
+ * never return a wrong answer.
+ *
+ * ⚠ The cached value is SHARED between callers, so it must be treated as read-only. Every consumer
+ * today reads it to render; do not start mutating `lengthLines` / `depthBays` in place.
+ *
+ * Bounded, because an unbounded module-level Map is a leak by another name (B1162): insertion-order
+ * eviction over a cap that is far above any real plan's distinct (footprint × settings) count. */
+const GRID_CACHE_MAX = 256;
+const _gridCache = new Map();
+const gridCacheKey = (L, D, dock, g) => `${L}|${D}|${dock}|${g.speedBay}|${g.bayLengthTarget}|${g.bayDepthTarget}|${g.bayMin}|${g.bayMax}|${g.doorWidth}|${g.doorOC}`;
+
+export function computeBuildingGrid(opts = {}) {
+  const { length, depth, dock = "single", grid } = opts;
+  const gk = grid || resolveGridSettings(null, {});
+  const key = gridCacheKey(num(length), num(depth), dock, gk);
+  const hit = _gridCache.get(key);
+  if (hit !== undefined) return hit;
+  const out = computeBuildingGridUncached({ length, depth, dock, grid: gk });
+  if (_gridCache.size >= GRID_CACHE_MAX) _gridCache.delete(_gridCache.keys().next().value);
+  _gridCache.set(key, out);
+  return out;
+}
+
+function computeBuildingGridUncached({ length, depth, dock = "single", grid } = {}) {
   const L = num(length), D = num(depth);
   const g = grid || resolveGridSettings(null, {});
   const empty = { lengthLines: [], depthLines: [], lengthBays: [], depthBays: [], summary: null };

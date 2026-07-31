@@ -10,6 +10,8 @@
  * independent of where the view happens to be pointing.
  */
 import { describe, it, expect } from "vitest";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import {
   visibleWorldRect, elementBounds, boundsIntersect, cullToView, shouldCull,
   CULL_MARGIN, CULL_MIN_ELEMENTS,
@@ -97,6 +99,28 @@ describe("the export renders the COMPLETE model, whatever the view (hard constra
       const exported = cullToView(model, visibleWorldRect(v, size), { enabled: shouldCull(model.length, { exporting: true }) });
       expect(exported.length).toBe(model.length);
     }
+  });
+
+  /* NEW-4(a) — THE LABEL PASS NOW ITERATES `drawEls` TOO, so this same guarantee has to cover it.
+   * The geometry pass has been culled since this suite was written, but the label/declutter pass and
+   * the dimension-collision loop still swept the FULL model — two passes meant to see the same set,
+   * seeing different ones. Aligning them is only safe because on an export pass `cullRect` is null,
+   * which makes `drawEls` IDENTICAL to `els` (not merely similar), so the sheet still lays out every
+   * label. Asserted here as identity, and asserted at the source below, because "PDF parity holds by
+   * construction" is exactly the kind of claim that stops being true without anyone noticing. */
+  it("on an export pass the culled set IS the model — same objects, same order (the label pass rides on this)", () => {
+    const exported = cullToView(model, null, { enabled: false });
+    expect(exported).toBe(model);   // identity, not a copy: `drawEls === els` on the sheet
+  });
+
+  it("SOURCE: both label passes iterate the culled set, and the cull is inert on an export", () => {
+    const SP = readFileSync(fileURLToPath(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url)), "utf8");
+    // the element-label candidate pass and the dimension-number collision pass
+    expect(SP).toMatch(/const labelCands = \[\];[\s\S]{0,1400}?\n  for \(const el of drawEls\) \{/);
+    expect(SP).toMatch(/const dimItems = \[\];[\s\S]{0,400}?\n  for \(const el of drawEls\) \{/);
+    // …and `drawEls` is only ever the culled set of `els`, with the cull disabled when cullRect is null
+    expect(SP).toMatch(/const drawEls = useMemo\(\(\) => cullToView\(els, cullRect, \{ enabled: !!cullRect, keep: cullKeep \}\)/);
+    expect(SP).toMatch(/cullActive = !exportPass/);
   });
 
   it("…while the SCREEN pass at those same views draws strictly fewer", () => {
