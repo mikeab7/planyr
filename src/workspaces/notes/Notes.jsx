@@ -6,31 +6,42 @@
  * ⛔ BUNDLE — LOAD-BEARING, and the repo's perf gate fails without it. The editor engine is
  * pulled by a `lazy()` import FROM THIS FILE, inside a Suspense, so the notebook tree paints
  * before ~460 KB of engine downloads. Nothing on this module's static path may import
- * `@tiptap/*`; test/notesModule.test.js source-scans for exactly that.
+ * `@tiptap/*`; test/notesModule.test.js source-scans for exactly that. The print serializer
+ * (lib/notesDocHtml.js) is on the same side of that line and is therefore reached from here
+ * ONLY by a dynamic `import()`.
  *
  * ⛔ EDITOR REMOUNT PER PAGE — also load-bearing, and not a style choice. `key={activePageId}`
  * is what makes the outgoing page's autosave flush on unmount (so an edit made a split second
  * before switching pages survives) and what removes the whole "setContent against a
  * torn-down instance" crash class. See the header of components/NoteEditor.jsx for both
  * bugs in full. Do not lift the editor above this key.
+ *
+ * ⛔ DELETE IS UNDOABLE (B1310). Every delete here bins rather than destroys: the model
+ * moves the node into `tree.trash` with its FULL page cascade stamped on it, an Undo appears
+ * immediately, and the bytes are cleared only at PURGE — which is the one call site of
+ * `purgePages`. TOMBSTONE-DELETES is unchanged in substance: the cascade is still computed
+ * at delete time and every id in it is still cleared, just later and only once.
  */
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import AppHeader from "../../shared/ui/AppHeader.jsx";
 import NotesTree from "./components/NotesTree.jsx";
 import {
-  addNotebook, addPage, addSection, deleteNode, emptyTree, findPage,
-  firstPageId, migrate, renameNode, visibleNotebooks,
+  addNotebook, addPage, addSection, allPageIds, deleteNode, emptyTree, expiredTrashIds,
+  findPage, firstPageId, migrate, moveNotebook, movePage, moveSection, purgeTrashEntry,
+  renameNode, restoreNode, touchPage, trashEntries, trashPageIds, visibleNotebooks,
 } from "./lib/notesModel.js";
 import {
-  clearNotesStorageError, deletePages, notesScopeLabel, onNotesStorageError,
-  readPage, readTreeRaw, searchNotes, setNotesScope, writeTree,
+  clearNotesStorageError, notesScopeLabel, onNotesStorageError, purgePages,
+  readNoteImages, readPage, readTreeRaw, searchNotes, setNotesScope,
+  sweepImagesOfMissingPages, sweepOrphans, writeTree,
 } from "./lib/notesStore.js";
-import { notebookToMarkdown, safeFileName } from "./lib/notesMarkdown.js";
+import { imageIdsInDocs, notebookToMarkdown, safeFileName } from "./lib/notesMarkdown.js";
 
 const NoteEditor = lazy(() => import("./components/NoteEditor.jsx"));
 
 const RADIUS = { control: 8, pill: 999 }; // mirrored from shared/ui/controls.jsx — see NoteToolbar
 const TREE_SAVE_MS = 400;
+const UNDO_MS = 14000;
 
 /* ---- module-scope pieces (MODULE-SCOPE-COMPONENTS) --------------------------------------- */
 
@@ -81,6 +92,47 @@ function ExportNotice({ note, onDismiss }) {
         style={{
           flex: "0 0 auto", border: "1px solid var(--warn-text)", borderRadius: RADIUS.pill,
           background: "transparent", color: "var(--warn-text)", font: "inherit",
+          fontSize: 11.5, fontWeight: 700, padding: "2px 10px", cursor: "pointer",
+        }}
+      >Dismiss</button>
+    </div>
+  );
+}
+
+/** The way back from a delete, offered at the moment the delete happens.
+ *
+ *  A bin nobody can find is not an undo. This is deliberately NOT a dialog (house rule) and
+ *  deliberately not a confirmation step either — the inline "Delete? ✓ ✕" already asks; a
+ *  second prompt would make every delete two decisions. It states what went, offers the way
+ *  back, and gets out of the way. */
+function UndoBar({ deleted, onUndo, onDismiss }) {
+  if (!deleted) return null;
+  return (
+    <div
+      role="status"
+      data-testid="notes-undo-bar"
+      style={{
+        flex: "none", display: "flex", alignItems: "center", gap: 10, padding: "6px 14px",
+        background: "var(--surface-raised)", borderBottom: "1px solid var(--border-default)",
+        color: "var(--text-secondary)", fontSize: 12.5, fontWeight: 600,
+      }}
+    >
+      <span style={{ flex: 1, minWidth: 0 }}>
+        Deleted “{deleted.title || "Untitled"}”{deleted.pageIds.length > 1 ? ` and its ${deleted.pageIds.length} pages` : ""}. It is in the bin for 30 days.
+      </span>
+      <button
+        type="button" data-testid="notes-undo" onClick={onUndo}
+        style={{
+          flex: "0 0 auto", border: "1px solid var(--accent-notes)", borderRadius: RADIUS.pill,
+          background: "var(--accent-notes)", color: "var(--on-accent-notes)", font: "inherit",
+          fontSize: 11.5, fontWeight: 700, padding: "2px 12px", cursor: "pointer",
+        }}
+      >Undo</button>
+      <button
+        type="button" onClick={onDismiss}
+        style={{
+          flex: "0 0 auto", border: "1px solid var(--border-default)", borderRadius: RADIUS.pill,
+          background: "transparent", color: "var(--text-tertiary)", font: "inherit",
           fontSize: 11.5, fontWeight: 700, padding: "2px 10px", cursor: "pointer",
         }}
       >Dismiss</button>
@@ -146,18 +198,49 @@ export default function Notes({
   const [storageError, setStorageError] = useState(null);
   const [exportNote, setExportNote] = useState(null);
   const [query, setQuery] = useState("");
+  const [highlight, setHighlight] = useState("");
+  const [deleted, setDeleted] = useState(null);
   const treeTimer = useRef(0);
   const treeRef = useRef(null);   // the latest tree, captured at edit time (see the flush note below)
+  const undoTimer = useRef(0);
 
   /* Scope FIRST, then read: the store keys by the signed-in user's id (or `local`), so two
    * accounts on one machine never read each other's notes. A scope change re-reads. */
   useEffect(() => {
     setNotesScope(userId || null);
-    const loaded = migrate(readTreeRaw());
+    let loaded = migrate(readTreeRaw());
+
+    /* THE 30-DAY SWEEP, run here on the load and nowhere else. Deliberately lazy (like the
+     * Site Planner's own bin) rather than on a timer: nothing needs to happen while the tab
+     * is closed, and a background job whose whole purpose is destroying data is a worse
+     * thing to get wrong. Everything past its retention window is purged for real — bodies
+     * AND images — which is what stops the bin becoming a place storage goes to hide. */
+    const expired = expiredTrashIds(loaded);
+    if (expired.length) {
+      const ids = [];
+      for (const id of expired) {
+        const r = purgeTrashEntry(loaded, id);
+        loaded = r.tree;
+        ids.push(...r.pageIds);
+      }
+      writeTree(loaded);
+      purgePages(ids);
+    }
+
+    /* The safety net for a delete that was INTERRUPTED (a tab closed between the tree
+     * write and the purge), for bodies and for pictures. Both are handed the union of
+     * LIVE and BINNED page ids: a binned page's bytes are deliberately still on disk, and
+     * sweeping against the live tree alone would destroy what a restore needs. */
+    const keep = [...allPageIds(loaded), ...trashPageIds(loaded)];
+    sweepOrphans(keep);
+    sweepImagesOfMissingPages(keep);
+
     treeRef.current = loaded;   // seed the ref with what was just read, so a flush before
     setTree(loaded);            // the first edit cannot write a null over real notebooks
     setActivePageId(firstPageId(loaded));
     setQuery("");
+    setHighlight("");
+    setDeleted(null);
   }, [userId]);
 
   // LOUD-FAILURE: surface every storage failure the store reports, from anywhere.
@@ -212,7 +295,17 @@ export default function Notes({
     }
   }, [projectId, tree, activePageId]);
 
-  const activePage = useMemo(() => (activePageId ? findPage(tree, activePageId)?.page || null : null), [tree, activePageId]);
+  const active = useMemo(() => (activePageId ? findPage(tree, activePageId) : null), [tree, activePageId]);
+  const activePage = active?.page || null;
+
+  /* The page-id set of the notebook the open page lives in — what a pasted picture is
+   * charged against. Recomputed from the tree, never captured, so adding a page beside
+   * this one is immediately reflected in the ceiling. */
+  const notebookPageIds = useMemo(() => {
+    const nb = active?.notebook;
+    if (!nb) return [];
+    return (nb.sections || []).flatMap((s) => (s.pages || []).map((p) => p.id));
+  }, [active]);
 
   const results = useMemo(
     () => (query.trim() ? searchNotes(tree, query, { projectId }) : []),
@@ -243,21 +336,67 @@ export default function Notes({
 
   const handleRename = useCallback((id, title) => persistTree(renameNode(tree, id, title)), [tree, persistTree]);
 
-  /** TOMBSTONE-DELETES: clear a body for the FULL cascade the model reports, not just the
-   *  node that was clicked. Deleting a notebook orphans every page under every one of its
-   *  sections; a body left behind can never be reached and never be removed. */
+  /* ---- the bin ---- */
+
+  /** TOMBSTONE-DELETES, DEFERRED — never weakened. The model computes the FULL cascade of
+   *  orphaned page ids and stamps it on the trash entry; nothing is cleared here, and the
+   *  purge later clears every id on that entry (bodies AND images). */
   const handleDelete = useCallback((id) => {
-    const { tree: next, removedPageIds } = deleteNode(tree, id);
-    deletePages(removedPageIds);
+    const { tree: next, removedPageIds, entry } = deleteNode(tree, id);
+    if (!entry) return;
     persistTree(next);
     if (removedPageIds.includes(activePageId)) setActivePageId(firstPageId(next));
+    setDeleted({ id: entry.id, title: entry.title, pageIds: entry.pageIds });
+    if (undoTimer.current) clearTimeout(undoTimer.current);
+    undoTimer.current = setTimeout(() => { undoTimer.current = 0; setDeleted(null); }, UNDO_MS);
   }, [tree, activePageId, persistTree]);
+
+  const handleRestore = useCallback((entryId) => {
+    const r = restoreNode(tree, entryId);
+    persistTree(r.tree);
+    setDeleted((d) => (d && d.id === entryId ? null : d));
+    if (r.restored && r.pageIds.length) setActivePageId(r.pageIds[0]);
+  }, [tree, persistTree]);
+
+  /** DELETE FOREVER — the ONE place a note's bytes are destroyed. */
+  const handlePurge = useCallback((entryId) => {
+    const r = purgeTrashEntry(tree, entryId);
+    persistTree(r.tree);
+    setDeleted((d) => (d && d.id === entryId ? null : d));
+    purgePages(r.pageIds);
+  }, [tree, persistTree]);
+
+  const handlePurgeAll = useCallback(() => {
+    let next = tree;
+    const ids = [];
+    for (const e of trashEntries(tree)) {
+      const r = purgeTrashEntry(next, e.id);
+      next = r.tree;
+      ids.push(...r.pageIds);
+    }
+    persistTree(next);
+    setDeleted(null);
+    purgePages(ids);
+  }, [tree, persistTree]);
+
+  /* ---- moves (B1316 — these model functions had no caller at all before this) ---- */
+
+  const handleMovePage = useCallback((pageId, toSectionId, index) => persistTree(movePage(tree, pageId, toSectionId, index)), [tree, persistTree]);
+  const handleMoveSection = useCallback((sectionId, toNotebookId, index) => persistTree(moveSection(tree, sectionId, toNotebookId, index)), [tree, persistTree]);
+  const handleMoveNotebook = useCallback((notebookId, index) => persistTree(moveNotebook(tree, notebookId, index)), [tree, persistTree]);
 
   const handleTitleChange = useCallback((title) => {
     if (activePageId) handleRename(activePageId, title);
   }, [activePageId, handleRename]);
 
-  /* ---- export ---- */
+  /** Stamp the edited time — driven by the editor's write, NOT by a keystroke, so the field
+   *  can only ever record a save that actually landed. */
+  const handleSaved = useCallback((pageId) => {
+    const next = touchPage(treeRef.current || tree, pageId);
+    if (next !== (treeRef.current || tree)) persistTree(next);
+  }, [tree, persistTree]);
+
+  /* ---- export + print ---- */
 
   const handleExportPage = useCallback(({ markdown, lossy, filename }) => {
     downloadMarkdown(filename, markdown);
@@ -266,14 +405,44 @@ export default function Notes({
       : null);
   }, []);
 
-  const handleExportNotebook = useCallback((notebookId) => {
+  const handleExportNotebook = useCallback(async (notebookId) => {
     const nb = (tree.notebooks || []).find((n) => n.id === notebookId);
     if (!nb) return;
     const bodies = {};
     for (const sec of nb.sections || []) for (const pg of sec.pages || []) bodies[pg.id] = readPage(pg.id);
-    const { markdown, lossy } = notebookToMarkdown(nb, bodies);
+    // Pictures are inlined as data URLs so an exported notebook is one self-contained file.
+    const images = await readNoteImages(imageIdsInDocs(bodies));
+    const { markdown, lossy } = notebookToMarkdown(nb, bodies, { images });
     handleExportPage({ markdown, lossy, filename: safeFileName(nb.title) });
   }, [tree, handleExportPage]);
+
+  /* The print serializer imports the schema, and the schema pulls the editor engine — so it
+   * is reached from this file by a DYNAMIC import only. A static one here would put ~460 KB
+   * back on the route the lazy boundary exists to keep clear. */
+  const handlePrintNotebook = useCallback(async (notebookId) => {
+    const nb = (tree.notebooks || []).find((n) => n.id === notebookId);
+    if (!nb) return;
+    const bodies = {};
+    const pages = [];
+    for (const sec of nb.sections || []) {
+      for (const pg of sec.pages || []) {
+        bodies[pg.id] = readPage(pg.id);
+        pages.push({ id: pg.id, title: pg.title, updatedAt: pg.updatedAt, sectionTitle: sec.title });
+      }
+    }
+    const images = await readNoteImages(imageIdsInDocs(bodies));
+    const [{ docToHtml }, { buildPrintDocument, printHtmlDocument }] = await Promise.all([
+      import("./lib/notesDocHtml.js"),
+      import("./lib/notesPrint.js"),
+    ]);
+    const html = buildPrintDocument({
+      title: nb.title || "Notebook",
+      meta: `${pages.length === 1 ? "1 page" : `${pages.length} pages`} · Planyr Notes`,
+      pages: pages.map((p) => ({ ...p, html: docToHtml(bodies[p.id], images) })),
+    });
+    const r = await printHtmlDocument(html);
+    if (!r.ok) setExportNote(r.error);
+  }, [tree]);
 
   const scopeLabel = notesScopeLabel();
 
@@ -295,6 +464,7 @@ export default function Notes({
 
       <StorageBanner error={storageError} onDismiss={() => { clearNotesStorageError(); setStorageError(null); }} />
       <ExportNotice note={exportNote} onDismiss={() => setExportNote(null)} />
+      <UndoBar deleted={deleted} onUndo={() => handleRestore(deleted.id)} onDismiss={() => setDeleted(null)} />
 
       <div style={{ flex: 1, minHeight: 0, display: "flex" }}>
         <NotesTree
@@ -304,13 +474,23 @@ export default function Notes({
           query={query}
           results={results}
           onQueryChange={setQuery}
-          onSelectPage={(id) => { setActivePageId(id); setQuery(""); }}
+          onSelectPage={(id) => { setActivePageId(id); setQuery(""); setHighlight(""); }}
+          /* Opening a SEARCH HIT carries the phrase into the page, so the editor can mark
+             where it actually is — the thing search used to abandon you without. */
+          onSelectHit={(id) => { setActivePageId(id); setHighlight(query); setQuery(""); }}
           onAddNotebook={handleAddNotebook}
           onAddSection={handleAddSection}
           onAddPage={handleAddPage}
           onRename={handleRename}
           onDelete={handleDelete}
           onExportNotebook={handleExportNotebook}
+          onPrintNotebook={handlePrintNotebook}
+          onMovePage={handleMovePage}
+          onMoveSection={handleMoveSection}
+          onMoveNotebook={handleMoveNotebook}
+          onRestore={handleRestore}
+          onPurge={handlePurge}
+          onPurgeAll={handlePurgeAll}
         />
 
         <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", minHeight: 0 }}>
@@ -321,11 +501,19 @@ export default function Notes({
                 key={activePage.id}
                 pageId={activePage.id}
                 title={activePage.title}
+                updatedAt={activePage.updatedAt}
+                notebookTitle={active?.notebook?.title}
+                sectionTitle={active?.section?.title}
+                notebookPageIds={notebookPageIds}
+                searchTerm={highlight}
+                onClearSearch={() => setHighlight("")}
                 status={status}
                 scopeLabel={scopeLabel}
                 onTitleChange={handleTitleChange}
                 onStatus={setStatus}
+                onSaved={handleSaved}
                 onExportMarkdown={handleExportPage}
+                onPrintNotice={setExportNote}
               />
             </Suspense>
           ) : (

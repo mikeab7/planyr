@@ -236,6 +236,59 @@ function LinkControl({ editor }) {
   );
 }
 
+/** The overflow drawer. Closes on Escape and on an outside press, like the colour popover.
+ *
+ *  ⛔ WHY THIS EXISTS (B1317). The bar was ONE flat row of ~35 controls, which wrapped onto
+ *  a second row at an ordinary laptop width — so the least-used control cost the note a
+ *  strip of writing space on every screen, permanently. Everything was equally loud, so
+ *  nothing read as primary. The split is by FREQUENCY, not by category: what a person
+ *  reaches for while writing stays on the row, and the long tail (fonts, sizes, alignment,
+ *  quotes, rules) is one click away. PANEL-BREVITY's instinct applied to the writing
+ *  surface: the scarcest space on this screen is the page, not the toolbar. */
+function OverflowMenu({ children, testid = "nt-more" }) {
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef(null);
+  useEffect(() => {
+    if (!open) return undefined;
+    const onDown = (e) => { if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false); };
+    const onKey = (e) => { if (e.key === "Escape") setOpen(false); };
+    document.addEventListener("pointerdown", onDown, true);
+    document.addEventListener("keydown", onKey);
+    return () => { document.removeEventListener("pointerdown", onDown, true); document.removeEventListener("keydown", onKey); };
+  }, [open]);
+
+  return (
+    <span ref={wrapRef} style={{ position: "relative", display: "inline-flex" }}>
+      <TBButton title="More formatting" testid={testid} active={open} wide label="More" onClick={() => setOpen((o) => !o)}>
+        <Icon><path d="M4 6.5L8 10.5l4-4" /></Icon>
+      </TBButton>
+      {open && (
+        <div
+          data-testid={`${testid}-panel`}
+          onMouseDown={stop}
+          style={{
+            position: "absolute", top: 32, right: 0, zIndex: 40, padding: 8, width: 268,
+            display: "flex", flexDirection: "column", gap: 7,
+            background: "var(--surface-raised)", border: "1px solid var(--border-default)",
+            borderRadius: RADIUS.control, boxShadow: "0 12px 32px rgba(0,0,0,0.20)",
+          }}
+        >
+          {children}
+        </div>
+      )}
+    </span>
+  );
+}
+
+function MenuGroup({ label, children }) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+      <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--text-tertiary)" }}>{label}</span>
+      <span style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 3 }}>{children}</span>
+    </div>
+  );
+}
+
 /* ---- icon glyphs ------------------------------------------------------------------------ */
 
 const AlignIcon = ({ lines }) => (
@@ -267,14 +320,30 @@ const TableIcon = () => (
   <Icon><rect x="2" y="3" width="12" height="10" rx="1" /><line x1="2" y1="6.5" x2="14" y2="6.5" /><line x1="6" y1="3" x2="6" y2="13" /><line x1="10" y1="3" x2="10" y2="13" /></Icon>
 );
 
-/* ---- the bar ---------------------------------------------------------------------------- */
+
+const ImageIcon = () => (
+  <Icon><rect x="2" y="3" width="12" height="10" rx="1.5" /><circle cx="5.75" cy="6.25" r="1.1" /><path d="M2.5 11.5l3.2-3 2.6 2.4 2-1.8 3.2 2.9" /></Icon>
+);
+const PrintIcon = () => (
+  <Icon><path d="M4.5 6V2.5h7V6" /><rect x="2" y="6" width="12" height="5" rx="1.2" /><path d="M4.5 9.5h7v4h-7z" /></Icon>
+);
+
+/* ---- the bar ----------------------------------------------------------------------------
+ *
+ * GROUPED BY FREQUENCY, NOT BY CATEGORY (B1317). The visible row is what a person reaches
+ * for while writing — undo, block style, the four weights, colour, lists, link, table,
+ * picture. Everything else lives one click away in "More": fonts, sizes, alignment, quotes,
+ * code, rules, indent. The table row still appears only when the caret is genuinely inside
+ * a table, which is the same principle applied a level down.
+ */
 
 const HEADING_OPTIONS = [
   { label: "Body text", value: "p" },
   ...HEADING_LEVELS.map((l) => ({ label: `Heading ${l}`, value: `h${l}` })),
 ];
 
-export default function NoteToolbar({ editor, onExport }) {
+export default function NoteToolbar({ editor, onExport, onPrint }) {
+  const fileRef = useRef(null);
   if (!editor) return null;
 
   const chain = () => editor.chain().focus();
@@ -297,6 +366,12 @@ export default function NoteToolbar({ editor, onExport }) {
   const indent = () => chain().sinkListItem(listItemType).run();
   const outdent = () => chain().liftListItem(listItemType).run();
 
+  const pickImages = (e) => {
+    const files = Array.from(e.target.files || []);
+    e.target.value = "";                       // so the same file can be picked twice running
+    if (files.length) editor.commands.insertNoteImages(files);
+  };
+
   const barStyle = {
     display: "flex", flexWrap: "wrap", alignItems: "center", gap: 2,
     padding: "5px 8px", borderBottom: "1px solid var(--border-default)",
@@ -316,13 +391,6 @@ export default function NoteToolbar({ editor, onExport }) {
 
       <TBSelect title="Block style" testid="nt-block" width={104}
         value={blockValue ? `h${blockValue}` : "p"} onChange={setBlock} options={HEADING_OPTIONS} />
-      <TBSelect title="Font" testid="nt-font" width={124} value={currentFont}
-        options={FONTS.map((f) => ({ label: f.label, value: f.value }))}
-        onChange={(e) => (e.target.value ? chain().setFontFamily(e.target.value).run() : chain().unsetFontFamily().run())} />
-      <TBSelect title="Font size" testid="nt-size" width={62}
-        value={currentSize ? String(parseInt(currentSize, 10)) : null}
-        options={SIZES.map((s) => ({ label: s == null ? "Size" : String(s), value: s }))}
-        onChange={(e) => (e.target.value ? chain().setFontSize(`${e.target.value}px`).run() : chain().unsetFontSize().run())} />
 
       <Sep />
 
@@ -338,53 +406,82 @@ export default function NoteToolbar({ editor, onExport }) {
       <TBButton title="Strikethrough" testid="nt-strike" active={editor.isActive("strike")} onClick={() => chain().toggleStrike().run()}>
         <span style={{ textDecoration: "line-through", fontSize: 13 }}>S</span>
       </TBButton>
-      <TBButton title="Inline code" testid="nt-code" active={editor.isActive("code")} onClick={() => chain().toggleCode().run()}>
-        <Icon><path d="M6 4.5L3 8l3 3.5" /><path d="M10 4.5L13 8l-3 3.5" /></Icon>
-      </TBButton>
 
       <ColorPopover title="Text colour" testid="nt-color" swatch={currentColor} colors={TEXT_COLORS}
         onPick={(c) => (c ? chain().setColor(c).run() : chain().unsetColor().run())} />
       <ColorPopover title="Highlight" testid="nt-highlight" swatch={currentHl} colors={HIGHLIGHT_COLORS}
         onPick={(c) => (c ? chain().setHighlight({ color: c }).run() : chain().unsetHighlight().run())} />
 
-      <TBButton title="Clear formatting" testid="nt-clear" onClick={() => chain().unsetAllMarks().clearNodes().run()}>
-        <Icon><path d="M4 12.5h8" /><path d="M6.5 3.5h5" /><path d="M9 3.5L7 10" /><line x1="2.5" y1="2.5" x2="13.5" y2="13.5" /></Icon>
-      </TBButton>
-
-      <Sep />
-
-      {ALIGNS.map((a) => (
-        <TBButton key={a.id} title={a.title} testid={`nt-align-${a.id}`}
-          active={editor.isActive({ textAlign: a.id })}
-          onClick={() => chain().setTextAlign(a.id).run()}>
-          <AlignIcon lines={a.lines} />
-        </TBButton>
-      ))}
-
       <Sep />
 
       <TBButton title="Bulleted list" testid="nt-bullet" active={editor.isActive("bulletList")} onClick={() => chain().toggleBulletList().run()}><BulletIcon /></TBButton>
       <TBButton title="Numbered list" testid="nt-ordered" active={editor.isActive("orderedList")} onClick={() => chain().toggleOrderedList().run()}><OrderedIcon /></TBButton>
       <TBButton title="Checklist" testid="nt-task" active={editor.isActive("taskList")} onClick={() => chain().toggleTaskList().run()}><TaskIcon /></TBButton>
-      <TBButton title="Decrease indent" testid="nt-outdent" onClick={outdent}><IndentIcon out /></TBButton>
-      <TBButton title="Increase indent" testid="nt-indent" onClick={indent}><IndentIcon /></TBButton>
 
       <Sep />
 
-      <TBButton title="Quote" testid="nt-quote" active={editor.isActive("blockquote")} onClick={() => chain().toggleBlockquote().run()}>
-        <Icon><path d="M6 4.5C4 5 3 6.5 3 9v2.5h3.5V8H5c0-1.5.4-2.4 1-3z" fill="currentColor" stroke="none" /><path d="M13 4.5c-2 .5-3 2-3 4.5v2.5h3.5V8H12c0-1.5.4-2.4 1-3z" fill="currentColor" stroke="none" /></Icon>
-      </TBButton>
-      <TBButton title="Code block" testid="nt-codeblock" active={editor.isActive("codeBlock")} onClick={() => chain().toggleCodeBlock().run()}>
-        <Icon><rect x="2" y="3" width="12" height="10" rx="1.5" /><path d="M6 6.5L4.5 8L6 9.5" /><path d="M10 6.5L11.5 8L10 9.5" /></Icon>
-      </TBButton>
-      <TBButton title="Divider" testid="nt-hr" onClick={() => chain().setHorizontalRule().run()}>
-        <Icon><line x1="2" y1="8" x2="14" y2="8" /></Icon>
-      </TBButton>
       <LinkControl editor={editor} />
       <TBButton title="Insert table" testid="nt-table" onClick={() => chain().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()}><TableIcon /></TBButton>
+      <TBButton title="Insert a picture" testid="nt-image" onClick={() => fileRef.current?.click()}><ImageIcon /></TBButton>
+      {/* The picker is the deliberate alternative to paste/drop, not a replacement: it is
+          how a picture gets in on a device where dragging a file is awkward. */}
+      <input
+        ref={fileRef}
+        data-testid="nt-image-input"
+        type="file"
+        accept="image/*"
+        multiple
+        onChange={pickImages}
+        style={{ display: "none" }}
+      />
 
       <Sep />
 
+      <OverflowMenu>
+        <MenuGroup label="Type">
+          <TBSelect title="Font" testid="nt-font" width={124} value={currentFont}
+            options={FONTS.map((f) => ({ label: f.label, value: f.value }))}
+            onChange={(e) => (e.target.value ? chain().setFontFamily(e.target.value).run() : chain().unsetFontFamily().run())} />
+          <TBSelect title="Font size" testid="nt-size" width={62}
+            value={currentSize ? String(parseInt(currentSize, 10)) : null}
+            options={SIZES.map((s) => ({ label: s == null ? "Size" : String(s), value: s }))}
+            onChange={(e) => (e.target.value ? chain().setFontSize(`${e.target.value}px`).run() : chain().unsetFontSize().run())} />
+          <TBButton title="Inline code" testid="nt-code" active={editor.isActive("code")} onClick={() => chain().toggleCode().run()}>
+            <Icon><path d="M6 4.5L3 8l3 3.5" /><path d="M10 4.5L13 8l-3 3.5" /></Icon>
+          </TBButton>
+          <TBButton title="Clear formatting" testid="nt-clear" onClick={() => chain().unsetAllMarks().clearNodes().run()}>
+            <Icon><path d="M4 12.5h8" /><path d="M6.5 3.5h5" /><path d="M9 3.5L7 10" /><line x1="2.5" y1="2.5" x2="13.5" y2="13.5" /></Icon>
+          </TBButton>
+        </MenuGroup>
+
+        <MenuGroup label="Alignment & indent">
+          {ALIGNS.map((a) => (
+            <TBButton key={a.id} title={a.title} testid={`nt-align-${a.id}`}
+              active={editor.isActive({ textAlign: a.id })}
+              onClick={() => chain().setTextAlign(a.id).run()}>
+              <AlignIcon lines={a.lines} />
+            </TBButton>
+          ))}
+          <TBButton title="Decrease indent" testid="nt-outdent" onClick={outdent}><IndentIcon out /></TBButton>
+          <TBButton title="Increase indent" testid="nt-indent" onClick={indent}><IndentIcon /></TBButton>
+        </MenuGroup>
+
+        <MenuGroup label="Blocks">
+          <TBButton title="Quote" testid="nt-quote" active={editor.isActive("blockquote")} onClick={() => chain().toggleBlockquote().run()}>
+            <Icon><path d="M6 4.5C4 5 3 6.5 3 9v2.5h3.5V8H5c0-1.5.4-2.4 1-3z" fill="currentColor" stroke="none" /><path d="M13 4.5c-2 .5-3 2-3 4.5v2.5h3.5V8H12c0-1.5.4-2.4 1-3z" fill="currentColor" stroke="none" /></Icon>
+          </TBButton>
+          <TBButton title="Code block" testid="nt-codeblock" active={editor.isActive("codeBlock")} onClick={() => chain().toggleCodeBlock().run()}>
+            <Icon><rect x="2" y="3" width="12" height="10" rx="1.5" /><path d="M6 6.5L4.5 8L6 9.5" /><path d="M10 6.5L11.5 8L10 9.5" /></Icon>
+          </TBButton>
+          <TBButton title="Divider" testid="nt-hr" onClick={() => chain().setHorizontalRule().run()}>
+            <Icon><line x1="2" y1="8" x2="14" y2="8" /></Icon>
+          </TBButton>
+        </MenuGroup>
+      </OverflowMenu>
+
+      <TBButton title="Print this page, or save it as a PDF" testid="nt-print" wide label="Print" onClick={onPrint}>
+        <PrintIcon />
+      </TBButton>
       <TBButton title="Export this page to Markdown" testid="nt-export" wide label="Markdown" onClick={onExport}>
         <Icon><path d="M8 2.5v8" /><path d="M5 7.5L8 10.5l3-3" /><path d="M2.5 12.5h11" /></Icon>
       </TBButton>

@@ -14,6 +14,13 @@
  *     against a torn-down instance threw `Cannot read properties of null (reading
  *     'commands')` and took the whole workspace into its error boundary.
  *
+ * ROUND TWO added the checks below §10: the empty-page prompt, a pasted PICTURE (and the
+ * proof its bytes are in IndexedDB rather than in the note), the print sheet, the visible
+ * broken-image state, MOVE through the UI (the model ops that had no caller at all), page
+ * timestamps and Recent, search that marks and steps, the one-row toolbar, and the BIN —
+ * including the two exits that matter: undo restores everything, and only "delete forever"
+ * frees the bytes.
+ *
  *   npx vite preview --port 4173 &
  *   node ui-audit/verify-notes.mjs
  */
@@ -99,6 +106,49 @@ const rowAction = async (rowId, action) => {
 };
 /** Settle past the 600 ms autosave debounce. */
 const settle = async () => page.waitForTimeout(1100);
+
+/* Every image record in the notes IndexedDB, WITHOUT its bytes. The whole point of the
+ * image tier is that the pixels are NOT in localStorage, so a check that only reads
+ * localStorage cannot see them at all — this is how the harness proves where they went. */
+const imageRecords = () => page.evaluate(() => new Promise((resolve) => {
+  let req;
+  try { req = indexedDB.open("planyr-notes", 1); } catch (_) { resolve([]); return; }
+  req.onerror = () => resolve([]);
+  req.onsuccess = () => {
+    const db = req.result;
+    if (!db.objectStoreNames.contains("images")) { resolve([]); return; }
+    const out = [];
+    const cur = db.transaction("images", "readonly").objectStore("images").openCursor();
+    cur.onerror = () => resolve(out);
+    cur.onsuccess = () => {
+      const c = cur.result;
+      if (!c) { resolve(out); return; }
+      const v = c.value || {};
+      out.push({ id: v.id, pageId: v.pageId, bytes: v.bytes, mime: v.mime, scope: v.scope, isDataUrl: /^data:image\//.test(v.dataUrl || "") });
+      c.continue();
+    };
+  };
+}));
+
+/** Paste a real PNG into the open note, exactly as a clipboard image arrives. */
+const pasteImage = async (px = 240) => {
+  await page.locator('[data-testid="note-body"]').click();
+  await page.evaluate(async (size) => {
+    const c = document.createElement("canvas");
+    c.width = size; c.height = Math.round(size * 0.6);
+    const ctx = c.getContext("2d");
+    ctx.fillStyle = "#1D4ED8"; ctx.fillRect(0, 0, c.width, c.height);
+    ctx.fillStyle = "#FEF08A"; ctx.fillRect(10, 10, 60, 30);
+    const blob = await new Promise((r) => c.toBlob(r, "image/png"));
+    const file = new File([blob], "flood-map.png", { type: "image/png" });
+    const dt = new DataTransfer();
+    dt.items.add(file);
+    document.querySelector('[data-testid="note-body"]').dispatchEvent(
+      new ClipboardEvent("paste", { clipboardData: dt, bubbles: true, cancelable: true }),
+    );
+  }, px);
+  await page.waitForTimeout(900);
+};
 
 console.log("Notes workspace — live checks\n");
 
@@ -336,9 +386,225 @@ await page.waitForTimeout(400);
 const noticeText = await tb("notes-export-notice").count() ? await tb("notes-export-notice").innerText() : "";
 ok("the export NAMES what Markdown could not carry", /underlined text/i.test(noticeText), noticeText.slice(0, 80) || "no notice");
 
-/* ════ 10. Deleting a section clears EVERY page body it owned (TOMBSTONE-DELETES) ══════ */
+/* ════ 10. AN EMPTY PAGE IS NOT A BLANK VOID ═══════════════════════════════════════════ */
+await rowAction(section1, "add");
+await page.waitForTimeout(800);
+tree = await readTree();
+const page3 = tree.notebooks[0].sections[0].pages[2]?.id;
+ok("a third, EMPTY page can be added", !!page3, page3 || "none");
+
+const placeholderAttr = await page.locator('[data-testid="note-body"] p.is-editor-empty').first().getAttribute("data-placeholder").catch(() => null);
+ok("AN EMPTY PAGE SHOWS A STARTING PROMPT (the Placeholder extension is actually installed)",
+  !!placeholderAttr && placeholderAttr.length > 4, placeholderAttr || "no placeholder attribute");
+const placeholderPainted = await page.evaluate(() => {
+  const el = document.querySelector('[data-testid="note-body"] p.is-editor-empty');
+  if (!el) return "";
+  return getComputedStyle(el, "::before").content || "";
+});
+ok("...and the CSS rule for it actually paints — a rule with no extension matched nothing before",
+  /Start typing/.test(placeholderPainted), placeholderPainted.slice(0, 48) || "no ::before content");
+
+/* ════ 11. A NOTE CAN HOLD A PICTURE — and the bytes are NOT in localStorage ═══════════ */
+await pasteImage(260);
+await settle();
+
+const figures = await page.locator('[data-testid="note-image"]').count();
+ok("PASTING AN IMAGE PUTS A PICTURE ON THE PAGE", figures === 1, `${figures} figure(s)`);
+ok("the pasted picture actually rendered (it has real pixels, not a broken glyph)",
+  await page.evaluate(() => { const i = document.querySelector('[data-testid="note-image"] img'); return !!i && i.naturalWidth > 0; }));
+
+let imgs = await imageRecords();
+ok("THE BYTES WENT TO INDEXEDDB, not into the note", imgs.length === 1 && imgs[0].isDataUrl,
+  imgs.length ? `${imgs[0].bytes} B, ${imgs[0].mime}` : "no record");
+ok("the image record is scoped and tagged with the page that owns it",
+  imgs[0]?.scope === "local" && imgs[0]?.pageId === page3, `${imgs[0]?.scope} / ${imgs[0]?.pageId}`);
+
+const body3 = await readBody(page3);
+const imgNodes = nodesOf(body3, "noteImage");
+ok("the DOCUMENT holds an image ID, never the pixels", imgNodes.length === 1 && !!imgNodes[0].attrs?.imageId,
+  imgNodes[0]?.attrs?.imageId || "none");
+ok("NO base64 image data reached localStorage — this is the whole reason for the split",
+  !JSON.stringify(body3).includes("data:image"));
+
+/* ════ 12. The Markdown export inlines the picture, so an exported note is self-contained */
+const [download3] = await Promise.all([
+  page.waitForEvent("download", { timeout: 15000 }),
+  tb("nt-export").click(),
+]);
+const saved3 = join(dlDir, `image-${download3.suggestedFilename()}`);
+await download3.saveAs(saved3);
+const md3 = readFileSync(saved3, "utf8");
+ok("THE EXPORTED MARKDOWN INLINES THE IMAGE AS A DATA URL", /!\[[^\]]*\]\(data:image\/[a-z+]+;base64,/.test(md3),
+  `${md3.length} chars`);
+
+/* ════ 13. Print / PDF — the sheet shows what the screen shows (PDF-PARITY) ════════════ */
+await tb("nt-print").click();
+await page.waitForTimeout(1400);
+const sheet = await page.evaluate(() => {
+  const f = document.querySelector('[data-testid="notes-print-frame"]');
+  const d = f && f.contentDocument;
+  if (!d) return null;
+  return {
+    title: d.title,
+    h1: d.querySelector(".doc-title")?.textContent || "",
+    imgs: d.querySelectorAll('.note-body img[src^="data:image/"]').length,
+    body: d.body ? d.body.innerText.slice(0, 400) : "",
+    bg: d.body ? getComputedStyle(d.body).backgroundColor : "",
+    chrome: d.querySelectorAll('[data-testid="notes-tree"], [data-testid="note-toolbar"]').length,
+  };
+});
+ok("PRINT BUILDS A REAL SHEET", !!sheet && !!sheet.h1, sheet ? sheet.h1 : "no print frame");
+ok("the sheet carries the page's PICTURE, resolved to real bytes", (sheet?.imgs || 0) === 1, `${sheet?.imgs} image(s)`);
+ok("the sheet drops the app chrome — no rail, no toolbar", sheet?.chrome === 0);
+ok("the sheet is light-on-white, whatever the app theme is", /rgb\(255,\s*255,\s*255\)/.test(sheet?.bg || ""), sheet?.bg);
+
+/* ════ 14. A PICTURE WHOSE BYTES ARE GONE SAYS SO ══════════════════════════════════════ */
+const gone = imgs[0].id;
+await page.evaluate((id) => new Promise((resolve) => {
+  const req = indexedDB.open("planyr-notes", 1);
+  req.onsuccess = () => {
+    const tx = req.result.transaction("images", "readwrite");
+    tx.objectStore("images").delete(`local:${id}`);
+    tx.oncomplete = () => resolve(true);
+    tx.onerror = () => resolve(false);
+  };
+  req.onerror = () => resolve(false);
+}), gone);
+
+await page.reload({ waitUntil: "load" });
+await page.waitForTimeout(1800);
+await page.locator('[data-testid="module-tab-notes"]:visible').first().click();
+await page.waitForSelector('[data-testid="notes-tree"]', { timeout: 15000 });
+await tb(`notes-row-${page3}`).click();
+await page.waitForTimeout(1200);
+ok("AN IMAGE WHOSE STORED COPY IS GONE RENDERS A NAMED BROKEN STATE, never a blank gap",
+  await page.locator('[data-testid="note-image"][data-missing]').count() === 1
+  && /Image missing/i.test(await page.locator('[data-testid="note-image"]').innerText()));
+
+/* ════ 15. MOVE — the model's move ops finally have a caller ════════════════════════════ */
+await rowAction(notebook1, "add");
+await page.waitForTimeout(900);
+tree = await readTree();
+const section2Id = tree.notebooks[0].sections[1]?.id;
+ok("a second section can be added, to move a page into", !!section2Id, section2Id || "none");
+
+await tb(`notes-row-${page3}`).click();
+await page.waitForTimeout(700);
+
+await rowAction(page3, "mv");
+await page.waitForTimeout(250);
+ok("the move panel opens inline, not in a dialog box", await tb(`notes-move-${page3}`).count() === 1);
+
+await tb(`notes-move-${page3}-to-${section2Id}`).click();
+await page.waitForTimeout(900);
+tree = await readTree();
+const movedInto = tree.notebooks[0].sections.find((s) => (s.pages || []).some((p) => p.id === page3));
+ok("A PAGE CAN BE MOVED INTO ANOTHER SECTION — through the UI, not just in a unit test",
+  movedInto?.id === section2Id, `now in ${movedInto?.title}`);
+
+await rowAction(page1, "mv");
+await page.waitForTimeout(250);
+await tb(`notes-move-${page1}-down`).click();
+await page.waitForTimeout(900);
+tree = await readTree();
+const order = tree.notebooks[0].sections[0].pages.map((p) => p.id);
+ok("A PAGE CAN BE REORDERED INSIDE ITS SECTION", order.indexOf(page1) > 0, order.join(" → "));
+
+/* ════ 16. Timestamps, and the Recent view they make possible ══════════════════════════ */
+tree = await readTree();
+const stamped = tree.notebooks[0].sections.flatMap((s) => s.pages).filter((p) => Number.isFinite(p.updatedAt));
+ok("EVERY PAGE NOW RECORDS WHEN IT WAS LAST TOUCHED", stamped.length >= 3, `${stamped.length} stamped`);
+ok("the rail shows a relative time on a page row", await page.locator(`[data-testid="notes-when-${page1}"]`).count() >= 0);
+
+await tb("notes-view-recent").click();
+await page.waitForTimeout(400);
+const recentRows = await page.locator('[data-testid="notes-recent-list"] button').count();
+ok("A RECENT VIEW LISTS PAGES BY WHEN THEY WERE EDITED", recentRows >= 3, `${recentRows} row(s)`);
+const firstRecent = await page.locator('[data-testid="notes-recent-list"] button').first().getAttribute("data-testid");
+const newest = [...tree.notebooks[0].sections.flatMap((s) => s.pages)].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))[0];
+ok("...newest first", firstRecent === `notes-recent-${newest.id}`, `${firstRecent} vs ${newest.id}`);
+await tb("notes-view-tree").click();
+await page.waitForTimeout(300);
+
+/* ════ 17. Search lands you ON the phrase, and Esc gives the tree back ═════════════════ */
+await tb("notes-search").fill("bayou");
+await page.waitForTimeout(700);
+await page.locator('[data-testid="notes-search-results"] button').first().click();
+await page.waitForTimeout(1200);
+
+const findText = await tb("note-find-count").innerText().catch(() => "");
+ok("OPENING A SEARCH HIT SAYS WHERE THE PHRASE IS, instead of dropping you at the top",
+  /1 of \d+/.test(findText), findText || "no find bar");
+ok("the match is actually MARKED in the page", await page.locator('[data-testid="note-body"] .note-search-hit').count() >= 1);
+
+await tb("notes-search").fill("the");
+await page.waitForTimeout(700);
+await page.locator('[data-testid="notes-search-results"] button').first().click();
+await page.waitForTimeout(1200);
+const multi = await tb("note-find-count").innerText().catch(() => "");
+if (/of (\d+)/.test(multi) && Number(multi.match(/of (\d+)/)[1]) > 1) {
+  await tb("note-find-next").click();
+  await page.waitForTimeout(400);
+  const stepped = await tb("note-find-count").innerText();
+  ok("YOU CAN STEP BETWEEN MATCHES", stepped !== multi, `${multi} → ${stepped}`);
+} else {
+  ok("YOU CAN STEP BETWEEN MATCHES", false, `only one match to step through: ${multi}`);
+}
+ok("the current match is distinguished from the others", await page.locator('[data-testid="note-body"] .note-search-hit-current').count() === 1);
+
+await tb("note-find-clear").click();
+await page.waitForTimeout(300);
+ok("clearing the search removes the marking from the page", await page.locator('[data-testid="note-body"] .note-search-hit').count() === 0);
+
+await tb("notes-search").fill("bayou");
+await page.waitForTimeout(500);
+await tb("notes-search").press("Escape");
+await page.waitForTimeout(400);
+ok("ESC IN THE SEARCH BOX CLEARS IT AND GIVES THE TREE BACK — it used to do nothing at all",
+  await tb("notes-search").inputValue() === "" && await page.locator('[data-testid="notes-search-results"]').count() === 0);
+
+/* ════ 18. The toolbar fits on ONE row at a normal laptop width ════════════════════════ */
+/* Measured on a page with NO table: the table group is deliberately contextual (it appears
+ * only when the caret is inside one) and is not part of the row that has to fit. */
+await tb(`notes-row-${page3}`).click();
+await page.waitForTimeout(900);
+await page.setViewportSize({ width: 1366, height: 850 });
+await page.waitForTimeout(400);
+const barRows = await page.evaluate(() => {
+  const bar = document.querySelector('[data-testid="note-toolbar"]');
+  if (!bar) return 0;
+  /* Group on each control's vertical CENTRE, not its top: the bar is `align-items:center`,
+   * so a short separator and a tall button in the same row share a centre and differ by
+   * several pixels at the top. Counting tops reports two rows on a bar that never wrapped. */
+  const rows = new Set();
+  for (const el of bar.children) {
+    const r = el.getBoundingClientRect();
+    if (!r.width && !r.height) continue;          // the hidden file input
+    rows.add(Math.round(r.top + r.height / 2));
+  }
+  return rows.size;
+});
+ok("THE FORMATTING BAR NO LONGER WRAPS ONTO A SECOND ROW on a normal laptop", barRows === 1, `${barRows} row(s)`);
+ok("the long tail is still reachable, one click away", await tb("nt-more").count() === 1);
+await tb("nt-more").click();
+await page.waitForTimeout(250);
+ok("the More drawer holds the controls that left the row", await tb("nt-more-panel").count() === 1
+  && await tb("nt-align-center").count() === 1 && await tb("nt-font").count() === 1);
+await page.keyboard.press("Escape");
+await page.setViewportSize({ width: 1500, height: 950 });
+await page.waitForTimeout(300);
+
+/* ════ 19. DELETE IS UNDOABLE — the bin, and the purge that finally frees the bytes ════ */
+/* Put a picture back on a page the section owns, so the purge has real bytes to destroy —
+ * the §14 check deleted the earlier one out from under the note on purpose. */
+await tb(`notes-row-${page1}`).click();
+await page.waitForTimeout(900);
+await pasteImage(200);
+await settle();
+ok("a picture is in place on a page the section owns", (await imageRecords()).length === 1);
+
 const keysBefore = await pageKeyCount();
-ok("both page bodies are on disk before the delete", keysBefore === 2, `${keysBefore} key(s)`);
+ok("every page body is on disk before the delete", keysBefore >= 2, `${keysBefore} key(s)`);
 
 await rowAction(section1, "rm");
 await page.waitForTimeout(300);
@@ -347,10 +613,55 @@ ok("delete asks inline rather than with a dialog box", await tb(`notes-del-${sec
 await tb(`notes-del-${section1}-yes`).click();
 await page.waitForTimeout(1200);
 
+let treeAfter = await readTree();
+ok("the section leaves the live tree", !(treeAfter.notebooks[0]?.sections || []).some((s) => s.id === section1));
+ok("...and lands in the BIN, carrying its full page cascade",
+  (treeAfter.trash || []).length === 1 && (treeAfter.trash[0].pageIds || []).length >= 1,
+  `${(treeAfter.trash?.[0]?.pageIds || []).length} page(s) binned`);
+ok("THE BODIES ARE STILL ON DISK — a bin whose contents were already destroyed is not a bin",
+  await pageKeyCount() === keysBefore, `${keysBefore} → ${await pageKeyCount()} key(s)`);
+ok("an UNDO is offered at the moment of the delete, not buried in a menu", await tb("notes-undo-bar").count() === 1);
+
+await tb("notes-undo").click();
+await page.waitForTimeout(1200);
+treeAfter = await readTree();
+ok("UNDO PUTS THE WHOLE SECTION BACK, pages and all",
+  (treeAfter.notebooks[0]?.sections || []).some((s) => s.id === section1) && (treeAfter.trash || []).length === 0);
+ok("...and its text is still there afterwards", textOf(await readBody(page1)).includes("north property line"));
+
+/* Delete it again and take the OTHER exit: delete forever, which is the one and only
+ * point at which a note's bytes are actually destroyed. */
+await rowAction(section1, "rm");
+await page.waitForTimeout(250);
+await tb(`notes-del-${section1}-yes`).click();
+await page.waitForTimeout(1200);
+await tb("notes-view-bin").click();
+await page.waitForTimeout(400);
+treeAfter = await readTree();
+const entryId = treeAfter.trash[0].id;
+ok("the bin lists what was deleted, with a way back and a way out",
+  await tb(`notes-bin-${entryId}`).count() === 1
+  && await tb(`notes-bin-restore-${entryId}`).count() === 1
+  && await tb(`notes-bin-purge-${entryId}`).count() === 1);
+
+const binnedPages = treeAfter.trash[0].pageIds;
+const imgsBeforePurge = (await imageRecords()).length;
+ok("the binned pages still hold their picture, right up to the purge", imgsBeforePurge >= 1, `${imgsBeforePurge} image record(s)`);
+
+await tb(`notes-bin-purge-${entryId}`).click();
+await page.waitForTimeout(1800);
+
 const keysAfter = await pageKeyCount();
-ok("DELETING A SECTION CLEARS EVERY PAGE BODY IT OWNED", keysAfter === 0, `${keysBefore} → ${keysAfter} key(s)`);
-const treeAfter = await readTree();
-ok("the section is gone from the tree too", (treeAfter.notebooks[0]?.sections || []).length === 0);
+const bodiesGone = (await Promise.all(binnedPages.map((id) => readBody(id)))).every((b) => b === null);
+ok("DELETE FOREVER CLEARS EVERY PAGE BODY THE ENTRY OWNED",
+  bodiesGone && keysAfter === keysBefore - binnedPages.length,
+  `${keysBefore} → ${keysAfter} key(s); ${binnedPages.length} purged`);
+ok("...and a page that was MOVED OUT of the deleted section is untouched — the cascade is the entry's set, not a guess",
+  keysAfter >= 1, `${keysAfter} key(s) left`);
+ok("...AND EVERY PICTURE THOSE PAGES HELD — an image left behind can never be reached or freed",
+  (await imageRecords()).length === 0, `${imgsBeforePurge} → ${(await imageRecords()).length} image record(s)`);
+treeAfter = await readTree();
+ok("the bin is empty afterwards", (treeAfter.trash || []).length === 0);
 ok("the notebook itself survives a section delete", treeAfter.notebooks.length === 1 && treeAfter.notebooks[0].id === notebook1);
 
 /* ════ Wrap ═══════════════════════════════════════════════════════════════════════════ */

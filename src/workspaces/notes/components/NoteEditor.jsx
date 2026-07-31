@@ -27,12 +27,19 @@
  *     pageId change" effect in this file, and there must never be one.
  *     It also kills a third bug for free — a shared instance carries a shared undo history,
  *     so undo used to walk the user into another page's text. Per-instance history can't.
+ *
+ *     ⚠ The search-term effect below is NOT that effect and must not grow into it. It
+ *     touches DECORATIONS, never content, and it guards on `editor.isDestroyed` — which is
+ *     the discipline any future effect in this file has to meet.
  */
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { EditorContent, useEditor } from "@tiptap/react";
-import { NOTE_EXTENSIONS, EMPTY_DOC } from "../lib/notesExtensions.js";
-import { readPage, writePage } from "../lib/notesStore.js";
-import { docToMarkdown, safeFileName } from "../lib/notesMarkdown.js";
+import { noteExtensions, EMPTY_DOC } from "../lib/notesExtensions.js";
+import { readNoteImages, readPage, writePage } from "../lib/notesStore.js";
+import { docToMarkdown, imageIdsInDoc, safeFileName } from "../lib/notesMarkdown.js";
+import { docToHtml } from "../lib/notesDocHtml.js";
+import { buildPrintDocument, printHtmlDocument } from "../lib/notesPrint.js";
+import { absoluteStamp, editedLabel } from "../lib/notesTime.js";
 import NoteToolbar from "./NoteToolbar.jsx";
 
 const SAVE_DEBOUNCE_MS = 600;
@@ -40,7 +47,10 @@ const RADIUS = { control: 8, pill: 999 }; // mirrored from shared/ui/controls.js
 
 /* Editor surface styling. It lives here (rather than in src/index.css) so it rides the lazy
  * editor chunk instead of the app's first-paint stylesheet, and it is written entirely
- * against theme tokens so the document themes with the app. */
+ * against theme tokens so the document themes with the app.
+ *
+ * PDF-PARITY: lib/notesPrint.js mirrors this list construct for construct, on paper.
+ * Add a construct here and add it there in the same commit. */
 const EDITOR_CSS = `
 .planyr-note .ProseMirror { outline: none; min-height: 46vh; color: var(--text-primary); line-height: 1.65; font-size: 15px; }
 .planyr-note .ProseMirror > * + * { margin-top: 0.7em; }
@@ -71,15 +81,67 @@ const EDITOR_CSS = `
 .planyr-note .ProseMirror .tableWrapper { overflow-x: auto; }
 .planyr-note .ProseMirror .ProseMirror-gapcursor:after { border-top-color: var(--text-primary); }
 .planyr-note .ProseMirror ::selection { background: var(--accent-notes); color: var(--on-accent-notes); }
+
+/* An empty page says what to do. Both halves — the extension and this rule — landed
+   together; a rule with no extension matches nothing, which is what a blank page was. */
+.planyr-note .ProseMirror p.is-editor-empty:first-child::before { content: attr(data-placeholder); float: left; height: 0; pointer-events: none; color: var(--text-tertiary); font-style: italic; }
+
+/* A picture. The BROKEN state is styled as loudly as the good one on purpose: an image
+   whose bytes are gone must read as a stated problem, never as a blank gap. */
+.planyr-note .planyr-note-image { margin: 0; display: block; }
+.planyr-note .planyr-note-image img { max-width: 100%; height: auto; display: block; border-radius: ${RADIUS.control}px; border: 1px solid var(--border-default); }
+.planyr-note .planyr-note-image.ProseMirror-selectednode img { outline: 2px solid var(--accent-notes); outline-offset: 1px; }
+.planyr-note .planyr-note-image[data-missing] { border: 1px dashed var(--danger-text); border-radius: ${RADIUS.control}px; padding: 14px; background: var(--surface-page); }
+.planyr-note .planyr-note-image-missing { color: var(--danger-text); font-size: 12.5px; font-weight: 600; }
+
+/* Search marking is a decoration, never a mark — it is not in the document. */
+.planyr-note .note-search-hit { background: var(--warn-bg); box-shadow: 0 0 0 1px var(--warn-text) inset; border-radius: 2px; }
+.planyr-note .note-search-hit-current { background: var(--accent-notes); color: var(--on-accent-notes); box-shadow: none; }
 `;
 
 function EditorStyles() {
   return <style dangerouslySetInnerHTML={{ __html: EDITOR_CSS }} />;
 }
 
-export default function NoteEditor({ pageId, title, onTitleChange, onStatus, onExportMarkdown, scopeLabel, status }) {
+/** The find bar — where the phrase you searched for actually is, and how to step through
+ *  it. Shown only while a term is live, so it costs a page with no search nothing. */
+function FindBar({ term, count, index, onStep, onClear }) {
+  if (!term) return null;
+  return (
+    <div
+      data-testid="note-find-bar"
+      style={{
+        flex: "none", display: "flex", alignItems: "center", gap: 8, padding: "5px 14px",
+        borderBottom: "1px solid var(--border-default)", background: "var(--surface-page)",
+        color: "var(--text-secondary)", fontSize: 12.5, fontWeight: 600,
+      }}
+    >
+      <span data-testid="note-find-count" style={{ flex: 1, minWidth: 0 }}>
+        {count ? `“${term}” — ${index + 1} of ${count}` : `“${term}” is not on this page`}
+      </span>
+      <button type="button" data-testid="note-find-prev" title="Previous match" disabled={!count}
+        onMouseDown={(e) => e.preventDefault()} onClick={() => onStep(-1)}
+        style={{ height: 22, minWidth: 26, borderRadius: RADIUS.control, border: "1px solid var(--border-default)", background: "transparent", color: "var(--text-secondary)", font: "inherit", fontSize: 12, cursor: count ? "pointer" : "default", opacity: count ? 1 : 0.45 }}
+      >‹</button>
+      <button type="button" data-testid="note-find-next" title="Next match" disabled={!count}
+        onMouseDown={(e) => e.preventDefault()} onClick={() => onStep(1)}
+        style={{ height: 22, minWidth: 26, borderRadius: RADIUS.control, border: "1px solid var(--border-default)", background: "transparent", color: "var(--text-secondary)", font: "inherit", fontSize: 12, cursor: count ? "pointer" : "default", opacity: count ? 1 : 0.45 }}
+      >›</button>
+      <button type="button" data-testid="note-find-clear" title="Clear the search (Esc)"
+        onMouseDown={(e) => e.preventDefault()} onClick={onClear}
+        style={{ height: 22, padding: "0 9px", borderRadius: RADIUS.pill, border: "1px solid var(--border-default)", background: "transparent", color: "var(--text-secondary)", font: "inherit", fontSize: 11.5, fontWeight: 700, cursor: "pointer" }}
+      >Clear</button>
+    </div>
+  );
+}
+
+export default function NoteEditor({
+  pageId, title, onTitleChange, onStatus, onExportMarkdown, onPrintNotice, onSaved,
+  scopeLabel, status, updatedAt, searchTerm = "", onClearSearch, notebookPageIds, notebookTitle, sectionTitle,
+}) {
   /* Initial content read ONCE, here. Not in an effect — see fix (2) in the header. */
   const [initialDoc] = useState(() => readPage(pageId) || EMPTY_DOC);
+  const [find, setFind] = useState({ term: "", count: 0, index: 0 });
 
   /* The pending snapshot is PLAIN JSON captured at edit time, so the flush never has to
    * ask a possibly-destroyed editor for anything — see fix (1) in the header. */
@@ -90,7 +152,15 @@ export default function NoteEditor({ pageId, title, onTitleChange, onStatus, onE
    * re-register the unmount cleanup and the beforeunload listener on every parent render,
    * which is exactly the kind of churn that made the original ordering bug intermittent. */
   const onStatusRef = useRef(onStatus);
-  useEffect(() => { onStatusRef.current = onStatus; }, [onStatus]);
+  const onSavedRef = useRef(onSaved);
+  useEffect(() => { onStatusRef.current = onStatus; onSavedRef.current = onSaved; }, [onStatus, onSaved]);
+
+  /* WHICH page a pasted picture belongs to, and which notebook it is charged against, read
+   * at PASTE time through a ref — a value captured when the editor was created would be
+   * stale the moment a page is added beside this one. */
+  const imageCtxRef = useRef({ pageId, notebookPageIds });
+  imageCtxRef.current = { pageId, notebookPageIds };
+  const imageContext = useCallback(() => imageCtxRef.current, []);
 
   const flush = useCallback(() => {
     if (timerRef.current) { clearTimeout(timerRef.current); timerRef.current = 0; }
@@ -100,10 +170,18 @@ export default function NoteEditor({ pageId, title, onTitleChange, onStatus, onE
     const ok = writePage(pending.id, pending.doc);
     // LOUD-FAILURE: a write that did not land never reads as "Saved".
     onStatusRef.current?.(ok ? "saved" : "error");
+    // The edited stamp is hung on the write that ACTUALLY LANDED, never on a keystroke —
+    // a page cannot claim it was edited at a moment storage refused to record.
+    if (ok) onSavedRef.current?.(pending.id);
   }, []);
 
+  const extensions = useMemo(
+    () => noteExtensions({ imageContext, onSearchMatches: (m) => setFind(m) }),
+    [imageContext],
+  );
+
   const editor = useEditor({
-    extensions: NOTE_EXTENSIONS,
+    extensions,
     content: initialDoc,
     // The toolbar reads its active states straight off the editor, so it must re-render
     // as the caret moves — including selection-only transactions.
@@ -128,11 +206,43 @@ export default function NoteEditor({ pageId, title, onTitleChange, onStatus, onE
     return () => window.removeEventListener("beforeunload", onLeave);
   }, [flush]);
 
-  const exportPage = useCallback(() => {
-    if (!editor) return;
-    const { markdown, lossy } = docToMarkdown(editor.getJSON(), { title });
+  /* Mark the searched phrase. DECORATIONS ONLY — this writes nothing into the document, and
+   * it checks `isDestroyed` because a command against a torn-down instance is the crash
+   * class this file's header is about. */
+  useEffect(() => {
+    if (!editor || editor.isDestroyed) return;
+    editor.commands.setNoteSearch(searchTerm || "");
+    if (searchTerm) editor.commands.stepNoteSearch(0);
+  }, [editor, searchTerm]);
+
+  const stepFind = useCallback((d) => {
+    if (!editor || editor.isDestroyed) return;
+    editor.commands.stepNoteSearch(d);
+  }, [editor]);
+
+  /* Both exports need the page's pictures, and pictures are async (they live in IndexedDB),
+   * so both of these are async — the ONE place the module reaches across that boundary on
+   * the way out. */
+  const exportPage = useCallback(async () => {
+    if (!editor || editor.isDestroyed) return;
+    const json = editor.getJSON();
+    const images = await readNoteImages(imageIdsInDoc(json));
+    const { markdown, lossy } = docToMarkdown(json, { title, images });
     onExportMarkdown?.({ markdown, lossy, filename: safeFileName(title) });
   }, [editor, title, onExportMarkdown]);
+
+  const printPage = useCallback(async () => {
+    if (!editor || editor.isDestroyed) return;
+    const json = editor.getJSON();
+    const images = await readNoteImages(imageIdsInDoc(json));
+    const html = buildPrintDocument({
+      title: title || "Untitled page",
+      meta: [notebookTitle, sectionTitle].filter(Boolean).join(" › "),
+      pages: [{ title, html: docToHtml(json, images), updatedAt }],
+    });
+    const r = await printHtmlDocument(html);
+    if (!r.ok) onPrintNotice?.(r.error);
+  }, [editor, title, updatedAt, notebookTitle, sectionTitle, onPrintNotice]);
 
   const badge = status === "error"
     ? { text: "Not saved", color: "var(--danger-text)" }
@@ -140,10 +250,13 @@ export default function NoteEditor({ pageId, title, onTitleChange, onStatus, onE
       ? { text: "Unsaved", color: "var(--warn-text)" }
       : { text: "Saved", color: "var(--save-badge)" };
 
+  const edited = editedLabel(updatedAt);
+
   return (
     <div className="planyr-note" style={{ display: "flex", flexDirection: "column", minHeight: 0, flex: 1, background: "var(--surface-page)" }}>
       <EditorStyles />
-      <NoteToolbar editor={editor} onExport={exportPage} />
+      <NoteToolbar editor={editor} onExport={exportPage} onPrint={printPage} />
+      <FindBar term={find.term} count={find.count} index={find.index} onStep={stepFind} onClear={onClearSearch} />
 
       <div style={{ flex: 1, minHeight: 0, overflow: "auto" }}>
         {/* A DOCUMENT page (the owner's choice over a free-form canvas): a fixed-width
@@ -165,6 +278,13 @@ export default function NoteEditor({ pageId, title, onTitleChange, onStatus, onE
               onFocus={(e) => { e.target.style.borderBottomColor = "var(--accent-notes)"; }}
               onBlur={(e) => { e.target.style.borderBottomColor = "transparent"; }}
             />
+            {edited ? (
+              <span
+                data-testid="note-edited"
+                title={absoluteStamp(updatedAt)}
+                style={{ flex: "0 0 auto", fontSize: 11.5, fontWeight: 600, color: "var(--text-tertiary)" }}
+              >{edited}</span>
+            ) : null}
             <span
               data-testid="note-save-badge"
               title={scopeLabel}

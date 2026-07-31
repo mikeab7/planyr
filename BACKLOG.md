@@ -52,6 +52,19 @@ Add a new tag to this legend **in the same commit** you first use it (this preve
 
 ## 🔲 Open
 
+
+
+
+
+
+### B1318 — Link a note to a site, a plan element, or a Library file `[Notes]` (feature) #notes #library #site-planner  *(filed 2026-07-31 from an owner review of B1290; minted with B1310. **FILED ONLY, NOT BUILT — deliberately, and flagged loudly here and in the session reply per the intake rule.** DEDUPE-FIRST: notebook→project binding already exists (B1290) and is a different, coarser thing; nothing covers a link from a note to one OBJECT.)*
+`[ ]` A note that points at the thing it is about — this plan's north detention pond, this survey PDF in the Library, this site — and, from the object, the notes that mention it.
+- Verify: live
+- Origin: filed 2026-07-31 from chat (out-of-scope item 2)
+- **THIS IS THE DIFFERENTIATOR.** Everything else in the module is table stakes against OneNote. A note bound to a real object in the same product, resolvable in both directions, is the thing OneNote structurally cannot do — and it is the reason to keep notes here rather than anywhere else.
+- **It deserves its own design pass and did not get one this session**, which is why it is filed rather than half-built. The real questions are all product decisions, not glue: what a link ANCHORS to (a plan element has an id that survives an undo but not a copy-paste; a Library file has a stable key; a site has a group id), what a BROKEN link looks like when the object is deleted (this module already has a stated answer for a missing image — the same honesty applies), and whether the back-reference is stored or derived.
+- Depends on nothing shipped-but-missing; it is a design gap, not a dependency gap.
+
 ### B1291 — Notes belong in the cloud: sync the notebook tree and page bodies to Supabase `[Notes / sync]` (task) #notes #sync #persistence #auth  *(filed 2026-07-30 alongside **B1290**, which shipped the module itself. Minted **B1291** via `git fetch origin main && npm run next-id -- --against-main`. DEDUPE-FIRST — searched Open / ⏳ Verify / Done for `notes`, `notebook`, `sync`, `cloud save`: the Site Planner's own cloud sync (**B124** / **B671**–**B674** element-level sync) and the Doc Review `doc_reviews` table are different data and different tables; nothing covers Notes. Net-new.)*
 `[ ]` Notes are stored **on this device only** today, and the UI says so in as many words. Take them to the cloud so they follow the account.
 - Verify: live
@@ -1734,6 +1747,17 @@ physical row is a later polish," so **B104** is that remaining polish for the *m
 ---
 
 ## ⏳ Verify — awaiting live confirmation
+
+### B1314 — A note could not be printed or turned into a PDF `[Notes]` (feature) #notes #export  *(filed 2026-07-31 from an owner review of B1290; minted with B1310. DEDUPE-FIRST: the Site Planner's `exportSheet.js` is a different sheet for a different object; nothing covered Notes.)*
+`[x]` *(implemented 2026-07-31; parked for the one strand a headless run cannot reach — see **V631**.)* Markdown is the right archival export, but it is not what the owner sends anyone — he lives in PDFs. Print / Save as PDF now exists on the page and on the notebook.
+- Verify: live — **V631**
+- Origin: filed 2026-07-31 from chat (NEW-5)
+- **PDF-PARITY, BOUGHT BY CONSTRUCTION.** The sheet's body HTML is not hand-written: `lib/notesDocHtml.js` asks ProseMirror's own `DOMSerializer` to render the document through the very `renderHTML` each extension uses to paint the screen. Same schema, same rules — a construct added tomorrow prints with no edit there. Only the image `src` is substituted in (the node deliberately carries an id, not bytes), which is what makes a printed sheet self-contained like an exported one.
+- **A separate sheet rather than an `@media print` block on the app**, and that is the reliability decision: printing the live app means fighting the flex column, the scroll container, the sticky toolbar, the rail and the theme tokens (a dark surface prints a black page), and one new wrapper anywhere above the editor silently breaks it. A whole notebook also prints as one continuous document with section headings and a page break per page, which the on-screen layout cannot express at all.
+- `lib/notesPrint.js`'s paper CSS is a deliberate **mirror** of the screen's `EDITOR_CSS`, construct for construct; a unit test asserts both style the same construct list, and the live check asserts the sheet carries the picture, drops the app chrome, and is light-on-white whatever the app theme is.
+
+- **WHY THIS ONE PARKS AND THE OTHER SEVEN DID NOT — stated plainly, because it stretches a rule.** Everything our code is responsible for WAS driven here (`verify-notes.mjs` §13: the sheet exists, carries the page's picture resolved to real bytes, drops the rail and toolbar, and is light-on-white whatever the app theme is). What cannot be driven here is the step AFTER our code: headless Chromium's `window.print()` is a no-op, so nothing in this sandbox can produce a paginated document. `VERIFICATION.md` rule 4 names exactly three blockers and none of them fit, so **V631** proposes a fourth (`print-engine`) rather than mislabelling this as an auth or data wall. ATTEMPT-BEFORE-YOU-PARK is honoured in substance: nothing drivable was filed.
+
 
 <<<<<<< HEAD
 ### B1254 — Per-layer "Show above plan": opacity was never the escape hatch, and could not have been `[Site Planner / layers panel]` (feature) #site-planner #gis #ui  *(owner chat block 2026-07-30, provisional NEW-1. AMENDS **B1205/B1206/B1207** (PR #880, merged the same night). The owner's instinct — "just have a button that shows it above or shows it below" — was better than what shipped, and this implements it. Minted **B1254** via `git fetch origin main && npm run next-id -- --against-main`, LATE, as the last step before push, against `origin/main` a748911 + 57 in-flight peer branches; code, tests and commit keep the provisional `NEW-1` label. **B779 working as designed, twice over:** the first late mint returned B1228/V573 and `npm run check-mint` REFUSED it because a peer branch had claimed both in the intervening minutes; B1229/V574 was refused too; B1242/V577 passed the gate locally and was then refused by the PRE-PUSH hook, which had a newer view of the peer branches. B1254/V593 is the fifth — B1252/V591 passed the gate cleanly and was then overtaken while a merge-conflict resolution against a fast-moving `main` was in flight. Each renumber was a two-line `sed` — no code, test or commit touched, which is exactly the property late binding buys. Gaps left at B1228–B1253 deliberately (B1140: a gap is cheaper than another renumber pass). DEDUPE-FIRST — searched Open + ⏳ Verify + Done across the stacking and ordering families: **B1205** (the fixed model, whose DEFAULT this deliberately leaves alone), **B1206** (the opacity unification, kept), **B1208** (the handle-layer/line-band deviation — related, and explicitly NOT widened here, see below), **B1197/B1198** (the handle layer + the reference front/back band), **B671** (per-element `z`), **B820** (element/markup Arrange), **B461/B654** (the reference overlay's own z-ops), **B898/B760/B761** (the panel row shapes). None of them owns where a GIS layer sits relative to the plan as a USER decision — B1205 owns it as a fixed system default, and this is the named exception to it. Net-new, and it is an AMENDMENT rather than a B1205 recurrence: B1205 is not defective, its escape-hatch CLAIM was.)*

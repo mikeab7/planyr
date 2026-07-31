@@ -23,7 +23,7 @@ import { ROUTE_KEYS } from "../ui-audit/lib/bundleMetrics.mjs";
 import { PALETTES } from "../src/shared/theme/palette.js";
 import { NOTE_EXTENSIONS } from "../src/workspaces/notes/lib/notesExtensions.js";
 import { NOTE_MD_HANDLED } from "../src/workspaces/notes/lib/notesMarkdown.js";
-import { deleteNode } from "../src/workspaces/notes/lib/notesModel.js";
+import { deleteNode, restoreNode } from "../src/workspaces/notes/lib/notesModel.js";
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const NOTES = join(REPO, "src", "workspaces", "notes");
@@ -46,6 +46,8 @@ const JSX_SURFACES = ["Notes.jsx", "components/NotesTree.jsx", "components/NoteE
 const ALL_NOTES_FILES = [
   "Notes.jsx", "components/NotesTree.jsx", "components/NoteEditor.jsx", "components/NoteToolbar.jsx",
   "lib/notesModel.js", "lib/notesStore.js", "lib/notesMarkdown.js", "lib/notesExtensions.js",
+  "lib/notesTime.js", "lib/notesPrint.js", "lib/notesImageDb.js", "lib/notesImageIntake.js",
+  "lib/notesImageNode.js", "lib/notesSearchHighlight.js", "lib/notesDocHtml.js",
 ];
 
 /* ════════════════════════════════════════════════════════════════════════════════════════
@@ -175,8 +177,9 @@ describe("the editor is split off the route's static path", () => {
     }
   });
 
-  it("the static path does NOT reach the editor, the toolbar, or the extension declaration", () => {
-    for (const forbidden of ["components/NoteEditor.jsx", "components/NoteToolbar.jsx", "lib/notesExtensions.js"]) {
+  it("the static path does NOT reach the editor, the toolbar, or anything that pulls the engine", () => {
+    for (const forbidden of ["components/NoteEditor.jsx", "components/NoteToolbar.jsx", "lib/notesExtensions.js",
+      "lib/notesImageNode.js", "lib/notesSearchHighlight.js", "lib/notesDocHtml.js"]) {
       expect(reachedNotes, `${forbidden} is on the static path — the engine will ride the route chunk`).not.toContain(forbidden);
     }
   });
@@ -199,8 +202,15 @@ describe("the editor is split off the route's static path", () => {
   });
 
   it("lib/notesExtensions.js is the ONE declaration of what a note may contain", () => {
-    const declarers = ALL_NOTES_FILES.filter((f) => /from "@tiptap\/(starter-kit|extension-)/.test(code(f)));
+    const declarers = ALL_NOTES_FILES.filter((f) => /from "@tiptap\/(starter-kit|extension-|extensions")/.test(code(f)));
     expect(declarers).toEqual(["lib/notesExtensions.js"]);
+  });
+
+  it("the print serializer is reached from the workspace root by a DYNAMIC import only", () => {
+    const root = code("Notes.jsx");
+    expect(root, "a static import of the print serializer puts the engine back on the route")
+      .not.toMatch(/^\s*import\s+.*notesDocHtml/m);
+    expect(root).toMatch(/import\("\.\/lib\/notesDocHtml\.js"\)/);
   });
 
   it("the editor is REMOUNTED per page — the key is a bug fix, not a style choice", () => {
@@ -308,6 +318,8 @@ describe("no dialog boxes anywhere in the module (owner rule)", () => {
     const bar = code("components/NoteToolbar.jsx");
     expect(bar).toMatch(/editor\.isActive\(/);
     // The only useState in the bar belongs to the popovers' open/closed flags.
+    // The only useStates in the bar belong to the popovers' and the overflow drawer's
+    // open/closed flags — never to a formatting state.
     const states = [...bar.matchAll(/useState\(/g)].length;
     expect(states, "a mirrored active-state copy drifts the moment the caret moves").toBeLessThanOrEqual(4);
   });
@@ -397,6 +409,32 @@ describe("LOUD-FAILURE — storage is one seam and it never fails silently", () 
     }
   });
 
+  it("lib/notesImageDb.js is the ONE file that touches indexedDB — images ride the same seam", () => {
+    for (const f of ALL_NOTES_FILES.filter((x) => x !== "lib/notesImageDb.js")) {
+      expect(code(f), `${f} reaches for indexedDB directly, bypassing the storage seam`).not.toMatch(/indexedDB/);
+    }
+    const store = src("lib/notesStore.js");
+    for (const fn of ["putNoteImage", "readNoteImage", "deleteNoteImages", "purgePages"]) {
+      expect(store, `${fn} must live on the seam`).toContain(`function ${fn}`);
+    }
+  });
+
+  it("the image ceilings are enforced at the STORE, so no future intake path can slip past them", () => {
+    const store = src("lib/notesStore.js");
+    expect(store).toMatch(/export const MAX_IMAGE_BYTES/);
+    expect(store).toMatch(/export const MAX_NOTEBOOK_IMAGE_BYTES/);
+    // Over-limit is a NAMED refusal on the same one error channel, never a silent drop.
+    expect(store).toMatch(/was NOT added/);
+    expect(store).toMatch(/function failImage/);
+  });
+
+  it("an image whose bytes are gone renders a VISIBLE broken state, never a blank gap", () => {
+    const node = src("lib/notesImageNode.js");
+    expect(node).toMatch(/Image missing/);
+    expect(node).toMatch(/data-missing/);
+    expect(src("components/NoteEditor.jsx")).toMatch(/planyr-note-image\[data-missing\]/);
+  });
+
   it("the store exposes a failure subscription and a named, human-readable message", () => {
     const store = src("lib/notesStore.js");
     expect(store).toMatch(/export function onNotesStorageError/);
@@ -450,10 +488,35 @@ describe("LOUD-FAILURE — storage is one seam and it never fails silently", () 
 });
 
 describe("the delete cascade reaches storage (TOMBSTONE-DELETES)", () => {
-  it("the workspace clears a body for the FULL set the model reports, not just the clicked node", () => {
+  it("the delete computes the FULL cascade and stamps it on the trash entry, not just the clicked node", () => {
     const root = src("Notes.jsx");
-    expect(root).toMatch(/const \{ tree: next, removedPageIds \} = deleteNode\(/);
-    expect(root, "the cascade set must be handed straight to the store").toMatch(/deletePages\(removedPageIds\)/);
+    expect(root).toMatch(/const \{ tree: next, removedPageIds, entry \} = deleteNode\(/);
+    expect(root, "the cascade set is what the bin entry carries").toMatch(/pageIds: entry\.pageIds/);
+  });
+
+  it("the PURGE is what clears bytes, it takes the entry's cascade set, and it is the ONLY caller", () => {
+    const root = code("Notes.jsx");
+    // Every purge path hands `purgePages` the ids the model returned — never a guessed one.
+    expect(root).toMatch(/purgePages\(r\.pageIds\)/);
+    expect(root).toMatch(/purgePages\(ids\)/);
+    const store = src("lib/notesStore.js");
+    expect(store, "the purge must clear the page BODY and its IMAGES together").toMatch(/export async function purgePages/);
+    expect(store).toMatch(/imageIdsInDoc\(readPage\(id\)\)/);
+    expect(store).toMatch(/deletePages\(ids\)/);
+    expect(store).toMatch(/deleteNoteImages\(imageIds\)/);
+  });
+
+  it("a binned page's body survives until the purge — the bin is not a delayed delete of nothing", () => {
+    const t = { v: 2, notebooks: [{ id: "nb", title: "N", projectId: null, sections: [
+      { id: "s1", title: "A", pages: [{ id: "p1", title: "1" }, { id: "p2", title: "2" }] },
+    ] }], trash: [] };
+    const del = deleteNode(t, "s1");
+    expect(del.entry.pageIds.sort()).toEqual(["p1", "p2"]);
+    expect(del.tree.trash).toHaveLength(1);
+    // Restoring gives back exactly what went in, at the index it came from.
+    const back = restoreNode(del.tree, del.entry.id);
+    expect(back.tree.trash).toHaveLength(0);
+    expect(back.tree.notebooks[0].sections.map((s) => s.id)).toEqual(["s1"]);
   });
 
   it("the store's delete takes a LIST, so it cannot be called with one id by accident", () => {

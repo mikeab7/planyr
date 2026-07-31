@@ -28,7 +28,7 @@
 export const NOTE_MD_HANDLED = {
   nodes: ["doc", "paragraph", "text", "heading", "bulletList", "orderedList", "listItem",
     "taskList", "taskItem", "blockquote", "codeBlock", "horizontalRule", "hardBreak",
-    "table", "tableRow", "tableHeader", "tableCell"],
+    "table", "tableRow", "tableHeader", "tableCell", "noteImage"],
   marks: ["bold", "italic", "strike", "code", "underline", "link", "textStyle", "highlight"],
 };
 
@@ -43,7 +43,52 @@ const LOSSY = {
   mergedCells: "merged table cells",
   richCells: "tables with multi-paragraph cells",
   headerlessTable: "tables with no header row",
+  missingImage: "an image whose stored copy has gone",
 };
+
+/* ---- images -------------------------------------------------------------------------
+ *
+ * An image's BYTES are not in the document — the document holds an id and the bytes live
+ * in IndexedDB (lib/notesImageDb.js). This module stays PURE, so it never reaches for
+ * them: the caller passes an `images` map of `imageId → data URL` and the exporter inlines
+ * what it was given. An exported note is therefore SELF-CONTAINED (open it anywhere and
+ * the pictures are in it), and this file still has no storage dependency to test around.
+ */
+
+/** Every image id a document references, in document order, de-duplicated. The one place
+ *  the app asks "which pictures does this page need?" — used by the export, the print
+ *  sheet, and the purge that destroys a binned page's images along with its body. */
+export function imageIdsInDoc(doc) {
+  const out = [];
+  const seen = new Set();
+  const walk = (n) => {
+    if (!n || typeof n !== "object") return;
+    if (n.type === "noteImage") {
+      const id = n.attrs?.imageId;
+      if (id && !seen.has(id)) { seen.add(id); out.push(id); }
+    }
+    (n.content || []).forEach(walk);
+  };
+  walk(doc);
+  return out;
+}
+
+/** Every image id across a whole map of `pageId → doc`. */
+export function imageIdsInDocs(bodies) {
+  const seen = new Set();
+  for (const doc of Object.values(bodies || {})) for (const id of imageIdsInDoc(doc)) seen.add(id);
+  return [...seen];
+}
+
+/** Markdown for one image. A picture whose bytes are gone is written as a NAMED broken
+ *  reference and reported as lossy — silently emitting nothing would make an export look
+ *  complete while a figure had quietly vanished from it. */
+function imageMd(node, lossy, images) {
+  const alt = String(node.attrs?.alt || "image").replace(/[[\]]/g, "");
+  const src = images?.[node.attrs?.imageId];
+  if (!src) { lossy.add(LOSSY.missingImage); return `![${alt}](#image-not-stored)`; }
+  return `![${alt}](${src})`;
+}
 
 /* ---- text escaping ---------------------------------------------------------------- */
 
@@ -137,7 +182,7 @@ function cellText(cell, lossy) {
 }
 
 /** Full HTML table — the fallback for anything a pipe table structurally cannot hold. */
-function htmlTable(node, lossy) {
+function htmlTable(node, lossy, images) {
   const rows = (node.content || []).filter((r) => r.type === "tableRow");
   const lines = ["<table>"];
   for (const row of rows) {
@@ -147,7 +192,7 @@ function htmlTable(node, lossy) {
       const { cs, rs } = spans(cell);
       const a = `${cs > 1 ? ` colspan="${cs}"` : ""}${rs > 1 ? ` rowspan="${rs}"` : ""}`;
       // Cell bodies may be several blocks; render each as its own paragraph-ish line.
-      const body = (cell.content || []).map((b) => (b.type === "paragraph" ? inline(b.content, lossy, { inTableCell: true }) : blocks([b], lossy).trim().replace(/\n/g, "<br>"))).filter(Boolean).join("<br>");
+      const body = (cell.content || []).map((b) => (b.type === "paragraph" ? inline(b.content, lossy, { inTableCell: true }) : blocks([b], lossy, 0, images).trim().replace(/\n/g, "<br>"))).filter(Boolean).join("<br>");
       lines.push(`    <${tag}${a}>${body}</${tag}>`);
     }
     lines.push("  </tr>");
@@ -156,7 +201,7 @@ function htmlTable(node, lossy) {
   return lines.join("\n");
 }
 
-function table(node, lossy) {
+function table(node, lossy, images) {
   const rows = (node.content || []).filter((r) => r.type === "tableRow");
   if (!rows.length) return "";
 
@@ -168,7 +213,7 @@ function table(node, lossy) {
   if (rich) lossy.add(LOSSY.richCells);
   if (!headerRow) lossy.add(LOSSY.headerlessTable);
   // A GFM pipe table has no way to express any of the three, so the whole table goes HTML.
-  if (merged || rich || !headerRow) return htmlTable(node, lossy);
+  if (merged || rich || !headerRow) return htmlTable(node, lossy, images);
 
   const width = Math.max(...rows.map((r) => (r.content || []).length));
   const cells = (row) => {
@@ -185,7 +230,7 @@ function table(node, lossy) {
 
 /* ---- blocks ------------------------------------------------------------------------ */
 
-function listBlock(node, lossy, depth, ordered) {
+function listBlock(node, lossy, depth, ordered, images) {
   const pad = "  ".repeat(depth);
   const out = [];
   let n = Number(node.attrs?.start || 1);
@@ -193,17 +238,17 @@ function listBlock(node, lossy, depth, ordered) {
     const marker = ordered ? `${n++}. ` : "- ";
     const inner = (item.content || []);
     const first = inner[0];
-    const head = first?.type === "paragraph" ? inline(first.content, lossy) : blocks(first ? [first] : [], lossy, depth).trim();
+    const head = first?.type === "paragraph" ? inline(first.content, lossy) : blocks(first ? [first] : [], lossy, depth, images).trim();
     out.push(`${pad}${marker}${head}`);
     for (const rest of inner.slice(1)) {
-      const sub = blocks([rest], lossy, depth + 1).replace(/\n+$/, "");
+      const sub = blocks([rest], lossy, depth + 1, images).replace(/\n+$/, "");
       if (sub) out.push(sub);
     }
   }
   return out.join("\n");
 }
 
-function taskBlock(node, lossy, depth) {
+function taskBlock(node, lossy, depth, images) {
   const pad = "  ".repeat(depth);
   const out = [];
   for (const item of node.content || []) {
@@ -213,7 +258,7 @@ function taskBlock(node, lossy, depth) {
     const head = first?.type === "paragraph" ? inline(first.content, lossy) : "";
     out.push(`${pad}- ${box} ${head}`.trimEnd());
     for (const rest of inner.slice(1)) {
-      const sub = blocks([rest], lossy, depth + 1).replace(/\n+$/, "");
+      const sub = blocks([rest], lossy, depth + 1, images).replace(/\n+$/, "");
       if (sub) out.push(sub);
     }
   }
@@ -229,7 +274,7 @@ function alignWrap(node, md, lossy, tag) {
   return `<${tag} style="text-align:${attr(a)}">${md}</${tag}>`;
 }
 
-function blocks(nodes, lossy, depth = 0) {
+function blocks(nodes, lossy, depth = 0, images = null) {
   const out = [];
   for (const node of nodes || []) {
     if (!node || typeof node !== "object") continue;
@@ -247,11 +292,11 @@ function blocks(nodes, lossy, depth = 0) {
         else out.push(`${"#".repeat(lvl)} ${md}`);
         break;
       }
-      case "bulletList": out.push(listBlock(node, lossy, depth, false)); break;
-      case "orderedList": out.push(listBlock(node, lossy, depth, true)); break;
-      case "taskList": out.push(taskBlock(node, lossy, depth)); break;
+      case "bulletList": out.push(listBlock(node, lossy, depth, false, images)); break;
+      case "orderedList": out.push(listBlock(node, lossy, depth, true, images)); break;
+      case "taskList": out.push(taskBlock(node, lossy, depth, images)); break;
       case "blockquote": {
-        const inner = blocks(node.content, lossy, depth).split("\n").map((l) => (l ? `> ${l}` : ">")).join("\n");
+        const inner = blocks(node.content, lossy, depth, images).split("\n").map((l) => (l ? `> ${l}` : ">")).join("\n");
         out.push(inner);
         break;
       }
@@ -262,11 +307,12 @@ function blocks(nodes, lossy, depth = 0) {
         break;
       }
       case "horizontalRule": out.push("---"); break;
-      case "table": out.push(table(node, lossy)); break;
+      case "noteImage": out.push(imageMd(node, lossy, images)); break;
+      case "table": out.push(table(node, lossy, images)); break;
       case "hardBreak": out.push(""); break;
       default: {
         // An unmodelled block still contributes its content rather than vanishing.
-        if (node.content) out.push(blocks(node.content, lossy, depth));
+        if (node.content) out.push(blocks(node.content, lossy, depth, images));
         else if (node.text) out.push(escapeText(node.text));
       }
     }
@@ -279,9 +325,9 @@ function blocks(nodes, lossy, depth = 0) {
 /** One page's document model → `{ markdown, lossy }`.
  *  `lossy` is the list of constructs that needed an HTML fallback — the UI names them
  *  after an export so the gap is stated, not discovered later in another app. */
-export function docToMarkdown(doc, { title = "" } = {}) {
+export function docToMarkdown(doc, { title = "", images = null } = {}) {
   const lossy = new Set();
-  const body = blocks(doc?.content, lossy);
+  const body = blocks(doc?.content, lossy, 0, images);
   const head = title ? `# ${escapeText(title)}\n\n` : "";
   return { markdown: `${head}${body}`.replace(/\n{3,}/g, "\n\n").trimEnd() + "\n", lossy: [...lossy] };
 }
@@ -289,14 +335,14 @@ export function docToMarkdown(doc, { title = "" } = {}) {
 /** A whole notebook → one Markdown document, sections as `##`, pages as `###`.
  *  `bodies` maps pageId → document model (a missing body exports as an empty page,
  *  never as a thrown error mid-export). */
-export function notebookToMarkdown(notebook, bodies = {}) {
+export function notebookToMarkdown(notebook, bodies = {}, { images = null } = {}) {
   const lossy = new Set();
   const parts = [`# ${escapeText(notebook?.title || "Notebook")}`];
   for (const sec of notebook?.sections || []) {
     parts.push(`## ${escapeText(sec.title || "Section")}`);
     for (const pg of sec.pages || []) {
       parts.push(`### ${escapeText(pg.title || "Page")}`);
-      const body = blocks(bodies[pg.id]?.content, lossy);
+      const body = blocks(bodies[pg.id]?.content, lossy, 0, images);
       if (body) parts.push(body);
     }
   }
