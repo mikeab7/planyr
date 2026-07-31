@@ -13,6 +13,7 @@ import {
   addNotebook, addPage, addSection, allPageIds, deleteNode, emptyTree, findPage,
   firstPageId, makeNotebook, migrate, moveNotebook, movePage, moveSection,
   renameNode, searchTitles, setNotebookProject, visibleNotebooks, NOTES_TREE_VERSION,
+  boundProjectIds, notebooksInScope, SCOPE_ALL, SCOPE_PROJECT,
 } from "../src/workspaces/notes/lib/notesModel.js";
 
 const deepFreeze = (o) => {
@@ -151,6 +152,60 @@ describe("project visibility — bound at the NOTEBOOK, and loose notebooks foll
   it("unbinding back to null makes it loose again", () => {
     const t = setNotebookProject(setNotebookProject(fixture(), "nb3", "P2"), "nb3", null);
     expect(visibleNotebooks(t, "P1").map((n) => n.id)).toContain("nb3");
+  });
+});
+
+/* B1374 — the ESCAPE HATCH. `visibleNotebooks` above is a correct filter and was never the
+ * defect; the defect was that it was the ONLY view, so a notebook bound to a project you are
+ * not in was invisible from every screen but one. These are about the property that closes
+ * that: from anywhere, everything is reachable. */
+describe("scope — nothing can become unreachable", () => {
+  it("the project scope is exactly the old filter — the default behaviour is unchanged", () => {
+    expect(notebooksInScope(fixture(), "P1", SCOPE_PROJECT).map((n) => n.id))
+      .toEqual(visibleNotebooks(fixture(), "P1").map((n) => n.id));
+  });
+
+  it("THE ALL SCOPE REACHES EVERY NOTEBOOK, from inside any project", () => {
+    for (const p of ["P1", "P2", "P9-never-seen"]) {
+      expect(notebooksInScope(fixture(), p, SCOPE_ALL).map((n) => n.id)).toEqual(["nb1", "nb2", "nb3"]);
+    }
+  });
+
+  it("a notebook bound to a project that NO LONGER EXISTS is still reachable — the unreachable case, refuted", () => {
+    const t = setNotebookProject(fixture(), "nb3", "P-deleted-long-ago");
+    // Invisible from every project, which is correct and is exactly why ALL must exist…
+    expect(visibleNotebooks(t, "P1").map((n) => n.id)).not.toContain("nb3");
+    expect(visibleNotebooks(t, "P2").map((n) => n.id)).not.toContain("nb3");
+    // …and it is one click away from every one of them.
+    expect(notebooksInScope(t, "P1", SCOPE_ALL).map((n) => n.id)).toContain("nb3");
+    // The dashboard sees it too, so there is a second way home.
+    expect(notebooksInScope(t, null, SCOPE_PROJECT).map((n) => n.id)).toContain("nb3");
+  });
+
+  it("EVERY notebook in the tree appears in SOME scope, for every project — stated as a property", () => {
+    const t = setNotebookProject(fixture(), "nb3", "P-gone");
+    for (const p of ["P1", "P2", "P-unrelated", null]) {
+      const reachable = new Set([
+        ...notebooksInScope(t, p, SCOPE_PROJECT).map((n) => n.id),
+        ...notebooksInScope(t, p, SCOPE_ALL).map((n) => n.id),
+      ]);
+      expect([...reachable].sort()).toEqual(["nb1", "nb2", "nb3"]);
+    }
+  });
+
+  it("with no project selected the scope is moot — both answers are everything", () => {
+    expect(notebooksInScope(fixture(), null, SCOPE_PROJECT).map((n) => n.id)).toEqual(["nb1", "nb2", "nb3"]);
+    expect(notebooksInScope(fixture(), null, SCOPE_ALL).map((n) => n.id)).toEqual(["nb1", "nb2", "nb3"]);
+  });
+
+  it("reports which projects notebooks claim, in tree order and without repeats", () => {
+    expect(boundProjectIds(fixture())).toEqual(["P1", "P2"]);
+    expect(boundProjectIds(emptyTree())).toEqual([]);
+  });
+
+  it("neither scope function mutates the tree it is handed", () => {
+    const t = Object.freeze(fixture());
+    expect(() => { notebooksInScope(t, "P1", SCOPE_ALL); boundProjectIds(t); }).not.toThrow();
   });
 });
 

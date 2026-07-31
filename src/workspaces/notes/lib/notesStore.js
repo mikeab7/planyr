@@ -43,6 +43,36 @@
  * the row at seed time, rather than pushing over it, is what makes that impossible.
  *
  * ═══════════════════════════════════════════════════════════════════════════════════════
+ * WHICH NOTEBOOKS A PROJECT SHOWS — DECIDED, NOT LEFT ACCIDENTAL (B1374)
+ * ═══════════════════════════════════════════════════════════════════════════════════════
+ * A notebook is either BOUND to one project (`projectId`) or LOOSE (`projectId: null`).
+ * The owner asked for this rule to be written down rather than inferred, so here it is,
+ * in full, and every surface obeys it:
+ *
+ *   • A LOOSE notebook is visible EVERYWHERE — from the Dashboard and from inside every
+ *     project. It is not a Dashboard-only shelf. A scratch notebook you cannot reach from
+ *     where you are working is one you stop using, and hiding loose notebooks inside a
+ *     project would create a place notes can be while looking like they are nowhere.
+ *   • A BOUND notebook is visible from ITS project, and from the ALL scope. It is not
+ *     shown inside a different project, because that is the whole point of binding.
+ *   • THE ALL SCOPE IS ALWAYS ONE CLICK AWAY, from inside any project. This is the load-
+ *     bearing half: it is what makes "no notebook can become unreachable" a property
+ *     rather than a hope. A notebook bound to a project you are not in, to a project that
+ *     was deleted, or to an id that no longer resolves at all, is still one click from
+ *     every screen — and the rail says so in as many words rather than showing an
+ *     unexplained empty list.
+ *   • A notebook created while a project is selected is BOUND TO IT by default, with no
+ *     extra step; created from the Dashboard it is LOOSE. Either way the binding is
+ *     visible on the row and changeable from the row's menu.
+ *   • MIGRATION: every notebook that existed before this rule keeps exactly the binding it
+ *     had. Nothing is re-bound and nothing is orphaned — a notebook whose `projectId` is
+ *     absent reads as LOOSE, which is the visible-everywhere case.
+ *   • THE BINDING RIDES IN THE TREE BLOB, so it syncs with everything else and needs no
+ *     schema change. `mergeTrees` carries it: a notebook present on one side only is kept
+ *     whole (rule 2), and for a notebook on both sides the LOCAL binding wins (rule 3),
+ *     the same as its title. Asserted in test/notesSync.test.js, not assumed.
+ *
+ * ═══════════════════════════════════════════════════════════════════════════════════════
  * LOUD-FAILURE. A full quota, a disabled store, a private-mode browser, a refused upload or
  * a dead network must NEVER look like a clean save. Every local failure path broadcasts
  * through `onNotesStorageError`, which the workspace renders as a named banner; every write
@@ -53,7 +83,7 @@
  * there is no state in which the footer claims a sync that did not happen.
  */
 import { docToText, imageIdsInDoc } from "./notesMarkdown.js";
-import { migrate, searchTitles, visibleNotebooks } from "./notesModel.js";
+import { migrate, searchTitles, visibleNotebooks, SCOPE_ALL, SCOPE_PROJECT } from "./notesModel.js";
 import { relativeTime } from "./notesTime.js";
 
 export const TREE_KEY_BASE = "planyr:notes:tree:v1";
@@ -903,13 +933,17 @@ function excerptAround(text, q) {
 /** Titles + BODIES, merged. Title hits come first (a page whose NAME matches is what the
  *  user meant); body hits follow with an excerpt showing the phrase in context. A page
  *  that matches on both appears once, as a title hit. */
-export function searchNotes(tree, query, { projectId = null } = {}) {
+export function searchNotes(tree, query, { projectId = null, scope = SCOPE_PROJECT } = {}) {
   const q = String(query || "").trim().toLowerCase();
   if (!q) return [];
-  const titleHits = searchTitles(tree, query, { projectId });
+  // Search obeys the SAME scope the rail is showing (B1374). A search that silently spans
+  // notebooks the rail is hiding would answer a question the user did not ask; one that
+  // could never span them would make a mis-bound note unfindable, which is the bug.
+  const pid = scope === SCOPE_ALL ? null : projectId;
+  const titleHits = searchTitles(tree, query, { projectId: pid });
   const seen = new Set(titleHits.map((h) => h.pageId));
   const bodyHits = [];
-  for (const nb of visibleNotebooks(tree, projectId)) {
+  for (const nb of visibleNotebooks(tree, pid)) {
     for (const sec of nb.sections || []) {
       for (const pg of sec.pages || []) {
         if (seen.has(pg.id)) continue;

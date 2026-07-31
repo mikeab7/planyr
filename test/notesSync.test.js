@@ -106,6 +106,42 @@ describe("mergeTrees", () => {
     expect(mergeTrees(null, null)).toEqual({ v: 2, notebooks: [], trash: [] });
     expect(mergeTrees(tree([notebook("nb", [section("s", [page("p1")])])]), undefined).notebooks).toHaveLength(1);
   });
+
+  /* B1374 — THE PROJECT BINDING RIDES THROUGH THE MERGE. Asserted, not assumed: the binding
+   * lives in the tree blob, and the tree blob is the thing this function rewrites. A merge
+   * that dropped `projectId` would silently un-file every notebook the moment two devices
+   * both touched the structure — which is a data loss that looks exactly like the bug this
+   * whole item is about, arriving later and from a different direction. */
+  const bound = (id, pid, sections) => ({ id, title: id, projectId: pid, sections });
+
+  it("A NOTEBOOK'S PROJECT BINDING SURVIVES THE MERGE, on both sides", () => {
+    const mine = tree([bound("nbA", "P1", [section("s1", [page("p1")])])]);
+    const theirs = tree([bound("nbB", "P2", [section("s2", [page("p2")])])]);
+    const out = mergeTrees(mine, theirs);
+    expect(out.notebooks.map((n) => [n.id, n.projectId])).toEqual([["nbA", "P1"], ["nbB", "P2"]]);
+  });
+
+  it("...and a LOOSE notebook stays loose rather than acquiring one", () => {
+    const out = mergeTrees(
+      tree([bound("nb", null, [section("s", [page("p1")])])]),
+      tree([bound("nb", null, [section("s", [page("p2")])])]),
+    );
+    expect(out.notebooks[0].projectId).toBeNull();
+  });
+
+  it("for a notebook on BOTH sides the LOCAL binding wins, the same as its title (rule 3)", () => {
+    const mine = tree([bound("nb", "P-local", [section("s", [page("p1")])])]);
+    const theirs = tree([bound("nb", "P-server", [section("s", [page("p1")])])]);
+    expect(mergeTrees(mine, theirs).notebooks[0].projectId).toBe("P-local");
+  });
+
+  it("re-binding on THIS device and adding a page on the other keeps BOTH — the bind is not paid for with a note", () => {
+    const mine = tree([bound("nb", null, [section("s", [page("p1")])])]);           // set loose here
+    const theirs = tree([bound("nb", "P1", [section("s", [page("p1"), page("p2")])])]); // page added there
+    const out = mergeTrees(mine, theirs);
+    expect(out.notebooks[0].projectId).toBeNull();
+    expect(out.notebooks[0].sections[0].pages.map((p) => p.id)).toEqual(["p1", "p2"]);
+  });
 });
 
 /* ════════════════════════════════════════════════════════════════════════════════════════

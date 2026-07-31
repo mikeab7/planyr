@@ -27,9 +27,11 @@ import AppHeader from "../../shared/ui/AppHeader.jsx";
 import NotesTree from "./components/NotesTree.jsx";
 import {
   addNotebook, addPage, addSection, allPageIds, deleteNode, emptyTree, expiredTrashIds,
-  findPage, firstPageId, migrate, moveNotebook, movePage, moveSection, purgeTrashEntry,
-  renameNode, restoreNode, touchPage, trashEntries, trashPageIds, visibleNotebooks,
+  findPage, firstPageId, migrate, moveNotebook, movePage, moveSection, notebooksInScope,
+  purgeTrashEntry, renameNode, restoreNode, setNotebookProject, touchPage, trashEntries,
+  trashPageIds, SCOPE_ALL, SCOPE_PROJECT,
 } from "./lib/notesModel.js";
+import { listProjects } from "../../shared/projects/projects.js";
 import {
   clearNotesStorageError, markPagesBinned, markPagesRestored, notesConflictFor,
   notesScopeLabel, notesStorageLine, onNotesConflict, onNotesStorageError, onNotesSyncState,
@@ -254,6 +256,12 @@ export default function Notes({
   const [deleted, setDeleted] = useState(null);
   const [storageLine, setStorageLine] = useState(() => notesStorageLine());
   const [conflictIds, setConflictIds] = useState([]);
+  /* WHICH NOTEBOOKS THE RAIL IS SHOWING (B1374). Defaults to the selected project — which
+   * is the whole point of "when I'm in Grand Port and I click Notes, take me to Grand Port's
+   * notes" — and switches to ALL in one click, from inside the project, so nothing can
+   * become unreachable. Deliberately NOT persisted: the honest default every time you open a
+   * project is that project, and a sticky ALL would quietly undo the feature. */
+  const [scope, setScope] = useState(SCOPE_PROJECT);
   const treeTimer = useRef(0);
   const treeRef = useRef(null);   // the latest tree, captured at edit time (see the flush note below)
   const undoTimer = useRef(0);
@@ -366,17 +374,33 @@ export default function Notes({
     return () => { window.removeEventListener("beforeunload", flushTree); flushTree(); };
   }, [flushTree]);
 
-  /* Keep the open page inside the current project's visible set. Switching projects with a
-   * page open from a notebook this project can't see would otherwise leave the rail and the
-   * document disagreeing about what is open. */
+  /* Entering a project lands you in THAT project's notebooks (B1374). Changing project
+   * resets the scope — the sticky alternative would mean opening Grand Port and still
+   * looking at everything, which is the behaviour this item exists to end. */
+  useEffect(() => { setScope(SCOPE_PROJECT); }, [projectId]);
+
+  /* The project list, for the rail's scope label and the "Belongs to…" panel. Read from the
+   * SAME per-user, RLS-scoped store the header breadcrumb reads (no parallel project store,
+   * and no new chunk on this route — AppHeader already pulls it in). Re-read when the
+   * project or the account changes, which is when it can have moved. */
+  const [projects, setProjects] = useState(() => listProjects());
+  useEffect(() => { setProjects(listProjects()); }, [projectId, userId]);
+  const projectName = useMemo(
+    () => projects.find((p) => p.id === projectId)?.name || null,
+    [projects, projectId],
+  );
+
+  /* Keep the open page inside the visible set. Switching projects — or narrowing the scope
+   * — with a page open from a notebook the rail can no longer see would otherwise leave the
+   * rail and the document disagreeing about what is open. */
   useEffect(() => {
-    const visible = visibleNotebooks(tree, projectId);
+    const visible = notebooksInScope(tree, projectId, scope);
     const ok = activePageId && visible.some((nb) => (nb.sections || []).some((s) => (s.pages || []).some((p) => p.id === activePageId)));
     if (!ok) {
       const first = visible[0]?.sections?.[0]?.pages?.[0]?.id || null;
       setActivePageId(first);
     }
-  }, [projectId, tree, activePageId]);
+  }, [projectId, scope, tree, activePageId]);
 
   const active = useMemo(() => (activePageId ? findPage(tree, activePageId) : null), [tree, activePageId]);
   const activePage = active?.page || null;
@@ -391,18 +415,32 @@ export default function Notes({
   }, [active]);
 
   const results = useMemo(
-    () => (query.trim() ? searchNotes(tree, query, { projectId }) : []),
-    [query, tree, projectId],
+    () => (query.trim() ? searchNotes(tree, query, { projectId, scope }) : []),
+    [query, tree, projectId, scope],
   );
 
   /* ---- tree actions ---- */
 
+  /* A notebook created from inside a project BELONGS TO IT, with no extra step; created from
+   * the dashboard it is loose. The binding then shows on its row and is changeable from the
+   * row's menu — which is the half that did not exist before B1374. */
   const handleAddNotebook = useCallback(() => {
-    // A notebook created from inside a project belongs to it; from the dashboard it is loose.
     const r = addNotebook(tree, { projectId: projectId || null });
     persistTree(r.tree);
     setActivePageId(r.pageId);
     setQuery("");
+    // A new notebook must never be born invisible: creating one while looking at ALL, or
+    // while a project is selected, has to leave it on screen in the scope you are in.
+    setScope((s) => (projectId ? s : SCOPE_PROJECT));
+  }, [tree, projectId, persistTree]);
+
+  /** Re-bind a notebook to a project, or set it loose (B1374). */
+  const handleBindNotebook = useCallback((notebookId, pid) => {
+    persistTree(setNotebookProject(tree, notebookId, pid));
+    /* Binding a notebook AWAY from the project you are looking at would make it vanish from
+     * under the pointer. Widen the scope instead, so the notebook you just moved is still on
+     * screen and the move is visibly a move rather than a disappearance. */
+    if (projectId && pid != null && pid !== projectId) setScope(SCOPE_ALL);
   }, [tree, projectId, persistTree]);
 
   const handleAddSection = useCallback((notebookId) => {
@@ -590,6 +628,11 @@ export default function Notes({
         <NotesTree
           tree={tree}
           projectId={projectId}
+          projects={projects}
+          projectName={projectName}
+          scope={scope}
+          onScope={setScope}
+          onBindNotebook={handleBindNotebook}
           activePageId={activePageId}
           query={query}
           results={results}

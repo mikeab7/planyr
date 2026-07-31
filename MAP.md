@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-07-31 @ `fa8b791` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-07-31 @ `8ea698a` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -62,7 +62,7 @@ _413 source files mapped._
 - **`src/workspaces/notes/lib/notesMarkdown.js`** — PURE Markdown export of a note's document model (GFM tables/task lists, HTML fallback for what Markdown cannot spell, plus a lossiness report) and `docToText` for body search.
   - _exports_: `docToMarkdown`, `docToText`, `escapeText`, `imageIdsInDoc`, `imageIdsInDocs`, `lossyNote`, `NOTE_MD_HANDLED`, `notebookToMarkdown`, `safeFileName`
 - **`src/workspaces/notes/lib/notesModel.js`** — PURE notebook › section › page tree schema, page timestamps, every structural op (add/rename/move/delete/search/migrate) and the 30-day BIN. `deleteNode` is a soft delete that still computes the FULL cascade of orphaned page ids and stamps it on the trash entry.
-  - _exports_: `addNotebook`, `addPage`, `addSection`, `allPageIds`, `DEFAULT_NOTEBOOK_TITLE`, `DEFAULT_PAGE_TITLE`, `DEFAULT_SECTION_TITLE`, `deleteNode`, `emptyTree`, `expiredTrashIds`, `findNotebook`, `findPage`, `findSection`, `firstPageId`, `makeNotebook`, `makePage`, `makeSection`, `migrate`, `moveNotebook`, `movePage`, `moveSection`, `newId`, `NOTES_TREE_VERSION`, `purgeTrashEntry`, `recentPages`, `renameNode`, `restoreNode`, `searchTitles`, `setNotebookProject`, `touchPage`, `TRASH_RETENTION_DAYS`, `trashEntries`, `trashPageIds`, `visibleNotebooks`
+  - _exports_: `addNotebook`, `addPage`, `addSection`, `allPageIds`, `boundProjectIds`, `DEFAULT_NOTEBOOK_TITLE`, `DEFAULT_PAGE_TITLE`, `DEFAULT_SECTION_TITLE`, `deleteNode`, `emptyTree`, `expiredTrashIds`, `findNotebook`, `findPage`, `findSection`, `firstPageId`, `makeNotebook`, `makePage`, `makeSection`, `migrate`, `moveNotebook`, `movePage`, `moveSection`, `newId`, `notebooksInScope`, `NOTES_TREE_VERSION`, `purgeTrashEntry`, `recentPages`, `renameNode`, `restoreNode`, `SCOPE_ALL`, `SCOPE_PROJECT`, `searchTitles`, `setNotebookProject`, `touchPage`, `TRASH_RETENTION_DAYS`, `trashEntries`, `trashPageIds`, `visibleNotebooks`
 - **`src/workspaces/notes/lib/notesPrint.js`** — The Notes print / Save-as-PDF sheet — a pure HTML document builder whose paper CSS mirrors the screen's editor CSS, plus the hidden-iframe driver that opens the print dialogue.
   - _exports_: `buildPrintDocument`, `printHtmlDocument`
 - **`src/workspaces/notes/lib/notesSearchHighlight.js`** — Search marking as ProseMirror DECORATIONS (never marks — it must not write into the document) plus stepping between matches.
