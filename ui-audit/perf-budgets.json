@@ -129,7 +129,7 @@
           "from": 2332000,
           "to": 2320655,
           "direction": "ratchet",
-          "item": "NEW-1",
+          "item": "B1344",
           "date": "2026-07-30",
           "reason": "Policy migration: the hand-pinned ceiling 2332000 is retired and this becomes a measured baseline (a real build of main at d5476d0), with the ceiling derived from the shared headroom band. Not an optimization — a re-seed of the same measurement onto the new shape."
         },
@@ -138,7 +138,7 @@
           "from": 3985000,
           "to": 3980641,
           "direction": "ratchet",
-          "item": "NEW-1",
+          "item": "B1344",
           "date": "2026-07-30",
           "reason": "Policy migration, same as siteRouteJsBytes: hand-pinned ceiling retired, baseline re-seeded from a real build of main at d5476d0. This metric had 4.3 KB (0.11%) of headroom and was next in line to fail."
         },
@@ -147,7 +147,7 @@
           "from": 1750000,
           "to": 1743553,
           "direction": "ratchet",
-          "item": "NEW-1",
+          "item": "B1344",
           "date": "2026-07-30",
           "reason": "Policy migration, same as the other two: hand-pinned ceiling retired, baseline re-seeded from a real build of main at d5476d0 (1.1 KB / 0.06% of headroom under the old number)."
         },
@@ -268,9 +268,40 @@
       "Browser-measured, by ui-audit/perf-harness.mjs. NOT gated in the required CI build check —",
       "frame timing and heap on a shared CI runner are too noisy to gate a merge on, and the aerial",
       "budget needs live external tile hosts. Run on demand; see docs/PERF-BUDGETS.md for why and for",
-      "what IS gated. The reference scenario is the committed ui-audit/lib/perf-scenario.mjs, which",
-      "stands in for Sylvestri / Concept C (real project data needs a signed-in session the sandbox",
-      "cannot reach) and is LIGHTER than it, so these local numbers are a floor, not a match."
+      "what IS gated.",
+      "",
+      "THE REFERENCE SCENARIO WAS REPLACED 2026-07-31 (NEW-1), AND THE FRAME SEEDS BEFORE THAT DATE",
+      "ARE WITHDRAWN — the SECOND withdrawal of these two metrics, for a reason unrelated to the",
+      "first. The 2026-07-29 re-seed fixed the INSTRUMENT (a hidden tab starving rAF). It did not,",
+      "and could not, fix the SCENE or the GESTURE, and both were broken:",
+      "  1. THE SCENE HAD THE EXPENSIVE WORK TAKEN OUT. The hand-authored stand-in's road was a",
+      "     RECTANGLE — {type:'road', cx, cy, w, h}, no `pts`, no `vtx` — and it had NO PONDS and no",
+      "     polygon elements at all. So roadNet / teeJunctionsOf / driveJunctionsOf / dissolveRings",
+      "     and the whole of lib/roadGeometry.js, plus lib/detentionRules.js, lib/floodplainMitigation",
+      "     .js and the pond ledger, executed ZERO TIMES in the benchmark that certified them.",
+      "  2. THE GESTURE DID NOTHING. The scripted drag pressed at the exact canvas CENTRE, which on",
+      "     any real plan lands on an ELEMENT, so the view never panned. Measured head-to-head on the",
+      "     real plan: 604 DOM mutations for the centre press, 641,730 for the same drag started on",
+      "     bare canvas. The sampler saw a clean 60 fps for both and reported the first as 16.7 ms.",
+      "So a green 16.7 was never evidence that anything was fast. The scenario is now DERIVED from",
+      "ui-audit/fixtures/goose-creek-plan1copy.json (the owner's real Goose Creek plan: 62 elements,",
+      "6 centerline roads with arc vertices, 2 ponds, 6 parcels), the press point is chosen to be",
+      "bare canvas, and a gesture that moves nothing is REFUSED rather than reported.",
+      "",
+      "WHAT THAT COST, MEASURED AND REPORTED PLAINLY RATHER THAN SMOOTHED: canvas DOM nodes went",
+      "1197 -> 2822 at the innermost rung (+136%) and peak JS heap 41.7 -> 68.8-98.0 MB. The frame",
+      "medians did NOT move at 1x (16.7 / 16.7, 3 reps) — not because the scene is free, but because",
+      "this container has no dynamic range at 1x: it renders the heavier scene at a full 60 fps too.",
+      "NO CEILING WAS RAISED to accommodate any of this, and B1178 remains open and unexplained.",
+      "",
+      "THE INSTRUMENT WITH DYNAMIC RANGE IS `--cpu-throttle N`. On the same build and scene at 4x,",
+      "the pan runs at 14.8 fps (49.9 ms median) and the WHEEL ZOOM at 6.4 fps — 199.9 ms median,",
+      "250 ms p90 — which is the first time any instrument in this repo has reproduced the owner's",
+      "'I scroll out and it takes probably a whole second'. Emulated numbers are MEASURED BUT NEVER",
+      "JUDGED against anything below: these ceilings describe a 1x machine, and the ratchet refuses",
+      "an emulated run outright. Use them only to compare two builds at identical settings.",
+      "",
+      "These local numbers remain a FLOOR, not a match, for the owner's heaviest signed-in plans."
     ],
     "timeToFirstDragMs": {
       "ceiling": 4200,
@@ -295,7 +326,7 @@
       "measured": 16.7,
       "unit": "ms",
       "what": "Median frame time during a scripted drag across the planner canvas.",
-      "seededFrom": "ui-audit/perf-harness.mjs, headless, reference scenario, 2026-07-29 (3 reps: 16.7 / 16.7 / 16.7; 145-171 samples at 59.1-59.6 fps, tab visible)",
+      "seededFrom": "ui-audit/perf-harness.mjs, headless, perf-reference-goose-creek, 2026-07-31 (280 samples at 59.2 fps, tab visible, view panned)",
       "note": "RE-SEEDED 2026-07-29, and the previous seed is WITHDRAWN. The old numbers (ceiling 24, measured 20) came from a browser session whose tab visibility could not be guaranteed; that surface reports document.visibilityState === 'hidden', and Chrome SUSPENDS requestAnimationFrame in a backgrounded tab — six real drag gestures there produced ZERO frames, and sample counts wandering 1525 -> 316 -> 0 across otherwise-identical runs are the signature of that throttling, not of a performance change. So the 20ms was a median over a starved sample, of unknown provenance, and it must not be treated as measured truth. The instrument of record is now perf-harness.mjs run headless, where the page is guaranteed visible and rAF runs at full rate, and where the harness now REFUSES to report a median at all if the tab is not visible or the observed rate falls below 30 fps (ui-audit/lib/frameSampling.mjs). SCOPE, stated plainly: this ceiling describes the committed reference scenario in that harness, which is LIGHTER than Sylvestri / Concept C — it catches a render regression in the reference scene, it is NOT a claim about the owner's plan on production. Confirming production needs a signed-in live run on an instrument with guaranteed visibility, which a Cowork browser session is not (V480(e) / V481(g))."
     },
     "frameP90Ms": {
@@ -304,7 +335,7 @@
       "measured": 16.7,
       "unit": "ms",
       "what": "90th-percentile frame time during the same scripted drag — the stutter the owner actually feels.",
-      "seededFrom": "ui-audit/perf-harness.mjs, headless, reference scenario, 2026-07-29 (3 reps: 16.7 / 16.7 / 16.7)",
+      "seededFrom": "ui-audit/perf-harness.mjs, headless, perf-reference-goose-creek, 2026-07-31 (280 samples at 59.2 fps, tab visible, view panned)",
       "note": "RE-SEEDED 2026-07-29 alongside frameMedianMs, same withdrawal of the same untrustworthy seed — the old 96 ceiling / 80 measured came from that hidden-tab session (its later 'post-fix' sample of p90 120 over 316 frames is the same artefact, which is why neither is kept). The reference scene runs a clean 60fps headless, so the ceiling is the measurement plus real headroom rather than pinned to it: p90 is the metric a single scheduler hiccup on a shared runner moves most, and a ceiling that trips on machine noise teaches people to re-run until green. Read the SCOPE note on frameMedianMs before quoting this number for production."
     },
     "peakHeapMB": {
@@ -325,6 +356,42 @@
       "what": "Aerial basemap tile requests ISSUED per scenario load, counted across all zoom levels.",
       "note": "ABOVE TARGET — 221 on the owner's baseline vs 120. Counted as REQUESTS, not bytes: cross-origin tile responses carry no Timing-Allow-Origin, so transferSize reads 0 and a byte budget would silently never fire. Counting requests ISSUED (not completed) also keeps the metric meaningful where tile hosts are blocked, as they are in the sandbox — the app still asks for 182 tiles there."
     },
+    "ratchetLog": {
+      "$comment": [
+        "THE ONLY WAY A RUNTIME `measured` / `seededFrom` MOVES (NEW-1, 2026-07-31). The bundle",
+        "half above learned this lesson first; the frame metrics had to learn it twice, because a",
+        "runtime number cannot be measured from a file and so kept being typed in by hand with a",
+        "paragraph of justification bolted onto its `note`. `npm run perf:ratchet -- --metric",
+        "runtime.<name> --from-harness <a perf-harness --json run> --item … --reason …` now takes",
+        "the value from the INSTRUMENT'S OWN OUTPUT and refuses the run outright if it was emulated,",
+        "if the frame sampler raised a fault, or if the scripted drag never panned. A metric with no",
+        "`seededFrom` (peakHeapMB, aerialTileRequests — production figures) cannot be written at all.",
+        "The array is `runtimeRatchetEntries`, not `entries`, so the two logs are never confusable."
+      ],
+      "runtimeRatchetEntries": [
+        {
+          "metric": "runtime.frameMedianMs",
+          "from": 16.7,
+          "to": 16.7,
+          "direction": "reseed",
+          "scenario": "perf-reference-goose-creek",
+          "item": "B1344",
+          "date": "2026-07-31",
+          "reason": "Re-seeded from the Goose Creek scenario after NEW-1 replaced a hand-authored scene that had no centerline road, no pond and no polygon element, and a scripted drag that pressed on an element and never panned. Same number, different provenance: the value did not move at 1x because this container renders the 2.4x heavier scene at 60fps too."
+        },
+        {
+          "metric": "runtime.frameP90Ms",
+          "from": 16.7,
+          "to": 16.7,
+          "direction": "reseed",
+          "scenario": "perf-reference-goose-creek",
+          "item": "B1344",
+          "date": "2026-07-31",
+          "reason": "Re-seeded from the Goose Creek scenario alongside frameMedianMs, same withdrawal for the same two reasons (scene had no roads or ponds, gesture never panned). 3 reps at 1x all read 16.7."
+        }
+      ]
+    },
+
     "firstContentfulPaintMs": {
       "ceiling": 500,
       "target": 500,
