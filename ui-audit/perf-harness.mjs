@@ -11,6 +11,7 @@
  *   aerialTileRequests     basemap tile requests for the scenario load
  *   firstContentfulPaint   the browser's FCP entry
  *   siteRouteChunks        which JS chunks a plain Site route actually fetched (NEW-9 guard)
+ *   canvasNodes            SVG element count inside the planner canvas, PER ZOOM LEVEL (NEW-1)
  *
  * WHY THIS IS NOT IN THE REQUIRED CI BUILD CHECK. Frame time and heap on a shared CI runner
  * are dominated by co-tenant CPU contention — gating merges on them produces flaky reds that
@@ -20,19 +21,22 @@
  * CI via ui-audit/perf-bundle-audit.mjs; this half runs on demand and before shipping anything
  * that touches render or load. docs/PERF-BUDGETS.md records the split and the reasoning.
  *
- * REFERENCE SCENARIO. The owner's baseline was measured on Sylvestri / "Concept C — Full 275'
- * Frontage", which is real project data behind a signed-in session — unreachable from this
- * sandbox (the proxy blocks Supabase sign-in). The harness therefore drives a fixed, committed
- * stand-in scenario, ui-audit/lib/perf-scenario.mjs. (The e2e dense-testfit fixture was tried
- * first and is the WRONG source: it carries the pure-engine geometry schema and crashes the live
- * render path — see the note in that module.) The stand-in is LIGHTER than Sylvestri, so its
- * numbers are a floor, not a match — confirming the ceilings against the real scenario is a
- * signed-in live check (see VERIFICATION.md).
+ * REFERENCE SCENARIO. ⚠ REPLACED 2026-07-31 (NEW-1). Until then this harness drove a HAND-
+ * AUTHORED stand-in whose "road" was a rectangle with no `pts`/`vtx` and which contained no
+ * ponds and no polygon elements at all — so lib/roadGeometry.js, lib/detentionRules.js and
+ * lib/floodplainMitigation.js, the most expensive code in the app, executed ZERO TIMES in the
+ * benchmark that certified them, and its perfect 16.7 ms median measured a scene with the work
+ * taken out. The scenario is now DERIVED from ui-audit/fixtures/goose-creek-plan1copy.json —
+ * the owner's real Goose Creek plan, pulled from production, with 6 centerline roads (arc
+ * vertices), 2 ponds and 6 parcels. See the long note in ui-audit/lib/perf-scenario.mjs.
+ * It is still a FLOOR, not a match, for the owner's heaviest signed-in plans (VERIFICATION.md).
  *
  *   node ui-audit/perf-harness.mjs                       # against http://localhost:4173
  *   BASE_URL=https://planyr.io node ui-audit/perf-harness.mjs
  *   node ui-audit/perf-harness.mjs --json
  *   node ui-audit/perf-harness.mjs --no-tiles            # skip the aerial metrics (offline)
+ *   node ui-audit/perf-harness.mjs --cpu-throttle 4      # emulate a slower machine (NOT judged)
+ *   node ui-audit/perf-harness.mjs --dpr 2               # emulate a retina display (NOT judged)
  *
  * Exits 1 on a ceiling breach, naming the metric and its delta.
  */
@@ -62,6 +66,32 @@ const gestureArg = (() => {
 const DO_DRAG = gestureArg !== "wheel";
 const DO_WHEEL = gestureArg !== "drag";
 
+/* ---- --cpu-throttle N / --dpr N (NEW-1, 2026-07-31) -----------------------------------------
+ * THE THIRD REASON THIS HARNESS COULDN'T SEE THE OWNER'S LAG, after the empty scene and the
+ * no-op gesture. Even with the real plan and a real pan it reports a flat 16.7 ms median, and
+ * that is not a lie — it is a true measurement of a machine that is not his. This container is
+ * a fast headless CPU at deviceScaleFactor 1 with every tile host blocked; the owner is on a
+ * laptop at dpr 2.15 with a live aerial basemap under the plan. A budget measured only at 1× is
+ * a budget with no dynamic range: everything passes, so nothing is comparable, and an
+ * optimisation that halves the work still reads 16.7 → 16.7.
+ *
+ * So the harness can now emulate a slower machine (CDP Emulation.setCPUThrottlingRate — the same
+ * mechanism Lighthouse uses for its mobile profile) and a retina display. Under either, the frame
+ * metrics are reported and compared run-to-run but NOT judged against the committed ceilings,
+ * which were seeded at 1×: a throttled figure is a MEASUREMENT INSTRUMENT for A/B work, not a
+ * budget, and quietly judging it would be the B1086 trap with a new coat of paint.
+ *
+ * ⚠ This is emulation, not the owner's machine. It is the only honest way to get discrimination
+ * out of a box this fast; the production confirmation is still a signed-in live check. */
+const numArg = (flag, dflt) => {
+  const i = process.argv.indexOf(flag);
+  const v = i >= 0 ? Number(process.argv[i + 1]) : NaN;
+  return Number.isFinite(v) && v > 0 ? v : dflt;
+};
+const CPU_THROTTLE = numArg("--cpu-throttle", 1);
+const DPR = numArg("--dpr", 1);
+const EMULATED = CPU_THROTTLE > 1 || DPR !== 1;
+
 const budgets = JSON.parse(readFileSync(join(HERE, "perf-budgets.json"), "utf8"));
 
 /* Set when the frame sampler cannot be trusted (see MEASUREMENT BLOCKER #4 below); non-null
@@ -72,8 +102,10 @@ let frameSamplingFault = null;
  * Owned by ui-audit/lib/perf-scenario.mjs — see the long note there for why this is a
  * purpose-built scenario rather than the e2e dense-testfit fixture (that fixture carries the
  * pure-engine geometry schema and crashes the live render path). */
-const { ORIGIN, SCENARIO_ID, perfScenarioSite, perfScenarioSeed } = await import("./lib/perf-scenario.mjs");
-const { frameSamplingFault: frameSamplingFaultFor, observedFps, MIN_PLAUSIBLE_FPS } = await import("./lib/frameSampling.mjs");
+const { ORIGIN, SCENARIO_ID, perfScenarioSite, perfScenarioSeed, scenarioShape } = await import("./lib/perf-scenario.mjs");
+const shape = scenarioShape();
+const { frameSamplingFault: frameSamplingFaultFor, idleGestureFault, observedFps, plausibilityFloor } = await import("./lib/frameSampling.mjs");
+const MIN_FPS = plausibilityFloor(CPU_THROTTLE);
 const site = perfScenarioSite();
 const seed = perfScenarioSeed();
 
@@ -96,7 +128,7 @@ const browser = await chromium.launch({
   // measure). Without it the heap budget is measuring rounded noise.
   args: ["--no-sandbox", "--ignore-certificate-errors", "--enable-precise-memory-info"],
 });
-const ctx = await browser.newContext({ viewport: { width: 1600, height: 900 }, deviceScaleFactor: 1 });
+const ctx = await browser.newContext({ viewport: { width: 1600, height: 900 }, deviceScaleFactor: DPR });
 
 /* MEASUREMENT BLOCKER #1 — the default resource-timing buffer holds 250 entries and FILLS
  * during a scenario load, after which the browser silently drops every later entry. That
@@ -140,6 +172,15 @@ if (NO_TILES) {
 const results = {};
 const notes = [];
 
+/* CPU throttling is applied AFTER the page exists but BEFORE navigation, so the load timings and
+ * the frame timings are measured on the same emulated machine rather than one each. */
+if (CPU_THROTTLE > 1) {
+  const cdp = await ctx.newCDPSession(page);
+  await cdp.send("Emulation.setCPUThrottlingRate", { rate: CPU_THROTTLE });
+}
+results.cpuThrottle = CPU_THROTTLE;
+results.deviceScaleFactor = DPR;
+
 await page.goto(BASE, { waitUntil: "load" });
 
 /* ---- time-to-first-drag ------------------------------------------------------------------
@@ -157,6 +198,18 @@ await page.mouse.down();
 await page.mouse.move(cx + 40, cy + 30, { steps: 4 });
 await page.mouse.up();
 results.timeToFirstDragMs = Math.round(await page.evaluate(() => new Promise((res) => requestAnimationFrame(() => res(performance.now())))));
+
+/* SNAPSHOT THE ROUTE-CHUNK SET HERE, not at the end of the run (NEW-1).
+ * The guard's own definition is "which JS chunks a PLAIN SITE ROUTE fetched" — the boot path —
+ * but it was read after the scripted gesture loops, which press "l" six times and could
+ * legitimately pull lazily-imported modules. Splitting boot from post-boot makes the metric
+ * mean what it says.
+ * ⚠ AND IT REFUTED THE HYPOTHESIS THAT MOTIVATED IT, which is worth recording rather than
+ * quietly deleting: the five chunks this metric is currently red on (floodZoneCopy,
+ * rasterIdentifyMap, rasterIdentify, featureHover, terrainLayers) turn out to be fetched at
+ * BOOT, before any gesture — `lazyChunksAfterBoot` measures empty. So the red is real, not an
+ * artefact of when the list was read, and the guard is doing its job. Owned by its own item. */
+const bootChunks = [...new Set(jsChunks)];
 
 results.firstContentfulPaintMs = Math.round(
   await page.evaluate(() => {
@@ -230,18 +283,52 @@ if (NO_TILES) {
  * frame figure it cannot stand behind: the tab must be visible, and the observed frame rate
  * across the gesture must be at least MIN_PLAUSIBLE_FPS. Anything less is reported as an
  * unreliable measurement (loudly, with the reason), never as a median. The rule itself lives
- * in ui-audit/lib/frameSampling.mjs so it is unit-tested and cannot drift from the docs. */
+ * in ui-audit/lib/frameSampling.mjs so it is unit-tested and cannot drift from the docs.
+ *
+ * MEASUREMENT BLOCKER #5 — THE GESTURE WAS A NO-OP (NEW-1, 2026-07-31). Both guards above ask
+ * whether enough frames arrived. Neither asked whether the drag DID anything. This block pressed
+ * at the exact canvas CENTRE, and on any plan with something in the middle of it that press lands
+ * on an ELEMENT — so it never panned. Measured on the real Goose Creek plan: 604 DOM mutations
+ * for the centre-press gesture, 641,730 for the identical gesture started on bare canvas. The
+ * sampler saw a clean 60 fps for both and reported the first as a 16.7 ms median. So: the press
+ * point is now CHOSEN (the first candidate that is bare canvas, not an element), and the view
+ * transform is read before and after — a gesture that moved nothing is REFUSED, not reported. */
 const visibility = await page.evaluate(() => document.visibilityState);
+const viewNow = () => page.evaluate(() => {
+  const s = document.querySelector('[data-testid="planner-canvas"]');
+  return s ? `${s.getAttribute("data-view-offx")}|${s.getAttribute("data-view-offy")}|${s.getAttribute("data-view-ppf")}` : null;
+});
+/* A press point that is BARE CANVAS. Candidates are fixed fractions of the canvas, tried in a
+ * fixed order, so the choice is deterministic for a given scene + viewport; the chosen point is
+ * reported, because a harness that silently drags somewhere else run to run is not an instrument. */
+const pressPoint = await page.evaluate(() => {
+  const svg = document.querySelector('[data-testid="planner-canvas"]');
+  const r = svg.getBoundingClientRect();
+  for (const fy of [0.5, 0.3, 0.7, 0.15, 0.85]) {
+    for (const fx of [0.5, 0.25, 0.75, 0.12, 0.88]) {
+      const x = r.left + r.width * fx, y = r.top + r.height * fy;
+      const hit = document.elementFromPoint(x, y);
+      if (!hit || !svg.contains(hit)) continue;
+      if (hit.closest("[data-el-id]")) continue;          // an element — a press here MOVES it
+      return { x, y, fx, fy };
+    }
+  }
+  return null;
+});
+const px = pressPoint ? pressPoint.x : cx, py = pressPoint ? pressPoint.y : cy;
+results.dragPressAt = pressPoint ? `${pressPoint.fx}×${pressPoint.fy} of the canvas` : "canvas centre (no bare spot found)";
 if (DO_DRAG) {
 await page.evaluate(() => { window.__frames.length = 0; });
+const viewBefore = await viewNow();
 const dragT0 = Date.now();
-await page.mouse.move(cx, cy);
+await page.mouse.move(px, py);
 await page.mouse.down();
 for (let i = 0; i < 40; i++) {
-  await page.mouse.move(cx + Math.sin(i / 5) * 260, cy + Math.cos(i / 7) * 160, { steps: 2 });
+  await page.mouse.move(px + Math.sin(i / 5) * 260, py + Math.cos(i / 7) * 160, { steps: 2 });
 }
 await page.mouse.up();
 const dragMs = Date.now() - dragT0;
+const viewAfter = await viewNow();
 const drag = await page.evaluate(() => window.__frames.map((f) => f.d));
 /* Drop the first sample: its delta spans the idle gap before the gesture, not a rendered frame. */
 const dragFrames = drag.slice(1);
@@ -249,7 +336,9 @@ results.frameSamples = dragFrames.length;
 results.frameGestureMs = dragMs;
 results.frameObservedFps = observedFps(dragFrames.length, dragMs);
 results.frameVisibility = visibility;
-frameSamplingFault = frameSamplingFaultFor({ visibility, samples: dragFrames.length, gestureMs: dragMs });
+results.dragPanned = viewBefore !== viewAfter;
+frameSamplingFault = frameSamplingFaultFor({ visibility, samples: dragFrames.length, gestureMs: dragMs, minFps: MIN_FPS })
+  || idleGestureFault({ before: viewBefore, after: viewAfter });
 if (frameSamplingFault) {
   results.frameMedianMs = null;
   results.frameP90Ms = null;
@@ -336,7 +425,7 @@ if (DO_WHEEL) {
   results.zoomCanvasCommits = zoom.commits;
   results.zoomCommitsPerWheel = +(zoom.commits / WHEEL_EVENTS).toFixed(2);
   results.zoomObservedFps = observedFps(zoomFrames.length, zoomMs);
-  const zoomFault = frameSamplingFaultFor({ visibility, samples: zoomFrames.length, gestureMs: zoomMs });
+  const zoomFault = frameSamplingFaultFor({ visibility, samples: zoomFrames.length, gestureMs: zoomMs, minFps: MIN_FPS });
   if (zoomFault) {
     results.zoomFrameMedianMs = null;
     results.zoomFrameP90Ms = null;
@@ -346,6 +435,50 @@ if (DO_WHEEL) {
     results.zoomFrameP90Ms = zoomFrames.length ? +pct(zoomFrames, 90).toFixed(1) : null;
   }
 }
+
+/* ---- DOM node count, PER ZOOM LEVEL (NEW-1) -------------------------------------------------
+ * The harness counted leaflet TILE REQUESTS and nothing else, so the size of the thing React
+ * reconciles and the browser lays out on every frame — the SVG element count inside the planner
+ * canvas — was invisible to every budget. It is the number that most directly explains the
+ * owner's "slow and bloated", and it is the number a level-of-detail gate has to move.
+ *
+ * Counted at several zooms because that is the whole question: geometry that is worth drawing at
+ * a detail zoom (stall stripes, dock leaves, column grids) is still being emitted, node for node,
+ * at a site-overview zoom where it resolves to unreadable grey. Rungs are labelled by their
+ * MEASURED ppf (read from the canvas's own published `data-view-ppf`), never by an assumed one. */
+const countNodes = () => page.evaluate(() => {
+  const svg = document.querySelector('[data-testid="planner-canvas"]');
+  return {
+    ppf: svg ? +Number(svg.getAttribute("data-view-ppf")).toFixed(4) : null,
+    canvasNodes: svg ? svg.getElementsByTagName("*").length : 0,
+    documentNodes: document.getElementsByTagName("*").length,
+  };
+});
+/* One wheel event per task, for the reason spelled out in the zoom block above: React 18
+ * auto-batches a whole task's worth of setState, so a burst in one task would zoom once. */
+const zoomBy = (notches, dy) => page.evaluate(([n, delta, x, y]) => new Promise((done) => {
+  const el = document.querySelector('[data-testid="planner-canvas"]');
+  const ch = new MessageChannel();
+  let i = 0;
+  ch.port1.onmessage = () => {
+    el.dispatchEvent(new WheelEvent("wheel", { deltaY: delta, clientX: x, clientY: y, bubbles: true, cancelable: true }));
+    if (++i < n) ch.port2.postMessage(0); else done();
+  };
+  ch.port2.postMessage(0);
+}), [notches, dy, cx, cy]);
+
+await page.mouse.move(cx, cy);
+await page.waitForTimeout(200);
+const zoomLadder = [];
+zoomLadder.push(await countNodes());                                  // wherever the gestures left it
+for (const [n, dy] of [[8, 120], [8, 120], [16, -120], [8, -120]]) {   // out · further out · in · further in
+  await zoomBy(n, dy);
+  await page.waitForTimeout(350);   // let the coalesced commit + label/declutter pass settle
+  zoomLadder.push(await countNodes());
+}
+zoomLadder.sort((a, b) => (a.ppf || 0) - (b.ppf || 0));
+results.canvasNodesByZoom = zoomLadder;
+results.canvasNodesMax = Math.max(...zoomLadder.map((r) => r.canvasNodes));
 
 /* ---- pan / zoom / overlay-toggle loop → peak heap -------------------------------------------
  * MEASUREMENT BLOCKER #3 — performance.measureUserAgentSpecificMemory() is unavailable on
@@ -373,7 +506,8 @@ results.peakHeapMB = peakHeap ? +(peakHeap / 1048576).toFixed(1) : null;
 if (!peakHeap) notes.push("peakHeap unavailable — performance.memory not exposed (needs --enable-precise-memory-info)");
 
 results.aerialTileRequests = NO_TILES ? null : tiles.length;
-results.siteRouteChunks = [...new Set(jsChunks)];
+results.siteRouteChunks = bootChunks;
+results.lazyChunksAfterBoot = [...new Set(jsChunks)].filter((f) => !bootChunks.includes(f));
 
 await browser.close();
 
@@ -400,9 +534,16 @@ for (const m of METRICS) {
   }
   const row = { metric: `runtime.${m}`, value, ceiling: spec.ceiling, target: spec.target, unit: spec.unit };
   if (LOAD_SENSITIVE.has(m) && !loadTimingsTrustworthy) { unreliable.push(row); continue; }
+  /* An emulated run measures a DIFFERENT MACHINE from the one every ceiling here was seeded on.
+   * Report the numbers — they are the whole point of the mode — but never judge them, and never
+   * let a green under emulation read as a budget pass. */
+  if (EMULATED) { unreliable.push(row); continue; }
   if (value > spec.ceiling) failures.push({ ...row, delta: +(value - spec.ceiling).toFixed(1), pct: (value / spec.ceiling - 1) * 100 });
   else if (spec.target != null && value > spec.target) aboveTarget.push({ ...row, gap: +(value - spec.target).toFixed(1), owner: budgets.targetOwner?.[`runtime.${m}`] || null });
   else passes.push(row);
+}
+if (EMULATED) {
+  notes.push(`EMULATED MACHINE — CPU throttled ${CPU_THROTTLE}× at deviceScaleFactor ${DPR}. Every metric above is MEASURED but NOT JUDGED: the committed ceilings were seeded at 1×, and a throttled number is an A/B instrument, not a budget. Compare it only against another run at the same settings.`);
 }
 if (unreliable.length) {
   notes.push(NO_TILES
@@ -426,11 +567,15 @@ if (intruders.length) {
 }
 
 if (JSON_OUT) {
-  console.log(JSON.stringify({ base: BASE, scenario: site.id, results, frameSamplingFault, failures, aboveTarget, passes, skipped, unreliable, notes }, null, 2));
+  console.log(JSON.stringify({ base: BASE, scenario: site.id, shape, results, frameSamplingFault, failures, aboveTarget, passes, skipped, unreliable, notes }, null, 2));
 } else {
-  console.log(`Planyr runtime performance harness (NEW-8)\n  target: ${BASE}\n  scenario: ${site.id} @ ${ORIGIN.lat},${ORIGIN.lon} (stands in for Sylvestri / Concept C)\n`);
-  console.log(`  site-route chunks fetched: ${results.siteRouteChunks.length} — ${results.siteRouteChunks.map(stem).join(", ")}`);
-  if (DO_DRAG) console.log(`  frame samples during drag: ${results.frameSamples} over ${results.frameGestureMs} ms (${results.frameObservedFps} fps, tab "${results.frameVisibility}")`);
+  console.log(`Planyr runtime performance harness (NEW-8)${EMULATED ? `  [EMULATED: cpu ${CPU_THROTTLE}x, dpr ${DPR} — reported, NOT judged]` : ""}\n  target: ${BASE}\n  scenario: ${site.id} @ ${ORIGIN.lat},${ORIGIN.lon} (the owner's real Goose Creek plan — a FLOOR, not a match, for his heaviest)\n`);
+  console.log(`  scene: ${shape.elements} elements (${Object.entries(shape.byType).map(([t, n]) => `${n} ${t}`).join(" · ")}) · ${shape.parcels} parcels · ${shape.centerlineRoads} centerline roads (${shape.arcVertices} arc vertices) · ${shape.ponds} ponds · ${shape.drawnVertices + shape.parcelVertices} drawn vertices`);
+  console.log(`  site-route chunks fetched at boot: ${results.siteRouteChunks.length} — ${results.siteRouteChunks.map(stem).join(", ")}`);
+  if (results.lazyChunksAfterBoot.length) console.log(`      + lazily, during the scripted gestures (by design, not judged): ${results.lazyChunksAfterBoot.map(stem).join(", ")}`);
+  console.log(`  canvas DOM nodes by zoom: ${results.canvasNodesByZoom.map((r) => `${r.canvasNodes} @ ppf ${r.ppf}`).join("  ·  ")}`);
+  console.log(`      peak ${results.canvasNodesMax} nodes in the canvas · ${results.canvasNodesByZoom[results.canvasNodesByZoom.length - 1].documentNodes} in the whole document at the innermost rung`);
+  if (DO_DRAG) console.log(`  frame samples during drag: ${results.frameSamples} over ${results.frameGestureMs} ms (${results.frameObservedFps} fps, tab "${results.frameVisibility}") · pressed at ${results.dragPressAt} · view ${results.dragPanned ? "PANNED" : "DID NOT MOVE"}`);
   if (DO_WHEEL) {
     // NEW-3(a) — the ZOOM gesture, reported alongside the drag. `commits/wheel` is the number the
     // coalescing + epsilon work has to move; the medians are suppressed rather than guessed when

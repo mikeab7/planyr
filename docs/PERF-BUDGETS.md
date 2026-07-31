@@ -151,12 +151,67 @@ tab visibility, so blocker 4 does not touch their provenance.
 
 ## The reference scenario
 
-`ui-audit/lib/perf-scenario.mjs` — a fixed, deterministic, dense site plan at a fixed
-Katy/west-Houston origin. It is a **stand-in** for Sylvestri / "Concept C — Full 275' Frontage",
-which is real signed-in project data the sandbox cannot reach. The stand-in is **lighter** than
-the real thing, so its numbers are a **floor, not a match** — which is exactly why the ceilings
-are seeded from the owner's production measurements and not from a local run. Confirming them
-against the real scenario is a signed-in live check.
+`ui-audit/lib/perf-scenario.mjs` — **derived from `ui-audit/fixtures/goose-creek-plan1copy.json`,
+the owner's real Goose Creek plan pulled from production**: 62 elements (20 buildings, 6
+centerline roads with arc vertices, 2 ponds), 6 parcels, the plan's own 30-key settings. Derived,
+never copied — a second hand-maintained scene drifts from the fixture the moment either is edited,
+and then two instruments disagree about what "the reference plan" is. It remains a **floor, not a
+match** for the owner's heaviest signed-in plans; confirming production is still a live check.
+
+### ⚠ Measurement blocker 5 — the benchmark could not see the problem (NEW-1, 2026-07-31)
+
+Before this date the scenario was **hand-authored**, and what it left out was not a matter of
+degree. Its "road" was a `{type:'road', cx, cy, w, h}` **rectangle** — no `pts`, no `vtx` — and it
+had **no ponds** and no polygon elements at all. So `roadNet`, `teeJunctionsOf`, `driveJunctionsOf`,
+`dissolveRings` and all of `lib/roadGeometry.js`, plus `lib/detentionRules.js`,
+`lib/floodplainMitigation.js` and the pond ledger — the most expensive code in the app — **executed
+zero times in the benchmark that certified them.**
+
+Worse, the scripted drag pressed at the **exact canvas centre**, which on any real plan lands on an
+*element*, so the view never panned. Measured head to head on the real plan: **604 DOM mutations**
+for the centre-press gesture versus **641,730** for the identical drag started on bare canvas. The
+frame sampler saw a clean 60 fps for both and reported the first as a 16.7 ms median.
+
+Both are fixed, and both are now guarded: `scenarioShape()` is asserted to contain roads, ponds and
+polygons (`test/perfBudgets.test.js`), the press point is *chosen* to be bare canvas, and
+`idleGestureFault` (`ui-audit/lib/frameSampling.mjs`) **refuses** a sample whose view transform
+never moved. What it cost, reported rather than smoothed: canvas DOM nodes **1197 → 2822** at the
+innermost zoom rung (+136%), peak JS heap **41.7 → 68.8–98.0 MB**. The frame medians did **not**
+move at 1× — this container renders the heavier scene at 60 fps too. No ceiling was raised.
+
+### Dynamic range: `--cpu-throttle` and `--dpr`
+
+A budget measured only on a fast headless box at `deviceScaleFactor` 1 has no dynamic range —
+everything passes, so nothing is comparable, and an optimisation that halves the work still reads
+16.7 → 16.7. `node ui-audit/perf-harness.mjs --cpu-throttle 4` emulates a slower machine (CDP
+`Emulation.setCPUThrottlingRate`, the mechanism Lighthouse uses); `--dpr 2` emulates a retina
+display. On the same build and scene at 4×, the pan runs at **14.8 fps (49.9 ms median)** and the
+**wheel zoom at 6.4 fps — 199.9 ms median, 250 ms p90**, the first reproduction anywhere in this
+repo of the owner's *"I scroll out and it takes probably a whole second."*
+
+Emulated numbers are **MEASURED BUT NEVER JUDGED**: the ceilings here describe a 1× machine, and
+`perf-ratchet` refuses an emulated run outright. Compare them only against another run at the same
+settings. Under emulation the frame-sampling plausibility floor drops from 30 fps to 2 fps —
+`plausibilityFloor()` — because under deliberate throttling slowness is the *measurand* and only
+true rAF suspension should be refused; at 1× it returns exactly the committed 30, unchanged.
+
+### Seeding a runtime number
+
+`measured` and `seededFrom` on a harness-seeded runtime metric move **only** through the named step,
+the same rule the bundle baselines already had:
+
+```
+node ui-audit/perf-harness.mjs --no-tiles --json > /tmp/run.json
+npm run perf:ratchet -- --metric runtime.frameMedianMs --from-harness /tmp/run.json \
+  --item NEW-1 --reason "…"
+```
+
+It takes the value from the instrument's own output — never a number you typed — and refuses the run
+if it was emulated, if the frame sampler raised a fault, or if the drag never panned. A metric with
+no `seededFrom` (`peakHeapMB`, `aerialTileRequests` — production figures) cannot be written at all,
+so a sandbox floor can never quietly overwrite a production measurement.
+`test/perfBudgetPolicy.test.js` fails the build if a runtime `measured` does not equal the `to` of
+its own latest log entry.
 
 Two traps worth knowing:
 

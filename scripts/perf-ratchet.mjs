@@ -66,6 +66,106 @@ if (!reason || reason.trim().length < MIN_REASON) {
   ]);
 }
 
+/* ---- RUNTIME metrics (NEW-1, 2026-07-31) ----------------------------------------------------
+ * The bundle half below measures its own value from dist/. A runtime metric cannot be measured
+ * from a file — it needs a browser, a preview server and a gesture — so the equivalent guarantee
+ * is: the value comes from an INSTRUMENT'S OWN OUTPUT (`perf-harness.mjs --json`), never from a
+ * number typed on the command line. Same rule, same reason: you cannot seed what you did not run.
+ *
+ * The run itself is interrogated before a single byte is written, because the whole reason this
+ * exists is that a frame budget was seeded three times from a run that could not support it:
+ *   • it must not be EMULATED (--cpu-throttle / --dpr) — those ceilings describe a 1× machine;
+ *   • the frame sampler must not have raised a fault (hidden tab, starved sample, idle gesture);
+ *   • for a frame metric the scripted drag must actually have PANNED the view;
+ *   • only a metric that carries `seededFrom` may be written — that field is what marks a spec as
+ *     harness-seeded. peakHeapMB / aerialTileRequests carry PRODUCTION numbers, and a sandbox run
+ *     must never be allowed to quietly overwrite one with a local floor.
+ * A re-seed at an UNCHANGED value is still recorded: when the scenario changes, the provenance is
+ * the thing that moved, and provenance is exactly what the log exists to hold.
+ *
+ *   node ui-audit/perf-harness.mjs --no-tiles --json > /tmp/run.json
+ *   npm run perf:ratchet -- --metric runtime.frameMedianMs --from-harness /tmp/run.json \
+ *     --item NEW-1 --reason "Re-seeded from the Goose Creek scenario; the old scene had no roads or ponds"
+ */
+if (metricArg && metricArg.startsWith("runtime.")) {
+  const harnessPath = argOf("--from-harness");
+  if (!harnessPath) die("a runtime metric is seeded from an instrument run, not from a typed number.", [
+    "  node ui-audit/perf-harness.mjs --no-tiles --json > /tmp/run.json",
+    "  npm run perf:ratchet -- --metric runtime.frameMedianMs --from-harness /tmp/run.json --item … --reason …",
+  ]);
+  let run;
+  try { run = JSON.parse(readFileSync(harnessPath, "utf8")); }
+  catch (e) { die(`could not read a harness --json run from ${harnessPath}: ${e.message}`); }
+
+  const key = metricArg.slice("runtime.".length);
+  const text0 = readFileSync(BUDGETS, "utf8");
+  const budgets0 = JSON.parse(text0);
+  const spec = budgets0.runtime?.[key];
+  if (!spec) die(`unknown metric ${metricArg}.`);
+  if (!spec.seededFrom) die(`${metricArg} carries no \`seededFrom\` — it is not a harness-seeded metric.`, [
+    "Its `measured` is a PRODUCTION figure. A sandbox run must not overwrite one with a local floor;",
+    "if that is genuinely what you mean to do, add `seededFrom` to the spec first, deliberately.",
+  ]);
+  if (!budgets0.runtime.ratchetLog?.runtimeRatchetEntries) die("perf-budgets.json has no runtime.ratchetLog.runtimeRatchetEntries array — refusing to invent one.");
+
+  if (run.results?.cpuThrottle > 1 || run.results?.deviceScaleFactor !== 1) {
+    die(`that run is EMULATED (cpu ${run.results?.cpuThrottle}×, dpr ${run.results?.deviceScaleFactor}).`, [
+      "Emulated numbers are an A/B instrument, not a budget — the ceilings here were seeded at 1×.",
+    ]);
+  }
+  if (run.frameSamplingFault) die("that run's frame sample was REFUSED by the sampling guard.", [run.frameSamplingFault]);
+  if (/^frame/.test(key) && run.results?.dragPanned === false) {
+    die("that run's scripted drag never moved the view — it measured an idle page.");
+  }
+  const value = run.results?.[key];
+  if (typeof value !== "number") die(`${metricArg} is not present in that run (it was skipped or suppressed).`);
+
+  const from = spec.measured;
+  if (typeof from === "number" && value > from && !ALLOW_RAISE) {
+    die(`${metricArg}: the measured ${value} is ABOVE the recorded ${from}.`, [
+      "That is a RAISE, not a ratchet. If it is deliberate — a heavier reference scene, say —",
+      "add --allow-raise and make the --reason state what changed and why the number is honest.",
+    ]);
+  }
+  const seededFrom = `ui-audit/perf-harness.mjs, headless, ${run.scenario}, ${date}${run.results.frameSamples ? ` (${run.results.frameSamples} samples at ${run.results.frameObservedFps} fps, tab visible, view panned)` : ""}`;
+
+  const replaceStr = (text, k, field, next) => {
+    const re = new RegExp(`("${k}"\\s*:\\s*\\{[\\s\\S]*?"${field}"\\s*:\\s*)("(?:[^"\\\\]|\\\\.)*"|[\\d.]+)`);
+    if (!re.test(text)) die(`could not locate "${field}" inside the "${k}" block — refusing to guess.`);
+    return text.replace(re, (_m, head) => `${head}${JSON.stringify(next)}`);
+  };
+  const appendTo = (text, arrayKey, entry) => {
+    const at = text.indexOf(`"${arrayKey}"`);
+    if (at < 0) die(`could not locate "${arrayKey}" — refusing to guess.`);
+    let depth = 0, i = text.indexOf("[", at), close = -1;
+    for (; i < text.length; i++) {
+      if (text[i] === "[") depth++;
+      else if (text[i] === "]") { depth--; if (depth === 0) { close = i; break; } }
+    }
+    if (close < 0) die(`${arrayKey} is not a closed array — refusing to guess.`);
+    const before = text.slice(0, close).replace(/\s*$/, "");
+    const body = JSON.stringify(entry, null, 2).split("\n").map((l) => `        ${l}`).join("\n");
+    return `${before}${/[}\]]$/.test(before) ? "," : ""}\n${body}\n      ${text.slice(close)}`;
+  };
+
+  const entry = {
+    metric: metricArg, from: from ?? null, to: value,
+    direction: from === value ? "reseed" : value > from ? "raise" : "ratchet",
+    scenario: run.scenario, item, date, reason: reason.trim(),
+  };
+  if (!DRY) {
+    let out = replaceStr(text0, key, "measured", value);
+    out = replaceStr(out, key, "seededFrom", seededFrom);
+    out = appendTo(out, "runtimeRatchetEntries", entry);
+    JSON.parse(out); // never write a file we just broke
+    writeFileSync(BUDGETS, out);
+  }
+  console.log(`${DRY ? "(dry run) " : ""}${entry.direction.toUpperCase()} ${metricArg}: ${from} → ${value} (${run.scenario})`);
+  console.log(`  seededFrom: ${seededFrom}`);
+  console.log(`\nReason recorded: ${reason.trim()}`);
+  process.exit(0);
+}
+
 const build = loadBuild(join(ROOT, "dist"));
 if (!build) die("no build found at dist/.vite/manifest.json — run `npm run build` first.", [
   "The ratchet measures the value itself; it will not write a number you typed in.",
