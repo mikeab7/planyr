@@ -1,5 +1,22 @@
 # VERIFICATION-DONE.md — archived verification items (passed / superseded)
 
+### NEW-1/V — NEW-1 (the inline number editor: in place, at the chip's own size, spinner-free): the headless before/during/after pass at two zooms, in both themes, on the owner's real parcel
+
+**✅ PASSED 2026-07-31 — Claude, in-session, headless Chromium (`ui-audit/verify-numedit-inplace.mjs`, 89/89).** Driven logged out, no external GIS, geometry seeded locally — so every strand of this was Claude-doable HERE and none of it was filed as owed. Five passes: light + dark × fit-zoom + zoomed-in on a synthetic 900 × 600 ft parcel with a building hard against the setback line (the owner's case), plus a fifth on his REAL 60-vertex Weld County boundary (`test/fixtures/weldParcelProduction.json`, site `sms7v3ua7ksy`).
+- **SIZE — the field is not bigger than the chip it edits.** Measured `chip 26.0×15.0 @9.5px → field 26.0×15.0 @9.5px`, every pass. The box it replaced was `96×30 @13px`.
+- **PLACE — nothing moves.** `Δ 0.00, 0.00` between the field's centre and the plate's own rect (`Δ -0.01, -0.01` at zoom). **The first run of this harness FAILED this check at `Δ 0.00, 5.00`** and that is how the `<foreignObject>` line-box strut was found — an inline-level `<input>` was painting 5 px below the plate. Fixed with `display:block`; the check has teeth.
+- **THE VALUE ONCE.** 8 chips → **7 chips + 1 field**, with no chip at the edited anchor: the chip and its editor are never both in the DOM. The other chips are asserted unchanged in position AND size, so nothing grows or reflows around the edit.
+- **NOTHING COVERED.** On the Weld parcel, **15 of 16 on-canvas vertex grips answer `elementFromPoint` at their own centre DURING the edit — identical to the baseline measured before it — and 0 grips fall inside the field's box.** (The 16th is a pre-existing baseline condition at both readings, not something the editor caused.) The synthetic passes read 2/2, unchanged.
+- **NO NATIVE SPINNERS.** `appearance: textfield` on **every** `input[type=number]` on the page, not just this one — the suppression is app-wide in `index.css`, so a number input added later can't reintroduce the chevrons.
+- **THE APP'S OWN TOKENS.** 1 px border · Inter (not a monospace face) · no drop shadow. The only box-shadow present is the app's shared focused-input ring (`0 0 0 3px`, the accent token) — which is the point: the field now looks like every other input in Planyr.
+- **BEHAVIOUR.** Enter commits (`Side · 40′` on the record) and the chip returns with no editor left behind; Escape leaves the value alone (typed `999`, chip still `25′`).
+- **THE THREE SHARED FLOATING CALLERS, each driven for real, not argued from shared code:** road travel width (value `33`), a building's footprint depth (value `380`) and the overlay **trace length** ("Trace a length" → two canvas clicks → an empty focused field). All three at `54×18 @10.5px`, spinner-free, hairline border, no drop shadow, and offset up-and-to-the-side of their anchor rather than centred over the geometry being measured.
+- **No JS errors** in any pass, either theme.
+
+Screenshots: `ui-audit/screens/numedit-{light,dark}-{fit,in}-{1-before,2-editing,3-after}.png`, `numedit-weld-light-fit-*.png`, `numedit-float-{road-width,element-dimension,overlay-trace}.png`.
+
+Nothing pending — no `auth`, `live-GIS` or `real-data` blocker applies, so this entry lands PASSED and its backlog item goes straight to Done.
+
 ### V565 — B1209 / B1210 / B1211 / B1212 (the setback chip: black ink · an absolute zoom floor · a quieter chip · chrome above the elements) — the headless matrix on the owner's own Weld County parcel geometry, in both themes.
 
 **✅ PASSED 2026-07-31 — Claude, in-session, headless Chromium (`ui-audit/verify-setback-chip-quiet.mjs`, 35/35).** Driven logged-out with no external GIS, seeded from `test/fixtures/weldParcelProduction.json` (the real production geometry of `sites.id sms7v3ua7ksy`, 60 vertices) with the owner's own bright-green setback line (`sbStroke #22c55e`) and a building deliberately covering the whole lot interior. **Light AND dark theme, every assertion run twice.** Observed:
