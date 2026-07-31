@@ -34,17 +34,45 @@ export function loadRasterIdentify() {
 /* The loaded module, or null. */
 export const rasterIdentifyNow = () => mod;
 
-/* Attach the map finder's hover/click identify as soon as the chunk lands. Returns a detach
- * function immediately so it can be returned straight from a `useEffect`. */
+/* Attach the map finder's hover/click identify on the FIRST POINTER CONTACT with the map.
+ * Returns a detach function immediately so it can be returned straight from a `useEffect`.
+ *
+ * ⚠ B1349 — THE IMPORT USED TO FIRE AT MOUNT, WHICH UNDID THE SPLIT THIS FILE EXISTS FOR.
+ * This function was called from MapFinder's map-setup effect and kicked off `loadRasterIdentify()`
+ * immediately, so `rasterIdentifyMap`, `rasterIdentify` AND their shared `featureHover` dependency
+ * were all in flight during boot — on an idle page, with no gesture, and even when the planner
+ * (not the finder) was the visible workspace, because the finder's map is built either way. The
+ * runtime half of the perf harness reported all three by name; the static bundle audit could not
+ * see it, because a runtime `import()` leaves no static edge.
+ *
+ * The trigger is now the first `pointermove` / `pointerdown` / `wheel` on the map container — the
+ * `ensureRasterHover` pattern the planner side of this feature already used correctly. There is no
+ * behavioural gap: the identify only ever answers after the cursor RESTS (attachRasterIdentify
+ * debounces), and the chunk lands within the first move of a hover long before a rest completes.
+ * A pointer that never touches the map never pays for it. */
+const WAKE_EVENTS = ["pointermove", "pointerdown", "wheel"];
 export function attachRasterIdentifyLazy(map, opts = {}) {
   if (!map) return () => {};
-  let detach = null, cancelled = false;
-  loadRasterIdentify().then(
-    (m) => { if (!cancelled) detach = m.attachRasterIdentify(map, opts); },
-    () => { /* the layer still paints; only the identify is unavailable, and it says so on use */ },
-  );
+  let detach = null, cancelled = false, container = null;
+  const arm = () => {
+    disarm();
+    if (cancelled) return;
+    loadRasterIdentify().then(
+      (m) => { if (!cancelled) detach = m.attachRasterIdentify(map, opts); },
+      () => { /* the layer still paints; only the identify is unavailable, and it says so on use */ },
+    );
+  };
+  function disarm() {
+    if (!container) return;
+    for (const t of WAKE_EVENTS) container.removeEventListener(t, arm);
+    container = null;
+  }
+  try { container = map.getContainer ? map.getContainer() : null; } catch (_) { container = null; }
+  if (container) for (const t of WAKE_EVENTS) container.addEventListener(t, arm, { passive: true });
+  else arm();   // no container to watch — never silently drop the feature
   return () => {
     cancelled = true;
+    disarm();
     if (detach) { detach(); detach = null; }
   };
 }

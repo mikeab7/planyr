@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo, Fragment, lazy, Suspense } from "react";
+import { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo, memo, Fragment, lazy, Suspense } from "react";
 import { flushSync } from "react-dom";
 import ContextMenu from "../../shared/ui/ContextMenu.jsx";
 import L from "leaflet";
@@ -381,6 +381,12 @@ const PARCEL_CLICK_MS = 400;      // max press duration (ms) to still count as a
 // B1092 — how close a tap must land to a GIS LINE feature (a channel centreline) to
 // identify it, on screen. Polygons hit-test by containment and ignore this.
 const CANVAS_IDENTIFY_SLOP_PX = 14;
+/* B1349/B1121(b) — the hard ceiling on how long a LOAD-kind drainage auto-check will wait for an
+ * idle main thread before firing regardless. It is a `requestIdleCallback` timeout, so it is a
+ * BOUND, not a delay: on a quiet page the pass runs at the first idle slot, and on a page that
+ * never goes idle it still fires here. B874's "the attempt always fires" invariant depends on
+ * this being finite — never remove it in favour of a bare requestIdleCallback. */
+const DRAIN_AUTO_IDLE_TIMEOUT_MS = 4000;
 /* How long the cursor must REST on the canvas before the hover identify answers (NEW-2). Long
  * enough that sweeping across the canvas asks nothing at all — the vector pass is a hit-test
  * over everything painted, and the raster pass is a network request — short enough to feel
@@ -1150,6 +1156,13 @@ function curbEdgesOf(el, allEls) {
 }
 // Plan-view area of an element's curbs (counts in the SF / impervious math).
 const curbAreaOf = (el, allEls) => (el.points ? 0 : curbEdgesOf(el, allEls).reduce((s, e) => s + e.length * e.width, 0));
+/* B1352 — the same area, read off an ALREADY-RESOLVED neighbour record (resolveElNeighbors) rather
+ * than re-running the O(n²) adjacency scan. This is the yield/impervious math's copy of the same
+ * waste the renderer had: the scan is a function of the MODEL, and it was running once per element
+ * per render — measured at 2.7% of all script self-time during a wheel gesture with the Yield panel
+ * docked, on a gesture that cannot change a single curb. Falls back to the full scan if a record is
+ * missing, so a caller that has no resolved set still gets the right number, never a silent zero. */
+const curbAreaFrom = (el, nb, allEls) => (nb ? nb.curbEdges.reduce((s, e) => s + e.length * e.width, 0) : curbAreaOf(el, allEls));
 
 /* ---- Centerline road geometry (B596–B598 / NEW-1..3) ----
  * A centerline road carries pts + per-vertex treatment (vtx) + travelW + curb + roadClass.
@@ -9038,6 +9051,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     setMarkups((a) => a.map((m) => (m.id === id ? { ...m, locked: !m.locked } : m)));
   };
 
+  /* B1352 — every element's NEIGHBOUR answers, resolved once per model change instead of once per
+     element per frame. See `resolveElNeighbors` for why the dependency has to be modelled rather
+     than assumed away, and `ElNode` for what the stable record buys. Keyed on `els` (the complete
+     model), never on `drawEls` (the culled subset) — a culled neighbour still shapes a curb. */
+  const elNeighbors = useMemo(() => resolveElNeighbors(els), [els]);
+
   /* ------------ metrics ------------ */
   // Per-element striping/count config: a strip may override the global standards
   // (e.g. the 50′ × 12′ single-row trailer parking carries its own cfg).
@@ -9057,7 +9076,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   let providedDetCf = 0, pondCount = 0, maxPondDepthFt = 0; // B630: provided detention across ALL ponds (cubic feet; pondGeom's Map memo keeps this cheap per render)
   els.forEach((e) => {
     const a = isCenterlineRoad(e) ? roadStripArea(e, settings, sharpFor(e)) : e.points ? polyArea(e.points) : e.w * e.h; // road area = its generated strip polygon (B598)
-    const curb = curbAreaOf(e, els); // derived curbs count in the SF / impervious math (0 for non-paved types; a road's curb is already inside its strip area)
+    const curb = curbAreaFrom(e, elNeighbors.get(e.id), els); // derived curbs count in the SF / impervious math (0 for non-paved types; a road's curb is already inside its strip area)
     if (e.type === "building") {
       bldg += a;
       if (e.dogEar) {
@@ -10512,14 +10531,33 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const base = drainReval.kind === "load" ? 1200 : 2500;
     const floorRemaining = Math.max(0, 20000 - (Date.now() - drainAutoLastAt.current));
     const delay = Math.max(base, floorRemaining);
-    const t = setTimeout(() => {
-      if (typeof document !== "undefined" && document.hidden) return; // yield to the active tab — the armed watchdog still bounds this
+    /* B1349/B1121(b) — A LOAD-KIND ATTEMPT ADDITIONALLY WAITS FOR A GENUINELY IDLE MAIN THREAD.
+     * The 1200 ms above was chosen as "after boot", and on this container's 4x-throttled profile
+     * boot is not finished at 1200 ms — time-to-first-drag measures ~7 s. So the load-time facts
+     * pass (a GIS pull plus the bare-earth DEM grid, which drags `terrainLayers` in with it) was
+     * landing in the middle of the very window the owner describes as "still sluggish immediately
+     * after a reload". This does not change WHETHER it runs, only WHEN: `requestIdleCallback` with
+     * a hard `timeout` still fires it unconditionally, so B874's load-bearing invariant — the
+     * attempt ALWAYS fires, is never silently dropped, and always reaches a terminal state — is
+     * preserved exactly. The attempt is marked spent inside the idle callback, so a cancelled
+     * (superseded) wait consumes nothing. An EDIT-kind attempt is untouched: the user just acted
+     * and is waiting on the answer. */
+    let idleH = null;
+    const fire = () => {
       if (drainAutoAttempts.current.has(drainReval.key)) return;
       drainAutoAttempts.current.add(drainReval.key);
       drainAutoLastAt.current = Date.now();
       checkDrainage({ auto: true });
+    };
+    const t = setTimeout(() => {
+      if (typeof document !== "undefined" && document.hidden) return; // yield to the active tab — the armed watchdog still bounds this
+      if (drainReval.kind !== "load" || typeof requestIdleCallback !== "function") { fire(); return; }
+      idleH = requestIdleCallback(fire, { timeout: DRAIN_AUTO_IDLE_TIMEOUT_MS });
     }, delay);
-    return () => clearTimeout(t); // any geometry change re-arms the timer — the coalescing debounce
+    return () => { // any geometry change re-arms the timer — the coalescing debounce
+      clearTimeout(t);
+      if (idleH != null && typeof cancelIdleCallback === "function") cancelIdleCallback(idleH);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [drainReval.need, drainReval.key, drainCtx?.busy]);
   // B874 (edit-path) — WATCHDOG #1: an in-flight fetch (busy) that never settles. The fetch has a 30 s
@@ -16660,6 +16698,26 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const sorted = [...drawEls].sort(byZ);
     return { below: sorted.filter((el) => zOrder(el) < BUILDING_Z), above: sorted.filter((el) => zOrder(el) >= BUILDING_Z) };
   }, [drawEls]);
+  /* B1352 — ONE identity-stable handler bundle for the element pass.
+     The five element handlers are ordinary arrows redefined on every render of this 25k-line
+     component, so passing them straight to a memoised child defeats the memo entirely — the
+     precondition that makes `ElNode` a no-op if missed. `useCallback` on each was rejected: these
+     close over a large, shifting slice of component state, and a hand-maintained dependency list
+     that misses one is a STALE HANDLER (a drag that moves the wrong element), which is far worse
+     than a slow render. The latest-ref indirection has no dependency list to get wrong: the ref is
+     refreshed in a LAYOUT effect after every commit, and these wrappers are only ever invoked from
+     a DOM event, which cannot be dispatched between a commit and its layout effects. */
+  const elHandlersRef = useRef({});
+  useLayoutEffect(() => {
+    elHandlersRef.current = { startMoveEl, onElDouble, startDimMove, onDimNumberDown, onElContext };
+  });
+  const elHandlers = useMemo(() => ({
+    startMoveEl: (e, id) => elHandlersRef.current.startMoveEl?.(e, id),
+    onElDouble: (e, id) => elHandlersRef.current.onElDouble?.(e, id),
+    startDimMove: (e, id) => elHandlersRef.current.startDimMove?.(e, id),
+    onDimNumberDown: (e, id) => elHandlersRef.current.onDimNumberDown?.(e, id),
+    onElContext: (e, id) => elHandlersRef.current.onElContext?.(e, id),
+  }), []);
   const drawMarkupsZ = useMemo(() => cullToView(markupsZ, cullRect, { enabled: !!cullRect, keep: cullKeep }), [markupsZ, cullRect, cullKeep]);
   /* NEW-2 — MEASUREMENTS JOIN THE STACKING MODEL. A measurement used to be structurally
      un-layerable: it lives in its own `measures` collection, never enters the `zOrder`/`byZ` system
@@ -17633,7 +17691,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   })}
                 </g>
               )}
-              {drawElsZ.below.map((el) => renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, els, startDimMove, onDimNumberDown, onElContext, dimSuppressed, roadNet, labelFrame))}
+              {drawElsZ.below.map((el) => <ElNode key={el.id} el={el} f2p={f2p} isSel={sel?.kind === "el" && sel.id === el.id} tool={tool} settings={settings} H={elHandlers} nb={elNeighbors.get(el.id)} dimHidden={dimSuppressed?.has(el.id) || false} roadNet={roadNet} lf={labelFrame} />)}
               {/* NEW-4 — civil radius conflict flags. A corner the leg is too short to carry gets marked
                   ON THE PLAN, so a non-compliant turn can't hide until someone selects the road. Review
                   chrome: data-export="skip" keeps it out of the PDF a consultant receives. */}
@@ -17736,7 +17794,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   strokes and the tee-cover knockout mask are all superseded by the dissolved road network
                   painted above: a junction is now a boolean union of pavement, not a patch over a seam. */}
               {/* buildings + any layer at/above the building band, painted OVER the overlay. */}
-              {drawElsZ.above.map((el) => renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, els, startDimMove, onDimNumberDown, onElContext, dimSuppressed, null, labelFrame))}
+              {drawElsZ.above.map((el) => <ElNode key={el.id} el={el} f2p={f2p} isSel={sel?.kind === "el" && sel.id === el.id} tool={tool} settings={settings} H={elHandlers} nb={elNeighbors.get(el.id)} dimHidden={dimSuppressed?.has(el.id) || false} roadNet={null} lf={labelFrame} />)}
               {/* markup shapes (neutral line/polyline/rect/ellipse/polygon) on top of the elements */}
               {drawMarkupsZ.filter((m) => !m.behindEls).map(renderMarkupNode)}
               {/* NEW-2 — references the user has explicitly promoted ("Draw above the plan"). Same
@@ -22281,9 +22339,53 @@ function dimSlideFor(el, allEls) {
   return dimSlideRange(el, bumpsAlongLength(el, allEls), posF);
 }
 
+/* ---- The RESOLVED NEIGHBOUR SET, per element (B1352) ----------------------------------------
+ *
+ * An element's drawing is not a function of that element alone. Four things it renders read the
+ * WHOLE model: the curb band (`curbEdgesOf`, whose `edgeAbutsPaving` walks every other element),
+ * the dog-ear bumps along a building's dock face, the dimension callout's slide range
+ * (`bumpsAlongLength`), and — for a bump-out — the HOST building whose style it inherits.
+ *
+ * That neighbour dependency is why `renderElPx` took the whole `allEls` array, and it is exactly
+ * what makes a naive `React.memo(el)` WRONG rather than merely ineffective: move a building next
+ * to a paved pad and the pad's curb changes, with nothing about the pad itself having changed. A
+ * memo keyed on `el` alone would keep drawing the old curb. A stale curb is a wrong drawing, and
+ * a wrong drawing is worse than a slow one.
+ *
+ * So the dependency is MODELLED rather than assumed away: resolve every element's neighbour
+ * answers ONCE per `els` change, hand each element its own resolved record, and let the record's
+ * identity be the memo's evidence that its neighbourhood is unchanged. Same inputs, same outputs
+ * — this is a pure re-association of work already done, not an approximation of it.
+ *
+ * It is also, on its own, the single largest item in the CPU profile of a zoom frame that we can
+ * legitimately delete: `edgeAbutsPaving` + `curbEdgesOf` measured 8.6% of all script self-time
+ * across a 40-event wheel gesture at 4x throttle (ui-audit/diagnose-zoom-cost.mjs --profile), and
+ * none of it depends on the view. It was being recomputed, per element, on every frame of a
+ * gesture that cannot change its answer.
+ */
+function resolveElNeighbors(allEls) {
+  const out = new Map();
+  const list = allEls || [];
+  for (const el of list) {
+    out.set(el.id, {
+      // A bump-out (dog-ear) renders with its HOST building's resolved style — see the styleEl note below.
+      styleEl: el.dogEar ? (list.find((h) => h.id === el.attachedTo && h.type === "building" && !h.points) || el) : el,
+      curbEdges: curbEdgesOf(el, list),
+      dogEars: list.filter((x) => x.attachedTo === el.id && x.dogEar),
+      dimSlide: dimSlideFor(el, list),
+    });
+  }
+  return out;
+}
 /* element renderer working in PIXEL space (points pre-transformed by f2p).
-   We draw the rect via the rotated group around the element's pixel center. */
-function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEls, startDimMove, onDimNumberDown, onElContext, dimSuppressed, roadNet, lf = null) {
+   We draw the rect via the rotated group around the element's pixel center.
+   ⚠ B1352 — `nb` is this element's RESOLVED NEIGHBOUR RECORD (resolveElNeighbors above), NOT the
+   element array. Do not reintroduce an `allEls` parameter: the whole point is that this function
+   can no longer reach across the model, so its output is a function of its arguments alone and
+   `ElNode`'s memo is sound. `isSel`/`dimHidden` are likewise pre-resolved booleans rather than the
+   whole `sel` object and the whole suppressed-id Set, so a selection change re-renders the two
+   elements it concerns instead of all of them. */
+function renderElPx(el, f2p, isSel, tool, settings, startMoveEl, onElDouble, nb, startDimMove, onDimNumberDown, onElContext, dimHidden, roadNet, lf = null) {
   // NEW-2 — the junction vertices whose corners render SHARP, read off the road-network data this
   // renderer already receives (renderElPx is module-level, so it cannot close over the memo).
   const sharpFor = (e) => (roadNet && roadNet.junctionVerts && e && e.id != null ? roadNet.junctionVerts.get(e.id) : undefined);
@@ -22303,10 +22405,9 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
   // A bump-out (dog-ear) is part of its building, so it renders with the HOST building's resolved
   // fill / stroke / opacity — a recoloured or faded building carries its bump-outs with it (owner
   // request). Falls back to the bump's own style if the host isn't in the list.
-  const styleEl = el.dogEar && allEls ? (allEls.find((h) => h.id === el.attachedTo && h.type === "building" && !h.points) || el) : el;
+  const styleEl = (el.dogEar && nb && nb.styleEl) || el;
   const st = elStyle(styleEl, settings);
   const fillOp = st.fillOpacity ?? 1;
-  const isSel = sel?.kind === "el" && sel.id === el.id;
   const texFill = st.pattern ? `url(#pat-${st.pattern})` : st.hatch ? "url(#pat-landscape)" : null;
   // B231 — cartographic water body (detention pond): a radial steel-teal gradient fill at
   // ~80% opacity + a constant-screen-pixel teal outline. NEVER orange (the Markup accent), so
@@ -22598,7 +22699,7 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
   // Derived curbs: thin bands on the terminal / sidewalk-transition edges. Always
   // drawn (their width scales, so a 12" curb visibly doubles a 6" one); the band's
   // stroke keeps it legible when the 0.5′ width is sub-pixel at low zoom.
-  curbEdgesOf(el, allEls).forEach((e, i) => {
+  (nb ? nb.curbEdges : []).forEach((e, i) => {
     const cpx = e.width * ppf;
     const x = e.axis === "x" ? (e.sign > 0 ? tl.x + w : tl.x - cpx) : tl.x;
     const y = e.axis === "y" ? (e.sign > 0 ? tl.y + h : tl.y - cpx) : tl.y;
@@ -22662,7 +22763,7 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
     // the panel count exactly. The hardcoded 12′ spacing is now g.doorOC. (The apron rect
     // keeps the data-dock-apron hook added on main for the truck-court / measurement path.)
     if (settings.showDocks && dockSides.length) {
-      const dogEars = (allEls || []).filter((x) => x.attachedTo === el.id && x.dogEar);
+      const dogEars = nb ? nb.dogEars : [];
       const lenOffsets = grid.lengthLines.map((l) => l.at);
       const leaf = g.doorWidth * ppf;
       dockSides.forEach((s) => {
@@ -22741,7 +22842,7 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
     // constraint for DISPLAY too — a legacy free-drag offset (off the shape, or carrying a depth
     // component) or one stranded by a later bump-out/resize edit renders back ON the footprint and
     // off the bumps; the next drag then persists the clamped value.
-    const dimOff = clampDimOffset(el.dimOffset, dimSlideFor(el, allEls));
+    const dimOff = clampDimOffset(el.dimOffset, nb ? nb.dimSlide : dimSlideFor(el, [el]));
     const ox = dimOff.x * ppf, oy = dimOff.y * ppf;
     const dimSel = isSel && tool === "select"; // interactive (drag/reposition) only when the element is selected
     const isRoad = el.type === "road";
@@ -22788,7 +22889,7 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
     // (its number would overprint a higher-priority centred label) — a selected non-building keeps its
     // dimension so the drag/edit handle never vanishes mid-edit. The "Show dimensions" toggle (B121)
     // gates the whole layer. We only HIDE here; B592 keeps the dimension pinned on the footprint.
-    if (settings.showDims !== false && ((dimVisible && !dimSuppressed?.has(el.id)) || (dimSel && el.type !== "building"))) parts.push(
+    if (settings.showDims !== false && ((dimVisible && !dimHidden) || (dimSel && el.type !== "building"))) parts.push(
       <g key="dim" style={dimSel ? { cursor: "move" } : { pointerEvents: "none" }}
         onPointerDown={dimSel ? ((e) => { if (e.button === 0) { e.stopPropagation(); startDimMove(e, el.id); } }) : undefined}>
         {dim}
@@ -22802,6 +22903,41 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
     onPointerDown={(e) => startMoveEl(e, el.id)} onDoubleClick={(e) => onElDouble && onElDouble(e, el.id)}
     onContextMenu={(e) => { if (onElContext) onElContext(e, el.id); }}>{parts}</g>;
 }
+
+/* ---- ElNode — the element pass's RECONCILIATION BOUNDARY (B1352) ----------------------------
+ *
+ * `renderElPx` was a plain function called from `drawElsZ.below.map(...)`, so React never saw a
+ * component type it could bail out on: it received a flat array of host elements with fresh props
+ * every render and diffed every one of them. There was no `React.memo` anywhere in `src/`.
+ *
+ * ⚠ READ THIS BEFORE EXPECTING IT TO SPEED UP A PAN OR A ZOOM — IT DOES NOT, AND THAT IS NOT A BUG.
+ * `f2p` is `worldToScreen(view, …)`, so it changes identity whenever `view` changes, and every
+ * element's rendered pixel geometry genuinely changes with it. During a pan or a wheel zoom this
+ * memo therefore MISSES on every element, by construction — measured, not assumed:
+ * ui-audit/diagnose-zoom-cost.mjs reports the same mutation-record count either side of this change
+ * for both view gestures. Making those gestures cheap needs the view to stop being baked into every
+ * coordinate, which is a representation change to the whole renderer and is filed separately.
+ *
+ * WHERE IT DOES PAY is every re-render where the VIEW DOES NOT MOVE, which is most of them:
+ *   • the cursor readout — `scheduleFrameJob("cursor", …)` fires on EVERY pointermove over the
+ *     canvas, so simply sweeping the mouse across a plan re-rendered and re-diffed the whole
+ *     element tree at frame rate, with nothing on screen changing but one coordinate chip;
+ *   • a selection change (which is why `isSel` is passed instead of the `sel` object — the two
+ *     elements that changed re-render, not all of them);
+ *   • dragging ONE element (only that element's props change);
+ *   • hovers, tool changes, panel toggles, layer toggles, cloud-sync ticks.
+ *
+ * Two preconditions, both load-bearing and both easy to undo by accident:
+ *   1. THE HANDLERS MUST BE IDENTITY-STABLE. They are fresh arrows per render at the call site, so
+ *      without `elHandlers` (the latest-ref bundle in the component) this memo never hits at all.
+ *   2. THE NEIGHBOUR DEPENDENCY MUST BE MODELLED, NOT DROPPED. `nb` is the resolved record from
+ *      `resolveElNeighbors` — see its note. Passing `els` here instead would make the memo compare
+ *      an array that changes on every model edit (harmless) OR, worse, tempt someone to key the
+ *      memo on `el` alone, which draws stale curbs when a NEIGHBOUR moves.
+ */
+const ElNode = memo(function ElNode({ el, f2p, isSel, tool, settings, H, nb, dimHidden, roadNet, lf }) {
+  return renderElPx(el, f2p, isSel, tool, settings, H.startMoveEl, H.onElDouble, nb, H.startDimMove, H.onDimNumberDown, H.onElContext, dimHidden, roadNet, lf);
+});
 
 /* ----------------------------- small UI ----------------------------- */
 function Section({ title, children, collapsed, accent }) {

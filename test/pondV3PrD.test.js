@@ -52,9 +52,12 @@ describe("D3 — the berm ring is drawn INWARD, over the pond, inside the outlin
     // The element pass is split at the building layer (B959); the berm ring follows the ground pass.
     // NEW-4(b) — the two passes read one memoised split (`drawElsZ`) instead of copying and
     // sorting `drawEls` twice. The ORDER this guard exists to protect is unchanged.
-    const groundPass = src.indexOf("drawElsZ.below.map((el) => renderElPx(");
+    // B1352 — the element pass now renders through the memoised `ElNode` boundary rather than
+    // calling `renderElPx` inline. The SPLIT and its ORDER are exactly what they were; only the
+    // call shape moved, so this guard follows the new anchor rather than being relaxed.
+    const groundPass = src.indexOf("drawElsZ.below.map((el) => <ElNode");
     const bermLayer = src.indexOf('data-testid="pond-berm-ring-layer"');
-    const buildingPass = src.indexOf("drawElsZ.above.map((el) => renderElPx(");
+    const buildingPass = src.indexOf("drawElsZ.above.map((el) => <ElNode");
     expect(groundPass).toBeGreaterThan(-1);
     expect(bermLayer).toBeGreaterThan(groundPass); // over the pond (a ground surface)
     expect(buildingPass).toBeGreaterThan(bermLayer); // buildings still paint on top of it
