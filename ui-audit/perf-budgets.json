@@ -87,16 +87,16 @@
       "allow": ["index", "SitePlannerApp", "hitTest", "AppHeader", "map-vendor", "cjs-interop", "teams"]
     },
     "notesRouteJsBytes": {
-      "baseline": 568121,
-      "target": 568121,
+      "baseline": 602087,
+      "target": 602087,
       "unit": "bytes",
       "what": "Total JS a plain Notes route must download: the entry chunk plus Notes and its static-import closure.",
       "note": "Seeded at 0 so the FIRST measurement of a brand-new route lands through `npm run perf:ratchet` with a stated reason, exactly like any other baseline move — a hand-typed seed is the thing that step exists to prevent. WHAT THIS NUMBER DOES AND DOES NOT INCLUDE, because it is the whole reason the split is load-bearing: it counts the notebook TREE and its chrome, and deliberately NOT the rich-text engine. Notes.jsx pulls components/NoteEditor.jsx (and through it the only @tiptap imports in the module) via a lazy() import inside a Suspense, so the engine is a separate on-demand chunk of ~464 KB that a user pays for only when a page is actually opened, and the rail paints first. A future rise in THIS metric therefore means something moved onto the static path that belongs behind that boundary — most likely a new static import of the editor, or a shared module that got hoisted. test/notesModule.test.js source-scans for the first case; this budget is the backstop for the second."
     },
 
     "totalJsBytes": {
-      "baseline": 4517941,
-      "target": 4517941,
+      "baseline": 4617433,
+      "target": 4617433,
       "unit": "bytes",
       "what": "Every JS chunk EMITTED into dist/assets, summed. Catches overall bundle growth even when it lands off the Site route.",
       "note": "Larger than the 3016 KB the owner's 2026-07-28 pass reported, and correctly so: that figure counted the 11 chunks a browser actually FETCHED, while this counts all 20 emitted — the extra 5 are Web Worker bundles (terrainWorker, dxfWorker) and small helper chunks that only a dynamic import ever pulls. Two different questions; the per-route budgets above answer the owner's. CEILING RAISED 3960000 -> 3985000 by B1130/B1131 (2026-07-30), stated in full because raising a ceiling is a product decision. THE KEY POINT: this metric counts EVERY emitted chunk, lazy ones included, BY DESIGN — that is exactly what makes it the honest catch-all. So the four deferrals that paid the two per-route budgets (see siteRouteJsBytes.note) move bytes OFF the critical path without reducing this number at all, and no amount of further code-splitting can. The residual is ~19 KB of genuine minified code implementing two owner-reported defects on the Electric layer: substations painting as broken-image glyphs labelled \"Mark\", and no way to hover a line or substation to learn what it is. WHAT WAS PAID ELSEWHERE FIRST, so this is not a shortcut: largestChunkBytes was brought back UNDER its existing ceiling with no raise at all (1719.5 -> 1706.8 KB), and siteRouteJsBytes was cut from +20.2 KB to +7.4 KB before its ceiling moved. HEADROOM CONTEXT: main was at 3861.4 KB against the 3867.2 KB ceiling — 5.8 KB — so like the other two, this metric now trips on essentially any feature; that is a headroom problem to be closed by B1064, not a regression in this PR. Ceiling and target are kept EQUAL here, as they were before, so this metric continues to assert no known gap rather than quietly acquiring one. NEW-1 (2026-07-30): baseline and target are still kept EQUAL for exactly that reason, and the derived headroom band now applies to this metric too — it was 4.3 KB (0.11%) under its old hand-pinned ceiling and would have been the next surprise."
@@ -240,6 +240,24 @@
           "item": "B1290",
           "date": "2026-07-30",
           "reason": "The Notes workspace adds a module TAB to the shared header, and that is the entire Site-route cost. Measured head-to-head in one container: origin/main a748911 alone is 2340801 bytes, this branch 2341801 — a delta of exactly 1000 bytes, all of it the AppHeader tab (label + inline SVG icon) plus four one-line registry entries (route slug maps, moduleAccent, moduleLoaderTheme, modulePrefetch). It is IRREDUCIBLE by construction: a module tab must render before its workspace chunk loads, so it is the one part of a new workspace that cannot be lazy. The workspace itself is behind lazy() and contributes nothing else here — bundle.notesRouteJsBytes carries its real weight, and the rich-text engine is a separate on-demand chunk. WHY A RAISE RATHER THAN AN OPTIMIZATION: main was ALREADY within 1189 bytes of the derived ceiling before this branch existed, so this metric now trips on essentially any feature — the same headroom problem the note above records for B1130/B1131, recurring exactly as predicted. Shaving the icon to squeeze under a ceiling main has already consumed would be a fake optimization that the next session pays for again. B1064 remains the metric owner for closing the real gap."
+        },
+        {
+          "metric": "bundle.notesRouteJsBytes",
+          "from": 568121,
+          "to": 602087,
+          "direction": "raise",
+          "item": "B1291",
+          "date": "2026-07-31",
+          "reason": "B1291 puts cloud sync behind the Notes storage seam. Measured head-to-head in ONE container: origin/main alone 576.9 KB vs this branch 588.0 KB, so this branch's own delta is +11.1 KB and main had ALREADY consumed 22.1 KB of the 32.0 KB band (B1310-B1318 round two, which passed inside it). The +11.1 KB is the store's sync ledger, the seed/push orchestration and the conflict bar. The transport and every merge decision live in lib/notesCloud.js, which is dynamic-imported and therefore NOT in this metric at all (9.3 KB, fetched only when signed in — ui-audit/verify-notes.mjs asserts a signed-out visit never requests it). siteRouteJsBytes and largestChunkBytes are BYTE-IDENTICAL to main. Not shaved further on purpose: the remaining bytes are the orchestration that must be reachable from the synchronous writeTree/writePage entry points, and hiding it behind a third lazy boundary would buy ~5 KB for a fifteen-value injection surface — the fake optimization this file's siteRouteJsBytes note warns about."
+        },
+        {
+          "metric": "bundle.totalJsBytes",
+          "from": 4517941,
+          "to": 4617433,
+          "direction": "raise",
+          "item": "B1291",
+          "date": "2026-07-31",
+          "reason": "B1291 cloud sync for Notes. Head-to-head in ONE container: origin/main alone 4488.9 KB vs this branch 4509.2 KB = +20.3 KB, of which 9.3 KB is the lazily-loaded notesCloud chunk (transport + the pure merge decisions) and 11.0 KB is the store and workspace. This metric counts EVERY emitted chunk BY DESIGN — that is what makes it the honest catch-all — so no amount of further splitting reduces it: the code has to exist for a note to survive clearing browsing data, which is the whole point of the item. main had already consumed 76.9 KB of the 88.2 KB band before this branch existed. A future rise in this metric WITHOUT a new capability is a regression."
         }
       ]
     }
