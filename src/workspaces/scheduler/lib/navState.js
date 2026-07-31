@@ -72,16 +72,34 @@ export function findBySiteId(projects, siteId) {
   return projects.find((p) => p && p.linkedSiteId != null && p.linkedSiteId === siteId) || null;
 }
 
-// True while a routed site's linked schedule is NOT yet the iframe's ACTIVE one — i.e. the shell
-// must (re)post planar:nav-select-by-site so the grid follows the route. Stays true when the link
-// isn't resolvable yet (the embed's projects haven't loaded), so the carry-in keeps driving until
-// the iframe actually has the data to switch; goes false only once the active schedule equals the
-// link. This is what makes the carry-in self-heal the boot race where the FIRST select is dropped
-// before the embed's cloud data loads (the B644 null-data guard) and — pre-fix — was never retried,
-// stranding the grid on the previously-active schedule while the crumb correctly named the routed
-// one (the route↔grid divergence this fixes). Pure + null-safe; no siteId → nothing to carry.
-export function needsScheduleCarryIn(projects, siteId, activeId) {
+// True while the embedded app is NOT yet showing the routed site's schedule — i.e. the shell must
+// (re)post planar:nav-select-by-site so the grid follows the route. Stays true when the link isn't
+// resolvable yet (the embed's projects haven't loaded), so the carry-in keeps driving until the
+// iframe actually has the data to switch. This is what makes the carry-in self-heal the boot race
+// where the FIRST select is dropped before the embed's cloud data loads (the B644 null-data guard)
+// and — pre-fix — was never retried, stranding the grid on the previously-active schedule while the
+// crumb correctly named the routed one (the route↔grid divergence, B851).
+//
+// NEW-2 — `section` is part of the answer, and leaving it out was the whole bug. "Showing the
+// routed site's schedule" is TWO facts: the right project is active AND the embed is on its
+// PROJECTS section rather than its own Dashboard (reports). The old test compared only the active
+// id, so the very common state — the owner last pressed Dashboard inside Schedule, which the embed
+// persists as `section:"reports"` in its cloud doc, while `aPid` still names the routed project's
+// schedule — answered "nothing to carry in". Nothing was posted, the embed stayed on its Dashboard,
+// and jumping Site Planner → Schedule inside a project landed on the dashboard every time. Worse,
+// it was self-sustaining: the section persists, so it kept happening for every project until the
+// user manually picked one from the breadcrumb.
+//
+// A deliberate in-module Dashboard press is NOT caught by this, because that path CLEARS the routed
+// project (dashboardNavActions → onProjectChange(null)) and `siteId == null` returns false here.
+// So the only way to be on a non-projects section with a routed site is to have arrived from
+// another module — which is exactly the case that must be carried in.
+//
+// Pure + null-safe; no siteId → nothing to carry. `section` is optional so an older caller keeps
+// the previous behaviour.
+export function needsScheduleCarryIn(projects, siteId, activeId, section) {
   if (siteId == null) return false;
+  if (section != null && section !== "projects") return true;
   const linked = findBySiteId(projects, siteId);
   if (linked && linked.id === activeId) return false;
   return true;

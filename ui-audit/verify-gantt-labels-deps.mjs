@@ -137,10 +137,14 @@ async function pass(align) {
       sumAnchors: { left:P({kind:"summary",align:"left",bx:50,bw:400,rowTop:0,barMidY:10,barTopY:8,labelW:80,chartL:0,chartR:1000}).anchor,
                     center:P({kind:"summary",align:"center",bx:50,bw:400,rowTop:0,barMidY:10,barTopY:8,labelW:80,chartL:0,chartR:1000}).anchor,
                     right:P({kind:"summary",align:"right",bx:50,bw:400,rowTop:0,barMidY:10,barTopY:8,labelW:80,chartL:0,chartR:1000}).anchor },
-      leafRightAfter: P(geomR).mode,
-      leafRightFlip: P({...geomR, bx:980, bw:15}).mode,            // bar jammed at right clip → not "after"
-      leafCenterPlate: P({...geomR, align:"center", labelW:20}).mode,   // fits → plate
-      leafCenterOverflow: P({...geomR, align:"center", labelW:200}).mode, // wider than bar → above
+      // NEW-1 — one rule now: every kind × every alignment is a caption ABOVE the bar, and
+      // alignment only picks the horizontal anchor. (Amends B393's leaf plate / before / after.)
+      leafRight: P(geomR).mode,
+      leafRightFlip: P({...geomR, bx:980, bw:15}).mode,                  // bar jammed at right clip
+      leafCenterFits: P({...geomR, align:"center", labelW:20}).mode,     // fits inside the bar → still above
+      leafCenterOverflow: P({...geomR, align:"center", labelW:200}).mode,
+      leafAnchors: ["left","center","right"].map(a => P({...geomR, align:a}).anchor),
+      leafSameY: new Set(["left","center","right"].map(a => P({...geomR, align:a}).y)).size,
       mileLeft: P({kind:"milestone",align:"left",bx:200,bw:0,rowTop:0,barMidY:18,barTopY:8,labelW:40,chartL:0,chartR:1000}).mode,
       mileRight: P({kind:"milestone",align:"right",bx:200,bw:0,rowTop:0,barMidY:18,barTopY:8,labelW:40,chartL:0,chartR:1000}).mode,
       mileCenter: P({kind:"milestone",align:"center",bx:200,bw:0,rowTop:0,barMidY:18,barTopY:8,labelW:40,chartL:0,chartR:1000}).mode,
@@ -177,12 +181,13 @@ async function pass(align) {
   ok(h.sumAlways.every(m => m === "above"), `summary caption ALWAYS above (modes ${h.sumAlways.join(",")})`);
   ok(h.sumAnchors.left === "start" && h.sumAnchors.center === "middle" && h.sumAnchors.right === "end",
      `summary align anchors L=start/C=middle/R=end (${JSON.stringify(h.sumAnchors)})`);
-  ok(h.leafRightAfter === "after", `leaf Right default = after the bar (${h.leafRightAfter})`);
-  ok(h.leafRightFlip !== "after", `leaf at right clip flips/lifts (not "after": ${h.leafRightFlip})`);
-  ok(h.leafCenterPlate === "plate", `leaf Center (fits) = plate (${h.leafCenterPlate})`);
+  ok(h.leafRight === "above" && h.leafRightFlip === "above", `leaf Right = caption above, clipped or not (${h.leafRight}/${h.leafRightFlip})`);
+  ok(h.leafCenterFits === "above", `leaf Center that FITS inside its bar is still above it, never on a plate (${h.leafCenterFits})`);
   ok(h.leafCenterOverflow === "above", `leaf Center (too wide) = caption above (${h.leafCenterOverflow})`);
-  ok(h.mileLeft === "before" && h.mileRight === "after" && h.mileCenter === "above",
-     `milestone L=before/R=after/C=above (${h.mileLeft}/${h.mileRight}/${h.mileCenter})`);
+  ok(JSON.stringify(h.leafAnchors) === '["start","middle","end"]' && h.leafSameY === 1,
+     `align is the HORIZONTAL anchor only — L/C/R anchor start/middle/end at one height (${JSON.stringify(h.leafAnchors)}, ${h.leafSameY} distinct y)`);
+  ok(h.mileLeft === "above" && h.mileRight === "above" && h.mileCenter === "above",
+     `milestone caption above for all three alignments (${h.mileLeft}/${h.mileRight}/${h.mileCenter})`);
 
   // On-screen uniform ink + weight + summary-above
   ok(probe.names.length >= 6, `rendered ${probe.names.length} in-chart names`);
