@@ -495,6 +495,26 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   per-edge dimensions. The summary CHIP is laid out by `labelLayout.layoutLabels` (its boxes then
   become obstacles for the element-label pass) and carries `data-print-chip="measure"`, so
   `exportSheet`'s one attribute-keyed restyle prints it exactly like a parcel acreage chip.
+  **⛔ NEW-1 — `measureSheet.js` is how a measurement renders on a SHEET, and the principle it
+  encodes generalises: AN EXPORT IS A DOCUMENT, NOT A SCREENSHOT.** `buildExportSvg` CLONES the live
+  `<svg>` and strips only `data-export="skip"`, so an export is by construction exactly what was on
+  screen — which meant it inherited the canvas's level-of-detail decisions. On the owner's Sylvestri
+  print that produced a length measurement as two fat discs joined by a stub with no number anywhere:
+  the VALUE was zoom-gated (below the gate at whole-site zoom, so never in the DOM to clone) and the
+  endpoint discs had NO gate and constant screen-px sizing. Three rules now: **(1)** a measurement's
+  value renders regardless of every zoom gate on an export (`measureLabelVisible`'s `sheet` option) —
+  the per-measurement reveal zoom governs the CANVAS ONLY; **(2)** the vertex discs are an EDITING
+  AFFORDANCE (`data-export="skip"`) and an open run gets real drafting terminators instead
+  (`terminatorTicks`), while a COUNT's numbered markers are CONTENT and keep printing; **(3)** the
+  INVARIANT — a measurement never prints its geometry without its value — is enforced on the clone
+  (`enforceMeasureValueOnSheet`, LOUD-FAILURE), so a measurement that somehow loses its number is
+  OMITTED rather than printed as anonymous marks. **The general test when adding a gate: does it ask
+  "is the user zoomed in enough" (screen declutter → lift it on the sheet) or "is there physical room
+  on the SHEET" (`detailLabelVisible`/`pondParamLabelVisible`, already re-evaluated at the sheet's own
+  scale by `exportLabelScale.js` → keep it)?** Guards: the repo-root `test/` suite **measureSheet**
+  and the e2e spec **measure-export-lod** (which builds the REAL sheet through
+  `window.__plannerExportSvg` — the defect is invisible to any source reading, it exists only in the
+  clone; mutation-checked both ways).
 - `zOrder.js` — per-element `z` stacking key utilities (`nextZ`/`sortByZ`/`normalizeZ`/`ensureZ`, B671).
   `arrange.js` — pure z-order "Arrange" (`reorderByZ`/`arrangeFlags`, B820): Bring-to-Front/Send-to-Back
   over a peer set (a building reorders within its `Z_LAYER` band, a markup within the markup layer;
