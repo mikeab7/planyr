@@ -4,14 +4,13 @@
 > One line per Open / Verify item so project-knowledge sync indexes the live open list and a
 > chat session can see what's already filed without opening the 200 KB backlog. Regenerate it
 > in the SAME commit as any `BACKLOG.md` edit; CI runs `--check` and fails the build on drift.
-> _89 open · 249 awaiting live verification._
+> _88 open · 250 awaiting live verification._
 
 ## 🔲 Open
 
 | B# | Title | Module | Tags | Verify |
 |---|---|---|---|---|
 | B1318 | Link a note to a site, a plan element, or a Library file | [Notes] | #notes #library #site-planner | live |
-| B1291 | Notes belong in the cloud: sync the notebook tree and page bodies to Supabase | [Notes / sync] | #notes #sync #persistence #auth | live |
 | B1208 | Lift the handle layer above the GIS line band, together with its pointer plumbing | [Site Planner / UI] | #site-planner #ui #selection #gis | live |
 | B1179 | Three e2e specs are RED on `main` today, and the suite files an issue on any failure | [Infra / CI] | #infra #testing #site-planner #ui | sandbox |
 | B1178 | The bundle baselines are not reproducible from a clean clone: `main` alone sits ~14–22 KB over its own recorded numbers | [Infra / CI] | #infra #perf #testing | sandbox |
@@ -104,6 +103,7 @@
 
 | B# | Title | Module | Tags | Verify |
 |---|---|---|---|---|
+| B1291 | Notes belong in the cloud: the tree, the bodies AND the pictures sync to Supabase | [Notes / sync] | #notes #sync #persistence #auth | ⏳ live — awaiting |
 | B1314 | A note could not be printed or turned into a PDF | [Notes] | #notes #export | ⏳ live — awaiting |
 | B1254 | Per-layer "Show above plan": opacity was never the escape hatch, and could not have been | [Site Planner / layers panel] | #site-planner #gis #ui | ⏳ live — awaiting |
 | B1253 | The map's landing view was hardcoded to Houston for EVERY account — it is now derived from the user's own sites | [Site Planner / MapFinder] | #site-planner #ui #gis | ⏳ live — awaiting |
@@ -356,7 +356,7 @@
 
 ## By tag
 
-- **#auth** — B1291, B916, B917, B778, B483, B676, B714, B1167
+- **#auth** — B916, B917, B778, B483, B1291, B676, B714, B1167
 - **#compare** — B471
 - **#coordinates** — B1106, B1141, B1142, B1122, B1111, B1043, B625, B684
 - **#doc-review** — B484, B471, B423, B422, B413, B411, B406, B364, B267, B268, B269, B273, B180, B181, B183, B20, B38, B1190, B1173, B1160, B947, B948, B914, B918, B919, B791, B792, B746, B667, B659
@@ -374,7 +374,7 @@
 - **#markup** — B423, B422, B267, B268, B1190, B1152, B1153, B947, B948, B918, B919, B913, B820, B746, B737
 - **#notes** — B1318, B1291, B1314
 - **#perf** — B1178, B1163, B1064, B1063, B495, B484, B479, B1189, B1157, B1158, B1160, B1161, B1162, B1132, B1121, B1115, B1086, B1042, B1043, B1045, B1046, B1047, B1048, B1049, B1040, B842, B860, B839, B837, B832, B821, B816, B669
-- **#persistence** — B1291, B994, B916, B662, B648, B499, B495, B483, B474, B479, B163, B128, B134, B20, B38, B1198, B1124, B1120, B1118, B1113, B1114, B1101, B1070, B1060, B984, B956, B914, B860, B863, B864, B836, B832, B791, B792, B793, B784, B785, B786, B812, B811, B759, B757, B756, B751, B746, B742, B743, B716, B701, B692, B682, B676, B667, B673, B674, B714, B1195
+- **#persistence** — B994, B916, B662, B648, B499, B495, B483, B474, B479, B163, B128, B134, B20, B38, B1291, B1198, B1124, B1120, B1118, B1113, B1114, B1101, B1070, B1060, B984, B956, B914, B860, B863, B864, B836, B832, B791, B792, B793, B784, B785, B786, B812, B811, B759, B757, B756, B751, B746, B742, B743, B716, B701, B692, B682, B676, B667, B673, B674, B714, B1195
 - **#pond** — B1000, B1001, B1002, B1003, B1004, B993, B995, B986, B988, B954, B950, B943, B937, B934, B906, B1103, B1053, B1032, B1036, B1030, B1031, B1019, B1020, B1021, B1023, B1024, B1028, B1016, B1007, B999, B997, B996, B990, B992, B983, B982, B987, B980, B981, B978, B977, B976, B975, B974, B973, B972, B970, B969, B968, B967, B965, B963, B958, B957, B909, B907, B905, B904, B903, B902, B901, B900, B888, B884, B883, B870, B871, B707
 - **#road** — B1155, B1083, B1067, B1068, B1052, B1017, B1005, B1006, B1010, B1011, B1015, B1014, B1013, B1012, B1009, B1008, B989, B971, B964, B961, B960, B959, B955, B953, B945, B946, B742
 - **#scheduler** — B908, B818, B778, B495, B1050, B1065, B1066, B865, B863, B864, B836, B816

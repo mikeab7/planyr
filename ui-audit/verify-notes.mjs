@@ -58,7 +58,16 @@ const page = await ctx.newPage();
 const pageErrors = [];
 page.on("pageerror", (e) => pageErrors.push(e.message));
 const jsRequests = [];
-page.on("request", (r) => { if (r.url().endsWith(".js")) jsRequests.push(r.url().split("/").pop()); });
+/* Anything that would be a NOTES cloud call (B1291). Signed out there must be none at all —
+ * see §20. Scoped to the notes tables and the picture bucket on purpose: the app has other,
+ * legitimate Supabase traffic (auth, site data) and a blanket "any supabase URL" check would
+ * be a false alarm rather than a guard. */
+const cloudRequests = [];
+page.on("request", (r) => {
+  const u = r.url();
+  if (u.endsWith(".js")) jsRequests.push(u.split("/").pop());
+  if (/notes_trees|notes_pages|notes_images|notes-images/.test(u)) cloudRequests.push(u.slice(0, 120));
+});
 
 /* ---- helpers ------------------------------------------------------------------------- */
 
@@ -663,6 +672,49 @@ ok("...AND EVERY PICTURE THOSE PAGES HELD — an image left behind can never be 
 treeAfter = await readTree();
 ok("the bin is empty afterwards", (treeAfter.trash || []).length === 0);
 ok("the notebook itself survives a section delete", treeAfter.notebooks.length === 1 && treeAfter.notebooks[0].id === notebook1);
+
+/* ════ 20. CLOUD SYNC, SIGNED OUT (B1291) — the half that IS checkable here ═════════════
+ *
+ * The sandbox proxy CORS-blocks Supabase sign-in, so the cross-device half of B1291 is a
+ * V### live check and says so honestly. What is fully checkable HERE, and is checked, is the
+ * promise the feature made to everyone who is NOT signed in: nothing changes. Not the
+ * behaviour, not the footer's claim, not the bytes fetched, not one network request. That is
+ * a real property and it is exactly the kind that rots silently, so it is committed rather
+ * than assumed — and the footer honesty check is the one that would have caught a "Synced"
+ * label shipped ahead of an actual sync. */
+const footer = page.locator('[data-testid="notes-scope-label"]:visible').first();
+const footerText = (await footer.innerText()).trim();
+
+ok("signed out, the footer says notes are on this device — and claims NOTHING about a cloud",
+  /saved on this device/i.test(footerText) && !/synced|cloud|account/i.test(footerText), `“${footerText}”`);
+ok("...and the pre-sync sentence is GONE, replaced rather than joined (PANEL-BREVITY)",
+  !/not synced to the cloud yet/i.test(footerText), `${footerText.split("·").length} segment(s), ${footerText.length} chars`);
+ok("...on ONE line, in the quiet tone — the storage line never becomes a paragraph",
+  await footer.getAttribute("data-sync-tone") === "quiet" && !footerText.includes("\n"));
+ok("nothing invents a conflict that did not happen", await page.locator('[data-testid="notes-conflict-bar"]').count() === 0);
+
+const syncKeys = await page.evaluate(() => Object.keys(localStorage).filter((k) => k.startsWith("planyr:notes:sync:")));
+ok("signed out, NO sync ledger is written — the cloud bookkeeping does not exist for you",
+  syncKeys.length === 0, syncKeys.join(", ") || "none");
+
+ok("the cloud module is never even DOWNLOADED signed out — the network tier costs you nothing",
+  !jsRequests.some((f) => /^notesCloud-/.test(f)), jsRequests.filter((f) => /notesCloud/.test(f)).join(", ") || "not requested");
+ok("and not one request left for a notes table or the picture bucket",
+  !cloudRequests.length, cloudRequests.slice(0, 3).join(" | ") || "none");
+
+/* The whole local story still holds with the sync tier in the build — the point of putting
+ * it behind the seam rather than through it. */
+tree = await readTree();
+ok("the notebook, its pages and the bin are all still exactly where they were",
+  !!tree && Array.isArray(tree.notebooks) && Array.isArray(tree.trash));
+await page.reload({ waitUntil: "load" });
+await page.waitForTimeout(2200);
+await page.locator('[data-testid="module-tab-notes"]:visible').first().click();
+await page.waitForSelector('[data-testid="notes-tree"]', { timeout: 15000 });
+const afterReload = await readTree();
+ok("a reload with cloud sync in the build restores the same signed-out notebook",
+  JSON.stringify(afterReload?.notebooks?.map((n) => n.id)) === JSON.stringify(tree?.notebooks?.map((n) => n.id)),
+  `${afterReload?.notebooks?.length ?? 0} notebook(s)`);
 
 /* ════ Wrap ═══════════════════════════════════════════════════════════════════════════ */
 ok("no uncaught page error across the whole run", pageErrors.length === 0, pageErrors.join(" | ") || "clean");

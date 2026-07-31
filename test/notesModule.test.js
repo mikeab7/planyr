@@ -45,7 +45,7 @@ const MODULE_ID = "notes";
 const JSX_SURFACES = ["Notes.jsx", "components/NotesTree.jsx", "components/NoteEditor.jsx"];
 const ALL_NOTES_FILES = [
   "Notes.jsx", "components/NotesTree.jsx", "components/NoteEditor.jsx", "components/NoteToolbar.jsx",
-  "lib/notesModel.js", "lib/notesStore.js", "lib/notesMarkdown.js", "lib/notesExtensions.js",
+  "lib/notesModel.js", "lib/notesStore.js", "lib/notesCloud.js", "lib/notesMarkdown.js", "lib/notesExtensions.js",
   "lib/notesTime.js", "lib/notesPrint.js", "lib/notesImageDb.js", "lib/notesImageIntake.js",
   "lib/notesImageNode.js", "lib/notesSearchHighlight.js", "lib/notesDocHtml.js",
 ];
@@ -466,11 +466,28 @@ describe("LOUD-FAILURE — storage is one seam and it never fails silently", () 
     expect(root).toContain("StorageBanner");
   });
 
-  it("the header tells the truth about where notes live and does NOT imply sync", () => {
+  /* ⛔ THIS TEST WAS INVERTED BY B1291, deliberately and with the feature in the same commit.
+   * It used to assert the store never said "Synced" — which was the right guard while notes
+   * were device-only, because the label claiming a cloud copy before one existed is the
+   * B209 / B595 / B610 class LOUD-FAILURE exists to prevent. Now that sync is real, the same
+   * rule points the other way: the line must be DERIVED from what actually happened, and the
+   * old "not synced to the cloud yet" sentence must be gone rather than sitting beside it. */
+  it("the footer says what is TRUE — a `Synced` state exists, and it is derived, never hardcoded", () => {
     const store = src("lib/notesStore.js");
+    const root = code("Notes.jsx");   // CODE, not prose — the comments discuss the old sentence
     expect(store).toMatch(/Saved on this device/);
-    expect(store).not.toMatch(/Synced|Saved to the cloud|Backed up/);
-    expect(src("Notes.jsx")).toMatch(/not synced to the cloud yet/);
+    expect(store).toMatch(/Synced to your account/);
+    // Signed out is unchanged: no cloud claim at all.
+    expect(store).toMatch(/scope === LOCAL_SCOPE\) return \{ text: "Saved on this device"/);
+    // Every honest state has a branch, including the ones nobody likes.
+    for (const mode of ["syncing", "synced", "offline", "error", "conflict"]) {
+      expect(store, `notesStorageLine has no branch for "${mode}"`).toContain(`case "${mode}":`);
+    }
+    expect(store, "a failed sync must say WHY").toMatch(/sync failed: \$\{syncState\.reason\}/);
+    // PANEL-BREVITY: the new line REPLACES the old sentence; it does not accumulate beside it.
+    expect(root, "the pre-sync sentence must be gone, not joined").not.toMatch(/not synced to the cloud yet/);
+    expect(root, "the footer renders the store's one line, never its own wording").toContain("{storageLine.text}");
+    expect(root.match(/data-testid="notes-scope-label"/g), "there is exactly ONE storage line").toHaveLength(1);
   });
 
   it("the storage keys are scoped and versioned, so two accounts never read each other's notes", () => {
@@ -533,6 +550,126 @@ describe("the delete cascade reaches storage (TOMBSTONE-DELETES)", () => {
 
   it("there is an orphan sweep as a safety net for an interrupted delete", () => {
     expect(src("lib/notesStore.js")).toMatch(/export function sweepOrphans/);
+  });
+});
+
+/* ════════════════════════════════════════════════════════════════════════════════════════
+ * 5b. CLOUD SYNC (B1291) — the properties that cannot be checked by reading the happy path
+ *
+ * The merge and conflict DECISIONS are proven in test/notesSync.test.js, against the real
+ * pure functions. These are the structural guards: that the seam held, that the revision
+ * guard is actually on every write, that nothing hard-deletes, and that signing out still
+ * costs nothing.
+ * ═══════════════════════════════════════════════════════════════════════════════════════ */
+describe("cloud sync rides the SAME one seam", () => {
+  it("lib/notesCloud.js has exactly ONE importer — the store — so storage still has one door", () => {
+    const importers = ALL_NOTES_FILES.filter((f) => /notesCloud\.js/.test(code(f)));
+    expect(importers).toEqual(["lib/notesStore.js"]);
+  });
+
+  it("…and the store reaches it by a DYNAMIC import, so the network never rides the rail's first paint", () => {
+    const store = code("lib/notesStore.js");
+    expect(store, "a static import would put Supabase on the Notes route's critical path")
+      .not.toMatch(/^import .* from "\.\/notesCloud\.js"/m);
+    expect(store).toMatch(/import\("\.\/notesCloud\.js"\)/);
+  });
+
+  it("no component talks to Supabase — the workspace imports the store, never a client", () => {
+    for (const f of ALL_NOTES_FILES.filter((x) => x !== "lib/notesCloud.js")) {
+      expect(code(f), `${f} reaches for Supabase directly, bypassing the storage seam`).not.toMatch(/supabase/i);
+    }
+  });
+
+  it("THE SERVER OWNS `rev`: no write sends one, and every guarded update carries .eq(\"rev\")", () => {
+    const cloud = code("lib/notesCloud.js");
+    // A client-chosen rev would be silently discarded by the notes_touch_rev trigger, and the
+    // guard would then be the only thing between two devices and a lost note.
+    expect(cloud, "a push must not send its own rev").not.toMatch(/\.(update|insert)\(\{[^}]*\brev:/);
+    for (const fn of ["pushPage", "pushTree"]) {
+      const body = cloud.slice(cloud.indexOf(`function ${fn}`));
+      expect(body.slice(0, 900), `${fn} does not guard on the revision it read`).toMatch(/\.eq\("rev", baseRev\)/);
+    }
+  });
+
+  it("a refused write is a CONFLICT, never a blind retry that clobbers", () => {
+    const cloud = code("lib/notesCloud.js");
+    expect(cloud).toMatch(/if \(!data \|\| !data\.length\) return \{ ok: false, conflict: true \}/);
+    const store = code("lib/notesStore.js");
+    expect(store, "the store must surface a refusal rather than pushing again").toMatch(/if \(r\.conflict\)/);
+  });
+
+  it("TOMBSTONE-DELETES on the wire: nothing hard-deletes a note row", () => {
+    const cloud = code("lib/notesCloud.js");
+    expect(cloud, "a vanished row reads as 'not uploaded yet' and gets resurrected")
+      .not.toMatch(/from\((?:PAGE_TABLE|TREE_TABLE|IMAGE_TABLE)\)\s*\.delete\(/);
+    expect(cloud).toMatch(/purged_at: stamp/);
+    expect(cloud).toMatch(/export async function purgePagesCloud/);
+    // Binning keeps the body — that is what a restore on the other device needs to find.
+    expect(cloud).toMatch(/export async function binPages/);
+  });
+
+  it("ADOPTION IS ALSO A DELETE PATH — an adopted-once notebook is recorded, so a delete sticks", () => {
+    const store = code("lib/notesStore.js");
+    expect(store, "the plan must be told what this device already adopted").toMatch(/planAdoption\(localTree, accountTree, \{ already: sync\.adopted/);
+    expect(store, "…and the record must be persisted, or the guard resets every sign-in").toMatch(/sync\.adopted = \[\.\.\.new Set\(/);
+    expect(store).toMatch(/out\.adopted = \(Array\.isArray\(raw\.adopted\)/);
+  });
+
+  it("the purge cascade reaches the cloud, for bodies AND pictures", () => {
+    const store = code("lib/notesStore.js");
+    expect(store).toMatch(/purgePagesCloud\(client\(\), ids\)/);
+    expect(store).toMatch(/purgeImagesCloud\(client\(\), scope, imageIds\)/);
+  });
+
+  it("PICTURES SYNC — bytes go up, and a device that has never seen one fetches it", () => {
+    const store = code("lib/notesStore.js");
+    expect(store, "readNoteImage must fall through to the cloud on a cache miss").toMatch(/fetchImage\(client\(\), scope, imageId\)/);
+    expect(store, "and cache what it fetched, so the second open is instant").toMatch(/idbPutImage\(\{[\s\S]{0,200}dataUrl: r\.dataUrl/);
+    expect(store, "a pasted picture is uploaded, not left on one machine").toMatch(/uploadImage\(\{ id, pageId, dataUrl/);
+  });
+
+  it("SIGNING OUT COSTS NOTHING: every cloud path is behind an explicit gate", () => {
+    const store = code("lib/notesStore.js");
+    expect(store).toMatch(/const scoped = \(\) => scope !== LOCAL_SCOPE/);
+    expect(store).toMatch(/const syncOn = \(\) => scoped\(\) && !!cloudClient/);
+    expect(store, "starting sync signed out must be a no-op").toMatch(/if \(scope === LOCAL_SCOPE\) \{ setSyncState\(\{ mode: "local" \}\)/);
+  });
+
+  it("NEVER A LOST EDIT: choosing the other device's copy parks this one first", () => {
+    const root = code("Notes.jsx");
+    expect(root).toMatch(/if \(choice === "theirs"\)/);
+    expect(root, "the local body must be written to a NEW page before the conflict resolves")
+      .toMatch(/addPage\(base, hit\.section\.id[\s\S]{0,160}writePage\(r\.pageId, localDoc\)/);
+    expect(root, "and the resolution happens after that").toMatch(/resolveNotesConflict\(pageId, choice\)/);
+    expect(root).toContain("ConflictBar");
+  });
+
+  it("the applied schema is committed as a record, naming the migration and the date", () => {
+    const sql = read(NOTES, "db", "notes_cloud_sync.sql");
+    const ddl = sql.replace(/^\s*--.*$/gm, "");   // statements, not the prose around them
+    expect(sql).toContain("notes_cloud_sync_b1291");
+    expect(sql).toMatch(/2026-07-31/);
+    for (const t of ["public.notes_trees", "public.notes_pages", "public.notes_images"]) {
+      expect(sql, `${t} is missing from the record`).toContain(t);
+    }
+    expect(sql, "RLS must be on for every table").toMatch(/notes_trees enable row level security/);
+    expect(sql).toMatch(/notes_pages enable row level security/);
+    expect(sql).toMatch(/notes_images enable row level security/);
+    // Own-row only, private by default — no team columns, no cross-user path (KEY DECISIONS).
+    expect(ddl, "a team predicate would be a sharing decision nobody made").not.toMatch(/is_team_member\s*\(/);
+    expect((ddl.match(/user_id = \(select auth\.uid\(\)\)/g) || []).length).toBeGreaterThanOrEqual(12);
+    // The bucket is PRIVATE and keyed on the owner's own folder.
+    expect(ddl).toMatch(/'notes-images',\s*\n?\s*false/);
+    expect(ddl).toMatch(/\(storage\.foldername\(name\)\)\[1\]/);
+  });
+
+  it("and the client codes against THAT schema — the table and bucket names match the record", () => {
+    const sql = read(NOTES, "db", "notes_cloud_sync.sql");
+    const cloud = src("lib/notesCloud.js");
+    for (const [constant, name] of [["TREE_TABLE", "notes_trees"], ["PAGE_TABLE", "notes_pages"], ["IMAGE_TABLE", "notes_images"], ["IMAGE_BUCKET", "notes-images"]]) {
+      expect(cloud, `${constant} does not name the applied table`).toContain(`export const ${constant} = "${name}"`);
+      expect(sql).toContain(name);
+    }
   });
 });
 
