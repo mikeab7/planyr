@@ -5,7 +5,31 @@
 > step; tick/remove it once he's done it. This is the **owner's** plate only. Browser click-throughs and
 > signed-in spot-checks are the Claude cohort's job (`VERIFICATION.md`), **never** Michael's — do NOT list those here.
 
-_Last updated: 2026-07-30._
+_Last updated: 2026-07-31._
+
+## 🌊 One call to make: should the flood-and-drainage check run by itself the moment a plan opens? (B1349)
+
+> **Short version: when you open a plan whose flood and drainage facts haven't been pulled yet, the app goes and
+> gets them on its own, a moment after the page appears.** That is deliberate — it's why the stormwater numbers are
+> usually just *there* when you go looking for them instead of making you press a button. But it isn't free: it
+> fetches real data from the county and state services and pulls in the terrain machinery to do it, and it was
+> starting while the page was still busy becoming usable.
+>
+> **What I've already done, and it needed no decision from you:** it now waits until the app is genuinely idle
+> before it starts, with a hard limit so it always runs in the end. So it no longer competes with the moment
+> you're trying to start work. That part is shipped.
+>
+> **What's genuinely yours to decide:** whether it should run automatically at all. Two honest options, and I'd
+> take either:
+> - **Leave it automatic** (what happens today). Opening an unchecked plan costs you a slightly heavier first few
+>   seconds, and the drainage answers are waiting for you when you look.
+> - **Make it a button.** Opening a plan is as light as it can be, and the stormwater panel says "not checked yet —
+>   ↻ Re-check" until you ask. Nothing is lost, but you'd press it once per new plan.
+>
+> There is no wrong answer here and nothing breaks either way — it's a taste call about what you want the first
+> few seconds after opening a plan to feel like.
+- [ ] **Tell me: leave the drainage check automatic, or turn it into a button?** One word either way and I'll do it.
+
 
 ## ✏️ Rename one plan — it's called your seller's head office by mistake (B1196)
 
