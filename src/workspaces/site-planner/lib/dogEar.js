@@ -167,12 +167,35 @@ export function wallKidAlong(b, side, kid) {
  *     tracking the span, on BOTH axes: its along-CENTRE is stale by the same arithmetic (half the
  *     shrink), and keeping it would leave a correctly-sized field hanging off the end of the wall.
  *   · `pinAllowed` is the intent gate (B1123's `userResize`, by another name). Only a gesture aimed
- *     AT THIS FIELD may pin an over-length run — the owner dragging its end past the wall is a real
- *     statement, even though the render clamps it. A host refit, a duplicate, a relayout and the
- *     load-time heal all pass false and are structurally incapable of stamping.
- *   · Anything else is unchanged: a run SHORTER than the span, or a shifted centre, is preserved
- *     exactly as before (that is the owner's amendment — he slides a field to line a curb return up
- *     with a fire lane, and that must survive every refit).
+ *     AT THIS FIELD may pin a run — the owner dragging its end is a real statement. A host refit, a
+ *     duplicate, a relayout and the load-time heal all pass false and are structurally incapable of
+ *     stamping.
+ *
+ * ⛔ NEW-2 (2026-07-31) — "PRESERVE ONCE TOUCHED" IS GONE, AND ITS REMOVAL IS THE POINT.
+ * The rule above used to end with a third clause: a run SHORTER than the span, or a shifted centre,
+ * was preserved exactly as it was found. That clause is what B1340 did not close and what the owner
+ * reproduced on "Concept D — Sylvestri Retail" (`sms4zs8unbkg`) after a hard reload: building
+ * `e1454731yyuqqs` had its DEPTH taken 220 → 200, its sidewalks correctly followed to 260 (200 + a
+ * 60 ft bump projection), its truck court correctly followed — and its two end PARKING fields sat
+ * at a run of 205 against that same 260 ft wall. On the building beside it, 80 ft of parking against
+ * a 259 ft wall. Their PERPENDICULAR offsets were perfect, so B1340's position work was holding; it
+ * was the SPAN that had gone stale, because an unstamped short run read as "the owner meant this"
+ * forever and outlived the geometry it was measured against.
+ *
+ * A run is derivable from its host exactly like a position is, so it is DERIVED on the same
+ * schedule and by the same rule:
+ *   · NO STAMP → the run and the centre are the span default. An implicit difference is staleness,
+ *     never intent, whichever direction it points.
+ *   · A STAMP (`sideParkFit`) is the ONLY intent that counts. It is written ONLY by a gesture aimed
+ *     at this field, it is EXPLICIT and per-element, and it is RE-CLAMPED to the host's span on
+ *     every host change — so it can shrink with the wall and spring back when the wall grows, but it
+ *     can never silently outlive the host it was measured against.
+ *   · Dragging a field back onto the span default CLEARS the stamp: intent withdrawn is intent gone.
+ * A deliberate resize therefore still survives every refit (it is recorded), and an accident no
+ * longer does (it is not). Migration is deliberate and one-way: a plan carrying an unstamped short
+ * run — nobody can tell an old accident from an old intent, and the owner has ruled that a field
+ * matching its wall is the right default — is re-derived to its wall on the next open, LOUDLY
+ * (`assembly-tear-detected`, span half).
  *
  * PURE, so the rule is unit-testable apart from the React canvas.
  */
@@ -197,15 +220,22 @@ export function sideParkAlongRun({ cur, span, stamp = null, pinAllowed = false, 
     // Stale on both axes → back onto the span default, and the impossible stamp goes with it.
     return { run: spanRun, alongShift: Number(span && span.alongShift) || 0, stamp: want ? null : undefined, stale: true };
   }
-  const untouched = Math.abs(curRun - spanRun) <= tol
-    && Math.abs(curShift - (Number(span && span.alongShift) || 0)) <= tol;
-  if (untouched && !want) return { run: spanRun, alongShift: Number(span && span.alongShift) || 0, stamp: undefined, stale: false };
-  const intent = want || { run: curRun, alongShift: curShift };
-  const run = Math.min(intent.run, spanRun);
-  // Stamp the unclamped intent only once the clamp actually bites, so it springs back when the host
-  // grows again — and only from a gesture that was allowed to pin in the first place.
-  const stampOut = run !== intent.run && (pinAllowed || want) ? intent : undefined;
-  return { run, alongShift: intent.alongShift, stamp: stampOut, stale: false };
+  const spanShift = Number(span && span.alongShift) || 0;
+  const offDefault = Math.abs(curRun - spanRun) > tol || Math.abs(curShift - spanShift) > tol;
+  /* NEW-2 — a gesture aimed at THIS field is the only thing that can create intent, and it now
+   * RECORDS that intent instead of leaving it implicit in the geometry. Recording is what makes the
+   * override explicit, per-element and re-clampable; leaving it implicit is what made it sticky. */
+  if (pinAllowed) {
+    // Dragged back onto the span default → the override is withdrawn, not merely satisfied.
+    if (!offDefault) return { run: spanRun, alongShift: spanShift, stamp: null, stale: false };
+    return { run: Math.min(curRun, spanRun), alongShift: curShift, stamp: { run: curRun, alongShift: curShift }, stale: false };
+  }
+  /* NEW-2 — no gesture, so the ONLY intent that counts is a RECORDED one. An unstamped divergence is
+   * staleness in either direction (the Sylvestri case was SHORT, the Weld case was LONG) and goes
+   * back onto the span. `stale` is what makes the load-time heal apply it and what makes it audible. */
+  if (!want) return { run: spanRun, alongShift: spanShift, stamp: undefined, stale: offDefault };
+  // A recorded override: honoured, but re-clamped to the wall the host currently has.
+  return { run: Math.min(want.run, spanRun), alongShift: want.alongShift, stamp: undefined, stale: false };
 }
 
 // A host-local point back into world feet (rotate by the host angle, offset by its centre).

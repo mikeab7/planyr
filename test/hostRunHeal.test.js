@@ -123,9 +123,14 @@ describe("the load-time heal re-lays a child carrying another host's run (NEW-1)
     expect(alongRuns(out, B3).tX).toBeLessThanOrEqual(B3_LEN + 1);
   });
 
-  it("a run that FITS is never touched — a hand-positioned field survives every load", () => {
-    // A 300 ft field slid 40 ft along building 3's 514 ft wall: shorter than the wall, so it is a
-    // real placement and the heal has no business re-deriving it (the owner's fire-lane curb return).
+  /* ⛔ NEW-2 (2026-07-31) — THE OWNER AMENDED THIS RULE, and this pair of cases is the record of it.
+   * The old contract was "a run that FITS is never touched": any shorter-than-the-wall run read as a
+   * hand-placed field forever. That is what B1340 did not close — on "Concept D — Sylvestri Retail"
+   * a building's depth went 220 → 200, its sidewalks correctly followed to 260 and its end PARKING
+   * fields sat at 205 against that same 260 ft wall (and 80 against 259 on the building beside it).
+   * The run is derivable from the host exactly like the position is, so it is derived — and a
+   * genuine user length is an EXPLICIT `sideParkFit` override, re-clamped to the host every time. */
+  it("an UNSTAMPED short run is re-derived to the wall — 'preserve once touched' is gone", () => {
     const host = by(ELS, B3);
     const rad = ((host.rot || 0) * Math.PI) / 180;
     const perp = -(host.w / 2 + 5 + 30), along = 40;
@@ -135,7 +140,40 @@ describe("the load-time heal re-lays a child carrying another host's run (NEW-1)
       cy: host.cy + perp * Math.sin(rad) + along * Math.cos(rad),
     };
     const out = normalizeHostRuns(ELS.map((e) => (e.id === B3_PK_LEFT ? slid : e)), () => {});
-    expect(by(out, B3_PK_LEFT)).toBe(slid);
+    const got = by(out, B3_PK_LEFT);
+    expect(got).not.toBe(slid);                          // it WAS re-derived
+    expect(alongRuns(out, B3)[B3_PK_LEFT]).toBeCloseTo(B3_LEN, 0);   // …onto the wall it hugs
+  });
+
+  it("a RECORDED length survives every load, and is re-clamped to the host it currently has", () => {
+    const host = by(ELS, B3);
+    const rad = ((host.rot || 0) * Math.PI) / 180;
+    const perp = -(host.w / 2 + 5 + 30), along = 40;
+    const stamped = {
+      ...by(ELS, B3_PK_LEFT), w: 300, sideParkFit: { run: 300, alongShift: along },
+      cx: host.cx + perp * Math.cos(rad) - along * Math.sin(rad),
+      cy: host.cy + perp * Math.sin(rad) + along * Math.cos(rad),
+    };
+    const out = normalizeHostRuns(ELS.map((e) => (e.id === B3_PK_LEFT ? stamped : e)), () => {});
+    expect(by(out, B3_PK_LEFT)).toBe(stamped);           // explicit intent → untouched
+    // …and the same stamp on a SHORTER host is clamped to that host, never left overhanging.
+    const shortHost = ELS.map((e) => (e.id === B3 ? { ...e, h: 120 } : (e.id === B3_PK_LEFT ? stamped : e)));
+    expect(alongRuns(normalizeHostRuns(shortHost, () => {}), B3)[B3_PK_LEFT]).toBeLessThanOrEqual(121);
+  });
+
+  it("legacy: a run that FITS used to be frozen — kept as a named record of the old contract", () => {
+    const host = by(ELS, B3);
+    const rad = ((host.rot || 0) * Math.PI) / 180;
+    const perp = -(host.w / 2 + 5 + 30), along = 40;
+    const slid = {
+      ...by(ELS, B3_PK_LEFT), w: 300,
+      cx: host.cx + perp * Math.cos(rad) - along * Math.sin(rad),
+      cy: host.cy + perp * Math.sin(rad) + along * Math.cos(rad),
+    };
+    const out = normalizeHostRuns(ELS.map((e) => (e.id === B3_PK_LEFT ? slid : e)), () => {});
+    // Under the amended rule this is NO LONGER frozen. Asserted as the inverse so the change of
+    // contract is explicit in the suite rather than silently deleted.
+    expect(by(out, B3_PK_LEFT)).not.toBe(slid);
   });
 });
 
@@ -190,10 +228,32 @@ describe("a stored along length is never stamped by a duplicate or a host resize
     expect(keep.stale).toBe(false);
   });
 
-  it("sideParkAlongRun: a field sitting on the span default keeps tracking it", () => {
-    const res = sideParkAlongRun({ cur: { run: 514, alongShift: 0 }, span: { run: 600, alongShift: 0 } });
+  it("sideParkAlongRun: a field sitting ON the span default keeps tracking it", () => {
+    const res = sideParkAlongRun({ cur: { run: 600, alongShift: 0 }, span: { run: 600, alongShift: 0 } });
+    expect(res.run).toBe(600);
     expect(res.stale).toBe(false);
     expect(res.stamp).toBeUndefined();
+  });
+
+  it("sideParkAlongRun: an UNSTAMPED run SHORT of the span is stale and re-derived (NEW-2)", () => {
+    // The Sylvestri shape: a 205 ft field against the 260 ft wall its host now has.
+    const res = sideParkAlongRun({ cur: { run: 205, alongShift: 0 }, span: { run: 260, alongShift: 0 } });
+    expect(res.run).toBe(260);
+    expect(res.stale).toBe(true);            // → the load-time heal applies it, and it is reported
+    expect(res.stamp).toBeUndefined();
+  });
+
+  it("sideParkAlongRun: a gesture aimed at the field RECORDS its intent, and dragging back clears it", () => {
+    const span = { run: 260, alongShift: 0 };
+    const pinned = sideParkAlongRun({ cur: { run: 205, alongShift: 12 }, span, pinAllowed: true });
+    expect(pinned.run).toBe(205);
+    expect(pinned.stamp).toEqual({ run: 205, alongShift: 12 });   // EXPLICIT, per-element, storable
+    // Recorded intent then survives an ordinary refit…
+    expect(sideParkAlongRun({ cur: { run: 205, alongShift: 12 }, span, stamp: pinned.stamp }).run).toBe(205);
+    // …and is re-clamped when the host shrinks under it, rather than overhanging.
+    expect(sideParkAlongRun({ cur: { run: 205, alongShift: 12 }, span: { run: 150, alongShift: 0 }, stamp: pinned.stamp }).run).toBe(150);
+    // Dragged back onto the default → intent withdrawn.
+    expect(sideParkAlongRun({ cur: { run: 260, alongShift: 0 }, span, stamp: pinned.stamp, pinAllowed: true }).stamp).toBeNull();
   });
 
   it("resizedZoneAlongLen: a host refit / relayout / heal can never pin a dock zone's length", () => {

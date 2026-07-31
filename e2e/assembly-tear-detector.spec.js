@@ -38,7 +38,7 @@ const telemetry = (page) => page.evaluate(() => {
   try { return (window.pfTelemetry && window.pfTelemetry.recent() || []).map((r) => `${r.source} ${r.message}`); } catch { return []; }
 });
 
-async function drawAssembly(page) {
+async function drawAssembly(page, { parking = 1 } = {}) {
   await page.goto("/");
   await openModule(page, "site-planner");
   await page.getByRole("button", { name: /Start blank/i }).first().click();
@@ -56,7 +56,7 @@ async function drawAssembly(page) {
   // Give it the children that stayed behind in the owner's plan.
   await page.getByRole("button", { name: /^Properties$/ }).click();
   const plus = (label) => page.getByText(label, { exact: true }).first().locator("xpath=..").getByRole("button").last();
-  for (const [label, times] of [["Dock zones", 2], ["Car parking", 1], ["Bump-outs", 1]]) {
+  for (const [label, times] of [["Dock zones", 2], ["Car parking", parking], ["Bump-outs", 1]]) {
     for (let i = 0; i < times; i++) { await plus(label).click(); await page.waitForTimeout(300); }
   }
   await page.waitForTimeout(900);
@@ -186,5 +186,108 @@ test.describe("bonded assembly: measured before any reload, and healed loudly af
     expect(kidIds.some((id) => joined.includes(id)), `no repaired child id in: ${joined}`).toBe(true);
     // The repair reaching DISK is itself an event, so "it healed but nobody saved it" is visible.
     expect(events.join(" ")).toContain("assembly-tear-persisted");
+  });
+
+  /* NEW-2 — THE REPRODUCTION THE OWNER ASKED TO BE ADDED, after "Concept D — Sylvestri Retail"
+   * reproduced this AFTER B1340 merged and after a hard reload. B1340 made a child's POSITION
+   * derived; it did not make its SIZE derived, so a side-parking field's along-wall run survived a
+   * host resize as an invisible sticky value — 205 ft of parking beside a 260 ft sidewalk on the
+   * same wall, and 80 ft against 259 on the building next to it, both with perfect perpendicular
+   * offsets. Resize a building's DEPTH and assert every bonded child's RUN follows, measured
+   * immediately, in-session, before any reload. */
+  test("resizing a building's depth drags every bonded child's SPAN with it — measured in-session", async ({ page }) => {
+    const errors = [];
+    page.on("pageerror", (e) => errors.push(String(e)));
+
+    // Three parking rows, so one of them hugs an END wall — the wall whose length IS the depth,
+    // and therefore the only one this resize changes. With parking on the long walls only, the
+    // case measures nothing (verified: it passed with the old rule restored).
+    await drawAssembly(page, { parking: 3 });
+    const before = await readPlan(page);
+    const host = before.els.find((e) => e.type === "building" && !e.attachedTo);
+    const kids = before.els.filter((e) => e.attachedTo === host.id);
+    expect(kids.length).toBeGreaterThanOrEqual(4);
+    expect(assemblyIntegrity(before.els).tears).toHaveLength(0);
+
+    /* Resize the DEPTH on the real canvas, by grabbing the real grip: the building is wider than it
+     * is deep, so its depth axis is the one the NS handles drive. The grip is found in the shipped
+     * always-on-top handle layer by its own cursor, not by guessing at screen coordinates — an
+     * earlier version of this case guessed, missed the grip, and skipped itself, which proves
+     * nothing. */
+    const svg = page.getByTestId("planner-canvas");
+    const box = await svg.boundingBox();
+    // NOTE: do NOT click the canvas to "select" first — the building is already the selected element
+    // (the Properties + buttons above act on it), and a click at a guessed coordinate DESELECTS it,
+    // which empties the handle layer. Measured: the grip search returned zero rects that way.
+    const grip = await page.evaluate(() => {
+      // BOTH planner hosts stay mounted (the map view is hidden with display:none), so there can be
+      // two handle layers in the document and only one of them has a selection — search all of them
+      // and take the first grip that is actually laid out.
+      const seen = [];
+      for (const layer of document.querySelectorAll('[data-handle-layer="1"]')) {
+        for (const n of layer.querySelectorAll("rect")) {
+          const cur = (n.getAttribute("style") || "");
+          seen.push(cur);
+          if (!cur.includes("ns-resize")) continue;
+          const r = n.getBoundingClientRect();
+          if (r.width > 0 && r.height > 0) return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+        }
+      }
+      return { none: true, seen: seen.slice(0, 20) };
+    });
+    expect(grip && !grip.none, `no depth (ns-resize) grip on the selected building; cursors seen: ${JSON.stringify(grip && grip.seen)}`).toBe(true);
+    const dragDepth = async (g, dy) => {
+      await page.mouse.move(g.x, g.y);
+      await page.mouse.down();
+      await page.mouse.move(g.x, g.y + dy / 2, { steps: 8 });
+      await page.mouse.move(g.x, g.y + dy, { steps: 8 });
+      await page.mouse.up();
+      await page.waitForTimeout(900);
+    };
+    /* TWO drags, and the second one is the one that matters. Shrinking a wall was ALREADY handled
+     * before this work — an over-length run gets clamped, so the plan looks right. The failure is a
+     * wall that GROWS under a field that stays short: that is the state the owner was looking at
+     * (205 ft of parking on a 260 ft wall), and it is the only direction that distinguishes the
+     * derived rule from the old "preserve once touched" one. Proven: with the old rule restored,
+     * the shrink-only version of this case still passed and the grow-back version goes red. */
+    await dragDepth(grip, -70);                       // in…
+    const grip2 = await page.evaluate(() => {
+      for (const layer of document.querySelectorAll('[data-handle-layer="1"]')) {
+        for (const n of layer.querySelectorAll("rect")) {
+          if (!(n.getAttribute("style") || "").includes("ns-resize")) continue;
+          const r = n.getBoundingClientRect();
+          if (r.width > 0 && r.height > 0) return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+        }
+      }
+      return null;
+    });
+    expect(grip2, "the depth grip vanished after the first resize").toBeTruthy();
+    await dragDepth(grip2, 130);                      // …and back out, past where it started
+
+    const after = await readPlan(page);
+    const hostAfter = after.els.find((e) => e.id === host.id);
+    // Guard the guard: a case that quietly measured nothing would be worse than no case at all.
+    const changed = Math.abs(hostAfter.w - host.w) + Math.abs(hostAfter.h - host.h);
+    expect(changed, "the grip drag did not resize the building — nothing was measured").toBeGreaterThan(5);
+
+    // THE ASSERTION, in the same session with nothing reloaded: no bonded child is the wrong
+    // length or in the wrong place for the host it now has.
+    const res = assemblyIntegrity(after.els);
+    expect(res.tears, `after a depth resize, before any reload: ${JSON.stringify(res.tears)}`).toHaveLength(0);
+    // …and the wall strips and the parking beside them agree about how long their shared wall is.
+    const runOf = (e) => Math.max(e.w, e.h);
+    for (const k of after.els.filter((e) => e.attachedTo === host.id && e.sideParkSide)) {
+      const strip = after.els.find((e) => e.attachedTo === host.id && e.sidewalkSide === k.sideParkSide);
+      if (!strip) continue;
+      expect(Math.abs(runOf(k) - runOf(strip)), `${k.id} spans a different wall from its own sidewalk`).toBeLessThan(1);
+    }
+    // GUARD THE GUARD: at least one parking row must actually have changed length, or this case
+    // is measuring a resize that never touched a wall any parking row hugs.
+    const runOfId = (els, id) => { const e = els.find((x) => x.id === id); return e ? Math.max(e.w, e.h) : null; };
+    const parkIds = before.els.filter((e) => e.attachedTo === host.id && e.sideParkSide).map((e) => e.id);
+    expect(parkIds.length, "no side-parking rows to measure").toBeGreaterThan(0);
+    expect(parkIds.some((id) => Math.abs(runOfId(after.els, id) - runOfId(before.els, id)) > 1),
+      "no parking row changed length — the resize did not touch a wall any of them hugs").toBe(true);
+    expect(errors, "no page errors during the resize").toEqual([]);
   });
 });

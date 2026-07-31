@@ -180,10 +180,18 @@ export default function Scheduler({
   const carriedRef = useRef(null);
   useEffect(() => {
     if (!ready || projectId == null) return;
-    // Already carried this route's grid onto its schedule once → let deliberate later picks stand.
-    // Re-arms whenever the routed project changes (carriedRef holds the last-carried projectId).
-    if (carriedRef.current === projectId) return;
-    if (!needsScheduleCarryIn(projects, projectId, activeId)) { carriedRef.current = projectId; return; }
+    if (!needsScheduleCarryIn(projects, projectId, activeId, section)) { carriedRef.current = projectId; return; }
+    // Already carried this route's grid onto its schedule once → let deliberate later picks stand
+    // (picking the cross-cutting Pursuits / Operations schedule must not be yanked back). Re-arms
+    // whenever the routed project changes (carriedRef holds the last-carried projectId).
+    //
+    // NEW-2 — that latch is scoped to the PROJECTS section. A non-projects section (the embed's own
+    // Dashboard) cannot reflect the route at all, so it is never a deliberate pick worth preserving:
+    // pressing Dashboard inside Schedule clears the routed project, so the only way to be here is to
+    // have arrived from another module. Without this scoping, coming back to a project we had
+    // already carried once left the latch closed and the Dashboard on screen — the same landing the
+    // section fix exists to prevent, reached by a second route.
+    if (carriedRef.current === projectId && section === "projects") return;
     post({ type: "planar:nav-select-by-site", siteId: projectId });
     // LOUD-FAILURE backstop: if the routed site's linked schedule is ALREADY loaded (resolvable in
     // `projects`) yet the grid still hasn't adopted it after a short settle window, the drive isn't
@@ -203,7 +211,7 @@ export default function Scheduler({
       } catch (_) { /* telemetry must never throw into the app */ }
     }, 2500);
     return () => clearTimeout(t);
-  }, [ready, projectId, projects, activeId]);
+  }, [ready, projectId, projects, activeId, section]);
 
   // Carry the project the OTHER way ONLY when the route has no project yet (projectId == null):
   // adopt the iframe's active schedule's linked site into the empty route so the Site/Review tabs
@@ -258,11 +266,17 @@ export default function Scheduler({
   // schedule linked to it, or its name as last-known-good during the ~2 s iframe boot — never the
   // iframe's transient active schedule (which may belong to a different project mid-carry-in: the
   // B560 placeholder/flash). With no routed project, the iframe's active schedule IS the current.
+  //
+  // NEW-2 — the ROUTE outranks the embed's section. The old order tested `section === "reports"`
+  // FIRST, so whenever the embed was on its own Dashboard the crumb read "Select a project" even
+  // though the URL named one — the app knowing which project you are in and saying nothing. The
+  // Dashboard's genuine no-current-project state is the `projectId == null` case (pressing Dashboard
+  // clears the route), which the last branch still handles.
   let currentProject;
-  if (section === "reports") {
-    currentProject = null; // Dashboard: no single project is current
-  } else if (projectId != null) {
+  if (projectId != null) {
     currentProject = linkedSchedule || (routedSiteName ? { id: projectId, name: routedSiteName } : null);
+  } else if (section === "reports") {
+    currentProject = null; // Dashboard with no routed project: none is current
   } else {
     currentProject = deriveCurrentProject(projects, activeId, section);
   }

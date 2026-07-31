@@ -22,6 +22,7 @@
  *
  * Three things live here, and they are deliberately ONE function so they can never drift:
  *   • the INVARIANT   — `assemblyIntegrity(els).els` is the healed list (identity when clean).
+ *                       Covers a child's FULL geometry: where it sits AND how long it is.
  *   • the DETECTOR    — `.tears` names every child that disagreed with its host by more than
  *                       `ASSEMBLY_TEAR_TOL_FT`, with ids and the delta, for telemetry.
  *   • the LOUD HEAL   — `.repairs` names EVERY element the heal rewrote, tear or drift.
@@ -33,11 +34,17 @@
  *   • ACROSS the wall (the outward normal) a bonded child's offset is fully determined by the
  *     host box and the depths inboard of it. There is NO user freedom on that axis, so any
  *     disagreement past tolerance is a tear.
- *   • ALONG the wall there IS user freedom (sliding a parking field to line up a curb return —
- *     B1039), bounded by the member still OVERLAPPING the wall it is bonded to.
+ *   • ALONG the wall there IS user freedom (sliding or shortening a parking field to line up a
+ *     curb return — B1039) — but as of NEW-2 that freedom must be RECORDED to count. An unstamped
+ *     along-wall run or centre that disagrees with the span is staleness, not intent, and is
+ *     re-derived; a `sideParkFit` stamp (written only by a gesture aimed at that field) is honoured
+ *     and re-clamped to the host's current wall on every host change. The removed clause —
+ *     "preserve once touched", which read any geometric difference as intent forever — is what
+ *     survived B1340 and put a 205 ft field on a 260 ft wall.
  *   • A wall strip and a corner bump-out are fully derived on BOTH axes.
- * So the invariant is "every bonded child sits at its host-derived anchor across the wall, and
- * within overlap along it" — complete for impossible states, silent about legal ones.
+ * So the invariant is "every bonded child sits at its host-derived anchor across the wall, spans
+ * the wall its host currently has unless an explicit override says otherwise, and stays within
+ * overlap along it" — complete for impossible states, silent about legal ones.
  *
  * Pure: no DOM, no clock, no I/O. Safe in a worker and in a Node test.
  */
@@ -97,15 +104,26 @@ export function assemblyIntegrity(els, { tol = ASSEMBLY_TEAR_TOL_FT } = {}) {
     const dy = num(e.cy) - num(prev.cy);
     const dist = Math.hypot(dx, dy);
     const drot = angDelta(e.rot, prev.rot);
+    /* NEW-2 — SPAN, not just position. B1340 made a child's POSITION derived and stopped the plan
+     * being written torn, and the owner confirmed both held. It did not make the child's SIZE
+     * derived, so a side-parking field's along-wall RUN survived a host resize as an invisible
+     * sticky value: on `sms4zs8unbkg` a 205 ft field hugged a 260 ft wall and an 80 ft field hugged
+     * a 259 ft one, with perfect perpendicular offsets. A child that is the wrong LENGTH for its
+     * host is exactly as wrong as one in the wrong PLACE, so the same detector must see both. */
+    const dw = num(e.w) - num(prev.w);
+    const dh = num(e.h) - num(prev.h);
+    const span = Math.max(Math.abs(dw), Math.abs(dh));
     repairs.push({
       id: e.id,
       host: e.attachedTo != null ? e.attachedTo : null,
       type: e.type || null,
       kinds: [...(notes.get(e.id) || [])],
       dx: r3(dx), dy: r3(dy), dist: r3(dist), drot: r3(drot),
+      dw: r3(dw), dh: r3(dh), span: r3(span),
     });
   }
-  return { els: healed, changed: true, repairs, tears: repairs.filter((r) => r.dist > tol) };
+  // A tear is a disagreement with the host past tolerance on EITHER axis of the child's geometry.
+  return { els: healed, changed: true, repairs, tears: repairs.filter((r) => r.dist > tol || r.span > tol) };
 }
 
 /* Detector-only: does this collection HOLD a tear right now? Same derivation, nothing written.
@@ -119,9 +137,10 @@ export function tearPayload(records, cap = 20) {
   const list = Array.isArray(records) ? records : [];
   return {
     count: list.length,
-    worstFt: list.reduce((m, r) => Math.max(m, Number(r && r.dist) || 0), 0),
+    worstFt: list.reduce((m, r) => Math.max(m, Number(r && r.dist) || 0, Number(r && r.span) || 0), 0),
     items: list.slice(0, cap).map((r) => ({
-      id: r.id, host: r.host, type: r.type, kinds: r.kinds, dx: r.dx, dy: r.dy, dist: r.dist, drot: r.drot,
+      id: r.id, host: r.host, type: r.type, kinds: r.kinds,
+      dx: r.dx, dy: r.dy, dist: r.dist, drot: r.drot, dw: r.dw, dh: r.dh, span: r.span,
     })),
   };
 }
