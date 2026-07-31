@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-07-31 @ `30eba47` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-07-31 @ `37680c1` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -404,7 +404,7 @@ _411 source files mapped._
 - **`src/workspaces/site-planner/lib/districtFacilities.js`** — PR-K/K7 drainage-district facilities ingest scaffold: discover BKDD ArcGIS REST services behind its Web AppBuilder viewer (injectable fetch, graceful degradation), classify a DISTRICT floodway/ROW distinct from a FEMA floodway, name the receiving channel
   - _exports_: `ASSUMED_CHANNEL_TAG`, `BKDD_APPVIEWER`, `classifyDistrictFacilities`, `discoverDistrictServices`, `districtFloodwayNote`, `districtIdNote`, `facilityKind`
 - **`src/workspaces/site-planner/lib/dockZones.js`** — Building-anchored dock-zone stack geometry: outward court/trailer/buffer chain, catalog layers, dock-side axes, stranded-zone pruning
-  - _exports_: `alongLenIsChainEcho`, `boxExtentAlong`, `catalogDepthDefault`, `DOCK_ZONES`, `dockSidesFor`, `footprintAxes`, `footprintDepth`, `footprintLength`, `layoutStack`, `layoutZone`, `layoutZoneByKind`, `MAX_DOCK_ZONES`, `pruneStrandedZones`, `resizedAlongLen`, `resizedZoneAlongLen`, `strandedZoneIds`, `usableCourtSpan`, `ZONE_CATALOG`, `zoneAlongExtent`, `zoneAlongSpan`, `zoneDepthDefault`, `zoneDepthDefaults`, `zoneDepthExtent`
+  - _exports_: `ALONG_ANCHOR`, `alongAnchorFromDrag`, `alongLenIsChainEcho`, `alongOffsetFor`, `anchoredAlongSpan`, `boxExtentAlong`, `catalogDepthDefault`, `DOCK_ZONES`, `dockSidesFor`, `footprintAxes`, `footprintDepth`, `footprintLength`, `layoutStack`, `layoutZone`, `layoutZoneByKind`, `MAX_DOCK_ZONES`, `normalizeAlongAnchor`, `pruneStrandedZones`, `resizedAlongLen`, `resizedZoneAlongFit`, `resizedZoneAlongLen`, `strandedZoneIds`, `usableCourtSpan`, `ZONE_CATALOG`, `zoneAlongExtent`, `zoneAlongPlacement`, `zoneAlongSpan`, `zoneDepthDefault`, `zoneDepthDefaults`, `zoneDepthExtent`
 - **`src/workspaces/site-planner/lib/dogEar.js`** — Corner bump-out geometry (flush corner placement + resize round-trip) AND the wall-hugging-child placement rule: the sidewalk span over the extended side, plus the always-flush perpendicular offset every wall strip / side-parking row is derived from
   - _exports_: `bumpSidewalkSide`, `bumpsOfHost`, `DOGEAR_D`, `DOGEAR_W`, `dogEarDesc`, `dogEarGeom`, `dogEarSize`, `hostAxisExtents`, `isDogEarSide`, `localToWorld`, `ownExtents`, `SIDE_PARK_PIN_TOL_FT`, `sideOfBondedBox`, `sideParkAlongRun`, `sidewalkSpanForBumps`, `wallKidAlong`, `wallKidBox`, `wallKidPerp`, `wallStripBox`
 - **`src/workspaces/site-planner/lib/drafts.js`** — Pure resolver for Bluebeam-style mid-draw undo: decides which in-progress multi-point draft to trim by one vertex (Backspace + Ctrl-Z), and returns null when no draft is active so Ctrl-Z falls through to a global undo

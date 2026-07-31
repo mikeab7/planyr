@@ -198,7 +198,7 @@ import { layoutLabels, buildingLabelLines, dimCalloutVisible, detailLabelVisible
 import { inlineLines } from "./lib/labelFitLadder.js";
 import { calloutLayout, minCalloutWidthFt } from "./lib/calloutLayout.js";
 import { splitOverlayBands, overlayPanelOrder, overlayOrderFlags, reorderOverlays, setOverlayBand, overlayBand } from "./lib/overlayOrder.js";
-import { DOCK_ZONES, MAX_DOCK_ZONES, ZONE_CATALOG, zoneDepthDefaults, catalogDepthDefault, layoutZoneByKind, usableCourtSpan, zoneAlongSpan, boxExtentAlong, resizedZoneAlongLen, dockSidesFor, footprintDepth, footprintLength, footprintAxes, strandedZoneIds, pruneStrandedZones } from "./lib/dockZones.js";
+import { DOCK_ZONES, MAX_DOCK_ZONES, ZONE_CATALOG, zoneDepthDefaults, catalogDepthDefault, layoutZoneByKind, usableCourtSpan, zoneAlongSpan, anchoredAlongSpan, boxExtentAlong, resizedZoneAlongFit, dockSidesFor, footprintDepth, footprintLength, footprintAxes, strandedZoneIds, pruneStrandedZones } from "./lib/dockZones.js";
 import { computeBuildingGrid, resolveGridSettings, placeDockDoors } from "./lib/buildingGrid.js";
 import { convertBuildingToPolygon, dockLineAt, dockEdgeLine, projectOntoLine, frameBBox, translateDockLines, dockSegExtent, clipSegmentToRing } from "./lib/footprintEdit.js";
 import { dimSlideRange, clampDimOffset, DIM_POS_F_DEFAULT, DIM_POS_F_ROAD, dimNumberBox } from "./lib/dimSlide.js";
@@ -7845,8 +7845,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (b.footEdit) { const seg = dockSegExtent(b, side); if (seg) { insStart = Math.max(insStart, seg.startF); insEnd = Math.max(insEnd, seg.L - seg.endF); } }
     const { along: usable, shift } = usableCourtSpan(full, insStart, insEnd);
     const court = findCourtIn(arr, b, side);
-    const along = court && Number.isFinite(court.alongLen) && court.alongLen > 0 ? Math.min(court.alongLen, usable) : usable;
-    return { along, alongShift: shift };
+    // NEW-1 — the court's own length is ANCHORED too: shorten it from one end and that end is the
+    // one that moves. Its clamp window is the CLEAR FACE (not the whole wall), so an anchored court
+    // can never slide onto a corner bump-out. With no anchor stored this is byte-identical to the
+    // old `Math.min(court.alongLen, usable)` centred on `shift`.
+    const fit = anchoredAlongSpan({
+      stored: court && court.alongLen, anchor: court && court.alongAnchor, off: court && court.alongOff,
+      chainAlong: usable, chainShift: shift, fullAlong: full, limitAlong: usable, limitShift: shift,
+    });
+    // `faceAlong`/`faceShift` are the clear bump-out face itself — the reference the COURT's own
+    // anchor is measured against (every outward zone anchors against the court's resolved span).
+    return { along: fit.along, alongShift: fit.shift, faceAlong: usable, faceShift: shift };
   };
   /* ---- Generic outward-stack chain (B495). The dock sequence (court → trailer → buffer) plus any
      menu-appended layers (landscape buffer / road) form ONE linked list rooted at the wall, bonded
@@ -7886,9 +7895,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // a length keeps it — clamped to the wall, never reset. Index 0 is excluded: the court's own
     // alongLen is already folded into courtOpts.along, capped to the clear bump-out face (B492).
     const alongs = zones.map((z, i) => (i === 0 ? null : (Number.isFinite(z.alongLen) && z.alongLen > 0 ? z.alongLen : null)));
+    // NEW-1 — WHICH END that length is anchored from. Index 0 is 0/0 because the court's own anchor
+    // is already resolved into `courtOpts.alongShift`; every outward zone anchors against that.
+    const anchors = zones.map((z, i) => (i === 0 ? 0 : z.alongAnchor));
+    const offs = zones.map((z, i) => (i === 0 ? 0 : z.alongOff));
     const patch = new Map();
     zones.forEach((z, i) => {
-      const g = layoutZoneByKind(b, side, i, depths, kinds, { ...courtOpts, alongs });
+      const g = layoutZoneByKind(b, side, i, depths, kinds, { ...courtOpts, alongs, anchors, offs });
       patch.set(z.id, z.type === "trailer"
         ? { ...g, cfg: { ...(z.cfg || {}), trailerW: (z.cfg && z.cfg.trailerW) || settings.trailerW || OPP_TRAILER_W, trailerL: depths[i], trailerAisle: 0, single: true } }
         : g);
@@ -8099,7 +8112,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
    * control the truck court has had, now for the zones stacked beyond it. Stores the typed length
    * on that zone's `alongLen`; relayoutSide clamps it to the wall but never resets it, so the
    * trailer can be shorter OR longer than the court and stays where it was put. `null` clears the
-   * override and the zone goes back to tracking the court. */
+   * override and the zone goes back to tracking the court.
+   * NEW-1 — a TYPED length KEEPS the current anchor (it does not silently re-centre), so a zone the
+   * owner already pulled in from its north end keeps that end put when he then types a number.
+   * Clearing the override clears the anchor with it: intent withdrawn is intent gone. */
   const setZoneLengthAll = (b, i, newLen) => {
     const { dockSides } = dockSidesOf(b);
     const nl = newLen == null ? null : Math.max(1, Math.round(newLen));
@@ -8108,7 +8124,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       let next = a;
       dockSides.forEach((side) => {
         const z = findZoneIn(next, b, side, i);
-        if (z) next = next.map((x) => (x.id === z.id ? (nl == null ? (() => { const { alongLen: _drop, ...rest } = x; return rest; })() : { ...x, alongLen: nl }) : x));
+        if (z) next = next.map((x) => (x.id === z.id ? (nl == null ? (() => { const { alongLen: _drop, alongAnchor: _dropA, alongOff: _dropO, ...rest } = x; return rest; })() : { ...x, alongLen: nl }) : x));
       });
       dockSides.forEach((side) => { next = relayoutSide(next, b, side); });
       return next;
@@ -8248,13 +8264,27 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         //      The stamp now requires the gesture to BE a user resize OF THIS ZONE, and an edge drag
         //      must have moved the along axis. A host refit, a relayout, a rotation, a court depth
         //      change and the load-time heal are all structurally incapable of stamping.
+        //
+        // NEW-1 — the length was stored with no ANCHOR, so the relayout re-centred it on the wall and
+        // both ends walked inward by half the reduction ("when I shrink the trailer parking, it
+        // shrinks from both sides"). The gesture knows which end it held — an edge drag pins the
+        // opposite edge exactly — so store that with the length. The truck court is no longer excluded:
+        // it shares the defect (its typed length re-centred too), and `courtBumpOpts` still caps it to
+        // the clear bump-out face, so B492 is unchanged.
         const isTrailerZone = resized.type === "trailer" || !!resized.forCourt;
         const alongIsW = isTrailerZone || side === "top" || side === "bottom";
         const alongAxisDragged = opts.dragAxis ? !!(alongIsW ? opts.dragAxis.w : opts.dragAxis.h) : null;
-        const setLen = resized.truckCourt ? null : resizedZoneAlongLen(resized, box, {
-          hostRot: b.rot, side, userResize: !!opts.userResize, alongAxisDragged,
+        const cOpts = courtBumpOpts(next, b, side);
+        const fit = resizedZoneAlongFit(resized, { ...box, cx: nb.cx, cy: nb.cy }, {
+          host: b, side, userResize: !!opts.userResize, alongAxisDragged,
+          // The court head anchors against the clear bump-out FACE; everything outward of it anchors
+          // against the court's own resolved span.
+          chainAlong: resized.truckCourt ? cOpts.faceAlong : cOpts.along,
+          chainShift: resized.truckCourt ? cOpts.faceShift : cOpts.alongShift,
         });
-        next = next.map((x) => (x.id === buildingId ? { ...x, zd: newDepth, ...(setLen ? { alongLen: setLen } : {}) } : x));
+        next = next.map((x) => (x.id === buildingId
+          ? { ...x, zd: newDepth, ...(fit ? { alongLen: fit.len, alongAnchor: fit.anchor, alongOff: fit.off } : {}) }
+          : x));
         next = relayoutSide(next, b, side);
       }
     } else if (resized && (isWallStrip(resized) || resized.sideParkSide)) {
@@ -13361,6 +13391,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           const m = f2p({ x: el.cx + o.x, y: el.cy + o.y });
           return (
             <rect key={`edge${i}`} x={m.x - 4.5} y={m.y - 4.5} width={9} height={9} rx={2}
+              data-handle="edge" data-edge={`${nx},${ny}`}
               fill={SEL_HANDLE_FILL} stroke={SEL_BLUE} strokeWidth={1.5}
               style={{ cursor: resizeCursor(m.x - cpx.x, m.y - cpx.y) }}
               onPointerDown={(e) => startEdgeResize(e, el.id, nx, ny)} />

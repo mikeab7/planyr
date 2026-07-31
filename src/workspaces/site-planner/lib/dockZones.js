@@ -106,6 +106,96 @@ export function zoneAlongSpan(stored, chainAlong, fullAlong) {
   return Math.min(v, fullAlong);                          // clamped to the wall, never forgotten
 }
 
+/* ---- NEW-1: the span is ANCHORED — a resize moves the end you GRABBED, and only that end --------
+ *
+ * THE OWNER'S REPORT: "fix the fact that when I shrink the trailer parking, it shrinks from both
+ * sides."
+ *
+ * ROOT CAUSE, and it is structural rather than arithmetic: `layoutZoneByKind` builds the zone's
+ * centre as `b.c + u·center + tan·alongShift`, and the ONLY along-wall term in it is `alongShift`,
+ * which exists to carry the B492 bump-out trim. The LENGTH came from the user (`alongLen` →
+ * `zoneAlongSpan` above) and the CENTRE did not — so a shrunk zone stayed centred on its wall and
+ * BOTH ends travelled inward by half the reduction. The model stored a SPAN WITH NO ANCHOR; there
+ * was no field in which "which end did you grab" could even be written down.
+ *
+ * THE MODEL — the override is an ANCHORED span. Three fields on the element, of which only the
+ * first already existed, so nothing migrates:
+ *   · `alongLen`    — the length in feet, semantics unchanged.
+ *   · `alongAnchor` — WHICH END is held: `-1` the −along end, `+1` the +along end, `0` centred.
+ *                     Absent ⇒ 0 ⇒ byte-for-byte the old behaviour.
+ *   · `alongOff`    — feet from the CHAIN DEFAULT's corresponding reference to the held one, so a
+ *                     zone may sit off-centre on its wall. It is zero for the first end-drag (the
+ *                     held end IS the chain's) and becomes non-zero on the second, from the other
+ *                     end — which is exactly the case a bare offset could not express.
+ *
+ * Because the anchor is a REFERENCE rather than a world position, it survives everything the zone
+ * is derived through: shrink the host and the held end moves with the wall it is bonded to; grow it
+ * back and the zone springs out again; add a bump-out and the whole chain slides together. And it
+ * COMPOSES with the bump-out trim instead of replacing it — `chainShift` is the trim, `off` rides on
+ * top of it. PURE, so every one of those cases is unit-testable apart from the React canvas. */
+export const ALONG_ANCHOR = { START: -1, CENTER: 0, END: 1 };
+export const normalizeAlongAnchor = (a) => (Number(a) === 1 ? 1 : Number(a) === -1 ? -1 : 0);
+
+/**
+ * Resolve an anchored along-wall span into the length to draw and the along-wall centre shift.
+ *
+ * @param stored      the zone's `alongLen` (absent/0 ⇒ it tracks the chain span)
+ * @param anchor      its `alongAnchor` (-1 | 0 | 1)
+ * @param off         its `alongOff` (feet)
+ * @param chainAlong  the span it tracks by default (the truck court's resolved length)
+ * @param chainShift  that span's own along-wall centre (the B492 bump-out trim) — composed, never replaced
+ * @param fullAlong   the host wall
+ * @param limitAlong/limitShift  the window the zone must stay inside (defaults to the whole wall).
+ *        The court head passes the CLEAR FACE here, so a typed length can never slide onto a bump-out.
+ * @returns { along, shift } — feet, both already clamped to the limit window.
+ */
+export function anchoredAlongSpan({ stored, anchor = 0, off = 0, chainAlong, chainShift = 0, fullAlong, limitAlong, limitShift } = {}) {
+  const cap = Number.isFinite(limitAlong) ? limitAlong : Number(fullAlong) || 0;
+  const capC = Number.isFinite(limitShift) ? limitShift : 0;
+  const along = zoneAlongSpan(stored, chainAlong, cap);
+  const a = normalizeAlongAnchor(anchor);
+  const o = Number.isFinite(Number(off)) ? Number(off) : 0;
+  // The held reference, expressed against the chain default: its centre (a=0) or one of its ends.
+  const held = (Number(chainShift) || 0) + a * ((Number(chainAlong) || 0) / 2) + o;
+  const want = held - a * (along / 2);                    // the centre that keeps that reference put
+  const lim = Math.max(0, (cap - along) / 2);             // …re-clamped rather than sliding off the wall
+  return { along, shift: Math.min(capC + lim, Math.max(capC - lim, want)) };
+}
+
+/** A box's along-wall placement in its HOST's frame: centre, length, and the two ends. */
+export function zoneAlongPlacement(box, host, side = "bottom") {
+  const horiz = side === "top" || side === "bottom";
+  const hostRot = (host && Number(host.rot)) || 0;
+  const tan = rot2(horiz ? 1 : 0, horiz ? 0 : 1, hostRot);
+  const center = ((Number(box.cx) || 0) - (Number(host.cx) || 0)) * tan.x
+               + ((Number(box.cy) || 0) - (Number(host.cy) || 0)) * tan.y;
+  const len = zoneAlongExtent(box, hostRot, side);
+  return { center, len, min: center - len / 2, max: center + len / 2 };
+}
+
+/**
+ * Which end a resize HELD, read off the geometry rather than off the handle: an edge drag pins the
+ * opposite edge EXACTLY, and a corner drag pins the opposite corner, so whichever end moved less is
+ * the one the user did not grab. Both ends moving (a re-centre) reads as centred, which is the
+ * conservative answer.
+ */
+export function alongAnchorFromDrag(prev, next, tol = 0.5) {
+  if (!prev || !next) return 0;
+  const dMin = Math.abs(next.min - prev.min), dMax = Math.abs(next.max - prev.max);
+  if (dMin <= tol && dMax > tol) return -1;
+  if (dMax <= tol && dMin > tol) return 1;
+  return 0;
+}
+
+/** The `alongOff` to store for a placement under a given anchor — sub-foot residue snaps to zero so
+ *  a zone that IS on the chain's held end keeps tracking it. */
+export function alongOffsetFor(anchor, placement, chainAlong, chainShift = 0, tol = 0.5) {
+  const a = normalizeAlongAnchor(anchor);
+  const held = a === 0 ? placement.center : a === -1 ? placement.min : placement.max;
+  const off = held - ((Number(chainShift) || 0) + a * ((Number(chainAlong) || 0) / 2));
+  return Math.abs(off) <= tol ? 0 : Math.round(off * 100) / 100;
+}
+
 /** Extent of a rotated box {w,h,rot} projected onto a unit direction {x,y} — feet. */
 export function boxExtentAlong(box, unit) {
   const ax = rot2((box.w || 0) / 2, 0, box.rot || 0);
@@ -198,6 +288,25 @@ export function resizedZoneAlongLen(prevBox, nextBox, { hostRot = 0, side = "bot
 }
 
 /**
+ * NEW-1 — the ONE call a resize gesture makes: the anchored span to store, or null to leave the zone
+ * tracking the chain. `resizedZoneAlongLen`'s two intent gates still decide WHETHER anything is
+ * pinned (a depth-only drag, a host refit, a relayout and the load-time heal all still pin nothing);
+ * this adds WHERE, which the length alone could never say.
+ *
+ * `chainAlong`/`chainShift` are the span this zone tracks by default — the truck court's resolved
+ * placement for an outward zone, the B492 clear bump-out face for the court head itself.
+ */
+export function resizedZoneAlongFit(prevBox, nextBox, { host, side = "bottom", chainAlong, chainShift = 0, userResize = false, alongAxisDragged = null, tol = 0.5 } = {}) {
+  const hostRot = (host && Number(host.rot)) || 0;
+  const len = resizedZoneAlongLen(prevBox, nextBox, { hostRot, side, userResize, alongAxisDragged, tol });
+  if (len == null) return null;
+  const prev = zoneAlongPlacement(prevBox, host, side);
+  const next = zoneAlongPlacement(nextBox, host, side);
+  const anchor = alongAnchorFromDrag(prev, next, tol);
+  return { len, anchor, off: alongOffsetFor(anchor, next, chainAlong, chainShift, tol) };
+}
+
+/**
  * B1123 load-time heal — is a stored `alongLen` indistinguishable from the chain span the zone would
  * derive anyway? Such a value carries no user intent (it is what the zone would render regardless),
  * and keeping it costs the owner the tracking behaviour forever, so it is DROPPED on load. A length
@@ -237,10 +346,17 @@ export function layoutZoneByKind(b, side, i, depths, kinds = [], opts = {}) {
   const fullAlong = horiz ? b.w : b.h;          // full wall length
   const useOverride = Number.isFinite(opts.along); // any zone may pull in to the clear bump-out span
   const chainAlong = useOverride ? opts.along : fullAlong;
-  // Per-zone length override (`opts.alongs[i]`): a zone the user has actually dragged/typed a
-  // length onto keeps it, instead of being forced to the chain span. Absent → tracks the chain.
-  const along = zoneAlongSpan(opts.alongs && opts.alongs[i], chainAlong, fullAlong);
-  const alongShift = useOverride && Number.isFinite(opts.alongShift) ? opts.alongShift : 0;
+  const chainShift = useOverride && Number.isFinite(opts.alongShift) ? opts.alongShift : 0;
+  // Per-zone ANCHORED span override: a zone the user has actually dragged/typed a length onto keeps
+  // it, instead of being forced to the chain span — and keeps the END IT WAS ANCHORED FROM, instead
+  // of re-centring on its wall (NEW-1). Absent anchor/offset ⇒ centred ⇒ the pre-NEW-1 behaviour to
+  // the foot. The anchor COMPOSES with the bump-out trim (`chainShift`), it never replaces it.
+  const { along, shift: alongShift } = anchoredAlongSpan({
+    stored: opts.alongs && opts.alongs[i],
+    anchor: opts.anchors && opts.anchors[i],
+    off: opts.offs && opts.offs[i],
+    chainAlong, chainShift, fullAlong,
+  });
   const inner = depths.slice(0, i).reduce((s, d) => s + (d || 0), 0); // depth nearer the wall
   const d = depths[i];
   const half = (horiz ? b.h : b.w) / 2;         // building face along the outward normal

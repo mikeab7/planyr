@@ -18,7 +18,7 @@
 import { dogEarGeom, dogEarSize, isDogEarSide,
   wallStripBox, wallKidBox, wallKidAlong, hostAxisExtents, ownExtents, bumpsOfHost,
   sideOfBondedBox, localToWorld, sidewalkSpanForBumps, sideParkAlongRun } from "./dogEar.js";
-import { layoutZoneByKind, boxExtentAlong, zoneAlongExtent, zoneDepthExtent, alongLenIsChainEcho, usableCourtSpan } from "./dockZones.js";
+import { layoutZoneByKind, boxExtentAlong, zoneAlongExtent, zoneDepthExtent, alongLenIsChainEcho, usableCourtSpan, anchoredAlongSpan } from "./dockZones.js";
 import { roadCenterline, dedupeRoadVertices, repairBakedRadii, simplifyRoadVertices, ROAD_SIMPLIFY_TOL_FT, ROAD_VERTEX_COLLAPSE_FT } from "./roadGeometry.js";
 import { bufferPolyline } from "./metesAndBounds.js";
 import { DEFAULT_ROAD_CLASS, roadClassOf } from "./roadClasses.js";
@@ -526,11 +526,16 @@ function normalizeStrandedZones(list, onHeal) {
       // Span along the wall: taken from the HEAD when the head is still where it belongs (that
       // span is the B492 clear-face intent); a torn head falls back to the full wall.
       const headOk = !strandedAt[0];
+      // NEW-1 — the per-zone ANCHOR rides along with the per-zone length at EVERY layout site, or a
+      // heal would re-centre a zone the owner anchored and the tear detector would fight the canvas
+      // forever. (It is a no-op wherever the length equals the chain span and the offset is zero.)
+      const anchors = chain.map((z, i) => (i === 0 ? 0 : z.alongAnchor));
+      const offs = chain.map((z, i) => (i === 0 ? 0 : z.alongOff));
       const opts = headOk
         ? { along: boxExtentAlong(head, tan),
             alongShift: (head.cx - host.cx) * tan.x + (head.cy - host.cy) * tan.y,
-            alongs: chain.map((z, i) => (i === 0 || strandedAt[i] ? null : boxExtentAlong(z, tan))) }
-        : { alongs: chain.map(() => null) };
+            alongs: chain.map((z, i) => (i === 0 || strandedAt[i] ? null : boxExtentAlong(z, tan))), anchors, offs }
+        : { alongs: chain.map(() => null), anchors, offs };
       chain.forEach((z, i) => {
         if (!strandedAt[i]) return;                                 // in reach → untouched, same object
         const g = layoutZoneByKind(host, side, i, depths, kinds, opts);
@@ -591,10 +596,14 @@ export function normalizeZoneAlongLen(list, onHeal) {
         alongShift: (head.cx - host.cx) * tan.x + (head.cy - host.cy) * tan.y,
         // The surviving genuine overrides still win; the dropped ones go back to tracking the chain.
         alongs: chain.map((z, i) => (i === 0 || echoes[i] || !(Number.isFinite(z.alongLen) && z.alongLen > 0) ? null : z.alongLen)),
+        // NEW-1 — the anchor goes with the length: a dropped echo drops its anchor too.
+        anchors: chain.map((z, i) => (i === 0 || echoes[i] ? 0 : z.alongAnchor)),
+        offs: chain.map((z, i) => (i === 0 || echoes[i] ? 0 : z.alongOff)),
       };
       chain.forEach((z, i) => {
         if (!echoes[i]) return;
-        drop.add(z.id);
+        drop.add(z.id);                                          // …and its anchor, dropped below
+
         patch.set(z.id, layoutZoneByKind(host, side, i, depths, kinds, opts));
         if (onHeal) onHeal({ id: z.id, host: host.id, kind: "zone-along-len", type: z.type, side, from: { alongLen: z.alongLen }, to: { alongLen: null, chainAlong } });
       });
@@ -603,7 +612,7 @@ export function normalizeZoneAlongLen(list, onHeal) {
   if (!drop.size) return els;
   return els.map((e) => {
     if (!e || !drop.has(e.id)) return e;
-    const { alongLen: _dropped, ...rest } = e;
+    const { alongLen: _dropped, alongAnchor: _dropA, alongOff: _dropO, ...rest } = e;
     return { ...rest, ...(patch.get(e.id) || {}) };
   });
 }
@@ -691,17 +700,24 @@ export function normalizeHostRuns(list, onHeal) {
       // The head is laid on the clear face; everything outward of it may legally reach the full wall.
       const over = chain.map((z, i) => zoneAlongExtent(z, host.rot || 0, side) > (i === 0 ? usable : wall) + HOST_RUN_TOL_FT);
       if (!over.some(Boolean) && !badLen.some(Boolean)) continue;
-      const headLen = Number.isFinite(head.alongLen) && head.alongLen > 0 && !over[0] ? Math.min(head.alongLen, usable) : usable;
       const kinds = chain.map((z) => (z.type === "trailer" || z.forCourt ? "trailer" : "strip"));
       const depths = chain.map((z) => (Number.isFinite(z.zd) && z.zd > 0 ? z.zd : zoneDepthExtent(z, host.rot || 0, side)));
+      // NEW-1 — the head is resolved through the SAME anchored rule the canvas uses (`courtBumpOpts`),
+      // clamped to the clear face, so a healed chain still lands byte-identical to a freshly laid one.
+      const headFit = anchoredAlongSpan({
+        stored: over[0] ? null : head.alongLen, anchor: head.alongAnchor, off: head.alongOff,
+        chainAlong: usable, chainShift: shift, fullAlong: wall, limitAlong: usable, limitShift: shift,
+      });
       const opts = {
-        along: headLen,
-        alongShift: shift,
+        along: headFit.along,
+        alongShift: headFit.shift,
         // A surviving genuine per-zone length still wins; an impossible one goes back to the chain.
         alongs: chain.map((z, i) => (i === 0 || badLen[i] || !(Number.isFinite(z.alongLen) && z.alongLen > 0) ? null : z.alongLen)),
+        anchors: chain.map((z, i) => (i === 0 || badLen[i] ? 0 : z.alongAnchor)),
+        offs: chain.map((z, i) => (i === 0 || badLen[i] ? 0 : z.alongOff)),
       };
       chain.forEach((z, i) => {
-        if (badLen[i]) dropAlongLen.add(z.id);
+        if (badLen[i]) dropAlongLen.add(z.id);                   // …with its anchor (see the map below)
         const g = layoutZoneByKind(host, side, i, depths, kinds, opts);
         if (nearBox(z, g) && !badLen[i]) return;                 // already right → same object, no churn
         patch.set(z.id, g);
@@ -745,7 +761,7 @@ export function normalizeHostRuns(list, onHeal) {
     if (!e || e.id == null) return e;
     if (!patch.has(e.id) && !dropAlongLen.has(e.id) && !dropStamp.has(e.id)) return e;
     const out = { ...e, ...(patch.get(e.id) || {}) };
-    if (dropAlongLen.has(e.id)) delete out.alongLen;
+    if (dropAlongLen.has(e.id)) { delete out.alongLen; delete out.alongAnchor; delete out.alongOff; }
     if (dropStamp.has(e.id)) delete out.sideParkFit;
     return out;
   });
