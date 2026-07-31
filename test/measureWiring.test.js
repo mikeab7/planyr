@@ -70,6 +70,22 @@ describe("NEW-1: measurements are styled through the ONE resolver, on every mode
  * `onPointerDown` bound inside the measurement block — instead of listing them, so adding a new
  * one without the gesture goes red on arrival rather than shipping and waiting to be reported.
  */
+/** Extract `const NAME = (…) => { … }` from SitePlanner's component body by brace matching. */
+function fnBody(name) {
+  const at = SP.indexOf(`const ${name} = (`);
+  if (at < 0) return null;
+  const open = SP.indexOf("{", SP.indexOf("=>", at));
+  let depth = 0;
+  for (let i = open; i < SP.length; i++) {
+    if (SP[i] === "{") depth++;
+    else if (SP[i] === "}" && --depth === 0) return SP.slice(open, i + 1);
+  }
+  return null;
+}
+// NEW-2 — the measurement render is `renderMeasureNode` now (it paints in two bands), not an
+// inline `measures.map(...)` in the JSX. Both suites below scan that body.
+const MEASURE_RENDER_BODY = fnBody("renderMeasureNode");
+
 describe("NEW-2: EVERY interactive measurement surface opens Properties on double-click", () => {
   // The measurement render block, sliced exactly as the chip-ordering assertion below slices it,
   // PLUS the hoisted `measureHandles` const. NEW-1 moved the control-point grips out of the render
@@ -77,7 +93,6 @@ describe("NEW-2: EVERY interactive measurement surface opens Properties on doubl
   // be buried under a label or a promoted reference and then could not be grabbed) — so the scan
   // has to cover both halves, or it would silently stop seeing the vertex grip it classifies.
   const HANDLE_LAYER = SP.slice(SP.indexOf("const measureHandles = (() => {"), SP.indexOf("/* ----------------------------- UI ----------------------------- */"));
-  const block = SP.slice(SP.indexOf("{/* measurements — line (distance)"), SP.indexOf("{/* in-progress measure draft */}")) + HANDLE_LAYER;
 
   /** Extract `const NAME = (…) => { … }` from the component body by brace matching. */
   function bodyOf(name) {
@@ -91,6 +106,31 @@ describe("NEW-2: EVERY interactive measurement surface opens Properties on doubl
     }
     return null;
   }
+
+  /* NEW-2 moved the measurement render out of the inline `measures.map(...)` and into
+     `renderMeasureNode`, so a measurement can paint in EITHER band (behind the plan or above it).
+     The scan follows the code: the render body is now that function's body. Everything this suite
+     asserts is unchanged — WHERE the markup lives moved, WHAT it must contain did not. */
+  const MEASURE_RENDER = MEASURE_RENDER_BODY;
+  const block = MEASURE_RENDER + HANDLE_LAYER;
+
+  it("the measurement render is a reusable node builder, drawn in BOTH bands (NEW-2)", () => {
+    expect(MEASURE_RENDER, "renderMeasureNode not found — the measurement render moved again").toBeTruthy();
+    // Two draw passes, one renderer: behind the elements and above them.
+    expect(SP).toMatch(/\{measureBands\.below\.map\(\(\{ m, i \}\) => renderMeasureNode\(m, i\)\)\}/);
+    expect(SP).toMatch(/\{measureBands\.above\.map\(\(\{ m, i \}\) => renderMeasureNode\(m, i\)\)\}/);
+    // …and the below pass really is emitted before the element bands, the above pass after them.
+    const below = SP.indexOf("{measureBands.below.map(");
+    const above = SP.indexOf("{measureBands.above.map(");
+    const elsAbove = SP.indexOf("{drawElsZ.above.map(");
+    expect(below).toBeGreaterThan(-1);
+    expect(below).toBeLessThan(elsAbove);
+    expect(above).toBeGreaterThan(elsAbove);
+    // The DEFAULT must not move: only an explicit `=== true` sends a measurement down, so every
+    // plan saved before this shipped renders exactly where it always did.
+    expect(SP).toMatch(/below: idx\.filter\(\(\{ m \}\) => m\.behindEls === true\)/);
+    expect(SP).toMatch(/above: idx\.filter\(\(\{ m \}\) => m\.behindEls !== true\)/);
+  });
 
   // Every handler the measurement render binds to a pointer press. Discovered, not listed.
   const pressed = [...new Set([...block.matchAll(/onPointerDown=\{(?:[^}]*?)\b(start\w+)\(e,/g)].map((m) => m[1]))];
@@ -211,7 +251,7 @@ describe("NEW-3: the summary chip, the segment dimensions, and print parity", ()
     // Found live: an area's hit path is a transparent FILLED polygon over the whole shape, so a
     // chip drawn before it in document order was unreachable — every press moved the measurement
     // instead of the label. Both branches must keep the chip last.
-    const block = SP.slice(SP.indexOf("{/* measurements — line (distance)"), SP.indexOf("{/* in-progress measure draft */}"));
+    const block = MEASURE_RENDER_BODY;
     const countChip = block.indexOf("{chipNode}");        // the count branch renders first
     const areaChip = block.lastIndexOf("{chipNode}");     // the line / polyline / area branch
     expect(countChip).toBeGreaterThan(-1);

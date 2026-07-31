@@ -137,8 +137,14 @@ describe("per-type click wiring (the pond regression, and the types the owner as
 
   it("POND: the double-click (canvas AND map label) still reaches the inspector with B875's flash", () => {
     expect(SP).toMatch(/if \(el\.type === "pond"\) revealPondInspector\(id\); else openInspector\(\);/);
-    // the map label honours the same contract: double-tap reveals, a single press only selects
-    expect(SP).toMatch(/if \(isDoubleTap\(e, `\$\{d\.el\.id\}:label`, wasSel\)\) \{ revealPondInspector\(d\.el\.id\); return; \}/);
+    /* The map label honours the same contract: double-tap reveals, a single press only selects.
+       NEW-1 re-keyed it from a private `${id}:label` onto the pond's OWN id. `isDoubleTap` keeps
+       ONE tap record, so a private key on chrome that sits over its own object is a POISON: press 1
+       on the basin and press 2 on the overhanging label matched nothing either way AND wiped the
+       record, so a third press had nothing to pair with. One key per feature is the rule now — the
+       ACTION still branches on which surface took the press. */
+    expect(SP).toMatch(/if \(isDoubleTap\(e, d\.el\.id, wasSel\)\) \{ revealPondInspector\(d\.el\.id\); return; \}/);
+    expect(SP, "a pond label must not go back to a private double-tap key").not.toMatch(/isDoubleTap\(e, `\$\{d\.el\.id\}:label`/);
     expect(SP).toMatch(/setSel\(\{ kind: "el", id: d\.el\.id \}\); *\/\/ single click: select only/);
   });
 

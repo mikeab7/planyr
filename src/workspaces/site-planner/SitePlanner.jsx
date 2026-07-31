@@ -2124,6 +2124,41 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const reAddFileRef = useRef(null);                    // B784 — always-mounted picker for re-adding a missing overlay's file
   const reAddIdRef = useRef(null);                      // B784 — id of the overlay a re-add picker will replace in place
   const overlayDocs = useRef(new Map());                // id -> live PDFDocumentProxy (session-only, for the page picker)
+  /* NEW-5(ii) — SHORTER LIFETIMES FOR THE PDF PROXIES, WITH RE-OPEN MADE TRANSPARENT FIRST.
+   * A `PDFDocumentProxy` per sheet overlay was held for the WHOLE session — set on load, destroyed
+   * only when the overlay was removed or the planner unmounted — pinning JS-side page objects AND a
+   * worker-side document for a reference the user placed once and never touched again.
+   * The trap the brief names, and the reason this is not a two-line teardown: the References panel
+   * gates the page picker's enabled state on `overlayDocs.current.has(o.id)`, so a naive destroy
+   * silently degrades a WORKING control to "re-add to change page". So the gate now asks a different
+   * question — `overlayPageReady(o)`: is the doc live OR RE-OPENABLE — and every consumer routes
+   * through `ensureOverlayPdf`, which already downloads the stored bytes and reloads. A proxy is
+   * only ever torn down when it can be brought back, so nothing the user can see changes.
+   * `overlayDocTouch` is the LRU clock: every real use stamps it, and the sweeper below destroys
+   * only what has gone unused for a full idle window. */
+  const overlayDocTouch = useRef(new Map());            // id -> last-used epoch ms
+  const OVERLAY_DOC_IDLE_MS = 5 * 60 * 1000;
+  const touchOverlayDoc = (id) => { overlayDocTouch.current.set(id, Date.now()); };
+  // Is this reference's page picker usable? Live doc, or stored PDF bytes we can silently re-open.
+  const overlayPageReady = (o) => !!o && (overlayDocs.current.has(o.id) || (o.storageKey || "").toLowerCase().endsWith(".pdf"));
+  useEffect(() => {
+    const t = setInterval(() => {
+      const now = Date.now();
+      for (const [id, doc] of [...overlayDocs.current.entries()]) {
+        const last = overlayDocTouch.current.get(id) || 0;
+        if (now - last < OVERLAY_DOC_IDLE_MS) continue;
+        // Only release what we can transparently restore. A doc loaded from a dropped file with no
+        // stored key is NOT re-openable, so it stays — a released one there would be a real loss.
+        const o = stateRef.current.sheetOverlays.find((x) => x.id === id);
+        if (!o || !(o.storageKey || "").toLowerCase().endsWith(".pdf")) continue;
+        try { doc.destroy(); } catch (_) {}
+        overlayDocs.current.delete(id);
+        overlayDocTouch.current.delete(id);
+      }
+    }, 60_000);
+    return () => clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const overlayFetching = useRef(new Set());            // ids currently downloading their raster from Storage (B72)
   // B784/B785 — a TERMINAL load state per overlay id: "missing" (object gone → re-add) | "network" (transient →
   // retry). Recording it stops the old infinite "Loading drawing…" retry loop (a src-less overlay was re-selected
@@ -2316,9 +2351,20 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
    * non-hit states of a raster identify. Never open at the same time as the pinned card: a
    * deliberate tap always wins (see hoverIdleOk). */
   const [gisHover, setGisHover] = useState(null);
+  // NEW-4(c) — plain mirrors of the two identify-card states, so the zoom effects below can ask
+  // "is there anything to clear?" without reading (and re-subscribing to) the state itself.
+  const gisHitRef = useRef(null);
+  const gisHoverRef = useRef(null);
+  gisHitRef.current = gisHit;
+  gisHoverRef.current = gisHover;
   // The card is anchored in SCREEN space, so a zoom would leave it pointing at ground it
   // no longer covers. A pan already dismisses it (the press does); this covers the wheel.
-  useEffect(() => { setGisHit(null); }, [view.ppf]);
+  /* NEW-4(c) — READ THE REF, SKIP THE DISPATCH. This effect fires on every zoom step and, in the
+     overwhelming case, dispatched `setGisHit(null)` over a value that was ALREADY null. Per this
+     file's own B1189 note: a same-value dispatch is still a DISPATCH, and React only skips
+     scheduling it when the fiber has no other pending work — which during a zoom it always has. So
+     a no-op was buying a render of the whole plan per wheel notch. */
+  useEffect(() => { if (gisHitRef.current) setGisHit(null); }, [view.ppf]);
   // overlays / setOverlays are app-shared (props from App) — one source of truth across pages.
   // Aerial basemap SOURCE (B693): "off" | "esri" | "usgs" — a three-way control in the
   // Layers panel's Basemap group (was a bare on/off checkbox). Located sites default to
@@ -2721,7 +2767,25 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         });
       }
       const next = s.shift;
-      setRegShift((r) => (Math.abs(r.dx - next.dx) < 1e-4 && Math.abs(r.dy - next.dy) < 1e-4 ? r : next));
+      /* NEW-3(c) — THE GUARD NOW HOLDS, so a view change commits ONE render instead of two.
+       *
+       * `regShift` is component STATE consumed as the SVG's `transform`, so every dispatch that
+       * changes it re-renders the whole ~4,600-node tree. The epsilon here was 1e-4 px against a
+       * CONTINUOUSLY-VARYING sub-pixel residual, so it essentially never held: each zoom step and
+       * each pan step committed a second full render of the plan on top of the one `setView`
+       * already caused. That doubling is a straight multiplier on the wheel jank NEW-3(b) fixes.
+       *
+       * REG_EPS_PX is a visually irrelevant floor, deliberately far below anything that can be
+       * seen or asserted: the pointer-accuracy harness (ui-audit/diagnose-pointer-accuracy.mjs)
+       * pins placement to a quarter of a pixel, and this sits an order of magnitude under that, so
+       * the weld the whole registration mechanism exists to hold (B1141/B1142) is untouched.
+       *
+       * The larger win — taking `regShift` out of React state entirely and writing both transforms
+       * through refs in the layout effect that already writes `wrap.style.transform` — is left
+       * DELIBERATELY unshipped: `window.__plannerView.registration()` and the `data-reg-dx/dy`
+       * attributes are read by the harnesses, and moving them is a separate, measurable change.
+       * Ship the epsilon, measure, then decide. Do not do both blind. */
+      setRegShift((r) => (Math.abs(r.dx - next.dx) < REG_EPS_PX && Math.abs(r.dy - next.dy) < REG_EPS_PX ? r : next));
     };
     /* PREFERRED reference: a real TILE on screen. Its z/x/y (straight off the `src` our own
      * basemap registry builds) fixes its Mercator corner exactly, and its rendered rect is where
@@ -3088,6 +3152,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const lastTapRef = useRef({ id: null, t: 0, x: 0, y: 0, wasSel: false });
   const labelSessionRef = useRef(null);  // B682 — coalesces a live label-spacing slider drag into one undo frame
   const DBLTAP_MS = 350, DBLTAP_PX = 14;
+  // NEW-3(c) — the drawing↔basemap registration re-dispatch floor, in screen px. See the setRegShift
+  // call site for why this exists and why it is safe (an order of magnitude under the quarter-pixel
+  // placement accuracy the pointer harness asserts).
+  const REG_EPS_PX = 0.02;
   // A THIRD rapid press on the same spot (a real "click to select, then immediately double-click"
   // gesture done fast, all three inside one DBLTAP_MS window) used to read as a lone dangling tap: a
   // matched pair used to WIPE lastTapRef to the empty record, so press 3 had nothing to pair with.
@@ -3887,12 +3955,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // a markup reorders within the markup layer. reorderByZ returns a minimal {id->z} patch (or null on
   // a no-op / end-of-stack); undo rides pushHistory + the setter like every other edit.
   const arrangeSel = (mode, target) => {
-    const s = target || selRef.current;
+    let s = target || selRef.current;
     // Resolve the peer set once (a building reorders within its type-layer band; a markup within the
     // markup layer) so the patch AND the B921/NEW-2 no-op cue read the same list.
     let peers = null;
     if (s?.kind === "el") { const t = els.find((e) => e.id === s.id); if (!t) return; const band = zOrder(t); peers = els.filter((e) => zOrder(e) === band); }
     else if (s?.kind === "markup") { peers = markups; }
+    // NEW-2 — a measurement reorders within the MEASUREMENT band, the same way a markup reorders
+    // within the markup layer. `sel` for a measurement carries an index, not an id, so resolve the
+    // id here; a legacy measurement saved without one simply has nothing to reorder against.
+    else if (s?.kind === "measure") { const t = s.id ? measures.find((x) => x.id === s.id) : measures[s.i]; if (!t || !t.id) return; peers = measures.filter((x) => x && x.id && (x.behindEls === true) === (t.behindEls === true)); s = { kind: "measure", id: t.id }; }
     else return;
     const patch = reorderByZ(peers, s.id, mode);
     if (!patch) {
@@ -3905,7 +3977,21 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     }
     pushHistory();
     if (s.kind === "el") setEls((a) => a.map((e) => (patch[e.id] != null ? { ...e, z: patch[e.id] } : e)));
+    else if (s.kind === "measure") setMeasures((a) => a.map((m) => (m.id && patch[m.id] != null ? { ...m, z: patch[m.id] } : m)));
     else setMarkups((a) => a.map((m) => (patch[m.id] != null ? { ...m, z: patch[m.id] } : m)));
+  };
+  /* NEW-2 — cross-band move for a measurement: "Send behind the plan" / "Bring above the plan".
+     Mirrors `setBehind` on the markup menu (and the reference's "Draw above/below the plan"), and
+     re-stacks the measurement on top of the band it arrives in so it is never dropped underneath
+     whatever was already there. Undo rides pushHistory + the setter like every other edit. */
+  const setMeasureBand = (id, behind) => {
+    pushHistory();
+    setMeasures((a) => {
+      const target = a.find((m) => m.id === id);
+      if (!target) return a;
+      const z = nextZ(a.filter((m) => m.id !== id && (m.behindEls === true) === !!behind));
+      return a.map((m) => (m.id === id ? { ...m, behindEls: behind ? true : undefined, z } : m));
+    });
   };
   const applySnapshot = (s) => {
     // NEW-1 (the straggler re-tear) — THIS SNAPSHOT IS NOW THE AUTHORITY. A remote instruction that
@@ -4440,7 +4526,42 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (active) { const t = setTimeout(() => requestFit(), 120); return () => clearTimeout(t); }
   }, [active]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  /* ------------ wheel zoom (non-passive) ------------ */
+  /* ------------ wheel zoom (non-passive) ------------
+   * NEW-3(b) — THE WHEEL IS FRAME-COALESCED, like every other gesture in this file.
+   *
+   * It was the ONE pointer path left calling `setView` directly, once per raw event, with no rAF
+   * and no throttle — while the pointer path (`scheduleFrameJob`/`flushFrameJobs`, B1157) and the
+   * pinch path (`flushPinch`) both coalesce. The pinch path's own comment says it is throttled "so
+   * a heavy plan doesn't re-render on every raw touchmove (the other half of the jank)"; the wheel
+   * WAS that other half. Chrome coalesces queued wheel events into fewer, larger, LATER dispatches
+   * when the handler can't keep up, which is exactly the owner's report — "I scroll out and it
+   * takes probably a whole second, and it does it in like two scrolls".
+   *
+   * The math is unchanged, not approximated: an anchored zoom about a FIXED screen point composes,
+   * so applying f₁ then f₂ about the same anchor is one zoom by f₁·f₂ about it. We multiply the
+   * factors and take the LATEST cursor position as the anchor (which is where the user is pointing
+   * by the time the frame paints), then clamp once at the end.
+   *
+   * The pointerdown listener is CAPTURE-phase on the wrapper so it beats every React handler on the
+   * canvas: no gesture may start against a view with a zoom still queued behind it. */
+  const wheelRaf = useRef(0);
+  const wheelAccum = useRef(null);   // { f, mx, my } awaiting the next frame
+  const flushWheel = () => {
+    wheelRaf.current = 0;
+    const w = wheelAccum.current;
+    wheelAccum.current = null;
+    if (!w) return;
+    setView((v) => {
+      const nv = zoomAround({ scale: v.ppf, tx: v.offX, ty: v.offY }, w.f, w.mx, w.my, 0.02, 8);
+      return { ppf: nv.scale, offX: nv.tx, offY: nv.ty };
+    });
+  };
+  const flushWheelNow = () => {
+    if (!wheelRaf.current) return;   // nothing pending → byte-identical to the old path
+    cancelAnimationFrame(wheelRaf.current);
+    wheelRaf.current = 0;
+    flushSync(flushWheel);
+  };
   useEffect(() => {
     // Attach to the canvas WRAPPER (which holds the SVG + the HTML overlays), so
     // scrolling over a badge / zoom button / selected element still zooms.
@@ -4452,13 +4573,19 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       e.preventDefault();
       const r = wrap.getBoundingClientRect(); // SVG fills the wrapper, so same rect
       const mx = e.clientX - r.left, my = e.clientY - r.top;
-      setView((v) => {
-        const nv = zoomAround({ scale: v.ppf, tx: v.offX, ty: v.offY }, e.deltaY < 0 ? 1.12 : 1 / 1.12, mx, my, 0.02, 8);
-        return { ppf: nv.scale, offX: nv.tx, offY: nv.ty };
-      });
+      const f = e.deltaY < 0 ? 1.12 : 1 / 1.12;
+      const prev = wheelAccum.current;
+      wheelAccum.current = { f: (prev ? prev.f : 1) * f, mx, my };
+      if (!wheelRaf.current) wheelRaf.current = requestAnimationFrame(flushWheel);
     };
     wrap.addEventListener("wheel", onWheel, { passive: false });
-    return () => wrap.removeEventListener("wheel", onWheel);
+    wrap.addEventListener("pointerdown", flushWheelNow, { capture: true });
+    return () => {
+      wrap.removeEventListener("wheel", onWheel);
+      wrap.removeEventListener("pointerdown", flushWheelNow, { capture: true });
+      if (wheelRaf.current) { cancelAnimationFrame(wheelRaf.current); wheelRaf.current = 0; }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // NEW-1 — never leave the canvas stuck behind a frozen grab/hand cursor that won't click.
@@ -4542,7 +4669,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // because Shift rewrites "]"→"}" / "["→"{". Acts on the single selected element or markup;
       // ⌘/Ctrl+] = Bring Forward (⇧ = to Front), ⌘/Ctrl+[ = Send Backward (⇧ = to Back).
       if ((e.ctrlKey || e.metaKey) && (e.code === "BracketRight" || e.code === "BracketLeft")) {
-        if (sel?.kind === "el" || sel?.kind === "markup") {
+        // NEW-2 — measurements are layerable objects now, so they answer the same chords.
+        if (sel?.kind === "el" || sel?.kind === "markup" || sel?.kind === "measure") {
           e.preventDefault();
           const fwd = e.code === "BracketRight";
           arrangeSel(e.shiftKey ? (fwd ? "front" : "back") : (fwd ? "forward" : "backward"));
@@ -4764,7 +4892,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     pushHistory(); // ONE frame for the whole paste, however many objects it carries
     if (made.els.length) setEls((a) => [...a, ...made.els]);
     if (made.markups.length) setMarkups((a) => [...a, ...withStackZ(a, made.markups)]);
-    if (made.measures.length) setMeasures((a) => [...a, ...made.measures]);
+    if (made.measures.length) setMeasures((a) => [...a, ...withStackZ(a, made.measures)]); // NEW-2 — a pasted measurement stacks on top of the band it lands in, like a pasted markup
     if (made.callouts.length) setCallouts((a) => [...a, ...made.callouts]);
     if (made.parcels.length) setParcels((a) => [...a, ...made.parcels]);
     // The pasted set IS the new selection (bonded children stay folded into their host's ref).
@@ -5066,7 +5194,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   }, [cursorLL, overlays, tool, gisHit, panning, view.ppf]);
   // A zoom moves the ground out from under a screen-anchored card, exactly as it does for the
   // pinned one (B1092's note) — drop it rather than let it point at ground it no longer covers.
-  useEffect(() => { setGisHover(null); }, [view.ppf]);
+  // NEW-4(c) — same ref guard as gisHit above, same reason: this fired on every zoom step and
+  // almost always wrote null over null.
+  useEffect(() => { if (gisHoverRef.current) setGisHover(null); }, [view.ppf]);
 
   const onBgDown = (e) => {
     if (e.button !== 0) return;
@@ -5238,7 +5368,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         if (measDraft.length === 0) setMeasDraft([sp]);
         // NEW-1 — born with the user's Standards measurement defaults, the same way a parcel is
         // born with parcelDefaultStyle (B929). All four modes stamp; see finishMeasure.
-        else { pushHistory(); setMeasures((m) => [...m, { id: uid(), mode: "line", pts: [measDraft[0], sp], ...measureDefaultStyle(settings) }]); setMeasDraft([]); }
+        else { pushHistory(); setMeasures((m) => [...m, ...withStackZ(m, [{ id: uid(), mode: "line", pts: [measDraft[0], sp], ...measureDefaultStyle(settings) }])]); setMeasDraft([]); }
       } else {
         // polyline / area: accumulate points; close an area by clicking the first dot
         if (measureMode === "area" && measDraft.length >= 3 && dist(f2p(snapPt(fp)), f2p(measDraft[0])) < 12) { finishMeasure(); return; }
@@ -5299,9 +5429,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   };
   const finishMeasure = () => {
     const std = measureDefaultStyle(settings); // NEW-1 — Standards defaults, stamped at creation
-    if (measureMode === "polyline" && measDraft.length >= 2) { pushHistory(); setMeasures((m) => [...m, { id: uid(), mode: "polyline", pts: measDraft, ...std }]); }
-    else if (measureMode === "area" && measDraft.length >= 3) { pushHistory(); setMeasures((m) => [...m, { id: uid(), mode: "area", pts: measDraft, ...std }]); flashPolyWarn(measDraft, "Measured area"); }
-    else if (measureMode === "count" && measDraft.length >= 1) { pushHistory(); setMeasures((m) => [...m, { id: uid(), mode: "count", pts: measDraft, ...std }]); }
+    if (measureMode === "polyline" && measDraft.length >= 2) { pushHistory(); setMeasures((m) => [...m, ...withStackZ(m, [{ id: uid(), mode: "polyline", pts: measDraft, ...std }])]); }
+    else if (measureMode === "area" && measDraft.length >= 3) { pushHistory(); setMeasures((m) => [...m, ...withStackZ(m, [{ id: uid(), mode: "area", pts: measDraft, ...std }])]); flashPolyWarn(measDraft, "Measured area"); }
+    else if (measureMode === "count" && measDraft.length >= 1) { pushHistory(); setMeasures((m) => [...m, ...withStackZ(m, [{ id: uid(), mode: "count", pts: measDraft, ...std }])]); }
     setMeasDraft([]);
   };
   // Split the selected parcel (or whichever parcel the cut crosses) along a
@@ -6844,7 +6974,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       const r = await openOverlayFile(file); // {src,imgW,imgH,page,pageCount,pdf,detectedScale,sheet} or the DXF shape (kind:"dxf",ftPerPx,unitsAssumed,unsupported)
       const prev = reuseId ? stateRef.current.sheetOverlays.find((x) => x.id === reuseId) : null; // B784 — the overlay we're re-adding into
       const id = prev ? prev.id : uid();
-      if (r.pdf) overlayDocs.current.set(id, r.pdf); // keep the doc for the in-session page picker
+      if (r.pdf) { overlayDocs.current.set(id, r.pdf); touchOverlayDoc(id); } // keep the doc for the in-session page picker (NEW-5: on an LRU clock)
       const c = p2fStatic(size.w / 2, size.h / 2);   // view centre, in feet
 
       let ftPerPx, pick = null;
@@ -6969,6 +7099,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     pushHistory();
     const doc = overlayDocs.current.get(id);
     if (doc) { try { doc.destroy(); } catch (_) {} overlayDocs.current.delete(id); }
+    overlayDocTouch.current.delete(id);   // NEW-5(ii) — never leave an LRU entry for a gone overlay
     // Ref-count the shared source: a Duplicate/Paste (B461) copies the storageKey, so only drop the
     // cloud object when no OTHER overlay still points at it (else we'd orphan the sibling's image).
     const shared = o.storageKey && sheetOverlays.some((x) => x.id !== id && x.storageKey === o.storageKey);
@@ -7072,11 +7203,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     setSel(null); setSelOverlay(id);
     setOvMenu({ id, x: e.clientX, y: e.clientY });
   };
-  // Re-rasterize a different page (only while the source doc is still in memory).
+  /* Re-rasterize a different page. NEW-5(ii) — this used to work ONLY while the source doc happened
+     to still be in memory, and simply returned on a miss. It now re-opens from the stored PDF bytes
+     through `ensureOverlayPdf`, so the idle teardown is invisible here: the picker keeps working,
+     and the one and only user-visible difference is that the first page change after a long idle
+     spends a moment fetching. LOUD-FAILURE: a genuine miss (no doc AND no stored bytes) says so
+     instead of doing nothing, which is what the old silent `return` did. */
   const setOverlayPage = async (id, page) => {
-    const doc = overlayDocs.current.get(id);
-    if (!doc) return;
     const o = sheetOverlays.find((x) => x.id === id);
+    const doc = overlayDocs.current.get(id) || (o ? await ensureOverlayPdf(o) : null);
+    if (!doc) { flashWarn("Couldn't open this PDF to change its page — re-add the file.", 6000); return; }
+    touchOverlayDoc(id);
     try {
       const r = await rasterizePage(doc, page, { knockout: o ? o.knockout !== false : true });
       patchOverlay(id, { src: r.src, imgW: r.imgW, imgH: r.imgH, page: r.page });
@@ -7187,7 +7324,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     return n % 2 === 0 ? `Click a known point on the drawing (point ${pairNo}).` : "Now click where that point belongs on the map.";
   };
   // Free any held PDF docs when the planner unmounts (cf. B39).
-  useEffect(() => () => { overlayDocs.current.forEach((d) => { try { d.destroy(); } catch (_) {} }); overlayDocs.current.clear(); }, []);
+  useEffect(() => () => { overlayDocs.current.forEach((d) => { try { d.destroy(); } catch (_) {} }); overlayDocs.current.clear(); overlayDocTouch.current.clear(); }, []);
   // Cross-device reload (B72): an overlay that synced only its transform (raster stripped
   // from the cloud row) but kept a Storage key → fetch the original PDF and re-rasterize.
   useEffect(() => {
@@ -7261,7 +7398,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const wantsHires = (o) => { const pm = Math.max(o.imgW, o.imgH); return chooseOverlayRasterScale({ ftPerPx: o.ftPerPx, ppf: viewPpfRef.current, pageMaxPts: pm, baseScale: baseRasterScale(pm) }); };
   // Get a PDF proxy for an overlay: the in-session doc, or load once from stored bytes (cached in overlayDocs).
   const ensureOverlayPdf = async (o) => {
-    if (overlayDocs.current.has(o.id)) return overlayDocs.current.get(o.id);
+    if (overlayDocs.current.has(o.id)) { touchOverlayDoc(o.id); return overlayDocs.current.get(o.id); }
     if (!(o.storageKey || "").toLowerCase().endsWith(".pdf")) return null;
     const bytes = await downloadOverlayBytes(o.storageKey);
     if (!bytes) return null;
@@ -7270,6 +7407,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // Unmounted (or the overlay was removed) while loading → don't leak an undestroyed proxy in overlayDocs.
     if (!hiresMounted.current || !stateRef.current.sheetOverlays.some((x) => x.id === o.id)) { try { pdf.destroy(); } catch (_) {} return null; }
     overlayDocs.current.set(o.id, pdf);
+    touchOverlayDoc(o.id);
     return pdf;
   };
   useEffect(() => {
@@ -8523,6 +8661,20 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     e.stopPropagation();
     const el = els.find((x) => x.id === id);
     if (!el) return;
+    /* NEW-1 — FORWARD THE DOUBLE-TAP TO THE ELEMENT UNDERNEATH, keyed on the element's own id
+       (the same key `startMoveEl` uses), because this grab band DID NOT EXIST when press 1 landed.
+       The fat transparent dimension grab line renders only `if (dimSel)` — i.e. only once the
+       element is selected — so on a real double-click press 1 selects, press 2 lands on a layer
+       press 1 just created, and `startDimMove` swallowed it. Double-click was dead by construction
+       anywhere in that band (18% along a building's footprint, and across a road's full width).
+       Routing it through the shared gesture is the general rule this file now enforces: chrome that
+       paints above content and stops propagation either gates on its own object being selected, or
+       forwards the press to `isDoubleTap` on the underlying feature. */
+    if (!el.groupId && !el.locked && isDoubleTap(e, id, sel?.kind === "el" && sel.id === id)) {
+      setSel({ kind: "el", id });
+      if (el.type === "pond") revealPondInspector(id); else openInspector();
+      return;
+    }
     setSel({ kind: "el", id });
     pushHistory();
     // A centerline road's dimension drags FREELY (a dashed leader bridges back to the
@@ -12308,6 +12460,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     svgRef.current.setPointerCapture(e.pointerId);
   };
 
+  const cullKeep = useMemo(() => {
+    const s = new Set();
+    if (sel && sel.id != null) s.add(sel.id);
+    if (Array.isArray(multi)) multi.forEach((r) => { if (r && r.id != null) s.add(r.id); });
+    if (drag.current && drag.current.id != null) s.add(drag.current.id);
+    return s;
+  }, [sel, multi]);
+  const drawEls = useMemo(() => cullToView(els, cullRect, { enabled: !!cullRect, keep: cullKeep }), [els, cullRect, cullKeep]);
+
   /* ------------ grid lines ------------ */
   const gridLines = () => {
     const out = [];
@@ -12415,7 +12576,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const seenLabels = new Set(); // suppress duplicate overlapping callouts (e.g. two stacked sidewalks)
   const showAreas = settings.showAreas !== false; // B121: drop the sf/acreage line when the user turns areas off (name + dimension lines stay)
   const labelCands = [];
-  for (const el of els) {
+  /* NEW-4(a) — ITERATE `drawEls`, THE SAME SET THE GEOMETRY PASS DRAWS.
+     The geometry pass has been viewport-culled since the culling work landed, but this label /
+     declutter pass and the dimension-collision loop below both still swept the FULL model, so on a
+     large plan every frame paid label layout for elements that were never going to be painted —
+     and `layoutLabels` then ran twice over that pool. This is NOT a cap and NOT decimation: it
+     aligns two passes that were always meant to see the same elements. `cullToView` force-keeps the
+     selection and anything mid-drag (`cullKeep`), and CULL_MARGIN already covers a label hanging
+     outside its element's own bounds — and on an EXPORT pass `cullRect` is null, so `drawEls === els`
+     and PDF-PARITY holds by construction (asserted in test/viewCull.test.js). */
+  for (const el of drawEls) {
     if (NO_LABEL.includes(el.type) || el.noLabel) continue;
     const poly = !!el.points;
     const area = poly ? polyArea(el.points) : el.w * el.h;
@@ -12672,7 +12842,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // pill either. Fold the parcel-chip boxes into the obstacle set alongside the placed labels.
   const committedLabelBoxes = [...labelShow.values()].map((p) => p.box).filter(Boolean).concat(parcelChipBoxes);
   const dimItems = [];
-  for (const el of els) {
+  // NEW-4(a) — `drawEls`, for the same reason as the label pass above: the dimension-number
+  // collision boxes are only ever consumed by elements this frame actually draws.
+  for (const el of drawEls) {
     if (!(el.type === "building" || el.type === "paving" || el.type === "road") || el.points || el.noLabel) continue;
     const dimW = el.type === "road" ? roadTravelWidth(el.w, el.h, el.curb ?? (+settings.roadCurb || CURB))
       : el.type === "building" ? footprintDepth(el) : Math.min(el.w, el.h);
@@ -12725,7 +12897,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           if (e.button !== 0) return;
           e.stopPropagation();
           const wasSel = sel?.kind === "el" && sel.id === d.el.id;
-          if (isDoubleTap(e, `${d.el.id}:label`, wasSel)) { revealPondInspector(d.el.id); return; }
+          // NEW-1 — keyed on the pond's own id (was `${id}:label`), same lastTapRef-poison fix as
+          // the dimension number: a label that overhangs its basin took press 2 of a real
+          // double-click under a private key, so the pair dissolved and the record was clobbered.
+          if (isDoubleTap(e, d.el.id, wasSel)) { revealPondInspector(d.el.id); return; }
           setSel({ kind: "el", id: d.el.id });   // single click: select only (NEW-1)
         } : undefined}
         onContextMenu={isPondLabel ? (e) => onElContext(e, d.el.id) : undefined}>
@@ -12755,7 +12930,22 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // B951 — geometry (c / txt / fs / box) is precomputed in `parcelChips` above so the drawn pill
   // matches the obstacle box the label-collision engine avoided; here we only render it.
   const parcelLabels = parcelChips.map(({ pc, c, txt, fs, padY, boxW, boxH }) => {
-    const draggable = tool === "select";
+    /* NEW-1 — THE BADGE IS A HIT TARGET ONLY WHILE ITS OWN LOT IS SELECTED.
+       This group paints AFTER `drawElsZ.above`, and in SVG paint order IS hit-test order, so a
+       solid pill with `pointerEvents: auto` won every press inside it — over a building, over a
+       road, over anything. `startAcChip` stops propagation, sets no selection and never calls
+       `isDoubleTap`, so that press did nothing visible, could not pair as a double-tap (the
+       owner's "double-click a building and Properties never opens"), and burnt an undo frame.
+       B1186 is what made it bite: moving the anchor from `centroid()` to `polylabel()` guarantees
+       the badge lands INSIDE the ring — on the developed middle of the lot, where the buildings
+       are. On the owner's own saved plan three badges moved several hundred feet and parked on
+       two buildings and a road.
+       The gate is the rule `setbackGrabNode` / `setbackChipNodes` already follow: selection is the
+       signal of intent, so the lot's own chrome is grabbable for exactly as long as the lot is
+       selected. The badge still DRAWS at all times — only its press is gated — and a click on it
+       now falls through to whatever is underneath (which, over the lot's own fill, selects the
+       lot and arms the drag). */
+    const draggable = tool === "select" && sel?.kind === "parcel" && sel.id === pc.id;
     return (
       <g key={`pl${pc.id}`} data-print-chip="acre" pointerEvents={draggable ? "auto" : "none"}
         style={draggable ? { cursor: "move" } : undefined}
@@ -14247,7 +14437,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const wasSel = sel?.kind === "el" && sel.id === id;
     setSel({ kind: "el", id });
     setSelEdgeRun(null); // an element dim, not a parcel edge
-    if (!el.locked && isDoubleTap(e, `eldim:${id}`, wasSel)) editElDim(el, e);
+    /* NEW-1 — key the gesture on the ELEMENT's own id, not on a private `eldim:` key.
+       A private key made this number a lastTapRef POISON: `isDoubleTap` keeps ONE tap record, so
+       press 1 on the building (key `id`) followed by press 2 three pixels away on the number (key
+       `eldim:id`) matched nothing either way AND overwrote the record, so press 3 on the building
+       had nothing left to pair with. The number sits ON the footprint, so that mixed pair is the
+       common case, not a corner. One key per element means every mixed pair now resolves: number→
+       body opens Properties (`startMoveEl`), body→number opens the length editor here. Both are
+       real edit surfaces — what is never acceptable is a double-click that does nothing at all. */
+    if (!el.locked && isDoubleTap(e, id, wasSel)) editElDim(el, e);
   };
   // Re-sync a centerline road's stored strip bbox (cx/cy/w/h/rot) after a pts/travelW/curb/
   // class change, so every generic geometry consumer (fit, snap, group bbox) stays correct.
@@ -15217,10 +15415,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           )}
                           {o.pageCount > 1 && (
                             <div style={ovRow}><span style={{ width: 48 }}>Page</span>
-                              <button style={chip} disabled={!overlayDocs.current.has(o.id) || o.page <= 1} onClick={() => setOverlayPage(o.id, o.page - 1)}>‹</button>
+                              {/* NEW-5(ii) — gated on RE-OPENABLE, not on "loaded right now": the idle
+                                  teardown releases a proxy only when the stored bytes can bring it
+                                  back, so this control must not go dead the moment one is released. */}
+                              <button style={chip} disabled={!overlayPageReady(o) || o.page <= 1} onClick={() => setOverlayPage(o.id, o.page - 1)}>‹</button>
                               <span style={{ color: PAL.ink }}>{o.page} / {o.pageCount}</span>
-                              <button style={chip} disabled={!overlayDocs.current.has(o.id) || o.page >= o.pageCount} onClick={() => setOverlayPage(o.id, o.page + 1)}>›</button>
-                              {!overlayDocs.current.has(o.id) && <span style={{ fontSize: 10 }}>re-add to change page</span>}
+                              <button style={chip} disabled={!overlayPageReady(o) || o.page >= o.pageCount} onClick={() => setOverlayPage(o.id, o.page + 1)}>›</button>
+                              {!overlayPageReady(o) && <span style={{ fontSize: 10 }}>re-add to change page</span>}
                             </div>
                           )}
                           <div style={{ display: "flex", gap: 6 }}>
@@ -15242,7 +15443,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                             <span>Draw above the plan</span>
                           </label>
                           {/* B654: per-sheet white knockout — re-renders the page, so it needs a PDF source */}
-                          {(overlayDocs.current.has(o.id) || (o.storageKey || "").toLowerCase().endsWith(".pdf")) && (
+                          {overlayPageReady(o) && (   /* NEW-5(ii) — the same "live or re-openable" question, one helper */
                             <label style={{ ...ovRow, cursor: "pointer" }} title="Make the sheet's white paper transparent so the map shows through the linework">
                               <input type="checkbox" checked={o.knockout !== false} onChange={(e) => setOverlayKnockout(o.id, e.target.checked)} />
                               <span>Knock out white paper</span>
@@ -16311,14 +16512,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
      element whose shape we can't bound is never culled; and during an EXPORT pass `cullRect`
      is null, so these are identity — `buildExportSvg`, the PDF and the aerial pipeline always
      see the complete model (asserted in test/viewCull.test.js). */
-  const cullKeep = useMemo(() => {
-    const s = new Set();
-    if (sel && sel.id != null) s.add(sel.id);
-    if (Array.isArray(multi)) multi.forEach((r) => { if (r && r.id != null) s.add(r.id); });
-    if (drag.current && drag.current.id != null) s.add(drag.current.id);
-    return s;
-  }, [sel, multi]);
-  const drawEls = useMemo(() => cullToView(els, cullRect, { enabled: !!cullRect, keep: cullKeep }), [els, cullRect, cullKeep]);
   /* NEW-4(b) — the render body split the SAME array at the SAME z threshold in two places, and did
      it by copying and sorting `drawEls` twice per render. One sort, one split, one memo; `zOrder`
      and BUILDING_Z are module-level constants, so `drawEls` is the complete input set. Order within
@@ -16328,6 +16521,23 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     return { below: sorted.filter((el) => zOrder(el) < BUILDING_Z), above: sorted.filter((el) => zOrder(el) >= BUILDING_Z) };
   }, [drawEls]);
   const drawMarkupsZ = useMemo(() => cullToView(markupsZ, cullRect, { enabled: !!cullRect, keep: cullKeep }), [markupsZ, cullRect, cullKeep]);
+  /* NEW-2 — MEASUREMENTS JOIN THE STACKING MODEL. A measurement used to be structurally
+     un-layerable: it lives in its own `measures` collection, never enters the `zOrder`/`byZ` system
+     (which reasons over `els`), and painted in ONE unconditional pass after `drawElsZ.above` — a
+     hard top layer with no ordering controls in its right-click menu at all. The owner had an area
+     measurement he could not send behind his buildings.
+     The model is the MARKUP model, deliberately reused rather than reinvented: an explicit `z`
+     (lib/zOrder.js — nextZ / Z_GAP / byZAsc, the same helpers markups and elements use) orders
+     measurements against each other, and a `behindEls` flag picks the band. Sorting reorders the
+     DOM only — `i` stays each measurement's index in `measures`, which IS its selection identity.
+     DEFAULT PRESERVES TODAY'S APPEARANCE EXACTLY: `behindEls` is undefined on every measurement
+     ever saved and on every newly drawn one, and only `=== true` sends one down, so no stored plan
+     changes on load and a fresh measurement still lands on top. */
+  const measureBands = useMemo(() => {
+    const idx = measures.map((m, i) => ({ m, i }));
+    idx.sort((a, b) => byZAsc(a.m, b.m));
+    return { below: idx.filter(({ m }) => m.behindEls === true), above: idx.filter(({ m }) => m.behindEls !== true) };
+  }, [measures]);
   const drawParcels = useMemo(() => cullToView(parcels, cullRect, { enabled: !!cullRect, keep: cullKeep }), [parcels, cullRect, cullKeep]);
   // B953/NEW-1 — clean-tee junction geometry (world feet), recomputed only when els/settings change;
   // rendered through f2p each frame. Drawn as an overlay after the element pass (see the render below).
@@ -16441,6 +16651,131 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   }, [roadNet, teeJunctions, driveJunctions]);
   // One markup → its SVG node. Extracted from the old inline map so it can paint in both passes. A
   // plain render helper invoked via .map(renderMarkupNode) — NOT a component, so no remount concern.
+  /* NEW-2 — ONE MEASUREMENT → ITS SVG NODE. Extracted from the old inline map so a measurement can
+     paint in EITHER band: behind the plan (with the ground surfaces, under the buildings) or above
+     it, where every measurement has always drawn and still does by default. A plain render helper
+     invoked via .map(...) — NOT a component, so there is no remount concern. `i` stays the
+     measurement's ORIGINAL index in `measures`, because that index IS its selection identity
+     (`sel.kind === "measure"` carries `i`); the z-sort reorders the DOM, never the model array. */
+  const renderMeasureNode = (m, i) => {
+                const fpts = measPts(m);
+                const mode = measMode(m);
+                if (mode === "count" ? fpts.length < 1 : fpts.length < 2) return null;
+                const pts = fpts.map(f2p);
+                const isSel = sel?.kind === "measure" && sel.i === i;
+                // B910 — a finished measurement is grabbable from BOTH the Select tool and the
+                // Measure tool (the tool you're still in right after drawing it); startMoveMeasure
+                // drops you back to Select on the click so the grips/×/highlight show (B940: it also
+                // arms a whole-measurement drag on the same press).
+                const canGrab = tool === "select" || tool === "measure";
+                // NEW-1 — per-measurement style, resolved in ONE place (lib/measureStyle.js) for
+                // every mode. The uncalibrated amber still overrides the user's colour there,
+                // because that is a correctness signal rather than decoration.
+                const st = measureStyle(m, { accent: PAL.accent, uncalibrated: calibrationState === "uncalibrated", selected: isSel });
+                const mcolor = st.stroke;
+                const mdash = dashArray(st.dash, st.weight);
+                const chip = measureChipDraw.get(i);
+                // NEW-3 — the summary chip: the parcel-acreage chip's exact treatment (a rounded
+                // plate with a hairline, `data-print-chip` so the export restyles it into haloed
+                // exhibit text), one dominant value with the detail subordinate, placed by the
+                // shared collision engine and draggable with a leader back to its anchor.
+                const chipNode = chip ? (
+                  <g data-print-chip="measure" data-measure-chip={m.id || `m${i}`}
+                    pointerEvents={tool === "select" ? "auto" : "none"}
+                    style={tool === "select" ? { cursor: "move" } : undefined}
+                    onPointerDown={tool === "select" ? (e) => startMeasChip(e, i) : undefined}
+                    onContextMenu={(e) => onMeasureContext(e, i)}>
+                    {chip.moved && <line x1={chip.anchor.x} y1={chip.anchor.y} x2={chip.c.x} y2={chip.c.y} stroke={mcolor} strokeWidth={1} opacity={0.55} />}
+                    {/* Plate + keyline in ONE node: the keyline carries the measurement's colour on
+                        screen, and dropping the plate on paper drops all of the screen chrome at once. */}
+                    <rect data-chip-bg x={chip.c.x - chip.boxW / 2} y={chip.c.y - chip.boxH / 2} width={chip.boxW} height={chip.boxH}
+                      rx={7 * ls} fill="rgba(17,24,39,0.72)" stroke={mcolor} strokeWidth={1.25} />
+                    {chip.lines.map((t, k) => {
+                      const head = k === chip.hi;
+                      const fs = head ? chip.fsHead : chip.fsSub;
+                      const y = chip.c.y - chip.boxH / 2 + chip.padY + chip.lh * k + fs * 0.82;
+                      return (
+                        <text key={k} data-chip-text {...(head ? {} : { "data-chip-sub": "1" })}
+                          x={chip.c.x} y={y} textAnchor="middle" fontSize={fs}
+                          fontFamily={NUM_FONT} fontVariantNumeric={TABULAR_NUMS} pointerEvents="none"
+                          fill={head ? "#f4f7fa" : "#c3ccd6"}
+                          style={{ fontWeight: head ? 700 : 500, letterSpacing: head ? "0" : "0.02em" }}>
+                          {head && st.warn ? `⚠ ${t}` : t}
+                        </text>
+                      );
+                    })}
+                  </g>
+                ) : null;
+
+                if (mode === "count") {
+                  return (
+                    <g key={m.id || `m${i}`}>
+                      {pts.map((p, k) => (
+                        <g key={k} pointerEvents="none">
+                          <circle cx={p.x} cy={p.y} r={8 * labelK} fill={mcolor + "28"} stroke={mcolor} strokeWidth={st.weight} />
+                          <text x={p.x} y={p.y + 3.5 * labelK} fontSize={8.5 * labelK} textAnchor="middle" fill={mcolor} fontWeight="700">{k + 1}</text>
+                        </g>
+                      ))}
+                      {/* hit targets — one transparent circle per marker */}
+                      {pts.map((p, k) => (
+                        <circle key={`h${k}`} cx={p.x} cy={p.y} r={12} fill="transparent" stroke="transparent"
+                          pointerEvents={canGrab ? "all" : "none"} style={{ cursor: "move" }} onPointerDown={(e) => startMoveMeasure(e, i)} onContextMenu={(e) => onMeasureContext(e, i)} />
+                      ))}
+                      {/* NEW-3 — the chip paints AFTER the hit targets, or the transparent grab
+                          layer sits on top of it in document order and swallows the chip drag. */}
+                      {chipNode}
+                      {/* NEW-1 — the B230 control-point grips moved to the always-on-top handle
+                          layer (measureHandles); a grip under a label or a promoted reference
+                          used to be unreachable. */}
+                    </g>
+                  );
+                }
+
+                const isArea = mode === "area";
+                const ptsStr = pts.map((p) => `${p.x},${p.y}`).join(" ");
+                /* NEW-3 (d) — per-edge segment lengths, ON the edges. This is what a civil
+                 * reviewer expects to see, and it is the single biggest thing that makes the
+                 * drawing read as a plan rather than a sketch. Gated SEPARATELY from the summary
+                 * chip: it rides `detailLabelVisible`, so an edge has to project as a real run on
+                 * screen before it is dimensioned — a 3-point sketch at site overview stays clean
+                 * while the same shape zoomed in dimensions itself. Skipped for a two-point
+                 * distance, whose one segment IS the headline (printing it twice is noise). */
+                const segs = fpts.length > 2 || isArea ? measureSegments(fpts, isArea) : [];
+                const segFs = 9.5 * ls * labelK;
+                return (
+                  <g key={m.id || `m${i}`}>
+                    {isArea
+                      ? <polygon points={ptsStr} fill={st.fill} fillOpacity={st.fillOpacity} stroke={mcolor} strokeWidth={st.weight} strokeDasharray={mdash} pointerEvents="none" />
+                      : <polyline points={ptsStr} fill="none" stroke={mcolor} strokeWidth={st.weight} strokeDasharray={mdash} pointerEvents="none" />}
+                    {pts.map((p, k) => <circle key={k} cx={p.x} cy={p.y} r={3} fill={mcolor} pointerEvents="none" />)}
+                    {segs.map((s) => {
+                      if (!detailLabelVisible(s.ft, labelPpf)) return null;
+                      const q = f2p(s.mid);
+                      return (
+                        <text key={`sg${s.i}`} x={q.x} y={q.y - 3 * labelK} textAnchor="middle" fontSize={segFs}
+                          transform={`rotate(${s.deg.toFixed(2)} ${q.x} ${q.y})`}
+                          fontFamily={NUM_FONT} fontVariantNumeric={TABULAR_NUMS} fill={mcolor}
+                          stroke={PAL.paper} strokeWidth={2.5 * ls} paintOrder="stroke" fontWeight="600" pointerEvents="none">{s.label}</text>
+                      );
+                    })}
+                    {/* wide invisible hit path to select the measurement (Select OR Measure tool — B910) */}
+                    {isArea
+                      ? <polygon points={ptsStr} fill="transparent" stroke="transparent" strokeWidth={14}
+                          pointerEvents={canGrab ? "all" : "none"} style={{ cursor: "move" }} onPointerDown={(e) => startMoveMeasure(e, i)} onContextMenu={(e) => onMeasureContext(e, i)} />
+                      : <polyline points={ptsStr} fill="none" stroke="transparent" strokeWidth={14}
+                          pointerEvents={canGrab ? "stroke" : "none"} style={{ cursor: "move" }} onPointerDown={(e) => startMoveMeasure(e, i)} onContextMenu={(e) => onMeasureContext(e, i)} />}
+                    {/* NEW-3 — the chip paints AFTER the hit path. An AREA's grab layer is a
+                        transparent FILLED polygon covering the whole shape, so a chip drawn before
+                        it was unreachable: every press over the chip landed on the grab layer and
+                        moved the measurement instead of the label. */}
+                    {chipNode}
+                    {/* NEW-1 — the B230 control-point grips moved to the always-on-top handle
+                        layer (measureHandles); a grip under a label or a promoted reference
+                        used to be unreachable. */}
+                  </g>
+                );
+  };
+
   const renderMarkupNode = (m) => {
                 const isSel = sel?.kind === "markup" && sel.id === m.id;
                 const zk = strokeZk; // B617 zoom multiplier (matches the callout scale); NEW-1: 1 on an export pass so a sheet's line weights don't ride the live zoom
@@ -17076,6 +17411,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               {/* markups sent BEHIND the buildings (B820 layer ordering) paint before the elements,
                   the rest after — both in z order. See renderMarkupNode / markupsZ above. */}
               {drawMarkupsZ.filter((m) => m.behindEls).map(renderMarkupNode)}
+              {/* NEW-2 — measurements the user has sent BEHIND the plan. Same renderer, first pass:
+                  under the buildings, so a measured area can sit as ground the layout is drawn on.
+                  Empty on every plan that predates the feature (`behindEls` is opt-in), so this pass
+                  costs nothing and changes nothing until someone asks for it. */}
+              {measureBands.below.map(({ m, i }) => renderMeasureNode(m, i))}
               {/* The element pass is split at the building layer so a building always paints over ground
                   pavement (B959/NEW-1 — connection pavement can never overlap a building). */}
               {/* NEW-1/NEW-2 — DISSOLVED ROAD NETWORK. Roads share the bottom paint layer (Z_LAYER.road = 0),
@@ -17640,125 +17980,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               {/* B935 — the old on-canvas inline-label editor was removed; the inline label is now edited
                   only in the Properties panel's "Inline label" field. */}
 
-              {/* measurements — line (distance), polyline (path length), area, count */}
-              {measures.map((m, i) => {
-                const fpts = measPts(m);
-                const mode = measMode(m);
-                if (mode === "count" ? fpts.length < 1 : fpts.length < 2) return null;
-                const pts = fpts.map(f2p);
-                const isSel = sel?.kind === "measure" && sel.i === i;
-                // B910 — a finished measurement is grabbable from BOTH the Select tool and the
-                // Measure tool (the tool you're still in right after drawing it); startMoveMeasure
-                // drops you back to Select on the click so the grips/×/highlight show (B940: it also
-                // arms a whole-measurement drag on the same press).
-                const canGrab = tool === "select" || tool === "measure";
-                // NEW-1 — per-measurement style, resolved in ONE place (lib/measureStyle.js) for
-                // every mode. The uncalibrated amber still overrides the user's colour there,
-                // because that is a correctness signal rather than decoration.
-                const st = measureStyle(m, { accent: PAL.accent, uncalibrated: calibrationState === "uncalibrated", selected: isSel });
-                const mcolor = st.stroke;
-                const mdash = dashArray(st.dash, st.weight);
-                const chip = measureChipDraw.get(i);
-                // NEW-3 — the summary chip: the parcel-acreage chip's exact treatment (a rounded
-                // plate with a hairline, `data-print-chip` so the export restyles it into haloed
-                // exhibit text), one dominant value with the detail subordinate, placed by the
-                // shared collision engine and draggable with a leader back to its anchor.
-                const chipNode = chip ? (
-                  <g data-print-chip="measure" data-measure-chip={m.id || `m${i}`}
-                    pointerEvents={tool === "select" ? "auto" : "none"}
-                    style={tool === "select" ? { cursor: "move" } : undefined}
-                    onPointerDown={tool === "select" ? (e) => startMeasChip(e, i) : undefined}
-                    onContextMenu={(e) => onMeasureContext(e, i)}>
-                    {chip.moved && <line x1={chip.anchor.x} y1={chip.anchor.y} x2={chip.c.x} y2={chip.c.y} stroke={mcolor} strokeWidth={1} opacity={0.55} />}
-                    {/* Plate + keyline in ONE node: the keyline carries the measurement's colour on
-                        screen, and dropping the plate on paper drops all of the screen chrome at once. */}
-                    <rect data-chip-bg x={chip.c.x - chip.boxW / 2} y={chip.c.y - chip.boxH / 2} width={chip.boxW} height={chip.boxH}
-                      rx={7 * ls} fill="rgba(17,24,39,0.72)" stroke={mcolor} strokeWidth={1.25} />
-                    {chip.lines.map((t, k) => {
-                      const head = k === chip.hi;
-                      const fs = head ? chip.fsHead : chip.fsSub;
-                      const y = chip.c.y - chip.boxH / 2 + chip.padY + chip.lh * k + fs * 0.82;
-                      return (
-                        <text key={k} data-chip-text {...(head ? {} : { "data-chip-sub": "1" })}
-                          x={chip.c.x} y={y} textAnchor="middle" fontSize={fs}
-                          fontFamily={NUM_FONT} fontVariantNumeric={TABULAR_NUMS} pointerEvents="none"
-                          fill={head ? "#f4f7fa" : "#c3ccd6"}
-                          style={{ fontWeight: head ? 700 : 500, letterSpacing: head ? "0" : "0.02em" }}>
-                          {head && st.warn ? `⚠ ${t}` : t}
-                        </text>
-                      );
-                    })}
-                  </g>
-                ) : null;
-
-                if (mode === "count") {
-                  return (
-                    <g key={m.id || `m${i}`}>
-                      {pts.map((p, k) => (
-                        <g key={k} pointerEvents="none">
-                          <circle cx={p.x} cy={p.y} r={8 * labelK} fill={mcolor + "28"} stroke={mcolor} strokeWidth={st.weight} />
-                          <text x={p.x} y={p.y + 3.5 * labelK} fontSize={8.5 * labelK} textAnchor="middle" fill={mcolor} fontWeight="700">{k + 1}</text>
-                        </g>
-                      ))}
-                      {/* hit targets — one transparent circle per marker */}
-                      {pts.map((p, k) => (
-                        <circle key={`h${k}`} cx={p.x} cy={p.y} r={12} fill="transparent" stroke="transparent"
-                          pointerEvents={canGrab ? "all" : "none"} style={{ cursor: "move" }} onPointerDown={(e) => startMoveMeasure(e, i)} onContextMenu={(e) => onMeasureContext(e, i)} />
-                      ))}
-                      {/* NEW-3 — the chip paints AFTER the hit targets, or the transparent grab
-                          layer sits on top of it in document order and swallows the chip drag. */}
-                      {chipNode}
-                      {/* NEW-1 — the B230 control-point grips moved to the always-on-top handle
-                          layer (measureHandles); a grip under a label or a promoted reference
-                          used to be unreachable. */}
-                    </g>
-                  );
-                }
-
-                const isArea = mode === "area";
-                const ptsStr = pts.map((p) => `${p.x},${p.y}`).join(" ");
-                /* NEW-3 (d) — per-edge segment lengths, ON the edges. This is what a civil
-                 * reviewer expects to see, and it is the single biggest thing that makes the
-                 * drawing read as a plan rather than a sketch. Gated SEPARATELY from the summary
-                 * chip: it rides `detailLabelVisible`, so an edge has to project as a real run on
-                 * screen before it is dimensioned — a 3-point sketch at site overview stays clean
-                 * while the same shape zoomed in dimensions itself. Skipped for a two-point
-                 * distance, whose one segment IS the headline (printing it twice is noise). */
-                const segs = fpts.length > 2 || isArea ? measureSegments(fpts, isArea) : [];
-                const segFs = 9.5 * ls * labelK;
-                return (
-                  <g key={m.id || `m${i}`}>
-                    {isArea
-                      ? <polygon points={ptsStr} fill={st.fill} fillOpacity={st.fillOpacity} stroke={mcolor} strokeWidth={st.weight} strokeDasharray={mdash} pointerEvents="none" />
-                      : <polyline points={ptsStr} fill="none" stroke={mcolor} strokeWidth={st.weight} strokeDasharray={mdash} pointerEvents="none" />}
-                    {pts.map((p, k) => <circle key={k} cx={p.x} cy={p.y} r={3} fill={mcolor} pointerEvents="none" />)}
-                    {segs.map((s) => {
-                      if (!detailLabelVisible(s.ft, labelPpf)) return null;
-                      const q = f2p(s.mid);
-                      return (
-                        <text key={`sg${s.i}`} x={q.x} y={q.y - 3 * labelK} textAnchor="middle" fontSize={segFs}
-                          transform={`rotate(${s.deg.toFixed(2)} ${q.x} ${q.y})`}
-                          fontFamily={NUM_FONT} fontVariantNumeric={TABULAR_NUMS} fill={mcolor}
-                          stroke={PAL.paper} strokeWidth={2.5 * ls} paintOrder="stroke" fontWeight="600" pointerEvents="none">{s.label}</text>
-                      );
-                    })}
-                    {/* wide invisible hit path to select the measurement (Select OR Measure tool — B910) */}
-                    {isArea
-                      ? <polygon points={ptsStr} fill="transparent" stroke="transparent" strokeWidth={14}
-                          pointerEvents={canGrab ? "all" : "none"} style={{ cursor: "move" }} onPointerDown={(e) => startMoveMeasure(e, i)} onContextMenu={(e) => onMeasureContext(e, i)} />
-                      : <polyline points={ptsStr} fill="none" stroke="transparent" strokeWidth={14}
-                          pointerEvents={canGrab ? "stroke" : "none"} style={{ cursor: "move" }} onPointerDown={(e) => startMoveMeasure(e, i)} onContextMenu={(e) => onMeasureContext(e, i)} />}
-                    {/* NEW-3 — the chip paints AFTER the hit path. An AREA's grab layer is a
-                        transparent FILLED polygon covering the whole shape, so a chip drawn before
-                        it was unreachable: every press over the chip landed on the grab layer and
-                        moved the measurement instead of the label. */}
-                    {chipNode}
-                    {/* NEW-1 — the B230 control-point grips moved to the always-on-top handle
-                        layer (measureHandles); a grip under a label or a promoted reference
-                        used to be unreachable. */}
-                  </g>
-                );
-              })}
+              {/* measurements — NEW-2: the ABOVE band. This is the default, and for every plan
+                  saved before z-ordering shipped it is EVERY measurement, so nothing moves on load.
+                  The BELOW band paints back with the ground surfaces — see the twin pass up there. */}
+              {measureBands.above.map(({ m, i }) => renderMeasureNode(m, i))}
               {/* in-progress measure draft */}
               {tool === "measure" && measDraft.length > 0 && (() => {
                 // Live point mirrors the commit: Shift = perpendicular / parallel / 45° to the
@@ -18993,6 +19218,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.5, margin: "0 2px 4px" }}>
                   {labelRevealNote(m, settings, DIM_CALLOUT_MIN_PPF)} · a selected measurement always shows its label.
                 </div>
+                {/* NEW-2 — the same layering the right-click menu offers, in the panel. Named states,
+                    not a number: a measurement is either above the plan (the default) or behind it. */}
+                {m.id && <>
+                  <StdSubLabel>Layer</StdSubLabel>
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap", margin: "2px 2px 4px" }}>
+                    <button style={chip} data-testid="measure-band-toggle"
+                      title={m.behindEls ? "Draw this measurement over the buildings again" : "Draw this measurement under the buildings, so the plan sits on top of it"}
+                      onClick={() => setMeasureBand(m.id, !m.behindEls)}>{m.behindEls ? "Bring above the plan" : "Send behind the plan"}</button>
+                    <button style={chip} title="Move it in front of the other measurements in its band" onClick={() => arrangeSel("front", { kind: "measure", id: m.id })}>Bring to front</button>
+                    <button style={chip} title="Move it behind the other measurements in its band" onClick={() => arrangeSel("back", { kind: "measure", id: m.id })}>Send to back</button>
+                  </div>
+                </>}
                 <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.5, marginTop: 8 }}>
                   {m.locked
                     ? "Locked — click 🔓 Unlock below to move or reshape it."
@@ -21507,8 +21744,22 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           const m = measures[mapMenu.i];
           if (!m) return null;
           header = "Measurement";
+          // NEW-2 — Arrange, in the SAME wording the markup and reference menus already use, because
+          // a measurement is now a layerable object like any other. Front/back move it within the
+          // measurement band; the last row crosses the plan.
+          const mBand = measures.filter((x) => x && x.id && (x.behindEls === true) === (m.behindEls === true));
+          const maf = m.id ? arrangeFlags(mBand, m.id) : null;
           body = <>
             {row({ text: "Properties…", on: () => { setSel({ kind: "measure", i: mapMenu.i }); openInspector(); close(); } })}
+            {m.id && <div style={{ borderTop: `1px solid ${PAL.panelLine}`, marginTop: 4, paddingTop: 4 }} />}
+            {m.id && maf && maf.count > 1 && <>
+              {row({ text: "Bring to front", hint: `${MOD}⇧]`, dis: maf.atTop, on: () => { arrangeSel("front", { kind: "measure", id: m.id }); close(); } })}
+              {row({ text: "Send to back", hint: `${MOD}⇧[`, dis: maf.atBottom, on: () => { arrangeSel("back", { kind: "measure", id: m.id }); close(); } })}
+            </>}
+            {m.id && row({ text: m.behindEls ? "Bring above the plan" : "Send behind the plan",
+              title: m.behindEls ? "Draw this measurement over the buildings again" : "Draw this measurement under the buildings, so the plan sits on top of it",
+              on: () => { setMeasureBand(m.id, !m.behindEls); close(); } })}
+            <div style={{ borderTop: `1px solid ${PAL.panelLine}`, marginTop: 4, paddingTop: 4 }} />
             {row({ text: m.locked ? "Unlock" : "Lock", hint: m.locked ? "🔒" : "🔓", on: () => { toggleMeasureLock(m.id); close(); } })}
             {row({ text: "Copy", hint: `${MOD}C`, on: () => { copyRef({ kind: "measure", id: m.id, i: mapMenu.i }); close(); } })}
             <div style={{ borderTop: `1px solid ${PAL.panelLine}`, marginTop: 4, paddingTop: 4 }} />
@@ -22044,7 +22295,7 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
         const tnx = nrm.x * tick, tny = nrm.y * tick; // ticks perpendicular to the dim line (along the road)
         dim.push(<line key="t0" x1={A.x - dir.x * tick} y1={A.y - dir.y * tick} x2={A.x + dir.x * tick} y2={A.y + dir.y * tick} stroke={RED} strokeWidth={1.25} />);
         dim.push(<line key="t1" x1={B.x - dir.x * tick} y1={B.y - dir.y * tick} x2={B.x + dir.x * tick} y2={B.y + dir.y * tick} stroke={RED} strokeWidth={1.25} />);
-        if (dimSel) dim.push(<line key="grab" x1={A.x} y1={A.y} x2={B.x} y2={B.y} stroke="transparent" strokeWidth={14} />);
+        if (dimSel) dim.push(<line key="grab" data-testid="el-dim-grab" x1={A.x} y1={A.y} x2={B.x} y2={B.y} stroke="transparent" strokeWidth={14} />);
         dim.push(<text key="tx" data-testid="el-dim" x={M.x + dir.x * (fz * 0.9) - tnx} y={M.y + dir.y * (fz * 0.9) - tny} textAnchor="middle" dominantBaseline="middle" fontSize={fz} fontFamily={NUM_FONT} fontVariantNumeric={TABULAR_NUMS} fill={RED} stroke="#fff" strokeWidth={2.5} paintOrder="stroke" fontWeight="600" {...numHandlers}>{txt}</text>);
         rparts.push(
           <g key="dim" style={dimSel ? { cursor: "move" } : { pointerEvents: "none" }}
@@ -22281,7 +22532,7 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
       dim.push(<line key="dl" x1={X} y1={Y0} x2={X} y2={Y1} stroke={RED} strokeWidth={1.25} />);
       dim.push(<line key="t0" x1={X - tick} y1={Y0} x2={X + tick} y2={Y0} stroke={RED} strokeWidth={1.25} />);
       dim.push(<line key="t1" x1={X - tick} y1={Y1} x2={X + tick} y2={Y1} stroke={RED} strokeWidth={1.25} />);
-      if (dimSel) dim.push(<line key="grab" x1={X} y1={Y0} x2={X} y2={Y1} stroke="transparent" strokeWidth={14} />); // fat invisible grab target
+      if (dimSel) dim.push(<line key="grab" data-testid="el-dim-grab" x1={X} y1={Y0} x2={X} y2={Y1} stroke="transparent" strokeWidth={14} />); // fat invisible grab target
       // number OUTBOARD of the line (away from the centred label) so it doesn't clutter by default
       dim.push(<text key="tx" data-testid="el-dim" x={X - 6 * lfK} y={MY} transform={`rotate(${-el.rot} ${X - 6 * lfK} ${MY})`} textAnchor="end" fontSize={fz} fontFamily={NUM_FONT} fontVariantNumeric={TABULAR_NUMS} fill={RED} stroke="#fff" strokeWidth={2.5} paintOrder="stroke" dominantBaseline="middle" fontWeight="600" {...numHandlers}>{txt}</text>);
     } else { // short side is horizontal (w)
@@ -22292,7 +22543,7 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
       dim.push(<line key="dl" x1={X0} y1={Y} x2={X1} y2={Y} stroke={RED} strokeWidth={1.25} />);
       dim.push(<line key="t0" x1={X0} y1={Y - tick} x2={X0} y2={Y + tick} stroke={RED} strokeWidth={1.25} />);
       dim.push(<line key="t1" x1={X1} y1={Y - tick} x2={X1} y2={Y + tick} stroke={RED} strokeWidth={1.25} />);
-      if (dimSel) dim.push(<line key="grab" x1={X0} y1={Y} x2={X1} y2={Y} stroke="transparent" strokeWidth={14} />); // fat invisible grab target
+      if (dimSel) dim.push(<line key="grab" data-testid="el-dim-grab" x1={X0} y1={Y} x2={X1} y2={Y} stroke="transparent" strokeWidth={14} />); // fat invisible grab target
       dim.push(<text key="tx" data-testid="el-dim" x={MX} y={Y - 6 * lfK} transform={`rotate(${-el.rot} ${MX} ${Y - 6 * lfK})`} textAnchor="middle" fontSize={fz} fontFamily={NUM_FONT} fontVariantNumeric={TABULAR_NUMS} fill={RED} stroke="#fff" strokeWidth={2.5} paintOrder="stroke" fontWeight="600" {...numHandlers}>{txt}</text>);
     }
     // When the element is selected the dimension is grab-to-move (the red line/ticks are the handle);

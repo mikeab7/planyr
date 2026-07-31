@@ -48,6 +48,19 @@ const BASE = (process.env.BASE_URL || "http://localhost:4173/").replace(/\/?$/, 
 const EXEC = process.env.PW_CHROME || "/opt/pw-browsers/chromium-1194/chrome-linux/chrome";
 const JSON_OUT = process.argv.includes("--json");
 const NO_TILES = process.argv.includes("--no-tiles");
+/* NEW-3(a) — WHICH GESTURE TO MEASURE. Until now this harness measured a scripted DRAG only, and
+ * ui-audit/zoomout-frames.mjs measures dark-pixel coverage on a one-element scene — so the owner's
+ * "I scroll out and it takes probably a whole second" had NO frame-time instrument anywhere. This
+ * mode adds one, and it lands BEFORE the fixes so every change gets a real before/after.
+ *   --gesture wheel   only the zoom gesture   ·   --gesture drag   only the drag (the old behaviour)
+ * Default is BOTH, so an existing invocation keeps reporting everything it used to. */
+const gestureArg = (() => {
+  const i = process.argv.indexOf("--gesture");
+  const v = i >= 0 ? String(process.argv[i + 1] || "").toLowerCase() : "both";
+  return ["wheel", "drag", "both"].includes(v) ? v : "both";
+})();
+const DO_DRAG = gestureArg !== "wheel";
+const DO_WHEEL = gestureArg !== "drag";
 
 const budgets = JSON.parse(readFileSync(join(HERE, "perf-budgets.json"), "utf8"));
 
@@ -218,8 +231,9 @@ if (NO_TILES) {
  * across the gesture must be at least MIN_PLAUSIBLE_FPS. Anything less is reported as an
  * unreliable measurement (loudly, with the reason), never as a median. The rule itself lives
  * in ui-audit/lib/frameSampling.mjs so it is unit-tested and cannot drift from the docs. */
-await page.evaluate(() => { window.__frames.length = 0; });
 const visibility = await page.evaluate(() => document.visibilityState);
+if (DO_DRAG) {
+await page.evaluate(() => { window.__frames.length = 0; });
 const dragT0 = Date.now();
 await page.mouse.move(cx, cy);
 await page.mouse.down();
@@ -242,6 +256,95 @@ if (frameSamplingFault) {
 } else {
   results.frameMedianMs = dragFrames.length ? +pct(dragFrames, 50).toFixed(1) : null;
   results.frameP90Ms = dragFrames.length ? +pct(dragFrames, 90).toFixed(1) : null;
+}
+}
+
+/* ---- scripted WHEEL ZOOM → frame timing + renders-per-wheel-event (NEW-3a) -------------------
+ * The SAME trust rules as the drag above, deliberately reusing ui-audit/lib/frameSampling.mjs
+ * rather than re-deriving them: the tab must be VISIBLE and the observed rate across the gesture
+ * must clear the plausibility floor, or the medians are suppressed and the reason is reported. A
+ * number from a backgrounded tab is worse than no number (the B1086 trap), and it is worse here
+ * than anywhere, because this metric exists to justify a render-path change.
+ *
+ * THE SECOND NUMBER IS THE POINT. A frame median alone cannot distinguish "the wheel handler is
+ * slow" from "the wheel handler fires too many times" — and the diagnosed defect was both: an
+ * uncoalesced setView per raw wheel event, each of which then committed TWICE because the
+ * registration-shift epsilon never held. So we count COMMITS THAT TOUCHED THE CANVAS, using the
+ * planner's own published attributes (`data-view-*` / `data-reg-*` on the canvas svg) as the
+ * signal — no React internals, no instrumentation build. One observer callback = one delivery
+ * batch = one commit; dividing by the wheel events dispatched gives renders-per-wheel, which is
+ * the number the NEW-3(b)+(c) work has to move. */
+if (DO_WHEEL) {
+  await page.mouse.move(cx, cy);
+  await page.evaluate(() => {
+    window.__frames.length = 0;
+    window.__zoomCommits = 0;
+    const svg = document.querySelector('[data-testid="planner-canvas"]');
+    const WATCH = ["data-view-ppf", "data-view-offx", "data-view-offy", "data-reg-dx", "data-reg-dy"];
+    window.__zoomObs = new MutationObserver((recs) => {
+      if (recs.some((r) => WATCH.includes(r.attributeName))) window.__zoomCommits++;
+    });
+    if (svg) window.__zoomObs.observe(svg, { attributes: true, attributeFilter: WATCH });
+  });
+  /* ⚠ THE DRIVER IS IN-PAGE AND BURSTED, AND THAT IS THE WHOLE POINT — MEASURED, NOT ASSUMED.
+   * The first version of this block used `page.mouse.wheel()`, which awaits a CDP round-trip per
+   * notch and so delivers them roughly one per animation frame. Against that input a coalescing
+   * handler and an uncoalesced one are INDISTINGUISHABLE — there is never a second event inside a
+   * frame to coalesce — and the harness duly reported an identical 1.00 commits/wheel on the
+   * pre-fix and post-fix builds. That is a measurement artefact, not a finding, and reporting it
+   * as one would have been the B1086 trap wearing different clothes.
+   * A real trackpad flick (and Chrome's own coalesced delivery under load) puts SEVERAL wheel
+   * events into one task. So the gesture is dispatched in-page in bursts: five events per task,
+   * yielding between bursts. That is the input shape the owner's report describes, and it is the
+   * only shape under which "renders per wheel event" means anything. */
+  const WHEEL_EVENTS = 40, BURST = 5;
+  const zoomT0 = Date.now();
+  for (let b = 0; b < WHEEL_EVENTS / BURST; b++) {
+    // Alternate direction every other burst so the view can't run into the ppf clamp, where the
+    // handler short-circuits and the sample would flatter the very code we are measuring.
+    await page.evaluate(([n, dy, x, y]) => new Promise((done) => {
+      /* ⚠ ONE EVENT PER TASK — this is the load-bearing detail, and the second artefact this
+       * block had to be corrected for. Dispatching the burst inside ONE task is useless: React 18
+       * auto-batches every `setView` in a single task into a single commit, so the uncoalesced
+       * handler measured identically to the coalesced one (16.7 ms median either way, across four
+       * runs each). Real wheel input does not arrive that way. Chrome delivers each (possibly
+       * coalesced) wheel event in its OWN task, and auto-batching does not span tasks — so N events
+       * inside one frame become N separate full commits of the ~4,600-node tree. That is the defect,
+       * and a MessageChannel port pump is the smallest faithful reproduction of it. */
+      const el = document.querySelector('[data-testid="planner-canvas"]');
+      const ch = new MessageChannel();
+      let i = 0;
+      ch.port1.onmessage = () => {
+        el.dispatchEvent(new WheelEvent("wheel", { deltaY: dy, clientX: x, clientY: y, bubbles: true, cancelable: true }));
+        if (++i < n) ch.port2.postMessage(0); else done();
+      };
+      ch.port2.postMessage(0);
+    }), [BURST, b % 2 ? -120 : 120, cx, cy]);
+    await page.waitForTimeout(40);
+  }
+  const zoomMs = Date.now() - zoomT0;
+  await page.waitForTimeout(120);   // let the last coalesced frame commit before we read
+  const zoom = await page.evaluate(() => {
+    const out = { frames: window.__frames.map((f) => f.d), commits: window.__zoomCommits };
+    if (window.__zoomObs) window.__zoomObs.disconnect();
+    return out;
+  });
+  const zoomFrames = zoom.frames.slice(1);   // same first-sample drop as the drag
+  results.zoomFrameSamples = zoomFrames.length;
+  results.zoomGestureMs = zoomMs;
+  results.zoomWheelEvents = WHEEL_EVENTS;
+  results.zoomCanvasCommits = zoom.commits;
+  results.zoomCommitsPerWheel = +(zoom.commits / WHEEL_EVENTS).toFixed(2);
+  results.zoomObservedFps = observedFps(zoomFrames.length, zoomMs);
+  const zoomFault = frameSamplingFaultFor({ visibility, samples: zoomFrames.length, gestureMs: zoomMs });
+  if (zoomFault) {
+    results.zoomFrameMedianMs = null;
+    results.zoomFrameP90Ms = null;
+    notes.push(`zoom frame timing UNRELIABLE — ${zoomFault}`);
+  } else {
+    results.zoomFrameMedianMs = zoomFrames.length ? +pct(zoomFrames, 50).toFixed(1) : null;
+    results.zoomFrameP90Ms = zoomFrames.length ? +pct(zoomFrames, 90).toFixed(1) : null;
+  }
 }
 
 /* ---- pan / zoom / overlay-toggle loop → peak heap -------------------------------------------
@@ -327,7 +430,16 @@ if (JSON_OUT) {
 } else {
   console.log(`Planyr runtime performance harness (NEW-8)\n  target: ${BASE}\n  scenario: ${site.id} @ ${ORIGIN.lat},${ORIGIN.lon} (stands in for Sylvestri / Concept C)\n`);
   console.log(`  site-route chunks fetched: ${results.siteRouteChunks.length} — ${results.siteRouteChunks.map(stem).join(", ")}`);
-  console.log(`  frame samples during drag: ${results.frameSamples} over ${results.frameGestureMs} ms (${results.frameObservedFps} fps, tab "${results.frameVisibility}")\n`);
+  if (DO_DRAG) console.log(`  frame samples during drag: ${results.frameSamples} over ${results.frameGestureMs} ms (${results.frameObservedFps} fps, tab "${results.frameVisibility}")`);
+  if (DO_WHEEL) {
+    // NEW-3(a) — the ZOOM gesture, reported alongside the drag. `commits/wheel` is the number the
+    // coalescing + epsilon work has to move; the medians are suppressed rather than guessed when
+    // the sample cannot be trusted, exactly as the drag's are.
+    const med = results.zoomFrameMedianMs == null ? "NOT REPORTED (starved sample)" : `${results.zoomFrameMedianMs} ms median · ${results.zoomFrameP90Ms} ms p90`;
+    console.log(`  zoom (wheel): ${med}`);
+    console.log(`      ${results.zoomFrameSamples} frames over ${results.zoomGestureMs} ms (${results.zoomObservedFps} fps, tab "${visibility}") · ${results.zoomCanvasCommits} canvas commits across ${results.zoomWheelEvents} wheel events = ${results.zoomCommitsPerWheel} per wheel`);
+  }
+  console.log();
   for (const p of passes) console.log(`  ✓ ${p.metric} — ${p.value} ${p.unit} (ceiling ${p.ceiling})`);
   for (const a of aboveTarget) {
     console.log(`  ⚠ ${a.metric} — ${a.value} ${a.unit} is within its ${a.ceiling} ceiling but ABOVE the ${a.target} target (gap ${a.gap})`);

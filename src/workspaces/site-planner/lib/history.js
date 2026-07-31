@@ -35,9 +35,15 @@ export function createHistoryStack({ keyOf, limit = 80 } = {}) {
      * onto the redo future so redo can return to it. */
     undo(current) {
       let prev = null;
+      /* NEW-4(d) — hoist `keyOf(current)` OUT of the loop. `keyOf` is the planner's `histKey`: a
+       * JSON.stringify of every parcel, element, measurement, callout and markup in the plan. It was
+       * recomputed on EVERY iteration against the same unchanging `current`, so an undo that skipped
+       * ten deduped no-op frames stringified the whole model eleven times instead of once — on a
+       * path the owner hits constantly. Behaviour-identical: `current` cannot change inside the loop. */
+      const curKey = keyOf(current);
       while (past.length) {
         const cand = past.pop();
-        if (keyOf(cand) !== keyOf(current)) { prev = cand; break; }
+        if (keyOf(cand) !== curKey) { prev = cand; break; }
       }
       if (!prev) return null;
       future.push(current);
