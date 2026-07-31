@@ -542,7 +542,15 @@ function setSyncState(next) {
   for (const fn of syncListeners) { try { fn({ ...syncState }); } catch (_) { /* a bad listener must not mute the rest */ } }
 }
 
-const noteSynced = () => setSyncState({ mode: "synced", at: Date.now(), reason: null });
+/* "Everything agrees" — but only when it actually does. A page still in conflict is NOT a
+ * clean sync, so this reports the conflict state instead rather than letting the footer read
+ * "Synced" over an unresolved note. Resolving one of two conflicts must not clear the line
+ * for the other; that would be the same quiet lie one layer up. */
+function noteSynced() {
+  setSyncState(conflicts.size
+    ? { mode: "conflict", at: Date.now(), reason: null }
+    : { mode: "synced", at: Date.now(), reason: null });
+}
 
 /** LOUD-FAILURE, on the channel the footer reads. A sync that did not happen must never be
  *  able to render as "Synced" — so every failed push/pull lands here WITH a reason, and an
@@ -858,10 +866,7 @@ async function pushPending() {
   }
 
   saveSyncState();
-  // A page still in conflict is NOT a clean sync, and the footer says so rather than
-  // showing a green "Synced" over an unresolved note.
-  if (ok && conflicts.size) setSyncState({ mode: "conflict", at: Date.now(), reason: null });
-  else if (ok) noteSynced();
+  if (ok) noteSynced();   // …which reports the conflict state when one is still open
   return ok;
 }
 
