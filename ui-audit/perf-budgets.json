@@ -129,7 +129,7 @@
           "from": 2332000,
           "to": 2320655,
           "direction": "ratchet",
-          "item": "NEW-1",
+          "item": "B1344",
           "date": "2026-07-30",
           "reason": "Policy migration: the hand-pinned ceiling 2332000 is retired and this becomes a measured baseline (a real build of main at d5476d0), with the ceiling derived from the shared headroom band. Not an optimization — a re-seed of the same measurement onto the new shape."
         },
@@ -138,7 +138,7 @@
           "from": 3985000,
           "to": 3980641,
           "direction": "ratchet",
-          "item": "NEW-1",
+          "item": "B1344",
           "date": "2026-07-30",
           "reason": "Policy migration, same as siteRouteJsBytes: hand-pinned ceiling retired, baseline re-seeded from a real build of main at d5476d0. This metric had 4.3 KB (0.11%) of headroom and was next in line to fail."
         },
@@ -147,7 +147,7 @@
           "from": 1750000,
           "to": 1743553,
           "direction": "ratchet",
-          "item": "NEW-1",
+          "item": "B1344",
           "date": "2026-07-30",
           "reason": "Policy migration, same as the other two: hand-pinned ceiling retired, baseline re-seeded from a real build of main at d5476d0 (1.1 KB / 0.06% of headroom under the old number)."
         },
@@ -375,7 +375,7 @@
           "to": 16.7,
           "direction": "reseed",
           "scenario": "perf-reference-goose-creek",
-          "item": "NEW-1",
+          "item": "B1344",
           "date": "2026-07-31",
           "reason": "Re-seeded from the Goose Creek scenario after NEW-1 replaced a hand-authored scene that had no centerline road, no pond and no polygon element, and a scripted drag that pressed on an element and never panned. Same number, different provenance: the value did not move at 1x because this container renders the 2.4x heavier scene at 60fps too."
         },
@@ -385,7 +385,7 @@
           "to": 16.7,
           "direction": "reseed",
           "scenario": "perf-reference-goose-creek",
-          "item": "NEW-1",
+          "item": "B1344",
           "date": "2026-07-31",
           "reason": "Re-seeded from the Goose Creek scenario alongside frameMedianMs, same withdrawal for the same two reasons (scene had no roads or ponds, gesture never panned). 3 reps at 1x all read 16.7."
         }
