@@ -22,7 +22,8 @@ import { loadProfile } from "./lib/profile.js";
 import { commitElements, fetchElements, keepaliveCommit } from "./lib/elementApi.js";
 import { supabase, supabaseRest, currentAccessToken } from "./lib/supabase.js";
 import { createIdMinter, randomIdSalt } from "../../shared/ids.js";
-import { mergeSiteContent, createSiteModel, normalizeBondedChildren } from "./lib/siteModel.js";
+import { mergeSiteContent, createSiteModel } from "./lib/siteModel.js";
+import { assemblyIntegrity, tearPayload } from "./lib/assemblyIntegrity.js";
 import { extendMergeSelection } from "./lib/parcelSelect.js";
 import { parcelSelectHintDecision, PARCEL_HINT_COOLDOWN_MS } from "./lib/parcelSelectHint.js";
 import { measuresUnderPoint, nextMeasureSelection } from "./lib/measureHit.js";
@@ -1767,7 +1768,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // Restore this site's saved canvas (and advance the id counter past saved ids).
   // Keyed remount in App means this runs once per site.
   const restored = useMemo(() => {
-    const s = loadSite(siteId);
+    // NEW-2 — `persistHeal`: this is the one call that OPENS the plan, so a bonded repair made on
+    // the way in is written back rather than living only in this tab's memory (see storage.loadSite).
+    const s = loadSite(siteId, { persistHeal: true });
     // B591 — seed past EVERY id-bearing collection + tombstones, not just parcels+els, so a
     // new id can't re-collide with a retained markup/measure/callout or a deleted-id tombstone.
     if (s) ensureIdAbove([
@@ -3549,6 +3552,34 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // engine's shadow still has the row makes the next reconcile diff tombstone it in the cloud —
   // the husk heals into a proper delete instead of poisoning every reader (husk-parcel crash).
   const isHuskParcel = (kind, el) => kind === "parcel" && !(el && Array.isArray(el.points) && el.points.length);
+  /* ---- The bonded-assembly INVARIANT, enforced at every seam (NEW-1 / NEW-2) -----------------
+   * A bonded child's world position is DERIVED from its host, so a child that disagrees with what
+   * its host implies is by definition wrong — there is no case where a bonded sidewalk legitimately
+   * sits hundreds of feet off its building. Eight merged PRs closed eight specific interleavings in
+   * the WRITE path and the tear kept returning, because a child row can always be written, refused,
+   * echoed, journaled or folded on its own. So stop chasing the interleaving: re-derive the child
+   * from its host at every boundary where one can arrive without the other, and the partial apply
+   * stops being representable — on the canvas, and (the important half) on the wire.
+   *
+   * `seam` names WHERE the check ran, because "which boundary let it through" is the first question
+   * of any recurrence. Gated on a real TEAR (> ASSEMBLY_TEAR_TOL_FT) rather than on any repair at
+   * all: sub-foot drift is cleaned at load time as it always was, and gating here on drift would
+   * fight live editing for corrections nobody can see.
+   *
+   * LOUD by contract (the addendum to this dive): a silent self-heal is exactly why this bug kept
+   * shipping as fixed and kept coming back — the tear happened, a later load quietly repaired it,
+   * and any verification that reloaded before it measured saw a clean plan. Every repair now names
+   * the ids and the delta it corrected. */
+  const assemblyGuard = (list, seam) => {
+    const res = assemblyIntegrity(list);
+    if (!res.tears.length) return list;
+    reportClientEvent("assembly-tear-detected",
+      `bonded child ${res.tears.length > 1 ? "children" : ""} off host by up to ${Math.round(res.tears[0].dist)} ft (${seam})`,
+      { id: siteId, seam, ...tearPayload(res.tears) });
+    reportClientEvent("assembly-tear-healed", `re-derived ${res.repairs.length} bonded element(s) from their host (${seam})`,
+      { id: siteId, seam, ...tearPayload(res.repairs) });
+    return res.els;
+  };
   // Put one applyRemoteRow instruction onto the canvas. The engine already updated its shadow, so
   // the autosave-effect diff that this setState triggers sees the element as unchanged (no echo
   // commit). Insertion respects the collection's z (byZ reads z, not array position).
@@ -3567,6 +3598,20 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const q = pendingRemoteRef.current; pendingRemoteRef.current = [];
     for (const instr of q) applyRemoteInstr(instr);
   };
+  /* The ECHO / ADOPTION seam, as ONE choke point. Every path that changes `els` lands here after
+   * React commits — a realtime upsert, a rows-canonical adoption, the buffered mid-gesture drain, a
+   * journal fold, an undo/redo restore, an ordinary local edit — so a new write path cannot be added
+   * that silently skips the check. That property is the whole point: the previous eight fixes each
+   * guarded ONE path, and the ninth path was always the one that tore.
+   *
+   * Deferred while a gesture is in flight (`busyRef`): the drag owns the canvas until pointer-up and
+   * its own refit keeps the assembly together; `flushElems` re-runs the check at that boundary, and
+   * the write-side guard in `reconcileElems` re-runs it before anything reaches the wire. */
+  useEffect(() => {
+    if (busyRef.current) return;
+    const guarded = assemblyGuard(els, "canvas");
+    if (guarded !== els) setEls(guarded);
+  }, [els]); // eslint-disable-line react-hooks/exhaustive-deps
   // B672 — the READ cutover: full refetch of the site's live rows + REPLACE local canonical state.
   // Runs on every channel join/rejoin and tab wake — never trust event gaps. Elements with a
   // pending local commit keep their LOCAL data (they re-commit through the rev-checked path).
@@ -3665,8 +3710,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // ago. Re-running the heal on the FINAL canvas is what stops such a fold putting a geometrically
     // impossible assembly on screen (and then committing it): a child off its computed anchor is
     // re-fitted here, whatever ledger it came from. Identity-preserving on a coherent plan.
-    merged.els = normalizeBondedChildren(merged.els, (h) => healed.push(h));
-    if (healed.length) reportClientEvent("bonded-children-healed", "bonded children re-fitted to their host on read", { id: siteId, count: healed.length, healed: healed.slice(0, 20) });
+    // NEW-2 — through the shared invariant now, so the LOAD seam reports the same shape (ids + the
+    // delta corrected) as every other seam and a real tear on disk pages us instead of being
+    // repaired in silence. `repairs` still feeds the `exempt` set below: an element the heal
+    // rewrote must diff and COMMIT, or rows-canonical-on-seed adopts the torn rows straight back
+    // over the repair (B1118).
+    const post = assemblyIntegrity(merged.els);
+    merged.els = post.els;
+    for (const r of post.repairs) healed.push(r);
+    if (healed.length) reportClientEvent("bonded-children-healed", "bonded children re-fitted to their host on read", { id: siteId, seam: "load", count: healed.length, healed: healed.slice(0, 20) });
+    if (post.tears.length)
+      reportClientEvent("assembly-tear-detected", `a stored plan held ${post.tears.length} bonded child(ren) off their host by up to ${Math.round(post.tears[0].dist)} ft (load)`,
+        { id: siteId, seam: "load", ...tearPayload(post.tears) });
     const replace = (setter, val) => setter((prev) => (stableStringify(prev) === stableStringify(val) ? prev : val));
     replace(setEls, merged.els); replace(setMarkups, merged.markups); replace(setMeasures, merged.measures);
     replace(setCallouts, merged.callouts); replace(setParcels, merged.parcels);
@@ -3754,6 +3809,21 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         const s = syncStateOverride.current || stateRef.current;
         return { els: s.els, markups: s.markups, measures: s.measures, callouts: s.callouts, parcels: s.parcels };
       },
+      // NEW-1 — THE DETECTOR, on the write side. Runs once per settled batch, whatever the outcome,
+      // and asserts that every bonded child is still where its host implies. If this had existed
+      // through the eight previous attempts, each recurrence would have paged us with the ids and
+      // the delta instead of waiting for the owner to notice his parking sitting in a field.
+      // Detection only — the repair itself is owned by the `els` seam effect, so a detector bug can
+      // never move geometry.
+      afterCommit: (summary) => {
+        try {
+          const tears = assemblyIntegrity(stateRef.current.els).tears;
+          if (!tears.length) return;
+          reportClientEvent("assembly-tear-detected",
+            `a bonded child sits ${Math.round(tears[0].dist)} ft off its host after a commit (${summary && summary.outcome})`,
+            { id: siteId, seam: "post-commit", outcome: summary && summary.outcome, atomic: !!(summary && summary.atomic), ops: summary && summary.ops, ...tearPayload(tears) });
+        } catch (_) { /* the detector may never break the write path */ }
+      },
     });
     elSyncRef.current = eng;
     // B673 — who to blame in a conflict toast: self → "you (another window)"; teammates via the
@@ -3826,14 +3896,34 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (!busy && !override) drainRemote(); // apply remote rows that arrived mid-gesture before diffing
     stampDirectTargets(); // NEW-1 — refresh direct-touch stamps in the SAME tick the ops are enqueued
     const s = override || stateRef.current;
-    try { e.reconcile({ els: s.els, markups: s.markups, measures: s.measures, callouts: s.callouts, parcels: s.parcels }, { busy }); } catch (_) {}
+    /* NEW-1 — the WRITE seam, and the one that makes the invariant structural rather than cosmetic.
+     * This is the single funnel every commit passes through, so re-deriving HERE means a torn
+     * assembly cannot be put on the wire at all: not by the diff, not by a conflict re-commit (the
+     * engine's `freshen` re-reads this same live canvas at flush time), not by the ~40 s backoff
+     * retry that carried pre-undo child coordinates in the reported case. A tear becomes a state
+     * the client is incapable of persisting, whatever race produced it locally. */
+    let els = s.els;
+    if (!busy) {
+      const guarded = assemblyGuard(els, override ? "flush-override" : "commit");
+      if (guarded !== els) { els = guarded; setEls(guarded); }
+    }
+    try { e.reconcile({ els, markups: s.markups, measures: s.measures, callouts: s.callouts, parcels: s.parcels }, { busy }); } catch (_) {}
   };
   const flushElems = (override) => {
     const e = elSyncRef.current;
     if (!e || !isCloudActive()) return;
     const prev = syncStateOverride.current;
-    if (override) syncStateOverride.current = override;
-    try { reconcileElems(false, override); try { e.flushGesture(); } catch (_) {} }
+    // NEW-1 — the override IS what `liveCollections` serves to the engine's `freshen`, so it has to
+    // carry the re-derived assembly too. Installing the raw snapshot here would let a torn copy be
+    // re-read onto the wire at flush time even though the canvas itself had been repaired — the
+    // freshen path is exactly how a queued op's bytes are decided.
+    let ov = override;
+    if (ov) {
+      const g = assemblyGuard(ov.els, "flush-override");
+      if (g !== ov.els) ov = { ...ov, els: g };
+      syncStateOverride.current = ov;
+    }
+    try { reconcileElems(false, ov); try { e.flushGesture(); } catch (_) {} }
     finally { syncStateOverride.current = prev; }
   };
   const retryElems = () => { const e = elSyncRef.current; if (e) e.retryNow(); };
@@ -3994,6 +4084,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     });
   };
   const applySnapshot = (s) => {
+    // NEW-1 — the REVERT seam. An undo/redo restores a whole-canvas snapshot, so the restore itself
+    // is assembly-whole; what it cannot fix is a snapshot that was ALREADY torn when it was pushed
+    // (a frame captured while a straggling echo had a child at pre-undo coordinates). Re-derive
+    // before the snapshot reaches the canvas, so an undo can never REINSTATE a tear — and so the
+    // flush at the bottom of this function, which commits against this exact snapshot, ships the
+    // repaired geometry rather than the recorded wreckage.
+    {
+      const guardedEls = assemblyGuard(s.els, "undo/redo");
+      if (guardedEls !== s.els) s = { ...s, els: guardedEls };
+    }
     // NEW-1 (the straggler re-tear) — THIS SNAPSHOT IS NOW THE AUTHORITY. A remote instruction that
     // arrived MID-GESTURE was computed with its payload FROZEN at arrival time and parked in
     // `pendingRemoteRef`; draining it after an undo puts pre-undo geometry back on a canvas the user

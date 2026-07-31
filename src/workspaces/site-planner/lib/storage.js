@@ -806,7 +806,15 @@ export function loadSitesList() {
     const junk = raw.reduce((n, r) => n + countJunkEntries(r), 0);
     if (junk > 0) reportClientEvent("model-sanitized", "dropped malformed collection entries on load", { junk, records: raw.length });
   } catch (_) {}
-  return raw.map(migrate).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+  // NEW-2 — the list read normalizes every record too, and on a cold boot it is usually the FIRST
+  // thing to run the bonded heal. Report from here as well, or the plan-open report below is
+  // reached only after the repair has already happened somewhere else.
+  return raw.map((r) => {
+    const watch = bondedHealWatch(r && r.id);
+    const m = migrate(r, { onHeal: watch.onHeal });
+    watch.flush();
+    return m;
+  }).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
 }
 // Every plan belonging to one site (group), newest first.
 export function loadPlansOfGroup(groupId) {
@@ -953,11 +961,64 @@ export async function purgeExpiredDeletedProjects({ days = DELETED_RETENTION_DAY
 // since I last synced" (fold my change in — so a stale tab can't thin it, B127). Each browser
 // tab is its own JS module instance, so this map is naturally per-tab.
 const lastSeenAt = {};
-export function loadSite(id) {
+/* ---- The LOAD seam of the bonded-assembly invariant, made LOUD (NEW-2) ---------------------
+ * `createSiteModel` has re-derived torn bonded children on EVERY read since B1097, and it has done
+ * it in SILENCE. That silence is a named cause of this bug family shipping as fixed eight times:
+ * the tear happened, the owner saw it, the next open quietly repaired it, and any check that
+ * reloaded before it measured saw a clean plan ("looks like it just fixed itself somehow again").
+ *
+ * So listen to the repair that already runs, rather than re-deriving to look for one — no extra
+ * work, and no chance of a detector that disagrees with the healer. It lives HERE, in the storage
+ * layer, deliberately: a read at the ROUTE level (the plan list, a group lookup) normalizes the
+ * record before the planner ever mounts, so a detector inside the planner can be — and was,
+ * measured — outrun by the very repair it exists to report. */
+const HEAL_TEAR_TOL_FT = 1;   // mirrors assemblyIntegrity.ASSEMBLY_TEAR_TOL_FT (kept local: this
+                              // module must not import a consumer of itself)
+const healMoveFt = (h) => {
+  const f = h && h.from, t = h && h.to;
+  if (!f || !t || !Number.isFinite(f.cx) || !Number.isFinite(t.cx)) return 0;
+  return Math.hypot(t.cx - f.cx, (Number(t.cy) || 0) - (Number(f.cy) || 0));
+};
+function bondedHealWatch(id) {
+  const heals = [];
+  return {
+    onHeal: (h) => { if (h) heals.push(h); },
+    /* Reports what was repaired and RETURNS whether it was a real tear, so the caller can decide to
+     * persist the repair. */
+    flush() {
+      try {
+        if (!heals.length) return false;
+        const torn = heals.filter((h) => healMoveFt(h) > HEAL_TEAR_TOL_FT);
+        if (!torn.length) return false;              // sub-foot drift is housekeeping, not a tear
+        const items = torn.slice(0, 20).map((h) => ({ id: h.id, host: h.host, type: h.type, kind: h.kind, dist: Math.round(healMoveFt(h) * 1000) / 1000 }));
+        const worst = torn.reduce((m, h) => Math.max(m, healMoveFt(h)), 0);
+        reportClientEvent("assembly-tear-detected",
+          `the stored plan opened with ${torn.length} bonded child(ren) up to ${Math.round(worst)} ft off their host (load)`,
+          { id, seam: "load", count: torn.length, worstFt: Math.round(worst * 1000) / 1000, items });
+        return true;
+      } catch (_) { return false; /* telemetry never blocks a read */ }
+    },
+  };
+}
+export function loadSite(id, { persistHeal = false } = {}) {
   const rec = id ? readSites()[id] : null;
   if (!rec) return null;
-  const m = migrate(rec);
+  const watch = bondedHealWatch(id);
+  const m = migrate(rec, { onHeal: watch.onHeal });
+  const wasTorn = watch.flush();
   lastSeenAt[id] = m.updatedAt || 0; // we are now in sync with the stored copy
+  /* NEW-2 — PERSIST the repair when the plan is actually being OPENED.
+   * A heal that lives only in memory is precisely why the owner's plan kept "fixing itself" on
+   * screen while the STORED copy stayed torn: the canvas is initialised from the already-repaired
+   * model, so from React's point of view nothing changed, no autosave fires, and the next reader —
+   * another device, the export path, the yield math, the cloud push — reads the wreckage again.
+   * Measured in the headless repro: a planted tear rendered correctly and was still on disk, byte
+   * for byte, four seconds later.
+   * Opt-in, because `loadSite` is also the cheap existence probe behind a dozen route lookups and
+   * none of those may write; and gated on a real TEAR, so a healthy plan's `updatedAt` never churns. */
+  if (persistHeal && wasTorn) {
+    try { saveSite(m); reportClientEvent("assembly-tear-persisted", "the repaired plan was written back to storage", { id }); } catch (_) { /* the in-memory repair still stands */ }
+  }
   return m;
 }
 // `skipHistory` writes the local mirror WITHOUT taking a version-history snapshot. Used by the
