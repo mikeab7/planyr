@@ -121,9 +121,18 @@ export function measureLabelThreshold(m, settings, globalFloor) {
  * A SELECTED measurement always shows its value — you must be able to read what you are
  * editing (the same exception B149 / B121 / B225-B226 already make, and what the code did
  * before this item).
+ *
+ * `sheet` is the EXPORT pass (NEW-1). An export is a DOCUMENT, not a screenshot: every gate in
+ * here is screen decluttering — it exists so the canvas stays readable while you work — and none
+ * of that reasoning applies to a sheet that will be read at full size on paper. So on the sheet
+ * the value ALWAYS renders, and the threshold above (whether the user's per-measurement pin, the
+ * Standards default, or the shared floor) governs the CANVAS ONLY. This is the whole of the
+ * owner's Sylvestri defect: he was zoomed out to see his multi-parcel site — the normal thing to
+ * do before printing — so the numbers were below the gate and simply were not in the DOM to clone,
+ * and the sheet printed anonymous marks.
  */
-export function measureLabelVisible(m, ppf, { settings, globalFloor, selected = false } = {}) {
-  if (selected) return true;
+export function measureLabelVisible(m, ppf, { settings, globalFloor, selected = false, sheet = false } = {}) {
+  if (sheet || selected) return true;
   return ppf >= measureLabelThreshold(m, settings, globalFloor);
 }
 
