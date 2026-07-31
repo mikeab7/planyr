@@ -111,6 +111,12 @@ import {
   hasLabelThreshold, labelRevealNote,
 } from "./lib/measureStyle.js";
 import { measureLabelModel, measureChipLines, headlineIndex, measureSegments, fmtInt, fmtSf, fmtAcres, fmtFeet } from "./lib/measureLabel.js";
+// NEW-1 — the EXPORT's view of a measurement: drafting terminators in place of the editing discs,
+// and the attribute names the sheet's "never print geometry without its value" invariant reads.
+import {
+  terminatorTicks, terminatedMode, TERMINATOR_HALF_PX, TERMINATOR_WEIGHT_PX,
+  MEASURE_GROUP_ATTR, MEASURE_MODE_ATTR,
+} from "./lib/measureSheet.js";
 import { pushRecent, notePick, commitPick } from "../../shared/ui/colorRecents.js";
 import { CLIP_KINDS, collectClipboard, clipboardBBox, pasteClipboard, translateCalloutBy, translateParcelBy } from "./lib/planClipboard.js";
 import { remapBondRefs } from "./lib/bondRemap.js";
@@ -198,7 +204,7 @@ import { layoutLabels, buildingLabelLines, dimCalloutVisible, detailLabelVisible
 import { inlineLines } from "./lib/labelFitLadder.js";
 import { calloutLayout, minCalloutWidthFt } from "./lib/calloutLayout.js";
 import { splitOverlayBands, overlayPanelOrder, overlayOrderFlags, reorderOverlays, setOverlayBand, overlayBand } from "./lib/overlayOrder.js";
-import { DOCK_ZONES, MAX_DOCK_ZONES, ZONE_CATALOG, zoneDepthDefaults, catalogDepthDefault, layoutZoneByKind, usableCourtSpan, zoneAlongSpan, boxExtentAlong, resizedZoneAlongLen, dockSidesFor, footprintDepth, footprintLength, footprintAxes, strandedZoneIds, pruneStrandedZones } from "./lib/dockZones.js";
+import { DOCK_ZONES, MAX_DOCK_ZONES, ZONE_CATALOG, zoneDepthDefaults, catalogDepthDefault, layoutZoneByKind, usableCourtSpan, zoneAlongSpan, anchoredAlongSpan, boxExtentAlong, resizedZoneAlongFit, dockSidesFor, footprintDepth, footprintLength, footprintAxes, strandedZoneIds, pruneStrandedZones } from "./lib/dockZones.js";
 import { computeBuildingGrid, resolveGridSettings, placeDockDoors } from "./lib/buildingGrid.js";
 import { convertBuildingToPolygon, dockLineAt, dockEdgeLine, projectOntoLine, frameBBox, translateDockLines, dockSegExtent, clipSegmentToRing } from "./lib/footprintEdit.js";
 import { dimSlideRange, clampDimOffset, DIM_POS_F_DEFAULT, DIM_POS_F_ROAD, dimNumberBox } from "./lib/dimSlide.js";
@@ -7858,8 +7864,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (b.footEdit) { const seg = dockSegExtent(b, side); if (seg) { insStart = Math.max(insStart, seg.startF); insEnd = Math.max(insEnd, seg.L - seg.endF); } }
     const { along: usable, shift } = usableCourtSpan(full, insStart, insEnd);
     const court = findCourtIn(arr, b, side);
-    const along = court && Number.isFinite(court.alongLen) && court.alongLen > 0 ? Math.min(court.alongLen, usable) : usable;
-    return { along, alongShift: shift };
+    // NEW-1 — the court's own length is ANCHORED too: shorten it from one end and that end is the
+    // one that moves. Its clamp window is the CLEAR FACE (not the whole wall), so an anchored court
+    // can never slide onto a corner bump-out. With no anchor stored this is byte-identical to the
+    // old `Math.min(court.alongLen, usable)` centred on `shift`.
+    const fit = anchoredAlongSpan({
+      stored: court && court.alongLen, anchor: court && court.alongAnchor, off: court && court.alongOff,
+      chainAlong: usable, chainShift: shift, fullAlong: full, limitAlong: usable, limitShift: shift,
+    });
+    // `faceAlong`/`faceShift` are the clear bump-out face itself — the reference the COURT's own
+    // anchor is measured against (every outward zone anchors against the court's resolved span).
+    return { along: fit.along, alongShift: fit.shift, faceAlong: usable, faceShift: shift };
   };
   /* ---- Generic outward-stack chain (B495). The dock sequence (court → trailer → buffer) plus any
      menu-appended layers (landscape buffer / road) form ONE linked list rooted at the wall, bonded
@@ -7899,9 +7914,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // a length keeps it — clamped to the wall, never reset. Index 0 is excluded: the court's own
     // alongLen is already folded into courtOpts.along, capped to the clear bump-out face (B492).
     const alongs = zones.map((z, i) => (i === 0 ? null : (Number.isFinite(z.alongLen) && z.alongLen > 0 ? z.alongLen : null)));
+    // NEW-1 — WHICH END that length is anchored from. Index 0 is 0/0 because the court's own anchor
+    // is already resolved into `courtOpts.alongShift`; every outward zone anchors against that.
+    const anchors = zones.map((z, i) => (i === 0 ? 0 : z.alongAnchor));
+    const offs = zones.map((z, i) => (i === 0 ? 0 : z.alongOff));
     const patch = new Map();
     zones.forEach((z, i) => {
-      const g = layoutZoneByKind(b, side, i, depths, kinds, { ...courtOpts, alongs });
+      const g = layoutZoneByKind(b, side, i, depths, kinds, { ...courtOpts, alongs, anchors, offs });
       patch.set(z.id, z.type === "trailer"
         ? { ...g, cfg: { ...(z.cfg || {}), trailerW: (z.cfg && z.cfg.trailerW) || settings.trailerW || OPP_TRAILER_W, trailerL: depths[i], trailerAisle: 0, single: true } }
         : g);
@@ -8112,7 +8131,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
    * control the truck court has had, now for the zones stacked beyond it. Stores the typed length
    * on that zone's `alongLen`; relayoutSide clamps it to the wall but never resets it, so the
    * trailer can be shorter OR longer than the court and stays where it was put. `null` clears the
-   * override and the zone goes back to tracking the court. */
+   * override and the zone goes back to tracking the court.
+   * NEW-1 — a TYPED length KEEPS the current anchor (it does not silently re-centre), so a zone the
+   * owner already pulled in from its north end keeps that end put when he then types a number.
+   * Clearing the override clears the anchor with it: intent withdrawn is intent gone. */
   const setZoneLengthAll = (b, i, newLen) => {
     const { dockSides } = dockSidesOf(b);
     const nl = newLen == null ? null : Math.max(1, Math.round(newLen));
@@ -8121,7 +8143,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       let next = a;
       dockSides.forEach((side) => {
         const z = findZoneIn(next, b, side, i);
-        if (z) next = next.map((x) => (x.id === z.id ? (nl == null ? (() => { const { alongLen: _drop, ...rest } = x; return rest; })() : { ...x, alongLen: nl }) : x));
+        if (z) next = next.map((x) => (x.id === z.id ? (nl == null ? (() => { const { alongLen: _drop, alongAnchor: _dropA, alongOff: _dropO, ...rest } = x; return rest; })() : { ...x, alongLen: nl }) : x));
       });
       dockSides.forEach((side) => { next = relayoutSide(next, b, side); });
       return next;
@@ -8261,13 +8283,27 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         //      The stamp now requires the gesture to BE a user resize OF THIS ZONE, and an edge drag
         //      must have moved the along axis. A host refit, a relayout, a rotation, a court depth
         //      change and the load-time heal are all structurally incapable of stamping.
+        //
+        // NEW-1 — the length was stored with no ANCHOR, so the relayout re-centred it on the wall and
+        // both ends walked inward by half the reduction ("when I shrink the trailer parking, it
+        // shrinks from both sides"). The gesture knows which end it held — an edge drag pins the
+        // opposite edge exactly — so store that with the length. The truck court is no longer excluded:
+        // it shares the defect (its typed length re-centred too), and `courtBumpOpts` still caps it to
+        // the clear bump-out face, so B492 is unchanged.
         const isTrailerZone = resized.type === "trailer" || !!resized.forCourt;
         const alongIsW = isTrailerZone || side === "top" || side === "bottom";
         const alongAxisDragged = opts.dragAxis ? !!(alongIsW ? opts.dragAxis.w : opts.dragAxis.h) : null;
-        const setLen = resized.truckCourt ? null : resizedZoneAlongLen(resized, box, {
-          hostRot: b.rot, side, userResize: !!opts.userResize, alongAxisDragged,
+        const cOpts = courtBumpOpts(next, b, side);
+        const fit = resizedZoneAlongFit(resized, { ...box, cx: nb.cx, cy: nb.cy }, {
+          host: b, side, userResize: !!opts.userResize, alongAxisDragged,
+          // The court head anchors against the clear bump-out FACE; everything outward of it anchors
+          // against the court's own resolved span.
+          chainAlong: resized.truckCourt ? cOpts.faceAlong : cOpts.along,
+          chainShift: resized.truckCourt ? cOpts.faceShift : cOpts.alongShift,
         });
-        next = next.map((x) => (x.id === buildingId ? { ...x, zd: newDepth, ...(setLen ? { alongLen: setLen } : {}) } : x));
+        next = next.map((x) => (x.id === buildingId
+          ? { ...x, zd: newDepth, ...(fit ? { alongLen: fit.len, alongAnchor: fit.anchor, alongOff: fit.off } : {}) }
+          : x));
         next = relayoutSide(next, b, side);
       }
     } else if (resized && (isWallStrip(resized) || resized.sideParkSide)) {
@@ -12910,7 +12946,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const mode = measMode(m);
     if (mode === "count" ? fpts.length < 1 : fpts.length < 2) return null;
     const isSel = sel?.kind === "measure" && sel.i === i;
-    if (!measureLabelVisible(m, labelPpf, { settings, globalFloor: DIM_CALLOUT_MIN_PPF, selected: isSel })) return null;
+    // NEW-1 — `sheet` lifts every zoom gate on an EXPORT pass. An export is a document, not a
+    // screenshot: the reveal threshold (B1152's per-measurement pin, the Standards default, or the
+    // shared floor) is a working-canvas declutter and must not decide what a printed exhibit says.
+    if (!measureLabelVisible(m, labelPpf, { settings, globalFloor: DIM_CALLOUT_MIN_PPF, selected: isSel, sheet: labelFrame.sheet })) return null;
     const isArea = mode === "area";
     const model = measureLabelModel(mode, {
       areaSf: isArea ? polyArea(fpts) : 0,
@@ -13399,6 +13438,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           const m = f2p({ x: el.cx + o.x, y: el.cy + o.y });
           return (
             <rect key={`edge${i}`} x={m.x - 4.5} y={m.y - 4.5} width={9} height={9} rx={2}
+              data-handle="edge" data-edge={`${nx},${ny}`}
               fill={SEL_HANDLE_FILL} stroke={SEL_BLUE} strokeWidth={1.5}
               style={{ cursor: resizeCursor(m.x - cpx.x, m.y - cpx.y) }}
               onPointerDown={(e) => startEdgeResize(e, el.id, nx, ny)} />
@@ -16807,6 +16847,20 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       drives: driveJunctions.map((d) => ({ sideId: d.sideId, kind: d.kind, R: d.geom.R, wedges: d.geom.wedges.length })),
     });
   }, [roadNet, teeJunctions, driveJunctions]);
+  /* NEW-1 — E2E/self-audit hook for the EXPORT SHEET (same `window.__PLANYR_E2E` gate; never runs in
+     production). The measurement/export defect is invisible to any source reading — it only exists in
+     the CLONE the sheet is built from — so the guard spec has to inspect the real built sheet. No dep
+     array on purpose: `exportCtx()` closes over the current render, and the hook must never hand the
+     sheet a stale one. */
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.__PLANYR_E2E) return;
+    window.__plannerExportSvg = async (frame = null) => {
+      const { createExportSheet } = await loadExportSheet();
+      const built = createExportSheet(exportCtx())
+        .buildExportSvg(frame, true, PAL.paper, null, null, false, null, "letter", "landscape");
+      return built && built.clone ? built.clone.outerHTML : null;
+    };
+  });
   // One markup → its SVG node. Extracted from the old inline map so it can paint in both passes. A
   // plain render helper invoked via .map(renderMarkupNode) — NOT a component, so no remount concern.
   /* NEW-2 — ONE MEASUREMENT → ITS SVG NODE. Extracted from the old inline map so a measurement can
@@ -16815,6 +16869,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
      invoked via .map(...) — NOT a component, so there is no remount concern. `i` stays the
      measurement's ORIGINAL index in `measures`, because that index IS its selection identity
      (`sel.kind === "measure"` carries `i`); the z-sort reorders the DOM, never the model array. */
+  /* NEW-1 — the outer <g>'s export identity. The sheet's value invariant (a measurement never
+     prints its geometry without its number) is enforced on the CLONE, which means the clone has to
+     be able to find each measurement and ask whether it carries a value; before this the group was
+     an anonymous <g>. Attribute names live in lib/measureSheet.js so the renderer, the enforcement
+     pass and the guard test can never drift onto three different spellings. */
+  const measureGroupAttrs = (m, i, mode) => ({
+    [MEASURE_GROUP_ATTR]: m.id || `m${i}`,
+    [MEASURE_MODE_ATTR]: mode,
+  });
   const renderMeasureNode = (m, i) => {
                 const fpts = measPts(m);
                 const mode = measMode(m);
@@ -16867,16 +16930,22 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
 
                 if (mode === "count") {
                   return (
-                    <g key={m.id || `m${i}`}>
+                    <g key={m.id || `m${i}`} {...measureGroupAttrs(m, i, mode)}>
+                      {/* NEW-1 — a COUNT's numbered markers are the deliberate EXCEPTION to
+                          "endpoint markers are editing affordances": they ARE the content (they
+                          say which items were counted, and in what order), so they keep printing
+                          untouched. They already ride `labelK`, so they hold a constant physical
+                          size on the sheet instead of ballooning with the zoom. */}
                       {pts.map((p, k) => (
                         <g key={k} pointerEvents="none">
                           <circle cx={p.x} cy={p.y} r={8 * labelK} fill={mcolor + "28"} stroke={mcolor} strokeWidth={st.weight} />
-                          <text x={p.x} y={p.y + 3.5 * labelK} fontSize={8.5 * labelK} textAnchor="middle" fill={mcolor} fontWeight="700">{k + 1}</text>
+                          <text data-measure-tally x={p.x} y={p.y + 3.5 * labelK} fontSize={8.5 * labelK} textAnchor="middle" fill={mcolor} fontWeight="700">{k + 1}</text>
                         </g>
                       ))}
-                      {/* hit targets — one transparent circle per marker */}
+                      {/* hit targets — one transparent circle per marker. Pure editing affordance,
+                          and sized in constant screen px, so it is stripped from the sheet (NEW-1). */}
                       {pts.map((p, k) => (
-                        <circle key={`h${k}`} cx={p.x} cy={p.y} r={12} fill="transparent" stroke="transparent"
+                        <circle key={`h${k}`} data-export="skip" cx={p.x} cy={p.y} r={12} fill="transparent" stroke="transparent"
                           pointerEvents={canGrab ? "all" : "none"} style={{ cursor: "move" }} onPointerDown={(e) => startMoveMeasure(e, i)} onContextMenu={(e) => onMeasureContext(e, i)} />
                       ))}
                       {/* NEW-3 — the chip paints AFTER the hit targets, or the transparent grab
@@ -16900,12 +16969,26 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                  * distance, whose one segment IS the headline (printing it twice is noise). */
                 const segs = fpts.length > 2 || isArea ? measureSegments(fpts, isArea) : [];
                 const segFs = 9.5 * ls * labelK;
+                // NEW-1 — the drafting terminators an open run wears ON PAPER, in place of the
+                // vertex discs. `labelK` puts the tick at a constant physical size on the sheet.
+                const termTicks = labelFrame.sheet && terminatedMode(mode)
+                  ? terminatorTicks(pts, { halfPx: TERMINATOR_HALF_PX * labelK })
+                  : [];
                 return (
-                  <g key={m.id || `m${i}`}>
+                  <g key={m.id || `m${i}`} {...measureGroupAttrs(m, i, mode)}>
                     {isArea
                       ? <polygon points={ptsStr} fill={st.fill} fillOpacity={st.fillOpacity} stroke={mcolor} strokeWidth={st.weight} strokeDasharray={mdash} pointerEvents="none" />
                       : <polyline points={ptsStr} fill="none" stroke={mcolor} strokeWidth={st.weight} strokeDasharray={mdash} pointerEvents="none" />}
-                    {pts.map((p, k) => <circle key={k} cx={p.x} cy={p.y} r={3} fill={mcolor} pointerEvents="none" />)}
+                    {/* NEW-1 — THE VERTEX DISCS ARE AN EDITING AFFORDANCE, NOT DRAWING CONTENT, and
+                        they are sized in constant screen px with no zoom gate of any kind. On the
+                        owner's whole-site sheet that combination printed each length measurement as
+                        two fat discs joined by a stub. They are `data-export="skip"` now — they never
+                        reach paper — and an open run gets real drafting ticks instead (below). */}
+                    {pts.map((p, k) => <circle key={k} data-export="skip" data-measure-vertex="1" cx={p.x} cy={p.y} r={3} fill={mcolor} pointerEvents="none" />)}
+                    {termTicks.map((t, k) => (
+                      <line key={`tk${k}`} data-measure-term="1" x1={t.x1} y1={t.y1} x2={t.x2} y2={t.y2}
+                        stroke={mcolor} strokeWidth={TERMINATOR_WEIGHT_PX * labelK} strokeLinecap="butt" pointerEvents="none" />
+                    ))}
                     {segs.map((s) => {
                       if (!detailLabelVisible(s.ft, labelPpf)) return null;
                       const q = f2p(s.mid);
@@ -16916,11 +16999,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           stroke={PAL.paper} strokeWidth={2.5 * ls} paintOrder="stroke" fontWeight="600" pointerEvents="none">{s.label}</text>
                       );
                     })}
-                    {/* wide invisible hit path to select the measurement (Select OR Measure tool — B910) */}
+                    {/* wide invisible hit path to select the measurement (Select OR Measure tool — B910).
+                        NEW-1: `data-export="skip"` — a grab band is an editing affordance and its width is
+                        constant screen px, so it has no business on a sheet even while it is transparent. */}
                     {isArea
-                      ? <polygon points={ptsStr} fill="transparent" stroke="transparent" strokeWidth={14}
+                      ? <polygon data-export="skip" points={ptsStr} fill="transparent" stroke="transparent" strokeWidth={14}
                           pointerEvents={canGrab ? "all" : "none"} style={{ cursor: "move" }} onPointerDown={(e) => startMoveMeasure(e, i)} onContextMenu={(e) => onMeasureContext(e, i)} />
-                      : <polyline points={ptsStr} fill="none" stroke="transparent" strokeWidth={14}
+                      : <polyline data-export="skip" points={ptsStr} fill="none" stroke="transparent" strokeWidth={14}
                           pointerEvents={canGrab ? "stroke" : "none"} style={{ cursor: "move" }} onPointerDown={(e) => startMoveMeasure(e, i)} onContextMenu={(e) => onMeasureContext(e, i)} />}
                     {/* NEW-3 — the chip paints AFTER the hit path. An AREA's grab layer is a
                         transparent FILLED polygon covering the whole shape, so a chip drawn before
@@ -16995,8 +17080,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       <polygon points={cor} fill={col} fillOpacity={0.12} stroke={col} strokeWidth={strokeZoom(1.2, zk)} strokeDasharray={m.util === "water" ? dashZoom("5 4", zk) : undefined} />
                       <polyline points={clStr} fill="none" stroke={col} strokeWidth={clW} />
                       <polygon points={pad} fill={col} fillOpacity={0.88} stroke="#fff" strokeWidth={1} />
-                      <text x={padC.x} y={padC.y + 3} textAnchor="middle" fontSize="8" fontWeight="800" fill="#fff" pointerEvents="none">{m.fitting}</text>
-                      <text x={mid.x} y={mid.y - 5} textAnchor="middle" fontSize="9.5" fontWeight="700" fill={col} pointerEvents="none" style={INK_HALO}>{m.label}</text>
+                      {/* NEW-1 (the constant-screen-px audit): these ride `labelK` like every other
+                          on-canvas label, so a sheet exported from a wide zoom doesn't print them at
+                          several times their intended size. `labelK` is exactly 1 on screen. */}
+                      <text x={padC.x} y={padC.y + 3 * labelK} textAnchor="middle" fontSize={8 * labelK} fontWeight="800" fill="#fff" pointerEvents="none">{m.fitting}</text>
+                      <text x={mid.x} y={mid.y - 5 * labelK} textAnchor="middle" fontSize={9.5 * labelK} fontWeight="700" fill={col} pointerEvents="none" style={INK_HALO}>{m.label}</text>
                     </g>
                   );
                 }
@@ -17010,9 +17098,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     <g key={m.id} style={mkCursor} onPointerDown={(e) => startMoveMarkup(e, m.id)} onContextMenu={(e) => onMarkupContext(e, m.id)}>
                       {isSel && <polyline points={s} fill="none" stroke={SEL_BLUE} strokeWidth={tw + 5} strokeOpacity={0.4} strokeLinecap="round" strokeLinejoin="round" data-export="skip" pointerEvents="none" />}
                       <polyline points={s} fill="none" stroke={col} strokeWidth={tw} strokeDasharray={dashArray(m.dash, m.weight ?? 2.4)} strokeLinejoin="round" />
-                      {m.kind === "infwater" && pp.map((q, i) => <circle key={i} cx={q.x} cy={q.y} r={3} fill="#dc2626" stroke="#fff" strokeWidth={1} />)}
-                      {m.kind === "traced" && pp.map((q, i) => <rect key={i} x={q.x - 2} y={q.y - 2} width={4} height={4} fill={col} stroke="#fff" strokeWidth={0.8} />)}
-                      {mid && <text x={mid.x} y={mid.y - 6} textAnchor="middle" fontSize="9.5" fontWeight="700" fill={col} pointerEvents="none" style={INK_HALO}>{m.label}</text>}
+                      {/* NEW-1 (the constant-screen-px audit): vertex marks and the label ride `labelK`
+                          so they hold their intended size on a sheet instead of scaling with the zoom. */}
+                      {m.kind === "infwater" && pp.map((q, i) => <circle key={i} cx={q.x} cy={q.y} r={3 * labelK} fill="#dc2626" stroke="#fff" strokeWidth={1} />)}
+                      {m.kind === "traced" && pp.map((q, i) => <rect key={i} x={q.x - 2 * labelK} y={q.y - 2 * labelK} width={4 * labelK} height={4 * labelK} fill={col} stroke="#fff" strokeWidth={0.8} />)}
+                      {mid && <text x={mid.x} y={mid.y - 6 * labelK} textAnchor="middle" fontSize={9.5 * labelK} fontWeight="700" fill={col} pointerEvents="none" style={INK_HALO}>{m.label}</text>}
                     </g>
                   );
                 }
@@ -17029,9 +17119,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       {labelPpf > 0.12 && (m.calls || []).map((c, i) => {
                         const a = cen[i], b = cen[i + 1]; if (!a || !b) return null;
                         const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
-                        return <text key={i} x={mx} y={my - 3} textAnchor="middle" fontSize="9" fontFamily={NUM_FONT} fontVariantNumeric={TABULAR_NUMS} fill={stroke} pointerEvents="none" style={{ paintOrder: "stroke", stroke: "#fff", strokeWidth: 2.5 }}>{c.label}</text>;
+                        return <text key={i} x={mx} y={my - 3 * labelK} textAnchor="middle" fontSize={9 * labelK} fontFamily={NUM_FONT} fontVariantNumeric={TABULAR_NUMS} fill={stroke} pointerEvents="none" style={{ paintOrder: "stroke", stroke: "#fff", strokeWidth: 2.5 }}>{c.label}</text>;
                       })}
-                      <text x={cp.x} y={cp.y} textAnchor="middle" fontSize="11" fontWeight="700" fill={stroke} pointerEvents="none" style={INK_HALO}>{m.label}</text>
+                      {/* NEW-1 (the constant-screen-px audit) — `labelK`, as above. */}
+                      <text x={cp.x} y={cp.y} textAnchor="middle" fontSize={11 * labelK} fontWeight="700" fill={stroke} pointerEvents="none" style={INK_HALO}>{m.label}</text>
                     </g>
                   );
                 }
@@ -18154,7 +18245,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 if (measureMode === "count") {
                   const lp = pts[pts.length - 1];
                   return (
-                    <g pointerEvents="none">
+                    // NEW-1 — a HALF-DRAWN measurement is never document content, and every mark in
+                    // here is constant screen px. Stripped from the sheet.
+                    <g data-export="skip" pointerEvents="none">
                       {measDraft.map((p, k) => { const c = f2p(p); return (
                         <g key={k}>
                           <circle cx={c.x} cy={c.y} r={8} fill={PAL.accent + "28"} stroke={PAL.accent} strokeWidth={1.5} />
@@ -18173,7 +18266,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   ? (all.length >= 3 ? `${f0(polyArea(all))} sf` : "")
                   : (all.length >= 2 ? `${f0(pathLen(all))}′` : "");
                 return (
-                  <g pointerEvents="none">
+                  <g data-export="skip" pointerEvents="none">
                     {isArea && all.length >= 3
                       ? <polygon points={ptsStr} fill={PAL.accent} fillOpacity={0.1} stroke={PAL.accent} strokeWidth={1.5} strokeDasharray="5 4" />
                       : <polyline points={ptsStr} fill="none" stroke={PAL.accent} strokeWidth={1.5} strokeDasharray="5 4" />}
@@ -18184,7 +18277,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               })()}
               {/* draft polygon */}
               {draftPoly && (
-                <g pointerEvents="none">
+                <g data-export="skip" pointerEvents="none">
                   <polyline points={[...draftPoly, ...(cursor ? [snapPt(cursor)] : [])].map((p) => `${f2p(p).x},${f2p(p).y}`).join(" ")} fill="none" stroke={PAL.accent} strokeWidth={1.75} strokeDasharray="6 5" />
                   {draftPoly.map((p, i) => { const c = f2p(p); return <circle key={i} cx={c.x} cy={c.y} r={i === 0 ? 5 : 3.5} fill={i === 0 ? PAL.paper : PAL.accent} stroke={PAL.accent} strokeWidth={1.5} />; })}
                 </g>
@@ -18193,7 +18286,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               {draftRect && (() => { const a = f2p({ x: draftRect.x, y: draftRect.y }), pw = draftRect.w * view.ppf, ph = draftRect.h * view.ppf;
                 const curb = +settings.roadCurb || CURB, dw = draftRect.type === "road" ? Math.max(0, Math.min(draftRect.w, draftRect.h) - 2 * curb) : 0;
                 return (
-                <g pointerEvents="none"><rect x={a.x} y={a.y} width={pw} height={ph} fill={typeStyle(draftRect.type, settings).fill} fillOpacity={0.5} stroke={PAL.accent} strokeWidth={1.5} strokeDasharray="5 4" />
+                <g data-export="skip" pointerEvents="none"><rect x={a.x} y={a.y} width={pw} height={ph} fill={typeStyle(draftRect.type, settings).fill} fillOpacity={0.5} stroke={PAL.accent} strokeWidth={1.5} strokeDasharray="5 4" />
                   {(draftRect.w > 2 || draftRect.h > 2) && <text x={a.x + pw + 6} y={a.y + ph + 14} fontSize="11.5" fontFamily={NUM_FONT} fontVariantNumeric={TABULAR_NUMS} fill={PAL.accent} stroke={PAL.paper} strokeWidth={3} paintOrder="stroke" fontWeight="700">{draftRect.type === "road" ? `${f0(dw)}′ road` : `${f0(draftRect.w)}′ × ${f0(draftRect.h)}′`}</text>}
                 </g>
               ); })()}

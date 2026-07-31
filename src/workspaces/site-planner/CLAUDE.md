@@ -397,6 +397,24 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   the repo-root fixture **ui-audit/fixtures/weld-concept-a.json** (the owner's real rows — the defect IS the
   fixture, do not "fix" the numbers), the repo-root `test/` suite **hostRunHeal** and the e2e spec
   **dock-zone-host-run**.
+- **⛔ `dockZones.js` — A BONDED ZONE'S SPAN IS *ANCHORED*, AND THAT IS ONE FIELD, NOT TWO (NEW-1).**
+  `layoutZoneByKind` builds the zone centre as `b.c + u·center + tan·alongShift`, and for a long time
+  the ONLY along-wall term there was `alongShift` — the B492 corner-bump-out trim. The LENGTH came
+  from the user (`alongLen`) and the CENTRE did not, so shrinking a zone moved BOTH ends inward by
+  half the reduction (the owner's *"when I shrink the trailer parking, it shrinks from both sides"*).
+  The override is therefore an ANCHORED span — `alongLen` + **`alongAnchor`** (−1 / 0 / +1: which end
+  is held) + **`alongOff`** (feet from the chain default's matching reference) — resolved by
+  `anchoredAlongSpan`, which **COMPOSES with the bump-out trim rather than replacing it** and
+  RE-CLAMPS instead of sliding off the wall. Three rules: **(a)** an absent anchor is 0 and renders
+  byte-identically, so there is no migration — never "helpfully" default one; **(b)** the anchor
+  travels with the length at EVERY layout site — the canvas (`relayoutSide` / `courtBumpOpts`) and all
+  three `siteModel` heals — because B1340's tear detector IS the healer's own diff, so a heal that
+  re-centred would report a permanent tear against a correct canvas; **(c)** a dropped `alongLen`
+  drops its anchor with it. B1123's two intent gates still decide WHETHER a gesture may pin; this only
+  adds WHERE. **Side parking already worked this way** (`dogEar.sideParkAlongRun` stores
+  `{ run, alongShift }`) — do not "unify" it away. Guards: the repo-root `test/` suite
+  **zoneAlongAnchor** (mutation-checked 15 ways) and the e2e spec **dock-zone-anchor**, both driving
+  the owner's real rows in **ui-audit/fixtures/sylvestri-concept-d.json**.
 - **`appraisal.js` `situsAddress` / `situsKey` / `siteNameFromParcel` — the SITUS ladder (NEW-2).** The address a
   card, a plan NAME and a parcel search resolve is the LAND's, never the owner's mailing address. It is an ORDERED
   ladder (every key tested against "says situs" before any key is tested against the generic `address` catch-all),
@@ -477,6 +495,26 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   per-edge dimensions. The summary CHIP is laid out by `labelLayout.layoutLabels` (its boxes then
   become obstacles for the element-label pass) and carries `data-print-chip="measure"`, so
   `exportSheet`'s one attribute-keyed restyle prints it exactly like a parcel acreage chip.
+  **⛔ NEW-1 — `measureSheet.js` is how a measurement renders on a SHEET, and the principle it
+  encodes generalises: AN EXPORT IS A DOCUMENT, NOT A SCREENSHOT.** `buildExportSvg` CLONES the live
+  `<svg>` and strips only `data-export="skip"`, so an export is by construction exactly what was on
+  screen — which meant it inherited the canvas's level-of-detail decisions. On the owner's Sylvestri
+  print that produced a length measurement as two fat discs joined by a stub with no number anywhere:
+  the VALUE was zoom-gated (below the gate at whole-site zoom, so never in the DOM to clone) and the
+  endpoint discs had NO gate and constant screen-px sizing. Three rules now: **(1)** a measurement's
+  value renders regardless of every zoom gate on an export (`measureLabelVisible`'s `sheet` option) —
+  the per-measurement reveal zoom governs the CANVAS ONLY; **(2)** the vertex discs are an EDITING
+  AFFORDANCE (`data-export="skip"`) and an open run gets real drafting terminators instead
+  (`terminatorTicks`), while a COUNT's numbered markers are CONTENT and keep printing; **(3)** the
+  INVARIANT — a measurement never prints its geometry without its value — is enforced on the clone
+  (`enforceMeasureValueOnSheet`, LOUD-FAILURE), so a measurement that somehow loses its number is
+  OMITTED rather than printed as anonymous marks. **The general test when adding a gate: does it ask
+  "is the user zoomed in enough" (screen declutter → lift it on the sheet) or "is there physical room
+  on the SHEET" (`detailLabelVisible`/`pondParamLabelVisible`, already re-evaluated at the sheet's own
+  scale by `exportLabelScale.js` → keep it)?** Guards: the repo-root `test/` suite **measureSheet**
+  and the e2e spec **measure-export-lod** (which builds the REAL sheet through
+  `window.__plannerExportSvg` — the defect is invisible to any source reading, it exists only in the
+  clone; mutation-checked both ways).
 - `zOrder.js` — per-element `z` stacking key utilities (`nextZ`/`sortByZ`/`normalizeZ`/`ensureZ`, B671).
   `arrange.js` — pure z-order "Arrange" (`reorderByZ`/`arrangeFlags`, B820): Bring-to-Front/Send-to-Back
   over a peer set (a building reorders within its `Z_LAYER` band, a markup within the markup layer;

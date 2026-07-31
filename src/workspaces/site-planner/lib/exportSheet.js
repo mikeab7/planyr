@@ -42,6 +42,7 @@ import { buildSheetFurnitureSvg } from "./sheetFurnitureLayout.js";
 import { printSheetLayout, buildPrintSheetSvg, sheetFileName, formatDateStamp } from "./printSheet.js";
 import { printStrokeWidth, sheetFitScale } from "./exportStyle.js";
 import { sheetLabelPpf } from "./exportLabelScale.js";
+import { enforceMeasureValueOnSheet, droppedMeasureWarning } from "./measureSheet.js";
 import { jpegToPdf } from "./imagePdf.js";
 import { buildOverlayVectorFragment, esriLineFeatures, esriPolygonFeatures, contourFeatures, arrowGlyphFeatures, swapLatLng } from "./overlayVectorSvg.js";
 import { labelAnchors, placeLabels } from "./boundaryLabels.js";
@@ -192,6 +193,16 @@ export function createExportSheet(ctx) {
     const x = Math.min(a.x, b.x), y = Math.min(a.y, b.y), w = Math.abs(b.x - a.x), h = Math.abs(b.y - a.y);
     const clone = svgRef.current.cloneNode(true);
     clone.querySelectorAll('[data-export="skip"]').forEach((n) => n.remove());
+    /* NEW-1 — THE MEASUREMENT VALUE INVARIANT, asserted here rather than left to review: a
+       measurement must never print its geometry without its value. The `withFullRender` pass above
+       lifts every zoom gate off measurement labels precisely so this can't happen, but the label
+       re-frame is best-effort (a layout hiccup, or a `flushSync` that can't run mid-lifecycle,
+       falls through), and the failure it would otherwise produce is the owner's Sylvestri sheet:
+       anonymous marks where a number should be. So the last word belongs to the sheet — anything
+       still carrying geometry without a number is OMITTED, not printed nameless.
+       LOUD-FAILURE: a drop always warns; it is never a silent trim. */
+    const { dropped } = enforceMeasureValueOnSheet(clone);
+    if (dropped.length) flashWarn(droppedMeasureWarning(dropped), 8000);
     clone.setAttribute("viewBox", `${x} ${y} ${w} ${h}`);
     clone.setAttribute("preserveAspectRatio", "xMidYMid meet"); // scale to fill the box, centered
     clone.setAttribute("width", Math.round(w));
