@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-07-31 @ `30eba47` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-07-31 @ `e00e1e4` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_411 source files mapped._
+_412 source files mapped._
 
 ## infra
 
@@ -547,6 +547,8 @@ _411 source files mapped._
   - _exports_: `distToPolyline`, `measModeOf`, `measPoints`, `measuresUnderPoint`, `nextMeasureSelection`, `pointInRing`, `ringArea`
 - **`src/workspaces/site-planner/lib/measureLabel.js`** — How a measurement presents its numbers: one dominant headline + a subordinate detail line, the headline area unit chosen by magnitude (sf below an acre, ac above), one feet convention (the prime mark), and the per-edge segment dimensions
   - _exports_: `ACRE_LEAD_MIN_SF`, `fmt2`, `fmtAcres`, `fmtFeet`, `fmtInt`, `fmtSf`, `headlineIndex`, `measureChipLines`, `measureLabelModel`, `measureSegments`, `SQFT_PER_ACRE`
+- **`src/workspaces/site-planner/lib/measureSheet.js`** — How a measurement renders on an EXPORT sheet rather than the canvas: drafting terminators in place of the editing discs, and the enforced invariant that a measurement never prints its geometry without its value.
+  - _exports_: `CHIP_TEXT_ATTR`, `droppedMeasureWarning`, `enforceMeasureValueOnSheet`, `MEASURE_GROUP_ATTR`, `MEASURE_MODE_ATTR`, `MEASURE_TERM_ATTR`, `MEASURE_VERTEX_ATTR`, `sheetMeasureVerdict`, `TERMINATED_MODES`, `terminatedMode`, `TERMINATOR_HALF_PX`, `TERMINATOR_WEIGHT_PX`, `terminatorTicks`
 - **`src/workspaces/site-planner/lib/measureStyle.js`** — Per-measurement style (stroke/weight/dash/fill/opacity) + the Standards defaults stamped at creation + the per-measurement label-reveal zoom threshold and its named zoom bands; the uncalibrated amber override lives here
   - _exports_: `getAccountMeasureDefaults`, `hasLabelThreshold`, `labelRevealNote`, `MEASURE_LINE`, `MEASURE_SEL_FILL_BUMP`, `MEASURE_SEL_WEIGHT_BUMP`, `MEASURE_STD_KEYS`, `MEASURE_WARN_COLOR`, `measureDefaultStyle`, `measureLabelThreshold`, `measureLabelVisible`, `measureStdValue`, `measureStyle`, `setAccountMeasureDefaults`, `zoomBandLabel`
 - **`src/workspaces/site-planner/lib/metesAndBounds.js`** — Pure polyline offset / buffer / ring-overlap primitives, shared by easements, road corridors, pipeline corridors and the KMZ export (the deed PARSER that used to live here moved to deedParse.js so it could be deferred)

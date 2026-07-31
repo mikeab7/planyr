@@ -205,7 +205,9 @@ describe("NEW-1: measurement styling (continued)", () => {
 
 describe("NEW-2: the label reveal zoom is per-measurement, captured by click", () => {
   it("the render gates on measureLabelVisible, not the bare global floor", () => {
-    expect(SP).toMatch(/measureLabelVisible\(m, labelPpf, \{ settings, globalFloor: DIM_CALLOUT_MIN_PPF, selected: isSel \}\)/);
+    // NEW-1 amends this call with `sheet: labelFrame.sheet` — an export lifts the gate entirely
+    // (test/measureSheet.test.js owns that half). The canvas gate itself is unchanged.
+    expect(SP).toMatch(/measureLabelVisible\(m, labelPpf, \{ settings, globalFloor: DIM_CALLOUT_MIN_PPF, selected: isSel, sheet: labelFrame\.sheet \}\)/);
   });
   it("both controls CAPTURE the live zoom — no raw zoom number is ever typed", () => {
     expect(SP).toMatch(/onClick=\{\(\) => setSelMeasure\(\{ labelPpf: view\.ppf \}\)\}>Set at current zoom</);
