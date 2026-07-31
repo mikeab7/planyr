@@ -51,6 +51,10 @@ const MODULES = [
 let fails = 0;
 const ok = (cond, msg) => { if (!cond) fails++; console.log(`  ${cond ? "✓" : "✗ FAIL"} ${msg}`); };
 
+// A second, deliberately UNLINKED project — the "no schedule yet" case, which must land in the
+// Schedule module on ITS create/link screen, never bounce to the dashboard.
+const UNLINKED_GID = "grp-no-schedule", UNLINKED_NAME = "Katy Freeway Tract";
+
 const site = (gid, name) => ({
   id: gid, groupId: gid, site: name, name: "Concept A", status: "active",
   origin: { lat: 29.77, lon: -95.38 }, county: "chambers",
@@ -58,7 +62,9 @@ const site = (gid, name) => ({
   updatedAt: Date.now(),
 });
 const seedScript = `(() => { try {
-  localStorage.setItem('planarfit:sites:v1', JSON.stringify(${JSON.stringify({ [GID]: site(GID, SITE_NAME) })}));
+  localStorage.setItem('planarfit:sites:v1', JSON.stringify(${JSON.stringify({
+    [GID]: site(GID, SITE_NAME), [UNLINKED_GID]: site(UNLINKED_GID, UNLINKED_NAME),
+  })}));
   localStorage.removeItem('planarfit:currentSite:v1');
 } catch (e) {} })();`;
 
@@ -196,9 +202,38 @@ async function grandPortCase(browser) {
   await ctx.close();
 }
 
+// ── PART C — a project with NO linked schedule: an empty state, never a bounce ──────────────
+// The owner ruled this cause out for Grand Port, but it is the recurring disease in this codebase
+// (the app knowing something and saying nothing), so it is asserted as its own case: switching into
+// Schedule from an unlinked project must land you IN Schedule, on that project's create-or-link
+// screen, naming it — not silently on the dashboard, which reads as a bug.
+async function unlinkedProjectCase(browser) {
+  console.log("\nPART C — a project with NO linked schedule");
+  const ctx = await newCtx(browser, { stubSequence: true });
+  const page = await ctx.newPage();
+  await page.goto(`${BASE}#/project/${UNLINKED_GID}/site`, { waitUntil: "load" });
+  await page.waitForTimeout(2600);
+  await page.locator("[data-testid=module-tab-scheduler]:visible").first().click({ timeout: 6000 }).catch(() => {});
+  await page.waitForTimeout(1200);
+  // The embed reports its projects — none of them linked to this site.
+  await postNav(page, "projects", SCHED_ID);
+  await page.waitForTimeout(2000);
+
+  ok(routeProject(await hashOf(page)) === UNLINKED_GID,
+     `the switch keeps ${UNLINKED_NAME} in the route (${await hashOf(page)})`);
+  ok(routeModuleSlug(await hashOf(page)) === "schedule", `you are IN the Schedule module, not bounced elsewhere`);
+  const text = await page.evaluate(() => document.body.innerText);
+  ok(text.includes(UNLINKED_NAME), `the screen names ${UNLINKED_NAME} — the project you came from`);
+  ok(/link|create/i.test(text), `it offers the obvious next action (create or link a schedule)`);
+  ok(!text.includes(UNLINKED_GID), `it never shows the raw project id as a name (B560)`);
+  await page.screenshot({ path: new URL("./screens/module-context-unlinked.png", import.meta.url).pathname });
+  await ctx.close();
+}
+
 const browser = await chromium.launch({ executablePath: EXEC, args: ["--no-sandbox"] });
 await transitionTable(browser);
 await grandPortCase(browser);
+await unlinkedProjectCase(browser);
 await browser.close();
 
 console.log("\n" + (fails === 0 ? "✅ PASS — module switching preserves project context" : `❌ FAIL — ${fails} assertion(s)`));
