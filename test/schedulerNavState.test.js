@@ -14,7 +14,9 @@
  * workspace ErrorBoundary.
  */
 import { describe, it, expect } from "vitest";
-import { sanitizeProjects, parseNavState, deriveCurrentProject, findBySiteId, needsScheduleCarryIn } from "../src/workspaces/scheduler/lib/navState.js";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { sanitizeProjects, parseNavState, deriveCurrentProject, findBySiteId, needsScheduleCarryIn, dashboardNavActions } from "../src/workspaces/scheduler/lib/navState.js";
 
 const WELL_FORMED = [{ id: 1, name: "Goose Creek" }, { id: 3, name: "Grand Port Logistics" }];
 const navMsg = (over = {}) => ({ source: "planar-seq", type: "planar:nav-state", section: "projects", activeId: 3, projects: WELL_FORMED, ...over });
@@ -154,5 +156,56 @@ describe("needsScheduleCarryIn — re-drive the grid onto the routed site's sche
 
   it("true for a routed site with no linked schedule — post is an inert no-op in the iframe; the resolution panel handles create/link", () => {
     expect(needsScheduleCarryIn(LINKED, "unlinked-site", 1)).toBe(true);
+  });
+
+  /* NEW-2 — "showing the routed site's schedule" is TWO facts: the right project is ACTIVE and the
+   * embed is on its PROJECTS section rather than its own Dashboard (reports). Comparing only the
+   * active id is what made jumping Site Planner → Schedule inside a project land on the dashboard:
+   * the embed persists `section:"reports"` after a Dashboard press while `aPid` still names the
+   * routed project's schedule, so the carry-in answered "nothing to do" and posted nothing. */
+  it("true when the routed schedule is active but the embed is on its own Dashboard (the reported landing)", () => {
+    expect(needsScheduleCarryIn(LINKED, "gp", 2, "reports")).toBe(true);
+  });
+
+  it("false only when the routed schedule is active AND the embed is on the projects section", () => {
+    expect(needsScheduleCarryIn(LINKED, "gp", 2, "projects")).toBe(false);
+  });
+
+  it("a deliberate Dashboard press inside Schedule is NOT caught by this — it clears the routed site first", () => {
+    // dashboardNavActions sets clearRoute when a project is routed, so by the time the embed
+    // reports "reports" the route carries nothing and there is nothing to carry in.
+    expect(dashboardNavActions({ projectId: "gp" }).clearRoute).toBe(true);
+    expect(needsScheduleCarryIn(LINKED, null, 2, "reports")).toBe(false);
+  });
+
+  it("an omitted section keeps the previous behaviour exactly (older caller / not reported yet)", () => {
+    for (const s of [undefined, null]) {
+      expect(needsScheduleCarryIn(LINKED, "gp", 2, s)).toBe(false);
+      expect(needsScheduleCarryIn(LINKED, "gc", 2, s)).toBe(true);
+    }
+  });
+});
+
+/* NEW-2 — source guards on the two Scheduler.jsx decisions the pure helpers can't express.
+ * Both are ORDERING facts, and in both the old order let the embed's section outrank the URL. */
+describe("Scheduler.jsx — the ROUTE outranks the embed's section", () => {
+  const SRC = readFileSync(fileURLToPath(new URL("../src/workspaces/scheduler/Scheduler.jsx", import.meta.url)), "utf8");
+
+  it("the carry-in passes `section` to needsScheduleCarryIn", () => {
+    expect(SRC).toMatch(/needsScheduleCarryIn\(projects,\s*projectId,\s*activeId,\s*section\)/);
+    // …and re-runs when the section changes, or a Dashboard→projects transition is never noticed.
+    expect(SRC).toMatch(/\[ready,\s*projectId,\s*projects,\s*activeId,\s*section\]/);
+  });
+
+  it('the "already carried" latch is scoped to the projects section, so a return visit re-drives', () => {
+    expect(SRC).toMatch(/carriedRef\.current === projectId && section === "projects"/);
+  });
+
+  it("a routed project names the breadcrumb even while the embed reports its Dashboard", () => {
+    const i = SRC.indexOf("let currentProject;");
+    const block = SRC.slice(i, i + 420);
+    // The routed-project branch must come FIRST; `section === "reports"` may only answer for a
+    // route with no project (which is what pressing Dashboard leaves behind).
+    expect(block.indexOf("if (projectId != null)")).toBeLessThan(block.indexOf('section === "reports"'));
   });
 });

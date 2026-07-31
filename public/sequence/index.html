@@ -9779,38 +9779,56 @@ const ganttNameWeight = (depth, kind, bold) => {
 // over-estimate so a flip/lift triggers before a real clip, never after). (B393)
 const estLabelWidth = (s, fs) => Math.max(1, String(s == null ? "" : s).length) * fs * 0.6 + 4;
 
-// THE placement helper. Given a bar/bracket/diamond's geometry, the label width, the
-// chosen alignment and the row-band height, decide where the name goes and how — never
-// on the fill. Mirrors the overflow-outside logic of site-planner/lib/labelLayout.js
-// (can't import it — the /sequence/ iframe is a separate bundle). Pure geometry. (B393)
-//   kind     "leaf" | "summary" | "milestone"
-//   align    "left" | "center" | "right"
+// THE placement helper. Given a bar/bracket/diamond's geometry, the label width and the chosen
+// alignment, decide where the name goes. ONE RULE, no per-row variation, at every zoom:
+//
+//   ⛔ EVERY task name renders ABOVE its bar. Never centered on it, never inside it, never
+//      beside it. `align` chooses only the HORIZONTAL ANCHOR — which end of the bar the caption
+//      hangs off (left edge / midpoint / right edge) — never whether it sits on the bar.
+//
+// NEW-1 (owner, 2026-07-31, Grand Port → Schedule → Split view at 33%): *"on the bar in the Gantt
+// chart, the task name is IN THE MIDDLE of the Gantt chart bar — which we have talked about before
+// and you proposed — but I don't want it in the middle. I just want it ABOVE the bar just like
+// every other bar."* This AMENDS B393, which shipped the per-kind ladder this replaces: Center =
+// on a white contrast "plate" ON the bar when the name fit inside it, Left = "before" the bar and
+// Right = "after" it (both inline, vertically centered on the bar), each falling back to a caption
+// above only when it would run off the chart. B393's stated goal was "never painted on the bar
+// FILL", and the plate was its answer to the earlier bug where centered names were covered by the
+// bar — a legible backing rather than a move off the bar. It worked as designed; the owner simply
+// does not want the name on the bar at all. So the plate is not made better here, it is removed,
+// and the case it protected (a name wider than its bar) is handled by the same above-the-bar
+// caption every other row already used.
+//
+// The B1188 invariant still holds and is now trivially true: a FIT failure may relocate or shorten
+// a label but may NEVER blank it. There is no branch here that returns nothing — a caption too wide
+// for the chart is slid horizontally by `clampX` until it fits, never dropped. (Collision-driven
+// declutter, which MAY legitimately hide, does not exist on this surface: rows are disjoint
+// vertical bands and each carries exactly one name, so a name can only ever contend with itself.)
+//
+//   kind     "leaf" | "summary" | "milestone" — kept for callers/telemetry; placement no longer
+//            branches on it, which is precisely what makes the rule uniform
+//   align    "left" | "center" | "right" — horizontal anchor only
 //   bx,bw    bar left x + width (px); milestone passes its diamond center as bx, bw 0
 //   rowTop   y of the row band's top
-//   barMidY  vertical center of the bar/diamond (for inline labels)
-//   barTopY  top y of the bar/span/diamond (so an "above" caption clears it)
+//   barTopY  top y of the bar/span/diamond — the caption is seated in the clear air above it
 //   labelW   estimated label width
-//   padBefore/padAfter  px already taken by a data label hugging that side of the bar
 //   chartL/chartR  horizontal clip — a label must stay within (no horizontal scroll)
-//   gap, capHalf   spacing + caption half-height
-// Returns { x, y, anchor:"start"|"middle"|"end", mode:"after"|"before"|"plate"|"above" }.
-const placeGanttLabel = ({kind, align, bx, bw, rowTop, barMidY, barTopY, labelW,
-                          padBefore = 0, padAfter = 0, chartL, chartR, gap = 6, capHalf = 6, rowH = null}) => {
+//   capHalf  caption half-height; rowH the row band's height (B629 confinement)
+// Returns { x, y, anchor:"start"|"middle"|"end", mode:"above" }.
+const placeGanttLabel = ({align, bx, bw, rowTop, barTopY, labelW,
+                          chartL, chartR, capHalf = 6, rowH = null}) => {
   const barStart = bx, barEnd = bx + bw;
-  // Keep a label's vertical box inside its OWN row band [rowTop, rowTop+rowH] when the band is
-  // known. Bars are bottom-aligned, so an inline (beside-the-bar) label centered on the bar sits
-  // near the band bottom and would otherwise poke ~2px into the next row — at low horizontal zoom
-  // that stacks up into the cross-row label↔bar / label↔label overlaps the owner reported. Lifting
-  // each label to fit its own band makes a cross-row collision geometrically impossible (rows are
+  // Keep a caption's vertical box inside its OWN row band [rowTop, rowTop+rowH] when the band is
+  // known, so a cross-row label↔bar / label↔label overlap is geometrically impossible (rows are
   // disjoint vertical bands). A pure no-op when rowH is not supplied. (B629)
   const confineY = r => {
-    if (rowH == null || r.mode === "plate") return r;   // a center "plate" caption sits ON its own bar by design — keep it bar-centered, don't lift it
+    if (rowH == null) return r;
     const y = Math.max(rowTop + capHalf, Math.min(rowTop + rowH - capHalf, r.y));
     return y === r.y ? r : {...r, y};
   };
-  // An "above" caption is vertically centered in the upper part of the row band: it sits
-  // just above the bar/span (clear air) but never rides above the row top (which, for the
-  // topmost summary, is the timeline header).
+  // The caption is vertically centered in the upper part of the row band: it sits just above the
+  // bar/span (clear air) but never rides above the row top (which, for the topmost summary, is the
+  // timeline header).
   const aboveY = Math.max(rowTop + capHalf,
                           Math.min(rowTop + capHalf + 1, (barTopY != null ? barTopY : rowTop) - 1 - capHalf));
   const clampX = (x, anchor) => {
@@ -9823,42 +9841,19 @@ const placeGanttLabel = ({kind, align, bx, bw, rowTop, barMidY, barTopY, labelW,
   };
   const above = (x, anchor) => confineY({ x: clampX(x, anchor), y: aboveY, anchor, mode: "above" });
 
-  if (kind === "summary")            // caption ALWAYS above the thin span; align anchors it
-    return align === "left"  ? above(barStart, "start")
-         : align === "right" ? above(barEnd,   "end")
-         :                      above(barStart + bw / 2, "middle");
-
-  if (kind === "milestone") {        // Left = before / Center = above / Right = after
-    const lo = barStart - 5, hi = barEnd + 5;     // diamond half-width ≈ 5
-    if (align === "center") return above(bx, "middle");
-    if (align === "left") {
-      const x = lo - gap - padBefore;
-      return (x - labelW < chartL) ? above(bx, "middle") : confineY({ x, y: barMidY, anchor: "end", mode: "before" });
-    }
-    const x = hi + gap + padAfter;                // right
-    if (x + labelW <= chartR) return confineY({ x, y: barMidY, anchor: "start", mode: "after" });
-    const xl = lo - gap - padBefore;
-    return (xl - labelW >= chartL) ? confineY({ x: xl, y: barMidY, anchor: "end", mode: "before" }) : above(bx, "middle");
-  }
-
-  // leaf
-  if (align === "center")
-    return (labelW <= bw - 4) ? confineY({ x: barStart + bw / 2, y: barMidY, anchor: "middle", mode: "plate" })
-                              : above(barStart + bw / 2, "middle");
-  if (align === "left") {
-    const x = barStart - gap - padBefore;
-    return (x - labelW < chartL) ? above(barStart, "start") : confineY({ x, y: barMidY, anchor: "end", mode: "before" });
-  }
-  const x = barEnd + gap + padAfter;              // right (default)
-  if (x + labelW <= chartR) return confineY({ x, y: barMidY, anchor: "start", mode: "after" });
-  const xl = barStart - gap - padBefore;          // flip left
-  return (xl - labelW >= chartL) ? confineY({ x: xl, y: barMidY, anchor: "end", mode: "before" }) : above(barEnd, "end");
+  // A milestone has bw 0, so all three anchors resolve against its diamond centre — the caption
+  // still hangs left of / over / right of the glyph, and still above it.
+  return align === "left"  ? above(barStart, "start")
+       : align === "right" ? above(barEnd,   "end")
+       :                     above(barStart + bw / 2, "middle");
 };
 
-// Cap a summary caption's font size so the whole caption fits in the HEADROOM above its bracket
-// (the gap between the row top and the bracket's span). At compressed row heights the default
-// caption is taller than that gap and sits on its own bracket — the "Utilities label touches its
-// summary bracket" bug. Shrink to fit, floored so it stays legible. (B629)
+// Cap a caption's font size so the whole caption fits in the HEADROOM above its own glyph (the gap
+// between the row top and the bar / bracket / diamond). At compressed row heights the default
+// caption is taller than that gap and would sit on the thing it names — originally the "Utilities
+// label touches its summary bracket" bug (B629), and since NEW-1 made EVERY name a caption above
+// its bar, the same cap now applies to leaves and milestones too. Shrink to fit, floored so it
+// stays legible.
 const fitCaptionFs = (baseFs, headroom) => Math.max(6.5, Math.min(baseFs, headroom / 1.3));
 
 // Dependency connectors are CURVED (cubic bézier) — owner preference (B396, reverting the
@@ -10064,19 +10059,18 @@ function GanttView({tasks, updateTask, pxPerDay, onZoomChange, scrollRef, onScro
   const labelAlign = resolveLabelAlign(proj);
   const chartL = 0, chartR = Math.max(totalW, 400);
   const NAME_SIZE = lvl => [9.5, 8.5, 8.5, 8][Math.min(lvl || 0, 3)];
-  const padOf = txt => (txt ? estLabelWidth(txt, 8) + 6 : 0);   // room a hugging data label needs
   // One name renderer for all three kinds: uniform near-black ink, weight-by-level, an
   // optional contrast plate for the centered-on-bar case. (x,y) is the alignment anchor +
   // vertical center, in the row's local space; the transform seats the box on it.
+  // NEW-1: the caption always sits in the clear air ABOVE its glyph, so there is no on-bar
+  // "plate" variant any more — no contrast backing, because nothing is painted on a fill.
   const GanttName = ({task, kind, place, fs}) => {
     const ax = place.anchor === "middle" ? "-50%" : place.anchor === "end" ? "-100%" : "0";
-    const plate = place.mode === "plate";
     return <span data-gantt-name={task.id} data-gantt-mode={place.mode} style={{position:"absolute",
       left:place.x, top:place.y, transform:`translate(${ax}, -50%)`,
       fontSize:fs, lineHeight:1.2, fontWeight:ganttNameWeight(task.level, kind, task.bold),
       fontStyle:task.italic?"italic":"normal", color:GANTT_INK,
-      fontFamily:"'Inter',system-ui,sans-serif", whiteSpace:"nowrap", pointerEvents:"none", zIndex:7,
-      ...(plate ? {background:"rgba(255,255,255,0.85)", padding:"0 3px", borderRadius:2} : {})}}>{task.name}</span>;
+      fontFamily:"'Inter',system-ui,sans-serif", whiteSpace:"nowrap", pointerEvents:"none", zIndex:7}}>{task.name}</span>;
   };
 
   const handleScroll = e => { setScrollTop(e.currentTarget.scrollTop); if (onScroll) onScroll(e); };
@@ -10286,11 +10280,11 @@ function GanttView({tasks, updateTask, pxPerDay, onZoomChange, scrollRef, onScro
                     milestones (z5, the data layer) → bar + name labels (z6–7, top). */}
                 {/* a duration-0 PARENT renders as a summary bracket, not a diamond (B2) — so gate milestone on !isSummary */}
                 {(isMilestone && !isSummary) ? (<>
-                  {(() => {                                    // milestone name: Left=before / Center=above / Right=after the diamond (B393)
-                    const fs = NAME_SIZE(task.level), bl = settings?.barLabels;
+                  {(() => {                                    // milestone name: ALWAYS above the diamond; align anchors it L/C/R (NEW-1)
+                    const mileTopY = ROW_H-10.5;
+                    const fs = fitCaptionFs(NAME_SIZE(task.level), mileTopY);
                     const place = placeGanttLabel({kind:"milestone", align:labelAlign, bx, bw:0, rowTop:0,
-                      barMidY:ROW_H-7.5, barTopY:ROW_H-10.5, labelW:estLabelWidth(task.name, fs),
-                      padBefore:padOf(bl?barLabelText(task,bl.left,bl.year):""), padAfter:padOf(bl?barLabelText(task,bl.right,bl.year):""),
+                      barTopY:mileTopY, labelW:estLabelWidth(task.name, fs),
                       chartL, chartR, capHalf:Math.round(fs*0.58), rowH:ROW_H});
                     return <GanttName task={task} kind="milestone" place={place} fs={fs} />;
                   })()}
@@ -10332,7 +10326,7 @@ function GanttView({tasks, updateTask, pxPerDay, onZoomChange, scrollRef, onScro
                     // Summary caption ALWAYS above the thin span (a near-full-width top summary
                     // has no side room); alignment anchors it L/center/R (B393 — the top-summary fix).
                     const place = placeGanttLabel({kind:"summary", align:labelAlign, bx, bw, rowTop:0,
-                      barMidY:spanTop+SPAN/2, barTopY:spanTop, labelW:estLabelWidth(task.name, fs),
+                      barTopY:spanTop, labelW:estLabelWidth(task.name, fs),
                       chartL, chartR, capHalf:Math.round(fs*0.58), rowH:ROW_H});
                     return (<>
                       <GanttName task={task} kind="summary" place={place} fs={fs} />
@@ -10344,11 +10338,11 @@ function GanttView({tasks, updateTask, pxPerDay, onZoomChange, scrollRef, onScro
                     </>);
                   })()
                 ) : (<>
-                  {(() => {                                    // leaf name: Right=after / Left=before / Center=on a plate; auto-flip/lift, never on the fill (B393)
-                    const fs = NAME_SIZE(task.level), bl = settings?.barLabels, barTopY = ROW_H-LEAF_H-1;
+                  {(() => {                                    // leaf name: ALWAYS above the bar; align anchors it L/C/R (NEW-1, amending B393's on-bar plate)
+                    const barTopY = ROW_H-LEAF_H-1;
+                    const fs = fitCaptionFs(NAME_SIZE(task.level), barTopY);
                     const place = placeGanttLabel({kind:"leaf", align:labelAlign, bx, bw, rowTop:0,
-                      barMidY:barTopY+LEAF_H/2, barTopY, labelW:estLabelWidth(task.name, fs),
-                      padBefore:padOf(bl?barLabelText(task,bl.left,bl.year):""), padAfter:padOf(bl?barLabelText(task,bl.right,bl.year):""),
+                      barTopY, labelW:estLabelWidth(task.name, fs),
                       chartL, chartR, capHalf:Math.round(fs*0.58), rowH:ROW_H});
                     return <GanttName task={task} kind="leaf" place={place} fs={fs} />;
                   })()}
@@ -11906,6 +11900,18 @@ function buildGanttSVG(projects, svgWidth, orientation, opts = {}) {
   const noLabels = !!opts.noLabels;
   const ROW_H=18, LABEL_W=noLabels ? 0 : (orientation==="landscape"?200:155);
   const ganttW=svgWidth-LABEL_W;
+  // NEW-1 / PDF-PARITY — EVERY glyph in a print row is BOTTOM-ALIGNED on one baseline, exactly as
+  // on screen, so the always-above name caption owns the row's upper band. The summary bracket
+  // already sat on this baseline; the leaf bar and the milestone diamond used to be vertically
+  // CENTRED (an old screen↔print drift), which left a 9px-tall caption nowhere to go but on top of
+  // the glyph it names. The bar renderer AND the dependency router both read these helpers, so the
+  // two can no longer disagree about where a glyph is.
+  const GLYPH_BASE=ROW_H-2;                       // shared bottom baseline, px below the row top
+  const MILE_HALF=Math.min(4, ROW_H*0.25);        // diamond half-height (was a fixed 5, centred)
+  const leafBand=yTop=>{const h=ROW_H*0.30, top=yTop+GLYPH_BASE-h; return {top,bot:top+h,mid:top+h/2,h};};
+  const mileBand=yTop=>{const c=yTop+GLYPH_BASE-MILE_HALF; return {top:c-MILE_HALF,bot:c+MILE_HALF,mid:c,half:MILE_HALF};};
+  const summaryBand=(yTop,depth)=>{const dd=Math.min(depth,3), SPAN=[4,3.5,3,3][dd], LEG=[0.14,0.10,0.08,0.06][dd]*ROW_H;
+    const top=yTop+GLYPH_BASE-LEG-SPAN; return {top,bot:top+SPAN+LEG,mid:top+SPAN/2,SPAN,LEG};};
   const pd=s=>new Date(s+"T12:00:00"), fd=d=>d.toISOString().slice(0,10);
   const allTasks=projects.flatMap(p=>p.tasks);
   if(!allTasks.length) return "";
@@ -11929,7 +11935,6 @@ function buildGanttSVG(projects, svgWidth, orientation, opts = {}) {
     const xo0=d=>LABEL_W+Math.round((pd(d)-pd(minD))/DAY*ppd0);
     let leadPx=0, trailPx=0;
     try{
-      const padOf=txt=>txt?estLabelWidth(txt,6.5)+5:0;
       allTasks.forEach(t=>{
         if(!t||!t.start||!t.end||isNaN(pd(t.start))||isNaN(pd(t.end))) return;
         const proj=projects.find(p=>p.tasks.some(x=>x.id===t.id));
@@ -11941,10 +11946,8 @@ function buildGanttSVG(projects, svgWidth, orientation, opts = {}) {
         const align=opts.labelAlign||resolveLabelAlign(proj);
         const fs=[9,8.5,8,7.5][Math.min(depth,3)];
         const nm=t.name==null?"":String(t.name), lw=estLabelWidth(nm,fs);
-        const bl=(opts.barLabels&&!isParent)?opts.barLabels:null;
-        const place=placeGanttLabel({kind,align,bx,bw:isMile?0:bw,rowTop:0,barMidY:0,barTopY:0,labelW:lw,
-          padBefore:padOf(bl?barLabelText(t,bl.left,bl.year):""),padAfter:padOf(bl?barLabelText(t,bl.right,bl.year):""),
-          chartL:-1e9,chartR:1e9,gap:5,capHalf:Math.round(fs*0.6)});
+        const place=placeGanttLabel({kind,align,bx,bw:isMile?0:bw,rowTop:0,barTopY:0,labelW:lw,
+          chartL:-1e9,chartR:1e9,capHalf:Math.round(fs*0.6)});
         const x0=place.anchor==="start"?place.x:place.anchor==="middle"?place.x-lw/2:place.x-lw, x1=x0+lw;
         if(LABEL_W-x0>leadPx) leadPx=LABEL_W-x0;
         if(x1-svgWidth>trailPx) trailPx=x1-svgWidth;
@@ -12044,16 +12047,15 @@ function buildGanttSVG(projects, svgWidth, orientation, opts = {}) {
       // magnitudes compressed a touch vs B210 so the always-above caption has clear air (B393).
       const dd=Math.min(depth,3);
       const NAVY=["#2B3340","#46506A","#6E7790","#8A93A8"][dd];
-      const SPAN=[4,3.5,3,3][dd], LEG=[0.14,0.10,0.08,0.06][dd]*ROW_H, legW=1.1;
-      const sTop=y+ROW_H-2-LEG-SPAN;
+      const legW=1.1, sb=summaryBand(y,depth), SPAN=sb.SPAN, LEG=sb.LEG, sTop=sb.top;
       barSvg=`<rect x="${bx}" y="${sTop}" width="${bw}" height="${SPAN}" rx="1" fill="${NAVY}"/>`
         +`<rect x="${bx}" y="${sTop}" width="${legW}" height="${SPAN+LEG}" fill="${NAVY}"/>`
         +`<rect x="${bx+bw-legW}" y="${sTop}" width="${legW}" height="${SPAN+LEG}" fill="${NAVY}"/>`;
     }else if(isMilestone){
-      const done = pct>=100;
-      barSvg=`<polygon points="${bx},${midY-5} ${bx+5},${midY} ${bx},${midY+5} ${bx-5},${midY}" fill="${done?GRAY:'#fff'}" stroke="${GRAY}" stroke-width="1.1"/>`;
+      const done = pct>=100, mb=mileBand(y), h=mb.half;
+      barSvg=`<polygon points="${bx},${mb.top} ${bx+h},${mb.mid} ${bx},${mb.bot} ${bx-h},${mb.mid}" fill="${done?GRAY:'#fff'}" stroke="${GRAY}" stroke-width="1.1"/>`;
     }else{
-      const LH=ROW_H*0.30, by=midY-LH/2, bw2=Math.max(bw,5), r=LH/2;
+      const lb=leafBand(y), LH=lb.h, by=lb.top, bw2=Math.max(bw,5), r=LH/2;
       if(pct>=100){
         barSvg=`<rect x="${bx}" y="${by}" width="${bw2}" height="${LH}" rx="${r}" fill="${GRAY}"/>`;                         // Complete → solid
       }else if(pct<=0){
@@ -12076,21 +12078,15 @@ function buildGanttSVG(projects, svgWidth, orientation, opts = {}) {
     if(opts.barNames!==false && nameInView){
       const kind = isMilestone?"milestone":isParent?"summary":"leaf";
       const align = opts.labelAlign || resolveLabelAlign(proj);
-      let barTopY, barMidY, bwN=bw;
-      if(isMilestone){ barTopY=midY-5; barMidY=midY; bwN=0; }
-      else if(isParent){ const dd=Math.min(depth,3); const SP=[4,3.5,3,3][dd], LG=[0.14,0.10,0.08,0.06][dd]*ROW_H; barTopY=y+ROW_H-2-LG-SP; barMidY=barTopY+SP/2; }
-      else { const LH=ROW_H*0.30; barTopY=midY-LH/2; barMidY=midY; }
-      // Summary caption auto-fits the headroom above its bracket so it clears its own span at
-      // compressed row heights (B629, mirrors the on-screen fix).
-      const fs = isParent ? fitCaptionFs([9,8.5,8,7.5][Math.min(depth,3)], barTopY-y) : [9,8.5,8,7.5][Math.min(depth,3)];
-      const pad = txt => txt ? estLabelWidth(txt,6.5)+5 : 0;
-      const bl = (opts.barLabels && !isParent) ? opts.barLabels : null;
+      const band = isMilestone ? mileBand(y) : isParent ? summaryBand(y,depth) : leafBand(y);
+      const barTopY = band.top, bwN = isMilestone ? 0 : bw;
+      // EVERY caption auto-fits the headroom above its own glyph so it clears it at this row
+      // height (B629's summary rule, now uniform — NEW-1 made every name a caption above its bar).
+      const fs = fitCaptionFs([9,8.5,8,7.5][Math.min(depth,3)], barTopY-y);
       const nm = t.name==null?"":String(t.name);
       const lw = estLabelWidth(nm, fs);
-      const place = placeGanttLabel({kind, align, bx, bw:bwN, rowTop:y, barMidY, barTopY,
-        labelW:lw, padBefore:pad(bl?barLabelText(t,bl.left,bl.year):""),
-        padAfter:pad(bl?barLabelText(t,bl.right,bl.year):""), chartL:LABEL_W, chartR:svgWidth,
-        gap:5, capHalf:Math.round(fs*0.6), rowH:ROW_H});
+      const place = placeGanttLabel({kind, align, bx, bw:bwN, rowTop:y, barTopY,
+        labelW:lw, chartL:LABEL_W, chartR:svgWidth, capHalf:Math.round(fs*0.6), rowH:ROW_H});
       // Collected, not emitted: the in-chart names are de-collided AFTER the row pass so
       // co-dated labels never overprint each other (B402), then drawn on the top layer.
       nameRecords.push({x:place.x, y:place.y, anchor:place.anchor, mode:place.mode, lw, fs,
@@ -12116,14 +12112,15 @@ function buildGanttSVG(projects, svgWidth, orientation, opts = {}) {
       // target's TOP edge near its start (never 9 o'clock, so it clears the start-date label); an
       // up-link mirrors it. A bar's outbound links FAN across the exit arc instead of bundling.
       const isParentTask=task=>p.tasks.some(x=>x.parentId===task.id);
+      // Reads the SAME bottom-aligned glyph bands the bar renderer draws (NEW-1), so an arrow can
+      // never attach to where a glyph used to be.
       const glyphEdges=(task,gidx)=>{
-        const yTop=HEADER_H+gidx*ROW_H, midY=yTop+ROW_H*0.5, sX=xOf(task.start), eX=xOf(task.end);
+        const yTop=HEADER_H+gidx*ROW_H, sX=xOf(task.start), eX=xOf(task.end);
         if(isParentTask(task)){                                                          // summary bracket (before milestone — a duration-0 parent draws as a bracket)
-          const dd=getDepth(p.tasks,task.id), SP=[4,3.5,3,3][dd], LG=[0.14,0.10,0.08,0.06][dd]*ROW_H;
-          const top=yTop+(ROW_H-2-LG-SP); return {startX:sX,endX:eX,topY:top,botY:top+SP+LG,rowTop:yTop};
+          const b=summaryBand(yTop,getDepth(p.tasks,task.id)); return {startX:sX,endX:eX,topY:b.top,botY:b.bot,rowTop:yTop};
         }
-        if(task.duration===0) return {startX:sX,endX:sX,topY:midY-5,botY:midY+5,rowTop:yTop};        // diamond vertices
-        const LH=ROW_H*0.30; return {startX:sX,endX:Math.max(eX,sX+5),topY:midY-LH/2,botY:midY+LH/2,rowTop:yTop}; // leaf bar
+        if(task.duration===0){ const b=mileBand(yTop); return {startX:sX,endX:sX,topY:b.top,botY:b.bot,rowTop:yTop}; }  // diamond vertices
+        const b=leafBand(yTop); return {startX:sX,endX:Math.max(eX,sX+5),topY:b.top,botY:b.bot,rowTop:yTop};            // leaf bar
       };
       // Right edge x of a target's start-date bar-label (text-anchor:end at bx-3 / bx-8 for a
       // milestone) when start labels are shown — the arrowhead exclusion zone (B396 re-report).
@@ -12199,9 +12196,9 @@ function buildGanttSVG(projects, svgWidth, orientation, opts = {}) {
   // failure falls back to the un-nudged labels.
   let nameLayer="";
   const emitName=r=>{
-    const x0=r.anchor==="middle"?r.x-r.lw/2:r.anchor==="end"?r.x-r.lw:r.x;
-    const plate=r.mode==="plate"?`<rect x="${(x0-2).toFixed(1)}" y="${(r.y-r.fs*0.72).toFixed(1)}" width="${(r.lw+4).toFixed(1)}" height="${(r.fs*1.44).toFixed(1)}" rx="2" fill="#fff" opacity="0.85"/>`:"";
-    return plate+`<text x="${r.x.toFixed(1)}" y="${r.y.toFixed(1)}" font-size="${r.fs}" font-weight="${r.weight}" fill="${GANTT_INK}" text-anchor="${r.anchor}" dominant-baseline="central" font-family="Arial,sans-serif"${r.italic?' font-style="italic"':''}>${r.str}</text>`;
+    // No contrast plate: since NEW-1 every name is a caption in the clear air above its glyph, so
+    // there is nothing to knock out behind it.
+    return `<text x="${r.x.toFixed(1)}" y="${r.y.toFixed(1)}" font-size="${r.fs}" font-weight="${r.weight}" fill="${GANTT_INK}" text-anchor="${r.anchor}" dominant-baseline="central" font-family="Arial,sans-serif"${r.italic?' font-style="italic"':''}>${r.str}</text>`;
   };
   try{
     const boxOf=r=>{const x0=r.anchor==="middle"?r.x-r.lw/2:r.anchor==="end"?r.x-r.lw:r.x;return {x0,x1:x0+r.lw,y0:r.y-r.fs*0.72,y1:r.y+r.fs*0.72};};
