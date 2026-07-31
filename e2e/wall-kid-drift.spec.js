@@ -11,8 +11,9 @@
  *   • both end sidewalk runs = building depth + the bump projection (the span rule, NEW-2);
  *   • the parking-to-sidewalk gap is 0 on BOTH ends — the west field's bare-ground strip is gone
  *     and the east field has no overlap (NEW-3);
- *   • the east field (the one the owner slid himself for the fire-lane curb return) has not moved
- *     ALONG the wall and has not been re-lengthened — the owner's amendment, asserted explicitly.
+ *   • a RECORDED east-field length (`sideParkFit`) survives a real Depth retype and is re-clamped
+ *     to the host — while an UNRECORDED one now FOLLOWS the wall instead of outliving it. That is
+ *     the 2026-07-31 owner amendment, asserted in both directions.
  *
  * Logged out + no external GIS, so it runs here (VERIFICATION.md rule 4 — attempt before you park).
  * Run: PW_CHROME=/opt/pw-browsers/chromium npx playwright test e2e/wall-kid-drift.spec.js --project=chromium
@@ -141,28 +142,38 @@ test.describe("NEW-2 / NEW-3 — wall strips + side parking on the owner's real 
     expect(errors, errors.join("\n")).toEqual([]);
   });
 
-  test("the east field the owner positioned himself does not move ALONG the wall", async ({ page }) => {
+  /* ⛔ AMENDED BY THE OWNER 2026-07-31, and rewritten rather than deleted so the change of contract
+   * is visible in the suite. These two cases used to assert that the east field's run and along-wall
+   * centre survive a host resize whether or not anyone had RECORDED them ("preserve once touched").
+   * That clause is what B1340 did not close: on "Concept D — Sylvestri Retail" a building's depth
+   * went 220 → 200, its sidewalks correctly followed to 260 and its end PARKING fields sat at 205
+   * against that same wall (80 against 259 on the building beside it), perpendicular offsets
+   * perfect. A run is derivable from its host exactly as a position is, so it is derived — and a
+   * genuine user length is now an EXPLICIT per-element override, re-clamped every host change. */
+  test("an UNRECORDED east field is re-derived onto the wall — the Sylvestri case, on the owner's own plan", async ({ page }) => {
     await loadPlan(page);
     const p = await assertRules(page, "as loaded");
-    // As saved on his plan: the east field's own run + along-wall centre (he slid it for the curb
-    // return where the fire lane ties in). The span default would be a different number entirely.
     const stored = FIXTURE.els.find((e) => e.id === PK_EAST);
-    const host = FIXTURE.els.find((e) => e.id === B3);
-    expect(p.kids[PK_EAST].run, "east parking run was re-lengthened onto the span").toBeCloseTo(stored.w, 1);
-    expect(p.kids[PK_EAST].run).not.toBeCloseTo(p.host.h + BUMP_PROJ, 1); // proves the assertion has teeth
-    // Its along-wall centre, in the host's local frame, is exactly where it was stored.
-    const dx = stored.cx - host.cx, dy = stored.cy - host.cy;
-    const rad = (-host.rot * Math.PI) / 180;
-    expect(p.kids[PK_EAST].alongShift, "east parking slid along the wall")
-      .toBeCloseTo(dx * Math.sin(rad) + dy * Math.cos(rad), 1);
+    // The fixture's east field carries no `sideParkFit`, so nothing recorded its 150 ft run…
+    expect(stored.sideParkFit, "fixture precondition: the east field is unstamped").toBeFalsy();
+    // …and it now spans the same wall its own sidewalk does, instead of outliving it.
+    expect(p.kids[PK_EAST].run, "east parking did not follow its wall").toBeCloseTo(p.kids[SW_EAST].run, 1);
+    expect(p.kids[PK_EAST].run).not.toBeCloseTo(stored.w, 1);       // proves the assertion has teeth
   });
 
-  test("the rules still hold AFTER a host resize (the branch that was missing)", async ({ page }) => {
-    await loadPlan(page);
+  test("a RECORDED east-field length survives a real Depth retype, and is re-clamped to the host", async ({ page }) => {
+    // Same plan, but with the owner's length RECORDED — which is what a resize of the field itself
+    // now writes. That is the intent the product still honours.
+    const stored = FIXTURE.els.find((e) => e.id === PK_EAST);
+    const host = FIXTURE.els.find((e) => e.id === B3);
+    const rad = (-host.rot * Math.PI) / 180;
+    const alongShift = (stored.cx - host.cx) * Math.sin(rad) + (stored.cy - host.cy) * Math.cos(rad);
+    await loadPlan(page, FIXTURE.els.map((e) => (e.id === PK_EAST
+      ? { ...e, sideParkFit: { run: stored.w, alongShift } } : e)));
     const before = await assertRules(page, "before resize");
-    const eastBefore = before.kids[PK_EAST];
+    expect(before.kids[PK_EAST].run, "a recorded run was flattened on load").toBeCloseTo(stored.w, 1);
 
-    // Resize the building through the real UI: select it, open Properties, retype its Depth.
+    // Retype the Depth through the real Properties field — the gesture the owner actually performs.
     await selectBuilding(page);
     const depth = fieldInput(page, "Depth (ft)");
     await depth.fill("210");
@@ -170,10 +181,23 @@ test.describe("NEW-2 / NEW-3 — wall strips + side parking on the owner's real 
     await expect.poll(async () => Math.round((await readPlan(page, IDS)).host.h), { timeout: 8000 }).toBe(210);
 
     const after = await assertRules(page, "after resize");
-    expect(after.kids[SW_EAST].run).toBeCloseTo(210 + BUMP_PROJ, 1);   // re-derived, not rescaled
-    // …and the owner's east field is STILL where he left it along the wall.
-    expect(after.kids[PK_EAST].run, "east parking run changed on a host resize").toBeCloseTo(eastBefore.run, 1);
-    expect(after.kids[PK_EAST].alongShift, "east parking slid on a host resize").toBeCloseTo(eastBefore.alongShift, 1);
+    expect(after.kids[SW_EAST].run).toBeCloseTo(210 + BUMP_PROJ, 1);   // the strip is re-derived
+    // …and the RECORDED field is still the owner's length, still where he left it along the wall.
+    expect(after.kids[PK_EAST].run, "a recorded run changed on a host resize").toBeCloseTo(before.kids[PK_EAST].run, 1);
+    expect(after.kids[PK_EAST].alongShift, "a recorded field slid on a host resize").toBeCloseTo(before.kids[PK_EAST].alongShift, 1);
+  });
+
+  test("an unrecorded field FOLLOWS a real Depth retype instead of outliving it", async ({ page }) => {
+    await loadPlan(page);
+    await assertRules(page, "before resize");
+    await selectBuilding(page);
+    const depth = fieldInput(page, "Depth (ft)");
+    await depth.fill("210");
+    await depth.press("Enter");
+    await expect.poll(async () => Math.round((await readPlan(page, IDS)).host.h), { timeout: 8000 }).toBe(210);
+    const after = await assertRules(page, "after resize");
+    expect(after.kids[SW_EAST].run).toBeCloseTo(210 + BUMP_PROJ, 1);
+    expect(after.kids[PK_EAST].run, "east parking did not follow the new depth").toBeCloseTo(210 + BUMP_PROJ, 1);
   });
 
   test("NEW-1 — selecting a building draws no dashed attachment tethers", async ({ page }) => {

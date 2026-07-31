@@ -137,10 +137,23 @@ describe("NEW-3 — side parking is flush perpendicular, untouched along the wal
     expect(gapBetween(b, by(SW_EAST), by(PK_EAST))).toBeCloseTo(0, 6);
   });
 
-  it("REGRESSION (owner amendment): the east field does not move ALONG the wall, ever", () => {
+  /* ⛔ SUPERSEDED BY A LATER OWNER AMENDMENT (2026-07-31), and rewritten rather than deleted so the
+   * change of contract is visible. This case used to assert that the east field's along-wall run and
+   * centre survive every mutation whether or not anyone recorded them — "preserve once touched".
+   * That is what B1340 did not close: on "Concept D — Sylvestri Retail" a building's depth went
+   * 220 → 200, its sidewalks correctly followed to 260, and its end parking fields sat at 205 (and
+   * 80 against 259 on the building beside it) with perfect perpendicular offsets. The owner's
+   * ruling: a run is derivable from its host exactly like a position is, so derive it — and let a
+   * genuine user length be an EXPLICIT per-element override, re-clamped to the host on every host
+   * change, instead of an invisible sticky value that outlives the geometry it was measured against.
+   * So the guarantee is now conditional on the override being RECORDED, and both halves are asserted. */
+  it("a RECORDED east-field length does not move ALONG the wall through any host change", () => {
     const storedEast = fresh().find((e) => e.id === PK_EAST);
     const b0 = fresh().find((e) => e.id === B3);
     const want = onHost(b0, storedEast);           // its run + along-wall centre, as the owner left it
+    // The owner's own resize of THIS field is what records the intent (relayoutWallKids' `pinFrom`).
+    const stamp = { run: want.run, alongShift: want.alongShift };
+    const withStamp = (els) => els.map((e) => (e.id === PK_EAST ? { ...e, sideParkFit: stamp } : e));
     // …through a host resize, a sidewalk width change, a sidewalk delete, and a bump-out delete.
     const cases = {
       "as stored": (els) => els,
@@ -151,13 +164,33 @@ describe("NEW-3 — side parking is flush perpendicular, untouched along the wal
       "bump-out deepened": (els) => { const d = els.find((e) => e.id === BUMPS[0]); d.h = 95; d.dogEar = { ...d.dogEar, along: 55, proj: 95 }; return els; },
     };
     for (const [label, mutate] of Object.entries(cases)) {
-      const by = load(mutate(fresh())), b = by(B3);
+      const by = load(withStamp(mutate(fresh()))), b = by(B3);
       const got = onHost(b, by(PK_EAST));
       expect(got.run, label).toBeCloseTo(want.run, 6);               // 150 — never re-lengthened
       expect(got.alongShift, label).toBeCloseTo(want.alongShift, 6); // never re-centred
       const strip = by(SW_EAST);
       expect(got.innerFace, label).toBeCloseTo(b.w / 2 + (strip ? onHost(b, strip).depth : 0), 6);
     }
+  });
+
+  it("an UNRECORDED short east field is re-derived to the wall it hugs — the Sylvestri case", () => {
+    // Same fixture, no stamp: the 150 ft run nobody recorded now follows the host instead of
+    // outliving it. This is the behaviour change the 2026-07-31 amendment asked for.
+    const by = load(fresh()), b = by(B3);
+    const got = onHost(b, by(PK_EAST));
+    const strip = by(SW_EAST);
+    expect(got.run).toBeCloseTo(onHost(b, strip).run, 6);            // spans the same wall as its sidewalk
+    expect(got.innerFace).toBeCloseTo(b.w / 2 + onHost(b, strip).depth, 6);  // …still perfectly flush
+  });
+
+  it("a RECORDED length is RE-CLAMPED when the host shrinks under it, never left overhanging", () => {
+    const storedEast = fresh().find((e) => e.id === PK_EAST);
+    const b0 = fresh().find((e) => e.id === B3);
+    const want = onHost(b0, storedEast);
+    const shrunk = fresh().map((e) => (e.id === PK_EAST ? { ...e, sideParkFit: { run: want.run, alongShift: want.alongShift } }
+      : (e.id === B3 ? { ...e, h: 90 } : e)));
+    const by = load(shrunk), b = by(B3);
+    expect(onHost(b, by(PK_EAST)).run).toBeLessThanOrEqual(onHost(b, by(SW_EAST)).run + 1e-6);
   });
 
   it("a sidewalk DELETE pulls the parking back flush against the wall itself", () => {

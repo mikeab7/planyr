@@ -400,12 +400,20 @@ describe("NEW-2 (round 3) — strandedness is measured against the COMPUTED anch
     expect(byId(healed, "court").cy).toBeCloseTo(250, 6);
   });
 
-  it("a legitimately SLID side-parking row keeps its slide; one slid off the wall is re-centred", () => {
+  /* NEW-2 (2026-07-31) — AMENDED BY THE OWNER, and the amendment is the fix. This case used to
+   * assert that an UNSTAMPED slide survives ("preserve once touched"). That clause is what let a
+   * 205 ft parking field hug a 260 ft wall on `sms4zs8unbkg` after its host's depth was resized.
+   * Intent must now be RECORDED (`sideParkFit`) to count; an unstamped difference is staleness. */
+  it("a RECORDED slide survives; an unstamped one is re-derived, and one slid off the wall always is", () => {
     const b = { id: "b1", type: "building", cx: 0, cy: 0, w: 600, h: 300, rot: 0 };
     const walk = { id: "w", type: "sidewalk", attachedTo: "b1", sidewalkSide: "left", cx: -152.5, cy: 0, w: 5, h: 300, rot: 0 };
     const park = { id: "p", type: "parking", attachedTo: "b1", sideParkSide: "left", cx: -335, cy: 60, w: 60, h: 300, rot: 0 };
-    expect(byId(normalizeBondedChildren([b, walk, park]), "p").cy).toBeCloseTo(60, 6);
-    // Slid clean off the wall it is bonded to → the number is wreckage, so it re-centres.
+    // RECORDED intent — the owner dragged this field himself, so it is carried through.
+    const stamped = { ...park, sideParkFit: { run: 300, alongShift: 60 } };
+    expect(byId(normalizeBondedChildren([b, walk, stamped]), "p").cy).toBeCloseTo(60, 6);
+    // Unstamped — nobody expressed this, so it goes back onto the wall's own span.
+    expect(byId(normalizeBondedChildren([b, walk, park]), "p").cy).toBeCloseTo(0, 6);
+    // Slid clean off the wall it is bonded to → wreckage either way, stamped or not.
     const off = byId(normalizeBondedChildren([b, walk, { ...park, cy: 900 }]), "p");
     expect(off.cy).toBeCloseTo(0, 6);
   });
@@ -971,9 +979,10 @@ describe("NEW-4 — a torn assembly is healed on the site_elements read path", (
   it("a side-parking row torn off its host is re-centred; one still on the wall keeps its slide", () => {
     const b = { id: "b1", type: "building", cx: 0, cy: 0, w: 600, h: 300, rot: 0 };
     const walk = { id: "w", type: "sidewalk", attachedTo: "b1", sidewalkSide: "left", cx: -152.5, cy: 0, w: 5, h: 300, rot: 0 };
-    // Flush outside the sidewalk (wall at −300, 5 ft walk, 60 ft deep row → centre −335), and
-    // deliberately slid 60 ft along the wall — user intent, never normalised (B1039 owner rule).
-    const park = { id: "p", type: "parking", attachedTo: "b1", sideParkSide: "left", cx: -335, cy: 60, w: 60, h: 300, rot: 0 };
+    /* Flush outside the sidewalk (wall at −300, 5 ft walk, 60 ft deep row → centre −335), and
+     * deliberately slid 60 ft along the wall. NEW-2: that intent must be RECORDED to survive — an
+     * unstamped slide is now staleness, which is the owner's 2026-07-31 amendment. */
+    const park = { id: "p", type: "parking", attachedTo: "b1", sideParkSide: "left", cx: -335, cy: 60, w: 60, h: 300, rot: 0, sideParkFit: { run: 300, alongShift: 60 } };
     const kept = normalizeBondedChildren([b, walk, park]);
     expect(byId(kept, "p").cy).toBeCloseTo(60, 6);            // slide preserved
     expect(byId(kept, "p").cx).toBeCloseTo(-335, 6);
