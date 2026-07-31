@@ -68,8 +68,8 @@ const FS_HOLD_PX = 60;       // band below the header that still counts as "on i
 const TAB_IDLE = "var(--chrome-tab-inactive)";
 // Per-module accent: the FILL (the 2px underline) is fixed in both themes; the active
 // tab TEXT uses the -text token, which swaps by theme (sits on chrome). (B318)
-const ACCENT_FILL = { "site-planner": "var(--accent-site)", "scheduler": "var(--accent-schedule)", "doc-review": "var(--accent-review)", "library": "var(--accent-library)" };
-const ACCENT_TEXT = { "site-planner": "var(--accent-site-text)", "scheduler": "var(--accent-schedule-text)", "doc-review": "var(--accent-review-text)", "library": "var(--accent-library-text)" };
+const ACCENT_FILL = { "site-planner": "var(--accent-site)", "scheduler": "var(--accent-schedule)", "doc-review": "var(--accent-review)", "library": "var(--accent-library)", "notes": "var(--accent-notes)" };
+const ACCENT_TEXT = { "site-planner": "var(--accent-site-text)", "scheduler": "var(--accent-schedule-text)", "doc-review": "var(--accent-review-text)", "library": "var(--accent-library-text)", "notes": "var(--accent-notes-text)" };
 
 // The Light/Dark/System picker now lives in the account → Settings panel (B389, AuthPanel)
 // for signed-in users. The row-1 gear below is kept ONLY when signed out, so a logged-out
@@ -166,6 +166,21 @@ const MODULES = [
       <>
         <path d="M2.5 5.5l2-1.5h3l1 1.5h4.5v7.5a1 1 0 0 1-1 1H3.5a1 1 0 0 1-1-1z" />
         <line x1="2.5" y1="8" x2="13.5" y2="8" />
+      </>
+    ),
+  },
+  {
+    id: "notes",
+    label: "Notes",
+    // simplified ti-notebook outline (16×16 viewBox) — a bound book with ruled lines
+    icon: (
+      <>
+        <path d="M4.5 2.5h8a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1h-8z" />
+        <line x1="4.5" y1="2.5" x2="4.5" y2="13.5" />
+        <line x1="2.5" y1="5" x2="4.5" y2="5" />
+        <line x1="2.5" y1="11" x2="4.5" y2="11" />
+        <line x1="7" y1="6" x2="11" y2="6" />
+        <line x1="7" y1="9" x2="11" y2="9" />
       </>
     ),
   },

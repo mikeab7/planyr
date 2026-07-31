@@ -36,7 +36,7 @@ When a new report matches an existing **Done or ⏳ Verify** item (search titles
 
 Add a new tag to this legend **in the same commit** you first use it (this prevents tag sprawl; CI's `build-backlog-index --check` fails on an off-legend tag):
 
-`#persistence` `#gis` `#gantt` `#export` `#site-planner` `#doc-review` `#scheduler` `#selection` `#pond` `#drive` `#testing` `#ui` `#markup` `#infra` `#auth` `#perf` `#files` `#compare` `#stitching` `#yield` `#filing` `#library` `#road` `#sync` `#coordinates` `#thoroughfare` `#entitlements` `#floodplain` `#grading`
+`#persistence` `#gis` `#gantt` `#export` `#site-planner` `#doc-review` `#scheduler` `#selection` `#pond` `#drive` `#testing` `#ui` `#markup` `#infra` `#auth` `#perf` `#files` `#compare` `#stitching` `#yield` `#filing` `#library` `#road` `#sync` `#coordinates` `#thoroughfare` `#entitlements` `#floodplain` `#grading` `#notes`
 
 ### Item template
 
@@ -51,6 +51,19 @@ Add a new tag to this legend **in the same commit** you first use it (this preve
 ---
 
 ## 🔲 Open
+
+### B1291 — Notes belong in the cloud: sync the notebook tree and page bodies to Supabase `[Notes / sync]` (task) #notes #sync #persistence #auth  *(filed 2026-07-30 alongside **B1290**, which shipped the module itself. Minted **B1291** via `git fetch origin main && npm run next-id -- --against-main`. DEDUPE-FIRST — searched Open / ⏳ Verify / Done for `notes`, `notebook`, `sync`, `cloud save`: the Site Planner's own cloud sync (**B124** / **B671**–**B674** element-level sync) and the Doc Review `doc_reviews` table are different data and different tables; nothing covers Notes. Net-new.)*
+`[ ]` Notes are stored **on this device only** today, and the UI says so in as many words. Take them to the cloud so they follow the account.
+- Verify: live
+- Origin: filed 2026-07-30 from chat
+- **DELIBERATELY NOT BUILT IN THE SAME SESSION AS B1290, and this is the reason.** A half-done sync is *worse than none*: a note that LOOKS synced and is not is precisely the **B209 / B595 / B610** failure class that **LOUD-FAILURE** exists to prevent, and it fails at the moment the user has most reason to trust it — a second device. This needs a table, own-row RLS, a merge policy, and tombstones for the delete cascade, each of which is a real decision rather than a line of glue. B1290 shipped with the honest label instead, which is a stable resting place: notes work, and the product does not claim anything it cannot do.
+- **THE WHOLE CHANGE IS ONE FILE.** Every read and write in the module already goes through `src/workspaces/notes/lib/notesStore.js` — that seam was built for this. No component, no model function and no exporter has to learn that storage moved. `test/notesModule.test.js` pins the property (no other notes file may touch `localStorage`), so the seam cannot quietly leak before this lands.
+- **What must carry across, by name:**
+  - **TOMBSTONE-DELETES** — `deleteNode` already returns the FULL cascade of orphaned page ids, and the local path already clears every one. The cloud path needs real tombstones for that same set, or a merge will resurrect a deleted page (or raise a false "changed in another session" conflict) exactly as **B276 / B556 / B596 / B612** did.
+  - **LOUD-FAILURE** — the store's `onNotesStorageError` broadcast and the boolean return from every write are the existing contract; the network path must keep both. A failed push must reach the banner, never a silent retry that reads as saved.
+  - **`notesScopeLabel()` MUST CHANGE WITH IT.** It returns "Saved on this device (this account)" today because that is true. The moment sync is real it has to say so — and not one commit earlier. The same applies to the footer line in `Notes.jsx` ("not synced to the cloud yet") and to **V630**, whose whole point is that the label is honest.
+- **Merge policy is the actual decision to make**, not the schema: a note is a document model, so last-writer-wins at the PAGE level is the obvious start, but two devices editing the same page need a stated answer (the tree is small and structural; the bodies are large and independent, which is an argument for merging them differently).
+- Depends on: **B1290** (shipped).
 
 ### B1208 — Lift the handle layer above the GIS line band, together with its pointer plumbing `[Site Planner / UI]` (task) #site-planner #ui #selection #gis  *(spun out of B1205, 2026-07-30, and flagged loudly there rather than left implicit. Minted via `--against-main`. DEDUPE-FIRST: not a B1197 recurrence — B1197 SHIPPED the one handle layer and its guarantee holds inside the plan SVG; this is the follow-on the new GIS line band creates, and it is a different mechanism, so it takes its own number.)*
 `[ ]` **Open — flagged, not fixed. Cosmetic only today; the reason it was not done in the same session is recorded below.**

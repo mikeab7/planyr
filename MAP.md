@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-07-30 @ `238cb82` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-07-30 @ `023d3cd` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_392 source files mapped._
+_400 source files mapped._
 
 ## infra
 
@@ -39,6 +39,22 @@ _392 source files mapped._
   - _exports_: `default (Shell)`
 - **`src/main.jsx`** — Entry point: installs client-error telemetry + chunk-reload guard, retires old GIS service worker, renders Shell inside ThemeProvider/StrictMode
   - _exports_: _(none)_
+- **`src/workspaces/notes/components/NoteEditor.jsx`** — One note page (title · toolbar · document) and the module's ONLY editor-engine import — the lazy boundary. Snapshots the document as plain JSON at edit time so the flush never queries a torn-down instance.
+  - _exports_: `default (NoteEditor)`
+- **`src/workspaces/notes/components/NotesTree.jsx`** — Notes left rail — notebooks › sections › pages plus search results; inline rename (Enter/Esc) and an inline delete confirmation, never a dialog box.
+  - _exports_: `default (NotesTree)`
+- **`src/workspaces/notes/components/NoteToolbar.jsx`** — Notes formatting bar — block style, font, size, marks, colour/highlight popovers, alignment, lists, quote/code/divider/link/table, undo-redo, Markdown export, plus a table group shown only inside a table. Reads active state from the editor; cancels mousedown to keep the caret.
+  - _exports_: `default (NoteToolbar)`
+- **`src/workspaces/notes/lib/notesExtensions.js`** — The ONE declaration of what a note may contain — the editor extension set and the empty-document constant.
+  - _exports_: `EMPTY_DOC`, `HEADING_LEVELS`, `NOTE_EXTENSIONS`
+- **`src/workspaces/notes/lib/notesMarkdown.js`** — PURE Markdown export of a note's document model (GFM tables/task lists, HTML fallback for what Markdown cannot spell, plus a lossiness report) and `docToText` for body search.
+  - _exports_: `docToMarkdown`, `docToText`, `escapeText`, `lossyNote`, `NOTE_MD_HANDLED`, `notebookToMarkdown`, `safeFileName`
+- **`src/workspaces/notes/lib/notesModel.js`** — PURE notebook › section › page tree schema and every structural op (add/rename/move/delete/search/migrate). `deleteNode` returns the FULL cascade of orphaned page ids.
+  - _exports_: `addNotebook`, `addPage`, `addSection`, `allPageIds`, `DEFAULT_NOTEBOOK_TITLE`, `DEFAULT_PAGE_TITLE`, `DEFAULT_SECTION_TITLE`, `deleteNode`, `emptyTree`, `findNotebook`, `findPage`, `findSection`, `firstPageId`, `makeNotebook`, `makePage`, `makeSection`, `migrate`, `moveNotebook`, `movePage`, `moveSection`, `newId`, `NOTES_TREE_VERSION`, `renameNode`, `searchTitles`, `setNotebookProject`, `visibleNotebooks`
+- **`src/workspaces/notes/lib/notesStore.js`** — The ONE storage seam for Notes — per-account scoped keys, tree and page bodies kept separate, every failure broadcast (LOUD-FAILURE). Cloud sync would be a change here and nowhere else.
+  - _exports_: `clearNotesStorageError`, `deletePages`, `lastNotesStorageError`, `listStoredPageIds`, `LOCAL_SCOPE`, `notesScope`, `notesScopeLabel`, `onNotesStorageError`, `PAGE_KEY_BASE`, `pageKey`, `readPage`, `readTreeRaw`, `searchNotes`, `setNotesScope`, `sweepOrphans`, `TREE_KEY_BASE`, `treeKey`, `writePage`, `writeTree`
+- **`src/workspaces/notes/Notes.jsx`** — Notes workspace root (lazy chunk) — owns the notebook/section/page TREE, search, export and the storage-error banner; pulls the editor via `lazy()` so the rail paints first, and keys it by page id so a page switch flushes the outgoing autosave.
+  - _exports_: `default (Notes)`
 
 ## shared lib
 

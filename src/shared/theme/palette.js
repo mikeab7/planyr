@@ -37,8 +37,9 @@ const LIGHT = {
   /* Multi-select / marquee chrome — hue-free two-tone (light casing under a dark line), B569. */
   selCasing: "#FFFFFF", selLine: "#1B1E26",
   /* Module accents — fills fixed both themes; -text swaps */
-  accentSite: "#1D9E75", accentSchedule: "#7F77DD", accentReview: "#EF9F27", accentLibrary: "#0E7490",
-  accentSiteText: "#0F6E56", accentScheduleText: "#534AB7", accentReviewText: "#8A5410", accentLibraryText: "#0C677E",
+  accentSite: "#1D9E75", accentSchedule: "#7F77DD", accentReview: "#EF9F27", accentLibrary: "#0E7490", accentNotes: "#B8418C",
+  onAccentNotes: "#FFFFFF",
+  accentSiteText: "#0F6E56", accentScheduleText: "#534AB7", accentReviewText: "#8A5410", accentLibraryText: "#0C677E", accentNotesText: "#8C2F69",
   /* Strong accent for TEXT sitting on the soft-accent fill (selected menu row /
      "current" marker). The plain accent (#C2410C) is only 3.8:1 on canvasAccentSoft —
      this darker value clears AA there; dark theme keeps the bright accent. */
@@ -70,8 +71,9 @@ const DARK = {
   /* Two-tone selection chrome (B569) — light casing + dark line, legible on a dark aerial. */
   selCasing: "#E8EBF0", selLine: "#15171C",
   /* Module accents — fills unchanged; -text is the light-on-dark set */
-  accentSite: "#1D9E75", accentSchedule: "#7F77DD", accentReview: "#EF9F27", accentLibrary: "#0E7490",
-  accentSiteText: "#5DCAA5", accentScheduleText: "#AFA9EC", accentReviewText: "#EF9F27", accentLibraryText: "#5AC4DB",
+  accentSite: "#1D9E75", accentSchedule: "#7F77DD", accentReview: "#EF9F27", accentLibrary: "#0E7490", accentNotes: "#B8418C",
+  onAccentNotes: "#FFFFFF",
+  accentSiteText: "#5DCAA5", accentScheduleText: "#AFA9EC", accentReviewText: "#EF9F27", accentLibraryText: "#5AC4DB", accentNotesText: "#F0A6D2",
   /* On dark, the soft-accent fill is a low-alpha tint over the dark surface, so the
      bright accent already clears AA against it — keep it. */
   accentStrong: "#F26B3A",
