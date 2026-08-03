@@ -33,14 +33,36 @@
  *   • The TREE follows the identical rule one level up: the server's tree wins on seed
  *     unless this device has unpushed structural changes, in which case the two are MERGED
  *     (never clobbered) — see `mergeTrees` in notesCloud.js for the merge's own four rules.
- *   • When BOTH moved on the same page, NOBODY wins silently. The page enters a named
- *     CONFLICT state, the workspace says "this note also changed on another device", and
- *     the user picks. Neither copy is destroyed to get there.
+ *   • When BOTH moved on the same page AND THE TWO COPIES ACTUALLY DIFFER, nobody wins
+ *     silently. The page enters a named CONFLICT state, the workspace says "this note also
+ *     changed in another of your windows", and the user picks. Neither copy is destroyed to
+ *     get there.
  *
  * The trap this closes is the same one B1113 closed for site elements: after a seed this
  * device holds the FRESH rev, so a stale cached body would commit CLEANLY — the revision
  * guard cannot help, because the client legitimately holds the current revision. Adopting
  * the row at seed time, rather than pushing over it, is what makes that impossible.
+ *
+ * ═══════════════════════════════════════════════════════════════════════════════════════
+ * TWO WINDOWS OF ONE ACCOUNT IS A NORMAL STATE, NOT AN EXCEPTION (B1391)
+ * ═══════════════════════════════════════════════════════════════════════════════════════
+ * The rule above was right and was firing far too often, because a lost REVISION RACE was
+ * being reported as a disagreement without anyone comparing the two documents. One person
+ * with Planyr open in two tabs (or a hard reload landing between a push and the ledger
+ * write) produced "this also changed on another device… keep yours or theirs?" over two
+ * copies of the SAME TEXT. Three things changed, and all three are load-bearing:
+ *
+ *   1. A NO-OP NEVER PROMPTS. Every path that loses the guard goes through `settleQuietly`
+ *      → `judgeConflict` (pure, notesCloud.js) first: identical text, or nothing here to
+ *      lose, reconciles in silence. Only a real divergence may interrupt.
+ *   2. THE LEDGER MERGES INSTEAD OF OVERWRITING. Two windows share this browser's storage
+ *      but not its memory, so a blind ledger write flattened what the sibling had learned
+ *      and manufactured the stale bases that caused the refusals (`mergeSyncState`).
+ *   3. THE OPEN EDITOR RE-READS A BODY THAT CHANGED UNDER IT (`onNotesPagesChanged`). This
+ *      is the real self-race the prompt was only a symptom of: the editor reads its document
+ *      once, so a page replaced by a sibling window or by the cloud seed left it holding a
+ *      stale copy that the next keystroke wrote straight back — cleanly, past a guard this
+ *      window legitimately satisfied. Silent loss, no conflict, nothing to notice.
  *
  * ═══════════════════════════════════════════════════════════════════════════════════════
  * WHICH NOTEBOOKS A PROJECT SHOWS — DECIDED, NOT LEFT ACCIDENTAL (B1374)
@@ -553,10 +575,18 @@ function readSyncState() {
 
 /* A failure to persist the sync LEDGER is not a lost note — the bodies are already on disk
  * — but it does mean this device may re-push work it already pushed, so it is reported
- * rather than swallowed. */
+ * rather than swallowed.
+ *
+ * ⛔ IT MERGES WITH WHAT IS ON DISK RATHER THAN OVERWRITING IT (B1391). Two windows of the
+ * same account share this storage and not this memory, so a blind write here flattened
+ * whatever the sibling window had just learned — which is how a base revision goes stale
+ * and a perfectly ordinary push comes back refused, and reported as "someone else edited
+ * this". The merge rules (including the one that keeps a DIRTY page's own base) live in
+ * `mergeSyncState`, pure and unit-tested, in notesCloud.js. */
 function saveSyncState() {
   const s = store();
   if (!s) return false;
+  if (mergeState) sync = mergeState(sync, readSyncState());
   try { s.setItem(syncKey(), JSON.stringify(sync)); return true; }
   catch (e) { fail("write", syncKey(), e); return false; }
 }
@@ -594,6 +624,13 @@ function reportSyncFailure(error) {
 let reasonFn = null;
 const cloudReason = (e) => (reasonFn ? reasonFn(e) : String(e || "an unknown problem").slice(0, 120));
 
+/* Two pure decisions from the cloud tier, held here as plain functions because the paths
+ * that need them are SYNCHRONOUS (a ledger write, a storage event). They are set the moment
+ * the cloud module loads; until then `saveSyncState` simply writes without merging, which is
+ * the pre-B1391 behaviour and is safe — nothing has synced yet. */
+let mergeState = null;
+let judgeConflictFn = null;
+
 /** THE ONE LINE THE FOOTER SHOWS, and the only place the product says where a note lives.
  *
  *  ⛔ It may only claim a cloud copy when there IS one. Before B1291 this said "Saved on
@@ -608,7 +645,7 @@ export function notesStorageLine({ now = Date.now() } = {}) {
       const rel = relativeTime(syncState.at, { now });
       return { text: rel === "just now" || !rel ? "Synced to your account just now" : `Synced to your account ${rel} ago`, tone: "good" };
     }
-    case "conflict": return { text: "Synced · one note also changed on another device", tone: "warn" };
+    case "conflict": return { text: "Synced · one note also changed in another window", tone: "warn" };
     case "offline": return { text: "Saved on this device · offline, it will sync when you are back", tone: "warn" };
     case "error": return { text: `Saved on this device · sync failed: ${syncState.reason}`, tone: "error" };
     default: return { text: "Saved on this device", tone: "quiet" };
@@ -619,11 +656,56 @@ export function notesStorageLine({ now = Date.now() } = {}) {
  *  Delegates to the footer line so the two can never disagree. */
 export function notesScopeLabel() { return notesStorageLine().text; }
 
+/** ⛔ THE CONFLICT BAR'S WORDS, AND THEY MAY NEVER IMPLY ANOTHER PERSON (B1391).
+ *
+ *  Notes are own-row and private by default: nobody but the account holder can read one,
+ *  let alone write it. So every copy on this path names a WINDOW or a COMPUTER — never a
+ *  someone. "The other person's copy" was not a clumsy phrase, it was a false statement
+ *  about who has access, and it is what made a routine two-tab reconciliation read as a
+ *  security event.
+ *
+ *  It lives HERE, beside `notesStorageLine`, because this file already owns the product's
+ *  sentences about where a note lives — and because a pure function is something a test can
+ *  hold to the rule, which a string inlined in JSX is not. */
+export function notesConflictLine(title) {
+  const name = String(title || "").trim() || "Untitled";
+  return {
+    text: `“${name}” also changed in another of your windows. Nothing was overwritten — pick which to keep.`,
+    keepMine: "Keep this one",
+    keepTheirs: "Use the other",
+    /** What the un-picked copy is parked as, so choosing can never lose the other text. */
+    parkedSuffix: "(this window’s copy)",
+  };
+}
+
 /* ---- conflicts ------------------------------------------------------------------------
  *
  * TWO DEVICES, ONE PAGE, BOTH EDITED. Neither copy is destroyed and neither wins by
  * default: the page is named as conflicted and the user chooses. `resolveNotesConflict`
  * is the only way out, and both of its answers are explicit. */
+
+/* ---- "this page's body changed underneath you" (B1391) --------------------------------
+ *
+ * THE SELF-RACE THE PROMPT WAS ONLY A SYMPTOM OF. A page's body can be replaced under an
+ * open editor by three things that are not the person typing: the cloud seed adopting the
+ * server's row, a silent reconciliation above, and — the common one — the SAME ACCOUNT in a
+ * SECOND WINDOW of this browser writing the same key. The editor read its document once, at
+ * mount (deliberately: see NoteEditor's header). So without this channel it holds a stale
+ * copy, and the next keystroke writes that whole stale document back — guarded by a
+ * revision this device now legitimately holds, so it commits CLEANLY and the other window's
+ * paragraph is gone with no conflict, no banner and no way to notice. That is exactly the
+ * B1113 / ROWS-CANONICAL-ON-SEED trap, in Notes.
+ *
+ * A page is announced ONLY when this device has no pending edit of its own on it — an
+ * unflushed local edit is real work and must never be dropped to pick up a remote copy;
+ * that case is the genuine conflict, and it still goes through `judgeConflict`. */
+const pageListeners = new Set();
+export function onNotesPagesChanged(fn) { pageListeners.add(fn); return () => pageListeners.delete(fn); }
+function emitPagesChanged(pageIds) {
+  const ids = (pageIds || []).filter((id) => id && !sync.pages[id]?.dirty);
+  if (!ids.length) return;
+  for (const fn of pageListeners) { try { fn(ids); } catch (_) { /* a bad listener must not mute the rest */ } }
+}
 
 const conflictListeners = new Set();
 export function onNotesConflict(fn) { conflictListeners.add(fn); return () => conflictListeners.delete(fn); }
@@ -632,6 +714,35 @@ export function notesConflictFor(pageId) { return conflicts.get(pageId) || null;
 function emitConflicts() {
   const ids = [...conflicts.keys()];
   for (const fn of conflictListeners) { try { fn(ids); } catch (_) { /* a bad listener must not mute the rest */ } }
+}
+
+/* ⛔ A NO-OP CONFLICT MUST NEVER PROMPT (B1391).
+ *
+ * Both paths that can lose a revision race — the seed's plan and a refused push — come
+ * through here BEFORE anyone is interrupted. `judgeConflict` (pure, in notesCloud.js)
+ * answers the only question worth asking: do the two copies actually say different things?
+ *
+ *   • identical      → adopt the server's revision and clear the dirty flag. Nothing to
+ *                      write locally (the text is already the same) and nothing to say.
+ *   • nothing-local  → this device has no body or an empty one; take the row's, and tell
+ *                      the workspace so an editor open on that page re-reads it.
+ *   • diverged       → return false. The caller names it, and the user chooses.
+ *
+ * Returns true when the page was settled without a word. A settled page is also REMOVED
+ * from any existing conflict entry: a conflict that has since become a non-conflict must
+ * not leave a bar on screen with nothing behind it. */
+function settleQuietly(pageId, row) {
+  if (!judgeConflictFn || !row || row.purged) return false;
+  const localDoc = readPage(pageId);
+  const verdict = judgeConflictFn({ localDoc, serverDoc: row.doc });
+  if (!verdict.silent) return false;
+  if (verdict.why === "nothing-local") {
+    if (!writePageLocal(pageId, row.doc)) return false;   // LOUD-FAILURE: a refused write is not a resolution
+    emitPagesChanged([pageId]);
+  }
+  sync.pages[pageId] = { rev: row.rev, dirty: false, purged: false };
+  conflicts.delete(pageId);
+  return true;
 }
 
 /** Resolve one conflict. `"mine"` forces this device's body up (guarded against whatever the
@@ -646,10 +757,11 @@ export async function resolveNotesConflict(pageId, choice) {
   if (!entry || !syncOn()) return { ok: false, error: "nothing to resolve" };
   const c = await cloud();
   if (choice === "theirs") {
-    if (!writePageLocal(pageId, entry.serverDoc)) return { ok: false, error: "the other device's copy could not be saved here" };
+    if (!writePageLocal(pageId, entry.serverDoc)) return { ok: false, error: "the other window’s copy could not be saved here" };
     sync.pages[pageId] = { rev: entry.serverRev, dirty: false, purged: false };
     saveSyncState();
     conflicts.delete(pageId);
+    emitPagesChanged([pageId]);   // the editor must show the copy that was just chosen
     emitConflicts();
     noteSynced();
     return { ok: true };
@@ -709,9 +821,12 @@ async function adoptLocalNotes() {
  *  `onTree` is called whenever the cloud changed the local tree, so the workspace re-reads. */
 export async function startNotesSync({ onTree } = {}) {
   onTreeChanged = onTree || null;
+  attachSiblingListener();   // every scope: a second window is a second window (B1391)
   if (scope === LOCAL_SCOPE) { setSyncState({ mode: "local" }); return { ok: true, mode: "local" }; }
   const c = await cloud();
   reasonFn = c.syncFailureReason;
+  mergeState = c.mergeSyncState;
+  judgeConflictFn = c.judgeConflict;
   cloudClient = c.cloudClient();
   if (!cloudClient) { setSyncState({ mode: "local" }); return { ok: true, mode: "local" }; }
   sync = readSyncState();
@@ -724,6 +839,7 @@ export function stopNotesSync() {
   if (pushTimer) { clearTimeout(pushTimer); pushTimer = 0; }
   if (pollTimer) { clearInterval(pollTimer); pollTimer = 0; }
   detachListeners();
+  detachSiblingListener();
   cloudClient = null;
   onTreeChanged = null;
 }
@@ -746,6 +862,57 @@ function detachListeners() {
   window.removeEventListener("visibilitychange", onVisible);
   window.removeEventListener("focus", onVisible);
   window.removeEventListener("online", onVisible);
+}
+
+/* The sibling-window listener is attached for EVERY scope, signed in or out — two windows
+ * of one browser share this storage whether or not a cloud is involved, and the stale-editor
+ * self-race below is a local-storage race first and a sync race second. */
+let siblingListening = false;
+function attachSiblingListener() {
+  if (siblingListening || typeof window === "undefined") return;
+  siblingListening = true;
+  window.addEventListener("storage", onSiblingWindow);
+}
+function detachSiblingListener() {
+  if (!siblingListening || typeof window === "undefined") return;
+  siblingListening = false;
+  window.removeEventListener("storage", onSiblingWindow);
+}
+
+/* ---- the SECOND WINDOW of the same account (B1391) ------------------------------------
+ *
+ * `storage` fires in every OTHER tab of this origin when one of them writes — so it is the
+ * one place a window can learn, immediately and for free, what its sibling just did. Before
+ * this, two windows of one account only ever met at the server, minutes apart, through a
+ * revision guard: the whole false-alarm class the owner hit ("someone else is editing this"
+ * when the someone else was his own second tab).
+ *
+ * Three keys matter, and each has its own answer:
+ *   the LEDGER  merge, never adopt wholesale — see `mergeSyncState` for why a dirty page
+ *               keeps its own base revision
+ *   the TREE    re-read it: a notebook added, renamed or binned next door is not news that
+ *               should wait for a poll
+ *   a PAGE      announce it, so an editor open on that page re-reads instead of writing its
+ *               stale copy back over it
+ *
+ * It is attached only for a SIGNED-IN scope, alongside the rest of the sync listeners. The
+ * signed-out multi-window case is covered too, by the workspace's own listener — the store
+ * is not running there at all, by design. */
+function onSiblingWindow(e) {
+  try {
+    if (!e || (e.storageArea && typeof window !== "undefined" && e.storageArea !== window.localStorage)) return;
+    const key = e.key;
+    if (!key) return;                                  // a whole-store clear: nothing specific to reconcile
+    if (key === syncKey()) { sync = mergeState ? mergeState(sync, readSyncState()) : readSyncState(); return; }
+    if (key === treeKey()) { onTreeChanged?.(); return; }
+    const prefix = `${PAGE_KEY_BASE}:${scope}:`;
+    if (key.startsWith(prefix)) emitPagesChanged([key.slice(prefix.length)]);
+  } catch (e) {
+    // LOUD-FAILURE: reaching here means this browser's storage refused a plain read, which
+    // is a real failure and is named on the same banner as every other one — it is never
+    // swallowed just because the trigger was a background event.
+    fail("read", syncKey(), e);
+  }
 }
 
 /** Pick up anything another device changed, and push anything this one owes. */
@@ -801,17 +968,26 @@ async function seed({ full }) {
     if (need.length) {
       const got = await c.fetchPages(client(), need);
       if (!got.ok) { saveSyncState(); return reportSyncFailure(got.error); }
+      const adopted = [];
       for (const id of plan.adopt) {
         const row = got.pages[id];
         if (!row || row.purged) continue;
-        if (writePageLocal(id, row.doc)) sync.pages[id] = { rev: row.rev, dirty: false, purged: false };
+        if (writePageLocal(id, row.doc)) { sync.pages[id] = { rev: row.rev, dirty: false, purged: false }; adopted.push(id); }
       }
+      // An adopted body under an OPEN editor is the self-race, not a background detail —
+      // the workspace re-reads it rather than letting a stale document commit cleanly.
+      emitPagesChanged(adopted);
+      let changed = false;
       for (const id of plan.conflicts) {
         const row = got.pages[id];
         if (!row) continue;
+        // A MOVED REVISION IS NOT YET A DISAGREEMENT (B1391). Only a real divergence may
+        // interrupt; identical text, or nothing here to lose, reconciles in silence.
+        if (settleQuietly(id, row)) { changed = true; continue; }
         conflicts.set(id, { serverDoc: row.doc, serverRev: row.rev, at: Date.now() });
+        changed = true;
       }
-      if (plan.conflicts.length) emitConflicts();
+      if (changed) emitConflicts();
     }
 
     // Whatever the plan says local wins on, carry the rev it must be guarded against.
@@ -871,6 +1047,9 @@ async function pushPending() {
       const got = await c.fetchPages(client(), [id]);
       const row = got.pages?.[id];
       if (row?.purged) { deletePages([id]); sync.pages[id] = { rev: row.rev, dirty: false, purged: true }; continue; }
+      // THE REFUSAL IS NOT THE BUG REPORT (B1391). The guard did its job — now find out
+      // whether the two copies actually differ before saying a word to anyone.
+      if (row && settleQuietly(id, row)) { emitConflicts(); continue; }
       if (row) { conflicts.set(id, { serverDoc: row.doc, serverRev: row.rev, at: Date.now() }); emitConflicts(); }
       ok = false;
       continue;

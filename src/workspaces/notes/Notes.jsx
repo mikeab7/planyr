@@ -33,9 +33,9 @@ import {
 } from "./lib/notesModel.js";
 import { listProjects } from "../../shared/projects/projects.js";
 import {
-  clearNotesStorageError, markPagesBinned, markPagesRestored, notesConflictFor,
+  clearNotesStorageError, markPagesBinned, markPagesRestored, notesConflictFor, notesConflictLine,
   notesScopeLabel, notesStorageLine, onNotesConflict, onNotesStorageError, onNotesSyncState,
-  purgePages, readNoteImages, readPage, readTreeRaw, resolveNotesConflict, searchNotes,
+  onNotesPagesChanged, purgePages, readNoteImages, readPage, readTreeRaw, resolveNotesConflict, searchNotes,
   setNotesScope, startNotesSync, stopNotesSync, sweepImagesOfMissingPages, sweepOrphans,
   writePage, writeTree,
 } from "./lib/notesStore.js";
@@ -152,15 +152,23 @@ function UndoBar({ deleted, onUndo, onDismiss }) {
   );
 }
 
-/** TWO DEVICES, ONE PAGE, BOTH EDITED — named, never resolved behind your back.
+/** TWO WINDOWS, ONE PAGE, BOTH EDITED — named, never resolved behind your back.
  *
  *  This is the visible half of the concurrency rule: a push refused because the revision
  *  moved does NOT overwrite and does NOT get thrown away. Both copies exist, this bar says
- *  so in as many words, and the two buttons are the only ways out. "Keep the other
- *  computer's" parks this device's text as a page beside it first, so choosing cannot lose
- *  the edit you did not pick either. */
+ *  so in as many words, and the two buttons are the only ways out. "Use the other" parks
+ *  this window's text as a page beside it first, so choosing cannot lose the copy you did
+ *  not pick either.
+ *
+ *  ⛔ IT REACHES THE SCREEN FAR LESS OFTEN NOW, AND IT NAMES NOBODY (B1391). A moved
+ *  revision is no longer enough to raise it: the store compares the two documents first and
+ *  reconciles in silence when they say the same thing (`judgeConflict`), so the ordinary
+ *  same-account, two-window race resolves without a word. When it IS raised the divergence
+ *  is real — and the words come from `notesConflictLine`, which may only ever say WINDOW or
+ *  COMPUTER. These notes are private to one account; there is no other person to name. */
 function ConflictBar({ conflict, onKeepMine, onKeepTheirs }) {
   if (!conflict) return null;
+  const copy = notesConflictLine(conflict.title);
   return (
     <div
       role="alert"
@@ -171,9 +179,7 @@ function ConflictBar({ conflict, onKeepMine, onKeepTheirs }) {
         color: "var(--warn-text)", fontSize: 12.5, fontWeight: 600,
       }}
     >
-      <span style={{ flex: 1, minWidth: 0 }}>
-        “{conflict.title || "Untitled"}” also changed on another device. Nothing was overwritten — pick which one to keep.
-      </span>
+      <span style={{ flex: 1, minWidth: 0 }}>{copy.text}</span>
       <button
         type="button" data-testid="notes-conflict-mine" onClick={onKeepMine}
         style={{
@@ -181,7 +187,7 @@ function ConflictBar({ conflict, onKeepMine, onKeepTheirs }) {
           background: "transparent", color: "var(--warn-text)", font: "inherit",
           fontSize: 11.5, fontWeight: 700, padding: "2px 10px", cursor: "pointer",
         }}
-      >Keep this computer’s</button>
+      >{copy.keepMine}</button>
       <button
         type="button" data-testid="notes-conflict-theirs" onClick={onKeepTheirs}
         style={{
@@ -189,7 +195,7 @@ function ConflictBar({ conflict, onKeepMine, onKeepTheirs }) {
           background: "transparent", color: "var(--warn-text)", font: "inherit",
           fontSize: 11.5, fontWeight: 700, padding: "2px 10px", cursor: "pointer",
         }}
-      >Keep the other computer’s</button>
+      >{copy.keepTheirs}</button>
     </div>
   );
 }
@@ -326,6 +332,26 @@ export default function Notes({
   // LOUD-FAILURE, the cloud half: the footer line is whatever the store says is TRUE.
   useEffect(() => onNotesSyncState(() => setStorageLine(notesStorageLine())), []);
   useEffect(() => onNotesConflict((ids) => setConflictIds(ids)), []);
+
+  /* ⛔ A BODY THAT CHANGED UNDERNEATH THE OPEN EDITOR (B1391).
+   *
+   * The editor reads its document ONCE, at mount — deliberately, and that must not change
+   * (NoteEditor's header explains what the "sync content on pageId change" effect used to
+   * crash). But the body on disk can be replaced by something other than typing: the same
+   * account in a SECOND WINDOW writing the same key, or the cloud seed adopting the
+   * account's row. Left alone the editor keeps its stale copy and the next keystroke writes
+   * the whole of it back — cleanly, past a revision guard this window legitimately holds —
+   * and the other window's paragraph is gone silently. That is the self-race the false
+   * "someone else edited this" prompt was only the symptom of.
+   *
+   * The fix is a REMOUNT, not an effect: bumping this epoch changes the editor's key, so a
+   * fresh instance reads the fresh document through the same one-shot path. The store only
+   * announces a page it knows this window has no unflushed edit on, so a remount can never
+   * discard work in progress. */
+  const [bodyEpoch, setBodyEpoch] = useState(0);
+  useEffect(() => onNotesPagesChanged((ids) => {
+    if (activePageId && ids.includes(activePageId)) setBodyEpoch((n) => n + 1);
+  }), [activePageId]);
 
   /* The relative "synced 5m ago" would otherwise freeze at the moment of the last sync and
    * quietly become a lie the longer the tab stays open. */
@@ -533,7 +559,7 @@ export default function Notes({
   }, [conflictIds, tree]);
 
   const handleConflict = useCallback(async (pageId, choice) => {
-    /* ⛔ "Keep the other computer's" PARKS THIS DEVICE'S TEXT FIRST, as a page beside the
+    /* ⛔ "Use the other" PARKS THIS WINDOW'S TEXT FIRST, as a page beside the
      * one being replaced. Without that step the choice would destroy an edit the user made
      * — and "never a lost edit" would be a slogan rather than a property. */
     if (choice === "theirs") {
@@ -541,7 +567,7 @@ export default function Notes({
       const hit = findPage(base, pageId);
       const localDoc = readPage(pageId);
       if (hit && localDoc != null) {
-        const r = addPage(base, hit.section.id, { title: `${hit.page.title} (this computer’s copy)` });
+        const r = addPage(base, hit.section.id, { title: `${hit.page.title} ${notesConflictLine().parkedSuffix}` });
         if (r.pageId && writePage(r.pageId, localDoc)) persistTree(r.tree);
       }
     }
@@ -659,9 +685,10 @@ export default function Notes({
         <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", minHeight: 0 }}>
           {activePage ? (
             <Suspense fallback={<EditorFallback />}>
-              {/* key = page id — the remount is the fix. See this file's header. */}
+              {/* key = page id + BODY EPOCH — the remount is the fix. See this file's
+                  header for the page half, and `bodyEpoch` above for the second window's. */}
               <NoteEditor
-                key={activePage.id}
+                key={`${activePage.id}:${bodyEpoch}`}
                 pageId={activePage.id}
                 title={activePage.title}
                 updatedAt={activePage.updatedAt}

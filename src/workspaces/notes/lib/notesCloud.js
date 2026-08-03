@@ -231,6 +231,140 @@ export function planPageSeed({ index = [], state = emptySyncState(), localIds = 
   return { adopt, conflicts, upload, purged };
 }
 
+/* ---- pure: is a refused push actually a CONFLICT? (B1391) ----------------------------
+ *
+ * A revision guard answers ONE question — "did the row move since I read it?" — and the
+ * honest answer to that is not the same as "do the two copies disagree?". Every path that
+ * loses the race lands here first, and only a REAL divergence is allowed to interrupt.
+ *
+ * The false alarm this closes, in the exact shape it reached the owner: ONE person with the
+ * same account open in two windows. Both windows share this browser's storage but each holds
+ * its own ledger in memory, so a push that landed in window A leaves window B's base rev
+ * stale — and the moment B pushes, the guard refuses a write whose CONTENT IS THE ONE THE
+ * SERVER ALREADY HAS. Same for a hard reload that lands between the push and the ledger
+ * write. Prompting there asks the user to choose between two identical documents, which is
+ * both meaningless and (worse) teaches them to distrust the sync that is working.
+ *
+ *   identical      the two documents say the same thing → adopt the server rev, in silence
+ *   nothing-local  this device has no body, or an empty one, and the server has real text →
+ *                  there is nothing here to lose, so take the row (ROWS-CANONICAL-ON-SEED)
+ *   diverged       two different documents. NOBODY wins silently — this is the only case
+ *                  that may raise the bar.
+ *
+ * ⛔ THE ASYMMETRY IN `nothing-local` IS DELIBERATE. Empty-here + text-there adopts the text;
+ * text-here + empty-there does NOT adopt the blank, because that direction would delete
+ * words with no prompt. The silent path may only ever ADD text back, never remove it. */
+export function judgeConflict({ localDoc, serverDoc } = {}) {
+  if (sameDoc(localDoc, serverDoc)) return { silent: true, why: "identical" };
+  if (isEmptyDoc(localDoc) && !isEmptyDoc(serverDoc)) return { silent: true, why: "nothing-local" };
+  return { silent: false, why: "diverged" };
+}
+
+/** Do two documents SAY THE SAME THING? Compared canonically, so the noise a round trip
+ *  through the editor, the server's jsonb and JSON.stringify all add — key order, an attr
+ *  written as null rather than left out, an empty marks/content array — cannot masquerade
+ *  as an edit. This is the difference between "the bytes differ" and "the note differs". */
+export function sameDoc(a, b) {
+  if (a === b) return true;
+  if (a == null || b == null) return a == null && b == null;
+  return JSON.stringify(canonNode(a)) === JSON.stringify(canonNode(b));
+}
+
+function canonNode(n) {
+  if (Array.isArray(n)) return n.map(canonNode);
+  if (!n || typeof n !== "object") return n === undefined ? null : n;
+  const out = {};
+  for (const k of Object.keys(n).sort()) {
+    const v = n[k];
+    if (v == null) continue;                       // an absent attribute and a null one are one note
+    if (k === "attrs") {
+      const a = {};
+      for (const ak of Object.keys(v).sort()) if (v[ak] != null) a[ak] = canonNode(v[ak]);
+      if (Object.keys(a).length) out.attrs = a;
+      continue;
+    }
+    if (k === "marks" || k === "content") {
+      if (!Array.isArray(v) || !v.length) continue;   // an empty list and no list are one note
+      // Marks are a SET on a node — bold+italic is the same text as italic+bold — so they
+      // are ordered canonically. Content is a SEQUENCE and is never reordered.
+      const list = v.map(canonNode);
+      out[k] = k === "marks" ? list.sort((x, y) => (JSON.stringify(x) < JSON.stringify(y) ? -1 : 1)) : list;
+      continue;
+    }
+    out[k] = canonNode(v);
+  }
+  return out;
+}
+
+/** A document with no words, no picture and no table in it — what a page that was never
+ *  typed into looks like, and what `EMPTY_DOC` round-trips to. */
+export function isEmptyDoc(doc) {
+  if (doc == null) return true;
+  let empty = true;
+  const walk = (n) => {
+    if (!n || typeof n !== "object" || !empty) return;
+    if (n.type === "text" && String(n.text || "").trim()) { empty = false; return; }
+    if (n.type && !["doc", "paragraph", "text"].includes(n.type)) { empty = false; return; }
+    (n.content || []).forEach(walk);
+  };
+  walk(doc);
+  return empty;
+}
+
+/* ---- pure: two windows, one browser, one ledger (B1391) -------------------------------
+ *
+ * SAME-ACCOUNT MULTI-WINDOW IS A NORMAL STATE, NOT AN EXCEPTION. Two tabs share this
+ * browser's localStorage but not its memory, so each one holds its own copy of the sync
+ * ledger and the last one to write used to flatten whatever the other had learned — which
+ * is how a base revision goes stale and a push that should have sailed through gets
+ * refused. This merges the in-memory ledger with whatever is on disk at the moment of
+ * writing, so two windows CONVERGE instead of overwriting each other.
+ *
+ * ⛔ A DIRTY PAGE KEEPS *ITS OWN* BASE REVISION, even when the disk has a newer one. That
+ * is the B1113 / ROWS-CANONICAL-ON-SEED trap in this file's terms: adopting the sibling
+ * window's fresher rev as the base for a body this window edited from an OLDER one would
+ * let a stale document commit CLEANLY, past a guard that is doing its job. The guard must
+ * still refuse — and `judgeConflict` above is what then decides, cheaply, whether the
+ * refusal was worth a word to the user. */
+export function mergeSyncState(mine, disk) {
+  const a = mine || emptySyncState();
+  const b = disk || emptySyncState();
+  const out = {
+    treeRev: higherRev(a.treeRev, b.treeRev),
+    treeDirty: !!a.treeDirty || !!b.treeDirty,     // an unpushed change on either side is still owed
+    pages: {},
+    images: {},
+    adopted: [...new Set([...(a.adopted || []), ...(b.adopted || [])])],
+  };
+  for (const id of new Set([...Object.keys(a.pages || {}), ...Object.keys(b.pages || {})])) {
+    const m = a.pages?.[id] || null;
+    const d = b.pages?.[id] || null;
+    const dirty = !!m?.dirty || !!d?.dirty;
+    out.pages[id] = {
+      // Dirty HERE → keep this window's base (see the rule above). Otherwise a revision only
+      // ever moves forward, so the higher of the two is the current one.
+      rev: m?.dirty ? (Number.isFinite(m.rev) ? m.rev : null) : higherRev(m?.rev, d?.rev),
+      dirty,
+      purged: !!m?.purged || !!d?.purged,          // a tombstone from either window stands
+    };
+  }
+  for (const id of new Set([...Object.keys(a.images || {}), ...Object.keys(b.images || {})])) {
+    out.images[id] = {
+      up: !!a.images?.[id]?.up || !!b.images?.[id]?.up,
+      purged: !!a.images?.[id]?.purged || !!b.images?.[id]?.purged,
+    };
+  }
+  return out;
+}
+
+const higherRev = (x, y) => {
+  const nx = Number.isFinite(x) ? x : null;
+  const ny = Number.isFinite(y) ? y : null;
+  if (nx == null) return ny;
+  if (ny == null) return nx;
+  return Math.max(nx, ny);
+};
+
 /* ---- pure: pictures ------------------------------------------------------------------
  *
  * The BYTES are LAZY on the way down and EAGER on the way up, and that asymmetry is the

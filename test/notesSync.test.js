@@ -11,9 +11,10 @@
 import { describe, it, expect } from "vitest";
 import {
   IMAGE_MIME_ALLOWED, PAGE_TABLE, TREE_TABLE, dataUrlToBlob, emptySyncState, fetchPageIndex,
-  mergeTrees, planAdoption, planImageSync, planPageSeed, pushPage, pushTree,
-  syncFailureReason,
+  isEmptyDoc, judgeConflict, mergeSyncState, mergeTrees, planAdoption, planImageSync,
+  planPageSeed, pushPage, pushTree, sameDoc, syncFailureReason,
 } from "../src/workspaces/notes/lib/notesCloud.js";
+import { notesConflictLine } from "../src/workspaces/notes/lib/notesStore.js";
 
 /* ---- fixtures ------------------------------------------------------------------------ */
 
@@ -469,5 +470,173 @@ describe("the picture codec", () => {
 
   it("the mime allow-list matches the bucket's, so a refusal is named here not at the server", () => {
     expect(IMAGE_MIME_ALLOWED).toEqual(["image/png", "image/jpeg", "image/gif", "image/webp", "image/svg+xml"]);
+  });
+});
+
+/* ════════════════════════════════════════════════════════════════════════════════════════
+ * 8. A NO-OP CONFLICT MUST NEVER PROMPT (B1391)
+ *
+ * The false alarm the owner hit: one person, one account, two windows. A revision guard can
+ * only answer "did the row move?", and the honest answer to that is not "do the two copies
+ * disagree?". These are the rules that stand between a lost race and an interruption.
+ * ═══════════════════════════════════════════════════════════════════════════════════════ */
+describe("sameDoc — the bytes may differ; the note may not", () => {
+  const doc = (...content) => ({ type: "doc", content });
+  const para = (text, marks) => ({ type: "paragraph", content: text ? [{ type: "text", text, ...(marks ? { marks } : {}) }] : [] });
+
+  it("two documents that say the same thing are the same document", () => {
+    expect(sameDoc(doc(para("The bayou runs north.")), doc(para("The bayou runs north.")))).toBe(true);
+  });
+
+  it("KEY ORDER is not an edit — a round trip through the server's jsonb may reorder it", () => {
+    const a = { type: "doc", content: [{ type: "paragraph", attrs: { textAlign: "left" }, content: [{ type: "text", text: "hi" }] }] };
+    const b = { content: [{ content: [{ text: "hi", type: "text" }], attrs: { textAlign: "left" }, type: "paragraph" }], type: "doc" };
+    expect(sameDoc(a, b)).toBe(true);
+  });
+
+  it("an attribute written as NULL and one left out are the same note", () => {
+    const a = doc({ type: "paragraph", attrs: { textAlign: null }, content: [{ type: "text", text: "hi" }] });
+    const b = doc({ type: "paragraph", content: [{ type: "text", text: "hi" }] });
+    expect(sameDoc(a, b)).toBe(true);
+  });
+
+  it("an EMPTY marks list and no marks list are the same note", () => {
+    const a = doc({ type: "paragraph", content: [{ type: "text", text: "hi", marks: [] }] });
+    expect(sameDoc(a, doc(para("hi")))).toBe(true);
+  });
+
+  it("marks are a SET — bold+italic is the same text as italic+bold", () => {
+    const a = doc(para("hi", [{ type: "bold" }, { type: "italic" }]));
+    const b = doc(para("hi", [{ type: "italic" }, { type: "bold" }]));
+    expect(sameDoc(a, b)).toBe(true);
+  });
+
+  it("...but CONTENT is a SEQUENCE — two paragraphs in the other order is a different note", () => {
+    expect(sameDoc(doc(para("one"), para("two")), doc(para("two"), para("one")))).toBe(false);
+  });
+
+  it("a real edit is still a real edit", () => {
+    expect(sameDoc(doc(para("The bayou runs north.")), doc(para("The bayou runs south.")))).toBe(false);
+    expect(sameDoc(doc(para("hi")), doc(para("hi", [{ type: "bold" }])))).toBe(false);
+  });
+
+  it("nothing and nothing agree; nothing and something do not", () => {
+    expect(sameDoc(null, null)).toBe(true);
+    expect(sameDoc(null, doc(para("hi")))).toBe(false);
+  });
+});
+
+describe("isEmptyDoc", () => {
+  it("a page that was never typed into is empty", () => {
+    expect(isEmptyDoc(null)).toBe(true);
+    expect(isEmptyDoc({ type: "doc", content: [{ type: "paragraph" }] })).toBe(true);
+    expect(isEmptyDoc({ type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "   " }] }] })).toBe(true);
+  });
+
+  it("a picture or a table is NOT nothing, even with no words in it", () => {
+    expect(isEmptyDoc({ type: "doc", content: [{ type: "noteImage", attrs: { imageId: "i1" } }] })).toBe(false);
+    expect(isEmptyDoc({ type: "doc", content: [{ type: "table", content: [] }] })).toBe(false);
+  });
+
+  it("one word is not empty", () => {
+    expect(isEmptyDoc({ type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "hi" }] }] })).toBe(false);
+  });
+});
+
+describe("judgeConflict — only a REAL divergence may interrupt", () => {
+  const withText = (t) => ({ type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: t }] }] });
+  const blank = { type: "doc", content: [{ type: "paragraph" }] };
+
+  it("IDENTICAL COPIES RECONCILE IN SILENCE — the owner's false alarm, in one line", () => {
+    const v = judgeConflict({ localDoc: withText("same words"), serverDoc: withText("same words") });
+    expect(v.silent).toBe(true);
+    expect(v.why).toBe("identical");
+  });
+
+  it("a lost race with NOTHING HERE TO LOSE takes the row (ROWS-CANONICAL-ON-SEED)", () => {
+    expect(judgeConflict({ localDoc: null, serverDoc: withText("their words") })).toEqual({ silent: true, why: "nothing-local" });
+    expect(judgeConflict({ localDoc: blank, serverDoc: withText("their words") })).toEqual({ silent: true, why: "nothing-local" });
+  });
+
+  it("⛔ THE SILENT PATH MAY ONLY EVER ADD TEXT BACK — text here against a blank there is a REAL conflict", () => {
+    const v = judgeConflict({ localDoc: withText("my paragraph"), serverDoc: blank });
+    expect(v.silent).toBe(false);
+  });
+
+  it("two different documents still stop and ask — the guarantee this whole path exists for", () => {
+    const v = judgeConflict({ localDoc: withText("my words"), serverDoc: withText("their words") });
+    expect(v).toEqual({ silent: false, why: "diverged" });
+  });
+});
+
+describe("mergeSyncState — two windows of one browser converge instead of overwriting", () => {
+  const ledger = (over = {}) => ({ ...emptySyncState(), adopted: [], ...over });
+
+  it("a revision the SIBLING window pushed is picked up, not flattened", () => {
+    const mine = ledger({ pages: { p1: { rev: 4, dirty: false, purged: false } } });
+    const disk = ledger({ pages: { p1: { rev: 7, dirty: false, purged: false } } });
+    expect(mergeSyncState(mine, disk).pages.p1.rev).toBe(7);
+  });
+
+  it("⛔ A DIRTY PAGE KEEPS ITS OWN BASE — adopting a fresher rev would let a STALE body commit cleanly", () => {
+    const mine = ledger({ pages: { p1: { rev: 4, dirty: true, purged: false } } });
+    const disk = ledger({ pages: { p1: { rev: 7, dirty: false, purged: false } } });
+    const out = mergeSyncState(mine, disk).pages.p1;
+    expect(out.rev).toBe(4);      // the guard must still refuse; judgeConflict then decides
+    expect(out.dirty).toBe(true);
+  });
+
+  it("an unpushed edit in EITHER window is still owed to the cloud", () => {
+    expect(mergeSyncState(ledger({ treeDirty: true }), ledger()).treeDirty).toBe(true);
+    expect(mergeSyncState(ledger(), ledger({ treeDirty: true })).treeDirty).toBe(true);
+    expect(mergeSyncState(
+      ledger({ pages: { p1: { rev: 2, dirty: false, purged: false } } }),
+      ledger({ pages: { p1: { rev: 2, dirty: true, purged: false } } }),
+    ).pages.p1.dirty).toBe(true);
+  });
+
+  it("a TOMBSTONE from either window stands (TOMBSTONE-DELETES)", () => {
+    const out = mergeSyncState(
+      ledger({ pages: { p1: { rev: 3, dirty: false, purged: false } } }),
+      ledger({ pages: { p1: { rev: 3, dirty: false, purged: true } }, images: { i1: { up: true, purged: true } } }),
+    );
+    expect(out.pages.p1.purged).toBe(true);
+    expect(out.images.i1.purged).toBe(true);
+  });
+
+  it("a page only ONE window knows about survives the merge", () => {
+    const out = mergeSyncState(
+      ledger({ pages: { p1: { rev: 1, dirty: false, purged: false } } }),
+      ledger({ pages: { p2: { rev: 9, dirty: false, purged: false } } }),
+    );
+    expect(Object.keys(out.pages).sort()).toEqual(["p1", "p2"]);
+  });
+
+  it("the ADOPTED-ONCE list is a union — a notebook adopted in one window is not re-copied in the other", () => {
+    expect(mergeSyncState(ledger({ adopted: ["nbA"] }), ledger({ adopted: ["nbB"] })).adopted.sort()).toEqual(["nbA", "nbB"]);
+  });
+
+  it("merging an EMPTY ledger with a real one loses nothing", () => {
+    const disk = ledger({ treeRev: 12, pages: { p1: { rev: 3, dirty: false, purged: false } } });
+    expect(mergeSyncState(null, disk).treeRev).toBe(12);
+    expect(mergeSyncState(null, disk).pages.p1.rev).toBe(3);
+  });
+});
+
+describe("the conflict copy may never name a PERSON (B1391)", () => {
+  it("says WINDOW, never a someone — these notes are private to one account", () => {
+    const copy = notesConflictLine("Site notes");
+    const all = `${copy.text} ${copy.keepMine} ${copy.keepTheirs} ${copy.parkedSuffix}`;
+    expect(copy.text).toContain("Site notes");
+    expect(all).toMatch(/window/i);
+    expect(all).not.toMatch(/person|someone|somebody|else's|another user|colleague/i);
+  });
+
+  it("still says plainly that nothing was overwritten — the reassurance is the point of the bar", () => {
+    expect(notesConflictLine("x").text).toMatch(/nothing was overwritten/i);
+  });
+
+  it("an untitled page is named, not left blank", () => {
+    expect(notesConflictLine("").text).toContain("Untitled");
   });
 });

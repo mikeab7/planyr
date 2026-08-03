@@ -40,7 +40,10 @@ body { font: 11.5pt/1.55 -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sa
 .note-page-head { font-size: 12.5pt; font-weight: 700; margin: 6mm 0 2mm; }
 .note-page-meta { font-size: 8pt; font-weight: 600; color: #5B6270; margin: 0 0 2mm; }
 .note-body > * + * { margin-top: 0.7em; }
-.note-body p { margin: 0; orphans: 2; widows: 2; }
+/* PDF-PARITY for the Tab indent (B1392): a tab typed in a paragraph is a real character
+   in the document, so the sheet has to honour it — and at the SAME width the screen
+   does, or an indented line would land in a different place on paper. */
+.note-body p { margin: 0; orphans: 2; widows: 2; white-space: pre-wrap; tab-size: 4; }
 .note-body h1 { font-size: 1.7em; font-weight: 700; line-height: 1.25; margin: 0; break-after: avoid; }
 .note-body h2 { font-size: 1.4em; font-weight: 700; line-height: 1.3; margin: 0; break-after: avoid; }
 .note-body h3 { font-size: 1.18em; font-weight: 650; margin: 0; break-after: avoid; }

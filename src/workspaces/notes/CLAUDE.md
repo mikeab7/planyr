@@ -86,6 +86,12 @@ rule, including what migrates and how the bind rides the cloud sync, is written 
   SVG pass through untouched (a canvas would silently flatten them).
 - `lib/notesImageNode.js` — the `noteImage` schema node + the paste/drop plugin + the node view
   that draws the **visible broken-image state** when the bytes are gone.
+- `lib/notesTabKey.js` — **Tab belongs to the DOCUMENT while the caret is in it** (B1392). A
+  low-priority FALLBACK: the table's next-cell and the list's indent/outdent are asked first and
+  still win; this catches only what they decline — a plain paragraph, an empty page, the first
+  item of a list — which is where Tab used to escape into Chrome's toolbar mid-sentence. It keeps
+  a deliberate keyboard-trap escape: **Escape releases the next Tab**, and the editor's accessible
+  name says so.
 - `lib/notesSearchHighlight.js` — search marking as ProseMirror **decorations** (never marks: it
   must not write into the document), plus stepping between matches.
 - `lib/notesMarkdown.js` — PURE Markdown export + `docToText` (what body search reads) +

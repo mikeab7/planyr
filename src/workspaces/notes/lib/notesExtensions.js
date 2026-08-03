@@ -36,6 +36,7 @@ import { TextAlign } from "@tiptap/extension-text-align";
 // already installed as StarterKit's own dependency, and it rides the lazy editor chunk.
 import { Placeholder } from "@tiptap/extensions";
 import NoteImage from "./notesImageNode.js";
+import NoteTabKey from "./notesTabKey.js";
 import NoteSearchHighlight from "./notesSearchHighlight.js";
 
 /** Headings stop at 4. A note is a document, not a spec: levels 5–6 are indistinguishable
@@ -80,6 +81,12 @@ export const NOTE_EXTENSIONS = [
 
   // Presentation-only search marking. It writes nothing into the document.
   NoteSearchHighlight,
+
+  // Tab belongs to the DOCUMENT while the caret is in it (B1392). Registered at a low
+  // priority ON PURPOSE, so the table's and the list's own Tab handlers are asked first —
+  // see lib/notesTabKey.js for which cases each of them already claimed and which ones were
+  // falling through to Chrome's toolbar.
+  NoteTabKey,
 
   Placeholder.configure({ placeholder: NOTE_PLACEHOLDER }),
 ];

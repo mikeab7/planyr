@@ -47,7 +47,7 @@ const ALL_NOTES_FILES = [
   "Notes.jsx", "components/NotesTree.jsx", "components/NoteEditor.jsx", "components/NoteToolbar.jsx",
   "lib/notesModel.js", "lib/notesStore.js", "lib/notesCloud.js", "lib/notesMarkdown.js", "lib/notesExtensions.js",
   "lib/notesTime.js", "lib/notesPrint.js", "lib/notesImageDb.js", "lib/notesImageIntake.js",
-  "lib/notesImageNode.js", "lib/notesSearchHighlight.js", "lib/notesDocHtml.js",
+  "lib/notesImageNode.js", "lib/notesSearchHighlight.js", "lib/notesDocHtml.js", "lib/notesTabKey.js",
 ];
 
 /* ════════════════════════════════════════════════════════════════════════════════════════
@@ -215,7 +215,13 @@ describe("the editor is split off the route's static path", () => {
 
   it("the editor is REMOUNTED per page — the key is a bug fix, not a style choice", () => {
     const root = code("Notes.jsx");
-    expect(root, "without key={pageId} the outgoing page's autosave cannot flush on unmount").toMatch(/key=\{activePage\.id\}/);
+    // The key LEADS with the page id (the original fix: switching pages must unmount the
+    // outgoing editor so its autosave can flush) and now also carries the BODY EPOCH, which
+    // remounts when the body changed underneath it — a second window, or a cloud adopt
+    // (B1391). Both halves are a remount; neither may become a "sync content" effect.
+    expect(root, "without the page id in the key the outgoing page's autosave cannot flush on unmount")
+      .toMatch(/key=\{`\$\{activePage\.id\}/);
+    expect(root, "the editor must also remount when the body changed underneath it").toMatch(/bodyEpoch/);
   });
 
   it("there is NO 'sync content on pageId change' effect — that is the crash this shape removed", () => {
@@ -705,5 +711,80 @@ describe("the folder pointer", () => {
     expect(pointer).toMatch(/document model/i);
     expect(pointer).toMatch(/ProseMirror JSON/);
     expect(pointer).toMatch(/never Markdown/i);
+  });
+});
+
+/* ════════════════════════════════════════════════════════════════════════════════════════
+ * 7. TAB BELONGS TO THE DOCUMENT (B1392)
+ *
+ * The owner's Tab presses were landing in Chrome's toolbar. The fix is a FALLBACK, and the
+ * two properties that make it a fallback rather than a blanket swallow are asserted here;
+ * the behaviour itself is driven in a real browser in ui-audit/verify-notes.mjs §23.
+ * ═══════════════════════════════════════════════════════════════════════════════════════ */
+describe("the Tab key", () => {
+  it("is claimed by an extension that IS in the one canonical extension list", () => {
+    expect(NOTE_EXTENSIONS.map((e) => e.name)).toContain("noteTabKey");
+  });
+
+  it("⛔ runs BELOW the table's and the list's own Tab handlers, so indent and next-cell still win", () => {
+    const tab = NOTE_EXTENSIONS.find((e) => e.name === "noteTabKey");
+    const others = NOTE_EXTENSIONS.filter((e) => e.name !== "noteTabKey");
+    for (const e of others) {
+      const p = e.config?.priority ?? e.options?.priority ?? 100;
+      expect(tab.config.priority, `${e.name} would be asked after the Tab fallback`).toBeLessThan(p + 1);
+    }
+    expect(tab.config.priority).toBeLessThan(100);
+  });
+
+  it("⛔ KEEPS AN ESCAPE HATCH — a key that can never leave is a keyboard trap", () => {
+    const text = code("lib/notesTabKey.js");
+    expect(text).toMatch(/Escape:/);
+    expect(text).toMatch(/released/);
+    // …and the way out is ANNOUNCED, not folklore: the editor's accessible name says it.
+    expect(code("components/NoteEditor.jsx")).toMatch(/aria-label[^\n]*Escape/);
+  });
+
+  it("indents with a REAL character, so the indent survives storage and export", () => {
+    expect(code("lib/notesTabKey.js")).toMatch(/TAB_CHAR = "\\t"/);
+  });
+
+  it("PDF-PARITY — the print sheet honours a tab at the SAME width the screen does", () => {
+    const onScreen = src("components/NoteEditor.jsx").match(/tab-size:\s*(\d+)/);
+    const onPaper = src("lib/notesPrint.js").match(/tab-size:\s*(\d+)/);
+    expect(onScreen, "the editor CSS sets no tab-size").toBeTruthy();
+    expect(onPaper, "the print sheet sets no tab-size").toBeTruthy();
+    expect(onPaper[1]).toBe(onScreen[1]);
+  });
+});
+
+/* ════════════════════════════════════════════════════════════════════════════════════════
+ * 8. THE CONFLICT BAR NAMES NOBODY (B1391)
+ * ═══════════════════════════════════════════════════════════════════════════════════════ */
+describe("the conflict surface", () => {
+  it("takes its words from the ONE pure copy function, not from strings inlined in JSX", () => {
+    expect(code("Notes.jsx")).toMatch(/notesConflictLine/);
+  });
+
+  it("⛔ no user-facing string in the module implies another PERSON edited your note", () => {
+    for (const f of JSX_SURFACES.concat(["lib/notesStore.js"])) {
+      const text = code(f);
+      expect(text, `${f} implies a second person`).not.toMatch(/other person|someone else|another user/i);
+    }
+  });
+
+  it("a moved revision alone may not raise the bar — the store compares the documents first", () => {
+    const store = code("lib/notesStore.js");
+    expect(store).toMatch(/settleQuietly/);
+    // Both paths that can lose the race have to go through it: the seed and the push.
+    expect(store.match(/settleQuietly\(/g)?.length ?? 0).toBeGreaterThanOrEqual(3);
+  });
+
+  it("same-account MULTI-WINDOW is handled as a normal state: a sibling window is listened for", () => {
+    const store = code("lib/notesStore.js");
+    expect(store).toMatch(/addEventListener\("storage"/);
+    expect(store).toMatch(/mergeSyncState|mergeState/);
+    // …and an open editor re-reads a body that changed underneath it (the self-race).
+    expect(store).toMatch(/emitPagesChanged/);
+    expect(code("Notes.jsx")).toMatch(/onNotesPagesChanged/);
   });
 });
