@@ -38,8 +38,48 @@ export const ID_BOND_TAGS = ["attachedTo", "forCourt", "forTrailer", "prevZone"]
  * Tags that only mean something next to the host. Dropped when the host does NOT ride along in the
  * same copy, so a lone child pastes as a plain standalone element instead of a half-bonded one.
  * (Mirrors `HOST_ROLE_TAGS` in planClipboard / `ORPHAN_TAGS` in SitePlanner.)
+ *
+ * NEW-1 (2026-08-03) — `sideParkFit` and `sideParkPiece` joined the list. Both are measured AGAINST
+ * the host (an along-wall run + centre, and a position in the wall's outward stack), so both are
+ * meaningless without it and must travel with it or not at all — exactly the contract this list
+ * encodes. They were previously loose keys nobody enumerated, which is how a copy path could carry
+ * one and drop the other.
  */
-export const HOST_ROLE_TAGS = ["truckCourt", "forCourt", "forTrailer", "dogEar", "oppSide", "sideParkSide", "sidewalkSide", "stackSide", "noFit", "noLabel", "prevZone"];
+export const HOST_ROLE_TAGS = ["truckCourt", "forCourt", "forTrailer", "dogEar", "oppSide", "sideParkSide", "sideParkFit", "sideParkPiece", "sidewalkSide", "stackSide", "noFit", "noLabel", "prevZone"];
+
+/* ---- NEW-1: the ONE tag-carry helper every "replace an element with fresh-uid children" path uses.
+ *
+ * THE BUG THIS EXISTS TO CLOSE. `splitParkingRows` (the parking field's Explode) built each piece
+ * from scratch with only `cfg` and `attachedTo` copied off the source field. Every bond ROLE tag was
+ * dropped — `sideParkSide` above all — so the pieces stayed bonded to the building while reading as
+ * nothing in particular. That is not a cosmetic loss: `empSidePark` / `sideParkingOn` /
+ * `normalizeWallKids` / the side-parking heal all answered "what is on this wall?" with a STRICT
+ * `sideParkSide === side` test, so a full 60 ft parking module went INVISIBLE to every one of them.
+ * The consequence the owner reported: on a non-dock wall the "−" ladder walks
+ * rows → remove parking → remove sidewalk, and with the parking invisible ONE click fell straight
+ * through to the last rung and deleted the sidewalk out from under a live parking field. Two
+ * buildings on Goose Creek "Plan II" lost a sidewalk that way (2026-07-29 / 2026-07-30), each a solo
+ * single-row delete with the host alive and untouched; twelve host buildings across six sites were
+ * carrying untagged exploded pieces by the time it was found.
+ *
+ * THE RULE: a path that REPLACES an element with fresh-uid children keeps the source's host bond AND
+ * its full role identity on every child — because the children ARE the source as far as the host is
+ * concerned. `attachedTo` alone makes a bonded child with no identity, which every lookup keyed on
+ * the role tag then fails to see. Route the copy through here rather than hand-picking a subset per
+ * call site; hand-picked subsets are what drifted.
+ *
+ * NOT the same thing as `remapBondRefs` above, and deliberately separate: that one rewrites bonds
+ * when a SET is copied (ids change on both ends). This one carries role tags when ONE element
+ * becomes N pieces of itself and the host is untouched, so there is no id to remap.
+ */
+export function carryHostRoleTags(src, clone = {}) {
+  if (!src) return clone;
+  for (const tag of HOST_ROLE_TAGS) {
+    const v = src[tag];
+    if (v !== undefined) clone[tag] = v;
+  }
+  return clone;
+}
 
 /**
  * Rewrite `clone`'s id-bearing bonds in place-ish (returns the same object) from `src`'s originals.

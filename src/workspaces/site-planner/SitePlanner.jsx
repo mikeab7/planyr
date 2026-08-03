@@ -23,7 +23,7 @@ import { commitElements, fetchElements, keepaliveCommit } from "./lib/elementApi
 import { supabase, supabaseRest, currentAccessToken } from "./lib/supabase.js";
 import { createIdMinter, randomIdSalt } from "../../shared/ids.js";
 import { mergeSiteContent, createSiteModel } from "./lib/siteModel.js";
-import { assemblyIntegrity, tearPayload } from "./lib/assemblyIntegrity.js";
+import { assemblyIntegrity, tearPayload, orphanPayload } from "./lib/assemblyIntegrity.js";
 import { extendMergeSelection } from "./lib/parcelSelect.js";
 import { parcelSelectHintDecision, PARCEL_HINT_COOLDOWN_MS } from "./lib/parcelSelectHint.js";
 import { measuresUnderPoint, nextMeasureSelection } from "./lib/measureHit.js";
@@ -119,7 +119,7 @@ import {
 } from "./lib/measureSheet.js";
 import { pushRecent, notePick, commitPick } from "../../shared/ui/colorRecents.js";
 import { CLIP_KINDS, collectClipboard, clipboardBBox, pasteClipboard, translateCalloutBy, translateParcelBy } from "./lib/planClipboard.js";
-import { remapBondRefs } from "./lib/bondRemap.js";
+import { remapBondRefs, carryHostRoleTags } from "./lib/bondRemap.js";
 import { SETBACK_CHIP, setbackChipPlateW, setbackChipSpawn, numEditBox } from "./lib/numEditBox.js";
 import NumEditField from "./components/NumEditField.jsx";
 import { usePalette } from "../../shared/theme/ThemeProvider.jsx";
@@ -198,7 +198,8 @@ import { dissolveRings, clipPolylineOutside, clusterIds, regionPathD, rectOutlin
 import { dashZoom, insetRingVisible } from "./lib/lineZoom.js";
 import { roadClassesOf, roadClassOf, classMinRadius, classDefaultRadius, classReturnRadius, DEFAULT_ROAD_CLASS, ROAD_CLASS_SEEDS, speedMinRadius } from "./lib/roadClasses.js";
 import { DOGEAR_W, DOGEAR_D, dogEarGeom, dogEarSize, sidewalkSpanForBumps, isDogEarSide,
-  wallStripBox, wallKidBox, wallKidPerp, wallKidAlong, hostAxisExtents, ownExtents, bumpsOfHost, sideParkAlongRun } from "./lib/dogEar.js";
+  wallStripBox, wallKidBox, wallKidPerp, wallKidAlong, hostAxisExtents, ownExtents, bumpsOfHost, sideParkAlongRun,
+  sideParkStack } from "./lib/dogEar.js";
 import { CURB_TYPES as COST_CURB_TYPES, CURB_TYPE_META, roadCurbType, roadCurbedSides, roadPanWidth, roadQuantities, costRollup } from "./lib/costTakeoff.js";
 import { layoutLabels, buildingLabelLines, dimCalloutVisible, detailLabelVisible, pondParamLabelVisible, pondParamFontPx, suppressedDimIds, dimFontScale, dimFontPx, boxOf, DIM_CALLOUT_MIN_PPF, stallStripesExplicit, segmentsPath } from "./lib/labelLayout.js";
 import { inlineLines } from "./lib/labelFitLadder.js";
@@ -3592,7 +3593,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
    * the ids and the delta it corrected. */
   const assemblyGuard = (list, seam) => {
     const res = assemblyIntegrity(list);
-    if (!res.tears.length) return list;
+    /* NEW-4 — a bonded child with NO ROLE is a defect even when its coordinates are perfect, so it
+       is reported on its own terms and never folded into the geometry diff (which cannot see it).
+       The heal in the same call has already given it its identity back; this is what makes the next
+       code path that drops a tag get caught by the harness rather than by the owner. */
+    if (res.orphans && res.orphans.length)
+      reportClientEvent("assembly-orphan-pad", `${res.orphans.length} bonded pad(s) on a building carried no wall role (${seam})`,
+        { id: siteId, seam, ...orphanPayload(res.orphans) });
+    // Adopt for an orphan even with no tear — the re-tag is a zero-geometry repair, so it would
+    // otherwise be thrown away here (this seam deliberately ignores sub-tolerance geometry churn).
+    if (!res.tears.length) return (res.orphans && res.orphans.length) ? res.els : list;
     reportClientEvent("assembly-tear-detected",
       `bonded child ${res.tears.length > 1 ? "children" : ""} off host by up to ${Math.round(res.tears[0].dist)} ft (${seam})`,
       { id: siteId, seam, ...tearPayload(res.tears) });
@@ -7778,7 +7788,26 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // Add a single row of parking + drive aisle flush against a building side, the
   // wall's full length, oriented so it grows OUTWARD (drive on the building side).
   const SIDE_PARK_ANGLE = { top: 180, bottom: 0, left: 90, right: 270 };
-  const sideParkingOn = (b, name) => els.find((x) => x.attachedTo === b.id && x.sideParkSide === name);
+  /* ---- NEW-2: "what is on this wall?" is answered by GEOMETRY, with the tag as a fast path ------
+   *
+   * `sideParkingOn` / `empSidePark` used to test `x.sideParkSide === name` and NOTHING else. That
+   * made the answer depend on a tag surviving every write path — and it did not: `splitParkingRows`
+   * dropped it off every Explode piece, so a wall carrying a full 60 ft parking module answered
+   * "nothing here". `empSideSidewalk` beside it has always used the forgiving test (bonded + a
+   * strip type + `sideOfKid`), which is why the sidewalk stayed visible while the parking vanished,
+   * and therefore why the "−" ladder fell through to the sidewalk rung with pavement still bonded
+   * to that wall. Same forgiving test here: a bonded, non-stack, non-strip pad whose side resolves
+   * to this wall IS parking on this wall, tagged or not. A future tag-loss bug can then only cost a
+   * label — never geometry. Returned INNER→OUTER, because an exploded field is a stack and the
+   * ladder must always act on the outermost piece. */
+  const SIDE_PARK_PAD_TYPES = new Set(["parking", "paving"]);
+  const isSideParkPad = (x, b) => SIDE_PARK_PAD_TYPES.has(x.type) && x.attachedTo === b.id && !x.points
+    && !x.dogEar && !x.noFit && !x.truckCourt && !x.forCourt && !x.forTrailer && !x.prevZone && !isWallStrip(x);
+  const sideParkPadsOn = (b, name) => {
+    const pads = els.filter((x) => isSideParkPad(x, b) && (x.sideParkSide ? x.sideParkSide === name : sideOfKid(b, x) === name));
+    return sideParkStack(b, name, pads, 0).map((r) => r.el);   // one ordering, shared with the refit
+  };
+  const sideParkingOn = (b, name) => sideParkPadsOn(b, name)[0] || null;
   const sidewalkOnSide = (b, name) => els.find((x) => isWallStrip(x) && !x.points && x.attachedTo === b.id && sideOfKid(b, x) === name);
   // Add a 5′ sidewalk flush against a building side, full wall length. If pads
   // (paving/parking) already sit on that side, push them out by the sidewalk's
@@ -7820,6 +7849,33 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const el = { id: uid(), type: "parking", cx: b.cx + off.x, cy: b.cy + off.y, w: along, h: parkDepth,
       rot: ((b.rot + SIDE_PARK_ANGLE[name]) % 360 + 360) % 360, attachedTo: b.id, sideParkSide: name };
     addBuildingEls([el], b.id);
+  };
+  /* NEW-2 — "+" on a wall whose parking has been EXPLODED. The set is a stack of individual bands,
+     so a new stall row is appended BEYOND the outermost piece rather than growing a band that has
+     an aisle outboard of it. It matches its neighbour's along-wall run (the owner trims these
+     pieces by hand, and a full-span newcomer beside a trimmed row is not what he asked for), and
+     records that run as intent so the wall-kid refit carries it. */
+  const addSideParkPieceBeyond = (b, side, outer) => {
+    const isVert = side === "left" || side === "right";
+    const depth = settings.stallDepth;                          // one stall row; the aisle already exists
+    const sw = sidewalkOnSide(b, side);
+    const pads = sideParkPadsOn(b, side);
+    const inboard = (sw ? swThick(sw) : 0)
+      + pads.reduce((s, p) => s + (isVert ? hostAxisExtents(b, p).dimBX : hostAxisExtents(b, p).dimBY), 0);
+    const cur = wallKidAlong(b, side, outer);
+    const span = sidewalkSpanForBumps(b, side, bumpsOfHost(els, b));
+    const offDefault = Math.abs(cur.run - span.run) > 0.5 || Math.abs(cur.alongShift - span.alongShift) > 0.5;
+    const [nx, ny] = SIDE_N[side];
+    const perp = wallKidPerp(b, side, depth, inboard);
+    const off = rot2(nx !== 0 ? perp : cur.alongShift, ny !== 0 ? perp : cur.alongShift, b.rot);
+    const idx = pads.reduce((m, p, i) => Math.max(m, Number.isFinite(p.sideParkPiece) ? p.sideParkPiece : i), -1) + 1;
+    addBuildingEls([{
+      id: uid(), type: "parking", cx: b.cx + off.x, cy: b.cy + off.y, w: cur.run, h: depth,
+      rot: ((b.rot + SIDE_PARK_ANGLE[side]) % 360 + 360) % 360, attachedTo: b.id,
+      sideParkSide: side, sideParkPiece: idx,
+      ...(offDefault ? { sideParkFit: { run: cur.run, alongShift: cur.alongShift } } : {}),
+      ...(outer.cfg ? { cfg: outer.cfg } : {}),
+    }], b.id);
   };
   // (Removed B416: the legacy opposite-dock trailer row — `OPP_TRAILER_D` / `oppTrailerGeom`
   // / `fitWallTrailer` / the `oppSide` refit branch. Since B228 the dock-zone stack
@@ -8193,16 +8249,28 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // "−" reverses (rows → remove parking → remove sidewalk). Mirrors the dock stack for the parking
   // side, and brings the sidewalk back into the flow (it was dropped in the B242 redesign).
   const empSideSidewalk = (b, side) => els.find((x) => x.attachedTo === b.id && isWallStrip(x) && !x.points && sideOfKid(b, x) === side);
-  const empSidePark = (b, side) => els.find((x) => x.attachedTo === b.id && x.sideParkSide === side);
+  // The pad the ladder acts on: the OUTERMOST one on the wall. With a single un-exploded field
+  // that is the field itself (unchanged behaviour); with an exploded set it is the last piece, so
+  // "+"/"−" walk the stack outward/inward exactly like the dock-zone LIFO next door.
+  const empSidePark = (b, side) => { const p = sideParkPadsOn(b, side); return p[p.length - 1] || null; };
   const empSideRows = (p) => parkRowsForDepth(p.h, cfgOf(p).stallDepth || settings.stallDepth, cfgOf(p).aisle ?? settings.aisle);
+  /* NEW-2 — the removal ladder is now STRUCTURALLY incapable of reaching the sidewalk while any
+   * parking or paving is still bonded to this wall. The sidewalk rung is guarded on `pads.length`
+   * — the geometric answer, not a tag — so the failure mode of a future tag-loss bug is a rung that
+   * does nothing, never a rung that destroys geometry the user can still see. (The old ladder read
+   * the parking through a strict tag test and fell past `else if (park)` straight into
+   * `else if (sw) removeFeature(sw.id)` with a full 60 ft module sitting on the wall; that single
+   * fall-through is what cost Goose Creek two sidewalks.) */
   const growEmployeeSide = (b, side, dir) => {
-    const sw = empSideSidewalk(b, side), park = empSidePark(b, side);
+    const sw = empSideSidewalk(b, side), pads = sideParkPadsOn(b, side), park = pads[pads.length - 1] || null;
     if (dir > 0) {
       if (!sw && !park) addSidewalkSide(b, side);      // 1) a 5′ sidewalk against the wall
       else if (!park) addParkingRowSide(b, side);       // 2) first parking row, just beyond the sidewalk
-      else growParking(park, +1);                       // 3+) another row, growing outward
-    } else if (park) {
-      if (empSideRows(park) > 1) growParking(park, -1); else removeFeature(park.id);
+      else if (park.type === "parking" && pads.length === 1) growParking(park, +1); // 3+) another row
+      else addSideParkPieceBeyond(b, side, park);       // an exploded stack → append beyond the outermost
+    } else if (pads.length) {
+      // Never the sidewalk while pavement is still bonded here: peel the outermost pad instead.
+      if (park.type === "parking" && empSideRows(park) > 1) growParking(park, -1); else removeFeature(park.id);
     } else if (sw) removeFeature(sw.id);
   };
   const empSideAddTitle = (b, side) => { const sw = empSideSidewalk(b, side), park = empSidePark(b, side); return (!sw && !park) ? "Add a 5′ sidewalk" : !park ? "Add a parking row" : "Add another parking row"; };
@@ -8368,7 +8436,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // relayoutBumpSidewalks filter caught a chain-zone landscape buffer as if it were a sidewalk.
   const ownedWallStrip = (x, b) => isWallStrip(x) && x.attachedTo === b.id && !x.points && !x.noFit
     && !x.truckCourt && !x.forCourt && !x.forTrailer && !x.prevZone;
-  const ownedSidePark = (x, b) => !!x.sideParkSide && x.attachedTo === b.id && !x.points && !x.noFit;
+  /* NEW-2 — geometric, with the tag as the fast path (same rule as `sideParkPadsOn`). An untagged
+   * Explode piece used to fail this test and therefore never re-flushed when its host moved or was
+   * resized — the "the parking is entirely separated from the building" class. */
+  const ownedSidePark = (x, b) => isSideParkPad(x, b) && !!sideOfKid(b, x);
+  const sideParkSideOf = (b, x) => x.sideParkSide || sideOfKid(b, x);
   /* Re-lay every wall-hugging child of `b` from the RULE rather than from a remembered box
      (NEW-2 / NEW-3). `sideRef` is the host box used only to infer an untagged child's side — on a
      resize that's the PRE-resize host, so a big drag can't flip a strip onto the wrong wall.
@@ -8397,17 +8469,35 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // being built, so a just-added / just-deleted / just-widened sidewalk is already reflected.
     const stripBySide = {};
     arr.forEach((x) => { if (ownedWallStrip(x, b)) { const s = swSideOn(sideRef, x); if (!stripBySide[s]) stripBySide[s] = x; } });
+    /* NEW-1 — a wall's side parking may be an exploded STACK (stall row | drive aisle | stall row),
+       so each piece clears the strip PLUS everything stacked inboard of it. One shared derivation
+       with the load-time heal (lib/dogEar `sideParkStack`); a single un-exploded field still
+       resolves to the bare strip thickness, so this is identity for a plan never exploded. */
+    const gapById = new Map();
+    {
+      const byWall = new Map();
+      arr.forEach((x) => {
+        if (!ownedSidePark(x, b)) return;
+        const s = sideParkSideOf(b, x);
+        if (!byWall.has(s)) byWall.set(s, []);
+        byWall.get(s).push(x);
+      });
+      byWall.forEach((pads, s) => {
+        const strip = stripBySide[s];
+        const isV = s === "left" || s === "right";
+        const sd = strip ? (isV ? hostAxisExtents(b, strip).dimBX : hostAxisExtents(b, strip).dimBY) : 0;
+        sideParkStack(b, s, pads, sd).forEach((r) => gapById.set(r.el.id, r.gap));
+      });
+    }
     const placed = arr.map((x) => {
       if (ownedWallStrip(x, b)) return sidewalkFullRunPatch(arr, b, x, sideRef);
       if (!ownedSidePark(x, b)) return x;
-      const side = x.sideParkSide;
-      const isVert = side === "left" || side === "right";
+      const side = sideParkSideOf(b, x);
       const { cross } = hostAxisExtents(b, x);
       const cur = wallKidAlong(b, side, x);                       // its live run / centre / depth
-      const strip = stripBySide[side];
-      // Only the strip's THICKNESS may become the gap — never its run (a rotated strip would
-      // otherwise leak a wall-length value here, the swThick guard from addParkingRowSide).
-      const gap = strip ? (isVert ? hostAxisExtents(b, strip).dimBX : hostAxisExtents(b, strip).dimBY) : 0;
+      // Only the strip's THICKNESS may become part of the gap — never its run (a rotated strip
+      // would otherwise leak a wall-length value here, the swThick guard from addParkingRowSide).
+      const gap = gapById.has(x.id) ? gapById.get(x.id) : 0;
       const span = sidewalkSpanForBumps(b, side, bumps);
       // NEW-1 — the along-wall decision is the ONE shared rule (lib/dogEar `sideParkAlongRun`), so
       // the canvas refit and the load-time heal cannot answer "is this run user intent?" differently.
@@ -13356,10 +13446,19 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const newEls = [];
     for (const p of pieces) {
       const off = rot2(0, y + p.depth / 2, el.rot);    // piece centre in local depth
+      /* NEW-1 — every piece keeps the SOURCE FIELD's full bond identity, not just `attachedTo`.
+         The pieces ARE the source as far as the host is concerned, so dropping `sideParkSide` (and
+         the rest of HOST_ROLE_TAGS) made a bonded child with no identity: invisible to every lookup
+         and every heal keyed on the role tag, which is how one "−" click reached past a live
+         parking field and deleted the sidewalk under it. `sideParkPiece` is its position in the
+         wall's outward stack, so the set still lays out as ONE wall kid (lib/dogEar sideParkStack).
+         Carried through the ONE shared helper (lib/bondRemap) rather than hand-picked here — a
+         hand-picked subset is exactly what drifted. */
+      const bond = { ...carryHostRoleTags(el), ...(el.attachedTo ? { attachedTo: el.attachedTo } : {}), sideParkPiece: newEls.length };
       if (p.kind === "aisle") {                        // a drive aisle → a plain paving lane
-        newEls.push({ id: uid(), type: "paving", cx: el.cx + off.x, cy: el.cy + off.y, w: el.w, h: p.depth, rot: el.rot, ...(el.attachedTo ? { attachedTo: el.attachedTo } : {}) });
+        newEls.push({ id: uid(), type: "paving", cx: el.cx + off.x, cy: el.cy + off.y, w: el.w, h: p.depth, rot: el.rot, ...bond });
       } else {                                         // a stall row → a one-row parking band (inherits the field's striping cfg)
-        newEls.push({ id: uid(), type: "parking", cx: el.cx + off.x, cy: el.cy + off.y, w: el.w, h: p.depth, rot: el.rot, ...(el.cfg ? { cfg: el.cfg } : {}), ...(el.attachedTo ? { attachedTo: el.attachedTo } : {}) });
+        newEls.push({ id: uid(), type: "parking", cx: el.cx + off.x, cy: el.cy + off.y, w: el.w, h: p.depth, rot: el.rot, ...(el.cfg ? { cfg: el.cfg } : {}), ...bond });
       }
       y += p.depth;
     }

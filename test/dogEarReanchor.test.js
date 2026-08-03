@@ -40,12 +40,25 @@ describe("B487 — dog-ear children re-anchor to the host's current edge on load
     expect(fixed).toBe(good);
   });
 
-  it("does not touch non-dogEar bonded children (truck-court / dock stay as stored)", () => {
-    const truckCourt = { id: "tc", type: "paving", attachedTo: "e8984", cx: 100, cy: 200, w: 50, h: 30, rot: 0 };
-    const m = createSiteModel({ id: "s", els: [HOST, truckCourt] });
+  /* NEW-3 (2026-08-03) — this case used to place the pad 35 ft off its own wall and assert that the
+   * heal never touched it. That was only ever true because the pad carried NO role tag, and "an
+   * untagged bonded pad is invisible to every wall pass" is precisely the state that cost Goose
+   * Creek two sidewalks: three untagged Explode pieces sat on a wall that every lookup reported as
+   * empty, so one "−" click fell through to the sidewalk rung. The pad now gets its role back.
+   * So the case is restated at a FIXED POINT — the pad sits exactly where the bottom wall puts it —
+   * which still proves the DOG-EAR pass leaves a non-dogEar child's geometry alone, and additionally
+   * proves the re-tag is geometry-neutral. */
+  it("does not move a non-dogEar bonded pad — and gives it back the wall role it was missing", () => {
+    // Bottom wall, no strip: derived centre is host.h/2 + depth/2 = 150 + 15 = 165, run/centre kept.
+    const pad = { id: "tc", type: "paving", attachedTo: "e8984", cx: 100, cy: 165, w: 50, h: 30, rot: 0 };
+    const m = createSiteModel({ id: "s", els: [HOST, pad] });
     const kept = m.els.find((e) => e.id === "tc");
-    expect(kept.cx).toBe(100);
-    expect(kept.cy).toBe(200);
+    expect(kept.cx).toBeCloseTo(100, 6);
+    expect(kept.cy).toBeCloseTo(165, 6);
+    expect(kept.w).toBeCloseTo(50, 6);
+    expect(kept.h).toBeCloseTo(30, 6);
+    expect(kept.sideParkSide).toBe("bottom");                       // the identity it never had
+    expect(kept.sideParkFit).toEqual({ run: 50, alongShift: 100 }); // its hand-set span, recorded
   });
 
   it("skips a dog-ear whose host is missing (no crash, kept as-is)", () => {

@@ -572,7 +572,9 @@ describe("every seam that can put a child on the canvas or on the wire runs the 
     // its children's back was corrected with nobody told. Every pass now takes the callback.
     expect(model).toMatch(/function normalizeBondedRotations\(list, onHeal\)/);
     expect(model).toMatch(/kind: "bond-rotation"/);
-    expect(model).toMatch(/normalizeBondedRotations\(normalizeCrossHostBonds\(els, onHeal\), onHeal\)/);
+    // NEW-3 inserted the orphaned-wall-pad repair between the two: every pass after it is keyed on
+    // the role tag it restores, so it has to run before them and after the cross-host re-bond.
+    expect(model).toMatch(/normalizeBondedRotations\(\s*normalizeOrphanWallPads\(normalizeCrossHostBonds\(els, onHeal\), onHeal, \{ mintId \}\), onHeal\)/);
   });
 
   it("the POST-WRITE assertion is wired into the engine and cannot break the commit path", () => {
