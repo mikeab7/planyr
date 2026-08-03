@@ -483,6 +483,10 @@ const TableIcon = () => (
 const ImageIcon = () => (
   <Icon><rect x="2" y="3" width="12" height="10" rx="1.5" /><circle cx="5.75" cy="6.25" r="1.1" /><path d="M2.5 11.5l3.2-3 2.6 2.4 2-1.8 3.2 2.9" /></Icon>
 );
+/* Sketch mode: two boxes and an arrow between them — the thing it makes, not a metaphor. */
+const SketchIcon = () => (
+  <Icon><rect x="1.5" y="2.5" width="5.5" height="4" rx="1" /><rect x="9" y="9.5" width="5.5" height="4" rx="1" /><path d="M7 4.5h3.2a1.5 1.5 0 0 1 1.5 1.5v3" /><path d="M10.2 7.6l1.5 1.9 1.5-1.9" /></Icon>
+);
 const PrintIcon = () => (
   <Icon><path d="M4.5 6V2.5h7V6" /><rect x="2" y="6" width="12" height="5" rx="1.2" /><path d="M4.5 9.5h7v4h-7z" /></Icon>
 );
@@ -604,6 +608,11 @@ export default function NoteToolbar({ editor, onExport, onPrint }) {
         onChange={pickImages}
         style={{ display: "none" }}
       />
+      {/* SKETCH MODE. It sits beside the picture rather than in "More" because it is the
+          same kind of act — putting a non-text thing on the page — and because a control
+          nobody can find is one that does not exist (B1371). */}
+      <TBButton title="Insert a sketch — type an outline, get boxes and arrows"
+        testid="nt-sketch" onClick={() => editor.commands.insertNoteSketch()}><SketchIcon /></TBButton>
 
       <Sep />
 

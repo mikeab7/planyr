@@ -86,6 +86,26 @@ rule, including what migrates and how the bind rides the cloud sync, is written 
   SVG pass through untouched (a canvas would silently flatten them).
 - `lib/notesImageNode.js` — the `noteImage` schema node + the paste/drop plugin + the node view
   that draws the **visible broken-image state** when the bytes are gone.
+- **SKETCH MODE — four files, and ONE rule that makes them make sense.** *The **OUTLINE** is the
+  single source of truth for what exists and what connects to what; the **CANVAS** stores nothing
+  but **POSITION**.* Typing an indented outline is the only way content is authored (it creates the
+  boxes AND the parent→child arrows); dragging a box saves an (x,y) override and never edits the
+  text; the arrows an outline cannot express are their own explicit `{from,to}` list; and deleting a
+  line takes its box, its position **and** every arrow that named it (TOMBSTONE-DELETES). The two
+  representations therefore cannot disagree about **content** — only about layout, which has no
+  competing version to arbitrate. A node is a short **label** plus an optional longer **body**,
+  designed in from the start. And it is a **node in the ProseMirror schema**, not a store beside it —
+  which is what makes it persist, sync, print and export with no new plumbing. If a change starts
+  wanting a second store, that is the wrong branch.
+  - `lib/notesSketchModel.js` — PURE: the outline text ↔ model, the id-stable reconcile (the ONE
+    place a node is created or destroyed, and where the cascade runs), the automatic layout.
+  - `lib/notesSketchRender.js` — the ONE drawing builder, used by `renderHTML` **and** the node
+    view. **No colours at all** — class names only, so the same drawing themes on screen and
+    prints black on white. PDF-PARITY by construction.
+  - `lib/notesSketchNode.js` — the `noteSketch` schema node + the node-view shell.
+  - `lib/notesSketchEditor.js` — the interactive half (outline pane, drag, arrow mode), behind a
+    **cached dynamic import** for the same bundle reason as `notesCloud.js`: a note with no sketch
+    never downloads it. A sketch paints from the pure spec first and becomes interactive after.
 - `lib/notesTabKey.js` — **Tab belongs to the DOCUMENT while the caret is in it** (B1392). A
   low-priority FALLBACK: the table's next-cell and the list's indent/outdent are asked first and
   still win; this catches only what they decline — a plain paragraph, an empty page, the first
