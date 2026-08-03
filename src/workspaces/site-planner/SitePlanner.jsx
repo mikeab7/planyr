@@ -193,7 +193,7 @@ import { pondInspectorChips, POND_CHIP_DEFS, pondGroupSummary, POND_FLOOD_NOTES,
 import { classifyWseSource, classifyVerified } from "./lib/provenance.js";
 import { formatAge } from "./lib/gisCache.js";
 import { buildingNumbers, isBuilding, roadTravelWidth, bondedChildRot, roadStripBBox, rectRoadEndpoints, parcelOutline, parcelDisplayInfo, lineageConflicts } from "./lib/siteModel.js";
-import { roadCenterline, projectToRoadCenterline, roadMinRadius, insertRoadVertex, removeRoadVertex, canRemoveRoadVertex, curbStrokePx, findRoadConnect, planRoadConnect, fixRoadRadii, teeGeometry, rectEdges, nearestRectEdge, weldCoverPolygon, roadRadiusConflicts, fitRoadCorners, nodeJunction } from "./lib/roadGeometry.js";
+import { roadCenterline, projectToRoadCenterline, roadMinRadius, insertRoadVertex, removeRoadVertex, canRemoveRoadVertex, curbStrokePx, findRoadConnect, planRoadConnect, fixRoadRadii, teeGeometry, rectEdges, nearestRectEdge, weldCoverPolygon, roadRadiusConflicts, fitRoadCorners, nodeJunction, cardinalTeePoint, roadBearingDeg } from "./lib/roadGeometry.js";
 import { dissolveRings, clipPolylineOutside, clusterIds, regionPathD, rectOutlineCutSegments } from "./lib/roadNetwork.js";
 import { dashZoom, insetRingVisible } from "./lib/lineZoom.js";
 import { roadClassesOf, roadClassOf, classMinRadius, classDefaultRadius, classReturnRadius, DEFAULT_ROAD_CLASS, ROAD_CLASS_SEEDS, speedMinRadius } from "./lib/roadClasses.js";
@@ -2040,6 +2040,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [draftRoadPts, setDraftRoadPts] = useState(null); // [{x,y}…] in-progress centerline road (B596/NEW-1)
   const [roadVtxSel, setRoadVtxSel] = useState(null); // {id, idx} selected road vertex (panel: flip treatment, B597)
   const [roadSnapTarget, setRoadSnapTarget] = useState(null); // {x,y} world pt of an engaged road-connect magnet (B945/NEW-1) — highlight ring
+  const [roadDragBearing, setRoadDragBearing] = useState(null); // NEW-2 {deg, at, locked} — the live bearing of the leg being dragged
   const [measDraft, setMeasDraft] = useState([]);    // in-progress measure vertices
   const [measureMode, setMeasureMode] = useState(() => lsGet("measureMode", "line"));
   const [measureMenu, setMeasureMenu] = useState(false);  // Measure ▾ dropdown open
@@ -4367,6 +4368,24 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (road) return { kind: "road", pt: road.pt, road };
     return null;
   };
+  /* ---- NEW-2 — Shift locks a tee's leg to a CARDINAL bearing, without letting go of the host ----
+     The tee's position along the host is what sets the connecting road's absolute bearing (the owner's
+     "more angled with respect to N/S than I'd like"), and Shift already locks a road vertex to 45°
+     increments — due N/S/E/W plus the diagonals — through `snap45`. That lock was simply DEAD on a
+     junction drag: it computed a locked point and the connect magnet then overwrote it. Composing the
+     two gives the leg its exact cardinal AND keeps the endpoint welded to the host. Releasing Shift is
+     the override; Alt still bypasses connecting altogether. */
+  const cardinalTee = (el, idx, c) => {
+    if (!c || c.kind !== "road" || !c.road || c.road.kind !== "interior") return null;
+    const host = els.find((x) => x.id === c.road.roadId);
+    const pivot = el.pts[idx === 0 ? 1 : idx - 1];
+    if (!host || !Array.isArray(host.pts) || !pivot) return null;
+    const cd = cardinalTeePoint(host.pts, pivot, c.road.pt);
+    if (!cd) return null;
+    // `index` moves with the point: the locked crossing routinely lands on a different leg of the host
+    // than the cursor was over, and that index is the segment the tee gets spliced into.
+    return { ...c, pt: cd.pt, cardinal: true, road: { ...c.road, pt: cd.pt, index: cd.index } };
+  };
   // Store a road→drive junction on the road (the weld coord is already applied). Seeds the curb-return
   // radius by target vehicle scale unless the road already overrides it for this target. Caller pushed history.
   const applyDriveConnect = (movingId, drive) => {
@@ -6505,10 +6524,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       const isEnd = d.idx === 0 || d.idx === el.pts.length - 1;
       if (isEnd && !altSnapOffRef.current) {
         const c = resolveEndpointConnect(fp, { id: el.id, index: d.idx });
-        if (c) { P = { x: c.pt.x, y: c.pt.y }; connect = c; }
+        if (c) { connect = (e.shiftKey && cardinalTee(el, d.idx, c)) || c; P = { x: connect.pt.x, y: connect.pt.y }; }
       }
       d.connect = connect; // stash for release
-      setRoadSnapTarget(connect ? { x: connect.pt.x, y: connect.pt.y } : null);
+      setRoadSnapTarget(connect ? { x: connect.pt.x, y: connect.pt.y, cardinal: !!connect.cardinal } : null);
+      // NEW-2 — the leg's live BEARING, because a few degrees is not eyeball-able and nothing anywhere
+      // in the road tools reported one. `ref` is the vertex this leg swings about (the 45°-lock's own
+      // reference), so the number always describes the leg the drag is actually aiming.
+      setRoadDragBearing(ref ? { deg: roadBearingDeg(ref, P), at: P, locked: !!(connect && connect.cardinal) } : null);
       setEls((arr) => arr.map((x) => {
         if (x.id !== d.id || !isCenterlineRoad(x)) return x;
         return reRoad({ ...x, pts: x.pts.map((p, i) => (i === d.idx ? P : p)) });
@@ -6868,7 +6891,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         if (moving && isCenterlineRoad(moving)) {
           if (d.connect.kind === "road") {
             const rc = d.connect.road;
-            const plan = planRoadConnect(moving, d.idx, els.find((x) => x.id === rc.roadId), rc, roadDefaultRadius(moving, settings));
+            // NEW-1 — `fromPt` is what turns "weld onto this road" into "slide the junction I am already
+            // welded to": without it the tee re-anchored to the host vertex it started on.
+            const plan = planRoadConnect(moving, d.idx, els.find((x) => x.id === rc.roadId), rc, roadDefaultRadius(moving, settings), { fromPt: d.from });
             if (plan) {
               applyRoadConnectPlan(d.id, rc.roadId, plan);
               if (plan.action === "merge") flashWarn("Roads joined into one — the junction corner was rounded to the class minimum.", 5000);
@@ -6879,6 +6904,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         }
       }
       setRoadSnapTarget(null);
+      setRoadDragBearing(null);
       const r = els.find((x) => x.id === d.id);
       const stt = !d.connect && r && roadRadiusStatus(r, settings); // a connect already reconciles the radius
       if (stt) flashWarn(`⚠ ${f0(stt.minR)}′ radius — below ${f0(stt.threshold)}′ min for ${stt.label}`, 6000);
@@ -8999,7 +9025,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     setSel({ kind: "el", id });
     setRoadVtxSel({ id, idx });
     pushHistory();
-    drag.current = { mode: "roadVtx", id, idx };
+    // NEW-1 — remember where this vertex STARTED. When it is a tee endpoint the release path needs it to
+    // recognise which junction node on the host road this drag is sliding (see planRoadConnect's fromPt).
+    drag.current = { mode: "roadVtx", id, idx, from: { x: el.pts[idx].x, y: el.pts[idx].y } };
     svgRef.current.setPointerCapture(e.pointerId);
   };
   // Double-click an element: if it's in a group, "drill in" to edit just that member in
@@ -18500,7 +18528,36 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 {handleNodes}
                 {/* B945/NEW-1 — the engaged road-connect magnet: a glowing ring on the target the
                     dragged endpoint will weld to on release (mirrors the road-vertex handle styling). */}
-                {roadSnapTarget && (() => { const c = f2p(roadSnapTarget); return <g pointerEvents="none"><circle cx={c.x} cy={c.y} r={10} fill="none" stroke={SEL_BLUE} strokeWidth={2.5} opacity={0.9} /><circle cx={c.x} cy={c.y} r={4} fill={SEL_BLUE} /></g>; })()}
+                {roadSnapTarget && (() => {
+                  const c = f2p(roadSnapTarget);
+                  return (
+                    <g pointerEvents="none" data-road-snap={roadSnapTarget.cardinal ? "cardinal" : "connect"}>
+                      <circle cx={c.x} cy={c.y} r={10} fill="none" stroke={SEL_BLUE} strokeWidth={2.5} opacity={0.9} />
+                      <circle cx={c.x} cy={c.y} r={4} fill={SEL_BLUE} />
+                      {/* NEW-2 — the cardinal lock has engaged: a second ring, so a locked tee is
+                          visibly different from an ordinary connect. */}
+                      {roadSnapTarget.cardinal && <circle cx={c.x} cy={c.y} r={15} fill="none" stroke={SEL_BLUE} strokeWidth={1.5} opacity={0.75} />}
+                    </g>
+                  );
+                })()}
+                {/* NEW-2 — the live BEARING of the road leg being dragged. Nothing in the road tools
+                    reported one, so a few degrees off north was pure eyeball; this is the readout that
+                    makes "more angled with respect to N/S than I'd like" a number you can aim at.
+                    Transient (drag only), so it costs the default view nothing. */}
+                {roadDragBearing && Number.isFinite(roadDragBearing.deg) && (() => {
+                  const c = f2p(roadDragBearing.at);
+                  const txt = `${roadDragBearing.deg.toFixed(1)}°`;
+                  const w = 20 + txt.length * 8;
+                  return (
+                    <g pointerEvents="none" data-road-bearing={roadDragBearing.locked ? "locked" : "free"}>
+                      <rect x={c.x + 16} y={c.y - 30} width={w} height={20} rx={5}
+                        fill="rgba(17,24,39,0.82)" stroke={SEL_BLUE} strokeWidth={roadDragBearing.locked ? 1.75 : 1} />
+                      <text x={c.x + 16 + w / 2} y={c.y - 15.5} textAnchor="middle" fontSize={12}
+                        fontFamily={NUM_FONT} fontVariantNumeric={TABULAR_NUMS} fill="#f4f7fa"
+                        style={{ fontWeight: roadDragBearing.locked ? 700 : 500 }}>{txt}</text>
+                    </g>
+                  );
+                })()}
                 {sideAddNodes}
                 {parkingAddNodes}
                 {parcelHandles}
