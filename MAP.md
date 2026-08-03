@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-08-03 @ `967c8af` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-08-03 @ `ccbfcf2` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_414 source files mapped._
+_416 source files mapped._
 
 ## infra
 
@@ -378,7 +378,7 @@ _414 source files mapped._
 - **`src/workspaces/site-planner/lib/costTakeoff.js`** — Priced road takeoff: FC-FC asphalt paving (SY, pan-trimmed) + both-side curb (LF by type) rolled up at user unit prices
   - _exports_: `costRollup`, `CURB_TYPE_META`, `CURB_TYPES`, `DEFAULT_PAN_WIDTH`, `roadCurbedSides`, `roadCurbType`, `roadPanWidth`, `roadQuantities`, `SF_PER_SY`
 - **`src/workspaces/site-planner/lib/counties.js`** — County parcel/GIS registry: CAD endpoints, TxGIO statewide fallback, jurisdiction utility layers, click-routing bboxes, tax-unit resolver
-  - _exports_: `candidateCountiesForPoint`, `COUNTIES`, `COUNTIES_MAP`, `countyForView`, `countyKeyForName`, `countyKeysForState`, `detectField`, `FEET_WKID`, `JURISDICTION_LAYERS`, `resolveTaxRates`, `SNAPSHOT_COUNTIES`, `stateForCountyKey`, `STATEWIDE_KEYS`, `STATEWIDE_PARCEL_LAYER`, `statewideFallbackFor`, `TAX_RATE_SOURCES`
+  - _exports_: `candidateCountiesForPoint`, `COUNTIES`, `COUNTIES_MAP`, `countyForView`, `countyKeyForName`, `countyKeysForState`, `detectField`, `FEET_WKID`, `isStatewideLayerUrl`, `JURISDICTION_LAYERS`, `resolveTaxRates`, `sharedLayerUrlConflicts`, `SNAPSHOT_COUNTIES`, `stateForCountyKey`, `STATEWIDE_KEYS`, `STATEWIDE_LAYER_URLS`, `STATEWIDE_PARCEL_LAYER`, `statewideFallbackFor`, `TAX_RATE_SOURCES`, `trimLayerUrl`
 - **`src/workspaces/site-planner/lib/countiesProvenance.js`** — NEW-5 build-time endpoint verification record for every county parcel source (probe dates, parked candidate URLs, provenance) — read by the GIS source audit, NEVER by the browser, which is why it is split out of counties.js: its prose has no business on the Site route's bundle
   - _exports_: `candidateUrlFor`, `COUNTY_VERIFICATION`, `provenanceFor`, `verifiedOnFor`
 - **`src/workspaces/site-planner/lib/coverage.js`** — Picker-only layer coverage engine: reproject regional service extents vs viewport to flag in-view/empty/out-of-coverage plus relevance prefs
@@ -599,6 +599,8 @@ _414 source files mapped._
   - _exports_: `PARCEL_HINT_COOLDOWN_MS`, `parcelSelectHintDecision`
 - **`src/workspaces/site-planner/lib/parcelSnapshot.js`** — Client loader for nightly Drive county parcel-snapshot cache: IndexedDB-held SWR download, pure viewport-filter/point-in-lot hit-test so a flaky county server never blanks the map
   - _exports_: `_resetSnapshots`, `ensureSnapshot`, `featureAtPoint`, `featureBbox`, `featuresForView`, `getSnapshot`, `onSnapshotChange`, `preferSnapshotForDisplay`, `snapshotEnabled`, `snapshotFootprint`, `snapshotVintage`
+- **`src/workspaces/site-planner/lib/parcelTruncation.js`** — NEW-3: did a parcel query come back CUT SHORT (`exceededTransferLimit`, in every shape a real service returns it), how many features arrived, and the honest non-blocking notice that says so. Split out of `parcelDisplay.js` because that module imports Leaflet and cannot be unit-tested.
+  - _exports_: `featureCountOf`, `parcelTruncationNotice`, `responseWasTruncated`
 - **`src/workspaces/site-planner/lib/parking.js`** — Pure parking-layout math: rows-to-depth, split into double-loaded modules, explode into stall-row/aisle bands, curb-adjacency test
   - _exports_: `edgeAbutsPaving`, `explodeParkingBands`, `parkDepthForRows`, `parkRowsForDepth`, `PAVED_NEIGHBOR_TYPES`, `splitParkingPieces`
 - **`src/workspaces/site-planner/lib/pfds.js`** — Pure NOAA Atlas-14 PFDS text parser (0.2%/500-yr + 100-yr design-storm depths) + the wse02pct-provider documentation notes (FBCDD candidate endpoint / MAAPnext / M3 pointers). B763; honest-null on out-of-coverage
@@ -683,6 +685,8 @@ _414 source files mapped._
   - _exports_: `canRemoveRoadVertex`, `cardinalTeePoint`, `concatRoads`, `cornerApproachShortfall`, `cornerShares`, `curbStrokePx`, `dedupeRoadVertices`, `DEFAULT_ARC_RADIUS`, `DEFAULT_TESS_DEG`, `findRoadConnect`, `fitRoadCorners`, `fixRoadRadii`, `insertRoadVertex`, `minRadiusOfCurvature`, `nearestRectEdge`, `nodeJunction`, `planRoadConnect`, `polylineLength`, `projectToPolyline`, `projectToRoadCenterline`, `rectEdges`, `removeRoadVertex`, `repairBakedRadii`, `ROAD_SIMPLIFY_TOL_FT`, `ROAD_VERTEX_COLLAPSE_FT`, `roadBearingDeg`, `roadCenterline`, `roadCenterlineTagged`, `roadCornerRadii`, `roadMinRadius`, `roadRadiusConflicts`, `roadsMergeCompatible`, `simplifyRoadVertices`, `slideTeeNode`, `TEE_CARDINAL_STEP_DEG`, `teeGeometry`, `teeNodeIndex`, `weldCoverPolygon`
 - **`src/workspaces/site-planner/lib/roadNetwork.js`** — Dissolves connected road strips + curb-return wedges into ONE pavement region per cluster (clipper union, orientation-normalised, morphologically closed), and trims curb stripes at junctions. The topology replacement for the old per-junction cover patches.
   - _exports_: `clipPolylineOutside`, `clusterIds`, `dissolveRings`, `rectOutlineCutSegments`, `regionPathD`
+- **`src/workspaces/site-planner/lib/roundabout.js`** — NEW-5: roundabouts at a road terminus — the class→inscribed-diameter derivation (FHWA/NCHRP bands, so a WB-67 truck route and an auto aisle get different circles), the annulus emitted as union-only arc sectors so the central island is a real hole, curb returns tangent to both the leg edge and the circle, the half-chord leg trim, and the node grouping that makes a second road join as a LEG.
+  - _exports_: `annulusSectors`, `circleRing`, `circulatoryWidthFt`, `legReturnWedges`, `legTrimFor`, `normalizeRoundaboutD`, `ROUNDABOUT_BANDS`, `ROUNDABOUT_MAX_D`, `ROUNDABOUT_MIN_D`, `roundaboutArea`, `roundaboutBandFor`, `roundaboutDiameterFor`, `roundaboutGeometry`, `roundaboutIslandArea`, `roundaboutNodes`, `trimPolylineEnds`
 - **`src/workspaces/site-planner/lib/screenDeclutter.js`** — shared screen-space thinning for fixed-size canvas chrome: greedy min-separation (`spaceOut`) + per-vertex corner-ness priority (`cornerTurns`)
   - _exports_: `cornerTurns`, `spaceOut`, `turnBetween`
 - **`src/workspaces/site-planner/lib/screeningBfe.js`** — independent SCREENING base-flood-elevation engine: SCS/NRCS unit-hydrograph peak discharge (hydrology) + Manning normal-depth solve over a terrain-sampled cross-section (hydraulics), with a peak-rate-factor uncertainty band, the not-modelled list, the CLOMR/LOMR note, and the 44 CFR 60.3(b)(3) BFE-data threshold research. Returns an explicit unknown rather than any elevation it did not compute.

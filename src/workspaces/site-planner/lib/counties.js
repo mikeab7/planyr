@@ -55,12 +55,19 @@ const TXGIO_STATEWIDE_LAYER =
 const CO_STATEWIDE_LAYER =
   "https://gis.colorado.gov/public/rest/services/Address_and_Parcel/Colorado_Public_Parcels/FeatureServer/0";
 
-/* Five of the nine Colorado counties ride the statewide composite until their own endpoint is
+/* Four of the nine Colorado counties ride the statewide composite until their own endpoint is
  * probed (V511), and each was repeating the same ~130-character help string verbatim. One builder
  * instead of five literals — the same words, a fraction of the bytes on the Site route's bundle.
- * (Bundle budget, 2026-07-29: deduplication, not abbreviation. Nothing was shortened.) */
+ * (Bundle budget, 2026-07-29: deduplication, not abbreviation. Nothing was shortened.)
+ * NEW-1, 2026-08-03 — Larimer was the fifth and is now PROMOTED to its own live-probed service. */
 const compositeHelp = (county) =>
   `Colorado statewide parcels (state OIT composite) — searches are limited to ${county} County until the county's own endpoint is confirmed.`;
+
+/* NEW-1 — the honest reason a county is STILL on the composite after the 2026-08-03 re-probe, in
+ * the help string rather than only in a code comment, because it is the user who is looking at a
+ * statewide-backup badge and wondering why. One shared clause (bundle bytes), appended per row. */
+const publishedButUnprobed =
+  " Its own county service is published but is not reachable from our build environment, so it stays unverified.";
 
 /* The four counties whose OWN parcel service is live-verified share one help shape too. */
 const ownHelp = (source, idKind) => `${source}. Search by ${idKind} or a site address.`;
@@ -196,29 +203,53 @@ export const COUNTIES = {
     idField: "parcel_id",
     addrField: "situsAdd",
     scopeWhere: "countyName='Arapahoe'",
-    help: compositeHelp("Arapahoe"),
+    // RE-PROBED 2026-08-03 (NEW-1) and deliberately NOT promoted. The county's own service
+    // (gis.arapahoegov.com) is still egress-blocked here. The only Arapahoe parcel layer this
+    // environment CAN reach is an AGOL copy (services1.arcgis.com/Ezk9fcjSUkeadg6u, 214,375
+    // features, 250 ms) owned by `jklier_uagis` — a 2017 personal/coursework account whose other
+    // items are a GIS-class exercise. A nine-year-old third-party copy is WORSE than the composite
+    // (which the state refreshes), so it is recorded here and not shipped.
+    help: compositeHelp("Arapahoe") + publishedButUnprobed,
   },
   co_larimer: {
     state: "CO",
     label: "Larimer County, CO",
-    layerUrl: CO_STATEWIDE_LAYER,
-    idField: "parcel_id",
-    addrField: "situsAdd",
-    scopeWhere: "countyName='Larimer'",
-    help: compositeHelp("Larimer"),
+    // VERIFIED LIVE 2026-08-03: 181,035 tax parcels; capabilities Map,Query,Data; count query
+    // 108 ms; point identify 87 ms; maxRecordCount 1000. idField PARCELNUM, addrField LOCADDRESS
+    // (NAME carries the owner). A point identify at -104.985, 40.44 — I-25 at E County Road 30 /
+    // Fairgrounds Ave — returns PARCELNUM 8634109901, LOCADDRESS "5260 ARENA CIR" (the Larimer
+    // County Fairgrounds), the SAME parcel the statewide composite returns for that point.
+    // This layer is Larimer-only, so it takes NO scopeWhere.
+    //
+    // WHY THIS ROW MATTERS MORE THAN THE OTHER PROMOTIONS (NEW-1): parking Larimer on the
+    // composite meant every draw and every click over Larimer ground ran against every parcel in
+    // Colorado. Measured the same moment, same browser: Weld's own county layer answered a count
+    // in 67 ms and a point identify in 55 ms, while ONE view-sized bbox against the composite took
+    // 1,466 ms and came back with exactly 2000 features and exceededTransferLimit = true. So the
+    // composite was not only slow, it was drawing an INCOMPLETE parcel fabric (NEW-3).
+    layerUrl: "https://maps1.larimer.org/arcgis/rest/services/MapServices/Parcels/MapServer/3",
+    idField: "PARCELNUM",
+    addrField: "LOCADDRESS",
+    help: ownHelp("Larimer County parcels (county GIS — Tax Parcels)", "parcel number"),
   },
   co_jefferson: {
     state: "CO",
     label: "Jefferson County, CO",
-    // No county assessor parcel endpoint could be FOUND at all (as opposed to found-but-unprobed):
-    // the Jeffco services that surface publicly are open-space land boundaries and one-off project
-    // layers, not the parcel fabric. Rather than ship a plausible-looking guessed URL, Jefferson
-    // rides the statewide composite outright — exactly what Waller does in Texas.
+    // ⚠ CORRECTION, 2026-08-03 (NEW-1). B1111 recorded that "no county assessor parcel endpoint
+    // could be FOUND at all" for Jefferson. That was WRONG, and the re-probe found the record:
+    // ArcGIS Online item "Parcel", owner `Jeffco` (the county's own org), serving
+    // https://gisportal.jeffco.us/server2/rest/services/Parcel/FeatureServer — plus a sibling
+    // "Parcel Split" service on the same host. Jefferson is therefore the same case as the other
+    // three, not a special one: found, egress-blocked here, unpromoted.
+    // The two Jeffco parcel copies this environment CAN reach are both STALE, and provably so:
+    // the City of Lakewood's hosted copy (248,974 features) last edited 2018-05-08 and the
+    // county's own 2022 snapshot service disagree on the OWNER of the same PIN 49-061-03-003.
+    // Neither is fit to price a deal against, so neither ships.
     layerUrl: CO_STATEWIDE_LAYER,
     idField: "parcel_id",
     addrField: "situsAdd",
     scopeWhere: "countyName='Jefferson'",
-    help: compositeHelp("Jefferson") + " Jefferson publishes no public parcel service of its own that we could locate.",
+    help: compositeHelp("Jefferson") + publishedButUnprobed,
   },
   co_elpaso: {
     state: "CO",
@@ -227,7 +258,14 @@ export const COUNTIES = {
     idField: "parcel_id",
     addrField: "situsAdd",
     scopeWhere: "countyName='El Paso'",
-    help: compositeHelp("El Paso"),
+    // RE-PROBED 2026-08-03 (NEW-1), decision UNCHANGED and now on stronger evidence. The county's
+    // own service (gisservices.elpasoco.com) is still egress-blocked. The regional PPACG layer IS
+    // reachable and is genuinely fresh (268,356 features, 326 ms, last edited 2026-07-25) — but it
+    // is the MPO's TAZ-joined planning derivative (LandUse / PlaceType / NumHU columns), it drops
+    // right-of-way parcels, and it spans Teller County too. B1111 rejected it for that reason and
+    // this re-probe confirms the reason rather than overturning it: the parcel fabric a deal is
+    // priced against must be the assessor's, not a travel-demand model's.
+    help: compositeHelp("El Paso") + publishedButUnprobed,
   },
   co_boulder: {
     state: "CO",
@@ -236,7 +274,13 @@ export const COUNTIES = {
     idField: "parcel_id",
     addrField: "situsAdd",
     scopeWhere: "countyName='Boulder'",
-    help: compositeHelp("Boulder"),
+    // RE-PROBED 2026-08-03 (NEW-1) and deliberately NOT promoted. The county's own live service
+    // (maps.bouldercounty.org) is still egress-blocked. Boulder County's OWN AGOL copy is
+    // reachable — "Boulder County Parcel / Address Look Up" (services3.arcgis.com/0jWpHMuhmHsukKE3,
+    // native SR EPSG:2876, 259 ms) — but it carries only 30,803 features against a county fabric
+    // several times that size, and its own `Updated` column reads 2/14/2020. A partial, six-year-old
+    // extract would show a lot as MISSING rather than as slow, which is the worse failure.
+    help: compositeHelp("Boulder") + publishedButUnprobed,
   },
 };
 
@@ -570,6 +614,51 @@ export function countyForView(lat, lng) {
 // fallback), and a hit FROM one of them standing in for a real-CAD county is what the
 // honest "statewide backup" badge keys off (B244).
 export const STATEWIDE_KEYS = Object.entries(COUNTIES_MAP).filter(([, c]) => c.statewide).map(([k]) => k);
+
+/* NEW-2 — ONE URL MUST NOT CARRY TWO HEALTH POLICIES.
+ *
+ * `STATEWIDE_KEYS` answers "is this KEY the statewide pseudo-county?", and for the hang-guard that
+ * is the wrong question. The universal composite is exempt from the display hang-guard because
+ * pulling it would leave the map with nothing to see or click — a property of the ENDPOINT, not of
+ * whichever key happened to name it. A county parked on a composite (`co_larimer` before this item;
+ * `waller` and the four remaining Colorado counties today) resolves to the same URL and so used to
+ * get the OPPOSITE policy: the guard fired on the county-keyed copy, `markDown` pulled the layer,
+ * the breaker opened, and the banner told the owner a server was slow while pointing him at that
+ * exact server. Ask the URL, not the key. */
+export const trimLayerUrl = (u) => String(u || "").trim().replace(/\/+$/, "");
+export const STATEWIDE_LAYER_URLS = Object.freeze([TXGIO_STATEWIDE_LAYER, CO_STATEWIDE_LAYER].map(trimLayerUrl));
+export const isStatewideLayerUrl = (url) => STATEWIDE_LAYER_URLS.includes(trimLayerUrl(url));
+
+/* NEW-2 — the dev-time assertion that stops the next county parked on a composite from
+ * reintroducing the double-add. Two config entries may share a layer URL ONLY when that URL is a
+ * statewide composite, because the composite is the one endpoint whose display and health policy
+ * are both keyed off the URL — so every key naming it gets ONE Leaflet layer and ONE policy. Any
+ * OTHER shared URL means two keys the app will treat as two independent sources: two identical
+ * layers over the same ground, double the requests, and two health verdicts that can disagree.
+ * Pure, so `test/counties.test.js` asserts it and the module logs it once in dev (LOUD-FAILURE). */
+export function sharedLayerUrlConflicts(map = COUNTIES_MAP) {
+  const byUrl = new Map();
+  for (const [key, cfg] of Object.entries(map)) {
+    const url = trimLayerUrl(cfg && (cfg.layerUrl || cfg.mapServer));
+    if (!url) continue;
+    if (!byUrl.has(url)) byUrl.set(url, []);
+    byUrl.get(url).push(key);
+  }
+  const conflicts = [];
+  for (const [url, keys] of byUrl)
+    if (keys.length > 1 && !isStatewideLayerUrl(url)) conflicts.push({ url, keys });
+  return conflicts;
+}
+
+if (typeof import.meta !== "undefined" && import.meta.env && import.meta.env.DEV) {
+  const bad = sharedLayerUrlConflicts();
+  if (bad.length)
+    console.error(
+      "[counties] Two county entries share a non-statewide parcel layer URL — the map will add the " +
+      "same layer twice and can reach two different health verdicts for one endpoint:",
+      bad,
+    );
+}
 
 // The statewide TxGIO parcel layer URL (all of Texas) — the search/click fallback for
 // any county whose own CAD endpoint is down. Decoupled from COUNTIES.chambers in B787

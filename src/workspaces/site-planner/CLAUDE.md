@@ -515,6 +515,22 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   and the e2e spec **measure-export-lod** (which builds the REAL sheet through
   `window.__plannerExportSvg` — the defect is invisible to any source reading, it exists only in the
   clone; mutation-checked both ways).
+- **`parcelTruncation.js` (NEW-3)** — did a parcel query come back CUT SHORT? ArcGIS answers any query
+  with at most `maxRecordCount` features and sets `exceededTransferLimit`; esri-leaflet does NOT page,
+  so a truncated answer draws an authoritative-looking parcel layer with an unknown number of lots
+  missing. Measured: one view-sized bbox against the Colorado composite returned exactly 2000 features
+  with the flag true, and nothing said so. Split out of `parcelDisplay.js` (which imports Leaflet and
+  so cannot be unit-tested). The two paths that PAGE — `vectorLayers.js` and the nightly snapshot
+  builder — already handled the flag and are untouched.
+- **`counties.js` — ONE URL MUST NOT CARRY TWO HEALTH POLICIES (NEW-2).** `STATEWIDE_KEYS` answers "is
+  this KEY the statewide pseudo-county"; for the display hang-guard that is the wrong question. The
+  composite is exempt because pulling it leaves nothing to see or click — a property of the ENDPOINT.
+  A county PARKED on a composite (Waller, and four Colorado counties) resolves to the same URL and used
+  to get the opposite policy: the guard fired on the county-keyed copy, the breaker opened, and the
+  banner claimed a server was slow while pointing at that same host. Ask `isStatewideLayerUrl(url)`.
+  `sharedLayerUrlConflicts()` is the dev-time + CI assertion that no two entries share a NON-statewide
+  URL; `MapFinder.addDisplay` dedupes displays by RESOLVED URL, so the same endpoint is never added
+  twice and non-owner keys are aliases that must never remove the shared layer.
 - `zOrder.js` — per-element `z` stacking key utilities (`nextZ`/`sortByZ`/`normalizeZ`/`ensureZ`, B671).
   `arrange.js` — pure z-order "Arrange" (`reorderByZ`/`arrangeFlags`, B820): Bring-to-Front/Send-to-Back
   over a peer set (a building reorders within its `Z_LAYER` band, a markup within the markup layer;
@@ -586,6 +602,25 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   production snapshot `test/fixtures/weldParcelProduction.json`, site `sms7v3ua7ksy`) + the ui-audit harness
   **verify-setback-roles** (that same geometry, driven in a browser: default tier, auto-assignment,
   correction, one-input-many-sides, role chips, and the ring proven identical across all of it).
+  **`roundabout.js` (NEW-5) — a roundabout at a road TERMINUS, and it is real rather than decorative
+  in three specific ways.** (1) The pavement math knows: `roundaboutArea` is the ANNULUS (the island
+  is landscaped, so counting it would overstate impervious cover — which is what detention is priced
+  off), and `legTrimFor` shortens each approach leg by the HALF-CHORD √(R²−half²), not the radius, so
+  the strip's square end face lands ON the arc across its full width instead of leaving a lens-shaped
+  void that closes as a phantom hole. (2) The curb engine knows: the circulatory roadway is emitted as
+  arc SECTORS whose UNION is the annulus — union-only, the one op `dissolveRings` is proven on — so the
+  central island falls out as a genuine PolyTree hole and the whole thing is one region with one
+  continuous outline. (3) The design vehicle decides the size: `roundaboutDiameterFor` is
+  2·(turning radius) + one circulatory width, clamped into the class's published FHWA/NCHRP band, so an
+  auto aisle, a fire lane and a WB-67 truck route get three different circles — and `public` takes a
+  FIXED band value because its `minRadius` is a horizontal CURVE radius, not a turning radius, and
+  feeding it to the formula gives a 390 ft circle on a site road. ⛔ A curb return's closing polygon
+  must run through the CORNER, never straight between the two tangent points: a direct chord passes
+  inside the fillet circle, self-intersects, and the union silently drops the ring — the return then
+  floats as its own island. Bonded by construction: `el.roundabout = {end, d}` stores no position, so
+  moving the road re-derives everything. Guards: the repo-root `test/` suite **roundabout** and the
+  e2e spec **road-roundabout** (which DRAWS the road with the tool — a seeded road never resolves the
+  initial view fit, so every screen coordinate comes out NaN).
   `roadGeometry.js` — centerline road curves + junction primitives (pure): `teeGeometry` returns the
   ADDITIVE curb-return `wedges` a junction contributes. `roadNetwork.js` — the DISSOLVED road surface
   (clipper union of every connected strip + wedge → one region, one outline, per cluster) plus the

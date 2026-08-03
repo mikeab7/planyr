@@ -1,7 +1,7 @@
 import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
-import { COUNTIES, COUNTIES_MAP, candidateCountiesForPoint, countyForView, countyKeyForName, STATEWIDE_KEYS, SNAPSHOT_COUNTIES } from "./lib/counties.js";
+import { COUNTIES, COUNTIES_MAP, candidateCountiesForPoint, countyForView, countyKeyForName, STATEWIDE_KEYS, SNAPSHOT_COUNTIES, isStatewideLayerUrl, trimLayerUrl } from "./lib/counties.js";
 import { landingView } from "./lib/landingView.js";
 import { ensureSnapshot, getSnapshot, snapshotVintage, onSnapshotChange, featureAtPoint, preferSnapshotForDisplay } from "./lib/parcelSnapshot.js";
 import { recordSourceResult, filterHealthyCandidates, isSourceOpen, isStatewideBackup } from "./lib/sourceHealth.js";
@@ -40,6 +40,7 @@ import { findAttr, situsAddress, siteNameFromParcel } from "./lib/appraisal.js";
 const ParcelInfoCard = lazy(() => import("./components/ParcelInfoCard.jsx"));
 import { PanelErrorBoundary } from "./components/LazyPanel.jsx";
 import { makeParcelDisplayLayer, makeSnapshotLayer, PARCEL_MINZOOM, ADD_CURSOR, REMOVE_CURSOR } from "./lib/parcelDisplay.js";
+import { responseWasTruncated, featureCountOf, parcelTruncationNotice } from "./lib/parcelTruncation.js";
 import { dissolvedParcelSqft } from "./lib/polyClip.js";
 import { geocodeAddress } from "./lib/geocode.js";
 import { statusToken, darken } from "../../shared/ui/statusTokens.js";
@@ -269,6 +270,11 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
   const imageryCapRef = useRef(null); // NEW-6 — detach fn for the imagery layer's tile-cache cap
   const labelsCapRef = useRef(null);  // NEW-6 — ditto for the labels overlay
   const displaysRef = useRef({});    // county -> visible parcel-line layer (all CAD counties)
+  /* NEW-2 — county -> { url, owner }: the RESOLVED endpoint behind that county's on-map layer, and
+     which county key actually CREATED it. Two keys that resolve to the same endpoint (a county
+     parked on a statewide composite) now share ONE Leaflet layer instead of stacking two identical
+     ones over the same ground; the non-owner keys are aliases and must never remove the layer. */
+  const displaySrcRef = useRef({});
   const sitesLayerRef = useRef(null); // saved-site footprints
   const pressedRef = useRef(false);        // a pointer is currently down on the map (B64)
   const pendingRebuildRef = useRef(null);  // a saved-site rebuild deferred until pointer-up (B64)
@@ -954,7 +960,28 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
 
     const url = layerUrlsRef.current[key];
     if (!url) return;
-    const statewide = STATEWIDE_KEYS.includes(key);
+    const src = trimLayerUrl(url);
+
+    /* NEW-2 (a) — DEDUPE BY RESOLVED URL, NOT BY COUNTY KEY. `co_larimer` used to carry the exact
+       same URL as `co_statewide`, so this function added TWO identical Leaflet layers over the
+       same ground and doubled every request to the slowest host in the app. Structural, not a
+       special case for Larimer: any key that resolves to an endpoint already on the map becomes an
+       ALIAS of the layer that is already there. Four counties + Waller are in that position today
+       and the next one parked on a composite is covered for free. */
+    const twin = Object.keys(displaysRef.current).find((k) => displaySrcRef.current[k]?.url === src);
+    if (twin) {
+      displaysRef.current[key] = displaysRef.current[twin];
+      displaySrcRef.current[key] = { url: src, owner: displaySrcRef.current[twin].owner };
+      return;
+    }
+
+    /* NEW-2 (b) — THE HANG-GUARD EXEMPTION FOLLOWS THE URL, NOT THE `statewide` FLAG ON THE KEY.
+       The composite is exempt because pulling it would leave the map with nothing to see or click
+       — a property of the ENDPOINT. Keyed off `STATEWIDE_KEYS` instead, a county sharing the
+       composite's URL got the OPPOSITE policy: the 8s guard fired on the county-keyed copy,
+       `markDown` pulled it, `recordSourceResult` opened the breaker, and the banner told the owner
+       his county server was slow while pointing him at the very host it had just declared dead. */
+    const statewide = isStatewideLayerUrl(src);
     // A county we already know is down: don't add a layer that will only spin — the
     // statewide outlines cover it. Never skip the statewide source itself (the
     // universal fallback).
@@ -968,6 +995,16 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
     const fl = makeParcelDisplayLayer(url);
     fl.addTo(map);
     displaysRef.current[key] = fl;
+    displaySrcRef.current[key] = { url: src, owner: key };
+    /* NEW-3 — a truncated parcel draw must never look like a complete one. ArcGIS answers a
+       view-sized bbox with at most `maxRecordCount` features and sets `exceededTransferLimit`
+       when it had more to give; esri-leaflet does not page, so the map draws an authoritative-
+       looking parcel layer with an unknown number of lots silently missing. Measured against the
+       Colorado composite: exactly 2000 features, flag true, 1,466 ms. Say so. */
+    fl.on("requestsuccess", (e) => {
+      if (!responseWasTruncated(e && e.response)) return;
+      setErr(parcelTruncationNotice(featureCountOf(e.response)));
+    });
     // The statewide TxGIO layer is the UNIVERSAL fallback — let it load even when it's
     // slow, and NEVER pull it on a hiccup. A slow statewide outline still beats no
     // outline (that "took a while to load but worked" wait IS this layer); removing it
@@ -988,7 +1025,11 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
       // the TxGIO statewide outlines for this area (keep what you SEE == what you can
       // SELECT, the B137 rule).
       try { map.removeLayer(fl); } catch (_) {}
-      delete displaysRef.current[key];
+      // NEW-2 — drop every key pointing at this layer, not just the one that armed the guard, so
+      // an alias can never hand a detached layer to `optimisticHitAt`.
+      Object.keys(displaysRef.current).forEach((k) => {
+        if (displaysRef.current[k] === fl) { delete displaysRef.current[k]; delete displaySrcRef.current[k]; }
+      });
       recordSourceResult(key, false);
       setErr("That county's parcel server is slow right now — showing statewide outlines; clicking a lot still adds it.");
     };
@@ -1001,13 +1042,28 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
   };
   const clearDisplays = () => {
     const map = mapRef.current;
-    Object.values(displaysRef.current).forEach((fl) => { try { map && map.removeLayer(fl); } catch (_) {} });
+    const seen = new Set(); // NEW-2 — aliased keys share ONE layer; remove it once
+    Object.values(displaysRef.current).forEach((fl) => {
+      if (!fl || seen.has(fl)) return;
+      seen.add(fl);
+      try { map && map.removeLayer(fl); } catch (_) {}
+    });
     displaysRef.current = {};
+    displaySrcRef.current = {};
   };
   const removeDisplay = (key) => {
     const map = mapRef.current;
     const fl = displaysRef.current[key];
-    if (fl) { try { map && map.removeLayer(fl); } catch (_) {} delete displaysRef.current[key]; }
+    if (!fl) return;
+    // NEW-2 — an ALIAS drops only its own reference; the layer belongs to the key that created it.
+    if (displaySrcRef.current[key] && displaySrcRef.current[key].owner !== key) {
+      delete displaysRef.current[key]; delete displaySrcRef.current[key];
+      return;
+    }
+    try { map && map.removeLayer(fl); } catch (_) {}
+    Object.keys(displaysRef.current).forEach((k) => {
+      if (displaysRef.current[k] === fl) { delete displaysRef.current[k]; delete displaySrcRef.current[k]; }
+    });
   };
 
   // B629 — the Phase-1 client-loaded (whole-county) snapshot counties. Chambers + Waller ride the
@@ -1083,9 +1139,18 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
   };
   const optimisticHitAt = (latlng) => {
     let best = null; // { county, feature(esri), acres, real }
+    const walked = new Set(); // NEW-2 — aliased keys share one layer; walk its features once
     for (const [county, fl] of Object.entries(displaysRef.current)) {
       if (!fl || typeof fl.eachFeature !== "function") continue;
-      const real = !STATEWIDE_KEYS.includes(county);
+      if (walked.has(fl)) continue;
+      walked.add(fl);
+      /* NEW-2 — "is this a REAL county CAD hit?" is a question about the ENDPOINT, not the key. A
+         county parked on a statewide composite draws COMPOSITE features, so a hit off it is a
+         statewide-backup hit however the key is spelled — which is what decides whether a genuine
+         neighbouring CAD hit should win instead. Falls back to the key test for the snapshot
+         layers, which have no live URL. */
+      const src = displaySrcRef.current[county];
+      const real = src ? !isStatewideLayerUrl(src.url) : !STATEWIDE_KEYS.includes(county);
       fl.eachFeature((layer) => {
         // Cheap bbox reject first — only convert/test the 1-3 features that could contain it.
         try { if (layer.getBounds && !layer.getBounds().contains(latlng)) return; } catch (_) { return; }
