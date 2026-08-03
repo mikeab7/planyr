@@ -1050,6 +1050,219 @@ await page.waitForSelector('[data-testid="notes-tree"]', { timeout: 15000 });
 ok("THE BINDING RIDES IN THE TREE BLOB — it survives a reload, which is what makes it sync",
   (await readTree()).notebooks.find((n) => n.id === projNotebook.id)?.projectId === PROJ_A);
 
+/* ════ 23. ROUND FOUR — the false alarm, the key Chrome was stealing, and the blank space
+        you can double-click (B1391 · B1392 · B1393) ═══════════════════════════════════════
+
+   All three arrived together from the owner, and all three are driven HERE, logged out,
+   rather than parked: the two-window race is a localStorage race first (the cloud only
+   makes it visible later), the Tab escape is pure keyboard, and the blank-space press
+   needs nothing but a wide window. The ONE half that genuinely cannot run here — a real
+   revision conflict between two SIGNED-IN windows — is V680. */
+
+await goProject(null);                       // a LOOSE notebook, so the second window sees it
+await tb("notes-new-notebook").click();
+await page.waitForSelector('[data-testid="note-body"]', { timeout: 15000 });
+await page.waitForTimeout(1200);
+const r4Tree = await readTree();
+const r4Notebook = r4Tree.notebooks[r4Tree.notebooks.length - 1];
+const r4Page = r4Notebook.sections[0].pages[0].id;
+
+const inDoc = () => page.evaluate(() => !!document.activeElement?.closest?.(".ProseMirror"));
+const clearBody = async () => {
+  await tb("note-body").click();
+  await page.keyboard.press("Control+a");
+  await page.keyboard.press("Backspace");
+  await page.waitForTimeout(120);
+};
+/* Every node type in the document, so a NESTED list can be told from a flat one. */
+const typesIn = (doc) => { const out = []; const walk = (n) => { if (!n || typeof n !== "object") return; if (n.type) out.push(n.type); (n.content || []).forEach(walk); }; walk(doc); return out; };
+const nested = (doc) => { let found = false; const walk = (n, insideItem) => { if (!n || typeof n !== "object") return; if (insideItem && (n.type === "bulletList" || n.type === "orderedList")) found = true; (n.content || []).forEach((c) => walk(c, insideItem || n.type === "listItem")); }; walk(doc, false); return found; };
+
+/* ---- B1392: Tab belongs to the DOCUMENT ---- */
+
+/* A PLAIN PARAGRAPH was the commonest escape: nothing in the editor claimed Tab, so Chrome
+   took it and the caret was gone mid-sentence. */
+await clearBody();
+await page.keyboard.type("Detention pond notes", { delay: 6 });
+await page.keyboard.press("Tab");
+await page.waitForTimeout(150);
+const heldInParagraph = await inDoc();
+await settle();
+ok("TAB IN A PLAIN PARAGRAPH STAYS IN THE NOTE — the press Chrome used to steal",
+  heldInParagraph && textOf(await readBody(r4Page)).includes("\t"), heldInParagraph ? "indented" : "focus left the document");
+
+/* An EMPTY page escaped too — the very first thing you do on a new note. */
+await clearBody();
+await page.keyboard.press("Tab");
+await page.waitForTimeout(150);
+const heldInEmpty = await inDoc();
+await settle();
+ok("...and on a brand-new EMPTY page, where it escaped on the first keystroke of all",
+  heldInEmpty && textOf(await readBody(r4Page)).includes("\t"));
+
+/* THE FIRST ITEM OF A LIST — the case that made the report read as "sometimes". The list
+   extension claims Tab and then declines it (there is nothing above to indent into), so the
+   press fell through. It must be swallowed, and it must NOT wedge a tab character into a
+   bullet, which is a document you cannot outdent again. */
+await clearBody();
+await page.keyboard.type("- first bullet", { delay: 6 });
+await page.keyboard.press("Tab");
+await page.waitForTimeout(150);
+const heldInFirstItem = await inDoc();
+await settle();
+const firstItemDoc = await readBody(r4Page);
+ok("TAB IN THE FIRST ITEM OF A LIST STAYS PUT — and puts no stray tab inside the bullet",
+  heldInFirstItem && !textOf(firstItemDoc).includes("\t"), heldInFirstItem ? "swallowed cleanly" : "focus left the document");
+
+/* ...while a SECOND item still really indents. The fallback must not have eaten the feature
+   it was written to sit behind. */
+await page.keyboard.press("Enter");
+await page.keyboard.type("second bullet", { delay: 6 });
+await page.keyboard.press("Tab");
+await page.waitForTimeout(150);
+await settle();
+ok("...and a SECOND list item still INDENTS, exactly as it did before the fallback existed",
+  nested(await readBody(r4Page)), typesIn(await readBody(r4Page)).join(","));
+
+/* A TABLE's own Tab — next cell — is the other handler that must still win. */
+await clearBody();
+await tb("nt-table").click();
+await page.waitForSelector('[data-testid="nt-table-grid"]', { timeout: 5000 });
+await tb("nt-table-cell-2-2").click();
+await page.waitForTimeout(400);
+await page.keyboard.type("A1", { delay: 6 });
+await page.keyboard.press("Tab");
+await page.keyboard.type("B1", { delay: 6 });
+await settle();
+const tableDoc = await readBody(r4Page);
+const cellTexts = nodesOf(tableDoc, "tableCell").concat(nodesOf(tableDoc, "tableHeader")).map((c) => textOf(c));
+ok("TAB IN A TABLE STILL MOVES TO THE NEXT CELL — the fallback sits behind it, not over it",
+  cellTexts.includes("A1") && cellTexts.includes("B1") && !textOf(tableDoc).includes("\t"),
+  cellTexts.filter(Boolean).join(" | ") || "no cells");
+
+/* ⛔ THE ESCAPE HATCH. A key that can never leave is a keyboard trap: someone working
+   without a mouse would be sealed inside the note. Escape releases the next Tab. */
+await clearBody();
+await page.keyboard.type("about to leave", { delay: 6 });
+await page.keyboard.press("Escape");
+await page.keyboard.press("Tab");
+await page.waitForTimeout(200);
+ok("ESCAPE THEN TAB LEAVES THE NOTE — the keyboard-only escape hatch is real, not a promise",
+  !(await inDoc()));
+
+/* ...and the release is single-use: typing takes it back, so you cannot end up in a mode
+   where Tab silently stopped indenting. */
+await tb("note-body").click();
+await page.keyboard.type("back inside", { delay: 6 });
+await page.keyboard.press("Tab");
+await page.waitForTimeout(150);
+ok("...and typing takes the release back — the next Tab indents again, no lingering mode",
+  await inDoc());
+await settle();
+
+/* ---- B1393: double-click the blank part of the page and start typing ---- */
+
+/* AUDIT-FIRST, and it is worth stating plainly: single-click-anywhere (B1368) was VERIFIED
+   WORKING on a wide window in a real browser before any of this was written, and the same
+   handler was already in the deployed bundle. Double-click worked only as a side effect of
+   the press path. These checks make it a stated contract in all four blank regions. */
+await clearBody();
+await page.keyboard.type("Short line.", { delay: 6 });
+await settle();
+const r4Mat = await tb("note-mat").boundingBox();
+const r4Body = await tb("note-body").boundingBox();
+const blankSpots = [
+  ["far RIGHT of the text column", r4Mat.x + r4Mat.width - 40, r4Body.y + 10],
+  ["BELOW the last paragraph", r4Body.x + 60, Math.min(r4Mat.y + r4Mat.height - 30, r4Body.y + r4Body.height + 90)],
+  ["the margin BESIDE the first line", r4Body.x + r4Body.width - 12, r4Body.y + 6],
+  ["low and far right, where the sheet has nothing at all", r4Mat.x + r4Mat.width - 80, r4Mat.y + r4Mat.height - 60],
+];
+for (const [where, x, y] of blankSpots) {
+  await page.locator("body").click({ position: { x: 4, y: 4 } });     // blur first, every time
+  await page.waitForTimeout(120);
+  await page.mouse.dblclick(x, y);
+  await page.waitForTimeout(180);
+  const landed = await inDoc();
+  const stamp = `DBL${blankSpots.indexOf(blankSpots.find((b) => b[0] === where))}`;
+  await page.keyboard.type(stamp, { delay: 6 });
+  await settle();
+  ok(`DOUBLE-CLICKING ${where} lands the caret and you can type straight away`,
+    landed && textOf(await readBody(r4Page)).includes(stamp));
+}
+
+/* ⛔ …and double-clicking a WORD still SELECTS that word. The new behaviour is for blank
+   space only; taking word-select away would be a worse bug than the one being fixed. */
+await clearBody();
+await page.keyboard.type("alpha beta gamma", { delay: 6 });
+await settle();
+const betaBox = await page.evaluate(() => {
+  const node = document.querySelector('[data-testid="note-body"] p')?.firstChild;
+  if (!node) return null;
+  const r = document.createRange();
+  const i = node.textContent.indexOf("beta");
+  r.setStart(node, i); r.setEnd(node, i + 4);
+  const b = r.getBoundingClientRect();
+  return { x: b.x + b.width / 2, y: b.y + b.height / 2 };
+});
+await page.mouse.dblclick(betaBox.x, betaBox.y);
+await page.waitForTimeout(150);
+await page.keyboard.type("BRAVO", { delay: 6 });
+await settle();
+ok("DOUBLE-CLICKING A WORD STILL SELECTS IT — only blank space got the new behaviour",
+  textOf(await readBody(r4Page)).replace(/\s+/g, " ").includes("alpha BRAVO gamma"),
+  textOf(await readBody(r4Page)));
+
+/* ---- B1391: TWO WINDOWS OF THE SAME PERSON, which is the state the false alarm came from ----
+
+   The owner's report was "it thought someone else was editing this file… it's literally just
+   me." What was actually true is that his account was open in more than one window. That is
+   a normal state, and the half of it that does not need a sign-in is driven right here: two
+   tabs of this browser, the same note open in both. */
+await clearBody();
+await page.keyboard.type("WINDOW-ONE-PARAGRAPH", { delay: 6 });
+await settle();
+
+const win2 = await ctx.newPage();
+const win2Errors = [];
+win2.on("pageerror", (e) => win2Errors.push(e.message));
+await win2.goto(BASE, { waitUntil: "load" });
+await win2.waitForTimeout(1800);
+await win2.locator('[data-testid="module-tab-notes"]:visible').first().click();
+await win2.waitForSelector('[data-testid="notes-tree"]', { timeout: 20000 });
+await win2.locator(`[data-testid="notes-row-${r4Page}"]`).click();
+await win2.waitForSelector('[data-testid="note-body"]', { timeout: 20000 });
+await win2.waitForTimeout(900);
+ok("a SECOND window of the same browser opens the same note",
+  (await win2.locator('[data-testid="note-body"]').innerText()).includes("WINDOW-ONE-PARAGRAPH"));
+
+/* The second window types. The first window has the same page open and has NOT touched it. */
+await win2.locator('[data-testid="note-body"]').click();
+await win2.keyboard.press("Control+End");
+await win2.keyboard.type(" ADDED-IN-WINDOW-TWO", { delay: 6 });
+await win2.waitForTimeout(1400);
+await page.waitForTimeout(900);
+
+const win1Text = await page.locator('[data-testid="note-body"]').innerText();
+ok("⛔ THE OPEN EDITOR IN THE FIRST WINDOW RE-READS THE NOTE — it does not sit on a stale copy",
+  win1Text.includes("ADDED-IN-WINDOW-TWO"), win1Text.slice(0, 80));
+
+/* THE SELF-RACE ITSELF: the first window now types. If it were still holding its stale
+   document, this keystroke would write that whole document back and the second window's
+   sentence would vanish — cleanly, past a revision guard, with no conflict and nothing to
+   notice. That silent loss is the actual bug the false prompt was a symptom of. */
+await tb("note-body").click();
+await page.keyboard.press("Control+End");
+await page.keyboard.type(" THEN-WINDOW-ONE-AGAIN", { delay: 6 });
+await settle();
+const bothText = textOf(await readBody(r4Page));
+ok("⛔ AND THE NEXT KEYSTROKE DOES NOT WIPE THE OTHER WINDOW'S SENTENCE — the self-race is dead",
+  bothText.includes("ADDED-IN-WINDOW-TWO") && bothText.includes("THEN-WINDOW-ONE-AGAIN"), bothText.slice(0, 110));
+
+ok("NEITHER WINDOW WAS EVER ASKED TO PICK BETWEEN TWO COPIES — a no-op raises no bar",
+  await tb("notes-conflict-bar").count() === 0 && await win2.locator('[data-testid="notes-conflict-bar"]').count() === 0);
+ok("...and the second window ran clean too", win2Errors.length === 0, win2Errors.join(" | ") || "clean");
+await win2.close();
+
 /* ════ Wrap ═══════════════════════════════════════════════════════════════════════════ */
 ok("no uncaught page error across the whole run", pageErrors.length === 0, pageErrors.join(" | ") || "clean");
 

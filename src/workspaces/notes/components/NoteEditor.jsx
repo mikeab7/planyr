@@ -52,7 +52,7 @@ const RADIUS = { control: 8, pill: 999 }; // mirrored from shared/ui/controls.js
  * PDF-PARITY: lib/notesPrint.js mirrors this list construct for construct, on paper.
  * Add a construct here and add it there in the same commit. */
 const EDITOR_CSS = `
-.planyr-note .ProseMirror { outline: none; min-height: 46vh; color: var(--text-primary); line-height: 1.65; font-size: 15px; }
+.planyr-note .ProseMirror { outline: none; min-height: 46vh; color: var(--text-primary); line-height: 1.65; font-size: 15px; tab-size: 4; }
 .planyr-note .ProseMirror > * + * { margin-top: 0.7em; }
 .planyr-note .ProseMirror p { margin: 0; }
 .planyr-note .ProseMirror h1 { font-size: 1.9em; font-weight: 700; line-height: 1.25; margin: 0; }
@@ -187,7 +187,16 @@ export default function NoteEditor({
     // as the caret moves — including selection-only transactions.
     shouldRerenderOnTransaction: true,
     immediatelyRender: false,
-    editorProps: { attributes: { "aria-label": "Note body", "data-testid": "note-body" } },
+    /* The accessible name carries the KEYBOARD TRAP ESCAPE (B1392). Tab now indents inside
+     * the note instead of jumping to the browser's toolbar, so the way OUT has to be
+     * announced rather than known: Escape releases the next Tab. */
+    editorProps: {
+      attributes: {
+        "aria-label": "Note body. Tab indents; press Escape then Tab to leave the note.",
+        "aria-keyshortcuts": "Tab Shift+Tab Escape",
+        "data-testid": "note-body",
+      },
+    },
     onUpdate: ({ editor: ed }) => {
       pendingRef.current = { id: pageId, doc: ed.getJSON() };
       onStatusRef.current?.("unsaved");
@@ -215,7 +224,8 @@ export default function NoteEditor({
     if (searchTerm) editor.commands.stepNoteSearch(0);
   }, [editor, searchTerm]);
 
-  /* CLICKING THE EMPTY PART OF THE PAGE PUTS THE CARET THERE (B1368).
+  /* CLICKING — OR DOUBLE-CLICKING — THE EMPTY PART OF THE PAGE PUTS THE CARET THERE
+   * (B1368, extended by B1393).
    *
    * The document only claimed the box its own text filled, so on a short note most of the
    * sheet was dead: clicking below the last line, or out to the side of it, did nothing at
@@ -225,7 +235,19 @@ export default function NoteEditor({
    * The mat forwards the press instead: anything that is not already the document, a field
    * or a control lands the caret at the nearest real position — the same place the browser
    * would have put it if the document had filled the pane. `preventDefault` on mousedown is
-   * what stops the press blurring the editor before the focus lands. */
+   * what stops the press blurring the editor before the focus lands.
+   *
+   * B1393 BINDS THE SAME HANDLER TO DOUBLE-CLICK, and the reason is worth writing down
+   * because the code looks redundant: a double-click DOES fire two mousedowns, so blank
+   * space already worked by accident — driven in a real browser at desk width, all four
+   * blank regions (right of the column, left of it, above the text and below the last line)
+   * landed the caret and typed. Binding the second event makes it a STATED CONTRACT with a
+   * guard on it rather than a side effect of the first, so a later change to the press path
+   * cannot quietly take double-click away again.
+   *
+   * ⛔ IT MUST NOT REACH TEXT. Double-clicking a WORD still selects that word — the guard
+   * at the top returns early for anything inside `.ProseMirror`, so only genuinely blank
+   * space gets the caret-landing behaviour. */
   const focusFromMat = useCallback((e) => {
     if (!editor || editor.isDestroyed) return;
     const el = e.target;
@@ -287,11 +309,13 @@ export default function NoteEditor({
       <NoteToolbar editor={editor} onExport={exportPage} onPrint={printPage} />
       <FindBar term={find.term} count={find.count} index={find.index} onStep={stepFind} onClear={onClearSearch} />
 
-      {/* The mat. It is the WHOLE pane, and a press anywhere on it lands the caret (B1368) —
-          see focusFromMat. `data-testid` so the headless check can press the dead zone. */}
+      {/* The mat. It is the WHOLE pane, and a press — single OR double — anywhere on it lands
+          the caret (B1368, B1393); see focusFromMat. `data-testid` so the headless check can
+          press the dead zone. */}
       <div
         data-testid="note-mat"
         onMouseDown={focusFromMat}
+        onDoubleClick={focusFromMat}
         style={{ flex: 1, minHeight: 0, overflow: "auto", display: "flex", flexDirection: "column" }}
       >
         {/* A DOCUMENT page (the owner's choice over a free-form canvas): a fixed-width sheet.
