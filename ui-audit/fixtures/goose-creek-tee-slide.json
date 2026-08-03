@@ -1,0 +1,361 @@
+{
+ "note": "REAL owner plan \u2014 Goose Creek, site `sms69x8rb2qk`, plan 'Plan II - 220K, 440K, 700K' (Supabase lyeqzkuiwngunutlkkmi, pulled 2026-08-03). ALL SIX roads plus the buildings that frame them \u2014 the full road set is load-bearing, not padding: the load-time vertex simplify (B1052) only protects a host control point that another road's endpoint PINS, so dropping `e1454749rlpiva` silently deletes host control point 3 and the plan stops being the owner's. This is the geometry behind his report that a road tee \"won't let me adjust the tee to the correct spot\". The 40' aisle `e1454743ykduhm` \u2014 HIS 'road between buildings', in the gap between `e1454647dshobp` (north) and `e1454729ykduhm` (south) \u2014 tees into the 100' aisle `e1454717dshobp` at that road's control point index 7, at (-1272.674, 0.357). Its last leg bears 9.4 deg off the cardinal axis; the cardinal is 18.4 ft SOUTH along the host (+y is south in this frame; the tee sits near the host's north end), and the pre-fix collapse radius on a 100' host was travelW/4 = 25 ft \u2014 so every correction he could want was inside the dead zone and reverted on release. Do NOT 'tidy' these numbers: the defect IS the fixture.",
+ "site": "sms69x8rb2qk",
+ "pulled": "2026-08-03",
+ "els": [
+  {
+   "h": 419,
+   "w": 495,
+   "z": 0,
+   "cx": -482.95,
+   "cy": 1126.02,
+   "id": "e1454629danlgq",
+   "rot": 269,
+   "dock": "cross",
+   "type": "building",
+   "dockSide": "bottom",
+   "fillOpacity": 1
+  },
+  {
+   "h": 946.42,
+   "w": 620.62,
+   "z": 18432,
+   "cx": -632.84,
+   "cy": -787.09,
+   "id": "e1454647dshobp",
+   "rot": 0,
+   "dock": "cross",
+   "type": "building",
+   "dockSide": "right"
+  },
+  {
+   "h": 1106.65,
+   "w": 516,
+   "z": 23552,
+   "cx": -1123.38,
+   "cy": -2096.84,
+   "id": "e1454652dshobp",
+   "rot": 0,
+   "dock": "cross",
+   "type": "building",
+   "dockSide": "right"
+  },
+  {
+   "h": 1571.751069610692,
+   "w": 414.89820192349714,
+   "z": 75776,
+   "cx": -1117.7277252051408,
+   "cy": 696.8321122486473,
+   "id": "e1454717dshobp",
+   "rot": 0,
+   "curb": 0.5,
+   "type": "road",
+   "travelW": 100,
+   "roadClass": "aisle",
+   "pts": [
+    {
+     "x": -960.6502885848445,
+     "y": 1479.1096710296038
+    },
+    {
+     "x": -988.0602885848444,
+     "y": 1095.369671029604
+    },
+    {
+     "x": -1047.1002885848445,
+     "y": 876.099671029604
+    },
+    {
+     "x": -1070.8546899012351,
+     "y": 820.8258397286411
+    },
+    {
+     "x": -1156.7402885848444,
+     "y": 620.979671029604
+    },
+    {
+     "x": -1205.2302885848444,
+     "y": 456.51967102960396
+    },
+    {
+     "x": -1262.1602885848445,
+     "y": 201.39967102960398
+    },
+    {
+     "x": -1272.6739049081787,
+     "y": 0.35714051719406825
+    },
+    {
+     "x": -1274.69,
+     "y": -87.89
+    }
+   ],
+   "vtx": [
+    {},
+    {
+     "radius": 25,
+     "treatment": "arc"
+    },
+    {
+     "radius": 25,
+     "treatment": "arc"
+    },
+    {},
+    {
+     "radius": 25,
+     "treatment": "arc"
+    },
+    {
+     "radius": 25,
+     "treatment": "arc"
+    },
+    {
+     "radius": 25,
+     "treatment": "arc"
+    },
+    {},
+    {}
+   ]
+  },
+  {
+   "h": 2683.364601535954,
+   "w": 537.5647691154509,
+   "z": 78848,
+   "cx": -1460.24,
+   "cy": -1496.84,
+   "id": "e1454720dshobp",
+   "rot": 0,
+   "curb": 0.5,
+   "type": "road",
+   "travelW": 100,
+   "roadClass": "aisle",
+   "pts": [
+    {
+     "x": -1241.7553751896476,
+     "y": -159.67271466893288
+    },
+    {
+     "x": -1271.3753751896475,
+     "y": -489.64271466893285
+    },
+    {
+     "x": -1356.0153751896476,
+     "y": -788.5127146689329
+    },
+    {
+     "x": -1486.37,
+     "y": -1048.5
+    },
+    {
+     "x": -1582.23,
+     "y": -1309.22
+    },
+    {
+     "x": -1636.3653751896475,
+     "y": -1574.0227146689328
+    },
+    {
+     "x": -1664.1353751896474,
+     "y": -1813.7927146689328
+    },
+    {
+     "x": -1669.6353751896474,
+     "y": -2021.142714668933
+    },
+    {
+     "x": -1678.5253751896475,
+     "y": -2837.972714668933
+    }
+   ],
+   "vtx": [
+    {},
+    {
+     "radius": 25,
+     "treatment": "arc"
+    },
+    {
+     "radius": 25,
+     "treatment": "arc"
+    },
+    {
+     "radius": 25,
+     "treatment": "arc"
+    },
+    {
+     "radius": 25,
+     "treatment": "arc"
+    },
+    {
+     "radius": 25,
+     "treatment": "arc"
+    },
+    {
+     "radius": 25,
+     "treatment": "arc"
+    },
+    {
+     "radius": 25,
+     "treatment": "arc"
+    },
+    {}
+   ]
+  },
+  {
+   "h": 480,
+   "w": 870,
+   "z": 0,
+   "cx": -612.1,
+   "cy": 350.98,
+   "id": "e1454729ykduhm",
+   "rot": 178.543241069641,
+   "dock": "cross",
+   "type": "building",
+   "dockSide": "bottom",
+   "fillOpacity": 1
+  },
+  {
+   "h": 59.085277682876594,
+   "w": 349.224038409444,
+   "z": 79872,
+   "cx": -1101.404223523335,
+   "cy": 9.674083378078043,
+   "id": "e1454743ykduhm",
+   "rot": 0,
+   "curb": 0.5,
+   "type": "road",
+   "travelW": 40,
+   "roadClass": "aisle",
+   "pts": [
+    {
+     "x": -927.4501189351333,
+     "y": 11.286553838600852
+    },
+    {
+     "x": -1161.13,
+     "y": 18.79
+    },
+    {
+     "x": -1272.6739049081787,
+     "y": 0.35714051719406825
+    }
+   ],
+   "vtx": [
+    {},
+    {},
+    {}
+   ]
+  },
+  {
+   "h": 150.4816244274933,
+   "w": 104.45551456191424,
+   "z": 80896,
+   "cx": -181.1094674050312,
+   "cy": -59.53684769936329,
+   "id": "e1454747rlpiva",
+   "rot": 0,
+   "curb": 0.5,
+   "type": "road",
+   "travelW": 36,
+   "roadClass": "aisle",
+   "pts": [
+    {
+     "x": -148.06642037023835,
+     "y": -134.62735028598502
+    },
+    {
+     "x": -147.3,
+     "y": -40.3
+    },
+    {
+     "x": -177.55642037023836,
+     "y": -9.897350285985029
+    },
+    {
+     "x": -230.83564481228487,
+     "y": -2.6261227231472226
+    }
+   ],
+   "vtx": [
+    {},
+    {},
+    {
+     "radius": 25,
+     "treatment": "arc"
+    },
+    {}
+   ]
+  },
+  {
+   "h": 177.35268769371078,
+   "w": 940.7461772999312,
+   "z": 81920,
+   "cx": -601.0859137337125,
+   "cy": 750.6396231507788,
+   "id": "e1454749rlpiva",
+   "rot": 0,
+   "curb": 0.5,
+   "type": "road",
+   "travelW": 36,
+   "roadClass": "aisle",
+   "pts": [
+    {
+     "x": -1070.8546899012351,
+     "y": 820.8258397286411
+    },
+    {
+     "x": -944.6600392270734,
+     "y": 816.7014223295349
+    },
+    {
+     "x": -147.93,
+     "y": 789.85
+    },
+    {
+     "x": -153.51,
+     "y": 679.68
+    },
+    {
+     "x": -223.56075858308992,
+     "y": 681.9334394567222
+    }
+   ],
+   "vtx": [
+    {},
+    {},
+    {},
+    {
+     "radius": 25,
+     "treatment": "arc"
+    },
+    {}
+   ]
+  },
+  {
+   "h": 143.8170271828401,
+   "w": 57.919940822978276,
+   "z": 82944,
+   "cx": -158.60704412625336,
+   "cy": 858.9328089981134,
+   "id": "e1454750rlpiva",
+   "rot": 0,
+   "curb": 0.5,
+   "type": "road",
+   "travelW": 36,
+   "roadClass": "aisle",
+   "pts": [
+    {
+     "x": -147.93,
+     "y": 789.85
+    },
+    {
+     "x": -169.2840882525067,
+     "y": 928.0156179962268
+    }
+   ],
+   "vtx": [
+    {},
+    {}
+   ]
+  }
+ ]
+}

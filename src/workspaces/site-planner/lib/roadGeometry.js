@@ -472,6 +472,14 @@ export function findRoadConnect(movePt, exclude, roads, opts = {}) {
   const tolFt = opts.tolFt > 0 ? opts.tolFt : 10;
   const list = Array.isArray(roads) ? roads : [];
   let best = null;
+  // NEW-1 — EDGE distance SATURATES, so it cannot order candidates on its own. `edgeD` is
+  // max(0, d − halfW), and on a 100 ft road that is 0 for EVERY point within ~50 ft of the centerline:
+  // a strict `edgeD < best.dist` comparison then resolves a 50 ft-wide band of ties by SCAN ORDER, not
+  // by proximity. Sliding a tee along a wide host that way kept resolving to the first segment scanned —
+  // whose clamped projection is the shared vertex itself — so the junction sat still while the cursor
+  // moved. Keep `dist` edge-relative (B961: it has to compare fairly against a parking/court edge hit)
+  // and break its ties on the RAW centerline distance, which does not saturate.
+  const better = (edgeD, raw) => !best || edgeD < best.dist - 1e-6 || (edgeD <= best.dist + 1e-6 && raw < best.raw - 1e-6);
   // Endpoint candidates (both ends of every road), skipping the moving vertex itself. Distance is
   // measured to the CENTERLINE but the tolerance and the returned `dist` are EDGE-relative (B961).
   for (const r of list) {
@@ -483,7 +491,7 @@ export function findRoadConnect(movePt, exclude, roads, opts = {}) {
       const p = r.pts[idx];
       const d = Math.hypot(p.x - movePt.x, p.y - movePt.y);
       const edgeD = Math.max(0, d - hw);
-      if (d <= tolFt + hw && (!best || edgeD < best.dist)) best = { roadId: r.id, kind: "endpoint", index: idx, pt: { x: p.x, y: p.y }, dist: edgeD };
+      if (d <= tolFt + hw && better(edgeD, d)) best = { roadId: r.id, kind: "endpoint", index: idx, pt: { x: p.x, y: p.y }, dist: edgeD, raw: d };
     }
   }
   // Interior (T/Y) candidates — only on OTHER roads, and only when strictly closer than any
@@ -498,12 +506,15 @@ export function findRoadConnect(movePt, exclude, roads, opts = {}) {
         const q = nearestOnSeg(movePt, r.pts[i], r.pts[i + 1]);
         const d = Math.hypot(q.x - movePt.x, q.y - movePt.y);
         const edgeD = Math.max(0, d - hw);
-        if (d > tolFt + hw || (best && edgeD >= best.dist - 1e-6)) continue;
+        // An interior hit must be STRICTLY better than any endpoint hit (so a near-endpoint press joins
+        // end-to-end), which under saturation means: closer at the edge, or — when the edge distances
+        // tie — genuinely closer to the centerline.
+        if (d > tolFt + hw || !better(edgeD, d)) continue;
         // Defer to the endpoint pass when the projection lands within (edge) tolerance of either end —
         // near a road's end you want a clean end-to-end join, not a tee just inside it.
         const nearEnd = Math.hypot(q.x - r.pts[0].x, q.y - r.pts[0].y) <= tolFt + hw ||
                         Math.hypot(q.x - r.pts[last].x, q.y - r.pts[last].y) <= tolFt + hw;
-        if (!nearEnd) best = { roadId: r.id, kind: "interior", index: i, pt: { x: q.x, y: q.y }, dist: edgeD };
+        if (!nearEnd) best = { roadId: r.id, kind: "interior", index: i, pt: { x: q.x, y: q.y }, dist: edgeD, raw: d };
       }
     }
   }
@@ -530,17 +541,135 @@ export function concatRoads(aPts, aVtx, aIndex, bPts, bVtx, bIndex, joinRadius) 
   return { pts, vtx, joinIndex };
 }
 
+/* NEW-1 — the index of the INTERIOR control point of `pts` coincident with `pt` (within `tol`), or -1.
+ * This is how a junction node is RECOGNISED: a road that tees into this one shares the exact coordinate
+ * of one of its control points, so "which of my vertices is this endpoint already welded to" is a plain
+ * coincidence test. Endpoints are deliberately excluded — an endpoint meet is a WELD (both roads keep
+ * their extent), not a tee node that may be slid along a host. */
+export function teeNodeIndex(pts, pt, tol = ROAD_VERTEX_COLLAPSE_FT) {
+  if (!Array.isArray(pts) || pts.length < 3 || !pt || !Number.isFinite(pt.x) || !Number.isFinite(pt.y)) return -1;
+  const t = tol > 0 ? tol : ROAD_VERTEX_COLLAPSE_FT;
+  let best = -1, bestD = Infinity;
+  for (let i = 1; i < pts.length - 1; i++) {
+    const q = pts[i];
+    if (!q) continue;
+    const d = Math.hypot(q.x - pt.x, q.y - pt.y);
+    if (d <= t && d < bestD) { best = i; bestD = d; }
+  }
+  return best;
+}
+
+/* NEW-1 — SLIDE an existing junction node along its own host road to `pt`.
+ *
+ * This is the operation the owner was missing. A tee stores the junction as a control point spliced
+ * into the HOST's alignment; dragging the side road's endpoint therefore has to MOVE that control
+ * point, not look for somewhere to put a new one. `planRoadConnect` used to route every tee — including
+ * one that already existed — through `insertRoadVertex`'s reuse rule, whose tolerance scales with the
+ * host's width (travelW/4). On a 100 ft host that is 25 ft, so any slide shorter than that "reused" the
+ * node the endpoint was already welded to and the junction snapped straight back to where it started;
+ * a longer slide moved it but left the old node behind as clutter.
+ *
+ * Mechanically: drop the held node, re-project onto what is left (so a slide PAST a neighbouring control
+ * point re-sequences correctly instead of folding the alignment back on itself), then splice the node in
+ * at its new home. The reuse tolerance here is the TIGHT `ROAD_VERTEX_COLLAPSE_FT`, never the width-scaled
+ * one: a slide is a deliberate repositioning of a node that already exists, so the only thing worth
+ * collapsing onto is a true coincidence — anything wider is the dead zone this exists to remove.
+ *
+ * Returns { pts, vtx, index } (index = the node's new position) or null when `heldIndex` is not a
+ * slidable interior node. Pure — unit-tested. */
+export function slideTeeNode(pts, vtx, heldIndex, pt) {
+  if (!Array.isArray(pts) || pts.length < 3) return null;
+  if (!(heldIndex > 0 && heldIndex < pts.length - 1)) return null;   // interior only — an endpoint is a weld
+  if (!pt || !Number.isFinite(pt.x) || !Number.isFinite(pt.y)) return null;
+  const v = normVtx(pts, vtx);
+  const rPts = pts.filter((_, i) => i !== heldIndex).map((p) => ({ x: p.x, y: p.y }));
+  const rVtx = v.filter((_, i) => i !== heldIndex);
+  const hit = projectToPolyline(rPts, pt);
+  if (!hit) return null;
+  const ins = insertRoadVertex(rPts, rVtx, hit.i, pt, { collapseFt: ROAD_VERTEX_COLLAPSE_FT });
+  if (!ins) return null;
+  return { pts: ins.pts, vtx: ins.vtx, index: ins.index };
+}
+
+/* NEW-2 — the road's ABSOLUTE BEARING, and the cardinal lock that lets a tee drag set it.
+ *
+ * Owner, correcting an earlier reading: the connecting road is "not square to the host road, it's just
+ * more angled with respect to N/S than I'd like." So the thing he is aiming at is a CARDINAL bearing —
+ * a property of the road alone — not a relationship to the road it tees into.
+ *
+ * The planner's feet frame is axis-aligned to true north (`mapLock.feetToLatLngPair`: −y is north, +x is
+ * east, no rotation), so page angles here ARE true bearings. `roadBearingDeg` reports one the way a plan
+ * reads it: degrees clockwise from north, 0–360.
+ *
+ * `cardinalTeePoint` is the LOCK. Holding Shift while dragging a road vertex already locks its leg to 45°
+ * increments (`snap45` — due N/S/E/W plus the diagonals); that lock was simply dead on a junction drag,
+ * because the connect magnet overwrote the locked point. Here the two compose instead: take the leg's
+ * bearing from `pivot`, round it to the nearest 45°, and slide the connection to where THAT ray crosses
+ * the host segment — so the endpoint stays welded to the host and the leg lands on an exact cardinal.
+ * Releasing Shift is the override.
+ *
+ *   hostPts — the host's WHOLE alignment, not just the chord the cursor is over. That distinction is
+ *            load-bearing: the cardinal crossing routinely sits on a DIFFERENT segment from the free
+ *            connect point (on the owner's plan the crossing is 18 ft up the host, one control point
+ *            back from where his cursor was), and a single-segment intersection simply refuses there.
+ *   pivot  — the connecting road's next vertex back from the moving endpoint: the point its last leg
+ *            swings about, and therefore what the bearing is measured from.
+ *   pt     — the connection point as it stands (the free projection onto the host); the crossing
+ *            NEAREST it wins, so the lock tracks the drag rather than jumping to a far one.
+ * Returns { pt, bearing, index } (index = the host segment the locked point lands on, which is what
+ * the tee is spliced into) or null when the locked ray misses the host entirely / the geometry is
+ * degenerate — in which case the caller keeps the free point rather than inventing one.
+ * Pure — unit-tested. */
+export function roadBearingDeg(from, to) {
+  if (!from || !to) return null;
+  const dx = to.x - from.x, dy = to.y - from.y;              // −y is north
+  if (Math.hypot(dx, dy) < EPS) return null;
+  return ((Math.atan2(dx, -dy) * 180) / Math.PI + 360) % 360;
+}
+
+export const TEE_CARDINAL_STEP_DEG = 45;
+export function cardinalTeePoint(hostPts, pivot, pt, opts = {}) {
+  if (!Array.isArray(hostPts) || hostPts.length < 2 || !pivot || !pt) return null;
+  const step = opts.stepDeg > 0 ? opts.stepDeg : TEE_CARDINAL_STEP_DEG;
+  if (len(sub(pt, pivot)) < EPS) return null;
+  const rad = (step * Math.PI) / 180;
+  const ang = Math.round(Math.atan2(pt.y - pivot.y, pt.x - pivot.x) / rad) * rad;
+  const d = { x: Math.cos(ang), y: Math.sin(ang) };           // the locked ray, from the pivot
+  let best = null;
+  for (let i = 0; i < hostPts.length - 1; i++) {
+    const a = hostPts[i], b = hostPts[i + 1];
+    if (!a || !b) continue;
+    const seg = sub(b, a);
+    // Ray/segment intersection: pivot + t·d = a + s·seg, solved by cross products.
+    const den = cross(d, seg);
+    if (Math.abs(den) < 1e-9) continue;                       // this leg is parallel to the locked ray
+    const w = sub(a, pivot);
+    const t = cross(w, seg) / den;
+    const s = cross(w, d) / den;
+    if (!(t > EPS) || !(s >= -1e-9 && s <= 1 + 1e-9)) continue;   // behind the pivot / off this leg
+    const q = { x: pivot.x + d.x * t, y: pivot.y + d.y * t };
+    const away = len(sub(q, pt));
+    if (!best || away < best.away) best = { pt: q, index: i, away };
+  }
+  if (!best) return null;
+  return { pt: best.pt, index: best.index, bearing: roadBearingDeg(pivot, best.pt) };
+}
+
 /* Decide + build the connect action for a moving road endpoint welding onto `candidate`.
  *   movingEl / targetEl — { pts, vtx, id, roadClass, travelW, curb }.
  *   movingIndex         — the moving endpoint (0 or last) being welded.
  *   candidate           — a findRoadConnect() hit ({ roadId, kind, index, pt }).
  *   joinRadius          — the merged road's class-default arc radius (merge only).
+ *   opts.fromPt         — (NEW-1) where the moving endpoint sat BEFORE the gesture. When that point is
+ *                         an existing junction node on `targetEl`, the tee is SLID (the node moves) —
+ *                         see slideTeeNode. Omitting it keeps the original fresh-connect behaviour.
  * Returns one of:
  *   { action:"merge", moving:{pts,vtx}, deleteTarget:true }        — target absorbed into moving
  *   { action:"weld",  moving:{pts,vtx} }                           — endpoints share a coord; both kept
  *   { action:"tee",   moving:{pts,vtx}, target:{pts,vtx} }         — endpoint onto interior; vertex inserted
+ *                         (`slid` = the node's new index when an existing junction was moved)
  * or null when the inputs are unusable. Callers own the id bookkeeping (delete/patch). */
-export function planRoadConnect(movingEl, movingIndex, targetEl, candidate, joinRadius) {
+export function planRoadConnect(movingEl, movingIndex, targetEl, candidate, joinRadius, opts = {}) {
   if (!movingEl || !Array.isArray(movingEl.pts) || !candidate) return null;
   const mPts = movingEl.pts, mLast = mPts.length - 1;
   if (movingIndex !== 0 && movingIndex !== mLast) return null;
@@ -552,6 +681,14 @@ export function planRoadConnect(movingEl, movingIndex, targetEl, candidate, join
   const weldMoving = () => weldMovingTo(weldPt);
   if (candidate.kind === "interior") {
     if (!targetEl || !Array.isArray(targetEl.pts)) return null;
+    // NEW-1 — a junction this endpoint is ALREADY welded to is MOVED, never re-reused in place. Without
+    // this the collapse rule below (25 ft on a 100 ft host) swallowed every short slide whole: the ghost
+    // followed the cursor the entire drag and the junction reverted the instant you let go.
+    const held = teeNodeIndex(targetEl.pts, opts.fromPt, ROAD_VERTEX_COLLAPSE_FT);
+    if (held > 0) {
+      const slid = slideTeeNode(targetEl.pts, targetEl.vtx, held, weldPt);
+      if (slid) return { action: "tee", moving: weldMovingTo(slid.pts[slid.index]), target: { pts: slid.pts, vtx: slid.vtx }, slid: slid.index };
+    }
     // NEW-3 — reuse an existing through-road vertex within collapse distance instead of near-duplicating
     // one, and weld the moving endpoint to that RESOLVED node so both roads meet at a single point.
     // NEW-5 — reuse an existing control point far more readily than B1008's flat 1.5 ft. A tee node
