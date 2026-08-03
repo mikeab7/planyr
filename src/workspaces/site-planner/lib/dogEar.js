@@ -124,6 +124,42 @@ export function wallStripBox(b, side, bumps = [], depth) {
   return { ...wallKidBox(b, side, { depth, gap: 0, ...span }), ...span };
 }
 
+/* ---- NEW-1/NEW-2: a wall's side parking is a STACK, not a single field ------------------------
+ *
+ * Exploding a parking field ("Split rows/aisles") replaces ONE 60 ft double-loaded module with
+ * three pieces — stall row | drive aisle | stall row — each its own element, contiguous, stacked
+ * outward from the wall. The owner does this to trim individual rows back around a fire lane, so
+ * the pieces routinely carry DIFFERENT along-wall runs from each other (measured on the owner's
+ * Silvestri plan: nine pieces running 679 → 486 ft in a taper). They are still ONE wall kid to the
+ * host: their perpendicular positions are fully determined by the wall, the strip inboard of them,
+ * and each other's depths.
+ *
+ * `sideParkStack` is the ONE derivation of that. It orders the pads inner→outer and gives each the
+ * cumulative `gap` it must clear — the strip plus everything stacked inboard of it — so the canvas
+ * refit, the load-time wall-kid heal and the host-run heal cannot answer "how far out does this
+ * piece sit?" three different ways. With a single un-exploded field it returns exactly
+ * `[{ el, depth, gap: stripDepth }]`, i.e. byte-for-byte what those three callers computed before.
+ *
+ * ORDER comes from `sideParkPiece` (stamped by the explode and by the load-time repair) when every
+ * pad has one, and falls back to the pads' CURRENT perpendicular offsets otherwise — a fallback
+ * that matters because every plan already on disk predates the stamp.
+ */
+export function sideParkStack(host, side, pads, stripDepth = 0) {
+  const isVert = side === "left" || side === "right";
+  const [nx, ny] = SIDE_N[side] || [0, 0];
+  const sgn = isVert ? nx : ny;
+  const rows = (pads || []).filter(Boolean).map((el) => {
+    const { dimBX, dimBY } = hostAxisExtents(host, el);
+    const l = rot2(el.cx - host.cx, el.cy - host.cy, -(host.rot || 0));
+    return { el, depth: isVert ? dimBX : dimBY, perp: sgn * (isVert ? l.x : l.y) };
+  });
+  const idx = (r) => (Number.isFinite(r.el.sideParkPiece) ? r.el.sideParkPiece : null);
+  const stamped = rows.every((r) => idx(r) !== null) && new Set(rows.map(idx)).size === rows.length;
+  rows.sort((a, b) => (stamped ? idx(a) - idx(b) : a.perp - b.perp));
+  let gap = Math.max(0, stripDepth || 0);
+  return rows.map(({ el, depth }) => { const out = { el, depth, gap }; gap += depth; return out; });
+}
+
 // Which of the host's local axes a bonded box child's own w/h land on. A child may sit at a
 // quarter turn from its host (a side-parking row runs ALONG a side wall), so its `w` is not
 // necessarily the host's X extent. `cross` = the child is turned 90°/270° from the host.

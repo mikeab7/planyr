@@ -48,7 +48,7 @@
  *
  * Pure: no DOM, no clock, no I/O. Safe in a worker and in a Node test.
  */
-import { normalizeBondedChildren } from "./siteModel.js";
+import { normalizeBondedChildren, orphanWallPads } from "./siteModel.js";
 
 /* The reporting floor, in feet. The heal's own passes re-derive to ~1e-6 ft, so a coherent plan
  * read off disk routinely gets sub-inch corrections (stored rounding, a legacy record's drift) —
@@ -83,23 +83,34 @@ const angDelta = (a, b) => {
  * re-anchor) still shows up as a repair via the geometry diff — the diff is the source of truth
  * here, the callbacks are annotation.
  */
-export function assemblyIntegrity(els, { tol = ASSEMBLY_TEAR_TOL_FT } = {}) {
+export function assemblyIntegrity(els, { tol = ASSEMBLY_TEAR_TOL_FT, mintId = null } = {}) {
   const list = Array.isArray(els) ? els : [];
+  /* NEW-4 — the ROLE invariant, measured on the INPUT before anything is healed. A non-stack pad
+   * bonded to a building host must resolve to a wall AND carry the role tag for that wall. This is
+   * the check that was missing: three untagged pads bonded to a building, sitting exactly where
+   * side parking belongs, are geometrically indistinguishable from correct — the geometry diff
+   * below can never see them, because nothing was in the wrong PLACE. What was wrong was that they
+   * had no IDENTITY, so every lookup keyed on the role tag stopped seeing them, one of those
+   * lookups gated a destructive rung, and the defect ran five days across six sites before the
+   * owner noticed missing sidewalks. A bonded child with no role is now a reported defect in its
+   * own right, whatever its coordinates say. */
+  const orphans = orphanWallPads(list);
   const notes = new Map(); // id -> Set(kind)
   const healed = normalizeBondedChildren(list, (h) => {
     if (!h || h.id == null) return;
     let s = notes.get(h.id);
     if (!s) { s = new Set(); notes.set(h.id, s); }
     if (h.kind) s.add(h.kind);
-  });
-  if (healed === list) return { els: list, changed: false, repairs: [], tears: [] };
+  }, { mintId });
+  if (healed === list) return { els: list, changed: false, repairs: [], tears: [], orphans };
   const before = new Map();
   for (const e of list) if (e && e.id != null) before.set(e.id, e);
   const repairs = [];
   for (const e of healed) {
     if (!e || e.id == null) continue;
     const prev = before.get(e.id);
-    if (!prev || prev === e) continue;                 // untouched objects are returned by identity
+    if (!prev) continue;                               // minted BY the heal (a restored wall strip)
+    if (prev === e) continue;                          // untouched objects are returned by identity
     const dx = num(e.cx) - num(prev.cx);
     const dy = num(e.cy) - num(prev.cy);
     const dist = Math.hypot(dx, dy);
@@ -123,13 +134,20 @@ export function assemblyIntegrity(els, { tol = ASSEMBLY_TEAR_TOL_FT } = {}) {
     });
   }
   // A tear is a disagreement with the host past tolerance on EITHER axis of the child's geometry.
-  return { els: healed, changed: true, repairs, tears: repairs.filter((r) => r.dist > tol || r.span > tol) };
+  return { els: healed, changed: true, repairs, tears: repairs.filter((r) => r.dist > tol || r.span > tol), orphans };
 }
 
 /* Detector-only: does this collection HOLD a tear right now? Same derivation, nothing written.
  * Used where we want to assert without adopting (e.g. straight after a commit result, to report
  * that the rows we just wrote are coherent). */
 export function assemblyTears(els, opts) { return assemblyIntegrity(els, opts).tears; }
+
+/* NEW-4 — bounded telemetry for the role invariant. Same shape rule as `tearPayload`: the ids and
+ * the wall are what turn a recurrence into a query. */
+export function orphanPayload(records, cap = 20) {
+  const list = Array.isArray(records) ? records : [];
+  return { count: list.length, items: list.slice(0, cap).map((r) => ({ id: r.id, host: r.host, type: r.type, side: r.side })) };
+}
 
 /* Compact, bounded telemetry payload. A tear can span a dozen children; the ids and the delta
  * are what make a recurrence a query instead of an investigation, and the rest is noise. */

@@ -17,7 +17,9 @@
 
 import { dogEarGeom, dogEarSize, isDogEarSide,
   wallStripBox, wallKidBox, wallKidAlong, hostAxisExtents, ownExtents, bumpsOfHost,
-  sideOfBondedBox, localToWorld, sidewalkSpanForBumps, sideParkAlongRun } from "./dogEar.js";
+  sideOfBondedBox, localToWorld, sidewalkSpanForBumps, sideParkAlongRun, sideParkStack,
+  SIDE_PARK_PIN_TOL_FT } from "./dogEar.js";
+import { createIdMinter, randomIdSalt } from "../../../shared/ids.js";
 import { layoutZoneByKind, boxExtentAlong, zoneAlongExtent, zoneDepthExtent, alongLenIsChainEcho, usableCourtSpan, anchoredAlongSpan } from "./dockZones.js";
 import { roadCenterline, dedupeRoadVertices, repairBakedRadii, simplifyRoadVertices, ROAD_SIMPLIFY_TOL_FT, ROAD_VERTEX_COLLAPSE_FT } from "./roadGeometry.js";
 import { bufferPolyline } from "./metesAndBounds.js";
@@ -347,6 +349,32 @@ function normalizeWallKids(list, onHeal) {
     const h = hostOf(x);
     return h && h.id === host.id && WALL_STRIP_TYPES.has(x.type) && sideOf(h, x) === side;
   });
+  const stripDepthFor = (host, side) => {
+    const strip = stripFor(host, side);
+    if (!strip) return 0;
+    const { dimBX, dimBY } = hostAxisExtents(host, strip);
+    return (side === "left" || side === "right") ? dimBX : dimBY;
+  };
+  /* NEW-1 — a wall's side parking may be an exploded STACK (stall row | drive aisle | stall row,
+   * each its own element), so what a pad must clear is the strip PLUS every piece inboard of it —
+   * not the strip alone. One shared derivation with the canvas refit (`dogEar.sideParkStack`); a
+   * single un-exploded field still resolves to the bare strip thickness, so this is identity for
+   * every plan that has never been exploded. */
+  const gapById = new Map();
+  {
+    const byWall = new Map();
+    for (const e of els) {
+      const host = hostOf(e);
+      if (!host || WALL_STRIP_TYPES.has(e.type)) continue;
+      const side = sideOf(host, e);
+      const key = `${host.id} ${side}`;
+      let g = byWall.get(key);
+      if (!g) { g = { host, side, pads: [] }; byWall.set(key, g); }
+      g.pads.push(e);
+    }
+    for (const { host, side, pads } of byWall.values())
+      for (const r of sideParkStack(host, side, pads, stripDepthFor(host, side))) gapById.set(r.el.id, r.gap);
+  }
   let changed = false;
   const out = els.map((e) => {
     const host = hostOf(e);
@@ -359,8 +387,7 @@ function normalizeWallKids(list, onHeal) {
     if (WALL_STRIP_TYPES.has(e.type)) {
       box = wallStripBox(host, side, bumpsOfHost(els, host), depth);
     } else {
-      const strip = stripFor(host, side);
-      const gap = strip ? (isVert ? hostAxisExtents(host, strip).dimBX : hostAxisExtents(host, strip).dimBY) : 0;
+      const gap = gapById.has(e.id) ? gapById.get(e.id) : stripDepthFor(host, side);
       const cur = wallKidAlong(host, side, e);            // along-wall position + run kept verbatim
       // NEW-4 — …unless the row has been TORN off its host (a parking field left behind when its
       // building's move committed in a separate transaction). The owner's along-wall placement is
@@ -403,6 +430,168 @@ function normalizeWallKids(list, onHeal) {
     return { ...e, ...g };
   });
   return changed ? out : els;
+}
+
+/* ---- NEW-3: re-tag orphaned wall pads, and restore the strip one of them cost ------------------
+ *
+ * WHAT WENT WRONG ON DISK. `splitParkingRows` built each Explode piece with only `cfg` and
+ * `attachedTo` copied from the source field, so every bond role tag was dropped — `sideParkSide`
+ * above all. The pieces stayed bonded to the building and kept rendering, but every lookup and
+ * every heal keyed on that tag stopped seeing them: `hostOf` above admits a child only when it is a
+ * WALL_STRIP_TYPE or carries `sideParkSide`, so an untagged pad never re-flushed when its host moved
+ * or resized, and `empSidePark` on the canvas returned nothing at all. The "−" ladder on a non-dock
+ * wall walks rows → remove the parking → remove the sidewalk; with a full 60 ft parking module
+ * invisible to it, ONE click fell straight through to the last rung. Two buildings on Goose Creek
+ * "Plan II" lost a sidewalk that way (`e1454689dshobp` 2026-07-29, `e1454744tcmstb` 2026-07-30),
+ * each a solo single-row delete with the host alive and untouched. Twelve host buildings across six
+ * sites were carrying untagged pieces by the time it surfaced.
+ *
+ * Fixing `splitParkingRows` does nothing for a plan already written. So this pass, under the same
+ * idempotency contract as every other heal here, does two things — and only these two:
+ *
+ *   1. RE-TAG. A bonded, non-stack, box parking/paving pad on a building host that carries no role
+ *      tag and whose geometry resolves to a NON-DOCK wall is stamped with the `sideParkSide` its own
+ *      position implies, plus its index in that wall's outward stack. Its CURRENT along-wall run and
+ *      centre are recorded as `sideParkFit` intent whenever they differ from the span default — the
+ *      owner has been trimming these pieces by hand for days (nine pads tapering 679 → 486 ft on
+ *      Silvestri), so the geometry on disk IS the record of intent and re-deriving it would throw it
+ *      away. With the run recorded and the stack model supplying the perpendicular gaps, re-tagging
+ *      is geometry-neutral: the pads land exactly where they already are, and the ACROSS axis (which
+ *      has no user freedom) rejoins the heal so they finally track their host again.
+ *
+ *   2. RESTORE. On a wall that has bonded side parking, NO wall strip, and a clear gap of about one
+ *      sidewalk width between the wall face and the parking's inner face, mint the 5 ft sidewalk
+ *      back into that void. The gap IS the evidence: `addParkingRowSide` offsets a new field by the
+ *      thickness of the strip that was there, so a strip-width void under intact parking can only
+ *      mean the strip was deleted out from under it. A wall the owner deliberately left bare has its
+ *      parking FLUSH and never matches. Measured across the whole fleet, this fires on exactly the
+ *      six damaged Goose Creek walls and nowhere else. The tombstoned rows are NOT resurrected —
+ *      a merge would strip them straight back out — so a fresh id is minted.
+ *
+ * `mintId` is injectable so the repair is deterministic under test; the default is a salted minter,
+ * seeded above every id in the list, matching the canvas's own uniqueness contract (shared/ids.js).
+ */
+export const RESTORED_STRIP_W_FT = 5;      // the 5′ wall sidewalk this app has always placed
+const STRIP_VOID_TOL_FT = 0.75;            // how close to one strip width a void must be to count
+const SIDE_PARK_PAD_TYPES = new Set(["parking", "paving"]);
+
+/* The detector half, exported so the assembly-integrity harness can assert the invariant on a list
+ * NOBODY has healed yet (NEW-4). A non-stack pad bonded to a building host must resolve to a wall
+ * AND carry the role tag for that wall; one that does not is bonded geometry with no identity, and
+ * is invisible to every lookup and every heal that reasons about that wall. Pure, allocation-light,
+ * returns [] on a clean plan. */
+export function orphanWallPads(list) {
+  const els = arr(list);
+  if (els.length < 2) return [];
+  const byId = new Map();
+  for (const e of els) if (e && e.id != null) byId.set(e.id, e);
+  const out = [];
+  for (const e of els) {
+    if (!e || e.points || e.id == null || !SIDE_PARK_PAD_TYPES.has(e.type)) continue;
+    if (e.sideParkSide || e.sidewalkSide || e.dogEar || isStackMember(e) || !finiteBoxEl(e)) continue;
+    if (e.attachedTo == null) continue;
+    const host = byId.get(e.attachedTo);
+    if (!host || host.type !== "building" || host.dogEar || host.points || !finiteBoxEl(host)) continue;
+    const side = sideOfBondedBox(host, e);
+    if (!SIDE_NORMAL[side]) continue;
+    out.push({ id: e.id, host: host.id, type: e.type, side });
+  }
+  return out;
+}
+
+// Which sides of `host` are DOCK sides — a side carrying a stack member (truck court → trailer →
+// buffer → any appended layer). A pad there belongs to that chain's world, not to side parking, so
+// the re-tag deliberately leaves it alone rather than guessing it into a wall-kid role.
+function dockSidesOfHost(els, host) {
+  const out = new Set();
+  for (const x of els) {
+    if (!x || x.attachedTo !== host.id || x.points || !isStackMember(x) || !finiteBoxEl(x)) continue;
+    out.add(x.truckCourt && SIDE_NORMAL[x.truckCourt.side] ? x.truckCourt.side : sideOfBondedBox(host, x));
+  }
+  return out;
+}
+
+export function normalizeOrphanWallPads(list, onHeal, { mintId = null } = {}) {
+  const els = arr(list);
+  if (els.length < 2) return els;
+  const orphans = orphanWallPads(els);
+  if (!orphans.length) return els;
+  const byId = new Map();
+  for (const e of els) if (e && e.id != null) byId.set(e.id, e);
+
+  // Group the orphans by the wall they resolve to, dropping any that land on a dock side.
+  const walls = new Map();
+  const dockCache = new Map();
+  for (const o of orphans) {
+    const host = byId.get(o.host);
+    if (!dockCache.has(host.id)) dockCache.set(host.id, dockSidesOfHost(els, host));
+    if (dockCache.get(host.id).has(o.side)) continue;
+    const key = `${host.id} ${o.side}`;
+    let g = walls.get(key);
+    if (!g) { g = { host, side: o.side, pads: [] }; walls.set(key, g); }
+    g.pads.push(byId.get(o.id));
+  }
+  if (!walls.size) return els;
+
+  const mint = mintId || createIdMinter(randomIdSalt()).seedAbove(els.map((e) => e && e.id));
+  const patch = new Map();
+  const added = [];
+  for (const { host, side, pads } of walls.values()) {
+    const isVert = side === "left" || side === "right";
+    // Anything ALREADY tagged on this wall is part of the same stack and shares the ordering.
+    const tagged = els.filter((x) => x && !x.points && x.sideParkSide === side && !isStackMember(x)
+      && x.attachedTo === host.id && finiteBoxEl(x));
+    const strip = els.find((x) => x && !x.points && WALL_STRIP_TYPES.has(x.type) && !isStackMember(x)
+      && x.attachedTo === host.id && finiteBoxEl(x) && (x.sidewalkSide || sideOfBondedBox(host, x)) === side);
+    const stripDepth = strip ? (isVert ? hostAxisExtents(host, strip).dimBX : hostAxisExtents(host, strip).dimBY) : 0;
+    const span = sidewalkSpanForBumps(host, side, bumpsOfHost(els, host));
+    // Order the whole wall (tagged + orphaned) inner→outer, so the stamped index is the real stack
+    // position and a wall that was only PARTLY exploded still reads as one ladder.
+    const stack = sideParkStack(host, side, [...tagged, ...pads], stripDepth);
+
+    /* 2) RESTORE — measured BEFORE anything is re-tagged, off the innermost pad's inner face. */
+    if (!strip && stack.length) {
+      const inner = stack[0];
+      const l = rot2d(inner.el.cx - host.cx, inner.el.cy - host.cy, -(host.rot || 0));
+      const [nx, ny] = SIDE_NORMAL[side];
+      const perp = (isVert ? nx : ny) * (isVert ? l.x : l.y);      // signed outward offset of its centre
+      const wall = (isVert ? host.w : host.h) / 2;
+      const void_ = perp - inner.depth / 2 - wall;                 // bare ground between wall + parking
+      if (Math.abs(void_ - RESTORED_STRIP_W_FT) <= STRIP_VOID_TOL_FT) {
+        const box = wallStripBox(host, side, bumpsOfHost(els, host), RESTORED_STRIP_W_FT);
+        const c = localToWorld(host, box.lx, box.ly);
+        const sw = {
+          id: mint(), type: "sidewalk", cx: c.x, cy: c.y,
+          ...ownExtents(false, box.dimBX, box.dimBY),
+          rot: (((host.rot || 0) % 360) + 360) % 360, attachedTo: host.id, sidewalkSide: side,
+        };
+        added.push(sw);
+        if (onHeal) onHeal({ id: sw.id, host: host.id, kind: "orphan-pad-strip-restored", type: "sidewalk", side,
+          to: { cx: sw.cx, cy: sw.cy, w: sw.w, h: sw.h }, voidFt: Math.round(void_ * 100) / 100 });
+      }
+    }
+
+    /* 1) RE-TAG — every orphan on this wall, with its own stack index and its own recorded run. */
+    for (const r of stack) {
+      const e = r.el;
+      if (e.sideParkSide) continue;                                // already had an identity
+      const cur = wallKidAlong(host, side, e);
+      const offDefault = Math.abs(cur.run - span.run) > SIDE_PARK_PIN_TOL_FT
+        || Math.abs(cur.alongShift - span.alongShift) > SIDE_PARK_PIN_TOL_FT;
+      const next = { sideParkSide: side, sideParkPiece: stack.indexOf(r) };
+      // Record the along-wall geometry the owner has been looking at as INTENT. Without this the
+      // wall-kid heal would read an unstamped divergence as staleness (correctly — that is the
+      // B1340 rule) and re-derive it, silently re-lengthening every hand-trimmed piece.
+      if (offDefault && !e.sideParkFit) next.sideParkFit = { run: cur.run, alongShift: cur.alongShift };
+      patch.set(e.id, next);
+      if (onHeal) onHeal({ id: e.id, host: host.id, kind: "orphan-pad-retagged", type: e.type, side,
+        to: { sideParkSide: side, sideParkPiece: next.sideParkPiece, sideParkFit: next.sideParkFit || null } });
+    }
+  }
+
+  if (!patch.size && !added.length) return els;
+  const out = els.map((e) => (e && e.id != null && patch.has(e.id) ? { ...e, ...patch.get(e.id) } : e));
+  return added.length ? [...out, ...added] : out;
 }
 
 /* ---- NEW-4: heal a bonded child that has been TORN AWAY from its host ---------------------
@@ -743,7 +932,12 @@ export function normalizeHostRuns(list, onHeal) {
     const isVert = side === "left" || side === "right";
     const strip = els.find((x) => x && !x.points && WALL_STRIP_TYPES.has(x.type) && !isStackMember(x)
       && x.attachedTo === host.id && finiteBoxEl(x) && (x.sidewalkSide || sideOfBondedBox(host, x)) === side);
-    const gap = strip ? (isVert ? hostAxisExtents(host, strip).dimBX : hostAxisExtents(host, strip).dimBY) : 0;
+    const stripDepth = strip ? (isVert ? hostAxisExtents(host, strip).dimBX : hostAxisExtents(host, strip).dimBY) : 0;
+    // NEW-1 — an exploded field is a STACK on this wall: clear the strip plus everything inboard.
+    const wallPads = els.filter((x) => x && !x.points && x.sideParkSide === side && !isStackMember(x)
+      && x.attachedTo === host.id && finiteBoxEl(x));
+    const stacked = sideParkStack(host, side, wallPads, stripDepth).find((r) => r.el.id === e.id);
+    const gap = stacked ? stacked.gap : stripDepth;
     const { cross } = hostAxisExtents(host, e);
     const box = wallKidBox(host, side, { depth: cur.depth, gap, run: res.run, alongShift: res.alongShift });
     const c = localToWorld(host, box.lx, box.ly);
@@ -832,16 +1026,20 @@ export function normalizeCrossHostBonds(list, onHeal) {
  * had been torn stayed broken across every reload. Same function, both paths, so they can never
  * drift again. `onHeal` is optional telemetry (LOUD-FAILURE: a silent repair is a repair nobody
  * can audit). */
-export function normalizeBondedChildren(els, onHeal) {
+export function normalizeBondedChildren(els, onHeal, { mintId = null } = {}) {
   // Order matters: the cross-host bond repair (B1124) runs FIRST, so every later pass walks a chain
-  // that actually belongs to its host; the spurious-length drop (B1123) then runs on the repaired
-  // chain; the foreign-host RUN heal (NEW-1) runs after that drop, so it judges a member's length
-  // against the chain it will actually be laid on; the stranded re-fit stays last (it re-places
-  // whatever is still geometrically impossible).
+  // that actually belongs to its host; the orphaned-wall-pad repair (NEW-3) runs next, because
+  // every pass after it is keyed on the role tag it restores — an untagged pad is invisible to
+  // `normalizeWallKids` by construction, so re-tagging AFTER the wall-kid pass would leave the
+  // repair a full load behind; the spurious-length drop (B1123) then runs on the repaired chain;
+  // the foreign-host RUN heal (NEW-1) runs after that drop, so it judges a member's length against
+  // the chain it will actually be laid on; the stranded re-fit stays last (it re-places whatever is
+  // still geometrically impossible).
   return normalizeStrandedZones(
     normalizeHostRuns(
       normalizeZoneAlongLen(
-        normalizeWallKids(normalizeDogEarPositions(normalizeBondedRotations(normalizeCrossHostBonds(els, onHeal), onHeal), onHeal), onHeal),
+        normalizeWallKids(normalizeDogEarPositions(normalizeBondedRotations(
+          normalizeOrphanWallPads(normalizeCrossHostBonds(els, onHeal), onHeal, { mintId }), onHeal), onHeal), onHeal),
         onHeal,
       ),
       onHeal,
