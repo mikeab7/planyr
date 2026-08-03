@@ -1,0 +1,863 @@
+{
+ "_source": "Live production rows (site_elements, deleted_at is null), pulled 2026-08-03. THE DEFECT IS THE FIXTURE \u2014 do not 'fix' these numbers.",
+ "gooseCreekPlanII": {
+  "siteId": "sms69x8rb2qk",
+  "note": "Both damaged hosts. e1454629danlgq lost sidewalk e1454689dshobp (2026-07-29), e1454729ykduhm lost e1454744tcmstb (2026-07-30) \u2014 each a solo delete with the host untouched. Their left walls carry three UNTAGGED exploded pads (parking 18 / paving 24 / parking 18) and a 5 ft void where the strip was.",
+  "els": [
+   {
+    "h": 419,
+    "w": 495,
+    "z": 0,
+    "cx": -482.95,
+    "cy": 1126.02,
+    "id": "e1454629danlgq",
+    "rot": 269,
+    "dock": "cross",
+    "type": "building",
+    "dockSide": "bottom",
+    "fillOpacity": 1
+   },
+   {
+    "h": 60,
+    "w": 55,
+    "z": 1024,
+    "cx": -726.2530524061581,
+    "cy": 910.2333584073233,
+    "id": "e1454630danlgq",
+    "rot": 269,
+    "dock": "none",
+    "type": "building",
+    "noFit": true,
+    "dogEar": {
+     "side": "top",
+     "sign": 1
+    },
+    "noLabel": true,
+    "attachedTo": "e1454629danlgq"
+   },
+   {
+    "h": 60,
+    "w": 55,
+    "z": 2048,
+    "cx": -718.5739935737533,
+    "cy": 1350.1663442761355,
+    "id": "e1454631danlgq",
+    "rot": 269,
+    "dock": "none",
+    "type": "building",
+    "noFit": true,
+    "dogEar": {
+     "side": "top",
+     "sign": -1
+    },
+    "noLabel": true,
+    "attachedTo": "e1454629danlgq"
+   },
+   {
+    "h": 60,
+    "w": 55,
+    "z": 3072,
+    "cx": -239.6469475938419,
+    "cy": 1341.8066415926767,
+    "id": "e1454632danlgq",
+    "rot": 269,
+    "dock": "none",
+    "type": "building",
+    "noFit": true,
+    "dogEar": {
+     "side": "bottom",
+     "sign": -1
+    },
+    "noLabel": true,
+    "attachedTo": "e1454629danlgq"
+   },
+   {
+    "h": 60,
+    "w": 55,
+    "z": 4096,
+    "cx": -247.32600642624664,
+    "cy": 901.8736557238644,
+    "id": "e1454633danlgq",
+    "rot": 269,
+    "dock": "none",
+    "type": "building",
+    "noFit": true,
+    "dogEar": {
+     "side": "bottom",
+     "sign": 1
+    },
+    "noLabel": true,
+    "attachedTo": "e1454629danlgq"
+   },
+   {
+    "h": 539,
+    "w": 5,
+    "z": 59392,
+    "cx": -487.3131016093209,
+    "cy": 876.0580762109022,
+    "id": "e1454687dshobp",
+    "rot": 269,
+    "type": "sidewalk",
+    "attachedTo": "e1454629danlgq",
+    "sidewalkSide": "right"
+   },
+   {
+    "h": 60,
+    "w": 539,
+    "z": 60416,
+    "cx": -487.8803048185326,
+    "cy": 843.5630261183194,
+    "id": "e1454688dshobp",
+    "rot": 179,
+    "type": "parking",
+    "attachedTo": "e1454629danlgq",
+    "sideParkSide": "right"
+   },
+   {
+    "h": 18,
+    "w": 509.64685945049393,
+    "z": 62464,
+    "cx": -478.3861957166504,
+    "cy": 1387.480172283396,
+    "id": "e1454691dshobp",
+    "rot": 359,
+    "type": "parking",
+    "attachedTo": "e1454629danlgq"
+   },
+   {
+    "h": 24,
+    "w": 509.64685945049393,
+    "z": 63488,
+    "cx": -478.0196951814674,
+    "cy": 1408.4769738816804,
+    "id": "e1454692dshobp",
+    "rot": 359,
+    "type": "paving",
+    "attachedTo": "e1454629danlgq"
+   },
+   {
+    "h": 18,
+    "w": 509.64685945049393,
+    "z": 64512,
+    "cx": -477.6531946462845,
+    "cy": 1429.4737754799646,
+    "id": "e1454693dshobp",
+    "rot": 359,
+    "type": "parking",
+    "attachedTo": "e1454629danlgq"
+   },
+   {
+    "h": 135,
+    "w": 385,
+    "z": 71680,
+    "cx": -759.9078115583203,
+    "cy": 1130.8543165831275,
+    "id": "e1454700dshobp",
+    "zd": 135,
+    "rot": 269,
+    "type": "paving",
+    "attachedTo": "e1454629danlgq",
+    "truckCourt": {
+     "side": "top"
+    }
+   },
+   {
+    "h": 50,
+    "w": 385,
+    "z": 72704,
+    "cx": -852.3937233602866,
+    "cy": 1132.4686641785763,
+    "id": "e1454701dshobp",
+    "zd": 50,
+    "cfg": {
+     "single": true,
+     "trailerL": 50,
+     "trailerW": 12,
+     "trailerAisle": 0
+    },
+    "rot": 269,
+    "type": "trailer",
+    "noFit": true,
+    "forCourt": "e1454700dshobp",
+    "prevZone": "e1454700dshobp",
+    "attachedTo": "e1454629danlgq"
+   },
+   {
+    "h": 135,
+    "w": 385,
+    "z": 73728,
+    "cx": -205.99218844167962,
+    "cy": 1121.1856834168725,
+    "id": "e1454702dshobp",
+    "zd": 135,
+    "rot": 269,
+    "type": "paving",
+    "attachedTo": "e1454629danlgq",
+    "truckCourt": {
+     "side": "bottom"
+    }
+   },
+   {
+    "h": 50,
+    "w": 385,
+    "z": 74752,
+    "cx": -113.5062766397134,
+    "cy": 1119.5713358214236,
+    "id": "e1454703dshobp",
+    "zd": 50,
+    "cfg": {
+     "single": true,
+     "trailerL": 50,
+     "trailerW": 12,
+     "trailerAisle": 0
+    },
+    "rot": 269,
+    "type": "trailer",
+    "noFit": true,
+    "forCourt": "e1454702dshobp",
+    "prevZone": "e1454702dshobp",
+    "attachedTo": "e1454629danlgq"
+   },
+   {
+    "h": 480,
+    "w": 870,
+    "z": 0,
+    "cx": -592.37,
+    "cy": 329.82,
+    "id": "e1454729ykduhm",
+    "rot": 178.543241069641,
+    "dock": "cross",
+    "type": "building",
+    "dockSide": "bottom",
+    "fillOpacity": 1
+   },
+   {
+    "h": 60,
+    "w": 55,
+    "z": 1024,
+    "cx": -992.8742192354433,
+    "cy": 610.0924038763144,
+    "id": "e1454730ykduhm",
+    "rot": 178.543241069641,
+    "dock": "none",
+    "type": "building",
+    "noFit": true,
+    "dogEar": {
+     "side": "top",
+     "sign": 1
+    },
+    "noLabel": true,
+    "attachedTo": "e1454729ykduhm"
+   },
+   {
+    "h": 60,
+    "w": 55,
+    "z": 2048,
+    "cx": -178.13763049246563,
+    "cy": 589.3730659656585,
+    "id": "e1454731ykduhm",
+    "rot": 178.543241069641,
+    "dock": "none",
+    "type": "building",
+    "noFit": true,
+    "dogEar": {
+     "side": "top",
+     "sign": -1
+    },
+    "noLabel": true,
+    "attachedTo": "e1454729ykduhm"
+   },
+   {
+    "h": 60,
+    "w": 55,
+    "z": 3072,
+    "cx": -191.8657807645567,
+    "cy": 49.54759612368548,
+    "id": "e1454732ykduhm",
+    "rot": 178.543241069641,
+    "dock": "none",
+    "type": "building",
+    "noFit": true,
+    "dogEar": {
+     "side": "bottom",
+     "sign": -1
+    },
+    "noLabel": true,
+    "attachedTo": "e1454729ykduhm"
+   },
+   {
+    "h": 60,
+    "w": 55,
+    "z": 4096,
+    "cx": -1006.6023695075344,
+    "cy": 70.26693403434149,
+    "id": "e1454733ykduhm",
+    "rot": 178.543241069641,
+    "dock": "none",
+    "type": "building",
+    "noFit": true,
+    "dogEar": {
+     "side": "bottom",
+     "sign": 1
+    },
+    "noLabel": true,
+    "attachedTo": "e1454729ykduhm"
+   },
+   {
+    "h": 600,
+    "w": 5,
+    "z": 59392,
+    "cx": -1029.7285982515987,
+    "cy": 340.94234397044414,
+    "id": "e1454734ykduhm",
+    "rot": 178.543241069641,
+    "type": "sidewalk",
+    "attachedTo": "e1454729ykduhm",
+    "sidewalkSide": "right"
+   },
+   {
+    "h": 60,
+    "w": 600,
+    "z": 60416,
+    "cx": -1062.2180941217175,
+    "cy": 341.76857523682,
+    "id": "e1454735ykduhm",
+    "rot": 88.543241069641,
+    "type": "parking",
+    "attachedTo": "e1454729ykduhm",
+    "sideParkSide": "right"
+   },
+   {
+    "h": 18,
+    "w": 583.8436576043845,
+    "z": 62464,
+    "cx": -143.51511859435976,
+    "cy": 318.4052972737611,
+    "id": "e1454736ykduhm",
+    "rot": 268.543241069641,
+    "type": "parking",
+    "attachedTo": "e1454729ykduhm"
+   },
+   {
+    "h": 24,
+    "w": 583.8436576043845,
+    "z": 63488,
+    "cx": -122.52190587828301,
+    "cy": 317.87142476317973,
+    "id": "e1454737ykduhm",
+    "rot": 268.543241069641,
+    "type": "paving",
+    "attachedTo": "e1454729ykduhm"
+   },
+   {
+    "h": 18,
+    "w": 583.8436576043845,
+    "z": 64512,
+    "cx": -101.52869316220631,
+    "cy": 317.3375522525984,
+    "id": "e1454738ykduhm",
+    "rot": 268.543241069641,
+    "type": "parking",
+    "attachedTo": "e1454729ykduhm"
+   },
+   {
+    "h": 135,
+    "w": 760,
+    "z": 71680,
+    "cx": -584.5525810950593,
+    "cy": 637.2206147711236,
+    "id": "e1454739ykduhm",
+    "zd": 135,
+    "rot": 178.543241069641,
+    "type": "paving",
+    "attachedTo": "e1454729ykduhm",
+    "truckCourt": {
+     "side": "top"
+    }
+   },
+   {
+    "h": 50,
+    "w": 760,
+    "z": 72704,
+    "cx": -582.200999798451,
+    "cy": 729.6907184014615,
+    "id": "e1454740ykduhm",
+    "zd": 50,
+    "cfg": {
+     "single": true,
+     "trailerL": 50,
+     "trailerW": 12,
+     "trailerAisle": 0
+    },
+    "rot": 178.543241069641,
+    "type": "trailer",
+    "noFit": true,
+    "forCourt": "e1454739ykduhm",
+    "prevZone": "e1454739ykduhm",
+    "attachedTo": "e1454729ykduhm"
+   },
+   {
+    "h": 135,
+    "w": 760,
+    "z": 73728,
+    "cx": -600.1874189049407,
+    "cy": 22.41938522887648,
+    "id": "e1454741ykduhm",
+    "zd": 135,
+    "rot": 178.543241069641,
+    "type": "paving",
+    "attachedTo": "e1454729ykduhm",
+    "truckCourt": {
+     "side": "bottom"
+    }
+   },
+   {
+    "h": 50,
+    "w": 760,
+    "z": 74752,
+    "cx": -602.539000201549,
+    "cy": -70.0507184014615,
+    "id": "e1454742ykduhm",
+    "zd": 50,
+    "cfg": {
+     "single": true,
+     "trailerL": 50,
+     "trailerW": 12,
+     "trailerAisle": 0
+    },
+    "rot": 178.543241069641,
+    "type": "trailer",
+    "noFit": true,
+    "forCourt": "e1454741ykduhm",
+    "prevZone": "e1454741ykduhm",
+    "attachedTo": "e1454729ykduhm"
+   }
+  ]
+ },
+ "silvestri": {
+  "siteId": "sms9c5oc7jnt",
+  "note": "Nine untagged exploded pads on the bottom wall, hand-trimmed into a taper (679 -> 486 ft). Sidewalk INTACT, pads already flush past it \u2014 so this must re-tag with ZERO geometry movement.",
+  "els": [
+   {
+    "h": 1886,
+    "w": 620,
+    "z": 2048,
+    "cx": -336.4119603486262,
+    "cy": 1194.4635138003628,
+    "id": "e1454678snowrs",
+    "rot": 89.26606135812284,
+    "dock": "cross",
+    "type": "building",
+    "dockSide": "right"
+   },
+   {
+    "h": 1831,
+    "w": 135,
+    "z": 3072,
+    "cx": -359.07419513346065,
+    "cy": 1572.2847984238697,
+    "id": "e1454679snowrs",
+    "zd": 135,
+    "rot": 89.26606135812284,
+    "type": "paving",
+    "attachedTo": "e1454678snowrs",
+    "truckCourt": {
+     "side": "right"
+    }
+   },
+   {
+    "h": 1776,
+    "w": 135,
+    "z": 4096,
+    "cx": -341.2474693980388,
+    "cy": 816.994484802972,
+    "id": "e1454680snowrs",
+    "zd": 135,
+    "rot": 89.26606135812284,
+    "type": "paving",
+    "attachedTo": "e1454678snowrs",
+    "truckCourt": {
+     "side": "left"
+    }
+   },
+   {
+    "h": 50,
+    "w": 1776,
+    "z": 5120,
+    "cx": -342.43232923133854,
+    "cy": 724.5020737241412,
+    "id": "e1454681snowrs",
+    "zd": 50,
+    "cfg": {
+     "single": true,
+     "trailerL": 50,
+     "trailerW": 12,
+     "trailerAisle": 0
+    },
+    "rot": 179.2660613581229,
+    "type": "trailer",
+    "noFit": true,
+    "forCourt": "e1454680snowrs",
+    "prevZone": "e1454680snowrs",
+    "attachedTo": "e1454678snowrs"
+   },
+   {
+    "h": 50,
+    "w": 1768,
+    "z": 6144,
+    "cx": -357.8893353001609,
+    "cy": 1664.7772095027005,
+    "id": "e1454682snowrs",
+    "zd": 50,
+    "cfg": {
+     "single": true,
+     "trailerL": 50,
+     "trailerW": 12,
+     "trailerAisle": 0
+    },
+    "rot": 179.2660613581229,
+    "type": "trailer",
+    "noFit": true,
+    "alongLen": 1768,
+    "forCourt": "e1454679snowrs",
+    "prevZone": "e1454679snowrs",
+    "attachedTo": "e1454678snowrs"
+   },
+   {
+    "h": 5,
+    "w": 680,
+    "z": 10240,
+    "cx": -1282.218668132773,
+    "cy": 1176.5771639627412,
+    "id": "e1454692snowrs",
+    "rot": 89.26606135812284,
+    "type": "sidewalk",
+    "attachedTo": "e1454678snowrs",
+    "sidewalkSide": "bottom"
+   },
+   {
+    "h": 5,
+    "w": 740,
+    "z": 11264,
+    "cx": 609.0104685706675,
+    "cy": 1182.352324909715,
+    "id": "e1454694snowrs",
+    "rot": 89.26606135812284,
+    "type": "sidewalk",
+    "attachedTo": "e1454678snowrs",
+    "sidewalkSide": "top"
+   },
+   {
+    "h": 60,
+    "w": 740,
+    "z": 12288,
+    "cx": 641.5078021929586,
+    "cy": 1181.9360228061232,
+    "id": "e1454695snowrs",
+    "rot": 269.2660613581229,
+    "type": "parking",
+    "attachedTo": "e1454678snowrs",
+    "sideParkSide": "top"
+   },
+   {
+    "h": 55,
+    "w": 60,
+    "z": 54272,
+    "cx": -1256.1920110079946,
+    "cy": 866.2183182391027,
+    "id": "e1454749yyuqqs",
+    "rot": 89.26606135812284,
+    "dock": "none",
+    "type": "building",
+    "noFit": true,
+    "dogEar": {
+     "side": "left",
+     "sign": 1
+    },
+    "noLabel": true,
+    "attachedTo": "e1454678snowrs"
+   },
+   {
+    "h": 55,
+    "w": 60,
+    "z": 56320,
+    "cx": 583.3680903107421,
+    "cy": 1522.7087093616228,
+    "id": "e1454751yyuqqs",
+    "rot": 89.26606135812284,
+    "dock": "none",
+    "type": "building",
+    "noFit": true,
+    "dogEar": {
+     "side": "right",
+     "sign": -1
+    },
+    "noLabel": true,
+    "attachedTo": "e1454678snowrs"
+   },
+   {
+    "h": 55,
+    "w": 60,
+    "z": 57344,
+    "cx": 574.657769374052,
+    "cy": 842.7644981875148,
+    "id": "e1454752yyuqqs",
+    "rot": 89.26606135812284,
+    "dock": "none",
+    "type": "building",
+    "noFit": true,
+    "dogEar": {
+     "side": "left",
+     "sign": -1
+    },
+    "noLabel": true,
+    "attachedTo": "e1454678snowrs"
+   },
+   {
+    "h": 18,
+    "w": 679,
+    "z": 100352,
+    "cx": -1293.7241292930241,
+    "cy": 1176.2245118821304,
+    "id": "e1454827nloema",
+    "rot": 89.26606135812284,
+    "type": "parking",
+    "attachedTo": "e1454678snowrs"
+   },
+   {
+    "h": 24,
+    "w": 642,
+    "z": 101376,
+    "cx": -1314.959378369473,
+    "cy": 1157.9950248717623,
+    "id": "e1454828nloema",
+    "rot": 89.26606135812284,
+    "type": "paving",
+    "attachedTo": "e1454678snowrs"
+   },
+   {
+    "h": 18,
+    "w": 613,
+    "z": 102400,
+    "cx": -1336.143390263941,
+    "cy": 1143.7652096918298,
+    "id": "e1454829nloema",
+    "rot": 89.26606135812284,
+    "type": "parking",
+    "attachedTo": "e1454678snowrs"
+   },
+   {
+    "h": 18,
+    "w": 591,
+    "z": 103424,
+    "cx": -1354.282815751349,
+    "cy": 1132.9966794770435,
+    "id": "e1454830nloema",
+    "rot": 89.26606135812284,
+    "type": "parking",
+    "attachedTo": "e1454678snowrs"
+   },
+   {
+    "h": 24,
+    "w": 584,
+    "z": 104448,
+    "cx": -1375.3259253953704,
+    "cy": 1129.7659618308096,
+    "id": "e1454831nloema",
+    "rot": 89.26606135812284,
+    "type": "paving",
+    "attachedTo": "e1454678snowrs"
+   },
+   {
+    "h": 18,
+    "w": 563,
+    "z": 105472,
+    "cx": -1396.4587001078585,
+    "cy": 1119.535818481313,
+    "id": "e1454832nloema",
+    "rot": 89.26606135812284,
+    "type": "parking",
+    "attachedTo": "e1454678snowrs"
+   },
+   {
+    "h": 18,
+    "w": 519,
+    "z": 106496,
+    "cx": -1414.7390278457128,
+    "cy": 1097.7681907328279,
+    "id": "e1454833nloema",
+    "rot": 89.26606135812284,
+    "type": "parking",
+    "attachedTo": "e1454678snowrs"
+   },
+   {
+    "h": 24,
+    "w": 508,
+    "z": 107520,
+    "cx": -1435.8077560807246,
+    "cy": 1092.5376371713762,
+    "id": "e1454834nloema",
+    "rot": 89.26606135812284,
+    "type": "paving",
+    "attachedTo": "e1454678snowrs"
+   },
+   {
+    "h": 18,
+    "w": 486,
+    "z": 108544,
+    "cx": -1456.9469354409596,
+    "cy": 1081.8075348430752,
+    "id": "e1454835nloema",
+    "rot": 89.26606135812284,
+    "type": "parking",
+    "attachedTo": "e1454678snowrs"
+   }
+  ]
+ },
+ "hoffmeister": {
+  "siteId": "smqtu6li9mqy",
+  "note": "Seven untagged pads on two walls, sitting 4.44 ft INSIDE their own sidewalks (an across-axis error, which has no user freedom). Re-tagging rejoins them to the heal, so this is the one survey site where geometry legitimately moves.",
+  "els": [
+   {
+    "h": 173,
+    "w": 5,
+    "z": 0,
+    "cx": 387.93000000000006,
+    "cy": -40.87000000000002,
+    "id": "e79342",
+    "rot": 0,
+    "type": "sidewalk",
+    "attachedTo": "e9007",
+    "sidewalkSide": "right"
+   },
+   {
+    "h": 173,
+    "w": 5,
+    "z": 2048,
+    "cx": -98.07,
+    "cy": -40.87000000000002,
+    "id": "e79347",
+    "rot": 0,
+    "type": "sidewalk",
+    "attachedTo": "e9007",
+    "sidewalkSide": "left"
+   },
+   {
+    "h": 5,
+    "w": 481,
+    "z": 3072,
+    "cx": 144.93,
+    "cy": -129.87,
+    "id": "e79348",
+    "rot": 0,
+    "type": "sidewalk",
+    "attachedTo": "e9007",
+    "sidewalkSide": "top"
+   },
+   {
+    "h": 18,
+    "w": 141.44654088050314,
+    "z": 5120,
+    "cx": -105.13,
+    "cy": -69.51836477987422,
+    "id": "e79365ntwjkt",
+    "rot": 90,
+    "type": "parking",
+    "attachedTo": "e9007"
+   },
+   {
+    "h": 210,
+    "w": 481,
+    "z": 6144,
+    "cx": 144.93,
+    "cy": 150.63,
+    "id": "e79366bnirte",
+    "zd": 210,
+    "rot": 0,
+    "type": "paving",
+    "attachedTo": "e9007",
+    "truckCourt": {
+     "side": "bottom"
+    }
+   },
+   {
+    "h": 24,
+    "w": 144.71069182389937,
+    "z": 7168,
+    "cx": -126.13,
+    "cy": -71.15044025157232,
+    "id": "e79366ntwjkt",
+    "rot": 90,
+    "type": "paving",
+    "attachedTo": "e9007"
+   },
+   {
+    "h": 18,
+    "w": 118.59748427672956,
+    "z": 8192,
+    "cx": -147.13,
+    "cy": -58.09383647798741,
+    "id": "e79367ntwjkt",
+    "rot": 90,
+    "type": "parking",
+    "attachedTo": "e9007"
+   },
+   {
+    "h": 18,
+    "w": 91.39622641509433,
+    "z": 9216,
+    "cx": -165.13,
+    "cy": -44.4932075471698,
+    "id": "e79368ntwjkt",
+    "rot": 90,
+    "type": "parking",
+    "attachedTo": "e9007"
+   },
+   {
+    "h": 24,
+    "w": 53.31446540880503,
+    "z": 10240,
+    "cx": -186.13,
+    "cy": -25.452327044025147,
+    "id": "e79369ntwjkt",
+    "rot": 90,
+    "type": "paving",
+    "attachedTo": "e9007"
+   },
+   {
+    "h": 18,
+    "w": 173,
+    "z": 11264,
+    "cx": 403.87000000000006,
+    "cy": -85.29509433962264,
+    "id": "e79370ntwjkt",
+    "rot": 270,
+    "type": "parking",
+    "attachedTo": "e9007"
+   },
+   {
+    "h": 24,
+    "w": 152.32704402515722,
+    "z": 12288,
+    "cx": 424.87000000000006,
+    "cy": -74.95861635220126,
+    "id": "e79371ntwjkt",
+    "rot": 270,
+    "type": "paving",
+    "attachedTo": "e9007"
+   },
+   {
+    "h": 173,
+    "w": 481,
+    "z": 17408,
+    "cx": 144.93,
+    "cy": -40.87000000000002,
+    "id": "e9007",
+    "rot": 0,
+    "dock": "single",
+    "type": "building",
+    "dockSide": "bottom"
+   }
+  ]
+ }
+}
