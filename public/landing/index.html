@@ -24,15 +24,74 @@
 <meta name="twitter:description" content="Turn a raw parcel into a yield-tested site plan in minutes: footprint, trailers, detention, coverage — before you tie the site up." />
 <meta name="twitter:image" content="https://planyr.io/landing/og.png" />
 
+<!-- The two animation libraries live at the BOTTOM of <body> and are synchronous, so
+     nothing on the page can animate until they land. Preloading them here starts both
+     downloads with the document instead of after ~700 lines of markup + CSS parse, which
+     is what keeps the reveal gate below from timing out on an ordinary connection. -->
+<link rel="preload" as="script" href="/landing/vendor/gsap.min.js" />
+<link rel="preload" as="script" href="/landing/vendor/ScrollTrigger.min.js" />
+
+<!-- ============================================================================
+     REVEAL GATE (B1384) — progressive enhancement, and the reason this page can no
+     longer render wordless.
+     Every element the scroll choreography touches rests FULLY OPAQUE in CSS. The
+     hidden pre-animation state is scoped to `html.anim`, which only this script
+     adds — and which it releases on the FIRST of:
+       (a) build() arming it, i.e. GSAP is here and the animation is starting now,
+       (b) a watchdog, i.e. the animation has had its chance and the words go up,
+       (c) the window `load` event, as a last backstop.
+     If the gate is released before build() runs, build() must NOT animate the copy
+     (it would re-hide words the reader is already reading) — __landingArmAnim()
+     returns false to tell it so, and it takes the static, no-motion path instead.
+     Reduced motion never arms the gate at all: the copy is simply there.
+     ============================================================================ -->
+<script>
+(function () {
+  var d = document.documentElement;
+  var reduce = false;
+  try { reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches; } catch (e) {}
+  window.__landingAnimGate = { armed: false, released: false, reduce: reduce };
+  if (reduce) return;                    // copy is already on screen; nothing to release
+  d.className += (d.className ? " " : "") + "anim";
+  var timer = null;
+  function release(why) {
+    var g = window.__landingAnimGate;
+    if (g.released || g.armed) return;
+    g.released = true; g.releasedBy = why;
+    if (timer) { clearTimeout(timer); timer = null; }
+    d.classList.remove("anim");          // the words go up, animated or not
+  }
+  // build() calls this the instant it can animate. False = too late, show-don't-animate.
+  window.__landingArmAnim = function () {
+    var g = window.__landingAnimGate;
+    if (g.released) return false;
+    g.armed = true;
+    if (timer) { clearTimeout(timer); timer = null; }
+    return true;
+  };
+  timer = setTimeout(function () { release("watchdog"); }, 1200);
+  window.addEventListener("load", function () { release("load"); });
+})();
+</script>
+
 <link rel="icon" href="/favicon.svg" type="image/svg+xml" sizes="any" />
 <link rel="icon" href="/favicon.ico" sizes="48x48" />
 <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
 
-<!-- Inter (brand face) + IBM Plex Mono (engineering-data texture). System fallbacks below
-     mean the page reads correctly even if the font CDN is blocked. -->
+<!-- Inter (brand face) + IBM Plex Mono (engineering-data texture). System fallbacks in the
+     stylesheet below mean the page reads correctly even if the font CDN is blocked.
+     ⚠ LOADED NON-BLOCKING, AND THIS IS LOAD-BEARING (B1384). A plain `rel="stylesheet"` here is
+     RENDER-BLOCKING, and — the part that actually bit — a synchronous <script> cannot EXECUTE
+     until every preceding stylesheet has resolved. So a slow, blocked or filtered fonts CDN
+     stalled GSAP at the bottom of <body> even though its bytes had already arrived, which
+     froze the whole page mid-reveal. Measured in an egress-blocked sandbox: scripts fully
+     downloaded at 84 ms, DOMContentLoaded at 12,964 ms. `media="print"` makes the browser
+     fetch it at low priority without blocking; the onload swap promotes it once it lands. -->
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap"
+      rel="stylesheet" media="print" onload="this.media='all'" />
+<noscript><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" /></noscript>
 
 <!-- Structured data — helps search + knowledge graphs understand what Planyr is. -->
 <script type="application/ld+json">
@@ -266,7 +325,7 @@ h2 { font-size: clamp(1.7rem, 3.8vw, 2.65rem); letter-spacing: -0.02em; }
   #spine-svg { display: none; }
   .spine-track { height: auto; margin-top: 6px; }
   .spine-vert { display: block; list-style: none; margin: 0; padding: 4px 0 2px 24px; border-left: 2px solid var(--line-1); }
-  .spine-vert li { position: relative; padding: 0 0 22px 12px; opacity: 0; transform: translateY(8px); }
+  .spine-vert li { position: relative; padding: 0 0 22px 12px; }
   .spine-vert li:last-child { padding-bottom: 2px; }
   .spine-vert li::before { content: ""; position: absolute; left: -31px; top: 3px; width: 11px; height: 11px; border-radius: 50%; background: var(--coral-mid); border: 2px solid var(--ink); }
   .spine-vert .vn { display: block; font-weight: 700; font-size: 1.05rem; letter-spacing: -0.01em; color: var(--cream); }
@@ -339,7 +398,7 @@ h2 { font-size: clamp(1.7rem, 3.8vw, 2.65rem); letter-spacing: -0.02em; }
 .sheet .code { position: absolute; left: 9px; top: 9px; font-family: var(--mono); font-size: 11px; color: #5a5446; font-weight: 600; letter-spacing: .05em; }
 .calib-label, .filed-label {
   position: absolute; font-family: var(--mono); font-size: 0.74rem; letter-spacing: .04em; font-weight: 500;
-  padding: 6px 11px; border-radius: 8px; opacity: 0; white-space: nowrap;
+  padding: 6px 11px; border-radius: 8px; white-space: nowrap;
   box-shadow: 0 8px 22px rgba(0,0,0,.45);
 }
 /* Inside the sheet's corners (the reading zone) so these two payoff badges —
@@ -352,22 +411,21 @@ h2 { font-size: clamp(1.7rem, 3.8vw, 2.65rem); letter-spacing: -0.02em; }
 .gantt .row { display: grid; grid-template-columns: 130px 1fr; align-items: center; gap: 14px; }
 .gantt .row .lbl { font-family: var(--mono); font-size: 0.7rem; letter-spacing: .04em; text-transform: uppercase; color: var(--cream-dim); }
 .gantt .row .bartrack { height: 16px; border-radius: 5px; background: var(--ink-2); position: relative; overflow: hidden; border: 1px solid var(--ink-3); }
-.gantt .row .bar { position: absolute; top: 0; bottom: 0; border-radius: 5px; background: linear-gradient(90deg, rgba(127,119,221,.95), rgba(127,119,221,.6)); transform-origin: left center; transform: scaleX(0); }
+.gantt .row .bar { position: absolute; top: 0; bottom: 0; border-radius: 5px; background: linear-gradient(90deg, rgba(127,119,221,.95), rgba(127,119,221,.6)); transform-origin: left center; }
 
 /* Library breadcrumb */
 .crumbs { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 18px; }
-.crumb { font-family: var(--mono); font-size: 0.8rem; letter-spacing: .03em; color: var(--cream); padding: 8px 13px; border: 1px solid var(--ink-3); border-radius: 9px; background: var(--ink-2); opacity: 0; transform: translateY(8px); white-space: nowrap; }
+.crumb { font-family: var(--mono); font-size: 0.8rem; letter-spacing: .03em; color: var(--cream); padding: 8px 13px; border: 1px solid var(--ink-3); border-radius: 9px; background: var(--ink-2); white-space: nowrap; }
 .crumb[data-final] { color: var(--library); border-color: rgba(43,182,206,.4); }
-.crumb-sep { color: var(--line-1); opacity: 0; }
+.crumb-sep { color: var(--line-1); opacity: .7; }
 
 /* Spec sheet */
 .spec { padding: clamp(80px, 12vh, 140px) 0; }
 .spec-table { border-top: 1px solid var(--ink-3); margin-top: 36px; }
-.spec-row { display: grid; grid-template-columns: auto 1fr auto; align-items: baseline; gap: 14px; padding: 17px 4px; border-bottom: 1px solid var(--ink-3); }
+.spec-row { display: grid; grid-template-columns: auto 1fr; align-items: baseline; gap: 14px; padding: 17px 4px; border-bottom: 1px solid var(--ink-3); }
 .spec-row .n { font-family: var(--mono); font-size: 0.7rem; color: var(--line-1); letter-spacing: .1em; }
 .spec-row .t { font-weight: 600; font-size: clamp(1rem, 1.6vw, 1.18rem); letter-spacing: -0.01em; }
 .spec-row .t .d { color: var(--cream-dim); font-weight: 400; font-size: 0.92em; }
-.spec-row .ck { color: var(--coral-top); font-size: 1.05rem; opacity: 0; transform: scale(.4); }
 
 /* Close / footer */
 .close { padding: clamp(90px, 16vh, 180px) 0 0; text-align: center; }
@@ -379,7 +437,21 @@ h2 { font-size: clamp(1.7rem, 3.8vw, 2.65rem); letter-spacing: -0.02em; }
 footer { margin-top: clamp(70px, 12vh, 120px); padding: 30px 0 40px; border-top: 1px solid var(--ink-3); }
 footer .wrap { display: flex; flex-wrap: wrap; gap: 14px 28px; align-items: center; justify-content: space-between; }
 footer .cred { font-family: var(--mono); font-size: 0.62rem; letter-spacing: .06em; color: var(--cream-dim); line-height: 1.7; }
-.reveal { opacity: 0; transform: translateY(22px); }
+/* ---- reveal contract: the RESTING state is fully legible ----------------------
+   (B1384.) The page's copy must never depend on JavaScript, on a vendor animation library,
+   or on an animation actually running in order to be readable. So every element
+   that the scroll choreography animates rests VISIBLE here, and the hidden
+   pre-animation state below is opt-in: it is applied by the `html.anim` gate in
+   the <head> script, which releases it the moment the animation is either about
+   to run or demonstrably not coming (slow/blocked vendor script, JS error, JS off).
+   ⛔ Never move an `opacity: 0` start state out of an `html.anim` selector. */
+.reveal { opacity: 1; transform: none; }
+html.anim .reveal { opacity: 0; transform: translateY(22px); }
+html.anim .crumb { opacity: 0; transform: translateY(8px); }
+html.anim .crumb-sep { opacity: 0; }
+html.anim .spine-vert li { opacity: 0; transform: translateY(8px); }
+html.anim .calib-label, html.anim .filed-label { opacity: 0; }
+html.anim .gantt .row .bar { transform: scaleX(0); }
 
 /* ---- proof strip (thin tracked-caps band, no icons) ---- */
 .proof-strip { padding: clamp(30px, 4.5vh, 48px) 0; border-top: 1px solid var(--ink-3); border-bottom: 1px solid var(--ink-3); }
@@ -420,6 +492,29 @@ footer .cred { font-family: var(--mono); font-size: 0.62rem; letter-spacing: .06
      overflow a narrow phone. */
   .hero .ctas, .close .ctas { flex-direction: column; align-items: stretch; }
   .hero .ctas .btn, .close .ctas .btn { width: 100%; white-space: normal; justify-content: center; text-align: center; }
+}
+
+/* ---- SHORT WINDOWS ARE FIRST-CLASS (B1384) ----------------------------------
+   A laptop window only ~500px tall is an ordinary way to browse, and the hero was
+   built for height: a headline sized purely off viewport WIDTH grew to four lines,
+   ran under the 3D mark, and pushed the lede beneath the fixed scale bar. Legible
+   means readable AND unobstructed, so on a short window the headline is additionally
+   capped against viewport height, the copy column narrows to clear the mark, and the
+   two decorative furniture pieces that sit over the copy stand down. */
+@media (max-height: 700px) {
+  .hero { padding: 74px 0 48px; }
+  .hero-inner { max-width: 620px; }
+  .hero h1 { font-size: min(clamp(2.1rem, 7.2vw, 5.1rem), 9vh); margin-top: 16px; }
+  .hero .lede { margin-top: 18px; font-size: 1rem; }
+  .hero .ctas { margin-top: 22px; }
+  .proof-row { margin-top: 20px; }
+  /* Decorative only: the self-measuring scale bar and the scroll chevron are pinned to
+     the bottom edge, which on a short window is exactly where the body copy lands. */
+  #vp-dim, .scroll-cue { display: none; }
+}
+@media (max-height: 700px) and (max-width: 1100px) {
+  /* Narrower AND short: the mark is closer to the text, so give the column the full row. */
+  .hero-inner { max-width: 100%; }
 }
 
 /* ---- reduced motion: everything legible, zero motion ---- */
@@ -481,9 +576,10 @@ footer .cred { font-family: var(--mono); font-size: 0.62rem; letter-spacing: .06
           <a class="btn btn-primary" href="/?app">Plan a site free</a>
         </div>
         <div class="proof-row reveal">
-          <span>Runs in the browser</span>
-          <span>Cloud sync across devices</span>
-          <span>Private by default</span>
+          <span>Free to start</span>
+          <!-- landing:coverage:hero -->
+          <span>13 counties · Texas &amp; Colorado</span>
+          <!-- /landing:coverage:hero -->
         </div>
       </div>
     </div>
@@ -506,11 +602,11 @@ footer .cred { font-family: var(--mono); font-size: 0.62rem; letter-spacing: .06
   <section class="spine" id="how">
     <div class="wrap">
       <div class="sec-head">
-        <span class="eyebrow reveal">The thesis</span>
+        <span class="eyebrow reveal">Deed to schedule</span>
         <h2 class="reveal">One coordinate system.</h2>
-        <p class="lede reveal">Deed → map → drawings → layout → schedule — the same point in space,
-          seen four ways. One feet-accurate spine (EPSG:2278) underpins everything, so work flows
-          between modules without ever leaving the grid.</p>
+        <p class="lede reveal">Deed → map → drawings → layout → schedule. A corner you set from the
+          deed is the same corner the engineer's drawing lands on, and the same corner the site plan
+          measures from — in true survey feet, on the state plane zone your county actually uses.</p>
       </div>
       <div class="spine-track">
         <svg id="spine-svg" viewBox="0 0 1200 150" preserveAspectRatio="none" aria-hidden="true"></svg>
@@ -610,26 +706,15 @@ footer .cred { font-family: var(--mono); font-size: 0.62rem; letter-spacing: .06
     </div>
   </section>
 
-  <!-- ============ COST ESTIMATING ============ -->
-  <section id="cost" style="padding: clamp(60px,9vh,120px) 0;">
-    <div class="wrap">
-      <div class="sec-head" style="max-width:720px">
-        <span class="eyebrow reveal"><span style="color:var(--coral-mid)">●</span>&nbsp;Cost Estimating</span>
-        <h2 class="reveal">A number you can defend in the investment committee.</h2>
-        <p class="lede reveal">Roll paving, curb, and sitework quantities straight off the plan into
-          costs anchored to your own bids — so the estimate moves when the plan moves.</p>
-      </div>
-    </div>
-  </section>
-
   <!-- ============ LIBRARY ============ -->
   <section id="library" style="padding: clamp(60px,9vh,120px) 0;">
     <div class="wrap">
       <div class="sec-head" style="max-width:720px">
         <span class="eyebrow reveal"><span style="color:var(--library)">●</span>&nbsp;Library</span>
         <h2 class="reveal">From the map to the latest set, already stitched.</h2>
-        <p class="lede reveal">The north-star: from the map, click a project → Drawings → a discipline →
-          the latest revision's full set, already stitched. One project, every file, on the same spine.</p>
+        <p class="lede reveal">From the map, click a project → Drawings → a discipline → the latest
+          revision's full set, already stitched. One project, every file, in the place you were
+          already looking.</p>
       </div>
       <div class="crumbs" id="crumbs">
         <span class="crumb">Map</span><span class="crumb-sep">▸</span>
@@ -646,17 +731,19 @@ footer .cred { font-family: var(--mono); font-size: 0.62rem; letter-spacing: .06
     <div class="wrap">
       <div class="sec-head">
         <span class="eyebrow reveal">General notes</span>
-        <h2 class="reveal">Why it's different.</h2>
+        <h2 class="reveal">What's built and running.</h2>
       </div>
       <div class="spec-table" id="spec">
-        <div class="spec-row reveal"><span class="n">01</span><span class="t">Live county parcel data <span class="d">— Harris · Fort Bend · Chambers, pulled straight from public GIS</span></span><span class="ck">✓</span></div>
-        <div class="spec-row reveal"><span class="n">02</span><span class="t">Feet-accurate <span class="d">— true Texas State Plane survey feet, no Web-Mercator stretch</span></span><span class="ck">✓</span></div>
-        <div class="spec-row reveal"><span class="n">03</span><span class="t">Yield as you draw <span class="d">— coverage, FAR, impervious %, stalls, detention, open space</span></span><span class="ck">✓</span></div>
-        <div class="spec-row reveal"><span class="n">04</span><span class="t">Auto-stitch + auto-calibrate + auto-file <span class="d">— drop a multi-sheet set, it organizes itself</span></span><span class="ck">✓</span></div>
-        <div class="spec-row reveal"><span class="n">05</span><span class="t">Metes-and-bounds deed → polygon <span class="d">— parse the calls, drop it on the map</span></span><span class="ck">✓</span></div>
-        <div class="spec-row reveal"><span class="n">06</span><span class="t">Runs in the browser <span class="d">— no install, nothing to provision</span></span><span class="ck">✓</span></div>
-        <div class="spec-row reveal"><span class="n">07</span><span class="t">Cloud sync across devices <span class="d">— pick up where you left off, anywhere</span></span><span class="ck">✓</span></div>
-        <div class="spec-row reveal"><span class="n">08</span><span class="t">Private by default <span class="d">— your deals are yours; sharing is always deliberate</span></span><span class="ck">✓</span></div>
+        <!-- landing:coverage:spec -->
+        <div class="spec-row reveal"><span class="n">01</span><span class="t">Live county parcel data <span class="d">— Texas: Chambers · Fort Bend · Harris · Waller. Colorado: Adams · Arapahoe · Boulder · Broomfield · Denver · El Paso · Jefferson · Larimer · Weld. Pulled straight from each public GIS.</span></span></div>
+        <div class="spec-row reveal"><span class="n">02</span><span class="t">Feet-accurate <span class="d">— true survey feet on your county's own state plane zone, no Web-Mercator stretch</span></span></div>
+        <!-- /landing:coverage:spec -->
+        <div class="spec-row reveal"><span class="n">03</span><span class="t">Yield as you draw <span class="d">— coverage, FAR, impervious %, stalls, detention, open space</span></span></div>
+        <div class="spec-row reveal"><span class="n">04</span><span class="t">Auto-stitch + auto-calibrate + auto-file <span class="d">— drop a multi-sheet set, it organizes itself</span></span></div>
+        <div class="spec-row reveal"><span class="n">05</span><span class="t">Metes-and-bounds deed → polygon <span class="d">— parse the calls, drop it on the map</span></span></div>
+        <div class="spec-row reveal"><span class="n">06</span><span class="t">Runs in the browser <span class="d">— open a link and start drawing</span></span></div>
+        <div class="spec-row reveal"><span class="n">07</span><span class="t">Cloud sync across devices <span class="d">— pick up where you left off, anywhere</span></span></div>
+        <div class="spec-row reveal"><span class="n">08</span><span class="t">Private by default <span class="d">— your deals are yours; sharing is always deliberate</span></span></div>
       </div>
     </div>
   </section>
@@ -690,7 +777,9 @@ footer .cred { font-family: var(--mono); font-size: 0.62rem; letter-spacing: .06
           <b style="font-size:.95rem">planyr</b>
         </a>
         <div class="cred">
-          planyr.io · EPSG:2278 · NAD83 / Texas State Plane South Central · US survey feet<br>
+          <!-- landing:coverage:cred -->
+          planyr.io · NAD83 state plane · US survey feet · Texas South Central (EPSG:2278) · Colorado North (EPSG:2231) · Colorado Central (EPSG:2232)<br>
+          <!-- /landing:coverage:cred -->
           © 2026 · Built for industrial site work · Private by default
         </div>
       </div>
@@ -1045,7 +1134,14 @@ footer .cred { font-family: var(--mono); font-size: 0.62rem; letter-spacing: .06
   function build() {
     if (!gsap) return;
 
-    if (REDUCE) {
+    // The reveal gate (see the <head> script). ARMED = the copy is still in its
+    // pre-animation state and we are free to animate it. NOT armed = the gate already
+    // gave up waiting for GSAP and put the words on screen; animating them now would
+    // snatch them back out from under a reader, so we take the same static, no-motion
+    // path reduced motion takes. Legibility outranks the fade, always.
+    var ANIM = typeof window.__landingArmAnim === "function" ? window.__landingArmAnim() : false;
+
+    if (REDUCE || !ANIM) {
       // Everything legible, zero motion: jump to final states.
       gsap.set(".reveal", { opacity: 1, y: 0 });
       setYield(1); updateSiteReadout(1);
@@ -1057,7 +1153,6 @@ footer .cred { font-family: var(--mono); font-size: 0.62rem; letter-spacing: .06
       }
       gsap.utils.toArray("#gantt .bar").forEach(function (b) { b.style.transform = "scaleX(1)"; });
       gsap.utils.toArray(".crumb, .crumb-sep").forEach(function (c) { c.style.opacity = 1; c.style.transform = "none"; });
-      gsap.utils.toArray(".spec-row .ck").forEach(function (c) { c.style.opacity = 1; c.style.transform = "none"; });
       drawSpineStatic();
       buildReview(); // snaps the sheets to the final stitched set (place(1)) — no motion
       var cal = document.getElementById("calib"), fil = document.getElementById("filed");
@@ -1076,7 +1171,6 @@ footer .cred { font-family: var(--mono); font-size: 0.62rem; letter-spacing: .06
     reveal("#problem .reveal");
     reveal(".spine .reveal");
     reveal("#schedule .reveal");
-    reveal("#cost .reveal");
     reveal("#library .reveal");
     reveal(".proof-strip .reveal");
     reveal(".spec .eyebrow, .spec h2");
@@ -1137,10 +1231,9 @@ footer .cred { font-family: var(--mono); font-size: 0.62rem; letter-spacing: .06
 
     // SPEC rows + check snap
     gsap.utils.toArray(".spec-row").forEach(function (row) {
-      var ck = row.querySelector(".ck");
-      var tl = gsap.timeline({ scrollTrigger: { trigger: row, start: "top 88%" } });
-      tl.fromTo(row, { opacity: 0, x: -14 }, { opacity: 1, x: 0, duration: 0.5, ease: "power2.out" })
-        .to(ck, { opacity: 1, scale: 1, duration: 0.28, ease: "back.out(2.5)" }, "-=0.12");
+      gsap.fromTo(row, { opacity: 0, x: -14 },
+        { opacity: 1, x: 0, duration: 0.5, ease: "power2.out",
+          scrollTrigger: { trigger: row, start: "top 88%" } });
     });
 
     finishReady();
@@ -1283,9 +1376,12 @@ footer .cred { font-family: var(--mono); font-size: 0.62rem; letter-spacing: .06
     rt = setTimeout(function () { drawVpDim(false); }, 120);
   });
 
-  // boot
-  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", build);
-  else build();
+  // Boot NOW, not on DOMContentLoaded. This script is the last thing in <body>, so every
+  // element it touches is already parsed — and DOMContentLoaded additionally waits for the
+  // DEFERRED 603 KB three.min.js to download AND execute. Waiting on it meant the reveals
+  // were gated on ~718 KB of JavaScript rather than the ~115 KB they actually need, which is
+  // most of why the gate below kept having to time out. (B1384.)
+  build();
   // safety: if fonts/late layout shift things, refresh triggers
   window.addEventListener("load", function () { if (ScrollTrigger) ScrollTrigger.refresh(); });
 })();

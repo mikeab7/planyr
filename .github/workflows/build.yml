@@ -52,6 +52,8 @@ jobs:
         run: node scripts/build-backlog-index.mjs --check
       - name: e2e fixture drift guard (regenerate with `node scripts/build-fixtures.mjs` — B278/B280 harness)
         run: node scripts/build-fixtures.mjs --check
+      - name: Landing coverage drift guard (regenerate with `node scripts/build-landing-coverage.mjs` — B1385)
+        run: node scripts/build-landing-coverage.mjs --check
       # Mint gate (B779 second pass). The uniqueness tests below catch a collision once both items
       # are in the same tree; this catches one whose twin is still on an UNMERGED branch, which no
       # static check of this repo can see. A proven collision fails the build (renumbering is a
