@@ -38,6 +38,16 @@
  * the scope is never sticky, search follows it, and the binding survives a reload — which is
  * what proves it rides in the tree blob and therefore syncs.
  *
+ * §23 is SKETCH MODE, and every check in it is one half of the rule the feature is built on:
+ * the OUTLINE is the single source of truth for what exists and what connects to what, the
+ * CANVAS stores nothing but POSITION. So it types an outline and watches boxes and arrows
+ * appear; it drags a box and asserts the stored text is BYTE-IDENTICAL either side; it draws
+ * an extra arrow and reloads the browser to find it still there; it prints the sheet and
+ * finds the same boxes plus every body; and then it deletes one outline line and demands the
+ * box, its position AND every arrow that named it go with it — the check that would catch a
+ * half-built cascade. It also proves the thing no unit test can: twenty-two sections run with
+ * nothing sketch-shaped downloaded at all, because no page had a sketch on it.
+ *
  *   npx vite preview --port 4173 &
  *   node ui-audit/verify-notes.mjs
  */
@@ -1262,6 +1272,245 @@ ok("NEITHER WINDOW WAS EVER ASKED TO PICK BETWEEN TWO COPIES — a no-op raises 
   await tb("notes-conflict-bar").count() === 0 && await win2.locator('[data-testid="notes-conflict-bar"]').count() === 0);
 ok("...and the second window ran clean too", win2Errors.length === 0, win2Errors.join(" | ") || "clean");
 await win2.close();
+
+/* ════ 23. SKETCH MODE — the outline governs, the canvas only remembers where ══════════
+ *
+ * THE RULE THIS SECTION EXISTS TO PROVE, in the browser rather than in a comment: the
+ * OUTLINE is the single source of truth for what exists and what connects to what, and the
+ * CANVAS stores nothing but POSITION. Everything below is one half of that claim:
+ *   • typing an indented outline produces boxes AND arrows — no other way to author one;
+ *   • dragging a box moves it and leaves the stored text BYTE-IDENTICAL;
+ *   • an extra arrow (the kind an outline cannot express) persists and survives a reload;
+ *   • deleting a line takes its box, its position AND every arrow that named it, with
+ *     nothing left dangling — the check that would have caught a half-built cascade;
+ *   • the label/body pair survives save, reload, Markdown export and the printed sheet.
+ *
+ * It also proves the BUNDLE claim, which no unit test can: nothing sketch-shaped is fetched
+ * until a sketch is genuinely on the page. */
+const sketchBefore = jsRequests.filter((f) => /Sketch/i.test(f));
+ok("⛔ NOTHING SKETCH-SHAPED HAS BEEN DOWNLOADED — twenty-two sections in, with no sketch on any page",
+  sketchBefore.length === 0, sketchBefore.join(", ") || "not requested");
+
+/* A fresh notebook, so this section owns its own page and cannot be confused by the earlier
+ * ones (which carry tables, pictures and a bin history). */
+await tb("notes-new-notebook").click();
+await page.waitForSelector('[data-testid="note-body"]', { timeout: 15000 });
+await page.waitForTimeout(900);
+const skTree = await readTree();
+const skNotebook = skTree.notebooks[skTree.notebooks.length - 1];
+const skPage = skNotebook.sections[0].pages[0].id;
+
+await tb("note-title").fill("Deal sequence");
+await tb("note-body").click();
+await tb("nt-sketch").click();
+await page.waitForSelector('[data-testid="note-sketch"]', { timeout: 15000 });
+await page.waitForTimeout(900);
+
+ok("the toolbar inserts a sketch, and it lands IN the note", await tb("note-sketch").count() === 1);
+const sketchChunk = jsRequests.find((f) => /Sketch/i.test(f));
+ok("...and ONLY THEN is the sketch editor fetched — its own chunk, on demand",
+  !!sketchChunk, sketchChunk || "never requested");
+
+/* A sketch's document node — read straight out of storage, which is the only place that
+ * settles whether the canvas and the outline agree. */
+const sketchNode = async () => {
+  const doc = await readBody(skPage);
+  let found = null;
+  const walk = (n) => { if (!n || typeof n !== "object") return; if (n.type === "noteSketch") found = n; (n.content || []).forEach(walk); };
+  walk(doc);
+  return found;
+};
+const outlineText = (n) => (n?.attrs?.outline || []).map((x) => `${x.depth}|${x.label}|${x.body}`).join("\n");
+
+/* ---- typing an outline is what draws the chart ------------------------------------- */
+const OUTLINE_TEXT = "Acquisition\n  Title review\n  > Order the commitment from Stewart; 30-day cure.\n  Environmental\n    Phase I\nEntitlement";
+await tb("sketch-outline").fill(OUTLINE_TEXT);
+await page.waitForTimeout(700);
+await settle();
+
+ok("TYPING AN INDENTED OUTLINE DRAWS THE BOXES", await page.locator("[data-sketch-node]").count() === 5,
+  `${await page.locator("[data-sketch-node]").count()} box(es)`);
+ok("...and the parent→child ARROWS, without anyone drawing one",
+  await page.locator('[data-sketch-edge-kind="tree"]').count() === 3);
+ok("the outline pane is the ONLY authoring surface — there is no 'add a box' control",
+  await page.locator('[data-testid="note-sketch"] button').count() === 3);
+
+let node = await sketchNode();
+ok("the sketch is stored INSIDE the page's document — not in a second store",
+  !!node && node.attrs.outline.length === 5, node ? `${node.attrs.outline.length} nodes` : "no sketch node");
+ok("the LABEL and the BODY are stored as one node, as designed from the start",
+  node.attrs.outline[1].label === "Title review" && /Stewart/.test(node.attrs.outline[1].body),
+  `${node.attrs.outline[1].label} / ${node.attrs.outline[1].body.slice(0, 24)}`);
+const noSketchKey = await page.evaluate(() => Object.keys(localStorage).filter((k) => /sketch/i.test(k)));
+ok("⛔ NO SKETCH KEY ANYWHERE IN STORAGE — the document IS the persistence", noSketchKey.length === 0, noSketchKey.join(", ") || "none");
+
+/* ---- the body opens in place, no dialog -------------------------------------------- */
+ok("only the box that HAS a body offers to open it", await page.locator("[data-sketch-toggle]").count() === 1);
+await page.locator("[data-sketch-toggle]").first().click();
+await page.waitForTimeout(400);
+ok("the detail opens IN PLACE, inside its own box — no dialog box (house rule)",
+  await page.locator(".planyr-sketch-body").count() > 0 && await page.locator(".planyr-sketch-node-open").count() === 1);
+await page.locator("[data-sketch-toggle]").first().click();
+await page.waitForTimeout(300);
+
+/* ---- dragging moves ONE box and touches NOTHING else -------------------------------- */
+const textBeforeDrag = outlineText(node);
+const dragTarget = page.locator("[data-sketch-node]").nth(1);
+const bb = await dragTarget.boundingBox();
+await page.mouse.move(bb.x + 30, bb.y + 14);
+await page.mouse.down();
+await page.mouse.move(bb.x + 250, bb.y + 190, { steps: 14 });
+await page.mouse.up();
+await settle();
+
+node = await sketchNode();
+const dragged = Object.keys(node.attrs.positions);
+ok("DRAGGING A BOX SAVES A POSITION", dragged.length === 1, JSON.stringify(node.attrs.positions));
+ok("⛔ AND LEAVES THE TEXT BYTE-IDENTICAL — a drag is layout, never content",
+  outlineText(node) === textBeforeDrag);
+ok("the outline pane still reads exactly what was typed", (await tb("sketch-outline").inputValue()) === OUTLINE_TEXT);
+
+/* ---- an extra arrow: the one thing an outline cannot express ------------------------ */
+await tb("sketch-arrow-mode").click();
+await page.locator("[data-sketch-node]").nth(3).click();     // Phase I
+await page.locator("[data-sketch-node]").nth(4).click();     // Entitlement
+await settle();
+node = await sketchNode();
+const linkFrom = node.attrs.links[0]?.from;
+const linkTo = node.attrs.links[0]?.to;
+ok("AN EXTRA ARROW IS STORED AS AN EXPLICIT {from,to} — never inferred, never hidden in layout",
+  node.attrs.links.length === 1 && !!linkFrom && !!linkTo, JSON.stringify(node.attrs.links));
+ok("...and it is DRAWN, told apart from the outline's own arrows",
+  await page.locator('[data-sketch-edge-kind="link"]').count() === 1);
+
+/* An arrow the outline already draws is refused OUT LOUD rather than silently ignored. */
+await tb("sketch-arrow-mode").click();
+await page.locator("[data-sketch-node]").nth(0).click();
+await page.locator("[data-sketch-node]").nth(1).click();
+await page.waitForTimeout(500);
+ok("a duplicate of an arrow the outline already draws is REFUSED, and SAYS WHY (LOUD-FAILURE)",
+  /outline already/.test(await tb("sketch-status").innerText()), await tb("sketch-status").innerText());
+
+/* ---- it all survives a real reload -------------------------------------------------- */
+await page.reload({ waitUntil: "load" });
+await page.waitForTimeout(1800);
+await page.locator('[data-testid="module-tab-notes"]:visible').first().click();
+await page.waitForSelector('[data-testid="notes-tree"]', { timeout: 15000 });
+await tb(`notes-row-${skPage}`).click();
+await page.waitForSelector('[data-testid="note-sketch"]', { timeout: 15000 });
+await page.waitForTimeout(1200);
+
+ok("A RELOAD BRINGS THE WHOLE SKETCH BACK — boxes, arrows and the extra arrow",
+  await page.locator("[data-sketch-node]").count() === 5
+  && await page.locator('[data-sketch-edge-kind="link"]').count() === 1);
+node = await sketchNode();
+ok("...with the hand-placed box still where it was put", Object.keys(node.attrs.positions).length === 1);
+ok("...and the LABEL/BODY pair intact after a round trip through storage",
+  /Stewart/.test(node.attrs.outline[1].body));
+ok("the reloaded sketch renders with no crash and no error boundary",
+  await page.locator("text=Something went wrong").count() === 0);
+
+/* ---- Markdown export: lossless for content, NAMED for what a list cannot say -------- */
+const skDir = mkdtempSync(join(tmpdir(), "notes-sketch-"));
+const [skDownload] = await Promise.all([
+  page.waitForEvent("download", { timeout: 15000 }),
+  tb("nt-export").click(),
+]);
+const skSaved = join(skDir, skDownload.suggestedFilename());
+await skDownload.saveAs(skSaved);
+const skMd = readFileSync(skSaved, "utf8");
+
+ok("THE EXPORTED MARKDOWN CARRIES THE OUTLINE AS A PLAIN INDENTED LIST",
+  /^- Acquisition$/m.test(skMd) && /^ {2}- Title review$/m.test(skMd) && /^ {4}- Phase I$/m.test(skMd));
+ok("...INCLUDING THE BODY, still attached to its own label",
+  /^ {4}> Order the commitment from Stewart/m.test(skMd));
+ok("...and the EXTRA ARROW is written out, not silently dropped",
+  /Also connected:/.test(skMd) && /Phase I → Entitlement/.test(skMd));
+await page.waitForTimeout(400);
+const skNotice = await tb("notes-export-notice").count() ? await tb("notes-export-notice").innerText() : "";
+ok("...and the ONE thing a list genuinely cannot say is NAMED, not silently dropped",
+  /dragged to/.test(skNotice), skNotice.slice(0, 110) || "no notice shown");
+
+/* ---- the printed sheet (PDF-PARITY) ------------------------------------------------- */
+await tb("nt-print").click();
+await page.waitForTimeout(1600);
+const skSheet = await page.evaluate(() => {
+  const f = document.querySelector('[data-testid="notes-print-frame"]');
+  const d = f && f.contentDocument;
+  if (!d) return null;
+  return {
+    boxes: d.querySelectorAll("[data-sketch-node]").length,
+    treeEdges: d.querySelectorAll('[data-sketch-edge-kind="tree"]').length,
+    linkEdges: d.querySelectorAll('[data-sketch-edge-kind="link"]').length,
+    chevrons: d.querySelectorAll("[data-sketch-toggle]").length,
+    detail: d.querySelector("ul.planyr-sketch-detail")?.textContent || "",
+    payload: d.querySelector("[data-note-sketch]") ? "yes" : "no",
+    boxFill: (() => { const b = d.querySelector(".planyr-sketch-box"); return b ? getComputedStyle(b).fill : ""; })(),
+  };
+});
+ok("THE PRINTED SHEET DRAWS THE SAME SKETCH — every box and every arrow",
+  skSheet?.boxes === 5 && skSheet?.treeEdges === 3 && skSheet?.linkEdges === 1, JSON.stringify(skSheet && { b: skSheet.boxes, t: skSheet.treeEdges, l: skSheet.linkEdges }));
+ok("⛔ AND IT PRINTS EVERY BODY, because a chevron cannot be pressed on paper",
+  /Title review/.test(skSheet?.detail || "") && /Stewart/.test(skSheet?.detail || ""), (skSheet?.detail || "").slice(0, 60));
+ok("...so the sheet carries no chevrons at all — nothing on paper pretends to be clickable",
+  skSheet?.chevrons === 0);
+ok("the printed box is drawn on WHITE, not in the app's theme", /255/.test(skSheet?.boxFill || ""), skSheet?.boxFill);
+
+/* ---- THE CASCADE: deleting a line takes its box, its position AND its arrows -------- */
+const beforeDelete = await sketchNode();
+const doomed = beforeDelete.attrs.outline.find((n) => n.label === "Phase I").id;
+const placedId = Object.keys(beforeDelete.attrs.positions)[0];
+ok("before the delete: the doomed line has a box, and an arrow that names it",
+  beforeDelete.attrs.links.some((l) => l.from === doomed || l.to === doomed));
+
+/* Put a position on the doomed node too, so the delete has BOTH dependants to cascade. */
+const doomedBox = page.locator("[data-sketch-node]").nth(3);
+const dbb = await doomedBox.boundingBox();
+await page.mouse.move(dbb.x + 30, dbb.y + 14);
+await page.mouse.down();
+await page.mouse.move(dbb.x + 160, dbb.y + 120, { steps: 10 });
+await page.mouse.up();
+await settle();
+const armed = await sketchNode();
+ok("...and now a hand-placed position as well — both dependants are armed",
+  Object.keys(armed.attrs.positions).length === 2 && doomed in armed.attrs.positions);
+
+await tb("sketch-outline").fill(OUTLINE_TEXT.replace("\n    Phase I", ""));
+await page.waitForTimeout(700);
+await settle();
+
+const after = await sketchNode();
+const ids = new Set(after.attrs.outline.map((n) => n.id));
+ok("DELETING THE LINE REMOVES ITS BOX", !ids.has(doomed) && after.attrs.outline.length === 4);
+ok("⛔ ...AND ITS POSITION GOES WITH IT — no dangling position (TOMBSTONE-DELETES)",
+  !(doomed in after.attrs.positions), JSON.stringify(after.attrs.positions));
+ok("⛔ ...AND EVERY ARROW THAT NAMED IT GOES TOO — no dangling arrow",
+  after.attrs.links.every((l) => ids.has(l.from) && ids.has(l.to)) && after.attrs.links.length === 0,
+  JSON.stringify(after.attrs.links));
+ok("...while the UNRELATED box keeps its own position — the cascade is exact, not a wipe",
+  placedId in after.attrs.positions);
+ok("nothing dangling reaches the drawing either", await page.locator('[data-sketch-edge-kind="link"]').count() === 0);
+ok("and the deletion is stated rather than silent", /arrow/i.test(await tb("sketch-status").innerText()), await tb("sketch-status").innerText());
+
+/* ---- putting a box back under the automatic layout ---------------------------------- */
+await tb("sketch-tidy").click();
+await settle();
+const tidied = await sketchNode();
+ok("“Tidy up” returns every box to the outline's own layout, and says nothing you typed changed",
+  Object.keys(tidied.attrs.positions).length === 0 && tidied.attrs.outline.length === 4);
+ok("...and the text is STILL byte-identical through all of it",
+  tidied.attrs.outline.map((n) => n.label).join("|") === "Acquisition|Title review|Environmental|Entitlement",
+  tidied.attrs.outline.map((n) => n.label).join("|"));
+
+/* ---- a sketch's words are findable -------------------------------------------------- */
+await tb("notes-search").fill("Stewart");
+await page.waitForTimeout(700);
+const skHits = page.locator('[data-testid="notes-search-results"] button');
+ok("A SKETCH'S WORDS ARE SEARCHABLE — they live in ATTRIBUTES, not in text nodes, so a plain walk would miss them",
+  await skHits.count() >= 1 && /Deal sequence/.test(await skHits.first().innerText()),
+  await skHits.count() ? (await skHits.first().innerText()).replace(/\s+/g, " ").slice(0, 70) : "no hit");
+await tb("notes-search").fill("");
+await page.waitForTimeout(400);
 
 /* ════ Wrap ═══════════════════════════════════════════════════════════════════════════ */
 ok("no uncaught page error across the whole run", pageErrors.length === 0, pageErrors.join(" | ") || "clean");

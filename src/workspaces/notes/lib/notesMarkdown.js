@@ -28,7 +28,7 @@
 export const NOTE_MD_HANDLED = {
   nodes: ["doc", "paragraph", "text", "heading", "bulletList", "orderedList", "listItem",
     "taskList", "taskItem", "blockquote", "codeBlock", "horizontalRule", "hardBreak",
-    "table", "tableRow", "tableHeader", "tableCell", "noteImage"],
+    "table", "tableRow", "tableHeader", "tableCell", "noteImage", "noteSketch"],
   marks: ["bold", "italic", "strike", "code", "underline", "link", "textStyle", "highlight"],
 };
 
@@ -44,6 +44,7 @@ const LOSSY = {
   richCells: "tables with multi-paragraph cells",
   headerlessTable: "tables with no header row",
   missingImage: "an image whose stored copy has gone",
+  sketchPlacement: "where a sketch's boxes were dragged to",
 };
 
 /* ---- images -------------------------------------------------------------------------
@@ -88,6 +89,68 @@ function imageMd(node, lossy, images) {
   const src = images?.[node.attrs?.imageId];
   if (!src) { lossy.add(LOSSY.missingImage); return `![${alt}](#image-not-stored)`; }
   return `![${alt}](${src})`;
+}
+
+/* ---- sketches -------------------------------------------------------------------------
+ *
+ * A SKETCH EXPORTS AS THE OUTLINE IT WAS DRAWN FROM, and that is LOSSLESS FOR CONTENT: the
+ * outline is the single source of truth for what exists and what connects to what (the full
+ * rule is at the top of lib/notesSketchModel.js), so an indented Markdown list carries every
+ * box, every label, every body and every parent→child arrow with nothing left behind.
+ *
+ * Two things a list cannot say, and NEITHER is dropped silently:
+ *   • WHERE boxes were dragged to — a Markdown list has no coordinates, so this is reported
+ *     by name in the lossy list, the same way a merged table cell is.
+ *   • THE EXTRA ARROWS — the cross-links the outline's shape cannot express. These are
+ *     WRITTEN OUT, as a short labelled list under the outline, because they are content and
+ *     content does not get to vanish into a footnote.
+ *
+ * ⛔ THIS FILE IMPORTS NOTHING (it is on the Notes route's STATIC path, and the sketch model
+ * deliberately is not — pulling it in here would put sketch code on every notebook's first
+ * paint). The reading below is therefore hand-rolled and defensive. test/notesSketch.test.js
+ * guards the drift that invites: it feeds a real sketch node through BOTH this exporter and
+ * the model's own `parseOutlineText`, and fails if the two disagree about the outline.
+ */
+function sketchMd(node, lossy) {
+  const a = node?.attrs || {};
+  const outline = (Array.isArray(a.outline) ? a.outline : [])
+    .filter((n) => n && typeof n === "object" && n.id)
+    .map((n) => ({
+      id: String(n.id),
+      depth: Math.max(0, Math.trunc(Number(n.depth) || 0)),
+      label: String(n.label == null ? "" : n.label),
+      body: String(n.body == null ? "" : n.body),
+    }));
+  if (!outline.length) return "";
+
+  // Same clamp the model applies: a line can only ever be one level deeper than the one above.
+  let prev = -1;
+  for (const n of outline) { n.depth = Math.min(n.depth, prev + 1); prev = n.depth; }
+
+  const lines = [];
+  for (const n of outline) {
+    const pad = "  ".repeat(n.depth);
+    lines.push(`${pad}- ${escapeText(n.label)}`);
+    /* The body rides as an indented `>` line under its own bullet — the SAME syntax the
+     * outline pane uses. Two things fall out of matching it rather than inventing a second
+     * form: the label/body pair survives the export AS A PAIR (a plain indented
+     * continuation would re-read as a box of its own), and the exported list can be pasted
+     * straight back into a sketch and come out identical. It renders as an indented quote
+     * in any Markdown viewer, which is what a detail note should look like. */
+    if (n.body) for (const b of n.body.split("\n")) lines.push(`${pad}  > ${escapeText(b)}`);
+  }
+
+  const label = (id) => outline.find((n) => n.id === id)?.label || "";
+  const links = (Array.isArray(a.links) ? a.links : [])
+    .filter((l) => l && label(l.from) && label(l.to));
+  if (links.length) {
+    lines.push("");
+    lines.push(`${escapeText("Also connected:")}`);
+    for (const l of links) lines.push(`- ${escapeText(label(l.from))} → ${escapeText(label(l.to))}`);
+  }
+
+  if (Object.keys(a.positions || {}).length) lossy.add(LOSSY.sketchPlacement);
+  return lines.join("\n");
 }
 
 /* ---- text escaping ---------------------------------------------------------------- */
@@ -308,6 +371,7 @@ function blocks(nodes, lossy, depth = 0, images = null) {
       }
       case "horizontalRule": out.push("---"); break;
       case "noteImage": out.push(imageMd(node, lossy, images)); break;
+      case "noteSketch": out.push(sketchMd(node, lossy)); break;
       case "table": out.push(table(node, lossy, images)); break;
       case "hardBreak": out.push(""); break;
       default: {
@@ -357,6 +421,16 @@ export function docToText(doc) {
     if (!n || typeof n !== "object") return;
     if (n.type === "text" && n.text) { out.push(n.text); return; }
     if (n.type === "hardBreak") { out.push("\n"); return; }
+    /* A sketch's words live in its ATTRIBUTES, not in child text nodes, so a plain walk
+     * would make every box on it invisible to search — a note whose whole content was a
+     * sketch would be unfindable by anything written on it. */
+    if (n.type === "noteSketch") {
+      for (const box of Array.isArray(n.attrs?.outline) ? n.attrs.outline : []) {
+        if (box?.label) out.push(`${box.label}\n`);
+        if (box?.body) out.push(`${box.body}\n`);
+      }
+      return;
+    }
     const block = n.type && n.type !== "doc" && n.type !== "text";
     if (Array.isArray(n.content)) n.content.forEach(walk);
     if (block) out.push("\n");

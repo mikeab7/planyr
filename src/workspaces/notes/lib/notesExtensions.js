@@ -36,6 +36,7 @@ import { TextAlign } from "@tiptap/extension-text-align";
 // already installed as StarterKit's own dependency, and it rides the lazy editor chunk.
 import { Placeholder } from "@tiptap/extensions";
 import NoteImage from "./notesImageNode.js";
+import NoteSketch from "./notesSketchNode.js";
 import NoteTabKey from "./notesTabKey.js";
 import NoteSearchHighlight from "./notesSearchHighlight.js";
 
@@ -78,6 +79,11 @@ export const NOTE_EXTENSIONS = [
 
   // A picture, held by ID. The bytes are in IndexedDB — see lib/notesImageNode.js.
   NoteImage,
+
+  // SKETCH MODE: a chart drawn from an indented outline. It is a NODE IN THIS SCHEMA rather
+  // than a canvas store bolted alongside, and that is what makes it persist, sync, print and
+  // export with no new plumbing anywhere — see lib/notesSketchNode.js for the full argument.
+  NoteSketch,
 
   // Presentation-only search marking. It writes nothing into the document.
   NoteSearchHighlight,
