@@ -48,7 +48,9 @@ const ALL_NOTES_FILES = [
   "lib/notesModel.js", "lib/notesStore.js", "lib/notesCloud.js", "lib/notesMarkdown.js", "lib/notesExtensions.js",
   "lib/notesTime.js", "lib/notesPrint.js", "lib/notesImageDb.js", "lib/notesImageIntake.js",
   "lib/notesImageNode.js", "lib/notesSearchHighlight.js", "lib/notesDocHtml.js", "lib/notesTabKey.js",
+  "lib/notesSketchModel.js", "lib/notesSketchRender.js", "lib/notesSketchNode.js", "lib/notesSketchEditor.js",
 ];
+const SKETCH_FILES = ALL_NOTES_FILES.filter((f) => f.includes("Sketch"));
 
 /* ════════════════════════════════════════════════════════════════════════════════════════
  * 1. THE EIGHT-PLACE REGISTRATION CHECKLIST
@@ -786,5 +788,123 @@ describe("the conflict surface", () => {
     // …and an open editor re-reads a body that changed underneath it (the self-race).
     expect(store).toMatch(/emitPagesChanged/);
     expect(code("Notes.jsx")).toMatch(/onNotesPagesChanged/);
+  });
+});
+
+/* ════════════════════════════════════════════════════════════════════════════════════════
+ * 9. SKETCH MODE LIVES IN THE SCHEMA — NOT IN A SECOND STORE
+ *
+ * The load-bearing claim of the whole feature is that a sketch is a NODE IN THE PROSEMIRROR
+ * SCHEMA, so it persists, syncs, prints and exports through plumbing that already exists.
+ * That claim is only true while nobody adds a second store or a second persistence path
+ * beside it — which is exactly the kind of thing that gets added later, in good faith, by
+ * someone who has not read the header. So it is asserted here, structurally.
+ * ═══════════════════════════════════════════════════════════════════════════════════════ */
+describe("sketch mode is a schema node, and there is no second store", () => {
+  it("the schema really admits it — read off the REAL schema, not the extension list", () => {
+    const schema = getSchema(NOTE_EXTENSIONS);
+    expect(schema.nodes.noteSketch, "noteSketch is not in the schema").toBeTruthy();
+    const attrs = schema.nodes.noteSketch.spec.attrs;
+    expect(Object.keys(attrs).sort()).toEqual(["links", "outline", "positions"]);
+  });
+
+  it("⛔ NOT ONE sketch file touches storage — no localStorage, no IndexedDB, no Supabase", () => {
+    for (const f of SKETCH_FILES) {
+      const text = code(f);
+      for (const forbidden of ["localStorage", "sessionStorage", "indexedDB", "supabase", "createClient", "fetch("]) {
+        expect(text, `${f} reaches for ${forbidden} — a sketch persists as part of the DOCUMENT, nowhere else`)
+          .not.toContain(forbidden);
+      }
+      expect(text, `${f} imports the store — the document IS the storage`).not.toMatch(/notesStore|notesCloud|notesImageDb/);
+    }
+  });
+
+  it("the position/link cascade is enforced by the MODEL, so no caller can skip it", () => {
+    const model = code("lib/notesSketchModel.js");
+    // reconcileOutline is the only place a node is destroyed, and it returns the survivors.
+    expect(model).toMatch(/export function reconcileOutline/);
+    expect(model).toMatch(/removedIds/);
+    // applyOutlineText — the one call the outline pane makes — goes THROUGH it.
+    expect(model).toMatch(/export function applyOutlineText[\s\S]{0,200}reconcileOutline\(/);
+    // and the editor never assembles an outline by hand.
+    expect(code("lib/notesSketchEditor.js")).not.toMatch(/outline:\s*\[/);
+  });
+
+  it("a drag writes a POSITION only — moveNode is the one way the editor moves a box", () => {
+    const editor = code("lib/notesSketchEditor.js");
+    expect(editor).toMatch(/moveNode\(/);
+    expect(editor, "the editor must not write an outline of its own").not.toMatch(/\.outline\s*=/);
+    expect(editor, "positions are written through the model, never spliced in place").not.toMatch(/positions\[[^\]]+\]\s*=/);
+  });
+
+  it("ONE builder draws the screen and the paper — PDF-PARITY by construction", () => {
+    expect(code("lib/notesSketchNode.js"), "renderHTML must use the shared spec").toMatch(/renderHTML[\s\S]{0,160}sketchSpec\(/);
+    expect(code("lib/notesSketchNode.js"), "the node view must draw from the SAME spec").toMatch(/specToDom\(sketchSpec\(/);
+    // …and only one of them is in paper mode.
+    expect(src("lib/notesSketchNode.js")).toMatch(/detail: true/);
+  });
+
+  it("the drawing carries CLASS NAMES and no colours — the ink is in the two CSS mirrors", () => {
+    const render = code("lib/notesSketchRender.js");
+    expect(render, "a literal colour here would print the screen's theme onto paper").not.toMatch(/#[0-9a-fA-F]{3,8}\b/);
+    expect(render).not.toMatch(/rgba?\(|var\(--/);
+  });
+
+  it("every sketch class the drawing emits is styled on BOTH surfaces", () => {
+    const render = src("lib/notesSketchRender.js");
+    const screen = src("components/NoteEditor.jsx");
+    const paper = src("lib/notesPrint.js");
+    const classes = new Set([...render.matchAll(/planyr-sketch[\w-]*/g)].map((m) => m[0]));
+    /* The DRAWING's own classes must be styled on both. Two sets are deliberately one-sided,
+     * and each is the same decision seen from its own end: the interactive chrome (chevron,
+     * tools, the outline field, the drag group) cannot be pressed on paper, and the detail
+     * list exists ONLY on paper — it is what replaces the chevron there, so that every body
+     * is carried on both surfaces without either surface printing it twice (PANEL-BREVITY). */
+    const screenOnly = /chevron|tools|kind|btn|status|offline|host|draw|outline|textarea|hint|sketch-node/;
+    const paperOnly = /detail/;
+    for (const cls of classes) {
+      if (!paperOnly.test(cls)) expect(screen, `${cls} has no on-screen style`).toContain(cls);
+      if (!screenOnly.test(cls)) expect(paper, `${cls} is drawn but has no PRINT style — the sheet will not match the screen`).toContain(cls);
+    }
+  });
+
+  it("the INTERACTIVE half is behind a cached dynamic import, like notesCloud and the image DB", () => {
+    const node = code("lib/notesSketchNode.js");
+    expect(node, "a static import puts the whole editor on every note that has no sketch")
+      .not.toMatch(/^\s*import\s+.*notesSketchEditor/m);
+    expect(node).toMatch(/import\("\.\/notesSketchEditor\.js"\)/);
+    expect(node, "the promise is cached, so a second sketch does not re-fetch").toMatch(/editorChunk/);
+    // Nothing else may reach it either.
+    for (const f of ALL_NOTES_FILES.filter((x) => x !== "lib/notesSketchNode.js")) {
+      expect(code(f), `${f} imports the sketch editor directly`).not.toMatch(/^\s*import\s+.*notesSketchEditor/m);
+    }
+  });
+
+  it("sketch code stays OFF the Notes route's static path — including out of the exporter", () => {
+    expect(code("lib/notesMarkdown.js"), "the exporter is on the static path; importing the sketch model puts sketch bytes on every notebook's first paint")
+      .not.toMatch(/notesSketch/);
+    for (const f of ["Notes.jsx", "components/NotesTree.jsx", "lib/notesModel.js", "lib/notesStore.js"]) {
+      expect(code(f), `${f} is on the static path and reaches sketch code`).not.toMatch(/notesSketch/);
+    }
+  });
+
+  it("no dialog boxes in the sketch either (house rule) — every edit is in place", () => {
+    for (const f of SKETCH_FILES) {
+      expect(code(f), `${f} uses a browser dialog`).not.toMatch(/window\.(prompt|confirm|alert)|[^.\w](prompt|confirm|alert)\(/);
+    }
+    // The outline is a real field on the page and the arrow is drawn by pressing two boxes.
+    expect(code("lib/notesSketchEditor.js")).toMatch(/createElement\("textarea"\)|el\("textarea"/);
+  });
+
+  it("a refused act SAYS SO (LOUD-FAILURE) — addLink returns a reason and the editor shows it", () => {
+    expect(code("lib/notesSketchModel.js")).toMatch(/added:\s*false,\s*reason:/);
+    expect(code("lib/notesSketchEditor.js")).toMatch(/say\(`No arrow — \$\{reason\}/);
+    // …and a failed chunk load leaves a named message rather than a dead-looking drawing.
+    expect(src("lib/notesSketchNode.js")).toMatch(/Sketch editing could not load/);
+  });
+
+  it("the toolbar can insert one, and the command is the only way in", () => {
+    expect(code("components/NoteToolbar.jsx")).toMatch(/insertNoteSketch\(\)/);
+    expect(code("lib/notesSketchNode.js")).toMatch(/insertNoteSketch:/);
   });
 });

@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-08-03 @ `ccbfcf2` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-08-03 @ `fffd980` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_416 source files mapped._
+_420 source files mapped._
 
 ## infra
 
@@ -67,6 +67,14 @@ _416 source files mapped._
   - _exports_: `buildPrintDocument`, `printHtmlDocument`
 - **`src/workspaces/notes/lib/notesSearchHighlight.js`** — Search marking as ProseMirror DECORATIONS (never marks — it must not write into the document) plus stepping between matches.
   - _exports_: `default`, `findSearchMatches`, `NoteSearchHighlight`, `noteSearchKey`
+- **`src/workspaces/notes/lib/notesSketchEditor.js`** — Sketch mode's INTERACTIVE half — the outline pane, dragging a box, arrow mode, opening a body in place. Behind a cached dynamic import so a note with no sketch never downloads it.
+  - _exports_: `attachSketchEditor`, `default`
+- **`src/workspaces/notes/lib/notesSketchModel.js`** — PURE sketch decisions: the outline text <-> model, the id-stable reconcile (the ONE place a node is created or destroyed, and where the position/arrow cascade runs), and the automatic layout.
+  - _exports_: `addLink`, `applyOutlineText`, `BODY_LINE_H`, `BODY_WRAP`, `BOX_MIN_H`, `BOX_W`, `boxAt`, `boxSize`, `buildTree`, `clearPosition`, `defaultMint`, `edgePoint`, `EMPTY_SKETCH`, `GAP_X`, `GAP_Y`, `isEmptySketch`, `LABEL_WRAP`, `layoutSketch`, `LINE_H`, `MARGIN`, `moveNode`, `normalizeSketch`, `outlineToText`, `PAD_X`, `PAD_Y`, `parentMap`, `parseOutlineText`, `reconcileOutline`, `removeLink`, `wrapText`
+- **`src/workspaces/notes/lib/notesSketchNode.js`** — The `noteSketch` schema node and its node-view shell — a sketch is part of the DOCUMENT, which is what makes it persist, sync, print and export with no new plumbing.
+  - _exports_: `default`, `NoteSketch`
+- **`src/workspaces/notes/lib/notesSketchRender.js`** — The ONE sketch drawing builder, used by the schema node's renderHTML AND the node view — class names only, no colours, so screen and paper cannot drift (PDF-PARITY).
+  - _exports_: `sketchAltText`, `sketchSpec`, `specToDom`
 - **`src/workspaces/notes/lib/notesStore.js`** — The ONE storage seam for Notes — per-account scoped keys, tree and page bodies kept separate, image bytes in IndexedDB behind enforced ceilings, `purgePages` as the one place bytes are destroyed, every failure broadcast (LOUD-FAILURE). Cloud sync would be a change here and nowhere else.
   - _exports_: `clearNotesStorageError`, `deleteNoteImages`, `deletePages`, `lastNotesStorageError`, `listStoredPageIds`, `LOCAL_SCOPE`, `markPagesBinned`, `markPagesRestored`, `MAX_IMAGE_BYTES`, `MAX_NOTEBOOK_IMAGE_BYTES`, `noteImageUsage`, `notesConflictFor`, `notesConflictLine`, `notesConflicts`, `notesScope`, `notesScopeLabel`, `notesStorageLine`, `notesSyncState`, `onNotesConflict`, `onNotesPagesChanged`, `onNotesStorageError`, `onNotesSyncState`, `PAGE_KEY_BASE`, `pageKey`, `purgePages`, `putNoteImage`, `readNoteImage`, `readNoteImages`, `readPage`, `readTreeRaw`, `refreshNotesSync`, `reportImageProblem`, `resolveNotesConflict`, `searchNotes`, `setNotesScope`, `startNotesSync`, `stopNotesSync`, `sweepImagesOfMissingPages`, `sweepOrphans`, `SYNC_KEY_BASE`, `syncKey`, `TREE_KEY_BASE`, `treeKey`, `writePage`, `writeTree`
 - **`src/workspaces/notes/lib/notesTabKey.js`** — Tab belongs to the document: a low-priority fallback behind the table and list handlers, plus the Escape-then-Tab keyboard-trap escape
