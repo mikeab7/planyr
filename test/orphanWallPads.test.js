@@ -18,7 +18,7 @@
  * Every fixture here is REAL PRODUCTION GEOMETRY (`test/fixtures/orphanWallPads.json`, pulled from
  * `site_elements` 2026-08-03). The defect IS the fixture — do not "fix" the numbers.
  */
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeEach } from "vitest";
 import { readFileSync } from "node:fs";
 import {
   normalizeBondedChildren, normalizeOrphanWallPads, orphanWallPads, RESTORED_STRIP_W_FT,
@@ -27,6 +27,7 @@ import { assemblyIntegrity, orphanPayload } from "../src/workspaces/site-planner
 import { HOST_ROLE_TAGS, carryHostRoleTags } from "../src/workspaces/site-planner/lib/bondRemap.js";
 import { sideParkStack } from "../src/workspaces/site-planner/lib/dogEar.js";
 import { createIdMinter } from "../src/shared/ids.js";
+import { loadSite } from "../src/workspaces/site-planner/lib/storage.js";
 
 const FIX = JSON.parse(readFileSync(new URL("./fixtures/orphanWallPads.json", import.meta.url), "utf8"));
 const read = (p) => readFileSync(new URL(p, import.meta.url), "utf8");
@@ -301,5 +302,72 @@ describe("NEW-4 — assembly integrity fails loud on a bonded pad with no wall r
     // A zero-geometry repair would otherwise be discarded here (this seam ignores sub-tolerance
     // churn on purpose), so the orphan case adopts the healed list explicitly.
     expect(guard).toMatch(/if \(!res\.tears\.length\) return \(res\.orphans && res\.orphans\.length\) \? res\.els : list;/);
+  });
+});
+
+/* -------------------------------- NEW-3, second pass: the repair has to reach the STORED record */
+describe("NEW-3 — a repair that moves nothing is still written back to disk", () => {
+  function mockLocalStorage() {
+    const store = {};
+    globalThis.localStorage = {
+      getItem: (k) => (k in store ? store[k] : null),
+      setItem: (k, v) => { store[k] = String(v); },
+      removeItem: (k) => { delete store[k]; },
+      clear: () => { for (const k of Object.keys(store)) delete store[k]; },
+      key: (i) => Object.keys(store)[i] ?? null,
+      get length() { return Object.keys(store).length; },
+    };
+  }
+  beforeEach(() => mockLocalStorage());
+  // The on-device store, read straight off the stub — the point of these three cases is what is
+  // ON DISK, so they must not go back through the read path that does the repairing.
+  const stored = (id) => JSON.parse(globalThis.localStorage.getItem("planarfit:sites:v1"))[id].els;
+  /* ⛔ PLANT THE RAW BYTES, never via `saveSite` — `saveSite` renormalizes on WRITE, so seeding
+     through it stores an already-repaired record and the load path is never exercised at all.
+     (The first version of these three cases did exactly that and passed against the pre-fix code,
+     which is how the mistake was caught: a mutation that should have turned them red did not.) */
+  const plant = (id, els) => globalThis.localStorage.setItem("planarfit:sites:v1",
+    JSON.stringify({ [id]: { id, name: id, schemaVersion: 12, updatedAt: 1, els } }));
+
+  /* THE DEFECT THIS CLOSES, found by driving the fix in a headless browser rather than by reading
+   * it. `bondedHealWatch` decides whether a load-time repair is worth persisting by measuring how
+   * far it MOVED a child — the right question for a torn assembly, where the distance is both the
+   * severity and the proof. It is the wrong question here: restoring a pad's `sideParkSide` changes
+   * its identity and not one coordinate, and minting the deleted sidewalk back ADDS an element with
+   * no previous position to measure. Both scored 0 ft, so `wasTorn` came back false, `saveSite` was
+   * never called, and the plan rendered repaired while the stored copy kept its wreckage — exactly
+   * the failure `loadSite`'s own comment was written about. */
+  it("opening the damaged plan WRITES the restored sidewalks back, not just draws them", () => {
+    plant("gc", clone(FIX.gooseCreekPlanII.els));
+    const opened = loadSite("gc", { persistHeal: true });
+    for (const host of ["e1454629danlgq", "e1454729ykduhm"])
+      expect(stripsOn(opened.els, host), `${host} repaired in memory`).toHaveLength(2);
+    // …and the same is true of what is now ON DISK, which is the half that was missing.
+    const onDisk = stored("gc");
+    for (const host of ["e1454629danlgq", "e1454729ykduhm"])
+      expect(stripsOn(onDisk, host), `${host} repaired ON DISK`).toHaveLength(2);
+    for (const id of ["e1454691dshobp", "e1454736ykduhm"]) {
+      const was = FIX.gooseCreekPlanII.els.find((e) => e.id === id);
+      const now = onDisk.find((e) => e.id === id);
+      expect(now.sideParkSide, `${id} kept its restored role on disk`).toBe("left");
+      expect(Math.hypot(now.cx - was.cx, now.cy - was.cy)).toBeLessThan(0.01);
+    }
+  });
+
+  it("re-opening it changes nothing — no second sidewalk, no re-minted id", () => {
+    plant("gc", clone(FIX.gooseCreekPlanII.els));
+    loadSite("gc", { persistHeal: true });
+    const first = stored("gc").map((e) => e.id).sort();
+    loadSite("gc", { persistHeal: true });
+    expect(stored("gc").map((e) => e.id).sort()).toEqual(first);
+    expect(orphanWallPads(stored("gc"))).toEqual([]);
+  });
+
+  it("a healthy plan is NOT re-written on open (no updatedAt churn on every route lookup)", () => {
+    plant("ok", clone(FIX.silvestri.els));
+    loadSite("ok", { persistHeal: true });                     // repairs identity, writes once
+    const after = JSON.stringify(stored("ok"));
+    loadSite("ok", { persistHeal: true });
+    expect(JSON.stringify(stored("ok"))).toBe(after);    // …and never again
   });
 });
