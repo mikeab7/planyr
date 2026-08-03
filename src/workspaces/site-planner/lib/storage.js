@@ -986,6 +986,17 @@ const healMoveFt = (h) => {
   const ran = Number.isFinite(f.run) && Number.isFinite(t.run) ? Math.abs(t.run - f.run) : 0;
   return Math.max(moved, ran);
 };
+/* NEW-3 — REPAIRS THAT MOVE NOTHING STILL HAVE TO BE WRITTEN BACK, and the distance test above
+ * cannot see them. It was built for a child in the wrong PLACE, where "how far" is both the
+ * severity and the proof. The orphaned-wall-pad repair is the other kind: restoring a bonded pad's
+ * `sideParkSide` changes its IDENTITY and not one coordinate, and minting the deleted 5 ft sidewalk
+ * back into the void ADDS an element that has no previous position to be measured against. Both
+ * scored 0 ft, so `wasTorn` came back false and `saveSite` was never called — the repair rendered
+ * correctly on the canvas and the stored record kept its wreckage, which is the exact failure mode
+ * the comment in `loadSite` below was written about. Measured in a headless check before it shipped,
+ * not guessed. So severity here is STRUCTURAL, not metric: these kinds always persist. */
+const STRUCTURAL_HEAL_KINDS = new Set(["orphan-pad-retagged", "orphan-pad-strip-restored"]);
+const isStructuralHeal = (h) => !!(h && STRUCTURAL_HEAL_KINDS.has(h.kind));
 function bondedHealWatch(id) {
   const heals = [];
   return {
@@ -996,12 +1007,26 @@ function bondedHealWatch(id) {
       try {
         if (!heals.length) return false;
         const torn = heals.filter((h) => healMoveFt(h) > HEAL_TEAR_TOL_FT);
-        if (!torn.length) return false;              // sub-foot drift is housekeeping, not a tear
-        const items = torn.slice(0, 20).map((h) => ({ id: h.id, host: h.host, type: h.type, kind: h.kind, dist: Math.round(healMoveFt(h) * 1000) / 1000 }));
-        const worst = torn.reduce((m, h) => Math.max(m, healMoveFt(h)), 0);
-        reportClientEvent("assembly-tear-detected",
-          `the stored plan opened with ${torn.length} bonded child(ren) up to ${Math.round(worst)} ft off their host (load)`,
-          { id, seam: "load", count: torn.length, worstFt: Math.round(worst * 1000) / 1000, items });
+        // NEW-3 — reported SEPARATELY from the displaced ones, because "N children up to X ft off
+        // their host" is simply untrue of a repair that moved nothing, and a message that overstates
+        // what happened is how a real signal stops being read.
+        const structural = heals.filter(isStructuralHeal);
+        if (!torn.length && !structural.length) return false;   // sub-foot drift is housekeeping
+        if (torn.length) {
+          const items = torn.slice(0, 20).map((h) => ({ id: h.id, host: h.host, type: h.type, kind: h.kind, dist: Math.round(healMoveFt(h) * 1000) / 1000 }));
+          const worst = torn.reduce((m, h) => Math.max(m, healMoveFt(h)), 0);
+          reportClientEvent("assembly-tear-detected",
+            `the stored plan opened with ${torn.length} bonded child(ren) up to ${Math.round(worst)} ft off their host (load)`,
+            { id, seam: "load", count: torn.length, worstFt: Math.round(worst * 1000) / 1000, items });
+        }
+        if (structural.length) {
+          const restored = structural.filter((h) => h.kind === "orphan-pad-strip-restored").length;
+          reportClientEvent("assembly-orphan-pad-repaired",
+            `the stored plan opened with ${structural.length - restored} bonded pad(s) carrying no wall role`
+            + (restored ? `; ${restored} deleted sidewalk(s) restored into the void left behind` : "") + " (load)",
+            { id, seam: "load", count: structural.length, restored,
+              items: structural.slice(0, 20).map((h) => ({ id: h.id, host: h.host, type: h.type, kind: h.kind, side: h.side })) });
+        }
         return true;
       } catch (_) { return false; /* telemetry never blocks a read */ }
     },
