@@ -37,25 +37,35 @@ export const COUNTY_VERIFICATION = {
   },
   co_arapahoe: {
     candidateUrl: "https://gis.arapahoegov.com/arcgis/rest/services/OpenDataService/FeatureServer/0",
-    candidateProvenance: "ArcGIS Online item 'Parcels - Arapahoe County' (owner gis@mhfd); host gis.arapahoegov.com blocked by build-environment egress policy — probe pending (V507).",
+    candidateProvenance: "ArcGIS Online item 'Parcels - Arapahoe County' (owner gis@mhfd); host gis.arapahoegov.com still blocked by build-environment egress policy — RE-PROBED 2026-08-03 (NEW-1) and still pending. The only reachable alternative is an AGOL copy (services1.arcgis.com/Ezk9fcjSUkeadg6u, 214,375 features, 250 ms) owned by `jklier_uagis`, a 2017 personal/coursework account; a nine-year-old third-party copy is worse than the state composite, so it is recorded and not shipped.",
     verifiedOn: null,
   },
   co_larimer: {
-    candidateUrl: "https://maps1.larimer.org/arcgis/rest/services/MapServices/Parcels/MapServer/3",
-    candidateProvenance: "ArcGIS Online item 'Larimer County Tax Parcels' (owner ftc_geoevent); host maps1.larimer.org blocked by build-environment egress policy — probe pending (V507).",
-    verifiedOn: null,
+    // PROMOTED 2026-08-03 (NEW-1). The parked candidate is now the primary: probed LIVE from the
+    // owner's own browser over the site in the report — 181,035 tax parcels, capabilities
+    // Map,Query,Data, count query 108 ms, point identify 87 ms, maxRecordCount 1000, and the same
+    // parcel (PARCELNUM 8634109901, LOCADDRESS "5260 ARENA CIR") the statewide composite returns
+    // for -104.985, 40.44. Independently corroborated here against the ArcGIS Online registry:
+    // item "Larimer County Tax Parcels", owner `ftc_geoevent`, this exact URL.
+    verifiedOn: "2026-08-03",
+    verifiedNote: "Live-probed from the owner's browser, not from this build environment — maps1.larimer.org is still blocked by the sandbox egress policy (a sandbox limitation, not a sign the endpoint moved), the same standing as the Chambers row. The browser is where the app actually runs, so a browser probe is the load-bearing one; the AGOL item record was matched here to confirm the URL is the county's own published service. → V682.",
   },
   co_jefferson: {
+    // ⚠ CORRECTS the B1111 record. Jefferson was filed as "no county parcel endpoint could be
+    // FOUND at all". The 2026-08-03 re-probe (NEW-1) found it registered: ArcGIS Online item
+    // "Parcel", owner `Jeffco` (the county's own org).
+    candidateUrl: "https://gisportal.jeffco.us/server2/rest/services/Parcel/FeatureServer/0",
+    candidateProvenance: "ArcGIS Online item 'Parcel' (owner Jeffco, the county's own org), plus a sibling 'Parcel Split' service on the same host; gisportal.jeffco.us blocked by build-environment egress policy — probe pending. The two reachable Jeffco copies are both provably STALE: the City of Lakewood's hosted copy (services.arcgis.com/PFikmPaTMlt2KX1O, 248,974 features) last edited 2018-05-08, and the county's own 2022 snapshot service disagree on the owner of the same PIN 49-061-03-003.",
     verifiedOn: null,
   },
   co_elpaso: {
     candidateUrl: "https://gisservices.elpasoco.com/arcgis2/rest/services/HubPublic/Parcels/MapServer",
-    candidateProvenance: "ArcGIS Online item 'Parcels' (owner BaileyG, El Paso County); host gisservices.elpasoco.com blocked by build-environment egress policy — probe pending (V507). A regional alternative WAS verified live 2026-07-29 — PPACG Parcels (2025), https://services1.arcgis.com/0plDVQODvYjBRQXP/arcgis/rest/services/PPACG_Parcels/FeatureServer/0, native SR EPSG:2232 — but it is the MPO's derived planning layer, not the assessor's fabric, so it is not shipped as a parcel source.",
+    candidateProvenance: "ArcGIS Online item 'Parcels' (owner BaileyG, El Paso County); host gisservices.elpasoco.com still blocked by build-environment egress policy — RE-PROBED 2026-08-03 (NEW-1) and still pending. A regional alternative was verified live 2026-07-29 and RE-verified 2026-08-03 — PPACG Parcels (2025), https://services1.arcgis.com/0plDVQODvYjBRQXP/arcgis/rest/services/PPACG_Parcels/FeatureServer/0, 268,356 features, 326 ms, native SR EPSG:2232, last edited 2026-07-25 — but it is the MPO's TAZ-joined planning derivative (LandUse/PlaceType/NumHU columns), it drops right-of-way parcels and it spans Teller County, so it is still not shipped as a parcel source. The re-probe confirms the 2026-07-29 reasoning rather than overturning it.",
     verifiedOn: null,
   },
   co_boulder: {
     candidateUrl: "https://maps.bouldercounty.org/arcgis/rest/services/PARCELS/PARCELS_OWNER/FeatureServer/0",
-    candidateProvenance: "ArcGIS Online item 'Parcels - Boulder County' (owner gis@mhfd); host maps.bouldercounty.org blocked by build-environment egress policy — probe pending (V507).",
+    candidateProvenance: "ArcGIS Online item 'Parcels - Boulder County' (owner gis@mhfd); host maps.bouldercounty.org still blocked by build-environment egress policy — RE-PROBED 2026-08-03 (NEW-1) and still pending. Boulder County's OWN reachable AGOL copy ('Boulder County Parcel / Address Look Up', services3.arcgis.com/0jWpHMuhmHsukKE3, native SR EPSG:2876, 259 ms) carries only 30,803 features and its own Updated column reads 2/14/2020 — a partial six-year-old extract would show a lot as MISSING rather than as slow, so it is recorded and not shipped.",
     verifiedOn: null,
   },
 };

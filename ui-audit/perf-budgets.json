@@ -48,7 +48,7 @@
       "minBytes": 32768
     },
     "siteRouteJsBytes": {
-      "baseline": 2341801,
+      "baseline": 2377892,
       "target": 1600000,
       "unit": "bytes",
       "what": "Total JS a plain Site route must download: the entry chunk plus SitePlannerApp and its static-import closure.",
@@ -102,7 +102,7 @@
       "note": "Larger than the 3016 KB the owner's 2026-07-28 pass reported, and correctly so: that figure counted the 11 chunks a browser actually FETCHED, while this counts all 20 emitted — the extra 5 are Web Worker bundles (terrainWorker, dxfWorker) and small helper chunks that only a dynamic import ever pulls. Two different questions; the per-route budgets above answer the owner's. CEILING RAISED 3960000 -> 3985000 by B1130/B1131 (2026-07-30), stated in full because raising a ceiling is a product decision. THE KEY POINT: this metric counts EVERY emitted chunk, lazy ones included, BY DESIGN — that is exactly what makes it the honest catch-all. So the four deferrals that paid the two per-route budgets (see siteRouteJsBytes.note) move bytes OFF the critical path without reducing this number at all, and no amount of further code-splitting can. The residual is ~19 KB of genuine minified code implementing two owner-reported defects on the Electric layer: substations painting as broken-image glyphs labelled \"Mark\", and no way to hover a line or substation to learn what it is. WHAT WAS PAID ELSEWHERE FIRST, so this is not a shortcut: largestChunkBytes was brought back UNDER its existing ceiling with no raise at all (1719.5 -> 1706.8 KB), and siteRouteJsBytes was cut from +20.2 KB to +7.4 KB before its ceiling moved. HEADROOM CONTEXT: main was at 3861.4 KB against the 3867.2 KB ceiling — 5.8 KB — so like the other two, this metric now trips on essentially any feature; that is a headroom problem to be closed by B1064, not a regression in this PR. Ceiling and target are kept EQUAL here, as they were before, so this metric continues to assert no known gap rather than quietly acquiring one. NEW-1 (2026-07-30): baseline and target are still kept EQUAL for exactly that reason, and the derived headroom band now applies to this metric too — it was 4.3 KB (0.11%) under its old hand-pinned ceiling and would have been the next surprise."
     },
     "largestChunkBytes": {
-      "baseline": 1452996,
+      "baseline": 1476228,
       "target": 900000,
       "unit": "bytes",
       "what": "The single biggest chunk (today SitePlannerApp).",
@@ -258,6 +258,24 @@
           "item": "B1291",
           "date": "2026-07-31",
           "reason": "B1291 cloud sync for Notes. Head-to-head in ONE container: origin/main alone 4488.9 KB vs this branch 4509.2 KB = +20.3 KB, of which 9.3 KB is the lazily-loaded notesCloud chunk (transport + the pure merge decisions) and 11.0 KB is the store and workspace. This metric counts EVERY emitted chunk BY DESIGN — that is what makes it the honest catch-all — so no amount of further splitting reduces it: the code has to exist for a note to survive clearing browsing data, which is the whole point of the item. main had already consumed 76.9 KB of the 88.2 KB band before this branch existed. A future rise in this metric WITHOUT a new capability is a regression."
+        },
+        {
+          "metric": "bundle.largestChunkBytes",
+          "from": 1452996,
+          "to": 1476228,
+          "direction": "raise",
+          "item": "B1405",
+          "date": "2026-08-03",
+          "reason": "NEW-1..NEW-5 (B1401-B1405) add 10.4 KB to the Site route's largest chunk — the roundabout geometry module + its canvas wiring, the acreage-chip hover/menu tier, and the URL-keyed parcel-source policy. Measured against main at ccbfcf2 with no changes applied: main ALONE already builds 22.7 KB over its own recorded baseline (the B1178 unreproducible-baseline defect), so 22.7 of the 23.7 KB above baseline is pre-existing drift this branch did not cause, and this feature's own 10.4 KB sits well inside the 32 KB headroom band. Payback is owned by B1064 (extract SitePlanner's panels into lazily-loaded children)."
+        },
+        {
+          "metric": "bundle.siteRouteJsBytes",
+          "from": 2341801,
+          "to": 2377892,
+          "direction": "raise",
+          "item": "B1401",
+          "date": "2026-08-03",
+          "reason": "Re-seed onto a REAL BUILD OF MAIN (ccbfcf2), the same policy-migration shape B1344 used. The recorded 2286.9 KB is not reproducible from a clean clone — measured this session, main with zero changes builds 2322.2 KB, i.e. 35.2 KB above its own baseline (the filed B1178 defect), which was silently consuming the whole headroom band and left 0.1 KB for any change at all. This records what main actually builds; the B1401-B1405 feature growth (10.3 KB) then rides the band as intended. No optimization is claimed. Payback for the site route's bytes is owned by B1064."
         }
       ]
     }

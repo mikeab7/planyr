@@ -131,13 +131,21 @@ test.describe("NEW-1 — no chrome painted above the plan swallows a press meant
     expect(byChrome, `chrome swallowed the press at these elements' own centres: ${JSON.stringify(byChrome)}`).toEqual([]);
   });
 
-  test("STRUCTURAL: the acreage badge is inert until its own lot is selected", async ({ page }) => {
+  /* NEW-4 amended the GATE and not the GUARANTEE. B1327 made the badge a hit target only while its
+     own lot was SELECTED; that gate turned out to be unreachable (the badge sits on the building,
+     so pressing it selected the building and the lot never got selected — see
+     e2e/parcel-chip-move-delete.spec.js), and the gate is now HOVER. What this test protects is
+     unchanged and is the thing that actually matters: with the pointer nowhere near a badge — which
+     is every static hit test, and every press aimed at something else — no badge answers anything. */
+  test("STRUCTURAL: the acreage badge is inert until the pointer is on it", async ({ page }) => {
     await loadOwnerPlan(page);
     const badges = page.locator('[data-print-chip="acre"]');
     await expect(badges.first(), "the badge still DRAWS at all times — only its PRESS is gated").toBeVisible();
-    // Nothing selected → not one badge on the plan may answer a press.
+    // Park the pointer off every badge, then assert not one of them can answer a press.
+    await page.mouse.move(4, 4);
+    await page.waitForTimeout(250);
     const live = await badges.evaluateAll((ns) => ns.filter((n) => getComputedStyle(n).pointerEvents !== "none").length);
-    expect(live, "an acreage badge was pointer-enabled with no parcel selected — this is the B1186 regression").toBe(0);
+    expect(live, "an acreage badge was pointer-enabled with the pointer elsewhere — this is the B1186 regression").toBe(0);
   });
 
   test("BEHAVIOURAL: double-clicking a badged building opens Properties (the owner's report)", async ({ page }) => {

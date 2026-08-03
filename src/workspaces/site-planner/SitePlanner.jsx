@@ -195,6 +195,11 @@ import { formatAge } from "./lib/gisCache.js";
 import { buildingNumbers, isBuilding, roadTravelWidth, bondedChildRot, roadStripBBox, rectRoadEndpoints, parcelOutline, parcelDisplayInfo, lineageConflicts } from "./lib/siteModel.js";
 import { roadCenterline, projectToRoadCenterline, roadMinRadius, insertRoadVertex, removeRoadVertex, canRemoveRoadVertex, curbStrokePx, findRoadConnect, planRoadConnect, fixRoadRadii, teeGeometry, rectEdges, nearestRectEdge, weldCoverPolygon, roadRadiusConflicts, fitRoadCorners, nodeJunction, cardinalTeePoint, roadBearingDeg } from "./lib/roadGeometry.js";
 import { dissolveRings, clipPolylineOutside, clusterIds, regionPathD, rectOutlineCutSegments } from "./lib/roadNetwork.js";
+import {
+  roundaboutNodes, roundaboutGeometry, roundaboutDiameterFor, roundaboutBandFor,
+  normalizeRoundaboutD, legTrimFor, trimPolylineEnds, roundaboutArea, roundaboutIslandArea,
+  ROUNDABOUT_MIN_D, ROUNDABOUT_MAX_D,
+} from "./lib/roundabout.js";
 import { dashZoom, insetRingVisible } from "./lib/lineZoom.js";
 import { roadClassesOf, roadClassOf, classMinRadius, classDefaultRadius, classReturnRadius, DEFAULT_ROAD_CLASS, ROAD_CLASS_SEEDS, speedMinRadius } from "./lib/roadClasses.js";
 import { DOGEAR_W, DOGEAR_D, dogEarGeom, dogEarSize, sidewalkSpanForBumps, isDogEarSide,
@@ -1197,23 +1202,34 @@ const roadDefaultRadius = (el, settings) => classDefaultRadius(roadClassOf(setti
 // centerlines MEET, so the through road has to pass through the node, and a centerline fillet cuts
 // the corner clean off it. Every caller that draws, measures or dissolves a road passes it, so the
 // pavement, the curb stripes, the paved-area figure and the length all describe the same road.
-const roadDenseCenterline = (el, settings, sharpAt) => roadCenterline(el.pts, el.vtx, { defaultRadius: roadDefaultRadius(el, settings), sharpAt });
+/* NEW-5 — `trim` is {start,end} in feet: how far this road's centerline is SHORTENED at each
+ * terminus because a roundabout sits there. Every consumer of a road's geometry takes it, so the
+ * drawn pavement, the curb stripes, the paved-area figure and the dissolve all describe the SAME
+ * road — the "the pavement math knows about it" half of the owner's condition. An undefined trim is
+ * the byte-identical old behaviour, so a plan with no roundabout is untouched. */
+const roadDenseCenterline = (el, settings, sharpAt, trim) => {
+  const dense = roadCenterline(el.pts, el.vtx, { defaultRadius: roadDefaultRadius(el, settings), sharpAt });
+  return trim && (trim.start > 0 || trim.end > 0) ? trimPolylineEnds(dense, trim.start || 0, trim.end || 0) : dense;
+};
 // The pavement+curb OUTER ring (closed polygon) — total width = travelW + a curb each side.
-const roadStripRing = (el, settings, sharpAt) => {
-  const dense = roadDenseCenterline(el, settings, sharpAt);
+const roadStripRing = (el, settings, sharpAt, trim) => {
+  const dense = roadDenseCenterline(el, settings, sharpAt, trim);
   return bufferPolyline(dense, Math.max(0, (+el.travelW || 0) + 2 * roadCurbWidth(el))) || [];
 };
 // The two inner curb lines = the centerline offset by ±travelW/2 (face-of-curb edges).
-const roadCurbLines = (el, settings, sharpAt) => {
-  const dense = roadDenseCenterline(el, settings, sharpAt);
+const roadCurbLines = (el, settings, sharpAt, trim) => {
+  const dense = roadDenseCenterline(el, settings, sharpAt, trim);
   const hw = Math.max(0, (+el.travelW || 0) / 2);
   return [offsetPolyline(dense, hw), offsetPolyline(dense, -hw)].filter(Boolean);
 };
 // Plan-view paved area (sf) of a centerline road = its generated strip polygon area
 // (replaces the old w×h — the curbs are included, matching the B70 three-way contract).
-const roadStripArea = (el, settings, sharpAt) => {
-  const ring = roadStripRing(el, settings, sharpAt);
-  return ring.length >= 3 ? Math.abs(polyArea(ring)) : 0;
+// NEW-5 — plus the CIRCULATORY ROADWAY of any roundabout this road owns (`extraSf`), which is the
+// annulus and never the disc: the central island is landscaped, so counting it would overstate
+// impervious cover, and impervious cover is what a detention volume is priced off.
+const roadStripArea = (el, settings, sharpAt, trim, extraSf = 0) => {
+  const ring = roadStripRing(el, settings, sharpAt, trim);
+  return (ring.length >= 3 ? Math.abs(polyArea(ring)) : 0) + (+extraSf || 0);
 };
 // B953/NEW-1 — detect road tees for the clean-intersection render. A tee = a centerline road's
 // ENDPOINT coincident with an INTERIOR vertex of another centerline road (the B945/B949 tee
@@ -2211,6 +2227,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [ovMenu, setOvMenu] = useState(null);     // {id, x, y} site-plan overlay right-click menu (B461)
   const [ovAlignBase, setOvAlignBase] = useState(null); // overlay id armed for "Align to base edge" — next parcel-edge click sets its rotation (B462)
   const [parcelMenu, setParcelMenu] = useState(null); // {x,y,id} right-click parcel menu (merge / delete)
+  /* NEW-4 — THE ACREAGE CHIP'S OWN AFFORDANCE.
+     `parcelChipsRef` mirrors the frame's chip geometry (screen boxes) so the hot pointermove path
+     can answer "is the cursor over a chip?" without re-deriving it; `hoverChipId` is that answer.
+     The chip is a HIT TARGET only while it is hovered — see the render site for why that gate and
+     not the old selected-lot one (which could only be opened from behind itself). */
+  const parcelChipsRef = useRef([]);
+  const [hoverChipId, setHoverChipId] = useState(null);
   const [mapMenu, setMapMenu] = useState(null);   // {x,y,kind:'markup'|'empty',id?} — dedicated canvas right-click menu (never the browser's)
   // B230 — Bluebeam-style vertex editing (shared across every editable path: parcel, polygon
   // element, measure, markup poly/line, easement). `selVtx` = the active control point (the
@@ -6297,7 +6320,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // a protected endpoint is NOT armed for the Delete key (leave selVtx null → whole-road delete).
       const canDel = path.noEndpointDelete ? canRemoveRoadVertex(path.pts, v.index) : path.pts.length > path.min;
       setSelVtx(path.noEndpointDelete && !canDel ? null : { layer: path.layer, id: path.id, index: v.index });
-      setVtxMenu({ mode: "vertex", layer: path.layer, id: path.id, index: v.index, canDelete: canDel, x: e.clientX, y: e.clientY });
+      // NEW-5 — a road TERMINUS is where a roundabout can go, so the menu that already hosts
+      // "Add / Delete control point" is where the owner already right-clicks for it.
+      const roadEnd = path.layer === "road" ? (v.index === 0 ? "start" : v.index === path.pts.length - 1 ? "end" : null) : null;
+      setVtxMenu({ mode: "vertex", layer: path.layer, id: path.id, index: v.index, canDelete: canDel, roadEnd, x: e.clientX, y: e.clientY });
     } else if (edge) { // on an edge (away from any corner) → Add control point here
       e.preventDefault(); e.stopPropagation();
       setVtxMenu({ mode: "edge", layer: path.layer, id: path.id, index: edge.index, ptFeet: edge.pt, x: e.clientX, y: e.clientY });
@@ -6361,6 +6387,21 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // the footprint — moving onto one keeps the pointer over the building, so the
       // hover never flickers off. Only runs while idle in select mode with no
       // selection (selection otherwise drives the buttons), so there's no churn.
+      /* NEW-4 — which acreage chip (if any) is under the cursor. Screen-space point-in-box against
+         the boxes the render already computed for the label-collision engine, so this costs one
+         short loop and can never disagree with the drawn pill. It runs OUTSIDE the `!sel` gate
+         below because a chip must stay grabbable while something else is selected. */
+      if (tool === "select") {
+        // `fp` is the cursor in feet; `f2p` puts it back in the SAME screen space the chip boxes
+        // were built in, with no extra layout read (p2f above already paid for the one rect).
+        const sp = f2p(fp);
+        let over = null;
+        for (const c of parcelChipsRef.current) {
+          const b = c.box;
+          if (sp.x >= b.x && sp.x <= b.x + b.w && sp.y >= b.y && sp.y <= b.y + b.h) { over = c.id; break; }
+        }
+        if (over !== hoverChipId) setHoverChipId(over);
+      } else if (hoverChipId) setHoverChipId(null);
       if (tool === "select" && !sel) {
         // NEW-2 — ONE linear scan, no copy and no sort. This used to spread, sort and reverse the
         // whole element array on every pointermove just to answer "which building is under me".
@@ -6383,6 +6424,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
 
     if (d.mode === "acChip") { // NEW-3: drag a parcel's acreage chip (offset stored in feet)
       const dx = fp.x - d.start.x, dy = fp.y - d.start.y;
+      if (!d.moved) { d.moved = true; pushHistory(); } // NEW-4 — one undo frame, and only for a real move
       setParcels((a) => a.map((pc) => pc.id === d.id ? { ...pc, labelOffset: { x: d.base.x + dx, y: d.base.y + dy } } : pc));
       return;
     }
@@ -8956,9 +8998,42 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     e.stopPropagation();
     const pc = parcels.find((p) => p.id === id);
     if (!pc) return;
-    pushHistory();
-    drag.current = { mode: "acChip", id, start: p2f(e.clientX, e.clientY), base: pc.labelOffset || { x: 0, y: 0 } };
+    /* NEW-4 — history is pushed on the first real MOVE, not on the press. B1327's complaint about
+       this chip included "burnt an undo frame for nothing"; a press that turns out to be a click
+       must cost no undo step. `moved` is the latch. */
+    drag.current = { mode: "acChip", id, start: p2f(e.clientX, e.clientY), base: pc.labelOffset || { x: 0, y: 0 }, moved: false };
     svgRef.current.setPointerCapture(e.pointerId);
+  };
+
+  /* NEW-4 — the acreage chip's OWN right-click menu. The owner asked for the hide to be reachable
+     from both here and the parcel menu, "so it is findable either way"; the chip had no
+     `onContextMenu` at all, which is why there was no obvious place to put it. Selects the lot as
+     well, so the menu that opens is unambiguously about a named parcel. */
+  const onChipContext = (e, id) => {
+    if (tool !== "select") return;
+    e.preventDefault(); e.stopPropagation();
+    if (!parcels.some((p) => p.id === id)) return;
+    setSel({ kind: "parcel", id });
+    setParcelMenu({ x: e.clientX, y: e.clientY, id, fromChip: true });
+  };
+
+  /* NEW-4 — hide / show a parcel's acreage chip. A LABEL flag, deliberately NOT `active`: the lot
+     stays in the plan and in the yield math, it just stops wearing its badge. Undoable like every
+     other parcel mutation. */
+  const setParcelChipHidden = (id, hidden) => {
+    const pc = parcels.find((p) => p.id === id);
+    if (!pc || !!pc.chipHidden === !!hidden) return;
+    pushHistory();
+    setParcels((a) => a.map((p) => (p.id === id ? { ...p, chipHidden: !!hidden } : p)));
+    if (hidden) setHoverChipId((h) => (h === id ? null : h));
+  };
+
+  /* NEW-4 — put a dragged chip back on its parcel's own anchor. */
+  const resetParcelChipOffset = (id) => {
+    const pc = parcels.find((p) => p.id === id);
+    if (!pc || !pc.labelOffset) return;
+    pushHistory();
+    setParcels((a) => a.map((p) => (p.id === id ? { ...p, labelOffset: null } : p)));
   };
   // Inline numeric editor — NEVER a dialog box (owner rule 2026-06-17). Commit on Enter / click-away,
   // cancel on Esc; each opener says where to place it (feet) + what to do with the entered value.
@@ -9177,6 +9252,54 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
 
   /* ------------ metrics ------------ */
   // Per-element striping/count config: a strip may override the global standards
+  /* ⚠ DECLARED HERE, ABOVE THE AREA LEDGER, ON PURPOSE (NEW-5). The paved-area loop a few lines
+     down reads `roundabouts` DURING RENDER, and a `const` declared later in the component body is
+     in its temporal dead zone at that moment — which throws the whole planner to its error boundary
+     ("Cannot access … before initialization"), not a wrong number. Keep this above its first
+     reader; `roadNet` further down reads it too and is unaffected by the position. */
+  /* NEW-5 — ROUNDABOUTS. Derived entirely from what each road stores at its terminus
+     (`el.roundabout = {end, d}`), so the circle is BONDED by construction: move or re-align the
+     road and the centre, the leg bearings and the curb returns all re-derive from the current
+     `pts` in the same frame. Two roads whose termini meet at one node share ONE circle (the larger
+     declared diameter wins), which is what makes a second leg join rather than stack.
+     `trims` is the per-road centerline shortening every geometry consumer reads (see
+     `roadDenseCenterline`); `areaById` is the annulus each owning road contributes to the paved
+     figure. Both are handed to the render through `roadNet` so `renderElPx` can't drift from the
+     dissolve. */
+  const roundabouts = useMemo(() => {
+    const roads = (els || []).filter((x) => isCenterlineRoad(x) && !x.attachedTo);
+    const declared = roads.filter((r) => r.roundabout && r.roundabout.end);
+    if (!declared.length) return { nodes: [], geoms: [], trims: new Map(), areaById: new Map(), pairs: [], extraById: new Map() };
+    const byId = new Map(roads.map((r) => [r.id, r]));
+    const derivedD = (r) => roundaboutDiameterFor(roadClassOf(settings, r.roadClass), +r.travelW || 0);
+    const nodes = roundaboutNodes(
+      roads.map((r) => ({ id: r.id, pts: r.pts, travelW: r.travelW, curbW: roadCurbWidth(r), roundabout: r.roundabout })),
+      { nodeTolFt: Math.max(2, TEE_COINCIDE_FT), diameterFor: (r) => derivedD(byId.get(r.id) || r) },
+    );
+    const geoms = [], trims = new Map(), areaById = new Map(), pairs = [], extraById = new Map();
+    for (const node of nodes) {
+      // The circulatory width follows the WIDEST leg — a truck approach must not be circled by an
+      // aisle-width ring.
+      const travelW = Math.max(...node.legs.map((l) => +((byId.get(l.roadId) || {}).travelW) || 0), 0);
+      const owner = node.legs[0];
+      const cls = roadClassOf(settings, (byId.get(owner.roadId) || {}).roadClass);
+      const g = roundaboutGeometry(node, { travelWFt: travelW, returnR: classReturnRadius(cls), tessDeg: 6 });
+      if (!g) continue;
+      geoms.push({ node, geom: g, travelW });
+      for (const leg of node.legs) {
+        const t = trims.get(leg.roadId) || { start: 0, end: 0 };
+        t[leg.end] = legTrimFor(node.d, leg.half, travelW);
+        trims.set(leg.roadId, t);
+      }
+      // ONE road owns the annulus in the area ledger, so two legs can never double-count it.
+      areaById.set(owner.roadId, (areaById.get(owner.roadId) || 0) + roundaboutArea(node.d, travelW));
+      extraById.set(owner.roadId, [...(extraById.get(owner.roadId) || []), ...g.sectors, ...g.returns]);
+      for (let i = 1; i < node.roadIds.length; i++) pairs.push([node.roadIds[0], node.roadIds[i]]);
+    }
+    return { nodes, geoms, trims, areaById, pairs, extraById };
+  }, [els, settings]);
+  const roundTrim = useCallback((el) => (el && roundabouts.trims.get(el.id)) || undefined, [roundabouts]);
+
   // (e.g. the 50′ × 12′ single-row trailer parking carries its own cfg).
   const cfgOf = (el) => (el.cfg ? { ...settings, ...el.cfg } : settings);
   // Only ACTIVE parcels drive the yield/area math (default active; inactive = excluded but visible) (B100).
@@ -9193,7 +9316,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   let bumpCount = 0, bumpArea = 0, bumpsUniform = true; // dog-ear / bump-out tally (counted within bldg)
   let providedDetCf = 0, pondCount = 0, maxPondDepthFt = 0; // B630: provided detention across ALL ponds (cubic feet; pondGeom's Map memo keeps this cheap per render)
   els.forEach((e) => {
-    const a = isCenterlineRoad(e) ? roadStripArea(e, settings, sharpFor(e)) : e.points ? polyArea(e.points) : e.w * e.h; // road area = its generated strip polygon (B598)
+    const a = isCenterlineRoad(e) ? roadStripArea(e, settings, sharpFor(e), roundTrim(e), roundabouts.areaById.get(e.id)) : e.points ? polyArea(e.points) : e.w * e.h; // road area = its generated strip polygon (B598) + any roundabout annulus it owns (NEW-5)
     const curb = curbAreaFrom(e, elNeighbors.get(e.id), els); // derived curbs count in the SF / impervious math (0 for non-paved types; a road's curb is already inside its strip area)
     if (e.type === "building") {
       bldg += a;
@@ -13026,6 +13149,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // labels yield around them. Reused by parcelLabels so the obstacle box and the drawn pill agree.
   const parcelChips = parcels.map((pc) => {
     if (pc.active === false) return null; // inactive parcel shows no chip (B213) → not an obstacle
+    /* NEW-4 — the owner asked to be able to DELETE an acreage chip, and the only thing that hid one
+       was `active === false`, which also drops the lot from the yield math. `chipHidden` is the
+       label-only flag: keep the parcel, lose its badge. Filtering it HERE (rather than at the
+       render site below) is load-bearing — this list is also `parcelChipBoxes`, the obstacle set
+       the B951 label-collision engine avoids, and a label nobody can see must not go on pushing
+       every other label around the plan. */
+    if (pc.chipHidden) return null;
     // NEW-3 — the badge sits at the parcel's VISUAL centre (the pole of inaccessibility: the
     // centre of the largest circle that fits inside the ring), not at the vertex average. The
     // vertex average is pulled toward whichever side was digitized with the most points, so on a
@@ -13044,6 +13174,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     return { pc, c, txt, fs, padX, padY, boxW, boxH, box: boxOf(c.x, c.y, boxW, boxH) };
   }).filter(Boolean);
   const parcelChipBoxes = parcelChips.map((p) => p.box);
+  /* NEW-4 — mirror the frame's chip geometry for the hot pointermove hover test (see `hoverChipId`).
+     Assigning during render is safe here because it is a pure mirror of what this frame draws — the
+     handler that reads it can only run after the frame is committed. */
+  parcelChipsRef.current = parcelChips.map((p) => ({ id: p.pc.id, box: p.box }));
 
   /* NEW-3 — the MEASUREMENT summary chip.
    *
@@ -13240,15 +13374,38 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
        selected. The badge still DRAWS at all times — only its press is gated — and a click on it
        now falls through to whatever is underneath (which, over the lot's own fill, selects the
        lot and arms the drag). */
-    const draggable = tool === "select" && sel?.kind === "parcel" && sel.id === pc.id;
+    /* ⛔ NEW-4 — THE GATE IS *HOVER*, NOT SELECTION, AND THE OLD GATE COULD ONLY BE OPENED FROM
+       BEHIND ITSELF. B1327 (above) made the badge a hit target only while its own lot was
+       SELECTED. That is a sound reading of CHROME-NEVER-EATS-A-PRESS, and it was also unreachable:
+       B1186 parks the badge at `polylabel` — the developed middle of the lot, i.e. on top of a
+       building — so pressing the badge selected the BUILDING, the lot never became selected, the
+       badge never became grabbable, and the drag could not start. The owner's "I can't move them"
+       was that loop, reproduced in the app (see e2e/parcel-chip-move-delete.spec.js, red before
+       this change: the chip moved exactly 0 px).
+
+       Hover is the honest gate, and it keeps every property B1327 bought:
+        • With the pointer anywhere else — which is every static hit test, including the STRUCTURAL
+          half of e2e/chrome-swallows-press.spec.js — the badge is `pointerEvents: none` and a
+          press at an element's centre still answers to that element. Unchanged, by construction.
+        • The press is never invisible: the cursor is already `move` and the badge is already
+          wearing its grab keyline before the button goes down, so the outcome is legible BEFORE
+          the press, not merely afterwards.
+        • It is user-demotable in one click — the badge's own right-click menu hides it (and the
+          parcel menu offers the same) — which is the named rule's sanctioned exception for content
+          the user has opted into having on top.
+       The cursor and the handler read the SAME flag, so the `move` cursor can never appear on a
+       badge that will not actually drag (the other half of the owner's report). */
+    const draggable = tool === "select" && hoverChipId === pc.id;
     return (
-      <g key={`pl${pc.id}`} data-print-chip="acre" pointerEvents={draggable ? "auto" : "none"}
+      <g key={`pl${pc.id}`} data-print-chip="acre" data-chip-parcel={pc.id} pointerEvents={draggable ? "auto" : "none"}
         style={draggable ? { cursor: "move" } : undefined}
+        onContextMenu={draggable ? (e) => onChipContext(e, pc.id) : undefined}
         onPointerDown={draggable ? (e) => startAcChip(e, pc.id) : undefined}>
         {/* NEW-3: on screen this is a dark UI pill; the PDF/PNG export restyles it
             (data-print-chip) into haloed exhibit text — no solid dark pill on paper. */}
         <rect data-chip-bg x={c.x - boxW / 2} y={c.y - boxH / 2} width={boxW} height={boxH} rx={7 * ls}
-          fill="rgba(17,24,39,0.62)" stroke="rgba(255,255,255,0.14)" strokeWidth={1} />
+          fill="rgba(17,24,39,0.62)"
+          stroke={draggable ? SEL_BLUE : "rgba(255,255,255,0.14)"} strokeWidth={draggable ? 1.75 : 1} />
         <text data-chip-text x={c.x} y={c.y - boxH / 2 + padY + fs * 0.82} textAnchor="middle" fontSize={fs}
           fontFamily={NUM_FONT} fontVariantNumeric={TABULAR_NUMS} fill="#e9edf2" pointerEvents="none" style={{ fontWeight: 500, letterSpacing: "0.02em" }}>{txt}</text>
       </g>
@@ -14719,6 +14876,35 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // axis (footprintAxes); paving/other strip = the measured short side. Reject ≤0 / non-numeric
   // (commitNumEdit already drops non-finite input; onCommit guards > 0). Locked / irregular-footprint
   // (points) elements are select-only — no editor opens.
+  /* NEW-5 — set / clear a roundabout at a road terminus. Undoable like every other road mutation.
+     Stored on the ROAD so the circle is bonded to it: nothing here records a position, the geometry
+     is derived from the road's current `pts` every frame (see the `roundabouts` memo), so moving or
+     re-aligning the road carries the roundabout and re-derives its leg tie-ins with no second copy
+     of the truth to keep in sync. */
+  const setRoadRoundabout = (id, ra) => {
+    const el = (els || []).find((x) => x.id === id);
+    if (!el) return;
+    pushHistory();
+    setEls((a) => a.map((x) => (x.id === id ? (ra ? { ...x, roundabout: ra } : (() => { const { roundabout, ...rest } = x; void roundabout; return rest; })()) : x)));
+  };
+  /* NEW-5 — the diameter is edited through the SAME inline numeric editor every other dimension on
+     this canvas uses (owner rule 2026-06-17: never a dialog box). `fx/fy` places it on the circle. */
+  const editRoundaboutD = (id, screenPt) => {
+    const el = (els || []).find((x) => x.id === id);
+    if (!el || !el.roundabout) return;
+    const fp = screenPt ? p2f(screenPt.x, screenPt.y) : { x: el.pts[0].x, y: el.pts[0].y };
+    const cls = roadClassOf(settings, el.roadClass);
+    const cur = normalizeRoundaboutD(el.roundabout.d, roundaboutDiameterFor(cls, +el.travelW || 0));
+    setNumEdit({
+      fx: fp.x, fy: fp.y, value: String(Math.round(cur)),
+      onCommit: (n) => {
+        const d = normalizeRoundaboutD(n, cur);
+        pushHistory();
+        setEls((a) => a.map((x) => (x.id === id ? { ...x, roundabout: { ...x.roundabout, d } } : x)));
+        if (d !== n) flashWarn(`A roundabout has to be between ${ROUNDABOUT_MIN_D}′ and ${ROUNDABOUT_MAX_D}′ across — set to ${Math.round(d)}′.`, 5000);
+      },
+    });
+  };
   const editElDim = (el, e) => {
     if (!el || el.locked || el.points) return;
     const fp = e ? p2f(e.clientX, e.clientY) : { x: el.cx, y: el.cy };
@@ -16880,9 +17066,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // for why every patch-based attempt (B953…B1006) had to fail on topologies it wasn't tuned for.
   const roadNet = useMemo(() => {
     const roads = (els || []).filter((x) => isCenterlineRoad(x) && !x.attachedTo);
-    if (!roads.length) return { regions: [], stripes: new Map(), outlineCuts: new Map(), memberIds: new Set(), junctionVerts: roadJunctionVerts };
+    if (!roads.length) return { regions: [], stripes: new Map(), outlineCuts: new Map(), memberIds: new Set(), junctionVerts: roadJunctionVerts, trims: roundabouts.trims, roundabouts: roundabouts.geoms };
     const byId = new Map(roads.map((r) => [r.id, r]));
-    const strip = new Map(roads.map((r) => [r.id, roadStripRing(r, settings, sharpFor(r))]));
+    const strip = new Map(roads.map((r) => [r.id, roadStripRing(r, settings, sharpFor(r), roundabouts.trims.get(r.id))]));
     // Extra pavement contributed by each junction, indexed by the road that owns the junction.
     const extra = new Map(roads.map((r) => [r.id, []]));
     // Stripe-only cutters: regions that must INTERRUPT a curb stripe without adding pavement. The one
@@ -16900,6 +17086,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if (t1 && t2 && n && depth > 0) stripeCut.push([t1, t2, { x: t2.x - n.x * depth, y: t2.y - n.y * depth }, { x: t1.x - n.x * depth, y: t1.y - n.y * depth }]);
     }
     for (const dj of driveJunctions) addExtra(dj.sideId, dj.geom.wedges);   // target is a rect element, not a road
+    // NEW-5 — a roundabout's circulatory sectors + its curb returns are ADDITIVE pavement in exactly
+    // the same sense a tee's wedges are, so they go through the SAME union: one region, one
+    // continuous curb outline, and the central island falls out as a genuine PolyTree hole.
+    for (const [rid, polys] of roundabouts.extraById) addExtra(rid, polys);
+    for (const p of roundabouts.pairs) pairs.push(p);   // every leg clusters with its circle
     for (const wj of weldJunctions) {
       addExtra(wj.ids[0], [wj.cover]);
       for (let i = 1; i < wj.ids.length; i++) pairs.push([wj.ids[0], wj.ids[i]]);
@@ -16928,7 +17119,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         for (const oid of ids) { if (oid === id) continue; const s = strip.get(oid); if (s && s.length >= 3) others.push(s); }
         for (const oid of ids) others.push(...extra.get(oid));
         others.push(...stripeCut);
-        stripes.set(id, roadCurbLines(byId.get(id), settings, sharpFor(byId.get(id))).flatMap((cl) => clipPolylineOutside(cl, others)));
+        stripes.set(id, roadCurbLines(byId.get(id), settings, sharpFor(byId.get(id)), roundabouts.trims.get(id)).flatMap((cl) => clipPolylineOutside(cl, others)));
       }
     }
     regions.sort((a, b) => a.zKey - b.zKey);
@@ -16944,8 +17135,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if (!cutters.length) continue;
       outlineCuts.set(dj.targetId, [...(outlineCuts.get(dj.targetId) || []), ...cutters]);
     }
-    return { regions, stripes, outlineCuts, memberIds: new Set(roads.map((r) => r.id)), junctionVerts: roadJunctionVerts };
-  }, [els, settings, teeJunctions, driveJunctions, weldJunctions, sharpFor, roadJunctionVerts]);
+    return { regions, stripes, outlineCuts, memberIds: new Set(roads.map((r) => r.id)), junctionVerts: roadJunctionVerts, trims: roundabouts.trims, roundabouts: roundabouts.geoms };
+  }, [els, settings, teeJunctions, driveJunctions, weldJunctions, sharpFor, roadJunctionVerts, roundabouts]);
   // NEW-4 — corners the app had to draw TIGHTER than the road's own civil minimum. `arcCorner`
   // feasibility-clamps a corner's radius to half the shorter adjacent leg; that clamp is geometrically
   // necessary (without it two corners overrun each other and the strip self-intersects) but it used to
@@ -17816,6 +18007,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       </g>
                     );
                   })}
+                  {/* NEW-5 — the CENTRAL ISLAND. The pavement above already carries the island as a
+                      real hole (it is a hole in the dissolved region, not a disc drawn on top), so
+                      this is the landscaped surface showing THROUGH that hole — which is why it is
+                      painted with the region group and not over the plan, and why it prints. */}
+                  {roadNet.roundabouts && roadNet.roundabouts.map(({ node, geom }, i) => (
+                    geom.island ? (
+                      <path key={`ra${i}-${node.key}`} data-testid="roundabout-island" data-export="road-network"
+                        d={`M${geom.island.map((p) => { const c = f2p(p); return `${c.x},${c.y}`; }).join("L")}Z`}
+                        fill={typeStyle("landscape", settings).fill} fillOpacity={typeStyle("landscape", settings).fillOpacity ?? 1}
+                        stroke={typeStyle("landscape", settings).stroke} strokeWidth={1} pointerEvents="none" />
+                    ) : null
+                  ))}
                 </g>
               )}
               {drawElsZ.below.map((el) => <ElNode key={el.id} el={el} f2p={f2p} isSel={sel?.kind === "el" && sel.id === el.id} tool={tool} settings={settings} H={elHandlers} nb={elNeighbors.get(el.id)} dimHidden={dimSuppressed?.has(el.id) || false} roadNet={roadNet} lf={labelFrame} />)}
@@ -20109,7 +20312,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               )}
               {selEl.type !== "pond" && (() => {
                 const poly = !!selEl.points;
-                const area = isCenterlineRoad(selEl) ? roadStripArea(selEl, settings, sharpFor(selEl)) : poly ? polyArea(selEl.points) : selEl.w * selEl.h;
+                const area = isCenterlineRoad(selEl) ? roadStripArea(selEl, settings, sharpFor(selEl), roundTrim(selEl), roundabouts.areaById.get(selEl.id)) : poly ? polyArea(selEl.points) : selEl.w * selEl.h;
                 return (
                   <div style={{ fontSize: 12, color: PAL.muted, marginTop: 6, lineHeight: 1.6 }}>
                     {poly ? "Area" : "Footprint"}: <b style={{ color: PAL.ink }}>{f0(area)} sf</b>{poly ? ` · ${f2(area / SQFT_PER_ACRE)} ac` : ""}<br />
@@ -22092,6 +22295,32 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           {vtxMenu.mode === "edge"
             ? <button style={menuItem(false)} onClick={() => { insertVtx(vtxMenu.layer, vtxMenu.id, vtxMenu.index, vtxMenu.ptFeet); setVtxMenu(null); }}>＋&nbsp; Add control point</button>
             : <button disabled={!vtxMenu.canDelete} style={{ ...menuItem(false), color: vtxMenu.canDelete ? "#b3361b" : "#b9b3a6", cursor: vtxMenu.canDelete ? "pointer" : "default" }} onClick={() => { if (vtxMenu.canDelete) { deleteVtx(vtxMenu.layer, vtxMenu.id, vtxMenu.index); setVtxMenu(null); } }}>✕&nbsp; Delete control point{vtxMenu.canDelete ? "" : " (min reached)"}</button>}
+          {/* NEW-5 — ROUNDABOUT, on the road-terminus branch of the menu the owner already uses.
+              The size shown is the class's own derived diameter (a WB-67 truck route and an auto
+              drive aisle do NOT get the same circle), and it is editable in place afterwards through
+              the shared inline numeric editor — never a dialog (owner rule). */}
+          {vtxMenu.roadEnd && (() => {
+            const road = (els || []).find((x) => x.id === vtxMenu.id);
+            if (!road) return null;
+            const ra = road.roundabout && road.roundabout.end === vtxMenu.roadEnd ? road.roundabout : null;
+            const cls = roadClassOf(settings, road.roadClass);
+            const band = roundaboutBandFor(cls);
+            const derived = roundaboutDiameterFor(cls, +road.travelW || 0);
+            return (
+              <>
+                <div style={{ borderTop: `1px solid ${PAL.panelLine}`, marginTop: 4, paddingTop: 4 }} />
+                <button style={menuItem(false)} title={`${band.note} — sized from this road's design vehicle; editable`}
+                  onClick={() => { setRoadRoundabout(road.id, ra ? null : { end: vtxMenu.roadEnd, d: derived }); setVtxMenu(null); }}>
+                  {ra ? "✕  Remove roundabout" : "◎  Roundabout"}
+                </button>
+                {ra && (
+                  <button style={menuItem(false)} onClick={() => { const at = f2p(road.pts[vtxMenu.index]); setVtxMenu(null); editRoundaboutD(road.id, at); }}>
+                    Diameter… ({Math.round(ra.d || derived)}′)
+                  </button>
+                )}
+              </>
+            );
+          })()}
         </ContextMenu>
       )}
 
@@ -22100,6 +22329,24 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           <button style={{ ...menuItem(false), opacity: combineSel.length >= 2 ? 1 : 0.5, cursor: combineSel.length >= 2 ? "pointer" : "default" }} disabled={combineSel.length < 2} onClick={() => { mergeParcels(); setParcelMenu(null); }}>Merge parcels ({combineSel.length})</button>
           <button style={menuItem(false)} onClick={() => { setCombineSel([]); setParcelMenu(null); }}>Clear selection</button>
           <div style={{ borderTop: `1px solid ${PAL.panelLine}`, marginTop: 4, paddingTop: 4 }} />
+          {/* NEW-4 — the acreage badge's own controls, on BOTH menus (the badge's right-click and
+              the parcel's) so they are findable either way. Hiding a badge is a LABEL change: the
+              lot stays in the plan and in the yield math. */}
+          {(() => {
+            const pc = parcels.find((p) => p.id === parcelMenu.id);
+            if (!pc) return null;
+            return (
+              <>
+                <button style={menuItem(false)} onClick={() => { setParcelChipHidden(pc.id, !pc.chipHidden); setParcelMenu(null); }}>
+                  {pc.chipHidden ? "Show acreage label" : "Hide acreage label"}
+                </button>
+                {!pc.chipHidden && pc.labelOffset && (
+                  <button style={menuItem(false)} onClick={() => { resetParcelChipOffset(pc.id); setParcelMenu(null); }}>Reset label position</button>
+                )}
+                <div style={{ borderTop: `1px solid ${PAL.panelLine}`, marginTop: 4, paddingTop: 4 }} />
+              </>
+            );
+          })()}
           <button style={{ ...menuItem(false), color: PAL.danger }} onClick={() => { if (parcelMenu.id) deleteParcelById(parcelMenu.id); setParcelMenu(null); }}>Delete parcel</button>
           <div style={{ fontSize: 10.5, color: PAL.muted, padding: "6px 8px 2px", lineHeight: 1.4, borderTop: `1px solid ${PAL.panelLine}`, marginTop: 4 }}>Shift-click parcels to add more, then Merge.</div>
         </ContextMenu>
@@ -22670,7 +22917,7 @@ function renderElPx(el, f2p, isSel, tool, settings, startMoveEl, onElDouble, nb,
   }
   if (isCenterlineRoad(el)) { // centerline road (B596–B599): surface + curbs + dimension all from pts
     const ppf = (f2p({ x: 1, y: 0 }).x - f2p({ x: 0, y: 0 }).x);
-    const ring = roadStripRing(el, settings, sharpFor(el));
+    const ring = roadStripRing(el, settings, sharpFor(el), roadNet && roadNet.trims ? roadNet.trims.get(el.id) : undefined);
     const dPath = ring.length >= 3 ? ring.map((p, i) => { const q = f2p(p); return `${i ? "L" : "M"}${q.x},${q.y}`; }).join(" ") + "Z" : null;
     const stroke = st.stroke; // B619: no accent recolor on select — blue vertex handles cue the selection
     const rparts = [];
@@ -22699,7 +22946,7 @@ function renderElPx(el, f2p, isSel, tool, settings, startMoveEl, onElDouble, nb,
     // Curb stripe lines = the centerline offset by ±travelW/2 (the inner face-of-curb edges), TRIMMED
     // against the rest of the cluster's pavement (roadNet.stripes) so a stripe stops at the junction
     // instead of drawing a curb straight through the intersection.
-    const stripeLines = inNetwork ? (roadNet.stripes.get(el.id) || []) : roadCurbLines(el, settings, sharpFor(el));
+    const stripeLines = inNetwork ? (roadNet.stripes.get(el.id) || []) : roadCurbLines(el, settings, sharpFor(el), roadNet && roadNet.trims ? roadNet.trims.get(el.id) : undefined);
     stripeLines.forEach((cl, i) => {
       if (!cl || cl.length < 2) return;
       rparts.push(<polyline key={`curb${i}`} points={cl.map((p) => { const q = f2p(p); return `${q.x},${q.y}`; }).join(" ")} fill="none" stroke={st.stroke} strokeWidth={curbStrokePx(roadCurbWidth(el), ppf, CURB_STROKE_MIN_PX * lfK)} pointerEvents="none" />);
