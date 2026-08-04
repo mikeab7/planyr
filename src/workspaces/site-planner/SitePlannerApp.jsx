@@ -6,7 +6,7 @@ import { defaultOverlayState } from "./lib/layers.js";
 import { testConnection, supabaseConfigured, connectionInfo } from "./lib/supabase.js";
 import { onAuthChange } from "./lib/auth.js";
 import { claimInvites } from "./lib/teams.js";
-import { migrateOldAutosave, migrateSiteGroups, migrateScenarios, initHistoryStore, loadSitesList, loadPlansOfGroup, renameSiteGroup, groupOf, loadSite, saveSite, deleteSite, getCurrentSiteId, setCurrentSiteId, setActiveUser, pushSiteToCloud, pullCloud, importLegacyIntoCloud, pendingLegacyCount, stageLegacySite, discardLegacySite } from "./lib/storage.js";
+import { migrateOldAutosave, migrateSiteGroups, migrateScenarios, initHistoryStore, loadSitesList, loadPlansOfGroup, renameSiteGroup, repairSplitProjectNames, groupOf, loadSite, saveSite, deleteSite, getCurrentSiteId, setCurrentSiteId, setActiveUser, pushSiteToCloud, pullCloud, importLegacyIntoCloud, pendingLegacyCount, stageLegacySite, discardLegacySite } from "./lib/storage.js";
 import { idbPersist } from "./lib/localDb.js";
 /* LOADED ON DEMAND (B1092). The legacy-import review modal is signed-in-only and opens
  * from a menu — it has no business riding the planner's critical-path chunk, which is the
@@ -21,6 +21,7 @@ import { initialBootResolved, mayReconcileUrl, pickResumeTarget } from "./lib/bo
 migrateOldAutosave(); // bring any legacy single-slot autosave into the site store
 migrateSiteGroups();  // give every legacy record a site (location) group
 migrateScenarios();   // fold legacy named scenarios into Plans
+repairSplitProjectNames(); // NEW-3 — converge any project whose plans disagree on its name (idempotent; see lib/projectName.js)
 initHistoryStore();   // B474 — hydrate the version-history ring from IndexedDB (async, fire-and-forget); migrates the localStorage ring over once
 idbPersist();         // B474 review (#9) — ask the browser to keep our IndexedDB durable (not best-effort/evictable); it's now the version ring's home + the underlay raster's local cache
 
@@ -435,18 +436,31 @@ export default function App({
     await reportDeleteResult([res], "that plan");
   };
 
+  /* NEW-1/NEW-2 — ONE rename, awaited before the list is rebuilt.
+   *
+   * Two bugs lived here. (1) The rename pushed one plan at a time over `loadPlansOfGroup` — the
+   * LOCAL store — so a plan this browser had never hydrated was never written and kept the old
+   * name in the cloud, ready to re-publish it on its next save. `renameSiteGroup` now performs a
+   * single write against the GROUP at the source of truth, so that enumeration is gone entirely.
+   * (2) The pushes were fired with `Promise.all` and NOT awaited, then `refreshSites()` ran
+   * synchronously — so a pull landing in that window rebuilt the list from cloud rows that hadn't
+   * been updated yet, and the name appeared to revert. The refresh now waits for the write.
+   *
+   * The immediate refresh is kept as well, so the new name paints in the same tick; the awaited one
+   * is the honest confirmation. LOUD-FAILURE: a rename that didn't reach the cloud says so. */
   const renameSite = (idOrGroup, site) => {
-    // idOrGroup may be a group id (the header breadcrumb) or a representative plan id (the map's
-    // site list). Resolve to the group so BOTH renameSiteGroup and the cloud-push loop target
-    // every plan in the site — a bare plan id would push nothing, so the rename wouldn't reach
-    // the cloud and could come back as the old name on the next pull. (rename-revert)
     const rec = loadSite(idOrGroup);
     const groupId = rec ? groupOf(rec) : idOrGroup;
-    renameSiteGroup(groupId, site);
-    // NEW-F6 — aggregate the per-plan pushes to ONE banner, not one per plan.
-    Promise.all(loadPlansOfGroup(groupId).map((s) => pushSiteToCloud(s.id).then((r) => !(r && r.ok === false)).catch(() => false)))
-      .then((oks) => { if (oks.some((ok) => !ok)) { setPushError("The rename is saved on this device but couldn't sync to the cloud — it'll catch up on your next edit or reload."); reportClientEvent("cloud-push-failed", "background push failed (rename site)", { id: groupId }); } });
-    refreshSites();
+    const done = renameSiteGroup(groupId, site);
+    refreshSites(); // optimistic — the local half of the rename has already been written
+    return Promise.resolve(done).then((res) => {
+      refreshSites(); // authoritative — rebuilt only AFTER the cloud write settled
+      if (res && res.ok === false) {
+        setPushError(`“${site}” is saved on this device, but the rename couldn't be saved to the cloud — it may come back under its old name when you reload. Check your connection and try again.`);
+        reportClientEvent("cloud-push-failed", "project rename did not reach the cloud", { id: groupId, error: (res && res.error) || "" });
+      }
+      return res;
+    });
   };
   const renamePlan = (id, name) => { saveSite({ id, name }); pushLoud(id, "The plan rename"); refreshSites(); }; // NEW-F6
 
@@ -537,6 +551,12 @@ export default function App({
           currentProject={null}
           onSelectProject={openProjectGroup}
           onNewProject={newBlankSite}
+          // NEW-4 — the header project dropdown can rename, and it routes through the SAME single
+          // write path everything else uses. Unwired, the breadcrumb fell back to its uncontrolled
+          // `storeRename`, which writes only to this device — so a rename made from the map viewer
+          // was never sent to the cloud at all and came straight back on the next load. That is
+          // the owner's exact repro.
+          onRenameProject={renameSite}
           centerContent={null}
           saveSlot={null}
           toolbarContent={

@@ -57,9 +57,16 @@ export async function warmProjectsIfEmpty() {
 }
 
 // Rename a project (= a Site Planner site group) for the uncontrolled breadcrumb (B439).
-// A project's name IS its group's `site` label, so this is a thin wrapper over the store.
+// A project's name IS its group's authoritative `site` value, so this is a thin wrapper over the
+// store's ONE rename write.
+//
+// NEW-2 — it now RETURNS the store's promise ({ ok, error, … }). It used to return nothing, and
+// `renameSiteGroup` used to be a local-only write, so an uncontrolled rename from the header
+// dropdown never reached the cloud AND never reported that it hadn't: the name simply came back
+// on the next load. Both halves are fixed — the write goes to the source of truth, and the caller
+// can await it and surface an honest failure.
 export function renameProject(id, name) {
-  renameSiteGroup(id, name);
+  return renameSiteGroup(id, name);
 }
 
 // Delete a project (= a whole site group, every plan in it) for the uncontrolled breadcrumb
