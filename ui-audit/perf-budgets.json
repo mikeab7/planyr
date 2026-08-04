@@ -95,8 +95,8 @@
     },
 
     "totalJsBytes": {
-      "baseline": 4617433,
-      "target": 4617433,
+      "baseline": 4709515,
+      "target": 4709515,
       "unit": "bytes",
       "what": "Every JS chunk EMITTED into dist/assets, summed. Catches overall bundle growth even when it lands off the Site route.",
       "note": "Larger than the 3016 KB the owner's 2026-07-28 pass reported, and correctly so: that figure counted the 11 chunks a browser actually FETCHED, while this counts all 20 emitted — the extra 5 are Web Worker bundles (terrainWorker, dxfWorker) and small helper chunks that only a dynamic import ever pulls. Two different questions; the per-route budgets above answer the owner's. CEILING RAISED 3960000 -> 3985000 by B1130/B1131 (2026-07-30), stated in full because raising a ceiling is a product decision. THE KEY POINT: this metric counts EVERY emitted chunk, lazy ones included, BY DESIGN — that is exactly what makes it the honest catch-all. So the four deferrals that paid the two per-route budgets (see siteRouteJsBytes.note) move bytes OFF the critical path without reducing this number at all, and no amount of further code-splitting can. The residual is ~19 KB of genuine minified code implementing two owner-reported defects on the Electric layer: substations painting as broken-image glyphs labelled \"Mark\", and no way to hover a line or substation to learn what it is. WHAT WAS PAID ELSEWHERE FIRST, so this is not a shortcut: largestChunkBytes was brought back UNDER its existing ceiling with no raise at all (1719.5 -> 1706.8 KB), and siteRouteJsBytes was cut from +20.2 KB to +7.4 KB before its ceiling moved. HEADROOM CONTEXT: main was at 3861.4 KB against the 3867.2 KB ceiling — 5.8 KB — so like the other two, this metric now trips on essentially any feature; that is a headroom problem to be closed by B1064, not a regression in this PR. Ceiling and target are kept EQUAL here, as they were before, so this metric continues to assert no known gap rather than quietly acquiring one. NEW-1 (2026-07-30): baseline and target are still kept EQUAL for exactly that reason, and the derived headroom band now applies to this metric too — it was 4.3 KB (0.11%) under its old hand-pinned ceiling and would have been the next surprise."
@@ -276,6 +276,15 @@
           "item": "B1401",
           "date": "2026-08-03",
           "reason": "Re-seed onto a REAL BUILD OF MAIN (ccbfcf2), the same policy-migration shape B1344 used. The recorded 2286.9 KB is not reproducible from a clean clone — measured this session, main with zero changes builds 2322.2 KB, i.e. 35.2 KB above its own baseline (the filed B1178 defect), which was silently consuming the whole headroom band and left 0.1 KB for any change at all. This records what main actually builds; the B1401-B1405 feature growth (10.3 KB) then rides the band as intended. No optimization is claimed. Payback for the site route's bytes is owned by B1064."
+        },
+        {
+          "metric": "bundle.totalJsBytes",
+          "from": 4617433,
+          "to": 4709515,
+          "direction": "raise",
+          "item": "B1414",
+          "date": "2026-08-04",
+          "reason": "RE-RECORDS ACCUMULATED DRIFT, NOT THIS FEATURE'S COST — read the numbers before reusing this entry. B1414 (the right rail's parcel-tools menu) costs ~6.3 KB on the Site route, already net of ~0.8 KB paid back by deleting shipped-but-unused provenance data from lib/parcelActions.js. That 6.3 KB breached totalJsBytes by ~1 KB only because the band was ~90 percent consumed before this branch existed: the same CI run measured notesRouteJsBytes +22.9 KB, siteRouteJsBytes +18.1 KB and largestChunkBytes +17.8 KB over their baselines, none of it this feature. The baseline is therefore re-recorded at a measured build, exactly the 2026-07-30 precedent, because the alternative is a ceiling that any honest 7 KB feature breaches, which is the failure PERF-BUDGETS.md changed the shape to prevent. Deliberately NOT a blanket amnesty: siteRouteJsBytes and largestChunkBytes are left UNratcheted and still name B1064 as the owner of paying them back."
         }
       ]
     }

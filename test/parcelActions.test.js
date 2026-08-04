@@ -2,9 +2,19 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import {
-  PARCEL_SURFACES, PARCEL_GROUPS, PARCEL_ACTIONS,
-  parcelMenuModel, parcelMenuIds, parcelAction, boundaryEditHint,
+  PARCEL_SURFACES, PARCEL_GROUPS, PARCEL_ACTIONS, parcelMenuModel, boundaryEditHint,
 } from "../src/workspaces/site-planner/lib/parcelActions.js";
+
+/* The module ships no id lookup and no flattener — both were test-only, and string data with no
+ * runtime consumer costs real bytes in the Site route's bundle (this change had to pay a budget
+ * breach back). They live here instead, where they belong. */
+const parcelAction = (id) => PARCEL_ACTIONS.find((a) => a.id === id) || null;
+const parcelMenuIds = (state) => parcelMenuModel(state).flatMap((g) => g.rows.map((r) => r.id));
+
+/* WHICH ACTIONS ARE GESTURE- OR RIGHT-CLICK-ONLY without this menu. The owner's rule is that a
+ * gesture stays as the FAST path but may never be the ONLY path, so this list is the requirement
+ * stated independently of the code — which is stronger than reading it back out of the module. */
+const GESTURE_OR_RIGHT_CLICK_ONLY = ["boundary", "chip", "chipReset", "deleteSelected"];
 
 /* NEW-1 — "every parcel action belongs in the right-hand Parcel menu."
  *
@@ -35,7 +45,9 @@ describe("the inventory is the contract", () => {
     for (const a of PARCEL_ACTIONS) {
       expect(a.id, JSON.stringify(a)).toBeTruthy();
       expect(groupIds, `${a.id} names an unknown group`).toContain(a.group);
-      expect(["string", "function"]).toContain(typeof a.label);
+      expect(typeof a.label, `${a.id}'s label`).toBe("string");
+      // a toggling row needs BOTH halves or it can say the wrong thing
+      expect(!!a.altLabel, `${a.id} altLabel/altWhen must come as a pair`).toBe(typeof a.altWhen === "function");
     }
   });
 
@@ -56,12 +68,11 @@ describe("the inventory is the contract", () => {
   });
 
   it("every action reachable ONLY by a gesture or a right-click now has a menu row", () => {
-    // The owner's rule: a gesture stays as the FAST path, never the ONLY path.
-    const gestureOnly = PARCEL_ACTIONS.filter((a) =>
-      a.elsewhere.length > 0 && a.elsewhere.every((w) => /^gesture:|^right-click|^key:/.test(w)));
-    expect(gestureOnly.length).toBeGreaterThan(0); // there ARE such actions — that's the point
     const ids = parcelMenuIds(rich);
-    for (const a of gestureOnly) expect(ids, `${a.id} has no menu row`).toContain(a.id);
+    for (const id of GESTURE_OR_RIGHT_CLICK_ONLY) {
+      expect(parcelAction(id), `${id} is not in the inventory`).toBeTruthy();
+      expect(ids, `${id} has no menu row`).toContain(id);
+    }
   });
 
   it("renders EVERY inventory entry on a plan where nothing is gated off", () => {

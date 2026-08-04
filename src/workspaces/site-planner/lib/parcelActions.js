@@ -45,34 +45,42 @@ export const PARCEL_GROUPS = [
  *
  *   id        stable key; the render site maps it to a handler
  *   group     which section of the menu it belongs to
- *   label     menu wording (a function when it toggles)
+ *   label     menu wording; `altLabel` + `altWhen` when the row toggles (see `rowLabel`)
  *   detail    the "in Land →" / shortcut hint shown right-aligned, or null
- *   elsewhere every OTHER surface the same action is reachable from. The rule the owner set:
- *             a gesture or a right-click may stay as the FAST path, but it may never be the ONLY
- *             path — so an entry whose `elsewhere` is a gesture is exactly why this menu exists.
+ *
+ * WHERE ELSE each one is reachable — the rule the owner set is that a gesture or a right-click may
+ * stay as the FAST path but may never be the ONLY path, and these are the entries that were:
+ *   combine .......... gesture: Shift-click parcels, then Enter · right-click a parcel · Land ⧉ Merge
+ *   boundary ......... gesture ONLY: drag a corner / ＋ on an edge / Shift-click a corner
+ *   chip ............. right-click a parcel · right-click the acreage label
+ *   chipReset ........ right-click a parcel
+ *   deleteSelected ... right-click a parcel · the Delete key
+ *   removeMode ....... the Parcel tool's own banner · the Land panel's per-row ✕
+ *   lock / active .... Land panel only        draw / identify / address / split ... Land ＋ Add ▾ / ✂ Split
+ * That list is PROSE on purpose: it is provenance with no runtime consumer, and shipping it as
+ * string data cost real bytes in the Site route's bundle for nothing. `test/parcelActions.test.js`
+ * states the gesture-only set itself and asserts each member has a row.
  * ------------------------------------------------------------------------------------------- */
 export const PARCEL_ACTIONS = [
   // ---- create -------------------------------------------------------------------------------
-  { id: "draw", group: "create", label: "Draw new parcel", elsewhere: ["land-panel: ＋ Add ▾"] },
-  { id: "deed", group: "create", label: "Deed / Title — metes & bounds…", elsewhere: [] },
-  { id: "identify", group: "create", label: "Click a lot on the map", detail: "county records", elsewhere: ["land-panel: ＋ Add ▾"] },
-  { id: "address", group: "create", label: "Add by address…", elsewhere: ["land-panel: ＋ Add ▾"] },
+  { id: "draw", group: "create", label: "Draw new parcel" },
+  { id: "deed", group: "create", label: "Deed / Title — metes & bounds…" },
+  { id: "identify", group: "create", label: "Click a lot on the map", detail: "county records" },
+  { id: "address", group: "create", label: "Add by address…" },
   // ---- modify -------------------------------------------------------------------------------
-  { id: "split", group: "modify", label: "Split a parcel", elsewhere: ["land-panel: ✂ Split"] },
-  { id: "combine", group: "modify", label: "Combine parcels", elsewhere: ["land-panel: ⧉ Merge", "gesture: Shift-click, then Enter", "right-click a parcel"] },
-  { id: "boundary", group: "modify", label: "Edit boundary corners", elsewhere: ["gesture: drag a corner / ＋ on an edge / Shift-click a corner"] },
-  { id: "setbacks", group: "modify", label: "Setbacks & parcel settings", detail: "in Land →", elsewhere: ["land-panel: Boundary section"] },
-  { id: "lock", group: "modify", label: (s) => (s.selectedLocked ? "Unlock boundary" : "Lock boundary"), elsewhere: ["land-panel: 🔒 Lock"] },
-  { id: "active", group: "modify", label: (s) => (s.selectedActive === false ? "Count in yield totals" : "Exclude from yield totals"), elsewhere: ["land-panel: row checkbox"] },
-  { id: "chip", group: "modify", label: (s) => (s.selectedChipHidden ? "Show acreage label" : "Hide acreage label"), elsewhere: ["right-click a parcel", "right-click the acreage label"] },
-  { id: "chipReset", group: "modify", label: "Reset label position", elsewhere: ["right-click a parcel"] },
+  { id: "split", group: "modify", label: "Split a parcel" },
+  { id: "combine", group: "modify", label: "Combine parcels" },
+  { id: "boundary", group: "modify", label: "Edit boundary corners" },
+  { id: "setbacks", group: "modify", label: "Setbacks & parcel settings", detail: "in Land →" },
+  // A toggling row says what the NEXT click will do: `altLabel` shows when `altWhen` holds.
+  { id: "lock", group: "modify", label: "Lock boundary", altLabel: "Unlock boundary", altWhen: (p) => !!p.locked },
+  { id: "active", group: "modify", label: "Exclude from yield totals", altLabel: "Count in yield totals", altWhen: (p) => p.active === false },
+  { id: "chip", group: "modify", label: "Hide acreage label", altLabel: "Show acreage label", altWhen: (p) => !!p.chipHidden },
+  { id: "chipReset", group: "modify", label: "Reset label position" },
   // ---- remove -------------------------------------------------------------------------------
-  { id: "removeMode", group: "remove", label: "Remove parcels — click to delete", elsewhere: ["Parcel tool banner: ✕ Remove", "land-panel: per-row ✕"] },
-  { id: "deleteSelected", group: "remove", label: "Delete this parcel", detail: "Del", danger: true, elsewhere: ["right-click a parcel", "key: Delete"] },
+  { id: "removeMode", group: "remove", label: "Remove parcels — click to delete" },
+  { id: "deleteSelected", group: "remove", label: "Delete this parcel", detail: "Del", danger: true },
 ];
-
-const byId = new Map(PARCEL_ACTIONS.map((a) => [a.id, a]));
-export const parcelAction = (id) => byId.get(id) || null;
 
 /* A row that needs a selected parcel is SHOWN but disabled when nothing is selected, so the
  * capability stays visible (that is the whole point of this menu) — never hidden, which is how
@@ -100,11 +108,6 @@ export function parcelMenuModel(state = {}) {
     tool: "select", parcelMode: "add", mergePick: false, boundaryEdit: false, ...state,
   };
   const sel = s.selected || null;
-  const labelState = {
-    selectedLocked: !!(sel && sel.locked),
-    selectedActive: sel ? sel.active : undefined,
-    selectedChipHidden: !!(sel && sel.chipHidden),
-  };
   const hasParcels = s.parcelCount >= 1;
 
   // enabled + why-not, per row. `null` reason means "enabled".
@@ -143,7 +146,7 @@ export function parcelMenuModel(state = {}) {
     const reason = gate(a.id);
     return {
       id: a.id,
-      label: typeof a.label === "function" ? a.label(labelState) : a.label,
+      label: a.altLabel && sel && a.altWhen(sel) ? a.altLabel : a.label,
       detail: a.detail || null,
       enabled: !reason,
       disabledReason: reason,
@@ -155,11 +158,6 @@ export function parcelMenuModel(state = {}) {
   return PARCEL_GROUPS
     .map((g) => ({ id: g.id, label: g.label, rows: PARCEL_ACTIONS.filter((a) => a.group === g.id).map(rowFor).filter(Boolean) }))
     .filter((g) => g.rows.length > 0);
-}
-
-/** Every action id the model can render, flattened — what the wiring guard checks against. */
-export function parcelMenuIds(state) {
-  return parcelMenuModel(state).flatMap((g) => g.rows.map((r) => r.id));
 }
 
 /* The boundary-editing banner's copy. It lives here (not inline at the render site) so the ONE
