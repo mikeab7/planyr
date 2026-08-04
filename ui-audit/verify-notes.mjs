@@ -38,15 +38,18 @@
  * the scope is never sticky, search follows it, and the binding survives a reload — which is
  * what proves it rides in the tree blob and therefore syncs.
  *
- * §23 is SKETCH MODE, and every check in it is one half of the rule the feature is built on:
- * the OUTLINE is the single source of truth for what exists and what connects to what, the
- * CANVAS stores nothing but POSITION. So it types an outline and watches boxes and arrows
- * appear; it drags a box and asserts the stored text is BYTE-IDENTICAL either side; it draws
- * an extra arrow and reloads the browser to find it still there; it prints the sheet and
- * finds the same boxes plus every body; and then it deletes one outline line and demands the
- * box, its position AND every arrow that named it go with it — the check that would catch a
- * half-built cascade. It also proves the thing no unit test can: twenty-two sections run with
- * nothing sketch-shaped downloaded at all, because no page had a sketch on it.
+ * §23 is SKETCH MODE, rewritten for the authoring REBUILD (B1400 ×2). The rule it proves is
+ * now that THE CANVAS OWNS EVERYTHING — each box carries its own text and its own position,
+ * arrows are an explicit list — so it drives the real gestures: it double-clicks an empty
+ * spot and types straight into the box that appears (including while the caret is somewhere
+ * else entirely), it turns written words into a box with the toolbar's Box button, it drags
+ * from one box onto another to draw an arrow, it drags a box and demands the words come back
+ * byte-identical, it reloads the whole browser, it prints the sheet, and it deletes a box and
+ * demands every arrow that named it goes too — the check that would catch a half-built
+ * cascade. It asserts what is GONE (no outline textarea, anywhere) and that a sketch saved
+ * under the SUPERSEDED outline shape still opens with its arrows intact. It also proves the
+ * thing no unit test can: twenty-two sections run with nothing sketch-shaped downloaded at
+ * all, because no page had a sketch on it.
  *
  *   npx vite preview --port 4173 &
  *   node ui-audit/verify-notes.mjs
@@ -1273,17 +1276,23 @@ ok("NEITHER WINDOW WAS EVER ASKED TO PICK BETWEEN TWO COPIES — a no-op raises 
 ok("...and the second window ran clean too", win2Errors.length === 0, win2Errors.join(" | ") || "clean");
 await win2.close();
 
-/* ════ 23. SKETCH MODE — the outline governs, the canvas only remembers where ══════════
+/* ════ 23. SKETCH MODE — THE CANVAS OWNS EVERYTHING ═══════════════════════════════════
  *
- * THE RULE THIS SECTION EXISTS TO PROVE, in the browser rather than in a comment: the
- * OUTLINE is the single source of truth for what exists and what connects to what, and the
- * CANVAS stores nothing but POSITION. Everything below is one half of that claim:
- *   • typing an indented outline produces boxes AND arrows — no other way to author one;
- *   • dragging a box moves it and leaves the stored text BYTE-IDENTICAL;
- *   • an extra arrow (the kind an outline cannot express) persists and survives a reload;
- *   • deleting a line takes its box, its position AND every arrow that named it, with
- *     nothing left dangling — the check that would have caught a half-built cascade;
- *   • the label/body pair survives save, reload, Markdown export and the printed sheet.
+ * THE RULE THIS SECTION EXISTS TO PROVE, in the browser rather than in a comment: each box
+ * owns its own TEXT and its own POSITION, and the arrows are an explicit list of box
+ * references. There is no second representation, so there is nothing to keep in sync.
+ * Every check below is one half of that claim, and every one of them is a REAL gesture:
+ *   • double-click an empty spot → a box appears there and takes typing immediately;
+ *   • the toolbar's Box button turns words you already wrote into a box;
+ *   • drag from one box onto another → an arrow, which survives a whole browser reload;
+ *   • drag a box → it moves, and its words come back byte-identical;
+ *   • delete a box → its arrows go with it, with nothing left dangling (TOMBSTONE-DELETES);
+ *   • a box's label and body survive save, reload, Markdown export and the printed sheet;
+ *   • a sketch saved under the SUPERSEDED outline shape still opens, with its arrows.
+ *
+ * ⛔ It also asserts what is GONE: there is no outline textarea anywhere. Two authoring
+ * paths is the accumulation PANEL-BREVITY forbids, and the outline half is the one the owner
+ * used and rejected.
  *
  * It also proves the BUNDLE claim, which no unit test can: nothing sketch-shaped is fetched
  * until a sketch is genuinely on the page. */
@@ -1301,18 +1310,9 @@ const skNotebook = skTree.notebooks[skTree.notebooks.length - 1];
 const skPage = skNotebook.sections[0].pages[0].id;
 
 await tb("note-title").fill("Deal sequence");
-await tb("note-body").click();
-await tb("nt-sketch").click();
-await page.waitForSelector('[data-testid="note-sketch"]', { timeout: 15000 });
-await page.waitForTimeout(900);
-
-ok("the toolbar inserts a sketch, and it lands IN the note", await tb("note-sketch").count() === 1);
-const sketchChunk = jsRequests.find((f) => /Sketch/i.test(f));
-ok("...and ONLY THEN is the sketch editor fetched — its own chunk, on demand",
-  !!sketchChunk, sketchChunk || "never requested");
 
 /* A sketch's document node — read straight out of storage, which is the only place that
- * settles whether the canvas and the outline agree. */
+ * settles what was actually saved. */
 const sketchNode = async () => {
   const doc = await readBody(skPage);
   let found = null;
@@ -1320,78 +1320,164 @@ const sketchNode = async () => {
   walk(doc);
   return found;
 };
-const outlineText = (n) => (n?.attrs?.outline || []).map((x) => `${x.depth}|${x.label}|${x.body}`).join("\n");
+const boxesOf = (n) => (n?.attrs?.boxes || []);
+const labelsOf = (n) => boxesOf(n).map((b) => b.label).join("|");
+const idFor = (n, label) => boxesOf(n).find((b) => b.label === label)?.id;
+const wordsOf = (n) => boxesOf(n).map((b) => `${b.label}‖${b.body}`).join("\n");
 
-/* ---- typing an outline is what draws the chart ------------------------------------- */
-const OUTLINE_TEXT = "Acquisition\n  Title review\n  > Order the commitment from Stewart; 30-day cure.\n  Environmental\n    Phase I\nEntitlement";
-await tb("sketch-outline").fill(OUTLINE_TEXT);
-await page.waitForTimeout(700);
+/* ---- (2) THE BOX BUTTON: words you already wrote become a box ----------------------- */
+await typeInBody("Acquisition");
+await page.waitForTimeout(200);
+await tb("nt-box").click();
+await page.waitForSelector('[data-testid="note-sketch"]', { timeout: 15000 });
+await page.waitForTimeout(600);
 await settle();
 
-ok("TYPING AN INDENTED OUTLINE DRAWS THE BOXES", await page.locator("[data-sketch-node]").count() === 5,
-  `${await page.locator("[data-sketch-node]").count()} box(es)`);
-ok("...and the parent→child ARROWS, without anyone drawing one",
-  await page.locator('[data-sketch-edge-kind="tree"]').count() === 3);
-ok("the outline pane is the ONLY authoring surface — there is no 'add a box' control",
-  await page.locator('[data-testid="note-sketch"] button').count() === 3);
+ok("THE BOX BUTTON PUTS A BOX AROUND WHAT YOU WROTE — one click, no syntax, no pane",
+  await page.locator("[data-sketch-node]").count() === 1
+  && labelsOf(await sketchNode()) === "Acquisition", labelsOf(await sketchNode()));
+const sketchChunk = jsRequests.find((f) => /Sketch/i.test(f));
+ok("...and ONLY THEN is the sketch editor fetched — its own chunk, on demand",
+  !!sketchChunk, sketchChunk || "never requested");
+ok("⛔ THE OUTLINE TEXTAREA IS GONE — there is exactly ONE authoring surface, the canvas",
+  await page.locator('[data-testid="sketch-outline"]').count() === 0
+  && await page.locator('[data-testid="note-sketch"] textarea:visible').count() === 0);
+ok("...and boxing your only paragraph still leaves a line to keep writing on",
+  nodesOf(await readBody(skPage), "paragraph").length >= 1);
+
+/* ---- (1) DOUBLE-CLICK AN EMPTY SPOT: a box, right there, ready to type -------------- */
+/** A point on the canvas that is over no box — the canvas is deliberately roomier than its
+ *  contents, which is what makes double-click-to-create possible at all.
+ *
+ *  The clearance is DELIBERATELY a whole box wide: the new box is CENTRED on the press (it
+ *  appears where you double-clicked), so a point that is merely outside the neighbouring box
+ *  would still drop a box half on top of it — and a box painted over another one covers the
+ *  dot you drag an arrow out of. That is the harness keeping its own gestures unambiguous;
+ *  a person who deliberately drops a box on another can simply drag it off again. */
+const emptySpot = async (dx = 0, dy = 0) => {
+  const c = await page.locator("[data-sketch-canvas]").boundingBox();
+  const boxes = await page.locator("[data-sketch-node]").all();
+  const taken = [];
+  for (const b of boxes) taken.push(await b.boundingBox());
+  const clearX = 110;
+  const clearY = 34;
+  for (let y = c.y + 26 + dy; y < c.y + c.height - 26; y += 20) {
+    for (let x = c.x + 26 + dx; x < c.x + c.width - 26; x += 24) {
+      if (!taken.some((t) => t && x > t.x - clearX && x < t.x + t.width + clearX && y > t.y - clearY && y < t.y + t.height + clearY)) return { x, y };
+    }
+  }
+  return { x: c.x + c.width - 40, y: c.y + c.height - 30 };
+};
+
+const spot1 = await emptySpot();
+await page.mouse.dblclick(spot1.x, spot1.y);
+await page.waitForTimeout(300);
+ok("DOUBLE-CLICKING AN EMPTY SPOT OPENS A BOX RIGHT THERE, with the caret already in it",
+  await page.locator('[data-testid="sketch-box-edit"]:visible').count() === 1
+  && await page.evaluate(() => document.activeElement?.getAttribute("data-testid")) === "sketch-box-label",
+  await page.evaluate(() => document.activeElement?.getAttribute("data-testid") || "nothing focused"));
+
+/* TYPE IMMEDIATELY — no click into a field first, which is the whole point. */
+await page.keyboard.type("Title review", { delay: 12 });
+await page.keyboard.press("Tab");
+await page.keyboard.type("Order the commitment from Stewart; 30-day cure.", { delay: 6 });
+await page.keyboard.press("Escape");
+await settle();
 
 let node = await sketchNode();
-ok("the sketch is stored INSIDE the page's document — not in a second store",
-  !!node && node.attrs.outline.length === 5, node ? `${node.attrs.outline.length} nodes` : "no sketch node");
-ok("the LABEL and the BODY are stored as one node, as designed from the start",
-  node.attrs.outline[1].label === "Title review" && /Stewart/.test(node.attrs.outline[1].body),
-  `${node.attrs.outline[1].label} / ${node.attrs.outline[1].body.slice(0, 24)}`);
+ok("...and what you type lands in THAT box — a short label and a longer detail, both in the box",
+  boxesOf(node).length === 2 && idFor(node, "Title review")
+  && /Stewart/.test(boxesOf(node).find((b) => b.label === "Title review").body),
+  labelsOf(node));
+ok("the box was made WHERE IT WAS MADE — the canvas owns the position too",
+  boxesOf(node).every((b) => Number.isFinite(b.x) && Number.isFinite(b.y))
+  && boxesOf(node)[1].x !== boxesOf(node)[0].x, JSON.stringify(boxesOf(node).map((b) => [b.x, b.y])));
+ok("the sketch is stored INSIDE the page's document — not in a second store", !!node);
 const noSketchKey = await page.evaluate(() => Object.keys(localStorage).filter((k) => /sketch/i.test(k)));
 ok("⛔ NO SKETCH KEY ANYWHERE IN STORAGE — the document IS the persistence", noSketchKey.length === 0, noSketchKey.join(", ") || "none");
 
-/* ---- the body opens in place, no dialog -------------------------------------------- */
-ok("only the box that HAS a body offers to open it", await page.locator("[data-sketch-toggle]").count() === 1);
-await page.locator("[data-sketch-toggle]").first().click();
-await page.waitForTimeout(400);
-ok("the detail opens IN PLACE, inside its own box — no dialog box (house rule)",
-  await page.locator(".planyr-sketch-body").count() > 0 && await page.locator(".planyr-sketch-node-open").count() === 1);
-await page.locator("[data-sketch-toggle]").first().click();
+/* ---- "even if I'm already writing text" --------------------------------------------- */
+/* The caret is put somewhere else entirely — in the note's own body — and the canvas is
+ * double-clicked WITHOUT leaving that first. The new box must take the typing, and the
+ * paragraph must be left exactly as it was. */
+await page.locator('[data-testid="note-body"] p').last().click();
+await page.keyboard.type("Still writing this sentence", { delay: 6 });
+await page.waitForTimeout(200);
+const spot2 = await emptySpot(0, 40);
+await page.mouse.dblclick(spot2.x, spot2.y);
 await page.waitForTimeout(300);
+await page.keyboard.type("Environmental", { delay: 12 });
+await page.keyboard.press("Escape");
+await settle();
 
-/* ---- dragging moves ONE box and touches NOTHING else -------------------------------- */
-const textBeforeDrag = outlineText(node);
-const dragTarget = page.locator("[data-sketch-node]").nth(1);
-const bb = await dragTarget.boundingBox();
-await page.mouse.move(bb.x + 30, bb.y + 14);
+node = await sketchNode();
+ok("⛔ IT WORKS WHILE YOU ARE ALREADY WRITING SOMEWHERE ELSE — the press takes focus, no exit first",
+  boxesOf(node).length === 3 && !!idFor(node, "Environmental"), labelsOf(node));
+ok("...and the sentence you were writing is untouched",
+  /Still writing this sentence/.test(textOf(await readBody(skPage))));
+
+/* ---- (3) DRAG FROM ONE BOX TO ANOTHER = AN ARROW ------------------------------------ */
+const acq = idFor(node, "Acquisition");
+const title = idFor(node, "Title review");
+const env = idFor(node, "Environmental");
+const centre = async (sel) => { const b = await page.locator(sel).boundingBox(); return { x: b.x + b.width / 2, y: b.y + b.height / 2 }; };
+
+const grip = await centre(`[data-sketch-grip="${acq}"]`);
+const onTitle = await centre(`[data-sketch-node="${title}"] .planyr-sketch-box`);
+await page.mouse.move(grip.x, grip.y);
 await page.mouse.down();
-await page.mouse.move(bb.x + 250, bb.y + 190, { steps: 14 });
+await page.mouse.move(onTitle.x, onTitle.y, { steps: 12 });
 await page.mouse.up();
 await settle();
 
 node = await sketchNode();
-const dragged = Object.keys(node.attrs.positions);
-ok("DRAGGING A BOX SAVES A POSITION", dragged.length === 1, JSON.stringify(node.attrs.positions));
-ok("⛔ AND LEAVES THE TEXT BYTE-IDENTICAL — a drag is layout, never content",
-  outlineText(node) === textBeforeDrag);
-ok("the outline pane still reads exactly what was typed", (await tb("sketch-outline").inputValue()) === OUTLINE_TEXT);
+ok("DRAGGING FROM ONE BOX ONTO ANOTHER DRAWS AN ARROW — no mode button, no second click",
+  (node.attrs.links || []).length === 1 && node.attrs.links[0].from === acq && node.attrs.links[0].to === title,
+  JSON.stringify(node.attrs.links));
+ok("...and it is DRAWN, as an explicit {from,to} and never inferred from a layout",
+  await page.locator("[data-sketch-edge]").count() === 1);
 
-/* ---- an extra arrow: the one thing an outline cannot express ------------------------ */
-await tb("sketch-arrow-mode").click();
-await page.locator("[data-sketch-node]").nth(3).click();     // Phase I
-await page.locator("[data-sketch-node]").nth(4).click();     // Entitlement
+/* The keyboard route to the same thing — select a box, press ↗ Arrow, click the target. */
+await page.locator(`[data-sketch-node="${acq}"]`).click();
+await tb("sketch-arrow").click();
+await page.locator(`[data-sketch-node="${env}"] .planyr-sketch-box`).click();
 await settle();
 node = await sketchNode();
-const linkFrom = node.attrs.links[0]?.from;
-const linkTo = node.attrs.links[0]?.to;
-ok("AN EXTRA ARROW IS STORED AS AN EXPLICIT {from,to} — never inferred, never hidden in layout",
-  node.attrs.links.length === 1 && !!linkFrom && !!linkTo, JSON.stringify(node.attrs.links));
-ok("...and it is DRAWN, told apart from the outline's own arrows",
-  await page.locator('[data-sketch-edge-kind="link"]').count() === 1);
+ok("...and the same arrow can be drawn WITHOUT a drag, for anyone on a keyboard",
+  (node.attrs.links || []).length === 2 && node.attrs.links.some((l) => l.from === acq && l.to === env),
+  JSON.stringify(node.attrs.links));
 
-/* An arrow the outline already draws is refused OUT LOUD rather than silently ignored. */
-await tb("sketch-arrow-mode").click();
-await page.locator("[data-sketch-node]").nth(0).click();
-await page.locator("[data-sketch-node]").nth(1).click();
-await page.waitForTimeout(500);
-ok("a duplicate of an arrow the outline already draws is REFUSED, and SAYS WHY (LOUD-FAILURE)",
-  /outline already/.test(await tb("sketch-status").innerText()), await tb("sketch-status").innerText());
+/* A duplicate is refused OUT LOUD rather than silently ignored. */
+await page.locator(`[data-sketch-node="${acq}"]`).click();
+await tb("sketch-arrow").click();
+await page.locator(`[data-sketch-node="${env}"] .planyr-sketch-box`).click();
+await page.waitForTimeout(400);
+ok("a duplicate arrow is REFUSED, and SAYS WHY (LOUD-FAILURE)",
+  /already there/.test(await tb("sketch-status").innerText()) && (await sketchNode()).attrs.links.length === 2,
+  await tb("sketch-status").innerText());
 
-/* ---- it all survives a real reload -------------------------------------------------- */
+/* ---- (4) BOXES STAY DRAGGABLE ------------------------------------------------------- */
+const wordsBeforeDrag = wordsOf(node);
+const beforeXY = boxesOf(node).find((b) => b.id === env);
+const envBox = await page.locator(`[data-sketch-node="${env}"] .planyr-sketch-box`).boundingBox();
+await page.mouse.move(envBox.x + 30, envBox.y + 14);
+await page.mouse.down();
+await page.mouse.move(envBox.x + 210, envBox.y + 150, { steps: 14 });
+await page.mouse.up();
+await settle();
+
+node = await sketchNode();
+const afterXY = boxesOf(node).find((b) => b.id === env);
+ok("A BOX IS STILL DRAGGABLE, and the drag moves exactly ONE box",
+  afterXY.x !== beforeXY.x && afterXY.y !== beforeXY.y
+  && boxesOf(node).filter((b) => b.id !== env).every((b) => {
+    const was = JSON.parse(JSON.stringify(beforeXY));   // only env may have moved
+    return b.id !== was.id;
+  }), `${beforeXY.x},${beforeXY.y} → ${afterXY.x},${afterXY.y}`);
+ok("⛔ AND IT LEAVES EVERY WORD BYTE-IDENTICAL — a drag is layout, never content",
+  wordsOf(node) === wordsBeforeDrag);
+
+/* ---- it all survives a real reload --------------------------------------------------- */
 await page.reload({ waitUntil: "load" });
 await page.waitForTimeout(1800);
 await page.locator('[data-testid="module-tab-notes"]:visible').first().click();
@@ -1400,17 +1486,18 @@ await tb(`notes-row-${skPage}`).click();
 await page.waitForSelector('[data-testid="note-sketch"]', { timeout: 15000 });
 await page.waitForTimeout(1200);
 
-ok("A RELOAD BRINGS THE WHOLE SKETCH BACK — boxes, arrows and the extra arrow",
-  await page.locator("[data-sketch-node]").count() === 5
-  && await page.locator('[data-sketch-edge-kind="link"]').count() === 1);
+ok("A RELOAD BRINGS THE WHOLE SKETCH BACK — every box and every arrow",
+  await page.locator("[data-sketch-node]").count() === 3
+  && await page.locator("[data-sketch-edge]").count() === 2);
 node = await sketchNode();
-ok("...with the hand-placed box still where it was put", Object.keys(node.attrs.positions).length === 1);
+ok("...with each box still exactly where it was dragged to",
+  boxesOf(node).find((b) => b.id === env).x === afterXY.x);
 ok("...and the LABEL/BODY pair intact after a round trip through storage",
-  /Stewart/.test(node.attrs.outline[1].body));
+  /Stewart/.test(boxesOf(node).find((b) => b.id === title).body));
 ok("the reloaded sketch renders with no crash and no error boundary",
   await page.locator("text=Something went wrong").count() === 0);
 
-/* ---- Markdown export: lossless for content, NAMED for what a list cannot say -------- */
+/* ---- Markdown export: every word survives, NAMED for what a list cannot say ---------- */
 const skDir = mkdtempSync(join(tmpdir(), "notes-sketch-"));
 const [skDownload] = await Promise.all([
   page.waitForEvent("download", { timeout: 15000 }),
@@ -1420,16 +1507,14 @@ const skSaved = join(skDir, skDownload.suggestedFilename());
 await skDownload.saveAs(skSaved);
 const skMd = readFileSync(skSaved, "utf8");
 
-ok("THE EXPORTED MARKDOWN CARRIES THE OUTLINE AS A PLAIN INDENTED LIST",
-  /^- Acquisition$/m.test(skMd) && /^ {2}- Title review$/m.test(skMd) && /^ {4}- Phase I$/m.test(skMd));
-ok("...INCLUDING THE BODY, still attached to its own label",
+ok("THE EXPORTED MARKDOWN CARRIES THE BOXES AS A READABLE NESTED LIST",
+  /^- Acquisition$/m.test(skMd) && /^ {2}- Title review$/m.test(skMd) && /^ {2}- Environmental$/m.test(skMd), skMd.slice(0, 160).replace(/\n/g, "⏎"));
+ok("...INCLUDING THE DETAIL, still attached to its own box",
   /^ {4}> Order the commitment from Stewart/m.test(skMd));
-ok("...and the EXTRA ARROW is written out, not silently dropped",
-  /Also connected:/.test(skMd) && /Phase I → Entitlement/.test(skMd));
 await page.waitForTimeout(400);
 const skNotice = await tb("notes-export-notice").count() ? await tb("notes-export-notice").innerText() : "";
 ok("...and the ONE thing a list genuinely cannot say is NAMED, not silently dropped",
-  /dragged to/.test(skNotice), skNotice.slice(0, 110) || "no notice shown");
+  /sit on the canvas/.test(skNotice), skNotice.slice(0, 110) || "no notice shown");
 
 /* ---- the printed sheet (PDF-PARITY) ------------------------------------------------- */
 await tb("nt-print").click();
@@ -1440,70 +1525,52 @@ const skSheet = await page.evaluate(() => {
   if (!d) return null;
   return {
     boxes: d.querySelectorAll("[data-sketch-node]").length,
-    treeEdges: d.querySelectorAll('[data-sketch-edge-kind="tree"]').length,
-    linkEdges: d.querySelectorAll('[data-sketch-edge-kind="link"]').length,
-    chevrons: d.querySelectorAll("[data-sketch-toggle]").length,
-    detail: d.querySelector("ul.planyr-sketch-detail")?.textContent || "",
+    edges: d.querySelectorAll("[data-sketch-edge]").length,
+    grips: d.querySelectorAll("[data-sketch-grip]").length,
+    words: (d.querySelector("[data-sketch-canvas]")?.textContent || ""),
     payload: d.querySelector("[data-note-sketch]") ? "yes" : "no",
     boxFill: (() => { const b = d.querySelector(".planyr-sketch-box"); return b ? getComputedStyle(b).fill : ""; })(),
   };
 });
 ok("THE PRINTED SHEET DRAWS THE SAME SKETCH — every box and every arrow",
-  skSheet?.boxes === 5 && skSheet?.treeEdges === 3 && skSheet?.linkEdges === 1, JSON.stringify(skSheet && { b: skSheet.boxes, t: skSheet.treeEdges, l: skSheet.linkEdges }));
-ok("⛔ AND IT PRINTS EVERY BODY, because a chevron cannot be pressed on paper",
-  /Title review/.test(skSheet?.detail || "") && /Stewart/.test(skSheet?.detail || ""), (skSheet?.detail || "").slice(0, 60));
-ok("...so the sheet carries no chevrons at all — nothing on paper pretends to be clickable",
-  skSheet?.chevrons === 0);
+  skSheet?.boxes === 3 && skSheet?.edges === 2, JSON.stringify(skSheet && { b: skSheet.boxes, e: skSheet.edges }));
+ok("⛔ AND EVERY WORD IS ON IT, label and detail alike — nothing hides behind a click on paper",
+  /Title review/.test(skSheet?.words || "") && /Stewart/.test(skSheet?.words || ""), (skSheet?.words || "").slice(0, 60));
+ok("...so the sheet carries no grips at all — nothing on paper pretends to be draggable",
+  skSheet?.grips === 0);
 ok("the printed box is drawn on WHITE, not in the app's theme", /255/.test(skSheet?.boxFill || ""), skSheet?.boxFill);
 
-/* ---- THE CASCADE: deleting a line takes its box, its position AND its arrows -------- */
+/* ---- THE CASCADE: deleting a box takes every arrow that named it --------------------- */
 const beforeDelete = await sketchNode();
-const doomed = beforeDelete.attrs.outline.find((n) => n.label === "Phase I").id;
-const placedId = Object.keys(beforeDelete.attrs.positions)[0];
-ok("before the delete: the doomed line has a box, and an arrow that names it",
-  beforeDelete.attrs.links.some((l) => l.from === doomed || l.to === doomed));
-
-/* Put a position on the doomed node too, so the delete has BOTH dependants to cascade. */
-const doomedBox = page.locator("[data-sketch-node]").nth(3);
-const dbb = await doomedBox.boundingBox();
-await page.mouse.move(dbb.x + 30, dbb.y + 14);
-await page.mouse.down();
-await page.mouse.move(dbb.x + 160, dbb.y + 120, { steps: 10 });
-await page.mouse.up();
+ok("before the delete: the doomed box has arrows at BOTH ends",
+  beforeDelete.attrs.links.some((l) => l.to === title) && beforeDelete.attrs.links.length === 2);
+/* Arm the other end too, so the delete has to cascade in both directions. */
+await page.locator(`[data-sketch-node="${title}"]`).click();
+await tb("sketch-arrow").click();
+await page.locator(`[data-sketch-node="${env}"] .planyr-sketch-box`).click();
 await settle();
 const armed = await sketchNode();
-ok("...and now a hand-placed position as well — both dependants are armed",
-  Object.keys(armed.attrs.positions).length === 2 && doomed in armed.attrs.positions);
+ok("...and now one pointing away from it as well — both directions are armed",
+  armed.attrs.links.length === 3 && armed.attrs.links.some((l) => l.from === title));
 
-await tb("sketch-outline").fill(OUTLINE_TEXT.replace("\n    Phase I", ""));
-await page.waitForTimeout(700);
+await page.locator(`[data-sketch-node="${title}"]`).click();
+await tb("sketch-delete").click();
 await settle();
 
 const after = await sketchNode();
-const ids = new Set(after.attrs.outline.map((n) => n.id));
-ok("DELETING THE LINE REMOVES ITS BOX", !ids.has(doomed) && after.attrs.outline.length === 4);
-ok("⛔ ...AND ITS POSITION GOES WITH IT — no dangling position (TOMBSTONE-DELETES)",
-  !(doomed in after.attrs.positions), JSON.stringify(after.attrs.positions));
-ok("⛔ ...AND EVERY ARROW THAT NAMED IT GOES TOO — no dangling arrow",
-  after.attrs.links.every((l) => ids.has(l.from) && ids.has(l.to)) && after.attrs.links.length === 0,
+const liveIds = new Set(boxesOf(after).map((b) => b.id));
+ok("DELETING A BOX REMOVES IT", !liveIds.has(title) && boxesOf(after).length === 2);
+ok("⛔ ...AND EVERY ARROW THAT NAMED IT GOES TOO — at either end, nothing dangling (TOMBSTONE-DELETES)",
+  after.attrs.links.every((l) => liveIds.has(l.from) && liveIds.has(l.to)) && after.attrs.links.length === 1,
   JSON.stringify(after.attrs.links));
-ok("...while the UNRELATED box keeps its own position — the cascade is exact, not a wipe",
-  placedId in after.attrs.positions);
-ok("nothing dangling reaches the drawing either", await page.locator('[data-sketch-edge-kind="link"]').count() === 0);
-ok("and the deletion is stated rather than silent", /arrow/i.test(await tb("sketch-status").innerText()), await tb("sketch-status").innerText());
-
-/* ---- putting a box back under the automatic layout ---------------------------------- */
-await tb("sketch-tidy").click();
-await settle();
-const tidied = await sketchNode();
-ok("“Tidy up” returns every box to the outline's own layout, and says nothing you typed changed",
-  Object.keys(tidied.attrs.positions).length === 0 && tidied.attrs.outline.length === 4);
-ok("...and the text is STILL byte-identical through all of it",
-  tidied.attrs.outline.map((n) => n.label).join("|") === "Acquisition|Title review|Environmental|Entitlement",
-  tidied.attrs.outline.map((n) => n.label).join("|"));
+ok("...while the UNRELATED arrow survives — the cascade is exact, not a wipe",
+  after.attrs.links.some((l) => l.from === acq && l.to === env));
+ok("nothing dangling reaches the drawing either", await page.locator("[data-sketch-edge]").count() === 1);
+ok("and the deletion states what went with it rather than doing it quietly",
+  /arrow/i.test(await tb("sketch-status").innerText()), await tb("sketch-status").innerText());
 
 /* ---- a sketch's words are findable -------------------------------------------------- */
-await tb("notes-search").fill("Stewart");
+await tb("notes-search").fill("Environmental");
 await page.waitForTimeout(700);
 const skHits = page.locator('[data-testid="notes-search-results"] button');
 ok("A SKETCH'S WORDS ARE SEARCHABLE — they live in ATTRIBUTES, not in text nodes, so a plain walk would miss them",
@@ -1511,6 +1578,55 @@ ok("A SKETCH'S WORDS ARE SEARCHABLE — they live in ATTRIBUTES, not in text nod
   await skHits.count() ? (await skHits.first().innerText()).replace(/\s+/g, " ").slice(0, 70) : "no hit");
 await tb("notes-search").fill("");
 await page.waitForTimeout(400);
+
+/* ---- ⛔ A SKETCH SAVED UNDER THE SUPERSEDED OUTLINE SHAPE STILL OPENS ---------------- */
+/* The owner already drew sketches under the old rule (B1400 as shipped). Their documents
+ * carry `outline` + `positions` and no `boxes` at all, and they have to keep working —
+ * migrated on READ, so opening one does not even rewrite it. This writes a genuine old-shape
+ * document into storage and then opens it the way the app would. */
+await tb("notes-new-notebook").click();
+await page.waitForSelector('[data-testid="note-body"]', { timeout: 15000 });
+await page.waitForTimeout(900);
+const oldTree = await readTree();
+const oldPage = oldTree.notebooks[oldTree.notebooks.length - 1].sections[0].pages[0].id;
+await page.evaluate(([key, doc]) => localStorage.setItem(key, JSON.stringify(doc)), [
+  `${"planyr:notes:page:v1:local:"}${oldPage}`,
+  {
+    type: "doc",
+    content: [{
+      type: "noteSketch",
+      attrs: {
+        outline: [
+          { id: "old-a", depth: 0, label: "Acquisition", body: "" },
+          { id: "old-b", depth: 1, label: "Title", body: "Old detail line." },
+          { id: "old-c", depth: 1, label: "Environmental", body: "" },
+        ],
+        positions: { "old-c": { x: 420, y: 260 } },
+        links: [{ from: "old-b", to: "old-c" }],
+      },
+    }, { type: "paragraph" }],
+  },
+]);
+await page.reload({ waitUntil: "load" });
+await page.waitForTimeout(1800);
+await page.locator('[data-testid="module-tab-notes"]:visible').first().click();
+await page.waitForSelector('[data-testid="notes-tree"]', { timeout: 15000 });
+await tb(`notes-row-${oldPage}`).click();
+await page.waitForSelector('[data-testid="note-sketch"]', { timeout: 15000 });
+await page.waitForTimeout(1200);
+
+ok("⛔ A SKETCH DRAWN UNDER THE SUPERSEDED OUTLINE RULE STILL OPENS — every box is there",
+  await page.locator("[data-sketch-node]").count() === 3,
+  `${await page.locator("[data-sketch-node]").count()} box(es)`);
+ok("...and the indentation's arrows became REAL arrows — two from the outline, one that was explicit",
+  await page.locator("[data-sketch-edge]").count() === 3,
+  `${await page.locator("[data-sketch-edge]").count()} arrow(s)`);
+ok("...and its detail is on the canvas rather than hidden behind a chevron that no longer exists",
+  /Old detail line/.test(await page.locator("[data-sketch-canvas]").innerText().catch(() => "")
+    || await page.locator("[data-sketch-canvas]").textContent()));
+const oldStored = await readBody(oldPage);
+ok("...and merely OPENING it did not rewrite it — the migration is a read, not a silent edit",
+  !!(oldStored?.content || []).find((n) => n.type === "noteSketch")?.attrs?.outline);
 
 /* ════ Wrap ═══════════════════════════════════════════════════════════════════════════ */
 ok("no uncaught page error across the whole run", pageErrors.length === 0, pageErrors.join(" | ") || "clean");

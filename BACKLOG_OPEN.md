@@ -119,7 +119,7 @@
 | B1403 | A truncated parcel draw looked exactly like a complete one | [Site Planner / MapFinder · GIS] | #site-planner #gis | ⏳ live — awaiting |
 | B1404 | The parcel acreage chip could not be deleted, and its drag was behind a gate that could only be opened from behind itself | [Site Planner / UI] | #site-planner #ui #selection | ⏳ live — awaiting |
 | B1405 | Right-click a road end, get a real roundabout | [Site Planner / roadGeometry] | #site-planner #road #ui | ⏳ live — awaiting |
-| B1400 | Sketch mode: type an outline, get a chart you can rearrange | [Notes / sketch] | #notes #ui #export | ⏳ live — awaiting |
+| B1400 | Sketch mode (×2): REBUILT the authoring surface — double-click anywhere, type in the box, drag an arrow | [Notes / sketch] | #notes #ui #export | ⏳ live — awaiting |
 | B1391 | A FALSE CONFLICT: one person, one account, two windows — and the app said someone else was editing his note | [Notes / sync] | #notes #sync #persistence | ⏳ live — awaiting |
 | B1384 | The landing page rendered with NO VISIBLE TEXT: every word was gated on a vendor animation library | [Landing / marketing] | #ui | ⏳ live — awaiting |
 | B1377 | One-time repair: re-tag the orphaned pieces and restore the sidewalks they cost | [Site Planner / siteModel] | #site-planner #persistence | ⏳ live — awaiting |
