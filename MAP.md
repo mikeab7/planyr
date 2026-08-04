@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-08-04 @ `32c06e1` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-08-04 @ `6bba543` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -207,7 +207,7 @@ _423 source files mapped._
 - **`src/shared/projects/projectModel.js`** — Pure project-model helpers: collapse site records into one project per site-group, name-match suggest, dropdown filter, and relative-time formatting for the breadcrumb switcher
   - _exports_: `filterProjects`, `groupProjects`, `normalizeProjectName`, `relTime`, `resolveCurrentName`, `suggestNameMatch`
 - **`src/shared/projects/projects.js`** — Live project list for the breadcrumb switcher: groups the RLS-scoped site store, warms an empty on-device cache via cloud pull, and rename/delete a site-group project
-  - _exports_: `DELETED_RETENTION_DAYS`, `deleteProject`, `filterProjects`, `groupProjects`, `listDeletedProjects`, `listProjects`, `normalizeProjectName`, `purgeDeletedProject`, `purgeExpiredDeletedProjects`, `relTime`, `renameProject`, `restoreDeletedProject`, `suggestNameMatch`, `warmProjectsIfEmpty`
+  - _exports_: `DELETED_RETENTION_DAYS`, `deleteProject`, `filterProjects`, `groupProjects`, `listDeletedProjects`, `listProjects`, `normalizeProjectName`, `notifyProjectsChanged`, `onProjectsChanged`, `purgeDeletedProject`, `purgeExpiredDeletedProjects`, `relTime`, `renameProject`, `restoreDeletedProject`, `suggestNameMatch`, `warmProjects`, `warmProjectsIfEmpty`
 - **`src/shared/recents/recentDocs.js`** — Library-Home Recent list: local recently-OPENED drawings (not updated_at), per-uid, deduped by id, newest-first, capped at 15
   - _exports_: `listRecents`, `RECENTS_CAP`, `recordOpen`, `removeRecent`
 - **`src/shared/telemetry/clientErrors.js`** — Client error+event telemetry: window/rejection/preload sources insert into anon INSERT-only Supabase client_errors with dedup, rate/session caps, tab-id stamping, fail-safe

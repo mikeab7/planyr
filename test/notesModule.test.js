@@ -717,6 +717,73 @@ describe("the folder pointer", () => {
 });
 
 /* ════════════════════════════════════════════════════════════════════════════════════════
+ * 6b. THE PROJECT A NOTE BELONGS TO — loaded, named, and never guessed at (B482 ×2, B1343 ×2,
+ *     NEW-1).
+ *
+ * Three defects, one screen. The rail showed "OTHER PROJECT" on every notebook while the
+ * header said "Select a project", on an account whose notebooks were all bound correctly.
+ * Each guard below fails if its fix is reverted — the live behaviour is driven in
+ * ui-audit/verify-notes.mjs §24, and these are the structural facts a browser check cannot
+ * see (which call exists, in which file).
+ * ═══════════════════════════════════════════════════════════════════════════════════════ */
+describe("the project a notebook belongs to", () => {
+  it("⛔ the SHELL binds the account to the project store — not the lazily-mounted Site Planner (B482 ×2)", () => {
+    /* This is the whole bug. `setActiveUser` is what points the shared project store at the
+     * signed-in user's own cache; while it was called only from SitePlannerApp, any boot that
+     * did not visit the Site Planner (which "open where I left off" makes routine) left the
+     * store bound to nobody and every project read returned stale logged-out data. */
+    const shell = stripComments(read(REPO, "src", "app", "Shell.jsx"));
+    expect(shell, "Shell.jsx must import setActiveUser").toMatch(/setActiveUser/);
+    const auth = shell.slice(shell.indexOf("onAuthChange("));
+    expect(auth.slice(0, 400), "setActiveUser must be called from the shell's auth subscription")
+      .toMatch(/setActiveUser\(/);
+  });
+
+  it("the warm reports WHY it did nothing, so a failure can't read as 'no projects' (LOUD-FAILURE)", () => {
+    const projects = stripComments(read(REPO, "src", "shared", "projects", "projects.js"));
+    expect(projects).toMatch(/export async function warmProjects\b/);
+    // The four outcomes the old boolean collapsed into one indistinguishable `false`.
+    for (const reason of ["signed-out", "already-warm", "pull-failed"]) {
+      expect(projects, `warmProjects must name the "${reason}" outcome`).toContain(reason);
+    }
+    // The old boolean contract still exists for the callers that only wanted "did it change?".
+    expect(projects).toMatch(/export async function warmProjectsIfEmpty/);
+    // A warm that lands must reach every OTHER reader — a same-tab write fires no storage event.
+    expect(projects).toMatch(/export function onProjectsChanged/);
+    expect(projects).toMatch(/notifyProjectsChanged\(\)/);
+  });
+
+  it("⛔ Notes hands the shared header its project, like every other workspace (B1343 ×2)", () => {
+    const notes = code("Notes.jsx");
+    expect(notes, "AppHeader must be given currentProject or the crumb forgets the project")
+      .toMatch(/currentProject=\{/);
+    // …and it is the ROUTE's project, so the crumb can never disagree with the URL.
+    expect(notes).toMatch(/projectId \? \{ id: projectId/);
+  });
+
+  it("⛔ no caption describes a failed lookup as though it were the user's data (NEW-1)", () => {
+    const rail = code("components/NotesTree.jsx");
+    expect(rail, '"Other project" said the same thing whether the project was gone or merely unknown')
+      .not.toMatch(/Other project/);
+    // The three unresolved cases are told apart by REASON.
+    for (const label of ["Loading…", "Not loaded", "Missing project"]) {
+      expect(rail, `the badge must be able to say "${label}"`).toContain(label);
+    }
+    // …and a real failure is loud, with a way out, not merely a quieter word on a badge.
+    expect(rail).toMatch(/notes-projects-error/);
+    expect(rail).toMatch(/notes-projects-retry/);
+  });
+
+  it("a notebook's 'Belongs to' panel offers each destination exactly once", () => {
+    /* Both the "this project is not in the list" splice and the "this binding is unresolved"
+     * push fired on an unresolved CURRENT project, emitting two rows with the same id — a
+     * duplicate React key, and one of them naming a raw id at the user. */
+    const rail = code("components/NotesTree.jsx");
+    expect(rail).toMatch(/boundTo != null && boundTo !== currentProjectId/);
+  });
+});
+
+/* ════════════════════════════════════════════════════════════════════════════════════════
  * 7. TAB BELONGS TO THE DOCUMENT (B1392)
  *
  * The owner's Tab presses were landing in Chrome's toolbar. The fix is a FALLBACK, and the

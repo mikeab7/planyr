@@ -6,7 +6,7 @@
 import { lazy, Suspense, useEffect, useState } from "react";
 import { supabaseConfigured } from "../workspaces/site-planner/lib/supabase.js";
 import { onAuthChange } from "../workspaces/site-planner/lib/auth.js";
-import { setScheduleLink } from "../workspaces/site-planner/lib/storage.js";
+import { setScheduleLink, setActiveUser } from "../workspaces/site-planner/lib/storage.js";
 import AuthPanel from "../workspaces/site-planner/components/AuthPanel.jsx";
 import ErrorBoundary from "./ErrorBoundary.jsx";
 import ModuleLoader from "../shared/ui/ModuleLoader.jsx";
@@ -131,9 +131,25 @@ export default function Shell() {
     try { setScheduleLink(groupId, info || {}); } catch (_) {}
   };
 
+  /* ⛔ WHO THE PROJECT STORE BELONGS TO IS THE SHELL'S JOB, NOT THE SITE PLANNER'S (B482 ×2).
+   *
+   * `setActiveUser` is what switches the shared project store from the logged-out legacy cache
+   * to the signed-in user's own (`planarfit:sites:cloud:<uid>`). It used to be called in exactly
+   * ONE place — SitePlannerApp's auth effect — and SitePlannerApp is a lazy workspace that only
+   * mounts once you visit it. "Open where I left off" now routinely boots straight into Notes,
+   * Review or Library, and on those boots the Site Planner never mounts, so the store stayed
+   * bound to nobody: `isCloudActive()` was false, every warm no-opped instantly, and every
+   * project read silently returned whatever stale LOGGED-OUT data that particular machine
+   * happened to hold. That is why one account gave two answers on two computers — the office
+   * machine had a few legacy sites to show, the home machine had none.
+   *
+   * The Shell always mounts and already owns auth, so the binding lives here. The Site Planner
+   * still calls it (and still runs its own pull) — the call is idempotent, and its own
+   * same-user re-emit guard is keyed on its own ref, so nothing there changes. */
   useEffect(() => {
     if (!supabaseConfigured()) return;
     return onAuthChange((event, u) => {
+      try { setActiveUser((u && u.id) || null); } catch (_) {}
       setUser(u);
       if (event === "PASSWORD_RECOVERY") { setRecovery(true); setAuthOpen(true); }
     });

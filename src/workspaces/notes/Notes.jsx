@@ -31,7 +31,7 @@ import {
   purgeTrashEntry, renameNode, restoreNode, setNotebookProject, touchPage, trashEntries,
   trashPageIds, SCOPE_ALL, SCOPE_PROJECT,
 } from "./lib/notesModel.js";
-import { listProjects } from "../../shared/projects/projects.js";
+import { listProjects, warmProjects, onProjectsChanged } from "../../shared/projects/projects.js";
 import {
   clearNotesStorageError, markPagesBinned, markPagesRestored, notesConflictFor, notesConflictLine,
   notesScopeLabel, notesStorageLine, onNotesConflict, onNotesStorageError, onNotesSyncState,
@@ -405,15 +405,61 @@ export default function Notes({
    * looking at everything, which is the behaviour this item exists to end. */
   useEffect(() => { setScope(SCOPE_PROJECT); }, [projectId]);
 
-  /* The project list, for the rail's scope label and the "Belongs to…" panel. Read from the
-   * SAME per-user, RLS-scoped store the header breadcrumb reads (no parallel project store,
-   * and no new chunk on this route — AppHeader already pulls it in). Re-read when the
-   * project or the account changes, which is when it can have moved. */
-  const [projects, setProjects] = useState(() => listProjects());
-  useEffect(() => { setProjects(listProjects()); }, [projectId, userId]);
+  /* THE PROJECT LIST — and, just as important, WHETHER IT LOADED (B482 ×2, NEW-1).
+   *
+   * Read from the SAME per-user, RLS-scoped store the header breadcrumb reads (no parallel
+   * project store, and no new chunk on this route — AppHeader already pulls it in).
+   *
+   * ⛔ A SYNCHRONOUS READ IS NOT AN ANSWER. `listProjects()` reads an on-device cache that a
+   * cloud pull fills, so on a machine that booted straight into Notes it legitimately returns
+   * an EMPTY list for a signed-in user with projects. The old code read it once per project /
+   * account change and treated whatever came back as the truth — which is how a notebook bound
+   * to Grand Port ended up wearing a badge that described a failed lookup instead of his data.
+   *
+   * So the list is a small state machine and every branch is named: `loading` while a warm is
+   * in flight, `failed` when the pull actually failed (LOUD — the rail says so and offers the
+   * retry), `ready` otherwise. An unresolved id under `ready` is a genuinely missing project;
+   * under `failed` it is our own ignorance, and the two must never be captioned the same way. */
+  const [warmTick, setWarmTick] = useState(0);
+  const [projectList, setProjectList] = useState(() => ({ projects: listProjects(), state: "ready", error: "" }));
+  const projects = projectList.projects;
+
+  useEffect(() => {
+    let live = true;
+    const read = () => { if (live) setProjectList((p) => ({ ...p, projects: listProjects() })); };
+    read();
+    (async () => {
+      if (listProjects().length) return;                       // already warm — nothing to wait on
+      if (live) setProjectList((p) => ({ ...p, state: "loading" }));
+      const r = await warmProjects();
+      if (!live) return;
+      setProjectList({
+        projects: listProjects(),
+        state: r.ok ? "ready" : "failed",
+        error: r.ok ? "" : r.error,
+      });
+    })();
+    /* …and a warm that lands somewhere ELSE (the header's own switcher opening, a rename in
+     * another tab) reaches this rail too, instead of leaving it on the copy it read at mount. */
+    const off = onProjectsChanged(read);
+    return () => { live = false; off(); };
+  }, [projectId, userId, warmTick]);
+
+  const retryProjects = useCallback(() => setWarmTick((n) => n + 1), []);
+
   const projectName = useMemo(
     () => projects.find((p) => p.id === projectId)?.name || null,
     [projects, projectId],
+  );
+
+  /* THE HEADER MUST SAY WHERE YOU ACTUALLY ARE (B1343 ×2). Every other workspace hands
+   * AppHeader a `currentProject`; Notes never did, so walking into Notes from inside a project
+   * left the crumb reading "Dashboard / Select a project" while the URL named the project.
+   * Same shape as Review and Library: the route's id, with the store's name when it resolves
+   * (the breadcrumb re-resolves the live name itself, so a rename shows without a reload). */
+  const notesProject = useMemo(
+    () => (projectId ? { id: projectId, name: projectName || "Project" } : null),
+    [projectId, projectName],
   );
 
   /* Keep the open page inside the visible set. Switching projects — or narrowing the scope
@@ -631,6 +677,9 @@ export default function Notes({
         module={shellModule || "notes"}
         onSwitch={onShellSwitch}
         onDashboard={onGoDashboard}
+        // B1343 ×2 — the crumb names the project the route is standing in, like every
+        // other workspace. Without it the header forgot the project on the way into Notes.
+        currentProject={notesProject}
         cross={crossProject}
         onSelectProject={(id) => onNavigate?.({ projectId: id, cross: false })}
         onNewProject={onNewProject}
@@ -655,6 +704,9 @@ export default function Notes({
           tree={tree}
           projectId={projectId}
           projects={projects}
+          projectsState={projectList.state}
+          projectsError={projectList.error}
+          onRetryProjects={retryProjects}
           projectName={projectName}
           scope={scope}
           onScope={setScope}

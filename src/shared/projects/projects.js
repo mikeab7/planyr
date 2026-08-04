@@ -31,29 +31,72 @@ export function listProjects() {
   }
 }
 
-// Warm the signed-in user's on-device project cache when it's empty (B475).
-//
-// The breadcrumb switcher reads listProjects() → loadSitesList(), which only returns
-// data AFTER a Site-Planner cloud pull has populated the per-user cache. On a device (or
-// fresh tab) that went straight to Markup without ever opening the Site Planner, that cache
-// is empty even though the user has cloud projects — so the switcher looked empty/stale right
-// next to a populated Markup Library (which queries Supabase live). One pull fixes the
-// divergence: it's the SAME `sites` table, just warmed into the shared cache both paths read.
-//
-// Safe + idempotent: it's the exact pull the Site Planner runs on login. No-ops (returns
-// false) when logged out (the legacy local store is authoritative) or when the cache already
-// has projects. Never throws.
-export async function warmProjectsIfEmpty() {
+/* THE PROJECT LIST CHANGED — one signal, every surface (B482 ×2).
+ *
+ * A same-tab localStorage write fires NO native `storage` event, so a warm that lands in one
+ * component is invisible to every other reader of the same cache. The breadcrumb has always
+ * papered over that by re-reading when its own dropdown opens; a rail that renders project
+ * NAMES has no such moment — it just keeps showing whatever it read at mount. So the warm now
+ * announces itself, and any surface can subscribe.
+ *
+ * It is deliberately the SAME synthetic `storage` event the breadcrumb already dispatches after
+ * a rename/delete, so the existing listeners (this breadcrumb, the Site Planner's site list)
+ * pick it up for free rather than needing a second mechanism bolted beside them.
+ */
+const SITES_EVENT_KEY = "planarfit:sites:v1";
+
+export function notifyProjectsChanged() {
+  try { window.dispatchEvent(new StorageEvent("storage", { key: SITES_EVENT_KEY })); } catch (_) {}
+}
+
+/** Subscribe to "the project list may have moved". Returns an unsubscribe. */
+export function onProjectsChanged(cb) {
+  if (typeof window === "undefined") return () => {};
+  const onStorage = (e) => { if (!e.key || e.key.startsWith("planarfit:sites")) cb(); };
+  window.addEventListener("storage", onStorage);
+  return () => window.removeEventListener("storage", onStorage);
+}
+
+/* Warm the signed-in user's on-device project cache when it's empty (B475/B482), and SAY WHAT
+ * HAPPENED (LOUD-FAILURE).
+ *
+ * The list reads listProjects() → loadSitesList(), which only returns data AFTER a cloud pull
+ * has populated the per-user cache. On a device (or fresh tab) that went straight to another
+ * workspace, that cache is empty even though the user has cloud projects — so the switcher
+ * looked empty right next to surfaces that query Supabase live. One pull fixes the divergence:
+ * it's the SAME `sites` table, just warmed into the shared cache every path reads.
+ *
+ * ⛔ THE BOOLEAN RETURN WAS ITSELF A SILENT-FAILURE SURFACE. `false` meant four different
+ * things — logged out, already warm, no uid, and *the pull failed* — so a caller could not tell
+ * "nothing to do" from "the cloud refused", and every caller therefore treated a real failure as
+ * a no-op. That is exactly how a rail ends up captioning a failed lookup as though it were the
+ * user's data. This reports the REASON; `warmProjectsIfEmpty` below keeps the old boolean
+ * contract for the callers that only ever wanted "did the list change?".
+ *
+ * Safe + idempotent: it's the exact pull the Site Planner runs on login. Never throws.
+ * Returns { ok, warmed, reason, error }.
+ */
+export async function warmProjects() {
   try {
-    if (!isCloudActive()) return false;        // logged out → nothing to pull
-    if (loadSitesList().length) return false;  // already warm
+    if (!isCloudActive()) return { ok: true, warmed: false, reason: "signed-out", error: "" };
+    if (loadSitesList().length) return { ok: true, warmed: false, reason: "already-warm", error: "" };
     const uid = activeUid();
-    if (!uid) return false;
+    if (!uid) return { ok: true, warmed: false, reason: "signed-out", error: "" };
     const res = await pullCloud(uid);
-    return !!(res && res.ok);
-  } catch (_) {
-    return false;
+    if (!res || res.ok === false) {
+      return { ok: false, warmed: false, reason: "pull-failed", error: (res && res.error) || "couldn't reach the cloud" };
+    }
+    notifyProjectsChanged();
+    return { ok: true, warmed: true, reason: "pulled", error: "" };
+  } catch (e) {
+    return { ok: false, warmed: false, reason: "threw", error: (e && e.message) || "couldn't reach the cloud" };
   }
+}
+
+/** The original boolean form — true only when the cache actually gained projects. */
+export async function warmProjectsIfEmpty() {
+  const r = await warmProjects();
+  return !!(r.ok && r.warmed);
 }
 
 // Rename a project (= a Site Planner site group) for the uncontrolled breadcrumb (B439).
