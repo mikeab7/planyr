@@ -367,7 +367,7 @@ _423 source files mapped._
   - _exports_: `CCN_UTILITY_TYPES`, `ccnHolders`, `classifyCcn`, `describeHolder`, `inferUtilityType`
 - **`src/workspaces/site-planner/lib/channelSection.js`** — Cuts a ground cross-section across the channel from the existing 3DEP DEM grid (pixel-space bilinear sampling), plus the channel's flow bearing, longitudinal slope, the site mask, and the watershed-truncation guard. The missing fourth input to the screening-BFE engine; same terrain source as the berm-height sampler, indexed as a line rather than as points.
   - _exports_: `channelCell`, `channelSlope`, `cutSection`, `flowBearing`, `gridCellFt`, `sampleAtPixel`, `siteMaskFromLatLngRings`, `upstreamEdgeFlags`
-- **`src/workspaces/site-planner/lib/cloudRename.js`** — TODO — describe
+- **`src/workspaces/site-planner/lib/cloudRename.js`** — the project-rename CLOUD write, LOADED ON DEMAND: one atomic `rename_site_group` RPC over the whole site group (so a rename reaches plans this browser has never loaded and cannot half-land), plus the server-side read-then-write degrade for a DB without the migration. Reached only by a dynamic import from `storage.renameSiteGroup` — never static-import it from the boot path.
   - _exports_: `cloudRenameGroup`
 - **`src/workspaces/site-planner/lib/cloudSync.js`** — RLS-scoped Supabase site read/write: per-tab version CAS + thin-clobber guard, keepalive push, delete-tombstone reconcile
   - _exports_: `_lastHeaderSig`, `_siteVersions`, `clearSiteVersions`, `cloudDelete`, `cloudDeletedRows`, `cloudHardDelete`, `cloudList`, `cloudRestore`, `cloudUpsert`, `fetchSiteForReconcile`, `headerSig`, `interpretDelete`, `keepaliveCloudPush`, `siteRowFor`, `slimForCloud`
@@ -671,7 +671,7 @@ _423 source files mapped._
   - _exports_: `buildBuildingTableSvg`, `buildPrintSheetSvg`, `buildStormwaterSvg`, `formatDateStamp`, `metricsRowsFor`, `pageSize`, `printSheetLayout`, `sanitizeFilename`, `sheetFileName`, `stormwaterBandH`
 - **`src/workspaces/site-planner/lib/profile.js`** — Signed-in user profile I/O against Supabase public.profiles (load/upsert first/last/org, mirrors names to auth metadata)
   - _exports_: `loadProfile`, `saveProfile`
-- **`src/workspaces/site-planner/lib/projectName.js`** — TODO — describe
+- **`src/workspaces/site-planner/lib/projectName.js`** — THE authority for what a project (site group) is called: resolves the one authoritative name across a group's plans (rename-stamp first, legacy majority second, ambiguous never guessed), reconciles a split group, and supplies the write-path correction that stops a stale plan re-publishing an old name.
   - _exports_: `byGroup`, `groupKeyOf`, `maxStampOf`, `nameAuthority`, `reconcileGroupNames`, `resolveNameFor`
 - **`src/workspaces/site-planner/lib/proposedSurface.js`** — B826 proposed-surface engine (pure): per-element grading planes from the B825 class records, composite cut/fill lattice, balance assist, violation classing (ADA legal vs screening)
   - _exports_: `balanceAssist`, `buildPlanes`, `buildProposedSurface`, `classifyGradeElement`, `daylightRings`, `distToRingEdges`, `DOCK_BREAK_FT`, `nearestOnRing`, `netImportCy`, `PL_FILL_EPS_FT`, `sampleProposedAt`, `slopeBand`, `surfaceGrid`, `surfaceViolations`, `TIE_DROP_FT`
