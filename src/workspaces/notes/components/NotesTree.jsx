@@ -204,9 +204,14 @@ function ProjectPanel({ projects, currentProjectId, boundTo, onBind, onClose, te
   /* A binding whose project this device cannot resolve — deleted, or belonging to an
    * account that is not signed in — is shown AS ITSELF rather than silently dropped. The
    * user has to be able to see the state they are in before they can change it. */
-  if (boundTo != null && !projects.some((p) => p.id === boundTo)) {
+  if (boundTo != null && boundTo !== currentProjectId && !projects.some((p) => p.id === boundTo)) {
     rows.push({ id: boundTo, label: `Unknown project (${boundTo})`, current: true, value: boundTo });
   }
+  /* ⛔ …and NOT when it is the project you are standing in, which the row above already
+   * offers. Both branches fire on an unresolved current project, and the pair of them
+   * emitted TWO rows carrying the SAME id — a duplicate React key, and two buttons saying
+   * the same thing with one of them naming a raw id at the user. (Found by the headless
+   * check for NEW-1, which could not click either of them.) */
 
   return (
     <div
@@ -608,8 +613,52 @@ function ViewTabs({ view, onView, binCount }) {
 
 /* ---- the rail --------------------------------------------------------------------------- */
 
+/** ⛔ A BADGE THAT DESCRIBES A FAILED LOOKUP MUST NOT LOOK LIKE DATA (NEW-1, LOUD-FAILURE).
+ *
+ *  "Other project" was shown for every notebook whose project id could not be resolved — which
+ *  is the same caption whether the project genuinely belongs to someone else's scope or the
+ *  project list simply never loaded. The owner read it as a statement about his notebooks; it
+ *  was a statement about our own ignorance, and it was wrong on every row at once.
+ *
+ *  So the unresolved case is now split by WHY, and when the reason is a failure the rail says
+ *  so out loud in a line above the tree with a way to try again. Renders nothing at all when
+ *  the list is fine, so it costs the default view nothing (PANEL-BREVITY). */
+function ProjectListBanner({ state, error, unresolved, onRetry }) {
+  // Only the FAILURE gets a line. The in-flight case is already told by the rows' own
+  // "Loading…" badge, and saying it twice is the accumulation PANEL-BREVITY forbids.
+  if (state !== "failed" || !unresolved) return null;
+  return (
+    <div
+      role="alert"
+      data-testid="notes-projects-error"
+      style={{
+        display: "flex", alignItems: "center", gap: 8, padding: "5px 8px",
+        borderRadius: RADIUS.control, border: "1px solid var(--danger-text)",
+        background: "var(--danger-bg)", color: "var(--danger-text)",
+        fontSize: 11.5, fontWeight: 600, lineHeight: 1.4,
+      }}
+    >
+      <span style={{ flex: 1, minWidth: 0 }}>
+        {`Your projects didn't load${error ? ` — ${error}` : ""}.`}
+      </span>
+      <button
+        type="button"
+        data-testid="notes-projects-retry"
+        onMouseDown={(e) => e.preventDefault()}
+        onClick={onRetry}
+        style={{
+          flex: "0 0 auto", border: "1px solid var(--danger-text)", borderRadius: RADIUS.pill,
+          background: "transparent", color: "var(--danger-text)", font: "inherit",
+          fontSize: 11, fontWeight: 700, padding: "1px 9px", cursor: "pointer",
+        }}
+      >Retry</button>
+    </div>
+  );
+}
+
 export default function NotesTree({
-  tree, projectId, projects = [], projectName, scope = SCOPE_PROJECT, onScope,
+  tree, projectId, projects = [], projectsState = "ready", projectsError = "", onRetryProjects,
+  projectName, scope = SCOPE_PROJECT, onScope,
   activePageId, query, results,
   onQueryChange, onSelectPage, onSelectHit, onAddNotebook, onAddSection, onAddPage,
   onRename, onDelete, onExportNotebook, onPrintNotebook, onBindNotebook,
@@ -631,6 +680,27 @@ export default function NotesTree({
     [view, tree, projectId, scope],
   );
   const projectNameOf = (pid) => projects.find((p) => p.id === pid)?.name || null;
+
+  /* What a notebook's row may honestly say about where it belongs. `null` when the answer is
+   * simply the project you are already standing in — repeating the header on every row is
+   * noise (PANEL-BREVITY). The three unresolved cases are deliberately DIFFERENT words: a
+   * project that is really gone is not the same fact as a list that hasn't arrived. */
+  const projectBadge = (pid) => {
+    if (pid == null) return "Loose";
+    if (pid === projectId) return null;
+    const name = projectNameOf(pid);
+    if (name) return name;
+    if (projectsState === "loading") return "Loading…";
+    if (projectsState === "failed") return "Not loaded";
+    return "Missing project";
+  };
+
+  /* Whether ANY visible notebook is wearing an unresolved badge — what decides if the failure
+   * is worth a line of its own above the tree. */
+  const unresolvedBinding = useMemo(
+    () => notebooks.some((nb) => nb.projectId != null && nb.projectId !== projectId && !projects.some((p) => p.id === nb.projectId)),
+    [notebooks, projectId, projects],
+  );
 
   const isOpen = (id) => !collapsed.has(id);
   const toggle = (id) => setCollapsed((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
@@ -707,6 +777,12 @@ export default function NotesTree({
           }}
         />
         {projectId ? <ScopeBar scope={scope} projectName={projectName} onScope={onScope} /> : null}
+        <ProjectListBanner
+          state={projectsState}
+          error={projectsError}
+          unresolved={unresolvedBinding}
+          onRetry={onRetryProjects}
+        />
         <ViewTabs view={view} onView={(v) => { setView(v); onQueryChange(""); }} binCount={bin.length} />
         <button
           type="button"
@@ -764,11 +840,7 @@ export default function NotesTree({
                  when it is not simply the project you are already in. A badge repeating
                  the header on every row is noise (PANEL-BREVITY); a badge that never says
                  which project is the state the owner could not see. */
-              badge={nb.projectId == null
-                ? "Loose"
-                : (nb.projectId !== projectId
-                  ? (projectNameOf(nb.projectId) || "Other project")
-                  : null)}
+              badge={projectBadge(nb.projectId)}
               {...rowProps(nb.id, {
                 /* The notebook's exports moved HERE from a pair of links repeated under
                    every notebook in the rail (B1365). They are notebook-level (the toolbar's

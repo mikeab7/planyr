@@ -992,8 +992,14 @@ const rowText = await page.evaluate((id) => {
   const row = document.querySelector(`[data-testid="notes-row-${id}"]`);
   return (row?.innerText || "").toLowerCase();
 }, projNotebook.id);
-ok("...and the row SAYS where it belongs, rather than leaving you to guess",
-  /other project|alpha/.test(rowText), rowText.replace(/\n/g, " · ").slice(0, 60));
+/* ⛔ AMENDED (NEW-1). This used to accept "other project" — the degraded caption the owner
+ * was reading as a fact about his notebooks when it was really a failed lookup. There are no
+ * real projects in this logged-out run, so the honest answer here is "missing project": the
+ * list loaded fine and this id genuinely is not in it. The one answer that is now FORBIDDEN
+ * is the old one, which said the same thing whether the project was gone or merely unknown. */
+ok("...and the row SAYS where it belongs, in words that match WHY it can't name it",
+  /missing project|alpha/.test(rowText) && !/other project/.test(rowText),
+  rowText.replace(/\n/g, " · ").slice(0, 60));
 
 /* The half that never existed: change the binding. `setNotebookProject` shipped with the
  * module, was unit-tested, and had no caller at all — so a notebook could only ever be bound
@@ -1627,6 +1633,90 @@ ok("...and its detail is on the canvas rather than hidden behind a chevron that 
 const oldStored = await readBody(oldPage);
 ok("...and merely OPENING it did not rewrite it — the migration is a read, not a silent edit",
   !!(oldStored?.content || []).find((n) => n.type === "noteSketch")?.attrs?.outline);
+
+/* ════ 24. THE HEADER REMEMBERS THE PROJECT, AND THE RAIL NEVER LIES ABOUT ONE.
+ *
+ * Two owner reports from 2026-08-04, both about the same screen.
+ *
+ *   (a) "it shouldn't say dashboard select a project at the top when, you know, I started
+ *        here in a project."  — B1343 ×2. Every other workspace hands the shared header a
+ *        `currentProject`; Notes never did, so the crumb read "Dashboard / Select a project"
+ *        while the URL named the project he had walked in from. Drivable logged out: a
+ *        project is a route id.
+ *
+ *   (b) A notebook bound to a project the app cannot name wore the badge "OTHER PROJECT" —
+ *        a caption describing OUR failed lookup as though it were HIS data (NEW-1). The rule
+ *        asserted here is that the words differ by REASON, and that the old undifferentiated
+ *        caption is gone from the running app entirely.
+ *
+ * The third half — a project list that fails to LOAD (the signed-in cold-machine case that
+ * started all of this) — is the one piece the sandbox cannot reach: the warm only runs while
+ * signed in, and the proxy CORS-blocks sign-in. That is a V### entry, not a gap left quiet.
+ * ═══════════════════════════════════════════════════════════════════════════════════════ */
+
+const crumbText = async () => (await page.locator('[data-testid="project-crumb"]').first().innerText().catch(() => "")).replace(/\s+/g, " ").trim();
+
+await goProject(PROJ_A);
+await page.waitForTimeout(500);
+const inProjectCrumb = await crumbText();
+ok("⛔ ENTERING NOTES INSIDE A PROJECT, THE HEADER STILL NAMES THE PROJECT (B1343 ×2)",
+  !/select a project/i.test(inProjectCrumb) && inProjectCrumb.length > 0, inProjectCrumb || "empty crumb");
+
+/* …and it is the ROUTE's project, not a leftover: leaving for the dashboard has to clear it,
+ * or "it remembers" would just be "it is stuck". */
+await goProject(null);
+await page.waitForTimeout(500);
+ok("...and with NO project in the route it correctly asks for one — the crumb tracks the URL, both ways",
+  /select a project/i.test(await crumbText()), await crumbText());
+
+/* The real move the owner makes: stand in a project in ANOTHER workspace, then press the
+ * Notes tab. The project must survive the module switch all the way to the header TEXT — the
+ * URL half of that was already audited by B1343 and still holds; the header was the half
+ * Notes never joined.
+ *
+ * ⚠ The source module here is Review, not Site, and that is a harness fact rather than a
+ * product one: the Site Planner OWNS the URL's project and drops one that names no real plan,
+ * so a synthetic route id cannot survive that route in a logged-out sandbox. Every module tab
+ * is proven for the URL half by ui-audit/verify-module-context-carry.mjs (20 of 20). */
+await page.evaluate((p) => { window.location.hash = `#/project/${p}/markup`; }, PROJ_A);
+await page.waitForTimeout(1400);
+await page.locator('[data-testid="module-tab-notes"]:visible').first().click();
+await page.waitForSelector('[data-testid="notes-tree"]', { timeout: 15000 });
+await page.waitForTimeout(700);
+ok("⛔ ...AND ARRIVING BY THE REAL TAB FROM INSIDE A PROJECT, IT STILL DOES — the owner's exact move",
+  !/select a project/i.test(await crumbText()) && /project\/[^/]+\/notes/.test(await page.evaluate(() => window.location.hash)),
+  `${await crumbText()} @ ${await page.evaluate(() => window.location.hash)}`);
+
+/* (b) — the badge. Bind a notebook to this project, walk into another one, widen the scope,
+ * and read that row back: its project id is real to the route and unresolvable to the store,
+ * which is precisely the shape that used to print "OTHER PROJECT" on every row at once. */
+await goProject(PROJ_A);
+await page.waitForTimeout(500);
+const boundNb = (await readTree()).notebooks.find((n) => n.projectId === PROJ_A);
+ok("a notebook is bound to the project the route names, ready to be looked at from elsewhere", !!boundNb);
+const badgeNbId = boundNb.id;
+/* The panel that shows the binding must offer ONE row per destination — the unresolved
+ * current project used to be listed twice, once as "This project" and once as a raw id. */
+await tb(`notes-row-${badgeNbId}`).click({ button: "right" });
+await page.waitForSelector('[data-testid="notes-row-menu"]', { timeout: 5000 });
+await tb(`notes-menu-bind-${badgeNbId}`).click();
+await page.waitForTimeout(300);
+ok("...and the 'Belongs to' panel offers it exactly ONCE, never as a raw id beside itself",
+  await page.locator(`[data-testid="notes-bind-${badgeNbId}-to-${PROJ_A}"]`).count() === 1);
+await tb(`notes-bind-${badgeNbId}-close`).click();
+await page.waitForTimeout(300);
+
+await goProject(PROJ_B);
+await page.waitForTimeout(500);
+await tb("notes-scope-all").click();
+await page.waitForTimeout(500);
+const badgeRow = (await tb(`notes-row-${badgeNbId}`).innerText().catch(() => "")).toLowerCase();
+ok("⛔ THE CAPTION THAT DESCRIBED A FAILED LOOKUP AS DATA IS GONE FROM THE RUNNING APP (NEW-1)",
+  !/other project/.test(badgeRow), badgeRow.replace(/\n/g, " · ").slice(0, 90));
+ok("...and an unresolvable binding is named for what it IS, rather than left blank",
+  /missing project/.test(badgeRow), badgeRow.replace(/\n/g, " · ").slice(0, 90));
+ok("...while the rail stays quiet when there is no failure to report — no banner on a healthy list",
+  await tb("notes-projects-error").count() === 0);
 
 /* ════ Wrap ═══════════════════════════════════════════════════════════════════════════ */
 ok("no uncaught page error across the whole run", pageErrors.length === 0, pageErrors.join(" | ") || "clean");
