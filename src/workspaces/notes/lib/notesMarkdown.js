@@ -44,7 +44,7 @@ const LOSSY = {
   richCells: "tables with multi-paragraph cells",
   headerlessTable: "tables with no header row",
   missingImage: "an image whose stored copy has gone",
-  sketchPlacement: "where a sketch's boxes were dragged to",
+  sketchPlacement: "where a sketch's boxes sit on the canvas",
 };
 
 /* ---- images -------------------------------------------------------------------------
@@ -93,64 +93,136 @@ function imageMd(node, lossy, images) {
 
 /* ---- sketches -------------------------------------------------------------------------
  *
- * A SKETCH EXPORTS AS THE OUTLINE IT WAS DRAWN FROM, and that is LOSSLESS FOR CONTENT: the
- * outline is the single source of truth for what exists and what connects to what (the full
- * rule is at the top of lib/notesSketchModel.js), so an indented Markdown list carries every
- * box, every label, every body and every parent→child arrow with nothing left behind.
+ * A SKETCH EXPORTS AS A NESTED LIST, and every WORD in it survives: each box is a bullet
+ * carrying its label, with its body as an indented `>` continuation under it. The nesting is
+ * DERIVED from the arrows (a box hangs under the first arrow that can be its parent without
+ * making a loop) — nobody owns that ordering and nothing reads it back in; it exists so a
+ * drawing can be written down. The full rule is at the top of lib/notesSketchModel.js.
  *
- * Two things a list cannot say, and NEITHER is dropped silently:
- *   • WHERE boxes were dragged to — a Markdown list has no coordinates, so this is reported
- *     by name in the lossy list, the same way a merged table cell is.
- *   • THE EXTRA ARROWS — the cross-links the outline's shape cannot express. These are
- *     WRITTEN OUT, as a short labelled list under the outline, because they are content and
- *     content does not get to vanish into a footnote.
+ * Two things a flat list cannot say, and NEITHER is dropped silently:
+ *   • WHERE the boxes sit — a Markdown list has no coordinates, so a sketch of more than one
+ *     box reports this by name in the lossy list, the same way a merged table cell does.
+ *   • THE ARROWS THE NESTING COULD NOT EXPRESS — a second arrow into the same box, a link
+ *     back to an earlier one. These are WRITTEN OUT under "Also connected:", because they
+ *     are content and content does not get to vanish into a footnote.
+ *
+ * It also still reads a sketch saved under the SUPERSEDED outline shape (B1400: `outline` +
+ * `positions`), because a note in storage may carry one; that shape brings its own nesting.
  *
  * ⛔ THIS FILE IMPORTS NOTHING (it is on the Notes route's STATIC path, and the sketch model
  * deliberately is not — pulling it in here would put sketch code on every notebook's first
  * paint). The reading below is therefore hand-rolled and defensive. test/notesSketch.test.js
  * guards the drift that invites: it feeds a real sketch node through BOTH this exporter and
- * the model's own `parseOutlineText`, and fails if the two disagree about the outline.
+ * the model's own `outlineFromSketch`, and fails if the two disagree.
  */
+function sketchLines(a) {
+  const legacyOutline = Array.isArray(a.outline) ? a.outline : [];
+  const boxes = Array.isArray(a.boxes) ? a.boxes : [];
+  const links = (Array.isArray(a.links) ? a.links : []).filter((l) => l && typeof l === "object");
+
+  /* The superseded shape: the indentation IS the nesting, and its arrows are all extra. */
+  if (!boxes.length && legacyOutline.length) {
+    const lines = [];
+    let prev = -1;
+    for (const n of legacyOutline) {
+      if (!n || typeof n !== "object" || !n.id) continue;
+      const depth = Math.min(Math.max(0, Math.trunc(Number(n.depth) || 0)), prev + 1);
+      prev = depth;
+      lines.push({ id: String(n.id), depth, label: String(n.label == null ? "" : n.label), body: String(n.body == null ? "" : n.body) });
+    }
+    return { lines, extra: links, placed: Object.keys(a.positions || {}).length > 0 };
+  }
+
+  const clean = [];
+  const seen = new Set();
+  for (const b of boxes) {
+    if (!b || typeof b !== "object") continue;
+    const id = String(b.id == null ? "" : b.id);
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    clean.push({ id, label: String(b.label == null ? "" : b.label), body: String(b.body == null ? "" : b.body) });
+  }
+  if (!clean.length) return { lines: [], extra: [], placed: false };
+
+  const order = new Map(clean.map((b, i) => [b.id, i]));
+  const parentOf = new Map();
+  const used = new Set();
+  for (const l of links) {
+    const from = String(l.from == null ? "" : l.from);
+    const to = String(l.to == null ? "" : l.to);
+    if (!order.has(from) || !order.has(to) || from === to) continue;
+    if (used.has(`${from} ${to}`)) continue;
+    if (parentOf.has(to)) continue;
+    let walker = from;
+    let cyclic = false;
+    for (let guard = 0; walker && guard <= clean.length; guard += 1) {
+      if (walker === to) { cyclic = true; break; }
+      walker = parentOf.get(walker);
+    }
+    if (cyclic) continue;
+    parentOf.set(to, from);
+    used.add(`${from} ${to}`);
+  }
+
+  const kids = new Map();
+  for (const [child, parent] of parentOf) {
+    if (!kids.has(parent)) kids.set(parent, []);
+    kids.get(parent).push(child);
+  }
+  for (const list of kids.values()) list.sort((x, y) => order.get(x) - order.get(y));
+
+  const byId = new Map(clean.map((b) => [b.id, b]));
+  const lines = [];
+  const emitted = new Set();
+  const emit = (id, depth) => {
+    if (emitted.has(id)) return;
+    emitted.add(id);
+    const b = byId.get(id);
+    lines.push({ id, depth, label: b.label, body: b.body });
+    for (const child of kids.get(id) || []) emit(child, depth + 1);
+  };
+  for (const b of clean) if (!parentOf.has(b.id)) emit(b.id, 0);
+  for (const b of clean) emit(b.id, 0);
+
+  const extra = [];
+  const extraSeen = new Set();
+  for (const l of links) {
+    const from = String(l.from == null ? "" : l.from);
+    const to = String(l.to == null ? "" : l.to);
+    const key = `${from} ${to}`;
+    if (!order.has(from) || !order.has(to) || from === to || used.has(key) || extraSeen.has(key)) continue;
+    extraSeen.add(key);
+    extra.push({ from, to });
+  }
+  return { lines, extra, placed: clean.length > 1 };
+}
+
 function sketchMd(node, lossy) {
   const a = node?.attrs || {};
-  const outline = (Array.isArray(a.outline) ? a.outline : [])
-    .filter((n) => n && typeof n === "object" && n.id)
-    .map((n) => ({
-      id: String(n.id),
-      depth: Math.max(0, Math.trunc(Number(n.depth) || 0)),
-      label: String(n.label == null ? "" : n.label),
-      body: String(n.body == null ? "" : n.body),
-    }));
-  if (!outline.length) return "";
+  const { lines: nodes, extra, placed } = sketchLines(a);
+  if (!nodes.length) return "";
 
-  // Same clamp the model applies: a line can only ever be one level deeper than the one above.
-  let prev = -1;
-  for (const n of outline) { n.depth = Math.min(n.depth, prev + 1); prev = n.depth; }
-
-  const lines = [];
-  for (const n of outline) {
+  const out = [];
+  for (const n of nodes) {
     const pad = "  ".repeat(n.depth);
-    lines.push(`${pad}- ${escapeText(n.label)}`);
-    /* The body rides as an indented `>` line under its own bullet — the SAME syntax the
-     * outline pane uses. Two things fall out of matching it rather than inventing a second
-     * form: the label/body pair survives the export AS A PAIR (a plain indented
-     * continuation would re-read as a box of its own), and the exported list can be pasted
-     * straight back into a sketch and come out identical. It renders as an indented quote
-     * in any Markdown viewer, which is what a detail note should look like. */
-    if (n.body) for (const b of n.body.split("\n")) lines.push(`${pad}  > ${escapeText(b)}`);
+    out.push(`${pad}- ${escapeText(n.label)}`);
+    /* The body rides as an indented `>` line under its own bullet, so the label/body pair
+     * survives the export AS A PAIR (a plain indented continuation would re-read as a box of
+     * its own). It renders as an indented quote in any Markdown viewer, which is what a
+     * detail note should look like. */
+    if (n.body) for (const b of n.body.split("\n")) out.push(`${pad}  > ${escapeText(b)}`);
   }
 
-  const label = (id) => outline.find((n) => n.id === id)?.label || "";
-  const links = (Array.isArray(a.links) ? a.links : [])
-    .filter((l) => l && label(l.from) && label(l.to));
-  if (links.length) {
-    lines.push("");
-    lines.push(`${escapeText("Also connected:")}`);
-    for (const l of links) lines.push(`- ${escapeText(label(l.from))} → ${escapeText(label(l.to))}`);
+  const label = (id) => nodes.find((n) => n.id === id)?.label || "";
+  const named = extra.filter((l) => nodes.some((n) => n.id === l.from) && nodes.some((n) => n.id === l.to));
+  if (named.length) {
+    out.push("");
+    out.push(`${escapeText("Also connected:")}`);
+    for (const l of named) out.push(`- ${escapeText(label(l.from))} → ${escapeText(label(l.to))}`);
   }
 
-  if (Object.keys(a.positions || {}).length) lossy.add(LOSSY.sketchPlacement);
-  return lines.join("\n");
+  if (placed) lossy.add(LOSSY.sketchPlacement);
+  return out.join("\n");
 }
 
 /* ---- text escaping ---------------------------------------------------------------- */
@@ -425,7 +497,10 @@ export function docToText(doc) {
      * would make every box on it invisible to search — a note whose whole content was a
      * sketch would be unfindable by anything written on it. */
     if (n.type === "noteSketch") {
-      for (const box of Array.isArray(n.attrs?.outline) ? n.attrs.outline : []) {
+      const boxes = Array.isArray(n.attrs?.boxes) && n.attrs.boxes.length
+        ? n.attrs.boxes
+        : Array.isArray(n.attrs?.outline) ? n.attrs.outline : [];   // the superseded shape
+      for (const box of boxes) {
         if (box?.label) out.push(`${box.label}\n`);
         if (box?.body) out.push(`${box.body}\n`);
       }

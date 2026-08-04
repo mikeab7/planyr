@@ -98,36 +98,46 @@ const EDITOR_CSS = `
    all, so the ink is entirely here — which is what lets the same drawing theme with the app
    on screen and print black-on-white on paper. PDF-PARITY: lib/notesPrint.js mirrors every
    rule below at paper weight; change one, change both. */
-.planyr-note .planyr-sketch-host { border: 1px solid var(--border-default); border-radius: ${RADIUS.control}px; background: var(--surface-raised); padding: 8px; }
+.planyr-note .planyr-sketch-host { position: relative; border: 1px solid var(--border-default); border-radius: ${RADIUS.control}px; background: var(--surface-raised); padding: 8px; }
 .planyr-note .planyr-sketch-host.ProseMirror-selectednode { outline: 2px solid var(--accent-notes); outline-offset: 1px; }
 .planyr-note .planyr-sketch-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 7px; }
 .planyr-note .planyr-sketch-kind { font-size: 10.5px; font-weight: 700; letter-spacing: 0.07em; text-transform: uppercase; color: var(--text-tertiary); }
 .planyr-note .planyr-sketch-btn { height: 24px; padding: 0 9px; border: 1px solid var(--border-default); border-radius: ${RADIUS.pill}px; background: transparent; color: var(--text-secondary); font: inherit; font-size: 11.5px; font-weight: 650; cursor: pointer; }
 .planyr-note .planyr-sketch-btn.is-on { background: var(--accent-notes); border-color: var(--accent-notes); color: var(--on-accent-notes); }
+.planyr-note .planyr-sketch-btn:disabled { opacity: 0.45; cursor: default; }
 .planyr-note .planyr-sketch-status { font-size: 11.5px; font-weight: 600; color: var(--text-secondary); }
 .planyr-note .planyr-sketch-draw { overflow-x: auto; }
 .planyr-note .planyr-sketch-draw.is-linking { cursor: crosshair; }
 .planyr-note .planyr-sketch-canvas { display: block; max-width: 100%; height: auto; touch-action: none; }
+.planyr-note .planyr-sketch-surface { fill: transparent; cursor: crosshair; }
 .planyr-note .planyr-sketch-box { fill: var(--surface-page); stroke: var(--border-strong); stroke-width: 1.2; }
-.planyr-note .planyr-sketch-box-placed { stroke: var(--accent-notes); }
 .planyr-note .planyr-sketch-node { cursor: grab; }
-.planyr-note .planyr-sketch-node.is-link-source .planyr-sketch-box { stroke: var(--accent-notes); stroke-width: 2.2; }
-.planyr-note .planyr-sketch-node-open .planyr-sketch-box { fill: var(--surface-raised); }
+.planyr-note .planyr-sketch-node:focus { outline: none; }
+.planyr-note .planyr-sketch-node:focus .planyr-sketch-box,
+.planyr-note .planyr-sketch-node.is-selected .planyr-sketch-box { stroke: var(--accent-notes); stroke-width: 2.2; }
 .planyr-note .planyr-sketch-label { fill: var(--text-primary); font-size: 12.5px; font-weight: 650; }
 .planyr-note .planyr-sketch-body { fill: var(--text-secondary); font-size: 11px; font-weight: 500; }
+.planyr-note .planyr-sketch-grip { cursor: crosshair; }
+.planyr-note .planyr-sketch-grip-hit { fill: transparent; }
+.planyr-note .planyr-sketch-grip-dot { fill: var(--surface-raised); stroke: var(--accent-notes); stroke-width: 1.6; }
 .planyr-note .planyr-sketch-edge { stroke: var(--border-strong); stroke-width: 1.4; fill: none; }
-.planyr-note .planyr-sketch-edge-link { stroke: var(--accent-notes); stroke-dasharray: 5 3; cursor: pointer; }
+.planyr-note .planyr-sketch-edge-hit { stroke: transparent; stroke-width: 12; fill: none; cursor: pointer; }
+.planyr-note .planyr-sketch-edge-g.is-selected .planyr-sketch-edge { stroke: var(--accent-notes); stroke-width: 2.4; }
+.planyr-note .planyr-sketch-edge-g.is-selected .planyr-sketch-head { fill: var(--accent-notes); }
 .planyr-note .planyr-sketch-head { fill: var(--border-strong); stroke: none; }
-.planyr-note .planyr-sketch-head-link { fill: var(--accent-notes); }
-.planyr-note .planyr-sketch-chevron { cursor: pointer; }
-.planyr-note .planyr-sketch-chevron-hit { fill: transparent; }
-.planyr-note .planyr-sketch-chevron-mark { stroke: var(--text-tertiary); stroke-width: 1.5; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+.planyr-note .planyr-sketch-pending { stroke: var(--accent-notes); stroke-width: 1.6; stroke-dasharray: 5 3; fill: none; pointer-events: none; }
 .planyr-note .planyr-sketch-empty { margin: 0; padding: 12px 2px; color: var(--text-tertiary); font-size: 12.5px; font-style: italic; }
 .planyr-note .planyr-sketch-offline { margin: 6px 0 0; color: var(--danger-text); font-size: 12px; font-weight: 600; }
-.planyr-note .planyr-sketch-outline { margin-top: 8px; }
-.planyr-note .planyr-sketch-textarea { width: 100%; box-sizing: border-box; resize: vertical; border: 1px solid var(--border-default); border-radius: ${RADIUS.control}px; background: var(--surface-page); color: var(--text-primary); font: inherit; font-size: 13px; line-height: 1.5; padding: 8px 10px; tab-size: 2; }
-.planyr-note .planyr-sketch-textarea:focus { outline: none; border-color: var(--accent-notes); }
 .planyr-note .planyr-sketch-hint { margin: 5px 0 0; color: var(--text-tertiary); font-size: 11.5px; }
+/* The words are edited IN the box: two plain fields laid exactly over it (no dialog boxes —
+   house rule). It is positioned against the host, which is why the host is relative. */
+.planyr-note .planyr-sketch-edit { position: absolute; z-index: 3; box-sizing: border-box; display: flex; flex-direction: column; gap: 3px; padding: 5px; border: 2px solid var(--accent-notes); border-radius: 8px; background: var(--surface-page); box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18); }
+.planyr-note .planyr-sketch-edit-label,
+.planyr-note .planyr-sketch-edit-body { width: 100%; box-sizing: border-box; border: none; background: transparent; color: var(--text-primary); font: inherit; padding: 1px 3px; }
+.planyr-note .planyr-sketch-edit-label { font-size: 12.5px; font-weight: 650; }
+.planyr-note .planyr-sketch-edit-body { font-size: 11px; font-weight: 500; color: var(--text-secondary); resize: vertical; line-height: 1.28; }
+.planyr-note .planyr-sketch-edit-label:focus,
+.planyr-note .planyr-sketch-edit-body:focus { outline: none; }
 
 /* Search marking is a decoration, never a mark — it is not in the document. */
 .planyr-note .note-search-hit { background: var(--warn-bg); box-shadow: 0 0 0 1px var(--warn-text) inset; border-radius: 2px; }

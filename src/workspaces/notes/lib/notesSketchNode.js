@@ -2,9 +2,10 @@
  *
  * ═══ WHY THIS IS A SCHEMA NODE AND NOT A CANVAS STORE BOLTED ALONGSIDE ═════════════════
  *
- * This is the load-bearing decision of the whole feature, and everything good about it
- * falls out of this one choice. A sketch is a NODE IN THE DOCUMENT MODEL, declared in
- * lib/notesExtensions.js — the one place that says what a note may contain. Therefore:
+ * This is the load-bearing decision of the whole feature, it survived the authoring rebuild
+ * untouched, and everything good about it falls out of this one choice. A sketch is a NODE
+ * IN THE DOCUMENT MODEL, declared in lib/notesExtensions.js — the one place that says what a
+ * note may contain. Therefore:
  *
  *   • it PERSISTS through the existing storage seam (lib/notesStore.js), because it is
  *     part of the page's document JSON and always has been;
@@ -21,27 +22,33 @@
  *
  * ═══ WHAT IS IN THE ATTRIBUTES, AND WHAT IS NOT ════════════════════════════════════════
  *
- * `outline` — the SINGLE SOURCE OF TRUTH for what exists and what connects to what.
- * `positions` — `nodeId → {x,y}`, and NOTHING else the canvas knows.
- * `links` — the explicit `{from,to}` arrows an outline cannot express.
- * The full rule, including the delete cascade that keeps the three consistent, is written
- * out at the top of lib/notesSketchModel.js. Read it there before changing anything here.
+ * `boxes` — `[{ id, label, body, x, y }]`. THE CANVAS OWNS EVERYTHING: each box carries its
+ *           own text AND its own position. There is no second representation.
+ * `links` — the explicit `{ from, to }` arrows, drawn by dragging one box onto another.
+ * `outline` / `positions` — ⛔ SUPERSEDED (B1400's outline-owns-content design). They are
+ *           declared, default `null`, for ONE reason: a sketch saved under the old rule has
+ *           them, and `normalizeSketch` migrates such a sketch into boxes on read so it
+ *           opens looking exactly as it did. Every commit writes them back as `null`. Do not
+ *           write to them, and do not remove them until no stored note can carry one.
+ * The full rule, including the delete cascade, is written out at the top of
+ * lib/notesSketchModel.js. Read it there before changing anything here.
  *
- * NOT in the attributes: which bodies are currently open. That is a view preference, and
- * putting it in the document would sync one device's disclosure state to another and mark
- * a note as edited for opening a box.
+ * NOT in the attributes: which box or arrow is currently selected. That is view state, and
+ * putting it in the document would sync one device's highlight to another and mark a note as
+ * edited for clicking on it.
  *
  * ═══ THE BUNDLE SPLIT ══════════════════════════════════════════════════════════════════
  *
  * Sketch mode is a big feature and most notes contain no sketch. So this file — the schema
  * declaration plus the pure drawing — is all the editor chunk pays for, and the INTERACTIVE
- * half (dragging, the outline pane, arrow mode) is fetched by a CACHED DYNAMIC IMPORT the
- * first time a sketch is actually on screen, exactly the way lib/notesCloud.js and
- * lib/notesImageDb.js are fetched. A sketch therefore PAINTS IMMEDIATELY from the pure spec
- * and becomes interactive a moment later; it is never blank while the chunk arrives.
+ * half (double-click-to-create, in-box typing, dragging, arrow drags) is fetched by a CACHED
+ * DYNAMIC IMPORT the first time a sketch is actually on screen, exactly the way
+ * lib/notesCloud.js and lib/notesImageDb.js are fetched. A sketch therefore PAINTS
+ * IMMEDIATELY from the pure spec and becomes interactive a moment later; it is never blank
+ * while the chunk arrives.
  */
 import { Node } from "@tiptap/core";
-import { EMPTY_SKETCH, normalizeSketch } from "./notesSketchModel.js";
+import { addBox, EMPTY_SKETCH, MARGIN, normalizeSketch } from "./notesSketchModel.js";
 import { sketchSpec, specToDom } from "./notesSketchRender.js";
 
 /* The interactive controller, fetched once per session and shared by every sketch on the
@@ -59,9 +66,22 @@ function loadSketchEditor() {
 }
 
 const readAttrs = (el) => {
-  try { return normalizeSketch(JSON.parse(el.getAttribute("data-note-sketch") || "null")); }
-  catch (_) { return { ...EMPTY_SKETCH }; }
+  try {
+    const m = normalizeSketch(JSON.parse(el.getAttribute("data-note-sketch") || "null"));
+    return { boxes: m.boxes, links: m.links, outline: null, positions: null };
+  } catch (_) { return { ...EMPTY_SKETCH, outline: null, positions: null }; }
 };
+
+/** Selected text → a sketch holding ONE box with that text. The first line is the box's
+ *  LABEL and anything after it is the BODY, because that is exactly what the box draws —
+ *  not a syntax to learn, just the shape of the thing you are looking at. */
+function sketchWithBox(raw) {
+  const lines = String(raw == null ? "" : raw).split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+  const { model } = addBox(EMPTY_SKETCH, {
+    x: MARGIN, y: MARGIN, label: lines[0] || "", body: lines.slice(1).join("\n"),
+  });
+  return { boxes: model.boxes, links: model.links, outline: null, positions: null };
+}
 
 export const NoteSketch = Node.create({
   name: "noteSketch",
@@ -73,9 +93,11 @@ export const NoteSketch = Node.create({
 
   addAttributes() {
     return {
-      outline: { default: [] },
-      positions: { default: {} },
+      boxes: { default: [] },
       links: { default: [] },
+      // ⛔ superseded, read-only, migrated by normalizeSketch — see the header.
+      outline: { default: null },
+      positions: { default: null },
     };
   },
 
@@ -84,22 +106,49 @@ export const NoteSketch = Node.create({
   },
 
   /* PDF-PARITY, by construction: this is the same builder the node view draws with, so the
-   * printed sheet cannot drift from the screen. `detail: true` is the paper mode — every
-   * body prints as a list under the drawing, because a chevron cannot be clicked on paper. */
+   * printed sheet cannot drift from the screen. Paper gets no `interactive` flag, which
+   * costs it nothing but the grip you would drag an arrow out of — every box, every word
+   * and every arrow is identical on both surfaces. */
   renderHTML({ node }) {
-    return sketchSpec(node.attrs, { detail: true });
+    return sketchSpec(node.attrs);
   },
 
   addCommands() {
     return {
-      /* A new sketch is EMPTY. Seeding it with example boxes would be text the user has to
-       * delete before they can type their own — and the empty canvas already says what to
-       * do. The outline pane takes focus, so "click, type three words, see a box" is three
-       * actions and no reading. */
-      insertNoteSketch: () => ({ chain }) => chain().focus().insertContent({
-        type: "noteSketch",
-        attrs: { ...EMPTY_SKETCH },
-      }).run(),
+      /* THE ONE WAY IN, and it is the owner's second sentence: "maybe there's a button where
+       * I can just put a box around it."
+       *
+       * WHAT BOXING DOES, decided rather than left ambiguous: it CONVERTS the text into a
+       * real sketch box — it does not draw a border around the text where it sits. A border
+       * in place would be a dead end: you could not drag it, and you could not draw an arrow
+       * from it to another box, which is the very next thing he asked for. A box you cannot
+       * connect is a decoration, and he asked for a chart.
+       *
+       * With nothing selected the sketch arrives holding ONE EMPTY BOX, and the node view
+       * puts the caret straight in it — so the button is also "start a sketch and type". */
+      boxSelection: () => ({ state, tr, dispatch }) => {
+        const { selection } = state;
+        const { $from, empty } = selection;
+        const node = state.schema.nodes.noteSketch.create(sketchWithBox(empty
+          ? $from.parent.textContent
+          : state.doc.textBetween(selection.from, selection.to, "\n", " ")));
+        if (!dispatch) return true;
+
+        /* Caret in a top-level block: the block BECOMES the sketch, so boxing a paragraph
+         * does not leave the emptied paragraph behind it. Anywhere else (a list item, a
+         * table cell, a real selection) replaces just the selection and lets ProseMirror do
+         * its own splitting. */
+        if (empty && $from.depth === 1 && $from.parent.isTextblock) tr.replaceWith($from.before(1), $from.after(1), node);
+        else tr.replaceSelectionWith(node);
+
+        /* A sketch is an ATOM. If it ends up last in the document there is nowhere left to
+         * put the caret, and the next thing typed would land ON the sketch and replace it —
+         * so boxing your only paragraph always leaves a line to keep writing on. */
+        const last = tr.doc.lastChild;
+        if (last && last.type.name === "noteSketch") tr.insert(tr.doc.content.size, state.schema.nodes.paragraph.create());
+        dispatch(tr);
+        return true;
+      },
     };
   },
 
@@ -140,9 +189,10 @@ export const NoteSketch = Node.create({
           const pos = typeof getPos === "function" ? getPos() : null;
           if (pos == null || Number.isNaN(pos)) { draw(); return false; }
           const tr = editor.view.state.tr.setNodeMarkup(pos, undefined, {
-            outline: m.outline,
-            positions: m.positions,
+            boxes: m.boxes,
             links: m.links,
+            outline: null,          // the superseded shape is cleared the first time we write
+            positions: null,
           });
           editor.view.dispatch(tr);
           return true;
@@ -150,17 +200,20 @@ export const NoteSketch = Node.create({
       };
 
       let current = normalizeSketch(node.attrs);
-      let expanded = new Set();
+      let selected = null;
       let attached = null;
 
       function draw(model = current, opts = {}) {
-        const next = specToDom(sketchSpec(model, { detail: false, expanded: opts.expanded || expanded }));
+        const next = specToDom(sketchSpec(model, {
+          interactive: editor.isEditable,
+          selected: opts.selected === undefined ? selected : opts.selected,
+        }));
         drawSlot.replaceChildren(next);
         return next;
       }
 
-      handle.setExpanded = (set) => { expanded = set instanceof Set ? set : new Set(set || []); };
-      handle.getExpanded = () => expanded;
+      handle.setSelected = (sel) => { selected = sel || null; };
+      handle.getSelected = () => selected;
 
       draw();
 
@@ -179,17 +232,19 @@ export const NoteSketch = Node.create({
 
       return {
         dom,
-        /* Everything inside the host is ours: a textarea, a drag, a chevron. ProseMirror
+        /* Everything inside the host is ours: an in-box field, a drag, a grip. ProseMirror
          * must not treat any of it as a document event, and must not try to reconcile the
-         * DOM we are drawing by hand. */
+         * DOM we are drawing by hand. This is also what makes "double-click the canvas even
+         * while you are writing somewhere else" work: the press never reaches the document. */
         stopEvent: () => true,
         ignoreMutation: () => true,
         update(updated) {
           if (updated.type.name !== "noteSketch") return false;
           current = normalizeSketch(updated.attrs);
-          // Expansion is a view preference; a node whose line is gone cannot stay open.
-          const ids = new Set(current.outline.map((n) => n.id));
-          expanded = new Set([...expanded].filter((id) => ids.has(id)));
+          // A selection is view state; a box that is gone cannot stay selected.
+          const ids = new Set(current.boxes.map((b) => b.id));
+          if (selected?.kind === "box" && !ids.has(selected.id)) selected = null;
+          if (selected?.kind === "edge" && !(ids.has(selected.from) && ids.has(selected.to))) selected = null;
           if (attached?.refresh) attached.refresh();
           else draw();
           return true;
