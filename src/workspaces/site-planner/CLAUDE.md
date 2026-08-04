@@ -11,6 +11,25 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
 - `siteModel.js` — the per-plan schema (`createSiteModel`, `SITE_MODEL_VERSION`); read via
   selectors, persist via `storage.js`. **Additive only** — bump the version, extend `migrate`.
 - `storage.js` — thin model layer (migrate on read, merge+renormalize on save).
+- **⛔ `projectName.js` (B1415–B1418) — A PROJECT'S NAME HAS ONE AUTHORITATIVE VALUE PER GROUP, and every
+  plan's `site` field is a DERIVED MIRROR of it. Read it before touching any rename path.** The name was
+  denormalized across a group's plans with nothing keeping the copies in agreement, so a rename that ran
+  while some plans weren't cached locally left those plans holding the old name — and they RE-PUBLISHED it
+  on their next save (proven in production: group `smrp1wrgg6u5` split Silvestri/Sylvestri for four days,
+  the straggler saved seventeen minutes AFTER the rename). Three things hold the invariant up and removing
+  any one re-opens it: **(1)** `siteRenamedAt` (schema v13) is the FACT that decides which copy is current —
+  **never re-derive the winner from `updatedAt`**, which on the owner's own data is a coin flip; **(2)** the
+  rename is ONE server-side statement over the GROUP (`cloudSync.cloudRenameGroup` → `db/rename_site_group.sql`),
+  keyed on `coalesce(data->>'groupId', id)` and **never on the `group_id` COLUMN**, which is a mirror known to
+  drift from the jsonb; **(3)** the authority is resolved at BOTH seams — `loadSitesList`/`loadSite` on the way
+  out, and **`saveSite` as the write choke point**, which is what stops a stale in-memory model being written
+  (and therefore pushed) with the old name. `repairSplitProjectNames()` is the idempotent load-time converger;
+  a legacy group with no stamp and no majority is REPORTED, never guessed at. Guards: the repo-root `test/`
+  suites **projectName** (23, against the real production rows) and **storage**, plus the e2e spec
+  **project-rename** (mutation-checked). UI trap it also closes: `ProjectBreadcrumb`'s `editingWhere` is NOT
+  redundant with `editingId` — one project id addresses two inline editors (its list row and the crumb-level
+  rename), and keyed on the id alone BOTH mount with `autoFocus`, the second stealing focus from the first,
+  whose `onBlur` commits and closes it in the same frame.
 - `layers.js` + `components/LayerPanel.jsx` — map-layer system; `layerPrefs.js` (per-site Layers-panel
   toggle memory — NEW-1, sparse on/off overrides restored on open + persisted on toggle); `coverage.js` (coverage engine);
   `arcgis.js`/`counties.js`/`layerRequest.js` — GIS plumbing; `gisCache.js` — screening cache;

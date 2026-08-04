@@ -10,6 +10,7 @@
  */
 import { createSiteModel, migrate, mergeSiteContent, contentCount, isBuilding, toMs, countJunkEntries } from "./siteModel.js";
 import { cloudUpsert, cloudDelete, cloudHardDelete, cloudRestore, cloudDeletedRows, cloudList, clearSiteVersions, keepaliveCloudPush, fetchSiteForReconcile } from "./cloudSync.js";
+import { reconcileGroupNames, resolveNameFor, groupKeyOf, maxStampOf } from "./projectName.js";
 import { idbGet, idbPut, idbAvailable, idbDeleteByPrefix } from "./localDb.js";
 import { reportClientEvent } from "../../../shared/telemetry/clientErrors.js";
 
@@ -256,6 +257,10 @@ export async function pullCloud(uid) {
   // Heal the split: re-push anything the cloud is missing / older on, so a push that didn't
   // land doesn't strand work on this device (fire-and-forget; the next autosave would too).
   for (const id of toPush) cloudUpsert(uid, map[id]).catch(() => {});
+  // NEW-3 — the pull is exactly when a group can arrive split (a plan this device has never seen
+  // showing up still carrying a pre-rename name), so converge it here as well as at boot.
+  // Idempotent: a coherent store writes and pushes nothing.
+  try { repairSplitProjectNames(); } catch (_) {}
   return { ok: true, count: models.length };
 }
 export function clearCloudCache(uid) { try { if (uid) localStorage.removeItem(cloudKey(uid)); } catch (_) {} }
@@ -809,12 +814,34 @@ export function loadSitesList() {
   // NEW-2 — the list read normalizes every record too, and on a cold boot it is usually the FIRST
   // thing to run the bonded heal. Report from here as well, or the plan-open report below is
   // reached only after the repair has already happened somewhere else.
-  return raw.map((r) => {
+  const models = raw.map((r) => {
     const watch = bondedHealWatch(r && r.id);
     const m = migrate(r, { onHeal: watch.onHeal });
     watch.flush();
     return m;
-  }).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+  });
+  // NEW-1 — a project's name is a DERIVED MIRROR of its group's one authoritative value, so the
+  // list read resolves it. This is what stops a group that is split on disk (the Silvestri /
+  // Sylvestri case) from ever REACHING the map list as two entries: even before the repair pass
+  // has written anything back, every reader sees the group's real name. Pure + identity-preserving
+  // on a coherent store, so a healthy list allocates nothing new. `repairSplitProjectNames()` is
+  // the persisting half — a read must not write (this runs inside render paths).
+  return applyNameAuthority(models).models.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+}
+
+/* Resolve every group's authoritative name across a set of models, reporting any group with no
+ * honest winner instead of guessing at one (LOUD-FAILURE). Shared by the list read and the repair
+ * pass so both run exactly one rule. Returns { models, changes }. */
+function applyNameAuthority(models) {
+  const { models: out, changes, ambiguous } = reconcileGroupNames(models);
+  for (const a of ambiguous) {
+    try {
+      reportClientEvent("project-name-ambiguous", "a project's plans disagree on its name and there is no majority — left unchanged", {
+        groupId: a.groupId, names: (a.names || []).join(" | "), plans: a.plans,
+      });
+    } catch (_) {}
+  }
+  return { models: out, changes };
 }
 // Every plan belonging to one site (group), newest first.
 export function loadPlansOfGroup(groupId) {
@@ -825,10 +852,79 @@ export function loadPlansOfGroup(groupId) {
 // plan's id, which for a multi-plan site is often NOT the group's anchor plan. Resolve to the
 // group first — otherwise loadPlansOfGroup(planId) matches nothing, no plan is saved, and the
 // rename silently no-ops, reading as the name "reverting" to the old one. (rename-revert)
+/* ⛔ NEW-1/NEW-2 — THE ONE RENAME. Every rename entry point (the map list's right-click, the
+ * header project dropdown) goes through here, so there is one implementation and not a second to
+ * drift.
+ *
+ * What changed, and why: this used to iterate `loadPlansOfGroup(groupId)` — the LOCAL store — and
+ * write each hydrated plan. Any plan not in this browser's localStorage at rename time was never
+ * touched, kept the old name in the cloud, and RE-PUBLISHED it the next time it saved. Now the
+ * rename is TWO writes with completely different jobs:
+ *   • LOCAL, synchronously — stamp `site` + `siteRenamedAt` on the hydrated plans so the UI updates
+ *     in the same tick. `saveSite` mirrors the stamp across the rest of the group as they hydrate.
+ *   • CLOUD, as ONE statement over the GROUP (`cloudRenameGroup`) — never an enumeration of what
+ *     this browser happens to have cached, so it reaches plans this device has never loaded, and
+ *     it cannot half-land.
+ *
+ * Returns a PROMISE of { ok, groupId, name, at, plans, cloud } so the caller can AWAIT the write
+ * before refreshing its list and can surface an honest failure. The old function returned nothing
+ * and failed silently — which is why the owner only found out by noticing the name had reverted. */
 export function renameSiteGroup(idOrGroup, site) {
+  const name = typeof site === "string" ? site.trim() : "";
   const rec = loadSite(idOrGroup);
   const groupId = rec ? groupOf(rec) : idOrGroup;
-  loadPlansOfGroup(groupId).forEach((s) => saveSite({ id: s.id, site }));
+  if (!groupId || !name) return Promise.resolve({ ok: false, groupId, name, error: "A project needs a name." });
+  // ONE stamp for the whole rename — every plan the local write and the cloud write touch carries
+  // the SAME `siteRenamedAt`, so the group has a single unambiguous "when" and no reader has to
+  // fall back to the legacy majority rule again. STRICTLY MONOTONIC rather than a bare Date.now():
+  // a second rename inside the same millisecond, or a device whose clock runs slow, would otherwise
+  // stamp a genuinely later rename with a number that doesn't beat the one already on the group.
+  const localPlans = loadPlansOfGroup(groupId);
+  const at = Math.max(Date.now(), maxStampOf(localPlans) + 1);
+  localPlans.forEach((s) => saveSite({ id: s.id, site: name, siteRenamedAt: at }));
+  if (!activeUser) return Promise.resolve({ ok: true, groupId, name, at, plans: localPlans.length, cloud: { skipped: true } });
+  // LOADED ON DEMAND — see lib/cloudRename.js. A rename is rare and user-initiated, so its cloud
+  // path (an RPC plus the whole un-migrated-DB degrade) stays off the chunk every page load pays for.
+  return import("./cloudRename.js").then((m) => m.cloudRenameGroup(activeUser, groupId, name, at))
+    .then((cloud) => ({ ok: !!(cloud && cloud.ok), groupId, name, at, plans: localPlans.length, cloud, error: cloud && cloud.error }))
+    .catch((e) => ({ ok: false, groupId, name, at, plans: localPlans.length, error: (e && e.message) || "rename failed" }));
+}
+
+/* NEW-3 — REPAIR the projects already split by the old rename, and keep them repaired.
+ *
+ * Idempotent, same contract as the other repair passes here: it converges every group whose plans
+ * disagree onto the group's authoritative name, writes the correction back to the on-device store,
+ * and re-pushes the corrected plans so the CLOUD stops carrying the contradiction too (otherwise
+ * the stale row is still there to re-publish on its next save). A group with no honest winner —
+ * legacy, unstamped, and no majority — is reported and LEFT ALONE rather than guessed at.
+ *
+ * Runs at boot and after every successful pull. A second run changes nothing: after the first pass
+ * every plan already matches its group's authority, so `reconcileGroupNames` produces no changes,
+ * nothing is written and nothing is pushed. */
+export function repairSplitProjectNames() {
+  let raw;
+  try { raw = Object.values(readSites()); } catch (_) { return { ok: false, changed: 0 }; }
+  if (!raw.length) return { ok: true, changed: 0 };
+  // Deliberately reasons over the RAW stored records, not migrated models: the name authority reads
+  // only id / groupId / site / siteRenamedAt / updatedAt, all of which a stored record already has,
+  // and running the full `migrate()` (which carries the bonded-assembly heal) on every record would
+  // make a pass that fires at boot and after every pull needlessly expensive.
+  const { models, changes } = applyNameAuthority(raw);
+  if (!changes.length) return { ok: true, changed: 0 };
+  const byId = new Map(models.map((m) => [m.id, m]));
+  for (const c of changes) {
+    const m = byId.get(c.id);
+    if (!m) continue;
+    // skipHistory — a name correction is not a content edit; it should not burn a version snapshot.
+    saveSite({ id: m.id, site: m.site, siteRenamedAt: m.siteRenamedAt }, { skipHistory: true });
+    reportClientEvent("project-name-reconciled", "a plan's project name disagreed with its project and was converged", {
+      id: c.id, groupId: c.groupId, from: c.from, to: c.to, basis: c.basis,
+    });
+  }
+  // Push the corrections so the cloud copy stops contradicting the group as well. Fire-and-forget:
+  // the local repair already stands, and the next ordinary save would carry it up regardless.
+  if (activeUser) for (const c of changes) pushSiteToCloud(c.id).catch(() => {});
+  return { ok: true, changed: changes.length, groups: [...new Set(changes.map((c) => c.groupId))].length };
 }
 // Mirror the cross-module schedule link onto a site group (schema v9). The canonical pairing
 // lives on the Schedule record (its `linkedSiteId`); this writes the lightweight HINT
@@ -1033,11 +1129,17 @@ function bondedHealWatch(id) {
   };
 }
 export function loadSite(id, { persistHeal = false } = {}) {
-  const rec = id ? readSites()[id] : null;
+  const all = id ? readSites() : null;
+  const rec = all ? all[id] : null;
   if (!rec) return null;
   const watch = bondedHealWatch(id);
-  const m = migrate(rec, { onHeal: watch.onHeal });
+  let m = migrate(rec, { onHeal: watch.onHeal });
   const wasTorn = watch.flush();
+  // NEW-1 — the single-record read resolves the group's authoritative name too. `pushSiteToCloud`
+  // reads through here, so this is what stops a stale on-disk copy being shipped to the cloud with
+  // the old name even before the repair pass has written the correction back.
+  const authority = resolveNameFor(m, Object.values(all).filter((s) => s && s.id !== id && groupKeyOf(s) === groupKeyOf(m)));
+  if (authority) m = { ...m, ...authority };
   lastSeenAt[id] = m.updatedAt || 0; // we are now in sync with the stored copy
   /* NEW-2 — PERSIST the repair when the plan is actually being OPENED.
    * A heal that lives only in memory is precisely why the owner's plan kept "fixing itself" on
@@ -1081,7 +1183,20 @@ export function saveSite(partial, { skipHistory = false } = {}) {
     merged = mergeSiteContent(createSiteModel(merged), existing); // our scalars + union of content
   }
   if (existing && !skipHistory) snapshotVersion(existing); // back up the prior version before overwriting (rollback safety net, B126); the immediate per-edit write skips this (B458)
-  const model = { ...createSiteModel(merged), updatedAt: Date.now() };
+  let model = { ...createSiteModel(merged), updatedAt: Date.now() };
+  /* ⛔ NEW-1 — THE WRITE CHOKE POINT. A plan may never be written carrying a name that contradicts
+   * its own project. Every local write lands here, so enforcing the group's authority at this one
+   * spot is what makes "a stale plan hydrating later READS the project name, never re-publishes its
+   * own copy over it" true at the STORE — not merely at the reader. It matters because
+   * `pushSiteToCloud` reads straight back out of this store: without it, a tab holding a pre-rename
+   * model (a CAS conflict self-heal, a late autosave, a second device catching up) writes the old
+   * name locally and then ships it to the cloud, undoing a completed rename. That is the exact move
+   * that split the owner's project.
+   *
+   * The record being written VOTES: a genuine rename stamps `siteRenamedAt: Date.now()`, the newest
+   * stamp in the group, so it wins and applies. Anything without a newer stamp is corrected. */
+  const authority = resolveNameFor(model, Object.values(sites).filter((s) => s && s.id !== model.id && groupKeyOf(s) === groupKeyOf(model)));
+  if (authority) model = { ...model, ...authority };
   sites[partial.id] = model;
   lastSeenAt[partial.id] = model.updatedAt;
   return writeSites(sites);

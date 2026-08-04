@@ -363,6 +363,10 @@ a look-ahead at what that study will produce, clearly labelled as screening and 
       tester's upload bridge caps at 10 MB, so this one needs a manual drop.
 
 ## Quick housekeeping in his account
+- [ ] **One concept in Silvestri is still labelled "Concept D - Sylvestri Retail"** (the old spelling). The
+      PROJECT name is fixed everywhere — all five concepts now say Silvestri — but that one line is the plan's
+      own label, which is his text, so Claude left it alone rather than rewriting it behind his back. Rename it
+      from the plan switcher if he wants it to match. (B1417, 2026-08-04.)
 - [ ] **Name or delete the stray "Untitled site" (~32.8 acres)** that's sitting in his Site list — it wasn't
       created by testing; Claude left it untouched. He may want to label it or remove it.
 - [ ] **Reload planyr.io once** after a deploy to pick up the latest fixes (his open tab runs the old build until

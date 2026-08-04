@@ -318,6 +318,16 @@ export async function cloudDeletedRows(uid) {
 }
 
 
+/* NEW-1/NEW-2 — the project-rename cloud write lives in `cloudRename.js` and is reached ONLY by a
+ * dynamic import from `storage.renameSiteGroup`.
+ *
+ * A rename is a rare, deliberate, user-initiated action, so its code has no business on the boot
+ * path — the same reason `exportSheet.js` and `rasterIdentifyLazy.js` are split out. It needs the
+ * per-tab CAS bookkeeping below, which is why those two maps are exported as `_siteVersions` /
+ * `_lastHeaderSig` rather than being duplicated: after a group-wide rename the server has bumped
+ * `version` on every row it touched, so a tab holding the pre-rename token would take a needless
+ * conflict on its next ordinary content push. */
+
 // Every site row the signed-in user can see — their own PLUS any shared with a team they're
 // in (RLS decides). Returns the array of serialized Site Models (the `data` column), records
 // each row's `version` for the next compare-and-swap (B314), and overlays the authoritative

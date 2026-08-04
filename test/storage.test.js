@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { mergePulledSites, saveSite, loadSite, renameSiteGroup, snapshotVersion, listVersions, getVersion, summarizeVersion, backupNow, pruneMigratedLegacy } from "../src/workspaces/site-planner/lib/storage.js";
+import { mergePulledSites, saveSite, loadSite, loadSitesList, renameSiteGroup, repairSplitProjectNames, snapshotVersion, listVersions, getVersion, summarizeVersion, backupNow, pruneMigratedLegacy } from "../src/workspaces/site-planner/lib/storage.js";
 import { mergeSiteContent, contentCount, createSiteModel } from "../src/workspaces/site-planner/lib/siteModel.js";
 import { idbAvailable } from "../src/workspaces/site-planner/lib/localDb.js";
 
@@ -539,6 +539,100 @@ describe("renameSiteGroup — renames the whole site by group id OR any plan id 
   it("is a harmless no-op (never throws) on an unknown id", () => {
     expect(() => renameSiteGroup("ghost", "X")).not.toThrow();
     expect(loadSite("ghost")).toBeNull();
+  });
+
+  /* NEW-1/NEW-2/NEW-3 — the store half of "a project's name has ONE authority".
+   *
+   * These run LOGGED OUT (no activeUser), so they exercise the local half only; the cloud half is
+   * `cloudRenameGroup`'s single group-wide statement. What is proven here is the invariant that
+   * made the owner's rename come undone: a plan that was NOT hydrated at rename time must READ the
+   * project's name when it eventually shows up, never re-publish its own stale copy over it. */
+
+  it("stamps siteRenamedAt on every plan, so the group has ONE unambiguous 'when'", async () => {
+    saveSite({ id: "g1", groupId: "g1", site: "Old", name: "Concept A" });
+    saveSite({ id: "p2", groupId: "g1", site: "Old", name: "Concept B" });
+    const res = await renameSiteGroup("g1", "New Name");
+    expect(res.ok).toBe(true);
+    expect(res.name).toBe("New Name");
+    expect(loadSite("g1").siteRenamedAt).toBe(res.at);
+    expect(loadSite("p2").siteRenamedAt).toBe(res.at);
+  });
+
+  it("⛔ a stale plan hydrating LATER reads the project name — it cannot re-publish the old one", async () => {
+    // The owner's exact sequence: rename with only some plans hydrated, then the missing plan
+    // (sms4zs8unbkg) turns up and saves seventeen minutes later still carrying "Sylvestri".
+    saveSite({ id: "g1", groupId: "g1", site: "Sylvestri", name: "Concept A" });
+    await renameSiteGroup("g1", "Silvestri");
+    // …the straggler arrives from the cloud / another device, with the OLD name and no stamp…
+    saveSite({ id: "late", groupId: "g1", site: "Sylvestri", name: "Concept D" });
+    // …and is corrected on the way IN, so the store never holds the contradiction at all.
+    expect(loadSite("late").site).toBe("Silvestri");
+    expect(loadSite("g1").site).toBe("Silvestri");
+  });
+
+  it("a genuine rename still wins over every existing plan (the stamp is the newest)", async () => {
+    saveSite({ id: "g1", groupId: "g1", site: "A", name: "Concept A" });
+    saveSite({ id: "p2", groupId: "g1", site: "A", name: "Concept B" });
+    await renameSiteGroup("g1", "B");
+    await renameSiteGroup("p2", "C"); // renamed again, from the other plan's id
+    expect(loadSite("g1").site).toBe("C");
+    expect(loadSite("p2").site).toBe("C");
+  });
+
+  it("never leaks a name across projects", async () => {
+    saveSite({ id: "g1", groupId: "g1", site: "Alpha" });
+    saveSite({ id: "g2", groupId: "g2", site: "Beta" });
+    await renameSiteGroup("g1", "Renamed");
+    expect(loadSite("g2").site).toBe("Beta");
+  });
+
+  it("refuses an empty / whitespace-only name instead of silently blanking the project", async () => {
+    saveSite({ id: "g1", groupId: "g1", site: "Keep" });
+    const res = await renameSiteGroup("g1", "   ");
+    expect(res.ok).toBe(false);
+    expect(loadSite("g1").site).toBe("Keep");
+  });
+
+  it("trims the name — a stray trailing space must not fork the project into two", async () => {
+    saveSite({ id: "g1", groupId: "g1", site: "Old" });
+    const res = await renameSiteGroup("g1", "  Silvestri  ");
+    expect(res.name).toBe("Silvestri");
+    expect(loadSite("g1").site).toBe("Silvestri");
+  });
+
+  it("NEW-3 — repairSplitProjectNames converges an already-split group, and a second run is a no-op", () => {
+    // Plant the owner's real split directly in the store (as the old rename left it on disk).
+    saveSite({ id: "a", groupId: "smrp1wrgg6u5", site: "Silvestri", name: "Concept A" });
+    saveSite({ id: "b", groupId: "smrp1wrgg6u5", site: "Silvestri", name: "Concept B" });
+    saveSite({ id: "c", groupId: "smrp1wrgg6u5", site: "Silvestri", name: "Concept C" });
+    // the straggler — written straight into storage so saveSite's own guard can't pre-correct it
+    const raw = JSON.parse(localStorage.getItem("planarfit:sites:v1"));
+    raw.d = { id: "d", groupId: "smrp1wrgg6u5", site: "Sylvestri", name: "Concept D", updatedAt: Date.now() + 5000 };
+    localStorage.setItem("planarfit:sites:v1", JSON.stringify(raw));
+
+    const first = repairSplitProjectNames();
+    expect(first.changed).toBe(1);
+    expect(loadSite("d").site).toBe("Silvestri");
+    expect(repairSplitProjectNames().changed).toBe(0); // idempotent
+  });
+
+  it("NEW-3 — the map list shows ONE entry for a split project, even before the repair writes back", () => {
+    saveSite({ id: "a", groupId: "g", site: "Silvestri", name: "Concept A" });
+    saveSite({ id: "b", groupId: "g", site: "Silvestri", name: "Concept B" });
+    const raw = JSON.parse(localStorage.getItem("planarfit:sites:v1"));
+    raw.c = { id: "c", groupId: "g", site: "Sylvestri", name: "Concept D", updatedAt: Date.now() + 5000 };
+    localStorage.setItem("planarfit:sites:v1", JSON.stringify(raw));
+    const names = new Set(loadSitesList().filter((s) => (s.groupId || s.id) === "g").map((s) => s.site));
+    expect([...names]).toEqual(["Silvestri"]);
+  });
+
+  it("NEW-3 — an ambiguous legacy split is LEFT ALONE rather than half-renamed", () => {
+    const store = { alpha: { id: "alpha", groupId: "g", site: "Alpha", updatedAt: 2 },
+                    beta: { id: "beta", groupId: "g", site: "Beta", updatedAt: 1 } };
+    localStorage.setItem("planarfit:sites:v1", JSON.stringify(store));
+    expect(repairSplitProjectNames().changed).toBe(0);
+    expect(loadSite("alpha").site).toBe("Alpha");
+    expect(loadSite("beta").site).toBe("Beta");
   });
 });
 

@@ -34,7 +34,12 @@ import { ensureZ } from "./zOrder.js";
 // left in place (not reordered): render/hit-test read order from byZ (type layer, then z), and
 // leaving order alone keeps element object identity and the fixtures stable.
 
-export const SITE_MODEL_VERSION = 12;
+// v13 (NEW-1): `siteRenamedAt` — the epoch-ms stamp of the last project rename, written by the ONE
+// authoritative rename write onto every plan in the group. A project's NAME is denormalized across
+// its plans (the `site` field), so without a stamp there is no fact that says which copy is current
+// and a stale plan re-publishes the old name over a completed rename. See lib/projectName.js.
+
+export const SITE_MODEL_VERSION = 13;
 
 // Markup `kind`s grouped by what they MEAN (used by the selectors).
 export const EASEMENT_KINDS = ["encumbrance", "easement"];        // title metes-and-bounds tracts/corridors + first-class easement objects (NEW-1)
@@ -1058,6 +1063,11 @@ export function createSiteModel(p = {}, { onHeal } = {}) {
     id: p.id || null,
     groupId: p.groupId || p.id || null,
     site: p.site || p.name || "Untitled site",
+    // NEW-1 — when the project was last renamed (epoch ms), or null for a record that predates the
+    // authoritative rename. `site` is a DERIVED MIRROR of the group's authoritative name; this stamp
+    // is what lets any reader decide which mirror is current. Never set it outside a real rename:
+    // lib/projectName.js treats it as the sole evidence that a group has an unambiguous answer.
+    siteRenamedAt: typeof p.siteRenamedAt === "number" && isFinite(p.siteRenamedAt) && p.siteRenamedAt > 0 ? p.siteRenamedAt : null,
     name: p.name || "Concept A",
     updatedAt: p.updatedAt || Date.now(),
     // team sharing (additive; null = private). teamId = the team this plan is shared with;

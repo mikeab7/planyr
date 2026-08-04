@@ -109,6 +109,32 @@ const btnSm = {
   fontFamily: "inherit", fontSize: 12, fontWeight: 700,
 };
 
+/* The ONE inline rename editor, used by BOTH the per-row menu (B439) and the crumb-level
+ * "Rename “…”" row (NEW-4). Module scope, never inside a render body — an inner-defined component
+ * is a new type every render, which React remounts, which would drop focus mid-rename. */
+function RenameInput({ value, onChange, onCommit, onCancel, label, testId, style }) {
+  return (
+    <input
+      {...NO_AUTOFILL}
+      autoFocus
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") { e.preventDefault(); e.stopPropagation(); onCommit(); }
+        else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); onCancel(); }
+      }}
+      onBlur={onCommit}
+      aria-label={label}
+      data-testid={testId}
+      style={{
+        display: "block", minWidth: 0, padding: "5px 7px", borderRadius: 6, outline: "none",
+        fontFamily: "inherit", fontSize: 12.5, color: "var(--text-primary)", background: "var(--surface-page)",
+        ...style,
+      }}
+    />
+  );
+}
+
 export default function ProjectBreadcrumb({
   currentProject,
   accent = "var(--accent-site-text)", // foreground text token (AA), not the fill (B341)
@@ -146,6 +172,7 @@ export default function ProjectBreadcrumb({
   const [toast, setToast] = useState(null); // transient "saved on device" notice (B193)
   const [menuFor, setMenuFor] = useState(null); // {id, name, x, y, confirm} — per-row manage menu (B439)
   const [editingId, setEditingId] = useState(null); // project id being renamed inline (B439)
+  const [editingWhere, setEditingWhere] = useState("row"); // WHICH editor owns it — "row" | "crumb" (NEW-4)
   const [editVal, setEditVal] = useState("");
   // Recently deleted (NEW-1) — the restore bin. Deleting a project soft-deletes it, so the plans
   // AND their elements survive and a restore returns the project whole.
@@ -250,13 +277,27 @@ export default function ProjectBreadcrumb({
     const y = (e.clientY || r.bottom) + 2;
     setMenuFor({ id: p.id, name: p.name, x, y, confirm: false });
   };
-  const startRename = (p) => { setMenuFor(null); setEditingId(p.id); setEditVal(p.name || ""); };
+  /* ⛔ `editingWhere` is NOT redundant with `editingId` — one identity, two editors is a trap.
+   * The SAME project id addresses two inline editors: its row in the list, and (NEW-4) the crumb-
+   * level "Rename “…”" row for the open project. Keyed on `editingId` alone, clicking either one
+   * mounted BOTH, each with `autoFocus`; the second to mount stole focus from the first, whose
+   * `onBlur` then committed and closed the editor in the same frame. It looked like the rename
+   * simply refused to open, and only in the planner (where the crumb-level editor exists at all).
+   * So the surface is part of the key, and exactly one editor is ever live. */
+  const startRename = (p, where = "row") => { setMenuFor(null); setEditingWhere(where); setEditingId(p.id); setEditVal(p.name || ""); };
   const commitRename = (id) => {
     const v = (editVal || "").trim();
     setEditingId(null);
     if (!v) return; // reject empty/whitespace-only — keep the prior name
-    if (onRenameProject) onRenameProject(id, v);
-    else storeRename(id, v);
+    // NEW-2 — a rename that didn't reach the cloud must SAY so. Both branches now return the
+    // store's promise, so a failure surfaces as a toast here instead of the old silent no-op that
+    // only showed up later as the name having reverted. (The Site Planner also raises its own
+    // header banner; a duplicate line in the dropdown is cheap next to a silent revert.)
+    const done = onRenameProject ? onRenameProject(id, v) : storeRename(id, v);
+    Promise.resolve(done).then((res) => {
+      if (res && res.ok === false) flashToast(res.error || `“${v}” is saved on this device but couldn't be saved to the cloud — it may come back under its old name when you reload.`);
+      if (!controlled) { refresh(); notifyStoreChange(); }
+    }).catch(() => {});
     // Reflect the new name immediately. Uncontrolled mode owns the local `internalProjects`
     // list, and a same-tab store write does NOT fire the native 'storage' event — so without an
     // explicit refresh the just-edited row (and every other planarfit:sites surface) keeps the
@@ -335,6 +376,7 @@ export default function ProjectBreadcrumb({
           reads "All projects"; on a single project it carries a Private lock. */}
       <button
         ref={anchorRef}
+        data-testid="project-crumb"
         onClick={() => setOpen((o) => !o)}
         title={cross ? "Browsing all projects" : currentProject ? "Switch project" : "Choose a project"}
         aria-haspopup="menu"
@@ -405,6 +447,43 @@ export default function ProjectBreadcrumb({
           {onDash && <span style={{ color: accent, fontSize: 10.5, fontWeight: 700 }}>current</span>}
         </button>
 
+        {/* NEW-4 — rename THIS project, where the owner actually looks for it. Until now the only
+            rename was a right-click (or a hover-revealed kebab) on a row in a list — invisible, and
+            dead on touch. The crumb the user just opened is the control that NAMES the project they
+            are looking at, so renaming it belongs here. It reuses the SAME inline editor and the
+            SAME commitRename write path as the per-row menu — one rename implementation, not two. */}
+        {canRename && currentProject?.id && (
+          <>
+            <div style={divider} />
+            {editingId === currentProject.id && editingWhere === "crumb" ? (
+              <RenameInput
+                value={editVal}
+                onChange={setEditVal}
+                onCommit={() => commitRename(currentProject.id)}
+                onCancel={() => setEditingId(null)}
+                label={`Rename ${currentName}`}
+                testId="project-rename-current-input"
+                style={{ width: "100%", margin: "2px 0", padding: "6px 8px", border: `1px solid ${accent}`, borderRadius: 7 }}
+              />
+            ) : (
+              <button
+                data-testid="project-rename-current"
+                onClick={() => startRename({ id: currentProject.id, name: currentName }, "crumb")}
+                onMouseEnter={() => setHoverRow("__rename")}
+                onMouseLeave={() => setHoverRow(null)}
+                style={row({ background: hoverRow === "__rename" ? "var(--hover-ghost)" : "transparent" })}
+              >
+                <span style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+                  <span aria-hidden style={{ fontSize: 12, opacity: 0.8 }}>✎</span>
+                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    Rename “{currentName}”
+                  </span>
+                </span>
+              </button>
+            )}
+          </>
+        )}
+
         <div style={divider} />
 
         {/* Recent projects — newest-edited first, relative timestamps */}
@@ -416,7 +495,7 @@ export default function ProjectBreadcrumb({
           ) : (
             filtered.map((p) => {
               const cur = p.id === currentProject?.id;
-              const editing = editingId === p.id;
+              const editing = editingId === p.id && editingWhere === "row";
               const active = hoverRow === p.id || menuFor?.id === p.id; // row highlighted while its menu is open
               return (
                 <div
@@ -428,22 +507,13 @@ export default function ProjectBreadcrumb({
                   style={row({ padding: 0, background: active ? "var(--hover-ghost)" : (cur ? "var(--hover-menu)" : "transparent") })}
                 >
                   {editing ? (
-                    <input
-                      {...NO_AUTOFILL}
-                      autoFocus
+                    <RenameInput
                       value={editVal}
-                      onChange={(e) => setEditVal(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") { e.preventDefault(); e.stopPropagation(); commitRename(p.id); }
-                        else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); setEditingId(null); }
-                      }}
-                      onBlur={() => commitRename(p.id)}
-                      aria-label={`Rename ${p.name}`}
-                      style={{
-                        flex: 1, minWidth: 0, margin: "2px 4px", padding: "5px 7px",
-                        border: "1px solid var(--accent-site-text, #2563eb)", borderRadius: 6, outline: "none",
-                        fontFamily: "inherit", fontSize: 12.5, color: "var(--text-primary)", background: "var(--surface-page)",
-                      }}
+                      onChange={setEditVal}
+                      onCommit={() => commitRename(p.id)}
+                      onCancel={() => setEditingId(null)}
+                      label={`Rename ${p.name}`}
+                      style={{ flex: 1, margin: "2px 4px", border: "1px solid var(--accent-site-text, #2563eb)" }}
                     />
                   ) : (
                     <>
