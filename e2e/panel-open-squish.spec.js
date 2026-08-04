@@ -103,7 +103,7 @@ test.describe("panel open must not squish the drawing (B962)", () => {
 
     // Every left panel, opened from closed with the element selected (the owner's flow), must stay
     // welded frame-by-frame — Yield was the reported case, but the squish was shared by all of them.
-    for (const title of ["Parcel", "Analysis", "Yield", "Properties", "References", "Standards"]) {
+    for (const title of ["Land", "Analysis", "Yield", "Properties", "References", "Standards"]) {
       await closeAllPanels();
       await page.mouse.click(bx + 120, by + 85); // select the building
       await page.waitForTimeout(150);
@@ -116,9 +116,9 @@ test.describe("panel open must not squish the drawing (B962)", () => {
     await closeAllPanels();
     await page.mouse.click(bx + 120, by + 85);
     await page.waitForTimeout(150);
-    await clickTab("Parcel")();
+    await clickTab("Land")();
     await page.waitForTimeout(500);
-    assertNoFlash("switch Parcel→Yield", await recordDuring(clickTab("Yield")));
+    assertNoFlash("switch Land→Yield", await recordDuring(clickTab("Yield")));
     assertNoFlash("close Yield", await recordDuring(clickTab("Yield")));
     expect(errors, errors.join("\n")).toEqual([]);
   });

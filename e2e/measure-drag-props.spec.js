@@ -157,7 +157,7 @@ test.describe("measurement drag / properties / label LOD (logged out)", () => {
     await startBlank(page);
 
     // Draw an axis-aligned rectangle parcel (top edge horizontal), via the Parcel draw tool.
-    await page.getByRole("button", { name: "Parcel", exact: true }).click();
+    await page.locator('[data-rail-tab="parcel"]').click();
     await page.getByTitle(/Add land to this plan/i).click();
     await page.getByRole("button", { name: /Draw a new boundary/i }).click();
     await expect(page.getByRole("button", { name: /Draw/, pressed: true })).toBeVisible();

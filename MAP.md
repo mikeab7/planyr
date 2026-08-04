@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-08-03 @ `fffd980` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-08-04 @ `096125f` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_420 source files mapped._
+_421 source files mapped._
 
 ## infra
 
@@ -595,6 +595,8 @@ _420 source files mapped._
   - _exports_: `BUCKET`, `classifyStorageError`, `deleteOverlayObject`, `downloadOverlayBytes`, `downloadOverlayDataUrl`, `fetchOverlayBytes`, `fetchOverlayDataUrl`, `fileKind`, `MAX_BYTES`, `overlayKey`, `siteUnderlayKey`, `uploadOverlayFile`, `uploadUnderlayDataUrl`
 - **`src/workspaces/site-planner/lib/overlayVectorSvg.js`** — Pure vector-overlay SVG emitter for the print export (B745): reprojects normalized [lon,lat] line/polygon/point features via an injected projection into styled `<path>`/`<circle>` (LOUD-skip on non-finite), plus esri/terrain normalizers (contour lines, drainage-arrow glyphs)
   - _exports_: `arrowGlyphFeatures`, `buildOverlayVectorFragment`, `contourFeatures`, `esriLineFeatures`, `esriPolygonFeatures`, `featureToSvg`, `overlayVectorSvg`, `swapLatLng`
+- **`src/workspaces/site-planner/lib/parcelActions.js`** — THE inventory of every parcel action and the pure model behind the right rail's "Parcel tools" menu: grouped create → modify → remove, per-row enabled/active/why-not, plus the rail-owns-actions / Land-panel-owns-attributes naming split
+  - _exports_: `boundaryEditHint`, `PARCEL_ACTIONS`, `PARCEL_GROUPS`, `PARCEL_SURFACES`, `parcelAction`, `parcelMenuIds`, `parcelMenuModel`
 - **`src/workspaces/site-planner/lib/parcelDisplay.js`** — Shared parcel-outline display layers for map and planner: styleable esri vector layer, image-export layer for query-disabled TxGIO, Drive-snapshot geoJSON layer, add/remove cursors
   - _exports_: `ADD_CURSOR`, `makeParcelDisplayLayer`, `makeParcelImageLayer`, `makeParcelLayer`, `makeSnapshotLayer`, `PARCEL_MINZOOM`, `parcelDisplayIsImageOnly`, `REMOVE_CURSOR`
 - **`src/workspaces/site-planner/lib/parcelOffset.js`** — the setback ring's inward polygon offset (miter with bevel fallback) plus the buildable-envelope area it encloses; lifted out of SitePlanner so the envelope is provable in a unit test

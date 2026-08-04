@@ -56,11 +56,11 @@ test.describe("panel toggle viewport (B837)", () => {
     await page.waitForTimeout(800); // fit-on-load + first commit settle
 
     // Baseline with every panel CLOSED.
-    if ((await openPanels(page)).length) { await page.locator('button[title="Parcel"]').first().click(); await page.waitForTimeout(500); }
+    if ((await openPanels(page)).length) { await page.locator('[data-rail-tab="parcel"]').first().click(); await page.waitForTimeout(500); }
     const base = await feetScreenX(page, FX);
 
     // Each open / switch / close must leave the fixed feet point at the same viewport x (±2px).
-    for (const [label, title] of [["open Parcel", "Parcel"], ["switch Analysis", "Analysis"], ["switch Yield", "Yield"], ["close Yield", "Yield"]]) {
+    for (const [label, title] of [["open Land", "Land"], ["switch Analysis", "Analysis"], ["switch Yield", "Yield"], ["close Yield", "Yield"]]) {
       await page.locator(`button[title="${title}"]`).first().click();
       await page.waitForTimeout(500);
       const x = await feetScreenX(page, FX);

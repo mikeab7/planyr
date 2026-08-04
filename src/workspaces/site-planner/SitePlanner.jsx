@@ -174,6 +174,11 @@ import { offsetPolygon, lineIntersect } from "./lib/parcelOffset.js";
 import { SETBACK_ROLES, ROLE_LABEL, ROLE_SHORT, resolveRoles, resolveOverrides, runRole, runOverridden, setRunOverride, hasRoleOverrides, shiftOverridesOnInsert, shiftOverridesOnDelete, roleGroups } from "./lib/setbackRoles.js";
 import { spaceOut, cornerTurns } from "./lib/screenDeclutter.js";
 import { polylabel } from "./lib/polylabel.js";
+// NEW-1 — the ONE model behind the right rail's "Parcel tools" menu: the full inventory of what a
+// user can do to a parcel, grouped create → modify → remove, plus which rows are enabled/active
+// right now. The menu is the DISCOVERABLE surface (a gesture or right-click is only ever the fast
+// path), so "every parcel action has a menu path" is a property a test asserts — not a convention.
+import { PARCEL_SURFACES, parcelMenuModel, boundaryEditHint } from "./lib/parcelActions.js";
 // B1123 bundle-budget offset — the title reader is loaded ON DEMAND (dynamic import in
 // `runTitleExtract`). Its Claude schema + prompt are KB of string literals that minify to
 // themselves and are needed only once someone uploads a title commitment; only the tiny stored-key
@@ -2066,6 +2071,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // original behaviour); "remove" = click an existing parcel to delete it. Reset to "add" on
   // every tool switch (selectTool), so re-entering the Parcel tool always starts in Draw.
   const [parcelMode, setParcelMode] = useState("add"); // 'add' | 'remove'
+  // NEW-1 — boundary editing had NO entry point: it existed only as prose inside the Select tool's
+  // hint string, so a user who never hovered that tooltip never learned the app could reshape a
+  // boundary at all. This flag is not a new tool and changes no gesture — dragging a corner, adding
+  // one on an edge and Shift-clicking one off have always worked in Select with a parcel selected.
+  // It arms Select, keeps a parcel selected, and shows the banner that TEACHES the three gestures.
+  const [boundaryEdit, setBoundaryEdit] = useState(false);
 
   // aerial underlay + scale calibration
   const [underlay, setUnderlay] = useState(() => restored?.underlay || null);    // {src,imgW,imgH,x,y,ftPerPx,opacity,locked}
@@ -4892,7 +4903,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // the ✕ does). It runs BEFORE the catch-all below and consumes the key, so the panel can never
       // be a place you get stuck; a second Escape then falls through and deselects as always.
       if (e.key === "Escape" && inspectorShowingRef.current) { e.preventDefault(); closeInspector(); return; }
-      if (e.key === "Escape") { setDraftPoly(null); setDraftRect(null); setDraftElPoly(null); setDraftRoadPts(null); branchSeedRef.current = null; setRoadVtxSel(null); setMeasDraft([]); setSplitPath([]); setCombineSel([]); setCalloutDraft(null); setAddLeaderFor(null); cancelEditCallout(); setMkRect(null); setMkPoly(null); setEaseDraft(null); setEaseEdges(null); setEaseMenu(false); setMarquee(null); setMulti([]); setDrillId(null); setPrintMode(false); setPrintFrame(null); setIdentifyMode(false); setIdentifyRes(null); setAttachFor(null); setAlignFor(null); setPobMode(null); setOvCalib(null); setTraceMode(false); setTracePts([]); setRouteMode(null); setXsecMode(false); setXsecPts([]); setOverlapWarn(""); setSel(null); setTypeMenu(null); setParcelMenu(null); setSelVtx(null); setVtxMenu(null); setInsHint(null); setToolMenu(false); setMeasureMenu(false); setOvMenu(null); setOvAlignBase(null); setParcelMode("add"); setMergePick(false); setGisHit(null); spaceRef.current = false; setSpacePan(false); abortGesture(); setTool("select"); lastTapRef.current = { id: null, t: 0, x: 0, y: 0, wasSel: false }; }
+      if (e.key === "Escape") { setDraftPoly(null); setDraftRect(null); setDraftElPoly(null); setDraftRoadPts(null); branchSeedRef.current = null; setRoadVtxSel(null); setMeasDraft([]); setSplitPath([]); setCombineSel([]); setCalloutDraft(null); setAddLeaderFor(null); cancelEditCallout(); setMkRect(null); setMkPoly(null); setEaseDraft(null); setEaseEdges(null); setEaseMenu(false); setMarquee(null); setMulti([]); setDrillId(null); setPrintMode(false); setPrintFrame(null); setIdentifyMode(false); setIdentifyRes(null); setAttachFor(null); setAlignFor(null); setPobMode(null); setOvCalib(null); setTraceMode(false); setTracePts([]); setRouteMode(null); setXsecMode(false); setXsecPts([]); setOverlapWarn(""); setSel(null); setTypeMenu(null); setParcelMenu(null); setSelVtx(null); setVtxMenu(null); setInsHint(null); setToolMenu(false); setMeasureMenu(false); setOvMenu(null); setOvAlignBase(null); setParcelMode("add"); setBoundaryEdit(false); setMergePick(false); setGisHit(null); spaceRef.current = false; setSpacePan(false); abortGesture(); setTool("select"); lastTapRef.current = { id: null, t: 0, x: 0, y: 0, wasSel: false }; }
       if (e.key.startsWith("Arrow") && (multi.length > 1 || sel?.kind === "el")) { e.preventDefault(); nudgeSel(e.key, e.shiftKey ? 10 : 1); return; }
       if ((e.key === "Backspace" || e.key === "Delete") && removeLastVertex()) { e.preventDefault(); return; } // undo the last placed vertex mid-draw
       if ((e.key === "Delete" || e.key === "Backspace") && selVtxRef.current && deleteVtx(selVtxRef.current.layer, selVtxRef.current.id, selVtxRef.current.index)) { e.preventDefault(); return; } // B230: an armed control point → delete just that vertex. NEW-1: deleteVtx returns false on a no-op (endpoint/min/stale) → we DON'T consume the key; it falls through to the whole-element delete below so Delete can never silently wedge.
@@ -5686,6 +5697,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // Esc / Done exits. Shift-click in plain Select still works for power users.
   const startMergePick = () => {
     if (tool !== "select") selectTool("select"); // pick mode lives in Select — a draw tool switches first (edge case)
+    setBoundaryEdit(false); // NEW-1: one top-center banner at a time
     setMergePick(true);
     // B735 — carry the already-selected parcel into the merge set so pressing Merge keeps your
     // pick (you then click more parcels to add them). Inactive parcels never merge (B170).
@@ -5740,6 +5752,42 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     setCombineSel((s) => (s.includes(id) ? s.filter((x) => x !== id) : s));
     setSel((cur) => (cur && cur.kind === "parcel" && cur.id === id ? null : cur));
   };
+
+  /* ---- NEW-1: the right rail's Parcel tools menu, wired ------------------------------------
+   * One handler per row id in `lib/parcelActions.js`. Each one is a thin arm-the-existing-path
+   * call — nothing here is a second implementation of an action that already exists elsewhere,
+   * which is the whole reason the menu can be complete without growing new behaviour to test. */
+
+  // The parcel a menu row acts on: the selected one, or the only one there is (a plan with a
+  // single lot should never make you click it first to hide its label).
+  const menuParcel = () => {
+    if (sel?.kind === "parcel") { const p = parcels.find((x) => x.id === sel.id); if (p) return p; }
+    return parcels.length === 1 ? parcels[0] : null;
+  };
+  // Enter Select with a parcel in hand + the banner that teaches the reshape gestures.
+  const startBoundaryEdit = () => {
+    if (tool !== "select") selectTool("select");
+    setMergePick(false); setCombineSel([]); // one top-center banner at a time
+    setBoundaryEdit(true);
+    if (sel?.kind !== "parcel") {
+      const p = parcels.find((x) => x.active !== false && (x.points?.length || 0) >= 3) || parcels[0];
+      if (p) { setCombineSel([]); setMergePick(false); setSel({ kind: "parcel", id: p.id }); }
+    }
+  };
+  const exitBoundaryEdit = () => setBoundaryEdit(false);
+  // Remove mode is the Parcel tool's own sub-mode; selectTool always resets it to "add" (B598),
+  // so the order here matters — set the mode AFTER the tool switch.
+  const startRemoveParcels = () => { selectTool("parcel"); setParcelMode("remove"); setDraftPoly(null); };
+  // The cross-links that close the two-sided "Parcel" split: the right rail owns ACTIONS, the left
+  // Land panel owns ATTRIBUTES (setbacks included), and each is one click from the other.
+  const openLandPanel = (opts = {}) => {
+    setToolMenu(false);
+    setLeftPanel("parcel");
+    if (narrow) setMobileTools(false);
+    if (opts.select !== false) { const p = menuParcel(); if (p && sel?.kind !== "parcel") setSel({ kind: "parcel", id: p.id }); }
+    if (opts.addMenu) setAddParcelMenu(true);
+  };
+  const openParcelToolsMenu = () => { if (narrow) setMobileTools(true); setToolMenu(true); };
 
   /* ------------ callouts (annotations) ------------ */
   // Re-aim / move / retext callouts. Box & tip are stored in feet.
@@ -14172,8 +14220,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // Properties (B733) is the docked HOME for the element inspector — the B656 companion still
   // auto-rides above another open panel when you select something, but this tab gives it a
   // permanent, discoverable seat (with an empty state when nothing is selected).
+  // NEW-1 — the left tab is "Land", not "Parcel". "Parcel" used to name BOTH this panel and the
+  // right-rail tool, two different things one word apart, and the concrete cost was setbacks
+  // sitting on the left while every other parcel action sat on the right. The split we settled on:
+  // the RIGHT rail owns ACTIONS (what you DO to a parcel — "Parcel tools"), this panel owns
+  // ATTRIBUTES & SETTINGS (what a parcel HAS — its acreage, county record, taxes, setbacks,
+  // active/locked state). The panel id stays `parcel` — it keys persisted panel state and the
+  // `setLeftPanel("parcel")` call sites, and renaming it would orphan them for no user gain.
   const leftTabs = [
-    { id: "parcel", label: "Parcel" },
+    { id: "parcel", label: PARCEL_SURFACES.panel.name },
     { id: "analysis", label: "Analysis" },
     { id: "yield", label: "Yield" },
     { id: "properties", label: "Properties" }, // B733: docked home for the selected-element inspector
@@ -14320,6 +14375,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (id !== "easement") { setEaseDraft(null); setEaseEdges(null); setEaseMenu(false); }
     if (id !== "select") setMulti([]);
     setMergePick(false); // B720: switching tools exits merge pick mode (startMergePick re-arms it after selecting Select)
+    if (id !== "select") setBoundaryEdit(false); // NEW-1: boundary editing lives in Select; any draw tool leaves it
     if (id !== "select") setCombineSel([]); // merge selection only lives in the Select tool
     if (id !== "callout") setCalloutDraft(null);
     if (!MARKUP_TOOLS.includes(id)) { setMkRect(null); setMkPoly(null); }
@@ -16136,8 +16192,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   onClick={mergePick ? exitMergePick : startMergePick}>⧉ Merge{combineSel.length >= 2 ? ` (${combineSel.length})` : ""}</button>
               )}
               </div>
+              {/* NEW-1 — the return half of the cross-link. This panel owns what a parcel HAS;
+                  everything you DO to one lives in the right rail's Parcel tools menu, and landing
+                  on the wrong side should never be a dead end. Opens that menu directly (and slides
+                  the rail in first on a phone, where it's hidden behind the ✎ Tools pill). */}
+              <button type="button" data-testid="land-to-parcel-tools" onClick={openParcelToolsMenu}
+                title="Draw, plot from a deed, split, combine, reshape or remove a parcel"
+                style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "7px 10px", marginBottom: 9, border: `1px solid ${PAL.panelLine}`, borderRadius: 8, background: "transparent", color: PAL.ink, fontWeight: 700, fontSize: 11.5, cursor: "pointer", fontFamily: "inherit", textAlign: "left" }}>
+                <span>Draw, split, combine, reshape…</span>
+                <span style={{ color: PAL.muted, fontWeight: 600, fontSize: 10.5, whiteSpace: "nowrap" }}>{PARCEL_SURFACES.rail.name} →</span>
+              </button>
               {parcels.length === 0 ? (
-                <div style={{ fontSize: 12, color: PAL.muted, lineHeight: 1.6 }}>No parcels in this plan yet. Use <b>＋ Add</b> above, or draw one with the Parcel tool (right rail).</div>
+                <div style={{ fontSize: 12, color: PAL.muted, lineHeight: 1.6 }}>No parcels in this plan yet. Use <b>＋ Add</b> above, or draw one from <b>{PARCEL_SURFACES.rail.name}</b> in the right rail.</div>
               ) : (
                 <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
                   {/* B720 — "Active" microlabel over the checkbox column: the checkbox reads as
@@ -19227,6 +19293,29 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             </div>
           )}
 
+          {/* NEW-1 — Edit-boundary banner. Reshaping a parcel was always possible (drag a corner,
+              click the dot that appears on an edge to add one, Shift-click a corner to delete one)
+              but the only place that said so was the Select tool's hint string. Picking
+              "Edit boundary corners" from the Parcel tools menu arms Select with a parcel selected
+              and puts the three gestures on screen. Same zIndex/stopPropagation guard as the merge
+              and parcel banners above, so the transparent SVG canvas can't swallow Done. */}
+          {boundaryEdit && tool === "select" && (() => {
+            const bp = sel?.kind === "parcel" ? parcels.find((p) => p.id === sel.id) : null;
+            return (
+            <div data-testid="boundary-edit-banner" onPointerDown={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()}
+              style={{ position: "absolute", top: 14, left: "50%", transform: "translateX(-50%)", zIndex: 6, whiteSpace: "nowrap", background: "rgba(25,22,19,0.94)", color: "#fff", padding: "6px 8px 6px 15px", borderRadius: 99, fontSize: 12.5, fontWeight: 500, display: "flex", alignItems: "center", gap: 10, boxShadow: "0 6px 22px rgba(0,0,0,0.28)" }}>
+              <span style={{ color: "rgba(255,255,255,0.92)" }}>{boundaryEditHint({ hasSelection: !!bp, locked: !!(bp && bp.locked) })}</span>
+              {/* A drawn parcel arrives LOCKED, and a locked boundary has no editable path — so the
+                  mode would teach three gestures and then swallow all of them. Say so, and put the
+                  one control that fixes it right here (never unlock behind the user's back). */}
+              {bp && bp.locked && (
+                <button className="dbtn" data-testid="boundary-edit-unlock" style={{ ...btn(true), padding: "5px 12px" }} onClick={() => toggleParcelLock(bp.id)}>🔓 Unlock</button>
+              )}
+              <button className="dbtn" style={{ ...chip, padding: "5px 13px" }} title="Finish reshaping (Esc)" onClick={exitBoundaryEdit}>Done</button>
+            </div>
+            );
+          })()}
+
           {/* GPS coordinate HUD — floating chip bottom-left (B683). Shows the cursor's WGS84
               lat/long (the coordinate Google Earth / a phone GPS uses), reprojected from the
               planner's feet frame via the SAME feetToLatLng the map render + KMZ export use.
@@ -19256,22 +19345,72 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           <button className={`rbtn${tool === "pan" ? " on" : ""}`} style={rbtn(tool === "pan")} onClick={() => selectTool("pan")} aria-pressed={tool === "pan"} title="Hand tool — or hold Space to pan temporarily"><ToolIcon id="pan" /> Pan <span style={railHint(tool === "pan")}>H</span></button>
           <button className={`rbtn${tool === "marquee" ? " on" : ""}`} style={rbtn(tool === "marquee")} onClick={() => selectTool("marquee")} aria-pressed={tool === "marquee"} data-testid="tool-marquee" title={TOOLS.find((t) => t.id === "marquee").hint}><ToolIcon id="marquee" /> Marquee <span style={railHint(tool === "marquee")}>M</span></button>
 
-          {/* parcel tools grouped in one menu (opens to the left) */}
+          {/* NEW-1 — "Parcel tools": the COMPLETE answer to "what can I do to a parcel", grouped in
+              the order the work happens (add land → change a parcel → remove). It carried three of
+              the eleven-plus parcel actions before this: Remove had no rail entry at all, Combine
+              had none, setbacks lived on the opposite side of the screen, and boundary editing
+              existed only as prose in the Select tool's tooltip. Every row is decided by
+              `lib/parcelActions.js` (which rows show, which are enabled, which read as the mode
+              you're in) — this render site only maps a row id to the existing handler. A row that
+              needs a selection stays VISIBLE and disabled with its reason, never hidden: a hidden
+              action is an undiscoverable one, which is the bug being fixed.
+              The rail button is "Parcel tools" (not "Parcel") because the LEFT panel is "Land" —
+              the right rail owns ACTIONS, the left panel owns ATTRIBUTES. See PARCEL_SURFACES. */}
           <div ref={boundaryAnchor} style={{ position: "relative" }}>
-            <button className={`rbtn${["parcel", "split"].includes(tool) ? " on" : ""}`} style={rbtn(["parcel", "split"].includes(tool))} onClick={() => setToolMenu((o) => !o)} aria-haspopup="menu" aria-expanded={toolMenu} title="Draw, plot from a deed, or split a parcel"><ToolIcon id="parcel" /> Parcel <span style={railHint(["parcel", "split"].includes(tool))}>▾</span></button>
-            <AnchoredMenu open={toolMenu} onClose={() => setToolMenu(false)} anchorRef={boundaryAnchor} placement="left" width={248} panelStyle={menuPanel}>
-              <button style={menuItem(tool === "parcel")} onClick={() => selectTool("parcel")}>Draw new parcel</button>
-              {/* B570 — the Deed / Title (metes & bounds) tool lives HERE in the Parcel
-                  group, folded in from the old standalone rail launcher (B543). Opens the
-                  existing reader/plotter modal — no second modal, no parser fork. */}
-              <button data-testid="boundary-menu-mb" style={menuItem(false)} title="Read a deed / title commitment (or paste a legal description) to plot a parcel boundary from its metes & bounds"
-                onClick={() => { setToolMenu(false); setTitleErr(""); setDeedErr(""); setDeedBusy(false); setTitleOpen(true); }}>
-                <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}><ToolIcon id="deed" size={13} /> Deed / Title — metes &amp; bounds…</span>
-              </button>
-              <button style={menuItem(tool === "split")} onClick={() => selectTool("split")}>Split a parcel</button>
-              {/* B720 — the Merge/Reshape how-to prose was removed: Merge now has a first-class
-                  "Merge" button + click-to-pick mode in the Parcel panel ops row, so this menu no
-                  longer needs to explain where Merge lives. It stays a Draw/Deed/Split shortcut. */}
+            <button className={`rbtn${["parcel", "split"].includes(tool) || mergePick || boundaryEdit ? " on" : ""}`} style={rbtn(["parcel", "split"].includes(tool) || mergePick || boundaryEdit)} onClick={() => setToolMenu((o) => !o)} aria-haspopup="menu" aria-expanded={toolMenu} data-testid="rail-parcel-tools" title="Everything you can do to a parcel — draw, plot from a deed, split, combine, reshape, remove"><ToolIcon id="parcel" /> {PARCEL_SURFACES.rail.name} <span style={railHint(["parcel", "split"].includes(tool) || mergePick || boundaryEdit)}>▾</span></button>
+            <AnchoredMenu open={toolMenu} onClose={() => setToolMenu(false)} anchorRef={boundaryAnchor} placement="left" width={272} panelStyle={menuPanel}>
+              {(() => {
+                const pcm = menuParcel();
+                const groups = parcelMenuModel({
+                  parcelCount: parcels.length,
+                  activeCount: parcels.filter((p) => p.active !== false).length,
+                  hasOrigin: !!origin,
+                  selected: pcm ? { locked: !!pcm.locked, active: pcm.active, chipHidden: !!pcm.chipHidden, labelOffset: pcm.labelOffset || null } : null,
+                  tool, parcelMode, mergePick, boundaryEdit,
+                });
+                // id → what it does. Every entry arms an EXISTING path; nothing here is a second
+                // implementation of an action that already lives somewhere else.
+                const run = {
+                  draw: () => selectTool("parcel"),
+                  deed: () => { setToolMenu(false); setTitleErr(""); setDeedErr(""); setDeedBusy(false); setTitleOpen(true); },
+                  identify: () => { setIdentifyMode(true); ensureBasemapOn(); setIdentifyRes(null); setJurInfo(null); openLandPanel({ select: false }); },
+                  address: () => openLandPanel({ select: false, addMenu: true }),
+                  split: () => selectTool("split"),
+                  combine: () => { setToolMenu(false); if (mergePick) exitMergePick(); else startMergePick(); },
+                  boundary: () => { setToolMenu(false); if (boundaryEdit) exitBoundaryEdit(); else startBoundaryEdit(); },
+                  setbacks: () => openLandPanel(),
+                  lock: () => { if (pcm) toggleParcelLock(pcm.id); setToolMenu(false); },
+                  active: () => { if (pcm) toggleParcelActive(pcm.id); setToolMenu(false); },
+                  chip: () => { if (pcm) setParcelChipHidden(pcm.id, !pcm.chipHidden); setToolMenu(false); },
+                  chipReset: () => { if (pcm) resetParcelChipOffset(pcm.id); setToolMenu(false); },
+                  removeMode: () => startRemoveParcels(),
+                  deleteSelected: () => { if (pcm) removeParcelById(pcm.id); setToolMenu(false); },
+                };
+                return groups.map((g, gi) => (
+                  <div key={g.id}>
+                    {gi > 0 && <div style={{ borderTop: `1px solid ${PAL.panelLine}`, margin: "5px 2px 3px" }} />}
+                    <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, padding: "4px 8px 5px" }}>{g.label}</div>
+                    {/* Every row is addressable by `data-parcel-action` (the uniform hook the guards
+                        and the e2e spec use). The Deed row additionally keeps its historical
+                        `boundary-menu-mb` testid — two ui-audit harnesses click it by that name. */}
+                    {g.rows.map((r) => (
+                      <button key={r.id} data-parcel-action={r.id}
+                        data-testid={r.id === "deed" ? "boundary-menu-mb" : `parcel-menu-${r.id}`} disabled={!r.enabled}
+                        title={r.enabled ? undefined : r.disabledReason}
+                        aria-pressed={r.active || undefined}
+                        style={{ ...menuItem(r.active), display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10,
+                          ...(r.enabled ? (r.danger ? { color: PAL.danger } : {}) : { color: PAL.disabled, cursor: "default" }) }}
+                        onClick={r.enabled ? run[r.id] : undefined}>
+                        <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                          {r.id === "deed" && <ToolIcon id="deed" size={13} />}
+                          {r.label}
+                        </span>
+                        {r.detail && <span style={{ fontSize: 10.5, fontWeight: 600, color: r.enabled ? PAL.muted : PAL.disabled, whiteSpace: "nowrap" }}>{r.detail}</span>}
+                      </button>
+                    ))}
+                  </div>
+                ));
+              })()}
             </AnchoredMenu>
           </div>
 

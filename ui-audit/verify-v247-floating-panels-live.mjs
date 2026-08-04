@@ -96,7 +96,7 @@ const openBlankPlanner = async (page) => {
   await card.waitFor({ state: "hidden" });
   // Docked panels are single-slot (opening Parcel swaps Analysis out of the dock) — switch to
   // Parcel and back to Analysis, then re-detach Analysis.
-  await page.locator('button[title="Parcel"]').first().click();
+  await page.locator('[data-rail-tab="parcel"]').first().click();
   await page.waitForTimeout(150);
   await page.locator('button[title="Analysis"]').first().click();
   await page.waitForTimeout(150);

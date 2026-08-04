@@ -15,6 +15,11 @@
  * as it goes logged out (the control disables and says why); the write itself is the live check.
  */
 import { test, expect } from "@playwright/test";
+import { PALETTES } from "../src/shared/theme/palette.js";
+
+/* The setback ring's default colour is a THEME token, not a constant this spec gets to restate:
+ * B1192 moved it indigo → the property-line green and left two hardcoded hexes here red. */
+const SETBACK_DEFAULT = PALETTES.light.canvasSetback.toLowerCase();
 
 const canvas = (p) => p.getByTestId("planner-canvas");
 const SHOTS = "test-results/standards-footer";
@@ -32,7 +37,7 @@ async function startBlank(page) {
 }
 
 async function drawParcel(page) {
-  await page.getByRole("button", { name: "Parcel", exact: true }).click();
+  await page.locator('[data-rail-tab="parcel"]').click();
   await page.getByTitle(/Add land to this plan/i).click();
   await page.getByRole("button", { name: /Draw a new boundary/i }).click();
   const box = await canvas(page).boundingBox();
@@ -81,10 +86,12 @@ test.describe("the setback line has the same tools as the parcel line", () => {
     await expect(page.getByRole("button", { name: /^Outline color$/i })).toHaveCount(1);
     await expect(page.getByRole("button", { name: /^Setback line color$/i })).toHaveCount(1);
 
-    // The ring is drawn with the historic look until anything is changed. Weight and dash are
+    // The ring is drawn with the theme default until anything is changed. Weight and dash are
     // scaled by the live zoom (B617/B880), so the invariant is the RATIO they hold to each other.
+    // The colour is the palette's `canvasSetback` — B1192 moved that default indigo → the owner's
+    // property-line green, so read the token rather than restating a hex that has already drifted once.
     const ring = page.getByTestId("setback-ring").first();
-    expect(await ringShape(ring)).toEqual({ dashRatio: [5.6, 4.8], stroke: "#534AB7" });
+    expect(await ringShape(ring)).toEqual({ dashRatio: [5.6, 4.8], stroke: SETBACK_DEFAULT });
 
     // Pick a new setback colour: it is a DRAFT — the ring on the canvas has not moved yet,
     // because a parcel is STAMPED at creation and only Apply rewrites what is already drawn.
@@ -113,9 +120,9 @@ test.describe("the setback line has the same tools as the parcel line", () => {
     await startBlank(page);
     await drawParcel(page);
     const ring = page.getByTestId("setback-ring").first();
-    // The old hardcoded look, unchanged: the theme setback colour and a 1.25-weight "7 6" dash,
-    // both scaled by the same zoom factor they always were — so the ratios are the fixed point.
-    expect(await ringShape(ring)).toEqual({ dashRatio: [5.6, 4.8], stroke: "#534AB7" });
+    // The unchanged look: the theme setback colour and a 1.25-weight "7 6" dash, both scaled by the
+    // same zoom factor they always were — so the ratios are the fixed point.
+    expect(await ringShape(ring)).toEqual({ dashRatio: [5.6, 4.8], stroke: SETBACK_DEFAULT });
     const stored = (await site(page)).parcels[0];
     expect("sbStroke" in stored).toBe(false);
     expect("sbWeight" in stored).toBe(false);

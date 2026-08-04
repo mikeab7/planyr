@@ -83,7 +83,7 @@ ok(/Translucence/.test(stdTxt2), "B929 turning fill ON reveals the Translucence 
 ok(/Fill color/.test(stdTxt2), "B929 turning fill ON reveals the Fill color control");
 
 // ---------- draw a new parcel on the canvas ----------
-await page.locator('button[title="Parcel"]').first().click();
+await page.locator('[data-rail-tab="parcel"]').first().click();
 await page.waitForTimeout(400);
 // ＋ Add ▾ → Draw a new boundary
 try { await menuPanel.getByRole("button", { name: /^＋ Add/ }).click({ timeout: 1500 }); } catch {}

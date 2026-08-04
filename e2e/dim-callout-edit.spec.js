@@ -53,7 +53,7 @@ test.describe("B911 — parcel edge dimension labels declutter on zoom-out", () 
 
     // Arm the parcel DRAW tool: Parcel panel → "＋ Add" → "Draw a new boundary". This docks the left
     // Parcel panel, which shifts the canvas — so capture the canvas box AFTER arming, not before.
-    await page.getByRole("button", { name: "Parcel", exact: true }).click();
+    await page.locator('[data-rail-tab="parcel"]').click();
     await page.getByTitle(/Add land to this plan/i).click();
     await page.getByRole("button", { name: /Draw a new boundary/i }).click();
     await expect(page.getByRole("button", { name: /Draw/, pressed: true })).toBeVisible();
