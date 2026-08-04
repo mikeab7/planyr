@@ -60,7 +60,7 @@ check("the deed parser is NOT fetched at boot",
   !bootChunks.some((u) => /deedParse|deedAlign/.test(u)), bootChunks.filter((u) => /deed/.test(u)).join(","));
 
 // Open the title reader: Parcel rail button → its menu → "Deed / Title — metes & bounds…".
-await page.locator('button.rbtn:has-text("Parcel")').first().click();
+await page.locator('button.rbtn:has-text("Parcel tools")').first().click();
 await page.waitForTimeout(400);
 await page.locator('[data-testid="boundary-menu-mb"]').click();
 await page.waitForTimeout(900);

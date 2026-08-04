@@ -68,7 +68,7 @@ async function open() {
 async function openParcelPanel(page) {
   const marker = page.getByText(/^Parcels · \d+$/);
   if (!(await marker.first().isVisible().catch(() => false))) {
-    try { await page.locator('button[title="Parcel"]').first().click({ timeout: 5000 }); } catch {}
+    try { await page.locator('[data-rail-tab="parcel"]').first().click({ timeout: 5000 }); } catch {}
     await page.waitForTimeout(400);
   }
 }

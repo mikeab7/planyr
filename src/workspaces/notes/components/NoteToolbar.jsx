@@ -608,11 +608,15 @@ export default function NoteToolbar({ editor, onExport, onPrint }) {
         onChange={pickImages}
         style={{ display: "none" }}
       />
-      {/* SKETCH MODE. It sits beside the picture rather than in "More" because it is the
-          same kind of act — putting a non-text thing on the page — and because a control
-          nobody can find is one that does not exist (B1371). */}
-      <TBButton title="Insert a sketch — type an outline, get boxes and arrows"
-        testid="nt-sketch" onClick={() => editor.commands.insertNoteSketch()}><SketchIcon /></TBButton>
+      {/* SKETCH MODE — and it is the BOX button, not an "insert a sketch" button. Select
+          some words, press it, and they become a box you can drag and connect; press it with
+          nothing selected and you get a box with the caret already in it. One control, both
+          ways in — the second half of the feature rather than a garnish (B1400 rebuild).
+          It sits beside the picture rather than in "More" because it is the same kind of act
+          — putting a non-text thing on the page — and because a control nobody can find is
+          one that does not exist (B1371). */}
+      <TBButton title="Box this — put a box around the selected words, then drag arrows between boxes"
+        testid="nt-box" onClick={() => editor.commands.boxSelection()}><SketchIcon /></TBButton>
 
       <Sep />
 

@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-08-04 @ `1e84020` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-08-04 @ `32c06e1` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_422 source files mapped._
+_423 source files mapped._
 
 ## infra
 
@@ -67,10 +67,10 @@ _422 source files mapped._
   - _exports_: `buildPrintDocument`, `printHtmlDocument`
 - **`src/workspaces/notes/lib/notesSearchHighlight.js`** — Search marking as ProseMirror DECORATIONS (never marks — it must not write into the document) plus stepping between matches.
   - _exports_: `default`, `findSearchMatches`, `NoteSearchHighlight`, `noteSearchKey`
-- **`src/workspaces/notes/lib/notesSketchEditor.js`** — Sketch mode's INTERACTIVE half — the outline pane, dragging a box, arrow mode, opening a body in place. Behind a cached dynamic import so a note with no sketch never downloads it.
+- **`src/workspaces/notes/lib/notesSketchEditor.js`** — Sketch mode's INTERACTIVE half — double-click empty canvas to make a box, type in the box, drag a box to move it, drag from its dot onto another box to draw an arrow. Behind a cached dynamic import so a note with no sketch never downloads it.
   - _exports_: `attachSketchEditor`, `default`
-- **`src/workspaces/notes/lib/notesSketchModel.js`** — PURE sketch decisions: the outline text <-> model, the id-stable reconcile (the ONE place a node is created or destroyed, and where the position/arrow cascade runs), and the automatic layout.
-  - _exports_: `addLink`, `applyOutlineText`, `BODY_LINE_H`, `BODY_WRAP`, `BOX_MIN_H`, `BOX_W`, `boxAt`, `boxSize`, `buildTree`, `clearPosition`, `defaultMint`, `edgePoint`, `EMPTY_SKETCH`, `GAP_X`, `GAP_Y`, `isEmptySketch`, `LABEL_WRAP`, `layoutSketch`, `LINE_H`, `MARGIN`, `moveNode`, `normalizeSketch`, `outlineToText`, `PAD_X`, `PAD_Y`, `parentMap`, `parseOutlineText`, `reconcileOutline`, `removeLink`, `wrapText`
+- **`src/workspaces/notes/lib/notesSketchModel.js`** — PURE sketch decisions: THE CANVAS OWNS EVERYTHING — a box carries its own text and its own position, arrows are an explicit list, `removeBox` is the ONE place a box is destroyed (and where the arrow cascade runs), plus the layout and the migration off the superseded outline shape.
+  - _exports_: `addBox`, `addLink`, `BODY_LINE_H`, `BODY_WRAP`, `BOX_MIN_H`, `BOX_W`, `boxAt`, `boxSize`, `defaultMint`, `edgePoint`, `EMPTY_SKETCH`, `GRIP_R`, `isEmptySketch`, `LABEL_WRAP`, `layoutSketch`, `LINE_H`, `MARGIN`, `MIN_CANVAS_H`, `MIN_CANVAS_W`, `moveBox`, `nextSpot`, `normalizeSketch`, `outlineFromSketch`, `PAD_X`, `PAD_Y`, `removeBox`, `removeLink`, `SLACK_X`, `SLACK_Y`, `updateBox`, `wrapText`
 - **`src/workspaces/notes/lib/notesSketchNode.js`** — The `noteSketch` schema node and its node-view shell — a sketch is part of the DOCUMENT, which is what makes it persist, sync, print and export with no new plumbing.
   - _exports_: `default`, `NoteSketch`
 - **`src/workspaces/notes/lib/notesSketchRender.js`** — The ONE sketch drawing builder, used by the schema node's renderHTML AND the node view — class names only, no colours, so screen and paper cannot drift (PDF-PARITY).
@@ -367,7 +367,7 @@ _422 source files mapped._
   - _exports_: `CCN_UTILITY_TYPES`, `ccnHolders`, `classifyCcn`, `describeHolder`, `inferUtilityType`
 - **`src/workspaces/site-planner/lib/channelSection.js`** — Cuts a ground cross-section across the channel from the existing 3DEP DEM grid (pixel-space bilinear sampling), plus the channel's flow bearing, longitudinal slope, the site mask, and the watershed-truncation guard. The missing fourth input to the screening-BFE engine; same terrain source as the berm-height sampler, indexed as a line rather than as points.
   - _exports_: `channelCell`, `channelSlope`, `cutSection`, `flowBearing`, `gridCellFt`, `sampleAtPixel`, `siteMaskFromLatLngRings`, `upstreamEdgeFlags`
-- **`src/workspaces/site-planner/lib/cloudRename.js`** — the project-rename CLOUD write, LOADED ON DEMAND: one atomic `rename_site_group` RPC over the whole site group (so a rename reaches plans this browser has never loaded and cannot half-land), plus the server-side read-then-write degrade for a DB without the migration. Reached only by a dynamic import from `storage.renameSiteGroup` — never static-import it from the boot path.
+- **`src/workspaces/site-planner/lib/cloudRename.js`** — TODO — describe
   - _exports_: `cloudRenameGroup`
 - **`src/workspaces/site-planner/lib/cloudSync.js`** — RLS-scoped Supabase site read/write: per-tab version CAS + thin-clobber guard, keepalive push, delete-tombstone reconcile
   - _exports_: `_lastHeaderSig`, `_siteVersions`, `clearSiteVersions`, `cloudDelete`, `cloudDeletedRows`, `cloudHardDelete`, `cloudList`, `cloudRestore`, `cloudUpsert`, `fetchSiteForReconcile`, `headerSig`, `interpretDelete`, `keepaliveCloudPush`, `siteRowFor`, `slimForCloud`
@@ -597,6 +597,8 @@ _422 source files mapped._
   - _exports_: `BUCKET`, `classifyStorageError`, `deleteOverlayObject`, `downloadOverlayBytes`, `downloadOverlayDataUrl`, `fetchOverlayBytes`, `fetchOverlayDataUrl`, `fileKind`, `MAX_BYTES`, `overlayKey`, `siteUnderlayKey`, `uploadOverlayFile`, `uploadUnderlayDataUrl`
 - **`src/workspaces/site-planner/lib/overlayVectorSvg.js`** — Pure vector-overlay SVG emitter for the print export (B745): reprojects normalized [lon,lat] line/polygon/point features via an injected projection into styled `<path>`/`<circle>` (LOUD-skip on non-finite), plus esri/terrain normalizers (contour lines, drainage-arrow glyphs)
   - _exports_: `arrowGlyphFeatures`, `buildOverlayVectorFragment`, `contourFeatures`, `esriLineFeatures`, `esriPolygonFeatures`, `featureToSvg`, `overlayVectorSvg`, `swapLatLng`
+- **`src/workspaces/site-planner/lib/parcelActions.js`** — THE inventory of every parcel action and the pure model behind the right rail's "Parcel tools" menu: grouped create → modify → remove, per-row enabled/active/why-not, plus the rail-owns-actions / Land-panel-owns-attributes naming split
+  - _exports_: `boundaryEditHint`, `PARCEL_ACTIONS`, `PARCEL_GROUPS`, `PARCEL_SURFACES`, `parcelMenuModel`
 - **`src/workspaces/site-planner/lib/parcelDisplay.js`** — Shared parcel-outline display layers for map and planner: styleable esri vector layer, image-export layer for query-disabled TxGIO, Drive-snapshot geoJSON layer, add/remove cursors
   - _exports_: `ADD_CURSOR`, `makeParcelDisplayLayer`, `makeParcelImageLayer`, `makeParcelLayer`, `makeSnapshotLayer`, `PARCEL_MINZOOM`, `parcelDisplayIsImageOnly`, `REMOVE_CURSOR`
 - **`src/workspaces/site-planner/lib/parcelOffset.js`** — the setback ring's inward polygon offset (miter with bevel fallback) plus the buildable-envelope area it encloses; lifted out of SitePlanner so the envelope is provable in a unit test
@@ -669,7 +671,7 @@ _422 source files mapped._
   - _exports_: `buildBuildingTableSvg`, `buildPrintSheetSvg`, `buildStormwaterSvg`, `formatDateStamp`, `metricsRowsFor`, `pageSize`, `printSheetLayout`, `sanitizeFilename`, `sheetFileName`, `stormwaterBandH`
 - **`src/workspaces/site-planner/lib/profile.js`** — Signed-in user profile I/O against Supabase public.profiles (load/upsert first/last/org, mirrors names to auth metadata)
   - _exports_: `loadProfile`, `saveProfile`
-- **`src/workspaces/site-planner/lib/projectName.js`** — THE authority for what a project (site group) is called: resolves the one authoritative name across a group's plans (rename-stamp first, legacy majority second, ambiguous never guessed), reconciles a split group, and supplies the write-path correction that stops a stale plan re-publishing an old name.
+- **`src/workspaces/site-planner/lib/projectName.js`** — TODO — describe
   - _exports_: `byGroup`, `groupKeyOf`, `maxStampOf`, `nameAuthority`, `reconcileGroupNames`, `resolveNameFor`
 - **`src/workspaces/site-planner/lib/proposedSurface.js`** — B826 proposed-surface engine (pure): per-element grading planes from the B825 class records, composite cut/fill lattice, balance assist, violation classing (ADA legal vs screening)
   - _exports_: `balanceAssist`, `buildPlanes`, `buildProposedSurface`, `classifyGradeElement`, `daylightRings`, `distToRingEdges`, `DOCK_BREAK_FT`, `nearestOnRing`, `netImportCy`, `PL_FILL_EPS_FT`, `sampleProposedAt`, `slopeBand`, `surfaceGrid`, `surfaceViolations`, `TIE_DROP_FT`

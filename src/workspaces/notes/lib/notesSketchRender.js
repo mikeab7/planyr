@@ -14,17 +14,20 @@
  * out of the module's "chrome is theme tokens only" problem entirely: it has no colours to
  * get wrong.
  *
- * ═══ THE ONE PLACE SCREEN AND PAPER DELIBERATELY DIFFER, AND WHY IT LOSES NOTHING ══════
+ * ═══ SCREEN AND PAPER NOW DRAW THE SAME CONTENT, FULL STOP ═════════════════════════════
  *
- * A node has a short LABEL and an optional longer BODY. On screen the box shows the label
- * and the body opens IN PLACE (a chevron on the box — no dialog, house rule); on paper
- * nothing can be clicked, so every body prints as a DETAIL LIST under the drawing. Both
- * surfaces therefore carry every body: one behind a click, one on the page. What is
- * forbidden — and what this arrangement avoids — is the same sentence rendered twice on the
- * same surface (PANEL-BREVITY), which is why the screen has no detail list and the paper
- * has no chevrons. `detail: true` is the flag; it is the only difference between the two.
+ * Under the superseded outline design a box's body hid behind a chevron on screen and
+ * reappeared as a detail list on paper. The canvas now owns the text (see the header of
+ * lib/notesSketchModel.js), so the body is simply always drawn inside its box, on both
+ * surfaces — the divergence is gone rather than managed.
+ *
+ * The ONE remaining difference is `interactive`, and it carries no content: it adds the
+ * AFFORDANCES a person can press — the drag-out grip that starts an arrow, the focus stops
+ * a keyboard user tabs through. A grip printed on paper would be a lie (nothing on a sheet
+ * can be dragged), so paper does not get one. Every box, every word and every arrow is
+ * identical either way.
  */
-import { layoutSketch, normalizeSketch } from "./notesSketchModel.js";
+import { GRIP_R, layoutSketch, normalizeSketch, outlineFromSketch } from "./notesSketchModel.js";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 const svg = (tag) => `${SVG_NS} ${tag}`;
@@ -48,70 +51,88 @@ function arrowHead(e) {
     [bx + px, by + py],
     [bx - px, by - py],
   ].map(([x, y]) => `${round(x)},${round(y)}`).join(" ");
-  return [svg("polygon"), { points: pts, class: `planyr-sketch-head planyr-sketch-head-${e.kind}` }];
+  return [svg("polygon"), { points: pts, class: "planyr-sketch-head" }];
 }
 
 const round = (n) => Math.round(n * 10) / 10;
 
-/** One box, as a group: the rounded rectangle, its wrapped label, its body when showing,
- *  and (screen only) the chevron that opens the body. */
-function boxSpec(b, { detail }) {
+/** One arrow: a fat invisible line to press, the visible line, and the head. The hit line
+ *  is drawn FIRST and under everything, so it can never steal a press from a box. */
+function edgeSpec(e, selected) {
+  const on = selected && selected.kind === "edge" && selected.from === e.from && selected.to === e.to;
+  return [svg("g"), {
+    class: `planyr-sketch-edge-g${on ? " is-selected" : ""}`,
+    "data-sketch-edge": `${e.from} ${e.to}`,
+  },
+    [svg("line"), { x1: round(e.x1), y1: round(e.y1), x2: round(e.x2), y2: round(e.y2), class: "planyr-sketch-edge-hit" }],
+    [svg("line"), { x1: round(e.x1), y1: round(e.y1), x2: round(e.x2), y2: round(e.y2), class: "planyr-sketch-edge" }],
+    arrowHead(e),
+  ];
+}
+
+/** One box: the rounded rectangle, its wrapped label, its body, and — on screen only — the
+ *  grip you drag out of to draw an arrow. */
+function boxSpec(b, { interactive, selected }) {
+  const on = selected && selected.kind === "box" && selected.id === b.id;
   const kids = [
-    [svg("rect"), {
-      x: 0, y: 0, width: b.w, height: b.h, rx: 8, ry: 8,
-      class: `planyr-sketch-box${b.placed ? " planyr-sketch-box-placed" : ""}`,
-    }],
+    [svg("rect"), { x: 0, y: 0, width: b.w, height: b.h, rx: 8, ry: 8, class: "planyr-sketch-box" }],
   ];
 
   const labelTop = 9 + 12;
   b.labelLines.forEach((line, i) => {
-    kids.push([svg("text"), {
-      x: 11, y: labelTop + i * 16, class: "planyr-sketch-label",
-    }, line]);
+    kids.push([svg("text"), { x: 11, y: labelTop + i * 16, class: "planyr-sketch-label" }, line]);
   });
 
   if (b.bodyLines.length) {
-    const bodyTop = labelTop + b.labelLines.length * 16 + 6;
+    const bodyTop = labelTop + Math.max(1, b.labelLines.length) * 16 + 6;
     b.bodyLines.forEach((line, i) => {
       kids.push([svg("text"), { x: 11, y: bodyTop + i * 14, class: "planyr-sketch-body" }, line]);
     });
   }
 
-  /* The "there is more behind this box" affordance. On paper it is replaced by the detail
-   * list, so it is not drawn at all — an un-clickable chevron on a printed page is a lie. */
-  if (!detail && b.body) {
-    kids.push([svg("g"), { class: "planyr-sketch-chevron", "data-sketch-toggle": b.id, transform: `translate(${b.w - 20}, 9)` },
-      [svg("rect"), { x: -4, y: -3, width: 16, height: 16, rx: 4, class: "planyr-sketch-chevron-hit" }],
-      [svg("path"), { d: b.expanded ? "M0 8 L4 3 L8 8" : "M0 3 L4 8 L8 3", class: "planyr-sketch-chevron-mark" }],
+  /* THE GRIP — the whole of "drag from one box to another draws an arrow", with no mode to
+   * turn on first. It sits on the right edge because that is where a left-to-right reader
+   * expects the next thing to be, and it is a generous circle rather than a hairline so a
+   * press lands on it and not on the box behind. */
+  if (interactive) {
+    kids.push([svg("g"), { class: "planyr-sketch-grip", "data-sketch-grip": b.id, transform: `translate(${b.w}, ${round(b.h / 2)})` },
+      [svg("circle"), { cx: 0, cy: 0, r: GRIP_R + 5, class: "planyr-sketch-grip-hit" }],
+      [svg("circle"), { cx: 0, cy: 0, r: GRIP_R, class: "planyr-sketch-grip-dot" }],
     ]);
   }
 
-  return [svg("g"), {
-    class: `planyr-sketch-node${b.expanded ? " planyr-sketch-node-open" : ""}`,
+  const attrs = {
+    class: `planyr-sketch-node${on ? " is-selected" : ""}`,
     "data-sketch-node": b.id,
     transform: `translate(${round(b.x)}, ${round(b.y)})`,
-  }, ...kids];
+  };
+  /* A keyboard user has to be able to reach a box to delete it or start an arrow from it,
+   * and a screen reader has to be told what it landed on. */
+  if (interactive) {
+    attrs.tabindex = "0";
+    attrs.role = "button";
+    attrs["aria-label"] = `Box: ${b.label || "empty"}${b.body ? `. ${b.body.replace(/\n/g, " ")}` : ""}`;
+  }
+  return [svg("g"), attrs, ...kids];
 }
 
-/** The whole drawing. `detail` switches paper mode on (no chevrons, a detail list below). */
-export function sketchSpec(model, { detail = false, expanded = new Set(), title = "" } = {}) {
+/** The whole drawing. `interactive` adds the affordances (grips, focus stops) and nothing
+ *  else; `selected` highlights one box or one arrow, which is view state and never stored. */
+export function sketchSpec(model, { interactive = false, selected = null, title = "" } = {}) {
   const m = normalizeSketch(model);
-  const layout = layoutSketch(m, { expanded: detail ? new Set() : expanded });
-
-  const svgKids = [];
-  for (const e of layout.edges) {
-    svgKids.push([svg("line"), {
-      x1: round(e.x1), y1: round(e.y1), x2: round(e.x2), y2: round(e.y2),
-      class: `planyr-sketch-edge planyr-sketch-edge-${e.kind}`,
-      "data-sketch-edge": `${e.from} ${e.to}`,
-      "data-sketch-edge-kind": e.kind,
-    }]);
-    svgKids.push(arrowHead(e));
-  }
-  for (const b of layout.boxes) svgKids.push(boxSpec(b, { detail }));
+  const layout = layoutSketch(m);
 
   const children = [];
-  if (m.outline.length) {
+  if (m.boxes.length || interactive) {
+    const svgKids = [
+      /* THE SURFACE. A transparent rect covering the canvas, so an empty spot is a real
+       * target — an SVG with no painted background swallows nothing and a double-click on
+       * "nothing" would never reach us. It is drawn first, so it is under everything. */
+      [svg("rect"), { x: 0, y: 0, width: layout.width, height: layout.height, class: "planyr-sketch-surface", "data-sketch-surface": "1" }],
+    ];
+    for (const e of layout.edges) svgKids.push(edgeSpec(e, selected));
+    for (const b of layout.boxes) svgKids.push(boxSpec(b, { interactive, selected }));
+
     children.push([svg("svg"), {
       class: "planyr-sketch-canvas",
       viewBox: `0 0 ${layout.width} ${layout.height}`,
@@ -122,23 +143,9 @@ export function sketchSpec(model, { detail = false, expanded = new Set(), title 
       "aria-label": sketchAltText(m, title),
     }, ...svgKids]);
   } else {
-    /* An empty sketch says what to do rather than showing an empty white box. LOUD-FAILURE's
-     * quiet cousin: a surface that renders nothing must say why it is rendering nothing. */
-    children.push(["p", { class: "planyr-sketch-empty" }, "Empty sketch — type a line in the outline to draw a box."]);
-  }
-
-  /* The DETAIL LIST — paper only. Every body, in outline order, so a printed sheet carries
-   * the detail the screen keeps one click away. */
-  if (detail) {
-    const withBody = m.outline.filter((n) => n.body);
-    if (withBody.length) {
-      children.push(["ul", { class: "planyr-sketch-detail" },
-        ...withBody.map((n) => ["li", {},
-          ["strong", {}, n.label],
-          ["span", {}, ` — ${n.body.replace(/\n/g, " ")}`],
-        ]),
-      ]);
-    }
+    /* An empty sketch on paper says it is empty rather than printing a blank rectangle.
+     * (On screen the canvas is always drawn — it is the thing you double-click.) */
+    children.push(["p", { class: "planyr-sketch-empty" }, "Empty sketch."]);
   }
 
   /* THE PAYLOAD. The drawing above is a rendering; THIS is the sketch. It rides the HTML so
@@ -147,20 +154,21 @@ export function sketchSpec(model, { detail = false, expanded = new Set(), title 
    * HTML instead of a src. */
   return ["div", {
     class: "planyr-sketch",
-    "data-note-sketch": JSON.stringify({ outline: m.outline, positions: m.positions, links: m.links }),
-    "data-sketch-count": String(m.outline.length),
+    "data-note-sketch": JSON.stringify({ boxes: m.boxes, links: m.links }),
+    "data-sketch-count": String(m.boxes.length),
   }, ...children];
 }
 
 /** What a screen reader is told the drawing is. A diagram with no accessible name is a
- *  blank to anyone not looking at it, and the outline is right there to say it with. */
+ *  blank to anyone not looking at it, and the derived ordering is right there to say it. */
 export function sketchAltText(model, title = "") {
   const m = normalizeSketch(model);
+  const { lines, extra } = outlineFromSketch(m);
   const head = title ? `${title}: ` : "";
-  const lines = m.outline.slice(0, 12).map((n) => `${"— ".repeat(n.depth)}${n.label}`);
-  const more = m.outline.length > 12 ? `, and ${m.outline.length - 12} more` : "";
-  const links = m.links.length ? `. ${m.links.length} extra arrow${m.links.length === 1 ? "" : "s"}` : "";
-  return `${head}Sketch of ${m.outline.length} box${m.outline.length === 1 ? "" : "es"}: ${lines.join("; ")}${more}${links}.`;
+  const shown = lines.slice(0, 12).map((n) => `${"— ".repeat(n.depth)}${n.label || "empty box"}`);
+  const more = lines.length > 12 ? `, and ${lines.length - 12} more` : "";
+  const links = extra.length ? `. ${extra.length} other arrow${extra.length === 1 ? "" : "s"}` : "";
+  return `${head}Sketch of ${m.boxes.length} box${m.boxes.length === 1 ? "" : "es"}: ${shown.join("; ")}${more}${links}.`;
 }
 
 /** Build real DOM from a spec — the node view's half of the pair. Mirrors ProseMirror's own

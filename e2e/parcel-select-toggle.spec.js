@@ -46,7 +46,7 @@ async function startBlank(page, { theme }) {
 
 async function drawParcel(page) {
   const box = await canvas(page).boundingBox();
-  await page.getByRole("button", { name: "Parcel", exact: true }).click();
+  await page.locator('[data-rail-tab="parcel"]').click();
   await page.getByTitle(/Add land to this plan/i).click();
   await page.getByRole("button", { name: /Draw a new boundary/i }).click();
   await expect(page.getByText(/drop boundary points/i)).toBeVisible(); // the tool is armed before we click

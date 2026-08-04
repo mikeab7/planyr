@@ -40,7 +40,7 @@ await page.waitForTimeout(1500);
 
 // ---------- B733 — rail has a Properties tab between Yield and References ----------
 const railLabels = await page.evaluate(() => {
-  const wanted = ["Parcel", "Analysis", "Yield", "Properties", "References", "Standards"];
+  const wanted = ["Land", "Analysis", "Yield", "Properties", "References", "Standards"];
   const seen = new Set(); const out = [];
   for (const b of document.querySelectorAll("button[title]")) {
     const t = b.getAttribute("title");

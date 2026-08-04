@@ -70,23 +70,21 @@ body { font: 11.5pt/1.55 -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sa
 .note-body .planyr-note-image-missing { display: inline-block; border: 1px dashed #9AA0AC; color: #5B6270; font-size: 0.85em; padding: 0.6em 0.9em; }
 /* SKETCH MODE on paper. The drawing itself comes from the schema node's own renderHTML, so
    it cannot drift from the screen; what changes here is only the INK — black on white,
-   because a theme token would print a dark page — and the fact that a printed sheet shows
-   every box's detail as a list (planyr-sketch-detail) instead of behind a chevron nobody can
-   click. Mirrors components/NoteEditor.jsx → EDITOR_CSS; change one, change both. */
+   because a theme token would print a dark page. Every box, every word (label AND body) and
+   every arrow is on both surfaces: since the canvas started owning the text, a box simply
+   draws its own detail, so there is no chevron and no separate detail list to keep in step.
+   Mirrors components/NoteEditor.jsx → EDITOR_CSS; change one, change both. */
 .note-body .planyr-sketch { break-inside: avoid; }
 .note-body .planyr-sketch-canvas { display: block; max-width: 100%; height: auto; }
+.note-body .planyr-sketch-surface { fill: transparent; }
 .note-body .planyr-sketch-box { fill: #FFFFFF; stroke: #5B6270; stroke-width: 1.2; }
-.note-body .planyr-sketch-box-placed { stroke: #8C2F69; }
 .note-body .planyr-sketch-label { fill: #14161C; font-size: 12.5px; font-weight: 650; }
 .note-body .planyr-sketch-body { fill: #3A3F4B; font-size: 11px; font-weight: 500; }
 .note-body .planyr-sketch-edge { stroke: #5B6270; stroke-width: 1.4; fill: none; }
-.note-body .planyr-sketch-edge-link { stroke: #8C2F69; stroke-dasharray: 5 3; }
+.note-body .planyr-sketch-edge-hit { stroke: none; fill: none; }
+.note-body .planyr-sketch-edge-g { fill: none; }
 .note-body .planyr-sketch-head { fill: #5B6270; stroke: none; }
-.note-body .planyr-sketch-head-link { fill: #8C2F69; }
 .note-body .planyr-sketch-empty { margin: 0; color: #5B6270; font-style: italic; }
-.note-body ul.planyr-sketch-detail { list-style: none; padding-left: 0; margin: 3mm 0 0; font-size: 0.92em; }
-.note-body ul.planyr-sketch-detail li { margin: 0.25em 0; color: #3A3F4B; break-inside: avoid; }
-.note-body ul.planyr-sketch-detail strong { color: #14161C; }
 .empty-note { color: #5B6270; font-style: italic; }
 @page { margin: 14mm; }
 `;

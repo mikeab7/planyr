@@ -64,12 +64,12 @@ test.describe("panel toggle aerial flash (B933)", () => {
     await page.waitForTimeout(1000); // fit-on-load + first crisp commit settle
 
     // Begin with every panel CLOSED, THEN arm the watcher — so first-paint commits aren't counted.
-    if ((await openPanels(page)).length) { await page.locator('button[title="Parcel"]').first().click(); await page.waitForTimeout(600); }
+    if ((await openPanels(page)).length) { await page.locator('[data-rail-tab="parcel"]').first().click(); await page.waitForTimeout(600); }
     await armGhostWatch(page);
 
     // A full open / switch / switch / close cycle. Each step resizes the in-flow canvas. Post-B933
     // a same-zoom re-center pans (no ghost); the whole cycle must append ZERO ghost clones.
-    for (const title of ["Parcel", "Analysis", "Yield", "Yield"]) {
+    for (const title of ["Land", "Analysis", "Yield", "Yield"]) {
       await page.locator(`button[title="${title}"]`).first().click();
       await page.waitForTimeout(500); // let the debounced (~160ms) commit fire too
     }

@@ -135,7 +135,7 @@ async function draw(page, type) {
 
   if (type === "parcel") {
     // The Parcel tool's own arming flow (mirrors e2e/parcel-select-toggle.spec.js).
-    await page.getByRole("button", { name: "Parcel", exact: true }).first().click();
+    await page.locator('[data-rail-tab="parcel"]').first().click();
     await page.getByTitle(/Add land to this plan/i).click();
     await page.getByRole("button", { name: /Draw a new boundary/i }).click();
     await expect(page.getByText(/drop boundary points/i)).toBeVisible();
