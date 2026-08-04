@@ -83,10 +83,10 @@ const SHOTS = [
   { name: "planner-plan.png", seed: true, prep: fitFirst },
   { name: "planner-setup.png", seed: true, prep: async (p) => { await fitFirst(p); await p.locator('button[title="Setup"]').click({ timeout: 5000 }); } },
   { name: "planner-yield.png", seed: true, prep: async (p) => { await fitFirst(p); await p.locator('button[title="Yield"]').click({ timeout: 5000 }); } },
-  { name: "planner-parcel-panel.png", seed: true, prep: async (p) => { await fitFirst(p); await p.locator('button[title="Parcel"]').click({ timeout: 5000 }); } },
+  { name: "planner-parcel-panel.png", seed: true, prep: async (p) => { await fitFirst(p); await p.locator('[data-rail-tab="parcel"]').click({ timeout: 5000 }); } },
   { name: "parcel-drawing.png", seed: true, prep: async (p) => {
       await fitFirst(p);
-      await p.locator('button[title="Parcel"]').click({ timeout: 5000 });          // open Parcel panel
+      await p.locator('[data-rail-tab="parcel"]').click({ timeout: 5000 });          // open Parcel panel
       await p.locator('button:has-text("Parcel 1")').first().click({ timeout: 5000 }); // select the parcel
       await p.waitForTimeout(300);
       await p.locator('button:has-text("Schiel Rd")').first().click({ timeout: 5000 }); // open the markup modal

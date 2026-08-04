@@ -82,7 +82,7 @@ async function openPanel(site, { mock = false } = {}) {
   // Open the Parcel panel if it didn't auto-open (the rail tab TOGGLES, so guard on the button).
   const addBtn = page.locator('button[title^="Add land to this plan"]').first();
   if (!(await addBtn.isVisible().catch(() => false))) {
-    try { await page.locator('button[title="Parcel"]').first().click({ timeout: 5000 }); } catch {}
+    try { await page.locator('[data-rail-tab="parcel"]').first().click({ timeout: 5000 }); } catch {}
     await page.waitForTimeout(500);
   }
   return { ctx, page, errors, addBtn };

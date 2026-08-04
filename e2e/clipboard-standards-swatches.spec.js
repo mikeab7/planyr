@@ -160,7 +160,7 @@ test.describe("Ctrl+C / Ctrl+V copies whatever is selected (NEW-2 / NEW-6)", () 
     page.on("pageerror", (e) => errors.push(String(e)));
     await startBlank(page);
 
-    await page.getByRole("button", { name: "Parcel", exact: true }).click();
+    await page.locator('[data-rail-tab="parcel"]').click();
     await page.getByTitle(/Add land to this plan/i).click();
     await page.getByRole("button", { name: /Draw a new boundary/i }).click();
     const box = await canvas(page).boundingBox();
@@ -254,7 +254,7 @@ test.describe("Standards: one Apply for the whole panel", () => {
     await startBlank(page);
 
     // Two parcels, so "Apply" has to be retroactive across more than one object.
-    await page.getByRole("button", { name: "Parcel", exact: true }).click();
+    await page.locator('[data-rail-tab="parcel"]').click();
     await page.getByTitle(/Add land to this plan/i).click();
     await page.getByRole("button", { name: /Draw a new boundary/i }).click();
     const box = await canvas(page).boundingBox();

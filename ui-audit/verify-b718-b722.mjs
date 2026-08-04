@@ -60,7 +60,7 @@ const railLabels = await page.evaluate(() => {
   // the rail buttons carry a title = the tab label and render a RailIcon <svg>
   const btns = [...document.querySelectorAll('button[title]')].filter((b) => {
     const t = b.getAttribute("title");
-    return ["Parcel", "Analysis", "Yield", "References", "Standards"].includes(t) && b.querySelector("svg");
+    return ["Land", "Analysis", "Yield", "References", "Standards"].includes(t) && b.querySelector("svg");
   });
   // de-dupe by title preserving DOM order
   const seen = new Set(); const out = [];
@@ -77,7 +77,7 @@ await page.waitForTimeout(600);
 ok(!(await strip.count()), "B732 the on-canvas Yield KPI strip is gone (reverted)");
 
 // Open the Parcel panel (needed for the B720 ops-row checks below).
-await page.locator('button[title="Parcel"]').first().click();
+await page.locator('[data-rail-tab="parcel"]').first().click();
 await page.waitForTimeout(600);
 
 // ---------- B720 — ops row + click-to-pick merge ----------
