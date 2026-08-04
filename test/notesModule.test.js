@@ -805,7 +805,13 @@ describe("sketch mode is a schema node, and there is no second store", () => {
     const schema = getSchema(NOTE_EXTENSIONS);
     expect(schema.nodes.noteSketch, "noteSketch is not in the schema").toBeTruthy();
     const attrs = schema.nodes.noteSketch.spec.attrs;
-    expect(Object.keys(attrs).sort()).toEqual(["links", "outline", "positions"]);
+    /* `boxes` + `links` are the live shape — THE CANVAS OWNS EVERYTHING. `outline` and
+     * `positions` are the SUPERSEDED shape (B1400), kept declared and defaulting to null for
+     * one reason only: a note already in storage may carry one, and normalizeSketch migrates
+     * it on read. Removing them would silently blank those sketches. */
+    expect(Object.keys(attrs).sort()).toEqual(["boxes", "links", "outline", "positions"]);
+    expect(attrs.outline.default).toBeNull();
+    expect(attrs.positions.default).toBeNull();
   });
 
   it("⛔ NOT ONE sketch file touches storage — no localStorage, no IndexedDB, no Supabase", () => {
@@ -819,29 +825,38 @@ describe("sketch mode is a schema node, and there is no second store", () => {
     }
   });
 
-  it("the position/link cascade is enforced by the MODEL, so no caller can skip it", () => {
+  it("⛔ THE ARROW CASCADE IS ENFORCED BY THE MODEL, so no caller can skip it", () => {
     const model = code("lib/notesSketchModel.js");
-    // reconcileOutline is the only place a node is destroyed, and it returns the survivors.
-    expect(model).toMatch(/export function reconcileOutline/);
-    expect(model).toMatch(/removedIds/);
-    // applyOutlineText — the one call the outline pane makes — goes THROUGH it.
-    expect(model).toMatch(/export function applyOutlineText[\s\S]{0,200}reconcileOutline\(/);
-    // and the editor never assembles an outline by hand.
-    expect(code("lib/notesSketchEditor.js")).not.toMatch(/outline:\s*\[/);
+    // removeBox is the ONLY place a box is destroyed, and it reports the arrows it took.
+    expect(model).toMatch(/export function removeBox/);
+    expect(model).toMatch(/removedLinks/);
+    // …and the editor never splices a box out by hand.
+    const editor = code("lib/notesSketchEditor.js");
+    expect(editor).toMatch(/removeBox\(/);
+    expect(editor, "boxes must never be filtered out around the cascade").not.toMatch(/boxes\.filter\(/);
+    expect(editor, "the editor must not assemble a box list of its own").not.toMatch(/boxes:\s*\[/);
   });
 
-  it("a drag writes a POSITION only — moveNode is the one way the editor moves a box", () => {
+  it("the canvas owns the text AND the position — and each edit goes through its own function", () => {
     const editor = code("lib/notesSketchEditor.js");
-    expect(editor).toMatch(/moveNode\(/);
-    expect(editor, "the editor must not write an outline of its own").not.toMatch(/\.outline\s*=/);
-    expect(editor, "positions are written through the model, never spliced in place").not.toMatch(/positions\[[^\]]+\]\s*=/);
+    for (const fn of ["addBox(", "updateBox(", "moveBox(", "addLink(", "removeLink("]) {
+      expect(editor, `the editor does not reach the model's ${fn} — an edit is being hand-rolled`).toContain(fn);
+    }
+    expect(editor, "a position is written through the model, never spliced in place").not.toMatch(/\.x\s*=\s*/);
+    /* ⛔ THE SUPERSEDED OUTLINE PANE IS GONE AND MUST NOT COME BACK — two authoring paths is
+     * the accumulation PANEL-BREVITY forbids, and the outline half is the one the owner
+     * rejected. There is no outline text anywhere in the interactive layer. */
+    expect(editor, "an outline authoring surface is back").not.toMatch(/outlineToText|parseOutlineText|applyOutlineText/);
+    expect(editor, "an outline textarea is back").not.toMatch(/sketch-outline/);
   });
 
   it("ONE builder draws the screen and the paper — PDF-PARITY by construction", () => {
     expect(code("lib/notesSketchNode.js"), "renderHTML must use the shared spec").toMatch(/renderHTML[\s\S]{0,160}sketchSpec\(/);
     expect(code("lib/notesSketchNode.js"), "the node view must draw from the SAME spec").toMatch(/specToDom\(sketchSpec\(/);
-    // …and only one of them is in paper mode.
-    expect(src("lib/notesSketchNode.js")).toMatch(/detail: true/);
+    /* …and the ONLY difference between them carries no content: the screen gets the
+     * affordances (`interactive`), paper gets the same boxes, words and arrows. */
+    expect(code("lib/notesSketchNode.js")).toMatch(/interactive: editor\.isEditable/);
+    expect(code("lib/notesSketchRender.js")).toMatch(/if \(interactive\)/);
   });
 
   it("the drawing carries CLASS NAMES and no colours — the ink is in the two CSS mirrors", () => {
@@ -855,15 +870,13 @@ describe("sketch mode is a schema node, and there is no second store", () => {
     const screen = src("components/NoteEditor.jsx");
     const paper = src("lib/notesPrint.js");
     const classes = new Set([...render.matchAll(/planyr-sketch[\w-]*/g)].map((m) => m[0]));
-    /* The DRAWING's own classes must be styled on both. Two sets are deliberately one-sided,
-     * and each is the same decision seen from its own end: the interactive chrome (chevron,
-     * tools, the outline field, the drag group) cannot be pressed on paper, and the detail
-     * list exists ONLY on paper — it is what replaces the chevron there, so that every body
-     * is carried on both surfaces without either surface printing it twice (PANEL-BREVITY). */
-    const screenOnly = /chevron|tools|kind|btn|status|offline|host|draw|outline|textarea|hint|sketch-node/;
-    const paperOnly = /detail/;
+    /* One set is deliberately one-sided, and it is the same decision seen from its own end:
+     * the AFFORDANCES (the grip you drag an arrow out of, the drag group's own cursor) cannot
+     * be pressed on paper, so the spec does not draw them there. Everything that is CONTENT —
+     * box, label, body, arrow, head — is styled on both, because both surfaces draw it. */
+    const screenOnly = /grip|tools|kind|btn|status|offline|host|draw|pending|hint|edit|sketch-node/;
     for (const cls of classes) {
-      if (!paperOnly.test(cls)) expect(screen, `${cls} has no on-screen style`).toContain(cls);
+      expect(screen, `${cls} has no on-screen style`).toContain(cls);
       if (!screenOnly.test(cls)) expect(paper, `${cls} is drawn but has no PRINT style — the sheet will not match the screen`).toContain(cls);
     }
   });
@@ -892,19 +905,37 @@ describe("sketch mode is a schema node, and there is no second store", () => {
     for (const f of SKETCH_FILES) {
       expect(code(f), `${f} uses a browser dialog`).not.toMatch(/window\.(prompt|confirm|alert)|[^.\w](prompt|confirm|alert)\(/);
     }
-    // The outline is a real field on the page and the arrow is drawn by pressing two boxes.
-    expect(code("lib/notesSketchEditor.js")).toMatch(/createElement\("textarea"\)|el\("textarea"/);
+    // A box's words are edited IN the box: two real fields laid over it.
+    const editor = code("lib/notesSketchEditor.js");
+    expect(editor).toMatch(/el\("input", "planyr-sketch-edit-label"/);
+    expect(editor).toMatch(/el\("textarea", "planyr-sketch-edit-body"/);
+  });
+
+  it("⛔ DOUBLE-CLICKING EMPTY CANVAS IS THE AUTHORING SURFACE, and a drag between boxes is the arrow", () => {
+    const editor = code("lib/notesSketchEditor.js");
+    expect(editor, "nothing listens for a double-click on the canvas").toMatch(/addEventListener\("dblclick"/);
+    expect(editor, "a double-click on empty canvas must make a box right there").toMatch(/beginBox\(pt\.x/);
+    // The arrow is dragged off the box itself — not turned on with a mode button first.
+    expect(editor).toMatch(/data-sketch-grip/);
+    expect(editor, "an arrow MODE is back").not.toMatch(/linkMode/);
+    // The surface the press has to land on is drawn, or an empty spot would swallow it.
+    expect(code("lib/notesSketchRender.js")).toMatch(/planyr-sketch-surface/);
   });
 
   it("a refused act SAYS SO (LOUD-FAILURE) — addLink returns a reason and the editor shows it", () => {
-    expect(code("lib/notesSketchModel.js")).toMatch(/added:\s*false,\s*reason:/);
+    expect(code("lib/notesSketchModel.js")).toMatch(/added: false, reason:/);
     expect(code("lib/notesSketchEditor.js")).toMatch(/say\(`No arrow — \$\{reason\}/);
+    // …and a deleted box states the arrows it took with it, rather than removing them quietly.
+    expect(code("lib/notesSketchEditor.js")).toMatch(/removedLinks\.length/);
     // …and a failed chunk load leaves a named message rather than a dead-looking drawing.
     expect(src("lib/notesSketchNode.js")).toMatch(/Sketch editing could not load/);
   });
 
-  it("the toolbar can insert one, and the command is the only way in", () => {
-    expect(code("components/NoteToolbar.jsx")).toMatch(/insertNoteSketch\(\)/);
-    expect(code("lib/notesSketchNode.js")).toMatch(/insertNoteSketch:/);
+  it("the toolbar's BOX button is the one way in, and it makes a real box", () => {
+    expect(code("components/NoteToolbar.jsx")).toMatch(/boxSelection\(\)/);
+    expect(code("lib/notesSketchNode.js")).toMatch(/boxSelection:/);
+    // The superseded "insert an empty sketch and go type an outline" command is gone.
+    expect(code("components/NoteToolbar.jsx")).not.toMatch(/insertNoteSketch/);
+    expect(code("lib/notesSketchNode.js")).not.toMatch(/insertNoteSketch/);
   });
 });
