@@ -9663,8 +9663,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             const covered = m && (m.wse1pctFt != null || m.wse02Ft != null);
             floodGeo.maapnext = covered ? { wse1pctFt: m.wse1pctFt ?? null, wse02Ft: m.wse02Ft ?? null, source: "hcfcd-maapnext" } : null;
             floodGeo.maapnextFlags = { state: covered ? "loaded" : (m ? "empty" : "not-configured") };
-          } catch (_) {
-            floodGeo.maapnextFlags = { state: "failed" };
+          } catch (e) {
+            /* NEW-1 — a DECLARED outage is its own state, distinct from a one-off failure. On a
+             * Harris site this is the governing WSE provider, and MAAPnext usually runs HIGHER
+             * than the effective FIRM, so the estimate the site DOES get is likely low. That has
+             * to reach the user in words; it may never look like "no flood data here". */
+            floodGeo.maapnextFlags = e && e.outage
+              ? { state: "unavailable", since: e.outage.since, symptom: e.outage.symptom, impact: e.outage.impact, replacement: e.outage.replacement }
+              : { state: "failed" };
           }
           if (tok !== drainTok.current) return; // superseded while sampling
         }

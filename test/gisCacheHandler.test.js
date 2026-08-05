@@ -146,6 +146,53 @@ describe("handleGisCache — bounded upstream timeout (NEW-1/B788)", () => {
   });
 });
 
+/* NEW-1 — `nostore=1`: the pass-through mode the FEMA InFRM EBFE point identify uses.
+ *
+ * It exists because a JSON reader needs the same-origin relay for one reason only (the agency
+ * refuses the browser cross-origin) while having the OPPOSITE caching and failure needs from a
+ * tile: every site coordinate is a distinct URL, so caching them would fill the Drive folder
+ * with one-shot answers, and a 302 fail-open would send the browser straight back into the CORS
+ * refusal the relay exists to avoid. */
+describe("handleGisCache — nostore (point JSON pass-through)", () => {
+  const JSEGS = ["svc", b64urlEncode("https://txgeo.usgs.gov/arcgis/rest/services/FEMA_EBFE/EBFE/MapServer"), "identify"];
+  const JSEARCH = "?geometry=%7B%7D&f=json&nostore=1";
+
+  it("serves the upstream bytes and stores NOTHING", async () => {
+    const client = fakeDrive();
+    const bag = deferBag();
+    const res = await handleGisCache({ client, segs: JSEGS, search: JSEARCH, fetchImpl: okFetch('{"results":[]}', "application/json"), folderIdFor, defer: bag.defer });
+    expect(res.status).toBe(200);
+    expect(await res.text()).toBe('{"results":[]}');
+    await bag.settle();
+    expect(client.calls.create).toBe(0);
+    expect(client.calls.find).toBe(0); // it never even looks in the cache
+    expect(client._files.length).toBe(0);
+  });
+
+  it("strips the flag before rebuilding the upstream URL — the agency sees the same query", async () => {
+    let seen = null;
+    const fetchImpl = async (u) => { seen = u; return new Response("{}", { status: 200, headers: { "content-type": "application/json" } }); };
+    await handleGisCache({ client: fakeDrive(), segs: JSEGS, search: JSEARCH, fetchImpl, folderIdFor });
+    expect(seen).not.toContain("nostore");
+    expect(seen).toContain("txgeo.usgs.gov");
+    expect(seen).toContain("/identify");
+  });
+
+  it("FAILS LOUD with a 502 — never a 302 the browser would follow into a CORS wall", async () => {
+    for (const f of [downFetch(), throwFetch()]) {
+      const res = await handleGisCache({ client: fakeDrive(), segs: JSEGS, search: JSEARCH, fetchImpl: f, folderIdFor });
+      expect(res.status).toBe(502);
+      expect(JSON.parse(await res.text()).error).toMatch(/Upstream GIS request failed/);
+    }
+  });
+
+  it("still refuses a host outside the allow-list", async () => {
+    const bad = ["svc", b64urlEncode("https://evil.example.com/x/MapServer"), "identify"];
+    const res = await handleGisCache({ client: fakeDrive(), segs: bad, search: JSEARCH, fetchImpl: okFetch(), folderIdFor });
+    expect(res.status).toBe(400);
+  });
+});
+
 describe("handleGisCache — meta (age badge)", () => {
   it("reports cached:false with no upstream call when nothing is stored", async () => {
     let fetched = false;

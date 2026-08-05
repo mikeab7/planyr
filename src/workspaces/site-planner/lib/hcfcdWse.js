@@ -46,10 +46,22 @@ const MAAP_CACHE_MAX = 300;
 const cacheKey = (lat, lng) => `${lat.toFixed(4)},${lng.toFixed(4)}`;
 export function clearMaapnextCache() { _maapCache.clear(); }
 
-/* The confirmed/provisional WSE ImageServer endpoints from the registry. `wseLayers.wse1pct`
- * and `.wse02` are null until the live directory probe fills them (V363). */
+/* The WSE ImageServer endpoints from the registry. NEW-1: these are now CONFIRMED (read from
+ * HCFCD's own ArcGIS-Online item catalog), so the old `provisional: null` state is gone. */
 export function maapnextEndpoints() {
   return gisSource("hcfcdMaapnext").wseLayers || { wse1pct: null, wse02: null };
+}
+
+/* NEW-1 — is this provider currently DOWN, and if so, what should the user be told?
+ *
+ * Returns null when it is live, else the registry's own outage record. The point is that a dead
+ * source must be a NAMED state, not an absence: "returns nothing" and "is not answering" look
+ * identical on a flood screen and mean completely different things, and this one is the owner's
+ * core county. The resolver still falls through to the next provider — this only makes sure the
+ * fall-through is SAID rather than silent. */
+export function maapnextOutage() {
+  const s = gisSource("hcfcdMaapnext");
+  return (s.availability && s.availability !== "live") ? { ...s.outage, availability: s.availability } : null;
 }
 
 /* Sample the HCFCD MAAPnext 1% + 0.2% WSE at ONE point (WGS84). Returns
@@ -57,10 +69,25 @@ export function maapnextEndpoints() {
  *   null (or no configured endpoints) ⇒ the provider is absent and the caller falls through.
  * THROWS on HTTP/service errors (→ the caller records failed and falls through). `endpoints`
  * injectable for tests; `fetchImpl`/`signal`/`timeoutMs`/`useCache` as ebfe.js. */
-export async function sampleMaapnextWse(lat, lng, { timeoutMs, fetchImpl, signal, useCache = true, endpoints } = {}) {
+export async function sampleMaapnextWse(lat, lng, { timeoutMs, fetchImpl, signal, useCache = true, endpoints, ignoreOutage = false } = {}) {
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  /* NEW-1 — short-circuit a DECLARED outage instead of spending the request. The host hangs for
+   * ~20 s before failing, and this sampler sits inside the drainage check's own race; paying that
+   * twice (1% and 0.2%) on every Harris site was a real, measurable stall for a call we already
+   * know cannot succeed. THROWING (rather than returning null) is deliberate: the caller's catch
+   * records a "failed" provider state, which is what puts the honest "not answering" line on the
+   * screen — a null would have read as "no coverage here", the exact lie this task is about.
+   * `ignoreOutage` lets a deliberate re-probe (or a test) go to the wire anyway. */
+  if (!ignoreOutage) {
+    const out = maapnextOutage();
+    if (out) {
+      const e = new Error(`HCFCD MAAPnext unavailable since ${out.since}: ${out.symptom}`);
+      e.outage = out;
+      throw e;
+    }
+  }
   const eps = endpoints || maapnextEndpoints();
-  if (!eps || (!eps.wse1pct && !eps.wse02)) return null; // provisional — endpoints not yet confirmed
+  if (!eps || (!eps.wse1pct && !eps.wse02)) return null; // no configured endpoints → provider absent
   const key = cacheKey(lat, lng);
   if (useCache && _maapCache.has(key)) {
     const hit = _maapCache.get(key);
