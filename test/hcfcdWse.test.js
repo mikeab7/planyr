@@ -11,6 +11,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { sampleMaapnextWse, maapnextEndpoints, maapnextOutage, clearMaapnextCache } from "../src/workspaces/site-planner/lib/hcfcdWse.js";
 import { gisSource, availabilityProblems, fixtureCount } from "../src/shared/gis/sources.js";
+import { fixturesFor } from "../src/shared/gis/sourceFixtures.js";
 
 const okJson = (body) => ({ ok: true, json: async () => body });
 const sampleBody = (v) => okJson({ samples: v == null ? [] : [{ value: String(v), resolution: 3 }] });
@@ -101,6 +102,6 @@ describe("the hcfcdMaapnext registry row", () => {
   it("carries coverage fixtures, so the weekly drift job can see it recover", () => {
     // This is the hole NEW-1 closed: a fixture-less row is invisible to the verifier, which is
     // exactly how this source rotted for weeks behind a green weekly check.
-    expect(fixtureCount(gisSource("hcfcdMaapnext"))).toBeGreaterThan(0);
+    expect(fixtureCount(null, fixturesFor("hcfcdMaapnext"))).toBeGreaterThan(0);
   });
 });

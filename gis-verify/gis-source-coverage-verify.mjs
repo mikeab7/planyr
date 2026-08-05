@@ -26,6 +26,9 @@
  * A sandbox run still verifies every ArcGIS-Online row, incl. all fourteen Colorado rows.
  */
 import { GIS_SOURCES, outFieldsFor, auditRegistry, availabilityOf, fixtureCount } from "../src/shared/gis/sources.js";
+// NEW-4 — the coverage fixtures live beside the registry but OFF the app bundle (they are
+// assertions, not endpoint facts, and sources.js is on the Site route's critical path).
+import { SOURCE_FIXTURES, SOURCE_DOCS, fixturesFor } from "../src/shared/gis/sourceFixtures.js";
 
 const TIMEOUT_MS = 20000;
 
@@ -74,7 +77,7 @@ async function checkRasterSource(key, s) {
   } else {
     notes.push(`${key}: reachable, ${meta.bandCount} band(s), ${meta.pixelType}.`);
   }
-  for (const fx of s.sampleFixtures || []) {
+  for (const fx of fixturesFor(key).sampleFixtures || []) {
     const geometry = JSON.stringify({ x: fx.point[0], y: fx.point[1], spatialReference: { wkid: 4326 } });
     // A fixture may name its own service (B807 multiplex rows: in-coverage probes span
     // watersheds, while s.serviceUrl is just the representative endpoint).
@@ -228,7 +231,7 @@ async function checkIdentifySource(key, s) {
     }
   }
   const attrs = s.pixelAttributes || ["Pixel Value", "Stretched.Pixel Value"];
-  for (const fx of s.sampleFixtures || []) {
+  for (const fx of fixturesFor(key).sampleFixtures || []) {
     try {
       const j = await getJson(identifyUrlFor(s, fx.point[0], fx.point[1]));
       const wanted = new Set(Object.values(s.identifyLayers || {}));
@@ -286,7 +289,7 @@ async function checkSource(key, s) {
   }
 
   // 2) coverage fixtures (the 14-vs-8,014 guard)
-  for (const fx of s.fixtures || []) {
+  for (const fx of fixturesFor(key).fixtures || []) {
     const ep = fx.layer != null ? eps.find((e) => e.id === fx.layer) || eps[0] : eps[0];
     const params = new URLSearchParams({
       f: "json", where: "1=1",
@@ -357,9 +360,9 @@ const allNotes = [];
 /* NEW-1 — the STRUCTURAL guard, run before a single request goes out. `auditRegistry` now fails
  * a row that carries no coverage fixture at all, which is the hole that hid both dead flood
  * layers: a fixture-less row has nothing for this script to assert, so it can never go red. */
-const audit = auditRegistry(GIS_SOURCES);
+const audit = auditRegistry(GIS_SOURCES, SOURCE_FIXTURES, SOURCE_DOCS);
 allProblems.push(...audit.problems.map((p) => `registry: ${p}`));
-const noFixture = Object.entries(GIS_SOURCES).filter(([, s]) => fixtureCount(s) === 0).map(([k]) => k);
+const noFixture = Object.keys(GIS_SOURCES).filter((k) => fixtureCount(null, fixturesFor(k)) === 0);
 allNotes.push(`registry: ${Object.keys(GIS_SOURCES).length} rows, ${noFixture.length} without a coverage fixture (must be 0).`);
 
 for (const [key, s] of Object.entries(GIS_SOURCES)) {

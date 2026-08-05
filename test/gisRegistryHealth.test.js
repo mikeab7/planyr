@@ -19,16 +19,18 @@ import {
   GIS_SOURCES, auditRegistry, availabilityProblems, availabilityOf, fixtureCount,
   statesFor, sourceCoversState, VALID_AVAILABILITY, SOURCE_STATE_SCOPE,
 } from "../src/shared/gis/sources.js";
+// NEW-4 — the fixtures live off the app bundle now (sourceFixtures.js header explains why).
+import { SOURCE_FIXTURES, SOURCE_DOCS, fixturesFor } from "../src/shared/gis/sourceFixtures.js";
 
 const rows = Object.entries(GIS_SOURCES);
 
 describe("the registry as shipped", () => {
   it("passes its own audit with zero problems", () => {
-    expect(auditRegistry().problems).toEqual([]);
+    expect(auditRegistry(GIS_SOURCES, SOURCE_FIXTURES, SOURCE_DOCS).problems).toEqual([]);
   });
 
   it("EVERY row carries at least one coverage fixture — no exceptions", () => {
-    const naked = rows.filter(([, s]) => fixtureCount(s) === 0).map(([k]) => k);
+    const naked = rows.filter(([k]) => fixtureCount(null, fixturesFor(k)) === 0).map(([k]) => k);
     expect(naked).toEqual([]);
   });
 
@@ -42,18 +44,18 @@ describe("the fixture-completeness guard actually fails", () => {
   // A guard that has never been shown to go red is a hope, not a guard.
   it("rejects a row with no fixtures at all", () => {
     const bad = { key: "x", provider: "P", serviceUrl: "https://example.com/x/MapServer", tier: "production", lastVerified: "2026-08-05", states: null, fixtures: [] };
-    const problems = auditRegistry({ x: bad }).problems;
+    const problems = auditRegistry({ x: bad }, { x: {} }).problems;
     expect(problems.some((p) => /NO coverage fixture/.test(p))).toBe(true);
   });
 
   it("accepts a raster row whose only fixtures are sampleFixtures", () => {
     const ok = { key: "x", provider: "P", serviceUrl: "https://example.com/x/ImageServer", tier: "production", lastVerified: "2026-08-05", states: null, kind: "raster", sampleFixtures: [{ label: "l", point: [-95, 29], expectValueRange: [0, 1] }] };
-    expect(auditRegistry({ x: ok }).problems).toEqual([]);
+    expect(auditRegistry({ x: ok }, { x: { sampleFixtures: [{ label: "l", point: [-95, 29], expectValueRange: [0, 1] }] } }).problems).toEqual([]);
   });
 
   it("rejects a row with no state scope", () => {
     const bad = { key: "zz_unknown", provider: "P", serviceUrl: "https://example.com/x/MapServer", tier: "production", lastVerified: "2026-08-05", fixtures: [{ label: "l", point: [-95, 29], expectMinCount: 1 }] };
-    expect(auditRegistry({ zz_unknown: bad }).problems.some((p) => /no state scope/.test(p))).toBe(true);
+    expect(auditRegistry({ zz_unknown: bad }, { zz_unknown: { fixtures: [{ label: "l", point: [-95, 29], expectMinCount: 1 }] } }).problems.some((p) => /no state scope/.test(p))).toBe(true);
   });
 });
 
@@ -144,8 +146,9 @@ describe("the Colorado family (NEW-2)", () => {
   });
 
   it("every Colorado row has fixtures at real Colorado points", () => {
-    for (const [k, s] of CO) {
-      const fx = [...(s.fixtures || []), ...(s.sampleFixtures || [])];
+    for (const [k] of CO) {
+      const f = fixturesFor(k);
+      const fx = [...(f.fixtures || []), ...(f.sampleFixtures || [])];
       expect(fx.length, `${k} fixtures`).toBeGreaterThan(0);
       for (const f of fx) {
         const [lng, lat] = f.point || [(f.bbox[0] + f.bbox[2]) / 2, (f.bbox[1] + f.bbox[3]) / 2];
@@ -174,7 +177,7 @@ describe("the Colorado family (NEW-2)", () => {
   it("MHFD fixtures sit in counties MHFD actually covers", () => {
     // Commerce City (Adams), Denver and Broomfield are member counties; the district boundary
     // fixture is the point-in-district test that selects the Colorado drainage regime.
-    const labels = GIS_SOURCES.mhfdBoundary.fixtures.map((f) => f.label.toLowerCase());
+    const labels = fixturesFor("mhfdBoundary").fixtures.map((f) => f.label.toLowerCase());
     expect(labels.some((l) => l.includes("commerce city"))).toBe(true);
     expect(labels.some((l) => l.includes("denver"))).toBe(true);
   });

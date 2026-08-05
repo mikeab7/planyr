@@ -12,6 +12,11 @@ import { boundTileCache, capTileCache, releaseLayer } from "./lib/tileLifecycle.
 import { BASEMAPS } from "./lib/basemaps.js";
 import { prefetchExtents, computeCoverage, boundsFromLeaflet, getNearbyRadiusMiles, subscribeRelevance } from "./lib/coverage.js";
 import LayerPanel from "./components/LayerPanel.jsx";
+import { siteState } from "./lib/siteRegion.js";
+// NEW-3 — the ONE map-overlay stacking model. Leaflet fixes its own control containers at
+// z-index 1000; these panels sat at 1000 too, so whether the zoom buttons and the scale bar
+// covered them came down to document order. An open panel now outranks map chrome outright.
+import { MAP_CHROME_Z, panelMaxHeight } from "./lib/mapChromeStack.js";
 import { useGroundElevation } from "./components/useGroundElevation.js";
 import CursorChip from "./components/CursorChip.jsx";
 import { contourHover } from "./lib/terrainLazy.js";
@@ -342,6 +347,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
   // from where the map is about to OPEN rather than from a hardcoded "harris", so a
   // Colorado-only account never flashes a Harris County panel before the first `moveend`.
   const [viewCounty, setViewCounty] = useState(() => { const c = landingView(sites).center; return countyForView(c[0], c[1]); });
+  const [viewState, setViewState] = useState(null); // NEW-2 — the state the map centre is in (see the LayerPanel prop below)
   const [confirmDel, setConfirmDel] = useState(null); // site pending delete confirmation
   // (B235) The chips are now POSITIVE filters: a status in this set is SHOWN; an
   // empty set shows everything. The filter drives BOTH the list and the map pins,
@@ -518,7 +524,14 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
     // now derivable to Denver — or to the whole country — that made the panel claim Harris
     // County over Colorado and over Kansas. `countyForView` answers the jurisdiction question
     // on its own terms: bbox hit, else the nearest county IN THE POINT'S OWN STATE.
-    const onMove = () => { const c = map.getCenter(); setViewCounty(countyForView(c.lat, c.lng)); };
+    const onMove = () => {
+      const c = map.getCenter();
+      setViewCounty(countyForView(c.lat, c.lng));
+      // NEW-2 — the state the view is in, resolved with NO network (siteRegion.js is envelope
+      // math). It has to hold when every GIS endpoint is down, which is exactly when a site
+      // falls through to a default — the same reason coloradoRegions.js is network-free.
+      setViewState(siteState({ lat: c.lat, lng: c.lng }));
+    };
     onMove();
     // NEW-1 — the moment the user drives the map themselves, the derived landing view is done
     // for the session. Deliberately keyed on real INPUT (a press, a wheel, a drag) rather than
@@ -1682,8 +1695,8 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
             // Phone: drop below the full-width search bar; a slim tap when closed, a wider
             // overlay (above the layers panel) when the user opens it.
             ...(narrow
-              ? { top: 60, left: 8, zIndex: 1060, width: sitesPanelOpen ? "min(320px, calc(100vw - 16px))" : 188 }
-              : { top: 10, left: 10, zIndex: 1000, width: 232 }) }}>
+              ? { top: 60, left: 8, zIndex: MAP_CHROME_Z.panel, width: sitesPanelOpen ? "min(320px, calc(100vw - 16px))" : 188 }
+              : { top: 10, left: 10, zIndex: MAP_CHROME_Z.panel, width: 232 }) }}>
             {/* collapsible header (B106): click to fold the panel to a slim bar; state persists per device */}
             <button onClick={() => { if (narrow && !sitesPanelOpen) setLayersPanelOpen(false); toggleSitesPanel(); }} title={sitesPanelOpen ? "Collapse the sites panel" : "Expand the sites panel"}
               style={{ display: "flex", alignItems: "center", gap: 6, width: "100%", background: "transparent", border: "none", cursor: "pointer", fontFamily: "inherit",
@@ -1754,8 +1767,8 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
             (default closed) so it stops covering the search bar / Select-parcels button. */}
         <div style={{ position: "absolute", background: "var(--surface-overlay)", border: `1px solid ${PAL.panelLine}`, borderRadius: 8, padding: narrow && !layersPanelOpen ? 0 : "6px 9px 8px", fontSize: 12, color: PAL.ink, boxShadow: "0 2px 8px rgba(0,0,0,0.12)",
           ...(narrow
-            ? { top: 60, right: 8, zIndex: 1055, width: layersPanelOpen ? "min(300px, calc(100vw - 16px))" : "auto" }
-            : { top: 10, right: 10, zIndex: 1000, width: 228 }) }}>
+            ? { top: 60, right: 8, zIndex: MAP_CHROME_Z.panel, width: layersPanelOpen ? "min(300px, calc(100vw - 16px))" : "auto" }
+            : { top: 10, right: 10, zIndex: MAP_CHROME_Z.panel, width: 268, maxHeight: panelMaxHeight({ topPx: 10, bottomPx: 76 }), display: "flex", flexDirection: "column" }) }}>
           {narrow && (
             <button onClick={() => setLayersPanelOpen((o) => { const n = !o; if (narrow && n) setSitesPanelOpen(false); return n; })} title={layersPanelOpen ? "Collapse layers" : "Imagery & layers"}
               style={{ display: "flex", alignItems: "center", gap: 6, width: "100%", background: "transparent", border: "none", cursor: "pointer", fontFamily: "inherit",
@@ -1776,7 +1789,10 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
           </div>
           <div style={{ borderTop: `1px solid ${PAL.panelLine}`, margin: "7px -9px 6px" }} />
           <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.07em", fontWeight: 700, marginBottom: 4 }}>Layers</div>
-          <div style={{ maxHeight: 260, overflowY: "auto", margin: "0 -2px", paddingRight: 2 }}>
+          {/* NEW-3 — the list takes whatever height the card has left instead of a flat 260px
+              (about four rows of a twenty-eight layer list). The card itself is bounded by
+              panelMaxHeight above, so this can never run off the bottom of the map. */}
+          <div style={{ flex: 1, minHeight: 140, overflowY: "auto", margin: "0 -2px", paddingRight: 2 }}>
             {/* No county is pre-picked on the map any more (B11). The jurisdiction
                 shown here follows the map's current area (B13) — `viewCounty` is
                 resolved from the view centre on every moveend — so the right utility
@@ -1785,7 +1801,12 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
             {/* B1091(×2) — on the finder the view county IS the best county fact available (no
                 site, no drainage identify), so it feeds the flood scoping too. In the
                 planner the two are deliberately different signals. */}
-            <LayerPanel overlays={overlays} setOverlays={setOverlays} county={viewCounty} siteCounty={viewCounty} layerStatus={layerStatus} coverage={coverage} surface="finder" />
+            <LayerPanel overlays={overlays} setOverlays={setOverlays} county={viewCounty} siteCounty={viewCounty} layerStatus={layerStatus} coverage={coverage} surface="finder"
+              /* NEW-2 — which STATE the map is looking at, so a Texas-only source is named as
+                 "not available in Colorado" rather than offered as a toggle that produces an
+                 empty map. The view centre is the best state fact the finder has (there is no
+                 site here), and an unresolved one hides nothing. */
+              siteState={viewState} />
           </div>
           </>)}
         </div>

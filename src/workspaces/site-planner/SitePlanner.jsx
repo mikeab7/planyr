@@ -73,6 +73,8 @@ import { resolveEstimatedWse } from "./lib/wseProviders.js";
 import { sanityCheckEstimate, sensitivityBand } from "./lib/estimateChallenge.js";
 import { wseSensitivity } from "./lib/wseSensitivity.js";
 import LayerPanel from "./components/LayerPanel.jsx";
+// NEW-3 — the ONE map-overlay stacking model (an open panel outranks map chrome).
+import { MAP_CHROME_Z } from "./lib/mapChromeStack.js";
 import { districtDrainageNote } from "./lib/floodGroup.js";
 import { useGroundElevation } from "./components/useGroundElevation.js";
 import CursorChip from "./components/CursorChip.jsx";
@@ -18906,7 +18908,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 dangerouslySetInnerHTML={{ __html: p.markup }} />
             );
             return (
-              <div data-export="skip" style={{ position: "absolute", left: 0, right: 0, bottom: 0, top: 0, pointerEvents: "none", zIndex: 7 }}>
+              <div data-export="skip" style={{ position: "absolute", left: 0, right: 0, bottom: 0, top: 0, pointerEvents: "none", zIndex: MAP_CHROME_Z.furniture }}>
                 <div style={{ position: "absolute", left: 14, bottom: 40 }}>{plate(furn.north)}</div>
                 <div style={{ position: "absolute", right: 14, bottom: 40 }}>{plate(furn.scaleBar)}</div>
               </div>
@@ -18941,20 +18943,32 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           {/* Top-right on-canvas controls — one anchored row: View (eye, B653) + Layers.
               The container owns the position so the two cards can never overlap; each
               card keeps its own open/closed width and scrolling. */}
-          <div data-export="skip" style={{ position: "absolute", top: 10, right: 10, zIndex: 6, display: "flex", gap: 8, alignItems: "flex-start" }}>
+          {/* NEW-3 — an OPEN PANEL outranks map chrome. At zIndex 6 this column tied with the
+              zoom stack (also 6, but later in the DOM) and lost outright to the canvas
+              furniture at 7 — so the scale bar and the zoom buttons painted over the Layers
+              panel, clipping the group header's "N ON" count and covering the opacity slider
+              and the "Show above plan" control. The band comes from mapChromeStack.js now, so
+              the View popover beside it is fixed by the same change rather than separately. */}
+          <div data-export="skip" style={{ position: "absolute", top: 10, right: 10, bottom: 10, zIndex: MAP_CHROME_Z.panel, display: "flex", gap: 8, alignItems: "flex-start", pointerEvents: "none" }}>
+          <div style={{ pointerEvents: "auto", display: "flex", gap: 8, alignItems: "flex-start", maxHeight: "100%", minHeight: 0 }}>
           <ViewMenu open={viewMenuOpen} onToggle={() => setViewMenuOpen((o) => !o)} settings={settings}
             setSnap={setSnap} patchSettings={(patch) => setSettings((s) => ({ ...s, ...patch }))} pal={PAL} />
           {/* Layers control — same shared layers as the map finder. ALWAYS rendered
               (B693): an unlocated plan gets the control DISABLED with the plain reason
               ("place it on the map first"), never a silently-missing / dead control.
               The aerial toggle itself moved into LayerPanel's Basemap group. */}
+          {/* NEW-3 — WIDER, and as TALL as the space allows. 226px forced every long label
+              onto two lines; the height was a flat 62vh, which on a laptop left about four rows
+              of a twenty-eight layer list visible. Both are now derived from the room that
+              actually exists, and the flex column is what lets the scroll box — not the card —
+              take the overflow. */}
           {(
-            <div data-wheelscroll="1" style={{ width: layersOpen ? 226 : "auto", background: "var(--surface-overlay)", border: `1px solid ${PAL.panelLine}`, borderRadius: 9, boxShadow: "0 2px 10px rgba(28,25,20,0.16)", overflow: "hidden" }}>
+            <div data-wheelscroll="1" style={{ width: layersOpen ? 268 : "auto", background: "var(--surface-overlay)", border: `1px solid ${PAL.panelLine}`, borderRadius: 9, boxShadow: "0 2px 10px rgba(28,25,20,0.16)", overflow: "hidden", display: "flex", flexDirection: "column", maxHeight: "100%", minHeight: 0 }}>
               <button onClick={() => setLayersOpen((o) => !o)} style={{ display: "flex", alignItems: "center", gap: 7, width: "100%", padding: "8px 11px", border: "none", background: "transparent", color: PAL.ink, cursor: "pointer", fontFamily: "inherit", fontSize: 12.5, fontWeight: 700 }}>
                 <span style={{ color: PAL.accent }}>❖</span> Layers <span style={{ flex: 1 }} /> <span style={{ color: PAL.muted, fontWeight: 500 }}>{layersOpen ? "▾" : "▸"}</span>
               </button>
               {layersOpen && (
-                <div style={{ padding: "2px 11px 10px", maxHeight: "62vh", overflowY: "auto" }}>
+                <div style={{ padding: "2px 11px 10px", overflowY: "auto", flex: 1, minHeight: 0 }}>
                   <LayerPanel overlays={overlays} setOverlays={setOverlays} county={restored?.county || county} layerStatus={layerStatus} coverage={coverage}
                     /* B1076/B1077 — the flood group scopes its district rows off the SAME
                        drainage context the Stormwater readout uses, so the panel and the
@@ -18965,6 +18979,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                        The flood group's district scoping reasons over the identify county
                        and falls back to THIS, never to the selector. */
                     siteCounty={restored?.county || null}
+                    /* NEW-2 — which STATE this site is in, resolved from its own origin with NO
+                       network (siteRegion.js is envelope math). A Texas-only source is then named
+                       as "not available in Colorado" instead of being offered as a toggle that
+                       silently produces an empty map — on a due-diligence screen those are
+                       different facts, and only one of them is a finding. */
+                    siteState={siteStateId}
                     basemap={{
                       value: origin ? basemapSrc : "off",
                       onChange: setBasemapSrc,
@@ -19040,6 +19060,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             </div>
           )}
           </div>
+          </div>
 
           {/* empty state */}
           {parcels.length === 0 && els.length === 0 && !underlay && (
@@ -19095,7 +19116,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             const badgeMaxW = calibPlace.maxWidth ?? undefined;
             return (
               <div onClick={warn ? () => { setShowAerial(true); setLeftPanel("references"); setOvCalib({ target: "underlay", kind: "trace", pts: [] }); } : undefined}
-                style={{ position: "absolute", left: calibPlace.left, bottom: calibPlace.bottom, maxWidth: badgeMaxW, display: "flex", alignItems: "center", gap: 8, background: cfg.bg, color: "#fff", padding: "5px 11px", borderRadius: 99, fontSize: 11.5, fontWeight: 600, boxShadow: "0 4px 14px rgba(0,0,0,0.22)", cursor: warn ? "pointer" : "default", zIndex: 6, overflow: "hidden" }}>
+                style={{ position: "absolute", left: calibPlace.left, bottom: calibPlace.bottom, maxWidth: badgeMaxW, display: "flex", alignItems: "center", gap: 8, background: cfg.bg, color: "#fff", padding: "5px 11px", borderRadius: 99, fontSize: 11.5, fontWeight: 600, boxShadow: "0 4px 14px rgba(0,0,0,0.22)", cursor: warn ? "pointer" : "default", zIndex: MAP_CHROME_Z.furniture, overflow: "hidden" }}>
                 <span style={{ width: 7, height: 7, borderRadius: 99, background: cfg.dot, flex: "none", animation: warn ? "pf-pulse 1.1s ease-in-out infinite" : "none" }} />
                 <span ref={calibBadgeRef} style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                   {cfg.text}{cfg.sub && <span style={{ fontWeight: 400, opacity: 0.85, fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS }}>· {cfg.sub}</span>}
@@ -19117,7 +19138,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             const zb = { width: 30, height: 30, display: "grid", placeItems: "center", border: `1px solid ${PAL.panelLine}`, background: "var(--surface-overlay)", color: PAL.ink, cursor: "pointer", fontSize: 16, fontWeight: 600 };
             const zoomBy = (f) => setView((v) => { const nv = zoomAround({ scale: v.ppf, tx: v.offX, ty: v.offY }, f, size.w / 2, size.h / 2, 0.02, 8); return { ppf: nv.scale, offX: nv.tx, offY: nv.ty }; });
             return (
-              <div data-export="skip" style={{ position: "absolute", right: 14, bottom: 100, display: "flex", flexDirection: "column", borderRadius: 9, overflow: "hidden", boxShadow: "0 4px 14px rgba(0,0,0,0.18)", zIndex: 6 }}>
+              <div data-export="skip" style={{ position: "absolute", right: 14, bottom: 100, display: "flex", flexDirection: "column", borderRadius: 9, overflow: "hidden", boxShadow: "0 4px 14px rgba(0,0,0,0.18)", zIndex: MAP_CHROME_Z.control }}>
                 <button className="gbtn" aria-label="Zoom in" title="Zoom in" style={{ ...zb, borderRadius: 0 }} onClick={() => zoomBy(1.25)}>＋</button>
                 <button className="gbtn" aria-label="Zoom out" title="Zoom out" style={{ ...zb, borderTop: "none", borderRadius: 0 }} onClick={() => zoomBy(1 / 1.25)}>－</button>
                 <button className="gbtn" aria-label="Zoom to fit" title="Zoom to fit" style={{ ...zb, borderTop: "none", borderRadius: 0, fontSize: 14 }} onClick={fit}>⤢</button>

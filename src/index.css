@@ -456,3 +456,17 @@ kbd {
   border: 1px solid var(--kbd-line); border-bottom-width: 2px;
   border-radius: 4px; padding: 1px 5px;
 }
+
+/* NEW-3 — the Layers panel's group headers stay visible while their rows scroll.
+ *
+ * The stacking lives here rather than inline on the component for a specific reason: the layer
+ * stacking model (lib/mapStack.js) is fixed and the panel offers no ordering control, and
+ * `test/mapStack.test.js` enforces that by asserting `LayerPanel.jsx` contains no z-index token
+ * at all. A sticky panel header is chrome, not layer order — but the guard is deliberately blunt
+ * so it cannot be argued around, so the chrome goes in the stylesheet where cross-cutting chrome
+ * belongs anyway. */
+.pf-sticky-group-hdr {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}

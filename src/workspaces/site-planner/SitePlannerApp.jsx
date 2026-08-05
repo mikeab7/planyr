@@ -16,7 +16,7 @@ import { idbPersist } from "./lib/localDb.js";
 const SiteReviewModal = lazy(() => import("./components/SiteReviewModal.jsx").then((m) => ({ default: m.SiteReviewModal })));
 import { nextConceptName } from "./lib/conceptName.js";
 import { reportClientEvent } from "../../shared/telemetry/clientErrors.js";
-import { initialBootResolved, mayReconcileUrl, pickResumeTarget } from "./lib/bootResume.js";
+import { initialBootResolved, mayReconcileUrl, pickResumeTarget, mayWriteRouteProject, routeProjectAvailability } from "./lib/bootResume.js";
 
 migrateOldAutosave(); // bring any legacy single-slot autosave into the site store
 migrateSiteGroups();  // give every legacy record a site (location) group
@@ -83,6 +83,14 @@ export default function App({
   // where a signed-in user's cloud sites aren't loaded yet). True from the start when there's
   // no Supabase to wait on (logged-out / unconfigured boots resolve synchronously).
   const [bootResolved, setBootResolved] = useState(() => initialBootResolved(supabaseConfigured()));
+  /* NEW-5 — the two pieces of the route<->project binding that must NOT live in render state.
+   * `userLeftProjectRef` records a DELIBERATE exit from a project (see leaveProject/goMap); it
+   * is a ref because the URL-sync effect reads it in the same tick the exit sets it, and a
+   * state write would not be visible until the next render — by which time the write it is
+   * meant to authorise has already been skipped. `routeMissing` is the honest answer when the
+   * URL names a project this device genuinely does not have. */
+  const userLeftProjectRef = useRef(false);
+  const [routeMissing, setRouteMissing] = useState(null);
   // Clear a dangling currentSite pointer (e.g. a never-persisted site from before
   // the fix) so it doesn't linger in storage. The finder fallback already handles
   // the routing; this just tidies the stale pointer. V13: gate on bootResolved — a
@@ -182,7 +190,7 @@ export default function App({
         // resume has no in-progress edits to lose.
         setLoadEpoch((n) => n + 1);
       }
-      else { setActiveSiteId(null); setMode("map"); }
+      else { setActiveSiteId(null); setMode("map"); }  // NEW-5: NOT a user exit — the URL writer keeps the route (mayWriteRouteProject)
       refreshSites();
     } else {
       // Deliberately DON'T wipe the per-user cloud cache here. supabase-js also emits
@@ -191,7 +199,7 @@ export default function App({
       // that user is active (logged out, the app reads the legacy store), so leaving it is
       // not a leak — and it's preserved if the "sign-out" was a momentary refresh blip.
       setCloudError("");
-      if (event === "SIGNED_OUT") { setActiveSiteId(null); setMode("map"); }
+      if (event === "SIGNED_OUT") { userLeftProjectRef.current = true; setActiveSiteId(null); setMode("map"); }
       refreshSites();
     }
     // B471 — log the auth transition so a "saving stopped after my session changed" report is
@@ -270,8 +278,7 @@ export default function App({
     setMigrationPendingSiteId(null);
     setMigrationSaveMsg("");
     discardLegacySite(signedInUid, siteId);
-    setActiveSiteId(null);
-    setMode("map");
+    leaveProject();
     refreshSites();
   };
 
@@ -285,6 +292,16 @@ export default function App({
     return () => window.removeEventListener("storage", onStorage);
   }, []);
   const goPlan = (id) => { setCurrentSiteId(id); setActiveSiteId(id); setMode("plan"); };
+  /* NEW-5 — the ONE way to leave a project, and the ONE place the intent is recorded.
+   *
+   * The URL writer refuses to clear a route-named project unless it is told the user meant to
+   * leave (see mayWriteRouteProject). That intent CANNOT be inferred from state: "the project's
+   * data hasn't loaded" and "the user closed the project" both look like `effGroup === null`,
+   * and treating the first as the second is precisely the bug. So every deliberate exit —
+   * the Map crumb, the planner's Back to map, a sign-out, a discarded staging site — goes
+   * through here, and nothing else may set `mode` to "map" while a project is routed. */
+  const leaveProject = () => { userLeftProjectRef.current = true; setActiveSiteId(null); setMode("map"); };
+  const goMap = () => { userLeftProjectRef.current = true; setMode("map"); };
 
   // NEW-F6 (LOUD-FAILURE): the fire-and-forget cloud mirrors below (new site, duplicate, rename,
   // status) used to `.catch(() => {})` — the op looked done while the cloud copy silently lagged.
@@ -346,17 +363,34 @@ export default function App({
   //    back into the project resumes the same plan. The first, route-less render is NOT
   //    treated as a Dashboard navigation, so a localStorage resume isn't undone.
   const prevPidRef = useRef(undefined);
+  /* NEW-5 — the route effect now also re-runs when the SITE LIST changes.
+   *
+   * Repro B was two faults compounding. `openProjectGroup` returned silently when a group had
+   * no plans on this device, so a hash edited to a not-yet-pulled project left the PREVIOUS
+   * project rendered under a URL claiming the new one — and because the effect only depended on
+   * `projectId`, the cloud pull landing a moment later never re-ran it, so it never self-
+   * corrected either. Depending on `sites` (bumped by every `refreshSites`) makes a late arrival
+   * complete the switch, and `routeProjectAvailability` replaces the silent return with a real
+   * three-state answer. `bootResolved` is in the deps for the same reason: it is what turns a
+   * "waiting" verdict into a "missing" one. */
   useEffect(() => {
     const prev = prevPidRef.current; prevPidRef.current = projectId;
     if (projectId) {
       const curGroup = groupForPlan(activeSiteId, mode);
-      if (projectId !== curGroup) openProjectGroup(projectId);
-      else if (mode !== "plan") setMode("plan");
+      if (projectId !== curGroup) {
+        const avail = routeProjectAvailability({ plansOfGroup: loadPlansOfGroup, groupId: projectId, bootResolved });
+        if (avail === "open") { setRouteMissing(null); openProjectGroup(projectId); }
+        // "waiting": hold the current view; the pull may still land it and this effect re-runs.
+        // "missing": say so out loud and drop to the map — never leave the OLD project on
+        // screen under a URL naming a different one (that is what made repro B invisible).
+        else if (avail === "missing") { setRouteMissing(projectId); setActiveSiteId(null); setMode("map"); }
+      } else { setRouteMissing(null); if (mode !== "plan") setMode("plan"); }
     } else if (prev !== undefined && prev !== null) {
+      setRouteMissing(null);
       setMode("map");
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectId]);
+  }, [projectId, sites, bootResolved]);
 
   // 2) Active project → URL. When the open project changes (open another, back to map,
   //    sign-in resume, new blank), reflect it in the hash so the URL stays shareable and
@@ -369,9 +403,25 @@ export default function App({
   //    the first auth + pull settles, then sync (de-duped if already correct).
   //    Keep-alive: a HIDDEN Site Planner must never write to the URL (the visible module
   //    owns it) — `isActive` in the deps makes re-activation reconcile immediately instead.
+  //    NEW-5: `mayReconcileUrl` gates on an EVENT having fired, and that is not enough — a
+  //    null-user INITIAL_SESSION releases it while the cloud sites are still absent, and the
+  //    null written there strips the deep link before the real SIGNED_IN can resume it. So the
+  //    writer is now honest about what it knows: it may CLEAR a route-named project only when
+  //    the user deliberately left it (`userLeftProjectRef`), never merely because nothing is
+  //    loaded. Opening or keeping a project still writes freely, so the URL stays shareable.
   const effGroup = groupForPlan(activeSiteId, mode);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { if (isActive && mayReconcileUrl(bootResolved)) onProjectChange?.(effGroup); }, [effGroup, bootResolved, isActive]);
+  useEffect(() => {
+    if (!isActive || !mayReconcileUrl(bootResolved)) return;
+    const allowed = mayWriteRouteProject({
+      routeProjectId: projectIdRef.current,
+      nextGroup: effGroup,
+      userLeft: userLeftProjectRef.current,
+    });
+    if (!allowed) return;
+    userLeftProjectRef.current = false; // the intent is spent once it has been written
+    onProjectChange?.(effGroup);
+  }, [effGroup, bootResolved, isActive]);
 
   // Keep-alive: returning to this tab re-reads the local site list (cheap, synchronous) so a
   // project created/renamed from another module while we were hidden shows without a reload.
@@ -432,7 +482,7 @@ export default function App({
     const res = await deleteSite(id);
     refreshSites();
     if (wasActive && next) goPlan(next.id);
-    else if (wasActive) { setActiveSiteId(null); setMode("map"); }
+    else if (wasActive) { leaveProject(); }
     await reportDeleteResult([res], "that plan");
   };
 
@@ -547,7 +597,7 @@ export default function App({
           // view, so no "current project" here — the Map crumb reads as current and the
           // project crumb invites a pick.
           homeLabel="Map"
-          onDashboard={() => setMode("map")}
+          onDashboard={goMap}
           currentProject={null}
           onSelectProject={openProjectGroup}
           onNewProject={newBlankSite}
@@ -573,6 +623,24 @@ export default function App({
             </button>
           }
         />
+        {/* NEW-5 — the URL named a project this device genuinely doesn't have (a bad id, a
+            project on another account, or one that's been deleted). The old code returned
+            silently and left the PREVIOUS project on screen under the new URL, so nothing on
+            the page agreed with anything else. Say it plainly instead — LOUD-FAILURE. */}
+        {routeMissing && (
+          <div role="status" data-testid="route-project-missing"
+            style={{ margin: "8px 12px 0", padding: "9px 13px", border: "1px solid var(--border-default)",
+              borderLeft: "3px solid var(--warn-text)", borderRadius: 8, background: "var(--surface-overlay)",
+              fontSize: 12.5, color: "var(--text-primary)", lineHeight: 1.45, display: "flex", gap: 10, alignItems: "center" }}>
+            <span style={{ flex: 1 }}>
+              That link points at a project this account doesn&rsquo;t have open here. Pick one below, or check the link.
+            </span>
+            <button onClick={() => { setRouteMissing(null); userLeftProjectRef.current = true; onProjectChange?.(null); }}
+              style={{ border: "none", background: "transparent", color: "var(--accent)", fontWeight: 700, fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}>
+              Dismiss
+            </button>
+          </div>
+        )}
         <div style={{ flex: 1, minHeight: 0 }}>
           <MapFinder
             visible={mode === "map"}
@@ -608,7 +676,7 @@ export default function App({
             layerStatus={layerStatus}
             setLayerStatus={setLayerStatus}
             sites={sites}
-            onBackToMap={() => setMode("map")}
+            onBackToMap={goMap}
             onOpenSite={openSite}
             onNewSite={newBlankSite}
             onNewPlanSameParcel={newPlanSameParcel}

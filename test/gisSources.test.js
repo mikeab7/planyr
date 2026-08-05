@@ -7,6 +7,9 @@ import {
   GIS_SOURCES, ANALYSIS_KEYS, JURISDICTION_KEYS, auditRegistry, tierProblems,
   looksNonProduction, outFieldsFor, gisSource,
 } from "../src/shared/gis/sources.js";
+// NEW-4 — the coverage fixtures moved off the app bundle into their own module
+// (src/shared/gis/sourceFixtures.js explains why); the audit takes them as a parameter.
+import { SOURCE_FIXTURES, SOURCE_DOCS, fixturesFor, docsFor } from "../src/shared/gis/sourceFixtures.js";
 import { auditSources, scanInlineUrls, scanCountyProvenance } from "../ui-audit/gis-source-audit.mjs";
 
 const audit = auditSources();
@@ -29,14 +32,14 @@ describe("county parcel provenance (NEW-5)", () => {
 
 describe("registry tier integrity", () => {
   it("the whole registry passes the shape + tier audit (no problems)", () => {
-    const { problems } = auditRegistry(GIS_SOURCES);
+    const { problems } = auditRegistry(GIS_SOURCES, SOURCE_FIXTURES, SOURCE_DOCS);
     expect(problems, JSON.stringify(problems, null, 2)).toEqual([]);
   });
 
   it("every source is production OR an acknowledged monitored-exception with a reason", () => {
     for (const [key, s] of Object.entries(GIS_SOURCES)) {
       expect(["production", "monitored-exception"]).toContain(s.tier);
-      if (s.tier === "monitored-exception") expect(s.tierReason, key).toBeTruthy();
+      if (s.tier === "monitored-exception") expect(docsFor(key).tierReason, key).toBeTruthy();
     }
   });
 
@@ -45,7 +48,7 @@ describe("registry tier integrity", () => {
     // wetlands: USFWS publishes polygon-query only on its Test folder. growthFaults: USGS SIM 2874
     // is download-only, so we depend on the UH GIS republication until we self-host the shapefile.
     expect(exceptions).toEqual(["wetlands", "growthFaults"]);
-    for (const key of exceptions) expect(gisSource(key).tierReason, key).toBeTruthy();
+    for (const key of exceptions) expect(docsFor(key).tierReason, key).toBeTruthy();
   });
 
   it("flags a non-production URL that isn't acknowledged (the NWI-Test / geogimstest class)", () => {
@@ -73,14 +76,14 @@ describe("authoritative sources (B368 — no more silent false-clean)", () => {
 
   it("carries the coverage fixtures that would have caught Chambers 14-vs-8,014", () => {
     const wells = gisSource("oilgas");
-    const chambers = wells.fixtures.find((f) => /Chambers/.test(f.label));
+    const chambers = fixturesFor("oilgas").fixtures.find((f) => /Chambers/.test(f.label));
     expect(chambers).toBeTruthy();
     expect(chambers.bbox).toEqual([-94.92, 29.40, -94.40, 29.95]);
     expect(chambers.expectMinCount).toBeGreaterThanOrEqual(1000); // a county-clipped source fails this
     // the Mont Belvieu (Grand Port) point — must find at least one well
-    expect(wells.fixtures.some((f) => f.point && f.expectMinCount >= 1)).toBe(true);
+    expect(fixturesFor("oilgas").fixtures.some((f) => f.point && f.expectMinCount >= 1)).toBe(true);
     // pipelines too
-    expect(gisSource("pipelines").fixtures.some((f) => /Chambers/.test(f.label) && f.expectMinCount >= 1000)).toBe(true);
+    expect(fixturesFor("pipelines").fixtures.some((f) => /Chambers/.test(f.label) && f.expectMinCount >= 1000)).toBe(true);
   });
 
   it("outFieldsFor derives the request fields; wetlands stays '*' (joined layers)", () => {
@@ -98,8 +101,8 @@ describe("authoritative sources (B368 — no more silent false-clean)", () => {
     expect(isd.fields.number).toBe("DISTRICT_N");
     expect(outFieldsFor(isd)).toBe("NAME,DISTRICT_N");
     // Coverage fixtures verified live 2026-07-11 — a county-clipped/wrong source fails these.
-    expect(isd.fixtures.some((f) => /Goose Creek/.test(f.label) && f.point && f.expectMinCount >= 1)).toBe(true);
-    expect(isd.fixtures.some((f) => /Houston ISD/.test(f.label))).toBe(true);
+    expect(fixturesFor("isd").fixtures.some((f) => /Goose Creek/.test(f.label) && f.point && f.expectMinCount >= 1)).toBe(true);
+    expect(fixturesFor("isd").fixtures.some((f) => /Houston ISD/.test(f.label))).toBe(true);
   });
 });
 

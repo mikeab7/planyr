@@ -19,6 +19,7 @@ import {
   clearEbfeCache, EBFE_URL, EBFE_LAYERS, EBFE_PIXEL_ATTRS,
 } from "../src/workspaces/site-planner/lib/ebfe.js";
 import { gisSource, fixtureCount } from "../src/shared/gis/sources.js";
+import { fixturesFor } from "../src/shared/gis/sourceFixtures.js";
 
 const okJson = (body) => ({ ok: true, json: async () => body });
 
@@ -179,13 +180,13 @@ describe("the femaEbfe registry row", () => {
   });
 
   it("carries REAL measured fixtures, not a provisional guess", () => {
-    const s = gisSource("femaEbfe");
-    expect(fixtureCount(s)).toBeGreaterThan(0);
+    const fx = fixturesFor("femaEbfe");
+    expect(fixtureCount(null, fx)).toBeGreaterThan(0);
     // No fixture may still be flagged provisional — that flag is what made the old fixture
     // unfalsifiable, and an unfalsifiable fixture is the same as no fixture at all.
-    for (const fx of s.sampleFixtures) expect(fx.provisional).toBeUndefined();
+    for (const f of fx.sampleFixtures) expect(f.provisional).toBeUndefined();
     // Both directions are pinned: somewhere it answers, and somewhere it correctly does not.
-    expect(s.sampleFixtures.some((f) => f.expectValueRange)).toBe(true);
-    expect(s.sampleFixtures.some((f) => f.expectNoData)).toBe(true);
+    expect(fx.sampleFixtures.some((f) => f.expectValueRange)).toBe(true);
+    expect(fx.sampleFixtures.some((f) => f.expectNoData)).toBe(true);
   });
 });
