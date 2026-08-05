@@ -8,7 +8,7 @@
  */
 import { describe, it, expect } from "vitest";
 import {
-  docToMarkdown, docToText, escapeText, lossyNote, notebookToMarkdown, safeFileName, NOTE_MD_HANDLED,
+  docToMarkdown, docToText, escapeText, lossyNote, pageToMarkdown, safeFileName, MD_MAX_HEADING, NOTE_MD_HANDLED,
 } from "../src/workspaces/notes/lib/notesMarkdown.js";
 
 const doc = (...content) => ({ type: "doc", content });
@@ -330,12 +330,19 @@ describe("the lossiness report", () => {
   });
 });
 
-describe("whole-notebook export", () => {
-  const notebook = {
-    id: "nb", title: "Goose Creek",
-    sections: [
-      { id: "s1", title: "Due diligence", pages: [{ id: "p1", title: "Site visit" }, { id: "p2", title: "Utilities" }] },
-      { id: "s2", title: "Zoning", pages: [{ id: "p3", title: "Setbacks" }] },
+/* ⛔ REWRITTEN FOR THE COLLAPSE (B1420). This block used to export a `notebook › section ›
+ * page` as headings 1 › 2 › 3. There is no notebook and no section: a page holds pages, at
+ * any depth, and the export carries that as heading DEPTH. The cases are replaced, not left
+ * passing against a shape nothing produces. */
+describe("a page and everything under it → Markdown, nesting as heading depth", () => {
+  const branch = {
+    id: "root", title: "Goose Creek",
+    pages: [
+      { id: "s1", title: "Due diligence", pages: [
+        { id: "p1", title: "Site visit", pages: [] },
+        { id: "p2", title: "Utilities", pages: [] },
+      ] },
+      { id: "s2", title: "Zoning", pages: [{ id: "p3", title: "Setbacks", pages: [] }] },
     ],
   };
   const bodies = {
@@ -344,8 +351,8 @@ describe("whole-notebook export", () => {
     // p3 deliberately absent — an unwritten page must not break the export.
   };
 
-  it("nests notebook › section › page as heading levels 1 › 2 › 3", () => {
-    const { markdown } = notebookToMarkdown(notebook, bodies);
+  it("nests page › subpage › subpage as heading levels 1 › 2 › 3", () => {
+    const { markdown } = pageToMarkdown(branch, bodies);
     expect(markdown).toContain("# Goose Creek");
     expect(markdown).toContain("## Due diligence");
     expect(markdown).toContain("### Site visit");
@@ -354,25 +361,44 @@ describe("whole-notebook export", () => {
   });
 
   it("keeps every page in reading order", () => {
-    const { markdown } = notebookToMarkdown(notebook, bodies);
+    const { markdown } = pageToMarkdown(branch, bodies);
     const order = ["# Goose Creek", "## Due diligence", "### Site visit", "### Utilities", "## Zoning", "### Setbacks"];
     let at = -1;
     for (const s of order) { const i = markdown.indexOf(s); expect(i, s).toBeGreaterThan(at); at = i; }
   });
 
   it("a page with no stored body exports as its heading, never as a thrown error", () => {
-    expect(() => notebookToMarkdown(notebook, bodies)).not.toThrow();
-    expect(notebookToMarkdown(notebook, bodies).markdown).toContain("### Setbacks");
+    expect(() => pageToMarkdown(branch, bodies)).not.toThrow();
+    expect(pageToMarkdown(branch, bodies).markdown).toContain("### Setbacks");
   });
 
-  it("reports lossiness across the whole notebook, not just the first page", () => {
-    const { lossy: l } = notebookToMarkdown(notebook, { ...bodies, p3: doc(p(t("x", [{ type: "underline" }]))) });
+  it("reports lossiness across the WHOLE branch, not just the first page", () => {
+    const { lossy: l } = pageToMarkdown(branch, { ...bodies, p3: doc(p(t("x", [{ type: "underline" }]))) });
     expect(l).toContain("underlined text");
   });
 
-  it("survives an empty or malformed notebook", () => {
-    expect(() => notebookToMarkdown(null, {})).not.toThrow();
-    expect(notebookToMarkdown({ title: "Bare" }, {}).markdown).toContain("# Bare");
+  it("survives an empty or malformed page", () => {
+    expect(() => pageToMarkdown(null, {})).not.toThrow();
+    expect(pageToMarkdown({ title: "Bare" }, {}).markdown).toContain("# Bare");
+  });
+
+  it("⛔ LOSSLESS FOR CONTENT past Markdown's six heading levels — the page is still there", () => {
+    // Seven deep. Markdown runs out at six; the note tree does not.
+    let node = { id: "d7", title: "Seventh", pages: [] };
+    for (let i = 6; i >= 1; i--) node = { id: `d${i}`, title: `Level ${i}`, pages: [node] };
+    const { markdown, lossy: l } = pageToMarkdown(node, { d7: doc(p(t("Still readable."))) });
+    expect(markdown).toContain("###### Seventh");                 // clamped, never dropped
+    expect(markdown).toContain("Still readable.");                // the BODY is intact
+    expect(markdown).toContain("Level 1 › Level 2");              // …and where it sits is stated
+    expect(l).toContain("how deeply a subpage is nested");        // …and named as the one gap
+    expect(MD_MAX_HEADING).toBe(6);
+  });
+
+  it("a single page with no children exports as one heading and its body", () => {
+    const { markdown } = pageToMarkdown({ id: "one", title: "Alone", pages: [] }, { one: doc(p(t("Body."))) });
+    expect(markdown).toContain("# Alone");
+    expect(markdown).toContain("Body.");
+    expect(markdown).not.toContain("##");
   });
 });
 

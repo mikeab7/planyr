@@ -26,10 +26,10 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } fro
 import AppHeader from "../../shared/ui/AppHeader.jsx";
 import NotesTree from "./components/NotesTree.jsx";
 import {
-  addNotebook, addPage, addSection, allPageIds, deleteNode, emptyTree, expiredTrashIds,
-  findPage, firstPageId, migrate, moveNotebook, movePage, moveSection, notebooksInScope,
-  purgeTrashEntry, renameNode, restoreNode, setNotebookProject, touchPage, trashEntries,
-  trashPageIds, SCOPE_ALL, SCOPE_PROJECT,
+  addPage, allPageIds, ancestorIds, deleteNode, emptyTree, expiredTrashIds, findPage,
+  firstPageId, migrate, movePage, pagesInScope, purgeTrashEntry, renameNode, restoreNode,
+  setPageProject, subtreePageIds, touchPage, trashEntries, trashPageIds,
+  SCOPE_ALL, SCOPE_PROJECT,
 } from "./lib/notesModel.js";
 import { listProjects, warmProjects, onProjectsChanged } from "../../shared/projects/projects.js";
 import {
@@ -39,7 +39,7 @@ import {
   setNotesScope, startNotesSync, stopNotesSync, sweepImagesOfMissingPages, sweepOrphans,
   writePage, writeTree,
 } from "./lib/notesStore.js";
-import { imageIdsInDocs, notebookToMarkdown, safeFileName } from "./lib/notesMarkdown.js";
+import { imageIdsInDocs, pageToMarkdown, safeFileName } from "./lib/notesMarkdown.js";
 
 const NoteEditor = lazy(() => import("./components/NoteEditor.jsx"));
 
@@ -206,8 +206,8 @@ function EmptyState({ onCreate }) {
       <div style={{ maxWidth: 380, textAlign: "center" }}>
         <h2 style={{ margin: "0 0 8px", fontSize: 19, fontWeight: 700, color: "var(--text-primary)" }}>No page open</h2>
         <p style={{ margin: "0 0 16px", fontSize: 13.5, lineHeight: 1.6, color: "var(--text-secondary)" }}>
-          Make a notebook and start typing. It arrives with a section and a page already in it,
-          so there is nothing to set up first.
+          Make a page and start typing. Anything you write can hold pages of its own, so there
+          is nothing to set up first.
         </p>
         <button
           type="button"
@@ -218,7 +218,7 @@ function EmptyState({ onCreate }) {
             border: "1px solid var(--accent-notes)", background: "var(--accent-notes)",
             color: "var(--on-accent-notes)", font: "inherit", fontSize: 13.5, fontWeight: 650, cursor: "pointer",
           }}
-        >＋ New notebook</button>
+        >＋ New page</button>
       </div>
     </div>
   );
@@ -262,12 +262,12 @@ export default function Notes({
   const [deleted, setDeleted] = useState(null);
   const [storageLine, setStorageLine] = useState(() => notesStorageLine());
   const [conflictIds, setConflictIds] = useState([]);
-  /* WHICH NOTEBOOKS THE RAIL IS SHOWING (B1374). Defaults to the selected project — which
-   * is the whole point of "when I'm in Grand Port and I click Notes, take me to Grand Port's
-   * notes" — and switches to ALL in one click, from inside the project, so nothing can
-   * become unreachable. Deliberately NOT persisted: the honest default every time you open a
-   * project is that project, and a sticky ALL would quietly undo the feature. */
-  const [scope, setScope] = useState(SCOPE_PROJECT);
+  /* ⛔ THE IN-RAIL SCOPE SWITCH IS GONE (B1420), and B1374's guarantee is UNCHANGED.
+   * "Show me everything" is now the DASHBOARD — which shows every project's pages grouped by
+   * project — and its crumb is at the top of every screen, so it is still exactly one click
+   * from inside a project. What went is a whole segmented control that duplicated a control
+   * already on screen (PANEL-BREVITY). The empty-rail state still offers the same click
+   * explicitly, in the one place someone could conclude their notes were gone. */
   const treeTimer = useRef(0);
   const treeRef = useRef(null);   // the latest tree, captured at edit time (see the flush note below)
   const undoTimer = useRef(0);
@@ -276,7 +276,18 @@ export default function Notes({
    * accounts on one machine never read each other's notes. A scope change re-reads. */
   useEffect(() => {
     setNotesScope(userId || null);
-    let loaded = migrate(readTreeRaw());
+    const raw = readTreeRaw();
+    let loaded = migrate(raw);
+
+    /* ⛔ THE COLLAPSE IS WRITTEN BACK ONCE, ON THE FIRST LOAD THAT SEES THE OLD SHAPE (B1420).
+     * `migrate` converts on READ, which is what makes opening safe — but a conversion that is
+     * never persisted means the stored blob stays four-level forever, every device keeps
+     * re-converting it, and (the part that matters) the SHAPE never rides the cloud tree blob
+     * to the other machine. One write settles it. It is safe to do here because the migration
+     * is a fixed point: a tree already in the new shape takes this branch never, and running
+     * it twice is a no-op either way (test/notesModel.test.js asserts both). */
+    const wasLegacy = !!raw && typeof raw === "object" && Array.isArray(raw.notebooks) && !Array.isArray(raw.pages);
+    if (wasLegacy) writeTree(loaded);
 
     /* THE 30-DAY SWEEP, run here on the load and nowhere else. Deliberately lazy (like the
      * Site Planner's own bin) rather than on a timer: nothing needs to happen while the tab
@@ -400,11 +411,6 @@ export default function Notes({
     return () => { window.removeEventListener("beforeunload", flushTree); flushTree(); };
   }, [flushTree]);
 
-  /* Entering a project lands you in THAT project's notebooks (B1374). Changing project
-   * resets the scope — the sticky alternative would mean opening Grand Port and still
-   * looking at everything, which is the behaviour this item exists to end. */
-  useEffect(() => { setScope(SCOPE_PROJECT); }, [projectId]);
-
   /* THE PROJECT LIST — and, just as important, WHETHER IT LOADED (B482 ×2, NEW-1).
    *
    * Read from the SAME per-user, RLS-scoped store the header breadcrumb reads (no parallel
@@ -466,65 +472,53 @@ export default function Notes({
    * — with a page open from a notebook the rail can no longer see would otherwise leave the
    * rail and the document disagreeing about what is open. */
   useEffect(() => {
-    const visible = notebooksInScope(tree, projectId, scope);
-    const ok = activePageId && visible.some((nb) => (nb.sections || []).some((s) => (s.pages || []).some((p) => p.id === activePageId)));
-    if (!ok) {
-      const first = visible[0]?.sections?.[0]?.pages?.[0]?.id || null;
-      setActivePageId(first);
-    }
-  }, [projectId, scope, tree, activePageId]);
+    const roots = pagesInScope(tree, projectId, projectId == null ? SCOPE_ALL : SCOPE_PROJECT);
+    const visible = new Set(roots.flatMap((r) => subtreePageIds(r)));
+    if (!activePageId || !visible.has(activePageId)) setActivePageId(roots[0]?.id || null);
+  }, [projectId, tree, activePageId]);
 
   const active = useMemo(() => (activePageId ? findPage(tree, activePageId) : null), [tree, activePageId]);
   const activePage = active?.page || null;
+  /* The open page's ancestors, root first — the "where am I?" the editor shows and the print
+   * sheet carries. Derived from the tree, so a re-parent updates it with no second copy. */
+  const activeTrail = useMemo(
+    () => (activePageId ? ancestorIds(tree, activePageId).map((id) => findPage(tree, id)?.page?.title).filter(Boolean) : []),
+    [tree, activePageId],
+  );
 
-  /* The page-id set of the notebook the open page lives in — what a pasted picture is
-   * charged against. Recomputed from the tree, never captured, so adding a page beside
-   * this one is immediately reflected in the ceiling. */
-  const notebookPageIds = useMemo(() => {
-    const nb = active?.notebook;
-    if (!nb) return [];
-    return (nb.sections || []).flatMap((s) => (s.pages || []).map((p) => p.id));
-  }, [active]);
+  /* The page-id set the open page's pictures are CHARGED AGAINST — its whole top-level
+   * branch, which is what a notebook used to be. Recomputed from the tree, never captured,
+   * so adding a subpage beside this one is immediately reflected in the ceiling. */
+  const notebookPageIds = useMemo(() => (active?.root ? subtreePageIds(active.root) : []), [active]);
 
   const results = useMemo(
-    () => (query.trim() ? searchNotes(tree, query, { projectId, scope }) : []),
-    [query, tree, projectId, scope],
+    () => (query.trim() ? searchNotes(tree, query, { projectId, scope: projectId == null ? SCOPE_ALL : SCOPE_PROJECT }) : []),
+    [query, tree, projectId],
   );
 
   /* ---- tree actions ---- */
 
-  /* A notebook created from inside a project BELONGS TO IT, with no extra step; created from
-   * the dashboard it is loose. The binding then shows on its row and is changeable from the
-   * row's menu — which is the half that did not exist before B1374. */
-  const handleAddNotebook = useCallback(() => {
-    const r = addNotebook(tree, { projectId: projectId || null });
+  /* ⛔ A PAGE MADE INSIDE A PROJECT IS FILED THERE, WITH NO EXTRA STEP (B1374, kept through
+   * B1420's collapse). Made from the Dashboard it belongs to no project, which is a real
+   * place with the same shape — never a holding pen. */
+  const handleAddPage = useCallback(() => {
+    const r = addPage(tree, { projectId: projectId || null });
     persistTree(r.tree);
     setActivePageId(r.pageId);
     setQuery("");
-    // A new notebook must never be born invisible: creating one while looking at ALL, or
-    // while a project is selected, has to leave it on screen in the scope you are in.
-    setScope((s) => (projectId ? s : SCOPE_PROJECT));
   }, [tree, projectId, persistTree]);
 
-  /** Re-bind a notebook to a project, or set it loose (B1374). */
-  const handleBindNotebook = useCallback((notebookId, pid) => {
-    persistTree(setNotebookProject(tree, notebookId, pid));
-    /* Binding a notebook AWAY from the project you are looking at would make it vanish from
-     * under the pointer. Widen the scope instead, so the notebook you just moved is still on
-     * screen and the move is visibly a move rather than a disappearance. */
-    if (projectId && pid != null && pid !== projectId) setScope(SCOPE_ALL);
-  }, [tree, projectId, persistTree]);
-
-  const handleAddSection = useCallback((notebookId) => {
-    const r = addSection(tree, notebookId);
+  /** A page UNDER another page — the whole point of the collapse, and reachable by direct
+   *  action (the row's menu) rather than by a mode. */
+  const handleAddSubpage = useCallback((parentId) => {
+    const r = addPage(tree, { parentId });
     persistTree(r.tree);
     if (r.pageId) setActivePageId(r.pageId);
   }, [tree, persistTree]);
 
-  const handleAddPage = useCallback((sectionId) => {
-    const r = addPage(tree, sectionId);
-    persistTree(r.tree);
-    if (r.pageId) setActivePageId(r.pageId);
+  /** Re-file a TOP-LEVEL page into a project, or out of every project (B1374, B1420). */
+  const handleSetPageProject = useCallback((pageId, pid) => {
+    persistTree(setPageProject(tree, pageId, pid));
   }, [tree, persistTree]);
 
   const handleRename = useCallback((id, title) => persistTree(renameNode(tree, id, title)), [tree, persistTree]);
@@ -576,11 +570,11 @@ export default function Notes({
     purgePages(ids);
   }, [tree, persistTree]);
 
-  /* ---- moves (B1316 — these model functions had no caller at all before this) ---- */
-
-  const handleMovePage = useCallback((pageId, toSectionId, index) => persistTree(movePage(tree, pageId, toSectionId, index)), [tree, persistTree]);
-  const handleMoveSection = useCallback((sectionId, toNotebookId, index) => persistTree(moveSection(tree, sectionId, toNotebookId, index)), [tree, persistTree]);
-  const handleMoveNotebook = useCallback((notebookId, index) => persistTree(moveNotebook(tree, notebookId, index)), [tree, persistTree]);
+  /* ---- moves (B1316 — the model op had no caller at all before that item) ----
+   *
+   * ONE op now, for every move there is: reorder among siblings, nest under another page,
+   * lift back to the top level. Three ops became one when the three levels became one. */
+  const handleMovePage = useCallback((pageId, toParentId, index, opts) => persistTree(movePage(tree, pageId, toParentId, index, opts)), [tree, persistTree]);
 
   const handleTitleChange = useCallback((title) => {
     if (activePageId) handleRename(activePageId, title);
@@ -613,7 +607,11 @@ export default function Notes({
       const hit = findPage(base, pageId);
       const localDoc = readPage(pageId);
       if (hit && localDoc != null) {
-        const r = addPage(base, hit.section.id, { title: `${hit.page.title} ${notesConflictLine().parkedSuffix}` });
+        /* Parked as a SIBLING of the page being replaced — under its parent, or at the top
+         * level of its project when it is a top-level page itself. */
+        const r = addPage(base, hit.parent
+          ? { parentId: hit.parent.id, title: `${hit.page.title} ${notesConflictLine().parkedSuffix}` }
+          : { projectId: hit.root.projectId ?? null, title: `${hit.page.title} ${notesConflictLine().parkedSuffix}` });
         if (r.pageId && writePage(r.pageId, localDoc)) persistTree(r.tree);
       }
     }
@@ -630,38 +628,42 @@ export default function Notes({
       : null);
   }, []);
 
-  const handleExportNotebook = useCallback(async (notebookId) => {
-    const nb = (tree.notebooks || []).find((n) => n.id === notebookId);
-    if (!nb) return;
+  /** Export a page AND EVERYTHING UNDER IT. Nesting rides out as heading depth — see
+   *  `pageToMarkdown`, which is where the one degradation (past six levels) is named. */
+  const handleExportPageTree = useCallback(async (pageId) => {
+    const hit = findPage(tree, pageId);
+    if (!hit) return;
     const bodies = {};
-    for (const sec of nb.sections || []) for (const pg of sec.pages || []) bodies[pg.id] = readPage(pg.id);
-    // Pictures are inlined as data URLs so an exported notebook is one self-contained file.
+    for (const id of subtreePageIds(hit.page)) bodies[id] = readPage(id);
+    // Pictures are inlined as data URLs so an exported branch is one self-contained file.
     const images = await readNoteImages(imageIdsInDocs(bodies));
-    const { markdown, lossy } = notebookToMarkdown(nb, bodies, { images });
-    handleExportPage({ markdown, lossy, filename: safeFileName(nb.title) });
+    const { markdown, lossy } = pageToMarkdown(hit.page, bodies, { images });
+    handleExportPage({ markdown, lossy, filename: safeFileName(hit.page.title) });
   }, [tree, handleExportPage]);
 
   /* The print serializer imports the schema, and the schema pulls the editor engine — so it
    * is reached from this file by a DYNAMIC import only. A static one here would put ~460 KB
    * back on the route the lazy boundary exists to keep clear. */
-  const handlePrintNotebook = useCallback(async (notebookId) => {
-    const nb = (tree.notebooks || []).find((n) => n.id === notebookId);
-    if (!nb) return;
+  const handlePrintPageTree = useCallback(async (pageId) => {
+    const hit = findPage(tree, pageId);
+    if (!hit) return;
     const bodies = {};
     const pages = [];
-    for (const sec of nb.sections || []) {
-      for (const pg of sec.pages || []) {
-        bodies[pg.id] = readPage(pg.id);
-        pages.push({ id: pg.id, title: pg.title, updatedAt: pg.updatedAt, sectionTitle: sec.title });
-      }
-    }
+    /* Reading order, with each page's TRAIL — which is what paper uses in place of the
+     * section heading it no longer has (PDF-PARITY; see buildPrintDocument). */
+    const walk = (node, trail) => {
+      bodies[node.id] = readPage(node.id);
+      pages.push({ id: node.id, title: node.title, updatedAt: node.updatedAt, trail });
+      for (const k of node.pages || []) walk(k, [...trail, node.title]);
+    };
+    walk(hit.page, []);
     const images = await readNoteImages(imageIdsInDocs(bodies));
     const [{ docToHtml }, { buildPrintDocument, printHtmlDocument }] = await Promise.all([
       import("./lib/notesDocHtml.js"),
       import("./lib/notesPrint.js"),
     ]);
     const html = buildPrintDocument({
-      title: nb.title || "Notebook",
+      title: hit.page.title || "Note",
       meta: `${pages.length === 1 ? "1 page" : `${pages.length} pages`} · Planyr Notes`,
       pages: pages.map((p) => ({ ...p, html: docToHtml(bodies[p.id], images) })),
     });
@@ -708,9 +710,6 @@ export default function Notes({
           projectsError={projectList.error}
           onRetryProjects={retryProjects}
           projectName={projectName}
-          scope={scope}
-          onScope={setScope}
-          onBindNotebook={handleBindNotebook}
           activePageId={activePageId}
           query={query}
           results={results}
@@ -719,16 +718,19 @@ export default function Notes({
           /* Opening a SEARCH HIT carries the phrase into the page, so the editor can mark
              where it actually is — the thing search used to abandon you without. */
           onSelectHit={(id) => { setActivePageId(id); setHighlight(query); setQuery(""); }}
-          onAddNotebook={handleAddNotebook}
-          onAddSection={handleAddSection}
           onAddPage={handleAddPage}
+          onAddSubpage={handleAddSubpage}
+          onSetPageProject={handleSetPageProject}
           onRename={handleRename}
           onDelete={handleDelete}
-          onExportNotebook={handleExportNotebook}
-          onPrintNotebook={handlePrintNotebook}
+          onExportPage={handleExportPageTree}
+          onPrintPage={handlePrintPageTree}
           onMovePage={handleMovePage}
-          onMoveSection={handleMoveSection}
-          onMoveNotebook={handleMoveNotebook}
+          /* ⛔ "See all your notes" STAYS IN NOTES (B1420). The shell's own Dashboard action
+             switches to the Site workspace — using it here would answer "where are my other
+             notes?" by leaving the notes module entirely, which is worse than the empty rail
+             it is trying to explain. This drops the project and keeps the route's module. */
+          onAllNotes={() => onNavigate?.({ projectId: null, cross: false })}
           onRestore={handleRestore}
           onPurge={handlePurge}
           onPurgeAll={handlePurgeAll}
@@ -744,8 +746,10 @@ export default function Notes({
                 pageId={activePage.id}
                 title={activePage.title}
                 updatedAt={activePage.updatedAt}
-                notebookTitle={active?.notebook?.title}
-                sectionTitle={active?.section?.title}
+                /* WHERE THIS PAGE SITS — its ancestors' titles, which is what the editor
+                   puts on the printed sheet in place of the section heading it no longer
+                   has (PDF-PARITY). */
+                trail={activeTrail}
                 notebookPageIds={notebookPageIds}
                 searchTerm={highlight}
                 onClearSearch={() => setHighlight("")}
@@ -759,7 +763,7 @@ export default function Notes({
               />
             </Suspense>
           ) : (
-            <EmptyState onCreate={handleAddNotebook} />
+            <EmptyState onCreate={handleAddPage} />
           )}
 
           <div

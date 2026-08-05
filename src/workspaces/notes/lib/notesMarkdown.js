@@ -468,20 +468,39 @@ export function docToMarkdown(doc, { title = "", images = null } = {}) {
   return { markdown: `${head}${body}`.replace(/\n{3,}/g, "\n\n").trimEnd() + "\n", lossy: [...lossy] };
 }
 
-/** A whole notebook → one Markdown document, sections as `##`, pages as `###`.
- *  `bodies` maps pageId → document model (a missing body exports as an empty page,
- *  never as a thrown error mid-export). */
-export function notebookToMarkdown(notebook, bodies = {}, { images = null } = {}) {
+/** A page and everything under it → one Markdown document (B1420).
+ *
+ *  ⛔ NESTING IS HEADING DEPTH, AND IT IS LOSSLESS FOR CONTENT. A top-level page is `#`, its
+ *  subpages `##`, theirs `###`, and so on. Markdown runs out of heading levels at six, and a
+ *  note tree does not — so past that depth the heading stays `######` and the page's place is
+ *  carried by a **trail line** (`Grand Port › Entitlements › Bonding`) instead of being
+ *  silently flattened. Depth is the ONLY thing that can degrade here; not one page, title or
+ *  byte of body is ever dropped, which is what "losslessly for content" has to mean.
+ *
+ *  `bodies` maps pageId → document model (a missing body exports as an empty page, never as
+ *  a thrown error mid-export). Named `pageToMarkdown`; the old `notebookToMarkdown` is gone
+ *  along with the notebook it took. */
+export const MD_MAX_HEADING = 6;
+
+export function pageToMarkdown(page, bodies = {}, { images = null } = {}) {
   const lossy = new Set();
-  const parts = [`# ${escapeText(notebook?.title || "Notebook")}`];
-  for (const sec of notebook?.sections || []) {
-    parts.push(`## ${escapeText(sec.title || "Section")}`);
-    for (const pg of sec.pages || []) {
-      parts.push(`### ${escapeText(pg.title || "Page")}`);
-      const body = blocks(bodies[pg.id]?.content, lossy, 0, images);
-      if (body) parts.push(body);
+  const parts = [];
+  const walk = (node, depth, trail) => {
+    const level = Math.min(depth + 1, MD_MAX_HEADING);
+    parts.push(`${"#".repeat(level)} ${escapeText(node?.title || "Page")}`);
+    if (depth + 1 > MD_MAX_HEADING) {
+      // Deeper than Markdown can spell. Say where it sits rather than let it read as a
+      // sibling of the page six levels up.
+      parts.push(`*${escapeText([...trail, node?.title || "Page"].join(" › "))}*`);
+      lossy.add("how deeply a subpage is nested");
     }
-  }
+    const body = blocks(bodies[node?.id]?.content, lossy, 0, images);
+    if (body) parts.push(body);
+    for (const kid of Array.isArray(node?.pages) ? node.pages : []) {
+      walk(kid, depth + 1, [...trail, node?.title || "Page"]);
+    }
+  };
+  walk(page, 0, []);
   return { markdown: `${parts.join("\n\n")}\n`.replace(/\n{3,}/g, "\n\n"), lossy: [...lossy] };
 }
 

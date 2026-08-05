@@ -1,26 +1,49 @@
-/* notesModel — the PURE notebook › section › page tree, and every structural op on it.
+/* notesModel — the PURE page tree, and every structural op on it.
  *
- * WHAT LIVES HERE AND WHAT DELIBERATELY DOES NOT. This module owns the SHAPE of the
- * notes hierarchy and nothing else: no storage, no React, no editor. In particular the
- * tree does **not** hold page BODIES — a page node carries only `{ id, title }`. That
- * split is the load-bearing decision behind the whole module: the tree is one storage
- * key, and each page body is its own key (see lib/notesStore.js). One blob holding
- * every note would mean every keystroke's autosave rewrites every note ever written,
- * which gets slower for the rest of the notebook's life.
+ * ⛔ THE SHAPE, AND THE ONE SENTENCE THAT DEFINES IT (B1420, 2026-08-04, owner's decision,
+ * verbatim: *"so i dont need a project to have multiple notebooks i dont think, like grand
+ * port being its own notebook is great as long as i can have subpages there."*)
  *
- * PROJECT BINDING IS AT THE NOTEBOOK LEVEL, not the page. A notebook carries an
- * optional `projectId` (a Site Planner site-group id) or `null` for a loose notebook.
- * Binding the notebook makes "everything on Goose Creek" a one-line filter
- * (`visibleNotebooks`), and a LOOSE notebook is visible from inside EVERY project —
- * a scratch notebook you can't reach from where you're working is one you stop using.
+ *   **THE PROJECT IS THE NOTEBOOK. There are exactly TWO concepts: a project, and PAGES
+ *   THAT CAN HOLD SUBPAGES.**
  *
- * PURITY IS THE CONTRACT. Every exported mutator returns a NEW tree and never touches
- * its input (test/notesModel.test.js deep-freezes and asserts this). The tree is small
- * by construction — titles only — so these clone rather than share structure, which
- * makes the guarantee total instead of "total along the paths we remembered".
+ * There is no notebook to pick and no separate species called a "section". "Entitlements"
+ * is not a different KIND of thing from "Bonding" — it is simply a page that has pages under
+ * it. **Anything can have children, at any depth.** That is precisely what OneNote cannot do
+ * (its sections and pages are different types, and a page cannot nest under a page), so do
+ * not reintroduce the distinction by the back door: no `kind` field, no depth ceiling, no
+ * "container" flag. A page with children and a page without are the same node.
+ *
+ * ⛔ SUPERSEDED — kept so a future session cannot rebuild it from a stale comment. The old
+ * model was FOUR levels, `project › notebook › section › page`, with the project binding on
+ * the NOTEBOOK (B1374) and `addSection` / `moveSection` / `moveNotebook` / `setNotebookProject`
+ * as its ops. It is gone. `migrate()` below converts it — that conversion is the ONLY code
+ * in the module that may mention a notebook or a section, and it is one-way.
+ *
+ *   tree  = { v: 3, pages: [rootPage…], trash: [entry…] }
+ *   page  = { id, title, createdAt, updatedAt, pages: [child…] }
+ *   root  = a page in `tree.pages`; it ALSO carries `projectId` (a Site Planner site-group
+ *           id, or `null` for "Not in a project").
+ *
+ * ⛔ `projectId` LIVES ON THE ROOT AND NOWHERE ELSE. A subpage's project is its root's,
+ * DERIVED on demand (`projectOfPage`) and never stored. Storing it on every node would make
+ * the same fact writable in N places, and redundant state updated by independent writes is
+ * guaranteed to disagree eventually — the B1340 lesson, applied before it can cost anything.
+ *
+ * WHAT LIVES HERE AND WHAT DELIBERATELY DOES NOT. This module owns the SHAPE and nothing
+ * else: no storage, no React, no editor. In particular the tree does **not** hold page
+ * BODIES — a node carries only `{ id, title, timestamps, children }`. That split is the
+ * load-bearing decision behind the whole module: the tree is one storage key and each page
+ * body is its own key (see lib/notesStore.js). One blob holding every note would mean every
+ * keystroke's autosave rewrites every note ever written.
+ *
+ * PURITY IS THE CONTRACT. Every exported mutator returns a NEW tree and never touches its
+ * input (test/notesModel.test.js deep-freezes and asserts this). The tree is small by
+ * construction — titles only — so these clone rather than share structure, which makes the
+ * guarantee total instead of "total along the paths we remembered".
  */
 
-export const NOTES_TREE_VERSION = 2;
+export const NOTES_TREE_VERSION = 3;
 
 /** How long a binned node is kept before its bodies and images are destroyed for real.
  *  Matched to the Site Planner's own bin (`storage.DELETED_RETENTION_DAYS`) on purpose:
@@ -39,159 +62,189 @@ export function newId(prefix = "n") {
 
 const clone = (v) => JSON.parse(JSON.stringify(v));
 
-export const DEFAULT_NOTEBOOK_TITLE = "Untitled notebook";
-export const DEFAULT_SECTION_TITLE = "Untitled section";
 export const DEFAULT_PAGE_TITLE = "Untitled page";
+/** The home for pages that belong to no project — signed-out notes, and everything that
+ *  was a loose notebook. It is a real place with the same shape as a project's pages, not a
+ *  holding pen: nothing about a page changes by being here. */
+export const NO_PROJECT = null;
+export const NO_PROJECT_LABEL = "Not in a project";
 
 /* ---- construction ---------------------------------------------------------------- */
 
 export function emptyTree() {
-  return { v: NOTES_TREE_VERSION, notebooks: [], trash: [] };
+  return { v: NOTES_TREE_VERSION, pages: [], trash: [] };
 }
 
 /* TIMESTAMPS LIVE ON THE PAGE NODE, AND NOWHERE ELSE (B1312). The tree is read on every
- * render and rewritten on a 400 ms debounce, so it stays titles-and-numbers only — two
- * integers per page is the whole cost. `null` is a REAL value here and means "unknown",
- * which is what every page written before this landed honestly is: a migrated page shows
- * no time rather than claiming it was edited the moment you upgraded. */
-export function makePage({ id, title = DEFAULT_PAGE_TITLE, createdAt, updatedAt, at = Date.now() } = {}) {
+ * render and rewritten on a short debounce, so it stays titles-and-numbers only. `null` is a
+ * REAL value here and means "unknown", which is what every page written before timestamps
+ * existed honestly is: it shows no time rather than claiming it was edited the moment you
+ * upgraded. */
+export function makePage({ id, title = DEFAULT_PAGE_TITLE, createdAt, updatedAt, at = Date.now(), pages, projectId } = {}) {
   const born = Number.isFinite(createdAt) ? createdAt : at;
-  return {
+  const node = {
     id: id || newId("pg"),
     title: String(title),
     createdAt: born,
     updatedAt: Number.isFinite(updatedAt) ? updatedAt : born,
+    pages: pages ? clone(pages) : [],
   };
+  if (projectId !== undefined) node.projectId = projectId == null ? null : String(projectId);
+  return node;
 }
 
-export function makeSection({ id, title = DEFAULT_SECTION_TITLE, pages } = {}) {
-  return { id: id || newId("sec"), title: String(title), pages: pages ? clone(pages) : [] };
-}
+/* ---- walking (pure, non-throwing) -------------------------------------------------- */
 
-/* A new notebook is BORN with one section and one page, so there is nothing to create
- * before typing. An empty notebook is a dead end that asks the user to do setup work
- * to reach the thing they came for. */
-export function makeNotebook({ id, title = DEFAULT_NOTEBOOK_TITLE, projectId = null, ids = {}, at = Date.now() } = {}) {
-  return {
-    id: id || ids.notebook || newId("nb"),
-    title: String(title),
-    projectId: projectId == null ? null : String(projectId),
-    sections: [makeSection({ id: ids.section, title: "Section 1", pages: [makePage({ id: ids.page, title: "Page 1", at })] })],
+const rootsOf = (tree) => (Array.isArray(tree?.pages) ? tree.pages : []);
+const kidsOf = (page) => (Array.isArray(page?.pages) ? page.pages : []);
+
+/** Depth-first walk. `fn(page, { parent, root, depth })`; return `false` to stop descending. */
+export function walkPages(tree, fn) {
+  const go = (page, parent, root, depth) => {
+    if (fn(page, { parent, root, depth }) === false) return;
+    for (const kid of kidsOf(page)) go(kid, page, root, depth + 1);
   };
+  for (const r of rootsOf(tree)) go(r, null, r, 0);
 }
 
-/* ---- lookup (pure, non-throwing) -------------------------------------------------- */
-
+/** Find a page anywhere in the tree. Returns `{ page, parent, root, depth }` or null.
+ *  `parent` is null for a root. */
 export function findPage(tree, pageId) {
-  for (const nb of tree?.notebooks || []) {
-    for (const sec of nb.sections || []) {
-      for (const pg of sec.pages || []) {
-        if (pg.id === pageId) return { notebook: nb, section: sec, page: pg };
-      }
-    }
-  }
-  return null;
+  let hit = null;
+  walkPages(tree, (page, ctx) => {
+    if (hit) return false;
+    if (page.id === pageId) { hit = { page, ...ctx }; return false; }
+    return undefined;
+  });
+  return hit;
 }
 
-export function findSection(tree, sectionId) {
-  for (const nb of tree?.notebooks || []) {
-    for (const sec of nb.sections || []) if (sec.id === sectionId) return { notebook: nb, section: sec };
-  }
-  return null;
-}
-
-export function findNotebook(tree, notebookId) {
-  return (tree?.notebooks || []).find((nb) => nb.id === notebookId) || null;
-}
-
-/** Every page id in the tree — the universe the store's orphan sweep is checked against. */
+/** Every page id in the tree, in reading order — the universe the store's orphan sweep is
+ *  checked against. */
 export function allPageIds(tree) {
   const out = [];
-  for (const nb of tree?.notebooks || []) for (const sec of nb.sections || []) for (const pg of sec.pages || []) out.push(pg.id);
+  walkPages(tree, (p) => { out.push(p.id); });
   return out;
 }
 
-/** The first page in the tree (reading order), or null. Used to pick a landing page. */
+/** Every page id in one page's SUBTREE, itself included. This IS the delete cascade set. */
+export function subtreePageIds(page) {
+  const out = [];
+  const go = (p) => { out.push(p.id); for (const k of kidsOf(p)) go(k); };
+  if (page?.id) go(page);
+  return out;
+}
+
+/** The first page in reading order, or null. Used to pick a landing page. */
 export function firstPageId(tree) {
   return allPageIds(tree)[0] || null;
 }
 
-/* ---- project visibility -----------------------------------------------------------
- *
- * ⛔ WHAT A LOOSE NOTEBOOK DOES WHEN A PROJECT IS SELECTED — DECIDED, IN WRITING (B1374).
- * A loose notebook (`projectId: null`) is visible from EVERYWHERE, including from inside
- * every project. It is not a Dashboard-only shelf. The reason is the one this whole item
- * exists for: a scratch notebook you cannot reach from where you are working is one you
- * stop using, and the alternative — hiding loose notebooks inside a project — creates a
- * place notes can be while looking like they are nowhere. The full rule, and the reason
- * the SCOPE toggle exists beside it, is written out in the header of lib/notesStore.js.
- */
-
-/** Notebooks visible from a given project: that project's own, PLUS every loose one.
- *  With no project selected (`null`) nothing is out of scope, so all are visible. */
-export function visibleNotebooks(tree, projectId) {
-  const list = tree?.notebooks || [];
-  if (projectId == null) return list.slice();
-  return list.filter((nb) => nb.projectId == null || nb.projectId === projectId);
+/** The ids of every ancestor of a page, root first — what "open the path to the page I am
+ *  on, and leave everything else shut" needs. Excludes the page itself. */
+export function ancestorIds(tree, pageId) {
+  const chain = [];
+  const go = (page, trail) => {
+    if (page.id === pageId) { chain.push(...trail); return true; }
+    for (const k of kidsOf(page)) if (go(k, [...trail, page.id])) return true;
+    return false;
+  };
+  for (const r of rootsOf(tree)) if (go(r, [])) break;
+  return chain;
 }
+
+/** Which project a page belongs to — DERIVED from its root, never stored on the page. */
+export function projectOfPage(tree, pageId) {
+  const hit = findPage(tree, pageId);
+  return hit ? (hit.root.projectId ?? null) : null;
+}
+
+/* ---- project scoping ----------------------------------------------------------------
+ *
+ * ⛔ WHAT A PAGE WITH NO PROJECT DOES — DECIDED, IN WRITING.
+ * Standing INSIDE a project you see that project's pages and nothing else: everything on
+ * screen belongs to where you are standing, which is what lets the rail drop the per-row
+ * project badge entirely. Pages with no project live in their own named group, reachable
+ * from the Dashboard — which shows EVERY project's pages, grouped, and is one click away
+ * from the header crumb on every screen. That click is what keeps B1374's guarantee
+ * ("nothing can become unreachable") true; do not remove it.
+ */
 
 export const SCOPE_PROJECT = "project";
 export const SCOPE_ALL = "all";
 
-/** The notebooks the rail should show, given the selected project AND the chosen scope.
- *
- *  `SCOPE_ALL` is the ESCAPE HATCH, and it is what makes "nothing can become unreachable"
- *  true rather than aspirational: a notebook bound to a project you are not in — or to a
- *  project that no longer exists at all — is always one click from here. Without it, a
- *  mis-bound notebook is invisible from every screen except the one project it names, which
- *  is exactly how the owner came to open a project, click Notes, and find nothing. */
-export function notebooksInScope(tree, projectId, scope = SCOPE_PROJECT) {
-  if (scope === SCOPE_ALL || projectId == null) return (tree?.notebooks || []).slice();
-  return visibleNotebooks(tree, projectId);
+/** The ROOT pages the rail should show. Inside a project (and in the default scope) that is
+ *  exactly that project's roots; `SCOPE_ALL`, or no project at all, is every root. */
+export function pagesInScope(tree, projectId, scope = SCOPE_PROJECT) {
+  const roots = rootsOf(tree);
+  if (scope === SCOPE_ALL || projectId == null) return roots.slice();
+  return roots.filter((p) => (p.projectId ?? null) === projectId);
 }
 
-/** Every project id any notebook claims, in tree order. Lets a caller tell an id that
+/** The Dashboard's shape: every root page grouped by the project it belongs to, in the order
+ *  the projects were given, with the no-project group LAST. A group is emitted only when it
+ *  has pages, so an account with one project sees one heading rather than a directory.
+ *
+ *  `projects` is `[{ id, name }]`; a page bound to an id that is not in that list still gets
+ *  a group — named by the caller, never silently folded into "no project", because losing
+ *  the binding is how a page becomes hard to find. */
+export function projectGroups(tree, projects = []) {
+  const byId = new Map((projects || []).filter(Boolean).map((p) => [p.id, p]));
+  const order = [];
+  const groups = new Map();
+  const put = (key, page) => {
+    if (!groups.has(key)) { groups.set(key, []); order.push(key); }
+    groups.get(key).push(page);
+  };
+  for (const p of rootsOf(tree)) put(p.projectId ?? " none", p);
+  const out = [];
+  for (const key of order) {
+    if (key === " none") continue;
+    out.push({ projectId: key, name: byId.get(key)?.name || null, resolved: byId.has(key), pages: groups.get(key) });
+  }
+  if (groups.has(" none")) {
+    out.push({ projectId: null, name: NO_PROJECT_LABEL, resolved: true, pages: groups.get(" none") });
+  }
+  return out;
+}
+
+/** Every project id any root page claims, in tree order. Lets a caller tell an id that
  *  resolves to a real project from one that no longer does, without guessing. */
 export function boundProjectIds(tree) {
   const out = [];
-  for (const nb of tree?.notebooks || []) {
-    if (nb?.projectId != null && !out.includes(nb.projectId)) out.push(nb.projectId);
+  for (const p of rootsOf(tree)) {
+    const pid = p.projectId ?? null;
+    if (pid != null && !out.includes(pid)) out.push(pid);
   }
   return out;
 }
 
 /* ---- structural ops (all pure) ----------------------------------------------------- */
 
-export function addNotebook(tree, { title, projectId = null, ids, at = Date.now() } = {}) {
+/** Add a page. With no `parentId` it becomes a ROOT page in `projectId` — which is what
+ *  makes "a page created inside a project is filed there automatically" true with no extra
+ *  step. With a `parentId` it becomes that page's LAST child, and its project is its root's
+ *  by construction (nothing to pass, nothing to get wrong). */
+export function addPage(tree, { parentId = null, projectId = null, title, id, at = Date.now() } = {}) {
   const next = clone(tree || emptyTree());
-  const nb = makeNotebook({ title, projectId, ids, at });
-  next.notebooks.push(nb);
-  return { tree: next, notebook: nb, notebookId: nb.id, sectionId: nb.sections[0].id, pageId: nb.sections[0].pages[0].id };
-}
-
-export function addSection(tree, notebookId, { title, ids = {}, at = Date.now() } = {}) {
-  const next = clone(tree);
-  const nb = next.notebooks.find((n) => n.id === notebookId);
-  if (!nb) return { tree: next, sectionId: null, pageId: null };
-  // A new section is born with one page, same reasoning as a new notebook.
-  const sec = makeSection({ id: ids.section, title: title || `Section ${nb.sections.length + 1}`, pages: [makePage({ id: ids.page, title: "Page 1", at })] });
-  nb.sections.push(sec);
-  return { tree: next, sectionId: sec.id, pageId: sec.pages[0].id };
-}
-
-export function addPage(tree, sectionId, { title, id, at = Date.now() } = {}) {
-  const next = clone(tree);
-  const hit = findSection(next, sectionId);
+  if (!Array.isArray(next.pages)) next.pages = [];
+  if (parentId == null) {
+    const pg = makePage({ id, title: title || DEFAULT_PAGE_TITLE, at, projectId });
+    next.pages.push(pg);
+    return { tree: next, pageId: pg.id };
+  }
+  const hit = findPage(next, parentId);
   if (!hit) return { tree: next, pageId: null };
-  const pg = makePage({ id, title: title || `Page ${hit.section.pages.length + 1}`, at });
-  hit.section.pages.push(pg);
+  const pg = makePage({ id, title: title || DEFAULT_PAGE_TITLE, at });
+  if (!Array.isArray(hit.page.pages)) hit.page.pages = [];
+  hit.page.pages.push(pg);
   return { tree: next, pageId: pg.id };
 }
 
 /** Stamp a page as edited. Called from the ONE place a body write is known to have LANDED
  *  (the editor's flush, on `writePage` returning true) — never on a keystroke, so the field
- *  cannot claim a save that the storage layer refused. Returns the same tree object when
- *  the page is unknown, so a caller can skip a pointless write. */
+ *  cannot claim a save the storage layer refused. Returns the same tree object when the page
+ *  is unknown, so a caller can skip a pointless write. */
 export function touchPage(tree, pageId, at = Date.now()) {
   if (!findPage(tree, pageId)) return tree;
   const next = clone(tree);
@@ -201,66 +254,93 @@ export function touchPage(tree, pageId, at = Date.now()) {
   return next;
 }
 
-/** Pages in most-recently-edited order, scoped by project visibility. A page whose time is
- *  unknown (written before timestamps existed) sorts last rather than pretending to be old
- *  or new — it simply has nothing to say. */
-export function recentPages(tree, { projectId = null, limit = 40 } = {}) {
-  const out = [];
-  for (const nb of visibleNotebooks(tree, projectId)) {
-    for (const sec of nb.sections || []) {
-      for (const pg of sec.pages || []) {
-        out.push({
-          pageId: pg.id, pageTitle: pg.title, sectionId: sec.id, sectionTitle: sec.title,
-          notebookId: nb.id, notebookTitle: nb.title,
-          updatedAt: Number.isFinite(pg.updatedAt) ? pg.updatedAt : null,
-          createdAt: Number.isFinite(pg.createdAt) ? pg.createdAt : null,
-        });
-      }
-    }
-  }
-  out.sort((a, b) => (b.updatedAt ?? -1) - (a.updatedAt ?? -1));
-  return out.slice(0, Math.max(0, limit));
-}
-
-/** Rename any node by id — notebook, section or page. Unknown id is a no-op clone. */
+/** Rename any page by id. Unknown id is a no-op clone. */
 export function renameNode(tree, id, title) {
   const next = clone(tree);
-  const t = String(title ?? "").trim();
-  for (const nb of next.notebooks) {
-    if (nb.id === id) { nb.title = t || DEFAULT_NOTEBOOK_TITLE; return next; }
-    for (const sec of nb.sections) {
-      if (sec.id === id) { sec.title = t || DEFAULT_SECTION_TITLE; return next; }
-      for (const pg of sec.pages) if (pg.id === id) { pg.title = t || DEFAULT_PAGE_TITLE; return next; }
-    }
+  const hit = findPage(next, id);
+  if (hit) hit.page.title = String(title ?? "").trim() || DEFAULT_PAGE_TITLE;
+  return next;
+}
+
+/* Index clamping is shared so every move behaves the same at the bounds: a negative index
+ * lands first, an over-long index lands last, and neither throws. */
+const clampIndex = (i, len) => (Number.isFinite(i) ? Math.max(0, Math.min(Math.trunc(i), len)) : len);
+
+/** Move a page — reorder among its siblings, nest it under another page, or lift it to root.
+ *
+ *  ⛔ A PAGE MAY NOT BE MOVED INTO ITS OWN SUBTREE. That would detach the whole branch from
+ *  the tree in one operation — every page under it still exists in the object graph and is
+ *  reachable from nowhere, which is the exact "renders in no scope" bug this model must not
+ *  create. The move is REFUSED (returns the tree unchanged) rather than silently repaired.
+ *
+ *  `toParentId === null` means root. A page moved to root needs a project: `projectId` is
+ *  used when given, otherwise it keeps the project of the root it came from. */
+export function movePage(tree, pageId, toParentId = null, index, { projectId } = {}) {
+  const next = clone(tree);
+  const from = findPage(next, pageId);
+  if (!from) return next;
+
+  if (toParentId != null) {
+    const to = findPage(next, toParentId);
+    if (!to) return next;
+    if (toParentId === pageId) return next;
+    if (subtreePageIds(from.page).includes(toParentId)) return next;   // into its own subtree — refused
   }
+
+  const wasProject = from.root.projectId ?? null;
+  // Detach.
+  const siblings = from.parent ? from.parent.pages : next.pages;
+  siblings.splice(siblings.indexOf(from.page), 1);
+  const node = from.page;
+
+  if (toParentId == null) {
+    node.projectId = projectId !== undefined ? (projectId == null ? null : String(projectId)) : wasProject;
+    next.pages.splice(clampIndex(index, next.pages.length), 0, node);
+  } else {
+    delete node.projectId;                       // a child's project is its root's, derived
+    const to = findPage(next, toParentId);
+    if (!Array.isArray(to.page.pages)) to.page.pages = [];
+    to.page.pages.splice(clampIndex(index, to.page.pages.length), 0, node);
+  }
+  return next;
+}
+
+/** Re-bind a ROOT page to a project (or to `null` = not in a project). A non-root id is a
+ *  no-op: a subpage's project is its root's, and letting a child claim a different one is
+ *  exactly the redundant-state trap this model exists to avoid. */
+export function setPageProject(tree, pageId, projectId) {
+  const next = clone(tree);
+  const root = next.pages.find((p) => p.id === pageId);
+  if (root) root.projectId = projectId == null ? null : String(projectId);
   return next;
 }
 
 /* ---- the bin (B1310) ----------------------------------------------------------------
  *
  * ⛔ DELETE IS A MOVE, NOT A DESTRUCTION — and TOMBSTONE-DELETES is intact, not weakened.
- * The full cascade of orphaned page ids is still computed at the moment of the delete,
- * by the same walk as before, and still returned to the caller. What changed is WHEN it
- * is executed: the caller now stores it on a trash ENTRY and clears the bodies at PURGE
- * time. Nothing can be resurrected in between, because the pages are out of the live tree
- * and no read path looks in `trash` — so a merge or a sync sees exactly what it saw
- * before. What the deferral buys is the thing the rest of Planyr already had and Notes
- * did not: one inline tick used to destroy a whole notebook forever, with no undo, no
- * bin, and no export-first prompt, while deleting a PROJECT bins it for 30 days.
+ * The full cascade of orphaned page ids is still computed at the moment of the delete, by
+ * the same walk as before, and still returned to the caller. What changed is WHEN it is
+ * executed: the caller stores it on a trash ENTRY and clears the bodies at PURGE time.
+ * Nothing can be resurrected in between, because the pages are out of the live tree and no
+ * read path looks in `trash`.
+ *
+ * ⛔ AND THE CASCADE IS NOW THE WHOLE SUBTREE, AT ANY DEPTH. Deleting a page takes every
+ * page under it, however deep — `subtreePageIds` is the one walk that answers it, and it is
+ * what the entry carries so a restore brings the branch back WHOLE.
  *
  * An ENTRY carries everything a restore needs and nothing it doesn't:
- *   { id, kind, node, parentId, index, title, deletedAt, pageIds }
- * `parentId` is the notebook for a section and the section for a page (null for a
- * notebook), `index` is where it sat, and `pageIds` IS the cascade set — so the purge
- * never has to re-walk a tree that no longer holds the node.
+ *   { id, kind: "page", node, parentId, index, projectId, title, deletedAt, pageIds }
+ * `parentId` is the parent page (null when it was a root), `index` is where it sat,
+ * `projectId` is the root's project (so a deleted root returns to the right project even if
+ * every other page in it has gone), and `pageIds` IS the cascade set.
  */
 
 const trashOf = (tree) => (Array.isArray(tree?.trash) ? tree.trash : []);
 
 /** Every page id currently held IN THE BIN. The store's orphan sweep MUST union this with
- *  `allPageIds` — a binned page's body is deliberately still on disk, and a sweep that
- *  only knew about the live tree would call every one of them an orphan and destroy the
- *  bin's whole reason to exist. */
+ *  `allPageIds` — a binned page's body is deliberately still on disk, and a sweep that only
+ *  knew about the live tree would call every one of them an orphan and destroy the bin's
+ *  whole reason to exist. */
 export function trashPageIds(tree) {
   const out = [];
   for (const e of trashOf(tree)) for (const id of e.pageIds || []) out.push(id);
@@ -270,7 +350,7 @@ export function trashPageIds(tree) {
 /** The bin, newest first, with each entry's expiry stamped on. */
 export function trashEntries(tree, { days = TRASH_RETENTION_DAYS } = {}) {
   return trashOf(tree)
-    .map((e) => ({ ...e, expiresAt: (e.deletedAt || 0) + days * 86400000, restorable: !!(e.kind && e.node) }))
+    .map((e) => ({ ...e, expiresAt: (e.deletedAt || 0) + days * 86400000, restorable: !!e.node }))
     .sort((a, b) => (b.deletedAt || 0) - (a.deletedAt || 0));
 }
 
@@ -280,67 +360,49 @@ export function expiredTrashIds(tree, { now = Date.now(), days = TRASH_RETENTION
   return trashOf(tree).filter((e) => (e.deletedAt || 0) < cutoff).map((e) => e.id);
 }
 
-/** Delete any node by id: lift it out of the live tree, park it in the bin, and report
- *  the FULL cascade of orphaned page ids.
+/** Delete a page and its whole subtree: lift it out of the live tree, park it in the bin,
+ *  and report the FULL cascade of orphaned page ids.
  *
- *  TOMBSTONE-DELETES: the caller MUST hold a body for every id in `removedPageIds` until
- *  the entry is purged, and MUST then clear every one of them — not just the node that
- *  was clicked. Deleting a notebook orphans every page under every one of its sections;
- *  the caller cannot compute that set itself without re-walking a tree it no longer has,
- *  so this returns it AND stamps it onto the entry. */
+ *  TOMBSTONE-DELETES: the caller MUST hold a body for every id in `removedPageIds` until the
+ *  entry is purged, and MUST then clear every one of them — not just the page that was
+ *  clicked. */
 export function deleteNode(tree, id, { at = Date.now(), entryId } = {}) {
   const next = clone(tree);
   if (!Array.isArray(next.trash)) next.trash = [];
-  const removedPageIds = [];
+  const hit = findPage(next, id);
+  if (!hit) return { tree: next, removedPageIds: [], entry: null };
 
-  const bin = (kind, node, parentId, index) => {
-    const entry = { id: entryId || newId("tr"), kind, node, parentId, index, title: String(node.title || ""), deletedAt: at, pageIds: removedPageIds.slice() };
-    next.trash.push(entry);
-    return { tree: next, removedPageIds, kind, entry };
+  const removedPageIds = subtreePageIds(hit.page);
+  const siblings = hit.parent ? hit.parent.pages : next.pages;
+  const index = siblings.indexOf(hit.page);
+  const projectId = hit.root.projectId ?? null;
+  siblings.splice(index, 1);
+
+  const entry = {
+    id: entryId || newId("tr"),
+    kind: "page",
+    node: hit.page,
+    parentId: hit.parent ? hit.parent.id : null,
+    index,
+    projectId,
+    title: String(hit.page.title || ""),
+    deletedAt: at,
+    pageIds: removedPageIds,
   };
-
-  const nbIdx = next.notebooks.findIndex((n) => n.id === id);
-  if (nbIdx > -1) {
-    const [nb] = next.notebooks.splice(nbIdx, 1);
-    for (const sec of nb.sections || []) for (const pg of sec.pages || []) removedPageIds.push(pg.id);
-    return bin("notebook", nb, null, nbIdx);
-  }
-
-  for (const nb of next.notebooks) {
-    const secIdx = nb.sections.findIndex((s) => s.id === id);
-    if (secIdx > -1) {
-      const [sec] = nb.sections.splice(secIdx, 1);
-      for (const pg of sec.pages || []) removedPageIds.push(pg.id);
-      return bin("section", sec, nb.id, secIdx);
-    }
-    for (const sec of nb.sections) {
-      const pgIdx = sec.pages.findIndex((p) => p.id === id);
-      if (pgIdx > -1) {
-        const [pg] = sec.pages.splice(pgIdx, 1);
-        removedPageIds.push(pg.id);
-        return bin("page", pg, sec.id, pgIdx);
-      }
-    }
-  }
-  return { tree: next, removedPageIds, kind: null, entry: null };
+  next.trash.push(entry);
+  return { tree: next, removedPageIds, entry };
 }
 
-/* A restore must never fail into nothing. If the place a node came from is itself in the
- * bin, that parent is restored FIRST (recursively); if it is gone for good, the node lands
- * in a clearly-named "Recovered notes" home rather than being refused. Refusing a restore
- * because a container disappeared would make the bin exactly as lossy as the delete it
- * replaced. */
-const RECOVERED_TITLE = "Recovered notes";
-
-function ensureRecoveredSection(tree, at) {
-  let nb = tree.notebooks.find((n) => n.title === RECOVERED_TITLE);
-  if (!nb) { nb = { id: newId("nb"), title: RECOVERED_TITLE, projectId: null, sections: [] }; tree.notebooks.push(nb); }
-  if (!nb.sections.length) nb.sections.push({ id: newId("sec"), title: "Restored", pages: [] });
-  return { notebook: nb, section: nb.sections[0], at };
-}
-
-/** Put a binned node back where it came from. Returns `{ tree, restored, pageIds }`;
- *  `restored` is null when the entry id is unknown (a double-click on Undo, say). */
+/** Put a binned page back where it came from, subtree and all.
+ *
+ *  A restore must never fail into nothing. If the page it hung under is itself in the bin,
+ *  that parent is restored FIRST (recursively); if the parent is gone for good the page
+ *  lands at ROOT, in the project it was deleted from — visible, rather than refused.
+ *  Refusing a restore because a container disappeared would make the bin exactly as lossy as
+ *  the delete it replaced.
+ *
+ *  Returns `{ tree, restored, pageIds }`; `restored` is null when the entry id is unknown
+ *  (a double-click on Undo, say). */
 export function restoreNode(tree, entryId, { at = Date.now() } = {}) {
   let next = clone(tree);
   if (!Array.isArray(next.trash)) next.trash = [];
@@ -348,13 +410,18 @@ export function restoreNode(tree, entryId, { at = Date.now() } = {}) {
   if (idx < 0) return { tree: next, restored: null, pageIds: [] };
 
   const entry = next.trash[idx];
-
   // The parent is in the bin too — bring it back first, then retry against that tree.
-  if (entry.parentId && !findNotebook(next, entry.parentId) && !findSection(next, entry.parentId)) {
-    const parentEntry = next.trash.find((e) => e.node?.id === entry.parentId);
-    if (parentEntry) {
-      const up = restoreNode(next, parentEntry.id, { at });
-      next = up.tree;
+  if (entry.parentId && !findPage(next, entry.parentId)) {
+    const parentEntry = next.trash.find((e) => (e.pageIds || []).includes(entry.parentId));
+    if (parentEntry && parentEntry.id !== entryId) {
+      next = restoreNode(next, parentEntry.id, { at }).tree;
+      // Restoring the parent may have brought this page back with it (it was in that
+      // subtree), in which case this entry is already satisfied.
+      if (findPage(next, entry.node?.id)) {
+        const gone = next.trash.findIndex((e) => e.id === entryId);
+        if (gone > -1) next.trash.splice(gone, 1);
+        return { tree: next, restored: entry, pageIds: (entry.pageIds || []).slice() };
+      }
     }
   }
 
@@ -363,17 +430,20 @@ export function restoreNode(tree, entryId, { at = Date.now() } = {}) {
   const e = next.trash[here];
   // A corrupted entry (see `migrateTrashEntry`) has page ids but no node: it can free its
   // bytes and nothing else. Refuse the restore honestly rather than splicing a null in.
-  if (!e.kind || !e.node) return { tree: next, restored: null, pageIds: [] };
+  if (!e.node || typeof e.node !== "object") return { tree: next, restored: null, pageIds: [] };
   next.trash.splice(here, 1);
 
-  if (e.kind === "notebook") {
-    next.notebooks.splice(clampIndex(e.index, next.notebooks.length), 0, e.node);
-  } else if (e.kind === "section") {
-    const nb = findNotebook(next, e.parentId) || next.notebooks[0] || ensureRecoveredSection(next, at).notebook;
-    nb.sections.splice(clampIndex(e.index, nb.sections.length), 0, e.node);
-  } else if (e.kind === "page") {
-    const sec = findSection(next, e.parentId)?.section || ensureRecoveredSection(next, at).section;
-    sec.pages.splice(clampIndex(e.index, sec.pages.length), 0, e.node);
+  const node = e.node;
+  const parent = e.parentId ? findPage(next, e.parentId) : null;
+  if (parent) {
+    delete node.projectId;
+    if (!Array.isArray(parent.page.pages)) parent.page.pages = [];
+    parent.page.pages.splice(clampIndex(e.index, parent.page.pages.length), 0, node);
+  } else {
+    node.projectId = e.projectId == null ? null : String(e.projectId);
+    /* It came from root → back to its old slot. It came from a parent that is gone for good
+     * → append, because its recorded index belonged to a list that no longer exists. */
+    next.pages.splice(e.parentId ? next.pages.length : clampIndex(e.index, next.pages.length), 0, node);
   }
   return { tree: next, restored: e, pageIds: (e.pageIds || []).slice() };
 }
@@ -390,150 +460,236 @@ export function purgeTrashEntry(tree, entryId) {
   return { tree: next, pageIds: (e.pageIds || []).slice() };
 }
 
-/* Index clamping is shared so every move behaves the same at the bounds: a negative
- * index lands first, an over-long index lands last, and neither throws. */
-const clampIndex = (i, len) => (Number.isFinite(i) ? Math.max(0, Math.min(Math.trunc(i), len)) : len);
+/* ---- listing + search --------------------------------------------------------------- */
 
-/** Move a page into a section at an index (same section = reorder). */
-export function movePage(tree, pageId, toSectionId, index) {
-  const next = clone(tree);
-  const from = findPage(next, pageId);
-  const to = findSection(next, toSectionId);
-  if (!from || !to) return next;
-  const fromPages = from.section.pages;
-  fromPages.splice(fromPages.indexOf(from.page), 1);
-  to.section.pages.splice(clampIndex(index, to.section.pages.length), 0, from.page);
-  return next;
+/** A page's trail of ancestor titles, root first, for a search hit or a Recent row — the
+ *  "where is this?" that a flat list otherwise leaves you to guess. */
+function trailOf(tree, pageId) {
+  return ancestorIds(tree, pageId).map((id) => findPage(tree, id)?.page?.title).filter(Boolean);
 }
 
-/** Move a section into a notebook at an index (same notebook = reorder). */
-export function moveSection(tree, sectionId, toNotebookId, index) {
-  const next = clone(tree);
-  const from = findSection(next, sectionId);
-  const nb = next.notebooks.find((n) => n.id === toNotebookId);
-  if (!from || !nb) return next;
-  from.notebook.sections.splice(from.notebook.sections.indexOf(from.section), 1);
-  nb.sections.splice(clampIndex(index, nb.sections.length), 0, from.section);
-  return next;
+/** Pages in most-recently-edited order, scoped by project. A page whose time is unknown
+ *  (written before timestamps existed) sorts last rather than pretending to be old or new. */
+export function recentPages(tree, { projectId = null, limit = 40 } = {}) {
+  const out = [];
+  for (const root of pagesInScope(tree, projectId, projectId == null ? SCOPE_ALL : SCOPE_PROJECT)) {
+    const go = (page, trail) => {
+      out.push({
+        pageId: page.id, pageTitle: page.title, trail,
+        projectId: root.projectId ?? null,
+        updatedAt: Number.isFinite(page.updatedAt) ? page.updatedAt : null,
+        createdAt: Number.isFinite(page.createdAt) ? page.createdAt : null,
+      });
+      for (const k of kidsOf(page)) go(k, [...trail, page.title]);
+    };
+    go(root, []);
+  }
+  out.sort((a, b) => (b.updatedAt ?? -1) - (a.updatedAt ?? -1));
+  return out.slice(0, Math.max(0, limit));
 }
 
-/** Reorder a notebook within the tree. */
-export function moveNotebook(tree, notebookId, index) {
-  const next = clone(tree);
-  const i = next.notebooks.findIndex((n) => n.id === notebookId);
-  if (i < 0) return next;
-  const [nb] = next.notebooks.splice(i, 1);
-  next.notebooks.splice(clampIndex(index, next.notebooks.length), 0, nb);
-  return next;
-}
-
-/** Re-bind a notebook to a project (or to `null` = loose).
- *
- *  ⛔ THIS HAD NO CALLER AT ALL until B1374 — the same defect B1316 found in the three move
- *  ops. The binding existed, was unit-tested, shipped with the module, and was reachable
- *  from nowhere: a notebook could be bound only by being CREATED inside a project, and once
- *  bound it could never be re-bound or made loose. That is why the owner's notebooks were
- *  stranded in the projects they happened to be born in. */
-export function setNotebookProject(tree, notebookId, projectId) {
-  const next = clone(tree);
-  const nb = next.notebooks.find((n) => n.id === notebookId);
-  if (nb) nb.projectId = projectId == null ? null : String(projectId);
-  return next;
-}
-
-/* ---- search (titles only — bodies need storage, so they live in notesStore) -------- */
-
-/** Case-insensitive page-TITLE search, scoped by project visibility. Pure. */
+/** Case-insensitive page-TITLE search, scoped by project. Pure. */
 export function searchTitles(tree, query, { projectId = null } = {}) {
   const q = String(query || "").trim().toLowerCase();
   if (!q) return [];
   const out = [];
-  for (const nb of visibleNotebooks(tree, projectId)) {
-    for (const sec of nb.sections || []) {
-      for (const pg of sec.pages || []) {
-        if (String(pg.title || "").toLowerCase().includes(q)) {
-          out.push({ pageId: pg.id, pageTitle: pg.title, sectionId: sec.id, sectionTitle: sec.title, notebookId: nb.id, notebookTitle: nb.title, where: "title" });
-        }
+  for (const root of pagesInScope(tree, projectId, projectId == null ? SCOPE_ALL : SCOPE_PROJECT)) {
+    const go = (page, trail) => {
+      if (String(page.title || "").toLowerCase().includes(q)) {
+        out.push({ pageId: page.id, pageTitle: page.title, trail, projectId: root.projectId ?? null, where: "title" });
       }
-    }
+      for (const k of kidsOf(page)) go(k, [...trail, page.title]);
+    };
+    go(root, []);
   }
   return out;
 }
 
-/* ---- migration --------------------------------------------------------------------- */
+/* ---- migration ---------------------------------------------------------------------
+ *
+ * ⛔ FOUR LEVELS → TWO CONCEPTS, and NOTHING MAY BE LOST OR BECOME UNREACHABLE.
+ *
+ * THE RULES, stated once so they are not re-derived from the code:
+ *   1. **Every SECTION becomes a top-level page**, and the section's pages become its
+ *      children. So `Grand Port › Entitlements › Bonding` becomes the page `Entitlements`
+ *      with the subpage `Bonding`, in the project Grand Port.
+ *   2. **The section keeps its own ID.** That is not cosmetic: it is what makes a binned
+ *      page whose `parentId` names its old section restore to exactly the right place, and
+ *      what makes the migration safe to run against a tree that is mid-sync.
+ *   3. **TWO NOTEBOOKS BOUND TO THE SAME PROJECT MERGE**, and they merge *by construction*
+ *      rather than by a merge step: `projectId` is the only grouping key there is, so their
+ *      sections simply arrive as sibling top-level pages of the same project. No id can
+ *      collide, because every id is preserved exactly.
+ *   4. **A notebook's TITLE is consumed by the merge** — the project IS the notebook now, so
+ *      the notebook's name is the project's name. Two exceptions, both of which only ever
+ *      RECOVER a name that would otherwise be lost, never discard one:
+ *        (a) a notebook with exactly ONE section whose section title is generic
+ *            ("Section 1", "Untitled section") lends its OWN title to that page — this is
+ *            what stops "Section 1" surviving as a top-level page name;
+ *        (b) if BOTH titles are generic and that one section holds exactly ONE page, that
+ *            page becomes the top-level page itself. `Untitled notebook › Section 1 › Load
+ *            Study` becomes simply `Load Study`.
+ *   5. **A loose notebook (`projectId: null`) lands in the no-project home**, same shape.
+ *   6. **The BIN is preserved.** A binned notebook or section converts to a single page
+ *      carrying its former contents as children, so a restore returns the branch whole. Its
+ *      `pageIds` — the cascade set the purge depends on — are copied verbatim.
+ *
+ * IDEMPOTENCE: the conversion runs only when the input has `notebooks` and no `pages`, so
+ * `migrate(migrate(x))` is `migrate(x)` for every input. test/notesModel.test.js asserts it
+ * by deep equality on the owner's own data.
+ */
 
-/** Tolerant read of anything that claims to be a tree. Never throws, never returns
- *  null: junk, a missing key, a future version, a half-written object all resolve to a
- *  usable tree. A notes module that refuses to open because one field is the wrong type
- *  is worse than one that quietly drops the field. */
 const num = (v) => (Number.isFinite(v) ? v : null);
+const GENERIC_SECTION = /^(section\s*\d*|untitled section)$/i;
+const GENERIC_NOTEBOOK = /^(untitled notebook|notebook\s*\d*)$/i;
 
-/* A v1 page had no timestamps at all, and inventing one would be a lie the UI then repeats
- * for the life of the note. So a migrated page keeps `null` and the rail shows it no time.
- * This is ADDITIVE in both directions: a v2 tree read by an older build loses only the two
- * fields and the bin, and neither is load-bearing for opening a note. */
-function migratePage(pg) {
+function migratePageNode(pg) {
+  const kids = [];
+  for (const k of Array.isArray(pg?.pages) ? pg.pages : []) {
+    if (k && typeof k === "object") kids.push(migratePageNode(k));
+  }
   return {
-    id: String(pg.id || newId("pg")),
-    title: typeof pg.title === "string" ? pg.title : DEFAULT_PAGE_TITLE,
-    createdAt: num(pg.createdAt),
-    updatedAt: num(pg.updatedAt),
+    id: String(pg?.id || newId("pg")),
+    title: typeof pg?.title === "string" ? pg.title : DEFAULT_PAGE_TITLE,
+    createdAt: num(pg?.createdAt),
+    updatedAt: num(pg?.updatedAt),
+    pages: kids,
   };
 }
 
-function migrateSection(sec) {
-  const pages = [];
-  for (const pg of Array.isArray(sec.pages) ? sec.pages : []) {
-    if (pg && typeof pg === "object") pages.push(migratePage(pg));
+const withProject = (node, projectId) => ({ ...node, projectId: projectId == null ? null : String(projectId) });
+
+/** One legacy notebook → the top-level pages it becomes. Rules 1, 2 and 4 live here. */
+function notebookToPages(nb) {
+  const projectId = nb?.projectId == null ? null : String(nb.projectId);
+  const sections = (Array.isArray(nb?.sections) ? nb.sections : []).filter((s) => s && typeof s === "object");
+  const nbTitle = typeof nb?.title === "string" ? nb.title : "";
+  const out = [];
+
+  for (const sec of sections) {
+    const kids = (Array.isArray(sec.pages) ? sec.pages : []).filter((p) => p && typeof p === "object").map(migratePageNode);
+    const secTitle = typeof sec.title === "string" ? sec.title : "";
+    const only = sections.length === 1;
+
+    // 4(b): both names are noise and there is exactly one page — that page IS the top level.
+    if (only && GENERIC_SECTION.test(secTitle.trim()) && GENERIC_NOTEBOOK.test(nbTitle.trim()) && kids.length === 1) {
+      out.push(withProject(kids[0], projectId));
+      continue;
+    }
+    // 4(a): recover the notebook's name rather than keep "Section 1".
+    const title = (only && GENERIC_SECTION.test(secTitle.trim()) && nbTitle.trim())
+      ? nbTitle
+      : (secTitle || nbTitle || DEFAULT_PAGE_TITLE);
+
+    out.push(withProject({
+      id: String(sec.id || newId("pg")),   // rule 2 — the section KEEPS its id
+      title,
+      createdAt: null,
+      updatedAt: null,
+      pages: kids,
+    }, projectId));
   }
-  return { id: String(sec.id || newId("sec")), title: typeof sec.title === "string" ? sec.title : DEFAULT_SECTION_TITLE, pages };
+  return out;
 }
 
-function migrateNotebook(nb) {
-  const sections = [];
-  for (const sec of Array.isArray(nb.sections) ? nb.sections : []) {
-    if (sec && typeof sec === "object") sections.push(migrateSection(sec));
-  }
-  return {
-    id: String(nb.id || newId("nb")),
-    title: typeof nb.title === "string" ? nb.title : DEFAULT_NOTEBOOK_TITLE,
-    projectId: nb.projectId == null ? null : String(nb.projectId),
-    sections,
-  };
-}
-
-/* A trash entry whose node is unreadable is dropped rather than kept as a row that can
- * never restore anything. Its page ids are kept on a BODYLESS entry so the purge sweep
- * still frees the bytes — losing the ability to restore must never also leak storage. */
-function migrateTrashEntry(e) {
-  if (!e || typeof e !== "object") return null;
-  const kind = e.kind === "notebook" || e.kind === "section" || e.kind === "page" ? e.kind : null;
+/** A legacy trash entry → the one-page-shaped entry the new bin holds (rule 6). */
+function legacyTrashEntry(e) {
+  const kind = e.kind;
   const pageIds = (Array.isArray(e.pageIds) ? e.pageIds : []).filter((x) => typeof x === "string");
   const base = {
     id: String(e.id || newId("tr")),
-    kind,
-    parentId: e.parentId == null ? null : String(e.parentId),
+    kind: "page",
+    parentId: null,
     index: Number.isFinite(e.index) ? e.index : 0,
+    projectId: null,
     title: typeof e.title === "string" ? e.title : "",
     deletedAt: Number.isFinite(e.deletedAt) ? e.deletedAt : 0,
     pageIds,
   };
-  if (!kind || !e.node || typeof e.node !== "object") return { ...base, kind: null, node: null };
-  const node = kind === "notebook" ? migrateNotebook(e.node) : kind === "section" ? migrateSection(e.node) : migratePage(e.node);
-  return { ...base, node };
+  if (!e.node || typeof e.node !== "object") return { ...base, node: null };
+
+  if (kind === "notebook") {
+    // The whole notebook comes back as ONE page holding its sections as children, so the
+    // restore is a single reversible act rather than N loose pages.
+    const sections = (Array.isArray(e.node.sections) ? e.node.sections : []).filter((s) => s && typeof s === "object");
+    const node = {
+      id: String(e.node.id || newId("pg")),
+      title: typeof e.node.title === "string" ? e.node.title : DEFAULT_PAGE_TITLE,
+      createdAt: null, updatedAt: null,
+      pages: sections.map((s) => ({
+        id: String(s.id || newId("pg")),
+        title: typeof s.title === "string" ? s.title : DEFAULT_PAGE_TITLE,
+        createdAt: null, updatedAt: null,
+        pages: (Array.isArray(s.pages) ? s.pages : []).filter((p) => p && typeof p === "object").map(migratePageNode),
+      })),
+    };
+    return { ...base, node, projectId: e.node.projectId == null ? null : String(e.node.projectId) };
+  }
+  if (kind === "section") {
+    const node = {
+      id: String(e.node.id || newId("pg")),
+      title: typeof e.node.title === "string" ? e.node.title : DEFAULT_PAGE_TITLE,
+      createdAt: null, updatedAt: null,
+      pages: (Array.isArray(e.node.pages) ? e.node.pages : []).filter((p) => p && typeof p === "object").map(migratePageNode),
+    };
+    // Its old parent was a notebook, which no longer exists — so it returns to root.
+    return { ...base, node, parentId: null };
+  }
+  // A binned PAGE: its parentId named a section, and a section kept its id — so it restores
+  // to exactly the page that section became.
+  return { ...base, node: migratePageNode(e.node), parentId: e.parentId == null ? null : String(e.parentId) };
 }
 
+/** A v3 trash entry, read tolerantly. */
+function migrateTrashEntry(e) {
+  if (!e || typeof e !== "object") return null;
+  const pageIds = (Array.isArray(e.pageIds) ? e.pageIds : []).filter((x) => typeof x === "string");
+  const base = {
+    id: String(e.id || newId("tr")),
+    kind: "page",
+    parentId: e.parentId == null ? null : String(e.parentId),
+    index: Number.isFinite(e.index) ? e.index : 0,
+    projectId: e.projectId == null ? null : String(e.projectId),
+    title: typeof e.title === "string" ? e.title : "",
+    deletedAt: Number.isFinite(e.deletedAt) ? e.deletedAt : 0,
+    pageIds,
+  };
+  if (!e.node || typeof e.node !== "object") return { ...base, node: null };
+  return { ...base, node: migratePageNode(e.node) };
+}
+
+/** Tolerant read of anything that claims to be a tree. Never throws, never returns null:
+ *  junk, a missing key, a future version, a half-written object all resolve to a usable
+ *  tree. A notes module that refuses to open because one field is the wrong type is worse
+ *  than one that quietly drops the field. */
 export function migrate(raw) {
-  if (!raw || typeof raw !== "object" || !Array.isArray(raw.notebooks)) return emptyTree();
-  const notebooks = [];
-  for (const nb of raw.notebooks) {
-    if (!nb || typeof nb !== "object") continue;
-    notebooks.push(migrateNotebook(nb));
+  if (!raw || typeof raw !== "object") return emptyTree();
+
+  // ---- the LEGACY four-level shape (v1/v2). One-way; see the rules above.
+  if (!Array.isArray(raw.pages) && Array.isArray(raw.notebooks)) {
+    const pages = [];
+    for (const nb of raw.notebooks) {
+      if (!nb || typeof nb !== "object") continue;
+      pages.push(...notebookToPages(nb));
+    }
+    const trash = [];
+    for (const e of Array.isArray(raw.trash) ? raw.trash : []) {
+      if (!e || typeof e !== "object") continue;
+      trash.push(legacyTrashEntry(e));
+    }
+    return { v: NOTES_TREE_VERSION, pages, trash };
+  }
+
+  if (!Array.isArray(raw.pages)) return emptyTree();
+  const pages = [];
+  for (const p of raw.pages) {
+    if (!p || typeof p !== "object") continue;
+    pages.push(withProject(migratePageNode(p), p.projectId));
   }
   const trash = [];
   for (const e of Array.isArray(raw.trash) ? raw.trash : []) {
     const m = migrateTrashEntry(e);
     if (m) trash.push(m);
   }
-  return { v: NOTES_TREE_VERSION, notebooks, trash };
+  return { v: NOTES_TREE_VERSION, pages, trash };
 }

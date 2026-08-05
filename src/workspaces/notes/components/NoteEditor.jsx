@@ -182,7 +182,7 @@ function FindBar({ term, count, index, onStep, onClear }) {
 
 export default function NoteEditor({
   pageId, title, onTitleChange, onStatus, onExportMarkdown, onPrintNotice, onSaved,
-  scopeLabel, status, updatedAt, searchTerm = "", onClearSearch, notebookPageIds, notebookTitle, sectionTitle,
+  scopeLabel, status, updatedAt, searchTerm = "", onClearSearch, notebookPageIds, trail = [],
 }) {
   /* Initial content read ONCE, here. Not in an effect — see fix (2) in the header. */
   const [initialDoc] = useState(() => readPage(pageId) || EMPTY_DOC);
@@ -333,12 +333,12 @@ export default function NoteEditor({
     const images = await readNoteImages(imageIdsInDoc(json));
     const html = buildPrintDocument({
       title: title || "Untitled page",
-      meta: [notebookTitle, sectionTitle].filter(Boolean).join(" › "),
+      meta: (trail || []).filter(Boolean).join(" › "),
       pages: [{ title, html: docToHtml(json, images), updatedAt }],
     });
     const r = await printHtmlDocument(html);
     if (!r.ok) onPrintNotice?.(r.error);
-  }, [editor, title, updatedAt, notebookTitle, sectionTitle, onPrintNotice]);
+  }, [editor, title, updatedAt, trail, onPrintNotice]);
 
   const badge = status === "error"
     ? { text: "Not saved", color: "var(--danger-text)" }
