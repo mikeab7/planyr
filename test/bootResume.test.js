@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { initialBootResolved, mayReconcileUrl, pickResumeTarget } from "../src/workspaces/site-planner/lib/bootResume.js";
+import { initialBootResolved, mayReconcileUrl, pickResumeTarget, mayWriteRouteProject, routeProjectAvailability } from "../src/workspaces/site-planner/lib/bootResume.js";
 
 describe("initialBootResolved — the boot gate's starting value (V13)", () => {
   it("is FALSE when Supabase is configured (wait for the first auth + pull before reconciling the URL)", () => {
@@ -67,5 +67,70 @@ describe("pickResumeTarget — which plan to resume (shared by boot + post-pull)
     // After pullCloud: same route project, plans now present → resumes the exact open plan.
     const postFetch = pickResumeTarget({ routeProjectId: "g1", currentId: "g1-older", plansOfGroup, hasSite: has(new Set(["g1-older"])) });
     expect(postFetch).toBe("g1-older");
+  });
+});
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * NEW-5 — THE URL IS AUTHORITATIVE.
+ *
+ * `mayReconcileUrl` above was the V13 fix, and it gates on an EVENT having fired rather than on
+ * the DATA being known — which is why the owner could still lose a project by refreshing. Two
+ * live boot sequences defeat it:
+ *   • supabase-js emits INITIAL_SESSION with a NULL user while it is still restoring a stored
+ *     session. That call runs to completion and releases the gate, so the URL sync fires with
+ *     the cloud sites still absent and writes null straight over #/project/<id>/site.
+ *   • if the sequence is INITIAL_SESSION(null) → TOKEN_REFRESHED(user), the handler ignores
+ *     TOKEN_REFRESHED entirely, so the resume never runs at all — and the route is already gone.
+ * These lock the fix that closes the CLASS rather than either sequence.
+ * ──────────────────────────────────────────────────────────────────────────── */
+describe("mayWriteRouteProject (NEW-5)", () => {
+  it("REFUSES to clear a route-named project just because nothing is loaded", () => {
+    // The exact frame that broke it: the route names a project, the app has none open yet.
+    expect(mayWriteRouteProject({ routeProjectId: "smsdsqdkl9i0", nextGroup: null })).toBe(false);
+  });
+
+  it("allows the clear when the user deliberately left", () => {
+    expect(mayWriteRouteProject({ routeProjectId: "smsdsqdkl9i0", nextGroup: null, userLeft: true })).toBe(true);
+  });
+
+  it("always allows writing a REAL project (the URL stays shareable)", () => {
+    expect(mayWriteRouteProject({ routeProjectId: null, nextGroup: "g1" })).toBe(true);
+    expect(mayWriteRouteProject({ routeProjectId: "g0", nextGroup: "g1" })).toBe(true);
+  });
+
+  it("a route with no project can always be written (nothing to lose)", () => {
+    expect(mayWriteRouteProject({ routeProjectId: null, nextGroup: null })).toBe(true);
+  });
+
+  it("REGRESSION — the null-user INITIAL_SESSION frame no longer strips the deep link", () => {
+    // Boot order on production: INITIAL_SESSION(null) releases the gate → effGroup is null →
+    // the old writer put "#/" in the URL, and the SIGNED_IN that followed then resumed against
+    // a route with no project in it. Under the new rule that write never happens…
+    const route = "smsdsqdkl9i0";
+    expect(mayWriteRouteProject({ routeProjectId: route, nextGroup: null, userLeft: false })).toBe(false);
+    // …so the later resume still sees the route, and writing the resolved group is allowed.
+    expect(mayWriteRouteProject({ routeProjectId: route, nextGroup: route, userLeft: false })).toBe(true);
+  });
+});
+
+describe("routeProjectAvailability (NEW-5)", () => {
+  const withPlans = (ids) => (g) => (g === "has" ? ids.map((id) => ({ id })) : []);
+
+  it("opens a project whose plans are on this device", () => {
+    expect(routeProjectAvailability({ plansOfGroup: withPlans(["p1"]), groupId: "has", bootResolved: true })).toBe("open");
+  });
+
+  it("WAITS while the boot is unresolved — the pull may still land it", () => {
+    // This is the state the old code answered with a silent `return`, leaving the PREVIOUS
+    // project rendered under a URL naming a different one (the owner's repro B).
+    expect(routeProjectAvailability({ plansOfGroup: withPlans([]), groupId: "nope", bootResolved: false })).toBe("waiting");
+  });
+
+  it("reports MISSING once the boot has settled — never silence", () => {
+    expect(routeProjectAvailability({ plansOfGroup: withPlans([]), groupId: "nope", bootResolved: true })).toBe("missing");
+  });
+
+  it("no routed project is trivially open", () => {
+    expect(routeProjectAvailability({ plansOfGroup: withPlans([]), groupId: null, bootResolved: true })).toBe("open");
   });
 });

@@ -27,9 +27,24 @@
  * so a recompute never re-hits the network. Endpoint facts live in the GIS Source Registry
  * (shared/gis/sources.js `femaEbfe`). */
 import { gisSource } from "../../../shared/gis/sources.js";
+import { proxyServiceUrl } from "../../../shared/gis/gisProxyCore.js";
 
 export const EBFE_URL = gisSource("femaEbfe").serviceUrl;
-export const EBFE_LAYERS = gisSource("femaEbfe").identifyLayers; // { bfe1pct: 17, wse02: 21 }
+export const EBFE_LAYERS = gisSource("femaEbfe").identifyLayers; // { bfe1pct: 20, wse02: 24 } — RASTER sublayers
+/* The attribute names this service reports a raster pixel under. Registry-owned so the app and
+ * the weekly verifier read the SAME list — the mismatch between them is half of the NEW-1 bug. */
+export const EBFE_PIXEL_ATTRS = gisSource("femaEbfe").pixelAttributes || ["Pixel Value", "Stretched.Pixel Value"];
+
+/* NEW-1 — the request goes through the app's OWN same-origin GIS proxy, never straight at
+ * txgeo.usgs.gov. Direct, the owner's 2026-08-04 audit measured "TypeError: Failed to fetch" at
+ * Katy (a cross-origin refusal: the browser never saw a response, so no amount of error handling
+ * here could have helped) and a hard TIMEOUT at Harris. Through the proxy the identical request
+ * answered in under three seconds. `nostore=1` keeps a per-site point answer out of the Drive
+ * imagery cache — this is a JSON reading, not a tile.
+ * `direct: true` is the escape hatch the unit tests and any non-browser caller use. */
+export function ebfeEndpoint({ direct = false } = {}) {
+  return direct ? EBFE_URL : `${proxyServiceUrl(EBFE_URL)}`;
+}
 
 // Per-location response cache. Key = lat/lng rounded to ~11 m (4 dp). Stores the resolved
 // { bfe1pctFt, wse02Ft } (both may be null = no coverage) — NOT thrown errors, so a transient
@@ -40,16 +55,22 @@ const cacheKey = (lat, lng) => `${lat.toFixed(4)},${lng.toFixed(4)}`;
 
 export function clearEbfeCache() { _ebfeCache.clear(); }
 
-/* Pull the raw pixel value out of one identify result. Prefer the raw "Pixel Value"
- * attribute (unaffected by any renderer/stretch), else the top-level `value`. Returns a
- * finite number, or null for "NoData" / empty / non-numeric. Pure. */
-export function pixelValueOf(result) {
-  if (!result) return null;
-  const candidates = [
-    result.attributes && (result.attributes["Pixel Value"] ?? result.attributes["Stretched.Pixel Value"]),
-    result.value,
-  ];
-  for (const c of candidates) {
+/* Pull the raw pixel value out of one identify result.
+ *
+ * ⛔ NEW-1 — read the ATTRIBUTE NAMES from the registry, and NEVER fall back to `result.value`.
+ * Both halves are load-bearing:
+ *   (a) this service reports its pixel under "Service Pixel Value" / "Classify.Pixel Value".
+ *       The old hardcoded pair ("Pixel Value" / "Stretched.Pixel Value") matched neither, so
+ *       every result folded to null.
+ *   (b) `result.value` is NOT a pixel value on this service. On the boundary sublayer it is a
+ *       Shape_Length — the live response carries `value: "17141870.9255999"` — so a fold that
+ *       trusted it would report seventeen million feet as a flood elevation. A missing attribute
+ *       is an honest null; it is never an invitation to read whatever else is on the object.
+ * Returns a finite number, or null for "NoData" / empty / non-numeric / absent. Pure. */
+export function pixelValueOf(result, attrNames = EBFE_PIXEL_ATTRS) {
+  if (!result || !result.attributes) return null;
+  for (const name of attrNames) {
+    const c = result.attributes[name];
     if (c == null) continue;
     const s = String(c).trim();
     if (!s || /^nodata$/i.test(s)) continue;
@@ -60,11 +81,15 @@ export function pixelValueOf(result) {
 }
 
 /* Fold an identify response's `results` array into { bfe1pctFt, wse02Ft } by layer id.
- * A layer with no covering result (omitted, or NoData) stays null. Pure. */
-export function foldIdentify(results = [], layers = EBFE_LAYERS) {
+ * A layer with no covering result (omitted, or NoData) stays null. Pure.
+ *
+ * The layer ids MUST be the raster "… Image" sublayers (20 / 24), not the mosaic GROUP ids
+ * (17 / 21): ArcGIS identify expands a group and reports only its children, so matching on a
+ * group id matches nothing, forever, silently. See the registry row's trap note. */
+export function foldIdentify(results = [], layers = EBFE_LAYERS, attrNames = EBFE_PIXEL_ATTRS) {
   const out = { bfe1pctFt: null, wse02Ft: null };
   for (const r of results || []) {
-    const v = pixelValueOf(r);
+    const v = pixelValueOf(r, attrNames);
     if (v == null) continue;
     if (r.layerId === layers.bfe1pct && out.bfe1pctFt == null) out.bfe1pctFt = v;
     else if (r.layerId === layers.wse02 && out.wse02Ft == null) out.wse02Ft = v;
@@ -74,14 +99,18 @@ export function foldIdentify(results = [], layers = EBFE_LAYERS) {
 
 /* Build the /identify query URL for a WGS84 point. Uses a small map extent + imageDisplay
  * around the point so the raster cell containing the point is what's identified. Pure. */
-export function ebfeIdentifyUrl(lat, lng, { serviceUrl = EBFE_URL, layers = EBFE_LAYERS, boxDeg = 0.005 } = {}) {
+export function ebfeIdentifyUrl(lat, lng, { serviceUrl, direct = false, layers = EBFE_LAYERS, boxDeg = 0.005 } = {}) {
+  const base = serviceUrl || ebfeEndpoint({ direct });
   const geometry = JSON.stringify({ x: lng, y: lat, spatialReference: { wkid: 4326 } });
   const mapExtent = [lng - boxDeg, lat - boxDeg, lng + boxDeg, lat + boxDeg].join(",");
   const ids = [layers.bfe1pct, layers.wse02].join(",");
-  return `${serviceUrl}/identify?geometry=${encodeURIComponent(geometry)}` +
+  // `nostore=1` is stripped by the proxy before the upstream URL is rebuilt (like `meta=1`), so
+  // a direct call and a proxied call put the SAME query on the agency's wire.
+  const store = base.indexOf("/api/gis-cache/") === 0 ? "&nostore=1" : "";
+  return `${base}/identify?geometry=${encodeURIComponent(geometry)}` +
     `&geometryType=esriGeometryPoint&sr=4326&layers=${encodeURIComponent(`all:${ids}`)}` +
     `&tolerance=1&mapExtent=${encodeURIComponent(mapExtent)}&imageDisplay=101,101,96` +
-    `&returnGeometry=false&f=json`;
+    `&returnGeometry=false&f=json${store}`;
 }
 
 /* Sample the FEMA InFRM EBFE at ONE point (WGS84 lat/lng). Returns
@@ -91,7 +120,7 @@ export function ebfeIdentifyUrl(lat, lng, { serviceUrl = EBFE_URL, layers = EBFE
  *   timeoutMs (default 8s) bounds the call; fetchImpl injectable for tests; signal lets a
  *   caller abort a superseded request; useCache (default true) reads/writes the per-location
  *   cache. */
-export async function sampleEbfePoint(lat, lng, { timeoutMs = 8000, fetchImpl, signal, useCache = true, boxDeg } = {}) {
+export async function sampleEbfePoint(lat, lng, { timeoutMs = 8000, fetchImpl, signal, useCache = true, boxDeg, direct } = {}) {
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
   const key = cacheKey(lat, lng);
   if (useCache && _ebfeCache.has(key)) {
@@ -99,7 +128,7 @@ export async function sampleEbfePoint(lat, lng, { timeoutMs = 8000, fetchImpl, s
     _ebfeCache.delete(key); _ebfeCache.set(key, hit); // LRU touch
     return hit;
   }
-  const url = ebfeIdentifyUrl(lat, lng, { boxDeg });
+  const url = ebfeIdentifyUrl(lat, lng, { boxDeg, direct });
   const ctrl = !signal && typeof AbortController !== "undefined" ? new AbortController() : null;
   const timer = ctrl ? setTimeout(() => ctrl.abort(), timeoutMs) : null;
   let r;

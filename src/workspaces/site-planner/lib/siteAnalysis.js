@@ -577,19 +577,43 @@ export function analyzeProximitySource(source, rings, opts = {}) {
   const cap = source.proxCap || 100;
   const nameKey = (source.fields && source.fields.name) || "NAME";
 
+  /* NEW-6 — the feature query now REPORTS whether it was truncated, so the separate exact-count
+   * request can be skipped when it is provably redundant.
+   *
+   * Why this exists: every proximity source fired TWO requests per screen — the features, and a
+   * `returnCountOnly` for the exact total, because the feature query is capped at `proxCap` (100).
+   * But ArcGIS tells you when it truncated: `exceededTransferLimit`. Below the cap and not
+   * truncated, the features ARE the population, so the second request buys nothing and asks the
+   * agency for an answer we already hold. Measured on the owner's Goose Creek ring, 2026-08-05:
+   * seventeen proximity sources, thirty-four requests → seventeen, and on every one of them the
+   * feature count already equalled the reported total.
+   *
+   * The wall-clock win is small (the two ran concurrently), and that is not the point. The point
+   * is REQUEST VOLUME against metered agency services — H-GAC's ArcGIS Online org was returning
+   * HTTP 429 "API calls quota exceeded" during this same audit, and halving what we ask for is
+   * the only lever we have on that. `aadt` is the slowest source in the registry, so it saves
+   * the most; nothing about the reported numbers changes. */
   const featFetcher = async () => {
     const j = await queryProximity(source, layer, rings, bufferFt, fetchJson);
-    return (j.features || []).map((f) => {
+    const recs = (j.features || []).map((f) => {
       const g = f.geometry || {};
       const rec = { attrs: normalizeAttrs(f.attributes) };
       if (Array.isArray(g.paths)) rec.paths = g.paths;                        // polyline (faults, rail)
       else if (Number.isFinite(g.x) && Number.isFinite(g.y)) rec.lngLat = [g.x, g.y]; // point
       return rec;
     });
+    // Non-enumerable so nothing downstream (or a cache serializer) sees it as a feature.
+    Object.defineProperty(recs, "truncated", { value: !!j.exceededTransferLimit || recs.length >= cap, enumerable: false });
+    return recs;
   };
   const { fresh } = cache.swr("proximity:" + source.id + ":" + sig, featFetcher, { ttl: source.ttl || 0 });
-  const countFresh = cache.swr("proximitycount:" + source.id + ":" + sig,
-    async () => countProximity(source, layer, rings, bufferFt, fetchJson), { ttl: source.ttl || 0 }).fresh;
+  const countFresh = fresh.then((r) => {
+    // Only ask for the exact total when the feature answer could not have carried it. A failed
+    // feature query still asks — a count is cheap and may succeed where the geometry pull didn't.
+    if (r && !r.error && Array.isArray(r.data) && !r.data.truncated) return { data: r.data.length, error: null };
+    return cache.swr("proximitycount:" + source.id + ":" + sig,
+      async () => countProximity(source, layer, rings, bufferFt, fetchJson), { ttl: source.ttl || 0 }).fresh;
+  });
 
   return Promise.all([fresh, countFresh]).then(([r, rc]) => {
     if (r.error) logQueryFailure(source.id, r.error);

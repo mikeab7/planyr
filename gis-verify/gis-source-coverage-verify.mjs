@@ -15,12 +15,20 @@
  *
  *   node gis-verify/gis-source-coverage-verify.mjs
  *
- * NOTE on the sandbox: outbound HTTPS is allow-listed, and gis.rrc.texas.gov is NOT on
- * the sandbox list — so the RRC rows will report "unreachable" HERE. That is expected;
- * this script is meant to run in CI / GitHub Actions (open internet) or anywhere RRC is
- * reachable. A sandbox run still verifies the FEMA / TxGIO / TxDOT / NWI rows.
+ * NOTE on the sandbox: outbound HTTPS is allow-listed, so some hosts report "unreachable"
+ * HERE (HTTP 403 at the egress proxy) purely because of the sandbox's policy, not because the
+ * service is down. As of 2026-08-05 that is: gisclient.quiddity.com (the whole BKDD family),
+ * txgeo.usgs.gov (femaEbfe) and — separately, and this one IS genuinely dead —
+ * fximgservices.hcfcd.org. This script is meant to run in CI / GitHub Actions (open internet).
+ * To probe a sandbox-blocked-but-allow-listed host from here, route it through the app's own
+ * same-origin GIS proxy: https://planyr.io/api/gis-cache/svc/<b64url(serviceUrl)>/<op>?<query>
+ * (that is how femaEbfe's 20/24 layer ids and its live values were confirmed).
+ * A sandbox run still verifies every ArcGIS-Online row, incl. all fourteen Colorado rows.
  */
-import { GIS_SOURCES, outFieldsFor } from "../src/shared/gis/sources.js";
+import { GIS_SOURCES, outFieldsFor, auditRegistry, availabilityOf, fixtureCount } from "../src/shared/gis/sources.js";
+// NEW-4 — the coverage fixtures live beside the registry but OFF the app bundle (they are
+// assertions, not endpoint facts, and sources.js is on the Site route's critical path).
+import { SOURCE_FIXTURES, SOURCE_DOCS, fixturesFor } from "../src/shared/gis/sourceFixtures.js";
 
 const TIMEOUT_MS = 20000;
 
@@ -69,7 +77,7 @@ async function checkRasterSource(key, s) {
   } else {
     notes.push(`${key}: reachable, ${meta.bandCount} band(s), ${meta.pixelType}.`);
   }
-  for (const fx of s.sampleFixtures || []) {
+  for (const fx of fixturesFor(key).sampleFixtures || []) {
     const geometry = JSON.stringify({ x: fx.point[0], y: fx.point[1], spatialReference: { wkid: 4326 } });
     // A fixture may name its own service (B807 multiplex rows: in-coverage probes span
     // watersheds, while s.serviceUrl is just the representative endpoint).
@@ -167,8 +175,38 @@ async function checkMultiplexCatalog(key, s) {
 /* B882 — reachability + layer-presence check for a MapServer whose sublayers are RASTERS
  * read via /identify (FEMA InFRM EBFE): confirm the service root answers and that each
  * identifyLayer id still exists in the live layer list (a renamed/renumbered raster would
- * silently break the point sampler). A live value probe belongs to the app + V363; this
- * weekly check guards the endpoint shape. */
+ * silently break the point sampler).
+ *
+ * NEW-1 — it now also RUNS THE IDENTIFY and checks the VALUE, because the shape check alone
+ * passed for weeks while the sampler returned a permanent silent null. The layer ids were
+ * "present" (17/21 exist) — they were just the wrong KIND of layer (mosaic GROUPS, whose ids
+ * identify never reports back), and no shape check can see that. Only a real value probe can.
+ * The probe is deliberately the same request the app makes, folded the same way. */
+function identifyUrlFor(s, lng, lat, boxDeg = 0.005) {
+  const geometry = JSON.stringify({ x: lng, y: lat, spatialReference: { wkid: 4326 } });
+  const mapExtent = [lng - boxDeg, lat - boxDeg, lng + boxDeg, lat + boxDeg].join(",");
+  const ids = Object.values(s.identifyLayers || {}).join(",");
+  return `${s.serviceUrl}/identify?geometry=${encodeURIComponent(geometry)}` +
+    `&geometryType=esriGeometryPoint&sr=4326&layers=${encodeURIComponent(`all:${ids}`)}` +
+    `&tolerance=1&mapExtent=${encodeURIComponent(mapExtent)}&imageDisplay=101,101,96` +
+    `&returnGeometry=false&f=json`;
+}
+
+// The pixel value out of one identify result, using the row's declared attribute names.
+function identifyPixelValue(result, attrNames) {
+  if (!result) return null;
+  const a = result.attributes || {};
+  for (const n of attrNames) {
+    const raw = a[n];
+    if (raw == null) continue;
+    const str = String(raw).trim();
+    if (!str || /^nodata$/i.test(str)) continue;
+    const v = parseFloat(str);
+    if (Number.isFinite(v)) return v;
+  }
+  return null;
+}
+
 async function checkIdentifySource(key, s) {
   const problems = [];
   const notes = [];
@@ -179,9 +217,42 @@ async function checkIdentifySource(key, s) {
     return { problems: [`${key}: identify MapServer UNREACHABLE — ${e.message}`], notes };
   }
   const liveIds = new Set((meta.layers || []).map((l) => l.id));
+  const byId = new Map((meta.layers || []).map((l) => [l.id, l]));
   for (const [role, id] of Object.entries(s.identifyLayers || {})) {
     if (!liveIds.has(id)) {
       problems.push(`${key}: identify layer ${id} (${role}) not in the live service — renamed/renumbered? (re-map identifyLayers)`);
+      continue;
+    }
+    // NEW-1 — a MOSAIC/GROUP layer id is the exact trap that made this source silent: identify
+    // reports its SUBLAYERS, never the group, so the fold never matched. Refuse one outright.
+    const t = String((byId.get(id) || {}).type || "");
+    if (/Mosaic Layer|Group Layer/i.test(t)) {
+      problems.push(`${key}: identify layer ${id} (${role}) is a "${t}" — identify NEVER reports a group/mosaic id back, so the fold can never match it. Point identifyLayers at the "… Image" RASTER sublayer.`);
+    }
+  }
+  const attrs = s.pixelAttributes || ["Pixel Value", "Stretched.Pixel Value"];
+  for (const fx of fixturesFor(key).sampleFixtures || []) {
+    try {
+      const j = await getJson(identifyUrlFor(s, fx.point[0], fx.point[1]));
+      const wanted = new Set(Object.values(s.identifyLayers || {}));
+      let v = null;
+      for (const r of j.results || []) {
+        if (!wanted.has(r.layerId)) continue;
+        const pv = identifyPixelValue(r, attrs);
+        if (pv != null) { v = pv; break; }
+      }
+      if (fx.expectNoData) {
+        if (v != null) problems.push(`${key} fixture "${fx.label}": expected no-data, got ${v} — coverage extent changed?`);
+        else notes.push(`${key} fixture "${fx.label}": no-data as expected ✓`);
+      } else if (v == null) {
+        problems.push(`${key} fixture "${fx.label}": identify returned NO value. Either coverage moved, or the identifyLayers / pixelAttributes no longer match what this service reports.`);
+      } else if (fx.expectValueRange && (v < fx.expectValueRange[0] || v > fx.expectValueRange[1])) {
+        problems.push(`${key} fixture "${fx.label}": ${v} outside expected ${fx.expectValueRange.join("–")} — datum/units/model change?`);
+      } else {
+        notes.push(`${key} fixture "${fx.label}": ${v} ✓`);
+      }
+    } catch (e) {
+      problems.push(`${key} fixture "${fx.label}": identify failed — ${e.message}`);
     }
   }
   if (!problems.length) notes.push(`${key}: identify MapServer reachable; layers ${Object.values(s.identifyLayers || {}).join(", ")} present ✓`);
@@ -218,7 +289,7 @@ async function checkSource(key, s) {
   }
 
   // 2) coverage fixtures (the 14-vs-8,014 guard)
-  for (const fx of s.fixtures || []) {
+  for (const fx of fixturesFor(key).fixtures || []) {
     const ep = fx.layer != null ? eps.find((e) => e.id === fx.layer) || eps[0] : eps[0];
     const params = new URLSearchParams({
       f: "json", where: "1=1",
@@ -242,10 +313,60 @@ async function checkSource(key, s) {
   return { problems, notes };
 }
 
+/* NEW-1 — an ACKNOWLEDGED-OUTAGE row is checked the other way round.
+ *
+ * `hcfcdMaapnext` is genuinely dead (its whole ImageServer host hangs), and there is no
+ * replacement to repoint at. Two bad options and one good one:
+ *   • leave it "production" and let the weekly job stay green — that is precisely the state
+ *     that let it rot unnoticed, and the reason this task exists;
+ *   • let it fail every week — a permanently red guard is a guard nobody reads.
+ * So a row declared `availability: "down"` INVERTS: the check asserts it is STILL down, and a
+ * row that starts answering again is reported as a PROBLEM — "recovered, flip it back to live"
+ * — which is the one message we actually want on the day it comes back. `degraded` is softer:
+ * a failure is reported as a note (we already know it is flaky) but a recovery is not, because
+ * a degraded row is expected to answer some of the time. */
+async function checkWithAvailability(key, s) {
+  const av = availabilityOf(s);
+  const r = await checkSource(key, s);
+  if (av === "live") return r;
+  const reachFailed = r.problems.length > 0;
+  if (av === "down") {
+    if (reachFailed) {
+      return {
+        problems: [],
+        notes: [`${key}: STILL DOWN as declared (since ${s.outage.since}) — ${s.outage.symptom}. Falls through to: ${s.outage.replacement}.`],
+      };
+    }
+    return {
+      problems: [
+        `${key}: RECOVERED — the registry declares it down (since ${s.outage.since}) but every check now passes. ` +
+        `Set availability back to "live", drop the outage record, and re-enable the sampler.`,
+      ],
+      notes: r.notes,
+    };
+  }
+  // degraded — a failure is expected-ish; keep it visible but don't fail the build on it.
+  return {
+    problems: [],
+    notes: reachFailed
+      ? [`${key}: DEGRADED as declared (since ${s.outage.since}) — ${s.outage.symptom}. This run: ${r.problems.join(" | ")}`]
+      : [...r.notes, `${key}: degraded row answered cleanly this run (declared flaky since ${s.outage.since}).`],
+  };
+}
+
 const allProblems = [];
 const allNotes = [];
+
+/* NEW-1 — the STRUCTURAL guard, run before a single request goes out. `auditRegistry` now fails
+ * a row that carries no coverage fixture at all, which is the hole that hid both dead flood
+ * layers: a fixture-less row has nothing for this script to assert, so it can never go red. */
+const audit = auditRegistry(GIS_SOURCES, SOURCE_FIXTURES, SOURCE_DOCS);
+allProblems.push(...audit.problems.map((p) => `registry: ${p}`));
+const noFixture = Object.keys(GIS_SOURCES).filter((k) => fixtureCount(null, fixturesFor(k)) === 0);
+allNotes.push(`registry: ${Object.keys(GIS_SOURCES).length} rows, ${noFixture.length} without a coverage fixture (must be 0).`);
+
 for (const [key, s] of Object.entries(GIS_SOURCES)) {
-  const { problems, notes } = await checkSource(key, s);
+  const { problems, notes } = await checkWithAvailability(key, s);
   allProblems.push(...problems);
   allNotes.push(...notes);
 }

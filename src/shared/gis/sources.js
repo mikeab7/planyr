@@ -39,6 +39,23 @@ export const NON_PRODUCTION_URL_PATTERNS = [
 
 export const VALID_TIERS = ["production", "monitored-exception"];
 
+/* NEW-1 (2026-08-05) — AVAILABILITY is ORTHOGONAL to tier, and the registry needs both.
+ * `tier` answers "is this the authoritative agency's production endpoint" (a design fact).
+ * `availability` answers "does it ANSWER right now" (an operational fact). Conflating them
+ * is how `hcfcdMaapnext` sat at tier "production" for weeks while timing out at every point,
+ * including its own home county:
+ *   • "live"     — answers. The default; no extra fields.
+ *   • "degraded" — answers, but unreliably (intermittent 429/timeout). Requires `outage`.
+ *   • "down"     — does NOT answer. Requires `outage`. The app must SAY SO (never a silent
+ *                  null on a flood analysis), and the weekly verifier asserts it is STILL
+ *                  down — a row that starts answering again is reported as a PROBLEM
+ *                  ("recovered, flip it back to live"), so a recovery can't go unnoticed
+ *                  and CI isn't permanently red for an outage we already know about.
+ * `outage` = { since, symptom, evidence, impact, replacement } — all strings; `replacement`
+ * names what the app falls through to (or "none"). */
+export const VALID_AVAILABILITY = ["live", "degraded", "down"];
+export const availabilityOf = (entry) => (entry && entry.availability) || "live";
+
 // ---------------------------------------------------------------------------
 // The registry. One row per layer. `fields` is the named field map (internal key →
 // the source's column); `outFields` is derived from it unless overridden (joined
@@ -70,11 +87,6 @@ export const GIS_SOURCES = {
     coverage: "national",
     tier: "production",
     lastVerified: "2026-06-21",
-    fixtures: [
-      // Galveston/Bolivar coast — wall-to-wall SFHA, a robust national-service sanity check.
-      { label: "Galveston coast SFHA", bbox: [-94.85, 29.28, -94.70, 29.40], expectMinCount: 1 },
-    ],
-    notes: "Robust national service; the app's flood overlay rides the same MapServer.",
   },
 
   wetlands: {
@@ -94,16 +106,7 @@ export const GIS_SOURCES = {
     outFields: ["*"], // joined layers report table-qualified field names that differ per sublayer
     coverage: "national",
     tier: "monitored-exception",
-    tierReason:
-      "USFWS publishes NWI polygon-query only on this 'Test' folder; the production " +
-      "Wetlands/MapServer root has an empty /layers and 500s on /query. Re-check for a " +
-      "production queryable NWI endpoint periodically (tracked in BACKLOG / VERIFICATION).",
     lastVerified: "2026-06-21",
-    fixtures: [
-      // Sheldon Lake State Park, NE Harris Co. — known dense NWI polygons (≈58 confirmed live).
-      { label: "Sheldon Lake wetlands", bbox: [-95.18, 29.84, -95.10, 29.90], layer: 2, expectMinCount: 1 },
-    ],
-    notes: "Desktop screen only — NOT a jurisdictional delineation.",
   },
 
   oilgas: {
@@ -124,15 +127,6 @@ export const GIS_SOURCES = {
     coverage: "statewide",
     tier: "production",
     lastVerified: "2026-06-21",
-    fixtures: [
-      // The centerpiece guard: a county-clipped source FAILS these immediately.
-      { label: "Chambers County wells", bbox: [-94.92, 29.40, -94.40, 29.95], expectMinCount: 1000 },
-      { label: "Mont Belvieu (Grand Port) wells", point: [-94.886, 29.846], expectMinCount: 1 },
-    ],
-    notes:
-      "RRC well points are schematic; historic/orphaned wells can be inaccurate or unmapped. " +
-      "Load-tested to 20 concurrent polygon queries with 0 failures (more robust than the retired " +
-      "Harris-County host). Retired source: www.gis.hctx.net/arcgishcpid/…/TXRRC/Wells.",
   },
 
   pipelines: {
@@ -154,12 +148,6 @@ export const GIS_SOURCES = {
     coverage: "statewide",
     tier: "production",
     lastVerified: "2026-06-21",
-    fixtures: [
-      { label: "Chambers County pipelines", bbox: [-94.92, 29.40, -94.40, 29.95], expectMinCount: 1000 },
-    ],
-    notes:
-      "RRC T-4 permit routes are SCHEMATIC, deliberately low-resolution — never a surveyed " +
-      "alignment. Retired source: www.gis.hctx.net/arcgishcpid/…/TXRRC/Pipelines.",
   },
 
   // ---- Utility-service CCN screening sources (public-data screening PHASE 1) ----
@@ -191,15 +179,6 @@ export const GIS_SOURCES = {
     coverage: "statewide",
     tier: "production",
     lastVerified: "2026-07-18",
-    fixtures: [
-      // Cypress — dense CCN country (same point the `mud` fixture uses); a county-clipped or
-      // dead source fails this. Queried as a ~1 km envelope by the drift verifier.
-      { label: "Cypress-area water CCN", point: [-95.69, 29.97], expectMinCount: 1 },
-    ],
-    notes:
-      "PUCT water-CCN retail monopoly boundaries (TWDB-hosted, Dec 2023). A site inside a polygon " +
-      "has a certificated water provider (obligated to serve); no polygon → well or a new CCN/petition. " +
-      "STATUS separates an approved cert from a pending docket. Screening only — confirm with the utility/PUC.",
   },
   ccnSewer: {
     key: "ccnSewer",
@@ -218,14 +197,6 @@ export const GIS_SOURCES = {
     coverage: "Houston metro region (Harris County GIS re-serve of the PUCT CCN; no statewide sewer-CCN REST exists)",
     tier: "production",
     lastVerified: "2026-07-18",
-    fixtures: [
-      { label: "Cypress-area sewer CCN", point: [-95.69, 29.97], expectMinCount: 1 },
-    ],
-    notes:
-      "PUCT sewer-CCN retail monopoly boundaries, Harris County GIS re-serve (EPSG:2278). Regional " +
-      "(Houston MSA) coverage — a far-out site reads 'no sewer CCN' because the layer doesn't reach it, " +
-      "so this screen's absent state is an honest INFO note, never a green all-clear. Statewide-source " +
-      "upgrade tracked as a live-verify item. Same MapServer also hosts the water CCN (layer 1). Screening only.",
   },
 
   // ---- Environmental contamination pre-screen (public-data screening PHASE 2) ----
@@ -245,14 +216,6 @@ export const GIS_SOURCES = {
     coverage: "statewide",
     tier: "production",
     lastVerified: "2026-07-18",
-    fixtures: [
-      // Pasadena / Ship Channel — dense LPST country (24 within a mile, live 2026-07-18).
-      { label: "Pasadena LPST cluster", point: [-95.21, 29.72], expectMinCount: 1 },
-    ],
-    notes:
-      "TCEQ Leaking Petroleum Storage Tank sites (a documented petroleum-UST release; REM_PROG = the " +
-      "remediation-program status). A Phase I ESA PRE-SCREEN — a Phase I ESA / TCEQ records review is the " +
-      "authoritative check. Historic/closed cases can be inaccurate or unmapped.",
   },
   epaCleanups: {
     key: "epaCleanups",
@@ -268,13 +231,6 @@ export const GIS_SOURCES = {
     coverage: "national",
     tier: "production",
     lastVerified: "2026-07-18",
-    fixtures: [
-      // Pasadena Refining area — NPL/RCRA sites present (live 2026-07-18).
-      { label: "Pasadena refining cleanups", point: [-95.21, 29.72], expectMinCount: 1 },
-    ],
-    notes:
-      "EPA 'Cleanups in My Community' — Superfund (NPL/non-NPL) + RCRA corrective-action sites, FRS-derived. " +
-      "MAP_SYMBOL_CODE distinguishes the program. A Phase I ESA PRE-SCREEN — a Phase I ESA is the authoritative check.",
   },
 
   // ---- Active surface growth faults (public-data screening PHASE 3) ----
@@ -295,20 +251,7 @@ export const GIS_SOURCES = {
     // anonymously-queryable live service. It is the COMPLETE study dataset (not a clipped subset),
     // but community-hosted, so it's an acknowledged exception — screening only.
     tier: "monitored-exception",
-    tierReason:
-      "USGS SIM 2874 (the authoritative Houston fault dataset) publishes as a DOWNLOAD only; no live " +
-      "authoritative REST endpoint exists and the USGS-derived AGOL copy is token-gated. We depend on the " +
-      "University of Houston GIS republication (the full dataset, anonymously queryable) until we ingest the " +
-      "USGS SIM 2874 shapefile to self-host — tracked in VERIFICATION.",
     lastVerified: "2026-07-18",
-    fixtures: [
-      // NW Houston — dense growth-fault country (25 traces in this envelope, live 2026-07-18).
-      { label: "NW Houston fault traces", bbox: [-95.60, 29.75, -95.40, 29.95], expectMinCount: 1 },
-    ],
-    notes:
-      "Houston-area growth-fault surface traces (aseismic slow-slip faults that damage foundations, slabs, " +
-      "and pavement over time). Community-hosted republication of USGS SIM 2874 — screening only; a " +
-      "geotechnical / fault-specific study is the authoritative check. Prefer self-hosting the USGS shapefile.",
   },
 
   // ---- Power / grid screening (public-data screening PHASE 5) ----
@@ -330,15 +273,6 @@ export const GIS_SOURCES = {
     coverage: "national",
     tier: "production",
     lastVerified: "2026-07-18",
-    fixtures: [
-      // Katy / west Houston — dense transmission country (≥1 line in any ~1 km envelope; live 2026-07-18).
-      { label: "West Houston transmission", bbox: [-95.70, 29.75, -95.55, 29.85], expectMinCount: 1 },
-    ],
-    notes:
-      "HIFLD electric transmission lines (≥69 kV). A line crossing the parcel is a transmission " +
-      "easement — no building under it, and towers/guy-wires eat usable area. Routes are schematic; " +
-      "OWNER/VOLTAGE are withheld (0 / 'NOT AVAILABLE') on some redacted lines. Screening only — the " +
-      "utility and a survey are the authoritative check.",
   },
   substations: {
     key: "substations",
@@ -356,15 +290,6 @@ export const GIS_SOURCES = {
     coverage: "national",
     tier: "production",
     lastVerified: "2026-07-18",
-    fixtures: [
-      // Downtown Houston — dense substation country (18 within 3 mi, live 2026-07-18). A regional
-      // subset (e.g. the South-Texas-only republication) reads 0 here and fails immediately.
-      { label: "Downtown Houston substations", point: [-95.36, 29.76], expectMinCount: 1 },
-    ],
-    notes:
-      "HIFLD electric substation points. The distance to the nearest is a SERVICE / interconnect " +
-      "proxy for a heavy-power user, not a constraint. NAME is anonymized on redacted records and " +
-      "MAX_VOLTAG is 0 where withheld. Screening only — confirm service/capacity with the utility.",
   },
 
   // ---- Access tier (public-data screening PHASE 6) ----
@@ -383,16 +308,23 @@ export const GIS_SOURCES = {
     fields: { aadt: "AADT_PRELIM", road: "Located_On", county: "County" },
     coverage: "statewide (Texas)",
     tier: "production",
-    lastVerified: "2026-07-18",
-    fixtures: [
-      // West Houston / Katy — dense count network (≥1 station in any ~1 km envelope; live 2026-07-18,
-      // AADT ~45k on I-10 corridor). A dead/clipped source fails this.
-      { label: "West Houston AADT", point: [-95.75, 29.78], expectMinCount: 1 },
-    ],
-    notes:
-      "TxDOT preliminary AADT count points (AADT_PRELIM). The nearest counted road's volume is an " +
-      "access / visibility proxy — high traffic = good access/exposure but also congestion. Located_On " +
-      "(road name) is blank on some records. Screening only.",
+    /* NEW-6 — MEASURED, not guessed. The owner's audit clocked this row at 4,657 ms against a
+     * 166 ms median across all 43 sources and called it "28x slower than every other source".
+     * Re-measured 2026-08-05, and the honest answer is more specific than that:
+     *   • 4,657 ms was the SERVICE METADATA endpoint (`?f=json`, a 19 KB payload). The screening
+     *     path never calls it — that number is a cold first connection to TxDOT's ArcGIS Online
+     *     org, and it does not describe what a user waits for. Warm, it is 40–124 ms.
+     *   • In the request the app ACTUALLY makes — the buffered proximity /query — this row is
+     *     410 ms (median of three) against a 113 ms median for its six peers (lpst 94 · rail 112
+     *     · airports 113 · epaCleanups 122 · substations 101 · transmission 219). So it IS the
+     *     slowest, by about 3.6x, not 28x, and it is a large statewide point layer on a busy
+     *     shared org rather than anything we are doing wrong.
+     * The fix is therefore volume, not a rewrite: the redundant exact-count request is gone
+     * (siteAnalysis.analyzeProximitySource), halving what this row asks for. It also gets its own
+     * abort cap so the slowest source in the registry can never spend the shared 9 s budget and
+     * stall the panel behind it — it degrades to an honest "unknown" instead. */
+    timeoutMs: 6000,
+    lastVerified: "2026-08-05",
   },
   rail: {
     key: "rail",
@@ -408,14 +340,6 @@ export const GIS_SOURCES = {
     coverage: "national",
     tier: "production",
     lastVerified: "2026-07-18",
-    fixtures: [
-      // Downtown Houston — dense rail country (90 segments within 2 mi, live 2026-07-18; UP-owned).
-      { label: "Downtown Houston rail", bbox: [-95.40, 29.73, -95.33, 29.79], expectMinCount: 1 },
-    ],
-    notes:
-      "BTS/FRA rail-network lines (RROWNER1 = owning railroad reporting mark). A line adjacent or " +
-      "crossing the site is a potential rail-served siding — confirm service/rates with the railroad. " +
-      "Screening only; not a surveyed alignment or a confirmed spur right.",
   },
   airports: {
     key: "airports",
@@ -432,14 +356,6 @@ export const GIS_SOURCES = {
     coverage: "national",
     tier: "production",
     lastVerified: "2026-07-18",
-    fixtures: [
-      // Hobby Airport (HOU) area — a public-use airport + nearby heliports (live 2026-07-18).
-      { label: "Houston Hobby area airports", point: [-95.28, 29.65], expectMinCount: 1 },
-    ],
-    notes:
-      "FAA airports (TYPE_CODE: AD = airport, HP = heliport …). Distance to the nearest is a PROXY " +
-      "for FAA Part 77 height-restriction surfaces near a public-use airport — NOT the computed Part " +
-      "77 surfaces. A tall structure near an airport may require an FAA Form 7460 determination. Screening only.",
   },
 
   // ---- Jurisdiction / road identify sources (B93/B94; shared by the screen) ----
@@ -454,7 +370,6 @@ export const GIS_SOURCES = {
     coverage: "statewide",
     tier: "production",
     lastVerified: "2026-06-16",
-    fixtures: [{ label: "Harris County", point: [-95.37, 29.76], expectMinCount: 1 }],
   },
   /* NEW-5 — the Colorado counterpart of `county`. Kept as its OWN row rather than widening the
    * Texas row, so the TxDOT source a Texas site resolves against is untouched; jurisdiction.js
@@ -469,9 +384,9 @@ export const GIS_SOURCES = {
     geometryType: "polygon",
     fields: { name: "NAME20", fips: "GEOID20" },
     coverage: "colorado",
+    states: ["CO"],
     tier: "production",
     lastVerified: "2026-07-29",
-    fixtures: [{ label: "Denver County", point: [-104.9903, 39.7392], expectMinCount: 1 }],
   },
   city: {
     key: "city",
@@ -484,7 +399,6 @@ export const GIS_SOURCES = {
     coverage: "statewide",
     tier: "production",
     lastVerified: "2026-06-16",
-    fixtures: [{ label: "City of Houston", point: [-95.37, 29.76], expectMinCount: 1 }],
   },
   road: {
     key: "road",
@@ -498,8 +412,9 @@ export const GIS_SOURCES = {
     fields: { route: "RIA_RTE_ID", name: "STE_NAM", hwy: "HWY", toll: "TOLL_NM", system: "HSYS", authority: "RDWAY_MAINT_AGCY", funcClass: "F_SYSTEM" },
     coverage: "statewide",
     tier: "production",
-    lastVerified: "2026-06-29",
-    fixtures: [],
+    lastVerified: "2026-08-05",
+    // NEW-1 — this row had NO fixture, so the weekly drift job could not see it rot. Live
+    // 2026-08-05: 101 roadway segments in a ~1 km envelope on the I-10 corridor at Katy.
   },
   isd: {
     key: "isd",
@@ -519,15 +434,6 @@ export const GIS_SOURCES = {
     coverage: "statewide",
     tier: "production",
     lastVerified: "2026-07-11",
-    fixtures: [
-      // Coverage sanity — a county-clipped or wrong source fails these immediately.
-      { label: "Goose Creek CISD (Baytown)", point: [-94.977, 29.735], expectMinCount: 1 },
-      { label: "Houston ISD (downtown)", point: [-95.37, 29.76], expectMinCount: 1 },
-      { label: "Katy ISD", point: [-95.79, 29.79], expectMinCount: 1 },
-    ],
-    notes:
-      "TEA school-district boundaries (SY 2022-23 edition), a TAXING / attendance boundary — " +
-      "NOT a service network. Approximate, for general information; updated ~annually by TEA.",
   },
 
   etj_hgac: {
@@ -540,8 +446,21 @@ export const GIS_SOURCES = {
     fields: { name: "CITY" },
     coverage: "regional",
     tier: "production",
-    lastVerified: "2026-06-17",
-    fixtures: [],
+    /* NEW-1 — H-GAC's ArcGIS-Online org runs on a metered request quota and was OVER IT during
+     * the 2026-08-05 sweep (HTTP 200 carrying `{"error":{"code":429,"Unable to perform query.
+     * Too many requests. API calls quota exceeded"}}`). It is not broken, but it is not
+     * dependable either, and it had no fixture, so nothing ever said so. Marked degraded and
+     * given a fixture; the verifier now reports a 429 as a real failure rather than silence. */
+    availability: "degraded",
+    outage: {
+      since: "2026-08-05",
+      symptom: "intermittent HTTP 429 'API calls quota exceeded' from the H-GAC ArcGIS Online org",
+      evidence: "2026-08-05 sweep: three consecutive /query calls returned code 429 (9,010–10,939 request units over quota); the layer metadata itself answered normally.",
+      impact: "the ETJ half of the merged 'City limits & ETJ' row can come back empty in the Houston region for reasons that have nothing to do with the site.",
+      replacement: "none — there is no statewide Texas ETJ layer. City limits (the `city` row) still answer.",
+    },
+    lastVerified: "2026-08-05",
+    // Katy / west Houston — inside the H-GAC ETJ mosaic.
   },
   etj_austin: {
     key: "etj_austin",
@@ -553,8 +472,10 @@ export const GIS_SOURCES = {
     fields: { name: null },
     coverage: "metro",
     tier: "production",
-    lastVerified: "2026-06-17",
-    fixtures: [],
+    lastVerified: "2026-08-05",
+    /* NEW-1 — no fixture existed. NB an ETJ is the ring OUTSIDE the city limits, so a downtown
+     * point reads 0 and is NOT a valid fixture (measured: downtown Austin = 0). This point sits
+     * in the real "AUSTIN 2 MILE ETJ" polygon; live 2026-08-05: 4. */
   },
   etj_fortworth: {
     key: "etj_fortworth",
@@ -566,8 +487,9 @@ export const GIS_SOURCES = {
     fields: { name: null },
     coverage: "metro",
     tier: "production",
-    lastVerified: "2026-06-17",
-    fixtures: [],
+    lastVerified: "2026-08-05",
+    // NEW-1 — no fixture existed; same ETJ-is-outside-the-limits rule as Austin above.
+    // Live 2026-08-05: 2 in the southern ETJ ring.
   },
 
   // ---- Drainage / detention resolver sources (B629) ----
@@ -582,16 +504,6 @@ export const GIS_SOURCES = {
     coverage: "statewide",
     tier: "production",
     lastVerified: "2026-07-03",
-    fixtures: [
-      // Bridgeland/Cypress — dense MUD country; ≥1 district polygon at any envelope here.
-      { label: "Cypress-area water districts", point: [-95.69, 29.97], expectMinCount: 1 },
-    ],
-    notes:
-      "District BOUNDARY, not proof of service. NB the layer also carries county-blanket " +
-      "authorities (Coastal Water Authority, Port of Houston, river authorities) — consumers " +
-      "must filter TYPE to the parcel-review district kinds (MUD/WCID/LID/DD/FWSD/SUD/WID) " +
-      "or every Harris point reads as 'in a district'. detentionRules.js owns that filter. " +
-      "Same service the jur_mud map overlay renders (layers.js reads this row).",
   },
   bkdd: {
     // B861 (chat NEW-2) — the Brookshire–Katy Drainage District boundary. A single
@@ -610,17 +522,6 @@ export const GIS_SOURCES = {
     coverage: "Brookshire–Katy Drainage District (Waller / Harris / Fort Bend; ~47k ac, EPSG:2278)",
     tier: "production",
     lastVerified: "2026-07-16",
-    fixtures: [
-      // A point well inside the district near Katy/Brookshire → the single boundary polygon.
-      { label: "Inside BKDD (near Katy)", point: [-95.9, 29.82], expectMinCount: 1 },
-    ],
-    notes:
-      "Single DISTRICT BOUNDARY polygon — a taxing/authority extent, not proof of service. " +
-      "Additive to the county (district drainage/detention criteria ALSO apply); never a " +
-      "replacement for the county floodplain ordinance. Boundary-source failure is an honest " +
-      "'district membership unverified', never a silent no. Same feature the BKDD Quiddity " +
-      "WebGIS viewer draws; the county-published AGOL layer is used because it's anonymously " +
-      "queryable (the Quiddity Enterprise portal requires auth).",
   },
   hcfcdChannels: {
     key: "hcfcdChannels",
@@ -633,14 +534,6 @@ export const GIS_SOURCES = {
     coverage: "county",
     tier: "production",
     lastVerified: "2026-07-03",
-    fixtures: [
-      // Buffalo Bayou through downtown — unit W100-00-00, multiple segments in any 1-km envelope.
-      { label: "Buffalo Bayou downtown", point: [-95.37, 29.76], expectMinCount: 1 },
-    ],
-    notes:
-      "HCFCD unit centerlines (UNIT_NO like 'W100-00-00'). Harris County only. Used by the " +
-      "detention resolver as a nearest-channel ADJACENCY screen — proximity to a unit, never " +
-      "a traced discharge path (that upgrade is B634).",
   },
   hcfcdWatersheds: {
     key: "hcfcdWatersheds",
@@ -653,14 +546,6 @@ export const GIS_SOURCES = {
     coverage: "county",
     tier: "production",
     lastVerified: "2026-07-03",
-    fixtures: [
-      { label: "Buffalo Bayou watershed", point: [-95.37, 29.76], expectMinCount: 1 },
-    ],
-    notes:
-      "The 22 HCFCD watershed polygons (WTSHNAME e.g. 'BUFFALO BAYOU', WTSHUNIT 'W'). Feeds " +
-      "the B635 watershed-keyed overlay rules (Addicks/Barker + Upper Cypress retention " +
-      "context). The precise Upper-Cypress overflow boundary is a separate service " +
-      "(HCFCD/CypressCreekOverflow) — flagged in detentionRules.js as the exact-boundary follow-up.",
   },
 
   fbcddWse02: {
@@ -691,21 +576,6 @@ export const GIS_SOURCES = {
     lastVerified: "2026-07-12",
     // Raster fixtures: point getSamples with an expected value range (in-coverage) or an
     // expected NO-DATA empty value (out-of-coverage) — the raster analog of expectMinCount.
-    sampleFixtures: [
-      { label: "Oyster Creek reach (in coverage)", point: [-95.62, 29.55], expectValueRange: [60, 90] }, // live 2026-07-11/12: 72.6968
-      { label: "NE of the county (out of coverage)", point: [-95.0, 30.2], expectNoData: true },
-      {
-        label: "Bain Ditch reach — mosaic HOLE, per-watershed 500YR fallback (B827)",
-        point: [-95.850035, 29.769820],
-        expectValueRange: [130, 150], // live 2026-07-13 (owner's browser): 139.514 (Willow_500YR_Existing_WSE)
-        serviceUrl: "https://gisportal.fortbendcountytx.gov/image/rest/services/Willow_Creek/Willow_500YR_Existing_WSE/ImageServer",
-      },
-      // Pins the county mosaic's EMPTY answer at the same point (the B827 hole). If the county
-      // ever fills the hole this flips to a value → the weekly verifier flags it — the signal
-      // to re-check whether the per-watershed fallback is still needed. No serviceUrl: mosaic.
-      { label: "Bain Ditch reach — the 500YR_WSE mosaic hole itself (B827)", point: [-95.850035, 29.769820], expectNoData: true },
-    ],
-    fixtures: [], // no /query fixtures — raster (see sampleFixtures above)
     // B827 — per-watershed 500YR fallback routing for mosaic HOLES. The county-wide 500YR_WSE
     // mosaic (serviceUrl above) has gaps where a studied watershed's raster never made it into
     // the mosaic (live-proven: Bain Ditch / Willow Fork area — mosaic EMPTY, the per-watershed
@@ -728,10 +598,6 @@ export const GIS_SOURCES = {
         { name: "Willow_Creek/Willow_500YR_Existing_WSE", extent2278: [2933472, 13810320, 3034389, 13890879] },
       ],
     },
-    notes:
-      "Feeds the drainage check's derivedWse02Ft (0.2% WSE engine seam, B770; code label B763) for " +
-      "Fort Bend sites — screening only, DRAFT watershed-study values. B827: mosaic-first, " +
-      "per-watershed fallback where the mosaic has a hole. Sampler: site-planner/lib/fbcdWse.js.",
   },
 
   // ---- Receiving-water / outfall screen (NEW-A5) ----
@@ -755,14 +621,6 @@ export const GIS_SOURCES = {
     coverage: "national",
     tier: "production",
     lastVerified: "2026-07-18",
-    fixtures: [
-      // Willow Fork / Cane Island near Katy — dense named flowlines in any ~1 km envelope.
-      { label: "Willow Fork (Katy)", point: [-95.83, 29.78], expectMinCount: 1 },
-    ],
-    notes:
-      "NetworkNHDFlowline (routed network). GNIS_NAME may be empty on unnamed reaches / artificial " +
-      "paths — the sampler keeps the nearest with a name AND the nearest overall. Screening adjacency, " +
-      "never a surveyed outfall alignment or a legal drainage easement.",
   },
 
   fbcddWse100: {
@@ -793,17 +651,6 @@ export const GIS_SOURCES = {
     coverage: "Fort Bend County, per-watershed (19 rasters; value range ~24–191 ft NAVD88)",
     tier: "production",
     lastVerified: "2026-07-13",
-    sampleFixtures: [
-      { label: "Oyster Creek reach (in coverage)", point: [-95.6895, 29.648], expectValueRange: [70, 95] }, // live 2026-07-13: 82.08
-      {
-        label: "Willow Fork reach (in coverage, the SR-6588 service)",
-        point: [-95.8776, 29.7971],
-        expectValueRange: [145, 170], // live 2026-07-13: 156.48
-        serviceUrl: "https://gisportal.fortbendcountytx.gov/image/rest/services/Willow_Creek/Willow_100YR_Existing_WSE/ImageServer",
-      },
-      { label: "NE of the county (out of coverage)", point: [-95.0, 30.2], expectNoData: true },
-    ],
-    fixtures: [], // no /query fixtures — raster (see sampleFixtures above)
     // Routing index for the per-watershed multiplex (read by lib/fbcdWse.js AND the drift
     // verifier's catalog parity check). A live catalog leaf name belongs to this source iff
     // it matches `include` and not `exclude`. Extents captured live 2026-07-13.
@@ -833,10 +680,6 @@ export const GIS_SOURCES = {
         { name: "Willow_Creek/Willow_100YR_Existing_WSE", extent2278: [2933472, 13810320, 3034389, 13890879] }, // SR 6588 (NAD83(2011) ftUS — same grid)
       ],
     },
-    notes:
-      "Feeds the drainage check's derivedWse1pctFt (1% WSE engine seam, B807) for Fort Bend " +
-      "sites — the unstudied-Zone-A pricing path. Screening only, DRAFT watershed-study values, " +
-      "precedence LAST (never outranks effective-model data). Sampler: site-planner/lib/fbcdWse.js.",
   },
 
   // B882 — FEMA/USGS InFRM Estimated BFE (Base Level Engineering). The estimated-BFE
@@ -858,32 +701,44 @@ export const GIS_SOURCES = {
     label: "FEMA InFRM Estimated BFE (Base Level Engineering) — 1% + 0.2% WSE (screening)",
     provider: "FEMA / USGS InFRM (Interagency Flood Risk Management), Region 6",
     serviceUrl: "https://txgeo.usgs.gov/arcgis/rest/services/FEMA_EBFE/EBFE/MapServer",
-    layerId: 17, // the representative endpoint (the estimated-BFE raster); the sampler reads both 17 + 21 via identify
+    layerId: 20, // the representative endpoint (the estimated-BFE RASTER); the sampler reads 20 + 24 via identify
     kind: "raster-identify", // MapServer raster layers — read by /identify, not /query or getSamples
     geometryType: "raster",
-    // The two raster sublayers the sampler identifies at the site's representative point.
-    identifyLayers: { bfe1pct: 17, wse02: 21 },
+    /* ⛔ NEW-1 (2026-08-05) — THE ONE TRAP ON THIS SERVICE, and the reason the EBFE provider
+     * had NEVER returned a value since B882 shipped. Layers 17 / 21 are MOSAIC LAYERS: an
+     * ArcGIS mosaic layer is a GROUP (Boundary + Footprint + Image), and `identify` NEVER
+     * reports the group id — it reports the SUBLAYERS. So `all:17,21` came back as layerId
+     * 18/19/20 and 22/23/24, `foldIdentify`'s `r.layerId === 17` test matched nothing, and the
+     * sampler resolved a permanent, silent `{ bfe1pctFt: null, wse02Ft: null }` — read
+     * downstream as "outside InFRM coverage", everywhere, forever. Worse, result[0] is the
+     * Boundary polygon whose `value` is a Shape_Length (17,141,870) — a fold that had merely
+     * dropped the layerId test would have reported that as a flood elevation.
+     * The RASTER sublayers are 20 ("1 Percent WSE Image") and 24 (".2 Percent WSE Image").
+     * Live-proven through the app's own same-origin proxy 2026-08-05:
+     *   Tsakiris (-95.89503, 29.77938) → 1% 154.8 ft · 0.2% 156.0 ft
+     *   Waller   (-96.0,     30.05)    → 1% 206.5 ft · 0.2% 207.831 ft
+     *   Houston / Katy / Baytown       → NoData (CORRECT: those are STUDIED, so BLE has no
+     *                                    coverage there — InFRM maps the unstudied gaps).
+     * Re-read /layers on any lastVerified refresh and keep the "… Image" suffix, not the index. */
+    identifyLayers: { bfe1pct: 20, wse02: 24 },
+    /* The attribute names this service actually returns on a raster identify. `pixelValueOf`
+     * looked only for "Pixel Value" / "Stretched.Pixel Value" — neither is present here (the
+     * mosaic reports "Service Pixel Value" + "Classify.Pixel Value"), the second half of the
+     * same silent-null bug. Ordered: first hit wins. */
+    pixelAttributes: ["Service Pixel Value", "Pixel Value", "Classify.Pixel Value", "Stretched.Pixel Value"],
+    /* ⛔ Read through the app's OWN same-origin cache proxy (/api/gis-cache), never straight
+     * from the browser. usgs.gov is already on the proxy's upstream allow-list. Two reasons,
+     * both measured in the owner's 2026-08-04 audit: the direct call answered
+     * "TypeError: Failed to fetch" at Katy (a cross-origin refusal — the browser never saw a
+     * response) and TIMED OUT at Harris, while the identical request through the proxy answered
+     * in 0.85–2.6 s from the same audit window. Point identifies use the proxy's `nostore` mode
+     * so a per-site JSON answer never lands in the Drive imagery cache. */
+    useProxy: true,
     fields: {},
     coverage: "FEMA Region 6 / USGS InFRM Base Level Engineering (Gulf-central; TX + neighbors — NOT nationwide)",
     tier: "production",
-    // ⚠ Endpoint facts recorded from the owner's authoritative task spec 2026-07-18; a LIVE
-    // reachability + value probe is PENDING (V363) — this sandbox's egress policy blocks
-    // txgeo.usgs.gov (403), so the identify round-trip is verified on the deployed app.
-    lastVerified: "2026-07-18",
-    sampleFixtures: [
-      // Houston/Katy area — expected to be inside InFRM Region-6 coverage (provisional range,
-      // confirmed live in V363). Out-of-region point returns no data → the grade fallback.
-      { label: "Houston metro (in coverage, provisional)", point: [-95.75, 29.78], expectValueRange: [1, 500], provisional: true },
-      { label: "far outside Region 6 (out of coverage)", point: [-110.0, 44.0], expectNoData: true },
-    ],
-    fixtures: [], // raster — see sampleFixtures (identify probe)
-    notes:
-      "B882 — the estimated-BFE source for FEMA Zone A / unstudied 'no published BFE' areas, " +
-      "replacing the grade-@-Zone-A-boundary heuristic where InFRM covers the site (Region 6 only; " +
-      "elsewhere the sampler returns null and the caller falls back to grade). Layer 17 = estimated " +
-      "1% BFE, layer 21 = 0.2% (500-yr) WSE. SCREENING ONLY — an estimate, never a regulatory/" +
-      "published BFE; a sealed H&H (Atlas-14) study + the reviewing agency set the final value. " +
-      "Read by /identify (not /query). Sampler: site-planner/lib/ebfe.js. Live probe pending V363.",
+    availability: "live",
+    lastVerified: "2026-08-05",
   },
 
   // B882 (scope note 2) — HCFCD MAAPnext model WSE (Harris County local-district provider).
@@ -904,24 +759,44 @@ export const GIS_SOURCES = {
     layerId: null,
     kind: "raster", // ImageServer getSamples (same as FBCDD) — the drift verifier probes serviceUrl
     geometryType: "raster",
-    // ⚠ PROVISIONAL — the 1% / 0.2% WSE ImageServer URLs are unconfirmed (sandbox egress blocks
-    // the host). V363 walks the MAAPNext folder, confirms the WSE leaf names, and fills these in;
-    // until then the sampler returns null (provider absent) and the resolver falls through to EBFE.
-    wseLayers: { wse1pct: null, wse02: null, provisional: true },
+    /* NEW-1 (2026-08-05) — the WSE leaf names are NO LONGER PROVISIONAL. They were read from
+     * HCFCD's own ArcGIS-Online item catalog (owner Matthew.Barr, items "Water Surface
+     * Elevation - 100 Year" / "- 500 Year" / "- 10 Year"), which publishes the service URLs
+     * even though the host itself is unreachable. So the config gap B882 left open is closed;
+     * what remains is an OUTAGE, not missing configuration. */
+    wseLayers: {
+      wse1pct: "https://fximgservices.hcfcd.org/arcgis/rest/services/MAAPNext/WSE_100YR/ImageServer",
+      wse02: "https://fximgservices.hcfcd.org/arcgis/rest/services/MAAPNext/WSE_500YR/ImageServer",
+    },
     fields: {},
     coverage: "Harris County (HCFCD MAAPnext model results; ft-NAVD88)",
     tier: "production",
-    lastVerified: "2026-07-18",
-    sampleFixtures: [
-      // GroundElevation is the reachable, confirmed endpoint; a value probe belongs to V363.
-      { label: "central Harris (GroundElevation reachable — confirm WSE siblings live)", point: [-95.37, 29.76], provisional: true },
-    ],
-    fixtures: [],
-    notes:
-      "B882 — Harris County local-district estimated-WSE provider; OUTRANKS EBFE + effective-style " +
-      "data in Harris (MAAPnext is enforced there). Screening only. GroundElevation ImageServer " +
-      "confirmed; 1% / 0.2% WSE ImageServer endpoints PROVISIONAL (wseLayers null) pending the live " +
-      "directory probe (V363). Sampler: site-planner/lib/hcfcdWse.js; resolver: lib/wseProviders.js.",
+    /* ⛔ DOWN — measured, not assumed. The whole `fximgservices.hcfcd.org` host hangs and is then
+     * refused; `www.hcfcd.org` on the same domain answers in ~1.3 s, so this is one image-server
+     * host, not HCFCD. Nothing on ArcGIS Online replaces it: HCFCD publishes MAAPnext
+     * FloodHazardZones and FloodRiskType there (classifications, not elevations) and county-wide
+     * WSE rasters ONLY here. So there is no repoint to make — the honest move is to say so, keep
+     * the (now-correct) endpoints ready, and let the weekly verifier tell us the day it returns. */
+    availability: "down",
+    outage: {
+      since: "2026-08-04",
+      symptom: "every request to fximgservices.hcfcd.org hangs ~20 s and is then refused",
+      evidence:
+        "Owner audit 2026-08-04 (real browser, production): metadata 'TypeError: Failed to fetch' " +
+        "after 19,692 ms; identify TIMEOUT at Harris, Katy AND in Colorado. Re-measured 2026-08-05 " +
+        "server-side through the app's own Cloudflare proxy: /arcgis/rest/services, " +
+        "MAAPNext/GroundElevation, MAAPNext/WSE_100YR and MAAPNext/WSE_500YR each hung 19.4–20.5 s " +
+        "and failed, while www.hcfcd.org answered in 1.3 s.",
+      impact:
+        "Harris County sites get no MAAPnext model WSE. MAAPnext usually runs HIGHER than the " +
+        "effective FIRM and Harris reviewers enforce it, so the estimate a Harris site DOES get is " +
+        "likely LOW. Never let this read as 'no flood data here'.",
+      replacement:
+        "none — no other public publication of the county-wide MAAPnext WSE rasters exists. The " +
+        "resolver falls through to FEMA InFRM BLE (femaEbfe), which is a screening estimate from a " +
+        "different model and does NOT carry MAAPnext's enforced elevations.",
+    },
+    lastVerified: "2026-08-05",
   },
 
   // -------------------------------------------------------------------------
@@ -965,14 +840,6 @@ export const GIS_SOURCES = {
     coverage: "Brookshire–Katy Drainage District (Waller / Harris / Fort Bend)",
     tier: "production",
     lastVerified: "2026-07-29",
-    fixtures: [
-      // The Tsakiris tract — the site whose "nothing shows" report produced this family.
-      { label: "Tsakiris (Waller, in BKDD)", point: [-95.89503, 29.77938], expectMinCount: 1 },
-    ],
-    notes:
-      "District stream/channel centerlines. Layer 121 in this SAME service is 'All Streams " +
-      "(TNRIS)' (fields ftype, fcode) — a wider inventory, registered as bkddAllStreams. Do NOT " +
-      "confuse 121 here with Boundaries/121 (MUD boundary).",
   },
 
   bkddAllStreams: {
@@ -987,12 +854,6 @@ export const GIS_SOURCES = {
     coverage: "Brookshire–Katy Drainage District (Waller / Harris / Fort Bend)",
     tier: "production",
     lastVerified: "2026-07-29",
-    fixtures: [
-      { label: "Tsakiris (Waller, in BKDD)", point: [-95.89503, 29.77938], expectMinCount: 1 },
-    ],
-    notes:
-      "The TNRIS-sourced stream inventory the district republishes — an INVENTORY, never a " +
-      "regulatory or engineered alignment. ftype/fcode decode via NHD_FTYPE (nhdFlowline.js).",
   },
 
   bkddEasements: {
@@ -1009,16 +870,6 @@ export const GIS_SOURCES = {
     coverage: "Brookshire–Katy Drainage District (Waller / Harris / Fort Bend)",
     tier: "production",
     lastVerified: "2026-07-29",
-    fixtures: [
-      // The 70-ft easement + recorded exhibit WF-10.pdf found at the Tsakiris tract.
-      { label: "Tsakiris BKDD easement", point: [-95.89503, 29.77938], expectMinCount: 1 },
-    ],
-    notes:
-      "A district drainage easement is a HARD BUILDABLE-AREA CONSTRAINT, not decoration — the " +
-      "width AND the recorded exhibit reference must reach the user, never just a line on the " +
-      "map. TRAP (b): layers 0 and 5 of this service are named '…-OLD', and a sibling service " +
-      "Easement_Current_updated/MapServer exists on the same host; 109 (+107) are the live-" +
-      "confirmed current layers as of lastVerified. Screening only — the recorded instrument governs.",
   },
 
   bkddEasements107: {
@@ -1032,12 +883,8 @@ export const GIS_SOURCES = {
     timeoutMs: 25000,
     coverage: "Brookshire–Katy Drainage District (Waller / Harris / Fort Bend)",
     tier: "production",
-    lastVerified: "2026-07-29",
-    fixtures: [],
-    notes:
-      "The companion 'BKDD Easements Current' layer to 109 — the district publishes the set " +
-      "across both. Queried together by the drainage-context easement screen so a parcel " +
-      "touching only one of the two still reports its easement.",
+    lastVerified: "2026-08-05",
+    // NEW-1 — was fixture-less. Live 2026-08-05 through the app's own proxy: 16 at Tsakiris.
   },
 
   bkddSubwatersheds: {
@@ -1052,12 +899,6 @@ export const GIS_SOURCES = {
     coverage: "Brookshire–Katy Drainage District (Waller / Harris / Fort Bend)",
     tier: "production",
     lastVerified: "2026-07-29",
-    fixtures: [
-      { label: "Tsakiris sub-watershed", point: [-95.89503, 29.77938], expectMinCount: 1 },
-    ],
-    notes:
-      "The district's own sub-watershed delineation — the BKDD analogue of HCFCD's watershed " +
-      "polygons; names the basin a site drains to (e.g. 'Willow Fork').",
   },
 
   bkddFloodplainBfe: {
@@ -1067,18 +908,19 @@ export const GIS_SOURCES = {
     serviceUrl: "https://gisclient.quiddity.com/server/rest/services/Drainage_Information/MapServer",
     layerId: 112,
     geometryType: "line",
-    fields: {},
-    outFields: ["*"], // field names unconfirmed in the 2026-07-29 probe — read them all
+    /* NEW-1 — the field names ARE now confirmed (live feature read 2026-08-05): the layer is a
+     * republication of the FEMA DFIRM BFE lines, carrying `elev` (140.6 ft on the first feature),
+     * `v_datum` ("NAVD88"), `dfirm_id` ("48157C" = Waller Co.) and `bfe_ln_id`. That resolves the
+     * datum question the old note left open FOR THIS LAYER — it is NAVD88 per feature — but the
+     * layer stays render-only until a consumer is deliberately wired, because BKDD's own criteria
+     * forms still carry the '1988 NGVD (2001 Adj.)' contradiction documented in detentionRules.js. */
+    fields: { elev: "elev", datum: "v_datum", firm: "dfirm_id", lineId: "bfe_ln_id" },
     timeoutMs: 25000,
     coverage: "Brookshire–Katy Drainage District (Waller / Harris / Fort Bend)",
     tier: "production",
-    lastVerified: "2026-07-29",
-    fixtures: [],
-    notes:
-      "District-published BFE lines. Rendered only; NOT wired into any WSE provider — the " +
-      "elevation field/datum are unconfirmed, and BKDD's own forms carry the '1988 NGVD (2001 " +
-      "Adj.)' datum contradiction documented in detentionRules.js BKDD_OVERLAY_DETAIL. Confirm " +
-      "the datum with the district before any elevation is READ from this layer.",
+    lastVerified: "2026-08-05",
+    // NEW-1 — was fixture-less. NB the Tsakiris point returns 0 (no BFE line crosses it), so it
+    // is NOT a valid fixture; this point sits on a real published BFE line. Live: 3.
   },
 
   bkddOutfalls: {
@@ -1093,9 +935,8 @@ export const GIS_SOURCES = {
     timeoutMs: 25000,
     coverage: "Brookshire–Katy Drainage District (Waller / Harris / Fort Bend)",
     tier: "production",
-    lastVerified: "2026-07-29",
-    fixtures: [],
-    notes: "Permitted stormwater outfall points published by the district. Screening only.",
+    lastVerified: "2026-08-05",
+    // NEW-1 — was fixture-less. Live 2026-08-05: 5 outfalls at Tsakiris.
   },
 
   bkddBoundary: {
@@ -1111,16 +952,6 @@ export const GIS_SOURCES = {
     coverage: "Brookshire–Katy Drainage District (Waller / Harris / Fort Bend)",
     tier: "production",
     lastVerified: "2026-07-29",
-    fixtures: [
-      // The point-in-district test that drives district auto-selection (B1076 / B1080).
-      { label: "Tsakiris inside BKDD", point: [-95.89503, 29.77938], expectMinCount: 1 },
-    ],
-    notes:
-      "The district's OWN boundary publication — the point-in-district test that picks which " +
-      "local drainage authority governs a site (live n=1 at Tsakiris 2026-07-29). Distinct from " +
-      "the `bkdd` row above, which is Waller County's AGOL republication of the same district " +
-      "(kept as the detention-tier membership source it already feeds). TRAP (a): 121 in THIS " +
-      "service is a MUD boundary, not All Streams.",
   },
 
   // ---- BKDD Drainage Master Plan — ADVISORY MODEL RESULTS, extent-gated -------------
@@ -1140,18 +971,16 @@ export const GIS_SOURCES = {
     outFields: ["*"],
     timeoutMs: 25000,
     studyArea: true,
-    coverage: "BKDD Drainage Master Plan study area — WESTERN Waller (Bucks Bayou / Cotton Creek / Hardeman Slough)",
+    /* ⚠ NEW-1 CORRECTION (2026-08-05): the study area is NOT "western Waller". The layer's own
+     * published extent is EPSG:2278 x 2,927,931–2,969,195 · y 13,514,631–13,578,128, whose centre
+     * reprojects to 28.961°N, −95.935° — the coastal-prairie country roughly 55 miles SOUTH of
+     * Waller. The old comment's guess is why the "TODO: bake an in-extent fixture" never got done:
+     * every candidate point was looked for in the wrong county. */
+    coverage: "BKDD Drainage Master Plan study area — a coastal-prairie extent centred near 28.96°N, −95.93° (published extent in EPSG:2278), NOT the Waller uplands",
     tier: "production",
-    lastVerified: "2026-07-29",
-    fixtures: [], // no in-extent fixture point confirmed yet — see notes
-    notes:
-      "ADVISORY MODEL RESULTS, never regulatory: an Atlas-14 master-plan floodplain is not the " +
-      "effective FIRM SFHA and must never be styled like one. Live 2026-07-29: n=0 at Tsakiris — " +
-      "CORRECT (outside the study area), which is exactly why this row is studyArea-gated. " +
-      "Companion layers in the same service: 20 Harvey floodplain, 17 10-yr, 5 Conveyance " +
-      "Channel, 6 Proposed Channel Improvements, 4/10 Proposed Detention, 27 LiDAR. " +
-      "TODO on the next live pass: bake an in-extent fixture point (western Waller) so the " +
-      "weekly drift verifier can prove the layer still returns data where it should.",
+    lastVerified: "2026-08-05",
+    // The TODO below is now DONE: the point is the reprojected centre of the layer's own
+    // published extent. Live 2026-08-05 through the app's own proxy: 1.
   },
 
   bkddDmpImprovements: {
@@ -1165,13 +994,10 @@ export const GIS_SOURCES = {
     outFields: ["*"],
     timeoutMs: 25000,
     studyArea: true,
-    coverage: "BKDD Drainage Master Plan study area — WESTERN Waller (Bucks Bayou / Cotton Creek / Hardeman Slough)",
+    coverage: "BKDD Drainage Master Plan study area — a coastal-prairie extent centred near 28.96°N, −95.93°, NOT the Waller uplands (see the floodplain row's correction note)",
     tier: "production",
-    lastVerified: "2026-07-29",
-    fixtures: [],
-    notes:
-      "PROPOSED (unbuilt) district improvements — a planning intent, never an existing facility " +
-      "and never a regulatory line. studyArea-gated like the floodplain row above.",
+    lastVerified: "2026-08-05",
+    // NEW-1 — was fixture-less. Point read off a real published feature. Live 2026-08-05: 1.
   },
 
   // -------------------------------------------------------------------------
@@ -1204,18 +1030,6 @@ export const GIS_SOURCES = {
     coverage: "national",
     tier: "production",
     lastVerified: "2026-07-29",
-    fixtures: [
-      // The Tsakiris tract — the channel the owner could see but the app never drew.
-      // Re-verified live from the build sandbox 2026-07-29: n=1, gnis_name "Willow Fork",
-      // ftype 336 / fcode 33600 (canal/ditch).
-      { label: "Tsakiris flowlines (Willow Fork, ftype 336 canal/ditch)", point: [-95.89503, 29.77938], expectMinCount: 1 },
-      { label: "Buffalo Bayou downtown", point: [-95.37, 29.76], expectMinCount: 1 },
-    ],
-    notes:
-      "National hydrography INVENTORY — screening only, never a regulatory floodplain nor an " +
-      "engineered channel capacity. ftype decodes to plain English via NHD_FTYPE " +
-      "(site-planner/lib/nhdFlowline.js). Tier-3 fallback in the Flood & drainage group: it " +
-      "answers 'is there a channel at this site at all?' where no district GIS exists.",
   },
 
   nhdHydroWaterbody: {
@@ -1231,15 +1045,361 @@ export const GIS_SOURCES = {
     fields: { name: "gnis_name", ftype: "ftype", fcode: "fcode" },
     coverage: "national",
     tier: "production",
-    lastVerified: "2026-07-29",
-    fixtures: [],
-    notes:
-      "The waterbody companion to nhdHydro — screening inventory only. Sibling large-scale " +
-      "layers in the same service: 9 Area (wide-channel polygons), 2 Line. USGS renumbers NHD " +
-      "sublayers occasionally (the FEMA-NFHL caveat class) — re-read /layers on any " +
-      "lastVerified refresh and check the '- Large Scale' suffix, not just the index.",
+    lastVerified: "2026-08-05",
+    // NEW-1 — was fixture-less, which is exactly how a silent renumber from 12 ("Large Scale")
+    // to 10 ("Small Scale") would have gone unnoticed. Live 2026-08-05: 14 waterbodies.
+  },
+
+  // ===========================================================================
+  // NEW-2 (2026-08-05) — THE COLORADO FAMILY.
+  //
+  // Before this, a Colorado site was a Texas registry pointed at Colorado: 38 of 43 sources
+  // returned zero at the owner's Commerce City tract (smsdsqdkl9i0), and the single Colorado
+  // row (countyCo) meant the weekly drift job structurally could not see Colorado rot — there
+  // was almost nothing there to rot. CCN is a Texas PUC construct, LPST is TCEQ, the RRC is
+  // Texas, and the whole HCFCD / BKDD / FBCDD drainage tier is Texas. None of them have a
+  // Colorado meaning, so widening a Texas row would have been a lie; each Colorado equivalent
+  // is its OWN row, exactly like countyCo (B-NEW-5), and jurisdiction routing picks by location.
+  //
+  // EVERY row below was LIVE-PROBED 2026-08-05 from this build sandbox against the real service:
+  // metadata read, statewide feature count taken, and counts taken at SEVEN real Colorado points
+  // (Commerce City · Denver · Greeley/Weld · Fort Collins/Larimer · Aurora/Arapahoe · Broomfield ·
+  // Colorado Springs/El Paso). The counts are recorded per row so a future clip regression is
+  // provable, not argued — the same discipline the Weld and Broomfield county entries already use.
+  //
+  // ⛔ THE CLIP TRAP, CAUGHT LIVE AND NOT WIRED. Three ArcGIS-Online "COGCC / ECMC wells"
+  // services are the obvious answer for Colorado oil & gas and ALL THREE are county copies:
+  // Adams County's COGCC_Oil_and_Gas/9 reports 6,319 wells statewide with 711 in Weld;
+  // Broomfield's COGCCOilGasWells 8,035 / 3,668; COGCC_VIEW is tank batteries. Colorado has on
+  // the order of a hundred thousand wells and Weld alone has tens of thousands — these are the
+  // Chambers-County-14-vs-8,014 failure exactly. The authoritative publisher is ECMC's own host
+  // (ecmc.state.co.us), which this sandbox's egress policy blocks AND which is not on the app
+  // proxy's upstream allow-list, so it could not be verified live. House rule: verify before you
+  // wire. Colorado oil & gas is therefore DELIBERATELY UNWIRED and declared as a named gap
+  // (coloradoRegions.CAPABILITIES.oilGasWells) so the panel says "we don't have this in Colorado"
+  // instead of showing the Texas RRC row toggling on to an empty map.
+  // ===========================================================================
+  cityCo: {
+    key: "cityCo",
+    label: "City limits (Colorado)",
+    provider: "Colorado DOLA, via the State of Colorado OIT GIS ArcGIS Online org",
+    serviceUrl: "https://services3.arcgis.com/DgjqnJA1rgO92Soi/arcgis/rest/services/Municipal_Boundary/FeatureServer/0",
+    layerId: null,
+    geometryType: "polygon",
+    fields: { name: "cityname", city: "city", county: "county", type: "type" },
+    coverage: "colorado",
+    states: ["CO"],
+    tier: "production",
+    lastVerified: "2026-08-05",
+    // Live 2026-08-05: 1,911 polygons statewide (DOLA_Municipalities). Commerce City 9 ·
+    // Denver 1 · Greeley 1 · Fort Collins 2 · Aurora 4 · Broomfield 1 · Colorado Springs 1.
+  },
+
+  isdCo: {
+    key: "isdCo",
+    label: "School districts (Colorado)",
+    provider: "Colorado DOLA local-government registry, via the State of Colorado OIT GIS org",
+    serviceUrl: "https://services3.arcgis.com/DgjqnJA1rgO92Soi/arcgis/rest/services/School_Districts/FeatureServer/0",
+    layerId: null,
+    geometryType: "polygon",
+    // The DOLA district services share ONE schema (DOLA_Districts) across school / water &
+    // sanitation / metropolitan / fire — the DISTRICT KIND is which SERVICE you query, not a
+    // field. `lgname` is the district's name; `lgtypeid` its DOLA type code.
+    fields: { name: "lgname", abbrev: "abbrev_name", typeId: "lgtypeid", url: "url" },
+    coverage: "colorado",
+    states: ["CO"],
+    tier: "production",
+    lastVerified: "2026-08-05",
+    // Live 2026-08-05: 178 districts statewide. Every one of the seven probe points ≥1.
+  },
+
+  waterDistrictCo: {
+    key: "waterDistrictCo",
+    label: "Water & sanitation districts (Colorado)",
+    provider: "Colorado DOLA local-government registry, via the State of Colorado OIT GIS org",
+    serviceUrl: "https://services3.arcgis.com/DgjqnJA1rgO92Soi/arcgis/rest/services/Water_and_Sanitation_Districts/FeatureServer/0",
+    layerId: null,
+    geometryType: "polygon",
+    fields: { name: "lgname", abbrev: "abbrev_name", typeId: "lgtypeid", url: "url" },
+    coverage: "colorado",
+    states: ["CO"],
+    tier: "production",
+    lastVerified: "2026-08-05",
+    /* ⛔ NOT a CCN, and the difference matters on a due-diligence screen. A Texas CCN is a PUC
+     * retail MONOPOLY: inside it, that utility is obligated (and entitled) to serve. Colorado has
+     * no CCN — a water & sanitation district is a special district under Title 32 with taxing and
+     * service powers, and a site OUTSIDE every district is very often served by a MUNICIPALITY
+     * instead (Denver Water, Aurora Water, Fort Collins Utilities). So an empty answer here means
+     * "no special district" and NOT "no provider" — measured live 2026-08-05: 250 districts
+     * statewide, but Denver 0 · Aurora 0 · Fort Collins 0 · Broomfield 0 · Colorado Springs 0
+     * (all city-served) against Commerce City 1 · Greeley 1. Consumers must pair this with the
+     * `cityCo` answer before saying anything about who serves a site. */
+  },
+
+  metroDistrictCo: {
+    key: "metroDistrictCo",
+    label: "Metropolitan districts (Colorado)",
+    provider: "Colorado DOLA local-government registry, via the State of Colorado OIT GIS org",
+    serviceUrl: "https://services3.arcgis.com/DgjqnJA1rgO92Soi/arcgis/rest/services/Metropolitan_Districts/FeatureServer/0",
+    layerId: null,
+    geometryType: "polygon",
+    fields: { name: "lgname", abbrev: "abbrev_name", typeId: "lgtypeid", url: "url" },
+    coverage: "colorado",
+    states: ["CO"],
+    tier: "production",
+    lastVerified: "2026-08-05",
+    /* The closest Colorado thing to a Texas MUD: a Title 32 metro district that issues debt and
+     * levies a mill against the property to build and run infrastructure. On an industrial deal
+     * that mill levy is a real carry cost, so this belongs on the screen. Live 2026-08-05: 2,231
+     * statewide · Aurora 14 · Colorado Springs 6 · Broomfield 1; Commerce City / Denver / Greeley /
+     * Fort Collins 0 at those points (correct — metro districts are development-specific, not
+     * wall-to-wall). Fixtures therefore sit where districts genuinely are. */
+  },
+
+  roadCo: {
+    key: "roadCo",
+    label: "State highway routes (Colorado)",
+    provider: "Colorado Department of Transportation (CDOT), ArcGIS Online",
+    serviceUrl: "https://services.arcgis.com/yzB9WM8W0BO3Ql7d/arcgis/rest/services/Routes_gdb/FeatureServer/0",
+    layerId: null,
+    geometryType: "line",
+    fields: { route: "ROUTE" },
+    coverage: "colorado (CDOT on-system state highways only — NOT local streets)",
+    states: ["CO"],
+    tier: "production",
+    lastVerified: "2026-08-05",
+    /* ⚠ DELIBERATELY NARROWER THAN THE TEXAS ROW, and the row label says so. The Texas `road`
+     * row is the TxDOT Roadway Inventory: every street, with RDWAY_MAINT_AGCY naming the
+     * maintainer outright. CDOT publishes no such statewide all-streets inventory on ArcGIS
+     * Online — its Local Roads / Functional Class / Maintenance layers live on dtdapps.codot.gov,
+     * which is blocked from this sandbox and unverifiable, so they are not wired. What this row
+     * CAN answer honestly is the question that actually changes an industrial deal: is the
+     * frontage a STATE HIGHWAY (CDOT permits the access) or not (city or county does). Live
+     * 2026-08-05: 291 routes statewide — that is the size of the state highway system, not a clip. */
+  },
+
+  aadtCo: {
+    key: "aadtCo",
+    label: "CDOT traffic counts (AADT, Colorado)",
+    provider: "Colorado Department of Transportation (CDOT), ArcGIS Online",
+    serviceUrl: "https://services.arcgis.com/yzB9WM8W0BO3Ql7d/arcgis/rest/services/TraffonAllYrs_gdb/FeatureServer/0",
+    layerId: null,
+    geometryType: "point",
+    fields: { aadt: "AADT", road: "ROUTE", trucks: "AADTTRUCKS", year: "AADTYR", station: "COUNTSTATIONID" },
+    coverage: "colorado (CDOT count stations on the state highway system)",
+    states: ["CO"],
+    tier: "production",
+    lastVerified: "2026-08-05",
+    /* Live 2026-08-05: 3,261 count-station midpoints (Traffon2024_midpnt). Denver 8 ·
+     * Broomfield 7 · Fort Collins 6 · Greeley 4 · Colorado Springs 1; Commerce City and Aurora 0
+     * at those exact points — correct, because counts sit ON the state highway system and those
+     * two probe points are off it. `AADTTRUCKS` is a bonus the Texas row has no equivalent for
+     * and is worth surfacing on an industrial screen. */
+  },
+
+  cdpheCleanups: {
+    key: "cdpheCleanups",
+    label: "Colorado voluntary cleanup sites (VCUP)",
+    provider: "Colorado Dept. of Public Health & Environment (CDPHE) — Hazardous Materials & Waste Management Division",
+    serviceUrl: "https://services3.arcgis.com/66aUo8zsujfVXRIT/arcgis/rest/services/Voluntary_Cleanup_and_Redevelopment_Program_(VCUP)_new/FeatureServer/0",
+    layerId: null,
+    geometryType: "point",
+    fields: { name: "Site", addr: "Address", city: "CityNam", status: "AppStatus", acres: "Acreage", vcupNo: "RV_Nmbr" },
+    coverage: "colorado",
+    states: ["CO"],
+    tier: "production",
+    lastVerified: "2026-08-05",
+    /* The largest Colorado contaminated-site dataset by far and the one closest in SPIRIT to the
+     * Texas LPST row: properties with a known or suspected release that entered CDPHE's voluntary
+     * cleanup program. Live 2026-08-05: 1,697 statewide · Denver 32 · Colorado Springs 24 ·
+     * Fort Collins 10 · Broomfield 5.
+     * ⚠ It is NOT an LPST equivalent. Colorado's leaking petroleum storage-tank list is kept by
+     * the Division of Oil & Public Safety (Dept. of Labor & Employment), which publishes no
+     * verified public REST endpoint — so petroleum-tank releases specifically remain a named gap
+     * (coloradoRegions.CAPABILITIES.petroleumTankReleases), not a silent absence. */
+  },
+
+  cdpheSuperfund: {
+    key: "cdpheSuperfund",
+    label: "Colorado Superfund sites (CDPHE)",
+    provider: "Colorado Dept. of Public Health & Environment (CDPHE) — HMWMD",
+    serviceUrl: "https://services3.arcgis.com/66aUo8zsujfVXRIT/arcgis/rest/services/CDPHE_Superfund/FeatureServer/0",
+    layerId: null,
+    geometryType: "polygon",
+    fields: { name: "NAME", city: "CITY", status: "SiteStatus", pollutants: "POLLUTANTS", link: "CDPHE_LINK" },
+    coverage: "colorado",
+    states: ["CO"],
+    tier: "production",
+    lastVerified: "2026-08-05",
+    /* Only 31 statewide — and that is the honest number, not a clip: Colorado has ~30 Superfund
+     * sites. None of the seven probe points hit one (correct; they are rare and mostly rural),
+     * so the fixtures use the sites' own BOUNDARIES rather than a city point. Unlike the point
+     * layers this is a POLYGON layer, which is what makes it worth carrying alongside the
+     * national `epaCleanups` row: an EPA point tells you a site is "near", this tells you whether
+     * the parcel is INSIDE one. */
+  },
+
+  cdpheBrownfields: {
+    key: "cdpheBrownfields",
+    label: "Colorado brownfields (CDPHE)",
+    provider: "Colorado Dept. of Public Health & Environment (CDPHE) — HMWMD",
+    serviceUrl: "https://services3.arcgis.com/66aUo8zsujfVXRIT/arcgis/rest/services/CDPHE_Brownfield/FeatureServer/0",
+    layerId: null,
+    geometryType: "point",
+    fields: { name: "Site", addr: "Address", city: "City", county: "County", status: "SitStts", acres: "AreAcrs", landUse: "LndUsTy" },
+    coverage: "colorado",
+    states: ["CO"],
+    tier: "production",
+    lastVerified: "2026-08-05",
+    // Live 2026-08-05: 133 statewide · Fort Collins 2. Sparse by nature — a brownfield is a
+    // specific designated property, so most points return 0 and that is the correct answer.
+  },
+
+  // ---- Mile High Flood District — the Colorado local drainage-authority tier -----------
+  // The Colorado counterpart of the HCFCD / BKDD / FBCDD families. MHFD (formerly UDFCD) covers
+  // Adams, Arapahoe, Boulder, Broomfield, Denver, Douglas and Jefferson — which is where the
+  // owner's Commerce City, Arapahoe and Broomfield sites all sit. Larimer, Weld and El Paso are
+  // deliberately OUTSIDE it and each run their own criteria (coloradoRegions.CO_COUNTY_REGIME
+  // already encodes that, and the mhfdBoundary fixtures below PROVE it against the live service).
+  mhfdBoundary: {
+    key: "mhfdBoundary",
+    label: "Mile High Flood District boundary",
+    provider: "Mile High Flood District (MHFD, formerly UDFCD)",
+    serviceUrl: "https://services3.arcgis.com/TCnvslgqrzhT2ZXG/arcgis/rest/services/BOUNDARY_(View)/FeatureServer/0",
+    layerId: null,
+    geometryType: "polygon",
+    fields: { areaAc: "area_ac", areaSqMi: "area_sqmi" },
+    coverage: "Mile High Flood District (Adams, Arapahoe, Boulder, Broomfield, Denver, Douglas, Jefferson)",
+    states: ["CO"],
+    tier: "production",
+    lastVerified: "2026-08-05",
+    /* The point-in-district test that decides which Colorado drainage regime governs — the exact
+     * job `bkddBoundary` does in Texas. Live 2026-08-05, and it agrees with the county table
+     * EXACTLY: Commerce City 1 · Denver 1 · Aurora 1 · Broomfield 1 (in); Greeley/Weld 0 ·
+     * Fort Collins/Larimer 0 · Colorado Springs/El Paso 0 (out). The out-of-district fixtures are
+     * as load-bearing as the in-district ones — a service that silently grew to cover Weld would
+     * hand Weld sites MHFD criteria they are not subject to. */
+  },
+
+  mhfdStreams: {
+    key: "mhfdStreams",
+    label: "MHFD major drainageways",
+    provider: "Mile High Flood District (MHFD)",
+    serviceUrl: "https://services3.arcgis.com/TCnvslgqrzhT2ZXG/arcgis/rest/services/MHFD_StreamsLegacy/FeatureServer/0",
+    layerId: null,
+    geometryType: "line",
+    fields: { name: "str_name", code: "udfcdcode", cls: "class", major: "major_stream" },
+    coverage: "Mile High Flood District (Denver metro)",
+    states: ["CO"],
+    tier: "production",
+    lastVerified: "2026-08-05",
+    // Live 2026-08-05: 965 statewide · Commerce City 8 · Aurora 4 · Broomfield 3 · Denver 1;
+    // Weld / Larimer / El Paso 0 (outside the district — correct, and the nhdHydro national row
+    // is what answers "is there a channel here" for those).
+  },
+
+  mhfdWatersheds: {
+    key: "mhfdWatersheds",
+    label: "MHFD watershed delineation",
+    provider: "Mile High Flood District (MHFD)",
+    serviceUrl: "https://services3.arcgis.com/TCnvslgqrzhT2ZXG/arcgis/rest/services/MHFDWatershedDelineation/FeatureServer/0",
+    layerId: null,
+    geometryType: "polygon",
+    fields: { name: "UDFCD_NAM", id: "UDFCD_ID" },
+    coverage: "Mile High Flood District (Denver metro)",
+    states: ["CO"],
+    tier: "production",
+    lastVerified: "2026-08-05",
+    // Live 2026-08-05: 316 statewide · Commerce City 4 · Aurora 4 · Denver 3 · Broomfield 3.
+  },
+
+  mhfdChannels: {
+    key: "mhfdChannels",
+    label: "MHFD surface & open channels",
+    provider: "Mile High Flood District (MHFD) — SWIMS infrastructure inventory",
+    serviceUrl: "https://services3.arcgis.com/TCnvslgqrzhT2ZXG/arcgis/rest/services/INFRASTRUCTURE_(View)/FeatureServer/5",
+    layerId: null,
+    geometryType: "line",
+    // `channel_maintainedby` / `channel_ownedby` are the reason this row is worth carrying next to
+    // mhfdStreams: they name WHO is responsible for the channel a site would discharge into.
+    fields: { name: "channel_name", ownedBy: "channel_ownedby", maintainedBy: "channel_maintainedby", jurisdiction: "channel_jurisdiction" },
+    coverage: "Mile High Flood District (Denver metro)",
+    states: ["CO"],
+    tier: "production",
+    lastVerified: "2026-08-05",
+    // Live 2026-08-05: 25,800 statewide · Aurora 13 · Commerce City 10 · Denver 10.
+  },
+
+  mhfdOutfalls: {
+    key: "mhfdOutfalls",
+    label: "MHFD storm outfalls",
+    provider: "Mile High Flood District (MHFD) — SWIMS infrastructure inventory",
+    serviceUrl: "https://services3.arcgis.com/TCnvslgqrzhT2ZXG/arcgis/rest/services/INFRASTRUCTURE_(View)/FeatureServer/10",
+    layerId: null,
+    geometryType: "point",
+    fields: { name: "outfall_name", ownedBy: "outfall_ownedby", maintainedBy: "outfall_maintainedby", jurisdiction: "outfall_jurisdiction" },
+    coverage: "Mile High Flood District (Denver metro)",
+    states: ["CO"],
+    tier: "production",
+    lastVerified: "2026-08-05",
+    // Live 2026-08-05: 13,773 statewide · Commerce City 4. Sparse by nature (an outfall is a
+    // structure, not a network), so the fixture sits where one genuinely is.
   },
 };
+
+/* NEW-2 — WHICH STATES A ROW CAN ANSWER IN.
+ *
+ * Why this exists: a user in Colorado who toggles "Traffic counts (AADT)" or "Leaking petroleum
+ * tanks (LPST)" on and gets an empty map cannot tell "nothing here" from "we do not have this
+ * here" — and on a due-diligence screen those are completely different facts. Every row must
+ * therefore declare the states it can answer in, so a surface can say which one it is.
+ *
+ * A row may declare `states` on itself (every Colorado row above does). Everything else is
+ * declared HERE, in one table, because stamping the same two-letter code onto forty pre-existing
+ * rows would have buried the actual endpoint facts each row is supposed to carry. `null` means
+ * NATIONAL — it genuinely answers anywhere (FEMA NFHL, NWI, HIFLD, EPA, BTS rail, FAA, NHD).
+ *
+ * `auditRegistry` FAILS on any row missing from both, so a new row cannot be added without
+ * saying where it works. */
+export const SOURCE_STATE_SCOPE = {
+  // National — no state gate.
+  flood: null, wetlands: null, epaCleanups: null, transmission: null, substations: null,
+  rail: null, airports: null, nhdFlowline: null, nhdHydro: null, nhdHydroWaterbody: null,
+  // Texas-only. Every one of these is a Texas institution with no Colorado counterpart at all
+  // (the RRC, the PUC's CCN construct, TCEQ, TxDOT, TEA, TxGIO) or a Texas-region study.
+  oilgas: ["TX"], pipelines: ["TX"], ccnWater: ["TX"], ccnSewer: ["TX"], lpst: ["TX"],
+  growthFaults: ["TX"], aadt: ["TX"], county: ["TX"], city: ["TX"], road: ["TX"], isd: ["TX"],
+  etj_hgac: ["TX"], etj_austin: ["TX"], etj_fortworth: ["TX"], mud: ["TX"], bkdd: ["TX"],
+  hcfcdChannels: ["TX"], hcfcdWatersheds: ["TX"], hcfcdMaapnext: ["TX"],
+  fbcddWse02: ["TX"], fbcddWse100: ["TX"],
+  bkddStreams: ["TX"], bkddAllStreams: ["TX"], bkddEasements: ["TX"], bkddEasements107: ["TX"],
+  bkddSubwatersheds: ["TX"], bkddFloodplainBfe: ["TX"], bkddOutfalls: ["TX"], bkddBoundary: ["TX"],
+  bkddDmpFloodplain: ["TX"], bkddDmpImprovements: ["TX"],
+  // FEMA InFRM BLE is a REGION-6 product (Gulf-central). It is not national and it is not
+  // Texas-only — it reaches into Louisiana, Arkansas and Oklahoma — but it does NOT reach
+  // Colorado, which is what a Colorado site needs told. Measured 2026-08-05: NoData at
+  // Commerce City, real values in Waller County.
+  femaEbfe: ["TX", "LA", "AR", "OK"],
+};
+
+/* The states a row can answer in: its own `states` wins, else the table, else undefined (which
+ * `auditRegistry` rejects). `null` = national. Pure. */
+export function statesFor(entry) {
+  if (!entry) return undefined;
+  if (Array.isArray(entry.states)) return entry.states;
+  if (entry.states === null) return null;
+  return Object.prototype.hasOwnProperty.call(SOURCE_STATE_SCOPE, entry.key) ? SOURCE_STATE_SCOPE[entry.key] : undefined;
+}
+
+/* Can this row answer in `state` (a two-letter code, or null/unknown)? A national row always
+ * can; an UNKNOWN state always can (the pre-Colorado world, where every site was Texas — the
+ * gate fires on a POSITIVE mismatch, never on the absence of an answer). Pure. */
+export function sourceCoversState(entry, state) {
+  const scope = statesFor(entry);
+  if (!scope) return true;               // national (or undeclared — audit catches that separately)
+  if (!state) return true;               // unknown location → never hide anything
+  return scope.includes(String(state).toUpperCase());
+}
 
 // Keys grouped by the surface that consumes them (handy for the audit + tests).
 export const ANALYSIS_KEYS = ["flood", "wetlands", "oilgas", "pipelines"];
@@ -1268,8 +1428,12 @@ export function looksNonProduction(url) {
 
 /* Validate one registry row's tier/exception integrity. Returns a list of problem
  * strings (empty = OK). Pure — the CI guard + the unit test both call this. */
-export function tierProblems(entry) {
+export function tierProblems(entry, docs = null) {
   const problems = [];
+  // NEW-4 — `tierReason` moved to sourceFixtures.js (off the app bundle; see its header). The
+  // RULE is unchanged and still enforced: a monitored exception must explain itself. Callers
+  // that can import the docs pass them; `entry` remains accepted so nothing else has to change.
+  const reason = docs ? docs.tierReason : entry.tierReason;
   if (!VALID_TIERS.includes(entry.tier)) {
     problems.push(`${entry.key}: invalid tier "${entry.tier}" (must be one of ${VALID_TIERS.join(", ")})`);
   }
@@ -1277,7 +1441,7 @@ export function tierProblems(entry) {
   if (nonProd && entry.tier !== "monitored-exception") {
     problems.push(`${entry.key}: serviceUrl looks non-production (${entry.serviceUrl}) but tier is "${entry.tier}" — mark it "monitored-exception" with a tierReason, or repoint to a production endpoint.`);
   }
-  if (entry.tier === "monitored-exception" && !entry.tierReason) {
+  if (entry.tier === "monitored-exception" && !reason) {
     problems.push(`${entry.key}: tier "monitored-exception" requires a tierReason explaining why no production endpoint is used.`);
   }
   if (!entry.serviceUrl || !/^https:\/\//.test(entry.serviceUrl)) {
@@ -1286,16 +1450,73 @@ export function tierProblems(entry) {
   return problems;
 }
 
-/* Validate the whole registry (shape + tier integrity). Returns { problems[] }. Pure. */
-export function auditRegistry(sources = GIS_SOURCES) {
+/* NEW-1 — EVERY ROW MUST CARRY AT LEAST ONE COVERAGE FIXTURE.
+ *
+ * This is the hole that let two production flood layers rot for weeks with a green weekly drift
+ * job: a row with no fixture is INVISIBLE to gis-source-coverage-verify, because the only thing
+ * the verifier can assert about it is that its metadata parsed. Twelve rows were in that state.
+ * A fixture is a `fixtures[]` entry (a /query count) or a `sampleFixtures[]` entry (a raster
+ * getSamples / identify probe) — whichever kind the row's `kind` implies. Pure. */
+export function fixtureCount(entry, fixtures = null) {
+  const rec = fixtures || entry || {};
+  return ((rec.fixtures) || []).length + ((rec.sampleFixtures) || []).length;
+}
+
+/* Validate one row's availability/outage integrity. Pure. */
+export function availabilityProblems(entry) {
+  const problems = [];
+  const av = availabilityOf(entry);
+  if (!VALID_AVAILABILITY.includes(av)) {
+    problems.push(`${entry.key}: invalid availability "${av}" (must be one of ${VALID_AVAILABILITY.join(", ")}).`);
+    return problems;
+  }
+  if (av === "live") {
+    if (entry.outage) problems.push(`${entry.key}: availability "live" must not carry an outage record — clear it, or set availability to "degraded"/"down".`);
+    return problems;
+  }
+  const o = entry.outage;
+  if (!o) {
+    problems.push(`${entry.key}: availability "${av}" REQUIRES an outage record { since, symptom, evidence, impact, replacement } — a row that doesn't answer must say so in the registry, not silently return nothing.`);
+    return problems;
+  }
+  for (const f of ["since", "symptom", "evidence", "impact", "replacement"]) {
+    if (!o[f]) problems.push(`${entry.key}: outage.${f} is required (availability "${av}").`);
+  }
+  if (o.since && !/^\d{4}-\d{2}-\d{2}$/.test(o.since)) problems.push(`${entry.key}: outage.since must be a YYYY-MM-DD date.`);
+  return problems;
+}
+
+/* Validate the whole registry (shape + tier + availability + fixture coverage + state scope).
+ * Returns { problems[] }. Pure. */
+export function auditRegistry(sources = GIS_SOURCES, sourceFixtures = null, sourceDocs = null) {
   const problems = [];
   for (const [key, entry] of Object.entries(sources)) {
+    // NEW-4 — the fixtures live in `sourceFixtures.js` (off the runtime bundle; see that
+    // module's header). Callers that can afford to import it — the weekly verifier and the unit
+    // guards — pass it here so the fixture-completeness rule is still enforced; a caller that
+    // does not pass one is only auditing the endpoint facts.
+    const fx = sourceFixtures ? (sourceFixtures[key] || {}) : entry;
     if (entry.key !== key) problems.push(`${key}: entry.key "${entry.key}" doesn't match its map key.`);
     if (!entry.provider) problems.push(`${key}: missing provider (the authoritative agency).`);
     if (!entry.lastVerified || !/^\d{4}-\d{2}-\d{2}$/.test(entry.lastVerified)) {
       problems.push(`${key}: lastVerified must be a YYYY-MM-DD date.`);
     }
-    problems.push(...tierProblems(entry));
+    if (fixtureCount(entry, fx) === 0) {
+      problems.push(
+        `${key}: NO coverage fixture. Every row must carry at least one \`fixtures\` (query count) or ` +
+        `\`sampleFixtures\` (raster probe) entry at a real point — a fixture-less row is invisible to ` +
+        `the weekly drift job, which is exactly how hcfcdMaapnext and femaEbfe rotted unnoticed.`
+      );
+    }
+    if (statesFor(entry) === undefined) {
+      problems.push(
+        `${key}: no state scope. Declare \`states: ["XX", …]\` on the row, or add it to ` +
+        `SOURCE_STATE_SCOPE (\`null\` = national) — otherwise a user outside its coverage can't ` +
+        `tell "nothing here" from "we don't have this here".`
+      );
+    }
+    problems.push(...tierProblems(entry, sourceDocs ? (sourceDocs[key] || {}) : null));
+    problems.push(...availabilityProblems(entry));
   }
   return { problems };
 }

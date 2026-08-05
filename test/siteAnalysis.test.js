@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { GIS_SOURCES } from "../src/shared/gis/sources.js";
 import {
   ANALYSIS_SOURCES, simplifyRing, ringsBBox, ringCentroid, representativeRing,
   ringsSignature, buildAnalysisParams, buildQueryUrl, normalizeAttrs, zoneSummary, wetlandSummary,
@@ -574,5 +575,77 @@ describe("runSiteAnalysis — orchestration", () => {
     expect(findings.find((f) => f.id === "flood").status).toBe("absent");
     // jurisdiction/road/zoning fall back to their pending/placeholder rows, not a crash
     expect(findings.find((f) => f.id === "jurisdiction")).toBeTruthy();
+  });
+});
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * NEW-6 — the redundant exact-count request.
+ *
+ * Every proximity source fired TWO requests per screen: the features (capped at `proxCap`) and a
+ * separate `returnCountOnly` for the exact total. ArcGIS reports truncation via
+ * `exceededTransferLimit`, so below the cap and untruncated the features ARE the population and
+ * the second request asks the agency for a number we already hold. Halving request volume is the
+ * only lever we have against a metered agency org — H-GAC's was returning HTTP 429 "API calls
+ * quota exceeded" during the same audit — and `aadt`, the registry's slowest row, saves the most.
+ *
+ * The reported numbers must not change, which is what the truncated case below pins.
+ * ──────────────────────────────────────────────────────────────────────────── */
+describe("NEW-6 — the exact-count request is skipped when it is provably redundant", () => {
+  const RINGS = [[[-95.75, 29.78], [-95.74, 29.78], [-95.74, 29.79], [-95.75, 29.79], [-95.75, 29.78]]];
+  const SRC = {
+    id: "t_aadt", category: "Traffic", label: "Traffic counts", kind: "point", proxCap: 100,
+    url: "https://example.com/x/FeatureServer/0", layer: null, plural: "count stations",
+    fields: { name: "Located_On" }, verified: true,
+  };
+  const pt = (i) => ({ attributes: { Located_On: `Road ${i}`, OBJECTID: i }, geometry: { x: -95.745, y: 29.785 } });
+
+  function spyFetch(featureBody) {
+    const urls = [];
+    return {
+      urls,
+      fetchJson: async (url) => {
+        urls.push(String(url));
+        if (String(url).includes("returnCountOnly")) return { count: 9999 };
+        return featureBody;
+      },
+    };
+  }
+  const freshCache = () => ({ swr: (key, fn) => ({ fresh: fn().then((data) => ({ data, error: null, ts: Date.now(), ageMs: 0 })).catch((error) => ({ data: null, error })) }) });
+
+  it("makes ONE request when the answer is complete, and reports the same total", async () => {
+    const spy = spyFetch({ features: [pt(1), pt(2), pt(3)] });
+    const f = await analyzeProximitySource(SRC, RINGS, { cache: freshCache(), fetchJson: spy.fetchJson });
+    expect(spy.urls.filter((u) => u.includes("returnCountOnly"))).toEqual([]);
+    expect(spy.urls.length).toBe(1);
+    expect(f.summary).toContain("3 count stations");
+  });
+
+  it("STILL asks for the exact count when the feature answer was truncated", async () => {
+    // exceededTransferLimit is the service telling us it cut the answer short — the count is the
+    // only way to report the real total, so it must still be fetched.
+    const spy = spyFetch({ features: [pt(1), pt(2)], exceededTransferLimit: true });
+    const f = await analyzeProximitySource(SRC, RINGS, { cache: freshCache(), fetchJson: spy.fetchJson });
+    expect(spy.urls.filter((u) => u.includes("returnCountOnly")).length).toBe(1);
+    expect(f.summary).toContain("9999");
+  });
+
+  it("STILL asks when the feature answer hit the cap exactly (a cap-length answer is ambiguous)", async () => {
+    const spy = spyFetch({ features: Array.from({ length: 100 }, (_, i) => pt(i)) });
+    await analyzeProximitySource(SRC, RINGS, { cache: freshCache(), fetchJson: spy.fetchJson });
+    expect(spy.urls.filter((u) => u.includes("returnCountOnly")).length).toBe(1);
+  });
+
+  it("a verified-absent source still reads absent on one request", async () => {
+    const spy = spyFetch({ features: [] });
+    const f = await analyzeProximitySource(SRC, RINGS, { cache: freshCache(), fetchJson: spy.fetchJson });
+    expect(spy.urls.length).toBe(1);
+    expect(f.status).toBe("absent");
+  });
+
+  it("aadt carries its own abort cap so the slowest row can't stall the panel", () => {
+    // 4,657 ms in the owner's audit was the METADATA endpoint, which the screen never calls;
+    // the real query path measures 410 ms against a 113 ms peer median. Still the slowest, so it
+    // gets a shorter budget than the shared 9 s default and degrades to an honest unknown.
+    expect(GIS_SOURCES.aadt.timeoutMs).toBeLessThan(9000);
   });
 });

@@ -52,7 +52,11 @@ describe("B898 — decision-first group order (deal-killer first, reference last
 describe("B898 — ONE 'Water & sewer' layer for all AHJs (no provider-named water/sewer layers remain)", () => {
   it("exactly one mergeGroup id ('water_sewer') covers every water/sewer adapter", () => {
     const members = membersOf("water_sewer");
-    expect(members.map(([id]) => id).sort()).toEqual(["ccn_service", "coh_ww", "coh_water", "jur_mud"].sort());
+    // NEW-2 — `co_water_districts` joined the group when Colorado landed: Colorado has no CCN,
+    // so its Title 32 water & sanitation districts are the "who is entitled to serve" half there,
+    // exactly as the MUD/CCN rows are in Texas. It is a fifth MEMBER of the one consolidated row,
+    // not a second row — which is the whole point of the merge group.
+    expect(members.map(([id]) => id).sort()).toEqual(["ccn_service", "co_water_districts", "coh_ww", "coh_water", "jur_mud"].sort());
   });
   it("every member keeps group 'utilities' and its own fetch (url/kind) untouched", () => {
     for (const [, cfg] of membersOf("water_sewer")) {
@@ -79,7 +83,7 @@ describe("B898 — ONE 'Water & sewer' layer for all AHJs (no provider-named wat
     const slots = buildGroupSlots(utilEntries);
     const waterSlot = slots.find((s) => s.kind === "merge" && s.mergeGroup === "water_sewer");
     expect(waterSlot).toBeTruthy();
-    expect(waterSlot.members.length).toBe(4);
+    expect(waterSlot.members.length).toBe(5); // NEW-2 — co_water_districts joined the group (see the member list above)
     // and only ONE such slot — never split across two rows
     expect(slots.filter((s) => s.kind === "merge" && s.mergeGroup === "water_sewer").length).toBe(1);
   });

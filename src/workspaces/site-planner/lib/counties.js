@@ -369,6 +369,14 @@ export const JURISDICTION_LAYERS = {
         label: "1-ft contours (Fort Bend DD)",
         url: "https://arcgisweb.fortbendcountytx.gov/arcgis/rest/services/FLOODZONE/Contours_1Foot/MapServer",
         layers: null,
+        // NEW-4 — the ONE acknowledged unpinned-sublayer exception (lib/layerWeight.js). Every
+        // other server-rendered layer now pins its data sublayers so an agency cannot paint its
+        // own LABEL sublayer over the plan. This host sends no CORS headers and its services
+        // catalog is unreachable from the build sandbox, so the sublayer ids cannot be READ —
+        // and inventing them would silently blank the layer, which is worse than an annotation
+        // risk on a contour service that publishes hairlines rather than point labels.
+        // Re-check on the next live pass with a browser that can reach the county host.
+        sublayersUnpinned: "county host sends no CORS headers; its sublayer catalog cannot be read from here — pin the ids on the next live pass",
         note: "Fort Bend Drainage District 1-foot contours. Exists ONLY in Fort Bend County — the statewide USGS contour layer above covers everywhere else. Health checked via the same-origin proxy (county host sends no CORS headers).",
         // NEW-1 stacking role (lib/mapStack.js): contour hairlines — they draw OVER the site
         // elements, so a building placed on the plan never hides the ground it sits on.

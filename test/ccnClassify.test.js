@@ -5,6 +5,8 @@ import {
   inferUtilityType, describeHolder, ccnHolders, classifyCcn, CCN_UTILITY_TYPES,
 } from "../src/workspaces/site-planner/lib/ccnClassify.js";
 import { gisSource } from "../src/shared/gis/sources.js";
+// NEW-4 — the coverage fixtures live off the app bundle now (sourceFixtures.js header).
+import { fixturesFor } from "../src/shared/gis/sourceFixtures.js";
 
 describe("inferUtilityType — provider kind from the UTILITY name (no field encodes it)", () => {
   // Real names pulled live from the PUC CCN layers near Katy/Cypress.
@@ -94,7 +96,7 @@ describe("CCN registry rows (PHASE 1) — endpoints + coverage guards", () => {
     expect(w.coverage).toBe("statewide");
     expect(w.tier).toBe("production");
     expect(w.fields.utility).toBe("UTILITY");
-    expect(w.fixtures.some((f) => f.expectMinCount >= 1 && Array.isArray(f.point))).toBe(true);
+    expect(fixturesFor("ccnWater").fixtures.some((f) => f.expectMinCount >= 1 && Array.isArray(f.point))).toBe(true);
   });
 
   it("sewer CCN rides the Harris County re-serve (layer 2), documented regional", () => {
@@ -103,6 +105,6 @@ describe("CCN registry rows (PHASE 1) — endpoints + coverage guards", () => {
     expect(s.layerId).toBe(2);
     expect(s.coverage).toMatch(/Houston metro region/i);
     expect(s.tier).toBe("production");
-    expect(s.fixtures.length).toBeGreaterThanOrEqual(1);
+    expect(fixturesFor("ccnSewer").fixtures.length).toBeGreaterThanOrEqual(1);
   });
 });
