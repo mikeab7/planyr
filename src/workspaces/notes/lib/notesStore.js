@@ -1,20 +1,20 @@
 /* notesStore — the ONE storage seam for the Notes module.
  *
- * EVERY read and write of a notebook tree, a page body or a picture goes through this file.
+ * EVERY read and write of the page tree, a page body or a picture goes through this file.
  * That was deliberate and load-bearing, and B1291 is what it was for: cloud sync landed
  * HERE and (below) in lib/notesCloud.js — no component, no model function and no exporter
  * had to learn that storage moved.
  *
  * TWO KEY SHAPES ON THE DEVICE, and the reason there are two:
- *   planyr:notes:tree:v1:<SCOPE>            — the whole notebook › section › page tree
+ *   planyr:notes:tree:v1:<SCOPE>            — the whole PAGE TREE (pages holding pages)
  *   planyr:notes:page:v1:<SCOPE>:<PAGEID>   — ONE page's document model
  * The tree holds no bodies. If one blob held every note, every keystroke's autosave would
  * rewrite every note ever written, and the cost of typing would grow with the size of the
- * notebook for the rest of its life. The cloud mirrors that same split exactly.
+ * tree for the rest of its life. The cloud mirrors that same split exactly.
  *
  * SCOPE is the signed-in user's id, or the literal `local` when signed out. Two accounts on
  * one machine therefore never read each other's notes, and signing out does not leak the
- * previous account's notebooks into the signed-out tree.
+ * previous account's notes into the signed-out tree.
  *
  * ═══════════════════════════════════════════════════════════════════════════════════════
  * ROWS-CANONICAL-ON-SEED — WHICH COPY WINS, DECIDED, NOT LEFT TO ACCIDENT (B1291)
@@ -65,34 +65,42 @@
  *      window legitimately satisfied. Silent loss, no conflict, nothing to notice.
  *
  * ═══════════════════════════════════════════════════════════════════════════════════════
- * WHICH NOTEBOOKS A PROJECT SHOWS — DECIDED, NOT LEFT ACCIDENTAL (B1374)
+ * WHICH PAGES A PROJECT SHOWS — DECIDED, NOT LEFT ACCIDENTAL (B1374, AMENDED BY B1420)
  * ═══════════════════════════════════════════════════════════════════════════════════════
- * A notebook is either BOUND to one project (`projectId`) or LOOSE (`projectId: null`).
- * The owner asked for this rule to be written down rather than inferred, so here it is,
- * in full, and every surface obeys it:
+ * ⛔ SUPERSEDED, and kept so nobody rebuilds it from a stale comment: the model used to be
+ * `project › notebook › section › page`, and the project binding lived on the NOTEBOOK. It
+ * is gone (B1420, owner's decision — **the project IS the notebook**). There are two concepts
+ * now: a project, and PAGES THAT CAN HOLD SUBPAGES. The full rule and the one-way migration
+ * live in the header of `notesModel.js`; read it there rather than re-deriving it.
  *
- *   • A LOOSE notebook is visible EVERYWHERE — from the Dashboard and from inside every
- *     project. It is not a Dashboard-only shelf. A scratch notebook you cannot reach from
- *     where you are working is one you stop using, and hiding loose notebooks inside a
- *     project would create a place notes can be while looking like they are nowhere.
- *   • A BOUND notebook is visible from ITS project, and from the ALL scope. It is not
- *     shown inside a different project, because that is the whole point of binding.
- *   • THE ALL SCOPE IS ALWAYS ONE CLICK AWAY, from inside any project. This is the load-
- *     bearing half: it is what makes "no notebook can become unreachable" a property
- *     rather than a hope. A notebook bound to a project you are not in, to a project that
- *     was deleted, or to an id that no longer resolves at all, is still one click from
- *     every screen — and the rail says so in as many words rather than showing an
- *     unexplained empty list.
- *   • A notebook created while a project is selected is BOUND TO IT by default, with no
- *     extra step; created from the Dashboard it is LOOSE. Either way the binding is
- *     visible on the row and changeable from the row's menu.
- *   • MIGRATION: every notebook that existed before this rule keeps exactly the binding it
- *     had. Nothing is re-bound and nothing is orphaned — a notebook whose `projectId` is
- *     absent reads as LOOSE, which is the visible-everywhere case.
- *   • THE BINDING RIDES IN THE TREE BLOB, so it syncs with everything else and needs no
- *     schema change. `mergeTrees` carries it: a notebook present on one side only is kept
- *     whole (rule 2), and for a notebook on both sides the LOCAL binding wins (rule 3),
- *     the same as its title. Asserted in test/notesSync.test.js, not assumed.
+ * What replaces the old binding rule, and every surface obeys it:
+ *
+ *   • A TOP-LEVEL page carries `projectId` — a project, or `null` for the named
+ *     "Not in a project" home. A SUBPAGE carries none: its project is its root's, DERIVED.
+ *     Storing it on every node would make one fact writable in N places, which is the
+ *     redundancy B1340 cost this repo eight PRs to remove from the Site Planner.
+ *   • INSIDE A PROJECT you see that project's pages and nothing else — including nothing
+ *     from the no-project home. That is a deliberate CHANGE from B1374's "a loose notebook
+ *     shows up everywhere", and it is what lets the rail drop the per-row project badge
+ *     entirely: everything on screen belongs to where you are standing.
+ *   • THE DASHBOARD IS THE ALL-PROJECTS VIEW — every project's pages, GROUPED under the
+ *     project's name, no-project group last. It is one click from the header crumb on every
+ *     screen, which is what keeps B1374's load-bearing guarantee ("nothing can become
+ *     unreachable") true after its in-rail scope switch was removed as duplicate chrome.
+ *     A project id that no longer resolves still gets its own flagged group rather than
+ *     being folded away — losing the label must never mean losing the pages.
+ *   • A page created while a project is selected is FILED THERE by default with no extra
+ *     step; created from the Dashboard it belongs to no project. Either way it is re-filed
+ *     from the row's own menu, or by dragging it onto a project's heading.
+ *   • MIGRATION: one-way, on read, and PERSISTED on the first load that sees the old shape
+ *     (so the new shape rides the cloud tree blob to the other machine). Every section
+ *     becomes a top-level page keeping its own ID; its pages become that page's subpages;
+ *     two notebooks bound to the same project MERGE by construction, because `projectId`
+ *     is the only grouping key there is. Nothing is dropped and no id can collide.
+ *   • THE FILING RIDES IN THE TREE BLOB, so it syncs with everything else and needs no
+ *     schema change and no SQL. `mergeTrees` carries it: a page present on one side only is
+ *     kept whole (rule 2), and for a page on both sides the LOCAL filing wins (rule 3), the
+ *     same as its title. Asserted in test/notesSync.test.js, not assumed.
  *
  * ═══════════════════════════════════════════════════════════════════════════════════════
  * LOUD-FAILURE. A full quota, a disabled store, a private-mode browser, a refused upload or
@@ -105,7 +113,7 @@
  * there is no state in which the footer claims a sync that did not happen.
  */
 import { docToText, imageIdsInDoc } from "./notesMarkdown.js";
-import { migrate, searchTitles, visibleNotebooks, SCOPE_ALL, SCOPE_PROJECT } from "./notesModel.js";
+import { migrate, searchTitles, pagesInScope, walkPages, SCOPE_ALL, SCOPE_PROJECT } from "./notesModel.js";
 import { relativeTime } from "./notesTime.js";
 
 export const TREE_KEY_BASE = "planyr:notes:tree:v1";
@@ -160,7 +168,7 @@ function fail(op, key, e) {
     op,
     key,
     message: quota
-      ? "This browser's storage is full, so the last change was NOT saved. Free some space or export the notebook to Markdown."
+      ? "This browser's storage is full, so the last change was NOT saved. Free some space or export your notes to Markdown."
       : `Notes could not be ${op === "read" ? "read from" : "written to"} this browser's storage, so the last change was NOT saved.`,
     detail: String(e?.message || e || "unknown"),
     at: Date.now(),
@@ -184,7 +192,7 @@ function store() {
 /* ---- tree ---------------------------------------------------------------------------- */
 
 /** Read the raw tree object, or null when absent. A PARSE failure is a real failure and
- *  is reported — a corrupt tree read as "you have no notebooks" is how notes disappear. */
+ *  is reported — a corrupt tree read as "you have no notes" is how notes disappear. */
 export function readTreeRaw(s = scope) {
   const st = store();
   if (!st) { fail("read", treeKey(s), new Error("localStorage is unavailable in this browser")); return null; }
@@ -250,9 +258,9 @@ export function writePage(pageId, doc) {
 }
 
 /** Clear page bodies. Takes the FULL cascade set from `deleteNode`, never a single id the
- *  caller guessed at — TOMBSTONE-DELETES: deleting a notebook orphans every page beneath
- *  every one of its sections, and a body left behind is a note that can never be reached
- *  and never be removed. Returns how many keys were actually cleared. */
+ *  caller guessed at — TOMBSTONE-DELETES: deleting a page orphans its ENTIRE SUBTREE, at
+ *  every depth, and a body left behind is a note that can never be reached and never be
+ *  removed. Returns how many keys were actually cleared. */
 export function deletePages(pageIds) {
   const ids = (Array.isArray(pageIds) ? pageIds : [pageIds]).filter(Boolean);
   if (!ids.length) return 0;
@@ -778,18 +786,18 @@ export async function resolveNotesConflict(pageId, choice) {
 
 /* ---- the sign-in migration ------------------------------------------------------------ */
 
-/** Adopt the signed-OUT notebooks into this account. COPIES — the `local` scope is left
+/** Adopt the signed-OUT pages into this account. COPIES — the `local` scope is left
  *  exactly as it was, so signing out lands you back on the same notes rather than on
- *  nothing. Idempotent by notebook id, so it cannot duplicate a notebook it already
+ *  nothing. Idempotent by top-level page id, so it cannot duplicate a page it already
  *  adopted, and it needs no "already done" marker to get out of step with. */
 async function adoptLocalNotes() {
   const c = await cloud();
   const localTree = migrate(readTreeRaw(LOCAL_SCOPE));
   const accountTree = migrate(readTreeRaw(scope));
   const plan = c.planAdoption(localTree, accountTree, { already: sync.adopted || [] });
-  if (!plan.notebooks.length) return { adopted: 0 };
+  if (!plan.pages.length) return { adopted: 0 };
 
-  const merged = { ...accountTree, notebooks: [...accountTree.notebooks, ...plan.notebooks] };
+  const merged = { ...accountTree, pages: [...(accountTree.pages || []), ...plan.pages] };
   for (const id of plan.pageIds) {
     const body = readPage(id, LOCAL_SCOPE);
     if (body != null) writePageLocal(id, body, scope);
@@ -804,14 +812,14 @@ async function adoptLocalNotes() {
     if (!rec?.dataUrl) continue;
     await db.idbPutImage({ ...rec, key: imageKey(m.id, scope), scope });
   }
-  if (!writeTreeLocal(merged, scope)) return { adopted: 0, error: "the adopted notebooks could not be saved" };
+  if (!writeTreeLocal(merged, scope)) return { adopted: 0, error: "the adopted notes could not be saved" };
   sync.treeDirty = true;
   for (const id of plan.pageIds) sync.pages[id] = { rev: null, dirty: true, purged: false };
   // ADOPTED-ONCE, EVER. Recorded before the push, so a notebook the user later deletes from
   // the account is not copied back in on the next sign-in (see planAdoption's header).
-  sync.adopted = [...new Set([...(sync.adopted || []), ...plan.notebooks.map((n) => n.id)])];
+  sync.adopted = [...new Set([...(sync.adopted || []), ...plan.pages.map((n) => n.id)])];
   saveSyncState();
-  return { adopted: plan.notebooks.length };
+  return { adopted: plan.pages.length };
 }
 
 /* ---- the seed + the push -------------------------------------------------------------- */
@@ -1122,18 +1130,17 @@ export function searchNotes(tree, query, { projectId = null, scope = SCOPE_PROJE
   const titleHits = searchTitles(tree, query, { projectId: pid });
   const seen = new Set(titleHits.map((h) => h.pageId));
   const bodyHits = [];
-  for (const nb of visibleNotebooks(tree, pid)) {
-    for (const sec of nb.sections || []) {
-      for (const pg of sec.pages || []) {
-        if (seen.has(pg.id)) continue;
-        const text = docToText(readPage(pg.id));
-        if (!text || !text.toLowerCase().includes(q)) continue;
-        bodyHits.push({
-          pageId: pg.id, pageTitle: pg.title, sectionId: sec.id, sectionTitle: sec.title,
-          notebookId: nb.id, notebookTitle: nb.title, where: "body", excerpt: excerptAround(text, q),
-        });
-      }
-    }
-  }
+  // The SAME scoped roots the title search walked, at every depth — a subpage's body has to
+  // be as findable as a top-level one, or nesting would quietly hide notes.
+  const scoped = { pages: pagesInScope(tree, pid, pid == null ? SCOPE_ALL : SCOPE_PROJECT) };
+  walkPages(scoped, (pg, { root, depth }) => {
+    if (seen.has(pg.id)) return;
+    const text = docToText(readPage(pg.id));
+    if (!text || !text.toLowerCase().includes(q)) return;
+    bodyHits.push({
+      pageId: pg.id, pageTitle: pg.title, projectId: root.projectId ?? null, depth,
+      where: "body", excerpt: excerptAround(text, q),
+    });
+  });
   return [...titleHits, ...bodyHits];
 }

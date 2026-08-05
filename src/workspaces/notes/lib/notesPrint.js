@@ -36,7 +36,7 @@ body { font: 11.5pt/1.55 -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sa
 .doc-title { font-size: 20pt; font-weight: 700; letter-spacing: -0.01em; margin: 0 0 2mm; }
 .doc-meta { font-size: 8.5pt; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: #5B6270; margin: 0 0 6mm; }
 .page-break { break-before: page; page-break-before: always; }
-.note-section-head { font-size: 14pt; font-weight: 700; margin: 8mm 0 3mm; padding-bottom: 1.5mm; border-bottom: 1px solid #C9CDD6; }
+.note-trail { font-size: 9pt; font-weight: 600; letter-spacing: 0.03em; color: #5A6070; margin: 0 0 1mm; }
 .note-page-head { font-size: 12.5pt; font-weight: 700; margin: 6mm 0 2mm; }
 .note-page-meta { font-size: 8pt; font-weight: 600; color: #5B6270; margin: 0 0 2mm; }
 .note-body > * + * { margin-top: 0.7em; }
@@ -102,10 +102,16 @@ function pageBlock({ title, html, updatedAt, headingClass = "note-page-head", sh
 
 /** A whole print document.
  *
- *  `doc` = `{ title, meta, pages: [{ title, html, updatedAt, sectionTitle }] }`. A single
- *  page prints with its title as the document heading and no section furniture; a notebook
- *  prints section headings and starts each page on its own sheet, because a stack of pages
- *  run together is not what anyone hands to a consultant. */
+ *  `doc` = `{ title, meta, pages: [{ title, html, updatedAt, trail }] }`. A single page
+ *  prints with its title as the document heading and no extra furniture; a branch prints
+ *  each page on its own sheet, because a stack of pages run together is not what anyone
+ *  hands to a consultant.
+ *
+ *  ⛔ PDF-PARITY WITH THE NEW SHAPE (B1420). There is no "section" any more, so a subpage
+ *  cannot be printed under a section heading. What paper needs instead is WHERE a page sits,
+ *  which the screen shows by indentation and paper shows as a **trail line** above the
+ *  title — `Grand Port › Entitlements`. It is the same information the rail carries, and it
+ *  is the reason a printed branch is still readable when the sheets get separated. */
 export function buildPrintDocument({ title, meta = "", pages = [] } = {}) {
   const body = [];
   const single = pages.length === 1;
@@ -113,15 +119,10 @@ export function buildPrintDocument({ title, meta = "", pages = [] } = {}) {
   body.push(`<h1 class="doc-title">${esc(title || "Note")}</h1>`);
   if (meta) body.push(`<p class="doc-meta">${esc(meta)}</p>`);
 
-  let lastSection = null;
   pages.forEach((p, i) => {
-    if (!single && p.sectionTitle && p.sectionTitle !== lastSection) {
-      lastSection = p.sectionTitle;
-      body.push(`<h2 class="note-section-head${i ? " page-break" : ""}">${esc(p.sectionTitle)}</h2>`);
-      body.push(pageBlock({ ...p, showTitle: true, breakBefore: false }));
-      return;
-    }
-    body.push(pageBlock({ ...p, showTitle: !single, breakBefore: !single && i > 0 }));
+    const trail = Array.isArray(p.trail) && p.trail.length ? p.trail.join(" › ") : "";
+    if (!single && trail) body.push(`<p class="note-trail${i ? " page-break" : ""}">${esc(trail)}</p>`);
+    body.push(pageBlock({ ...p, showTitle: !single, breakBefore: !single && i > 0 && !trail }));
   });
 
   return [

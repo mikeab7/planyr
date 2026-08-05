@@ -105,8 +105,8 @@ export const emptySyncState = () => ({ treeRev: null, treeDirty: false, pages: {
  *   4. A PAGE MOVED ON BOTH DEVICES keeps the LOCAL placement and appears exactly once.
  */
 export function mergeTrees(local, server) {
-  const L = local && typeof local === "object" ? local : { notebooks: [], trash: [] };
-  const S = server && typeof server === "object" ? server : { notebooks: [], trash: [] };
+  const L = local && typeof local === "object" ? local : { pages: [], trash: [] };
+  const S = server && typeof server === "object" ? server : { pages: [], trash: [] };
 
   const trash = [];
   const trashIds = new Set();
@@ -115,62 +115,44 @@ export function mergeTrees(local, server) {
     trashIds.add(e.id);
     trash.push(e);
   }
-  // Every node id any bin claims. A live copy on the other side loses to it (rule 1).
+  // Every page id any bin claims. A live copy on the other side loses to it (rule 1).
   const deleted = new Set();
   for (const e of trash) {
     if (e?.node?.id) deleted.add(e.node.id);
     for (const pid of e?.pageIds || []) deleted.add(pid);
   }
 
-  const seenPages = new Set();
-  const mergePages = (a = [], b = []) => {
+  /* ONE RECURSIVE MERGE, because there is now ONE node type (B1420). The old model needed a
+   * merge per level — pages inside sections inside notebooks — and each level was its own
+   * chance to get the rules subtly different. A page and a subpage are the same thing, so
+   * they merge by the same code at every depth. `seen` is global across the whole walk: a
+   * page that was re-parented on one device must appear EXACTLY once, in the local
+   * placement (rule 4), never in both its old and its new home. */
+  const seen = new Set();
+  const mergeList = (a = [], b = []) => {
     const out = [];
-    const byId = new Map(b.filter(Boolean).map((p) => [p.id, p]));
-    const push = (pg) => {
-      if (!pg?.id || deleted.has(pg.id) || seenPages.has(pg.id)) return;
-      seenPages.add(pg.id);
-      out.push(pg);
-    };
-    for (const pg of a) {
-      if (!pg?.id) continue;
-      const other = byId.get(pg.id);
-      push(other
+    const byId = new Map((b || []).filter(Boolean).map((p) => [p.id, p]));
+    const push = (pg, other) => {
+      if (!pg?.id || deleted.has(pg.id) || seen.has(pg.id)) return;
+      seen.add(pg.id);
+      const merged = other
         ? { ...pg, updatedAt: laterOf(pg.updatedAt, other.updatedAt), createdAt: earlierOf(pg.createdAt, other.createdAt) }
-        : pg);
-    }
-    const aIds = new Set(a.filter(Boolean).map((p) => p.id));
-    for (const pg of b) if (pg?.id && !aIds.has(pg.id)) push(pg);
+        : { ...pg };
+      merged.pages = mergeList(pg.pages || [], other?.pages || []);
+      out.push(merged);
+    };
+    for (const pg of a || []) push(pg, byId.get(pg?.id));
+    const aIds = new Set((a || []).filter(Boolean).map((p) => p.id));
+    for (const pg of b || []) if (pg?.id && !aIds.has(pg.id)) push(pg, null);
     return out;
   };
 
-  const mergeSections = (a = [], b = []) => {
-    const out = [];
-    const byId = new Map(b.filter(Boolean).map((s) => [s.id, s]));
-    for (const sec of a) {
-      if (!sec?.id || deleted.has(sec.id)) continue;
-      out.push({ ...sec, pages: mergePages(sec.pages || [], byId.get(sec.id)?.pages || []) });
-    }
-    const aIds = new Set(a.filter(Boolean).map((s) => s.id));
-    for (const sec of b) {
-      if (!sec?.id || aIds.has(sec.id) || deleted.has(sec.id)) continue;
-      out.push({ ...sec, pages: mergePages(sec.pages || [], []) });
-    }
-    return out;
-  };
+  // Roots also carry `projectId`, and rule 3 (the local title wins) covers it: this function
+  // is only reached when local has unpushed changes, so a re-filing done here is the one
+  // with something to say. A root only the server has keeps the server's project.
+  const pages = mergeList(L.pages || [], S.pages || []);
 
-  const notebooks = [];
-  const srvById = new Map((S.notebooks || []).filter(Boolean).map((n) => [n.id, n]));
-  for (const nb of L.notebooks || []) {
-    if (!nb?.id || deleted.has(nb.id)) continue;
-    notebooks.push({ ...nb, sections: mergeSections(nb.sections || [], srvById.get(nb.id)?.sections || []) });
-  }
-  const localIds = new Set((L.notebooks || []).filter(Boolean).map((n) => n.id));
-  for (const nb of S.notebooks || []) {
-    if (!nb?.id || localIds.has(nb.id) || deleted.has(nb.id)) continue;
-    notebooks.push({ ...nb, sections: mergeSections(nb.sections || [], []) });
-  }
-
-  return { v: L.v || S.v || 2, notebooks, trash };
+  return { v: L.v || S.v || 3, pages, trash };
 }
 
 const laterOf = (a, b) => (Number.isFinite(a) && Number.isFinite(b) ? Math.max(a, b) : (Number.isFinite(a) ? a : (Number.isFinite(b) ? b : null)));
@@ -396,17 +378,23 @@ export function planImageSync({ index = [], localMeta = [], state = emptySyncSta
  * account tree" is NOT the same as "never adopted": adopt a signed-out notebook, then delete
  * it from the account, and a naive re-run would find it missing and copy it straight back in
  * — a deleted note resurrected by the migration that was supposed to be idempotent. So a
- * notebook is skipped when ANY of three things is true: the account has it live, the account
- * has it IN THE BIN, or this device has adopted it before (`already`, which the store keeps
- * in its sync ledger). Only a notebook that is genuinely new to the account is copied. */
+ * top-level page is skipped when ANY of three things is true: the account has it live, the
+ * account has it IN THE BIN (including inside a binned branch's cascade set), or this device
+ * has adopted it before (`already`, which the store keeps in its sync ledger). Only a page
+ * that is genuinely new to the account is copied — and a copied page brings its whole
+ * SUBTREE with it, which is why the body list is a recursive walk. */
 export function planAdoption(localTree, accountTree, { already = [] } = {}) {
-  const have = new Set((accountTree?.notebooks || []).filter(Boolean).map((n) => n.id));
+  const have = new Set((accountTree?.pages || []).filter(Boolean).map((n) => n.id));
   for (const id of already) have.add(id);
-  for (const e of accountTree?.trash || []) if (e?.node?.id) have.add(e.node.id);
-  const notebooks = (localTree?.notebooks || []).filter((nb) => nb?.id && !have.has(nb.id));
+  for (const e of accountTree?.trash || []) {
+    if (e?.node?.id) have.add(e.node.id);
+    for (const pid of e?.pageIds || []) have.add(pid);
+  }
+  const pages = (localTree?.pages || []).filter((p) => p?.id && !have.has(p.id));
   const pageIds = [];
-  for (const nb of notebooks) for (const sec of nb.sections || []) for (const pg of sec.pages || []) pageIds.push(pg.id);
-  return { notebooks, pageIds };
+  const go = (p) => { pageIds.push(p.id); for (const k of (Array.isArray(p.pages) ? p.pages : [])) go(k); };
+  for (const p of pages) go(p);
+  return { pages, pageIds };
 }
 
 /* ---- transport: the tree ------------------------------------------------------------- */

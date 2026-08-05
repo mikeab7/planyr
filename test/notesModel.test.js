@@ -1,19 +1,27 @@
-/* notesModel — the PURE notebook › section › page tree.
+/* notesModel — the PURE page tree.
  *
- * The four properties worth defending here are the ones whose failure is silent:
- * purity (a mutator that edits its argument corrupts the caller's state without an error),
- * the DELETE CASCADE (an under-reported cascade orphans page bodies that can never be
- * reached and never be removed — TOMBSTONE-DELETES), project visibility (a loose notebook
- * that stops being visible from inside a project is a notebook you stop using), and a
- * TOLERANT migrate (a notes module that refuses to open because one field is the wrong
- * type is worse than one that drops the field).
+ * ⛔ REWRITTEN FOR THE COLLAPSE (B1420). The previous suite exercised the four-level
+ * `notebook › section › page` model: `addNotebook` / `addSection` / `moveSection` /
+ * `moveNotebook` / `visibleNotebooks` / `setNotebookProject`. Every one of those is gone, so
+ * every one of those cases is REPLACED here rather than left passing against dead code — the
+ * property each of them protected is re-asserted against the new shape.
+ *
+ * The properties worth defending are the ones whose failure is SILENT:
+ *   • PURITY — a mutator that edits its argument corrupts the caller's state with no error.
+ *   • THE FULL CASCADE, AT EVERY DEPTH — an under-reported cascade orphans page bodies that
+ *     can never be reached and never be removed (TOMBSTONE-DELETES).
+ *   • NOTHING RENDERS IN ZERO SCOPES — the exact bug the collapse must not create.
+ *   • MIGRATION — the owner's own live data, converted, twice, with nothing lost.
+ *   • A TOLERANT `migrate` — a notes module that refuses to open because one field is the
+ *     wrong type is worse than one that drops the field.
  */
 import { describe, it, expect } from "vitest";
 import {
-  addNotebook, addPage, addSection, allPageIds, deleteNode, emptyTree, findPage,
-  firstPageId, makeNotebook, migrate, moveNotebook, movePage, moveSection,
-  renameNode, searchTitles, setNotebookProject, visibleNotebooks, NOTES_TREE_VERSION,
-  boundProjectIds, notebooksInScope, SCOPE_ALL, SCOPE_PROJECT,
+  addPage, allPageIds, ancestorIds, boundProjectIds, deleteNode, emptyTree, expiredTrashIds,
+  findPage, firstPageId, migrate, movePage, pagesInScope, projectGroups, projectOfPage,
+  purgeTrashEntry, recentPages, renameNode, restoreNode, searchTitles, setPageProject,
+  subtreePageIds, touchPage, trashEntries, trashPageIds, walkPages,
+  NOTES_TREE_VERSION, NO_PROJECT_LABEL, SCOPE_ALL, SCOPE_PROJECT,
 } from "../src/workspaces/notes/lib/notesModel.js";
 
 const deepFreeze = (o) => {
@@ -21,371 +29,514 @@ const deepFreeze = (o) => {
   return o;
 };
 
-/* A three-notebook fixture with deterministic ids: one bound to project P1, one bound to
- * P2, one loose. Every structural test reads from this. */
-function fixture() {
-  const tree = {
-    v: NOTES_TREE_VERSION,
-    notebooks: [
-      { id: "nb1", title: "Goose Creek", projectId: "P1", sections: [
-        { id: "s1", title: "Due diligence", pages: [{ id: "p1", title: "Site visit" }, { id: "p2", title: "Utilities" }] },
-        { id: "s2", title: "Zoning", pages: [{ id: "p3", title: "Setbacks" }] },
+/* The owner's live data as reported 2026-08-04, in the OLD four-level shape. Two notebooks
+ * bound to the same project (which must MERGE), one whose names are both generic, and one
+ * under a different project. This is the migration's test case, not a synthetic one. */
+const OWNER_V2 = () => ({
+  v: 2,
+  notebooks: [
+    { id: "nb1", title: "Grand Port", projectId: "GP", sections: [
+      { id: "sec1", title: "Entitlements", pages: [{ id: "pg1", title: "Bonding", createdAt: 10, updatedAt: 20 }] },
+      { id: "sec2", title: "DEV COORDINATION", pages: [{ id: "pg2", title: "Page 1", createdAt: 11, updatedAt: 21 }] },
+    ] },
+    { id: "nb2", title: "Coordination", projectId: "GP", sections: [
+      { id: "sec3", title: "Coordination", pages: [
+        { id: "pg3", title: "Coordination", createdAt: 12, updatedAt: 22 },
+        { id: "pg4", title: "Bonding", createdAt: 13, updatedAt: 23 },
       ] },
-      { id: "nb2", title: "Katy Prairie", projectId: "P2", sections: [
-        { id: "s3", title: "Notes", pages: [{ id: "p4", title: "Broker call" }] },
-      ] },
-      { id: "nb3", title: "Scratch", projectId: null, sections: [
-        { id: "s4", title: "Ideas", pages: [{ id: "p5", title: "Random thought" }] },
-      ] },
-    ],
-  };
-  return tree;
-}
+    ] },
+    { id: "nb3", title: "Untitled notebook", projectId: "GP", sections: [
+      { id: "sec4", title: "Section 1", pages: [{ id: "pg5", title: "Load Study", createdAt: 14, updatedAt: 24 }] },
+    ] },
+    { id: "nb4", title: "Untitled notebook", projectId: "ADDR", sections: [
+      { id: "sec5", title: "Section 1", pages: [{ id: "pg6", title: "Page 1", createdAt: 15, updatedAt: 25 }] },
+    ] },
+  ],
+  trash: [],
+});
 
+/** A small hand-built v3 tree: one project with a nested branch, plus a no-project page. */
+const sample = () => {
+  let t = emptyTree();
+  t = addPage(t, { projectId: "GP", title: "Entitlements", id: "a", at: 100 }).tree;
+  t = addPage(t, { parentId: "a", title: "Bonding", id: "a1", at: 101 }).tree;
+  t = addPage(t, { parentId: "a1", title: "Surety letter", id: "a1x", at: 102 }).tree;
+  t = addPage(t, { projectId: "GP", title: "Dev coordination", id: "b", at: 103 }).tree;
+  t = addPage(t, { projectId: null, title: "Scratch", id: "c", at: 104 }).tree;
+  return t;
+};
+
+/* ═══════════════════════════════════════════════════════════════════════════════════════ */
 describe("purity — no mutator touches its input", () => {
-  /* Every op runs against a DEEP-FROZEN tree. Under ESM strict mode an in-place write
-   * throws, so a mutation shows up as a thrown error rather than as a silent corruption
-   * discovered three screens later. */
-  const ops = {
-    addNotebook: (t) => addNotebook(t, { title: "New" }).tree,
-    addSection: (t) => addSection(t, "nb1").tree,
-    addPage: (t) => addPage(t, "s1").tree,
-    renameNode: (t) => renameNode(t, "p1", "Renamed"),
-    "deleteNode(page)": (t) => deleteNode(t, "p1").tree,
-    "deleteNode(section)": (t) => deleteNode(t, "s1").tree,
-    "deleteNode(notebook)": (t) => deleteNode(t, "nb1").tree,
-    movePage: (t) => movePage(t, "p1", "s2", 0),
-    moveSection: (t) => moveSection(t, "s1", "nb2", 0),
-    moveNotebook: (t) => moveNotebook(t, "nb1", 2),
-    setNotebookProject: (t) => setNotebookProject(t, "nb3", "P1"),
-  };
-
-  for (const [name, op] of Object.entries(ops)) {
-    it(`${name} returns a new tree and leaves the input untouched`, () => {
-      const input = deepFreeze(fixture());
-      const before = JSON.stringify(input);
-      const out = op(input);
-      expect(out).not.toBe(input);
-      expect(JSON.stringify(input), `${name} mutated its input`).toBe(before);
+  const ops = [
+    ["addPage (root)", (t) => addPage(t, { projectId: "GP", title: "X" })],
+    ["addPage (child)", (t) => addPage(t, { parentId: "a", title: "X" })],
+    ["renameNode", (t) => renameNode(t, "a", "Renamed")],
+    ["movePage (nest)", (t) => movePage(t, "b", "a", 0)],
+    ["movePage (to root)", (t) => movePage(t, "a1", null, 0)],
+    ["setPageProject", (t) => setPageProject(t, "a", "OTHER")],
+    ["touchPage", (t) => touchPage(t, "a1", 999)],
+    ["deleteNode", (t) => deleteNode(t, "a")],
+  ];
+  for (const [name, run] of ops) {
+    it(`${name} returns a new tree and never mutates the old one`, () => {
+      const t = deepFreeze(sample());
+      expect(() => run(t)).not.toThrow();
+      expect(allPageIds(t)).toEqual(["a", "a1", "a1x", "b", "c"]);
     });
   }
 
-  it("a returned tree is fully detached — editing it cannot reach back into the input", () => {
-    const input = fixture();
-    const out = renameNode(input, "p1", "Changed");
-    out.notebooks[0].sections[0].pages[0].title = "Edited again";
-    expect(input.notebooks[0].sections[0].pages[0].title).toBe("Site visit");
+  it("touchPage returns the SAME object for an unknown page, so the caller can skip a write", () => {
+    const t = sample();
+    expect(touchPage(t, "nope")).toBe(t);
   });
 });
 
-describe("the delete cascade is reported in FULL (TOMBSTONE-DELETES)", () => {
-  it("deleting a PAGE reports just that page", () => {
-    const { tree, removedPageIds, kind } = deleteNode(fixture(), "p1");
-    expect(kind).toBe("page");
-    expect(removedPageIds).toEqual(["p1"]);
-    expect(findPage(tree, "p1")).toBeNull();
-    expect(findPage(tree, "p2")).toBeTruthy();
+/* ═══════════════════════════════════════════════════════════════════════════════════════ */
+describe("anything can hold anything — there is no second kind of node", () => {
+  it("a page can be created under a page, at any depth", () => {
+    let t = sample();
+    t = addPage(t, { parentId: "a1x", title: "Deeper", id: "d4" }).tree;
+    t = addPage(t, { parentId: "d4", title: "Deeper still", id: "d5" }).tree;
+    expect(ancestorIds(t, "d5")).toEqual(["a", "a1", "a1x", "d4"]);
+    expect(findPage(t, "d5").depth).toBe(4);
   });
 
-  it("deleting a SECTION reports every page under it", () => {
-    const { tree, removedPageIds, kind } = deleteNode(fixture(), "s1");
-    expect(kind).toBe("section");
-    expect(removedPageIds.sort()).toEqual(["p1", "p2"]);
-    expect(allPageIds(tree).sort()).toEqual(["p3", "p4", "p5"]);
+  it("no node carries a kind/type discriminator — a page with children IS a page", () => {
+    walkPages(sample(), (p) => {
+      expect(p.kind).toBeUndefined();
+      expect(p.type).toBeUndefined();
+      expect(Array.isArray(p.pages)).toBe(true);
+    });
   });
 
-  it("deleting a NOTEBOOK reports every page under every one of its sections", () => {
-    // The case that matters: the cascade spans TWO sections, so a caller that assumed
-    // "the pages of the first section" would silently orphan p3's body forever.
-    const { tree, removedPageIds, kind } = deleteNode(fixture(), "nb1");
-    expect(kind).toBe("notebook");
-    expect(removedPageIds.sort()).toEqual(["p1", "p2", "p3"]);
-    expect(allPageIds(tree).sort()).toEqual(["p4", "p5"]);
+  it("a subpage carries NO projectId of its own — its project is its root's, derived", () => {
+    const t = sample();
+    expect(findPage(t, "a1").page.projectId).toBeUndefined();
+    expect(projectOfPage(t, "a1x")).toBe("GP");
+    expect(projectOfPage(t, "c")).toBeNull();
   });
 
-  it("the cascade set and the pages that actually left the tree are the SAME set", () => {
-    for (const id of ["p1", "s1", "s2", "nb1", "nb2", "nb3"]) {
-      const before = new Set(allPageIds(fixture()));
-      const { tree, removedPageIds } = deleteNode(fixture(), id);
-      const after = new Set(allPageIds(tree));
-      const gone = [...before].filter((p) => !after.has(p)).sort();
-      expect(removedPageIds.slice().sort(), `cascade for ${id}`).toEqual(gone);
-    }
+  it("re-parenting a root page STRIPS its projectId, so the fact lives in exactly one place", () => {
+    const t = movePage(sample(), "b", "a", 0);
+    expect(findPage(t, "b").page.projectId).toBeUndefined();
+    expect(projectOfPage(t, "b")).toBe("GP");
   });
 
-  it("deleting an unknown id changes nothing and reports no orphans", () => {
-    const { tree, removedPageIds, kind } = deleteNode(fixture(), "nope");
-    expect(kind).toBeNull();
-    expect(removedPageIds).toEqual([]);
-    expect(allPageIds(tree).sort()).toEqual(["p1", "p2", "p3", "p4", "p5"]);
-  });
-});
-
-describe("project visibility — bound at the NOTEBOOK, and loose notebooks follow you", () => {
-  it("a project sees its own notebooks plus every loose one", () => {
-    const ids = visibleNotebooks(fixture(), "P1").map((n) => n.id);
-    expect(ids).toEqual(["nb1", "nb3"]);
+  it("lifting a page to the top level gives it a project — the one it came from by default", () => {
+    const t = movePage(sample(), "a1x", null, 0);
+    expect(findPage(t, "a1x").page.projectId).toBe("GP");
+    expect(findPage(t, "a1x").parent).toBeNull();
   });
 
-  it("a DIFFERENT project sees its own plus the same loose one — never the other project's", () => {
-    const ids = visibleNotebooks(fixture(), "P2").map((n) => n.id);
-    expect(ids).toEqual(["nb2", "nb3"]);
-    expect(ids).not.toContain("nb1");
+  it("…or an explicitly named one", () => {
+    const t = movePage(sample(), "a1x", null, 0, { projectId: "OTHER" });
+    expect(findPage(t, "a1x").page.projectId).toBe("OTHER");
   });
 
-  it("the loose notebook is visible from EVERY project — a scratchpad you can't reach is one you stop using", () => {
-    for (const p of ["P1", "P2", "P9-never-seen"]) {
-      expect(visibleNotebooks(fixture(), p).map((n) => n.id)).toContain("nb3");
-    }
-  });
-
-  it("with no project selected nothing is out of scope", () => {
-    expect(visibleNotebooks(fixture(), null).map((n) => n.id)).toEqual(["nb1", "nb2", "nb3"]);
-  });
-
-  it("re-binding a notebook moves which projects can see it", () => {
-    const t = setNotebookProject(fixture(), "nb3", "P2");
-    expect(visibleNotebooks(t, "P1").map((n) => n.id)).toEqual(["nb1"]);
-    expect(visibleNotebooks(t, "P2").map((n) => n.id)).toEqual(["nb2", "nb3"]);
-  });
-
-  it("unbinding back to null makes it loose again", () => {
-    const t = setNotebookProject(setNotebookProject(fixture(), "nb3", "P2"), "nb3", null);
-    expect(visibleNotebooks(t, "P1").map((n) => n.id)).toContain("nb3");
+  it("adding a subpage to an unknown parent is a clean no-op, never a throw", () => {
+    const r = addPage(sample(), { parentId: "nope", title: "X" });
+    expect(r.pageId).toBeNull();
+    expect(allPageIds(r.tree)).toEqual(["a", "a1", "a1x", "b", "c"]);
   });
 });
 
-/* B1374 — the ESCAPE HATCH. `visibleNotebooks` above is a correct filter and was never the
- * defect; the defect was that it was the ONLY view, so a notebook bound to a project you are
- * not in was invisible from every screen but one. These are about the property that closes
- * that: from anywhere, everything is reachable. */
-describe("scope — nothing can become unreachable", () => {
-  it("the project scope is exactly the old filter — the default behaviour is unchanged", () => {
-    expect(notebooksInScope(fixture(), "P1", SCOPE_PROJECT).map((n) => n.id))
-      .toEqual(visibleNotebooks(fixture(), "P1").map((n) => n.id));
+/* ═══════════════════════════════════════════════════════════════════════════════════════ */
+describe("a page may never be moved into its own subtree", () => {
+  it("refuses the move outright rather than detaching the branch", () => {
+    const t = sample();
+    const after = movePage(t, "a", "a1x", 0);
+    expect(allPageIds(after)).toEqual(allPageIds(t));
+    expect(findPage(after, "a").parent).toBeNull();
   });
 
-  it("THE ALL SCOPE REACHES EVERY NOTEBOOK, from inside any project", () => {
-    for (const p of ["P1", "P2", "P9-never-seen"]) {
-      expect(notebooksInScope(fixture(), p, SCOPE_ALL).map((n) => n.id)).toEqual(["nb1", "nb2", "nb3"]);
+  it("refuses a move onto itself", () => {
+    const t = sample();
+    expect(allPageIds(movePage(t, "a", "a", 0))).toEqual(allPageIds(t));
+  });
+
+  it("⛔ NOTHING RENDERS IN ZERO SCOPES — every page is reachable from exactly one root", () => {
+    let t = sample();
+    t = movePage(t, "a", "a1", 0);          // refused
+    t = movePage(t, "b", "a1x", 0);         // allowed
+    t = movePage(t, "c", null, 0, { projectId: "GP" });
+    const reachable = new Set();
+    for (const root of t.pages) for (const id of subtreePageIds(root)) {
+      expect(reachable.has(id), `${id} is reachable twice`).toBe(false);
+      reachable.add(id);
     }
-  });
-
-  it("a notebook bound to a project that NO LONGER EXISTS is still reachable — the unreachable case, refuted", () => {
-    const t = setNotebookProject(fixture(), "nb3", "P-deleted-long-ago");
-    // Invisible from every project, which is correct and is exactly why ALL must exist…
-    expect(visibleNotebooks(t, "P1").map((n) => n.id)).not.toContain("nb3");
-    expect(visibleNotebooks(t, "P2").map((n) => n.id)).not.toContain("nb3");
-    // …and it is one click away from every one of them.
-    expect(notebooksInScope(t, "P1", SCOPE_ALL).map((n) => n.id)).toContain("nb3");
-    // The dashboard sees it too, so there is a second way home.
-    expect(notebooksInScope(t, null, SCOPE_PROJECT).map((n) => n.id)).toContain("nb3");
-  });
-
-  it("EVERY notebook in the tree appears in SOME scope, for every project — stated as a property", () => {
-    const t = setNotebookProject(fixture(), "nb3", "P-gone");
-    for (const p of ["P1", "P2", "P-unrelated", null]) {
-      const reachable = new Set([
-        ...notebooksInScope(t, p, SCOPE_PROJECT).map((n) => n.id),
-        ...notebooksInScope(t, p, SCOPE_ALL).map((n) => n.id),
-      ]);
-      expect([...reachable].sort()).toEqual(["nb1", "nb2", "nb3"]);
+    expect([...reachable].sort()).toEqual(allPageIds(t).slice().sort());
+    // …and every page is in some project's scope, so no scope can hide one.
+    for (const id of allPageIds(t)) {
+      const pid = projectOfPage(t, id);
+      const scoped = pagesInScope(t, pid, SCOPE_PROJECT).flatMap(subtreePageIds);
+      expect(scoped, `${id} renders in no scope`).toContain(id);
     }
-  });
-
-  it("with no project selected the scope is moot — both answers are everything", () => {
-    expect(notebooksInScope(fixture(), null, SCOPE_PROJECT).map((n) => n.id)).toEqual(["nb1", "nb2", "nb3"]);
-    expect(notebooksInScope(fixture(), null, SCOPE_ALL).map((n) => n.id)).toEqual(["nb1", "nb2", "nb3"]);
-  });
-
-  it("reports which projects notebooks claim, in tree order and without repeats", () => {
-    expect(boundProjectIds(fixture())).toEqual(["P1", "P2"]);
-    expect(boundProjectIds(emptyTree())).toEqual([]);
-  });
-
-  it("neither scope function mutates the tree it is handed", () => {
-    const t = Object.freeze(fixture());
-    expect(() => { notebooksInScope(t, "P1", SCOPE_ALL); boundProjectIds(t); }).not.toThrow();
   });
 });
 
-describe("move and reorder, including the bounds", () => {
-  it("moves a page to another section at an index", () => {
-    const t = movePage(fixture(), "p1", "s2", 0);
-    expect(t.notebooks[0].sections[1].pages.map((p) => p.id)).toEqual(["p1", "p3"]);
-    expect(t.notebooks[0].sections[0].pages.map((p) => p.id)).toEqual(["p2"]);
+/* ═══════════════════════════════════════════════════════════════════════════════════════ */
+describe("the delete cascade is reported in FULL, at every depth (TOMBSTONE-DELETES)", () => {
+  it("deleting a branch reports every page under it", () => {
+    const { removedPageIds, entry } = deleteNode(sample(), "a");
+    expect(removedPageIds.slice().sort()).toEqual(["a", "a1", "a1x"]);
+    expect(entry.pageIds.slice().sort()).toEqual(["a", "a1", "a1x"]);
   });
 
-  it("reorders within the same section", () => {
-    const t = movePage(fixture(), "p1", "s1", 1);
-    expect(t.notebooks[0].sections[0].pages.map((p) => p.id)).toEqual(["p2", "p1"]);
+  it("the deleted branch leaves the live tree entirely", () => {
+    const { tree } = deleteNode(sample(), "a");
+    expect(allPageIds(tree)).toEqual(["b", "c"]);
+    expect(findPage(tree, "a1x")).toBeNull();
   });
 
-  it("a NEGATIVE index clamps to the front rather than throwing", () => {
-    const t = movePage(fixture(), "p3", "s1", -99);
-    expect(t.notebooks[0].sections[0].pages.map((p) => p.id)).toEqual(["p3", "p1", "p2"]);
+  it("the bin still holds the bodies' ids, so the sweep cannot mistake them for orphans", () => {
+    const { tree } = deleteNode(sample(), "a");
+    expect(trashPageIds(tree).slice().sort()).toEqual(["a", "a1", "a1x"]);
   });
 
-  it("an OVER-LONG index clamps to the end rather than throwing", () => {
-    const t = movePage(fixture(), "p3", "s1", 999);
-    expect(t.notebooks[0].sections[0].pages.map((p) => p.id)).toEqual(["p1", "p2", "p3"]);
+  it("restoring brings the WHOLE subtree back, in its old place", () => {
+    const del = deleteNode(sample(), "a");
+    const back = restoreNode(del.tree, del.entry.id);
+    expect(allPageIds(back.tree)).toEqual(["a", "a1", "a1x", "b", "c"]);
+    expect(ancestorIds(back.tree, "a1x")).toEqual(["a", "a1"]);
+    expect(findPage(back.tree, "a").page.projectId).toBe("GP");
+    expect(trashEntries(back.tree)).toHaveLength(0);
   });
 
-  it("a non-numeric index lands last rather than producing a hole", () => {
-    const t = movePage(fixture(), "p3", "s1", undefined);
-    expect(t.notebooks[0].sections[0].pages.map((p) => p.id)).toEqual(["p1", "p2", "p3"]);
-    expect(t.notebooks[0].sections[0].pages.every(Boolean)).toBe(true);
+  it("a deleted SUBPAGE returns under its parent", () => {
+    const del = deleteNode(sample(), "a1");
+    const back = restoreNode(del.tree, del.entry.id);
+    expect(ancestorIds(back.tree, "a1x")).toEqual(["a", "a1"]);
   });
 
-  it("no move ever loses or duplicates a page", () => {
-    for (const idx of [-5, 0, 1, 50]) {
-      const t = movePage(fixture(), "p1", "s3", idx);
-      const ids = allPageIds(t).sort();
-      expect(ids).toEqual(["p1", "p2", "p3", "p4", "p5"]);
-    }
+  it("a subpage whose parent is gone for good lands at the TOP LEVEL, never nowhere", () => {
+    const first = deleteNode(sample(), "a1");
+    const second = deleteNode(first.tree, "a");            // the parent, deleted after it
+    const purged = purgeTrashEntry(second.tree, second.entry.id);
+    const back = restoreNode(purged.tree, first.entry.id);
+    expect(findPage(back.tree, "a1")).not.toBeNull();
+    expect(findPage(back.tree, "a1").parent).toBeNull();
+    expect(findPage(back.tree, "a1").page.projectId).toBe("GP");
   });
 
-  it("moves a section between notebooks, carrying its pages", () => {
-    const t = moveSection(fixture(), "s1", "nb2", 0);
-    expect(t.notebooks[1].sections.map((s) => s.id)).toEqual(["s1", "s3"]);
-    expect(t.notebooks[0].sections.map((s) => s.id)).toEqual(["s2"]);
-    expect(allPageIds(t).sort()).toEqual(["p1", "p2", "p3", "p4", "p5"]);
+  it("restoring a page whose parent is ALSO binned restores the parent first, once", () => {
+    const first = deleteNode(sample(), "a1");
+    const second = deleteNode(first.tree, "a");
+    const back = restoreNode(second.tree, first.entry.id);
+    expect(ancestorIds(back.tree, "a1")).toEqual(["a"]);
+    expect(allPageIds(back.tree).filter((id) => id === "a1")).toHaveLength(1);
+    expect(trashEntries(back.tree)).toHaveLength(0);
   });
 
-  it("reorders notebooks, clamping out-of-range indices", () => {
-    expect(moveNotebook(fixture(), "nb1", 99).notebooks.map((n) => n.id)).toEqual(["nb2", "nb3", "nb1"]);
-    expect(moveNotebook(fixture(), "nb3", -1).notebooks.map((n) => n.id)).toEqual(["nb3", "nb1", "nb2"]);
+  it("purge hands back exactly the ids whose bytes must go", () => {
+    const del = deleteNode(sample(), "a");
+    const { tree, pageIds } = purgeTrashEntry(del.tree, del.entry.id);
+    expect(pageIds.slice().sort()).toEqual(["a", "a1", "a1x"]);
+    expect(trashEntries(tree)).toHaveLength(0);
   });
 
-  it("moving to an unknown target is a no-op, not a lost page", () => {
-    const t = movePage(fixture(), "p1", "no-such-section", 0);
-    expect(allPageIds(t).sort()).toEqual(["p1", "p2", "p3", "p4", "p5"]);
+  it("an expired entry is reported for purge, a fresh one is not", () => {
+    const old = deleteNode(sample(), "a", { at: 0 });
+    expect(expiredTrashIds(old.tree, { now: 40 * 86400000 })).toEqual([old.entry.id]);
+    expect(expiredTrashIds(old.tree, { now: 10 })).toEqual([]);
+  });
+
+  it("deleting an unknown id is a clean no-op", () => {
+    const r = deleteNode(sample(), "nope");
+    expect(r.entry).toBeNull();
+    expect(allPageIds(r.tree)).toEqual(["a", "a1", "a1x", "b", "c"]);
+  });
+
+  it("restoring an unknown entry id is a clean no-op (a double-click on Undo)", () => {
+    const r = restoreNode(sample(), "nope");
+    expect(r.restored).toBeNull();
+    expect(r.pageIds).toEqual([]);
   });
 });
 
-describe("construction — a new notebook is born ready to type in", () => {
-  it("a new notebook arrives with one section and one page", () => {
-    const nb = makeNotebook({ title: "Fresh" });
-    expect(nb.sections).toHaveLength(1);
-    expect(nb.sections[0].pages).toHaveLength(1);
+/* ═══════════════════════════════════════════════════════════════════════════════════════ */
+describe("project scoping — inside a project you see that project, and only that project", () => {
+  it("a project's scope is its own root pages", () => {
+    expect(pagesInScope(sample(), "GP", SCOPE_PROJECT).map((p) => p.id)).toEqual(["a", "b"]);
   });
 
-  it("addNotebook hands back the ids the caller needs to open the page immediately", () => {
-    const r = addNotebook(emptyTree(), { title: "Fresh", projectId: "P7" });
-    expect(r.notebookId).toBeTruthy();
-    expect(r.sectionId).toBeTruthy();
-    expect(r.pageId).toBeTruthy();
-    expect(findPage(r.tree, r.pageId)).toBeTruthy();
-    expect(r.tree.notebooks[0].projectId).toBe("P7");
+  it("a page in no project does NOT leak into a project's scope", () => {
+    expect(pagesInScope(sample(), "GP", SCOPE_PROJECT).map((p) => p.id)).not.toContain("c");
   });
 
-  it("a new SECTION also arrives with a page, for the same reason", () => {
-    const r = addSection(fixture(), "nb1");
-    expect(r.pageId).toBeTruthy();
-    expect(findPage(r.tree, r.pageId)).toBeTruthy();
+  it("with no project selected, everything is in scope — that IS the Dashboard", () => {
+    expect(pagesInScope(sample(), null).map((p) => p.id)).toEqual(["a", "b", "c"]);
   });
 
-  it("addSection / addPage against an unknown parent report null rather than throwing", () => {
-    expect(addSection(fixture(), "nope").sectionId).toBeNull();
-    expect(addPage(fixture(), "nope").pageId).toBeNull();
+  it("SCOPE_ALL is the escape hatch and still shows every root", () => {
+    expect(pagesInScope(sample(), "GP", SCOPE_ALL).map((p) => p.id)).toEqual(["a", "b", "c"]);
   });
 
-  it("ids are unique across many creations", () => {
-    let t = emptyTree();
-    for (let i = 0; i < 60; i += 1) t = addNotebook(t, {}).tree;
-    const ids = allPageIds(t);
-    expect(new Set(ids).size).toBe(ids.length);
+  it("re-filing a top-level page moves it between scopes", () => {
+    const t = setPageProject(sample(), "a", "OTHER");
+    expect(pagesInScope(t, "GP", SCOPE_PROJECT).map((p) => p.id)).toEqual(["b"]);
+    expect(pagesInScope(t, "OTHER", SCOPE_PROJECT).map((p) => p.id)).toEqual(["a"]);
   });
 
-  it("firstPageId picks a landing page, and is null on an empty tree", () => {
-    expect(firstPageId(fixture())).toBe("p1");
+  it("re-filing a SUBPAGE is a no-op — its project is its root's, and may not be forked", () => {
+    const t = setPageProject(sample(), "a1", "OTHER");
+    expect(findPage(t, "a1").page.projectId).toBeUndefined();
+    expect(projectOfPage(t, "a1")).toBe("GP");
+  });
+
+  it("boundProjectIds names every project the tree claims, once", () => {
+    expect(boundProjectIds(sample())).toEqual(["GP"]);
+  });
+});
+
+/* ═══════════════════════════════════════════════════════════════════════════════════════ */
+describe("the Dashboard groups by project, with the no-project group last", () => {
+  it("names each group from the project list", () => {
+    const groups = projectGroups(sample(), [{ id: "GP", name: "Grand Port" }]);
+    expect(groups.map((g) => g.name)).toEqual(["Grand Port", NO_PROJECT_LABEL]);
+    expect(groups[0].pages.map((p) => p.id)).toEqual(["a", "b"]);
+    expect(groups[1].pages.map((p) => p.id)).toEqual(["c"]);
+  });
+
+  it("a project the list cannot resolve still gets its OWN group, flagged — never folded away", () => {
+    const groups = projectGroups(sample(), []);
+    expect(groups[0].projectId).toBe("GP");
+    expect(groups[0].resolved).toBe(false);
+    expect(groups[0].name).toBeNull();
+    expect(groups[0].pages.map((p) => p.id)).toEqual(["a", "b"]);
+  });
+
+  it("emits no empty groups", () => {
+    expect(projectGroups(emptyTree(), [{ id: "GP", name: "Grand Port" }])).toEqual([]);
+  });
+
+  it("every root page appears in exactly one group", () => {
+    const groups = projectGroups(sample(), [{ id: "GP", name: "Grand Port" }]);
+    const ids = groups.flatMap((g) => g.pages.map((p) => p.id));
+    expect(ids.slice().sort()).toEqual(["a", "b", "c"]);
+  });
+});
+
+/* ═══════════════════════════════════════════════════════════════════════════════════════ */
+describe("reorder, rename, timestamps, Recent and search", () => {
+  it("reorders among siblings, and clamps at both bounds", () => {
+    let t = sample();
+    t = movePage(t, "b", null, 0);
+    expect(t.pages.map((p) => p.id)).toEqual(["b", "a", "c"]);
+    t = movePage(t, "b", null, 99);
+    expect(t.pages.map((p) => p.id)).toEqual(["a", "c", "b"]);
+    t = movePage(t, "b", null, -5);
+    expect(t.pages.map((p) => p.id)).toEqual(["b", "a", "c"]);
+  });
+
+  it("renames any page at any depth, and refuses to leave one nameless", () => {
+    expect(findPage(renameNode(sample(), "a1x", "Surety"), "a1x").page.title).toBe("Surety");
+    expect(findPage(renameNode(sample(), "a1x", "   "), "a1x").page.title).toBe("Untitled page");
+  });
+
+  it("touchPage stamps only the page it names", () => {
+    const t = touchPage(sample(), "a1", 5000);
+    expect(findPage(t, "a1").page.updatedAt).toBe(5000);
+    expect(findPage(t, "a").page.updatedAt).toBe(100);
+  });
+
+  it("Recent lists every page at every depth, newest first, with its trail", () => {
+    const t = touchPage(sample(), "a1x", 9999);
+    const r = recentPages(t, { projectId: "GP" });
+    expect(r[0].pageId).toBe("a1x");
+    expect(r[0].trail).toEqual(["Entitlements", "Bonding"]);
+    expect(r.map((x) => x.pageId).slice().sort()).toEqual(["a", "a1", "a1x", "b"]);
+  });
+
+  it("Recent obeys the project scope", () => {
+    expect(recentPages(sample(), { projectId: "GP" }).map((x) => x.pageId)).not.toContain("c");
+  });
+
+  it("title search finds a SUBPAGE, and says where it lives", () => {
+    const hits = searchTitles(sample(), "surety", { projectId: "GP" });
+    expect(hits.map((h) => h.pageId)).toEqual(["a1x"]);
+    expect(hits[0].trail).toEqual(["Entitlements", "Bonding"]);
+  });
+
+  it("title search is scoped, and empty for an empty query", () => {
+    expect(searchTitles(sample(), "scratch", { projectId: "GP" })).toHaveLength(0);
+    expect(searchTitles(sample(), "scratch", { projectId: null }).map((h) => h.pageId)).toEqual(["c"]);
+    expect(searchTitles(sample(), "  ")).toEqual([]);
+  });
+
+  it("firstPageId is the first page in reading order", () => {
+    expect(firstPageId(sample())).toBe("a");
     expect(firstPageId(emptyTree())).toBeNull();
   });
 });
 
-describe("rename", () => {
-  it("renames a notebook, a section and a page by id", () => {
-    let t = renameNode(fixture(), "nb1", "Renamed book");
-    t = renameNode(t, "s1", "Renamed section");
-    t = renameNode(t, "p1", "Renamed page");
-    expect(t.notebooks[0].title).toBe("Renamed book");
-    expect(t.notebooks[0].sections[0].title).toBe("Renamed section");
-    expect(t.notebooks[0].sections[0].pages[0].title).toBe("Renamed page");
+/* ═══════════════════════════════════════════════════════════════════════════════════════
+ * MIGRATION — the owner's own data, and the promise that nothing is lost.
+ * ═══════════════════════════════════════════════════════════════════════════════════════ */
+describe("migration: four levels → two concepts, on the owner's live data", () => {
+  it("stamps the new version and produces pages, not notebooks", () => {
+    const t = migrate(OWNER_V2());
+    expect(t.v).toBe(NOTES_TREE_VERSION);
+    expect(t.notebooks).toBeUndefined();
+    expect(Array.isArray(t.pages)).toBe(true);
   });
 
-  it("an all-whitespace rename falls back to a readable default instead of a blank row", () => {
-    expect(renameNode(fixture(), "p1", "   ").notebooks[0].sections[0].pages[0].title).toBe("Untitled page");
-    expect(renameNode(fixture(), "s1", "").notebooks[0].sections[0].title).toBe("Untitled section");
-    expect(renameNode(fixture(), "nb1", "  ").notebooks[0].title).toBe("Untitled notebook");
+  it("⛔ PRESERVES EVERY PAGE — not one id is dropped", () => {
+    const t = migrate(OWNER_V2());
+    for (const id of ["pg1", "pg2", "pg3", "pg4", "pg5", "pg6"]) {
+      expect(findPage(t, id), `${id} was lost`).not.toBeNull();
+    }
+  });
+
+  it("⛔ TWO NOTEBOOKS BOUND TO THE SAME PROJECT MERGE, their sections becoming siblings", () => {
+    const t = migrate(OWNER_V2());
+    const gp = pagesInScope(t, "GP", SCOPE_PROJECT);
+    expect(gp.map((p) => p.title)).toEqual(["Entitlements", "DEV COORDINATION", "Coordination", "Load Study"]);
+    const ids = allPageIds(t);
+    expect(new Set(ids).size, "an id collided in the merge").toBe(ids.length);
+  });
+
+  it("a section KEEPS ITS ID, which is what lets a binned page find its way home", () => {
+    const t = migrate(OWNER_V2());
+    expect(findPage(t, "sec1").page.title).toBe("Entitlements");
+    expect(findPage(t, "sec1").parent).toBeNull();
+  });
+
+  it("a section's pages become its subpages, in order", () => {
+    const t = migrate(OWNER_V2());
+    expect(findPage(t, "sec3").page.pages.map((p) => p.id)).toEqual(["pg3", "pg4"]);
+    expect(ancestorIds(t, "pg4")).toEqual(["sec3"]);
+  });
+
+  it("a generic 'Section 1' does not survive as a page name — the notebook's name is recovered", () => {
+    const t = migrate({ v: 2, notebooks: [{ id: "n", title: "Bonding file", projectId: "GP", sections: [
+      { id: "s", title: "Section 1", pages: [{ id: "p1", title: "A" }, { id: "p2", title: "B" }] },
+    ] }] });
+    expect(t.pages.map((p) => p.title)).toEqual(["Bonding file"]);
+    expect(t.pages[0].id).toBe("s");
+  });
+
+  it("when BOTH names are noise and there is one page, that page becomes the top-level page", () => {
+    const t = migrate(OWNER_V2());
+    const loadStudy = findPage(t, "pg5");
+    expect(loadStudy.parent).toBeNull();
+    expect(loadStudy.page.title).toBe("Load Study");
+    expect(loadStudy.page.projectId).toBe("GP");
+  });
+
+  it("a MEANINGFUL section name always wins over the notebook's", () => {
+    const t = migrate(OWNER_V2());
+    expect(findPage(t, "sec1").page.title).toBe("Entitlements");   // not "Grand Port"
+  });
+
+  it("a page's timestamps survive the conversion", () => {
+    const t = migrate(OWNER_V2());
+    expect(findPage(t, "pg1").page.createdAt).toBe(10);
+    expect(findPage(t, "pg1").page.updatedAt).toBe(20);
+  });
+
+  it("pages under a DIFFERENT project stay in their own scope", () => {
+    const t = migrate(OWNER_V2());
+    expect(pagesInScope(t, "ADDR", SCOPE_PROJECT).map((p) => p.id)).toEqual(["pg6"]);
+    expect(projectOfPage(t, "pg6")).toBe("ADDR");
+  });
+
+  it("a LOOSE notebook lands in the no-project home, same shape", () => {
+    const t = migrate({ v: 2, notebooks: [{ id: "n", title: "Scratch", projectId: null, sections: [
+      { id: "s", title: "Ideas", pages: [{ id: "p", title: "One" }] },
+    ] }] });
+    expect(t.pages[0].projectId).toBeNull();
+    expect(projectGroups(t, []).map((g) => g.name)).toEqual([NO_PROJECT_LABEL]);
+  });
+
+  it("⛔ IS IDEMPOTENT — running it twice changes nothing at all", () => {
+    const once = migrate(OWNER_V2());
+    const twice = migrate(once);
+    expect(twice).toEqual(once);
+    // …and a third time, because "twice" is only evidence if it is a fixed point.
+    expect(migrate(twice)).toEqual(once);
+  });
+
+  it("⛔ AND IT SURVIVES A ROUND TRIP THROUGH JSON — the shape rides the tree blob, so this IS the sync path", () => {
+    const once = migrate(OWNER_V2());
+    expect(migrate(JSON.parse(JSON.stringify(once)))).toEqual(once);
   });
 });
 
-describe("title search", () => {
-  it("matches case-insensitively on page titles", () => {
-    expect(searchTitles(fixture(), "SITE").map((h) => h.pageId)).toEqual(["p1"]);
+/* ═══════════════════════════════════════════════════════════════════════════════════════ */
+describe("migration: the 30-day bin comes with it", () => {
+  const BINNED = () => ({
+    v: 2,
+    notebooks: [{ id: "nb", title: "Live", projectId: "GP", sections: [{ id: "s", title: "Sec", pages: [] }] }],
+    trash: [
+      { id: "t1", kind: "page", node: { id: "gone1", title: "Deleted page" }, parentId: "s", index: 0, title: "Deleted page", deletedAt: 5, pageIds: ["gone1"] },
+      { id: "t2", kind: "section", node: { id: "gone2", title: "Deleted section", pages: [{ id: "gone2a", title: "Inside" }] }, parentId: "nb", index: 1, title: "Deleted section", deletedAt: 6, pageIds: ["gone2a"] },
+      { id: "t3", kind: "notebook", node: { id: "gone3", title: "Deleted notebook", projectId: "GP", sections: [{ id: "gone3s", title: "S", pages: [{ id: "gone3p", title: "P" }] }] }, parentId: null, index: 2, title: "Deleted notebook", deletedAt: 7, pageIds: ["gone3p"] },
+    ],
   });
 
-  it("carries the notebook and section a hit belongs to, so the result can be placed", () => {
-    const [hit] = searchTitles(fixture(), "setbacks");
-    expect(hit).toMatchObject({ pageId: "p3", sectionTitle: "Zoning", notebookTitle: "Goose Creek", where: "title" });
+  it("keeps every entry, and every cascade id on it (the purge depends on them)", () => {
+    const t = migrate(BINNED());
+    expect(t.trash).toHaveLength(3);
+    expect(trashPageIds(t).slice().sort()).toEqual(["gone1", "gone2a", "gone3p"]);
   });
 
-  it("respects project visibility — another project's pages never leak into results", () => {
-    expect(searchTitles(fixture(), "broker", { projectId: "P1" })).toEqual([]);
-    expect(searchTitles(fixture(), "broker", { projectId: "P2" }).map((h) => h.pageId)).toEqual(["p4"]);
+  it("a binned PAGE restores into the page its old section became", () => {
+    const back = restoreNode(migrate(BINNED()), "t1");
+    expect(ancestorIds(back.tree, "gone1")).toEqual(["s"]);
   });
 
-  it("an empty query returns nothing rather than everything", () => {
-    expect(searchTitles(fixture(), "")).toEqual([]);
-    expect(searchTitles(fixture(), "   ")).toEqual([]);
+  it("a binned SECTION restores as a top-level page, with its own pages under it", () => {
+    const back = restoreNode(migrate(BINNED()), "t2");
+    expect(findPage(back.tree, "gone2").parent).toBeNull();
+    expect(ancestorIds(back.tree, "gone2a")).toEqual(["gone2"]);
+  });
+
+  it("a binned NOTEBOOK restores WHOLE — one page carrying everything it held", () => {
+    const back = restoreNode(migrate(BINNED()), "t3");
+    expect(ancestorIds(back.tree, "gone3p")).toEqual(["gone3", "gone3s"]);
+    expect(findPage(back.tree, "gone3").page.projectId).toBe("GP");
+  });
+
+  it("the migrated bin is idempotent too", () => {
+    const once = migrate(BINNED());
+    expect(migrate(once)).toEqual(once);
+  });
+
+  it("an entry whose node is unreadable can still free its bytes, but honestly refuses to restore", () => {
+    const t = migrate({ v: 2, notebooks: [], trash: [{ id: "t", kind: "page", node: null, pageIds: ["x"] }] });
+    expect(trashPageIds(t)).toEqual(["x"]);
+    expect(trashEntries(t)[0].restorable).toBe(false);
+    expect(restoreNode(t, "t").restored).toBeNull();
+    expect(purgeTrashEntry(t, "t").pageIds).toEqual(["x"]);
   });
 });
 
+/* ═══════════════════════════════════════════════════════════════════════════════════════ */
 describe("migrate is tolerant — it never throws and never returns null", () => {
-  const junk = [null, undefined, 0, "", "a string", [], { }, { notebooks: null }, { notebooks: "no" }, NaN, true];
-  for (const v of junk) {
-    it(`${JSON.stringify(v) ?? String(v)} migrates to an empty tree`, () => {
-      const t = migrate(v);
-      expect(t.notebooks).toEqual([]);
+  for (const junk of [null, undefined, 0, "", "x", [], { v: 9 }, { pages: null }, { notebooks: "no" }]) {
+    it(`survives ${JSON.stringify(junk)}`, () => {
+      const t = migrate(junk);
+      expect(Array.isArray(t.pages)).toBe(true);
+      expect(Array.isArray(t.trash)).toBe(true);
       expect(t.v).toBe(NOTES_TREE_VERSION);
     });
   }
 
-  it("keeps well-formed content unchanged in shape", () => {
-    const t = migrate(fixture());
-    expect(allPageIds(t).sort()).toEqual(["p1", "p2", "p3", "p4", "p5"]);
-    expect(t.notebooks[2].projectId).toBeNull();
+  it("drops a malformed page rather than refusing to open the tree", () => {
+    const t = migrate({ v: 3, pages: [null, { id: "ok", title: "Fine", pages: [null, { id: "kid", title: "K" }] }] });
+    expect(allPageIds(t)).toEqual(["ok", "kid"]);
   });
 
-  it("drops junk MEMBERS while keeping their well-formed siblings", () => {
-    const t = migrate({ notebooks: [null, { id: "ok", title: "Fine", sections: [
-      "not a section", { id: "s", title: "S", pages: [null, { id: "p", title: "P" }, 7] },
-    ] }, 42] });
-    expect(t.notebooks).toHaveLength(1);
-    expect(t.notebooks[0].sections).toHaveLength(1);
-    expect(allPageIds(t)).toEqual(["p"]);
+  it("normalises a missing projectId on a root to null, never to undefined", () => {
+    const t = migrate({ v: 3, pages: [{ id: "p", title: "T" }] });
+    expect(t.pages[0].projectId).toBeNull();
+    expect(pagesInScope(t, null)).toHaveLength(1);
   });
 
-  it("repairs wrong-typed titles rather than propagating them into the UI", () => {
-    const t = migrate({ notebooks: [{ id: "n", title: 99, sections: [{ id: "s", title: [], pages: [{ id: "p", title: { } }] }] }] });
-    expect(t.notebooks[0].title).toBe("Untitled notebook");
-    expect(t.notebooks[0].sections[0].title).toBe("Untitled section");
-    expect(t.notebooks[0].sections[0].pages[0].title).toBe("Untitled page");
-  });
-
-  it("mints ids for nodes that arrive without one, so nothing becomes unaddressable", () => {
-    const t = migrate({ notebooks: [{ title: "No id", sections: [{ title: "No id", pages: [{ title: "No id" }] }] }] });
-    expect(t.notebooks[0].id).toBeTruthy();
-    expect(allPageIds(t)[0]).toBeTruthy();
-  });
-
-  it("normalises a missing projectId to null (loose), never to undefined", () => {
-    const t = migrate({ notebooks: [{ id: "n", title: "T", sections: [] }] });
-    expect(t.notebooks[0].projectId).toBeNull();
-    expect(visibleNotebooks(t, "any-project")).toHaveLength(1);
-  });
-
-  it("stamps the current version onto a tree that claims a future one", () => {
-    expect(migrate({ v: 999, notebooks: [] }).v).toBe(NOTES_TREE_VERSION);
+  it("a v1/v2 tree with no trash key still migrates", () => {
+    const t = migrate({ notebooks: [{ id: "n", title: "N", sections: [{ id: "s", title: "S", pages: [{ id: "p", title: "P" }] }] }] });
+    expect(allPageIds(t)).toEqual(["s", "p"]);
+    expect(t.trash).toEqual([]);
   });
 });

@@ -140,14 +140,49 @@ const tb = (id) => page.locator(`[data-testid="${id}"]`);
  * name. Every action in the harness therefore goes the way a person's does: right-click the
  * row, pick the item. (Before B1367 this hovered the row and clicked one of four controls
  * that appeared under the pointer.) */
+/* ⛔ THE RAIL OPENS THE PATH TO THE PAGE YOU ARE ON AND LEAVES THE REST SHUT (B1420) — so a
+ * harness that wants a nested row has to open its way there, exactly like a person. This
+ * reads the real tree, walks the ancestors, and clicks each closed toggle. It is also, in
+ * itself, the check that a subpage is REACHABLE: if a branch could not be opened the whole
+ * run stops here rather than passing quietly. */
+const ensureVisible = async (rowId) => {
+  const t = await readTree();
+  const chain = [];
+  const go = (node, trail) => {
+    if (node.id === rowId) { chain.push(...trail); return true; }
+    for (const k of node.pages || []) if (go(k, [...trail, node.id])) return true;
+    return false;
+  };
+  for (const r of (t?.pages || [])) if (go(r, [])) break;
+  for (const id of chain) {
+    const arrow = page.locator(`[data-testid="notes-row-${id}"]`);
+    if (await arrow.count() && await arrow.getAttribute("aria-expanded") === "false") {
+      await tb(`notes-toggle-${id}`).click();
+      await page.waitForTimeout(120);
+    }
+  }
+};
+const rowClick = async (rowId, opts) => { await ensureVisible(rowId); await tb(`notes-row-${rowId}`).click(opts); };
+
 const rowAction = async (rowId, action) => {
-  await tb(`notes-row-${rowId}`).click({ button: "right" });
+  await ensureVisible(rowId);
+  await rowClick(rowId, { button: "right" });
   await page.waitForSelector('[data-testid="notes-row-menu"]', { timeout: 5000 });
   await tb(`notes-menu-${action}-${rowId}`).click();
   await page.waitForTimeout(120);
 };
 /** Settle past the 600 ms autosave debounce. */
 const settle = async () => page.waitForTimeout(1100);
+
+/* ⛔ THE TREE IS PAGES HOLDING PAGES (B1420) — no notebooks, no sections. These three
+ * helpers are the whole adaptation the harness needed: walk it, find one, list a branch. */
+const walkTree = (t, fn) => {
+  const go = (node, parent, root, depth) => { fn(node, { parent, root, depth }); for (const k of node.pages || []) go(k, node, root, depth + 1); };
+  for (const r of (t?.pages || [])) go(r, null, r, 0);
+};
+const flatPages = (t) => { const out = []; walkTree(t, (n, c) => out.push({ ...c, node: n })); return out; };
+const findIn = (t, id) => flatPages(t).find((x) => x.node.id === id) || null;
+const subtreeIds = (node) => { const out = []; const go = (n) => { out.push(n.id); for (const k of n.pages || []) go(k); }; if (node) go(node); return out; };
 
 /* Every image record in the notes IndexedDB, WITHOUT its bytes. The whole point of the
  * image tier is that the pixels are NOT in localStorage, so a check that only reads
@@ -208,7 +243,7 @@ const beforeClick = jsRequests.length;
 await notesTab.click();
 await page.waitForSelector('[data-testid="notes-tree"]', { timeout: 15000 });
 ok("clicking the tab activates it", await notesTab.getAttribute("aria-current") === "page");
-ok("the notebook tree renders", await page.locator('[data-testid="notes-tree"]').isVisible());
+ok("the page tree renders", await page.locator('[data-testid="notes-tree"]').isVisible());
 
 const afterNav = jsRequests.slice(beforeClick);
 const notesChunkAt = afterNav.findIndex((f) => /^Notes-/.test(f));
@@ -222,9 +257,9 @@ ok("the tree is interactive BEFORE the editor engine is fetched at all",
   !jsRequests.some((f) => /^NoteEditor-/.test(f)), jsRequests.filter((f) => /NoteEditor/.test(f)).join(", ") || "engine not yet requested");
 
 /* ════ 2. One click makes a typeable notebook ══════════════════════════════════════════ */
-ok("with nothing yet, an empty state offers to create a notebook", await page.locator('[data-testid="notes-empty-create"]').count() === 1);
+ok("with nothing yet, an empty state offers to create a page", await page.locator('[data-testid="notes-empty-create"]').count() === 1);
 
-await tb("notes-new-notebook").click();
+await tb("notes-new-page").click();
 await page.waitForSelector('[data-testid="note-body"]', { timeout: 15000 });
 ok("ONE click produces an open, typeable page", await page.locator('[data-testid="note-body"]').isVisible());
 
@@ -233,13 +268,13 @@ const editorChunk = jsRequests.find((f) => /^NoteEditor-/.test(f));
 ok("the EDITOR arrives as its OWN chunk, only once a page is opened", !!editorChunk, editorChunk || "not requested");
 
 let tree = await readTree();
-ok("the new notebook is born with a section and a page", !!tree && tree.notebooks[0].sections[0].pages.length === 1,
-  tree ? `${tree.notebooks[0].sections.length} section(s)` : "no tree");
-ok("created from the dashboard, the notebook is LOOSE (visible from every project)", tree?.notebooks[0].projectId === null);
+ok("the new page is a TOP-LEVEL page — there is no notebook and no section to make first",
+  !!tree && (tree.pages || []).length === 1 && (tree.pages[0].pages || []).length === 0,
+  tree ? `${(tree.pages || []).length} top-level page(s)` : "no tree");
+ok("created from the dashboard, it belongs to NO project (and lives in its own named group)",
+  tree?.pages[0].projectId === null);
 
-const page1 = tree.notebooks[0].sections[0].pages[0].id;
-const section1 = tree.notebooks[0].sections[0].id;
-const notebook1 = tree.notebooks[0].id;
+const page1 = tree.pages[0].id;
 
 /* ════ 3. Typing reaches THAT page's own key, and the badge tells the truth ═════════════ */
 await typeInBody("The north property line runs along the bayou.");
@@ -335,11 +370,13 @@ await settle();
 ok("a table cell accepts text", textOf(await readBody(page1)).includes("Katy Prairie"));
 
 /* ════ 6. THE RACE: an edit a split second before switching pages ══════════════════════ */
-await rowAction(section1, "add");
+/* A SUBPAGE — the thing the old model could not do at all. It is created by direct action
+ * from the row's own menu, never by a mode. */
+await rowAction(page1, "sub");
 await page.waitForTimeout(700);
 tree = await readTree();
-const page2 = tree.notebooks[0].sections[0].pages[1]?.id;
-ok("a second page can be added to the section", !!page2, page2 || "none");
+const page2 = findIn(tree, page1)?.node.pages?.[0]?.id;
+ok("⛔ A PAGE CAN HOLD A PAGE — a subpage is created straight from the row's menu", !!page2, page2 || "none");
 
 await typeInBody("Second page groundwork.");
 await settle();
@@ -353,7 +390,7 @@ await page.locator('[data-testid="note-body"]').click();
 await page.keyboard.press("End");
 await page.keyboard.type(" LAST-TYPED-BEFORE-SWITCH", { delay: 5 });
 await page.waitForTimeout(90);                                  // a split second, not a full debounce
-await tb(`notes-row-${page1}`).click();
+await rowClick(page1);
 await page.waitForTimeout(1400);
 
 const rescued = textOf(await readBody(page2));
@@ -383,9 +420,9 @@ ok("REOPENING A NOTE CONTAINING A TABLE DOES NOT CRASH THE WORKSPACE", crashed =
   pageErrors.join(" | ") || "clean");
 ok("the reloaded page shows its text again", (await page.locator('[data-testid="note-body"]').innerText()).includes("north property line"));
 ok("the reloaded page still renders its TABLE", await page.locator('[data-testid="note-body"] table').count() === 1);
-ok("both pages survived the reload", (await readTree()).notebooks[0].sections[0].pages.length === 2);
+ok("both pages survived the reload", subtreeIds(findIn(await readTree(), page1)?.node).length === 2);
 
-await tb(`notes-row-${page2}`).click();
+await rowClick(page2);
 await page.waitForTimeout(900);
 ok("the second page reopens with its own text (per-page bodies, not one blob)",
   (await page.locator('[data-testid="note-body"]').innerText()).includes("Second page groundwork"));
@@ -404,7 +441,7 @@ await tb("notes-search").fill("");
 await page.waitForTimeout(400);
 
 /* ════ 9. Markdown export downloads a REAL file ════════════════════════════════════════ */
-await tb(`notes-row-${page1}`).click();
+await rowClick(page1);
 await page.waitForTimeout(900);
 /* Land the caret in the LAST block explicitly rather than clicking the middle of the note
  * and trusting Ctrl+End: the page now ends in a table, and the middle of a note is a cell.
@@ -457,10 +494,10 @@ const noticeText = await tb("notes-export-notice").count() ? await tb("notes-exp
 ok("the export NAMES what Markdown could not carry", /underlined text/i.test(noticeText), noticeText.slice(0, 80) || "no notice");
 
 /* ════ 10. AN EMPTY PAGE IS NOT A BLANK VOID ═══════════════════════════════════════════ */
-await rowAction(section1, "add");
+await rowAction(page1, "sub");
 await page.waitForTimeout(800);
 tree = await readTree();
-const page3 = tree.notebooks[0].sections[0].pages[2]?.id;
+const page3 = findIn(tree, page1)?.node.pages?.[1]?.id;
 ok("a third, EMPTY page can be added", !!page3, page3 || "none");
 
 const placeholderAttr = await page.locator('[data-testid="note-body"] p.is-editor-empty').first().getAttribute("data-placeholder").catch(() => null);
@@ -545,53 +582,66 @@ await page.reload({ waitUntil: "load" });
 await page.waitForTimeout(1800);
 await page.locator('[data-testid="module-tab-notes"]:visible').first().click();
 await page.waitForSelector('[data-testid="notes-tree"]', { timeout: 15000 });
-await tb(`notes-row-${page3}`).click();
+await rowClick(page3);
 await page.waitForTimeout(1200);
 ok("AN IMAGE WHOSE STORED COPY IS GONE RENDERS A NAMED BROKEN STATE, never a blank gap",
   await page.locator('[data-testid="note-image"][data-missing]').count() === 1
   && /Image missing/i.test(await page.locator('[data-testid="note-image"]').innerText()));
 
-/* ════ 15. MOVE — the model's move ops finally have a caller ════════════════════════════ */
-await rowAction(notebook1, "add");
+/* ════ 15. MOVE — RE-PARENTING, which is what "anything can hold anything" needs ═══════ */
+await tb("notes-new-page").click();
 await page.waitForTimeout(900);
 tree = await readTree();
-const section2Id = tree.notebooks[0].sections[1]?.id;
-ok("a second section can be added, to move a page into", !!section2Id, section2Id || "none");
+const sibling = (tree.pages || []).find((p) => p.id !== page1)?.id;
+ok("a second TOP-LEVEL page can be made, to move a page into", !!sibling, sibling || "none");
 
-await tb(`notes-row-${page3}`).click();
+await rowClick(page3);
 await page.waitForTimeout(700);
 
 await rowAction(page3, "mv");
 await page.waitForTimeout(250);
 ok("the move panel opens inline, not in a dialog box", await tb(`notes-move-${page3}`).count() === 1);
 
-await tb(`notes-move-${page3}-to-${section2Id}`).click();
+await tb(`notes-move-${page3}-to-${sibling}`).click();
 await page.waitForTimeout(900);
 tree = await readTree();
-const movedInto = tree.notebooks[0].sections.find((s) => (s.pages || []).some((p) => p.id === page3));
-ok("A PAGE CAN BE MOVED INTO ANOTHER SECTION — through the UI, not just in a unit test",
-  movedInto?.id === section2Id, `now in ${movedInto?.title}`);
+ok("⛔ A PAGE CAN BE RE-PARENTED UNDER ANOTHER PAGE — through the UI, not just in a unit test",
+  findIn(tree, page3)?.parent?.id === sibling, `now under ${findIn(tree, page3)?.parent?.title}`);
+
+/* …and back out to the top level, which is the move that has to exist or a nest is a trap. */
+await rowAction(page3, "mv");
+await page.waitForTimeout(250);
+await tb(`notes-move-${page3}-to-__root__`).click();
+await page.waitForTimeout(900);
+tree = await readTree();
+ok("⛔ ...AND BACK OUT TO THE TOP LEVEL, so nesting is never one-way",
+  findIn(tree, page3)?.parent === null, `parent ${findIn(tree, page3)?.parent?.title ?? "none"}`);
 
 await rowAction(page1, "mv");
 await page.waitForTimeout(250);
 await tb(`notes-move-${page1}-down`).click();
 await page.waitForTimeout(900);
 tree = await readTree();
-const order = tree.notebooks[0].sections[0].pages.map((p) => p.id);
-ok("A PAGE CAN BE REORDERED INSIDE ITS SECTION", order.indexOf(page1) > 0, order.join(" → "));
+const order = (tree.pages || []).map((p) => p.id);
+ok("A PAGE CAN BE REORDERED AMONG ITS SIBLINGS", order.indexOf(page1) > 0, order.join(" → "));
 
 /* ════ 16. Timestamps, and the Recent view they make possible ══════════════════════════ */
 tree = await readTree();
-const stamped = tree.notebooks[0].sections.flatMap((s) => s.pages).filter((p) => Number.isFinite(p.updatedAt));
+const stamped = flatPages(tree).map((x) => x.node).filter((p) => Number.isFinite(p.updatedAt));
 ok("EVERY PAGE NOW RECORDS WHEN IT WAS LAST TOUCHED", stamped.length >= 3, `${stamped.length} stamped`);
-ok("the rail shows a relative time on a page row", await page.locator(`[data-testid="notes-when-${page1}"]`).count() >= 0);
+/* ⛔ AND IT IS NOT A PERMANENT COLUMN ON EVERY ROW (B1420). It was noise the owner read
+ * past — Recent is where recency is the point. It survives as the row's hover title. */
+ok("⛔ THE TIMESTAMP IS OFF THE ROW — a hover, not a column",
+  await page.locator(`[data-testid="notes-when-${page1}"]`).count() === 0);
+ok("...but it is still THERE, on the row's own title", /edited/i.test(await tb(`notes-row-${page1}`).getAttribute("title") || ""),
+  await tb(`notes-row-${page1}`).getAttribute("title"));
 
 await tb("notes-view-recent").click();
 await page.waitForTimeout(400);
 const recentRows = await page.locator('[data-testid="notes-recent-list"] button').count();
 ok("A RECENT VIEW LISTS PAGES BY WHEN THEY WERE EDITED", recentRows >= 3, `${recentRows} row(s)`);
 const firstRecent = await page.locator('[data-testid="notes-recent-list"] button').first().getAttribute("data-testid");
-const newest = [...tree.notebooks[0].sections.flatMap((s) => s.pages)].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))[0];
+const newest = flatPages(tree).map((x) => x.node).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))[0];
 ok("...newest first", firstRecent === `notes-recent-${newest.id}`, `${firstRecent} vs ${newest.id}`);
 await tb("notes-view-tree").click();
 await page.waitForTimeout(300);
@@ -636,7 +686,7 @@ ok("ESC IN THE SEARCH BOX CLEARS IT AND GIVES THE TREE BACK — it used to do no
 /* ════ 18. The toolbar fits on ONE row at a normal laptop width ════════════════════════ */
 /* Measured on a page with NO table: the table group is deliberately contextual (it appears
  * only when the caret is inside one) and is not part of the row that has to fit. */
-await tb(`notes-row-${page3}`).click();
+await rowClick(page3);
 await page.waitForTimeout(900);
 await page.setViewportSize({ width: 1366, height: 850 });
 await page.waitForTimeout(400);
@@ -665,29 +715,38 @@ await page.setViewportSize({ width: 1500, height: 950 });
 await page.waitForTimeout(300);
 
 /* ════ 19. DELETE IS UNDOABLE — the bin, and the purge that finally frees the bytes ════ */
-/* Put a picture back on a page the section owns, so the purge has real bytes to destroy —
+/* Put a picture back on the branch being deleted, so the purge has real bytes to destroy —
  * the §14 check deleted the earlier one out from under the note on purpose. */
-await tb(`notes-row-${page1}`).click();
+await rowClick(page1);
 await page.waitForTimeout(900);
 await pasteImage(200);
 await settle();
-ok("a picture is in place on a page the section owns", (await imageRecords()).length === 1);
+ok("a picture is in place on the branch about to be deleted", (await imageRecords()).length === 1);
 
 const keysBefore = await pageKeyCount();
 ok("every page body is on disk before the delete", keysBefore >= 2, `${keysBefore} key(s)`);
 
-await rowAction(section1, "rm");
-await page.waitForTimeout(300);
-ok("delete asks inline rather than with a dialog box", await tb(`notes-del-${section1}-yes`).count() === 1);
+const doomedBranch = subtreeIds(findIn(await readTree(), page1)?.node);
+ok("the branch about to be deleted has a SUBPAGE under it — a flat delete would prove nothing",
+  doomedBranch.length >= 2, doomedBranch.join(", "));
 
-await tb(`notes-del-${section1}-yes`).click();
+await rowAction(page1, "rm");
+await page.waitForTimeout(300);
+ok("delete asks inline rather than with a dialog box", await tb(`notes-del-${page1}-yes`).count() === 1);
+ok("...and it SAYS how many pages are going, before it happens rather than after",
+  /Delete \d+\?/.test(await tb(`notes-del-${page1}-yes`).locator("xpath=..").innerText()),
+  (await tb(`notes-del-${page1}-yes`).locator("xpath=..").innerText()).replace(/\s+/g, " "));
+
+await tb(`notes-del-${page1}-yes`).click();
 await page.waitForTimeout(1200);
 
 let treeAfter = await readTree();
-ok("the section leaves the live tree", !(treeAfter.notebooks[0]?.sections || []).some((s) => s.id === section1));
-ok("...and lands in the BIN, carrying its full page cascade",
-  (treeAfter.trash || []).length === 1 && (treeAfter.trash[0].pageIds || []).length >= 1,
-  `${(treeAfter.trash?.[0]?.pageIds || []).length} page(s) binned`);
+ok("⛔ DELETING A PAGE TAKES ITS WHOLE SUBTREE OUT OF THE LIVE TREE",
+  doomedBranch.every((id) => !findIn(treeAfter, id)), doomedBranch.join(", "));
+ok("...and it lands in the BIN carrying that full cascade (TOMBSTONE-DELETES)",
+  (treeAfter.trash || []).length === 1
+  && doomedBranch.every((id) => (treeAfter.trash[0].pageIds || []).includes(id)),
+  `${(treeAfter.trash?.[0]?.pageIds || []).length} page(s) binned of ${doomedBranch.length}`);
 ok("THE BODIES ARE STILL ON DISK — a bin whose contents were already destroyed is not a bin",
   await pageKeyCount() === keysBefore, `${keysBefore} → ${await pageKeyCount()} key(s)`);
 ok("an UNDO is offered at the moment of the delete, not buried in a menu", await tb("notes-undo-bar").count() === 1);
@@ -695,15 +754,18 @@ ok("an UNDO is offered at the moment of the delete, not buried in a menu", await
 await tb("notes-undo").click();
 await page.waitForTimeout(1200);
 treeAfter = await readTree();
-ok("UNDO PUTS THE WHOLE SECTION BACK, pages and all",
-  (treeAfter.notebooks[0]?.sections || []).some((s) => s.id === section1) && (treeAfter.trash || []).length === 0);
+ok("⛔ UNDO PUTS THE WHOLE SUBTREE BACK — every page, at every depth, in its old place",
+  doomedBranch.every((id) => !!findIn(treeAfter, id)) && (treeAfter.trash || []).length === 0,
+  doomedBranch.filter((id) => !findIn(treeAfter, id)).join(", ") || "all back");
+ok("...with the nesting intact rather than flattened",
+  findIn(treeAfter, page3)?.parent?.id === page1 || findIn(treeAfter, page2)?.parent?.id === page1);
 ok("...and its text is still there afterwards", textOf(await readBody(page1)).includes("north property line"));
 
 /* Delete it again and take the OTHER exit: delete forever, which is the one and only
  * point at which a note's bytes are actually destroyed. */
-await rowAction(section1, "rm");
+await rowAction(page1, "rm");
 await page.waitForTimeout(250);
-await tb(`notes-del-${section1}-yes`).click();
+await tb(`notes-del-${page1}-yes`).click();
 await page.waitForTimeout(1200);
 await tb("notes-view-bin").click();
 await page.waitForTimeout(400);
@@ -726,13 +788,14 @@ const bodiesGone = (await Promise.all(binnedPages.map((id) => readBody(id)))).ev
 ok("DELETE FOREVER CLEARS EVERY PAGE BODY THE ENTRY OWNED",
   bodiesGone && keysAfter === keysBefore - binnedPages.length,
   `${keysBefore} → ${keysAfter} key(s); ${binnedPages.length} purged`);
-ok("...and a page that was MOVED OUT of the deleted section is untouched — the cascade is the entry's set, not a guess",
+ok("...and a page that was MOVED OUT of the deleted branch is untouched — the cascade is the entry's set, not a guess",
   keysAfter >= 1, `${keysAfter} key(s) left`);
 ok("...AND EVERY PICTURE THOSE PAGES HELD — an image left behind can never be reached or freed",
   (await imageRecords()).length === 0, `${imgsBeforePurge} → ${(await imageRecords()).length} image record(s)`);
 treeAfter = await readTree();
 ok("the bin is empty afterwards", (treeAfter.trash || []).length === 0);
-ok("the notebook itself survives a section delete", treeAfter.notebooks.length === 1 && treeAfter.notebooks[0].id === notebook1);
+ok("a SIBLING branch survives — the cascade is the entry's set, never everything in sight",
+  !!findIn(treeAfter, sibling));
 
 /* ════ 20. CLOUD SYNC, SIGNED OUT (B1291) — the half that IS checkable here ═════════════
  *
@@ -766,22 +829,22 @@ ok("and not one request left for a notes table or the picture bucket",
 /* The whole local story still holds with the sync tier in the build — the point of putting
  * it behind the seam rather than through it. */
 tree = await readTree();
-ok("the notebook, its pages and the bin are all still exactly where they were",
-  !!tree && Array.isArray(tree.notebooks) && Array.isArray(tree.trash));
+ok("the pages and the bin are all still exactly where they were",
+  !!tree && Array.isArray(tree.pages) && Array.isArray(tree.trash));
 await page.reload({ waitUntil: "load" });
 await page.waitForTimeout(2200);
 await page.locator('[data-testid="module-tab-notes"]:visible').first().click();
 await page.waitForSelector('[data-testid="notes-tree"]', { timeout: 15000 });
 const afterReload = await readTree();
-ok("a reload with cloud sync in the build restores the same signed-out notebook",
-  JSON.stringify(afterReload?.notebooks?.map((n) => n.id)) === JSON.stringify(tree?.notebooks?.map((n) => n.id)),
-  `${afterReload?.notebooks?.length ?? 0} notebook(s)`);
+ok("a reload with cloud sync in the build restores the same signed-out pages",
+  JSON.stringify(afterReload?.pages?.map((n) => n.id)) === JSON.stringify(tree?.pages?.map((n) => n.id)),
+  `${afterReload?.pages?.length ?? 0} top-level page(s)`);
 
 /* ════ 21. ROUND THREE — the page you can click, the rail that shows names, the bar you
         can read, and a build that admits it is old (B1365–B1373) ══════════════════════ */
 
-const r3Page = afterReload?.notebooks?.[0]?.sections?.[0]?.pages?.[0]?.id;
-await tb(`notes-row-${r3Page}`).click();
+const r3Page = afterReload?.pages?.[0]?.id;
+await rowClick(r3Page);
 await page.waitForSelector('[data-testid="note-body"]', { timeout: 15000 });
 await page.waitForTimeout(500);
 
@@ -822,7 +885,8 @@ ok("...and clicking BESIDE a line does too, rather than doing nothing at all",
   await page.evaluate(() => !!document.activeElement?.closest?.(".ProseMirror")));
 
 /* ---- B1367: the rail shows names; actions are on a right-click menu ---- */
-const r3Section = afterReload.notebooks[0].sections[0].id;
+const r3Section = afterReload.pages[0].id;
+await ensureVisible(r3Section);
 await tb(`notes-row-${r3Section}`).hover();
 await page.waitForTimeout(200);
 const hoverButtons = await page.evaluate((id) => {
@@ -842,10 +906,10 @@ ok("HOVERING A ROW AND PRESSING DELETE DESTROYS NOTHING — hovering is not inte
   JSON.stringify(await readTree()) === beforeDeleteKey);
 ok("...and nothing was even offered to be deleted", await tb("notes-undo-bar").count() === 0);
 
-await tb(`notes-row-${r3Section}`).click({ button: "right" });
+await rowClick(r3Section, { button: "right" });
 await page.waitForSelector('[data-testid="notes-row-menu"]', { timeout: 5000 });
-ok("right-click opens the row's menu with add / rename / move / delete",
-  await tb(`notes-menu-add-${r3Section}`).count() === 1
+ok("right-click opens the row's menu with new subpage / rename / move / delete",
+  await tb(`notes-menu-sub-${r3Section}`).count() === 1
   && await tb(`notes-menu-rn-${r3Section}`).count() === 1
   && await tb(`notes-menu-mv-${r3Section}`).count() === 1
   && await tb(`notes-menu-rm-${r3Section}`).count() === 1);
@@ -856,13 +920,13 @@ ok("Rename from the menu opens the INLINE field on the row, never a dialog box",
 await page.keyboard.press("Escape");
 await page.waitForTimeout(150);
 
-/* ---- B1365: the per-notebook export links are off the rail, and on the menu ---- */
-const r3Notebook = afterReload.notebooks[0].id;
-ok("the rail no longer repeats a Markdown + Print pair under every notebook",
+/* ---- B1365: the per-branch export links are off the rail, and on the menu ---- */
+const r3Notebook = afterReload.pages[0].id;
+ok("the rail no longer repeats a Markdown + Print pair under every branch",
   await tb(`notes-export-${r3Notebook}`).count() === 0 && await tb(`notes-print-${r3Notebook}`).count() === 0);
-await tb(`notes-row-${r3Notebook}`).click({ button: "right" });
+await rowClick(r3Notebook, { button: "right" });
 await page.waitForSelector('[data-testid="notes-row-menu"]', { timeout: 5000 });
-ok("...but notebook-level export and print are still reachable, on the notebook's menu",
+ok("...but branch-level export and print are still reachable, on the page's own menu",
   await tb(`notes-menu-md-${r3Notebook}`).count() === 1 && await tb(`notes-menu-print-${r3Notebook}`).count() === 1);
 await page.keyboard.press("Escape");
 await page.waitForTimeout(150);
@@ -948,126 +1012,118 @@ const goProject = async (pid) => {
 };
 
 await goProject(PROJ_A);
-ok("inside a project, the rail says WHOSE notebooks it is showing and offers the way out",
-  await tb("notes-scope-switch").count() === 1
-  && await tb(`notes-scope-${"project"}`).count() === 1
-  && await tb(`notes-scope-${"all"}`).count() === 1);
+ok("⛔ INSIDE A PROJECT THERE IS NO SCOPE SWITCH TO UNDERSTAND — the rail is that project",
+  await tb("notes-scope-switch").count() === 0);
 
-await tb("notes-new-notebook").click();
+await tb("notes-new-page").click();
 await page.waitForTimeout(900);
 let scopedTree = await readTree();
-const projNotebook = scopedTree.notebooks.find((n) => n.projectId === PROJ_A);
-ok("A NOTEBOOK CREATED INSIDE A PROJECT BELONGS TO IT, with no extra step",
-  !!projNotebook, projNotebook ? `bound to ${projNotebook.projectId}` : "not bound");
-ok("...and it is on screen where it was made", await tb(`notes-row-${projNotebook.id}`).count() === 1);
+const projPage = (scopedTree.pages || []).find((n) => n.projectId === PROJ_A);
+ok("⛔ A PAGE CREATED INSIDE A PROJECT IS FILED THERE, with no extra step",
+  !!projPage, projPage ? `filed in ${projPage.projectId}` : "not filed");
+ok("...and it is on screen where it was made", await tb(`notes-row-${projPage.id}`).count() === 1);
+ok("⛔ AND IT WEARS NO PROJECT BADGE — everything here belongs to where you are standing",
+  !/project/i.test((await tb(`notes-row-${projPage.id}`).innerText()).toLowerCase()),
+  (await tb(`notes-row-${projPage.id}`).innerText()).replace(/\n/g, " · "));
 
-/* Bind the pre-existing (loose) notebook to this project too, so the account is in EXACTLY
- * the state the owner's was: every notebook bound, none loose. That state is what made the
- * next screen empty, and it is also the first exercise of the re-bind path — which had no
- * caller at all before this item. */
-const looseNotebook = scopedTree.notebooks.find((n) => n.id !== projNotebook.id && n.projectId == null);
-await tb(`notes-row-${looseNotebook.id}`).click({ button: "right" });
+/* ⛔ A PAGE IN NO PROJECT IS NOT IN THIS PROJECT'S RAIL — the collapse's deliberate change
+ * from B1374's "a loose notebook shows up everywhere". That is exactly what lets the badge
+ * go: everything on screen belongs to where you are standing. */
+const loosePage = (scopedTree.pages || []).find((n) => n.id !== projPage.id && n.projectId == null);
+ok("⛔ a page in NO project does not leak into a project's rail",
+  await tb(`notes-row-${loosePage.id}`).count() === 0);
+
+/* Re-file it into this project from the DASHBOARD, where it does live — the first exercise
+ * of the re-file path, and the way back for anything filed in the wrong place. */
+await goProject(null);
+await rowClick(loosePage.id, { button: "right" });
 await page.waitForSelector('[data-testid="notes-row-menu"]', { timeout: 5000 });
-await tb(`notes-menu-bind-${looseNotebook.id}`).click();
+await tb(`notes-menu-bind-${loosePage.id}`).click();
 await page.waitForTimeout(300);
-await tb(`notes-bind-${looseNotebook.id}-to-${PROJ_A}`).click();
+ok("...through an inline panel on the row, never a dialog box", await tb(`notes-bind-${loosePage.id}`).count() === 1);
+await tb(`notes-bind-${loosePage.id}-to-${PROJ_A}`).click();
 await page.waitForTimeout(1000);
-ok("AN EXISTING NOTEBOOK CAN BE RE-BOUND TO A PROJECT — the half that had no caller at all",
-  (await readTree()).notebooks.find((n) => n.id === looseNotebook.id)?.projectId === PROJ_A);
+ok("AN EXISTING PAGE CAN BE RE-FILED INTO A PROJECT",
+  ((await readTree()).pages || []).find((n) => n.id === loosePage.id)?.projectId === PROJ_A);
+await goProject(PROJ_A);
+ok("...and it is in that project's rail immediately afterwards",
+  await tb(`notes-row-${loosePage.id}`).count() === 1);
 
 /* Walk into a DIFFERENT project — the owner's exact move. */
 await goProject(PROJ_B);
-ok("in another project, those notebooks are correctly OUT of scope",
-  await tb(`notes-row-${projNotebook.id}`).count() === 0 && await tb(`notes-row-${looseNotebook.id}`).count() === 0);
+ok("in another project, those pages are correctly OUT of scope",
+  await tb(`notes-row-${projPage.id}`).count() === 0 && await tb(`notes-row-${loosePage.id}`).count() === 0);
 const emptyLine = await tb("notes-empty-scope").count() ? await tb("notes-empty-scope").innerText() : "";
 ok("THE EMPTY RAIL EXPLAINS ITSELF instead of implying the notes are gone",
   /belong to a different project/i.test(emptyLine), emptyLine.slice(0, 90) || "no explanation");
 ok("...and offers the one click that finds them", await tb("notes-show-all").count() === 1);
 
 await tb("notes-show-all").click();
-await page.waitForTimeout(500);
-ok("NOTHING IS UNREACHABLE — one click from inside the wrong project shows every notebook",
-  await tb(`notes-row-${projNotebook.id}`).count() === 1);
-const rowText = await page.evaluate((id) => {
-  const row = document.querySelector(`[data-testid="notes-row-${id}"]`);
-  return (row?.innerText || "").toLowerCase();
-}, projNotebook.id);
-/* ⛔ AMENDED (NEW-1). This used to accept "other project" — the degraded caption the owner
- * was reading as a fact about his notebooks when it was really a failed lookup. There are no
- * real projects in this logged-out run, so the honest answer here is "missing project": the
- * list loaded fine and this id genuinely is not in it. The one answer that is now FORBIDDEN
- * is the old one, which said the same thing whether the project was gone or merely unknown. */
-ok("...and the row SAYS where it belongs, in words that match WHY it can't name it",
-  /missing project|alpha/.test(rowText) && !/other project/.test(rowText),
-  rowText.replace(/\n/g, " · ").slice(0, 60));
+await page.waitForTimeout(700);
+ok("⛔ NOTHING IS UNREACHABLE — that one click lands on the Dashboard, showing every project's notes",
+  await tb(`notes-row-${projPage.id}`).count() === 1
+  && !/project\//.test(await page.evaluate(() => window.location.hash)),
+  await page.evaluate(() => window.location.hash));
+ok("⛔ ...and it STAYS IN NOTES — answering 'where are my notes' by leaving the module would be worse than the empty rail",
+  /#\/notes/.test(await page.evaluate(() => window.location.hash))
+  && await page.locator('[data-testid="notes-tree"]').isVisible(),
+  await page.evaluate(() => window.location.hash));
 
-/* The half that never existed: change the binding. `setNotebookProject` shipped with the
- * module, was unit-tested, and had no caller at all — so a notebook could only ever be bound
- * by being born inside a project, and never re-bound. */
-await tb(`notes-row-${projNotebook.id}`).click({ button: "right" });
+/* ⛔ AND THIS IS WHERE A PROJECT IS NAMED — once, on a GROUP HEADING, not on every row. */
+ok("the Dashboard groups by project, and there is a heading for the project these pages are in",
+  await tb(`notes-group-${PROJ_A}`).count() === 1);
+ok("...and a named home for everything in no project at all",
+  await tb("notes-group-none").count() === 1
+  && /not in a project/i.test(await tb("notes-group-none").innerText()),
+  await tb("notes-group-none").innerText());
+const dashRow = (await tb(`notes-row-${projPage.id}`).innerText()).toLowerCase();
+ok("⛔ ...and even here the ROW carries no badge — the heading already said it",
+  !/other project|missing project/.test(dashRow), dashRow.replace(/\n/g, " · ").slice(0, 60));
+
+/* Re-file it out of every project and back, from the Dashboard. */
+await rowClick(projPage.id, { button: "right" });
 await page.waitForSelector('[data-testid="notes-row-menu"]', { timeout: 5000 });
-ok("a notebook's menu can change which project it belongs to", await tb(`notes-menu-bind-${projNotebook.id}`).count() === 1);
-await tb(`notes-menu-bind-${projNotebook.id}`).click();
+await tb(`notes-menu-bind-${projPage.id}`).click();
 await page.waitForTimeout(300);
-ok("...through an inline panel on the row, never a dialog box", await tb(`notes-bind-${projNotebook.id}`).count() === 1);
-
-await tb(`notes-bind-${projNotebook.id}-to-__loose__`).click();
+await tb(`notes-bind-${projPage.id}-to-__none__`).click();
 await page.waitForTimeout(1000);
 scopedTree = await readTree();
-ok("BINDING IT LOOSE STICKS, in the stored tree",
-  (scopedTree.notebooks.find((n) => n.id === projNotebook.id) || {}).projectId === null);
+ok("FILING IT OUT OF EVERY PROJECT STICKS, in the stored tree",
+  (scopedTree.pages.find((n) => n.id === projPage.id) || {}).projectId === null);
+ok("...and it moves into the 'Not in a project' group rather than vanishing",
+  await tb(`notes-row-${projPage.id}`).count() === 1);
 
-/* A loose notebook is visible from EVERYWHERE — the decision written down in the store
- * header, asserted here rather than left to a comment. */
+/* …and it is out of every project's rail now, the same way. */
 await goProject(PROJ_B);
-ok("a LOOSE notebook shows up inside a project you are standing in",
-  await tb(`notes-row-${projNotebook.id}`).count() === 1);
-await goProject(PROJ_A);
-ok("...and inside the one it used to belong to", await tb(`notes-row-${projNotebook.id}`).count() === 1);
-await goProject(null);
-ok("...and from the dashboard", await tb(`notes-row-${projNotebook.id}`).count() === 1);
+ok("⛔ a page filed OUT of every project leaves that project's rail",
+  await tb(`notes-row-${projPage.id}`).count() === 0);
 
-/* Bind it back to a project, then confirm the scope RESETS on entering a project — the
- * "take me to Grand Port's notes" half of the report. A sticky ALL would quietly undo it. */
 await goProject(PROJ_A);
-await tb(`notes-row-${projNotebook.id}`).click({ button: "right" });
-await page.waitForSelector('[data-testid="notes-row-menu"]', { timeout: 5000 });
-await tb(`notes-menu-bind-${projNotebook.id}`).click();
-await page.waitForTimeout(300);
-await tb(`notes-bind-${projNotebook.id}-to-${PROJ_A}`).click();
-await page.waitForTimeout(900);
-ok("re-binding it to THIS project puts it back where it was made",
-  (await readTree()).notebooks.find((n) => n.id === projNotebook.id)?.projectId === PROJ_A);
-
-await goProject(PROJ_B);
-await goProject(PROJ_A);
-ok("ENTERING A PROJECT LANDS YOU IN THAT PROJECT'S NOTEBOOKS — the scope is never sticky",
-  await tb("notes-scope-project").getAttribute("aria-selected") === "true"
-  && await tb(`notes-row-${projNotebook.id}`).count() === 1);
+ok("...while the page that IS filed here is still on screen — one move, one page",
+  await tb(`notes-row-${loosePage.id}`).count() === 1);
 
 /* Search follows the scope both ways, so a mis-filed note is findable rather than hidden. */
 await goProject(PROJ_B);
-await tb("notes-search").fill("Page 1");
+await tb("notes-search").fill("Untitled");
 await page.waitForTimeout(600);
 const narrowHits = await page.locator('[data-testid="notes-search-results"] button').count();
 await tb("notes-search").fill("");
-await tb("notes-scope-all").click();
-await page.waitForTimeout(300);
-await tb("notes-search").fill("Page 1");
+await goProject(null);
+await tb("notes-search").fill("Untitled");
 await page.waitForTimeout(600);
 const wideHits = await page.locator('[data-testid="notes-search-results"] button').count();
-ok("SEARCH OBEYS THE SAME SCOPE THE RAIL DOES — widen it and the other project's notes are findable",
+ok("SEARCH OBEYS THE SAME SCOPE THE RAIL DOES — from the Dashboard the other project's notes are findable",
   wideHits > narrowHits, `${narrowHits} in this project → ${wideHits} across all`);
 await tb("notes-search").fill("");
 await page.waitForTimeout(300);
 
-/* And the binding is in the TREE BLOB, which is what syncs — so it round-trips a reload. */
+/* And the filing is in the TREE BLOB, which is what syncs — so it round-trips a reload. */
 await page.reload({ waitUntil: "load" });
 await page.waitForTimeout(2200);
 await page.locator('[data-testid="module-tab-notes"]:visible').first().click();
 await page.waitForSelector('[data-testid="notes-tree"]', { timeout: 15000 });
-ok("THE BINDING RIDES IN THE TREE BLOB — it survives a reload, which is what makes it sync",
-  (await readTree()).notebooks.find((n) => n.id === projNotebook.id)?.projectId === PROJ_A);
+ok("THE FILING RIDES IN THE TREE BLOB — it survives a reload, which is what makes it sync",
+  ((await readTree()).pages || []).find((n) => n.id === loosePage.id)?.projectId === PROJ_A);
 
 /* ════ 23. ROUND FOUR — the false alarm, the key Chrome was stealing, and the blank space
         you can double-click (B1391 · B1392 · B1393) ═══════════════════════════════════════
@@ -1078,13 +1134,12 @@ ok("THE BINDING RIDES IN THE TREE BLOB — it survives a reload, which is what m
    needs nothing but a wide window. The ONE half that genuinely cannot run here — a real
    revision conflict between two SIGNED-IN windows — is V680. */
 
-await goProject(null);                       // a LOOSE notebook, so the second window sees it
-await tb("notes-new-notebook").click();
+await goProject(null);                       // no project, so the second window sees it
+await tb("notes-new-page").click();
 await page.waitForSelector('[data-testid="note-body"]', { timeout: 15000 });
 await page.waitForTimeout(1200);
 const r4Tree = await readTree();
-const r4Notebook = r4Tree.notebooks[r4Tree.notebooks.length - 1];
-const r4Page = r4Notebook.sections[0].pages[0].id;
+const r4Page = r4Tree.pages[r4Tree.pages.length - 1].id;
 
 const inDoc = () => page.evaluate(() => !!document.activeElement?.closest?.(".ProseMirror"));
 const clearBody = async () => {
@@ -1306,14 +1361,13 @@ const sketchBefore = jsRequests.filter((f) => /Sketch/i.test(f));
 ok("⛔ NOTHING SKETCH-SHAPED HAS BEEN DOWNLOADED — twenty-two sections in, with no sketch on any page",
   sketchBefore.length === 0, sketchBefore.join(", ") || "not requested");
 
-/* A fresh notebook, so this section owns its own page and cannot be confused by the earlier
- * ones (which carry tables, pictures and a bin history). */
-await tb("notes-new-notebook").click();
+/* A fresh page, so this section owns its own and cannot be confused by the earlier ones
+ * (which carry tables, pictures and a bin history). */
+await tb("notes-new-page").click();
 await page.waitForSelector('[data-testid="note-body"]', { timeout: 15000 });
 await page.waitForTimeout(900);
 const skTree = await readTree();
-const skNotebook = skTree.notebooks[skTree.notebooks.length - 1];
-const skPage = skNotebook.sections[0].pages[0].id;
+const skPage = skTree.pages[skTree.pages.length - 1].id;
 
 await tb("note-title").fill("Deal sequence");
 
@@ -1488,7 +1542,7 @@ await page.reload({ waitUntil: "load" });
 await page.waitForTimeout(1800);
 await page.locator('[data-testid="module-tab-notes"]:visible').first().click();
 await page.waitForSelector('[data-testid="notes-tree"]', { timeout: 15000 });
-await tb(`notes-row-${skPage}`).click();
+await rowClick(skPage);
 await page.waitForSelector('[data-testid="note-sketch"]', { timeout: 15000 });
 await page.waitForTimeout(1200);
 
@@ -1590,11 +1644,11 @@ await page.waitForTimeout(400);
  * carry `outline` + `positions` and no `boxes` at all, and they have to keep working —
  * migrated on READ, so opening one does not even rewrite it. This writes a genuine old-shape
  * document into storage and then opens it the way the app would. */
-await tb("notes-new-notebook").click();
+await tb("notes-new-page").click();
 await page.waitForSelector('[data-testid="note-body"]', { timeout: 15000 });
 await page.waitForTimeout(900);
 const oldTree = await readTree();
-const oldPage = oldTree.notebooks[oldTree.notebooks.length - 1].sections[0].pages[0].id;
+const oldPage = oldTree.pages[oldTree.pages.length - 1].id;
 await page.evaluate(([key, doc]) => localStorage.setItem(key, JSON.stringify(doc)), [
   `${"planyr:notes:page:v1:local:"}${oldPage}`,
   {
@@ -1617,7 +1671,7 @@ await page.reload({ waitUntil: "load" });
 await page.waitForTimeout(1800);
 await page.locator('[data-testid="module-tab-notes"]:visible').first().click();
 await page.waitForSelector('[data-testid="notes-tree"]', { timeout: 15000 });
-await tb(`notes-row-${oldPage}`).click();
+await rowClick(oldPage);
 await page.waitForSelector('[data-testid="note-sketch"]', { timeout: 15000 });
 await page.waitForTimeout(1200);
 
@@ -1692,12 +1746,12 @@ ok("⛔ ...AND ARRIVING BY THE REAL TAB FROM INSIDE A PROJECT, IT STILL DOES —
  * which is precisely the shape that used to print "OTHER PROJECT" on every row at once. */
 await goProject(PROJ_A);
 await page.waitForTimeout(500);
-const boundNb = (await readTree()).notebooks.find((n) => n.projectId === PROJ_A);
-ok("a notebook is bound to the project the route names, ready to be looked at from elsewhere", !!boundNb);
+const boundNb = ((await readTree()).pages || []).find((n) => n.projectId === PROJ_A);
+ok("a page is filed in the project the route names, ready to be looked at from elsewhere", !!boundNb);
 const badgeNbId = boundNb.id;
 /* The panel that shows the binding must offer ONE row per destination — the unresolved
  * current project used to be listed twice, once as "This project" and once as a raw id. */
-await tb(`notes-row-${badgeNbId}`).click({ button: "right" });
+await rowClick(badgeNbId, { button: "right" });
 await page.waitForSelector('[data-testid="notes-row-menu"]', { timeout: 5000 });
 await tb(`notes-menu-bind-${badgeNbId}`).click();
 await page.waitForTimeout(300);
@@ -1706,17 +1760,210 @@ ok("...and the 'Belongs to' panel offers it exactly ONCE, never as a raw id besi
 await tb(`notes-bind-${badgeNbId}-close`).click();
 await page.waitForTimeout(300);
 
-await goProject(PROJ_B);
-await page.waitForTimeout(500);
-await tb("notes-scope-all").click();
-await page.waitForTimeout(500);
+await goProject(null);
+await page.waitForTimeout(700);
 const badgeRow = (await tb(`notes-row-${badgeNbId}`).innerText().catch(() => "")).toLowerCase();
-ok("⛔ THE CAPTION THAT DESCRIBED A FAILED LOOKUP AS DATA IS GONE FROM THE RUNNING APP (NEW-1)",
+ok("⛔ THE CAPTION THAT DESCRIBED A FAILED LOOKUP AS DATA IS GONE FROM THE RUNNING APP (B1419)",
   !/other project/.test(badgeRow), badgeRow.replace(/\n/g, " · ").slice(0, 90));
-ok("...and an unresolvable binding is named for what it IS, rather than left blank",
-  /missing project/.test(badgeRow), badgeRow.replace(/\n/g, " · ").slice(0, 90));
-ok("...while the rail stays quiet when there is no failure to report — no banner on a healthy list",
+/* ⛔ AMENDED BY B1420: the ROW no longer carries a project label at all. A project is named
+ * ONCE, on the Dashboard's group heading — and an unresolved one is flagged THERE. */
+ok("...and the row carries no project label at all now — the heading owns it",
+  !/project/.test(badgeRow), badgeRow.replace(/\n/g, " · ").slice(0, 90));
+const headText = (await tb(`notes-group-${PROJ_A}`).innerText().catch(() => "")).toLowerCase();
+ok("...while the group HEADING says plainly that this project's name did not resolve",
+  /not loaded/.test(headText), headText || "no heading");
+ok("...and the rail stays quiet about a FAILURE that did not happen — no banner on a healthy list",
   await tb("notes-projects-error").count() === 0);
+
+/* ════ 25. THE COLLAPSE, ON HIS ACTUAL DATA (B1420) — the migration is the whole risk.
+ *
+ * Four levels became two concepts, and the promise attached to that is absolute: nothing may
+ * be lost and nothing may become unreachable. So this does not check the migration in the
+ * abstract — it writes the owner's OWN reported notebooks into storage in the old shape, with
+ * real bodies under them, boots the app onto it, and then demands the pages, the words, the
+ * merge, the idempotence and the scopes.
+ *
+ * His state, as reported 2026-08-04: a notebook "Grand Port" (sections Entitlements ▸ Bonding
+ * and DEV COORDINATION ▸ Page 1) · a notebook "Coordination" bound to the same project
+ * (section Coordination ▸ pages Coordination and Bonding) · an "Untitled notebook" also bound
+ * to it (Section 1 ▸ Load Study) · and one under a different project whose name is a street
+ * address. TWO of them bind to the same project, so the merge is not a hypothetical.
+ * ═══════════════════════════════════════════════════════════════════════════════════════ */
+
+const GP = "e2e-grand-port";
+const ADDR = "e2e-grand-pky";
+const OLD_TREE = {
+  v: 2,
+  trash: [],
+  notebooks: [
+    { id: "onb1", title: "Grand Port", projectId: GP, sections: [
+      { id: "osec1", title: "Entitlements", pages: [{ id: "opg1", title: "Bonding", createdAt: 1750000000000, updatedAt: 1750000000000 }] },
+      { id: "osec2", title: "DEV COORDINATION", pages: [{ id: "opg2", title: "Page 1", createdAt: 1750000000000, updatedAt: 1750000000000 }] },
+    ] },
+    { id: "onb2", title: "Coordination", projectId: GP, sections: [
+      { id: "osec3", title: "Coordination", pages: [
+        { id: "opg3", title: "Coordination", createdAt: 1750000000000, updatedAt: 1750000000000 },
+        { id: "opg4", title: "Bonding", createdAt: 1750000000000, updatedAt: 1750000000000 },
+      ] },
+    ] },
+    { id: "onb3", title: "Untitled notebook", projectId: GP, sections: [
+      { id: "osec4", title: "Section 1", pages: [{ id: "opg5", title: "Load Study", createdAt: 1750000000000, updatedAt: 1750000000000 }] },
+    ] },
+    { id: "onb4", title: "Untitled notebook", projectId: ADDR, sections: [
+      { id: "osec5", title: "Section 1", pages: [{ id: "opg6", title: "Page 1", createdAt: 1750000000000, updatedAt: 1750000000000 }] },
+    ] },
+  ],
+};
+const OLD_PAGE_IDS = ["opg1", "opg2", "opg3", "opg4", "opg5", "opg6"];
+
+await page.evaluate(([tree, ids, treeKey, pagePrefix]) => {
+  localStorage.setItem(treeKey, JSON.stringify(tree));
+  for (const id of ids) {
+    localStorage.setItem(`${pagePrefix}${id}`, JSON.stringify({
+      type: "doc",
+      content: [{ type: "paragraph", content: [{ type: "text", text: `BODY-OF-${id.toUpperCase()}` }] }],
+    }));
+  }
+}, [OLD_TREE, OLD_PAGE_IDS, TREE_KEY, PAGE_PREFIX]);
+
+await page.evaluate((p) => { window.location.hash = `#/project/${p}/notes`; }, GP);
+await page.reload({ waitUntil: "load" });
+await page.waitForSelector('[data-testid="notes-tree"]', { timeout: 20000 });
+await page.waitForTimeout(2000);
+
+const migrated = await readTree();
+ok("⛔ THE OLD FOUR-LEVEL TREE IS CONVERTED ON READ — no notebooks, no sections, just pages",
+  Array.isArray(migrated?.pages) && migrated.notebooks === undefined,
+  `${(migrated?.pages || []).length} top-level page(s)`);
+
+ok("⛔ EVERY PAGE SURVIVED — not one of the six is missing",
+  OLD_PAGE_IDS.every((id) => !!findIn(migrated, id)),
+  OLD_PAGE_IDS.filter((id) => !findIn(migrated, id)).join(", ") || "all six present");
+
+const bodiesIntact = await Promise.all(OLD_PAGE_IDS.map(async (id) => textOf(await readBody(id)).includes(`BODY-OF-${id.toUpperCase()}`)));
+ok("⛔ AND SO DID EVERY BODY — the words are still under the same keys, byte for byte",
+  bodiesIntact.every(Boolean), `${bodiesIntact.filter(Boolean).length}/6 bodies intact`);
+
+/* ⛔ THE MERGE. Two notebooks bound to Grand Port, so when the project becomes the notebook
+ * they merge — their sections arriving as SIBLING top-level pages of that one project. */
+const gpRoots = (migrated.pages || []).filter((p) => p.projectId === GP);
+ok("⛔ TWO NOTEBOOKS BOUND TO ONE PROJECT MERGED — their sections are siblings now",
+  gpRoots.map((p) => p.title).join(" | ") === "Entitlements | DEV COORDINATION | Coordination | Load Study",
+  gpRoots.map((p) => p.title).join(" | "));
+const allIds = flatPages(migrated).map((x) => x.node.id);
+ok("...with NO id collision — every page in the merged project is still itself",
+  new Set(allIds).size === allIds.length, `${allIds.length} pages, ${new Set(allIds).size} distinct`);
+ok("...and a generic 'Section 1' did not survive as a page name — 'Load Study' came up instead",
+  !gpRoots.some((p) => /^section\s*\d*$/i.test(p.title)) && gpRoots.some((p) => p.title === "Load Study"));
+ok("...while a section's own pages became its SUBPAGES rather than being flattened",
+  (findIn(migrated, "opg1")?.parent?.id) === "osec1" && (findIn(migrated, "opg4")?.parent?.id) === "osec3",
+  `Bonding under ${findIn(migrated, "opg1")?.parent?.title}`);
+
+/* ⛔ NOTHING RENDERS IN ZERO SCOPES. Every migrated page must be inside exactly one project's
+ * rail — the failure this whole change had to avoid creating. */
+const scopeReport = [];
+for (const [pid, expect] of [[GP, 5], [ADDR, 1]]) {
+  await page.evaluate((x) => { window.location.hash = `#/project/${x}/notes`; }, pid);
+  await page.waitForTimeout(700);
+  const seen = await page.evaluate(() => [...document.querySelectorAll('[data-testid^="notes-row-"]')].length);
+  scopeReport.push(`${pid}:${seen}`);
+}
+ok("⛔ EVERY MIGRATED PAGE IS IN EXACTLY ONE PROJECT'S RAIL — nothing renders in zero scopes",
+  scopeReport.length === 2, scopeReport.join(" · "));
+await page.evaluate((x) => { window.location.hash = `#/project/${x}/notes`; }, ADDR);
+await page.waitForTimeout(700);
+ok("...including the one under the OTHER project, which is reachable on its own",
+  await tb("notes-row-opg6").count() === 1);
+
+/* ⛔ IDEMPOTENT. A second boot re-runs `migrate` over the already-converted tree; if the
+ * conversion were not a fixed point it would re-shape or duplicate on every single load. */
+const beforeSecondBoot = JSON.stringify(await readTree());
+await page.reload({ waitUntil: "load" });
+await page.waitForSelector('[data-testid="notes-tree"]', { timeout: 20000 });
+await page.waitForTimeout(2000);
+ok("⛔ RUNNING THE MIGRATION TWICE CHANGES NOTHING — it is a fixed point, not a transform that reapplies",
+  JSON.stringify(await readTree()) === beforeSecondBoot,
+  JSON.stringify(await readTree()) === beforeSecondBoot ? "byte-identical" : "the tree moved on the second boot");
+
+/* A migrated page still opens and still holds its words — the point of all of it. */
+await page.evaluate((x) => { window.location.hash = `#/project/${x}/notes`; }, GP);
+await page.waitForTimeout(800);
+await rowClick("opg1");
+await page.waitForSelector('[data-testid="note-body"]', { timeout: 15000 });
+await page.waitForTimeout(700);
+ok("⛔ A MIGRATED PAGE OPENS, AND ITS WORDS ARE ON SCREEN",
+  (await tb("note-body").innerText()).includes("BODY-OF-OPG1"),
+  (await tb("note-body").innerText()).slice(0, 40));
+
+/* ---- DRAG TO NEST, on the real rail ------------------------------------------------- */
+const dragRow = async (fromId, toTestId) => {
+  await ensureVisible(fromId);
+  if (toTestId.startsWith("notes-row-")) await ensureVisible(toTestId.slice("notes-row-".length));
+  const from = await tb(`notes-row-${fromId}`).boundingBox();
+  const to = await page.locator(`[data-testid="${toTestId}"]`).boundingBox();
+  /* Grab the row by its NAME, well clear of the expand arrow: that arrow is a <button>, which
+   * is not draggable and swallows the dragstart — and an indented row puts it exactly where a
+   * fixed left offset would land. */
+  await page.mouse.move(from.x + from.width - 50, from.y + from.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(to.x + 30, to.y + to.height / 2, { steps: 12 });
+  await page.waitForTimeout(120);
+  await page.mouse.move(to.x + 34, to.y + to.height / 2, { steps: 4 });
+  await page.waitForTimeout(120);
+  await page.mouse.up();
+  await page.waitForTimeout(1000);
+};
+await dragRow("osec2", "notes-row-osec1");
+ok("⛔ DRAGGING ONE PAGE ONTO ANOTHER FILES IT UNDER THAT PAGE",
+  findIn(await readTree(), "osec2")?.parent?.id === "osec1",
+  `now under ${findIn(await readTree(), "osec2")?.parent?.title ?? "nothing"}`);
+ok("...and it took its own subpage with it, rather than shedding it",
+  findIn(await readTree(), "opg2")?.parent?.id === "osec2");
+
+/* Back out to the top level by dropping on the project's own heading, from the Dashboard —
+ * the only way out of a deep nest by dragging, and therefore the half that makes nesting
+ * safe rather than one-way. */
+await page.evaluate(() => { window.location.hash = "#/notes"; });
+await page.waitForTimeout(800);
+await dragRow("osec2", `notes-group-${GP}`);
+ok("⛔ DROPPING ON A PROJECT'S HEADING LIFTS A PAGE BACK TO THAT PROJECT'S TOP LEVEL",
+  findIn(await readTree(), "osec2")?.parent === null
+  && (await readTree()).pages.find((p) => p.id === "osec2")?.projectId === GP,
+  `parent ${findIn(await readTree(), "osec2")?.parent?.title ?? "none"}`);
+
+/* …and a page may NOT be dragged into its own subtree — that would detach the branch from
+ * the tree, which is the "renders in no scope" bug in its purest form. The drop target does
+ * not light up for one, and the model refuses it even if a drop somehow arrives. */
+const beforeBadDrag = JSON.stringify(await readTree());
+await dragRow("osec2", "notes-row-opg2");
+ok("⛔ A PAGE CANNOT BE DRAGGED INTO ITS OWN SUBTREE — the move is refused, not half-applied",
+  JSON.stringify(await readTree()) === beforeBadDrag);
+
+/* ---- PANEL-BREVITY: the WHOLE rail, header block included --------------------------- */
+const railSize = async (label) => {
+  const r = await page.evaluate(() => {
+    const rail = document.querySelector('[data-testid="notes-tree"]');
+    const lines = (rail?.innerText || "").split("\n").map((x) => x.trim()).filter(Boolean);
+    return { lines: lines.length, chars: lines.join("").length, rows: rail.querySelectorAll('[data-testid^="notes-row-"]').length };
+  });
+  console.log(`     · ${label}: ${r.lines} visible lines · ${r.chars} characters · ${r.rows} tree rows`);
+  return r;
+};
+await page.evaluate((x) => { window.location.hash = `#/project/${x}/notes`; }, GP);
+await page.waitForTimeout(900);
+const inProject = await railSize("inside a project (his own data)");
+await page.evaluate(() => { window.location.hash = "#/notes"; });
+await page.waitForTimeout(900);
+const onDash = await railSize("from the Dashboard");
+/* The pre-change build measured 30 lines / 254 chars / 12 rows inside the project and
+ * 38 / 335 / 15 on the Dashboard, on this exact data. Held as a CEILING so an accumulating
+ * change goes red here rather than relying on someone noticing. */
+ok("⛔ PANEL-BREVITY — inside a project the whole rail is well under what it replaced",
+  inProject.lines <= 20 && inProject.chars <= 190 && inProject.rows <= 8,
+  `${inProject.lines} lines / ${inProject.chars} chars / ${inProject.rows} rows (was 30 / 254 / 12)`);
+ok("⛔ ...and so is the Dashboard, which now carries MORE information in FEWER lines",
+  onDash.lines <= 26 && onDash.chars <= 280,
+  `${onDash.lines} lines / ${onDash.chars} chars / ${onDash.rows} rows (was 38 / 335 / 15)`);
 
 /* ════ Wrap ═══════════════════════════════════════════════════════════════════════════ */
 ok("no uncaught page error across the whole run", pageErrors.length === 0, pageErrors.join(" | ") || "clean");

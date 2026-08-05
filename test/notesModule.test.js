@@ -538,28 +538,28 @@ describe("the delete cascade reaches storage (TOMBSTONE-DELETES)", () => {
   });
 
   it("a binned page's body survives until the purge — the bin is not a delayed delete of nothing", () => {
-    const t = { v: 2, notebooks: [{ id: "nb", title: "N", projectId: null, sections: [
-      { id: "s1", title: "A", pages: [{ id: "p1", title: "1" }, { id: "p2", title: "2" }] },
-    ] }], trash: [] };
+    const t = { v: 3, trash: [], pages: [{ id: "s1", title: "A", projectId: null, pages: [
+      { id: "p1", title: "1", pages: [] }, { id: "p2", title: "2", pages: [] },
+    ] }] };
     const del = deleteNode(t, "s1");
-    expect(del.entry.pageIds.sort()).toEqual(["p1", "p2"]);
+    expect(del.entry.pageIds.slice().sort()).toEqual(["p1", "p2", "s1"]);
     expect(del.tree.trash).toHaveLength(1);
     // Restoring gives back exactly what went in, at the index it came from.
     const back = restoreNode(del.tree, del.entry.id);
     expect(back.tree.trash).toHaveLength(0);
-    expect(back.tree.notebooks[0].sections.map((s) => s.id)).toEqual(["s1"]);
+    expect(back.tree.pages.map((p) => p.id)).toEqual(["s1"]);
   });
 
   it("the store's delete takes a LIST, so it cannot be called with one id by accident", () => {
     expect(src("lib/notesStore.js")).toMatch(/export function deletePages\(pageIds\)/);
   });
 
-  it("model and workspace agree: a notebook delete cascades across ALL its sections", () => {
-    const tree = { v: 1, notebooks: [{ id: "nb", title: "N", projectId: null, sections: [
-      { id: "s1", title: "A", pages: [{ id: "p1", title: "1" }, { id: "p2", title: "2" }] },
-      { id: "s2", title: "B", pages: [{ id: "p3", title: "3" }] },
+  it("model and workspace agree: deleting a branch cascades across its WHOLE subtree, at every depth", () => {
+    const tree = { v: 3, trash: [], pages: [{ id: "top", title: "N", projectId: null, pages: [
+      { id: "s1", title: "A", pages: [{ id: "p1", title: "1", pages: [{ id: "deep", title: "D", pages: [] }] }] },
+      { id: "s2", title: "B", pages: [{ id: "p3", title: "3", pages: [] }] },
     ] }] };
-    expect(deleteNode(tree, "nb").removedPageIds.sort()).toEqual(["p1", "p2", "p3"]);
+    expect(deleteNode(tree, "top").removedPageIds.slice().sort()).toEqual(["deep", "p1", "p3", "s1", "s2", "top"]);
   });
 
   it("there is an orphan sweep as a safety net for an interrupted delete", () => {
@@ -653,7 +653,7 @@ describe("cloud sync rides the SAME one seam", () => {
     const root = code("Notes.jsx");
     expect(root).toMatch(/if \(choice === "theirs"\)/);
     expect(root, "the local body must be written to a NEW page before the conflict resolves")
-      .toMatch(/addPage\(base, hit\.section\.id[\s\S]{0,160}writePage\(r\.pageId, localDoc\)/);
+      .toMatch(/addPage\(base, hit\.parent[\s\S]{0,400}writePage\(r\.pageId, localDoc\)/);
     expect(root, "and the resolution happens after that").toMatch(/resolveNotesConflict\(pageId, choice\)/);
     expect(root).toContain("ConflictBar");
   });
@@ -761,15 +761,18 @@ describe("the project a notebook belongs to", () => {
     expect(notes).toMatch(/projectId \? \{ id: projectId/);
   });
 
-  it("⛔ no caption describes a failed lookup as though it were the user's data (NEW-1)", () => {
+  it("⛔ no caption describes a failed lookup as though it were the user's data (B1419)", () => {
     const rail = code("components/NotesTree.jsx");
     expect(rail, '"Other project" said the same thing whether the project was gone or merely unknown')
       .not.toMatch(/Other project/);
-    // The three unresolved cases are told apart by REASON.
-    for (const label of ["Loading…", "Not loaded", "Missing project"]) {
-      expect(rail, `the badge must be able to say "${label}"`).toContain(label);
-    }
-    // …and a real failure is loud, with a way out, not merely a quieter word on a badge.
+    /* ⛔ AMENDED BY B1420. The per-row badge is GONE — inside a project every row belongs to
+     * where you are standing, so there is nothing for a badge to say. The honesty problem
+     * moved to the Dashboard's group HEADING, which is the one place a project is named, and
+     * an unresolved one is flagged there instead of quietly reading like a name. */
+    expect(rail, "a row must not carry a project badge at all now").not.toMatch(/badge=/);
+    expect(rail).toContain("Project not loaded");
+    expect(rail, "an unresolved group is visibly not a resolved one").toMatch(/group\.resolved/);
+    // …and a real failure is loud, with a way out.
     expect(rail).toMatch(/notes-projects-error/);
     expect(rail).toMatch(/notes-projects-retry/);
   });

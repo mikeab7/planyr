@@ -20,7 +20,7 @@ import {
   TRASH_RETENTION_DAYS,
 } from "../src/workspaces/notes/lib/notesModel.js";
 import { absoluteStamp, daysLeft, editedLabel, relativeTime } from "../src/workspaces/notes/lib/notesTime.js";
-import { docToMarkdown, imageIdsInDoc, imageIdsInDocs, notebookToMarkdown } from "../src/workspaces/notes/lib/notesMarkdown.js";
+import { docToMarkdown, imageIdsInDoc, imageIdsInDocs, pageToMarkdown } from "../src/workspaces/notes/lib/notesMarkdown.js";
 import { buildPrintDocument } from "../src/workspaces/notes/lib/notesPrint.js";
 
 /* A minimal localStorage, installed before the store module is reached. The store resolves
@@ -41,19 +41,23 @@ const store = await import("../src/workspaces/notes/lib/notesStore.js");
 
 const DAY = 86400000;
 
+/* ⛔ THE FIXTURE IS THE NEW SHAPE (B1420): pages holding pages. It keeps the same ids and the
+ * same depths as the old `notebook › section › page` one — `nb1 › s1 › p1` is now
+ * `nb1 › s1 › p1` as three nested PAGES — so every case below still exercises a three-deep
+ * cascade, which is the property these tests exist for. */
 const fixture = () => ({
-  v: 2,
+  v: 3,
   trash: [],
-  notebooks: [
-    { id: "nb1", title: "Goose Creek", projectId: null, sections: [
+  pages: [
+    { id: "nb1", title: "Goose Creek", projectId: null, pages: [
       { id: "s1", title: "Survey", pages: [
-        { id: "p1", title: "Deed", createdAt: 1000, updatedAt: 5000 },
-        { id: "p2", title: "Plat", createdAt: 1000, updatedAt: 9000 },
+        { id: "p1", title: "Deed", createdAt: 1000, updatedAt: 5000, pages: [] },
+        { id: "p2", title: "Plat", createdAt: 1000, updatedAt: 9000, pages: [] },
       ] },
-      { id: "s2", title: "Drainage", pages: [{ id: "p3", title: "Detention", createdAt: 1000, updatedAt: 1000 }] },
+      { id: "s2", title: "Drainage", pages: [{ id: "p3", title: "Detention", createdAt: 1000, updatedAt: 1000, pages: [] }] },
     ] },
-    { id: "nb2", title: "Brokers", projectId: "P2", sections: [
-      { id: "s3", title: "Calls", pages: [{ id: "p4", title: "CBRE", createdAt: 1, updatedAt: null }] },
+    { id: "nb2", title: "Brokers", projectId: "P2", pages: [
+      { id: "s3", title: "Calls", pages: [{ id: "p4", title: "CBRE", createdAt: 1, updatedAt: null, pages: [] }] },
     ] },
   ],
 });
@@ -66,16 +70,16 @@ describe("delete bins rather than destroys", () => {
     const { tree, removedPageIds, entry } = deleteNode(fixture(), "p1", { at: 5000, entryId: "t1" });
     expect(allPageIds(tree)).not.toContain("p1");
     expect(removedPageIds).toEqual(["p1"]);
-    expect(entry).toMatchObject({ id: "t1", kind: "page", parentId: "s1", index: 0, title: "Deed", deletedAt: 5000 });
+    expect(entry).toMatchObject({ id: "t1", parentId: "s1", index: 0, title: "Deed", deletedAt: 5000 });
     expect(entry.pageIds).toEqual(["p1"]);
     expect(trashPageIds(tree)).toEqual(["p1"]);
   });
 
-  it("a deleted notebook bins the WHOLE cascade, not just the node that was clicked", () => {
+  it("a deleted BRANCH bins the WHOLE cascade, not just the node that was clicked", () => {
     const { tree, entry } = deleteNode(fixture(), "nb1", { entryId: "t1" });
-    expect(entry.pageIds.sort()).toEqual(["p1", "p2", "p3"]);
-    expect(trashPageIds(tree).sort()).toEqual(["p1", "p2", "p3"]);
-    expect(allPageIds(tree)).toEqual(["p4"]);
+    expect(entry.pageIds.slice().sort()).toEqual(["nb1", "p1", "p2", "p3", "s1", "s2"]);
+    expect(trashPageIds(tree).slice().sort()).toEqual(["nb1", "p1", "p2", "p3", "s1", "s2"]);
+    expect(allPageIds(tree)).toEqual(["nb2", "s3", "p4"]);
   });
 
   it("a binned page is INVISIBLE to every live read — the bin is not a second tree", () => {
@@ -87,38 +91,36 @@ describe("delete bins rather than destroys", () => {
   it("restore puts a page back at the index it came from", () => {
     const { tree, entry } = deleteNode(fixture(), "p1", { entryId: "t1" });
     const back = restoreNode(tree, entry.id);
-    expect(back.tree.notebooks[0].sections[0].pages.map((p) => p.id)).toEqual(["p1", "p2"]);
+    expect(findPage(back.tree, "s1").page.pages.map((p) => p.id)).toEqual(["p1", "p2"]);
     expect(back.tree.trash).toHaveLength(0);
     expect(back.pageIds).toEqual(["p1"]);
   });
 
-  it("restoring a page whose SECTION is also binned brings the section back first", () => {
+  it("restoring a page whose PARENT is also binned brings the parent back first", () => {
     let t = fixture();
-    const pageDel = deleteNode(t, "p1", { entryId: "tp" });
-    t = pageDel.tree;
-    const secDel = deleteNode(t, "s1", { entryId: "ts" });
-    t = secDel.tree;
-    expect(t.notebooks[0].sections.map((s) => s.id)).toEqual(["s2"]);
+    t = deleteNode(t, "p1", { entryId: "tp" }).tree;
+    t = deleteNode(t, "s1", { entryId: "ts" }).tree;
+    expect(findPage(t, "nb1").page.pages.map((x) => x.id)).toEqual(["s2"]);
 
     const back = restoreNode(t, "tp");
     expect(back.tree.trash, "both entries are gone — the parent was restored on the way").toHaveLength(0);
-    const sec = back.tree.notebooks[0].sections.find((s) => s.id === "s1");
-    expect(sec.pages.map((p) => p.id)).toEqual(["p1", "p2"]);
+    expect(findPage(back.tree, "s1").page.pages.map((x) => x.id)).toEqual(["p1", "p2"]);
   });
 
-  it("restoring into a parent that is gone FOR GOOD lands in a named home rather than failing", () => {
+  it("restoring into a parent that is gone FOR GOOD lands at the TOP LEVEL rather than failing", () => {
     let t = fixture();
-    const del = deleteNode(t, "p1", { entryId: "tp" });
-    t = del.tree;
-    // The section is purged for real while the page sits in the bin.
+    t = deleteNode(t, "p1", { entryId: "tp" }).tree;
+    // The parent is purged for real while the page sits in the bin.
     const secDel = deleteNode(t, "s1", { entryId: "ts" });
     t = purgeTrashEntry(secDel.tree, "ts").tree;
 
     const back = restoreNode(t, "tp");
-    expect(back.restored).toBeTruthy();
-    const home = back.tree.notebooks.find((n) => n.title === "Recovered notes");
-    expect(home, "a restore must never fail into nothing").toBeTruthy();
-    expect(home.sections[0].pages.map((p) => p.id)).toEqual(["p1"]);
+    expect(back.restored, "a restore must never fail into nothing").toBeTruthy();
+    /* The old model needed an invented "Recovered notes" notebook for this case, because a
+     * page could not exist without a section. A page can now BE a top level, so the recovery
+     * home is simply the top level — one fewer synthetic container to explain. */
+    expect(findPage(back.tree, "p1").parent).toBeNull();
+    expect(findPage(back.tree, "p1").page.projectId).toBeNull();
   });
 
   it("restoring an unknown entry is a no-op, not a crash (a double-clicked Undo)", () => {
@@ -131,7 +133,7 @@ describe("delete bins rather than destroys", () => {
   it("purge hands back the FULL page set whose bytes the caller must now destroy", () => {
     const { tree, entry } = deleteNode(fixture(), "nb1", { entryId: "t1" });
     const r = purgeTrashEntry(tree, entry.id);
-    expect(r.pageIds.sort()).toEqual(["p1", "p2", "p3"]);
+    expect(r.pageIds.slice().sort()).toEqual(["nb1", "p1", "p2", "p3", "s1", "s2"]);
     expect(r.tree.trash).toHaveLength(0);
     expect(trashPageIds(r.tree)).toEqual([]);
   });
@@ -155,7 +157,7 @@ describe("delete bins rather than destroys", () => {
   });
 
   it("a corrupt bin entry keeps its page ids (so the bytes can still be freed) but refuses to restore", () => {
-    const t = migrate({ v: 2, notebooks: [], trash: [{ id: "bad", kind: "page", node: null, pageIds: ["pX"], deletedAt: 5 }] });
+    const t = migrate({ v: 3, pages: [], trash: [{ id: "bad", kind: "page", node: null, pageIds: ["pX"], deletedAt: 5 }] });
     expect(trashPageIds(t)).toEqual(["pX"]);
     expect(trashEntries(t)[0].restorable).toBe(false);
     expect(restoreNode(t, "bad").restored).toBeNull();
@@ -174,7 +176,8 @@ describe("delete bins rather than destroys", () => {
     const round = migrate(JSON.parse(JSON.stringify(t)));
     expect(round.trash).toHaveLength(1);
     expect(round.trash[0].node.id).toBe("p1");
-    // A v1 tree (no `trash` key at all) reads as an empty bin, never as a crash.
+    // A tree with no `trash` key at all reads as an empty bin, never as a crash.
+    expect(migrate({ pages: [] }).trash).toEqual([]);
     expect(migrate({ notebooks: [] }).trash).toEqual([]);
     expect(emptyTree().trash).toEqual([]);
   });
@@ -189,9 +192,15 @@ describe("a page records when it was made and when it was touched", () => {
     expect(p).toMatchObject({ id: "x", createdAt: 4242, updatedAt: 4242 });
   });
 
-  it("a page added to a section is stamped too", () => {
-    const r = addPage(fixture(), "s1", { id: "pz", at: 777 });
+  it("a page added UNDER another page is stamped too", () => {
+    const r = addPage(fixture(), { parentId: "s1", id: "pz", at: 777 });
     expect(findPage(r.tree, "pz").page.updatedAt).toBe(777);
+  });
+
+  it("…and so is one made at the top level of a project", () => {
+    const r = addPage(fixture(), { projectId: "P9", id: "pr", at: 888 });
+    expect(findPage(r.tree, "pr").page.updatedAt).toBe(888);
+    expect(findPage(r.tree, "pr").page.projectId).toBe("P9");
   });
 
   it("touchPage moves only updatedAt, only on the page named", () => {
@@ -207,17 +216,22 @@ describe("a page records when it was made and when it was touched", () => {
   });
 
   it("a page written before timestamps existed keeps NULL rather than being invented", () => {
-    const t = migrate({ notebooks: [{ id: "nb", sections: [{ id: "s", pages: [{ id: "p", title: "Old" }] }] }] });
-    expect(t.notebooks[0].sections[0].pages[0]).toMatchObject({ createdAt: null, updatedAt: null });
+    const t = migrate({ notebooks: [{ id: "nb", sections: [{ id: "s", title: "S", pages: [{ id: "p", title: "Old" }] }] }] });
+    expect(findPage(t, "p").page).toMatchObject({ createdAt: null, updatedAt: null });
   });
 
   it("Recent is newest first, and an unknown time sorts LAST rather than pretending to be new", () => {
-    expect(recentPages(fixture()).map((r) => r.pageId)).toEqual(["p2", "p1", "p3", "p4"]);
+    // Every page, at every depth — the containers have no stamp at all, so they sort last.
+    const order = recentPages(fixture()).map((r) => r.pageId);
+    expect(order.slice(0, 3)).toEqual(["p2", "p1", "p3"]);
+    expect(order).toHaveLength(9);   // 2 roots + 3 containers + 4 leaves
+    expect(order[order.length - 1]).toBe("p4");   // updatedAt: null → last, never first
   });
 
-  it("Recent respects project visibility, like every other read", () => {
-    expect(recentPages(fixture(), { projectId: "P1" }).map((r) => r.pageId)).toEqual(["p2", "p1", "p3"]);
-    expect(recentPages(fixture(), { projectId: "P2" }).map((r) => r.pageId)).toEqual(["p2", "p1", "p3", "p4"]);
+  it("Recent respects the project scope, like every other read", () => {
+    // nb1 is in no project, nb2 is in P2 — so a project's Recent is that project only.
+    expect(recentPages(fixture(), { projectId: "P2" }).map((r) => r.pageId)).toEqual(["nb2", "s3", "p4"]);
+    expect(recentPages(fixture(), { projectId: "P2" }).map((r) => r.pageId)).not.toContain("p1");
   });
 
   it("relative time is coarse, and says NOTHING when the time is unknown", () => {
@@ -276,9 +290,9 @@ describe("the Markdown export inlines pictures, and names one it could not find"
     expect(lossy).toEqual(["an image whose stored copy has gone"]);
   });
 
-  it("a notebook export carries pictures too", () => {
-    const nb = { title: "N", sections: [{ title: "S", pages: [{ id: "p1", title: "P" }] }] };
-    const { markdown } = notebookToMarkdown(nb, { p1: docWith(imgNode("a")) }, { images: { a: PNG } });
+  it("a branch export carries pictures too, from a SUBPAGE", () => {
+    const branch = { id: "root", title: "N", pages: [{ id: "p1", title: "P", pages: [] }] };
+    const { markdown } = pageToMarkdown(branch, { p1: docWith(imgNode("a")) }, { images: { a: PNG } });
     expect(markdown).toContain(PNG);
   });
 
@@ -391,15 +405,19 @@ describe("the print sheet", () => {
     const html = buildPrintDocument({
       title: "Goose Creek",
       pages: [
-        { title: "Deed", html: "<p>a</p>", sectionTitle: "Survey" },
-        { title: "Plat", html: "<p>b</p>", sectionTitle: "Survey" },
-        { title: "Detention", html: "<p>c</p>", sectionTitle: "Drainage" },
+        { title: "Deed", html: "<p>a</p>", trail: ["Goose Creek", "Survey"] },
+        { title: "Plat", html: "<p>b</p>", trail: ["Goose Creek", "Survey"] },
+        { title: "Detention", html: "<p>c</p>", trail: ["Goose Creek", "Drainage"] },
       ],
     });
+    /* ⛔ PDF-PARITY UNDER THE NEW SHAPE (B1420). There is no section heading to print, so
+     * paper carries each page's TRAIL — the same "where does this sit?" the rail shows by
+     * indentation. A printed branch has to stay readable once the sheets are separated. */
     expect(html).toContain("Survey");
     expect(html).toContain("Drainage");
+    expect(html).toContain("Goose Creek › Survey");
     const breaks = (html.match(/ page-break"/g) || []).length;
-    expect(breaks, "the second page and the second section each start a new sheet").toBe(2);
+    expect(breaks, "each page after the first starts a new sheet").toBe(2);
     expect(html).toContain('<h2 class="note-page-head">Plat</h2>');
   });
 

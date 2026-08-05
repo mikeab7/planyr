@@ -18,11 +18,14 @@ import { notesConflictLine } from "../src/workspaces/notes/lib/notesStore.js";
 
 /* ---- fixtures ------------------------------------------------------------------------ */
 
-const page = (id, title = id, t = {}) => ({ id, title, createdAt: t.createdAt ?? 1000, updatedAt: t.updatedAt ?? 1000 });
-const section = (id, pages) => ({ id, title: id, pages });
-const notebook = (id, sections) => ({ id, title: id, projectId: null, sections });
-const tree = (notebooks, trash = []) => ({ v: 2, notebooks, trash });
-const trashEntry = (id, node, kind = "page", pageIds = [node.id]) => ({ id, kind, node, parentId: null, index: 0, title: node.title, deletedAt: 5000, pageIds });
+/* ⛔ FIXTURES REWRITTEN FOR THE COLLAPSE (B1420). A page holds pages, at any depth; a ROOT
+ * page also carries `projectId`. The old `notebook(section(page))` builders are gone with the
+ * levels they built — the merge rules they proved are all re-asserted below on the new shape,
+ * which is what a rewrite has to mean. */
+const page = (id, title = id, t = {}, kids = []) => ({ id, title, createdAt: t.createdAt ?? 1000, updatedAt: t.updatedAt ?? 1000, pages: kids });
+const root = (id, kids = [], projectId = null) => ({ ...page(id), pages: kids, projectId });
+const tree = (pages, trash = []) => ({ v: 3, pages, trash });
+const trashEntry = (id, node, pageIds = [node.id]) => ({ id, kind: "page", node, parentId: null, index: 0, projectId: null, title: node.title, deletedAt: 5000, pageIds });
 
 const state = (over = {}) => ({ ...emptySyncState(), ...over });
 
@@ -30,118 +33,118 @@ const state = (over = {}) => ({ ...emptySyncState(), ...over });
  * 1. THE TREE MERGE — reached only when BOTH devices changed the structure
  * ═══════════════════════════════════════════════════════════════════════════════════════ */
 describe("mergeTrees", () => {
-  it("keeps a notebook that exists on only ONE side — a merge can never lose a notebook", () => {
-    const mine = tree([notebook("nbA", [section("s1", [page("p1")])])]);
-    const theirs = tree([notebook("nbB", [section("s2", [page("p2")])])]);
+  it("keeps a top-level page that exists on only ONE side — a merge can never lose a page", () => {
+    const out = mergeTrees(tree([root("A", [page("p1")])]), tree([root("B", [page("p2")])]));
+    expect(out.pages.map((n) => n.id)).toEqual(["A", "B"]);
+  });
+
+  it("keeps a SUBPAGE added on the other device under a page they both have", () => {
+    const mine = tree([root("A", [page("p1")])]);
+    const theirs = tree([root("A", [page("p1"), page("p2")])]);
+    expect(mergeTrees(mine, theirs).pages[0].pages.map((p) => p.id)).toEqual(["p1", "p2"]);
+  });
+
+  it("⛔ MERGES AT EVERY DEPTH — one recursive rule, not one per level", () => {
+    const mine = tree([root("A", [page("p1", "p1", {}, [page("g1")])])]);
+    const theirs = tree([root("A", [page("p1", "p1", {}, [page("g1"), page("g2")])])]);
     const out = mergeTrees(mine, theirs);
-    expect(out.notebooks.map((n) => n.id)).toEqual(["nbA", "nbB"]);
-  });
-
-  it("keeps a PAGE added on the other device inside a section they both have", () => {
-    const mine = tree([notebook("nb", [section("s", [page("p1")])])]);
-    const theirs = tree([notebook("nb", [section("s", [page("p1"), page("p2")])])]);
-    expect(mergeTrees(mine, theirs).notebooks[0].sections[0].pages.map((p) => p.id)).toEqual(["p1", "p2"]);
-  });
-
-  it("keeps a SECTION added on the other device", () => {
-    const mine = tree([notebook("nb", [section("s1", [page("p1")])])]);
-    const theirs = tree([notebook("nb", [section("s1", [page("p1")]), section("s2", [page("p2")])])]);
-    expect(mergeTrees(mine, theirs).notebooks[0].sections.map((s) => s.id)).toEqual(["s1", "s2"]);
+    expect(out.pages[0].pages[0].pages.map((p) => p.id)).toEqual(["g1", "g2"]);
   });
 
   it("the LOCAL title wins for a node both sides have — local is the side with unpushed changes", () => {
-    const mine = tree([notebook("nb", [section("s", [{ ...page("p1"), title: "My rename" }])])]);
-    const theirs = tree([notebook("nb", [section("s", [{ ...page("p1"), title: "Their rename" }])])]);
-    expect(mergeTrees(mine, theirs).notebooks[0].sections[0].pages[0].title).toBe("My rename");
+    const mine = tree([root("A", [{ ...page("p1"), title: "My rename" }])]);
+    const theirs = tree([root("A", [{ ...page("p1"), title: "Their rename" }])]);
+    expect(mergeTrees(mine, theirs).pages[0].pages[0].title).toBe("My rename");
   });
 
   it("timestamps take the LATER edit and the EARLIER creation, whichever side each came from", () => {
-    const mine = tree([notebook("nb", [section("s", [page("p1", "p1", { createdAt: 900, updatedAt: 2000 })])])]);
-    const theirs = tree([notebook("nb", [section("s", [page("p1", "p1", { createdAt: 500, updatedAt: 7000 })])])]);
-    const pg = mergeTrees(mine, theirs).notebooks[0].sections[0].pages[0];
+    const mine = tree([root("A", [page("p1", "p1", { createdAt: 900, updatedAt: 2000 })])]);
+    const theirs = tree([root("A", [page("p1", "p1", { createdAt: 500, updatedAt: 7000 })])]);
+    const pg = mergeTrees(mine, theirs).pages[0].pages[0];
     expect(pg.updatedAt).toBe(7000);
     expect(pg.createdAt).toBe(500);
   });
 
   it("A DELETE ON EITHER SIDE WINS — a page they binned does not come back because we still have it", () => {
     const p = page("p2");
-    const mine = tree([notebook("nb", [section("s", [page("p1"), p])])]);
-    const theirs = tree([notebook("nb", [section("s", [page("p1")])])], [trashEntry("t1", p)]);
+    const mine = tree([root("A", [page("p1"), p])]);
+    const theirs = tree([root("A", [page("p1")])], [trashEntry("t1", p)]);
     const out = mergeTrees(mine, theirs);
-    expect(out.notebooks[0].sections[0].pages.map((x) => x.id)).toEqual(["p1"]);
+    expect(out.pages[0].pages.map((x) => x.id)).toEqual(["p1"]);
     expect(out.trash.map((e) => e.id)).toEqual(["t1"]);
   });
 
   it("…and it works the other way round too — a page WE binned is not resurrected by their live copy", () => {
     const p = page("p2");
-    const mine = tree([notebook("nb", [section("s", [page("p1")])])], [trashEntry("t1", p)]);
-    const theirs = tree([notebook("nb", [section("s", [page("p1"), p])])]);
-    expect(mergeTrees(mine, theirs).notebooks[0].sections[0].pages.map((x) => x.id)).toEqual(["p1"]);
+    const mine = tree([root("A", [page("p1")])], [trashEntry("t1", p)]);
+    const theirs = tree([root("A", [page("p1"), p])]);
+    expect(mergeTrees(mine, theirs).pages[0].pages.map((x) => x.id)).toEqual(["p1"]);
   });
 
-  it("a binned NOTEBOOK takes its whole cascade with it, from either side's bin", () => {
-    const nb = notebook("nbGone", [section("sG", [page("pG1"), page("pG2")])]);
-    const mine = tree([notebook("nbKeep", [section("s", [page("p1")])]), nb]);
-    const theirs = tree([notebook("nbKeep", [section("s", [page("p1")])])], [trashEntry("t9", nb, "notebook", ["pG1", "pG2"])]);
+  it("a binned BRANCH takes its whole cascade with it, from either side's bin", () => {
+    const gone = root("gone", [page("pG1"), page("pG2")]);
+    const mine = tree([root("keep", [page("p1")]), gone]);
+    const theirs = tree([root("keep", [page("p1")])], [trashEntry("t9", gone, ["gone", "pG1", "pG2"])]);
     const out = mergeTrees(mine, theirs);
-    expect(out.notebooks.map((n) => n.id)).toEqual(["nbKeep"]);
+    expect(out.pages.map((n) => n.id)).toEqual(["keep"]);
+  });
+
+  it("⛔ AND A DEEP CHILD OF A BINNED BRANCH IS NOT RESURRECTED FROM THE OTHER SIDE", () => {
+    const deep = page("deep");
+    const gone = root("gone", [page("mid", "mid", {}, [deep])]);
+    const mine = tree([root("keep", [page("p1")])], [trashEntry("t1", gone, ["gone", "mid", "deep"])]);
+    const theirs = tree([root("keep", [page("p1")]), gone]);
+    const out = mergeTrees(mine, theirs);
+    expect(out.pages.map((n) => n.id)).toEqual(["keep"]);
   });
 
   it("the merged bin is the UNION, and an entry is never duplicated", () => {
-    const p = page("p9");
-    const shared = trashEntry("tShared", p);
+    const shared = trashEntry("tShared", page("p9"));
     const mine = tree([], [shared, trashEntry("tMine", page("pm"))]);
     const theirs = tree([], [shared, trashEntry("tTheirs", page("pt"))]);
     expect(mergeTrees(mine, theirs).trash.map((e) => e.id)).toEqual(["tShared", "tMine", "tTheirs"]);
   });
 
-  it("a page MOVED on both devices keeps the LOCAL placement and appears exactly once", () => {
-    const mine = tree([notebook("nb", [section("s1", [page("p1")]), section("s2", [])])]);
-    const theirs = tree([notebook("nb", [section("s1", []), section("s2", [page("p1")])])]);
+  it("a page RE-PARENTED on both devices keeps the LOCAL placement and appears exactly once", () => {
+    const mine = tree([root("A", [page("p1")]), root("B", [])]);
+    const theirs = tree([root("A", []), root("B", [page("p1")])]);
     const out = mergeTrees(mine, theirs);
-    expect(out.notebooks[0].sections[0].pages.map((p) => p.id)).toEqual(["p1"]);
-    expect(out.notebooks[0].sections[1].pages).toEqual([]);
+    expect(out.pages[0].pages.map((p) => p.id)).toEqual(["p1"]);
+    expect(out.pages[1].pages).toEqual([]);
   });
 
   it("survives junk on either side rather than throwing — a merge is not a place to crash", () => {
-    expect(mergeTrees(null, null)).toEqual({ v: 2, notebooks: [], trash: [] });
-    expect(mergeTrees(tree([notebook("nb", [section("s", [page("p1")])])]), undefined).notebooks).toHaveLength(1);
+    expect(mergeTrees(null, null)).toEqual({ v: 3, pages: [], trash: [] });
+    expect(mergeTrees(tree([root("A", [page("p1")])]), undefined).pages).toHaveLength(1);
   });
 
-  /* B1374 — THE PROJECT BINDING RIDES THROUGH THE MERGE. Asserted, not assumed: the binding
+  /* B1374 → B1420 — THE PROJECT BINDING RIDES THROUGH THE MERGE, now on the ROOT page. It
    * lives in the tree blob, and the tree blob is the thing this function rewrites. A merge
-   * that dropped `projectId` would silently un-file every notebook the moment two devices
-   * both touched the structure — which is a data loss that looks exactly like the bug this
-   * whole item is about, arriving later and from a different direction. */
-  const bound = (id, pid, sections) => ({ id, title: id, projectId: pid, sections });
+   * that dropped `projectId` would silently un-file every page the moment two devices both
+   * touched the structure. */
+  it("A PAGE'S PROJECT SURVIVES THE MERGE, on both sides", () => {
+    const mine = tree([root("A", [page("p1")], "P1")]);
+    const theirs = tree([root("B", [page("p2")], "P2")]);
+    expect(mergeTrees(mine, theirs).pages.map((n) => [n.id, n.projectId])).toEqual([["A", "P1"], ["B", "P2"]]);
+  });
 
-  it("A NOTEBOOK'S PROJECT BINDING SURVIVES THE MERGE, on both sides", () => {
-    const mine = tree([bound("nbA", "P1", [section("s1", [page("p1")])])]);
-    const theirs = tree([bound("nbB", "P2", [section("s2", [page("p2")])])]);
+  it("...and a page in NO project stays that way rather than acquiring one", () => {
+    const out = mergeTrees(tree([root("A", [page("p1")], null)]), tree([root("A", [page("p2")], null)]));
+    expect(out.pages[0].projectId).toBeNull();
+  });
+
+  it("for a page on BOTH sides the LOCAL project wins, the same as its title (rule 3)", () => {
+    const mine = tree([root("A", [page("p1")], "P-local")]);
+    const theirs = tree([root("A", [page("p1")], "P-server")]);
+    expect(mergeTrees(mine, theirs).pages[0].projectId).toBe("P-local");
+  });
+
+  it("re-filing on THIS device and adding a page on the other keeps BOTH — the re-file is not paid for with a note", () => {
+    const mine = tree([root("A", [page("p1")], null)]);              // set to no project here
+    const theirs = tree([root("A", [page("p1"), page("p2")], "P1")]); // page added there
     const out = mergeTrees(mine, theirs);
-    expect(out.notebooks.map((n) => [n.id, n.projectId])).toEqual([["nbA", "P1"], ["nbB", "P2"]]);
-  });
-
-  it("...and a LOOSE notebook stays loose rather than acquiring one", () => {
-    const out = mergeTrees(
-      tree([bound("nb", null, [section("s", [page("p1")])])]),
-      tree([bound("nb", null, [section("s", [page("p2")])])]),
-    );
-    expect(out.notebooks[0].projectId).toBeNull();
-  });
-
-  it("for a notebook on BOTH sides the LOCAL binding wins, the same as its title (rule 3)", () => {
-    const mine = tree([bound("nb", "P-local", [section("s", [page("p1")])])]);
-    const theirs = tree([bound("nb", "P-server", [section("s", [page("p1")])])]);
-    expect(mergeTrees(mine, theirs).notebooks[0].projectId).toBe("P-local");
-  });
-
-  it("re-binding on THIS device and adding a page on the other keeps BOTH — the bind is not paid for with a note", () => {
-    const mine = tree([bound("nb", null, [section("s", [page("p1")])])]);           // set loose here
-    const theirs = tree([bound("nb", "P1", [section("s", [page("p1"), page("p2")])])]); // page added there
-    const out = mergeTrees(mine, theirs);
-    expect(out.notebooks[0].projectId).toBeNull();
-    expect(out.notebooks[0].sections[0].pages.map((p) => p.id)).toEqual(["p1", "p2"]);
+    expect(out.pages[0].projectId).toBeNull();
+    expect(out.pages[0].pages.map((p) => p.id)).toEqual(["p1", "p2"]);
   });
 });
 
@@ -305,49 +308,56 @@ describe("planImageSync", () => {
  * 4. THE SIGN-IN MIGRATION
  * ═══════════════════════════════════════════════════════════════════════════════════════ */
 describe("planAdoption — signed-out notes join the account", () => {
-  const local = tree([notebook("nbLocal", [section("s", [page("p1"), page("p2")])])]);
+  const local = tree([root("L", [page("p1"), page("p2")])]);
 
-  it("adopts a signed-out notebook the account has never seen, with every page under it", () => {
+  it("adopts a signed-out page the account has never seen, with every page UNDER it", () => {
     const plan = planAdoption(local, tree([]));
-    expect(plan.notebooks.map((n) => n.id)).toEqual(["nbLocal"]);
-    expect(plan.pageIds).toEqual(["p1", "p2"]);
+    expect(plan.pages.map((n) => n.id)).toEqual(["L"]);
+    expect(plan.pageIds).toEqual(["L", "p1", "p2"]);
+  });
+
+  it("…at every depth, so a deep subpage's body is not left behind", () => {
+    const deep = tree([root("L", [page("p1", "p1", {}, [page("g1", "g1", {}, [page("g2")])])])]);
+    expect(planAdoption(deep, tree([])).pageIds).toEqual(["L", "p1", "g1", "g2"]);
   });
 
   it("IS IDEMPOTENT — a second run adopts nothing, so notes are never silently duplicated", () => {
-    const account = tree([notebook("nbLocal", [section("s", [page("p1"), page("p2")])])]);
-    expect(planAdoption(local, account)).toEqual({ notebooks: [], pageIds: [] });
+    expect(planAdoption(local, tree([root("L", [page("p1"), page("p2")])]))).toEqual({ pages: [], pageIds: [] });
   });
 
-  it("leaves the account's own notebooks alone and never proposes deleting anything", () => {
-    const account = tree([notebook("nbAccount", [section("sa", [page("pa")])])]);
-    const plan = planAdoption(local, account);
-    expect(plan.notebooks.map((n) => n.id)).toEqual(["nbLocal"]);
+  it("leaves the account's own pages alone and never proposes deleting anything", () => {
+    const plan = planAdoption(local, tree([root("Acct", [page("pa")])]));
+    expect(plan.pages.map((n) => n.id)).toEqual(["L"]);
   });
 
-  /* ⛔ TOMBSTONE-DELETES. Adoption is also a delete path, and "missing from the account
-   * tree" is not the same as "never adopted" — these two cases are how a deleted note would
-   * otherwise be resurrected by the migration that was supposed to be idempotent. */
-  it("does NOT re-adopt a notebook this device already adopted and the user has since deleted", () => {
-    const account = tree([]);   // adopted once, then deleted and purged out of the account
-    expect(planAdoption(local, account, { already: ["nbLocal"] })).toEqual({ notebooks: [], pageIds: [] });
+  /* ⛔ TOMBSTONE-DELETES. Adoption is also a delete path, and "missing from the account tree"
+   * is not the same as "never adopted" — these cases are how a deleted note would otherwise
+   * be resurrected by the migration that was supposed to be idempotent. */
+  it("does NOT re-adopt a page this device already adopted and the user has since deleted", () => {
+    expect(planAdoption(local, tree([]), { already: ["L"] })).toEqual({ pages: [], pageIds: [] });
   });
 
-  it("does NOT re-adopt a notebook sitting in the account's BIN — a binned note is not a missing one", () => {
-    const nb = notebook("nbLocal", [section("s", [page("p1"), page("p2")])]);
-    const account = tree([], [trashEntry("t1", nb, "notebook", ["p1", "p2"])]);
-    expect(planAdoption(local, account).notebooks).toEqual([]);
+  it("does NOT re-adopt a page sitting in the account's BIN — a binned note is not a missing one", () => {
+    const gone = root("L", [page("p1"), page("p2")]);
+    const account = tree([], [trashEntry("t1", gone, ["L", "p1", "p2"])]);
+    expect(planAdoption(local, account).pages).toEqual([]);
   });
 
-  it("a genuinely new signed-out notebook still comes across even with a history of adoptions", () => {
-    const both = tree([notebook("nbLocal", [section("s", [page("p1")])]), notebook("nbNew", [section("s2", [page("p3")])])]);
-    const plan = planAdoption(both, tree([]), { already: ["nbLocal"] });
-    expect(plan.notebooks.map((n) => n.id)).toEqual(["nbNew"]);
-    expect(plan.pageIds).toEqual(["p3"]);
+  it("…including one binned as part of a deeper branch's cascade", () => {
+    const account = tree([], [trashEntry("t1", root("other"), ["other", "L"])]);
+    expect(planAdoption(local, account).pages).toEqual([]);
+  });
+
+  it("a genuinely new signed-out page still comes across even with a history of adoptions", () => {
+    const both = tree([root("L", [page("p1")]), root("New", [page("p3")])]);
+    const plan = planAdoption(both, tree([]), { already: ["L"] });
+    expect(plan.pages.map((n) => n.id)).toEqual(["New"]);
+    expect(plan.pageIds).toEqual(["New", "p3"]);
   });
 
   it("nothing signed out means nothing to do", () => {
-    expect(planAdoption(tree([]), tree([notebook("nb", [])]))).toEqual({ notebooks: [], pageIds: [] });
-    expect(planAdoption(null, null)).toEqual({ notebooks: [], pageIds: [] });
+    expect(planAdoption(tree([]), tree([root("A")]))).toEqual({ pages: [], pageIds: [] });
+    expect(planAdoption(null, null)).toEqual({ pages: [], pageIds: [] });
   });
 });
 
