@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-08-06 @ `84eb3e0` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-08-06 @ `3341559` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_430 source files mapped._
+_432 source files mapped._
 
 ## infra
 
@@ -222,6 +222,10 @@ _430 source files mapped._
   - _exports_: `CACHE_CLEARED_EVENT`, `CACHE_IDB_PREFIX`, `reclaimableClasses`, `reclaimLocalStorage`, `reclaimMessage`, `reclaimRefetchable`, `reclaimThenRetry`, `unprovenReclaimables`
 - **`src/shared/telemetry/clientErrors.js`** — Client error+event telemetry: window/rejection/preload sources insert into anon INSERT-only Supabase client_errors with dedup, rate/session caps, tab-id stamping, fail-safe
   - _exports_: `buildErrorRow`, `decideReport`, `DUP_MS`, `errorSignature`, `extractMessage`, `extractStack`, `installClientErrorTelemetry`, `RATE_MAX`, `RATE_WINDOW_MS`, `reportClientError`, `reportClientEvent`, `SESSION_MAX`, `setTelemetryModule`, `TAB_ID`
+- **`src/shared/telemetry/perfInstrument.js`** — Always-on sampled client PERFORMANCE telemetry: longtask + Event Timing/INP observers plus a periodic scene sample (heap, canvas nodes, elements drawn, layers on, panels open, edits since load) through the existing reportClientEvent sink, with its own row ceiling so it can never spend the error budget
+  - _exports_: `__resetPerfInstrument`, `buildPerfRow`, `decidePerfSend`, `inpFrom`, `installPerfInstrument`, `isEnrolled`, `notePerfEdit`, `PERF_LONGTASK_MS`, `PERF_MAX_ROWS`, `PERF_MIN_GAP_MS`, `PERF_SAMPLE_MS`, `PERF_SAMPLE_RATE`, `perfSnapshot`, `readScene`
+- **`src/shared/telemetry/perfSampling.js`** — The tiny always-loaded half of the perf instrument: the deterministic per-tab enrolment decision and the undo-path edit counter, split out by TIER so `main.jsx` and `SitePlanner.jsx` never drag the diagnostic onto every route's critical path
+  - _exports_: `__resetPerfEdits`, `isEnrolled`, `notePerfEdit`, `PERF_SAMPLE_RATE`, `perfEditCount`
 - **`src/shared/theme/palette.js`** — JS mirror of index.css theme tokens as concrete light/dark hex for the SVG canvas and Markup viewer where var() cannot resolve; paletteFor(resolved) selector
   - _exports_: `paletteFor`, `PALETTES`
 - **`src/shared/theme/ThemePicker.jsx`** — Light/Dark/System theme picker UI reading useTheme, mounted in signed-in Settings and the signed-out header gear, styled purely from theme tokens

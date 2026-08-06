@@ -8,6 +8,7 @@ import { idbGet, idbPut, idbDelete, idbAvailable } from "./lib/localDb.js";
 import { registerFlush } from "../../app/flushRegistry.js";
 import { createEditorLock } from "../../shared/presence/editorLock.js";
 import { reportClientEvent } from "../../shared/telemetry/clientErrors.js";
+import { notePerfEdit } from "../../shared/telemetry/perfSampling.js";
 import { createElementSync, stableStringify } from "./lib/elementSync.js";
 import { planDelete, shouldHintTypingGuard, TYPING_GUARD_HINT } from "./lib/deletePlan.js";
 import { rowsToModel, KIND_TO_FIELD, foldNeverSyncedLocal, foldJournal, reconcileSeedRows } from "./lib/elementRows.js";
@@ -4113,7 +4114,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   if (!histRef.current) histRef.current = createHistoryStack({ keyOf: histKey });
   const [, bumpHist] = useState(0);
   const touchHist = () => bumpHist((n) => n + 1); // re-render so undo/redo enabled state updates
-  const pushHistory = () => { histRef.current.push(stateRef.current); touchHist(); };
+  /* NEW-4 — `notePerfEdit()` is one integer increment, and it is the ONE axis of the
+   * amplification hypothesis the DOM cannot report: how much this session has been WORKED. Every
+   * undoable action funnels through here already, so this is the cheapest complete count there
+   * is. It is a no-op unless the perf instrument is installed (a quarter of page loads). */
+  const pushHistory = () => { histRef.current.push(stateRef.current); notePerfEdit(); touchHist(); };
   // B820 — give each freshly-created markup a z that stacks it on TOP of the collection (nextZ), so a
   // newly drawn markup paints above the existing ones now that the markup layer renders in z order
   // (see the [...markups].sort(byZAsc) passes below). Ascending so a multi-markup add (paste, a deed +
@@ -9313,7 +9318,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
      element per frame. See `resolveElNeighbors` for why the dependency has to be modelled rather
      than assumed away, and `ElNode` for what the stable record buys. Keyed on `els` (the complete
      model), never on `drawEls` (the culled subset) — a culled neighbour still shapes a curb. */
-  const elNeighbors = useMemo(() => resolveElNeighbors(els), [els]);
+  /* NEW-3 — `settings` joins the key because the record now also carries the per-building DOCK PLAN
+     (column grid + door runs), which is a function of the element AND the standards. Same shape as
+     `teeJunctions` / `driveJunctions`, which are already keyed `[els, settings]`. `settings` is a
+     stable object between edits, so this adds no invalidations a settings change did not already
+     cause — and a settings change genuinely does change the grid. */
+  const elNeighbors = useMemo(() => resolveElNeighbors(els, settings), [els, settings]);
 
   /* ------------ metrics ------------ */
   // Per-element striping/count config: a strip may override the global standards
@@ -23051,19 +23061,60 @@ function dimSlideFor(el, allEls) {
  * none of it depends on the view. It was being recomputed, per element, on every frame of a
  * gesture that cannot change its answer.
  */
-function resolveElNeighbors(allEls) {
+function resolveElNeighbors(allEls, settings) {
   const out = new Map();
   const list = allEls || [];
+  const wantDock = !!(settings && (settings.showDocks || settings.showGrid));
   for (const el of list) {
+    const dogEars = list.filter((x) => x.attachedTo === el.id && x.dogEar);
     out.set(el.id, {
       // A bump-out (dog-ear) renders with its HOST building's resolved style — see the styleEl note below.
       styleEl: el.dogEar ? (list.find((h) => h.id === el.attachedTo && h.type === "building" && !h.points) || el) : el,
       curbEdges: curbEdgesOf(el, list),
-      dogEars: list.filter((x) => x.attachedTo === el.id && x.dogEar),
+      dogEars,
       dimSlide: dimSlideFor(el, list),
+      dockPlan: wantDock ? resolveDockPlan(el, settings, dogEars) : null,
     });
   }
   return out;
+}
+
+/* ---- The per-building DOCK PLAN (NEW-3) -----------------------------------------------------
+ *
+ * THE SAME MISTAKE B1352 FIXED FOR CURBS, IN THE PLACE B1352 DID NOT REACH.
+ *
+ * `renderElPx` recomputed ALL of this inside itself, per building, on every frame of every pan and
+ * zoom: the validated dock sides, the resolved grid settings, `computeBuildingGrid` (a bay-count
+ * SEARCH over the footprint), the footprint axes, and `dockDoorRun` per dock side (which runs the
+ * door-placement solver). Not one of them takes the view. `settings.showDocks` and
+ * `settings.showGrid` both DEFAULT TO TRUE, so on a default plan every building paid for the whole
+ * lot on every frame — and the count of buildings is exactly one of the axes that rises through a
+ * work session, which is what makes this an AMPLIFICATION cost rather than a fixed one.
+ *
+ * MEASURED (ui-audit/session-axes.mjs, the layers axis): turning the drawn layers on takes an
+ * identical pan-and-zoom gesture from 1,613 ms of main-thread work to 2,065 ms on the 62-element
+ * reference plan — the first rung of that ladder IS this code path.
+ *
+ * ⛔ BYTE-IDENTICAL BY CONSTRUCTION, which is the only reason this can ship against the B1345
+ * pixel bar without a pixel diff to argue about: same pure functions, same arguments, same
+ * outputs — moved from "once per frame per building" to "once per model-or-settings change per
+ * building". There is no approximation, no threshold and no new geometry here.
+ *
+ * ⚠ WHAT IS DELIBERATELY *NOT* CACHED: the `buildingChrome` path for a footprint under live
+ * reshape (`el.footEdit`) recomputes its grid from the LIVE `frameBBox` every frame ON PURPOSE, so
+ * the grid tracks the drag frame-by-frame. Do not "unify" that into this record.
+ */
+function resolveDockPlan(el, settings, dogEars) {
+  if (!el || el.type !== "building") return null;
+  const dock = el.dock || "cross";
+  const { dside, dockSides } = dockSidesFor(el);
+  const g = resolveGridSettings(el, settings);
+  const grid = computeBuildingGrid({ length: footprintLength(el), depth: footprintDepth(el), dock, grid: g });
+  const axes = footprintAxes(el);
+  const lenOffsets = grid.lengthLines.map((l) => l.at);
+  const runs = {};
+  for (const s of dockSides) runs[s] = dockDoorRun(el, s, dogEars, lenOffsets, g);
+  return { dock, dside, dockSides, g, grid, axes, runs };
 }
 /* element renderer working in PIXEL space (points pre-transformed by f2p).
    We draw the rect via the rotated group around the element's pixel center.
@@ -23402,12 +23453,14 @@ function renderElPx(el, f2p, isSel, tool, settings, startMoveEl, onElDouble, nb,
     // (a dock-less legacy building reads as cross-dock everywhere else). And read the dock
     // side from dockSidesFor — it VALIDATES el.dockSide against the current long axis, so an
     // axis-flipping resize can't desync the grid from footprintAxes below.
-    const dock = el.dock || "cross";
-    const { dside: side, dockSides } = dockSidesFor(el);
+    /* NEW-3 — the view-INDEPENDENT half of this block is resolved once per model/settings change
+     * (resolveDockPlan, via B1352's neighbour record) instead of once per frame per building. The
+     * inline fallback keeps this function total for any caller with no resolved record; it is the
+     * identical computation, so the two branches cannot draw different pictures. */
+    const dockPlanDogEars = nb ? nb.dogEars : [];
+    const plan = (nb && nb.dockPlan) || resolveDockPlan(el, settings, dockPlanDogEars);
+    const { dock, dside: side, dockSides, g, grid, axes: fax } = plan;
     const Dpx = Math.min(8, Math.min(el.w, el.h) * 0.25) * ppf; // dock-apron depth
-    const g = resolveGridSettings(el, settings);
-    const grid = computeBuildingGrid({ length: footprintLength(el), depth: footprintDepth(el), dock, grid: g });
-    const fax = footprintAxes(el);              // { depth:'w'|'h', length:'w'|'h' }
     const lengthHoriz = fax.length === "w";     // the length axis runs along x
     const depthVert = fax.depth === "h";        // the depth axis runs along y
     const depthMaxFt = depthVert ? el.h : el.w; // = D (ft)
@@ -23451,11 +23504,10 @@ function renderElPx(el, f2p, isSel, tool, settings, startMoveEl, onElDouble, nb,
     // the panel count exactly. The hardcoded 12′ spacing is now g.doorOC. (The apron rect
     // keeps the data-dock-apron hook added on main for the truck-court / measurement path.)
     if (settings.showDocks && dockSides.length) {
-      const dogEars = nb ? nb.dogEars : [];
-      const lenOffsets = grid.lengthLines.map((l) => l.at);
       const leaf = g.doorWidth * ppf;
       dockSides.forEach((s) => {
-        const { startF, endF, horiz, doors } = dockDoorRun(el, s, dogEars, lenOffsets, g);
+        // NEW-3 — the door run for this side, resolved with the dock plan above (see resolveDockPlan).
+        const { startF, endF, horiz, doors } = plan.runs[s] || dockDoorRun(el, s, dockPlanDogEars, grid.lengthLines.map((l) => l.at), g);
         if (!doors.length) return;
         if (horiz) {
           const by = s === "bottom" ? h - Dpx : 0;

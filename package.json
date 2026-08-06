@@ -18,7 +18,8 @@
     "perf:interaction": "xvfb-run -a --server-args=\"-screen 0 1600x1000x24\" node ui-audit/interaction-degradation.mjs",
     "check-mint": "node scripts/check-mint.mjs",
     "hooks:install": "node scripts/install-hooks.mjs",
-    "prepare": "node scripts/install-hooks.mjs"
+    "prepare": "node scripts/install-hooks.mjs",
+    "perf:session": "xvfb-run -a --server-args=\"-screen 0 1600x1000x24\" node ui-audit/session-axes.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.104.1",

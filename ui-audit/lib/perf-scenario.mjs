@@ -173,3 +173,41 @@ export function perfScenarioSeed(opts) {
     localStorage.setItem('planarfit:currentSite:v1', ${JSON.stringify(site.id)});
   } catch (e) {} })();`;
 }
+
+/* ---- A SECOND PLAN, for the plan-switch axis (NEW-2) ---------------------------------------
+ *
+ * The session-shaped probe has to answer "load plan A, load plan B, return to A — was A's
+ * geometry, listeners and memos ever released?", and that needs two plans in the store with
+ * DIFFERENT project ids, because the app switches projects by route (`#/project/<groupId>/site`).
+ *
+ * The companion is DERIVED from the same fixture by truncation rather than authored, for the same
+ * reason the primary is: a second hand-maintained plan would drift. Truncating also makes the
+ * switch OBSERVABLE — B holds a different element count from A, so "did the switch actually
+ * happen" is a counter the harness reads rather than a wait it hopes was long enough. A plan the
+ * probe cannot prove it opened is a rung that did not take (see lib/sessionAxes.mjs).
+ */
+export const SCENARIO_ID_B = "perf-reference-goose-creek-b";
+
+export function perfScenarioSiteB(fraction = 0.5) {
+  const base = perfScenarioSite();
+  const keep = Math.max(1, Math.round(base.els.length * fraction));
+  return {
+    ...base,
+    id: SCENARIO_ID_B,
+    groupId: SCENARIO_ID_B,
+    name: "Plan 2 (half) — perf reference B",
+    els: base.els.slice(0, keep),
+    measures: base.measures.slice(0, 4),
+    callouts: base.callouts.slice(0, 2),
+  };
+}
+
+/** Seed BOTH plans, opening on A. Same store keys, same shape — only the map has two entries. */
+export function perfScenarioSeedMulti(opts) {
+  const a = perfScenarioSite(opts);
+  const b = perfScenarioSiteB();
+  return `(() => { try {
+    localStorage.setItem('planarfit:sites:v1', JSON.stringify(${JSON.stringify({ [a.id]: a, [b.id]: b })}));
+    localStorage.setItem('planarfit:currentSite:v1', ${JSON.stringify(a.id)});
+  } catch (e) {} })();`;
+}
