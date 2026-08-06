@@ -136,32 +136,88 @@ describe("per-type click wiring (the pond regression, and the types the owner as
   });
 
   it("POND: the double-click (canvas AND map label) still reaches the inspector with B875's flash", () => {
-    expect(SP).toMatch(/if \(el\.type === "pond"\) revealPondInspector\(id\); else openInspector\(\);/);
+    expect(SP).toMatch(/if \(el\.type === "pond"\) revealPondInspector\(t\.id\); else openInspector\(\);/);
     /* The map label honours the same contract: double-tap reveals, a single press only selects.
        NEW-1 re-keyed it from a private `${id}:label` onto the pond's OWN id. `isDoubleTap` keeps
        ONE tap record, so a private key on chrome that sits over its own object is a POISON: press 1
        on the basin and press 2 on the overhanging label matched nothing either way AND wiped the
        record, so a third press had nothing to pair with. One key per feature is the rule now — the
        ACTION still branches on which surface took the press. */
-    expect(SP).toMatch(/if \(isDoubleTap\(e, d\.el\.id, wasSel\)\) \{ revealPondInspector\(d\.el\.id\); return; \}/);
+    expect(SP).toMatch(/if \(isDoubleTap\(e, d\.el\.id, wasSel\)\) \{ featureDoubleAction\(\{ kind: "el", id: d\.el\.id \}, e\); return; \}/);
     expect(SP, "a pond label must not go back to a private double-tap key").not.toMatch(/isDoubleTap\(e, `\$\{d\.el\.id\}:label`/);
     expect(SP).toMatch(/setSel\(\{ kind: "el", id: d\.el\.id \}\); *\/\/ single click: select only/);
   });
 
   it("PARCEL: single click selects; a double-click opens the Parcel panel", () => {
-    expect(SP).toMatch(/if \(isDoubleTap\(e, `parcel:\$\{id\}`, sel\?\.kind === "parcel" && sel\.id === id\)\) \{[\s\S]{0,240}openParcelPanel\(\);/);
+    expect(SP).toMatch(/if \(isDoubleTap\(e, `parcel:\$\{id\}`, sel\?\.kind === "parcel" && sel\.id === id\)\) \{[\s\S]{0,240}featureDoubleAction\(\{ kind: "parcel", id \}, e\);/);
     expect(SP).toMatch(/const openParcelPanel = \(\) => \{/);
+    expect(SP).toMatch(/t\.kind === "parcel"[\s\S]{0,400}openParcelPanel\(\);/);
   });
 
-  it("ELEMENT / MARKUP / MEASUREMENT / CALLOUT double-clicks all route through the ONE explicit open", () => {
-    // element (startMoveEl reconstructed double-tap) + the raw-dblclick fallbacks
-    expect(SP).toMatch(/const onElDouble = \(e, id\) => \{[\s\S]*?openInspector\(\);/);
-    expect(SP).toMatch(/const onMarkupDouble = \(e, id\) => \{[\s\S]*?openInspector\(\);/);
-    // markup + measurement double-taps
-    expect(SP).toMatch(/isDoubleTap\(e, id, sel\?\.kind === "markup" && sel\.id === id\)\) \{[\s\S]{0,120}openInspector\(\)/);
-    expect(SP).toMatch(/isDoubleTap\(e, m\.id, sel\?\.kind === "measure" && sel\.i === idx\)\) \{[\s\S]{0,200}openInspector\(\)/);
+  /* ⛔ NEW-2 — THE CONTRACT HAS ONE IMPLEMENTATION NOW, AND THAT IS THE POINT OF THIS CASE.
+   *
+   * The gesture reaches the app by two independent routes — the double-tap reconstructed from two
+   * pointerdowns (pointer capture suppresses the native dblclick) and the browser's own `dblclick`,
+   * which retargets to the canvas root — and each route used to carry its OWN copy of "what a
+   * double-click does". Two copies drift silently: `onElDouble` opened Properties for a LOCKED
+   * element while `startMoveEl` refused to, and nothing could notice, because the native route was
+   * unreachable. So the guard no longer checks for `openInspector()` at each call site (which is
+   * what permitted the drift); it checks that every site DELEGATES, and that the one delegate holds
+   * one decision per family. */
+  it("ELEMENT / MARKUP / MEASUREMENT / CALLOUT double-clicks all route through the ONE shared action", () => {
+    const act = SP.slice(SP.indexOf("const featureDoubleAction = (t, e) => {"));
+    expect(act.length, "featureDoubleAction is gone — the contract has no implementation").toBeGreaterThan(0);
+
+    // Every double-click ROUTE delegates: the two reconstructed element paths, the markup path, both
+    // measurement surfaces, the parcel path, and the two raw-dispatch natives.
+    for (const re of [
+      /const onElDouble = \(e, id\) => \{[\s\S]{0,120}featureDoubleAction\(\{ kind: "el", id \}, e\)/,
+      /const onMarkupDouble = \(e, id\) => \{[\s\S]{0,120}featureDoubleAction\(\{ kind: "markup", id \}, e\)/,
+      /isDoubleTap\(e, id, sel\?\.kind === "markup" && sel\.id === id\)\) \{[\s\S]{0,160}featureDoubleAction\(\{ kind: "markup", id \}, e\)/,
+      /isDoubleTap\(e, m\.id, sel\?\.kind === "measure" && sel\.i === idx\)\) \{[\s\S]{0,200}featureDoubleAction\(\{ kind: "measure", i: idx \}, e\)/,
+      /isDoubleTap\(e, m\.id, sel\?\.kind === "measure" && sel\.i === i\)\) \{[\s\S]{0,200}featureDoubleAction\(\{ kind: "measure", i \}, e\)/,
+    ]) expect(SP, `a double-click route stopped delegating to featureDoubleAction: ${re}`).toMatch(re);
+
+    // …and the delegate makes one decision per family.
+    expect(act).toMatch(/if \(el\.groupId\) \{ setMulti\(\[\]\); setDrillId\(t\.id\); setSel\(\{ kind: "el", id: t\.id \}\); return true; \}/); // B261 drill-in
+    expect(act, "the locked carve-out must be a decision, not an accident").toMatch(/if \(el\.locked\) return true;/);
+    expect(act).toMatch(/if \(m\.locked\) return true;/);
+    expect(act).toMatch(/calloutDblAction\(e, t\.id\)/);
+    expect(act).toMatch(/setSel\(\{ kind: "measure", i: t\.i \}\)[\s\S]{0,80}openInspector\(\);/);
+
     // callout: interior edits text, border opens the inspector (B948 preserved)
     expect(SP).toMatch(/if \(zone === "interior"\) beginEditCallout\(id\);\s*\n\s*else openInspector\(\);/);
+  });
+
+  /* ⛔ NEW-2 — THE NATIVE `dblclick` NEVER REACHES THE FEATURE'S OWN NODE, so the contract is
+   * resolved at the canvas ROOT by hit-testing the point. Measured on the owner's machine: press 1
+   * selects, React re-renders the feature, and press 2's click/dblclick collapse to the bare `<svg>`
+   * because a click's target is the common ancestor of its down and up targets. This pins the root
+   * handler and the render-side identity it depends on; the LIVE half (which asserts the dblclick's
+   * own TARGET really is the svg) is e2e/dblclick-properties.spec.js. */
+  it("the double-click is resolved at the canvas ROOT, off the live hit stack", () => {
+    expect(SP).toMatch(/const onBgDouble = \(e\) => \{[\s\S]{0,400}featureDoubleAction\(resolveDoubleClickTarget\(hitStackAt\(e\.clientX, e\.clientY\)\), e\);/);
+    expect(SP, "a double-click mid-draw must still finish the shape, exactly like Enter").toMatch(/const onBgDouble = \(e\) => \{\s*\n\s*if \(finishActiveDrawing\(\)\) return;/);
+    expect(SP, "the root resolver must use the browser's own hit-test, never a second geometric one").toMatch(/document\.elementsFromPoint\(x, y\)/);
+    // Every family the resolver can name must actually be stamped on the render, or a double-click
+    // there resolves to nothing at all.
+    for (const [kind, stamp] of [
+      ["el", /data-feature=\{`el:\$\{el\.id\}`\}/],
+      ["markup", /data-feature=\{`markup:\$\{m\.id\}`\}/],
+      ["callout", /data-feature=\{`callout:\$\{c\.id\}`\}/],
+      ["parcel", /data-feature=\{`parcel:\$\{pc\.id\}`\}/],
+      ["measure", /"data-feature": `measure:\$\{i\}`/],
+    ]) expect(SP, `${kind} carries no data-feature stamp — the root dblclick cannot resolve it`).toMatch(stamp);
+  });
+
+  /* ⛔ NEW-3 — A DIMENSION NUMBER THAT SITS ON ITS OWN BODY MUST NOT SWALLOW THE GESTURE. A
+   * centerline road's width number is anchored to the centreline midpoint, so a double-click aimed
+   * at the road could not miss it and the inline width chip opened instead of Properties. Fixed once
+   * in the SHARED dispatch, not special-cased for road. */
+  it("a dimension number over its element's body forwards the double-click to the body", () => {
+    expect(SP).toMatch(/if \(pressIsOverElementBody\(hitStackAt\(e\.clientX, e\.clientY, elementStackEntries\), id\)\) featureDoubleAction\(\{ kind: "el", id \}, e\);\s*\n\s*else editElDim\(el, e\);/);
+    expect(SP, "the dimension chrome must be markable, or the body test cannot look past it").toMatch(/<g key="dim" data-el-dim="1"/);
+    expect(SP, "road must not be special-cased in the dispatch").not.toMatch(/el\.type === "road"[^\n]{0,80}editElDim/);
   });
 });
 

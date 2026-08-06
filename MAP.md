@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-08-06 @ `2145dc1` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-08-06 @ `fee9a01` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_432 source files mapped._
+_434 source files mapped._
 
 ## infra
 
@@ -435,6 +435,8 @@ _432 source files mapped._
   - _exports_: `ALONG_ANCHOR`, `alongAnchorFromDrag`, `alongLenIsChainEcho`, `alongOffsetFor`, `anchoredAlongSpan`, `boxExtentAlong`, `catalogDepthDefault`, `DOCK_ZONES`, `dockSidesFor`, `footprintAxes`, `footprintDepth`, `footprintLength`, `layoutStack`, `layoutZone`, `layoutZoneByKind`, `MAX_DOCK_ZONES`, `normalizeAlongAnchor`, `pruneStrandedZones`, `resizedAlongLen`, `resizedZoneAlongFit`, `resizedZoneAlongLen`, `strandedZoneIds`, `usableCourtSpan`, `ZONE_CATALOG`, `zoneAlongExtent`, `zoneAlongPlacement`, `zoneAlongSpan`, `zoneDepthDefault`, `zoneDepthDefaults`, `zoneDepthExtent`
 - **`src/workspaces/site-planner/lib/dogEar.js`** — Corner bump-out geometry (flush corner placement + resize round-trip) AND the wall-hugging-child placement rule: the sidewalk span over the extended side, plus the always-flush perpendicular offset every wall strip / side-parking row is derived from
   - _exports_: `bumpSidewalkSide`, `bumpsOfHost`, `DOGEAR_D`, `DOGEAR_W`, `dogEarDesc`, `dogEarGeom`, `dogEarSize`, `hostAxisExtents`, `isDogEarSide`, `localToWorld`, `ownExtents`, `SIDE_PARK_PIN_TOL_FT`, `sideOfBondedBox`, `sideParkAlongRun`, `sideParkStack`, `sidewalkSpanForBumps`, `wallKidAlong`, `wallKidBox`, `wallKidPerp`, `wallStripBox`
+- **`src/workspaces/site-planner/lib/doubleTap.js`** — the reconstructed double-click gesture, budgeted on the EVENT's own clock (never a wall clock read inside the handler)
+  - _exports_: `DBLTAP_MS`, `DBLTAP_PX`, `EMPTY_TAP`, `pairsWithLastTap`, `stepDoubleTap`, `tapRecord`, `tapTime`
 - **`src/workspaces/site-planner/lib/drafts.js`** — Pure resolver for Bluebeam-style mid-draw undo: decides which in-progress multi-point draft to trim by one vertex (Backspace + Ctrl-Z), and returns null when no draft is active so Ctrl-Z falls through to a global undo
   - _exports_: `resolveDraftStepBack`
 - **`src/workspaces/site-planner/lib/drawdownStatute.js`** — NEW-7 C.R.S. 37-92-602(8) as a rule record — 97% of a 5-year storm out in 72 hr, 99% of larger events in 120 hr — turning the existing drawdown number into a Colorado water-rights verdict (fail / not-ruled-out / unknown, never 'pass') plus the post-2015 State Engineer notification. Texas is untouched
@@ -489,6 +491,8 @@ _432 source files mapped._
   - _exports_: `cleanAttr`, `HOVER_CLEANERS`, `HOVER_MAX_CHARS`, `hoverDetails`, `hoverIdentifyEnabled`, `hoverText`, `hoverTitle`, `pickAttr`, `sourceTag`, `titleCaseAgency`
 - **`src/workspaces/site-planner/lib/featureHoverAttach.js`** — lazily-loaded attach layer for the vector overlays' hover identify: binds the sticky tooltip on an esri featureLayer and installs the planner-canvas `identifyAt` accessor, kept off the boot bundle to pay the bundle budget.
   - _exports_: `attachFeatureCanvasIdentify`, `wireFeatureHover`
+- **`src/workspaces/site-planner/lib/featureTarget.js`** — which feature a canvas double-click is about, resolved at the SVG root off the live hit stack (plus the dimension-number-over-body test)
+  - _exports_: `EL_DIM_ATTR`, `elementStackEntries`, `FEATURE_ATTR`, `FEATURE_KINDS`, `HANDLE_ATTR`, `parseFeatureKey`, `pressIsOverElementBody`, `resolveDoubleClickTarget`, `stackEntries`
 - **`src/workspaces/site-planner/lib/ffeBalance.js`** — grading milestone (DECISION 3): the balance-optimal finished-floor solver (`solveBalanceFfe` floats the pad UP off the regulatory code minimum to reuse basin spoil as fill, never below it) + the dual FFE readout (`ffeDualDisplay`, "FFE X (code floor Y + Z for balance)"). The net earthwork residual is reported in CY (owner preference), not truckloads. Pure, Node-tested.
   - _exports_: `ffeDualDisplay`, `solveBalanceFfe`
 - **`src/workspaces/site-planner/lib/floodAdministrator.js`** — NEW-8 governing floodplain administrator: candidate resolution from county/city/ETJ/edge signals, deliberate strictest-wins selection with an ambiguity flag, and the BFE back-solved from an assumed FFE
