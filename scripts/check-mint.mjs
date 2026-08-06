@@ -49,6 +49,7 @@ import {
   B_FILES, V_FILES, PEER_NS, DEFAULT_MAX_FETCH_AGE_S, DEFAULT_PEER_DAYS,
   headingIdsIn, readRefFile, maxOnRef, assessFreshness, originMainSha, lastFetchAgeSeconds,
   fetchPeers, peerRefRows, selectPeerRefs, peerClaims, tryGit, selfBranchNames, dropContainedRefs,
+  reservedBlock,
 } from "./next-id.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -56,24 +57,39 @@ const REPO = resolve(HERE, "..");
 
 /**
  * PURE verdict. `added` = ids this branch introduces; `claimedMax` = the highest id anyone else
- * holds (main ∪ peers); `peerIds` maps an id to the branch already holding it.
+ * holds (main ∪ peers); `peerOwners` maps an id to the branch already holding it.
  *
- * Two distinct failures, because they read differently to a human:
- *   - TAKEN: the exact id is already on main or on a peer branch → a guaranteed collision.
- *   - BELOW: the id is free today but sits at or under the claimed high-water mark → it was minted
- *     against a stale view, so the next merge will very likely take it. This is the early-mint
- *     case, and catching it is the whole point of the gate.
- * Gaps are explicitly legal (B1140 established they cost nothing), so the test is `> claimedMax`,
- * never `=== claimedMax + 1`.
+ * ⛔ ONE HARD FAILURE, AND IT IS THE ONLY ONE THAT IS A COLLISION (B36051, owner decision
+ * 2026-08-06). **A number is TAKEN only if `main` has it.** Everything else is a warning:
+ *
+ *   - TAKEN on origin/main → HARD FAIL. Two headings with one number, guaranteed, the moment this
+ *     merges. This case is correct, it is the reason the gate exists, and it is unchanged.
+ *   - held by an UNMERGED PEER BRANCH → WARN. That branch may be renumbered, rebased or abandoned;
+ *     it has not taken anything yet. Worth saying out loud, never worth failing a build over.
+ *   - BELOW the claimed high-water mark → WARN. This was the old hard failure and it was WRONG —
+ *     not merely inconvenient. It is a *guess* that the id was minted against a stale view, and the
+ *     id it rejects is demonstrably free. Under N-way contention that guess has no convergent
+ *     strategy: every rejected session re-mints to `mark + 1`, raising the mark, rejecting the next
+ *     session. Measured 2026-08-06 with seven PRs open, the mark went B3,010 → B200,119 in an hour,
+ *     main did not move once in ninety minutes, and the ratchet produced the very defect it exists
+ *     to prevent — two branches independently landing on B100002. A gate that fails a provably
+ *     unique id trades a false positive for a repo-wide deadlock.
+ *   - OFF-BLOCK (outside this branch's reserved range) → WARN. Advisory only; the blocks in
+ *     `next-id.mjs` are what stop the race, and a legacy or hand-picked id is not a defect.
+ *
+ * Gaps are explicitly legal (B1140 established they cost nothing).
  */
-export function mintVerdict({ letter, added, claimedMax, peerOwners = new Map(), mainIds = new Set() }) {
-  const offenders = [];
+export function mintVerdict({ letter, added, claimedMax, peerOwners = new Map(), mainIds = new Set(), reservation = null }) {
+  const offenders = [], warnings = [];
   for (const n of [...added].sort((a, b) => a - b)) {
-    if (mainIds.has(n)) offenders.push({ id: `${letter}${n}`, kind: "taken", where: "origin/main" });
-    else if (peerOwners.has(n)) offenders.push({ id: `${letter}${n}`, kind: "taken", where: peerOwners.get(n) });
-    else if (n <= claimedMax) offenders.push({ id: `${letter}${n}`, kind: "below", where: `the claimed high-water mark ${letter}${claimedMax}` });
+    const id = `${letter}${n}`;
+    if (mainIds.has(n)) { offenders.push({ id, kind: "taken", where: "origin/main" }); continue; }
+    if (peerOwners.has(n)) { warnings.push({ id, kind: "peer-taken", where: peerOwners.get(n) }); continue; }
+    if (n <= claimedMax) { warnings.push({ id, kind: "below", where: `the claimed high-water mark ${letter}${claimedMax}` }); continue; }
+    if (reservation && (n < reservation.start || n > reservation.end))
+      warnings.push({ id, kind: "off-block", where: `this branch's reserved block ${letter}${reservation.start}–${letter}${reservation.end}` });
   }
-  return { ok: offenders.length === 0, letter, offenders, claimedMax, nextFree: claimedMax + 1 };
+  return { ok: offenders.length === 0, letter, offenders, warnings, claimedMax, nextFree: claimedMax + 1, reservation };
 }
 
 /* ---- the ANNOUNCEMENT check (NEW-H, 2026-07-30) -----------------------------------------
@@ -201,8 +217,14 @@ export function runGate(repo = REPO, { peerDays = DEFAULT_PEER_DAYS, maxAgeSecon
     }
 
     const added = [...localIds(repo, files, letter)].filter((n) => !priorIds.has(n));
+    // This branch's reserved block, computed off MAIN's max alone so no peer push can move it.
+    const peerNames = refs.map((r) => r.name.split("/").slice(1).join("/"));
+    const reservation = reservedBlock(branch, peerNames, mainMax.max);
     families.push({
-      ...mintVerdict({ letter, added, claimedMax: Math.max(mainMax.max, claims.max), peerOwners: owners, mainIds: onMain.ids }),
+      ...mintVerdict({
+        letter, added, claimedMax: Math.max(mainMax.max, claims.max),
+        peerOwners: owners, mainIds: onMain.ids, reservation,
+      }),
       added, mainMax: mainMax.max, peerMax: claims.max, peersScanned: refs.length,
     });
   }
@@ -225,6 +247,25 @@ export function runGate(repo = REPO, { peerDays = DEFAULT_PEER_DAYS, maxAgeSecon
   }
 
   return { ok: families.every((f) => f.ok) && announce.ok, families, announce, branch, sha: fresh.sha, peersScanned: refs.length, baseRef };
+}
+
+/* Advisory output. These NEVER change the exit code — that is the whole point of B36051. They are
+ * printed on a green run precisely because a warning nobody sees is the same as no warning. */
+function writeWarnings(res) {
+  const all = (res.families || []).flatMap((f) => (f.warnings || []).map((w) => ({ ...w, letter: f.letter })));
+  if (!all.length) return;
+  const lines = ["\nℹ Mint gate notes (advisory — these do NOT fail the build):\n"];
+  for (const w of all) {
+    if (w.kind === "peer-taken")
+      lines.push(`   ${w.id} is also held by ${w.where} (unmerged). Not a collision — whoever merges` +
+        ` second renumbers, and only main can actually take a number.\n`);
+    else if (w.kind === "below")
+      lines.push(`   ${w.id} sits at or below ${w.where}. Free on main, so it ships. (Failing this` +
+        ` was the B36051 ratchet: every rejected session re-minted higher and nobody converged.)\n`);
+    else if (w.kind === "off-block")
+      lines.push(`   ${w.id} is outside ${w.where} — fine, but new ids mint from the block by default.\n`);
+  }
+  process.stdout.write(lines.join(""));
 }
 
 // ---- CLI -------------------------------------------------------------------------------
@@ -256,10 +297,11 @@ function main(argv) {
     if (!json) {
       const added = res.families.flatMap((f) => f.added.map((n) => `${f.letter}${n}`));
       process.stdout.write(
-        `✅ Mint gate: ${added.length ? added.join(", ") + " " + (added.length > 1 ? "are" : "is") : "no new ids —"} unclaimed on origin/main ` +
-          `(${res.sha.slice(0, 7)}) and on ${res.peersScanned} in-flight branches.\n` +
+        `✅ Mint gate: ${added.length ? added.join(", ") + " " + (added.length > 1 ? "are" : "is") : "no new ids —"} not taken on origin/main ` +
+          `(${res.sha.slice(0, 7)}); ${res.peersScanned} in-flight branches consulted.\n` +
           (res.baseRef ? "" : "⚠ merge base unavailable — checked against main's tip only, which cannot see a number main took while this branch was in flight.\n"),
       );
+      writeWarnings(res);
     }
     return 0;
   }
@@ -282,21 +324,23 @@ function main(argv) {
     if (res.families.every((f) => f.ok)) return 1;
   }
 
-  const lines = [`\n⛔ MINT GATE FAILED — this branch claims backlog ids someone else already holds (B779).\n`];
+  const lines = [`\n⛔ MINT GATE FAILED — this branch files a backlog id that origin/main ALREADY HAS (B779).\n`];
   for (const f of res.families) {
     if (f.ok) continue;
-    for (const o of f.offenders) {
-      lines.push(o.kind === "taken"
-        ? `   ${o.id} is ALREADY TAKEN on ${o.where}.\n`
-        : `   ${o.id} is at or below ${o.where} — minted against a stale view; the next merge will take it.\n`);
-    }
-    lines.push(`   → renumber this branch's new ${f.letter}# ids starting at ${f.letter}${f.nextFree} ` +
-      `(gaps are free — leaving one is cheaper than a second renumber pass).\n`);
+    for (const o of f.offenders) lines.push(`   ${o.id} is ALREADY TAKEN on ${o.where}.\n`);
+    const b = f.reservation;
+    lines.push(b
+      ? `   → renumber this branch's new ${f.letter}# ids into its reserved block: ` +
+        `${f.letter}${b.start}–${f.letter}${b.end}.\n`
+      : `   → renumber this branch's new ${f.letter}# ids starting at ${f.letter}${f.nextFree} ` +
+        `(gaps are free — leaving one is cheaper than a second renumber pass).\n`);
   }
-  lines.push(`\n   Only the BACKLOG/VERIFICATION heading lines carry the real number — code, tests and\n` +
+  lines.push(`\n   This is a REAL collision: two headings would carry one number the moment this merges.\n` +
+    `   Only the BACKLOG/VERIFICATION heading lines carry the real number — code, tests and\n` +
     `   commits keep the provisional NEW-# label, so this is a few-line text edit, not a rebuild.\n` +
     `   Re-mint with: git fetch origin main && npm run next-id -- --against-main\n\n`);
   process.stderr.write(lines.join(""));
+  writeWarnings(res);
   return 1;
 }
 

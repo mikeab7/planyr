@@ -30,6 +30,24 @@ the always-loaded core. This merges two tracks of work: the mature **Site Planne
 > from `nextB` (e.g. B755, B756). (This finds the *number*; **DEDUPE-FIRST** below still governs
 > *whether* to mint at all — a recurrence re-opens the original B#, it doesn't take a new one.)
 >
+> **📦 THE NUMBER COMES FROM YOUR BRANCH'S RESERVED BLOCK, NOT FROM "HIGHEST + 1" (B36051, 2026-08-06).**
+> `next-id` now prints the block your branch owns — e.g. `reserved block for "claude/my-branch" →
+> B36050–B36074` — and hands out the lowest free id in it. The block is a function of **main's max
+> alone** plus a hash of your **branch name**, so *another session pushing ids can never move yours,
+> and there is nothing to leapfrog.* **⛔ Do NOT "step over" a peer's number, and do NOT take a cushion
+> above the mark — that is exactly the behaviour that broke this.** Measured with seven PRs open: every
+> rejected session re-minted to `mark + 1`, which raised the mark, which rejected the next session;
+> the claimed mark went **B3,010 → B200,119 in about an hour**, `main` did not move once in ninety
+> minutes, and the ratchet produced the very thing it exists to prevent — **two branches independently
+> landing on B100002.** If your id is inside your block and free on `main`, it ships; the mark is
+> reported as context and is no longer something to clear.
+>
+> **⚖ AND THE GATE NOW FAILS ON ONE THING ONLY: `main` ALREADY HAS THE NUMBER.** That is the sole real
+> collision — two headings, one number, guaranteed on merge — and it is unchanged. *"A peer branch holds
+> it"* and *"it sits below the claimed mark"* are **advisory notes printed on a green run**, because an
+> unmerged branch has taken nothing and whoever merges second renumbers. A gate that fails a provably
+> unique id trades a false positive for a repo-wide deadlock.
+>
 > **⏱ LATE-BIND the real number — assign it as the LAST step before you push, against fresh main (B779).**
 > `next-id` reads only YOUR branch, so if you stamp a real `B###`/`V###` at the *start* of a session, a
 > concurrent session (branched from the same main, its mint not merged yet) can honestly grab the same

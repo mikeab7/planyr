@@ -1,4 +1,4 @@
-/* NotesTree — the left rail: PAGES THAT HOLD PAGES, plus search, Recent and the Bin.
+/* NotesTree — the left rail: PAGES THAT HOLD PAGES, plus search and the Bin.
  *
  * ⛔ TWO CONCEPTS, NOT FOUR (B1420). A project, and pages that can hold subpages. There is no
  * notebook row and no section row — "Entitlements" is a page that has pages under it, drawn
@@ -24,8 +24,9 @@
  *
  * ⛔ THE RAIL SHOWS NAMES. ACTIONS ARE ON A RIGHT-CLICK MENU (B1367). A row renders its name
  * and nothing else — no hover controls, and (B1420) **no timestamp column either**: the time
- * was on every page row permanently while Recent already exists and is where recency is the
- * point. It survives as the row's hover title, which costs the default view nothing.
+ * was on every page row permanently and the owner read straight past it. It survives as the
+ * row's hover title, which costs the default view nothing. (B36050 then removed the Recent
+ * view as well — see the VIEWS note for why the hover is deliberately the whole of it now.)
  *
  * ⛔ AND THE KEYBOARD DOES NOT DESTROY WHAT THE MOUSE IS MERELY OVER (B1366). A row's key
  * handler answers Enter/Space (select), Left/Right (collapse/expand) and the context-menu
@@ -46,10 +47,10 @@
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  ancestorIds, boundProjectIds, findPage, pagesInScope, projectGroups, recentPages, subtreePageIds, trashEntries,
+  ancestorIds, boundProjectIds, findPage, pagesInScope, projectGroups, subtreePageIds, trashEntries,
   NO_PROJECT_LABEL, SCOPE_ALL, SCOPE_PROJECT,
 } from "../lib/notesModel.js";
-import { absoluteStamp, daysLeft, relativeTime } from "../lib/notesTime.js";
+import { absoluteStamp, daysLeft } from "../lib/notesTime.js";
 
 const RADIUS = { control: 8, pill: 999 }; // mirrored from shared/ui/controls.jsx — see NoteToolbar
 const INDENT = 13;
@@ -63,10 +64,23 @@ const rowBase = {
 
 /* "Notebooks" stopped being true the moment the notebook stopped existing (B1420), and the
  * Bin's permanent count went with it — advertising how many deleted things you have is noise,
- * not information. The count lives INSIDE the Bin view, where it is the point. */
+ * not information. The count lives INSIDE the Bin view, where it is the point.
+ *
+ * ⛔ AND **RECENT** IS GONE (B36050). Owner, verbatim: *"I don't think I need a recent
+ * option."* Two segments, not three.
+ *
+ * ⛔ THE CONSEQUENCE, DECIDED RATHER THAN DISCOVERED. B1420 took the timestamp off every page
+ * row and named Recent as its home. With Recent gone the only recency signal left is the
+ * row's hover title — and that is the RIGHT amount, deliberately: the owner has now removed
+ * BOTH surfaces that showed dates, which is a clear statement that a date on a note is not
+ * something he navigates by. Putting the column back to compensate would be answering a
+ * removal with the thing that was removed before it. **The data is NOT orphaned:**
+ * `createdAt` / `updatedAt` stay on every page node, `touchPage` still stamps them, they
+ * still ride the cloud sync, `recentPages` is still exported and unit-tested, and the hover
+ * still reads them. Nothing has to be migrated to bring a Recent view back if he ever wants
+ * one — it is a component, not a schema. */
 const VIEWS = [
   { id: "tree", label: "Pages" },
-  { id: "recent", label: "Recent" },
   { id: "bin", label: "Bin" },
 ];
 
@@ -391,8 +405,8 @@ function TreeRow({
       aria-selected={!!selected}
       aria-expanded={hasChildren ? !!expanded : undefined}
       aria-level={depth + 1}
-      /* The time a page was last edited is a HOVER, not a column (B1420). Recent is where
-         recency is the point; on every row, permanently, it was noise the owner read past. */
+      /* The time a page was last edited is a HOVER, not a column (B1420/B36050) — on every
+         row, permanently, it was noise the owner read straight past. */
       title={when ? `${title} — edited ${when}` : title}
       draggable={!editing}
       onDragStart={onDragStart}
@@ -512,39 +526,6 @@ function SearchResults({ results, onSelectHit, query }) {
           ) : null}
           {r.excerpt ? (
             <span style={{ fontSize: 11.5, color: "var(--text-secondary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.excerpt}</span>
-          ) : null}
-        </button>
-      ))}
-    </div>
-  );
-}
-
-function RecentList({ pages, activePageId, onSelectPage }) {
-  if (!pages.length) {
-    return <p style={{ margin: "8px 10px", fontSize: 12, color: "var(--text-tertiary)" }}>Nothing edited yet.</p>;
-  }
-  return (
-    <div data-testid="notes-recent-list" style={{ padding: "2px 6px 10px" }}>
-      {pages.map((p) => (
-        <button
-          key={p.pageId}
-          type="button"
-          data-testid={`notes-recent-${p.pageId}`}
-          onMouseDown={(e) => e.preventDefault()}
-          onClick={() => onSelectPage(p.pageId)}
-          style={{
-            ...rowBase, flexDirection: "column", alignItems: "stretch", gap: 1, padding: "6px 8px",
-            background: p.pageId === activePageId ? "var(--accent-notes)" : "transparent",
-            color: p.pageId === activePageId ? "var(--on-accent-notes)" : "var(--text-primary)",
-          }}
-        >
-          <span style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
-            <span style={{ flex: 1, minWidth: 0, fontWeight: 650, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.pageTitle}</span>
-            {/* Recency IS the point of this view, so here the time is a column, not a hover. */}
-            <span style={{ flex: "0 0 auto", fontSize: 10.5, fontWeight: 600, opacity: 0.8 }}>{relativeTime(p.updatedAt)}</span>
-          </span>
-          {(p.trail || []).length ? (
-            <span style={{ fontSize: 11, opacity: 0.75, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{(p.trail || []).join(" › ")}</span>
           ) : null}
         </button>
       ))}
@@ -679,10 +660,6 @@ export default function NotesTree({
     return out;
   }, [projects, tree]);
   const bin = useMemo(() => trashEntries(tree), [tree]);
-  const recent = useMemo(
-    () => (view === "recent" ? recentPages(tree, { projectId }) : []),
-    [view, tree, projectId],
-  );
 
   /* OPEN THE PATH TO THE PAGE YOU ARE ON, and leave the rest shut. It only ever ADDS: a
    * branch the user opened by hand stays open, because a rail that closes what you just
@@ -908,8 +885,6 @@ export default function NotesTree({
       <div role="tree" aria-label="Notes" style={{ flex: 1, minHeight: 0, overflow: "auto", padding: "6px 6px 14px" }}>
         {query ? (
           <SearchResults results={results} query={query} onSelectHit={onSelectHit} />
-        ) : view === "recent" ? (
-          <RecentList pages={recent} activePageId={activePageId} onSelectPage={onSelectPage} />
         ) : view === "bin" ? (
           <BinList entries={bin} onRestore={onRestore} onPurge={onPurge} onPurgeAll={onPurgeAll} />
         ) : roots.length === 0 ? (

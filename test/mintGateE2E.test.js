@@ -122,6 +122,8 @@ function cli(repo, ...flags) {
 }
 
 const offendersOf = (res, letter) => res.families.find((f) => f.letter === letter).offenders;
+/** HARD failures vs ADVISORY notes are now different lists (B36051) — assert against the right one. */
+const warningsOf = (res, letter) => res.families.find((f) => f.letter === letter).warnings || [];
 
 /* ------------------------------------------------------------------------------------------ */
 
@@ -138,46 +140,55 @@ describe("the mint gate BLOCKS a real push (the path that had never once fired)"
     expect(code).toBe(1);
     expect(err).toMatch(/MINT GATE FAILED/);
     expect(err).toMatch(/B102 is ALREADY TAKEN on origin\/main/);
-    // The id to move to clears BOTH main (B102) and the unmerged peer (B103) — the advice is only
-    // useful if it steps over the branch the pusher cannot see.
-    expect(err).toMatch(/renumber this branch's new B# ids starting at B104/);
+    // The advice now points at THIS BRANCH'S RESERVED BLOCK rather than a shared "next" number
+    // (B36051). That is the fix, not a cosmetic change: "start at max+1" is the instruction that
+    // ratcheted the mark B3,010 → B200,119 in an hour, because every rejected session followed it.
+    // A block is derived from main's max alone, so following this advice cannot move anyone else.
+    expect(err).toMatch(/renumber this branch's new B# ids into its reserved block: B\d+–B\d+/);
+    expect(err).toMatch(/This is a REAL collision/);
   });
 
-  it("(b) REJECTS an id held only by an UNMERGED PEER branch — the window B779 could not see at all", () => {
-    // B103 / V53 exist nowhere on main. They are sitting on another session's pushed branch, which
-    // is precisely the case the first pass declared impossible and this fix newly covers.
+  /* ⛔ THE TWO CASES BELOW USED TO BE REJECTIONS AND ARE NOW WARNINGS (B36051, owner decision
+   * 2026-08-06). They are kept, inverted, rather than deleted — the point is not that the gate got
+   * quieter, it is that these two were never collisions, and failing them deadlocked the repo:
+   * seven PRs open, the claimed mark ratcheting B3,010 → B200,119 in an hour as each rejected
+   * session re-minted higher, main not moving once in ninety minutes, and two branches
+   * independently landing on B100002 — the very defect the rule exists to prevent. */
+  it("WARNS (never fails) on an id held only by an UNMERGED PEER branch — that branch has taken nothing yet", () => {
+    // B103 / V53 exist nowhere on main. They sit on another session's pushed branch, which may be
+    // renumbered, rebased or abandoned before it ever merges. Whoever merges SECOND renumbers.
     const repo = workBranch("collides-with-peer", { open: [99, 100, 103], done: [50], vOpen: [50, 53], vDone: [10] });
     const res = runGate(repo);
     expect(res.unverifiable, res.reason).toBeFalsy();
-    expect(res.ok).toBe(false);
+    expect(res.ok).toBe(true);
     expect(res.peersScanned).toBeGreaterThanOrEqual(1);
+    expect(offendersOf(res, "B")).toEqual([]); // nothing HARD
 
-    const b = offendersOf(res, "B")[0];
-    expect(b.id).toBe("B103");
-    expect(b.kind).toBe("taken");
-    expect(b.where).toMatch(/peer-session$/); // names the session we would have collided with
-    expect(offendersOf(res, "V")[0].id).toBe("V53"); // both families are checked, not just B
+    const b = warningsOf(res, "B").find((w) => w.id === "B103");
+    expect(b.kind).toBe("peer-taken");
+    expect(b.where).toMatch(/peer-session$/); // still NAMES the session, because it is worth knowing
+    expect(warningsOf(res, "V").some((w) => w.id === "V53")).toBe(true); // both families still checked
 
-    const { code, err } = cli(repo);
-    expect(code).toBe(1);
-    expect(err).toMatch(/B103 is ALREADY TAKEN on .*peer-session/);
+    const { code, out } = cli(repo);
+    expect(code).toBe(0);
+    expect(out).toMatch(/advisory — these do NOT fail the build/);
+    expect(out).toMatch(/B103 is also held by .*peer-session/);
   });
 
-  it("REJECTS an id that is free today but sits UNDER the claimed high-water mark", () => {
-    // B101 is free on main AND on every peer — nobody holds it. But main is at B102 and the peer
-    // at B103, so a branch handing out B101 computed it against a view that is already gone, and
-    // the next merge will take it. This reason code reads differently to a human than "taken",
-    // and it is the early-mint case the gate exists for, so it is pinned separately.
+  it("WARNS (never fails) on an id that is free today but sits UNDER the claimed high-water mark", () => {
+    // B101 is free on main AND on every peer — nobody holds it. The old gate failed it anyway, on a
+    // GUESS that it had been minted against a stale view. That guess is what had no convergent
+    // strategy under contention, and the id it rejected was demonstrably unique.
     const repo = workBranch("below-the-mark", { open: [99, 100, 101], done: [50], vOpen: [50], vDone: [10] });
     const res = runGate(repo);
-    expect(res.ok).toBe(false);
-    expect(offendersOf(res, "B")[0]).toMatchObject({ id: "B101", kind: "below" });
-    expect(offendersOf(res, "V")).toEqual([]); // the V family minted nothing — only B is flagged
+    expect(res.ok).toBe(true);
+    expect(offendersOf(res, "B")).toEqual([]);
+    expect(warningsOf(res, "B")[0]).toMatchObject({ id: "B101", kind: "below" });
 
-    const { code, err } = cli(repo);
-    expect(code).toBe(1);
-    expect(err).toMatch(/B101 is at or below the claimed high-water mark B103/);
-    expect(err).toMatch(/minted against a stale view/);
+    const { code, out } = cli(repo);
+    expect(code).toBe(0);
+    expect(out).toMatch(/B101 sits at or below the claimed high-water mark B103/);
+    expect(out).toMatch(/Free on main, so it ships/);
   });
 });
 
@@ -190,7 +201,7 @@ describe("the mint gate LETS THROUGH what it should (a gate that cries wolf gets
 
     const { code, out } = cli(repo);
     expect(code).toBe(0);
-    expect(out).toMatch(/✅ Mint gate: B104, V54 are unclaimed on origin\/main/);
+    expect(out).toMatch(/✅ Mint gate: B104, V54 are not taken on origin\/main/);
     expect(out).toMatch(/in-flight branches/);
   });
 

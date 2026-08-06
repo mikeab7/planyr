@@ -248,7 +248,26 @@ export function attachSketchEditor(handle) {
   editor.addEventListener("keydown", (e) => {
     e.stopPropagation();                        // the note's own Tab/Escape handling is not ours
     if (e.key === "Escape") { e.preventDefault(); closeEditor(true); focusBox(); return; }
-    if (e.key === "Enter" && e.target === labelField) { e.preventDefault(); closeEditor(true); focusBox(); }
+    if (e.key === "Enter" && e.target === labelField) { e.preventDefault(); closeEditor(true); focusBox(); return; }
+    /* ⛔ TAB HAS A DEFINED MEANING IN BOTH FIELDS (B1392 ×2). These two arrived long after
+     * B1392, and its rule — "Tab belongs to the document while the caret is in it" — could
+     * not reach them: the caret is in an <input>/<textarea> in a node view, and this handler
+     * stops propagation, so Tab was the browser's focus key and walked out of the note.
+     *   label  → the detail field of the same box
+     *   detail → close the box and hand the caret back to the sketch
+     * Shift+Tab reverses both. The escape hatch is unchanged: Escape closes the box, and the
+     * document's own Escape-then-Tab release still gets you out to the browser. */
+    if (e.key === "Tab") {
+      e.preventDefault();
+      if (e.target === labelField) {
+        if (e.shiftKey) { closeEditor(true); focusBox(); } else bodyField.focus();
+        return;
+      }
+      if (e.target === bodyField) {
+        if (e.shiftKey) labelField.focus();
+        else { closeEditor(true); focusBox(); }
+      }
+    }
   });
 
   const focusBox = () => {

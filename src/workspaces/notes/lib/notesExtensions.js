@@ -38,6 +38,8 @@ import { Placeholder } from "@tiptap/extensions";
 import NoteImage from "./notesImageNode.js";
 import NoteSketch from "./notesSketchNode.js";
 import NoteTabKey from "./notesTabKey.js";
+import NotePastePlain from "./notesPastePlain.js";
+import NoteBlockKeys from "./notesBlockKeys.js";
 import NoteSearchHighlight from "./notesSearchHighlight.js";
 
 /** Headings stop at 4. A note is a document, not a spec: levels 5–6 are indistinguishable
@@ -94,6 +96,16 @@ export const NOTE_EXTENSIONS = [
   // falling through to Chrome's toolbar.
   NoteTabKey,
 
+  // PASTE JUST THE TEXT (B36051). It WATCHES the paste rather than intercepting it — the
+  // default Ctrl+V is deliberately unchanged — so the "Keep text only" option can be offered
+  // afterwards, the way Word's is. See lib/notesPastePlain.js.
+  NotePastePlain,
+
+  // Backspace at the START of a block undoes a formatting difference before it restructures
+  // anything (B36051). Registered ABOVE the default keymap so it is asked before joinBackward
+  // — see lib/notesBlockKeys.js for the whole-chunk-moves report it closes.
+  NoteBlockKeys,
+
   Placeholder.configure({ placeholder: NOTE_PLACEHOLDER }),
 ];
 
@@ -103,10 +115,11 @@ export const NOTE_EXTENSIONS = [
  *
  *  `imageContext` is a FUNCTION on purpose: the notebook a picture is charged against gains
  *  and loses pages while the editor is open, so a value captured at mount goes stale. */
-export function noteExtensions({ imageContext = null, onSearchMatches = null } = {}) {
+export function noteExtensions({ imageContext = null, onSearchMatches = null, onPasted = null } = {}) {
   return NOTE_EXTENSIONS.map((ext) => {
     if (ext.name === "noteImage") return NoteImage.configure({ imageContext });
     if (ext.name === "noteSearchHighlight") return NoteSearchHighlight.configure({ onMatches: onSearchMatches });
+    if (ext.name === "notePastePlain") return NotePastePlain.configure({ onPasted });
     return ext;
   });
 }

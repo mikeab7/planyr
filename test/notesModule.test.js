@@ -49,6 +49,7 @@ const ALL_NOTES_FILES = [
   "lib/notesTime.js", "lib/notesPrint.js", "lib/notesImageDb.js", "lib/notesImageIntake.js",
   "lib/notesImageNode.js", "lib/notesSearchHighlight.js", "lib/notesDocHtml.js", "lib/notesTabKey.js",
   "lib/notesSketchModel.js", "lib/notesSketchRender.js", "lib/notesSketchNode.js", "lib/notesSketchEditor.js",
+  "lib/notesPastePlain.js", "lib/notesBlockKeys.js",
 ];
 const SKETCH_FILES = ALL_NOTES_FILES.filter((f) => f.includes("Sketch"));
 
@@ -783,28 +784,85 @@ describe("the project a notebook belongs to", () => {
     expect(rail).toMatch(/notes-projects-retry/);
   });
 
-  it("⛔ Click and Type lands the caret WHERE YOU CLICKED, and cleans up after itself (B1393 ×2)", () => {
-    /* The recurrence's real lesson: the old guards asserted focus and a keystroke, both of
-     * which were TRUE on the broken build. These assert the structure that makes the caret
-     * land in the right place, and the structure that stops stray clicks fattening the doc. */
+  it("⛔ A press in blank space places the caret and does NOTHING ELSE (B1393 ×3)", () => {
+    /* ⛔ REWRITTEN TWICE. B1393's guard asserted focus; B1393 ×2's asserted the padding
+     * machinery that reached the pressed height. The owner tested that shipped build and
+     * rejected it — the centring made the line crawl left as he typed, the alignment was
+     * inherited on Enter, and six empty paragraphs were permanent in his document. So these
+     * assert what must NOT be there. */
     const ed = code("components/NoteEditor.jsx");
-    // It must decide on the CONTENT's bottom edge, not the editor box's — `.ProseMirror`
-    // carries min-height, so most blank space is INSIDE it and the old guard never fired.
-    expect(ed, "the blank-space test must be against the last block, not the editor box")
-      .toMatch(/lastElementChild[\s\S]{0,200}contentBottom/);
-    expect(ed).toMatch(/const belowContent = /);
-    // Paragraphs are inserted to reach the press — the vertical placement itself.
-    expect(ed).toMatch(/insertContentAt\([\s\S]{0,80}content\)/);
-    expect(ed, "how many paragraphs comes from the measured gap, never a guess").toMatch(/gap \/ step/);
-    // Word's alignment-from-horizontal-position.
-    expect(ed).toMatch(/setTextAlign\(align\)/);
-    // …and the claim that keeps stray clicks from leaving orphans behind.
-    expect(ed).toMatch(/claimRef/);
-    expect(ed, "a claim must be released by typing, by moving the caret, and by blurring")
-      .toMatch(/editor\.on\("update"[\s\S]{0,400}editor\.on\("blur"/);
-    expect(ed).toMatch(/deleteRange\(\{ from: c\.from, to: c\.to \}\)/);
+    expect(ed, "Click and Type must not set alignment from where you pressed").not.toMatch(/setTextAlign/);
+    expect(ed, "and it must not pad the document to reach the press").not.toMatch(/MAX_CLICK_PARAGRAPHS|paragraphStep|gap \/ step/);
+    expect(ed, "the padding's clean-up bookkeeping went with the padding").not.toMatch(/claimRef|dropClaim/);
+    // It still has to decide on the CONTENT's bottom edge — `.ProseMirror` carries a
+    // min-height, so most blank space is INSIDE it and the naive guard never fires.
+    expect(ed).toMatch(/lastElementChild[\s\S]{0,200}contentBottom/);
+    // At most ONE new line, and only when the last block is not already empty.
+    expect(ed).toMatch(/lastIsEmptyParagraph/);
+    expect(ed).toMatch(/insertContentAt\(doc\.content\.size, \{ type: "paragraph" \}\)/);
     // …and a press ON text is still the browser's business, or word-select dies.
     expect(ed).toMatch(/if \(el\.closest\("\.ProseMirror"\)/);
+  });
+
+  it("⛔ TAB HAS A DEFINED ANSWER IN EVERY CONTEXT, and none of them destroys content (B1392 ×2)", () => {
+    const tab = code("lib/notesTabKey.js");
+    /* The destructive one: with a picture or a sketch SELECTED, `insertContent` replaced it.
+     * And the guard must be an `instanceof` — a `constructor.name` test is correct in dev and
+     * MEANINGLESS in the shipped bundle, because the minifier renames the class. */
+    expect(tab, "a node selection must be detected by instanceof, never by class name")
+      .toMatch(/selection instanceof NodeSelection/);
+    expect(tab).not.toMatch(/constructor\.name/);
+    expect(tab, "the last cell of a table grows the table instead of taking a tab character")
+      .toMatch(/addRowAfter\(\)/);
+    // The escape hatch is not optional and must survive every rewrite.
+    expect(tab).toMatch(/Escape: \(\) => \{ this\.storage\.released = true/);
+    // The two surfaces that are NOT the document, each with its own defined answer.
+    expect(code("components/NoteEditor.jsx"), "Tab out of the page title goes into the body")
+      .toMatch(/e\.key !== "Tab" \|\| e\.shiftKey[\s\S]{0,200}focus\("start"\)/);
+    expect(code("lib/notesSketchEditor.js"), "Tab has a defined meaning in a sketch box's fields")
+      .toMatch(/if \(e\.key === "Tab"\)/);
+  });
+
+  it("⛔ PASTE: three modes, the default untouched, and sanitisation in ALL of them (B36051)", () => {
+    const paste = code("lib/notesPastePlain.js");
+    // The default paste is watched, never intercepted — except the one list-nesting case.
+    expect(paste, "the ordinary paste must fall through to the default").toMatch(/return false;/);
+    expect(paste).toMatch(/export const PASTE_MODES = \["source", "merge", "text"\]/);
+    // Merge keeps MEANING and drops APPEARANCE — the distinction is data, not a comment.
+    expect(paste).toMatch(/export const STYLE_MARKS = \["textStyle", "highlight"\]/);
+    for (const meaning of ["bold", "italic", "underline", "link"]) {
+      expect(paste, `${meaning} is meaning, not appearance — it must NOT be stripped by merge`)
+        .not.toMatch(new RegExp(`STYLE_MARKS[\\s\\S]{0,80}"${meaning}"`));
+    }
+    // Structural sanitisation runs on the ORDINARY paste too (transformPasted), so it cannot
+    // get out of step with whichever mode is chosen afterwards.
+    expect(paste).toMatch(/transformPasted\(slice, view\)/);
+    expect(paste).toMatch(/export function isSpacerParagraph/);
+    expect(paste).toMatch(/export function isLayoutTable/);
+    // …and a multi-block paste into a list goes AFTER the list, never inside the item.
+    expect(paste).toMatch(/enclosingListDepth/);
+    expect(paste).toMatch(/\$from\.after\(listDepth\)/);
+  });
+
+  it("⛔ BACKSPACE at the start of a block undoes formatting BEFORE it restructures (B36051)", () => {
+    const keys = code("lib/notesBlockKeys.js");
+    expect(keys, "it must be asked BEFORE the default joinBackward").toMatch(/BLOCK_KEYS_PRIORITY = 160/);
+    expect(keys, "only at the very start of a block, and only on an empty selection")
+      .toMatch(/parentOffset !== 0/);
+    expect(keys).toMatch(/if \(!selection\.empty\) return false/);
+    // It claims the key ONLY when there is a real alignment difference to undo.
+    expect(keys).toMatch(/MEANINGFUL\.has\(align\)/);
+    expect(keys).toMatch(/textAlign: null/);
+  });
+
+  it("the three paste glyphs are OUR drawings, and there are three of them", () => {
+    const ed = code("components/NoteEditor.jsx");
+    expect(ed).toMatch(/const PASTE_ICONS = \{/);
+    for (const mode of ["source", "merge", "text"]) expect(ed).toMatch(new RegExp(`${mode}: \\(`));
+    expect(ed, "each mode is named with its Word access key").toMatch(/key: "K"/);
+    expect(ed).toMatch(/key: "M"/);
+    expect(ed).toMatch(/key: "T"/);
+    expect(ed, "inline SVG on currentColor, like every other icon in the module").toMatch(/stroke="currentColor"/);
   });
 
   it("a notebook's 'Belongs to' panel offers each destination exactly once", () => {

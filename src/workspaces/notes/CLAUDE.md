@@ -154,7 +154,34 @@ written out in the header of `lib/notesStore.js`; read it there rather than re-d
     arrow drag), behind a **cached dynamic import** for the same bundle reason as `notesCloud.js`: a
     note with no sketch never downloads it. A sketch paints from the pure spec first and becomes
     interactive after.
-- `lib/notesTabKey.js` — **Tab belongs to the DOCUMENT while the caret is in it** (B1392). A
+- `lib/notesBlockKeys.js` — **Backspace at the START of a block undoes a formatting difference
+  BEFORE it restructures anything** (B36051). Registered ABOVE the default keymap. The report it
+  closes: a pasted, right-aligned line in the middle of an Outlook signature merged into the
+  spacer paragraph above it on one keypress, so *"a whole chunk moves to the left"*. Now the
+  first press clears the alignment and stops; the second does the ordinary join, by which point
+  the join is visible rather than a surprise.
+- `lib/notesPastePlain.js` — **paste JUST the text** (B36051), Word's "Keep Text Only". ⛔ The
+  DEFAULT PASTE IS UNCHANGED — the owner asked for an *option*, so this WATCHES the paste
+  (`handlePaste` returns false) rather than intercepting it. Two ways in: **Ctrl/Cmd+Shift+V**,
+  and the **paste-options chip** that appears at the paste point after a paste that actually
+  carried formatting (plus the same choice on the document's right-click menu). Plain means
+  plain: every mark dropped, every block reduced to a paragraph, and **paragraph breaks kept**
+  so a multi-line paste does not collapse into one line. Pure and unit-tested —
+  `plainTextToContent` / `sliceCarriesFormatting` / `textOfNode` / `tidyPastedFragment` touch
+  no DOM. **THREE MODES, Word's** (amendment 3): `source` (the default, unchanged) · `merge`
+  (drops fonts, point sizes, colours, highlights and alignment; KEEPS bold, italic, underline,
+  links, lists and headings) · `text` (Ctrl+Shift+V). Picking one re-transforms the just-pasted
+  RANGE in place as one undo step — it never re-pastes. ⛔ **Collapsing `&nbsp;`-only spacer
+  paragraphs and unwrapping single-column layout tables is STRUCTURAL SANITISATION, not
+  formatting, so it happens in `transformPasted` and applies to ALL THREE modes** — that
+  structure is broken input, not a style choice. And a multi-block paste with the caret in a
+  list lands AFTER the list, never nested inside the item (an Outlook signature four levels
+  deep inside one bullet is the report it closes).
+- `lib/notesTabKey.js` — **Tab belongs to the DOCUMENT while the caret is in it** (B1392, and
+  B1392 ×2 which made it true in EVERY context rather than usually — **its header carries the
+  full table of what Tab does in each one; read that before touching it**, and note that the
+  destructive case it closed was a selected picture or sketch being REPLACED by a tab
+  character). A
   low-priority FALLBACK: the table's next-cell and the list's indent/outdent are asked first and
   still win; this catches only what they decline — a plain paragraph, an empty page, the first
   item of a list — which is where Tab used to escape into Chrome's toolbar mid-sentence. It keeps
