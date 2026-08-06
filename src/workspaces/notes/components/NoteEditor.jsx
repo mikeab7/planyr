@@ -269,47 +269,166 @@ export default function NoteEditor({
     if (searchTerm) editor.commands.stepNoteSearch(0);
   }, [editor, searchTerm]);
 
-  /* CLICKING — OR DOUBLE-CLICKING — THE EMPTY PART OF THE PAGE PUTS THE CARET THERE
-   * (B1368, extended by B1393).
+  /* ⛔ CLICK AND TYPE — THE CARET LANDS WHERE YOU CLICKED, NOT WHERE THE TEXT ENDS
+   * (B1368 → B1393, and B1393 ×2, which is the one that actually delivers it).
    *
-   * The document only claimed the box its own text filled, so on a short note most of the
-   * sheet was dead: clicking below the last line, or out to the side of it, did nothing at
-   * all — the owner's "I'm not sure that I can really edit anywhere on the page". A page you
-   * can only click ON THE WORDS is not a page.
+   * THE OWNER'S REPORT, verbatim and twice: *"i still cant double click and type somewhere."*
+   * The word that matters is SOMEWHERE. Reproduced on the live build: double-click on a blank
+   * page well down and to the right, type, and the text appears on LINE ONE at the LEFT
+   * MARGIN. Focus moved and the keystroke registered — which is exactly why B1393 and its
+   * harness check passed. **They asserted that the editor took focus and accepted input, and
+   * never asserted WHERE the caret landed.** A test that would pass on the broken build is not
+   * a test; the harness now asserts the resulting POSITION and nothing less.
    *
-   * The mat forwards the press instead: anything that is not already the document, a field
-   * or a control lands the caret at the nearest real position — the same place the browser
-   * would have put it if the document had filled the pane. `preventDefault` on mousedown is
-   * what stops the press blurring the editor before the focus lands.
+   * ⛔ AUDIT-FIRST — WHY THE OLD CODE COULD NOT HAVE WORKED, whatever it did with focus. The
+   * document element carries `min-height: 46vh`, so on a short note most of the blank sheet is
+   * INSIDE `.ProseMirror`, not below it. The old handler's first guard returned early for
+   * anything inside `.ProseMirror`, so those presses were never handled here at all — the
+   * browser placed the caret at the nearest real text position, which on an empty page is the
+   * end of the only paragraph. The `clientY > box.bottom` branch it did have could only fire
+   * for a press below the 46vh box, and even that called `focus("end")` — the end of the
+   * TEXT, which is the very thing being complained about. Both halves are replaced.
    *
-   * B1393 BINDS THE SAME HANDLER TO DOUBLE-CLICK, and the reason is worth writing down
-   * because the code looks redundant: a double-click DOES fire two mousedowns, so blank
-   * space already worked by accident — driven in a real browser at desk width, all four
-   * blank regions (right of the column, left of it, above the text and below the last line)
-   * landed the caret and typed. Binding the second event makes it a STATED CONTRACT with a
-   * guard on it rather than a side effect of the first, so a later change to the press path
-   * cannot quietly take double-click away again.
+   * THE FIX IS WORD'S, and deliberately so: the owner asked on day one for the same editing
+   * behaviour as Word and OneNote, so matching Word is the target rather than an invention.
+   * Word's **Click and Type** silently inserts the empty paragraphs needed for the caret to
+   * sit on the line you clicked, and takes the paragraph's ALIGNMENT from where you clicked
+   * across the column. It stays in the DOCUMENT MODEL — paragraphs, not a canvas — which is
+   * what keeps export, print, search and sync working with no new plumbing.
    *
-   * ⛔ IT MUST NOT REACH TEXT. Double-clicking a WORD still selects that word — the guard
-   * at the top returns early for anything inside `.ProseMirror`, so only genuinely blank
-   * space gets the caret-landing behaviour. */
+   * THREE RULES, and the third is the one that keeps it honest:
+   *   1. A press BELOW the last block inserts `round(gap / lineStep)` empty paragraphs and
+   *      puts the caret in the last one. Single click and double click do the same thing.
+   *   2. Press past the first third of the column across → `center`; past the second → `right`.
+   *      Left is the default and is never written, so an ordinary press stores nothing.
+   *   3. ⛔ NOTHING IS LEFT BEHIND. Paragraphs made this way are a CLAIM, not a commitment:
+   *      if the user types, the claim is released and they are the user's; if the user clicks
+   *      away, blurs, or leaves the page without typing, they are removed. Word does the same,
+   *      and without it every stray click would fatten the document forever.
+   *
+   * ⛔ AND IT MUST NOT REACH TEXT. A press at or above the content's bottom edge is left
+   * entirely alone inside the document, so double-clicking a WORD still selects that word. */
+  const BLANK_SLACK = 6;      // a press within a few px of the last line is that line, not blank space
+  const MAX_CLICK_PARAGRAPHS = 200;
+
+  /** How far one empty paragraph advances the caret down the page, measured from the REAL
+   *  rendered document rather than assumed from the stylesheet — a font-size mark or a
+   *  user's zoom would make an assumed number wrong in a way nobody would ever notice. */
+  const paragraphStep = (dom) => {
+    const cs = window.getComputedStyle(dom);
+    const line = parseFloat(cs.lineHeight);
+    const probe = dom.querySelector("p");
+    const gapCs = probe ? window.getComputedStyle(probe) : null;
+    const gap = gapCs ? (parseFloat(gapCs.marginTop) || 0) : 0;
+    const h = Number.isFinite(line) ? line : 24;
+    return Math.max(12, h + gap);
+  };
+
+  /* The outstanding claim: `{ from, to, docSize }` for paragraphs inserted by a press that
+   * has not been typed into yet. Held in a ref because it is not render state — nothing on
+   * screen depends on it, and re-rendering the editor on every stray click would be worse
+   * than the problem. */
+  const claimRef = useRef(null);
+
+  const dropClaim = useCallback(() => {
+    const c = claimRef.current;
+    claimRef.current = null;
+    if (!c || !editor || editor.isDestroyed) return;
+    const { doc } = editor.state;
+    // Anything at all changed since we made them? Then they are the user's now. Leave them.
+    if (doc.content.size !== c.docSize || c.to > doc.content.size) return;
+    let onlyEmpties = true;
+    doc.nodesBetween(c.from, c.to, (node, pos) => {
+      if (pos < c.from) return true;
+      if (node.type.name !== "paragraph" || node.content.size !== 0) onlyEmpties = false;
+      return false;
+    });
+    if (!onlyEmpties) return;
+    editor.commands.deleteRange({ from: c.from, to: c.to });
+  }, [editor]);
+
+  /* Release the claim the moment the user makes it theirs — by typing (the document changed)
+   * or by putting the caret somewhere else. Registered once, on the editor, so it cannot get
+   * out of step with a React render. */
+  useEffect(() => {
+    if (!editor || editor.isDestroyed) return undefined;
+    const onUpdate = () => {
+      const c = claimRef.current;
+      if (c && editor.state.doc.content.size !== c.docSize) claimRef.current = null;
+    };
+    const onSelection = () => {
+      const c = claimRef.current;
+      if (!c) return;
+      const { from } = editor.state.selection;
+      if (from < c.from || from > c.to) dropClaim();
+    };
+    const onBlur = () => dropClaim();
+    editor.on("update", onUpdate);
+    editor.on("selectionUpdate", onSelection);
+    editor.on("blur", onBlur);
+    return () => {
+      editor.off("update", onUpdate);
+      editor.off("selectionUpdate", onSelection);
+      editor.off("blur", onBlur);
+      dropClaim();          // leaving the page must not leave empty paragraphs on it either
+    };
+  }, [editor, dropClaim]);
+
   const focusFromMat = useCallback((e) => {
     if (!editor || editor.isDestroyed) return;
     const el = e.target;
     if (!(el instanceof Element)) return;
-    if (el.closest(".ProseMirror") || el.closest("input, textarea, select, button, a, [contenteditable]")) return;
-    e.preventDefault();
+    if (el.closest("input, textarea, select, button, a")) return;
+
     const dom = editor.view.dom;
     const box = dom.getBoundingClientRect();
-    // Clamp the press INTO the text column horizontally and keep its height: a click out to
-    // the right of a short line should land at the end of THAT line, not at the end of the
-    // document, which is what makes this feel like a page rather than a jump.
-    const left = Math.min(Math.max(e.clientX, box.left + 1), box.right - 1);
-    const top = Math.min(Math.max(e.clientY, box.top + 1), box.bottom - 1);
-    const hit = e.clientY > box.bottom ? null : editor.view.posAtCoords({ left, top });
-    if (hit && Number.isFinite(hit.pos)) editor.chain().focus().setTextSelection(hit.pos).run();
-    else editor.commands.focus("end");
-  }, [editor]);
+    const last = dom.lastElementChild;
+    const contentBottom = last ? last.getBoundingClientRect().bottom : box.top;
+    const belowContent = e.clientY > contentBottom + BLANK_SLACK;
+
+    if (!belowContent) {
+      /* At or beside real content. Inside the document the browser is already right — and
+         must stay right, or double-click-to-select-a-word dies. Outside it (left of the
+         column, above the first line) the mat still forwards the press to the nearest
+         position, which is what B1368 was for. */
+      if (el.closest(".ProseMirror") || el.closest("[contenteditable]")) return;
+      e.preventDefault();
+      const left = Math.min(Math.max(e.clientX, box.left + 1), box.right - 1);
+      const top = Math.min(Math.max(e.clientY, box.top + 1), box.bottom - 1);
+      const hit = editor.view.posAtCoords({ left, top });
+      if (hit && Number.isFinite(hit.pos)) editor.chain().focus().setTextSelection(hit.pos).run();
+      else editor.commands.focus("end");
+      return;
+    }
+
+    /* ---- CLICK AND TYPE ---- */
+    e.preventDefault();
+    dropClaim();                       // a previous unused claim is not this one's business
+
+    const step = paragraphStep(dom);
+    const gap = e.clientY - contentBottom;
+    const want = Math.min(MAX_CLICK_PARAGRAPHS, Math.max(0, Math.round(gap / step)));
+
+    // Which third of the column was pressed — Word's rule, and the reason the caret can be
+    // centred or right-aligned without ever opening a menu.
+    const width = Math.max(1, box.width);
+    const frac = Math.min(1, Math.max(0, (e.clientX - box.left) / width));
+    const align = frac > 0.68 ? "right" : frac > 0.34 ? "center" : null;
+
+    const before = editor.state.doc.content.size;
+    if (want > 0) {
+      const content = Array.from({ length: want }, () => ({ type: "paragraph" }));
+      editor.chain().focus().insertContentAt(before, content).run();
+    } else {
+      editor.commands.focus("end");
+    }
+    if (align) editor.commands.setTextAlign(align);
+
+    const after = editor.state.doc.content.size;
+    if (want > 0 && after > before) {
+      claimRef.current = { from: before, to: after, docSize: after };
+    }
+  }, [editor, dropClaim]);
 
   const stepFind = useCallback((d) => {
     if (!editor || editor.isDestroyed) return;

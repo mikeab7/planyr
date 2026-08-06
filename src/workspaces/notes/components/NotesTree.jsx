@@ -444,8 +444,28 @@ function TreeRow({
 /** A project's heading on the Dashboard — the ONE place a project label belongs (B1420).
  *  It is also a drop target: dragging a page onto it lifts that page to the top level of
  *  that project, which is the only way back out of a deep nest by dragging. */
-function GroupHead({ group, dropping, onDragEnter, onDragOver, onDragLeave, onDrop }) {
-  const named = group.name || (group.resolved ? NO_PROJECT_LABEL : "Project not loaded");
+/* ⛔ A HEADING STATES A FACT THE OWNER CAN ACT ON (B1419 ×2, LOUD-FAILURE).
+ *
+ * "PROJECT NOT LOADED" described an internal loading state, not his data — the same class of
+ * quiet lie as the old "OTHER PROJECT" it replaced, just a layer up. There are THREE genuinely
+ * different situations here and they were being told with one sentence:
+ *   • the page was never filed anywhere            → "Not in a project"
+ *   • its project was DELETED (the list is fine, this id is not in it)
+ *                                                  → "From a project you deleted"
+ *   • the project LIST itself failed to load       → "Project names didn't load"
+ * The middle one is the owner's actual case (the notebook these pages came from pointed at a
+ * project that no longer exists), and it is the one he can do something about: re-file them
+ * from the row's own menu. So it says so, in his language, rather than in ours. */
+function groupHeading(group, projectsState) {
+  if (group.projectId == null) return NO_PROJECT_LABEL;
+  if (group.name) return group.name;
+  if (projectsState === "failed") return "Project names didn't load";
+  if (projectsState === "loading") return "Loading…";
+  return "From a project you deleted";
+}
+
+function GroupHead({ group, projectsState, dropping, onDragEnter, onDragOver, onDragLeave, onDrop }) {
+  const named = groupHeading(group, projectsState);
   return (
     <div
       data-testid={`notes-group-${group.projectId ?? "none"}`}
@@ -921,6 +941,7 @@ export default function NotesTree({
             <div key={g.projectId ?? "none"} style={{ marginBottom: 4 }}>
               <GroupHead
                 group={g}
+                projectsState={projectsState}
                 dropping={dropId === `root:${g.projectId ?? "none"}`}
                 {...groupDropProps(g.projectId)}
               />
