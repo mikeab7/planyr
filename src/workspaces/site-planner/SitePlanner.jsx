@@ -8,6 +8,7 @@ import { idbGet, idbPut, idbDelete, idbAvailable } from "./lib/localDb.js";
 import { registerFlush } from "../../app/flushRegistry.js";
 import { createEditorLock } from "../../shared/presence/editorLock.js";
 import { reportClientEvent } from "../../shared/telemetry/clientErrors.js";
+import { notePerfEdit } from "../../shared/telemetry/perfSampling.js";
 import { createElementSync, stableStringify } from "./lib/elementSync.js";
 import { planDelete, shouldHintTypingGuard, TYPING_GUARD_HINT } from "./lib/deletePlan.js";
 import { rowsToModel, KIND_TO_FIELD, foldNeverSyncedLocal, foldJournal, reconcileSeedRows } from "./lib/elementRows.js";
@@ -73,6 +74,8 @@ import { resolveEstimatedWse } from "./lib/wseProviders.js";
 import { sanityCheckEstimate, sensitivityBand } from "./lib/estimateChallenge.js";
 import { wseSensitivity } from "./lib/wseSensitivity.js";
 import LayerPanel from "./components/LayerPanel.jsx";
+// NEW-3 — the ONE map-overlay stacking model (an open panel outranks map chrome).
+import { MAP_CHROME_Z } from "./lib/mapChromeStack.js";
 import { districtDrainageNote } from "./lib/floodGroup.js";
 import { useGroundElevation } from "./components/useGroundElevation.js";
 import CursorChip from "./components/CursorChip.jsx";
@@ -226,7 +229,7 @@ import { rankLedgerMoves, BERM_MAX_RAISE_FT } from "./lib/ledgerBalancer.js";
 // strings (heading names its ledger; buildability + over-provision ride the qualifier line).
 import { detentionVerdict, mitigationVerdict, overdugAcFt, overProvision } from "./lib/pondVerdict.js";
 import { pondEncumbranceConflicts } from "./lib/corridorConflicts.js";
-import { envelopeOf, revalidationNeed, fetchStaleForEdit, FETCH_TTL_MS, canonEnv, DRAIN_STUCK_MS, fetchWatchdogFired } from "./lib/factRevalidation.js";
+import { envelopeOf, revalidationNeed, fetchStaleForEdit, factsFreshness, FETCH_TTL_MS, canonEnv, DRAIN_STUCK_MS, fetchWatchdogFired } from "./lib/factRevalidation.js";
 import { bulletBarLayout, stackedBarLayout, bulletBarMarks, stackedBarMarks, stormwaterBarSpecs, ACFT_EPS } from "./lib/yieldBar.js";
 import { yieldVerdictStrip, fmtAcFt, fmtSignedAcFt, TRACE_ACFT, fmtMargin } from "./lib/yieldVerdicts.js";
 // Cowork yield review (NEW-1 … NEW-10) — the ONE per-pond stage/elevation model and the checks
@@ -246,9 +249,23 @@ import { buildChangeSummaryRows, gapProposalNote, bermCapProposalNote } from "./
  * ONLY inside the pond inspector and the Optimize card, both reached by an explicit user action,
  * so a plain Site load has no use for it. Both call sites wrap it in one shared Suspense. */
 const PondSection = lazy(() => import("./components/PondSection.jsx"));
+/* Storage on this device (NEW-3/B1429) — the two-tier census + the safe clear-map-data action.
+ * It lives on the SITE ROUTE, not in the shared account panel or the header gear: both of those
+ * land in the entry chunk that EVERY route downloads, and even a lazy stub there measured +0.5 KB
+ * on all four routes and pushed `bundle.notesRouteJsBytes` past its ceiling in CI. Here it costs
+ * the other three routes nothing, it is reachable SIGNED OUT (which the account panel is not, and
+ * a signed-out user shares the same ~5 MB ceiling with no cloud copy to fall back on), and it sits
+ * next to Save now and Version history — the two things it explains when a save fails. */
+const StoragePanel = lazy(() => import("../../shared/storage/StoragePanel.jsx"));
 import { pondScreeningGuards } from "./lib/pondScreeningGuards.js";
 import { geometricMaxBermFt, drainageBermCapFt, bindingBermCap, bermNeedsInlets, INLETS_THROUGH_BERM_NOTE, inwardBermSplit, crestRingForBerm, EXT_BERM_SLOPE, INFLOW_HEAD_ALLOWANCE_FT } from "./lib/inwardBerm.js";
 import { gisCache } from "./lib/gisCache.js";
+/* NEW-2/NEW-3 (B1428/B1429) — the honest device-save retry lives in shared/storage/, and it is
+ * reached by DYNAMIC import on purpose. The storage panel (shared chrome on every route) imports
+ * the same two modules lazily; a static edge from here would make them a chunk BOTH pull, which
+ * lands 8.4 KB on a plain Site load and breaches the route allowlist. These paths only run when a
+ * save has already failed or the owner clicked Retry, so on-demand is also simply correct.
+ * Loaded via `loadStorageTools()` below — do not "tidy" it into a static import. */
 import { VECTOR_SOURCES, fetchCached } from "./lib/vectorLayers.js";
 import { sampleAtLatLng } from "./lib/demGrid.js";
 // B1095 — the terrain pipeline loads on demand: the site DEM grid rides the explicit
@@ -2050,6 +2067,45 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     () => (cullActive ? visibleWorldRect(view, size) : null),
     [cullActive, view, size]
   );
+
+  /* ------------ NEW-2 — THE PAN ANCHOR: the view a coordinate is BAKED at ------------
+     `f2p` is `worldToScreen(view, …)`, so every element's pixel geometry used to be a function of
+     the LIVE view: a pan changed the rendered output of EVERY element and `ElNode`'s memo (B1352)
+     missed on 100% of them by construction — the measured fact B1360 was filed on.
+
+     A pan is a pure translation at constant `ppf`, and a translation composes EXACTLY, so it does
+     not have to be baked into coordinates at all. While a pan is armed the emitted geometry stays
+     pinned at the ANCHOR and the gesture writes ONE group transform instead of re-emitting ~1,200
+     host elements. Nothing about WHAT is drawn changes — no LOD gate, no stroke width, no label
+     decision and no declutter rule reads an offset, only `ppf` — so the picture is exact by
+     construction rather than by a pixel diff (B1360's own note that this increment's pixel bar
+     is free).
+
+     ⛔ `view` IS UNTOUCHED AND STAYS THE TRUTH. `p2f` (which reads the SVG's own bounding box),
+     the cull rect, the basemap registration (`tileRef`) and the `data-view-off*` harness contract
+     all keep reading it, so the pointer path, the weld and every e2e assertion are unchanged. Do
+     not "simplify" by folding the anchor into `view` — that would break the exactly-reversible
+     pan V478 proved, exactly as B1141 rule (2) says of the registration shift.
+
+     ⛔ AN EXPORT PASS BYPASSES THE ANCHOR ENTIRELY. The sheet resolves its own render view at
+     export time rather than inheriting whatever transient representation the screen is holding,
+     so a sheet built mid-gesture is identical to one built at rest. That independence is the
+     precondition for this increment, not a side effect of it — see `withFullRender`. */
+  const [panAnchor, setPanAnchor] = useState(null);
+  const panAnchored = !exportPass && !!panAnchor && panAnchor.ppf === view.ppf;
+  const rvOffX = panAnchored ? panAnchor.offX : view.offX;
+  const rvOffY = panAnchored ? panAnchor.offY : view.offY;
+  /* Value-keyed, NOT `[view]`: the whole point is that this identity survives a pan frame, which
+     is what lets `f2p` stay stable and every memoised element bail. */
+  const renderView = useMemo(() => ({ ppf: view.ppf, offX: rvOffX, offY: rvOffY }), [view.ppf, rvOffX, rvOffY]);
+  const panDx = view.offX - rvOffX, panDy = view.offY - rvOffY;
+  const panT = panDx || panDy ? `translate(${panDx} ${panDy})` : undefined;
+  /* Arm at the moment the pan passes its dead zone, from the gesture's OWN captured origin (so the
+     anchor and the `offX = ox + travel` the handler writes are one frame of reference); disarm on
+     every gesture end, which re-bakes at the settled view in one commit. A zoom re-bakes on its
+     own — `panAnchor.ppf === view.ppf` fails — so no wheel/pinch path has to know this exists. */
+  const armPanAnchor = useCallback((ppf, offX, offY) => setPanAnchor({ ppf, offX, offY }), []);
+  const disarmPanAnchor = useCallback(() => setPanAnchor((a) => (a ? null : a)), []);
   const [cursor, setCursor] = useState(null);   // {x,y} feet
   const [hoverElId, setHoverElId] = useState(null); // B226: building under the cursor (select mode, nothing selected) → preview its feature-add buttons
   const [hoverMkId, setHoverMkId] = useState(null); // B156: markup under the cursor in Select mode → pre-click hover glow (set by the markup's own pointer enter/leave, so it matches what a click grabs)
@@ -3345,6 +3401,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // free up space" banner instead of the red "at risk" one — honest about exactly where the work lives.
   const [savedToCloudOnly, setSavedToCloudOnly] = useState(false);
   const [saveNowMsg, setSaveNowMsg] = useState("");
+  const [storageOpen, setStorageOpen] = useState(false);  // NEW-3 — the on-device storage census dialog
   // True when a cloud write was REJECTED because another session advanced this project since
   // we loaded it (B314 optimistic concurrency). Distinct from cloudSaveFailed (a write that
   // didn't reach the cloud, retries on next edit): a conflict won't clear by retrying — the
@@ -3429,7 +3486,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       const missingId = wantIds.find((id) => !haveIds.has(id));
       if (!ok || got < want || missingId) {
         setLocalSaveFailed(true);
-        reportClientEvent("save-verify-failed", "on-device write did not persist", { id: siteId, want, got, ok: !!ok, missingId: missingId || null });
+        reportStorageEvent("save-verify-failed", "on-device write did not persist", { id: siteId, want, got, ok: !!ok, missingId: missingId || null });
       } else { setLocalSaveFailed(false); setSavedToCloudOnly(false); } // device can hold it again → clear both
     };
     let microT = null;
@@ -4096,7 +4153,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   if (!histRef.current) histRef.current = createHistoryStack({ keyOf: histKey });
   const [, bumpHist] = useState(0);
   const touchHist = () => bumpHist((n) => n + 1); // re-render so undo/redo enabled state updates
-  const pushHistory = () => { histRef.current.push(stateRef.current); touchHist(); };
+  /* NEW-4 — `notePerfEdit()` is one integer increment, and it is the ONE axis of the
+   * amplification hypothesis the DOM cannot report: how much this session has been WORKED. Every
+   * undoable action funnels through here already, so this is the cheapest complete count there
+   * is. It is a no-op unless the perf instrument is installed (a quarter of page loads). */
+  const pushHistory = () => { histRef.current.push(stateRef.current); notePerfEdit(); touchHist(); };
   // B820 — give each freshly-created markup a z that stacks it on TOP of the collection (nextZ), so a
   // newly drawn markup paints above the existing ones now that the markup layer renders in z order
   // (see the [...markups].sort(byZAsc) passes below). Ascending so a multi-markup add (paste, a deed +
@@ -4279,7 +4340,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   /* ------------ coordinate transforms ------------ */
   // Feet<->screen via the shared viewport engine (B329). { ppf, offX, offY } maps to the
   // engine's { scale, tx, ty }; the math is identical to the old inline form (unit-tested).
-  const f2p = useCallback((p) => worldToScreen({ scale: view.ppf, tx: view.offX, ty: view.offY }, p), [view]);
+  /* NEW-2 — `renderView`, not `view`: while a pan is armed this is the ANCHOR, so `f2p` keeps its
+     identity across the gesture and the pan lands as one group transform. Everything that maps
+     screen → world (`p2f`, `p2fStatic`) still reads the live `view`; see the pan-anchor block. */
+  const f2p = useCallback((p) => worldToScreen({ scale: renderView.ppf, tx: renderView.offX, ty: renderView.offY }, p), [renderView]);
+  /* NEW-2 — `f2p` at the LIVE view rather than the anchor. For screen-space chrome that is placed
+     through feet but sits OUTSIDE the translated feet-space group, and so cannot ride the pan
+     delta: the print crop, whose dim mask hugs the canvas edges while its frame tracks the plan.
+     Identity churns per pan frame by design; it has no memoised consumers. */
+  const f2pLive = useCallback((p) => worldToScreen({ scale: view.ppf, tx: view.offX, ty: view.offY }, p), [view]);
   // E2E/self-audit hook (same `window.__PLANYR_E2E` gate as the geo-map hook above; never runs in
   // production). Lets a headless harness park the viewport on an EXACT world point at an EXACT
   // scale, so a junction screenshot is reproducible instead of "wheel-scroll and hope".
@@ -4647,6 +4716,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // (VIEWPORT-STABLE (a): the surface must neither jump nor flash when a panel changes its edge.)
       const d = drag.current;
       if (d && d.mode === "pan" && typeof d.ox === "number") d.ox -= delta;
+      // NEW-2 — the anchor is a copy of that same captured origin, so it has to be rebased by the
+      // same delta or the group transform would carry the panel's width as a permanent offset.
+      setPanAnchor((a) => (a ? { ...a, offX: a.offX - delta } : a));
     }
     // These deps are intentional re-measure TRIGGERS (the body reads only refs, so exhaustive-deps
     // is satisfied by any set): re-run whenever something that can move the canvas's left edge changes.
@@ -4786,6 +4858,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     capturePidRef.current = null;
     cancelActiveMove(); // a drag-move torn down without a clean pointer-up reverts to pre-drag (B315); no-op otherwise
     drag.current = null;
+    disarmPanAnchor(); // NEW-2 — re-bake at the settled view; a torn-down pan must not leave a live group transform
     setPanning(false);
     setMarquee(null);
     setMkRect(null);
@@ -6509,6 +6582,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // deselect still jumps by the panel width on the first move past the threshold — (a) above is
       // the actual fix, and this rides alongside it, never instead of it.
       if (!d.panArmed && Math.hypot(e.clientX - d.sx, e.clientY - d.sy) <= PARCEL_CLICK_SLOP_PX) return;
+      // NEW-2 — pin the coordinates at the gesture's OWN captured origin the moment it arms, so
+      // everything from here to pointer-up is one group transform instead of ~1,200 re-emitted
+      // nodes. Batches into the same commit as the setView below. See the pan-anchor block.
+      if (!d.panArmed) armPanAnchor(view.ppf, d.ox, d.oy);
       d.panArmed = true;
       setView((v) => ({ ...v, offX: d.ox + (e.clientX - d.sx), offY: d.oy + (e.clientY - d.sy) }));
       return;
@@ -6856,6 +6933,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // pending. Commit it SYNCHRONOUSLY first: everything below (and flushElems at the end) must
     // see the settled geometry, never a canvas one move short of where the finger let go.
     flushFrameJobs();
+    disarmPanAnchor(); // NEW-2 — the gesture is over; re-bake coordinates at the settled view (a no-op if no pan armed)
     const d = drag.current;
     if (d && d.mode === "marquee") {
       // Crossing/touch box-select via the shared selection model (B569/B570) — one box-test for
@@ -9296,7 +9374,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
      element per frame. See `resolveElNeighbors` for why the dependency has to be modelled rather
      than assumed away, and `ElNode` for what the stable record buys. Keyed on `els` (the complete
      model), never on `drawEls` (the culled subset) — a culled neighbour still shapes a curb. */
-  const elNeighbors = useMemo(() => resolveElNeighbors(els), [els]);
+  /* NEW-3 — `settings` joins the key because the record now also carries the per-building DOCK PLAN
+     (column grid + door runs), which is a function of the element AND the standards. Same shape as
+     `teeJunctions` / `driveJunctions`, which are already keyed `[els, settings]`. `settings` is a
+     stable object between edits, so this adds no invalidations a settings change did not already
+     cause — and a settings change genuinely does change the grid. */
+  const elNeighbors = useMemo(() => resolveElNeighbors(els, settings), [els, settings]);
 
   /* ------------ metrics ------------ */
   // Per-element striping/count config: a strip may override the global standards
@@ -9637,12 +9720,29 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // B874 30 s race) + cached per location. Failure isolation: an outage reads state
       // "failed" (→ grade fallback), NEVER a fabricated value. Layer 17 → estimated 1% BFE;
       // layer 21 → the 0.2% (500-yr) WSE that fills the currently-blank field off Fort Bend.
+      /* ⛔ NEW-4(d) — "Also would be great to reduce how long that check takes." The three
+       * point-samplers below were STARTED one after another because they were WRITTEN one after
+       * another: MAAPnext was nested inside EBFE's block and the screening study followed both, so
+       * an unstudied-Zone-A site in Harris paid three bounded round trips end to end when none of
+       * the three depends on any other — every one of them samples the SAME `bfePt`.
+       * The fix is deliberately the smallest one that is provably equivalent: START the promises
+       * here and `await` them exactly where they were awaited before. Not one guard, assignment,
+       * `tok` check or failure branch below moves, so there is no reordering to reason about — a
+       * promise simply begins running when it is created. `.catch(() => {})` on a SEPARATE handle
+       * marks each rejection handled, because a `tok` supersede can return before the await and an
+       * un-awaited rejection would otherwise surface as an unhandled one. */
+      const zoneAUnstudied = (floodGeo.zones || []).some((z) => z.unstudiedA && z.zone === "A");
+      const inHarris = (ctx?.authority?.jurisdiction?.county || []).some((c) => /harris/i.test(String(c)));
+      const [ptLat, ptLng] = feetToLatLng(bfePt, origin.lat, origin.lon);
+      const ebfeP = zoneAUnstudied ? sampleEbfePoint(ptLat, ptLng) : null;
+      const maapP = zoneAUnstudied && inHarris ? sampleMaapnextWse(ptLat, ptLng) : null;
+      if (ebfeP) ebfeP.catch(() => {});
+      if (maapP) maapP.catch(() => {});
       floodGeo.ebfe = null;
       floodGeo.ebfeFlags = { state: "not-applicable" };
-      if ((floodGeo.zones || []).some((z) => z.unstudiedA && z.zone === "A")) {
-        const [eLat, eLng] = feetToLatLng(bfePt, origin.lat, origin.lon);
+      if (zoneAUnstudied) {
         try {
-          const e = await sampleEbfePoint(eLat, eLng);
+          const e = await ebfeP;
           const covered = e && (e.bfe1pctFt != null || e.wse02Ft != null);
           floodGeo.ebfe = covered ? { bfe1pctFt: e.bfe1pctFt ?? null, wse02Ft: e.wse02Ft ?? null, source: "fema-ebfe" } : null;
           floodGeo.ebfeFlags = { state: covered ? "loaded" : "empty" };
@@ -9656,15 +9756,20 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         // the sampler is a no-op until they're filled; wired now so Harris activates by config.
         floodGeo.maapnext = null;
         floodGeo.maapnextFlags = { state: "not-applicable" };
-        if ((ctx?.authority?.jurisdiction?.county || []).some((c) => /harris/i.test(String(c)))) {
-          const [mLat, mLng] = feetToLatLng(bfePt, origin.lat, origin.lon);
+        if (inHarris) {
           try {
-            const m = await sampleMaapnextWse(mLat, mLng);
+            const m = await maapP;
             const covered = m && (m.wse1pctFt != null || m.wse02Ft != null);
             floodGeo.maapnext = covered ? { wse1pctFt: m.wse1pctFt ?? null, wse02Ft: m.wse02Ft ?? null, source: "hcfcd-maapnext" } : null;
             floodGeo.maapnextFlags = { state: covered ? "loaded" : (m ? "empty" : "not-configured") };
-          } catch (_) {
-            floodGeo.maapnextFlags = { state: "failed" };
+          } catch (e) {
+            /* NEW-1 — a DECLARED outage is its own state, distinct from a one-off failure. On a
+             * Harris site this is the governing WSE provider, and MAAPnext usually runs HIGHER
+             * than the effective FIRM, so the estimate the site DOES get is likely low. That has
+             * to reach the user in words; it may never look like "no flood data here". */
+            floodGeo.maapnextFlags = e && e.outage
+              ? { state: "unavailable", since: e.outage.since, symptom: e.outage.symptom, impact: e.outage.impact, replacement: e.outage.replacement }
+              : { state: "failed" };
           }
           if (tok !== drainTok.current) return; // superseded while sampling
         }
@@ -9681,8 +9786,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // three extra point fetches buys anything the app doesn't already have.
       floodGeo.screeningBfe = null;
       floodGeo.screeningBfeFlags = { state: "not-applicable" };
-      if ((floodGeo.zones || []).some((z) => z.unstudiedA && z.zone === "A")) {
-        const [sLat, sLng] = feetToLatLng(bfePt, origin.lat, origin.lon);
+      if (zoneAUnstudied) {
+        const sLat = ptLat, sLng = ptLng;
         try {
           // The WIDE, COARSE delineation window — the SAME 3DEP sampler as the site DEM, a
           // different extent (a site-envelope grid would delineate a few acres of a basin that
@@ -10710,8 +10815,21 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // a retry loop, never blocks editing), and skipped while the tab is hidden
   // (multi-writer care: a background tab must not fight the active one; the lastCheck
   // writes stay sig-keyed + JSON-guarded, so a duplicate write is idempotent).
-  // settings.drainage.autoFacts === false opts out (the headless legacy seeds use it).
-  const drainAutoEnabled = (settings.drainage?.autoFacts !== false) && !!origin && drainActive.length > 0;
+  /* ⛔ NEW-4 — THE FACTS PASS IS MANUAL, AND THIS LINE IS WHERE THAT IS TRUE. Owner decision,
+     restated 2026-08-06: "i thought we talked about doing this only manually". `autoFacts` was
+     OPT-OUT (`!== false`), so every plan ran a GIS pull plus a bare-earth DEM grid on open —
+     B1349 measured that pass dragging `terrainLayers` onto the boot path and B1431 priced it at
+     roughly half a second of a seven-second boot. It is now OPT-IN (`=== true`), which is the
+     whole of amendment (a): with nothing set, `drainAutoEnabled` is false, `revalidationNeed`
+     returns need:false, the 1,200 ms timer never arms, the 4,000 ms idle ceiling never exists,
+     and nothing at all is fetched when a plan is opened.
+     Everything downstream of this flag — the B874 watchdogs, the one-attempt-per-key guard, the
+     armed/stalled terminal states — is KEPT, not deleted: it is the bounding that makes a manual
+     run safe too, and deleting a guard because its trigger moved is how the class comes back. The
+     freshness LIGHT below is computed independently of this flag, because "is the answer on screen
+     still about the drawing on screen" is a question that has to be answered whether or not
+     anything is allowed to fetch. */
+  const drainAutoEnabled = (settings.drainage?.autoFacts === true) && !!origin && drainActive.length > 0;
   const drainAutoAttempts = useRef(new Set());
   const drainAutoLastAt = useRef(0);
   // B874 (edit-path recurrence) — the refresh WATCHDOG. `drainBusyStartRef` stamps when the current
@@ -10730,7 +10848,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // UNKNOWN rule then only applies to CURRENT geometry. It self-heals on the next fetch (flash).
   const drainLastGoodMitRef = useRef(null);
   const drainFactsNow = (() => {
-    if (!drainAutoEnabled) return { bboxNow: null, anchorNow: null, groundNow: null };
+    /* NEW-4 — gated on GEOMETRY, not on `drainAutoEnabled`. These three are the inputs to the
+       freshness light as well as to the (now opt-in) auto pass, and the light has to work with
+       auto off — which is every plan. */
+    if (!origin || !drainActive.length) return { bboxNow: null, anchorNow: null, groundNow: null };
     const pts = [];
     const fillPts = [];
     for (const p of drainActive) for (const pt of p.points) pts.push(pt);
@@ -10805,6 +10926,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   //   • armed            — a refetch is wanted and its one attempt hasn't fired/been consumed yet.
   // A wanted refetch whose single attempt is spent while nothing is in flight is STALLED — a
   // terminal state that offers ↻ Re-check, never an endless spinner.
+  /* NEW-4 — THE LIGHT. Computed on every render, independently of whether anything is allowed to
+     fetch, from the SAME signature the fetch has always been keyed on. Green while the parcels,
+     the fill and the ponds are where they were when the check ran; red once one of them moves;
+     and a distinct "never checked" that is neither. See lib/factRevalidation.js → factsFreshness
+     for why the key is deliberately loose and why there are four states rather than three. */
+  const drainFreshness = factsFreshness({
+    hasSessionCtx: !!drainReadCtx,
+    lastCheck: settings.drainage?.lastCheck || null,
+    sigNow: drainSigNow,
+    busy: !!drainCtx?.busy,
+    ...drainFactsNow,
+  });
   const drainAutoInFlight = !!(drainCtx?.busy && drainCtx?.auto);
   const drainAutoAttemptSpent = drainReval.need && drainAutoAttempts.current.has(drainReval.key);
   const drainAutoRefreshing = drainAutoEnabled && (drainAutoInFlight || (drainReval.need && !drainAutoAttemptSpent && !drainCtx?.busy));
@@ -12207,6 +12340,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     autoRefreshing: drainAutoRefreshing,
     autoStalled: drainAutoStalled, // B874 — a wanted refetch whose one attempt is spent + not in flight (terminal, offer ↻)
     autoEnabled: drainAutoEnabled,
+    /* NEW-4 — the green/red light. `state` is one of unchecked | fresh | stale | checking, and
+       `note` is the one short sentence that says WHY it is red. The readout renders this INSTEAD
+       of the old auto-refresh spinner copy, so the panel gains no lines (PANEL-BREVITY). */
+    freshness: drainFreshness,
     // NEW-19 — ONE source of truth for "have flood facts been ESTABLISHED?" A live fetch
     // (floodGeo loaded) OR a remembered/restored check (drainViewCtx.checkedAt) both count.
     // The header keys its checked-state off THIS, so it can never say "not checked" over the
@@ -12610,10 +12747,79 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     flashWarn("You're now editing here — pulled in the latest and your changes are saving to the cloud.", 7000);
   };
   const closeHdrMenus = () => { setPlanMenu(false); setPlanDelArm(null); };
+  /* NEW-3(b)/B1429 — every storage-failure report carries the storage FACTS: usage vs quota for
+   * BOTH tiers, kept separate and labelled (`local_*` / `idb_*`), plus the per-class byte
+   * breakdown. So the next occurrence answers "which store was full, and what was in it" instead
+   * of only "a write failed" — which is the whole reason the first diagnosis of B1427 was wrong.
+   * The census is async and telemetry is fire-and-forget, so the report is sent on resolve; a
+   * census that fails still sends the bare event rather than swallowing it (LOUD-FAILURE). */
+  const reportStorageEvent = (kind, msg, extra = {}) => {
+    import("../../shared/storage/storageCensus.js")
+      .then(({ storageSnapshot, telemetryFacts }) => storageSnapshot().then((snap) => reportClientEvent(kind, msg, { ...extra, ...telemetryFacts(snap) })))
+      .catch(() => reportClientEvent(kind, msg, { ...extra, storage_census: "unavailable" }));
+  };
+  /* The reclaim tier, on demand (see the import note at the top of this file). Returns the
+   * outcome object plus its owner-facing sentence, or null if the modules can't be fetched — a
+   * stale-deploy chunk failure must degrade to "no reclaim", never to a thrown save handler. */
+  const loadStorageTools = () => Promise.all([
+    import("../../shared/storage/storageReclaim.js"),
+    import("../../shared/storage/storageCensus.js"),
+  ]).catch(() => null);
+  const reclaimAndRetryDevice = async () => {
+    const mods = await loadStorageTools();
+    if (!mods) return null;
+    const [{ reclaimThenRetry, reclaimMessage }, { formatBytes }] = mods;
+    const r = await reclaimThenRetry({
+      store: (() => { try { return typeof localStorage !== "undefined" ? localStorage : null; } catch (_) { return null; } })(),
+      cache: gisCache,
+      save: writeDeviceVerified,
+    }).catch(() => null);
+    return r ? { r, message: reclaimMessage(r, formatBytes) } : null;
+  };
+  /* The verified on-device write, extracted so the retry path (NEW-2) can re-run EXACTLY what
+   * failed rather than an approximation of it: flush the live canvas to the mirror, read it back,
+   * and require every item to have survived. Returns true iff the device really holds it. */
+  const writeDeviceVerified = () => {
+    if (!siteId) return false;
+    flushSite();
+    const back = loadSite(siteId);
+    return !!back && drawnCount(back) >= drawnCount(liveRef.current);
+  };
+  /* NEW-2/B1428 — "Retry device save" that can actually succeed.
+   *
+   * The button used to be wired straight to saveNow(), which re-ran the same write with NOTHING
+   * freed in between — so while the store was full it failed every single time, offering an action
+   * it was incapable of performing. This frees the provably re-fetchable tier first (the GIS
+   * screening cache: map layers and terrain, every byte of it one fetch away), retries, and then
+   * reports what it freed AND whether the save landed. If it still doesn't fit, it says THAT —
+   * it never drops the user back into the same banner with no new information.
+   *
+   * Nothing that lacks a rehydration source is ever touched; the proof lives in storageReclaim.js
+   * and is asserted against a raster with no cloud copy in test/storageReclaim.test.js. */
+  const retryDeviceSave = async () => {
+    closeHdrMenus();
+    if (!siteId) return;
+    setSaveNowMsg("Freeing up space on this device…");
+    const done = await reclaimAndRetryDevice();
+    if (!done) { setSaveNowMsg("Couldn't free up space just now — your work is still safe in your account."); setTimeout(() => setSaveNowMsg(""), 8000); return; }
+    const { r, message } = done;
+    setSaveNowMsg(message);
+    setTimeout(() => setSaveNowMsg(""), r.saved ? 6000 : 12000);
+    if (r.saved) {
+      setLocalSaveFailed(false); setSavedToCloudOnly(false);
+      if (isCloudActive() && !readOnlyRef.current) cloudPushWithWatchdog(siteId);
+    } else {
+      // Still doesn't fit. The work IS in the account (that is what the amber banner says), so the
+      // banner state is unchanged — but the failure is now a measured fact, not a shrug.
+      reportStorageEvent("device-save-still-full", "retry after reclaim: the plan still does not fit on this device", {
+        id: siteId, outcome: r.outcome, freed_local: r.freedLocalBytes, freed_cache: r.freedCacheBytes, removed_keys: r.removedKeys,
+      });
+    }
+  };
   // B473 — explicit, VERIFIED "Save now": write the live canvas to the device, READ IT BACK to prove it
   // persisted, push to the cloud, and show a provable "Saved ✓ N items · time" (or a loud failure).
   // Gives the owner a guaranteed save + proof rather than trusting a silent autosave.
-  const saveNow = () => {
+  const saveNow = async () => {
     closeHdrMenus();
     if (!siteId) return;
     flushSite();
@@ -12631,13 +12837,28 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // B473 — the on-device write FAILED (storage full). Don't give up: push the LIVE payload to the
     // cloud (no ~5MB cap). If it lands, the work is safe in the account even though this device can't
     // hold it — say so honestly (amber, not red). If the cloud is unreachable too, go loud.
-    reportClientEvent("save-verify-failed", "Save now: on-device write did not persist", { id: siteId, want, got });
+    reportStorageEvent("save-verify-failed", "Save now: on-device write did not persist", { id: siteId, want, got });
+    /* NEW-2/B1428 — before settling for the cloud-only story, FREE THE RE-FETCHABLE TIER AND TRY
+     * AGAIN. Under the pressure this whole item exists to fix, an explicit Save now that only
+     * re-ran the same failing write was the same dead action the amber banner's button was; a
+     * single click should exhaust the safe options. Awaited (rather than raced against the cloud
+     * push) so the two can't contend over the banner state — the reclaim is a handful of
+     * localStorage removals and an in-memory index clear, so the cloud push is delayed by
+     * milliseconds and only when the device write has ALREADY failed. */
+    const freed = await reclaimAndRetryDevice();
+    if (freed && freed.r.saved) {
+      setLocalSaveFailed(false); setSavedToCloudOnly(false);
+      if (isCloudActive() && !readOnlyRef.current) cloudPushWithWatchdog(siteId);
+      setSaveNowMsg(freed.message);
+      setTimeout(() => setSaveNowMsg(""), 6000);
+      return;
+    }
     if (isCloudActive() && !readOnlyRef.current) {
       setSaveNowMsg("Saving to your account…");
       pushModelToCloud({ id: siteId, ...metaRef.current, ...liveRef.current }).then((r) => {
         setSaveNowMsg("");
         if (r && r.ok) { setLocalSaveFailed(false); setSavedToCloudOnly(true); }
-        else { setLocalSaveFailed(true); setSavedToCloudOnly(false); reportClientEvent("save-both-failed", "Save now: device full AND cloud push failed", { id: siteId, error: (r && r.error) || "" }); }
+        else { setLocalSaveFailed(true); setSavedToCloudOnly(false); reportStorageEvent("save-both-failed", "Save now: device full AND cloud push failed", { id: siteId, error: (r && r.error) || "" }); }
       }).catch(() => { setSaveNowMsg(""); setLocalSaveFailed(true); setSavedToCloudOnly(false); });  // B507: a rejected push must clear the transient banner + surface the honest failure
     } else { setLocalSaveFailed(true); setSavedToCloudOnly(false); }
   };
@@ -15702,6 +15923,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             title="Restore an earlier automatically-saved version of this plan">
             <span aria-hidden style={{ flex: "none" }}>↺</span><span>Version history…</span>
           </button>
+          <button style={{ ...menuItem(false), marginTop: 2, display: "flex", alignItems: "center", gap: 8 }} onClick={() => { closeHdrMenus(); setStorageOpen(true); }}
+            title="How much room this app is using on this device, and what's safe to clear" data-testid="storage-menu-item">
+            <span aria-hidden style={{ flex: "none" }}>🗄</span><span>Storage on this device…</span>
+          </button>
         </AnchoredMenu>
     </div>
   );
@@ -17705,7 +17930,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       {savedToCloudOnly ? (
         <div role="status" data-testid="saved-cloud-only" style={{ ...topBanner, zIndex: 6002 }}>
           <span style={bannerText}>✔ <b>Saved to your account</b> — your work is safe in the cloud and will reload fine. This <b>device's storage is full</b>, so there's no offline copy; free up space (or Export) to keep one.</span>
-          <button onClick={saveNow} title="Try saving on this device again" style={{ flex: "none", cursor: "pointer", background: "rgba(255,255,255,0.18)", color: "#fff", border: "none", borderRadius: 6, padding: "4px 10px", fontFamily: "inherit", fontSize: 12, fontWeight: 700 }}>Retry device save</button>
+          {/* NEW-2/B1428 — this used to be wired to saveNow(), which re-ran the same write with nothing
+              freed in between and so could never succeed. It now clears the re-fetchable map cache
+              first, retries, and reports what it freed + whether the save landed. */}
+          <button onClick={retryDeviceSave} data-testid="retry-device-save" title="Clear re-downloadable map data and try saving on this device again" style={{ flex: "none", cursor: "pointer", background: "rgba(255,255,255,0.18)", color: "#fff", border: "none", borderRadius: 6, padding: "4px 10px", fontFamily: "inherit", fontSize: 12, fontWeight: 700 }}>Free up space &amp; retry</button>
         </div>
       ) : localSaveFailed && (
         <div role="alert" data-testid="local-save-failed" style={{ ...topBanner, zIndex: 6002, maxWidth: "min(720px, calc(100vw - 16px))", background: "#7c1d1d", border: "1px solid #f87171", fontWeight: 700, boxShadow: "0 8px 28px rgba(0,0,0,0.4)" }}>
@@ -17848,6 +18076,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           <svg ref={svgRef} data-testid="planner-canvas" width="100%" height="100%" viewBox={`0 0 ${size.w} ${size.h}`} role="application" aria-label="Site plan canvas"
             data-view-offx={view.offX} data-view-offy={view.offY} data-view-ppf={view.ppf}
             data-reg-dx={regShift.dx} data-reg-dy={regShift.dy}
+            data-pan-dx={panDx} data-pan-dy={panDy}
             style={{ position: "relative", zIndex: 1, transform: (regShift.dx || regShift.dy) ? `translate(${regShift.dx}px, ${regShift.dy}px)` : undefined, background: origin ? "transparent" : PAL.paper, display: "block", touchAction: "none", userSelect: "none", WebkitUserSelect: "none", cursor: spacePan ? (panning ? "grabbing" : "grab") : identifyMode ? ADD_CURSOR : (attachFor || alignFor || traceMode || pobMode || routeMode || xsecMode || ovCalib) ? "crosshair" : (tool === "select" || tool === "pan" || printMode) ? (panning ? "grabbing" : "grab") : "crosshair" }}
             onMouseDown={(e) => {
               // Don't cancel the default action when the mousedown lands on an inline text
@@ -17923,8 +18152,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
 
             {!(origin && basemapOn) && <g data-export="skip">{gridLines()}</g>}
 
-            {/* scaled feet space */}
-            <g>
+            {/* Scaled feet space. NEW-2 — `transform` here is the LIVE PAN DELTA: while a pan is
+                armed the geometry below is emitted at the anchor and the gesture writes this ONE
+                attribute instead of re-emitting every host element. It is undefined at rest and on
+                every export pass, so nothing outside a live pan sees a transform at all. */}
+            <g transform={panT}>
               {/* aerial underlay (drawn beneath everything) — hidden until you
                   click a parcel or toggle it on, so it doesn't fill the canvas by default */}
               {showAerial && underlay && !(origin && basemapOn) && (() => {
@@ -18851,10 +19083,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 or hide behind the status bar. The export still composites its own
                 frame-anchored copy via buildSheetFurnitureSvg. */}
 
-            {/* print-frame crop overlay (screen space) */}
+            {/* print-frame crop overlay (screen space). NEW-2 — `f2pLive`, not `f2p`: this group is
+                OUTSIDE the translated feet space and its dim mask hugs the canvas edges, so it is
+                positioned at the live view and never carries the pan delta. */}
             {printMode && printFrame && (() => {
-              const a = f2p({ x: printFrame.cx - printFrame.wFt / 2, y: printFrame.cy - printFrame.hFt / 2 });
-              const b = f2p({ x: printFrame.cx + printFrame.wFt / 2, y: printFrame.cy + printFrame.hFt / 2 });
+              const a = f2pLive({ x: printFrame.cx - printFrame.wFt / 2, y: printFrame.cy - printFrame.hFt / 2 });
+              const b = f2pLive({ x: printFrame.cx + printFrame.wFt / 2, y: printFrame.cy + printFrame.hFt / 2 });
               const fx = Math.min(a.x, b.x), fy = Math.min(a.y, b.y), fw = Math.abs(b.x - a.x), fh = Math.abs(b.y - a.y);
               const HS = 9;
               const corners = [[-1, -1], [1, -1], [1, 1], [-1, 1]];
@@ -18900,7 +19134,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 dangerouslySetInnerHTML={{ __html: p.markup }} />
             );
             return (
-              <div data-export="skip" style={{ position: "absolute", left: 0, right: 0, bottom: 0, top: 0, pointerEvents: "none", zIndex: 7 }}>
+              <div data-export="skip" style={{ position: "absolute", left: 0, right: 0, bottom: 0, top: 0, pointerEvents: "none", zIndex: MAP_CHROME_Z.furniture }}>
                 <div style={{ position: "absolute", left: 14, bottom: 40 }}>{plate(furn.north)}</div>
                 <div style={{ position: "absolute", right: 14, bottom: 40 }}>{plate(furn.scaleBar)}</div>
               </div>
@@ -18935,20 +19169,32 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           {/* Top-right on-canvas controls — one anchored row: View (eye, B653) + Layers.
               The container owns the position so the two cards can never overlap; each
               card keeps its own open/closed width and scrolling. */}
-          <div data-export="skip" style={{ position: "absolute", top: 10, right: 10, zIndex: 6, display: "flex", gap: 8, alignItems: "flex-start" }}>
+          {/* NEW-3 — an OPEN PANEL outranks map chrome. At zIndex 6 this column tied with the
+              zoom stack (also 6, but later in the DOM) and lost outright to the canvas
+              furniture at 7 — so the scale bar and the zoom buttons painted over the Layers
+              panel, clipping the group header's "N ON" count and covering the opacity slider
+              and the "Show above plan" control. The band comes from mapChromeStack.js now, so
+              the View popover beside it is fixed by the same change rather than separately. */}
+          <div data-export="skip" style={{ position: "absolute", top: 10, right: 10, bottom: 10, zIndex: MAP_CHROME_Z.panel, display: "flex", gap: 8, alignItems: "flex-start", pointerEvents: "none" }}>
+          <div style={{ pointerEvents: "auto", display: "flex", gap: 8, alignItems: "flex-start", maxHeight: "100%", minHeight: 0 }}>
           <ViewMenu open={viewMenuOpen} onToggle={() => setViewMenuOpen((o) => !o)} settings={settings}
             setSnap={setSnap} patchSettings={(patch) => setSettings((s) => ({ ...s, ...patch }))} pal={PAL} />
           {/* Layers control — same shared layers as the map finder. ALWAYS rendered
               (B693): an unlocated plan gets the control DISABLED with the plain reason
               ("place it on the map first"), never a silently-missing / dead control.
               The aerial toggle itself moved into LayerPanel's Basemap group. */}
+          {/* NEW-3 — WIDER, and as TALL as the space allows. 226px forced every long label
+              onto two lines; the height was a flat 62vh, which on a laptop left about four rows
+              of a twenty-eight layer list visible. Both are now derived from the room that
+              actually exists, and the flex column is what lets the scroll box — not the card —
+              take the overflow. */}
           {(
-            <div data-wheelscroll="1" style={{ width: layersOpen ? 226 : "auto", background: "var(--surface-overlay)", border: `1px solid ${PAL.panelLine}`, borderRadius: 9, boxShadow: "0 2px 10px rgba(28,25,20,0.16)", overflow: "hidden" }}>
+            <div data-wheelscroll="1" style={{ width: layersOpen ? 268 : "auto", background: "var(--surface-overlay)", border: `1px solid ${PAL.panelLine}`, borderRadius: 9, boxShadow: "0 2px 10px rgba(28,25,20,0.16)", overflow: "hidden", display: "flex", flexDirection: "column", maxHeight: "100%", minHeight: 0 }}>
               <button onClick={() => setLayersOpen((o) => !o)} style={{ display: "flex", alignItems: "center", gap: 7, width: "100%", padding: "8px 11px", border: "none", background: "transparent", color: PAL.ink, cursor: "pointer", fontFamily: "inherit", fontSize: 12.5, fontWeight: 700 }}>
                 <span style={{ color: PAL.accent }}>❖</span> Layers <span style={{ flex: 1 }} /> <span style={{ color: PAL.muted, fontWeight: 500 }}>{layersOpen ? "▾" : "▸"}</span>
               </button>
               {layersOpen && (
-                <div style={{ padding: "2px 11px 10px", maxHeight: "62vh", overflowY: "auto" }}>
+                <div style={{ padding: "2px 11px 10px", overflowY: "auto", flex: 1, minHeight: 0 }}>
                   <LayerPanel overlays={overlays} setOverlays={setOverlays} county={restored?.county || county} layerStatus={layerStatus} coverage={coverage}
                     /* B1076/B1077 — the flood group scopes its district rows off the SAME
                        drainage context the Stormwater readout uses, so the panel and the
@@ -18959,6 +19205,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                        The flood group's district scoping reasons over the identify county
                        and falls back to THIS, never to the selector. */
                     siteCounty={restored?.county || null}
+                    /* NEW-2 — which STATE this site is in, resolved from its own origin with NO
+                       network (siteRegion.js is envelope math). A Texas-only source is then named
+                       as "not available in Colorado" instead of being offered as a toggle that
+                       silently produces an empty map — on a due-diligence screen those are
+                       different facts, and only one of them is a finding. */
+                    siteState={siteStateId}
                     basemap={{
                       value: origin ? basemapSrc : "off",
                       onChange: setBasemapSrc,
@@ -19034,6 +19286,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             </div>
           )}
           </div>
+          </div>
 
           {/* empty state */}
           {parcels.length === 0 && els.length === 0 && !underlay && (
@@ -19089,7 +19342,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             const badgeMaxW = calibPlace.maxWidth ?? undefined;
             return (
               <div onClick={warn ? () => { setShowAerial(true); setLeftPanel("references"); setOvCalib({ target: "underlay", kind: "trace", pts: [] }); } : undefined}
-                style={{ position: "absolute", left: calibPlace.left, bottom: calibPlace.bottom, maxWidth: badgeMaxW, display: "flex", alignItems: "center", gap: 8, background: cfg.bg, color: "#fff", padding: "5px 11px", borderRadius: 99, fontSize: 11.5, fontWeight: 600, boxShadow: "0 4px 14px rgba(0,0,0,0.22)", cursor: warn ? "pointer" : "default", zIndex: 6, overflow: "hidden" }}>
+                style={{ position: "absolute", left: calibPlace.left, bottom: calibPlace.bottom, maxWidth: badgeMaxW, display: "flex", alignItems: "center", gap: 8, background: cfg.bg, color: "#fff", padding: "5px 11px", borderRadius: 99, fontSize: 11.5, fontWeight: 600, boxShadow: "0 4px 14px rgba(0,0,0,0.22)", cursor: warn ? "pointer" : "default", zIndex: MAP_CHROME_Z.furniture, overflow: "hidden" }}>
                 <span style={{ width: 7, height: 7, borderRadius: 99, background: cfg.dot, flex: "none", animation: warn ? "pf-pulse 1.1s ease-in-out infinite" : "none" }} />
                 <span ref={calibBadgeRef} style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                   {cfg.text}{cfg.sub && <span style={{ fontWeight: 400, opacity: 0.85, fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS }}>· {cfg.sub}</span>}
@@ -19111,7 +19364,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             const zb = { width: 30, height: 30, display: "grid", placeItems: "center", border: `1px solid ${PAL.panelLine}`, background: "var(--surface-overlay)", color: PAL.ink, cursor: "pointer", fontSize: 16, fontWeight: 600 };
             const zoomBy = (f) => setView((v) => { const nv = zoomAround({ scale: v.ppf, tx: v.offX, ty: v.offY }, f, size.w / 2, size.h / 2, 0.02, 8); return { ppf: nv.scale, offX: nv.tx, offY: nv.ty }; });
             return (
-              <div data-export="skip" style={{ position: "absolute", right: 14, bottom: 100, display: "flex", flexDirection: "column", borderRadius: 9, overflow: "hidden", boxShadow: "0 4px 14px rgba(0,0,0,0.18)", zIndex: 6 }}>
+              <div data-export="skip" style={{ position: "absolute", right: 14, bottom: 100, display: "flex", flexDirection: "column", borderRadius: 9, overflow: "hidden", boxShadow: "0 4px 14px rgba(0,0,0,0.18)", zIndex: MAP_CHROME_Z.control }}>
                 <button className="gbtn" aria-label="Zoom in" title="Zoom in" style={{ ...zb, borderRadius: 0 }} onClick={() => zoomBy(1.25)}>＋</button>
                 <button className="gbtn" aria-label="Zoom out" title="Zoom out" style={{ ...zb, borderTop: "none", borderRadius: 0 }} onClick={() => zoomBy(1 / 1.25)}>－</button>
                 <button className="gbtn" aria-label="Zoom to fit" title="Zoom to fit" style={{ ...zb, borderTop: "none", borderRadius: 0, fontSize: 14 }} onClick={fit}>⤢</button>
@@ -22167,6 +22420,19 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         </div>
       )}
       {/* Version history (automatic local backups, B126) — restore an earlier saved version */}
+      {storageOpen && (
+        <div onClick={() => setStorageOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 3000, background: "rgba(20,18,15,0.55)", display: "grid", placeItems: "center" }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ background: SURF_RAISED, borderRadius: 14, boxShadow: "0 20px 60px rgba(0,0,0,0.35)", padding: 22, width: 420, maxWidth: "92vw", maxHeight: "82vh", overflowY: "auto" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 2 }}>
+              <h2 style={{ margin: 0, fontSize: 16, color: PAL.ink }}>Storage</h2>
+              <button className="gbtn" onClick={() => setStorageOpen(false)} style={{ ...chip }}>Close ✕</button>
+            </div>
+            <Suspense fallback={<div style={{ fontSize: 12, color: PAL.muted, padding: "18px 0" }}>Checking storage…</div>}>
+              <StoragePanel />
+            </Suspense>
+          </div>
+        </div>
+      )}
       {versionsOpen && (
         <div onClick={() => setVersionsOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 3000, background: "rgba(20,18,15,0.55)", display: "grid", placeItems: "center" }}>
           <div onClick={(e) => e.stopPropagation()} style={{ background: SURF_RAISED, borderRadius: 14, boxShadow: "0 20px 60px rgba(0,0,0,0.35)", padding: 22, width: 460, maxWidth: "92vw", maxHeight: "82vh", overflowY: "auto" }}>
@@ -22905,19 +23171,60 @@ function dimSlideFor(el, allEls) {
  * none of it depends on the view. It was being recomputed, per element, on every frame of a
  * gesture that cannot change its answer.
  */
-function resolveElNeighbors(allEls) {
+function resolveElNeighbors(allEls, settings) {
   const out = new Map();
   const list = allEls || [];
+  const wantDock = !!(settings && (settings.showDocks || settings.showGrid));
   for (const el of list) {
+    const dogEars = list.filter((x) => x.attachedTo === el.id && x.dogEar);
     out.set(el.id, {
       // A bump-out (dog-ear) renders with its HOST building's resolved style — see the styleEl note below.
       styleEl: el.dogEar ? (list.find((h) => h.id === el.attachedTo && h.type === "building" && !h.points) || el) : el,
       curbEdges: curbEdgesOf(el, list),
-      dogEars: list.filter((x) => x.attachedTo === el.id && x.dogEar),
+      dogEars,
       dimSlide: dimSlideFor(el, list),
+      dockPlan: wantDock ? resolveDockPlan(el, settings, dogEars) : null,
     });
   }
   return out;
+}
+
+/* ---- The per-building DOCK PLAN (NEW-3) -----------------------------------------------------
+ *
+ * THE SAME MISTAKE B1352 FIXED FOR CURBS, IN THE PLACE B1352 DID NOT REACH.
+ *
+ * `renderElPx` recomputed ALL of this inside itself, per building, on every frame of every pan and
+ * zoom: the validated dock sides, the resolved grid settings, `computeBuildingGrid` (a bay-count
+ * SEARCH over the footprint), the footprint axes, and `dockDoorRun` per dock side (which runs the
+ * door-placement solver). Not one of them takes the view. `settings.showDocks` and
+ * `settings.showGrid` both DEFAULT TO TRUE, so on a default plan every building paid for the whole
+ * lot on every frame — and the count of buildings is exactly one of the axes that rises through a
+ * work session, which is what makes this an AMPLIFICATION cost rather than a fixed one.
+ *
+ * MEASURED (ui-audit/session-axes.mjs, the layers axis): turning the drawn layers on takes an
+ * identical pan-and-zoom gesture from 1,613 ms of main-thread work to 2,065 ms on the 62-element
+ * reference plan — the first rung of that ladder IS this code path.
+ *
+ * ⛔ BYTE-IDENTICAL BY CONSTRUCTION, which is the only reason this can ship against the B1345
+ * pixel bar without a pixel diff to argue about: same pure functions, same arguments, same
+ * outputs — moved from "once per frame per building" to "once per model-or-settings change per
+ * building". There is no approximation, no threshold and no new geometry here.
+ *
+ * ⚠ WHAT IS DELIBERATELY *NOT* CACHED: the `buildingChrome` path for a footprint under live
+ * reshape (`el.footEdit`) recomputes its grid from the LIVE `frameBBox` every frame ON PURPOSE, so
+ * the grid tracks the drag frame-by-frame. Do not "unify" that into this record.
+ */
+function resolveDockPlan(el, settings, dogEars) {
+  if (!el || el.type !== "building") return null;
+  const dock = el.dock || "cross";
+  const { dside, dockSides } = dockSidesFor(el);
+  const g = resolveGridSettings(el, settings);
+  const grid = computeBuildingGrid({ length: footprintLength(el), depth: footprintDepth(el), dock, grid: g });
+  const axes = footprintAxes(el);
+  const lenOffsets = grid.lengthLines.map((l) => l.at);
+  const runs = {};
+  for (const s of dockSides) runs[s] = dockDoorRun(el, s, dogEars, lenOffsets, g);
+  return { dock, dside, dockSides, g, grid, axes, runs };
 }
 /* element renderer working in PIXEL space (points pre-transformed by f2p).
    We draw the rect via the rotated group around the element's pixel center.
@@ -23256,12 +23563,14 @@ function renderElPx(el, f2p, isSel, tool, settings, startMoveEl, onElDouble, nb,
     // (a dock-less legacy building reads as cross-dock everywhere else). And read the dock
     // side from dockSidesFor — it VALIDATES el.dockSide against the current long axis, so an
     // axis-flipping resize can't desync the grid from footprintAxes below.
-    const dock = el.dock || "cross";
-    const { dside: side, dockSides } = dockSidesFor(el);
+    /* NEW-3 — the view-INDEPENDENT half of this block is resolved once per model/settings change
+     * (resolveDockPlan, via B1352's neighbour record) instead of once per frame per building. The
+     * inline fallback keeps this function total for any caller with no resolved record; it is the
+     * identical computation, so the two branches cannot draw different pictures. */
+    const dockPlanDogEars = nb ? nb.dogEars : [];
+    const plan = (nb && nb.dockPlan) || resolveDockPlan(el, settings, dockPlanDogEars);
+    const { dock, dside: side, dockSides, g, grid, axes: fax } = plan;
     const Dpx = Math.min(8, Math.min(el.w, el.h) * 0.25) * ppf; // dock-apron depth
-    const g = resolveGridSettings(el, settings);
-    const grid = computeBuildingGrid({ length: footprintLength(el), depth: footprintDepth(el), dock, grid: g });
-    const fax = footprintAxes(el);              // { depth:'w'|'h', length:'w'|'h' }
     const lengthHoriz = fax.length === "w";     // the length axis runs along x
     const depthVert = fax.depth === "h";        // the depth axis runs along y
     const depthMaxFt = depthVert ? el.h : el.w; // = D (ft)
@@ -23305,11 +23614,10 @@ function renderElPx(el, f2p, isSel, tool, settings, startMoveEl, onElDouble, nb,
     // the panel count exactly. The hardcoded 12′ spacing is now g.doorOC. (The apron rect
     // keeps the data-dock-apron hook added on main for the truck-court / measurement path.)
     if (settings.showDocks && dockSides.length) {
-      const dogEars = nb ? nb.dogEars : [];
-      const lenOffsets = grid.lengthLines.map((l) => l.at);
       const leaf = g.doorWidth * ppf;
       dockSides.forEach((s) => {
-        const { startF, endF, horiz, doors } = dockDoorRun(el, s, dogEars, lenOffsets, g);
+        // NEW-3 — the door run for this side, resolved with the dock plan above (see resolveDockPlan).
+        const { startF, endF, horiz, doors } = plan.runs[s] || dockDoorRun(el, s, dockPlanDogEars, grid.lengthLines.map((l) => l.at), g);
         if (!doors.length) return;
         if (horiz) {
           const by = s === "bottom" ? h - Dpx : 0;
@@ -23320,18 +23628,33 @@ function renderElPx(el, f2p, isSel, tool, settings, startMoveEl, onElDouble, nb,
           const ay = tl.y + startF * ppf, ah = (endF - startF) * ppf;
           parts.push(<rect key={`db${s}`} data-dock-apron x={tl.x + bx} y={ay} width={Dpx} height={ah} fill="#9aa3b0" fillOpacity={0.9} stroke="#5b6470" strokeWidth={1} />);
         }
-        /* NEW-2 — THE DOOR LEAVES DELIBERATELY DO **NOT** COLLAPSE, and this is the measurement
-         * that decided it rather than a judgement call. Folding the N leaf <rect>s into the N
-         * subpaths of one <path> — the same transformation that makes the stall striping above
-         * byte-identical — shifts the picture here by up to 23/255 on 0.02–0.41% of canvas
-         * pixels (ui-audit/verify-stall-lod-parity.mjs, four zoom rungs). The cause is specific
-         * and not fixable from this side: a leaf's fill is SEMI-TRANSPARENT (fillOpacity 0.95),
-         * so where two leaves' antialiased edges share pixel coverage — which at any zoom fine
-         * enough to be worth collapsing is always — compositing them one at a time and
-         * compositing their union are genuinely different colours. The stall dividers are
-         * opaque and single-coloured, which is exactly why the same fold is exact for them.
-         * That is 424 nodes left on the table on the owner's plan, knowingly, because the
-         * constraint is "visually identical or it does not ship" and this is not identical. */
+        /* ⛔ NEW-5 — THE DOOR LEAVES STILL DO NOT FOLD, AND THIS IS THE THIRD MEASUREMENT, NOT THE
+         * THIRD OPINION. B1350 rejected the fold twice under B1345's byte-identity bar. The owner
+         * retired that bar on 2026-08-06 and replaced it with PERCEPTUAL-PARITY (/CLAUDE.md) —
+         * "imperceptible at working zoom" — precisely so a difference like this one could be judged
+         * on whether he can SEE it rather than on whether the file matches. So the fold was built,
+         * armed, and measured again against the NEW bar, on two builds differing only in the gate:
+         *
+         *   ppf    nodes          perceived ΔE00 (bar 1.0)
+         *   0.02   940 → 516      2.188
+         *   0.10   976 → 552      1.568
+         *   0.35   1213 → 789     1.749      <- working zoom
+         *   1.20   1560 → 1332    1.196
+         *   3.00   980 → 980      byte-identical (gate off — the control)
+         *
+         * It recovers exactly the 424 nodes B1350 named, and it FAILS at every armed rung. The
+         * reason it fails is the reason PR #921 already established and this run confirms: N
+         * 95%-opacity <rect>s each fill-then-stroke, while one <path> fills every subpath and THEN
+         * strokes them, and at these zooms a door run is a band of overlapping sub-pixel marks
+         * where that ordering is a real change of picture, not an antialiasing seam. Opacity was
+         * separately tested and is innocent (both arms opaque: the difference does not move).
+         * ⛔ The bar was NOT moved to make this pass. The one modelling parameter the verdict turns
+         * on is PERCEIVED_ARCMIN (6 — the half-period at the contrast-sensitivity peak; 12 would
+         * roughly halve every number above and this would clear). It was chosen at the strict end
+         * BEFORE this was measured and deliberately left alone AFTER. That is an owner call with a
+         * price of 424 nodes on it, and it is on B1350 and OWNER-TODO — not a judgement to make
+         * here. The mechanism is ready; do not re-derive it, and do not try a fourth time without
+         * either that decision or a Chromium that rasterises the two primitives alike. */
         doors.forEach((cF, i) => {
           if (horiz) {
             const by = s === "bottom" ? h - Dpx : 0;
@@ -25673,9 +25996,23 @@ function YieldPanel({
           // amber while a verdict is blocked loading (state D). v3 B3 — an unknown age reads
           // "Flood data: not checked" (never a bare "Flood data"); a "·" separates the ↻.
           <span onClick={(e) => e.stopPropagation()} style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 10.5, color: verdictLoading ? Y.warnText : Y.muted, whiteSpace: "nowrap", flex: "none" }}>
+            {/* NEW-4 — THE LIGHT (owner: "leave it green while elements are in the same spot, once
+                they're moved turn it red so we know to recheck"). One dot, no new line: green while
+                the parcels / fill / ponds the last check was computed against are where they were,
+                red once one of them moves, and nothing at all before a first check — a dot over a
+                plan that was never checked would read as a verdict. The reason rides the hover
+                (PANEL-BREVITY: a title is not visible copy), and `data-drain-freshness` lets a
+                headless check assert the state without reading colours. */}
+            {drainage.freshness && (drainage.freshness.state === "fresh" || drainage.freshness.state === "stale") && (
+              <span data-drain-freshness={drainage.freshness.state} aria-label={drainage.freshness.state === "stale" ? "Flood check is out of date" : "Flood check is up to date"}
+                title={drainage.freshness.note || "The flood check still matches what's drawn."}
+                style={{ color: drainage.freshness.state === "stale" ? Y.dangerText : "var(--success-text)", fontSize: 9, lineHeight: 1, flex: "none" }}>●</span>
+            )}
             {/* NEW-20(a) — while a fetch is in flight the line says so ("checking…") instead of an
-                unchanging "not checked", and the ↻ spins + disables so the click is never silent. */}
-            <span>{drainRefreshing ? "Flood data: checking…" : !drainage.floodChecked ? "Flood data: not checked" : floodAgeMs != null ? `Flood data ${formatAge(floodAgeMs)}` : "Flood data: checked"}</span>
+                unchanging "not checked", and the ↻ spins + disables so the click is never silent.
+                NEW-4 — a STALE check says so instead of quoting an age: "3d ago" is true and useless
+                when the answer no longer describes the drawing. It REPLACES the age, never joins it. */}
+            <span>{drainRefreshing ? "Flood data: checking…" : !drainage.floodChecked ? "Flood data: not checked" : drainage.freshness?.state === "stale" ? "Flood data: re-check" : floodAgeMs != null ? `Flood data ${formatAge(floodAgeMs)}` : "Flood data: checked"}</span>
             <span aria-hidden="true" style={{ color: Y.faint }}>·</span>
             <button type="button" onClick={drainRefreshing ? undefined : drainage.onCheck} disabled={drainRefreshing} aria-busy={drainRefreshing} title={drainRefreshing ? "Re-checking the flood data…" : "Re-pull the GIS flood data for the drawn area."} style={{ border: "none", background: "none", color: verdictLoading ? Y.warnText : "var(--accent)", cursor: drainRefreshing ? "default" : "pointer", fontSize: 11, fontWeight: 700, fontFamily: "inherit", padding: 0, lineHeight: 1, display: "inline-block", animation: drainRefreshing ? "spin 0.9s linear infinite" : undefined }} aria-label="Re-check flood data">↻</button>
           </span>

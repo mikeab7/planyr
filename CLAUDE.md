@@ -412,6 +412,41 @@ rules are binding shorthand, not optional style. (Full-text home so briefs stay 
   EXCEPTION is user-placed content the user opted into putting on top — a promoted reference (B1198), a markup
   with `behindEls: false` — which is selectable, lockable and demotable in one click from the menu that put it
   there. Guard: the e2e spec **chrome-swallows-press** (mutation-checked both ways).
+- **PERCEPTUAL-PARITY** — **The bar a change to the PICTURE has to clear is that the owner cannot SEE it at
+  working zoom — not that the file is unchanged.** (Owner amendment, 2026-08-06, verbatim: *"imperceptible at
+  working zoom assuming that one makes the most sense"*, and *"I've got a 2K display, so I'm not gonna see
+  certain levels of detail."*) **This SUPERSEDES the B1345 bar — byte-identical, or one unit of 255 on one
+  channel — for every LOD-class change.** B1345's bar measured the FILE, and it cost real work twice: B1350's
+  dock-door leaves were refused at 12–23/255 and 424 DOM nodes stayed on the table, the second time for a
+  cause that turned out to be that Chromium does not rasterise a `<rect>` and a rectangular `<path>` to the
+  same antialiased edge at any zoom — so no gate could ever have saved it.
+  1. **THE METRIC IS CIEDE2000 (ΔE00) ON AN ACUITY-FILTERED PAIR**, not a channel delta — 10/255 in a dark
+     blue and 10/255 in a light yellow are nothing alike to a viewer. Both renders are low-pass filtered
+     first, at **two scales**, because a raw diff cannot tell *the same ink moved a sub-pixel* (invisible)
+     from *a line of ink removed* (a downgrade) — both read ~23/255, and refusing both is what byte-identity
+     did. Engine: `ui-audit/lib/perceptualDiff.mjs`, driven by `ui-audit/verify-perceptual-parity.mjs`. The
+     **measurement did not go away** — the pixel-diff harness and its dependency-free PNG decoder are the
+     same ones; the threshold and the metric changed.
+  2. **THE BAR, three magnitudes, all pinned by unit test** (`test/perceptualParity.test.js`, whose CIEDE2000
+     is checked against Sharma/Wu/Dalal's published vectors): **detail ΔE00 ≤ 6.0** near acuity (what stops a
+     fine texture being replaced by its own local average) · **perceived ΔE00 ≤ 1.0** — the classical JND —
+     and **perceived frame-mean ΔE00 ≤ 0.10** (what stops a thousand invisible differences adding up).
+     Coverage is REPORTED but does not gate: for an antialiasing-class change the pixels touched scale with
+     total edge length, i.e. with how much is drawn, not with how much changed.
+  3. **THE VIEWING GEOMETRY IS STATED, NOT ASSUMED, and it is a parameter.** 20/20 acuity (1 arcmin), 600 mm
+     viewing distance, 0.50 mm per CSS pixel (a 27″ 2560-wide panel at the owner's measured dpr ~2.15) → one
+     CSS pixel subtends ~2.9 arcmin. The two numbers this repo cannot measure — his panel's physical width
+     and how far he sits from it — are on `OWNER-TODO.md`, and every run prints the geometry it used.
+  4. **⛔ THE THRESHOLD IS CHOSEN BEFORE THE MEASUREMENT, NEVER AFTER.** Picking a bar to suit a result you
+     have already seen is not a measurement. Moving one of the three numbers is a product decision about
+     drawing quality: argue it on the item, name the price, never nudge it to make a run pass. The first real
+     use of this bar REJECTED the change it was introduced for (B1350's fold: perceived ΔE00 1.20–2.19), and
+     the bar was left alone — that is the standard.
+  5. **EVERY change that alters the picture records a before/after crop in the PR**, so the owner sees what
+     he approved. `--shots` writes them.
+  6. **The old bar is not gone, it is DEMOTED**: byte-identical is still the right claim to make when a change
+     genuinely is byte-identical (B1437's dock-plan cache), and saying so is stronger than a ΔE00 of 0.
+
 - **DEDUPE-FIRST** — Search **Open, ⏳ Verify, AND Done** (`^### B` headings + `#tags` + symbols; grep
   `BACKLOG_OPEN.md` for the live set) before minting a `B#`. A matching prior item gets the recurrence
   treatment (back to Open, `Recurrence:` line, `(×N)` title) — never a fresh number. When you DO mint,
@@ -419,6 +454,36 @@ rules are binding shorthand, not optional style. (Full-text home so briefs stay 
 - **TOMBSTONE-DELETES** — Every removal path records tombstones for its **FULL cascade set** before the
   next flush, so a merge / sync can't resurrect the deleted item (or raise a false "changed in another
   session" conflict). Applies to every delete handler, not just the obvious one. (B276 / B556 / B596 / B612.)
+- **TIER-BY-REBUILDABILITY** — **User work and re-fetchable cache NEVER share a storage tier, and anything
+  that can be re-fetched belongs in the LARGE one** (B1427, 2026-08-06, after a disposable map cache
+  crowded the owner's saved plans out of a ~5 MB store — the B473 "your work is safe in the cloud, this
+  device's storage is full" banner, with 400 KB terrain tiles keeping their space while a real plan was
+  refused). Four parts, all binding:
+  1. **THE TWO TIERS ARE DIFFERENT BY THREE ORDERS OF MAGNITUDE AND ARE NEVER REASONED ABOUT AS ONE.**
+     Measured on the owner's own Chrome: **localStorage 3.88 MB across 156 keys against a hard ~5 MB
+     per-origin cap (~78% full)** · **IndexedDB 35.9 MB against a 10,275.9 MB quota (0.3%), persisted.**
+     Never sum them, never report a combined figure, never call the large one "uncapped" or "a store that
+     can't fill" (`localDb.js`'s header said exactly that, and that framing is what let the mistake live
+     for a year). A combined "4 MB of 10 GB" reads as empty while the store that matters is about to throw.
+  2. **THE SMALL STORE IS FOR IRREPLACEABLE WORK ONLY** — saved plans, the cloud index, the version ring,
+     the autosave. A cache that competes with it is a **priority inversion**: pure cache holding room that
+     irreplaceable user work needs. Put the cache in IndexedDB (`gisCache.js`'s persistent tier, B1427)
+     and keep its own budget there — bounded is still right, it was just bounded against the wrong ceiling.
+  3. **A BUDGET IS NOT OPTIONAL, EVEN IN THE LARGE STORE.** `SitePlannerApp.jsx` calls `idbPersist()`, so
+     this origin is **PERSISTENT** — the browser will never evict it for us. That is correct for data safety
+     and it makes the app solely responsible for its own size.
+  4. **NO EVICTION MAY EVER COST DATA THAT CANNOT BE REBUILT.** Every reclaimable class must **declare a
+     rehydration source** (cloud Storage, the source PDF, a re-fetchable GIS service) before anything is
+     removed; a class that cannot name one for EVERY member is not reclaimable at any pressure. B474's
+     hazard is the precedent — "a raster whose src had been dropped (idbKey set) was then unrecoverable" —
+     so reference images declare `rebuild: null` and are never bulk-cleared. Declarations live in
+     `shared/storage/storageCensus.js`; `shared/storage/storageReclaim.js` is the only module allowed to
+     act on them, and it refuses the whole pass if any class claims to be reclaimable with no way back.
+  - **Corollary — MEASURE, don't reason.** Nothing knew its own size before B1429, which is why the first
+    diagnosis of this crisis blamed IndexedDB and was wrong by three orders of magnitude. Both tiers are
+    now surfaced (the planner's plan menu → Storage, reachable signed-out) and both ride every storage-failure telemetry
+    row, tier-labelled `local_*` / `idb_*`. Guards: the repo-root `test/` suites **storageReclaim** (incl.
+    the raster-with-no-cloud-copy case) and **gisCache**.
 - **ROWS-CANONICAL-ON-SEED** — **Which ledger wins when a plan is opened, decided explicitly (B1113,
   2026-07-29, after the ambiguity cost a real plan three times).** A signed-in plan has THREE copies of
   every element: the `site_elements` ROWS, the on-device CACHE (localStorage mirror), and the pending-edit

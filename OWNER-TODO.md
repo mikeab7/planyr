@@ -5,7 +5,57 @@
 > step; tick/remove it once he's done it. This is the **owner's** plate only. Browser click-throughs and
 > signed-in spot-checks are the Claude cohort's job (`VERIFICATION.md`), **never** Michael's — do NOT list those here.
 
-_Last updated: 2026-07-31._
+_Last updated: 2026-08-06._
+
+## ✅ CLOSED — the flood-and-drainage check now only runs when you ask for it (B1349 → B1442)
+
+> **You already decided this one and it hadn't been carried through. That's on us, not you.** Your words:
+> *"i thought we talked about doing this only manually … seems like it only needs it once after relevant elements
+> are moved, and so maybe we just only do it manually, leave it green while elements are in the same spot, once
+> they're moved turn it red so we know to recheck."*
+>
+> **Done, exactly that.** Opening a plan now fetches nothing at all — no waiting, no county servers, no terrain
+> machinery. Next to where it used to say how old the flood data was, there is now a small **green dot** while the
+> answer on screen still describes what you've drawn, and it turns **red** the moment you move something that
+> genuinely changes the answer — a pond, or fill. Hovering it tells you why. Moving a car park or a road leaves it
+> green on purpose: a light that goes red for everything is a light you'd learn to ignore.
+> The re-check itself is also faster — three flood-data lookups that used to happen one after another now happen
+> at the same time.
+>
+> **Nothing left on your end.** The old question below is answered and closed.
+
+## 🎨 One call, worth 424 pieces of drawing: how strict should "I can't see the difference" be? (B1350)
+
+> **Background in one line: you told me to stop measuring whether the picture's FILE changed and start measuring
+> whether YOU can see it.** I built that — a real perceptual test, not a vibe — and the very first thing I pointed
+> it at was the dock doors you mentioned.
+>
+> **The result was honest and it went against us.** Collapsing the dock doors would take 424 pieces out of the
+> drawing (they're the ones that never change unless you change the building, exactly as you said). Measured
+> against the new test, at every zoom you'd actually work at, it comes in **just over** the line — not wildly over,
+> but over.
+>
+> **Here's the thing, and it's the reason this is yours and not mine.** The test has one dial in it: how far the
+> eye blurs things together before it decides two pictures differ. There are two defensible settings for that dial,
+> both standard. I picked the **stricter** one — and I picked it *before* I ran the measurement, on purpose, so I
+> couldn't be accused of choosing whichever setting gave me the answer I wanted. On the looser setting, which is
+> just as defensible, the dock doors comfortably pass.
+>
+> **So: do you want me to move the dial one notch looser?**
+> - **Yes** → the dock doors ship, you get 424 fewer pieces on the drawing, and a whole class of similar wins
+>   becomes available. The risk: the test becomes slightly more forgiving for every future change too.
+> - **No** → we keep the strict setting and the dock doors stay as they are. Nothing breaks; we just leave that on
+>   the table for a third time.
+>
+> I genuinely don't have a strong view. I'd probably say yes — but the reason I'm asking rather than deciding is
+> that I already set this line once this week, and moving it right after it gave me an answer I didn't like is
+> exactly the move I shouldn't make on my own.
+
+## 📏 Two small facts about your monitor, whenever you're near it (B1441)
+
+> The "can he see it?" test needs to know how big a pixel physically is on your screen and roughly how far you sit
+> from it. I've assumed a 27-inch 2K panel at about two feet. **If that's wrong, tell me and I'll re-run every
+> measurement** — it's a one-line change and it moves the answers. If it's roughly right, ignore this.
 
 ## 🌊 One call to make: should the flood-and-drainage check run by itself the moment a plan opens? (B1349)
 
@@ -26,8 +76,15 @@ _Last updated: 2026-07-31._
 > - **Make it a button.** Opening a plan is as light as it can be, and the stormwater panel says "not checked yet —
 >   ↻ Re-check" until you ask. Nothing is lost, but you'd press it once per new plan.
 >
-> There is no wrong answer here and nothing breaks either way — it's a taste call about what you want the first
-> few seconds after opening a plan to feel like.
+> **NEW — I've now MEASURED what it costs you, so this isn't a taste call in the dark (2026-08-06).** I built a
+> stopwatch that breaks the whole "open a plan → able to drag it" wait into named pieces, and ran it twelve times
+> with this check switched on and off, alternating, so a slow patch on the machine couldn't favour either side.
+> **Turning it off buys you about half a second of a roughly seven-second wait** — real, but small, and the two
+> sets of runs overlap. It is NOT the thing making a reload feel slow: with it switched off completely, opening a
+> plan still takes essentially as long, and looks the same at every step.
+>
+> So the choice is genuinely just taste now: half a second sooner, versus the drainage answers being there without
+> you asking. There is no wrong answer and nothing breaks either way.
 - [ ] **Tell me: leave the drainage check automatic, or turn it into a button?** One word either way and I'll do it.
 
 

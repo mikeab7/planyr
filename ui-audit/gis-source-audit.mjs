@@ -20,6 +20,8 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { auditRegistry, GIS_SOURCES, looksNonProduction } from "../src/shared/gis/sources.js";
+// NEW-4 — the coverage fixtures live in their own module now (off the app bundle).
+import { SOURCE_FIXTURES, SOURCE_DOCS } from "../src/shared/gis/sourceFixtures.js";
 import { COUNTIES } from "../src/workspaces/site-planner/lib/counties.js";
 import { verifiedOnFor, candidateUrlFor, provenanceFor } from "../src/workspaces/site-planner/lib/countiesProvenance.js";
 
@@ -112,7 +114,7 @@ export function scanCountyProvenance() {
 }
 
 export function auditSources() {
-  const registryProblems = auditRegistry(GIS_SOURCES).problems;
+  const registryProblems = auditRegistry(GIS_SOURCES, SOURCE_FIXTURES, SOURCE_DOCS).problems;
   const inlineUrlProblems = scanInlineUrls();
   const countyProblems = scanCountyProvenance();
   return {

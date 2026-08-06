@@ -6,6 +6,8 @@
 import { describe, it, expect } from "vitest";
 import { sampleWse02Point, sampleWse100Point, wse100CandidatesForPoint, wse02CandidatesForPoint, FBCDD_WSE02_URL } from "../src/workspaces/site-planner/lib/fbcdWse.js";
 import { gisSource } from "../src/shared/gis/sources.js";
+// NEW-4 — the coverage fixtures live off the app bundle now (sourceFixtures.js header).
+import { fixturesFor } from "../src/shared/gis/sourceFixtures.js";
 import { projectToGrid } from "../src/shared/coordinates/index.js";
 
 const okJson = (body) => ({ ok: true, json: async () => body });
@@ -41,8 +43,8 @@ describe("the fbcddWse02 registry row (GIS Source Registry)", () => {
     expect(s.tier).toBe("production");
     expect(s.serviceUrl).toBe("https://gisportal.fortbendcountytx.gov/image/rest/services/500YR_WSE/ImageServer");
     expect(s.label).toMatch(/DRAFT/); // the draft-study caveat is part of the row's identity
-    expect(s.sampleFixtures.some((f) => f.expectValueRange)).toBe(true);
-    expect(s.sampleFixtures.some((f) => f.expectNoData)).toBe(true);
+    expect(fixturesFor("fbcddWse02").sampleFixtures.some((f) => f.expectValueRange)).toBe(true);
+    expect(fixturesFor("fbcddWse02").sampleFixtures.some((f) => f.expectNoData)).toBe(true);
     expect(FBCDD_WSE02_URL).toBe(s.serviceUrl); // the sampler reads the registry, no inline URL
   });
 });
@@ -113,10 +115,10 @@ describe("the fbcddWse100 registry row — multiplex table shape (B807)", () => 
     expect(s.kind).toBe("raster");
     expect(s.tier).toBe("production");
     expect(s.label).toMatch(/DRAFT/);
-    expect(s.sampleFixtures.some((f) => f.expectValueRange)).toBe(true);
-    expect(s.sampleFixtures.some((f) => f.expectNoData)).toBe(true);
+    expect(fixturesFor("fbcddWse100").sampleFixtures.some((f) => f.expectValueRange)).toBe(true);
+    expect(fixturesFor("fbcddWse100").sampleFixtures.some((f) => f.expectNoData)).toBe(true);
     // per-fixture serviceUrl overrides stay on the same portal as the routing table
-    for (const f of s.sampleFixtures) if (f.serviceUrl) expect(f.serviceUrl.startsWith(s.multiplex.restBase)).toBe(true);
+    for (const f of fixturesFor("fbcddWse100").sampleFixtures) if (f.serviceUrl) expect(f.serviceUrl.startsWith(s.multiplex.restBase)).toBe(true);
     expect(s.serviceUrl.startsWith(s.multiplex.restBase)).toBe(true);
   });
   it("every routed service is a 100-yr WSE/WSEL product — never LOS / Depth / DxV — with a finite extent", () => {
@@ -224,12 +226,12 @@ describe("the fbcddWse02 registry row — provisional multiplex table (B827)", (
     expect(willow500.extent2278).toEqual(willow100.extent2278);
   });
   it("carries the Bain hole fixtures: in-coverage via the Willow serviceUrl + the mosaic expectNoData pin", () => {
-    const inCov = s2.sampleFixtures.find((f) => f.serviceUrl && /Willow_500YR/.test(f.serviceUrl));
+    const inCov = fixturesFor("fbcddWse02").sampleFixtures.find((f) => f.serviceUrl && /Willow_500YR/.test(f.serviceUrl));
     expect(inCov).toBeTruthy();
     expect(inCov.serviceUrl.startsWith(s2.multiplex.restBase)).toBe(true);
     expect(inCov.expectValueRange[0]).toBeLessThan(139.514);
     expect(inCov.expectValueRange[1]).toBeGreaterThan(139.514);
-    const holePin = s2.sampleFixtures.find((f) => f.expectNoData && !f.serviceUrl && f.point[0] === inCov.point[0] && f.point[1] === inCov.point[1]);
+    const holePin = fixturesFor("fbcddWse02").sampleFixtures.find((f) => f.expectNoData && !f.serviceUrl && f.point[0] === inCov.point[0] && f.point[1] === inCov.point[1]);
     expect(holePin).toBeTruthy();
   });
 });

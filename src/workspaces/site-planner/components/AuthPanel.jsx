@@ -152,6 +152,9 @@ function AccountView({ user, profileApi, initialTab, onClose }) {
           {/* Display theme (B389) — moved here from the row-1 gear so it lives with your account settings */}
           <div style={{ height: 1, background: PAL.line, margin: "16px 0 12px" }} />
           <ThemePicker />
+          {/* Storage on this device (NEW-3) lives in the planner's plan menu, NOT here — this file
+              lands in the shared ENTRY chunk, so even a lazy stub is downloaded by every route and
+              pushed the Notes route past its bundle ceiling. See SitePlanner's `storageOpen`. */}
         </div>
       )}
 

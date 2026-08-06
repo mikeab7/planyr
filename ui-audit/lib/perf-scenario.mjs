@@ -123,8 +123,28 @@ function callouts() {
   });
 }
 
+/* ---- CONTROL ARMS (NEW-1, phase 3) -------------------------------------------------------------
+ * A hypothesis about boot is only settled by a run with the suspect TURNED OFF, measured the same
+ * way and interleaved with the baseline. These arms exist so that control is a SEEDED SETTING —
+ * the product's own switch, flipped in the plan the harness loads — and never a patched build or a
+ * monkey-patched global, either of which measures a different program.
+ *
+ *   drainageAutoFacts:false   → `settings.drainage.autoFacts = false`, which is exactly what
+ *                               `drainAutoEnabled` in SitePlanner.jsx reads. It disables the
+ *                               LOAD-kind drainage facts pass (B860) that B1349 put behind a
+ *                               requestIdleCallback with a hard 4 s ceiling — the arm that settles
+ *                               whether that ceiling and time-to-first-drag are the same 4 seconds.
+ */
+export function scenarioArm(name) {
+  if (name === "no-drainage") return { drainageAutoFacts: false };
+  return {};
+}
+
 /** The full site record, in the shape the logged-out planner store persists. */
-export function perfScenarioSite() {
+export function perfScenarioSite({ drainageAutoFacts } = {}) {
+  const settings = drainageAutoFacts === false
+    ? { ...PLAN.settings, drainage: { ...(PLAN.settings.drainage || {}), autoFacts: false } }
+    : PLAN.settings;
   return {
     id: SCENARIO_ID,
     groupId: SCENARIO_ID,
@@ -138,7 +158,7 @@ export function perfScenarioSite() {
     callouts: callouts(),
     markups: [],
     parcelDrawings: [],
-    settings: PLAN.settings,
+    settings,
     underlay: null,
     updatedAt: 0, // fixed, so the seeded bytes are byte-identical run to run
     data: { status: "active" },
@@ -146,10 +166,48 @@ export function perfScenarioSite() {
 }
 
 /** The localStorage seed script the harness injects before navigation. */
-export function perfScenarioSeed() {
-  const site = perfScenarioSite();
+export function perfScenarioSeed(opts) {
+  const site = perfScenarioSite(opts);
   return `(() => { try {
     localStorage.setItem('planarfit:sites:v1', JSON.stringify(${JSON.stringify({ [site.id]: site })}));
     localStorage.setItem('planarfit:currentSite:v1', ${JSON.stringify(site.id)});
+  } catch (e) {} })();`;
+}
+
+/* ---- A SECOND PLAN, for the plan-switch axis (NEW-2) ---------------------------------------
+ *
+ * The session-shaped probe has to answer "load plan A, load plan B, return to A — was A's
+ * geometry, listeners and memos ever released?", and that needs two plans in the store with
+ * DIFFERENT project ids, because the app switches projects by route (`#/project/<groupId>/site`).
+ *
+ * The companion is DERIVED from the same fixture by truncation rather than authored, for the same
+ * reason the primary is: a second hand-maintained plan would drift. Truncating also makes the
+ * switch OBSERVABLE — B holds a different element count from A, so "did the switch actually
+ * happen" is a counter the harness reads rather than a wait it hopes was long enough. A plan the
+ * probe cannot prove it opened is a rung that did not take (see lib/sessionAxes.mjs).
+ */
+export const SCENARIO_ID_B = "perf-reference-goose-creek-b";
+
+export function perfScenarioSiteB(fraction = 0.5) {
+  const base = perfScenarioSite();
+  const keep = Math.max(1, Math.round(base.els.length * fraction));
+  return {
+    ...base,
+    id: SCENARIO_ID_B,
+    groupId: SCENARIO_ID_B,
+    name: "Plan 2 (half) — perf reference B",
+    els: base.els.slice(0, keep),
+    measures: base.measures.slice(0, 4),
+    callouts: base.callouts.slice(0, 2),
+  };
+}
+
+/** Seed BOTH plans, opening on A. Same store keys, same shape — only the map has two entries. */
+export function perfScenarioSeedMulti(opts) {
+  const a = perfScenarioSite(opts);
+  const b = perfScenarioSiteB();
+  return `(() => { try {
+    localStorage.setItem('planarfit:sites:v1', JSON.stringify(${JSON.stringify({ [a.id]: a, [b.id]: b })}));
+    localStorage.setItem('planarfit:currentSite:v1', ${JSON.stringify(a.id)});
   } catch (e) {} })();`;
 }

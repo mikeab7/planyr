@@ -31,6 +31,8 @@ import { DEFAULT_CORRIDOR_WIDTH_FT, MIN_CORRIDOR_WIDTH_FT, MAX_CORRIDOR_WIDTH_FT
 // NEW-1 — which layers the "Show above plan" lift can actually move (only an AREA role; a line
 // or point layer is over the plan already). The model, never a local guess.
 import { configCanLift } from "../lib/mapStack.js";
+// NEW-4 — which layers the one-click sweep clears (everything but the drawing surface).
+import { sweepableLayerIds } from "../lib/layerWeight.js";
 import { PLANNER_BASEMAP_CHOICES } from "../lib/basemaps.js";
 import { mapillaryToken, setMapillaryToken, subscribeMapillaryToken } from "../lib/evidenceLayers.js";
 import { formatAge } from "../lib/gisCache.js";
@@ -77,6 +79,15 @@ export default function LayerPanel({
    * check that doesn't distinguish them reads the silent copy and concludes the live panel
    * went quiet. Stamped on the root as `data-surface` so any check can target the real one. */
   surface = "planner",
+  /* NEW-2 — WHICH STATE this site is in ("TX" | "CO" | null).
+   *
+   * Without it a Colorado user saw "Traffic counts (AADT)" and "Leaking petroleum tanks (LPST)"
+   * in the list, toggled them on, and got an empty map — with no way to tell "nothing here"
+   * from "we do not have this here". On a due-diligence screen those are completely different
+   * facts, and only one of them is a finding. Null (unknown location) hides NOTHING: the gate
+   * fires on a POSITIVE mismatch only, so a coordinate-less plan behaves exactly as before.
+   */
+  siteState = null,
 }) {
   const jur = jurisdictionFor(county);
   /* B1091(×2) — WHICH county the flood group reasons about.
@@ -129,7 +140,16 @@ export default function LayerPanel({
   const groupHead = (g, label, count) => (
     <button onClick={() => toggleGroup(g)} title={collapsed[g] ? "Show" : "Hide"}
       aria-expanded={!collapsed[g]} aria-label={`${collapsed[g] ? "Show" : "Hide"} ${label} layers`} /* B557 */
-      style={{ ...groupHdr, display: "flex", alignItems: "center", gap: 6, width: "100%", background: "transparent", border: "none", padding: "5px 0 4px", margin: "5px 0 3px", cursor: "pointer" }}>
+      /* NEW-3 — the header STICKS while its rows scroll. With twenty-eight layers in a short
+         scroll box the owner could see about four rows at a time and had no idea which group he
+         was looking at once he had scrolled. `--surface-overlay` (not transparent) is what stops
+         rows showing through as they pass under it.
+         ⛔ The stacking half lives in the global stylesheet (`.pf-sticky-group-hdr`), NOT inline:
+         this file may not contain a z-index token at all. That is the B1205 invariant — the layer
+         stacking model is fixed and the panel offers no ordering control — and `test/mapStack`
+         asserts it on the source text, deliberately bluntly, so it cannot be argued around. */
+      className="pf-sticky-group-hdr"
+      style={{ ...groupHdr, display: "flex", alignItems: "center", gap: 6, width: "100%", background: "var(--surface-overlay)", border: "none", padding: "5px 0 4px", margin: "5px 0 3px", cursor: "pointer" }}>
       <span style={{ fontSize: 8, lineHeight: 1, transform: collapsed[g] ? "rotate(-90deg)" : "none", display: "inline-block" }}>▼</span>
       <span style={{ flex: 1, textAlign: "left" }}>{label}</span>
       {count > 0 && <span style={{ color: INK, fontWeight: 700 }}>{count} on</span>}
@@ -140,6 +160,22 @@ export default function LayerPanel({
   // coverage) or it isn't configured (Mapillary with no token) — but NEVER if it's
   // currently ON (you should always see what you've enabled). Picker-only signal.
   const lowRel = (k, cfg) => !overlays[k]?.on && (coverage[k] === "out" || (cfg.needsSetup && !tok));
+
+  /* NEW-2 — CAN THIS LAYER ANSWER HERE AT ALL?
+   *
+   * Distinct from `lowRel` above, and the difference is the whole point. Relevance/coverage says
+   * "this source's data doesn't reach the current VIEW" — a soft, geographic, sometimes-wrong
+   * signal. This says "this source has no meaning in this STATE": the RRC is Texas, a CCN is a
+   * Texas PUC construct, LPST is TCEQ, TxDOT counts stop at the state line. No amount of panning
+   * will ever make one of them answer in Colorado, so listing it as an ordinary toggle is a lie
+   * of omission. Layers with no `states` are national and always in scope. */
+  const outOfState = (cfg) => !!(siteState && Array.isArray(cfg?.states) && !cfg.states.includes(siteState));
+  const STATE_NAME = { TX: "Texas", CO: "Colorado" };
+  const hereName = STATE_NAME[siteState] || "this state";
+  const outOfStateReason = (cfg) => {
+    const only = (cfg.states || []).map((c) => STATE_NAME[c] || c).join(" / ");
+    return `${only}-only — no ${hereName} equivalent is wired yet. Not a finding: it is a gap in what Planyr carries here.`;
+  };
 
   /* NEW-2/B1206 — THE ONE OPACITY CONTROL, used by every row shape in this panel (solo, the
    * pairwise City-limits-&-ETJ composite, and the N-ary merge groups). "I want to see through
@@ -226,7 +262,14 @@ export default function LayerPanel({
         <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
           <label style={{ display: "flex", gap: 6, alignItems: "center", cursor: "pointer", flex: 1, minWidth: 0 }}>
             <input type="checkbox" checked={st.on} onChange={(e) => set(k, { on: e.target.checked })} />
-            <span style={{ flex: 1, fontSize: compact ? 12 : 12.5, color: INK }}>{cfg.label}</span>
+            {/* NEW-3 — `minWidth: 0` is load-bearing, not tidiness. A flex item will not shrink
+                below its min-content width by default, so this label refused to narrow, wrapped
+                onto a second line, and pushed the agency chip beside it past the panel's
+                `overflow: hidden` edge — which is why the owner saw "FEMA flood zones" on two
+                lines with its chip clipped to "FEM". Letting the label shrink and ellipsise (with
+                the full text on hover) keeps every row exactly one line at any panel width. */}
+            <span title={cfg.label} style={{ flex: 1, minWidth: 0, fontSize: compact ? 12 : 12.5, color: INK,
+              overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{cfg.label}</span>
           </label>
           <RowInfo label={cfg.label} sections={infoSections} />
           {meta && (
@@ -323,7 +366,8 @@ export default function LayerPanel({
         <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
           <label style={{ display: "flex", gap: 6, alignItems: "center", cursor: "pointer", flex: 1, minWidth: 0 }}>
             <input type="checkbox" checked={anyOn} onChange={(e) => setBoth({ on: e.target.checked })} />
-            <span style={{ flex: 1, fontSize: compact ? 12 : 12.5, color: INK }}>{label}</span>
+            <span title={label} style={{ flex: 1, minWidth: 0, fontSize: compact ? 12 : 12.5, color: INK,
+              overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{label}</span>
           </label>
           <RowInfo label={label} sections={mergedInfoSections(pk, pcfg, sk, scfg, anyOn)} />
           {meta && (
@@ -374,7 +418,8 @@ export default function LayerPanel({
         <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
           <label style={{ display: "flex", gap: 6, alignItems: "center", cursor: "pointer", flex: 1, minWidth: 0 }}>
             <input type="checkbox" checked={anyOn} onChange={(e) => setAll({ on: e.target.checked })} />
-            <span style={{ flex: 1, fontSize: compact ? 12 : 12.5, color: INK }}>{label}</span>
+            <span title={label} style={{ flex: 1, minWidth: 0, fontSize: compact ? 12 : 12.5, color: INK,
+              overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{label}</span>
           </label>
           <RowInfo label={label} sections={sections} />
           {statusMeta && (
@@ -414,9 +459,47 @@ export default function LayerPanel({
   // B1076: `render` lets a group supply its own row renderer (the Flood & drainage group
   // wraps each row with an agency badge + an honest empty-state reason) while keeping ALL
   // of the relevance ordering / dim / hide behaviour identical.
+  /* NEW-2 — the out-of-state rows, named rather than listed or silently dropped.
+   *
+   * Dropping them would be the other sanctioned branch, and it is worse: the owner would have no
+   * way to learn that oil & gas wells exist as a screen at all, or that Planyr simply has no
+   * Colorado source for them yet. One collapsed line per group, each row naming its own reason. */
+  const outOfStateBlock = (slots, groupKey) => slots.length > 0 && (
+    <div style={{ marginTop: 4 }}>
+      <button onClick={() => setRevealHidden((st) => ({ ...st, [`${groupKey}:state`]: !st[`${groupKey}:state`] }))}
+        aria-expanded={!!revealHidden[`${groupKey}:state`]}
+        aria-label={`${revealHidden[`${groupKey}:state`] ? "Hide" : "Show"} ${slots.length} layer${slots.length > 1 ? "s" : ""} not available in ${hereName}`}
+        style={{ background: "transparent", border: "none", color: MUTED, fontSize: 10.5, cursor: "pointer", padding: "2px 0", textAlign: "left", width: "100%" }}>
+        {revealHidden[`${groupKey}:state`] ? "▾ Hide" : "▸ Show"} {slots.length} not available in {hereName}
+      </button>
+      {revealHidden[`${groupKey}:state`] && slots.map((sl) => {
+        const cfg = sl.kind === "merge" ? sl.members[0][1] : sl.entry[1];
+        const id = sl.kind === "merge" ? sl.members[0][0] : sl.entry[0];
+        return (
+          <div key={`oos-${id}`} style={{ marginBottom: 5, opacity: 0.6 }}>
+            <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+              <input type="checkbox" checked={false} disabled aria-label={`${cfg.label} — not available in ${hereName}`} />
+              <span title={cfg.label} style={{ flex: 1, minWidth: 0, fontSize: compact ? 12 : 12.5, color: INK,
+                overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{cfg.label}</span>
+            </div>
+            <div style={{ fontSize: 10, color: MUTED, lineHeight: 1.4, margin: "1px 0 0 22px" }}>{outOfStateReason(cfg)}</div>
+          </div>
+        );
+      })}
+    </div>
+  );
+
   const groupRows = (entries, groupKey, render = renderSlot) => {
-    const slots = buildGroupSlots(entries.filter(([k]) => !mergeSecondaries.has(k)));
-    if (mode === "all") return slots.map((sl) => render(sl));
+    const allSlots = buildGroupSlots(entries.filter(([k]) => !mergeSecondaries.has(k)));
+    // NEW-2 — split the state gate out BEFORE the relevance treatment. They answer different
+    // questions ("this can never answer here" vs "its data doesn't reach this view"), and folding
+    // an out-of-state row into the coverage bucket would tell the user the wrong one.
+    const slots = [], oos = [];
+    for (const sl of allSlots) {
+      const cfg = sl.kind === "merge" ? sl.members[0][1] : sl.entry[1];
+      (outOfState(cfg) ? oos : slots).push(sl);
+    }
+    if (mode === "all") return <>{slots.map((sl) => render(sl))}{outOfStateBlock(oos, groupKey)}</>;
     const hi = [], lo = [];
     for (const sl of slots) (slotLowRel(sl) ? lo : hi).push(sl);
     return (
@@ -434,6 +517,7 @@ export default function LayerPanel({
               {revealHidden[groupKey] && lo.map((sl) => render(sl, { dim: true }))}
             </>
           ))}
+        {outOfStateBlock(oos, groupKey)}
       </>
     );
   };
@@ -688,8 +772,36 @@ export default function LayerPanel({
   // data-PROVIDER order (a Houston-specific group used to sit above the generic ones). Each
   // group below pulls its rows from the flat ALL_LAYERS registry via `groupEntries`/`groupRows`
   // — purely data-driven off each layer's `group`/`order` (see LAYER_GROUP_ORDER in layers.js).
+  /* NEW-4 — THE WAY OUT.
+   *
+   * The owner's words: "Right now recovering from an over-layered map means unchecking boxes one
+   * at a time in a four-row scroll box." Turning things ON is a series of small decisions;
+   * turning them all off should be ONE, and it is the action you want precisely when the screen
+   * has become unreadable — i.e. when hunting for individual checkboxes is hardest.
+   *
+   * It clears every GIS layer and leaves the plan and the ground exactly as they were: the
+   * basemap and the terrain tier are EXEMPT (lib/layerWeight.js), because "I can't see my plan"
+   * never means "turn the aerial off". The button appears only when there is something to
+   * clear, so it is never dead chrome. */
+  const sweepIds = sweepableLayerIds(ALL_LAYERS).filter((id) => overlays[id]?.on);
+  const clearAllLayers = () => setOverlays((o) => {
+    const next = { ...o };
+    for (const id of sweepIds) next[id] = { ...next[id], on: false };
+    return next;
+  });
+
   return (
     <div data-testid="layer-panel" data-surface={surface}>
+      {sweepIds.length > 0 && (
+        <button data-testid="layers-clear-all" onClick={clearAllLayers}
+          title="Turn every reference layer off. Your plan and the aerial stay exactly as they are."
+          style={{ display: "flex", alignItems: "center", gap: 6, width: "100%", marginBottom: 6,
+            padding: "5px 8px", border: `1px solid ${LINE}`, borderRadius: 6, background: "transparent",
+            color: INK, fontFamily: "inherit", fontSize: 11.5, fontWeight: 700, cursor: "pointer" }}>
+          <span aria-hidden="true" style={{ color: MUTED }}>⊘</span>
+          <span style={{ flex: 1, textAlign: "left" }}>Turn all {sweepIds.length} layer{sweepIds.length > 1 ? "s" : ""} off</span>
+        </button>
+      )}
       {/* 1) Base & terrain — the planner's aerial source (B693) + terrain (B696) + any
              single-layer county fold (B762, e.g. Fort Bend contours). Kept as its own
              special-cased section (the segmented Off/Aerial/USGS control isn't a layer row). */}

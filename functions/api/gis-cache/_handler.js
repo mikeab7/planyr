@@ -67,10 +67,33 @@ export async function handleGisCache({
   const sp = new URLSearchParams(search);
   const metaMode = sp.get("meta") === "1";
   sp.delete("meta");
+  /* NEW-1 — `nostore=1`: pass THROUGH, cache NOTHING. This exists for point JSON reads (the
+   * FEMA InFRM EBFE identify), which need the same-origin relay for exactly one reason — the
+   * agency is not reachable cross-origin from a browser — but must never enter the Drive
+   * imagery cache: every distinct site coordinate is a distinct URL, so caching them would fill
+   * the cache folder with thousands of one-shot JSON answers that will never be read again.
+   *
+   * It also inverts the failure mode ON PURPOSE. The imagery path FAILS OPEN with a 302 to the
+   * agency, which is right for a tile (the browser can load a picture cross-origin). For a JSON
+   * reader a 302 is worse than useless — the browser follows it straight into the CORS refusal
+   * this relay exists to avoid, and the caller sees an opaque network error instead of a status.
+   * So this path returns an explicit 502 and the caller THROWS (LOUD-FAILURE) → the drainage
+   * check records a failed provider and falls back, never a fabricated or silently-absent value. */
+  const noStore = sp.get("nostore") === "1";
+  sp.delete("nostore");
 
   const upstream = parseUpstream(segs, sp.toString());
   if (!upstream) return json({ error: "Unsupported GIS request." }, 400);
   const key = `${cacheKey(upstream.url)}.bin`;
+
+  if (noStore) {
+    let res;
+    try { res = await fetchUpstream(fetchImpl, upstream.url, upstreamTimeoutMs); }
+    catch (e) { return json({ error: `Upstream GIS request failed: ${(e && e.message) || "network error"}`, host: upstream.host }, 502); }
+    if (!res || !res.ok) return json({ error: `Upstream GIS request failed (HTTP ${res ? res.status : "?"})`, host: upstream.host }, 502);
+    const buf = new Uint8Array(await res.arrayBuffer());
+    return bytesResponse(buf, res.headers.get("content-type") || "application/json");
+  }
 
   try {
     if (!client) return metaMode ? json({ cached: false }) : redirectTo(upstream.url); // no creds → live-only
