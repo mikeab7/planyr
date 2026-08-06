@@ -30,6 +30,7 @@ import { readFileSync, existsSync, statSync, writeFileSync, rmSync } from "node:
 import { execSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
+import { ringFloor, nextFreeBlock } from "./idBlocks.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, "..");
@@ -418,7 +419,31 @@ export function computeNextIdsStrict(repo = REPO, {
   }
 
   const maxB = out.B.max, maxV = out.V.max;
-  return { ok: true, maxB, maxV, nextB: maxB + 1, nextV: maxV + 1, provenance, detail: out };
+
+  // NEW-3 — hand out ids from THIS BRANCH'S RESERVED BLOCK rather than from `max + 1`.
+  //
+  // `max + 1` is what made two concurrent sessions collide: both fetch the same fresh main, both
+  // compute the same maximum, both are handed the same number. Reproduced in a two-clone lab and
+  // recorded in CLAUDE.md. A block is a pure function of the branch name, so the same view of the
+  // world now yields DIFFERENT numbers to different branches — the collision cannot form.
+  //
+  // `nextB`/`nextV` (the `max + 1` answer) are preserved for callers and tests that predate this,
+  // and because they remain the honest "highest assigned" report. `blockB`/`blockV` are what a
+  // session should mint from.
+  const branch = currentBranch || selfBranchNames(repo)[0] || "";
+  const blocks = {};
+  for (const [letter, key] of [["B", "B"], ["V", "V"]]) {
+    const claimed = new Set([
+      ...(out[key].peerIds || []),
+      ...Array.from({ length: out[key].main }, (_, i) => i + 1), // everything at or below main's max
+    ]);
+    blocks[letter] = nextFreeBlock(branch, { floor: ringFloor(out[key].main), claimed });
+  }
+
+  return {
+    ok: true, maxB, maxV, nextB: maxB + 1, nextV: maxV + 1, provenance, detail: out,
+    branch, blockB: blocks.B, blockV: blocks.V,
+  };
 }
 
 /* Kept for callers/tests that predate the strict path (B779 shape): local ∪ origin/main only, and
@@ -462,16 +487,22 @@ export function main(argv, io = { out: process.stdout, err: process.stderr }) {
   }
   const { nextB, nextV, maxB, maxV } = res;
 
+  // NEW-3 — mint from THIS BRANCH'S BLOCK when we have one (only `--against-main` reads the peer
+  // set needed to compute it). `max + 1` is what handed two concurrent sessions the same number.
+  const mintB = res.blockB ? res.blockB.lo : nextB;
+  const mintV = res.blockV ? res.blockV.lo : nextV;
+
   if (json) {
     io.out.write(JSON.stringify({
-      ok: true, nextB, nextV, maxB, maxV,
+      ok: true, nextB, nextV, maxB, maxV, mintB, mintV,
+      block: res.blockB ? { B: res.blockB, V: res.blockV, branch: res.branch } : null,
       againstMain, provenance: res.provenance ?? null,
       claimants: res.detail ? { B: res.detail.B.claimants, V: res.detail.V.claimants } : null,
     }) + "\n");
     return 0;
   }
-  if (argv.includes("--b")) { io.out.write(`B${nextB}\n`); return 0; }
-  if (argv.includes("--v")) { io.out.write(`V${nextV}\n`); return 0; }
+  if (argv.includes("--b")) { io.out.write(`B${mintB}\n`); return 0; }
+  if (argv.includes("--v")) { io.out.write(`V${mintV}\n`); return 0; }
 
   let banner = "";
   if (againstMain) {
@@ -479,11 +510,22 @@ export function main(argv, io = { out: process.stdout, err: process.stderr }) {
     banner = `  [origin/main ${p.sha.slice(0, 7)}, fetched ${p.fetchedSecondsAgo}s ago` +
       (p.peers ? ` · ${p.peers.scanned} in-flight branches` : ` · PEERS NOT SCANNED`) + `]`;
   }
-  io.out.write(
-    `Next free → B${nextB} · V${nextV}   (highest assigned: B${maxB} / V${maxV})${banner}\n` +
-      `Mint from here. Multi-mint runs consecutively (e.g. B${nextB}, B${nextB + 1}). ` +
-      `Don't grep the archives — this is the whole answer.\n`,
-  );
+  if (res.blockB) {
+    io.out.write(
+      `Your block → B${res.blockB.lo}–B${res.blockB.hi} · V${res.blockV.lo}–V${res.blockV.hi}` +
+        `   (branch ${res.branch})${banner}\n` +
+        `Mint from B${mintB} · V${mintV}, running consecutively (e.g. B${mintB}, B${mintB + 1}). ` +
+        `Highest assigned anywhere: B${maxB} / V${maxV}.\n` +
+        `This block is yours alone — reserved by branch name, so a session minting at the same moment\n` +
+        `cannot draw the same number. Stay inside it and you will never need to renumber (NEW-3).\n`,
+    );
+  } else {
+    io.out.write(
+      `Next free → B${nextB} · V${nextV}   (highest assigned: B${maxB} / V${maxV})${banner}\n` +
+        `Mint from here. Multi-mint runs consecutively (e.g. B${nextB}, B${nextB + 1}). ` +
+        `Don't grep the archives — this is the whole answer.\n`,
+    );
+  }
   // Name the sessions we just stepped around, so a collision that WAS about to happen is visible.
   for (const [letter, d] of Object.entries(res.detail || {})) {
     for (const c of d.claimants || [])

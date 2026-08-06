@@ -30,6 +30,27 @@ the always-loaded core. This merges two tracks of work: the mature **Site Planne
 > from `nextB` (e.g. B755, B756). (This finds the *number*; **DEDUPE-FIRST** below still governs
 > *whether* to mint at all — a recurrence re-opens the original B#, it doesn't take a new one.)
 >
+> **🧱 SUPERSEDED 2026-08-06 (B6864–B6867) — YOU NOW MINT FROM YOUR OWN RESERVED BLOCK, and the
+> high-water-mark rule that everything below describes IS GONE.** Read the rest of this section as
+> history; this paragraph is the live rule. `npm run next-id -- --against-main` prints **your block** —
+> a range reserved to your branch by name, e.g. `Your block → B6864–B6879 · V6144–V6159` — and you mint
+> from its low end. Two sessions minting at the same instant get **different blocks**, so they cannot
+> draw the same number; there is no allocator to race and none to be down (the block is a pure function
+> of the branch name). **`check-mint` now fails ONLY on a genuine collision** (`TAKEN` — someone really
+> holds that id); an id merely *below* what some other branch picked is **green**, and an id outside
+> your block is **reported, never fatal**.
+> **Why this changed:** the `BELOW` rule was a ratchet. Its only remedy was to renumber upward, which
+> raised the mark for every other in-flight branch, which then had to renumber higher still. Combined
+> with a **~30-minute lag between a push and its `build` run** (measured: PR #931 pushed 22:29:23Z,
+> build started 22:59:27Z), it produced a **livelock** on 2026-08-06: seven PRs open, none mergeable,
+> every one reading `build — Expected — Waiting for status to be reported` with **no merge control
+> available to anyone**, and one PR's ids moved six times. Main's max was B1449; the claimed mark passed
+> **B100002**. Full diagnosis, including every hypothesis that was refuted: **`docs/CI-REQUIRED-CHECK.md`**.
+> **The practical consequences for you:** (a) mint from your block and you will never need to renumber;
+> (b) **a PR showing `Expected` for the first half hour is NORMAL — wait it out, do not renumber and do
+> not nudge**; (c) gaps are still free; (d) the steel-man for the block scheme, including where it
+> concedes a real cost, is the header of `scripts/idBlocks.mjs`.
+>
 > **⏱ LATE-BIND the real number — assign it as the LAST step before you push, against fresh main (B779).**
 > `next-id` reads only YOUR branch, so if you stamp a real `B###`/`V###` at the *start* of a session, a
 > concurrent session (branched from the same main, its mint not merged yet) can honestly grab the same

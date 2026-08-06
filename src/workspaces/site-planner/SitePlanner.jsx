@@ -223,6 +223,7 @@ import { splitOverlayBands, overlayPanelOrder, overlayOrderFlags, reorderOverlay
 import { DOCK_ZONES, MAX_DOCK_ZONES, ZONE_CATALOG, zoneDepthDefaults, catalogDepthDefault, layoutZoneByKind, usableCourtSpan, zoneAlongSpan, anchoredAlongSpan, boxExtentAlong, resizedZoneAlongFit, dockSidesFor, footprintDepth, footprintLength, footprintAxes, strandedZoneIds, pruneStrandedZones } from "./lib/dockZones.js";
 import { computeBuildingGrid, resolveGridSettings, placeDockDoors } from "./lib/buildingGrid.js";
 import { convertBuildingToPolygon, dockLineAt, dockEdgeLine, projectOntoLine, frameBBox, translateDockLines, dockSegExtent, clipSegmentToRing } from "./lib/footprintEdit.js";
+import { pondAreaLabelLine, pondAreaDeltaLine } from "./lib/pondLabelText.js";
 import { dimSlideRange, clampDimOffset, DIM_POS_F_DEFAULT, DIM_POS_F_ROAD, dimNumberBox } from "./lib/dimSlide.js";
 import { addedAreaLabelPoint, pondContours, contourLabelPoint, autoContourInterval, detentionStorage, usablePondVolume, incrementalExcavationCf, detentionLandTakeEstimate, estimateFootprintSf, pondPlacementCandidates, drawdownWarning, bermAsFillHeight, bermFillVolume, bermFillCells } from "./lib/pondGeom.js";
 import { accumulatePondLedger, effectivePondRole, POND_ROLE_LABEL, pondDisplayName, pondDisplayNameFor } from "./lib/pondLedger.js";
@@ -1649,13 +1650,13 @@ const ringSpanFt = (pts) => {
 const ringMinSpanFt = (pts) => { const s = ringSpanFt(pts); return Math.min(s.w, s.h); };
 const f1 = (n) => (Math.round(n * 10) / 10).toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 const f2 = (n) => (Math.round(n * 100) / 100).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-// NEW-1 — the pond's footprint line, authored as a REFLOWABLE spec for the shared fit ladder.
-// Acreage and square footage are two ATOMS joined by a middot on the widest rung; the ladder may
-// stack them onto their own lines, or keep only the acreage, when the pond's real interior can't
-// hold the joined line. Never pre-join it here — a joined string has no rungs left to take.
-const footprintLabelLine = (sf) => ({
-  parts: [`footprint ${f2(sf / SQFT_PER_ACRE)} ac`, `${f0(sf)} sf`], sep: " · ", keep: 1,
-});
+// NEW-1 — the pond's area line is the ACREAGE and nothing else ("6.58 ac"), per the owner:
+// "get rid of footprint and get rid of square feet, leave the acreage." It used to be a
+// reflowable two-atom spec ("footprint 6.58 ac · 286,648 sf") that the fit ladder had to stack
+// or abbreviate; a single short atom simply FITS, which is the point. Lives in
+// lib/pondLabelText.js so the unit guard drives the real builder rather than grepping this file
+// — and see that module's header for why PR-Q/O4's "no bare acreage" rule is deliberately NOT
+// applied to this one line (the pond's noun sits directly above it).
 
 /* --------------- county appraisal-district attribute view --------------- */
 // The curated attribute view (APPR_FIELDS / apprRows / apprAll / apprVal / findAttr)
@@ -13402,16 +13403,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         // whole-pond centre — so it reads over the old pond and clears the "+added" label.
         fc = centroid(base.ring);
         lines = [`Existing ${pondName}`];
-        // PR-Q/O4 — no bare acreage: the pond area IS the drawn footprint at the outer toe (label it).
-        // NEW-1 — authored as a REFLOWABLE spec, not a pre-joined string: the shared fit ladder
-        // (lib/labelFitLadder) may stack the two parts onto their own lines, or keep only the
-        // acreage, when the pond's real interior can't hold the wide single line.
-        if (showAreas) lines.push(footprintLabelLine(exA));
+        // NEW-1 — acreage only. The area is still the drawn footprint at the outer toe; the pond's
+        // noun on the line above is what says so, so the old "footprint …" prefix and its square-
+        // footage twin are gone (owner). Same shared builder as the plain-pond branch below.
+        if (showAreas) lines.push(pondAreaLabelLine(exA));
         if (pt) pondAdd = { pt, addA };
-        else if (showAreas) { const s = addA >= 0 ? "+" : "−", m = Math.abs(addA); lines.push({ parts: [`${s}${f2(m / SQFT_PER_ACRE)} ac footprint`, `${s}${f0(m)} sf`], sep: " · ", keep: 1 }); }
+        // The inline expansion increment takes the SAME trim — it is a line of this same label,
+        // and leaving "…ac footprint · …sf" on it would read as an oversight.
+        else if (showAreas) lines.push(pondAreaDeltaLine(addA));
       } else {
         lines = [pondName];
-        if (showAreas) lines.push(footprintLabelLine(area));
+        if (showAreas) lines.push(pondAreaLabelLine(area));
         // Stage-storage line, seated on the pond with its name (rides the same LOD/collision
         // pool). Same detentionStorage() the side panel reads, so the two can never disagree.
         // Gated on the contours toggle (default on) AND the same zoom floor as the depth-ring
@@ -13497,7 +13499,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // Rides the SAME LOD/collision pool (its own label id) — not a parallel renderer.
       const a = pondAdd.addA;
       labelCands.push({ el, lid: `${el.id}#add`, added: true, c: f2p(pondAdd.pt),
-        lines: showAreas ? ["Additional Detention", { parts: [`+${f2(a / SQFT_PER_ACRE)} ac`, `+${f0(a)} sf`], sep: " · ", keep: 1 }] : ["Additional Detention"], importance: area + 1, halfW, halfH, fs, lh, charW, noLeader: false, carto: true, mustLabel: true });
+        // NEW-1 — acreage only, the same trim the pond's own area line took.
+        lines: showAreas ? ["Additional Detention", pondAreaDeltaLine(a)] : ["Additional Detention"], importance: area + 1, halfW, halfH, fs, lh, charW, noLeader: false, carto: true, mustLabel: true });
     }
   }
   // B951 — the parcel-area badges ("5.24 ac" pills) are painted as their own fixed layer
