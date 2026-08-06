@@ -50,6 +50,14 @@ the always-loaded core. This merges two tracks of work: the mature **Site Planne
 > (b) **a PR showing `Expected` for the first half hour is NORMAL — wait it out, do not renumber and do
 > not nudge**; (c) gaps are still free; (d) the steel-man for the block scheme, including where it
 > concedes a real cost, is the header of `scripts/idBlocks.mjs`.
+> **⛔ AND ONE MEASURED FACT THAT CONTRADICTS THIS REPO'S NUDGE LORE (B6867): RE-RUNNING A FAILED
+> `build` DOES NOTHING FOR A PR THAT IS STALE AGAINST MAIN.** A re-run replays the merge commit the run
+> was created against — it does **not** recompute `refs/pull/<n>/merge` against main's current tip. Tried
+> on four stuck PRs the minute the fix landed; all four failed again, reproducing the OLD gate's wording
+> verbatim. **A stuck PR needs a NEW PUSH** — prefer `git fetch origin main && git merge origin/main`
+> (it also brings the corrected gate into the branch, so the pre-push hook and CI agree) over an empty
+> `Nudge CI` commit. Resolve the inevitable `BACKLOG.md` conflict by keeping both sides and renumbering
+> nothing.
 >
 > **⏱ LATE-BIND the real number — assign it as the LAST step before you push, against fresh main (B779).**
 > `next-id` reads only YOUR branch, so if you stamp a real `B###`/`V###` at the *start* of a session, a

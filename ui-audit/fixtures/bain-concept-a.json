@@ -1,0 +1,1184 @@
+{
+ "_note": "SYNTHESISED GEOMETRY, MEASURED PARAMETERS. Derived by ui-audit/build-bain-fixture.mjs from the owner's reported census of his real Bain plan (site smr9olizi5ue, \"Concept A\") — 53 elements in the exact measured kind counts, 5 parcels, 1 pond, and BOTH RASTERS at their exact measured dimensions, opacities, ftPerPx and IndexedDB-string storage path. The COORDINATES are invented (the real plan JSON has been offered by the owner and not yet taken); settings/origin/county are held EQUAL TO THE GOOSE CREEK CONTROL so the comparison isolates rasters. Regenerate with `node ui-audit/build-bain-fixture.mjs`; `--check` fails CI on drift.",
+ "_redacted": [
+  "no owner data is present in this file — the geometry is synthetic"
+ ],
+ "_standIns": {
+  "geometry": "synthesised — element COUNTS are measured, coordinates are not",
+  "settings": "Goose Creek's real 30-key settings (the census did not include Bain's)",
+  "origin": "Goose Creek's origin, held equal to the control so basemap + GIS are not a second variable",
+  "underlayFtPerPx": "INFERRED (1.3333 → a 2400 × 1556 ft aerial); a fromMap underlay's scale was not in the census"
+ },
+ "origin": {
+  "lat": 29.812239929817107,
+  "lon": -95.00263322181794
+ },
+ "county": null,
+ "parcels": [
+  {
+   "id": "bain-pc1",
+   "z": 0,
+   "locked": true,
+   "active": true,
+   "acct": "BAIN-100",
+   "addr": "BAIN TRACT 1",
+   "points": [
+    {
+     "x": -2500,
+     "y": -3100
+    },
+    {
+     "x": 2400,
+     "y": -3100
+    },
+    {
+     "x": 2400,
+     "y": -1800
+    },
+    {
+     "x": -2500,
+     "y": -1800
+    }
+   ]
+  },
+  {
+   "id": "bain-pc2",
+   "z": 0,
+   "locked": true,
+   "active": true,
+   "acct": "BAIN-101",
+   "addr": "BAIN TRACT 2",
+   "points": [
+    {
+     "x": -2500,
+     "y": -1800
+    },
+    {
+     "x": 2440,
+     "y": -1800
+    },
+    {
+     "x": 2440,
+     "y": -600
+    },
+    {
+     "x": -2500,
+     "y": -600
+    }
+   ]
+  },
+  {
+   "id": "bain-pc3",
+   "z": 0,
+   "locked": true,
+   "active": true,
+   "acct": "BAIN-102",
+   "addr": "BAIN TRACT 3",
+   "points": [
+    {
+     "x": -2500,
+     "y": -600
+    },
+    {
+     "x": 2400,
+     "y": -600
+    },
+    {
+     "x": 2400,
+     "y": 700
+    },
+    {
+     "x": -2500,
+     "y": 700
+    }
+   ]
+  },
+  {
+   "id": "bain-pc4",
+   "z": 0,
+   "locked": true,
+   "active": true,
+   "acct": "BAIN-103",
+   "addr": "BAIN TRACT 4",
+   "points": [
+    {
+     "x": -2500,
+     "y": 700
+    },
+    {
+     "x": 2440,
+     "y": 700
+    },
+    {
+     "x": 2440,
+     "y": 1900
+    },
+    {
+     "x": -2500,
+     "y": 1900
+    }
+   ]
+  },
+  {
+   "id": "bain-pc5",
+   "z": 0,
+   "locked": true,
+   "active": true,
+   "acct": "BAIN-104",
+   "addr": "BAIN TRACT 5",
+   "points": [
+    {
+     "x": -2500,
+     "y": 1900
+    },
+    {
+     "x": 2400,
+     "y": 1900
+    },
+    {
+     "x": 2400,
+     "y": 3000
+    },
+    {
+     "x": -2500,
+     "y": 3000
+    }
+   ]
+  }
+ ],
+ "parcelDrawings": [],
+ "els": [
+  {
+   "z": 1024,
+   "id": "bain-b1",
+   "type": "building",
+   "cx": -900,
+   "cy": -2600,
+   "w": 1040,
+   "h": 380,
+   "rot": 0,
+   "dock": "cross",
+   "dockSide": "bottom",
+   "fillOpacity": 1
+  },
+  {
+   "z": 2048,
+   "id": "bain-b2",
+   "type": "building",
+   "cx": -900,
+   "cy": -2150,
+   "w": 437,
+   "h": 190,
+   "rot": 0,
+   "dock": "none",
+   "dockSide": "top",
+   "fillOpacity": 1
+  },
+  {
+   "z": 3072,
+   "id": "bain-s1",
+   "type": "sidewalk",
+   "cx": -900,
+   "cy": -2792.5,
+   "w": 1040,
+   "h": 5,
+   "rot": 0,
+   "attachedTo": "bain-b1",
+   "sidewalkSide": "top"
+  },
+  {
+   "z": 4096,
+   "id": "bain-s2",
+   "type": "sidewalk",
+   "cx": -900,
+   "cy": -2407.5,
+   "w": 437,
+   "h": 5,
+   "rot": 0,
+   "attachedTo": "bain-b1",
+   "sidewalkSide": "bottom"
+  },
+  {
+   "z": 5120,
+   "id": "bain-p1",
+   "type": "parking",
+   "cx": -900,
+   "cy": -2825,
+   "w": 1040,
+   "h": 60,
+   "rot": 180,
+   "attachedTo": "bain-b1",
+   "sideParkSide": "top"
+  },
+  {
+   "z": 6144,
+   "id": "bain-p2",
+   "type": "parking",
+   "cx": -1451,
+   "cy": -2600,
+   "w": 380,
+   "h": 62,
+   "rot": 90,
+   "attachedTo": "bain-b1",
+   "sideParkSide": "left"
+  },
+  {
+   "z": 7168,
+   "id": "bain-b3",
+   "type": "building",
+   "cx": 900,
+   "cy": -2600,
+   "w": 620,
+   "h": 300,
+   "rot": 0,
+   "dock": "single",
+   "dockSide": "bottom",
+   "fillOpacity": 1
+  },
+  {
+   "z": 8192,
+   "id": "bain-b4",
+   "type": "building",
+   "cx": 900,
+   "cy": -2190,
+   "w": 260,
+   "h": 190,
+   "rot": 0,
+   "dock": "none",
+   "dockSide": "top",
+   "fillOpacity": 1
+  },
+  {
+   "z": 9216,
+   "id": "bain-s3",
+   "type": "sidewalk",
+   "cx": 900,
+   "cy": -2752.5,
+   "w": 620,
+   "h": 5,
+   "rot": 0,
+   "attachedTo": "bain-b3",
+   "sidewalkSide": "top"
+  },
+  {
+   "z": 10240,
+   "id": "bain-s4",
+   "type": "sidewalk",
+   "cx": 900,
+   "cy": -2447.5,
+   "w": 260,
+   "h": 5,
+   "rot": 0,
+   "attachedTo": "bain-b3",
+   "sidewalkSide": "bottom"
+  },
+  {
+   "z": 11264,
+   "id": "bain-p3",
+   "type": "parking",
+   "cx": 900,
+   "cy": -2785,
+   "w": 620,
+   "h": 60,
+   "rot": 180,
+   "attachedTo": "bain-b3",
+   "sideParkSide": "top"
+  },
+  {
+   "z": 12288,
+   "id": "bain-p4",
+   "type": "parking",
+   "cx": 559,
+   "cy": -2600,
+   "w": 300,
+   "h": 62,
+   "rot": 90,
+   "attachedTo": "bain-b3",
+   "sideParkSide": "left"
+  },
+  {
+   "z": 13312,
+   "id": "bain-b5",
+   "type": "building",
+   "cx": -900,
+   "cy": -700,
+   "w": 1040,
+   "h": 380,
+   "rot": 0,
+   "dock": "cross",
+   "dockSide": "bottom",
+   "fillOpacity": 1
+  },
+  {
+   "z": 14336,
+   "id": "bain-b6",
+   "type": "building",
+   "cx": -900,
+   "cy": -250,
+   "w": 437,
+   "h": 190,
+   "rot": 0,
+   "dock": "none",
+   "dockSide": "top",
+   "fillOpacity": 1
+  },
+  {
+   "z": 15360,
+   "id": "bain-s5",
+   "type": "sidewalk",
+   "cx": -900,
+   "cy": -892.5,
+   "w": 1040,
+   "h": 5,
+   "rot": 0,
+   "attachedTo": "bain-b5",
+   "sidewalkSide": "top"
+  },
+  {
+   "z": 16384,
+   "id": "bain-s6",
+   "type": "sidewalk",
+   "cx": -900,
+   "cy": -507.5,
+   "w": 437,
+   "h": 5,
+   "rot": 0,
+   "attachedTo": "bain-b5",
+   "sidewalkSide": "bottom"
+  },
+  {
+   "z": 17408,
+   "id": "bain-p5",
+   "type": "parking",
+   "cx": -900,
+   "cy": -925,
+   "w": 1040,
+   "h": 60,
+   "rot": 180,
+   "attachedTo": "bain-b5",
+   "sideParkSide": "top"
+  },
+  {
+   "z": 18432,
+   "id": "bain-p6",
+   "type": "parking",
+   "cx": -1451,
+   "cy": -700,
+   "w": 380,
+   "h": 62,
+   "rot": 90,
+   "attachedTo": "bain-b5",
+   "sideParkSide": "left"
+  },
+  {
+   "z": 19456,
+   "id": "bain-b7",
+   "type": "building",
+   "cx": 900,
+   "cy": -700,
+   "w": 620,
+   "h": 300,
+   "rot": 0,
+   "dock": "single",
+   "dockSide": "bottom",
+   "fillOpacity": 1
+  },
+  {
+   "z": 20480,
+   "id": "bain-b8",
+   "type": "building",
+   "cx": 900,
+   "cy": -290,
+   "w": 260,
+   "h": 190,
+   "rot": 0,
+   "dock": "none",
+   "dockSide": "top",
+   "fillOpacity": 1
+  },
+  {
+   "z": 21504,
+   "id": "bain-s7",
+   "type": "sidewalk",
+   "cx": 900,
+   "cy": -852.5,
+   "w": 620,
+   "h": 5,
+   "rot": 0,
+   "attachedTo": "bain-b7",
+   "sidewalkSide": "top"
+  },
+  {
+   "z": 22528,
+   "id": "bain-s8",
+   "type": "sidewalk",
+   "cx": 900,
+   "cy": -547.5,
+   "w": 260,
+   "h": 5,
+   "rot": 0,
+   "attachedTo": "bain-b7",
+   "sidewalkSide": "bottom"
+  },
+  {
+   "z": 23552,
+   "id": "bain-p7",
+   "type": "parking",
+   "cx": 900,
+   "cy": -885,
+   "w": 620,
+   "h": 60,
+   "rot": 180,
+   "attachedTo": "bain-b7",
+   "sideParkSide": "top"
+  },
+  {
+   "z": 24576,
+   "id": "bain-p8",
+   "type": "parking",
+   "cx": 559,
+   "cy": -700,
+   "w": 300,
+   "h": 62,
+   "rot": 90,
+   "attachedTo": "bain-b7",
+   "sideParkSide": "left"
+  },
+  {
+   "z": 25600,
+   "id": "bain-b9",
+   "type": "building",
+   "cx": -900,
+   "cy": 1200,
+   "w": 1040,
+   "h": 380,
+   "rot": 0,
+   "dock": "cross",
+   "dockSide": "bottom",
+   "fillOpacity": 1
+  },
+  {
+   "z": 26624,
+   "id": "bain-b10",
+   "type": "building",
+   "cx": -900,
+   "cy": 1650,
+   "w": 437,
+   "h": 190,
+   "rot": 0,
+   "dock": "none",
+   "dockSide": "top",
+   "fillOpacity": 1
+  },
+  {
+   "z": 27648,
+   "id": "bain-s9",
+   "type": "sidewalk",
+   "cx": -900,
+   "cy": 1007.5,
+   "w": 1040,
+   "h": 5,
+   "rot": 0,
+   "attachedTo": "bain-b9",
+   "sidewalkSide": "top"
+  },
+  {
+   "z": 28672,
+   "id": "bain-s10",
+   "type": "sidewalk",
+   "cx": -900,
+   "cy": 1392.5,
+   "w": 437,
+   "h": 5,
+   "rot": 0,
+   "attachedTo": "bain-b9",
+   "sidewalkSide": "bottom"
+  },
+  {
+   "z": 29696,
+   "id": "bain-p9",
+   "type": "parking",
+   "cx": -900,
+   "cy": 975,
+   "w": 1040,
+   "h": 60,
+   "rot": 180,
+   "attachedTo": "bain-b9",
+   "sideParkSide": "top"
+  },
+  {
+   "z": 30720,
+   "id": "bain-p10",
+   "type": "parking",
+   "cx": -1451,
+   "cy": 1200,
+   "w": 380,
+   "h": 62,
+   "rot": 90,
+   "attachedTo": "bain-b9",
+   "sideParkSide": "left"
+  },
+  {
+   "z": 31744,
+   "id": "bain-b11",
+   "type": "building",
+   "cx": 900,
+   "cy": 1200,
+   "w": 620,
+   "h": 300,
+   "rot": 0,
+   "dock": "single",
+   "dockSide": "bottom",
+   "fillOpacity": 1
+  },
+  {
+   "z": 32768,
+   "id": "bain-b12",
+   "type": "building",
+   "cx": 900,
+   "cy": 1610,
+   "w": 260,
+   "h": 190,
+   "rot": 0,
+   "dock": "none",
+   "dockSide": "top",
+   "fillOpacity": 1
+  },
+  {
+   "z": 33792,
+   "id": "bain-s11",
+   "type": "sidewalk",
+   "cx": 900,
+   "cy": 1047.5,
+   "w": 620,
+   "h": 5,
+   "rot": 0,
+   "attachedTo": "bain-b11",
+   "sidewalkSide": "top"
+  },
+  {
+   "z": 34816,
+   "id": "bain-s12",
+   "type": "sidewalk",
+   "cx": 900,
+   "cy": 1352.5,
+   "w": 260,
+   "h": 5,
+   "rot": 0,
+   "attachedTo": "bain-b11",
+   "sidewalkSide": "bottom"
+  },
+  {
+   "z": 35840,
+   "id": "bain-p11",
+   "type": "parking",
+   "cx": 900,
+   "cy": 1015,
+   "w": 620,
+   "h": 60,
+   "rot": 180,
+   "attachedTo": "bain-b11",
+   "sideParkSide": "top"
+  },
+  {
+   "z": 36864,
+   "id": "bain-p12",
+   "type": "parking",
+   "cx": 559,
+   "cy": 1200,
+   "w": 300,
+   "h": 62,
+   "rot": 90,
+   "attachedTo": "bain-b11",
+   "sideParkSide": "left"
+  },
+  {
+   "z": 37888,
+   "id": "bain-pv1",
+   "type": "paving",
+   "cx": -900,
+   "cy": -2342.5,
+   "w": 1040,
+   "h": 135,
+   "zd": 135,
+   "rot": 0,
+   "attachedTo": "bain-b1",
+   "truckCourt": {
+    "side": "bottom"
+   }
+  },
+  {
+   "z": 38912,
+   "id": "bain-pv2",
+   "type": "paving",
+   "cx": -900,
+   "cy": -442.5,
+   "w": 1040,
+   "h": 135,
+   "zd": 135,
+   "rot": 0,
+   "attachedTo": "bain-b3",
+   "truckCourt": {
+    "side": "bottom"
+   }
+  },
+  {
+   "z": 39936,
+   "id": "bain-pv3",
+   "type": "paving",
+   "cx": -900,
+   "cy": 1457.5,
+   "w": 1040,
+   "h": 135,
+   "zd": 135,
+   "rot": 0,
+   "attachedTo": "bain-b5",
+   "truckCourt": {
+    "side": "bottom"
+   }
+  },
+  {
+   "z": 40960,
+   "id": "bain-pv4",
+   "type": "paving",
+   "cx": 900,
+   "cy": -2342.5,
+   "w": 1040,
+   "h": 135,
+   "zd": 135,
+   "rot": 0,
+   "attachedTo": "bain-b7",
+   "truckCourt": {
+    "side": "bottom"
+   }
+  },
+  {
+   "z": 41984,
+   "id": "bain-pv5",
+   "type": "paving",
+   "cx": 900,
+   "cy": -442.5,
+   "w": 1040,
+   "h": 135,
+   "zd": 135,
+   "rot": 0,
+   "attachedTo": "bain-b9",
+   "truckCourt": {
+    "side": "bottom"
+   }
+  },
+  {
+   "z": 43008,
+   "id": "bain-pv6",
+   "type": "paving",
+   "cx": 900,
+   "cy": 1457.5,
+   "w": 1040,
+   "h": 135,
+   "zd": 135,
+   "rot": 0,
+   "attachedTo": "bain-b11",
+   "truckCourt": {
+    "side": "bottom"
+   }
+  },
+  {
+   "z": 44032,
+   "id": "bain-tr1",
+   "type": "trailer",
+   "cx": -900,
+   "cy": -2250,
+   "w": 1040,
+   "h": 50,
+   "zd": 50,
+   "cfg": {
+    "single": true,
+    "trailerL": 50,
+    "trailerW": 12,
+    "trailerAisle": 0
+   },
+   "rot": 0,
+   "noFit": true,
+   "forCourt": "bain-pv1",
+   "attachedTo": "bain-b1"
+  },
+  {
+   "z": 45056,
+   "id": "bain-tr2",
+   "type": "trailer",
+   "cx": -900,
+   "cy": -350,
+   "w": 1040,
+   "h": 50,
+   "zd": 50,
+   "cfg": {
+    "single": true,
+    "trailerL": 50,
+    "trailerW": 12,
+    "trailerAisle": 0
+   },
+   "rot": 0,
+   "noFit": true,
+   "forCourt": "bain-pv3",
+   "attachedTo": "bain-b5"
+  },
+  {
+   "z": 46080,
+   "id": "bain-rd1",
+   "type": "road",
+   "w": 60,
+   "h": 60,
+   "rot": 0,
+   "curb": true,
+   "travelW": 60,
+   "roadClass": "local",
+   "cx": -1752,
+   "cy": -250,
+   "pts": [
+    {
+     "x": -1750,
+     "y": -3000
+    },
+    {
+     "x": -1790,
+     "y": -1200
+    },
+    {
+     "x": -1750,
+     "y": 600
+    },
+    {
+     "x": -1720,
+     "y": 2600
+    }
+   ],
+   "vtx": [
+    {},
+    {
+     "radius": 300,
+     "treatment": "arc"
+    },
+    {
+     "radius": 300,
+     "treatment": "arc"
+    },
+    {}
+   ]
+  },
+  {
+   "z": 47104,
+   "id": "bain-rd2",
+   "type": "road",
+   "w": 60,
+   "h": 60,
+   "rot": 0,
+   "curb": true,
+   "travelW": 60,
+   "roadClass": "local",
+   "cx": 0,
+   "cy": -250,
+   "pts": [
+    {
+     "x": 0,
+     "y": -3000
+    },
+    {
+     "x": 0,
+     "y": -1200
+    },
+    {
+     "x": 0,
+     "y": 600
+    },
+    {
+     "x": 0,
+     "y": 2600
+    }
+   ],
+   "vtx": [
+    {},
+    {
+     "radius": 300,
+     "treatment": "arc"
+    },
+    {
+     "radius": 300,
+     "treatment": "arc"
+    },
+    {}
+   ]
+  },
+  {
+   "z": 48128,
+   "id": "bain-rd3",
+   "type": "road",
+   "w": 60,
+   "h": 60,
+   "rot": 0,
+   "curb": true,
+   "travelW": 60,
+   "roadClass": "local",
+   "cx": 1753,
+   "cy": -250,
+   "pts": [
+    {
+     "x": 1750,
+     "y": -3000
+    },
+    {
+     "x": 1790,
+     "y": -1200
+    },
+    {
+     "x": 1750,
+     "y": 600
+    },
+    {
+     "x": 1720,
+     "y": 2600
+    }
+   ],
+   "vtx": [
+    {},
+    {
+     "radius": 300,
+     "treatment": "arc"
+    },
+    {
+     "radius": 300,
+     "treatment": "arc"
+    },
+    {}
+   ]
+  },
+  {
+   "z": 49152,
+   "id": "bain-rd4",
+   "type": "road",
+   "w": 48,
+   "h": 60,
+   "rot": 0,
+   "curb": true,
+   "travelW": 48,
+   "roadClass": "local",
+   "cx": 75,
+   "cy": -2697,
+   "pts": [
+    {
+     "x": -1750,
+     "y": -2700
+    },
+    {
+     "x": -400,
+     "y": -2670
+    },
+    {
+     "x": 700,
+     "y": -2720
+    },
+    {
+     "x": 1750,
+     "y": -2700
+    }
+   ],
+   "vtx": [
+    {},
+    {
+     "radius": 220,
+     "treatment": "arc"
+    },
+    {
+     "radius": 220,
+     "treatment": "arc"
+    },
+    {}
+   ]
+  },
+  {
+   "z": 50176,
+   "id": "bain-rd5",
+   "type": "road",
+   "w": 48,
+   "h": 60,
+   "rot": 0,
+   "curb": true,
+   "travelW": 48,
+   "roadClass": "local",
+   "cx": 75,
+   "cy": -1397,
+   "pts": [
+    {
+     "x": -1750,
+     "y": -1400
+    },
+    {
+     "x": -400,
+     "y": -1370
+    },
+    {
+     "x": 700,
+     "y": -1420
+    },
+    {
+     "x": 1750,
+     "y": -1400
+    }
+   ],
+   "vtx": [
+    {},
+    {
+     "radius": 220,
+     "treatment": "arc"
+    },
+    {
+     "radius": 220,
+     "treatment": "arc"
+    },
+    {}
+   ]
+  },
+  {
+   "z": 51200,
+   "id": "bain-rd6",
+   "type": "road",
+   "w": 48,
+   "h": 60,
+   "rot": 0,
+   "curb": true,
+   "travelW": 48,
+   "roadClass": "local",
+   "cx": 75,
+   "cy": -97,
+   "pts": [
+    {
+     "x": -1750,
+     "y": -100
+    },
+    {
+     "x": -400,
+     "y": -70
+    },
+    {
+     "x": 700,
+     "y": -120
+    },
+    {
+     "x": 1750,
+     "y": -100
+    }
+   ],
+   "vtx": [
+    {},
+    {
+     "radius": 220,
+     "treatment": "arc"
+    },
+    {
+     "radius": 220,
+     "treatment": "arc"
+    },
+    {}
+   ]
+  },
+  {
+   "z": 52224,
+   "id": "bain-rd7",
+   "type": "road",
+   "w": 48,
+   "h": 60,
+   "rot": 0,
+   "curb": true,
+   "travelW": 48,
+   "roadClass": "local",
+   "cx": 75,
+   "cy": 1203,
+   "pts": [
+    {
+     "x": -1750,
+     "y": 1200
+    },
+    {
+     "x": -400,
+     "y": 1230
+    },
+    {
+     "x": 700,
+     "y": 1180
+    },
+    {
+     "x": 1750,
+     "y": 1200
+    }
+   ],
+   "vtx": [
+    {},
+    {
+     "radius": 220,
+     "treatment": "arc"
+    },
+    {
+     "radius": 220,
+     "treatment": "arc"
+    },
+    {}
+   ]
+  },
+  {
+   "z": 53248,
+   "id": "bain-rd8",
+   "type": "road",
+   "w": 48,
+   "h": 60,
+   "rot": 0,
+   "curb": true,
+   "travelW": 48,
+   "roadClass": "local",
+   "cx": 75,
+   "cy": 2403,
+   "pts": [
+    {
+     "x": -1750,
+     "y": 2400
+    },
+    {
+     "x": -400,
+     "y": 2430
+    },
+    {
+     "x": 700,
+     "y": 2380
+    },
+    {
+     "x": 1750,
+     "y": 2400
+    }
+   ],
+   "vtx": [
+    {},
+    {
+     "radius": 220,
+     "treatment": "arc"
+    },
+    {
+     "radius": 220,
+     "treatment": "arc"
+    },
+    {}
+   ]
+  },
+  {
+   "z": 54272,
+   "id": "bain-pond1",
+   "type": "pond",
+   "rot": 0,
+   "points": [
+    {
+     "x": -2350,
+     "y": 900
+    },
+    {
+     "x": -1500,
+     "y": 860
+    },
+    {
+     "x": -1380,
+     "y": 1240
+    },
+    {
+     "x": -1420,
+     "y": 1780
+    },
+    {
+     "x": -1760,
+     "y": 2080
+    },
+    {
+     "x": -2260,
+     "y": 2010
+    },
+    {
+     "x": -2420,
+     "y": 1560
+    }
+   ]
+  }
+ ],
+ "markups": [],
+ "measures": [],
+ "callouts": [],
+ "elevation": {
+  "crossSections": []
+ },
+ "settings": {
+  "snap": false,
+  "aisle": 24,
+  "bayMax": 58,
+  "bayMin": 50,
+  "doorOC": 12,
+  "stallW": 9,
+  "bufferD": 15,
+  "setback": 25,
+  "gridSize": 10,
+  "roadCurb": 0.5,
+  "showDims": true,
+  "showGrid": true,
+  "speedBay": 60,
+  "trailerL": 53,
+  "trailerW": 12,
+  "doorWidth": 9,
+  "parkAngle": 90,
+  "showAreas": true,
+  "showDocks": true,
+  "roadWidths": "24, 26, 30, 36, 40",
+  "stallDepth": 18,
+  "typeStyles": {},
+  "parcelStyle": {
+   "stroke": "#0729cf",
+   "weight": 3,
+   "sbStroke": "#0729cf"
+  },
+  "showSetback": true,
+  "truckCourtD": 135,
+  "parcelSelect": true,
+  "trailerAisle": 60,
+  "trailerParkD": 50,
+  "bayDepthTarget": 50,
+  "bayLengthTarget": 56
+ },
+ "layerOverrides": {},
+ "layerAbove": {},
+ "rasters": [
+  {
+   "role": "underlay",
+   "id": "underlay",
+   "imgW": 1800,
+   "imgH": 1167,
+   "opacity": 1,
+   "ftPerPx": 1.3333,
+   "rotation": 0,
+   "locked": false,
+   "visible": true,
+   "encodedBytes": 393216,
+   "fromIdb": true,
+   "fromMap": true,
+   "x": -1200,
+   "y": -778
+  },
+  {
+   "role": "sheetOverlay",
+   "id": "ovbain1",
+   "imgW": 1728,
+   "imgH": 2592,
+   "opacity": 0.55,
+   "ftPerPx": 2.7778,
+   "rotation": 0,
+   "locked": true,
+   "page": 1,
+   "visible": true,
+   "encodedBytes": 10432512,
+   "fromIdb": true,
+   "x": -2400,
+   "y": -3600
+  }
+ ]
+}
