@@ -467,7 +467,12 @@ async function restoreView(page, home) {
 
 /* ── One run: one page load, one arm, the whole ladder ─────────────────────────────────────── */
 async function runArm(browser, { arm, idleBudgetMs }) {
-  const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: DPR });
+  /* `ignoreHTTPSErrors` + the launch flag are BOTH required against a remote origin: the sandbox
+   * routes outbound HTTPS through a TLS-inspecting proxy that Node trusts and Chromium does not
+   * (docs/REFERENCE.md, "Playwright / ui-audit in the sandbox"). Harmless against localhost. */
+  const context = await browser.newContext({
+    viewport: { width: 1440, height: 900 }, deviceScaleFactor: DPR, ignoreHTTPSErrors: true,
+  });
   await context.addInitScript(INSTRUMENT.replace("__PF_LITE__", LITE ? "true" : "false"));
   await context.addInitScript(perfScenarioSeed());
   /* Arms the planner's own read/debug hook (`window.__plannerView`), which `restoreView` needs to
@@ -574,10 +579,27 @@ async function runArm(browser, { arm, idleBudgetMs }) {
 }
 
 /* ── Main ──────────────────────────────────────────────────────────────────────────────────── */
+/* ⚠ A REMOTE `BASE_URL` DOES NOT WORK FROM THIS SANDBOX, and the failure is silent about its cause.
+ *
+ * Measured 2026-08-06 while smoke-testing V711's own "point it at planyr.io" recipe against the
+ * branch's Cloudflare Pages preview: `curl` returns 200 and `page.goto` dies with
+ * ERR_CONNECTION_RESET. Chromium does not read HTTPS_PROXY (Node and curl do), which is the
+ * obvious explanation and is HALF the story — passing the proxy explicitly, below, does NOT fix
+ * it: an isolation test with `proxy` set and unset failed identically. The egress gateway resets
+ * the browser's traffic either way.
+ *
+ * The proxy is still wired up because it is the correct plumbing and costs nothing (localhost is
+ * in NO_PROXY, so a local run is byte-identical either way), but it is NOT a workaround and must
+ * not be reported as one. The consequence for V711 is recorded on that entry: the remote run has
+ * to happen from a machine with ordinary network access — which is what V711 asks for anyway,
+ * since the whole point is to measure the machine that HAS the symptom. */
+const PROXY = process.env.HTTPS_PROXY || process.env.HTTP_PROXY || "";
+const REMOTE = !/^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])/.test(BASE);
 const browser = await chromium.launch({
   executablePath: EXEC,
   headless: false, // ⚠ REQUIRED — see the frameSampling note at the top of this file
   args: ["--no-sandbox", "--ignore-certificate-errors", "--window-size=1600,1000"],
+  ...(PROXY && REMOTE ? { proxy: { server: PROXY, bypass: "localhost,127.0.0.1" } } : {}),
 });
 
 const runs = [];
