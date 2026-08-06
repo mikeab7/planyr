@@ -266,6 +266,50 @@ node scripts/perf-base-stats.mjs --out .perf/base-stats.json
 node ui-audit/perf-bundle-audit.mjs --compare .perf/base-stats.json
 ```
 
+## Attributing a BOOT — `--boot-timeline` (added 2026-07-31, speed program phase 3)
+
+`timeToFirstDrag` is one number, and for most of this program it was the largest one in it
+(4.4–7.9 s at 4× throttle against a first paint under a second) with no breakdown behind it.
+`--boot-timeline` produces the breakdown, and it is a different kind of measurement from every
+budget above — it is never judged against a ceiling, it is an explanation.
+
+```sh
+npx vite build --sourcemap            # ⚠ REQUIRED for named phases — see below
+npx vite preview --port 4173 &
+node ui-audit/perf-harness.mjs --no-tiles --cpu-throttle 4 --boot-timeline
+node ui-audit/perf-harness.mjs --no-tiles --cpu-throttle 4 --boot-timeline \
+     --arms baseline,no-drainage --reps 3        # interleaved A/B against a control arm
+```
+
+What it prints, and why it is in two halves:
+
+- **The wall spine** — consecutive measured marks (HTML received · first script · first paint ·
+  canvas element exists · canvas finished drawing · press delivered · drag serviced). They are
+  events, so they sum EXACTLY to time-to-first-drag and no segment can hide a remainder. Ordered by
+  measurement, not by expectation: the harness presses as soon as the canvas ELEMENT exists, so on a
+  slow boot "canvas drawn" legitimately lands after "press delivered".
+- **The attribution** — a CPU sample profile across the same window, resolved through the build's
+  source maps, so a sample lands on `lib/roadGeometry.js` or `node_modules/react-dom` rather than on
+  `SitePlannerApp-BxMJopPJ.js:7`. Idle is a phase like any other. Whatever no rule can name is
+  charged to an explicit **UNATTRIBUTED** row with its top contributors by name.
+- **The cross-tab** — the two laid over each other, per segment, busy% vs idle%. The profile clock is
+  pinned to the page clock by a **burn marker** (a uniquely-named CPU-burning function that appears in
+  both), which is good to a fraction of a millisecond; the pairing by CDP round-trip that this
+  replaced was only good to ±390 ms and suppressed itself every run.
+
+⚠ **Without `--sourcemap` the attribution degrades to chunk granularity**, and the run says so rather
+than printing a chunk name where a phase name should be. Rebuild without source maps before
+shipping — nothing is gated on their absence, but they should not be published.
+
+⚠ **This sandbox blocks every external host.** Basemap tiles, GIS services and Supabase are ABSENT,
+not slow, so a boot measured here is a LOWER BOUND. Correspondingly, anything it does find is local
+work that the owner's machine pays too.
+
+**Control arms** (`--arms`) are seeded SETTINGS, never patched builds: `no-drainage` sets
+`settings.drainage.autoFacts = false`, which is exactly what `drainAutoEnabled` reads. Check the arm
+DID something — the run prints per-category request counts, and the drainage arm should visibly drop
+the GIS request count — before believing a null result.
+
 ## Changing a budget
 
 1. Lowering a bundle **baseline** after an optimization — the good direction, and the only

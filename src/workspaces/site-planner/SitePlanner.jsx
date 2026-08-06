@@ -23351,14 +23351,15 @@ function renderElPx(el, f2p, isSel, tool, settings, startMoveEl, onElDouble, nb,
          * that decided it rather than a judgement call. Folding the N leaf <rect>s into the N
          * subpaths of one <path> — the same transformation that makes the stall striping above
          * byte-identical — shifts the picture here by up to 23/255 on 0.02–0.41% of canvas
-         * pixels (ui-audit/verify-stall-lod-parity.mjs, four zoom rungs). The cause is specific
-         * and not fixable from this side: a leaf's fill is SEMI-TRANSPARENT (fillOpacity 0.95),
-         * so where two leaves' antialiased edges share pixel coverage — which at any zoom fine
-         * enough to be worth collapsing is always — compositing them one at a time and
-         * compositing their union are genuinely different colours. The stall dividers are
-         * opaque and single-coloured, which is exactly why the same fold is exact for them.
-         * That is 424 nodes left on the table on the owner's plan, knowingly, because the
-         * constraint is "visually identical or it does not ship" and this is not identical. */
+         * pixels (ui-audit/verify-stall-lod-parity.mjs, four zoom rungs). That is 424 nodes left
+         * on the table on the owner's plan, knowingly, because the constraint is "visually
+         * identical or it does not ship" and this is not identical.
+         * ⚠ THE CAUSE IS **NOT** THE SEMI-TRANSPARENT FILL — that was the recorded explanation
+         * until 2026-07-31 and it is refuted: with both arms forced fully opaque the difference
+         * does not move. It is that Chromium does not rasterise a <rect> and a rectangular
+         * <path> to the same antialiased edge, at ANY zoom, folded or not. The full split lives
+         * next to `stallStripesExplicit` in lib/labelLayout.js and on B1350; the instrument is
+         * ui-audit/diagnose-dock-leaf-fold.mjs. Do not try a third time without new information. */
         doors.forEach((cF, i) => {
           if (horiz) {
             const by = s === "bottom" ? h - Dpx : 0;

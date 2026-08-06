@@ -123,8 +123,28 @@ function callouts() {
   });
 }
 
+/* ---- CONTROL ARMS (NEW-1, phase 3) -------------------------------------------------------------
+ * A hypothesis about boot is only settled by a run with the suspect TURNED OFF, measured the same
+ * way and interleaved with the baseline. These arms exist so that control is a SEEDED SETTING —
+ * the product's own switch, flipped in the plan the harness loads — and never a patched build or a
+ * monkey-patched global, either of which measures a different program.
+ *
+ *   drainageAutoFacts:false   → `settings.drainage.autoFacts = false`, which is exactly what
+ *                               `drainAutoEnabled` in SitePlanner.jsx reads. It disables the
+ *                               LOAD-kind drainage facts pass (B860) that B1349 put behind a
+ *                               requestIdleCallback with a hard 4 s ceiling — the arm that settles
+ *                               whether that ceiling and time-to-first-drag are the same 4 seconds.
+ */
+export function scenarioArm(name) {
+  if (name === "no-drainage") return { drainageAutoFacts: false };
+  return {};
+}
+
 /** The full site record, in the shape the logged-out planner store persists. */
-export function perfScenarioSite() {
+export function perfScenarioSite({ drainageAutoFacts } = {}) {
+  const settings = drainageAutoFacts === false
+    ? { ...PLAN.settings, drainage: { ...(PLAN.settings.drainage || {}), autoFacts: false } }
+    : PLAN.settings;
   return {
     id: SCENARIO_ID,
     groupId: SCENARIO_ID,
@@ -138,7 +158,7 @@ export function perfScenarioSite() {
     callouts: callouts(),
     markups: [],
     parcelDrawings: [],
-    settings: PLAN.settings,
+    settings,
     underlay: null,
     updatedAt: 0, // fixed, so the seeded bytes are byte-identical run to run
     data: { status: "active" },
@@ -146,8 +166,8 @@ export function perfScenarioSite() {
 }
 
 /** The localStorage seed script the harness injects before navigation. */
-export function perfScenarioSeed() {
-  const site = perfScenarioSite();
+export function perfScenarioSeed(opts) {
+  const site = perfScenarioSite(opts);
   return `(() => { try {
     localStorage.setItem('planarfit:sites:v1', JSON.stringify(${JSON.stringify({ [site.id]: site })}));
     localStorage.setItem('planarfit:currentSite:v1', ${JSON.stringify(site.id)});
