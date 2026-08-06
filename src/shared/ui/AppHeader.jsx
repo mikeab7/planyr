@@ -38,7 +38,7 @@
  * exit affordance can never leave the two disagreeing. Esc (or the exit button) restores it.
  * When hidden the workspace's flex: 1 content fills 100 % of viewport height.
  */
-import { useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import ProjectBreadcrumb from "./ProjectBreadcrumb.jsx";
 import CloudSyncBadge from "./CloudSyncBadge.jsx";
 import AnchoredMenu from "./AnchoredMenu.jsx";
@@ -81,9 +81,13 @@ const settingsPanel = {
   fontFamily: "system-ui, sans-serif",
 };
 
-// Settings gear (row-1 right zone) → popover hosting the display-theme picker. Rendered
-// only when signed OUT (B389): signed-in users get the theme control in account → Settings,
-// so the gear isn't duplicated; signed out, this keeps the switch one click away. (B342/B389)
+/* Settings gear (row-1 right zone) → popover hosting the display-theme picker and the on-device
+ * storage readout. Rendered only when signed OUT (B389): signed-in users get both controls in
+ * account → Settings, so the gear isn't duplicated; signed out, this keeps them one click away.
+ * (B342/B389; storage added NEW-3/B1429 — a signed-out user shares the same ~5 MB ceiling and
+ * has no cloud copy to fall back on, so they need the number more, not less.)
+ * The panel is LAZY so its census + byte formatting never ride the entry chunk. */
+const StoragePanel = lazy(() => import("../storage/StoragePanel.jsx"));
 function SettingsMenu() {
   const [open, setOpen] = useState(false);
   const anchor = useRef(null);
@@ -95,7 +99,7 @@ function SettingsMenu() {
         aria-haspopup="menu"
         aria-expanded={open}
         aria-label="Settings"
-        title="Settings: display theme"
+        title="Settings: display theme and device storage"
         style={{
           display: "grid", placeItems: "center", width: 30, height: 26, borderRadius: 7,
           border: `1px solid ${LINE}`, background: "var(--chrome-bg)", color: "var(--chrome-text)",
@@ -109,8 +113,12 @@ function SettingsMenu() {
         </svg>
       </button>
       <AnchoredMenu open={open} onClose={() => setOpen(false)} anchorRef={anchor}
-        placement="below-right" width={206} gap={8} panelStyle={settingsPanel}>
+        placement="below-right" width={264} gap={8} panelStyle={settingsPanel}>
         <ThemePicker />
+        <div style={{ height: 1, background: LINE, margin: "12px 0 10px" }} />
+        <Suspense fallback={<div style={{ fontSize: 10.5, color: "var(--text-secondary)" }}>Checking storage…</div>}>
+          {open && <StoragePanel />}
+        </Suspense>
       </AnchoredMenu>
     </>
   );

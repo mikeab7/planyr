@@ -16,6 +16,10 @@ import { SIGNUP_CONFIRM_MSG, PASSWORD_RESET_MSG } from "../lib/authMail.js";
  * a first paint of any workspace. Moving it out is the one panel in this tranche whose saving
  * lands on all four routes rather than only the Site route. */
 const TeamPanel = lazy(() => import("./TeamPanel.jsx"));
+/* LAZY for the same reason (NEW-3): the storage census pulls in the byte-formatting + class
+ * registry and reaches the IndexedDB walker, and it is only ever read when someone opens
+ * Settings and looks. Nothing about it belongs on a first paint. */
+const StoragePanel = lazy(() => import("../../../shared/storage/StoragePanel.jsx"));
 import LazyPanel from "./LazyPanel.jsx";
 import ThemePicker from "../../../shared/theme/ThemePicker.jsx";
 
@@ -152,6 +156,11 @@ function AccountView({ user, profileApi, initialTab, onClose }) {
           {/* Display theme (B389) — moved here from the row-1 gear so it lives with your account settings */}
           <div style={{ height: 1, background: PAL.line, margin: "16px 0 12px" }} />
           <ThemePicker />
+          {/* Storage on this device (NEW-3) — two tiers, reported separately, with a safe clear-cache */}
+          <div style={{ height: 1, background: PAL.line, margin: "16px 0 12px" }} />
+          <LazyPanel name="Storage" minHeight={120} label="Checking storage…">
+            <StoragePanel />
+          </LazyPanel>
         </div>
       )}
 

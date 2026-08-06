@@ -782,6 +782,24 @@ export function createExportSheet(ctx) {
     }
     return { features: [] };
   };
+  /* NEW-1/B1427 — PDF-PARITY guard for the async cache tier. `exportVectorOverlaysForFrame` is
+   * SYNC by contract, and its terrain branch reads `gisCache.read()`, which since the persistent
+   * tier moved to IndexedDB answers from the in-memory L1 only. L1 is bounded (48 entries), so a
+   * wide view whose tiles have cycled out would silently export without contours even though the
+   * tiles are still stored. Pull the tiles this frame needs back into L1 FIRST — both export
+   * entry points are already async, so this costs a few milliseconds and nothing else. */
+  const warmTerrainForFrame = async () => {
+    const map = geoMapRef.current;
+    if (!map) return;
+    const wants = Object.entries(ALL_LAYERS).some(([id, cfg]) =>
+      (cfg.kind === "contours" || cfg.kind === "flowdir") && overlays?.[id]?.on);
+    if (!wants) return;
+    try {
+      const b = map.getBounds();
+      const req = gridRequest({ west: b.getWest(), south: b.getSouth(), east: b.getEast(), north: b.getNorth() }, map.getZoom());
+      await gisCache.warm(`terrain:${req.key}`);
+    } catch (_) { /* a cold tile just exports without contours, exactly as before */ }
+  };
   // B745 — capture the VECTOR/client-drawn overlay layers (transmission, boundaries, contours,
   // drainage arrows, OSM/Mapillary) for the export. buildExportSvg reprojects lat/lon → feet → SVG;
   // this only enumerates active non-raster layers + normalizes their live geometry. Sync-only; a
@@ -825,6 +843,7 @@ export function createExportSheet(ctx) {
   const exportPNG = async () => {
     const exportAerial = await exportAerialForFrame(printFrame); // B735/B839 — capture the live basemap (stitched cached tiles, or the dynamic /export fallback)
     const exportOverlays = exportOverlaysForFrame(printFrame); // B739 — capture the live GIS raster layers (floodplain, pipelines, …)
+    await warmTerrainForFrame(); // NEW-1 — the persistent cache tier is async now; make sure the frame's terrain tiles are resident before the SYNC capture below
     const exportVectorOverlays = exportVectorOverlaysForFrame(); // B745 — capture the live GIS vector layers (boundaries, transmission, contours, …)
     const built = buildExportSvg(printFrame, true, PAL.paper, exportAerial, exportOverlays, true, exportVectorOverlays); // use the print crop if one's set, else dev extent
     if (!built) { alert("Nothing to export yet — add a parcel or some elements first."); return; }
@@ -888,6 +907,7 @@ export function createExportSheet(ctx) {
     const mark = (label) => { try { console.debug(`[pdf] ${label}: ${Math.round(now() - t0)}ms`); } catch (_) {} };
     const exportAerial = await exportAerialForFrame(printFrame); // B735/B839 — capture the live basemap (a Leaflet <div> the SVG can't clone) as a frame-exact image: stitched cached tiles, or the dynamic /export fallback
     const exportOverlays = exportOverlaysForFrame(printFrame); // B739 — capture the live GIS raster layers (floodplain, pipelines, …) for the print frame
+    await warmTerrainForFrame(); // NEW-1 — the persistent cache tier is async now; make sure the frame's terrain tiles are resident before the SYNC capture below
     const exportVectorOverlays = exportVectorOverlaysForFrame(); // B745 — capture the live GIS vector layers (boundaries, transmission, contours, …)
     const built = buildExportSvg(printFrame, includeOverlay, "#ffffff", exportAerial, exportOverlays, includeMapLayers, exportVectorOverlays, paper, orient); // force WHITE paper for print/PDF; paper/orient size the label tier (NEW-1)
     if (!built) { alert("Nothing to export yet — add a parcel or some elements first."); return; }

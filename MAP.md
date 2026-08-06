@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-08-05 @ `0ae3056` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-08-06 @ `cfea855` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_426 source files mapped._
+_430 source files mapped._
 
 ## infra
 
@@ -212,6 +212,14 @@ _426 source files mapped._
   - _exports_: `DELETED_RETENTION_DAYS`, `deleteProject`, `filterProjects`, `groupProjects`, `listDeletedProjects`, `listProjects`, `normalizeProjectName`, `notifyProjectsChanged`, `onProjectsChanged`, `purgeDeletedProject`, `purgeExpiredDeletedProjects`, `relTime`, `renameProject`, `restoreDeletedProject`, `suggestNameMatch`, `warmProjects`, `warmProjectsIfEmpty`
 - **`src/shared/recents/recentDocs.js`** — Library-Home Recent list: local recently-OPENED drawings (not updated_at), per-uid, deduped by id, newest-first, capped at 15
   - _exports_: `listRecents`, `RECENTS_CAP`, `recordOpen`, `removeRecent`
+- **`src/shared/storage/originStore.js`** — Dependency-free read/delete-by-prefix access to the origin's IndexedDB kv store, so shared chrome can census and clear it without importing a workspace module (which hoists the cache into a route chunk)
+  - _exports_: `deleteOriginPrefix`, `originStoreAvailable`, `walkOriginStore`
+- **`src/shared/storage/storageCensus.js`** — Per-tier, per-class storage census: localStorage byte census + navigator.storage.estimate, key→class registry with a declared rehydration source, tier-labelled telemetry facts; the two tiers are never summed
+  - _exports_: `censusIndexedDb`, `censusLocalStorage`, `classifyIdbKey`, `classifyLocalKey`, `estimateQuota`, `formatBytes`, `IDB_CLASSES`, `LOCAL_CAP_BYTES`, `LOCAL_CLASSES`, `REBUILD`, `storageSnapshot`, `telemetryFacts`
+- **`src/shared/storage/StoragePanel.jsx`** — "Storage on this device" panel: two separate tier meters (small ~5 MB store vs large IndexedDB quota) with per-class sizes and a safe clear-map-data action; lazily loaded into account Settings and the signed-out gear
+  - _exports_: `default (StoragePanel)`
+- **`src/shared/storage/storageReclaim.js`** — Free space by dropping ONLY data that declares a rehydration source (never a raster with no cloud copy); oldest-first localStorage eviction plus the reclaim-then-retry decision behind the device-save retry button
+  - _exports_: `CACHE_CLEARED_EVENT`, `CACHE_IDB_PREFIX`, `reclaimableClasses`, `reclaimLocalStorage`, `reclaimMessage`, `reclaimRefetchable`, `reclaimThenRetry`, `unprovenReclaimables`
 - **`src/shared/telemetry/clientErrors.js`** — Client error+event telemetry: window/rejection/preload sources insert into anon INSERT-only Supabase client_errors with dedup, rate/session caps, tab-id stamping, fail-safe
   - _exports_: `buildErrorRow`, `decideReport`, `DUP_MS`, `errorSignature`, `extractMessage`, `extractStack`, `installClientErrorTelemetry`, `RATE_MAX`, `RATE_WINDOW_MS`, `reportClientError`, `reportClientEvent`, `SESSION_MAX`, `setTelemetryModule`, `TAB_ID`
 - **`src/shared/theme/palette.js`** — JS mirror of index.css theme tokens as concrete light/dark hex for the SVG canvas and Markup viewer where var() cannot resolve; paletteFor(resolved) selector
@@ -499,8 +507,8 @@ _426 source files mapped._
   - _exports_: `geocodeAddress`
 - **`src/workspaces/site-planner/lib/ghostSnapshot.js`** — Frozen visible-tile snapshot held over an unavoidable basemap wipe — flat, viewport-only, replacing the whole-container deep clone
   - _exports_: `buildGhost`, `visibleTiles`
-- **`src/workspaces/site-planner/lib/gisCache.js`** — Browser-local stale-while-revalidate cache for GIS responses: L1 memo plus byte-capped oldest-evicted localStorage, age-aware, injectable store/clock
-  - _exports_: `createGisCache`, `formatAge`, `gisCache`, `isStale`, `NS`
+- **`src/workspaces/site-planner/lib/gisCache.js`** — Browser-local stale-while-revalidate cache for GIS responses: synchronous L1 memo over a byte-capped, oldest-evicted IndexedDB tier (moved off localStorage so cache can't crowd out saved plans), age-aware, injectable disk/clock
+  - _exports_: `createGisCache`, `formatAge`, `gisCache`, `IDB_INDEX_KEY`, `IDB_NS`, `isStale`, `NS`, `purgeLegacyLocalStorage`
 - **`src/workspaces/site-planner/lib/gisFetch.js`** — Resilient ArcGIS fetch substrate: honest error taxonomy, timeout plus jittered-backoff retry, auto GET-to-POST for long geometry, pLimit concurrency pool
   - _exports_: `backoffMs`, `classifyGisError`, `clearCoalesced`, `COALESCE_TTL_MS`, `coalesceRequest`, `fetchArcgisJson`, `GIS_FETCH_RETRIES`, `GIS_FETCH_TIMEOUT_MS`, `GIS_MAX_GET_URL`, `gisErrorMessage`, `GisFetchError`, `pLimit`
 - **`src/workspaces/site-planner/lib/gradingRules.js`** — Grading-standards registry (B825): per-surface-class slope limits with provenance (verified/basis/source), override merge, percent/ratio validation seam, chip labels
@@ -549,8 +557,8 @@ _426 source files mapped._
   - _exports_: `decodeGrid`
 - **`src/workspaces/site-planner/lib/lineZoom.js`** — B880: dash-period + inset-visibility zoom helpers (the B617 siblings for dashed feet-frame lines) — `dashZoom` scales an SVG dash spec with zoom (floored sub-pixel, capped), `insetRingVisible` suppresses a setback/inset ring when it collapses onto its boundary. Exports: `dashZoom`, `insetRingVisible`, `DASH_ZOOM_FLOOR_PX`, `DASH_ZOOM_CEIL`, `INSET_MIN_VISIBLE_PX`.
   - _exports_: `DASH_ZOOM_CEIL`, `DASH_ZOOM_FLOOR_PX`, `dashZoom`, `INSET_MIN_VISIBLE_PX`, `insetRingVisible`
-- **`src/workspaces/site-planner/lib/localDb.js`** — IndexedDB async key/value store (get/put/delete/deleteByPrefix + durable persist), self-healing open, no-op fallback where IDB is unavailable; durable home for the version-history ring and cached rasters
-  - _exports_: `idbAvailable`, `idbDelete`, `idbDeleteByPrefix`, `idbGet`, `idbPersist`, `idbPut`
+- **`src/workspaces/site-planner/lib/localDb.js`** — IndexedDB async key/value store (get/put/delete/deleteByPrefix/forEachByPrefix + durable persist), self-healing open, no-op fallback where IDB is unavailable; large-but-finite durable home for the version-history ring, cached rasters and the GIS cache
+  - _exports_: `idbAvailable`, `idbDelete`, `idbDeleteByPrefix`, `idbForEachByPrefix`, `idbGet`, `idbPersist`, `idbPut`
 - **`src/workspaces/site-planner/lib/mapChromeStack.js`** — the ONE map-overlay stacking model (an open panel outranks map chrome — Leaflet controls, scale bar) plus the available-room panel height
   - _exports_: `LEAFLET_CONTROL_Z`, `MAP_CHROME_Z`, `panelMaxHeight`
 - **`src/workspaces/site-planner/lib/mapillaryClient.js`** — Leaflet-free Mapillary request shaping: builds bbox map_features URL (same-origin token-injecting proxy, or direct Graph API with a user token) and filters to pole/hydrant detections

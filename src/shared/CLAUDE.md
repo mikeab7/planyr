@@ -58,6 +58,17 @@ into every consumer. Root rules in `/CLAUDE.md`; deep detail in `/docs/REFERENCE
   CHECK, ingestion (B721/B722; the runnable adapter lives under `server/ingest/`), the overlay
   legend (B723), and parcel analysis (B724). The Postgres schema lives under the site-planner
   workspace's `db/` folder.
+- `storage/` — the device-storage tier (B1427–B1429), governed by /CLAUDE.md → **TIER-BY-REBUILDABILITY**.
+  `storageCensus.js` is the per-TIER, per-CLASS census — localStorage bytes + `navigator.storage.estimate`,
+  a key→class registry where **every class declares a rehydration source**, and tier-labelled telemetry
+  facts. **⛔ The two tiers are NEVER summed** (~5 MB hard cap vs a gigabyte quota; conflating them is what
+  mis-diagnosed the crisis). `storageReclaim.js` acts on those declarations and nothing else — it refuses
+  the whole pass if a class claims to be reclaimable with no way back, so a reference image with no cloud
+  copy survives any pressure (B474). `originStore.js` is a dependency-free IndexedDB accessor and
+  `StoragePanel.jsx` the UI. **⛔ Nothing here may import a workspace module** — this is chrome on every
+  route, so a module shared with the planner's boot path gets hoisted into a chunk every route downloads
+  (measured: importing `gisCache` put 11.3 KB on a plain Site load and breached three bundle budgets).
+  That is why the cache is cleared by NAMESPACE and told about it through a window event.
 - `projects/`, `profile/`, `cloud/`, `presence/`, `telemetry/`, `gis/`, `geometry/`, `placement/`.
 
 **Convention:** shared logic is pure and unit-tested; per-host state/wiring stays in the workspace.
