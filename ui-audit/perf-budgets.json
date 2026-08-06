@@ -87,8 +87,8 @@
       "allow": ["index", "SitePlannerApp", "hitTest", "AppHeader", "map-vendor", "cjs-interop", "teams"]
     },
     "notesRouteJsBytes": {
-      "baseline": 602087,
-      "target": 602087,
+      "baseline": 634678,
+      "target": 634678,
       "unit": "bytes",
       "what": "Total JS a plain Notes route must download: the entry chunk plus Notes and its static-import closure.",
       "note": "Seeded at 0 so the FIRST measurement of a brand-new route lands through `npm run perf:ratchet` with a stated reason, exactly like any other baseline move — a hand-typed seed is the thing that step exists to prevent. WHAT THIS NUMBER DOES AND DOES NOT INCLUDE, because it is the whole reason the split is load-bearing: it counts the notebook TREE and its chrome, and deliberately NOT the rich-text engine. Notes.jsx pulls components/NoteEditor.jsx (and through it the only @tiptap imports in the module) via a lazy() import inside a Suspense, so the engine is a separate on-demand chunk of ~464 KB that a user pays for only when a page is actually opened, and the rail paints first. A future rise in THIS metric therefore means something moved onto the static path that belongs behind that boundary — most likely a new static import of the editor, or a shared module that got hoisted. test/notesModule.test.js source-scans for the first case; this budget is the backstop for the second."
@@ -285,6 +285,15 @@
           "item": "B1414",
           "date": "2026-08-04",
           "reason": "RE-RECORDS ACCUMULATED DRIFT, NOT THIS FEATURE'S COST — read the numbers before reusing this entry. B1414 (the right rail's parcel-tools menu) costs ~6.3 KB on the Site route, already net of ~0.8 KB paid back by deleting shipped-but-unused provenance data from lib/parcelActions.js. That 6.3 KB breached totalJsBytes by ~1 KB only because the band was ~90 percent consumed before this branch existed: the same CI run measured notesRouteJsBytes +22.9 KB, siteRouteJsBytes +18.1 KB and largestChunkBytes +17.8 KB over their baselines, none of it this feature. The baseline is therefore re-recorded at a measured build, exactly the 2026-07-30 precedent, because the alternative is a ceiling that any honest 7 KB feature breaches, which is the failure PERF-BUDGETS.md changed the shape to prevent. Deliberately NOT a blanket amnesty: siteRouteJsBytes and largestChunkBytes are left UNratcheted and still name B1064 as the owner of paying them back."
+        },
+        {
+          "metric": "bundle.notesRouteJsBytes",
+          "from": 602087,
+          "to": 634678,
+          "direction": "raise",
+          "item": "B1420",
+          "date": "2026-08-06",
+          "reason": "B1420 collapsed the Notes hierarchy from four levels to two (a new page-tree model, a one-way migration off the notebook/section shape, Dashboard project grouping, drag-to-nest) and B1393 x2 added Word-style Click and Type. That is +31.8 KB of REAL, attributable feature weight on the Notes route, and it merged in #917 without recording it - this ratchet is that debt being stated rather than absorbed. Paid back first, not instead: the Click-and-Type constants and the paragraph-step measurement were hoisted to module scope (they closed over nothing and were rebuilt every render). The remainder is the feature. Not a blanket raise: siteRouteJsBytes, totalJsBytes and largestChunkBytes are all left UNratcheted and still name B1064 as the owner of paying them back."
         }
       ]
     }

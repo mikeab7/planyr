@@ -180,6 +180,22 @@ function FindBar({ term, count, index, onStep, onClear }) {
   );
 }
 
+/* ---- Click and Type: the two constants and the one measurement (see focusFromMat) ------- */
+
+const BLANK_SLACK = 6;            // a press within a few px of the last line IS that line
+const MAX_CLICK_PARAGRAPHS = 200; // a runaway backstop; a real press is a dozen at most
+
+/** How far one empty paragraph advances the caret down the page, measured from the REAL
+ *  rendered document rather than assumed from the stylesheet — a font-size mark or a user's
+ *  browser zoom would make an assumed number wrong in a way nobody would ever notice.
+ *  Module scope: it closes over nothing, so re-creating it per render was pure waste. */
+function paragraphStep(dom) {
+  const line = parseFloat(window.getComputedStyle(dom).lineHeight);
+  const probe = dom.querySelector("p");
+  const gap = probe ? (parseFloat(window.getComputedStyle(probe).marginTop) || 0) : 0;
+  return Math.max(12, (Number.isFinite(line) ? line : 24) + gap);
+}
+
 export default function NoteEditor({
   pageId, title, onTitleChange, onStatus, onExportMarkdown, onPrintNotice, onSaved,
   scopeLabel, status, updatedAt, searchTerm = "", onClearSearch, notebookPageIds, trail = [],
@@ -308,22 +324,6 @@ export default function NoteEditor({
    *
    * ⛔ AND IT MUST NOT REACH TEXT. A press at or above the content's bottom edge is left
    * entirely alone inside the document, so double-clicking a WORD still selects that word. */
-  const BLANK_SLACK = 6;      // a press within a few px of the last line is that line, not blank space
-  const MAX_CLICK_PARAGRAPHS = 200;
-
-  /** How far one empty paragraph advances the caret down the page, measured from the REAL
-   *  rendered document rather than assumed from the stylesheet — a font-size mark or a
-   *  user's zoom would make an assumed number wrong in a way nobody would ever notice. */
-  const paragraphStep = (dom) => {
-    const cs = window.getComputedStyle(dom);
-    const line = parseFloat(cs.lineHeight);
-    const probe = dom.querySelector("p");
-    const gapCs = probe ? window.getComputedStyle(probe) : null;
-    const gap = gapCs ? (parseFloat(gapCs.marginTop) || 0) : 0;
-    const h = Number.isFinite(line) ? line : 24;
-    return Math.max(12, h + gap);
-  };
-
   /* The outstanding claim: `{ from, to, docSize }` for paragraphs inserted by a press that
    * has not been typed into yet. Held in a ref because it is not render state — nothing on
    * screen depends on it, and re-rendering the editor on every stray click would be worse
