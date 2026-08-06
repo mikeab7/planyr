@@ -1,5 +1,88 @@
 ## ✅ Done
 
+### B1458 — The pond map label says its name and its acreage, and nothing else `[Site Planner / map · labels]` (task) #site-planner #ui #pond #export  *(owner chat block 2026-08-06, provisional NEW-1, verbatim: "the pond label — not just the footprint. And honestly, maybe we just get rid of the square feet from the label as well. Get rid of footprint and get rid of square feet, leave the acreage." Minted **B1458** via `git fetch origin main && npm run next-id -- --against-main`, LATE, as the last step before push; the code, tests and commits keep the provisional `NEW-1` label. DEDUPE-FIRST — searched Open + ⏳ Verify + Done across `pond label`, `footprint`, `labelFitLadder`, `footprintLabelLine`, `bare acreage`, `PR-Q`, `O4`, `B121`, `B123`, `B140`, `B157`, `B951`, `B1016`, `B1147`, `B1148`: **B1147** is the fit ladder this label rides and **B1148** made that ladder shared and guarded — both own **whether a label FITS**, neither owns **what it SAYS**, and neither is re-opened here because both guarantees still hold and their suites pass unchanged (B1147's harness is in fact the instrument used to verify this). **B140/B157** authored the acres+sf pairing this trims. The rule being overruled is **PR-Q/O4** ("no bare acreage on a pond map label") — an owner decision on one line, recorded rather than silently deleted. Net-new.)*
+`[x]` **✅ DONE 2026-08-06 — live-verified HERE against the real Goose Creek and Tsakiris plans (Verify: live, no `Blocker:` remains).** The label reads `Detention Pond` / `6.58 ac` on screen at every zoom step and on the exported sheet.
+- Verify: live — zoom-/data-density-dependent rendering AND PDF/export parity, both mandatory-live classes. **Done here, not deferred** (the B1147 precedent): `ui-audit/verify-pond-label-fit.mjs` drives both real plans logged-out across a five-step zoom sweep, reads the painted label text back off the DOM, and exports the sheet. No `Blocker:` remains — no auth, no external GIS, real project geometry seeded locally.
+- Origin: filed 2026-08-06 from chat (NEW-1)
+
+**THE CHANGE.** Two removals, both explicit, on the pond's MAP label only:
+
+```
+was:  Detention Pond              now:  Detention Pond
+      footprint 6.58 ac · 286,648 sf     6.58 ac
+```
+
+The area line moved into `lib/pondLabelText.js` (`pondAreaLabelLine`) — a pure module, so the guard drives
+the real builder instead of grepping `SitePlanner.jsx` for a string, and so the canvas and the print sheet
+cannot acquire two copies of the wording. **Length: the area line went 30 → 7 characters; the label's widest
+line is now its own name at 14.** Three call sites, all pond, all through the one builder: the plain-pond
+area line, the `Existing …` baseline area line, and — same trim, same label — the two expansion-mode
+increment lines (`+0.50 ac footprint · +21,780 sf` → `+0.50 ac`, and the "Additional Detention" chip).
+
+**PR-Q/O4 IS DELIBERATELY OVERRULED FOR THIS ONE LINE, and the reversal is written down where the next
+session will hit it** (`lib/pondLabelText.js`'s header, `src/workspaces/site-planner/CLAUDE.md`, and the
+superseded assertion in `test/pondV3PrQ.test.js`, which is annotated rather than deleted). O4 asked every
+pond acreage to say what it measured; the word "footprint" was how the map label did that. The
+disambiguation is not lost, it moved: the pond's NOUN sits on the line directly above ("Detention Pond" /
+"Mitigation Pond" / "Existing Detention Pond"), the parcel badge still reads "Parcel 15.35 ac", and the pond
+INSPECTOR is untouched and still spells out Water area / Berm ring / Land take in full. O4's assertions for
+the panel header and the parcel badge are unchanged and still pass.
+
+**INTERACTION WITH THE B1147 FIT LADDER — measured, not assumed.** The harness was run against the pre-fix
+build first (to prove the new assertion red and to capture the baseline), then against the fix. Real Goose
+Creek, five-step zoom sweep, both ponds, plus Tsakiris:
+
+| step | pond | before | after |
+| --- | --- | --- | --- |
+| fit | north | `inline`, **1 line — acreage dropped entirely** | `inline`, 2 lines ✅ |
+| fit | south | `stacked`, 3 lines | `inline`, 2 lines |
+| out1 | north | `outside` + leader | `outside` + leader *(unchanged — see below)* |
+| out1 | south | `stacked`, 3 lines | `inline`, 2 lines |
+| out2 | north | `outside` + leader | `outside` + leader *(unchanged)* |
+| out2 | south | `inline`, **1 line — acreage dropped** | `inline`, 2 lines ✅ |
+| in1 | north | `inline`, **1 line — acreage dropped** | `inline`, 2 lines ✅ |
+| in1 | south | `stacked`, 3 lines | `inline`, 2 lines |
+| in2 | north | `stacked`, 3 lines | `inline`, 2 lines |
+| in2 | south | `inline`, 2 lines | `inline`, 2 lines |
+| — | Tsakiris | `stacked`, 3 lines | `inline`, 2 lines |
+
+Two findings worth more than the rung names. **(a)** At three of the ten steps the OLD label was so wide that
+the engine dropped the area line altogether and the pond showed only its name — the acreage was not shown
+*anywhere*. The trimmed label keeps both facts at every step, so this is a change that shows MORE
+information, not less. **(b)** The north pond still leaders outside at the two most zoomed-out steps, and the
+trim was never going to help there: at those zooms the pond draws narrower than the words "Detention Pond",
+and a NAME is one atom that cannot be broken or shortened. That is the ladder working as designed
+(`outside` + leader, never a hide), not a residual defect.
+
+**THE STACKED RUNG IS NOT DELETED, AND IT IS NOT DEAD — reported rather than removed, as instructed.** No
+pond on the two real plans needs `stacked` any more. It stays reachable and stays TESTED, because the pond
+label still has a multi-atom line: the stage-storage line `Holds 12.4 ac-ft usable · 8.0′ rim to floor`,
+which reveals at the contour/parameter zoom tier. A 420 × 500 ft basin — an ordinary size — cannot carry
+that line inline and takes `stacked` today; `test/pondLabelFit.test.js` pins exactly that case, and
+`test/labelFitLadder.test.js` now asserts the multi-atom line still EXISTS in `SitePlanner.jsx`, so removing
+it would go red rather than quietly retiring two rungs.
+
+**AUDIT-FIRST — other element types carry the same construction? NO. Reported only, nothing else changed.**
+Read off the rendered DOM of the real Tsakiris plan (not inferred from source), every labelled type:
+`building` → `Building 1` / `451,638 sf` / `(incl. 3 bump-outs)` / `873′ × 506′` · `trailer` → `50′ Trailer
+Parking` / `63 trailers` · `pond` → `Detention Pond` / `6.58 ac` · `paving`, `parking`, `road` are
+deliberately unlabelled (`NO_LABEL`) · `sidewalk`/`landscape` show a width only, at close zoom · the parcel
+badge shows `Parcel 15.35 ac`. **The `footprint X ac · Y sf` construction was pond-only.** The one adjacent
+thing the owner may want to decide on: **buildings carry a raw square-footage line** (`451,638 sf`) with no
+acreage and no "footprint", and an IRREGULAR (polygon) building adds a bare acreage line beneath it —
+source-read, `SitePlanner.jsx`'s generic label branch; the Tsakiris plan has no polygon building to observe.
+Left exactly as-is pending his call.
+
+**OUT OF SCOPE, CONFIRMED UNTOUCHED:** the pond inspector / Properties panel. Its Water area / Berm ring /
+Land take rows are unchanged, asserted in `test/pondLabelText.test.js`.
+
+**Verification.** Full suite **451 files / 8,310 tests green** · lint 0 errors · build green · `MAP.md`
+regenerated + drift check green · doc-pointer audit green · `BACKLOG_OPEN.md` regenerated. New assertion
+PROVEN RED against the pre-fix build first: the harness reported `label still says "footprint"` /
+`no bare "N.NN ac" line found` at all ten steps, then PASS at all ten after. PDF-PARITY tightened from "both
+ponds are named on the sheet" to "named the same way" — the sheet must carry the acreage and must NOT carry
+a `footprint …` line. Before/after crops of the Tsakiris pond in `ui-audit/screens/pond-label-trim-*.png`.
+
 ### B1430 — Corrected the falsified "uncapped store" comment and wrote the tiering rule down `[Core / docs]` (task) #persistence #infra  *(owner chat block 2026-08-06 as NEW-4. Minted **B1430** via `git fetch origin main && npm run next-id -- --against-main`, LATE. DEDUPE-FIRST — searched Open + ⏳ Verify + Done across `localDb`, `uncapped`, `idbPersist`, `TIER`, `B474`: B474 WROTE the header being corrected. Net-new — a rule, not a re-fix.)* — ✅ DONE 2026-08-06 (`Verify: sandbox`)
 `[x]` **Shipped 2026-08-06.** Verify: **sandbox** — a doc/comment correction with a machine-checked companion (the `TIER-BY-REBUILDABILITY` guards land with B1427–B1429).
 - Origin: filed 2026-08-06 from the owner chat block (NEW-4)

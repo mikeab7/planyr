@@ -166,7 +166,15 @@ test("SitePlanner feeds the shared ladder its ring, and marks ponds mustLabel", 
   assert.match(src, /mustLabel: el\.type === "pond"/, "a pond label may never be blanked");
   assert.match(src, /ring: d\.ring, ringOrigin: d\.ringOrigin, ringPpf: d\.ringPpf, mustLabel: d\.mustLabel/,
     "the ring/mustLabel keys must actually reach layoutLabels");
-  assert.match(src, /footprintLabelLine/, "the pond footprint line stays a reflowable spec, never pre-joined");
+  // NEW-1 — the pond's area line is now a single atom ("6.58 ac"), so there is nothing left to
+  // pre-join; what this guard protects is that both pond call sites still go through ONE shared
+  // builder rather than each growing its own string. The reflow rungs stay exercised by the
+  // pond's "Holds … ac-ft usable · …′ rim to floor" line, asserted just below.
+  assert.match(src, /lines\.push\(pondAreaLabelLine\(area\)\);/, "the pond area line comes from the shared builder");
+  assert.match(src, /lines\.push\(pondAreaLabelLine\(exA\)\);/, "…and so does the existing-basin one");
+  assert.ok(!/footprintLabelLine/.test(src), "the old footprint+sf line is gone, not merely unused");
+  assert.match(src, /parts: \[`Holds \$\{f1\(usableAcFt\)\} ac-ft usable`/,
+    "a reflowable multi-atom pond line must still exist, or the stacked/abbrev rungs go dead");
   // The ladder is the ONE place fit is decided: no second bounding-box fit test may grow beside it.
   const engine = readFileSync(new URL("../src/workspaces/site-planner/lib/labelLayout.js", import.meta.url), "utf8");
   assert.match(engine, /import \{ labelForms, interiorFitter \} from "\.\/labelFitLadder\.js"/,
