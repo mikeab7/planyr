@@ -134,11 +134,35 @@ export function resolveAdministrator(candidates = [], { requiredFfeAt = null } =
   const overlays = scored.filter((c) => c.kind !== "primary");
   const ambiguous = pool.length > 1 && distinct.size > 1 ? true : overlays.length > 0;
   const strictestBy = typeof requiredFfeAt === "function" ? "required FFE" : "declared freeboard";
+  /* ⛔ B209508 — RANKING BY FREEBOARD IS NOT RANKING BY ELEVATION, and when the BASES differ the two
+   * can disagree. Without a `requiredFfeAt` resolver the score is each rule's declared freeboard, so
+   * "the stricter standard was chosen" compares +2 ft against +2.5 ft — while the elevations those
+   * sit on may be a 100-yr surface and a 500-yr surface. That is exactly the Bain trade: City of
+   * Houston Ch. 19 is 500-yr WSE + 2 ft and commonly lands 1–2 ft HIGHER than Fort Bend's number
+   * despite declaring LESS freeboard. Picking the bigger `plusFt` and calling it stricter is then a
+   * confident wrong answer.
+   *
+   * So when the pool's top candidates rest on DIFFERENT bases and we had no elevation resolver, say
+   * so. This does not change which candidate is chosen — it refuses to let the choice read as
+   * settled on a comparison that was never actually made. */
+  const basesOf = (c) => (c.ffe && Array.isArray(c.ffe.bases) ? c.ffe.bases.map((b) => b.basis) : []).filter(Boolean);
+  /* Measured over EVERY scored candidate with a rule, not just the governing `pool`. The pool
+   * excludes ETJ and edge candidates by design — and the ETJ is precisely the one whose basis
+   * differs at Bain (Houston Ch. 19's 500-yr surface against Fort Bend's 100-yr set). Reading only
+   * the pool would report "no mismatch" on the exact site that has one. */
+  const withRules = scored.filter((c) => c.ffe);
+  const allBases = new Set(withRules.flatMap(basesOf));
+  const basisMismatch = strictestBy === "declared freeboard" && withRules.length > 1 && allBases.size > 1;
   return {
     governing,
     candidates: scored,
     overlays,
     ambiguous,
+    comparedBy: strictestBy,
+    basisMismatch,
+    basisNote: basisMismatch
+      ? "These authorities measure from DIFFERENT flood surfaces (e.g. a 100-yr vs a 500-yr water surface), and the comparison here is on declared freeboard only — the resulting elevations were not computed. A rule with less freeboard on a higher surface can still govern."
+      : null,
     selectionReason: pool.length > 1 || overlays.length
       ? `${scored.length} candidate floodplain authorities are in play; the stricter standard was chosen deliberately (highest ${strictestBy}).`
       : "one floodplain administrator resolved.",
@@ -148,11 +172,39 @@ export function resolveAdministrator(candidates = [], { requiredFfeAt = null } =
   };
 }
 
-/* The one call the panel makes: candidates → governing + the implied BFE behind the shown FFE. */
+/* ⛔ B209508 — AN UNKNOWN JURISDICTION INPUT IS A FIRST-CLASS STATE, NOT AN ABSENT CANDIDATE.
+ *
+ * This module already had the right instincts — `ambiguous:true`, never silently collapse, pick the
+ * STRICTER rule deliberately. But it can only reason about candidates it is GIVEN, and a FAILED
+ * jurisdiction lookup hands it silence. Silence reads as "no ETJ here", so the resolver settles on
+ * the remaining candidate and reports a governing authority with full confidence.
+ *
+ * At Bain that is not a label. With the City of Houston ETJ missing, `etjLabel` is null, the Houston
+ * candidate is never pushed, and the module settles on Fort Bend County:
+ *
+ *   Fort Bend County        non-residential lowest floor = BFE + 2 ft   (FDPR §5.02(c)/(e))
+ *   City of Houston Ch. 19  500-yr WSE + 2 ft — in flat Fort Bend floodplain this commonly lands
+ *                           1–2 ft HIGHER
+ *
+ * So a flaky ETJ lookup silently swaps the stricter rule for the laxer one and prints the result as
+ * settled. On a site with two detention ponds that is finished floors 1–2 ft too low.
+ *
+ * `unresolvedRoles` (from `formatJurisdictionBadge`, which reads `identifyJurisdiction`'s per-role
+ * source state) makes that missing input VISIBLE. When any role failed, the result is flagged
+ * `unresolved` and the panel must not print a settled FFE — the governing candidate is still
+ * computed and shown as provisional, because the reader still needs to know what we DID find. */
+const ROLE_STAKES = {
+  etj: "a city ETJ can impose a stricter floodplain rule than the county",
+  city: "city limits decide whether a city ordinance governs at all",
+  county: "the county is the default floodplain administrator",
+};
+
 export function assessAdministrator({ signals = {}, rules = {}, ffeFt = null, requiredFfeAt = null } = {}) {
   const candidates = administratorCandidates({ ...signals, rules });
   const resolved = resolveAdministrator(candidates, { requiredFfeAt });
   const gov = resolved.governing;
+  const unresolvedRoles = (signals.unresolvedRoles || []).filter(Boolean);
+  const unresolved = unresolvedRoles.length > 0;
   return {
     ...resolved,
     impliedFlood: impliedFloodElevation({ ffeFt, ffe: gov ? gov.ffe : null }),
@@ -160,5 +212,16 @@ export function assessAdministrator({ signals = {}, rules = {}, ffeFt = null, re
     governingRuleText: gov && gov.ffe ? gov.ffe.rule : null,
     governingSource: gov && gov.rule ? gov.rule.source : null,
     governingVerified: gov && gov.rule ? gov.rule.verified !== false : false,
+    /* B209508 — the three fields a panel needs to refuse honestly. `settled` is the one a caller
+     * should gate a printed FFE on: it is false whenever an input could not be checked, EVEN IF a
+     * governing candidate resolved, because the candidate set itself is incomplete. */
+    unresolved,
+    unresolvedRoles,
+    settled: !unresolved && !!gov,
+    unresolvedNote: unresolved
+      ? `Jurisdiction incomplete — ${unresolvedRoles.map((r) => `the ${r} lookup failed`).join(" and ")}. ` +
+        `${unresolvedRoles.map((r) => ROLE_STAKES[r]).filter(Boolean).join("; ")}. ` +
+        `The FFE rule is NOT settled: a stricter authority may apply that we could not check.`
+      : null,
   };
 }

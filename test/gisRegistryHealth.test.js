@@ -18,6 +18,8 @@ import { describe, it, expect } from "vitest";
 import {
   GIS_SOURCES, auditRegistry, availabilityProblems, availabilityOf, fixtureCount,
   statesFor, sourceCoversState, VALID_AVAILABILITY, SOURCE_STATE_SCOPE,
+  // B209505 — the fixture-REACH tier: one point is not coverage.
+  fixtureReachProblems, fixturePoints, haversineKm, SOURCE_FIXTURE_REACH, SOURCE_FIXTURE_REACH_PENDING,
 } from "../src/shared/gis/sources.js";
 // NEW-4 — the fixtures live off the app bundle now (sourceFixtures.js header explains why).
 import { SOURCE_FIXTURES, SOURCE_DOCS, fixturesFor } from "../src/shared/gis/sourceFixtures.js";
@@ -40,6 +42,47 @@ describe("the registry as shipped", () => {
   });
 });
 
+/* B209505 — THE OWNER'S SIX HOUSTON SITES, PINNED AS A PERMANENT REGRESSION SUITE.
+ *
+ * These are the six new industrial locations the 2026-08-06 audit ran 27 layers against, one per
+ * Houston-metro county. Every one of them is now a fixture on the rows that cover Houston, so the
+ * weekly drift job asks about them forever. The owner's ask: "if this suite had existed, every
+ * finding in this block would have been caught by the weekly job instead of by the owner."
+ *
+ * This test asserts the POINTS are still in the fixture set. It cannot assert what the services
+ * return — that is the weekly live verifier's job — but it makes silently dropping one of these
+ * six a red build, which is the part a unit test can hold. */
+const OWNER_SITES_2026_08_06 = [
+  { label: "Cedar Port / Mont Belvieu (Chambers)", point: [-94.852, 29.793] },
+  { label: "NW Harris, Beltway 8 at US-290", point: [-95.552, 29.87] },
+  { label: "Sugar Land (Fort Bend)", point: [-95.6, 29.58] },
+  { label: "Conroe / I-45 North (Montgomery)", point: [-95.45, 30.28] },
+  { label: "Pearland / SH-288 (Brazoria)", point: [-95.29, 29.55] },
+  { label: "Texas City (Galveston)", point: [-94.935, 29.4] },
+];
+
+describe("B209505 · the owner's six Houston audit sites are permanent fixtures", () => {
+  const near = (a, b) => Math.abs(a[0] - b[0]) < 0.01 && Math.abs(a[1] - b[1]) < 0.01;
+  const allPoints = Object.keys(GIS_SOURCES).flatMap((k) => fixturePoints(fixturesFor(k)));
+
+  for (const site of OWNER_SITES_2026_08_06) {
+    it(`${site.label} is asserted by at least one registry row`, () => {
+      expect(allPoints.some((p) => near(p, site.point)), `no fixture at ${site.point}`).toBe(true);
+    });
+  }
+
+  it("the six are spread across six DIFFERENT counties, not six points in one", () => {
+    // Guards against someone "fixing" a failure above by nudging all six onto one convenient spot.
+    let maxSpan = 0;
+    for (let i = 0; i < OWNER_SITES_2026_08_06.length; i++) {
+      for (let j = i + 1; j < OWNER_SITES_2026_08_06.length; j++) {
+        maxSpan = Math.max(maxSpan, haversineKm(OWNER_SITES_2026_08_06[i].point, OWNER_SITES_2026_08_06[j].point));
+      }
+    }
+    expect(maxSpan).toBeGreaterThan(90);
+  });
+});
+
 describe("the fixture-completeness guard actually fails", () => {
   // A guard that has never been shown to go red is a hope, not a guard.
   it("rejects a row with no fixtures at all", () => {
@@ -49,8 +92,69 @@ describe("the fixture-completeness guard actually fails", () => {
   });
 
   it("accepts a raster row whose only fixtures are sampleFixtures", () => {
-    const ok = { key: "x", provider: "P", serviceUrl: "https://example.com/x/ImageServer", tier: "production", lastVerified: "2026-08-05", states: null, kind: "raster", sampleFixtures: [{ label: "l", point: [-95, 29], expectValueRange: [0, 1] }] };
-    expect(auditRegistry({ x: ok }, { x: { sampleFixtures: [{ label: "l", point: [-95, 29], expectValueRange: [0, 1] }] } }).problems).toEqual([]);
+    // B209505 — sampleFixtures count toward REACH as well as toward completeness, so a national
+    // raster row needs three separated probe points just like a /query row. That is deliberate:
+    // a raster sampled in one place is exactly as unfalsifiable as a vector layer queried in one.
+    const sample = [
+      { label: "tx", point: [-95, 29], expectValueRange: [0, 1] },
+      { label: "co", point: [-105, 39.7], expectValueRange: [0, 1] },
+      { label: "nj", point: [-74.17, 40.74], expectValueRange: [0, 1] },
+    ];
+    const ok = { key: "x", provider: "P", serviceUrl: "https://example.com/x/ImageServer", tier: "production", lastVerified: "2026-08-05", states: null, kind: "raster", sampleFixtures: sample };
+    expect(auditRegistry({ x: ok }, { x: { sampleFixtures: sample } }).problems).toEqual([]);
+  });
+
+  /* B209505 — the owner's ask, verbatim: "deliberately break a row and prove the suite catches it."
+   * The whole point of this item is that the OLD fixture set could not fail: 45 of 57 rows carried
+   * one point, so every row's claim to work anywhere rested on one place. These cases break a row
+   * in each of the ways that used to pass silently and assert the audit goes red. */
+  it("rejects a NATIONAL row proven at only one point (the epaCleanups-in-Pasadena shape)", () => {
+    const oneSpot = {
+      key: "x", provider: "P", serviceUrl: "https://example.com/x/MapServer", tier: "production",
+      lastVerified: "2026-08-06", states: null,
+    };
+    const fx = { fixtures: [{ label: "Pasadena", point: [-95.21, 29.72], expectMinCount: 1 }] };
+    const problems = auditRegistry({ x: oneSpot }, { x: fx }).problems;
+    expect(problems.some((p) => /only 1 fixture point/.test(p))).toBe(true);
+  });
+
+  it("rejects a national row whose several fixtures are all CLUSTERED in one metro", () => {
+    // Three points is enough to satisfy a naive count rule and still prove nothing: these sit
+    // within ~20 km of each other, so they re-test one place three times.
+    const clustered = {
+      key: "x", provider: "P", serviceUrl: "https://example.com/x/MapServer", tier: "production",
+      lastVerified: "2026-08-06", states: null,
+    };
+    const fx = { fixtures: [
+      { label: "downtown Houston", point: [-95.37, 29.76], expectMinCount: 1 },
+      { label: "Pasadena", point: [-95.21, 29.72], expectMinCount: 1 },
+      { label: "NW Harris", point: [-95.55, 29.87], expectMinCount: 1 },
+    ] };
+    const problems = auditRegistry({ x: clustered }, { x: fx }).problems;
+    expect(problems.some((p) => /span only \d+ km/.test(p))).toBe(true);
+  });
+
+  it("a reach DEFERRAL must name the blocking host and its V# — an empty excuse is a problem", () => {
+    // The deferral list exists because twelve rows sit on hosts this build environment blocks.
+    // It must never become a silent opt-out, so a blank reason is itself audited.
+    const row = { key: "bkddOutfalls", provider: "P", serviceUrl: "https://gisclient.quiddity.com/x/MapServer", tier: "production", lastVerified: "2026-08-06", states: ["TX"] };
+    const fx = { fixtures: [{ label: "one", point: [-95.9, 29.82], expectMinCount: 1 }] };
+    // As shipped (a real reason) the row passes its reach check…
+    expect(fixtureReachProblems(row, fx)).toEqual([]);
+    // …and every shipped deferral actually carries one.
+    for (const [k, reason] of Object.entries(SOURCE_FIXTURE_REACH_PENDING)) {
+      expect(String(reason || "").trim(), `${k} deferral reason`).not.toBe("");
+      expect(reason, `${k} deferral must name its V#`).toMatch(/V\d+/);
+    }
+  });
+
+  it("every reach-class OVERRIDE carries a justification", () => {
+    // Narrowing a row's requirement is allowed (a single drainage district genuinely cannot be
+    // probed 200 km apart) but never silently — that is how a row goes back to unfalsifiable.
+    for (const [k, v] of Object.entries(SOURCE_FIXTURE_REACH)) {
+      expect(Array.isArray(v), `${k} override shape`).toBe(true);
+      expect(String(v[1] || "").trim(), `${k} override reason`).not.toBe("");
+    }
   });
 
   it("rejects a row with no state scope", () => {

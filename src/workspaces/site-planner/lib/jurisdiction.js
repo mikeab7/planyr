@@ -31,6 +31,9 @@ import { gisCache as defaultCache } from "./gisCache.js";
 import { GIS_SOURCES } from "../../../shared/gis/sources.js";
 import { fetchArcgisJson, gisErrorMessage } from "./gisFetch.js";
 import { proxyServiceUrl } from "../../../shared/gis/gisProxyCore.js";
+/* B209502 — the network-free county floor beneath the live boundary identify. Pure; answers only
+ * once its asset is resident, and returns a `pending` verdict rather than a guess before that. */
+import { resolveCounty } from "./countyPolygons.js";
 
 // ---------------------------------------------------------------------------
 // Source registry — one row per layer. `kind` picks the query: "polygon" = a
@@ -505,21 +508,75 @@ export async function identifyJurisdiction(lng, lat, opts = {}) {
     const state = names.length ? "loaded" : errPart ? "failed" : "empty";
     out.sources.push({ id: role, state, ageMs: out.ages[role], msg: errPart ? humanize(errPart.error) : null });
     opts.onStatus && opts.onStatus(role, state, errPart ? humanize(errPart.error) : null, { ts: parts[0]?.ts ?? null, stale: parts.some((p) => p.stale) });
-    // B793 — a ring query unions EVERY touching city, so a frontage sliver reads exactly
-    // like real membership. Test the CENTROID point too (same SWR cache) so the badge can
-    // demote edge-only hits. An outage leaves cityCentroid null — never claim "edge only"
-    // off a failed lookup.
-    if (role === "city" && geom.ring && names.length) {
-      try {
-        const rc = await identifySource(srcs[0], { lng, lat }, opts).fresh;
-        out.cityCentroid = rc.error ? null : uniq(rc.items.map((it) => normalizeFeature(srcs[0], it.attrs).name).filter((v) => v != null && v !== "").map(String));
-      } catch (_) { out.cityCentroid = null; }
+    /* B793 — a ring query unions EVERY touching city, so a frontage sliver reads exactly
+     * like real membership. Test the CENTROID point too (same SWR cache) so the badge can
+     * demote edge-only hits. An outage leaves cityCentroid null — never claim "edge only"
+     * off a failed lookup.
+     *
+     * ⛔ B209506 — `cityCentroid === null` USED TO MEAN TWO OPPOSITE THINGS, and that ambiguity is
+     * what made the flag below disagree with the badge. It was left null both when the centroid
+     * could not be tested AND on every POINT query — where the answer already IS a containment
+     * test, because a point has no edge to sliver against. A caller could not tell "we don't know"
+     * from "we know, and it's this". Every branch now sets it explicitly, so null means UNKNOWN and
+     * nothing else. */
+    if (role === "city") {
+      if (state === "failed") {
+        out.cityCentroid = null;                 // genuinely unknown — never claim edge-only or unincorporated off this
+      } else if (!geom.ring) {
+        out.cityCentroid = names;                // POINT query: the answer already is the containment answer
+      } else if (!names.length) {
+        out.cityCentroid = [];                   // the whole ring touched no city, so the centroid is in none either
+      } else {
+        try {
+          const rc = await identifySource(srcs[0], { lng, lat }, opts).fresh;
+          out.cityCentroid = rc.error ? null : uniq(rc.items.map((it) => normalizeFeature(srcs[0], it.attrs).name).filter((v) => v != null && v !== "").map(String));
+        } catch (_) { out.cityCentroid = null; }
+      }
     }
   }));
-  out.unincorporated = out.city.length === 0;
+  /* ⛔ B209506 — ONE DEFINITION OF "WHAT CITY IS THIS IN", AND IT IS CONTAINMENT.
+   *
+   * `unincorporated` was `out.city.length === 0` — the RING union, i.e. every city that so much as
+   * touches the parcel edge. The very same function computes a CENTROID answer a few lines above to
+   * demote edge-only slivers, so the app carried two contradictory notions of membership and this is
+   * the site where they disagreed: at Bain the ring touches Katy, the centroid is in no city at all,
+   * and `unincorporated` therefore read FALSE on genuinely unincorporated land.
+   *
+   * Containment wins. The ring result is kept, but only as the "also touches" set. */
+  out.cityContainment = out.cityCentroid === null ? "unknown" : (out.cityCentroid.length ? "in" : "none");
+  // Back-compat boolean. It can only ever be TRUE on a positive containment answer — an unknown
+  // reads false here, and callers that need to tell the two apart read `cityContainment`.
+  out.unincorporated = out.cityContainment === "none";
+  // Cities the ring touches that the centroid is NOT in — the footnote set, never the headline.
+  out.edgeOnlyCities = out.cityCentroid === null ? [] : out.city.filter((c) => !out.cityCentroid.some((k) => samePlace(k, c)));
   out.straddle = out.city.length > 1 || out.county.length > 1 || out.isd.length > 1;
   return out;
 }
+
+/* ═══ B209506 — ONE CANONICAL FORM FOR A PLACE NAME ═══════════════════════════════════════════
+ *
+ * The sources disagree about case and prefix, and every module downstream invented its own compare:
+ *   • H-GAC's ETJ layer publishes `CITY = "HOUSTON"` (all caps)
+ *   • TxGIO's city-limits layer publishes title case ("Houston")
+ *   • `formatJurisdictionBadge` deduped with `etjs.filter((e) => !cities.includes(e))` — a
+ *     case-SENSITIVE compare, so a site inside Houston's limits AND its ETJ rendered
+ *     "City of Houston / City of Houston · ETJ"
+ *   • `floodAdministrator.js` separately lowercases via its own `cityKey`
+ *
+ * Three private notions of "same place" is two too many. `placeKey` is the one comparison form
+ * (lowercased, "City of " stripped, punctuation and inner whitespace collapsed) and `samePlace` is
+ * the one predicate. DISPLAY strings are deliberately left alone — the H-GAC row already
+ * title-cases via `titleCaseName`, and rewriting a source's display name is a different decision
+ * from making two names compare equal. Pure. */
+export const placeKey = (name) =>
+  String(name == null ? "" : name)
+    .trim().toLowerCase()
+    .replace(/^(the\s+)?(city|town|village)\s+of\s+/, "")
+    .replace(/[.,']/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+export const samePlace = (a, b) => placeKey(a) === placeKey(b) && placeKey(a) !== "";
 
 /* B763 — compact jurisdiction badge for the ACTIVE parcel/site. Turns an
  * `identifyJurisdiction` result into ONE screening-line string a developer reads
@@ -535,22 +592,73 @@ export async function identifyJurisdiction(lng, lat, opts = {}) {
 export function formatJurisdictionBadge(j, opts = {}) {
   if (!j) return null;
   const cities = uniq((j.city || []).filter((v) => v != null && v !== "").map(String));
-  const etjs = uniq((j.etj || []).filter((v) => v != null && v !== "").map(String)).filter((e) => !cities.includes(e));
+  // B209506 — dedupe an ETJ against the city limits by PLACE, not by string. "HOUSTON" from H-GAC and
+  // "Houston" from TxGIO are the same city, and a case-sensitive compare rendered both.
+  const etjs = uniq((j.etj || []).filter((v) => v != null && v !== "").map(String))
+    .filter((e) => !cities.some((c) => samePlace(c, e)));
   const counties = uniq((j.county || []).filter((v) => v != null && v !== "").map(String));
   // B793 — with a POSITIVE centroid answer, a ring-hit city the centroid is not inside is
   // a frontage sliver: it demotes to the tail with an "edge only" qualifier so the badge
-  // leads with the dominant jurisdiction. No centroid data (point query / outage) → the
-  // pre-B793 behavior, no demotion claims.
+  // leads with the dominant jurisdiction. No centroid data (outage) → no demotion claims.
   const centroid = Array.isArray(j.cityCentroid) ? j.cityCentroid : null;
-  const coreCities = centroid === null ? cities : cities.filter((c) => centroid.includes(c));
-  const edgeCities = centroid === null ? [] : cities.filter((c) => !centroid.includes(c));
-  const parts = [
-    ...coreCities.map((c) => `City of ${c}`),
-    ...etjs.map((c) => `City of ${c} · ETJ`),
-    ...edgeCities.map((c) => `City of ${c} · edge only`),
-  ];
-  const jur = parts.length ? parts.join(" / ") : "Unincorporated";
-  const county = counties.length ? counties.map((c) => `${c} County`).join(" / ") : null;
+  const coreCities = centroid === null ? cities : cities.filter((c) => centroid.some((k) => samePlace(k, c)));
+  const edgeCities = centroid === null ? [] : cities.filter((c) => !centroid.some((k) => samePlace(k, c)));
+
+  /* ⛔ B209506/B209507 — THE LEAD IS WHAT GOVERNS, AND SILENCE IS NEVER AN ANSWER.
+   *
+   * Two defects, one line of code. `parts` was built as coreCities → etjs → edgeCities and the badge
+   * only fell back to "Unincorporated" when parts came out EMPTY. An edge-only sliver is a part, so
+   * a genuinely unincorporated site was never called unincorporated as long as any city polygon
+   * touched the parcel edge anywhere — the demoted sliver SUPPRESSED the true answer. At Bain that
+   * printed "City of Katy · edge only · Fort Bend County": leading with a jurisdiction the badge's
+   * own tooltip calls "unlikely to govern the site as a whole", while omitting the City of Houston
+   * ETJ that actually reaches the site.
+   *
+   * And a role that FAILED to load rendered exactly like a role that returned nothing, because the
+   * per-role state `identifyJurisdiction` already records in `j.sources` was never read here. For a
+   * jurisdiction those are opposite facts — "no ETJ here" and "we could not check" imply DIFFERENT
+   * floodplain rules — so collapsing them is how a wrong number reaches the reader as a settled one.
+   * The ETJ source is measurably flaky (0 at three of six points in the owner's Houston sweep), so
+   * this path is common, not rare.
+   *
+   * Order is now: GOVERNING (city limits, or Unincorporated) → ETJ → edge-only footnote, with any
+   * role that could not be checked SAYING SO in its own slot. */
+  const srcState = (role) => {
+    const s = (j.sources || []).find((x) => x && x.id === role);
+    return s ? s.state : null;
+  };
+  const cityState = srcState("city");
+  const etjState = srcState("etj");
+  const countyState = srcState("county");
+  const unresolvedRoles = ["city", "etj", "county"].filter((r) => srcState(r) === "failed");
+
+  /* The governing slot. Containment decides it; a failed lookup admits it rather than guessing.
+   *
+   * ⚠ "couldn't check" is keyed on the source state REPORTING failure — never merely on a missing
+   * centroid. A caller that hands us no `cityCentroid` and no `sources` (a bare point result, an
+   * older caller, a fixture) is not telling us the lookup failed; it is telling us nothing, and the
+   * pre-B793 reading of its city list still applies. Treating absent metadata as failure would have
+   * printed "City limits · couldn't check" on every one of those, which is its own false alarm — the
+   * same collapse in the opposite direction. */
+  const lead = coreCities.length
+    ? coreCities.map((c) => `City of ${c}`)
+    : cityState === "failed"
+      ? ["City limits · couldn't check"]
+      : ["Unincorporated"];
+
+  // The ETJ slot. `unavailable` means there is genuinely no ETJ layer for this area — an honest
+  // "not applicable", distinct from a failure, so it stays quiet.
+  const etjParts = etjs.length
+    ? etjs.map((c) => `City of ${c} · ETJ`)
+    : etjState === "failed"
+      ? ["ETJ · couldn't check"]
+      : [];
+
+  const parts = [...lead, ...etjParts, ...edgeCities.map((c) => `City of ${c} · edge only`)];
+  const jur = parts.join(" / ");
+  const county = counties.length
+    ? counties.map((c) => `${c} County`).join(" / ")
+    : countyState === "failed" ? "County · couldn't check" : null;
   // B764: the ISD from the identify result (j.isd, TEA names already carry the ISD/CISD suffix),
   // or an explicit opts.isd override. Multiple → a straddle across districts.
   const isds = uniq((j.isd || []).filter((v) => v != null && v !== "").map(String));
@@ -561,7 +669,16 @@ export function formatJurisdictionBadge(j, opts = {}) {
   // 2+ cities with no centroid answer to arbitrate).
   const straddle = counties.length > 1 || isds.length > 1 || coreCities.length > 1
     || (centroid === null && cities.length > 1);
-  return { text, jur, county, isd, straddle, edgeOnlyCities: edgeCities };
+  return {
+    text, jur, county, isd, straddle,
+    edgeOnlyCities: edgeCities,
+    // B209507 — what the badge could NOT establish, carried explicitly so a consumer (the floodplain
+    // administrator especially) can refuse to settle rather than reading silence as absence.
+    unresolvedRoles,
+    unresolved: unresolvedRoles.length > 0,
+    cityContainment: j.cityContainment || (centroid === null ? "unknown" : centroid.length ? "in" : "none"),
+    etjLabels: etjs,
+  };
 }
 
 // Configured CAD county keys (those with a wired parcel service) — maps a TxDOT
@@ -592,7 +709,29 @@ export async function countyAtPoint(lng, lat, opts = {}) {
   const isCo = src === JURISDICTION_SOURCES.countyCo;
   const r = await identifySource(src, { lng, lat }, opts).fresh;
   const feat = r.items.map((it) => normalizeFeature(src, it.attrs)).find((f) => f.name) || null;
-  if (!feat) return { name: null, key: null, fips: null, state: isCo ? "CO" : "TX", ageMs: r.ageMs, error: r.error ? humanize(r.error) : null };
+  if (!feat) {
+    /* B209502 — THE OFFLINE FLOOR. The live boundary layer is still the authority, but when it
+     * cannot answer this used to return a bare null, and null is where the caller falls back to
+     * a default — which in this app has always meant Harris. A county whose GIS is unreachable
+     * getting Harris County's drainage authority and detention criteria is the same wrong-but-
+     * plausible answer as Pearland's, arrived at from the other direction.
+     *
+     * The bundled polygons answer with no network at all, so an outage now degrades to the right
+     * county rather than to a default one. It is reported as its own `source: "offline-geometry"`
+     * (never silently passed off as a live identify) and carries `nearEdge` so a caller near a
+     * county line knows the answer is the simplified geometry's, not the state's. */
+    const off = resolveCounty(lat, lng);
+    if (off && off.status === "ok") {
+      const offMap = off.state === "CO" ? CO_COUNTY_NAME_TO_KEY : COUNTY_NAME_TO_KEY;
+      return {
+        name: off.name, key: offMap[off.name.toLowerCase()] || null,
+        fips: off.fips || null, state: off.state,
+        source: "offline-geometry", nearEdge: !!off.nearEdge,
+        ageMs: r.ageMs, error: r.error ? humanize(r.error) : null,
+      };
+    }
+    return { name: null, key: null, fips: null, state: isCo ? "CO" : "TX", ageMs: r.ageMs, error: r.error ? humanize(r.error) : null };
+  }
   // B792 — fips rides along (48157 = Fort Bend, …) so persistence-side callers can
   // cross-check parcel attributes against the boundary answer. (Colorado's GEOID20 is the
   // same 5-digit state+county FIPS, so the field means the same thing on both sources.)

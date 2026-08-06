@@ -4,7 +4,7 @@ import {
   buildIdentifyParams, normalizeFeature, simplifyRing, polylineDistMeters, polylineLengthMeters,
   identifySource, identifyJurisdiction, identifyRoadAuthority, countyAtPoint,
   formatHighway, roadDisplayName, roadAuthorityStyle, ROAD_AUTHORITY_COLORS, ROAD_AUTHORITY_LEGEND,
-  formatJurisdictionBadge,
+  formatJurisdictionBadge, placeKey, samePlace,
 } from "../src/workspaces/site-planner/lib/jurisdiction.js";
 
 const HGAC = ETJ_SOURCES.find((s) => s.id === "etj_hgac"); // the regional Houston ETJ source
@@ -299,9 +299,31 @@ describe("identifyJurisdiction (B93) — city / ETJ / county", () => {
     expect(b.text).toMatch(/^City of Houston \/ City of Bellaire · edge only/);
     expect(b.straddle).toBe(false); // demoted to a qualifier, not a ⚑
   });
-  it("B793 — a POINT query leaves cityCentroid null (no ring, nothing to arbitrate)", async () => {
+  /* ⚠ CONTRACT CHANGED BY B209506, deliberately. This asserted that a POINT query leaves
+   * `cityCentroid` NULL, which made null mean two opposite things — "we could not test containment"
+   * AND "we tested it by point, and here is the answer". A caller could not tell them apart, and
+   * that ambiguity is precisely why `unincorporated` (computed off the RING union) could contradict
+   * the centroid test in the same function. A point HAS no edge to sliver against, so its answer
+   * already IS the containment answer and is now recorded as such.
+   *
+   * The BADGE output is unchanged by this: with cities === centroid, every city is a core city and
+   * the edge-only set is empty, exactly as before. What changes is that `cityContainment` is now
+   * meaningful for point queries instead of reading "unknown". */
+  it("B209506 — a POINT query records its own answer as the containment answer (null now means UNKNOWN, only)", async () => {
     const out = await identifyJurisdiction(-95.37, 29.76, { cache: freshCache(), fetchJson: fakeFetch(base) });
+    expect(out.cityCentroid).toEqual(out.city);
+    expect(out.cityContainment).toBe(out.city.length ? "in" : "none");
+  });
+
+  it("B209506 — cityCentroid is null ONLY when the city lookup genuinely failed", async () => {
+    const out = await identifyJurisdiction(-95.37, 29.76, {
+      cache: freshCache(),
+      fetchJson: fakeFetch({ ...base, [CITY]: () => { throw new Error("boom"); } }),
+    });
     expect(out.cityCentroid).toBeNull();
+    expect(out.cityContainment).toBe("unknown");
+    // and the honest-unknown must NOT masquerade as unincorporated land
+    expect(out.unincorporated).toBe(false);
   });
   it("a point in no city reads as unincorporated", async () => {
     const out = await identifyJurisdiction(-95.0, 30.5, {
@@ -500,9 +522,13 @@ describe("formatJurisdictionBadge (B763) — the passive active-parcel badge", (
     expect(b.straddle).toBe(false);
   });
 
-  it("in an ETJ (no city) → 'City of X · ETJ · Y County'", () => {
-    const b = formatJurisdictionBadge({ city: [], etj: ["Baytown"], county: ["Harris"], unincorporated: true });
-    expect(b.text).toBe("City of Baytown · ETJ · Harris County");
+  /* ⚠ CONTRACT CHANGED BY B209506, at the owner's explicit request. An ETJ is NOT city limits, so a
+   * site in an ETJ and in no city now LEADS with "Unincorporated" and names the ETJ after it. The
+   * owner's stated target line for Bain is "Unincorporated · City of Houston ETJ · Fort Bend County".
+   * The old string implied the city governed the site outright. */
+  it("B209506 — in an ETJ but in NO city → Unincorporated leads, the ETJ follows", () => {
+    const b = formatJurisdictionBadge({ city: [], cityCentroid: [], etj: ["Baytown"], county: ["Harris"] });
+    expect(b.text).toBe("Unincorporated / City of Baytown · ETJ · Harris County");
   });
 
   it("neither city nor ETJ → 'Unincorporated · Y County'", () => {
@@ -519,7 +545,8 @@ describe("formatJurisdictionBadge (B763) — the passive active-parcel badge", (
   it("B793 — a frontage-sliver city (centroid outside) demotes to '· edge only' at the tail, no ⚑", () => {
     // The Bain shape: ring intersects Katy, centroid outside it; Houston-ETJ; Fort Bend.
     const b = formatJurisdictionBadge({ city: ["Katy"], cityCentroid: [], etj: ["Houston"], county: ["Fort Bend"], isd: ["Katy ISD"], straddle: false });
-    expect(b.text).toBe("City of Houston · ETJ / City of Katy · edge only · Fort Bend County · Katy ISD");
+    // B209506 — the centroid is in no city, so the lead is Unincorporated and Katy stays a footnote.
+    expect(b.text).toBe("Unincorporated / City of Houston · ETJ / City of Katy · edge only · Fort Bend County · Katy ISD");
     expect(b.straddle).toBe(false);
     expect(b.edgeOnlyCities).toEqual(["Katy"]);
   });
@@ -551,12 +578,12 @@ describe("formatJurisdictionBadge (B763) — the passive active-parcel badge", (
 
   it("appends the ISD from the identify result (B764: j.isd)", () => {
     const b = formatJurisdictionBadge({ city: [], etj: ["Baytown"], county: ["Harris"], isd: ["Goose Creek Consolidated ISD"] });
-    expect(b.text).toBe("City of Baytown · ETJ · Harris County · Goose Creek Consolidated ISD");
+    expect(b.text).toBe("Unincorporated / City of Baytown · ETJ · Harris County · Goose Creek Consolidated ISD");
     expect(b.isd).toBe("Goose Creek Consolidated ISD");
   });
   it("an explicit opts.isd overrides the result's ISD", () => {
     const b = formatJurisdictionBadge({ city: [], etj: ["Baytown"], county: ["Harris"], isd: ["A ISD"] }, { isd: "B ISD" });
-    expect(b.text).toBe("City of Baytown · ETJ · Harris County · B ISD");
+    expect(b.text).toBe("Unincorporated / City of Baytown · ETJ · Harris County · B ISD");
   });
   it("lists both districts when a parcel straddles two ISDs", () => {
     const b = formatJurisdictionBadge({ city: ["Houston"], etj: [], county: ["Harris"], isd: ["Houston ISD", "Aldine ISD"], straddle: true });
@@ -572,5 +599,115 @@ describe("formatJurisdictionBadge (B763) — the passive active-parcel badge", (
     const b = formatJurisdictionBadge({ city: ["Houston"], etj: [], county: [] });
     expect(b.text).toBe("City of Houston");
     expect(b.county).toBe(null);
+  });
+});
+
+/* ═══ B209506 / B209507 — the Bain header pill ════════════════════════════════════════════════════
+ *
+ * The owner's report: the Bain site read "City of Katy · edge only · Fort Bend County" — leading
+ * with a jurisdiction the badge's own tooltip calls "unlikely to govern the site as a whole", while
+ * omitting the City of Houston ETJ that actually reaches the site.
+ *
+ * GROUND TRUTH, queried live at the Bain origin 29.77086450409065 / -95.84668255417057:
+ *   Texas_County_Boundaries   → 1 feature, CNTY_NM "Fort Bend"  (county label was correct)
+ *   Texas_City_Boundaries     → ZERO features                   (the centroid is in NO city)
+ *   HGAC_City_ETJ_Boundaries  → 1 feature, CITY = "HOUSTON"     (the governing ETJ)
+ *
+ * These fixtures ARE that answer. Do not "fix" them to make a test pass. */
+const BAIN = (over = {}) => ({
+  city: ["Katy"], cityCentroid: [], etj: ["Houston"], county: ["Fort Bend"],
+  sources: [{ id: "city", state: "loaded" }, { id: "etj", state: "loaded" }, { id: "county", state: "loaded" }],
+  ...over,
+});
+
+describe("B209506 — an edge-only sliver is never the headline jurisdiction", () => {
+  it("Bain reads UNINCORPORATED, names the Houston ETJ, and demotes Katy", () => {
+    const b = formatJurisdictionBadge(BAIN());
+    expect(b.text).toBe("Unincorporated / City of Houston · ETJ / City of Katy · edge only · Fort Bend County");
+    // The specific regression: the lead is the governing answer, not the sliver.
+    expect(b.jur.startsWith("Unincorporated")).toBe(true);
+    expect(b.edgeOnlyCities).toEqual(["Katy"]);
+  });
+
+  it("'Unincorporated' is reachable even when the edge-city list is NON-empty", () => {
+    // This is the exact defect: `parts` was non-empty from the sliver alone, and the old code only
+    // fell back to "Unincorporated" when `parts` came out empty — so the sliver SUPPRESSED the truth.
+    const b = formatJurisdictionBadge(BAIN({ etj: [] }));
+    expect(b.jur).toContain("Unincorporated");
+    expect(b.jur).toContain("City of Katy · edge only");
+    expect(b.jur.indexOf("Unincorporated")).toBeLessThan(b.jur.indexOf("Katy"));
+  });
+
+  it("a city the CENTROID is inside still leads", () => {
+    const b = formatJurisdictionBadge({
+      city: ["Houston"], cityCentroid: ["Houston"], etj: [], county: ["Harris"],
+      sources: [{ id: "city", state: "loaded" }, { id: "etj", state: "empty" }, { id: "county", state: "loaded" }],
+    });
+    expect(b.text).toBe("City of Houston · Harris County");
+  });
+});
+
+describe("B209506 — one definition of 'what city is this in', and it is CONTAINMENT", () => {
+  it("cityContainment reports 'none' at Bain even though the RING touches Katy", () => {
+    const b = formatJurisdictionBadge(BAIN());
+    expect(b.cityContainment).toBe("none");
+  });
+  it("an untestable centroid is 'unknown', never silently 'none'", () => {
+    const b = formatJurisdictionBadge(BAIN({ cityCentroid: null, sources: [{ id: "city", state: "failed" }] }));
+    expect(b.cityContainment).toBe("unknown");
+    expect(b.jur).not.toContain("Unincorporated");
+  });
+});
+
+describe("B209507 — a failed lookup never renders as an absence", () => {
+  it("a FAILED etj says so; an EMPTY etj stays quiet", () => {
+    const failed = formatJurisdictionBadge(BAIN({ etj: [], sources: [
+      { id: "city", state: "loaded" }, { id: "etj", state: "failed" }, { id: "county", state: "loaded" }] }));
+    const empty = formatJurisdictionBadge(BAIN({ etj: [], sources: [
+      { id: "city", state: "loaded" }, { id: "etj", state: "empty" }, { id: "county", state: "loaded" }] }));
+    expect(failed.jur).toContain("ETJ · couldn't check");
+    expect(failed.unresolved).toBe(true);
+    expect(failed.unresolvedRoles).toEqual(["etj"]);
+    // The whole point: these two must NOT render the same.
+    expect(empty.jur).not.toContain("couldn't check");
+    expect(empty.unresolved).toBe(false);
+    expect(failed.text).not.toBe(empty.text);
+  });
+
+  it("'unavailable' (no ETJ layer for this area) is an honest N/A, not a failure", () => {
+    const b = formatJurisdictionBadge({
+      city: [], cityCentroid: [], etj: [], county: ["Waller"],
+      sources: [{ id: "city", state: "loaded" }, { id: "etj", state: "unavailable" }, { id: "county", state: "loaded" }],
+    });
+    expect(b.text).toBe("Unincorporated · Waller County");
+    expect(b.unresolved).toBe(false);
+  });
+
+  it("the same failed-vs-empty split holds for the CITY and COUNTY roles", () => {
+    const b = formatJurisdictionBadge({
+      city: [], cityCentroid: null, etj: ["Houston"], county: [],
+      sources: [{ id: "city", state: "failed" }, { id: "etj", state: "loaded" }, { id: "county", state: "failed" }],
+    });
+    expect(b.jur).toContain("City limits · couldn't check");
+    expect(b.county).toBe("County · couldn't check");
+    expect(b.unresolvedRoles.sort()).toEqual(["city", "county"]);
+  });
+});
+
+describe("B209509 — place names compare case-insensitively", () => {
+  it("H-GAC's caps ETJ dedupes against TxGIO's title-case city limits", () => {
+    const b = formatJurisdictionBadge({
+      city: ["Houston"], cityCentroid: ["Houston"], etj: ["HOUSTON"], county: ["Harris"],
+      sources: [{ id: "city", state: "loaded" }, { id: "etj", state: "loaded" }, { id: "county", state: "loaded" }],
+    });
+    // Pre-fix this rendered "City of Houston / City of Houston · ETJ".
+    expect(b.text).toBe("City of Houston · Harris County");
+  });
+  it("placeKey normalises case, the 'City of' prefix and punctuation", () => {
+    expect(placeKey("HOUSTON")).toBe(placeKey("Houston"));
+    expect(placeKey("City of Katy")).toBe(placeKey("KATY"));
+    expect(samePlace("City of Houston", "houston")).toBe(true);
+    expect(samePlace("Houston", "Katy")).toBe(false);
+    expect(samePlace("", "")).toBe(false); // an empty name is not "the same place" as another empty
   });
 });

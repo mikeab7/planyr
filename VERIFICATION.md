@@ -113,6 +113,30 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V17707 — B209506 / B209507 (the Bain header pill: Unincorporated, the Houston ETJ named, Katy demoted — and a failed lookup that SAYS so). ⏳ **LIVE APP (planyr.io), SIGNED IN — the Bain project** `Blocker: real-data`
+**✅ VERIFIED HERE 2026-08-06 — the whole chain, against the LIVE services, at the Bain origin.** `identifyJurisdiction(-95.84668255417057, 29.77086450409065, {ring})` returned: city `[]` · cityCentroid `[]` · cityContainment **none** · etj **["Houston"]** · county **["Fort Bend"]** · sources `etj=loaded city=empty county=loaded`. The pill it produces is:
+
+    BEFORE:  City of Katy · edge only · Fort Bend County
+    AFTER:   Unincorporated / City of Houston · ETJ · Fort Bend County
+
+which is the owner's stated target line. Also proven here: a `failed` ETJ renders `ETJ · couldn't check` and sets `unresolvedRoles:["etj"]`, while an `empty` ETJ stays quiet — the two no longer render identically (`test/jurisdiction.test.js`, and the pair is asserted to differ).
+
+**STILL PENDING (needs the signed-in app on the owner's own Bain project):**
+**(a)** Open Bain and read the header pill — confirm it leads **Unincorporated**, names the **City of Houston ETJ**, and shows Katy only as `· edge only` (his parcel ring touches Katy; the ring used here did not, so the edge footnote is the one part not exercised live).
+**(b)** Hover the pill and confirm the tooltip still explains what "edge only" means.
+**(c)** With the ETJ layer failing (block `HGAC_City_ETJ` in devtools, or open on a flaky load), confirm the pill SAYS `ETJ · couldn't check` rather than going quiet.
+**(d)** Confirm a site genuinely inside a city's limits still reads `City of <name>` with no "Unincorporated" prefix.
+Record the before/after pill text in the note when confirmed.
+
+### V17708 — B209508 (the FFE rule refuses to settle on an incomplete jurisdiction). ⏳ **LIVE APP (planyr.io), SIGNED IN — the Bain project** `Blocker: real-data`
+**✅ VERIFIED HERE 2026-08-06 (engine + panel logic, unit-level against the real rule records):** with the Houston ETJ present the Ch. 19 candidate is raised (`coh`, "wse02pct + 2 ft") and `settled:true`; with the ETJ lookup FAILED the result is `unresolved:true` / `settled:false` and the Buildability row states `FFE rule not settled — jurisdiction unknown` instead of `pads assumed at 144.8′ FFE`. `basisMismatch` is true at Bain (a 500-yr basis compared against a 100-yr set on freeboard alone).
+
+**STILL PENDING (needs the signed-in app with real flood data):**
+**(a)** Open Bain, expand Yield → Stormwater, and confirm the FFE row names its authority and its rule.
+**(b)** Confirm the freeboard-vs-basis caveat renders when both Fort Bend and the Houston ETJ are in play.
+**(c)** Force the ETJ lookup to fail and confirm the panel refuses to state an FFE at all — the Buildability row reads "FFE rule not settled" and no pad elevation is printed as settled anywhere on the panel.
+**(d)** Confirm no OTHER surface prints a pad/finished-floor number while that state is active.
+
 ### V720 — B1393 (×2) (double-click low on a real page and the words appear THERE). `Blocker: real-data` — everything is driven headless here and PASSES (`ui-audit/verify-notes.mjs` **248/248**, and the new checks were proven RED against the old behaviour first, reporting `clicked y=447 · text landed y=190`). It is parked anyway, deliberately: **this exact item passed a sandbox check once and was still wrong in the field**, so the owner's own press on his own page is worth the wait. On **planyr.io**, on a real note, confirm — **(a) THE WORDS GO WHERE YOU CLICK:** open a page, double-click a long way down and off to the right of the text, type something, and confirm it appears **where you clicked** rather than on the first line at the left margin. **(b) A SINGLE CLICK DOES THE SAME:** same test, one click. **(c) OFF TO THE RIGHT COMES OUT RIGHT-ALIGNED:** click near the right-hand edge and confirm what you type sits over there, the way it does in Word; click in the middle and confirm it comes out centred. If that surprises you rather than helps, say so and it comes out — the placement is the bug, the alignment is the Word convention on top of it. **(d) NOTHING IS LEFT BEHIND:** click into blank space, type nothing, click somewhere else, and confirm the page is exactly as it was — no stack of blank lines. **(e) BUT WHAT YOU TYPED STAYS PUT:** do it again, type this time, click away, reload, and confirm your text is still down the page where you put it. **(f) DOUBLE-CLICKING A WORD STILL SELECTS IT.** ⏳ **LIVE APP (planyr.io), ON A REAL NOTE** `Blocker: real-data`
 - **Verified in-session 2026-08-05 as far as the sandbox reaches, and the verification itself is the point of this item.** The previous check asserted that the editor took focus and that a keystroke arrived — both TRUE on the broken build, which is why it was green while the owner was reporting the failure for the second time. The replacement asserts the marker's **resulting rendered position**, read out of the live DOM. Mutation-checked: with the old behaviour restored, seven checks go red.
 **PARTIAL PASS — 2026-08-05, on the DEPLOYED branch preview (`claude-registry-layer-debug.planyr.pages.dev`), driven from this session.** The shipped code path was exercised against the real edge, not a local relay, and all three behaviours are confirmed:
@@ -122,6 +146,31 @@ was never clicked" quietly ships broken.
 >
 > **STILL PENDING (why this is not a full pass):** every check above is the DATA path. What has not been seen is the READOUT — the Yield → Stormwater lines on a signed-in, real Zone-A plan, which needs an account this environment cannot sign into. Steps (a)–(e) below stand.
 
+### V17704 — B209502 / B209503 (the app names the right county, and the five new counties select a real parcel). ⏳ **LIVE APP (planyr.io)** `Blocker: real-data`
+The pure resolution is proven HERE and recorded below (all six of the owner's points resolve correctly; 114/114 and 107/108 agreement against the live county layer). What a sandbox cannot do is drive a signed-in click-to-select against a real CAD, so this is what remains. On **planyr.io**, confirm —
+**(a) THE COUNTY READS RIGHT AT ALL SIX.** Move the map over each of the owner's six audit sites and confirm the Layers panel names, in order: **Chambers · Harris · Fort Bend · Montgomery · Brazoria · Galveston**. Pearland is the one that matters most — it must say Brazoria, never Harris.
+**(b) PEARLAND NO LONGER SHOWS HARRIS FLOOD-CONTROL DATA.** At the Pearland site, confirm the Harris County Flood Control channels and watersheds are no longer offered as corroboration for a Brazoria site.
+**(c) A CLICK SELECTS A REAL PARCEL IN THE NEW COUNTIES.** Click a lot at Conroe, at Pearland and at Texas City and confirm each selects an actual parcel with an owner and an address — or says plainly that there is none there. (Each county's own CAD was probed live from the build: Montgomery 336,769 · Brazoria 280,226 · Galveston 188,679 · Liberty 155,826 · Austin 22,630 parcels, all answering a point identify in well under a second.)
+**(d) A COUNTY WITH NO CAD ADMITS IT.** Move to somewhere like Walker or Wharton County and confirm the app names THAT county and says it has no parcel data there — never a neighbouring county's name.
+**(e) NOTHING REGRESSED IN THE OLD FOUR.** Confirm Harris, Fort Bend, Chambers and Waller still select parcels exactly as before.
+
+**✅ VERIFIED HERE 2026-08-06 — the resolution half, in a REAL BROWSER against the BUILT output** (`ui-audit/verify-county-geometry.mjs`, logged out, no external GIS needed). Recorded so the live pass only has to cover what a sandbox genuinely cannot reach:
+- the built app **REQUESTS** `geo/county-polygons.json` and it returns **200** — this is the B1120 check (a feature that merges green and does nothing because nobody wired the call site). **Mutation-proven:** deleting the `loadCountyPolygons()` call from `MapFinder`, rebuilding and re-running turns this check red.
+- the asset serves **318 counties** (254 TX + 64 CO), format `county-polygons/1`.
+- **all six audit sites resolve correctly** through the served bytes — Chambers · Harris · Fort Bend · Montgomery · Brazoria · Galveston.
+- **Pearland resolves to Brazoria, FIPS 48039** — not Harris. That is the original defect, gone.
+- **Walker and Wharton (no configured CAD) are NAMED correctly**, not swapped for a neighbour.
+- Independently: **114/114** agreement with the live Texas county layer on random Houston-metro points, and **107/108** on points deliberately sampled 300–800 m off a county line (the single miss self-reported `nearEdge`).
+**STILL PENDING (needs the signed-in app + real CAD traffic):** (b) the HCFCD data no longer offered at Pearland, (c) a click selecting a real parcel in the five new counties, (e) no regression in the old four.
+
+### V17705 — B209504 (the layers reported dead are alive; confirm in the running app). ⏳ **LIVE APP (planyr.io)** `Blocker: live-GIS` `Blocker: real-data`
+Every claim in the report was measured against the live services from this build and recorded on B209504. Two things need the running app rather than a raw endpoint. On **planyr.io**, with a real parcel drawn, confirm —
+**(a) THE PROXIMITY LAYERS REPORT REAL FACTS.** At the six audit sites confirm the Site Analysis rows for substations, airports, rail and EPA cleanups each show either a real nearest-distance or an explicit "none within N miles" — and that "none within a mile" reads as the honest statement it is, not as an error. (Measured here: substations answer at five of six sites within their 3-mile buffer, airports at all six, rail at three of six within a half mile.)
+**(b) femaEbfe ANSWERS THROUGH THE APP'S OWN PROXY.** Its host is blocked from the build sandbox, so this is the one claim that could not be re-confirmed here. On a Waller-area site confirm the estimated-BFE row returns a value (B882 recorded 154.8 ft at Tsakiris) rather than an error — and that a Houston site correctly shows NO estimate, because InFRM deliberately publishes nothing over studied areas.
+**(c) WETLANDS DRAW AND IDENTIFY.** Toggle the wetlands layer at Cedar Port and Texas City and confirm polygons paint and hover-identify. If they ever go blank everywhere, the first thing to check is that `layerId` is still `[1, 2]` and has not been "simplified" to `0` — sublayer 0 returns zero nationwide.
+
+### V17706 — B209505 (the twelve rows whose fixture reach could not be widened from the build sandbox). ⏳ **ANY UNBLOCKED NETWORK** `Blocker: live-GIS`
+`femaEbfe`, `hcfcdMaapnext` and the ten BKDD rows sit on three hosts this build's egress policy blocks outright (`txgeo.usgs.gov`, `fximgservices.hcfcd.org`, `gisclient.quiddity.com` — every request returns "Host not in allowlist"). Their reach requirement is DEFERRED and recorded in `SOURCE_FIXTURE_REACH_PENDING`, not dropped. From a network that can reach those hosts: run `node scripts/probe-fixture-candidates.mjs femaEbfe bkddStreams bkddBoundary …`, add the fixture points that actually answer, and **delete each row from `SOURCE_FIXTURE_REACH_PENDING` in the same commit** — the list may only ever shrink. `hcfcdMaapnext` is a special case: it is already `availability: "down"` with an outage record, so its fixtures deliberately assert the OUTAGE and it should only be widened once the host returns.
 ### V724 — The post-draw tail, measured where it actually happens: signed in, on his own plan, with live GIS (B1448)
 
 `Blocker: auth` + `Blocker: real-data` + `Blocker: live-GIS` — the instrument is built, unit-proven (24 tests) and has already produced a full breakdown here with **0.0% unattributed** (`docs/PERF-TAIL.md`). What it CANNOT do is reproduce the owner's symptom, and the reasons are structural rather than incidental: **the whole element-sync engine returns at its first line unless signed in** (`SitePlanner.jsx:3873`), so the seed and the model normalisation never run at all here; **every GIS host is blocked**, so a restored layer mounts and stages but never receives a byte; and this container has 4 cores against his 28. Measured here at 1×: the tail is **453 ms and 56.9% idle** — there is no three-second tail on this fixture. The check that would settle it:

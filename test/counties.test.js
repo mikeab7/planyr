@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
+import { readFileSync } from "node:fs";
 import {
-  candidateCountiesForPoint, COUNTIES_MAP, countyKeyForName, STATEWIDE_KEYS,
+  candidateCountiesForPoint, COUNTIES_MAP, countyKeyForName, STATEWIDE_KEYS, countyIdentity, noParcelSourceNote,
   STATEWIDE_PARCEL_LAYER, statewideFallbackFor, countyForView,
 } from "../src/workspaces/site-planner/lib/counties.js";
 
@@ -149,9 +150,23 @@ describe("countyKeyForName (B792) — display name → configured routing key, n
     expect(countyKeyForName("Waller County")).toBe("waller"); // 'County' suffix stripped
     expect(countyKeyForName("CHAMBERS")).toBe("chambers");
   });
+  it("maps the five B209503 Houston-metro counties too", () => {
+    expect(countyKeyForName("Montgomery")).toBe("montgomery");
+    expect(countyKeyForName("Brazoria")).toBe("brazoria");
+    expect(countyKeyForName("Galveston")).toBe("galveston");
+    expect(countyKeyForName("Liberty County")).toBe("liberty");
+  });
+  it("Austin COUNTY resolves to austintx, never to a key the city could reach (B209503)", () => {
+    // Austin County is Bellville / Sealy on I-10 west — not the City of Austin. The key is
+    // deliberately NOT the slug, so the far more common string "Austin" (a city, an ETJ, a TxDOT
+    // district) cannot resolve into a county row that gets persisted in a saved plan.
+    expect(countyKeyForName("Austin County")).toBe("austintx");
+    expect(countyKeyForName("Austin")).toBe("austintx");
+    expect(COUNTIES_MAP.austin).toBeUndefined();
+  });
   it("unconfigured counties and the statewide pseudo-key → null (can never corrupt the stored row)", () => {
-    expect(countyKeyForName("Galveston")).toBeNull();   // real county, no configured CAD entry
-    expect(countyKeyForName("Montgomery")).toBeNull();  // ditto — a heal must keep the stored key
+    expect(countyKeyForName("Walker")).toBeNull();      // real county, no configured CAD entry
+    expect(countyKeyForName("Wharton")).toBeNull();     // ditto — a heal must keep the stored key
     expect(countyKeyForName("txgio_statewide")).toBeNull(); // statewide pseudo-key is excluded
     expect(countyKeyForName("")).toBeNull();
     expect(countyKeyForName(null)).toBeNull();
@@ -197,5 +212,37 @@ describe("countyForView — the Layers-panel jurisdiction for a map position", (
 
   it("leaves click routing untouched (candidate[0] is still harris-first when away)", () => {
     expect(candidateCountiesForPoint(31.9686, -102.0779)[0]).toBe("harris");
+  });
+});
+
+/* B209502 — NAMING A GAP HONESTLY. `countyIdentity` / `noParcelSourceNote` are the second half of the
+ * bbox fix: a click in one of the ~245 Texas counties with no configured CAD must NAME that county
+ * and say there is no parcel data, never inherit a neighbour's. These guard the pure half AND the
+ * wiring — the exports existed for a while with no call site, which is the B1120 failure mode
+ * (merged, green, and doing nothing), so the source guard below is deliberate. */
+describe("countyIdentity / noParcelSourceNote (B209502)", () => {
+  it("reports `pending` before the geometry is resident — never a guess", () => {
+    // The unit environment never loads the asset, so this is the cold-start contract.
+    const id = countyIdentity(29.55, -95.29);
+    expect(id.status).toBe("pending");
+    expect(noParcelSourceNote(id)).toBeNull();
+  });
+
+  it("says nothing for a resolved county that HAS a parcel source", () => {
+    expect(noParcelSourceNote({ status: "ok", key: "harris", name: "Harris", state: "TX" })).toBeNull();
+  });
+
+  it("names the county — with the right suffix per state — when nothing is wired there", () => {
+    expect(noParcelSourceNote({ status: "no-source", key: null, name: "Walker", state: "TX" }))
+      .toBe("Walker County — no parcel data wired here yet.");
+    // Colorado rows read as bare county names in this app's copy, so no "County" suffix.
+    expect(noParcelSourceNote({ status: "no-source", key: null, name: "Mesa", state: "CO" }))
+      .toBe("Mesa — no parcel data wired here yet.");
+  });
+
+  it("is actually WIRED into the click path (B1120 — an unused export ships nothing)", () => {
+    const src = readFileSync(new URL("../src/workspaces/site-planner/MapFinder.jsx", import.meta.url), "utf8");
+    expect(src).toMatch(/import \{[^}]*countyIdentity[^}]*\} from "\.\/lib\/counties\.js"/s);
+    expect(src).toMatch(/noParcelSourceNote\(countyIdentity\(/);
   });
 });

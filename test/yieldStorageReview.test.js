@@ -627,3 +627,67 @@ describe("NEW-10 — cut/fill balance, and labelling a borrow-driven surplus", (
     expect(classifyStorageSurplus({ requiredCf: 10, providedCf: 20, balance: b }).driver).toBe("unknown");
   });
 });
+
+/* ═══ B209508 — the floodplain administrator refuses to settle on an incomplete jurisdiction ═══
+ *
+ * The stakes, from this module's own header: Fort Bend County requires BFE + 2 ft, while City of
+ * Houston Ch. 19 requires the 500-yr WSE + 2 ft — which in flat Fort Bend floodplain commonly lands
+ * 1–2 ft HIGHER. At the Bain site the City of Houston ETJ is what raises the Houston candidate, and
+ * that ETJ lookup is measurably flaky (0 at three of six points in the owner's Houston sweep). When
+ * it fails, silence used to read as "no ETJ" and the county's laxer rule was reported as settled. */
+describe("B209508 — an unknown jurisdiction input is a first-class state", () => {
+  const rules = DEFAULT_BUILDABILITY_RULES;
+  const bain = (unresolvedRoles, etjLabel) => assessAdministrator({
+    signals: { county: "Fort Bend", etjLabel, edgeLabels: ["Katy"], unresolvedRoles },
+    rules, ffeFt: 144.8,
+  });
+
+  it("with the Houston ETJ present, the Ch. 19 candidate is RAISED and the answer is settled", () => {
+    const a = bain([], "Houston");
+    // The ETJ resolves through RULE_KEY_ALIAS to the `coh` record — not silently dropped.
+    const coh = a.candidates.find((c) => c.key === "coh");
+    expect(coh).toBeTruthy();
+    expect(coh.kind).toBe("etj");
+    expect(coh.ffe.rule).toBe("wse02pct + 2 ft");   // Ch. 19's 500-yr basis
+    expect(a.settled).toBe(true);
+    expect(a.unresolved).toBe(false);
+    // More than one authority is genuinely in play, so the panel must still flag it.
+    expect(a.ambiguous).toBe(true);
+  });
+
+  it("with the ETJ lookup FAILED, the result refuses to settle", () => {
+    const a = bain(["etj"], null);
+    expect(a.unresolved).toBe(true);
+    expect(a.unresolvedRoles).toEqual(["etj"]);
+    expect(a.settled).toBe(false);
+    expect(a.unresolvedNote).toMatch(/NOT settled/);
+    expect(a.unresolvedNote).toMatch(/stricter authority may apply/);
+    // The provisional answer is still computed — the reader needs to know what WAS found.
+    expect(a.governingLabel).toBeTruthy();
+  });
+
+  it("the ONLY difference between the two is the failed role — the county candidate is identical", () => {
+    // Proves the refusal is driven by the unknown input, not by a changed candidate set.
+    const withEtjFailed = bain(["etj"], null);
+    const withNothing = bain([], null);
+    expect(withEtjFailed.governingLabel).toBe(withNothing.governingLabel);
+    expect(withNothing.settled).toBe(true);
+    expect(withEtjFailed.settled).toBe(false);
+  });
+
+  it("flags a freeboard-only comparison when the candidates rest on DIFFERENT flood surfaces", () => {
+    // Fort Bend's rule is a max-of over 100-yr bases; Houston Ch. 19 is a 500-yr basis. Without a
+    // requiredFfeAt resolver only their FREEBOARD is compared, so "the stricter rule was used"
+    // cannot stand unqualified — a smaller freeboard on a higher surface can still govern.
+    const a = bain([], "Houston");
+    expect(a.comparedBy).toBe("declared freeboard");
+    expect(a.basisMismatch).toBe(true);
+    expect(a.basisNote).toMatch(/different flood surfaces/i);
+  });
+
+  it("a single-authority site with one basis is NOT flagged as a mismatch", () => {
+    const a = assessAdministrator({ signals: { county: "Waller", unresolvedRoles: [] }, rules, ffeFt: 140 });
+    expect(a.basisMismatch).toBe(false);
+    expect(a.basisNote).toBeNull();
+  });
+});

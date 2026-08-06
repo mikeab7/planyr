@@ -7,6 +7,41 @@
 
 _Last updated: 2026-08-06._
 
+## ✅ MERGE WHEN YOU'RE READY — both jurisdiction fixes are finished and waiting on one click (B209502–B209509)
+
+> **Both of the things you sent today were the same underlying mistake: the app deciding which
+> authority governs a site by what's NEARBY rather than by what the site is actually INSIDE — and then
+> stating it with confidence.**
+>
+> **The county half.** Pearland is in Brazoria; the app called it Harris — and then showed you Harris
+> County flood-control data as if that backed it up. It did the same at Sugar Land, Conroe and Texas
+> City. That matters because the county is what picks your drainage authority, your detention rules,
+> your setbacks and who reviews the plans. It now works out the county from the real county SHAPE
+> instead of a rectangle drawn around it, so all six of the places you sent come out right. I also
+> added the five missing Houston-area counties — Montgomery, Brazoria, Galveston, Liberty and Austin —
+> so a click there now finds a real property.
+>
+> **The Katy half, on Bain.** The header said "City of Katy". Katy only clips the very edge of that
+> parcel; the site itself sits in no city at all, and the authority that actually reaches it is
+> Houston's extraterritorial area. The header now leads with what governs and mentions a bare touch as
+> a footnote. This one wasn't only a label: because Houston was missing from the picture, the finished
+> floor was being set off the county's easier rule and printed as settled. Where that answer isn't
+> complete, the panel now says so instead of stating a floor height — which at Bain was worth a foot or
+> two of finished floor on a two-pond site.
+>
+> **The one thing on your end:** the pull request is open as a **draft** (that's the house setting for
+> work I open automatically). Nothing is live until it's marked ready and merged. Everything else is
+> done — it builds, all 8,339 tests pass, and I drove both fixes in a real browser against the live
+> county and city services.
+>
+> **One thing outside anybody's control:** GitHub's own build service stopped picking up jobs for this
+> repo this afternoon — it's accepted nothing since mid-afternoon, on any branch, including work from
+> other sessions. So the green "it builds" tick that normally has to appear before a merge may be
+> missing when you look. It's their outage, not this work: our own hosting built and published this
+> exact branch successfully, and I ran every one of those same checks here first. If the tick is still
+> absent when you go to merge, it'll come back on its own once GitHub recovers.
+> → https://github.com/mikeab7/planyr/pull/928
+
 ## ✅ CLOSED — the flood-and-drainage check now only runs when you ask for it (B1349 → B1442)
 
 > **You already decided this one and it hadn't been carried through. That's on us, not you.** Your words:
