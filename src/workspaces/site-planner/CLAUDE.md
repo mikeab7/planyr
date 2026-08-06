@@ -572,7 +572,11 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   wide-zoom PDF silently loses its stalls; **(b)** an SVG `<pattern>` is NOT an equivalent and was
   measured as wrong (Chromium rasterises a tile once and repeats it, so a non-integer pitch accumulates
   sub-pixel phase error — up to 30/255); **(c)** the DOCK-DOOR LEAVES deliberately do NOT collapse
-  (up to 23/255, because a leaf's fill is semi-transparent — B1350 owns the 424 nodes left behind).
+  (up to 23/255 — **and NOT because the fill is semi-transparent, which was the recorded cause until
+  2026-08-06 and is refuted: fold both arms fully OPAQUE and the difference does not move. It is that
+  Chromium does not rasterise a `<rect>` and a rectangular `<path>` to the same antialiased edge, at
+  ANY zoom, folded or not — so no gate saves it.** B1350 is CLOSED with the 424 nodes left behind;
+  the instrument is the ui-audit harness **diagnose-dock-leaf-fold**).
   Guards: the repo-root `test/` suite **geometryLod** (incl. source guards on both call sites and on the
   rejected door half) and the ui-audit harness **verify-stall-lod-parity** (two real builds compared
   pixel by pixel via its own dependency-free PNG decoder, plus the exported sheet — PDF-PARITY).

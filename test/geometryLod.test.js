@@ -78,11 +78,16 @@ describe("the wiring, guarded at the source", () => {
     expect(planner).toMatch(/carStalls\(e\.w, e\.h, cfgOf\(e\)\)\.count/);
   });
 
-  it("the dock-door leaves are NOT collapsed — that half was measured and rejected", () => {
-    // 23/255 on up to 0.41% of pixels, because a leaf's fill is semi-transparent. If a later
-    // change reintroduces it, this goes red and points at the measurement rather than at taste.
+  it("the dock-door leaves are NOT collapsed — that half was measured and rejected TWICE", () => {
+    // 23/255 on up to 0.41% of pixels. If a later change reintroduces the fold, this goes red and
+    // points at the measurement rather than at taste.
     expect(planner).not.toMatch(/rectsPath/);
     expect(labels).not.toMatch(/dockLeavesExplicit/);
-    expect(labels, "the reason must stay on the record next to the gate").toMatch(/SEMI-TRANSPARENT/);
+    /* NEW-4 (2026-07-31) — the CORRECTED cause has to stay next to the gate, because the wrong one
+     * (the leaves' semi-transparent fill) is what would send a third attempt looking for an opaque
+     * backdrop trick that cannot work. The refutation is one line: fold both arms fully opaque and
+     * the difference does not move. What actually blocks it is <rect> → <path> itself. */
+    expect(labels, "the corrected reason must stay on the record next to the gate").toMatch(/OPAQUE/);
+    expect(labels, "and it must name the primitive, not the opacity").toMatch(/rasterise a rect and a\s*\n?\s*\*?\s*rectangular path|<rect> → <path>/);
   });
 });

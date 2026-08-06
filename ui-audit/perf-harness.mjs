@@ -92,6 +92,86 @@ const CPU_THROTTLE = numArg("--cpu-throttle", 1);
 const DPR = numArg("--dpr", 1);
 const EMULATED = CPU_THROTTLE > 1 || DPR !== 1;
 
+/* ---- --boot-timeline (NEW-1, phase 3, 2026-07-31) --------------------------------------------
+ * WHY THIS MODE EXISTS. This harness reports time-to-first-drag as ONE number — 4.4–7.9 s at 4×
+ * throttle against a first-contentful-paint under a second — and that number, the largest single
+ * figure in the whole speed program, has never had a breakdown behind it. `--boot-timeline`
+ * attributes the whole navigation → first-drag window to NAMED phases with milliseconds against
+ * each, and charges anything it cannot name to an explicit UNATTRIBUTED line rather than letting a
+ * remainder hide inside a bucket. The protocol and its limits live in ui-audit/lib/bootTimeline.mjs.
+ *
+ *   node ui-audit/perf-harness.mjs --no-tiles --cpu-throttle 4 --boot-timeline
+ *   node ui-audit/perf-harness.mjs --no-tiles --cpu-throttle 4 --boot-timeline --arms baseline,no-drainage --reps 3
+ *
+ * ⚠ FOR NAMED PHASES, BUILD WITH SOURCE MAPS FIRST: `npx vite build --sourcemap`. Without them a
+ * production profile can only say "SitePlannerApp-BxMJopPJ.js:7", and the mode says so in its own
+ * output instead of printing a chunk name where a phase name should be.
+ */
+const BOOT_TIMELINE = process.argv.includes("--boot-timeline");
+const argOfBoot = (flag, dflt) => { const i = process.argv.indexOf(flag); return i > -1 ? process.argv[i + 1] : dflt; };
+
+/* The boot-timeline report. Deliberately verbose in one specific way: every table states what it
+ * CANNOT say (unresolved chunks, a suppressed cross-tab, an absent external network) next to what
+ * it can, because a boot breakdown that reads as complete when it is not is how four seconds get
+ * "explained" twice. */
+function printBootTimeline(out, MARK_LABELS) {
+  console.log(`Boot timeline — navigation → first drag  [cpu ${out.cpuThrottle}x, dpr ${out.deviceScaleFactor}, ${out.sampleUs} µs sampling]`);
+  console.log(`  target: ${out.base}  ·  scenario: ${out.scenario} (${out.shape.elements} elements · ${out.shape.parcels} parcels · ${out.shape.ponds} ponds)`);
+  console.log(`  arms: ${out.arms.join(" · ")} × ${out.reps} rep(s), INTERLEAVED\n`);
+  for (const a of out.byArm) {
+    console.log(`  ${a.arm.padEnd(14)} time-to-first-drag: median ${a.ttfdMedianMs} ms  (${a.n} run(s), ${a.ttfdMinMs}–${a.ttfdMaxMs} ms)`);
+  }
+  if (out.noiseFloorPct != null) console.log(`\n  NOISE FLOOR, measured here: ±${out.noiseFloorPct}% across the "${out.byArm[0].arm}" repeats. Nothing inside it is a finding.`);
+  if (out.byArm.length > 1 && out.byArm[0].ttfdMedianMs) {
+    for (const a of out.byArm.slice(1)) {
+      const pct = +(((a.ttfdMedianMs - out.byArm[0].ttfdMedianMs) / out.byArm[0].ttfdMedianMs) * 100).toFixed(1);
+      const verdict = out.noiseFloorPct == null ? "NO FLOOR MEASURED (single rep) — not a finding"
+        : Math.abs(pct) <= out.noiseFloorPct ? `INCONCLUSIVE — inside the ±${out.noiseFloorPct}% floor`
+        : `${pct < 0 ? "FASTER" : "SLOWER"} by ${Math.abs(pct)}%, which clears the floor`;
+      console.log(`  arm "${a.arm}" vs "${out.byArm[0].arm}": ${pct > 0 ? "+" : ""}${pct}% — ${verdict}`);
+    }
+  }
+  for (const r of out.runs) {
+    console.log(`\n──── rep ${r.rep} · arm "${r.arm}" · time-to-first-drag ${r.ttfdMs} ms · canvas ${r.canvasNodes} nodes · tab "${r.visibility}"`);
+    if (!r.sourceMaps.mapped) {
+      console.log(`  ⚠ NO SOURCE MAPS in dist/assets — script phases below are CHUNK-level only. Rebuild with \`npx vite build --sourcemap\` for named phases.`);
+    }
+    console.log(`\n  WALL SPINE (consecutive measured marks — these sum EXACTLY to time-to-first-drag):`);
+    for (const s of r.segments) console.log(`     ${String(s.ms).padStart(7)} ms   ${s.from} → ${s.to}`);
+    if (r.missingMarks.length) console.log(`     (marks that never fired: ${r.missingMarks.map((m) => MARK_LABELS[m] || m).join(", ")})`);
+    console.log(`\n  WHAT THE MAIN THREAD DID across the whole window (${r.attribution.totalMs} ms of samples):`);
+    for (const p of r.attribution.phases) console.log(`     ${String(p.ms).padStart(7)} ms  ${String(p.pct).padStart(5)}%  ${p.phase}`);
+    if (r.attribution.unattributed.length) {
+      console.log(`     ── the UNATTRIBUTED line above, by name:`);
+      for (const u of r.attribution.unattributed) console.log(`        ${String(u.ms).padStart(7)} ms  ${u.fn}`);
+    }
+    if (r.crossTab.rows) {
+      console.log(`\n  THE SAME TIME, SEGMENT BY SEGMENT (clock alignment ±${r.alignment.uncertaintyMs} ms via an in-profile burn marker):`);
+      for (const row of r.crossTab.rows) {
+        if (!row.phases || row.ms < 1) continue;
+        /* BUSY vs IDLE FIRST, then the names. The single most important question about any boot
+         * segment is whether the thread was WORKING or WAITING — they have completely different
+         * fixes — and a top-N list of phases can hide the answer when idle is not in the top N. */
+        const idle = row.phases.find((p) => p.phase.startsWith("idle"));
+        const idlePct = idle ? idle.pct : 0;
+        const top = row.phases.filter((p) => !p.phase.startsWith("idle")).slice(0, 4).map((p) => `${p.phase} ${p.ms}ms`).join(" · ");
+        console.log(`     ${String(row.ms).padStart(7)} ms  ${row.from} → ${row.to}`);
+        console.log(`               busy ${(100 - idlePct).toFixed(0)}% · idle ${idlePct.toFixed(0)}%  │  ${top}`);
+      }
+    } else {
+      console.log(`\n  ⚠ per-segment attribution SUPPRESSED — ${r.crossTab.why}`);
+    }
+    console.log(`\n  NETWORK during boot:`);
+    for (const n of r.network) console.log(`     ${String(n.count).padStart(4)} req  ${n.failed ? `${n.failed} blocked/failed  ` : ""}${(n.bytes / 1024).toFixed(0).padStart(6)} KB  ${n.firstMs ?? "—"}–${n.lastMs} ms  ${n.category}`);
+    const lt = r.longTasks.filter((t) => t.dur >= 50);
+    if (lt.length) {
+      const worst = [...lt].sort((a, b) => b.dur - a.dur).slice(0, 5);
+      console.log(`\n  LONG TASKS (≥50 ms): ${lt.length}, totalling ${Math.round(lt.reduce((a, b) => a + b.dur, 0))} ms. Worst: ${worst.map((t) => `${t.dur} ms @ ${t.start}`).join(" · ")}`);
+    }
+  }
+  console.log(`\n  ⚠ This sandbox blocks every external host, so basemap tiles / GIS / Supabase are ABSENT, not slow. Every number above is a LOWER BOUND on a machine with a live network.`);
+}
+
 const budgets = JSON.parse(readFileSync(join(HERE, "perf-budgets.json"), "utf8"));
 
 /* Set when the frame sampler cannot be trusted (see MEASUREMENT BLOCKER #4 below); non-null
@@ -128,6 +208,49 @@ const browser = await chromium.launch({
   // measure). Without it the heap budget is measuring rounded noise.
   args: ["--no-sandbox", "--ignore-certificate-errors", "--enable-precise-memory-info"],
 });
+/* ---- BOOT TIMELINE MODE ----------------------------------------------------------------------
+ * Runs and exits before the budget metrics below, deliberately: every one of them describes a
+ * settled page, and this mode is only about the window before there is one. It drives its own
+ * browser CONTEXTS (one per boot — a reused context carries a warm HTTP cache, a warm V8 code cache
+ * and a populated IndexedDB, and would answer a different question on every rep after the first).
+ */
+if (BOOT_TIMELINE) {
+  const { runBootTimeline, MARK_LABELS } = await import("./lib/bootTimeline.mjs");
+  const { scenarioArm } = await import("./lib/perf-scenario.mjs");
+  const arms = String(argOfBoot("--arms", "baseline")).split(",").map((s) => s.trim()).filter(Boolean);
+  const reps = numArg("--reps", 1);
+  const sampleUs = numArg("--sample-us", 250);
+  const runs = [];
+  /* INTERLEAVED, rep by rep — arm A, arm B, arm A, arm B — never all of A then all of B. This
+   * container's warm-up drift across a few minutes is larger than most of the effects being looked
+   * for, and a blocked A/B would hand the whole drift to whichever arm ran second. */
+  for (let rep = 0; rep < reps; rep++) {
+    for (const arm of arms) {
+      const out = await runBootTimeline(browser, {
+        base: BASE, seed: perfScenarioSeed(scenarioArm(arm)), sampleUs,
+        cpuThrottle: CPU_THROTTLE, dpr: DPR, noTiles: NO_TILES, distDir: join(ROOT, "dist"), arm,
+      });
+      runs.push({ rep: rep + 1, ...out });
+    }
+  }
+  await browser.close();
+  const med = (xs) => { const s = [...xs].sort((a, b) => a - b); return s.length ? s[Math.floor(s.length / 2)] : null; };
+  const byArm = arms.map((arm) => {
+    const rs = runs.filter((r) => r.arm === arm);
+    const ttfds = rs.map((r) => r.ttfdMs);
+    return { arm, n: rs.length, ttfdMedianMs: med(ttfds), ttfdMinMs: Math.min(...ttfds), ttfdMaxMs: Math.max(...ttfds) };
+  });
+  /* THE NOISE FLOOR IS MEASURED, NOT ASSUMED — the spread of the baseline arm's own repeats. A
+   * difference between arms that does not clear it is reported INCONCLUSIVE, never as a finding. */
+  const baseArm = byArm[0];
+  const floorPct = baseArm && baseArm.n > 1 && baseArm.ttfdMedianMs
+    ? +(((baseArm.ttfdMaxMs - baseArm.ttfdMinMs) / baseArm.ttfdMedianMs) * 100).toFixed(1) : null;
+  const out = { base: BASE, scenario: site.id, shape, cpuThrottle: CPU_THROTTLE, deviceScaleFactor: DPR, sampleUs, arms, reps, noiseFloorPct: floorPct, byArm, runs };
+  if (JSON_OUT) console.log(JSON.stringify(out, null, 2));
+  else printBootTimeline(out, MARK_LABELS);
+  process.exit(0);
+}
+
 const ctx = await browser.newContext({ viewport: { width: 1600, height: 900 }, deviceScaleFactor: DPR });
 
 /* MEASUREMENT BLOCKER #1 — the default resource-timing buffer holds 250 entries and FILLS

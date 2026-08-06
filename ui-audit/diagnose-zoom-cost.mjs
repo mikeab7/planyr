@@ -34,6 +34,10 @@
  */
 import { chromium } from "playwright";
 import { perfScenarioSeed } from "./lib/perf-scenario.mjs";
+import { makeSourceLocator } from "./lib/sourceMapIndex.mjs";
+import { readdirSync, readFileSync } from "node:fs";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const BASE = (process.env.BASE_URL || "http://localhost:4173/").replace(/\/?$/, "/");
 const EXEC = process.env.PW_CHROME || "/opt/pw-browsers/chromium-1194/chrome-linux/chrome";
@@ -143,9 +147,34 @@ const wheelBurst = (n, dy) => page.evaluate(([count, delta, x, y]) => new Promis
 
 /* --profile: a CPU sample profile across the SAME gesture, aggregated by SELF time.
  * "Script is 75% of the frame" is a bucket, not an answer — the fix for React reconciliation and
- * the fix for our own geometry math are different fixes. This names the functions. */
+ * the fix for our own geometry math are different fixes. This names the functions.
+ *
+ * ⚠ AND ON A PRODUCTION BUILD "the functions" ARE `Qse  SitePlannerApp-BxMJopPJ.js:7` (NEW-2, phase
+ * 3). That is a chunk and a minified identifier, which is why phase 2 could say the registration
+ * layout effect was 9.2% of the frame but not WHICH LINE OF IT. If the build carries source maps
+ * (`npx vite build --sourcemap`) every frame is resolved to `SitePlanner.jsx:2814` instead — the
+ * same reader the boot timeline uses, so the two instruments name a function identically. Without
+ * maps it degrades to the old chunk-level output and says so. */
 const PROFILE = process.argv.includes("--profile");
+const LOCATORS = (() => {
+  const dir = join(dirname(fileURLToPath(import.meta.url)), "..", "dist", "assets");
+  const out = new Map();
+  let names = [];
+  try { names = readdirSync(dir).filter((f) => f.endsWith(".js.map")); } catch (_) { return out; }
+  for (const n of names) {
+    try { out.set(n.replace(/\.map$/, ""), makeSourceLocator(JSON.parse(readFileSync(join(dir, n), "utf8")))); }
+    catch (e) { console.error(`  ⚠ source map ${n} unreadable (${e.message}) — that chunk stays minified in the profile`); }
+  }
+  return out;
+})();
+const nameFrame = (cf) => {
+  const file = String(cf.url || "").split("/").pop().split("?")[0];
+  const at = LOCATORS.get(file)?.(cf.lineNumber || 0, cf.columnNumber || 0);
+  if (at) return `${cf.functionName || "(anonymous)"}  ${at.source}:${at.line}`;
+  return `${cf.functionName || "(anonymous)"}  ${file || ""}:${(cf.lineNumber || 0) + 1}`;
+};
 let profileTop = null;
+let profileTree = null;
 
 const runs = [];
 for (let rep = 0; rep < REPEATS; rep++) {
@@ -229,12 +258,45 @@ for (let rep = 0; rep < REPEATS; rep++) {
       const n = byId.get(id);
       if (!n) continue;
       const cf = n.callFrame;
-      const key = `${cf.functionName || "(anonymous)"}  ${(cf.url || "").split("/").pop()}:${cf.lineNumber + 1}`;
+      const key = nameFrame(cf);
       self.set(key, (self.get(key) || 0) + dt);
     }
     const total = [...self.values()].reduce((a, b) => a + b, 0) || 1;
     profileTop = [...self.entries()].sort((a, b) => b[1] - a[1]).slice(0, 30)
       .map(([fn, us]) => ({ fn, ms: +(us / 1000).toFixed(1), pct: +((us / total) * 100).toFixed(1) }));
+
+    /* --profile-tree <substring>: SELF TIME NAMES A FRAME, IT DOES NOT EXPLAIN IT (NEW-2, phase 3).
+     * The registration layout effect reads as the largest single app frame in a zoom profile, and
+     * "15% of script is in this arrow function" is not yet a reason to change anything: the fix for
+     * a frame that spends its time in ONE synchronous DOM read is different from the fix for one
+     * that spends it in fifty little ones. This walks the profile's own call tree, so a named frame
+     * can be opened up: its total (subtree) cost, its own self cost, and where the difference went.
+     * Deliberately a subtree walk over the SAME profile — no second gesture, no second run. */
+    const treeArg = argOf("--profile-tree", null);
+    if (treeArg) {
+      const selfUs = new Map();
+      for (const [i, id] of (profile.samples || []).entries()) selfUs.set(id, (selfUs.get(id) || 0) + ((profile.timeDeltas || [])[i] || 0));
+      const totalUs = new Map();
+      const totalOf = (id, seen = new Set()) => {
+        if (totalUs.has(id)) return totalUs.get(id);
+        if (seen.has(id)) return 0;
+        seen.add(id);
+        const n = byId.get(id);
+        let t = selfUs.get(id) || 0;
+        for (const c of n?.children || []) t += totalOf(c, seen);
+        totalUs.set(id, t);
+        return t;
+      };
+      const hits = (profile.nodes || []).filter((n) => nameFrame(n.callFrame || {}).includes(treeArg));
+      profileTree = hits.map((n) => ({
+        fn: nameFrame(n.callFrame),
+        totalMs: +(totalOf(n.id) / 1000).toFixed(1),
+        selfMs: +((selfUs.get(n.id) || 0) / 1000).toFixed(1),
+        children: (n.children || [])
+          .map((c) => ({ fn: nameFrame(byId.get(c)?.callFrame || {}), totalMs: +(totalOf(c) / 1000).toFixed(1) }))
+          .sort((a, b) => b.totalMs - a.totalMs).slice(0, 12),
+      })).sort((a, b) => b.totalMs - a.totalMs).slice(0, 6);
+    }
   }
   const frames = (await page.evaluate(() => window.__frames.slice())).slice(1);
   const dom = await page.evaluate(() => {
@@ -262,7 +324,7 @@ await browser.close();
 const median = (k) => { const v = runs.map((r) => r[k]).filter((x) => typeof x === "number"); return v.length ? +pct(v, 50).toFixed(1) : null; };
 const res = {
   base: BASE, gesture: GESTURE, cpuThrottle: CPU, mutation, repeats: REPEATS, openPanel: OPEN_PANEL, panelOpened,
-  runs, profileTop,
+  runs, profileTop, profileTree,
   median: {
     frameMedianMs: median("frameMedianMs"), frameP90Ms: median("frameP90Ms"),
     scriptMs: median("scriptMs"), layoutMs: median("layoutMs"), recalcStyleMs: median("recalcStyleMs"),
@@ -282,6 +344,13 @@ else {
   if (profileTop) {
     console.log(`\n  CPU profile — top self time across the last gesture:`);
     for (const p of profileTop) console.log(`      ${String(p.pct).padStart(5)}%  ${String(p.ms).padStart(8)} ms  ${p.fn}`);
+  }
+  if (profileTree) {
+    console.log(`\n  CALL TREE under the frames matching "${argOf("--profile-tree", "")}" (total = the frame and everything it called):`);
+    for (const t of profileTree) {
+      console.log(`      ${t.totalMs} ms total · ${t.selfMs} ms self   ${t.fn}`);
+      for (const c of t.children) console.log(`          ${String(c.totalMs).padStart(8)} ms  ${c.fn}`);
+    }
   }
   console.log(`\n  ⚠ "residual" is task time MINUS script/style/layout — paint, raster, compositing and anything Chrome does not attribute. It is a subtraction, not a measurement.`);
 }
