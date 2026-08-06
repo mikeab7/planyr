@@ -28,6 +28,7 @@
  * chunk names. The run says so in its own output rather than printing a chunk where a phase belongs.
  */
 import { chromium } from "playwright";
+import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { attributeProfile, loadSourceMaps, makeFrameResolver, bootMarksScript } from "./lib/bootTimeline.mjs";
@@ -37,6 +38,8 @@ import {
 } from "./lib/bootTail.mjs";
 import { fakeTilePng, parseTileUrl } from "./lib/fakeTile.mjs";
 import { perfScenarioSite, SCENARIO_ID, scenarioShape } from "./lib/perf-scenario.mjs";
+import { buildFixtureState } from "./lib/fixtureSeeding.mjs";
+import { fixtureCensus, paintedRasters, heldButUnpaintedRasters } from "./lib/planFixture.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const BASE = (process.env.BASE_URL || "http://localhost:4173/").replace(/\/?$/, "/");
@@ -54,6 +57,22 @@ const LADDER_REPS = num("--ladder-reps", 3);
 const LADDER_RUNGS = String(arg("--rungs", "1,2,3,5,10")).split(",").map(Number).filter((n) => n > 0);
 const SAVED_LAYERS = num("--layers", 0);
 const DIST = join(HERE, "..", "dist");
+/* ---- --fixture <name> (NEW-1) ------------------------------------------------------------------
+ * ⛔ THE REASON THIS FLAG EXISTS IS THE WHOLE POINT OF THE DISPATCH IT SHIPPED IN. Every boot number
+ * this instrument has produced came from Goose Creek, because Goose Creek was the only real plan the
+ * harness could open. The owner reports that BAIN is slow, and Bain's distinguishing feature — two
+ * large rasters, one of them 4.5 megapixels at 55% opacity — is a load the reference plan does not
+ * contain at all. A boot measured on a plan with no rasters cannot see a raster's boot cost.
+ *
+ *   --fixture goose   the reference plan (default; every existing number was taken here)
+ *   --fixture bain    ui-audit/fixtures/bain-concept-a.json, WITH both rasters in IndexedDB
+ *
+ * ⚠ THE RASTERS ARRIVE BY `storageState`, NOT BY A THROWAWAY NAVIGATION. IndexedDB cannot be seeded
+ * before an origin exists, and the obvious fix — load, write, reload — leaves a warm HTTP and V8 code
+ * cache, so the "cold boot" measured after it is a second boot wearing a first boot's name. See
+ * lib/fixtureSeeding.mjs. */
+const FIXTURE = String(arg("--fixture", "goose")).toLowerCase();
+const CACHE = join(HERE, ".raster-cache");
 
 /* ---- The seed ---------------------------------------------------------------------------------
  * The reference plan, plus an optional SAVED LAYER SET.
@@ -97,6 +116,10 @@ const BASE_SEED = seedFor(perfScenarioSite());
 
 /** The seed actually used. Replaced by `learnLayerSeed` when `--layers N` is asked for. */
 let SEED = BASE_SEED;
+/** Non-null when a fixture with rasters is in play: every measured context is built FROM this
+ *  instead of seeding localStorage itself, so IndexedDB is populated before the first navigation. */
+let FIXTURE_STATE = null;
+let FIXTURE_FACTS = null;
 
 async function learnLayerSeed(browser, n) {
   const ctx = await browser.newContext({ viewport: { width: 1600, height: 900 }, deviceScaleFactor: 1 });
@@ -127,10 +150,15 @@ async function assertLayerArm(page, n) {
 }
 
 async function newCtx(browser, nLayers) {
-  const ctx = await browser.newContext({ viewport: { width: 1600, height: 900 }, deviceScaleFactor: DPR, ignoreHTTPSErrors: true });
+  const ctx = await browser.newContext({
+    viewport: { width: 1600, height: 900 }, deviceScaleFactor: DPR, ignoreHTTPSErrors: true,
+    ...(FIXTURE_STATE ? { storageState: FIXTURE_STATE } : {}),
+  });
   await ctx.addInitScript(() => performance.setResourceTimingBufferSize(6000));
   await ctx.addInitScript(() => { window.__PLANYR_E2E = true; });
-  await ctx.addInitScript(SEED);
+  /* With a fixture state the plan record is already in localStorage — re-seeding it would be
+   * harmless but would also hide a broken state, so it is deliberately not done. */
+  if (!FIXTURE_STATE) await ctx.addInitScript(SEED);
   await ctx.addInitScript(bootMarksScript());
   await ctx.addInitScript(tailInstrumentScript());
   let tiles = 0;
@@ -425,6 +453,26 @@ const browser = await chromium.launch({
 });
 const out = {};
 try {
+  if (FIXTURE !== "goose") {
+    const file = FIXTURE === "bain" ? "bain-concept-a.json" : `${FIXTURE}.json`;
+    const fx = JSON.parse(readFileSync(join(HERE, "fixtures", file), "utf8"));
+    const built = await buildFixtureState(browser, { base: BASE, fixture: fx, siteId: "boot-tail-fixture", cacheDir: CACHE });
+    FIXTURE_STATE = built.state; FIXTURE_FACTS = built.facts;
+    out.fixture = {
+      name: FIXTURE, census: fixtureCensus(fx), rasters: built.facts,
+      painted: paintedRasters(fx).map((r) => `${r.role} ${r.imgW}×${r.imgH} @${r.opacity}`),
+      /* ⚠ With an origin present the live basemap replaces the aerial underlay, so its bytes are
+       * loaded and held but NEVER composited. Reporting that separately is the difference between
+       * "26 MB of texture" and the truth. */
+      heldButNeverPainted: heldButUnpaintedRasters(fx).map((r) => `${r.role} ${r.imgW}×${r.imgH}`),
+    };
+    if (!JSON_OUT) {
+      const c = out.fixture.census;
+      console.log(`  fixture "${FIXTURE}": ${c.elements} elements · ${c.parcels} parcels · ${c.ponds} pond(s) · ${c.rasters.length} raster(s)`);
+      console.log(`    painted: ${out.fixture.painted.join(" · ") || "none"}`);
+      if (out.fixture.heldButNeverPainted.length) console.log(`    held but NEVER painted (the live basemap replaces it): ${out.fixture.heldButNeverPainted.join(" · ")}\n`);
+    }
+  }
   if (SAVED_LAYERS > 0) {
     const learned = await learnLayerSeed(browser, SAVED_LAYERS);
     SEED = learned.seed;
