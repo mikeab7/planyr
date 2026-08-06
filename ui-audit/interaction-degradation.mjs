@@ -85,6 +85,13 @@ const LITE = process.argv.includes("--lite");
  * owner's tab memory — decoded bitmaps and their GPU textures — is not exercised at all, which is
  * the caveat every memory run in this repo has had to end on. See lib/fakeTile.mjs. */
 const FAKE_TILES = process.argv.includes("--fake-tiles");
+/* --dpr N: emulate a HiDPI display. NOT cosmetic and NOT optional for this question — the owner's
+ * laptop runs at roughly 2.15, and `detectRetina` makes Leaflet fetch one zoom level DEEPER on a
+ * HiDPI display, which is FOUR TIMES the tiles for the same ground area (tileBudget.js's
+ * retinaForZoom owns that trade). Everything raster-bound therefore lives in a regime this harness
+ * never enters at dpr 1: four times the decodes, four times the bitmaps, four times the texture
+ * uploads. A "nothing grows" result at dpr 1 says nothing about dpr 2. */
+const DPR = numArg("--dpr", 1);
 
 /* ── The in-page instrumentation ───────────────────────────────────────────────────────────────
  * Installed BEFORE any app code runs, because a listener added during module evaluation is
@@ -460,7 +467,7 @@ async function restoreView(page, home) {
 
 /* ── One run: one page load, one arm, the whole ladder ─────────────────────────────────────── */
 async function runArm(browser, { arm, idleBudgetMs }) {
-  const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: DPR });
   await context.addInitScript(INSTRUMENT.replace("__PF_LITE__", LITE ? "true" : "false"));
   await context.addInitScript(perfScenarioSeed());
   /* Arms the planner's own read/debug hook (`window.__plannerView`), which `restoreView` needs to
@@ -646,7 +653,7 @@ const tilesDecoded = interact?.[interact.length - 1]?.counters?.tilesLoaded || 0
 
 const out = {
   base: BASE, scenario: SCENARIO_ID, shape: scenarioShape(),
-  cpuThrottle: CPU_THROTTLE, reps: REPS, runs: RUNS, arms: ARMS, checkpoints: CHECKPOINTS,
+  cpuThrottle: CPU_THROTTLE, dpr: DPR, reps: REPS, runs: RUNS, arms: ARMS, checkpoints: CHECKPOINTS,
   headed: true, visibility: runs[0]?.visibility, minFps: MIN_FPS,
   noiseFloorPct: floorPct, verdict, growthTable: table, suspects: named,
   interact, idle, rawRuns: runs,
@@ -663,7 +670,7 @@ const pad = (s, n) => String(s ?? "—").padEnd(n);
 const rpad = (s, n) => String(s ?? "—").padStart(n);
 console.log(`\nINTERACTION-COUNT DEGRADATION — the same probe, on unchanged content, after N gestures`);
 console.log(`  target ${BASE} · scenario ${SCENARIO_ID} (${out.shape.elements} elements · ${out.shape.parcels} parcels · ${out.shape.ponds} ponds)`);
-console.log(`  headed browser, tab "${out.visibility}" · cpu ${CPU_THROTTLE}x · frame floor ${MIN_FPS} fps · arms ${ARMS.join(" + ")} x ${RUNS} run(s), INTERLEAVED\n`);
+console.log(`  headed browser, tab "${out.visibility}" · cpu ${CPU_THROTTLE}x · dpr ${DPR} · frame floor ${MIN_FPS} fps · arms ${ARMS.join(" + ")} x ${RUNS} run(s), INTERLEAVED\n`);
 
 if (floorPct != null) console.log(`  NOISE FLOOR, measured on this machine in this run: ±${floorPct}%. Nothing inside it is a finding.\n`);
 
