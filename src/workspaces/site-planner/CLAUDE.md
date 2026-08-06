@@ -576,7 +576,7 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   2026-08-06 and is refuted: fold both arms fully OPAQUE and the difference does not move. It is that
   Chromium does not rasterise a `<rect>` and a rectangular `<path>` to the same antialiased edge, at
   ANY zoom, folded or not — so no gate saves it.** B1350 is CLOSED with the 424 nodes left behind;
-  the instrument is `ui-audit/diagnose-dock-leaf-fold.mjs`).
+  the instrument is the ui-audit harness **diagnose-dock-leaf-fold**).
   Guards: the repo-root `test/` suite **geometryLod** (incl. source guards on both call sites and on the
   rejected door half) and the ui-audit harness **verify-stall-lod-parity** (two real builds compared
   pixel by pixel via its own dependency-free PNG decoder, plus the exported sheet — PDF-PARITY).
