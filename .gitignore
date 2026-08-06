@@ -81,6 +81,8 @@ out
 # Nuxt.js build / generate output
 .nuxt
 dist
+# The instrumented build the VIEW-INDEPENDENT-ONCE detector drives (PLANYR_PROBE=1).
+dist-probe
 .output
 
 # Gatsby files

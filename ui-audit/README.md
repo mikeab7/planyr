@@ -35,6 +35,20 @@ times the view has been MOVED, which is a different question with a different an
   meanings. **Must run headed, under `xvfb-run`** (see `lib/frameSampling.mjs`). Decision layer in
   `lib/interactionAxis.mjs`, unit-tested in `test/interactionAxis.test.js`.
 - `diagnose-pan-commits.mjs` — how many React commits and DOM writes ONE pan frame costs.
+- `detect-view-recompute.mjs` — **the VIEW-INDEPENDENT-ONCE detector** (`npm run perf:recompute`).
+  Drives pan / wheel-zoom / single-element-edit / panel-open on a plan whose model and settings are
+  FROZEN, and records per computation: identity, call count, ms, and a fingerprint of its INPUTS and
+  of its RESULT. Anything that runs twice and answers identically is a violation. The comparison is
+  STRUCTURAL on purpose — every instance of this defect returns a fresh object holding an identical
+  answer, so `Object.is` (all React's memo does) reports "changed" on 100% of them. Needs the probe
+  build (`--build`, i.e. `PLANYR_PROBE=1`; see `scripts/vite-plugin-recompute-probe.mjs`, which is
+  inert without the flag). Decision layer in `lib/viewIndependence.mjs` + `lib/recomputeHash.mjs`,
+  unit-tested in `test/recomputeProbe.test.js`. Enumeration: `docs/PERF-VIEW-INDEPENDENCE.md`.
+- `verify-view-independent.mjs` — the GATE built on it (`npm run perf:viewindep`): a real pure pan,
+  failing if any computation in `lib/viewIndependentRegistry.mjs` ran more than once — **or was
+  never observed**, which is how a guard of this shape rots into a permanent green. It counts rather
+  than looks because this defect draws the identical picture when broken, so every screenshot and
+  behavioural test in this repo passes on it.
 - `verify-stall-lod-parity.mjs` — the pixel bar. Two builds, five zoom rungs plus the exported
   sheet, byte-identical or one unit of 255. Any render change in this program passes it first.
 
