@@ -14,7 +14,7 @@ _Last updated: 2026-08-06._
 > your big background drawings at exactly the sizes and see-through settings you measured** — and ran the whole
 > battery on it against Goose Creek.
 >
-> **What I still don't have is your real Bain drawing itself.** The stand-in has the right *ingredients* but I had to
+> **What I still don't have is your real Bain plan itself.** The stand-in has the right *ingredients* but I had to
 > invent *where* each building sits, because that part lives in your signed-in browser and I can't reach it. That
 > matters for one of the two findings: the background drawing's cost I can now state confidently, but the larger
 > share of the difference comes from Bain's own layout, and I measured that on a layout I made up.

@@ -138,9 +138,10 @@ describe("the mint gate BLOCKS a real push (the path that had never once fired)"
     expect(code).toBe(1);
     expect(err).toMatch(/MINT GATE FAILED/);
     expect(err).toMatch(/B102 is ALREADY TAKEN on origin\/main/);
-    // The id to move to clears BOTH main (B102) and the unmerged peer (B103) — the advice is only
-    // useful if it steps over the branch the pusher cannot see.
-    expect(err).toMatch(/renumber this branch's new B# ids starting at B104/);
+    // NEW-3: the advice now points at THIS BRANCH'S RESERVED BLOCK rather than at a global
+    // high-water mark. That is the whole difference — moving into your own block invalidates
+    // nobody else's ids, so a rejection can no longer cascade across every in-flight branch.
+    expect(err).toMatch(/renumber this branch's new B# ids into its reserved block: B\d+–B\d+/);
   });
 
   it("(b) REJECTS an id held only by an UNMERGED PEER branch — the window B779 could not see at all", () => {
@@ -163,21 +164,30 @@ describe("the mint gate BLOCKS a real push (the path that had never once fired)"
     expect(err).toMatch(/B103 is ALREADY TAKEN on .*peer-session/);
   });
 
-  it("REJECTS an id that is free today but sits UNDER the claimed high-water mark", () => {
-    // B101 is free on main AND on every peer — nobody holds it. But main is at B102 and the peer
-    // at B103, so a branch handing out B101 computed it against a view that is already gone, and
-    // the next merge will take it. This reason code reads differently to a human than "taken",
-    // and it is the early-mint case the gate exists for, so it is pinned separately.
+  it("ALLOWS an id that is free today but sits UNDER the claimed high-water mark — the ratchet is GONE (NEW-2)", () => {
+    // THIS ASSERTION IS DELIBERATELY INVERTED, and the inversion is the fix.
+    //
+    // B101 is free on main AND on every peer — nobody holds it. Main is at B102 and the peer at
+    // B103, so the old rule failed this push as "minted against a stale view". That rule was a
+    // ratchet: its only remedy was to renumber UPWARD, which raised the mark for every other
+    // in-flight branch, which then had to renumber higher still. On 2026-08-06 it produced a
+    // repo-wide merge outage — seven open PRs, none mergeable, one PR's ids moved six times
+    // (B1467 → … → B9001), and the claimed mark reached B25005 against a main max of B1449.
+    // Worse, every renumber is a DOCS-ONLY push, which is exactly the push that produces no
+    // `build` check run, so each escape attempt left the required check unreportable forever.
+    //
+    // An unclaimed id is now GREEN. A prediction is not a collision.
     const repo = workBranch("below-the-mark", { open: [99, 100, 101], done: [50], vOpen: [50], vDone: [10] });
     const res = runGate(repo);
-    expect(res.ok).toBe(false);
-    expect(offendersOf(res, "B")[0]).toMatchObject({ id: "B101", kind: "below" });
-    expect(offendersOf(res, "V")).toEqual([]); // the V family minted nothing — only B is flagged
+    expect(res.unverifiable, res.reason).toBeFalsy();
+    expect(res.ok).toBe(true);
+    expect(offendersOf(res, "B")).toEqual([]);
 
     const { code, err } = cli(repo);
-    expect(code).toBe(1);
-    expect(err).toMatch(/B101 is at or below the claimed high-water mark B103/);
-    expect(err).toMatch(/minted against a stale view/);
+    expect(code).toBe(0);
+    expect(err).not.toMatch(/MINT GATE FAILED/);
+    // It is still SAID — out-of-block minting is worth reporting, it just never blocks a merge.
+    expect(err).toMatch(/outside this branch's reserved block/);
   });
 });
 
