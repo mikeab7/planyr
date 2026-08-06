@@ -32,7 +32,13 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   whose `onBlur` commits and closes it in the same frame.
 - `layers.js` + `components/LayerPanel.jsx` — map-layer system; `layerPrefs.js` (per-site Layers-panel
   toggle memory — NEW-1, sparse on/off overrides restored on open + persisted on toggle); `coverage.js` (coverage engine);
-  `arcgis.js`/`counties.js`/`layerRequest.js` — GIS plumbing; `gisCache.js` — screening cache;
+  `arcgis.js`/`counties.js`/`layerRequest.js` — GIS plumbing; **`gisCache.js` — the screening cache;
+  its persistent tier lives in `localDb.js`'s IndexedDB store, NOT localStorage (B1427 — a disposable
+  cache was crowding saved plans out of the ~5 MB cap; see /CLAUDE.md → TIER-BY-REBUILDABILITY). Two
+  consequences to know: `read()` is L1-ONLY and synchronous, so a cold miss means "not resident yet",
+  not "not stored" — use `readAsync`/`warm`, which is why `exportSheet.js` warms the frame's terrain
+  tiles before its sync capture; and the budget (512 KB/entry, 3 MB total) is B1162's, unchanged —
+  it stopped competing, it did not get bigger.**
   `vectorLayers.js` (pure vector engine — polygons AND lines — + boundary/pipeline registry) +
   `vectorOverlay.js` (cached boundary/pipeline/corridor render + identify + labels glue) +
   `boundaryLabels.js` (pure label math) — the B694/B695 tier; `basemaps.js` — the shared Esri/USGS

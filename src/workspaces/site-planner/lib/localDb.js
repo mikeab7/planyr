@@ -1,9 +1,29 @@
-/* IndexedDB-backed durable key/value store (B474).
+/* IndexedDB-backed durable key/value store (B474; framing corrected by NEW-4/B1427).
  *
  * WHY: localStorage's hard ~5 MB per-origin cap is what let a full device store drop edits (B473).
- * IndexedDB gives gigabytes. Stage A moves the version-history ring here: storage.js keeps a synchronous
- * in-memory ring as the source of truth and writes through to here (durable, uncapped), so undo history is
- * no longer byte-throttled and survives reloads in a store that can't fill.
+ * IndexedDB gives gigabytes. Stage A moved the version-history ring here: storage.js keeps a synchronous
+ * in-memory ring as the source of truth and writes through to here, so undo history is no longer
+ * byte-throttled and survives reloads.
+ *
+ * ⛔ THIS STORE IS **LARGE**, NOT "UNCAPPED", AND IT CANNOT "NEVER FILL". The original header said both
+ * of those things and that framing is what let a ~5 MB tier and a ~10 GB tier be reasoned about as one
+ * thing for a year. Measured on the owner's own Chrome profile, 2026-08-06, via
+ * navigator.storage.estimate() + a localStorage key census:
+ *
+ *     IndexedDB   35.9 MB used / 10,275.9 MB quota   (0.3%)   persisted: true
+ *     localStorage 3.88 MB across 156 keys / ~5 MB hard cap   (~78%)
+ *
+ * Two facts follow, and both are load-bearing:
+ *  1. The quota is a real number the browser derives from free disk. It is large; it is finite; on a
+ *     nearly-full disk it can be small. Anything stored here still needs its own budget.
+ *  2. `SitePlannerApp.jsx` calls idbPersist() at boot, so this origin is PERSISTENT — the browser will
+ *     NEVER evict it for us under storage pressure. That is exactly right for data safety (a user's only
+ *     copy of a raster is not the browser's to throw away) and it is precisely why a budget is not
+ *     optional: nothing else is going to clean up after us.
+ *
+ * TIERING RULE (see /CLAUDE.md → TIER-BY-REBUILDABILITY): user work and re-fetchable cache never share a
+ * storage tier, and anything re-fetchable belongs in the LARGE one. That is why gisCache's persistent tier
+ * lives here now and no longer competes with saved plans for the ~5 MB localStorage ceiling.
  *
  * SAFETY: a thin async kv layer that DEGRADES TO A NO-OP whenever IndexedDB is unavailable (private mode,
  * old browser, the node test env). storage.js then stays on its localStorage fallback exactly as before —
@@ -122,5 +142,37 @@ export async function idbDeleteByPrefix(prefix) {
       cur.onsuccess = () => { const c = cur.result; if (c) { try { c.delete(); } catch (_) {} c.continue(); } };
       cur.onerror = () => {}; // tx.onerror/onabort settles the promise
     } catch (_) { try { tx.abort(); } catch (_2) {} resolve(false); }
+  });
+}
+
+/* Walk every record whose key begins with `prefix`, calling `fn(key, value)` per record (NEW-3/B1429).
+ * One cursor pass, one record resident at a time — so measuring a 200 MB raster namespace costs one
+ * raster of peak memory, not 200 MB. Pass `prefix: ""` to walk the whole store. Resolves the number of
+ * records visited (0 on any failure); never throws. Read-only.
+ *
+ * This exists because navigator.storage.estimate() reports ONE number for the whole origin: it can say
+ * "IndexedDB is using 35.9 MB" but not WHICH class of thing is using it, and a census that can't name a
+ * class can't offer a safe clear-cache action for it. */
+export async function idbForEachByPrefix(prefix, fn) {
+  const db = await openDb();
+  if (!db || typeof fn !== "function") return 0;
+  return new Promise((resolve) => {
+    let tx, n = 0;
+    try { tx = db.transaction(STORE, "readonly"); } catch (_) { resolve(0); return; }
+    tx.oncomplete = () => resolve(n);
+    tx.onerror = () => resolve(n);
+    tx.onabort = () => resolve(n);
+    try {
+      const range = prefix ? IDBKeyRange.bound(prefix, prefix + "￿", false, true) : undefined;
+      const cur = tx.objectStore(STORE).openCursor(range);
+      cur.onsuccess = () => {
+        const c = cur.result;
+        if (!c) return;
+        n++;
+        try { fn(c.key, c.value); } catch (_) { /* a census callback may never break the walk */ }
+        c.continue();
+      };
+      cur.onerror = () => {};
+    } catch (_) { try { tx.abort(); } catch (_2) {} resolve(0); }
   });
 }
