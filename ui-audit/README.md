@@ -38,6 +38,36 @@ times the view has been MOVED, which is a different question with a different an
 - `verify-stall-lod-parity.mjs` — the pixel bar. Two builds, five zoom rungs plus the exported
   sheet, byte-identical or one unit of 255. Any render change in this program passes it first.
 
+## ⛔ WHICH PLAN AN INSTRUMENT IS POINTED AT — read this before quoting any number above
+
+Every instrument in the section above defaulted to **Goose Creek** (`fixtures/goose-creek-plan1copy.json`),
+because it was the only real plan anyone had committed. The owner has reported **Bain** and **Sylvestri**
+as slow and the harness could open neither, so the whole program has been measuring the one site it CAN
+open while he reports on two it cannot. **Goose Creek has no raster overlay at all**, so every null result
+about rasters, compositing or texture memory taken on it was structurally guaranteed.
+
+- **`build-bain-fixture.mjs`** → `fixtures/bain-concept-a.json`. The owner's measured Bain census — 53
+  elements in his exact kind counts, 5 parcels, 1 pond — and **both rasters at their measured dimensions,
+  opacities, `ftPerPx` and IndexedDB-string storage path** (1728 × 2592 @ 0.55 over 1800 × 1167 @ 1.0).
+  Coordinates are synthesised and the file says so; `--check` fails CI on drift.
+- **`raster-arms.mjs`** — the six-arm decomposition of the raster hypothesis (blending · size · presence ·
+  Bain's own geometry · the Goose Creek control), with a cost metric the rest of this program does not
+  have: **paint / raster / decode / composite**, read from Chromium's tracing. The existing un-quantised
+  work figure is `Script + Layout + RecalcStyle` — all main-thread work that happens *before* a pixel
+  exists — so it is structurally blind to blending. Findings in `../docs/PERF-BAIN.md`.
+- **`lib/planFixture.mjs` + `../scripts/extract-plan.mjs`** — the path from ANY plan the owner works in to
+  a fixture the harness can drive, rasters included, with his pixels and his identity stripped and the
+  stripping unit-tested as a negative.
+- **`lib/fixtureSeeding.mjs`** — how a plan's rasters get in front of an instrument at all. IndexedDB is
+  origin-scoped, so they cannot be seeded before navigation; the obvious fix (load, write, reload) leaves a
+  warm HTTP and V8 code cache and turns a "cold boot" into a second boot. It seeds once and hands every
+  measured context a `storageState({ indexedDB: true })`. That is what `boot-tail.mjs --fixture bain` uses.
+
+⚠ **An arm whose raster never decoded looks exactly like an arm that is fast**, and the first run of
+`raster-arms.mjs` wrote nothing to IndexedDB at all (Playwright evaluates a string as an *expression* and
+does not call it with the argument, unlike Puppeteer). `lib/rasterCost.mjs`'s `decodeFault` is the guard;
+do not remove it, and do not report an arm it suppresses.
+
 ⚠ Every one of these has been wrong at least once in a way that looked right. Read the
 MEASUREMENT BLOCKER notes in `perf-harness.mjs` before trusting a number from any of them: a
 gesture that moved nothing, a starved frame sample, a boot-chunk snapshot that races the machine's
