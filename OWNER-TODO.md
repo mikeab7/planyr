@@ -51,6 +51,28 @@ _Last updated: 2026-08-06._
 > that I already set this line once this week, and moving it right after it gave me an answer I didn't like is
 > exactly the move I shouldn't make on my own.
 
+## 🔍 One sentence to answer, and it unblocks the smooth-zoom work (B1449)
+
+> **The background in two lines.** Dragging the plan around is already fixed — it went from redrawing the whole
+> drawing on every twitch to just sliding what's already there, and it got about forty-six times cheaper. The same
+> move for **zooming** is the last big piece, and it's been sitting waiting on one call that's yours, not mine.
+>
+> **Here's the whole question.** While you're still spinning the wheel, the drawing can either *stretch what's
+> already on screen* (which is what makes it perfectly smooth) or *rebuild itself properly at every notch* (which is
+> what makes it choppy). If it stretches, then for the split second your wheel is still moving, fine detail — parking
+> stripes, dock doors, the little dimension labels — shows at the level of detail you started from, and snaps to the
+> right level the instant you stop.
+>
+> **So: while the wheel is still turning, is it fine for the drawing to briefly show the detail from where you
+> started, and catch up the moment you stop — in exchange for the zoom itself being completely smooth?**
+>
+> - **Yes** → I build it. Roughly a session or two, and zooming stops being the thing that lags.
+> - **No, it must always be exactly right** → I leave zooming as it is and spend that time on the layers and panels
+>   instead, which are the next two biggest things making your gestures expensive.
+>
+> Either answer is fine and neither is wrong — I just can't pick it for you, because it's about how your drawing is
+> allowed to look, not about how it's built.
+
 ## 📏 Two small facts about your monitor, whenever you're near it (B1441)
 
 > The "can he see it?" test needs to know how big a pixel physically is on your screen and roughly how far you sit

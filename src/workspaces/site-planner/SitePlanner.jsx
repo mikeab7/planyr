@@ -4361,7 +4361,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   useEffect(() => { probeRef.current = { view, size, regShift, cursorFt: cursor, cursorLL, measures }; });
   useEffect(() => {
     if (typeof window === "undefined" || !window.__PLANYR_E2E) return;
-    window.__plannerView = {
+    const hook = {
       get: () => ({ ...view, w: size.w, h: size.h }),
       centerOn: (fx, fy, ppf) => setView(() => ({ ppf, offX: size.w / 2 - fx * ppf, offY: size.h / 2 - fy * ppf })),
       // read-only probes (NEW-2): the registration shift actually applied, the cursor's own
@@ -4372,7 +4372,31 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         : null),
       measures: () => JSON.parse(JSON.stringify(probeRef.current.measures || [])),
     };
+    window.__plannerView = hook;
+    /* NEW-3 — NULL IT ON UNMOUNT. These hooks close over the live render (`setView`, `probeRef`,
+       `exportCtx()` → `svgRef`/`wrapRef`), so a hook left on `window` after the component unmounts
+       keeps that whole tree — and its detached SVG — reachable from a GC root. The neighbouring
+       `window.__geoMap` hook (:2612) has always done this; these four did not. It is dev-gated
+       code, but it is dev-gated code that EVERY performance harness here arms, so a measurement
+       taken through it was measuring the instrument as much as the product (B1439). */
+    return () => { if (window.__plannerView === hook) window.__plannerView = null; };
   }, [view, size.w, size.h]);
+  /* NEW-1 — E2E/self-audit hook for the LAYER SET (same `window.__PLANYR_E2E` gate as above; never
+   * runs in production). `ui-audit/boot-tail.mjs` has to build a plan that OPENS WITH N LAYERS ON,
+   * because the reference fixture saves none and `defaultOverlayState()` starts every layer off —
+   * so the "the FILE turns layers on" hypothesis has no arm without one. The only honest way to
+   * build that arm is from the app's OWN layer ids: a hand-authored id in the harness would seed a
+   * key nothing matches, `sanitizeLayerOverrides` would drop it, and the harness would measure the
+   * zero-layer arm while reporting N. Read-only. */
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.__PLANYR_E2E) return;
+    const hook = () => ({
+      ids: Object.keys(overlays || {}),
+      on: Object.keys(overlays || {}).filter((k) => overlays[k] && overlays[k].on),
+    });
+    window.__plannerLayers = hook;
+    return () => { if (window.__plannerLayers === hook) window.__plannerLayers = null; };
+  }, [overlays]);
   const p2f = useCallback((cx, cy) => {
     const r = svgRef.current.getBoundingClientRect();
     return screenToWorld({ scale: view.ppf, tx: view.offX, ty: view.offY }, { x: cx - r.left, y: cy - r.top });
@@ -17450,11 +17474,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // instead of inferring it from pixels.
   useEffect(() => {
     if (typeof window === "undefined" || !window.__PLANYR_E2E) return;
-    window.__plannerRoadNet = () => ({
+    const hook = () => ({
       regions: roadNet.regions.map((r) => ({ ids: r.ids, outer: r.region.outer, holes: r.region.holes })),
       tees: teeJunctions.map((t) => ({ sideId: t.sideId, throughId: t.throughId, R: t.geom.R, wedges: t.geom.wedges.length, returns: t.geom.returns.map((a) => a.length) })),
       drives: driveJunctions.map((d) => ({ sideId: d.sideId, kind: d.kind, R: d.geom.R, wedges: d.geom.wedges.length })),
     });
+    window.__plannerRoadNet = hook;
+    return () => { if (window.__plannerRoadNet === hook) window.__plannerRoadNet = null; }; // NEW-3 — see the note on __plannerView
   }, [roadNet, teeJunctions, driveJunctions]);
   /* NEW-1 — E2E/self-audit hook for the EXPORT SHEET (same `window.__PLANYR_E2E` gate; never runs in
      production). The measurement/export defect is invisible to any source reading — it only exists in
@@ -17463,12 +17489,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
      sheet a stale one. */
   useEffect(() => {
     if (typeof window === "undefined" || !window.__PLANYR_E2E) return;
-    window.__plannerExportSvg = async (frame = null) => {
+    const hook = async (frame = null) => {
       const { createExportSheet } = await loadExportSheet();
       const built = createExportSheet(exportCtx())
         .buildExportSvg(frame, true, PAL.paper, null, null, false, null, "letter", "landscape");
       return built && built.clone ? built.clone.outerHTML : null;
     };
+    window.__plannerExportSvg = hook;
+    return () => { if (window.__plannerExportSvg === hook) window.__plannerExportSvg = null; }; // NEW-3 — see the note on __plannerView
   });
   // One markup → its SVG node. Extracted from the old inline map so it can paint in both passes. A
   // plain render helper invoked via .map(renderMarkupNode) — NOT a component, so no remount concern.
