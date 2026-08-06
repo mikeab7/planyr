@@ -171,3 +171,6 @@ ui-audit/.cache-vendor/
 # scripts/build-admin-boundaries.mjs --fetch. Its simplified OUTPUT
 # (public/geo/admin-boundaries.json) is what ships and is committed.
 scripts/data/
+
+# Synthesised megapixel rasters for the plan-raster probe (NEW-1) — regenerated on demand, never committed
+ui-audit/.raster-cache/

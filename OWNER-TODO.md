@@ -7,6 +7,32 @@
 
 _Last updated: 2026-08-06._
 
+## 📄 The one thing I need from you: paste a short line into your browser (B200100 / B200101)
+
+> **You were right that nobody had ever measured Bain, and I've now fixed that as far as I can from here.** I built
+> a stand-in Bain — the same 53 pieces in the same mix you counted, the same five parcels, and crucially **both of
+> your big background drawings at exactly the sizes and see-through settings you measured** — and ran the whole
+> battery on it against Goose Creek.
+>
+> **What I still don't have is your real Bain drawing itself.** The stand-in has the right *ingredients* but I had to
+> invent *where* each building sits, because that part lives in your signed-in browser and I can't reach it. That
+> matters for one of the two findings: the background drawing's cost I can now state confidently, but the larger
+> share of the difference comes from Bain's own layout, and I measured that on a layout I made up.
+>
+> **Your part is one paste and it takes about ten seconds.** I've sent you a small text file. Open planyr.io while
+> you're signed in, open the browser console (F12, then the "Console" tab), paste the whole thing in, press Enter.
+> It saves one small file per plan straight to your computer — send those back and I'll re-run everything on the
+> real thing.
+>
+> **It does not take your drawings' pictures.** It measures them — how big, how see-through, where they sit — and
+> throws the actual image away. Nothing is uploaded anywhere; it only reads your own browser and saves files. Each
+> file should be tens of kilobytes. If one comes out huge, don't send it — tell me, because that would mean
+> something leaked and I'd want to fix it first.
+>
+> **The two I most want are Bain (Concept A) and Sylvestri (Concept D)**, but it will grab all of them at once, so
+> just send whatever it saves.
+
+
 ## ✅ CLOSED — the flood-and-drainage check now only runs when you ask for it (B1349 → B1442)
 
 > **You already decided this one and it hadn't been carried through. That's on us, not you.** Your words:
