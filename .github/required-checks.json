@@ -1,0 +1,27 @@
+{
+  "$comment": [
+    "THE REQUIRED-CHECK CONTRACT (NEW-2, 2026-08-06). This file is the committed, checkable copy of",
+    "the status checks the 'Protect Main' ruleset requires before a pull request may merge",
+    "(github.com/mikeab7/planyr/settings/rules/17661176).",
+    "",
+    "WHY IT EXISTS. The ruleset lives on GitHub, not in the repo, so nothing in a build could see it",
+    "and nothing could notice when it stopped matching reality. On 2026-08-06 every open pull request",
+    "became unmergeable — the required context 'build' sat at 'Expected — Waiting for status to be",
+    "reported' on seven PRs at once — and no check anywhere went red, because a required context that",
+    "is never reported produces no failure, only silence. GitHub offers no merge control in that",
+    "state, to anyone, so the repository cannot get itself out of it.",
+    "",
+    "ui-audit/required-check-audit.mjs asserts, in the ordinary required build, that every context",
+    "named here is (a) actually produced by a job in a workflow that runs on pull_request into main,",
+    "and (b) still reported when a pull request changes ONLY documentation — the docs-only renumber",
+    "push being exactly the change that wedged those seven PRs.",
+    "",
+    "KEEP THIS IN SYNC WITH THE RULESET. Adding a required check on GitHub without adding it here",
+    "leaves it unguarded; adding it here without adding it on GitHub fails the build until one of",
+    "the two is corrected. That is the intended friction — it is the only thing standing between a",
+    "one-word job rename and a silent repo-wide merge outage."
+  ],
+  "branch": "main",
+  "ruleset": "Protect Main",
+  "requiredStatusChecks": ["build"]
+}

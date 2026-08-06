@@ -44,6 +44,13 @@ jobs:
         run: npm ci
       - name: Lint (fails the build on a dangling/undefined identifier)
         run: npm run lint
+      # Required-check contract guard (NEW-2). On 2026-08-06 seven PRs were stuck at
+      # "build — Expected — Waiting for status to be reported" with nothing red anywhere, and GitHub
+      # offers no merge control at all in that state. This asserts that every context the ruleset
+      # requires is actually produced by a job here AND still reports on a docs-only change — the
+      # renumber push that caused it. Cheap, no network, and it goes red before it can wedge merges.
+      - name: Required-check contract guard (a required check must always be able to report — NEW-2)
+        run: node ui-audit/required-check-audit.mjs
       - name: GIS source registry guard (no test/non-authoritative endpoint, no inline URLs — B369)
         run: node ui-audit/gis-source-audit.mjs
       - name: MAP.md drift guard (regenerate with `node scripts/build-map.mjs` — B637)
