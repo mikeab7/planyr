@@ -113,6 +113,24 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V6144 — The merge outage is really over: a PR that goes green on its own, and a mint that survives the lag (B6864–B6867)
+
+The whole fix is about a dynamic that only exists when **several sessions are in flight at once**, which no sandbox can stage — so this is a genuine live-verify, not a deferral. Everything provable here was proven and is recorded on the items: 18 block tests (including the exact two-session race), 16 required-check contract tests mutation-checked four ways, the mint-gate e2e suite green with its `below-the-mark` case deliberately inverted, lint clean, `npm test` green, build green, `perf-bundle-audit` green.
+
+What only the live repository can answer, in order:
+
+**(a) A PR REACHES GREEN WITHOUT A RENUMBER.** Open any ordinary PR after this merges and confirm its `build` check goes green **on its first run**, with no `check-mint` failure and no id moved. This is the whole point: before, a PR minted correctly against a fresh main and was still rejected 30 minutes later because someone else had picked a bigger number.
+
+**(b) THE LAG IS SURVIVED RATHER THAN RACED.** Note the gap between the push and the `build` check starting — expect roughly half an hour. Confirm the verdict is the **same** at the end of that wait as it would have been at the start. A `check-mint` failure that appears only because time passed means the mark is somehow still in play and this fix is incomplete.
+
+**(c) TWO CONCURRENT SESSIONS GET DISJOINT IDS, IN THE FIELD.** With two dispatches running at once, confirm `npm run next-id -- --against-main` prints two **different** blocks, and that neither renumbers. The unit test proves this over 2,000 synthetic pairs; the field is where real branch names and a real peer set are.
+
+**(d) THE SEVEN RECOVER (B6867).** For #928, #930–#935: re-trigger each and confirm `build` reports and passes. Anything still red after that is its own PR's failure and belongs to that PR, not to this item.
+
+**(e) THE GUARD ACTUALLY FIRES IN CI, not just in vitest.** On a throwaway branch, rename `build.yml`'s job and confirm the required build goes **red** on `required-check-audit` with the name-drift message — rather than merging quietly and wedging the next seven PRs.
+
+⏳ **THE LIVE REPOSITORY, WITH CONCURRENT DISPATCHES** `Blocker: real-data`
+
 ### V720 — B1393 (×2) (double-click low on a real page and the words appear THERE). `Blocker: real-data` — everything is driven headless here and PASSES (`ui-audit/verify-notes.mjs` **248/248**, and the new checks were proven RED against the old behaviour first, reporting `clicked y=447 · text landed y=190`). It is parked anyway, deliberately: **this exact item passed a sandbox check once and was still wrong in the field**, so the owner's own press on his own page is worth the wait. On **planyr.io**, on a real note, confirm — **(a) THE WORDS GO WHERE YOU CLICK:** open a page, double-click a long way down and off to the right of the text, type something, and confirm it appears **where you clicked** rather than on the first line at the left margin. **(b) A SINGLE CLICK DOES THE SAME:** same test, one click. **(c) OFF TO THE RIGHT COMES OUT RIGHT-ALIGNED:** click near the right-hand edge and confirm what you type sits over there, the way it does in Word; click in the middle and confirm it comes out centred. If that surprises you rather than helps, say so and it comes out — the placement is the bug, the alignment is the Word convention on top of it. **(d) NOTHING IS LEFT BEHIND:** click into blank space, type nothing, click somewhere else, and confirm the page is exactly as it was — no stack of blank lines. **(e) BUT WHAT YOU TYPED STAYS PUT:** do it again, type this time, click away, reload, and confirm your text is still down the page where you put it. **(f) DOUBLE-CLICKING A WORD STILL SELECTS IT.** ⏳ **LIVE APP (planyr.io), ON A REAL NOTE** `Blocker: real-data`
 - **Verified in-session 2026-08-05 as far as the sandbox reaches, and the verification itself is the point of this item.** The previous check asserted that the editor took focus and that a keystroke arrived — both TRUE on the broken build, which is why it was green while the owner was reporting the failure for the second time. The replacement asserts the marker's **resulting rendered position**, read out of the live DOM. Mutation-checked: with the old behaviour restored, seven checks go red.
 **PARTIAL PASS — 2026-08-05, on the DEPLOYED branch preview (`claude-registry-layer-debug.planyr.pages.dev`), driven from this session.** The shipped code path was exercised against the real edge, not a local relay, and all three behaviours are confirmed:
