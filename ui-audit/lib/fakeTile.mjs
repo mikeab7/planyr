@@ -52,6 +52,29 @@ function chunk(type, data) {
   return Buffer.concat([len, body, crc]);
 }
 
+/* The PNG encoder itself, exported so a SECOND generator can reuse it without a second hand-rolled
+ * copy of the signature/CRC/IDAT dance (NEW-1: lib/synthRaster.mjs builds the megapixel plan
+ * rasters the Bain fixture needs, which is the same file format at a completely different scale).
+ * `fill(row, col, px, raw)` writes three bytes at `raw[px]`; the caller owns the pixel content, so
+ * the entropy — and therefore the compressed size — is the caller's decision, not this file's. */
+export function encodeRgbPng(width, height, fill) {
+  const w = Math.max(1, Math.floor(width)), h = Math.max(1, Math.floor(height));
+  const stride = 1 + w * 3;
+  const raw = Buffer.alloc(h * stride);
+  for (let row = 0; row < h; row++) {
+    const off = row * stride;
+    raw[off] = 0; // filter 0 = None
+    for (let col = 0; col < w; col++) fill(row, col, off + 1 + col * 3, raw);
+  }
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(w, 0);
+  ihdr.writeUInt32BE(h, 4);
+  ihdr[8] = 8;   // bit depth
+  ihdr[9] = 2;   // colour type 2 = truecolour RGB
+  ihdr[10] = 0; ihdr[11] = 0; ihdr[12] = 0; // deflate / adaptive filtering / no interlace
+  return Buffer.concat([SIG, chunk("IHDR", ihdr), chunk("IDAT", deflateSync(raw)), chunk("IEND", Buffer.alloc(0))]);
+}
+
 /* A deterministic colour per tile. Deliberately spread across the byte range rather than a small
  * palette, so two different tiles cannot collide into identical bytes and get their decoded
  * bitmaps shared (see the note above — that collision is the failure mode this file exists to
@@ -68,25 +91,11 @@ export function tileColor(z, x, y) {
 export function fakeTilePng(z, x, y, size = 256) {
   const s = Math.max(1, Math.min(1024, Math.floor(size)));
   const { r, g, b } = tileColor(z, x, y);
-  // Raw scanlines: one filter byte (0 = None) then RGB triples.
-  const raw = Buffer.alloc(s * (1 + s * 3));
-  for (let row = 0; row < s; row++) {
-    const off = row * (1 + s * 3);
-    raw[off] = 0;
-    for (let col = 0; col < s; col++) {
-      const p = off + 1 + col * 3;
-      raw[p] = (r + row) & 0xff;
-      raw[p + 1] = (g + col) & 0xff;
-      raw[p + 2] = (b + ((row + col) >> 1)) & 0xff;
-    }
-  }
-  const ihdr = Buffer.alloc(13);
-  ihdr.writeUInt32BE(s, 0);
-  ihdr.writeUInt32BE(s, 4);
-  ihdr[8] = 8;   // bit depth
-  ihdr[9] = 2;   // colour type 2 = truecolour RGB
-  ihdr[10] = 0; ihdr[11] = 0; ihdr[12] = 0; // deflate / adaptive filtering / no interlace
-  return Buffer.concat([SIG, chunk("IHDR", ihdr), chunk("IDAT", deflateSync(raw)), chunk("IEND", Buffer.alloc(0))]);
+  return encodeRgbPng(s, s, (row, col, p, raw) => {
+    raw[p] = (r + row) & 0xff;
+    raw[p + 1] = (g + col) & 0xff;
+    raw[p + 2] = (b + ((row + col) >> 1)) & 0xff;
+  });
 }
 
 /* Pull z/x/y out of a tile URL. Handles the two shapes this app's basemap registry builds —
