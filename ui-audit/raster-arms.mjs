@@ -45,7 +45,7 @@ import {
   redactPlan, fixtureCensus, armFixture, fixtureSeed, rasterIdbPlan,
   idbPutInPage, RASTER_ARMS, specDecodedBytes, paintedRasters, heldButUnpaintedRasters,
 } from "./lib/planFixture.mjs";
-import { bucketTrace, layerCensus, median, noiseFloorPct, armVerdict, decodeFault, renderedDecodedBytes } from "./lib/rasterCost.mjs";
+import { bucketTrace, layerCensus, median, noiseFloorPct, armVerdict, pairedComparison, decodeFault, renderedDecodedBytes } from "./lib/rasterCost.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const BASE = (process.env.BASE_URL || "http://localhost:4173/").replace(/\/?$/, "/");
@@ -342,6 +342,19 @@ const byArm = ARMS.map((arm) => {
 });
 
 const baseline = byArm.find((a) => a.arm === "bain") || byArm[0];
+
+/* Rep-for-rep against the baseline. The arms are interleaved, so rep i of every arm ran within
+ * seconds of rep i of every other — a slow machine-minute hits both together and pairing cancels it.
+ * See the long note on `pairedComparison`: this ADDS an analysis the design already supported, it
+ * does not replace the range floor, which continues to be reported verbatim. */
+const pairFor = (arm, pick) => {
+  const reps = [...new Set(runs.map((r) => r.rep))].sort((a, b) => a - b);
+  return reps.map((rep) => {
+    const b = ok.find((r) => r.arm === baseline.arm && r.rep === rep);
+    const a = ok.find((r) => r.arm === arm && r.rep === rep);
+    return b && a ? [pick(b), pick(a)] : null;
+  }).filter(Boolean);
+};
 const floorWork = noiseFloorPct(ok.filter((r) => r.arm === baseline.arm).map((r) => r.workMs));
 const floorRender = noiseFloorPct(ok.filter((r) => r.arm === baseline.arm).map((r) => r.paint?.totalMs));
 
@@ -352,6 +365,8 @@ const out = {
     ...a,
     vsBaselineWork: a.arm === baseline.arm ? null : armVerdict(baseline.workMs, a.workMs, floorWork),
     vsBaselineRender: a.arm === baseline.arm ? null : armVerdict(baseline.renderTotalMs, a.renderTotalMs, floorRender),
+    pairedWork: a.arm === baseline.arm ? null : pairedComparison(pairFor(a.arm, (r) => r.workMs)),
+    pairedRender: a.arm === baseline.arm ? null : pairedComparison(pairFor(a.arm, (r) => (r.paint ? r.paint.totalMs : null))),
   })),
   faults: runs.filter((r) => r.fault).map((r) => ({ arm: r.arm, rep: r.rep, fault: r.fault })),
   runs,
@@ -384,6 +399,9 @@ else {
     console.log(`  ${a.arm.padEnd(12)} — ${a.changes}`);
     console.log(`               work:   ${a.vsBaselineWork.pct == null ? "—" : `${a.vsBaselineWork.pct > 0 ? "+" : ""}${a.vsBaselineWork.pct}%`}  ${a.vsBaselineWork.verdict}`);
     console.log(`               render: ${a.vsBaselineRender.pct == null ? "—" : `${a.vsBaselineRender.pct > 0 ? "+" : ""}${a.vsBaselineRender.pct}%`}  ${a.vsBaselineRender.verdict}`);
+    console.log(`               PAIRED rep-for-rep (cancels a slow machine-minute, which the range floor cannot):`);
+    console.log(`                 render  ${a.pairedRender.verdict}`);
+    console.log(`                 work    ${a.pairedWork.verdict}`);
   }
   if (out.faults.length) {
     console.log(`\n  ⛔ ${out.faults.length} rep(s) SUPPRESSED — an arm that did not take is not a fast arm:`);

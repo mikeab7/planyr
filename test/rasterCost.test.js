@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   bucketOf, bucketTrace, layerCensus, median, noiseFloorPct, armVerdict,
-  decodeFault, renderedDecodedBytes, TRACE_BUCKETS,
+  decodeFault, renderedDecodedBytes, TRACE_BUCKETS, signTestP, pairedComparison,
 } from "../ui-audit/lib/rasterCost.mjs";
 
 /* NEW-1 — the half of a gesture's cost that every prior instrument in this program was structurally
@@ -111,6 +111,60 @@ describe("statistics refuse to manufacture findings", () => {
   it("an unmeasured arm says so instead of returning 0%", () => {
     expect(armVerdict(null, 100, 5)).toEqual({ pct: null, verdict: "NOT MEASURED" });
     expect(armVerdict(0, 100, 5).pct).toBeNull();
+  });
+});
+
+describe("the paired comparison — an analysis the interleaved design already supported", () => {
+  it("signTestP matches the exact two-sided binomial at p=0.5", () => {
+    expect(signTestP(5, 5)).toBeCloseTo(2 * (1 / 32), 6);
+    expect(signTestP(0, 5)).toBeCloseTo(2 * (1 / 32), 6);
+    expect(signTestP(3, 6)).toBeCloseTo(1, 6);          // dead even → nothing to see
+    expect(signTestP(6, 6)).toBeCloseTo(2 / 64, 6);
+    expect(signTestP(0, 0)).toBe(1);
+  });
+
+  /* ⛔ THE PROPERTY THAT MAKES THIS WORTH ADDING: one contaminated rep hits BOTH arms (they are
+   * interleaved), so it must not decide the answer. The range floor cannot do this — a single hot
+   * rep widens it until nothing can ever clear it. */
+  it("is not decided by a rep that ran hot on BOTH arms", () => {
+    const pairs = [[1000, 800], [1010, 810], [4000, 3200], [990, 790], [1005, 805], [995, 795]];
+    const r = pairedComparison(pairs);
+    expect(r.cheaper).toBe(6);
+    expect(r.verdict).toMatch(/CHEAPER in 6\/6/);
+    expect(r.medianPct).toBeLessThan(-15);
+    // ...whereas the range floor over those same baseline values is enormous and settles nothing.
+    expect(noiseFloorPct(pairs.map((p) => p[0]))).toBeGreaterThan(200);
+  });
+
+  it("refuses to separate arms that genuinely overlap", () => {
+    const r = pairedComparison([[100, 101], [100, 99], [100, 102], [100, 98], [100, 103], [100, 97]]);
+    expect(r.verdict).toMatch(/NOT SEPARATED/);
+    expect(r.p).toBeGreaterThan(0.05);
+  });
+
+  it("reports DEARER as readily as CHEAPER — the test is two-sided", () => {
+    expect(pairedComparison([[100, 130], [100, 125], [100, 140], [100, 128], [100, 135], [100, 132]]).verdict).toMatch(/DEARER in 6\/6/);
+  });
+
+  it("drops ties rather than counting them for either side", () => {
+    const r = pairedComparison([[100, 100], [100, 90], [100, 91], [100, 92], [100, 93]]);
+    expect(r.n).toBe(4);
+  });
+
+  /* ⛔ SIX PAIRED REPS IS THE MINIMUM THIS TEST CAN EVER SPEAK AT, and it is pinned here so nobody
+   * runs five and wonders why a perfectly clean sweep came back silent. Five unanimous reps give a
+   * two-sided p of 2/2^5 = 0.0625, which is OVER the 0.05 bar; six give 0.031. That is arithmetic,
+   * not a tuning choice — no amount of effect size rescues a five-rep sign test. */
+  it("cannot separate anything from five reps, however unanimous — and says so", () => {
+    const five = pairedComparison([[100, 50], [100, 51], [100, 49], [100, 52], [100, 48]]);
+    expect(five.cheaper).toBe(5);
+    expect(five.p).toBeCloseTo(0.0625, 4);
+    expect(five.verdict).toMatch(/NOT SEPARATED/);
+  });
+
+  it("refuses to report at all below three usable pairs", () => {
+    expect(pairedComparison([[100, 90], [100, 91]]).verdict).toMatch(/TOO FEW/);
+    expect(pairedComparison(null).verdict).toMatch(/TOO FEW/);
   });
 });
 

@@ -137,6 +137,65 @@ export function armVerdict(baselineMs, armMs, floorPct) {
   return { pct, verdict: `${pct < 0 ? "CHEAPER" : "DEARER"} by ${Math.abs(pct)}%, which clears the floor` };
 }
 
+/* ---- THE PAIRED COMPARISON --------------------------------------------------------------------
+ * ⛔ WHY THIS EXISTS, and it is NOT a second bite at a threshold that already said no.
+ *
+ * `noiseFloorPct` above is a RANGE — (max − min) / median — and the range of a sample is a
+ * monotonically increasing function of n. So ONE contaminated rep sets the floor for a whole
+ * battery, and **collecting more data makes the floor wider rather than tighter.** That is a real
+ * defect in the estimator this repo uses everywhere, and it fired here: a single rep ran ~45% hot
+ * across several arms at once (container contention) and widened the render floor from ±8.5% to
+ * ±48.4%, after which nothing could clear it however many times it was reproduced.
+ *
+ * The rule is not moved and the floor is not swapped for a kinder statistic — that is exactly the
+ * move `PERCEPTUAL-PARITY` rule (4) forbids, and the unpaired verdict continues to be reported
+ * verbatim. What is ADDED is an analysis the experiment was already designed for and nobody was
+ * reading: **the arms are INTERLEAVED**, so rep i of every arm ran within seconds of rep i of every
+ * other. A slow machine-minute therefore hits the baseline and the arm TOGETHER, and comparing them
+ * rep-for-rep cancels it. That is a paired design, and pairing is why interleaving was built.
+ *
+ * The statistic is a SIGN TEST — how many of the n paired reps went one way — chosen because it
+ * assumes nothing about the distribution and cannot be flattered by an outlier: a rep that is 45%
+ * hot counts exactly the same as one that is 1% hot. It answers a narrower question than the floor
+ * does ("which is cheaper", not "by how much"), and it is reported as such.
+ */
+
+/** Exact two-sided binomial tail for k successes in n trials at p = 0.5 — the sign test's p-value.
+ *  Computed in log space so a large n cannot overflow the factorials. */
+export function signTestP(k, n) {
+  if (!n) return 1;
+  const lnFact = (m) => { let s = 0; for (let i = 2; i <= m; i++) s += Math.log(i); return s; };
+  const pmf = (i) => Math.exp(lnFact(n) - lnFact(i) - lnFact(n - i) - n * Math.LN2);
+  const extreme = Math.max(k, n - k);
+  let tail = 0;
+  for (let i = extreme; i <= n; i++) tail += pmf(i);
+  return Math.min(1, 2 * tail);
+}
+
+/**
+ * Compare an arm against the baseline rep-for-rep.
+ *
+ * @param pairs array of [baselineValue, armValue], one per rep, in rep order.
+ * Ties are DROPPED rather than counted for either side (the conventional sign-test treatment); the
+ * returned `n` is the number of pairs that actually carried information.
+ */
+export function pairedComparison(pairs) {
+  const usable = (pairs || []).filter((p) => p && Number.isFinite(p[0]) && Number.isFinite(p[1]) && p[0] !== p[1]);
+  if (usable.length < 3) {
+    return { n: usable.length, cheaper: null, medianPct: null, p: null, verdict: "TOO FEW PAIRED REPS — not a finding" };
+  }
+  const cheaper = usable.filter(([b, a]) => a < b).length;
+  const deltas = usable.map(([b, a]) => ((a - b) / b) * 100);
+  const medianPct = +median(deltas).toFixed(1);
+  const p = signTestP(cheaper, usable.length);
+  /* 0.05 is the conventional bar and it is stated here, in the code, ahead of any result — the same
+   * discipline the perceptual bar is held to. */
+  const verdict = p > 0.05
+    ? `NOT SEPARATED — ${cheaper}/${usable.length} reps cheaper, p=${p.toFixed(3)}`
+    : `${medianPct < 0 ? "CHEAPER" : "DEARER"} in ${Math.max(cheaper, usable.length - cheaper)}/${usable.length} paired reps (sign test p=${p.toFixed(3)}), median ${medianPct > 0 ? "+" : ""}${medianPct}%`;
+  return { n: usable.length, cheaper, medianPct, p: +p.toFixed(4), verdict };
+}
+
 /* ---- THE DECODE ASSERTION ---------------------------------------------------------------------
  * ⛔ THE SINGLE MOST IMPORTANT GUARD IN THIS FILE, and the one whose absence would make every
  * number below a comfortable lie.
