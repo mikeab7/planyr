@@ -131,9 +131,31 @@ const marksIn = (doc) => {
   return [...out];
 };
 
+/* ⛔ CLICK THE END OF THE CONTENT, NEVER THE MIDDLE OF THE SHEET (B1393 ×2). This used to
+ * click the note-body element's CENTRE, which — now that pressing blank space genuinely puts
+ * the caret there (Click and Type) — would insert paragraphs and move the caret away from
+ * whatever the case under test had just set up. Aiming at the right-hand end of the last
+ * block is what the old centre-click effectively did anyway: continue from the end. */
 const typeInBody = async (text) => {
-  await page.locator('[data-testid="note-body"]').click();
+  const at = await page.evaluate(() => {
+    const body = document.querySelector('[data-testid="note-body"]');
+    const last = body.lastElementChild || body;
+    const r = last.getBoundingClientRect();
+    return { x: r.right - 2, y: r.top + Math.min(12, r.height / 2) };
+  });
+  await page.mouse.click(at.x, at.y);
   await page.keyboard.type(text, { delay: 8 });
+};
+/* Put the caret in the document WITHOUT tripping Click and Type — the same aim, reused by
+ * every case that just needs focus in the editor rather than a caret at a chosen place. */
+const caretInDoc = async (target = page) => {
+  const at = await target.evaluate(() => {
+    const body = document.querySelector('[data-testid="note-body"]');
+    const last = body.lastElementChild || body;
+    const r = last.getBoundingClientRect();
+    return { x: r.right - 2, y: r.top + Math.min(12, r.height / 2) };
+  });
+  await (target.mouse ? target : page).mouse.click(at.x, at.y);
 };
 const tb = (id) => page.locator(`[data-testid="${id}"]`);
 /* A tree row's actions live on its RIGHT-CLICK MENU (B1367) — the row itself shows only a
@@ -209,7 +231,7 @@ const imageRecords = () => page.evaluate(() => new Promise((resolve) => {
 
 /** Paste a real PNG into the open note, exactly as a clipboard image arrives. */
 const pasteImage = async (px = 240) => {
-  await page.locator('[data-testid="note-body"]').click();
+  await caretInDoc();
   await page.evaluate(async (size) => {
     const c = document.createElement("canvas");
     c.width = size; c.height = Math.round(size * 0.6);
@@ -296,7 +318,7 @@ await typeInBody("Bold sentence.");
 await settle();
 ok("Bold writes a real bold mark into the document model", marksIn(await readBody(page1)).includes("bold"));
 
-await page.locator('[data-testid="note-body"]').click();
+await caretInDoc();
 await page.keyboard.press("Enter");
 await tb("nt-block").selectOption("h2");
 await page.keyboard.type("Site conditions", { delay: 8 });
@@ -386,7 +408,7 @@ ok("the second page saves to its OWN key, leaving the first alone",
 
 /* Type, then switch pages IMMEDIATELY — well inside the 600 ms debounce. This is the
  * regression: the old flush queried the outgoing editor and raced its own teardown. */
-await page.locator('[data-testid="note-body"]').click();
+await caretInDoc();
 await page.keyboard.press("End");
 await page.keyboard.type(" LAST-TYPED-BEFORE-SWITCH", { delay: 5 });
 await page.waitForTimeout(90);                                  // a split second, not a full debounce
@@ -473,7 +495,7 @@ await page.waitForTimeout(400);
 ok("a fully-expressible page exports with NO lossiness notice", await tb("notes-export-notice").count() === 0);
 
 /* Now add something Markdown genuinely cannot spell, and export again. */
-await page.locator('[data-testid="note-body"]').click();
+await caretInDoc();
 await page.keyboard.press("Control+End");
 await page.keyboard.press("Enter");
 await tb("nt-underline").click();
@@ -870,13 +892,30 @@ ok("...and it does NOT slide right as the window widens — the whole 'aligned t
 /* ---- B1368: the empty part of the page takes the caret ---- */
 const mat = await tb("note-mat").boundingBox();
 const bodyBox = await tb("note-body").boundingBox();
-await page.mouse.click(bodyBox.x + 40, Math.min(mat.y + mat.height - 40, bodyBox.y + bodyBox.height + 60));
+const blankClickY = Math.min(mat.y + mat.height - 40, bodyBox.y + bodyBox.height + 60);
+await page.mouse.click(bodyBox.x + 40, blankClickY);
 await page.waitForTimeout(200);
 const focusedAfterBlankClick = await page.evaluate(() => !!document.activeElement?.closest?.(".ProseMirror"));
 await page.keyboard.type("CLICKED-THE-BLANK-PART", { delay: 6 });
 await settle();
-ok("clicking the empty space BELOW the text puts the caret in the document",
-  focusedAfterBlankClick && textOf(await readBody(r3Page)).includes("CLICKED-THE-BLANK-PART"));
+/* ⛔ AMENDED (B1393 ×2): "the keystroke arrived" is NOT the property. Where the words end up
+ * is. This now demands the text render at the height that was pressed. */
+const blankLanded = await page.evaluate(() => {
+  const w = document.createTreeWalker(document.querySelector('[data-testid="note-body"]'), NodeFilter.SHOW_TEXT);
+  let n;
+  while ((n = w.nextNode())) {
+    const i = (n.textContent || "").indexOf("CLICKED-THE-BLANK-PART");
+    if (i < 0) continue;
+    const r = document.createRange();
+    r.setStart(n, i); r.setEnd(n, i + 22);
+    return r.getBoundingClientRect().y;
+  }
+  return null;
+});
+ok("clicking the empty space BELOW the text puts the caret THERE, and typing lands there",
+  focusedAfterBlankClick && textOf(await readBody(r3Page)).includes("CLICKED-THE-BLANK-PART")
+  && blankLanded != null && Math.abs(blankLanded - blankClickY) <= 40,
+  blankLanded == null ? "no marker" : `pressed y=${Math.round(blankClickY)} · landed y=${Math.round(blankLanded)}`);
 
 /* Beside the text, out to the right of a short line — the other half of the dead zone. */
 await page.mouse.click(bodyBox.x + bodyBox.width - 20, bodyBox.y + 12);
@@ -947,7 +986,7 @@ ok("the font-size control is on the visible row, not buried in More",
 ok("...and it is not ALSO in the More drawer — it moved, it did not multiply",
   await tb("nt-size").count() === 1);
 
-await tb("note-body").click();
+await caretInDoc();
 await page.keyboard.press("Control+a");
 await tb("nt-size").selectOption("24");
 await settle();
@@ -1143,7 +1182,7 @@ const r4Page = r4Tree.pages[r4Tree.pages.length - 1].id;
 
 const inDoc = () => page.evaluate(() => !!document.activeElement?.closest?.(".ProseMirror"));
 const clearBody = async () => {
-  await tb("note-body").click();
+  await caretInDoc();
   await page.keyboard.press("Control+a");
   await page.keyboard.press("Backspace");
   await page.waitForTimeout(120);
@@ -1226,7 +1265,7 @@ ok("ESCAPE THEN TAB LEAVES THE NOTE — the keyboard-only escape hatch is real, 
 
 /* ...and the release is single-use: typing takes it back, so you cannot end up in a mode
    where Tab silently stopped indenting. */
-await tb("note-body").click();
+await caretInDoc();
 await page.keyboard.type("back inside", { delay: 6 });
 await page.keyboard.press("Tab");
 await page.waitForTimeout(150);
@@ -1234,35 +1273,119 @@ ok("...and typing takes the release back — the next Tab indents again, no ling
   await inDoc());
 await settle();
 
-/* ---- B1393: double-click the blank part of the page and start typing ---- */
+/* ---- B1393 ×2: CLICK AND TYPE — the caret lands WHERE YOU CLICKED ----------------------
+ *
+ * ⛔ THIS BLOCK REPLACES THE ORIGINAL B1393 CHECKS RATHER THAN SITTING BESIDE THEM, and the
+ * reason is the whole lesson of the recurrence. The old ones asserted that the editor took
+ * FOCUS and that a keystroke ARRIVED — both of which were true on the broken build, which is
+ * why they were green while the owner was telling us twice that it did not work. **A test
+ * that would pass on the broken build is not a test.** These assert the caret's RESULTING
+ * POSITION: type a marker and demand it renders down where the press was, not at the top.
+ *
+ * The measurement is the marker's own rendered box, read out of the live DOM — not the
+ * selection object, not the document JSON. Where the words END UP on screen is the thing the
+ * owner is looking at, so it is the thing asserted. */
 
-/* AUDIT-FIRST, and it is worth stating plainly: single-click-anywhere (B1368) was VERIFIED
-   WORKING on a wide window in a real browser before any of this was written, and the same
-   handler was already in the deployed bundle. Double-click worked only as a side effect of
-   the press path. These checks make it a stated contract in all four blank regions. */
+/* A brand-new empty page, which is the exact case in his report. */
 await clearBody();
-await page.keyboard.type("Short line.", { delay: 6 });
 await settle();
-const r4Mat = await tb("note-mat").boundingBox();
-const r4Body = await tb("note-body").boundingBox();
-const blankSpots = [
-  ["far RIGHT of the text column", r4Mat.x + r4Mat.width - 40, r4Body.y + 10],
-  ["BELOW the last paragraph", r4Body.x + 60, Math.min(r4Mat.y + r4Mat.height - 30, r4Body.y + r4Body.height + 90)],
-  ["the margin BESIDE the first line", r4Body.x + r4Body.width - 12, r4Body.y + 6],
-  ["low and far right, where the sheet has nothing at all", r4Mat.x + r4Mat.width - 80, r4Mat.y + r4Mat.height - 60],
-];
-for (const [where, x, y] of blankSpots) {
-  await page.locator("body").click({ position: { x: 4, y: 4 } });     // blur first, every time
-  await page.waitForTimeout(120);
-  await page.mouse.dblclick(x, y);
-  await page.waitForTimeout(180);
-  const landed = await inDoc();
-  const stamp = `DBL${blankSpots.indexOf(blankSpots.find((b) => b[0] === where))}`;
-  await page.keyboard.type(stamp, { delay: 6 });
-  await settle();
-  ok(`DOUBLE-CLICKING ${where} lands the caret and you can type straight away`,
-    landed && textOf(await readBody(r4Page)).includes(stamp));
-}
+
+const matBox = await tb("note-mat").boundingBox();
+const bodyBox2 = await tb("note-body").boundingBox();
+/* Well down the page and far to the right of the text column — his own coordinates, scaled
+ * into this window: past two thirds across, and a long way below the single empty line. */
+const clickX = bodyBox2.x + bodyBox2.width * 0.78;
+const clickY = Math.min(matBox.y + matBox.height - 60, bodyBox2.y + 260);
+
+await page.mouse.dblclick(clickX, clickY);
+await page.waitForTimeout(220);
+await page.keyboard.type("ZZTEST", { delay: 8 });
+await settle();
+
+/** Where did the marker actually render? */
+const markerBox = async (text) => page.evaluate((t) => {
+  const walker = document.createTreeWalker(document.querySelector('[data-testid="note-body"]'), NodeFilter.SHOW_TEXT);
+  let n;
+  while ((n = walker.nextNode())) {
+    const i = (n.textContent || "").indexOf(t);
+    if (i < 0) continue;
+    const r = document.createRange();
+    r.setStart(n, i); r.setEnd(n, i + t.length);
+    const b = r.getBoundingClientRect();
+    return { x: b.x, y: b.y, w: b.width, h: b.height };
+  }
+  return null;
+}, text);
+
+const landedAt = await markerBox("ZZTEST");
+ok("⛔ DOUBLE-CLICKING BLANK SPACE AND TYPING PUTS THE WORDS THERE — not on line one (B1393 ×2)",
+  !!landedAt && Math.abs(landedAt.y - clickY) <= 40,
+  landedAt ? `clicked y=${Math.round(clickY)} · text landed y=${Math.round(landedAt.y)}` : "the marker is nowhere on the page");
+ok("...and DEMONSTRABLY not at the top of the page, which is what the old check could not tell apart",
+  !!landedAt && landedAt.y - bodyBox2.y > 120,
+  landedAt ? `${Math.round(landedAt.y - bodyBox2.y)} below the first line` : "no marker");
+ok("...and it took the alignment from where across the column it was pressed, the way Word does",
+  !!landedAt && landedAt.x > bodyBox2.x + bodyBox2.width * 0.4,
+  landedAt ? `text x=${Math.round(landedAt.x)} vs column left ${Math.round(bodyBox2.x)}` : "no marker");
+
+/* A SINGLE click must do exactly the same thing — the owner does not think of them as two
+ * different gestures, and a page where one works and the other does not is worse than
+ * neither working, because it looks intermittent. */
+await clearBody();
+await settle();
+const singleY = Math.min(matBox.y + matBox.height - 60, bodyBox2.y + 200);
+await page.mouse.click(bodyBox2.x + 60, singleY);
+await page.waitForTimeout(200);
+await page.keyboard.type("SINGLECLICK", { delay: 8 });
+await settle();
+const singleAt = await markerBox("SINGLECLICK");
+ok("⛔ A SINGLE CLICK IN BLANK SPACE DOES THE SAME — one gesture, one behaviour",
+  !!singleAt && Math.abs(singleAt.y - singleY) <= 40,
+  singleAt ? `clicked y=${Math.round(singleY)} · text landed y=${Math.round(singleAt.y)}` : "no marker");
+
+/* ⛔ NOTHING IS LEFT BEHIND. Click into blank space, DON'T type, click away — Word removes
+ * the paragraphs it speculatively made, and so must this, or every stray press fattens the
+ * document forever. */
+await clearBody();
+await settle();
+const cleanBefore = JSON.stringify(await readBody(r4Page));
+await page.mouse.dblclick(bodyBox2.x + 60, Math.min(matBox.y + matBox.height - 60, bodyBox2.y + 220));
+await page.waitForTimeout(220);
+const claimed = await page.evaluate(() => document.querySelectorAll('[data-testid="note-body"] > p').length);
+ok("pressing blank space really does make the paragraphs needed to get there",
+  claimed > 1, `${claimed} paragraph(s) while the caret waits`);
+await page.locator("body").click({ position: { x: 4, y: 4 } });    // click away without typing
+await page.waitForTimeout(400);
+await settle();
+ok("⛔ ...AND THEY ARE REMOVED WHEN YOU CLICK AWAY WITHOUT TYPING — no orphan paragraphs",
+  JSON.stringify(await readBody(r4Page)) === cleanBefore,
+  `${await page.evaluate(() => document.querySelectorAll('[data-testid="note-body"] > p').length)} paragraph(s) left`);
+
+/* …but paragraphs you DID type into are yours and stay put, including after a reload — the
+ * other half, and the one that would break if the cleanup were too eager. */
+await page.mouse.dblclick(bodyBox2.x + 60, Math.min(matBox.y + matBox.height - 60, bodyBox2.y + 220));
+await page.waitForTimeout(220);
+await page.keyboard.type("KEEPER", { delay: 8 });
+await settle();
+await page.locator("body").click({ position: { x: 4, y: 4 } });
+await page.waitForTimeout(400);
+await settle();
+const keptDoc = await readBody(r4Page);
+ok("⛔ ...while a paragraph you TYPED into survives the same click-away",
+  textOf(keptDoc).includes("KEEPER") && JSON.stringify(keptDoc).match(/"paragraph"/g).length > 1,
+  `${(JSON.stringify(keptDoc).match(/"paragraph"/g) || []).length} paragraph(s)`);
+await page.reload({ waitUntil: "load" });
+await page.waitForTimeout(1800);
+await page.locator('[data-testid="module-tab-notes"]:visible').first().click();
+await page.waitForSelector('[data-testid="notes-tree"]', { timeout: 15000 });
+await rowClick(r4Page);
+await page.waitForSelector('[data-testid="note-body"]', { timeout: 15000 });
+await page.waitForTimeout(700);
+const reloadedAt = await markerBox("KEEPER");
+const reloadedBody = await tb("note-body").boundingBox();
+ok("⛔ ...and it is STILL down the page after a reload — the position is in the document, not in the view",
+  !!reloadedAt && reloadedAt.y - reloadedBody.y > 100,
+  reloadedAt ? `${Math.round(reloadedAt.y - reloadedBody.y)} below the first line` : "no marker");
 
 /* ⛔ …and double-clicking a WORD still SELECTS that word. The new behaviour is for blank
    space only; taking word-select away would be a worse bug than the one being fixed. */
@@ -1310,7 +1433,7 @@ ok("a SECOND window of the same browser opens the same note",
   (await win2.locator('[data-testid="note-body"]').innerText()).includes("WINDOW-ONE-PARAGRAPH"));
 
 /* The second window types. The first window has the same page open and has NOT touched it. */
-await win2.locator('[data-testid="note-body"]').click();
+await caretInDoc(win2);
 await win2.keyboard.press("Control+End");
 await win2.keyboard.type(" ADDED-IN-WINDOW-TWO", { delay: 6 });
 await win2.waitForTimeout(1400);
@@ -1324,7 +1447,7 @@ ok("⛔ THE OPEN EDITOR IN THE FIRST WINDOW RE-READS THE NOTE — it does not si
    document, this keystroke would write that whole document back and the second window's
    sentence would vanish — cleanly, past a revision guard, with no conflict and nothing to
    notice. That silent loss is the actual bug the false prompt was a symptom of. */
-await tb("note-body").click();
+await caretInDoc();
 await page.keyboard.press("Control+End");
 await page.keyboard.type(" THEN-WINDOW-ONE-AGAIN", { delay: 6 });
 await settle();
@@ -1770,8 +1893,8 @@ ok("⛔ THE CAPTION THAT DESCRIBED A FAILED LOOKUP AS DATA IS GONE FROM THE RUNN
 ok("...and the row carries no project label at all now — the heading owns it",
   !/project/.test(badgeRow), badgeRow.replace(/\n/g, " · ").slice(0, 90));
 const headText = (await tb(`notes-group-${PROJ_A}`).innerText().catch(() => "")).toLowerCase();
-ok("...while the group HEADING says plainly that this project's name did not resolve",
-  /not loaded/.test(headText), headText || "no heading");
+ok("...while the group HEADING states a FACT he can act on, not an internal loading state",
+  /deleted/.test(headText) && !/not loaded/.test(headText), headText || "no heading");
 ok("...and the rail stays quiet about a FAILURE that did not happen — no banner on a healthy list",
   await tb("notes-projects-error").count() === 0);
 
