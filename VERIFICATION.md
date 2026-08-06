@@ -113,6 +113,60 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+> **⚠ The deployed BRANCH PREVIEW cannot be driven from the sandbox — measured 2026-08-06, don't rediscover it.** Both specs below were pointed at `claude-review-module-bugs-82.planyr.pages.dev` (Cloudflare deployed it green). `curl` returns **200**; Chromium's own `page.goto` dies with **`net::ERR_CONNECTION_RESET`** on every one of the 13 specs. Same gateway behaviour already recorded on V711. So "verified against the real deploy" is not available here for ANY of V10608–V10611 — the headless evidence on these items is from a local production build of the identical tree.
+
+### V10608 — B208960 + B208961 (open a SAVED stitch and press a sheet row while it loads). `Blocker: auth` + `Blocker: real-data`
+
+Everything that can be driven logged out was driven here and passes (e2e **stitch-row-adds-a-sheet**, 7 specs, mutation-checked against the old build), **but the owner's exact trigger is out of reach from this sandbox and that is structural, not incidental:** the gate that swallowed his clicks is held by `loadStitch`, which only runs when a saved stitch is re-fetched from Drive — signed out there are no stored sources, so the load finishes instantly and the gate is never held. The queue-and-replay behaviour is unit-locked (`test/stitchLoadState.test.js`, 15) and the bare early return is gone from the code; what needs his session is that it BEHAVES that way on a real set. On **planyr.io**, signed in, on the JACINTOPORT stitch:
+
+- **(a) THE STATUS BAR MOVES.** From the moment the set starts loading, confirm the line COUNTS ("Drawing the saved set — sheet 3 of 8…") and changes as it goes. A fixed line, or the words "Rendering…" anywhere, is a fail.
+- **(b) SHEETS APPEAR AS THEY LAND**, one at a time, instead of the canvas staying empty until everything is ready.
+- **(c) PRESS A SHEET ROW WHILE IT IS STILL LOADING.** Confirm you get an answer in the same beat — a short "still loading the saved set, that sheet goes on as soon as it finishes" — and then that **the sheet you pressed actually appears on the canvas** once the load ends. Silence is the whole bug; a message with no sheet afterwards is only half a fix.
+- **(d) PRESS SEVERAL DIFFERENT ROWS while it loads.** All of them should land, in the order pressed. Pressing the SAME row twice should produce one sheet, not two.
+- **(e) ONCE IT HAS SETTLED, THE BAR IS GONE.** Not idle text — gone.
+- **(f) A ROW PRESS ON A SETTLED SET STILL WORKS** — the ordinary case, unchanged.
+- **(g) IF ANYTHING FAILS TO LOAD, IT IS NAMED.** If a drawing won't come back from Drive you should see which one, not a vague "some source PDFs weren't available".
+
+⏳ **LIVE APP (planyr.io), SIGNED IN, ON A SAVED STITCH** `Blocker: auth` + `Blocker: real-data`
+
+### V10609 — B208962 (the Review URL lands somewhere with doors on it). `Blocker: real-data`
+
+The chrome itself is proven headless (e2e: module tabs visible from inside Stitch, ‹ Exit Stitch works, a module tab navigates out) and those three fail on the old build. What needs his account is the LANDING — `#/markup` only resumes into Stitch when his last document reviewed was a stitch, which is a saved-state condition this sandbox has no way to reproduce. On **planyr.io**, signed in:
+
+- **(a) GO TO planyr.io/#/markup** — the URL that landed you in the full-screen room. Confirm you now see the logo, the Dashboard/project breadcrumb and the Site / Schedule / Review / Library / Notes tabs, whether it resumes into Stitch or into the single sheet.
+- **(b) IF IT RESUMES INTO STITCH, THE EXIT IS OBVIOUS.** Confirm there is a **‹ Exit Stitch** button and that pressing it puts you in the ordinary single-sheet Review view.
+- **(c) THE TABS WORK FROM IN THERE.** From Stitch, click Site — confirm you actually leave Review.
+- **(d) THE BREADCRUMB STILL SWITCHES PROJECTS** from inside Stitch.
+- **(e) YOUR STITCH IS STILL SAVING.** The stitcher keeps its own save badge in its toolbar (the header's is deliberately blank in this mode, because it would otherwise report the single-sheet review's state). Confirm the badge in the stitch toolbar behaves as it did.
+
+⏳ **LIVE APP (planyr.io), SIGNED IN** `Blocker: real-data`
+
+### V10610 — B208965 (the "Opening…" toast, on the drawing that produced it). `Blocker: real-data`
+
+Driven headless and passing (the chip reaches count 0 after a real sheet switch, the sheet's computed opacity reaches exactly 1, no error chip is left behind), and it times out on the old build — so the fix is real on a synthetic set. It parks anyway because his report is on a specific real drawing and a specific sheet, and the failing path is a render that throws or never becomes ready, which a clean synthetic PDF does not do. On **planyr.io**, signed in:
+
+- **(a) OPEN "2026.06.23 Grand Port - Architectural" and go to A227** — the exact case. Confirm the "Opening A227…" tag disappears once the sheet is up.
+- **(b) THE SHEET IS NOT LEFT GREYED.** This is the half your report didn't mention: the same stuck state also held the drawing at about a third brightness. Confirm the sheet looks fully solid, not washed out.
+- **(c) PAGE THROUGH TEN SHEETS QUICKLY** with the arrow keys and confirm no tag is left behind on any of them.
+- **(d) IF A SHEET GENUINELY WON'T DRAW, YOU GET TOLD.** You should see an amber warning naming the sheet — clickable to dismiss — instead of a progress message that never finishes. If you never see this, that's fine; it means nothing failed.
+
+⏳ **LIVE APP (planyr.io), SIGNED IN, ON GRAND PORT ARCHITECTURAL** `Blocker: real-data`
+
+### V10611 — B208966 (the zoom control is where you can see it). `Blocker: real-data`
+
+**The real, reproduced fault is the missing CONTROL, and it is fixed.** Measured on the real app: the tool rail held **1,294 px of content in a 536–796 px box** at 1440×900, 1280×720 and 1512×640 alike, so the zoom block sat **539 px below the visible bottom** of the rail's own scroll, in a narrow column with no scrollbar affordance. That is why there was no zoom control anywhere in that mode. It is now pinned in a footer outside the scroll, and the e2e guard fails by name on the old build.
+
+**⚠ ABOUT THE "WHEEL DOES NOTHING" HALF — DO NOT TREAT IT AS A FINDING, AND DO NOT ANSWER IT AS A QUESTION.** That half was **reported by the assistant, not by the owner, and by a method that cannot support it**: it was driven through browser automation, which dispatches a synthetic scroll rather than a real wheel event with the `deltaMode` and modifier state a zoom handler reads. Driven wheel events zoom correctly here in every position and state tried — sheet centre, over the mat, at the viewport corner, with a drawing tool armed, with Takeoff open, after a module round-trip, and after the exact Stitch → single-sheet round-trip — and **no code path was found that disables wheel zoom**. So: bad measurement in, nothing out. No cause was invented and none is claimed. The live check below is simply whether the owner's own wheel works; it is a routine confirmation, not an investigation.
+
+On **planyr.io**, signed in, with a drawing open in the ordinary Review view:
+
+- **(a) THE ZOOM CONTROL IS VISIBLE** without scrolling anything — a small **Zoom** block at the bottom of the right-hand tool strip: a percentage, **In**, **Out**, **Fit**, **Page**. This is the fix. Confirm you can see it the moment a drawing is open.
+- **(b) PRESSING IN AND OUT CHANGES THE PICTURE**, and the percentage next to them tracks it.
+- **(c) "PAGE" IS THE RESET** — it should put the whole sheet back in the window.
+- **(d) YOUR MOUSE WHEEL ZOOMS.** Put the pointer over the drawing and scroll. It should zoom, toward wherever the pointer is. If it does — which is what is expected — nothing further is owed. If it genuinely does not, that is a NEW report, from a real wheel for the first time, and it re-opens B208966 with the browser you were using noted.
+- **(e) NOTHING ELSE MOVED.** Confirm the drawing tools above the Zoom block are all still reachable in that strip.
+
+⏳ **LIVE APP (planyr.io), SIGNED IN, WITH A DRAWING OPEN** `Blocker: real-data`
 ### V11216 — Bain, on his own machine, with his own plan (B209568). `Blocker: real-data`
 **What was verified HERE, headless, this session — and it is most of the item.** `ui-audit/raster-arms.mjs` was driven under `xvfb` at **dpr 2.15, 1× CPU, with tiles that actually decode**: six arms across **two independent batteries (4 reps + 6 reps, 60 runs, 0 suppressed)**, interleaved, with verdicts taken rep-for-rep by paired sign test at a bar declared in code ahead of any result. Every arm PROVED its rasters decoded before any number was taken (`decodeFault`). Findings — semi-transparency separates on NOTHING; ¼ the pixels at the same footprint saves 6.3% of raster work against 24.3% for removing the overlay; **304 compositor layers in every arm, rasters or not, against Goose Creek's 118**; Bain 40% above Goose Creek on render work and still 20.9% above with both rasters stripped; **main-thread work identical, p = 1.000** — are recorded on B209568 and in `docs/PERF-BAIN.md`.
 **What is left, and why it genuinely cannot be done from here.** Three things, all `real-data`:
