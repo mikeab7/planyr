@@ -152,3 +152,59 @@ export function revalidationNeed({ hasSessionCtx = false, lastCheck = null, sigN
   }
   return none;
 }
+
+/* ---------------------------------------------------------------------------------------------
+ * NEW-4 — THE CHECK IS MANUAL, AND ITS FRESHNESS IS A LIGHT (owner decision, restated 2026-08-06:
+ * "i thought we talked about doing this only manually … seems like it only needs it once after
+ * relevant elements are moved, and so maybe we just only do it manually, leave it green while
+ * elements are in the same spot, once they're moved turn it red so we know to recheck").
+ *
+ * He had decided this before and it was not carried through: B860 kept an automatic LOAD-kind pass
+ * and B1349 then measured it landing in the middle of the first few seconds after opening a plan.
+ * The pass now runs ONLY when he asks for it, and the app's job is to say whether the answer on
+ * screen is still about the drawing on screen.
+ *
+ * ⛔ THE STALENESS KEY IS DELIBERATELY LOOSE, and that is the owner's own reading. It is the SAME
+ * signature the fetch has always been keyed on — active parcels, the site area, the georeference,
+ * and the fill/pond envelope (`drainElsSig`, i.e. FM_FILL_TYPES + ponds) — so moving a car park,
+ * renaming the plan or nudging a road does NOT turn the light red. Only the things that genuinely
+ * change the answer do. A light that cries wolf on every edit is a light he would learn to ignore,
+ * which is worse than no light.
+ *
+ * Four states, never three, because "never checked" and "checked and still valid" are different
+ * facts and collapsing them is how a blank reads as an all-clear:
+ *   "unchecked" — nothing has ever run for this plan. NOT a pass and NOT a failure.
+ *   "fresh"     — a check exists and the elements that feed it are where they were. GREEN.
+ *   "stale"     — a check exists and one of them moved, or the drawing outgrew what was
+ *                 fetched. RED, with the reason.
+ *   "checking"  — a run is in flight.
+ * Pure. */
+export const FRESHNESS_REASONS = {
+  "moved": "elements that affect this have moved since the last check",
+  "env-exit": "the drawing now reaches outside the area that was checked",
+  "anchor-moved": "the fill has moved away from where it was checked",
+  "ground-moved": "the parcel has moved away from where it was checked",
+};
+
+export function factsFreshness({ hasSessionCtx = false, lastCheck = null, sigNow = "", busy = false, bboxNow = null, anchorNow = null, groundNow = null } = {}) {
+  if (busy) return { state: "checking", reason: null, note: null };
+  // "Checked" means a live run this session OR a remembered one — the same ONE truth the header's
+  // floodChecked uses, so the light and the numbers can never disagree about whether facts exist.
+  if (!hasSessionCtx && !lastCheck) return { state: "unchecked", reason: null, note: null };
+  // A remembered check whose signature no longer matches is stale for the plainest possible
+  // reason: the parcels/fill/ponds it was computed against are not the ones on the canvas.
+  if (lastCheck && lastCheck.sig && sigNow && lastCheck.sig !== sigNow) {
+    return { state: "stale", reason: "moved", note: FRESHNESS_REASONS.moved };
+  }
+  // And the geometric half — the drawing grew past the fetched envelope, or a sampled point
+  // drifted. Reuses `fetchStaleForEdit` rather than re-deriving it, so the light can never
+  // disagree with the fetch-staleness flag the readout already carries.
+  const fetchRec = lastCheck && lastCheck.fetch;
+  if (fetchRec && bboxNow && fetchStaleForEdit(fetchRec, { bboxNow, anchorNow, groundNow })) {
+    const reason = fetchRec.env && !envelopeContains(fetchRec.env, bboxNow, ENV_TOL_FT) ? "env-exit"
+      : (anchorDriftFt(fetchRec.anchorPt, anchorNow) ?? 0) > ANCHOR_DRIFT_FT ? "anchor-moved"
+      : "ground-moved";
+    return { state: "stale", reason, note: FRESHNESS_REASONS[reason] };
+  }
+  return { state: "fresh", reason: null, note: null };
+}

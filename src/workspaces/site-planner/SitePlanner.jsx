@@ -229,7 +229,7 @@ import { rankLedgerMoves, BERM_MAX_RAISE_FT } from "./lib/ledgerBalancer.js";
 // strings (heading names its ledger; buildability + over-provision ride the qualifier line).
 import { detentionVerdict, mitigationVerdict, overdugAcFt, overProvision } from "./lib/pondVerdict.js";
 import { pondEncumbranceConflicts } from "./lib/corridorConflicts.js";
-import { envelopeOf, revalidationNeed, fetchStaleForEdit, FETCH_TTL_MS, canonEnv, DRAIN_STUCK_MS, fetchWatchdogFired } from "./lib/factRevalidation.js";
+import { envelopeOf, revalidationNeed, fetchStaleForEdit, factsFreshness, FETCH_TTL_MS, canonEnv, DRAIN_STUCK_MS, fetchWatchdogFired } from "./lib/factRevalidation.js";
 import { bulletBarLayout, stackedBarLayout, bulletBarMarks, stackedBarMarks, stormwaterBarSpecs, ACFT_EPS } from "./lib/yieldBar.js";
 import { yieldVerdictStrip, fmtAcFt, fmtSignedAcFt, TRACE_ACFT, fmtMargin } from "./lib/yieldVerdicts.js";
 // Cowork yield review (NEW-1 … NEW-10) — the ONE per-pond stage/elevation model and the checks
@@ -2067,6 +2067,45 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     () => (cullActive ? visibleWorldRect(view, size) : null),
     [cullActive, view, size]
   );
+
+  /* ------------ NEW-2 — THE PAN ANCHOR: the view a coordinate is BAKED at ------------
+     `f2p` is `worldToScreen(view, …)`, so every element's pixel geometry used to be a function of
+     the LIVE view: a pan changed the rendered output of EVERY element and `ElNode`'s memo (B1352)
+     missed on 100% of them by construction — the measured fact B1360 was filed on.
+
+     A pan is a pure translation at constant `ppf`, and a translation composes EXACTLY, so it does
+     not have to be baked into coordinates at all. While a pan is armed the emitted geometry stays
+     pinned at the ANCHOR and the gesture writes ONE group transform instead of re-emitting ~1,200
+     host elements. Nothing about WHAT is drawn changes — no LOD gate, no stroke width, no label
+     decision and no declutter rule reads an offset, only `ppf` — so the picture is exact by
+     construction rather than by a pixel diff (B1360's own note that this increment's pixel bar
+     is free).
+
+     ⛔ `view` IS UNTOUCHED AND STAYS THE TRUTH. `p2f` (which reads the SVG's own bounding box),
+     the cull rect, the basemap registration (`tileRef`) and the `data-view-off*` harness contract
+     all keep reading it, so the pointer path, the weld and every e2e assertion are unchanged. Do
+     not "simplify" by folding the anchor into `view` — that would break the exactly-reversible
+     pan V478 proved, exactly as B1141 rule (2) says of the registration shift.
+
+     ⛔ AN EXPORT PASS BYPASSES THE ANCHOR ENTIRELY. The sheet resolves its own render view at
+     export time rather than inheriting whatever transient representation the screen is holding,
+     so a sheet built mid-gesture is identical to one built at rest. That independence is the
+     precondition for this increment, not a side effect of it — see `withFullRender`. */
+  const [panAnchor, setPanAnchor] = useState(null);
+  const panAnchored = !exportPass && !!panAnchor && panAnchor.ppf === view.ppf;
+  const rvOffX = panAnchored ? panAnchor.offX : view.offX;
+  const rvOffY = panAnchored ? panAnchor.offY : view.offY;
+  /* Value-keyed, NOT `[view]`: the whole point is that this identity survives a pan frame, which
+     is what lets `f2p` stay stable and every memoised element bail. */
+  const renderView = useMemo(() => ({ ppf: view.ppf, offX: rvOffX, offY: rvOffY }), [view.ppf, rvOffX, rvOffY]);
+  const panDx = view.offX - rvOffX, panDy = view.offY - rvOffY;
+  const panT = panDx || panDy ? `translate(${panDx} ${panDy})` : undefined;
+  /* Arm at the moment the pan passes its dead zone, from the gesture's OWN captured origin (so the
+     anchor and the `offX = ox + travel` the handler writes are one frame of reference); disarm on
+     every gesture end, which re-bakes at the settled view in one commit. A zoom re-bakes on its
+     own — `panAnchor.ppf === view.ppf` fails — so no wheel/pinch path has to know this exists. */
+  const armPanAnchor = useCallback((ppf, offX, offY) => setPanAnchor({ ppf, offX, offY }), []);
+  const disarmPanAnchor = useCallback(() => setPanAnchor((a) => (a ? null : a)), []);
   const [cursor, setCursor] = useState(null);   // {x,y} feet
   const [hoverElId, setHoverElId] = useState(null); // B226: building under the cursor (select mode, nothing selected) → preview its feature-add buttons
   const [hoverMkId, setHoverMkId] = useState(null); // B156: markup under the cursor in Select mode → pre-click hover glow (set by the markup's own pointer enter/leave, so it matches what a click grabs)
@@ -4301,7 +4340,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   /* ------------ coordinate transforms ------------ */
   // Feet<->screen via the shared viewport engine (B329). { ppf, offX, offY } maps to the
   // engine's { scale, tx, ty }; the math is identical to the old inline form (unit-tested).
-  const f2p = useCallback((p) => worldToScreen({ scale: view.ppf, tx: view.offX, ty: view.offY }, p), [view]);
+  /* NEW-2 — `renderView`, not `view`: while a pan is armed this is the ANCHOR, so `f2p` keeps its
+     identity across the gesture and the pan lands as one group transform. Everything that maps
+     screen → world (`p2f`, `p2fStatic`) still reads the live `view`; see the pan-anchor block. */
+  const f2p = useCallback((p) => worldToScreen({ scale: renderView.ppf, tx: renderView.offX, ty: renderView.offY }, p), [renderView]);
+  /* NEW-2 — `f2p` at the LIVE view rather than the anchor. For screen-space chrome that is placed
+     through feet but sits OUTSIDE the translated feet-space group, and so cannot ride the pan
+     delta: the print crop, whose dim mask hugs the canvas edges while its frame tracks the plan.
+     Identity churns per pan frame by design; it has no memoised consumers. */
+  const f2pLive = useCallback((p) => worldToScreen({ scale: view.ppf, tx: view.offX, ty: view.offY }, p), [view]);
   // E2E/self-audit hook (same `window.__PLANYR_E2E` gate as the geo-map hook above; never runs in
   // production). Lets a headless harness park the viewport on an EXACT world point at an EXACT
   // scale, so a junction screenshot is reproducible instead of "wheel-scroll and hope".
@@ -4669,6 +4716,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // (VIEWPORT-STABLE (a): the surface must neither jump nor flash when a panel changes its edge.)
       const d = drag.current;
       if (d && d.mode === "pan" && typeof d.ox === "number") d.ox -= delta;
+      // NEW-2 — the anchor is a copy of that same captured origin, so it has to be rebased by the
+      // same delta or the group transform would carry the panel's width as a permanent offset.
+      setPanAnchor((a) => (a ? { ...a, offX: a.offX - delta } : a));
     }
     // These deps are intentional re-measure TRIGGERS (the body reads only refs, so exhaustive-deps
     // is satisfied by any set): re-run whenever something that can move the canvas's left edge changes.
@@ -4808,6 +4858,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     capturePidRef.current = null;
     cancelActiveMove(); // a drag-move torn down without a clean pointer-up reverts to pre-drag (B315); no-op otherwise
     drag.current = null;
+    disarmPanAnchor(); // NEW-2 — re-bake at the settled view; a torn-down pan must not leave a live group transform
     setPanning(false);
     setMarquee(null);
     setMkRect(null);
@@ -6531,6 +6582,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // deselect still jumps by the panel width on the first move past the threshold — (a) above is
       // the actual fix, and this rides alongside it, never instead of it.
       if (!d.panArmed && Math.hypot(e.clientX - d.sx, e.clientY - d.sy) <= PARCEL_CLICK_SLOP_PX) return;
+      // NEW-2 — pin the coordinates at the gesture's OWN captured origin the moment it arms, so
+      // everything from here to pointer-up is one group transform instead of ~1,200 re-emitted
+      // nodes. Batches into the same commit as the setView below. See the pan-anchor block.
+      if (!d.panArmed) armPanAnchor(view.ppf, d.ox, d.oy);
       d.panArmed = true;
       setView((v) => ({ ...v, offX: d.ox + (e.clientX - d.sx), offY: d.oy + (e.clientY - d.sy) }));
       return;
@@ -6878,6 +6933,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // pending. Commit it SYNCHRONOUSLY first: everything below (and flushElems at the end) must
     // see the settled geometry, never a canvas one move short of where the finger let go.
     flushFrameJobs();
+    disarmPanAnchor(); // NEW-2 — the gesture is over; re-bake coordinates at the settled view (a no-op if no pan armed)
     const d = drag.current;
     if (d && d.mode === "marquee") {
       // Crossing/touch box-select via the shared selection model (B569/B570) — one box-test for
@@ -9664,12 +9720,29 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // B874 30 s race) + cached per location. Failure isolation: an outage reads state
       // "failed" (→ grade fallback), NEVER a fabricated value. Layer 17 → estimated 1% BFE;
       // layer 21 → the 0.2% (500-yr) WSE that fills the currently-blank field off Fort Bend.
+      /* ⛔ NEW-4(d) — "Also would be great to reduce how long that check takes." The three
+       * point-samplers below were STARTED one after another because they were WRITTEN one after
+       * another: MAAPnext was nested inside EBFE's block and the screening study followed both, so
+       * an unstudied-Zone-A site in Harris paid three bounded round trips end to end when none of
+       * the three depends on any other — every one of them samples the SAME `bfePt`.
+       * The fix is deliberately the smallest one that is provably equivalent: START the promises
+       * here and `await` them exactly where they were awaited before. Not one guard, assignment,
+       * `tok` check or failure branch below moves, so there is no reordering to reason about — a
+       * promise simply begins running when it is created. `.catch(() => {})` on a SEPARATE handle
+       * marks each rejection handled, because a `tok` supersede can return before the await and an
+       * un-awaited rejection would otherwise surface as an unhandled one. */
+      const zoneAUnstudied = (floodGeo.zones || []).some((z) => z.unstudiedA && z.zone === "A");
+      const inHarris = (ctx?.authority?.jurisdiction?.county || []).some((c) => /harris/i.test(String(c)));
+      const [ptLat, ptLng] = feetToLatLng(bfePt, origin.lat, origin.lon);
+      const ebfeP = zoneAUnstudied ? sampleEbfePoint(ptLat, ptLng) : null;
+      const maapP = zoneAUnstudied && inHarris ? sampleMaapnextWse(ptLat, ptLng) : null;
+      if (ebfeP) ebfeP.catch(() => {});
+      if (maapP) maapP.catch(() => {});
       floodGeo.ebfe = null;
       floodGeo.ebfeFlags = { state: "not-applicable" };
-      if ((floodGeo.zones || []).some((z) => z.unstudiedA && z.zone === "A")) {
-        const [eLat, eLng] = feetToLatLng(bfePt, origin.lat, origin.lon);
+      if (zoneAUnstudied) {
         try {
-          const e = await sampleEbfePoint(eLat, eLng);
+          const e = await ebfeP;
           const covered = e && (e.bfe1pctFt != null || e.wse02Ft != null);
           floodGeo.ebfe = covered ? { bfe1pctFt: e.bfe1pctFt ?? null, wse02Ft: e.wse02Ft ?? null, source: "fema-ebfe" } : null;
           floodGeo.ebfeFlags = { state: covered ? "loaded" : "empty" };
@@ -9683,10 +9756,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         // the sampler is a no-op until they're filled; wired now so Harris activates by config.
         floodGeo.maapnext = null;
         floodGeo.maapnextFlags = { state: "not-applicable" };
-        if ((ctx?.authority?.jurisdiction?.county || []).some((c) => /harris/i.test(String(c)))) {
-          const [mLat, mLng] = feetToLatLng(bfePt, origin.lat, origin.lon);
+        if (inHarris) {
           try {
-            const m = await sampleMaapnextWse(mLat, mLng);
+            const m = await maapP;
             const covered = m && (m.wse1pctFt != null || m.wse02Ft != null);
             floodGeo.maapnext = covered ? { wse1pctFt: m.wse1pctFt ?? null, wse02Ft: m.wse02Ft ?? null, source: "hcfcd-maapnext" } : null;
             floodGeo.maapnextFlags = { state: covered ? "loaded" : (m ? "empty" : "not-configured") };
@@ -9714,8 +9786,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // three extra point fetches buys anything the app doesn't already have.
       floodGeo.screeningBfe = null;
       floodGeo.screeningBfeFlags = { state: "not-applicable" };
-      if ((floodGeo.zones || []).some((z) => z.unstudiedA && z.zone === "A")) {
-        const [sLat, sLng] = feetToLatLng(bfePt, origin.lat, origin.lon);
+      if (zoneAUnstudied) {
+        const sLat = ptLat, sLng = ptLng;
         try {
           // The WIDE, COARSE delineation window — the SAME 3DEP sampler as the site DEM, a
           // different extent (a site-envelope grid would delineate a few acres of a basin that
@@ -10743,8 +10815,21 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // a retry loop, never blocks editing), and skipped while the tab is hidden
   // (multi-writer care: a background tab must not fight the active one; the lastCheck
   // writes stay sig-keyed + JSON-guarded, so a duplicate write is idempotent).
-  // settings.drainage.autoFacts === false opts out (the headless legacy seeds use it).
-  const drainAutoEnabled = (settings.drainage?.autoFacts !== false) && !!origin && drainActive.length > 0;
+  /* ⛔ NEW-4 — THE FACTS PASS IS MANUAL, AND THIS LINE IS WHERE THAT IS TRUE. Owner decision,
+     restated 2026-08-06: "i thought we talked about doing this only manually". `autoFacts` was
+     OPT-OUT (`!== false`), so every plan ran a GIS pull plus a bare-earth DEM grid on open —
+     B1349 measured that pass dragging `terrainLayers` onto the boot path and B1431 priced it at
+     roughly half a second of a seven-second boot. It is now OPT-IN (`=== true`), which is the
+     whole of amendment (a): with nothing set, `drainAutoEnabled` is false, `revalidationNeed`
+     returns need:false, the 1,200 ms timer never arms, the 4,000 ms idle ceiling never exists,
+     and nothing at all is fetched when a plan is opened.
+     Everything downstream of this flag — the B874 watchdogs, the one-attempt-per-key guard, the
+     armed/stalled terminal states — is KEPT, not deleted: it is the bounding that makes a manual
+     run safe too, and deleting a guard because its trigger moved is how the class comes back. The
+     freshness LIGHT below is computed independently of this flag, because "is the answer on screen
+     still about the drawing on screen" is a question that has to be answered whether or not
+     anything is allowed to fetch. */
+  const drainAutoEnabled = (settings.drainage?.autoFacts === true) && !!origin && drainActive.length > 0;
   const drainAutoAttempts = useRef(new Set());
   const drainAutoLastAt = useRef(0);
   // B874 (edit-path recurrence) — the refresh WATCHDOG. `drainBusyStartRef` stamps when the current
@@ -10763,7 +10848,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // UNKNOWN rule then only applies to CURRENT geometry. It self-heals on the next fetch (flash).
   const drainLastGoodMitRef = useRef(null);
   const drainFactsNow = (() => {
-    if (!drainAutoEnabled) return { bboxNow: null, anchorNow: null, groundNow: null };
+    /* NEW-4 — gated on GEOMETRY, not on `drainAutoEnabled`. These three are the inputs to the
+       freshness light as well as to the (now opt-in) auto pass, and the light has to work with
+       auto off — which is every plan. */
+    if (!origin || !drainActive.length) return { bboxNow: null, anchorNow: null, groundNow: null };
     const pts = [];
     const fillPts = [];
     for (const p of drainActive) for (const pt of p.points) pts.push(pt);
@@ -10838,6 +10926,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   //   • armed            — a refetch is wanted and its one attempt hasn't fired/been consumed yet.
   // A wanted refetch whose single attempt is spent while nothing is in flight is STALLED — a
   // terminal state that offers ↻ Re-check, never an endless spinner.
+  /* NEW-4 — THE LIGHT. Computed on every render, independently of whether anything is allowed to
+     fetch, from the SAME signature the fetch has always been keyed on. Green while the parcels,
+     the fill and the ponds are where they were when the check ran; red once one of them moves;
+     and a distinct "never checked" that is neither. See lib/factRevalidation.js → factsFreshness
+     for why the key is deliberately loose and why there are four states rather than three. */
+  const drainFreshness = factsFreshness({
+    hasSessionCtx: !!drainReadCtx,
+    lastCheck: settings.drainage?.lastCheck || null,
+    sigNow: drainSigNow,
+    busy: !!drainCtx?.busy,
+    ...drainFactsNow,
+  });
   const drainAutoInFlight = !!(drainCtx?.busy && drainCtx?.auto);
   const drainAutoAttemptSpent = drainReval.need && drainAutoAttempts.current.has(drainReval.key);
   const drainAutoRefreshing = drainAutoEnabled && (drainAutoInFlight || (drainReval.need && !drainAutoAttemptSpent && !drainCtx?.busy));
@@ -12240,6 +12340,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     autoRefreshing: drainAutoRefreshing,
     autoStalled: drainAutoStalled, // B874 — a wanted refetch whose one attempt is spent + not in flight (terminal, offer ↻)
     autoEnabled: drainAutoEnabled,
+    /* NEW-4 — the green/red light. `state` is one of unchecked | fresh | stale | checking, and
+       `note` is the one short sentence that says WHY it is red. The readout renders this INSTEAD
+       of the old auto-refresh spinner copy, so the panel gains no lines (PANEL-BREVITY). */
+    freshness: drainFreshness,
     // NEW-19 — ONE source of truth for "have flood facts been ESTABLISHED?" A live fetch
     // (floodGeo loaded) OR a remembered/restored check (drainViewCtx.checkedAt) both count.
     // The header keys its checked-state off THIS, so it can never say "not checked" over the
@@ -17972,6 +18076,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           <svg ref={svgRef} data-testid="planner-canvas" width="100%" height="100%" viewBox={`0 0 ${size.w} ${size.h}`} role="application" aria-label="Site plan canvas"
             data-view-offx={view.offX} data-view-offy={view.offY} data-view-ppf={view.ppf}
             data-reg-dx={regShift.dx} data-reg-dy={regShift.dy}
+            data-pan-dx={panDx} data-pan-dy={panDy}
             style={{ position: "relative", zIndex: 1, transform: (regShift.dx || regShift.dy) ? `translate(${regShift.dx}px, ${regShift.dy}px)` : undefined, background: origin ? "transparent" : PAL.paper, display: "block", touchAction: "none", userSelect: "none", WebkitUserSelect: "none", cursor: spacePan ? (panning ? "grabbing" : "grab") : identifyMode ? ADD_CURSOR : (attachFor || alignFor || traceMode || pobMode || routeMode || xsecMode || ovCalib) ? "crosshair" : (tool === "select" || tool === "pan" || printMode) ? (panning ? "grabbing" : "grab") : "crosshair" }}
             onMouseDown={(e) => {
               // Don't cancel the default action when the mousedown lands on an inline text
@@ -18047,8 +18152,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
 
             {!(origin && basemapOn) && <g data-export="skip">{gridLines()}</g>}
 
-            {/* scaled feet space */}
-            <g>
+            {/* Scaled feet space. NEW-2 — `transform` here is the LIVE PAN DELTA: while a pan is
+                armed the geometry below is emitted at the anchor and the gesture writes this ONE
+                attribute instead of re-emitting every host element. It is undefined at rest and on
+                every export pass, so nothing outside a live pan sees a transform at all. */}
+            <g transform={panT}>
               {/* aerial underlay (drawn beneath everything) — hidden until you
                   click a parcel or toggle it on, so it doesn't fill the canvas by default */}
               {showAerial && underlay && !(origin && basemapOn) && (() => {
@@ -18975,10 +19083,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 or hide behind the status bar. The export still composites its own
                 frame-anchored copy via buildSheetFurnitureSvg. */}
 
-            {/* print-frame crop overlay (screen space) */}
+            {/* print-frame crop overlay (screen space). NEW-2 — `f2pLive`, not `f2p`: this group is
+                OUTSIDE the translated feet space and its dim mask hugs the canvas edges, so it is
+                positioned at the live view and never carries the pan delta. */}
             {printMode && printFrame && (() => {
-              const a = f2p({ x: printFrame.cx - printFrame.wFt / 2, y: printFrame.cy - printFrame.hFt / 2 });
-              const b = f2p({ x: printFrame.cx + printFrame.wFt / 2, y: printFrame.cy + printFrame.hFt / 2 });
+              const a = f2pLive({ x: printFrame.cx - printFrame.wFt / 2, y: printFrame.cy - printFrame.hFt / 2 });
+              const b = f2pLive({ x: printFrame.cx + printFrame.wFt / 2, y: printFrame.cy + printFrame.hFt / 2 });
               const fx = Math.min(a.x, b.x), fy = Math.min(a.y, b.y), fw = Math.abs(b.x - a.x), fh = Math.abs(b.y - a.y);
               const HS = 9;
               const corners = [[-1, -1], [1, -1], [1, 1], [-1, 1]];
@@ -23518,19 +23628,33 @@ function renderElPx(el, f2p, isSel, tool, settings, startMoveEl, onElDouble, nb,
           const ay = tl.y + startF * ppf, ah = (endF - startF) * ppf;
           parts.push(<rect key={`db${s}`} data-dock-apron x={tl.x + bx} y={ay} width={Dpx} height={ah} fill="#9aa3b0" fillOpacity={0.9} stroke="#5b6470" strokeWidth={1} />);
         }
-        /* NEW-2 — THE DOOR LEAVES DELIBERATELY DO **NOT** COLLAPSE, and this is the measurement
-         * that decided it rather than a judgement call. Folding the N leaf <rect>s into the N
-         * subpaths of one <path> — the same transformation that makes the stall striping above
-         * byte-identical — shifts the picture here by up to 23/255 on 0.02–0.41% of canvas
-         * pixels (ui-audit/verify-stall-lod-parity.mjs, four zoom rungs). That is 424 nodes left
-         * on the table on the owner's plan, knowingly, because the constraint is "visually
-         * identical or it does not ship" and this is not identical.
-         * ⚠ THE CAUSE IS **NOT** THE SEMI-TRANSPARENT FILL — that was the recorded explanation
-         * until 2026-07-31 and it is refuted: with both arms forced fully opaque the difference
-         * does not move. It is that Chromium does not rasterise a <rect> and a rectangular
-         * <path> to the same antialiased edge, at ANY zoom, folded or not. The full split lives
-         * next to `stallStripesExplicit` in lib/labelLayout.js and on B1350; the instrument is
-         * ui-audit/diagnose-dock-leaf-fold.mjs. Do not try a third time without new information. */
+        /* ⛔ NEW-5 — THE DOOR LEAVES STILL DO NOT FOLD, AND THIS IS THE THIRD MEASUREMENT, NOT THE
+         * THIRD OPINION. B1350 rejected the fold twice under B1345's byte-identity bar. The owner
+         * retired that bar on 2026-08-06 and replaced it with PERCEPTUAL-PARITY (/CLAUDE.md) —
+         * "imperceptible at working zoom" — precisely so a difference like this one could be judged
+         * on whether he can SEE it rather than on whether the file matches. So the fold was built,
+         * armed, and measured again against the NEW bar, on two builds differing only in the gate:
+         *
+         *   ppf    nodes          perceived ΔE00 (bar 1.0)
+         *   0.02   940 → 516      2.188
+         *   0.10   976 → 552      1.568
+         *   0.35   1213 → 789     1.749      <- working zoom
+         *   1.20   1560 → 1332    1.196
+         *   3.00   980 → 980      byte-identical (gate off — the control)
+         *
+         * It recovers exactly the 424 nodes B1350 named, and it FAILS at every armed rung. The
+         * reason it fails is the reason PR #921 already established and this run confirms: N
+         * 95%-opacity <rect>s each fill-then-stroke, while one <path> fills every subpath and THEN
+         * strokes them, and at these zooms a door run is a band of overlapping sub-pixel marks
+         * where that ordering is a real change of picture, not an antialiasing seam. Opacity was
+         * separately tested and is innocent (both arms opaque: the difference does not move).
+         * ⛔ The bar was NOT moved to make this pass. The one modelling parameter the verdict turns
+         * on is PERCEIVED_ARCMIN (6 — the half-period at the contrast-sensitivity peak; 12 would
+         * roughly halve every number above and this would clear). It was chosen at the strict end
+         * BEFORE this was measured and deliberately left alone AFTER. That is an owner call with a
+         * price of 424 nodes on it, and it is on B1350 and OWNER-TODO — not a judgement to make
+         * here. The mechanism is ready; do not re-derive it, and do not try a fourth time without
+         * either that decision or a Chromium that rasterises the two primitives alike. */
         doors.forEach((cF, i) => {
           if (horiz) {
             const by = s === "bottom" ? h - Dpx : 0;
@@ -25872,9 +25996,23 @@ function YieldPanel({
           // amber while a verdict is blocked loading (state D). v3 B3 — an unknown age reads
           // "Flood data: not checked" (never a bare "Flood data"); a "·" separates the ↻.
           <span onClick={(e) => e.stopPropagation()} style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 10.5, color: verdictLoading ? Y.warnText : Y.muted, whiteSpace: "nowrap", flex: "none" }}>
+            {/* NEW-4 — THE LIGHT (owner: "leave it green while elements are in the same spot, once
+                they're moved turn it red so we know to recheck"). One dot, no new line: green while
+                the parcels / fill / ponds the last check was computed against are where they were,
+                red once one of them moves, and nothing at all before a first check — a dot over a
+                plan that was never checked would read as a verdict. The reason rides the hover
+                (PANEL-BREVITY: a title is not visible copy), and `data-drain-freshness` lets a
+                headless check assert the state without reading colours. */}
+            {drainage.freshness && (drainage.freshness.state === "fresh" || drainage.freshness.state === "stale") && (
+              <span data-drain-freshness={drainage.freshness.state} aria-label={drainage.freshness.state === "stale" ? "Flood check is out of date" : "Flood check is up to date"}
+                title={drainage.freshness.note || "The flood check still matches what's drawn."}
+                style={{ color: drainage.freshness.state === "stale" ? Y.dangerText : "var(--success-text)", fontSize: 9, lineHeight: 1, flex: "none" }}>●</span>
+            )}
             {/* NEW-20(a) — while a fetch is in flight the line says so ("checking…") instead of an
-                unchanging "not checked", and the ↻ spins + disables so the click is never silent. */}
-            <span>{drainRefreshing ? "Flood data: checking…" : !drainage.floodChecked ? "Flood data: not checked" : floodAgeMs != null ? `Flood data ${formatAge(floodAgeMs)}` : "Flood data: checked"}</span>
+                unchanging "not checked", and the ↻ spins + disables so the click is never silent.
+                NEW-4 — a STALE check says so instead of quoting an age: "3d ago" is true and useless
+                when the answer no longer describes the drawing. It REPLACES the age, never joins it. */}
+            <span>{drainRefreshing ? "Flood data: checking…" : !drainage.floodChecked ? "Flood data: not checked" : drainage.freshness?.state === "stale" ? "Flood data: re-check" : floodAgeMs != null ? `Flood data ${formatAge(floodAgeMs)}` : "Flood data: checked"}</span>
             <span aria-hidden="true" style={{ color: Y.faint }}>·</span>
             <button type="button" onClick={drainRefreshing ? undefined : drainage.onCheck} disabled={drainRefreshing} aria-busy={drainRefreshing} title={drainRefreshing ? "Re-checking the flood data…" : "Re-pull the GIS flood data for the drawn area."} style={{ border: "none", background: "none", color: verdictLoading ? Y.warnText : "var(--accent)", cursor: drainRefreshing ? "default" : "pointer", fontSize: 11, fontWeight: 700, fontFamily: "inherit", padding: 0, lineHeight: 1, display: "inline-block", animation: drainRefreshing ? "spin 0.9s linear infinite" : undefined }} aria-label="Re-check flood data">↻</button>
           </span>

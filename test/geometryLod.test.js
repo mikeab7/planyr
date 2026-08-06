@@ -78,9 +78,11 @@ describe("the wiring, guarded at the source", () => {
     expect(planner).toMatch(/carStalls\(e\.w, e\.h, cfgOf\(e\)\)\.count/);
   });
 
-  it("the dock-door leaves are NOT collapsed — that half was measured and rejected TWICE", () => {
-    // 23/255 on up to 0.41% of pixels. If a later change reintroduces the fold, this goes red and
-    // points at the measurement rather than at taste.
+  it("the dock-door leaves are NOT collapsed — measured and rejected THREE times, twice on the old bar and once on the new one", () => {
+    // If a later change reintroduces the fold, this goes red and points at the measurement rather
+    // than at taste. UPDATED 2026-08-06 (NEW-5): the fold was re-measured against the owner's new
+    // PERCEPTUAL-PARITY bar and failed at every armed rung (perceived ΔE00 1.20–2.19 against 1.0)
+    // — so it stays out, and the numbers, not the verdict, are what this guard keeps on the record.
     expect(planner).not.toMatch(/rectsPath/);
     expect(labels).not.toMatch(/dockLeavesExplicit/);
     /* NEW-4 (2026-07-31) — the CORRECTED cause has to stay next to the gate, because the wrong one
@@ -88,6 +90,13 @@ describe("the wiring, guarded at the source", () => {
      * backdrop trick that cannot work. The refutation is one line: fold both arms fully opaque and
      * the difference does not move. What actually blocks it is <rect> → <path> itself. */
     expect(labels, "the corrected reason must stay on the record next to the gate").toMatch(/OPAQUE/);
-    expect(labels, "and it must name the primitive, not the opacity").toMatch(/rasterise a rect and a\s*\n?\s*\*?\s*rectangular path|<rect> → <path>/);
+    expect(labels, "and it must name the primitive, not the opacity").toMatch(/rasterise a rect and a\s*\n?\s*\*?\s*rectangular path|rasterises a <rect> and a rectangular <path>/);
+    /* NEW-5 — the THIRD measurement has to stay on the record too, with the number that decides it.
+     * Without it a fourth attempt reads "rejected on byte-identity, and that bar is gone" and
+     * re-derives the whole thing. The bar was not moved to fit the result; the parameter that would
+     * change the verdict is named so the decision is the owner's, not the next reader's. */
+    expect(labels, "the new bar's verdict must stay on the record").toMatch(/PERCEPTUAL-PARITY/);
+    expect(labels, "with the number it turned on").toMatch(/perceived ΔE00 1\.749/);
+    expect(labels, "and the parameter the owner would have to change").toMatch(/PERCEIVED_ARCMIN/);
   });
 });
