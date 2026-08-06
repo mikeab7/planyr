@@ -598,11 +598,20 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   box as their interior (behaviour unchanged). **Rung order is TRIED, not PREFERRED** — the chosen rung is
   whichever first FITS the measured interior, so a long shallow pond keeps the single wide line while a
   tall narrow one stacks; never "always stack". A reflowable line is authored as `{parts, sep, keep}`
-  (`footprintLabelLine`) and must never be pre-joined — a joined string has no rungs left to take.
+  and must never be pre-joined — a joined string has no rungs left to take. On a pond label the one
+  remaining reflowable line is the stage-storage line (`Holds … ac-ft usable · …′ rim to floor`); it is
+  what keeps the `stacked`/`abbrev` rungs exercised, so do not remove it without replacing that coverage.
+  `pondLabelText.js` — **what the pond MAP label SAYS: its name, then a bare acreage, and nothing else**
+  (NEW-1, owner 2026-08-06 — "get rid of footprint and get rid of square feet, leave the acreage"). This
+  deliberately **overrides PR-Q/O4's "no bare acreage" rule for this one line**; O4 still governs the panel
+  headers and the parcel badge, where it was actually load-bearing. Read that module's header before
+  "restoring" the old `footprint … ac · … sf` form. The pond INSPECTOR is untouched and keeps its full
+  Water area / Berm ring / Land take split.
   Guards: the repo-root `test/` suites **labelFitLadder** (the invariant, over a battery of hostile shapes,
-  plus a source guard that the ring/`mustLabel` keys still reach `layoutLabels`) and **pondLabelFit** (the
-  real Goose Creek / Tsakiris / Bain rings), plus the ui-audit harness **verify-pond-label-fit** (the real
-  plan, a zoom sweep, and the exported sheet — PDF-PARITY).
+  plus a source guard that the ring/`mustLabel` keys still reach `layoutLabels`), **pondLabelFit** (the
+  real Goose Creek / Tsakiris / Bain rings) and **pondLabelText** (the label's wording, driving the real
+  builder), plus the ui-audit harness **verify-pond-label-fit** (the real plan, a zoom sweep, the rendered
+  label text read back off the DOM, and the exported sheet — PDF-PARITY).
   `calloutLayout.js` — pure text-box/callout box geometry: auto-size or wrap-to-width (B913).
 - **Parcel-chrome declutter trio (NEW-1/NEW-2/NEW-3) — the FIXED-SIZE sibling of the label engine above.**
   `labelLayout` reflows labels; these three govern the chrome that CANNOT reflow, whose count is set by how

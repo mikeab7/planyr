@@ -82,11 +82,36 @@ describe("mintVerdict — the gate's decision (red on an early or stale mint, gr
     expect(v.offenders[0]).toEqual({ id: "B1145", kind: "taken", where: "planyr-peers/claude/other-session" });
   });
 
-  it("RED: an id that is free today but sits UNDER the claimed mark — minted against a stale view", () => {
+  // NEW-2 (2026-08-06) — this case used to be RED, and that is precisely what took the repository
+  // down. `below the claimed high-water mark` never proved a collision; its only remedy was to
+  // renumber upward, which raised the mark for every other in-flight branch. Seven PRs, none
+  // mergeable, one PR's ids moved six times, and the mark hit B25005 against a main max of B1449.
+  // An unclaimed id is now GREEN, whatever some other branch happened to pick.
+  it("GREEN: an id that is free today but sits under the claimed mark — the ratchet is gone", () => {
     const v = mintVerdict({ ...base, claimedMax: 1150, added: [1144] });
+    expect(v.ok).toBe(true);
+    expect(v.offenders).toEqual([]);
+  });
+
+  it("an unclaimed id OUTSIDE this branch's block is an advisory, never a merge blocker", () => {
+    const v = mintVerdict({ ...base, claimedMax: 1150, added: [1144], block: { lo: 1456, hi: 1471 } });
+    expect(v.ok).toBe(true); // still mergeable — the grandfather path for the seven blocked PRs
+    expect(v.offenders).toEqual([]);
+    expect(v.advisories[0]).toMatchObject({ id: "B1144", kind: "outside" });
+  });
+
+  it("an id INSIDE this branch's block raises nothing at all", () => {
+    const v = mintVerdict({ ...base, claimedMax: 1150, added: [1460], block: { lo: 1456, hi: 1471 } });
+    expect(v.ok).toBe(true);
+    expect(v.advisories).toEqual([]);
+  });
+
+  it("a TAKEN id stays fatal even when it sits inside this branch's block", () => {
+    // The strength that matters is unchanged: a proven, present collision still fails the build.
+    const v = mintVerdict({ ...base, added: [1460], block: { lo: 1456, hi: 1471 },
+      peerOwners: new Map([[1460, "planyr-peers/claude/other-session"]]) });
     expect(v.ok).toBe(false);
-    expect(v.offenders[0].kind).toBe("below");
-    expect(v.nextFree).toBe(1151);
+    expect(v.offenders[0].kind).toBe("taken");
   });
 
   it("GAPS ARE LEGAL — B1140 established that skipping numbers costs nothing, so only `> max` is required", () => {
@@ -107,8 +132,8 @@ describe("mintVerdict — the gate's decision (red on an early or stale mint, gr
     expect(mintVerdict({ ...base, added }).ok).toBe(true);
   });
 
-  it("reports EVERY offender, in order — a multi-mint dispatch renumbers once, not one id per pass", () => {
-    const v = mintVerdict({ ...base, claimedMax: 1145, added: [1145, 1143, 1146] });
+  it("reports EVERY taken offender, in order — a multi-mint dispatch renumbers once, not one id per pass", () => {
+    const v = mintVerdict({ ...base, claimedMax: 1145, added: [1145, 1143, 1146], peerOwners: new Map([[1145, "planyr-peers/claude/other"]]) });
     expect(v.offenders.map((o) => o.id)).toEqual(["B1143", "B1145"]);
     expect(v.nextFree).toBe(1146);
   });

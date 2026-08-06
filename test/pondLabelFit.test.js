@@ -12,6 +12,7 @@ import { test, assert } from "vitest";
 import { readFileSync } from "node:fs";
 import { layoutLabels, boxOf } from "../src/workspaces/site-planner/lib/labelLayout.js";
 import { interiorFitter, labelForms, LADDER_RUNGS } from "../src/workspaces/site-planner/lib/labelFitLadder.js";
+import { pondAreaLabelLine } from "../src/workspaces/site-planner/lib/pondLabelText.js";
 
 const FX = JSON.parse(readFileSync(new URL("./fixtures/gooseCreekPonds.json", import.meta.url)));
 
@@ -25,18 +26,16 @@ const bbox = (p) => { let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -In
 // The SitePlanner's own label metrics (SitePlanner.jsx :11784) at a given px-per-foot.
 const metrics = (ppf) => { const ls = Math.max(0.34, Math.min(1, ppf / 0.45)); const fs = 11 * ls; return { fs, lh: 14.5 * ls, charW: fs * 0.6 }; };
 
-// Build the label candidate for one pond exactly as SitePlanner.jsx :11887 does.
-function pondCand(ring, ppf, { stacked = true } = {}) {
+// Build the label candidate for one pond exactly as SitePlanner.jsx does.
+// NEW-1 — the area line is now the bare acreage, straight from the SHIPPED builder, so this
+// fixture cannot drift from the app's own label text.
+function pondCand(ring, ppf) {
   const area = polyArea(ring), c = centroid(ring), b = bbox(ring);
   const m = metrics(ppf);
   return {
     id: "pond",
     cx: c.x * ppf, cy: c.y * ppf,     // screen px with zero pan offset
-    lines: [
-      "Detention Pond",
-      // PR-Q/O4's single wide line: acreage and square footage side by side.
-      { parts: [`footprint ${f2(area / SQFT_PER_ACRE)} ac`, `${f0(area)} sf`], sep: " · ", keep: 1, stack: stacked },
-    ],
+    lines: ["Detention Pond", pondAreaLabelLine(area)],
     lh: m.lh, charW: m.charW,
     halfW: ((b.x1 - b.x0) / 2) * ppf, halfH: ((b.y1 - b.y0) / 2) * ppf,
     ring, ringOrigin: c, ringPpf: ppf,
@@ -177,15 +176,19 @@ test("labelForms walks inline → stacked → abbreviated, and never empties the
   assert.deepEqual(labelForms(["Building 3", "166,240 sf"]).map((f) => f.rung), ["inline"]);
 });
 
-test("NORTHERN pond — the label now sits INSIDE the outline (stacked), not outside", () => {
+test("NORTHERN pond — the label sits INSIDE the outline, and the trim buys it the INLINE rung", () => {
+  // NEW-1 follow-up. Before the label trim this pond could only fit by STACKING
+  // ("Detention Pond" / "footprint 6.11 ac" / "266,354 sf") — three lines, and at some zooms it
+  // leadered outside instead. With the area line down to "6.11 ac" the whole label fits on the
+  // widest rung, unreflowed. This is the assertion that records the rung actually moving.
   const ppf = WORKING_PPF;
   const cand = pondCand(FX.northPond.points, ppf);
   const out = layoutLabels([cand], {});
   const p = out.get("pond");
   assert.ok(p, "north pond must be labelled");
   assert.equal(p.leader, null, "north pond label must no longer be leadered outside");
-  assert.ok(p.rung === "stacked" || p.rung === "abbrev",
-    `expected the stacked/abbreviated rung for a narrow pond, got ${p.rung}`);
+  assert.equal(p.rung, "inline", `the trimmed label should need no reflow at working zoom, got ${p.rung}`);
+  assert.deepEqual(p.lines, ["Detention Pond", "6.11 ac"], "and it keeps BOTH facts — name and acreage");
   // Every corner of the committed box is inside the real ring.
   const fit = interiorFitter(FX.northPond.points);
   const c = centroid(FX.northPond.points);
@@ -229,23 +232,52 @@ test("INVARIANT — a fit failure alone can never produce no label (NEW-2 guard)
   }
 });
 
+// NEW-1 — the pond's REMAINING reflowable line, exactly as SitePlanner authors it: the
+// stage-storage line that appears once the contour tier reveals. After the area-line trim this is
+// the pond label's only multi-atom line, so it is what keeps the ladder's stacked/abbrev rungs
+// exercised — which is why the aspect test below drives it rather than the (now single-atom) area
+// line. If this line is ever removed, the rungs go untested, not merely unused.
+// A pond narrow enough that the storage line cannot ride inline, wide enough that it still fits
+// once stacked — i.e. the shape class the stacked rung exists for. 420 × 500 ft, a perfectly
+// ordinary detention basin, and the same 210,000 sf as the wide-and-shallow ring below.
+const TALL_RING = [{ x: 0, y: 0 }, { x: 420, y: 0 }, { x: 420, y: 500 }, { x: 0, y: 500 }];
+
+const pondCandWithHolds = (ring, ppf) => {
+  const c = pondCand(ring, ppf);
+  return { ...c, lines: [...c.lines, { parts: ["Holds 12.4 ac-ft usable", "8.0′ rim to floor"], sep: " · ", keep: 1 }] };
+};
+
 test("ASPECT-AWARE — a long THIN pond keeps the single line rather than stacking", () => {
   // 1400 ft wide × 150 ft tall: stacking is narrower but taller, and taller is what this
   // shape has no room for. The ladder must pick by MEASURED fit, not by always preferring
   // the stack. (The owner's fix, applied blindly, would have broken exactly this case.)
   const ring = [{ x: 0, y: 0 }, { x: 1400, y: 0 }, { x: 1400, y: 150 }, { x: 0, y: 150 }];
   const ppf = WORKING_PPF;
-  const cand = pondCand(ring, ppf);
-  const out = layoutLabels([cand], {});
-  const p = out.get("pond");
+  const p = layoutLabels([pondCandWithHolds(ring, ppf)], {}).get("pond");
   assert.ok(p, "long thin pond must be labelled");
   assert.equal(p.rung, "inline", "a wide, shallow pond must keep the single-line form");
-  assert.equal(p.lines.length, 2);
-  // And a tall NARROW pond of the same area takes the stack instead.
-  const tall = [{ x: 0, y: 0 }, { x: 260, y: 0 }, { x: 260, y: 900 }, { x: 0, y: 900 }];
-  const pt = layoutLabels([pondCand(tall, ppf)], {}).get("pond");
+  // And a tall NARROW pond of the SAME area (420 × 500 = 210,000 sf) takes the stack instead.
+  const pt = layoutLabels([pondCandWithHolds(TALL_RING, ppf)], {}).get("pond");
   assert.ok(pt, "tall narrow pond must be labelled");
   assert.ok(pt.rung !== "inline", "a tall narrow pond must reflow rather than keep the wide line");
+});
+
+test("NEW-1 — the stacked rung is still REACHABLE after the trim, and still needed", () => {
+  // The owner's explicit instruction: a shorter label must not quietly retire a rung. Two ponds
+  // that still need one, so this is not a rung kept for its own sake.
+  const ppf = WORKING_PPF;
+
+  // (a) the stage-storage line, on a pond too narrow to carry it inline.
+  const holds = layoutLabels([pondCandWithHolds(TALL_RING, ppf)], {}).get("pond");
+  assert.ok(["stacked", "abbrev"].includes(holds.rung),
+    `the multi-atom storage line must still reflow; got ${holds.rung}`);
+
+  // (b) a LONG pond NAME — the case the owner named. The name itself is one atom and cannot be
+  //     broken, so what has to survive is that a long name is still never dropped or truncated.
+  const long = pondCand([{ x: 0, y: 0 }, { x: 260, y: 0 }, { x: 260, y: 900 }, { x: 0, y: 900 }], ppf);
+  const named = layoutLabels([{ ...long, lines: ["Detention + Mitigation Pond", long.lines[1]] }], {}).get("pond");
+  assert.ok(named, "a long pond name is never left unlabelled");
+  assert.ok(named.lines[0].startsWith("Detention + Mitigation"), "and the name itself is never truncated");
 });
 
 test("LADDER_RUNGS is the one ordered vocabulary", () => {
