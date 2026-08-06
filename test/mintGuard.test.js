@@ -18,7 +18,6 @@ import { mintVerdict, announceVerdict, idsNamedIn } from "../scripts/check-mint.
 import {
   assessFreshness, headingIdsIn, selectPeerRefs,
   DEFAULT_MAX_FETCH_AGE_S, DEFAULT_PEER_DAYS, PEER_NS,
-  reservedBlock, assignSlots, idsFromBlock, blockBase,
 } from "../scripts/next-id.mjs";
 
 describe("freshness — `--against-main` must PROVE the ref it trusts is current (defect 3)", () => {
@@ -74,41 +73,59 @@ describe("mintVerdict — the gate's decision (red on an early or stale mint, gr
     expect(v.nextFree).toBe(1144);
   });
 
-  /* ⛔ THE NEXT TWO USED TO BE RED AND ARE NOW WARNINGS (B36051, owner decision 2026-08-06). Kept
-   * and INVERTED rather than deleted, because the reason matters: neither was ever a collision, and
-   * failing them deadlocked the repo. Measured with seven PRs open — the claimed mark ratcheted
-   * B3,010 → B200,119 in an hour as each rejected session re-minted to `mark + 1`, main did not
-   * move once in ninety minutes, and two branches independently landed on B100002. Only `main` can
-   * actually take a number, so only `main` is a hard failure. */
-  it("WARNS, does not fail: the id is held by an UNMERGED peer branch — that branch has taken nothing yet", () => {
+  /* ⛔ ADVISORY, NOT RED (B36051, owner decision 2026-08-06, verbatim: *"a number is taken only if
+   * main has it. A guess made from stale information about an unmerged branch is not a collision
+   * and must not fail a build."*). Kept and INVERTED rather than deleted, because the reason is the
+   * point: an unmerged branch has taken nothing — it may be renumbered, rebased or abandoned, and
+   * whoever merges SECOND renumbers. The blocks make an overlap rare in the first place. */
+  it("ADVISORY, not fatal: the id is held by an UNMERGED peer branch — that branch has taken nothing", () => {
     const v = mintVerdict({
       ...base, claimedMax: 1145, added: [1145],
       peerOwners: new Map([[1145, "planyr-peers/claude/other-session"]]),
     });
     expect(v.ok).toBe(true);
     expect(v.offenders).toEqual([]);
-    // Still NAMED — the session is worth knowing about, it just is not a build failure.
-    expect(v.warnings[0]).toEqual({ id: "B1145", kind: "peer-taken", where: "planyr-peers/claude/other-session" });
+    // Still NAMED — worth knowing about, just never a build failure.
+    expect(v.advisories[0]).toEqual({ id: "B1145", kind: "peer-held", where: "planyr-peers/claude/other-session" });
   });
 
-  it("WARNS, does not fail: an id free today that sits UNDER the claimed mark", () => {
+  // NEW-2 (2026-08-06) — this case used to be RED, and that is precisely what took the repository
+  // down. `below the claimed high-water mark` never proved a collision; its only remedy was to
+  // renumber upward, which raised the mark for every other in-flight branch. Seven PRs, none
+  // mergeable, one PR's ids moved six times, and the mark hit B25005 against a main max of B1449.
+  // An unclaimed id is now GREEN, whatever some other branch happened to pick.
+  it("GREEN: an id that is free today but sits under the claimed mark — the ratchet is gone", () => {
     const v = mintVerdict({ ...base, claimedMax: 1150, added: [1144] });
     expect(v.ok).toBe(true);
     expect(v.offenders).toEqual([]);
-    expect(v.warnings[0].kind).toBe("below");
   });
 
-  it("STILL RED, and this is the case that must never soften: main already has the number", () => {
-    // The one true collision. Two headings, one number, guaranteed the moment this merges.
-    const v = mintVerdict({ ...base, claimedMax: 99999, added: [1143] });
-    expect(v.ok).toBe(false);
-    expect(v.offenders).toEqual([{ id: "B1143", kind: "taken", where: "origin/main" }]);
+  it("an unclaimed id OUTSIDE this branch's block is an advisory, never a merge blocker", () => {
+    const v = mintVerdict({ ...base, claimedMax: 1150, added: [1144], block: { lo: 1456, hi: 1471 } });
+    expect(v.ok).toBe(true); // still mergeable — the grandfather path for the seven blocked PRs
+    expect(v.offenders).toEqual([]);
+    expect(v.advisories[0]).toMatchObject({ id: "B1144", kind: "outside" });
   });
 
-  it("an id outside this branch's reserved block is a NOTE, not a failure", () => {
-    const v = mintVerdict({ ...base, added: [1144], reservation: { start: 2000, end: 2024 } });
+  it("an id INSIDE this branch's block raises nothing at all", () => {
+    const v = mintVerdict({ ...base, claimedMax: 1150, added: [1460], block: { lo: 1456, hi: 1471 } });
     expect(v.ok).toBe(true);
-    expect(v.warnings[0]).toMatchObject({ id: "B1144", kind: "off-block" });
+    expect(v.advisories).toEqual([]);
+  });
+
+  it("an id ON MAIN stays fatal even when it sits inside this branch's block", () => {
+    // The strength that matters is unchanged: a proven, present collision still fails the build.
+    // This is now the ONLY fatal case, and it must never soften.
+    const v = mintVerdict({ ...base, added: [1143], block: { lo: 1140, hi: 1155 } });
+    expect(v.ok).toBe(false);
+    expect(v.offenders[0]).toEqual({ id: "B1143", kind: "taken", where: "origin/main" });
+  });
+
+  it("a peer-held id inside the block is still only an advisory", () => {
+    const v = mintVerdict({ ...base, added: [1460], block: { lo: 1456, hi: 1471 },
+      peerOwners: new Map([[1460, "planyr-peers/claude/other-session"]]) });
+    expect(v.ok).toBe(true);
+    expect(v.advisories[0].kind).toBe("peer-held");
   });
 
   it("GAPS ARE LEGAL — B1140 established that skipping numbers costs nothing, so only `> max` is required", () => {
@@ -129,66 +146,11 @@ describe("mintVerdict — the gate's decision (red on an early or stale mint, gr
     expect(mintVerdict({ ...base, added }).ok).toBe(true);
   });
 
-  it("reports EVERY offender, in order — a multi-mint dispatch renumbers once, not one id per pass", () => {
+  it("reports EVERY taken offender, in order — a multi-mint dispatch renumbers once, not one id per pass", () => {
     const mainIds = new Set([1100, 1143, 1145]);
     const v = mintVerdict({ ...base, mainIds, claimedMax: 1145, added: [1145, 1143, 1146] });
     expect(v.offenders.map((o) => o.id)).toEqual(["B1143", "B1145"]);
     expect(v.nextFree).toBe(1146);
-  });
-});
-
-/* ═══ THE RESERVED-BLOCK ALLOCATOR — what actually stops the race (B36051) ══════════════════ */
-describe("reserved blocks — each branch mints from its own range, off MAIN's max alone", () => {
-  it("THE ANTI-RATCHET PROPERTY: a peer claiming a huge id cannot move our block", () => {
-    // This is the whole fix in one assertion. Under `max + 1`, a peer at B200,119 dragged every
-    // other session up with it. A block is a function of main's max and the branch NAME, so a peer
-    // pushing any number at all — 200,119 or 2 million — leaves our range exactly where it was.
-    const a = reservedBlock("claude/my-branch", ["claude/peer"], 1449);
-    const b = reservedBlock("claude/my-branch", ["claude/peer"], 1449);
-    expect(a).toEqual(b);
-    expect(a.start).toBeGreaterThan(1449);
-  });
-
-  it("the base moves only when MAIN moves — which is the one thing that really takes numbers", () => {
-    const before = reservedBlock("claude/x", [], 1449).start;
-    const after = reservedBlock("claude/x", [], 1600).start;
-    expect(after).toBeGreaterThan(before);
-  });
-
-  it("two different branches get DISJOINT blocks", () => {
-    const names = ["claude/alpha", "claude/beta", "claude/gamma", "claude/delta"];
-    const blocks = names.map((n) => reservedBlock(n, names.filter((x) => x !== n), 1449));
-    for (let i = 0; i < blocks.length; i++)
-      for (let j = i + 1; j < blocks.length; j++)
-        expect(blocks[i].start === blocks[j].start).toBe(false);
-  });
-
-  it("slot assignment is ORDER-INDEPENDENT, so every session computes the same answer", () => {
-    const names = ["claude/alpha", "claude/beta", "claude/gamma"];
-    const one = assignSlots(names);
-    const two = assignSlots([...names].reverse());
-    for (const n of names) expect(one.get(n)).toBe(two.get(n));
-  });
-
-  it("a hash CLASH is resolved by deterministic probing, never by overlapping", () => {
-    // Forced by shrinking the slot space to 2: three branches cannot all hash apart, so the probe
-    // has to run. What must hold is that they still land in three DIFFERENT slots, or one has to
-    // be denied — and with slots exhausted the third simply reuses, which the disjointness test
-    // above proves does not happen at the real slot count.
-    const names = ["a", "b"];
-    const got = assignSlots(names, { slots: 2 });
-    expect(new Set([...got.values()]).size).toBe(2);
-  });
-
-  it("hands out the lowest free id in the block, skipping ones already used", () => {
-    const block = { start: 1450, end: 1474 };
-    expect(idsFromBlock(block, new Set([1450, 1451]), 2)).toEqual([1452, 1453]);
-  });
-
-  it("blocks are block-ALIGNED above main's max, so they never straddle a boundary", () => {
-    expect(blockBase(1449, 25)).toBe(1450);
-    expect(blockBase(1450, 25)).toBe(1475);
-    expect(blockBase(0, 25)).toBe(25);
   });
 });
 

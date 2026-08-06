@@ -30,6 +30,7 @@ import { readFileSync, existsSync, statSync, writeFileSync, rmSync } from "node:
 import { execSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
+import { ringFloor, nextFreeBlock } from "./idBlocks.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, "..");
@@ -307,85 +308,6 @@ export function selfBranchNames(repo, env = process.env) {
   return [...names];
 }
 
-/* ═══ RESERVED BLOCKS — why "highest + 1" cannot work with more than one session ═══════════
- *
- * MEASURED 2026-08-06, seven PRs open at once. Every session that lost the gate re-minted to
- * `mark + 1`, which RAISED the mark, which rejected the next session, which raised it again. The
- * claimed high-water mark went **B3,010 → B3,217 → B10,011 → B25,003 → B50,011 → B100,343 → B200,119
- * in about an hour**, `main` did not move once in ninety minutes, and every branch's mint was
- * outbid inside its own push→CI window. Sessions that escaped by taking a big cushion only made it
- * worse, because the next session's `mark + 1` was measured from the cushion. V numbers, which
- * nobody was re-minting, moved at a normal human pace over the same window — so this was the
- * allocator, not the workload.
- *
- * It also produced the exact defect it exists to prevent: two branches independently landed on
- * **B100002**. A shared counter read concurrently is a race by construction; adding cushions to a
- * race just makes the numbers bigger.
- *
- * ⛔ THE FIX IS TO STOP SHARING THE COUNTER. Each branch gets its own disjoint BLOCK of ids:
- *
- *   base  = the next block boundary above **main's own max** — main ALONE, never peers. This is
- *           the whole anti-ratchet property: pushing ids cannot move anybody else's base, so there
- *           is nothing to leapfrog. The base moves only when main actually merges something.
- *   slot  = a hash of the branch NAME, so a branch computes the same block every time without
- *           coordinating with anyone, and two different branches land in different blocks.
- *
- * Slot clashes are resolved by DETERMINISTIC PROBING over the sorted set of live branch names, so
- * every session that can see the same peers computes the same assignment and agrees. A session
- * that cannot see a peer may still clash — that is a WARNING, never a build failure, because an
- * unmerged branch holding a number is not a collision. Only `main` can actually take an id.
- */
-
-/** Ids per branch block. Small on purpose: a dispatch mints one or two, never twenty-five. */
-export const ID_BLOCK_SIZE = 25;
-/** Distinct blocks. 2048 × 25 keeps every id within ~51k of main's max while making a hash clash
- *  rare enough that the deterministic probe below almost never has to run. */
-export const ID_BLOCK_SLOTS = 2048;
-
-/** FNV-1a, 32-bit. Chosen because it is four lines and needs no dependency — the hash only has to
- *  spread branch names across slots, it is not protecting anything. */
-export function fnv1a32(str) {
-  let h = 0x811c9dc5;
-  for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; }
-  return h >>> 0;
-}
-
-/** The first block boundary strictly above `mainMax`. Derived from MAIN ONLY — see the note above. */
-export function blockBase(mainMax, size = ID_BLOCK_SIZE) {
-  return Math.ceil((Number(mainMax) + 1) / size) * size;
-}
-
-/**
- * PURE: branch name → slot, for a whole set at once. Sorted so the result depends on the SET and
- * not on the order it was discovered in; probing on clash so two names that hash alike still get
- * different blocks, and every session computes the same answer for the same set.
- */
-export function assignSlots(branchNames, { slots = ID_BLOCK_SLOTS } = {}) {
-  const bySlot = new Map(), out = new Map();
-  for (const name of [...new Set(branchNames.filter(Boolean))].sort()) {
-    let slot = fnv1a32(name) % slots;
-    for (let i = 0; i < slots && bySlot.has(slot); i++) slot = (slot + 1) % slots;
-    bySlot.set(slot, name);
-    out.set(name, slot);
-  }
-  return out;
-}
-
-/** PURE: this branch's reserved id range. `[start, end]` inclusive. */
-export function reservedBlock(branch, peerBranches = [], mainMax = 0, { size = ID_BLOCK_SIZE, slots = ID_BLOCK_SLOTS } = {}) {
-  const slot = assignSlots([branch, ...peerBranches], { slots }).get(branch);
-  const base = blockBase(mainMax, size);
-  const start = base + slot * size;
-  return { branch, slot, base, size, start, end: start + size - 1 };
-}
-
-/** PURE: the next `count` ids to hand out from a block, skipping anything already used. */
-export function idsFromBlock(block, used = new Set(), count = 1) {
-  const out = [];
-  for (let n = block.start; n <= block.end && out.length < count; n++) if (!used.has(n)) out.push(n);
-  return out;
-}
-
 /** Drop peer refs already CONTAINED in HEAD — an older push of this same branch, or anything
  * merged into us. Name-independent, so it catches the detached-HEAD case even if the env vars are
  * absent. Ancestry is unavailable in some shallow clones; there the name filter carries it. */
@@ -474,7 +396,6 @@ export function computeNextIdsStrict(repo = REPO, {
   }
 
   let releasePeers = () => {};
-  let peerRefsSeen = [];
   if (peers) {
     if (fetch) {
       const f = fetchPeers(repo, { exclude: currentBranch ? [currentBranch] : selfBranchNames(repo) });
@@ -485,7 +406,6 @@ export function computeNextIdsStrict(repo = REPO, {
     if (!rows.ok) return { ok: false, refusal: { code: "peer-list-failed", message: rows.reason } };
     const exclude = currentBranch ? [currentBranch] : selfBranchNames(repo);
     const refs = dropContainedRefs(repo, selectPeerRefs(rows.rows, { days: peerDays, now, exclude }));
-    peerRefsSeen = refs;
     for (const [letter, files] of [["B", B_FILES], ["V", V_FILES]]) {
       const c = peerClaims(repo, files, letter, { refs, baseMax: out[letter].main });
       if (!c.ok) return { ok: false, refusal: { code: "peer-read-failed", message: c.reason } };
@@ -500,22 +420,30 @@ export function computeNextIdsStrict(repo = REPO, {
 
   const maxB = out.B.max, maxV = out.V.max;
 
-  /* RESERVED BLOCK (B36050). The number handed out comes from THIS BRANCH'S OWN BLOCK, computed
-   * off main's max alone — not from the shared `max + 1` counter that ratcheted itself to 200,119
-   * in an hour. `maxB`/`maxV` are still reported, because "what is the highest anyone holds" is
-   * genuinely useful context; they are simply no longer what you mint from. */
+  // NEW-3 — hand out ids from THIS BRANCH'S RESERVED BLOCK rather than from `max + 1`.
+  //
+  // `max + 1` is what made two concurrent sessions collide: both fetch the same fresh main, both
+  // compute the same maximum, both are handed the same number. Reproduced in a two-clone lab and
+  // recorded in CLAUDE.md. A block is a pure function of the branch name, so the same view of the
+  // world now yields DIFFERENT numbers to different branches — the collision cannot form.
+  //
+  // `nextB`/`nextV` (the `max + 1` answer) are preserved for callers and tests that predate this,
+  // and because they remain the honest "highest assigned" report. `blockB`/`blockV` are what a
+  // session should mint from.
   const branch = currentBranch || selfBranchNames(repo)[0] || "";
-  const peerNames = (peerRefsSeen || []).map((r) => r.name.split("/").slice(1).join("/"));
   const blocks = {};
-  for (const [letter, files] of [["B", B_FILES], ["V", V_FILES]]) {
-    const block = reservedBlock(branch, peerNames, out[letter].main);
-    const used = new Set([...(out[letter].peerIds || []), ...headingIdsIn(
-      files.map((f) => join(repo, f)).filter(existsSync).map((p) => readFileSync(p, "utf8")), letter)]);
-    blocks[letter] = { ...block, free: idsFromBlock(block, used, 8) };
+  for (const [letter, key] of [["B", "B"], ["V", "V"]]) {
+    const claimed = new Set([
+      ...(out[key].peerIds || []),
+      ...Array.from({ length: out[key].main }, (_, i) => i + 1), // everything at or below main's max
+    ]);
+    blocks[letter] = nextFreeBlock(branch, { floor: ringFloor(out[key].main), claimed });
   }
-  const nextB = blocks.B.free[0] ?? maxB + 1;
-  const nextV = blocks.V.free[0] ?? maxV + 1;
-  return { ok: true, maxB, maxV, nextB, nextV, provenance, detail: out, blocks, branch };
+
+  return {
+    ok: true, maxB, maxV, nextB: maxB + 1, nextV: maxV + 1, provenance, detail: out,
+    branch, blockB: blocks.B, blockV: blocks.V,
+  };
 }
 
 /* Kept for callers/tests that predate the strict path (B779 shape): local ∪ origin/main only, and
@@ -559,16 +487,22 @@ export function main(argv, io = { out: process.stdout, err: process.stderr }) {
   }
   const { nextB, nextV, maxB, maxV } = res;
 
+  // NEW-3 — mint from THIS BRANCH'S BLOCK when we have one (only `--against-main` reads the peer
+  // set needed to compute it). `max + 1` is what handed two concurrent sessions the same number.
+  const mintB = res.blockB ? res.blockB.lo : nextB;
+  const mintV = res.blockV ? res.blockV.lo : nextV;
+
   if (json) {
     io.out.write(JSON.stringify({
-      ok: true, nextB, nextV, maxB, maxV,
+      ok: true, nextB, nextV, maxB, maxV, mintB, mintV,
+      block: res.blockB ? { B: res.blockB, V: res.blockV, branch: res.branch } : null,
       againstMain, provenance: res.provenance ?? null,
       claimants: res.detail ? { B: res.detail.B.claimants, V: res.detail.V.claimants } : null,
     }) + "\n");
     return 0;
   }
-  if (argv.includes("--b")) { io.out.write(`B${nextB}\n`); return 0; }
-  if (argv.includes("--v")) { io.out.write(`V${nextV}\n`); return 0; }
+  if (argv.includes("--b")) { io.out.write(`B${mintB}\n`); return 0; }
+  if (argv.includes("--v")) { io.out.write(`V${mintV}\n`); return 0; }
 
   let banner = "";
   if (againstMain) {
@@ -576,18 +510,20 @@ export function main(argv, io = { out: process.stdout, err: process.stderr }) {
     banner = `  [origin/main ${p.sha.slice(0, 7)}, fetched ${p.fetchedSecondsAgo}s ago` +
       (p.peers ? ` · ${p.peers.scanned} in-flight branches` : ` · PEERS NOT SCANNED`) + `]`;
   }
-  io.out.write(
-    `Next free → B${nextB} · V${nextV}   (highest assigned: B${maxB} / V${maxV})${banner}\n` +
-      `Mint from here. Multi-mint runs consecutively (e.g. B${nextB}, B${nextB + 1}). ` +
-      `Don't grep the archives — this is the whole answer.\n`,
-  );
-  // The RESERVED BLOCK (B36050): say which block this branch owns and why the number is not
-  // "highest + 1" any more, so the first person to notice the difference does not treat it as a bug.
-  if (res.blocks) {
+  if (res.blockB) {
     io.out.write(
-      `  · reserved block for "${res.branch}" → B${res.blocks.B.start}–B${res.blocks.B.end} · ` +
-        `V${res.blocks.V.start}–V${res.blocks.V.end} (slot ${res.blocks.B.slot}).\n` +
-        `    Blocks are derived from MAIN's max alone, so another session pushing ids cannot move yours.\n`,
+      `Your block → B${res.blockB.lo}–B${res.blockB.hi} · V${res.blockV.lo}–V${res.blockV.hi}` +
+        `   (branch ${res.branch})${banner}\n` +
+        `Mint from B${mintB} · V${mintV}, running consecutively (e.g. B${mintB}, B${mintB + 1}). ` +
+        `Highest assigned anywhere: B${maxB} / V${maxV}.\n` +
+        `This block is yours alone — reserved by branch name, so a session minting at the same moment\n` +
+        `cannot draw the same number. Stay inside it and you will never need to renumber (NEW-3).\n`,
+    );
+  } else {
+    io.out.write(
+      `Next free → B${nextB} · V${nextV}   (highest assigned: B${maxB} / V${maxV})${banner}\n` +
+        `Mint from here. Multi-mint runs consecutively (e.g. B${nextB}, B${nextB + 1}). ` +
+        `Don't grep the archives — this is the whole answer.\n`,
     );
   }
   // Name the sessions we just stepped around, so a collision that WAS about to happen is visible.

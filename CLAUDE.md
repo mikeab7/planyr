@@ -30,23 +30,40 @@ the always-loaded core. This merges two tracks of work: the mature **Site Planne
 > from `nextB` (e.g. B755, B756). (This finds the *number*; **DEDUPE-FIRST** below still governs
 > *whether* to mint at all — a recurrence re-opens the original B#, it doesn't take a new one.)
 >
-> **📦 THE NUMBER COMES FROM YOUR BRANCH'S RESERVED BLOCK, NOT FROM "HIGHEST + 1" (B36051, 2026-08-06).**
-> `next-id` now prints the block your branch owns — e.g. `reserved block for "claude/my-branch" →
-> B36050–B36074` — and hands out the lowest free id in it. The block is a function of **main's max
-> alone** plus a hash of your **branch name**, so *another session pushing ids can never move yours,
-> and there is nothing to leapfrog.* **⛔ Do NOT "step over" a peer's number, and do NOT take a cushion
-> above the mark — that is exactly the behaviour that broke this.** Measured with seven PRs open: every
-> rejected session re-minted to `mark + 1`, which raised the mark, which rejected the next session;
-> the claimed mark went **B3,010 → B200,119 in about an hour**, `main` did not move once in ninety
-> minutes, and the ratchet produced the very thing it exists to prevent — **two branches independently
-> landing on B100002.** If your id is inside your block and free on `main`, it ships; the mark is
-> reported as context and is no longer something to clear.
->
-> **⚖ AND THE GATE NOW FAILS ON ONE THING ONLY: `main` ALREADY HAS THE NUMBER.** That is the sole real
-> collision — two headings, one number, guaranteed on merge — and it is unchanged. *"A peer branch holds
-> it"* and *"it sits below the claimed mark"* are **advisory notes printed on a green run**, because an
-> unmerged branch has taken nothing and whoever merges second renumbers. A gate that fails a provably
-> unique id trades a false positive for a repo-wide deadlock.
+> **🧱 SUPERSEDED 2026-08-06 (B6864–B6867) — YOU NOW MINT FROM YOUR OWN RESERVED BLOCK, and the
+> high-water-mark rule that everything below describes IS GONE.** Read the rest of this section as
+> history; this paragraph is the live rule. `npm run next-id -- --against-main` prints **your block** —
+> a range reserved to your branch by name, e.g. `Your block → B6864–B6879 · V6144–V6159` — and you mint
+> from its low end. Two sessions minting at the same instant get **different blocks**, so they cannot
+> draw the same number; there is no allocator to race and none to be down (the block is a pure function
+> of the branch name). **`check-mint` now fails ONLY on a genuine collision** (`TAKEN` — someone really
+> holds that id); an id merely *below* what some other branch picked is **green**, and an id outside
+> your block is **reported, never fatal**.
+> **Why this changed:** the `BELOW` rule was a ratchet. Its only remedy was to renumber upward, which
+> raised the mark for every other in-flight branch, which then had to renumber higher still. Combined
+> with a **~30-minute lag between a push and its `build` run** (measured: PR #931 pushed 22:29:23Z,
+> build started 22:59:27Z), it produced a **livelock** on 2026-08-06: seven PRs open, none mergeable,
+> every one reading `build — Expected — Waiting for status to be reported` with **no merge control
+> available to anyone**, and one PR's ids moved six times. Main's max was B1449; the claimed mark passed
+> **B100002**. Full diagnosis, including every hypothesis that was refuted: **`docs/CI-REQUIRED-CHECK.md`**.
+> **The practical consequences for you:** (a) mint from your block and you will never need to renumber;
+> (b) **a PR showing `Expected` for the first half hour is NORMAL — wait it out, do not renumber and do
+> not nudge**; (c) gaps are still free; (d) the steel-man for the block scheme, including where it
+> concedes a real cost, is the header of `scripts/idBlocks.mjs`.
+> **⛔ AND ONE MEASURED FACT THAT CONTRADICTS THIS REPO'S NUDGE LORE (B6867): RE-RUNNING A FAILED
+> `build` DOES NOTHING FOR A PR THAT IS STALE AGAINST MAIN.** A re-run replays the merge commit the run
+> was created against — it does **not** recompute `refs/pull/<n>/merge` against main's current tip. Tried
+> on four stuck PRs the minute the fix landed; all four failed again, reproducing the OLD gate's wording
+> verbatim. **A stuck PR needs a NEW PUSH** — prefer `git fetch origin main && git merge origin/main`
+> (it also brings the corrected gate into the branch, so the pre-push hook and CI agree) over an empty
+> `Nudge CI` commit. Resolve the inevitable `BACKLOG.md` conflict by keeping both sides and renumbering
+> nothing.
+> **⚖ AMENDED (B36051, owner decision 2026-08-06): a PEER BRANCH holding your number is an ADVISORY too,
+> not a failure.** Owner, verbatim: *"a number is taken only if main has it. A guess made from stale
+> information about an unmerged branch is not a collision and must not fail a build."* That branch may be
+> renumbered, rebased or abandoned, and whoever merges SECOND renumbers — so the gate NAMES the peer and
+> lets the build through. **`origin/main` already holding the id is now the ONE fatal case**, and it is
+> untouched: two headings, one number, guaranteed the moment you merge.
 >
 > **⏱ LATE-BIND the real number — assign it as the LAST step before you push, against fresh main (B779).**
 > `next-id` reads only YOUR branch, so if you stamp a real `B###`/`V###` at the *start* of a session, a
