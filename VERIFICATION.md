@@ -192,7 +192,7 @@ What only the live repository can answer, in order:
 
 **(c) TWO CONCURRENT SESSIONS GET DISJOINT IDS, IN THE FIELD.** With two dispatches running at once, confirm `npm run next-id -- --against-main` prints two **different** blocks, and that neither renumbers. The unit test proves this over 2,000 synthetic pairs; the field is where real branch names and a real peer set are.
 
-**(d) THE SEVEN RECOVER (B6867).** For #928, #930–#935: re-trigger each and confirm `build` reports and passes. Anything still red after that is its own PR's failure and belongs to that PR, not to this item.
+**(d) THE SEVEN RECOVER (B6867).** For #928, #930–#935: push a commit to each (merging `origin/main` in is preferred — a **re-run does NOT work**, it replays the old merge commit, which was measured here and is recorded on B6867) and confirm `build` reports and passes. Anything still red after that is its own PR's failure and belongs to that PR, not to this item.
 
 **(e) THE GUARD ACTUALLY FIRES IN CI, not just in vitest.** On a throwaway branch, rename `build.yml`'s job and confirm the required build goes **red** on `required-check-audit` with the name-drift message — rather than merging quietly and wedging the next seven PRs.
 

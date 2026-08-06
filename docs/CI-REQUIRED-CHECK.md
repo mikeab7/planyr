@@ -151,13 +151,37 @@ stable over time, so waiting out the lag produces the same answer as being fast.
 
 ## 4. Recovering a PR that is already stuck
 
-Once this fix is on `main`, a PR's next build picks it up automatically — GitHub builds
-`refs/pull/<n>/merge`, which is the PR head merged into main's **current** tip, so no rebase is
-needed to get the new gate.
+> **⚠ CORRECTED 2026-08-06, minutes after this shipped — the first version of this section was WRONG,
+> and it was tested rather than assumed, which is the only reason the error was caught.**
+>
+> It said: *"a PR's next build picks it up automatically … no rebase is needed … what is needed is one
+> re-trigger: re-run the failed `build` workflow, or push any commit."* The re-run half is false. It
+> was tried on four stuck PRs (#931, #932, #933, #934) as soon as the fix reached main, and **all four
+> failed again** — with the message `B9001 is at or below the claimed high-water mark B209509`, which
+> is wording the corrected gate **no longer contains**. Proof, not inference: the re-run executed the
+> OLD `check-mint.mjs`.
+>
+> **A re-run replays the merge commit the run was created against.** It does not recompute
+> `refs/pull/<n>/merge` against main's current tip, so a PR whose only problem is that main has moved
+> gets nothing from a re-run — it faithfully reproduces the old failure, which reads as "the fix
+> didn't work" when what actually happened is that the fix was never in the tree being built.
 
-What is needed is one **re-trigger**, because main moving does not itself create a PR run: re-run the
-failed `build` workflow, or push any commit. Then wait out the delivery lag before concluding
-anything — a PR showing `Expected` for the first half hour is normal and is not evidence of a fault.
+**A stuck PR needs a NEW PUSH — nothing else will do.** Any new commit on the branch causes GitHub to
+recompute the merge ref against main's current tip, and *that* build runs the corrected gate. The two
+forms that work:
+
+```
+git fetch origin main && git merge origin/main    # then push — also brings the new gate into the branch
+git commit --allow-empty -m "Rebuild against main" && git push
+```
+
+Prefer the merge: it puts the corrected `check-mint.mjs` into the branch itself, so the pre-push hook
+and CI agree. Expect a conflict in `BACKLOG.md` (main's copy moved), and resolve it by keeping both
+sides' items — **do not renumber anything to resolve it.**
+
+Then **wait out the delivery lag before concluding anything** — a PR showing `Expected` for the first
+half hour is normal and is not evidence of a fault. That sentence is the one that would have
+prevented six renumbers.
 
 Do not clear a backlog by disabling the required check or merging something whose build has not
 actually passed.
