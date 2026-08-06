@@ -15,6 +15,7 @@
     "e2e": "playwright test",
     "perf:ratchet": "node scripts/perf-ratchet.mjs",
     "perf:bundle": "node ui-audit/perf-bundle-audit.mjs",
+    "perf:interaction": "xvfb-run -a --server-args=\"-screen 0 1600x1000x24\" node ui-audit/interaction-degradation.mjs",
     "check-mint": "node scripts/check-mint.mjs",
     "hooks:install": "node scripts/install-hooks.mjs",
     "prepare": "node scripts/install-hooks.mjs"

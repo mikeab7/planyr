@@ -11,7 +11,9 @@ build or deploy.
 
 ## The speed program's instruments (B1344–B1360)
 
-Four tools, and it matters which question each one answers:
+Five tools, and it matters which question each one answers. **The axis each one varies is the
+whole point** — three of them vary how much is DRAWN or nothing at all, and one varies how many
+times the view has been MOVED, which is a different question with a different answer:
 
 - `perf-harness.mjs` — the budget run. Adds `--long-session` (B1357): the identical reference
   gestures at t=0 and after each round of a realistic session workload, with two arms
@@ -23,6 +25,15 @@ Four tools, and it matters which question each one answers:
   script / recalc-style / layout accounting with paint as a stated residual, `--profile` for a
   per-function CPU profile, `--mutate` for a page-side A/B (the drop-shadow question, B1354),
   `--open-panel` to measure with an inspector docked, and `--gesture wheel|drag|hover`.
+- `interaction-degradation.mjs` — the INTERACTION-COUNT axis, which nothing above varies. One
+  identical, **viewport-neutral** probe (pan out-and-back + wheel in-and-out) run at N = 0, 50,
+  150, 400, 1000 gestures on **unchanged content**, against an `idle` control arm that waits the
+  same wall clock and takes the same probes. Deliverable is a **per-interaction growth table** —
+  retained heap after a forced GC, renderer nodes, detached nodes (upper bound), Leaflet tiles,
+  compositor layers, raster-area proxy, live listeners/rAF/timers/observers — each with a SLOPE,
+  because a step at load and a per-gesture cost have the same endpoint delta and opposite
+  meanings. **Must run headed, under `xvfb-run`** (see `lib/frameSampling.mjs`). Decision layer in
+  `lib/interactionAxis.mjs`, unit-tested in `test/interactionAxis.test.js`.
 - `diagnose-pan-commits.mjs` — how many React commits and DOM writes ONE pan frame costs.
 - `verify-stall-lod-parity.mjs` — the pixel bar. Two builds, five zoom rungs plus the exported
   sheet, byte-identical or one unit of 255. Any render change in this program passes it first.
