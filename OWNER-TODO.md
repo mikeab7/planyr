@@ -26,8 +26,15 @@ _Last updated: 2026-07-31._
 > - **Make it a button.** Opening a plan is as light as it can be, and the stormwater panel says "not checked yet —
 >   ↻ Re-check" until you ask. Nothing is lost, but you'd press it once per new plan.
 >
-> There is no wrong answer here and nothing breaks either way — it's a taste call about what you want the first
-> few seconds after opening a plan to feel like.
+> **NEW — I've now MEASURED what it costs you, so this isn't a taste call in the dark (2026-08-06).** I built a
+> stopwatch that breaks the whole "open a plan → able to drag it" wait into named pieces, and ran it twelve times
+> with this check switched on and off, alternating, so a slow patch on the machine couldn't favour either side.
+> **Turning it off buys you about half a second of a roughly seven-second wait** — real, but small, and the two
+> sets of runs overlap. It is NOT the thing making a reload feel slow: with it switched off completely, opening a
+> plan still takes essentially as long, and looks the same at every step.
+>
+> So the choice is genuinely just taste now: half a second sooner, versus the drainage answers being there without
+> you asking. There is no wrong answer and nothing breaks either way.
 - [ ] **Tell me: leave the drainage check automatic, or turn it into a button?** One word either way and I'll do it.
 
 
