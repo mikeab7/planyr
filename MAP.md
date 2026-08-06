@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-08-06 @ `2145dc1` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-08-06 @ `fee9a01` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_432 source files mapped._
+_433 source files mapped._
 
 ## infra
 
@@ -659,6 +659,8 @@ _432 source files mapped._
   - _exports_: `addedAreaLabelPoint`, `autoContourInterval`, `bandedStorage`, `bermAsFillHeight`, `bermFillCells`, `bermFillVolume`, `contourLabelPoint`, `detentionLandTakeEstimate`, `detentionStorage`, `drawdownWarning`, `estimateFootprintSf`, `excavationVolume`, `incrementalExcavationCf`, `pointInRing`, `pondContours`, `pondPlacementCandidates`, `usablePondVolume`, `volumeBetween`
 - **`src/workspaces/site-planner/lib/pondInspectorCopy.js`** — FINAL UI SPEC Part A pond-inspector visible copy as pure data (chip vocabulary A3, collapsed-group titles/summaries, at-a-glance labels, purpose tooltips) so the chip set and word budget unit-test without a browser
   - _exports_: `POND_CHIP_DEFS`, `POND_DIMENSION_LABELS`, `POND_FLOOD_NOTES`, `POND_GROUPS`, `POND_PURPOSE_DESCRIPTOR`, `POND_PURPOSE_TOOLTIP`, `pondGroupSummary`, `pondInspectorChips`
+- **`src/workspaces/site-planner/lib/pondLabelText.js`** — the pond MAP label's area text: acreage only, no "footprint" prefix and no square footage (NEW-1, owner). `pondAreaLabelLine`, `pondAreaDeltaLine`.
+  - _exports_: `pondAreaDeltaLine`, `pondAreaLabelLine`
 - **`src/workspaces/site-planner/lib/pondLedger.js`** — Site-level pond-ledger accumulator + pond roles: folds per-pond usable/dead splits into the detention totals (unknown facts poison usable to null — never gross-as-usable) and gates which ponds' below-WSE cut credits the mitigation Provided ledger. Exports `accumulatePondLedger`, `suggestPondRole`, `effectivePondRole`, `POND_ROLES`.
   - _exports_: `accumulatePondLedger`, `allocatePondDuty`, `effectivePondRole`, `mitigationCredit`, `POND_DISPLAY_NAME`, `POND_ROLE_LABEL`, `POND_ROLES`, `pondDisplayName`, `pondDisplayNameFor`, `ROLE_SHARE`, `suggestPondRole`
 - **`src/workspaces/site-planner/lib/pondOffset.js`** — Robust inward polygon offset via clipper-lib for pond grading contours: pinch-off, basin split, max inscribed reach

@@ -112,6 +112,7 @@ const step = async (tag) => {
       leadered: label ? label.leader : null,
       rung: label ? label.rung : null,
       lines: label ? label.lines.length : 0,
+      lineTexts: label ? label.lines : null,   // NEW-1 — the painted tspans, for the label-text check
       text: label ? label.text : null,
       // Rung (d) of the ladder — an outside, leadered placement — is legitimate ONLY when the pond
       // is drawn narrower on screen than its own name, i.e. there is genuinely no interior to use.
@@ -143,6 +144,27 @@ for (const r of report) {
     console.log(`✓ ${r.tag}/${key}: rung ${s.rung}, ${s.lines} line(s), inside the outline — "${s.text}"`);
   }
 }
+
+/* ── NEW-1 (owner) — WHAT THE LABEL SAYS, read back off the rendered DOM ────────────────────
+ * "Get rid of footprint and get rid of square feet, leave the acreage." A source grep can't
+ * prove this: the label is ASSEMBLED from parts and then reflowed by the fit ladder, so the only
+ * honest check is the text the browser actually painted, at every zoom step of the sweep above.
+ * Shape: line 1 is the pond's noun, line 2 is a bare acreage, and no line anywhere carries the
+ * word "footprint" or a square-footage figure. */
+console.log("\n== NEW-1 — the pond label reads name + acreage only ==");
+const AC_ONLY = /^[\d,]+\.\d{2} ac$/;
+for (const r of report) {
+  for (const key of ["north", "south"]) {
+    const s = r[key];
+    if (!s.present) continue; // already counted as a failure above
+    const painted = (s.lineTexts || []).map((t) => t.trim());
+    if (/footprint/i.test(s.text)) { console.error(`✗ ${r.tag}/${key}: label still says "footprint" — "${s.text}"`); fail++; continue; }
+    if (/[\d,]{3,}\s*sf\b/.test(s.text)) { console.error(`✗ ${r.tag}/${key}: label still carries a square-footage figure — "${s.text}"`); fail++; continue; }
+    if (!painted.some((t) => AC_ONLY.test(t))) { console.error(`✗ ${r.tag}/${key}: no bare "N.NN ac" line found — "${s.text}"`); fail++; continue; }
+    console.log(`✓ ${r.tag}/${key}: "${painted.join("  /  ")}"`);
+  }
+}
+
 // ── PDF-PARITY: both ponds must be named on the exported sheet too ─────────────────────────
 console.log("\n== PDF-PARITY — the printed sheet names both ponds ==");
 try {
@@ -171,6 +193,12 @@ try {
     const named = (svg.match(/Detention Pond/g) || []).length;
     if (named >= 2) console.log(`✓ pdf: the sheet names both ponds (${named} pond labels in ${svg.length} bytes of sheet SVG)`);
     else { console.error(`✗ pdf: only ${named} pond label(s) reached the sheet — screen and paper have drifted`); fail++; }
+    // NEW-1 — and the sheet says the SAME thing the screen does. The trim is a change to the
+    // picture, so PDF-PARITY is not "both ponds are named" but "named the same way": the printed
+    // label must carry the acreage and must NOT have kept the old footprint/square-footage form.
+    if (/footprint\s+[\d,]/.test(svg)) { console.error("✗ pdf: the printed sheet still carries a 'footprint …' pond line — screen and paper have drifted"); fail++; }
+    else if (!/>\s*[\d,]+\.\d{2} ac\s*</.test(svg)) { console.error("✗ pdf: no bare acreage line reached the sheet"); fail++; }
+    else console.log("✓ pdf: the printed labels match the screen — acreage only, no footprint/sf");
   }
 } catch (e) { console.error(`✗ pdf: export path failed — ${e.message}`); fail++; }
 

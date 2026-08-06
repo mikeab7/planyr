@@ -31,12 +31,18 @@ describe("O3 — map storage/depth == panel/section, from one source of truth", 
 });
 
 describe("O4 — every acreage says what it measures (no bare numbers on pond map labels / headers)", () => {
-  it("the map pond-area line is labeled 'footprint'", () => {
-    // NEW-1 — the two call sites now share ONE authored line (`footprintLabelLine`), a reflowable
-    // spec the fit ladder may stack or abbreviate. The word "footprint" and both facts are intact.
-    expect(src).toContain("lines.push(footprintLabelLine(area));");
-    expect(src).toContain("lines.push(footprintLabelLine(exA));");
-    expect(src).toContain('parts: [`footprint ${f2(sf / SQFT_PER_ACRE)} ac`, `${f0(sf)} sf`]');
+  // ⚠ SUPERSEDED FOR THE MAP LABEL — NEW-1, owner, 2026-08-06. O4 asked every pond acreage to say
+  // what it measured, and on the MAP that meant "footprint 6.58 ac · 286,648 sf". The owner has
+  // overruled that for the map label alone: "get rid of footprint and get rid of square feet,
+  // leave the acreage." The disambiguation moved rather than vanished — the pond's noun sits on
+  // the line directly above, and the two assertions below (panel header, parcel badge) are where
+  // O4 was actually load-bearing, so they stay. The map label's own guard is
+  // test/pondLabelText.test.js; the rendered proof is ui-audit/verify-pond-label-fit.mjs.
+  it("the map pond-area line is the bare acreage — no 'footprint', no square feet", () => {
+    expect(src).toContain("lines.push(pondAreaLabelLine(area));");
+    expect(src).toContain("lines.push(pondAreaLabelLine(exA));");
+    expect(src.includes("footprintLabelLine")).toBe(false);
+    expect(src.includes("`footprint ${f2(sf / SQFT_PER_ACRE)} ac`")).toBe(false);
   });
   it("the panel header says 'water surface' (not the ambiguous bare 'water area')", () => {
     expect(src).toContain("ac water surface</span>");
