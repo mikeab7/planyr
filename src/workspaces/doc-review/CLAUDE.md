@@ -18,6 +18,14 @@ internals in `/docs/REFERENCE.md` (Document Review persistence section).
   auto-group/stitch/crop/calibrate pipeline (Tesseract OCR for scanned sheets). `stitchGeom.js` —
   pure stitch geometry + the align-gate classifiers (`isReferenceSet`/`alignBadgeMetrics`, B630/B632);
   `stitchDedupe.js` — collapse duplicate placed sheets (B633). `takeoff.js` — measure rollup.
+- `stitchLoadState.js` / `sheetOpenState.js` — the two "never answer a user with silence" decisions,
+  pure so they can be asserted away from pdf.js, a canvas and a clock. `stitchLoadState` is the
+  stitcher's honest status line (phase + real counts; **the old fixed "Rendering…" string could and did
+  outlive the work it named**) plus the deferred-add QUEUE: a click that lands while `loadStitch` holds
+  the canvas is remembered and replayed, never dropped by a bare early return. `sheetOpenState` is the
+  Review "Opening <sheet>…" chip's three-way decision — arrived / genuinely failed / past the backstop —
+  which replaced a bare `renderedPage !== page` whose only exit was one success line, so every bail and
+  every swallowed throw left the chip up forever AND the sheet pinned at 0.35 opacity.
 - `releaseCanvas.js` (NEW-5) — hand an offscreen canvas's backing store back once its pixels have
   been consumed. This workspace is the biggest producer of them: `pdf.js`'s `renderInto` runs on a
   throttle DURING a continuous pan, so a minute of panning used to leave hundreds of full-density

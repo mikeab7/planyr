@@ -36,17 +36,37 @@ export function RailButton({ icon, label, title, active, accent, onClick, onDoub
   );
 }
 
-export default function ToolRail({ items = [], accent = "var(--accent-review)", width = 64, style, "data-testid": testId }) {
+function renderItem(it, i, accent) {
+  if (!it) return null;
+  if (it.kind === "divider") return <div key={i} style={{ height: 1, background: "var(--border-default)", margin: "4px 4px" }} />;
+  if (it.kind === "spacer") return <div key={i} style={{ flex: 1, minHeight: 6 }} />;
+  if (it.kind === "header") return <div key={i} style={{ fontSize: 8.5, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: MUTED, textAlign: "center", padding: "3px 0 1px" }}>{it.label}</div>;
+  if (it.kind === "node") return <Fragment key={i}>{it.render}</Fragment>;
+  return <RailButton key={it.id || i} icon={it.icon} label={it.label} title={it.title} active={it.active} disabled={it.disabled} onClick={it.onClick} onDoubleClick={it.onDoubleClick} accent={accent} data-testid={it.id ? `tool-${it.id}` : undefined} />;
+}
+
+/* `footer` (NEW-7) — items that must stay REACHABLE whatever the viewport height.
+ *
+ * The rail is one `overflow-y: auto` column, and the tool list alone is taller than the rail's box
+ * at every realistic window size — measured on this app: 1,294 px of content in a 536–796 px rail
+ * across 1440×900, 1280×720 and 1512×640. Anything after a `spacer` was therefore pinned to the
+ * bottom of the SCROLL CONTENT, i.e. several hundred pixels below the fold, in a narrow column with
+ * no scrollbar affordance. The owner's report was exact: "there is no visible zoom control anywhere
+ * in that mode." Footer items live OUTSIDE the scrolling area, so they are on screen by
+ * construction rather than by luck. */
+export default function ToolRail({ items = [], footer = [], accent = "var(--accent-review)", width = 64, style, "data-testid": testId }) {
   return (
-    <div data-testid={testId} style={{ flex: "none", width, background: CHROME, borderLeft: "1px solid var(--border-default)", display: "flex", flexDirection: "column", alignItems: "stretch", gap: 2, padding: "6px 5px", overflowY: "auto", ...style }}>
-      {items.map((it, i) => {
-        if (!it) return null;
-        if (it.kind === "divider") return <div key={i} style={{ height: 1, background: "var(--border-default)", margin: "4px 4px" }} />;
-        if (it.kind === "spacer") return <div key={i} style={{ flex: 1, minHeight: 6 }} />;
-        if (it.kind === "header") return <div key={i} style={{ fontSize: 8.5, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: MUTED, textAlign: "center", padding: "3px 0 1px" }}>{it.label}</div>;
-        if (it.kind === "node") return <Fragment key={i}>{it.render}</Fragment>;
-        return <RailButton key={it.id || i} icon={it.icon} label={it.label} title={it.title} active={it.active} disabled={it.disabled} onClick={it.onClick} onDoubleClick={it.onDoubleClick} accent={accent} data-testid={it.id ? `tool-${it.id}` : undefined} />;
-      })}
+    <div data-testid={testId} style={{ flex: "none", width, background: CHROME, borderLeft: "1px solid var(--border-default)", display: "flex", flexDirection: "column", minHeight: 0, ...style }}>
+      <div data-testid={testId ? `${testId}-scroll` : undefined}
+        style={{ flex: 1, minHeight: 0, overflowY: "auto", display: "flex", flexDirection: "column", alignItems: "stretch", gap: 2, padding: "6px 5px" }}>
+        {items.map((it, i) => renderItem(it, i, accent))}
+      </div>
+      {footer.length > 0 && (
+        <div data-testid={testId ? `${testId}-footer` : undefined}
+          style={{ flex: "none", borderTop: "1px solid var(--border-default)", display: "flex", flexDirection: "column", alignItems: "stretch", gap: 2, padding: "5px 5px 6px" }}>
+          {footer.map((it, i) => renderItem(it, i, accent))}
+        </div>
+      )}
     </div>
   );
 }
