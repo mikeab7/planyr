@@ -770,11 +770,41 @@ describe("the project a notebook belongs to", () => {
      * moved to the Dashboard's group HEADING, which is the one place a project is named, and
      * an unresolved one is flagged there instead of quietly reading like a name. */
     expect(rail, "a row must not carry a project badge at all now").not.toMatch(/badge=/);
-    expect(rail).toContain("Project not loaded");
-    expect(rail, "an unresolved group is visibly not a resolved one").toMatch(/group\.resolved/);
+    /* ⛔ AMENDED (B1419 ×2). "Project not loaded" was itself the same quiet lie one layer up:
+     * it described an internal loading state, not his data. The three genuinely different
+     * situations now get three different sentences, and the middle one — a project that was
+     * DELETED — is the one he can act on. */
+    expect(rail, '"not loaded" describes our state, not his notes').not.toMatch(/Project not loaded/);
+    expect(rail).toContain("From a project you deleted");
+    expect(rail).toContain("Project names didn't load");
+    expect(rail, "the three cases are told apart by a named function, not inline guesswork").toMatch(/function groupHeading/);
     // …and a real failure is loud, with a way out.
     expect(rail).toMatch(/notes-projects-error/);
     expect(rail).toMatch(/notes-projects-retry/);
+  });
+
+  it("⛔ Click and Type lands the caret WHERE YOU CLICKED, and cleans up after itself (B1393 ×2)", () => {
+    /* The recurrence's real lesson: the old guards asserted focus and a keystroke, both of
+     * which were TRUE on the broken build. These assert the structure that makes the caret
+     * land in the right place, and the structure that stops stray clicks fattening the doc. */
+    const ed = code("components/NoteEditor.jsx");
+    // It must decide on the CONTENT's bottom edge, not the editor box's — `.ProseMirror`
+    // carries min-height, so most blank space is INSIDE it and the old guard never fired.
+    expect(ed, "the blank-space test must be against the last block, not the editor box")
+      .toMatch(/lastElementChild[\s\S]{0,200}contentBottom/);
+    expect(ed).toMatch(/const belowContent = /);
+    // Paragraphs are inserted to reach the press — the vertical placement itself.
+    expect(ed).toMatch(/insertContentAt\([\s\S]{0,80}content\)/);
+    expect(ed, "how many paragraphs comes from the measured gap, never a guess").toMatch(/gap \/ step/);
+    // Word's alignment-from-horizontal-position.
+    expect(ed).toMatch(/setTextAlign\(align\)/);
+    // …and the claim that keeps stray clicks from leaving orphans behind.
+    expect(ed).toMatch(/claimRef/);
+    expect(ed, "a claim must be released by typing, by moving the caret, and by blurring")
+      .toMatch(/editor\.on\("update"[\s\S]{0,400}editor\.on\("blur"/);
+    expect(ed).toMatch(/deleteRange\(\{ from: c\.from, to: c\.to \}\)/);
+    // …and a press ON text is still the browser's business, or word-select dies.
+    expect(ed).toMatch(/if \(el\.closest\("\.ProseMirror"\)/);
   });
 
   it("a notebook's 'Belongs to' panel offers each destination exactly once", () => {
