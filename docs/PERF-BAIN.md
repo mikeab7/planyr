@@ -126,13 +126,138 @@ false null result.
 
 ## 4. Results
 
-<!-- RESULTS -->
+**Two independent batteries, 4 reps and 6 reps, 60 runs, 0 suppressed.** Arms interleaved. Medians
+pooled across both; the paired sign test pairs rep-for-rep **within** a battery.
+
+### Pooled medians, per pan gesture (ms)
+
+| arm | render total | raster | paint | composite | layerize | main-thread work | heap | frame median |
+|---|---|---|---|---|---|---|---|---|
+| `bain` | **2772** | 2111 | 213 | 283 | 170 | 795 | 67 MB | 50.0 |
+| `opaque` (no alpha) | 2640 | 1988 | 221 | 268 | 160 | 807 | 66 MB | 66.6 |
+| `no-overlay` | 2308 | 1625 | 218 | 288 | 162 | 777 | 60 MB | 62.4 |
+| `quarter` (¼ pixels) | 2613 | 1972 | 217 | 265 | 155 | 753 | 33 MB | 50.0 |
+| `no-rasters` | 2184 | 1544 | 203 | 285 | 150 | 779 | 60 MB | 50.0 |
+| **`goose`** | **1661** | 1299 | 162 | **124** | **83** | 790 | 26 MB | 49.9 |
+
+Raster totals exceed wall-clock because raster tasks run in parallel across worker threads; they are
+comparable between arms, not readable as elapsed time.
+
+### The comparisons that separate
+
+Sign test at p ≤ 0.05, over 10 paired reps. Anything not listed did not separate.
+
+| comparison | metric | result |
+|---|---|---|
+| **Bain vs Goose Creek** | render | **CHEAPER in 9/10, median −40%** (p = 0.021) |
+| | composite | **CHEAPER in 10/10, median −56.9%** (p = 0.002) |
+| | layerize | **CHEAPER in 10/10, median −51.5%** (p = 0.002) |
+| | paint | CHEAPER in 9/10, median −25.6% (p = 0.021) |
+| | **main-thread work** | **NOT SEPARATED — 5/10, p = 1.000** |
+| **Bain's geometry alone (`no-rasters`) vs Goose Creek** | render | **CHEAPER in 9/10, median −20.9%** (p = 0.021) |
+| | composite | **CHEAPER in 10/10, median −55.6%** (p = 0.002) |
+| | layerize | **CHEAPER in 10/10, median −46.4%** (p = 0.002) |
+| **Overlay removed vs Bain** | raster | **CHEAPER in 9/10, median −24.3%** (p = 0.021) |
+| **¼ the pixels, same footprint, vs Bain** | raster | CHEAPER in 9/10, median **−6.3%** (p = 0.021) |
+| | layerize | CHEAPER in 10/10, median −7.8% (p = 0.002) |
+| **Blending removed (`opaque`) vs Bain** | *every bucket* | **NOT SEPARATED — nothing reaches p ≤ 0.05, and paint is 5/10** |
+
+The unpaired range-floor verdicts are reported by the harness alongside these and clear nothing: at
+4 reps the render floor was ±48.4%, at 6 reps ±14%. See §6 for why that estimator gets worse with
+more data and why it was left alone rather than replaced.
+
 
 ---
 
 ## 5. The findings
 
-<!-- FINDINGS -->
+### 1. Semi-transparency is not the mechanism. The hypothesis named first is dead.
+
+Forcing the overlay to **opacity 1.0** — same pixels, same footprint, alpha removed — separates on
+**nothing**. Paint is 5/10, raster 6/10, composite 7/10. Not one bucket reaches significance and the
+medians move a few per cent in a metric whose reps span more than that.
+
+The premise was reasonable: an opaque layer can be blitted, a 0.55-alpha layer must be blended with
+everything beneath it. It is simply not what is happening here, and §3 says why.
+
+### 2. Nor is pixel count. The overlay's cost tracks the AREA IT COVERS, not its resolution.
+
+`quarter` cuts both rasters to a quarter of their pixels **while holding the on-map footprint
+exactly** — decoded texture falls 17.1 MB → 4.3 MB, a 75% cut — and raster work falls **6.3%**.
+
+Set that against removing the overlay entirely, which cuts raster work **24.3%**. Three quarters of
+the texture buys you a quarter of the saving that removing it does. The cost is in rasterising the
+screen area the overlay occupies, and a 4× cheaper source image barely touches it.
+
+### 3. Because the overlay never gets its own compositor layer.
+
+**304 compositor layers with the overlay. 304 with it at a quarter of the size. 304 with it opaque.
+304 with it hidden. 304 with both rasters gone.** Identical in every arm, in every run.
+
+That single count explains findings 1 and 2 together. The overlay is not promoted to a layer of its
+own — it is painted into the main content layer, so it is re-rastered as part of that layer's tiles
+whenever they are invalidated, at the layer's resolution over the area it covers. Alpha is free
+because the blend happens inside a raster pass that was going to run anyway; source resolution is
+nearly free because the raster is at screen scale, not image scale.
+
+### 4. And most of Bain's cost is NOT the rasters at all.
+
+Bain's render work is **40% above** Goose Creek's. Strip **both rasters out of Bain** and it is still
+**20.9% above** Goose Creek — with composite work **55.6%** higher and layerize **46.4%** higher,
+both at 10/10 reps.
+
+So roughly half of the gap is the rasters and roughly half is **Bain's own scene**: 1,035 canvas
+nodes against 884, and **304 compositor layers against 118**. Nothing in this dispatch explains where
+304 layers come from. It is the largest deterministic difference between the two plans, it is
+identical across every raster arm, and it is the next thing to measure.
+
+### 5. Main-thread work is IDENTICAL on the two plans — which is why nothing here was ever found.
+
+Script + layout + style: **5 of 10 paired reps, p = 1.000.** Bain 795 ms, Goose Creek 790 ms.
+
+That is the whole story of the miss in one line. **The only cost metric this program owns cannot
+tell the two plans apart.** Every difference above lives in paint, raster, composite and layerize —
+and the un-quantised work figure is structurally blind to all four.
+
+### 6. The frame median is blind too.
+
+50.0 ms on `bain`, 49.9 on `goose`, 50.0 on `quarter` and `no-rasters` — pinned to three display
+frames. A metric whose smallest expressible step is one frame cannot resolve a 40% difference in
+render work. (The two arms reading 62–67 ms are not a finding either; they are the same
+quantisation landing on four frames.)
+
+### 7. The aerial underlay is never painted at all.
+
+`showAerial && underlay && !(origin && basemapOn)`, and `basemapSrc` initialises to `"esri"` whenever
+a plan has an origin, with no persisted preference that can turn it off. On any real plan the live
+basemap replaces the aerial, and the app says so in the References panel.
+
+So "26 MB of decoded texture" was wrong. It is **17.1 MB painted**, plus one raster whose ~384 KB
+string is read out of IndexedDB and held in React state for the whole session and never becomes a
+texture at all.
+
+### 8. The 10 MB strings are read ONCE, not per frame — and the heap shows it.
+
+The overlay-load effect selects only overlays with `(idbKey || storageKey) && !src`, so once `src` is
+filled it never re-reads. Read once, then held in React state for the session. The measured heaps
+agree: `bain` 67 MB, `quarter` (same scene, quarter-size strings) **33 MB**, `goose` (no rasters at
+all) **26 MB**.
+
+### 9. The overlay DOES ride the B1440 pan anchor.
+
+`overlayBands.below.map(renderSheetOverlay)` renders inside `<g transform={panT}>`, and
+`renderSheetOverlay` positions through `f2p`, which reads the anchored `renderView`. During an armed
+pan the overlay's `x`/`y`/`width`/`height` do not change; the group takes one transform. It is not
+re-registered per frame.
+
+### ⚠ 10. And one cost this fixture does NOT reproduce, which is a lead rather than a result.
+
+His real overlay is **page 1 of a PDF**. B749 re-rasters a PDF-backed overlay at up to 8192 px
+whenever on-screen magnification exceeds ~1.5× its base raster — gated on `overlayDocs.has(id) ||
+storageKey.endsWith(".pdf")`. The fixture's overlay is a bare image with no PDF source, so **that path
+never ran in any arm here.** It fires on **zoom**, not pan, and it is the obvious next suspect for
+"Bain gets slow when I zoom in." Nothing in this document measures it.
+
 
 ---
 
@@ -166,7 +291,7 @@ false null result.
 
 1. **His real plan.** Run the extractor, land `smr9olizi5ue` and `sms4zs8unbkg` verbatim, re-run the
    battery. This turns the geometry finding from "measured on invented coordinates" into a fact.
-2. **His machine.** Everything here is a lower bound with the network absent. `V17200` carries the
+2. **His machine.** Everything here is a lower bound with the network absent. `V20000` carries the
    signed-in check.
 3. **The compositor-layer question, on its own.** 304 layers against 118 is the largest deterministic
    difference between the two plans, it is identical across every raster arm, and nothing in this
