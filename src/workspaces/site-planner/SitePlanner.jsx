@@ -248,9 +248,23 @@ import { buildChangeSummaryRows, gapProposalNote, bermCapProposalNote } from "./
  * ONLY inside the pond inspector and the Optimize card, both reached by an explicit user action,
  * so a plain Site load has no use for it. Both call sites wrap it in one shared Suspense. */
 const PondSection = lazy(() => import("./components/PondSection.jsx"));
+/* Storage on this device (NEW-3/B1429) — the two-tier census + the safe clear-map-data action.
+ * It lives on the SITE ROUTE, not in the shared account panel or the header gear: both of those
+ * land in the entry chunk that EVERY route downloads, and even a lazy stub there measured +0.5 KB
+ * on all four routes and pushed `bundle.notesRouteJsBytes` past its ceiling in CI. Here it costs
+ * the other three routes nothing, it is reachable SIGNED OUT (which the account panel is not, and
+ * a signed-out user shares the same ~5 MB ceiling with no cloud copy to fall back on), and it sits
+ * next to Save now and Version history — the two things it explains when a save fails. */
+const StoragePanel = lazy(() => import("../../shared/storage/StoragePanel.jsx"));
 import { pondScreeningGuards } from "./lib/pondScreeningGuards.js";
 import { geometricMaxBermFt, drainageBermCapFt, bindingBermCap, bermNeedsInlets, INLETS_THROUGH_BERM_NOTE, inwardBermSplit, crestRingForBerm, EXT_BERM_SLOPE, INFLOW_HEAD_ALLOWANCE_FT } from "./lib/inwardBerm.js";
 import { gisCache } from "./lib/gisCache.js";
+/* NEW-2/NEW-3 (B1428/B1429) — the honest device-save retry lives in shared/storage/, and it is
+ * reached by DYNAMIC import on purpose. The storage panel (shared chrome on every route) imports
+ * the same two modules lazily; a static edge from here would make them a chunk BOTH pull, which
+ * lands 8.4 KB on a plain Site load and breaches the route allowlist. These paths only run when a
+ * save has already failed or the owner clicked Retry, so on-demand is also simply correct.
+ * Loaded via `loadStorageTools()` below — do not "tidy" it into a static import. */
 import { VECTOR_SOURCES, fetchCached } from "./lib/vectorLayers.js";
 import { sampleAtLatLng } from "./lib/demGrid.js";
 // B1095 — the terrain pipeline loads on demand: the site DEM grid rides the explicit
@@ -3347,6 +3361,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // free up space" banner instead of the red "at risk" one — honest about exactly where the work lives.
   const [savedToCloudOnly, setSavedToCloudOnly] = useState(false);
   const [saveNowMsg, setSaveNowMsg] = useState("");
+  const [storageOpen, setStorageOpen] = useState(false);  // NEW-3 — the on-device storage census dialog
   // True when a cloud write was REJECTED because another session advanced this project since
   // we loaded it (B314 optimistic concurrency). Distinct from cloudSaveFailed (a write that
   // didn't reach the cloud, retries on next edit): a conflict won't clear by retrying — the
@@ -3431,7 +3446,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       const missingId = wantIds.find((id) => !haveIds.has(id));
       if (!ok || got < want || missingId) {
         setLocalSaveFailed(true);
-        reportClientEvent("save-verify-failed", "on-device write did not persist", { id: siteId, want, got, ok: !!ok, missingId: missingId || null });
+        reportStorageEvent("save-verify-failed", "on-device write did not persist", { id: siteId, want, got, ok: !!ok, missingId: missingId || null });
       } else { setLocalSaveFailed(false); setSavedToCloudOnly(false); } // device can hold it again → clear both
     };
     let microT = null;
@@ -12618,10 +12633,79 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     flashWarn("You're now editing here — pulled in the latest and your changes are saving to the cloud.", 7000);
   };
   const closeHdrMenus = () => { setPlanMenu(false); setPlanDelArm(null); };
+  /* NEW-3(b)/B1429 — every storage-failure report carries the storage FACTS: usage vs quota for
+   * BOTH tiers, kept separate and labelled (`local_*` / `idb_*`), plus the per-class byte
+   * breakdown. So the next occurrence answers "which store was full, and what was in it" instead
+   * of only "a write failed" — which is the whole reason the first diagnosis of B1427 was wrong.
+   * The census is async and telemetry is fire-and-forget, so the report is sent on resolve; a
+   * census that fails still sends the bare event rather than swallowing it (LOUD-FAILURE). */
+  const reportStorageEvent = (kind, msg, extra = {}) => {
+    import("../../shared/storage/storageCensus.js")
+      .then(({ storageSnapshot, telemetryFacts }) => storageSnapshot().then((snap) => reportClientEvent(kind, msg, { ...extra, ...telemetryFacts(snap) })))
+      .catch(() => reportClientEvent(kind, msg, { ...extra, storage_census: "unavailable" }));
+  };
+  /* The reclaim tier, on demand (see the import note at the top of this file). Returns the
+   * outcome object plus its owner-facing sentence, or null if the modules can't be fetched — a
+   * stale-deploy chunk failure must degrade to "no reclaim", never to a thrown save handler. */
+  const loadStorageTools = () => Promise.all([
+    import("../../shared/storage/storageReclaim.js"),
+    import("../../shared/storage/storageCensus.js"),
+  ]).catch(() => null);
+  const reclaimAndRetryDevice = async () => {
+    const mods = await loadStorageTools();
+    if (!mods) return null;
+    const [{ reclaimThenRetry, reclaimMessage }, { formatBytes }] = mods;
+    const r = await reclaimThenRetry({
+      store: (() => { try { return typeof localStorage !== "undefined" ? localStorage : null; } catch (_) { return null; } })(),
+      cache: gisCache,
+      save: writeDeviceVerified,
+    }).catch(() => null);
+    return r ? { r, message: reclaimMessage(r, formatBytes) } : null;
+  };
+  /* The verified on-device write, extracted so the retry path (NEW-2) can re-run EXACTLY what
+   * failed rather than an approximation of it: flush the live canvas to the mirror, read it back,
+   * and require every item to have survived. Returns true iff the device really holds it. */
+  const writeDeviceVerified = () => {
+    if (!siteId) return false;
+    flushSite();
+    const back = loadSite(siteId);
+    return !!back && drawnCount(back) >= drawnCount(liveRef.current);
+  };
+  /* NEW-2/B1428 — "Retry device save" that can actually succeed.
+   *
+   * The button used to be wired straight to saveNow(), which re-ran the same write with NOTHING
+   * freed in between — so while the store was full it failed every single time, offering an action
+   * it was incapable of performing. This frees the provably re-fetchable tier first (the GIS
+   * screening cache: map layers and terrain, every byte of it one fetch away), retries, and then
+   * reports what it freed AND whether the save landed. If it still doesn't fit, it says THAT —
+   * it never drops the user back into the same banner with no new information.
+   *
+   * Nothing that lacks a rehydration source is ever touched; the proof lives in storageReclaim.js
+   * and is asserted against a raster with no cloud copy in test/storageReclaim.test.js. */
+  const retryDeviceSave = async () => {
+    closeHdrMenus();
+    if (!siteId) return;
+    setSaveNowMsg("Freeing up space on this device…");
+    const done = await reclaimAndRetryDevice();
+    if (!done) { setSaveNowMsg("Couldn't free up space just now — your work is still safe in your account."); setTimeout(() => setSaveNowMsg(""), 8000); return; }
+    const { r, message } = done;
+    setSaveNowMsg(message);
+    setTimeout(() => setSaveNowMsg(""), r.saved ? 6000 : 12000);
+    if (r.saved) {
+      setLocalSaveFailed(false); setSavedToCloudOnly(false);
+      if (isCloudActive() && !readOnlyRef.current) cloudPushWithWatchdog(siteId);
+    } else {
+      // Still doesn't fit. The work IS in the account (that is what the amber banner says), so the
+      // banner state is unchanged — but the failure is now a measured fact, not a shrug.
+      reportStorageEvent("device-save-still-full", "retry after reclaim: the plan still does not fit on this device", {
+        id: siteId, outcome: r.outcome, freed_local: r.freedLocalBytes, freed_cache: r.freedCacheBytes, removed_keys: r.removedKeys,
+      });
+    }
+  };
   // B473 — explicit, VERIFIED "Save now": write the live canvas to the device, READ IT BACK to prove it
   // persisted, push to the cloud, and show a provable "Saved ✓ N items · time" (or a loud failure).
   // Gives the owner a guaranteed save + proof rather than trusting a silent autosave.
-  const saveNow = () => {
+  const saveNow = async () => {
     closeHdrMenus();
     if (!siteId) return;
     flushSite();
@@ -12639,13 +12723,28 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // B473 — the on-device write FAILED (storage full). Don't give up: push the LIVE payload to the
     // cloud (no ~5MB cap). If it lands, the work is safe in the account even though this device can't
     // hold it — say so honestly (amber, not red). If the cloud is unreachable too, go loud.
-    reportClientEvent("save-verify-failed", "Save now: on-device write did not persist", { id: siteId, want, got });
+    reportStorageEvent("save-verify-failed", "Save now: on-device write did not persist", { id: siteId, want, got });
+    /* NEW-2/B1428 — before settling for the cloud-only story, FREE THE RE-FETCHABLE TIER AND TRY
+     * AGAIN. Under the pressure this whole item exists to fix, an explicit Save now that only
+     * re-ran the same failing write was the same dead action the amber banner's button was; a
+     * single click should exhaust the safe options. Awaited (rather than raced against the cloud
+     * push) so the two can't contend over the banner state — the reclaim is a handful of
+     * localStorage removals and an in-memory index clear, so the cloud push is delayed by
+     * milliseconds and only when the device write has ALREADY failed. */
+    const freed = await reclaimAndRetryDevice();
+    if (freed && freed.r.saved) {
+      setLocalSaveFailed(false); setSavedToCloudOnly(false);
+      if (isCloudActive() && !readOnlyRef.current) cloudPushWithWatchdog(siteId);
+      setSaveNowMsg(freed.message);
+      setTimeout(() => setSaveNowMsg(""), 6000);
+      return;
+    }
     if (isCloudActive() && !readOnlyRef.current) {
       setSaveNowMsg("Saving to your account…");
       pushModelToCloud({ id: siteId, ...metaRef.current, ...liveRef.current }).then((r) => {
         setSaveNowMsg("");
         if (r && r.ok) { setLocalSaveFailed(false); setSavedToCloudOnly(true); }
-        else { setLocalSaveFailed(true); setSavedToCloudOnly(false); reportClientEvent("save-both-failed", "Save now: device full AND cloud push failed", { id: siteId, error: (r && r.error) || "" }); }
+        else { setLocalSaveFailed(true); setSavedToCloudOnly(false); reportStorageEvent("save-both-failed", "Save now: device full AND cloud push failed", { id: siteId, error: (r && r.error) || "" }); }
       }).catch(() => { setSaveNowMsg(""); setLocalSaveFailed(true); setSavedToCloudOnly(false); });  // B507: a rejected push must clear the transient banner + surface the honest failure
     } else { setLocalSaveFailed(true); setSavedToCloudOnly(false); }
   };
@@ -15710,6 +15809,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             title="Restore an earlier automatically-saved version of this plan">
             <span aria-hidden style={{ flex: "none" }}>↺</span><span>Version history…</span>
           </button>
+          <button style={{ ...menuItem(false), marginTop: 2, display: "flex", alignItems: "center", gap: 8 }} onClick={() => { closeHdrMenus(); setStorageOpen(true); }}
+            title="How much room this app is using on this device, and what's safe to clear" data-testid="storage-menu-item">
+            <span aria-hidden style={{ flex: "none" }}>🗄</span><span>Storage on this device…</span>
+          </button>
         </AnchoredMenu>
     </div>
   );
@@ -17713,7 +17816,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       {savedToCloudOnly ? (
         <div role="status" data-testid="saved-cloud-only" style={{ ...topBanner, zIndex: 6002 }}>
           <span style={bannerText}>✔ <b>Saved to your account</b> — your work is safe in the cloud and will reload fine. This <b>device's storage is full</b>, so there's no offline copy; free up space (or Export) to keep one.</span>
-          <button onClick={saveNow} title="Try saving on this device again" style={{ flex: "none", cursor: "pointer", background: "rgba(255,255,255,0.18)", color: "#fff", border: "none", borderRadius: 6, padding: "4px 10px", fontFamily: "inherit", fontSize: 12, fontWeight: 700 }}>Retry device save</button>
+          {/* NEW-2/B1428 — this used to be wired to saveNow(), which re-ran the same write with nothing
+              freed in between and so could never succeed. It now clears the re-fetchable map cache
+              first, retries, and reports what it freed + whether the save landed. */}
+          <button onClick={retryDeviceSave} data-testid="retry-device-save" title="Clear re-downloadable map data and try saving on this device again" style={{ flex: "none", cursor: "pointer", background: "rgba(255,255,255,0.18)", color: "#fff", border: "none", borderRadius: 6, padding: "4px 10px", fontFamily: "inherit", fontSize: 12, fontWeight: 700 }}>Free up space &amp; retry</button>
         </div>
       ) : localSaveFailed && (
         <div role="alert" data-testid="local-save-failed" style={{ ...topBanner, zIndex: 6002, maxWidth: "min(720px, calc(100vw - 16px))", background: "#7c1d1d", border: "1px solid #f87171", fontWeight: 700, boxShadow: "0 8px 28px rgba(0,0,0,0.4)" }}>
@@ -22194,6 +22300,19 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         </div>
       )}
       {/* Version history (automatic local backups, B126) — restore an earlier saved version */}
+      {storageOpen && (
+        <div onClick={() => setStorageOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 3000, background: "rgba(20,18,15,0.55)", display: "grid", placeItems: "center" }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ background: SURF_RAISED, borderRadius: 14, boxShadow: "0 20px 60px rgba(0,0,0,0.35)", padding: 22, width: 420, maxWidth: "92vw", maxHeight: "82vh", overflowY: "auto" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 2 }}>
+              <h2 style={{ margin: 0, fontSize: 16, color: PAL.ink }}>Storage</h2>
+              <button className="gbtn" onClick={() => setStorageOpen(false)} style={{ ...chip }}>Close ✕</button>
+            </div>
+            <Suspense fallback={<div style={{ fontSize: 12, color: PAL.muted, padding: "18px 0" }}>Checking storage…</div>}>
+              <StoragePanel />
+            </Suspense>
+          </div>
+        </div>
+      )}
       {versionsOpen && (
         <div onClick={() => setVersionsOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 3000, background: "rgba(20,18,15,0.55)", display: "grid", placeItems: "center" }}>
           <div onClick={(e) => e.stopPropagation()} style={{ background: SURF_RAISED, borderRadius: 14, boxShadow: "0 20px 60px rgba(0,0,0,0.35)", padding: 22, width: 460, maxWidth: "92vw", maxHeight: "82vh", overflowY: "auto" }}>

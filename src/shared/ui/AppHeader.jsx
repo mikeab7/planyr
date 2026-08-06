@@ -81,9 +81,18 @@ const settingsPanel = {
   fontFamily: "system-ui, sans-serif",
 };
 
-// Settings gear (row-1 right zone) → popover hosting the display-theme picker. Rendered
-// only when signed OUT (B389): signed-in users get the theme control in account → Settings,
-// so the gear isn't duplicated; signed out, this keeps the switch one click away. (B342/B389)
+/* Settings gear (row-1 right zone) → popover hosting the display-theme picker. Rendered
+ * only when signed OUT (B389): signed-in users get the theme control in account → Settings,
+ * so the gear isn't duplicated; signed out, this keeps the switch one click away. (B342/B389)
+ *
+ * ⛔ NO STORAGE READOUT HERE, and it is a budget decision rather than a product one (NEW-3/B1429).
+ * This file lands in the shared ENTRY chunk, so anything mounted here is downloaded by EVERY
+ * route. Even a lazy stub for the storage panel measured +0.5 KB on all four routes and pushed
+ * `bundle.notesRouteJsBytes` 0.2 KB past its ceiling in CI — a breach the repo pays back with an
+ * optimization rather than a raised baseline. The storage readout therefore lives in ONE place,
+ * account → Settings (`AuthPanel`), which is where a signed-in owner looks for it. A signed-out
+ * user reaches it by signing in; the amber banner's "Free up space & retry" (B1428) works
+ * regardless of route or session, so nothing is unreachable — only less convenient. */
 function SettingsMenu() {
   const [open, setOpen] = useState(false);
   const anchor = useRef(null);

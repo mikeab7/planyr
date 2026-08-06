@@ -32,7 +32,13 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   whose `onBlur` commits and closes it in the same frame.
 - `layers.js` + `components/LayerPanel.jsx` — map-layer system; `layerPrefs.js` (per-site Layers-panel
   toggle memory — NEW-1, sparse on/off overrides restored on open + persisted on toggle); `coverage.js` (coverage engine);
-  `arcgis.js`/`counties.js`/`layerRequest.js` — GIS plumbing; `gisCache.js` — screening cache;
+  `arcgis.js`/`counties.js`/`layerRequest.js` — GIS plumbing; **`gisCache.js` — the screening cache;
+  its persistent tier lives in `localDb.js`'s IndexedDB store, NOT localStorage (B1427 — a disposable
+  cache was crowding saved plans out of the ~5 MB cap; see /CLAUDE.md → TIER-BY-REBUILDABILITY). Two
+  consequences to know: `read()` is L1-ONLY and synchronous, so a cold miss means "not resident yet",
+  not "not stored" — use `readAsync`/`warm`, which is why `exportSheet.js` warms the frame's terrain
+  tiles before its sync capture; and the budget (512 KB/entry, 3 MB total) is B1162's, unchanged —
+  it stopped competing, it did not get bigger.**
   `vectorLayers.js` (pure vector engine — polygons AND lines — + boundary/pipeline registry) +
   `vectorOverlay.js` (cached boundary/pipeline/corridor render + identify + labels glue) +
   `boundaryLabels.js` (pure label math) — the B694/B695 tier; `basemaps.js` — the shared Esri/USGS
@@ -566,7 +572,11 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   wide-zoom PDF silently loses its stalls; **(b)** an SVG `<pattern>` is NOT an equivalent and was
   measured as wrong (Chromium rasterises a tile once and repeats it, so a non-integer pitch accumulates
   sub-pixel phase error — up to 30/255); **(c)** the DOCK-DOOR LEAVES deliberately do NOT collapse
-  (up to 23/255, because a leaf's fill is semi-transparent — B1350 owns the 424 nodes left behind).
+  (up to 23/255 — **and NOT because the fill is semi-transparent, which was the recorded cause until
+  2026-08-06 and is refuted: fold both arms fully OPAQUE and the difference does not move. It is that
+  Chromium does not rasterise a `<rect>` and a rectangular `<path>` to the same antialiased edge, at
+  ANY zoom, folded or not — so no gate saves it.** B1350 is CLOSED with the 424 nodes left behind;
+  the instrument is `ui-audit/diagnose-dock-leaf-fold.mjs`).
   Guards: the repo-root `test/` suite **geometryLod** (incl. source guards on both call sites and on the
   rejected door half) and the ui-audit harness **verify-stall-lod-parity** (two real builds compared
   pixel by pixel via its own dependency-free PNG decoder, plus the exported sheet — PDF-PARITY).

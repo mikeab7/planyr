@@ -331,12 +331,18 @@ describe("NEW-7(b) — the L1 GIS cache is bounded", () => {
     expect(c.read("d")).not.toBe(null);
   });
 
-  it("a miss is only ever a re-fetch — the durable tier still answers", () => {
-    const s = store();
-    const c = createGisCache({ store: s, now: () => 1, maxMemEntries: 1 });
+  it("a miss is only ever a re-fetch — the durable tier still answers", async () => {
+    // NEW-1/B1427: the durable tier moved localStorage → IndexedDB, so it answers ASYNCHRONOUSLY.
+    // The guarantee this test exists for is unchanged — an L1 eviction costs at most a re-read,
+    // never a re-fetch — it is just reached through readAsync() now.
+    const m = new Map();
+    const disk = { get: async (k) => (m.has(k) ? m.get(k) : null), put: async (k, v) => { m.set(k, v); return true; }, delete: async (k) => { m.delete(k); return true; } };
+    const c = createGisCache({ disk, store: null, now: () => 1, maxMemEntries: 1 });
     c.write("keep", { v: 1 });
     c.write("other", { v: 2 });   // pushes "keep" out of L1
-    expect(c.read("keep")).toMatchObject({ data: { v: 1 } }); // rehydrated from localStorage
+    expect(c.read("keep")).toBe(null);                                  // not resident…
+    for (let i = 0; i < 60; i++) await Promise.resolve();               // let the durable writes land
+    expect(await c.readAsync("keep")).toMatchObject({ data: { v: 1 } }); // …but never lost
   });
 });
 
