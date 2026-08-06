@@ -7,7 +7,7 @@
 
 _Last updated: 2026-08-06._
 
-## 📄 The one thing I need from you: paste a short line into your browser (B300000 / B300001)
+## 📄 The one thing I need from you: paste a short line into your browser (B209568 / B209569)
 
 > **You were right that nobody had ever measured Bain, and I've now fixed that as far as I can from here.** I built
 > a stand-in Bain — the same 53 pieces in the same mix you counted, the same five parcels, and crucially **both of

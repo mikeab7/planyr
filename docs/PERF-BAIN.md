@@ -291,7 +291,7 @@ never ran in any arm here.** It fires on **zoom**, not pan, and it is the obviou
 
 1. **His real plan.** Run the extractor, land `smr9olizi5ue` and `sms4zs8unbkg` verbatim, re-run the
    battery. This turns the geometry finding from "measured on invented coordinates" into a fact.
-2. **His machine.** Everything here is a lower bound with the network absent. `V20000` carries the
+2. **His machine.** Everything here is a lower bound with the network absent. `V11216` carries the
    signed-in check.
 3. **The compositor-layer question, on its own.** 304 layers against 118 is the largest deterministic
    difference between the two plans, it is identical across every raster arm, and nothing in this
