@@ -18,6 +18,8 @@ import { autoPlaceGroup, detectedEndpointsFor } from "./lib/autoStitch.js";
 import { binarizeImageData, refineGroupPlacements } from "./lib/matchLineRefine.js";
 import { readAndGroup, groupCalibration, isNotToScale } from "./lib/sheetRead.js";
 import { dedupePlaced, isPlaced } from "./lib/stitchDedupe.js";
+import { PHASE, loadStatusLine, mergeAddQueue, deferredAddNotice } from "./lib/stitchLoadState.js";
+import MiddleTruncate from "../../shared/ui/MiddleTruncate.jsx";
 import { normSheet } from "../../shared/files/detailRefs.js";
 import { projectStopTexts } from "../../shared/files/sheetTitleSet.js";
 import { listProjects as listLocalProjects } from "../../shared/projects/projects.js";
@@ -48,7 +50,11 @@ const f0 = (n) => Math.round(n).toLocaleString();
 const f1 = (n) => (Math.round(n * 10) / 10).toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 const f2 = (n) => (Math.round(n * 100) / 100).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOpenReview, signedIn = false, isActive = true }) {
+/* `chromed` (NEW-3): the host now mounts the app's real AppHeader above this component (logo,
+ * breadcrumb, module tabs, and an explicitly labelled "‹ Exit Stitch"), so the local back-link that
+ * used to be the ONLY way out is redundant and is dropped. The stitch's own save badge stays here —
+ * it is this component's persistence hook that owns it. */
+export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOpenReview, signedIn = false, isActive = true, chromed = false }) {
   const isActiveRef = useRef(isActive); isActiveRef.current = isActive; // keep-alive: live value for the once-bound key handler
   const svgRef = useRef(null);
   const [pdfs, setPdfs] = useState([]);          // {srcId,name,doc,numPages,blob,size,storageKey,oversize,missing}
@@ -61,7 +67,11 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
   const [measures, setMeasures] = useState([]);  // {id,kind,pts:[world]}
   const [ftPerUnit, setFtPerUnit] = useState(0); // composite calibration (ft per world unit)
   const [calInput, setCalInput] = useState(null); // inline Calibrate entry { pts:[world], x, y (screen px), value } (B304)
-  const [busy, setBusy] = useState(false);
+  // NEW-2 — the status bar's ONE source of truth. The old `busy` boolean rendered the fixed string
+  // "Rendering…", which therefore sat unchanged for a whole multi-sheet load over an empty canvas:
+  // no count, no name, no way to tell "working" from "wedged". `prog` carries the phase and the
+  // real counts, and `loadStatusLine` (pure, unit-locked) turns it into the line the user reads.
+  const [prog, setProg] = useState(null);        // { phase, done, total, name } | null
   const [err, setErr] = useState("");
   const [reading, setReading] = useState(false); // reading + grouping a freshly dropped set (B335/B336)
   const [ocrRunning, setOcrRunning] = useState(false); // a scanned page is being OCR'd (B352) — slower
@@ -165,10 +175,18 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
   const loadingRef = useRef(false);
   const loadTok = useRef(0);
   const openFiles = async (files) => {
-    if (loadingRef.current) return; // don't add sources while a load is rebuilding them (B51)
-    const list = [...(files || [])].filter((f) => /pdf$/i.test(f.name) || f.type === "application/pdf");
-    if (!list.length) return;
-    setBusy(true); setErr("");
+    // NEW-1 — never a bare early return on a user action. A drop that lands mid-load is REFUSED
+    // OUT LOUD (the load is rebuilding pdfs[] and would clobber it, B51), so the user knows to
+    // drop it again rather than watching the file vanish into nothing.
+    if (loadingRef.current) { setNotice("Still loading the saved set — drop those files again once it finishes."); return; }
+    const dropped = [...(files || [])];
+    const list = dropped.filter((f) => /pdf$/i.test(f.name) || f.type === "application/pdf");
+    if (!list.length) {
+      // A drop of the wrong file type used to be an utterly silent no-op (LOUD-FAILURE).
+      if (dropped.length) setErr(dropped.length === 1 ? `“${dropped[0].name}” isn’t a PDF — the stitcher takes PDF sheets.` : "None of those files were PDFs — the stitcher takes PDF sheets.");
+      return;
+    }
+    setProg({ phase: PHASE.OPENING, name: list[0].name }); setErr("");
     try {
       for (const f of list) {
         const doc = await loadPdf(f);
@@ -188,7 +206,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
         }).catch(() => {}); // best-effort store; don't leak an unhandled rejection
       }
     } catch (_) { setErr("One of those files wasn't a readable PDF."); }
-    finally { setBusy(false); }
+    finally { setProg(null); }
   };
 
   // Read every page's metadata and collapse the file into logical sheets (B335/B336). Runs in
@@ -250,11 +268,54 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
     return {};
   };
 
+  /* NEW-1 — a press on a sheet row is NEVER dropped on the floor.
+   *
+   * The bug: both add paths opened with `if (loadingRef.current) return;`. While the saved set was
+   * loading — which is minutes on a real drawing set, over an empty canvas — every click on every
+   * row did nothing, said nothing, logged nothing and issued no request. The guard itself is
+   * correct (a load rebuilds placed[] wholesale and its commit would clobber the added sheet, B51);
+   * what was wrong was answering a user action with silence. So the request is QUEUED and replayed
+   * the moment the load lets go, and the user is told so in the same beat.
+   */
+  const addQueueRef = useRef([]);
+  const deferAdd = (req) => {
+    const next = mergeAddQueue(addQueueRef.current, req);
+    addQueueRef.current = next;
+    // The notice IS the queue's rendering — it names how many presses are waiting, and setting it
+    // is what re-renders. A parallel piece of state holding the same array would be a second
+    // source of truth for one fact.
+    setNotice(deferredAddNotice(next));
+  };
+  // Replay whatever the user pressed during the load, in the order they pressed it. Resolved
+  // against the FRESH pdfs the load just installed (the old objects are gone), and a request we
+  // can no longer resolve is reported — never dropped quietly.
+  const flushAddQueue = async () => {
+    const q = addQueueRef.current;
+    if (!q.length) return;
+    addQueueRef.current = []; setNotice("");
+    const lost = [];
+    for (const req of q) {
+      const pdf = pdfsRef.current.find((p) => p.srcId === req.srcId);
+      if (!pdf || !pdf.doc) { lost.push(req); continue; }
+      if (req.kind === "group") {
+        const g = (pdf.groups || [])[req.groupIndex];
+        if (!g) { lost.push(req); continue; }
+        await addGroup(pdf, g);
+      } else {
+        await addSheet(pdf, req.pageNum);
+      }
+    }
+    if (lost.length) setErr(`Couldn’t add ${lost.length === 1 ? "the sheet you clicked" : `${lost.length} of the sheets you clicked`} while the set was loading — its file isn’t open any more. Click the row again.`);
+  };
+
   const addSheet = async (pdf, pageNum) => {
-    if (loadingRef.current) return; // a load is rebuilding placed[]; its blind setPlaced would clobber this sheet (B51)
+    if (loadingRef.current) { deferAdd({ kind: "sheet", srcId: pdf.srcId, pageNum }); return; }
+    // LOUD-FAILURE — a source whose bytes never arrived can't be rendered. Say which one and what
+    // to do, instead of throwing an unhandled rejection past this handler into silence.
+    if (!pdf.doc) { setErr(`“${pdf.name}” isn’t open — its pages can’t be drawn. Drop the file again, then add its sheets.`); return; }
     // B633/NEW-4 — adding a page that's already on the canvas is a no-op, never a stacked duplicate.
     if (isPlaced(placedRef.current, pdf.srcId, pageNum)) { setNotice("That sheet is already placed."); return; }
-    setBusy(true);
+    setProg({ phase: PHASE.ADDING, name: `p${pageNum}` });
     try {
       const img = await renderPageToImage(pdf.doc, pageNum, 2);
       const pm = pageMetaOf(pdf, pageNum);
@@ -272,7 +333,11 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
           notToScale: isNotToScale(pm), matchLines: pm.matchLines || [], drawingArea: pm.drawingArea || null,
           sheetNumber: pm.sheetNumber || "", detailRefs: pm.detailRefs || [], detailAnchors: pm.detailAnchors || [], notes: pm.notes || [] }];
       });
-    } finally { setBusy(false); }
+    } catch (e) {
+      // A raster failure used to escape as an unhandled rejection: the click looked like it did
+      // nothing at all. Name the sheet and what failed (LOUD-FAILURE — surfaced, not swallowed).
+      setErr(`Couldn’t draw page ${pageNum} of “${pdf.name}”${e && e.message ? ` — ${e.message}` : ""}.`);
+    } finally { setProg(null); }
   };
 
   /* Add a whole LOGICAL sheet at once (B335): render every page in the group, AUTO-STITCH them
@@ -280,8 +345,10 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
    * title-block band so the composite can crop it (B338). A single-page logical sheet just drops
    * one page. Sheets the seam graph can't reach stay aligned:false → the manual-Align safety net,
    * pre-seeded with their detected seam endpoints. The drawing-area edge is the seam reference. */
-  const addGroup = async (pdf, group) => {
-    if (loadingRef.current) return;
+  const addGroup = async (pdf, group, groupIndex = -1) => {
+    // NEW-1 — queue-and-replay instead of a silent early return (see addSheet).
+    if (loadingRef.current) { deferAdd({ kind: "group", srcId: pdf.srcId, groupIndex, groupKey: group && group.label }); return; }
+    if (!pdf.doc) { setErr(`“${pdf.name}” isn’t open — its pages can’t be drawn. Drop the file again, then add its sheets.`); return; }
     // B633/NEW-4 — drop pages already on the canvas so re-clicking a group can't stack duplicates.
     // If every page is already placed, it's a no-op with a quiet notice. (Only the not-yet-placed
     // pages stitch among themselves — a partial re-add never duplicates the existing sheets.)
@@ -289,11 +356,14 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
     const pages = (group.pages || []).filter((pg) => !already.has(pdf.srcId + " " + pg.pageNum));
     if (!pages.length) { setNotice(group.pages && group.pages.length > 1 ? "Those sheets are already placed." : "That sheet is already placed."); return; }
     group = { ...group, pages };
-    setBusy(true); setNotice("");
+    setProg({ phase: PHASE.ADDING, done: 0, total: group.pages.length, name: group.label || `${group.pages.length} sheets` });
+    setNotice("");
     try {
       const built = [];
       const renderFailed = []; // B536: pages whose raster threw (corrupt page / worker crash)
       for (const pg of group.pages) {
+        // NEW-2 — a multi-page group is a long job too; count it rather than freeze one label on it.
+        setProg({ phase: PHASE.ADDING, done: built.length + renderFailed.length, total: group.pages.length, name: pg.sheetNumber || `p${pg.pageNum}` });
         let img;
         // B536: a single failed page-render used to throw past the loop, so the whole group-drop
         // silently did NOTHING (no sheets, no message). Skip the bad page and report it instead.
@@ -370,7 +440,11 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
       setNotice(unplaced.length
         ? `Auto-stitched ${placedSheets.length} of ${built.length} sheets${calMsg} — ${unplaced.length} need a quick manual Align.${failMsg}`
         : (built.length > 1 || failMsg) ? `Auto-stitched ${placedSheets.length} sheets${calMsg}.${failMsg}` : "");
-    } finally { setBusy(false); }
+    } catch (e) {
+      // Anything the per-page guards didn't already catch (the auto-place / refine / calibrate
+      // stages) must surface too — a group click that dies mid-way must not read as "nothing here".
+      setErr(`Couldn’t place “${group.label || pdf.name}”${e && e.message ? ` — ${e.message}` : ""}.`);
+    } finally { setProg(null); }
   };
 
   // Screen<->world via the shared viewport engine (B329); { zoom, panX, panY } == { scale, tx, ty }.
@@ -614,10 +688,26 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
     finally { if (tok === loadTok.current) setMetaScanning(false); } // token-guarded so a superseded scan can't clear a newer one's flag
   };
 
+  /* NEW-1 / NEW-2 — the saved-set load, rebuilt around the two things it never had: PROGRESS and a
+   * FAILURE SURFACE.
+   *
+   * It used to fetch every source, then rasterise every placed sheet one at a time, and commit
+   * NOTHING until the last one landed — so for the whole run (minutes on a real set) the canvas was
+   * empty, the status bar read a fixed "Rendering…", and the `loadingRef` gate silently killed every
+   * click. Three changes, all about honesty rather than raw speed:
+   *   • DEDUPE FIRST. The duplicate collapse ran AFTER the loop, so the owner's 14-entry / 8-unique
+   *     JACINTOPORT draft rasterised six full sheets purely to throw them away. Same result, ~40%
+   *     less work, and it is the cheapest second saved in the whole path.
+   *   • COMMIT AS WE GO. Each sheet lands on the canvas the moment it is drawn, so the set builds up
+   *     in front of you instead of appearing all at once after a silent wait.
+   *   • REPORT. Phase + counts + the sheet name feed `loadStatusLine`; a source that won't download
+   *     and a page that won't raster are both NAMED, never skipped in silence.
+   */
   const loadStitch = async (rec) => {
     const tok = ++loadTok.current; // a newer open supersedes this load (B52)
-    loadingRef.current = true; setBusy(true);
+    loadingRef.current = true;
     suspendSave(); // this programmatic load sets the autosave deps; don't re-save what we loaded (B19)
+    const failed = []; // sources that wouldn't download / pages that wouldn't raster — reported, not swallowed
     try {
       setReviewId(rec.id);
       setMeta({ title: rec.title || "", projectId: rec.projectId || null, project: rec.project || "", discipline: rec.discipline || "", item: rec.item || "", revision: rec.revision || "", docDate: rec.docDate || "" });
@@ -626,47 +716,77 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
       if (st.view) setView(st.view);
       setAlign(null); setDraft(null); setTool("pan"); setCalInput(null); clearHistory(); setSteerDismissed(false);
       // Re-fetch each source PDF; render placed sheets back from the bytes + saved M.
+      const srcList = rec.sources || [];
       const srcEntries = [];
-      for (const src of rec.sources || []) {
+      for (let i = 0; i < srcList.length; i++) {
+        const src = srcList[i];
+        setProg({ phase: PHASE.FETCHING, done: i, total: srcList.length, name: src.name });
         let doc = null, missing = true;
         if (!src.oversize) {
           // Read-back prefers Google Drive (the file's home), falls back to Supabase Storage
           // so a pre-Drive sheet — or any Drive miss — still opens (B322, fallback-safe).
-          let buf = src.driveKey ? await downloadFromDrive(src.driveKey) : null;
-          if (!buf && src.storageKey) buf = await downloadSource(src.storageKey);
-          if (buf) { doc = await loadPdf(buf); missing = false; }
+          // NEW-1: a download/parse that throws used to take the WHOLE load down through the
+          // caller's blanket `.catch(() => {})`, leaving the gate held and the canvas empty with
+          // nothing said. Each source now fails on its own and is named at the end.
+          try {
+            let buf = src.driveKey ? await downloadFromDrive(src.driveKey) : null;
+            if (!buf && src.storageKey) buf = await downloadSource(src.storageKey);
+            if (buf) { doc = await loadPdf(buf); missing = false; }
+          } catch (_) { doc = null; missing = true; failed.push(src.name || "a drawing"); }
         }
+        if (tok !== loadTok.current) return; // a newer load started — don't overwrite its sources (B52)
         srcEntries.push({ srcId: src.srcId, name: src.name, size: src.size || 0, doc, numPages: doc ? doc.numPages : 0, blob: null, storageKey: src.storageKey || null, driveKey: src.driveKey || null, oversize: !!src.oversize, missing });
       }
-      if (tok !== loadTok.current) return; // a newer load started — don't overwrite its sources (B52)
+      if (tok !== loadTok.current) return;
       suspendSave(); // re-park across this load's async commits (B19)
       setPdfs(srcEntries); pdfsRef.current = srcEntries;
+      // B633/NEW-4 — collapse exact (srcId,pageNum) duplicates persisted before the add-time guard
+      // existed (the owner's JACINTOPORT draft was 14 entries / 8 unique). Keeping the FIRST
+      // instance preserves the index-0 world frame + its transform. NEW-1: this now runs BEFORE the
+      // raster loop, not after it — the old order paid full render cost for every duplicate and
+      // then discarded it. Re-persist the cleaned array once (the effect below).
+      const { placed: wanted, removed } = dedupePlaced(st.placed || []);
+      dedupeResaveRef.current = removed > 0;
       const out = [];
-      let idx = 0;
-      for (const s of st.placed || []) {
+      for (let idx = 0; idx < wanted.length; idx++) {
+        const s = wanted[idx];
+        setProg({ phase: PHASE.RENDERING, done: idx, total: wanted.length, name: s.sheetNumber || s.name });
         const e = srcEntries.find((x) => x.srcId === s.srcId);
         let href = null, baseW = s.baseW, baseH = s.baseH, missing = true;
-        if (e && e.doc) { const img = await renderPageToImage(e.doc, s.pageNum, 2); if (tok !== loadTok.current) return; href = img.href; baseW = img.baseW; baseH = img.baseH; missing = false; }
+        if (e && e.doc) {
+          try { const img = await renderPageToImage(e.doc, s.pageNum, 2); href = img.href; baseW = img.baseW; baseH = img.baseH; missing = false; }
+          catch (_) { failed.push(s.sheetNumber || s.name || `page ${s.pageNum}`); } // B536 class: one bad page must not kill the set
+          if (tok !== loadTok.current) return;
+        }
         // First placed sheet is always the world frame; older saves predate the `aligned`
         // flag, so treat the rest as aligned (they were saved with a real transform) — only
         // genuinely unaligned new sheets carry aligned:false, so we never falsely flag. (B301)
         out.push({ id: s.id, srcId: s.srcId, pageNum: s.pageNum, name: s.name, baseW, baseH, M: s.M, href, missing, aligned: idx === 0 ? true : s.aligned !== false, notToScale: !!s.notToScale, drawingArea: s.drawingArea || null, grouped: !!s.grouped, groupLabel: s.groupLabel || null, matchLines: s.matchLines || [], sheetNumber: s.sheetNumber || "", detailRefs: s.detailRefs || [], detailAnchors: s.detailAnchors || [], notes: s.notes || [] });
-        idx++;
+        if (tok !== loadTok.current) return; // superseded before committing (B52)
+        suspendSave(); // re-park before each commit so a slow load's setPlaced isn't re-saved (B19)
+        // NEW-2 — commit INCREMENTALLY: the sheet you just watched the counter draw is on the canvas
+        // now, rather than the whole set appearing after a silent wait over an empty page.
+        const soFar = out.slice();
+        setPlaced(soFar); placedRef.current = soFar;
       }
-      if (tok !== loadTok.current) return; // superseded before committing the placed sheets (B52)
-      suspendSave(); // re-park before the final commit so a slow load's setPlaced isn't re-saved (B19)
-      // B633/NEW-4 — collapse any exact (srcId,pageNum) duplicates persisted before the add-time
-      // guard existed (the owner's JACINTOPORT draft was 14 entries / 8 unique). Keeping the FIRST
-      // instance preserves the index-0 world frame + its transform. Re-persist the cleaned array
-      // once (the effect below) so the duplicates can't return on the next open.
-      const { placed: cleaned, removed } = dedupePlaced(out);
-      dedupeResaveRef.current = removed > 0;
-      setPlaced(cleaned); placedRef.current = cleaned;
+      if (tok !== loadTok.current) return;
       // B631 — pre-B631 saves didn't persist notToScale; recover it in the background so a resumed
       // schedule/legend set is classified as a reference set. Only when some sheet lacks the flag.
-      if (cleaned.some((s) => !s.notToScale)) backfillNotToScale(srcEntries, tok);
-      setErr(srcEntries.some((e) => e.missing) ? "Some source PDFs weren't available (too large to store) — drop the files to fill in the placeholders." : "");
-    } finally { if (tok === loadTok.current) { loadingRef.current = false; setBusy(false); } }
+      if (out.some((s) => !s.notToScale)) backfillNotToScale(srcEntries, tok);
+      // LOUD-FAILURE — name what didn't make it. "Some source PDFs weren't available" alone hid the
+      // difference between "too big to store" and "the fetch or the raster actually failed".
+      const oversize = srcEntries.some((e) => e.missing && e.oversize);
+      setErr([
+        failed.length ? `Couldn’t load ${failed.length === 1 ? failed[0] : `${failed.length} sheets (${failed.slice(0, 3).join(", ")}${failed.length > 3 ? "…" : ""})`} — drop the file again to fill in the placeholders.` : "",
+        oversize ? "Some source PDFs weren't available (too large to store) — drop the files to fill in the placeholders." : "",
+      ].filter(Boolean).join(" "));
+    } finally {
+      if (tok === loadTok.current) {
+        loadingRef.current = false; setProg(null);
+        // NEW-1 — replay everything the user pressed while the gate was closed. Never dropped.
+        flushAddQueue();
+      }
+    }
   };
 
   // Controlled load handed down from DocReview (opening a saved stitch review).
@@ -805,7 +925,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
   const hasGroups = (p) => Array.isArray(p.groups) && p.groups.length > 0;
   const trayItems = pdfs.flatMap((p) => {
     const useGroups = !showAllPages && hasGroups(p);
-    if (useGroups) return p.groups.map((g, gi) => ({ key: p.srcId + ":g" + gi, pdf: p, group: g }));
+    if (useGroups) return p.groups.map((g, gi) => ({ key: p.srcId + ":g" + gi, pdf: p, group: g, groupIndex: gi }));
     return Array.from({ length: p.numPages }, (_, i) => ({ key: p.srcId + ":p" + (i + 1), pdf: p, page: i + 1 }));
   });
   const anyGroups = pdfs.some(hasGroups);
@@ -818,6 +938,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
   const calPos = calInput ? worldToScreen({ scale: view.zoom, tx: view.panX, ty: view.panY }, { x: (calInput.pts[0].x + calInput.pts[1].x) / 2, y: (calInput.pts[0].y + calInput.pts[1].y) / 2 }) : null;
   const btn = (on) => ({ padding: "6px 10px", fontSize: 11.5, whiteSpace: "nowrap", borderRadius: 8, cursor: "pointer", fontFamily: "inherit", fontWeight: 600, border: `1px solid ${on ? PAL.accent : "var(--border-default)"}`, background: on ? PAL.accent : "var(--surface-raised)", color: on ? "var(--on-accent)" : PAL.ink }); // B657-5B: radius 8 = shared control scale
   const iconBtn = (disabled) => ({ ...btn(false), padding: "5px 8px", opacity: disabled ? 0.4 : 1, cursor: disabled ? "default" : "pointer" });
+  const statusLine = loadStatusLine(prog); // NEW-2 — the one honest status string (pure, unit-locked)
   const alignMsg = align && (align.seeded
     ? ["Seam detected — click where its FIRST end lands on the placed sheet", "Click where its SECOND end lands"][align.step]
     : ["Click reference point #1 (on a placed sheet)", "Click the SAME point on the sheet being aligned", "Click reference point #2", "Click the matching point #2 on the sheet"][align.step]);
@@ -827,8 +948,8 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
       onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); openFiles(e.dataTransfer.files); }}>
       {/* toolbar */}
       <div style={{ flex: "none", display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", background: PAL.chrome, borderBottom: "1px solid var(--chrome-divider)", flexWrap: "wrap" }}>
-        <button style={{ ...btn(false), border: "1px solid var(--chrome-divider)", background: "var(--chrome-bg-elev)", color: PAL.chromeInk }} onClick={onReview}>‹ Single sheet</button>
-        <span style={{ width: 1, height: 20, background: "var(--chrome-divider)" }} />
+        {!chromed && <button style={{ ...btn(false), border: "1px solid var(--chrome-divider)", background: "var(--chrome-bg-elev)", color: PAL.chromeInk }} onClick={onReview}>‹ Exit Stitch</button>}
+        {!chromed && <span style={{ width: 1, height: 20, background: "var(--chrome-divider)" }} />}
         <label style={{ ...btn(false), display: "inline-block" }}>
           Open PDFs…<input type="file" accept="application/pdf,.pdf" multiple style={{ display: "none" }} onChange={(e) => { openFiles(e.target.files); e.target.value = ""; }} />
         </label>
@@ -865,19 +986,28 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
           </div>
           {reading && <div style={{ fontSize: 10.5, color: PAL.accent, marginBottom: 6 }}>{ocrRunning ? "Reading scanned sheet (OCR)…" : "Reading sheets…"}</div>}
           {trayItems.length === 0 && !reading && <div style={{ fontSize: 11.5, color: PAL.muted, lineHeight: 1.5 }}>Open or drop a PDF set — it’ll group the pages into logical sheets here.</div>}
+          {/* NEW-4 — every row label is MIDDLE-truncated. A drawing set's names are identical for
+              their whole readable length and differ only at the end ("… - p1" … "- p32"), so plain
+              CSS ellipsis rendered 32 rows of one identical string. The tail is pinned; the full
+              name is on the hover tooltip. */}
           {trayItems.map((t) => t.group ? (
-            <button key={t.key} onClick={() => addGroup(t.pdf, t.group)} title={`${t.group.label} — ${t.pdf.name}`}
+            <button key={t.key} data-testid="stitch-tray-row" onClick={() => addGroup(t.pdf, t.group, t.groupIndex)} title={`${t.group.label} — ${t.pdf.name}`}
               style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 8px", marginBottom: 4, borderRadius: 6, cursor: "pointer", fontFamily: "inherit", fontSize: 11, border: `1px solid ${t.group.kind === "group" ? "#c7b88f" : PAL.line}`, background: t.group.kind === "group" ? "#fbf7ec" : "#fff", color: PAL.ink }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 4, overflow: "hidden" }}>
+              {/* The sheet CODE is pinned and never truncated — on a real set the titles repeat
+                  ("OVERALL ROOF PLAN" on four disciplines) and the code is the only thing that
+                  tells two rows apart. Title middle-truncates beside it. */}
+              <div style={{ display: "flex", alignItems: "baseline", gap: 4, overflow: "hidden" }}>
                 <span style={{ flex: "none", fontWeight: 700, color: t.group.kind === "group" ? "#8a6d1f" : PAL.muted }}>{t.group.kind === "group" ? "▣" : "+"}</span>
-                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontWeight: t.group.kind === "group" ? 650 : 400 }}>{t.group.title}</span>
+                {t.group.sheetRange ? <span style={{ flex: "none", fontWeight: 700 }}>{t.group.sheetRange}</span> : null}
+                <MiddleTruncate text={t.group.title} title={`${t.group.label} — ${t.pdf.name}`} style={{ fontWeight: t.group.kind === "group" ? 650 : 400 }} />
               </div>
               {t.group.kind === "group" && <div style={{ fontSize: 9.5, color: PAL.muted, marginTop: 1 }}>{t.group.sheetRange} · {t.group.pages.length} sheets · auto-stitch</div>}
             </button>
           ) : (
-            <button key={t.key} onClick={() => addSheet(t.pdf, t.page)} title={t.pdf.name}
-              style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 8px", marginBottom: 3, borderRadius: 6, cursor: "pointer", fontFamily: "inherit", fontSize: 11, border: `1px solid ${PAL.line}`, background: "#fff", color: PAL.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-              + {t.pdf.name.replace(/\.pdf$/i, "")} · p{t.page}
+            <button key={t.key} data-testid="stitch-tray-row" onClick={() => addSheet(t.pdf, t.page)} title={`${t.pdf.name} · page ${t.page}`}
+              style={{ display: "flex", alignItems: "baseline", gap: 3, width: "100%", textAlign: "left", padding: "6px 8px", marginBottom: 3, borderRadius: 6, cursor: "pointer", fontFamily: "inherit", fontSize: 11, border: `1px solid ${PAL.line}`, background: "#fff", color: PAL.ink, overflow: "hidden" }}>
+              <span style={{ flex: "none", fontWeight: 700, color: PAL.muted }}>+</span>
+              <MiddleTruncate text={`${t.pdf.name.replace(/\.pdf$/i, "")} · p${t.page}`} title={`${t.pdf.name} · page ${t.page}`} />
             </button>
           ))}
         </div>
@@ -1126,7 +1256,11 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
             const needsAlign = i > 0 && s.aligned === false && !referenceSet && !s.notToScale && !metaScanning;
             return (
             <div key={s.id} style={{ border: `1px solid ${isAligning ? PAL.accent : needsAlign ? "#d6a64a" : PAL.line}`, borderRadius: 7, padding: "6px 8px", marginBottom: 6, background: needsAlign ? "#fffbeb" : "#fff" }}>
-              <div style={{ fontSize: 11, color: PAL.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", marginBottom: 4 }}>{i + 1}. {s.name}</div>
+              {/* NEW-4 — the placed list identifies sheets by the same tail the tray does. */}
+              <div style={{ display: "flex", alignItems: "baseline", gap: 3, fontSize: 11, color: PAL.ink, overflow: "hidden", marginBottom: 4 }}>
+                <span style={{ flex: "none" }}>{i + 1}.</span>
+                <MiddleTruncate text={s.name} data-testid="stitch-placed-name" />
+              </div>
               {needsAlign && <div style={{ fontSize: 10, color: "#b45309", fontWeight: 700, marginBottom: 4 }}>⚠ Not aligned — Align before measuring</div>}
               <div style={{ display: "flex", gap: 6 }}>
                 {i > 0 && <button style={{ ...btn(isAligning), padding: "3px 8px", fontSize: 11, ...(needsAlign && !isAligning ? { border: "1px solid #d6a64a", color: "#b45309", fontWeight: 700 } : {}) }} onClick={() => startAlign(s.id)}>Align</button>}
@@ -1168,7 +1302,14 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
           )}
         </div>
       </div>
-      {(busy || err) && <div style={{ flex: "none", padding: "5px 12px", background: PAL.chrome, borderTop: "1px solid var(--chrome-divider)", color: err ? "var(--warn-text)" : PAL.chromeMuted, fontSize: 11, fontFamily: "system-ui, sans-serif" }}>{err || "Rendering…"}</div>}
+      {/* NEW-2 — the status bar says what is ACTUALLY happening, with counts, and goes quiet the
+          moment it stops. The old fixed "Rendering…" could (and did) outlive the work it named. */}
+      {(statusLine || err) && (
+        <div data-testid="stitch-status" data-phase={(prog && prog.phase) || (err ? "error" : "idle")}
+          style={{ flex: "none", padding: "5px 12px", background: PAL.chrome, borderTop: "1px solid var(--chrome-divider)", color: err ? "var(--warn-text)" : PAL.chromeMuted, fontSize: 11, fontFamily: "system-ui, sans-serif" }}>
+          {err || statusLine}
+        </div>
+      )}
     </div>
   );
 }

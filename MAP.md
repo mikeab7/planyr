@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-08-06 @ `845f313` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-08-06 @ `f1f39fd` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_435 source files mapped._
+_439 source files mapped._
 
 ## infra
 
@@ -120,6 +120,8 @@ _435 source files mapped._
   - _exports_: `colProfile`, `fitMatchLine`, `isolateLinePoints`, `ransacLine`, `rowClose`, `rowOpen`, `slideRefine`
 - **`src/shared/files/matchProject.js`** — Deterministic browser project matcher: searches sheet text for each named project's name/address/parcel/job identifiers, noisy-or scores, confident-single-else-needs-filing decision
   - _exports_: `decide`, `matchProjectInText`, `scoreProjectInText`
+- **`src/shared/files/middleTruncate.js`** — split a label into head + pinned tail so middle-ellipsis keeps the distinguishing end (NEW-4).
+  - _exports_: `middleEllipsis`, `splitLabel`
 - **`src/shared/files/ocrMatchLines.js`** — Recovers "MATCH LINE ... SHEET N" labels from raster scans by OCRing the page at 0/90/270 orientations and mapping found labels back to page space for autoStitch
   - _exports_: `framePointToPage`, `OCR_ORIENTATIONS`, `recoverMatchLines`
 - **`src/shared/files/pdfText.js`** — Lazy pdf.js PDF-to-deed-text reader: pulls the embedded text layer and reflows word-wrapped survey courses onto one logical line each so the metes-and-bounds parser can segment them
@@ -262,6 +264,8 @@ _435 source files mapped._
   - _exports_: `clampToBounds`, `dockAfterRelinquish`, `FLOAT_MIN_WIDTH`, `FLOAT_SIZE`, `initialFloatPos`, `reconcileForNarrow`, `shouldInspectorTakeDock`
 - **`src/shared/ui/FloatingPanel.jsx`** — NEW-1 poppable panels: a left-rail panel detached into a portal-to-body draggable card over the map (drag-clamp, session-remembered position, map pan/zoom isolation); composes PanelChrome
   - _exports_: `default (FloatingPanel)`
+- **`src/shared/ui/MiddleTruncate.jsx`** — CSS middle-ellipsis label: head ellipsizes, tail always drawn, full text on hover (NEW-4).
+  - _exports_: `default (MiddleTruncate)`
 - **`src/shared/ui/moduleAccent.js`** — MODULE_ACCENT: single source of truth for per-workspace accent hexes (Site/Schedule/Review/Library) as pure React-free constants
   - _exports_: `MODULE_ACCENT`
 - **`src/shared/ui/ModuleLoader.jsx`** — Per-module assembling skeleton loader: Site parcel-draws itself, Gantt bars/milestones/playhead animate; 250ms show-delay, reduced-motion fallback
@@ -877,6 +881,8 @@ _435 source files mapped._
   - _exports_: `BUCKET`, `buildDriveKey`, `clearDraft`, `clearReviewVersions`, `cloudConfigured`, `cloudReady`, `composeTitle`, `currentUid`, `deleteFromDrive`, `deleteReview`, `DISCIPLINES`, `downloadFromDrive`, `downloadSource`, `driveStreamSource`, `fetchFileFacts`, `fetchProjects`, `fetchReviews`, `fileNewReview`, `fmtDocDate`, `getShareLink`, `guessContentType`, `isStoredSource`, `keepaliveFlushReview`, `listDeletedReviews`, `listFileFacts`, `listProjects`, `listReviews`, `loadReview`, `markReviewPlaced`, `MAX_BYTES`, `newReviewId`, `newSourceId`, `purgeExpiredDeleted`, `purgeReview`, `pushFileToDrive`, `readDraft`, `reconcile`, `refileReview`, `restoreReview`, `REVIEW_SCHEMA`, `reviewRowFor`, `setProjectStatus`, `shouldDeleteBytes`, `STATUS_META`, `STATUSES`, `statusOf`, `storeSource`, `stripFileExt`, `upsertFileFacts`, `upsertReview`, `writeDraft`
 - **`src/workspaces/doc-review/lib/sessionBytes.js`** — In-memory session-lifetime FIFO cache of dropped source Files by srcId so a backdrop reopens while its upload is still keyless
   - _exports_: `_clearSessionBytes`, `cacheSourceBytes`, `getSourceBytes`, `hasSourceBytes`, `SESSION_BYTES_CAP`
+- **`src/workspaces/doc-review/lib/sheetOpenState.js`** — the Review "Opening <sheet>…" chip's three-way decision: opening / failed / backstop-expired (NEW-6).
+  - _exports_: `OPEN_CHIP_TIMEOUT_MS`, `sheetOpenState`
 - **`src/workspaces/doc-review/lib/sheetRead.js`** — Browser bridge from pdf.js to pure sheet engines: reads/groups pages, derives per-group stated/scale-bar calibration, flags not-to-scale sheets, with dormant OCR seam
   - _exports_: `groupCalibration`, `isNotToScale`, `readAndGroup`, `readSheets`, `SCALE_BAR_MIN_CONFIDENCE`, `scaleBarCalibration`, `statedCalibration`
 - **`src/workspaces/doc-review/lib/sourceState.js`** — Single owner of source-unavailable taxonomy (too-large/oversize/not-stored/signed-out/fetch-failed) plus the banner and file-warn copy each state maps to
@@ -885,6 +891,8 @@ _435 source files mapped._
   - _exports_: `dedupePlaced`, `isPlaced`, `placedKey`
 - **`src/workspaces/doc-review/lib/stitchGeom.js`** — Pure stitch geometry: similarity fwd/inv/solveM, sheet bbox, degenerate-align guards, reference-set + not-aligned-badge classifiers, and captured-origin pan
   - _exports_: `alignBadgeMetrics`, `alignBaselinesDegenerate`, `fwd`, `inv`, `isReferenceSet`, `measureOverUnaligned`, `MIN_ALIGN_BASE`, `panTo`, `sheetBBox`, `sheetContains`, `solveM`
+- **`src/workspaces/doc-review/lib/stitchLoadState.js`** — honest stitcher load status line + the deferred-add queue for clicks made during a load (NEW-1/NEW-2).
+  - _exports_: `deferredAddNotice`, `isLoading`, `loadStatusLine`, `mergeAddQueue`, `PHASE`, `queueKey`
 - **`src/workspaces/doc-review/lib/takeoff.js`** — Re-export shim forwarding measure/geometry/markup-model symbols to the shared markup engine so legacy doc-review import paths still resolve
   - _exports_: `canCommitMeasure`, `centroidOf`, `dist`, `measureLabel`, `measureValue`, `midOfPath`, `MIN_MEASURE_PTS`, `pathLength`, `pointInPoly`, `polyArea`, `rollup`, `sanitizeMarkup`, `sanitizeMarkups`
 - **`src/workspaces/doc-review/lib/usePersistence.js`** — useReviewPersistence hook: first-edit debounced cloud save + synchronous localStorage mirror, honest save badge, conflict/read-only lockout, unload flush

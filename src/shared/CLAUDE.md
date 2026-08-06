@@ -21,6 +21,10 @@ into every consumer. Root rules in `/CLAUDE.md`; deep detail in `/docs/REFERENCE
   today; grow additively, not a planner rewrite.
 - `files/` — `chunkedUpload.js` (any-size chunked Drive upload via /api/uploads/* — pure chunk
   math + the retry/resume loop, B409 rework) + `uploadQueue.js` (the upload-tray queue model).
+  `middleTruncate.js` — split a label into head + a PINNED tail, so a list of names that differ only
+  at the end ("… - p1" … "- p32") stays readable when it doesn't fit; plain CSS ellipsis cuts exactly
+  the distinguishing part. Rendered by `ui/MiddleTruncate.jsx` (flexbox, not measurement — correct at
+  any width, through a rail drag or a zoom, with no measure/re-render loop).
   Pure PDF/sheet parsers: `titleBlockParse.js`, `sheetMeta.js`, `sheetTitleSet.js`
   (set-aware sheet-title refinement — cross-page boilerplate + known-project demotion, B659),
   `sheetGroups.js`, `sheetNotes.js`, `detailRefs.js`, `matchProject.js`, `sheetScale.js`,
