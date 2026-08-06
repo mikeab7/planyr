@@ -248,6 +248,14 @@ import { buildChangeSummaryRows, gapProposalNote, bermCapProposalNote } from "./
  * ONLY inside the pond inspector and the Optimize card, both reached by an explicit user action,
  * so a plain Site load has no use for it. Both call sites wrap it in one shared Suspense. */
 const PondSection = lazy(() => import("./components/PondSection.jsx"));
+/* Storage on this device (NEW-3/B1429) — the two-tier census + the safe clear-map-data action.
+ * It lives on the SITE ROUTE, not in the shared account panel or the header gear: both of those
+ * land in the entry chunk that EVERY route downloads, and even a lazy stub there measured +0.5 KB
+ * on all four routes and pushed `bundle.notesRouteJsBytes` past its ceiling in CI. Here it costs
+ * the other three routes nothing, it is reachable SIGNED OUT (which the account panel is not, and
+ * a signed-out user shares the same ~5 MB ceiling with no cloud copy to fall back on), and it sits
+ * next to Save now and Version history — the two things it explains when a save fails. */
+const StoragePanel = lazy(() => import("../../shared/storage/StoragePanel.jsx"));
 import { pondScreeningGuards } from "./lib/pondScreeningGuards.js";
 import { geometricMaxBermFt, drainageBermCapFt, bindingBermCap, bermNeedsInlets, INLETS_THROUGH_BERM_NOTE, inwardBermSplit, crestRingForBerm, EXT_BERM_SLOPE, INFLOW_HEAD_ALLOWANCE_FT } from "./lib/inwardBerm.js";
 import { gisCache } from "./lib/gisCache.js";
@@ -3353,6 +3361,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // free up space" banner instead of the red "at risk" one — honest about exactly where the work lives.
   const [savedToCloudOnly, setSavedToCloudOnly] = useState(false);
   const [saveNowMsg, setSaveNowMsg] = useState("");
+  const [storageOpen, setStorageOpen] = useState(false);  // NEW-3 — the on-device storage census dialog
   // True when a cloud write was REJECTED because another session advanced this project since
   // we loaded it (B314 optimistic concurrency). Distinct from cloudSaveFailed (a write that
   // didn't reach the cloud, retries on next edit): a conflict won't clear by retrying — the
@@ -15800,6 +15809,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             title="Restore an earlier automatically-saved version of this plan">
             <span aria-hidden style={{ flex: "none" }}>↺</span><span>Version history…</span>
           </button>
+          <button style={{ ...menuItem(false), marginTop: 2, display: "flex", alignItems: "center", gap: 8 }} onClick={() => { closeHdrMenus(); setStorageOpen(true); }}
+            title="How much room this app is using on this device, and what's safe to clear" data-testid="storage-menu-item">
+            <span aria-hidden style={{ flex: "none" }}>🗄</span><span>Storage on this device…</span>
+          </button>
         </AnchoredMenu>
     </div>
   );
@@ -22287,6 +22300,19 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         </div>
       )}
       {/* Version history (automatic local backups, B126) — restore an earlier saved version */}
+      {storageOpen && (
+        <div onClick={() => setStorageOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 3000, background: "rgba(20,18,15,0.55)", display: "grid", placeItems: "center" }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ background: SURF_RAISED, borderRadius: 14, boxShadow: "0 20px 60px rgba(0,0,0,0.35)", padding: 22, width: 420, maxWidth: "92vw", maxHeight: "82vh", overflowY: "auto" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 2 }}>
+              <h2 style={{ margin: 0, fontSize: 16, color: PAL.ink }}>Storage</h2>
+              <button className="gbtn" onClick={() => setStorageOpen(false)} style={{ ...chip }}>Close ✕</button>
+            </div>
+            <Suspense fallback={<div style={{ fontSize: 12, color: PAL.muted, padding: "18px 0" }}>Checking storage…</div>}>
+              <StoragePanel />
+            </Suspense>
+          </div>
+        </div>
+      )}
       {versionsOpen && (
         <div onClick={() => setVersionsOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 3000, background: "rgba(20,18,15,0.55)", display: "grid", placeItems: "center" }}>
           <div onClick={(e) => e.stopPropagation()} style={{ background: SURF_RAISED, borderRadius: 14, boxShadow: "0 20px 60px rgba(0,0,0,0.35)", padding: 22, width: 460, maxWidth: "92vw", maxHeight: "82vh", overflowY: "auto" }}>

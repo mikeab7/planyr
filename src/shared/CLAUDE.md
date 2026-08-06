@@ -65,7 +65,9 @@ into every consumer. Root rules in `/CLAUDE.md`; deep detail in `/docs/REFERENCE
   mis-diagnosed the crisis). `storageReclaim.js` acts on those declarations and nothing else — it refuses
   the whole pass if a class claims to be reclaimable with no way back, so a reference image with no cloud
   copy survives any pressure (B474). `originStore.js` is a dependency-free IndexedDB accessor and
-  `StoragePanel.jsx` the UI. **⛔ Nothing here may import a workspace module** — this is chrome on every
+  `StoragePanel.jsx` the UI — **mounted from the Site route's plan menu, NOT from `AuthPanel` or the
+  header gear**: those land in the entry chunk every route downloads, and even a lazy stub there cost
+  +0.8 KB on all four routes and breached the Notes route's ceiling in CI. **⛔ Nothing here may import a workspace module** — this is chrome on every
   route, so a module shared with the planner's boot path gets hoisted into a chunk every route downloads
   (measured: importing `gisCache` put 11.3 KB on a plain Site load and breached three bundle budgets).
   That is why the cache is cleared by NAMESPACE and told about it through a window event.

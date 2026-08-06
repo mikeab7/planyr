@@ -22,16 +22,31 @@ const MEASURED_TILES = [
 ];
 
 // Seed the legacy cache namespace + a stand-in for the owner's saved work, BEFORE the app boots.
-async function seedLegacyCache(page) {
-  await page.addInitScript(({ ns, tiles }) => {
+// A minimal but real saved plan, so the app boots INTO the planner (the plan menu — and with it
+// Save now / Version history / Storage — only exists once a plan is open, which is exactly the
+// state a user whose save is failing is in).
+const SEED_PLAN = { id: "e2e", groupId: "e2e", site: "E2E site", name: "Plan 1", origin: { lat: 29.78, lon: -95.82 }, parcels: [], els: [], updatedAt: 1 };
+
+async function seedLegacyCache(page, { withPlan = true } = {}) {
+  await page.addInitScript(({ ns, tiles, PLAN, withPlan }) => {
     try {
       for (const [k, bytes] of tiles) {
         localStorage.setItem(ns + k, JSON.stringify({ data: "x".repeat(bytes), ts: Date.now() - 3_600_000 }));
       }
-      localStorage.setItem("planarfit:sites:v1", JSON.stringify({ e2e: { id: "e2e", name: "Plan 1", site: "E2E" } }));
-      localStorage.setItem("planarfit:sites:history:v1", JSON.stringify({ e2e: [] }));
+      if (withPlan) {
+        localStorage.setItem("planarfit:sites:v1", JSON.stringify({ e2e: PLAN }));
+        localStorage.setItem("planarfit:sites:history:v1", JSON.stringify({ e2e: [] }));
+        localStorage.setItem("planarfit:currentSite:v1", "e2e");   // boot straight into the planner
+      }
     } catch (_) { /* a store that refuses the seed just makes the assertion below trivial */ }
-  }, { ns: LEGACY_NS, tiles: MEASURED_TILES });
+  }, { ns: LEGACY_NS, tiles: MEASURED_TILES, PLAN: SEED_PLAN, withPlan });
+}
+
+/* Open the storage dialog: plan menu (the ▾ beside the plan name) → "Storage on this device…". */
+async function openStoragePanel(page) {
+  await page.getByTitle("Switch or rename plan").first().click();
+  await page.getByTestId("storage-menu-item").click();
+  await expect(page.getByTestId("storage-panel")).toBeVisible({ timeout: 15_000 });
 }
 
 const census = (page) => page.evaluate((ns) => {
@@ -66,6 +81,7 @@ test.describe("storage tiers (logged out)", () => {
   });
 
   test("nothing the app writes afterwards goes back into the small store's cache namespace", async ({ page }) => {
+    await seedLegacyCache(page, { withPlan: false });
     await page.goto("/");
     await expect(moduleTab(page, "site-planner")).toBeVisible();
     // Let the planner settle (layer probes, boot effects) before checking.
@@ -78,8 +94,11 @@ test.describe("storage tiers (logged out)", () => {
     await seedLegacyCache(page);
     await page.goto("/");
     await expect(moduleTab(page, "site-planner")).toBeVisible();
-    // Signed out, the storage readout lives in the row-1 settings gear beside the theme picker.
-    await page.getByRole("button", { name: /^Settings$/i }).first().click();
+    // The storage readout lives on the SITE route, in the plan menu beside Save now / Version
+    // history — deliberately not in the shared account panel or the header gear, both of which sit
+    // in the entry chunk every route downloads (B1429). Reachable signed OUT, which is why this
+    // spec can prove it at all.
+    await openStoragePanel(page);
     const panel = page.getByTestId("storage-panel");
     await expect(panel).toBeVisible({ timeout: 15_000 });
 
@@ -96,10 +115,10 @@ test.describe("storage tiers (logged out)", () => {
   });
 
   test("the clear-map-data action exists and never offers to clear irreplaceable classes", async ({ page }) => {
+    await seedLegacyCache(page);
     await page.goto("/");
     await expect(moduleTab(page, "site-planner")).toBeVisible();
-    await page.getByRole("button", { name: /^Settings$/i }).first().click();
-    await expect(page.getByTestId("storage-panel")).toBeVisible({ timeout: 15_000 });
+    await openStoragePanel(page);
     const btn = page.getByTestId("clear-map-cache");
     await expect(btn).toBeVisible();
     // Only the re-downloadable classes are ever labelled as such.

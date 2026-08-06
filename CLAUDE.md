@@ -446,7 +446,7 @@ rules are binding shorthand, not optional style. (Full-text home so briefs stay 
      act on them, and it refuses the whole pass if any class claims to be reclaimable with no way back.
   - **Corollary — MEASURE, don't reason.** Nothing knew its own size before B1429, which is why the first
     diagnosis of this crisis blamed IndexedDB and was wrong by three orders of magnitude. Both tiers are
-    now surfaced (account → Settings, and the signed-out ⚙) and both ride every storage-failure telemetry
+    now surfaced (the planner's plan menu → Storage, reachable signed-out) and both ride every storage-failure telemetry
     row, tier-labelled `local_*` / `idb_*`. Guards: the repo-root `test/` suites **storageReclaim** (incl.
     the raster-with-no-cloud-copy case) and **gisCache**.
 - **ROWS-CANONICAL-ON-SEED** — **Which ledger wins when a plan is opened, decided explicitly (B1113,
