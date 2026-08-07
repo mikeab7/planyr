@@ -34,8 +34,25 @@
  * is detected; see `blockCollision` below).
  *
  * THE NUMBERS. `size` 16 ids per block × `slots` 512 blocks = an 8,192-id span sitting just above
- * origin/main's current maximum. With main at B1449 that is B1456–B9647: still four digits, still
- * readable, and it moves up as main moves up rather than inflating without bound.
+ * origin/main's current maximum, moving up as main moves up rather than inflating without bound.
+ *
+ * ⚠ CORRECTED 2026-08-07 (B226402) — THE FOUR-DIGIT PROMISE DID NOT SURVIVE THE OUTAGE THIS FILE
+ * WAS WRITTEN TO END, and the original wording is left here so the correction is legible rather
+ * than tidied away. It read: *"With main at B1449 that is B1456–B9647: still four digits, still
+ * readable."* That was true when it was written and is now false. The ring anchors ABOVE main's
+ * maximum, and main's maximum absorbed the inflation era when those branches merged: measured
+ * against `origin/main` at `87f0438` on 2026-08-07 it is **B225,984** (V23,409), so the ring runs
+ * from B225,995 to about B234,180 and a reserved block is **six digits** — this branch's is
+ * B226400–B226415. Repro: `node scripts/check-mint.mjs --ci` on any branch, and read the block it
+ * reports. (Note the distinction the report itself draws: "highest assigned anywhere" was B227,475
+ * that day, which includes an id held by an unmerged peer. The ring floor follows main's maximum,
+ * not that one.)
+ *
+ * The width is a CONSEQUENCE of main's maximum, never a guarantee this file can make — it will not
+ * come back down, because ids are never reused (B1140: gaps are free, and reuse is what makes a
+ * grep ambiguous). Nothing counts or iterates ids, so digit count is a readability preference and
+ * costs nothing; the correction is here because a header describing a state the repo has left
+ * behind is how the next reader stops trusting the rest of the file.
  *
  * ─────────────────────────────────────────────────────────────────────────────────────────────
  * STEEL-MAN (required by the owner before this shipped). Each argument is stated at its strongest

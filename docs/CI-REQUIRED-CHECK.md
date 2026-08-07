@@ -1,6 +1,8 @@
 # The 2026-08-06 merge outage — why no pull request could merge, and what now prevents it
 
-**Status:** cause identified with evidence, fix shipped (B6864–B6867).
+**Status:** cause identified with evidence, fix shipped (B6864–B6867). Corrected 2026-08-07
+(B226400 — the 30-minute lag is incident-scoped, not standing; §2, §3, §4) and guarded against
+recurrence of the *shape* rather than the instance (B226401 — §3).
 **Symptom:** seven open pull requests (#928, #930–#935), every one showing
 `build — Expected — Waiting for status to be reported`, Required. Auto-merge armed on all of them and
 unable to fire. No merge control offered to anyone — the owner verified this by toggling auto-merge
@@ -58,41 +60,87 @@ and while this fix was being written it passed **B100002** — over 98,000 ids o
 one of them a real collision. One PR's ids moved six times:
 `B1467 → B1479 → B1501 → B1601 → B1801 → B3001 → B9001`.
 
-### Stage B — the run is created about 30 minutes after the push
+### Stage B — that afternoon, the run was created about 30 minutes after the push
 
-This is the half that turns a bad rule into an outage, and it is the half every previous session
+This is the half that turned a bad rule into an outage, and it is the half every previous session
 misread — including, at first, this one.
 
-A push does not produce its `pull_request` workflow run promptly. Measured on PR #931: the
-`Nudge CI` commit `94c4efb` was pushed at **22:29:23Z**, and its `build` check run did not start
-until **22:59:27Z** — **thirty minutes later**. The same gap appears on #933 (pushed 22:29, build
-22:59) and on runs 2338/2339, whose `pull_request` runs were created 29 and 34 minutes after
-`workflow_dispatch` runs had already completed on the same SHAs.
+During the incident a push did not produce its `pull_request` workflow run promptly. Measured on
+PR #931: the `Nudge CI` commit `94c4efb` was pushed at **22:29:23Z**, and its `build` check run did
+not start until **22:59:27Z** — **thirty minutes later**. The same gap appears on #933 (pushed
+22:29, build 22:59) and on runs 2338/2339, whose `pull_request` runs were created 29 and 34 minutes
+after `workflow_dispatch` runs had already completed on the same SHAs.
 
 During that half-hour the PR shows exactly what the owner saw: the required context reads
 `Expected — Waiting for status to be reported`, with no merge control available. Looking at a PR
 inside that window is indistinguishable from a check that will never report, which is why this was
 repeatedly diagnosed as permanent suppression. **It is a delay, not a suppression.**
 
+> **⚠ CORRECTED 2026-08-07 (B226400) — THE LAG IS INCIDENT-SCOPED, NOT A PROPERTY OF THIS
+> REPOSITORY.** The measurements above are real and are kept: that afternoon, runs genuinely took
+> half an hour to appear. What was wrong was the *tense*. This document went on to state the delay
+> as a standing fact — "the ~30-minute delay between a push and its workflow run is GitHub-side,
+> nothing in this repository can shorten it" — and that sentence, read the next day, is false.
+>
+> Measured 2026-08-07 from the owner's signed-in session, eight samples across both event types:
+>
+> | Event | SHA | Pushed / committed | Run started | Lag |
+> |---|---|---|---|---|
+> | push → main | `87f0438` | 00:52:01Z | 00:52:04Z | **3 s** |
+> | push → main | `020265f` | 00:37:10Z | 00:37:14Z | **4 s** |
+> | push → main | `fdcb02d` | 00:29:05Z | 00:29:09Z | **4 s** |
+> | push → main | `ad09957` | 00:21:12Z | 00:21:15Z | **3 s** |
+> | push → main | `cd9c94c` | 00:12:51Z | 00:12:56Z | **5 s** |
+> | PR #932 synchronize | `5f89818c` | 00:26:55Z | 00:27:06Z | **11 s** |
+> | PR #939 opened | `a45af00` | 00:18:01Z | 00:18:27Z | **26 s** |
+> | PR #940 opened | `4edf282` | 00:34:10Z | 00:34:54Z | **44 s** |
+>
+> **Method, and where each figure is exact.** For a squash merge GitHub creates the merge commit at
+> the moment it merges, so that commit's **committer** timestamp on `origin/main` *is* the push
+> moment — the five push rows are exact. For a `pull_request` event the committer timestamp is when
+> the commit was written locally, which precedes the push by however long the session spent between
+> the two, so those three rows are **upper bounds**. Every figure is therefore at or above the true
+> lag, and the largest of them is 44 seconds. Repro: compare each merge commit's committer timestamp
+> on `origin/main` against its `build` run's `run_started_at`.
+>
+> So the correct statement is **incident-scoped**: during the four-hour Actions outage of 2026-08-06
+> and the backlog it left behind, run creation lagged pushes by about half an hour. Ordinarily it is
+> seconds. This matters for the advice in §4, which used to tell you to sit through half an hour of
+> `Expected` on faith.
+
 ### Why the two together are lethal
 
 Per pull request, the loop ran like this:
 
 1. Mint ids against a freshly fetched `main` — correct at push time.
-2. Push. Wait ~30 minutes for the run to be created.
-3. The run fails on `check-mint`, because during those 30 minutes other sessions pushed higher ids
-   and the high-water mark moved past yours.
+2. Push. Wait for the run to be created (that afternoon, ~30 minutes).
+3. The run fails on `check-mint`, because during the wait other sessions pushed higher ids and the
+   high-water mark moved past yours.
 4. Renumber upward, push, go to 2 — raising the mark for everyone else on the way past.
 
-The feedback loop's period (~30 minutes) is far longer than the rate at which the mark advances, so
-**no branch can ever satisfy a condition defined by a global maximum.** This is a livelock, not a
-deadlock: every session was making progress, and none of it could ever converge. Nothing merged, so
-no id range was ever released, so the mark only climbed.
+**The ratchet had no fixed point at ANY period, and that is the claim that survives the correction
+above.** The old rule passed a branch only if its new ids were strictly above `claimedMax`, the
+highest id held by *any other* in-flight branch. For two branches A and B that reads: A is green iff
+`a > b`, and B is green iff `b > a`. **Both conditions cannot hold at once** — at most one branch in
+the whole in-flight set can be green, and the moment a red one takes the only remedy the rule
+offers, it becomes the maximum and turns the green one red. With `n` branches in flight, `n − 1` are
+red by construction, and every attempt to fix one breaks another. Merging is the only exit, and
+merging requires being green when your build actually runs.
+
+This is period-independent, which is what makes it the stronger statement. **Set the delivery lag to
+the three seconds we now measure and the same rule still livelocks** — it would simply have burned
+through its ninety-eight thousand ids in minutes instead of hours. The lag is not what made the rule
+unsatisfiable; it only decided how stale each verdict was on arrival, and how long the loop ran
+before a human noticed. Any rule that requires *every* participant to hold the strict maximum of a
+quantity they collectively define has no solution, at any speed.
 
 An earlier session had already measured the lag and written it into #931's description. Its
 conclusion — *"the final block was chosen ~850 clear of the mark so it survives the lag rather than
-races it"* — is the ratchet, correctly reasoned from a correct observation. Escaping upward is the
-only move the rule allows, and it is the move that starves everyone else.
+races it"* — is the ratchet, correctly reasoned from a correct observation, and it is the tell: the
+only move the rule allows is to escape upward, and that is the move that starves everyone else. Note
+that it treats the problem as a race to be outrun, which is exactly the mistake the period-
+independent argument corrects — there was no lead large enough, because the finish line is defined
+by wherever the other runners are.
 
 **A four-hour Actions infrastructure outage** earlier that day (main's own push run failed at
 "Set up job"; a `workflow_dispatch` sat 15 minutes with no runner) is what let seven branches
@@ -143,9 +191,22 @@ base branch) each go red.
 
 ### What is *not* fixed, stated plainly
 
-The ~30-minute delay between a push and its workflow run is GitHub-side. Nothing in this repository
-can shorten it. What has changed is that it no longer costs anything: the gate's verdict is now
-stable over time, so waiting out the lag produces the same answer as being fast.
+**Delivery time is GitHub's, and it is not a constant.** Ordinarily a run appears within seconds of
+the push — measured 2026-08-07 across eight consecutive pushes, 3–5 s for a push to `main` and under
+a minute for a `pull_request` event (table in §2). When Actions is degraded, as it was on
+2026-08-06, it can stretch to half an hour. Nothing in this repository shortens either case.
+
+**What has changed is that neither case costs anything.** The gate's verdict no longer depends on
+what other branches did while you waited: an id unclaimed at push time is still unclaimed half an
+hour later, so a slow run produces the same answer as a fast one. That is the whole point of
+removing the ratchet, and it is why the correction in §2 changes no conclusion in this document —
+only the advice in §4.
+
+**Also not fixed, and deliberately so:** the gate still *reads* peer branches, to name the branch you
+would have overlapped with. That is reporting, not judgement — a peer-held id is an advisory
+(B36051), never fatal. The invariant that keeps it that way is now a guard rather than a memory:
+`ui-audit/lib/mintFatality.mjs` + `test/mintFatality.test.js` (B226401) fail the build if any fatal
+mint verdict is ever again a function of an aggregate of peer state.
 
 ---
 
@@ -179,9 +240,18 @@ Prefer the merge: it puts the corrected `check-mint.mjs` into the branch itself,
 and CI agree. Expect a conflict in `BACKLOG.md` (main's copy moved), and resolve it by keeping both
 sides' items — **do not renumber anything to resolve it.**
 
-Then **wait out the delivery lag before concluding anything** — a PR showing `Expected` for the first
-half hour is normal and is not evidence of a fault. That sentence is the one that would have
-prevented six renumbers.
+Then **give the run time to appear before concluding anything.** *(Restated 2026-08-07, B226400 —
+the earlier wording said "a PR showing `Expected` for the first half hour is normal", which was true
+during the incident and is misleading on an ordinary day.)* Normally the run starts within seconds,
+so:
+
+- **under a minute or two of `Expected` is just delivery.** Do nothing.
+- **longer than that is worth LOOKING at, not waiting out.** Check whether the run exists at all
+  (`actions_list list_workflow_runs` for the branch); if runs are being created but sitting unstarted
+  across the whole repository, Actions is backed up and half an hour is again the right expectation.
+- **whatever the answer, do not renumber.** Renumbering in response to a slow check is what produced
+  six rounds of it, and under the current gate it cannot help — the verdict does not change with
+  time.
 
 Do not clear a backlog by disabling the required check or merging something whose build has not
 actually passed.
