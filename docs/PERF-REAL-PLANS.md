@@ -324,6 +324,7 @@ Four variables, one change each, run through `ui-audit/annotation-arms.mjs --pla
 | `no-easements` | the 3 pipeline easements removed, everything else held |
 | `one-pond` | the second pond removed, easements kept |
 | **`unrestricting`** | **easements DRAWN but `restrictsBuildings`/`restrictsPaving` forced false** |
+| **`simple-ponds`** | **added after the results below — pond COUNT held at 2, both rings coarsened to 7 points, bounding boxes preserved exactly (§5.5)** |
 
 ⛔ **`unrestricting` is the arm that can discriminate, and it was designed before any number
 existed.** An easement is two things at once: a banded polygon that gets **drawn**, and a constraint
@@ -377,6 +378,11 @@ between the two plans and they are not the cause.
 
 #### Finding 3 — the PONDS are implicated, and it is the one arm that moved
 
+> ⛔ **RE-READ BY §5.5.** This finding is correct about *where* the cost is and wrong about *what it
+> scales with*. `simple-ponds` — pond count held at two, rings coarsened — recovers **89.3%**, so what
+> `one-pond` was buying was the 20 vertices it removed alongside the pond, not the pond. Read this
+> section with §5.5; it is kept verbatim because a measurement is a historical fact about what was run.
+
 Removing the second pond — **one element out of fifty-two** — cuts main-thread work **27.4%**,
 **CHEAPER in 6/6 paired reps (p = 0.031)**, median −27.1%.
 
@@ -407,27 +413,70 @@ floor for the whole battery. The floor is reported verbatim and unchanged; the p
 what carries the result. Main-thread work's floor was fine (±4.6%), which is why the work column
 separates on both estimators.
 
-#### What is NOT attributed
+#### What is NOT attributed — *superseded by §5.5, which attributes almost all of it*
 
-Easements: **0%**. The second pond: **~27%**. That leaves roughly **two thirds of a ten-fold gap
-unexplained**, and this document does not guess at it. The named next steps are §5.5's ring-complexity
-arm and, beyond it, the 47-vs-38 rotated-element difference that no arm in this programme has ever
-varied.
+At the close of this battery: easements **0%**, the second pond **~27%**, and roughly two thirds of a
+ten-fold gap unexplained. **§5.5 closes that gap** — the missing two thirds was in the same place the
+27% was, and `one-pond` was only sampling it. This paragraph is kept rather than rewritten because a
+report that quietly edits away what it did not yet know stops being evidence.
 
-### 5.5 The arm this result demands, and what it would settle
+### 5.5 ⛔ RING COMPLEXITY. Not pond count, not element count — and it is nearly the whole gap
 
-`one-pond` changed two things at once — it removed a pond AND 20 ring vertices. The next arm holds
-pond COUNT at two and **decimates both rings toward the fast plan's 7 points**, which separates:
+`one-pond` changed two things at once: it removed a pond **and** 20 ring vertices. This arm holds pond
+**COUNT at two** and decimates both rings to the fast plan's **7 points**, with each pond's bounding
+box **preserved exactly** — a ring that shrinks has also changed its painted area, its label-fit
+question and its overlap with every neighbour, which would trade three confounds for one removed.
 
-- **if simplified rings recover the time** → the cost is ring COMPLEXITY, it lands on the
-  `interiorFitter` / pond-ledger path B221761 and B221763 already own, and the fix is engineering
-  (cheaper fit, coarser ring for the fit question) with **nothing asked of the owner**;
-- **if they do not** → the cost is per-POND, and the question moves to what a pond does that a
-  building does not.
+#### Results — 4 arms × 6 reps, interleaved, 24 runs, 0 suppressed
 
-⛔ **Neither outcome licenses "draw fewer or simpler ponds."** Those are his detention basins; their
-shape is the design. A separating arm names a cost to go make cheaper — the same rule §2.2's rotation
-arm is held to.
+| arm | **main-thread work** | vs baseline | render | canvas nodes | paired sign test (work) |
+|---|---:|---:|---:|---:|---|
+| `quiddity` (baseline, **SLOW**) | **55,760 ms** | — | 9,330 | 752 | — |
+| `one-pond` | 39,505 ms | −29.2% | 10,017 | 742 | 6/6, p = 0.031 |
+| **`simple-ponds`** | **5,955 ms** | **−89.3%** | **3,328** | **752** | **6/6, p = 0.031** |
+| `original` (**FAST**) | 4,940 ms | −91.1% | 2,806 | 598 | 6/6, p = 0.031 |
+
+**Coarsening two rings recovers 89.3% of the work, out of a 91.1% total gap.** Simplifying the rings
+gets the slow plan to within **a thousand milliseconds of the fast plan** — the same plan, the same
+52 elements, the same 3 easements, the same 2 ponds, the same **752 canvas nodes** and the same 30
+text nodes. Nothing was removed from the picture; 54 vertices were.
+
+Render separates here too — **−64.3%, 6/6, p = 0.031** — which it could not do in §5.4, because this
+battery had no contaminated rep and its floor came out at a healthy ±13.2% instead of ±116.3%.
+
+⚠ **Regime note, stated because the absolutes look different from §5.4's.** This battery ran with
+**no basemap tiles**, so the render column and the compositor-layer count (5, not 330) are not
+comparable across the two tables. The *work* column is: the two shared arms reproduced at
+**55,760 vs 55,876 ms** (`quiddity`) and **4,940 vs 5,157 ms** (`original`) — an independent
+replication of the headline result to within a few per cent, on a different day and a different
+tile regime.
+
+#### What this settles, and what it re-reads
+
+1. **The cost is ring COMPLEXITY.** It lands on the `interiorFitter` / pond-ledger path **B221761**
+   and **B221763** already own, and the fix is engineering — a cheaper fit, or a coarser ring for the
+   fit question only — with **nothing asked of the owner**.
+2. **⛔ `one-pond`'s −27% has to be RE-READ, and it is a correction to §5.4's Finding 3.** That arm
+   removed a pond *and* its 20 vertices; this one shows the vertices were what it was buying. Pond
+   **count** is not the cost — the slow plan and the fast plan both draw ponds. Finding 3's own
+   caveat was right and its headline was the wrong emphasis: it is not "a pond is worth 400
+   elements", it is **"a vertex is expensive, and ponds are where the vertices are."**
+3. **The scale of it, since 54 vertices bought 49,806 ms.** That is roughly **920 ms per vertex
+   removed** — a figure no per-element or per-node model produces, and one that points at something
+   **superlinear in ring vertex count** rather than at a fixed per-pond cost. This report does not
+   name the mechanism; it names where to instrument next.
+4. **Everything else in the pair stays refuted.** The raster is eliminated by identity (§5.1),
+   easements by two independent arms (§5.4 Finding 2), element count by arithmetic (§5.2) — and now
+   pond count by this arm. What survives is 54 ring vertices.
+
+⛔ **This does NOT license "draw fewer or simpler ponds."** Those are his detention basins; their
+shape is the design, and it is surveyed. A separating arm names a cost to go make cheaper — the same
+bar §2.2's rotation arm is held to.
+
+⚠ **What it still does not settle.** *Which* per-vertex path is superlinear. `interiorFitter`'s
+inscribed-rectangle enumeration and the pond ledger's rebuild are both candidates, both are on open
+items, and neither has been instrumented against a real 48-point ring. That is the next arm, and it
+wants the recompute probe (§`VIEW-INDEPENDENT-ONCE`) rather than another fixture subtraction.
 
 ---
 
@@ -465,6 +514,14 @@ xvfb-run -a --server-args="-screen 0 1600x1000x24" \
 # the annotation arms, on Sylvestri
 xvfb-run -a --server-args="-screen 0 1600x1000x24" \
   node ui-audit/annotation-arms.mjs --fake-tiles --dpr 2.15 --reps 6
+
+# THE BAIN PAIR (§5) — his own A/B plus the four subtraction arms
+xvfb-run -a --server-args="-screen 0 1600x1000x24" \
+  node ui-audit/annotation-arms.mjs --plan bain-pair --fake-tiles --dpr 2.15 --reps 6
+
+# the ring-complexity arm alone (§5.5) — note NO --fake-tiles, which is the regime that table ran in
+node ui-audit/annotation-arms.mjs --plan bain-pair \
+  --arms quiddity,one-pond,simple-ponds,original --reps 6
 
 # re-pull either plan from Supabase (the dump is an INPUT and must never be committed)
 node scripts/plan-dump-to-fixture.mjs <dump.json> ui-audit/fixtures/<name>.json

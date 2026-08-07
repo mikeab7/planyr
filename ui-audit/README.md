@@ -99,6 +99,12 @@ again by accident.
   are eliminated for Bain **by identity**, with no floor, no sign test and no reps. Drive it with
   `annotation-arms.mjs --plan bain-pair`; the identity is asserted in `test/realPlanFixtures.test.js`,
   so a re-pull that breaks it goes red rather than letting a refuted hypothesis quietly return.
+  ⛔ **The pair has since ANSWERED the question it was built for, and the answer is RING VERTEX
+  COUNT.** The `simple-ponds` arm holds pond count at two, the element count at 52, the easements at
+  three and the canvas at 752 nodes, and coarsens both pond rings to the fast plan's 7 points with
+  each bounding box preserved exactly — **recovering 89.3% of a 91.1% gap, 6/6 paired reps,
+  p = 0.031.** Removing 54 vertices bought 49,806 ms. Raster, easements, element count and pond count
+  are all refuted for this pair; what survives is the vertices. `docs/PERF-REAL-PLANS.md` §5.5.
 - **`annotation-arms.mjs`** — the same design on the axis every plan ever measured here was ZERO on.
   Sylvestri's 16 callouts, 6 markups and 2 measures, decomposed per kind against the baseline. Its guard is
   the analogue of `decodeFault`: an arm whose annotations never reached the canvas is SUPPRESSED, never
