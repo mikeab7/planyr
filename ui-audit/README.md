@@ -89,6 +89,16 @@ again by accident.
   does not have: **paint / raster / decode / composite**, read from Chromium's tracing. The existing
   un-quantised work figure is `Script + Layout + RecalcStyle` — all main-thread work that happens *before* a
   pixel exists — so it is structurally blind to blending. Findings in `../docs/PERF-BAIN.md`.
+- **`fixtures/bain-quiddity.json`** — site `smshwnnijjfi`, "Concept A - Quiddity Hydrologic Analysis":
+  the **SLOW half of the owner's own A/B**, and the strongest experiment in this programme.
+  52 elements · 2 parcels · **3 pipeline easements** (18/28/4 pts) · 2 ponds carrying **68 vertices**.
+  ⛔ **Its value is the PAIR, not the file.** It shares with `bain-concept-original.json` (which he
+  calls fast) **the same physical sheet overlay** — same id, same `storageKey`, same 1728 × 2592 @ 0.55
+  at rotation 1.5° — plus the same underlay, origin, county and byte-identical settings. **A shared
+  cause cannot explain a difference**, so the raster, its alpha, its rotation and B749's PDF re-raster
+  are eliminated for Bain **by identity**, with no floor, no sign test and no reps. Drive it with
+  `annotation-arms.mjs --plan bain-pair`; the identity is asserted in `test/realPlanFixtures.test.js`,
+  so a re-pull that breaks it goes red rather than letting a refuted hypothesis quietly return.
 - **`annotation-arms.mjs`** — the same design on the axis every plan ever measured here was ZERO on.
   Sylvestri's 16 callouts, 6 markups and 2 measures, decomposed per kind against the baseline. Its guard is
   the analogue of `decodeFault`: an arm whose annotations never reached the canvas is SUPPRESSED, never

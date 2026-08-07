@@ -5,6 +5,7 @@ import {
   redactPlan, fixtureCensus, armFixture, fixtureSite, fixtureSeed, rasterIdbPlan,
   rasterSpecOf, specDecodedBytes, specFootprintFt, paintedRasters, heldButUnpaintedRasters,
   overlayIdbKey, underlayIdbKey, RASTER_ARMS, PRIVATE_FIELDS,
+  BAIN_PAIR_ARMS, bainPairArmFixture,
 } from "../ui-audit/lib/planFixture.mjs";
 import { synthRasterPng, decodedBytes, megapixels, base64Len, hash32, rasterFill } from "../ui-audit/lib/synthRaster.mjs";
 import { encodeRgbPng } from "../ui-audit/lib/fakeTile.mjs";
@@ -288,6 +289,78 @@ describe("synthRaster produces real, distinct, size-targeted PNGs", () => {
   it("base64Len matches what a real encode produces", () => {
     for (const n of [1, 2, 3, 4, 100, 1001]) {
       expect(base64Len(n)).toBe(Buffer.alloc(n).toString("base64").length);
+    }
+  });
+});
+
+/* NEW-2 — THE BAIN PAIR. These arms are subtractions from the SLOW plan plus one whole-plan swap,
+ * and the properties worth pinning are the ones that would silently invalidate the experiment:
+ * an arm that changed two things at once, or an arm that quietly touched the shared overlay — which
+ * is the control the entire comparison rests on. */
+describe("the Bain-pair arms change exactly one thing, and never the shared control", () => {
+  const QUIDDITY = JSON.parse(readFileSync(join(process.cwd(), "ui-audit/fixtures/bain-quiddity.json"), "utf8"));
+  const ORIGINAL = BAIN;
+  const arm = (a) => bainPairArmFixture(QUIDDITY, ORIGINAL, a);
+
+  it("`original` is the OTHER PLAN, unmodified — the natural experiment", () => {
+    expect(arm("original")).toBe(ORIGINAL);
+    expect(arm("quiddity")).toBe(QUIDDITY);
+  });
+
+  it("`no-easements` drops all three and touches nothing else", () => {
+    const a = arm("no-easements");
+    expect(a.markups).toEqual([]);
+    expect(a.els).toBe(QUIDDITY.els);
+    expect(a.parcels).toBe(QUIDDITY.parcels);
+    expect(a.rasters).toBe(QUIDDITY.rasters);
+  });
+
+  it("`one-pond` drops exactly one pond and KEEPS the easements", () => {
+    const a = arm("one-pond");
+    const ponds = (f) => f.els.filter((e) => e.type === "pond");
+    expect(ponds(QUIDDITY)).toHaveLength(2);
+    expect(ponds(a)).toHaveLength(1);
+    expect(a.els).toHaveLength(QUIDDITY.els.length - 1);
+    expect(a.markups).toHaveLength(3);            // the other variable is held
+    /* Deterministic: the same pond survives on every run, so reps are comparable. */
+    expect(ponds(a)[0].id).toBe(ponds(QUIDDITY)[0].id);
+  });
+
+  it("`unrestricting` keeps every easement DRAWN and only clears what it CONSTRAINS", () => {
+    const a = arm("unrestricting");
+    expect(a.markups).toHaveLength(3);
+    for (let i = 0; i < 3; i++) {
+      expect(a.markups[i].pts).toBe(QUIDDITY.markups[i].pts);        // same geometry, same identity
+      expect(a.markups[i].width).toBe(QUIDDITY.markups[i].width);
+      expect(a.markups[i].restrictsBuildings).toBe(false);
+      expect(a.markups[i].restrictsPaving).toBe(false);
+    }
+    /* …and the baseline really did restrict, or the arm is a no-op dressed as an experiment. */
+    expect(QUIDDITY.markups.every((m) => m.restrictsBuildings)).toBe(true);
+  });
+
+  /* ⛔ THE ONE THAT PROTECTS THE ARGUMENT. Every subtraction arm must leave the shared overlay
+   * untouched — it is the control, and the whole force of this pair is that it is identical on both
+   * sides. An arm that perturbed it would quietly convert a controlled comparison into an
+   * uncontrolled one, and nothing else in the harness would notice. */
+  it("NO subtraction arm perturbs the rasters, the settings or the origin", () => {
+    for (const a of ["no-easements", "one-pond", "unrestricting"]) {
+      const f = arm(a);
+      expect(f.rasters, a).toEqual(QUIDDITY.rasters);
+      expect(f.settings, a).toEqual(QUIDDITY.settings);
+      expect(f.origin, a).toEqual(QUIDDITY.origin);
+      expect(f.parcels, a).toEqual(QUIDDITY.parcels);
+    }
+  });
+
+  it("an unknown arm falls back to the baseline rather than a silent partial change", () => {
+    expect(bainPairArmFixture(QUIDDITY, ORIGINAL, "nonsense")).toBe(QUIDDITY);
+  });
+
+  it("every named arm states what it changes", () => {
+    for (const [, a] of Object.entries(BAIN_PAIR_ARMS)) {
+      expect(a.title.length).toBeGreaterThan(5);
+      expect(a.changes.length).toBeGreaterThan(5);
     }
   });
 });

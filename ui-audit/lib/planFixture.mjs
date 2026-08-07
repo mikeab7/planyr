@@ -79,6 +79,13 @@ export function rasterSpecOf(raster, role) {
     rotation: num(raster.rotation),
     locked: !!raster.locked,
     page: raster.page || undefined,
+    pageCount: raster.pageCount || undefined,
+    /* ⛔ CARRIED THROUGH BECAUSE IT GATES A COST PATH, not because it is descriptive metadata.
+     * B749 re-rasters a PDF-backed overlay at up to 8192 px once magnification exceeds ~1.5× its
+     * base raster, gated on `overlayDocs.has(id) || storageKey.endsWith(".pdf")`. A spec that drops
+     * this makes a PDF-backed overlay indistinguishable from a bare image, and the arm measuring it
+     * would silently be measuring the cheaper thing. */
+    pdfBacked: raster.pdfBacked === true || /\.pdf$/i.test(String(raster.storageKey || raster.name || "")) || undefined,
     visible: raster.visible !== false,
     /* Byte length of the stored base64 string, if the extractor could measure it. `null` means
      * "not measured", and the synthesiser reports an untargeted size rather than inventing one. */
@@ -86,7 +93,14 @@ export function rasterSpecOf(raster, role) {
       : (isDataUrl(src) ? src.length : null),
     /* Whether the bytes lived in IndexedDB (the measured Bain path) rather than inline. */
     fromIdb: !!raster.idbKey || raster.fromIdb === true,
-    fromMap: raster.fromMap === true,
+    /* ⛔ EMITTED ONLY WHEN TRUE, like `page` / `pageCount` / `pdfBacked` — because two fixtures of
+     * THE SAME raster must compare equal, and a `false` here against an omitted key there is a
+     * difference in bookkeeping masquerading as a difference in the picture. That matters
+     * concretely: the Bain pair (`bain-concept-original` / `bain-quiddity`) shares one physical PDF
+     * overlay, and the whole force of that pair is that the shared thing is IDENTICAL. `fromIdb` is
+     * deliberately NOT normalised this way — `false` there is a load-bearing claim (the underlay is
+     * fetched from ArcGIS, not read out of IndexedDB) and must stay visible. */
+    fromMap: raster.fromMap === true || undefined,
   };
 }
 
@@ -326,6 +340,74 @@ export const ANNOTATION_ARMS = {
   "no-measures": { title: "the 2 measurements removed", changes: "MEASURES only — the smallest arm, and expected to be null" },
   "no-annotations": { title: "callouts, markups and measures all removed", changes: "the whole annotation tier at once — the headline pair against the baseline" },
 };
+
+/* ---- THE BAIN PAIR (NEW-2) ---------------------------------------------------------------------
+ * ⛔ THE STRONGEST EXPERIMENT IN THIS PROGRAM, AND IT IS THE OWNER'S, NOT THE HARNESS'S.
+ *
+ * He reported it himself: *"there's a Quiddity site plan on Bain, and then there's the original.
+ * And the original seems to move a lot faster than the Quiddity one."* Two plans, same site, same
+ * account, one fast and one slow.
+ *
+ * Measured from Supabase, `smr9olizi5ue` (fast) and `smshwnnijjfi` (slow) share:
+ *   • the SAME sheet overlay — not an equivalent one, THE SAME ONE: same id `e1454614mmzcgq`, same
+ *     `storageKey` (same PDF file), 1728 × 2592 @ 0.55, rotation 1.5°, same x/y, same ftPerPx;
+ *   • the SAME `fromMap` aerial underlay, 1800 × 1167, byte for byte;
+ *   • the SAME origin, the SAME county, and settings whose md5 matches.
+ *
+ * **A shared cause cannot explain a difference.** That single sentence does more work than the
+ * sixty-run raster battery did: every one of those shared things is eliminated by IDENTITY, which
+ * needs no noise floor, no sign test and no reps. It is not a stronger statistic — it is not a
+ * statistic at all.
+ *
+ * WHAT ACTUALLY DIFFERS, and therefore what the arms below vary:
+ *   • 52 elements vs 47 — five more out of about fifty, with SIX FEWER roads and THREE FEWER parcels
+ *   • 3 pipeline EASEMENTS (18 / 28 / 4 points, widths 50 / 100 / 150, all `restrictsBuildings`) vs 0
+ *   • 2 ponds carrying **68 vertices between them** vs 1 pond carrying **7**
+ *
+ * ⚠ THE ARMS ARE NOT SYMMETRIC AND THAT IS DELIBERATE. `original` is a WHOLE DIFFERENT PLAN — the
+ * natural experiment, with no synthetic change anywhere. The other three are subtractions from the
+ * SLOW plan, each removing exactly one candidate. A subtraction that lands on the fast plan's
+ * timing tells you what the difference was made of.
+ */
+export const BAIN_PAIR_ARMS = {
+  "quiddity": { title: "the SLOW plan, exactly as he has it", changes: "nothing — the baseline, and the half he reports as slow" },
+  "original": { title: "the FAST plan, exactly as he has it", changes: "a different plan entirely — THE NATURAL EXPERIMENT, no synthetic change at all" },
+  "no-easements": { title: "the slow plan minus its 3 pipeline easements", changes: "EASEMENTS only — 50 points of banded geometry removed, everything else held" },
+  "one-pond": { title: "the slow plan minus its second pond", changes: "POND COUNT only — 2 ponds → 1, easements kept" },
+  "unrestricting": { title: "easements drawn but not CONSTRAINING", changes: "restrictsBuildings + restrictsPaving forced false — separates DRAWING an easement from EVALUATING it" },
+};
+
+/**
+ * Apply a Bain-pair arm. `quiddity` is the slow plan, `original` the fast one.
+ *
+ * ⛔ `unrestricting` IS THE ARM THAT CAN DISCRIMINATE, and it is worth saying why before any number
+ * exists. An easement is two things at once: a banded polygon that gets DRAWN, and a constraint
+ * that gets EVALUATED against every building and paving element on the plan. `no-easements` removes
+ * both at once and so cannot tell them apart. This arm removes only the second. If `unrestricting`
+ * separates while `no-easements` does not, the cost is the constraint RELATION — which scales with
+ * easements × elements, not with easements — and no amount of simplifying the drawn band would help.
+ */
+export function bainPairArmFixture(quiddity, original, arm) {
+  if (arm === "original") return original;
+  if (arm === "quiddity") return quiddity;
+  if (arm === "no-easements") return { ...quiddity, markups: [] };
+  if (arm === "one-pond") {
+    /* Drop the LAST pond in z-order, so the arm is deterministic and the remaining pond is the same
+     * one on every run. Everything else — including all three easements — is untouched. */
+    const ponds = (quiddity.els || []).filter((e) => e.type === "pond");
+    const drop = ponds.length > 1 ? ponds[ponds.length - 1].id : null;
+    return drop ? { ...quiddity, els: quiddity.els.filter((e) => e.id !== drop) } : quiddity;
+  }
+  if (arm === "unrestricting") {
+    return {
+      ...quiddity,
+      markups: (quiddity.markups || []).map((m) => (
+        m.kind === "easement" ? { ...m, restrictsBuildings: false, restrictsPaving: false } : m
+      )),
+    };
+  }
+  return quiddity;
+}
 
 /** Apply an annotation arm. Geometry, parcels, settings and rasters are untouched by every arm. */
 export function annotationArmFixture(fixture, arm) {

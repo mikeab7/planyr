@@ -26,6 +26,7 @@ import { fixtureCensus, redactText, redactPlan, paintedRasters, heldButUnpainted
 
 const read = (p) => JSON.parse(readFileSync(join(process.cwd(), p), "utf8"));
 const BAIN = read("ui-audit/fixtures/bain-concept-original.json");
+const QUIDDITY = read("ui-audit/fixtures/bain-quiddity.json");
 const SYLVESTRI = read("ui-audit/fixtures/sylvestri-concept-d-full.json");
 
 /* ---- The acceptance census, verbatim ---------------------------------------------------------- */
@@ -91,6 +92,122 @@ describe("Bain — site smr9olizi5ue, \"Concept - Original\"", () => {
   });
 });
 
+describe("Quiddity — site smshwnnijjfi, \"Concept A - Quiddity Hydrologic Analysis\" (the SLOW half)", () => {
+  const c = fixtureCensus(QUIDDITY);
+
+  it("has 52 elements and 2 parcels", () => {
+    expect(c.elements).toBe(52);
+    expect(c.parcels).toBe(2);
+  });
+
+  it("has the measured element mix", () => {
+    expect(c.byType).toEqual({ building: 13, sidewalk: 13, parking: 12, paving: 8, road: 2, trailer: 2, pond: 2 });
+  });
+
+  it("has 2 centreline roads carrying 7 points between them", () => {
+    expect(c.centerlineRoads).toBe(2);
+    expect(QUIDDITY.els.filter((e) => e.type === "road").reduce((n, e) => n + e.pts.length, 0)).toBe(7);
+  });
+
+  it("has 47 of its 52 elements rotated", () => {
+    expect(QUIDDITY.els.filter((e) => e.rot).length).toBe(47);
+  });
+
+  it("carries 3 pipeline EASEMENTS with 18 / 28 / 4 points and the measured field set", () => {
+    expect(c.markups).toBe(3);
+    const ease = QUIDDITY.markups.filter((m) => m.kind === "easement");
+    expect(ease).toHaveLength(3);
+    expect(ease.map((m) => m.pts.length)).toEqual([18, 28, 4]);
+    expect(ease.map((m) => m.width)).toEqual([50, 100, 150]);
+    for (const m of ease) {
+      expect(m.easeType).toBe("pipeline");
+      /* Every field the owner enumerated, asserted by name — a fixture that quietly lost one of
+       * these would still load, still render a band, and no longer be the thing under test. */
+      for (const k of ["centerline", "easeType", "exclusive", "holder", "mode", "notes", "parcelId",
+        "pts", "recording", "restrictsBuildings", "restrictsPaving", "status", "width", "z"]) {
+        expect(Object.hasOwn(m, k), `easement ${m.id} must carry ${k}`).toBe(true);
+      }
+      /* ⛔ ALL THREE RESTRICT BUILDINGS, which is what makes the `unrestricting` arm a real change
+       * rather than a no-op. An easement is a drawn band AND a constraint evaluated against every
+       * building and paving element; that arm is the only one that can tell those apart. */
+      expect(m.restrictsBuildings).toBe(true);
+      expect(m.restrictsPaving).toBe(false);
+    }
+  });
+
+  it("carries no callouts and no measures — the annotation tier here is easements only", () => {
+    expect([c.callouts, c.measures, c.crossSections]).toEqual([0, 0, 0]);
+  });
+});
+
+/* ---- ⛔ THE PAIR, WHICH IS THE WHOLE POINT OF THE QUIDDITY FIXTURE -------------------------------
+ * The owner reported it: *"there's a Quiddity site plan on Bain, and then there's the original. And
+ * the original seems to move a lot faster than the Quiddity one."*
+ *
+ * These two plans share ONE PHYSICAL SHEET OVERLAY — not an equivalent one, the same file — plus the
+ * same aerial underlay, the same origin, the same county and byte-identical settings. **A shared
+ * cause cannot explain a difference.** That eliminates the raster, its alpha, its rotation and its
+ * PDF re-raster path for this pair by IDENTITY, which needs no noise floor, no sign test and no
+ * reps. It is not a stronger statistic; it is not a statistic.
+ *
+ * These assertions ARE that argument. If a future pull breaks the identity, the argument is void and
+ * this file must go red rather than let a refuted hypothesis quietly come back.
+ */
+describe("the Bain pair — a shared cause cannot explain a difference", () => {
+  /* The keys a renderer's cost can actually depend on. `_note`/`_srcHost` are prose this repo adds
+   * for readers and are deliberately excluded — comparing them would make the test about the
+   * annotations rather than about the picture. */
+  const COST_KEYS = ["role", "id", "imgW", "imgH", "opacity", "ftPerPx", "ftPerPxY", "x", "y",
+    "rotation", "locked", "page", "pageCount", "visible", "fromIdb", "fromMap", "pdfBacked", "encodedBytes"];
+  const costOf = (r) => Object.fromEntries(COST_KEYS.map((k) => [k, r[k]]));
+  const overlay = (f) => f.rasters.find((r) => r.role === "sheetOverlay");
+  const underlay = (f) => f.rasters.find((r) => r.role === "underlay");
+
+  it("both plans carry THE SAME sheet overlay — same id, and every cost-bearing parameter equal", () => {
+    expect(overlay(QUIDDITY).id).toBe(overlay(BAIN).id);
+    expect(overlay(QUIDDITY).id).toBe("e1454614mmzcgq");
+    expect(costOf(overlay(QUIDDITY))).toEqual(costOf(overlay(BAIN)));
+    /* Spelled out, so a reader does not have to trust the loop: */
+    expect(overlay(QUIDDITY)).toMatchObject({ imgW: 1728, imgH: 2592, opacity: 0.55, rotation: 1.5, page: 1, pdfBacked: true });
+  });
+
+  it("both plans carry THE SAME aerial underlay", () => {
+    expect(costOf(underlay(QUIDDITY))).toEqual(costOf(underlay(BAIN)));
+    expect(underlay(QUIDDITY)).toMatchObject({ imgW: 1800, imgH: 1167, fromMap: true });
+  });
+
+  it("both plans share the origin, the county and byte-identical settings", () => {
+    expect(QUIDDITY.origin).toEqual(BAIN.origin);
+    expect(QUIDDITY.county).toBe(BAIN.county);
+    expect(QUIDDITY.settings).toEqual(BAIN.settings);
+  });
+
+  /* ⛔ THE ELEMENT-COUNT FRAMING, REFUTED BY THE OWNER'S OWN PAIR. The plan he calls SLOW has five
+   * more elements than the one he calls FAST — out of about fifty — while having SIX FEWER roads
+   * and THREE FEWER parcels. A difference he notices in ordinary use does not track a 10% element
+   * delta, and per-element cost is therefore the wrong axis. */
+  it("the SLOW plan is only ~10% larger by element count, and is SMALLER on roads and parcels", () => {
+    expect(QUIDDITY.els.length).toBe(52);
+    expect(BAIN.els.length).toBe(47);
+    expect(QUIDDITY.els.length / BAIN.els.length).toBeLessThan(1.11);
+    const roads = (f) => f.els.filter((e) => e.type === "road").length;
+    expect(roads(QUIDDITY)).toBe(2);
+    expect(roads(BAIN)).toBe(8);            // the SLOW plan has SIX FEWER
+    expect(QUIDDITY.parcels.length).toBe(2);
+    expect(BAIN.parcels.length).toBe(5);    // and THREE FEWER
+  });
+
+  /* What DOES differ by a lot, recorded so the arms have something to aim at. Not a claim about
+   * cause — `ui-audit/annotation-arms.mjs --plan bain-pair` is what tests these. */
+  it("records the real asymmetries: easements, and ~10× the pond vertices", () => {
+    const pondVerts = (f) => f.els.filter((e) => e.type === "pond").reduce((n, e) => n + e.points.length, 0);
+    expect(QUIDDITY.markups).toHaveLength(3);
+    expect(BAIN.markups).toHaveLength(0);
+    expect(pondVerts(QUIDDITY)).toBe(68);   // 2 ponds, 48 + 20
+    expect(pondVerts(BAIN)).toBe(7);        // 1 pond
+  });
+});
+
 describe("Sylvestri — site sms4zs8unbkg, \"Concept D - Sylvestri Retail\"", () => {
   const c = fixtureCensus(SYLVESTRI);
 
@@ -152,7 +269,7 @@ describe("Sylvestri — site sms4zs8unbkg, \"Concept D - Sylvestri Retail\"", ()
 /* ---- The properties that fail silently -------------------------------------------------------- */
 
 describe("neither fixture leaks the owner's data", () => {
-  for (const [name, f] of [["bain", BAIN], ["sylvestri", SYLVESTRI]]) {
+  for (const [name, f] of [["bain", BAIN], ["quiddity", QUIDDITY], ["sylvestri", SYLVESTRI]]) {
     it(`${name}: no identity field, Storage key, appraisal record or data URL survives`, () => {
       const json = JSON.stringify(f);
       /* A Storage key is `<uuid>/site-overlays/...` — the uuid IS the owner's user id. */
@@ -226,7 +343,7 @@ describe("redactPlan strips the county appraisal record", () => {
  * It does not throw. A fixture in that state measures as "this plan is fast".
  */
 describe("neither fixture can silently blank the canvas", () => {
-  for (const [name, f] of [["bain", BAIN], ["sylvestri", SYLVESTRI]]) {
+  for (const [name, f] of [["bain", BAIN], ["quiddity", QUIDDITY], ["sylvestri", SYLVESTRI]]) {
     it(`${name}: every road carries the fields whose absence blanks it`, () => {
       for (const r of f.els.filter((e) => e.type === "road")) {
         expect(Number.isFinite(r.rot), `${r.id}.rot`).toBe(true);

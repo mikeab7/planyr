@@ -40,7 +40,9 @@ import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { fakeTilePng, parseTileUrl } from "./lib/fakeTile.mjs";
-import { fixtureCensus, fixtureSeed, ANNOTATION_ARMS, annotationArmFixture, paintedRasters } from "./lib/planFixture.mjs";
+import { fixtureCensus, fixtureSeed, ANNOTATION_ARMS, annotationArmFixture, BAIN_PAIR_ARMS, bainPairArmFixture, paintedRasters, rasterIdbPlan, idbPutInPage } from "./lib/planFixture.mjs";
+import { pngDataUrl } from "./lib/synthRaster.mjs";
+import { cachedRaster } from "./lib/fixtureSeeding.mjs";
 import { bucketTrace, layerCensus, median, noiseFloorPct, armVerdict, pairedComparison, annotationFault } from "./lib/rasterCost.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -53,11 +55,32 @@ const FAKE_TILES = process.argv.includes("--fake-tiles");
 const DPR = num("--dpr", 2.15);
 const CPU = num("--cpu-throttle", 1);
 const REPS = num("--reps", 4);
-const ARMS = String(arg("--arms", "sylvestri,no-callouts,no-markups,no-measures,no-annotations"))
+
+/* ---- WHICH EXPERIMENT (NEW-2) -----------------------------------------------------------------
+ * `--plan sylvestri`  the annotation tier, decomposed per kind on the one plan that has one.
+ * `--plan bain-pair`  THE OWNER'S OWN A/B: his fast Bain plan against his slow one, which share a
+ *                     byte-identical sheet overlay, underlay, origin and settings. See the long
+ *                     note on BAIN_PAIR_ARMS in lib/planFixture.mjs for why that identity is worth
+ *                     more than the sixty-run raster battery it supersedes.
+ */
+const PLAN = String(arg("--plan", "sylvestri")).toLowerCase();
+const SYLVESTRI = JSON.parse(readFileSync(join(HERE, "fixtures", "sylvestri-concept-d-full.json"), "utf8"));
+const QUIDDITY = JSON.parse(readFileSync(join(HERE, "fixtures", "bain-quiddity.json"), "utf8"));
+const ORIGINAL = JSON.parse(readFileSync(join(HERE, "fixtures", "bain-concept-original.json"), "utf8"));
+
+const BAIN_PAIR = PLAN === "bain-pair";
+const ARM_TABLE = BAIN_PAIR ? BAIN_PAIR_ARMS : ANNOTATION_ARMS;
+const BASELINE_ARM = BAIN_PAIR ? "quiddity" : "sylvestri";
+const armFixtureFor = (arm) => (BAIN_PAIR ? bainPairArmFixture(QUIDDITY, ORIGINAL, arm) : annotationArmFixture(SYLVESTRI, arm));
+const SUBJECT = BAIN_PAIR ? QUIDDITY : SYLVESTRI;
+
+const ARMS = String(arg("--arms", BAIN_PAIR
+  ? "quiddity,original,no-easements,one-pond,unrestricting"
+  : "sylvestri,no-callouts,no-markups,no-measures,no-annotations"))
   .split(",").map((s) => s.trim()).filter(Boolean);
 
-const SYLVESTRI = JSON.parse(readFileSync(join(HERE, "fixtures", "sylvestri-concept-d-full.json"), "utf8"));
 const SITE_ID = "annotation-arms-site";
+const CACHE = join(HERE, ".raster-cache");
 
 /* The same neutral pan every other probe here uses: out and straight back, so the view is
  * unchanged across the gesture and a rung that ended somewhere else is suppressed rather than
@@ -145,7 +168,7 @@ async function neutralPan(page, press) {
 }
 
 async function runArm(browser, arm, rep) {
-  const fixture = annotationArmFixture(SYLVESTRI, arm);
+  const fixture = armFixtureFor(arm);
   const census = fixtureCensus(fixture);
   const wantIds = {
     callouts: (fixture.callouts || []).map((c) => c.id),
@@ -176,15 +199,44 @@ async function runArm(browser, arm, rep) {
   await cdp.send("LayerTree.enable").catch(() => {});
   if (CPU > 1) await cdp.send("Emulation.setCPUThrottlingRate", { rate: CPU }).catch(() => {});
 
-  /* ⚠ ONE NAVIGATION, not the raster battery's two. There is nothing to put in IndexedDB: this
-   * plan's only raster is the `fromMap` underlay the app never paints. Keeping the extra reload
-   * would measure a warm boot for no reason. */
-  await page.goto(BASE, { waitUntil: "load" });
+  /* ⚠ ONE NAVIGATION FOR SYLVESTRI, TWO FOR THE BAIN PAIR, and the difference is not an
+   * optimisation — it is the difference between measuring the plan and measuring a plan with its
+   * drawing missing.
+   *
+   * Sylvestri's only raster is the `fromMap` underlay the app never paints, so there is nothing to
+   * put in IndexedDB and the extra reload would only measure a warm boot.
+   *
+   * ⛔ BOTH BAIN PLANS COMPOSITE A REAL 1728 × 2592 SHEET OVERLAY, and IndexedDB is origin-scoped —
+   * it cannot be written before a document from this origin exists. Skipping the seed would run
+   * every Bain arm with its overlay stuck on the "Loading drawing…" placeholder, which is both a
+   * false null AND a destroyed experiment: the whole force of this pair is that the overlay is
+   * IDENTICAL in both halves, and an absent raster is identical in neither. */
+  await page.goto(BASE, { waitUntil: BAIN_PAIR ? "domcontentloaded" : "load" });
+  const rasterFacts = [];
+  if (BAIN_PAIR) {
+    for (const { key, spec } of rasterIdbPlan(fixture, SITE_ID)) {
+      const r = cachedRaster(spec, CACHE);
+      const wrote = await page.evaluate(idbPutInPage, { key, value: pngDataUrl(r.png) });
+      if (wrote !== true) throw new Error(`IndexedDB write for ${key} did not confirm — the arm cannot be established`);
+      rasterFacts.push(`${spec.role} ${spec.imgW}×${spec.imgH} @${spec.opacity} rot ${spec.rotation}`);
+    }
+    await page.reload({ waitUntil: "load" });
+  }
   await page.waitForSelector('[data-testid="planner-canvas"]', { timeout: 60000 });
   await page.waitForTimeout(2500); // let the boot's own deferred work land, off the gesture's books
 
+  /* ⛔ AND THE OVERLAY MUST BE PROVEN ON THE PAGE, for exactly the reason `decodeFault` exists: an
+   * arm whose raster never decoded looks precisely like an arm that is fast. */
+  let rasterFault = null;
+  if (BAIN_PAIR) {
+    const want = paintedRasters(fixture).length;
+    const got = await page.evaluate(() => [...document.querySelectorAll('[data-testid="planner-canvas"] image')]
+      .filter((im) => ((im.href && im.href.baseVal) || "").length > 1000).length);
+    if (got < want) rasterFault = `SHEET OVERLAY NEVER REACHED THE CANVAS — expected ${want} painted raster(s), found ${got}. This arm did not measure what it claims to, and the pair's shared-overlay control is void.`;
+  }
+
   const seen = await page.evaluate(readAnnotations, wantIds);
-  const fault = annotationFault(seen, wantCounts);
+  const fault = rasterFault || annotationFault(seen, wantCounts);
   const settled = await page.evaluate(READ_COUNTERS);
   const layers = layerCensus(layerState.layers);
   const press = (await page.evaluate(PRESS_POINT)) || { x: 500, y: 450 };
@@ -214,7 +266,7 @@ async function runArm(browser, arm, rep) {
   return {
     arm, rep,
     fault: fault || (!pan1.neutral ? `the view was not neutral across the untraced pan — this rep looked at a different scene and is SUPPRESSED` : null),
-    census, tilesServed, annotationsOnCanvas: seen, expected: wantCounts,
+    census, tilesServed, annotationsOnCanvas: seen, expected: wantCounts, rasterFacts,
     paintedRasters: paintedRasters(fixture).map((r) => `${r.role} ${r.imgW}×${r.imgH}`),
     canvasNodes: settled.canvasNodes, textNodes: settled.textNodes, elementsDrawn: settled.elementsDrawn,
     leafletTiles: settled.leafletTiles,
@@ -231,7 +283,7 @@ const runs = [];
  * ran last. Interleaving is also what makes the PAIRED sign test below legitimate. */
 for (let rep = 1; rep <= REPS; rep++) {
   for (const arm of ARMS) {
-    if (!ANNOTATION_ARMS[arm]) { console.error(`unknown arm "${arm}"`); process.exit(2); }
+    if (!ARM_TABLE[arm]) { console.error(`unknown arm "${arm}"`); process.exit(2); }
     process.stderr.write(`  · rep ${rep} arm ${arm}\n`);
     runs.push(await runArm(browser, arm, rep));
   }
@@ -244,7 +296,7 @@ const byArm = ARMS.map((arm) => {
   const first = rs[0] || runs.find((r) => r.arm === arm) || {};
   return {
     arm, n: rs.length,
-    title: ANNOTATION_ARMS[arm].title, changes: ANNOTATION_ARMS[arm].changes,
+    title: ARM_TABLE[arm].title, changes: ARM_TABLE[arm].changes,
     workMs: median(rs.map((r) => r.workMs)),
     paintMs: median(rs.map((r) => r.paint?.paintMs)),
     rasterMs: median(rs.map((r) => r.paint?.rasterMs)),
@@ -257,7 +309,7 @@ const byArm = ARMS.map((arm) => {
   };
 });
 
-const baseline = byArm.find((a) => a.arm === "sylvestri") || byArm[0];
+const baseline = byArm.find((a) => a.arm === BASELINE_ARM) || byArm[0];
 const pairFor = (arm, pick) => {
   const reps = [...new Set(runs.map((r) => r.rep))].sort((a, b) => a - b);
   return reps.map((rep) => {
@@ -271,7 +323,7 @@ const floorRender = noiseFloorPct(ok.filter((r) => r.arm === baseline.arm).map((
 
 const out = {
   base: BASE, dpr: DPR, cpu: CPU, fakeTiles: FAKE_TILES, reps: REPS, arms: ARMS,
-  plan: { site: SYLVESTRI.site, name: SYLVESTRI.name, siteId: SYLVESTRI._source?.siteId },
+  plan: PLAN, subject: { site: SUBJECT.site, name: SUBJECT.name, siteId: SUBJECT._source?.siteId },
   noiseFloorWorkPct: floorWork, noiseFloorRenderPct: floorRender,
   byArm: byArm.map((a) => ({
     ...a,
@@ -287,14 +339,29 @@ const out = {
 if (JSON_OUT) { console.log(JSON.stringify(out, null, 2)); }
 else {
   const n = (v, w = 8, d = 1) => (v == null ? "—".padStart(w) : v.toFixed(d).padStart(w));
-  console.log(`\nANNOTATION ARMS — do callouts, markups and measures cost anything?  [${SYLVESTRI.site} / ${SYLVESTRI.name}]`);
+  console.log(BAIN_PAIR
+    ? `\nBAIN PAIR — the owner's own A/B: "${ORIGINAL.name}" (he calls it FAST) vs "${QUIDDITY.name}" (he calls it SLOW)`
+    : `\nANNOTATION ARMS — do callouts, markups and measures cost anything?  [${SYLVESTRI.site} / ${SYLVESTRI.name}]`);
   console.log(`  regime: cpu ${CPU}×, dpr ${DPR}, ${FAKE_TILES ? "fake tiles ON" : "NO tiles"}, ${REPS} rep(s), interleaved`);
-  console.log(`  ⛔ NO SHEET OVERLAY ON THIS PLAN — nothing below can be charged to a raster.\n`);
+  console.log(BAIN_PAIR
+    ? `  ⛔ THE TWO PLANS SHARE ONE PHYSICAL SHEET OVERLAY (same id, same storageKey, 1728×2592 @0.55 rot 1.5°),\n     the same aerial underlay, the same origin and byte-identical settings. A SHARED CAUSE CANNOT EXPLAIN\n     A DIFFERENCE — so the raster, its alpha, its rotation and its PDF re-raster path are all eliminated\n     for this pair BY IDENTITY, with no statistics involved at all.\n`
+    : `  ⛔ NO SHEET OVERLAY ON THIS PLAN — nothing below can be charged to a raster.\n`);
   console.log(`  ${"arm".padEnd(16)} ${"work".padStart(8)} ${"paint".padStart(8)} ${"raster".padStart(8)} ${"compos".padStart(8)} ${"layeriz".padStart(8)} ${"render".padStart(8)} ${"nodes".padStart(7)} ${"text".padStart(6)} ${"layers".padStart(7)}`);
   for (const a of out.byArm) {
     console.log(`  ${a.arm.padEnd(16)} ${n(a.workMs)} ${n(a.paintMs)} ${n(a.rasterMs)} ${n(a.compositeMs)} ${n(a.layerizeMs)} ${n(a.renderTotalMs)} ${n(a.canvasNodes, 7, 0)} ${n(a.textNodes, 6, 0)} ${n(a.layerCount, 7, 0)}`);
   }
   console.log(`\n  NOISE FLOOR, measured on the "${baseline.arm}" repeats: work ±${floorWork ?? "—"}%  ·  render ±${floorRender ?? "—"}%. Nothing inside it is a finding.`);
+  /* ⛔ MAIN-THREAD WORK GETS ITS OWN LINE, because a null on it is NOT a null. `Script + Layout +
+   * RecalcStyle` could not tell Bain from Goose Creek (5/10 paired reps, p = 1.000) — it is
+   * structurally blind to paint, raster, decode and compositing. So it is reported EXPLICITLY and
+   * separately, and a difference that appears HERE is a different kind of finding from one that
+   * appears in render: this metric sees script and layout, which is where a per-element or
+   * per-relation computation would live. */
+  console.log(`\n  MAIN-THREAD WORK (Script + Layout + RecalcStyle), reported separately because a null on it is NOT a null:`);
+  for (const a of out.byArm) {
+    const d = a.arm === baseline.arm ? "" : `   ${a.vsBaselineWork.pct > 0 ? "+" : ""}${a.vsBaselineWork.pct}% vs ${baseline.arm}`;
+    console.log(`     ${a.arm.padEnd(16)} ${a.workMs == null ? "—" : a.workMs.toFixed(1).padStart(9)} ms/pan${d}`);
+  }
   console.log(`\n  EVERY REP (render total, ms) — so a wide floor can be told from a genuinely noisy arm:`);
   for (const arm of ARMS) {
     const v = runs.filter((r) => r.arm === arm).map((r) => (r.paint ? r.paint.totalMs.toFixed(0) : "—").padStart(6));

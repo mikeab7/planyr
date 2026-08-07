@@ -256,7 +256,93 @@ of the annotation tier's DOM by node count on this plan.
 
 ---
 
-## 5. What this still cannot settle — stated, not implied
+## 5. THE BAIN PAIR — the owner's own controlled comparison, and the strongest result here
+
+**Added 2026-08-07.** His observation, unprompted:
+
+> *"there's a Quiddity site plan on Bain, and then there's the original. And the original seems to
+> move a lot faster than the Quiddity one."*
+
+### 5.1 Why this is worth more than the sixty-run battery
+
+Measured from Supabase, the two plans carry **the same sheet overlay** — not an equivalent one, the
+same file: same id `e1454614mmzcgq`, same `storageKey`, 1728 × 2592 at 0.55, rotation 1.5°, same
+x/y, same `ftPerPx`. Also the **same aerial underlay**, the **same origin**, the **same county**, and
+**settings whose md5 matches**.
+
+**A shared cause cannot explain a difference.**
+
+That one sentence retires the entire raster hypothesis for Bain, and it does so by IDENTITY rather
+than by statistics — no floor, no sign test, no reps, no p-value. Semi-transparency, pixel count, the
+1.5° rotation and B749's PDF re-raster are all present *in equal measure on both sides*, so however
+real each is on its own, none can be what separates them. Recorded in `docs/PERF-BAIN.md` finding 0.
+
+**What actually differs:**
+
+| | **Original (FAST)** | **Quiddity (SLOW)** |
+|---|---|---|
+| elements | 47 | **52** (+5, ~10%) |
+| roads | **8** | 2 (six FEWER) |
+| parcels | **5** | 2 (three FEWER) |
+| easements | 0 | **3 pipeline** (18 / 28 / 4 pts, widths 50 / 100 / 150, all `restrictsBuildings`) |
+| ponds | 1, **7 vertices** | 2, **68 vertices** |
+| sheet overlay · underlay · origin · settings | — **IDENTICAL** — | |
+
+### 5.2 ⛔ The element-count framing is refuted by his own pair
+
+The plan he experiences as slow has **five more elements out of about fifty** — and **six fewer
+roads** and **three fewer parcels**. A difference he notices in ordinary use does not track a 10%
+element delta.
+
+This is quantitative, not rhetorical, because B1435 measured the per-element cost directly
+(`docs/PERF-DESIGN-AUDIT.md`: elements 66 → 96 gave +59.9% work, **38.5 ms per element**, r = 0.927 —
+itself a near-exact reproduction of B1357's r = 0.93):
+
+- **The linear per-element model predicts +5 elements ≈ +193 ms.**
+- **First measurement of the pair: +51,879 ms** (main-thread work, 5,139 → 57,018 ms per pan).
+- **That is ~270× what element count predicts.**
+
+So B1435's amplification result is not wrong — it is **the wrong axis for this**. Element count is a
+real and well-measured amplifier, and it is nowhere near sufficient to explain what the owner sees.
+His own framing deserves the same correction:
+
+> *"no matter if I have two hundred elements... why are my elements so heavy?"*
+
+**What this pair supports is that they are not heavy.** Fifty-two of them can be eleven times dearer
+than forty-seven of them, which means the cost is not being paid per element at all. Something whose
+size is not the element count — a relation, a re-solve, a search over geometry — is doing the work.
+The arms in §6.3 are aimed at exactly that.
+
+### 5.3 The arms
+
+Four variables, one change each, run through `ui-audit/annotation-arms.mjs --plan bain-pair`:
+
+| arm | what it changes |
+|---|---|
+| `quiddity` | nothing — the baseline, the half he calls slow |
+| **`original`** | **a different plan entirely — the natural experiment, no synthetic change anywhere** |
+| `no-easements` | the 3 pipeline easements removed, everything else held |
+| `one-pond` | the second pond removed, easements kept |
+| **`unrestricting`** | **easements DRAWN but `restrictsBuildings`/`restrictsPaving` forced false** |
+
+⛔ **`unrestricting` is the arm that can discriminate, and it was designed before any number
+existed.** An easement is two things at once: a banded polygon that gets **drawn**, and a constraint
+**evaluated** against every building and paving element. `no-easements` removes both and cannot tell
+them apart. This arm removes only the second. **If `unrestricting` separates while `no-easements`
+does not, the cost is the constraint relation** — which scales with easements × elements, not with
+easements — and simplifying the drawn band would not help at all.
+
+⚠ **Main-thread work is reported separately and explicitly**, because a null on it is not a null:
+`Script + Layout + RecalcStyle` could not tell Bain from Goose Creek (5/10, p = 1.000) and is
+structurally blind to paint, raster, decode and compositing. Conversely a difference that appears
+*there* is a different kind of finding from one that appears in render — it is script and layout,
+which is where a per-relation computation would live.
+
+_(results — see §5.4)_
+
+---
+
+## 6. What this still cannot settle — stated, not implied
 
 - **The raster CONTENT is still synthetic.** Dimensions, opacity, rotation, footprint and the
   storage path are the owner's; the picture is generated. Sound for decode, texture and blend cost,
