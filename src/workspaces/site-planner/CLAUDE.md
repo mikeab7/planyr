@@ -470,6 +470,26 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   (elements expanded to their `attachedTo` assembly, so a building brings its truck court / trailer
   parking / dock zones / bump-outs), then paste with fresh ids, bonds remapped INSIDE the copy, and
   relative geometry preserved. A pasted parcel arrives INACTIVE by design (can't double-count site area).
+  **⛔ NEW-1 — `planClipboardStore.js` HOLDS THE PAYLOAD, AT MODULE SCOPE, AND THAT IS THE WHOLE POINT.**
+  The owner could not copy a polygon between two plans of one site, and coverage was never the problem
+  (`CLIP_KINDS` already had every drawn kind): the payload was a `useRef` INSIDE `SitePlanner`, which
+  `SitePlannerApp` mounts keyed on the plan id, so a plan switch remounted the component and destroyed
+  the copy. Module scope is above EVERY remount boundary at once — the plan-switch key, the `loadEpoch`
+  bump, a workspace switch, an error-boundary reset — rather than above the one that happened to be
+  found; hoisting into `SitePlannerApp` state would have fixed one and left the rest to be rediscovered.
+  **The overlay clipboard moved WITH it**; leaving one behind is how the two Ctrl+V paths diverge again.
+  **The coordinate decision is `resolveClipFrame`, and it is explicit, not accidental:** clipboard
+  geometry is feet in the SOURCE plan's frame, `origin` is per-RECORD and can differ between siblings,
+  so a cross-plan paste RE-PROJECTS through the `mapLock` projection and lands on the same GROUND
+  position it had — real-world SIZE is never rescaled (each plan's feet are ground-true at its own
+  origin, so a copied building must not shrink), and the ignored grid-scale term is MEASURED and the
+  paste REFUSED, loudly and by name, when it would smear the set past `CLIP_FRAME_MAX_SMEAR_FT` or when
+  the two frames cannot be related at all (exactly one plan has a map origin). A same-plan paste is
+  untouched and still lands at the cursor (B417). Guards: the repo-root `test/` suite
+  **planClipboardLifetime** (incl. a source guard that the payload is not owned by the component again)
+  and the e2e spec **clipboard-survives-plan-switch** — the mount boundary IS the thing under test, so
+  a unit test on the module cannot substitute (mutation-checked: make the payload die with the mount
+  and all four cases go red).
 - `standardsApply.js` + `userPrefs.js` + `components/StandardsBar.jsx` — Standards commit model +
   retroactive apply. `standardsApply` is the pure engine (parcels are stamped → WRITE the value;
   elements resolve at render → CLEAR the per-element override) plus `applyAllStandards` — ONE Apply

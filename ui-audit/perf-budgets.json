@@ -48,7 +48,7 @@
       "minBytes": 32768
     },
     "siteRouteJsBytes": {
-      "baseline": 2377892,
+      "baseline": 2426185,
       "target": 1600000,
       "unit": "bytes",
       "what": "Total JS a plain Site route must download: the entry chunk plus SitePlannerApp and its static-import closure.",
@@ -303,6 +303,15 @@
           "item": "B209502",
           "date": "2026-08-06",
           "reason": "B209502 county-by-geometry: +4.1 KB attributable (1.1 KB gate + 3.0 KB of irreducible registry data for the five new Houston-metro counties). The engine is ALREADY lazy (countyPolygonsCore.js) and the 238 KB geometry is a public/ asset charged to nothing, so the fat is gone. The band was consumed by main, not this branch: the base ref alone sits at +27.7 KB of the 32 KB band, leaving 4.3 KB for a correctness fix that stops the app naming the wrong county (which selects drainage authority, detention criteria, setbacks and review path). Paydown stays owned by B1064."
+        },
+        {
+          "metric": "bundle.siteRouteJsBytes",
+          "from": 2377892,
+          "to": 2426185,
+          "direction": "raise",
+          "item": "B230080",
+          "date": "2026-08-07",
+          "reason": "Shipped B230080 (the canvas clipboard hoisted above the plan-switch remount boundary, plus resolveClipFrame — the cross-plan coordinate decision — and revealPasted): +2.0 KB measured. Optimized first: the drawn-object and reference-drawing Ctrl+V paths had their placement logic collapsed into ONE shared pure decision (clipPlacement) instead of the two copies the brief warned would diverge; the three refusal messages share one tail; the modifier-label derivation was deduped to the existing MOD_LABEL. This raise records accumulated reality, not this feature's cost: clean main already measured 2367.3 KB, i.e. 45.1 KB of the 46.4 KB band was consumed by earlier merged work that never ratcheted, leaving 1.3 KB for the next feature of any size. B1064 still owns getting the route back down."
         }
       ]
     }

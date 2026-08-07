@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-08-07 @ `0fe011b` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-08-07 @ `4185394` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_445 source files mapped._
+_446 source files mapped._
 
 ## infra
 
@@ -657,8 +657,10 @@ _445 source files mapped._
   - _exports_: `COMMODITY_BUCKETS`, `commodityBucket`, `commodityBucketRecord`, `isHazardOutlier`, `PIPELINE_LEGEND`, `pipelineStyleFor`
 - **`src/workspaces/site-planner/lib/pipelineCorridor.js`** — Pure pipeline easement screening-corridor geometry (B752): buffers a WGS84 [lon,lat] centerline into an ASSUMED band via the shared bufferPolyline (local feet frame), plus the editable default/min/max width constants
   - _exports_: `corridorRingLngLat`, `corridorRings`, `DEFAULT_CORRIDOR_WIDTH_FT`, `MAX_CORRIDOR_WIDTH_FT`, `MIN_CORRIDOR_WIDTH_FT`
-- **`src/workspaces/site-planner/lib/planClipboard.js`** — The general canvas clipboard (NEW-2/NEW-6) — collect a selection (elements expanded to their `attachedTo` assembly), and paste it with fresh ids, remapped bonds and relative geometry preserved.
-  - _exports_: `CLIP_KINDS`, `clipboardBBox`, `clipboardLabel`, `clipCalloutTips`, `clipRefKey`, `collectClipboard`, `pasteClipboard`, `translateCalloutBy`, `translateParcelBy`
+- **`src/workspaces/site-planner/lib/planClipboard.js`** — The general canvas clipboard (NEW-2/NEW-6) — collect a selection (elements expanded to their `attachedTo` assembly), and paste it with fresh ids, remapped bonds and relative geometry preserved; plus `resolveClipFrame`, the coordinate decision for a paste that crosses into a plan anchored elsewhere.
+  - _exports_: `CLIP_FRAME_MAX_SMEAR_FT`, `CLIP_KINDS`, `clipboardBBox`, `clipboardLabel`, `clipCalloutTips`, `clipPlacement`, `clipRefKey`, `collectClipboard`, `pasteClipboard`, `resolveClipFrame`, `translateCalloutBy`, `translateParcelBy`
+- **`src/workspaces/site-planner/lib/planClipboardStore.js`** — Module-scope holder for the canvas + overlay clipboards, above every React remount boundary, so a copy survives a plan switch (NEW-1).
+  - _exports_: `clearClipboard`, `getCanvasClip`, `getOverlayClip`, `hasAnyClip`, `hasCanvasClip`, `hasOverlayClip`, `setCanvasClip`, `setOverlayClip`
 - **`src/workspaces/site-planner/lib/planStyle.js`** — Shared element style tokens (fills/strokes/weight/pattern per surface type), style resolver, paint z-order, element feet ring outline
   - _exports_: `byZ`, `elRingFeet`, `elStyle`, `getAccountStyleDefaults`, `getPreviewStyleDefaults`, `parcelDefaultStyle`, `setAccountStyleDefaults`, `SETBACK_LINE`, `setbackChipStyle`, `setbackDashArray`, `setbackLineStyle`, `setPreviewStyleDefaults`, `standardScope`, `toHex6`, `TYPE`, `typeStyle`, `zOrder`
 - **`src/workspaces/site-planner/lib/polyClip.js`** — Pure polygon intersection-AREA via ear-clip triangulation + Sutherland–Hodgman; pairwise active-parcel overlap detection for the B652 double-count warning; clipper-lib UNION/dissolve of overlapping active parcels for correct site acreage (B715)

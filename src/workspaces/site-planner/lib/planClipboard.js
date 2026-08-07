@@ -30,6 +30,9 @@ export const CLIP_KINDS = ["el", "markup", "measure", "callout", "parcel"];
 // and `duplicateGroup` cannot drift again (they already had: BOTH remapped only `attachedTo`, so a
 // copied trailer stayed bonded to the ORIGINAL building's truck court).
 import { remapBondRefs } from "./bondRemap.js";
+// The ONE projection that relates a plan's feet frame to the ground (see mapLock.js's header).
+// Used only by `resolveClipFrame` below — pure math, no Leaflet, no DOM.
+import { lngLatToFeet, feetToLatLngPair, ftPerDeg } from "./mapLock.js";
 
 // A stable string key for a selection ref, so a mixed set dedupes cleanly.
 const refKey = (r) => `${r.kind}:${r.id}`;
@@ -79,6 +82,113 @@ export function collectClipboard(refs, state) {
   const counts = {};
   items.forEach(({ kind }) => { counts[kind] = (counts[kind] || 0) + 1; });
   return { items, counts };
+}
+
+/* ------------------------------------------------- crossing a plan boundary */
+
+/* THE COORDINATE DECISION (NEW-1), made explicitly rather than by accident.
+ *
+ * Clipboard geometry is FEET IN THE SOURCE PLAN'S FRAME, and that frame is anchored at the
+ * plan's own `origin` (lat/lon). Sibling plans of one site usually share an origin — the
+ * `New plan (same parcel)` path copies it — but `origin` is a per-RECORD field and CAN differ,
+ * so identical framing is never guaranteed. Pasting the source numbers straight into a plan
+ * anchored somewhere else would put the shape in the wrong place with nothing said, which is
+ * the worst outcome available here (LOUD-FAILURE exists for exactly this).
+ *
+ * WHAT WE CHOSE: RE-PROJECT, through the same `mapLock` projection the whole planner is welded
+ * to. A point is taken out of the source frame to lat/lon and back into the destination frame,
+ * so a cross-plan paste lands on the SAME GROUND POSITION it occupied in the plan it came from.
+ * For the owner's case — two concepts of one parcel — that means the polygon arrives exactly
+ * over where it was, which is what "copy it over" means.
+ *
+ * WHAT WE DELIBERATELY DO NOT DO: rescale the geometry. Each plan's feet are ground-true at its
+ * OWN origin, so a 1,000 ft building is 1,000 real feet in either plan; the two frames differ by
+ * the Mercator grid-scale ratio between their origin latitudes, and applying that would SHRINK a
+ * copied building for no physical reason. So the frame relation is applied as an exact
+ * TRANSLATION, evaluated at the payload's own centre — exact there, with the ignored scale term
+ * showing up as a small positional smear that grows with how big the copied set is and how far
+ * apart the two anchors are.
+ *
+ * AND THAT SMEAR IS CHECKED, NOT ASSUMED. `resolveClipFrame` computes it and REFUSES when it
+ * would exceed `CLIP_FRAME_MAX_SMEAR_FT` — i.e. when the two plans are far enough apart that
+ * translation alone is no longer an honest answer (a different city, not a different concept of
+ * one site). It also refuses when the two frames cannot be related at all, which is the case
+ * where exactly ONE of the plans has a map origin. Both refusals are named and carry owner-facing
+ * copy; the caller must show it. Two plans that BOTH have no origin are two abstract feet frames
+ * with nothing to reconcile, so that case is a clean no-op.
+ */
+
+// The most positional error we will accept from treating the frame relation as a pure
+// translation. One foot, across the whole copied set — under a real survey's own tolerance, and
+// far more room than two concepts of one parcel can ever use (the two anchors would have to be
+// miles apart north-south before an ordinary site-sized copy reaches it).
+export const CLIP_FRAME_MAX_SMEAR_FT = 1;
+
+// Every refusal ends the same way, because there is always the same way out: place it yourself.
+const AIM_IT = " Put your cursor where you want it and paste there.";
+
+const hasOrigin = (o) => !!(o && Number.isFinite(o.lat) && Number.isFinite(o.lon));
+
+/**
+ * How the SOURCE plan's feet frame relates to the DESTINATION plan's.
+ *
+ * @param from       the source plan's `origin` ({ lat, lon } | null)
+ * @param to         the destination plan's `origin` ({ lat, lon } | null)
+ * @param opts.ref      the point (source feet) the translation is made exact at — pass the
+ *                      payload's bbox centre, so the error is split evenly across the set
+ * @param opts.extentFt the copied set's largest dimension, which is what the ignored scale
+ *                      term is multiplied by to get the worst-case smear
+ * @returns { ok: true,  dx, dy, same, smearFt }
+ *        | { ok: false, reason: "no-origin" | "frame-too-far", smearFt, why, message }
+ *          — `why` is the reason on its own; `message` is `why` plus the way out, for a refusal.
+ */
+export function resolveClipFrame(from, to, { ref = { x: 0, y: 0 }, extentFt = 0, maxSmearFt = CLIP_FRAME_MAX_SMEAR_FT } = {}) {
+  if (!hasOrigin(from) && !hasOrigin(to)) return { ok: true, dx: 0, dy: 0, same: true, smearFt: 0 };
+  if (!hasOrigin(from) || !hasOrigin(to)) {
+    const why = (hasOrigin(from) ? "This plan isn't on the map yet" : "The plan you copied from isn't on the map")
+      + ", so there's no way to tell where the copy belongs.";
+    return { ok: false, reason: "no-origin", smearFt: null, why, message: why + AIM_IT };
+  }
+  if (from.lat === to.lat && from.lon === to.lon) return { ok: true, dx: 0, dy: 0, same: true, smearFt: 0 };
+
+  // The two frames are the same conformal projection at two anchors, so they differ by a uniform
+  // scale (the ratio of feet-per-degree at the two origin latitudes) plus a translation. We keep
+  // real-world size and take only the translation — this is the error that leaves behind.
+  const scale = ftPerDeg(to.lat) / ftPerDeg(from.lat);
+  const smearFt = Math.abs(scale - 1) * (Math.max(0, Number(extentFt) || 0) / 2);
+  if (!(smearFt <= maxSmearFt)) {
+    const why = "These two plans sit too far apart on the map to copy by position.";
+    return { ok: false, reason: "frame-too-far", smearFt, why, message: why + AIM_IT };
+  }
+  const [lat, lon] = feetToLatLngPair(ref, from.lat, from.lon);
+  const p = lngLatToFeet(lon, lat, to.lon, to.lat);
+  return { ok: true, dx: p.x - (Number(ref.x) || 0), dy: p.y - (Number(ref.y) || 0), same: false, smearFt };
+}
+
+/**
+ * WHERE a paste lands — the ONE decision, shared by the drawn-object and the reference-drawing
+ * Ctrl+V paths. They had this logic twice and it is exactly the pair the brief warned would
+ * diverge the first time someone touched one of them.
+ *
+ * @param crossPlan  is this paste landing on a different plan from the one it was copied on?
+ * @param frame      `resolveClipFrame`'s verdict (null for a same-plan paste)
+ * @param bbox       the payload's extent in SOURCE feet
+ * @param cursor     the live cursor in DESTINATION feet, already snapped (null = none seen yet)
+ * @param nudge      the same-plan fallback offset, so a paste is never a silent no-op
+ * @returns { mode: "in-place" | "cursor" | "nudge", dx, dy } | { mode: "refuse", message }
+ */
+export function clipPlacement({ crossPlan, frame, bbox, cursor, nudge = 0 } = {}) {
+  // Cross-plan with a resolvable frame: land it on the same GROUND it had on the plan it came
+  // from. No nudge — there is no original here to sit on top of, and "it arrived where it was" is
+  // what copying it over means. A same-plan paste keeps landing at the cursor (B417).
+  if (crossPlan && frame && frame.ok) return { mode: "in-place", dx: frame.dx, dy: frame.dy };
+  if (bbox && cursor && Number.isFinite(cursor.x) && Number.isFinite(cursor.y)) {
+    return { mode: "cursor", dx: cursor.x - (bbox.x0 + bbox.x1) / 2, dy: cursor.y - (bbox.y0 + bbox.y1) / 2 };
+  }
+  if (!crossPlan) return { mode: "nudge", dx: nudge, dy: nudge };
+  // Crossing a plan boundary, no frame relation and nowhere aimed: refuse rather than land it
+  // somewhere arbitrary (LOUD-FAILURE).
+  return { mode: "refuse", message: frame.message };
 }
 
 /* ------------------------------------------------------------------ paste */
