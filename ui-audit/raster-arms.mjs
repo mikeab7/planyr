@@ -16,8 +16,15 @@
  *   opaque       the overlay forced to opacity 1.0                        ← isolates BLENDING
  *   no-overlay   the 4.5 MP semi-transparent overlay hidden               ← removes it entirely
  *   quarter      both rasters at ¼ the pixels, SAME on-map footprint      ← isolates SIZE
+ *   unrotated    the overlay's 1.5° rotation taken to 0                   ← isolates ROTATION (NEW-2)
  *   no-rasters   both hidden                                              ← isolates Bain's geometry
  *   goose        the Goose Creek control, same regime                     ← what we have measured
+ *
+ * ⛔ `unrotated` EXISTS BECAUSE THE REAL PLAN ARRIVED AND CONTRADICTED THE FIXTURE. The owner's
+ * overlay is rotated **1.5°**; the synthesised fixture said 0, so every arm ever run here — all six,
+ * both batteries, sixty runs — composited it AXIS-ALIGNED, and a rotated raster cannot take an
+ * axis-aligned fast path. See the long note on the arm in lib/planFixture.mjs, including what the
+ * arm can and cannot hold constant.
  *
  * THE REGIME IS THE OWNER'S: 1× CPU (his complaint is at 1× on a 28-core machine), dpr 2.15 (his
  * measured display), --fake-tiles so aerial decode and texture upload are real work.
@@ -57,10 +64,17 @@ const FAKE_TILES = process.argv.includes("--fake-tiles");
 const DPR = num("--dpr", 2.15);
 const CPU = num("--cpu-throttle", 1);
 const REPS = num("--reps", 3);
-const ARMS = String(arg("--arms", "bain,opaque,no-overlay,quarter,no-rasters,goose")).split(",").map((s) => s.trim()).filter(Boolean);
+const ARMS = String(arg("--arms", "bain,opaque,no-overlay,quarter,unrotated,no-rasters,goose")).split(",").map((s) => s.trim()).filter(Boolean);
 const CACHE = join(HERE, ".raster-cache");
 
-const BAIN = JSON.parse(readFileSync(join(HERE, "fixtures", "bain-concept-a.json"), "utf8"));
+/* ⛔ THE REAL PLAN, NOT THE SYNTHESISED ONE. Until 2026-08-07 this read `bain-concept-a.json`,
+ * whose element COUNTS were the owner's and whose COORDINATES were invented — the bound
+ * docs/PERF-BAIN.md §6 put on its own largest claim. That file and its generator are gone; this is
+ * `public.sites` JOINED to `public.site_elements` for site `smr9olizi5ue`, verbatim. Two of its
+ * facts were absent from the synthesis and both are load-bearing: the overlay is rotated **1.5°**
+ * (every arm here had run it axis-aligned — see the `rot-0` / `rot-1.5` pair below), and the
+ * underlay is `fromMap` with a live ArcGIS URL rather than an IndexedDB string. */
+const BAIN = JSON.parse(readFileSync(join(HERE, "fixtures", "bain-concept-original.json"), "utf8"));
 /* The control, put through the SAME redaction path as any real plan, so the two fixtures reach the
  * browser by one code path and a difference between them cannot be an artefact of two loaders. */
 const GOOSE = redactPlan(JSON.parse(readFileSync(join(HERE, "fixtures", "goose-creek-plan1copy.json"), "utf8")), { keepNames: true }).fixture;

@@ -17784,6 +17784,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 );
   };
 
+  /* ⛔ EVERY markup group carries `data-markup={m.id}` — an INERT attribute, no behaviour attached.
+   * It is the markup tier's answer to `data-el-id` (elements), `data-measure` (measurements) and
+   * `data-testid="callout-<id>"` (callouts): markups were the only drawn object with no id in the
+   * DOM at all, so nothing outside React could tell whether one had actually rendered. That gap is
+   * exactly what a measurement harness cannot work around — `ui-audit/annotation-arms.mjs` proves
+   * each arm's annotations reached the canvas before it will report a number, on the same principle
+   * as `decodeFault` (an arm whose subject never rendered looks identical to a fast arm). There are
+   * ten return paths below, one per markup kind; ALL of them carry it, because a kind that quietly
+   * did not would read as "this markup costs nothing". */
   const renderMarkupNode = (m) => {
                 const isSel = sel?.kind === "markup" && sel.id === m.id;
                 const zk = strokeZk; // B617 zoom multiplier (matches the callout scale); NEW-1: 1 on an export pass so a sheet's line weights don't ride the live zoom
@@ -17839,7 +17848,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   const clW = strokeZoom(2.2, zk); // B617
                   const padC = f2p(centroid(m.pad)), mid = { x: (cl[0].x + cl[cl.length - 1].x) / 2, y: (cl[0].y + cl[cl.length - 1].y) / 2 };
                   return (
-                    <g key={m.id} style={mkCursor} onPointerDown={(e) => startMoveMarkup(e, m.id)} onContextMenu={(e) => onMarkupContext(e, m.id)}>
+                    <g key={m.id} data-markup={m.id} style={mkCursor} onPointerDown={(e) => startMoveMarkup(e, m.id)} onContextMenu={(e) => onMarkupContext(e, m.id)}>
                       {/* B619: selection halo — a soft blue casing under the line, no recolor of the line itself */}
                       {isSel && <polyline points={clStr} fill="none" stroke={SEL_BLUE} strokeWidth={clW + 5} strokeOpacity={0.4} strokeLinecap="round" strokeLinejoin="round" data-export="skip" pointerEvents="none" />}
                       <polygon points={cor} fill={col} fillOpacity={0.12} stroke={col} strokeWidth={strokeZoom(1.2, zk)} strokeDasharray={m.util === "water" ? dashZoom("5 4", zk) : undefined} />
@@ -17860,7 +17869,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   const col = m.stroke; // B619: keep the traced line's own color when selected
                   const tw = strokeZoom(m.weight ?? 2.4, zk); // B617
                   return (
-                    <g key={m.id} style={mkCursor} onPointerDown={(e) => startMoveMarkup(e, m.id)} onContextMenu={(e) => onMarkupContext(e, m.id)}>
+                    <g key={m.id} data-markup={m.id} style={mkCursor} onPointerDown={(e) => startMoveMarkup(e, m.id)} onContextMenu={(e) => onMarkupContext(e, m.id)}>
                       {isSel && <polyline points={s} fill="none" stroke={SEL_BLUE} strokeWidth={tw + 5} strokeOpacity={0.4} strokeLinecap="round" strokeLinejoin="round" data-export="skip" pointerEvents="none" />}
                       <polyline points={s} fill="none" stroke={col} strokeWidth={tw} strokeDasharray={dashArray(m.dash, m.weight ?? 2.4)} strokeLinejoin="round" />
                       {/* NEW-1 (the constant-screen-px audit): vertex marks and the label ride `labelK`
@@ -17876,7 +17885,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   const cen = (m.centerline || []).map(f2p);
                   const ctr = centroid(m.pts), cp = f2p(ctr);
                   return (
-                    <g key={m.id} style={mkCursor} onPointerDown={(e) => startMoveMarkup(e, m.id)} onContextMenu={(e) => onMarkupContext(e, m.id)}>
+                    <g key={m.id} data-markup={m.id} style={mkCursor} onPointerDown={(e) => startMoveMarkup(e, m.id)} onContextMenu={(e) => onMarkupContext(e, m.id)}>
                       {isSel && <polygon points={ring} fill="none" stroke={SEL_BLUE} strokeWidth={2} data-export="skip" pointerEvents="none" />}
                       <polygon data-testid={m.except ? "deed-except" : "deed-boundary"} points={ring} fill="url(#pat-encumber)" stroke={stroke} strokeWidth={strokeZoom(sw, zk)} strokeDasharray={da} pointerEvents="all" />
                       {/* centerline + per-call bearing/distance labels */}
@@ -17906,7 +17915,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     ? m.centerline
                     : (m.pts && m.pts.length >= 3 ? [...m.pts, m.pts[0]] : m.pts);
                   return (
-                    <g key={m.id} style={mkCursor} onPointerDown={(e) => startMoveMarkup(e, m.id)} onContextMenu={(e) => onMarkupContext(e, m.id)} onDoubleClick={(e) => onMarkupDouble(e, m.id)}>
+                    <g key={m.id} data-markup={m.id} style={mkCursor} onPointerDown={(e) => startMoveMarkup(e, m.id)} onContextMenu={(e) => onMarkupContext(e, m.id)} onDoubleClick={(e) => onMarkupDouble(e, m.id)}>
                       <polygon points={ring} fill={`url(#pat-ease-${easementType(m.easeType).key})`} stroke={ecol} strokeWidth={strokeZoom(isSel ? 2.4 : 1.8, zk)} strokeDasharray={proposed ? dashZoom("7 5", zk) : undefined} />
                       {/* centerline shown for strip easements; flat-capped strip is the polygon above */}
                       {cen.length > 1 && <polyline points={cen.map((p) => `${p.x},${p.y}`).join(" ")} fill="none" stroke={ecol} strokeWidth={strokeZoom(0.9, zk)} strokeDasharray={dashZoom("4 3", zk)} opacity={0.7} pointerEvents="none" />}
@@ -17930,7 +17939,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 if (m.kind === "line") {
                   const a = f2p(m.a), b = f2p(m.b);
                   return (
-                    <g key={m.id} style={common.style} onPointerDown={common.onPointerDown} onDoubleClick={(e) => onMarkupDouble(e, m.id)}>
+                    <g key={m.id} data-markup={m.id} style={common.style} onPointerDown={common.onPointerDown} onDoubleClick={(e) => onMarkupDouble(e, m.id)}>
                       <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="rgba(0,0,0,0.001)" strokeWidth={MK_HIT_PX} strokeLinecap="round" pointerEvents="stroke" />
                       <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke={nStroke} strokeWidth={vsw} strokeDasharray={da} fill="none" pointerEvents="none" />
                       {/* B620 — inline label riding the line (own color + white halo; appears in exports) */}
@@ -17941,7 +17950,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 if (m.kind === "polyline") {
                   const s = m.pts.map((p) => { const q = f2p(p); return `${q.x},${q.y}`; }).join(" ");
                   return (
-                    <g key={m.id} style={common.style} onPointerDown={common.onPointerDown} onDoubleClick={(e) => onMarkupDouble(e, m.id)}>
+                    <g key={m.id} data-markup={m.id} style={common.style} onPointerDown={common.onPointerDown} onDoubleClick={(e) => onMarkupDouble(e, m.id)}>
                       <polyline points={s} fill="none" stroke="rgba(0,0,0,0.001)" strokeWidth={MK_HIT_PX} strokeLinecap="round" strokeLinejoin="round" pointerEvents="stroke" />
                       <polyline points={s} fill="none" stroke={nStroke} strokeWidth={vsw} strokeDasharray={da} pointerEvents="none" />
                       {inlineLabelEls(mkPts(m), m.inlineLabel, m.stroke, m.labelSpacing || INLINE_LABEL_SPACING.polyline, view.ppf, f2p, `il${m.id}-`, { size: m.labelSize, halo: m.labelHalo, place: labelPlaceOf(m), lf: labelFrame })}
@@ -17955,7 +17964,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 if (m.kind === "polygon") {
                   const s = m.pts.map((p) => { const q = f2p(p); return `${q.x},${q.y}`; }).join(" ");
                   return (
-                    <g key={m.id} style={mkCursor} onPointerDown={common.onPointerDown} onContextMenu={common.onContextMenu}>
+                    <g key={m.id} data-markup={m.id} style={mkCursor} onPointerDown={common.onPointerDown} onContextMenu={common.onContextMenu}>
                       <polygon points={s} fill="none" stroke="rgba(0,0,0,0.001)" strokeWidth={MK_HIT_PX} strokeLinejoin="round" pointerEvents={closedHitPE} />
                       <polygon points={s} stroke={nStroke} strokeWidth={vsw} strokeDasharray={da} {...visFill} pointerEvents="none" />
                     </g>
@@ -17964,13 +17973,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 const c = f2p({ x: m.cx, y: m.cy }), w = m.w * view.ppf, h = m.h * view.ppf;
                 const rotTf = `rotate(${m.rot || 0} ${c.x} ${c.y})`;
                 if (m.kind === "ellipse") return (
-                  <g key={m.id} style={mkCursor} onPointerDown={common.onPointerDown} onContextMenu={common.onContextMenu}>
+                  <g key={m.id} data-markup={m.id} style={mkCursor} onPointerDown={common.onPointerDown} onContextMenu={common.onContextMenu}>
                     <ellipse cx={c.x} cy={c.y} rx={w / 2} ry={h / 2} transform={rotTf} fill="none" stroke="rgba(0,0,0,0.001)" strokeWidth={MK_HIT_PX} pointerEvents={closedHitPE} />
                     <ellipse cx={c.x} cy={c.y} rx={w / 2} ry={h / 2} transform={rotTf} stroke={nStroke} strokeWidth={vsw} strokeDasharray={da} {...visFill} pointerEvents="none" />
                   </g>
                 );
                 return (
-                  <g key={m.id} style={mkCursor} onPointerDown={common.onPointerDown} onContextMenu={common.onContextMenu}>
+                  <g key={m.id} data-markup={m.id} style={mkCursor} onPointerDown={common.onPointerDown} onContextMenu={common.onContextMenu}>
                     <rect x={c.x - w / 2} y={c.y - h / 2} width={w} height={h} transform={rotTf} fill="none" stroke="rgba(0,0,0,0.001)" strokeWidth={MK_HIT_PX} pointerEvents={closedHitPE} />
                     <rect x={c.x - w / 2} y={c.y - h / 2} width={w} height={h} transform={rotTf} stroke={nStroke} strokeWidth={vsw} strokeDasharray={da} {...visFill} pointerEvents="none" />
                   </g>
@@ -17979,7 +17988,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 if (!node) return null; // e.g. an easement hidden with its inactive parcel (B213)
                 const isHov = hoverMkId === m.id && !isSel && tool === "select"; // never glow the already-selected markup, and Select mode only
                 return (
-                  <g key={m.id}
+                  <g key={m.id} data-markup={m.id}
                      className={isHov ? "mk-hover" : undefined} data-hover={isHov ? "1" : undefined}
                      data-testid={isSel && tool === "select" ? "markup-selected" : undefined} data-mk-id={m.id} data-feature={`markup:${m.id}`} data-mk-kind={m.kind} data-mk-locked={m.locked ? "1" : "0"}
                      onPointerEnter={() => { if (tool === "select") setHoverMkId(m.id); }}

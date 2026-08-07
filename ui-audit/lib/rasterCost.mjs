@@ -231,6 +231,31 @@ export function decodeFault(rendered, expected) {
     : null;
 }
 
+/* ---- THE SAME GUARD, ON THE ANNOTATION AXIS (NEW-3) --------------------------------------------
+ * `decodeFault` above exists because an arm whose raster never decoded looks EXACTLY like an arm
+ * that is fast. An arm whose CALLOUTS, MARKUPS AND MEASURES never rendered looks exactly the same
+ * way, and `annotation-arms.mjs` measures precisely that. So it gets the same treatment, and it
+ * lives here rather than in the harness for two reasons: it is pure and therefore unit-testable,
+ * and importing a harness that launches Chromium at module scope just to reach one function is a
+ * trap nobody should have to notice.
+ *
+ * ⚠ IT EARNED ITS KEEP ON THE FIRST RUN. Every arm reported 0 of 24 annotations on a page that was
+ * rendering all of them — the DOM census had been written as a template-literal STRING, and
+ * Playwright evaluates a string as an EXPRESSION and does not call it with its argument (the same
+ * subtlety that once wrote nothing to IndexedDB; see `idbPutInPage`). Nothing but this refusal
+ * would have caught it, and the run would have reported a beautiful, entirely false null.
+ */
+export function annotationFault(seen, expected) {
+  if (!seen) return "no canvas — the arm did not load";
+  const missing = [];
+  for (const k of ["callouts", "markups", "measures"]) {
+    if (seen[k] !== expected[k]) missing.push(`${k}: expected ${expected[k]} on the canvas, counted ${seen[k]}`);
+  }
+  return missing.length
+    ? `ANNOTATIONS DID NOT RENDER AS THE ARM SPECIFIES — ${missing.join("; ")}. This arm did not measure what it claims to.`
+    : null;
+}
+
 /** Decoded texture bytes actually on the page, from the intrinsic dimensions read out of the bytes
  *  the DOM is holding — never from the fixture's own claim about itself. Only images that actually
  *  decoded are counted: a texture the compositor does not have is not a cost. */

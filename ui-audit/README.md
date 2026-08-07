@@ -60,15 +60,57 @@ as slow and the harness could open neither, so the whole program has been measur
 open while he reports on two it cannot. **Goose Creek has no raster overlay at all**, so every null result
 about rasters, compositing or texture memory taken on it was structurally guaranteed.
 
-- **`build-bain-fixture.mjs`** → `fixtures/bain-concept-a.json`. The owner's measured Bain census — 53
-  elements in his exact kind counts, 5 parcels, 1 pond — and **both rasters at their measured dimensions,
-  opacities, `ftPerPx` and IndexedDB-string storage path** (1728 × 2592 @ 0.55 over 1800 × 1167 @ 1.0).
-  Coordinates are synthesised and the file says so; `--check` fails CI on drift.
-- **`raster-arms.mjs`** — the six-arm decomposition of the raster hypothesis (blending · size · presence ·
-  Bain's own geometry · the Goose Creek control), with a cost metric the rest of this program does not
-  have: **paint / raster / decode / composite**, read from Chromium's tracing. The existing un-quantised
-  work figure is `Script + Layout + RecalcStyle` — all main-thread work that happens *before* a pixel
-  exists — so it is structurally blind to blending. Findings in `../docs/PERF-BAIN.md`.
+**⛔ THAT IS NO LONGER TRUE, as of 2026-08-07 — BOTH of the owner's reported-slow plans are committed,
+verbatim, and the synthesised stand-in is GONE.** `bain-concept-a.json` and its generator
+`build-bain-fixture.mjs` are DELETED rather than kept beside the real files: its element counts were the
+owner's and its coordinates were invented, which is precisely the bound `../docs/PERF-BAIN.md` §6 put on
+its own largest claim, and a synthesised fixture left in the tree is a synthesised fixture someone measures
+again by accident.
+
+- **`fixtures/bain-concept-original.json`** — site `smr9olizi5ue`, "Concept - Original" (Fort Bend), from
+  `public.sites` JOINED to `public.site_elements`. 47 elements · 5 parcels · 1 pond · 38 of 47 rotated ·
+  0 annotations. Both rasters at their measured parameters — and **two facts the synthesis did not have**:
+  the sheet overlay is rotated **1.5°** (every arm ever run here composited it axis-aligned), and the
+  underlay is `fromMap` with a live ArcGIS URL, i.e. **fetched, not read out of IndexedDB**.
+- **`fixtures/sylvestri-concept-d-full.json`** — site `sms4zs8unbkg`, "Concept D - Sylvestri Retail"
+  (Harris). 98 elements · 3 parcels · **16 callouts, 6 markups, 2 measures** · **NO sheet overlay at all**.
+  The first plan this program has ever been able to measure that is not 0/0/0/0 on annotations, and a clean
+  control because nothing it shows can be charged to a raster. ⚠ NOT the same file as
+  `fixtures/sylvestri-concept-d.json`, which is a 22-element geometry bag for the dock-zone tests whose
+  hosts have since been deleted from the live plan; neither replaces the other.
+- **`../scripts/plan-dump-to-fixture.mjs`** — the SQL route from a real plan to a committable fixture, and
+  the boundary that decides what is safe to commit. ⛔ **The elements are NOT in the site row**
+  (`data.els` is `[]`, `elementsInRows` is true) — read only `public.sites` and a 47-element plan reports
+  as zero. It strips identity fields, Storage keys and county appraisal records, and replaces callout text
+  with a SHAPE-PRESERVING stand-in (exact line count, per-line length and whitespace positions) because a
+  callout's cost IS its text and "Note 3" would delete the property the fixture exists to reproduce.
+- **`raster-arms.mjs`** — the seven-arm decomposition of the raster hypothesis (blending · size · presence ·
+  **rotation** · Bain's own geometry · the Goose Creek control), with a cost metric the rest of this program
+  does not have: **paint / raster / decode / composite**, read from Chromium's tracing. The existing
+  un-quantised work figure is `Script + Layout + RecalcStyle` — all main-thread work that happens *before* a
+  pixel exists — so it is structurally blind to blending. Findings in `../docs/PERF-BAIN.md`.
+- **`fixtures/bain-quiddity.json`** — site `smshwnnijjfi`, "Concept A - Quiddity Hydrologic Analysis":
+  the **SLOW half of the owner's own A/B**, and the strongest experiment in this programme.
+  52 elements · 2 parcels · **3 pipeline easements** (18/28/4 pts) · 2 ponds carrying **68 vertices**.
+  ⛔ **Its value is the PAIR, not the file.** It shares with `bain-concept-original.json` (which he
+  calls fast) **the same physical sheet overlay** — same id, same `storageKey`, same 1728 × 2592 @ 0.55
+  at rotation 1.5° — plus the same underlay, origin, county and byte-identical settings. **A shared
+  cause cannot explain a difference**, so the raster, its alpha, its rotation and B749's PDF re-raster
+  are eliminated for Bain **by identity**, with no floor, no sign test and no reps. Drive it with
+  `annotation-arms.mjs --plan bain-pair`; the identity is asserted in `test/realPlanFixtures.test.js`,
+  so a re-pull that breaks it goes red rather than letting a refuted hypothesis quietly return.
+  ⛔ **The pair has since ANSWERED the question it was built for, and the answer is RING VERTEX
+  COUNT.** The `simple-ponds` arm holds pond count at two, the element count at 52, the easements at
+  three and the canvas at 752 nodes, and coarsens both pond rings to the fast plan's 7 points with
+  each bounding box preserved exactly — **recovering 89.3% of a 91.1% gap, 6/6 paired reps,
+  p = 0.031.** Removing 54 vertices bought 49,806 ms. Raster, easements, element count and pond count
+  are all refuted for this pair; what survives is the vertices. `docs/PERF-REAL-PLANS.md` §5.5.
+- **`annotation-arms.mjs`** — the same design on the axis every plan ever measured here was ZERO on.
+  Sylvestri's 16 callouts, 6 markups and 2 measures, decomposed per kind against the baseline. Its guard is
+  the analogue of `decodeFault`: an arm whose annotations never reached the canvas is SUPPRESSED, never
+  reported — because it looks exactly like an arm that is fast. (That guard earned its keep on the first
+  run: a Playwright string-vs-function subtlety made every arm read 0 of 24 annotations on a page that was
+  rendering all of them.)
 - **`lib/planFixture.mjs` + `../scripts/extract-plan.mjs`** — the path from ANY plan the owner works in to
   a fixture the harness can drive, rasters included, with his pixels and his identity stripped and the
   stripping unit-tested as a negative.
