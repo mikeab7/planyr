@@ -8,10 +8,36 @@
 // Pure: world-feet in, world-feet out, no React/DOM — unit-testable without a browser.
 // Clipper works in integers, so we scale feet → centi-feet (~0.01 ft ≈ 1/8" precision).
 import ClipperLib from "clipper-lib";
+import { identityCache } from "./pureCache.js";
 
 const SCALE = 100;            // feet → centi-feet
 const ARC_TOL = 0.25 * SCALE; // round-join chord tolerance (~0.25 ft) → smooth contour arcs
 const MITER = 2;
+
+/* ⛔ B227888 — THE INVOCATION COUNTER, and it is the guard, not a debug aid.
+ *
+ * `offsetInward` is the single primitive every pond number in this app is ultimately made of:
+ * stage bands, achievable depth, usable volume, excavation, berm crest, contours. A JS profile of
+ * the owner's slow Bain plan attributed 55,631 ms of a 55,760 ms pan gesture to clipper-lib's
+ * intersection sweep called from here — 275,184 executions in ONE pan, on two ponds nobody was
+ * touching.
+ *
+ * A TIME budget cannot guard that, because a time budget passes the moment a computation that
+ * should not be running at all merely gets cheaper. So the property asserted by
+ * `test/pondViewIndependence.test.js` and by `ui-audit/count-pond-invocations.mjs --assert` is the
+ * COUNT of real clipper executions, and `misses` is where they are counted. `calls` minus `misses`
+ * is what the memo saved. Two integers; they cost nothing and they are the only thing that can
+ * prove the recurrence has not come back. */
+export const offsetStats = { calls: 0, misses: 0 };
+
+/* Keyed on the ring's IDENTITY, because a planner element's `points` array is replaced wholesale on
+ * every edit and never mutated in place (the precondition pureCache.js states). Identity keying is
+ * free — no signature to build on a leaf that ran a quarter of a million times per gesture.
+ *
+ * The cap is 96: one ring is legitimately asked for ~28 distinct offsets by the pinch-off binary
+ * search plus one per stage band per consumer, and a cap below that clears on every call. */
+const offsetMemo = identityCache(96);
+const maxOffsetMemo = identityCache(4);
 
 const toPath = (ring) => ring.map((p) => ({ X: Math.round(p.x * SCALE), Y: Math.round(p.y * SCALE) }));
 const fromPath = (path) => path.map((c) => ({ x: c.X / SCALE, y: c.Y / SCALE }));
@@ -27,6 +53,19 @@ const ringAbsArea = (r) => { let s = 0; for (let i = 0, n = r.length; i < n; i++
 export function offsetInward(ring, dist) {
   if (!Array.isArray(ring) || ring.length < 3) return [];
   if (!(dist > 0)) return [ring.map((p) => ({ x: p.x, y: p.y }))];
+  offsetStats.calls++;
+  const memoKey = String(dist);
+  const hit = offsetMemo.get(ring, memoKey);
+  if (hit !== undefined) return hit;
+  offsetStats.misses++;
+  return offsetMemo.set(ring, memoKey, offsetExecute(ring, dist));
+}
+
+/* ⚠ THE RESULT IS SHARED — treat it as READ-ONLY, the same contract every other memo in this tree
+ * carries (`_detMemo`, `_contMemo`, `interiorFitter().spots`). Audited at the time this cache was
+ * added: every consumer in the repo either measures the rings (`ringsArea`, `polyArea`) or maps
+ * them to an SVG path string. None mutates one. */
+function offsetExecute(ring, dist) {
   try {
     let path = toPath(ring);
     path = ClipperLib.Clipper.CleanPolygon(path, SCALE * 0.01); // drop sub-precision noise
@@ -92,6 +131,15 @@ export function ringsArea(rings) {
 // max gradeable depth = maxInwardOffset(footprint) / sideSlopeRatio.
 export function maxInwardOffset(ring) {
   if (!Array.isArray(ring) || ring.length < 3) return 0;
+  /* 29 clipper executes per call, and a pure function of the ring alone — so it is memoised on the
+   * ring's identity. It was measured at 8,736 calls in one pan of the owner's Bain plan (B227888),
+   * every one of them re-deriving the same number for a pond that had not moved. */
+  const hit = maxOffsetMemo.get(ring, "max");
+  if (hit !== undefined) return hit;
+  return maxOffsetMemo.set(ring, "max", maxInwardOffsetUncached(ring));
+}
+
+function maxInwardOffsetUncached(ring) {
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
   for (const p of ring) { if (p.x < minX) minX = p.x; if (p.x > maxX) maxX = p.x; if (p.y < minY) minY = p.y; if (p.y > maxY) maxY = p.y; }
   let lo = 0, hi = Math.max(maxX - minX, maxY - minY) / 2 + 1; // inscribed reach ≤ half the larger side

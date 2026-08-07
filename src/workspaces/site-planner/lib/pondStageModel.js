@@ -36,8 +36,42 @@
 import { polyArea } from "./polygonSplit.js";
 import { offsetInward, ringsArea, maxInwardOffset } from "./pondOffset.js";
 import { volumeBetween } from "./pondGeom.js";
+import { identityCache } from "./pureCache.js";
 
 const EPS = 1e-6;
+
+/* ⛔ B227888 — VIEW-INDEPENDENT-ONCE, fourth instance. The owner, on being told a pond's geometry
+ * was expensive: *"I don't really understand how a static pond, how the calculation should slow
+ * anything down at all. And you can give me the reason, but I still don't think it should."*
+ *
+ * He is right, and the measurement agreed with him rather than with the milliseconds. `drainFacts()`
+ * in SitePlanner.jsx is deliberately GATING rather than memoising — it recomputes the whole yield /
+ * stormwater bundle fresh on every render that reads it — so with the Yield panel docked this model
+ * was rebuilt **156 times per pond per pan gesture** on ponds nobody had touched. A pan is a pure
+ * translation at constant scale (B1440); a pond's stage table is a function of (ring, det, opts) and
+ * of nothing about the view. 155 of those 156 answers were bit-for-bit identical to the first.
+ *
+ * ⛔ AND THIS IS WHY THE FIX IS A MEMO AND NOT A FASTER ALGORITHM. §5.5 of docs/PERF-REAL-PLANS.md
+ * read the same gap as "something superlinear in ring vertex count" and pointed at the label-fit
+ * ladder. Both halves of that are refuted below and in the doc: the ladder costs 0.5 ms of a 55,760
+ * ms gesture (B221761's memo hits, exactly as designed), and collinear-midpoint insertion — which
+ * raises vertex count while holding area, perimeter, bounding box and the drawn picture EXACTLY —
+ * scales at an exponent of 0.20, i.e. sixteen times the vertices for 1.75× the cost. Vertex count
+ * was never superlinear. It was a mildly-growing per-call cost multiplied by a recurrence that
+ * should not exist.
+ *
+ * The cache CANNOT serve a stale engineering number, which is the property `drainFacts`'s
+ * gating-not-memoising comment exists to protect: the key IS the inputs. The ring is keyed by
+ * IDENTITY (the planner replaces `points` wholesale on every edit — it never mutates in place), and
+ * the det/opts fields that move an answer are keyed by VALUE. Edit the pond and a new array arrives
+ * with a new entry; change a depth, a freeboard, a side slope, a flood elevation or an invert and
+ * the string key changes. Nothing else can move the answer, because the function is pure.
+ *
+ * ⚠ The returned objects are SHARED — read-only, like every memo in this tree. */
+const elevMemo = identityCache(8);
+const modelMemo = identityCache(8);
+
+const detKey = (det = {}) => `${det.depth}|${det.freeboard}|${det.slope}|${det.tobElev}`;
 export const CF_PER_ACFT = 43560;
 export const SQFT_PER_ACRE = 43560;
 
@@ -56,6 +90,18 @@ export function pondElevations(ring, det = {}) {
   const tob = det.tobElev;
   if (tob == null || !Number.isFinite(tob)) return null;
   if (!Array.isArray(ring) || ring.length < 3) return null;
+  /* Memoised because `stageTable` asks for it once itself and TWICE MORE PER BAND through
+   * `areaAtElev` — so a 7-band pond re-ran this 15 times per model build, each time paying the
+   * 29-clipper-execute pinch-off search for a constant. That is the superlinear-LOOKING term, and
+   * it is not superlinear: it is a constant re-derived a linear number of times. */
+  const memoKey = detKey(det);
+  const hit = elevMemo.get(ring, memoKey);
+  if (hit !== undefined) return hit;
+  return elevMemo.set(ring, memoKey, pondElevationsUncached(ring, det));
+}
+
+function pondElevationsUncached(ring, det) {
+  const tob = det.tobElev;
   const { depth, freeboard, slope } = detOf(det);
   const maxDepth = slope > 0 ? maxInwardOffset(ring) / slope : 0;
   const achievableDepth = Math.min(depth, maxDepth);
@@ -287,7 +333,18 @@ export function prismVsExtrusion(ring, det = {}) {
 /* Assemble the WHOLE per-pond model in one call — the shape every downstream consumer (site
  * reconciliation, drawdown, mitigation banding, cut/fill) reads, so no consumer re-derives storage
  * from a footprint. Returns null when the pond is unanchored. Pure. */
-export function pondStageModel(ring, det = {}, { floodElevFt = null, outletInvertFt = null, bandFt = 1, minGravityShare = DEFAULT_MIN_GRAVITY_SHARE, id = null, name = null } = {}) {
+export function pondStageModel(ring, det = {}, opts = {}) {
+  const { floodElevFt = null, outletInvertFt = null, bandFt = 1, minGravityShare = DEFAULT_MIN_GRAVITY_SHARE, id = null, name = null } = opts;
+  if (!Array.isArray(ring) || ring.length < 3) return null;
+  /* The whole-model memo (B227888). Every field below that can move an answer is in the key; `id`
+   * and `name` are in it too, because they are carried through into the result a consumer reads. */
+  const memoKey = `${detKey(det)}|${floodElevFt}|${outletInvertFt}|${bandFt}|${minGravityShare}|${id}|${name}`;
+  const hit = modelMemo.get(ring, memoKey);
+  if (hit !== undefined) return hit;
+  return modelMemo.set(ring, memoKey, pondStageModelUncached(ring, det, { floodElevFt, outletInvertFt, bandFt, minGravityShare, id, name }));
+}
+
+function pondStageModelUncached(ring, det, { floodElevFt, outletInvertFt, bandFt, minGravityShare, id, name }) {
   const stage = stageTable(ring, det, { bandFt });
   if (!stage) return null;
   const duty = dutySplit(ring, det, { floodElevFt });
