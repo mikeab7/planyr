@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-08-06 @ `f1f39fd` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-08-07 @ `89522ba` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_439 source files mapped._
+_440 source files mapped._
 
 ## infra
 
@@ -707,6 +707,8 @@ _439 source files mapped._
   - _exports_: `classifyVerified`, `classifyWseSource`, `SOURCE_TAG_COLOR_VAR`, `SOURCE_TAG_ORDER`, `SOURCE_TAGS`, `sourceTag`
 - **`src/workspaces/site-planner/lib/proximityScreen.js`** — Pure proximity-screen core (PHASE 2, reused by later distance screens): projects parcel rings + feature points to EPSG:2278 feet and returns count + nearest-distance + ranked names within a buffer (0 ft = on/under the site), plus the `fmtDistFt` display helper
   - _exports_: `distPathToRingsFt`, `distPointSegFt`, `distPointToRingsFt`, `distSegSegFt`, `featureDistFt`, `fmtDistFt`, `pointInRingFt`, `ringToGridFt`, `screenProximity`, `segmentsIntersectFt`, `toGrid`
+- **`src/workspaces/site-planner/lib/pureCache.js`** — the two pure caches behind VIEW-INDEPENDENT-ONCE: a bounded string-signature cache, a WeakMap identity cache, and a point-list signature builder
+  - _exports_: `boundedCache`, `identityCache`, `pointsSignature`
 - **`src/workspaces/site-planner/lib/rasterIdentify.js`** — pure ArcGIS `/identify` decision layer for the RASTER-painted layers: capability gate, request shaping, result→readout, and the debounced/cancelling hover controller with an honest state for every outcome.
   - _exports_: `createHoverIdentify`, `errorMessage`, `floodReadout`, `gapMessage`, `HOVER_IDENTIFY_DEBOUNCE_MS`, `IDENTIFY_ROW_SPECS`, `IDENTIFY_STATE`, `IDENTIFY_TIMEOUT_MS`, `IDENTIFY_TOLERANCE_PX`, `identifyCapable`, `identifyLayersParam`, `identifyRequest`, `readoutFromResult`, `readoutsFromJson`, `stateMessage`
 - **`src/workspaces/site-planner/lib/rasterIdentifyLazy.js`** — the one on-demand loader for the raster identify chunk: a synchronous-returning `attachRasterIdentifyLazy` for the map finder plus a `makeHoverIdentify`/`rasterIdentifyNow` pair for the planner's per-move path.
@@ -800,7 +802,7 @@ _439 source files mapped._
 - **`src/workspaces/site-planner/lib/vectorOverlay.js`** — Leaflet glue over the vector cache tier: cachedVectorLayer paints last-good boundaries instantly, background-refreshes, hover/click identify (identifyOk-gated), zoom-gated divIcon name labels, live esri-leaflet fallback
   - _exports_: `appendIdentifyRows`, `cachedCorridorLayer`, `cachedPipelineLayer`, `cachedVectorLayer`, `decodeFieldValue`, `identifyHref`, `identifyRowsFor`, `identifyTitle`, `isPointFeature`
 - **`src/workspaces/site-planner/lib/viewCull.js`** — Viewport culling for the feet-frame SVG (screen only — the export always renders the complete model)
-  - _exports_: `boundsIntersect`, `CULL_MARGIN`, `CULL_MIN_ELEMENTS`, `cullToView`, `elementBounds`, `shouldCull`, `visibleWorldRect`
+  - _exports_: `boundsIntersect`, `CULL_MARGIN`, `CULL_MIN_ELEMENTS`, `CULL_REARM`, `cullRectFor`, `cullToView`, `elementBounds`, `sameRect`, `shouldCull`, `visibleWorldRect`
 - **`src/workspaces/site-planner/lib/wellStatus.js`** — Pure RRC well status classifier (PHASE 4): SYMNUM/description → producing/plugged/dry/abandoned/injection, and `summarizeWells` turns a proximity result into a status breakdown + an on-site offset/replug risk flag
   - _exports_: `classifyWell`, `summarizeWells`
 - **`src/workspaces/site-planner/lib/wseProviders.js`** — the pluggable estimated-WSE provider registry (B882, pure): per-county precedence (district model → FEMA InFRM EBFE → grade) + provenance labels; `resolveEstimatedWse` picks the winning 1%/0.2% source and reports cross-provider disagreement.

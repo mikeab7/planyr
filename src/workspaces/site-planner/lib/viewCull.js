@@ -37,6 +37,64 @@ export function visibleWorldRect(view, size, margin = CULL_MARGIN) {
   return { minX: minX - mx, minY: minY - my, maxX: maxX + mx, maxY: maxY + my };
 }
 
+/* ⛔ VIEW-INDEPENDENT-ONCE (NEW-2, 2026-08-06) — WHY THE RECT IS LATCHED, NOT RE-DERIVED.
+ *
+ * `visibleWorldRect` is a CONTINUOUS function of `view`, so during a pan it returns four different
+ * numbers on every frame, `cullToView` re-filters the whole model, and the result — on any pan
+ * that stays inside the 60% margin — is THE SAME SET OF ELEMENTS in a brand-new array. Measured by
+ * ui-audit/detect-view-recompute.mjs on a 60-move pan of the reference plan: `drawEls`,
+ * `drawParcels` and `drawMarkupsZ` each ran 60 times and produced exactly ONE distinct result, and
+ * because the array identity changed each time, every memo downstream of them missed too. That is
+ * the `view-churned` verdict: the inputs moved, the answer did not.
+ *
+ * THE FIX IS HYSTERESIS, and the first attempt at it is worth recording because it was measured
+ * and was not good enough. Snapping each edge outward to a lattice took the recompute count from
+ * 60 to 19 — a step function still steps, and a gesture that oscillates re-crosses the same
+ * boundary again and again. What actually holds is a LATCH: keep the rect you already have for as
+ * long as the true viewport is still comfortably inside it, and only then build a new one.
+ *
+ *   • The rect handed out is padded by `CULL_MARGIN` (0.6 of the viewport on every side).
+ *   • It is kept while the TRUE viewport (no margin) is inside it with `CULL_REARM` of the
+ *     viewport still to spare on every side — so there is always at least that much drawn
+ *     content beyond the screen edge, and nothing can pop in.
+ *   • A change of px-per-foot always re-arms: at a new zoom the viewport covers a different
+ *     amount of world, and a rect sized for the old one is the wrong budget.
+ *
+ * ⛔ WHAT MAKES THIS SAFE IS THE CONTAINMENT TEST, not the margin: the latch is only held when the
+ * true visible rect is PROVEN inside the rect being kept, so the rect handed to `cullToView` is
+ * always a superset of what is on screen. Culling with a superset draws more than strictly
+ * necessary and can never drop something that should be visible. The export path passes no rect at
+ * all, so `test/viewCull.test.js`'s "an export is independent of the viewport" is untouched.
+ *
+ * PURE: the previous rect is an ARGUMENT, never module state, so this is unit-testable and two
+ * canvases cannot share a latch (test/pureCache.test.js).
+ */
+export const CULL_REARM = 0.25;
+
+/** Keep `prev` if it still covers the view with room to spare; otherwise build a fresh padded
+ *  rect. Returning `prev` BY IDENTITY is half the fix — a new object holding the same numbers
+ *  would still invalidate every memo keyed on the rect. */
+export function cullRectFor(view, size, prev = null, margin = CULL_MARGIN, rearm = CULL_REARM) {
+  const ppf = Number(view?.ppf);
+  if (prev && prev.ppf === ppf) {
+    const now = visibleWorldRect(view, size, 0);
+    const padX = Math.abs(now.maxX - now.minX) * rearm;
+    const padY = Math.abs(now.maxY - now.minY) * rearm;
+    if (now.minX - padX >= prev.minX && now.minY - padY >= prev.minY
+      && now.maxX + padX <= prev.maxX && now.maxY + padY <= prev.maxY) return prev;
+  }
+  const r = visibleWorldRect(view, size, margin);
+  return { minX: r.minX, minY: r.minY, maxX: r.maxX, maxY: r.maxY, ppf };
+}
+
+/** Do two cull rects describe the same window? The latch above returns `prev` by identity, so this
+ *  is only needed by callers comparing two independently built rects (and by the tests). */
+export function sameRect(a, b) {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  return a.minX === b.minX && a.minY === b.minY && a.maxX === b.maxX && a.maxY === b.maxY;
+}
+
 /* Axis-aligned bounds of anything the planner draws, in feet. Understands the three shapes
  * the model actually uses: a point list (`points` / `pts`), a rotated box (`cx/cy/w/h`), and
  * a bare anchor (`cx/cy`). Returns null when the element carries no usable geometry — and a

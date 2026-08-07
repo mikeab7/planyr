@@ -4,6 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { createRequire } from "node:module";
 import { execSync } from "node:child_process";
+import recomputeProbe from "./scripts/vite-plugin-recompute-probe.mjs";
 
 // PDF.js (v6) renders correctly only when it can fetch its support assets at runtime:
 // substitute fonts (non-embedded text), CMaps (CID/CJK fonts), an ICC profile (CMYK
@@ -199,6 +200,10 @@ export default defineConfig(({ command }) => ({
   },
   plugins: [
     react(),
+    /* NEW-1 — the VIEW-INDEPENDENT-ONCE detector's build-time instrumentation. Returns a plugin
+     * with no hooks unless PLANYR_PROBE=1 is in the environment, so a production build is byte-for-
+     * byte unaffected (asserted by test/recomputeProbe.test.js). Never enabled by `npm run build`. */
+    recomputeProbe(),
     pdfjsAssets(),
     chunkModuleStats(),
     buildStamp(),

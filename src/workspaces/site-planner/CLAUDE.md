@@ -582,6 +582,22 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   ui-audit harness **audit-doubleclick-properties** (every element type × every markup kind × three
   easement modes, in `centres` / `--labels` / `--locked` modes — `--labels` primes the selection first,
   because a detail-tier dimension number does not EXIST until its element is selected).
+- **⛔ `pureCache.js` + `viewCull.js`'s `cullRectFor` — VIEW-INDEPENDENT-ONCE (`/CLAUDE.md`), the two
+  mechanisms a fix in that class uses. Read the rule before adding a memo here.** The cull rect is
+  **LATCHED**, not re-derived: it was a continuous function of `view`, so `cullToView` re-filtered the
+  whole model every pan frame and returned THE SAME SET in a fresh array, which then missed every memo
+  downstream (`drawEls`/`drawElsZ`/`drawParcels`/`drawMarkupsZ`). A lattice snap was tried first and
+  measured at 60 → 19 recomputes — a step function still steps — so `cullRectFor` keeps the rect it
+  already holds while the true viewport is **proven inside it** (always a superset, so it can draw more
+  and never drop something visible) and re-arms on a far enough pan and always on a zoom. Returning
+  `prev` **by identity** is half the fix; a fresh object with equal numbers invalidates everything.
+  `pureCache.js` is for pure leaves that have no hook to hang a memo on — a signature cache
+  (`roadGeometry.roadCenterlineTagged`, bypassed when a caller passes the un-keyable `shareAt`) and a
+  WeakMap identity cache (`metesAndBounds.offsetPolyline` / `bufferPolyline`), whose precondition is
+  that the keyed array is treated as IMMUTABLE. Guards: the repo-root `test/` suites **pureCache**,
+  **recomputeProbe** and **viewIndependentRegistry**, the ui-audit gate **verify-view-independent**
+  (a counter — every visual test in this repo passes on this defect), and the instrument that finds
+  the class, **detect-view-recompute**. Enumeration: `/docs/PERF-VIEW-INDEPENDENCE.md`.
 - `zOrder.js` — per-element `z` stacking key utilities (`nextZ`/`sortByZ`/`normalizeZ`/`ensureZ`, B671).
   `arrange.js` — pure z-order "Arrange" (`reorderByZ`/`arrangeFlags`, B820): Bring-to-Front/Send-to-Back
   over a peer set (a building reorders within its `Z_LAYER` band, a markup within the markup layer;
