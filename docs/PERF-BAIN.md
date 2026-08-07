@@ -8,6 +8,46 @@ He was right, and the answer to the second question was no.
 
 ---
 
+> ## ⛔ SUPERSEDED IN PART, 2026-08-07 — READ THIS BEFORE QUOTING ANY NUMBER BELOW
+>
+> **Every figure in this document was measured on `bain-concept-a.json`, whose element counts were the
+> owner's and whose COORDINATES WERE INVENTED.** §6 said so, and was right to. The real plan has since
+> been pulled from `public.sites` JOINED to `public.site_elements` and committed as
+> `ui-audit/fixtures/bain-concept-original.json`; the synthesised fixture and its generator are DELETED.
+>
+> **What that changed, in one line each — the full account is `docs/PERF-REAL-PLANS.md`:**
+>
+> - The plan is **47 elements, not 53**, in a different mix. Six elements measured here do not exist.
+> - **The sheet overlay is rotated 1.5°.** The synthesis said 0, so **every arm in this document
+>   composited it AXIS-ALIGNED** — all six arms, both batteries, sixty runs. A rotated raster cannot
+>   take an axis-aligned fast path, so that is an untested term in findings 1–3.
+> - **§8 is wrong about the underlay.** It is `fromMap` with a live ArcGIS `export` URL and no `idbKey`
+>   — **fetched, not read out of IndexedDB.** §7 (it is never *painted*) is unaffected and stands.
+> - **§10's lead is confirmed as a fact rather than a suspicion:** the overlay really is page 1 of a
+>   PDF, so B749's up-to-8192 px zoom re-raster is genuinely gated on. It still has never run in an arm.
+ - **§7.3's 304-layer question is ANSWERED, and the answer is that the count was never about the plan:
+>   `layers = leafletTiles + 4`, exactly, on all three real plans and in every arm of both batteries.**
+>   Bain has the fewest elements of the three and the most layers; Sylvestri has more than twice Bain's
+>   elements and 118 fewer. See `docs/PERF-REAL-PLANS.md` §3.
+> - **Two measured results the arms below did not contain**, both at 6/6 paired reps, p = 0.031:
+>   removing the overlay's **rotation** is −10.2% render (−12.6% raster), and removing Sylvestri's
+>   **annotations** is −12.6% render.
+>
+> **What is NOT superseded:** findings 1, 2 and 5 rest on BETWEEN-ARM comparisons in which the geometry
+> was held identical across every arm, so the synthesis is common-mode and cancels. Semi-transparency is
+> still not the mechanism; pixel count is still not the mechanism; main-thread work still cannot tell the
+> two plans apart. The numbers below are kept verbatim rather than restated against the real plan,
+> because a measurement is a historical fact about what was run, and quietly editing one is how a report
+> stops being evidence.
+>
+> ⛔ **ONE CLAUSE IS WITHDRAWN OUTRIGHT.** Finding 4 reads *"roughly half is Bain's own scene: 1,035
+> canvas nodes against 884, and 304 compositor layers against 118."* **The layer count does not belong
+> in that sentence** — it is a basemap-tile-retention difference that would be there with an empty plan.
+> The node count stands. The composite and layerize gaps it was offered as an explanation for are real
+> and are once again unexplained.
+
+---
+
 ## 0. The admission this document exists to make
 
 Every performance number this program has produced came from **Goose Creek**, or from a scene derived
@@ -313,9 +353,13 @@ xvfb-run -a --server-args="-screen 0 1600x1000x24" \
 xvfb-run -a --server-args="-screen 0 1600x1000x24" \
   node ui-audit/boot-tail.mjs --fixture bain --fake-tiles --dpr 2
 
-# regenerate the fixture from the measured census (--check fails CI on drift)
-node ui-audit/build-bain-fixture.mjs
+# ⛔ `node ui-audit/build-bain-fixture.mjs` NO LONGER EXISTS. The fixture it generated had invented
+# coordinates, and the byte-identity check that guarded it was green for the fixture's whole life
+# while that was true — a regeneration guard proves a file matches what produced it, and says nothing
+# about whether that thing was making the plan up. Both real plans now come out of Supabase:
+node scripts/plan-dump-to-fixture.mjs <dump.json> ui-audit/fixtures/<name>.json
+# and the guard is the owner's own measured census, asserted in test/realPlanFixtures.test.js.
 
-# the snippet the owner pastes into his own browser
+# the snippet the owner pastes into his own browser (the non-SQL route, unchanged)
 node scripts/extract-plan.mjs
 ```

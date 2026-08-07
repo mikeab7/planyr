@@ -7,7 +7,6 @@ import {
   overlayIdbKey, underlayIdbKey, RASTER_ARMS, PRIVATE_FIELDS,
 } from "../ui-audit/lib/planFixture.mjs";
 import { synthRasterPng, decodedBytes, megapixels, base64Len, hash32, rasterFill } from "../ui-audit/lib/synthRaster.mjs";
-import { bainFixtureJson, BAIN_CENSUS, BAIN_PARCELS } from "../ui-audit/build-bain-fixture.mjs";
 import { encodeRgbPng } from "../ui-audit/lib/fakeTile.mjs";
 
 /* NEW-1 / NEW-2 — the plan→fixture pipeline that lets the harness open a site the owner ACTUALLY
@@ -27,7 +26,7 @@ import { encodeRgbPng } from "../ui-audit/lib/fakeTile.mjs";
  *     every run for a reason that is the app working correctly.
  */
 
-const BAIN = JSON.parse(readFileSync(join(process.cwd(), "ui-audit/fixtures/bain-concept-a.json"), "utf8"));
+const BAIN = JSON.parse(readFileSync(join(process.cwd(), "ui-audit/fixtures/bain-concept-original.json"), "utf8"));
 
 const PLAN_WITH_SECRETS = {
   origin: { lat: 29.8, lon: -95.0 }, county: "harris", name: "Concept A", site: "Bain",
@@ -65,8 +64,17 @@ describe("redactPlan", () => {
     expect(stripped.some((s) => /callout text/.test(s))).toBe(true);
   });
 
-  it("replaces callout prose but keeps the callout's geometry", () => {
-    expect(fixture.callouts[0].text).toBe("Note 1");
+  /* ⛔ THE STAND-IN IS SHAPE-PRESERVING, NOT "Note 1" — and the change is not cosmetic. A callout's
+   * COST is its text: the lines it wraps to and the nodes that lands on the canvas. Collapsing the
+   * owner's six-line note to "Note 1" destroys exactly the property the fixture exists to
+   * reproduce, which would make NEW-3's annotations-present arm understate its own effect. See the
+   * long note above `redactText`; the character-level properties are pinned in
+   * test/realPlanFixtures.test.js. */
+  it("replaces callout prose with a same-shape stand-in but keeps the callout's geometry", () => {
+    const src = PLAN_WITH_SECRETS.callouts[0].text;
+    expect(fixture.callouts[0].text).toBe("Nnnn Nnn nn nnn nnnnnn nnnnn nnn nnnnnnnn");
+    expect(fixture.callouts[0].text).toHaveLength(src.length);
+    expect(fixture.callouts[0].text).not.toContain("Bob");
     expect(fixture.callouts[0].tip).toEqual({ x: 1, y: 1 });
   });
 
@@ -79,7 +87,7 @@ describe("redactPlan", () => {
     const again = redactPlan({ ...fixture, sheetOverlays: [], underlay: null });
     expect(again.stripped.filter((s) => /raster bytes|storageKey|rev /.test(s))).toHaveLength(0);
     expect(again.fixture.els).toEqual(fixture.els);
-    expect(again.fixture.callouts[0].text).toBe("Note 1");
+    expect(again.fixture.callouts[0].text).toBe(fixture.callouts[0].text);
   });
 
   it("preserves the measured raster parameters verbatim — they ARE the cost", () => {
@@ -109,67 +117,19 @@ describe("rasterSpecOf / census arithmetic", () => {
   });
 });
 
-describe("the committed Bain fixture matches the owner's measured census", () => {
-  const c = fixtureCensus(BAIN);
-  it("has 53 elements in the exact measured kind counts", () => {
-    expect(c.elements).toBe(53);
-    expect(c.byType).toEqual({ building: 12, sidewalk: 12, parking: 12, road: 8, paving: 6, trailer: 2, pond: 1 });
-  });
-  it("has 5 parcels, 1 pond and nothing the census said was empty", () => {
-    expect(c.parcels).toBe(5);
-    expect(c.ponds).toBe(1);
-    expect([c.markups, c.measures, c.callouts, c.parcelDrawings, c.crossSections]).toEqual([0, 0, 0, 0, 0]);
-  });
-  it("exercises the expensive geometry paths Goose Creek's rebuild was made to cover", () => {
-    expect(c.centerlineRoads).toBe(8);
-    expect(c.arcVertices).toBeGreaterThan(0);
-    expect(c.polygonEls).toBeGreaterThan(0);
-  });
-  it("carries both rasters at the measured dimensions and opacities", () => {
-    expect(c.rasters.map((r) => [r.imgW, r.imgH, r.opacity])).toEqual([[1800, 1167, 1], [1728, 2592, 0.55]]);
-    expect(c.decodedRasterBytes).toBe(1800 * 1167 * 4 + 1728 * 2592 * 4);
-    expect(c.semiTransparentRasters).toBe(1);
-  });
-});
-
-describe("the committed fixture cannot drift from its generator", () => {
-  /* A fixture edited by hand would still load, still measure, and no longer match the census it
-   * claims to reproduce — the numbers would look like Bain's and be someone else's. */
-  it("is byte-identical to what `node ui-audit/build-bain-fixture.mjs` produces", () => {
-    expect(readFileSync(join(process.cwd(), "ui-audit/fixtures/bain-concept-a.json"), "utf8")).toBe(bainFixtureJson());
-  });
-
-  it("declares the owner's measured census as constants, so the generator asserts against them", () => {
-    expect(BAIN_CENSUS).toEqual({ building: 12, sidewalk: 12, parking: 12, road: 8, paving: 6, trailer: 2, pond: 1 });
-    expect(Object.values(BAIN_CENSUS).reduce((a, b) => a + b, 0)).toBe(53);
-    expect(BAIN_PARCELS).toBe(5);
-  });
-
-  /* ⛔ THE ROAD SCHEMA IS THE ONE THAT FAILS AS A BLANK PAGE. A road authored without `rot`, or with
-   * a `vtx` radius carrying no `treatment`, resolves the whole VIEW to NaN: the canvas renders ~117
-   * nodes, zero elements, and `data-view-ppf` reads "NaN". It does not throw. A fixture in that state
-   * would have been measured as "Bain is fast", and it is exactly what the first draft of this
-   * generator produced. */
-  it("gives every road the fields whose absence silently blanks the canvas", () => {
-    const roads = BAIN.els.filter((e) => e.type === "road");
-    expect(roads).toHaveLength(8);
-    for (const r of roads) {
-      expect(Number.isFinite(r.rot)).toBe(true);
-      expect(Number.isFinite(r.cx) && Number.isFinite(r.cy)).toBe(true);
-      expect(r.pts.length).toBeGreaterThan(1);
-      for (const v of r.vtx) if (v.radius != null) expect(v.treatment).toBe("arc");
-    }
-  });
-
-  it("contains no non-finite number anywhere — the failure mode is a blank canvas, not an exception", () => {
-    const walk = (o, path) => {
-      if (o == null) return;
-      if (typeof o === "number") { expect(Number.isFinite(o), `non-finite at ${path}`).toBe(true); return; }
-      if (typeof o === "object") for (const k of Object.keys(o)) walk(o[k], `${path}.${k}`);
-    };
-    walk(BAIN, "fixture");
-  });
-});
+/* ⛔ THE BAIN CENSUS AND THE BLANK-CANVAS SCHEMA GUARDS MOVED TO `test/realPlanFixtures.test.js`,
+ * and the generator they used to check moved to /dev/null.
+ *
+ * What stood here was a byte-identity check: the committed fixture against what
+ * `ui-audit/build-bain-fixture.mjs` produced. It was green for the fixture's whole life — while
+ * the fixture's coordinates were INVENTED. That is the shape of the check's limit: it proves a
+ * file matches the thing that produced it, and says nothing about whether that thing was making
+ * the plan up. docs/PERF-BAIN.md §6 named it as the bound on the report's largest claim.
+ *
+ * Both fixtures are now pulled from `public.sites` JOINED to `public.site_elements`, so there is
+ * no generator to be identical to, and the guard is the OWNER'S OWN MEASURED CENSUS asserted
+ * against the files. The road-schema and non-finite-number guards below moved with it and now run
+ * over BOTH plans rather than one. */
 
 describe("the arms each change exactly one thing", () => {
   const ov = (f) => f.rasters.find((r) => r.role === "sheetOverlay");
@@ -207,6 +167,28 @@ describe("the arms each change exactly one thing", () => {
     }
   });
 
+  /* ---- NEW-2 ---------------------------------------------------------------------------------
+   * The same invariant as `quarter`, on the other axis: change the ROTATION and nothing else. This
+   * arm was impossible before the real plan landed — the synthesised fixture had `rotation: 0`, so
+   * an arm forcing it to 0 would have been the baseline wearing a different name, and would have
+   * reported a guaranteed null.
+   */
+  it("`unrotated` changes ONLY the rotation — every other overlay term is held exactly", () => {
+    const before = ov(BAIN), after = ov(armFixture(BAIN, "unrotated"));
+    expect(before.rotation).toBe(1.5);   // the owner's measured value; if this moves, the arm is moot
+    expect(after.rotation).toBe(0);
+    for (const k of ["imgW", "imgH", "opacity", "ftPerPx", "x", "y", "visible", "page", "locked", "encodedBytes"]) {
+      expect(after[k], `${k} must not move`).toEqual(before[k]);
+    }
+    expect(specFootprintFt(after)).toEqual(specFootprintFt(before));
+    expect(specDecodedBytes(after)).toBe(specDecodedBytes(before));
+  });
+
+  it("`unrotated` leaves the underlay alone — it was never rotated, so touching it would confound", () => {
+    const a = armFixture(BAIN, "unrotated");
+    expect(a.rasters.find((r) => r.role === "underlay")).toEqual(BAIN.rasters.find((r) => r.role === "underlay"));
+  });
+
   it("an unknown arm is a no-op rather than a silent partial change", () => {
     expect(armFixture(BAIN, "nonsense").rasters).toEqual(BAIN.rasters);
   });
@@ -224,14 +206,14 @@ describe("fixtureSite takes the app's real storage path", () => {
 
   it("seeds `src: null` + an idbKey, never an inlined raster", () => {
     expect(site.sheetOverlays[0].src).toBeNull();
-    expect(site.sheetOverlays[0].idbKey).toBe(overlayIdbKey("S1", "ovbain1"));
+    expect(site.sheetOverlays[0].idbKey).toBe(overlayIdbKey("S1", "e1454614mmzcgq"));
     expect(site.underlay.src).toBeNull();
     expect(site.underlay.idbKey).toBe(underlayIdbKey("S1"));
   });
 
   it("keys match what the app itself would write for that site", () => {
     expect(rasterIdbPlan(BAIN, "S1").map((p) => p.key))
-      .toEqual(["raster:S1:underlay", "raster:S1:overlay:ovbain1"]);
+      .toEqual(["raster:S1:underlay", "raster:S1:overlay:e1454614mmzcgq"]);
   });
 
   it("has a fixed updatedAt so the seeded bytes are identical run to run", () => {
@@ -241,7 +223,7 @@ describe("fixtureSite takes the app's real storage path", () => {
 
   it("carries the plan's real settings and every collection through to the record", () => {
     expect(Object.keys(site.settings).length).toBeGreaterThan(20);
-    expect(site.els).toHaveLength(53);
+    expect(site.els).toHaveLength(47);
     expect(site.parcels).toHaveLength(5);
   });
 });
