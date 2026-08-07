@@ -67,6 +67,17 @@ npm run build
 - Then, for any UI-affecting change, drive it headless:
   `npx vite preview --host --port 4173 &` then run the matching `ui-audit/verify-*.mjs`.
   **Write a new `ui-audit/verify-<thing>.mjs` if none exists** for what you changed.
+- **⛔ TOUCHED SELECTION, MARKUP RENDERING, OR THE CLICK CONTRACT? Run all three variants of the
+  double-click audit** (needs the preview above) — it is the only thing in the repo that sees the
+  contract end to end, across every element type and markup kind:
+  ```
+  node ui-audit/audit-doubleclick-properties.mjs            # every feature, at its shape centre
+  node ui-audit/audit-doubleclick-properties.mjs --labels   # at its label / dimension number
+  node ui-audit/audit-doubleclick-properties.mjs --locked   # locked features stay select-only
+  ```
+  `--labels` is not optional: selection-only chrome (a detail-tier dimension number) does not exist
+  until the feature is selected, so it is invisible to the centre probe AND to any source reading —
+  which is exactly how it took press 2 of a real double-click and killed the gesture (NEW-3).
 - **Every Chromium launch MUST pass `--ignore-certificate-errors`** (sandbox TLS-proxy quirk),
   e.g. `chromium.launch({ executablePath: EXEC, args: ["--no-sandbox", "--ignore-certificate-errors"] })`.
 - Self-tests run **logged-out** (sandbox blocks sign-in). For any path you can only confirm

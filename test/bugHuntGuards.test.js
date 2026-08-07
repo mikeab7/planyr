@@ -529,7 +529,13 @@ describe("markup hit-area / callout padding / live color picker (B155 open-path 
     // dblclick). NEW-2: it only DETECTS the pair — a callout's double-tap then branches on the click
     // LOCATION (interior text vs border band), not on whether the feature was already selected.
     expect(src).toMatch(/const isDoubleTap = \(e, id, wasSel\) => \{/);
-    expect(src).toMatch(/const near = Math\.abs\(e\.clientX - p\.x\) <= DBLTAP_PX/);
+    /* NEW-1 — the gesture's time + distance test moved into the pure lib/doubleTap.js, keyed on the
+       EVENT's own clock. What must never come back is `Date.now()` inside this handler: on a busy
+       plan the handler runs hundreds of ms after the press it is measuring, which spent the whole
+       350 ms budget on our latency and silently discarded ordinary double-clicks. */
+    expect(src).toMatch(/stepDoubleTap\(lastTapRef\.current, \{ id, t: tapTime\(e\), x: e\.clientX, y: e\.clientY, wasSel \}\)/);
+    expect(src, "the double-tap budget must never be measured on a wall clock read inside the handler")
+      .not.toMatch(/const isDoubleTap = \(e, id, wasSel\) => \{[\s\S]{0,400}Date\.now\(\)/);
     // callout: double-tap on the box hands off to calloutDblAction (no dblWasSelRef temporal branch)
     expect(src).not.toMatch(/dblWasSelRef/);
     expect(src).toMatch(/if \(part === "box" && isDoubleTap\(e, id, [\s\S]{0,90}calloutDblAction\(e, id\)/);
@@ -541,10 +547,12 @@ describe("markup hit-area / callout padding / live color picker (B155 open-path 
     expect(src).toMatch(/if \(zone === "interior"\) beginEditCallout\(id\);/);
     expect(src).toMatch(/else openInspector\(\);/);
     // B935 — a markup (line/polyline/easement) double-tap ALWAYS opens Properties, never an inline editor
-    expect(src).toMatch(/if \(m && !m\.locked && isDoubleTap\(e, id, sel\?\.kind === "markup" && sel\.id === id\)\) \{[\s\S]{0,120}openInspector\(\)/);
+    expect(src).toMatch(/if \(m && !m\.locked && isDoubleTap\(e, id, sel\?\.kind === "markup" && sel\.id === id\)\) \{[\s\S]{0,160}featureDoubleAction\(\{ kind: "markup", id \}, e\)/);
     // B935 — an element (centerline road) double-tap ALWAYS opens Properties, never an inline editor.
     // NEW-1 — a POND routes through revealPondInspector so the double-click keeps B875's scroll+flash.
-    expect(src).toMatch(/if \(!el\.groupId && !el\.locked && isDoubleTap\(e, id, sel\?\.kind === "el" && sel\.id === id\)\) \{[\s\S]{0,320}if \(el\.type === "pond"\) revealPondInspector\(id\); else openInspector\(\);/);
+    expect(src).toMatch(/if \(!el\.groupId && !el\.locked && isDoubleTap\(e, id, sel\?\.kind === "el" && sel\.id === id\)\) \{[\s\S]{0,200}featureDoubleAction\(\{ kind: "el", id \}, e\)/);
+    // …and the ONE shared action still routes a pond through revealPondInspector (B875's scroll+flash).
+    expect(src).toMatch(/if \(el\.type === "pond"\) revealPondInspector\(t\.id\); else openInspector\(\);/);
     // NEW-1 supersedes the B656 stacking AND B750's propsFor marker: on DESKTOP the inspector is the
     // docked "properties" panel (leftPanel === "properties"), never a companion riding above another
     // panel; NARROW keeps the ✎ pill (narrowProps) + companion overlay. The marker is GONE — see the
@@ -553,8 +561,8 @@ describe("markup hit-area / callout padding / live color picker (B155 open-path 
     expect(src).toMatch(/const companionOpen = narrow \? narrowProps : leftPanel === "properties";/);
     // onElDouble AND onMarkupDouble (the native/raw-dblclick fallbacks) now OPEN PROPERTIES; the
     // type/actions menu moved off double-click and stays on right-click via onElContext.
-    expect(src).toMatch(/const onElDouble = \(e, id\) => \{[\s\S]*?if \(el\.type === "pond"\) revealPondInspector\(id\); else openInspector\(\);[\s\S]{0,60}\n\s*\};/);
-    expect(src).toMatch(/const onMarkupDouble = \(e, id\) => \{[\s\S]*?openInspector\(\);\s*\n\s*\};/);
+    expect(src).toMatch(/const onElDouble = \(e, id\) => \{[\s\S]{0,120}featureDoubleAction\(\{ kind: "el", id \}, e\);[\s\S]{0,20}\n\s*\};/);
+    expect(src).toMatch(/const onMarkupDouble = \(e, id\) => \{[\s\S]{0,120}featureDoubleAction\(\{ kind: "markup", id \}, e\);\s*\n\s*\};/);
     // NEW-8 also records the WORLD point of the right-click (`w`) so "Branch a road from here" starts
     // from the spot the user pointed at, not the element's centre — so the menu payload is now
     // { id, x, y, w }. The guard still pins that the SCREEN position drives the menu placement.

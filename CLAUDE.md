@@ -39,17 +39,25 @@ the always-loaded core. This merges two tracks of work: the mature **Site Planne
 > of the branch name). **`check-mint` now fails ONLY on a genuine collision** (`TAKEN` — someone really
 > holds that id); an id merely *below* what some other branch picked is **green**, and an id outside
 > your block is **reported, never fatal**.
-> **Why this changed:** the `BELOW` rule was a ratchet. Its only remedy was to renumber upward, which
-> raised the mark for every other in-flight branch, which then had to renumber higher still. Combined
-> with a **~30-minute lag between a push and its `build` run** (measured: PR #931 pushed 22:29:23Z,
-> build started 22:59:27Z), it produced a **livelock** on 2026-08-06: seven PRs open, none mergeable,
-> every one reading `build — Expected — Waiting for status to be reported` with **no merge control
-> available to anyone**, and one PR's ids moved six times. Main's max was B1449; the claimed mark passed
-> **B100002**. Full diagnosis, including every hypothesis that was refuted: **`docs/CI-REQUIRED-CHECK.md`**.
+> **Why this changed:** the `BELOW` rule was a ratchet with **no fixed point at any speed**. It passed a
+> branch only if its ids were strictly above the highest id any *other* in-flight branch held — so with
+> two branches, A is green iff `a > b` and B is green iff `b > a`, and both can never hold at once. With
+> `n` branches, `n − 1` are red by construction, and the only remedy the rule offered (renumber upward)
+> turns the one green branch red. On 2026-08-06 that produced a **livelock**: seven PRs open, none
+> mergeable, every one reading `build — Expected — Waiting for status to be reported` with **no merge
+> control available to anyone**, and one PR's ids moved six times. Main's max was B1449; the claimed mark
+> passed **B100002**. Full diagnosis, including every hypothesis that was refuted:
+> **`docs/CI-REQUIRED-CHECK.md`**. That the shape can never come back is now a guard, not a memory —
+> `test/mintFatality.test.js` (B226401) fails the build if a fatal mint verdict is ever again a function
+> of an aggregate of peer state (a max, a mean, a high-water mark) rather than a present, proven collision.
 > **The practical consequences for you:** (a) mint from your block and you will never need to renumber;
-> (b) **a PR showing `Expected` for the first half hour is NORMAL — wait it out, do not renumber and do
-> not nudge**; (c) gaps are still free; (d) the steel-man for the block scheme, including where it
-> concedes a real cost, is the header of `scripts/idBlocks.mjs`.
+> (b) **a run normally starts within SECONDS of the push** — corrected 2026-08-07 (B226400) from the old
+> "half an hour is normal, wait it out", which measured a four-hour Actions outage and stated it as a
+> standing property; eight samples the next day ran 3–5 s for a push to main and 11–44 s for a
+> `pull_request` event. So a minute or two of `Expected` is just delivery, longer is worth *looking* at
+> (is the run being created at all?), and **renumbering is never the response either way** — the verdict
+> no longer changes with time; (c) gaps are still free; (d) the steel-man for the block scheme, including
+> where it concedes a real cost, is the header of `scripts/idBlocks.mjs`.
 > **⛔ AND ONE MEASURED FACT THAT CONTRADICTS THIS REPO'S NUDGE LORE (B6867): RE-RUNNING A FAILED
 > `build` DOES NOTHING FOR A PR THAT IS STALE AGAINST MAIN.** A re-run replays the merge commit the run
 > was created against — it does **not** recompute `refs/pull/<n>/merge` against main's current tip. Tried
@@ -455,7 +463,16 @@ rules are binding shorthand, not optional style. (Full-text home so briefs stay 
   3. **A guard that names one component protects one component.** Assert it STRUCTURALLY, on the real render:
      with nothing selected, every element's own centre must answer to that element via `elementFromPoint`.
   Precedents: **B1174** (measurement chips), **B1327** (the parcel acreage badge — the third instance, and the
-  reason this is a named rule; regressed by B1186 moving the badge anchor to `polylabel`). The deliberate
+  reason this is a named rule; regressed by B1186 moving the badge anchor to `polylabel`), and **B50010** (an
+  element's own DIMENSION NUMBER — a road's is anchored to the centreline midpoint, so it is painted ON the
+  pavement and a double-click aimed at the road cannot miss it; the general fix is that chrome sitting over
+  its own object's BODY forwards the press to the body, asked once for every type rather than special-cased).
+  **⛔ AND THE COROLLARY B50008/B50009 ADD: A GESTURE CAN DIE WITH NOTHING EATING IT.** This rule is about
+  chrome swallowing a press, and reading every failure through it is how two other causes survived for
+  months — the pair being measured on a WALL CLOCK read inside the handler (so a busy plan spends the whole
+  budget on queueing delay), and the native `dblclick` retargeting to the root because press 1 re-rendered
+  the node the browser was holding. When a double-click "does nothing", check the CLOCK and the TARGET
+  before hunting for what covered it. The deliberate
   EXCEPTION is user-placed content the user opted into putting on top — a promoted reference (B1198), a markup
   with `behindEls: false` — which is selectable, lockable and demotable in one click from the menu that put it
   there. Guard: the e2e spec **chrome-swallows-press** (mutation-checked both ways).

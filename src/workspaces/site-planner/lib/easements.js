@@ -20,6 +20,8 @@
  * UI later needs no new geometry — only a per-side width.
  */
 import { offsetPolyline, bufferPolyline } from "./metesAndBounds.js";
+// Ray-cast point-in-ring (even-odd) — used to choose which side of a parcel edge is "interior".
+import { pointInRing, ringArea } from "./ringMath.js";
 
 /* The type catalog drives the attributes dropdown, the color-coding, and the label.
  * `short` is the human label suffix ("16′ Sanitary Sewer Esmt"); `color` is the
@@ -66,25 +68,7 @@ export function easementLabel(e) {
 }
 
 // Shoelace area (absolute) of a ring of {x,y} — feet² when fed planner feet.
-export const ringArea = (pts) => {
-  if (!pts || pts.length < 3) return 0;
-  let a = 0;
-  for (let i = 0; i < pts.length; i++) {
-    const j = (i + 1) % pts.length;
-    a += pts[i].x * pts[j].y - pts[j].x * pts[i].y;
-  }
-  return Math.abs(a) / 2;
-};
-
-// Ray-cast point-in-ring (even-odd) — used to choose which side of a parcel edge is "interior".
-function pointInRing(pt, ring) {
-  let inside = false;
-  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
-    const xi = ring[i].x, yi = ring[i].y, xj = ring[j].x, yj = ring[j].y;
-    if (((yi > pt.y) !== (yj > pt.y)) && (pt.x < ((xj - xi) * (pt.y - yi)) / (yj - yi) + xi)) inside = !inside;
-  }
-  return inside;
-}
+export { ringArea };
 
 /* Turn an easement's stored INPUT (mode + centerline/pts + width) into the closed
  * strip/boundary ring that gets drawn and area-counted. This is the single place

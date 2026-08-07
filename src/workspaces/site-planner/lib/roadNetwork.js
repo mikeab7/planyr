@@ -22,6 +22,7 @@
  * Pure: world feet in, world feet out. No React, no DOM. Unit-tested in test/roadNetwork.test.js.
  */
 import ClipperLib from "clipper-lib";
+import { pointInRing } from "./ringMath.js";
 
 const SCALE = 100;            // feet → centi-feet (~1/8"), matching pondOffset.js / polyClip.js
 const CLEAN_DELTA = SCALE * 0.01;
@@ -29,14 +30,6 @@ const CLEAN_DELTA = SCALE * 0.01;
 const toPath = (ring) => ring.map((p) => ({ X: Math.round(p.x * SCALE), Y: Math.round(p.y * SCALE) }));
 const fromPath = (path) => path.map((c) => ({ x: c.X / SCALE, y: c.Y / SCALE }));
 const isRing = (r) => Array.isArray(r) && r.length >= 3 && r.every((p) => p && Number.isFinite(p.x) && Number.isFinite(p.y));
-const pointInRing = (p, ring) => {
-  let inside = false;
-  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
-    const a = ring[i], b = ring[j];
-    if ((a.y > p.y) !== (b.y > p.y) && p.x < ((b.x - a.x) * (p.y - a.y)) / (b.y - a.y) + a.x) inside = !inside;
-  }
-  return inside;
-};
 const isLine = (l) => Array.isArray(l) && l.length >= 2 && l.every((p) => p && Number.isFinite(p.x) && Number.isFinite(p.y));
 
 /* Morphological CLOSE (dilate by `d`, erode by `d`) of a set of paths, with MITER joins so a real

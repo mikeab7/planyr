@@ -18,27 +18,18 @@
 // All geometry is in WORLD FEET; the caller passes a feet-space tolerance (screen px ÷ pixels-per-
 // foot), so the grab feel is identical at every zoom. Pure + Node-testable (test/markupPick.test.js).
 
+import { pointInRing, ringArea } from "./ringMath.js";
+
 const hyp = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
 const DEG = Math.PI / 180;
 
 // Ring area magnitude (feet²) — used only to RANK overlapping hits, so the sign is dropped.
-export function ringArea(pts) {
-  if (!pts || pts.length < 3) return 0;
-  let s = 0;
-  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) s += (pts[j].x + pts[i].x) * (pts[j].y - pts[i].y);
-  return Math.abs(s) / 2;
-}
+// One implementation, in ringMath.js; re-exported because callers and tests import it here.
+export { ringArea };
 
-// Point-in-ring by ray casting (matches the canvas's ringHas / pointInRing).
-export function pointInRing(p, ring) {
-  if (!ring || ring.length < 3) return false;
-  let inside = false;
-  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
-    const yi = ring[i].y, xi = ring[i].x, yj = ring[j].y, xj = ring[j].x;
-    if (((yi > p.y) !== (yj > p.y)) && (p.x < ((xj - xi) * (p.y - yi)) / (yj - yi) + xi)) inside = !inside;
-  }
-  return inside;
-}
+// Point-in-ring by ray casting — the ONE implementation, in ringMath.js (the canvas reads the
+// same one). Re-exported because callers and tests import it from here.
+export { pointInRing };
 
 // Shortest distance from p to any segment of an OPEN polyline (Infinity for < 2 points).
 export function distToPolyline(p, pts) {
