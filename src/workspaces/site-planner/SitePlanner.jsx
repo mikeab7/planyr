@@ -19407,9 +19407,27 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               and the "Show above plan" control. The band comes from mapChromeStack.js now, so
               the View popover beside it is fixed by the same change rather than separately. */}
           <div data-export="skip" style={{ position: "absolute", top: 10, right: 10, bottom: 10, zIndex: MAP_CHROME_Z.panel, display: "flex", gap: 8, alignItems: "flex-start", pointerEvents: "none" }}>
-          <div style={{ pointerEvents: "auto", display: "flex", gap: 8, alignItems: "flex-start", maxHeight: "100%", minHeight: 0 }}>
-          <ViewMenu open={viewMenuOpen} onToggle={() => setViewMenuOpen((o) => !o)} settings={settings}
-            setSnap={setSnap} patchSettings={(patch) => setSettings((s) => ({ ...s, ...patch }))} pal={PAL} />
+          {/* NEW-1 — THE HEIGHT HERE MUST BE `height`, NOT `maxHeight`, and that one word is the
+              whole scroll bug. A percentage `max-height` resolves against the containing block's
+              height ONLY when that height is definite; this row's own height was `auto`
+              (content-driven, merely clamped by its own max-height), so the cards inside resolved
+              their `maxHeight: "100%"` to `none`, grew to their full content height, and the
+              scroll box below them — correctly written with `flex:1; minHeight:0; overflowY:auto`
+              — never overflowed and so never scrolled. Measured on a 1280×600 viewport: the card
+              stood 1568px inside a 500px slot, and the last of the twenty-seven layer rows sat
+              641px below the bottom of the window with no way to reach it.
+              A definite `height` makes the percentage resolvable, which is what re-arms every
+              descendant's `maxHeight: "100%"` and hands the scroll box a bounded height.
+              ⛔ `pointerEvents` MUST move to the children in the same edit. This row is only as
+              tall as its content today, so a full-height version of it with `pointerEvents:"auto"`
+              would lay an invisible click-eating strip down the right edge of the map wherever the
+              cards aren't — worst with both cards collapsed. The strip is now transparent to the
+              pointer and each card claims its own presses back. */}
+          <div style={{ pointerEvents: "none", display: "flex", gap: 8, alignItems: "flex-start", height: "100%", minHeight: 0 }}>
+          <div style={{ pointerEvents: "auto", display: "flex", maxHeight: "100%", minHeight: 0 }}>
+            <ViewMenu open={viewMenuOpen} onToggle={() => setViewMenuOpen((o) => !o)} settings={settings}
+              setSnap={setSnap} patchSettings={(patch) => setSettings((s) => ({ ...s, ...patch }))} pal={PAL} />
+          </div>
           {/* Layers control — same shared layers as the map finder. ALWAYS rendered
               (B693): an unlocated plan gets the control DISABLED with the plain reason
               ("place it on the map first"), never a silently-missing / dead control.
@@ -19420,7 +19438,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               actually exists, and the flex column is what lets the scroll box — not the card —
               take the overflow. */}
           {(
-            <div data-wheelscroll="1" style={{ width: layersOpen ? 268 : "auto", background: "var(--surface-overlay)", border: `1px solid ${PAL.panelLine}`, borderRadius: 9, boxShadow: "0 2px 10px rgba(28,25,20,0.16)", overflow: "hidden", display: "flex", flexDirection: "column", maxHeight: "100%", minHeight: 0 }}>
+            <div data-wheelscroll="1" style={{ pointerEvents: "auto", width: layersOpen ? 268 : "auto", background: "var(--surface-overlay)", border: `1px solid ${PAL.panelLine}`, borderRadius: 9, boxShadow: "0 2px 10px rgba(28,25,20,0.16)", overflow: "hidden", display: "flex", flexDirection: "column", maxHeight: "100%", minHeight: 0 }}>
               <button onClick={() => setLayersOpen((o) => !o)} style={{ display: "flex", alignItems: "center", gap: 7, width: "100%", padding: "8px 11px", border: "none", background: "transparent", color: PAL.ink, cursor: "pointer", fontFamily: "inherit", fontSize: 12.5, fontWeight: 700 }}>
                 <span style={{ color: PAL.accent }}>❖</span> Layers <span style={{ flex: 1 }} /> <span style={{ color: PAL.muted, fontWeight: 500 }}>{layersOpen ? "▾" : "▸"}</span>
               </button>

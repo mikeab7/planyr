@@ -113,6 +113,18 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V39552 — B1422 (×2): the Texas Railroad Commission is DEMOTED, not deleted, on his own Weld County plan. `Blocker: real-data`
+
+Everything about this shipped green and was driven headless here on a seeded Weld County coordinate (40.19, −104.72): **10 rows demoted across 3 groups**, each naming its reason, with "Water & sewer" and "Fire hydrants" correctly surviving; the four specs in `e2e/layers-panel-scroll-and-state.spec.js` were each proven RED on the pre-fix build. What a seeded coordinate cannot prove is the behaviour on **his own saved plan**, which carries a real county key, a real identify result and a real GIS context — and this item is a recurrence precisely because the previous pass shipped a mechanism that was green everywhere and inert in the field.
+
+On **planyr.io**, signed in, on the **Colorado / Weld County** project, open the planner's **Layers** panel and confirm:
+- **(a) THE RRC IS NOT AN ORDINARY TOGGLE.** "Oil & gas wells", "Pipelines" and "Pipeline easement corridor (assumed)" are **not** in the main list.
+- **(b) BUT HE CAN STILL SEE THEY EXIST.** A line reading **"▸ Show N not available in Colorado"** appears in the Environmental group; opening it lists those rows, greyed and un-tickable, each saying **"Texas-only — no Colorado equivalent is wired yet."** ⛔ If they are simply GONE, that is the failure this item exists to prevent — report it.
+- **(c) NOTHING HE RELIES ON VANISHED.** "Water & sewer" and "Fire hydrants" are still ordinary, tickable rows (they bundle Colorado sources alongside Texas ones), and the MHFD / DOLA / CDPHE Colorado rows are all still listed.
+- **(d) THE COUNT IS SANE.** The demoted total should be around ten, not thirty — a much larger number means a national source was mis-tagged as Texas-only.
+- **(e) ON A TEXAS PLAN, THE MIRROR IMAGE.** Open any Houston-area plan: the RRC rows are ordinary toggles again, and it is the Colorado rows that sit behind "▸ Show N not available in Texas".
+
+⏳ **LIVE APP (planyr.io), SIGNED IN — the Weld County project** `Blocker: real-data`
 ### V33600 — The pond fix, on the plan he called slow: does Quiddity pan like Original now? (B236592)
 
 `Blocker: real-data` + `Blocker: auth` — **the same bound as V24898, and for the same reason: the finding was made on his own two Bain plans and the fix has to be confirmed where he saw the problem.** Everything reachable here was driven HERE, on his real fixture, and the numbers are on the item: the 4-arm × 6-rep interleaved battery reproduces **55,760 → 505.1 ms** of main-thread work per pan on the REAL 68-vertex rings, the decimated `simple-ponds` arm no longer separates from it at all (−0.3%, p = 0.688), and the rendered canvas was captured before and after and diffed **byte-identical** (752 nodes · 30 text · 52 elements · every vertex count and bounding box). Guards: `test/pondViewIndependence.test.js` (16, mutation-checked 16 green → 4 red), `test/pondStorageGoldenMaster.test.js` (78, exact equality), `ui-audit/count-pond-invocations.mjs --assert` (a pan recomputes NO pond geometry).
