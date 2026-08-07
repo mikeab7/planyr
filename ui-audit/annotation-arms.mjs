@@ -75,7 +75,7 @@ const armFixtureFor = (arm) => (BAIN_PAIR ? bainPairArmFixture(QUIDDITY, ORIGINA
 const SUBJECT = BAIN_PAIR ? QUIDDITY : SYLVESTRI;
 
 const ARMS = String(arg("--arms", BAIN_PAIR
-  ? "quiddity,original,no-easements,one-pond,unrestricting"
+  ? "quiddity,original,no-easements,one-pond,unrestricting,simple-ponds"
   : "sylvestri,no-callouts,no-markups,no-measures,no-annotations"))
   .split(",").map((s) => s.trim()).filter(Boolean);
 

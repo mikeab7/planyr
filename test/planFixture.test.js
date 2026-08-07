@@ -5,7 +5,7 @@ import {
   redactPlan, fixtureCensus, armFixture, fixtureSite, fixtureSeed, rasterIdbPlan,
   rasterSpecOf, specDecodedBytes, specFootprintFt, paintedRasters, heldButUnpaintedRasters,
   overlayIdbKey, underlayIdbKey, RASTER_ARMS, PRIVATE_FIELDS,
-  BAIN_PAIR_ARMS, bainPairArmFixture,
+  BAIN_PAIR_ARMS, bainPairArmFixture, decimateRing,
 } from "../ui-audit/lib/planFixture.mjs";
 import { synthRasterPng, decodedBytes, megapixels, base64Len, hash32, rasterFill } from "../ui-audit/lib/synthRaster.mjs";
 import { encodeRgbPng } from "../ui-audit/lib/fakeTile.mjs";
@@ -339,12 +339,63 @@ describe("the Bain-pair arms change exactly one thing, and never the shared cont
     expect(QUIDDITY.markups.every((m) => m.restrictsBuildings)).toBe(true);
   });
 
+  /* NEW-2 follow-on — the arm `one-pond`'s result DEMANDS, because that arm removed a pond AND its
+   * 20 vertices in one move. This one holds the count and varies only the vertices. */
+  it("`simple-ponds` keeps BOTH ponds and only coarsens their rings", () => {
+    const a = arm("simple-ponds");
+    const ponds = (f) => f.els.filter((e) => e.type === "pond");
+    expect(ponds(a)).toHaveLength(2);                               // the count is HELD
+    expect(a.els).toHaveLength(QUIDDITY.els.length);
+    expect(a.markups).toHaveLength(3);
+    expect(ponds(QUIDDITY).map((p) => p.points.length)).toEqual([48, 20]);
+    /* …down to the fast plan's own vertex count, read off `original` rather than hardcoded. */
+    const target = ORIGINAL.els.filter((e) => e.type === "pond")[0].points.length;
+    expect(target).toBe(7);
+    for (const p of ponds(a)) expect(p.points).toHaveLength(target);
+    /* Every non-pond element is passed through by identity — no incidental churn. */
+    const nonPond = (f) => f.els.filter((e) => e.type !== "pond");
+    expect(nonPond(a)).toEqual(nonPond(QUIDDITY));
+  });
+
+  /* ⛔ THE PROPERTY THAT MAKES `simple-ponds` A ONE-VARIABLE ARM. A ring that shrinks has also
+   * changed its painted area, its label-fit question and its overlap with its neighbours — three new
+   * confounds traded for one removed. The extent must survive the decimation exactly. */
+  it("decimation preserves each pond's bounding box EXACTLY", () => {
+    const box = (pts) => [
+      Math.min(...pts.map((p) => p.x)), Math.max(...pts.map((p) => p.x)),
+      Math.min(...pts.map((p) => p.y)), Math.max(...pts.map((p) => p.y)),
+    ];
+    const before = QUIDDITY.els.filter((e) => e.type === "pond").map((p) => box(p.points));
+    const after = arm("simple-ponds").els.filter((e) => e.type === "pond").map((p) => box(p.points));
+    expect(after).toEqual(before);
+  });
+
+  it("decimateRing is deterministic, ordered, and a no-op when it cannot help", () => {
+    const ring = Array.from({ length: 40 }, (_, i) => ({
+      x: Math.round(100 * Math.cos((i / 40) * 2 * Math.PI)),
+      y: Math.round(100 * Math.sin((i / 40) * 2 * Math.PI)),
+    }));
+    const out = decimateRing(ring, 7);
+    expect(out).toHaveLength(7);
+    expect(decimateRing(ring, 7)).toEqual(out);                     // deterministic
+    /* Winding order is preserved — the output is a subsequence of the input, in input order. */
+    let at = -1;
+    for (const p of out) {
+      const i = ring.indexOf(p);
+      expect(i).toBeGreaterThan(at);
+      at = i;
+    }
+    expect(decimateRing(ring, 40)).toBe(ring);                      // already at target
+    expect(decimateRing(ring, 3)).toBe(ring);                       // below 4 the extents can't hold
+    expect(decimateRing(null, 7)).toBe(null);
+  });
+
   /* ⛔ THE ONE THAT PROTECTS THE ARGUMENT. Every subtraction arm must leave the shared overlay
    * untouched — it is the control, and the whole force of this pair is that it is identical on both
    * sides. An arm that perturbed it would quietly convert a controlled comparison into an
    * uncontrolled one, and nothing else in the harness would notice. */
   it("NO subtraction arm perturbs the rasters, the settings or the origin", () => {
-    for (const a of ["no-easements", "one-pond", "unrestricting"]) {
+    for (const a of ["no-easements", "one-pond", "unrestricting", "simple-ponds"]) {
       const f = arm(a);
       expect(f.rasters, a).toEqual(QUIDDITY.rasters);
       expect(f.settings, a).toEqual(QUIDDITY.settings);

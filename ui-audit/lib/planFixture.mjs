@@ -375,7 +375,41 @@ export const BAIN_PAIR_ARMS = {
   "no-easements": { title: "the slow plan minus its 3 pipeline easements", changes: "EASEMENTS only — 50 points of banded geometry removed, everything else held" },
   "one-pond": { title: "the slow plan minus its second pond", changes: "POND COUNT only — 2 ponds → 1, easements kept" },
   "unrestricting": { title: "easements drawn but not CONSTRAINING", changes: "restrictsBuildings + restrictsPaving forced false — separates DRAWING an easement from EVALUATING it" },
+  "simple-ponds": { title: "two ponds still, but simple rings", changes: "RING COMPLEXITY only — pond COUNT held at 2, both rings decimated to the fast plan's vertex count, bounding boxes preserved EXACTLY" },
 };
+
+/** Ring vertex count to decimate toward when `original` carries no pond to read one off. */
+const FALLBACK_RING_TARGET = 7;
+
+/**
+ * Decimate a closed ring to `target` vertices while preserving its BOUNDING BOX EXACTLY.
+ *
+ * ⛔ THE BOUNDING-BOX PROPERTY IS THE WHOLE REASON THIS IS NOT PLAIN INDEX SAMPLING. The arm it
+ * serves has to vary vertex count and NOTHING ELSE — and a ring that shrinks has also changed its
+ * painted area, its label-fit question and its overlap with every neighbouring element, which would
+ * hand back three confounds in exchange for removing one. So the four extreme vertices (min-x,
+ * max-x, min-y, max-y) are pinned first and the remainder is filled with evenly-spaced indices.
+ * The result is a coarser polygon of the same extent, in the same place.
+ *
+ * Deterministic: same input, same output, every run. Returns the input unchanged when it is already
+ * at or below `target`, or when `target` is under 4 (below which the extents cannot all be kept).
+ */
+export function decimateRing(points, target) {
+  if (!Array.isArray(points) || target < 4 || points.length <= target) return points;
+  let minX = 0, maxX = 0, minY = 0, maxY = 0;
+  points.forEach((p, i) => {
+    if (p.x < points[minX].x) minX = i;
+    if (p.x > points[maxX].x) maxX = i;
+    if (p.y < points[minY].y) minY = i;
+    if (p.y > points[maxY].y) maxY = i;
+  });
+  const idx = new Set([minX, maxX, minY, maxY]);
+  for (let k = 0; k < target && idx.size < target; k++) {
+    idx.add(Math.round((k * points.length) / target) % points.length);
+  }
+  for (let i = 0; i < points.length && idx.size < target; i++) idx.add(i);
+  return [...idx].sort((a, b) => a - b).map((i) => points[i]);
+}
 
 /**
  * Apply a Bain-pair arm. `quiddity` is the slow plan, `original` the fast one.
@@ -397,6 +431,23 @@ export function bainPairArmFixture(quiddity, original, arm) {
     const ponds = (quiddity.els || []).filter((e) => e.type === "pond");
     const drop = ponds.length > 1 ? ponds[ponds.length - 1].id : null;
     return drop ? { ...quiddity, els: quiddity.els.filter((e) => e.id !== drop) } : quiddity;
+  }
+  if (arm === "simple-ponds") {
+    /* Hold pond COUNT at two and take the rings down to the fast plan's vertex count. `one-pond`
+     * removed a pond AND 20 vertices in one move, so its −27% cannot say which of the two it
+     * bought; this arm changes only the second. Neither outcome is a product instruction — see the
+     * note on §5.5 in docs/PERF-REAL-PLANS.md. */
+    const target = (original.els || [])
+      .filter((e) => e.type === "pond" && Array.isArray(e.points))
+      .reduce((m, p) => Math.min(m, p.points.length), FALLBACK_RING_TARGET);
+    return {
+      ...quiddity,
+      els: (quiddity.els || []).map((e) => (
+        e.type === "pond" && Array.isArray(e.points)
+          ? { ...e, points: decimateRing(e.points, target) }
+          : e
+      )),
+    };
   }
   if (arm === "unrestricting") {
     return {

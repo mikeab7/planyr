@@ -338,7 +338,96 @@ structurally blind to paint, raster, decode and compositing. Conversely a differ
 *there* is a different kind of finding from one that appears in render — it is script and layout,
 which is where a per-relation computation would live.
 
-_(results — see §5.4)_
+### 5.4 Results — 5 arms × 6 reps, interleaved, 30 runs, 0 suppressed
+
+Medians per pan gesture. Regime: 1× CPU, dpr 2.15, `--fake-tiles`, the shared overlay seeded into
+IndexedDB and **proven on the canvas** in every arm.
+
+| arm | **main-thread work** | vs baseline | render | canvas nodes | layers |
+|---|---:|---:|---:|---:|---:|
+| `quiddity` (baseline, **SLOW**) | **55,876 ms** | — | 10,536 | 752 | 330 |
+| **`original`** (**FAST**) | **5,157 ms** | **−90.8%** | 3,072 | 598 | 320 |
+| `no-easements` | 56,620 ms | +1.3% | 10,529 | 737 | 330 |
+| **`one-pond`** | **40,539 ms** | **−27.4%** | 10,705 | 742 | 330 |
+| `unrestricting` | 56,632 ms | +1.4% | 10,371 | 752 | 330 |
+
+#### Finding 1 — the owner's observation is real, and it is enormous
+
+`original` vs `quiddity`: **CHEAPER in 6/6 paired reps (p = 0.031), median −90.8% of main-thread
+work** and −71.8% of render. His two plans differ by **more than a factor of ten** on the same
+gesture, with the same overlay, the same aerial, the same origin and the same settings.
+
+This is the largest effect this programme has ever measured, and it was found by him, not by the
+instrument.
+
+#### Finding 2 — ⛔ THE EASEMENT HYPOTHESIS IS REFUTED, on both halves, and it was mine
+
+Removing all three pipeline easements — 50 points of banded geometry — moves main-thread work by
+**+1.3%** (1/6 reps cheaper, **p = 0.219**). Forcing `restrictsBuildings`/`restrictsPaving` false
+moves it **+1.4%** (2/6, **p = 0.688**). Neither separates on any bucket.
+
+**The `unrestricting` arm was built to discriminate between drawing an easement and evaluating one.
+It discriminated: neither costs anything measurable.** The constraint relation I expected to scale
+with easements × elements does not show up at all.
+
+This is recorded as prominently as a finding because the owner asked for exactly that: *"I have
+named a mechanism before measuring it twice now and been wrong both times, so do not let this one
+through on plausibility."* **Three times now.** The easements were the most conspicuous difference
+between the two plans and they are not the cause.
+
+#### Finding 3 — the PONDS are implicated, and it is the one arm that moved
+
+Removing the second pond — **one element out of fifty-two** — cuts main-thread work **27.4%**,
+**CHEAPER in 6/6 paired reps (p = 0.031)**, median −27.1%.
+
+Set that against Finding 2 of §5.2: the per-element model predicts **38.5 ms** for one element. This
+one element is worth **≈15,300 ms**, about **400× the per-element figure** — on the same plan, in the
+same gesture, measured the same way. Elements are not fungible, and a pond is not an element-sized
+cost.
+
+⚠ **And this does NOT say "two ponds are the problem".** The FAST plan has a pond too. What differs
+is the **rings**: 2 ponds carrying **68 vertices** against 1 carrying **7**. The arm removed a pond
+*and* its 20 vertices at the same time, so it cannot yet separate pond COUNT from ring COMPLEXITY —
+and those two point at completely different fixes. §5.5 is that arm.
+
+**Where this lands in code**, stated as a lead and not a conclusion: a pond is the only element type
+that is both `mustLabel` and handed a `ring`, which puts it on `labelFitLadder`'s `interiorFitter`
+path — the one that rasterises the ring and enumerates maximal inscribed rectangles. **B221761**
+memoised that (16.7 → 93.4 ms per gesture across 0 → 16 ponds) and **B221763** owns the pond ledger
+being rebuilt in the render body ~127 times a gesture. Both are already-known pond costs on already
+open items. This measurement says they are worth more than either estimated.
+
+#### Finding 4 — the estimator defect fired again, exactly as documented
+
+The unpaired range floor on render came out at **±116.3%**, from one contaminated `quiddity` rep
+(22,459 ms against a ~10,500 ms median — visible in the per-rep line). Under that floor every render
+verdict reads INCONCLUSIVE, **including the 71% one that the paired test resolves at p = 0.031**.
+`PERF-BAIN.md` §6 predicted this: a range is monotonically increasing in n, so one bad rep sets the
+floor for the whole battery. The floor is reported verbatim and unchanged; the paired sign test is
+what carries the result. Main-thread work's floor was fine (±4.6%), which is why the work column
+separates on both estimators.
+
+#### What is NOT attributed
+
+Easements: **0%**. The second pond: **~27%**. That leaves roughly **two thirds of a ten-fold gap
+unexplained**, and this document does not guess at it. The named next steps are §5.5's ring-complexity
+arm and, beyond it, the 47-vs-38 rotated-element difference that no arm in this programme has ever
+varied.
+
+### 5.5 The arm this result demands, and what it would settle
+
+`one-pond` changed two things at once — it removed a pond AND 20 ring vertices. The next arm holds
+pond COUNT at two and **decimates both rings toward the fast plan's 7 points**, which separates:
+
+- **if simplified rings recover the time** → the cost is ring COMPLEXITY, it lands on the
+  `interiorFitter` / pond-ledger path B221761 and B221763 already own, and the fix is engineering
+  (cheaper fit, coarser ring for the fit question) with **nothing asked of the owner**;
+- **if they do not** → the cost is per-POND, and the question moves to what a pond does that a
+  building does not.
+
+⛔ **Neither outcome licenses "draw fewer or simpler ponds."** Those are his detention basins; their
+shape is the design. A separating arm names a cost to go make cheaper — the same rule §2.2's rotation
+arm is held to.
 
 ---
 
