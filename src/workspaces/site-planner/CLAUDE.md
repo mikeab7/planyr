@@ -842,7 +842,33 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   stage-storage / elevation-band representation — stage table, the declared non-overlapping
   detention/mitigation duty split, the outfall-invert split, both gravity-drain tests, and the
   prism-vs-extrusion delta. Detention, mitigation, drawdown, gravity and cut/fill all READ it;
-  nothing re-derives storage from a footprint. Its consumers: `storageReconcile.js` (claimed
+  nothing re-derives storage from a footprint.
+  **⛔ B236592 — IT IS MEMOISED, AND EVERY CLIPPER CALL BENEATH IT IS TOO. Read this before touching
+  `pondStageModel.js` or `pondOffset.js`.** `drainFacts()` in `SitePlanner.jsx` is *deliberately*
+  GATING rather than memoising, so with the Yield panel docked this model was rebuilt **156 times per
+  pond per pan gesture** on ponds nobody had touched — 275,184 `offsetInward` executions in ONE pan,
+  and **55,631 ms of a 55,760 ms gesture** inside clipper-lib's intersection sweep. Compounding it,
+  `pondElevations` was re-derived *inside its own consumer* (`stageTable` asks once, and twice more
+  per band via `areaAtElev`), so a 7-band pond paid the 29-execute pinch-off search 15 times for a
+  constant — **that is the term that LOOKED superlinear, and it is a constant re-derived a linear
+  number of times.** The fix is memoisation and **no formula was touched**: keyed on the ring's
+  IDENTITY (the planner replaces `points` wholesale on edit, never mutates in place) plus det/opts by
+  VALUE, so the key IS the inputs and a stale engineering number is impossible — which is the very
+  property `drainFacts`'s gating comment exists to protect. Result **55,760 → 505 ms per pan** with
+  the owner's surveyed rings untouched and the canvas byte-identical.
+  **⚠ THE RESULTS ARE SHARED — read-only, like every memo in this tree** (`offsetInward` returns
+  cached ring arrays; audited: every consumer measures them or maps them to a path string).
+  **⛔ TWO THINGS THIS REFUTES, so they are not re-chased:** `interiorFitter` costs **0.5 ms** of that
+  gesture and is EXONERATED (B221761's memo works); and **there is no superlinear per-vertex law** —
+  collinear midpoint insertion, which raises vertex count while holding area, perimeter, bbox and the
+  drawn path exactly, measures an exponent of **0.20**. Decimation preserved the bounding box but not
+  the CONCAVITY that loads clipper, which is why `docs/PERF-REAL-PLANS.md` §5.5 read a recurrence as a
+  vertex law; §5.6 is the correction. Guards, all counting INVOCATIONS rather than milliseconds:
+  the repo-root `test/` suites **pondViewIndependence** (mutation-checked 16 green → 4 red) and
+  **pondStorageGoldenMaster** (78 assertions of EXACT equality — these numbers size his basins, so
+  there is no tolerance), plus the ui-audit harnesses **count-pond-invocations** (`--assert`: a pan
+  recomputes NO pond geometry, and the cached lookups must be OBSERVED so an empty report cannot pass
+  as a clean one) and **profile-pond-ring**. Its consumers: `storageReconcile.js` (claimed
   service vs storage that physically exists — a hard FAIL on a double-count), `drawdownTime.js`
   (time-to-empty at the allowable release rate), `mitigationBands.js` (the 1-ft hydraulic-equivalence
   band ledger, fed by `floodplainMitigation`'s opt-in `bandSpans`), `floodAdministrator.js` (who
