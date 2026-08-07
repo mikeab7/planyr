@@ -60,7 +60,7 @@ import {
 import { overscanPx, keepBufferFor, retinaForZoom, tileWeight, tileCacheLimit } from "./lib/tileBudget.js";
 import { preserveTilesAcrossSetView, announceSetView, boundTileCache, releaseLayer } from "./lib/tileLifecycle.js";
 import { buildGhost } from "./lib/ghostSnapshot.js";
-import { visibleWorldRect, cullToView, shouldCull } from "./lib/viewCull.js";
+import { cullRectFor, cullToView, shouldCull } from "./lib/viewCull.js";
 import { makeLabelFrame } from "./lib/exportLabelScale.js";
 import { orderLayersByPriority, LAYER_STAGE_SIZE } from "./lib/layerSchedule.js";
 import { prefetchExtents, computeCoverage, boundsFromLeaflet, getNearbyRadiusMiles, subscribeRelevance } from "./lib/coverage.js";
@@ -2064,10 +2064,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const labelK = labelFrame.k;       // label-space px → canvas px (1 on screen)
   const strokeZk = labelFrame.strokeZk; // the zoom factor `strokeZoom` uses (1 on an export pass)
   const cullActive = !exportPass && shouldCull(drawableCount);
-  const cullRect = useMemo(
-    () => (cullActive ? visibleWorldRect(view, size) : null),
-    [cullActive, view, size]
-  );
+  /* VIEW-INDEPENDENT-ONCE (NEW-2). The cull rect is LATCHED: `cullRectFor` hands back the rect we
+     already hold for as long as the true viewport is still comfortably inside it, and only builds
+     a new one when the view approaches its edge or the zoom changes (lib/viewCull.js explains why
+     the containment test is what makes that safe). Holding the same OBJECT is half the fix — a
+     fresh object with the same numbers would still invalidate `drawEls` / `drawElsZ` /
+     `drawParcels` / `drawMarkupsZ` and everything memoised on them.
+     ⛔ It is still genuinely view-derived, and must stay so: pan far enough, or zoom at all, and
+     the whole chain recomputes — exactly once. */
+  const cullRectRef = useRef(null);
+  cullRectRef.current = cullActive ? cullRectFor(view, size, cullRectRef.current) : null;
+  const cullRect = cullRectRef.current;
 
   /* ------------ NEW-2 — THE PAN ANCHOR: the view a coordinate is BAKED at ------------
      `f2p` is `worldToScreen(view, …)`, so every element's pixel geometry used to be a function of
@@ -15761,7 +15768,19 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const stdParcelValues = () => Object.fromEntries(PARCEL_STD_KEYS.map((k) => [k, parcelStdValue(k) ?? null]));
   const stdMeasureValues = () => Object.fromEntries(MEASURE_STD_KEYS.map((k) => [k, measureStdValueUI(k) ?? null]));
   const stdMeasureOpts = () => ({ measures, measureValues: stdMeasureValues() });
-  const stdApplyCount = allStandardsImpact(parcels, els, stdParcelValues(), Object.keys(TYPE), stdMeasureOpts());
+  /* VIEW-INDEPENDENT-ONCE (NEW-2). This is the badge count on the Standards footer's "Apply to
+     this plan (N)" button — a pure function of the model (parcels/els/measures) and the settings
+     ladder (plan settings → account prefs → the pending draft). It was computed in the render
+     body, so a 60-move pan re-derived it 187 times and re-ran `applyAllStandards` and 16 calls of
+     `applyTypeStandard` underneath it EVERY time, for an answer that had not changed since the
+     gesture began. Measured by ui-audit/detect-view-recompute.mjs at 52 ms of a 4.2 s pan across
+     the three sites, scaling with element count.
+     ⛔ The key is MODEL + SETTINGS and contains no view term, because the answer contains none. */
+  const stdApplyCount = useMemo(
+    () => allStandardsImpact(parcels, els, stdParcelValues(), Object.keys(TYPE), stdMeasureOpts()),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the three std*() closures read exactly these
+    [parcels, els, measures, settings, userPrefs, stdDraft],
+  );
   const saveStdForPlan = () => {
     if (!stdDirty) return;
     setSettings((s) => mergeDraftIntoSettings(s, stdDraft));
@@ -17471,6 +17490,22 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     }
     return { regions, stripes, outlineCuts, memberIds: new Set(roads.map((r) => r.id)), junctionVerts: roadJunctionVerts, trims: roundabouts.trims, roundabouts: roundabouts.geoms };
   }, [els, settings, teeJunctions, driveJunctions, weldJunctions, sharpFor, roadJunctionVerts, roundabouts]);
+  /* VIEW-INDEPENDENT-ONCE (NEW-2). The dissolved network's SVG path data and per-cluster style were
+     built inside the render's `roadNet.regions.map(…)`, so a 60-move pan rebuilt them 187 times —
+     561 `regionPathD` calls and 37 ms on the reference plan, the second-ranked violation the
+     detector found. `region` comes from the memo above (model + settings) and `f2p` is pinned at
+     the pan anchor (B1440), so the answer is already constant across a gesture; this just stops
+     re-deriving it. Keyed on `f2p` rather than `view`: the paths ARE in pixels, and `f2p`'s
+     identity is exactly "the view a coordinate is baked at", which is what they depend on. */
+  const roadRegionPaths = useMemo(
+    () => roadNet.regions.map(({ region, styleEl, ids }) => ({
+      ids,
+      d: regionPathD(region, f2p),
+      st: styleEl ? elStyle(styleEl, settings) : typeStyle("road", settings),
+      ppf: f2p({ x: 1, y: 0 }).x - f2p({ x: 0, y: 0 }).x,
+    })),
+    [roadNet, f2p, settings],
+  );
   // NEW-4 — corners the app had to draw TIGHTER than the road's own civil minimum. `arcCorner`
   // feasibility-clamps a corner's radius to half the shorter adjacent leg; that clamp is geometrically
   // necessary (without it two corners overrun each other and the strip self-intersects) but it used to
@@ -17888,7 +17923,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // bar's plate width/height so it can tell whether it would collide and, if so, reflow up
   // to its own row that clears the bar. `paneW` is the TRUE pane width (see `size.rawW`).
   const paneW = size.rawW ?? size.w;
-  const furnPlates = screenFurniturePlates({ ftPerUnit: 1 / view.ppf, fmtFeet: f0, pal: PAL });
+  /* VIEW-INDEPENDENT-ONCE (NEW-2). The scale bar and north arrow ARE view-derived — but only via
+     `ppf`. Keyed on the view TERM THEY ACTUALLY DEPEND ON, this recomputes exactly once per zoom
+     step and never during a pan, instead of 187 times per pan gesture (29 ms measured, with
+     `scaleBarPlate` and `furnitureMetrics` underneath it). This is the shape of a legitimate
+     view-derived memo: name the scalar, not the whole `view`. */
+  const furnPlates = useMemo(
+    () => screenFurniturePlates({ ftPerUnit: 1 / view.ppf, fmtFeet: f0, pal: PAL }),
+    [view.ppf, PAL],
+  );
   // Would the calibration badge (anchored at left:56, bottom:40) run into the right-anchored
   // scale bar on the same row? Pure decision in sheetFurniture.js: when they'd meet the badge
   // is lifted to its own row above the bar (and its width capped). `calibBadgeW` is measured
@@ -18337,11 +18380,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   strip-per-road + cover-patch + knockout-mask stack that B953…B1006 kept re-patching. */}
               {roadNet.regions.length > 0 && (
                 <g data-testid="road-network-layer">
-                  {roadNet.regions.map(({ region, styleEl, ids }, i) => {
-                    const st = styleEl ? elStyle(styleEl, settings) : typeStyle("road", settings);
-                    const ppf = (f2p({ x: 1, y: 0 }).x - f2p({ x: 0, y: 0 }).x);
-                    const d = regionPathD(region, f2p);
+                  {/* NEW-2 (VIEW-INDEPENDENT-ONCE) — `d`, `st` and `ppf` come from the
+                      `roadRegionPaths` memo above; this pass is now emission only. */}
+                  {roadRegionPaths.map(({ d, st, ppf, ids }, i) => {
                     if (!d) return null;
+                    const styleEl = roadNet.regions[i]?.styleEl;
                     return (
                       <g key={`rn${i}-${ids[0]}`} data-road-cluster={ids.join(",")} pointerEvents="none">
                         <path data-testid="road-network-surface" data-export="road-network" d={d} fillRule="evenodd"

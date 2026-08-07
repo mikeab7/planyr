@@ -57,8 +57,18 @@ describe("the harness and e2e contract is unchanged", () => {
     expect(src).toContain("data-pan-dx={panDx} data-pan-dy={panDy}");
   });
 
+  /* ⛔ RETARGETED, NOT WEAKENED (NEW-2, 2026-08-06). The property this asserts is unchanged —
+     the cull rect is derived from the LIVE `view`, never from the pan anchor, so what is drawn
+     is what is actually visible. What changed is that the rect is now LATCHED against the live
+     view rather than re-derived from it every frame (`cullRectFor` keeps the rect it already
+     holds for as long as the true viewport is still inside it), because re-deriving it
+     re-filtered the whole model on every pan frame to produce an identical set of elements.
+     The assertion is now STRONGER than it was: it pins the live-view source AND the latch, so
+     removing either goes red. */
   it("the cull rect still reads the LIVE view — culling by what is actually visible", () => {
-    expect(src).toContain("() => (cullActive ? visibleWorldRect(view, size) : null),");
+    expect(src).toContain("cullRectRef.current = cullActive ? cullRectFor(view, size, cullRectRef.current) : null;");
+    // …and never from the anchor, which is what would make a pan draw the wrong window.
+    expect(src).not.toContain("cullRectFor(renderView");
   });
 });
 

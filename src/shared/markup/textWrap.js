@@ -38,14 +38,34 @@ export function heuristicWidth(str, fs) {
  * the app's one UI face (`--font` in index.css) so the estimate matches the inherited SVG
  * <text> font as closely as a canvas font-string can. */
 let _ctx = null;
+/* VIEW-INDEPENDENT-ONCE (NEW-2, 2026-08-06). `measureText` is a pure function of (string, font)
+ * and one of the more expensive calls in a render pass — the browser has to lay the run out. It
+ * was being asked the same question over and over: ui-audit/detect-view-recompute.mjs measured
+ * 1,122 calls producing ONE distinct answer across a single 60-move pan of the reference plan
+ * (12 ms). A callout's text and its font size do not change because the map moved.
+ *
+ * Bounded on purpose: the key space is (text × size × weight × style), so a document full of
+ * distinct strings would otherwise grow this without limit. At the cap the cache is cleared
+ * outright rather than evicted one entry at a time — an exact-LRU here would cost more
+ * bookkeeping per call than the measurement it is saving, and the miss it causes is one
+ * `measureText`, not a wrong answer. */
+const _wCache = new Map();
+const W_CACHE_MAX = 4000;
 export function canvasWidth(str, fs, opts = {}) {
   if (typeof document === "undefined") return null;
   if (!_ctx) { const c = document.createElement("canvas"); _ctx = c.getContext("2d"); }
   if (!_ctx) return null;
   const weight = opts.bold ? "700" : "400";
   const style = opts.italic ? "italic" : "normal";
+  const s = String(str ?? "");
+  const key = `${style}|${weight}|${fs}|${s}`;
+  const hit = _wCache.get(key);
+  if (hit !== undefined) return hit;
   _ctx.font = `${style} ${weight} ${fs}px "Inter", system-ui, sans-serif`;
-  return _ctx.measureText(String(str ?? "")).width;
+  const w = _ctx.measureText(s).width;
+  if (_wCache.size >= W_CACHE_MAX) _wCache.clear();
+  _wCache.set(key, w);
+  return w;
 }
 
 /** The best measurer available: real canvas metrics in a browser, the heuristic elsewhere. */
