@@ -30,6 +30,8 @@ import { onAuthChange } from "../site-planner/lib/auth.js";
 import { listProjects as listLocalProjects } from "../../shared/projects/projects.js";
 import AppHeader from "../../shared/ui/AppHeader.jsx";
 import ToolRail from "../../shared/ui/ToolRail.jsx";
+import MiddleTruncate from "../../shared/ui/MiddleTruncate.jsx";
+import { sheetOpenState, OPEN_CHIP_TIMEOUT_MS } from "./lib/sheetOpenState.js";
 import AnchoredMenu from "../../shared/ui/AnchoredMenu.jsx";
 import ContextMenu from "../../shared/ui/ContextMenu.jsx";
 import { MODULE_ACCENT } from "../../shared/ui/moduleAccent.js";
@@ -130,12 +132,14 @@ const MK_ICONS = {
 };
 // A sheet-rail row's text (B664): the sheet CODE bold — it's how the owner navigates a set —
 // the title lighter beside it. Module scope per MODULE-SCOPE-COMPONENTS.
+/* NEW-4 — the sheet CODE never truncates (it is how the owner navigates a set) and the TITLE
+ * truncates in the MIDDLE, so "OVERALL ROOF PLAN" and "OVERALL FLOOR PLAN" stay tellable apart in
+ * a narrow rail instead of both rendering as "OVERALL…". Full text on hover. */
 const SheetRowText = ({ code, title }) => (
-  <>
-    {code ? <span style={{ fontWeight: 700 }}>{code}</span> : null}
-    {code && title ? <span style={{ fontWeight: 400 }}>{"  "}</span> : null}
-    {title ? <span style={{ fontWeight: 500, color: "var(--text-secondary)" }}>{title}</span> : null}
-  </>
+  <span style={{ display: "flex", minWidth: 0, alignItems: "baseline", gap: 6, whiteSpace: "nowrap" }}>
+    {code ? <span style={{ flex: "none", fontWeight: 700 }}>{code}</span> : null}
+    {title ? <MiddleTruncate text={title} style={{ fontWeight: 500, color: "var(--text-secondary)" }} /> : null}
+  </span>
 );
 
 const MkIcon = ({ id, size = 16 }) => (
@@ -266,6 +270,17 @@ export default function DocReview({
   const [calInfo, setCalInfo] = useState({});       // pageNum -> { src:'auto'|'manual'|'nts', label } (B267)
   const [sheetMeta, setSheetMeta] = useState({});   // pageNum -> readSheetMeta facts (sheet #, title, …) for the labeled, grouped sidebar (B266/B348)
   const [ocrScan, setOcrScan] = useState(null);     // { total, done } while the scanned-sheet OCR pass runs (B364) — visible, never a silent stall
+  // NEW-5 — how much of the set has actually been READ. The rail used to derive its headline count
+  // and every row label from `sheetMeta` regardless of how empty it was, so a 49-page set opened
+  // claiming "30 SHEETS · 49 PAGES" (a grouping computed over unread pages) with rows literally
+  // labelled "Sheet 1"…"Sheet 30" — numbers and names that were not read from anything. This is
+  // the seam that lets the rail say what it KNOWS and show a skeleton for what it doesn't.
+  // (derived below from `sheetMeta` — see `scanDone`, which counts the pages actually read)
+  // NEW-6 — a backdrop raster that genuinely FAILED, so the "Opening…" chip can become an honest
+  // error instead of a progress message that never ends. { page, message } | null.
+  const [backdropFail, setBackdropFail] = useState(null);
+  const [pageReqAt, setPageReqAt] = useState(0);    // when the current sheet was asked for (the chip's backstop clock)
+  const [openTick, setOpenTick] = useState(0);      // re-render once the backstop is due
   const [openGroups, setOpenGroups] = useState({}); // groupId -> expanded? in the logical-sheet list (B348)
   const [draft, setDraft] = useState(null);         // in-progress { kind, pts:[...] }
   const [cursor, setCursor] = useState(null);       // page-unit cursor for live preview
@@ -507,10 +522,35 @@ export default function DocReview({
   // "reading scanned sheets…" note (a silent multi-second stall would read as a hang).
   const RAIL_MAX_OCR_PAGES = 24; // matches localRead's filing cap — OCR is heavy; the rest stay "Sheet N"
   const scanTok = useRef(0);
+  /* NEW-5 (speed) — COMMIT THE READS IN BATCHES, not one per page.
+   *
+   * `applyMeta` used to call `setSheetMeta` once per page. Each of those is a full re-render of this
+   * component, and every one of them re-runs `refineSheetTitles` + `groupSheets` over the WHOLE
+   * set — so reading an n-page document cost n renders and O(n²) grouping work, all of it landing
+   * on the main thread the user is trying to pan and click on. Buffering the reads and flushing on
+   * a short interval keeps every label exactly as fresh to a human eye while collapsing n commits
+   * into a handful. Measured on a 49-page set at 6× CPU throttle: see the item's before/after. */
+  const META_FLUSH_MS = 250;
+  const metaBufRef = useRef(null);   // { tok, pages: { [pageNum]: meta } } | null
+  const metaTimerRef = useRef(null);
+  const flushMeta = useCallback(() => {
+    if (metaTimerRef.current) { clearTimeout(metaTimerRef.current); metaTimerRef.current = null; }
+    const buf = metaBufRef.current;
+    metaBufRef.current = null;
+    if (!buf) return;
+    if (buf.tok !== scanTok.current) return; // a newer document superseded this read — don't mix sets
+    setSheetMeta((m) => ({ ...m, ...buf.pages }));
+  }, []);
+  useEffect(() => () => { if (metaTimerRef.current) clearTimeout(metaTimerRef.current); }, []);
   const scanSheets = useCallback(async (pdf, pages) => {
     const tok = ++scanTok.current;
+    metaBufRef.current = null;
+    if (metaTimerRef.current) { clearTimeout(metaTimerRef.current); metaTimerRef.current = null; }
     const applyMeta = (p, meta) => {
-      setSheetMeta((m) => ({ ...m, [p]: meta }));
+      const buf = metaBufRef.current && metaBufRef.current.tok === tok ? metaBufRef.current : { tok, pages: {} };
+      buf.pages = { ...buf.pages, [p]: meta };
+      metaBufRef.current = buf;
+      if (!metaTimerRef.current) metaTimerRef.current = setTimeout(flushMeta, META_FLUSH_MS);
       const sc = meta.scale;
       if (sc && sc.explicit === "nts") { setCalInfo((m) => (m[p] ? m : { ...m, [p]: { src: "nts", label: sc.label } })); return; }
       const ft = statedCalibration(meta); // 0 unless a trustworthy stated scale on a standard plot size
@@ -538,6 +578,7 @@ export default function DocReview({
       applyMeta(p, meta);
       await new Promise((r) => setTimeout(r, 0));      // yield — never a long main-thread hog
     }
+    flushMeta(); // NEW-5: land the tail of the batch immediately — the set is read, say so now
     noText.sort((a, b) => a - b);
     if (!noText.length || tok !== scanTok.current) return;
     // OCR pass — only now does the (lazy, CDN-pinned) Tesseract worker load. Best-effort: any
@@ -564,7 +605,10 @@ export default function DocReview({
       // every label "Sheet N" — the user should know recognition didn't run, not wonder.
       if (tok === scanTok.current) setOcrScan(recovered === 0 ? { total: capped.length, done: capped.length, failed: true } : null);
     }
-  }, []);
+    // `flushMeta` is itself a useCallback([]) — stable for the component's lifetime — so declaring it
+    // here keeps this scanner's identity stable too, and silences the exhaustive-deps warning
+    // honestly rather than with a disable comment.
+  }, [flushMeta]);
 
   // Logical sheets (B348): collapse the read pages into the SAME logical groups the Stitcher uses —
   // consecutive pages sharing a plan type + a contiguous sheet-number run become one entry
@@ -587,6 +631,15 @@ export default function DocReview({
   );
   const metaOf = (n) => orderedMeta[n - 1] || sheetMeta[n] || null;
   const groups = useMemo(() => groupSheets(orderedMeta), [orderedMeta]);
+  /* NEW-5 — how much of this document has actually been READ, and therefore what the rail is
+   * ENTITLED to claim. `groups` is a grouping of `orderedMeta`, and `orderedMeta` invents an empty
+   * record for every page not yet scanned — so on a 49-page set that had read 30 pages it grouped
+   * to "30 sheets", a number derived from nothing, which then "settled" to the real 21. Same for
+   * the rows: an unread page fell through `sheetLabel` to the string "Sheet 7", which reads as a
+   * sheet NAME and isn't one. Until the read is complete the rail shows the one count it knows
+   * (pages), lists pages flat, and draws a skeleton where a name has not been read yet. */
+  const scanDone = useMemo(() => Object.keys(sheetMeta).length, [sheetMeta]);
+  const scanComplete = numPages > 0 && scanDone >= numPages;
 
   const openFile = async (file) => {
     // A null/no-op drop must not be silent (B446): name it on the always-visible banner so
@@ -707,9 +760,25 @@ export default function DocReview({
   // BACKDROP — the whole page at a fixed, zoom-independent density, rendered once per page (never
   // on zoom), double-buffered so a page change swaps with no white flash. Always present under the
   // detail layer as a no-white floor. Reads live refs so its identity stays stable. (B414/B415)
+  const backdropRetryRef = useRef(0); // NEW-6: bounded re-ask when the canvas/page box isn't committed yet
   const renderBackdrop = useCallback(async () => {
     const pdf = pdfRef.current, canvas = backdropRef.current, base = pageBaseRef.current;
-    if (!pdf || !canvas || !base) return;
+    if (!pdf) return;                     // nothing open — there is nothing to claim
+    // NEW-6 — this used to be part of one blanket `if (!pdf || !canvas || !base) return`, which is
+    // where a stuck "Opening…" came from: the canvas/page box simply hadn't committed yet, the
+    // raster was ABANDONED, nothing rescheduled it, and `renderedPage` never moved — so the chip
+    // asserted "opening" forever and the sheet stayed pinned at 0.35 opacity. Re-ask (bounded), and
+    // if it never becomes ready, say so out loud rather than sit on a progress message.
+    if (!canvas || !base) {
+      if (backdropRetryRef.current < 20) {
+        backdropRetryRef.current += 1;
+        setTimeout(() => setBackdropReq((n) => n + 1), 50);
+      } else {
+        setBackdropFail({ page: pageRef.current, message: "That sheet’s canvas never became ready — reopen the drawing." });
+      }
+      return;
+    }
+    backdropRetryRef.current = 0;
     const tok = ++backdropTok.current;
     if (backdropTaskRef.current) { try { backdropTaskRef.current.cancel(); } catch (_) {} backdropTaskRef.current = null; }
     try {
@@ -718,8 +787,16 @@ export default function DocReview({
         onTask: (t) => { backdropTaskRef.current = t; }, isStale: () => tok !== backdropTok.current });
       // The canvas now shows THIS page — clears the sheet-switch dim/label (B660). A superseded
       // render (tok moved on) never claims it.
-      if (tok === backdropTok.current) setRenderedPage(pageRef.current);
-    } catch (e) { if (!(e && e.name === "RenderingCancelledException")) { /* keep the prior frame */ } }
+      if (tok === backdropTok.current) { setRenderedPage(pageRef.current); setBackdropFail(null); }
+    } catch (e) {
+      // NEW-6 / LOUD-FAILURE — a cancellation is routine (a newer render won) and stays quiet. Any
+      // OTHER throw is a real failure to draw the sheet, and swallowing it is what turned a broken
+      // render into a permanent "Opening A227…". The prior frame is still kept; what changes is
+      // that the user is TOLD, instead of watching a progress message that will never finish.
+      if (!(e && e.name === "RenderingCancelledException") && tok === backdropTok.current) {
+        setBackdropFail({ page: pageRef.current, message: `Sheet ${pageRef.current} couldn’t be drawn${e && e.message ? ` — ${e.message}` : ""}.` });
+      }
+    }
   }, []);
 
   // DETAIL — only the visible window (+ margin) at full device density, re-rastered on settle and
@@ -747,6 +824,19 @@ export default function DocReview({
 
   useEffect(() => { renderBackdrop(); }, [renderBackdrop, backdropReq]);
   useEffect(() => { renderDetail(); }, [renderDetail, detailReq]);
+
+  /* NEW-6 — the "Opening <sheet>…" chip's clock. Asking for a sheet starts it; the backstop below
+   * makes sure the chip can stop asserting progress even if nothing ever reports back. The decision
+   * itself is `sheetOpenState` (pure, unit-locked) — this is only the clock that feeds it. */
+  useEffect(() => { setPageReqAt(Date.now()); setBackdropFail(null); backdropRetryRef.current = 0; }, [page, loadNonce]);
+  useEffect(() => {
+    if (!pageReqAt || renderedPage === page || (backdropFail && backdropFail.page === page)) return;
+    const left = OPEN_CHIP_TIMEOUT_MS - (Date.now() - pageReqAt);
+    if (left <= 0) return;                       // already past the backstop — the render re-reads it
+    const id = setTimeout(() => setOpenTick((n) => n + 1), left + 20);
+    return () => clearTimeout(id);
+  }, [page, pageReqAt, renderedPage, backdropFail, openTick]);
+  const openState = sheetOpenState({ requestedPage: numPages > 0 && pageBase ? page : 0, renderedPage, requestedAt: pageReqAt, now: Date.now(), failed: backdropFail });
 
   // Keep the current sheet scrolled into view in the (long) sheet list as you page (B306).
   useEffect(() => { activeSheetRef.current?.scrollIntoView({ block: "nearest" }); }, [page]);
@@ -1792,24 +1882,74 @@ export default function DocReview({
       onDoubleClick: () => { setTool(t.id); setToolLock(true); setDraft(null); setCalInput(null); } })),
     { kind: "tool", id: "takeoff", label: "Takeoff", title: "Show / hide the takeoff rollup (measured quantities across sheets)", icon: <MkIcon id="takeoff" />, active: takeoffOpen,
       onClick: () => setTakeoffOpen((v) => !v) },
-    { kind: "spacer" },
+  ];
+  /* NEW-7 — the zoom block is PINNED, not scrolled.
+   *
+   * It used to sit after a `spacer` inside the rail's single scrolling column. The tools alone are
+   * taller than the rail at every realistic window size, so "pinned to the bottom" meant pinned to
+   * the bottom of the scroll CONTENT — measured several hundred pixels below the fold at 1440×900,
+   * 1280×720 and 1512×640 alike. It was in the DOM and nowhere on screen, which is exactly what the
+   * owner reported. As a footer it is outside the scroll area and therefore always visible. */
+  const railFooter = [
     { kind: "header", label: "Zoom" },
-    { kind: "node", render: <div style={{ textAlign: "center", fontSize: 10, color: "var(--chrome-muted)", fontWeight: 600, padding: "1px 0 2px" }}>{Math.round((view?.scale || 0) * 100)}%</div> },
-    { kind: "tool", id: "zoomIn", label: "In", title: "Zoom in", icon: <MkIcon id="zoomIn" />, onClick: () => zoom(1.2) },
-    { kind: "tool", id: "zoomOut", label: "Out", title: "Zoom out", icon: <MkIcon id="zoomOut" />, onClick: () => zoom(1 / 1.2) },
+    { kind: "node", render: <div data-testid="zoom-readout" style={{ textAlign: "center", fontSize: 10, color: "var(--chrome-muted)", fontWeight: 600, padding: "1px 0 2px" }}>{Math.round((view?.scale || 0) * 100)}%</div> },
+    { kind: "tool", id: "zoomIn", label: "In", title: "Zoom in (or scroll the wheel over the sheet)", icon: <MkIcon id="zoomIn" />, onClick: () => zoom(1.2) },
+    { kind: "tool", id: "zoomOut", label: "Out", title: "Zoom out (or scroll the wheel over the sheet)", icon: <MkIcon id="zoomOut" />, onClick: () => zoom(1 / 1.2) },
     { kind: "tool", id: "fitW", label: "Fit", title: "Fit to width", icon: <MkIcon id="fitW" />, onClick: () => fitNow("width") },
-    { kind: "tool", id: "fitP", label: "Page", title: "Fit the whole sheet", icon: <MkIcon id="fitP" />, onClick: () => fitNow("page") },
+    { kind: "tool", id: "fitP", label: "Page", title: "Fit the whole sheet — the zoom reset", icon: <MkIcon id="fitP" />, onClick: () => fitNow("page") },
   ];
 
+  const exitStitch = () => { setMode("review"); setBackdropReq((n) => n + 1); setDetailReq((n) => n + 1); };
+
+  /* NEW-3 — Stitch keeps the app's chrome.
+   *
+   * The owner's report: planyr.io/#/markup opened full screen with no logo, no Dashboard or project
+   * breadcrumb and none of the Site / Schedule / Review / Library / Notes tabs — because this
+   * branch used to `return <Stitcher/>` ABOVE the AppHeader, so resuming a saved stitch (which is
+   * what that URL does when the last document was one) dropped you into a room with no doors. The
+   * only way out was a "‹ Single sheet" link that reads as a view toggle, not as an exit.
+   *
+   * The Stitcher is now a BODY inside the same shell every other module renders: same header, same
+   * breadcrumb, same module tabs, plus an explicitly labelled exit in the tool row. `saveState` is
+   * deliberately omitted — the stitch's own save state belongs to the Stitcher's persistence hook,
+   * and it renders its own badge; a header badge here would report the single-sheet review's state
+   * over a stitch, which is worse than showing none. */
   if (mode === "stitch") return (
-    <Stitcher
-      isActive={isActive}
-      onReview={() => { setMode("review"); setBackdropReq((n) => n + 1); setDetailReq((n) => n + 1); }}
-      loadReq={pendingStitch}
-      onConsumeLoad={() => setPendingStitch(null)}
-      onOpenReview={openReview}
-      signedIn={signedIn}
-    />
+    <div data-testid="doc-review-root" data-review-mode="stitch" style={{ height: "100%", display: "flex", flexDirection: "column", background: PAL.paper, position: "relative" }}>
+      <AppHeader
+        module={shellModule || "doc-review"}
+        onSwitch={onShellSwitch}
+        onDashboard={onGoDashboard}
+        currentProject={markupProject}
+        cross={crossProject}
+        onSelectProject={(id) => onNavigate?.({ projectId: id, cross: false })}
+        onNewProject={onNewProject}
+        centerContent={
+          <button onClick={() => onShellSwitch?.("library")} title="Open the Library to browse this project's files"
+            style={{ flex: "none", display: "flex", alignItems: "center", gap: 4, fontSize: 11.5, fontFamily: "inherit", fontWeight: 600, cursor: "pointer", borderRadius: 999, padding: "3px 10px",
+              border: "1px solid var(--chrome-divider)", background: "var(--chrome-bg-elev)", color: "var(--chrome-text)" }}>
+            🗂 Library
+          </button>
+        }
+        authControl={authControl}
+        accountActive={accountActive}
+        toolbarContent={
+          <button data-testid="exit-stitch" style={chromeBtn()} onClick={exitStitch}
+            title="Leave the multi-sheet stitcher and go back to reviewing one sheet at a time">‹ Exit Stitch</button>
+        }
+      />
+      <div style={{ flex: 1, minHeight: 0 }}>
+        <Stitcher
+          isActive={isActive}
+          chromed
+          onReview={exitStitch}
+          loadReq={pendingStitch}
+          onConsumeLoad={() => setPendingStitch(null)}
+          onOpenReview={openReview}
+          signedIn={signedIn}
+        />
+      </div>
+    </div>
   );
 
   // drawMarkup() is now handled by <MarkupRenderer> (B426); the local `draw()` alias is gone.
@@ -2079,7 +2219,17 @@ export default function DocReview({
               {/* Logical sheets (B348): grouped plans collapse to one entry; the real sheet # + title
                   replace "Sheet N" (B266). The same shared engine (sheetGroups/sheetMeta) the Stitcher
                   uses; the count reads "logical sheets · pages" so the collapse is visible. */}
-              <div data-testid="sheet-count" style={{ fontSize: 10, color: PAL.muted, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 6 }}>{groups.length} sheet{groups.length === 1 ? "" : "s"} · {numPages} pages</div>
+              {/* NEW-5 — the sheet COUNT is a read result, so it is only stated once the set has
+                  been read. Until then the rail reports the one thing it actually knows (how many
+                  pages the PDF has) and says it is still reading — never a grouping computed over
+                  pages nobody has looked at, which is what made a 49-page set announce
+                  "30 SHEETS · 49 PAGES" and then quietly become 21. */}
+              <div data-testid="sheet-count" data-scan={scanComplete ? "complete" : "reading"}
+                style={{ fontSize: 10, color: PAL.muted, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 6 }}>
+                {scanComplete
+                  ? `${groups.length} sheet${groups.length === 1 ? "" : "s"} · ${numPages} pages`
+                  : `${numPages} page${numPages === 1 ? "" : "s"} · reading ${scanDone}/${numPages}`}
+              </div>
               {/* B364 — the scanned-sheet OCR pass is visibly in progress (labels fill in as pages
                   read), and a pass that recovered NOTHING says so instead of silently leaving
                   "Sheet N" everywhere. */}
@@ -2088,7 +2238,30 @@ export default function DocReview({
                   {ocrScan.failed ? "Couldn’t read the scanned sheets (text recognition unavailable) — labels stay generic" : `Reading scanned sheets… ${ocrScan.done}/${ocrScan.total}`}
                 </div>
               )}
-              {groups.map((g, gi) => {
+              {/* NEW-5 — while the read is still running the rail lists PAGES, flat: a page whose
+                  title block has been read shows its real label; a page that hasn't shows a
+                  skeleton, not the invented name "Sheet 7". Both are clickable, so navigation works
+                  from the first frame. The grouped view arrives when the grouping is real. */}
+              {!scanComplete && Array.from({ length: numPages }, (_, i) => i + 1).map((n) => {
+                const active = n === page;
+                const m = sheetMeta[n];
+                const lb = m ? sheetLabel(n) : null;
+                const known = !!(lb && lb.real);
+                const rowStyle = { display: "block", width: "100%", textAlign: "left", padding: "6px 9px", marginBottom: 3, borderRadius: 6, cursor: "pointer", fontFamily: "inherit", fontSize: 12,
+                  border: `1px solid ${active ? PAL.accent : PAL.line}`, background: active ? "var(--hover-ghost)" : "var(--surface-raised)", color: PAL.ink, overflow: "hidden", whiteSpace: "nowrap" };
+                if (!known) return (
+                  <button key={n} ref={active ? activeSheetRef : null} onClick={() => goToPage(n)} data-testid="sheet-skeleton"
+                    title={`Page ${n} — its title block hasn’t been read yet`} aria-label={`Page ${n}, not read yet`} style={rowStyle}>
+                    <span aria-hidden="true" style={{ display: "block", height: 9, width: `${52 + ((n * 37) % 34)}%`, borderRadius: 4, background: "var(--border-default)", opacity: 0.55 }} />
+                  </button>
+                );
+                return (
+                  <button key={n} ref={active ? activeSheetRef : null} onClick={() => goToPage(n)} title={sheetTip(n)} data-testid="sheet-entry" style={rowStyle}>
+                    <SheetRowText code={lb.code} title={lb.title} />
+                  </button>
+                );
+              })}
+              {scanComplete && groups.map((g, gi) => {
                 const gid = `${gi}:${g.pages[0]?.pageNum}`;
                 if (g.kind === "single") {
                   const n = g.pages[0].pageNum, active = n === page;
@@ -2200,19 +2373,33 @@ export default function DocReview({
               cursor: panning ? "grabbing" : panMode() ? "grab" : tool === "select" ? "default" : "crosshair" }}>
             {/* B660 — while the new sheet rasterises, name what's opening (the dimmed frame behind
                 is the PREVIOUS sheet; without this the switch read as "it held the wrong sheet"). */}
-            {numPages > 0 && pageBase && renderedPage !== page && (
+            {openState.opening && (
               <div data-testid="sheet-switching" style={{ position: "absolute", top: 10, left: "50%", transform: "translateX(-50%)", zIndex: 5,
                 fontSize: 11.5, fontWeight: 700, color: "var(--text-primary)", background: "var(--surface-raised)",
                 border: "1px solid var(--border-default)", borderRadius: 999, padding: "4px 12px", boxShadow: "0 2px 8px rgba(0,0,0,0.18)", pointerEvents: "none" }}>
                 Opening {sheetShort(page)}…
               </div>
             )}
+            {/* NEW-6 / LOUD-FAILURE — a sheet that genuinely could not be drawn says SO, in the same
+                place the progress chip used to sit forever. Dismissible, and it clears itself the
+                moment a later render of that sheet succeeds. */}
+            {openState.error && (
+              <button type="button" data-testid="sheet-open-error" onClick={() => setBackdropFail(null)} title="Dismiss"
+                style={{ position: "absolute", top: 10, left: "50%", transform: "translateX(-50%)", zIndex: 6, cursor: "pointer",
+                  fontSize: 11.5, fontWeight: 700, fontFamily: "inherit", color: "var(--warn-text)", background: "var(--warn-bg)",
+                  border: "1px solid var(--warn-border)", borderRadius: 999, padding: "4px 12px", boxShadow: "0 2px 8px rgba(0,0,0,0.18)" }}>
+                ⚠ {openState.error}
+              </button>
+            )}
             {pageBase && view && (
               <div data-testid="review-sheet" data-view-tx={view.tx} data-view-scale={view.scale} style={{ position: "absolute", left: 0, top: 0, width: pageBase.w * view.scale, height: pageBase.h * view.scale, transform: `translate(${view.tx}px, ${view.ty}px)`, transformOrigin: "0 0", background: "#fff", boxShadow: "0 4px 18px rgba(0,0,0,0.25)",
                 // Sheet switch (B660): until the NEW page's backdrop lands, the double-buffered canvas
                 // still shows the PREVIOUS sheet — dim it so it clearly reads "in transition", never
                 // "the wrong sheet". The chip below names what's opening.
-                opacity: renderedPage === page ? 1 : 0.35, transition: "opacity 120ms linear" }}>
+                // NEW-6: driven by the same three-way decision as the chip, so the dim can never
+                // outlive the switch — the old `renderedPage === page` test left a finished sheet
+                // permanently at 0.35 whenever the raster never reported back.
+                opacity: openState.dimmed ? 0.35 : 1, transition: "opacity 120ms linear" }}>
               {/* Two layers (B415). BACKDROP: the whole page at a fixed density, filling the page
                   box — never re-rastered on zoom, so it's always present as a no-white floor. DETAIL:
                   just the visible window at full device density, positioned over the backdrop, sized
@@ -2363,7 +2550,7 @@ export default function DocReview({
           </div>
 
           {/* tool rail (B330) — drawing/measure tools + zoom, flush to the canvas */}
-          <ToolRail items={railItems} accent={MODULE_ACCENT["doc-review"]} data-testid="markup-rail" />
+          <ToolRail items={railItems} footer={railFooter} accent={MODULE_ACCENT["doc-review"]} data-testid="markup-rail" />
 
           {/* takeoff — collapsible (B330); a thin re-open tab when hidden */}
           {takeoffOpen ? (

@@ -1,7 +1,7 @@
 import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
-import { COUNTIES, COUNTIES_MAP, candidateCountiesForPoint, countyForView, countyKeyForName, STATEWIDE_KEYS, SNAPSHOT_COUNTIES, isStatewideLayerUrl, trimLayerUrl } from "./lib/counties.js";
+import { COUNTIES, COUNTIES_MAP, candidateCountiesForPoint, countyForView, countyKeyForName, STATEWIDE_KEYS, SNAPSHOT_COUNTIES, isStatewideLayerUrl, trimLayerUrl, loadCountyPolygons, countyIdentity, noParcelSourceNote } from "./lib/counties.js";
 import { landingView } from "./lib/landingView.js";
 import { ensureSnapshot, getSnapshot, snapshotVintage, onSnapshotChange, featureAtPoint, preferSnapshotForDisplay } from "./lib/parcelSnapshot.js";
 import { recordSourceResult, filterHealthyCandidates, isSourceOpen, isStatewideBackup } from "./lib/sourceHealth.js";
@@ -533,6 +533,19 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
       setViewState(siteState({ lat: c.lat, lng: c.lng }));
     };
     onMove();
+    /* B209502 — WARM THE COUNTY GEOMETRY, THEN ASK AGAIN.
+     *
+     * `countyForView` is synchronous and answers from whatever it has: before the polygon asset
+     * is resident it returns the old bounding-box guess, and after it returns the real county.
+     * Without this call the asset would never load at all and the whole point-in-polygon fix
+     * would ship inert but green — the exact failure mode B1120 recorded (a feature that merged,
+     * passed CI, and did nothing in production because nobody wired the one call site).
+     *
+     * The re-ask is what makes the load visible: the first resolve almost always happens before
+     * the fetch lands, so a map that opened over Pearland would otherwise sit on "Harris" for the
+     * whole session. Guarded on `cancelled` because a fast unmount must not set state. */
+    let cancelled = false;
+    loadCountyPolygons().then(() => { if (!cancelled && mapRef.current) onMove(); });
     // NEW-1 — the moment the user drives the map themselves, the derived landing view is done
     // for the session. Deliberately keyed on real INPUT (a press, a wheel, a drag) rather than
     // Leaflet's `movestart`/`zoomstart`, which our own programmatic `setView` also fires.
@@ -605,7 +618,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
       // vector boundary identify reads. Panning is gated inside attachRasterIdentify.
       identifyOk: () => !selectModeRef.current,
     });
-    return () => { detachRasterIdentify(); map.off("click", onClick); map.off("zoomend", onZoom); map.off("moveend", onMove); map.off("mousemove", onMouseMove); map.off("mousemove", onCoordMove); map.off("mouseout", onCoordOut); map.off("contextmenu", onMapCtx); map.off("dragstart", onDragStart); map.off("dragend", onDragEnd); map.off("dragstart", markUserMoved); containerEl.removeEventListener("pointerdown", onPress); containerEl.removeEventListener("pointerup", onRelease); containerEl.removeEventListener("pointercancel", onRelease); containerEl.removeEventListener("wheel", markUserMoved); map.remove(); mapRef.current = null; };
+    return () => { cancelled = true; detachRasterIdentify(); map.off("click", onClick); map.off("zoomend", onZoom); map.off("moveend", onMove); map.off("mousemove", onMouseMove); map.off("mousemove", onCoordMove); map.off("mouseout", onCoordOut); map.off("contextmenu", onMapCtx); map.off("dragstart", onDragStart); map.off("dragend", onDragEnd); map.off("dragstart", markUserMoved); containerEl.removeEventListener("pointerdown", onPress); containerEl.removeEventListener("pointerup", onRelease); containerEl.removeEventListener("pointercancel", onRelease); containerEl.removeEventListener("wheel", markUserMoved); map.remove(); mapRef.current = null; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -1316,11 +1329,20 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
           return; // the optimistic addParcelHit already added it to the selection — leave it in place
         }
         if (optKey) rollbackHit(optKey);
+        /* B209502 — SAY THE COUNTY, and say it has no parcel data, rather than implying the click
+         * was bad. Before this, a click anywhere in one of the ~245 Texas counties Planyr has no
+         * CAD for read as "No parcel right there — zoom in and click directly on a lot", which
+         * blames the user for a gap in our coverage. `countyIdentity` knows the difference: it
+         * names the county from real geometry and reports `no-source` when nothing is wired there.
+         * Naming the wrong county is worse than admitting a gap — and so is naming none at all. */
+        const gap = noParcelSourceNote(countyIdentity(latlng.lat, latlng.lng));
         // "Couldn't reach any parcel server" reads differently from "reached one, but
         // there's no parcel at this exact point" (B245).
         setErr(res.responded === 0
           ? "The county parcel server isn't responding right now — try again in a moment, or trace the lot from the Aerial underlay."
-          : "No parcel right there — zoom in and click directly on a lot.");
+          : gap
+            ? `${gap} You can still trace the lot from the Aerial underlay.`
+            : "No parcel right there — zoom in and click directly on a lot.");
         return;
       }
       // The authoritative live answer always wins: drop the optimistic outline and rebuild

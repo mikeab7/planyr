@@ -113,6 +113,96 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V23408 — The pond measurement, run where it actually lags: signed in, on the BAIN plan, with live GIS (B221760)
+
+`Blocker: auth` + `Blocker: real-data` + `Blocker: live-GIS` — the instrument is built, unit-proven (29 tests) and has already produced the full breakdown here with **0.0% unattributed** (`docs/PERF-POND.md`). What it CANNOT do is reproduce the owner's symptom from ONE pond, and the reasons are structural rather than incidental. **There is no Bain plan fixture in the repo at all** — only four Bain pond RINGS in `test/fixtures/gooseCreekPonds.json`, which were never a plan — so the measurement ran on his Goose Creek plan (62 elements, 2 ponds) with the ponds stripped, which is a FLOOR. **`pondSplitFor` takes its flood branch only when `fmZones` is non-empty**, and every GIS host is blocked here, so the per-pond ledger never enters the branch a real Zone-A plan uses. And this container has 4 cores against his 28.
+- **Measured here at 1×, dpr 2, Yield docked:** one pond moves an identical pan by **+3.6% against a ±3.97% floor (INCONCLUSIVE)** at every zoom from ppf 0.10 to 4.0, and the app is **silent** for 12 s afterwards. The per-pond cost is real but needs leverage to see: **≈10.3 ms of main-thread work per gesture per pond**, only clearing the floor from 8 ponds up.
+- **What settles it, and it is one export plus one run:** export the **Bain / Concept A** plan from a signed-in session into `ui-audit/fixtures/` (it must be a WHOLE plan — els **and** parcels **and** settings **and** origin; B1448 found Sylvestri's committed fixture is elements-only and cannot be opened as a plan at all), then run `BASE_URL=https://planyr.io node ui-audit/diagnose-pond-pan.mjs --arms null,pond,building --pairs 5 --probe-reps 5 --panel yield --ppf-sweep 0.1,0.35,1.0` **signed in**, and record: the paired delta for one pond, the null-pair floor, the contour-ring count at his working zoom, and whether the after-the-action watch stays silent. **If one pond on Bain moves the probe by more than the floor, the mechanism is in the flood branch this sandbox cannot enter** — and that is a different fix from B221761's.
+- The **owner never runs this** — it is a Claude-cohort check on a signed-in session. ⏳ **PENDING**
+
+### V23409 — B221761's pond-label memo, on a real plan with real basins
+
+`Blocker: real-data` — the fix is **byte-identical by construction** (same pure function, same arguments, same outputs) and that is asserted rather than asserted-about: `test/labelFitMemo.test.js` drives a hostile ring battery **plus the owner's own Goose Creek pair and two of the four Bain / Concept A basins** through several hundred size questions and compares the memoised answer position-for-position against a fresh un-memoised fitter, mutation-checked two ways. The saving is measured on the seeded ladder here: **per-pond 10.26 → 4.94 ms** of main-thread work per gesture, **16-pond penalty +30.5% → +14.1%**, label layout across 0 → 16 ponds **+76.7 → +20.0 ms**.
+- **What is still pending, and it is a LOOKING check, not a timing one.** On **planyr.io**, on a real plan with several ponds — Bain if it is to hand, Goose Creek otherwise — confirm the picture is unchanged: **(a)** every pond is still NAMED at whole-site zoom, at working zoom and zoomed right in (a pond may never go silent — that is B1147's invariant and this fix must not have touched it); **(b)** a pond whose label leaders OUTSIDE the outline still does, with its leader line; **(c)** pan across the plan and confirm no label jumps, flickers or changes rung mid-gesture; **(d)** edit a pond's boundary and confirm its label re-places against the NEW shape immediately (this is the one failure mode the memo could have introduced, and the WeakMap keying is what prevents it); **(e)** export a PDF and confirm the pond labels print where they print on screen.
+- The **owner never runs this** — it is a Claude-cohort check. ⏳ **PENDING**
+
+### V17707 — B209506 / B209507 (the Bain header pill: Unincorporated, the Houston ETJ named, Katy demoted — and a failed lookup that SAYS so). ⏳ **LIVE APP (planyr.io), SIGNED IN — the Bain project** `Blocker: real-data`
+**✅ VERIFIED HERE 2026-08-06 — the whole chain, against the LIVE services, at the Bain origin.** `identifyJurisdiction(-95.84668255417057, 29.77086450409065, {ring})` returned: city `[]` · cityCentroid `[]` · cityContainment **none** · etj **["Houston"]** · county **["Fort Bend"]** · sources `etj=loaded city=empty county=loaded`. The pill it produces is:
+
+    BEFORE:  City of Katy · edge only · Fort Bend County
+    AFTER:   Unincorporated / City of Houston · ETJ · Fort Bend County
+
+which is the owner's stated target line. Also proven here: a `failed` ETJ renders `ETJ · couldn't check` and sets `unresolvedRoles:["etj"]`, while an `empty` ETJ stays quiet — the two no longer render identically (`test/jurisdiction.test.js`, and the pair is asserted to differ).
+
+**STILL PENDING (needs the signed-in app on the owner's own Bain project):**
+**(a)** Open Bain and read the header pill — confirm it leads **Unincorporated**, names the **City of Houston ETJ**, and shows Katy only as `· edge only` (his parcel ring touches Katy; the ring used here did not, so the edge footnote is the one part not exercised live).
+**(b)** Hover the pill and confirm the tooltip still explains what "edge only" means.
+**(c)** With the ETJ layer failing (block `HGAC_City_ETJ` in devtools, or open on a flaky load), confirm the pill SAYS `ETJ · couldn't check` rather than going quiet.
+**(d)** Confirm a site genuinely inside a city's limits still reads `City of <name>` with no "Unincorporated" prefix.
+Record the before/after pill text in the note when confirmed.
+
+### V17708 — B209508 (the FFE rule refuses to settle on an incomplete jurisdiction). ⏳ **LIVE APP (planyr.io), SIGNED IN — the Bain project** `Blocker: real-data`
+**✅ VERIFIED HERE 2026-08-06 (engine + panel logic, unit-level against the real rule records):** with the Houston ETJ present the Ch. 19 candidate is raised (`coh`, "wse02pct + 2 ft") and `settled:true`; with the ETJ lookup FAILED the result is `unresolved:true` / `settled:false` and the Buildability row states `FFE rule not settled — jurisdiction unknown` instead of `pads assumed at 144.8′ FFE`. `basisMismatch` is true at Bain (a 500-yr basis compared against a 100-yr set on freeboard alone).
+
+**STILL PENDING (needs the signed-in app with real flood data):**
+**(a)** Open Bain, expand Yield → Stormwater, and confirm the FFE row names its authority and its rule.
+**(b)** Confirm the freeboard-vs-basis caveat renders when both Fort Bend and the Houston ETJ are in play.
+**(c)** Force the ETJ lookup to fail and confirm the panel refuses to state an FFE at all — the Buildability row reads "FFE rule not settled" and no pad elevation is printed as settled anywhere on the panel.
+**(d)** Confirm no OTHER surface prints a pad/finished-floor number while that state is active.
+> **⚠ The deployed BRANCH PREVIEW cannot be driven from the sandbox — measured 2026-08-06, don't rediscover it.** Both specs below were pointed at `claude-review-module-bugs-82.planyr.pages.dev` (Cloudflare deployed it green). `curl` returns **200**; Chromium's own `page.goto` dies with **`net::ERR_CONNECTION_RESET`** on every one of the 13 specs. Same gateway behaviour already recorded on V711. So "verified against the real deploy" is not available here for ANY of V10608–V10611 — the headless evidence on these items is from a local production build of the identical tree.
+
+### V10608 — B208960 + B208961 (open a SAVED stitch and press a sheet row while it loads). `Blocker: auth` + `Blocker: real-data`
+
+Everything that can be driven logged out was driven here and passes (e2e **stitch-row-adds-a-sheet**, 7 specs, mutation-checked against the old build), **but the owner's exact trigger is out of reach from this sandbox and that is structural, not incidental:** the gate that swallowed his clicks is held by `loadStitch`, which only runs when a saved stitch is re-fetched from Drive — signed out there are no stored sources, so the load finishes instantly and the gate is never held. The queue-and-replay behaviour is unit-locked (`test/stitchLoadState.test.js`, 15) and the bare early return is gone from the code; what needs his session is that it BEHAVES that way on a real set. On **planyr.io**, signed in, on the JACINTOPORT stitch:
+
+- **(a) THE STATUS BAR MOVES.** From the moment the set starts loading, confirm the line COUNTS ("Drawing the saved set — sheet 3 of 8…") and changes as it goes. A fixed line, or the words "Rendering…" anywhere, is a fail.
+- **(b) SHEETS APPEAR AS THEY LAND**, one at a time, instead of the canvas staying empty until everything is ready.
+- **(c) PRESS A SHEET ROW WHILE IT IS STILL LOADING.** Confirm you get an answer in the same beat — a short "still loading the saved set, that sheet goes on as soon as it finishes" — and then that **the sheet you pressed actually appears on the canvas** once the load ends. Silence is the whole bug; a message with no sheet afterwards is only half a fix.
+- **(d) PRESS SEVERAL DIFFERENT ROWS while it loads.** All of them should land, in the order pressed. Pressing the SAME row twice should produce one sheet, not two.
+- **(e) ONCE IT HAS SETTLED, THE BAR IS GONE.** Not idle text — gone.
+- **(f) A ROW PRESS ON A SETTLED SET STILL WORKS** — the ordinary case, unchanged.
+- **(g) IF ANYTHING FAILS TO LOAD, IT IS NAMED.** If a drawing won't come back from Drive you should see which one, not a vague "some source PDFs weren't available".
+
+⏳ **LIVE APP (planyr.io), SIGNED IN, ON A SAVED STITCH** `Blocker: auth` + `Blocker: real-data`
+
+### V10609 — B208962 (the Review URL lands somewhere with doors on it). `Blocker: real-data`
+
+The chrome itself is proven headless (e2e: module tabs visible from inside Stitch, ‹ Exit Stitch works, a module tab navigates out) and those three fail on the old build. What needs his account is the LANDING — `#/markup` only resumes into Stitch when his last document reviewed was a stitch, which is a saved-state condition this sandbox has no way to reproduce. On **planyr.io**, signed in:
+
+- **(a) GO TO planyr.io/#/markup** — the URL that landed you in the full-screen room. Confirm you now see the logo, the Dashboard/project breadcrumb and the Site / Schedule / Review / Library / Notes tabs, whether it resumes into Stitch or into the single sheet.
+- **(b) IF IT RESUMES INTO STITCH, THE EXIT IS OBVIOUS.** Confirm there is a **‹ Exit Stitch** button and that pressing it puts you in the ordinary single-sheet Review view.
+- **(c) THE TABS WORK FROM IN THERE.** From Stitch, click Site — confirm you actually leave Review.
+- **(d) THE BREADCRUMB STILL SWITCHES PROJECTS** from inside Stitch.
+- **(e) YOUR STITCH IS STILL SAVING.** The stitcher keeps its own save badge in its toolbar (the header's is deliberately blank in this mode, because it would otherwise report the single-sheet review's state). Confirm the badge in the stitch toolbar behaves as it did.
+
+⏳ **LIVE APP (planyr.io), SIGNED IN** `Blocker: real-data`
+
+### V10610 — B208965 (the "Opening…" toast, on the drawing that produced it). `Blocker: real-data`
+
+Driven headless and passing (the chip reaches count 0 after a real sheet switch, the sheet's computed opacity reaches exactly 1, no error chip is left behind), and it times out on the old build — so the fix is real on a synthetic set. It parks anyway because his report is on a specific real drawing and a specific sheet, and the failing path is a render that throws or never becomes ready, which a clean synthetic PDF does not do. On **planyr.io**, signed in:
+
+- **(a) OPEN "2026.06.23 Grand Port - Architectural" and go to A227** — the exact case. Confirm the "Opening A227…" tag disappears once the sheet is up.
+- **(b) THE SHEET IS NOT LEFT GREYED.** This is the half your report didn't mention: the same stuck state also held the drawing at about a third brightness. Confirm the sheet looks fully solid, not washed out.
+- **(c) PAGE THROUGH TEN SHEETS QUICKLY** with the arrow keys and confirm no tag is left behind on any of them.
+- **(d) IF A SHEET GENUINELY WON'T DRAW, YOU GET TOLD.** You should see an amber warning naming the sheet — clickable to dismiss — instead of a progress message that never finishes. If you never see this, that's fine; it means nothing failed.
+
+⏳ **LIVE APP (planyr.io), SIGNED IN, ON GRAND PORT ARCHITECTURAL** `Blocker: real-data`
+
+### V10611 — B208966 (the zoom control is where you can see it). `Blocker: real-data`
+
+**The real, reproduced fault is the missing CONTROL, and it is fixed.** Measured on the real app: the tool rail held **1,294 px of content in a 536–796 px box** at 1440×900, 1280×720 and 1512×640 alike, so the zoom block sat **539 px below the visible bottom** of the rail's own scroll, in a narrow column with no scrollbar affordance. That is why there was no zoom control anywhere in that mode. It is now pinned in a footer outside the scroll, and the e2e guard fails by name on the old build.
+
+**⚠ ABOUT THE "WHEEL DOES NOTHING" HALF — DO NOT TREAT IT AS A FINDING, AND DO NOT ANSWER IT AS A QUESTION.** That half was **reported by the assistant, not by the owner, and by a method that cannot support it**: it was driven through browser automation, which dispatches a synthetic scroll rather than a real wheel event with the `deltaMode` and modifier state a zoom handler reads. Driven wheel events zoom correctly here in every position and state tried — sheet centre, over the mat, at the viewport corner, with a drawing tool armed, with Takeoff open, after a module round-trip, and after the exact Stitch → single-sheet round-trip — and **no code path was found that disables wheel zoom**. So: bad measurement in, nothing out. No cause was invented and none is claimed. The live check below is simply whether the owner's own wheel works; it is a routine confirmation, not an investigation.
+
+On **planyr.io**, signed in, with a drawing open in the ordinary Review view:
+
+- **(a) THE ZOOM CONTROL IS VISIBLE** without scrolling anything — a small **Zoom** block at the bottom of the right-hand tool strip: a percentage, **In**, **Out**, **Fit**, **Page**. This is the fix. Confirm you can see it the moment a drawing is open.
+- **(b) PRESSING IN AND OUT CHANGES THE PICTURE**, and the percentage next to them tracks it.
+- **(c) "PAGE" IS THE RESET** — it should put the whole sheet back in the window.
+- **(d) YOUR MOUSE WHEEL ZOOMS.** Put the pointer over the drawing and scroll. It should zoom, toward wherever the pointer is. If it does — which is what is expected — nothing further is owed. If it genuinely does not, that is a NEW report, from a real wheel for the first time, and it re-opens B208966 with the browser you were using noted.
+- **(e) NOTHING ELSE MOVED.** Confirm the drawing tools above the Zoom block are all still reachable in that strip.
+
+⏳ **LIVE APP (planyr.io), SIGNED IN, WITH A DRAWING OPEN** `Blocker: real-data`
 ### V11216 — Bain, on his own machine, with his own plan (B209568). `Blocker: real-data`
 **What was verified HERE, headless, this session — and it is most of the item.** `ui-audit/raster-arms.mjs` was driven under `xvfb` at **dpr 2.15, 1× CPU, with tiles that actually decode**: six arms across **two independent batteries (4 reps + 6 reps, 60 runs, 0 suppressed)**, interleaved, with verdicts taken rep-for-rep by paired sign test at a bar declared in code ahead of any result. Every arm PROVED its rasters decoded before any number was taken (`decodeFault`). Findings — semi-transparency separates on NOTHING; ¼ the pixels at the same footprint saves 6.3% of raster work against 24.3% for removing the overlay; **304 compositor layers in every arm, rasters or not, against Goose Creek's 118**; Bain 40% above Goose Creek on render work and still 20.9% above with both rasters stripped; **main-thread work identical, p = 1.000** — are recorded on B209568 and in `docs/PERF-BAIN.md`.
 **What is left, and why it genuinely cannot be done from here.** Three things, all `real-data`:
@@ -152,6 +242,41 @@ What only the live repository can answer, in order:
 > - **The MAAPnext outage is real and now FAILS LOUD.** The same proxy at `MAAPNext/WSE_100YR` returned **HTTP 502 `{"error":"Upstream GIS request failed (HTTP 522)","host":"fximgservices.hcfcd.org"}`** after 19.9 s — Cloudflare's own 522 is a connection timeout at the origin, which independently confirms the host is dead from the production edge and not merely from this sandbox. Pre-fix this path answered with a 302 the browser would have followed into a CORS refusal.
 >
 > **STILL PENDING (why this is not a full pass):** every check above is the DATA path. What has not been seen is the READOUT — the Yield → Stormwater lines on a signed-in, real Zone-A plan, which needs an account this environment cannot sign into. Steps (a)–(e) below stand.
+
+### V17704 — B209502 / B209503 (the app names the right county, and the five new counties select a real parcel). ⏳ **LIVE APP (planyr.io)** `Blocker: real-data`
+The pure resolution is proven HERE and recorded below (all six of the owner's points resolve correctly; 114/114 and 107/108 agreement against the live county layer). What a sandbox cannot do is drive a signed-in click-to-select against a real CAD, so this is what remains. On **planyr.io**, confirm —
+**(a) THE COUNTY READS RIGHT AT ALL SIX.** Move the map over each of the owner's six audit sites and confirm the Layers panel names, in order: **Chambers · Harris · Fort Bend · Montgomery · Brazoria · Galveston**. Pearland is the one that matters most — it must say Brazoria, never Harris.
+**(b) PEARLAND NO LONGER SHOWS HARRIS FLOOD-CONTROL DATA.** At the Pearland site, confirm the Harris County Flood Control channels and watersheds are no longer offered as corroboration for a Brazoria site.
+**(c) A CLICK SELECTS A REAL PARCEL IN THE NEW COUNTIES.** Click a lot at Conroe, at Pearland and at Texas City and confirm each selects an actual parcel with an owner and an address — or says plainly that there is none there. (Each county's own CAD was probed live from the build: Montgomery 336,769 · Brazoria 280,226 · Galveston 188,679 · Liberty 155,826 · Austin 22,630 parcels, all answering a point identify in well under a second.)
+**(d) A COUNTY WITH NO CAD ADMITS IT.** Move to somewhere like Walker or Wharton County and confirm the app names THAT county and says it has no parcel data there — never a neighbouring county's name.
+**(e) NOTHING REGRESSED IN THE OLD FOUR.** Confirm Harris, Fort Bend, Chambers and Waller still select parcels exactly as before.
+
+**✅ VERIFIED HERE 2026-08-06 — the resolution half, in a REAL BROWSER against the BUILT output** (`ui-audit/verify-county-geometry.mjs`, logged out, no external GIS needed). Recorded so the live pass only has to cover what a sandbox genuinely cannot reach:
+- the built app **REQUESTS** `geo/county-polygons.json` and it returns **200** — this is the B1120 check (a feature that merges green and does nothing because nobody wired the call site). **Mutation-proven:** deleting the `loadCountyPolygons()` call from `MapFinder`, rebuilding and re-running turns this check red.
+- the asset serves **318 counties** (254 TX + 64 CO), format `county-polygons/1`.
+- **all six audit sites resolve correctly** through the served bytes — Chambers · Harris · Fort Bend · Montgomery · Brazoria · Galveston.
+- **Pearland resolves to Brazoria, FIPS 48039** — not Harris. That is the original defect, gone.
+- **Walker and Wharton (no configured CAD) are NAMED correctly**, not swapped for a neighbour.
+- Independently: **114/114** agreement with the live Texas county layer on random Houston-metro points, and **107/108** on points deliberately sampled 300–800 m off a county line (the single miss self-reported `nearEdge`).
+**STILL PENDING (needs the signed-in app + real CAD traffic):** (b) the HCFCD data no longer offered at Pearland, (c) a click selecting a real parcel in the five new counties, (e) no regression in the old four.
+
+### V17705 — B209504 (the layers reported dead are alive; confirm in the running app). ⏳ **LIVE APP (planyr.io)** `Blocker: live-GIS` `Blocker: real-data`
+Every claim in the report was measured against the live services from this build and recorded on B209504. Two things need the running app rather than a raw endpoint. On **planyr.io**, with a real parcel drawn, confirm —
+**(a) THE PROXIMITY LAYERS REPORT REAL FACTS.** At the six audit sites confirm the Site Analysis rows for substations, airports, rail and EPA cleanups each show either a real nearest-distance or an explicit "none within N miles" — and that "none within a mile" reads as the honest statement it is, not as an error. (Measured here: substations answer at five of six sites within their 3-mile buffer, airports at all six, rail at three of six within a half mile.)
+**(b) femaEbfe ANSWERS THROUGH THE APP'S OWN PROXY.** Its host is blocked from the build sandbox, so this is the one claim that could not be re-confirmed here. On a Waller-area site confirm the estimated-BFE row returns a value (B882 recorded 154.8 ft at Tsakiris) rather than an error — and that a Houston site correctly shows NO estimate, because InFRM deliberately publishes nothing over studied areas.
+**(c) WETLANDS DRAW AND IDENTIFY.** Toggle the wetlands layer at Cedar Port and Texas City and confirm polygons paint and hover-identify. If they ever go blank everywhere, the first thing to check is that `layerId` is still `[1, 2]` and has not been "simplified" to `0` — sublayer 0 returns zero nationwide.
+
+### V17706 — B209505 (the twelve rows whose fixture reach could not be widened from the build sandbox). ⏳ **ANY UNBLOCKED NETWORK** `Blocker: live-GIS`
+`femaEbfe`, `hcfcdMaapnext` and the ten BKDD rows sit on three hosts this build's egress policy blocks outright (`txgeo.usgs.gov`, `fximgservices.hcfcd.org`, `gisclient.quiddity.com` — every request returns "Host not in allowlist"). Their reach requirement is DEFERRED and recorded in `SOURCE_FIXTURE_REACH_PENDING`, not dropped. From a network that can reach those hosts: run `node scripts/probe-fixture-candidates.mjs femaEbfe bkddStreams bkddBoundary …`, add the fixture points that actually answer, and **delete each row from `SOURCE_FIXTURE_REACH_PENDING` in the same commit** — the list may only ever shrink. `hcfcdMaapnext` is a special case: it is already `availability: "down"` with an outage record, so its fixtures deliberately assert the OUTAGE and it should only be widened once the host returns.
+### V19184 — The cull rect is latched: nothing pops in at the edge of a real fling (B217537)
+`Blocker: real-data` — the change is **zoom- and data-density-dependent rendering** (LIVE-VERIFY), and the sandbox can only fling a 66-element committed fixture at localhost speed. Everything Claude-doable here PASSES and was done rather than deferred: `npm run perf:viewindep` ✅ (mutation-proven red at 186 calls each with the latch disabled) · `test/pureCache.test.js` 24/24, including that the latched rect **always contains the true visible rect** across a sweep, that it re-arms on a zoom and on a far enough pan, and that culling with it keeps everything the un-latched rect would have kept · `test/viewCull.test.js` 21/21 unchanged (an export still sees the complete model) · `test/panAnchor.test.js` retargeted and green. What is left is the thing only a real plan on a real machine can show. On **planyr.io**, signed in, on **Tsakiris / Concept A** and one of the heavier Goose Creek plans:
+- **(a) NOTHING POPS IN AT THE EDGE.** Grab empty canvas and fling the plan hard, several times, in different directions and at both a whole-site zoom and a close working zoom. Buildings, parcels, roads, ponds, markups and measurements must all already be there as they come into view — never appear a beat late at the edge of the screen.
+- **(b) IT IS SMOOTHER, NOT JUST DIFFERENT.** The pan should feel at least as smooth as before and, on a big plan, better. If anything feels heavier, say so — the latch trades a little extra drawn content for a lot less re-deciding, and that trade is settable.
+- **(c) ZOOM STILL REDRAWS EVERYTHING IT SHOULD.** Wheel-zoom in and out through several steps and confirm the plan fills the screen correctly at every step — the latch is supposed to re-arm on every zoom, so a stale window here would show as a band of missing content.
+- **(d) THE SCALE BAR AND NORTH ARROW STILL TRACK THE ZOOM** (they are now keyed on the zoom alone). Confirm the scale bar's number changes as you zoom and holds still as you pan.
+- **(e) THE STANDARDS FOOTER STILL COUNTS RIGHT.** Open the Standards panel, change a value, and confirm the **"Apply to this plan (N)"** number updates — that count is now memoised, so a stuck N is the failure mode to watch for.
+- **(f) ROADS STILL DISSOLVE.** Confirm every junction still reads as one continuous paved surface with no curb line through the intersection, and that dragging a road re-dissolves it live (the road tessellation is now cached on its own control points).
+⏳ **LIVE APP (planyr.io), SIGNED IN, ON A REAL PLAN** `Blocker: real-data`
 
 ### V724 — The post-draw tail, measured where it actually happens: signed in, on his own plan, with live GIS (B1448)
 

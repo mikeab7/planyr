@@ -6,7 +6,24 @@
  * (`deedParseLazy.js`) — it is only ever needed inside the deed workflow, and the site route has
  * no bundle headroom to carry it. Keep that separation: adding a parser import here puts ~5.5 KB
  * of minified deed-reading code back onto the planner's critical path.
+ *
+ * VIEW-INDEPENDENT-ONCE (NEW-2, 2026-08-06) — `offsetPolyline` and `bufferPolyline` are CACHED on
+ * the identity of the polyline they are given. Measured by ui-audit/detect-view-recompute.mjs on a
+ * 60-move pan of the reference plan: 2,256 calls of `offsetPolyline` and 1,128 of `bufferPolyline`
+ * producing twelve and six distinct answers respectively — the same six roads' curb lines and
+ * corridors re-derived on every render because the map moved. The centerlines they are taken of
+ * are now cached themselves (`roadGeometry.roadCenterlineTagged`), so their IDENTITY is stable
+ * across a gesture, which is what makes a `WeakMap` the right key here: free to compute, and it
+ * holds nothing alive.
+ *
+ * ⛔ The precondition is that a caller does not MUTATE a point array in place and expect a fresh
+ * answer — see `pureCache.js`. Every caller in this repo either builds a fresh array or replaces
+ * model arrays wholesale.
  */
+import { identityCache } from "./pureCache.js";
+
+const _offCache = identityCache();
+const _bufCache = identityCache();
 
 /* Offset an OPEN polyline by `dist` feet along its left-hand normal (a NEGATIVE
  * `dist` offsets to the right side). Joins are mitered and the miter is clamped so
@@ -20,6 +37,12 @@
  * exact same corner math (NEW-1 / NEW-3). */
 export function offsetPolyline(pts, dist) {
   if (!pts || pts.length < 2) return null;
+  const hit = _offCache.get(pts, `o${dist}`);
+  if (hit !== undefined) return hit;
+  return _offCache.set(pts, `o${dist}`, offsetPolylineUncached(pts, dist));
+}
+
+function offsetPolylineUncached(pts, dist) {
   const seg = [];
   for (let i = 1; i < pts.length; i++) {
     const dx = pts[i].x - pts[i - 1].x, dy = pts[i].y - pts[i - 1].y;
@@ -50,6 +73,13 @@ export function offsetPolyline(pts, dist) {
  * no geometry rework — just supply the two half-widths (NEW-1 engine note). */
 export function bufferPolyline(pts, w, opts = {}) {
   if (!pts || pts.length < 2) return null;
+  const key = `b${w}|${opts.leftW ?? ""}|${opts.rightW ?? ""}`;
+  const hit = _bufCache.get(pts, key);
+  if (hit !== undefined) return hit;
+  return _bufCache.set(pts, key, bufferPolylineUncached(pts, w, opts));
+}
+
+function bufferPolylineUncached(pts, w, opts = {}) {
   const leftW = opts.leftW != null ? opts.leftW : w / 2;
   const rightW = opts.rightW != null ? opts.rightW : w / 2;
   const left = offsetPolyline(pts, leftW);

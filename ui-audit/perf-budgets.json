@@ -102,7 +102,7 @@
       "note": "Larger than the 3016 KB the owner's 2026-07-28 pass reported, and correctly so: that figure counted the 11 chunks a browser actually FETCHED, while this counts all 20 emitted — the extra 5 are Web Worker bundles (terrainWorker, dxfWorker) and small helper chunks that only a dynamic import ever pulls. Two different questions; the per-route budgets above answer the owner's. CEILING RAISED 3960000 -> 3985000 by B1130/B1131 (2026-07-30), stated in full because raising a ceiling is a product decision. THE KEY POINT: this metric counts EVERY emitted chunk, lazy ones included, BY DESIGN — that is exactly what makes it the honest catch-all. So the four deferrals that paid the two per-route budgets (see siteRouteJsBytes.note) move bytes OFF the critical path without reducing this number at all, and no amount of further code-splitting can. The residual is ~19 KB of genuine minified code implementing two owner-reported defects on the Electric layer: substations painting as broken-image glyphs labelled \"Mark\", and no way to hover a line or substation to learn what it is. WHAT WAS PAID ELSEWHERE FIRST, so this is not a shortcut: largestChunkBytes was brought back UNDER its existing ceiling with no raise at all (1719.5 -> 1706.8 KB), and siteRouteJsBytes was cut from +20.2 KB to +7.4 KB before its ceiling moved. HEADROOM CONTEXT: main was at 3861.4 KB against the 3867.2 KB ceiling — 5.8 KB — so like the other two, this metric now trips on essentially any feature; that is a headroom problem to be closed by B1064, not a regression in this PR. Ceiling and target are kept EQUAL here, as they were before, so this metric continues to assert no known gap rather than quietly acquiring one. NEW-1 (2026-07-30): baseline and target are still kept EQUAL for exactly that reason, and the derived headroom band now applies to this metric too — it was 4.3 KB (0.11%) under its old hand-pinned ceiling and would have been the next surprise."
     },
     "largestChunkBytes": {
-      "baseline": 1476228,
+      "baseline": 1508765,
       "target": 900000,
       "unit": "bytes",
       "what": "The single biggest chunk (today SitePlannerApp).",
@@ -294,6 +294,15 @@
           "item": "B1420",
           "date": "2026-08-06",
           "reason": "B1420 collapsed the Notes hierarchy from four levels to two (a new page-tree model, a one-way migration off the notebook/section shape, Dashboard project grouping, drag-to-nest) and B1393 x2 added Word-style Click and Type. That is +31.8 KB of REAL, attributable feature weight on the Notes route, and it merged in #917 without recording it - this ratchet is that debt being stated rather than absorbed. Paid back first, not instead: the Click-and-Type constants and the paragraph-step measurement were hoisted to module scope (they closed over nothing and were rebuilt every render). The remainder is the feature. Not a blanket raise: siteRouteJsBytes, totalJsBytes and largestChunkBytes are all left UNratcheted and still name B1064 as the owner of paying them back."
+        },
+        {
+          "metric": "bundle.largestChunkBytes",
+          "from": 1476228,
+          "to": 1508765,
+          "direction": "raise",
+          "item": "B209502",
+          "date": "2026-08-06",
+          "reason": "B209502 county-by-geometry: +4.1 KB attributable (1.1 KB gate + 3.0 KB of irreducible registry data for the five new Houston-metro counties). The engine is ALREADY lazy (countyPolygonsCore.js) and the 238 KB geometry is a public/ asset charged to nothing, so the fat is gone. The band was consumed by main, not this branch: the base ref alone sits at +27.7 KB of the 32 KB band, leaving 4.3 KB for a correctness fix that stops the app naming the wrong county (which selects drainage authority, detention criteria, setbacks and review path). Paydown stays owned by B1064."
         }
       ]
     }

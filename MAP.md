@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-08-06 @ `65891ab` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-08-07 @ `0793d38` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_435 source files mapped._
+_442 source files mapped._
 
 ## infra
 
@@ -124,6 +124,8 @@ _435 source files mapped._
   - _exports_: `colProfile`, `fitMatchLine`, `isolateLinePoints`, `ransacLine`, `rowClose`, `rowOpen`, `slideRefine`
 - **`src/shared/files/matchProject.js`** — Deterministic browser project matcher: searches sheet text for each named project's name/address/parcel/job identifiers, noisy-or scores, confident-single-else-needs-filing decision
   - _exports_: `decide`, `matchProjectInText`, `scoreProjectInText`
+- **`src/shared/files/middleTruncate.js`** — split a label into head + pinned tail so middle-ellipsis keeps the distinguishing end (NEW-4).
+  - _exports_: `middleEllipsis`, `splitLabel`
 - **`src/shared/files/ocrMatchLines.js`** — Recovers "MATCH LINE ... SHEET N" labels from raster scans by OCRing the page at 0/90/270 orientations and mapping found labels back to page space for autoStitch
   - _exports_: `framePointToPage`, `OCR_ORIENTATIONS`, `recoverMatchLines`
 - **`src/shared/files/pdfText.js`** — Lazy pdf.js PDF-to-deed-text reader: pulls the embedded text layer and reflows word-wrapped survey courses onto one logical line each so the metes-and-bounds parser can segment them
@@ -165,7 +167,7 @@ _435 source files mapped._
 - **`src/shared/gis/sourceFixtures.js`** — the GIS registry's coverage fixtures + prose, split OFF the app bundle (assertions and documentation the running app never reads, so they don't ride the Site route)
   - _exports_: `docsFor`, `fixturesFor`, `SOURCE_DOCS`, `SOURCE_FIXTURES`
 - **`src/shared/gis/sources.js`** — Versioned GIS source registry: per-layer service URLs, fields, coverage, production/exception tier, and known-truth fixtures with CI tier/shape audits
-  - _exports_: `ANALYSIS_KEYS`, `auditRegistry`, `availabilityOf`, `availabilityProblems`, `DETENTION_KEYS`, `fixtureCount`, `GIS_SOURCES`, `gisSource`, `JURISDICTION_KEYS`, `looksNonProduction`, `NON_PRODUCTION_URL_PATTERNS`, `outFieldsFor`, `SOURCE_STATE_SCOPE`, `sourceCoversState`, `statesFor`, `tierProblems`, `VALID_AVAILABILITY`, `VALID_TIERS`
+  - _exports_: `ANALYSIS_KEYS`, `auditRegistry`, `availabilityOf`, `availabilityProblems`, `DETENTION_KEYS`, `FIXTURE_REACH_CLASSES`, `fixtureCount`, `fixturePoints`, `fixtureReachClassFor`, `fixtureReachProblems`, `fixtureSpreadKm`, `GIS_SOURCES`, `gisSource`, `haversineKm`, `JURISDICTION_KEYS`, `looksNonProduction`, `NON_PRODUCTION_URL_PATTERNS`, `outFieldsFor`, `SOURCE_FIXTURE_REACH`, `SOURCE_FIXTURE_REACH_PENDING`, `SOURCE_STATE_SCOPE`, `sourceCoversState`, `statesFor`, `tierProblems`, `VALID_AVAILABILITY`, `VALID_TIERS`
 - **`src/shared/ids.js`** — Collision-resistant element-id minter: per-tab random letter salt + seedAbove counter so no two tabs mint a tombstoned id (B591)
   - _exports_: `createIdMinter`, `randomIdSalt`
 - **`src/shared/markup/geometry.js`** — Pure unit-agnostic point math for all markup surfaces: length, shoelace area, arc-midpoint, point-in-poly, clamped centroid, snap45, projToSeg, bbox
@@ -266,6 +268,8 @@ _435 source files mapped._
   - _exports_: `clampToBounds`, `dockAfterRelinquish`, `FLOAT_MIN_WIDTH`, `FLOAT_SIZE`, `initialFloatPos`, `reconcileForNarrow`, `shouldInspectorTakeDock`
 - **`src/shared/ui/FloatingPanel.jsx`** — NEW-1 poppable panels: a left-rail panel detached into a portal-to-body draggable card over the map (drag-clamp, session-remembered position, map pan/zoom isolation); composes PanelChrome
   - _exports_: `default (FloatingPanel)`
+- **`src/shared/ui/MiddleTruncate.jsx`** — CSS middle-ellipsis label: head ellipsizes, tail always drawn, full text on hover (NEW-4).
+  - _exports_: `default (MiddleTruncate)`
 - **`src/shared/ui/moduleAccent.js`** — MODULE_ACCENT: single source of truth for per-workspace accent hexes (Site/Schedule/Review/Library) as pure React-free constants
   - _exports_: `MODULE_ACCENT`
 - **`src/shared/ui/ModuleLoader.jsx`** — Per-module assembling skeleton loader: Site parcel-draws itself, Gantt bars/milestones/playhead animate; 250ms show-delay, reduced-motion fallback
@@ -406,9 +410,13 @@ _435 source files mapped._
 - **`src/workspaces/site-planner/lib/costTakeoff.js`** — Priced road takeoff: FC-FC asphalt paving (SY, pan-trimmed) + both-side curb (LF by type) rolled up at user unit prices
   - _exports_: `costRollup`, `CURB_TYPE_META`, `CURB_TYPES`, `DEFAULT_PAN_WIDTH`, `roadCurbedSides`, `roadCurbType`, `roadPanWidth`, `roadQuantities`, `SF_PER_SY`
 - **`src/workspaces/site-planner/lib/counties.js`** — County parcel/GIS registry: CAD endpoints, TxGIO statewide fallback, jurisdiction utility layers, click-routing bboxes, tax-unit resolver
-  - _exports_: `candidateCountiesForPoint`, `COUNTIES`, `COUNTIES_MAP`, `countyForView`, `countyKeyForName`, `countyKeysForState`, `detectField`, `FEET_WKID`, `isStatewideLayerUrl`, `JURISDICTION_LAYERS`, `resolveTaxRates`, `sharedLayerUrlConflicts`, `SNAPSHOT_COUNTIES`, `stateForCountyKey`, `STATEWIDE_KEYS`, `STATEWIDE_LAYER_URLS`, `STATEWIDE_PARCEL_LAYER`, `statewideFallbackFor`, `TAX_RATE_SOURCES`, `trimLayerUrl`
+  - _exports_: `candidateCountiesForPoint`, `COUNTIES`, `COUNTIES_MAP`, `countyForView`, `countyIdentity`, `countyKeyForName`, `countyKeysForState`, `countyPolygonsReady`, `detectField`, `FEET_WKID`, `isStatewideLayerUrl`, `JURISDICTION_LAYERS`, `loadCountyPolygons`, `noParcelSourceNote`, `resolveTaxRates`, `sharedLayerUrlConflicts`, `SNAPSHOT_COUNTIES`, `stateForCountyKey`, `STATEWIDE_KEYS`, `STATEWIDE_LAYER_URLS`, `STATEWIDE_PARCEL_LAYER`, `statewideFallbackFor`, `TAX_RATE_SOURCES`, `trimLayerUrl`
 - **`src/workspaces/site-planner/lib/countiesProvenance.js`** — NEW-5 build-time endpoint verification record for every county parcel source (probe dates, parked candidate URLs, provenance) — read by the GIS source audit, NEVER by the browser, which is why it is split out of counties.js: its prose has no business on the Site route's bundle
   - _exports_: `candidateUrlFor`, `COUNTY_VERIFICATION`, `provenanceFor`, `verifiedOnFor`
+- **`src/workspaces/site-planner/lib/countyPolygons.js`** — B209502 point-in-polygon county resolution: decoder + ray-cast test over the committed `public/geo/county-polygons.json` asset, so a bounding box can narrow the candidates but never decide which county a point is in
+  - _exports_: `__resetCountyPolygons`, `countyPolygonsReady`, `loadCountyPolygons`, `resolveCounty`, `setCountyPolygons`
+- **`src/workspaces/site-planner/lib/countyPolygonsCore.js`** — B209502 the county resolver's working half (delta decode, ray-cast containment, edge distance), split off the boot path and dynamic-imported by `countyPolygons.js` so the Site route's largest chunk isn't charged for it
+  - _exports_: `buildIndex`, `decodeRing`, `distToRings`, `NEAR_EDGE_DEG`, `pointInRing`, `resolveIn`
 - **`src/workspaces/site-planner/lib/coverage.js`** — Picker-only layer coverage engine: reproject regional service extents vs viewport to flag in-view/empty/out-of-coverage plus relevance prefs
   - _exports_: `_resetCoverageCache`, `_resetRelevancePrefs`, `boundsFromLeaflet`, `boundsIntersect`, `bufferBounds`, `computeCoverage`, `COVERAGE_STATE`, `DEFAULT_RADIUS_MI`, `DEFAULT_RELEVANCE`, `displayCoverage`, `esriExtentToBounds`, `getCachedExtent`, `getNearbyRadiusMiles`, `getRelevanceMode`, `isRegional`, `LAYER_SCOPE`, `layerScope`, `normalizeMode`, `normalizeRadius`, `prefetchExtents`, `regionCoverage`, `RELEVANCE_MODES`, `setLayerExtent`, `setNearbyRadiusMiles`, `setRelevanceMode`, `srPointToLatLon`, `subscribeRelevance`
 - **`src/workspaces/site-planner/lib/curveNumber.js`** — SCS/NRCS Curve-Number runoff method (NEW-B1): composite CN from hydrologic soil group + impervious %, runoff depth/volume from an Atlas-14 rainfall depth, post-minus-pre increase. Pure TR-55.
@@ -538,7 +546,7 @@ _435 source files mapped._
 - **`src/workspaces/site-planner/lib/inwardBerm.js`** — v3 D1/D5 INWARD berm geometry (outer-toe model): the drawn polygon is the FIXED outer toe; a rim above grade builds the berm INWARD (crest = toe inset by extSlope·h), shrinking the water surface with diminishing returns up to a geometric ceiling where the footprint pinches closed. Also the COMPUTED berm cap (drainage cap vs geometric ceiling, D5). Pure — feeds pondGeom the crest ring; no storage math of its own.
   - _exports_: `bermNeedsInlets`, `bermPinched`, `bermRingAreaSf`, `bermWaterAreaSf`, `bindingBermCap`, `crestRingForBerm`, `crestTopRing`, `drainageBermCapFt`, `EXT_BERM_SLOPE`, `geometricMaxBermFt`, `INFLOW_HEAD_ALLOWANCE_FT`, `INLETS_THROUGH_BERM_NOTE`, `inwardBermSplit`
 - **`src/workspaces/site-planner/lib/jurisdiction.js`** — Registry-driven ArcGIS jurisdiction/road-authority identify (city/ETJ/county intersect + nearest-road maintainer) over the SWR cache with map-overlay styling
-  - _exports_: `buildIdentifyParams`, `countyAtPoint`, `countySourcesForPoint`, `ETJ_SOURCES`, `etjSourcesForPoint`, `formatHighway`, `formatJurisdictionBadge`, `identifyJurisdiction`, `identifyRoadAuthority`, `identifySource`, `JURISDICTION_SOURCES`, `normalizeFeature`, `polylineDistMeters`, `polylineLengthMeters`, `proxiedQueryUrl`, `ROAD_AUTHORITY_COLORS`, `ROAD_AUTHORITY_LEGEND`, `ROAD_MAINT_AGENCY`, `roadAuthority`, `roadAuthorityStyle`, `roadDisplayName`, `simplifyRing`
+  - _exports_: `buildIdentifyParams`, `countyAtPoint`, `countySourcesForPoint`, `ETJ_SOURCES`, `etjSourcesForPoint`, `formatHighway`, `formatJurisdictionBadge`, `identifyJurisdiction`, `identifyRoadAuthority`, `identifySource`, `JURISDICTION_SOURCES`, `normalizeFeature`, `placeKey`, `polylineDistMeters`, `polylineLengthMeters`, `proxiedQueryUrl`, `ROAD_AUTHORITY_COLORS`, `ROAD_AUTHORITY_LEGEND`, `ROAD_MAINT_AGENCY`, `roadAuthority`, `roadAuthorityStyle`, `roadDisplayName`, `samePlace`, `simplifyRing`
 - **`src/workspaces/site-planner/lib/kmzExport.js`** — Google Earth (.kmz) export (B684): pure, dependency-free CRC32 + hand-rolled STORE-only ZIP writer, KML builder (lon,lat order, ring closure/holes, per-layer styles, building extrude), and the site→layer feature mapping; reprojection is injected (the shared feetToLatLng), so it never drifts from the map render.
   - _exports_: `buildKml`, `buildKmz`, `crc32`, `elToRingFeet`, `KMZ_MIME`, `kmzFilename`, `siteToFeatures`, `xmlEscape`, `zipStore`
 - **`src/workspaces/site-planner/lib/labelFitLadder.js`** — NEW-1/NEW-2 the ONE ordered fit/fallback ladder for a map label that must sit inside a shape (inline → stacked → abbrev → outside-with-leader) plus the polygon INTERIOR measurer (largest inscribed rectangles, so fit is judged against real room, not a bounding box). Terminates in `outside`, never in a hide — a fit failure may relocate or shorten a label, never blank it.
@@ -663,7 +671,7 @@ _435 source files mapped._
   - _exports_: `addedAreaLabelPoint`, `autoContourInterval`, `bandedStorage`, `bermAsFillHeight`, `bermFillCells`, `bermFillVolume`, `contourLabelPoint`, `detentionLandTakeEstimate`, `detentionStorage`, `drawdownWarning`, `estimateFootprintSf`, `excavationVolume`, `incrementalExcavationCf`, `pointInRing`, `pondContours`, `pondPlacementCandidates`, `usablePondVolume`, `volumeBetween`
 - **`src/workspaces/site-planner/lib/pondInspectorCopy.js`** — FINAL UI SPEC Part A pond-inspector visible copy as pure data (chip vocabulary A3, collapsed-group titles/summaries, at-a-glance labels, purpose tooltips) so the chip set and word budget unit-test without a browser
   - _exports_: `POND_CHIP_DEFS`, `POND_DIMENSION_LABELS`, `POND_FLOOD_NOTES`, `POND_GROUPS`, `POND_PURPOSE_DESCRIPTOR`, `POND_PURPOSE_TOOLTIP`, `pondGroupSummary`, `pondInspectorChips`
-- **`src/workspaces/site-planner/lib/pondLabelText.js`** — the pond MAP label's area text: acreage only, no "footprint" prefix and no square footage (NEW-1, owner). `pondAreaLabelLine`, `pondAreaDeltaLine`.
+- **`src/workspaces/site-planner/lib/pondLabelText.js`** — the pond MAP label's area line, as one pure builder (`pondAreaLabelLine`) so canvas and print sheet cannot drift and the owner's wording rule can be asserted rather than grepped; deliberately overrules PR-Q/O4's "no bare acreage" for this one line.
   - _exports_: `pondAreaDeltaLine`, `pondAreaLabelLine`
 - **`src/workspaces/site-planner/lib/pondLedger.js`** — Site-level pond-ledger accumulator + pond roles: folds per-pond usable/dead splits into the detention totals (unknown facts poison usable to null — never gross-as-usable) and gates which ponds' below-WSE cut credits the mitigation Provided ledger. Exports `accumulatePondLedger`, `suggestPondRole`, `effectivePondRole`, `POND_ROLES`.
   - _exports_: `accumulatePondLedger`, `allocatePondDuty`, `effectivePondRole`, `mitigationCredit`, `POND_DISPLAY_NAME`, `POND_ROLE_LABEL`, `POND_ROLES`, `pondDisplayName`, `pondDisplayNameFor`, `ROLE_SHARE`, `suggestPondRole`
@@ -703,6 +711,8 @@ _435 source files mapped._
   - _exports_: `classifyVerified`, `classifyWseSource`, `SOURCE_TAG_COLOR_VAR`, `SOURCE_TAG_ORDER`, `SOURCE_TAGS`, `sourceTag`
 - **`src/workspaces/site-planner/lib/proximityScreen.js`** — Pure proximity-screen core (PHASE 2, reused by later distance screens): projects parcel rings + feature points to EPSG:2278 feet and returns count + nearest-distance + ranked names within a buffer (0 ft = on/under the site), plus the `fmtDistFt` display helper
   - _exports_: `distPathToRingsFt`, `distPointSegFt`, `distPointToRingsFt`, `distSegSegFt`, `featureDistFt`, `fmtDistFt`, `pointInRingFt`, `ringToGridFt`, `screenProximity`, `segmentsIntersectFt`, `toGrid`
+- **`src/workspaces/site-planner/lib/pureCache.js`** — the two pure caches behind VIEW-INDEPENDENT-ONCE: a bounded string-signature cache, a WeakMap identity cache, and a point-list signature builder
+  - _exports_: `boundedCache`, `identityCache`, `pointsSignature`
 - **`src/workspaces/site-planner/lib/rasterIdentify.js`** — pure ArcGIS `/identify` decision layer for the RASTER-painted layers: capability gate, request shaping, result→readout, and the debounced/cancelling hover controller with an honest state for every outcome.
   - _exports_: `createHoverIdentify`, `errorMessage`, `floodReadout`, `gapMessage`, `HOVER_IDENTIFY_DEBOUNCE_MS`, `IDENTIFY_ROW_SPECS`, `IDENTIFY_STATE`, `IDENTIFY_TIMEOUT_MS`, `IDENTIFY_TOLERANCE_PX`, `identifyCapable`, `identifyLayersParam`, `identifyRequest`, `readoutFromResult`, `readoutsFromJson`, `stateMessage`
 - **`src/workspaces/site-planner/lib/rasterIdentifyLazy.js`** — the one on-demand loader for the raster identify chunk: a synchronous-returning `attachRasterIdentifyLazy` for the map finder plus a `makeHoverIdentify`/`rasterIdentifyNow` pair for the planner's per-move path.
@@ -796,7 +806,7 @@ _435 source files mapped._
 - **`src/workspaces/site-planner/lib/vectorOverlay.js`** — Leaflet glue over the vector cache tier: cachedVectorLayer paints last-good boundaries instantly, background-refreshes, hover/click identify (identifyOk-gated), zoom-gated divIcon name labels, live esri-leaflet fallback
   - _exports_: `appendIdentifyRows`, `cachedCorridorLayer`, `cachedPipelineLayer`, `cachedVectorLayer`, `decodeFieldValue`, `identifyHref`, `identifyRowsFor`, `identifyTitle`, `isPointFeature`
 - **`src/workspaces/site-planner/lib/viewCull.js`** — Viewport culling for the feet-frame SVG (screen only — the export always renders the complete model)
-  - _exports_: `boundsIntersect`, `CULL_MARGIN`, `CULL_MIN_ELEMENTS`, `cullToView`, `elementBounds`, `shouldCull`, `visibleWorldRect`
+  - _exports_: `boundsIntersect`, `CULL_MARGIN`, `CULL_MIN_ELEMENTS`, `CULL_REARM`, `cullRectFor`, `cullToView`, `elementBounds`, `sameRect`, `shouldCull`, `visibleWorldRect`
 - **`src/workspaces/site-planner/lib/wellStatus.js`** — Pure RRC well status classifier (PHASE 4): SYMNUM/description → producing/plugged/dry/abandoned/injection, and `summarizeWells` turns a proximity result into a status breakdown + an on-site offset/replug risk flag
   - _exports_: `classifyWell`, `summarizeWells`
 - **`src/workspaces/site-planner/lib/wseProviders.js`** — the pluggable estimated-WSE provider registry (B882, pure): per-county precedence (district model → FEMA InFRM EBFE → grade) + provenance labels; `resolveEstimatedWse` picks the winning 1%/0.2% source and reports cross-provider disagreement.
@@ -877,6 +887,8 @@ _435 source files mapped._
   - _exports_: `BUCKET`, `buildDriveKey`, `clearDraft`, `clearReviewVersions`, `cloudConfigured`, `cloudReady`, `composeTitle`, `currentUid`, `deleteFromDrive`, `deleteReview`, `DISCIPLINES`, `downloadFromDrive`, `downloadSource`, `driveStreamSource`, `fetchFileFacts`, `fetchProjects`, `fetchReviews`, `fileNewReview`, `fmtDocDate`, `getShareLink`, `guessContentType`, `isStoredSource`, `keepaliveFlushReview`, `listDeletedReviews`, `listFileFacts`, `listProjects`, `listReviews`, `loadReview`, `markReviewPlaced`, `MAX_BYTES`, `newReviewId`, `newSourceId`, `purgeExpiredDeleted`, `purgeReview`, `pushFileToDrive`, `readDraft`, `reconcile`, `refileReview`, `restoreReview`, `REVIEW_SCHEMA`, `reviewRowFor`, `setProjectStatus`, `shouldDeleteBytes`, `STATUS_META`, `STATUSES`, `statusOf`, `storeSource`, `stripFileExt`, `upsertFileFacts`, `upsertReview`, `writeDraft`
 - **`src/workspaces/doc-review/lib/sessionBytes.js`** — In-memory session-lifetime FIFO cache of dropped source Files by srcId so a backdrop reopens while its upload is still keyless
   - _exports_: `_clearSessionBytes`, `cacheSourceBytes`, `getSourceBytes`, `hasSourceBytes`, `SESSION_BYTES_CAP`
+- **`src/workspaces/doc-review/lib/sheetOpenState.js`** — the Review "Opening <sheet>…" chip's three-way decision: opening / failed / backstop-expired (NEW-6).
+  - _exports_: `OPEN_CHIP_TIMEOUT_MS`, `sheetOpenState`
 - **`src/workspaces/doc-review/lib/sheetRead.js`** — Browser bridge from pdf.js to pure sheet engines: reads/groups pages, derives per-group stated/scale-bar calibration, flags not-to-scale sheets, with dormant OCR seam
   - _exports_: `groupCalibration`, `isNotToScale`, `readAndGroup`, `readSheets`, `SCALE_BAR_MIN_CONFIDENCE`, `scaleBarCalibration`, `statedCalibration`
 - **`src/workspaces/doc-review/lib/sourceState.js`** — Single owner of source-unavailable taxonomy (too-large/oversize/not-stored/signed-out/fetch-failed) plus the banner and file-warn copy each state maps to
@@ -885,6 +897,8 @@ _435 source files mapped._
   - _exports_: `dedupePlaced`, `isPlaced`, `placedKey`
 - **`src/workspaces/doc-review/lib/stitchGeom.js`** — Pure stitch geometry: similarity fwd/inv/solveM, sheet bbox, degenerate-align guards, reference-set + not-aligned-badge classifiers, and captured-origin pan
   - _exports_: `alignBadgeMetrics`, `alignBaselinesDegenerate`, `fwd`, `inv`, `isReferenceSet`, `measureOverUnaligned`, `MIN_ALIGN_BASE`, `panTo`, `sheetBBox`, `sheetContains`, `solveM`
+- **`src/workspaces/doc-review/lib/stitchLoadState.js`** — honest stitcher load status line + the deferred-add queue for clicks made during a load (NEW-1/NEW-2).
+  - _exports_: `deferredAddNotice`, `isLoading`, `loadStatusLine`, `mergeAddQueue`, `PHASE`, `queueKey`
 - **`src/workspaces/doc-review/lib/takeoff.js`** — Re-export shim forwarding measure/geometry/markup-model symbols to the shared markup engine so legacy doc-review import paths still resolve
   - _exports_: `canCommitMeasure`, `centroidOf`, `dist`, `measureLabel`, `measureValue`, `midOfPath`, `MIN_MEASURE_PTS`, `pathLength`, `pointInPoly`, `polyArea`, `rollup`, `sanitizeMarkup`, `sanitizeMarkups`
 - **`src/workspaces/doc-review/lib/usePersistence.js`** — useReviewPersistence hook: first-edit debounced cloud save + synchronous localStorage mirror, honest save badge, conflict/read-only lockout, unload flush

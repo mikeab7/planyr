@@ -5,7 +5,37 @@
 > step; tick/remove it once he's done it. This is the **owner's** plate only. Browser click-throughs and
 > signed-in spot-checks are the Claude cohort's job (`VERIFICATION.md`), **never** Michael's — do NOT list those here.
 
-_Last updated: 2026-08-06._
+_Last updated: 2026-08-07._
+
+## ✅ CLOSED — both jurisdiction fixes are LIVE, nothing on your end (B209502–B209509)
+
+> **Both of the things you sent today were the same underlying mistake: the app deciding which
+> authority governs a site by what's NEARBY rather than by what the site is actually INSIDE — and then
+> stating it with confidence.**
+>
+> **The county half.** Pearland is in Brazoria; the app called it Harris — and then showed you Harris
+> County flood-control data as if that backed it up. It did the same at Sugar Land, Conroe and Texas
+> City. That matters because the county is what picks your drainage authority, your detention rules,
+> your setbacks and who reviews the plans. It now works out the county from the real county SHAPE
+> instead of a rectangle drawn around it, so all six of the places you sent come out right. I also
+> added the five missing Houston-area counties — Montgomery, Brazoria, Galveston, Liberty and Austin —
+> so a click there now finds a real property.
+>
+> **The Katy half, on Bain.** The header said "City of Katy". Katy only clips the very edge of that
+> parcel; the site itself sits in no city at all, and the authority that actually reaches it is
+> Houston's extraterritorial area. The header now leads with what governs and mentions a bare touch as
+> a footnote. This one wasn't only a label: because Houston was missing from the picture, the finished
+> floor was being set off the county's easier rule and printed as settled. Where that answer isn't
+> complete, the panel now says so instead of stating a floor height — which at Bain was worth a foot or
+> two of finished floor on a two-pond site.
+>
+> **Nothing on your end — this went live late on 2026-08-06.** Every check passed, and I drove both
+> fixes in a real browser against the live county and city services before it merged.
+> → merged as https://github.com/mikeab7/planyr/pull/928
+>
+> *(For the record, since an earlier version of this note asked you to merge it by hand: GitHub's own
+> build service was down for most of that afternoon, so the tick that has to go green before anything
+> can merge simply never appeared. It came back that evening and this merged on its own.)*
 
 ## 📄 The one thing I need from you: paste a short line into your browser (B209568 / B209569)
 
@@ -77,7 +107,37 @@ _Last updated: 2026-08-06._
 > that I already set this line once this week, and moving it right after it gave me an answer I didn't like is
 > exactly the move I shouldn't make on my own.
 
-## 🔍 One sentence to answer, and it unblocks the smooth-zoom work (B1449)
+## ✅ ANSWERED — nothing more from you on smooth zoom (was: B1449)
+
+> You said: *"i think smooth zoom makes sense, unless theres something im not considering."* That's the call, it's
+> taken, and the question below is closed — I've left it in place only so the reasoning is on the record.
+>
+> **Where it stands: not built yet, and I want to be straight about why.** It isn't waiting on you any more, and it
+> isn't a small job. Making the zoom smooth means the drawing briefly holds its old size while a single stretch is
+> applied on top — and *everything* on the canvas that decides how big to be (line thicknesses, text, the rules about
+> what detail shows at what zoom) has to be told to use the held size rather than the live one. Miss one and the
+> drawing looks wrong for the split second your wheel is moving — doubled-up text, wrong line weights. The awkward
+> part is that **none of my existing checks can see that**, because at rest the two sizes are the same number, so
+> everything passes whether it's right or wrong. So the first piece of work is a check that can watch a frame while
+> the wheel is still turning — and only then the change itself. That's the next session on this, and when it's done
+> you'll get the before-and-after recording of the same wheel spin you asked for, plus a switch to turn it off.
+
+## 🐟 One export that would let me measure the Bain slowdown properly (B221760 / V23408)
+
+> **Why I'm asking.** You said the Bain site got fast and then a detention pond made it slow again. I built a probe
+> that adds a pond and measures the exact same drag before and after, and I found a real cost — the pond's name label
+> was re-solving where it fits inside the basin on *every single frame* of a drag, which I've now fixed (it's about
+> twice as cheap per pond). But on the plan I have to test with, one pond isn't enough to feel: I had to put sixteen
+> ponds on it before the cost was bigger than the measurement noise.
+>
+> **The gap is that I don't have your Bain plan.** There's no copy of it in the code — only a few of its pond
+> outlines, saved for a different test years ago. Everything I measured is a floor, not a match.
+>
+> **What would close it:** open Bain / Concept A while signed in and send me a full export of the plan. I need the
+> whole thing — the buildings, the property lines, the settings and where it sits on the map — not just the shapes.
+> One file, one time, and then I can measure the site you're actually complaining about instead of a stand-in.
+
+## 🔍 (CLOSED — see above) One sentence to answer, and it unblocks the smooth-zoom work (B1449)
 
 > **The background in two lines.** Dragging the plan around is already fixed — it went from redrawing the whole
 > drawing on every twitch to just sliding what's already there, and it got about forty-six times cheaper. The same
