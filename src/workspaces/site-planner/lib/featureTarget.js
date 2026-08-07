@@ -90,15 +90,27 @@ export function resolveDoubleClickTarget(entries) {
  *
  * Kept here beside the pure half so the attribute names live in ONE place — a render that renames
  * `data-feature` breaks a unit test rather than silently returning "nothing was double-clicked".
- * Takes the node list so the caller owns the `elementsFromPoint` call (and its null-guarding). */
+ * Takes the node list so the caller owns the `elementsFromPoint` call (and its null-guarding).
+ *
+ * ONE flattener, carrying every flag either consumer reads. There were two — this one and an
+ * `elementStackEntries` that differed only by also stamping `dim` — which meant the attribute
+ * names and the null-guarding were written twice and the caller had to pick the right one by
+ * passing a function. `resolveDoubleClickTarget` simply ignores `dim`, so the extra `closest` per
+ * hit node (a handful of nodes, once per double-click) buys back a duplicated body and a
+ * parameter that existed only to choose between two shapes of the same thing. */
 export const FEATURE_ATTR = "data-feature";
 export const HANDLE_ATTR = "data-handle-layer";
+export const EL_DIM_ATTR = "data-el-dim";
 export function stackEntries(nodes) {
   const out = [];
   for (const n of nodes || []) {
     if (!n || typeof n.closest !== "function") continue;
     const fg = n.closest(`[${FEATURE_ATTR}]`);
-    out.push({ feature: fg ? fg.getAttribute(FEATURE_ATTR) : null, handle: !!n.closest(`[${HANDLE_ATTR}]`) });
+    out.push({
+      feature: fg ? fg.getAttribute(FEATURE_ATTR) : null,
+      handle: !!n.closest(`[${HANDLE_ATTR}]`),
+      dim: !!n.closest(`[${EL_DIM_ATTR}]`),
+    });
   }
   return out;
 }
@@ -133,18 +145,3 @@ export function pressIsOverElementBody(entries, id) {
   return false;
 }
 
-export const EL_DIM_ATTR = "data-el-dim";
-/* The `pressIsOverElementBody` flattener — same shape as `stackEntries`, plus the dim flag. */
-export function elementStackEntries(nodes) {
-  const out = [];
-  for (const n of nodes || []) {
-    if (!n || typeof n.closest !== "function") continue;
-    const fg = n.closest(`[${FEATURE_ATTR}]`);
-    out.push({
-      feature: fg ? fg.getAttribute(FEATURE_ATTR) : null,
-      handle: !!n.closest(`[${HANDLE_ATTR}]`),
-      dim: !!n.closest(`[${EL_DIM_ATTR}]`),
-    });
-  }
-  return out;
-}

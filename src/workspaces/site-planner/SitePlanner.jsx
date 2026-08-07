@@ -31,7 +31,7 @@ import { measuresUnderPoint, nextMeasureSelection } from "./lib/measureHit.js";
 import { nearestBoundaryEdge, constrainToEdgeAngle, edgeLockTolFt } from "./lib/edgeConstrain.js";
 import { markupsUnderPoint, nextMarkupSelection, boxCorners } from "./lib/markupPick.js";
 import { EMPTY_TAP, tapTime, stepDoubleTap } from "./lib/doubleTap.js";
-import { resolveDoubleClickTarget, stackEntries, elementStackEntries, pressIsOverElementBody } from "./lib/featureTarget.js";
+import { resolveDoubleClickTarget, stackEntries, pressIsOverElementBody } from "./lib/featureTarget.js";
 import { parkDepthForRows, parkRowsForDepth, explodeParkingBands, edgeAbutsPaving } from "./lib/parking.js";
 import { loadAndDownscaleImage } from "./lib/image.js";
 import { openOverlayFile, rasterizePage, rasterizePageHiRes, isPdfFile, isDxfFile, rasterizeStoredPdf, rasterizeStoredDxf, baseRasterScale, chooseOverlayRasterScale } from "./lib/overlayPdf.js";
@@ -7320,9 +7320,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
    * lib/featureTarget.js reasons over. `elementsFromPoint` is the browser's OWN hit-test — the same
    * one that picked the press targets — so a feature can never be resolved differently here than it
    * was pressed. Guarded for a non-DOM environment; an empty stack simply resolves to nothing. */
-  const hitStackAt = (x, y, flatten = stackEntries) => {
+  const hitStackAt = (x, y) => {
     if (typeof document === "undefined" || typeof document.elementsFromPoint !== "function") return [];
-    try { return flatten(document.elementsFromPoint(x, y)); } catch (_) { return []; }
+    try { return stackEntries(document.elementsFromPoint(x, y)); } catch (_) { return []; }
   };
   /* ⛔ NEW-2 — THE CANVAS ROOT IS WHERE A DOUBLE-CLICK IS RESOLVED, because it is the only node the
      event reliably reaches. A click's target is the common ancestor of its down and up targets, and
@@ -15344,7 +15344,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
        where the number is genuinely the only thing there — a road's dimension drags FREELY, so a
        number parked out in clear space still edits the width in place. */
     if (!el.locked && isDoubleTap(e, id, wasSel)) {
-      if (pressIsOverElementBody(hitStackAt(e.clientX, e.clientY, elementStackEntries), id)) featureDoubleAction({ kind: "el", id }, e);
+      if (pressIsOverElementBody(hitStackAt(e.clientX, e.clientY), id)) featureDoubleAction({ kind: "el", id }, e);
       else editElDim(el, e);
     }
   };

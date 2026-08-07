@@ -215,7 +215,7 @@ describe("per-type click wiring (the pond regression, and the types the owner as
    * at the road could not miss it and the inline width chip opened instead of Properties. Fixed once
    * in the SHARED dispatch, not special-cased for road. */
   it("a dimension number over its element's body forwards the double-click to the body", () => {
-    expect(SP).toMatch(/if \(pressIsOverElementBody\(hitStackAt\(e\.clientX, e\.clientY, elementStackEntries\), id\)\) featureDoubleAction\(\{ kind: "el", id \}, e\);\s*\n\s*else editElDim\(el, e\);/);
+    expect(SP).toMatch(/if \(pressIsOverElementBody\(hitStackAt\(e\.clientX, e\.clientY\), id\)\) featureDoubleAction\(\{ kind: "el", id \}, e\);\s*\n\s*else editElDim\(el, e\);/);
     expect(SP, "the dimension chrome must be markable, or the body test cannot look past it").toMatch(/<g key="dim" data-el-dim="1"/);
     expect(SP, "road must not be special-cased in the dispatch").not.toMatch(/el\.type === "road"[^\n]{0,80}editElDim/);
   });

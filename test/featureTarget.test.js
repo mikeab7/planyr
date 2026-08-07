@@ -15,7 +15,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import {
   FEATURE_KINDS, parseFeatureKey, resolveDoubleClickTarget, pressIsOverElementBody,
-  stackEntries, elementStackEntries, FEATURE_ATTR, HANDLE_ATTR, EL_DIM_ATTR,
+  stackEntries, FEATURE_ATTR, HANDLE_ATTR, EL_DIM_ATTR,
 } from "../src/workspaces/site-planner/lib/featureTarget.js";
 
 const feat = (feature, extra = {}) => ({ feature, handle: false, dim: false, ...extra });
@@ -132,15 +132,15 @@ describe("flattening a live DOM stack", () => {
       node([]),
     ];
     expect(stackEntries(stack)).toEqual([
-      { feature: null, handle: true },
-      { feature: "el:e1", handle: false },
-      { feature: null, handle: false },
+      { feature: null, handle: true, dim: false },
+      { feature: "el:e1", handle: false, dim: false },
+      { feature: null, handle: false, dim: false },
     ]);
   });
 
-  it("the element flattener additionally flags the dimension chrome", () => {
+  it("the one flattener also flags the dimension chrome", () => {
     const stack = [node([{ [FEATURE_ATTR]: "el:r1" }, { [EL_DIM_ATTR]: "1" }]), node([{ [FEATURE_ATTR]: "el:r1" }])];
-    expect(elementStackEntries(stack)).toEqual([
+    expect(stackEntries(stack)).toEqual([
       { feature: "el:r1", handle: false, dim: true },
       { feature: "el:r1", handle: false, dim: false },
     ]);
@@ -148,7 +148,7 @@ describe("flattening a live DOM stack", () => {
 
   it("survives a non-element entry in the stack", () => {
     expect(stackEntries([null, {}, undefined])).toEqual([]);
-    expect(elementStackEntries(null)).toEqual([]);
+    expect(stackEntries(null)).toEqual([]);
   });
 });
 

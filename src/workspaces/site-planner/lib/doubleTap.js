@@ -48,7 +48,9 @@ export function tapTime(e, now) {
   const t = e ? e.timeStamp : undefined;
   if (typeof t === "number" && Number.isFinite(t) && t > 0) return t;
   if (typeof now === "number") return now;
-  if (typeof performance !== "undefined" && performance && typeof performance.now === "function") return performance.now();
+  /* `typeof` first — `performance` may be UNDECLARED (not merely undefined) in a bare Node context,
+   * where touching it directly, optional chaining included, is a ReferenceError. */
+  if (typeof performance !== "undefined" && typeof performance?.now === "function") return performance.now();
   return 0;
 }
 
@@ -79,6 +81,6 @@ export function tapRecord(id, t, x, y, wasSel) {
  * `{ double, record }`. The planner writes `record` back to its ref and branches on `double`. */
 export function stepDoubleTap(prev, press, opts) {
   const next = tapRecord(press.id, press.t, press.x, press.y, press.wasSel);
-  if (pairsWithLastTap(prev, next, opts)) return { double: true, record: tapRecord(press.id, press.t, press.x, press.y, true) };
-  return { double: false, record: next };
+  if (!pairsWithLastTap(prev, next, opts)) return { double: false, record: next };
+  return { double: true, record: { ...next, wasSel: true } };
 }
