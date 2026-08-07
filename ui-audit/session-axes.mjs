@@ -66,6 +66,7 @@ import {
   editRecoveryVerdict, planSwitchVerdict, rankAxes, quantisationFloor, pct, viewDrift,
 } from "./lib/sessionAxes.mjs";
 import { fakeTilePng, parseTileUrl } from "./lib/fakeTile.mjs";
+import { waitForSelectorReleased } from "./lib/waitRelease.mjs";
 
 const BASE = (process.env.BASE_URL || "http://localhost:4173/").replace(/\/?$/, "/");
 const EXEC = process.env.PW_CHROME || "/opt/pw-browsers/chromium-1194/chrome-linux/chrome";
@@ -492,7 +493,11 @@ async function nudgeBatch(page, id, half) {
 async function switchPlan(page, groupId) {
   await page.evaluate((g) => { window.location.hash = `#/project/${g}/site`; }, groupId);
   await page.waitForTimeout(2500);
-  await page.waitForSelector('[data-testid="planner-canvas"]', { timeout: 30000 }).catch(() => {});
+  /* B1439 — RELEASE THE HANDLE. `waitForSelector` returns an ElementHandle, which is a strong V8
+   * global handle, and a Blink Node holds its PARENT strongly — so an undisposed handle on the
+   * canvas retained the entire previous plan's shell. Stranded once per switch, this line alone
+   * produced every number in B1439. See ui-audit/lib/waitRelease.mjs. */
+  await waitForSelectorReleased(page, '[data-testid="planner-canvas"]', { timeout: 30000 });
   await page.waitForTimeout(1200);
 }
 
@@ -594,7 +599,7 @@ await cdp.send("HeapProfiler.enable").catch(() => {});
 if (CPU_THROTTLE > 1) await cdp.send("Emulation.setCPUThrottlingRate", { rate: CPU_THROTTLE }).catch(() => {});
 
 await page.goto(BASE, { waitUntil: "load" });
-await page.waitForSelector('[data-testid="planner-canvas"]', { timeout: 60000 });
+await waitForSelectorReleased(page, '[data-testid="planner-canvas"]', { timeout: 60000 });
 await page.waitForTimeout(2500);
 
 const visibility = await page.evaluate(() => document.visibilityState);

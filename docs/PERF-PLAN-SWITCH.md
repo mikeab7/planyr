@@ -1,3 +1,19 @@
+> # ⛔ RESOLVED 2026-08-07 — READ §12–§16 FIRST. EVERYTHING BELOW THIS LINE UNTIL §12 IS SUPERSEDED.
+>
+> **There is no plan-switch leak in the product.** B1439's entire signature — "~2,342 detached
+> nodes, ~391 KB and ~106 listeners per round trip, released never" — was produced by the measuring
+> harness, which called `await page.waitForSelector('[data-testid="planner-canvas"]')` after every
+> route change and never disposed the returned **ElementHandle**. That handle is a strong V8 global
+> handle, and a Blink `Node` holds its PARENT strongly, so one per switch retained the whole previous
+> app shell. Disposing it takes detached nodes to **0** and `rendererNodes` / `jsEventListeners` to
+> identical before-and-after (§12).
+>
+> §1–§11 are kept **as the record of how it was narrowed**, and several of their findings remain
+> true and useful (the detached count is real; the holder analyses in §4a and §6 are sound). But
+> **their conclusions about the product are wrong**, and §3's "every plan the owner has ever opened
+> in a session is still there" is the specific claim to stop quoting. §16 states plainly what this
+> does NOT explain — the owner's lag symptom is once again unexplained.
+
 # B1439, SECOND ATTEMPT — the plan-switch leak is REAL, UNBOUNDED, and half-named
 
 **2026-08-06.** B1439 was filed as *"a reproducible signature with no mechanism"* and deliberately not
@@ -233,3 +249,129 @@ target the census does not cover — every listener census so far has looked at 
 it is React's own listener wrapper, inside the island); any STRONG live JS reference into the island
 (§8 — there are none); and the SVG/panel tree as the entry point (§8 — every crossing is Leaflet,
 so the plan canvas is retained *through* the map container, not alongside it).
+
+---
+
+# B1439, FOURTH ATTEMPT — RESOLVED. The leak was the measuring harness, and the product is clean.
+
+**2026-08-07.** B1439 is **CLOSED**. The mechanism is named, it is proven by making the leak
+conditional, the fix is shipped, and a regression guard with a positive control ships with it.
+
+**⛔ The mechanism is not in the product. It is one ignored return value in the instrument.**
+
+```
+await page.waitForSelector('[data-testid="planner-canvas"]');   // ← the whole of B1439
+```
+
+`waitForSelector` **returns an ElementHandle**, and an ElementHandle is backed by a **strong V8
+global handle in the inspector's own object group**. Playwright does not dispose it for you, and
+ignoring the return value does not dispose it — it only throws away the ability to. In Blink a
+`Node` holds a **strong reference to its PARENT**, so one undisposed handle on the canvas `<svg>`
+pins its entire ancestor chain up to the detached shell root, and the root holds every descendant.
+Every harness in this family called that line once per route change, twice per A→B→A round trip.
+
+That single line accounts for **every number in §1–§8**, quantity included: ~1,171 nodes per switch
+is one previous app shell, ×2 per round trip is §3's 2,342, ×3 cycles is §3's 7,026, and it is
+linear because the handles are stranded one per switch and released only when the browser closes.
+
+## 12. THE PROOF: the leak made conditional on one line of harness code
+
+Two arms, everything else held, differing only in whether the handle is disposed
+(`ui-audit/verify-plan-switch-release.mjs` runs this permanently, as its own positive control):
+
+| ×2 A→B→A | detached nodes | KB | `rendererNodes` | `jsEventListeners` |
+|---|---:|---:|---:|---:|
+| (a) handle ignored — what attempts 1–3 measured | 0 → **3,377** | 564.3 | 2,378 → 6,112 | 577 → 736 |
+| (b) handle **disposed** — one added line | 0 → **0** | 0 | 2,379 → **2,379** | 578 → **578** |
+
+**Arm (b) is byte-for-byte flat on every counter B1439 was ever filed on.** No app code differs
+between the arms. §3's "every plan the owner has ever opened in a session is still there" was
+describing the harness's own handle table.
+
+## 13. HOW IT WAS FINALLY NAMED — the one heap rule §8 had backwards
+
+§8 walked forward from the GC roots and reported the crossings into the island, under two rules:
+never expand a detached node (right), and **never traverse THROUGH a handle table** (wrong). Its
+reason was sound — every DOM wrapper sits in a handle table, so traversing them names the table and
+explains nothing, §4a's always-true answer. But **a Blink- or inspector-side retention is exactly
+what a strong handle-table edge looks like.** By refusing to traverse them, §8 could only ever
+conclude "nothing live points into the island", which is what it concluded, and it then correctly
+inferred an unnameable holder. It was one rule away.
+
+**The right rule is not "skip handle tables", it is "skip WEAK edges."** A `weak:` edge does not
+retain, which is precisely why §8's six crossings — every one bottoming out through a `weak:` edge —
+explained nothing. Traversing handle tables by their **strong** edges only drops the useless case
+and keeps the useful one, instead of dropping both. Re-run that way
+(`ui-audit/diagnose-plan-switch-strong.mjs`), against 437,704 strongly-reachable nodes, the entire
+2,342-node island has **exactly two strong crossings**, and they are the answer:
+
+```
+(Global handles) [synthetic] ──internal:1 / DevTools console──▶ SVGSVGElement
+(Global handles) [synthetic] ──internal:5 / DevTools console──▶ SVGSVGElement
+```
+
+Two. One per switch. In **the inspector's object group**, pointing at the previous plan's canvas.
+
+## 14. WHAT THE FOURTH ATTEMPT RULED OUT ALONG THE WAY
+
+Each of these is a null result, and each is recorded because §9 asked for it:
+
+1. **§9's step 1, ANIMATIONS — REFUTED, and more strongly than asked.** `document.getAnimations()`
+   returns **0** before and after: there are no animations on this page at all, so §8's
+   `leaflet-zoom-animated` lead was a class name and not a running effect (Leaflet's `GridLayer`
+   applies that class unconditionally when it builds a level container). The two-arm experiment §9
+   did not name was run anyway — switch mid-flight vs switch only once `getAnimations()` is provably
+   empty — and both arms leaked **identically, 2,342 each**.
+2. **§9's step 3, LISTENERS BEYOND `window`/`document` — REFUTED.**
+   `DOMDebugger.getEventListeners` at `depth: -1` from the document node covers every live element,
+   Leaflet's own containers included: **net +0, not one row changed.**
+3. **OBSERVERS, RANGES AND FOCUS — REFUTED.** The three observer constructors were wrapped before
+   any app code ran; after the cycle **0** observers still observed a detached element, `getSelection()`
+   held no range into the island, and `document.activeElement` was `BODY`. §5.3's source sweep is
+   confirmed by runtime census.
+4. **CONSERVATIVE STACK PINNING — REFUTED, and this one nearly produced a fourth wrong answer.**
+   `Memory.forciblyPurgeJavaScriptMemory` takes the count 2,343 → **1** while thirteen
+   `collectGarbage` calls move it not at all, which looks exactly like Oilpan's conservative
+   native-stack scan pinning garbage during the measurement — i.e. "no leak at all". Two controls
+   killed it: ordinary in-page allocation pressure (hundreds of MB from timer callbacks, many
+   natural major GCs, no debugging API) moved it **not at all**, and `--expose-gc`'s
+   `gc({execution:'async'})` — a full, **precise, cache-neutral** collection from an empty stack —
+   also moved it **not at all**. The retention was real; the purge freed it because it releases the
+   inspector's object group, which is the same fact §13 names from the other side.
+
+## 15. WHAT SHIPPED
+
+- **`ui-audit/lib/waitRelease.mjs`** — `waitForSelectorReleased` / `withElement`, which dispose in a
+  `finally` so a timeout or a mid-wait navigation cannot strand a handle either. It deliberately
+  **never returns the handle**, because handing one back is how this comes back.
+- **The contaminated harnesses fixed**: `diagnose-plan-switch.mjs`, and — this is the one that
+  matters beyond B1439 — **`session-axes.mjs`**, whose `switchPlan` stranded a handle per switch.
+  That is the harness that measures session-long degradation, so **its plans-axis memory numbers
+  were measuring this defect**; §5(e)'s `rendererNodes +93.9%`, the reading B1439 was filed from, is
+  retired with it. `interaction-degradation.mjs`'s boot wait is fixed for the same reason.
+- **`ui-audit/verify-plan-switch-release.mjs`** (`npm run perf:planswitch`) — the regression guard.
+  An A→B→A round trip must leave essentially no detached DOM and must return `rendererNodes` to
+  baseline. **It cannot rot green**: it runs a second CONTROL arm that strands a handle on purpose,
+  and if that arm comes back CLEAN the guard fails as *not observing* rather than passing; and it
+  refuses to report at all unless the switch is proven by the drawn-element count changing. Measured
+  green: guarded arm `0 → 0` detached, `rendererNodes 2378 → 2378`; control arm `0 → 1035`.
+- **Tests.** `test/planSwitchRelease.test.js` (the pure verdict table, including both anti-rot
+  cases) and `test/harnessHandles.test.js` (a static guard: any ui-audit script that measures
+  retention must not call bare `page.waitForSelector` — the file list is derived from what each
+  script *does*, so a new harness is covered automatically, and it asserts the list is non-empty).
+
+## 16. THE HONEST BALANCE — what this does NOT explain
+
+**B1439 was the only confirmed defect matching the owner's "reload is quick, a minute or two later
+it's lagging", and it is now retired. That symptom is once again unexplained**, and no fix here
+addresses it. What the fourth attempt does hand the next investigation is a clean instrument: the
+plan-switch axis of `session-axes.mjs` was reporting this artifact, so **the memory readings that
+pointed here need re-taking before anything is concluded from them.** See **B1121**, which owns the
+symptom.
+
+**The methodological lesson, which is the fourth in this family** (§4a's two, §6's one): *the
+instrument's own protocol handles are part of the measured heap.* §1 built `--no-e2e` precisely to
+separate instrument from product and deserves credit for asking the question — it simply varied the
+wrong knob, testing the app-side `__PLANYR_E2E` hooks rather than the harness-side handles. A
+control that varies one candidate does not clear the instrument; only a control that varies *the
+measurement mechanism* does.

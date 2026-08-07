@@ -28,6 +28,7 @@
 import { chromium } from "playwright";
 import { perfScenarioSeedMulti, SCENARIO_ID, SCENARIO_ID_B } from "./lib/perf-scenario.mjs";
 import { aggregateSnapshot, diffAggregates, edgeIndex, retainerIndex, holderOf, retainingPath, detachedNodes, detachedByClass, liveEntryPoints } from "./lib/heapSnapshot.mjs";
+import { waitForSelectorReleased } from "./lib/waitRelease.mjs";
 
 const BASE = (process.env.BASE_URL || "http://localhost:4173/").replace(/\/?$/, "/");
 const EXEC = process.env.PW_CHROME || "/opt/pw-browsers/chromium-1194/chrome-linux/chrome";
@@ -126,10 +127,19 @@ function listenerGrowth(before, after) {
   return { ok: true, totalDelta: after.total - before.total, rows };
 }
 
+/* ⛔ B1439, RESOLVED — AND THIS FUNCTION WAS THE BUG. The line below used to read
+ * `await page.waitForSelector(...)` with the return value ignored. `waitForSelector` returns an
+ * ElementHandle, which is a STRONG V8 global handle in the inspector's object group, and Playwright
+ * never disposes it for you. A Blink `Node` holds its PARENT strongly, so that one stranded handle
+ * on the canvas `<svg>` pinned the whole previous plan's shell — header, rail, panels, all of it.
+ * Twice per A→B→A round trip, which is exactly the "linear, ~2,342 nodes per round trip, released
+ * never" signature this script was written to explain. Disposing it takes the detached count to 0
+ * and `rendererNodes`/`jsEventListeners` to identical before/after. See lib/waitRelease.mjs and
+ * §12–§15 of docs/PERF-PLAN-SWITCH.md. */
 async function switchPlan(page, groupId) {
   await page.evaluate((g) => { window.location.hash = `#/project/${g}/site`; }, groupId);
   await page.waitForTimeout(2500);
-  await page.waitForSelector('[data-testid="planner-canvas"]', { timeout: 30000 }).catch(() => {});
+  await waitForSelectorReleased(page, '[data-testid="planner-canvas"]', { timeout: 30000 });
   await page.waitForTimeout(1500);
 }
 
@@ -146,7 +156,7 @@ const cdp = await ctx.newCDPSession(page);
 await cdp.send("Performance.enable").catch(() => {});
 await cdp.send("HeapProfiler.enable").catch(() => {});
 await page.goto(BASE, { waitUntil: "load" });
-await page.waitForSelector('[data-testid="planner-canvas"]', { timeout: 60000 });
+await waitForSelectorReleased(page, '[data-testid="planner-canvas"]', { timeout: 60000 });
 await page.waitForTimeout(3000);
 
 const a0 = await counters(page, cdp);
