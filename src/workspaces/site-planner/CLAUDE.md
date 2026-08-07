@@ -556,6 +556,32 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   `sharedLayerUrlConflicts()` is the dev-time + CI assertion that no two entries share a NON-statewide
   URL; `MapFinder.addDisplay` dedupes displays by RESOLVED URL, so the same endpoint is never added
   twice and non-owner keys are aliases that must never remove the shared layer.
+- **⛔ `doubleTap.js` + `featureTarget.js` (B50008–B50010) — THE DOUBLE-CLICK, and both halves of its
+  contract had shipped broken. Read them before touching selection or the click contract.** B750/B935
+  declare the rule (single click selects, double click opens Properties) and it was never wrong; its two
+  IMPLEMENTATIONS were. **(1) `doubleTap.js` — the budget is the GESTURE's clock, never the app's.**
+  `isDoubleTap` compared `Date.now()` read INSIDE the handler, and on the owner's Bain plan press 2's
+  handler began **307 ms after its own event fired** against a 350 ms budget, so an ordinary 150 ms
+  double-click measured ~450 ms and was silently discarded — the busier the plan, the more often. Use
+  `e.timeStamp` (stamped at event creation) for both the stored value and the comparison; **⛔ never
+  "fix" a recurrence by raising `DBLTAP_MS`**, which hides the cause and makes a deliberate
+  click-pause-click misfire as an edit. **(2) `featureTarget.js` — the native `dblclick` never reaches
+  the feature's node.** A click's target is the common ancestor of its down and up targets, so press 1
+  selects, React re-renders, and press 2's click/dblclick collapse to the root `<svg>`; every `<g>`-level
+  `onDoubleClick` is unreachable in exactly the case it exists for. The gesture is therefore resolved AT
+  THE ROOT by hit-testing the point (`onBgDouble` → `resolveDoubleClickTarget`), using the browser's own
+  `elementsFromPoint` so a second geometric hit-test can never disagree with the one that picked the
+  press. Every feature's outermost group stamps `data-feature="<kind>:<id>"`; the handle layer is
+  skipped; **`featureDoubleAction` is the ONE decision per family** and both routes call it — two copies
+  had already drifted (`onElDouble` opened Properties for a LOCKED element while `startMoveEl` refused).
+  **(3) A dimension NUMBER over its own body forwards to the body** (`pressIsOverElementBody`): a road's
+  width number is anchored to the centreline midpoint, so a double-click aimed at the road could not miss
+  it and the inline width chip swallowed the gesture. Fixed once in the shared dispatch, never
+  special-cased for road. Guards: the repo-root `test/` suites **doubleTap** and **featureTarget**, the
+  e2e spec **dblclick-properties** (all four cases mutation-checked red on the pre-fix build), and the
+  ui-audit harness **audit-doubleclick-properties** (every element type × every markup kind × three
+  easement modes, in `centres` / `--labels` / `--locked` modes — `--labels` primes the selection first,
+  because a detail-tier dimension number does not EXIST until its element is selected).
 - **⛔ `pureCache.js` + `viewCull.js`'s `cullRectFor` — VIEW-INDEPENDENT-ONCE (`/CLAUDE.md`), the two
   mechanisms a fix in that class uses. Read the rule before adding a memo here.** The cull rect is
   **LATCHED**, not re-derived: it was a continuous function of `view`, so `cullToView` re-filtered the

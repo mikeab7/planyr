@@ -10,6 +10,8 @@
 // (b) cycle the selection down through everything under a repeated click. Kept pure + Node-
 // testable (test/measureHit.test.js); the SitePlanner canvas closes over them in selectMeasure.
 
+import { pointInRing, ringArea } from "./ringMath.js";
+
 const hyp = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
 
 // Vertices of a measurement, tolerating the legacy {a,b} distance shape.
@@ -17,22 +19,12 @@ export const measPoints = (m) => (m && m.pts ? m.pts : (m && m.a && m.b ? [m.a, 
 export const measModeOf = (m) => (m && m.mode) || "line";
 
 // Ring area magnitude (feet²) — used only to rank overlapping hits, so sign is dropped.
-export function ringArea(pts) {
-  if (!pts || pts.length < 3) return 0;
-  let s = 0;
-  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) s += (pts[j].x + pts[i].x) * (pts[j].y - pts[i].y);
-  return Math.abs(s) / 2;
-}
+// One implementation, in ringMath.js; re-exported because callers and tests import it here.
+export { ringArea };
 
-// Point-in-ring by ray casting (matches the canvas's ringHas).
-export function pointInRing(p, ring) {
-  let inside = false;
-  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
-    const yi = ring[i].y, xi = ring[i].x, yj = ring[j].y, xj = ring[j].x;
-    if (((yi > p.y) !== (yj > p.y)) && (p.x < ((xj - xi) * (p.y - yi)) / (yj - yi) + xi)) inside = !inside;
-  }
-  return inside;
-}
+// Point-in-ring by ray casting — the ONE implementation, in ringMath.js (the canvas reads the
+// same one). Re-exported because callers and tests import it from here.
+export { pointInRing };
 
 // Shortest distance from p to any segment of a polyline (Infinity for < 2 points).
 export function distToPolyline(p, pts) {

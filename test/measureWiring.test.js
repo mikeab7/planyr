@@ -55,7 +55,9 @@ describe("NEW-1: measurements are styled through the ONE resolver, on every mode
     expect(SP).toMatch(/MEASURE_STD_KEYS\.forEach\(\(k\) => \{ up = setStandardPref\(up, "measureStyle", k, measureStdValueUI\(k\) \?\? null\); \}\)/);
   });
   it("double-click a measurement still opens its Properties (parity with every other object)", () => {
-    expect(SP).toMatch(/if \(isDoubleTap\(e, m\.id, sel\?\.kind === "measure" && sel\.i === idx\)\) \{[\s\S]{0,200}openInspector\(\)/);
+    // NEW-2 — via the ONE shared action, which is what the root-level dblclick resolver calls too.
+    expect(SP).toMatch(/if \(isDoubleTap\(e, m\.id, sel\?\.kind === "measure" && sel\.i === idx\)\) \{[\s\S]{0,200}featureDoubleAction\(\{ kind: "measure", i: idx \}, e\)/);
+    expect(SP).toMatch(/setSel\(\{ kind: "measure", i: t\.i \}\);\s*\n\s*openInspector\(\);/);
   });
 });
 
@@ -170,9 +172,12 @@ describe("NEW-2: EVERY interactive measurement surface opens Properties on doubl
     const body = bodyOf(name);
     expect(body, `could not locate ${name}`).toBeTruthy();
     expect(body, `${name} never calls isDoubleTap — the gesture is unarmed on that surface`).toMatch(/isDoubleTap\(e, m\.id/);
-    // B1188 — every surface now opens through the ONE explicit `openInspector()`; the old
-    // selection-derived `setPropsFor({kind:"measure", i})` marker is gone (see clickContract).
-    expect(body, `${name} does not open the inspector`).toMatch(/openInspector\(\)/);
+    /* B1188 — every surface opens through the ONE explicit inspector open. NEW-2 moved that open
+       behind `featureDoubleAction`, which is the SHARED decision the root-level dblclick resolver
+       uses too — the whole point being that a surface can no longer carry its own copy and drift.
+       So the guard is now two-part: the surface routes to the one action (here), and the one action
+       opens the inspector for a measurement (asserted once, below). */
+    expect(body, `${name} does not route its double-tap through featureDoubleAction`).toMatch(/featureDoubleAction\(\{ kind: "measure", i/);
   });
 
   it.each(handlers)("%s opens Properties for a LOCKED measurement too (the surfaces must agree)", (name) => {
@@ -184,6 +189,14 @@ describe("NEW-2: EVERY interactive measurement surface opens Properties on doubl
     // branch must precede it — otherwise a locked measurement can be selected but never inspected
     // from that surface, which is exactly the divergence NEW-2 was.
     if (lock > -1) expect(dbl, `${name} checks m.locked before its double-tap branch`).toBeLessThan(lock);
+  });
+
+  it("the ONE shared action opens the inspector for a measurement (NEW-2)", () => {
+    const body = bodyOf("featureDoubleAction");
+    expect(body, "could not locate featureDoubleAction").toBeTruthy();
+    const branch = body.slice(body.indexOf('t.kind === "measure"'));
+    expect(branch, "featureDoubleAction's measure branch no longer opens the inspector").toMatch(/openInspector\(\)/);
+    expect(branch, "a measurement must select by INDEX, which is how sel stores it").toMatch(/setSel\(\{ kind: "measure", i: t\.i \}\)/);
   });
 
   it("the chip's double-tap keys on the bare id, so chip and shape pair with each other", () => {

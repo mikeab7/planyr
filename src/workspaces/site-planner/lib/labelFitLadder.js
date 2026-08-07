@@ -38,6 +38,7 @@
 // Pure geometry — no React, no DOM — so it unit-tests without a browser and the export sheet
 // reasons identically to the screen (PDF-PARITY: `layoutLabels` is the single consumer, and
 // both the canvas and `exportSheet` go through it).
+import { pointInRing as ringContains } from "./ringMath.js";
 
 // The ordered vocabulary. `outside` is always reachable; there is deliberately no `hidden` rung.
 export const LADDER_RUNGS = ["inline", "stacked", "abbrev", "outside"];
@@ -96,14 +97,9 @@ const ringBBox = (ring) => {
   return { x0, x1, y0, y1 };
 };
 
-export const pointInRing = (ring, pt) => {
-  let inside = false;
-  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
-    const a = ring[i], b = ring[j];
-    if ((a.y > pt.y) !== (b.y > pt.y) && pt.x < ((b.x - a.x) * (pt.y - a.y)) / (b.y - a.y) + a.x) inside = !inside;
-  }
-  return inside;
-};
+/* Ring-first argument order, kept because this module's callers and tests read it that way;
+ * the implementation is the shared one in ringMath.js. */
+export const pointInRing = (ring, pt) => ringContains(pt, ring);
 
 // Scanline rasterisation — one row of ring crossings per cell row, so this is O(rows · vertices)
 // rather than a point-in-polygon test per cell.

@@ -14,16 +14,11 @@
 import { offsetInward, ringsArea, maxInwardOffset } from "./pondOffset.js";
 import { polyArea } from "./polygonSplit.js";
 import { crestTopRing } from "./inwardBerm.js";
+import { pointInRing } from "./ringMath.js";
 
-// Even-odd ray cast: is point `pt` inside ring `ring` (array of {x,y})?
-export const pointInRing = (pt, ring) => {
-  let inside = false;
-  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
-    const xi = ring[i].x, yi = ring[i].y, xj = ring[j].x, yj = ring[j].y;
-    if (((yi > pt.y) !== (yj > pt.y)) && (pt.x < ((xj - xi) * (pt.y - yi)) / (yj - yi) + xi)) inside = !inside;
-  }
-  return inside;
-};
+// Even-odd ray cast: is point `pt` inside ring `ring` (array of {x,y})? Re-exported because
+// several modules have long imported it from here; the implementation is ringMath's.
+export { pointInRing };
 
 // Shortest distance from point `p` to segment a→b.
 const distToSeg = (p, a, b) => {

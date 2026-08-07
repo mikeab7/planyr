@@ -11,17 +11,10 @@
  * Planar feet, the app's usual open-ring convention: edge i is pts[i] → pts[i+1].
  */
 
-/* Shoelace area of a ring. Private: the component keeps its own `polyArea` with the B690
- * empty-ring guard for its ~30 other callers; the two rings this one compares are already
- * validated (n ≥ 3), so it stays the bare primitive. */
-const ringArea = (pts) => {
-  let s = 0;
-  for (let i = 0; i < pts.length; i++) {
-    const a = pts[i], b = pts[(i + 1) % pts.length];
-    s += a.x * b.y - b.x * a.y;
-  }
-  return Math.abs(s / 2);
-};
+/* Shoelace area magnitude — the shared one in `ringMath.js`. The component keeps its own
+ * `polyArea` for its ~30 other callers; the two rings compared here are already validated
+ * (n ≥ 3), so the shared guard never fires on this path. */
+import { ringArea } from "./ringMath.js";
 
 /* Intersection of the infinite lines through (x1,y1)→(x2,y2) and (x3,y3)→(x4,y4), or null when
  * they are parallel (within 1e-9). */

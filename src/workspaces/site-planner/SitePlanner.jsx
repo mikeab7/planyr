@@ -30,6 +30,8 @@ import { parcelSelectHintDecision, PARCEL_HINT_COOLDOWN_MS } from "./lib/parcelS
 import { measuresUnderPoint, nextMeasureSelection } from "./lib/measureHit.js";
 import { nearestBoundaryEdge, constrainToEdgeAngle, edgeLockTolFt } from "./lib/edgeConstrain.js";
 import { markupsUnderPoint, nextMarkupSelection, boxCorners } from "./lib/markupPick.js";
+import { EMPTY_TAP, tapTime, stepDoubleTap } from "./lib/doubleTap.js";
+import { resolveDoubleClickTarget, stackEntries, pressIsOverElementBody } from "./lib/featureTarget.js";
 import { parkDepthForRows, parkRowsForDepth, explodeParkingBands, edgeAbutsPaving } from "./lib/parking.js";
 import { loadAndDownscaleImage } from "./lib/image.js";
 import { openOverlayFile, rasterizePage, rasterizePageHiRes, isPdfFile, isDxfFile, rasterizeStoredPdf, rasterizeStoredDxf, baseRasterScale, chooseOverlayRasterScale } from "./lib/overlayPdf.js";
@@ -223,6 +225,7 @@ import { computeBuildingGrid, resolveGridSettings, placeDockDoors } from "./lib/
 import { convertBuildingToPolygon, dockLineAt, dockEdgeLine, projectOntoLine, frameBBox, translateDockLines, dockSegExtent, clipSegmentToRing } from "./lib/footprintEdit.js";
 import { pondAreaLabelLine, pondAreaDeltaLine } from "./lib/pondLabelText.js";
 import { dimSlideRange, clampDimOffset, DIM_POS_F_DEFAULT, DIM_POS_F_ROAD, dimNumberBox } from "./lib/dimSlide.js";
+import { pointInRing } from "./lib/ringMath.js";
 import { addedAreaLabelPoint, pondContours, contourLabelPoint, autoContourInterval, detentionStorage, usablePondVolume, incrementalExcavationCf, detentionLandTakeEstimate, estimateFootprintSf, pondPlacementCandidates, drawdownWarning, bermAsFillHeight, bermFillVolume, bermFillCells } from "./lib/pondGeom.js";
 import { accumulatePondLedger, effectivePondRole, POND_ROLE_LABEL, pondDisplayName, pondDisplayNameFor } from "./lib/pondLedger.js";
 import { rankLedgerMoves, BERM_MAX_RAISE_FT } from "./lib/ledgerBalancer.js";
@@ -899,16 +902,10 @@ function expandPolygon(pts, d) {
   if (!a1) return build(-1);
   return polyArea(a1) >= polyArea(pts) ? a1 : (build(-1) || a1); // outward must GROW
 }
-// Ray-cast point-in-ring (even-odd). Powers the pond expansion's "past the property
-// line" screening warning (B139).
-const pointInRing = (pt, ring) => {
-  let inside = false;
-  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
-    const xi = ring[i].x, yi = ring[i].y, xj = ring[j].x, yj = ring[j].y;
-    if (((yi > pt.y) !== (yj > pt.y)) && (pt.x < ((xj - xi) * (pt.y - yi)) / (yj - yi) + xi)) inside = !inside;
-  }
-  return inside;
-};
+/* Ray-cast point-in-ring (even-odd) — powers the pond expansion's "past the property
+ * line" screening warning (B139) and the building-under-footprint lookup. Imported from
+ * lib/ringMath.js: this file used to carry TWO copies of it (here and `ringHas`), and six
+ * more lived across lib/. */
 
 /* detentionStorage(ring, depth, freeboard, slope) — the pond stage/volume calc —
  * moved to lib/pondGeom.js (B630) so the yield metrics pass and the pure auto-size
@@ -926,14 +923,6 @@ function nearestOnPolylines(p, polys) {
   let best = null, bd = Infinity;
   polys.forEach((pl) => { for (let i = 0; i < pl.length - 1; i++) { const q = nearestOnSeg(p, pl[i], pl[i + 1]); const d = _hyp(p, q); if (d < bd) { bd = d; best = q; } } });
   return best ? { pt: best, d: bd } : null;
-}
-function ringHas(p, ring) {
-  let inside = false;
-  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
-    const yi = ring[i].y, xi = ring[i].x, yj = ring[j].y, xj = ring[j].x;
-    if (((yi > p.y) !== (yj > p.y)) && (p.x < ((xj - xi) * (p.y - yi)) / (yj - yi) + xi)) inside = !inside;
-  }
-  return inside;
 }
 const rectRing = (c, w, h) => { const hw = w / 2, hh = h / 2; return [{ x: c.x - hw, y: c.y - hh }, { x: c.x + hw, y: c.y - hh }, { x: c.x + hw, y: c.y + hh }, { x: c.x - hw, y: c.y + hh }]; };
 const ringOf = (e) => (e.points ? e.points : elCorners(e));
@@ -3271,9 +3260,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // a second press on the SAME feature within DBLTAP_MS *and* within DBLTAP_PX of the first (the time +
   // distance thresholds a native double-click uses). The distance gate is what stops a "click here to
   // select, then press over THERE to drag" gesture from misfiring as an edit.
-  const lastTapRef = useRef({ id: null, t: 0, x: 0, y: 0, wasSel: false });
+  const lastTapRef = useRef({ ...EMPTY_TAP });
   const labelSessionRef = useRef(null);  // B682 — coalesces a live label-spacing slider drag into one undo frame
-  const DBLTAP_MS = 350, DBLTAP_PX = 14;
   // NEW-3(c) — the drawing↔basemap registration re-dispatch floor, in screen px. See the setRegShift
   // call site for why this exists and why it is safe (an order of magnitude under the quarter-pixel
   // placement accuracy the pointer harness asserts).
@@ -3288,12 +3276,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // past a completed pair, anything that clearly ends the gesture (Escape, the Properties ✕) explicitly
   // clears lastTapRef too — otherwise an unrelated LATER single click inside that window would misread
   // as "press 3" of a gesture the user never intended to continue.
+  /* ⛔ NEW-1 — THE BUDGET IS SPENT BY THE GESTURE, NOT BY US. `tapTime(e)` reads the event's OWN
+     timeStamp (stamped when the browser CREATED the event), never `Date.now()` inside this handler.
+     Measured on the owner's Bain plan: pointerdown #2 fired at e.timeStamp 330662 and this handler
+     began at 330969 — 307 ms of main-thread queueing against a 350 ms budget — so an ordinary
+     150 ms double-click measured ~450 ms and was silently discarded. Do NOT raise DBLTAP_MS to
+     "fix" that; see lib/doubleTap.js. */
   const isDoubleTap = (e, id, wasSel) => {
-    const now = Date.now(), p = lastTapRef.current;
-    const near = Math.abs(e.clientX - p.x) <= DBLTAP_PX && Math.abs(e.clientY - p.y) <= DBLTAP_PX;
-    if (p.id === id && now - p.t < DBLTAP_MS && near) { lastTapRef.current = { id, t: now, x: e.clientX, y: e.clientY, wasSel: true }; return true; }
-    lastTapRef.current = { id, t: now, x: e.clientX, y: e.clientY, wasSel: !!wasSel };
-    return false;
+    const r = stepDoubleTap(lastTapRef.current, { id, t: tapTime(e), x: e.clientX, y: e.clientY, wasSel });
+    lastTapRef.current = r.record;
+    return r.double;
   };
   const pinch2Ref = useRef(null);        // active baseline { mid, dist } (svg-relative) | null
   const pinchRafRef = useRef(0);         // pending rAF id (0 = none)
@@ -4653,6 +4645,66 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     setDockMemo(null);
     setLeftPanel("parcel");
   };
+  /* NEW-2 — THE ONE THING A DOUBLE-CLICK DOES, for every feature family.
+   *
+   * The click contract (B750/B935) was never wrong; both of its IMPLEMENTATIONS were. The gesture
+   * reaches the app by two independent routes — the double-tap reconstructed from two pointerdowns
+   * (because pointer capture suppresses the native dblclick), and the browser's own `dblclick` — and
+   * each route used to carry its own copy of the decision. Two copies drift: `onElDouble` opened
+   * Properties for a LOCKED element while `startMoveEl` refused to, and nothing could notice because
+   * the native path was unreachable (see lib/featureTarget.js). So both routes now call THIS, and
+   * there is one decision per family to keep true.
+   *
+   *   element  — grouped: drill in. locked: select only. pond: reveal + flash. else: Properties.
+   *   markup   — locked: select only. else: Properties.
+   *   callout  — locked: select only. else the B948 LOCATION split (interior text edits in place,
+   *              the border band opens Properties) — which needs the event, hence `e`.
+   *   measure  — Properties, locked included (a locked measurement's panel is how you unlock it).
+   *   parcel   — the Parcel panel; that list+detail surface IS a lot's inspector.
+   *
+   * Returns true iff it handled the gesture, so a caller can fall through when it did not. */
+  const featureDoubleAction = (t, e) => {
+    if (!t) return false;
+    if (t.kind === "el") {
+      const el = els.find((x) => x.id === t.id);
+      if (!el) return false;
+      if (el.groupId) { setMulti([]); setDrillId(t.id); setSel({ kind: "el", id: t.id }); return true; } // B261 drill-in
+      setSel({ kind: "el", id: t.id });
+      if (el.locked) return true;                                   // locked features stay select-only
+      if (el.type === "pond") revealPondInspector(t.id); else openInspector(); // B875 keeps its scroll+flash
+      return true;
+    }
+    if (t.kind === "markup") {
+      const m = markups.find((x) => x.id === t.id);
+      if (!m) return false;
+      setSel({ kind: "markup", id: t.id });
+      if (m.locked) return true;
+      openInspector();
+      return true;
+    }
+    if (t.kind === "callout") {
+      if (!callouts.some((x) => x.id === t.id)) return false;
+      calloutDblAction(e, t.id);   // owns the select, the lock carve-out and the B948 location split
+      return true;
+    }
+    if (t.kind === "measure") {
+      if (!measures[t.i]) return false;
+      setMulti([]); setSelVtx(null);
+      setSel({ kind: "measure", i: t.i });
+      openInspector();
+      if (narrow) setNarrowProps(true);
+      return true;
+    }
+    if (t.kind === "parcel") {
+      if (!settings.parcelSelect) return false;                     // B311: parcels are click-through
+      if (!parcels.some((p) => p.id === t.id)) return false;
+      setSel({ kind: "parcel", id: t.id });
+      setCombineSel([]);
+      openParcelPanel();
+      return true;
+    }
+    return false;
+  };
   /* B1125 — the ONE inspector dismissal, so the close control can NEVER read as dead.
    *
    * The bug: the ✕ only dropped the (since-removed) explicit-open marker `propsFor`. That was enough
@@ -4678,7 +4730,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // Drop the pending tap history: without this, a plain single click on the same feature shortly
     // after closing could still pair with the double-click that just opened this panel (the fast-3-
     // click re-arm in isDoubleTap is deliberately generous) and misfire as another double-tap.
-    lastTapRef.current = { id: null, t: 0, x: 0, y: 0, wasSel: false };
+    lastTapRef.current = { ...EMPTY_TAP };
   };
   // B653 cross-links: after a "default ↗" jump lands on Standards, scroll the focused
   // section into view (it opens via its remount key); drop the focus when the panel closes
@@ -5008,7 +5060,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // the ✕ does). It runs BEFORE the catch-all below and consumes the key, so the panel can never
       // be a place you get stuck; a second Escape then falls through and deselects as always.
       if (e.key === "Escape" && inspectorShowingRef.current) { e.preventDefault(); closeInspector(); return; }
-      if (e.key === "Escape") { setDraftPoly(null); setDraftRect(null); setDraftElPoly(null); setDraftRoadPts(null); branchSeedRef.current = null; setRoadVtxSel(null); setMeasDraft([]); setSplitPath([]); setCombineSel([]); setCalloutDraft(null); setAddLeaderFor(null); cancelEditCallout(); setMkRect(null); setMkPoly(null); setEaseDraft(null); setEaseEdges(null); setEaseMenu(false); setMarquee(null); setMulti([]); setDrillId(null); setPrintMode(false); setPrintFrame(null); setIdentifyMode(false); setIdentifyRes(null); setAttachFor(null); setAlignFor(null); setPobMode(null); setOvCalib(null); setTraceMode(false); setTracePts([]); setRouteMode(null); setXsecMode(false); setXsecPts([]); setOverlapWarn(""); setSel(null); setTypeMenu(null); setParcelMenu(null); setSelVtx(null); setVtxMenu(null); setInsHint(null); setToolMenu(false); setMeasureMenu(false); setOvMenu(null); setOvAlignBase(null); setParcelMode("add"); setBoundaryEdit(false); setMergePick(false); setGisHit(null); spaceRef.current = false; setSpacePan(false); abortGesture(); setTool("select"); lastTapRef.current = { id: null, t: 0, x: 0, y: 0, wasSel: false }; }
+      if (e.key === "Escape") { setDraftPoly(null); setDraftRect(null); setDraftElPoly(null); setDraftRoadPts(null); branchSeedRef.current = null; setRoadVtxSel(null); setMeasDraft([]); setSplitPath([]); setCombineSel([]); setCalloutDraft(null); setAddLeaderFor(null); cancelEditCallout(); setMkRect(null); setMkPoly(null); setEaseDraft(null); setEaseEdges(null); setEaseMenu(false); setMarquee(null); setMulti([]); setDrillId(null); setPrintMode(false); setPrintFrame(null); setIdentifyMode(false); setIdentifyRes(null); setAttachFor(null); setAlignFor(null); setPobMode(null); setOvCalib(null); setTraceMode(false); setTracePts([]); setRouteMode(null); setXsecMode(false); setXsecPts([]); setOverlapWarn(""); setSel(null); setTypeMenu(null); setParcelMenu(null); setSelVtx(null); setVtxMenu(null); setInsHint(null); setToolMenu(false); setMeasureMenu(false); setOvMenu(null); setOvAlignBase(null); setParcelMode("add"); setBoundaryEdit(false); setMergePick(false); setGisHit(null); spaceRef.current = false; setSpacePan(false); abortGesture(); setTool("select"); lastTapRef.current = { ...EMPTY_TAP }; }
       if (e.key.startsWith("Arrow") && (multi.length > 1 || sel?.kind === "el")) { e.preventDefault(); nudgeSel(e.key, e.shiftKey ? 10 : 1); return; }
       if ((e.key === "Backspace" || e.key === "Delete") && removeLastVertex()) { e.preventDefault(); return; } // undo the last placed vertex mid-draw
       if ((e.key === "Delete" || e.key === "Backspace") && selVtxRef.current && deleteVtx(selVtxRef.current.layer, selVtxRef.current.id, selVtxRef.current.index)) { e.preventDefault(); return; } // B230: an armed control point → delete just that vertex. NEW-1: deleteVtx returns false on a no-op (endpoint/min/stale) → we DON'T consume the key; it falls through to the whole-element delete below so Delete can never silently wedge.
@@ -5318,10 +5370,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // B750 parity — double-click a measurement opens its Properties (pointer capture eats the native
     // dblclick, so reconstruct the double-tap like startMoveMarkup does).
     if (isDoubleTap(e, m.id, sel?.kind === "measure" && sel.i === idx)) {
-      setMulti([]); setSelVtx(null);
-      setSel({ kind: "measure", i: idx });
-      openInspector();
-      if (narrow) setNarrowProps(true);
+      featureDoubleAction({ kind: "measure", i: idx }, e);   // NEW-2 — ONE decision, shared with the root dblclick
       return;
     }
     setMulti([]); setSelVtx(null);
@@ -5351,9 +5400,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // locked measurement too — the two surfaces must agree. Returning early also skips the
     // pushHistory() below, which would otherwise push a no-op undo frame for a double-click.
     if (isDoubleTap(e, m.id, sel?.kind === "measure" && sel.i === i)) {
-      setMulti([]); setSelVtx(null);
-      setSel({ kind: "measure", i });
-      openInspector();
+      featureDoubleAction({ kind: "measure", i }, e);   // NEW-2 — ONE decision, shared with the root dblclick
       return;
     }
     setMulti([]); setSelVtx(null);
@@ -5531,7 +5578,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         flashWarn("Now click the building to serve.", 0);
         return;
       }
-      let b = els.find((e) => e.type === "building" && ringHas(fp, ringOf(e)));
+      let b = els.find((e) => e.type === "building" && pointInRing(fp, ringOf(e)));
       if (!b) { const builds = els.filter((e) => e.type === "building"); if (builds.length) b = builds.reduce((best, e) => _hyp(fp, centroid(ringOf(e))) < _hyp(fp, centroid(ringOf(best))) ? e : best); }
       if (!b) { flashWarn("No building to serve — draw a building first.", 0); return; }
       commitUtilRoute(routeMode, b);
@@ -6024,8 +6071,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // owner rule). Pointer capture eats the DOM dblclick, so we reconstruct the double-tap here. Locked
     // features stay select-only.
     if (m && !m.locked && isDoubleTap(e, id, sel?.kind === "markup" && sel.id === id)) {
-      setSel({ kind: "markup", id });
-      openInspector();
+      featureDoubleAction({ kind: "markup", id }, e);   // NEW-2 — ONE decision, shared with the root dblclick
       return;
     }
     // B740 — Shift (or Ctrl/⌘) TOGGLES the markup in/out of the multi-selection (see startMoveEl).
@@ -7257,8 +7303,26 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     draftSetters[r.target](r.next);
     return true;
   };
-  // Double-click finishes exactly the way Enter does (the shared path above).
-  const onBgDouble = () => { finishActiveDrawing(); };
+  /* The live DOM hit stack under a client point, top-most first, flattened to the pure shape
+   * lib/featureTarget.js reasons over. `elementsFromPoint` is the browser's OWN hit-test — the same
+   * one that picked the press targets — so a feature can never be resolved differently here than it
+   * was pressed. Guarded for a non-DOM environment; an empty stack simply resolves to nothing. */
+  const hitStackAt = (x, y) => {
+    if (typeof document === "undefined" || typeof document.elementsFromPoint !== "function") return [];
+    try { return stackEntries(document.elementsFromPoint(x, y)); } catch (_) { return []; }
+  };
+  /* ⛔ NEW-2 — THE CANVAS ROOT IS WHERE A DOUBLE-CLICK IS RESOLVED, because it is the only node the
+     event reliably reaches. A click's target is the common ancestor of its down and up targets, and
+     press 1 re-renders the feature it selected, so press 2's `click`/`dblclick` collapse to this
+     bare `<svg>` — measured, on the owner's easement and building alike. Every per-node
+     `onDoubleClick` below is therefore unreachable for a real user double-click; they are kept only
+     for harnesses that dispatch a raw dblclick AT a node (where no point hit-test is available).
+     A double-click while a multi-point shape is being drawn still finishes it, exactly like Enter. */
+  const onBgDouble = (e) => {
+    if (finishActiveDrawing()) return;
+    if (tool !== "select" || !e) return;
+    featureDoubleAction(resolveDoubleClickTarget(hitStackAt(e.clientX, e.clientY)), e);
+  };
 
   const addRectParcel = () => {
     const w = Math.max(20, +lotW || 0), d = Math.max(20, +lotD || 0);
@@ -8830,10 +8894,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // label" field, per the owner rule). Pointer capture eats the DOM dblclick, so we reconstruct the
     // double-tap here. Groups keep single-click = select-whole-group (drill-in stays in onElDouble).
     if (!el.groupId && !el.locked && isDoubleTap(e, id, sel?.kind === "el" && sel.id === id)) {
-      setSel({ kind: "el", id });
-      // NEW-1 — a pond opens through revealPondInspector so the double-click keeps B875's scroll+flash
-      // onto the pond card; every other type just opens the inspector.
-      if (el.type === "pond") revealPondInspector(id); else openInspector();
+      featureDoubleAction({ kind: "el", id }, e);   // NEW-2 — ONE decision, shared with the root dblclick
       return;
     }
     const fp = p2f(e.clientX, e.clientY);
@@ -8925,9 +8986,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // county-pulled LOCKED default too (whose single press starts a pan, resolved as a tap in onUp).
     if (isDoubleTap(e, `parcel:${id}`, sel?.kind === "parcel" && sel.id === id)) {
       e.stopPropagation();
-      setSel({ kind: "parcel", id });
-      setCombineSel([]);
-      openParcelPanel();
+      featureDoubleAction({ kind: "parcel", id }, e);   // NEW-2 — ONE decision, shared with the root dblclick
       return;
     }
     e.stopPropagation();
@@ -9136,8 +9195,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
        paints above content and stops propagation either gates on its own object being selected, or
        forwards the press to `isDoubleTap` on the underlying feature. */
     if (!el.groupId && !el.locked && isDoubleTap(e, id, sel?.kind === "el" && sel.id === id)) {
-      setSel({ kind: "el", id });
-      if (el.type === "pond") revealPondInspector(id); else openInspector();
+      featureDoubleAction({ kind: "el", id }, e);   // NEW-2 — ONE decision, shared with the root dblclick
       return;
     }
     setSel({ kind: "el", id });
@@ -9265,28 +9323,23 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   };
   // Double-click an element: if it's in a group, "drill in" to edit just that member in
   // place (without ungrouping, B261). Otherwise open its actions menu (dock/sidewalk/…).
+  /* ⛔ NEW-2 — THIS IS NOT A "FALLBACK FOR WHEN POINTER CAPTURE DOESN'T SUPPRESS THE NATIVE DBLCLICK",
+     which is what this comment used to claim and what the same claim on onMarkupDouble / the callout
+     box claimed too. It is UNREACHABLE for a real user double-click: press 1 selects the element,
+     React re-renders it, and press 2's click/dblclick then retarget to the root `<svg>` because a
+     click's target is the common ancestor of its down and up targets (measured — see
+     lib/featureTarget.js). The reachable native path is `onBgDouble` at the canvas root.
+     What survives here is the narrow case a point hit-test cannot serve: a harness dispatching a raw
+     `dblclick` AT a node, which carries no usable clientX/clientY. It delegates to the same one
+     action, so it cannot drift from the two live paths. */
   const onElDouble = (e, id) => {
     e.stopPropagation();
-    const el = els.find((x) => x.id === id);
-    if (!el) return;
-    if (el.groupId) { setMulti([]); setDrillId(id); setSel({ kind: "el", id }); return; }
-    // B750/B935: double-click ALWAYS opens Properties (never an on-canvas inline-label editor — that is
-    // reserved for the Properties panel's "Inline label" field, per the owner rule). Right-click still
-    // opens the type/actions menu via onElContext. This native path is the raw-dblclick / test-harness
-    // fallback for when pointer capture doesn't suppress the native dblclick; it makes the SAME decision
-    // as the reconstructed double-tap in startMoveEl.
-    setSel({ kind: "el", id });
-    if (el.type === "pond") revealPondInspector(id); else openInspector();  // NEW-1 — pond keeps B875's flash
+    featureDoubleAction({ kind: "el", id }, e);
   };
-  // B935 — native-dblclick fallback for the markup shapes (easement/line/polyline), mirroring
-  // startMoveMarkup: a double-click always opens Properties (never the old on-canvas inline-label
-  // editor). The raw path exists for when pointer capture doesn't suppress the native dblclick.
+  // B935 / NEW-2 — same story as onElDouble above: raw-dispatch only, delegating to the one action.
   const onMarkupDouble = (e, id) => {
     e.stopPropagation();
-    const m = markups.find((x) => x.id === id);
-    if (!m) return;
-    setSel({ kind: "markup", id });
-    openInspector();
+    featureDoubleAction({ kind: "markup", id }, e);
   };
   // Right-click an element always opens its actions menu (so a grouped element can still
   // reach Ungroup / Duplicate group / etc). Keeps an active group selection intact so the
@@ -13640,6 +13693,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // headless check can assert on our own markup instead of guessing ownership from proximity.
     return (
       <g key={`lbl${d.lid}`} data-label-for={d.lid} data-label-rung={place.rung || "inline"} data-label-leader={leader ? "1" : "0"}
+        /* NEW-2 — only the pond label is pointer-enabled, so it is the only label that can take a
+           dblclick itself; every other label is pointer-transparent and the press resolves to the
+           shape underneath it, which is the same answer. */
+        data-feature={isPondLabel ? `el:${d.el.id}` : undefined}
         pointerEvents={isPondLabel ? "auto" : "none"} style={isPondLabel ? { cursor: "pointer" } : undefined}
         onPointerDown={isPondLabel ? (e) => {
           if (e.button !== 0) return;
@@ -13648,7 +13705,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           // NEW-1 — keyed on the pond's own id (was `${id}:label`), same lastTapRef-poison fix as
           // the dimension number: a label that overhangs its basin took press 2 of a real
           // double-click under a private key, so the pair dissolved and the record was clobbered.
-          if (isDoubleTap(e, d.el.id, wasSel)) { revealPondInspector(d.el.id); return; }
+          if (isDoubleTap(e, d.el.id, wasSel)) { featureDoubleAction({ kind: "el", id: d.el.id }, e); return; }
           setSel({ kind: "el", id: d.el.id });   // single click: select only (NEW-1)
         } : undefined}
         onContextMenu={isPondLabel ? (e) => onElContext(e, d.el.id) : undefined}>
@@ -13716,7 +13773,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
        badge that will not actually drag (the other half of the owner's report). */
     const draggable = tool === "select" && hoverChipId === pc.id;
     return (
-      <g key={`pl${pc.id}`} data-print-chip="acre" data-chip-parcel={pc.id} pointerEvents={draggable ? "auto" : "none"}
+      <g key={`pl${pc.id}`} data-print-chip="acre" data-chip-parcel={pc.id} data-feature={`parcel:${pc.id}`} pointerEvents={draggable ? "auto" : "none"}
         style={draggable ? { cursor: "move" } : undefined}
         onContextMenu={draggable ? (e) => onChipContext(e, pc.id) : undefined}
         onPointerDown={draggable ? (e) => startAcChip(e, pc.id) : undefined}>
@@ -15263,7 +15320,20 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
        common case, not a corner. One key per element means every mixed pair now resolves: number→
        body opens Properties (`startMoveEl`), body→number opens the length editor here. Both are
        real edit surfaces — what is never acceptable is a double-click that does nothing at all. */
-    if (!el.locked && isDoubleTap(e, id, wasSel)) editElDim(el, e);
+    /* ⛔ NEW-3 — WHEN THE NUMBER SITS ON THE BODY, THE BODY WINS. A centerline road's width
+       dimension is anchored to the CENTRELINE MIDPOINT, i.e. it is painted ON the pavement, so a
+       double-click aimed at the road could not miss it and the inline width chip swallowed a
+       gesture the contract says opens Properties (the owner's report: "it selects and a blue 30
+       opens; Properties does not"). A rect element has the same trap — B592 clamps its number ONTO
+       the footprint. So this asks the general question ONCE, for every type, instead of special-
+       casing road: is the element's own body painted under this point, beneath the dimension
+       chrome? If it is, the press was aimed at the element. The inline editor survives exactly
+       where the number is genuinely the only thing there — a road's dimension drags FREELY, so a
+       number parked out in clear space still edits the width in place. */
+    if (!el.locked && isDoubleTap(e, id, wasSel)) {
+      if (pressIsOverElementBody(hitStackAt(e.clientX, e.clientY), id)) featureDoubleAction({ kind: "el", id }, e);
+      else editElDim(el, e);
+    }
   };
   // Re-sync a centerline road's stored strip bbox (cx/cy/w/h/rot) after a pts/travelW/curb/
   // class change, so every generic geometry consumer (fit, snap, group bbox) stays correct.
@@ -17568,6 +17638,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const measureGroupAttrs = (m, i, mode) => ({
     [MEASURE_GROUP_ATTR]: m.id || `m${i}`,
     [MEASURE_MODE_ATTR]: mode,
+    // NEW-2 — the root dblclick resolver addresses a measurement by INDEX, because that is how the
+    // planner's own selection stores it (`sel = { kind: "measure", i }`). A measurement has no
+    // guaranteed id (legacy rows carry none), so an id-keyed marker would leave those unreachable.
+    "data-feature": `measure:${i}`,
   });
   const renderMeasureNode = (m, i) => {
                 const fpts = measPts(m);
@@ -17907,7 +17981,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 return (
                   <g key={m.id}
                      className={isHov ? "mk-hover" : undefined} data-hover={isHov ? "1" : undefined}
-                     data-testid={isSel && tool === "select" ? "markup-selected" : undefined} data-mk-id={m.id} data-mk-kind={m.kind} data-mk-locked={m.locked ? "1" : "0"}
+                     data-testid={isSel && tool === "select" ? "markup-selected" : undefined} data-mk-id={m.id} data-feature={`markup:${m.id}`} data-mk-kind={m.kind} data-mk-locked={m.locked ? "1" : "0"}
                      onPointerEnter={() => { if (tool === "select") setHoverMkId(m.id); }}
                      onPointerLeave={() => setHoverMkId((h) => (h === m.id ? null : h))}>
                     {node}
@@ -18343,7 +18417,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 // where the colour IS the message, and on an inactive parcel, which is deliberately
                 // faint context.
                 const cased = !removeHover && !picked && !inactive;
-                return <g key={pc.id}>
+                return <g key={pc.id} data-feature={`parcel:${pc.id}`}>
                   {cased && (
                     <polygon data-testid="parcel-casing" points={ring} fill="none" stroke={PAL.lineCasing}
                       strokeWidth={strokeZoom(((isSel) ? Math.max(3, baseW) : baseW) + PARCEL_CASING_W, zk)}
@@ -18818,7 +18892,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 const cr = calloutCornerRadius(w, h); // NEW-1 — zoom-invariant, low → rectangle at every zoom
                 const ah = Math.max(7, fontPx * 0.7);
                 return (
-                  <g key={c.id} data-testid={`callout-${c.id}`} data-callout-leaders={tips.length}>
+                  <g key={c.id} data-testid={`callout-${c.id}`} data-feature={`callout:${c.id}`} data-callout-leaders={tips.length}>
                     {/* N leaders — each anchored from its OWN nearest box edge/corner (not one shared
                         box-centre anchor) via the shared nearestRectPerimeterPoint geometry helper. */}
                     {tips.map((tp, i) => {
@@ -18836,7 +18910,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                             e.stopPropagation();
                             setSel({ kind: "callout", id: c.id });
                             if (isDoubleTap(e, `${c.id}:leader`, sel?.kind === "callout" && sel.id === c.id) && !c.locked) {
-                              openInspector();
+                              openInspector();   // a leader has no text interior — always Properties (B948)
                             }
                           }}>
                           <line x1={origin.x} y1={origin.y} x2={tp.x} y2={tp.y} stroke={border} strokeWidth={1.6} />
@@ -18855,8 +18929,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       onPointerDown={(e) => startMoveCallout(e, c.id, "box")}
                       onContextMenu={(e) => onCalloutContext(e, c.id, -1)}
                       onDoubleClick={(e) => {
-                        // NEW-2 — native-dblclick fallback for when pointer capture didn't eat it; branches
-                        // on the click LOCATION (interior text → edit; border band → Properties).
+                        // NEW-2 — raw-dispatch path only (a real double-click retargets to the root
+                        // `<svg>` and is resolved by onBgDouble — see onElDouble). Same decision either
+                        // way: the click LOCATION branches it (interior text → edit; border → Properties).
                         e.stopPropagation();
                         calloutDblAction(e, c.id);
                       }} />}
@@ -23435,7 +23510,7 @@ function renderElPx(el, f2p, isSel, tool, settings, startMoveEl, onElDouble, nb,
       return out.length ? out : null;
     })() : null;
     return (
-      <g key={el.id} data-el-id={el.id} filter={st.shadow ? "url(#bldgShadow)" : undefined} style={{ cursor: tool === "select" ? (el.locked ? "pointer" : "move") : "crosshair" }}
+      <g key={el.id} data-el-id={el.id} data-feature={`el:${el.id}`} filter={st.shadow ? "url(#bldgShadow)" : undefined} style={{ cursor: tool === "select" ? (el.locked ? "pointer" : "move") : "crosshair" }}
         onPointerDown={(e) => startMoveEl(e, el.id)} onDoubleClick={(e) => onElDouble && onElDouble(e, el.id)}
         onContextMenu={(e) => { if (onElContext) onElContext(e, el.id); }}>
         <path d={dPath} fill={ghostPath ? addF : waterFill} fillOpacity={waterOp} stroke="none" />
@@ -23531,7 +23606,7 @@ function renderElPx(el, f2p, isSel, tool, settings, startMoveEl, onElDouble, nb,
         if (dimSel) dim.push(<line key="grab" data-testid="el-dim-grab" x1={A.x} y1={A.y} x2={B.x} y2={B.y} stroke="transparent" strokeWidth={14} />);
         dim.push(<text key="tx" data-testid="el-dim" x={M.x + dir.x * (fz * 0.9) - tnx} y={M.y + dir.y * (fz * 0.9) - tny} textAnchor="middle" dominantBaseline="middle" fontSize={fz} fontFamily={NUM_FONT} fontVariantNumeric={TABULAR_NUMS} fill={RED} stroke="#fff" strokeWidth={2.5} paintOrder="stroke" fontWeight="600" {...numHandlers}>{txt}</text>);
         rparts.push(
-          <g key="dim" style={dimSel ? { cursor: "move" } : { pointerEvents: "none" }}
+          <g key="dim" data-el-dim="1" style={dimSel ? { cursor: "move" } : { pointerEvents: "none" }}
             onPointerDown={dimSel ? ((e) => { if (e.button === 0) { e.stopPropagation(); startDimMove(e, el.id); } }) : undefined}>
             {dim}
           </g>,
@@ -23543,7 +23618,7 @@ function renderElPx(el, f2p, isSel, tool, settings, startMoveEl, onElDouble, nb,
     // pavement) so it doesn't sit on the drawn centerline; default rides the centerline as before.
     rparts.push(...inlineLabelEls(roadDenseCenterline(el, settings, sharpFor(el)), el.inlineLabel, st.stroke, el.labelSpacing || INLINE_LABEL_SPACING.road, ppf, f2p, `il${el.id}-`, { size: el.labelSize, halo: el.labelHalo, place: labelPlaceOf(el), lf, insetFt: labelPlaceOf(el) === "inside" ? Math.max(0, (+el.travelW || 0) / 4) : 0 }));
     return (
-      <g key={el.id} data-el-id={el.id} filter={st.shadow ? "url(#bldgShadow)" : undefined} style={{ cursor: tool === "select" ? (el.locked ? "pointer" : "move") : "crosshair" }}
+      <g key={el.id} data-el-id={el.id} data-feature={`el:${el.id}`} filter={st.shadow ? "url(#bldgShadow)" : undefined} style={{ cursor: tool === "select" ? (el.locked ? "pointer" : "move") : "crosshair" }}
         onPointerDown={(e) => startMoveEl(e, el.id)} onDoubleClick={(e) => onElDouble && onElDouble(e, el.id)}
         onContextMenu={(e) => { if (onElContext) onElContext(e, el.id); }}>{rparts}</g>
     );
@@ -23845,7 +23920,7 @@ function renderElPx(el, f2p, isSel, tool, settings, startMoveEl, onElDouble, nb,
     // dimension so the drag/edit handle never vanishes mid-edit. The "Show dimensions" toggle (B121)
     // gates the whole layer. We only HIDE here; B592 keeps the dimension pinned on the footprint.
     if (settings.showDims !== false && ((dimVisible && !dimHidden) || (dimSel && el.type !== "building"))) parts.push(
-      <g key="dim" style={dimSel ? { cursor: "move" } : { pointerEvents: "none" }}
+      <g key="dim" data-el-dim="1" style={dimSel ? { cursor: "move" } : { pointerEvents: "none" }}
         onPointerDown={dimSel ? ((e) => { if (e.button === 0) { e.stopPropagation(); startDimMove(e, el.id); } }) : undefined}>
         {dim}
       </g>,
@@ -23854,7 +23929,7 @@ function renderElPx(el, f2p, isSel, tool, settings, startMoveEl, onElDouble, nb,
   // `data-el-id` on the element's own group (NEW-2/NEW-3): a headless harness can measure ONE
   // element's real rendered geometry — the same identifier the junction outline-cut group already
   // carries. Inert markup: no styling, no behaviour, and it rides through the export clone harmlessly.
-  return <g key={el.id} data-el-id={el.id} transform={`rotate(${el.rot} ${c.x} ${c.y})`} filter={st.shadow ? "url(#bldgShadow)" : undefined} style={{ cursor: tool === "select" ? (el.locked ? "pointer" : "move") : "crosshair" }}
+  return <g key={el.id} data-el-id={el.id} data-feature={`el:${el.id}`} transform={`rotate(${el.rot} ${c.x} ${c.y})`} filter={st.shadow ? "url(#bldgShadow)" : undefined} style={{ cursor: tool === "select" ? (el.locked ? "pointer" : "move") : "crosshair" }}
     onPointerDown={(e) => startMoveEl(e, el.id)} onDoubleClick={(e) => onElDouble && onElDouble(e, el.id)}
     onContextMenu={(e) => { if (onElContext) onElContext(e, el.id); }}>{parts}</g>;
 }

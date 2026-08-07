@@ -463,7 +463,16 @@ rules are binding shorthand, not optional style. (Full-text home so briefs stay 
   3. **A guard that names one component protects one component.** Assert it STRUCTURALLY, on the real render:
      with nothing selected, every element's own centre must answer to that element via `elementFromPoint`.
   Precedents: **B1174** (measurement chips), **B1327** (the parcel acreage badge — the third instance, and the
-  reason this is a named rule; regressed by B1186 moving the badge anchor to `polylabel`). The deliberate
+  reason this is a named rule; regressed by B1186 moving the badge anchor to `polylabel`), and **B50010** (an
+  element's own DIMENSION NUMBER — a road's is anchored to the centreline midpoint, so it is painted ON the
+  pavement and a double-click aimed at the road cannot miss it; the general fix is that chrome sitting over
+  its own object's BODY forwards the press to the body, asked once for every type rather than special-cased).
+  **⛔ AND THE COROLLARY B50008/B50009 ADD: A GESTURE CAN DIE WITH NOTHING EATING IT.** This rule is about
+  chrome swallowing a press, and reading every failure through it is how two other causes survived for
+  months — the pair being measured on a WALL CLOCK read inside the handler (so a busy plan spends the whole
+  budget on queueing delay), and the native `dblclick` retargeting to the root because press 1 re-rendered
+  the node the browser was holding. When a double-click "does nothing", check the CLOCK and the TARGET
+  before hunting for what covered it. The deliberate
   EXCEPTION is user-placed content the user opted into putting on top — a promoted reference (B1198), a markup
   with `behindEls: false` — which is selectable, lockable and demotable in one click from the menu that put it
   there. Guard: the e2e spec **chrome-swallows-press** (mutation-checked both ways).
