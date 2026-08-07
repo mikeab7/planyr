@@ -58,6 +58,12 @@ the always-loaded core. This merges two tracks of work: the mature **Site Planne
 > (it also brings the corrected gate into the branch, so the pre-push hook and CI agree) over an empty
 > `Nudge CI` commit. Resolve the inevitable `BACKLOG.md` conflict by keeping both sides and renumbering
 > nothing.
+> **⚖ AMENDED (B36051, owner decision 2026-08-06): a PEER BRANCH holding your number is an ADVISORY too,
+> not a failure.** Owner, verbatim: *"a number is taken only if main has it. A guess made from stale
+> information about an unmerged branch is not a collision and must not fail a build."* That branch may be
+> renumbered, rebased or abandoned, and whoever merges SECOND renumbers — so the gate NAMES the peer and
+> lets the build through. **`origin/main` already holding the id is now the ONE fatal case**, and it is
+> untouched: two headings, one number, guaranteed the moment you merge.
 >
 > **⏱ LATE-BIND the real number — assign it as the LAST step before you push, against fresh main (B779).**
 > `next-id` reads only YOUR branch, so if you stamp a real `B###`/`V###` at the *start* of a session, a
@@ -346,6 +352,18 @@ Runtime deps are kept few and deliberate. New client dependency added 2026-07-10
   part of what "commit" already authorized. The only acceptable stop short of live is a
   hard blocker (merge conflict, red required check, protection that rejects the merge) —
   report _that_, not a request for permission.
+- **⛔ AFTER ANY CHANGE TO A PR TITLE — which every renumber causes — DISABLE AND RE-ENABLE
+  AUTO-MERGE. GitHub snapshots the squash commit message when auto-merge is ARMED, not when it
+  fires, and a later title edit does NOT update that frozen copy (B225984, 2026-08-07).** PR #931
+  armed auto-merge while its ids read `B3001–B3004`, was renumbered three more times, merged with
+  a correct title and correct files — and `main` still carries `fdcb02d`, whose subject announces
+  **retired ids that name no heading anywhere**. That is the #865/#866 defect arriving through the
+  one door B779's announcement check cannot see: that check guards the commit **you** push, and
+  this message never passed through your branch. Re-arming is the whole remedy; it costs two API
+  calls. **No machine guard exists for this and one was deliberately not built** — scanning `main`'s
+  log needs full history, and CI checks out depth 1, so the guard would pass trivially and rot green
+  (the failure mode VIEW-INDEPENDENT-ONCE §6 names). The reasoning is on B225984 so it is not
+  re-litigated.
 - **The required `build` check often does NOT auto-start on a PR you open via the GitHub
   MCP / automation — un-stick it yourself with a nudge commit; NEVER hand this to Michael.**
   GitHub suppresses `pull_request`/`push` workflow triggers for PRs opened or pushed by the

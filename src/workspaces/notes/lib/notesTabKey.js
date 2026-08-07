@@ -1,24 +1,45 @@
-/* notesTabKey — TAB BELONGS TO THE DOCUMENT WHILE THE CARET IS IN IT (B1392).
+/* notesTabKey — TAB BELONGS TO THE DOCUMENT WHILE THE CARET IS IN IT (B1392, and B1392 ×2
+ * which is the one that made it true in EVERY context rather than usually).
  *
- * THE BUG, in the owner's words: "when I press tab, sometimes Chrome grabs it, and it
- * doesn't hit tab on the notebook at all. It takes me to this dropdown on Chrome unrelated
- * to the web page." Tab is the browser's own focus key, so any press the document declines
- * falls through to the page chrome and then to the browser's toolbar — mid-sentence.
+ * THE ORIGINAL BUG, in the owner's words: "when I press tab, sometimes Chrome grabs it, and
+ * it doesn't hit tab on the notebook at all." Tab is the browser's own focus key, so any
+ * press the document declines falls through to the page chrome and then to the browser's
+ * toolbar — mid-sentence.
  *
- * "SOMETIMES" WAS THE WHOLE DIAGNOSIS, and it was measured in a real browser before a line
- * of this was written rather than guessed at. The editor's own extensions already claim Tab
- * in exactly two situations, and the escape happened in every other one:
+ * ⛔ THE RECURRENCE, and the word that matters: *"the tab doesn't always work correctly."*
+ * ALWAYS. B1392 fixed the contexts that existed when it was written and left the rest
+ * undefined — and three of the surfaces it never saw (a selected node, the last cell of a
+ * table, the page title, a sketch box's two fields) arrived afterwards. "Usually" is not a
+ * specification, so this file now states what Tab does in EVERY context and the harness
+ * drives every one of them.
  *
- *   in a table cell            TABLE handles it (next / previous cell)      — never escaped
- *   in a nested-able list item LIST handles it (indent / outdent)           — never escaped
- *   in the FIRST list item     list has nothing to indent INTO → declines   — ESCAPED
- *   in a plain paragraph       nobody claims it                             — ESCAPED
- *   in an empty document       nobody claims it                             — ESCAPED
+ * ═══════════════════════════════════════════════════════════════════════════════════════
+ * WHAT TAB DOES, EVERYWHERE. This table is the specification; the code below implements it
+ * and `ui-audit/verify-notes.mjs` §26 asserts each row by its OUTCOME, not by whether a
+ * handler ran.
+ * ═══════════════════════════════════════════════════════════════════════════════════════
+ *   plain paragraph               inserts a real tab character            (was: ✓)
+ *   empty document                inserts a real tab character            (was: ✓)
+ *   FIRST item of a list          nothing — a list has nothing to indent INTO, and a tab
+ *                                 wedged into a bullet is a document nobody asked for
+ *   nested / later list item      LIST indents (Shift+Tab outdents)       — never reached here
+ *   table cell                    TABLE steps to the next cell            — never reached here
+ *   LAST cell of a table          ⛔ NEW — adds a ROW and lands in its first cell, which is
+ *                                 what Word and Google Docs do. It used to fall through to
+ *                                 this fallback and wedge a tab character into the last cell.
+ *   ⛔ A SELECTED NODE            ⛔ NEW, and this one was DESTRUCTIVE. With an image or a
+ *   (image, sketch)               sketch selected, `insertContent` REPLACED THE SELECTION —
+ *                                 pressing Tab deleted the picture and left a tab character
+ *                                 where it had been. Tab now moves the caret to just after
+ *                                 the node and changes nothing.
+ *   page TITLE field              moves the caret INTO the document body (Shift+Tab goes
+ *                                 back out to the toolbar) — handled in NoteEditor.jsx
+ *   sketch box LABEL field        moves to that box's detail field        — notesSketchEditor
+ *   sketch box DETAIL field       closes the box and returns to the document — same file
  *
  * So this is a FALLBACK, not a blanket swallow: it is registered at a LOW PRIORITY, which
  * puts its keymap after the table's and the list's. Those still run first and still win
- * whenever they can act, and this only ever sees the presses they turned down. Indenting a
- * list, outdenting it, and stepping through a table's cells are untouched.
+ * whenever they can act, and this only ever sees the presses they turned down.
  *
  * ⛔ THE ESCAPE HATCH IS NOT OPTIONAL. A key that never leaves is a keyboard trap: someone
  * working without a mouse would be sealed inside the note with no way to reach the toolbar
@@ -28,7 +49,7 @@
  * it is discoverable by screen reader rather than folklore.
  */
 import { Extension } from "@tiptap/core";
-import { Plugin, PluginKey } from "@tiptap/pm/state";
+import { NodeSelection, Plugin, PluginKey } from "@tiptap/pm/state";
 
 /** One tab stop, as a real character in the document. It survives export (Markdown and the
  *  print sheet both carry text verbatim) and it round-trips through storage, which an
@@ -46,6 +67,22 @@ const releaseKey = new PluginKey("noteTabRelease");
  *  is "nothing to do" — NOT a tab character wedged into a bullet, which is a document nobody
  *  asked for and cannot outdent again. */
 const inList = (editor) => editor.isActive("listItem") || editor.isActive("taskItem");
+
+/** ⛔ A NON-TEXT SELECTION IS A NODE THE USER HAS SELECTED — a picture, a sketch. Inserting
+ *  anything at all REPLACES it, so the old fallback's `insertContent(TAB_CHAR)` destroyed a
+ *  picture on a stray Tab and left a tab character in the hole. Tab must never delete
+ *  content it was not asked to delete. */
+/*  ⛔ `instanceof`, NEVER `constructor.name`. The first version of this guard tested the
+ *  class NAME — which is correct in development and MEANINGLESS in the shipped bundle,
+ *  because the minifier renames the class. It would have passed every local check and
+ *  destroyed pictures in production: exactly the "green here, broken in the field" shape
+ *  that B1393 ×2 was about. The headless run against the real BUILT bundle caught it. */
+const nodeSelected = (editor) => editor.state.selection instanceof NodeSelection;
+
+/** In a table, `goToNextCell` declines at the LAST cell — the press then fell through here
+ *  and wedged a tab character into that cell. Word and Google Docs add a row instead, which
+ *  is the only reading of "next cell" that is ever wanted at the end of a table. */
+const inTable = (editor) => editor.isActive("table");
 
 const NoteTabKey = Extension.create({
   name: "noteTabKey",
@@ -68,12 +105,24 @@ const NoteTabKey = Extension.create({
       Tab: () => {
         if (this.storage.released) return release();
         if (inList(this.editor)) return true;
+        // The last cell of a table: grow the table rather than corrupt the cell.
+        if (inTable(this.editor)) return this.editor.commands.addRowAfter() || true;
+        // A selected picture or sketch: step past it. NEVER replace it.
+        if (nodeSelected(this.editor)) {
+          const to = this.editor.state.selection.to;
+          return this.editor.chain().focus().setTextSelection(to).run() || true;
+        }
         return this.editor.commands.insertContent(TAB_CHAR) || true;
       },
 
       "Shift-Tab": () => {
         if (this.storage.released) return release();
         if (inList(this.editor)) return true;
+        if (inTable(this.editor)) return true;          // the table keymap already declined; do nothing
+        if (nodeSelected(this.editor)) {
+          const from = this.editor.state.selection.from;
+          return this.editor.chain().focus().setTextSelection(from).run() || true;
+        }
         // Outdent, in a plain paragraph, means take back the tab stop you just added.
         // With nothing to take back it still swallows the key: Shift+Tab is focus-BACKWARD
         // in the browser, so declining here would walk the caret out of the note just as

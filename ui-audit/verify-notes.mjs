@@ -647,26 +647,29 @@ tree = await readTree();
 const order = (tree.pages || []).map((p) => p.id);
 ok("A PAGE CAN BE REORDERED AMONG ITS SIBLINGS", order.indexOf(page1) > 0, order.join(" → "));
 
-/* ════ 16. Timestamps, and the Recent view they make possible ══════════════════════════ */
+/* ════ 16. Timestamps — kept in the model, shown on a hover ════════════════════════════ */
 tree = await readTree();
 const stamped = flatPages(tree).map((x) => x.node).filter((p) => Number.isFinite(p.updatedAt));
 ok("EVERY PAGE NOW RECORDS WHEN IT WAS LAST TOUCHED", stamped.length >= 3, `${stamped.length} stamped`);
 /* ⛔ AND IT IS NOT A PERMANENT COLUMN ON EVERY ROW (B1420). It was noise the owner read
- * past — Recent is where recency is the point. It survives as the row's hover title. */
+ * past. It survives as the row's hover title, and after B36050 that is the whole of it. */
 ok("⛔ THE TIMESTAMP IS OFF THE ROW — a hover, not a column",
   await page.locator(`[data-testid="notes-when-${page1}"]`).count() === 0);
 ok("...but it is still THERE, on the row's own title", /edited/i.test(await tb(`notes-row-${page1}`).getAttribute("title") || ""),
   await tb(`notes-row-${page1}`).getAttribute("title"));
 
-await tb("notes-view-recent").click();
-await page.waitForTimeout(400);
-const recentRows = await page.locator('[data-testid="notes-recent-list"] button').count();
-ok("A RECENT VIEW LISTS PAGES BY WHEN THEY WERE EDITED", recentRows >= 3, `${recentRows} row(s)`);
-const firstRecent = await page.locator('[data-testid="notes-recent-list"] button').first().getAttribute("data-testid");
-const newest = flatPages(tree).map((x) => x.node).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))[0];
-ok("...newest first", firstRecent === `notes-recent-${newest.id}`, `${firstRecent} vs ${newest.id}`);
-await tb("notes-view-tree").click();
-await page.waitForTimeout(300);
+/* ⛔ AND THE RECENT VIEW IS GONE (B36050). Owner: *"I don't think I need a recent option."*
+   Two segments, not three — and the timestamp DATA is deliberately untouched underneath, so
+   this is a component that was removed, not a schema that was migrated. */
+ok("⛔ THE RECENT TAB IS GONE — two segments, Pages and Bin",
+  await tb("notes-view-recent").count() === 0
+  && await tb("notes-view-tree").count() === 1
+  && await tb("notes-view-bin").count() === 1);
+ok("...and the tab strip really is down to two",
+  await page.locator('[role="tablist"][aria-label="Notes view"] button').count() === 2,
+  `${await page.locator('[role="tablist"][aria-label="Notes view"] button').count()} tab(s)`);
+ok("⛔ ...while the times themselves are STILL IN THE MODEL — nothing was orphaned to remove a view",
+  flatPages(await readTree()).map((x) => x.node).filter((p) => Number.isFinite(p.updatedAt)).length >= 3);
 
 /* ════ 17. Search lands you ON the phrase, and Esc gives the tree back ═════════════════ */
 await tb("notes-search").fill("bayou");
@@ -893,29 +896,26 @@ ok("...and it does NOT slide right as the window widens — the whole 'aligned t
 const mat = await tb("note-mat").boundingBox();
 const bodyBox = await tb("note-body").boundingBox();
 const blankClickY = Math.min(mat.y + mat.height - 40, bodyBox.y + bodyBox.height + 60);
+const parasBefore = nodesOf(await readBody(r3Page), "paragraph").length;
 await page.mouse.click(bodyBox.x + 40, blankClickY);
 await page.waitForTimeout(200);
 const focusedAfterBlankClick = await page.evaluate(() => !!document.activeElement?.closest?.(".ProseMirror"));
 await page.keyboard.type("CLICKED-THE-BLANK-PART", { delay: 6 });
 await settle();
-/* ⛔ AMENDED (B1393 ×2): "the keystroke arrived" is NOT the property. Where the words end up
- * is. This now demands the text render at the height that was pressed. */
-const blankLanded = await page.evaluate(() => {
-  const w = document.createTreeWalker(document.querySelector('[data-testid="note-body"]'), NodeFilter.SHOW_TEXT);
-  let n;
-  while ((n = w.nextNode())) {
-    const i = (n.textContent || "").indexOf("CLICKED-THE-BLANK-PART");
-    if (i < 0) continue;
-    const r = document.createRange();
-    r.setStart(n, i); r.setEnd(n, i + 22);
-    return r.getBoundingClientRect().y;
-  }
-  return null;
-});
-ok("clicking the empty space BELOW the text puts the caret THERE, and typing lands there",
-  focusedAfterBlankClick && textOf(await readBody(r3Page)).includes("CLICKED-THE-BLANK-PART")
-  && blankLanded != null && Math.abs(blankLanded - blankClickY) <= 40,
-  blankLanded == null ? "no marker" : `pressed y=${Math.round(blankClickY)} · landed y=${Math.round(blankLanded)}`);
+/* ⛔ AMENDED TWICE, and the second amendment is the owner's own testing (B1393 ×3).
+ * B1392's version asserted only that a keystroke arrived. B1393 ×2's asserted the text
+ * rendered at the pressed HEIGHT — which a build that reached that height by injecting six
+ * empty paragraphs satisfies perfectly, and that is exactly what shipped and what he
+ * rejected. The property now is the DOCUMENT: the words arrive, and the press cost the
+ * document at most ONE new line and no alignment at all. */
+const blankDoc = await readBody(r3Page);
+ok("clicking the empty space BELOW the text lands the caret and typing goes in",
+  focusedAfterBlankClick && textOf(blankDoc).includes("CLICKED-THE-BLANK-PART"));
+ok("⛔ ...and it padded NOTHING to get there — at most one new line, never a stack of blanks",
+  nodesOf(blankDoc, "paragraph").length <= parasBefore + 1,
+  `${parasBefore} → ${nodesOf(blankDoc, "paragraph").length} paragraph(s)`);
+ok("⛔ ...and left no alignment behind",
+  !/"textAlign":"(center|right|justify)"/.test(JSON.stringify(blankDoc)));
 
 /* Beside the text, out to the right of a short line — the other half of the dead zone. */
 await page.mouse.click(bodyBox.x + bodyBox.width - 20, bodyBox.y + 12);
@@ -1258,10 +1258,18 @@ ok("TAB IN A TABLE STILL MOVES TO THE NEXT CELL — the fallback sits behind it,
 await clearBody();
 await page.keyboard.type("about to leave", { delay: 6 });
 await page.keyboard.press("Escape");
+console.log("DBG released after Escape:", await page.evaluate(() => {
+  const el = document.querySelector('[data-testid="note-body"]');
+  return el ? String(!!el.closest(".planyr-note")) : "no body";
+}));
 await page.keyboard.press("Tab");
 await page.waitForTimeout(200);
+console.log("DBG doc text after tab:", JSON.stringify((await page.locator('[data-testid="note-body"]').innerText()).slice(0,40)));
 ok("ESCAPE THEN TAB LEAVES THE NOTE — the keyboard-only escape hatch is real, not a promise",
-  !(await inDoc()));
+  !(await inDoc()), await page.evaluate(() => {
+    const a = document.activeElement;
+    return a ? `${a.tagName}[${a.getAttribute("data-testid") || a.className || ""}]` : "nothing";
+  }));
 
 /* ...and the release is single-use: typing takes it back, so you cannot end up in a mode
    where Tab silently stopped indenting. */
@@ -1273,122 +1281,80 @@ ok("...and typing takes the release back — the next Tab indents again, no ling
   await inDoc());
 await settle();
 
-/* ---- B1393 ×2: CLICK AND TYPE — the caret lands WHERE YOU CLICKED ----------------------
+/* ---- B1393 ×3: A PRESS IN BLANK SPACE PUTS THE CARET THERE AND DOES NOTHING ELSE -------
  *
- * ⛔ THIS BLOCK REPLACES THE ORIGINAL B1393 CHECKS RATHER THAN SITTING BESIDE THEM, and the
- * reason is the whole lesson of the recurrence. The old ones asserted that the editor took
- * FOCUS and that a keystroke ARRIVED — both of which were true on the broken build, which is
- * why they were green while the owner was telling us twice that it did not work. **A test
- * that would pass on the broken build is not a test.** These assert the caret's RESULTING
- * POSITION: type a marker and demand it renders down where the press was, not at the top.
+ * ⛔ THESE ASSERT THE RESULTING DOCUMENT. Not focus, not that a handler ran — the owner has
+ * now been failed twice by checks that did. B1393's asserted focus (green on a build that
+ * typed on line one); B1393 ×2's asserted the caret's landing HEIGHT, which was true of a
+ * build that reached that height by injecting six empty paragraphs and centring the text.
+ * So the questions these ask are the ones he actually asked of the live app: **how many
+ * paragraphs are in the document, and does any of them carry an alignment?**
  *
- * The measurement is the marker's own rendered box, read out of the live DOM — not the
- * selection object, not the document JSON. Where the words END UP on screen is the thing the
- * owner is looking at, so it is the thing asserted. */
+ * What he found on the shipped build, all reproduced: the line crawled left as he typed
+ * (every character re-centres a centred paragraph); the alignment was inherited by the next
+ * paragraph on Enter; the same gesture behaved differently depending on whether the press
+ * happened to land on an existing empty paragraph; and the padding paragraphs were permanent
+ * — in storage, in the Markdown and on the PDF, six backspaces deep. */
 
-/* A brand-new empty page, which is the exact case in his report. */
 await clearBody();
 await settle();
+const emptyBefore = await readBody(r4Page);
+ok("the page starts as a single empty paragraph", nodesOf(emptyBefore, "paragraph").length === 1);
 
 const matBox = await tb("note-mat").boundingBox();
 const bodyBox2 = await tb("note-body").boundingBox();
-/* Well down the page and far to the right of the text column — his own coordinates, scaled
- * into this window: past two thirds across, and a long way below the single empty line. */
+/* His own gesture: well down the page and far to the right of the text column. */
 const clickX = bodyBox2.x + bodyBox2.width * 0.78;
 const clickY = Math.min(matBox.y + matBox.height - 60, bodyBox2.y + 260);
 
 await page.mouse.dblclick(clickX, clickY);
 await page.waitForTimeout(220);
-await page.keyboard.type("ZZTEST", { delay: 8 });
+await page.keyboard.type("AAA", { delay: 8 });
 await settle();
+const afterClickType = await readBody(r4Page);
 
-/** Where did the marker actually render? */
-const markerBox = async (text) => page.evaluate((t) => {
-  const walker = document.createTreeWalker(document.querySelector('[data-testid="note-body"]'), NodeFilter.SHOW_TEXT);
-  let n;
-  while ((n = walker.nextNode())) {
-    const i = (n.textContent || "").indexOf(t);
-    if (i < 0) continue;
-    const r = document.createRange();
-    r.setStart(n, i); r.setEnd(n, i + t.length);
-    const b = r.getBoundingClientRect();
-    return { x: b.x, y: b.y, w: b.width, h: b.height };
-  }
-  return null;
-}, text);
+ok("⛔ EXACTLY ONE PARAGRAPH EXISTS — no padding was injected to reach the press (B1393 ×3)",
+  nodesOf(afterClickType, "paragraph").length === 1,
+  `${nodesOf(afterClickType, "paragraph").length} paragraph(s): ${JSON.stringify(textOf(afterClickType)).slice(0, 60)}`);
+ok("⛔ ...AND IT CARRIES NO ALIGNMENT — the centring that made the line crawl as he typed is gone",
+  !/"textAlign":"(center|right|justify)"/.test(JSON.stringify(afterClickType)),
+  (JSON.stringify(afterClickType).match(/"textAlign":"[a-z]+"/g) || ["none"]).join(","));
+ok("...and the words he typed are the ONLY content — no stray whitespace, tabs or blank lines",
+  textOf(afterClickType).trim() === "AAA", JSON.stringify(textOf(afterClickType)));
 
-const landedAt = await markerBox("ZZTEST");
-ok("⛔ DOUBLE-CLICKING BLANK SPACE AND TYPING PUTS THE WORDS THERE — not on line one (B1393 ×2)",
-  !!landedAt && Math.abs(landedAt.y - clickY) <= 40,
-  landedAt ? `clicked y=${Math.round(clickY)} · text landed y=${Math.round(landedAt.y)}` : "the marker is nowhere on the page");
-ok("...and DEMONSTRABLY not at the top of the page, which is what the old check could not tell apart",
-  !!landedAt && landedAt.y - bodyBox2.y > 120,
-  landedAt ? `${Math.round(landedAt.y - bodyBox2.y)} below the first line` : "no marker");
-ok("...and it took the alignment from where across the column it was pressed, the way Word does",
-  !!landedAt && landedAt.x > bodyBox2.x + bodyBox2.width * 0.4,
-  landedAt ? `text x=${Math.round(landedAt.x)} vs column left ${Math.round(bodyBox2.x)}` : "no marker");
+/* ⛔ ENTER MUST NOT INHERIT AN ALIGNMENT THAT NO LONGER EXISTS — his consequence (2). */
+await page.keyboard.press("Enter");
+await page.keyboard.type("BBB", { delay: 8 });
+await settle();
+const afterEnter = await readBody(r4Page);
+ok("⛔ ENTER AFTER A BLANK-SPACE PRESS MAKES A PLAIN PARAGRAPH — no alignment inherited from nowhere",
+  !/"textAlign":"(center|right|justify)"/.test(JSON.stringify(afterEnter))
+  && nodesOf(afterEnter, "paragraph").length === 2,
+  `${nodesOf(afterEnter, "paragraph").length} paragraph(s), align ${(JSON.stringify(afterEnter).match(/"textAlign":"[a-z]+"/g) || ["none"]).join(",")}`);
 
-/* A SINGLE click must do exactly the same thing — the owner does not think of them as two
- * different gestures, and a page where one works and the other does not is worse than
- * neither working, because it looks intermittent. */
+/* ⛔ THE SAME GESTURE TWICE GIVES THE SAME ANSWER — his consequence (3). One press below a
+ * NON-empty last block adds exactly one line; a second press, now that the last block IS
+ * empty, adds none. Deterministic, and stated rather than emergent. */
 await clearBody();
+await page.keyboard.type("only line", { delay: 8 });
 await settle();
-const singleY = Math.min(matBox.y + matBox.height - 60, bodyBox2.y + 200);
-await page.mouse.click(bodyBox2.x + 60, singleY);
-await page.waitForTimeout(200);
-await page.keyboard.type("SINGLECLICK", { delay: 8 });
+const oneLine = nodesOf(await readBody(r4Page), "paragraph").length;
+await page.mouse.click(bodyBox2.x + 60, clickY);
+await page.waitForTimeout(250);
 await settle();
-const singleAt = await markerBox("SINGLECLICK");
-ok("⛔ A SINGLE CLICK IN BLANK SPACE DOES THE SAME — one gesture, one behaviour",
-  !!singleAt && Math.abs(singleAt.y - singleY) <= 40,
-  singleAt ? `clicked y=${Math.round(singleY)} · text landed y=${Math.round(singleAt.y)}` : "no marker");
+const afterFirst = nodesOf(await readBody(r4Page), "paragraph").length;
+await page.mouse.click(bodyBox2.x + 400, clickY + 30);
+await page.waitForTimeout(250);
+await settle();
+const afterSecond = nodesOf(await readBody(r4Page), "paragraph").length;
+ok("⛔ A PRESS BELOW THE TEXT ADDS AT MOST ONE LINE, AND ONLY WHEN THERE ISN'T ONE ALREADY",
+  afterFirst === oneLine + 1 && afterSecond === afterFirst,
+  `${oneLine} → ${afterFirst} → ${afterSecond} paragraph(s)`);
+ok("...and neither press left an alignment behind, wherever across the column it landed",
+  !/"textAlign":"(center|right|justify)"/.test(JSON.stringify(await readBody(r4Page))));
 
-/* ⛔ NOTHING IS LEFT BEHIND. Click into blank space, DON'T type, click away — Word removes
- * the paragraphs it speculatively made, and so must this, or every stray press fattens the
- * document forever. */
-await clearBody();
-await settle();
-const cleanBefore = JSON.stringify(await readBody(r4Page));
-await page.mouse.dblclick(bodyBox2.x + 60, Math.min(matBox.y + matBox.height - 60, bodyBox2.y + 220));
-await page.waitForTimeout(220);
-const claimed = await page.evaluate(() => document.querySelectorAll('[data-testid="note-body"] > p').length);
-ok("pressing blank space really does make the paragraphs needed to get there",
-  claimed > 1, `${claimed} paragraph(s) while the caret waits`);
-await page.locator("body").click({ position: { x: 4, y: 4 } });    // click away without typing
-await page.waitForTimeout(400);
-await settle();
-ok("⛔ ...AND THEY ARE REMOVED WHEN YOU CLICK AWAY WITHOUT TYPING — no orphan paragraphs",
-  JSON.stringify(await readBody(r4Page)) === cleanBefore,
-  `${await page.evaluate(() => document.querySelectorAll('[data-testid="note-body"] > p').length)} paragraph(s) left`);
-
-/* …but paragraphs you DID type into are yours and stay put, including after a reload — the
- * other half, and the one that would break if the cleanup were too eager. */
-await page.mouse.dblclick(bodyBox2.x + 60, Math.min(matBox.y + matBox.height - 60, bodyBox2.y + 220));
-await page.waitForTimeout(220);
-await page.keyboard.type("KEEPER", { delay: 8 });
-await settle();
-await page.locator("body").click({ position: { x: 4, y: 4 } });
-await page.waitForTimeout(400);
-await settle();
-const keptDoc = await readBody(r4Page);
-ok("⛔ ...while a paragraph you TYPED into survives the same click-away",
-  textOf(keptDoc).includes("KEEPER") && JSON.stringify(keptDoc).match(/"paragraph"/g).length > 1,
-  `${(JSON.stringify(keptDoc).match(/"paragraph"/g) || []).length} paragraph(s)`);
-await page.reload({ waitUntil: "load" });
-await page.waitForTimeout(1800);
-await page.locator('[data-testid="module-tab-notes"]:visible').first().click();
-await page.waitForSelector('[data-testid="notes-tree"]', { timeout: 15000 });
-await rowClick(r4Page);
-await page.waitForSelector('[data-testid="note-body"]', { timeout: 15000 });
-await page.waitForTimeout(700);
-const reloadedAt = await markerBox("KEEPER");
-const reloadedBody = await tb("note-body").boundingBox();
-ok("⛔ ...and it is STILL down the page after a reload — the position is in the document, not in the view",
-  !!reloadedAt && reloadedAt.y - reloadedBody.y > 100,
-  reloadedAt ? `${Math.round(reloadedAt.y - reloadedBody.y)} below the first line` : "no marker");
-
-/* ⛔ …and double-clicking a WORD still SELECTS that word. The new behaviour is for blank
-   space only; taking word-select away would be a worse bug than the one being fixed. */
+/* ⛔ …and double-clicking a WORD still SELECTS that word, and typing replaces it. This is the
+   half that must survive every rewrite of the press path. */
 await clearBody();
 await page.keyboard.type("alpha beta gamma", { delay: 6 });
 await settle();
@@ -1405,9 +1371,58 @@ await page.mouse.dblclick(betaBox.x, betaBox.y);
 await page.waitForTimeout(150);
 await page.keyboard.type("BRAVO", { delay: 6 });
 await settle();
-ok("DOUBLE-CLICKING A WORD STILL SELECTS IT — only blank space got the new behaviour",
+ok("DOUBLE-CLICKING A WORD STILL SELECTS IT — and typing replaces it",
   textOf(await readBody(r4Page)).replace(/\s+/g, " ").includes("alpha BRAVO gamma"),
   textOf(await readBody(r4Page)));
+
+/* ---- HOME and END, in every context (owner check, same round) --------------------------
+ *
+ * He reported End not moving the caret to the end of a CENTRED line. Driven here in every
+ * context the caret can be in, asserting the caret's RESULTING OFFSET rather than the
+ * keypress: all of them are correct, including the centred case — which is consistent with
+ * the report being a symptom of the crawling text (the caret WAS at the end; the paragraph
+ * kept re-centring under it) rather than a second defect. Guarded from here on either way. */
+const caretOffset = () => page.evaluate(() => {
+  const sel = window.getSelection();
+  if (!sel || !sel.anchorNode) return null;
+  return { text: (sel.anchorNode.textContent || ""), off: sel.anchorOffset };
+});
+const homeEnd = async (label, expect) => {
+  await page.keyboard.press("ArrowLeft");
+  await page.keyboard.press("ArrowLeft");
+  await page.keyboard.press("Home");
+  const atHome = await caretOffset();
+  await page.keyboard.press("End");
+  const atEnd = await caretOffset();
+  ok(`HOME and END move the caret in ${label}`,
+    !!atHome && atHome.off === 0 && !!atEnd && atEnd.off === expect.length,
+    `Home→${atHome?.off} End→${atEnd?.off} of ${expect.length}`);
+};
+
+await clearBody();
+await page.keyboard.type("plain line here", { delay: 6 });
+await homeEnd("a plain paragraph", "plain line here");
+
+await clearBody();
+await page.keyboard.type("- bullet line here", { delay: 6 });
+await homeEnd("a list item", "bullet line here");
+
+await clearBody();
+await page.keyboard.type("centred line here", { delay: 6 });
+await tb("nt-more").click().catch(() => {});
+await page.waitForTimeout(250);
+await tb("nt-align-center").click().catch(() => {});
+await page.waitForTimeout(250);
+await homeEnd("a CENTRED paragraph — the case he reported", "centred line here");
+
+await clearBody();
+await tb("nt-table").click();
+await page.waitForSelector('[data-testid="nt-table-grid"]', { timeout: 5000 });
+await tb("nt-table-cell-2-2").click();
+await page.waitForTimeout(400);
+await page.keyboard.type("cell line here", { delay: 6 });
+await homeEnd("a table cell", "cell line here");
+await clearBody();
 
 /* ---- B1391: TWO WINDOWS OF THE SAME PERSON, which is the state the false alarm came from ----
 
@@ -2087,6 +2102,342 @@ ok("⛔ PANEL-BREVITY — inside a project the whole rail is well under what it 
 ok("⛔ ...and so is the Dashboard, which now carries MORE information in FEWER lines",
   onDash.lines <= 26 && onDash.chars <= 280,
   `${onDash.lines} lines / ${onDash.chars} chars / ${onDash.rows} rows (was 38 / 335 / 15)`);
+
+/* ════ 26. TAB, IN EVERY CONTEXT — and PASTE JUST THE TEXT (B1392 ×2 · B36051) ═══════════
+ *
+ * ⛔ THE WORD IN THE REPORT IS "ALWAYS": *"the tab doesn't always work correctly."* B1392
+ * defined Tab for the contexts that existed when it was written and left the rest to chance,
+ * and three surfaces arrived afterwards. So this section is an ENUMERATION — every context
+ * the caret can be in, driven, and each one asserted by WHAT ACTUALLY HAPPENED rather than
+ * by whether a handler ran. The contexts §23 already covers (plain paragraph, empty document,
+ * first list item, later list item, table next-cell, and the Escape-then-Tab hatch) are not
+ * repeated; these are the ones that were undefined.
+ * ═══════════════════════════════════════════════════════════════════════════════════════ */
+
+await goProject(null);
+await page.waitForTimeout(400);
+await tb("notes-new-page").click();
+await page.waitForSelector('[data-testid="note-body"]', { timeout: 15000 });
+await page.waitForTimeout(900);
+const tabPage = (await readTree()).pages[(await readTree()).pages.length - 1].id;
+
+/* ---- the PAGE TITLE field: Tab used to be Chrome's focus key on this surface ---- */
+await tb("note-title").click();
+await page.waitForTimeout(150);
+await page.keyboard.press("Tab");
+await page.waitForTimeout(200);
+ok("⛔ TAB OUT OF THE PAGE TITLE LANDS IN THE DOCUMENT — it used to hand the key to Chrome",
+  await inDoc(), "focus is outside the document");
+await page.keyboard.type("FROMTITLE", { delay: 8 });
+await settle();
+ok("...and typing straight afterwards goes into the page, which is the point of it",
+  textOf(await readBody(tabPage)).includes("FROMTITLE"));
+
+/* ---- the LAST CELL of a table: Word and Google Docs add a row; we used to wedge a tab ---- */
+await clearBody();
+await tb("nt-table").click();
+await page.waitForSelector('[data-testid="nt-table-grid"]', { timeout: 5000 });
+await tb("nt-table-cell-2-2").click();
+await page.waitForTimeout(500);
+await page.keyboard.type("x", { delay: 8 });
+await settle();                                   // the table has to be ON DISK before it is counted
+const rowsBeforeTab = nodesOf(await readBody(tabPage), "tableRow").length;
+ok("a table is on the page to walk to the end of", rowsBeforeTab >= 2, `${rowsBeforeTab} row(s)`);
+/* Walk to the very last cell: a 2×2 table is header row + one body row, so three Tabs from
+ * the first cell lands on the last one. */
+await page.keyboard.press("Tab");
+await page.keyboard.press("Tab");
+await page.keyboard.press("Tab");
+await page.waitForTimeout(200);
+await page.keyboard.press("Tab");           // the press that used to fall through
+await page.waitForTimeout(300);
+await settle();
+const afterLastCell = await readBody(tabPage);
+ok("⛔ TAB IN THE LAST CELL OF A TABLE ADDS A ROW — it used to wedge a tab character into the cell",
+  nodesOf(afterLastCell, "tableRow").length === rowsBeforeTab + 1 && !textOf(afterLastCell).includes("\t"),
+  `${rowsBeforeTab} → ${nodesOf(afterLastCell, "tableRow").length} row(s)`);
+
+/* ---- ⛔ A SELECTED NODE. This was DESTRUCTIVE: `insertContent` replaced the selection, so
+ * Tab with a picture selected DELETED THE PICTURE and left a tab character in the hole. ---- */
+await clearBody();
+await pasteImage(180);
+await settle();
+const withImage = await readBody(tabPage);
+ok("a picture is on the page, ready to be selected", nodesOf(withImage, "noteImage").length === 1);
+/* Select the node itself, the way a click on a picture does. */
+await page.evaluate(() => {
+  const img = document.querySelector('[data-testid="note-image"]');
+  img?.click();
+});
+await page.waitForTimeout(200);
+await page.keyboard.press("Tab");
+await page.waitForTimeout(250);
+await settle();
+const afterNodeTab = await readBody(tabPage);
+ok("⛔ TAB WITH A PICTURE SELECTED DOES NOT DESTROY IT — it used to replace the picture with a tab character",
+  nodesOf(afterNodeTab, "noteImage").length === 1,
+  `${nodesOf(afterNodeTab, "noteImage").length} picture(s) left`);
+ok("...and it inserted no stray tab character either",
+  !textOf(afterNodeTab).includes("\t"));
+
+/* ---- a SKETCH BOX's two fields: Tab walked out of the note from both ---- */
+await clearBody();
+/* A sketch has to EXIST before its box editor can be opened — the Box button turns the word
+ * you just wrote into one, which is the shortest real route to the state under test. */
+await typeInBody("Acquisition");
+await page.waitForTimeout(200);
+await tb("nt-box").click();
+await page.waitForSelector('[data-testid="note-sketch"]', { timeout: 15000 });
+await page.waitForTimeout(700);
+const skCanvas = await page.locator("[data-sketch-canvas]").boundingBox();
+await page.mouse.dblclick(skCanvas.x + skCanvas.width - 60, skCanvas.y + skCanvas.height - 40);
+await page.waitForTimeout(500);
+const madeSketch = await page.locator('[data-testid="sketch-box-label"]:visible').count() === 1;
+if (madeSketch) {
+  await page.keyboard.type("Acquisition", { delay: 8 });
+  await page.keyboard.press("Tab");
+  await page.waitForTimeout(250);
+  const inBody = await page.evaluate(() => document.activeElement?.getAttribute("data-testid"));
+  ok("⛔ TAB IN A SKETCH BOX'S LABEL MOVES TO ITS DETAIL FIELD — it used to leave the note",
+    inBody === "sketch-box-body", inBody || "focus went nowhere we can name");
+  await page.keyboard.type("Order the commitment.", { delay: 6 });
+  await page.keyboard.press("Tab");
+  await page.waitForTimeout(300);
+  const leftFields = await page.evaluate(() => document.activeElement?.getAttribute("data-testid"));
+  ok("⛔ ...and TAB FROM THE DETAIL FIELD closes the box rather than handing the key to Chrome",
+    leftFields !== "sketch-box-body" && leftFields !== "sketch-box-label",
+    leftFields || "no active testid");
+  await settle();
+  ok("...and the words typed in both fields survived the two Tabs",
+    /Acquisition/.test(JSON.stringify(await readBody(tabPage))) && /Order the commitment/.test(JSON.stringify(await readBody(tabPage))));
+} else {
+  ok("a sketch box could be made to drive Tab through its fields", false, "the box editor did not open");
+}
+
+/* ════ PASTE — THREE MODES, AND THE OUTLOOK SIGNATURE THAT BROKE HIS NOTE (B36051) ════════
+ *
+ * ⛔ EVERY ONE OF THESE ASSERTS THE RESULTING DOCUMENT. The fixture is the real structure
+ * read out of the owner's own note (project Silvestri, page "Utility"): two `&nbsp;`-only
+ * spacer paragraphs, a right-aligned 16pt Arial name in a hard rgb() colour, the CEO / O: /
+ * M: / E: / street / website lines, and a five-row single-cell layout TABLE carrying a second
+ * person's whole signature. */
+
+const SIG_HTML = [
+  '<p>&nbsp;</p><p>&nbsp;</p>',
+  '<p style="text-align: right;"><span style="color: rgb(79, 112, 172); font-family: Arial, sans-serif; font-size: 16pt;"><strong>Simon Sequeira</strong></span></p>',
+  '<p><span style="font-family: Calibri; font-size: 11pt;">CEO</span></p>',
+  '<p><span style="font-family: Calibri; font-size: 9pt;">O: 555-0100</span></p>',
+  '<p><span style="font-family: Calibri; font-size: 9pt;">M: 555-0101</span></p>',
+  '<p><span style="font-family: Calibri; font-size: 9pt;"><a href="mailto:s@quadvest.com">E: s@quadvest.com</a></span></p>',
+  '<p><span style="font-family: Calibri; font-size: 9pt;">1234 Grand Pkwy</span></p>',
+  '<p><a href="https://www.quadvest.com">www.quadvest.com</a></p>',
+  '<table><tbody><tr><td><p><strong>Kandice Cabets</strong></p></td></tr>',
+  '<tr><td><p>Assistant</p></td></tr><tr><td><p>O: 555-0200</p></td></tr>',
+  '<tr><td><p>M: 555-0201</p></td></tr><tr><td><p>k@quadvest.com</p></td></tr></tbody></table>',
+].join("");
+
+const pasteSig = async () => page.evaluate((html) => {
+  const dt = new DataTransfer();
+  dt.setData("text/html", html);
+  dt.setData("text/plain", "Simon Sequeira\nCEO\nO: 555-0100\nM: 555-0101\nE: s@quadvest.com\n1234 Grand Pkwy\nwww.quadvest.com\nKandice Cabets\nAssistant\nO: 555-0200\nM: 555-0201\nk@quadvest.com");
+  const target = document.querySelector('[data-testid="note-body"]');
+  target?.focus();
+  target?.dispatchEvent(new ClipboardEvent("paste", { clipboardData: dt, bubbles: true, cancelable: true }));
+}, SIG_HTML);
+
+const marksIn2 = (doc) => [...new Set((JSON.stringify(doc).match(/"type":"(bold|italic|underline|strike|link|textStyle|highlight)"/g) || []).map((m) => m.split('"')[3]))];
+const alignsIn = (doc) => (JSON.stringify(doc).match(/"textAlign":"(center|right|justify)"/g) || []);
+
+/* ---- (1) KEEP SOURCE FORMATTING — the DEFAULT, and it does not change ------------------ */
+await clearBody();
+await settle();
+await pasteSig();
+await page.waitForTimeout(600);
+await settle();
+const sourceDoc = await readBody(tabPage);
+ok("⛔ THE DEFAULT PASTE STILL KEEPS THE SOURCE'S FORMATTING — he asked for an OPTION, not a new default",
+  marksIn2(sourceDoc).includes("textStyle") && marksIn2(sourceDoc).includes("bold"),
+  marksIn2(sourceDoc).join(",") || "no marks at all");
+/* ⛔ …but the STRUCTURAL sanitisation applies even here, because broken input is not a style
+ * choice: no layout table, and the run of spacer paragraphs collapsed. */
+ok("⛔ ...but the single-column LAYOUT TABLE is unwrapped even in Keep Source — that structure was broken input, not a choice",
+  nodesOf(sourceDoc, "table").length === 0, `${nodesOf(sourceDoc, "table").length} table(s)`);
+ok("⛔ ...and the run of &nbsp;-only SPACER paragraphs is collapsed rather than carried in",
+  !/ /.test(textOf(sourceDoc)), JSON.stringify(textOf(sourceDoc).slice(0, 40)));
+ok("...while the second person's details, which lived INSIDE that table, all survived it",
+  textOf(sourceDoc).includes("Kandice Cabets") && textOf(sourceDoc).includes("k@quadvest.com"));
+
+/* ---- the control itself: a badge that expands to three icons -------------------------- */
+ok("⛔ A PASTE THAT CARRIED FORMATTING SHOWS THE PASTE-OPTIONS BADGE — Word's, at the paste point",
+  await tb("note-paste-options").count() === 1 && await tb("note-paste-badge").count() === 1);
+await tb("note-paste-badge").click();
+await page.waitForTimeout(250);
+ok("⛔ ...and it opens THREE icon buttons, one per mode",
+  await tb("note-paste-source").count() === 1
+  && await tb("note-paste-merge").count() === 1
+  && await tb("note-paste-text").count() === 1);
+const modeTitles = await page.evaluate(() => ["source", "merge", "text"].map((m) => document.querySelector(`[data-testid="note-paste-${m}"]`)?.getAttribute("title")));
+ok("⛔ ...each named, with its access key, exactly the way Word labels them",
+  /Keep source formatting \(K\)/.test(modeTitles[0] || "")
+  && /Merge formatting \(M\)/.test(modeTitles[1] || "")
+  && /Keep text only \(T\)/.test(modeTitles[2] || ""), modeTitles.join(" · "));
+const iconShapes = await page.evaluate(() => ["source", "merge", "text"].map((m) => document.querySelector(`[data-testid="note-paste-${m}"] svg`)?.innerHTML || ""));
+ok("⛔ ...and the three glyphs are genuinely DIFFERENT drawings, not one icon three times",
+  new Set(iconShapes).size === 3 && iconShapes.every((h) => h.includes("<rect")),
+  `${new Set(iconShapes).size} distinct`);
+
+/* Keep source is the no-op: picking it leaves the document exactly as it is. */
+const beforeSourcePick = JSON.stringify(sourceDoc);
+await tb("note-paste-source").click();
+await page.waitForTimeout(400);
+await settle();
+ok("⛔ CHOOSING 'KEEP SOURCE' CHANGES NOTHING — it is the state you are already in",
+  JSON.stringify(await readBody(tabPage)) === beforeSourcePick);
+
+/* ---- (2) MERGE FORMATTING — the new one ----------------------------------------------- */
+await clearBody();
+await settle();
+await pasteSig();
+await page.waitForTimeout(600);
+await settle();
+await tb("note-paste-badge").click();
+await page.waitForTimeout(200);
+await tb("note-paste-merge").click();
+await page.waitForTimeout(500);
+await settle();
+const mergedDoc = await readBody(tabPage);
+ok("⛔ MERGE FORMATTING DROPS THE SOURCE'S FONTS, SIZES AND COLOURS",
+  !marksIn2(mergedDoc).includes("textStyle") && !marksIn2(mergedDoc).includes("highlight"),
+  marksIn2(mergedDoc).join(",") || "no marks");
+ok("⛔ ...and its ALIGNMENT — the right-aligned name adopts the note's own body style",
+  alignsIn(mergedDoc).length === 0, alignsIn(mergedDoc).join(",") || "none");
+ok("⛔ ...while KEEPING the emphasis and the links, which are MEANING rather than appearance",
+  marksIn2(mergedDoc).includes("bold") && marksIn2(mergedDoc).includes("link"),
+  marksIn2(mergedDoc).join(",") || "nothing kept");
+ok("...and every word is still there", textOf(mergedDoc).includes("Simon Sequeira") && textOf(mergedDoc).includes("Kandice Cabets"));
+
+/* ---- (3) KEEP TEXT ONLY ---------------------------------------------------------------- */
+await clearBody();
+await settle();
+await pasteSig();
+await page.waitForTimeout(600);
+await settle();
+const parasWithStyle = nodesOf(await readBody(tabPage), "paragraph").length;
+await tb("note-paste-badge").click();
+await page.waitForTimeout(200);
+await tb("note-paste-text").click();
+await page.waitForTimeout(500);
+await settle();
+const textDoc = await readBody(tabPage);
+ok("⛔ KEEP TEXT ONLY LEAVES NO MARKS AT ALL — plain means plain",
+  marksIn2(textDoc).length === 0 && alignsIn(textDoc).length === 0,
+  marksIn2(textDoc).join(",") || "nothing left");
+ok("⛔ ...AND THE LINE BREAKS SURVIVE — a multi-line paste must not collapse into one run-on line",
+  nodesOf(textDoc, "paragraph").length >= 10,
+  `${nodesOf(textDoc, "paragraph").length} paragraph(s) (was ${parasWithStyle} formatted)`);
+ok("...with every word still present — stripping style must never cost content",
+  ["Simon Sequeira", "CEO", "1234 Grand Pkwy", "Kandice Cabets", "k@quadvest.com"].every((t) => textOf(textDoc).includes(t)),
+  textOf(textDoc).replace(/\n/g, " · ").slice(0, 90));
+ok("...and the option retires once it has been taken", await tb("note-paste-options").count() === 0);
+
+/* A PLAIN paste must NOT raise the badge — an affordance that can do nothing is noise. */
+await clearBody();
+await settle();
+await page.evaluate(() => {
+  const dt = new DataTransfer();
+  dt.setData("text/plain", "just some words");
+  const target = document.querySelector('[data-testid="note-body"]');
+  target?.focus();
+  target?.dispatchEvent(new ClipboardEvent("paste", { clipboardData: dt, bubbles: true, cancelable: true }));
+});
+await page.waitForTimeout(500);
+ok("⛔ A PLAIN paste raises NO badge — it would have nothing to offer",
+  await tb("note-paste-options").count() === 0);
+
+/* ---- ⛔ BUG B: A SIGNATURE MUST NOT NEST INSIDE A LIST ITEM ---------------------------- */
+await clearBody();
+await page.keyboard.type("- Contacts:", { delay: 6 });
+await settle();
+await pasteSig();
+await page.waitForTimeout(700);
+await settle();
+const listPasteDoc = await readBody(tabPage);
+/* His document had the whole signature four levels deep inside one <li>, which is why it sat
+ * at a bizarre indent far to the right. Assert the TREE: no paragraph of the signature may be
+ * a descendant of a listItem. */
+const sigInsideList = await page.evaluate(() => {
+  const li = [...document.querySelectorAll('[data-testid="note-body"] li')];
+  return li.some((el) => /Simon Sequeira/.test(el.textContent || ""));
+});
+ok("⛔ A MULTI-BLOCK PASTE INTO A LIST LANDS AFTER THE LIST, NOT NESTED INSIDE THE ITEM",
+  !sigInsideList, sigInsideList ? "the signature is still inside the <li>" : "outside the list");
+ok("...and the bullet itself is untouched", textOf(listPasteDoc).includes("Contacts:"));
+ok("...and the signature is all still on the page", textOf(listPasteDoc).includes("Simon Sequeira") && textOf(listPasteDoc).includes("Kandice Cabets"));
+
+/* ---- ⛔ BUG A: BACKSPACE AT THE START OF A BLOCK TAKES ONE PREDICTABLE STEP ------------- */
+await clearBody();
+await page.evaluate(() => {
+  const dt = new DataTransfer();
+  dt.setData("text/html", '<p>line above</p><p style="text-align: right;"><strong>Simon Sequeira</strong></p><p>CEO</p>');
+  dt.setData("text/plain", "line above\nSimon Sequeira\nCEO");
+  const target = document.querySelector('[data-testid="note-body"]');
+  target?.focus();
+  target?.dispatchEvent(new ClipboardEvent("paste", { clipboardData: dt, bubbles: true, cancelable: true }));
+});
+await page.waitForTimeout(500);
+await settle();
+const beforeBksp = await readBody(tabPage);
+const parasBeforeBksp = nodesOf(beforeBksp, "paragraph").length;
+ok("the fixture is in place: a right-aligned block among unaligned siblings",
+  alignsIn(beforeBksp).length === 1, alignsIn(beforeBksp).join(",") || "no aligned block");
+
+/* Put the caret at the very start of "Simon Sequeira" and press Backspace ONCE. */
+await page.evaluate(() => {
+  const p = [...document.querySelectorAll('[data-testid="note-body"] p')].find((el) => /Simon Sequeira/.test(el.textContent || ""));
+  const node = p?.firstChild?.firstChild || p?.firstChild;
+  if (!node) return;
+  const r = document.createRange();
+  r.setStart(node, 0); r.collapse(true);
+  const sel = window.getSelection();
+  sel.removeAllRanges(); sel.addRange(r);
+});
+await page.waitForTimeout(200);
+await page.keyboard.press("Backspace");
+await page.waitForTimeout(300);
+await settle();
+const afterBksp = await readBody(tabPage);
+ok("⛔ ONE BACKSPACE UNDOES THE ALIGNMENT AND STOPS — it does NOT merge two blocks in one press",
+  alignsIn(afterBksp).length === 0 && nodesOf(afterBksp, "paragraph").length === parasBeforeBksp,
+  `${parasBeforeBksp} → ${nodesOf(afterBksp, "paragraph").length} paragraph(s), align ${alignsIn(afterBksp).join(",") || "none"}`);
+ok("⛔ ...and NOTHING moved: every word is still in its own block, the line above included",
+  textOf(afterBksp).includes("line above") && textOf(afterBksp).includes("Simon Sequeira") && textOf(afterBksp).includes("CEO"),
+  textOf(afterBksp).replace(/\n/g, " · "));
+/* …and a SECOND press does the ordinary join, so nothing became unreachable. */
+await page.keyboard.press("Backspace");
+await page.waitForTimeout(300);
+await settle();
+ok("...while a SECOND press performs the ordinary join — the step was deferred, not removed",
+  nodesOf(await readBody(tabPage), "paragraph").length === parasBeforeBksp - 1,
+  `${nodesOf(await readBody(tabPage), "paragraph").length} paragraph(s)`);
+
+/* The DISCOVERABLE route he asked for by name: the same three, on the right-click menu. */
+await caretInDoc();
+const menuAt = await tb("note-body").boundingBox();
+await page.mouse.click(menuAt.x + 40, menuAt.y + 10, { button: "right" });
+await page.waitForTimeout(300);
+ok("⛔ ALL THREE PASTE OPTIONS ARE ON THE RIGHT-CLICK MENU — the option he asked to be able to SEE",
+  await tb("note-doc-menu").count() === 1
+  && await tb("note-menu-paste-source").count() === 1
+  && await tb("note-menu-paste-merge").count() === 1
+  && await tb("note-menu-paste-plain").count() === 1);
+ok("...with the same three glyphs the badge uses, so they read as the same three things",
+  await page.locator('[data-testid="note-doc-menu"] svg').count() === 3);
+ok("...and Keep text only names its shortcut, so the menu teaches the faster route",
+  /ctrl\+shift\+v/i.test(await tb("note-menu-paste-plain").innerText()),
+  (await tb("note-menu-paste-plain").innerText()).replace(/\n/g, " · "));
+await page.keyboard.press("Escape");
+await page.waitForTimeout(200);
+ok("...and Escape closes it — it is a menu, not a dialog", await tb("note-doc-menu").count() === 0);
 
 /* ════ Wrap ═══════════════════════════════════════════════════════════════════════════ */
 ok("no uncaught page error across the whole run", pageErrors.length === 0, pageErrors.join(" | ") || "clean");

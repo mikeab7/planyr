@@ -5,9 +5,9 @@
 > step; tick/remove it once he's done it. This is the **owner's** plate only. Browser click-throughs and
 > signed-in spot-checks are the Claude cohort's job (`VERIFICATION.md`), **never** Michael's — do NOT list those here.
 
-_Last updated: 2026-08-06._
+_Last updated: 2026-08-07._
 
-## ✅ MERGE WHEN YOU'RE READY — both jurisdiction fixes are finished and waiting on one click (B209502–B209509)
+## ✅ CLOSED — both jurisdiction fixes are LIVE, nothing on your end (B209502–B209509)
 
 > **Both of the things you sent today were the same underlying mistake: the app deciding which
 > authority governs a site by what's NEARBY rather than by what the site is actually INSIDE — and then
@@ -29,18 +29,14 @@ _Last updated: 2026-08-06._
 > complete, the panel now says so instead of stating a floor height — which at Bain was worth a foot or
 > two of finished floor on a two-pond site.
 >
-> **The one thing on your end:** the pull request is open as a **draft** (that's the house setting for
-> work I open automatically). Nothing is live until it's marked ready and merged. Everything else is
-> done — it builds, all 8,339 tests pass, and I drove both fixes in a real browser against the live
-> county and city services.
+> **Nothing on your end — this went live late on 2026-08-06.** Every check passed, and I drove both
+> fixes in a real browser against the live county and city services before it merged.
+> → merged as https://github.com/mikeab7/planyr/pull/928
 >
-> **One thing outside anybody's control:** GitHub's own build service stopped picking up jobs for this
-> repo this afternoon — it's accepted nothing since mid-afternoon, on any branch, including work from
-> other sessions. So the green "it builds" tick that normally has to appear before a merge may be
-> missing when you look. It's their outage, not this work: our own hosting built and published this
-> exact branch successfully, and I ran every one of those same checks here first. If the tick is still
-> absent when you go to merge, it'll come back on its own once GitHub recovers.
-> → https://github.com/mikeab7/planyr/pull/928
+> *(For the record, since an earlier version of this note asked you to merge it by hand: GitHub's own
+> build service was down for most of that afternoon, so the tick that has to go green before anything
+> can merge simply never appeared. It came back that evening and this merged on its own.)*
+
 ## 📄 The one thing I need from you: paste a short line into your browser (B209568 / B209569)
 
 > **You were right that nobody had ever measured Bain, and I've now fixed that as far as I can from here.** I built
@@ -111,7 +107,37 @@ _Last updated: 2026-08-06._
 > that I already set this line once this week, and moving it right after it gave me an answer I didn't like is
 > exactly the move I shouldn't make on my own.
 
-## 🔍 One sentence to answer, and it unblocks the smooth-zoom work (B1449)
+## ✅ ANSWERED — nothing more from you on smooth zoom (was: B1449)
+
+> You said: *"i think smooth zoom makes sense, unless theres something im not considering."* That's the call, it's
+> taken, and the question below is closed — I've left it in place only so the reasoning is on the record.
+>
+> **Where it stands: not built yet, and I want to be straight about why.** It isn't waiting on you any more, and it
+> isn't a small job. Making the zoom smooth means the drawing briefly holds its old size while a single stretch is
+> applied on top — and *everything* on the canvas that decides how big to be (line thicknesses, text, the rules about
+> what detail shows at what zoom) has to be told to use the held size rather than the live one. Miss one and the
+> drawing looks wrong for the split second your wheel is moving — doubled-up text, wrong line weights. The awkward
+> part is that **none of my existing checks can see that**, because at rest the two sizes are the same number, so
+> everything passes whether it's right or wrong. So the first piece of work is a check that can watch a frame while
+> the wheel is still turning — and only then the change itself. That's the next session on this, and when it's done
+> you'll get the before-and-after recording of the same wheel spin you asked for, plus a switch to turn it off.
+
+## 🐟 One export that would let me measure the Bain slowdown properly (B221760 / V23408)
+
+> **Why I'm asking.** You said the Bain site got fast and then a detention pond made it slow again. I built a probe
+> that adds a pond and measures the exact same drag before and after, and I found a real cost — the pond's name label
+> was re-solving where it fits inside the basin on *every single frame* of a drag, which I've now fixed (it's about
+> twice as cheap per pond). But on the plan I have to test with, one pond isn't enough to feel: I had to put sixteen
+> ponds on it before the cost was bigger than the measurement noise.
+>
+> **The gap is that I don't have your Bain plan.** There's no copy of it in the code — only a few of its pond
+> outlines, saved for a different test years ago. Everything I measured is a floor, not a match.
+>
+> **What would close it:** open Bain / Concept A while signed in and send me a full export of the plan. I need the
+> whole thing — the buildings, the property lines, the settings and where it sits on the map — not just the shapes.
+> One file, one time, and then I can measure the site you're actually complaining about instead of a stand-in.
+
+## 🔍 (CLOSED — see above) One sentence to answer, and it unblocks the smooth-zoom work (B1449)
 
 > **The background in two lines.** Dragging the plan around is already fixed — it went from redrawing the whole
 > drawing on every twitch to just sliding what's already there, and it got about forty-six times cheaper. The same

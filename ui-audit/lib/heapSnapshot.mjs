@@ -265,6 +265,98 @@ export function holderOf(rix, target, { maxNodes = 200000, maxDepth = 25 } = {})
   };
 }
 
+/* V8's handle tables hold EVERY DOM wrapper in the heap, live or leaked, so a walk that goes
+ * through one reaches everything and distinguishes nothing. They are identified by name because
+ * they are all `synthetic` and only some synthetic nodes are uninformative — "(Document DOM tree)"
+ * and "(Detached DOM trees)" are real structure and must stay traversable. */
+const HANDLE_TABLE_RE = /handle/i;
+const isHandleTable = (ix, n) => isSynthetic(ix, n) && HANDLE_TABLE_RE.test(ix.strings[ix.nodes[n * ix.NW + ix.iName]] ?? "");
+
+/**
+ * WHERE DOES THE LIVE HEAP TOUCH THE DETACHED ISLAND? — the third attempt's question (NEW-3).
+ *
+ * ⛔ WHY `holderOf` COULD NOT ANSWER THIS, stated because its answer was believed for a whole
+ * dispatch. `holderOf` walks BACKWARDS out of the detached subtree and stops at the first retainer
+ * that is neither detached nor native. That is the right question only if "not flagged detached"
+ * implies "alive" — and it does not. **V8 only sets `detachedness` on DOM WRAPPERS.** A JS closure,
+ * a bound function, a plain object or an array is never flagged, whatever it is reachable from. So
+ * a closure that is itself garbage — reachable only from inside the same dead island — satisfies
+ * `holderOf`'s stopping rule perfectly and gets reported as the holder.
+ *
+ * That is exactly what happened. B1439's second attempt named `native_bind [closure]` holding the
+ * overlay file `<input>` as its third bound argument, and it reproduces on demand — but React DOM
+ * builds precisely that shape for every non-delegated listener it attaches
+ * (`listenerWrapper.bind(null, domEventName, eventSystemFlags, targetContainer)`, three arguments,
+ * the third being the element), and `<input>` gets one for the `invalid` event. So the bound
+ * function is the element's OWN listener: it points at the input because it was made for the input,
+ * it is retained by the input's listener list, and the pair is a cycle INSIDE the dead island. It
+ * is a description of the garbage, not of what is keeping it.
+ *
+ * This function asks the complementary question, which does not have that failure mode:
+ *
+ *     Walk FORWARD from the GC roots, refusing to pass through any detached node. Everything
+ *     reached that way is provably ALIVE. The leak is then exactly the set of edges that cross
+ *     from that live set into the detached island — and each one names a live holder, the edge it
+ *     holds by, and what it is holding.
+ *
+ * Two traversal rules, each load-bearing:
+ *   • The handle tables are not traversed through (`isHandleTable`). Every DOM wrapper in the heap
+ *     is in one, so a walk through them reaches every leaked node in two steps and reports the
+ *     table as the holder — the same always-true, never-useful answer the shortest-path attempt
+ *     gave. Other synthetic nodes ARE traversed: "(Document DOM tree)" is real structure.
+ *   • A detached node is recorded as an ENTRY POINT and never expanded, so the result is the
+ *     island's boundary rather than its interior.
+ *
+ * An empty result is a real finding and is reported as one: it means nothing alive points into the
+ * island by an ordinary reference, so what holds it is on the Blink side (a listener still
+ * registered on a live target, an observer, a running animation) and no heap graph can name it.
+ */
+export function liveEntryPoints(rix, { limit = 25, maxNodes = 4000000 } = {}) {
+  if (!rix?.ok) return { ok: false, why: rix?.why || "no index" };
+  if (rix.iDet < 0) return { ok: true, known: false, entries: [], why: "this Chrome's snapshot has no detachedness column — the answer is UNKNOWN, not zero" };
+  const { nodeCount, firstEdge, edges, EW, iToNode, NW } = rix;
+  const seen = new Uint8Array(nodeCount);
+  // Node 0 is the snapshot root by V8's own contract.
+  const stack = [0];
+  seen[0] = 1;
+  const entries = new Map(); // "fromIdx|edge" → row
+  let visited = 0;
+  while (stack.length && visited < maxNodes) {
+    const n = stack.pop();
+    visited++;
+    if (isHandleTable(rix, n)) continue;
+    for (let e = firstEdge[n]; e < firstEdge[n + 1]; e++) {
+      const to = Math.floor((edges[e * EW + iToNode] || 0) / NW);
+      if (to < 0 || to >= nodeCount) continue;
+      if (isDetached(rix, to)) {
+        /* A live node pointing into the island. Recorded even if `n` is native: a Blink satellite
+         * that is itself alive and points at a detached element is a genuine crossing, and saying
+         * "a native node is not a holder" here would repeat holderOf's mistake in reverse. */
+        const key = `${n}|${e}`;
+        if (!entries.has(key)) {
+          entries.set(key, {
+            holder: nodeLabel(rix, n), holderIdx: n, holderNative: isNative(rix, n), holderSynthetic: isSynthetic(rix, n),
+            via: edgeLabel(rix, e), held: nodeLabel(rix, to), heldIdx: to,
+            heldBytes: rix.nodes[to * NW + rix.iSize] || 0,
+          });
+        }
+        continue; // never expand INTO the island — we want its boundary, not its interior
+      }
+      if (seen[to]) continue;
+      seen[to] = 1;
+      stack.push(to);
+    }
+  }
+  const rows = [...entries.values()].sort((a, b) => b.heldBytes - a.heldBytes).slice(0, limit);
+  return {
+    ok: true, known: true, entries: rows, crossings: entries.size, liveVisited: visited,
+    truncated: visited >= maxNodes,
+    why: entries.size
+      ? `${entries.size} reference(s) from the LIVE heap point into the detached island — each names a holder that is provably alive`
+      : "NOTHING ALIVE POINTS INTO THE DETACHED ISLAND by an ordinary reference. The island is held from the Blink side — a listener still registered on a live target, an observer still observing, or a running animation — and no heap graph can name which. This is a result, not a failure to find one.",
+  };
+}
+
 /**
  * Shortest retaining chain from a GC root down to `target`, as readable steps. Kept because it is
  * the right answer for a NON-detached object (what is holding this big array?), and is explicitly

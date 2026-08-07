@@ -134,17 +134,62 @@ function callouts() {
  *                               LOAD-kind drainage facts pass (B860) that B1349 put behind a
  *                               requestIdleCallback with a hard 4 s ceiling — the arm that settles
  *                               whether that ceiling and time-to-first-drag are the same 4 seconds.
+ *
+ *   ponds:false               → the same plan with every `type:"pond"` element REMOVED, and nothing
+ *                               else touched. This arm exists because of a confound that cost a
+ *                               whole measurement round (NEW-1, 2026-08-06): the reference plan
+ *                               ALREADY HAS TWO PONDS, so drawing one on it measures the THIRD
+ *                               pond — the marginal one — while the owner's report is about his
+ *                               FIRST. A first pond is not a marginal pond: it is what turns the
+ *                               whole stormwater ledger, the pond verdict rows and the drainage
+ *                               facts pass from "nothing to compute" into "a plan with detention
+ *                               in it". Measuring 2 → 3 and reporting it as "adding a pond is free"
+ *                               would have been a confident wrong answer to the question he asked.
  */
 export function scenarioArm(name) {
   if (name === "no-drainage") return { drainageAutoFacts: false };
+  if (name === "no-ponds") return { ponds: false };
   return {};
 }
 
 /** The full site record, in the shape the logged-out planner store persists. */
-export function perfScenarioSite({ drainageAutoFacts } = {}) {
+export function perfScenarioSite({ drainageAutoFacts, ponds } = {}) {
   const settings = drainageAutoFacts === false
     ? { ...PLAN.settings, drainage: { ...(PLAN.settings.drainage || {}), autoFacts: false } }
     : PLAN.settings;
+  /* Removing the ponds removes anything BONDED to one too, or the plan loads with children pointing
+   * at a host that is not there — which `normalizeBondedChildren` would then heal, silently making
+   * this arm a different plan in more ways than the one it declares. Measured on this fixture:
+   * nothing is attached to either pond, so the set removed is exactly the two ponds. */
+  const pondIds = new Set(PLAN.els.filter((e) => e.type === "pond").map((e) => e.id));
+  let els = ponds === false
+    ? PLAN.els.filter((e) => !pondIds.has(e.id) && !pondIds.has(e.attachedTo))
+    : PLAN.els;
+  /* A numeric `ponds` REPLACES the pond set with N copies of the fixture's own largest pond, laid
+   * out on a deterministic lattice across the plan's own bounding box. This is how the per-pond
+   * question gets an answer with enough leverage to clear a noise floor: at one pond a per-pond
+   * per-frame cost is a fraction of a per-cent and unmeasurable, at eight it is eight times that
+   * and either visible or genuinely absent. The geometry is the REAL pond's ring (translated), so
+   * every downstream derivation — the inward offset, the stage contours, the storage bands — does
+   * the same work it does on a real basin rather than on a square somebody invented. */
+  if (Number.isFinite(ponds) && ponds >= 0) {
+    const src = PLAN.els.filter((e) => e.type === "pond").sort((a, b) => (b.points?.length || 0) - (a.points?.length || 0))[0];
+    const rest = PLAN.els.filter((e) => !pondIds.has(e.id) && !pondIds.has(e.attachedTo));
+    const made = [];
+    if (src && src.points) {
+      const { minX, maxX, minY, maxY } = bounds();
+      const cx0 = src.points.reduce((s, p) => s + p.x, 0) / src.points.length;
+      const cy0 = src.points.reduce((s, p) => s + p.y, 0) / src.points.length;
+      const cols = Math.max(1, Math.ceil(Math.sqrt(ponds)));
+      for (let i = 0; i < ponds; i++) {
+        const col = i % cols, row = Math.floor(i / cols);
+        const tx = minX + ((col + 0.5) / cols) * (maxX - minX) - cx0;
+        const ty = minY + ((row + 0.5) / cols) * (maxY - minY) - cy0;
+        made.push({ ...src, id: `perf-pond-${i + 1}`, name: `Pond ${i + 1}`, points: src.points.map((p) => ({ x: p.x + tx, y: p.y + ty })) });
+      }
+    }
+    els = [...rest, ...made];
+  }
   return {
     id: SCENARIO_ID,
     groupId: SCENARIO_ID,
@@ -153,7 +198,7 @@ export function perfScenarioSite({ drainageAutoFacts } = {}) {
     origin: ORIGIN,
     county: "harris",
     parcels: PLAN.parcels,
-    els: PLAN.els,
+    els,
     measures: measures(),
     callouts: callouts(),
     markups: [],

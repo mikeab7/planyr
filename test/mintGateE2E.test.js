@@ -122,6 +122,8 @@ function cli(repo, ...flags) {
 }
 
 const offendersOf = (res, letter) => res.families.find((f) => f.letter === letter).offenders;
+/** FATAL failures and ADVISORY notes are different lists — assert against the right one. */
+const advisoriesOf = (res, letter) => res.families.find((f) => f.letter === letter).advisories || [];
 
 /* ------------------------------------------------------------------------------------------ */
 
@@ -144,24 +146,28 @@ describe("the mint gate BLOCKS a real push (the path that had never once fired)"
     expect(err).toMatch(/renumber this branch's new B# ids into its reserved block: B\d+–B\d+/);
   });
 
-  it("(b) REJECTS an id held only by an UNMERGED PEER branch — the window B779 could not see at all", () => {
-    // B103 / V53 exist nowhere on main. They are sitting on another session's pushed branch, which
-    // is precisely the case the first pass declared impossible and this fix newly covers.
+  /* ⛔ INVERTED (B36051, owner decision 2026-08-06): an unmerged peer branch holding the id is an
+   * ADVISORY, not a rejection — *"a number is taken only if main has it."* That branch may be
+   * renumbered, rebased or abandoned; whoever merges second renumbers. Kept rather than deleted so
+   * the change of contract is visible, and the CLI is asserted to still NAME the peer. */
+  it("(b) ADVISES on an id held only by an UNMERGED PEER branch — it names it, and does not fail", () => {
+    // B103 / V53 exist nowhere on main. They sit on another session's pushed branch.
     const repo = workBranch("collides-with-peer", { open: [99, 100, 103], done: [50], vOpen: [50, 53], vDone: [10] });
     const res = runGate(repo);
     expect(res.unverifiable, res.reason).toBeFalsy();
-    expect(res.ok).toBe(false);
+    expect(res.ok).toBe(true); // INVERTED (B36051) — see the block comment on this describe
     expect(res.peersScanned).toBeGreaterThanOrEqual(1);
+    expect(offendersOf(res, "B")).toEqual([]); // nothing FATAL
 
-    const b = offendersOf(res, "B")[0];
-    expect(b.id).toBe("B103");
-    expect(b.kind).toBe("taken");
-    expect(b.where).toMatch(/peer-session$/); // names the session we would have collided with
-    expect(offendersOf(res, "V")[0].id).toBe("V53"); // both families are checked, not just B
+    const b = advisoriesOf(res, "B").find((a) => a.id === "B103");
+    expect(b.kind).toBe("peer-held");
+    expect(b.where).toMatch(/peer-session$/); // still NAMES the session — worth knowing, not fatal
+    expect(advisoriesOf(res, "V").some((a) => a.id === "V53")).toBe(true); // both families still checked
 
     const { code, err } = cli(repo);
-    expect(code).toBe(1);
-    expect(err).toMatch(/B103 is ALREADY TAKEN on .*peer-session/);
+    expect(code).toBe(0);
+    expect(err).toMatch(/B103 is also held by .*peer-session/);
+    expect(err).toMatch(/NOT a failure/);
   });
 
   it("ALLOWS an id that is free today but sits UNDER the claimed high-water mark — the ratchet is GONE (NEW-2)", () => {
