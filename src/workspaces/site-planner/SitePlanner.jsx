@@ -123,7 +123,11 @@ import {
   MEASURE_GROUP_ATTR, MEASURE_MODE_ATTR,
 } from "./lib/measureSheet.js";
 import { pushRecent, notePick, commitPick } from "../../shared/ui/colorRecents.js";
-import { CLIP_KINDS, collectClipboard, clipboardBBox, pasteClipboard, translateCalloutBy, translateParcelBy } from "./lib/planClipboard.js";
+import { CLIP_KINDS, collectClipboard, clipboardBBox, pasteClipboard, translateCalloutBy, translateParcelBy, resolveClipFrame, clipPlacement } from "./lib/planClipboard.js";
+/* NEW-1 — the clipboard PAYLOAD lives at module scope, above every remount boundary. It used to
+ * be a `useRef` inside this component, which `SitePlannerApp` mounts keyed on the plan id, so
+ * switching plans destroyed the copy. Read planClipboardStore.js's header before moving it back. */
+import { setCanvasClip, getCanvasClip, hasCanvasClip, setOverlayClip, getOverlayClip, hasOverlayClip } from "./lib/planClipboardStore.js";
 import { remapBondRefs, carryHostRoleTags } from "./lib/bondRemap.js";
 import { SETBACK_CHIP, setbackChipPlateW, setbackChipSpawn, numEditBox } from "./lib/numEditBox.js";
 import NumEditField from "./components/NumEditField.jsx";
@@ -2179,7 +2183,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // the parcel selection changes or clears (covers Escape + background deselect + switching parcels) so
   // a stale side highlight can't linger on another parcel. Same-parcel edge clicks don't change the id.
   useEffect(() => { setSelEdgeRun(null); }, [sel?.kind === "parcel" ? sel.id : null]);
-  const overlayClip = useRef(null);                     // copied site-plan overlay (B461 Copy/Paste — shares the source ref, not a re-import)
+  /* The copied site-plan overlay (B461 Copy/Paste — shares the source ref, not a re-import) now
+   * lives in planClipboardStore, for the SAME reason the drawn-object clipboard does: as a
+   * `useRef` it died on every plan switch. Moved together with it on purpose — leaving one behind
+   * is how the two Ctrl+V paths diverge again (NEW-1). */
   const [overlayBusy, setOverlayBusy] = useState(false);
   // Drag-and-drop affordance for the site-plan overlay (B445). Two independent hover flags:
   // the left References panel dropzone, and a full-canvas "drop to place" hint.
@@ -3361,7 +3368,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (pinchRafRef.current) { cancelAnimationFrame(pinchRafRef.current); pinchRafRef.current = 0; }
   };
   const altSnapOffRef = useRef(false); // Alt held during a drag/placement → bypass snap for this one move (re-armed every pointer event)
-  const clip = useRef(null); // copied element (for Ctrl+C / X / V)
+  // The clipboard payload itself is in planClipboardStore (module scope) — see the import.
   const lastPtrFt = useRef(null); // live pointer in WORLD feet (updated every canvas move) → paste-at-cursor (B417)
   const lastPtrClient = useRef(null); // live pointer in VIEWPORT px → where the NEW-2 hover identify card anchors
 
@@ -5001,7 +5008,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // its own path because a backdrop copy has to clone the raster payload, not just geometry.
       if ((e.ctrlKey || e.metaKey) && (e.key === "c" || e.key === "C")) { if (hasCopyableSel()) { e.preventDefault(); copySel(); } else if (selOverlay) { e.preventDefault(); copyOverlay(selOverlay); } return; }
       if ((e.ctrlKey || e.metaKey) && (e.key === "x" || e.key === "X")) { if (hasCopyableSel()) { e.preventDefault(); cutSel(); } return; }
-      if ((e.ctrlKey || e.metaKey) && (e.key === "v" || e.key === "V")) { if (clip.current?.items?.length) { e.preventDefault(); pasteClip(); } else if (overlayClip.current) { e.preventDefault(); pasteOverlay(); } return; }
+      if ((e.ctrlKey || e.metaKey) && (e.key === "v" || e.key === "V")) { if (hasCanvasClip()) { e.preventDefault(); pasteClip(); } else if (hasOverlayClip()) { e.preventDefault(); pasteOverlay(); } return; }
       if ((e.ctrlKey || e.metaKey) && (e.key === "d" || e.key === "D")) { const gid = selectedGroupId(); if (gid) { e.preventDefault(); duplicateGroup(gid); } else if (multi.length > 1) { e.preventDefault(); multi.filter((m) => m.kind === "el").forEach((m) => duplicateEl(m.id)); } else if (sel?.kind === "el") { e.preventDefault(); duplicateEl(sel.id); } else if (selOverlay) { e.preventDefault(); duplicateOverlay(selOverlay); } return; }
       if ((e.ctrlKey || e.metaKey) && (e.key === "g" || e.key === "G")) { e.preventDefault(); if (e.shiftKey) ungroupSel(); else groupSel(); return; } // B261: Group / Ungroup
       // B820 — Arrange (z-order) chords, matching Document Review / Bluebeam. e.code (not e.key)
@@ -5173,10 +5180,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     ...(el.footEdit ? { cx: el.cx + dx, cy: el.cy + dy, dockLines: translateDockLines(el.dockLines, dx, dy) } : {}),
   });
   /* ---- NEW-2 / NEW-6: ONE general clipboard, driven by the current selection ----
-   * Was: a single-element clipboard (`clip.current` held one `els` entry) that stripped the host
+   * Was: a single-element clipboard (a per-mount ref holding one `els` entry) that stripped the host
    * bond on paste — so a copied building arrived WITHOUT its truck court / trailer parking / dock
    * zones / sidewalks / bump-outs, and callouts, parcels, markups and measurements could not be
-   * copied at all. Now `clip.current` holds a payload `{ items, counts }` from planClipboard.js:
+   * copied at all. Now planClipboardStore holds a payload `{ items, counts }` from planClipboard.js:
    * every selected kind, with each element expanded to its bonded ASSEMBLY (the explicit
    * `attachedTo` relation the delete/nudge/duplicate paths already cascade over — never a
    * geometric-containment guess). Paste re-mints ids, remaps the bonds INSIDE the copied set,
@@ -5194,39 +5201,68 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     return s && CLIP_KINDS.includes(s.kind) ? [s] : [];
   };
   const hasCopyableSel = () => copyRefs().length > 0;
+  /* NEW-1 — every copy stamps its PROVENANCE: which plan it came from, and that plan's map
+   * anchor. Both are unknowable at paste time (the source plan is no longer mounted), and both
+   * are what let a cross-plan paste land in the right place instead of at the source plan's raw
+   * feet coordinates. */
+  const clipProvenance = () => ({ siteId, origin: origin ? { lat: origin.lat, lon: origin.lon } : null });
   const copySel = () => {
     const refs = copyRefs();
     if (!refs.length) return null;
     const payload = collectClipboard(refs, stateRef.current);
     if (!payload.items.length) return null;
-    clip.current = payload;
-    return payload;
+    return setCanvasClip({ ...payload, ...clipProvenance() });
   };
   // Copy an EXPLICIT ref (a right-click menu's just-clicked item) without waiting for the
   // selection state to land — the same escape hatch `deleteSel(target)` uses.
   const copyRef = (ref) => {
     const payload = collectClipboard([ref], stateRef.current);
     if (!payload.items.length) return null;
-    clip.current = payload;
+    setCanvasClip({ ...payload, ...clipProvenance() });
     flashWarn(`Copied — ${MOD_LABEL}V pastes it where your cursor is.`, 3500);
     return payload;
   };
   const cutSel = () => { if (copySel()) deleteSel(null, { entry: "cut" }); };
+  /* Bring a pasted set into view when it landed outside the window (NEW-1). A cross-plan paste
+   * lands where the copy SAT, which after a plan switch can easily be off screen — and "I pressed
+   * paste and nothing appeared" is the very bug being fixed, so it must not be the cure's symptom.
+   * Pan only (the zoom the user chose is left alone); no-op when the set is already visible. */
+  /* One wording for both Ctrl+V paths — the clause that follows "Pasted…". Empty = nothing worth
+   * saying (an ordinary same-plan paste at the cursor, which the arriving selection already makes
+   * obvious). */
+  const pasteNote = (place, frame) => (
+    place.mode === "in-place" ? " where it sat on the plan you copied from."
+      : frame && !frame.ok ? ` at your cursor. ${frame.why}`
+        : ""
+  );
+  const revealPasted = (bb) => {
+    if (!bb || !size.w || !size.h) return;
+    const { ppf, offX, offY } = view;
+    const inView = (bb.x1 * ppf + offX) > 0 && (bb.x0 * ppf + offX) < size.w
+                && (bb.y1 * ppf + offY) > 0 && (bb.y0 * ppf + offY) < size.h;
+    if (inView) return;
+    const cx = (bb.x0 + bb.x1) / 2, cy = (bb.y0 + bb.y1) / 2;
+    setView({ ppf, offX: size.w / 2 - cx * ppf, offY: size.h / 2 - cy * ppf });
+  };
   const pasteClip = () => {
-    const payload = clip.current;
+    const payload = getCanvasClip();
     if (!payload?.items?.length) return;
-    // Where the set lands: its bbox center under the live cursor (B417 paste-at-cursor), honoring
-    // the grid/snap toggle. No pointer seen yet → the old fixed nudge, so paste is never a no-op.
     const bb = clipboardBBox(payload.items, featBBox);
     const anchor = lastPtrFt.current;
-    let dx, dy;
-    if (bb && anchor && Number.isFinite(anchor.x) && Number.isFinite(anchor.y)) {
-      const a = snapPt(anchor);
-      dx = a.x - (bb.x0 + bb.x1) / 2;
-      dy = a.y - (bb.y0 + bb.y1) / 2;
-    } else {
-      dx = dy = (settings.gridSize || 10) * 2;
-    }
+    // Is this paste crossing a plan boundary? A plan is its own record with its own id, so a
+    // different `siteId` means a different plan (of this site or another) — the case that used to
+    // be impossible because the clipboard died on the way here.
+    const crossPlan = payload.siteId !== siteId;
+    const frame = crossPlan
+      ? resolveClipFrame(payload.origin, origin, {
+          ref: bb ? { x: (bb.x0 + bb.x1) / 2, y: (bb.y0 + bb.y1) / 2 } : { x: 0, y: 0 },
+          extentFt: bb ? Math.max(bb.x1 - bb.x0, bb.y1 - bb.y0) : 0,
+        })
+      : null;
+    const place = clipPlacement({ crossPlan, frame, bbox: bb, cursor: anchor ? snapPt(anchor) : null, nudge: (settings.gridSize || 10) * 2 });
+    if (place.mode === "refuse") { flashWarn(place.message, 7000); return; } // LOUD-FAILURE
+    const { dx, dy } = place;
+    const note = pasteNote(place, frame);
     const made = pasteClipboard(payload.items, { mint: uid, translate: clipTranslate(), dx, dy });
     pushHistory(); // ONE frame for the whole paste, however many objects it carries
     if (made.els.length) setEls((a) => [...a, ...made.els]);
@@ -5239,7 +5275,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     setMulti(refs.length > 1 ? refs : []);
     setSel(refs[0] || null);
     setDrillId(null);
+    if (bb) revealPasted({ x0: bb.x0 + dx, y0: bb.y0 + dy, x1: bb.x1 + dx, y1: bb.y1 + dy });
     if (made.parcels.length) flashWarn(`Pasted parcel${made.parcels.length > 1 ? "s" : ""} start Off — turn one On to count it in the site area.`, 5000);
+    else if (note) flashWarn(`Pasted${note}`, 4500);
   };
   // Duplicate an element (offset ~10′, unattached). Used constantly from the menu.
   const duplicateEl = (id) => {
@@ -7546,8 +7584,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const copyOverlay = (id) => {
     const o = sheetOverlays.find((x) => x.id === id);
     if (!o) { flashWarn("Couldn't copy — that drawing is no longer in the list.", 4000); return; }
-    overlayClip.current = { ...o }; // snapshot shares src + storageKey (the source ref), not a re-import
-    flashWarn(`Copied “${o.name}”. Paste with ${navigator.platform?.startsWith("Mac") ? "⌘" : "Ctrl+"}V.`, 3500);
+    // Snapshot shares src + storageKey (the source ref), not a re-import — so a cross-plan paste
+    // references the SAME stored file, exactly as `⧉ Duplicate plan` already does.
+    setOverlayClip({ overlay: { ...o }, ...clipProvenance() });
+    flashWarn(`Copied “${o.name}”. Paste with ${MOD_LABEL}V.`, 3500); // one modifier-label derivation, not two
   };
   // Place a copy of `o` (new id, new transform-layer slot) on top. Shares the source ref; starts unlocked.
   const placeOverlayCopy = (o, x, y) => {
@@ -7565,14 +7605,25 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     flashWarn(`Duplicated “${o.name}”.`, 3000);
   };
   const pasteOverlay = () => {
-    const o = overlayClip.current;
-    if (!o) { flashWarn("Nothing to paste — copy a drawing first.", 3500); return; } // B461 edge case: empty clipboard
+    const payload = getOverlayClip();
+    if (!payload) { flashWarn("Nothing to paste — copy a drawing first.", 3500); return; } // B461 edge case: empty clipboard
+    const o = payload.overlay;
     const c = lastPtrFt.current; // live cursor in feet → paste lands centered there (B417 pattern)
-    const off = OV_OFFSET();
-    const x = c ? c.x - (o.imgW * o.ftPerPx) / 2 : o.x + off;
-    const y = c ? c.y - (o.imgH * o.ftPerPx) / 2 : o.y + off;
+    const w = o.imgW * o.ftPerPx, h = o.imgH * o.ftPerPx;
+    // NEW-1 — the same cross-plan rule the drawn-object clipboard uses, and for the same reason:
+    // a reference drawing is registered to the GROUND, so it must arrive over the ground it was
+    // aligned to, never at the source plan's raw feet coordinates.
+    const crossPlan = payload.siteId !== siteId;
+    const bb = { x0: o.x, y0: o.y, x1: o.x + w, y1: o.y + h };
+    const frame = crossPlan
+      ? resolveClipFrame(payload.origin, origin, { ref: { x: o.x + w / 2, y: o.y + h / 2 }, extentFt: Math.max(w, h) })
+      : null;
+    const place = clipPlacement({ crossPlan, frame, bbox: bb, cursor: c, nudge: OV_OFFSET() });
+    if (place.mode === "refuse") { flashWarn(place.message, 7000); return; } // LOUD-FAILURE
+    const x = o.x + place.dx, y = o.y + place.dy;
     placeOverlayCopy(o, x, y);
-    flashWarn(`Pasted “${o.name}”.`, 3000);
+    revealPasted({ x0: x, y0: y, x1: x + w, y1: y + h });
+    flashWarn(`Pasted “${o.name}”${pasteNote(place, frame) || "."}`, 4000);
   };
   // Draw order = array order (later paints on top), so front = end, back = start. No-op at the ends.
   // NEW-2 — front/back within the reference's OWN band (below-the-plan vs above-the-plan). Crossing
@@ -16009,13 +16060,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         }}
         onClick={() => setPlanMenu((o) => !o)}
         title="Switch or rename plan"
+        data-testid="plan-crumb"
       >
         <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{planLabel}</span><span style={{ color: "var(--chrome-muted)", fontSize: 11, flex: "none" }}>▾</span>
       </button>
         <AnchoredMenu open={planMenu} onClose={() => { setPlanMenu(false); setPlanDelArm(null); }} anchorRef={planAnchor} placement="below-left" gap={8} width={284} panelStyle={{ ...menuPanel, padding: 10 }}>
           <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, marginBottom: 5 }}>Plan name</div>
           <input value={planLabel} onChange={(e) => setPlanLabel(e.target.value)} onBlur={(e) => commitPlanLabel(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter") e.target.blur(); }} style={{ ...numInput, width: "100%", fontFamily: "inherit" }} />
+            onKeyDown={(e) => { if (e.key === "Enter") e.target.blur(); }} style={{ ...numInput, width: "100%", fontFamily: "inherit" }} data-testid="plan-name-input" />
           <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, margin: "11px 0 5px" }}>Plans in this site</div>
           {plansHere.map((s) => {
             const cur = s.id === siteId;
@@ -23002,11 +23054,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             {row({ text: c.noLeader ? "Delete text box" : "Delete callout", hint: "Del", danger: true, on: () => { deleteSel({ kind: "callout", id: c.id }, { entry: "menu:callout" }); close(); } })}
           </>;
         } else {
-          const hasClip = !!(clip.current?.items?.length || overlayClip.current);
+          const hasClip = hasCanvasClip() || hasOverlayClip();
           header = "Map";
           body = <>
             {row({ text: "Zoom to fit", on: () => { fit(); close(); } })}
-            {row({ text: "Paste", hint: `${MOD}V`, dis: !hasClip, title: hasClip ? "" : "Copy a shape or drawing first", on: () => { if (clip.current?.items?.length) pasteClip(); else if (overlayClip.current) pasteOverlay(); close(); } })}
+            {row({ text: "Paste", hint: `${MOD}V`, dis: !hasClip, title: hasClip ? "" : "Copy a shape or drawing first", on: () => { if (hasCanvasClip()) pasteClip(); else if (hasOverlayClip()) pasteOverlay(); close(); } })}
             <div style={{ borderTop: `1px solid ${PAL.panelLine}`, marginTop: 4, paddingTop: 4 }} />
             {row({ text: "Export to Google Earth (KMZ)", dis: !origin, title: origin ? "Download this site as a Google Earth file" : "Place this plan on the map first", on: () => { exportKmz(false); close(); } })}
             {row({ text: "Export with 3D buildings", dis: !origin, title: origin ? "Building massing lifted to real height in Earth's 3D view" : "Place this plan on the map first", on: () => { exportKmz(true); close(); } })}
@@ -23164,7 +23216,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             <div style={hdr(false)}>Edit</div>
             {item({ text: "Copy", hint: `${MOD}C`, on: () => { copyOverlay(ovMenu.id); setOvMenu(null); } })}
             {item({ text: "Duplicate", hint: `${MOD}D`, on: () => { duplicateOverlay(ovMenu.id); setOvMenu(null); } })}
-            {item({ text: "Paste", hint: `${MOD}V`, dis: !overlayClip.current, title: overlayClip.current ? "" : "Copy a drawing first", on: () => { pasteOverlay(); setOvMenu(null); } })}
+            {item({ text: "Paste", hint: `${MOD}V`, dis: !hasOverlayClip(), title: hasOverlayClip() ? "" : "Copy a drawing first", on: () => { pasteOverlay(); setOvMenu(null); } })}
             <div style={hdr(true)}>Arrange</div>
             {item({ text: "Bring to front", dis: atFront, on: () => { reorderOverlay(ovMenu.id, "front"); setOvMenu(null); } })}
             {item({ text: "Send to back", dis: atBack, on: () => { reorderOverlay(ovMenu.id, "back"); setOvMenu(null); } })}
