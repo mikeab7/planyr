@@ -43,7 +43,11 @@ export function boundedCache(max = 64) {
   };
 }
 
-export function identityCache() {
+/** `cap` is the per-OBJECT variant limit. The default of 16 suits a centerline buffered at two or
+ *  three widths. A pond ring is asked for its inward offset at every stage band AND at all 28 rungs
+ *  of the pinch-off binary search (B227888), so that caller passes a larger cap — an under-sized cap
+ *  on a hot leaf is worse than none, because it clears on every call and pays the keying for nothing. */
+export function identityCache(cap = 16) {
   const wm = new WeakMap();
   return {
     get(obj, k) {
@@ -54,9 +58,8 @@ export function identityCache() {
       if (!obj || (typeof obj !== "object" && typeof obj !== "function")) return v;
       let inner = wm.get(obj);
       if (!inner) { inner = new Map(); wm.set(obj, inner); }
-      // One object rarely carries many variants (a centerline is buffered at two or three
-      // widths); a small cap keeps a pathological caller from growing an entry without limit.
-      if (inner.size >= 16) inner.clear();
+      // A small cap keeps a pathological caller from growing an entry without limit.
+      if (inner.size >= cap) inner.clear();
       inner.set(k, v);
       return v;
     },

@@ -478,6 +478,135 @@ inscribed-rectangle enumeration and the pond ledger's rebuild are both candidate
 items, and neither has been instrumented against a real 48-point ring. That is the next arm, and it
 wants the recompute probe (§`VIEW-INDEPENDENT-ONCE`) rather than another fixture subtraction.
 
+> ⛔ **ANSWERED, AND THE ANSWER IS "NEITHER, AND THE QUESTION WAS WRONG" — see §5.6 (B236592).** No
+> per-vertex path is superlinear; nothing here is superlinear in vertex count at all. `interiorFitter`
+> costs **0.5 ms of the 55,760 ms gesture** and is exonerated. The cost was a mildly-growing per-call
+> cost multiplied by **156 recomputations per pond per pan**, and §5.5's own headline — *"a vertex is
+> expensive, and ponds are where the vertices are"* — has to be re-read exactly the way it re-read
+> §5.4's Finding 3. Both sections were right about WHERE and wrong about WHAT, for the same reason:
+> the subtraction arm changed more than one thing at a time.
+
+### 5.6 ⛔ RECURRENCE, NOT COMPLEXITY. §5.5's per-vertex law does not exist — and the gap is closed
+
+**Added 2026-08-07 (B236592). This CORRECTS §5.5's headline and its "920 ms per vertex" figure.** The
+owner refused the finding on principle before any of it was measured, and he was right:
+
+> *"I don't really understand how a static pond, how the calculation should slow anything down at
+> all. And you can give me the reason, but I still don't think it should."*
+
+#### The refutation: decimation was never a vertex-count instrument
+
+§5.5 decimated both rings to 7 points and preserved the **bounding box**. A bounding box is not a
+shape. Decimation removes **concavity** along with the vertices, and concavity is what loads
+clipper-lib's intersection sweep — so the arm confounded *"more points"* with *"a simpler polygon"*
+and reported the difference as a law about vertex count.
+
+**COLLINEAR MIDPOINT INSERTION is the arm that has no confound**, and nobody had run it: inserting
+midpoints along each edge raises the vertex count while holding area, perimeter, bounding box **and
+the drawn path** exactly identical. On the fast plan's real ring:
+
+| | n=7 | n=14 | n=28 | n=56 | n=112 | log-log exponent |
+|---|---:|---:|---:|---:|---:|---:|
+| area · perimeter · bbox | — **identical at every rung** — | | | | | |
+| `pondStageModel` | 30.7 | 30.5 | 33.9 | 38.8 | 53.6 ms | **0.20** |
+| `maxInwardOffset` | 3.29 | 2.26 | 2.01 | 1.96 | 1.72 ms | **−0.21** |
+
+**Sixteen times the vertices costs 1.75× — and the pinch-off search gets *cheaper*** (clipper's
+`CleanPolygon` drops collinear points, so they are free). There is no superlinear per-vertex term
+anywhere on this path. §5.5's ~920 ms/vertex was `49,806 ms ÷ 54` — an arithmetic consequence of
+attributing a whole recurrence to the one variable the arm happened to name.
+
+#### What it actually was, counted rather than timed
+
+A JS self-time profile of the real gesture (`ui-audit/profile-pond-ring.mjs`) put **55,631 ms of the
+55,760 ms** in clipper-lib's intersection sweep — `BuildIntersectList`, `ProcessEdgesAtTopOfScanbeam`,
+`ExecuteInternal`. An invocation count (`ui-audit/count-pond-invocations.mjs`, on the probe build)
+said why:
+
+| per ONE pan gesture, 2 ponds | calls | per pond |
+|---|---:|---:|
+| `offsetInward` (the clipper primitive) | **275,184** | 137,592 |
+| `maxInwardOffset` (29 clipper executes each) | 8,736 | 4,368 |
+| `pondElevations` | 5,616 | 2,808 |
+| **`pondStageModel`** | **312** | **156** |
+| `interiorFitter` | 312 | 156 — **0.5 ms total, EXONERATED** |
+
+Two stacked defects, neither of them a formula:
+
+1. **`drainFacts()` is deliberately GATING, not memoising** (`SitePlanner.jsx`) — it rebuilds the
+   whole yield/stormwater bundle fresh on every render that reads it. With the Yield panel docked
+   that is **156 rebuilds per pond per pan**, on ponds nobody touched. 155 of the 156 answers were
+   bit-for-bit identical to the first.
+2. **`pondElevations` was re-derived inside its own consumer** — `stageTable` asks for it once and
+   twice more *per band* via `areaAtElev`, so a 7-band pond paid the 29-execute pinch-off search 15
+   times to obtain a constant. That is the term that *looked* superlinear: a constant re-derived a
+   linear number of times.
+
+#### The fix, and why it carries no correctness risk
+
+Memoisation only — **no formula was touched.** `offsetInward` / `maxInwardOffset` (`pondOffset.js`)
+and `pondElevations` / `pondStageModel` (`pondStageModel.js`) are keyed on the ring's **identity**
+(the planner replaces `points` wholesale on every edit; it never mutates in place) plus the det/opts
+fields by **value**. The key IS the inputs, so the cache cannot serve a stale engineering number —
+which is the property `drainFacts`'s gating-not-memoising comment exists to protect.
+
+#### Results — the same 4 arms × 6 reps, interleaved, same regime as §5.5
+
+| arm | **main-thread work** | vs §5.5 | vs `quiddity` | canvas nodes | text |
+|---|---:|---:|---:|---:|---:|
+| `quiddity` (**REAL 68-vertex rings**) | **505.1 ms** | **−99.1%** (was 55,760) | — | 752 | 30 |
+| `simple-ponds` (decimated to 7) | 503.7 ms | −91.5% (was 5,955) | −0.3%, **p = 0.688 — NOT separated** | 752 | 30 |
+| `one-pond` | 479.1 ms | −98.8% (was 39,505) | −5.1%, p = 0.219 | 742 | 29 |
+| `original` (the fast plan) | 561.8 ms | −88.6% (was 4,940) | +11.2% | 598 | 23 |
+
+**The acceptance test was that `quiddity` with its real rings must land near the `simple-ponds`
+number. It did better than that: ring complexity has ceased to be a variable.** The arm that
+recovered 89.3% now recovers **nothing measurable**, because there is nothing left for it to
+recover — and the plan the owner calls slow is now marginally *cheaper* on main-thread work than the
+one he calls fast.
+
+⛔ **NOTHING DRAWN CHANGED, and it is proven rather than asserted.** The rendered canvas was captured
+before and after on the real fixture and diffed: **752 canvas nodes · 30 text nodes · 52 elements ·
+every element's vertex count and every bounding box byte-identical.** Both pond rings still carry
+their surveyed 48 and 20 points.
+
+#### The third question, and the honest answer is "nothing further to do"
+
+The owner then asked, reasonably: *"I'm assuming we should also make the pond math faster. Like,
+there's no reason it should be longer than it needs to. Right?"* After the recurrence fix these
+functions run on a real **edit** — drawing a pond, dragging a vertex — which is a felt moment. So the
+single-call cost was measured **cold** (a fresh ring identity every rep, which is exactly what a
+vertex drag produces, so no cache can flatter it):
+
+| pond | vertices | `pondStageModel` | `usablePondVolume` | `detentionStorage` | `interiorFitter` | **full edit** |
+|---|---:|---:|---:|---:|---:|---:|
+| quiddity (largest real basin) | 48 | 14.18 | 0.20 | 0.01 | 0.99 | **15.4 ms** |
+| quiddity (second basin) | 20 | 5.05 | 0.08 | 0.00 | 1.13 | **6.3 ms** |
+| original | 7 | 3.00 | 0.06 | 0.00 | 0.38 | **3.4 ms** |
+
+**A full cold recompute of his largest surveyed basin is 15.4 ms — inside a single 16 ms frame**, and
+only the edited pond recomputes (identity keying gives incremental invalidation for free). By the
+stated rule — under ~16 ms means there is nothing worth fixing — **this is the "already fast enough"
+case, and the correct answer is to stop.** For the record the constant factor did improve anyway, as
+a side effect of removing the internal re-derivation and with no formula touched: one cold
+`pondStageModel` on the 48-vertex ring went **249.9 ms → 14.18 ms (17.6×)**.
+
+⛔ **`pondFloodFacts` was never a suspect once looked at** — it has carried a content-signature LRU
+memo since B707 and does not appear in the profile at all.
+
+#### The guards, and why there are three
+
+| guard | asserts | runs |
+|---|---|---|
+| `test/pondViewIndependence.test.js` | 156 identical rebuilds do **zero** additional clipper work; every input that can move an answer still moves it; per-vertex cost bounded on a **collinear-inserted** ring | CI |
+| `test/pondStorageGoldenMaster.test.js` | 78 assertions of **exact** equality (`toBe`, no tolerance) — every stage band, area, volume and split, on both his real rings across five setting combinations and the full stage range | CI |
+| `ui-audit/count-pond-invocations.mjs --assert` | a pan recomputes **NO** pond geometry, **and** the cached lookups are OBSERVED so an empty report cannot pass as a clean one | browser |
+
+⚠ **Every guard here counts INVOCATIONS, not milliseconds**, because a time budget passes the moment
+a computation that should not be running at all merely gets cheaper — and this programme has three
+separate cases on record of a cost class returning unnoticed because only a total was being watched.
+All are mutation-checked: disabling the memos takes the unit guard from 16 green to 4 red.
+
 ---
 
 ## 6. What this still cannot settle — stated, not implied

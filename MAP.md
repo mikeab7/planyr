@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-08-07 @ `4185394` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-08-07 @ `4a77211` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -682,7 +682,7 @@ _446 source files mapped._
 - **`src/workspaces/site-planner/lib/pondLedger.js`** — Site-level pond-ledger accumulator + pond roles: folds per-pond usable/dead splits into the detention totals (unknown facts poison usable to null — never gross-as-usable) and gates which ponds' below-WSE cut credits the mitigation Provided ledger. Exports `accumulatePondLedger`, `suggestPondRole`, `effectivePondRole`, `POND_ROLES`.
   - _exports_: `accumulatePondLedger`, `allocatePondDuty`, `effectivePondRole`, `mitigationCredit`, `POND_DISPLAY_NAME`, `POND_ROLE_LABEL`, `POND_ROLES`, `pondDisplayName`, `pondDisplayNameFor`, `ROLE_SHARE`, `suggestPondRole`
 - **`src/workspaces/site-planner/lib/pondOffset.js`** — Robust inward polygon offset via clipper-lib for pond grading contours: pinch-off, basin split, max inscribed reach
-  - _exports_: `maxInwardOffset`, `offsetInward`, `offsetOutward`, `ringsArea`
+  - _exports_: `maxInwardOffset`, `offsetInward`, `offsetOutward`, `offsetStats`, `ringsArea`
 - **`src/workspaces/site-planner/lib/pondOptimizeAffordance.js`** — WHEN the pond optimizer is offered and WHAT it does: availability is POSSIBILITY (drawn ring · known requirement · resolved split), never verdict tone, and `materialAlternative` decides whether a smaller basin is worth a line at all (null = render nothing).
   - _exports_: `default`, `MATERIAL_LAND_AC`, `materialAlternative`, `OPTIMIZE_BLOCKED`, `OPTIMIZE_LABEL`, `OPTIMIZE_TITLE`, `optimizeAffordance`
 - **`src/workspaces/site-planner/lib/pondOptimizer.js`** — Pond economics optimizer (NEW-D / Phase D): searches depth × placement pond configurations under constraints (max depth, groundwater ceiling, maintenance berm, pipeline-corridor exclusions) and ranks by earthwork $, land-take, and buildable-SF recovered. Exports `solveScaleForVolume`, `evaluateCandidate`, `optimizePond`.
