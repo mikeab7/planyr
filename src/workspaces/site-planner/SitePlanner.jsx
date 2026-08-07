@@ -18728,7 +18728,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     const pts = ring.pts.map((p) => { const s = f2p(p); return `${s.x},${s.y}`; }).join(" ");
                     const Tag = ring.closed ? "polygon" : "polyline";
                     return (
-                      <g key={`ms${m.kind}${m.id}`}>
+                      // B227940 — stamped so a MULTI / GROUP selection is observable from the DOM.
+                      // An element in a multi-selection paints this footprint ring and nothing else
+                      // (no handle-layer grips, no per-feature "selected" attribute), so a grouped
+                      // element that selected correctly was indistinguishable from one that ignored
+                      // the press — the owner's "no selection" symptom, invisible to any harness.
+                      <g key={`ms${m.kind}${m.id}`} data-testid="selection-ring">
                         <Tag points={pts} fill="none" stroke={PAL.selCasing} strokeWidth={3.5} strokeLinejoin="round" strokeLinecap="round" />
                         <Tag points={pts} fill="none" stroke={PAL.selLine} strokeWidth={1.5} strokeLinejoin="round" strokeLinecap="round" />
                       </g>

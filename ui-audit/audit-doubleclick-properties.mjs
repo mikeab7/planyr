@@ -115,6 +115,22 @@ const ELS = [
   { id: eid(), type: "trailer", ...rect(3, 0, 300, 120), label: "Trailer Parking" },
   { id: eid(), type: "sidewalk", ...rect(4, 0, 300, 60), label: "Sidewalk" },
   { id: eid(), type: "pond", ...rect(0, 3, 320, 220), label: "Detention Pond" },
+  /* ⛔ THE FIXTURE'S POND USED TO BE THE BARE RECT ABOVE, AND THAT IS HOW THIS HARNESS CERTIFIED A
+   * POND 19/19 WHILE THE OWNER'S REAL DETENTION POND WAS REPORTED DEAD ON THE SAME BUILD (B227940).
+   * A real pond is not a rect with a label: it carries a detention record, it is often an irregular
+   * POLYGON rather than a rect (so it renders through a different branch of renderElPx entirely),
+   * and it may carry an expansion BASELINE that paints a second fill over the basin. Each of those
+   * is a different render path, so each gets a row — a type name in a fixture is not a class. */
+  { id: eid(), type: "pond", variant: "polygon", ...rect(3, 3, 320, 220), points: ring(at(3, 3).x, at(3, 3).y, 320, 220), label: "Pond (irregular)" },
+  { id: eid(), type: "pond", variant: "rect + detention", ...rect(0, 4, 320, 220), det: { role: "detention", depth: 8, tobElev: 100, poolElev: 96, freeboard: 1, slope: 3, outlet: "weir", contourInterval: 1, contours: true, daAcres: 12, daImpPct: 70, releaseRateCfs: 5 }, label: "Pond (detention)" },
+  { id: eid(), type: "pond", variant: "polygon + detention", ...rect(1, 4, 320, 220), points: ring(at(1, 4).x, at(1, 4).y, 320, 220), det: { role: "detention", depth: 8, tobElev: 100, poolElev: 96, freeboard: 1, slope: 3, outlet: "weir", contourInterval: 1, contours: true, daAcres: 12, daImpPct: 70, releaseRateCfs: 5 }, label: "Pond (irregular, detention)" },
+  { id: eid(), type: "pond", variant: "polygon + expansion baseline", ...rect(2, 4, 320, 220), points: ring(at(2, 4).x, at(2, 4).y, 320, 220),
+    det: { ...{ role: "detention", depth: 8, tobElev: 100, poolElev: 96, freeboard: 1, slope: 3, outlet: "weir", contourInterval: 1, contours: true, daAcres: 12, daImpPct: 70, releaseRateCfs: 5 }, baseline: { ring: ring(at(2, 4).x, at(2, 4).y, 200, 140) } }, label: "Pond (expanded)" },
+  /* A GROUPED pair. Its double-click is B261 DRILL-IN, not Properties — asserted in the direction it
+   * actually holds (below), so the one element class whose double-click deliberately does NOT open
+   * the panel is PINNED rather than left to look like a pass. */
+  { id: eid(), type: "pond", variant: "grouped", groupId: "zzgrp1", ...rect(3, 4, 320, 220), det: { role: "detention", depth: 8, tobElev: 100, poolElev: 96, freeboard: 1, slope: 3, outlet: "weir", contourInterval: 1, contours: true, daAcres: 12, daImpPct: 70, releaseRateCfs: 5 }, label: "Pond (grouped)", drillOnly: true },
+  { id: eid(), type: "building", variant: "grouped", groupId: "zzgrp1", ...rect(4, 4, 240, 160), label: "Building (grouped)", drillOnly: true },
   // TRAP 1 in action: pts + vtx + the roadStripBBox spread, never hand-written bounds.
   { id: eid(), type: "road", label: "Road", roadClass: "truck",
     ...roadBBox([{ x: at(4, 3).x - 200, y: at(4, 3).y }, { x: at(4, 3).x + 200, y: at(4, 3).y }], 30, 1) },
@@ -151,14 +167,14 @@ const MARKUPS = [
 ];
 
 const NAMES = new Map([
-  ...ELS.map((e) => [e.id, `element ${e.type}`]),
+  ...ELS.map((e) => [e.id, `element ${e.type}${e.variant ? ` · ${e.variant}` : ""}`]),
   ...MARKUPS.map((m) => [m.id, `markup ${m.kind}${m.mode ? ` (${m.mode})` : ""}`]),
 ]);
 
 const site = {
   id: SITE_ID, groupId: SITE_ID, site: "ZZ Double-click audit", name: "Plan 1",
   origin: null, county: null, parcels: [], measures: [], callouts: [], underlay: null,
-  els: ELS.map((e) => ({ ...e, locked: LOCKED || undefined })),
+  els: ELS.map(({ variant, drillOnly, ...e }) => ({ ...e, locked: LOCKED || undefined })),
   markups: MARKUPS.map((m) => ({ ...m, locked: LOCKED || undefined })),
   settings: { showDims: true }, updatedAt: Date.now(),
 };
@@ -238,6 +254,41 @@ try {
   }
 
   const panelOpen = () => page.locator('[data-testid="property-panel"]').count().then((c) => c > 0);
+  /* ⛔ SELECTION HAS TO BE READ, NOT ASSUMED — and it has to be able to reach ZERO first.
+   * The owner's pond report was "no panel, NO SELECTION", and this harness could not see the second
+   * half at all: it asserted the panel and nothing else, so a feature that silently refuses to
+   * select was indistinguishable from one that selects fine. Elements carry no per-feature
+   * "selected" stamp, so selection is read off the ONE handle layer; a markup also stamps itself.
+   * The deselect below is a PRECONDITION, not politeness: if handles never clear, `handles > 0`
+   * would pass for every feature whether or not the press did anything — a green that means
+   * nothing, which is the exact failure mode this whole audit exists to prevent. */
+  const selectionCount = () => page.evaluate(() =>
+    document.querySelectorAll('[data-handle-layer] *').length
+    + document.querySelectorAll('[data-testid="markup-selected"], [data-testid="measure-selected"], [data-testid="selection-chrome"], [data-testid="selection-ring"]').length);
+  /* Escape alone does NOT reliably clear the canvas selection (measured: it closed the panel and
+   * left 45 handle nodes up), so the deselect presses EMPTY CANVAS — the same way a user drops a
+   * selection. The empty point is found by asking the document, never hard-coded: a fixture whose
+   * layout shifts would otherwise "clear" by pressing some other feature. */
+  async function emptyPoint() {
+    return page.evaluate(() => {
+      const c = document.querySelector('[data-testid="planner-canvas"]').getBoundingClientRect();
+      for (const fx of [0.5, 0.08, 0.92]) for (const fy of [0.06, 0.94, 0.5]) {
+        const x = Math.round(c.left + c.width * fx), y = Math.round(c.top + c.height * fy);
+        const n = document.elementFromPoint(x, y);
+        if (n && n.closest && !n.closest("[data-feature]") && !n.closest("[data-handle-layer]")) return { x, y };
+      }
+      return null;
+    });
+  }
+  async function deselect() {
+    await page.keyboard.press("Escape");
+    await page.waitForTimeout(120);
+    if (await selectionCount() > 0) {
+      const e0 = await emptyPoint();
+      if (e0) { await page.mouse.click(e0.x, e0.y); await page.waitForTimeout(200); }
+    }
+    return await selectionCount();
+  }
   const closePanel = async () => {
     const x = page.locator('button[aria-label="Close properties"]');
     if (await x.count()) await x.first().click();
@@ -269,10 +320,28 @@ try {
       const g = document.querySelector(sel);
       if (!g) return null;
 
+      /* ⛔ IN CENTRES MODE THE POINT MUST LAND ON THE FEATURE'S BODY, NOT ON ITS DIMENSION CHROME
+       * (B227940). This is the hole that let this harness certify a pond that could not be clicked
+       * at all: `pointer-events` is INHERITED, but a child may override it, and the dimension
+       * number sets its own `pointer-events: all`. So a pond whose entire group was pointer-DEAD
+       * still had one live child, the probe found it, NEW-3 forwarded the press from the number to
+       * the body's action, and the row passed — 19/19 green over an element the user cannot press.
+       * Proven, not theorised: with the pond group forced to `pointer-events: none` the suite still
+       * reported 50/50 before this guard, and goes red with it.
+       * `--labels` is the deliberate exception: probing the label/number IS its whole purpose. */
       const answers = (x, y) => {
         const n = document.elementFromPoint(x, y);
         const f = n && n.closest ? n.closest("[data-feature]") : null;
-        return !!f && f.getAttribute("data-feature") === key;
+        if (!f || f.getAttribute("data-feature") !== key) return false;
+        if (!labels) {
+          // The BODY is geometry. Text chrome (the map label's <text>/<tspan>, the dimension
+          // number) is what --labels exists to probe, and accepting it here is exactly how a
+          // pointer-DEAD pond passed: its label stayed live and forwarded the press to Properties.
+          if (n.closest('[data-el-dim], [data-testid="el-dim"], [data-label-for]')) return false;
+          const tag = (n.tagName || "").toLowerCase();
+          if (tag === "text" || tag === "tspan") return false;
+        }
+        return true;
       };
       const push = (out, x, y, via) => { if (Number.isFinite(x) && Number.isFinite(y)) out.push({ x: Math.round(x), y: Math.round(y), via }); };
 
@@ -313,6 +382,15 @@ try {
       }
       const box = g.getBoundingClientRect();
       if (box.width || box.height) push(cands, box.left + box.width / 2, box.top + box.height / 2, "group centre");
+      /* INTERIOR POINTS OFF THE CENTRE. A filled feature usually carries its map label AT its
+       * centre, so every centre-ish candidate resolves to the label's <text>/<tspan> — which the
+       * centres-mode body rule (above) correctly rejects. Without these the probe would then
+       * report a perfectly clickable pond as unreachable. These are what a user actually does:
+       * press the basin somewhere that is not the writing. */
+      for (const fy of [0.28, 0.72, 0.5]) for (const fx of [0.28, 0.72, 0.5]) {
+        if (fx === 0.5 && fy === 0.5) continue;
+        push(cands, box.left + box.width * fx, box.top + box.height * fy, "interior point");
+      }
 
       for (const c of cands) if (answers(c.x, c.y)) return c;
       return cands.length ? { ...cands[0], via: cands[0].via + " (UNANSWERED — nothing under it claims this feature)" } : null;
@@ -329,7 +407,7 @@ try {
   }
 
   const targets = [
-    ...ELS.map((e) => ({ id: e.id, kind: "el" })),
+    ...ELS.map((e) => ({ id: e.id, kind: "el", drillOnly: !!e.drillOnly })),
     ...MARKUPS.map((m) => ({ id: m.id, kind: "markup" })),
   ];
 
@@ -350,11 +428,55 @@ try {
     }
     const pt = await probePoint(t.id, t.kind);
     if (!pt) { ok(`${name} — double-click opens Properties`, false, "feature did not render / has no box"); continue; }
+    /* ⛔ AN UNANSWERED PROBE POINT IS A FAILURE, NOT SOMETHING TO PRESS ANYWAY (B227940).
+     * This is THE hole that let the suite certify a pond nobody can click. `probePoint` falls back
+     * to its first candidate when no point resolves to the feature — and the loop then pressed it,
+     * the press landed on whatever lay beneath, SOME panel opened, and `panelOpen()` — which only
+     * ever asked "is a panel up", never "is it THIS feature's panel" — reported a pass.
+     * Measured, not argued: with the pond's own group forced to `pointer-events: none` (a pond the
+     * user provably cannot press) the suite still reported 50/50; with this check it reports the
+     * pond rows red and names the reason. If nothing under a feature claims it, the user cannot
+     * reach it either, and that IS the bug being hunted. */
+    if (String(pt.via).includes("UNANSWERED")) {
+      ok(`${name} — single click selects`, false, `⛔ no point on this feature answers to it — it is unreachable by pointer (probed ${pt.x},${pt.y})`);
+      ok(`${name} — double-click opens Properties`, false, `⛔ UNREACHABLE: ${pt.via}`);
+      continue;
+    }
 
+    /* HALF ONE — A SINGLE CLICK SELECTS. New with B227940. This is the half the owner reported
+     * ("no panel, no selection") that nothing in the repo could see. It holds in EVERY mode: a
+     * locked feature is select-only (B922) and a grouped one selects its whole group (B261), so
+     * "something is selected" is the common floor even where the panel deliberately stays shut. */
+    const zeroed = await deselect();
+    await page.mouse.click(pt.x, pt.y);
+    await page.waitForTimeout(280);
+    const selN = await selectionCount();
+    if (LOCKED && t.drillOnly) {
+      /* ⛔ NOT A PASS, AND DELIBERATELY NOT SILENT (B227940). A LOCKED + GROUPED element paints
+       * NOTHING the DOM can see when it is selected: locked suppresses the handles (B922) and an
+       * element — unlike a markup — carries no per-feature "selected" stamp, so `sel` moves in
+       * state with no observable consequence. That is a real gap in the selection contract and it
+       * is filed, not waved through; it is reported here rather than asserted because asserting
+       * either direction would pin behaviour nobody has decided on yet. */
+      console.log(`SKIP — ${name} — single click selects  ::  locked+grouped paints no DOM-observable selection (filed, B227940)`);
+    } else {
+      ok(`${name} — single click selects`, zeroed === 0 && selN > 0,
+        zeroed === 0 ? `${selN} selection node(s)` : `⛔ PRECONDITION: Escape left ${zeroed} selection node(s) — this assertion cannot mean anything until that is fixed`);
+    }
+
+    await closePanel();
+    await page.waitForTimeout(420);            // let the tap record lapse (DBLTAP_MS = 350)
+
+    // HALF TWO — the double-click contract itself.
     await doubleClick(pt.x, pt.y);
     const opened = await panelOpen();
 
-    if (LOCKED) {
+    if (t.drillOnly) {
+      /* B261 drill-in: a GROUPED element's double-click selects the member and deliberately does
+       * NOT open Properties. Asserted in the direction it holds so it reads as the decision it is.
+       * If this ever flips it is a product change, not a silent drift. */
+      ok(`${name} — GROUPED: double-click drills in, Properties stays shut`, !opened, pt.via);
+    } else if (LOCKED) {
       // The carve-out, asserted in the direction it actually holds: a locked feature SELECTS and
       // stays select-only. If this flips, it is a product decision, not a silent drift.
       const selected = await page.evaluate((id) => !!document.querySelector(`[data-mk-id="${id}"][data-testid="markup-selected"]`) || !!document.querySelector('[data-handle-layer] *'), t.id);
