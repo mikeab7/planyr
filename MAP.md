@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-08-06 @ `9edbefc` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-08-07 @ `9973741` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_438 source files mapped._
+_440 source files mapped._
 
 ## infra
 
@@ -163,7 +163,7 @@ _438 source files mapped._
 - **`src/shared/gis/sourceFixtures.js`** — the GIS registry's coverage fixtures + prose, split OFF the app bundle (assertions and documentation the running app never reads, so they don't ride the Site route)
   - _exports_: `docsFor`, `fixturesFor`, `SOURCE_DOCS`, `SOURCE_FIXTURES`
 - **`src/shared/gis/sources.js`** — Versioned GIS source registry: per-layer service URLs, fields, coverage, production/exception tier, and known-truth fixtures with CI tier/shape audits
-  - _exports_: `ANALYSIS_KEYS`, `auditRegistry`, `availabilityOf`, `availabilityProblems`, `DETENTION_KEYS`, `fixtureCount`, `GIS_SOURCES`, `gisSource`, `JURISDICTION_KEYS`, `looksNonProduction`, `NON_PRODUCTION_URL_PATTERNS`, `outFieldsFor`, `SOURCE_STATE_SCOPE`, `sourceCoversState`, `statesFor`, `tierProblems`, `VALID_AVAILABILITY`, `VALID_TIERS`
+  - _exports_: `ANALYSIS_KEYS`, `auditRegistry`, `availabilityOf`, `availabilityProblems`, `DETENTION_KEYS`, `FIXTURE_REACH_CLASSES`, `fixtureCount`, `fixturePoints`, `fixtureReachClassFor`, `fixtureReachProblems`, `fixtureSpreadKm`, `GIS_SOURCES`, `gisSource`, `haversineKm`, `JURISDICTION_KEYS`, `looksNonProduction`, `NON_PRODUCTION_URL_PATTERNS`, `outFieldsFor`, `SOURCE_FIXTURE_REACH`, `SOURCE_FIXTURE_REACH_PENDING`, `SOURCE_STATE_SCOPE`, `sourceCoversState`, `statesFor`, `tierProblems`, `VALID_AVAILABILITY`, `VALID_TIERS`
 - **`src/shared/ids.js`** — Collision-resistant element-id minter: per-tab random letter salt + seedAbove counter so no two tabs mint a tombstoned id (B591)
   - _exports_: `createIdMinter`, `randomIdSalt`
 - **`src/shared/markup/geometry.js`** — Pure unit-agnostic point math for all markup surfaces: length, shoelace area, arc-midpoint, point-in-poly, clamped centroid, snap45, projToSeg, bbox
@@ -406,9 +406,13 @@ _438 source files mapped._
 - **`src/workspaces/site-planner/lib/costTakeoff.js`** — Priced road takeoff: FC-FC asphalt paving (SY, pan-trimmed) + both-side curb (LF by type) rolled up at user unit prices
   - _exports_: `costRollup`, `CURB_TYPE_META`, `CURB_TYPES`, `DEFAULT_PAN_WIDTH`, `roadCurbedSides`, `roadCurbType`, `roadPanWidth`, `roadQuantities`, `SF_PER_SY`
 - **`src/workspaces/site-planner/lib/counties.js`** — County parcel/GIS registry: CAD endpoints, TxGIO statewide fallback, jurisdiction utility layers, click-routing bboxes, tax-unit resolver
-  - _exports_: `candidateCountiesForPoint`, `COUNTIES`, `COUNTIES_MAP`, `countyForView`, `countyKeyForName`, `countyKeysForState`, `detectField`, `FEET_WKID`, `isStatewideLayerUrl`, `JURISDICTION_LAYERS`, `resolveTaxRates`, `sharedLayerUrlConflicts`, `SNAPSHOT_COUNTIES`, `stateForCountyKey`, `STATEWIDE_KEYS`, `STATEWIDE_LAYER_URLS`, `STATEWIDE_PARCEL_LAYER`, `statewideFallbackFor`, `TAX_RATE_SOURCES`, `trimLayerUrl`
+  - _exports_: `candidateCountiesForPoint`, `COUNTIES`, `COUNTIES_MAP`, `countyForView`, `countyIdentity`, `countyKeyForName`, `countyKeysForState`, `countyPolygonsReady`, `detectField`, `FEET_WKID`, `isStatewideLayerUrl`, `JURISDICTION_LAYERS`, `loadCountyPolygons`, `noParcelSourceNote`, `resolveTaxRates`, `sharedLayerUrlConflicts`, `SNAPSHOT_COUNTIES`, `stateForCountyKey`, `STATEWIDE_KEYS`, `STATEWIDE_LAYER_URLS`, `STATEWIDE_PARCEL_LAYER`, `statewideFallbackFor`, `TAX_RATE_SOURCES`, `trimLayerUrl`
 - **`src/workspaces/site-planner/lib/countiesProvenance.js`** — NEW-5 build-time endpoint verification record for every county parcel source (probe dates, parked candidate URLs, provenance) — read by the GIS source audit, NEVER by the browser, which is why it is split out of counties.js: its prose has no business on the Site route's bundle
   - _exports_: `candidateUrlFor`, `COUNTY_VERIFICATION`, `provenanceFor`, `verifiedOnFor`
+- **`src/workspaces/site-planner/lib/countyPolygons.js`** — B209502 point-in-polygon county resolution: decoder + ray-cast test over the committed `public/geo/county-polygons.json` asset, so a bounding box can narrow the candidates but never decide which county a point is in
+  - _exports_: `__resetCountyPolygons`, `countyPolygonsReady`, `loadCountyPolygons`, `resolveCounty`, `setCountyPolygons`
+- **`src/workspaces/site-planner/lib/countyPolygonsCore.js`** — B209502 the county resolver's working half (delta decode, ray-cast containment, edge distance), split off the boot path and dynamic-imported by `countyPolygons.js` so the Site route's largest chunk isn't charged for it
+  - _exports_: `buildIndex`, `decodeRing`, `distToRings`, `NEAR_EDGE_DEG`, `pointInRing`, `resolveIn`
 - **`src/workspaces/site-planner/lib/coverage.js`** — Picker-only layer coverage engine: reproject regional service extents vs viewport to flag in-view/empty/out-of-coverage plus relevance prefs
   - _exports_: `_resetCoverageCache`, `_resetRelevancePrefs`, `boundsFromLeaflet`, `boundsIntersect`, `bufferBounds`, `computeCoverage`, `COVERAGE_STATE`, `DEFAULT_RADIUS_MI`, `DEFAULT_RELEVANCE`, `displayCoverage`, `esriExtentToBounds`, `getCachedExtent`, `getNearbyRadiusMiles`, `getRelevanceMode`, `isRegional`, `LAYER_SCOPE`, `layerScope`, `normalizeMode`, `normalizeRadius`, `prefetchExtents`, `regionCoverage`, `RELEVANCE_MODES`, `setLayerExtent`, `setNearbyRadiusMiles`, `setRelevanceMode`, `srPointToLatLon`, `subscribeRelevance`
 - **`src/workspaces/site-planner/lib/curveNumber.js`** — SCS/NRCS Curve-Number runoff method (NEW-B1): composite CN from hydrologic soil group + impervious %, runoff depth/volume from an Atlas-14 rainfall depth, post-minus-pre increase. Pure TR-55.
@@ -538,7 +542,7 @@ _438 source files mapped._
 - **`src/workspaces/site-planner/lib/inwardBerm.js`** — v3 D1/D5 INWARD berm geometry (outer-toe model): the drawn polygon is the FIXED outer toe; a rim above grade builds the berm INWARD (crest = toe inset by extSlope·h), shrinking the water surface with diminishing returns up to a geometric ceiling where the footprint pinches closed. Also the COMPUTED berm cap (drainage cap vs geometric ceiling, D5). Pure — feeds pondGeom the crest ring; no storage math of its own.
   - _exports_: `bermNeedsInlets`, `bermPinched`, `bermRingAreaSf`, `bermWaterAreaSf`, `bindingBermCap`, `crestRingForBerm`, `crestTopRing`, `drainageBermCapFt`, `EXT_BERM_SLOPE`, `geometricMaxBermFt`, `INFLOW_HEAD_ALLOWANCE_FT`, `INLETS_THROUGH_BERM_NOTE`, `inwardBermSplit`
 - **`src/workspaces/site-planner/lib/jurisdiction.js`** — Registry-driven ArcGIS jurisdiction/road-authority identify (city/ETJ/county intersect + nearest-road maintainer) over the SWR cache with map-overlay styling
-  - _exports_: `buildIdentifyParams`, `countyAtPoint`, `countySourcesForPoint`, `ETJ_SOURCES`, `etjSourcesForPoint`, `formatHighway`, `formatJurisdictionBadge`, `identifyJurisdiction`, `identifyRoadAuthority`, `identifySource`, `JURISDICTION_SOURCES`, `normalizeFeature`, `polylineDistMeters`, `polylineLengthMeters`, `proxiedQueryUrl`, `ROAD_AUTHORITY_COLORS`, `ROAD_AUTHORITY_LEGEND`, `ROAD_MAINT_AGENCY`, `roadAuthority`, `roadAuthorityStyle`, `roadDisplayName`, `simplifyRing`
+  - _exports_: `buildIdentifyParams`, `countyAtPoint`, `countySourcesForPoint`, `ETJ_SOURCES`, `etjSourcesForPoint`, `formatHighway`, `formatJurisdictionBadge`, `identifyJurisdiction`, `identifyRoadAuthority`, `identifySource`, `JURISDICTION_SOURCES`, `normalizeFeature`, `placeKey`, `polylineDistMeters`, `polylineLengthMeters`, `proxiedQueryUrl`, `ROAD_AUTHORITY_COLORS`, `ROAD_AUTHORITY_LEGEND`, `ROAD_MAINT_AGENCY`, `roadAuthority`, `roadAuthorityStyle`, `roadDisplayName`, `samePlace`, `simplifyRing`
 - **`src/workspaces/site-planner/lib/kmzExport.js`** — Google Earth (.kmz) export (B684): pure, dependency-free CRC32 + hand-rolled STORE-only ZIP writer, KML builder (lon,lat order, ring closure/holes, per-layer styles, building extrude), and the site→layer feature mapping; reprojection is injected (the shared feetToLatLng), so it never drifts from the map render.
   - _exports_: `buildKml`, `buildKmz`, `crc32`, `elToRingFeet`, `KMZ_MIME`, `kmzFilename`, `siteToFeatures`, `xmlEscape`, `zipStore`
 - **`src/workspaces/site-planner/lib/labelFitLadder.js`** — NEW-1/NEW-2 the ONE ordered fit/fallback ladder for a map label that must sit inside a shape (inline → stacked → abbrev → outside-with-leader) plus the polygon INTERIOR measurer (largest inscribed rectangles, so fit is judged against real room, not a bounding box). Terminates in `outside`, never in a hide — a fit failure may relocate or shorten a label, never blank it.
@@ -663,7 +667,7 @@ _438 source files mapped._
   - _exports_: `addedAreaLabelPoint`, `autoContourInterval`, `bandedStorage`, `bermAsFillHeight`, `bermFillCells`, `bermFillVolume`, `contourLabelPoint`, `detentionLandTakeEstimate`, `detentionStorage`, `drawdownWarning`, `estimateFootprintSf`, `excavationVolume`, `incrementalExcavationCf`, `pointInRing`, `pondContours`, `pondPlacementCandidates`, `usablePondVolume`, `volumeBetween`
 - **`src/workspaces/site-planner/lib/pondInspectorCopy.js`** — FINAL UI SPEC Part A pond-inspector visible copy as pure data (chip vocabulary A3, collapsed-group titles/summaries, at-a-glance labels, purpose tooltips) so the chip set and word budget unit-test without a browser
   - _exports_: `POND_CHIP_DEFS`, `POND_DIMENSION_LABELS`, `POND_FLOOD_NOTES`, `POND_GROUPS`, `POND_PURPOSE_DESCRIPTOR`, `POND_PURPOSE_TOOLTIP`, `pondGroupSummary`, `pondInspectorChips`
-- **`src/workspaces/site-planner/lib/pondLabelText.js`** — the pond MAP label's area text: acreage only, no "footprint" prefix and no square footage (NEW-1, owner). `pondAreaLabelLine`, `pondAreaDeltaLine`.
+- **`src/workspaces/site-planner/lib/pondLabelText.js`** — the pond MAP label's area line, as one pure builder (`pondAreaLabelLine`) so canvas and print sheet cannot drift and the owner's wording rule can be asserted rather than grepped; deliberately overrules PR-Q/O4's "no bare acreage" for this one line.
   - _exports_: `pondAreaDeltaLine`, `pondAreaLabelLine`
 - **`src/workspaces/site-planner/lib/pondLedger.js`** — Site-level pond-ledger accumulator + pond roles: folds per-pond usable/dead splits into the detention totals (unknown facts poison usable to null — never gross-as-usable) and gates which ponds' below-WSE cut credits the mitigation Provided ledger. Exports `accumulatePondLedger`, `suggestPondRole`, `effectivePondRole`, `POND_ROLES`.
   - _exports_: `accumulatePondLedger`, `allocatePondDuty`, `effectivePondRole`, `mitigationCredit`, `POND_DISPLAY_NAME`, `POND_ROLE_LABEL`, `POND_ROLES`, `pondDisplayName`, `pondDisplayNameFor`, `ROLE_SHARE`, `suggestPondRole`

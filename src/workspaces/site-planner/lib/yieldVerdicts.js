@@ -273,6 +273,20 @@ function buildabilityVerdict(d) {
   // the strip renderer draws the ↻ that re-pulls the flood data).
   if (!bb) return row("…", "neutral", "not checked yet", { recheck: true, sortRank: 3 });
   const ffe = bb.ffe;
+  /* ⛔ B209508 — A FINISHED-FLOOR ELEVATION MAY NOT BE STATED WHILE THE AUTHORITY BEHIND IT IS
+   * UNKNOWN. "pads assumed at 144.8′ FFE" reads as a settled screening answer, but the number comes
+   * from whichever floodplain rule survived — and a FAILED jurisdiction lookup removes candidates
+   * silently, so the surviving rule can be the LAXER one. At Bain a flaky City-of-Houston ETJ lookup
+   * is the difference between Ch. 19's 500-yr basis and Fort Bend County's, which is 1–2 ft of
+   * finished floor on a site with two detention ponds.
+   *
+   * So when the administrator reports an unresolved jurisdiction role, the row states the GAP
+   * instead of the number. The elevation is still reachable — the FFE detail line under the row
+   * carries it, labelled provisional — but the one-line verdict never asserts a settled floor off an
+   * incomplete candidate set. */
+  if (d.administrator && d.administrator.unresolved) {
+    return row("?", "warn", "FFE rule not settled — jurisdiction unknown", { sortRank: 1, ffeUnsettled: true });
+  }
   if (ffe.status === "pass") return row("OK", "good", `pads pass at ${fmtAcFt(ffe.requiredFfeFt)}′ FFE`);
   if (ffe.status === "assumed") return row("OK", "neutral", `pads assumed at ${fmtAcFt(ffe.requiredFfeFt)}′ FFE`);
   if (ffe.status === "short") return row("SHORT", "danger", `pads ${fmtAcFt(ffe.shortByFt)}′ short of required FFE`);

@@ -26,12 +26,22 @@ export const SOURCE_FIXTURES = {
   fixtures: [
     // Galveston/Bolivar coast — wall-to-wall SFHA, a robust national-service sanity check.
     { label: "Galveston coast SFHA", bbox: [-94.85, 29.28, -94.70, 29.40], expectMinCount: 1 },
+    { label: "Phoenix, AZ", point: [-112.074, 33.4484], expectMinCount: 1 }, // B209505 · live 2026-08-06: 1
+    { label: "Newark, NJ", point: [-74.1724, 40.7357], expectMinCount: 1 }, // B209505 · live 2026-08-06: 8
   ],
   },
   wetlands: {
   fixtures: [
     // Sheldon Lake State Park, NE Harris Co. — known dense NWI polygons (≈58 confirmed live).
     { label: "Sheldon Lake wetlands", bbox: [-95.18, 29.84, -95.10, 29.90], layer: 2, expectMinCount: 1 },
+    /* B209505 — Sugar Land is the sixth of the owner's six audit sites and is pinned HERE by hand.
+     * The other five were selected automatically because the reach rule favours widely separated
+     * points, and Sugar Land sits in the middle of the Houston cluster — so a rule that only
+     * maximises spread would drop the very site that exposed the Sugar-Land-reads-as-Harris bug.
+     * Reach and REGRESSION coverage are different jobs; this row carries both. */
+    { label: "Sugar Land (Fort Bend) — owner audit site", point: [-95.6, 29.58], expectMinCount: 1 }, // B209505 · live 2026-08-06: 12
+    { label: "El Paso, TX", point: [-106.485, 31.7619], expectMinCount: 1 }, // B209505 · live 2026-08-06: 4
+    { label: "Newark, NJ", point: [-74.1724, 40.7357], expectMinCount: 1 }, // B209505 · live 2026-08-06: 1
   ],
   },
   oilgas: {
@@ -39,11 +49,15 @@ export const SOURCE_FIXTURES = {
     // The centerpiece guard: a county-clipped source FAILS these immediately.
     { label: "Chambers County wells", bbox: [-94.92, 29.40, -94.40, 29.95], expectMinCount: 1000 },
     { label: "Mont Belvieu (Grand Port) wells", point: [-94.886, 29.846], expectMinCount: 1 },
+    { label: "Texas City (Galveston)", point: [-94.935, 29.4], expectMinCount: 1 }, // B209505 · live 2026-08-06: 5
+    { label: "Midland (Permian Basin)", point: [-102.0779, 31.9686], expectMinCount: 1 }, // B209505 · live 2026-08-06: 40
   ],
   },
   pipelines: {
   fixtures: [
     { label: "Chambers County pipelines", bbox: [-94.92, 29.40, -94.40, 29.95], expectMinCount: 1000 },
+    { label: "Texas City (Galveston)", point: [-94.935, 29.4], expectMinCount: 1 }, // B209505 · live 2026-08-06: 24
+    { label: "El Paso, TX", point: [-106.485, 31.7619], expectMinCount: 1 }, // B209505 · live 2026-08-06: 1
   ],
   },
   ccnWater: {
@@ -51,35 +65,47 @@ export const SOURCE_FIXTURES = {
     // Cypress — dense CCN country (same point the `mud` fixture uses); a county-clipped or
     // dead source fails this. Queried as a ~1 km envelope by the drift verifier.
     { label: "Cypress-area water CCN", point: [-95.69, 29.97], expectMinCount: 1 },
+    { label: "Texas City (Galveston)", point: [-94.935, 29.4], expectMinCount: 1 }, // B209505 · live 2026-08-06: 1
+    { label: "El Paso, TX", point: [-106.485, 31.7619], expectMinCount: 1 }, // B209505 · live 2026-08-06: 1
   ],
   },
   ccnSewer: {
   fixtures: [
     { label: "Cypress-area sewer CCN", point: [-95.69, 29.97], expectMinCount: 1 },
+    { label: "Pearland / SH-288 (Brazoria)", point: [-95.29, 29.55], expectMinCount: 1 }, // B209505 · live 2026-08-06: 1
+    { label: "additional coverage point", point: [-95.7582, 30.0291], expectMinCount: 1 }, // B209505 · live 2026-08-06: 1
   ],
   },
   lpst: {
   fixtures: [
     // Pasadena / Ship Channel — dense LPST country (24 within a mile, live 2026-07-18).
     { label: "Pasadena LPST cluster", point: [-95.21, 29.72], expectMinCount: 1 },
+    { label: "Texas City (Galveston)", point: [-94.935, 29.4], expectMinCount: 1 }, // B209505 · live 2026-08-06: 11
+    { label: "El Paso, TX", point: [-106.485, 31.7619], expectMinCount: 1 }, // B209505 · live 2026-08-06: 29
   ],
   },
   epaCleanups: {
   fixtures: [
     // Pasadena Refining area — NPL/RCRA sites present (live 2026-07-18).
     { label: "Pasadena refining cleanups", point: [-95.21, 29.72], expectMinCount: 1 },
+    { label: "Phoenix, AZ", point: [-112.074, 33.4484], expectMinCount: 1 }, // B209505 · live 2026-08-06: 3
+    { label: "Newark, NJ", point: [-74.1724, 40.7357], expectMinCount: 1 }, // B209505 · live 2026-08-06: 8
   ],
   },
   growthFaults: {
   fixtures: [
     // NW Houston — dense growth-fault country (25 traces in this envelope, live 2026-07-18).
     { label: "NW Houston fault traces", bbox: [-95.60, 29.75, -95.40, 29.95], expectMinCount: 1 },
+    { label: "NE Harris / Montgomery Co. fault traces", point: [-95.0559, 30.3089], expectMinCount: 1 }, // B209505 · live 2026-08-06: 2
+    { label: "SW Harris / Brazoria fault traces", point: [-95.8537, 29.3784], expectMinCount: 1 }, // B209505 · live 2026-08-06: 1
   ],
   },
   transmission: {
   fixtures: [
     // Katy / west Houston — dense transmission country (≥1 line in any ~1 km envelope; live 2026-07-18).
     { label: "West Houston transmission", bbox: [-95.70, 29.75, -95.55, 29.85], expectMinCount: 1 },
+    { label: "Phoenix, AZ", point: [-112.074, 33.4484], expectMinCount: 1 }, // B209505 · live 2026-08-06: 10
+    { label: "Newark, NJ", point: [-74.1724, 40.7357], expectMinCount: 1 }, // B209505 · live 2026-08-06: 6
   ],
   },
   substations: {
@@ -87,6 +113,8 @@ export const SOURCE_FIXTURES = {
     // Downtown Houston — dense substation country (18 within 3 mi, live 2026-07-18). A regional
     // subset (e.g. the South-Texas-only republication) reads 0 here and fails immediately.
     { label: "Downtown Houston substations", point: [-95.36, 29.76], expectMinCount: 1 },
+    { label: "Phoenix, AZ", point: [-112.074, 33.4484], expectMinCount: 1 }, // B209505 · live 2026-08-06: 6
+    { label: "Newark, NJ", point: [-74.1724, 40.7357], expectMinCount: 1 }, // B209505 · live 2026-08-06: 2
   ],
   },
   aadt: {
@@ -94,31 +122,54 @@ export const SOURCE_FIXTURES = {
     // West Houston / Katy — dense count network (≥1 station in any ~1 km envelope; live 2026-07-18,
     // AADT ~45k on I-10 corridor). A dead/clipped source fails this.
     { label: "West Houston AADT", point: [-95.75, 29.78], expectMinCount: 1 },
+    { label: "Cedar Port / Mont Belvieu (Chambers)", point: [-94.852, 29.793], expectMinCount: 1 }, // B209505 · live 2026-08-06: 5
+    { label: "San Antonio", point: [-98.4936, 29.4241], expectMinCount: 1 }, // B209505 · live 2026-08-06: 1
   ],
   },
   rail: {
   fixtures: [
     // Downtown Houston — dense rail country (90 segments within 2 mi, live 2026-07-18; UP-owned).
     { label: "Downtown Houston rail", bbox: [-95.40, 29.73, -95.33, 29.79], expectMinCount: 1 },
+    { label: "Phoenix, AZ", point: [-112.074, 33.4484], expectMinCount: 1 }, // B209505 · live 2026-08-06: 17
+    { label: "Newark, NJ", point: [-74.1724, 40.7357], expectMinCount: 1 }, // B209505 · live 2026-08-06: 10
   ],
   },
   airports: {
   fixtures: [
     // Hobby Airport (HOU) area — a public-use airport + nearby heliports (live 2026-07-18).
     { label: "Houston Hobby area airports", point: [-95.28, 29.65], expectMinCount: 1 },
+    { label: "Dallas", point: [-96.797, 32.7767], expectMinCount: 1 }, // B209505 · live 2026-08-06: 2
+    { label: "Newark, NJ", point: [-74.1724, 40.7357], expectMinCount: 1 }, // B209505 · live 2026-08-06: 2
+    { label: "Denver", point: [-104.9903, 39.7392], expectMinCount: 1 }, // B209505 · live 2026-08-06: 1
   ],
   },
   county: {
-  fixtures: [{ label: "Harris County", point: [-95.37, 29.76], expectMinCount: 1 }],
+  fixtures: [
+    { label: "Harris County", point: [-95.37, 29.76], expectMinCount: 1 },
+    { label: "Texas City (Galveston)", point: [-94.935, 29.4], expectMinCount: 1 }, // B209505 · live 2026-08-06: 1
+    { label: "El Paso, TX", point: [-106.485, 31.7619], expectMinCount: 1 }, // B209505 · live 2026-08-06: 1
+  ],
   },
   countyCo: {
-  fixtures: [{ label: "Denver County", point: [-104.9903, 39.7392], expectMinCount: 1 }],
+  fixtures: [
+    { label: "Denver County", point: [-104.9903, 39.7392], expectMinCount: 1 },
+    { label: "Greeley (Weld)", point: [-104.7091, 40.4233], expectMinCount: 1 }, // B209505 · live 2026-08-06: 1
+    { label: "Grand Junction (Mesa)", point: [-108.5506, 39.0639], expectMinCount: 1 }, // B209505 · live 2026-08-06: 1
+  ],
   },
   city: {
-  fixtures: [{ label: "City of Houston", point: [-95.37, 29.76], expectMinCount: 1 }],
+  fixtures: [
+    { label: "City of Houston", point: [-95.37, 29.76], expectMinCount: 1 },
+    { label: "Texas City (Galveston)", point: [-94.935, 29.4], expectMinCount: 1 }, // B209505 · live 2026-08-06: 1
+    { label: "El Paso, TX", point: [-106.485, 31.7619], expectMinCount: 1 }, // B209505 · live 2026-08-06: 1
+  ],
   },
   road: {
-  fixtures: [{ label: "I-10 corridor at Katy", point: [-95.79, 29.78], expectMinCount: 1 }],
+  fixtures: [
+    { label: "I-10 corridor at Katy", point: [-95.79, 29.78], expectMinCount: 1 },
+    { label: "Texas City (Galveston)", point: [-94.935, 29.4], expectMinCount: 1 }, // B209505 · live 2026-08-06: 161
+    { label: "El Paso, TX", point: [-106.485, 31.7619], expectMinCount: 1 }, // B209505 · live 2026-08-06: 387
+  ],
   },
   isd: {
   fixtures: [
@@ -126,38 +177,57 @@ export const SOURCE_FIXTURES = {
     { label: "Goose Creek CISD (Baytown)", point: [-94.977, 29.735], expectMinCount: 1 },
     { label: "Houston ISD (downtown)", point: [-95.37, 29.76], expectMinCount: 1 },
     { label: "Katy ISD", point: [-95.79, 29.79], expectMinCount: 1 },
+    { label: "Texas City (Galveston)", point: [-94.935, 29.4], expectMinCount: 1 }, // B209505 · live 2026-08-06: 1
+    { label: "El Paso, TX", point: [-106.485, 31.7619], expectMinCount: 1 }, // B209505 · live 2026-08-06: 1
   ],
   },
   etj_hgac: {
-  fixtures: [{ label: "Katy-area ETJ (H-GAC region)", point: [-95.79, 29.79], expectMinCount: 1 }],
+  fixtures: [
+    { label: "Katy-area ETJ (H-GAC region)", point: [-95.79, 29.79], expectMinCount: 1 },
+    { label: "Conroe / I-45 North (Montgomery)", point: [-95.45, 30.28], expectMinCount: 1 }, // B209505 · live 2026-08-06: 1
+    { label: "Texas City (Galveston)", point: [-94.935, 29.4], expectMinCount: 1 }, // B209505 · live 2026-08-06: 1
+  ],
   },
   etj_austin: {
-  fixtures: [{ label: "Austin 2-mile ETJ (NW of the city)", point: [-97.8963, 30.3916], expectMinCount: 1 }],
+  fixtures: [
+    { label: "Austin 2-mile ETJ (NW of the city)", point: [-97.8963, 30.3916], expectMinCount: 1 },
+    { label: "Austin ETJ (south of the city)", point: [-97.8963, 30.2366], expectMinCount: 1 }, // B209505 · live 2026-08-06: 2
+  ],
   },
   etj_fortworth: {
-  fixtures: [{ label: "Fort Worth ETJ (south)", point: [-97.2384, 32.6382], expectMinCount: 1 }],
+  fixtures: [
+    { label: "Fort Worth ETJ (south)", point: [-97.2384, 32.6382], expectMinCount: 1 },
+    { label: "Fort Worth ETJ (far south)", point: [-97.2384, 32.4832], expectMinCount: 1 }, // B209505 · live 2026-08-06: 1
+  ],
   },
   mud: {
   fixtures: [
     // Bridgeland/Cypress — dense MUD country; ≥1 district polygon at any envelope here.
     { label: "Cypress-area water districts", point: [-95.69, 29.97], expectMinCount: 1 },
+    { label: "Texas City (Galveston)", point: [-94.935, 29.4], expectMinCount: 1 }, // B209505 · live 2026-08-06: 2
+    { label: "El Paso, TX", point: [-106.485, 31.7619], expectMinCount: 1 }, // B209505 · live 2026-08-06: 1
   ],
   },
   bkdd: {
   fixtures: [
     // A point well inside the district near Katy/Brookshire → the single boundary polygon.
     { label: "Inside BKDD (near Katy)", point: [-95.9, 29.82], expectMinCount: 1 },
+    { label: "additional coverage point", point: [-95.9, 29.838], expectMinCount: 1 }, // B209505 · live 2026-08-06: 1
   ],
   },
   hcfcdChannels: {
   fixtures: [
     // Buffalo Bayou through downtown — unit W100-00-00, multiple segments in any 1-km envelope.
     { label: "Buffalo Bayou downtown", point: [-95.37, 29.76], expectMinCount: 1 },
+    { label: "NW Harris, Beltway 8 at US-290", point: [-95.552, 29.87], expectMinCount: 1 }, // B209505 · live 2026-08-06: 10
+    { label: "Pearland / SH-288 (Brazoria)", point: [-95.29, 29.55], expectMinCount: 1 }, // B209505 · live 2026-08-06: 1
   ],
   },
   hcfcdWatersheds: {
   fixtures: [
     { label: "Buffalo Bayou watershed", point: [-95.37, 29.76], expectMinCount: 1 },
+    { label: "NW Harris, Beltway 8 at US-290", point: [-95.552, 29.87], expectMinCount: 1 }, // B209505 · live 2026-08-06: 1
+    { label: "Pearland / SH-288 (Brazoria)", point: [-95.29, 29.55], expectMinCount: 1 }, // B209505 · live 2026-08-06: 1
   ],
   },
   fbcddWse02: {
@@ -181,6 +251,8 @@ export const SOURCE_FIXTURES = {
   fixtures: [
     // Willow Fork / Cane Island near Katy — dense named flowlines in any ~1 km envelope.
     { label: "Willow Fork (Katy)", point: [-95.83, 29.78], expectMinCount: 1 },
+    { label: "El Paso, TX", point: [-106.485, 31.7619], expectMinCount: 1 }, // B209505 · live 2026-08-06: 1
+    { label: "Newark, NJ", point: [-74.1724, 40.7357], expectMinCount: 1 }, // B209505 · live 2026-08-06: 1
   ],
   },
   fbcddWse100: {
@@ -269,10 +341,16 @@ export const SOURCE_FIXTURES = {
     // ftype 336 / fcode 33600 (canal/ditch).
     { label: "Tsakiris flowlines (Willow Fork, ftype 336 canal/ditch)", point: [-95.89503, 29.77938], expectMinCount: 1 },
     { label: "Buffalo Bayou downtown", point: [-95.37, 29.76], expectMinCount: 1 },
+    { label: "El Paso, TX", point: [-106.485, 31.7619], expectMinCount: 1 }, // B209505 · live 2026-08-06: 2
+    { label: "Newark, NJ", point: [-74.1724, 40.7357], expectMinCount: 1 }, // B209505 · live 2026-08-06: 1
   ],
   },
   nhdHydroWaterbody: {
-  fixtures: [{ label: "Addicks Reservoir waterbodies", point: [-95.62, 29.79], expectMinCount: 1 }],
+  fixtures: [
+    { label: "Addicks Reservoir waterbodies", point: [-95.62, 29.79], expectMinCount: 1 },
+    { label: "Texas City (Galveston)", point: [-94.935, 29.4], expectMinCount: 1 }, // B209505 · live 2026-08-06: 3
+    { label: "Grand Junction (Mesa)", point: [-108.5506, 39.0639], expectMinCount: 1 }, // B209505 · live 2026-08-06: 3
+  ],
   },
   cityCo: {
   fixtures: [
@@ -280,6 +358,8 @@ export const SOURCE_FIXTURES = {
     { label: "City & County of Denver", point: [-104.9903, 39.7392], expectMinCount: 1 },
     { label: "Greeley (Weld)", point: [-104.7091, 40.4233], expectMinCount: 1 },
     { label: "Fort Collins (Larimer)", point: [-105.0844, 40.5853], expectMinCount: 1 },
+    { label: "Greeley (Weld)", point: [-104.7091, 40.4233], expectMinCount: 1 }, // B209505 · live 2026-08-06: 1
+    { label: "Grand Junction (Mesa)", point: [-108.5506, 39.0639], expectMinCount: 1 }, // B209505 · live 2026-08-06: 2
   ],
   },
   isdCo: {
@@ -287,18 +367,23 @@ export const SOURCE_FIXTURES = {
     { label: "Commerce City school district", point: [-104.9209, 39.8683], expectMinCount: 1 },
     { label: "Weld (Greeley) school district", point: [-104.7091, 40.4233], expectMinCount: 1 },
     { label: "Larimer (Fort Collins) school district", point: [-105.0844, 40.5853], expectMinCount: 1 },
+    { label: "Greeley (Weld)", point: [-104.7091, 40.4233], expectMinCount: 1 }, // B209505 · live 2026-08-06: 1
+    { label: "Grand Junction (Mesa)", point: [-108.5506, 39.0639], expectMinCount: 1 }, // B209505 · live 2026-08-06: 1
   ],
   },
   waterDistrictCo: {
   fixtures: [
     { label: "Commerce City water & sanitation district", point: [-104.9209, 39.8683], expectMinCount: 1 },
     { label: "Weld (Greeley) water & sanitation district", point: [-104.7091, 40.4233], expectMinCount: 1 },
+    { label: "Greeley (Weld)", point: [-104.7091, 40.4233], expectMinCount: 1 }, // B209505 · live 2026-08-06: 1
   ],
   },
   metroDistrictCo: {
   fixtures: [
     { label: "Aurora-area metro districts", point: [-104.7319, 39.7294], expectMinCount: 1 },
     { label: "Colorado Springs-area metro districts", point: [-104.8214, 38.8339], expectMinCount: 1 },
+    { label: "Grand Junction (Mesa)", point: [-108.5506, 39.0639], expectMinCount: 1 }, // B209505 · live 2026-08-06: 2
+    { label: "additional coverage point", point: [-104.7319, 38.6155], expectMinCount: 1 }, // B209505 · live 2026-08-06: 1
   ],
   },
   roadCo: {
@@ -306,6 +391,8 @@ export const SOURCE_FIXTURES = {
     { label: "Commerce City state highway", point: [-104.9209, 39.8683], expectMinCount: 1 },
     { label: "Weld (Greeley) state highway", point: [-104.7091, 40.4233], expectMinCount: 1 },
     { label: "Broomfield state highway", point: [-105.0866, 39.9205], expectMinCount: 1 },
+    { label: "Greeley (Weld)", point: [-104.7091, 40.4233], expectMinCount: 1 }, // B209505 · live 2026-08-06: 2
+    { label: "Grand Junction (Mesa)", point: [-108.5506, 39.0639], expectMinCount: 1 }, // B209505 · live 2026-08-06: 2
   ],
   },
   aadtCo: {
@@ -313,6 +400,8 @@ export const SOURCE_FIXTURES = {
     { label: "Denver AADT stations", point: [-104.9903, 39.7392], expectMinCount: 1 },
     { label: "Fort Collins (Larimer) AADT stations", point: [-105.0844, 40.5853], expectMinCount: 1 },
     { label: "Greeley (Weld) AADT stations", point: [-104.7091, 40.4233], expectMinCount: 1 },
+    { label: "Greeley (Weld)", point: [-104.7091, 40.4233], expectMinCount: 1 }, // B209505 · live 2026-08-06: 4
+    { label: "Grand Junction (Mesa)", point: [-108.5506, 39.0639], expectMinCount: 1 }, // B209505 · live 2026-08-06: 6
   ],
   },
   cdpheCleanups: {
@@ -320,6 +409,8 @@ export const SOURCE_FIXTURES = {
     { label: "Denver VCUP sites", point: [-104.9903, 39.7392], expectMinCount: 1 },
     { label: "Colorado Springs VCUP sites", point: [-104.8214, 38.8339], expectMinCount: 1 },
     { label: "Fort Collins (Larimer) VCUP sites", point: [-105.0844, 40.5853], expectMinCount: 1 },
+    { label: "Colorado Springs (El Paso, CO)", point: [-104.8214, 38.8339], expectMinCount: 1 }, // B209505 · live 2026-08-06: 24
+    { label: "Grand Junction (Mesa)", point: [-108.5506, 39.0639], expectMinCount: 1 }, // B209505 · live 2026-08-06: 3
   ],
   },
   cdpheSuperfund: {
@@ -330,11 +421,15 @@ export const SOURCE_FIXTURES = {
     // Arsenal, Sand Creek, Woodbury Chemical and ASARCO Globeville all sit here. This is the
     // single most decision-relevant Colorado environmental fixture in the registry.
     { label: "Commerce City Superfund cluster (RMA / Sand Creek / Woodbury)", bbox: [-104.98, 39.78, -104.78, 39.86], expectMinCount: 1 },
+    { label: "Uravan / western Colorado (CDPHE site)", point: [-108.7481, 38.3681], expectMinCount: 1 }, // B209505 · live 2026-08-06: 1
+    { label: "Aurora / Denver metro (CDPHE site)", point: [-104.7097, 39.6542], expectMinCount: 1 }, // B209505 · live 2026-08-06: 1
   ],
   },
   cdpheBrownfields: {
   fixtures: [
     { label: "Fort Collins (Larimer) brownfields", point: [-105.0844, 40.5853], expectMinCount: 1 },
+    { label: "eastern plains (CDPHE brownfield)", point: [-102.2679, 39.3045], expectMinCount: 1 }, // B209505 · live 2026-08-06: 1
+    { label: "southwestern Colorado (CDPHE brownfield)", point: [-108.5881, 37.342], expectMinCount: 1 }, // B209505 · live 2026-08-06: 2
   ],
   },
   mhfdBoundary: {
@@ -342,29 +437,38 @@ export const SOURCE_FIXTURES = {
     { label: "Commerce City inside MHFD", point: [-104.9209, 39.8683], expectMinCount: 1 },
     { label: "Denver inside MHFD", point: [-104.9903, 39.7392], expectMinCount: 1 },
     { label: "Broomfield inside MHFD", point: [-105.0866, 39.9205], expectMinCount: 1 },
+    { label: "Denver", point: [-104.9903, 39.7392], expectMinCount: 1 }, // B209505 · live 2026-08-06: 1
+    { label: "additional coverage point", point: [-104.9979, 39.8092], expectMinCount: 1 }, // B209505 · live 2026-08-06: 1
   ],
   },
   mhfdStreams: {
   fixtures: [
     { label: "Commerce City drainageways", point: [-104.9209, 39.8683], expectMinCount: 1 },
     { label: "Aurora drainageways", point: [-104.7319, 39.7294], expectMinCount: 1 },
+    { label: "Denver", point: [-104.9903, 39.7392], expectMinCount: 1 }, // B209505 · live 2026-08-06: 1
+    { label: "additional coverage point", point: [-104.9979, 39.8092], expectMinCount: 1 }, // B209505 · live 2026-08-06: 3
   ],
   },
   mhfdWatersheds: {
   fixtures: [
     { label: "Commerce City watershed", point: [-104.9209, 39.8683], expectMinCount: 1 },
     { label: "Denver watershed", point: [-104.9903, 39.7392], expectMinCount: 1 },
+    { label: "Denver", point: [-104.9903, 39.7392], expectMinCount: 1 }, // B209505 · live 2026-08-06: 3
+    { label: "additional coverage point", point: [-104.9979, 39.8092], expectMinCount: 1 }, // B209505 · live 2026-08-06: 3
   ],
   },
   mhfdChannels: {
   fixtures: [
     { label: "Commerce City channels", point: [-104.9209, 39.8683], expectMinCount: 1 },
     { label: "Denver channels", point: [-104.9903, 39.7392], expectMinCount: 1 },
+    { label: "Denver", point: [-104.9903, 39.7392], expectMinCount: 1 }, // B209505 · live 2026-08-06: 10
+    { label: "additional coverage point", point: [-104.9979, 39.8092], expectMinCount: 1 }, // B209505 · live 2026-08-06: 83
   ],
   },
   mhfdOutfalls: {
   fixtures: [
     { label: "Commerce City outfalls", point: [-104.9209, 39.8683], expectMinCount: 1 },
+    { label: "Aurora / east Denver metro (MHFD)", point: [-104.7781, 39.7587], expectMinCount: 1 }, // B209505 · live 2026-08-06: 88
   ],
   },
 };

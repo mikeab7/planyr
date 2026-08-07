@@ -12096,8 +12096,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       floodJurKey,
       authorityId: drainAuthorityId,
       county: restored?.county || null,
-      etjLabel: (drainCtxData?.authority?.overlays || []).find((o) => o.kind === "etj")?.city || null,
+      /* B209507/B209508 — the ETJ comes from the drainage context's overlays OR from the jurisdiction
+       * badge's own identify, whichever resolved. Those are two independent lookups of the same
+       * fact, and at Bain the badge is the one that found the City of Houston ETJ. Preferring
+       * either alone is how the Houston candidate went missing and the county's laxer rule won. */
+      etjLabel: (drainCtxData?.authority?.overlays || []).find((o) => o.kind === "etj")?.city
+        || (jurBadge?.etjLabels || [])[0] || null,
       edgeLabels: (drainCtxData?.authority?.overlays || []).filter((o) => o.kind !== "etj").map((o) => o.city).filter(Boolean),
+      // A city ONLY governs when the site is actually inside its limits — containment, never the
+      // ring union that also picks up a frontage sliver (B209506).
+      cityLabel: jurBadge?.cityContainment === "in" ? (jurBadge?.jur || "").split(" / ")[0].replace(/^City of\s+/, "") || null : null,
+      // B209508 — what could NOT be checked. This is what makes the result refuse to settle.
+      unresolvedRoles: jurBadge?.unresolvedRoles || [],
     },
     rules: buildRules,
     ffeFt: fmBuild && fmBuild.ffe ? fmBuild.ffe.requiredFfeFt : null,
@@ -12572,6 +12582,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       .map((p) => p.points.map((pt) => { const [lat, lng] = feetToLatLng(pt, origin.lat, origin.lon); return [lng, lat]; }));
   }, [parcels, origin]);
   const jurBadgeSig = jurActiveRings.length ? ringsSignature(jurActiveRings) : "";
+  /* B209508 — `buildDrainFacts` (defined ABOVE) reads `jurBadge` for the floodplain administrator's
+   * unresolved-role signal. That is a CLOSURE, not a hoist: this stays a component-level hook here
+   * beside its own effect, and `drainFacts()` is not called until well after this line has run, so
+   * the reference is always initialised by then. It was briefly moved up to sit next to its reader
+   * and that put a useState inside `buildDrainFacts`, a plain function — a hooks violation the
+   * lint caught as 'setJurBadge is not defined'. Leave the declaration here. */
   const [jurBadge, setJurBadge] = useState(null);
   const jurBadgeCache = useRef(new Map()); // signature → badge (cache by parcel geometry hash)
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -26194,12 +26210,28 @@ function YieldPanel({
                         materially different rules is not a footnote — it IS the elevation. This
                         rides the Buildability strip row because the old Buildability GROUP was
                         deleted (v3 B2) and buildability now lives here. */}
-                    {v.key === "ffe" && drainage.administrator && drainage.administrator.governingLabel && (
+                    {/* B209508 — an UNRESOLVED jurisdiction outranks the rule line. When a jurisdiction
+                        lookup failed, the candidate set is incomplete by construction, so naming a
+                        "rule applied" would present the laxer surviving authority as settled. Say
+                        what could not be checked instead, and keep the provisional answer clearly
+                        labelled as provisional. */}
+                    {v.key === "ffe" && drainage.administrator && drainage.administrator.unresolved && (
+                      <div data-testid="yield-ffe-unresolved" style={{ fontSize: 10.5, color: "var(--warn-text)", lineHeight: 1.45, marginTop: 2, whiteSpace: "normal" }}
+                        title={drainage.administrator.unresolvedNote || ""}>
+                        <b>FFE rule not settled</b> — {drainage.administrator.unresolvedRoles.map((r) => `the ${r} lookup failed`).join(" and ")}, so a stricter authority may apply that we could not check.
+                        {drainage.administrator.governingLabel ? ` Provisionally ${drainage.administrator.governingLabel}${drainage.administrator.governingRuleText ? ` (${drainage.administrator.governingRuleText})` : ""} — do not rely on it until the jurisdiction is confirmed.` : ""}
+                      </div>
+                    )}
+                    {v.key === "ffe" && drainage.administrator && !drainage.administrator.unresolved && drainage.administrator.governingLabel && (
                       <div data-testid="yield-ffe-administrator" style={{ fontSize: 10.5, color: drainage.administrator.ambiguous ? "var(--warn-text)" : Y.muted, lineHeight: 1.45, marginTop: 2, whiteSpace: "normal" }}
                         title={`${drainage.administrator.selectionReason} Candidates: ${drainage.administrator.candidates.map((c) => c.label).join(" · ")}. ${drainage.administrator.governingSource || ""}`}>
                         Rule applied: <b>{drainage.administrator.governingLabel}</b>
                         {drainage.administrator.governingRuleText ? ` (${drainage.administrator.governingRuleText})` : ""}
                         {drainage.administrator.ambiguous ? " — more than one authority could govern here, so the stricter rule was used. Confirm who issues the permit." : ""}
+                        {/* B209508 — never let "the stricter rule was used" stand unqualified when the
+                            candidates measure from different flood surfaces and only their freeboard
+                            was compared. */}
+                        {drainage.administrator.basisMismatch ? " These authorities measure from different flood surfaces and only their freeboard was compared, so a rule with less freeboard could still govern." : ""}
                         {drainage.administrator.impliedFlood ? ` That floor implies the flood level here is at or below ${f1(drainage.administrator.impliedFlood.impliedFloodElevFt)}′ — worth checking against the FIRM panel.` : ""}
                       </div>
                     )}
