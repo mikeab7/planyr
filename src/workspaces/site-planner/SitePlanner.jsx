@@ -225,6 +225,7 @@ import { computeBuildingGrid, resolveGridSettings, placeDockDoors } from "./lib/
 import { convertBuildingToPolygon, dockLineAt, dockEdgeLine, projectOntoLine, frameBBox, translateDockLines, dockSegExtent, clipSegmentToRing } from "./lib/footprintEdit.js";
 import { pondAreaLabelLine, pondAreaDeltaLine } from "./lib/pondLabelText.js";
 import { dimSlideRange, clampDimOffset, DIM_POS_F_DEFAULT, DIM_POS_F_ROAD, dimNumberBox } from "./lib/dimSlide.js";
+import { pointInRing } from "./lib/ringMath.js";
 import { addedAreaLabelPoint, pondContours, contourLabelPoint, autoContourInterval, detentionStorage, usablePondVolume, incrementalExcavationCf, detentionLandTakeEstimate, estimateFootprintSf, pondPlacementCandidates, drawdownWarning, bermAsFillHeight, bermFillVolume, bermFillCells } from "./lib/pondGeom.js";
 import { accumulatePondLedger, effectivePondRole, POND_ROLE_LABEL, pondDisplayName, pondDisplayNameFor } from "./lib/pondLedger.js";
 import { rankLedgerMoves, BERM_MAX_RAISE_FT } from "./lib/ledgerBalancer.js";
@@ -901,16 +902,10 @@ function expandPolygon(pts, d) {
   if (!a1) return build(-1);
   return polyArea(a1) >= polyArea(pts) ? a1 : (build(-1) || a1); // outward must GROW
 }
-// Ray-cast point-in-ring (even-odd). Powers the pond expansion's "past the property
-// line" screening warning (B139).
-const pointInRing = (pt, ring) => {
-  let inside = false;
-  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
-    const xi = ring[i].x, yi = ring[i].y, xj = ring[j].x, yj = ring[j].y;
-    if (((yi > pt.y) !== (yj > pt.y)) && (pt.x < ((xj - xi) * (pt.y - yi)) / (yj - yi) + xi)) inside = !inside;
-  }
-  return inside;
-};
+/* Ray-cast point-in-ring (even-odd) — powers the pond expansion's "past the property
+ * line" screening warning (B139) and the building-under-footprint lookup. Imported from
+ * lib/ringMath.js: this file used to carry TWO copies of it (here and `ringHas`), and six
+ * more lived across lib/. */
 
 /* detentionStorage(ring, depth, freeboard, slope) — the pond stage/volume calc —
  * moved to lib/pondGeom.js (B630) so the yield metrics pass and the pure auto-size
@@ -928,14 +923,6 @@ function nearestOnPolylines(p, polys) {
   let best = null, bd = Infinity;
   polys.forEach((pl) => { for (let i = 0; i < pl.length - 1; i++) { const q = nearestOnSeg(p, pl[i], pl[i + 1]); const d = _hyp(p, q); if (d < bd) { bd = d; best = q; } } });
   return best ? { pt: best, d: bd } : null;
-}
-function ringHas(p, ring) {
-  let inside = false;
-  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
-    const yi = ring[i].y, xi = ring[i].x, yj = ring[j].y, xj = ring[j].x;
-    if (((yi > p.y) !== (yj > p.y)) && (p.x < ((xj - xi) * (p.y - yi)) / (yj - yi) + xi)) inside = !inside;
-  }
-  return inside;
 }
 const rectRing = (c, w, h) => { const hw = w / 2, hh = h / 2; return [{ x: c.x - hw, y: c.y - hh }, { x: c.x + hw, y: c.y - hh }, { x: c.x + hw, y: c.y + hh }, { x: c.x - hw, y: c.y + hh }]; };
 const ringOf = (e) => (e.points ? e.points : elCorners(e));
@@ -5591,7 +5578,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         flashWarn("Now click the building to serve.", 0);
         return;
       }
-      let b = els.find((e) => e.type === "building" && ringHas(fp, ringOf(e)));
+      let b = els.find((e) => e.type === "building" && pointInRing(fp, ringOf(e)));
       if (!b) { const builds = els.filter((e) => e.type === "building"); if (builds.length) b = builds.reduce((best, e) => _hyp(fp, centroid(ringOf(e))) < _hyp(fp, centroid(ringOf(best))) ? e : best); }
       if (!b) { flashWarn("No building to serve — draw a building first.", 0); return; }
       commitUtilRoute(routeMode, b);

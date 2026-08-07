@@ -14,6 +14,7 @@
  */
 
 import { dockSidesFor } from "./dockZones.js";
+import { pointInRing } from "./ringMath.js";
 
 const rot2 = (x, y, deg) => {
   const r = (deg * Math.PI) / 180, c = Math.cos(r), s = Math.sin(r);
@@ -150,16 +151,9 @@ export function dockSegExtent(el, side, tolFt = 0.5) {
   return { startF: s0 - loA, endF: s1 - loA, L: hiA - loA };
 }
 
-// Even-odd point-in-ring test (world feet). Local to keep the module framework-free.
-export function pointInRing(pt, ring) {
-  if (!Array.isArray(ring) || ring.length < 3) return false;
-  let inside = false;
-  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
-    const xi = ring[i].x, yi = ring[i].y, xj = ring[j].x, yj = ring[j].y;
-    if ((yi > pt.y) !== (yj > pt.y) && pt.x < ((xj - xi) * (pt.y - yi)) / (yj - yi) + xi) inside = !inside;
-  }
-  return inside;
-}
+// Even-odd point-in-ring test (world feet) — one implementation, in ringMath.js. Re-exported
+// because callers have long imported it from here.
+export { pointInRing };
 
 // Clip segment a→b (world feet) to the INTERIOR of polygon `ring`, returning the sub-segments that
 // fall inside as [{a,b}, ...]. Column-grid lines are drawn across the frame bbox then clipped to the

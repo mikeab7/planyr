@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-08-07 @ `5f89818` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-08-07 @ `e22c712` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_444 source files mapped._
+_445 source files mapped._
 
 ## infra
 
@@ -731,6 +731,8 @@ _444 source files mapped._
   - _exports_: `retireGisSw`
 - **`src/workspaces/site-planner/lib/releaseCanvas.js`** — hand an offscreen canvas's backing store (renderer/GPU memory the GC tracks poorly) back once its pixels have been consumed
   - _exports_: `releaseCanvas`
+- **`src/workspaces/site-planner/lib/ringMath.js`** — The one even-odd point-in-ring test and the one absolute shoelace area for `{x,y}` feet-space rings (import-free leaf; folds eight and four duplicated copies)
+  - _exports_: `pointInRing`, `ringArea`
 - **`src/workspaces/site-planner/lib/roadClasses.js`** — Road design classes and civil min-radius thresholds (AASHTO speed formula, default arc radius per class, per-plan overrides)
   - _exports_: `classDefaultRadius`, `classMinRadius`, `classReturnRadius`, `DEFAULT_ROAD_CLASS`, `ROAD_CLASS_SEEDS`, `roadClassesOf`, `roadClassOf`, `speedMinRadius`
 - **`src/workspaces/site-planner/lib/roadGeometry.js`** — Pure centerline road geometry: tessellate clicked alignment into arc fillets/smooth splines/sharp corners, min radius of curvature
