@@ -17,8 +17,13 @@ import { SEL, cornerGrips } from "./selection.js";
 export default function SelectionChrome({ x, y, w, h, casing, line, grips = false, fill = false, rx = 1 }) {
   if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(w) || !Number.isFinite(h)) return null;
   const rect = { x, y, w, h };
+  /* B227940 — the group carries a `data-testid` so SELECTION IS OBSERVABLE FROM THE DOM. A multi /
+     group selection paints only this chrome: it renders outside the handle layer, and an element
+     (unlike a markup) carries no per-feature "selected" stamp — so "I clicked it and nothing
+     appeared selected", the owner's reported symptom, had no signal any harness could read. Inert:
+     one attribute on an already pointer-transparent group, no visual change. */
   return (
-    <g pointerEvents="none">
+    <g pointerEvents="none" data-testid="selection-chrome">
       {fill && <rect x={x} y={y} width={w} height={h} rx={rx} fill={casing} fillOpacity={0.14} />}
       {/* light casing UNDERNEATH (drawn first / wider) */}
       <rect x={x} y={y} width={w} height={h} rx={rx} fill="none" stroke={casing} strokeWidth={SEL.casingW} />
