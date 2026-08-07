@@ -198,6 +198,7 @@ export const STATEWIDE = {
     opacity: 0.85,
     // NEW-1 stacking role (lib/mapStack.js): Commodity-colored pipeline centrelines.
     role: "line",
+    states: ["TX"],
     group: "environmental", order: 2,
   },
   txrrc_pipe_easement: {
@@ -210,6 +211,7 @@ export const STATEWIDE = {
     note: "ASSUMED screening corridor drawn off a SCHEMATIC centerline — NOT a surveyed easement. Doubly approximate (schematic line × assumed width). Confirm via title commitment / recorded easement instrument + an 811 one-call before relying on it.",
     // NEW-1 stacking role (lib/mapStack.js): A buffered band — a fill, so it goes under the plan (its centreline rides over).
     role: "area",
+    states: ["TX"],
     group: "environmental", order: 3,
   },
   txrrc_wells: {
@@ -222,6 +224,7 @@ export const STATEWIDE = {
     opacity: 0.55,
     // NEW-1 stacking role (lib/mapStack.js): Well symbols.
     role: "point",
+    states: ["TX"],
     group: "environmental", order: 4,
   },
   ccn_service: {
@@ -243,6 +246,7 @@ export const STATEWIDE = {
     infoCaveat: "A CCN boundary means a utility is CERTIFICATED to serve retail water/sewer here — not that a main is already built to a given parcel. Confirm service, capacity, and tap availability with the utility.",
     // NEW-1 stacking role (lib/mapStack.js): Certificated service TERRITORY polygons.
     role: "area",
+    states: ["TX"],
     group: "utilities", mergeGroup: "water_sewer", order: 1,
   },
   env_lpst: {
@@ -255,6 +259,7 @@ export const STATEWIDE = {
     note: "TCEQ Leaking Petroleum Storage Tank sites — documented petroleum-UST releases. A Phase I ESA PRE-SCREEN, not a substitute. Loads zoomed in.",
     // NEW-1 stacking role (lib/mapStack.js): LPST site symbols.
     role: "point",
+    states: ["TX"],
     group: "environmental", order: 6,
   },
   env_cleanups: {
@@ -283,6 +288,7 @@ export const STATEWIDE = {
     note: "Houston-area growth-fault surface traces (USGS SIM 2874, via a University of Houston GIS republication). Aseismic slow-slip faults that damage foundations/pavement. Screening only — get a geotechnical/fault study. Loads zoomed in.",
     // NEW-1 stacking role (lib/mapStack.js): Surface-fault traces.
     role: "line",
+    states: ["TX"],
     group: "environmental", order: 5,
   },
   txdot_aadt: {
@@ -298,6 +304,7 @@ export const STATEWIDE = {
     note: "TxDOT preliminary AADT (average annual daily traffic) count points — an access/visibility proxy. Loads zoomed in.",
     // NEW-1 stacking role (lib/mapStack.js): Count segments along the roadway centreline.
     role: "line",
+    states: ["TX"],
     group: "access", order: 1,
   },
   bts_rail: {
@@ -402,6 +409,7 @@ export const EVIDENCE = {
     note: "City of Houston Public Works fire hydrants.",
     // NEW-1 stacking role (lib/mapStack.js): Hydrant symbols (server-rendered).
     role: "point",
+    states: ["TX"],
     group: "utilities", mergeGroup: "fire_hydrants", order: 3,
   },
   mapillary: {
@@ -522,6 +530,7 @@ export const JURISDICTIONS = {
     note: "Texas county lines (TxDOT). A has-jurisdiction boundary, not a service area.",
     // NEW-1 stacking role (lib/mapStack.js): Boundary outlines (fill: false).
     role: "line",
+    states: ["TX"],
     group: "jurisdiction", order: 1,
   },
   // B761: city limits + ETJ are presented as ONE panel row ("City limits & ETJ") that
@@ -537,6 +546,7 @@ export const JURISDICTIONS = {
     infoCaveat: "A boundary means the city HAS JURISDICTION here (it can tax / regulate) — not that it serves or connects utilities to a parcel.",
     // NEW-1 stacking role (lib/mapStack.js): Boundary outlines.
     role: "line",
+    states: ["TX"],
     group: "jurisdiction", order: 2,
   },
   jur_etj: {
@@ -545,6 +555,7 @@ export const JURISDICTIONS = {
     note: "City ETJ across the H-GAC 13-county region — blank elsewhere (there is no statewide ETJ layer). ETJ = a city's reach OUTSIDE its limits; not annexation and not utility service.",
     // NEW-1 stacking role (lib/mapStack.js): Boundary outlines (dashed).
     role: "line",
+    states: ["TX"],
     group: "jurisdiction", order: 2,
   },
   jur_isd: {
@@ -558,6 +569,7 @@ export const JURISDICTIONS = {
     infoCaveat: "ISD lines are TAXING / attendance boundaries (usually the biggest line on a Texas tax bill) — not a utility service area.",
     // NEW-1 stacking role (lib/mapStack.js): Boundary outlines.
     role: "line",
+    states: ["TX"],
     group: "jurisdiction", order: 4, // last — reference-only, default-hidden like every layer
   },
   jur_mud: {
@@ -587,6 +599,7 @@ export const JURISDICTIONS = {
     infoCaveat: "A boundary means the district HAS JURISDICTION here (it can tax / regulate) — not that it serves or connects water/sewer to a parcel.",
     // NEW-1 stacking role (lib/mapStack.js): Agency /export paints district boundaries with a tinted fill.
     role: "area",
+    states: ["TX"],
     group: "utilities", mergeGroup: "water_sewer", order: 1,
   },
   jur_road_authority: {
@@ -610,6 +623,7 @@ export const JURISDICTIONS = {
     note: "Who maintains each road, from the TxDOT Roadway Inventory — City / County / State (TxDOT) / Toll / Federal, with an honest Unknown where the data can't classify it. Loads zoomed in to about street level (zoom ≥ 14). Verify access/ROW with the jurisdiction.",
     // NEW-1 stacking role (lib/mapStack.js): Per-maintainer coloured roadway centrelines.
     role: "line",
+    states: ["TX"],
     group: "jurisdiction", order: 3,
   },
 };
@@ -632,6 +646,7 @@ export const AHJ_LAYERS = {
     opacity: 0.8, county: "harris",
     // NEW-1 stacking role (lib/mapStack.js): Channel RIGHT-OF-WAY polygons dominate this export (the channel itself is drawn inside its ROW), so it is a fill — under the plan.
     role: "area",
+    states: ["TX"],
     group: "flood", order: 2,
     // B1076 — district-scoped: this row is listed ONLY when HCFCD is the governing
     // drainage authority. Before this, it was offered on a Waller site where HCFCD
@@ -661,6 +676,7 @@ export const AHJ_LAYERS = {
     opacity: 0.55, county: "harris",
     // NEW-1 stacking role (lib/mapStack.js): Wastewater mains.
     role: "line",
+    states: ["TX"],
     group: "utilities", mergeGroup: "water_sewer", order: 1,
   },
   coh_storm: {
@@ -672,6 +688,7 @@ export const AHJ_LAYERS = {
     opacity: 0.55, county: "harris",
     // NEW-1 stacking role (lib/mapStack.js): Storm sewer lines.
     role: "line",
+    states: ["TX"],
     group: "flood", order: 6,
     // Local tier, but NOT district-scoped (`district` deliberately absent): a municipal
     // storm system isn't a drainage district, so it must never be suppressed by the
@@ -695,6 +712,7 @@ export const AHJ_LAYERS = {
     opacity: 0.55, county: "harris",
     // NEW-1 stacking role (lib/mapStack.js): Water mains.
     role: "line",
+    states: ["TX"],
     group: "utilities", mergeGroup: "water_sewer", order: 1,
   },
 
@@ -723,6 +741,7 @@ export const AHJ_LAYERS = {
     opacity: 0.8, county: "waller",
     // NEW-1 stacking role (lib/mapStack.js): 116 = sub-watershed polygons (fill, under); 108/121 streams, 112 BFE lines, 2 outfalls (strokes/points, over).
     roleLayers: { area: [116], line: [108, 121, 112, 2] },
+    states: ["TX"],
     group: "flood", order: 3,
     floodTier: "local", district: "bkdd", agency: "BKDD",
     stallMs: 25000,
@@ -739,6 +758,7 @@ export const AHJ_LAYERS = {
     opacity: 0.85, county: "waller",
     // NEW-1 stacking role (lib/mapStack.js): Recorded easement bands — filled polygons.
     role: "area",
+    states: ["TX"],
     group: "flood", order: 4,
     // B1092 — clickable ON THE PLANNER CANVAS too, not just the map finder. The planner's
     // Leaflet backdrop is pointer-events:none (the SVG canvas owns every click), so the
@@ -761,6 +781,7 @@ export const AHJ_LAYERS = {
     opacity: 0.6, county: "waller",
     // NEW-1 stacking role (lib/mapStack.js): Study floodplains + proposed detention are fills (under); conveyance + proposed channel improvements are strokes (over).
     roleLayers: { area: [19, 20, 17, 4, 10], line: [5, 6] },
+    states: ["TX"],
     group: "flood", order: 5,
     floodTier: "advisory", district: "bkdd", agency: "BKDD",
     // EXPLICIT STUDY-AREA GATE (B1075). Every DMP layer returned nothing at Tsakiris

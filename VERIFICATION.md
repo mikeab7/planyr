@@ -113,6 +113,19 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V39552 — B1422 (×2): the Texas Railroad Commission is DEMOTED, not deleted, on his own Weld County plan. `Blocker: real-data`
+
+Everything about this shipped green and was driven headless here on a seeded Weld County coordinate (40.19, −104.72): **10 rows demoted across 3 groups**, each naming its reason, with "Water & sewer" and "Fire hydrants" correctly surviving; the four specs in `e2e/layers-panel-scroll-and-state.spec.js` were each proven RED on the pre-fix build. What a seeded coordinate cannot prove is the behaviour on **his own saved plan**, which carries a real county key, a real identify result and a real GIS context — and this item is a recurrence precisely because the previous pass shipped a mechanism that was green everywhere and inert in the field.
+
+On **planyr.io**, signed in, on the **Colorado / Weld County** project, open the planner's **Layers** panel and confirm:
+- **(a) THE RRC IS NOT AN ORDINARY TOGGLE.** "Oil & gas wells", "Pipelines" and "Pipeline easement corridor (assumed)" are **not** in the main list.
+- **(b) BUT HE CAN STILL SEE THEY EXIST.** A line reading **"▸ Show N not available in Colorado"** appears in the Environmental group; opening it lists those rows, greyed and un-tickable, each saying **"Texas-only — no Colorado equivalent is wired yet."** ⛔ If they are simply GONE, that is the failure this item exists to prevent — report it.
+- **(c) NOTHING HE RELIES ON VANISHED.** "Water & sewer" and "Fire hydrants" are still ordinary, tickable rows (they bundle Colorado sources alongside Texas ones), and the MHFD / DOLA / CDPHE Colorado rows are all still listed.
+- **(d) THE COUNT IS SANE.** The demoted total should be around ten, not thirty — a much larger number means a national source was mis-tagged as Texas-only.
+- **(e) ON A TEXAS PLAN, THE MIRROR IMAGE.** Open any Houston-area plan: the RRC rows are ordinary toggles again, and it is the Colorado rows that sit behind "▸ Show N not available in Texas".
+
+⏳ **LIVE APP (planyr.io), SIGNED IN — the Weld County project** `Blocker: real-data`
+
 ### V27088 — Copying between plans, signed in, on the owner's own Silvestri project (B230080)
 
 `Blocker: auth` — **everything reachable logged out was driven HERE, with the negative control proven RED first, and that is on the item.** `e2e/clipboard-survives-plan-switch.spec.js` drives the real UI logged out — draw · select · Ctrl+C · switch plans from the header dropdown · Ctrl+V — and asserts the DESTINATION plan's persisted record, for one of EACH kind in `CLIP_KINDS` (element · markup · measure · callout · parcel) plus a mixed marquee selection, plus a workspace switch and a plan rename on the way; the headline case also asserts the pasted polygon's coordinates EQUAL the original's, which is the in-place cross-plan placement proven rather than described. All 4 cases pass; with the pre-fix lifetime injected (payload dies with the mount) all 4 go RED, same run set. Unit half: `test/planClipboardLifetime.test.js`, 24.

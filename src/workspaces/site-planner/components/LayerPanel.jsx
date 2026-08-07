@@ -170,6 +170,16 @@ export default function LayerPanel({
    * will ever make one of them answer in Colorado, so listing it as an ordinary toggle is a lie
    * of omission. Layers with no `states` are national and always in scope. */
   const outOfState = (cfg) => !!(siteState && Array.isArray(cfg?.states) && !cfg.states.includes(siteState));
+  /* NEW-2 — A MERGED SLOT DEMOTES ONLY IF *EVERY* MEMBER IS OUT OF STATE, and this is not a
+   * refinement — without it, tagging the Texas members of a merge group takes the whole row down
+   * and silently removes a Colorado source that was working. "Water & sewer" bundles the Texas CCN,
+   * MUD and City-of-Houston mains together with Colorado's water & sanitation districts; reading
+   * the slot's state off `members[0]` (the registry's first member, `ccn_service`) would have
+   * demoted the one row a Colorado site actually needs. Same shape as `slotLowRel` below — the
+   * slot is only as out-of-scope as its most-in-scope member. */
+  const slotOutOfState = (slot) => (slot.kind === "merge"
+    ? slot.members.length > 0 && slot.members.every(([, cfg]) => outOfState(cfg))
+    : outOfState(slot.entry[1]));
   const STATE_NAME = { TX: "Texas", CO: "Colorado" };
   const hereName = STATE_NAME[siteState] || "this state";
   const outOfStateReason = (cfg) => {
@@ -474,13 +484,16 @@ export default function LayerPanel({
       </button>
       {revealHidden[`${groupKey}:state`] && slots.map((sl) => {
         const cfg = sl.kind === "merge" ? sl.members[0][1] : sl.entry[1];
-        const id = sl.kind === "merge" ? sl.members[0][0] : sl.entry[0];
+        const id = sl.kind === "merge" ? sl.mergeGroup : sl.entry[0];
+        // A merged slot is named by its GROUP here, exactly as mergeGroupRow names it above —
+        // a demoted row that suddenly reads as its first member would be a different row.
+        const label = (sl.kind === "merge" ? (MERGE_GROUPS[sl.mergeGroup] || {}).label : null) || cfg.label;
         return (
           <div key={`oos-${id}`} style={{ marginBottom: 5, opacity: 0.6 }}>
             <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-              <input type="checkbox" checked={false} disabled aria-label={`${cfg.label} — not available in ${hereName}`} />
-              <span title={cfg.label} style={{ flex: 1, minWidth: 0, fontSize: compact ? 12 : 12.5, color: INK,
-                overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{cfg.label}</span>
+              <input type="checkbox" checked={false} disabled aria-label={`${label} — not available in ${hereName}`} />
+              <span title={label} style={{ flex: 1, minWidth: 0, fontSize: compact ? 12 : 12.5, color: INK,
+                overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{label}</span>
             </div>
             <div style={{ fontSize: 10, color: MUTED, lineHeight: 1.4, margin: "1px 0 0 22px" }}>{outOfStateReason(cfg)}</div>
           </div>
@@ -495,10 +508,7 @@ export default function LayerPanel({
     // questions ("this can never answer here" vs "its data doesn't reach this view"), and folding
     // an out-of-state row into the coverage bucket would tell the user the wrong one.
     const slots = [], oos = [];
-    for (const sl of allSlots) {
-      const cfg = sl.kind === "merge" ? sl.members[0][1] : sl.entry[1];
-      (outOfState(cfg) ? oos : slots).push(sl);
-    }
+    for (const sl of allSlots) (slotOutOfState(sl) ? oos : slots).push(sl);
     if (mode === "all") return <>{slots.map((sl) => render(sl))}{outOfStateBlock(oos, groupKey)}</>;
     const hi = [], lo = [];
     for (const sl of slots) (slotLowRel(sl) ? lo : hi).push(sl);
