@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   bucketOf, bucketTrace, layerCensus, median, noiseFloorPct, armVerdict,
-  decodeFault, renderedDecodedBytes, TRACE_BUCKETS, signTestP, pairedComparison,
+  decodeFault, annotationFault, renderedDecodedBytes, TRACE_BUCKETS, signTestP, pairedComparison,
 } from "../ui-audit/lib/rasterCost.mjs";
 
 /* NEW-1 — the half of a gesture's cost that every prior instrument in this program was structurally
@@ -200,5 +200,46 @@ describe("the decode assertion — the guard without which every number is a com
       { decoded: true, intrinsicW: 10, intrinsicH: 10 },
       { decoded: false, intrinsicW: 1000, intrinsicH: 1000 },
     ])).toBe(400);
+  });
+});
+
+/* NEW-3 — the same refusal, on the annotation axis. An arm whose callouts, markups and measures
+ * never rendered looks EXACTLY like an arm that is fast, which is the whole reason `decodeFault`
+ * exists one describe-block up. This one is not hypothetical: on the first run of
+ * `annotation-arms.mjs` every arm read 0 of 24 annotations on a page that was rendering all of
+ * them, and nothing but this refusal would have caught it. */
+describe("annotationFault refuses to report an arm whose annotations never rendered", () => {
+  const want = { callouts: 16, markups: 6, measures: 2 };
+
+  it("passes when the canvas holds exactly what the arm specifies", () => {
+    expect(annotationFault({ callouts: 16, markups: 6, measures: 2 }, want)).toBeNull();
+  });
+
+  it("passes for a stripped arm that expects nothing — zero is a specification, not a failure", () => {
+    expect(annotationFault({ callouts: 0, markups: 0, measures: 0 }, { callouts: 0, markups: 0, measures: 0 })).toBeNull();
+  });
+
+  it("FAULTS the real first-run failure: everything rendered, nothing counted", () => {
+    const fault = annotationFault({ callouts: 0, markups: 0, measures: 0 }, want);
+    expect(fault).toMatch(/ANNOTATIONS DID NOT RENDER/);
+    expect(fault).toMatch(/callouts: expected 16 on the canvas, counted 0/);
+    expect(fault).toMatch(/markups: expected 6/);
+    expect(fault).toMatch(/measures: expected 2/);
+  });
+
+  it("FAULTS a partial render, which is the subtler and more dangerous case", () => {
+    expect(annotationFault({ callouts: 15, markups: 6, measures: 2 }, want)).toMatch(/callouts: expected 16 on the canvas, counted 15/);
+  });
+
+  /* ⛔ MORE is a fault too, not a bonus. An arm that dropped the callouts and still counts 16 of
+   * them did not take — it measured the baseline under another name, which is precisely the
+   * false-null this guard exists to prevent. */
+  it("FAULTS an arm that shows MORE than it specifies — the stripped arm that did not take", () => {
+    expect(annotationFault({ callouts: 16, markups: 6, measures: 2 }, { callouts: 0, markups: 6, measures: 2 }))
+      .toMatch(/callouts: expected 0 on the canvas, counted 16/);
+  });
+
+  it("FAULTS a page with no canvas at all rather than reading it as an empty plan", () => {
+    expect(annotationFault(null, want)).toMatch(/no canvas/);
   });
 });

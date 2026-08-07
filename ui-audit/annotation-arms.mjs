@@ -41,7 +41,7 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { fakeTilePng, parseTileUrl } from "./lib/fakeTile.mjs";
 import { fixtureCensus, fixtureSeed, ANNOTATION_ARMS, annotationArmFixture, paintedRasters } from "./lib/planFixture.mjs";
-import { bucketTrace, layerCensus, median, noiseFloorPct, armVerdict, pairedComparison } from "./lib/rasterCost.mjs";
+import { bucketTrace, layerCensus, median, noiseFloorPct, armVerdict, pairedComparison, annotationFault } from "./lib/rasterCost.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const BASE = (process.env.BASE_URL || "http://localhost:4173/").replace(/\/?$/, "/");
@@ -142,19 +142,6 @@ async function neutralPan(page, press) {
   const neutral = before && after && before.ppf === after.ppf
     && Math.abs(Number(before.offX) - Number(after.offX)) <= 1 && Math.abs(Number(before.offY) - Number(after.offY)) <= 1;
   return { neutral, before, after };
-}
-
-/** The annotation analogue of `decodeFault`: an arm whose annotations never rendered is not a fast
- *  arm, it is a broken one — and it looks identical to a real finding. */
-export function annotationFault(seen, expected) {
-  if (!seen) return "no canvas — the arm did not load";
-  const missing = [];
-  for (const k of ["callouts", "markups", "measures"]) {
-    if (seen[k] !== expected[k]) missing.push(`${k}: expected ${expected[k]} on the canvas, counted ${seen[k]}`);
-  }
-  return missing.length
-    ? `ANNOTATIONS DID NOT RENDER AS THE ARM SPECIFIES — ${missing.join("; ")}. This arm did not measure what it claims to.`
-    : null;
 }
 
 async function runArm(browser, arm, rep) {
