@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   aggregateSnapshot, diffAggregates, perInteraction,
-  edgeIndex, retainerIndex, retainingPath, holderOf, detachedNodes, detachedByClass,
+  edgeIndex, retainerIndex, retainingPath, holderOf, detachedNodes, detachedByClass, liveEntryPoints,
 } from "../ui-audit/lib/heapSnapshot.mjs";
 
 /* NEW-2 — reading a V8 heap snapshot well enough to NAME what is retained.
@@ -272,5 +272,103 @@ describe("holderOf — the question a detached node actually poses (B1439)", () 
     const rix = retainerIndex(edgeIndex(scene()));
     expect(rix.retainerCount[4]).toBe(2);        // the handle table AND the detached <g>
     expect(rix.retainerCount[3]).toBe(2);        // the handle table AND PlanCache
+  });
+});
+
+/* ---- THE LIVE BOUNDARY (B1439, third attempt — NEW-3) -----------------------------------------
+ *
+ * ⛔ THE PROPERTY THAT MAKES THIS INSTRUMENT WORTH HAVING, and the failure it exists to correct.
+ *
+ * `holderOf` walks BACKWARDS out of the detached island and stops at the first retainer that is not
+ * FLAGGED detached. That rule is only sound if "not flagged detached" implies "alive" — and it does
+ * not: **V8 sets `detachedness` on DOM WRAPPERS ONLY.** A closure, a bound function, a plain object
+ * or an array is never flagged, however dead it is. So a closure that is itself garbage — reachable
+ * only from inside the same dead island — satisfies `holderOf`'s stopping rule and is reported as
+ * the holder. B1439's second attempt named exactly such an object and it was believed.
+ *
+ * `liveEntryPoints` asks the complementary question and cannot make that mistake: walk FORWARD from
+ * the roots, never through a detached node, and report the edges that cross into the island. Every
+ * holder it names is reachable from a root through live nodes only, so it is alive by construction.
+ *
+ * The scenes below are built so that a naive implementation gets each one WRONG in a different way.
+ */
+describe("liveEntryPoints — who ALIVE points into the detached island (B1439, third attempt)", () => {
+  /*  0 (GC roots) ─> 1 (Traced handles) [synthetic] ─weak─> 4 <div> (detached)
+   *  0 ────────────> 2 LiveCache ─property:stale──────────> 4
+   *  4 ─element:[0]─> 5 <span> (detached, INSIDE the island)
+   *  0 ────────────> 3 DeadIsh   (NOT flagged — nothing flags a plain object) is reachable ONLY
+   *                              from the island, so it must never be reported as a holder.
+   */
+  const scene = ({ liveCacheHolds = true } = {}) => graph({
+    nodesIn: [
+      { name: "(GC roots)", type: "synthetic" },
+      { name: "(Traced handles)", type: "synthetic" },
+      { name: "LiveCache", size: 40 },
+      { name: "DeadClosure", size: 24 },
+      { name: "<div class=leaflet-container>", type: "native", size: 300, detached: true },
+      { name: "<span>", type: "native", size: 90, detached: true },
+    ],
+    edgesIn: [
+      { from: 0, to: 1, type: "element", name: 0 },
+      { from: 0, to: 2, type: "element", name: 1 },
+      { from: 1, to: 4, type: "weak", name: "handle" },
+      ...(liveCacheHolds ? [{ from: 2, to: 4, type: "property", name: "stale" }] : []),
+      { from: 4, to: 5, type: "element", name: 0 },
+      { from: 5, to: 3, type: "property", name: "onEvent" },   // the closure lives INSIDE the island
+      { from: 3, to: 4, type: "property", name: "el" },        // …and points back at it (the cycle)
+    ],
+  });
+
+  it("names the LIVE holder and the edge it holds by", () => {
+    const r = liveEntryPoints(retainerIndex(edgeIndex(scene())));
+    expect(r.ok).toBe(true);
+    expect(r.known).toBe(true);
+    expect(r.entries).toHaveLength(1);
+    expect(r.entries[0].holder).toBe("LiveCache");
+    expect(r.entries[0].via).toBe("property:stale");
+    expect(r.entries[0].held).toMatch(/leaflet-container/);
+  });
+
+  it("NEVER reports a JS object that is only reachable from inside the island — the mistake holderOf makes", () => {
+    /* With no live reference in, the island is pure garbage: the ONLY non-detached retainer
+     * anywhere is `DeadClosure`, which is inside the island and is not flagged because V8 flags
+     * only DOM wrappers. `holderOf` therefore names it as the holder — confidently and wrongly,
+     * which is precisely what happened to B1439's second attempt. */
+    const dead = scene({ liveCacheHolds: false });
+    const h = holderOf(retainerIndex(edgeIndex(dead)), 5);
+    expect(h.held).toBe(true);
+    expect(h.chain[0].node).toBe("DeadClosure");
+    // The forward walk never reaches it, because the only way in is through the island itself.
+    const r = liveEntryPoints(retainerIndex(edgeIndex(dead)));
+    expect(r.entries.map((e) => e.holder)).not.toContain("DeadClosure");
+    expect(r.entries).toHaveLength(0);
+  });
+
+  it("does NOT traverse the handle tables — every DOM wrapper is in one, so they name nothing", () => {
+    // With LiveCache's reference removed the ONLY path in is the traced-handle table, which is
+    // exactly the always-true/never-useful answer. The right result is an explicit NOTHING.
+    const r = liveEntryPoints(retainerIndex(edgeIndex(scene({ liveCacheHolds: false }))));
+    expect(r.entries).toHaveLength(0);
+    expect(r.why).toMatch(/NOTHING ALIVE POINTS INTO THE DETACHED ISLAND/);
+    expect(r.why).toMatch(/Blink side/);
+  });
+
+  it("reports the island's BOUNDARY, not its interior — a nested detached node is not a second crossing", () => {
+    const r = liveEntryPoints(retainerIndex(edgeIndex(scene())));
+    // <span> is detached too, but it is reached only THROUGH <div>, which the walk refuses to expand.
+    expect(r.entries.map((e) => e.held).join(" ")).not.toMatch(/span/);
+    expect(r.crossings).toBe(1);
+  });
+
+  it("refuses to answer at all when the snapshot has no detachedness column — UNKNOWN, never zero", () => {
+    const g2 = graph({
+      nodesIn: [{ name: "(GC roots)", type: "synthetic" }, { name: "X" }],
+      edgesIn: [{ from: 0, to: 1, type: "element", name: 0 }],
+      withDetachedness: false,
+    });
+    const r = liveEntryPoints(retainerIndex(edgeIndex(g2)));
+    expect(r.known).toBe(false);
+    expect(r.entries).toEqual([]);
+    expect(r.why).toMatch(/UNKNOWN, not zero/);
   });
 });

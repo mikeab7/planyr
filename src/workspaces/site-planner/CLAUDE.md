@@ -623,11 +623,24 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   headers and the parcel badge, where it was actually load-bearing. Read that module's header before
   "restoring" the old `footprint … ac · … sf` form. The pond INSPECTOR is untouched and keeps its full
   Water area / Berm ring / Land take split.
+  **NEW-2/B221761 — `interiorFitter(ring).spots(w, h, want)` IS MEMOISED, and the reason is worth knowing
+  before you touch it.** The fit question is asked in FEET (`layoutLabels` divides the screen size by `ppf`
+  first) and a pan is a pure translation at constant scale (B1440), so during a drag the ring, the ppf, the
+  lines and the type metrics are bit-for-bit identical frame to frame — every frame re-asked the same
+  question and re-scanned thousands of inscribed rectangles for the same answer. **A pond is the only
+  element type handed a `ring` AND marked `mustLabel`**, so it was the only one paying: measured at
+  16.7 → 93.4 ms of "Label layout & collision" per pan gesture going 0 → 16 ponds, and `labelFitLadder` was
+  the hottest application function in the profile (`docs/PERF-POND.md`). The cache's lifetime IS the ring's —
+  `fitterCache` is a WeakMap keyed on the ring array, so an edited pond arrives as a NEW array and gets a
+  new fitter and **can never be placed against its old interior**. The returned array is SHARED: read-only.
   Guards: the repo-root `test/` suites **labelFitLadder** (the invariant, over a battery of hostile shapes,
   plus a source guard that the ring/`mustLabel` keys still reach `layoutLabels`), **pondLabelFit** (the
-  real Goose Creek / Tsakiris / Bain rings) and **pondLabelText** (the label's wording, driving the real
-  builder), plus the ui-audit harness **verify-pond-label-fit** (the real plan, a zoom sweep, the rendered
-  label text read back off the DOM, and the exported sheet — PDF-PARITY).
+  real Goose Creek / Tsakiris / Bain rings), **pondLabelText** (the label's wording, driving the real
+  builder) and **labelFitMemo** (memoised === un-memoised, position for position, over the owner's own
+  Goose Creek and Bain geometry; mutation-checked two ways), plus the ui-audit harnesses
+  **verify-pond-label-fit** (the real plan, a zoom sweep, the rendered label text read back off the DOM,
+  and the exported sheet — PDF-PARITY) and **diagnose-pond-pan** (the paired before/after probe this was
+  found with).
   `calloutLayout.js` — pure text-box/callout box geometry: auto-size or wrap-to-width (B913).
 - **Parcel-chrome declutter trio (NEW-1/NEW-2/NEW-3) — the FIXED-SIZE sibling of the label engine above.**
   `labelLayout` reflows labels; these three govern the chrome that CANNOT reflow, whose count is set by how

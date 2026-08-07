@@ -163,7 +163,8 @@ const fitterCache = new WeakMap();
  *                      or null when the ring genuinely has no room
  *   spots(w, h, n)     up to `n` distinct centres for a w×h box, nearest-first — so a caller
  *                      can SLIDE the label within the interior to dodge an obstacle instead of
- *                      giving up and leadering out
+ *                      giving up and leadering out. ⚠ MEMOISED per (w, h, n) — like every memo in
+ *                      this tree the returned array is SHARED, so treat it as READ-ONLY.
  *   contains(pt)       exact point-in-ring
  *
  * Memoised per ring array (the mask is in ring units, so it survives pan and zoom).
@@ -211,8 +212,50 @@ export function interiorFitter(ring) {
 
   const clamp = (v, lo, hi) => (lo > hi ? (lo + hi) / 2 : Math.min(hi, Math.max(lo, v)));
 
-  const spots = (w, h, want = 1) => {
+  /* ⛔ NEW-1 — THE ANSWER IS A FUNCTION OF (ring, w, h, want) AND OF NOTHING ELSE, SO IT IS
+   * COMPUTED ONCE PER DISTINCT QUESTION RATHER THAN ONCE PER FRAME.
+   *
+   * `spots` is asked in FEET (`layoutLabels` divides the screen size by ppf before calling), and
+   * the mask above is in feet too — which is why the header already says the fitter "survives pan
+   * and zoom". The SCAN did not. Every frame of a pan re-asked the identical question: the ring is
+   * unchanged, `ppf` is unchanged (a pan is a pure translation at constant scale — B1440), and the
+   * label's lines and type metrics are unchanged, so `w`, `h` and `want` are bit-for-bit the same
+   * numbers they were on the previous frame. Only the screen ORIGIN moved, and that is applied by
+   * the caller with one multiply-add after this returns.
+   *
+   * What it was costing, measured (ui-audit/diagnose-pond-pan.mjs, the seeded pond-count ladder at
+   * 1× CPU, dpr 2, working zoom, Yield docked): "Label layout & collision" rose 16.7 ms → 93.4 ms
+   * of main-thread work per pan gesture going from 0 to 16 ponds — a 5.6× rise, and the largest
+   * single mover between those two rungs. `labelFitLadder`'s own scan was the hottest application
+   * function in the profile at 52.98 ms. A pond is the ONLY element type that reaches this path:
+   * it is the only one `SitePlanner.jsx` hands a `ring` AND marks `mustLabel`, and the ladder tries
+   * up to nine candidate forms per pond per frame, each one a fresh scan of the enumerated maximal
+   * rectangles (a 96-cell raster enumerates thousands).
+   *
+   * ⛔ BYTE-IDENTICAL BY CONSTRUCTION, which is what lets this ship with no pixel argument at all:
+   * same pure function, same arguments, same outputs, moved from "once per frame" to "once per
+   * distinct question". There is no threshold, no approximation and no level-of-detail decision
+   * here — this is a pure re-association of work already being done, the same justification B1352
+   * shipped the neighbour record on.
+   *
+   * The early-out is the same claim in the other direction: no rectangle in `rects` can be wider
+   * than `maxW` or taller than `maxH`, so a request past either bound was already guaranteed to
+   * scan every rectangle and return nothing. Returning nothing immediately is the identical answer,
+   * and it converts the WORST case (a label that fits nowhere — exactly the case the outside rung
+   * exists for) from a full scan into a comparison.
+   *
+   * Cache lifetime is the fitter's, which is the ring's: `fitterCache` is a WeakMap keyed on the
+   * ring array, so when the pond's geometry is edited a NEW array arrives, a new fitter is built,
+   * and this cache goes with the old one. It can therefore never serve a stale interior — the
+   * failure that would matter, because a label placed against the wrong interior is a WRONG
+   * DRAWING, and a wrong drawing is worse than a slow one. Bounded anyway (LRU), because a zoom
+   * sweep legitimately asks many distinct sizes of the same pond. */
+  const spotsCache = new Map();
+  const SPOTS_CACHE_MAX = 64;
+
+  const spotsUncached = (w, h, want) => {
     const out = [], seen = new Set();
+    if (!(w <= maxW) || !(h <= maxH)) return out; // no rectangle can hold it — same answer, no scan
     for (const r of rects) {
       if (r.w < w || r.h < h) continue;
       const lox = r.x0 + w / 2, hix = r.x1 - w / 2, loy = r.y0 + h / 2, hiy = r.y1 - h / 2;
@@ -230,6 +273,22 @@ export function interiorFitter(ring) {
     }
     out.sort((p, q) => p.d - q.d);
     return out.slice(0, want).map(({ x, y }) => ({ x, y }));
+  };
+
+  const spots = (w, h, want = 1) => {
+    /* A non-finite size is a caller bug, not a cache key — answer it directly rather than pinning
+     * a NaN entry that every later NaN would then hit. */
+    if (!Number.isFinite(w) || !Number.isFinite(h) || !Number.isFinite(want)) return spotsUncached(w, h, want);
+    const key = `${w}|${h}|${want}`;
+    if (spotsCache.has(key)) {
+      const hit = spotsCache.get(key);
+      spotsCache.delete(key); spotsCache.set(key, hit); // refresh recency
+      return hit;
+    }
+    const val = spotsUncached(w, h, want);
+    spotsCache.set(key, val);
+    if (spotsCache.size > SPOTS_CACHE_MAX) spotsCache.delete(spotsCache.keys().next().value);
+    return val;
   };
 
   const fitter = {
