@@ -1,4 +1,5 @@
-/* lib/roadGeometry.js — pure, dependency-free road centerline geometry (B597 / NEW-2).
+/* lib/roadGeometry.js — pure road centerline geometry (B597 / NEW-2). Its only import is the
+ * equally pure `pureCache.js` (see `roadCenterlineTagged` for why the tessellation is cached).
  *
  * A centerline road is stored as a polyline `pts:[{x,y}…]` plus a parallel per-vertex
  * treatment list `vtx:[{treatment, radius?}…]` (same length as `pts`; the two ENDPOINT
@@ -21,6 +22,8 @@
  * Frame-agnostic: works in feet, +y is south (the planner canvas frame), but nothing
  * here depends on the axis sign. No React, no canvas helpers — unit-tested in
  * test/roadGeometry.test.js. */
+import { boundedCache, pointsSignature } from "./pureCache.js";
+
 
 export const DEFAULT_TESS_DEG = 6;       // ~1 tessellation point per 6° of arc / curve
 export const DEFAULT_ARC_RADIUS = 50;    // ft — fallback Arc radius when none is supplied
@@ -193,7 +196,39 @@ function dedupe(pts, tol = 1e-6, tags = null) {
  * MUST render identically to the legacy rect road). Sharp-only input returns the input
  * polyline. Every corner consumes at most half of each adjacent segment, so the dense
  * result is always simple (no self-overlap from neighbouring corners). */
+/* VIEW-INDEPENDENT-ONCE (NEW-2, 2026-08-06) — the tessellation is cached on its own inputs.
+ *
+ * The alignment a road renders is a function of its control points, its per-vertex treatments and
+ * two scalars. Nothing about it moves when the map does. But every consumer re-derives it —
+ * `roadStripRing`, `roadCurbLines`, the label pass, the hit test — and each of those is called
+ * per road per render, so a 60-move pan of the reference plan produced 1,140 calls of
+ * `roadCenterline` and 1,140 of `roadCenterlineTagged` for SIX roads, measured by
+ * ui-audit/detect-view-recompute.mjs (28 ms, scaling with element count).
+ *
+ * The signature is O(control points) — five to twenty per road — while the work it replaces
+ * tessellates every corner into hundreds of dense points, so the ratio is not close.
+ *
+ * ⛔ A CALLER THAT PASSES `shareAt` BYPASSES THE CACHE ENTIRELY. It is a FUNCTION, so it cannot
+ * be put in a key, and guessing that two callers' closures agree is exactly the kind of
+ * assumption that turns a cache into a wrong answer. The one caller that uses it
+ * (`fitRadiusToLegs`, in a solver loop) simply does not benefit. */
+const _clCache = boundedCache(96);
+
+function centerlineKey(pts, vtx, opts) {
+  let v = "";
+  for (const t of vtx || []) v += t ? `|${t.treatment || ""}:${t.radius ?? ""}` : "|-";
+  const sharp = opts.sharpAt instanceof Set ? [...opts.sharpAt] : Array.isArray(opts.sharpAt) ? opts.sharpAt : [];
+  return `${pointsSignature(pts)}#${v}#${opts.defaultRadius ?? ""}#${opts.tessDeg ?? ""}#${sharp.slice().sort((a, b) => a - b).join(",")}`;
+}
+
 export function roadCenterlineTagged(pts, vtx, opts = {}) {
+  const key = typeof opts.shareAt === "function" ? null : centerlineKey(pts, vtx, opts);
+  if (key != null) { const hit = _clCache.get(key); if (hit) return hit; }
+  const res = roadCenterlineTaggedUncached(pts, vtx, opts);
+  return key == null ? res : _clCache.set(key, res);
+}
+
+function roadCenterlineTaggedUncached(pts, vtx, opts = {}) {
   const clean = [], keep = [];                       // `keep[j]` = the ORIGINAL index of clean[j]
   (pts || []).forEach((p, i) => { if (p && Number.isFinite(p.x) && Number.isFinite(p.y)) { clean.push(p); keep.push(i); } });
   if (clean.length < 2) return { dense: clean.map((p) => ({ x: p.x, y: p.y })), segOwn: [] };

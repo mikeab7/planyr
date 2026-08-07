@@ -14,7 +14,9 @@ export default [
   // (exports/define/__THREE_DEVTOOLS__) that trip no-undef and are not ours to fix.
   // ui-audit/.cache-vendor holds React/Babel/Supabase the scheduler boot-check downloads
   // (gitignored; not all are *.min.js-named, so an explicit dir ignore is needed too).
-  { ignores: ["dist/**", "node_modules/**", "public/landing/vendor/**", "**/*.min.js", "ui-audit/.cache-vendor/**"] },
+  // `dist-probe/**` is the instrumented build the VIEW-INDEPENDENT-ONCE detector drives
+  // (PLANYR_PROBE=1 — scripts/vite-plugin-recompute-probe.mjs). Build output, like `dist/`.
+  { ignores: ["dist/**", "dist-probe/**", "node_modules/**", "public/landing/vendor/**", "**/*.min.js", "ui-audit/.cache-vendor/**"] },
   {
     files: ["**/*.{js,jsx}"],
     plugins: { "react-hooks": reactHooks },
