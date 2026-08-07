@@ -146,3 +146,90 @@ fix is shipped against this.**
 **Where a third attempt should start:** the `Array` holder. It is a plain JS array with a detached
 `<div>` at index 1 — the cheapest thing left to identify, and unlike the bound function it is
 certainly ours or a dependency's rather than an engine artifact. The tool to do it with now exists.
+
+---
+
+# B1439, THIRD ATTEMPT — the second attempt's holder is REFUTED, and the live boundary is entirely Leaflet
+
+**2026-08-06 (NEW-3).** B1434's rule still stands and **no fix for B1439 is shipped here either.**
+What this attempt adds is a correction and a narrowing.
+
+New instrument: `liveEntryPoints` in `ui-audit/lib/heapSnapshot.mjs` (5 unit tests in
+`test/heapSnapshot.test.js`), wired into `ui-audit/diagnose-plan-switch.mjs`.
+
+## 6. THE `native_bind` HOLDER IN §4b IS NOT A HOLDER — and here is why holderOf could not know
+
+`holderOf` walks BACKWARDS out of the detached island and stops at the first retainer that is
+neither detached nor native. **That rule is sound only if "not flagged detached" implies "alive",
+and it does not: V8 sets `detachedness` on DOM WRAPPERS ONLY.** A closure, a bound function, a plain
+object or an array is never flagged, however dead it is. So an object that is itself garbage —
+reachable only from inside the same dead island — satisfies the stopping rule perfectly and is
+reported as the holder.
+
+That is what §4b is. The bound function reproduces on demand, and it has an ordinary explanation:
+**React DOM builds exactly that shape for every non-delegated listener it attaches** —
+`listenerWrapper.bind(null, domEventName, eventSystemFlags, targetContainer)`, three bound
+arguments, the third being the element — and an `<input>` gets one for the `invalid` event. So
+`bound_argument_2 → <input type="file" …>` is the element's OWN listener: it points at the input
+because it was made for the input, it is retained by the input's listener list, and the two form a
+cycle **inside** the island. It describes the garbage, not what is keeping it.
+
+This is the THIRD methodological correction in this family, and it follows the pattern of §4a's two:
+*the shortest path is the wrong question* → *a native node is not a holder* → **a JS object that is
+only reachable from inside the island is not a holder either.**
+
+## 7. THE COMPLEMENTARY QUESTION, which does not have that failure mode
+
+Walk **FORWARD from the GC roots, refusing to pass through any detached node.** Everything reached
+that way is provably alive. The leak is then exactly the set of edges crossing from that live set
+into the island — and each names a holder that is alive by construction.
+
+Two traversal rules, both load-bearing: the **handle tables are not traversed through** (every DOM
+wrapper in the heap is in one, so a walk through them reaches every leaked node in two steps and
+names the table — the same always-true, never-useful answer the shortest-path attempt gave), and a
+detached node is recorded as an entry point and **never expanded**, so the result is the island's
+boundary rather than its interior.
+
+## 8. THE RESULT: six crossings, all Leaflet, and every one of them WEAK
+
+Across one A → B → A cycle, from 357,982 live nodes:
+
+```
+6 crossings, each a CSSStyleDeclaration (an element's own inline-style object) →
+    <div class="leaflet-tile-container leaflet-zoom-animated">   ×2
+    <div class="leaflet-layer ">
+    <div class="leaflet-container leaflet-touch">
+    <div>   ×2
+```
+
+**Not one SVG node. Not one panel. Not one rail button. Every crossing is Leaflet's own container
+tree** — and the retaining chain to each of those `CSSStyleDeclaration`s bottoms out at
+`(Traced handles)` through a **`weak:` edge**, which does not retain.
+
+Two things follow, and they point in opposite directions, so both are stated:
+
+1. **Nothing in live JS strongly references the island.** Combined with §5's findings — no listener
+   growth on `window` or `document`, no missing `removeEventListener` / `disconnect()` /
+   `clearInterval` anywhere in app code, both maps ending in `map.remove()` — the reference keeping
+   the island alive is on the **Blink side**, where no heap graph can name it: a listener still
+   registered on a live target, an observer still observing, or **a running animation**.
+2. **§4 of the second attempt ruled Leaflet OUT, and that ruling should now be treated as open.**
+   Its evidence was that `leafletContainers` and `leafletTiles` return to their starting COUNTS —
+   but returning to the same count does not mean the old container was released; it means a new one
+   replaced it. The live boundary being 100% Leaflet, with two of the six crossings on nodes
+   carrying the class **`leaflet-zoom-animated`**, is a specific and testable new lead: a CSS
+   transition or animation still attached to a detached element is held by Blink and is invisible
+   to every JS-side check made so far.
+
+## 9. WHAT A FOURTH ATTEMPT SHOULD DO
+
+Start at the animation, not at the heap. `document.getAnimations()` before and after the cycle,
+counting animations whose `effect.target` is detached, is a direct test of the §8(1) hypothesis and
+needs no snapshot at all. If that comes back clean, the next candidate is a Blink-side listener on a
+target the census does not cover — every listener census so far has looked at `window` and
+`document` only, and Leaflet registers on its own container, which is neither.
+
+**What this attempt ruled out, so a fourth does not re-derive it:** the `native_bind` holder (§6 —
+it is React's own listener wrapper, inside the island); any STRONG live JS reference into the island
+(§8 — there are none); and the SVG/panel tree as the entry point (§8 — every crossing is Leaflet,
+so the plan canvas is retained *through* the map container, not alongside it).

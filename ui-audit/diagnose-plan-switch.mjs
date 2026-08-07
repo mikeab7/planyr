@@ -27,7 +27,7 @@
  */
 import { chromium } from "playwright";
 import { perfScenarioSeedMulti, SCENARIO_ID, SCENARIO_ID_B } from "./lib/perf-scenario.mjs";
-import { aggregateSnapshot, diffAggregates, edgeIndex, retainerIndex, holderOf, detachedNodes, detachedByClass } from "./lib/heapSnapshot.mjs";
+import { aggregateSnapshot, diffAggregates, edgeIndex, retainerIndex, holderOf, retainingPath, detachedNodes, detachedByClass, liveEntryPoints } from "./lib/heapSnapshot.mjs";
 
 const BASE = (process.env.BASE_URL || "http://localhost:4173/").replace(/\/?$/, "/");
 const EXEC = process.env.PW_CHROME || "/opt/pw-browsers/chromium-1194/chrome-linux/chrome";
@@ -197,6 +197,21 @@ if (rix && det?.detachedKnown) {
     out.paths.push({ klass: c.klass, nodes: c.nodes, bytes: c.bytes, ...holderOf(rix, c.sample) });
   }
 }
+/* NEW-3 — THE THIRD ATTEMPT'S QUESTION, and it is the complement of `holderOf`'s.
+ * `holderOf` walks backwards out of the island and stops at the first retainer that is not FLAGGED
+ * detached — but V8 flags only DOM wrappers, so a closure that is itself garbage satisfies that
+ * rule and gets reported as the holder. This walks FORWARD from the GC roots refusing to pass
+ * through anything detached, so every node it reaches is provably alive, and reports the edges that
+ * cross from that live set into the island. See lib/heapSnapshot.mjs → liveEntryPoints. */
+out.liveEntries = rix && det?.detachedKnown ? liveEntryPoints(rix, { limit: 30 }) : null;
+/* And for each crossing, the chain from a GC ROOT down to the live holder — because "a live
+ * CSSStyleDeclaration points at a detached div" names the boundary but not the owner, and the
+ * owner is the source line this item is for. `retainingPath` is the RIGHT tool here and the wrong
+ * one for a detached node (see its own note): the holder is alive, so its shortest chain from a
+ * root is a real answer rather than the handle table every wrapper shares. */
+if (out.liveEntries?.entries?.length) {
+  for (const e of out.liveEntries.entries) e.holderPath = retainingPath(rix, e.holderIdx, { maxDepth: 14 });
+}
 
 if (JSON_OUT) { console.log(JSON.stringify(out, null, 2)); process.exit(0); }
 
@@ -233,6 +248,23 @@ if (out.detachedClasses.length) {
     }
   }
 }
+console.log(`\n  WHERE THE LIVE HEAP TOUCHES THE DETACHED ISLAND (forward from the GC roots, never through a detached node —`);
+console.log(`  so every holder below is PROVABLY ALIVE, which is the thing holderOf above cannot establish):`);
+if (!out.liveEntries) console.log(`     ⚠ UNAVAILABLE — the snapshot could not be indexed`);
+else if (!out.liveEntries.known) console.log(`     ⚠ UNKNOWN — ${out.liveEntries.why}`);
+else if (!out.liveEntries.entries.length) console.log(`     ⛔ ${out.liveEntries.why}`);
+else {
+  console.log(`     ${out.liveEntries.crossings} crossing(s) from ${out.liveEntries.liveVisited.toLocaleString()} live nodes${out.liveEntries.truncated ? "  ⚠ TRUNCATED — the live walk hit its node ceiling, so this list may be incomplete" : ""}`);
+  for (const e of out.liveEntries.entries) {
+    console.log(`     ${(e.heldBytes / 1024).toFixed(1).padStart(8)} KB   ${e.holder}${e.holderNative ? " [native]" : ""}${e.holderSynthetic ? " [synthetic]" : ""}`);
+    console.log(`                    └ ${e.via} → ${e.held}  [detached]`);
+    if (e.holderPath?.ok) {
+      console.log(`                    held from a GC root by:`);
+      for (const s2 of e.holderPath.path) console.log(`                       ${s2.via ? `${s2.via} → ` : ""}${s2.node}${s2.retainers > 1 ? `   (${s2.retainers} retainers)` : ""}`);
+    }
+  }
+}
+
 console.log(`\n  WHAT GREW ACROSS THE CYCLE (self bytes by class, ≥8 KB):`);
 if (!out.growth.ok) console.log(`     ⚠ ${out.growth.why}`);
 else for (const r of out.growth.rows) console.log(`     ${(r.bytes.delta / 1024).toFixed(1).padStart(9)} KB   ${String(r.nodes.delta).padStart(7)} nodes   ${r.klass}`);

@@ -107,7 +107,37 @@ _Last updated: 2026-08-07._
 > that I already set this line once this week, and moving it right after it gave me an answer I didn't like is
 > exactly the move I shouldn't make on my own.
 
-## 🔍 One sentence to answer, and it unblocks the smooth-zoom work (B1449)
+## ✅ ANSWERED — nothing more from you on smooth zoom (was: B1449)
+
+> You said: *"i think smooth zoom makes sense, unless theres something im not considering."* That's the call, it's
+> taken, and the question below is closed — I've left it in place only so the reasoning is on the record.
+>
+> **Where it stands: not built yet, and I want to be straight about why.** It isn't waiting on you any more, and it
+> isn't a small job. Making the zoom smooth means the drawing briefly holds its old size while a single stretch is
+> applied on top — and *everything* on the canvas that decides how big to be (line thicknesses, text, the rules about
+> what detail shows at what zoom) has to be told to use the held size rather than the live one. Miss one and the
+> drawing looks wrong for the split second your wheel is moving — doubled-up text, wrong line weights. The awkward
+> part is that **none of my existing checks can see that**, because at rest the two sizes are the same number, so
+> everything passes whether it's right or wrong. So the first piece of work is a check that can watch a frame while
+> the wheel is still turning — and only then the change itself. That's the next session on this, and when it's done
+> you'll get the before-and-after recording of the same wheel spin you asked for, plus a switch to turn it off.
+
+## 🐟 One export that would let me measure the Bain slowdown properly (B221760 / V23408)
+
+> **Why I'm asking.** You said the Bain site got fast and then a detention pond made it slow again. I built a probe
+> that adds a pond and measures the exact same drag before and after, and I found a real cost — the pond's name label
+> was re-solving where it fits inside the basin on *every single frame* of a drag, which I've now fixed (it's about
+> twice as cheap per pond). But on the plan I have to test with, one pond isn't enough to feel: I had to put sixteen
+> ponds on it before the cost was bigger than the measurement noise.
+>
+> **The gap is that I don't have your Bain plan.** There's no copy of it in the code — only a few of its pond
+> outlines, saved for a different test years ago. Everything I measured is a floor, not a match.
+>
+> **What would close it:** open Bain / Concept A while signed in and send me a full export of the plan. I need the
+> whole thing — the buildings, the property lines, the settings and where it sits on the map — not just the shapes.
+> One file, one time, and then I can measure the site you're actually complaining about instead of a stand-in.
+
+## 🔍 (CLOSED — see above) One sentence to answer, and it unblocks the smooth-zoom work (B1449)
 
 > **The background in two lines.** Dragging the plan around is already fixed — it went from redrawing the whole
 > drawing on every twitch to just sliding what's already there, and it got about forty-six times cheaper. The same
