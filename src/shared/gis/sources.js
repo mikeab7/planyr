@@ -99,8 +99,28 @@ export const GIS_SOURCES = {
     // queryable NWI endpoint today. We keep the Test service as an acknowledged,
     // monitored exception and lean on the SWR cache (B367) — rather than silently
     // shipping a `/Test/` URL with no guard (the failure mode B369 exists to prevent).
+    /* ⛔ B209505 (2026-08-06) — RE-CHECKED AND THE EXCEPTION STANDS; the layer is NOT dead.
+     *
+     * Reported as "0 at all six, including Texas City on Galveston Bay — this is not 'no wetlands',
+     * it is broken", with the ask to repoint at the production NWI endpoint. Both halves were
+     * measured and both come out the other way:
+     *   • The LAYER ANSWERS. Queried at the six Houston-area audit sites with the drift verifier's
+     *     own ~1 km envelope: 71 · 63 · 12 · 33 · 30 · 24 polygons. It also answers in Dallas, San
+     *     Antonio, Denver, Grand Junction and Chicago. Nothing is broken here — a screening query
+     *     against a PARCEL-sized footprint legitimately returns 0 when no NWI polygon touches that
+     *     parcel, and a bare point is a parcel-sized footprint.
+     *   • THERE IS STILL NO PRODUCTION ALTERNATIVE. `…/services/Wetlands/MapServer` re-probed
+     *     2026-08-06: it still returns an EMPTY `layers` array — a display/cache service, not a
+     *     queryable one — and its sublayers 0/1/2 error. The whole services directory was
+     *     enumerated (Areas_of_Interest · Data_Source · HUCs · Riparian · Wetlands_Raster ·
+     *     Wetlands_Status · Wetlands); none is a drop-in queryable replacement. So the /Test/ folder
+     *     remains the only queryable NWI, and this stays a monitored exception.
+     * THE REAL TRAP, found while checking: sublayer 0 ("Wetlands", the combined one) returns ZERO at
+     * every one of the six points, while sublayer 2 (CONUS West) returns the counts above. Anyone
+     * "simplifying" `layerId` from [1, 2] to 0 would silently kill this layer nationwide. Keep the
+     * pair. B209505 also gives the row fixtures at six separated points instead of one. */
     serviceUrl: "https://fwsprimary.wim.usgs.gov/server/rest/services/Test/Wetlands_gdb_split/MapServer",
-    layerId: [1, 2], // 1 = CONUS East, 2 = CONUS West (Texas is West); joined layers
+    layerId: [1, 2], // 1 = CONUS East, 2 = CONUS West (Texas is West); joined layers — NEVER 0, see above
     geometryType: "polygon",
     fields: { type: "WETLAND_TYPE", attr: "ATTRIBUTE", acres: "ACRES" },
     outFields: ["*"], // joined layers report table-qualified field names that differ per sublayer
@@ -230,7 +250,21 @@ export const GIS_SOURCES = {
     fields: { name: "PRIMARY_NAME", symbol: "MAP_SYMBOL_CODE", sfName: "SF_SITE_NAME", city: "CITY_NAME", county: "COUNTY_NAME" },
     coverage: "national",
     tier: "production",
-    lastVerified: "2026-07-18",
+    /* B209505 (2026-08-06) — the row that motivated the whole fixture-method fix, and the one whose
+     * verdict is most easily misread. Reported as "0 at all six industrial sites while its Pasadena
+     * fixture passes — a passing fixture is not proving coverage". The first half is TRUE, the
+     * second is the important part, and the conclusion is not "the layer is dead":
+     *   • 64,000 features nationally; it answers in Dallas (19), San Antonio (5), El Paso (13),
+     *     Denver (6), Chicago (8), Atlanta (14), Newark (8) and Phoenix (3).
+     *   • It returns 0 within the screen's 1-mile buffer at all six Houston sites because the
+     *     nearest EPA cleanup point genuinely is further than a mile from each of them — at ~3 mi
+     *     the same six read 1 · 0 · 3 · 3 · 2 · 11. Texas City is the sharpest case: refineries
+     *     ~2.4 km south of the audit coordinate, just outside a 1-mile ring.
+     * So "absent within 1 mi" was the honest answer. What was NOT honest was the fixture set: one
+     * Pasadena point could never have distinguished this from a genuinely dead layer, which is
+     * exactly the owner's point. This row now carries separated fixtures on three continents' worth
+     * of separation; the reach rule lives in `fixtureReachProblems`. */
+    lastVerified: "2026-08-06",
   },
 
   // ---- Active surface growth faults (public-data screening PHASE 3) ----
@@ -1462,6 +1496,191 @@ export function fixtureCount(entry, fixtures = null) {
   return ((rec.fixtures) || []).length + ((rec.sampleFixtures) || []).length;
 }
 
+/* ═══ B209505 — A FIXTURE SET THAT CANNOT FAIL IS NOT MEASURING ANYTHING ════════════════════════
+ *
+ * THE FINDING THAT PRODUCED THIS RULE. Every one of the registry's fixtures passed while the owner
+ * ran 27 layers against six new Houston-area sites and reported five of them returning nothing.
+ * The layers turned out to be alive (see the B209505 notes on the rows themselves) — but the audit
+ * that was supposed to be able to tell us that could not have. 45 of 57 rows carried exactly ONE
+ * fixture point, so each row's entire claim to work anywhere rested on one place. `epaCleanups`
+ * is the cleanest illustration: its single Pasadena fixture passed continuously while the layer
+ * returned nothing across six industrial sites, because Pasadena is the one place it was ever
+ * asked about. A passing fixture was never evidence of coverage; it was evidence of one point.
+ *
+ * THE RULE. A row must be probed at points that are actually SEPARATED, and how separated is a
+ * function of what the row CLAIMS to cover — a national layer proven only in Houston has proven
+ * nothing about being national, while a single drainage district genuinely cannot be probed 200 km
+ * apart. So the reach requirement is declared per class, and a row that cannot meet its class must
+ * say why IN the registry rather than quietly sit at one point:
+ *
+ *   national  ≥3 points, ≥1000 km apart — must answer well outside Texas
+ *   state     ≥3 points, ≥200 km apart  — must answer outside its one metro
+ *   regional  ≥2 points, ≥15 km apart   — a metro / county / multi-county district
+ *   local     ≥2 points, ≥2 km apart    — one small district; separation is all that is available
+ *
+ * Class is DERIVED from the state scope the row already declares (national when `states` is null,
+ * state otherwise) and overridden only in `SOURCE_FIXTURE_REACH` below, where each override
+ * carries a reason. Deriving it keeps a new row honest by default: it inherits the strictest
+ * requirement its own scope implies, and weakening that is a deliberate, reviewed edit.
+ *
+ * WHAT THIS DOES NOT DO. It does not check that a fixture's expectation is CORRECT — only that the
+ * row is asked about more than one place. Correctness comes from the counts having been measured
+ * live (`scripts/probe-fixture-candidates.mjs`) rather than guessed. */
+export const FIXTURE_REACH_CLASSES = {
+  national: { minPoints: 3, minSpreadKm: 1000 },
+  state: { minPoints: 3, minSpreadKm: 200 },
+  regional: { minPoints: 2, minSpreadKm: 15 },
+  local: { minPoints: 2, minSpreadKm: 2 },
+};
+
+/* Per-row class overrides. A row appears here ONLY when its real coverage is narrower than its
+ * state scope implies, and the value is `[class, reason]` so the audit can require the reason.
+ * A row absent from this table takes the class its state scope derives. */
+export const SOURCE_FIXTURE_REACH = {
+  // Houston-region drainage/utility districts — a county or a metro, not a state.
+  ccnSewer: ["regional", "Harris County GIS re-serve of the PUCT CCN; its coverage is the Houston metro region, not the state (no statewide sewer-CCN REST endpoint exists)."],
+  growthFaults: ["regional", "The USGS SIM 2874 study extent IS the Houston metropolitan area — there are no growth-fault traces to probe outside it."],
+  hcfcdChannels: ["regional", "Harris County Flood Control District — one county by definition."],
+  hcfcdWatersheds: ["regional", "Harris County Flood Control District — one county by definition."],
+  hcfcdMaapnext: ["regional", "HCFCD MAAPnext model results cover Harris County only."],
+  etj_hgac: ["regional", "The H-GAC 13-county region; probing it in Dallas would assert a guaranteed zero."],
+  etj_austin: ["regional", "One city's 2-mile ETJ ring."],
+  etj_fortworth: ["regional", "One city's ETJ."],
+  // The BKDD tier — ONE drainage district, roughly 20 km across. `local` is the honest class:
+  // two separated points inside the district is the most separation that exists to buy.
+  bkdd: ["local", "The Brookshire–Katy Drainage District is a single district ~20 km across."],
+  bkddStreams: ["local", "Single BKDD district."],
+  bkddAllStreams: ["local", "Single BKDD district."],
+  bkddEasements: ["local", "Single BKDD district."],
+  bkddEasements107: ["local", "Single BKDD district."],
+  bkddSubwatersheds: ["local", "Single BKDD district."],
+  bkddFloodplainBfe: ["local", "Single BKDD district."],
+  bkddOutfalls: ["local", "Single BKDD district."],
+  bkddBoundary: ["local", "Single BKDD district — one boundary polygon."],
+  bkddDmpFloodplain: ["local", "BKDD Drainage Master Plan study area."],
+  bkddDmpImprovements: ["local", "BKDD Drainage Master Plan study area."],
+  // Fort Bend county WSE rasters.
+  fbcddWse02: ["regional", "Fort Bend County drainage district rasters — one county."],
+  fbcddWse100: ["regional", "Fort Bend County drainage district rasters — one county."],
+  // The MHFD tier — the Denver metro flood district, six counties.
+  mhfdBoundary: ["regional", "Mile High Flood District — the Denver metro, six counties."],
+  mhfdStreams: ["regional", "Mile High Flood District — the Denver metro."],
+  mhfdWatersheds: ["regional", "Mile High Flood District — the Denver metro."],
+  mhfdChannels: ["regional", "Mile High Flood District — the Denver metro."],
+  mhfdOutfalls: ["regional", "Mile High Flood District — the Denver metro."],
+  // Two Colorado rows whose PROGRAM is statewide but whose FEATURES cluster in the Denver metro.
+  // Measured 2026-08-06 by asking each layer where its own features are: the water/metro district
+  // layers' farthest sampled pair does not clear 200 km, so `state` would demand a separation the
+  // data does not contain. (cdpheSuperfund and cdpheBrownfields DO clear it — 377 km and 593 km —
+  // and are deliberately NOT listed here.)
+  waterDistrictCo: ["regional", "Colorado water districts in this layer cluster in the Denver metro / Front Range."],
+  metroDistrictCo: ["regional", "Colorado metropolitan districts cluster along the Front Range."],
+  // FEMA InFRM BLE is Region 6, and deliberately publishes NOTHING over studied areas, so its
+  // fixtures are a mix of in-coverage values and by-design no-data points.
+  femaEbfe: ["regional", "FEMA Region 6 Base Level Engineering — published only over UNSTUDIED reaches, so most of the state is no-data by design."],
+};
+
+/* ⛔ ROWS WHOSE REACH CANNOT BE WIDENED FROM THIS BUILD ENVIRONMENT, and why.
+ *
+ * A fixture has to be MEASURED against the live service, and twelve rows sit on three hosts this
+ * sandbox's egress policy blocks outright (`txgeo.usgs.gov`, `fximgservices.hcfcd.org`,
+ * `gisclient.quiddity.com` — every request returns "Host not in allowlist", not a service answer).
+ * Their existing single fixtures were written when someone could reach them; adding more from here
+ * would mean inventing counts, which is precisely the failure B209505 exists to end.
+ *
+ * So the requirement is DEFERRED, never dropped, and never silently: each row names the host that
+ * blocks it and the V# that closes it. `auditRegistry` still enforces everything else about these
+ * rows, and the entry is required to carry a reason — an empty one is itself a problem. This is
+ * the same shape as `countiesProvenance.js`'s `candidateUrl`: record the gap in the registry
+ * rather than let a green check imply coverage nobody verified.
+ *
+ * ⚠ A guard that becomes an outage is worse than the gap it covers (the check-mint precedent), so
+ * this list may only SHRINK: when a host becomes reachable, widen that row's fixtures and delete
+ * its row here in the same commit. */
+export const SOURCE_FIXTURE_REACH_PENDING = {
+  femaEbfe: "txgeo.usgs.gov is blocked by this build environment's egress policy (verified 2026-08-06: every request returns 'Host not in allowlist'). Its four sampleFixtures were measured live on 2026-08-05 from an unblocked network and are kept. → V17706.",
+  hcfcdMaapnext: "fximgservices.hcfcd.org unreachable (this row is already `availability: down` with an outage record, so its fixtures deliberately assert the OUTAGE). → V17706.",
+  bkddStreams: "gisclient.quiddity.com blocked by egress policy. → V17706.",
+  bkddAllStreams: "gisclient.quiddity.com blocked by egress policy. → V17706.",
+  bkddEasements: "gisclient.quiddity.com blocked by egress policy. → V17706.",
+  bkddEasements107: "gisclient.quiddity.com blocked by egress policy. → V17706.",
+  bkddSubwatersheds: "gisclient.quiddity.com blocked by egress policy. → V17706.",
+  bkddFloodplainBfe: "gisclient.quiddity.com blocked by egress policy. → V17706.",
+  bkddOutfalls: "gisclient.quiddity.com blocked by egress policy. → V17706.",
+  bkddBoundary: "gisclient.quiddity.com blocked by egress policy. → V17706.",
+  bkddDmpFloodplain: "gisclient.quiddity.com blocked by egress policy. → V17706.",
+  bkddDmpImprovements: "gisclient.quiddity.com blocked by egress policy. → V17706.",
+};
+
+/* The reach class for a row, derived from its state scope unless overridden. Pure. */
+export function fixtureReachClassFor(entry) {
+  const o = SOURCE_FIXTURE_REACH[entry && entry.key];
+  if (o) return o[0];
+  return statesFor(entry) === null ? "national" : "state";
+}
+
+/* Great-circle km between two [lng, lat] points. Pure. */
+export function haversineKm(a, b) {
+  const R = 6371, rad = (x) => (x * Math.PI) / 180;
+  const dLat = rad(b[1] - a[1]), dLng = rad(b[0] - a[0]);
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(rad(a[1])) * Math.cos(rad(b[1])) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(h));
+}
+
+/* Every fixture's representative point ([lng, lat]) — a point fixture's own point, or a bbox
+ * fixture's centre. Pure. */
+export function fixturePoints(fx) {
+  const all = [...((fx && fx.fixtures) || []), ...((fx && fx.sampleFixtures) || [])];
+  return all
+    .map((f) => (f.point ? f.point : f.bbox ? [(f.bbox[0] + f.bbox[2]) / 2, (f.bbox[1] + f.bbox[3]) / 2] : null))
+    .filter(Boolean);
+}
+
+/* The widest separation between any two of a row's fixture points, in km. Pure. */
+export function fixtureSpreadKm(fx) {
+  const pts = fixturePoints(fx);
+  let max = 0;
+  for (let i = 0; i < pts.length; i++) for (let j = i + 1; j < pts.length; j++) max = Math.max(max, haversineKm(pts[i], pts[j]));
+  return max;
+}
+
+/* Does this row's fixture set actually reach across what the row claims to cover? Pure. */
+export function fixtureReachProblems(entry, fx) {
+  const problems = [];
+  const pending = SOURCE_FIXTURE_REACH_PENDING[entry && entry.key];
+  if (pending !== undefined) {
+    // Deferred, but the DEFERRAL itself is audited: an entry with no stated reason is a problem,
+    // because "we couldn't check" has to be distinguishable from "we didn't bother".
+    if (!String(pending || "").trim()) {
+      problems.push(`${entry.key}: SOURCE_FIXTURE_REACH_PENDING entry must state which host blocks it and the V# that closes it.`);
+    }
+    return problems;
+  }
+  const cls = fixtureReachClassFor(entry);
+  const rule = FIXTURE_REACH_CLASSES[cls];
+  if (!rule) return [`${entry.key}: unknown fixture reach class "${cls}".`];
+  const override = SOURCE_FIXTURE_REACH[entry.key];
+  if (override && !String(override[1] || "").trim()) {
+    problems.push(`${entry.key}: SOURCE_FIXTURE_REACH override must carry a REASON — a narrowed requirement with no justification is how a row goes back to being unfalsifiable.`);
+  }
+  const pts = fixturePoints(fx);
+  if (pts.length < rule.minPoints) {
+    problems.push(
+      `${entry.key}: only ${pts.length} fixture point(s); a "${cls}" row needs ≥${rule.minPoints}. ` +
+      `One point proves the service answers THERE, never that it covers what the row claims — that is ` +
+      `exactly how epaCleanups passed its Pasadena fixture while returning nothing across six other sites.`
+    );
+  }
+  const spread = fixtureSpreadKm(fx);
+  if (pts.length >= 2 && spread < rule.minSpreadKm) {
+    problems.push(
+      `${entry.key}: fixture points span only ${spread.toFixed(0)} km; a "${cls}" row needs ≥${rule.minSpreadKm} km. ` +
+      `Clustered fixtures re-test one place several times.`
+    );
+  }
+  return problems;
+}
+
 /* Validate one row's availability/outage integrity. Pure. */
 export function availabilityProblems(entry) {
   const problems = [];
@@ -1515,6 +1734,10 @@ export function auditRegistry(sources = GIS_SOURCES, sourceFixtures = null, sour
         `tell "nothing here" from "we don't have this here".`
       );
     }
+    // B209505 — one fixture point is not coverage. Only enforced when the caller supplied the
+    // fixture module (the weekly verifier and the unit guards); a caller auditing endpoint facts
+    // alone has nothing to measure reach against.
+    if (sourceFixtures && fixtureCount(entry, fx) > 0) problems.push(...fixtureReachProblems(entry, fx));
     problems.push(...tierProblems(entry, sourceDocs ? (sourceDocs[key] || {}) : null));
     problems.push(...availabilityProblems(entry));
   }

@@ -23,6 +23,33 @@ export const COUNTY_VERIFICATION = {
     verifiedOn: null,
     verifiedNote: "Live-verified at the B787 CCAD repoint, and it is the same service the CCAD website's own map " + "draws. It could NOT be re-probed on 2026-07-29 because gisdata.pandai.com is blocked by this " + "build environment's egress policy — a sandbox limitation, not a sign the endpoint moved. Kept " + "as the primary: demoting a working Texas source to the statewide composite would be a " + "behaviour change, which the Colorado work is not permitted to make.",
   },
+  /* ═══ B209503 — the five counties that complete the Houston metro ═══════════════════════════
+   * All five were probed LIVE from this build environment on 2026-08-06 (every one is on Esri's
+   * ArcGIS Online cloud, which the sandbox egress policy permits — unlike the self-hosted county
+   * servers that keep the Colorado rows below parked). Each row's evidence — feature count,
+   * count-query time, point-identify time, and the actual parcel returned — is recorded in the
+   * matching `counties.js` comment, the way the Weld and Broomfield entries do it. */
+  montgomery: {
+    verifiedOn: "2026-08-06",
+    verifiedNote: "Montgomery County's OWN GIS org (AGOL owner GIS.Data_MOCO), not a republication: 336,769 parcel polygons, count query 1,212 ms, point identify 172–596 ms, real lots returned at Conroe, downtown Conroe and The Woodlands. → V17704.",
+  },
+  brazoria: {
+    verifiedOn: "2026-08-06",
+    verifiedNote: "280,226 parcel polygons, count query 156 ms, point identify 224 ms. Returned the real lot at the Pearland test point (prop_id 517005, CITY OF PEARLAND, 0.43 ac) — the site whose wrong-county answer produced B209502. → V17704.",
+  },
+  galveston: {
+    verifiedOn: "2026-08-06",
+    verifiedNote: "188,679 parcel polygons, count query 128 ms, point identify 594 ms, real lot returned at Texas City. A SECOND AGOL layer (services7.arcgis.com/2iAOv9D7729Bn31m, GCAD_Parcels_MGO_view) also answers at Texas City but holds only 26,094 features — a partial republication, rejected: it is the B369 clip trap, a source that passes your test point while being silently incomplete elsewhere. → V17704.",
+  },
+  liberty: {
+    verifiedOn: "2026-08-06",
+    verifiedNote: "155,826 parcel polygons, count query 133 ms, point identify 144 ms, real lot returned at Dayton (prop_id 73270). → V17704.",
+  },
+  austintx: {
+    verifiedOn: "2026-08-06",
+    verifiedNote: "22,630 parcel polygons, count query 221 ms, point identify 137–233 ms, real lots returned at both Sealy and Bellville. Small count is CORRECT for a rural county of ~30k people — checked against the whole-county extent, not assumed. → V17704.",
+  },
+
   co_adams: {
     verifiedOn: "2026-07-29",
   },

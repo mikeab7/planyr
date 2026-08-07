@@ -319,3 +319,39 @@ describe("NEW-5 (B1036) — an unpriceable pond-berm contribution never reads as
     expect(mit.pill).toBe("OK");
   });
 });
+
+/* ═══ B209508 — a finished-floor elevation may not be stated while its authority is unknown ═══
+ *
+ * The owner named the exact pattern: "pads assumed at 144.8' FFE" with no named authority. That
+ * number comes from whichever floodplain rule survived, and a FAILED jurisdiction lookup removes
+ * candidates silently — so the surviving rule can be the LAXER one. At Bain that is the difference
+ * between City of Houston Ch. 19's 500-yr basis and Fort Bend County's, which is 1–2 ft of finished
+ * floor on a site with two detention ponds. */
+describe("B209508 — the Buildability row refuses to state an FFE on an unresolved jurisdiction", () => {
+  const bb = (status, ffeFt) => ({ buildability: { ffe: { status, requiredFfeFt: ffeFt } } });
+  const rowFor = (d) => yieldVerdictStrip(d).find((r) => r.key === "ffe");
+
+  it("states the number when the jurisdiction IS resolved", () => {
+    const r = rowFor({ ...bb("assumed", 144.8), administrator: { unresolved: false } });
+    expect(r.sentence).toBe("pads assumed at 144.8′ FFE");
+  });
+
+  it("states the GAP, not the number, when a jurisdiction role failed", () => {
+    const r = rowFor({ ...bb("assumed", 144.8), administrator: { unresolved: true, unresolvedRoles: ["etj"] } });
+    expect(r.sentence).toBe("FFE rule not settled — jurisdiction unknown");
+    expect(r.sentence).not.toMatch(/144\.8/);   // the specific pattern the owner asked to eliminate
+    expect(r.tone).toBe("warn");
+    expect(r.ffeUnsettled).toBe(true);
+  });
+
+  it("holds for a PASSING pad too — passing off an incomplete rule set is the same false comfort", () => {
+    const r = rowFor({ ...bb("pass", 144.8), administrator: { unresolved: true, unresolvedRoles: ["etj"] } });
+    expect(r.sentence).not.toMatch(/144\.8/);
+    expect(r.pill).toBe("?");
+  });
+
+  it("is inert when no administrator is present at all (unchanged legacy behaviour)", () => {
+    const r = rowFor(bb("assumed", 144.8));
+    expect(r.sentence).toBe("pads assumed at 144.8′ FFE");
+  });
+});

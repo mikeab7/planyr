@@ -213,6 +213,7 @@
       "fortBendSugarland": [
         "harris",
         "fortbend",
+        "brazoria",
         "txgio_statewide"
       ],
       "chambersAnahuac": [
@@ -229,6 +230,11 @@
         "fortbend",
         "chambers",
         "waller",
+        "montgomery",
+        "brazoria",
+        "galveston",
+        "liberty",
+        "austintx",
         "txgio_statewide"
       ]
     },
@@ -237,7 +243,7 @@
       "Fort Bend": "fortbend",
       "Chambers County": "chambers",
       "Waller": "waller",
-      "Montgomery": null,
+      "Montgomery": "montgomery",
       "nonsense": null
     },
     "statewideFallback": {

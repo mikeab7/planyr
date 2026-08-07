@@ -29,6 +29,13 @@
 // x/y are already in feet, so on-screen distances are true (no Web-Mercator stretch).
 import { siteState } from "./siteRegion.js";
 import { situsKey } from "./appraisal.js";
+/* B209502 — the point-in-polygon county answer. Pure + synchronous once its asset is resident;
+ * every query before that returns a `pending` verdict, so nothing here ever trades a rectangle's
+ * guess for a real answer. See countyPolygons.js for why the geometry is bundled rather than
+ * fetched on demand. */
+import { resolveCounty, loadCountyPolygons, countyPolygonsReady } from "./countyPolygons.js";
+
+export { loadCountyPolygons, countyPolygonsReady };
 
 export const FEET_WKID = 2278;
 
@@ -138,6 +145,88 @@ export const COUNTIES = {
     addrField: "situs_addr",
     scopeWhere: "county='WALLER'",
     help: "Texas statewide parcels (TxGIO) — searches are limited to Waller County.",
+  },
+
+  /* ═══ B209503 — THE HOUSTON METRO IS NINE COUNTIES; THIS REGISTRY HELD FOUR ══════════════════
+   *
+   * Harris, Fort Bend, Chambers and Waller were the whole of it, so a click at Conroe, Pearland
+   * or Texas City had NO parcel source of any kind — not even the statewide backup, because
+   * `TXGIO_COUNTY_NAME` listed the same four. Every county below carries active industrial
+   * development the owner works in.
+   *
+   * WHAT "VERIFIED" MEANS ON EACH ROW — the same contract the Colorado rows established: the
+   * endpoint was QUERIED and answered. Every row below records its live parcel COUNT, the
+   * count-query time and the point-identify time, measured 2026-08-06 from this build. No row
+   * here is a guessed URL; the two that could not be probed are not shipped at all.
+   *
+   * A NOTE ON THE THREE "CADWebService" ROWS: Brazoria, Liberty and Austin are all published by
+   * BIS Consulting on Esri's ArcGIS Online cloud with an IDENTICAL schema (prop_id / file_as_name
+   * / situs_num+situs_street / legal_acreage). That is a convenience, not a coincidence to rely
+   * on — each row is verified independently and each names its own service, so one vendor's
+   * outage or reorganisation cannot silently take three counties with it. */
+  montgomery: {
+    state: "TX",
+    label: "Montgomery County · MCAD",
+    // VERIFIED LIVE 2026-08-06: 336,769 parcel polygons · count query 1,212 ms · point identify
+    // 172–596 ms. Published by Montgomery County's own GIS org (AGOL owner GIS.Data_MOCO), so
+    // this is the county's data rather than a republication. Note the situs column is lowercase
+    // `situs` and the OWNER's mailing address is a separate `ownerAddress` — the SITUS ladder in
+    // appraisal.js must win here (naming a plan after a mailing address is the B-NEW-2 trap).
+    layerUrl: "https://services1.arcgis.com/PRoAPGnMSUqvTrzq/arcgis/rest/services/Tax_Parcel_view/FeatureServer/0",
+    idField: "pid",
+    addrField: "situs",
+    help: "Montgomery CAD tax parcels (county GIS, Esri-hosted). Search by property ID or a site address.",
+  },
+  brazoria: {
+    state: "TX",
+    label: "Brazoria County · BCAD",
+    // VERIFIED LIVE 2026-08-06: 280,226 parcel polygons · count query 156 ms · point identify
+    // 224 ms (returned the real lot at Pearland — prop_id 517005, CITY OF PEARLAND, 0.43 ac).
+    // Pearland is the site whose wrong-county answer produced this whole work item.
+    layerUrl: "https://services6.arcgis.com/j94FvPaik4etwHFk/arcgis/rest/services/BrazoriaCADWebService/FeatureServer/0",
+    idField: "prop_id",
+    addrField: "situs_street",
+    help: "Brazoria CAD public parcels (Esri-hosted). Search by property ID or a street name.",
+  },
+  galveston: {
+    state: "TX",
+    label: "Galveston County · GCAD",
+    // VERIFIED LIVE 2026-08-06: 188,679 parcel polygons · count query 128 ms · point identify
+    // 594 ms (returned the real lot at Texas City — GEOID 6847-0000-0026-000).
+    // ⛔ REJECTED CANDIDATE, recorded so nobody re-picks it: a second AGOL layer
+    // (services7.arcgis.com/2iAOv9D7729Bn31m/…/GCAD_Parcels_MGO_view) also answers at Texas City
+    // but holds only 26,094 features against this one's 188,679 — a PARTIAL republication, and
+    // exactly the B369 clip trap (a source that answers your test point while being silently
+    // incomplete everywhere else). Count the features before trusting a hit.
+    layerUrl: "https://services2.arcgis.com/uGo7PKALPg93ZiO2/arcgis/rest/services/Galveston_County_Appraisal_District_Parcels_and_Lot_Lines/FeatureServer/2",
+    idField: "ID",
+    addrField: "SITUS",
+    help: "Galveston CAD parcels (Esri-hosted). Search by account ID or a site address.",
+  },
+  liberty: {
+    state: "TX",
+    label: "Liberty County · LCAD",
+    // VERIFIED LIVE 2026-08-06: 155,826 parcel polygons · count query 133 ms · point identify
+    // 144 ms (returned the real lot at Dayton — prop_id 73270, CALTEX & ASSOCIATE LTD).
+    layerUrl: "https://services3.arcgis.com/LbQai106UcFy2LlR/arcgis/rest/services/LibertyCADWebService/FeatureServer/0",
+    idField: "prop_id",
+    addrField: "situs_street",
+    help: "Liberty CAD public parcels (Esri-hosted). Search by property ID or a street name.",
+  },
+  austintx: {
+    state: "TX",
+    label: "Austin County · ACAD",
+    /* KEY IS `austintx`, NOT `austin`, ON PURPOSE. Austin County (Bellville / Sealy, on I-10 west)
+     * is not the City of Austin, and `countyKeyForName` slugs a display name straight to a key —
+     * so a key of `austin` would let the string "Austin" from a city or ETJ layer resolve to this
+     * county. The keys in this map are also persisted in saved plans, so the collision has to be
+     * impossible rather than merely unlikely — the same reasoning behind the `co_` prefix.
+     * VERIFIED LIVE 2026-08-06: 22,630 parcel polygons · count query 221 ms · point identify
+     * 137–233 ms (returned real lots at both Sealy and Bellville). */
+    layerUrl: "https://services7.arcgis.com/rNakmFefTO1XjYg4/arcgis/rest/services/AustinCADWebService/FeatureServer/0",
+    idField: "prop_id",
+    addrField: "situs_street",
+    help: "Austin County CAD public parcels (Esri-hosted). Search by property ID or a street name.",
   },
 
   /* ═══ COLORADO (NEW-5) ═══════════════════════════════════════════════════════════════════
@@ -470,6 +559,32 @@ export const COUNTIES_MAP = {
     // a second statewide key would just double the TxGIO query on every click.
     layerUrl: TXGIO_STATEWIDE_LAYER,
   },
+  /* B209503 — the five counties that complete the Houston metro. These bboxes are the REAL county
+   * extents, read from the committed county-polygon asset (which is itself built from the state's
+   * own boundary layer), padded 0.02° so a click near a shared line still queries both neighbours.
+   * They are a click PRE-FILTER and nothing more: since B209502 the geometry decides the answer, so
+   * an overlapping rectangle here can no longer hand a site the wrong county's rules. */
+  montgomery: {
+    state: "TX", center: [30.33, -95.46], zoom: 11, bbox: [30.01, -95.85, 30.65, -95.08],
+    mapServer: null, layerUrl: COUNTIES.montgomery.layerUrl,
+  },
+  brazoria: {
+    state: "TX", center: [29.21, -95.47], zoom: 10, bbox: [28.80, -95.89, 29.62, -95.04],
+    mapServer: null, layerUrl: COUNTIES.brazoria.layerUrl,
+  },
+  galveston: {
+    state: "TX", center: [29.34, -94.80], zoom: 11, bbox: [29.06, -95.25, 29.62, -94.35],
+    mapServer: null, layerUrl: COUNTIES.galveston.layerUrl,
+  },
+  liberty: {
+    state: "TX", center: [30.19, -94.80], zoom: 10, bbox: [29.87, -95.19, 30.51, -94.42],
+    mapServer: null, layerUrl: COUNTIES.liberty.layerUrl,
+  },
+  austintx: {
+    state: "TX", center: [29.85, -96.31], zoom: 11, bbox: [29.58, -96.64, 30.12, -95.98],
+    mapServer: null, layerUrl: COUNTIES.austintx.layerUrl,
+  },
+
   // The statewide TxGIO parcel source, as its OWN key (decoupled from Chambers in B787 once
   // Chambers got its live CCAD source). `statewide:true` makes it the UNIVERSAL parcel source:
   // its /export image layer paints parcel outlines anywhere you zoom in (backing the visible
@@ -548,12 +663,48 @@ export const COUNTIES_MAP = {
  * state a site is in, which is precisely the failure this work exists to prevent. */
 const stateForPoint = (lat, lng) => siteState({ lat, lng });
 
+/* B209502 — the GEOMETRY answer for a point, or null when the asset is not resident / the point is
+ * outside both states. This is the ONE place `counties.js` asks; both public resolvers below read
+ * it, so click routing and the jurisdiction heading cannot disagree about which county a point
+ * is in (two envelopes that could drift apart is precisely the failure NEW-5 already fought). */
+function geometryCountyKey(lat, lng) {
+  const ans = resolveCounty(lat, lng);
+  if (!ans || ans.status !== "ok") return null;
+  return countyKeyForName(ans.name, ans.state);
+}
+
 export function candidateCountiesForPoint(lat, lng) {
   const entries = Object.entries(COUNTIES_MAP);
   const within = entries
     .filter(([, c]) => { const b = c.bbox; return b && lat >= b[0] && lat <= b[2] && lng >= b[1] && lng <= b[3]; })
     .map(([k]) => k);
+
+  /* B209502 — THE BBOX NARROWS, THE GEOMETRY DECIDES.
+   *
+   * The bbox pre-filter stays exactly as it was, and it is still the right tool for its real job:
+   * deciding which parcel SERVICES are worth asking. Over-inclusion there is harmless — a
+   * straddle click queries both neighbours and the service that returns a lot is the source of
+   * truth — which is why this function keeps returning several keys.
+   *
+   * What was NOT harmless is the ORDER. `candidate[0]` is read as an answer to a different
+   * question ("which county is this?"), and a rectangle answered it: Harris's box contains
+   * Pearland, so a Brazoria site was handed Harris's flood-control district, detention criteria
+   * and setbacks as a confident match. So when the polygon geometry knows the answer, the real
+   * county is hoisted to the front and everything else stays behind it as a fallback. When the
+   * geometry is not resident yet, the order is byte-identical to before — no guess is introduced,
+   * the old behaviour simply persists until the asset lands. */
+  const truth = geometryCountyKey(lat, lng);
+  const hoist = (keys) => (truth && keys.includes(truth) ? [truth, ...keys.filter((k) => k !== truth)] : keys);
+
   if (!within.length) {
+    /* The geometry may know the county even when no bbox matched — Conroe and Texas City are
+     * exactly that case. A configured county resolved here is a REAL answer, not a fallback, so
+     * it leads and the rest of its state follows as coverage. */
+    if (truth) {
+      const st = COUNTIES_MAP[truth].state;
+      const inState = entries.filter(([, c]) => c.state === st).map(([k]) => k);
+      return hoist(inState);
+    }
     // Outside every county bbox. Pre-Colorado this returned EVERY configured county (harris-first),
     // which was right when every county was in one state. With two states it would hand a Texas
     // click nine Colorado servers to try — and, far worse, hand a COLORADO click `harris` as
@@ -572,7 +723,15 @@ export function candidateCountiesForPoint(lat, lng) {
   const statewide = entries
     .filter(([k, c]) => c.statewide && !within.includes(k) && (!c.state || states.size === 0 || states.has(c.state)))
     .map(([k]) => k);
-  return [...within, ...statewide];
+  /* The geometry's county leads even when several boxes matched — this is the Sugar Land case,
+   * where harris and fortbend both contain the point and config order used to hand it to harris.
+   * A geometry answer that is NOT among the bbox matches is still hoisted in front (it is the
+   * correct county; the boxes simply do not reach it), with every bbox candidate kept behind it
+   * so click coverage is never narrowed by this reorder. */
+  const ordered = truth && !within.includes(truth) && COUNTIES_MAP[truth]
+    ? [truth, ...within]
+    : hoist(within);
+  return [...ordered, ...statewide.filter((k) => !ordered.includes(k))];
 }
 
 /* NEW-1 — the JURISDICTION shown for a map POSITION, which is a different question from
@@ -595,6 +754,13 @@ export function candidateCountiesForPoint(lat, lng) {
 export function countyForView(lat, lng) {
   const entries = Object.entries(COUNTIES_MAP).filter(([, c]) => !c.statewide);
   if (!Number.isFinite(lat) || !Number.isFinite(lng) || !entries.length) return "harris";
+  /* B209502 — geometry first. The nearest-CENTER rule below is a real improvement on config order
+   * but it is still not the county line: Conroe's nearest configured center was WALLER and Texas
+   * City's was CHAMBERS, both simply wrong. When the polygon asset is resident and the point falls
+   * in a county Planyr has configured, that IS the jurisdiction — no distance heuristic can
+   * out-argue containment. Everything below stays as the pre-asset / unconfigured-county path. */
+  const truth = geometryCountyKey(lat, lng);
+  if (truth && COUNTIES_MAP[truth] && !COUNTIES_MAP[truth].statewide) return truth;
   const within = entries.filter(([, c]) => { const b = c.bbox; return b && lat >= b[0] && lat <= b[2] && lng >= b[1] && lng <= b[3]; });
   let search = within;
   if (!search.length) {
@@ -615,6 +781,50 @@ export function countyForView(lat, lng) {
     if (d < bestD) { bestD = d; bestKey = k; }
   });
   return bestKey;
+}
+
+/* B209502 (second half) — NAMING THE WRONG COUNTY IS WORSE THAN ADMITTING A GAP.
+ *
+ * The bbox resolvers above always returned SOME configured key, because they had to: a rectangle
+ * test has no way to express "this is a county I have never heard of". So a click in Walker or
+ * Wharton County did not report Walker or Wharton — it reported whichever configured neighbour's
+ * rectangle happened to reach, or plain `harris`. That is the same false-confidence failure as
+ * Pearland, one level out: the app substituted a neighbour rather than admit a gap.
+ *
+ * With real geometry the gap is expressible, so this reports it. Returns:
+ *
+ *   { status: "ok",       key, name, state, nearEdge }   — resolved AND Planyr has a parcel source
+ *   { status: "no-source", key: null, name, state }      — resolved, and there is NO parcel source
+ *                                                          configured for this county. The NAME is
+ *                                                          still correct and must be shown.
+ *   { status: "pending" }                                — geometry not resident yet
+ *   { status: "outside" }                                — not in a state Planyr covers
+ *
+ * The caller's contract for `no-source`: say the county, say there is no parcel data there, and do
+ * NOT fall back to a neighbouring county's CAD. The statewide composite may still paint and answer
+ * a click (it covers all 254 Texas counties) — that is coverage, not a jurisdiction claim, and it
+ * reports its own county in its attributes.
+ *
+ * Pure. */
+export function countyIdentity(lat, lng) {
+  const ans = resolveCounty(lat, lng);
+  if (!ans || ans.status === "pending") return { status: "pending" };
+  if (ans.status !== "ok") return { status: "outside" };
+  const key = countyKeyForName(ans.name, ans.state);
+  if (key && COUNTIES_MAP[key] && !COUNTIES_MAP[key].statewide) {
+    return { status: "ok", key, name: ans.name, state: ans.state, nearEdge: !!ans.nearEdge };
+  }
+  return { status: "no-source", key: null, name: ans.name, state: ans.state, nearEdge: !!ans.nearEdge };
+}
+
+/* The owner-facing sentence for a resolved county with no parcel source, or null when there is
+ * nothing to say. Kept here beside the resolver so the wording cannot drift from the verdict it
+ * describes, and deliberately short (PANEL-BREVITY): the county name is the fact, the absence is
+ * the qualifier. */
+export function noParcelSourceNote(identity) {
+  if (!identity || identity.status !== "no-source") return null;
+  const suffix = identity.state === "CO" ? "" : " County";
+  return `${identity.name}${suffix} — no parcel data wired here yet.`;
 }
 
 // The county keys whose parcel source is the STATEWIDE TxGIO layer (covers all 254
@@ -686,7 +896,13 @@ export function countyKeyForName(name, state = null) {
   if (!name) return null;
   const slug = String(name).toLowerCase().replace(/\bcounty\b/g, "").replace(/\b(city|and|of)\b/g, "").replace(/[^a-z]/g, "");
   const st = state ? String(state).toUpperCase() : null;
-  const candidates = st === "CO" ? [`co_${slug}`] : st === "TX" ? [slug] : [slug];
+  /* B209503 — the one Texas county whose key is not its slug. Austin COUNTY (Bellville / Sealy)
+   * keeps the key `austintx` so the far more common string "Austin" — the city, its ETJ, a TxDOT
+   * district — can never resolve to it by accident. The alias is applied here, in the one place
+   * a display name becomes a key, rather than at each call site. */
+  const TX_ALIAS = { austin: "austintx" };
+  const txSlug = TX_ALIAS[slug] || slug;
+  const candidates = st === "CO" ? [`co_${slug}`] : [txSlug];
   for (const key of candidates) {
     const entry = COUNTIES_MAP[key];
     if (!entry || entry.statewide) continue;
@@ -713,7 +929,16 @@ export const stateForCountyKey = (key) => (COUNTIES_MAP[key] && COUNTIES_MAP[key
 // name can't match a like-named parcel in another county (the Chambers caveat applied
 // to every county that falls back, B244). Click-to-select is a point query and needs no
 // scope (it can only hit one lot).
-const TXGIO_COUNTY_NAME = { harris: "HARRIS", fortbend: "FORT BEND", chambers: "CHAMBERS", waller: "WALLER" };
+/* B209503 — every configured Texas county needs a row here, not just the ones with a CAD, or the
+ * statewide backup silently does not exist for them: `statewideFallbackFor` returns null and a
+ * county whose own server is down degrades to nothing instead of to TxGIO. The five new counties
+ * are added with the spelling TxGIO's own `county` column uses (upper case, spaces not
+ * underscores) — verified against the live layer, which is why FORT BEND is two words. */
+const TXGIO_COUNTY_NAME = {
+  harris: "HARRIS", fortbend: "FORT BEND", chambers: "CHAMBERS", waller: "WALLER",
+  montgomery: "MONTGOMERY", brazoria: "BRAZORIA", galveston: "GALVESTON", liberty: "LIBERTY",
+  austintx: "AUSTIN",
+};
 
 /* NEW-5 — the same idea for Colorado. The state composite scopes on `countyName`, spelled in
  * title case (not TxGIO's upper case), so the two states need their own maps rather than one

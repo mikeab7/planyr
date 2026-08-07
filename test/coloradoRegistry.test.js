@@ -28,7 +28,12 @@ describe("NEW-5 · all nine Colorado counties are registered", () => {
       expect(COUNTIES[k].layerUrl, k).toMatch(/^https:\/\//);
     }
     expect(countyKeysForState("CO")).toHaveLength(9);
-    expect(countyKeysForState("TX")).toEqual(["harris", "fortbend", "chambers", "waller"]);
+    // B209503 grew the Texas side from four counties to nine (the Houston metro is nine counties).
+    // Asserted in full, in config order, because this list IS the click-routing fallback order.
+    expect(countyKeysForState("TX")).toEqual([
+      "harris", "fortbend", "chambers", "waller",
+      "montgomery", "brazoria", "galveston", "liberty", "austintx",
+    ]);
   });
 
   it("uses co_-prefixed keys so the El Paso / Jefferson collisions are impossible", () => {
