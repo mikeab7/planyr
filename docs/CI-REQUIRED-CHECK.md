@@ -185,3 +185,45 @@ prevented six renumbers.
 
 Do not clear a backlog by disabling the required check or merging something whose build has not
 actually passed.
+
+---
+
+## 5. The last trap on the way out — auto-merge freezes the commit message when it is ARMED
+
+**Added 2026-08-07 (B225984), after the very first PR recovered by §4 landed on `main` announcing
+ids that name no heading anywhere.**
+
+PR #931 followed §4 exactly: merged `main` in, took its reserved block, renumbered **once**,
+corrected its commit subject, corrected its PR title, went green, and auto-merged. The squash
+commit on `main`, `fdcb02d`, reads:
+
+```
+Add one pond and the pan gets slow … (B3001/B3002 · B3003 · B3004 · B1449 ×2 — V1501/V1502)
+```
+
+`B3001` was the **third of six** ratchet-era renumbers, abandoned hours earlier. The **files** that
+merged are correct — `### B221760`–`### B221763`, `### V23408`/`### V23409` — so the id space is
+sound and `test/idUniqueness.test.js` is green. Only the line a human reads is wrong.
+
+**Cause: GitHub captures the squash title and body at the moment auto-merge is ARMED, not when it
+fires.** #931 armed auto-merge early, while its ids still read `B3001`. Every later renumber updated
+the branch, the headings, the commit subject and the PR title; none of them touched GitHub's stored
+copy. Proof by elimination — the title at merge time was `B221760/B221761 · B221762 · B221763 —
+V23408/V23409`, and the merged files match it, yet the commit says `B3001`; that string existed in
+exactly one place, the PR title several hours before.
+
+**Remedy, and it is one step: after any PR title change, disable auto-merge and re-enable it.**
+Re-arming re-snapshots the message. Renumbering always changes the title, so this fires precisely on
+the branches §4 sends here.
+
+**Why there is no guard.** `check-mint`'s announcement check (B779) already proves the ids a branch
+*announces* are ids it *filed* — and on #931 it worked, rejecting the stale subject before the push.
+It cannot see this message, because this message never passed through the branch. The obvious
+after-the-fact guard — scan `main`'s log for ids with no heading — needs full history, and
+`actions/checkout` fetches depth 1, so in CI it would scan one commit, pass, and rot into a permanent
+green. That is the failure mode **VIEW-INDEPENDENT-ONCE §6** names. Run by hand once, across all 59
+commits this clone holds, `fdcb02d` is the only offender.
+
+**`B3001`–`B3004` and `V1501`/`V1502` are burned** — they name this work in main's history and must
+never be filed against a different feature. Reserved blocks anchor above main's maximum, so
+`next-id` cannot hand out a number that low; the burn is recorded so the reasoning outlives the tool.
