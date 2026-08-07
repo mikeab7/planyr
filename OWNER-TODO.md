@@ -5,9 +5,9 @@
 > step; tick/remove it once he's done it. This is the **owner's** plate only. Browser click-throughs and
 > signed-in spot-checks are the Claude cohort's job (`VERIFICATION.md`), **never** Michael's — do NOT list those here.
 
-_Last updated: 2026-08-06._
+_Last updated: 2026-08-07._
 
-## ✅ MERGE WHEN YOU'RE READY — both jurisdiction fixes are finished and waiting on one click (B209502–B209509)
+## ✅ CLOSED — both jurisdiction fixes are LIVE, nothing on your end (B209502–B209509)
 
 > **Both of the things you sent today were the same underlying mistake: the app deciding which
 > authority governs a site by what's NEARBY rather than by what the site is actually INSIDE — and then
@@ -29,18 +29,14 @@ _Last updated: 2026-08-06._
 > complete, the panel now says so instead of stating a floor height — which at Bain was worth a foot or
 > two of finished floor on a two-pond site.
 >
-> **The one thing on your end:** the pull request is open as a **draft** (that's the house setting for
-> work I open automatically). Nothing is live until it's marked ready and merged. Everything else is
-> done — it builds, all 8,339 tests pass, and I drove both fixes in a real browser against the live
-> county and city services.
+> **Nothing on your end — this went live late on 2026-08-06.** Every check passed, and I drove both
+> fixes in a real browser against the live county and city services before it merged.
+> → merged as https://github.com/mikeab7/planyr/pull/928
 >
-> **One thing outside anybody's control:** GitHub's own build service stopped picking up jobs for this
-> repo this afternoon — it's accepted nothing since mid-afternoon, on any branch, including work from
-> other sessions. So the green "it builds" tick that normally has to appear before a merge may be
-> missing when you look. It's their outage, not this work: our own hosting built and published this
-> exact branch successfully, and I ran every one of those same checks here first. If the tick is still
-> absent when you go to merge, it'll come back on its own once GitHub recovers.
-> → https://github.com/mikeab7/planyr/pull/928
+> *(For the record, since an earlier version of this note asked you to merge it by hand: GitHub's own
+> build service was down for most of that afternoon, so the tick that has to go green before anything
+> can merge simply never appeared. It came back that evening and this merged on its own.)*
+
 ## 📄 The one thing I need from you: paste a short line into your browser (B209568 / B209569)
 
 > **You were right that nobody had ever measured Bain, and I've now fixed that as far as I can from here.** I built
