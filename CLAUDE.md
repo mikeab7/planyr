@@ -352,6 +352,18 @@ Runtime deps are kept few and deliberate. New client dependency added 2026-07-10
   part of what "commit" already authorized. The only acceptable stop short of live is a
   hard blocker (merge conflict, red required check, protection that rejects the merge) —
   report _that_, not a request for permission.
+- **⛔ AFTER ANY CHANGE TO A PR TITLE — which every renumber causes — DISABLE AND RE-ENABLE
+  AUTO-MERGE. GitHub snapshots the squash commit message when auto-merge is ARMED, not when it
+  fires, and a later title edit does NOT update that frozen copy (B225984, 2026-08-07).** PR #931
+  armed auto-merge while its ids read `B3001–B3004`, was renumbered three more times, merged with
+  a correct title and correct files — and `main` still carries `fdcb02d`, whose subject announces
+  **retired ids that name no heading anywhere**. That is the #865/#866 defect arriving through the
+  one door B779's announcement check cannot see: that check guards the commit **you** push, and
+  this message never passed through your branch. Re-arming is the whole remedy; it costs two API
+  calls. **No machine guard exists for this and one was deliberately not built** — scanning `main`'s
+  log needs full history, and CI checks out depth 1, so the guard would pass trivially and rot green
+  (the failure mode VIEW-INDEPENDENT-ONCE §6 names). The reasoning is on B225984 so it is not
+  re-litigated.
 - **The required `build` check often does NOT auto-start on a PR you open via the GitHub
   MCP / automation — un-stick it yourself with a nudge commit; NEVER hand this to Michael.**
   GitHub suppresses `pull_request`/`push` workflow triggers for PRs opened or pushed by the
