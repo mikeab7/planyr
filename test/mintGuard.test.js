@@ -73,13 +73,20 @@ describe("mintVerdict — the gate's decision (red on an early or stale mint, gr
     expect(v.nextFree).toBe(1144);
   });
 
-  it("RED: the id is held by an UNMERGED peer branch — the window B779 could not see at all", () => {
+  /* ⛔ ADVISORY, NOT RED (B36051, owner decision 2026-08-06, verbatim: *"a number is taken only if
+   * main has it. A guess made from stale information about an unmerged branch is not a collision
+   * and must not fail a build."*). Kept and INVERTED rather than deleted, because the reason is the
+   * point: an unmerged branch has taken nothing — it may be renumbered, rebased or abandoned, and
+   * whoever merges SECOND renumbers. The blocks make an overlap rare in the first place. */
+  it("ADVISORY, not fatal: the id is held by an UNMERGED peer branch — that branch has taken nothing", () => {
     const v = mintVerdict({
       ...base, claimedMax: 1145, added: [1145],
       peerOwners: new Map([[1145, "planyr-peers/claude/other-session"]]),
     });
-    expect(v.ok).toBe(false);
-    expect(v.offenders[0]).toEqual({ id: "B1145", kind: "taken", where: "planyr-peers/claude/other-session" });
+    expect(v.ok).toBe(true);
+    expect(v.offenders).toEqual([]);
+    // Still NAMED — worth knowing about, just never a build failure.
+    expect(v.advisories[0]).toEqual({ id: "B1145", kind: "peer-held", where: "planyr-peers/claude/other-session" });
   });
 
   // NEW-2 (2026-08-06) — this case used to be RED, and that is precisely what took the repository
@@ -106,12 +113,19 @@ describe("mintVerdict — the gate's decision (red on an early or stale mint, gr
     expect(v.advisories).toEqual([]);
   });
 
-  it("a TAKEN id stays fatal even when it sits inside this branch's block", () => {
+  it("an id ON MAIN stays fatal even when it sits inside this branch's block", () => {
     // The strength that matters is unchanged: a proven, present collision still fails the build.
+    // This is now the ONLY fatal case, and it must never soften.
+    const v = mintVerdict({ ...base, added: [1143], block: { lo: 1140, hi: 1155 } });
+    expect(v.ok).toBe(false);
+    expect(v.offenders[0]).toEqual({ id: "B1143", kind: "taken", where: "origin/main" });
+  });
+
+  it("a peer-held id inside the block is still only an advisory", () => {
     const v = mintVerdict({ ...base, added: [1460], block: { lo: 1456, hi: 1471 },
       peerOwners: new Map([[1460, "planyr-peers/claude/other-session"]]) });
-    expect(v.ok).toBe(false);
-    expect(v.offenders[0].kind).toBe("taken");
+    expect(v.ok).toBe(true);
+    expect(v.advisories[0].kind).toBe("peer-held");
   });
 
   it("GAPS ARE LEGAL — B1140 established that skipping numbers costs nothing, so only `> max` is required", () => {
@@ -133,7 +147,8 @@ describe("mintVerdict — the gate's decision (red on an early or stale mint, gr
   });
 
   it("reports EVERY taken offender, in order — a multi-mint dispatch renumbers once, not one id per pass", () => {
-    const v = mintVerdict({ ...base, claimedMax: 1145, added: [1145, 1143, 1146], peerOwners: new Map([[1145, "planyr-peers/claude/other"]]) });
+    const mainIds = new Set([1100, 1143, 1145]);
+    const v = mintVerdict({ ...base, mainIds, claimedMax: 1145, added: [1145, 1143, 1146] });
     expect(v.offenders.map((o) => o.id)).toEqual(["B1143", "B1145"]);
     expect(v.nextFree).toBe(1146);
   });

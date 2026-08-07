@@ -35,6 +35,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { EditorContent, useEditor } from "@tiptap/react";
 import { noteExtensions, EMPTY_DOC } from "../lib/notesExtensions.js";
+import { PASTE_MODES } from "../lib/notesPastePlain.js";
 import { readNoteImages, readPage, writePage } from "../lib/notesStore.js";
 import { docToMarkdown, imageIdsInDoc, safeFileName } from "../lib/notesMarkdown.js";
 import { docToHtml } from "../lib/notesDocHtml.js";
@@ -180,20 +181,201 @@ function FindBar({ term, count, index, onStep, onClear }) {
   );
 }
 
-/* ---- Click and Type: the two constants and the one measurement (see focusFromMat) ------- */
+/* A press within a few pixels of the last line IS that line, not the blank space below it. */
+const BLANK_SLACK = 6;
 
-const BLANK_SLACK = 6;            // a press within a few px of the last line IS that line
-const MAX_CLICK_PARAGRAPHS = 200; // a runaway backstop; a real press is a dozen at most
+/* ⛔ OUR OWN GLYPHS, WORD'S SILHOUETTE LANGUAGE (B36051, amendment 3). The owner asked for
+ * "the same little insignias… it doesn't have to be the exact same one if that's a copyright
+ * issue, but something that shows the exact same thing almost." So these are drawn here, from
+ * scratch — no Microsoft asset is copied — while keeping the shape anyone who has used Word
+ * reads instantly: a clipboard, plus the one mark that says which mode it is.
+ *   Keep source formatting  clipboard + PAINTBRUSH
+ *   Merge formatting        clipboard + two CHEVRONS meeting
+ *   Keep text only          clipboard + a plain letter A
+ * Inline SVG on `currentColor`, at the same 16-box and 1.7 stroke as the toolbar's own. */
+const CLIPBOARD_BODY = (
+  <>
+    <rect x="3.2" y="2.6" width="7.6" height="10.6" rx="1.4" />
+    <path d="M5.6 2.6V2a1 1 0 0 1 1-1h0.8a1 1 0 0 1 1 1v0.6" />
+  </>
+);
 
-/** How far one empty paragraph advances the caret down the page, measured from the REAL
- *  rendered document rather than assumed from the stylesheet — a font-size mark or a user's
- *  browser zoom would make an assumed number wrong in a way nobody would ever notice.
- *  Module scope: it closes over nothing, so re-creating it per render was pure waste. */
-function paragraphStep(dom) {
-  const line = parseFloat(window.getComputedStyle(dom).lineHeight);
-  const probe = dom.querySelector("p");
-  const gap = probe ? (parseFloat(window.getComputedStyle(probe).marginTop) || 0) : 0;
-  return Math.max(12, (Number.isFinite(line) ? line : 24) + gap);
+const PASTE_ICONS = {
+  source: (
+    <>
+      {CLIPBOARD_BODY}
+      <path d="M11.4 8.6c1.3-1.3 2.4-0.6 2.4-0.6s0.7 1.1-0.6 2.4l-1.9 1.9-1.8-1.8z" />
+      <path d="M11.3 12.3l-1.6 2.2 2.2-1.6" />
+    </>
+  ),
+  merge: (
+    <>
+      {CLIPBOARD_BODY}
+      <path d="M10.2 8.2l2 2-2 2" />
+      <path d="M15 8.2l-2 2 2 2" />
+    </>
+  ),
+  text: (
+    <>
+      {CLIPBOARD_BODY}
+      <path d="M10.1 13.4l2.1-5 2.1 5" />
+      <path d="M10.9 11.7h2.6" />
+    </>
+  ),
+};
+
+/** Name + access key, exactly the way Word labels them. */
+export const PASTE_MODE_META = {
+  source: { label: "Keep source formatting", key: "K" },
+  merge: { label: "Merge formatting", key: "M" },
+  text: { label: "Keep text only", key: "T" },
+};
+
+function PasteIcon({ mode }) {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor"
+      strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ display: "block" }}>
+      {PASTE_ICONS[mode]}
+    </svg>
+  );
+}
+
+/** ⛔ WORD'S PASTE-OPTIONS CONTROL, and it is NOT a dialog (house rule) — B36051.
+ *
+ *  A small clipboard BADGE appears at the end of a paste that carried formatting. Clicking it
+ *  — or pressing Ctrl once, which is what Word does — expands the three icon buttons. Picking
+ *  one RE-TRANSFORMS THE JUST-PASTED RANGE IN PLACE, as a single undo step: nothing is
+ *  re-pasted from the clipboard and nothing outside that range is touched.
+ *
+ *  Module scope (MODULE-SCOPE-COMPONENTS): a component declared inside a render body is a new
+ *  type every render, so React would remount it out from under its own click. */
+function PasteOptions({ offer, expanded, onExpand, onPick, onDismiss }) {
+  if (!offer) return null;
+  const box = {
+    position: "absolute", left: Math.max(6, offer.x), top: offer.y + 4, zIndex: 40,
+    display: "flex", alignItems: "center", gap: 3, padding: 3,
+    borderRadius: RADIUS.control, border: "1px solid var(--border-default)",
+    background: "var(--surface-raised)", boxShadow: "0 8px 22px rgba(0,0,0,0.18)",
+  };
+  if (!expanded) {
+    return (
+      <div data-testid="note-paste-options" style={box}>
+        <button
+          type="button"
+          data-testid="note-paste-badge"
+          title="Paste options (Ctrl)"
+          aria-label="Paste options"
+          aria-expanded={false}
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={onExpand}
+          style={{
+            display: "flex", alignItems: "center", gap: 4, padding: "2px 6px",
+            border: "none", borderRadius: RADIUS.control, background: "transparent",
+            color: "var(--text-secondary)", font: "inherit", fontSize: 11, fontWeight: 700, cursor: "pointer",
+          }}
+        >
+          <PasteIcon mode="source" />
+          <span style={{ opacity: 0.7 }}>▾</span>
+        </button>
+      </div>
+    );
+  }
+  return (
+    <div data-testid="note-paste-options" role="group" aria-label="Paste options" style={box}>
+      {PASTE_MODES.map((mode) => (
+        <button
+          key={mode}
+          type="button"
+          data-testid={`note-paste-${mode}`}
+          title={`${PASTE_MODE_META[mode].label} (${PASTE_MODE_META[mode].key})`}
+          aria-label={PASTE_MODE_META[mode].label}
+          aria-keyshortcuts={PASTE_MODE_META[mode].key}
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={() => onPick(mode)}
+          style={{
+            display: "grid", placeItems: "center", width: 26, height: 24,
+            border: "1px solid transparent", borderRadius: RADIUS.control,
+            background: "transparent", color: "var(--text-primary)", cursor: "pointer",
+          }}
+          onMouseEnter={(e) => { e.currentTarget.style.background = "var(--surface-page)"; e.currentTarget.style.borderColor = "var(--border-default)"; }}
+          onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.borderColor = "transparent"; }}
+        >
+          <PasteIcon mode={mode} />
+        </button>
+      ))}
+      <button
+        type="button"
+        data-testid="note-paste-options-dismiss"
+        aria-label="Dismiss"
+        onMouseDown={(e) => e.preventDefault()}
+        onClick={onDismiss}
+        style={{
+          border: "none", background: "transparent", color: "var(--text-tertiary)",
+          font: "inherit", fontSize: 12, padding: "0 4px", cursor: "pointer",
+        }}
+      >✕</button>
+    </div>
+  );
+}
+
+/** The document's own right-click menu — one item, because there is exactly one thing here
+ *  that the keyboard route hides (B36051). Not a dialog, closes on Escape and on an outside
+ *  press, and reachable from the keyboard through the context-menu key like every other
+ *  menu in this module. */
+function DocMenu({ at, onPlainPaste, onClose }) {
+  const ref = useRef(null);
+  /* ⛔ GATED ON `at`. Registered unconditionally, this effect put a CAPTURE-phase Escape
+   * listener on the document that called preventDefault — while the menu was CLOSED. That
+   * silently ate every Escape in the note, which killed the Escape-then-Tab keyboard escape
+   * hatch (B1392) stone dead. The headless run caught it; a hook that fires while its own
+   * component renders nothing is the shape to watch for. */
+  useEffect(() => {
+    if (!at) return undefined;
+    const down = (e) => { if (ref.current && !ref.current.contains(e.target)) onClose(); };
+    const key = (e) => { if (e.key === "Escape") { e.preventDefault(); onClose(); } };
+    document.addEventListener("pointerdown", down, true);
+    document.addEventListener("keydown", key, true);
+    ref.current?.querySelector("button")?.focus();
+    return () => { document.removeEventListener("pointerdown", down, true); document.removeEventListener("keydown", key, true); };
+  }, [at, onClose]);
+  if (!at) return null;
+  return (
+    <div
+      ref={ref}
+      role="menu"
+      data-testid="note-doc-menu"
+      style={{
+        position: "fixed", left: Math.min(at.x, (typeof window !== "undefined" ? window.innerWidth : 1200) - 230),
+        top: at.y, zIndex: 60, minWidth: 214, padding: "5px 0",
+        background: "var(--surface-raised)", border: "1px solid var(--border-default)",
+        borderRadius: RADIUS.control, boxShadow: "0 14px 36px rgba(0,0,0,0.22)",
+        display: "flex", flexDirection: "column",
+      }}
+    >
+      {PASTE_MODES.map((mode) => (
+        <button
+          key={mode}
+          type="button"
+          role="menuitem"
+          data-testid={mode === "text" ? "note-menu-paste-plain" : `note-menu-paste-${mode}`}
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={() => onPlainPaste(mode)}
+          style={{
+            display: "flex", alignItems: "center", gap: 9,
+            width: "100%", padding: "5px 12px", border: "none", background: "transparent",
+            font: "inherit", fontSize: 12.5, fontWeight: 600, color: "var(--text-primary)",
+            textAlign: "left", cursor: "pointer",
+          }}
+        >
+          <PasteIcon mode={mode} />
+          <span style={{ flex: 1 }}>{PASTE_MODE_META[mode].label}</span>
+          <span style={{ color: "var(--text-tertiary)", fontWeight: 600 }}>
+            {mode === "text" ? "Ctrl+Shift+V" : PASTE_MODE_META[mode].key}
+          </span>
+        </button>
+      ))}
+    </div>
+  );
 }
 
 export default function NoteEditor({
@@ -236,8 +418,20 @@ export default function NoteEditor({
     if (ok) onSavedRef.current?.(pending.id);
   }, []);
 
+  /* PASTE JUST THE TEXT (B36051). `pasteOffer` is the last paste that actually CARRIED
+   * formatting: `{ from, to, text, x, y }`, the range plus where to draw the chip. Null the
+   * rest of the time, which is most of the time — an affordance that shows up on every paste
+   * would be its own noise. The default Ctrl+V is untouched; this only watches. */
+  const [pasteOffer, setPasteOffer] = useState(null);
+  const pasteRef = useRef(null);
+  pasteRef.current = pasteOffer;
+
   const extensions = useMemo(
-    () => noteExtensions({ imageContext, onSearchMatches: (m) => setFind(m) }),
+    () => noteExtensions({
+      imageContext,
+      onSearchMatches: (m) => setFind(m),
+      onPasted: ({ from, to, text }) => setPasteOffer({ from, to, text, at: Date.now() }),
+    }),
     [imageContext],
   );
 
@@ -285,95 +479,45 @@ export default function NoteEditor({
     if (searchTerm) editor.commands.stepNoteSearch(0);
   }, [editor, searchTerm]);
 
-  /* ⛔ CLICK AND TYPE — THE CARET LANDS WHERE YOU CLICKED, NOT WHERE THE TEXT ENDS
-   * (B1368 → B1393, and B1393 ×2, which is the one that actually delivers it).
+  /* ⛔ CLICK IN THE BLANK PART OF THE PAGE AND THE CARET GOES THERE — AND NOTHING ELSE
+   * HAPPENS (B1368 → B1393, B1393 ×2, and B1393 ×3 which is the one that got it right).
    *
-   * THE OWNER'S REPORT, verbatim and twice: *"i still cant double click and type somewhere."*
-   * The word that matters is SOMEWHERE. Reproduced on the live build: double-click on a blank
-   * page well down and to the right, type, and the text appears on LINE ONE at the LEFT
-   * MARGIN. Focus moved and the keystroke registered — which is exactly why B1393 and its
-   * harness check passed. **They asserted that the editor took focus and accepted input, and
-   * never asserted WHERE the caret landed.** A test that would pass on the broken build is not
-   * a test; the harness now asserts the resulting POSITION and nothing less.
+   * THE HISTORY, kept because each step was wrong in a way worth not repeating.
+   *   B1393    bound double-click to the mat. The caret took FOCUS but landed at the end of
+   *            the TEXT, so typing appeared on line one. The check asserted focus, not
+   *            placement, so it was green while the owner reported the failure twice.
+   *   B1393 ×2 implemented Word's Click and Type: pad with empty paragraphs to reach the
+   *            press, and take the paragraph's alignment from the horizontal position.
+   *   ⛔ B1393 ×3 REMOVES ALL OF THAT, on the owner's own testing of the shipped build. His
+   *            findings, every one reproduced: the centring meant **the line crawled left as
+   *            he typed**, because each character re-centres the paragraph — you start where
+   *            you clicked and end up somewhere else, and that was the worst of it. The
+   *            alignment was **inherited by the next paragraph on Enter**, with no visible
+   *            cause. The result was **inconsistent** — a press that happened to land on an
+   *            existing empty paragraph produced no alignment at all, so the same gesture
+   *            did different things depending on invisible document state. And the padding
+   *            paragraphs were **permanent**: six `<p><br></p>` in the stored document, in
+   *            the Markdown, on the PDF, and six backspaces to get back through.
    *
-   * ⛔ AUDIT-FIRST — WHY THE OLD CODE COULD NOT HAVE WORKED, whatever it did with focus. The
-   * document element carries `min-height: 46vh`, so on a short note most of the blank sheet is
-   * INSIDE `.ProseMirror`, not below it. The old handler's first guard returned early for
-   * anything inside `.ProseMirror`, so those presses were never handled here at all — the
-   * browser placed the caret at the nearest real text position, which on an empty page is the
-   * end of the only paragraph. The `clientY > box.bottom` branch it did have could only fire
-   * for a press below the 46vh box, and even that called `focus("end")` — the end of the
-   * TEXT, which is the very thing being complained about. Both halves are replaced.
+   * ⛔ SO THE RULE IS NOW ONE SENTENCE, AND IT IS DELIBERATELY BORING: a press in blank
+   * space puts the caret at the nearest real text position and does NOTHING else. No
+   * text-align. No inserted padding. No indentation, no tab characters, no whitespace of any
+   * kind. Horizontal position is deliberately not honoured. Below the last block the caret
+   * goes to the END of the document — creating at most ONE empty paragraph, and only when
+   * the last block is not already empty, which is the ordinary "click below the text to
+   * start a new line" every editor has.
    *
-   * THE FIX IS WORD'S, and deliberately so: the owner asked on day one for the same editing
-   * behaviour as Word and OneNote, so matching Word is the target rather than an invention.
-   * Word's **Click and Type** silently inserts the empty paragraphs needed for the caret to
-   * sit on the line you clicked, and takes the paragraph's ALIGNMENT from where you clicked
-   * across the column. It stays in the DOCUMENT MODEL — paragraphs, not a canvas — which is
-   * what keeps export, print, search and sync working with no new plumbing.
+   * ⛔ AND IT IS DETERMINISTIC, which the padding version was not. `.ProseMirror` carries a
+   * `min-height`, so a large band of blank page is INSIDE the editor element and ProseMirror
+   * maps a press there to whatever position is nearest — which is how the same gesture gave
+   * different answers depending on invisible document state. The min-height STAYS (it is
+   * what makes the sheet look like a page); the mat claims **every press below the last
+   * block** instead, and every one of them resolves to the same place. That is the choice,
+   * made once, here.
    *
-   * THREE RULES, and the third is the one that keeps it honest:
-   *   1. A press BELOW the last block inserts `round(gap / lineStep)` empty paragraphs and
-   *      puts the caret in the last one. Single click and double click do the same thing.
-   *   2. Press past the first third of the column across → `center`; past the second → `right`.
-   *      Left is the default and is never written, so an ordinary press stores nothing.
-   *   3. ⛔ NOTHING IS LEFT BEHIND. Paragraphs made this way are a CLAIM, not a commitment:
-   *      if the user types, the claim is released and they are the user's; if the user clicks
-   *      away, blurs, or leaves the page without typing, they are removed. Word does the same,
-   *      and without it every stray click would fatten the document forever.
-   *
-   * ⛔ AND IT MUST NOT REACH TEXT. A press at or above the content's bottom edge is left
-   * entirely alone inside the document, so double-clicking a WORD still selects that word. */
-  /* The outstanding claim: `{ from, to, docSize }` for paragraphs inserted by a press that
-   * has not been typed into yet. Held in a ref because it is not render state — nothing on
-   * screen depends on it, and re-rendering the editor on every stray click would be worse
-   * than the problem. */
-  const claimRef = useRef(null);
-
-  const dropClaim = useCallback(() => {
-    const c = claimRef.current;
-    claimRef.current = null;
-    if (!c || !editor || editor.isDestroyed) return;
-    const { doc } = editor.state;
-    // Anything at all changed since we made them? Then they are the user's now. Leave them.
-    if (doc.content.size !== c.docSize || c.to > doc.content.size) return;
-    let onlyEmpties = true;
-    doc.nodesBetween(c.from, c.to, (node, pos) => {
-      if (pos < c.from) return true;
-      if (node.type.name !== "paragraph" || node.content.size !== 0) onlyEmpties = false;
-      return false;
-    });
-    if (!onlyEmpties) return;
-    editor.commands.deleteRange({ from: c.from, to: c.to });
-  }, [editor]);
-
-  /* Release the claim the moment the user makes it theirs — by typing (the document changed)
-   * or by putting the caret somewhere else. Registered once, on the editor, so it cannot get
-   * out of step with a React render. */
-  useEffect(() => {
-    if (!editor || editor.isDestroyed) return undefined;
-    const onUpdate = () => {
-      const c = claimRef.current;
-      if (c && editor.state.doc.content.size !== c.docSize) claimRef.current = null;
-    };
-    const onSelection = () => {
-      const c = claimRef.current;
-      if (!c) return;
-      const { from } = editor.state.selection;
-      if (from < c.from || from > c.to) dropClaim();
-    };
-    const onBlur = () => dropClaim();
-    editor.on("update", onUpdate);
-    editor.on("selectionUpdate", onSelection);
-    editor.on("blur", onBlur);
-    return () => {
-      editor.off("update", onUpdate);
-      editor.off("selectionUpdate", onSelection);
-      editor.off("blur", onBlur);
-      dropClaim();          // leaving the page must not leave empty paragraphs on it either
-    };
-  }, [editor, dropClaim]);
-
+   * ⛔ A PRESS ON TEXT IS UNTOUCHED. Double-clicking a word still selects it and typing still
+   * replaces it — the guard returns early for anything at or above the content's bottom
+   * edge. */
   const focusFromMat = useCallback((e) => {
     if (!editor || editor.isDestroyed) return;
     const el = e.target;
@@ -384,13 +528,12 @@ export default function NoteEditor({
     const box = dom.getBoundingClientRect();
     const last = dom.lastElementChild;
     const contentBottom = last ? last.getBoundingClientRect().bottom : box.top;
-    const belowContent = e.clientY > contentBottom + BLANK_SLACK;
 
-    if (!belowContent) {
+    if (e.clientY <= contentBottom + BLANK_SLACK) {
       /* At or beside real content. Inside the document the browser is already right — and
          must stay right, or double-click-to-select-a-word dies. Outside it (left of the
-         column, above the first line) the mat still forwards the press to the nearest
-         position, which is what B1368 was for. */
+         column, above the first line) the mat forwards the press to the nearest position,
+         which is what B1368 was for. */
       if (el.closest(".ProseMirror") || el.closest("[contenteditable]")) return;
       e.preventDefault();
       const left = Math.min(Math.max(e.clientX, box.left + 1), box.right - 1);
@@ -401,34 +544,104 @@ export default function NoteEditor({
       return;
     }
 
-    /* ---- CLICK AND TYPE ---- */
+    /* ---- below the last block: the end of the document, deterministically ---- */
     e.preventDefault();
-    dropClaim();                       // a previous unused claim is not this one's business
-
-    const step = paragraphStep(dom);
-    const gap = e.clientY - contentBottom;
-    const want = Math.min(MAX_CLICK_PARAGRAPHS, Math.max(0, Math.round(gap / step)));
-
-    // Which third of the column was pressed — Word's rule, and the reason the caret can be
-    // centred or right-aligned without ever opening a menu.
-    const width = Math.max(1, box.width);
-    const frac = Math.min(1, Math.max(0, (e.clientX - box.left) / width));
-    const align = frac > 0.68 ? "right" : frac > 0.34 ? "center" : null;
-
-    const before = editor.state.doc.content.size;
-    if (want > 0) {
-      const content = Array.from({ length: want }, () => ({ type: "paragraph" }));
-      editor.chain().focus().insertContentAt(before, content).run();
-    } else {
-      editor.commands.focus("end");
+    const { doc } = editor.state;
+    const lastNode = doc.lastChild;
+    const lastIsEmptyParagraph = !!lastNode && lastNode.type.name === "paragraph" && lastNode.content.size === 0;
+    if (lastIsEmptyParagraph) {
+      editor.commands.focus("end");             // there is already a line to write on
+      return;
     }
-    if (align) editor.commands.setTextAlign(align);
+    // Exactly ONE new line, which is what clicking under the text means everywhere else.
+    editor.chain().focus().insertContentAt(doc.content.size, { type: "paragraph" }).run();
+  }, [editor]);
 
-    const after = editor.state.doc.content.size;
-    if (want > 0 && after > before) {
-      claimRef.current = { from: before, to: after, docSize: after };
+  /* ---- PASTE JUST THE TEXT (B36051) ------------------------------------------------------
+   *
+   * Two routes in, and the DEFAULT PASTE IS UNCHANGED behind both of them. The chip's
+   * position is resolved from the editor's own coordinates at the moment it is shown, so it
+   * lands at the paste point rather than at a remembered mouse position. */
+  const [docMenu, setDocMenu] = useState(null);
+  const [pasteAt, setPasteAt] = useState(null);
+
+  useEffect(() => {
+    if (!pasteOffer || !editor || editor.isDestroyed) { setPasteAt(null); return undefined; }
+    let live = true;
+    try {
+      const coords = editor.view.coordsAtPos(Math.min(pasteOffer.to, editor.state.doc.content.size));
+      const host = editor.view.dom.closest("[data-testid='note-mat']")?.getBoundingClientRect();
+      if (host) setPasteAt({ x: coords.left - host.left, y: coords.bottom - host.top });
+      else setPasteAt(null);
+    } catch (_) { setPasteAt(null); }
+    // Word's chip goes away on its own rather than sitting there for the rest of the session.
+    const t = setTimeout(() => { if (live) setPasteOffer(null); }, 12000);
+    return () => { live = false; clearTimeout(t); };
+  }, [pasteOffer, editor]);
+
+  /* Any further editing retires the offer — its range would be stale, and an option that
+   * would silently act on the wrong text is worse than no option. */
+  useEffect(() => {
+    if (!editor || editor.isDestroyed) return undefined;
+    const retire = () => { if (pasteRef.current) setPasteOffer(null); };
+    editor.on("update", retire);
+    return () => { editor.off("update", retire); };
+  }, [editor]);
+
+  /* ⛔ PICKING A MODE RE-TRANSFORMS THE JUST-PASTED RANGE IN PLACE, as ONE undo step — it
+   * never re-pastes from the clipboard and never touches anything outside that range. */
+  const [pasteExpanded, setPasteExpanded] = useState(false);
+  const applyPasteMode = useCallback((mode) => {
+    const offer = pasteRef.current;
+    setPasteOffer(null);
+    setPasteExpanded(false);
+    if (!offer || !editor || editor.isDestroyed) return;
+    if (mode === "source") return;                       // already what is on the page
+    const to = Math.min(offer.to, editor.state.doc.content.size);
+    if (to <= offer.from) return;
+    if (mode === "text") editor.commands.keepTextOnly({ from: offer.from, to });
+    else editor.commands.mergeFormatting({ from: offer.from, to });
+  }, [editor]);
+
+  /* Ctrl on its own expands the badge — Word's shortcut, and the reason the badge can be a
+   * badge rather than three buttons permanently in the way. */
+  useEffect(() => {
+    if (!pasteOffer) { setPasteExpanded(false); return undefined; }
+    const onKey = (e) => {
+      if (e.key === "Control") { setPasteExpanded(true); return; }
+      if (e.key === "Escape") { setPasteOffer(null); return; }
+      if (!pasteExpanded) return;
+      const hit = PASTE_MODES.find((m) => PASTE_MODE_META[m].key.toLowerCase() === e.key.toLowerCase());
+      if (hit) { e.preventDefault(); applyPasteMode(hit); }
+    };
+    document.addEventListener("keydown", onKey, true);
+    return () => document.removeEventListener("keydown", onKey, true);
+  }, [pasteOffer, pasteExpanded, applyPasteMode]);
+
+  /** Ctrl/Cmd+Shift+V, and the right-click menu's item, land here. LOUD-FAILURE: a browser
+   *  that refuses clipboard access must SAY so and name the shortcut that always works,
+   *  never fail silently and leave him pressing a dead menu item. */
+  const pastePlainFromClipboard = useCallback(async (mode = "text") => {
+    setDocMenu(null);
+    if (!editor || editor.isDestroyed) return;
+    let text = "";
+    try {
+      text = await navigator.clipboard.readText();
+    } catch (_) {
+      onPrintNotice?.("Your browser wouldn't let Planyr read the clipboard from a menu. Press Ctrl+Shift+V (⌘+Shift+V on a Mac) to paste plain text.");
+      return;
     }
-  }, [editor, dropClaim]);
+    if (!text) return;
+    /* From a MENU the clipboard is only readable as text, so "keep source" and "merge" have
+     * nothing extra to keep — say so rather than pretend, and point at the gesture that does
+     * carry the formatting (LOUD-FAILURE). The plain route is the one that works everywhere,
+     * which is why it is the one bound to the shortcut. */
+    if (mode !== "text") {
+      onPrintNotice?.("A browser only hands a menu the plain text of the clipboard. Press Ctrl+V to paste with its formatting, then choose Keep source or Merge from the badge that appears.");
+      return;
+    }
+    editor.commands.insertPlainText(text);
+  }, [editor, onPrintNotice]);
 
   const stepFind = useCallback((d) => {
     if (!editor || editor.isDestroyed) return;
@@ -480,8 +693,29 @@ export default function NoteEditor({
         data-testid="note-mat"
         onMouseDown={focusFromMat}
         onDoubleClick={focusFromMat}
-        style={{ flex: 1, minHeight: 0, overflow: "auto", display: "flex", flexDirection: "column" }}
+        /* Ctrl/Cmd+Shift+V — the shortcut everyone already knows. Caught here rather than in
+           the extension's keymap because the payload is the SYSTEM clipboard, which only the
+           async clipboard API can read; a ProseMirror keybinding cannot await one. */
+        onKeyDown={(e) => {
+          if (!(e.key === "V" || e.key === "v") || !e.shiftKey || !(e.ctrlKey || e.metaKey)) return;
+          e.preventDefault();
+          e.stopPropagation();
+          pastePlainFromClipboard();
+        }}
+        onContextMenu={(e) => {
+          if (!(e.target instanceof Element) || !e.target.closest(".ProseMirror")) return;
+          e.preventDefault();
+          setDocMenu({ x: e.clientX, y: e.clientY });
+        }}
+        style={{ flex: 1, minHeight: 0, overflow: "auto", display: "flex", flexDirection: "column", position: "relative" }}
       >
+        <PasteOptions
+          offer={pasteAt && pasteOffer ? { ...pasteOffer, ...pasteAt } : null}
+          expanded={pasteExpanded}
+          onExpand={() => setPasteExpanded(true)}
+          onPick={applyPasteMode}
+          onDismiss={() => setPasteOffer(null)}
+        />
         {/* A DOCUMENT page (the owner's choice over a free-form canvas): a fixed-width sheet.
             ⛔ IT IS LEFT-ALIGNED, NOT CENTRED (B1369). Centring it read as "my stuff is
             aligned to the right" on a wide monitor: the toolbar spans the pane, the text
@@ -500,6 +734,17 @@ export default function NoteEditor({
               placeholder="Untitled page"
               aria-label="Page title"
               onChange={(e) => onTitleChange?.(e.target.value)}
+              /* ⛔ TAB OUT OF THE TITLE GOES INTO THE PAGE (B1392 ×2). The title is a plain
+                 <input>, so Tab here was the browser's focus key and landed on whatever
+                 control came next — which is exactly the "Chrome grabs it" complaint, on a
+                 surface B1392 never covered. Forward means "start writing"; Shift+Tab is
+                 left alone so the way BACK to the toolbar and the rail still exists. */
+              onKeyDown={(e) => {
+                if (e.key !== "Tab" || e.shiftKey) return;
+                if (!editor || editor.isDestroyed) return;
+                e.preventDefault();
+                editor.commands.focus("start");
+              }}
               style={{
                 flex: 1, minWidth: 0, border: "none", borderBottom: "1px solid transparent",
                 background: "transparent", color: "var(--text-primary)",
@@ -530,6 +775,7 @@ export default function NoteEditor({
           <EditorContent editor={editor} />
         </div>
       </div>
+      <DocMenu at={docMenu} onPlainPaste={pastePlainFromClipboard} onClose={() => setDocMenu(null)} />
     </div>
   );
 }

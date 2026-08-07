@@ -59,10 +59,16 @@ const REPO = resolve(HERE, "..");
  * PURE verdict. `added` = ids this branch introduces; `claimedMax` = the highest id anyone else
  * holds (main ∪ peers); `peerIds` maps an id to the branch already holding it.
  *
- * ONE FATAL FAILURE, and one advisory — a distinction NEW-2 introduced after the old rule took the
+ * ONE FATAL FAILURE, and two advisories — a distinction NEW-2 introduced after the old rule took the
  * whole repository down:
- *   - TAKEN (fatal): the exact id is already on main or on a peer branch → a guaranteed, present
- *     collision. This is the property the gate exists to enforce and it is unchanged.
+ *   - TAKEN (fatal): the exact id is already on **origin/main** → a guaranteed, present collision:
+ *     two headings, one number, the moment this merges. This is the property the gate exists to
+ *     enforce and it is unchanged.
+ *   - PEER-HELD (advisory, B36051): an UNMERGED peer branch holds the id. Owner decision
+ *     2026-08-06, verbatim — *"a number is taken only if main has it. A guess made from stale
+ *     information about an unmerged branch is not a collision and must not fail a build."* That
+ *     branch may be renumbered, rebased or abandoned; whoever merges SECOND renumbers. The blocks
+ *     make an overlap rare in the first place.
  *   - OUTSIDE (advisory): the id is unclaimed, but sits outside this branch's reserved block
  *     (`scripts/idBlocks.mjs`). Worth saying — in-block minting is what keeps concurrent sessions
  *     from ever racing — but it is a hygiene signal, never a merge blocker.
@@ -96,7 +102,14 @@ export function mintVerdict({ letter, added, claimedMax, peerOwners = new Map(),
   const advisories = [];  // reported, never fatal
   for (const n of [...added].sort((a, b) => a - b)) {
     if (mainIds.has(n)) offenders.push({ id: `${letter}${n}`, kind: "taken", where: "origin/main" });
-    else if (peerOwners.has(n)) offenders.push({ id: `${letter}${n}`, kind: "taken", where: peerOwners.get(n) });
+    /* ⛔ A PEER BRANCH HOLDING THE NUMBER IS AN ADVISORY, NOT A FAILURE (B36051, owner decision
+     * 2026-08-06, verbatim: *"a number is taken only if main has it. A guess made from stale
+     * information about an unmerged branch is not a collision and must not fail a build."*).
+     * The blocks below make an overlap rare; when one does happen the peer may still be
+     * renumbered, rebased or abandoned, and whoever merges SECOND renumbers — so failing here
+     * blocks a build on something that has taken nothing. Only `main` can actually take an id,
+     * and that case above stays fatal, untouched. */
+    else if (peerOwners.has(n)) advisories.push({ id: `${letter}${n}`, kind: "peer-held", where: peerOwners.get(n) });
     else if (block && !inBlock(n, block)) {
       advisories.push({ id: `${letter}${n}`, kind: "outside", where: `this branch's block ${letter}${block.lo}–${letter}${block.hi}` });
     }
@@ -295,12 +308,24 @@ function main(argv) {
   const advisories = res.families ? res.families.flatMap((f) => f.advisories || []) : [];
   if (advisories.length && !json) {
     const blocks = res.families.filter((f) => f.block).map((f) => `${f.letter}${f.block.lo}–${f.letter}${f.block.hi}`);
-    process.stderr.write(
-      `\nℹ Mint gate: ${advisories.map((a) => a.id).join(", ")} ${advisories.length > 1 ? "sit" : "sits"} outside this branch's reserved block ` +
-        `(${blocks.join(" · ")}).\n` +
-        `   Unclaimed, so NOT a failure — in-block minting is what keeps two concurrent sessions from\n` +
-        `   ever drawing the same number. Next session: npm run next-id -- --against-main hands out in-block ids.\n`,
-    );
+    const outside = advisories.filter((a) => a.kind === "outside");
+    const peerHeld = advisories.filter((a) => a.kind === "peer-held");
+    if (outside.length) {
+      process.stderr.write(
+        `\nℹ Mint gate: ${outside.map((a) => a.id).join(", ")} ${outside.length > 1 ? "sit" : "sits"} outside this branch's reserved block ` +
+          `(${blocks.join(" · ")}).\n` +
+          `   Unclaimed, so NOT a failure — in-block minting is what keeps two concurrent sessions from\n` +
+          `   ever drawing the same number. Next session: npm run next-id -- --against-main hands out in-block ids.\n`,
+      );
+    }
+    // B36051: a peer holding the number is worth NAMING and never worth failing — only main can take one.
+    for (const a of peerHeld) {
+      process.stderr.write(
+        `\nℹ Mint gate: ${a.id} is also held by ${a.where} (unmerged).\n` +
+          `   NOT a failure — that branch may be renumbered, rebased or abandoned, and whoever merges\n` +
+          `   second renumbers. Only origin/main can actually take a number.\n`,
+      );
+    }
   }
 
   if (res.ok) {

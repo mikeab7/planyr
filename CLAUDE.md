@@ -58,6 +58,12 @@ the always-loaded core. This merges two tracks of work: the mature **Site Planne
 > (it also brings the corrected gate into the branch, so the pre-push hook and CI agree) over an empty
 > `Nudge CI` commit. Resolve the inevitable `BACKLOG.md` conflict by keeping both sides and renumbering
 > nothing.
+> **⚖ AMENDED (B36051, owner decision 2026-08-06): a PEER BRANCH holding your number is an ADVISORY too,
+> not a failure.** Owner, verbatim: *"a number is taken only if main has it. A guess made from stale
+> information about an unmerged branch is not a collision and must not fail a build."* That branch may be
+> renumbered, rebased or abandoned, and whoever merges SECOND renumbers — so the gate NAMES the peer and
+> lets the build through. **`origin/main` already holding the id is now the ONE fatal case**, and it is
+> untouched: two headings, one number, guaranteed the moment you merge.
 >
 > **⏱ LATE-BIND the real number — assign it as the LAST step before you push, against fresh main (B779).**
 > `next-id` reads only YOUR branch, so if you stamp a real `B###`/`V###` at the *start* of a session, a
