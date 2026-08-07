@@ -64,8 +64,11 @@ const DIST = join(HERE, "..", "dist");
  * large rasters, one of them 4.5 megapixels at 55% opacity — is a load the reference plan does not
  * contain at all. A boot measured on a plan with no rasters cannot see a raster's boot cost.
  *
- *   --fixture goose   the reference plan (default; every existing number was taken here)
- *   --fixture bain    ui-audit/fixtures/bain-concept-a.json, WITH both rasters in IndexedDB
+ *   --fixture goose       the reference plan (default; every existing number was taken here)
+ *   --fixture bain        ui-audit/fixtures/bain-concept-original.json — the owner's REAL Bain plan,
+ *                         WITH both rasters in IndexedDB
+ *   --fixture sylvestri   ui-audit/fixtures/sylvestri-concept-d-full.json — his REAL Sylvestri plan:
+ *                         98 elements, NO sheet overlay, and the only plan here carrying annotations
  *
  * ⚠ THE RASTERS ARRIVE BY `storageState`, NOT BY A THROWAWAY NAVIGATION. IndexedDB cannot be seeded
  * before an origin exists, and the obvious fix — load, write, reload — leaves a warm HTTP and V8 code
@@ -77,15 +80,17 @@ const CACHE = join(HERE, ".raster-cache");
 /* ---- The seed ---------------------------------------------------------------------------------
  * The reference plan, plus an optional SAVED LAYER SET.
  *
- * ⚠ WHICH FIXTURE, AND WHY IT IS NOT SYLVESTRI. The item names the owner's Sylvestri / Concept D
- * site. `ui-audit/fixtures/sylvestri-concept-d.json` exists but is an ELEMENTS-ONLY export — 22
- * elements, no parcels, no settings, no origin — so it cannot be opened as a plan at all, let
- * alone exercise the boot path this item is about (no settings means no layer overrides, no origin
- * means no map). The real record lives behind a signed-in session this sandbox cannot reach. The
- * closest fixture that DOES exercise the whole path is the one already of record for every other
- * perf instrument here: `goose-creek-plan1copy.json`, the owner's own plan pulled from production —
- * 62 elements, 6 parcels, 2 ponds, 6 centreline roads, its real 30-key settings. It is a FLOOR on
- * Sylvestri, not a match, and every number below carries that.
+ * ⚠ WHICH FIXTURE — AND THE OLD ANSWER HERE IS NOW WRONG, WHICH IS WHY IT IS CORRECTED RATHER THAN
+ * DELETED. This note used to say Sylvestri could not be opened as a plan: the only file was
+ * `sylvestri-concept-d.json`, an ELEMENTS-ONLY export of 22 elements with no parcels, no settings
+ * and no origin, so every boot number below was taken on `goose-creek-plan1copy.json` and called a
+ * FLOOR on Sylvestri. That is no longer true. `sylvestri-concept-d-full.json` is his complete
+ * plan — 98 elements, 3 parcels, its real settings, its real origin — pulled 2026-08-07 from
+ * `public.sites` JOINED to `public.site_elements`, and `--fixture sylvestri` opens it.
+ *
+ * The 22-element file STAYS and is NOT the same artefact: it is the dock-zone tests' geometry bag,
+ * and three of the ids it drives have since been deleted from the live plan. Neither replaces the
+ * other. Goose Creek also stays, as the control every prior number was taken on.
  *
  * ⚠ AND THE LAYER SET IS AN ARM, because the fixture saves NONE. `defaultOverlayState()`
  * (lib/layers.js) starts every layer OFF and a plan restores only what its own `layerOverrides`
@@ -454,7 +459,8 @@ const browser = await chromium.launch({
 const out = {};
 try {
   if (FIXTURE !== "goose") {
-    const file = FIXTURE === "bain" ? "bain-concept-a.json" : `${FIXTURE}.json`;
+    const FIXTURE_FILES = { bain: "bain-concept-original.json", sylvestri: "sylvestri-concept-d-full.json" };
+    const file = FIXTURE_FILES[FIXTURE] || `${FIXTURE}.json`;
     const fx = JSON.parse(readFileSync(join(HERE, "fixtures", file), "utf8"));
     const built = await buildFixtureState(browser, { base: BASE, fixture: fx, siteId: "boot-tail-fixture", cacheDir: CACHE });
     FIXTURE_STATE = built.state; FIXTURE_FACTS = built.facts;

@@ -8,6 +8,46 @@ He was right, and the answer to the second question was no.
 
 ---
 
+> ## ⛔ SUPERSEDED IN PART, 2026-08-07 — READ THIS BEFORE QUOTING ANY NUMBER BELOW
+>
+> **Every figure in this document was measured on `bain-concept-a.json`, whose element counts were the
+> owner's and whose COORDINATES WERE INVENTED.** §6 said so, and was right to. The real plan has since
+> been pulled from `public.sites` JOINED to `public.site_elements` and committed as
+> `ui-audit/fixtures/bain-concept-original.json`; the synthesised fixture and its generator are DELETED.
+>
+> **What that changed, in one line each — the full account is `docs/PERF-REAL-PLANS.md`:**
+>
+> - The plan is **47 elements, not 53**, in a different mix. Six elements measured here do not exist.
+> - **The sheet overlay is rotated 1.5°.** The synthesis said 0, so **every arm in this document
+>   composited it AXIS-ALIGNED** — all six arms, both batteries, sixty runs. A rotated raster cannot
+>   take an axis-aligned fast path, so that is an untested term in findings 1–3.
+> - **§8 is wrong about the underlay.** It is `fromMap` with a live ArcGIS `export` URL and no `idbKey`
+>   — **fetched, not read out of IndexedDB.** §7 (it is never *painted*) is unaffected and stands.
+> - **§10's lead is confirmed as a fact rather than a suspicion:** the overlay really is page 1 of a
+>   PDF, so B749's up-to-8192 px zoom re-raster is genuinely gated on. It still has never run in an arm.
+> - **§7.3's 304-layer question is ANSWERED, and the answer is that the count was never about the plan:
+>   `layers = leafletTiles + 4`, exactly, on all three real plans and in every arm of both batteries.**
+>   Bain has the fewest elements of the three and the most layers; Sylvestri has more than twice Bain's
+>   elements and 118 fewer. See `docs/PERF-REAL-PLANS.md` §3.
+> - **Two measured results the arms below did not contain**, both at 6/6 paired reps, p = 0.031:
+>   removing the overlay's **rotation** is −10.2% render (−12.6% raster), and removing Sylvestri's
+>   **annotations** is −12.6% render.
+>
+> **What is NOT superseded:** findings 1, 2 and 5 rest on BETWEEN-ARM comparisons in which the geometry
+> was held identical across every arm, so the synthesis is common-mode and cancels. Semi-transparency is
+> still not the mechanism; pixel count is still not the mechanism; main-thread work still cannot tell the
+> two plans apart. The numbers below are kept verbatim rather than restated against the real plan,
+> because a measurement is a historical fact about what was run, and quietly editing one is how a report
+> stops being evidence.
+>
+> ⛔ **ONE CLAUSE IS WITHDRAWN OUTRIGHT.** Finding 4 reads *"roughly half is Bain's own scene: 1,035
+> canvas nodes against 884, and 304 compositor layers against 118."* **The layer count does not belong
+> in that sentence** — it is a basemap-tile-retention difference that would be there with an empty plan.
+> The node count stands. The composite and layerize gaps it was offered as an explanation for are real
+> and are once again unexplained.
+
+---
+
 ## 0. The admission this document exists to make
 
 Every performance number this program has produced came from **Goose Creek**, or from a scene derived
@@ -171,6 +211,47 @@ more data and why it was left alone rather than replaced.
 
 ## 5. The findings
 
+### ⛔ 0. THE RASTER HYPOTHESIS IS RETIRED FOR BAIN — by IDENTITY, not by statistics (2026-08-07)
+
+**Everything below this line is superseded as an explanation of why Bain feels slow.** It is kept
+because the measurements are real and the arms were sound; what changed is that the owner supplied a
+controlled comparison the whole battery could not.
+
+His observation: *"there's a Quiddity site plan on Bain, and then there's the original. And the
+original seems to move a lot faster than the Quiddity one."*
+
+Measured from Supabase, `smr9olizi5ue` (**fast**) and `smshwnnijjfi` (**slow**) carry:
+
+- **the same sheet overlay** — not an equivalent one, **the same file**: same id `e1454614mmzcgq`,
+  same `storageKey`, 1728 × 2592 at opacity 0.55, **rotation 1.5°**, same x/y, same `ftPerPx`;
+- **the same aerial underlay**, 1800 × 1167, `fromMap`, parameter for parameter;
+- **the same origin, the same county, and settings whose md5 matches.**
+
+**A shared cause cannot explain a difference.** One of these plans is fast and one is slow, and the
+overlay is the same object in both. So for this pair the overlay is eliminated — and with it every
+property of the overlay, including the three this document spent sixty runs on:
+
+| hypothesis | how it died |
+|---|---|
+| semi-transparency (finding 1) | already refuted statistically — **now also by identity** |
+| pixel count (finding 2) | already refuted statistically — **now also by identity** |
+| the 1.5° rotation (`docs/PERF-REAL-PLANS.md` §2.2) | **real, 6/6 reps, p = 0.031 — and it cannot be what separates these two, because both carry it** |
+| B749's PDF re-raster on zoom (finding 10) | **eliminated for this pair** — the same PDF, the same `pdfBacked` gate, available to both equally |
+
+⚠ **What is NOT retired.** The rotation arm and its result stand: a rotated raster genuinely costs
+about 12.6% of raster work, and B749's re-raster may still cost on zoom. Both remain true and both
+remain worth fixing. **They are simply not the answer to "why is the Quiddity plan slower than the
+original".** A cost that is present in equal measure on both sides of a comparison cannot produce
+the difference, however real it is on its own.
+
+This is a stronger form of argument than anything else in this document. The paired sign tests below
+need reps, a floor and a p-value; identity needs none of them. It also required no new instrument —
+only reading two rows out of the database and noticing they matched.
+
+**Where the difference actually is:** `docs/PERF-REAL-PLANS.md` §5.
+
+---
+
 ### 1. Semi-transparency is not the mechanism. The hypothesis named first is dead.
 
 Forcing the overlay to **opacity 1.0** — same pixels, same footprint, alpha removed — separates on
@@ -252,6 +333,10 @@ re-registered per frame.
 
 ### ⚠ 10. And one cost this fixture does NOT reproduce, which is a lead rather than a result.
 
+> **⛔ CLOSED FOR THIS PAIR, 2026-08-07 (see finding 0).** Both Bain plans carry the *same* PDF-backed
+> overlay, so this path is available to both equally and cannot be what makes one slower than the
+> other. It survives only as a general zoom-time cost, unmeasured, on its own merits.
+
 His real overlay is **page 1 of a PDF**. B749 re-rasters a PDF-backed overlay at up to 8192 px
 whenever on-screen magnification exceeds ~1.5× its base raster — gated on `overlayDocs.has(id) ||
 storageKey.endsWith(".pdf")`. The fixture's overlay is a bare image with no PDF source, so **that path
@@ -313,9 +398,13 @@ xvfb-run -a --server-args="-screen 0 1600x1000x24" \
 xvfb-run -a --server-args="-screen 0 1600x1000x24" \
   node ui-audit/boot-tail.mjs --fixture bain --fake-tiles --dpr 2
 
-# regenerate the fixture from the measured census (--check fails CI on drift)
-node ui-audit/build-bain-fixture.mjs
+# ⛔ `node ui-audit/build-bain-fixture.mjs` NO LONGER EXISTS. The fixture it generated had invented
+# coordinates, and the byte-identity check that guarded it was green for the fixture's whole life
+# while that was true — a regeneration guard proves a file matches what produced it, and says nothing
+# about whether that thing was making the plan up. Both real plans now come out of Supabase:
+node scripts/plan-dump-to-fixture.mjs <dump.json> ui-audit/fixtures/<name>.json
+# and the guard is the owner's own measured census, asserted in test/realPlanFixtures.test.js.
 
-# the snippet the owner pastes into his own browser
+# the snippet the owner pastes into his own browser (the non-SQL route, unchanged)
 node scripts/extract-plan.mjs
 ```

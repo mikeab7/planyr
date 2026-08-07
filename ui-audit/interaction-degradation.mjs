@@ -54,6 +54,7 @@ import { chromium } from "playwright";
 import { perfScenarioSeed, scenarioShape, SCENARIO_ID } from "./lib/perf-scenario.mjs";
 import { frameSamplingFault, plausibilityFloor, observedFps } from "./lib/frameSampling.mjs";
 import { noiseFloor } from "./lib/longSession.mjs";
+import { waitForSelectorReleased } from "./lib/waitRelease.mjs";
 import { buildGrowthTable, probeValidityFault, axisVerdict, suspects, viewDrift } from "./lib/interactionAxis.mjs";
 import { aggregateSnapshot, diffAggregates, perInteraction } from "./lib/heapSnapshot.mjs";
 import { fakeTilePng, parseTileUrl, decodedMB } from "./lib/fakeTile.mjs";
@@ -518,7 +519,7 @@ async function runArm(browser, { arm, idleBudgetMs }) {
   await cdp.send("LayerTree.enable").catch(() => {});
 
   await page.goto(BASE, { waitUntil: "load" });
-  await page.waitForSelector('[data-testid="planner-canvas"]', { timeout: 60000 });
+  await waitForSelectorReleased(page, '[data-testid="planner-canvas"]', { timeout: 60000 }); // B1439 — never strand the handle
   await page.waitForTimeout(2500); // let the boot's own deferred work land, so it isn't charged to N
 
   const visibility = await page.evaluate(() => document.visibilityState);
