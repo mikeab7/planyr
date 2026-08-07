@@ -49,6 +49,14 @@ export const PLAN_FIELDS = [
 /** Fields that carry the owner's identity or his cloud row, never the plan's shape. */
 export const PRIVATE_FIELDS = ["storageKey", "sourceDwgKey", "rev", "revision", "userId", "user_id", "uid", "ownerId"];
 
+/* Parcel fields that carry the COUNTY APPRAISAL RECORD rather than the parcel's shape: third-party
+ * landowner names, mailing addresses, valuations, legal descriptions. Measured on the owner's own
+ * plans: 5.2 KB of `attrs` across Bain's 5 parcels, 3.1 KB across Sylvestri's 3, with keys like
+ * `OWNER_NAME`, `MAIL_ADDR`, `LAND_VALUE`, `owner_name_1`. NOTHING in any render path reads them —
+ * the outline, the acreage badge and the label all read `points` — so they are pure liability in a
+ * git repository and are stripped by name. */
+export const PARCEL_RECORD_FIELDS = ["attrs", "acct", "addr"];
+
 const num = (v, d = 0) => (Number.isFinite(v) ? v : d);
 const isDataUrl = (s) => typeof s === "string" && s.startsWith("data:");
 
@@ -71,6 +79,13 @@ export function rasterSpecOf(raster, role) {
     rotation: num(raster.rotation),
     locked: !!raster.locked,
     page: raster.page || undefined,
+    pageCount: raster.pageCount || undefined,
+    /* ⛔ CARRIED THROUGH BECAUSE IT GATES A COST PATH, not because it is descriptive metadata.
+     * B749 re-rasters a PDF-backed overlay at up to 8192 px once magnification exceeds ~1.5× its
+     * base raster, gated on `overlayDocs.has(id) || storageKey.endsWith(".pdf")`. A spec that drops
+     * this makes a PDF-backed overlay indistinguishable from a bare image, and the arm measuring it
+     * would silently be measuring the cheaper thing. */
+    pdfBacked: raster.pdfBacked === true || /\.pdf$/i.test(String(raster.storageKey || raster.name || "")) || undefined,
     visible: raster.visible !== false,
     /* Byte length of the stored base64 string, if the extractor could measure it. `null` means
      * "not measured", and the synthesiser reports an untargeted size rather than inventing one. */
@@ -78,7 +93,14 @@ export function rasterSpecOf(raster, role) {
       : (isDataUrl(src) ? src.length : null),
     /* Whether the bytes lived in IndexedDB (the measured Bain path) rather than inline. */
     fromIdb: !!raster.idbKey || raster.fromIdb === true,
-    fromMap: raster.fromMap === true,
+    /* ⛔ EMITTED ONLY WHEN TRUE, like `page` / `pageCount` / `pdfBacked` — because two fixtures of
+     * THE SAME raster must compare equal, and a `false` here against an omitted key there is a
+     * difference in bookkeeping masquerading as a difference in the picture. That matters
+     * concretely: the Bain pair (`bain-concept-original` / `bain-quiddity`) shares one physical PDF
+     * overlay, and the whole force of that pair is that the shared thing is IDENTICAL. `fromIdb` is
+     * deliberately NOT normalised this way — `false` there is a load-bearing claim (the underlay is
+     * fetched from ArcGIS, not read out of IndexedDB) and must stay visible. */
+    fromMap: raster.fromMap === true || undefined,
   };
 }
 
@@ -88,6 +110,44 @@ export const specDecodedBytes = (s) => (s ? Math.max(0, s.imgW) * Math.max(0, s.
 /** On-map footprint in plan feet. Two rasters with the SAME footprint and different pixel counts
  *  are what isolates SIZE from BLENDING, so this is the invariant the `quarter` arm holds. */
 export const specFootprintFt = (s) => (s ? { w: s.imgW * s.ftPerPx, h: s.imgH * (s.ftPerPxY || s.ftPerPx) } : null);
+
+/* ---- SHAPE-PRESERVING TEXT REDACTION ----------------------------------------------------------
+ * ⛔ WHY REPLACING FREE TEXT WITH "Note 3" IS THE WRONG REDACTION FOR A PERF FIXTURE, and why the
+ * right one is not "keep it".
+ *
+ * The owner's real Sylvestri plan carries 16 callouts and they are the most sensitive thing in
+ * either plan — named third parties, who is and is not interested in a deal, and what the
+ * interchanges would cost. None of that belongs in this repository, whatever it would buy.
+ *
+ * But a callout's COST is its text: how many lines it wraps to, how wide the box is, how many text
+ * nodes land on the canvas. Collapsing six lines to "Note 3" deletes exactly the property the
+ * fixture exists to reproduce — the plan would read as 16 cheap callouts when the owner has 16
+ * expensive ones, and NEW-3's annotations-present arm would understate its own effect.
+ *
+ * So the redaction preserves the SHAPE and destroys the CONTENT:
+ *   • line count and per-line length: EXACT
+ *   • whitespace positions: VERBATIM — which makes every word-wrap break land where it really does
+ *   • case and character class: preserved by representative (upper→N, lower→n, digit→0, punct→.)
+ *
+ * ⚠ WHAT IT DOES NOT PRESERVE, said plainly rather than implied: per-glyph advance width. The app
+ * renders in a proportional font, where "WWW" is far wider than "iii", so a redacted line is the
+ * right LENGTH but not, to the pixel, the right WIDTH. Line count, node count and box count — which
+ * is what paint and layout scale with — are exact. Width is approximate, and any claim that rests
+ * on the exact measured width of a callout box must say so.
+ */
+const CLASS_OF = (ch) => (
+  /\s/.test(ch) ? ch
+    : /[A-Z]/.test(ch) ? "N"
+      : /[a-z]/.test(ch) ? "n"
+        : /[0-9]/.test(ch) ? "0"
+          : "."
+);
+
+/** Replace free text with a same-shape stand-in. Idempotent on already-redacted text. */
+export function redactText(text) {
+  if (typeof text !== "string" || !text) return text;
+  return [...text].map(CLASS_OF).join("");
+}
 
 /* ---- Redaction --------------------------------------------------------------------------------
  * Returns { fixture, stripped } — never mutates its input, and never silently removes anything: a
@@ -102,8 +162,18 @@ export function redactPlan(plan, { keepNames = false, note = "" } = {}) {
     const out = Array.isArray(obj) ? [] : {};
     for (const [k, v] of Object.entries(obj)) {
       if (PRIVATE_FIELDS.includes(k)) { if (v != null) strip(`${k} (identity / cloud row)`); continue; }
+      if (PARCEL_RECORD_FIELDS.includes(k)) { if (v != null) strip(`${k} (county appraisal record — third-party owner names, mailing addresses, valuations)`); continue; }
       if (k === "src" && isDataUrl(v)) { strip("raster bytes (src data URLs → rasterSpec)"); continue; }
       if (k === "idbKey") { continue; } // re-derived from the fixture's own site id at load time
+      /* User free text on a markup / easement, shape-redacted rather than dropped — see the long
+       * note above `redactText` for why the SHAPE is the thing worth keeping. `inlineLabel` is
+       * deliberately NOT in this list: those are public infrastructure names ("BAUER HOCKLEY",
+       * "CenterPoint Overhead"), they render along the geometry, and their length is real cost. */
+      if (!keepNames && ["notes", "holder", "recording", "labelOverride"].includes(k) && typeof v === "string" && v) {
+        strip(`${k} (user free text — shape-preserving stand-in)`);
+        out[k] = redactText(v);
+        continue;
+      }
       out[k] = v && typeof v === "object" ? scrub(v) : v;
     }
     return out;
@@ -124,10 +194,10 @@ export function redactPlan(plan, { keepNames = false, note = "" } = {}) {
   const overlays = (plan.sheetOverlays || []).map((o) => rasterSpecOf(o, "sheetOverlay"));
   const underlay = plan.underlay ? rasterSpecOf(plan.underlay, "underlay") : null;
 
-  const callouts = (plan.callouts || []).map((c, i) => {
+  const callouts = (plan.callouts || []).map((c) => {
     if (keepNames || !c.text) return scrub(c);
-    strip("callout text (replaced with a placeholder)");
-    return { ...scrub(c), text: `Note ${i + 1}` };
+    strip("callout text (shape-preserving stand-in: exact line count, per-line length and whitespace positions; content destroyed)");
+    return { ...scrub(c), text: redactText(c.text) };
   });
 
   const fixture = {
@@ -216,13 +286,200 @@ export const RASTER_ARMS = {
   "no-overlay": { title: "sheet overlay hidden, underlay kept", changes: "removes the 4.5 MP semi-transparent layer entirely" },
   "quarter": { title: "both rasters at a quarter of the pixel count", changes: "SIZE only — same footprint, same opacity, one quarter the texture" },
   "no-rasters": { title: "both rasters hidden", changes: "isolates Bain's GEOMETRY from Bain's rasters" },
+  /* ---- NEW-2 -----------------------------------------------------------------------------------
+   * ⛔ THE ARM THAT COULD NOT EXIST UNTIL THE REAL PLAN LANDED, and the reason it matters.
+   *
+   * The owner's sheet overlay is rotated **1.5°**. The synthesised fixture had `rotation: 0`, so
+   * EVERY arm this harness has ever run — all six, both batteries, sixty runs — composited that
+   * raster AXIS-ALIGNED. A rotated raster is a different job for the rasteriser: `renderSheetOverlay`
+   * wraps the `<image>` in `rotate(θ cx cy)`, and an axis-aligned blit (a straight copy, one source
+   * pixel to one destination pixel) is not available under a rotation — every destination pixel has
+   * to be resampled from a neighbourhood.
+   *
+   * So this arm changes ONE thing: the overlay's rotation, 1.5° → 0. Pixel count, `ftPerPx`,
+   * opacity, position and on-map footprint are all held EXACTLY, which is the same invariant
+   * `quarter` holds for size and is unit-tested the same way.
+   *
+   * ⚠ WHAT THE ARM CANNOT HOLD, stated rather than glossed: rotating a rectangle enlarges its
+   * axis-aligned BOUNDING BOX, so the rotated arm covers slightly more screen area. That is not a
+   * confound to be corrected away — it is inherent to the change under test, and given finding 2
+   * (the overlay's cost tracks the AREA IT COVERS) it is a candidate MECHANISM rather than noise.
+   * A separating result must therefore be read as "rotation costs something", not yet as "resampling
+   * costs something"; distinguishing the two needs a third arm and is not claimed here.
+   */
+  "unrotated": { title: "sheet overlay forced to rotation 0", changes: "ROTATION only — 1.5° → 0, same pixels, same ftPerPx, same opacity, same position" },
 };
+
+/* ---- ANNOTATION ARMS (NEW-3) ------------------------------------------------------------------
+ * ⛔ THE AXIS EVERY PLAN THIS PROGRAM HAS MEASURED WAS ZERO ON.
+ *
+ * Bain: 0 markups, 0 measures, 0 callouts, 0 cross-sections. Goose Creek: 0 / 0 / 0 / 0. Both
+ * batteries, every arm, every null result — taken on plans with NO ANNOTATIONS AT ALL. That is the
+ * same structural blindness as the raster one (§0 of docs/PERF-BAIN.md): a plan with no callouts
+ * cannot show a callout's cost, at any sample size, under any statistic.
+ *
+ * Sylvestri is the first plan here that is not zero: **16 callouts, 6 markups, 2 measures** — and
+ * it is the plan the owner described as *"immediately loads super fast, and then literally three
+ * seconds later it's lagging again."*
+ *
+ * ⛔ AND IT IS A CLEAN CONTROL, which is why it is worth more than a second Bain. Sylvestri has NO
+ * SHEET OVERLAY AT ALL. Whatever it shows cannot be charged to a raster, cannot be confused with
+ * blending, and cannot be explained by texture memory — the three hypotheses the Bain battery spent
+ * sixty runs on. Its only raster is the `fromMap` underlay, which the app never paints on a plan
+ * with an origin (see `paintedRasters`), so the arms below differ in annotations and in nothing else.
+ *
+ * The decomposition is per KIND, not one all-or-nothing pair, because the three are different work:
+ * a callout is a text box that must be laid out and wrapped, a markup is a filled polygon, a
+ * measure is two vertices and a label. Collapsing them would report "annotations cost X" and leave
+ * the next question unanswerable.
+ */
+export const ANNOTATION_ARMS = {
+  "sylvestri": { title: "the plan exactly as he has it", changes: "nothing — the measured baseline" },
+  "no-callouts": { title: "the 16 callouts removed", changes: "CALLOUTS only — the text boxes that wrap, measure and collide" },
+  "no-markups": { title: "the 6 markups removed", changes: "MARKUPS only — 4 filled polygons + 2 easement bands" },
+  "no-measures": { title: "the 2 measurements removed", changes: "MEASURES only — the smallest arm, and expected to be null" },
+  "no-annotations": { title: "callouts, markups and measures all removed", changes: "the whole annotation tier at once — the headline pair against the baseline" },
+};
+
+/* ---- THE BAIN PAIR (NEW-2) ---------------------------------------------------------------------
+ * ⛔ THE STRONGEST EXPERIMENT IN THIS PROGRAM, AND IT IS THE OWNER'S, NOT THE HARNESS'S.
+ *
+ * He reported it himself: *"there's a Quiddity site plan on Bain, and then there's the original.
+ * And the original seems to move a lot faster than the Quiddity one."* Two plans, same site, same
+ * account, one fast and one slow.
+ *
+ * Measured from Supabase, `smr9olizi5ue` (fast) and `smshwnnijjfi` (slow) share:
+ *   • the SAME sheet overlay — not an equivalent one, THE SAME ONE: same id `e1454614mmzcgq`, same
+ *     `storageKey` (same PDF file), 1728 × 2592 @ 0.55, rotation 1.5°, same x/y, same ftPerPx;
+ *   • the SAME `fromMap` aerial underlay, 1800 × 1167, byte for byte;
+ *   • the SAME origin, the SAME county, and settings whose md5 matches.
+ *
+ * **A shared cause cannot explain a difference.** That single sentence does more work than the
+ * sixty-run raster battery did: every one of those shared things is eliminated by IDENTITY, which
+ * needs no noise floor, no sign test and no reps. It is not a stronger statistic — it is not a
+ * statistic at all.
+ *
+ * WHAT ACTUALLY DIFFERS, and therefore what the arms below vary:
+ *   • 52 elements vs 47 — five more out of about fifty, with SIX FEWER roads and THREE FEWER parcels
+ *   • 3 pipeline EASEMENTS (18 / 28 / 4 points, widths 50 / 100 / 150, all `restrictsBuildings`) vs 0
+ *   • 2 ponds carrying **68 vertices between them** vs 1 pond carrying **7**
+ *
+ * ⚠ THE ARMS ARE NOT SYMMETRIC AND THAT IS DELIBERATE. `original` is a WHOLE DIFFERENT PLAN — the
+ * natural experiment, with no synthetic change anywhere. The other three are subtractions from the
+ * SLOW plan, each removing exactly one candidate. A subtraction that lands on the fast plan's
+ * timing tells you what the difference was made of.
+ */
+export const BAIN_PAIR_ARMS = {
+  "quiddity": { title: "the SLOW plan, exactly as he has it", changes: "nothing — the baseline, and the half he reports as slow" },
+  "original": { title: "the FAST plan, exactly as he has it", changes: "a different plan entirely — THE NATURAL EXPERIMENT, no synthetic change at all" },
+  "no-easements": { title: "the slow plan minus its 3 pipeline easements", changes: "EASEMENTS only — 50 points of banded geometry removed, everything else held" },
+  "one-pond": { title: "the slow plan minus its second pond", changes: "POND COUNT only — 2 ponds → 1, easements kept" },
+  "unrestricting": { title: "easements drawn but not CONSTRAINING", changes: "restrictsBuildings + restrictsPaving forced false — separates DRAWING an easement from EVALUATING it" },
+  "simple-ponds": { title: "two ponds still, but simple rings", changes: "RING COMPLEXITY only — pond COUNT held at 2, both rings decimated to the fast plan's vertex count, bounding boxes preserved EXACTLY" },
+};
+
+/** Ring vertex count to decimate toward when `original` carries no pond to read one off. */
+const FALLBACK_RING_TARGET = 7;
+
+/**
+ * Decimate a closed ring to `target` vertices while preserving its BOUNDING BOX EXACTLY.
+ *
+ * ⛔ THE BOUNDING-BOX PROPERTY IS THE WHOLE REASON THIS IS NOT PLAIN INDEX SAMPLING. The arm it
+ * serves has to vary vertex count and NOTHING ELSE — and a ring that shrinks has also changed its
+ * painted area, its label-fit question and its overlap with every neighbouring element, which would
+ * hand back three confounds in exchange for removing one. So the four extreme vertices (min-x,
+ * max-x, min-y, max-y) are pinned first and the remainder is filled with evenly-spaced indices.
+ * The result is a coarser polygon of the same extent, in the same place.
+ *
+ * Deterministic: same input, same output, every run. Returns the input unchanged when it is already
+ * at or below `target`, or when `target` is under 4 (below which the extents cannot all be kept).
+ */
+export function decimateRing(points, target) {
+  if (!Array.isArray(points) || target < 4 || points.length <= target) return points;
+  let minX = 0, maxX = 0, minY = 0, maxY = 0;
+  points.forEach((p, i) => {
+    if (p.x < points[minX].x) minX = i;
+    if (p.x > points[maxX].x) maxX = i;
+    if (p.y < points[minY].y) minY = i;
+    if (p.y > points[maxY].y) maxY = i;
+  });
+  const idx = new Set([minX, maxX, minY, maxY]);
+  for (let k = 0; k < target && idx.size < target; k++) {
+    idx.add(Math.round((k * points.length) / target) % points.length);
+  }
+  for (let i = 0; i < points.length && idx.size < target; i++) idx.add(i);
+  return [...idx].sort((a, b) => a - b).map((i) => points[i]);
+}
+
+/**
+ * Apply a Bain-pair arm. `quiddity` is the slow plan, `original` the fast one.
+ *
+ * ⛔ `unrestricting` IS THE ARM THAT CAN DISCRIMINATE, and it is worth saying why before any number
+ * exists. An easement is two things at once: a banded polygon that gets DRAWN, and a constraint
+ * that gets EVALUATED against every building and paving element on the plan. `no-easements` removes
+ * both at once and so cannot tell them apart. This arm removes only the second. If `unrestricting`
+ * separates while `no-easements` does not, the cost is the constraint RELATION — which scales with
+ * easements × elements, not with easements — and no amount of simplifying the drawn band would help.
+ */
+export function bainPairArmFixture(quiddity, original, arm) {
+  if (arm === "original") return original;
+  if (arm === "quiddity") return quiddity;
+  if (arm === "no-easements") return { ...quiddity, markups: [] };
+  if (arm === "one-pond") {
+    /* Drop the LAST pond in z-order, so the arm is deterministic and the remaining pond is the same
+     * one on every run. Everything else — including all three easements — is untouched. */
+    const ponds = (quiddity.els || []).filter((e) => e.type === "pond");
+    const drop = ponds.length > 1 ? ponds[ponds.length - 1].id : null;
+    return drop ? { ...quiddity, els: quiddity.els.filter((e) => e.id !== drop) } : quiddity;
+  }
+  if (arm === "simple-ponds") {
+    /* Hold pond COUNT at two and take the rings down to the fast plan's vertex count. `one-pond`
+     * removed a pond AND 20 vertices in one move, so its −27% cannot say which of the two it
+     * bought; this arm changes only the second. Neither outcome is a product instruction — see the
+     * note on §5.5 in docs/PERF-REAL-PLANS.md. */
+    const target = (original.els || [])
+      .filter((e) => e.type === "pond" && Array.isArray(e.points))
+      .reduce((m, p) => Math.min(m, p.points.length), FALLBACK_RING_TARGET);
+    return {
+      ...quiddity,
+      els: (quiddity.els || []).map((e) => (
+        e.type === "pond" && Array.isArray(e.points)
+          ? { ...e, points: decimateRing(e.points, target) }
+          : e
+      )),
+    };
+  }
+  if (arm === "unrestricting") {
+    return {
+      ...quiddity,
+      markups: (quiddity.markups || []).map((m) => (
+        m.kind === "easement" ? { ...m, restrictsBuildings: false, restrictsPaving: false } : m
+      )),
+    };
+  }
+  return quiddity;
+}
+
+/** Apply an annotation arm. Geometry, parcels, settings and rasters are untouched by every arm. */
+export function annotationArmFixture(fixture, arm) {
+  const drop = {
+    "no-callouts": ["callouts"],
+    "no-markups": ["markups"],
+    "no-measures": ["measures"],
+    "no-annotations": ["callouts", "markups", "measures"],
+  }[arm];
+  if (!drop) return fixture;
+  const out = { ...fixture };
+  for (const k of drop) out[k] = [];
+  return out;
+}
 
 export function armFixture(fixture, arm) {
   const rasters = (fixture.rasters || []).map((r) => {
     if (arm === "opaque") return r.role === "sheetOverlay" ? { ...r, opacity: 1 } : r;
     if (arm === "no-overlay") return r.role === "sheetOverlay" ? { ...r, visible: false } : r;
     if (arm === "no-rasters") return { ...r, visible: false };
+    if (arm === "unrotated") return r.role === "sheetOverlay" ? { ...r, rotation: 0 } : r;
     if (arm === "quarter") {
       /* ⚠ THE FOOTPRINT IS PRESERVED ON THE WIDTH AXIS EXACTLY AND ON THE HEIGHT AXIS TO WITHIN
        * ROUNDING, and the asymmetry is the app's, not a shortcut. `renderSheetOverlay` sizes BOTH
