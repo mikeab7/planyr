@@ -55,12 +55,18 @@ describe("the ring sits just above main and stays readable", () => {
     expect(FLOOR).toBe(1456);
   });
 
-  it("keeps ids four digits — the whole ring spans size × slots above main", () => {
+  it("spans exactly size × slots above main — the width follows main, it is not a promise", () => {
+    // ⚠ B226402: this case used to be titled "keeps ids four digits", which was true against the
+    // 2026-08-06 main max of B1449 pinned above and is false today — main's max is B225,984, so a
+    // live block is six digits. What the ring actually guarantees is its SPAN, which is what is
+    // asserted; digit count is a consequence of main's maximum and never something this file can
+    // hold constant. See the corrected header of scripts/idBlocks.mjs.
     const last = blockAt(DEFAULT_SLOTS - 1, { floor: FLOOR });
     expect(last.hi).toBe(FLOOR + DEFAULT_BLOCK_SIZE * DEFAULT_SLOTS - 1);
-    expect(last.hi).toBeLessThan(10000);
-    // For contrast: the rule this replaces had reached B25005 against a main max of B1449.
-    expect(last.hi).toBeLessThan(25005);
+    expect(last.hi - FLOOR + 1).toBe(DEFAULT_BLOCK_SIZE * DEFAULT_SLOTS);
+    // The span is bounded and does not inflate: against the same main, the rule this replaces had
+    // reached B25005 — more than twice the whole ring — with not one real collision behind it.
+    expect(last.hi - MAIN_MAX_B).toBeLessThan(25005 - MAIN_MAX_B);
   });
 
   it("moves up with main instead of inflating without bound", () => {
