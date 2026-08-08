@@ -119,24 +119,74 @@ export async function rasterizePageHiRes(pdf, pageNum = 1, scale = 2, { knockout
   return { src, imgW: Math.round(base.width), imgH: Math.round(base.height), scale, revoke };
 }
 
+/* ⛔ NEW-1 — THE RE-RASTER SCALE IS QUANTISED TO AN OCTAVE LADDER, AND IT ROUNDS **UP**.
+ *
+ * Measured, on the owner's real Bain overlay (1728 × 2592 pt, both his Bain plans carry the same
+ * file), by ui-audit/zoom-reraster-arms.mjs:
+ *   • one wheel notch is exactly ×1.12 (`SitePlanner.jsx`'s `onWheel`) and the effect kept an
+ *     existing hi-res only while its scale was within 10% — 1.12 > 1.10, so **every notch inside
+ *     the band re-rastered the whole page**, from scratch, on the main thread;
+ *   • each of those is up to 5461 × 8192 px = 44.7 MP = 179 MB of RGBA, and it measured a
+ *     **1,360 ms main-thread long task** — a freeze, on a gesture, on the plan the owner says is
+ *     slow;
+ *   • the identical raster with the PDF backing removed (same pixels, same 0.55 opacity, same 1.5°
+ *     rotation, same zooms) measured a 51 ms worst long task. The cost is this path, not raster
+ *     cost in general.
+ *
+ * The ladder makes the wanted scale DISCRETE — octaves above the base raster, clamped to the
+ * texture cap — so a zoom sweep asks for the same rung over and over instead of a slightly
+ * different scale at every notch, and the caller can simply keep it (`SitePlanner.jsx`'s hi-res
+ * cache). On this overlay the whole band collapses to ONE rung, the cap: crossing the gate costs
+ * one re-raster, and no amount of further zooming costs another.
+ *
+ * ⛔ AND IT ROUNDS UP, WHICH IS WHAT MAKES THIS SAFE TO SHIP AGAINST A ZOOMED-IN SHEET. The
+ * returned scale is >= min(want, cap) — the exact scale the old continuous rule would have picked —
+ * at every zoom, so the drawing is never rendered COARSER than it is today, at any magnification.
+ * That is a proof, not a perceptual judgement, and it is the right bar here: PERCEPTUAL-PARITY's
+ * relaxation is for detail the owner cannot see at working zoom, and a sheet he has deliberately
+ * zoomed into is the opposite case. Pinned by `test/overlayRaster.test.js`, which asserts the
+ * inequality across a dense sweep of zooms and page sizes.
+ */
+export const RERASTER_LADDER = 2;
+
 /* Pure re-raster decision (B749) — given the overlay's current on-screen magnification, pick
- * the device scale to render at. Returns { scale, isHires, magAtBase, capped }. The caller
- * re-rasters only when the ideal scale differs meaningfully from what's loaded, and drops back
- * to the base raster (isHires:false) when zoomed out. Unit-tested; no DOM.
+ * the device scale to render at. Returns { scale, isHires, magAtBase, capped, rung }. The caller
+ * re-rasters only when the chosen RUNG is not one it already holds, and drops back to the base
+ * raster (isHires:false) when zoomed out. Unit-tested; no DOM.
  *   ftPerPx     overlay feet per intrinsic unit (feet per PDF point)
  *   ppf         view pixels per foot
  *   pageMaxPts  the page's longest intrinsic dimension in points
  *   baseScale   the device scale the base raster was rendered at (baseRasterScale)
  */
-export function chooseOverlayRasterScale({ ftPerPx, ppf, pageMaxPts, baseScale, maxDim = MAX_RERASTER_DIM, upgradeAt = RERASTER_UPGRADE_AT }) {
+export function chooseOverlayRasterScale({ ftPerPx, ppf, pageMaxPts, baseScale, maxDim = MAX_RERASTER_DIM, upgradeAt = RERASTER_UPGRADE_AT, ladder = RERASTER_LADDER }) {
   const want = Math.max(1e-9, ftPerPx * ppf);         // raster-px per point to render 1:1 at this zoom
   const bScale = Math.max(1e-9, baseScale);
   const magAtBase = want / bScale;                    // how hard the base raster is being upscaled
-  if (!(magAtBase > upgradeAt)) return { scale: bScale, isHires: false, magAtBase, capped: false };
+  if (!(magAtBase > upgradeAt)) return { scale: bScale, isHires: false, magAtBase, capped: false, rung: 0 };
   const cap = maxDim / Math.max(1, pageMaxPts);       // device scale that fills maxDim on the long edge
-  const scale = Math.max(bScale, Math.min(want, cap));
-  return { scale, isHires: scale > bScale * 1.05, magAtBase, capped: want > cap };
+  const ideal = Math.min(want, cap);                  // what the old continuous rule would have picked
+  // Round UP to the next octave above the base raster, then clamp to the cap. Both steps can only
+  // raise the scale relative to `ideal` (the clamp is a no-op below the cap, and `ideal <= cap`),
+  // which is what keeps the "never coarser than today" inequality true.
+  const k = Math.max(1, Math.ceil(Math.log(ideal / bScale) / Math.log(ladder)));
+  const scale = Math.max(bScale, Math.min(cap, bScale * Math.pow(ladder, k)));
+  return { scale, isHires: scale > bScale * 1.05, magAtBase, capped: want > cap, rung: k };
 }
+
+/* The cache key a chosen rung is held under. Page and knockout are part of it because both change
+ * what the raster DEPICTS — a stale hi-res of page 1 must never be shown for page 2 — and the
+ * scale is rounded so floating-point drift in the ladder arithmetic can't mint a second key for
+ * the same rung. */
+export const overlayRasterKey = (page, knockout, scale) => `${page || 1}:${knockout !== false ? 1 : 0}:${Number(scale).toFixed(4)}`;
+
+/* How many hi-res rungs one overlay may hold at once. The point of caching is that zooming back to
+ * a magnification you have already visited costs NOTHING, and with the ladder above there are only
+ * ever a handful of rungs between the gate and the cap — on the owner's ARCH-D sheet there is
+ * exactly one. Three is therefore generous for the picture and cheap for memory: what is retained
+ * is the ENCODED PNG blob (~3.5 MB for the 8192 px rung), not the decoded texture, which the
+ * compositor allocates only for the raster actually on screen. Least-recently-used is evicted and
+ * its object URL revoked, so this can never grow without bound. */
+export const HIRES_CACHE_PER_OVERLAY = 3;
 
 /* Read an engineer's scale note off a page's text (PDF.js getTextContent) → feet per
  * inch, or null. Tolerant: a scanned / text-less PDF just yields null. */

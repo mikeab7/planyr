@@ -24,7 +24,9 @@ He was right, and the answer to the second question was no.
 > - **§8 is wrong about the underlay.** It is `fromMap` with a live ArcGIS `export` URL and no `idbKey`
 >   — **fetched, not read out of IndexedDB.** §7 (it is never *painted*) is unaffected and stands.
 > - **§10's lead is confirmed as a fact rather than a suspicion:** the overlay really is page 1 of a
->   PDF, so B749's up-to-8192 px zoom re-raster is genuinely gated on. It still has never run in an arm.
+>   PDF, so B749's up-to-8192 px zoom re-raster is genuinely gated on. **⛔ SUPERSEDED 2026-08-08 —
+>   §10 IS NOW MEASURED AND IT IS A FINDING, NOT A LEAD. It cost a 1,738 ms main-thread freeze on the
+>   crossing sweep against 0 ms for the identical raster with the PDF backing removed. See §10.**
 > - **§7.3's 304-layer question is ANSWERED, and the answer is that the count was never about the plan:
 >   `layers = leafletTiles + 4`, exactly, on all three real plans and in every arm of both batteries.**
 >   Bain has the fewest elements of the three and the most layers; Sylvestri has more than twice Bain's
@@ -331,17 +333,53 @@ all) **26 MB**.
 pan the overlay's `x`/`y`/`width`/`height` do not change; the group takes one transform. It is not
 re-registered per frame.
 
-### ⚠ 10. And one cost this fixture does NOT reproduce, which is a lead rather than a result.
+### ✅ 10. The one cost this fixture did not reproduce — NOW MEASURED, and it is the largest single main-thread block this programme has found (B251136, 2026-08-08).
 
-> **⛔ CLOSED FOR THIS PAIR, 2026-08-07 (see finding 0).** Both Bain plans carry the *same* PDF-backed
-> overlay, so this path is available to both equally and cannot be what makes one slower than the
-> other. It survives only as a general zoom-time cost, unmeasured, on its own merits.
+> **⛔ AND A CORRECTION TO HOW THIS SECTION WAS CLOSED.** The 2026-08-07 note read: *"CLOSED FOR THIS
+> PAIR — both Bain plans carry the same PDF-backed overlay, so this path is available to both equally
+> and cannot be what makes one slower than the other."* As an explanation for the DIFFERENCE between
+> the two plans that is correct and it stands. But "cannot explain the difference" is not "does not
+> cost", and the sentence was read as the second for a day. **It costs on both plans**, which is
+> precisely what a difference-based argument is structurally unable to see.
 
 His real overlay is **page 1 of a PDF**. B749 re-rasters a PDF-backed overlay at up to 8192 px
 whenever on-screen magnification exceeds ~1.5× its base raster — gated on `overlayDocs.has(id) ||
-storageKey.endsWith(".pdf")`. The fixture's overlay is a bare image with no PDF source, so **that path
-never ran in any arm here.** It fires on **zoom**, not pan, and it is the obvious next suspect for
-"Bain gets slow when I zoom in." Nothing in this document measures it.
+storageKey.endsWith(".pdf")`. It fires on **zoom**, not pan, and every arm in this document — and in
+`raster-arms.mjs`, `annotation-arms.mjs` and `session-axes.mjs` — PANS. A pan holds `ppf` constant,
+so it cannot cross a magnification gate: sixty-plus runs, and the path never once executed.
+
+It was also **unreachable by construction**, and that is worth more than the excuse: `planFixture.mjs`
+carried `pdfBacked` on the raster spec *specifically because it gates this path*, with a comment
+saying so — and the SEEDER emitted only an `idbKey` (the raster's bytes), never a `storageKey` (the
+source PDF's). The fixture recorded the fact and the seed dropped it.
+
+**Measured by `ui-audit/zoom-reraster-arms.mjs`**, both real plans, 3 reps, four arms, zero faulted
+reps. The gate opens at a MEASURED **0.9375 px/ft** — an ordinary working zoom, not an extreme one —
+and the 8192 px cap is reached at 1.1378. One wheel notch is ×1.12 and the effect retained a hi-res
+only within 10%, so **every notch in the band re-rendered the whole page**:
+
+| arm | re-rasters | peak decoded | longtask max | longtask total | trace decode |
+|---|---|---|---|---|---|
+| bain / **across** | **2** | **179 MB** | **1,738 ms** | 3,347 ms | 7,926 ms |
+| bain / across-image | 0 | — | **0 ms** | 0 ms | 1,463 ms |
+| bain / across-hidden | 0 | — | 0 ms | 0 ms | 1,521 ms |
+| bain / below | 0 | — | 118 ms | 254 ms | 3,973 ms |
+| quiddity / **across** | **2** | **177 MB** | **572 ms** | 2,046 ms | 7,056 ms |
+| quiddity / across-image | 0 | — | 94 ms | 171 ms | 1,520 ms |
+
+**`across-image` is the result.** Same plan, same zoom range, same pixel count, same 0.55 opacity,
+same 1.5° rotation, same footprint — `pdfBacked` removed and nothing else. The cost is this specific
+re-render of the source page, not "a big translucent raster at high zoom".
+
+**And the un-quantised main-thread metric is a NULL here, which is not a null.** 947 / 843 / 677 /
+1,423 ms across the four Bain arms — the arm that does NO re-rastering is the highest of the four,
+because it is measuring how many elements are on screen. The same blindness §0 of this document
+describes for compositing applies to a main-thread block that lives inside one long task: the signal
+that carries this finding is the re-raster COUNT and the LONG TASK, never the frame mean.
+
+Fixed by **B251137** (octave scale ladder + a per-rung cache that survives a zoom-out): the crossing
+sweep costs **one** page render instead of two, and the realistic in-out-in gesture costs one instead
+of 3.5–4.5. The picture is provably never coarser — the ladder rounds UP.
 
 
 ---

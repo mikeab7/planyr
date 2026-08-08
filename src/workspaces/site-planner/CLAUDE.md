@@ -111,6 +111,27 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   other source; `detentionRules.js` owns the district-aware `resolveDrainageContext`.
 - Site-plan overlay import (B72/B73/B747/B748/B749): `overlayPdf.js` (PDF+DXF raster, banded
   white-knockout, zoom-aware re-raster) + `overlayScale.js` (scale/trace math) + `overlayStorage.js`
+  **⛔ B251136/B251137 — `chooseOverlayRasterScale` QUANTISES THE RE-RASTER SCALE TO AN OCTAVE
+  LADDER AND ROUNDS **UP**, and `SitePlanner.jsx` CACHES the rungs. Read both headers before
+  touching either.** Measured on the owner's real Bain overlay (1728 × 2592 pt, both his Bain
+  plans carry the same PDF): a wheel notch is ×1.12 and the old rule retained a hi-res only within
+  10%, so **every notch past the gate re-rendered the whole page** at up to 5461 × 8192 px — 179 MB
+  of RGBA, on the main thread, a **1,738 ms freeze** against **0 ms** for the identical raster with
+  the PDF backing removed. Three things not to undo: **(a)** the ladder rounds UP, so the chosen
+  scale is `>= min(want, cap)` — the exact scale the old continuous rule picked — at every zoom and
+  page size; that inequality is what makes this safe against a sheet the owner has deliberately
+  zoomed into, and it is a PROOF, not a perceptual judgement (PERCEPTUAL-PARITY's relaxation is for
+  detail he *cannot* see, which is the opposite case). **(b)** a zoom-out drops the DISPLAY, never
+  the rung — the old code revoked, and a zoom sweep is out AND back by definition, so every return
+  trip paid the whole render again. The cache holds the ENCODED blob (~3.5 MB), is LRU-bounded per
+  overlay, and is the ONLY owner of an object URL. **(c)** the completion tick that retries a
+  re-raster dropped by `hiresBusy` is GATED on real work having been done — ungated it is an
+  infinite loop for an overlay whose bytes cannot be fetched. Guards, both COUNTS rather than
+  durations: the repo-root `test/` suites **overlayRerasterCount** (which replays the pre-fix rule
+  verbatim as a mutation check) and **rerasterProbe**, plus the ui-audit battery
+  **zoom-reraster-arms** (`npm run perf:reraster`, `--assert` for the per-arm budget). ⚠ The
+  battery needs a Supabase-configured build — with no config the client returns null WITHOUT
+  issuing a request and the whole path dies silently; its `pdfDeliveryFault` refuses such a run.
   (Storage backup) + `dxf/` (worker parse via `dxf-parser` + entity→SVG render + true-units auto-scale)
   + `convertClient.js` (DWG→DXF through the B238 convert service, gated on `VITE_CONVERT_URL`).
   **`overlayOrder.js` (NEW-2) is the ONE draw-order model for placed references** — a two-BAND
