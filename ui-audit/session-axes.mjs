@@ -836,7 +836,11 @@ if (JSON_OUT) { console.log(JSON.stringify(report, null, 2)); process.exit(0); }
 const L = (s = "") => console.log(s);
 L("");
 L("SESSION-SHAPED DEGRADATION — cost as a function of what a work session fills up with (NEW-2)");
-L(`  scenario ${SCENARIO_ID} · ${report.shape.elements} elements · dpr ${DPR} · cpu ×${CPU_THROTTLE} · tiles ${FAKE_TILES ? `fake (${tilesServed} served)` : "BLOCKED (nothing decodes)"}`);
+/* ⛔ NAME THE SCENE THAT WAS ACTUALLY DRIVEN. This line hard-coded `SCENARIO_ID`, so a `--fixture`
+ * run printed "perf-reference-goose-creek" over numbers taken on Bain and Sylvestri — a header
+ * that names the wrong plan is how a real reading gets filed against the wrong scene, which is the
+ * whole defect B246529 exists to close. */
+L(`  scenario ${report.scenario}${FIXTURE ? ` ↔ ${FIXTURE_B}` : ""} · ${report.shape.elements} elements · dpr ${DPR} · cpu ×${CPU_THROTTLE} · tiles ${FAKE_TILES ? `fake (${tilesServed} served)` : "BLOCKED (nothing decodes)"}`);
 L(`  COST METRIC — ${report.costMetric}`);
 L(`  rung-0 work ${workMedian ?? "—"} ms · WORK floor ±${floorPct ?? "—"}% over ${floor.reps} repeats (${floor.min ?? "—"}–${floor.max ?? "—"} ms)`);
 L(`  (for comparison with B1432: rung-0 frame median ${zeroMedian ?? "—"} ms, frame floor ±${frameFloor?.floorPct ?? "—"}%, of which ±${report.quantisationFloorPct ?? "—"}% is 16.7 ms quantisation alone —`);

@@ -167,6 +167,20 @@ sample (A₂)** and has two new verdicts — **`TRANSIENT`** (spiked, then gone:
 would have reported a leak"*) and **`UNSETTLED`** (spiked, and no settle sample was taken, so it
 cannot be called retention at all). A one-sample run can no longer produce the word RETAINED.
 
+**Re-run with the settle sample, the verdict flips and every counter comes home exactly:**
+
+| counter | A₀ | B | A₁ | A₂ (settled) | verdict |
+|---|---:|---:|---:|---:|---|
+| renderer nodes | 2190 | 3784 | **3150 (+43.8%)** | **2089 (−4.6%)** | **transient** |
+| retained heap MB | 17.69 | 18.60 | 18.33 (+3.6%) | 17.84 (+0.8%) | released |
+| event listeners | 1600 | 1233 | 1654 (+3.4%) | **1600 (0%)** | released |
+| document elements | 1692 | 2289 | 1687 | **1692 (0%)** | released |
+| canvas nodes | 600 | 1307 | 600 | **600 (0%)** | released |
+| layout objects | 1391 | 2010 | 1378 | **1391 (0%)** | released |
+
+Four of the six counters return to their **exact** starting value. The overall verdict is
+**`TRANSIENT` — "a single sample here would have reported a leak."**
+
 **Which is to say: the readings that pointed at a plan-switch leak were artifacts twice over** —
 first of the harness's undisposed protocol handle (B1439), and then, after that was fixed, of
 sampling a transient once at the only moment it exists.
