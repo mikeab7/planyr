@@ -24,6 +24,7 @@
  *
  * Both specs drive the real SVG canvas LOGGED OUT (no account) on a seeded-blank site. */
 import { test, expect } from "@playwright/test";
+import { drawAnchoredPond, openPondGroup, pondReleaseInput, POND_GROUP } from "./helpers.js";
 
 const canvas = (p) => p.getByTestId("planner-canvas");
 
@@ -35,43 +36,28 @@ async function startBlank(page) {
 
 let pondCenter = null;
 
-async function drawAndOpenPond(page) {
-  const box = await canvas(page).boundingBox();
-  await page.getByRole("button", { name: "Detention Pond", exact: true }).click();
-  const x1 = box.x + 320, y1 = box.y + 250, x2 = box.x + 560, y2 = box.y + 420;
-  await page.mouse.move(x1, y1);
-  await page.mouse.down();
-  await page.mouse.move(x1 + 60, y1 + 40, { steps: 5 });
-  await page.mouse.move(x2, y2, { steps: 8 });
-  await page.mouse.up();
-  await page.keyboard.press("Escape");
-  const cx = Math.round((x1 + x2) / 2), cy = Math.round((y1 + y2) / 2);
-  pondCenter = { cx, cy };
-  await page.mouse.dblclick(cx, cy);
+/* Anchor the pond (its "Rim" row — `det.tobElev`) so the RATE CONTROL section, which echoes
+ * "Allowable release ≈ N cfs", actually renders; unanchored ponds show only a placeholder. */
+async function drawAnchorAndOpenPond(page, opts = {}) {
+  pondCenter = await drawAnchoredPond(page, opts);
 }
 
+/* Re-open the pond's inspector after a reload, back on the group under test. */
 async function reselectPond(page) {
   await canvas(page).waitFor({ state: "visible", timeout: 10000 });
   await page.mouse.dblclick(pondCenter.cx, pondCenter.cy);
   await page.waitForTimeout(300);
+  await openPondGroup(page, POND_GROUP.outlet);
 }
-
-const fieldInput = (page, labelText) =>
-  page.getByText(labelText, { exact: true }).first().locator("xpath=ancestor::div[1]").locator("input").first();
 
 test.describe("Pond outlet fields — clear + persistence (B901)", () => {
   test("Allowable release (cfs) can be set, then fully CLEARED via select-all + delete", async ({ page }) => {
     const errors = [];
     page.on("pageerror", (e) => errors.push(String(e)));
     await startBlank(page);
-    await drawAndOpenPond(page);
+    await drawAnchorAndOpenPond(page);
 
-    // Anchor the pond (tobElev) so the RATE CONTROL section — which echoes "Allowable release
-    // ≈ N cfs" — actually renders; unanchored ponds show only a placeholder there.
-    await fieldInput(page, "Top-of-bank elev. (ft)").fill("100");
-    await fieldInput(page, "Top-of-bank elev. (ft)").press("Tab");
-
-    const relInput = page.locator('[id^="pond-release-field-"] input').first();
+    const relInput = pondReleaseInput(page);
     await relInput.scrollIntoViewIfNeeded();
     await relInput.fill("15");
     await relInput.press("Tab");
@@ -98,13 +84,9 @@ test.describe("Pond outlet fields — clear + persistence (B901)", () => {
     const errors = [];
     page.on("pageerror", (e) => errors.push(String(e)));
     await startBlank(page);
-    await drawAndOpenPond(page);
+    await drawAnchorAndOpenPond(page, { drainageAcres: 10 });
 
-    await fieldInput(page, "Top-of-bank elev. (ft)").fill("100");
-    await fieldInput(page, "Top-of-bank elev. (ft)").press("Tab");
-    await fieldInput(page, "Drainage area (ac)").fill("10");
-    await fieldInput(page, "Drainage area (ac)").press("Tab");
-    const relInput = page.locator('[id^="pond-release-field-"] input').first();
+    const relInput = pondReleaseInput(page);
     await relInput.fill("15");
     await relInput.press("Tab");
 

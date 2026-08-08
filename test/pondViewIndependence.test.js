@@ -169,15 +169,46 @@ describe("B227888 · per-vertex cost stays inside a stated bound", () => {
     /* Cost is bounded against a ring with 16× the vertices and an identical shape. The bound is
      * generous on purpose: it exists to catch a CLASS CHANGE (an O(n²) scan arriving on this path),
      * not to police a few per cent, and a tight bound on a shared CI box would be flaky rather
-     * than informative. Measured at ~1.75× when this was written. */
-    const time = (r) => {
-      offsetInward(r, 13); // warm — this measures the algorithm, not the memo
+     * than informative. Measured at ~1.75× when this was written.
+     *
+     * ⛔ B267539 — HOW THIS IS SAMPLED IS LOAD-BEARING, and the first cut got it wrong. Each arm
+     * was timed ONCE, over 20 iterations, landing both in the 1–10 ms band where timer noise and
+     * JIT state dominate. Measured on one idle machine, the single-sample ratio spanned
+     * 0.23× … 8.81× against a 6× bound while the TRUE cost ratio was 1.84× — so the test could
+     * fail on perfectly healthy code, and did, on PR #957 (small 1.41 ms, large 17.67 ms).
+     *
+     * Worse, the bound is a function of the baseline: `max(small, 1) × 6` means a baseline that
+     * happens to measure FAST tightens the gate. That is backwards — a lucky-fast baseline should
+     * never make the test harder to pass.
+     *
+     * So both arms are now sampled REPEATEDLY and INTERLEAVED, and each keeps its MINIMUM. Min is
+     * the right statistic for "how fast can this go": a scheduler steal, a GC, or a noisy
+     * neighbour can only ever ADD time, never subtract it, so the minimum is the least
+     * contaminated estimate available and one clean sample out of REPS is enough. Interleaving
+     * stops a machine that drifts during the run from biasing one arm against the other. The
+     * iteration count is raised so each sample sits well clear of timer granularity.
+     *
+     * The ASSERTION is deliberately unchanged — same 6× bound, same meaning. This fixes how the
+     * number is measured, not what is required of it. (The bound's SENSITIVITY is a separate,
+     * pre-existing question recorded on B267539: a light planted O(n²) at this ring size — 12
+     * vertices against 192 — only reaches ~3.4×, because at that size `offsetInward` is dominated
+     * by fixed clipper overhead. Do not read this guard as proof that no quadratic term exists;
+     * read it as proof that none large enough to double the cost class has arrived.) */
+    const ITERS = 60, REPS = 7;
+    const sample = (r) => {
       const t0 = performance.now();
-      for (let i = 0; i < 20; i++) offsetInward(copy(r), 13 + i * 0.001);
+      for (let i = 0; i < ITERS; i++) offsetInward(copy(r), 13 + i * 0.001);
       return performance.now() - t0;
     };
-    const small = time(collinear(RING, 0));
-    const large = time(collinear(RING, 15)); // 16× the vertices, identical polygon
+    const smallRing = collinear(RING, 0);
+    const largeRing = collinear(RING, 15); // 16× the vertices, identical polygon
+    offsetInward(smallRing, 13); // warm both — this measures the algorithm, not the memo
+    offsetInward(largeRing, 13);
+    let small = Infinity, large = Infinity;
+    for (let k = 0; k < REPS; k++) {
+      small = Math.min(small, sample(smallRing));
+      large = Math.min(large, sample(largeRing));
+    }
     expect(large).toBeLessThan(Math.max(small, 1) * 6);
   });
 });

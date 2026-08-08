@@ -199,18 +199,52 @@ describe("the REAL Playwright reporter shape (captured fixture)", () => {
   it("produces exactly the id shape the committed ledger uses", () => {
     const failing = cases.filter((c) => c.status === "failed").map((c) => c.id);
     expect(failing).toEqual([
-      "e2e/pond-outlet-clear.spec.js:63 › Pond outlet fields — clear + persistence (B901) › Allowable release (cfs) can be set, then fully CLEARED via select-all + delete",
-      "e2e/pond-outlet-clear.spec.js:97 › Pond outlet fields — clear + persistence (B901) › proposing then removing an outlet, then reloading, shows NO outlet (local persistence)",
+      "e2e/flood-district-scoping.spec.js:133 › flood & drainage district scoping (B1091(×2)) › the VISIBLE panel carries the zone verdict and the scoping reasons; the hidden copy is inert",
     ]);
+  });
+
+  it("reads a PASSING case too — the status mapping is exercised in both directions", () => {
+    // The original capture held only failures and a skip, so `expected`/`passed` was never seen
+    // by this guard at all. A collector that mislabelled a pass would have gone unnoticed, and
+    // the gate's stale-entry half — the one that makes the ledger shrink — runs entirely on
+    // passes.
+    const passed = cases.filter((c) => c.status === "passed").map((c) => c.id);
+    expect(passed).toContain(
+      "e2e/flood-district-scoping.spec.js:60 › flood & drainage district scoping (B1091(×2)) › at a site inside BKDD, BKDD is listed and HCFCD is the one demoted",
+    );
+  });
+
+  /* B267537 — SHRINK-PROOF. The check below it is the end-to-end one and is the stronger of the
+   * two, but it can only hold while the fixture's failures are still on the ledger. This one
+   * catches B266086's ACTUAL defect — both structural errors produced ids that could never match
+   * the ledger's grammar — without depending on any single row surviving, so it keeps working
+   * after the ledger has shrunk past the capture. */
+  it("every id it produces matches the grammar the ledger is written in", () => {
+    // `.setup.js` as well as `.spec.js`: the auth setup project reports through the same
+    // collector, and a run always carries it. The ledger only ever holds `.spec.js` rows.
+    const GRAMMAR = /^e2e\/[\w.-]+\.(spec|setup)\.js:\d+ › .+/;
+    expect(cases.length).toBeGreaterThan(0); // never vacuously green
+    for (const c of cases) {
+      expect(c.id, `id does not match the ledger's grammar:\n  ${c.id}`).toMatch(GRAMMAR);
+      const titles = c.id.split(" › ").slice(1);
+      expect(titles.some((t) => t.endsWith(".spec.js") || t.endsWith(".setup.js")),
+        `the file title leaked into the chain:\n  ${c.id}`).toBe(false);
+    }
   });
 
   it("those ids are ON the committed local-lane ledger — the end-to-end match", () => {
     // This is the assertion that would have caught the defect. It compares the instrument's own
     // output against the file the instrument is judged by, with nothing hand-written between.
+    //
+    // ⛔ IT IS PINNED TO A MOMENT, AND THAT IS THE POINT OF ITS FAILURE MESSAGE (B267537). The
+    // fixture is frozen; the ledger is designed to SHRINK. When the case captured here is fixed
+    // and removed, this goes red — not because anything regressed, but because the capture has
+    // aged out. The repair is to RE-CAPTURE from a real `--reporter=json` run (B266086's rule:
+    // never hand-write one), NOT to put the fixed row back on the ledger.
     const ledger = JSON.parse(readFileSync(new URL("../e2e/known-red.json", import.meta.url), "utf8"));
     const local = new Set(ledger.entries.filter((e) => e.lane === "local").map((e) => e.id));
     for (const c of cases.filter((c) => c.status === "failed")) {
-      expect(local.has(c.id), `real reporter id is not on the ledger:\n  ${c.id}`).toBe(true);
+      expect(local.has(c.id), `real reporter id is not on the local-lane ledger:\n  ${c.id}\n\nIf this case was just FIXED and removed from e2e/known-red.json, the fixture has aged out — re-capture test/fixtures/playwright-report.sample.json from a real \`npx playwright test --reporter=json\` run against a case that is still red. Do NOT re-add the fixed row to the ledger to make this pass.`).toBe(true);
     }
   });
 

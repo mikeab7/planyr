@@ -19,6 +19,7 @@
  *   (d) Stages can be added and removed by hand (the compound structure is a real editable
  *       list, not a fixed two-slot UI). */
 import { test, expect } from "@playwright/test";
+import { drawAnchoredPond } from "./helpers.js";
 
 const canvas = (p) => p.getByTestId("planner-canvas");
 
@@ -28,36 +29,8 @@ async function startBlank(page) {
   await expect(canvas(page)).toBeVisible();
 }
 
-async function drawAndOpenPond(page) {
-  const box = await canvas(page).boundingBox();
-  await page.getByRole("button", { name: "Detention Pond", exact: true }).click();
-  const x1 = box.x + 320, y1 = box.y + 250, x2 = box.x + 560, y2 = box.y + 420;
-  await page.mouse.move(x1, y1);
-  await page.mouse.down();
-  await page.mouse.move(x1 + 60, y1 + 40, { steps: 5 });
-  await page.mouse.move(x2, y2, { steps: 8 });
-  await page.mouse.up();
-  await page.keyboard.press("Escape");
-  const cx = Math.round((x1 + x2) / 2), cy = Math.round((y1 + y2) / 2);
-  await page.mouse.dblclick(cx, cy);
-}
-
-const fieldInput = (page, labelText) =>
-  page.getByText(labelText, { exact: true }).first().locator("xpath=ancestor::div[1]").locator("input").first();
-
-async function fillField(page, labelText, value) {
-  const input = fieldInput(page, labelText);
-  await input.scrollIntoViewIfNeeded();
-  await input.fill(String(value));
-  await input.press("Tab");
-}
-
-async function anchorAndSize(page, drainageAcres, impervPct = null) {
-  await drawAndOpenPond(page);
-  await fillField(page, "Top-of-bank elev. (ft)", 100);
-  await fillField(page, "Drainage area (ac)", drainageAcres);
-  if (impervPct != null) await fillField(page, "Impervious %", impervPct);
-}
+const anchorAndSize = (page, drainageAcres, impervPct = null) =>
+  drawAnchoredPond(page, { drainageAcres, impervPct });
 
 test.describe("Compound outlet + all-storms-at-once Post ≤ Pre (B903)", () => {
   test("(a) Auto-size produces a genuine multi-stage outlet with an emergency spillway", async ({ page }) => {
@@ -90,13 +63,18 @@ test.describe("Compound outlet + all-storms-at-once Post ≤ Pre (B903)", () => 
     await expect(page.getByText("PEAK WSE", { exact: true })).toBeVisible();
     await expect(page.getByText("STORAGE", { exact: true })).toBeVisible();
 
-    const overallBadge = page.getByText(/PASS — every storm|FAIL/).first();
+    // B954 (af2f8447, PR #766, 2026-07-22) swept the em dash out of every visible panel string
+    // (v3 UI SPEC G2, now guarded by ui-audit/verify-panel-em-dash.mjs): the overall banner reads
+    // "PASS: every storm". Only the punctuation changed — `routed.allPass` still drives it, and
+    // the invariant this test exists for (the banner can never read PASS while a storm row does
+    // not) is asserted below exactly as before.
+    const overallBadge = page.getByText(/PASS: every storm|FAIL/).first();
     await expect(overallBadge).toBeVisible();
     const overallText = await overallBadge.textContent();
 
     const rowChips = await page.getByText(/^(PASS|SHORT|OVERTOPS)$/).allTextContents();
     expect(rowChips.length).toBeGreaterThan(0);
-    if (overallText.includes("PASS — every storm")) {
+    if (overallText.includes("PASS: every storm")) {
       // Every individual storm must also read PASS — no partial hiding.
       expect(rowChips.every((t) => t === "PASS")).toBe(true);
     } else {

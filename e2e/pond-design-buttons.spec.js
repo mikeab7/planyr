@@ -32,7 +32,7 @@ async function startBlank(page) {
 
 async function drawParcel(page) {
   const box = await canvas(page).boundingBox();
-  await page.getByRole("button", { name: "Parcel ▾", exact: true }).click();
+  await page.getByRole("button", { name: "Parcel tools ▾", exact: true }).click();
   await page.getByText("Draw new parcel", { exact: true }).click();
   const pts = [
     [box.x + 80, box.y + 80],

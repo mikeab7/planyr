@@ -16,7 +16,7 @@ async function startBlank(page) {
 
 async function drawParcel(page) {
   const box = await canvas(page).boundingBox();
-  await page.getByRole("button", { name: "Parcel ▾", exact: true }).click();
+  await page.getByRole("button", { name: "Parcel tools ▾", exact: true }).click();
   await page.getByText("Draw new parcel", { exact: true }).click();
   for (const [x, y] of [[80, 80], [700, 80], [700, 500], [80, 500]]) await page.mouse.click(box.x + x, box.y + y);
   await page.getByRole("button", { name: "Finish", exact: false }).first().click();

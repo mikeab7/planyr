@@ -5,6 +5,7 @@
  * that open on click. The engine values (drainage / flood facts) are GIS-gated and unit-tested
  * elsewhere; this is the structure. */
 import { test, expect } from "@playwright/test";
+import { drawAndOpenPond, POND_GROUP } from "./helpers.js";
 
 const canvas = (p) => p.getByTestId("planner-canvas");
 
@@ -14,47 +15,41 @@ async function startBlank(page) {
   await expect(canvas(page)).toBeVisible();
 }
 
-async function drawPond(page) {
-  const box = await canvas(page).boundingBox();
-  await page.getByRole("button", { name: "Detention Pond", exact: true }).click();
-  const x1 = box.x + 320, y1 = box.y + 250, x2 = box.x + 560, y2 = box.y + 420;
-  await page.mouse.move(x1, y1);
-  await page.mouse.down();
-  await page.mouse.move(x1 + 60, y1 + 40, { steps: 5 });
-  await page.mouse.move(x2, y2, { steps: 8 });
-  await page.mouse.up();
-  await page.keyboard.press("Escape"); // disarm the draw tool
-  // Click the pond body to select it → its inspector docks open.
-  await page.mouse.click((x1 + x2) / 2, (y1 + y2) / 2);
-}
-
 test.describe("Pond inspector — v3 UI SPEC Part B structure", () => {
   test("inspector renders: DETENTION POND header, Dimensions rows, and four collapsed groups", async ({ page }) => {
     const errors = [];
     page.on("pageerror", (e) => errors.push(String(e)));
     await startBlank(page);
-    await drawPond(page);
+    // B1188 (85f9062b, PR #873, 2026-07-30): a single click SELECTS, a double click OPENS
+    // Properties. This spec used to click once and assert against a docked inspector.
+    await drawAndOpenPond(page);
 
-    // Selecting the pond docks its inspector: the header + subtitle + Dimensions rows.
+    // Opening the pond docks its inspector: the header + subtitle + Dimensions rows.
     await expect(page.getByText("Detention Pond", { exact: true }).first()).toBeVisible();
     await expect(page.getByText("Water area", { exact: true })).toBeVisible();
-    await expect(page.getByText("Holds", { exact: true })).toBeVisible();
+    // B977 (97e3bfbe, PR #787, 2026-07-23 — "label every acreage") renamed this row "Holds" →
+    // "Holds (gross)", the gross tub volume before the flood/tailwater dead-storage split. Its
+    // label span also carries an ⓘ, so match the leading text rather than the whole span.
+    await expect(page.getByText("Holds (gross)", { exact: false }).first()).toBeVisible();
 
-    // The four collapsed groups, closed by default (their bodies hidden).
-    for (const title of ["Sizing & criteria", "Outlet & storms", "Flood & datum", "Appearance"]) {
-      await expect(page.getByRole("button", { name: new RegExp(title, "i") })).toBeVisible();
+    // The four collapsed groups, closed by default (their bodies hidden). B969/B970 (d4595625 /
+    // c105648e, PR #779 / #780, 2026-07-23) renamed the first from "Sizing & criteria" to
+    // "Engineering assumptions" — an engineer-only override section, hence the new name.
+    for (const title of [POND_GROUP.sizing, POND_GROUP.outlet, POND_GROUP.flood, POND_GROUP.appearance]) {
+      await expect(page.getByRole("button", { name: new RegExp(`^${title}`, "i") }).first()).toBeVisible();
     }
 
-    // Open "Sizing & criteria" → its detail (freeboard field) appears; close → hides.
-    const sizing = page.getByRole("button", { name: /Sizing & criteria/i });
+    // Open the engineering group → its detail (freeboard field) appears; close → hides.
+    const sizing = page.getByRole("button", { name: new RegExp(`^${POND_GROUP.sizing}`, "i") }).first();
     await sizing.click();
     await expect(page.getByText("Freeboard (ft)")).toBeVisible();
     await sizing.click();
     await expect(page.getByText("Freeboard (ft)")).toHaveCount(0);
 
     // Open "Appearance" → the Fill/Outline controls (moved from the old Properties section).
-    // (The header's accessible name includes its closed-state summary, so match a substring.)
-    await page.getByRole("button", { name: /Appearance/i }).click();
+    // (A group header's accessible name is "<title> <closed-state summary>", so anchor on the
+    // title rather than matching the whole name.)
+    await page.getByRole("button", { name: new RegExp(`^${POND_GROUP.appearance}`, "i") }).first().click();
     await expect(page.getByText("Fill", { exact: true }).first()).toBeVisible();
     await expect(page.getByText("Outline", { exact: true }).first()).toBeVisible();
 

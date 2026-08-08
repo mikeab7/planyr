@@ -26,40 +26,56 @@
       ]
     },
     {
-      "title": "pond-outlet-clear.spec.js",
-      "file": "pond-outlet-clear.spec.js",
+      "title": "flood-district-scoping.spec.js",
+      "file": "flood-district-scoping.spec.js",
       "suites": [
         {
-          "title": "Pond outlet fields — clear + persistence (B901)",
-          "file": "pond-outlet-clear.spec.js",
+          "title": "flood & drainage district scoping (B1091(×2))",
+          "file": "flood-district-scoping.spec.js",
           "specs": [
             {
-              "title": "Allowable release (cfs) can be set, then fully CLEARED via select-all + delete",
-              "ok": false,
-              "file": "pond-outlet-clear.spec.js",
-              "line": 63,
+              "title": "at a site inside BKDD, BKDD is listed and HCFCD is the one demoted",
+              "ok": true,
+              "file": "flood-district-scoping.spec.js",
+              "line": 60,
               "tests": [
                 {
-                  "status": "unexpected",
+                  "status": "expected",
                   "results": [
                     {
-                      "status": "timedOut"
+                      "status": "passed"
                     }
                   ]
                 }
               ]
             },
             {
-              "title": "proposing then removing an outlet, then reloading, shows NO outlet (local persistence)",
+              "title": "a stale saved county can't flip the governing district",
+              "ok": true,
+              "file": "flood-district-scoping.spec.js",
+              "line": 102,
+              "tests": [
+                {
+                  "status": "expected",
+                  "results": [
+                    {
+                      "status": "passed"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "title": "the VISIBLE panel carries the zone verdict and the scoping reasons; the hidden copy is inert",
               "ok": false,
-              "file": "pond-outlet-clear.spec.js",
-              "line": 97,
+              "file": "flood-district-scoping.spec.js",
+              "line": 133,
               "tests": [
                 {
                   "status": "unexpected",
                   "results": [
                     {
-                      "status": "timedOut"
+                      "status": "failed"
                     }
                   ]
                 }
@@ -71,14 +87,28 @@
     }
   ],
   "$comment": [
-    "CAPTURED FROM A REAL `npx playwright test --reporter=json` RUN (2026-08-08).",
-    "Only the bulky per-result payloads (stdout, errors, attachments) were dropped;",
-    "every structural fact the gate depends on is exactly as Playwright emitted it:",
+    "CAPTURED FROM A REAL `npx playwright test --reporter=json` RUN — a full 361-case local sweep",
+    "on 2026-08-08. Only the bulky per-result payloads (stdout, errors, attachments, durations)",
+    "were dropped; every structural fact the gate depends on is exactly as Playwright emitted it:",
     "  · config.rootDir is the ABSOLUTE testDir, and spec.file is relative to IT;",
     "  · the top-level suite of each file has title === file, and must be skipped or",
-    "    the filename appears twice in the id.",
-    "B266086: the first cut of collectCases() was written against a fixture somebody",
-    "invented and got BOTH of those wrong, so every id it produced missed the ledger.",
-    "A fixture you invented can only confirm what you already believed. This one is real."
+    "    the filename appears twice in the id;",
+    "  · a passing case reports test.status \"expected\" / result.status \"passed\", a failing one",
+    "    \"unexpected\" / \"failed\", and a skipped one \"skipped\".",
+    "B266086: the first cut of collectCases() was written against a fixture somebody invented and",
+    "got the first two wrong, so every id it produced missed the ledger. A fixture you invented can",
+    "only confirm what you already believed. This one is real.",
+    "",
+    "RE-CAPTURED 2026-08-08 BY B267537, and the reason is a defect in how the ORIGINAL was pinned.",
+    "It held two pond-outlet-clear rows, and the end-to-end test asserts every FAILING id here is",
+    "present on the LIVE e2e/known-red.json. B267536 fixed those two cases and removed them from the",
+    "ledger — so the guard went red for the ledger SHRINKING, which is the one thing the ledger",
+    "exists to be able to do. A guard that fails when its subject succeeds creates pressure to leave",
+    "a fixed case listed, which is exactly the amnesty the ledger is designed to prevent.",
+    "This capture deliberately carries PASSING cases as well as a failing one (the original had only",
+    "failures and a skip), so the status mapping is exercised in every direction. Its one failure,",
+    "flood-district-scoping.spec.js:133, is on the local-lane ledger. When THAT is fixed, re-capture",
+    "from a real run rather than editing this file by hand — test/e2eDriftGate.test.js says so in its",
+    "failure message."
   ]
 }
