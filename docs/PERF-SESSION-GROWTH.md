@@ -225,13 +225,19 @@ not yet swept, and pinned through the forced collection by conservative stack sc
 `PERF-PLAN-SWITCH.md` §14 already recorded — "a forced purge drains 2,343 → 1"). It is gone by the
 next checkpoint without anything being asked to release it.
 
-### 6c. The one thing that genuinely accumulates and resets — and it is small and uncorrelated
+### 6c. The one thing that looked like an accumulation — ⚠ CORRECTED BY RUN 2 (§7b), read that first
 
 **Retained heap after a forced collection: 17.06 → 20.48 MB (+20%), fitted as a SLOPE, and the reload
 returns it to 16.85 MB.** That is the *only* candidate in the admissible quadrant with a genuine
 slope rather than a sawtooth. It is also **3.4 MB over six and a half minutes**, and its correlation
-with the cost curve is **r = 0.29** — it does not track cost. It is named here as the honest residue,
-not as a cause; nothing should be shipped against it.
+with the cost curve is **r = 0.29** — it does not track cost.
+
+**⚠ Run 2 refits this same counter as a STEP, not a slope, and run 2 is the cleaner run — see §7b.**
+The rise is a one-time ~+11 MB taken at the **first plan switch** and then flat; run 1's line was that
+step smeared by sawtooth sampling. A step is bounded and does not worsen with time, which is the
+opposite conclusion from a slope. Left in place rather than deleted, because a measurement is a
+historical fact about what was run and because the disagreement between the two fits is itself the
+argument for fitting curves at all.
 
 ### 6d. The tile cap holds — the measurement B1121 said could not be taken here
 
@@ -273,6 +279,69 @@ document elements (1691 → 1693), layout objects (1391 → 1391), origin storag
   turned drawn content **off** (canvas nodes fell 600 → 360 mid-session). Fixed to a cumulative
   enable; **run 2 (§7) is the clean one.** Run 1 is kept in full because a measurement is a historical
   fact about what was run, and because the finding in §6b is unaffected by it.
+
+---
+
+## 7. RUN 2 — the same regime with the layer axis fixed, and it CORRECTS run 1's one positive finding
+
+Same plans, same regime, 391.6 s of driving, 32,117 tiles served. The layer step now **enables**
+cumulatively instead of flipping, so nothing turns drawn content off mid-session. Measured noise
+floor **±12.2%** (wider than run 1's ±6.3% — stated, not smoothed).
+
+| round | work ms | heap MB | retained MB | renderer nodes | canvas nodes | detached≈ | listeners |
+|---:|---:|---:|---:|---:|---:|---:|---:|
+| 0 | 1375.22 | 31.88 | 17.39 | 2303 | 598 | 267 | 1601 |
+| 1 | 1266.31 | 32.38 | 17.89 | 2317 | 598 | 260 | 1607 |
+| 2 ⇄ | 1931.00 | 33.37 | **28.78** | 2223 | 598 | 186 | 1601 |
+| 3 | 1384.68 | 33.67 | 29.07 | 2329 | 598 | 271 | 1607 |
+| 4 ⇄ | 1506.43 | 33.59 | 28.99 | 2224 | 598 | 186 | 1601 |
+| 5 | 1576.22 | 34.08 | 29.48 | 2262 | 598 | 203 | 1607 |
+| 6 ⇄ | 1613.34 | 34.03 | 29.43 | 2280 | 598 | 242 | 1601 |
+| 7 | 1668.84 | 34.33 | 29.73 | 2209 | 598 | 150 | 1607 |
+| 8 ⇄ | 1610.72 | 34.20 | 29.60 | 2280 | 598 | 242 | 1601 |
+| **RELOAD** | **1698.77** | **31.47** | **26.90** | **2231** | **598** | **196** | **1600** |
+
+### 7a. The control now holds exactly, and everything structural is flat
+
+**Canvas nodes sit at 598 for the entire session and after the reload** — the layer-flip confound of
+run 1 is gone. Renderer nodes **2303 → 2280 → 2231** (falling). Event listeners **1601 → 1601 →
+1600**. Document elements 1690 → 1692. Layout objects 1388 → 1388 → 1388. Compositor layers 297
+throughout. Elements drawn 47 throughout. Tiles 291 throughout. Detached≈ is a **SAWTOOTH with no net
+growth** (267 → 242).
+
+### 7b. ⚠ Retained heap is a STEP, not a SLOPE — run 1's one positive finding is CORRECTED
+
+Run 1 fitted retained heap as a **SLOPE** (+20%) and §6c named it "the honest residue". Run 2, on a
+clean layer axis, fits the same counter as a **STEP**: **17.39 → 17.89 → 28.78 at the first plan
+switch, then flat at ~29 MB for the remaining six rounds.** That is a bounded one-time cost — plan
+B's model and rasters, held after the first switch — and it is **not an accumulation**. Run 1's slope
+was the same step, smeared by sawtooth sampling into something that fitted a line.
+
+**Reported as the correction it is rather than by picking the more dramatic of two runs.** It is also
+the exact distinction the classifier exists to make: a step is bounded and does not worsen with time;
+a slope has no ceiling. Getting this backwards would have sent the next session hunting an
+accumulation that is not there — which is what happened four times already in this program.
+
+**And a prediction was contradicted, which is why predictions are scored:** the registry predicted
+retained heap would fully reset on reload; it came back **PARTIAL** (29.60 → 26.90). The run flags it
+`⚠ prediction missed` rather than quietly agreeing with itself.
+
+### 7c. The reload did not help here either — and that is the same null, stated from the other side
+
+The post-reload probe is **1,698.77 ms — the most expensive reading in the run**, above every
+checkpoint including the last. The reload row reads `PERSISTS` for exactly that reason.
+
+This is not a finding about reloads; it is the null again. **There was no session accumulation for a
+reload to undo**, so the reload changed nothing about cost and the residual scatter went the way it
+went. In an environment where the symptom were present, this row is the one that would show it.
+
+### 7d. Where the two runs agree
+
+Cost curve **STEP** in both — a one-time level change after the first round, then flat. `localStorage`
+grows and **PERSISTS** in both (53.3 → 106.8 KB here), correctly `EXCLUDED`. Tiles, compositor
+layers, listeners, observers, rAF, elements drawn: flat in both. Origin storage: flat in both.
+
+**Two independent runs, ~13 minutes of driving between them, and neither contains the symptom.**
 
 ---
 
