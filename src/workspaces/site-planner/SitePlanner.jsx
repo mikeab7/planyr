@@ -9,6 +9,7 @@ import { registerFlush } from "../../app/flushRegistry.js";
 import { createEditorLock } from "../../shared/presence/editorLock.js";
 import { reportClientEvent } from "../../shared/telemetry/clientErrors.js";
 import { notePerfEdit } from "../../shared/telemetry/perfSampling.js";
+import { notePlanContext, noteViewScale, requestPerfCapture } from "../../shared/telemetry/perfRecorderHandle.js";
 import { createElementSync, stableStringify } from "./lib/elementSync.js";
 import { planDelete, shouldHintTypingGuard, TYPING_GUARD_HINT } from "./lib/deletePlan.js";
 import { rowsToModel, KIND_TO_FIELD, foldNeverSyncedLocal, foldJournal, reconcileSeedRows } from "./lib/elementRows.js";
@@ -4165,6 +4166,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
    * undoable action funnels through here already, so this is the cheapest complete count there
    * is. It is a no-op unless the perf instrument is installed (a quarter of page loads). */
   const pushHistory = () => { histRef.current.push(stateRef.current); notePerfEdit(); touchHist(); };
+  /* NEW-1 — the two context axes the always-on performance recorder cannot read off the DOM.
+   * `notePlanContext` is one string compare per plan load (and counts the switches — the axis
+   * B1121 §3 measured as a sawtooth and could not see from outside the app); `noteViewScale` is
+   * keyed on the SCALAR `view.ppf`, never on `view`, per VIEW-INDEPENDENT-ONCE. Both are a single
+   * store into the tiny always-loaded handle module and are no-ops if the recorder never armed. */
+  useEffect(() => { notePlanContext(siteId); }, [siteId]);
+  useEffect(() => { noteViewScale(view.ppf); }, [view.ppf]);
+  /* Transient acknowledgement on the "felt slow" control — LOUD-FAILURE: a press that recorded
+   * nothing must say so rather than look the same as one that worked. */
+  const [slowNote, setSlowNote] = useState(null);
   // B820 — give each freshly-created markup a z that stacks it on TOP of the collection (nextZ), so a
   // newly drawn markup paints above the existing ones now that the markup layer renders in z order
   // (see the [...markups].sort(byZAsc) passes below). Ascending so a multi-markup add (paste, a deed +
@@ -19692,6 +19703,27 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 <button className="gbtn" aria-label="Zoom in" title="Zoom in" style={{ ...zb, borderRadius: 0 }} onClick={() => zoomBy(1.25)}>＋</button>
                 <button className="gbtn" aria-label="Zoom out" title="Zoom out" style={{ ...zb, borderTop: "none", borderRadius: 0 }} onClick={() => zoomBy(1 / 1.25)}>－</button>
                 <button className="gbtn" aria-label="Zoom to fit" title="Zoom to fit" style={{ ...zb, borderTop: "none", borderRadius: 0, fontSize: 14 }} onClick={fit}>⤢</button>
+                {/* NEW-1 — "that felt slow just now". The one signal this whole programme has never
+                    had is the owner's own perception, and it is more authoritative than any
+                    threshold: the symptom has now failed to reproduce twice under instruments we
+                    aimed ourselves. Pressing this keeps the seconds BEFORE the press — which is the
+                    entire reason the recorder holds a ring buffer rather than a start button; by
+                    the time anyone reaches for a control the moment has passed.
+                    PLACEMENT: the smallest addition to chrome that is still one click away while
+                    he is panning — his hand is already here. Deliberately not a menu dive.
+                    The captures are marked owner-reported and stay distinguishable from the ones
+                    the trigger fires on its own. */}
+                <button className="gbtn" data-export="skip" data-testid="report-slow"
+                  aria-label="Report that this felt slow"
+                  title={slowNote === "ok" ? "Recorded — thanks" : slowNote === "fail" ? "Couldn't record it (the recorder isn't running on this page)" : "That felt slow just now — record the last few seconds"}
+                  style={{ ...zb, borderTop: "none", borderRadius: 0, fontSize: 13, color: slowNote === "ok" ? PAL.accent : slowNote === "fail" ? "var(--warn-text)" : PAL.muted }}
+                  onClick={() => {
+                    const ok = requestPerfCapture("manual");
+                    setSlowNote(ok ? "ok" : "fail");
+                    setTimeout(() => setSlowNote(null), 2600);
+                  }}>
+                  {slowNote === "ok" ? "✓" : slowNote === "fail" ? "!" : "◷"}
+                </button>
               </div>
             );
           })()}

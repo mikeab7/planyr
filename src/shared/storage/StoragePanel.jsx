@@ -18,6 +18,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { storageSnapshot, formatBytes, LOCAL_CAP_BYTES } from "./storageCensus.js";
 import { reclaimRefetchable } from "./storageReclaim.js";
+import { perfCaptureSummary, clearPerfCaptures, MAX_CAPTURES } from "../telemetry/perfCaptureStore.js";
 
 const PAL = {
   ink: "var(--text-primary)", muted: "var(--text-secondary)", line: "var(--border-default)",
@@ -67,12 +68,21 @@ export default function StoragePanel() {
   const [snap, setSnap] = useState(null);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
+  const [caps, setCaps] = useState(null);
 
   const load = useCallback(async () => {
     try { setSnap(await storageSnapshot()); }
     catch (_) { setSnap(null); }
+    try { setCaps(await perfCaptureSummary()); }
+    catch (_) { setCaps(null); }
   }, []);
   useEffect(() => { load(); }, [load]);
+
+  const clearCaptures = async () => {
+    setBusy(true);
+    try { const n = await clearPerfCaptures(); setMsg(n ? `Deleted ${n} performance recording${n === 1 ? "" : "s"}.` : "There was nothing to delete."); await load(); }
+    finally { setBusy(false); }
+  };
 
   const clearCache = async () => {
     setBusy(true); setMsg("");
@@ -121,6 +131,32 @@ export default function StoragePanel() {
         pct={idbPct}
         classes={snap.idb.classes}
       />
+
+      {/* Performance recordings (NEW-1). Surfaced here so this class can never grow without being
+          visible — the third clause of TIER-BY-REBUILDABILITY. It is capped at MAX_CAPTURES by the
+          writer, so the number here is a fact about the cap, not a warning. */}
+      {caps && caps.count > 0 && (
+        <section style={{ marginTop: 14 }} data-testid="perf-captures">
+          <div style={head}>Performance recordings</div>
+          <div style={{ ...row, marginTop: 4 }}>
+            <span>{caps.count} of {MAX_CAPTURES} kept{caps.newestAt ? ` · newest ${new Date(caps.newestAt).toLocaleString()}` : ""}</span>
+            <span style={{ fontVariantNumeric: "tabular-nums", color: PAL.muted }}>{formatBytes(caps.bytes)}</span>
+          </div>
+          <div style={note}>
+            Short recordings of how smoothly the app was running — frame timings and counts only, never
+            anything from your drawings. Kept so a slowdown can be looked at afterwards; the oldest is
+            dropped automatically.
+          </div>
+          <button
+            onClick={clearCaptures}
+            disabled={busy}
+            data-testid="clear-perf-captures"
+            style={{ marginTop: 8, padding: "5px 11px", fontSize: 11.5, fontWeight: 700, fontFamily: "inherit", borderRadius: 7, cursor: busy ? "default" : "pointer", border: `1px solid ${PAL.line}`, background: PAL.raised, color: PAL.ink }}
+          >
+            Delete recordings
+          </button>
+        </section>
+      )}
 
       <div style={{ height: 1, background: PAL.line, margin: "14px 0 10px" }} />
       <button

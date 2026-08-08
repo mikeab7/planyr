@@ -113,6 +113,18 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V52208 — B255200: does the recorder actually fire on HIS machine — and if it never does, B1121 closes. `Blocker: auth` `Blocker: real-data`
+
+The recorder is built, unit-tested (47 cases), and both of its guards were driven end to end HERE in a real browser: the hot path costs **0.07 µs a frame** against a stated 2.0 µs bound, the recorder-ON and recorder-OFF median frame times are **identical**, a deliberately induced stall produced **3 auto-captures** off a 16.7 ms baseline, a control arm with no stall produced **0**, and the manual button produced a capture marked owner-reported. Every one of those is mutation-proven — including the NOT-OBSERVING path, which was made to fail on demand.
+
+**What this sandbox cannot do is the only thing that matters now: be his machine, signed in, over a real working session.** Everything above is a synthetic stall on a logged-out page. This item is discharged by one of two outcomes, and BOTH are results:
+
+1. **A capture arrives.** Read it out of `public.client_errors` — `source = 'event:perfcap'`, newest first. Record: the `kind` (auto or manual), `ratio` and `windowMeanMs` against `baselineMs`, `atMs` (how far into the session it fired — his claim is "a minute or two"), and then the counter series: heap, canvas nodes, elements drawn, layers on, panels open, retained tiles, `ppf`, edits, plan switches. **This is the first direct measurement this programme has ever taken of the machine that HAS the symptom** — the counters name where to look, and the frame track shows the shape of the episode rather than its average.
+2. **A week of his normal use and it never trips.** Then, per the stopping rule on B255200, **B1121 closes as FIXED BY #947** — the pond recurrence measured 55,760 ms per pan on Quiddity, which is a complete description of "lagging just to go side to side". Silence from an instrument PROVEN able to fire is evidence, not absence. Check the negative honestly before concluding it: confirm rows are arriving at all (any `event:perfcap` row, or an `event:perfcap-store` row saying the local store was unavailable), and open the plan menu → Storage to see whether any Performance recordings are held on the device.
+
+Also worth one look while there: whether **any** capture ever comes back `note:"no-baseline"` (he never interacted enough in the calibration window for the trigger to arm) or `"baseline-late"`, and whether `plan` is arriving as an `id` or a `hash` — the second says his plan ids are user-typed names, which is the case the sanitiser exists for.
+
+⏳ **LIVE APP (planyr.io), SIGNED IN, HIS OWN MACHINE, OVER A NORMAL WEEK OF WORK** `Blocker: auth` `Blocker: real-data` *(sandbox evidence recorded on B255200; `Cadence: once, after a week of use`)*
 ### V48144 — B251137: the re-raster fix on the owner's OWN Bain plan, signed in, zooming into a truck court. `Blocker: auth` `Blocker: real-data`
 
 **What was proven here, and it is most of it.** The whole path was driven end to end in a real browser on BOTH of his real Bain fixtures (`bain-concept-original`, `bain-quiddity` — the same physical PDF overlay, 1728 × 2592 pt at 0.55 opacity and 1.5° rotation), at his own display density (dpr 2.15) and 1× CPU, with the re-rasters counted at `URL.createObjectURL` and their real pixel dimensions read out of the PNG the app itself produced. Before: 2 full 8192 px page renders on a one-way zoom in, 3.5–4.5 on the realistic in-out-in gesture. After: **1, on every arm, on both plans, on every rep**, with `--assert` green and the controls (`across-image`, `below`) still at zero. `node ui-audit/zoom-reraster-arms.mjs --assert` is the standing gate.

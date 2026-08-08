@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-08-08 @ `e9cde22` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-08-08 @ `ee3108e` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_446 source files mapped._
+_453 source files mapped._
 
 ## infra
 
@@ -219,7 +219,7 @@ _446 source files mapped._
 - **`src/shared/recents/recentDocs.js`** — Library-Home Recent list: local recently-OPENED drawings (not updated_at), per-uid, deduped by id, newest-first, capped at 15
   - _exports_: `listRecents`, `RECENTS_CAP`, `recordOpen`, `removeRecent`
 - **`src/shared/storage/originStore.js`** — Dependency-free read/delete-by-prefix access to the origin's IndexedDB kv store, so shared chrome can census and clear it without importing a workspace module (which hoists the cache into a route chunk)
-  - _exports_: `deleteOriginPrefix`, `originStoreAvailable`, `walkOriginStore`
+  - _exports_: `deleteOriginKey`, `deleteOriginPrefix`, `originStoreAvailable`, `putOriginRecord`, `walkOriginStore`
 - **`src/shared/storage/storageCensus.js`** — Per-tier, per-class storage census: localStorage byte census + navigator.storage.estimate, key→class registry with a declared rehydration source, tier-labelled telemetry facts; the two tiers are never summed
   - _exports_: `censusIndexedDb`, `censusLocalStorage`, `classifyIdbKey`, `classifyLocalKey`, `estimateQuota`, `formatBytes`, `IDB_CLASSES`, `LOCAL_CAP_BYTES`, `LOCAL_CLASSES`, `REBUILD`, `storageSnapshot`, `telemetryFacts`
 - **`src/shared/storage/StoragePanel.jsx`** — "Storage on this device" panel: two separate tier meters (small ~5 MB store vs large IndexedDB quota) with per-class sizes and a safe clear-map-data action; lazily loaded into account Settings and the signed-out gear
@@ -228,10 +228,24 @@ _446 source files mapped._
   - _exports_: `CACHE_CLEARED_EVENT`, `CACHE_IDB_PREFIX`, `reclaimableClasses`, `reclaimLocalStorage`, `reclaimMessage`, `reclaimRefetchable`, `reclaimThenRetry`, `unprovenReclaimables`
 - **`src/shared/telemetry/clientErrors.js`** — Client error+event telemetry: window/rejection/preload sources insert into anon INSERT-only Supabase client_errors with dedup, rate/session caps, tab-id stamping, fail-safe
   - _exports_: `buildErrorRow`, `decideReport`, `DUP_MS`, `errorSignature`, `extractMessage`, `extractStack`, `installClientErrorTelemetry`, `RATE_MAX`, `RATE_WINDOW_MS`, `reportClientError`, `reportClientEvent`, `SESSION_MAX`, `setTelemetryModule`, `TAB_ID`
+- **`src/shared/telemetry/perfCapture.js`** — Builds and encodes a performance capture — the privacy ALLOWLIST (counters/timings/view state only, proved before every send), plan-id sanitisation, frame statistics, and the compact encoder that trims oldest-first to fit one telemetry row.
+  - _exports_: `assertCaptureClean`, `buildCapture`, `CAPTURE_ENUM_KEYS`, `CAPTURE_MAX_CHARS`, `CAPTURE_NUMERIC_KEYS`, `CAPTURE_VERSION`, `decodeFrames`, `encodeCapture`, `encodeFrames`, `frameStats`, `hash32`, `NOTE_VOCAB`, `safePlanId`, `sanitizeAttribution`
+- **`src/shared/telemetry/perfCaptureStore.js`** — The bounded on-device copy of a performance capture — IndexedDB (the LARGE tier, per TIER-BY-REBUILDABILITY), pruned to three on every write, summarised for the storage panel.
+  - _exports_: `CAPTURE_PREFIX`, `clearPerfCaptures`, `listCaptureKeys`, `MAX_CAPTURES`, `perfCaptureSummary`, `readPerfCaptures`, `savePerfCapture`
 - **`src/shared/telemetry/perfInstrument.js`** — Always-on sampled client PERFORMANCE telemetry: longtask + Event Timing/INP observers plus a periodic scene sample (heap, canvas nodes, elements drawn, layers on, panels open, edits since load) through the existing reportClientEvent sink, with its own row ceiling so it can never spend the error budget
   - _exports_: `__resetPerfInstrument`, `buildPerfRow`, `decidePerfSend`, `inpFrom`, `installPerfInstrument`, `isEnrolled`, `notePerfEdit`, `PERF_LONGTASK_MS`, `PERF_MAX_ROWS`, `PERF_MIN_GAP_MS`, `PERF_SAMPLE_MS`, `PERF_SAMPLE_RATE`, `perfSnapshot`, `readScene`
+- **`src/shared/telemetry/perfRecorder.js`** — The always-on performance recorder: interaction-gated frame loop, long-animation-frame observer, periodic scene counters, and the capture path. Lazy-loaded from main.jsx; never on any route’s critical path.
+  - _exports_: `__resetPerfRecorder`, `capture`, `installPerfRecorder`, `RECORDER_DEFAULTS`
+- **`src/shared/telemetry/perfRecorderHandle.js`** — The tiny always-loaded half of the recorder — the kill switch, the bind seam the manual control calls, and the plan/zoom context setters.
+  - _exports_: `__resetPerfHandle`, `bindPerfRecorder`, `notePlanContext`, `noteViewScale`, `perfContext`, `perfRecorderArmed`, `perfRecorderEnabled`, `requestPerfCapture`
+- **`src/shared/telemetry/perfRing.js`** — Preallocated ring buffers for the recorder — frames, long tasks, periodic counters, and a bounded attribution string table. Fixed-arity pushes, written by index, no per-frame allocation.
+  - _exports_: `COUNTER_COLUMNS`, `createCounterRing`, `createFrameRing`, `createStringTable`, `createTaskRing`, `internString`, `pushCounters`, `pushFrame`, `pushTask`, `ringOrder`, `ringOrderSince`, `STRING_TABLE_MAX`
 - **`src/shared/telemetry/perfSampling.js`** — The tiny always-loaded half of the perf instrument: the deterministic per-tab enrolment decision and the undo-path edit counter, split out by TIER so `main.jsx` and `SitePlanner.jsx` never drag the diagnostic onto every route's critical path
   - _exports_: `__resetPerfEdits`, `isEnrolled`, `notePerfEdit`, `PERF_SAMPLE_RATE`, `perfEditCount`
+- **`src/shared/telemetry/perfScene.js`** — Reads the scene off the DOM (document/canvas nodes, elements drawn, layers, panels, tiles) — shared by the sampled perf instrument and the always-on recorder.
+  - _exports_: `readScene`
+- **`src/shared/telemetry/perfTrigger.js`** — The self-calibrating trigger: a baseline median taken from the window right after a load, then a sustained-deviation test (level × slow-fraction × perceptibility floor) over a time-qualified window.
+  - _exports_: `createTrigger`, `feedFrame`, `sealBaselineLate`, `TRIGGER_DEFAULTS`, `triggerState`
 - **`src/shared/theme/palette.js`** — JS mirror of index.css theme tokens as concrete light/dark hex for the SVG canvas and Markup viewer where var() cannot resolve; paletteFor(resolved) selector
   - _exports_: `paletteFor`, `PALETTES`
 - **`src/shared/theme/ThemePicker.jsx`** — Light/Dark/System theme picker UI reading useTheme, mounted in signed-in Settings and the signed-out header gear, styled purely from theme tokens

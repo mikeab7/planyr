@@ -44,6 +44,7 @@
  */
 import { reportClientEvent } from "./clientErrors.js";
 import { isEnrolled, PERF_SAMPLE_RATE, notePerfEdit, perfEditCount } from "./perfSampling.js";
+import { readScene } from "./perfScene.js";
 
 export { isEnrolled, PERF_SAMPLE_RATE, notePerfEdit };
 
@@ -132,34 +133,10 @@ export function buildPerfRow(sample = {}) {
 }
 
 /* ── Pure: reading the scene from the DOM ─────────────────────────────────────────────────────
- *
- * DELIBERATELY read off the DOM rather than plumbed through from SitePlanner's state. Threading
- * six counters out of a 26,000-line component would mean six new props, six new subscriptions,
- * and a standing invitation for the instrument to hold a reference to the model — which is
- * exactly the class of bug it exists to find. The DOM already knows all of it, the selectors are
- * the ones the e2e harnesses use, and the whole read happens once every two minutes.
- *
- * Split out and pure-ish (it takes a document) so the counting rules are unit-tested against a
- * fixture rather than only observed in a browser. */
-export function readScene(doc) {
-  const out = {};
-  try {
-    if (!doc) return out;
-    const svg = doc.querySelector('[data-testid="planner-canvas"]');
-    out.documentNodes = doc.getElementsByTagName("*").length;
-    if (svg) {
-      out.canvasNodes = svg.getElementsByTagName("*").length;
-      out.elementsDrawn = svg.querySelectorAll("[data-el-id]").length;
-    }
-    out.tiles = doc.querySelectorAll("img.leaflet-tile").length;
-    /* EXACT ids only. A `^=` prefix match counts a floating panel's chrome bar and its two icon
-     * buttons as three more panels — measured, and it read 13 panels open for 4. */
-    out.panelsOpen = (doc.querySelector('[data-testid="left-menu-panel"]') ? 1 : 0)
-      + [...doc.querySelectorAll("[data-testid]")].filter((n) => /^floating-panel-[a-z]+$/.test(n.getAttribute("data-testid"))).length;
-    out.layersOn = doc.querySelectorAll(".leaflet-layer").length;
-  } catch (_) { /* a telemetry read must never break a render */ }
-  return out;
-}
+ * Moved to `./perfScene.js` (NEW-1) so the always-on recorder can share it without pulling this
+ * sampled instrument — and its 25% enrolment gate — into every tab. Re-exported here because it
+ * has been part of this module's surface since NEW-4, and its tests address it that way. */
+export { readScene };
 
 // ——— impure layer (browser only) ————————————————————————————————————————————————
 

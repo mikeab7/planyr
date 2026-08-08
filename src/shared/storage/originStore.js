@@ -66,6 +66,42 @@ export async function walkOriginStore(prefix, fn) {
   });
 }
 
+/* Write one record. ⛔ CALLERS: this store is the LARGE tier (TIER-BY-REBUILDABILITY) and it is
+ * PERSISTENT for this origin — the browser will never evict for us — so anything written here
+ * must carry its own bound. The one writer today is the performance recorder's bounded capture
+ * ring (perfCaptureStore.js), which prunes to a fixed count on every write and is surfaced in the
+ * storage panel so it can never grow without being visible. Resolves true/false; never throws.
+ *
+ * If the `kv` store does not exist yet (a route that has never opened the planner), this resolves
+ * FALSE rather than creating it: `localDb.js` owns that schema, and a second creator racing it is
+ * how an IndexedDB version conflict starts. A false is reported by the caller, not swallowed. */
+export async function putOriginRecord(key, value) {
+  const db = await openDb();
+  if (!db || !key) return false;
+  return new Promise((resolve) => {
+    let tx;
+    try { tx = db.transaction(STORE, "readwrite"); } catch (_) { resolve(false); return; }
+    tx.oncomplete = () => resolve(true);
+    tx.onerror = () => resolve(false);
+    tx.onabort = () => resolve(false);
+    try { tx.objectStore(STORE).put(value, key); } catch (_) { try { tx.abort(); } catch (_2) {} resolve(false); }
+  });
+}
+
+/* Delete one record by exact key. Resolves true/false; never throws. */
+export async function deleteOriginKey(key) {
+  const db = await openDb();
+  if (!db || !key) return false;
+  return new Promise((resolve) => {
+    let tx;
+    try { tx = db.transaction(STORE, "readwrite"); } catch (_) { resolve(false); return; }
+    tx.oncomplete = () => resolve(true);
+    tx.onerror = () => resolve(false);
+    tx.onabort = () => resolve(false);
+    try { tx.objectStore(STORE).delete(key); } catch (_) { try { tx.abort(); } catch (_2) {} resolve(false); }
+  });
+}
+
 /* Delete every record under `prefix`, measuring what went. ⛔ CALLERS: this is a raw deleter with
  * no idea what it is deleting — the rehydration proof lives in storageReclaim.js and must be made
  * BEFORE a prefix reaches here. Resolves { bytes, keys }; never throws. */
