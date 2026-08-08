@@ -113,6 +113,63 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V73760 — B276752/B276753/B276755: the WHOLE portfolio, driven against the live agency services
+
+**Status: ✅ PASSED (2026-08-08) for every site the sandbox can reach — 27 of 28. One site (GREEN RIVER) has no active parcel geometry, so the app shows no badge and there is nothing to check.**
+
+**What this verifies.** The owner's report was *"Go and check every site I have, the labels are generally hit or miss on accuracy"*, and his instruction was explicit: run the WHOLE portfolio, not one site. `ui-audit/verify-jurisdiction-portfolio.mjs` drives the REAL `identifyJurisdiction` + `formatJurisdictionBadge` — the same two functions the header pill calls — using each site's REAL active parcel rings from his production rows, against the REAL LIVE services (TxDOT counties · TxGIO city limits · H-GAC ETJ), and prints the badge string the app would show. Re-run it with `node ui-audit/verify-jurisdiction-portfolio.mjs`.
+
+**Why this is a genuine live pass and not a sandbox stand-in:** the three agency endpoints are reachable from here and were queried live; the fixture's ground truth was captured the same way. What it does NOT cover is the browser rendering of the pill and the Yield panel's "FFE rule not settled" line — those need a signed-in session on a real saved project (`Blocker: auth` / `real-data`) and are carried below as the one open sub-check.
+
+**Result: 18 correct / 1 mislabelled / 8 unresolved → 27 correct / 0 mislabelled / 0 unresolved.**
+
+**Portfolio shape, queried live at all 28 Texas origins — it reproduces the owner's table exactly:** 8 inside city limits · 16 unincorporated inside the Houston ETJ · 4 unincorporated with no ETJ. 20 of 28 (71%) unincorporated, and 17 of those 20 have a city polygon within 1 km.
+
+| Site | Ground truth at origin | BEFORE | AFTER |
+|---|---|---|---|
+| 8 South | in Pearland | `City of Pearland · Harris County` | `City of Pearland · Harris County` |
+| Bain | Houston ETJ | `Unincorporated / City of Houston · ETJ / City of Katy · edge only · Fort Bend County` | `Unincorporated / City of Houston · ETJ / City of Katy · edge only · Fort Bend County` |
+| Bayport V | in Pasadena | `City of Pasadena · Harris County` | `City of Pasadena · Harris County` |
+| Clay & Porter | Houston ETJ | `Unincorporated / City of Houston · ETJ · Harris County` | `Unincorporated / City of Houston · ETJ · Harris County` |
+| Cravens | in Missouri City | `City of Missouri City · Fort Bend County` | `City of Missouri City · Fort Bend County` |
+| Forbidden Gardens | Houston ETJ | `Unincorporated / City of Houston · ETJ · Harris County` | `Unincorporated / City of Houston · ETJ · Harris County` |
+| Gessner | in Houston | `City of Houston · Harris County` | `City of Houston · Harris County` |
+| Goose Creek | no city · no ETJ | `Unincorporated · Harris County` | `Part in City of Baytown / part unincorporated · Harris County` |
+| Grand Port | no city · no ETJ | `Unincorporated · Chambers County` | `Unincorporated · Chambers County` |
+| Hoffmeister | Houston ETJ | `Unincorporated / City of Houston · ETJ · Harris County` | `Unincorporated / City of Houston · ETJ · Harris County` |
+| Houston ColdPort | Houston ETJ | `Unincorporated / City of Houston · ETJ · Harris County` | `Unincorporated / City of Houston · ETJ · Harris County` |
+| I-10/HWY 90 | no city · no ETJ | `Unincorporated / ETJ · couldn't check / City of Brookshire · edge only · County · couldn't check` | `Unincorporated / City of Brookshire · edge only · Waller County` |
+| JFK | Houston ETJ | `Unincorporated / City of Houston · edge only · County · couldn't check` | `Unincorporated / City of Houston · ETJ · Harris County` |
+| Jacintoport | Houston ETJ | `Unincorporated / City of Houston · ETJ · Harris County` | `Unincorporated / City of Houston · ETJ · Harris County` |
+| Katz | Houston ETJ | `Unincorporated / ETJ · couldn't check / City of Houston · edge only · County · couldn't check` | `Unincorporated / City of Houston · ETJ · Harris County` |
+| Kennedy Greens | Houston ETJ | `Unincorporated / City of Houston · edge only · Harris County` | `Unincorporated / City of Houston · ETJ · Harris County` |
+| Martini | in Houston | `City of Houston · Harris County` | `City of Houston · Harris County` |
+| Mesa | in Houston | `City of Houston · Harris County` | `City of Houston · Harris County` |
+| Pappadoupolos | Houston ETJ | `Unincorporated / ETJ · couldn't check · County · couldn't check` | `Unincorporated / City of Houston · ETJ · Harris County` |
+| Pinnacle | Houston ETJ | `Unincorporated / ETJ · couldn't check / City of Houston · edge only · County · couldn't check` | `Unincorporated / City of Houston · ETJ · Harris County` |
+| Pinto II | Houston ETJ | `Unincorporated / City of Houston · ETJ · Harris County` | `Unincorporated / City of Houston · ETJ · Harris County` |
+| RICHEY | Houston ETJ | `Unincorporated / City of Houston · ETJ · Harris County` | `Unincorporated / City of Houston · ETJ · Harris County` |
+| Richfield | Houston ETJ | `Unincorporated / ETJ · couldn't check · County · couldn't check` | `Unincorporated / City of Houston · ETJ · Harris County` |
+| Schiel | Houston ETJ | `Unincorporated / City of Houston · ETJ · Harris County` | `Unincorporated / City of Houston · ETJ · Harris County` |
+| Silvestri | Houston ETJ | `Unincorporated / ETJ · couldn't check · County · couldn't check` | `Unincorporated / City of Houston · ETJ · Harris County` |
+| Tsakiris | no city · no ETJ | `City of Katy · Waller County` | `Part in City of Katy / part unincorporated · Waller County` |
+| Will Clayton | in Humble | `City of Humble / ETJ · couldn't check · County · couldn't check` | `City of Humble / City of Houston · ETJ · Harris County` |
+
+**Reading the BEFORE column — three distinct failures, not one:**
+- **`City of Katy · Waller County` (Tsakiris)** — the reported class, confirmed on a second site. A bare city presented as the site's jurisdiction on land whose origin is in no city. Cause: containment decided by the largest parcel's centroid (B276752).
+- **`… couldn't check` (8 sites)** — county and/or ETJ unresolvable. Cause: the query URL past the ~2 KB ceiling returning an HTML 404 (B276755). Not flakiness; deterministic in the parcel's vertex count.
+- **`City of Houston · edge only` (Kennedy Greens, JFK, Katz, Pinnacle)** — reads as a pass to a careless eye and is the most dangerous of the three: an edge sliver shown INSTEAD of the Houston ETJ, which is the Ch. 19 authority that sets the finished floor on those sites (B276753). The first sweep's checker scored Kennedy Greens ✅ because the string contains "Houston"; the checker was tightened to require the ETJ be named AS an ETJ, and that is what exposed it.
+
+**Two AFTER rows that are changes of ANSWER, not just of wording — flagged because they correct the brief:**
+- **Goose Creek → `Part in City of Baytown / part unincorporated`.** Filed as "unincorporated, Baytown 1 km away". True at the origin; across the drawn site, **6 of the 16 active parcels are inside Baytown's limits** per TxGIO. The site genuinely straddles.
+- **Tsakiris → `Part in City of Katy / part unincorporated`.** Same: **2 of 9 parcels inside Katy.**
+In both, Baytown/Katy are never presented as the site's jurisdiction — the property the owner asked for — and the split is stated rather than rounded to whichever answer was convenient.
+
+**ATTEMPTED HERE, and it hit a named wall — recorded rather than quietly parked (ATTEMPT-BEFORE-YOU-PARK).** The rendering half was driven headless against a local production build of this branch: the app boots clean logged-out (no page errors), and the shell, map and Layers panel render. It cannot get further because **the header pill only exists once a georeferenced PARCEL is on the plan**, and placing one logged-out needs the county parcel service — which this sandbox's egress blocks (*"The county parcel server isn't responding right now"*). The Cloudflare branch preview is unreachable from here too (`ERR_CONNECTION_RESET` on `*.pages.dev`). Note the asymmetry, because it is exactly why the sweep above IS a live pass: the three JURISDICTION services (TxDOT / TxGIO / H-GAC) are reachable and were queried live; the county PARCEL service is a different host and is not. `Blocker: live-GIS`.
+
+**Still pending (`Blocker: live-GIS` for the pill · `Blocker: auth` + `real-data` for the panel):**
+- Open a signed-in saved project (Bain and Goose Creek are the two to look at) and confirm (a) the header pill renders the string this harness produces, (b) the ⚑ straddle mark appears on Goose Creek/Tsakiris, and (c) the Yield → Stormwater FFE row shows **"FFE rule not settled"** while the jurisdiction is still loading, then resolves to a named rule. The pure logic behind all three is unit-covered (`test/jurisdictionShapes.test.js`, 10 cases, mutation-checked), so this is a rendering confirmation, not a correctness one.
+
 ### V67920 — B270912: does the production row rate actually drop, and does the owner's own capture still land? `Blocker: real-data`
 
 **What was already proven HERE, so this is the residue rather than the check.** The `suppressed` arm
