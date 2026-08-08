@@ -113,6 +113,21 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V48144 — B251137: the re-raster fix on the owner's OWN Bain plan, signed in, zooming into a truck court. `Blocker: auth` `Blocker: real-data`
+
+**What was proven here, and it is most of it.** The whole path was driven end to end in a real browser on BOTH of his real Bain fixtures (`bain-concept-original`, `bain-quiddity` — the same physical PDF overlay, 1728 × 2592 pt at 0.55 opacity and 1.5° rotation), at his own display density (dpr 2.15) and 1× CPU, with the re-rasters counted at `URL.createObjectURL` and their real pixel dimensions read out of the PNG the app itself produced. Before: 2 full 8192 px page renders on a one-way zoom in, 3.5–4.5 on the realistic in-out-in gesture. After: **1, on every arm, on both plans, on every rep**, with `--assert` green and the controls (`across-image`, `below`) still at zero. `node ui-audit/zoom-reraster-arms.mjs --assert` is the standing gate.
+
+**What this sandbox could NOT do, and it is exactly two things.**
+1. **Sign in.** The egress proxy CORS-blocks the Supabase auth handshake, so the overlay's bytes were served from an intercepted route rather than fetched from Supabase Storage with his real uid-scoped key. The GATE (`storageKey.endsWith(".pdf")`) and everything downstream of the bytes were exercised; the real fetch was not.
+2. **Use his actual drawing.** The page GEOMETRY is his; the CONTENT is synthetic linework (`ui-audit/lib/sheetPdf.mjs`), because his sheet does not belong in the repository. PDF.js's render cost is content-dependent, so every duration recorded here is a FLOOR — his real civil sheet renders slower.
+
+**The signed-in steps still pending, on planyr.io:**
+- Open **Bain → Concept - Original** signed in, wait for the sheet overlay to appear, then zoom in on a truck court in ordinary wheel notches until the linework is clearly crisp.
+- It should sharpen **once** and then stay smooth: no repeated multi-second stall as you keep zooming, and — the part the fix is really about — **no stall at all when you zoom back out and in again.**
+- Confirm the sheet is at least as crisp as before at every zoom (the new rule can only render finer, never coarser, but it has never been looked at on his own drawing).
+- Repeat on **Bain → Quiddity**, which carries the same file.
+- A stall that still happens on the FIRST crossing is expected and is not a failure: one page render at the texture cap is the design. A stall on the second, third or return crossing is a regression and should re-open B251137.
+
 ### V43536 — B1121 (×3): the session-growth probe, run on the machine that HAS the symptom. `Blocker: auth` `Blocker: real-data`
 
 The whole instrument is built, unit-tested (37 cases) and was driven end to end HERE — a 6.5-minute mixed session on the owner's own two plans at his own display density, with 32,202 tiles served and decoded, and a reload at the end. **The cost curve came back an honest NULL: the identical gesture cost 1,323 ms at the start and 1,486 ms at the end, against a ±6.3% floor, and not monotone.** So the symptom did not reproduce here, which narrows where it can live without settling it (`docs/PERF-SESSION-GROWTH.md` §8).

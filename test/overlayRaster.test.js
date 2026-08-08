@@ -45,13 +45,20 @@ describe("chooseOverlayRasterScale — B749 zoom-aware re-raster decision", () =
     expect(d.scale * pageMaxPts).toBeLessThanOrEqual(MAX_RERASTER_DIM + 1e-6);
   });
 
-  it("a small page can reach hi-res without capping", () => {
+  /* NEW-1 — the chosen scale is QUANTISED UP to an octave rung, so it is no longer the continuous
+   * `want`. Here `want` is 7 and the next rung above the 4× base is 8, which is under the 8.19 cap:
+   * a slightly FINER raster than the old rule picked, and — the property that matters — never a
+   * coarser one. The reason is the measured cost of the continuous rule: every ×1.12 wheel notch
+   * asked for a slightly different scale and re-rendered the whole page, up to 8192 px, on the main
+   * thread. See the header of `chooseOverlayRasterScale` and test/overlayRerasterCount.test.js. */
+  it("a small page reaches a hi-res RUNG without capping, and never coarser than `want`", () => {
     const pmp = 1000, bs = baseRasterScale(pmp); // 4
     const fpp = 1.0, ppf = 7; // want=7, magAtBase=1.75 → hires, cap=8192/1000=8.19
     const d = chooseOverlayRasterScale({ ftPerPx: fpp, ppf, pageMaxPts: pmp, baseScale: bs });
     expect(d.isHires).toBe(true);
     expect(d.capped).toBe(false);
-    expect(d.scale).toBeCloseTo(7, 6);
+    expect(d.scale).toBeCloseTo(8, 6);            // the rung: 4 × 2
+    expect(d.scale).toBeGreaterThanOrEqual(7);    // never coarser than the continuous rule
   });
 });
 
