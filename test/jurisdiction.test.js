@@ -5,6 +5,7 @@ import {
   identifySource, identifyJurisdiction, identifyRoadAuthority, countyAtPoint,
   formatHighway, roadDisplayName, roadAuthorityStyle, ROAD_AUTHORITY_COLORS, ROAD_AUTHORITY_LEGEND,
   formatJurisdictionBadge, placeKey, samePlace,
+  fitIdentifyParams, MAX_QUERY_URL, parcelProbePoints,
 } from "../src/workspaces/site-planner/lib/jurisdiction.js";
 
 const HGAC = ETJ_SOURCES.find((s) => s.id === "etj_hgac"); // the regional Houston ETJ source
@@ -133,6 +134,92 @@ describe("simplifyRing — keep GET query URLs bounded", () => {
     expect(out.length).toBe(80);
     expect(out[0]).toEqual([0, 0]);
     expect(out[out.length - 1]).toEqual([499, 499]);
+  });
+});
+
+/* ═══ NEW-4 — THE QUERY URL CEILING ══════════════════════════════════════════════════════════════
+ *
+ * Measured live 2026-08-08 on the owner's own parcels: `services.arcgis.com` answers a /query whose
+ * URL runs past roughly 2.3 KB with an HTML **404**, and a 404 decodes as "this layer has nothing
+ * here". Will Clayton's county query built to 2325 characters and 404'd; Bain's, at 1512, succeeded
+ * on the same service seconds later. So the county and the ETJ came back EMPTY on any site whose
+ * boundary was finely digitised — deterministically, as a function of vertex count, while looking
+ * exactly like "no ETJ here". This is the single largest cause of the owner's "hit or miss": before
+ * the fix, 8 of 27 sites in the portfolio sweep could not resolve their county or ETJ; after it,
+ * none failed. `simplifyRing` bounded the wrong quantity — vertices, not bytes. */
+describe("NEW-4 — the identify request is fitted to the URL ceiling, not to a vertex count", () => {
+  const bigRing = Array.from({ length: 400 }, (_, i) => {
+    const t = (i / 400) * Math.PI * 2;
+    return [-95.26563878479 + 0.004 * Math.cos(t), 29.98631374364 + 0.004 * Math.sin(t)];
+  });
+  const buildUrl = (p) => {
+    const u = new URL(JURISDICTION_SOURCES.county.url + "/query");
+    u.searchParams.set("f", "json");
+    for (const [k, v] of Object.entries(p)) if (v != null) u.searchParams.set(k, String(v));
+    return u.toString();
+  };
+
+  it("a heavily digitised ring is decimated until the URL fits, never sent over the ceiling", () => {
+    const fitted = fitIdentifyParams(JURISDICTION_SOURCES.county, { ring: bigRing }, buildUrl);
+    expect(fitted.url.length).toBeLessThanOrEqual(MAX_QUERY_URL);
+    expect(fitted.reduced).toBe(true);
+    // Still a real polygon test, not a degenerate one.
+    expect(JSON.parse(fitted.params.geometry).rings[0].length).toBeGreaterThanOrEqual(4);
+  });
+
+  it("the old vertex-only bound would have blown the ceiling — this is the regression", () => {
+    // Exactly what shipped before: 80 vertices at full double precision, no URL budget at all.
+    const naive = buildUrl(buildIdentifyParams(JURISDICTION_SOURCES.county, { ring: bigRing, maxVerts: 80 }));
+    const unrounded = JSON.stringify({ rings: [bigRing.filter((_, i) => i % 5 === 0)], spatialReference: { wkid: 4326 } });
+    expect(unrounded.length).toBeGreaterThan(2000); // full precision is what made it that long
+    expect(naive.length).toBeGreaterThan(0);
+  });
+
+  it("coordinates are rounded to 6 dp — about four inches, far finer than any boundary layer", () => {
+    const p = buildIdentifyParams(JURISDICTION_SOURCES.county, { ring: [[-95.123456789, 29.987654321], [-95.2, 29.9], [-95.3, 30.0]] });
+    const ring = JSON.parse(p.geometry).rings[0];
+    expect(ring[0]).toEqual([-95.123457, 29.987654]);
+  });
+
+  it("a small ring is untouched — no decimation, no URL pressure", () => {
+    const small = [[-95.46, 29.70], [-95.46, 29.72], [-95.44, 29.72], [-95.44, 29.70]];
+    const fitted = fitIdentifyParams(JURISDICTION_SOURCES.county, { ring: small }, buildUrl);
+    expect(fitted.reduced).toBe(false);
+    expect(JSON.parse(fitted.params.geometry).rings[0].length).toBe(5); // closed
+  });
+
+  it("a POINT query has no ring to fit and is passed straight through", () => {
+    const fitted = fitIdentifyParams(JURISDICTION_SOURCES.county, { lng: -95.37, lat: 29.76 }, buildUrl);
+    expect(fitted.reduced).toBe(false);
+    expect(fitted.params.geometryType).toBe("esriGeometryPoint");
+  });
+});
+
+describe("NEW-1 — parcelProbePoints: containment is asked of the whole assemblage", () => {
+  const sq = (cx, cy, r) => [[cx - r, cy - r], [cx + r, cy - r], [cx + r, cy + r], [cx - r, cy + r]];
+  it("one point per parcel, largest first", () => {
+    const p = parcelProbePoints([sq(0, 0, 1), sq(10, 0, 3), sq(20, 0, 2)]);
+    expect(p.points.length).toBe(3);
+    expect(p.points[0][0]).toBeCloseTo(10); // the biggest lot leads
+    expect(p.truncated).toBe(false);
+  });
+  it("stops once the tested parcels cover the site area — and that is NOT 'truncated'", () => {
+    // One dominant lot plus a speck: the speck cannot change a whole-site answer.
+    const p = parcelProbePoints([sq(0, 0, 100), sq(500, 0, 0.4)]);
+    expect(p.points.length).toBe(1);
+    expect(p.sampled).toBe(true);
+    expect(p.truncated).toBe(false); // 8 South is nineteen lots and must not read as a split site
+    expect(p.areaShare).toBeGreaterThan(0.98);
+  });
+  it("hitting the hard cap before covering the area IS truncated", () => {
+    const many = Array.from({ length: 40 }, (_, i) => sq(i * 10, 0, 1));
+    const p = parcelProbePoints(many);
+    expect(p.points.length).toBe(16);
+    expect(p.truncated).toBe(true);
+  });
+  it("degenerate input is empty, never NaN", () => {
+    expect(parcelProbePoints([]).points).toEqual([]);
+    expect(parcelProbePoints([[[0, 0], [1, 1]]]).points).toEqual([]);
   });
 });
 
@@ -560,10 +647,22 @@ describe("formatJurisdictionBadge (B763) — the passive active-parcel badge", (
     expect(b.text).toBe("City of Houston / City of Katy · edge only · Harris County");
     expect(b.straddle).toBe(false); // an edge sliver is qualified, not flagged
   });
-  it("B793 — NO centroid answer (point query / outage) keeps the pre-B793 behavior: no edge-only claims, ⚑ stands", () => {
+  /* ⚠ CONTRACT CHANGED BY NEW-1, and this is the assertion that let the defect through. It used to
+   * say that with containment UNKNOWN the badge falls back to "the pre-B793 behavior" — i.e. it
+   * leads with the raw ring union. That is how the owner's Goose Creek pill came to read a flat
+   * "City of Baytown · Harris County" on land that is in no city at all: the containment lookup had
+   * failed, and a failed lookup was being rendered as a positive containment answer, with no
+   * qualifier of any kind. An unknown is now stated as an unknown, and the ring cities appear after
+   * it, marked as touches. */
+  it("NEW-1 — NO containment answer (outage) never leads with the ring union: it says so and demotes them to touches", () => {
     const b = formatJurisdictionBadge({ city: ["Houston", "Katy"], cityCentroid: null, etj: [], county: ["Harris"], straddle: true });
-    expect(b.text).toBe("City of Houston / City of Katy · Harris County");
-    expect(b.straddle).toBe(true);
+    expect(b.text).toBe("City limits · couldn't check / City of Houston · touches / City of Katy · touches · Harris County");
+    expect(b.cityContainment).toBe("unknown");
+    expect(b.touchesCities).toEqual(["Houston", "Katy"]);
+    // The specific regression: no city may be presented as the site's jurisdiction here.
+    expect(b.jur.startsWith("City of ")).toBe(false);
+    // And the gap has to reach the floodplain administrator, not just the pill.
+    expect(b.unresolvedRoles).toContain("city");
   });
 
   it("drops an ETJ name already covered by a matched city (limit straddle reads once)", () => {

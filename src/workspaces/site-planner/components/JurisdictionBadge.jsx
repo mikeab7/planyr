@@ -16,6 +16,12 @@ export default function JurisdictionBadge({ badge }) {
     // B793 — "edge only" = the city's limits touch only the parcel edge (the centroid is
     // outside), so that city's rules are unlikely to govern the site as a whole.
     badge.edgeOnlyCities?.length ? `"Edge only": ${badge.edgeOnlyCities.map((c) => `City of ${c}`).join(", ")} touches only the parcel edge: unlikely to govern the site as a whole.` : "",
+    // NEW-1 — the two states the whole-site containment model added. A "part in" city really does
+    // govern part of the site, so it is stated as membership; a "touches" city is a city we could
+    // not classify, and saying which it is matters more than hiding the gap.
+    badge.partialCities?.length ? `"Part in": some of the drawn parcels sit inside ${badge.partialCities.map((c) => `City of ${c}`).join(", ")} and some do not — the site is split, and both standards may apply.` : "",
+    badge.touchesCities?.length ? `"Touches": ${badge.touchesCities.map((c) => `City of ${c}`).join(", ")} borders the site, but the containment check did not complete — we cannot yet say whether the site is inside it.` : "",
+    badge.failureNote || "",
     badge.etjNote || "",
     badge.straddle ? "⚑ Straddles a boundary: touches multiple jurisdictions." : "",
   ].filter(Boolean).join("\n");

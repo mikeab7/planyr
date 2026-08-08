@@ -204,7 +204,19 @@ export function assessAdministrator({ signals = {}, rules = {}, ffeFt = null, re
   const resolved = resolveAdministrator(candidates, { requiredFfeAt });
   const gov = resolved.governing;
   const unresolvedRoles = (signals.unresolvedRoles || []).filter(Boolean);
-  const unresolved = unresolvedRoles.length > 0;
+  /* ⛔ NEW-2 — A JURISDICTION THAT HAS NOT ANSWERED YET IS NOT A JURISDICTION THAT SAID "NO".
+   *
+   * B209508 made a FAILED lookup first-class. It left the window before any lookup returns, and on
+   * this portfolio that window is not a detail: sixteen of the owner's twenty-eight Texas sites are
+   * unincorporated land inside the City of Houston ETJ, where Ch. 19 (500-yr WSE + 2 ft) is the
+   * governing rule. Until the ETJ answers, `etjLabel` is null, the Houston candidate is never
+   * pushed, and the panel prints a settled FFE off the county rule (BFE + 2 ft) — commonly 1–2 ft
+   * LOWER in flat Harris and Fort Bend floodplain. It corrects itself a second later, which is
+   * precisely what makes it dangerous: nothing ever says the number changed.
+   *
+   * So "still loading" is unresolved, and it says so in its own words. */
+  const pending = !!signals.jurisdictionPending;
+  const unresolved = unresolvedRoles.length > 0 || pending;
   return {
     ...resolved,
     impliedFlood: impliedFloodElevation({ ffeFt, ffe: gov ? gov.ffe : null }),
@@ -217,11 +229,16 @@ export function assessAdministrator({ signals = {}, rules = {}, ffeFt = null, re
      * governing candidate resolved, because the candidate set itself is incomplete. */
     unresolved,
     unresolvedRoles,
+    pending,
     settled: !unresolved && !!gov,
-    unresolvedNote: unresolved
-      ? `Jurisdiction incomplete — ${unresolvedRoles.map((r) => `the ${r} lookup failed`).join(" and ")}. ` +
-        `${unresolvedRoles.map((r) => ROLE_STAKES[r]).filter(Boolean).join("; ")}. ` +
-        `The FFE rule is NOT settled: a stricter authority may apply that we could not check.`
-      : null,
+    unresolvedNote: pending && !unresolvedRoles.length
+      ? "Jurisdiction still being looked up. Until the city and ETJ answer, the candidate set is incomplete — " +
+        `${ROLE_STAKES.etj}. The FFE rule is NOT settled yet.`
+      : unresolved
+        ? `Jurisdiction incomplete — ${unresolvedRoles.map((r) => `the ${r} lookup failed`).join(" and ")}` +
+          `${pending ? " and the rest have not answered yet" : ""}. ` +
+          `${unresolvedRoles.map((r) => ROLE_STAKES[r]).filter(Boolean).join("; ")}. ` +
+          `The FFE rule is NOT settled: a stricter authority may apply that we could not check.`
+        : null,
   };
 }
