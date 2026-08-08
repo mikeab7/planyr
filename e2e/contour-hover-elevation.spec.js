@@ -16,6 +16,10 @@
  * and a sweep leaves nothing orphaned behind.
  */
 import { test, expect } from "@playwright/test";
+// B276450 — the hover tolerance is read from the SOURCE OF TRUTH, never restated here: the
+// reachability guard below is expressed in terms of it, so a change to the tolerance moves the
+// assertion with it instead of silently invalidating it.
+import { HOVER_TOL_PX } from "../src/workspaces/site-planner/lib/contours.js";
 
 /* The sandbox's browser egress can't reach the USGS host (Chromium gets a tunnel reset)
  * while NODE can, so the spec relays the agency request itself. This is a transport
@@ -186,7 +190,8 @@ test.describe("NEW-1 — hovering a contour names its elevation", () => {
     const hits = [], agree = [];
     let maxHover = 0;
     for (let i = 0; i < 90; i++) {
-      await page.mouse.move(box.x + 120 + i * 6, box.y + 120 + i * 5);
+      const mx = box.x + 120 + i * 6, my = box.y + 120 + i * 5;
+      await page.mouse.move(mx, my);
       await page.waitForTimeout(28);
       const n = await hoverLabels(page).count();
       maxHover = Math.max(maxHover, n);
@@ -198,7 +203,7 @@ test.describe("NEW-1 — hovering a contour names its elevation", () => {
         // allowed to differ by a fraction of a foot, never by a contour interval.
         const r = await partText(page, "exist");
         const m = /([\d.]+)/.exec(r);
-        if (m) agree.push(Math.abs(parseFloat(label) - parseFloat(m[1])));
+        if (m) agree.push({ mx, my, level: parseFloat(label), read: parseFloat(m[1]), d: Math.abs(parseFloat(label) - parseFloat(m[1])) });
       }
     }
     // EXACTLY ONE transient label, ever — never a stacked pair (the B1087 class).
@@ -209,16 +214,64 @@ test.describe("NEW-1 — hovering a contour names its elevation", () => {
     // It reads INTERMEDIATE values, not only the labelled multiples of five.
     const levels = [...new Set(hits.map((t) => parseFloat(t)))];
     expect(levels.length).toBeGreaterThan(0);
-    // The hovered line's value tracks the ground readout at the same cursor. Measured on
-    // real Katy LiDAR: median ≈ 0.3 ft, p90 ≈ 1.0 ft. The tail sits on the steep channel
-    // bank, where the lines pack tight and the two answers come from DIFFERENT grids by
-    // design — contours are traced from the SMOOTHED grid, the readout is bilinear-sampled
-    // from the RAW one (so it agrees with the cross-section tool, V242). The guard is on
-    // the typical case, with a loose ceiling that would still catch a real mismatch.
+
+    /* ⛔ THE WORST-CASE CEILING WAS REPLACED 2026-08-08 (B276450), NOT LOOSENED. It read:
+     *     expect(sorted[sorted.length - 1], "worst line-vs-readout disagreement").toBeLessThanOrEqual(2.5);
+     * and it failed at 2.8000000000000114 — the SAME value on four consecutive runs, so it was
+     * never flake, and the pond rule applied because it is a contour number. Which of the spec and
+     * the code was right was settled with evidence before either was touched, and THE CODE IS RIGHT:
+     *   • The one offending sample sits in the bottom of a drainage channel. Probing the raw ground
+     *     around it: 140.2 ft at the cursor, rising to ~147 within eight pixels on BOTH sides —
+     *     11.3 ft of relief across a sixteen-pixel box.
+     *   • The 143-ft line the hover named genuinely passes ~3 px from that cursor (the raw grid
+     *     crosses 143 ft between +2 px and +4 px), i.e. well inside the 6 px HOVER_TOL_PX. The trace
+     *     is in the right place and the readout is right; they answer DIFFERENT questions — "the
+     *     level of the nearest line within the tolerance" versus "the ground under the cursor".
+     *   • 59 of the 60 samples were ≤ 1.7 ft. One channel bottom moved the max; nothing moved the
+     *     distribution. No code in either grid has changed since this spec was written — the only
+     *     commit to touch terrainLayers.js since (609b0304) is a z-order/pane change.
+     * So a fixed FOOT ceiling on the max was never well-posed: the honest bound is
+     * `HOVER_TOL_PX × the local relief per pixel`, which is unbounded in a channel. Nudging 2.5 to
+     * 3.0 would be exactly the move the pond rule forbids, and it would re-break on the next sweep
+     * that clips a steeper bank. (A per-sample derived ceiling was tried first and REJECTED on its
+     * own evidence: estimating relief from the neighbouring sweep steps cannot see relief
+     * PERPENDICULAR to the sweep, so it mis-fired on samples running along a contour.)
+     *
+     * What replaces it is the invariant the max was reaching for, stated directly and measured
+     * rather than assumed — and it is STRICTLY STRONGER, because it catches a line traced in the
+     * wrong PLACE, which a foot ceiling never could. */
     expect(agree.length).toBeGreaterThan(5);
-    const sorted = agree.slice().sort((a, b) => a - b);
-    expect(sorted[Math.floor(sorted.length / 2)], "median line-vs-readout disagreement").toBeLessThanOrEqual(0.6);
-    expect(sorted[sorted.length - 1], "worst line-vs-readout disagreement").toBeLessThanOrEqual(2.5);
+    const sorted = agree.map((a) => a.d).sort((a, b) => a - b);
+    /* (a) THE TYPICAL CASE — the systematic-mismatch guard. A units error, a datum error or a
+     * wrong-tile read shifts EVERY sample; terrain shifts the tail only. One contour interval is
+     * the natural bound: agreeing to inside the interval the map itself draws at means the two
+     * grids are the same ground, and no systematic error can hide under it. Measured here: 0.6 ft. */
+    expect(sorted[Math.floor(sorted.length / 2)], "median line-vs-readout disagreement (ft)").toBeLessThanOrEqual(1.0);
+    /* (b) THE PLACEMENT GUARD — the hovered line's level must be ATTAINED by the raw ground
+     * somewhere within the hover tolerance of the cursor. That is precisely what "the line under
+     * your cursor" claims, it holds however steep the ground is, and it fails loudly if the trace
+     * drifts off the surface it was traced from. Checked on the worst-disagreeing samples, which
+     * are the only ones where it could plausibly fail. Measured here: all reachable, zero slack. */
+    const RING = [[0, 0], ...[0, 45, 90, 135, 180, 225, 270, 315].map((a) => [
+      Math.round(HOVER_TOL_PX * Math.cos((a * Math.PI) / 180)),
+      Math.round(HOVER_TOL_PX * Math.sin((a * Math.PI) / 180))])];
+    for (const h of agree.slice().sort((a, b) => b.d - a.d).slice(0, 3)) {
+      const reads = [];
+      for (const [dx, dy] of RING) {
+        await page.mouse.move(h.mx + dx, h.my + dy);
+        await page.waitForTimeout(40);
+        const m = /([\d.]+)/.exec(await partText(page, "exist"));
+        if (m) reads.push(parseFloat(m[1]));
+      }
+      expect(reads.length, "the ground readout must answer everywhere on the tolerance ring").toBeGreaterThan(4);
+      const lo = Math.min(...reads), hi = Math.max(...reads);
+      expect(h.level,
+        `the hovered ${h.level} ft line must be reachable from the cursor within ${HOVER_TOL_PX}px ` +
+        `(raw ground there spans ${lo}–${hi} ft; readout at the cursor ${h.read} ft)`,
+      ).toBeGreaterThanOrEqual(lo - 0.5);
+      expect(h.level, `the hovered ${h.level} ft line must be reachable from the cursor within ${HOVER_TOL_PX}px ` +
+        `(raw ground there spans ${lo}–${hi} ft; readout at the cursor ${h.read} ft)`).toBeLessThanOrEqual(hi + 0.5);
+    }
 
     // Moving off a line clears it, and the permanent label set is exactly as it was —
     // the sweep left nothing orphaned behind.
@@ -244,6 +297,16 @@ test.describe("NEW-1 — hovering a contour names its elevation", () => {
    * and the scale bar float. The sweep deliberately runs a lap just inside all four edges,
    * so the flip cases are exercised rather than assumed. */
   test("the tag sits BESIDE the pointer, and flips at the edges instead of clipping", async ({ page }) => {
+    /* ⛔ THE TEST'S OWN BUDGET WAS SELF-CONTRADICTORY (B276452, 2026-08-08). This case waits up to
+     * 60 s below for the REAL 3DEP trace (fetch → decode → worker → paint) and then walks 185 cursor
+     * positions at ~45 ms each — but it inherited the config's 30 s default test timeout, so the
+     * inner 60 s budget could never be spent and the walk had no room even when the trace was fast.
+     * On a quick runner the trace lands in a few seconds and the walk squeaks in, which is why this
+     * has never been red in either lane and is NOT on the known-red ledger; in a sandbox relaying
+     * 3DEP through a proxy it times out every run, so the spec simply could not be run here.
+     * Raising this is NOT a product number and masks nothing — a timeout proves nothing in either
+     * direction. It only lets the assertions below actually be reached. */
+    test.setTimeout(180_000);
     const errors = [];
     page.on("pageerror", (e) => errors.push(String(e)));
     await openSite(page, { terrain: true });

@@ -174,6 +174,43 @@ bug and gets its own number.
 **Nothing is added to the ledger before this runs.** Seven rows on one sandbox's word is not the
 standard, and three of them are provably load-sensitive.
 
+### V73456 — B276448–B276450: the last six BOTH-LANE rows on the `ci` lane (signed in, against production). `Blocker: auth`
+
+**Already driven GREEN here, on the lane this sandbox CAN reach.** All three cases —
+`contour-hover-elevation`, `dim-callout-edit`, `flood-district-scoping` — were run in a real headless
+Chromium, logged out, against a local build of this tree (the ledger's `local` lane), and the full
+three spec files (18 cases) passed on **three consecutive runs**. ATTEMPT-BEFORE-YOU-PARK is
+satisfied: the Claude-doable check was done this session, not deferred.
+
+**And the determinism question was settled BEFORE any fix, because the dispatch turned on it.** Two
+of the three touch GIS-derived data, the same family being deliberately skipped, and "not marked
+intermittent" only means nobody had observed a PASS — never that determinism was proven. Each was
+therefore run **four times first**. All three failed identically every run; the contour case failed
+**bit-for-bit** (`2.8000000000000114`, four times). None is service-dependent and **none earned an
+intermittent marker**, so none was recorded with one.
+
+**What is still pending, and why it is a real blocker rather than a to-do.** The `ci` lane signs in
+and runs against production `planyr.io`. This sandbox's proxy CORS-blocks Supabase sign-in, so the
+signed-in configuration cannot be driven from here at all. The two lanes are deliberately not
+substitutes for each other (that is the whole reason `known-red.json` has a `lane` field), so the
+`local` pass is **not** evidence about `ci`.
+
+**The check, on the next scheduled `E2E (Playwright)` run:**
+1. The drift gate reports **`ci` known-red 7** and **`local` known-red 2**, not 10 and 5 — the six
+   removed rows are absent from the failure set because they passed, not because they were excused.
+2. **Zero new failures.** All three cases now live at NEW line numbers (`contour-hover-elevation`
+   :166 → :170; `dim-callout-edit` :90 → :130 and a second case at :150; the callout corner-radius
+   case moved too), so a case that did not really pass reappears under its new id as a NEW
+   REGRESSION — loud, and impossible to mistake for the old row.
+3. `dim-callout-edit` now runs **two** B912 cases where there was one. Both must pass: Properties on
+   the footprint-position number, and the inline editor once it is slid clear.
+4. The two cases fixed that were never on the ledger (B276451 corner-radius, B276452 the
+   tag-placement timeout) must also pass on the `ci` lane, where neither has ever been red.
+
+**If a row comes back it re-opens B276448 / B276449 / B276450** with a `Recurrence:` line. It does
+NOT go back on the ledger — a fixed case never keeps its amnesty, and neither does a not-quite-fixed
+one.
+
 ### V64544 — B267536: the pond/detention family on the `ci` lane (signed in, against production). `Blocker: auth`
 
 **Already driven GREEN here, on the lane this sandbox CAN reach — this is the second lane, not the

@@ -154,9 +154,24 @@ test.describe("flood & drainage district scoping (B1091(×2))", () => {
     const groupHead = live.getByRole("button", { name: /(Show|Hide) Flood & drainage layers/ });
     if (await groupHead.getAttribute("aria-expanded") === "false") await groupHead.click();
 
-    // 1. The single most useful line in the panel — the zone-specific SFHA sentence.
+    /* 1. The single most useful line in the panel — the zone-specific SFHA sentence.
+     *
+     * ⛔ COPY UPDATED 2026-08-08 (B276449). This asserted, verbatim:
+     *     "FEMA effective FIRM: Zone A — a special flood hazard area IS mapped here."
+     * B1236 (commit e82f0ce0, merged 0c141cb5, PR #884, 2026-07-30) deliberately re-shaped every
+     * FEMA verdict so THE ANSWER LEADS and FEMA's code follows as provenance — the owner report
+     * behind it was a Johnstown, CO site where the layer read "Type: X" and drew nothing, which is
+     * a correct answer nobody could use. `femaZoneVerdict` moved to lib/floodZoneCopy.js in the
+     * same change and now composes `${headline} — ${short}.`, so the zone letter is still named and
+     * the SFHA fact is still stated — in the opposite order, with the regulatory meaning spelled
+     * out. NOT a regression: the zone verdict was never lost, only rewritten. This spec was the
+     * only caller still pinned to the pre-B1236 wording, which is why it went red in both lanes.
+     *
+     * The seeded snapshot is zones X + A, so Zone A (the SFHA) must win the headline — that is the
+     * load-bearing half and it is asserted as text, not as a substring match. */
     await expect(live.getByTestId("flood-fema-verdict")).toHaveText(
-      "FEMA effective FIRM: Zone A — a special flood hazard area IS mapped here.", { timeout: 10000 });
+      "100-year floodplain · FEMA Zone A — a mapped Special Flood Hazard Area — the regulatory 1%-annual-chance floodplain.",
+      { timeout: 10000 });
     // …and the facts ARE in hand, so the not-checked state stays quiet.
     await expect(live.getByTestId("flood-facts-note")).toHaveCount(0);
 

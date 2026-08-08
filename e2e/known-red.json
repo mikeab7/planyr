@@ -86,12 +86,56 @@
     "The five copy assertions that HAD genuinely gone stale each name the commit that moved them,",
     "in the spec, at the line that changed.",
     "",
-    "STILL RED, and named rather than left to be inferred: layer-point-hover-identify (4 ci · 2",
-    "local), canvas-gis-identify (1 ci, intermittent), contour-hover-elevation (1 ci · 1 local),",
-    "flood-district-scoping (1 ci · 1 local) and dim-callout-edit (1 ci · 1 local). The first two",
-    "families reach an EXTERNAL GIS service — the host this sandbox blocks outbound, and the same",
-    "service whose availability flipped five rows between runs #41 and #42 — so they are not",
-    "fixable here and are not evidence of a defect until a lane with egress says otherwise."
+    "SHRUNK AGAIN 2026-08-08 BY B276448-B276450 — the last six BOTH-LANE rows, 3 out of EACH lane.",
+    "  ci    10 → 7  ·  local 5 → 2.  Every remaining row is external-GIS.",
+    "Each was driven GREEN in a real browser before it was removed, and each was first run FOUR",
+    "times to settle the question the ledger could not answer: not marked intermittent only means",
+    "nobody had observed a PASS, never that it was proven deterministic. All three failed",
+    "identically on every run — the contour one bit-for-bit (2.8000000000000114 four times) — so",
+    "all three were code-or-spec, not service availability. None earned an intermittent marker.",
+    "",
+    "WHAT EACH ONE ACTUALLY WAS. Two were stale SPECS and one was an ill-posed ASSERTION; none was",
+    "a product defect, and each names the commit that moved the behaviour, at the line that changed.",
+    "  • dim-callout-edit:90 — the genuine cross-lane row #956 predicted. B50010 (acd99a0d, PR #932,",
+    "    2026-08-07) deliberately reversed this gesture: when the dimension NUMBER sits on the",
+    "    element's BODY the body wins, so a building's number now opens Properties, not the inline",
+    "    length editor. It went red in both lanes the day after that merged. RETARGETED rather than",
+    "    rewritten: the case now pins BOTH halves of B50010's rule — body-wins at the default",
+    "    position, and B912's editor still opening once the number is slid clear of the footprint —",
+    "    so the coverage grew instead of shrinking.",
+    "  • flood-district-scoping:133 — pinned to the pre-B1236 FEMA wording. B1236 (e82f0ce0, merged",
+    "    0c141cb5, PR #884, 2026-07-30) re-shaped every verdict so the ANSWER leads and FEMA's code",
+    "    follows as provenance. The zone verdict was never lost, only rewritten; this spec was the",
+    "    last caller still asserting the old sentence.",
+    "  • contour-hover-elevation:166 — the pond rule applied (a contour number), so which of the",
+    "    spec and the code was right was settled with EVIDENCE first, and THE CODE IS RIGHT. The one",
+    "    offending sample sits in the bottom of a drainage channel: 140.2 ft at the cursor rising to",
+    "    ~147 ft within eight pixels on both sides, and the 143-ft line it named genuinely passes",
+    "    ~3 px away — inside the 6 px hover tolerance. 59 of 60 samples were within 1.7 ft; one",
+    "    channel bottom moved the MAX and nothing moved the distribution. A fixed foot ceiling on",
+    "    the max was never well-posed (the honest bound is tolerance × local relief, unbounded in a",
+    "    channel), so it was REPLACED, not loosened — nudging 2.5 to 3.0 is exactly what the pond",
+    "    rule forbids. What replaces it is stronger: the hovered line's level must be ATTAINED by",
+    "    the raw ground within the hover tolerance, which also catches a line traced in the wrong",
+    "    PLACE — something a foot ceiling never could.",
+    "",
+    "TWO MORE RED CASES WERE FOUND AND FIXED THAT WERE NEVER ON THIS LEDGER (B276451 / B276452), so",
+    "they are recorded here rather than left to surface as 'new regressions' on the next run. Both",
+    "were stale MEASUREMENTS in the same two spec files, and neither is a product defect:",
+    "dim-callout-edit's corner-radius case read SVG user units immediately after a wheel gesture,",
+    "which B1449's anchored zoom (c6a4b94d, PR #952, merged 2026-08-08 — the same day this ledger",
+    "was swept, which is why it was never listed) deliberately leaves unchanged until the re-layout",
+    "lands ~200 ms later; and contour-hover-elevation's tag-placement case allowed its own DEM trace",
+    "60 s inside a 30 s test timeout, a self-contradictory budget that only ever bit where the trace",
+    "is slow. The measured corner-radius proportion is 0.0600 before and after the zoom — the",
+    "invariant the test exists to prove was holding the whole time.",
+    "",
+    "STILL RED, and named rather than left to be inferred: layer-point-hover-identify (6 ci · 2",
+    "local) and canvas-gis-identify (1 ci, intermittent). ALL SEVEN remaining rows reach an EXTERNAL",
+    "GIS service — the host this sandbox blocks outbound, and the same service whose availability",
+    "flipped five rows between runs #41 and #42 — so they are not fixable here and are not evidence",
+    "of a defect until a lane with egress says otherwise. Four of them already carry an intermittent",
+    "marker with two run numbers behind it."
   ],
   "entries": [
     {
@@ -104,24 +148,6 @@
         "passedRun": 42,
         "why": "reaches an external GIS service; flips with that service's availability, not with the code"
       }
-    },
-    {
-      "id": "e2e/contour-hover-elevation.spec.js:166 › NEW-1 — hovering a contour names its elevation › hovering a line names its elevation — one label, tracking the cursor, no ghosts",
-      "lane": "ci",
-      "firstSeen": "2026-07-22",
-      "item": "B266081"
-    },
-    {
-      "id": "e2e/dim-callout-edit.spec.js:90 › B912 — editable dimension length › double-tap a building's dimension number → type a length → the building resizes",
-      "lane": "ci",
-      "firstSeen": "2026-08-08",
-      "item": "B266081"
-    },
-    {
-      "id": "e2e/flood-district-scoping.spec.js:133 › flood & drainage district scoping (B1091(×2)) › the VISIBLE panel carries the zone verdict and the scoping reasons; the hidden copy is inert",
-      "lane": "ci",
-      "firstSeen": "2026-07-22",
-      "item": "B266081"
     },
     {
       "id": "e2e/layer-point-hover-identify.spec.js:256 › electric layer point symbols + hover identify (NEW-1/NEW-2) › hovering a SUBSTATION names it — and moving off dismisses the readout",
@@ -178,24 +204,6 @@
         "passedRun": 42,
         "why": "reaches an external GIS service; flips with that service's availability, not with the code"
       }
-    },
-    {
-      "id": "e2e/contour-hover-elevation.spec.js:166 › NEW-1 — hovering a contour names its elevation › hovering a line names its elevation — one label, tracking the cursor, no ghosts",
-      "lane": "local",
-      "firstSeen": "2026-08-08",
-      "item": "B266081"
-    },
-    {
-      "id": "e2e/dim-callout-edit.spec.js:90 › B912 — editable dimension length › double-tap a building's dimension number → type a length → the building resizes",
-      "lane": "local",
-      "firstSeen": "2026-08-08",
-      "item": "B266081"
-    },
-    {
-      "id": "e2e/flood-district-scoping.spec.js:133 › flood & drainage district scoping (B1091(×2)) › the VISIBLE panel carries the zone verdict and the scoping reasons; the hidden copy is inert",
-      "lane": "local",
-      "firstSeen": "2026-08-08",
-      "item": "B266081"
     },
     {
       "id": "e2e/layer-point-hover-identify.spec.js:315 › electric layer point symbols + hover identify (NEW-1/NEW-2) › hovering a RASTER-painted layer identifies it through the service",

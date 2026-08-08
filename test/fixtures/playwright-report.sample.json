@@ -26,18 +26,19 @@
       ]
     },
     {
-      "title": "flood-district-scoping.spec.js",
-      "file": "flood-district-scoping.spec.js",
+      "title": "layer-point-hover-identify.spec.js",
+      "file": "layer-point-hover-identify.spec.js",
+      "specs": [],
       "suites": [
         {
-          "title": "flood & drainage district scoping (B1091(×2))",
-          "file": "flood-district-scoping.spec.js",
+          "title": "electric layer point symbols + hover identify (NEW-1/NEW-2)",
+          "file": "layer-point-hover-identify.spec.js",
           "specs": [
             {
-              "title": "at a site inside BKDD, BKDD is listed and HCFCD is the one demoted",
+              "title": "substation POINTS paint as circleMarkers, never a broken default marker",
               "ok": true,
-              "file": "flood-district-scoping.spec.js",
-              "line": 60,
+              "file": "layer-point-hover-identify.spec.js",
+              "line": 217,
               "tests": [
                 {
                   "status": "expected",
@@ -50,10 +51,10 @@
               ]
             },
             {
-              "title": "a stale saved county can't flip the governing district",
+              "title": "hovering a SUBSTATION names it — and moving off dismisses the readout",
               "ok": true,
-              "file": "flood-district-scoping.spec.js",
-              "line": 102,
+              "file": "layer-point-hover-identify.spec.js",
+              "line": 256,
               "tests": [
                 {
                   "status": "expected",
@@ -66,16 +67,96 @@
               ]
             },
             {
-              "title": "the VISIBLE panel carries the zone verdict and the scoping reasons; the hidden copy is inert",
+              "title": "a REDACTED substation still says what KIND of thing it is",
+              "ok": true,
+              "file": "layer-point-hover-identify.spec.js",
+              "line": 281,
+              "tests": [
+                {
+                  "status": "expected",
+                  "results": [
+                    {
+                      "status": "passed"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "title": "hovering a TRANSMISSION LINE names it with its voltage and owner",
+              "ok": true,
+              "file": "layer-point-hover-identify.spec.js",
+              "line": 298,
+              "tests": [
+                {
+                  "status": "expected",
+                  "results": [
+                    {
+                      "status": "passed"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "title": "hovering a RASTER-painted layer identifies it through the service",
               "ok": false,
-              "file": "flood-district-scoping.spec.js",
-              "line": 133,
+              "file": "layer-point-hover-identify.spec.js",
+              "line": 315,
               "tests": [
                 {
                   "status": "unexpected",
                   "results": [
                     {
                       "status": "failed"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "title": "an unreachable identify service says so, briefly — never a hanging spinner",
+              "ok": false,
+              "file": "layer-point-hover-identify.spec.js",
+              "line": 345,
+              "tests": [
+                {
+                  "status": "unexpected",
+                  "results": [
+                    {
+                      "status": "failed"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "title": "the hover readout renders in the light theme",
+              "ok": true,
+              "file": "layer-point-hover-identify.spec.js",
+              "line": 373,
+              "tests": [
+                {
+                  "status": "expected",
+                  "results": [
+                    {
+                      "status": "passed"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "title": "the hover readout renders in the dark theme",
+              "ok": true,
+              "file": "layer-point-hover-identify.spec.js",
+              "line": 373,
+              "tests": [
+                {
+                  "status": "expected",
+                  "results": [
+                    {
+                      "status": "passed"
                     }
                   ]
                 }
@@ -87,9 +168,9 @@
     }
   ],
   "$comment": [
-    "CAPTURED FROM A REAL `npx playwright test --reporter=json` RUN — a full 361-case local sweep",
-    "on 2026-08-08. Only the bulky per-result payloads (stdout, errors, attachments, durations)",
-    "were dropped; every structural fact the gate depends on is exactly as Playwright emitted it:",
+    "CAPTURED FROM A REAL `npx playwright test --reporter=json` RUN. Only the bulky per-result",
+    "payloads (stdout, errors, attachments, durations) were dropped; every structural fact the gate",
+    "depends on is exactly as Playwright emitted it:",
     "  · config.rootDir is the ABSOLUTE testDir, and spec.file is relative to IT;",
     "  · the top-level suite of each file has title === file, and must be skipped or",
     "    the filename appears twice in the id;",
@@ -99,16 +180,17 @@
     "got the first two wrong, so every id it produced missed the ledger. A fixture you invented can",
     "only confirm what you already believed. This one is real.",
     "",
-    "RE-CAPTURED 2026-08-08 BY B267537, and the reason is a defect in how the ORIGINAL was pinned.",
-    "It held two pond-outlet-clear rows, and the end-to-end test asserts every FAILING id here is",
-    "present on the LIVE e2e/known-red.json. B267536 fixed those two cases and removed them from the",
-    "ledger — so the guard went red for the ledger SHRINKING, which is the one thing the ledger",
-    "exists to be able to do. A guard that fails when its subject succeeds creates pressure to leave",
-    "a fixed case listed, which is exactly the amnesty the ledger is designed to prevent.",
-    "This capture deliberately carries PASSING cases as well as a failing one (the original had only",
-    "failures and a skip), so the status mapping is exercised in every direction. Its one failure,",
-    "flood-district-scoping.spec.js:133, is on the local-lane ledger. When THAT is fixed, re-capture",
-    "from a real run rather than editing this file by hand — test/e2eDriftGate.test.js says so in its",
-    "failure message."
+    "RE-CAPTURED 2026-08-08 BY B276448-B276450, for the SECOND time and for the same good reason:",
+    "the ledger shrank past the capture. B267537 re-captured against flood-district-scoping:133 and",
+    "wrote, in this very comment, \"when THAT is fixed, re-capture from a real run rather than editing",
+    "this file by hand\". B276449 has now fixed it, so that instruction was followed literally — this",
+    "is a fresh --reporter=json run, not an edit of the old one.",
+    "",
+    "THIS CAPTURE IS DELIBERATELY AIMED AT THE MOST DURABLE ROWS ON THE LEDGER. Its two failures,",
+    "layer-point-hover-identify.spec.js:315 and :345, are the local lane in its ENTIRETY, and they are",
+    "the external-GIS family: they reach a host this sandbox blocks outbound, so they are the last",
+    "rows anybody will fix from here and the least likely to age this fixture out again. It also",
+    "carries seven PASSING cases, so the status mapping is exercised in both directions — including",
+    "four rows the ci lane marks INTERMITTENT, which pass here exactly as that marker predicts."
   ]
 }
