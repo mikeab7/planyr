@@ -212,6 +212,33 @@ describe("guardVerdict — the standing counter-based guard (NEW-3)", () => {
     expect(v.missing).toEqual(["S.jsx:drawEls"]);
   });
 
+  /* B217539 — a shared pure-library leaf is asked more than one question per frame, so the guard
+   * needed a way to say "once per distinct question". `max` is that, and these pin its semantics:
+   * it defaults to 1 (so every existing entry is unchanged) and it is an EXACT ceiling, not a
+   * fudge factor — one call over still fails. */
+  it("max defaults to 1, so an entry that does not set it is unchanged", () => {
+    const v = guardVerdict(classifyGesture([site({ file: "S.jsx", name: "drawEls", calls: 2, inputs: ["a", "b"], results: ["r", "r"] })]), registry);
+    expect(v.ok).toBe(false);
+    expect(v.failures[0].why).toContain("must be ≤ 1");
+  });
+
+  it("max: 2 admits exactly two distinct questions and no more", () => {
+    const reg = [{ file: "S.jsx", name: "layoutLabelsSolve", max: 2, why: "the label collision pass, asked once per call site" }];
+    const mk = (calls) => classifyGesture([site({ file: "S.jsx", name: "layoutLabelsSolve", calls, inputs: Array.from({ length: calls }, (_, i) => `i${i}`), results: Array(calls).fill("r") })]);
+    expect(guardVerdict(mk(2), reg).ok).toBe(true);
+    const over = guardVerdict(mk(3), reg);
+    expect(over.ok).toBe(false);
+    expect(over.failures[0].why).toContain("must be ≤ 2");
+    expect(over.failures[0].max).toBe(2);
+  });
+
+  it("max does NOT exempt an entry from the never-observed check", () => {
+    // The rot-detector still applies: a registered computation the probe never saw is a failure
+    // whatever its ceiling, or renaming it would turn the guard permanently green.
+    const reg = [{ file: "S.jsx", name: "layoutLabelsSolve", max: 2, why: "the label collision pass" }];
+    expect(guardVerdict([], reg).missing).toEqual(["S.jsx:layoutLabelsSolve"]);
+  });
+
   it("is keyed on file:NAME, never file:line — a line number moves on every unrelated edit", () => {
     const moved = classifyGesture([site({ file: "S.jsx", line: 99999, name: "drawEls", calls: 1, inputs: ["a"], results: ["r"] })]);
     expect(guardVerdict(moved, registry).ok).toBe(true);

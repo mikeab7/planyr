@@ -50,14 +50,33 @@ function depsOf(name) {
   return src.slice(lastComma + 1, i - 1).trim().replace(/,\s*$/, "");
 }
 
+const SP_FILE = "src/workspaces/site-planner/SitePlanner.jsx";
+const spEntries = REGISTRY.filter((r) => r.file === SP_FILE);
+const libEntries = REGISTRY.filter((r) => r.file !== SP_FILE);
+
 describe("the VIEW-INDEPENDENT-ONCE registry has not rotted", () => {
   it("is not empty — an empty registry is a guard that asserts nothing", () => {
     expect(REGISTRY.length).toBeGreaterThan(8);
   });
 
-  it("every entry names a real memo in SitePlanner.jsx", () => {
-    const missing = REGISTRY.filter((r) => depsOf(r.name) == null).map((r) => r.name);
+  it("every SitePlanner entry names a real memo in SitePlanner.jsx", () => {
+    const missing = spEntries.filter((r) => depsOf(r.name) == null).map((r) => r.name);
     expect(missing).toEqual([]);
+  });
+
+  /* B217539 — the registry gained its first PURE-LIBRARY entry. A leaf has no dep array to
+   * inspect, so the source-level half checks the two things it can: the symbol still exists as an
+   * export in the file the registry names (the browser gate makes the same check against runtime
+   * observation), and it is reached through a memo rather than being called raw. Without this, a
+   * library entry would be silently exempt from the anti-rot check that is this file's whole job. */
+  it("every library entry names a real export in the file it claims", () => {
+    for (const r of libEntries) {
+      const code = readFileSync(join(ROOT, r.file), "utf8");
+      expect(
+        new RegExp(`export\\s+(?:const|function)\\s+${r.name}\\b`).test(code),
+        `${r.file} no longer exports ${r.name} — the registry has rotted`,
+      ).toBe(true);
+    }
   });
 
   it("every entry carries a WHY, so a failure names the property and not just the symbol", () => {
@@ -66,7 +85,9 @@ describe("the VIEW-INDEPENDENT-ONCE registry has not rotted", () => {
 });
 
 describe("⛔ no registered memo may key on a view term the answer does not use", () => {
-  for (const r of REGISTRY) {
+  // Library entries have no dep array to read; their key is a value signature, and the browser
+  // gate is what proves it holds. Only the component memos can be checked this way.
+  for (const r of spEntries) {
     it(`${r.name} — ${r.why}`, () => {
       const deps = depsOf(r.name);
       expect(deps, `${r.name} is registered but has no memo`).not.toBeNull();

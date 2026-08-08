@@ -156,7 +156,27 @@ const MUST_BE_ZERO = [
  * run proves the pass was reached and that the three zeros above are real zeros rather than an
  * empty report. Without it, deleting the ponds from the fixture would turn this check permanently
  * green — the exact rot VIEW-INDEPENDENT-ONCE §6 names. */
-const MUST_BE_PRESENT = ["pondStageModel", "pondLedgerSignature", "interiorFitter"];
+/* ⛔ B217539 (2026-08-08) — `interiorFitter` LEFT THIS LIST, and the reason is the same shape as
+ * B221763's `usablePondVolume` move above: a fix made it unreachable on a pan, so demanding that
+ * the probe SEE it turned a success into a red.
+ *
+ * WHAT CHANGED. `interiorFitter` is only ever reached from the label COLLISION pass, and that pass
+ * now resolves once per distinct question instead of once per frame (`labelLayout.layoutLabels`).
+ * On this fixture a pan took it from **262 calls to 0** — the intended win, measured both ways.
+ *
+ * WHY IT IS NOT SIMPLY MOVED TO `MUST_BE_ZERO`, which would be the stronger-looking choice. The
+ * honest count is 0 OR up to 2, not a hard zero: the solver legitimately runs once per call site,
+ * and whether either lands inside this probe's gesture window depends on where the window opens.
+ * Pinning it to zero would be an assertion that is true most runs and red some runs, and a guard
+ * that is intermittently red is worse than no guard — people learn to re-run it.
+ *
+ * ⛔ THE PROPERTY IS NOT DROPPED, IT MOVED HOUSE. "The label pass was actually reached, and it ran
+ * at most once per distinct question" is asserted by `ui-audit/verify-view-independent.mjs`, whose
+ * registry carries `labelLayout.js:layoutLabelsSolve` with `max: 2` AND whose never-observed rule
+ * fails if the probe cannot see it at all — the same anti-rot contract as this list, applied where
+ * the count is deterministic. The two sentinels left here (`pondStageModel`, `pondLedgerSignature`)
+ * still make an empty report impossible to pass off as a clean one, which is this list's job. */
+const MUST_BE_PRESENT = ["pondStageModel", "pondLedgerSignature"];
 
 if (process.argv.includes("--assert")) {
   const byName = new Map(pond.map((s) => [s.name, s]));

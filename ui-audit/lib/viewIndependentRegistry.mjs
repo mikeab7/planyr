@@ -16,6 +16,12 @@
  * `why`, so a failure names the property rather than the symbol.
  */
 const SP = "src/workspaces/site-planner/SitePlanner.jsx";
+/* A PURE-LIBRARY entry (B217539). The probe instruments exported library functions as well as
+ * `useMemo`s, so a leaf can carry the same promise a component memo does — and must, when it is
+ * reached from more than one call site. Registry entries in this file are checked differently by
+ * `test/viewIndependentRegistry.test.js`: an SP entry must name a real `useMemo`, a library entry
+ * must name a real export. */
+const LL = "src/workspaces/site-planner/lib/labelLayout.js";
 
 export const REGISTRY = [
   { file: SP, name: "drawEls",
@@ -44,6 +50,27 @@ export const REGISTRY = [
     why: "the measurement z bands — a function of `measures` alone" },
   { file: SP, name: "siteSqft",
     why: "dissolved site area — parcels only" },
+  /* B217539 — the FIRST pure-library entry, and it is registered deliberately rather than being
+   * memoised at its two call sites. `layoutLabels` is a leaf called from the render body, and a
+   * third caller (an export pass, a future overlay) would reintroduce the defect with nothing to
+   * notice; keying the promise to the FUNCTION rather than to a `useMemo` in one component is what
+   * makes "a redundant re-solve reached from a different path" the same failure. Its inputs are
+   * screen boxes baked at the pan ANCHOR (B1440), so a pan holds every one of them constant. */
+  /* ⚠ The registered name is the SOLVER, not the `layoutLabels` wrapper, and that is the same
+   * convention every other entry here follows. `drawEls` is a `useMemo`: the component re-renders
+   * 372× and the guard counts FACTORY executions, not renders. The library analogue is exactly
+   * that — the wrapper is asked once per render by design, and the question this guard asks is how
+   * often the pass actually RAN. Registering the wrapper would assert "the render body did not run",
+   * which is a different (and false) claim. */
+  /* `max: 2` is the number of DISTINCT QUESTIONS, not a tolerance: the planner asks this pass once
+   * for the measurement chips and once for the element labels, and the detector confirms it —
+   * during a pure pan the input fingerprints ALTERNATE between exactly two values. A perfectly
+   * memoised pass therefore solves twice, and `≤ 1` would assert something false. It is pinned to
+   * the source: `test/labelLayoutMemo.test.js` asserts SitePlanner has exactly two `layoutLabels(`
+   * call sites, so a third turns CI red and forces a decision here instead of a quiet bump.
+   * Before the fix this ran 372×. */
+  { file: LL, name: "layoutLabelsSolve", max: 2,
+    why: "the greedy label COLLISION pass over every label on the plan — items and obstacles are baked at the pan anchor, so a pan cannot change one of its inputs" },
 ];
 
 export default REGISTRY;
