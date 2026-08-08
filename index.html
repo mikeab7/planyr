@@ -171,9 +171,21 @@
       })();
     </script>
     <meta name="theme-color" content="#EAEEF3" />
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+    <!-- Inter is SELF-HOSTED (B276576) — see the @font-face block at the top of
+         src/index.css for the full reasoning. There is deliberately NO
+         fonts.googleapis.com <link> here: it was render-blocking, and a
+         stylesheet blocks execution of every later script, including the entry
+         module below — so the whole boot waited on a third-party round trip on
+         every load. Do not reintroduce one; test/bootRenderBlocking.test.js and
+         ui-audit/verify-font-blocking.mjs both fail if a cross-origin
+         render-blocking resource comes back to this file.
+         The preload starts the one font the UI actually needs at the same moment
+         as the stylesheet that references it, instead of a round trip later when
+         the CSS finally parses. `crossorigin` is REQUIRED even same-origin —
+         fonts are fetched in CORS mode, and without it the preload is discarded
+         and fetched a second time. Only the latin subset is preloaded; latin-ext
+         is declared in the CSS but requested only if such a character appears. -->
+    <link rel="preload" href="/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin />
     <!-- Planyr brand icons (generated from brand/planyr-favicon.svg via
          brand/generate-icons.mjs). SVG is preferred by modern browsers; the .ico
          is the legacy fallback; apple-touch-icon is the iOS home-screen tile. -->

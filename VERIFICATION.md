@@ -113,6 +113,65 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V73584 — B276576: does the edge actually serve the self-hosted Inter, and does production paint faster for it? `Blocker: live-deploy`
+
+**⛔ READ THIS FIRST — the vast majority of this item was DRIVEN HERE, not parked.** Per rule 4, only
+the step *after* our code is walled. What was verified in-sandbox this session, headless, on a real
+build: **`ui-audit/verify-font-blocking.mjs` (`npm run perf:fontblock`)** — a one-build, one-server,
+two-document A/B with the font host's latency injected. Arm A is the pre-fix build with the removed
+`<link>` re-injected and **must stall or the harness fails**; arm B is what we ship. At a 2,000 ms
+delay: **first paint 2,372 → 384 ms · app mounted 2,058 → 81 ms** (a 1,988 ms pass-through
+eliminated). At `--delay 0` — a perfectly fast font host, the best possible case for the pre-fix
+build — still **596 → 448 ms · 152 → 98 ms**. Plus `test/bootRenderBlocking.test.js` 11/11
+(mutation-proven red on re-injection), `npm test` full suite, lint, and a green build.
+
+**WHAT IS GENUINELY WALLED, and it is narrower than it first looked.** The wall was **re-tested this
+session, not inherited**: Chromium against the branch-preview URL still dies with
+`net::ERR_CONNECTION_RESET`, exactly as **V477** recorded, so no *browser* observation of the deployed
+edge is possible here. But `curl` does get through, which turned out to be enough to discharge (a)
+outright — see below. What remains needs a real browser on a real network, and only that. On
+**production planyr.io**, confirm:
+
+- **(a) The font files are served, with the right type.** ✅ **DISCHARGED 2026-08-08 against the REAL
+  Cloudflare edge** (the PR #961 branch preview, `claude-google-fonts-render-b.planyr.pages.dev`) — not
+  assumed, and not deferred. V477 records that `curl` reaches these hosts even though Chromium is reset
+  at the socket, so the highest-risk unknown here was reachable after all and was checked:
+  **`/fonts/inter-latin.woff2` → HTTP 200, `content-type: font/woff2`, 48,256 bytes** and
+  **`/fonts/inter-latin-ext.woff2` → HTTP 200, `content-type: font/woff2`, 85,068 bytes** — both
+  byte-exact against the repo, both with a valid `wOF2` signature and a self-declared length matching
+  the actual length (so neither is a truncated read or an HTML error page wearing a 200). This was the
+  one failure mode that fails *silently*: a wrong MIME type falls back to `system-ui` with no console
+  error and no visual alarm. It does not happen. Also confirmed on the deployed document: **zero live
+  `<link>`/`<script>` tags naming `fonts.googleapis.com` or `fonts.gstatic.com`** (the single textual
+  match is inside the explanatory HTML comment), the `crossorigin` font preload is present, and the
+  hashed app CSS really does carry `url(/fonts/inter-latin.woff2)` and `url(/fonts/inter-latin-ext.woff2)`.
+  ⏳ Re-confirm the same two headers on **planyr.io** itself once this merges — the preview and
+  production are the same Pages project, so this is a formality rather than an open question.
+- **(b) Inter actually renders — the check that catches (a) failing quietly.** In DevTools on a loaded
+  app page, `document.fonts.check('16px Inter')` is `true`, and the Network tab shows
+  `inter-latin.woff2` fetched from **planyr.io**, once, with **no request to `fonts.googleapis.com` or
+  `fonts.gstatic.com` anywhere in the waterfall**. Rendering/Fonts should show Inter, not a fallback.
+- **(c) The preload is not wasted.** `inter-latin.woff2` appears **once**, not twice. A `crossorigin`
+  mismatch on a font preload causes the browser to discard it and fetch the file a second time — the
+  page still looks perfect while paying double, which is why this is worth an explicit look.
+- **(d) `latin-ext` is NOT fetched** on an ordinary English session. Its `unicode-range` should keep
+  83.1 KB off the wire unless such a character is on screen.
+- **(e) The number this was all for.** `BASE_URL=https://planyr.io node ui-audit/perf-harness.mjs` from
+  a machine with **direct** network access (the owner's browser or a Cowork session — **not** a Claude
+  sandbox). Two things to read: **`firstContentfulPaintMs` should now be reported as JUDGED**, not
+  *MEASURED BUT NOT JUDGED* — the un-mute is only meaningful if the deployed page really carries no
+  cross-origin render-blocking resource — and its **value against the 500 ms ceiling**.
+  ⚠ **This is the number to re-seed from, and it is deliberately NOT being re-seeded from the sandbox.**
+  The sandbox reports 688 ms; the *unmodified pre-fix tree* reports 668 ms on that same container, so
+  that figure measures the container, not this change. The 500 ms ceiling's provenance is production
+  (328 ms measured 2026-07-28). **Overlaps V477, which already owns re-seeding the paint ceilings — do
+  both in one pass and record the result on whichever you run.**
+- **(f) Nothing looks different.** Type across the planner, the header, the yield panel and the Review
+  tab should be visually unchanged from before this shipped — same face, same weights (the variable
+  file covers 400–800). A subtle metric shift would mean the wrong file is being served.
+
+*(minted V73584; references **B276576**, overlaps **V477**; `Cadence: once`. Implemented + fully
+sandbox-verified 2026-08-08 — the residue above is the deployed edge only.)*
 ### V73760 — B276752/B276753/B276755: the WHOLE portfolio, driven against the live agency services
 
 **Status: ✅ PASSED (2026-08-08) for every site the sandbox can reach — 27 of 28. One site (GREEN RIVER) has no active parcel geometry, so the app shows no badge and there is nothing to check.**
