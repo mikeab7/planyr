@@ -113,6 +113,52 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V63088 — B266080 / B266082: the e2e drift gate and the NEW logged-out lane, on a real GitHub Actions run. `Blocker: ci-run`
+
+**What is already proven here, in the sandbox:** the gate is mutation-proven three ways against
+the real committed ledger (true failure set → exit 0 · one fabricated new failure → exit 1, named ·
+one ledgered case flipped to passing → exit 1, named), plus 16 unit tests. The rewritten
+`module-keepalive` spec runs green locally (7 passed, 1 skipped), and a full local sweep of the
+whole suite ran to completion (303 passed · 33 failed · 24 skipped, 23.5 min).
+
+**What CANNOT be checked from here, and is what this item is for** — none of it involves the owner:
+- **(a)** That `npm run e2e -- --reporter=list,json` actually writes `e2e-results.json` where
+  `PLAYWRIGHT_JSON_OUTPUT_NAME` says, under the workflow's own Playwright version. The gate exits
+  non-zero on a missing report by design, so a wiring mistake fails loudly rather than green — but
+  it would fail the job, and that should be seen once on a real run.
+- **(b)** That the **ci** lane's 29 seeded ids match the ids Playwright's JSON reporter emits on a
+  runner. They were transcribed from the LIST reporter's text in run #41; if the JSON reporter's
+  `file` field is absolute rather than repo-relative, every row reports as `absent` and the gate
+  passes while observing nothing. **That is the one failure mode here that is quiet, so it is the
+  first thing to check** — the run prints `N case(s) ran · M failed · K on the known-red ledger`.
+- **(c)** That the new **e2e-local** job (logged out, local build) completes inside the runner's
+  time budget, and what its true red set is on a machine with open GIS egress. Its 32 seeded rows
+  came from a sandbox that blocks those hosts; any artefact shows up as a STALE row and shrinks the
+  ledger by one line, which is the designed outcome, not a fault.
+- **(d)** That the `@claude` issue now fires on the DRIFT verdict rather than the raw suite exit —
+  i.e. that a still-red-but-known run files NOTHING, which is the whole point.
+
+**How:** Actions → *E2E (Playwright)* → Run workflow (or wait for the 13:30 UTC weekday schedule).
+
+---
+
+### V63089 — B266084: bundle-byte attribution on a REAL pull request, with a real base-ref build. `Blocker: ci-run`
+
+**Already proven here:** the split is unit-tested on every branch (7 cases), and driven end-to-end
+against a real build with a crafted base snapshot — as a pull request an inherited breach PASSES
+with a named line; as a push to main the identical numbers FAIL. `classify()` is asserted untouched,
+so main keeps its absolute verdict.
+
+**Still to see on a real run:** that `scripts/perf-base-stats.mjs` emits `notesRouteJsBytes` in its
+snapshot (the field was added this session — an older cached base snapshot reports `null` for it and
+falls back to the un-attributed verdict, which is safe but is one metric unattributed), and that
+`GITHUB_BASE_REF` correctly selects the pull-request lane so main is still judged absolutely. The
+run prints a `Whose bytes are these?` block on every invocation; on this PR it should show a small
+positive `base` drift on all four metrics and this branch's own delta at roughly zero, since nothing
+under `src/` changed.
+
+---
+
 ### V62544 — B265536: one real `event:perfcap` row from HIS signed-in browser. `Blocker: auth` `Blocker: real-data`
 **The pipe is proven to the database and no further; this is the only link left.** Full record:
 `docs/CAPTURE-PIPE.md`.

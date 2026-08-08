@@ -30,6 +30,8 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { loadBuild, measureBundle, kb, ROOT } from "../ui-audit/lib/bundleMetrics.mjs";
 import { isBanded, METRIC_KEYS } from "../ui-audit/lib/perfBudgetPolicy.mjs";
 
@@ -166,8 +168,83 @@ if (metricArg && metricArg.startsWith("runtime.")) {
   process.exit(0);
 }
 
-const build = loadBuild(join(ROOT, "dist"));
-if (!build) die("no build found at dist/.vite/manifest.json — run `npm run build` first.", [
+/* ---- B266083 — THE BUILD THIS MEASURES IS THE BUILD IT MAKES -------------------------------
+ *
+ * THE DEFECT. The header above has promised, since this script was written, that it "measures
+ * the value itself, FROM A FRESH BUILD" and that "you cannot ratchet to a number you did not
+ * measure". Half of that was true. Nothing here ever built anything: it read whatever `dist/`
+ * happened to be lying in the working tree, produced by whoever last typed `npm run build`,
+ * at whatever revision the tree was in at that moment. So the second half held — the number
+ * came from a real measurement — while the first half was a comment, and a stale, partial or
+ * different-tree `dist/` recorded a baseline its own commit could not reproduce.
+ *
+ * THIS IS NOT A HYPOTHESIS. Measured 2026-08-08, on a clean clone at Node 22.22.2 / npm 10.9.7,
+ * each of the four bundle baselines rebuilt at the exact commit that recorded it:
+ *
+ *     notesRouteJsBytes  @53d1bac    634,678  vs recorded    634,678   →       0   EXACT
+ *     siteRouteJsBytes   @c55ce52  2,430,257  vs recorded  2,426,185   →    +190
+ *     totalJsBytes       @259db28  4,807,077  vs recorded  4,806,089   →    +988
+ *     largestChunkBytes  @cd9c94c  1,513,081  vs recorded  1,508,765   →  +4,316
+ *
+ * Two clean builds of the same tree in the same container came back BYTE-IDENTICAL, and
+ * `notesRouteJsBytes` — recorded in a different session, on a different day, in a different
+ * container — reproduced to the byte here. So the toolchain is deterministic and reproducible
+ * across environments, and B1178's three suspects (a caret range floating, `npm ci` not being
+ * used, a different Node or npm major) are all REFUTED. What is left is the stale `dist/`.
+ *
+ * THE FIX, three parts, all of which fail loudly rather than degrade:
+ *   1. Build it here, into a dist of our own, unless `--dist <path>` names one deliberately.
+ *   2. Refuse a working tree with uncommitted changes to anything the bundle is a function of
+ *      (src/, index.html, public/, vite.config.js, package.json, package-lock.json) — a number
+ *      measured from a tree that no commit contains is unreproducible by construction.
+ *   3. Record `commit` and `sourceHash` on the entry, so `npm run perf:baseline-verify` can
+ *      later rebuild the exact tree and prove the recorded number is what it produces.
+ */
+const BUILD_INPUTS = ["src", "index.html", "public", "vite.config.js", "package.json", "package-lock.json"];
+const gitOut = (args) => execFileSync("git", args, { cwd: ROOT, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+
+let commit = null;
+let sourceHash = null;
+try {
+  const dirty = gitOut(["status", "--porcelain", "--", ...BUILD_INPUTS]);
+  if (dirty && !has("--allow-dirty")) {
+    die("the working tree has uncommitted changes to files the bundle is a function of.", [
+      "A baseline measured from a tree no commit contains cannot be reproduced by anything, ever.",
+      "That is the B1178 defect at its source. Commit the change first, then ratchet.",
+      ...dirty.split("\n").slice(0, 8).map((l) => `  ${l}`),
+      "(--allow-dirty exists for a local dry run and is refused for a real write.)",
+    ]);
+  }
+  commit = gitOut(["rev-parse", "HEAD"]);
+  // A content hash over exactly the build inputs at HEAD — not the commit id, which also moves
+  // for a docs-only change, and not the whole tree, which would make every baseline look stale.
+  sourceHash = createHash("sha256")
+    .update(gitOut(["rev-parse", `HEAD:`]) + "\n")
+    .update(BUILD_INPUTS.map((p) => { try { return `${p} ${gitOut(["rev-parse", `HEAD:${p}`])}`; } catch { return `${p} -`; } }).join("\n"))
+    .digest("hex").slice(0, 16);
+} catch (e) {
+  if (!has("--allow-dirty")) die(`git could not describe this tree (${e.message.split("\n")[0]}).`, [
+    "The ratchet records the commit it measured so the number can be re-derived later.",
+  ]);
+}
+if (has("--allow-dirty") && !DRY) {
+  die("--allow-dirty is a dry-run affordance only; it may not write a baseline.", [
+    "Commit the change and re-run, or add --dry-run to see what it would record.",
+  ]);
+}
+
+const DIST = argOf("--dist");
+if (!DIST) {
+  console.log("Building (B266083 — the ratchet builds what it measures; it will not read a dist it did not make)…");
+  try {
+    execFileSync("npx", ["vite", "build", "--outDir", "dist-ratchet"], { cwd: ROOT, stdio: ["ignore", "pipe", "pipe"], encoding: "utf8" });
+  } catch (e) {
+    die(`the build failed, so there is nothing to measure (${String(e.stderr || e.message).split("\n").slice(-3).join(" ").slice(0, 240)})`);
+  }
+}
+const distDir = join(ROOT, DIST || "dist-ratchet");
+const build = loadBuild(distDir);
+if (!build) die(`no manifest at ${distDir}/.vite/manifest.json — the build produced nothing measurable.`, [
   "The ratchet measures the value itself; it will not write a number you typed in.",
 ]);
 
@@ -254,10 +331,14 @@ function appendEntries(text, entries) {
   return `${before}${needsComma ? "," : ""}\n${body}\n      ${text.slice(close)}`;
 }
 
+/* B266083 — `commit` and `sourceHash` are what make a baseline CHECKABLE rather than merely
+ * recorded. `npm run perf:baseline-verify` rebuilds that exact tree and asserts the recorded
+ * number is what it produces; without these two fields there is nothing to rebuild, which is
+ * why the first four baselines could only be audited by hand, nine days late. */
 const entries = applied.map((a) => ({
   metric: a.path, from: a.from, to: a.to,
   direction: a.raising ? "raise" : "ratchet",
-  item, date, reason: reason.trim(),
+  item, date, commit, sourceHash, reason: reason.trim(),
 }));
 
 if (!DRY) {

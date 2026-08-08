@@ -84,6 +84,8 @@ dist
 # The instrumented build the VIEW-INDEPENDENT-ONCE detector drives (PLANYR_PROBE=1).
 dist-probe
 dist-pipe
+dist-ratchet
+dist-baseline-verify
 .output
 
 # Gatsby files
