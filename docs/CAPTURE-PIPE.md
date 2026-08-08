@@ -143,3 +143,60 @@ his session, his network. The check is: he loads planyr.io once on build `c6a4b9
 `select * from public.client_errors where source = 'event:perfcap'` returns a row. **There is no
 action for him** — no button to press, no report to file. Loading the app is the whole test, and
 if the row does not appear, the button now tells him so at the moment it happens.
+
+---
+
+## 6. WHO ELSE WAS WRITING TO THIS TABLE — and why the pipe guard now has an opt-in (B270912, 2026-08-08)
+
+§1–§5 asked whether the owner's capture *arrives*. They never asked what it arrives *among*. Measured
+against production the day after: **679 rows in 24 hours, of which 87 of 98 `event:perf` rows were
+automated and 11 were his — 89% noise.** Non-perf was worse (`assembly-orphan-pad-repaired` 154 ·
+`map-registration-out-of-range` 119 · `assembly-tear-persisted` 91 · `assembly-tear-detected` 65 ·
+`county-healed` 47, all on e2e fixture ids), and #954's logged-out CI lane had just multiplied it.
+
+**This is §1's defect wearing a different hat.** §1 was a capture that could not be *seen* to fail;
+this is a capture that cannot be *found*. Both end the same way — the highest-value signal in the
+programme, the one the owner produces himself, missing from the place people look for it.
+
+### The premise the fix could not use
+
+The obvious gate is `window.__PLANYR_E2E`, which `docs/PERF-PLAN-SWITCH.md` §1 describes as set by
+*"every performance harness in this repo"*. **That is true of the ui-audit perf harnesses and false of
+the e2e suite** — 62 of the 81 specs in `e2e/` never set it, `assembly-tear-detector.spec.js` (the top
+producer of three of the five loudest sources) among them. A flag-only gate would have silenced 19
+specs, left every top row untouched, and reported success. The primary detector is therefore
+`navigator.webdriver`, which the browser sets itself under any automation protocol and which needs no
+per-spec discipline; the flag remains as a second door.
+
+### The trap, which is the interesting part
+
+**Everything §2–§4 proves runs under automation.** Suppress unconditionally and this document's own
+harness is disabled by the fix it describes — the `rejected` and `offline` arms, which exist precisely
+because nothing could observe a rejection before B265536, would pass forever while observing nothing.
+That is the failure this repo has now caught six times, committed by the fix for its fifth instance.
+
+So suppression is the DEFAULT under automation and `window.__PLANYR_TELEMETRY_NETWORK` is the explicit
+opt-in, and **both directions are proven, in the same file:**
+
+| run | expectation | result |
+|---|---|---|
+| clean, opted-in arms | rows reach the wire, failures stay loud | ✅ 5 arms, 12 perfcap inserts |
+| clean, `suppressed` arm | **0 writes to `client_errors`**, capture still taken + stored + labelled | ✅ |
+| **mutant A** — suppression made unconditional | the pipe guard must NOT go quietly green | **7 assertions red** |
+| **mutant B** — suppression removed | the noise must come back visibly | **4 assertions red, 5 rows on the wire** |
+
+### Two things the arm's own first run established
+
+**The claim is about the TABLE, not the origin.** It first asserted "no request of any kind" and failed
+on `/auth/v1/health`. Supabase is also this app's data backend — an automated run legitimately signs in
+and reads plans — so the assertion is scoped to `/rest/v1/client_errors`, and every other request the
+page made is printed rather than ignored, so a write to some future sink cannot hide behind the
+narrower claim.
+
+**Nothing distinguishes a test row server-side.** Of 410 rows in one day, **0** carry a headless user
+agent and **0** a localhost URL: CI drives a real Chromium under xvfb against the deployed origin. No
+cleanup query could ever have separated the synthetic rows from his, which is why the read-side
+workaround had to key on his display signature — and why the gate has to live in the client.
+
+Retention is deliberately NOT applied here; it is proposed, with a number and a trigger, on **B270913**.
+The measurement says it is not yet the lever: **0 rows are older than 90 days.**

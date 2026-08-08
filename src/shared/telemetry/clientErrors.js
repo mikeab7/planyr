@@ -122,6 +122,7 @@ export function decideReport(sig, now, state = {}, opts = {}) {
 let _state = { seen: new Map(), windowStart: 0, sent: 0, total: 0 };
 let _module = null;
 let _installed = false;
+let _win = null;                       // the window the telemetry was installed against (B270912)
 const _recent = []; // diagnostic ring buffer (last N rows) for live/headless debugging
 
 /* Tag subsequent reports with the active workspace (the Shell calls this on switch). */
@@ -129,8 +130,65 @@ export function setTelemetryModule(id) { _module = id || null; }
 
 /* The outcome shape every reporter returns, for the callers that need to know whether the row
  * actually left the machine. `reason` says WHY nothing was sent when `ok` is false and there is no
- * `error`: "suppressed" (dedup / rate cap / session ceiling), "empty", "no-cloud", "threw". */
+ * `error`: "suppressed" (dedup / rate cap / session ceiling), "empty", "no-cloud", "threw",
+ * "automated-run" (this page is a test harness — see networkReportSuppression). */
 const notSent = (reason) => Promise.resolve({ ok: false, reason, error: null, at: Date.now() });
+
+/* ── AUTOMATED RUNS DO NOT REPORT TO PRODUCTION (B270912) ──────────────────────────────────────
+ *
+ * ⛔ AN INSTRUMENT THAT BURIES THE SIGNAL IT WAS BUILT TO CATCH IS THE DEFECT, NOT THE TIDINESS
+ * PROBLEM. Measured against the production table on 2026-08-08: 679 rows in twenty-four hours, of
+ * which 87 of 98 `event:perf` rows came from automated runs and 11 from the owner — 89% noise. The
+ * non-perf sources were worse (`assembly-orphan-pad-repaired` 154, `map-registration-out-of-range`
+ * 119, `assembly-tear-persisted` 91, `assembly-tear-detected` 65, `county-healed` 47, every one
+ * carrying an e2e fixture id). The recorder in #951 exists so that the owner pressing "that felt
+ * slow just now" reaches somebody; that row was arriving as one in several hundred synthetic ones,
+ * separable only by filtering his display signature from the READ side. That filter is a
+ * workaround, not a design, and a genuine production incident would have arrived buried in test
+ * traffic the same way.
+ *
+ * ⛔ THE DETECTOR IS `navigator.webdriver` FIRST, AND THE REASON IS MEASURED, NOT STYLISTIC.
+ * The obvious gate was `window.__PLANYR_E2E`, which `docs/PERF-PLAN-SWITCH.md` §1 describes as set
+ * by "every performance harness in this repo" — and for the ui-audit perf harnesses that is true.
+ * It is NOT true of the e2e suite, which is where the measured noise actually comes from: **62 of
+ * 81 specs in `e2e/` never set it**, `assembly-tear-detector.spec.js` — the top producer of three
+ * of the five loudest sources — among them. A flag-only gate would have silenced 19 specs, left
+ * every top row untouched, and reported success. `navigator.webdriver` is set by the browser
+ * itself under ANY automation protocol (Playwright, Puppeteer, Selenium), is never true for a real
+ * user, and needs no per-spec discipline — so it holds for harnesses nobody has written yet. The
+ * flag stays as a second door, for an automated context driving a browser that is not webdriver-
+ * controlled.
+ *
+ * ⛔ AND WHY THERE IS AN OPT-IN AT ALL — the whole difficulty of this change. `verify-capture-pipe`
+ * proves the row reaches the network, and its `rejected`/`offline` arms are the anti-rot half that
+ * proves a FAILED delivery is loud. Both run under automation. Suppress unconditionally and that
+ * verification is disabled by its own fix — it would pass forever while observing nothing, which is
+ * precisely the failure class this change exists to close. So the harness that verifies the pipe
+ * sets `__PLANYR_TELEMETRY_NETWORK = true` deliberately, and BOTH directions are asserted: an
+ * ordinary harness run must put nothing on the wire, and the opted-in run must still deliver AND
+ * still go red when delivery breaks.
+ *
+ * ⛔ THE LOCAL CAPTURE IS UNTOUCHED IN BOTH CASES. Only the network write is suppressed — the
+ * `_recent` ring, `window.pfTelemetry.recent()`, and the recorder's IndexedDB store all still work
+ * under test, because several harnesses assert against exactly those.
+ *
+ * ⛔ IT FAILS OPEN. Every unreadable branch here returns "not suppressed": silencing a real user's
+ * telemetry because a property read threw is a strictly worse outcome than one extra test row. */
+export const SUPPRESSED_AUTOMATED = "automated-run";
+
+export function networkReportSuppression(win) {
+  const none = { suppress: false, automated: false, optIn: false, via: "" };
+  try {
+    if (!win) return none;
+    let flagged = false, webdriver = false, optIn = false;
+    try { flagged = win.__PLANYR_E2E === true; } catch (_) { /* ignore */ }
+    try { webdriver = !!(win.navigator && win.navigator.webdriver === true); } catch (_) { /* ignore */ }
+    try { optIn = win.__PLANYR_TELEMETRY_NETWORK === true; } catch (_) { /* ignore */ }
+    const automated = flagged || webdriver;
+    const via = webdriver ? (flagged ? "webdriver+flag" : "webdriver") : (flagged ? "flag" : "");
+    return { suppress: automated && !optIn, automated, optIn, via };
+  } catch (_) { return none; }
+}
 
 /* Record one error. Fire-and-forget; NEVER throws into the app. Returns a promise of the delivery
  * outcome — callers are free to ignore it (almost all do), but B265536 made it available so the
@@ -200,7 +258,10 @@ export function reportClientEvent(kind, message, extra) {
  * A failed write reporting a failed write is an infinite loop through the same broken pipe. The
  * failure is recorded locally and surfaced through the handle and the recorder's UI — never sunk. */
 let _lastSend = null;      // { ok, at, source, status, error, attempts }
-const _delivery = { attempted: 0, ok: 0, failed: 0, lastOkAt: 0, lastFailAt: 0 };
+/* `suppressed` is deliberately NOT folded into `failed`. "the server refused the row" and "we
+ * chose not to send it" support opposite conclusions, and a reader who cannot tell them apart is
+ * back to the ambiguity this whole change is about. */
+const _delivery = { attempted: 0, ok: 0, failed: 0, suppressed: 0, lastOkAt: 0, lastFailAt: 0 };
 
 const SINK_RETRY_MS = 2500;
 
@@ -233,6 +294,17 @@ function sink(row) {
     return _lastSend;
   };
   try {
+    /* B270912 — the automated-run gate, checked at SEND time rather than at install. A harness
+     * sets its flags in an init script before the bundle runs, but reading them live is what makes
+     * the opt-in an ordinary property rather than a load-order puzzle. Stamped and counted so a
+     * suppressed send is READABLE (`pfTelemetry.lastSend()` / `.delivery()`) rather than a silent
+     * no-op — this file's own rule is that nothing about a send may be invisible. */
+    const sup = networkReportSuppression(_win || (typeof window !== "undefined" ? window : undefined));
+    if (sup.suppress) {
+      _lastSend = { ok: false, reason: SUPPRESSED_AUTOMATED, via: sup.via, error: null, attempts: 0, at: Date.now(), source: row && row.source };
+      _delivery.suppressed++;
+      return Promise.resolve(_lastSend);
+    }
     if (!supabase) return Promise.resolve(stamp({ ok: false, reason: "no-cloud", error: null, attempts: 0 }));
     return insertOnce(row)
       .then((r) => {
@@ -258,6 +330,7 @@ export function telemetryDelivery() { return { ..._delivery }; }
 export function installClientErrorTelemetry(win = typeof window !== "undefined" ? window : undefined) {
   if (!win || typeof win.addEventListener !== "function" || _installed) return;
   _installed = true;
+  _win = win;
   win.addEventListener("error", (e) => reportClientError(e && (e.error || e.message), { source: "window.onerror" }));
   win.addEventListener("unhandledrejection", (e) => reportClientError(e && e.reason, { source: "unhandledrejection" }));
   win.addEventListener("vite:preloadError", (e) => reportClientError((e && e.payload) || e, { source: "vite:preloadError" }));
@@ -273,6 +346,9 @@ export function installClientErrorTelemetry(win = typeof window !== "undefined" 
       lastSend: lastTelemetrySend,
       delivery: telemetryDelivery,
       configured: () => !!supabase,
+      // B270912 — is this page reporting to production, and if not, why not? Readable live so a
+      // harness (and a human at a console) can tell "suppressed on purpose" from "broken".
+      suppression: () => networkReportSuppression(win),
     };
   } catch { /* ignore */ }
 }

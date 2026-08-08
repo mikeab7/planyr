@@ -39,7 +39,7 @@
  * appraisal records, no owner names or addresses, no callout text, no raster bytes.
  */
 /* global __BUILD_ID__ */
-import { reportClientEvent } from "./clientErrors.js";
+import { reportClientEvent, SUPPRESSED_AUTOMATED } from "./clientErrors.js";
 import { readScene } from "./perfScene.js";
 import { perfEditCount } from "./perfSampling.js";
 import { bindPerfRecorder, bindPerfDelivery, perfContext } from "./perfRecorderHandle.js";
@@ -93,6 +93,7 @@ let _taskTotal = 0, _taskCount = 0, _taskMax = 0;
 let _sent = 0, _manual = 0;
 let _lastDelivery = null;            // promise of the last capture's delivery outcome (B265536)
 let _undelivered = 0;                // captures the server never acknowledged
+let _suppressed = 0;                 // captures deliberately not sent — an automated run (B270912)
 let _captures = [];                  // recent capture summaries, for a live console read
 let _gapMarks = [];                  // [tAtRestart, gapMs] — where the frame loop stopped and resumed
 let _lastFrameT = 0;                 // wall position of the last recorded frame, for gap sizing
@@ -354,7 +355,12 @@ export function capture(reason) {
       const r = out || { ok: false, reason: "unknown" };
       rec.delivered = !!r.ok;
       rec.reason = r.ok ? null : (r.reason || (r.error && (r.error.code || r.error.message)) || "rejected");
-      if (!r.ok) _undelivered++;
+      /* B270912 — A SUPPRESSED SEND IS NOT AN UNDELIVERED ONE, and the two must not share a
+       * counter. `undelivered` is the number this programme reads as "the pipe is broken"; folding
+       * a deliberate automated-run suppression into it would make every harness run look like a
+       * delivery failure, which is how a real failure stops being noticed. */
+      if (r.reason === SUPPRESSED_AUTOMATED) _suppressed++;
+      else if (!r.ok) _undelivered++;
       return { ...r, kind, chars: enc.chars };
     }, () => { rec.delivered = false; rec.reason = "threw"; _undelivered++; return { ok: false, reason: "threw", kind }; });
     bindPerfDelivery(() => _lastDelivery);
@@ -426,7 +432,7 @@ export function installPerfRecorder(win = typeof window !== "undefined" ? window
    * noisy A/B — see ui-audit/verify-perf-recorder.mjs. */
   try {
     win.pfRec = {
-      state: () => ({ ...triggerState(_trig), frames: _frames.count, tasks: _tasks.count, counters: _counters.count, activeMs: Math.round(_activeMs), sent: _sent, undelivered: _undelivered, running: _running }),
+      state: () => ({ ...triggerState(_trig), frames: _frames.count, tasks: _tasks.count, counters: _counters.count, activeMs: Math.round(_activeMs), sent: _sent, undelivered: _undelivered, suppressed: _suppressed, running: _running }),
       delivery: () => _lastDelivery,
       captures: () => _captures.slice(),
       capture: (reason) => capture(reason),
@@ -464,7 +470,7 @@ export function __resetPerfRecorder(win) {
   _activeUntil = 0; _running = false; _prevFrameT = 0; _activeMs = 0; _lastFrameT = 0;
   _lastScene = {}; _taskTotal = 0; _taskCount = 0; _taskMax = 0;
   _sent = 0; _manual = 0; _captures = []; _gapMarks = []; _selfUs = 0;
-  _lastDelivery = null; _undelivered = 0;
+  _lastDelivery = null; _undelivered = 0; _suppressed = 0;
   bindPerfRecorder(null);
   bindPerfDelivery(null);
 }

@@ -92,8 +92,21 @@ into every consumer. Root rules in `/CLAUDE.md`; deep detail in `/docs/REFERENCE
   **⛔ Its correctness is INVISIBLE AT REST** (`renderView.ppf === view.ppf` there), so the guard is the
   ui-audit gate **verify-midgesture-zoom** — `npm run perf:midzoom`, which fails unless the clean
   run is green AND both deliberate mutants go red.
-- **`telemetry/` — error + performance reporting, and one rule worth knowing before you touch it.
-  ⛔ THE SINK REPORTS ITS OWN OUTCOME (B265536); it used to swallow every write failure**, which made
+- **`telemetry/` — error + performance reporting, and two rules worth knowing before you touch it.
+  ⛔ FIRST: AUTOMATED RUNS DO NOT WRITE TO PRODUCTION (B270912).** `networkReportSuppression(win)` gates
+  the NETWORK write only — the `_recent` ring, `pfTelemetry.recent()` and the IndexedDB capture store all
+  still work under test, because several harnesses assert against exactly those. **The detector is
+  `navigator.webdriver`, NOT `__PLANYR_E2E`**, and that is measured rather than stylistic: `docs/PERF-PLAN-SWITCH.md`
+  §1's "every performance harness sets it" is true of the ui-audit perf harnesses and **false of the e2e
+  suite — 62 of 81 specs never set it**, including the top producer of three of the five loudest sources,
+  so a flag-only gate would have silenced 19 specs and left every top row untouched. The flag is a second
+  door; the gate FAILS OPEN (never silence a real user over a throwing property read). **⛔ The opt-in
+  `__PLANYR_TELEMETRY_NETWORK` is not optional plumbing** — `verify-capture-pipe`, including the anti-rot
+  arms that prove a BROKEN delivery is loud, runs under automation and would be disabled by its own fix;
+  its five arms now guard both directions and are mutation-proven in both. A suppressed send is counted
+  APART from an undelivered one (`delivery().suppressed`, `pfRec.state().suppressed`) and the owner's
+  button has its own `local` state — an automated run must never claim the server is unreachable.
+  **⛔ SECOND: THE SINK REPORTS ITS OWN OUTCOME (B265536); it used to swallow every write failure**, which made
   the recorder able to fail in total silence and made the owner's "that felt slow just now" button
   show ✓ for rows that never left the machine. `clientErrors.sink` returns `{ok, error, attempts}`,
   keeps `lastSend`/`delivery` on `window.pfTelemetry`, retries **once** (one, not a queue), never

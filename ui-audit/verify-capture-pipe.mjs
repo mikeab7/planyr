@@ -29,15 +29,23 @@
  * captures is written to disk so the database half can be proven separately, by executing that
  * same insert against the real table under the real RLS roles (see `docs/CAPTURE-PIPE.md`).
  *
- * FOUR ARMS, and the last two are the ones that make it a guard rather than a demo:
- *   auto      — induce a stall; a capture fires and a row goes on the wire
- *   manual    — press the owner's own "that felt slow just now" control; a row goes on the wire
- *               tagged `"kind":"manual"`, and the button reaches ✓
- *   rejected  — answer the SAME insert with 401; the button must reach the WARNING state and
- *               `pfTelemetry.lastSend().ok` must be false. **This is the anti-rot arm**: before
- *               B265536 it was un-failable, because nothing anywhere could observe the rejection.
- *   offline   — the request never completes; same requirement. A hung socket and a refusal are
- *               different failures and both used to read as success.
+ * FIVE ARMS, and the last three are the ones that make it a guard rather than a demo:
+ *   auto       — induce a stall; a capture fires and a row goes on the wire
+ *   manual     — press the owner's own "that felt slow just now" control; a row goes on the wire
+ *                tagged `"kind":"manual"`, and the button reaches ✓
+ *   rejected   — answer the SAME insert with 401; the button must reach the WARNING state and
+ *                `pfTelemetry.lastSend().ok` must be false. **This is the anti-rot arm**: before
+ *                B265536 it was un-failable, because nothing anywhere could observe the rejection.
+ *   offline    — the request never completes; same requirement. A hung socket and a refusal are
+ *                different failures and both used to read as success.
+ *   suppressed — B270912, and the ONLY arm that proves a row does NOT travel: the identical stall
+ *                with the network opt-in absent must reach the wire zero times, while still taking
+ *                the capture, still writing it to the device, and still SAYING that it suppressed.
+ *
+ * ⛔ THE FOUR ARMS ABOVE IT ARE ALSO B270912'S SECOND GUARD, and that is not incidental. They run
+ * WITH the opt-in, so if suppression is ever made unconditional — the one-line mistake that would
+ * blind the pipe guard by its own fix — `auto`, `manual`, `rejected` and `offline` all go red at
+ * once. Neither direction can be lost without the other noticing.
  *
  *   node ui-audit/verify-capture-pipe.mjs --build
  *   ... --json            machine-readable
@@ -127,11 +135,20 @@ const results = [];
 const fail = (arm, msg) => results.push({ arm, ok: false, msg });
 const pass = (arm, msg) => results.push({ arm, ok: true, msg });
 
-/** One arm: a fresh page, its own response policy for the insert endpoint. */
-async function runArm(name, { respond, drive }) {
+/** One arm: a fresh page, its own response policy for the insert endpoint.
+ *
+ *  ⛔ `networkOptIn` IS THE HALF OF B270912 THAT MAKES THE OTHER HALF SAFE. Production telemetry is
+ *  now suppressed under automation (`navigator.webdriver`), which is exactly what this file drives.
+ *  Suppress unconditionally and THIS harness — the one that proves the pipe works and, in its
+ *  `rejected`/`offline` arms, that a broken pipe is LOUD — would be disabled by its own fix and
+ *  would pass forever while observing nothing. So the arms that must reach the wire opt in
+ *  DELIBERATELY, with `window.__PLANYR_TELEMETRY_NETWORK`, and the `suppressed` arm below runs with
+ *  the opt-in ABSENT to prove the default really does hold. Both directions, or neither is proven. */
+async function runArm(name, { respond, drive, networkOptIn = true }) {
   const browser = await chromium.launch({ executablePath: EXEC, args: ["--no-sandbox", "--ignore-certificate-errors"] });
   const ctx = await browser.newContext({ viewport: { width: 1600, height: 900 }, deviceScaleFactor: 2 });
   await ctx.addInitScript((cfg) => { window.__PLANYR_PERFREC = cfg; }, FAST);
+  if (networkOptIn) await ctx.addInitScript(() => { window.__PLANYR_TELEMETRY_NETWORK = true; });
   /* A REAL plan, and — B265538 — his measured four-layer scene rather than the empty one every
    * other battery here has used. The "report that felt slow" control lives on the planner canvas,
    * so a seeded plan is what makes the manual arm reachable at all. */
@@ -292,6 +309,87 @@ await runArm("offline", {
     return {};
   },
 });
+
+/* ── Arm 5: SUPPRESSED — an ordinary automated run must put NOTHING on the wire (B270912) ───────
+ *
+ * ⛔ THIS IS THE OTHER DIRECTION, and shipping the suppression without it would have been the sixth
+ * instance of the class it closes. Four things are asserted, and the last two are why this is not
+ * simply "count zero requests":
+ *   1. NOT ONE request reaches the Supabase origin — not just no `perfcap` row. This arm runs the
+ *      identical stall the `auto` arm does, so a passing run here against a failing `auto` run is
+ *      arithmetically impossible to fake.
+ *   2. The capture is STILL TAKEN. Suppression that also stopped the recorder would be a different
+ *      and worse bug, and every harness reading `pfRec.captures()` would go quietly green-but-empty.
+ *   3. The ON-DEVICE copy is still written to IndexedDB — read here through raw IDB, the way the
+ *      storage panel would see it — because the brief's condition was that only the NETWORK report
+ *      is suppressed.
+ *   4. It is READABLE that it was suppressed: `pfTelemetry.lastSend().reason` says `automated-run`,
+ *      the recorder counts it as `suppressed` and NOT as `undelivered`, and the owner's button
+ *      settles on `local` rather than the `undelivered` warning. A silent suppression would be the
+ *      swallowing sink wearing a different hat. */
+const suppressedArm = await runArm("suppressed", {
+  networkOptIn: false,
+  respond: ok201,     // never invoked if the fix holds — that is the assertion
+  drive: async (page) => {
+    await induceStall(page);
+    await page.waitForTimeout(1200);
+    await page.locator('[data-testid="report-slow"]').click();
+    await page.waitForFunction(() => {
+      const b = document.querySelector('[data-testid="report-slow"]');
+      const n = b && b.getAttribute("data-slow-note");
+      return n && n !== "sending";
+    }, null, { timeout: 15000 }).catch(() => {});
+
+    const st = await page.evaluate(() => ({ ...window.pfRec.state(), captures: window.pfRec.captures() }));
+    if (!st.captures.length) fail("suppressed", "no capture was TAKEN under an automated run — suppression must silence the network, never the recorder");
+    else pass("suppressed", `${st.captures.length} capture(s) still taken locally`);
+    if (!(st.suppressed > 0)) fail("suppressed", `the recorder counted ${st.suppressed} suppressed sends — a suppression nobody can read is the swallowing sink again`);
+    else pass("suppressed", `${st.suppressed} send(s) recorded as deliberately suppressed`);
+    if (st.undelivered > 0) fail("suppressed", `${st.undelivered} capture(s) counted as UNDELIVERED — a deliberate suppression must not read as a broken pipe`);
+    else pass("suppressed", "nothing was counted as undelivered — suppressed and broken stay distinguishable");
+
+    const send = await page.evaluate(() => window.pfTelemetry.lastSend());
+    if (!send || send.reason !== "automated-run") fail("suppressed", `pfTelemetry.lastSend() reports ${JSON.stringify(send)} — it must name the automated run as the reason`);
+    else pass("suppressed", `the reason is readable live: ${send.reason} (via ${send.via})`);
+
+    const note = await page.getAttribute('[data-testid="report-slow"]', "data-slow-note");
+    if (note !== "local") fail("suppressed", `the button settled on "${note}" — an automated run must not tell the owner the server is unreachable`);
+    else pass("suppressed", "the button reads `local`, not the undelivered warning");
+
+    /* The on-device copy, read the way the storage panel reads it. */
+    const stored = await page.evaluate(() => new Promise((res) => {
+      let req; try { req = indexedDB.open("planyr"); } catch (_) { return res(-1); }
+      req.onerror = () => res(-1);
+      req.onsuccess = () => {
+        const db = req.result;
+        let tx; try { tx = db.transaction("kv", "readonly"); } catch (_) { return res(-1); }
+        let n = 0;
+        const cur = tx.objectStore("kv").openCursor(IDBKeyRange.bound("perfcap:", "perfcap:￿"));
+        cur.onsuccess = (e) => { const c = e.target.result; if (c) { n++; c.continue(); } else res(n); };
+        cur.onerror = () => res(-1);
+      };
+    }));
+    if (!(stored > 0)) fail("suppressed", `the on-device store holds ${stored} capture(s) — only the NETWORK report may be suppressed`);
+    else pass("suppressed", `${stored} capture(s) kept on the device, as under any other run`);
+    return {};
+  },
+});
+
+/* ⛔ AND THE CLAIM ITSELF: not one write reached `client_errors`. Checked at the network layer —
+ * below the app, below supabase-js — so no code path inside the bundle can satisfy it by accident.
+ *
+ * ⛔ THE CLAIM IS ABOUT THE TELEMETRY TABLE, NOT ABOUT THE ORIGIN, and the distinction is not a
+ * concession made to get a green. The first run of this arm asserted "no request of any kind" and
+ * failed on `/auth/v1/health` — the Supabase client's own liveness probe, which writes nothing
+ * anywhere. Supabase is also this app's DATA backend: an automated run legitimately signs in,
+ * reads plans and writes rows, and a harness that forbade that would be forbidding the app from
+ * working. What B270912 is about is `public.client_errors` filling with synthetic rows, so that is
+ * what is asserted — and everything else the page sent is PRINTED rather than ignored, so a future
+ * write to some other telemetry sink cannot hide behind this narrower claim. */
+const leaked = suppressedArm.seen.filter((s) => /\/rest\/v1\/client_errors/.test(s.url));
+if (leaked.length) fail("suppressed", `${leaked.length} telemetry row(s) still reached client_errors under an ordinary automated run: ${leaked.map((s) => (s.body && s.body.source) || s.url).slice(0, 4).join(", ")}`);
+else pass("suppressed", `no write reached client_errors — an ordinary harness run adds nothing to the table${suppressedArm.seen.length ? ` (the ${suppressedArm.seen.length} other request(s) it did make: ${[...new Set(suppressedArm.seen.map((s) => new URL(s.url).pathname))].join(", ")})` : ""}`);
+
 
 server.close();
 
