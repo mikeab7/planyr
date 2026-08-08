@@ -113,6 +113,32 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V64544 — B267536: the pond/detention family on the `ci` lane (signed in, against production). `Blocker: auth`
+
+**Already driven GREEN here, on the lane this sandbox CAN reach — this is the second lane, not the
+first.** All 20 cases were run in a real headless Chromium, logged out, against a local build of
+this tree (the ledger's `local` lane) and all 20 passed. ATTEMPT-BEFORE-YOU-PARK is satisfied: the
+Claude-doable check was done this session, not deferred.
+
+**What is still pending, and why it is a real blocker rather than a to-do.** The `ci` lane signs in
+and runs against production `planyr.io`. This sandbox's proxy CORS-blocks Supabase sign-in, so the
+signed-in configuration cannot be driven from here at all. The two lanes are deliberately not
+substitutes for each other (that is the whole reason `known-red.json` has a `lane` field), so the
+`local` pass is **not** evidence about `ci`.
+
+**The check, on the next scheduled `E2E (Playwright)` run:**
+1. The drift gate reports **`ci` known-red 10**, not 30 — the 20 removed rows are absent from the
+   failure set because they passed, not because they were excused.
+2. **Zero new failures.** The 20 cases now live at NEW line numbers (the duplicated helper blocks
+   were removed), so a case that did not really pass reappears under its new id as a NEW
+   REGRESSION — loud, and impossible to mistake for the old row.
+3. The three source-adjacent additions render on production: the pond `Rim` row still commits its
+   elevation, the LAND USE legend still reports the pond's share, and the Earthwork disclosure
+   still prices excavation off a typed $/CY.
+
+**If a row comes back it re-opens B267536** with a `Recurrence:` line. It does NOT go back on the
+ledger — a fixed case never keeps its amnesty, and neither does a not-quite-fixed one.
+
 ### V63088 — B266080 / B266082: the drift gate and the logged-out lane — ✅ **PASSED 2026-08-08 (run #42)**
 
 **Dispatched and read rather than parked.** Both jobs ran against merged `main`, including the

@@ -24,7 +24,7 @@ async function startBlank(page) {
 
 async function drawParcel(page) {
   const box = await canvas(page).boundingBox();
-  await page.getByRole("button", { name: "Parcel ▾", exact: true }).click();
+  await page.getByRole("button", { name: "Parcel tools ▾", exact: true }).click();
   await page.getByText("Draw new parcel", { exact: true }).click();
   const pts = [
     [box.x + 80, box.y + 80],
@@ -66,10 +66,17 @@ test.describe("Detention land-take + earthwork $ (B907)", () => {
     await drawPond(page);
     await openYield(page);
 
-    const detPctRow = page.getByText("Detention %", { exact: true }).locator("xpath=ancestor::div[1]");
-    await detPctRow.scrollIntoViewIfNeeded();
-    const text = await detPctRow.textContent();
-    expect(text).not.toMatch(/\b0%/);
+    // B944 (f414ce59, PR #754, 2026-07-21) deleted the standalone "Detention %" row: the pond's
+    // share of the site now reads off the LAND USE legend, which that same change introduced (its
+    // own comment says the Impervious / Detention-sf / Detention-% / Detention-storage rows
+    // "moved to LAND USE and the pond inspector's Holds"). Same fact, one surface instead of two.
+    // LAND USE is the one group open by default, so nothing needs unfolding here.
+    const pondRow = page.getByTestId("yield-landuse-pond");
+    await pondRow.scrollIntoViewIfNeeded();
+    await expect(pondRow).toBeVisible();
+    const text = await pondRow.textContent();
+    expect(text, "the drawn pond must take a non-zero share of the site").not.toMatch(/\b0%/);
+    expect(text, "the drawn pond must report a non-zero acreage").not.toMatch(/\b0\.00 ac/);
 
     expect(errors, errors.join("\n")).toEqual([]);
   });
@@ -82,9 +89,16 @@ test.describe("Detention land-take + earthwork $ (B907)", () => {
     await drawPond(page);
     await openYield(page);
 
-    // FINAL UI SPEC B1.2 — the cost cards now live inside the collapsed "④ Costs" group.
-    await page.getByRole("button", { name: /Costs road \+ earthwork/i }).click();
-    await page.getByRole("button", { name: "Earthwork cost (screening)", exact: true }).click();
+    // FINAL UI SPEC B1.2 — the cost cards live inside the collapsed "Costs" group. B944
+    // (f414ce59, PR #754, 2026-07-21) rewrote that group's closed-state summary: it reads
+    // "not priced yet" until a unit price is entered, so the old "Costs road + earthwork"
+    // accessible name no longer exists on an unpriced plan. Match the group title.
+    await page.getByRole("button", { name: /^Costs/ }).first().click();
+    // B954 (af2f8447, PR #766, 2026-07-22) replaced the "Earthwork cost (screening)" <Section>
+    // with a CostDisclosure row: a label plus a "Set unit prices →" link that unfolds the same
+    // lines. Two such rows exist (Earthwork, Road), so scope the link to the Earthwork row.
+    const earthworkRow = page.getByText("Earthwork", { exact: true }).locator("xpath=ancestor::div[1]");
+    await earthworkRow.getByRole("button", { name: /Set unit prices/i }).click();
 
     const excavationRow = page.getByText(/Pond excavation/i).first();
     await excavationRow.scrollIntoViewIfNeeded();

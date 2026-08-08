@@ -10,6 +10,7 @@
  *       transition (NRCS unit-hydrograph indicated) and honestly notes the routed numbers
  *       still ride the Rational proxy (the true NRCS routing wire-up is a follow-on stage). */
 import { test, expect } from "@playwright/test";
+import { drawAnchoredPond } from "./helpers.js";
 
 const canvas = (p) => p.getByTestId("planner-canvas");
 
@@ -19,35 +20,7 @@ async function startBlank(page) {
   await expect(canvas(page)).toBeVisible();
 }
 
-async function drawAndOpenPond(page) {
-  const box = await canvas(page).boundingBox();
-  await page.getByRole("button", { name: "Detention Pond", exact: true }).click();
-  const x1 = box.x + 320, y1 = box.y + 250, x2 = box.x + 560, y2 = box.y + 420;
-  await page.mouse.move(x1, y1);
-  await page.mouse.down();
-  await page.mouse.move(x1 + 60, y1 + 40, { steps: 5 });
-  await page.mouse.move(x2, y2, { steps: 8 });
-  await page.mouse.up();
-  await page.keyboard.press("Escape");
-  const cx = Math.round((x1 + x2) / 2), cy = Math.round((y1 + y2) / 2);
-  await page.mouse.dblclick(cx, cy);
-}
-
-const fieldInput = (page, labelText) =>
-  page.getByText(labelText, { exact: true }).first().locator("xpath=ancestor::div[1]").locator("input").first();
-
-async function fillField(page, labelText, value) {
-  const input = fieldInput(page, labelText);
-  await input.scrollIntoViewIfNeeded();
-  await input.fill(String(value));
-  await input.press("Tab");
-}
-
-async function anchor(page, drainageAcres) {
-  await drawAndOpenPond(page);
-  await fillField(page, "Top-of-bank elev. (ft)", 100);
-  await fillField(page, "Drainage area (ac)", drainageAcres);
-}
+const anchor = (page, drainageAcres) => drawAnchoredPond(page, { drainageAcres });
 
 test.describe("Detention method-by-area guardrail (B904)", () => {
   test("(a) an area within the Rational-method range shows a quiet method caption, no watch-out", async ({ page }) => {

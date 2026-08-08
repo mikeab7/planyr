@@ -21635,7 +21635,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       </span>,
                       "water depth + freeboard")}
                     {g_glanceRow("Rim",
-                      <span style={{ display: "flex", alignItems: "center", gap: 6, whiteSpace: "nowrap" }}>
+                      // id (the `pond-release-field-` precedent): the Rim row IS the pond's
+                      // top-of-bank anchor — the field B934 renamed from "Top-of-bank elev. (ft)"
+                      // — and every outlet/routing spec has to set it. Addressing it by its label
+                      // text is not possible (the label span also holds its ⓘ button), so it
+                      // carries a stable id like the release field beside it.
+                      <span id={`pond-rim-field-${selEl.id}`} style={{ display: "flex", alignItems: "center", gap: 6, whiteSpace: "nowrap" }}>
                         <NumInput allowClear style={{ ...numInput, width: 58 }} value={det.tobElev ?? ""} placeholder={pondAuto.tobElev ? `~${f1(pondAuto.tobElev.value)}` : "opt."} onCommit={(n) => setDet({ tobElev: Number.isFinite(n) ? n : null })} />
                         <span style={{ fontSize: 10.5, color: PAL.muted, whiteSpace: "nowrap" }}>{g_rimText}{g_floodLevel != null ? ` · flood ${f1(g_floodLevel)}′${g_facts.floodEstimated ? " est." : ""}` : ""}</span>
                         {det.tobElev != null && <button style={chipSm} title={pondAuto.tobElev ? `Clear: back to auto (${pondAuto.tobElev.source})` : "Clear: label rings by depth instead of elevation"} onClick={() => setDet({ tobElev: null })}>×</button>}
@@ -26791,7 +26796,10 @@ function YieldPanel({
                     ))}
                   </div>
                   {segs.map((s) => (
-                    <div key={s.key} style={{ display: "flex", alignItems: "center", gap: 8, padding: "3px 0" }}>
+                    // B944 folded the standalone "Detention %" row into this legend, so the pond's
+                    // share of the site is now read here — testid'd so that assertion has a stable
+                    // handle (the legend rows are otherwise addressable only by label text).
+                    <div key={s.key} data-testid={`yield-landuse-${s.key}`} style={{ display: "flex", alignItems: "center", gap: 8, padding: "3px 0" }}>
                       <span style={{ width: 10, height: 10, borderRadius: 3, background: s.fill, flex: "none" }} />
                       <span style={{ flex: 1, fontSize: 11.5, color: Y.rowLabel }}>{s.label}</span>
                       <span title={s.title} style={{ fontFamily: NUM_FONT, fontSize: 12, fontWeight: 650, color: Y.text, fontVariantNumeric: TABULAR_NUMS, whiteSpace: "nowrap", cursor: "help" }}>{f2(s.ac)} ac</span>

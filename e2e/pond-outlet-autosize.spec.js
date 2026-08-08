@@ -26,6 +26,7 @@
  * This spec drives the real SVG canvas LOGGED OUT (no account) on a seeded-blank site — the
  * suggested-release path needs zero auth or live GIS data, just a drawn pond + a drainage area. */
 import { test, expect } from "@playwright/test";
+import { drawAnchoredPond, pondReleaseInput } from "./helpers.js";
 
 const canvas = (p) => p.getByTestId("planner-canvas");
 
@@ -35,37 +36,9 @@ async function startBlank(page) {
   await expect(canvas(page)).toBeVisible();
 }
 
-async function drawAndOpenPond(page) {
-  const box = await canvas(page).boundingBox();
-  await page.getByRole("button", { name: "Detention Pond", exact: true }).click();
-  const x1 = box.x + 320, y1 = box.y + 250, x2 = box.x + 560, y2 = box.y + 420;
-  await page.mouse.move(x1, y1);
-  await page.mouse.down();
-  await page.mouse.move(x1 + 60, y1 + 40, { steps: 5 });
-  await page.mouse.move(x2, y2, { steps: 8 });
-  await page.mouse.up();
-  await page.keyboard.press("Escape");
-  const cx = Math.round((x1 + x2) / 2), cy = Math.round((y1 + y2) / 2);
-  await page.mouse.dblclick(cx, cy);
-}
-
-const fieldInput = (page, labelText) =>
-  page.getByText(labelText, { exact: true }).first().locator("xpath=ancestor::div[1]").locator("input").first();
-
-async function fillField(page, labelText, value) {
-  const input = fieldInput(page, labelText);
-  await input.scrollIntoViewIfNeeded();
-  await input.fill(String(value));
-  await input.press("Tab");
-}
-
-// Anchor the pond (tobElev) + give it a drainage area, but NEVER touch "Allowable release" —
-// this is the exact zero-manual-entry setup the brief describes.
-async function drawAnchorAndSizePondNoRelease(page) {
-  await drawAndOpenPond(page);
-  await fillField(page, "Top-of-bank elev. (ft)", 100);
-  await fillField(page, "Drainage area (ac)", 52.04);
-}
+// Anchor the pond (tobElev, the inspector's "Rim" row since B934) + give it a drainage area, but
+// NEVER touch "Allowable release" — this is the exact zero-manual-entry setup the brief describes.
+const drawAnchorAndSizePondNoRelease = (page) => drawAnchoredPond(page, { drainageAcres: 52.04 });
 
 test.describe("Pond detention — one-click auto-size (B902)", () => {
   test("(a) a pond with no release shows a non-empty SUGGESTED release + an enabled one-click path", async ({ page }) => {
@@ -93,7 +66,7 @@ test.describe("Pond detention — one-click auto-size (B902)", () => {
     await drawAnchorAndSizePondNoRelease(page);
 
     // The "Allowable release (cfs)" field was never typed into.
-    const relInput = page.locator('[id^="pond-release-field-"] input').first();
+    const relInput = pondReleaseInput(page);
     await expect(relInput).toHaveValue("");
 
     const autosizeBtn = page.getByRole("button", { name: /Auto-size detention/i });
@@ -118,7 +91,7 @@ test.describe("Pond detention — one-click auto-size (B902)", () => {
     await startBlank(page);
     await drawAnchorAndSizePondNoRelease(page);
 
-    const relInput = page.locator('[id^="pond-release-field-"] input').first();
+    const relInput = pondReleaseInput(page);
     // Override: type a manual release before ever clicking auto-size.
     await relInput.scrollIntoViewIfNeeded();
     await relInput.fill("42");

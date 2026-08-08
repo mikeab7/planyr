@@ -100,6 +100,109 @@ export async function expectOffScreen(page, locator, what = "element") {
 }
 
 
+/* ---- Detention-pond inspector (B266088) ---------------------------------------------------
+ * SIX pond specs each carried their own private copy of a helper block written against the FLAT
+ * pond inspector, and every copy went stale on the same day for the same reason. The inspector
+ * was reorganised into collapsible groups and the copies were not updated:
+ *
+ *   • 7ef3d3a5 (B934, PR #744, 2026-07-21) — the "Top-of-bank elev. (ft)" Field was removed and
+ *     its `det.tobElev` binding moved to the always-visible "Rim" glance row (same NumInput,
+ *     same onCommit, same clear button; only the label and the position changed). Every
+ *     engineering input — Freeboard, Drainage area, Impervious %, Allowable release — moved
+ *     inside the "Engineering assumptions" <Collapse>, and the outlet controls inside
+ *     "Outlet & storms". Both groups are CLOSED by default.
+ *   • d4595625 / c105648e (B969 / B970, PR #779 / #780, 2026-07-23) — that first group was
+ *     renamed "Sizing & criteria" → "Engineering assumptions" and pinned closed on every load
+ *     (`persist={false}`), so a spec cannot rely on a stored open state either.
+ *   • 85f9062b (B1188, PR #873, 2026-07-30) — a single click SELECTS; only a double click opens
+ *     Properties. A spec that clicks once gets a selected pond and a closed inspector.
+ *
+ * The E2E workflow's last green run was 2026-07-21 and it has been red every scheduled run from
+ * 2026-07-22 — the morning after the first of those. Keeping the knowledge here, once, is the
+ * point: the next reorganisation is one edit, not six.
+ *
+ * NOTE: these helpers deliberately do NOT touch any engineering value. They open groups and
+ * address fields; what the fields then compute is what the specs are for. */
+
+export const POND_GROUP = {
+  sizing: "Engineering assumptions",   // freeboard · side slope · drainage area · impervious % · allowable release
+  outlet: "Outlet & storms",           // rate control · outlet stages · the routed per-storm table
+  flood: "Flood & datum",
+  district: "Drainage district",
+  appearance: "Appearance",
+};
+
+/* A pond-inspector <Collapse> header, addressed by its title. The accessible name is
+ * "<title> <closed-state summary>", so match on the leading title only. */
+export const pondGroupHeader = (page, title) =>
+  page.getByRole("button", { name: new RegExp(`^${title}`, "i") }).first();
+
+/* Open one of the inspector's collapsed groups. Idempotent — an already-open group is left
+ * alone rather than toggled shut, so callers can open the same group twice safely. */
+export async function openPondGroup(page, title) {
+  const header = pondGroupHeader(page, title);
+  await header.scrollIntoViewIfNeeded();
+  if ((await header.getAttribute("aria-expanded")) !== "true") await header.click();
+  await expect(header).toHaveAttribute("aria-expanded", "true");
+}
+
+/* A `Field`-rendered input inside the inspector: <div><span>{label}</span>{children}</div>,
+ * no label[for], so locate by the label text's parent container. */
+export const pondFieldInput = (page, labelText) =>
+  page.getByText(labelText, { exact: true }).first().locator("xpath=ancestor::div[1]").locator("input").first();
+
+export async function fillPondField(page, labelText, value) {
+  const input = pondFieldInput(page, labelText);
+  await input.scrollIntoViewIfNeeded();
+  await input.fill(String(value));
+  await input.press("Tab");
+}
+
+/* The pond's top-of-bank anchor (`det.tobElev`) — the "Rim" glance row since B934. It is
+ * addressed by id rather than by label text because the label span also carries its ⓘ button,
+ * which is exactly why the release field beside it has always been addressed the same way. */
+export const pondRimInput = (page) => page.locator('[id^="pond-rim-field-"] input').first();
+export const pondReleaseInput = (page) => page.locator('[id^="pond-release-field-"] input').first();
+
+export async function setPondRim(page, elevFt) {
+  const input = pondRimInput(page);
+  await input.scrollIntoViewIfNeeded();
+  await input.fill(String(elevFt));
+  await input.press("Tab");
+}
+
+/* Draw a detention-pond rectangle on the canvas and open its inspector (double click — B1188).
+ * Returns the pond's screen centre so a spec can re-open it after a reload. */
+export async function drawAndOpenPond(page, { x1 = 320, y1 = 250, x2 = 560, y2 = 420 } = {}) {
+  const box = await page.getByTestId("planner-canvas").boundingBox();
+  await page.getByRole("button", { name: "Detention Pond", exact: true }).click();
+  const ax = box.x + x1, ay = box.y + y1, bx = box.x + x2, by = box.y + y2;
+  await page.mouse.move(ax, ay);
+  await page.mouse.down();
+  await page.mouse.move(ax + 60, ay + 40, { steps: 5 });
+  await page.mouse.move(bx, by, { steps: 8 });
+  await page.mouse.up();
+  await page.keyboard.press("Escape"); // back to the Select tool
+  const centre = { cx: Math.round((ax + bx) / 2), cy: Math.round((ay + by) / 2) };
+  await page.mouse.dblclick(centre.cx, centre.cy);
+  return centre;
+}
+
+/* Draw a pond, anchor it (rim elevation) and give it a tributary area — the setup every
+ * outlet/routing spec needs before the rate-control section will resolve. Leaves BOTH the
+ * "Engineering assumptions" and "Outlet & storms" groups open. */
+export async function drawAnchoredPond(page, { rimFt = 100, drainageAcres = null, impervPct = null, ...box } = {}) {
+  const centre = await drawAndOpenPond(page, box);
+  await setPondRim(page, rimFt);
+  // Always open BOTH groups: the release field lives in the first and the outlet controls in the
+  // second, and a spec that touches neither still costs nothing by having them open.
+  await openPondGroup(page, POND_GROUP.sizing);
+  if (drainageAcres != null) await fillPondField(page, "Drainage area (ac)", drainageAcres);
+  if (impervPct != null) await fillPondField(page, "Impervious %", impervPct);
+  await openPondGroup(page, POND_GROUP.outlet);
+  return centre;
+}
+
 /* ---- Dissolved road network (NEW-1/NEW-2) ------------------------------------------------
  * The road connection is no longer a cover patch painted over a seam — it is a boolean UNION of
  * pavement (see src/workspaces/site-planner/lib/roadNetwork.js). So a spec should not ask "is there a
