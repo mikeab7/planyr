@@ -378,6 +378,57 @@ export const BAIN_PAIR_ARMS = {
   "simple-ponds": { title: "two ponds still, but simple rings", changes: "RING COMPLEXITY only — pond COUNT held at 2, both rings decimated to the fast plan's vertex count, bounding boxes preserved EXACTLY" },
 };
 
+/* ══ ⛔ STANDING NOTE — EVERY PERF MEASUREMENT THIS PROGRAMME HAS TAKEN RAN WITH ZERO LAYERS ON,
+ *    AND THE OWNER DOES NOT WORK THAT WAY (B265538, 2026-08-08). ══════════════════════════════
+ *
+ * From his own telemetry on 2026-08-07 — one long-lived tab, "Bain Concept - Original":
+ *
+ *     el 47 · **ly 4** · pn 0 · dpr 2.15 · vw 1600 · cv 523 · dom 2007
+ *
+ * `ly` is the count of Leaflet layers on the map. Every fixture in this file, every arm of every
+ * standing battery, the growth harness, the pan/zoom probes, and the one live signed-in drive taken
+ * on his own machine, all ran at **ly 0**. B1435 measured the per-frame cost as scaling with
+ * elements × panels × LAYERS, so the scenes this programme benchmarks are materially LIGHTER than
+ * the one he actually has the symptom in — and a null from a lighter scene is not evidence about a
+ * heavier one. That is the instrument-on-trial clause of NEVER-PARK, stated as a fixture property
+ * rather than left as a caveat in a report nobody re-reads.
+ *
+ * ⛔ WHICH FOUR IS NOT KNOWN, and the arm says so rather than pretending. `ly` is a COUNT; the
+ * telemetry row carries no layer identity, so `OWNER_LAYER_SET` below is a plausible four for a
+ * Houston-area industrial site, not his. Asking him is on `OWNER-TODO.md`; adding layer identity to
+ * the telemetry row is B265539. Until one of those lands, an arm using this set proves "four layers
+ * mounted", never "his four layers".
+ *
+ * ⛔ AND WHAT IT CAN AND CANNOT REPRODUCE HERE. Every GIS host is egress-blocked in this sandbox, so
+ * a seeded layer MOUNTS (its Leaflet pane and layer object exist, and they are re-transformed on
+ * every pan frame — a real, measurable share of the cost) but never FETCHES, so no tiles or features
+ * are painted. The arm is therefore a genuine LOWER BOUND on the layer amplifier, and must be
+ * reported as one. */
+export const OWNER_SCENE = Object.freeze({
+  source: "client_errors event:perf, 2026-08-07/08, tab 60b6a0d2, build 4a77211",
+  plan: "Bain Concept - Original",
+  elementsDrawn: 47, layersOn: 4, panelsOpen: 0,
+  dpr: 2.15, viewportW: 1600, canvasNodes: 523, documentNodes: 2007, tiles: 248,
+  worstBlockMs: 632,
+});
+
+/** A plausible four-layer set for a Houston-area industrial site. NOT known to be his — see the
+ *  standing note above. Keys are real `ALL_LAYERS` entries in site-planner/lib/layers.js. */
+export const OWNER_LAYER_SET = ["fema", "contours", "txrrc_pipe", "jur_county"];
+
+export const LAYER_ARMS = {
+  none: { title: "no layers (the historic default of every battery here)", keys: [] },
+  "owner-4": { title: `four layers mounted, matching his measured ly 4 (${OWNER_LAYER_SET.join(", ")})`, keys: OWNER_LAYER_SET },
+};
+
+/** Stamp a layer arm's `layerOverrides` onto a fixture. `layerOverrides` is a sparse DESIRED-state
+ *  map and every layer defaults OFF, so "on" is simply `{ key: true }`. Returns a new fixture. */
+export function withLayerArm(fixture, arm = "none") {
+  const spec = LAYER_ARMS[arm] || LAYER_ARMS.none;
+  if (!spec.keys.length) return fixture;
+  return { ...fixture, layerOverrides: { ...(fixture.layerOverrides || {}), ...Object.fromEntries(spec.keys.map((k) => [k, true])) } };
+}
+
 /** Ring vertex count to decimate toward when `original` carries no pond to read one off. */
 const FALLBACK_RING_TARGET = 7;
 

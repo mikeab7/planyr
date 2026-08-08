@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-08-08 @ `259db28` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-08-08 @ `c6a4b94` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_454 source files mapped._
+_455 source files mapped._
 
 ## infra
 
@@ -227,7 +227,7 @@ _454 source files mapped._
 - **`src/shared/storage/storageReclaim.js`** — Free space by dropping ONLY data that declares a rehydration source (never a raster with no cloud copy); oldest-first localStorage eviction plus the reclaim-then-retry decision behind the device-save retry button
   - _exports_: `CACHE_CLEARED_EVENT`, `CACHE_IDB_PREFIX`, `reclaimableClasses`, `reclaimLocalStorage`, `reclaimMessage`, `reclaimRefetchable`, `reclaimThenRetry`, `unprovenReclaimables`
 - **`src/shared/telemetry/clientErrors.js`** — Client error+event telemetry: window/rejection/preload sources insert into anon INSERT-only Supabase client_errors with dedup, rate/session caps, tab-id stamping, fail-safe
-  - _exports_: `buildErrorRow`, `decideReport`, `DUP_MS`, `errorSignature`, `extractMessage`, `extractStack`, `installClientErrorTelemetry`, `RATE_MAX`, `RATE_WINDOW_MS`, `reportClientError`, `reportClientEvent`, `SESSION_MAX`, `setTelemetryModule`, `TAB_ID`
+  - _exports_: `buildErrorRow`, `decideReport`, `DUP_MS`, `errorSignature`, `extractMessage`, `extractStack`, `installClientErrorTelemetry`, `lastTelemetrySend`, `RATE_MAX`, `RATE_WINDOW_MS`, `reportClientError`, `reportClientEvent`, `SESSION_MAX`, `setTelemetryModule`, `TAB_ID`, `telemetryDelivery`
 - **`src/shared/telemetry/perfCapture.js`** — Builds and encodes a performance capture — the privacy ALLOWLIST (counters/timings/view state only, proved before every send), plan-id sanitisation, frame statistics, and the compact encoder that trims oldest-first to fit one telemetry row.
   - _exports_: `assertCaptureClean`, `buildCapture`, `CAPTURE_ENUM_KEYS`, `CAPTURE_MAX_CHARS`, `CAPTURE_NUMERIC_KEYS`, `CAPTURE_VERSION`, `decodeFrames`, `encodeCapture`, `encodeFrames`, `frameStats`, `hash32`, `NOTE_VOCAB`, `safePlanId`, `sanitizeAttribution`
 - **`src/shared/telemetry/perfCaptureStore.js`** — The bounded on-device copy of a performance capture — IndexedDB (the LARGE tier, per TIER-BY-REBUILDABILITY), pruned to three on every write, summarised for the storage panel.
@@ -237,7 +237,7 @@ _454 source files mapped._
 - **`src/shared/telemetry/perfRecorder.js`** — The always-on performance recorder: interaction-gated frame loop, long-animation-frame observer, periodic scene counters, and the capture path. Lazy-loaded from main.jsx; never on any route’s critical path.
   - _exports_: `__resetPerfRecorder`, `capture`, `installPerfRecorder`, `RECORDER_DEFAULTS`
 - **`src/shared/telemetry/perfRecorderHandle.js`** — The tiny always-loaded half of the recorder — the kill switch, the bind seam the manual control calls, and the plan/zoom context setters.
-  - _exports_: `__resetPerfHandle`, `bindPerfRecorder`, `notePlanContext`, `noteViewScale`, `perfContext`, `perfRecorderArmed`, `perfRecorderEnabled`, `requestPerfCapture`
+  - _exports_: `__resetPerfHandle`, `bindPerfDelivery`, `bindPerfRecorder`, `noteLayerContext`, `notePlanContext`, `noteViewScale`, `perfCaptureDelivery`, `perfContext`, `perfRecorderArmed`, `perfRecorderEnabled`, `requestPerfCapture`
 - **`src/shared/telemetry/perfRing.js`** — Preallocated ring buffers for the recorder — frames, long tasks, periodic counters, and a bounded attribution string table. Fixed-arity pushes, written by index, no per-frame allocation.
   - _exports_: `COUNTER_COLUMNS`, `createCounterRing`, `createFrameRing`, `createStringTable`, `createTaskRing`, `internString`, `pushCounters`, `pushFrame`, `pushTask`, `ringOrder`, `ringOrderSince`, `STRING_TABLE_MAX`
 - **`src/shared/telemetry/perfSampling.js`** — The tiny always-loaded half of the perf instrument: the deterministic per-tab enrolment decision and the undo-path edit counter, split out by TIER so `main.jsx` and `SitePlanner.jsx` never drag the diagnostic onto every route's critical path
@@ -697,6 +697,8 @@ _454 source files mapped._
   - _exports_: `pondAreaDeltaLine`, `pondAreaLabelLine`
 - **`src/workspaces/site-planner/lib/pondLedger.js`** — Site-level pond-ledger accumulator + pond roles: folds per-pond usable/dead splits into the detention totals (unknown facts poison usable to null — never gross-as-usable) and gates which ponds' below-WSE cut credits the mitigation Provided ledger. Exports `accumulatePondLedger`, `suggestPondRole`, `effectivePondRole`, `POND_ROLES`.
   - _exports_: `accumulatePondLedger`, `allocatePondDuty`, `effectivePondRole`, `mitigationCredit`, `POND_DISPLAY_NAME`, `POND_ROLE_LABEL`, `POND_ROLES`, `pondDisplayName`, `pondDisplayNameFor`, `ROLE_SHARE`, `suggestPondRole`
+- **`src/workspaces/site-planner/lib/pondLedgerKey.js`** — The value signature that decides whether the pond ledger pass must rebuild (B221763): the complete input set in one list, keyed by identity where the input is a wholesale-replaced model object and by value everywhere else. Exports: `POND_LEDGER_INPUTS`, `createIdentityToken`, `pondLedgerSignature`
+  - _exports_: `createIdentityToken`, `POND_LEDGER_INPUTS`, `pondLedgerSignature`
 - **`src/workspaces/site-planner/lib/pondOffset.js`** — Robust inward polygon offset via clipper-lib for pond grading contours: pinch-off, basin split, max inscribed reach
   - _exports_: `maxInwardOffset`, `offsetInward`, `offsetOutward`, `offsetStats`, `ringsArea`
 - **`src/workspaces/site-planner/lib/pondOptimizeAffordance.js`** — WHEN the pond optimizer is offered and WHAT it does: availability is POSSIBILITY (drawn ring · known requirement · resolved split), never verdict tone, and `materialAlternative` decides whether a smaller basin is worth a line at all (null = render nothing).

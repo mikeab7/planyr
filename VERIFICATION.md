@@ -113,6 +113,54 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V62544 — B265536: one real `event:perfcap` row from HIS signed-in browser. `Blocker: auth` `Blocker: real-data`
+**The pipe is proven to the database and no further; this is the only link left.** Full record:
+`docs/CAPTURE-PIPE.md`.
+
+**Already proven here, so do not re-do it:** the deployed build (`c6a4b94`) carries and arms the
+recorder · an induced stall produces captures · each becomes a real POST to `/rest/v1/client_errors`
+whose exact body was captured · every row parses and its frame track decodes · **the RLS policy was
+EXECUTED against the production table as both `anon` and `authenticated`**, the row landing under the
+caller's `user_id`, then read back and parsed in SQL · the `manual` kind round-trips warm and cold ·
+a rejection and an unreachable server both surface to the owner instead of reading as success.
+
+**Why it cannot be finished here:** the sandbox gateway answers 403 to CONNECT for `*.supabase.co`,
+so no browser in this repo can complete the hop. What is unproven is HIS machine, HIS session, HIS
+network — nothing else.
+
+**The check (no action for Michael — loading the app IS the test):**
+1. He opens planyr.io on build `c6a4b94` or later and works normally for a few minutes.
+2. `select at, build, user_id, left(message, 200) from public.client_errors where source =
+   'event:perfcap' order by at desc limit 20;`
+3. **PASS** — one or more rows exist, `user_id` is his, and the message parses.
+   **FAIL** — no rows after a session in which the recorder was armed (`window.pfRec.state()` shows
+   `sent > 0`). Then read `window.pfTelemetry.lastSend()`, which now names the reason.
+4. Also worth reading once rows exist: **which four layers** he actually runs (`layers` on the
+   capture, `lyk` on `event:perf`) — that turns `OWNER_LAYER_SET` in `ui-audit/lib/planFixture.mjs`
+   from a plausible guess into a measurement (B265538 / B265539).
+
+**⛔ STOPPING RULE (NEVER-PARK).** If nothing arrives within a week of his next normal use, this is
+NOT closed as "not reproducible" — the disposition is *instrument it further*: the delivery state is
+now readable live, so the next step is reading it, not waiting again.
+
+### V62545 — B221763: the pond ledger memo on a REAL signed-in plan with flood data. `Blocker: auth` `Blocker: real-data`
+**Verified here as far as the sandbox reaches:** on the real Bain quiddity fixture, one pan,
+`ui-audit/count-pond-invocations.mjs --assert` — `usablePondVolume`, `incrementalExcavationCf` and
+`excavationVolume` go **254 → 0**, `detentionStorage` **762 → 254**, with `pondLedgerSignature`
+observed at 129 calls so the zeros are proven real rather than an empty report. The golden master
+(78 exact-equality assertions on pond storage) is untouched and green.
+
+**What the sandbox cannot reach:** `pondSplitFor` takes its FLOOD branch only when `fmZones` is
+non-empty, and every GIS host is blocked here — so the flood-fed inputs (`fmZonesSig`, `fmElev`'s
+derived surfaces, `drainDetSplitRec`) are exercised only by unit fixtures, never by live data.
+
+**The check:** open a real signed-in plan that HAS flood data (Tsakiris or a Bain concept), let the
+drainage check run, then (a) pan and confirm the Yield → Stormwater detention/mitigation numbers do
+not change, and (b) **edit a pond's depth or drag a pond vertex and confirm they DO** — the second
+half is the one that matters, because a memo that never invalidates is the failure mode in the other
+direction. **PASS** — numbers hold on a pan and move on an edit. **FAIL** — either a stale number
+after an edit, or a reconciliation error naming a pond.
+
 ### V56000 — B1449: does the zoom FEEL smooth and professional on his own Bain plans? `Blocker: real-data`
 
 **The acceptance criterion is his, and he said so plainly:** *"I don't really care what the process is as long as the end result is smooth and professional… world class quality."* So this is not discharged by a millisecond target, and no number below is the bar. What the numbers are for is to say what changed and let him judge the real thing.

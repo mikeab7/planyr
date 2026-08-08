@@ -17,6 +17,8 @@
  *     wseFt, inTrigger, estPoolDepthFt, factsKnown,      // the facts used
  *     anchoredTob, autoAnchored, excavationCf, role }    // bookkeeping
  */
+import { identityCache } from "./pureCache.js";
+
 export const POND_ROLES = ["detention", "mitigation", "dual"];
 // NEW-4 (owner naming): the third purpose reads "Hybrid" everywhere the user sees it.
 // The STORED enum stays "dual" — renaming the stored value would orphan saved ponds.
@@ -175,10 +177,26 @@ export function allocatePondDuty(det, split, { needCf = 0 } = {}) {
   };
 }
 
+/* NEW-2 (B221763) — the site fold is memoised on the ENTRIES ARRAY'S IDENTITY plus the requirement
+ * by VALUE, the same key shape B236592 used one level down. It is called twice per render (the
+ * geometry-only fold and the duty fold) and was therefore running 254 times per pan on a two-pond
+ * plan; now that the render body resolves its entries once per model change, the fold rides that
+ * same boundary. The precondition is `identityCache`'s: the entries array is REBUILT, never mutated
+ * in place. Callers that pass a freshly-derived array (`entries.filter(...)`) legitimately miss and
+ * recompute — a cache may only ever save work, never change an answer. */
+const ledgerMemo = identityCache(4);
+
 /* `entries` are pondSplitFor results + bookkeeping. `mitigationRequiredCf` is the site's
  * mitigation REQUIREMENT: ponds dedicate below-flood void against it in order until it is met, so
  * no pond over-dedicates storage the detention ledger could have used (NEW-1 / B1032). */
-export function accumulatePondLedger(entries = [], { mitigationRequiredCf = null } = {}) {
+export function accumulatePondLedger(entries = [], opts = {}) {
+  const { mitigationRequiredCf = null } = opts;
+  const hit = ledgerMemo.get(entries, String(mitigationRequiredCf));
+  if (hit !== undefined) return hit;
+  return ledgerMemo.set(entries, String(mitigationRequiredCf), accumulatePondLedgerUncached(entries, mitigationRequiredCf));
+}
+
+function accumulatePondLedgerUncached(entries, mitigationRequiredCf) {
   const out = {
     pondCount: entries.length,
     grossCf: 0,

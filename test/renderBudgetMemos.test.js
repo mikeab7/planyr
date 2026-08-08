@@ -146,7 +146,11 @@ describe("NEW-4 — five memos, each with a provably complete input set", () => 
 
   it("the pond split is read off the ledger pass, not re-derived", () => {
     expect(src).toContain("const pondSplitOf = (e) => (e && pondSplitById.get(e.id)) || pondSplitFor(e);");
-    expect(src).toContain("pondSplitById.set(e.id, eSplit);");
+    // B221763 moved the pass inside `buildPondLedgerPass`, where the map is local (`splitById`)
+    // and published as `pondSplitById` from the resolved record. The property is unchanged: the
+    // split every entry was built from is kept and re-read, never re-derived.
+    expect(src).toContain("splitById.set(e.id, eSplit);");
+    expect(src).toContain("const pondSplitById = pondLedgerCache.current.pass.splitById;");
   });
 
   it("the four AUDITED-AND-REJECTED derivations are still un-memoised, deliberately", () => {

@@ -42,7 +42,7 @@
 import { reportClientEvent } from "./clientErrors.js";
 import { readScene } from "./perfScene.js";
 import { perfEditCount } from "./perfSampling.js";
-import { bindPerfRecorder, perfContext } from "./perfRecorderHandle.js";
+import { bindPerfRecorder, bindPerfDelivery, perfContext } from "./perfRecorderHandle.js";
 import {
   createFrameRing, pushFrame, createTaskRing, pushTask, createCounterRing, pushCounters,
   createStringTable, internString, ringOrder, ringOrderSince, COUNTER_COLUMNS,
@@ -91,6 +91,8 @@ let _activeMs = 0;                   // cumulative interacting time
 let _lastScene = {};
 let _taskTotal = 0, _taskCount = 0, _taskMax = 0;
 let _sent = 0, _manual = 0;
+let _lastDelivery = null;            // promise of the last capture's delivery outcome (B265536)
+let _undelivered = 0;                // captures the server never acknowledged
 let _captures = [];                  // recent capture summaries, for a live console read
 let _gapMarks = [];                  // [tAtRestart, gapMs] — where the frame loop stopped and resumed
 let _lastFrameT = 0;                 // wall position of the last recorded frame, for gap sizing
@@ -293,6 +295,7 @@ export function capture(reason) {
       canvasNodes: scene.canvasNodes,
       elementsDrawn: scene.elementsDrawn,
       layersOn: scene.layersOn,
+      layers: ctx.layers,          // B265539 — WHICH ones, so a fixture arm can be his rather than a guess
       panelsOpen: scene.panelsOpen,
       tiles: scene.tiles,
       ppf: Number.isFinite(ctx.ppf) ? ctx.ppf : colAt("ppf"),
@@ -311,7 +314,11 @@ export function capture(reason) {
       taskNames: _strings.list,
       counters,
       counterColumns: ["t", ...COUNTER_COLUMNS],
-      note: ts.baselineMs == null ? "no-baseline" : (ts.baselineLate ? "baseline-late" : ""),
+      /* B265540 — the payload's own state comes FIRST. An empty frame track is the one thing a
+       * reader cannot infer from the other fields, and a manual capture in a still moment produces
+       * one legitimately (the frame loop is gated on interaction). Saying so is what stops it being
+       * read as a lost track. */
+      note: deltas.length === 0 ? "no-frames" : (ts.baselineMs == null ? "no-baseline" : (ts.baselineLate ? "baseline-late" : "")),
     });
 
     /* ⛔ THE PRIVACY BOUNDARY IS CHECKED, NOT TRUSTED. A capture that fails the allowlist is
@@ -330,11 +337,27 @@ export function capture(reason) {
     }, () => {});
 
     const enc = encodeCapture(cap, { maxChars: CAPTURE_MAX_CHARS });
-    reportClientEvent("perfcap", enc.text);
     _sent++;
 
-    _captures.push({ kind, atMs: Math.round(t), ratio: cap.ratio, p95Ms: cap.p95Ms, frames: cap.frames, chars: enc.chars });
+    /* ⛔ B265536 — THE DELIVERY IS TRACKED, NOT ASSUMED. Until this, `capture()` returned true the
+     * moment the row was handed to the sink, and the sink swallowed every failure — so the manual
+     * button said "Recorded — thanks" whether the row reached Supabase or fell on the floor. That
+     * made the single highest-value signal in this programme (the owner pressing "that felt slow
+     * just now") the one most able to vanish without trace, and it would have taken a week of his
+     * normal use producing nothing before anyone noticed. The record now carries what actually
+     * happened, and `perfCaptureDelivery()` hands the promise to the UI so the ✓ means DELIVERED. */
+    const rec = { kind, atMs: Math.round(t), ratio: cap.ratio, p95Ms: cap.p95Ms, frames: cap.frames, chars: enc.chars, delivered: null, reason: null };
+    _captures.push(rec);
     if (_captures.length > 10) _captures.shift();
+
+    _lastDelivery = Promise.resolve(reportClientEvent("perfcap", enc.text)).then((out) => {
+      const r = out || { ok: false, reason: "unknown" };
+      rec.delivered = !!r.ok;
+      rec.reason = r.ok ? null : (r.reason || (r.error && (r.error.code || r.error.message)) || "rejected");
+      if (!r.ok) _undelivered++;
+      return { ...r, kind, chars: enc.chars };
+    }, () => { rec.delivered = false; rec.reason = "threw"; _undelivered++; return { ok: false, reason: "threw", kind }; });
+    bindPerfDelivery(() => _lastDelivery);
     return true;
   } catch (_) { return false; }
 }
@@ -403,7 +426,8 @@ export function installPerfRecorder(win = typeof window !== "undefined" ? window
    * noisy A/B — see ui-audit/verify-perf-recorder.mjs. */
   try {
     win.pfRec = {
-      state: () => ({ ...triggerState(_trig), frames: _frames.count, tasks: _tasks.count, counters: _counters.count, activeMs: Math.round(_activeMs), sent: _sent, running: _running }),
+      state: () => ({ ...triggerState(_trig), frames: _frames.count, tasks: _tasks.count, counters: _counters.count, activeMs: Math.round(_activeMs), sent: _sent, undelivered: _undelivered, running: _running }),
+      delivery: () => _lastDelivery,
       captures: () => _captures.slice(),
       capture: (reason) => capture(reason),
       config: () => ({ ..._cfg, trigger: { ..._trig.cfg } }),
@@ -440,5 +464,7 @@ export function __resetPerfRecorder(win) {
   _activeUntil = 0; _running = false; _prevFrameT = 0; _activeMs = 0; _lastFrameT = 0;
   _lastScene = {}; _taskTotal = 0; _taskCount = 0; _taskMax = 0;
   _sent = 0; _manual = 0; _captures = []; _gapMarks = []; _selfUs = 0;
+  _lastDelivery = null; _undelivered = 0;
   bindPerfRecorder(null);
+  bindPerfDelivery(null);
 }

@@ -9,7 +9,7 @@ import { registerFlush } from "../../app/flushRegistry.js";
 import { createEditorLock } from "../../shared/presence/editorLock.js";
 import { reportClientEvent } from "../../shared/telemetry/clientErrors.js";
 import { notePerfEdit } from "../../shared/telemetry/perfSampling.js";
-import { notePlanContext, noteViewScale, requestPerfCapture } from "../../shared/telemetry/perfRecorderHandle.js";
+import { notePlanContext, noteViewScale, requestPerfCapture, perfCaptureDelivery } from "../../shared/telemetry/perfRecorderHandle.js";
 import { createElementSync, stableStringify } from "./lib/elementSync.js";
 import { planDelete, shouldHintTypingGuard, TYPING_GUARD_HINT } from "./lib/deletePlan.js";
 import { rowsToModel, KIND_TO_FIELD, foldNeverSyncedLocal, foldJournal, reconcileSeedRows } from "./lib/elementRows.js";
@@ -236,6 +236,7 @@ import { dimSlideRange, clampDimOffset, DIM_POS_F_DEFAULT, DIM_POS_F_ROAD, dimNu
 import { pointInRing } from "./lib/ringMath.js";
 import { addedAreaLabelPoint, pondContours, contourLabelPoint, autoContourInterval, detentionStorage, usablePondVolume, incrementalExcavationCf, detentionLandTakeEstimate, estimateFootprintSf, pondPlacementCandidates, drawdownWarning, bermAsFillHeight, bermFillVolume, bermFillCells } from "./lib/pondGeom.js";
 import { accumulatePondLedger, effectivePondRole, POND_ROLE_LABEL, pondDisplayName, pondDisplayNameFor } from "./lib/pondLedger.js";
+import { pondLedgerSignature, createIdentityToken } from "./lib/pondLedgerKey.js";
 import { rankLedgerMoves, BERM_MAX_RAISE_FT } from "./lib/ledgerBalancer.js";
 // NEW-1/NEW-2 — the ONE derivation of the pond inspector's detention + mitigation verdict
 // strings (heading names its ledger; buildability + over-provision ride the qualifier line).
@@ -3308,6 +3309,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
    *   · the frame is cancelled on unmount. */
   const frameRaf = useRef(0);
   const frameJobs = useRef(new Map());
+  /* NEW-2 (B221763) — the pond ledger pass's resolve-once boundary. `pondLedgerToken` mints stable
+   * tokens for the objects the signature keys by identity (the pond elements, the jurisdiction
+   * rule record, the restored-split record); `pondLedgerCache` holds the one resolved pass and the
+   * signature it was resolved at. Refs rather than a `useMemo` because the inputs are computed
+   * inline in the render body 7,000 lines below and several of them are fresh objects holding
+   * identical values every render — the exact class `Object.is` cannot see (VIEW-INDEPENDENT-ONCE
+   * §1). A ref write during render is safe here for the reason React itself allows for memo
+   * caches: the same key always yields the same value. */
+  const pondLedgerToken = useRef(createIdentityToken());
+  const pondLedgerCache = useRef({ key: null, pass: null });
   const runFrameJobs = () => {
     frameRaf.current = 0;
     if (!frameJobs.current.size) return;
@@ -10861,47 +10872,86 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // NEW-9 — the site fold moved to the pure accumulator (lib/pondLedger.js) so the
   // "unknown facts poison the usable total" honesty rule is unit-testable. Entries are
   // built here (this component owns detWithAuto/pondAuto and the flood context).
-  const pondLedgerEntries = [];
-  // NEW-4 — the split each ledger entry was built from, kept by element id so the render body
-  // never re-derives one it already has (`pondSplitOf` below). Pure de-duplication: same object,
-  // same inputs, no new dependency surface. Only valid for an UNMODIFIED pond out of `els` —
-  // every call site that passes a probe element (`{ ...el, det: d }`) still calls pondSplitFor.
-  const pondSplitById = new Map();
-  for (const e of els) {
-    if (e.type !== "pond") continue;
-    // B907 — INCREMENTAL excavation when this basin reuses an existing pond/depression
-    // (the "Expand this pond" flow's det.baseline): prices only the added cut, not a
-    // from-scratch re-dig of ground already excavated once.
-    const exc = incrementalExcavationCf(ringOf(e), detWithAuto(e.det));
-    const eSplit = pondSplitFor(e);
-    pondSplitById.set(e.id, eSplit);
-    pondLedgerEntries.push({
-      id: e.id,
-      ...eSplit,
-      // NEW-23 — the DRAWN-ring gross (the full footprint hold, the SAME formula the site total
-      // providedDetCf sums), so the per-pond "holds" chip ties out to the explainer's "holds"
-      // exactly (never a mismatched pair). Distinct from the split's crest gross (`grossCf`),
-      // which is the inward-bermed water column feeding the usable/counts number.
-      drawnGrossCf: detentionStorage(ringOf(e), e.det?.depth ?? 8, e.det?.freeboard ?? 1, e.det?.slope ?? 3).vol,
-      anchoredTob: detWithAuto(e.det).tobElev != null,
-      autoAnchored: (e.det?.tobElev == null) && !!pondAuto.tobElev, // B822 — riding the auto anchor
-      excavationCf: exc.cf,
-      excavationIncremental: exc.incremental,
-      role: e.det?.role ?? null,
-      // NEW-10/B830 — the balancer consumes the same entries (name for move labels,
-      // ring + effective det for the berm/shrink volume probes).
-      name: (e.name && String(e.name).trim()) || `Pond ${pondLedgerEntries.length + 1}`,
-      ring: ringOf(e),
-      det: detWithAuto(e.det),
-    });
+  //
+  /* ⛔ NEW-2 (B221763) — RESOLVED ONCE PER MODEL CHANGE, NOT ONCE PER RENDER. This pass used to
+   * run in the bare render body, so a pure pan rebuilt every pond's ledger entry ~127 times
+   * (measured, `ui-audit/count-pond-invocations.mjs`: 254 calls of `usablePondVolume`,
+   * `incrementalExcavationCf` and `pondDisplayNameFor` across 2 ponds and one pan; 762 of
+   * `detentionStorage`). B236592 (#947) memoised the GEOMETRY LEAVES underneath — which is why the
+   * cost collapsed to a few milliseconds — but it did not touch the RECURRENCE, and the recurrence
+   * is the defect: a pan changes the view, and not one input below is a function of the view.
+   *
+   * Nothing about the formulas changed. The pass is gated on `pondLedgerSignature`, a pure value
+   * signature over its complete input set (`lib/pondLedgerKey.js`), so a stale ledger is not
+   * reachable through it: the key IS the inputs, and `test/pondLedgerKey.test.js` plants a change
+   * in EVERY input and asserts the key moved. Same discipline B236592 used, one level up.
+   *
+   * ⛔ THE RESULT IS SHARED AND MUST BE TREATED AS READ-ONLY, the `identityCache` precondition.
+   * Nothing mutates it today — `accumulatePondLedger` folds over `entries.map((p) => ({ ...p }))`
+   * and stamps `duty` on the copy, deliberately — and `test/pondLedgerKey.test.js` holds that
+   * accumulator property so a future fold cannot quietly start writing through. */
+  const buildPondLedgerPass = () => {
+    const entries = [];
+    // NEW-4 — the split each ledger entry was built from, kept by element id so the render body
+    // never re-derives one it already has (`pondSplitOf` below). Pure de-duplication: same object,
+    // same inputs, no new dependency surface. Only valid for an UNMODIFIED pond out of `els` —
+    // every call site that passes a probe element (`{ ...el, det: d }`) still calls pondSplitFor.
+    const splitById = new Map();
+    for (const e of els) {
+      if (e.type !== "pond") continue;
+      // B907 — INCREMENTAL excavation when this basin reuses an existing pond/depression
+      // (the "Expand this pond" flow's det.baseline): prices only the added cut, not a
+      // from-scratch re-dig of ground already excavated once.
+      const exc = incrementalExcavationCf(ringOf(e), detWithAuto(e.det));
+      const eSplit = pondSplitFor(e);
+      splitById.set(e.id, eSplit);
+      entries.push({
+        id: e.id,
+        ...eSplit,
+        // NEW-23 — the DRAWN-ring gross (the full footprint hold, the SAME formula the site total
+        // providedDetCf sums), so the per-pond "holds" chip ties out to the explainer's "holds"
+        // exactly (never a mismatched pair). Distinct from the split's crest gross (`grossCf`),
+        // which is the inward-bermed water column feeding the usable/counts number.
+        drawnGrossCf: detentionStorage(ringOf(e), e.det?.depth ?? 8, e.det?.freeboard ?? 1, e.det?.slope ?? 3).vol,
+        anchoredTob: detWithAuto(e.det).tobElev != null,
+        autoAnchored: (e.det?.tobElev == null) && !!pondAuto.tobElev, // B822 — riding the auto anchor
+        excavationCf: exc.cf,
+        excavationIncremental: exc.incremental,
+        role: e.det?.role ?? null,
+        // NEW-10/B830 — the balancer consumes the same entries (name for move labels,
+        // ring + effective det for the berm/shrink volume probes).
+        name: (e.name && String(e.name).trim()) || `Pond ${entries.length + 1}`,
+        ring: ringOf(e),
+        det: detWithAuto(e.det),
+      });
+    }
+    // NEW-4 (B1035) — the ONE on-screen label for a pond. Every surface that NAMES a specific pond
+    // (the map label, the Yield per-pond row, a reconciliation error) reads this, so an error can
+    // never blame "Pond 1" for a basin the map calls "Detention Pond".
+    for (let i = 0; i < entries.length; i++) {
+      const p = entries[i];
+      p.displayName = entries.length === 1 ? pondDisplayNameFor(p.det, p) : (p.name || `Pond ${i + 1}`);
+    }
+    return { entries, splitById };
+  };
+  const pondLedgerSig = pondLedgerSignature({
+    ponds: els.filter((e) => e.type === "pond"),
+    pondAuto,
+    fmElev,
+    fmZonesSig,
+    fmZonesLen: fmZones.length,
+    fmRule,
+    detRegime,
+    drainDetSplitRec,
+    drainIsRestored,
+    drainCtxZones: drainCtxData?.flood?.zones?.length ?? null,
+    coincidentStorm,
+  }, pondLedgerToken.current);
+  if (pondLedgerCache.current.key !== pondLedgerSig) {
+    pondLedgerCache.current = { key: pondLedgerSig, pass: buildPondLedgerPass() };
   }
-  // NEW-4 (B1035) — the ONE on-screen label for a pond. Every surface that NAMES a specific pond
-  // (the map label, the Yield per-pond row, a reconciliation error) reads this, so an error can
-  // never blame "Pond 1" for a basin the map calls "Detention Pond".
-  for (let i = 0; i < pondLedgerEntries.length; i++) {
-    const p = pondLedgerEntries[i];
-    p.displayName = pondLedgerEntries.length === 1 ? pondDisplayNameFor(p.det, p) : (p.name || `Pond ${i + 1}`);
-  }
+  const pondLedgerEntries = pondLedgerCache.current.pass.entries;
+  const pondSplitById = pondLedgerCache.current.pass.splitById;
   /* NEW-4 — read a pond's split off the ledger pass that already computed it. Falls back to a
      direct derivation for anything not in that pass (a probe element, or a pond that arrived
      after it), so this can only ever save work, never change an answer. */
@@ -19865,16 +19915,36 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     he is panning — his hand is already here. Deliberately not a menu dive.
                     The captures are marked owner-reported and stay distinguishable from the ones
                     the trigger fires on its own. */}
+                {/* ⛔ B265536 — THE ✓ MEANS *DELIVERED*, NOT *TAKEN*. It used to appear the instant
+                    the recorder built a capture, while the telemetry sink swallowed every write
+                    failure underneath it — so this button, the single highest-value signal in the
+                    speed programme, could report "Recorded — thanks" for a row that never reached
+                    Supabase, and nobody would find out until a week of his use produced nothing.
+                    Three honest states now: SENDING while the write is in flight · ✓ only on a
+                    server acknowledgement · ! with a plain-English reason otherwise, and the note
+                    stays up longer in that case because it is the one worth reading. The capture
+                    is kept on this device either way, which is what the failure text says. */}
                 <button className="gbtn" data-export="skip" data-testid="report-slow"
+                  data-slow-note={slowNote || ""}
                   aria-label="Report that this felt slow"
-                  title={slowNote === "ok" ? "Recorded — thanks" : slowNote === "fail" ? "Couldn't record it (the recorder isn't running on this page)" : "That felt slow just now — record the last few seconds"}
-                  style={{ ...zb, borderTop: "none", borderRadius: 0, fontSize: 13, color: slowNote === "ok" ? PAL.accent : slowNote === "fail" ? "var(--warn-text)" : PAL.muted }}
+                  title={slowNote === "ok" ? "Recorded — thanks"
+                    : slowNote === "sending" ? "Recording…"
+                      : slowNote === "undelivered" ? "Recorded on this device, but it couldn't reach the server — it'll be in the next report"
+                        : slowNote === "fail" ? "Couldn't record it (the recorder isn't running on this page)"
+                          : "That felt slow just now — record the last few seconds"}
+                  style={{ ...zb, borderTop: "none", borderRadius: 0, fontSize: 13, color: slowNote === "ok" ? PAL.accent : (slowNote === "fail" || slowNote === "undelivered") ? "var(--warn-text)" : PAL.muted }}
                   onClick={() => {
-                    const ok = requestPerfCapture("manual");
-                    setSlowNote(ok ? "ok" : "fail");
-                    setTimeout(() => setSlowNote(null), 2600);
+                    const taken = requestPerfCapture("manual");
+                    if (!taken) { setSlowNote("fail"); setTimeout(() => setSlowNote(null), 2600); return; }
+                    setSlowNote("sending");
+                    const d = perfCaptureDelivery();
+                    Promise.resolve(d).then((r) => {
+                      const ok = !!(r && r.ok);
+                      setSlowNote(ok ? "ok" : "undelivered");
+                      setTimeout(() => setSlowNote(null), ok ? 2600 : 6000);
+                    }, () => { setSlowNote("undelivered"); setTimeout(() => setSlowNote(null), 6000); });
                   }}>
-                  {slowNote === "ok" ? "✓" : slowNote === "fail" ? "!" : "◷"}
+                  {slowNote === "ok" ? "✓" : slowNote === "sending" ? "…" : (slowNote === "fail" || slowNote === "undelivered") ? "!" : "◷"}
                 </button>
               </div>
             );

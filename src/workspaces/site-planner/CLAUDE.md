@@ -909,7 +909,23 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   **pondStorageGoldenMaster** (78 assertions of EXACT equality — these numbers size his basins, so
   there is no tolerance), plus the ui-audit harnesses **count-pond-invocations** (`--assert`: a pan
   recomputes NO pond geometry, and the cached lookups must be OBSERVED so an empty report cannot pass
-  as a clean one) and **profile-pond-ring**. Its consumers: `storageReconcile.js` (claimed
+  as a clean one) and **profile-pond-ring**.
+  **⛔ B221763 — AND THE POND LEDGER PASS ABOVE IT RESOLVES ONCE PER MODEL CHANGE TOO, gated on
+  `lib/pondLedgerKey.js`.** B236592 made the leaves free and left the RECURRENCE: the render body
+  still rebuilt every pond's ledger entry once per render — measured at **254 calls each** of
+  `usablePondVolume` / `incrementalExcavationCf` / `excavationVolume` on one pan of a two-pond
+  plan, and **0** after. The key is a **VALUE signature**, not a `useMemo` dep array, for two
+  reasons that both matter: a hand-maintained dep list that misses one input is a stale
+  engineering LEDGER (this item's own filed fear), and most of these inputs (`fmElev`, `pondAuto`,
+  `detRegime`) are FRESH OBJECTS holding identical values every render, so `Object.is` calls them
+  changed 100% of the time and a dep array would never have hit. The one input keyed by IDENTITY
+  is the pond ELEMENT — safer than any field list, because it changes on edits to fields nobody
+  thought to enumerate. `accumulatePondLedger` rides the same boundary via an identity cache.
+  Guards: the repo-root `test/` suite **pondLedgerKey** (a planted change in EVERY declared input,
+  GENERATED from `POND_LEDGER_INPUTS` so a new input with no fixture fails on the spot;
+  mutation-proven three ways) and `count-pond-invocations --assert`, where `pondLedgerSignature`
+  sits in `MUST_BE_PRESENT` so an empty report cannot pass as a clean one.
+  Its consumers: `storageReconcile.js` (claimed
   service vs storage that physically exists — a hard FAIL on a double-count), `drawdownTime.js`
   (time-to-empty at the allowable release rate), `mitigationBands.js` (the 1-ft hydraulic-equivalence
   band ledger, fed by `floodplainMitigation`'s opt-in `bandSpans`), `floodAdministrator.js` (who
