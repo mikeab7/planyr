@@ -162,3 +162,61 @@ describe("the committed ledger itself", () => {
     for (const e of ledger.entries) expect(e.id, `${e.id} is not shaped file.spec.js:line › …`).toMatch(/^e2e\/[\w.-]+\.spec\.js:\d+ › /);
   });
 });
+
+/* ---- B266086 — pinned against a REAL reporter fixture, not an invented one ----------------
+ *
+ * The `report()` helper above is hand-written, and the first cut of `collectCases()` was written
+ * against it. It got TWO structural facts wrong and the tests passed anyway, because a fixture
+ * you invented can only ever confirm what you already believed:
+ *   1. `spec.file` is relative to `config.rootDir` (the testDir), not to the repo.
+ *   2. The top-level suite of each file IS the file (`title === file`), so including it in the
+ *      title chain prints the filename twice.
+ * On its first real run every id would have missed the ledger — all 61 ledgered cases reported
+ * as "did not run", all 33 failures reported as brand-new regressions. Loud, not false-green,
+ * which is the one mercy; useless noise all the same.
+ *
+ * This fixture was CAPTURED from `npx playwright test --reporter=json` against this repo. Only
+ * the bulky per-result payloads were dropped. It is the instrument's own output, so the guard
+ * can no longer be wrong in the same direction as the thing it guards.
+ */
+describe("the REAL Playwright reporter shape (captured fixture)", () => {
+  const real = JSON.parse(readFileSync(new URL("./fixtures/playwright-report.sample.json", import.meta.url), "utf8"));
+  const ROOT = new URL("..", import.meta.url).pathname.replace(/\/$/, "");
+  const cases = collectCases(real, { root: ROOT });
+
+  it("re-prefixes spec.file back to repo-relative", () => {
+    // Playwright says "pond-outlet-clear.spec.js"; every id in this repo says "e2e/…".
+    expect(cases.every((c) => c.file.startsWith("e2e/")), cases.map((c) => c.file).join(", ")).toBe(true);
+  });
+
+  it("does not repeat the filename inside the title chain", () => {
+    for (const c of cases) {
+      const titles = c.id.split(" › ").slice(1);
+      expect(titles, `filename repeated in: ${c.id}`).not.toContain("pond-outlet-clear.spec.js");
+    }
+  });
+
+  it("produces exactly the id shape the committed ledger uses", () => {
+    const failing = cases.filter((c) => c.status === "failed").map((c) => c.id);
+    expect(failing).toEqual([
+      "e2e/pond-outlet-clear.spec.js:63 › Pond outlet fields — clear + persistence (B901) › Allowable release (cfs) can be set, then fully CLEARED via select-all + delete",
+      "e2e/pond-outlet-clear.spec.js:97 › Pond outlet fields — clear + persistence (B901) › proposing then removing an outlet, then reloading, shows NO outlet (local persistence)",
+    ]);
+  });
+
+  it("those ids are ON the committed local-lane ledger — the end-to-end match", () => {
+    // This is the assertion that would have caught the defect. It compares the instrument's own
+    // output against the file the instrument is judged by, with nothing hand-written between.
+    const ledger = JSON.parse(readFileSync(new URL("../e2e/known-red.json", import.meta.url), "utf8"));
+    const local = new Set(ledger.entries.filter((e) => e.lane === "local").map((e) => e.id));
+    for (const c of cases.filter((c) => c.status === "failed")) {
+      expect(local.has(c.id), `real reporter id is not on the ledger:\n  ${c.id}`).toBe(true);
+    }
+  });
+
+  it("a report with no rootDir still parses, leaving the file as reported", () => {
+    // Never throw on a shape we did not expect — the gate's job is to fail with a reason.
+    const noRoot = { suites: real.suites };
+    expect(collectCases(noRoot).length).toBe(cases.length);
+  });
+});

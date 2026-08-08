@@ -126,11 +126,16 @@ whole suite ran to completion (303 passed · 33 failed · 24 skipped, 23.5 min).
   `PLAYWRIGHT_JSON_OUTPUT_NAME` says, under the workflow's own Playwright version. The gate exits
   non-zero on a missing report by design, so a wiring mistake fails loudly rather than green — but
   it would fail the job, and that should be seen once on a real run.
-- **(b)** That the **ci** lane's 29 seeded ids match the ids Playwright's JSON reporter emits on a
-  runner. They were transcribed from the LIST reporter's text in run #41; if the JSON reporter's
-  `file` field is absolute rather than repo-relative, every row reports as `absent` and the gate
-  passes while observing nothing. **That is the one failure mode here that is quiet, so it is the
-  first thing to check** — the run prints `N case(s) ran · M failed · K on the known-red ledger`.
+- **(b) — ✅ DISCHARGED 2026-08-08, and it was a REAL DEFECT (→ B266086).** This clause said the id
+  match was the one quiet failure mode and the first thing to check. It was checked here rather than
+  parked, by driving a real `--reporter=json` run: **zero of the 61 seeded rows matched**, for two
+  reasons, not the one guessed. `spec.file` is relative to `config.rootDir` (the testDir), and the
+  top-level suite of each file IS the file, so the filename appeared twice in every id. Fixed, and
+  pinned against a fixture captured from the real reporter. Re-proven: `29 ran · 29 failed · 29 on
+  the ledger` (that last number was 0 before the fix). **Nothing about (b) is still owed** — the
+  remaining clauses are.
+  Still worth reading the run's `N case(s) ran · M failed · K on the known-red ledger` line first: if
+  K is ever far below M on a run that should be steady-state, the ids have drifted again.
 - **(c)** That the new **e2e-local** job (logged out, local build) completes inside the runner's
   time budget, and what its true red set is on a machine with open GIS egress. Its 32 seeded rows
   came from a sandbox that blocks those hosts; any artefact shows up as a STALE row and shrinks the

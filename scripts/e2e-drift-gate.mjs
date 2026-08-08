@@ -79,7 +79,7 @@ if (!existsSync(REPORT)) die(`no report at ${REPORT} — NOT OBSERVING.`, [
 /* ---- Read the run --------------------------------------------------------------------- */
 let cases;
 try {
-  cases = collectCases(JSON.parse(readFileSync(REPORT, "utf8")));
+  cases = collectCases(JSON.parse(readFileSync(REPORT, "utf8")), { root: ROOT });
 } catch (e) {
   die(`could not read ${REPORT} as a Playwright JSON report (${e.message}) — NOT OBSERVING.`);
 }

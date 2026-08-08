@@ -1,0 +1,84 @@
+{
+  "config": {
+    "rootDir": "/home/user/planyr/e2e"
+  },
+  "suites": [
+    {
+      "title": "auth.setup.js",
+      "file": "auth.setup.js",
+      "specs": [
+        {
+          "title": "authenticate once",
+          "ok": true,
+          "file": "auth.setup.js",
+          "line": 12,
+          "tests": [
+            {
+              "status": "skipped",
+              "results": [
+                {
+                  "status": "skipped"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "title": "pond-outlet-clear.spec.js",
+      "file": "pond-outlet-clear.spec.js",
+      "suites": [
+        {
+          "title": "Pond outlet fields — clear + persistence (B901)",
+          "file": "pond-outlet-clear.spec.js",
+          "specs": [
+            {
+              "title": "Allowable release (cfs) can be set, then fully CLEARED via select-all + delete",
+              "ok": false,
+              "file": "pond-outlet-clear.spec.js",
+              "line": 63,
+              "tests": [
+                {
+                  "status": "unexpected",
+                  "results": [
+                    {
+                      "status": "timedOut"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "title": "proposing then removing an outlet, then reloading, shows NO outlet (local persistence)",
+              "ok": false,
+              "file": "pond-outlet-clear.spec.js",
+              "line": 97,
+              "tests": [
+                {
+                  "status": "unexpected",
+                  "results": [
+                    {
+                      "status": "timedOut"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "$comment": [
+    "CAPTURED FROM A REAL `npx playwright test --reporter=json` RUN (2026-08-08).",
+    "Only the bulky per-result payloads (stdout, errors, attachments) were dropped;",
+    "every structural fact the gate depends on is exactly as Playwright emitted it:",
+    "  · config.rootDir is the ABSOLUTE testDir, and spec.file is relative to IT;",
+    "  · the top-level suite of each file has title === file, and must be skipped or",
+    "    the filename appears twice in the id.",
+    "B266086: the first cut of collectCases() was written against a fixture somebody",
+    "invented and got BOTH of those wrong, so every id it produced missed the ledger.",
+    "A fixture you invented can only confirm what you already believed. This one is real."
+  ]
+}
