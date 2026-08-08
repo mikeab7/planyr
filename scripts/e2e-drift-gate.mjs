@@ -49,7 +49,7 @@
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { collectCases, compare, nextLedger } from "./lib/e2eDrift.mjs";
+import { collectCases, compare, nextLedger, validateLedger } from "./lib/e2eDrift.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, "..");
@@ -92,7 +92,10 @@ const ledger = existsSync(LEDGER)
   ? JSON.parse(readFileSync(LEDGER, "utf8"))
   : { $comment: [], entries: [] };
 
-const { novel, stale, absent, failed, knownRed, ran } = compare({ cases, entries: ledger.entries, lane: LANE });
+const bad = validateLedger(ledger.entries);
+if (bad.length) die(`e2e/known-red.json is malformed — refusing to judge a run against a ledger that is not sound.`, bad.slice(0, 10));
+
+const { novel, stale, staleIntermittent, absent, failed, knownRed, ran } = compare({ cases, entries: ledger.entries, lane: LANE });
 
 /* ---- --update: the ledger may SHRINK freely and GROW only deliberately ----------------- */
 if (UPDATE) {
@@ -119,6 +122,7 @@ console.log(`  ${ran} case(s) ran · ${failed} failed · ${knownRed} on the know
 
 for (const id of novel) console.log(`  ✗ NEW FAILURE (not on the ledger): ${id}`);
 for (const e of stale) console.log(`  ✗ STALE LEDGER ENTRY (this case PASSED): ${e.id}${e.item ? `  [${e.item}]` : ""}`);
+for (const e of staleIntermittent) console.log(`  ⓘ known-INTERMITTENT entry passed this run (runs ${e.intermittent.failedRun} failed / ${e.intermittent.passedRun} passed) — not fatal, still on the ledger: ${e.id}`);
 for (const e of absent) console.log(`  ⓘ ledger entry did not run (renamed or filtered?): ${e.id}`);
 
 if (!novel.length && !stale.length) {

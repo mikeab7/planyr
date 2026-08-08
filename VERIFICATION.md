@@ -113,37 +113,29 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
-### V63088 — B266080 / B266082: the e2e drift gate and the NEW logged-out lane, on a real GitHub Actions run. `Blocker: ci-run`
+### V63088 — B266080 / B266082: the drift gate and the logged-out lane — ✅ **PASSED 2026-08-08 (run #42)**
 
-**What is already proven here, in the sandbox:** the gate is mutation-proven three ways against
-the real committed ledger (true failure set → exit 0 · one fabricated new failure → exit 1, named ·
-one ledgered case flipped to passing → exit 1, named), plus 16 unit tests. The rewritten
-`module-keepalive` spec runs green locally (7 passed, 1 skipped), and a full local sweep of the
-whole suite ran to completion (303 passed · 33 failed · 24 skipped, 23.5 min).
+**Dispatched and read rather than parked.** Both jobs ran against merged `main`, including the
+logged-out lane that had never run anywhere.
 
-**What CANNOT be checked from here, and is what this item is for** — none of it involves the owner:
-- **(a)** That `npm run e2e -- --reporter=list,json` actually writes `e2e-results.json` where
-  `PLAYWRIGHT_JSON_OUTPUT_NAME` says, under the workflow's own Playwright version. The gate exits
-  non-zero on a missing report by design, so a wiring mistake fails loudly rather than green — but
-  it would fail the job, and that should be seen once on a real run.
-- **(b) — ✅ DISCHARGED 2026-08-08, and it was a REAL DEFECT (→ B266086).** This clause said the id
-  match was the one quiet failure mode and the first thing to check. It was checked here rather than
-  parked, by driving a real `--reporter=json` run: **zero of the 61 seeded rows matched**, for two
-  reasons, not the one guessed. `spec.file` is relative to `config.rootDir` (the testDir), and the
-  top-level suite of each file IS the file, so the filename appeared twice in every id. Fixed, and
-  pinned against a fixture captured from the real reporter. Re-proven: `29 ran · 29 failed · 29 on
-  the ledger` (that last number was 0 before the fix). **Nothing about (b) is still owed** — the
-  remaining clauses are.
-  Still worth reading the run's `N case(s) ran · M failed · K on the known-red ledger` line first: if
-  K is ever far below M on a run that should be steady-state, the ids have drifted again.
-- **(c)** That the new **e2e-local** job (logged out, local build) completes inside the runner's
-  time budget, and what its true red set is on a machine with open GIS egress. Its 32 seeded rows
-  came from a sandbox that blocks those hosts; any artefact shows up as a STALE row and shrinks the
-  ledger by one line, which is the designed outcome, not a fault.
-- **(d)** That the `@claude` issue now fires on the DRIFT verdict rather than the raw suite exit —
-  i.e. that a still-red-but-known run files NOTHING, which is the whole point.
+- **(a) the JSON report lands where the workflow expects — ✅.** The gate read it and judged.
+- **(b) the ledger ids match what the reporter emits — ✅, after a REAL DEFECT was found and fixed
+  (B266086).** Zero of 61 rows would have matched; two shape errors, not the one guessed. On #42:
+  `361 case(s) ran · 25 failed · 29 on the known-red ledger`.
+- **(c) the new local lane completes, and its true red set — ✅.** It ran to completion and reported
+  **0 new failures, 7 stale**: the sandbox's blocked-GIS artefacts, exactly as the ledger predicted
+  when it was seeded. `local 32 → 25`.
+- **(d) a still-red-but-known run files nothing — ⏳ NOT YET OBSERVED, and honestly so.** #42 filed,
+  correctly: it was genuinely red (1 new failure + 5 stale). The mechanism is evidenced — 24 of 25
+  failures were matched and ignored, and only the 6 differences drove the verdict — but the
+  all-quiet case has not happened yet. **It should be seen once.** The replay of #42 against the
+  updated ledger exits 0, so the next steady-state run is expected to be the one.
 
-**How:** Actions → *E2E (Playwright)* → Run workflow (or wait for the 13:30 UTC weekday schedule).
+**What the run found, all three now fixed (B266087):** a genuine cross-lane failure
+(`dim-callout-edit:90`, red in both lanes, which the production lane alone could never have seen);
+five externally-flaky rows that would have made the gate churn on somebody else's server; and a
+regression I introduced — `--reporter=list,json` replaces the config's reporters rather than adding
+to them, so the HTML artifact stopped being written in both jobs.
 
 ---
 
