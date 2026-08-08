@@ -161,8 +161,12 @@ test("labelForms / inlineLines never return an empty or object-valued line", () 
 // and the interior measurement quietly stops happening.
 test("SitePlanner feeds the shared ladder its ring, and marks ponds mustLabel", () => {
   const src = readFileSync(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url), "utf8");
-  assert.match(src, /const ringOpts = poly \? \{ ring: el\.points, ringOrigin: fc, ringPpf: view\.ppf \} : null/,
-    "every polygon label candidate must carry its ring");
+  // B1449 — `rppf`, not `view.ppf`: the fit question is asked in FEET (labelLayout divides the
+  // screen size by the ppf first), so it has to be asked at the ppf the geometry was EMITTED at or
+  // a mid-gesture pond is fitted against an interior it does not have on screen. It is also what
+  // keeps B221761's WeakMap fit memo alive through a zoom instead of missing on every notch.
+  assert.match(src, /const ringOpts = poly \? \{ ring: el\.points, ringOrigin: fc, ringPpf: rppf \} : null/,
+    "every polygon label candidate must carry its ring, measured at the RENDER ppf");
   assert.match(src, /mustLabel: el\.type === "pond"/, "a pond label may never be blanked");
   assert.match(src, /ring: d\.ring, ringOrigin: d\.ringOrigin, ringPpf: d\.ringPpf, mustLabel: d\.mustLabel/,
     "the ring/mustLabel keys must actually reach layoutLabels");

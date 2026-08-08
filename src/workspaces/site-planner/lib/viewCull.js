@@ -74,17 +74,36 @@ export const CULL_REARM = 0.25;
 /** Keep `prev` if it still covers the view with room to spare; otherwise build a fresh padded
  *  rect. Returning `prev` BY IDENTITY is half the fix — a new object holding the same numbers
  *  would still invalidate every memo keyed on the rect. */
-export function cullRectFor(view, size, prev = null, margin = CULL_MARGIN, rearm = CULL_REARM) {
+/* B1449 — `probeView` splits the two questions this function was quietly answering with one view.
+ *
+ *   • `view`      — the view the geometry is EMITTED at (the render anchor). Its `ppf` is what the
+ *                   latch is keyed on, so during a zoom gesture the key is CONSTANT and the latch
+ *                   can actually hold. Keyed on the live ppf it re-armed on every single frame,
+ *                   which is a full re-filter of the model per wheel notch.
+ *   • `probeView` — the view actually ON SCREEN. Containment is tested against THIS, so a zoom-OUT
+ *                   (whose true viewport grows while the anchor's does not) still re-arms in time
+ *                   and nothing can pop in at the edge.
+ *
+ * A fresh rect covers BOTH, because during a gesture the two disagree and the rect must be a
+ * superset of what is visible (the safety property in the block above). `probeView` defaults to
+ * `view`, so every pre-B1449 call site is byte-identical. */
+export function cullRectFor(view, size, prev = null, margin = CULL_MARGIN, rearm = CULL_REARM, probeView = null) {
   const ppf = Number(view?.ppf);
+  const probe = probeView || view;
   if (prev && prev.ppf === ppf) {
-    const now = visibleWorldRect(view, size, 0);
+    const now = visibleWorldRect(probe, size, 0);
     const padX = Math.abs(now.maxX - now.minX) * rearm;
     const padY = Math.abs(now.maxY - now.minY) * rearm;
     if (now.minX - padX >= prev.minX && now.minY - padY >= prev.minY
       && now.maxX + padX <= prev.maxX && now.maxY + padY <= prev.maxY) return prev;
   }
   const r = visibleWorldRect(view, size, margin);
-  return { minX: r.minX, minY: r.minY, maxX: r.maxX, maxY: r.maxY, ppf };
+  if (probe === view) return { minX: r.minX, minY: r.minY, maxX: r.maxX, maxY: r.maxY, ppf };
+  const s = visibleWorldRect(probe, size, margin);
+  return {
+    minX: Math.min(r.minX, s.minX), minY: Math.min(r.minY, s.minY),
+    maxX: Math.max(r.maxX, s.maxX), maxY: Math.max(r.maxY, s.maxY), ppf,
+  };
 }
 
 /** Do two cull rects describe the same window? The latch above returns `prev` by identity, so this

@@ -81,7 +81,10 @@ describe("the two halves of the cull latch are both present", () => {
   // Either one alone is a no-op: re-deriving the numbers re-filters the model, and rebuilding the
   // object invalidates every memo downstream even when the numbers did not move.
   it("the rect is latched against the rect already held", () => {
-    expect(src).toContain("cullRectFor(view, size, cullRectRef.current)");
+    // B1449 — the latch is now keyed on the RENDER view (constant through a zoom gesture, so it can
+    // actually hold) and probed against the LIVE one (so a zoom-out still re-arms). Passing one view
+    // for both is what made a wheel notch re-filter the whole model.
+    expect(src).toContain("cullRectFor(renderView, size, cullRectRef.current, undefined, undefined, view)");
   });
   it("and `cullRectFor` returns the PREVIOUS OBJECT rather than an equal one", () => {
     const cull = readFileSync(join(ROOT, "src/workspaces/site-planner/lib/viewCull.js"), "utf8");

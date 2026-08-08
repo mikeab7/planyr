@@ -113,6 +113,24 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V56000 — B1449: does the zoom FEEL smooth and professional on his own Bain plans? `Blocker: real-data`
+
+**The acceptance criterion is his, and he said so plainly:** *"I don't really care what the process is as long as the end result is smooth and professional… world class quality."* So this is not discharged by a millisecond target, and no number below is the bar. What the numbers are for is to say what changed and let him judge the real thing.
+
+**What was driven HERE, headless, and what it showed.** `npm run perf:midzoom` — a real wheel gesture on the reference plan, the frame captured MID-gesture (inside the 220 ms settle) and again once settled: **27 nodes checked, worst 0.74 px, observed scale 1.4049 against k 1.4049, zero settle jump.** That is the geometry proven exact while the gesture is still running, which nothing in this repo could observe before. Its `--selftest` also proves the harness goes RED on demand: a deliberately double-scaled frame fails and is correctly diagnosed `double-scaled`, and a build with the anchor disabled fails on "no anchor armed" rather than passing vacuously. `npm run perf:zoomab` — the SAME scripted 8-notch sweep, in and back out, one build, anchor on vs off: **wheel→DOM 51 → 21 ms · 25,149 → 6,528 DOM mutation records · re-bakes 180 ms after the last notch**, with a video of each arm.
+
+**What only he can answer, and the three specific things to watch for** — each is a real consequence of the trade he accepted, so any of them coming back as "no" is a product answer, not a bug report:
+
+1. **Does the wheel still feel late?** The delay he named was the re-emit, and it is measured 2.4× shorter. If it still feels late on a Bain plan, the residual is the component body itself, not the emit, and that is a different item.
+2. **Does the drawing look wrong WHILE the wheel is turning?** It scales as one piece, so line weights and text grow and shrink with it and the parking-stripe / dock-door detail holds the tier it started at until he stops. He was told this and accepted it — but "accepted in the abstract" and "fine to look at" are different, and this is the check.
+3. **Does it snap correctly the instant he stops?** The re-bake is ~180 ms after the last notch. Nothing should MOVE at that moment (the harness proves the geometry does not); what changes is sharpness and detail.
+
+Also worth one look: **a trackpad**, if he has one to hand. The wheel factor now reads the size of the scroll rather than only its direction, which is a much bigger change on a trackpad than on a wheel mouse — a mouse detent is numerically identical to before.
+
+**If any of it is wrong, `Plan ▾ → Smooth zoom` turns the whole thing off** and the zoom reverts to re-drawing on every notch. That switch existing is part of the deliverable.
+
+⏳ **LIVE APP (planyr.io), HIS OWN MACHINE, HIS OWN BAIN PLANS** `Blocker: real-data` *(sandbox evidence recorded on B1449; `Cadence: once`)*
+
 ### V52208 — B255200: does the recorder actually fire on HIS machine — and if it never does, B1121 closes. `Blocker: auth` `Blocker: real-data`
 
 The recorder is built, unit-tested (47 cases), and both of its guards were driven end to end HERE in a real browser: the hot path costs **0.07 µs a frame** against a stated 2.0 µs bound, the recorder-ON and recorder-OFF median frame times are **identical**, a deliberately induced stall produced **3 auto-captures** off a 16.7 ms baseline, a control arm with no stall produced **0**, and the manual button produced a capture marked owner-reported. Every one of those is mutation-proven — including the NOT-OBSERVING path, which was made to fail on demand.

@@ -172,6 +172,40 @@ the always-loaded core. This merges two tracks of work: the mature **Site Planne
 > on sight** (DEDUPE-FIRST still applies), so no diagnosis can go un-owned again. (Protocol doc:
 > `claude/protocol-2026-07-15-bug-blocks-are-fix-orders.md` in the owner's project.)
 >
+> **⛔ STANDING RULE #2 — NEVER-PARK: AN OWNER-REPORTED SYMPTOM IS NEVER CLOSED ON A NULL (owner rule,
+> 2026-08-08, instructed verbatim after a session broke it: *"Make a rule so that that never happened
+> again … there is, like, good information to act on and you just skipped over it. That should never
+> happen. Make a hard rule … I just can't believe you were gonna archive that."*).**
+> **THE FAILURE IT COMES FROM, recorded so the rule is not read as an abstraction.** B1121 — his *"reload
+> is quick then a minute later it's lagging"* — had been reported unchanged for weeks. A battery returned an
+> honest null. The session wrote it up, archived it with *"the honest position is that it is not currently
+> reproducible"*, and dispatched the next item on a list. The in-app recorder that finally addressed it
+> (B255200) exists ONLY because he asked whether anything was going to be done with it. **The mechanism of
+> the mistake:** a null READS like a closed item — it has a number, a document and a conclusion — but
+> *"we could not reproduce it"* and *"it is not happening"* are different statements, and the first was
+> filed as though it were the second.
+> **THE RULE, five clauses:**
+> **(1) A first-hand owner report is EVIDENCE; a failed reproduction is not a refutation of it. When the
+> instrument and the owner disagree, THE INSTRUMENT IS THE THING ON TRIAL.** This repo has proved that three
+> separate times: three harnesses silently contaminated by an undisposed `ElementHandle` (B1439), a fixture
+> seeder that made B749's whole cost path unreachable, and a growth harness whose "plan B" was plan A
+> truncated in half. **A clean number from an instrument that could not have seen the effect is not evidence
+> of absence.**
+> **(2) An owner-reported symptom may NEVER be closed, archived or de-prioritised on the strength of a null.**
+> There are exactly THREE admissible dispositions: **reproduce it and fix it** · **instrument it so it
+> captures itself when he hits it** · **ask him whether it is gone and take his answer as the verdict**.
+> *"Not currently reproducible"* is a **FINDING**. It is never a **DISPOSITION**.
+> **(3) SILENT DE-PRIORITISATION IS THE OFFENCE.** Judging that something else is more urgent is legitimate;
+> doing it without telling him is not. If a tractable item is picked over an owner-reported one, that choice
+> is stated to him in plain words at the moment it is made.
+> **(4) "The remaining work is large, dangerous or vague" is not a reason to pick a smaller item.** (See
+> DANGEROUS-MEANS-UNOBSERVABLE in the named rules — "dangerous" is a missing instrument, and building it is
+> the work.)
+> **(5) Every such item carries a STOPPING RULE when it is opened** — a stated condition under which it
+> closes. An item with no stopping rule rots, and rotting is how this failed.
+> **ENFORCEMENT: any session archiving a shipped record for an owner-reported symptom must state which of the
+> three dispositions it took, BY NAME**, on the item and in the session reply.
+>
 > **📋 `BACKLOG.md` = the single source of truth for open bugs & feature requests — KEEP IT LEAN.** Every run,
 > work the **🔲 Open** items. **The moment an item ships, MOVE its whole block to `BACKLOG-DONE.md` that same
 > session — never mark it done in place** (marking-done-in-place is exactly what bloated this file). The next
@@ -560,6 +594,26 @@ rules are binding shorthand, not optional style. (Full-text home so briefs stay 
   on the seeder's own diff (`elementSync.js`), which adopts rows via `onRowsCanonical` instead of
   enqueueing; and the bonded heal runs **AFTER** the journal / never-synced folds in `refetchReplace`, so
   no fold can put a geometrically impossible assembly on the canvas. Never re-order those two.
+- **DANGEROUS-MEANS-UNOBSERVABLE** — **When work is called DANGEROUS, NAME WHAT IS MISSING that makes it so.
+  If the answer is "nothing can observe whether it is correct", that gap is itself a DEFECT — and it is
+  usually the more valuable thing to fix.** (Owner rule, 2026-08-08, verbatim: *"I'm not really worried about
+  any path just because one is dangerous. I don't know that that's a good reason. If it is dangerous, then,
+  like, we should probably be fixing it in the first place because why is it dangerous?"* He was right and he
+  overruled the framing.)
+  **THE CASE IT COMES FROM.** B1449 (smooth zoom) was called too dangerous to ship for weeks, and the stated
+  reason was that at rest `renderView.ppf === view.ppf`, so a correct implementation and a broken one produce
+  IDENTICAL output in every existing test, e2e spec and pixel harness. **That is not a property of the
+  refactor — it is a hole in the harness.** The repo could not observe MID-GESTURE rendering at all, and that
+  hole bites every future interaction change, not just that one. So "it is dangerous" was never a reason to
+  avoid the work; it was a reason to **build the missing instrument first**, which was already step 1 of the
+  plan and is worth having on its own merits.
+  **HOW TO APPLY IT, three steps:** (a) write down the specific observation the guards cannot make — not
+  "this is risky" but *"no check in this repo can distinguish X from Y"*; (b) build that instrument and
+  **prove it goes RED on a deliberately wrong build** (a guard nobody has seen fail is a guard that rots
+  green — VIEW-INDEPENDENT-ONCE §6 names the same failure mode); (c) then do the work. If the instrument
+  cannot be built, THAT is the honest blocker to report — never the vague "dangerous".
+  **Do not confuse this with genuine caution.** Irreversible/destructive actions and real product decisions
+  still stop for the owner. This rule is about ENGINEERING risk that is really an observability gap.
 - **LIVE-VERIFY** — These classes can only be *confirmed* live, so they file `Verify: live` and park in
   `## ⏳ Verify` until seen working: timing / race bugs · concurrency / multi-writer · GIS endpoint
   behavior · zoom- or data-density-dependent rendering · PDF / export parity · anything whose repro

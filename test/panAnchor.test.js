@@ -1,4 +1,13 @@
 /* NEW-2 — THE PAN ANCHOR: a pan is one group transform, not ~1,200 re-emitted host elements.
+ * B1449 — …and a ZOOM is the same group transform with the scale term restored.
+ *
+ * ⛔ RETARGETED 2026-08-08, NOT WEAKENED. Every invariant below is the one it was written to
+ * protect; what changed is that `panAnchor` became `viewAnchor` and the transform gained a `k`.
+ * Two of them are now STRICTLY STRONGER (the cull rect pins the live PROBE as well as the latch;
+ * the at-rest transform is pinned through `anchorTransformAttr`, whose own unit test proves it
+ * emits B1440's byte-identical bare translate at k === 1). The pure math this file could not test
+ * before now EXISTS and is tested — see test/viewAnchor.test.js — and the mid-gesture behaviour
+ * this file is structurally blind to is covered by ui-audit/verify-midgesture-zoom.mjs.
  *
  * There is nothing pure to unit-test here — the change is a rearrangement of where a coordinate is
  * baked inside a React component — so this is a SOURCE guard, and that is deliberate: every
@@ -32,11 +41,26 @@ describe("the split between what is DRAWN at and what is TRUE", () => {
     // `useMemo(..., [view])` would allocate a fresh renderView every pan frame, f2p's identity would
     // churn, and every element memo would miss again — the change would be a no-op that still looks
     // correct. This one line is the whole mechanism.
-    expect(src).toContain("const renderView = useMemo(() => ({ ppf: view.ppf, offX: rvOffX, offY: rvOffY }), [view.ppf, rvOffX, rvOffY]);");
+    expect(src).toContain("const renderView = useMemo(() => ({ ppf: rvPpf, offX: rvOffX, offY: rvOffY }), [rvPpf, rvOffX, rvOffY]);");
   });
 
-  it("a zoom re-bakes on its own — the anchor is only ever honoured at constant ppf", () => {
-    expect(src).toContain("panAnchor.ppf === view.ppf");
+  it("a PAN anchor is still honoured only at constant ppf, and never gated on the zoom setting", () => {
+    // B1449 — the same-zoom case is B1440's, unchanged, and turning smooth zoom OFF must not take
+    // the pan increment away with it. That is what the `anchorSameZoom ||` short-circuit buys.
+    expect(src).toContain("const anchorSameZoom = !!viewAnchor && viewAnchor.ppf === view.ppf;");
+    expect(src).toMatch(/\(anchorSameZoom \|\| \(smoothZoom && anchorHolds\(view, viewAnchor\)\)\)/);
+  });
+
+  it("a zoom anchor is bounded — past the drift cap the frame re-bakes instead of scaling further", () => {
+    expect(src).toContain("anchorHolds(view, viewAnchor)");
+    expect(src).toMatch(/if \(!a \|\| !anchorHolds\(next, a\)\) armViewAnchor\(v\.ppf, v\.offX, v\.offY\);/);
+  });
+
+  it("the RENDER ppf is what the render body reasons at, and the label tier reads it too", () => {
+    // The mixture this forbids — geometry emitted at the anchor while labels/LOD/strokes are sized
+    // at the LIVE zoom — is invisible at rest, because at rest the two are equal.
+    expect(src).toContain("const rppf = renderView.ppf;");
+    expect(src).toContain("makeLabelFrame(rppf, exportPass && exportPass.ppf)");
   });
 });
 
@@ -44,7 +68,7 @@ describe("the export resolves its own view — the precondition, not a side effe
   it("an export pass bypasses the anchor entirely", () => {
     // The owner lifted the "buildExportSvg clones the live SVG" constraint on 2026-08-06; this is
     // where that lift is spent. A sheet built mid-gesture must equal one built at rest.
-    expect(src).toContain("const panAnchored = !exportPass && !!panAnchor && panAnchor.ppf === view.ppf;");
+    expect(src).toMatch(/const anchored = !exportPass && !!viewAnchor/);
   });
 });
 
@@ -55,6 +79,9 @@ describe("the harness and e2e contract is unchanged", () => {
 
   it("the live delta is exposed separately, so a probe can tell armed from at-rest", () => {
     expect(src).toContain("data-pan-dx={panDx} data-pan-dy={panDy}");
+    // B1449 — and the zoom half of it, plus the ppf the geometry was actually emitted at. Both are
+    // inert at rest (k === 1, render-ppf === view-ppf), so no pre-B1449 assertion moved.
+    expect(src).toContain("data-pan-k={panK} data-render-ppf={rppf}");
   });
 
   /* ⛔ RETARGETED, NOT WEAKENED (NEW-2, 2026-08-06). The property this asserts is unchanged —
@@ -65,10 +92,15 @@ describe("the harness and e2e contract is unchanged", () => {
      re-filtered the whole model on every pan frame to produce an identical set of elements.
      The assertion is now STRONGER than it was: it pins the live-view source AND the latch, so
      removing either goes red. */
-  it("the cull rect still reads the LIVE view — culling by what is actually visible", () => {
-    expect(src).toContain("cullRectRef.current = cullActive ? cullRectFor(view, size, cullRectRef.current) : null;");
-    // …and never from the anchor, which is what would make a pan draw the wrong window.
-    expect(src).not.toContain("cullRectFor(renderView");
+  /* ⛔ RETARGETED AGAIN (B1449) AND STRICTLY STRONGER. The property is unchanged: what is DRAWN
+     must cover what is actually VISIBLE. What changed is that the two questions the old call
+     conflated are now separate arguments — the rect is BUILT at the render view (so the latch key
+     is constant through a zoom gesture instead of re-arming on every notch) and PROBED against the
+     LIVE view (so a zoom-OUT, whose true viewport grows while the anchor's does not, still re-arms
+     in time and nothing pops in at the edge). Dropping EITHER argument now goes red; before, only
+     one could be asserted at all. */
+  it("the cull rect is built at the render view but PROBED against the live one", () => {
+    expect(src).toContain("cullRectFor(renderView, size, cullRectRef.current, undefined, undefined, view)");
   });
 });
 
@@ -78,7 +110,12 @@ describe("the transform reaches everything that is drawn through f2p, and nothin
   });
 
   it("the transform is undefined at rest, so nothing outside a live pan sees one at all", () => {
-    expect(src).toContain("const panT = panDx || panDy ? `translate(${panDx} ${panDy})` : undefined;");
+    // B1449 — the emptiness is now a property of `anchorTransformAttr`, which test/viewAnchor.test.js
+    // proves returns `undefined` when the anchor and the view coincide AND a bare `translate(dx dy)`
+    // at k === 1 (byte-for-byte what this line used to build). Assert the wiring here, the behaviour
+    // there — a string built inline could not be unit-tested at all.
+    expect(src).toContain("const panT = anchorTransformAttr(viewT);");
+    expect(src).toContain("const viewT = anchored ? anchorTransform(view, renderView) : null;");
   });
 
   it("the print crop — outside that group, placed through feet — uses the LIVE-view f2p", () => {
@@ -90,16 +127,35 @@ describe("the transform reaches everything that is drawn through f2p, and nothin
 
 describe("arming and disarming — the anchor may never outlive its gesture", () => {
   it("arms from the gesture's OWN captured origin, once, as it passes the dead zone", () => {
-    expect(src).toContain("if (!d.panArmed) armPanAnchor(view.ppf, d.ox, d.oy);");
+    expect(src).toContain("if (!d.panArmed) armViewAnchor(view.ppf, d.ox, d.oy);");
   });
 
   it("is rebased when a panel move rebases the gesture, or it carries the panel width forever", () => {
     // B837's compensation adjusts `d.ox` mid-pan; the anchor is a copy of that same origin.
-    expect(src).toContain("setPanAnchor((a) => (a ? { ...a, offX: a.offX - delta } : a));");
+    expect(src).toContain("setViewAnchor((a) => { if (!a) return a; const n = { ...a, offX: a.offX - delta }; viewAnchorRef.current = n; return n; });");
   });
 
   it("disarms on BOTH gesture-end paths — a clean release and a torn-down one", () => {
-    expect(src).toMatch(/flushFrameJobs\(\);\s*\n\s*disarmPanAnchor\(\);/);            // onUp
-    expect(src).toMatch(/drag\.current = null;\s*\n\s*disarmPanAnchor\(\);/);          // abortGesture
+    expect(src).toMatch(/flushFrameJobs\(\);\s*\n\s*disarmViewAnchor\(\);/);            // onUp
+    expect(src).toMatch(/drag\.current = null;\s*\n\s*disarmViewAnchor\(\);/);          // abortGesture
+  });
+
+  /* B1449 — a WHEEL has no pointer-up, so its gesture boundary is a settle timer. These three are
+     the whole lifetime, and each one left out is a distinct visible bug: no settle → the drawing
+     never re-bakes and stays at the anchor's line weights forever; no pinch disarm → the same on
+     touch; no pointerdown flush → a pan arms its own anchor over a live zoom one and the two
+     gestures fight over one anchor. */
+  it("a wheel gesture settles on a timer, because a wheel has no pointer-up", () => {
+    expect(src).toMatch(/wheelSettleRef\.current = setTimeout\(settleZoomAnchor, ZOOM_SETTLE_MS\);/);
+    expect(src).toMatch(/clearTimeout\(wheelSettleRef\.current\); wheelSettleRef\.current = 0;\s*\n\s*disarmViewAnchor\(\);/);
+  });
+
+  it("a pinch disarms when the second finger lifts", () => {
+    expect(src).toMatch(/pinchRafRef\.current = 0; \}\s*\n\s*disarmViewAnchor\(\);/);
+  });
+
+  it("a pointer gesture starting mid-zoom flushes AND re-bakes before it arms its own anchor", () => {
+    expect(src).toContain("const flushWheelForPointer = () => { flushWheelNow(); if (wheelSettleRef.current) settleZoomAnchor(); };");
+    expect(src).toContain('wrap.addEventListener("pointerdown", flushWheelForPointer, { capture: true });');
   });
 });
