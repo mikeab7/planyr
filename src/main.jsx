@@ -5,6 +5,7 @@ import { ThemeProvider } from "./shared/theme/ThemeProvider.jsx";
 import { installChunkReloadGuard } from "./app/chunkReload.js";
 import { installClientErrorTelemetry, TAB_ID } from "./shared/telemetry/clientErrors.js";
 import { isEnrolled } from "./shared/telemetry/perfSampling.js";
+import { perfRecorderEnabled } from "./shared/telemetry/perfRecorderHandle.js";
 import { retireGisSw } from "./workspaces/site-planner/lib/registerGisSw.js";
 import "./index.css";
 
@@ -33,6 +34,33 @@ if (isEnrolled(TAB_ID)) {
     .catch(() => {});
   if (typeof requestIdleCallback === "function") requestIdleCallback(armPerf, { timeout: 8000 });
   else setTimeout(armPerf, 4000);
+}
+
+/* THE ALWAYS-ON PERFORMANCE RECORDER (NEW-1). The owner's "a minute or two later it's lagging"
+ * has now failed to reproduce twice under instruments we aimed ourselves — so the app records
+ * itself instead. A preallocated ring buffer holds the last stretch of frame deltas, long tasks
+ * and scene counters; a SELF-CALIBRATING trigger (baseline taken from the window right after a
+ * load, which is the window he himself calls fast) fires on a sustained deviation from it, and a
+ * discreet control in the planner lets him say "that felt slow just now" and keep the seconds
+ * BEFORE the click. Counters, timings and view state only — never geometry, records or text.
+ *
+ * ⛔ DYNAMIC IMPORT, DEFERRED TO IDLE, AND UNCONDITIONAL — each deliberately. Unconditional
+ * because a 25%-sampled recorder would miss three of every four episodes he has, and he is the
+ * one person whose sessions contain the symptom. Dynamic + idle because `main.jsx` is on the
+ * critical path of EVERY route: a static edge would hoist a Site-Planner-shaped diagnostic into
+ * the chunk the Notes, Library and Review routes download (the mistake `perfSampling.js`'s header
+ * records), and the one window this must never compete with is the four seconds B1431 attributed
+ * to the boot. Only the tiny handle module is always loaded — and it is imported HERE, statically,
+ * on purpose: the planner and the recorder chunk both need it, and a module reachable from a lazy
+ * chunk and the site route but NOT from the entry gets hoisted into a THIRD chunk that lands on a
+ * plain Site load (measured: it broke the route's chunk-count budget and its allowlist). Pulling it
+ * into the entry every route already downloads costs a few hundred bytes and no new request. */
+if (perfRecorderEnabled(window)) {
+  const armRec = () => import("./shared/telemetry/perfRecorder.js")
+    .then((m) => m.installPerfRecorder(window))
+    .catch(() => {});
+  if (typeof requestIdleCallback === "function") requestIdleCallback(armRec, { timeout: 9000 });
+  else setTimeout(armRec, 4500);
 }
 
 // Recover from "stale chunk after deploy" failures (B221): when a new build ships

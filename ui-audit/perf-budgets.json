@@ -95,8 +95,8 @@
     },
 
     "totalJsBytes": {
-      "baseline": 4709515,
-      "target": 4709515,
+      "baseline": 4806089,
+      "target": 4806089,
       "unit": "bytes",
       "what": "Every JS chunk EMITTED into dist/assets, summed. Catches overall bundle growth even when it lands off the Site route.",
       "note": "Larger than the 3016 KB the owner's 2026-07-28 pass reported, and correctly so: that figure counted the 11 chunks a browser actually FETCHED, while this counts all 20 emitted — the extra 5 are Web Worker bundles (terrainWorker, dxfWorker) and small helper chunks that only a dynamic import ever pulls. Two different questions; the per-route budgets above answer the owner's. CEILING RAISED 3960000 -> 3985000 by B1130/B1131 (2026-07-30), stated in full because raising a ceiling is a product decision. THE KEY POINT: this metric counts EVERY emitted chunk, lazy ones included, BY DESIGN — that is exactly what makes it the honest catch-all. So the four deferrals that paid the two per-route budgets (see siteRouteJsBytes.note) move bytes OFF the critical path without reducing this number at all, and no amount of further code-splitting can. The residual is ~19 KB of genuine minified code implementing two owner-reported defects on the Electric layer: substations painting as broken-image glyphs labelled \"Mark\", and no way to hover a line or substation to learn what it is. WHAT WAS PAID ELSEWHERE FIRST, so this is not a shortcut: largestChunkBytes was brought back UNDER its existing ceiling with no raise at all (1719.5 -> 1706.8 KB), and siteRouteJsBytes was cut from +20.2 KB to +7.4 KB before its ceiling moved. HEADROOM CONTEXT: main was at 3861.4 KB against the 3867.2 KB ceiling — 5.8 KB — so like the other two, this metric now trips on essentially any feature; that is a headroom problem to be closed by B1064, not a regression in this PR. Ceiling and target are kept EQUAL here, as they were before, so this metric continues to assert no known gap rather than quietly acquiring one. NEW-1 (2026-07-30): baseline and target are still kept EQUAL for exactly that reason, and the derived headroom band now applies to this metric too — it was 4.3 KB (0.11%) under its old hand-pinned ceiling and would have been the next surprise."
@@ -312,6 +312,15 @@
           "item": "B230080",
           "date": "2026-08-07",
           "reason": "Shipped B230080 (the canvas clipboard hoisted above the plan-switch remount boundary, plus resolveClipFrame — the cross-plan coordinate decision — and revealPasted): +2.0 KB measured. Optimized first: the drawn-object and reference-drawing Ctrl+V paths had their placement logic collapsed into ONE shared pure decision (clipPlacement) instead of the two copies the brief warned would diverge; the three refusal messages share one tail; the modifier-label derivation was deduped to the existing MOD_LABEL. This raise records accumulated reality, not this feature's cost: clean main already measured 2367.3 KB, i.e. 45.1 KB of the 46.4 KB band was consumed by earlier merged work that never ratcheted, leaving 1.3 KB for the next feature of any size. B1064 still owns getting the route back down."
+        },
+        {
+          "metric": "bundle.totalJsBytes",
+          "from": 4709515,
+          "to": 4806089,
+          "direction": "raise",
+          "item": "B255200",
+          "date": "2026-08-08",
+          "reason": "The always-on performance recorder: a 16.6 KB lazy chunk (ring buffers, self-calibrating trigger, capture encoder, bounded IndexedDB store) fetched in an idle gap after boot, plus 3.1 KB on the site route for the manual control and the always-loaded handle. No route's critical path grows past its own band; main was already 73.6 KB above this stale baseline before this branch, and 20.6 KB of new lazy code is what carried it over."
         }
       ]
     }

@@ -82,6 +82,15 @@ export const IDB_CLASSES = [
     match: (k) => has(k, "planarfit:sites:history"),
   },
   {
+    /* Performance recordings (NEW-1). In the LARGE tier deliberately — TIER-BY-REBUILDABILITY:
+     * a diagnostic must never compete with saved plans for the ~5 MB small store. NOT reclaimable,
+     * because nothing can rebuild one: the moment it describes is gone. It is kept small by its
+     * own writer instead (perfCaptureStore.js prunes to three on every write) and it is shown in
+     * the storage panel with its own clear control, so it can never grow without being visible. */
+    id: "perfcaptures", label: "Performance recordings", rebuild: REBUILD.NONE, reclaimable: false,
+    match: (k) => has(k, "perfcap:"),
+  },
+  {
     /* Reference images: the aerial underlay and placed PDF/CAD rasters. CONDITIONALLY rebuildable
      * and therefore NEVER bulk-reclaimable. B474 recorded the exact hazard: "a raster whose src had
      * been dropped (idbKey set) was then unrecoverable". A raster with a `storageKey` has a cloud
