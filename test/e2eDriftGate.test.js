@@ -197,9 +197,13 @@ describe("the REAL Playwright reporter shape (captured fixture)", () => {
   });
 
   it("produces exactly the id shape the committed ledger uses", () => {
+    // RE-PINNED 2026-08-08 (B276449 fixed flood-district-scoping:133, so the previous capture aged
+    // out — see the fixture's own $comment). Now aimed at the external-GIS family, which is the
+    // whole of the local-lane ledger and the least likely to be fixed from a sandbox with no egress.
     const failing = cases.filter((c) => c.status === "failed").map((c) => c.id);
     expect(failing).toEqual([
-      "e2e/flood-district-scoping.spec.js:133 › flood & drainage district scoping (B1091(×2)) › the VISIBLE panel carries the zone verdict and the scoping reasons; the hidden copy is inert",
+      "e2e/layer-point-hover-identify.spec.js:315 › electric layer point symbols + hover identify (NEW-1/NEW-2) › hovering a RASTER-painted layer identifies it through the service",
+      "e2e/layer-point-hover-identify.spec.js:345 › electric layer point symbols + hover identify (NEW-1/NEW-2) › an unreachable identify service says so, briefly — never a hanging spinner",
     ]);
   });
 
@@ -210,7 +214,7 @@ describe("the REAL Playwright reporter shape (captured fixture)", () => {
     // passes.
     const passed = cases.filter((c) => c.status === "passed").map((c) => c.id);
     expect(passed).toContain(
-      "e2e/flood-district-scoping.spec.js:60 › flood & drainage district scoping (B1091(×2)) › at a site inside BKDD, BKDD is listed and HCFCD is the one demoted",
+      "e2e/layer-point-hover-identify.spec.js:217 › electric layer point symbols + hover identify (NEW-1/NEW-2) › substation POINTS paint as circleMarkers, never a broken default marker",
     );
   });
 

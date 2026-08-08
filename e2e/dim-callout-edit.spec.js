@@ -86,14 +86,35 @@ test.describe("B911 — parcel edge dimension labels declutter on zoom-out", () 
   });
 });
 
+/* B912 — editable dimension length, RETARGETED 2026-08-08 (B276448) onto the contract B50010
+ * established. Both halves are asserted here because B50010 split this gesture in two by POSITION,
+ * and pinning only one half is how the other silently dies.
+ *
+ * ⛔ WHAT CHANGED, EXACTLY, AND WHERE. Until 2026-08-07 this case asserted that a double-tap on a
+ * building's dimension number — at its DEFAULT position — opened the inline length editor. B50010
+ * (commit acd99a0d, PR #932, 2026-08-07) deliberately reversed that, in `onDimNumberDown`
+ * (SitePlanner.jsx): "WHEN THE NUMBER SITS ON THE BODY, THE BODY WINS". The report behind it was a
+ * centreline road, whose width number is anchored to the centreline midpoint and is therefore
+ * painted ON the pavement, so a double-click aimed at the road could not miss it and the inline
+ * width chip swallowed a gesture the click contract says opens Properties. B50010 fixed it once in
+ * the shared dispatch "for every type, not special-cased for road" — and a building is caught by
+ * the same rule, because B592 clamps its number ONTO the footprint. CLAUDE.md's
+ * CHROME-NEVER-EATS-A-PRESS now cites B50010 as the standing rule, so the contract is settled and
+ * it is this SPEC that was stale, not the code.
+ *
+ * The old assertion went red in BOTH lanes on 2026-08-08 — the day after B50010 merged — and was
+ * the only genuinely cross-lane row on the known-red ledger (B266081).
+ *
+ * ⛔ AND B912 IS NOT DEAD, WHICH IS WHY HALF 2 EXISTS. B50010 kept the inline editor "exactly where
+ * the number is genuinely the only thing there". The number renders OUTBOARD of the dimension line
+ * (6px beyond it, `textAnchor="end"`), and `dimSlideRange` lets the line slide to the end of the
+ * footprint — so sliding the dimension all the way along parks the NUMBER clear of the body, and
+ * there it still edits the length in place. Measured on this build: the number moves from x≈264 to
+ * x≈175 against a footprint whose left edge is x≈204, i.e. fully clear, and the editor opens. */
 test.describe("B912 — editable dimension length", () => {
-  test("double-tap a building's dimension number → type a length → the building resizes", async ({ page }) => {
-    const errors = [];
-    page.on("pageerror", (e) => errors.push(String(e)));
-    await startBlank(page);
-
-    // A WIDE, short building: the depth dimension sits well clear of the centred name label, so its
-    // number renders (it isn't collision-suppressed) and is a reliable double-tap target.
+  // A WIDE, short building: the depth dimension sits well clear of the centred name label, so its
+  // number renders (it isn't collision-suppressed) and is a reliable double-tap target.
+  async function drawWideBuilding(page) {
     const box = await canvas(page).boundingBox();
     await page.getByRole("button", { name: "Building", exact: true }).click();
     const x1 = box.x + 150, y1 = box.y + 250, x2 = box.x + 640, y2 = box.y + 380;
@@ -103,12 +124,62 @@ test.describe("B912 — editable dimension length", () => {
     await page.mouse.move(x2, y2, { steps: 8 });
     await page.mouse.up();
     await expect.poll(() => firstBuilding(page)).not.toBeNull();
+    return { x1, y1, x2, y2 };
+  }
+
+  test("the number sitting ON the footprint gives the press to the building (B50010) — Properties, not the editor", async ({ page }) => {
+    const errors = [];
+    page.on("pageerror", (e) => errors.push(String(e)));
+    await startBlank(page);
+    await drawWideBuilding(page);
 
     const dim = page.getByTestId("el-dim").first();
     await expect(dim).toBeVisible({ timeout: 8000 });
     const db = await dim.boundingBox();
 
-    // Double-tap the dimension number → the inline numeric editor opens (an <input type=number>).
+    // The number is at its default position, which B592 pins onto the footprint — so the body wins.
+    await doubleTap(page, db.x + db.width / 2, db.y + db.height / 2);
+    await expect(panel(page), "a double-tap on the dimension number did not open Properties").toBeVisible({ timeout: 6000 });
+    // …and it is Properties INSTEAD OF the chip, not as well as it.
+    await expect(page.locator('input[type="number"]'),
+      "the inline length editor opened over the body — the B50010 regression").toHaveCount(0);
+    // The press was never merely swallowed: CHROME-NEVER-EATS-A-PRESS's floor is that something happens.
+    expect(errors, errors.join("\n")).toEqual([]);
+  });
+
+  test("slid CLEAR of the footprint the number still edits in place → type a length → the building resizes", async ({ page }) => {
+    const errors = [];
+    page.on("pageerror", (e) => errors.push(String(e)));
+    await startBlank(page);
+    const { x1, x2, y1, y2 } = await drawWideBuilding(page);
+
+    // Select the building so the fat transparent grab band renders (it exists only while selected),
+    // then drag the dimension along its length. `dimSlideRange` clamps it at the end of the
+    // footprint, which is further than we push it — so this lands on the clamp deterministically.
+    await page.mouse.click((x1 + x2) / 2, (y1 + y2) / 2);
+    // NB: the grab band is a <line>, and for a horizontal-long building it is VERTICAL — so its
+    // client rect is zero-WIDTH and Playwright's visibility check calls it hidden even though it
+    // renders and hit-tests fine (the 14px stroke is what you actually grab). Poll for its
+    // presence and measure it directly rather than asserting visibility.
+    const grab = page.getByTestId("el-dim-grab").first();
+    await expect.poll(() => grab.count(), { timeout: 6000 }).toBeGreaterThan(0);
+    const gb = await grab.boundingBox();
+    await page.mouse.move(gb.x + gb.width / 2, gb.y + gb.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(gb.x + gb.width / 2 - 200, gb.y + gb.height / 2, { steps: 10 });
+    await page.mouse.up();
+    await page.keyboard.press("Escape"); // deselect — the number must work without a live selection
+
+    // It really is clear of the body now (this is the precondition the assertion below rests on;
+    // if a future change re-clamps the number onto the footprint this fails HERE, loudly, rather
+    // than silently turning the test into a duplicate of the one above).
+    const dim = page.getByTestId("el-dim").first();
+    await expect(dim).toBeVisible({ timeout: 8000 });
+    const db = await dim.boundingBox();
+    expect(db.x + db.width,
+      `the dimension number must sit clear of the footprint's left edge (${Math.round(x1)})`).toBeLessThanOrEqual(x1);
+
+    // Double-tap the number in clear space → the inline numeric editor opens (an <input type=number>).
     await doubleTap(page, db.x + db.width / 2, db.y + db.height / 2);
     const editor = page.locator('input[type="number"]');
     await expect(editor.first()).toBeVisible({ timeout: 6000 });
@@ -240,14 +311,26 @@ test.describe("NEW-1 — callout border corner radius is zoom-invariant (rectang
     const g1 = await boxGeo(page);
     const ratio1 = g1.rx / Math.min(g1.w, g1.h);
 
-    // Zoom OUT several steps → the box shrinks in px. Under the old fixed-px radius the proportion
-    // would BALLOON (bubble); with the fix it holds.
+    /* Zoom OUT several steps → the box shrinks in px. Under the old fixed-px radius the proportion
+     * would BALLOON (bubble); with the fix it holds.
+     *
+     * ⛔ WAIT FOR THE RE-LAYOUT (B276451, 2026-08-08). This used to read `boxGeo` immediately after
+     * the wheel gesture and assert the width had moved. B1449 (commit c6a4b94d, PR #952, merged
+     * 2026-08-08 — the same day the local ledger was swept, which is why this was never listed)
+     * made the zoom ANCHORED: during and just after the gesture the canvas is redrawn by a
+     * TRANSFORM (`viewT = anchorTransform(view, renderView)`) rather than re-laid-out, so the rect's
+     * SVG USER units are deliberately unchanged while its SCREEN box has already shrunk. Measured on
+     * this build: user w stays 92.76 immediately after the wheel while the client rect is already
+     * 53.84, and the re-layout lands ~200 ms later (user w 53.77, rx re-derived 1.146).
+     * So the assertion was reading the pre-transform user units and correctly seeing no change —
+     * a stale MEASUREMENT, not a product regression. The corner-radius proportion is 0.0600 both
+     * before and after, i.e. exactly the invariant this test exists to prove. Polling for the
+     * re-layout restores what the test always meant: a genuine re-layout at a new zoom. */
     await wheelZoom(page, 4, +1);
+    await expect.poll(async () => Math.abs((await boxGeo(page)).w - g1.w), { timeout: 8000 },
+    ).toBeGreaterThan(2);
     const g2 = await boxGeo(page);
     const ratio2 = g2.rx / Math.min(g2.w, g2.h);
-
-    // The box really did change size across the zoom (so we're genuinely testing across zoom)…
-    expect(Math.abs(g2.w - g1.w)).toBeGreaterThan(2);
     // …yet the corner-radius PROPORTION is unchanged (same shape at both zooms) and stays LOW enough
     // to read as a rectangle (never approaching the half-side that would make a pill).
     expect(ratio2).toBeCloseTo(ratio1, 3);
