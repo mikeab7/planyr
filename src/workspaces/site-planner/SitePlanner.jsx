@@ -7,7 +7,7 @@ import { loadSite, saveSite, deleteSite, isCloudActive, activeUid, pushSiteToClo
 import { idbGet, idbPut, idbDelete, idbAvailable } from "./lib/localDb.js";
 import { registerFlush } from "../../app/flushRegistry.js";
 import { createEditorLock } from "../../shared/presence/editorLock.js";
-import { reportClientEvent } from "../../shared/telemetry/clientErrors.js";
+import { reportClientEvent, SUPPRESSED_AUTOMATED } from "../../shared/telemetry/clientErrors.js";
 import { notePerfEdit } from "../../shared/telemetry/perfSampling.js";
 import { notePlanContext, noteViewScale, requestPerfCapture, perfCaptureDelivery } from "../../shared/telemetry/perfRecorderHandle.js";
 import { createElementSync, stableStringify } from "./lib/elementSync.js";
@@ -19930,8 +19930,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   title={slowNote === "ok" ? "Recorded — thanks"
                     : slowNote === "sending" ? "Recording…"
                       : slowNote === "undelivered" ? "Recorded on this device, but it couldn't reach the server — it'll be in the next report"
-                        : slowNote === "fail" ? "Couldn't record it (the recorder isn't running on this page)"
-                          : "That felt slow just now — record the last few seconds"}
+                        /* B270912 — an automated run keeps the capture locally and deliberately
+                           sends nothing. Saying "it couldn't reach the server" there would be a
+                           lie about a working pipe, and the ONE state a reader must be able to
+                           trust is this button's. */
+                        : slowNote === "local" ? "Recorded on this device — automated runs don't report to the server"
+                          : slowNote === "fail" ? "Couldn't record it (the recorder isn't running on this page)"
+                            : "That felt slow just now — record the last few seconds"}
                   style={{ ...zb, borderTop: "none", borderRadius: 0, fontSize: 13, color: slowNote === "ok" ? PAL.accent : (slowNote === "fail" || slowNote === "undelivered") ? "var(--warn-text)" : PAL.muted }}
                   onClick={() => {
                     const taken = requestPerfCapture("manual");
@@ -19940,11 +19945,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     const d = perfCaptureDelivery();
                     Promise.resolve(d).then((r) => {
                       const ok = !!(r && r.ok);
-                      setSlowNote(ok ? "ok" : "undelivered");
-                      setTimeout(() => setSlowNote(null), ok ? 2600 : 6000);
+                      const local = !ok && r && r.reason === SUPPRESSED_AUTOMATED;
+                      setSlowNote(ok ? "ok" : local ? "local" : "undelivered");
+                      setTimeout(() => setSlowNote(null), ok || local ? 2600 : 6000);
                     }, () => { setSlowNote("undelivered"); setTimeout(() => setSlowNote(null), 6000); });
                   }}>
-                  {slowNote === "ok" ? "✓" : slowNote === "sending" ? "…" : (slowNote === "fail" || slowNote === "undelivered") ? "!" : "◷"}
+                  {slowNote === "ok" ? "✓" : slowNote === "local" ? "✓" : slowNote === "sending" ? "…" : (slowNote === "fail" || slowNote === "undelivered") ? "!" : "◷"}
                 </button>
               </div>
             );

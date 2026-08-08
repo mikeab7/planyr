@@ -11,6 +11,8 @@ import {
   RATE_WINDOW_MS,
   RATE_MAX,
   SESSION_MAX,
+  networkReportSuppression,
+  SUPPRESSED_AUTOMATED,
 } from "../src/shared/telemetry/clientErrors.js";
 
 // B279 — error telemetry. The pure layer (decide-to-send + row shaping) is what carries
@@ -167,5 +169,86 @@ describe("reportClientEvent — structured events, fail-safe (B468/NEW-5)", () =
     expect(() => reportClientEvent("save-suppressed", "cloud push skipped", circular)).not.toThrow();
     expect(() => reportClientEvent(null, null)).not.toThrow();
     expect(() => reportClientEvent("delete-zero-rows")).not.toThrow();
+  });
+});
+
+/* ⛔ B270912 — PRODUCTION TELEMETRY MUST NOT REPORT FROM AUTOMATED RUNS, and the pure decision is
+ * pinned here because the browser half of the proof (`ui-audit/verify-capture-pipe.mjs`, the
+ * `suppressed` arm) cannot run in this repo's CI. Measured cause: 679 rows in twenty-four hours,
+ * 87 of 98 `event:perf` rows synthetic against 11 from the owner — his "that felt slow just now"
+ * capture arriving as one row in several hundred, separable only by a read-side filter on his
+ * display signature.
+ *
+ * The two properties that matter most are the ones a careless fix gets wrong:
+ *   • the OPT-IN wins, because `verify-capture-pipe` — including its anti-rot arms, which prove a
+ *     BROKEN delivery is loud — runs under automation and would otherwise be disabled by this very
+ *     change, passing forever while observing nothing;
+ *   • it FAILS OPEN, because silencing a real user over an unreadable property is strictly worse
+ *     than one extra test row. */
+describe("networkReportSuppression — automated runs do not write to production (B270912)", () => {
+  it("does not suppress an ordinary browser session", () => {
+    const r = networkReportSuppression({ navigator: {} });
+    expect(r.suppress).toBe(false);
+    expect(r.automated).toBe(false);
+  });
+
+  it("suppresses under navigator.webdriver — the detector that needs no per-spec discipline", () => {
+    // ⛔ THIS, not the flag, is the primary gate, and the reason is measured: 62 of the 81 specs in
+    // e2e/ never set `window.__PLANYR_E2E` — including assembly-tear-detector.spec.js, the top
+    // producer of three of the five loudest sources in the table. A flag-only gate would have
+    // silenced 19 specs, left every top row untouched, and reported success.
+    const r = networkReportSuppression({ navigator: { webdriver: true } });
+    expect(r.suppress).toBe(true);
+    expect(r.via).toBe("webdriver");
+  });
+
+  it("suppresses under __PLANYR_E2E too — the second door, for a non-webdriver harness", () => {
+    const r = networkReportSuppression({ __PLANYR_E2E: true, navigator: {} });
+    expect(r.suppress).toBe(true);
+    expect(r.via).toBe("flag");
+  });
+
+  it("names BOTH when both are present, so a reader can tell which gate caught it", () => {
+    expect(networkReportSuppression({ __PLANYR_E2E: true, navigator: { webdriver: true } }).via).toBe("webdriver+flag");
+  });
+
+  it("the EXPLICIT opt-in wins — without it the pipe verification would be blinded by its own fix", () => {
+    for (const win of [
+      { navigator: { webdriver: true }, __PLANYR_TELEMETRY_NETWORK: true },
+      { navigator: {}, __PLANYR_E2E: true, __PLANYR_TELEMETRY_NETWORK: true },
+    ]) {
+      const r = networkReportSuppression(win);
+      expect(r.automated).toBe(true);
+      expect(r.optIn).toBe(true);
+      expect(r.suppress).toBe(false);   // …so verify-capture-pipe still delivers, and still fails loudly when delivery breaks
+    }
+  });
+
+  it("only a strict `true` opts in — a truthy stray value must not re-open production reporting", () => {
+    expect(networkReportSuppression({ navigator: { webdriver: true }, __PLANYR_TELEMETRY_NETWORK: 1 }).suppress).toBe(true);
+    expect(networkReportSuppression({ navigator: { webdriver: true }, __PLANYR_TELEMETRY_NETWORK: "yes" }).suppress).toBe(true);
+  });
+
+  it("only a strict `true` suppresses — a truthy stray must not silence a real user either", () => {
+    expect(networkReportSuppression({ navigator: { webdriver: "false" } }).suppress).toBe(false);
+    expect(networkReportSuppression({ __PLANYR_E2E: 1, navigator: {} }).suppress).toBe(false);
+  });
+
+  it("FAILS OPEN on anything unreadable — a throwing property never silences telemetry", () => {
+    const hostile = {};
+    Object.defineProperty(hostile, "__PLANYR_E2E", { get() { throw new Error("nope"); } });
+    Object.defineProperty(hostile, "navigator", { get() { throw new Error("nope"); } });
+    Object.defineProperty(hostile, "__PLANYR_TELEMETRY_NETWORK", { get() { throw new Error("nope"); } });
+    expect(() => networkReportSuppression(hostile)).not.toThrow();
+    expect(networkReportSuppression(hostile).suppress).toBe(false);
+    expect(networkReportSuppression(undefined).suppress).toBe(false);
+    expect(networkReportSuppression(null).suppress).toBe(false);
+  });
+
+  it("exports a stable reason string — the recorder and the button both branch on it", () => {
+    // A literal here on purpose: this string crosses three modules (the sink, the recorder's
+    // suppressed/undelivered split, and the manual button's `local` state), so a silent rename
+    // would quietly turn every suppressed send back into a "the server is unreachable" warning.
+    expect(SUPPRESSED_AUTOMATED).toBe("automated-run");
   });
 });

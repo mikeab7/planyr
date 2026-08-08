@@ -113,6 +113,43 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V67920 — B270912: does the production row rate actually drop, and does the owner's own capture still land? `Blocker: real-data`
+
+**What was already proven HERE, so this is the residue rather than the check.** The `suppressed` arm
+of `ui-audit/verify-capture-pipe.mjs` drives the deployed bundle in a real browser and asserts, at
+the network layer: **zero writes to `client_errors`** from an ordinary automated run, the capture
+still TAKEN, the on-device IndexedDB copy still written, `pfTelemetry.lastSend().reason ===
+"automated-run"`, `pfRec.state().suppressed > 0` with `undelivered === 0`, and the owner's button
+reading `local` rather than the undelivered warning. The four opted-in arms (`auto`, `manual`,
+`manual-cold`, `rejected`, `offline`) still deliver and still go red when delivery breaks. **Both
+mutants were run and both go red** — suppression made unconditional takes 7 assertions down,
+suppression removed takes 4 (including 5 rows reaching the table). `verify-telemetry` and
+`e2e/assembly-tear-detector.spec.js` re-run green, so the local ring is intact under automation.
+
+**Why this still parks.** No sandbox can see the production table's rate over time, and the row that
+matters most is one this machine cannot produce: the owner pressing the button in his own signed-in
+browser, which is not under webdriver and must therefore still deliver. Baseline taken from the
+database this session, for the comparison: **5,162 rows total · 410 in the last 24 h · 2,174 in the
+last 7 days · 3.2 MB.**
+
+**The check, a few days after this deploys:**
+1. `select count(*) from public.client_errors where at > now() - interval '24 hours';` — expect a
+   **large fall from 410**, concentrated in `map-registration-out-of-range`,
+   `assembly-orphan-pad-repaired`, `assembly-tear-persisted`, `assembly-tear-detected` and
+   `county-healed`, which were the fixture-driven sources.
+2. `select source, count(*) … group by source` over the same window — the surviving rows should be
+   from real sessions. **The 89/11 split on `event:perf` should invert:** the owner's captures are
+   no longer a minority of their own source.
+3. **The one that matters most** — after he presses "that felt slow just now" once, a row with
+   `source = 'event:perfcap'` and `"kind":"manual"` appears within seconds, and his button shows the
+   **✓**, not `!` and not the muted `local`. If it shows `local` in his own browser the gate has
+   misfired on a real user and that is a stop-everything regression, not a tuning question.
+4. Confirm nothing was lost: the two rows at `2026-08-07 19:07:38` (`stale-cache-overruled`,
+   `element-rows-canonical`, plan `sms4zs8unbkg`) are still present. Verified present this session.
+
+**Feeds B270913** — the post-fix rate read in step 1 is the number that decides whether retention is
+worth applying at all. Do not action B270913 before this runs.
+
 ### V64545 — B267538: which of the seven sandbox-only failures a REAL runner sees. `Blocker: ci-run`
 
 **Already measured here as far as this machine allows, and the control arm was run rather than

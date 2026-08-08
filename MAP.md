@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-08-08 @ `67def328` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-08-08 @ `422cb3d` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -227,7 +227,7 @@ _455 source files mapped._
 - **`src/shared/storage/storageReclaim.js`** — Free space by dropping ONLY data that declares a rehydration source (never a raster with no cloud copy); oldest-first localStorage eviction plus the reclaim-then-retry decision behind the device-save retry button
   - _exports_: `CACHE_CLEARED_EVENT`, `CACHE_IDB_PREFIX`, `reclaimableClasses`, `reclaimLocalStorage`, `reclaimMessage`, `reclaimRefetchable`, `reclaimThenRetry`, `unprovenReclaimables`
 - **`src/shared/telemetry/clientErrors.js`** — Client error+event telemetry: window/rejection/preload sources insert into anon INSERT-only Supabase client_errors with dedup, rate/session caps, tab-id stamping, fail-safe
-  - _exports_: `buildErrorRow`, `decideReport`, `DUP_MS`, `errorSignature`, `extractMessage`, `extractStack`, `installClientErrorTelemetry`, `lastTelemetrySend`, `RATE_MAX`, `RATE_WINDOW_MS`, `reportClientError`, `reportClientEvent`, `SESSION_MAX`, `setTelemetryModule`, `TAB_ID`, `telemetryDelivery`
+  - _exports_: `buildErrorRow`, `decideReport`, `DUP_MS`, `errorSignature`, `extractMessage`, `extractStack`, `installClientErrorTelemetry`, `lastTelemetrySend`, `networkReportSuppression`, `RATE_MAX`, `RATE_WINDOW_MS`, `reportClientError`, `reportClientEvent`, `SESSION_MAX`, `setTelemetryModule`, `SUPPRESSED_AUTOMATED`, `TAB_ID`, `telemetryDelivery`
 - **`src/shared/telemetry/perfCapture.js`** — Builds and encodes a performance capture — the privacy ALLOWLIST (counters/timings/view state only, proved before every send), plan-id sanitisation, frame statistics, and the compact encoder that trims oldest-first to fit one telemetry row.
   - _exports_: `assertCaptureClean`, `buildCapture`, `CAPTURE_ENUM_KEYS`, `CAPTURE_MAX_CHARS`, `CAPTURE_NUMERIC_KEYS`, `CAPTURE_VERSION`, `decodeFrames`, `encodeCapture`, `encodeFrames`, `frameStats`, `hash32`, `NOTE_VOCAB`, `safePlanId`, `sanitizeAttribution`
 - **`src/shared/telemetry/perfCaptureStore.js`** — The bounded on-device copy of a performance capture — IndexedDB (the LARGE tier, per TIER-BY-REBUILDABILITY), pruned to three on every write, summarised for the storage panel.

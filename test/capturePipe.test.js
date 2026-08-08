@@ -67,8 +67,16 @@ describe("B265536 — TAKEN and DELIVERED are different facts all the way to the
 
   it("the recorder tracks each capture's delivery and counts the undelivered", () => {
     expect(recorder).toContain("bindPerfDelivery(() => _lastDelivery);");
-    expect(recorder).toContain("if (!r.ok) _undelivered++;");
+    expect(recorder).toContain("else if (!r.ok) _undelivered++;");
     expect(recorder).toContain("undelivered: _undelivered");
+  });
+
+  /* ⛔ B270912 — A DELIBERATE SUPPRESSION IS NOT A BROKEN PIPE, and one counter for both would
+   * make every automated run look like a delivery failure, which is how a REAL delivery failure
+   * stops being noticed. `undelivered` keeps meaning "the server never acknowledged it". */
+  it("an automated-run suppression is counted apart from an undelivered capture", () => {
+    expect(recorder).toContain("if (r.reason === SUPPRESSED_AUTOMATED) _suppressed++;");
+    expect(recorder).toContain("suppressed: _suppressed");
   });
 
   /* ⛔ THE BUTTON IS THE POINT. It used to set "ok" the instant a capture was BUILT, so his own
@@ -78,9 +86,21 @@ describe("B265536 — TAKEN and DELIVERED are different facts all the way to the
     const block = planner.slice(at - 1200, at + 2600);
     expect(block).toContain('setSlowNote("sending")');
     expect(block).toContain("perfCaptureDelivery()");
-    expect(block).toContain('setSlowNote(ok ? "ok" : "undelivered")');
+    expect(block).toContain('setSlowNote(ok ? "ok" : local ? "local" : "undelivered")');
     // The old shape — ✓ straight off the local capture — must not come back.
     expect(planner.includes('setSlowNote(ok ? "ok" : "fail");')).toBe(false);
+  });
+
+  /* ⛔ B270912 — AND THE THIRD STATE. Under an automated run the row is deliberately not sent, so
+   * "it couldn't reach the server" would be a lie told about a working pipe — on the one control
+   * in this product whose report has to be trustworthy. `local` says what actually happened. */
+  it("an automated run reads as `local`, never as the undelivered warning", () => {
+    const at = planner.indexOf('data-testid="report-slow"');
+    const block = planner.slice(at - 1200, at + 3200);
+    expect(block).toContain('r.reason === SUPPRESSED_AUTOMATED');
+    expect(block).toContain('slowNote === "local"');
+    // The warning colour and the "!" glyph are the UNDELIVERED signal and must not claim this one.
+    expect(block).toContain('(slowNote === "fail" || slowNote === "undelivered") ? "var(--warn-text)"');
   });
 });
 
