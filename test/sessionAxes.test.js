@@ -148,16 +148,59 @@ describe("planSwitchVerdict — did returning to plan A cost what plan A cost?",
     expect(v.verdict).toBe("RELEASED");
   });
 
-  it("says RETAINED and NAMES the counter when plan B was not let go", () => {
+  it("says RETAINED and NAMES the counter when plan B was not let go — and only with a settle sample agreeing", () => {
     const v = planSwitchVerdict({
       a0: { retainedHeapMB: 20, rendererNodes: 5000, jsEventListenersCdp: 400 },
       b: { retainedHeapMB: 26, rendererNodes: 6100, jsEventListenersCdp: 470 },
       a1: { retainedHeapMB: 31, rendererNodes: 5020, jsEventListenersCdp: 405 },
+      a2: { retainedHeapMB: 30.5, rendererNodes: 5015, jsEventListenersCdp: 404 },
       keys,
     });
     expect(v.verdict).toBe("RETAINED");
     expect(v.why).toMatch(/retainedHeapMB/);
     expect(v.rows.find((r) => r.counter === "rendererNodes").verdict).toBe("released");
+  });
+
+  /* ⛔ THE FALSE POSITIVE THIS VERDICT EXISTS TO STOP (B1121's recurrence run, 2026-08-08). Sampled
+   * once, immediately after the round trip, this test reported `retainedHeapMB +39.1% ·
+   * rendererNodes +38.1%` on two real plans — and `session-growth.mjs`, sampling the same counters
+   * one ordinary round of work later, found them BELOW where they started, on all four of its
+   * switch rounds. A forced collection does NOT settle it: conservative stack scanning pins what is
+   * still referenced from the frames on the stack when the collection runs. */
+  it("says TRANSIENT — not RETAINED — when the spike is gone after a settle", () => {
+    const v = planSwitchVerdict({
+      a0: { retainedHeapMB: 27.7, rendererNodes: 2276, jsEventListenersCdp: 1599 },
+      b: { retainedHeapMB: 28.6, rendererNodes: 3780, jsEventListenersCdp: 1232 },
+      a1: { retainedHeapMB: 38.5, rendererNodes: 3143, jsEventListenersCdp: 1654 },
+      a2: { retainedHeapMB: 27.9, rendererNodes: 2230, jsEventListenersCdp: 1605 },
+      keys,
+    });
+    expect(v.verdict).toBe("TRANSIENT");
+    expect(v.why).toMatch(/awaiting collection, NOT retention/);
+    expect(v.why).toMatch(/A single sample here would have reported a leak/);
+    expect(v.rows.find((r) => r.counter === "retainedHeapMB").verdict).toBe("transient");
+  });
+
+  it("refuses to call a one-sample spike retention at all — it is UNSETTLED, which is neither verdict", () => {
+    const v = planSwitchVerdict({
+      a0: { retainedHeapMB: 20, rendererNodes: 5000, jsEventListenersCdp: 400 },
+      b: { retainedHeapMB: 26, rendererNodes: 6100, jsEventListenersCdp: 470 },
+      a1: { retainedHeapMB: 31, rendererNodes: 5020, jsEventListenersCdp: 405 },
+      keys, // no a2
+    });
+    expect(v.verdict).toBe("UNSETTLED");
+    expect(v.why).toMatch(/conservative stack scanning/);
+    expect(v.rows.find((r) => r.counter === "retainedHeapMB").verdict).toBe("RETAINED?");
+  });
+
+  it("still says RELEASED without a settle sample when nothing spiked in the first place", () => {
+    const v = planSwitchVerdict({
+      a0: { retainedHeapMB: 20, rendererNodes: 5000, jsEventListenersCdp: 400 },
+      b: { retainedHeapMB: 26, rendererNodes: 6100, jsEventListenersCdp: 470 },
+      a1: { retainedHeapMB: 20.4, rendererNodes: 5030, jsEventListenersCdp: 402 },
+      keys,
+    });
+    expect(v.verdict).toBe("RELEASED");
   });
 
   it("is unmeasured when nothing could be compared, rather than declaring a clean bill of health", () => {

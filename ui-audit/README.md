@@ -49,8 +49,24 @@ times the view has been MOVED, which is a different question with a different an
   never observed**, which is how a guard of this shape rots into a permanent green. It counts rather
   than looks because this defect draws the identical picture when broken, so every screenshot and
   behavioural test in this repo passes on it.
+- `session-growth.mjs` — **the two-axis growth probe** (`npm run perf:growth`). Drives a long
+  MIXED session (pan · zoom · panel · layer · edit · plan switch, repeated) on the owner's REAL
+  plans at his own regime — dpr 2.15, 1× CPU — samples a **pre-registered** candidate list at every
+  checkpoint, and then **RELOADS and samples again**. That reload arm is the point: the owner's
+  symptom is *undone by a reload*, so anything that survives one (localStorage, IndexedDB, the HTTP
+  and V8 code caches) **cannot be its mechanism**, however well it correlates. Every series is fitted
+  as a CURVE — `FLAT` / `STEP` / `SLOPE` / `SAWTOOTH` with each model's residual — because a
+  before/after pair fits a step and a slope equally well and the report is explicitly a slope.
+  Registry, classifier and the two-axis rule in `lib/sessionGrowth.mjs`, unit-tested in
+  `test/sessionGrowth.test.js`. Findings: `../docs/PERF-SESSION-GROWTH.md`.
 - `verify-stall-lod-parity.mjs` — the pixel bar. Two builds, five zoom rungs plus the exported
   sheet, byte-identical or one unit of 255. Any render change in this program passes it first.
+
+**⛔ `session-axes.mjs` and `interaction-degradation.mjs` now take `--fixture` too, and every
+reading either produced before 2026-08-07 was taken on the synthetic scene.** `session-axes.mjs`
+additionally takes `--fixture-b`, which retires a property of every plan-switch number it ever
+produced: its built-in plan B is plan A *truncated by half*, so those runs measured a switch between
+one synthetic plan and a subset of itself — same origin, same county, same (absent) rasters.
 
 ## ⛔ WHICH PLAN AN INSTRUMENT IS POINTED AT — read this before quoting any number above
 

@@ -20,6 +20,7 @@
     "hooks:install": "node scripts/install-hooks.mjs",
     "prepare": "node scripts/install-hooks.mjs",
     "perf:session": "xvfb-run -a --server-args=\"-screen 0 1600x1000x24\" node ui-audit/session-axes.mjs",
+    "perf:growth": "xvfb-run -a --server-args=\"-screen 0 1600x1000x24\" node ui-audit/session-growth.mjs",
     "perf:viewindep": "xvfb-run -a --server-args=\"-screen 0 1600x1000x24\" node ui-audit/verify-view-independent.mjs --build",
     "perf:recompute": "xvfb-run -a --server-args=\"-screen 0 1600x1000x24\" node ui-audit/detect-view-recompute.mjs --build",
     "perf:planswitch": "xvfb-run -a --server-args=\"-screen 0 1600x1000x24\" node ui-audit/verify-plan-switch-release.mjs"

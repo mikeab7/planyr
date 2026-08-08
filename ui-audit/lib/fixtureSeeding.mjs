@@ -25,9 +25,39 @@
  * measured in.
  */
 import { readFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import { synthRasterPng, pngDataUrl } from "./synthRaster.mjs";
-import { fixtureSeed, rasterIdbPlan, idbPutInPage, fixtureCensus } from "./planFixture.mjs";
+import { fixtureSeed, fixtureSeedMulti, rasterIdbPlan, idbPutInPage, fixtureCensus } from "./planFixture.mjs";
+
+const FIXTURE_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "fixtures");
+
+/* ⛔ ONE MAP, NOT ONE PER HARNESS. Each harness that wanted a real plan grew its own private
+ * short-name → filename table, so "bain" already meant `bain-concept-original.json` in one file and
+ * nothing at all in three others — which is how the two GROWTH harnesses ended up measuring the one
+ * synthetic scene the owner has never opened while he reported on two real plans they could not
+ * name. Adding a fixture in one place is the fix; the doc-pointer audit already enforces the same
+ * discipline on prose. */
+export const FIXTURE_FILES = {
+  bain: "bain-concept-original.json",
+  quiddity: "bain-quiddity.json",
+  sylvestri: "sylvestri-concept-d-full.json",
+  "sylvestri-lite": "sylvestri-concept-d.json",
+  tsakiris: "tsakiris-concept-a-live.json",
+  weld: "weld-concept-a.json",
+};
+
+/** Resolve a short name (or a bare filename) to a parsed fixture. Throws NAMING the options,
+ *  because a typo that silently falls back to the default scene is how a run measures the wrong
+ *  plan and says nothing about it. */
+export function readFixture(name, dir = FIXTURE_DIR) {
+  const file = FIXTURE_FILES[String(name).toLowerCase()] || (String(name).endsWith(".json") ? String(name) : `${name}.json`);
+  const path = join(dir, file);
+  if (!existsSync(path)) {
+    throw new Error(`no fixture "${name}" (looked for ${path}) — known names: ${Object.keys(FIXTURE_FILES).join(", ")}`);
+  }
+  return JSON.parse(readFileSync(path, "utf8"));
+}
 
 /* ⛔ EVERY RASTER IN A RUN GETS A DISTINCT SEED. Chromium caches decoded images by CONTENT: hand two
  * rasters the same bytes and it allocates ONE bitmap and shares it, so a scene that should cost two
@@ -80,4 +110,35 @@ export async function buildFixtureState(browser, { base, fixture, siteId, cacheD
   const state = await ctx.storageState({ indexedDB: true });
   await ctx.close();
   return { state, facts, census: fixtureCensus(fixture) };
+}
+
+/**
+ * The same thing with SEVERAL real plans in the store, so a harness can switch between them.
+ *
+ * `plans` is `[{ name, fixture, siteId }]`; the first is the one the app opens on. Every plan's
+ * rasters are written under ITS OWN site id, which is the only reason this cannot be done by
+ * calling `buildFixtureState` twice — the two contexts would each capture their own storageState
+ * and the second would replace the first.
+ */
+export async function buildMultiFixtureState(browser, { base, plans = [], cacheDir, viewport = { width: 1600, height: 900 } }) {
+  if (!plans.length) throw new Error("buildMultiFixtureState needs at least one plan");
+  const ctx = await browser.newContext({ viewport, ignoreHTTPSErrors: true });
+  await ctx.addInitScript(fixtureSeedMulti(plans.map((p) => ({ fixture: p.fixture, id: p.siteId, name: p.name || p.siteId }))));
+  await ctx.route("**/*", (route) => (route.request().url().startsWith(base) ? route.continue() : route.abort()));
+  const page = await ctx.newPage();
+  await page.goto(base, { waitUntil: "domcontentloaded" });
+
+  const facts = [];
+  for (const p of plans) {
+    for (const { key, spec } of rasterIdbPlan(p.fixture, p.siteId)) {
+      const r = cachedRaster(spec, cacheDir);
+      const wrote = await page.evaluate(idbPutInPage, { key, value: pngDataUrl(r.png) });
+      if (wrote !== true) throw new Error(`IndexedDB write for ${key} did not confirm — the fixture cannot be established`);
+      facts.push({ plan: p.name || p.siteId, key, role: spec.role, imgW: spec.imgW, imgH: spec.imgH, opacity: spec.opacity, decodedBytes: spec.imgW * spec.imgH * 4 });
+    }
+  }
+
+  const state = await ctx.storageState({ indexedDB: true });
+  await ctx.close();
+  return { state, facts, census: Object.fromEntries(plans.map((p) => [p.name || p.siteId, fixtureCensus(p.fixture)])) };
 }

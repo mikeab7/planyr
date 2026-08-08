@@ -51,7 +51,10 @@
  * Never exits non-zero on a measurement. It is an instrument, not a gate.
  */
 import { chromium } from "playwright";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { perfScenarioSeed, scenarioShape, SCENARIO_ID } from "./lib/perf-scenario.mjs";
+import { readFixture, buildFixtureState } from "./lib/fixtureSeeding.mjs";
 import { frameSamplingFault, plausibilityFloor, observedFps } from "./lib/frameSampling.mjs";
 import { noiseFloor } from "./lib/longSession.mjs";
 import { waitForSelectorReleased } from "./lib/waitRelease.mjs";
@@ -93,6 +96,17 @@ const FAKE_TILES = process.argv.includes("--fake-tiles");
  * never enters at dpr 1: four times the decodes, four times the bitmaps, four times the texture
  * uploads. A "nothing grows" result at dpr 1 says nothing about dpr 2. */
 const DPR = numArg("--dpr", 1);
+/* --fixture <name>: drive a REAL saved plan of the owner's instead of the synthetic scenario.
+ *
+ * ⛔ WHY THIS WAS ADDED AND WHY IT MATTERS FOR EVERY NULL THIS HARNESS HAS EVER PRODUCED. B1432's
+ * "nothing grows across 3,000 gestures" was measured on Goose Creek — 62 elements, no rasters, no
+ * survey overlay — because that is the only scene this file could open. The owner has never once
+ * reported that plan as slow; he reports Bain and Sylvestri, which carry multi-megapixel reference
+ * rasters and several times the geometry. A flat result on a scene the symptom was never reported
+ * on is a weaker null than it reads as, and saying so is cheaper than re-learning it. Names resolve
+ * through lib/fixtureSeeding.mjs; omit for the historical synthetic scene. */
+const FIXTURE = String(argOf("--fixture", "")).toLowerCase();
+let FIXTURE_STATE = null;
 
 /* ── The in-page instrumentation ───────────────────────────────────────────────────────────────
  * Installed BEFORE any app code runs, because a listener added during module evaluation is
@@ -473,9 +487,14 @@ async function runArm(browser, { arm, idleBudgetMs }) {
    * (docs/REFERENCE.md, "Playwright / ui-audit in the sandbox"). Harmless against localhost. */
   const context = await browser.newContext({
     viewport: { width: 1440, height: 900 }, deviceScaleFactor: DPR, ignoreHTTPSErrors: true,
+    /* `--fixture` seeds a REAL saved plan of the owner's, with its rasters, through a storageState
+     * (lib/fixtureSeeding.mjs). Without it this harness measures the synthetic Goose Creek scene —
+     * which is what every prior reading from it measured, while the owner reported on Bain and
+     * Sylvestri, neither of which it could open. See the `--fixture` note at the top of this file. */
+    ...(FIXTURE_STATE ? { storageState: FIXTURE_STATE } : {}),
   });
   await context.addInitScript(INSTRUMENT.replace("__PF_LITE__", LITE ? "true" : "false"));
-  await context.addInitScript(perfScenarioSeed());
+  if (!FIXTURE_STATE) await context.addInitScript(perfScenarioSeed());
   /* Arms the planner's own read/debug hook (`window.__plannerView`), which `restoreView` needs to
    * put the view back exactly. It is the same gate every e2e spec here arms, it publishes getters
    * and one setter and changes no product behaviour — and the alternative, trusting hundreds of
@@ -603,6 +622,18 @@ const browser = await chromium.launch({
   ...(PROXY && REMOTE ? { proxy: { server: PROXY, bypass: "localhost,127.0.0.1" } } : {}),
 });
 
+let fixtureCensusOut = null;
+if (FIXTURE) {
+  const fx = readFixture(FIXTURE);
+  const built = await buildFixtureState(browser, {
+    base: BASE, fixture: fx, siteId: "interaction-fixture",
+    cacheDir: join(dirname(fileURLToPath(import.meta.url)), ".raster-cache"),
+  });
+  FIXTURE_STATE = built.state;
+  fixtureCensusOut = { name: FIXTURE, census: built.census, rasters: built.facts };
+  process.stderr.write(`· fixture "${FIXTURE}": ${built.census.elements} elements · ${built.census.parcels} parcels · ${built.facts.length} raster(s)\n`);
+}
+
 const runs = [];
 /* INTERLEAVED: interact, idle, interact, idle … A machine that warms up (or a container whose
  * co-tenants wake up) drifts monotonically, and running one arm to completion and then the other
@@ -675,7 +706,7 @@ const named = suspects(table, interact || []);
 const tilesDecoded = interact?.[interact.length - 1]?.counters?.tilesLoaded || 0;
 
 const out = {
-  base: BASE, scenario: SCENARIO_ID, shape: scenarioShape(),
+  base: BASE, scenario: FIXTURE || SCENARIO_ID, fixture: fixtureCensusOut, shape: fixtureCensusOut ? fixtureCensusOut.census : scenarioShape(),
   cpuThrottle: CPU_THROTTLE, dpr: DPR, reps: REPS, runs: RUNS, arms: ARMS, checkpoints: CHECKPOINTS,
   headed: true, visibility: runs[0]?.visibility, minFps: MIN_FPS,
   noiseFloorPct: floorPct, verdict, growthTable: table, suspects: named,
@@ -692,7 +723,7 @@ if (JSON_OUT) { console.log(JSON.stringify(out, null, 2)); process.exit(0); }
 const pad = (s, n) => String(s ?? "—").padEnd(n);
 const rpad = (s, n) => String(s ?? "—").padStart(n);
 console.log(`\nINTERACTION-COUNT DEGRADATION — the same probe, on unchanged content, after N gestures`);
-console.log(`  target ${BASE} · scenario ${SCENARIO_ID} (${out.shape.elements} elements · ${out.shape.parcels} parcels · ${out.shape.ponds} ponds)`);
+console.log(`  target ${BASE} · scenario ${out.scenario} (${out.shape.elements} elements · ${out.shape.parcels} parcels · ${out.shape.ponds ?? out.shape.ponds ?? 0} ponds${out.fixture ? ` · ${out.fixture.rasters.length} raster(s)` : ""})`);
 console.log(`  headed browser, tab "${out.visibility}" · cpu ${CPU_THROTTLE}x · dpr ${DPR} · frame floor ${MIN_FPS} fps · arms ${ARMS.join(" + ")} x ${RUNS} run(s), INTERLEAVED\n`);
 
 if (floorPct != null) console.log(`  NOISE FLOOR, measured on this machine in this run: ±${floorPct}%. Nothing inside it is a finding.\n`);
