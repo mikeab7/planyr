@@ -1,3 +1,54 @@
+/* ============================================================================
+   INTER — SELF-HOSTED, ON PURPOSE (B276576).
+   The app entry used to pull this face from fonts.googleapis.com with a plain
+   <link rel=stylesheet>. That is render-blocking, and — the part that actually
+   bit — a stylesheet blocks EXECUTION of every script after it, including
+   <script type="module" src="/src/main.jsx">. So the whole app boot waited on a
+   round trip to a third-party host on every single load, and the host's latency
+   passed through one-for-one (measured: +400 ms at the font host = +400 ms to
+   canvas-usable; +4,000 ms = +3,700 ms). Anyone behind an ad-blocker, a
+   filtering resolver or a slow link paid it every time.
+
+   The landing page fixed the same defect in B1384 by making the third-party link
+   non-blocking (media="print" + an onload promotion). Self-hosting is the
+   stronger fix and is what the app entry gets: it removes the third-party
+   dependency outright rather than deferring it — no DNS, no TLS handshake, no
+   second origin that can be blocked, and nothing left to promote.
+
+   Bytes: these are Google's OWN subsetted files, so the transfer size is
+   unchanged (47.1 KB latin), it just comes from our origin. latin-ext (83.1 KB)
+   is declared but downloads ONLY if a character in its unicode-range actually
+   appears on screen — for an English UI that is never, so a normal boot pays for
+   latin alone. Cyrillic/Greek/Vietnamese are deliberately NOT shipped: they
+   would be dead weight in the repo, and the system-ui fallback in --font renders
+   them correctly if they ever turn up.
+
+   These are VARIABLE fonts (font-weight: 400 800 in one file), which is why five
+   static weights collapse into one request. font-display: swap keeps text
+   visible in the fallback face while it loads — the same behaviour the Google
+   stylesheet asked for.
+   ============================================================================ */
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 400 800;
+  font-display: swap;
+  src: url("/fonts/inter-latin.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
+    U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193,
+    U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 400 800;
+  font-display: swap;
+  src: url("/fonts/inter-latin-ext.woff2") format("woff2");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF,
+    U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020,
+    U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
 * { box-sizing: border-box; }
 
 :root {

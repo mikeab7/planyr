@@ -113,6 +113,55 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V73584 — B276576: does the edge actually serve the self-hosted Inter, and does production paint faster for it? `Blocker: live-deploy`
+
+**⛔ READ THIS FIRST — the vast majority of this item was DRIVEN HERE, not parked.** Per rule 4, only
+the step *after* our code is walled. What was verified in-sandbox this session, headless, on a real
+build: **`ui-audit/verify-font-blocking.mjs` (`npm run perf:fontblock`)** — a one-build, one-server,
+two-document A/B with the font host's latency injected. Arm A is the pre-fix build with the removed
+`<link>` re-injected and **must stall or the harness fails**; arm B is what we ship. At a 2,000 ms
+delay: **first paint 2,372 → 384 ms · app mounted 2,058 → 81 ms** (a 1,988 ms pass-through
+eliminated). At `--delay 0` — a perfectly fast font host, the best possible case for the pre-fix
+build — still **596 → 448 ms · 152 → 98 ms**. Plus `test/bootRenderBlocking.test.js` 11/11
+(mutation-proven red on re-injection), `npm test` full suite, lint, and a green build.
+
+**WHAT IS GENUINELY WALLED, and it is only this.** The sandbox proxy cannot reach the deployed edge —
+Chromium is reset at the socket (`ERR_CONNECTION_RESET` to `*.pages.dev`) even for a host `curl`
+fetches with HTTP 200, measured and recorded under **V477**. So nothing here can observe what
+Cloudflare Pages does with a file type this repo has never shipped before. On **production
+planyr.io**, confirm:
+
+- **(a) The font files are served, with the right type.** `GET https://planyr.io/fonts/inter-latin.woff2`
+  returns **200** with **`content-type: font/woff2`** (not `application/octet-stream`, and emphatically
+  not an HTML 404 page with a 200 status — a wrong MIME type here fails *silently*, falling back to
+  `system-ui` with no console error and no visual alarm on a page whose fallback stack is deliberately
+  close). Same for `inter-latin-ext.woff2`.
+- **(b) Inter actually renders — the check that catches (a) failing quietly.** In DevTools on a loaded
+  app page, `document.fonts.check('16px Inter')` is `true`, and the Network tab shows
+  `inter-latin.woff2` fetched from **planyr.io**, once, with **no request to `fonts.googleapis.com` or
+  `fonts.gstatic.com` anywhere in the waterfall**. Rendering/Fonts should show Inter, not a fallback.
+- **(c) The preload is not wasted.** `inter-latin.woff2` appears **once**, not twice. A `crossorigin`
+  mismatch on a font preload causes the browser to discard it and fetch the file a second time — the
+  page still looks perfect while paying double, which is why this is worth an explicit look.
+- **(d) `latin-ext` is NOT fetched** on an ordinary English session. Its `unicode-range` should keep
+  83.1 KB off the wire unless such a character is on screen.
+- **(e) The number this was all for.** `BASE_URL=https://planyr.io node ui-audit/perf-harness.mjs` from
+  a machine with **direct** network access (the owner's browser or a Cowork session — **not** a Claude
+  sandbox). Two things to read: **`firstContentfulPaintMs` should now be reported as JUDGED**, not
+  *MEASURED BUT NOT JUDGED* — the un-mute is only meaningful if the deployed page really carries no
+  cross-origin render-blocking resource — and its **value against the 500 ms ceiling**.
+  ⚠ **This is the number to re-seed from, and it is deliberately NOT being re-seeded from the sandbox.**
+  The sandbox reports 688 ms; the *unmodified pre-fix tree* reports 668 ms on that same container, so
+  that figure measures the container, not this change. The 500 ms ceiling's provenance is production
+  (328 ms measured 2026-07-28). **Overlaps V477, which already owns re-seeding the paint ceilings — do
+  both in one pass and record the result on whichever you run.**
+- **(f) Nothing looks different.** Type across the planner, the header, the yield panel and the Review
+  tab should be visually unchanged from before this shipped — same face, same weights (the variable
+  file covers 400–800). A subtle metric shift would mean the wrong file is being served.
+
+*(minted V73584; references **B276576**, overlaps **V477**; `Cadence: once`. Implemented + fully
+sandbox-verified 2026-08-08 — the residue above is the deployed edge only.)*
+
 ### V67920 — B270912: does the production row rate actually drop, and does the owner's own capture still land? `Blocker: real-data`
 
 **What was already proven HERE, so this is the residue rather than the check.** The `suppressed` arm

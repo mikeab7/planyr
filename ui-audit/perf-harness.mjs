@@ -415,6 +415,23 @@ results.firstContentfulPaintMs = Math.round(
   })
 );
 
+/* B276576 — ASK THE QUESTION THAT ACTUALLY GATES PAINT TIMINGS, instead of "did any external
+ * host fail". Those are not the same question, and conflating them is what kept these metrics
+ * muted long after they became measurable: an aerial TILE host failing does not delay first
+ * paint by one millisecond (tiles are images fetched after boot), but it used to mute FCP all
+ * the same. The thing that genuinely inflates paint is a cross-origin RENDER-BLOCKING resource
+ * — a stylesheet, or a synchronous script — because a script cannot execute until every
+ * preceding stylesheet resolves. index.html had exactly one (fonts.googleapis.com) until
+ * B276576 self-hosted Inter; now it has none, so these timings can be judged again.
+ * Measured from the live document rather than assumed, so the mute RETURNS AUTOMATICALLY,
+ * naming the culprit, if anyone reintroduces a third-party blocker. */
+const crossOriginBlocking = await page.evaluate(() =>
+  [...document.querySelectorAll('link[rel="stylesheet"], script[src]:not([defer]):not([async]):not([type="module"])')]
+    .map((el) => el.href || el.src)
+    .filter((u) => { try { return new URL(u, location.href).origin !== location.origin; } catch { return false; } })
+);
+results.crossOriginBlocking = crossOriginBlocking;
+
 /* ---- first aerial coverage ----------------------------------------------------------------
  * "Covered" = the visible map area is ≥90% filled by tiles that have actually LOADED.
  *
@@ -713,10 +730,25 @@ const failures = [], aboveTarget = [], passes = [], skipped = [], unreliable = [
 const r = budgets.runtime;
 const METRICS = ["timeToFirstDragMs", "firstAerialCoverageMs", "frameMedianMs", "frameP90Ms", "peakHeapMB", "aerialTileRequests", "firstContentfulPaintMs"];
 
-/* Metrics whose value depends on the page's external, render-blocking resources resolving.
- * Frame time and heap are measured long after load and are unaffected, so they still count. */
-const LOAD_SENSITIVE = new Set(["timeToFirstDragMs", "firstContentfulPaintMs", "firstAerialCoverageMs"]);
-const loadTimingsTrustworthy = failedExternal.size === 0 && !NO_TILES;
+/* B276576 — TWO DIFFERENT GATES, because these metrics depend on two different things. The old
+ * single gate (`failedExternal.size === 0 && !NO_TILES`) muted all three whenever ANY external
+ * host failed, which in a sandbox is always. That was right while index.html pulled a
+ * render-blocking stylesheet from fonts.googleapis.com — the sandbox blocked it and FCP went
+ * from ~330 ms to ~13 s, so refusing to judge was the honest call. It is no longer right: Inter
+ * is self-hosted, the boot path has no cross-origin blocker, and leaving the mute in place would
+ * be inertia rather than caution. A budget muted for a bug we have now fixed is a budget nobody
+ * is enforcing.
+ *
+ *  · PAINT-SENSITIVE  — inflated only by a cross-origin RENDER-BLOCKING resource. Judged
+ *                       whenever the document has none. Tile hosts are irrelevant here.
+ *  · TILE-SENSITIVE   — first aerial coverage genuinely cannot complete without the tile hosts,
+ *                       so it keeps the original gate. This one is not un-muted and must not be.
+ *
+ * Frame time and heap are measured long after load and were never gated. */
+const PAINT_SENSITIVE = new Set(["timeToFirstDragMs", "firstContentfulPaintMs"]);
+const TILE_SENSITIVE = new Set(["firstAerialCoverageMs"]);
+const paintTimingsTrustworthy = crossOriginBlocking.length === 0;
+const tileTimingsTrustworthy = !NO_TILES && failedExternal.size === 0;
 
 for (const m of METRICS) {
   const spec = r[m];
@@ -730,7 +762,8 @@ for (const m of METRICS) {
     continue;
   }
   const row = { metric: `runtime.${m}`, value, ceiling: spec.ceiling, target: spec.target, unit: spec.unit };
-  if (LOAD_SENSITIVE.has(m) && !loadTimingsTrustworthy) { unreliable.push(row); continue; }
+  if (PAINT_SENSITIVE.has(m) && !paintTimingsTrustworthy) { unreliable.push(row); continue; }
+  if (TILE_SENSITIVE.has(m) && !tileTimingsTrustworthy) { unreliable.push(row); continue; }
   /* An emulated run measures a DIFFERENT MACHINE from the one every ceiling here was seeded on.
    * Report the numbers — they are the whole point of the mode — but never judge them, and never
    * let a green under emulation read as a budget pass. */
@@ -743,9 +776,20 @@ if (EMULATED) {
   notes.push(`EMULATED MACHINE — CPU throttled ${CPU_THROTTLE}× at deviceScaleFactor ${DPR}. Every metric above is MEASURED but NOT JUDGED: the committed ceilings were seeded at 1×, and a throttled number is an A/B instrument, not a budget. Compare it only against another run at the same settings.`);
 }
 if (unreliable.length) {
-  notes.push(NO_TILES
-    ? "load timings NOT judged: --no-tiles blocks every cross-origin request, including the render-blocking webfont stylesheet, so they are a local-only figure."
-    : `load timings NOT judged: external resources failed to load (${[...failedExternal].join(", ")}), which delays render-blocking CSS and inflates paint timings.`);
+  /* Say WHICH gate muted WHAT. The old single note claimed "load timings" wholesale even when
+   * only the aerial metric was actually affected, which is how a reader concluded that paint was
+   * unmeasurable here in general. */
+  if (!paintTimingsTrustworthy) {
+    notes.push(`paint timings NOT judged: the document loads ${crossOriginBlocking.length} cross-origin render-blocking resource(s) — ${crossOriginBlocking.join(", ")} — and a script cannot execute until every preceding stylesheet resolves, so this host's latency lands directly in first paint. Self-host it (B276576) or make it non-blocking (B1384).`);
+  }
+  if (!tileTimingsTrustworthy) {
+    notes.push(NO_TILES
+      ? "first-aerial-coverage NOT judged: --no-tiles blocks every cross-origin request, so the map can never reach coverage. Paint timings are unaffected by this and are judged on their own merits."
+      : `first-aerial-coverage NOT judged: tile hosts failed to load (${[...failedExternal].join(", ")}), so coverage cannot complete.`);
+  }
+}
+if (paintTimingsTrustworthy) {
+  notes.push("paint timings JUDGED: the boot path carries no cross-origin render-blocking resource (B276576 self-hosted Inter). These were muted for months because it did.");
 }
 
 /* Route-chunk guard, runtime edition. The static audit (perf-bundle-audit.mjs) can only see
