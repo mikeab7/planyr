@@ -125,17 +125,28 @@ eliminated). At `--delay 0` — a perfectly fast font host, the best possible ca
 build — still **596 → 448 ms · 152 → 98 ms**. Plus `test/bootRenderBlocking.test.js` 11/11
 (mutation-proven red on re-injection), `npm test` full suite, lint, and a green build.
 
-**WHAT IS GENUINELY WALLED, and it is only this.** The sandbox proxy cannot reach the deployed edge —
-Chromium is reset at the socket (`ERR_CONNECTION_RESET` to `*.pages.dev`) even for a host `curl`
-fetches with HTTP 200, measured and recorded under **V477**. So nothing here can observe what
-Cloudflare Pages does with a file type this repo has never shipped before. On **production
-planyr.io**, confirm:
+**WHAT IS GENUINELY WALLED, and it is narrower than it first looked.** The wall was **re-tested this
+session, not inherited**: Chromium against the branch-preview URL still dies with
+`net::ERR_CONNECTION_RESET`, exactly as **V477** recorded, so no *browser* observation of the deployed
+edge is possible here. But `curl` does get through, which turned out to be enough to discharge (a)
+outright — see below. What remains needs a real browser on a real network, and only that. On
+**production planyr.io**, confirm:
 
-- **(a) The font files are served, with the right type.** `GET https://planyr.io/fonts/inter-latin.woff2`
-  returns **200** with **`content-type: font/woff2`** (not `application/octet-stream`, and emphatically
-  not an HTML 404 page with a 200 status — a wrong MIME type here fails *silently*, falling back to
-  `system-ui` with no console error and no visual alarm on a page whose fallback stack is deliberately
-  close). Same for `inter-latin-ext.woff2`.
+- **(a) The font files are served, with the right type.** ✅ **DISCHARGED 2026-08-08 against the REAL
+  Cloudflare edge** (the PR #961 branch preview, `claude-google-fonts-render-b.planyr.pages.dev`) — not
+  assumed, and not deferred. V477 records that `curl` reaches these hosts even though Chromium is reset
+  at the socket, so the highest-risk unknown here was reachable after all and was checked:
+  **`/fonts/inter-latin.woff2` → HTTP 200, `content-type: font/woff2`, 48,256 bytes** and
+  **`/fonts/inter-latin-ext.woff2` → HTTP 200, `content-type: font/woff2`, 85,068 bytes** — both
+  byte-exact against the repo, both with a valid `wOF2` signature and a self-declared length matching
+  the actual length (so neither is a truncated read or an HTML error page wearing a 200). This was the
+  one failure mode that fails *silently*: a wrong MIME type falls back to `system-ui` with no console
+  error and no visual alarm. It does not happen. Also confirmed on the deployed document: **zero live
+  `<link>`/`<script>` tags naming `fonts.googleapis.com` or `fonts.gstatic.com`** (the single textual
+  match is inside the explanatory HTML comment), the `crossorigin` font preload is present, and the
+  hashed app CSS really does carry `url(/fonts/inter-latin.woff2)` and `url(/fonts/inter-latin-ext.woff2)`.
+  ⏳ Re-confirm the same two headers on **planyr.io** itself once this merges — the preview and
+  production are the same Pages project, so this is a formality rather than an open question.
 - **(b) Inter actually renders — the check that catches (a) failing quietly.** In DevTools on a loaded
   app page, `document.fonts.check('16px Inter')` is `true`, and the Network tab shows
   `inter-latin.woff2` fetched from **planyr.io**, once, with **no request to `fonts.googleapis.com` or
