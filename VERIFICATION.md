@@ -165,7 +165,9 @@ was never clicked" quietly ships broken.
 - **Tsakiris → `Part in City of Katy / part unincorporated`.** Same: **2 of 9 parcels inside Katy.**
 In both, Baytown/Katy are never presented as the site's jurisdiction — the property the owner asked for — and the split is stated rather than rounded to whichever answer was convenient.
 
-**Still pending (`Blocker: auth` + `real-data`) — the one sub-check this sandbox cannot make:**
+**ATTEMPTED HERE, and it hit a named wall — recorded rather than quietly parked (ATTEMPT-BEFORE-YOU-PARK).** The rendering half was driven headless against a local production build of this branch: the app boots clean logged-out (no page errors), and the shell, map and Layers panel render. It cannot get further because **the header pill only exists once a georeferenced PARCEL is on the plan**, and placing one logged-out needs the county parcel service — which this sandbox's egress blocks (*"The county parcel server isn't responding right now"*). The Cloudflare branch preview is unreachable from here too (`ERR_CONNECTION_RESET` on `*.pages.dev`). Note the asymmetry, because it is exactly why the sweep above IS a live pass: the three JURISDICTION services (TxDOT / TxGIO / H-GAC) are reachable and were queried live; the county PARCEL service is a different host and is not. `Blocker: live-GIS`.
+
+**Still pending (`Blocker: live-GIS` for the pill · `Blocker: auth` + `real-data` for the panel):**
 - Open a signed-in saved project (Bain and Goose Creek are the two to look at) and confirm (a) the header pill renders the string this harness produces, (b) the ⚑ straddle mark appears on Goose Creek/Tsakiris, and (c) the Yield → Stormwater FFE row shows **"FFE rule not settled"** while the jurisdiction is still loading, then resolves to a named rule. The pure logic behind all three is unit-covered (`test/jurisdictionShapes.test.js`, 10 cases, mutation-checked), so this is a rendering confirmation, not a correctness one.
 
 ### V67920 — B270912: does the production row rate actually drop, and does the owner's own capture still land? `Blocker: real-data`
