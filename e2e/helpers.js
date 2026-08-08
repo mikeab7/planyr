@@ -54,6 +54,52 @@ export async function openModule(page, moduleId) {
   }).toPass({ timeout: 30_000 });
 }
 
+/* B266082 — "visible" is NOT "on screen", and that gap silently blessed a broken assertion.
+ *
+ * Playwright's toBeVisible() means "has a non-empty box and is not visibility:hidden". It says
+ * NOTHING about where that box is. When the app enters real fullscreen the header slides to
+ * y = −44: every module tab is still `visible` by that definition, unreachable by any user,
+ * and unclickable by Playwright itself ("element is outside of the viewport"). So
+ * `module-keepalive`'s "the chrome came back" assertion PASSED for weeks against a page whose
+ * chrome had not come back — and the failure only surfaced one line later, on a click, which
+ * is why the spec's real subject was never reached.
+ *
+ * Assert the box is inside the viewport when what you mean is "the user can see and click it".
+ *
+ * Both helpers POLL rather than sampling once: the header slides, so a single read taken the
+ * instant the Exit-fullscreen control appears catches it mid-transition (measured: bottom edge
+ * at 4.5 on the first frame, −1 once settled). Polling waits for the settled state and still
+ * fails outright if it never arrives — it is a wait, not a relaxation. */
+export async function expectOnScreen(page, locator, what = "element") {
+  await expect(locator).toBeVisible();
+  const size = page.viewportSize() || { width: 1280, height: 720 };
+  await expect
+    .poll(async () => {
+      const b = await locator.boundingBox();
+      return b ? Math.round(b.y) : null;
+    }, { message: `${what} never came back on screen (viewport height ${size.height}) — "visible" is not "on screen"` })
+    .toEqual(expect.any(Number));
+  const box = await locator.boundingBox();
+  await expect
+    .poll(async () => {
+      const b = await locator.boundingBox();
+      return b && b.y + b.height > 0 && b.y < size.height;
+    }, { message: `${what} is off screen (last seen y=${Math.round(box?.y ?? NaN)}) — "visible" is not "on screen"` })
+    .toBe(true);
+}
+
+/* The inverse: present in the DOM but translated off screen — what a collapsed fullscreen
+ * header actually does to the module tabs. */
+export async function expectOffScreen(page, locator, what = "element") {
+  await expect
+    .poll(async () => {
+      const b = await locator.boundingBox();
+      return b ? b.y + b.height <= 0 : null;
+    }, { message: `${what} is still on screen — the chrome did not collapse` })
+    .toBe(true);
+}
+
+
 /* ---- Dissolved road network (NEW-1/NEW-2) ------------------------------------------------
  * The road connection is no longer a cover patch painted over a seam — it is a boolean UNION of
  * pavement (see src/workspaces/site-planner/lib/roadNetwork.js). So a spec should not ask "is there a

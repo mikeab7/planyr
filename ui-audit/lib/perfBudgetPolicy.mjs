@@ -77,6 +77,56 @@ export function classify(value, spec, headroom = DEFAULT_HEADROOM) {
 /** True when this metric's ceiling is derived from a baseline rather than hand-pinned. */
 export const isBanded = (spec) => typeof spec?.baseline === "number";
 
+/* ---- B266084 — WHOSE BYTES ARE THESE? ---------------------------------------------------
+ *
+ * THE DEFECT THIS CLOSES, measured rather than argued. Growth that stays INSIDE the band is
+ * annotated and passes, and — by design — writes NOTHING. So `main` accumulates real, honest
+ * feature weight above its own recorded baseline, invisibly, one in-band merge at a time,
+ * until some later branch adds its first kilobyte and trips a ceiling that was already ~90%
+ * consumed before it existed. That branch is then told to "pay it back with an optimization"
+ * for bytes it did not add, and its only way out is to RAISE the baseline by everyone else's
+ * drift. That happened FIVE times in the nine days after B1178 was filed — B1401, B1405,
+ * B1414, B209502 and B255200 each carry a ratchet reason that says some version of "main was
+ * already N KB above this stale baseline before this branch", the largest of them 73.6 KB.
+ * Every one of those entries is honest and every one of them launders drift into the record.
+ *
+ * THE FIX IS TO CHARGE EACH SIDE ITS OWN BYTES, and the measurement to do it is already being
+ * taken: `scripts/perf-base-stats.mjs` builds the base ref on every CI run for the NEW-3 byte
+ * attribution. It was only ever used to NAME movers, never to judge. Now:
+ *
+ *   inherited = base − baseline   what main already carried above its own record
+ *   branch    = value − base      what THIS branch actually added
+ *
+ *   • A branch FAILS for its own growth: `branch > band`, or an over-ceiling value when main
+ *     was clean (`inherited <= 0`) so every byte of the overage is its own.
+ *   • A branch does NOT fail for `inherited`. It cannot fix it and must not be extorted for it.
+ *   • `main` gets NO such relief — see the caller: attribution applies to a pull request only.
+ *     A push to main is judged on what main IS, so the drift surfaces on main, where a real
+ *     ratchet with a real reason is the right answer, instead of on a stranger's branch.
+ *
+ * `inherited` is REPORTED ON EVERY RUN, breach or not, so the accumulation can never again be
+ * invisible until it is 73.6 KB deep.
+ *
+ * Returns null when there is no base measurement or the metric is not banded — callers then
+ * keep the un-attributed verdict, so this can only ever make the gate FAIRER, never blinder.
+ */
+export function attribute(value, base, spec, headroom = DEFAULT_HEADROOM) {
+  if (typeof base !== "number" || !Number.isFinite(base) || !isBanded(spec)) return null;
+  const baseline = spec.baseline;
+  const ceiling = ceilingFor(spec, headroom);
+  const band = headroomFor(baseline, headroom);
+  const branch = value - base;
+  const inherited = base - baseline;
+  const overCeiling = value - ceiling;
+  const branchOverBand = branch - band;
+
+  let charged = null;
+  if (branchOverBand > 0) charged = "branch";            // this branch alone consumes the whole band
+  else if (overCeiling > 0) charged = inherited > 0 ? "base" : "branch";
+
+  return { base, baseline, ceiling, band, branch, inherited, overCeiling, branchOverBand, charged };
+}
+
 /** Metrics in perf-budgets.json `bundle` that are real metrics (not config/comment keys). */
 export const METRIC_KEYS = (bundle) =>
   Object.keys(bundle).filter((k) => !k.startsWith("$") && k !== "headroom" && k !== "ratchetLog" && k !== "siteRouteAllowlist");

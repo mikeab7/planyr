@@ -1,0 +1,412 @@
+{
+  "$comment": [
+    "KNOWN-RED LEDGER (B266080). The e2e cases that are failing today and are NOT being fixed",
+    "in the run that recorded them. scripts/e2e-drift-gate.mjs compares each run against this",
+    "list and fails on EITHER side: a failure that is not listed is a NEW regression, and a",
+    "listed case that PASSES means the ledger is stale and must shrink.",
+    "",
+    "WHY THIS FILE EXISTS. The E2E workflow was red on 17 consecutive scheduled runs (every",
+    "weekday from 2026-07-22; last green 2026-07-21) and filed correctly every time — as 12",
+    "comments on one idempotently-reused issue (#762) that nobody answered for 17 days. The",
+    "alarm was not noisy, it was MUTE, and while every run was red a brand-new regression",
+    "would have changed nothing about the signal anyone saw. A list in the repo is reviewable;",
+    "a comment on a muted thread is not.",
+    "",
+    "TWO LANES, because the two configurations do not see the same thing:",
+    "  ci    — the scheduled workflow: SIGNED IN, against production planyr.io.",
+    "  local — `npm run e2e` with no BASE_URL: LOGGED OUT, against a local build of the tree.",
+    "Measured head-to-head 2026-08-08 (ci run #41: 30 red · a full local sweep: 33 red):",
+    "  25 red in BOTH  ·  5 red only in ci  ·  8 red only in local.",
+    "The 25 matter because they say these failures are NOT production or auth noise — they",
+    "reproduce on a plain local build with no account, so they are real and anyone can fix them.",
+    "The 13 that differ matter because neither lane substitutes for the other, so a case red in",
+    "one lane is no evidence at all about the other and the gate never lets one lane's entry",
+    "silence the other's failure. That gap is exactly how B1179's click-behavior and",
+    "inspector-close cases ended up with no watcher anywhere.",
+    "",
+    "THE COUNT IS THE DEBT. It may fall freely; it grows only with --allow-grow --item B###.",
+    "The ci lane was seeded from run #41 (2026-08-07, 30 failed / 312 passed / 1 flaky).",
+    "",
+    "module-keepalive's 'hidden headers ignore f' case was on this list at seeding and has been",
+    "REMOVED because it was fixed in the same change (B1179): the step that pressed Escape to",
+    "leave REAL browser fullscreen was written for the old chrome-hide `f` and headless Chromium",
+    "has no browser chrome to answer it. A fixed case never keeps its amnesty — that is the half",
+    "of the gate that stops this file becoming a permanent one.",
+    "",
+    "THE LOCAL LANE was seeded from a full sweep run in the development sandbox on 2026-08-08, not",
+    "from a CI runner — the first honest measurement this configuration has ever had, since nothing",
+    "in the repo ran it before today. That sandbox blocks outbound GIS hosts, so a few of its 8",
+    "local-only rows may be artefacts of THIS environment rather than product breakage. They are",
+    "seeded anyway and deliberately: the gate's stale-entry half turns each artefact into a",
+    "one-line ledger shrink on the first real runner, which is cheaper and far more legible than",
+    "starting empty and reporting 32 'new regressions' that are nothing of the kind."
+  ],
+  "entries": [
+    {
+      "id": "e2e/canvas-gis-identify.spec.js:61 › canvas GIS identify (B1092) › tapping the district easement band reports its width and recorded exhibit",
+      "lane": "ci",
+      "firstSeen": "2026-07-22",
+      "item": "B266081"
+    },
+    {
+      "id": "e2e/contour-hover-elevation.spec.js:166 › NEW-1 — hovering a contour names its elevation › hovering a line names its elevation — one label, tracking the cursor, no ghosts",
+      "lane": "ci",
+      "firstSeen": "2026-07-22",
+      "item": "B266081"
+    },
+    {
+      "id": "e2e/flood-district-scoping.spec.js:133 › flood & drainage district scoping (B1091(×2)) › the VISIBLE panel carries the zone verdict and the scoping reasons; the hidden copy is inert",
+      "lane": "ci",
+      "firstSeen": "2026-07-22",
+      "item": "B266081"
+    },
+    {
+      "id": "e2e/layer-point-hover-identify.spec.js:256 › electric layer point symbols + hover identify (NEW-1/NEW-2) › hovering a SUBSTATION names it — and moving off dismisses the readout",
+      "lane": "ci",
+      "firstSeen": "2026-07-22",
+      "item": "B266081"
+    },
+    {
+      "id": "e2e/layer-point-hover-identify.spec.js:281 › electric layer point symbols + hover identify (NEW-1/NEW-2) › a REDACTED substation still says what KIND of thing it is",
+      "lane": "ci",
+      "firstSeen": "2026-07-22",
+      "item": "B266081"
+    },
+    {
+      "id": "e2e/layer-point-hover-identify.spec.js:315 › electric layer point symbols + hover identify (NEW-1/NEW-2) › hovering a RASTER-painted layer identifies it through the service",
+      "lane": "ci",
+      "firstSeen": "2026-07-22",
+      "item": "B266081"
+    },
+    {
+      "id": "e2e/layer-point-hover-identify.spec.js:345 › electric layer point symbols + hover identify (NEW-1/NEW-2) › an unreachable identify service says so, briefly — never a hanging spinner",
+      "lane": "ci",
+      "firstSeen": "2026-07-22",
+      "item": "B266081"
+    },
+    {
+      "id": "e2e/layer-point-hover-identify.spec.js:373 › electric layer point symbols + hover identify (NEW-1/NEW-2) › the hover readout renders in the dark theme",
+      "lane": "ci",
+      "firstSeen": "2026-07-22",
+      "item": "B266081"
+    },
+    {
+      "id": "e2e/layer-point-hover-identify.spec.js:373 › electric layer point symbols + hover identify (NEW-1/NEW-2) › the hover readout renders in the light theme",
+      "lane": "ci",
+      "firstSeen": "2026-07-22",
+      "item": "B266081"
+    },
+    {
+      "id": "e2e/pond-design-buttons.spec.js:63 › Yield panel — ⚡ Design pond gating (B909/B910, unified single-pond button) › the button doesn't render on a blank (ungeocoded) site — no drainage check is possible without a live GIS pull",
+      "lane": "ci",
+      "firstSeen": "2026-07-22",
+      "item": "B266081"
+    },
+    {
+      "id": "e2e/pond-design-buttons.spec.js:83 › Detention Pond draw-tool hint (B909 §2b) › arming the tool shows a transient hint naming both the manual draw and the ⚡ Design pond shortcut; it clears once drawing starts",
+      "lane": "ci",
+      "firstSeen": "2026-07-22",
+      "item": "B266081"
+    },
+    {
+      "id": "e2e/pond-detention-method.spec.js:53 › Detention method-by-area guardrail (B904) › (a) an area within the Rational-method range shows a quiet method caption, no watch-out",
+      "lane": "ci",
+      "firstSeen": "2026-07-22",
+      "item": "B266081"
+    },
+    {
+      "id": "e2e/pond-detention-method.spec.js:65 › Detention method-by-area guardrail (B904) › (b) an area over the ceiling flags the method transition honestly",
+      "lane": "ci",
+      "firstSeen": "2026-07-22",
+      "item": "B266081"
+    },
+    {
+      "id": "e2e/pond-inspector-layout.spec.js:32 › Pond inspector — v3 UI SPEC Part B structure › inspector renders: DETENTION POND header, Dimensions rows, and four collapsed groups",
+      "lane": "ci",
+      "firstSeen": "2026-07-22",
+      "item": "B266081"
+    },
+    {
+      "id": "e2e/pond-land-earthwork.spec.js:61 › Detention land-take + earthwork $ (B907) › (a) a drawn detention pond shows a non-zero Detention share in the Yield land breakdown",
+      "lane": "ci",
+      "firstSeen": "2026-07-22",
+      "item": "B266081"
+    },
+    {
+      "id": "e2e/pond-land-earthwork.spec.js:77 › Detention land-take + earthwork $ (B907) › (b) the Earthwork cost card prices the pond's real excavation once a $/CY bid is entered",
+      "lane": "ci",
+      "firstSeen": "2026-07-22",
+      "item": "B266081"
+    },
+    {
+      "id": "e2e/pond-outlet-autosize.spec.js:115 › Pond detention — one-click auto-size (B902) › (c) the suggestion is overridable (typing wins) and the resulting value is clearable",
+      "lane": "ci",
+      "firstSeen": "2026-07-22",
+      "item": "B266081"
+    },
+    {
+      "id": "e2e/pond-outlet-autosize.spec.js:71 › Pond detention — one-click auto-size (B902) › (a) a pond with no release shows a non-empty SUGGESTED release + an enabled one-click path",
+      "lane": "ci",
+      "firstSeen": "2026-07-22",
+      "item": "B266081"
+    },
+    {
+      "id": "e2e/pond-outlet-autosize.spec.js:89 › Pond detention — one-click auto-size (B902) › (b) one click sizes an outlet AND shows a Post ≤ Pre routing result — zero manual typing",
+      "lane": "ci",
+      "firstSeen": "2026-07-22",
+      "item": "B266081"
+    },
+    {
+      "id": "e2e/pond-outlet-clear.spec.js:63 › Pond outlet fields — clear + persistence (B901) › Allowable release (cfs) can be set, then fully CLEARED via select-all + delete",
+      "lane": "ci",
+      "firstSeen": "2026-07-22",
+      "item": "B266081"
+    },
+    {
+      "id": "e2e/pond-outlet-clear.spec.js:97 › Pond outlet fields — clear + persistence (B901) › proposing then removing an outlet, then reloading, shows NO outlet (local persistence)",
+      "lane": "ci",
+      "firstSeen": "2026-07-22",
+      "item": "B266081"
+    },
+    {
+      "id": "e2e/pond-outlet-compound.spec.js:112 › Compound outlet + all-storms-at-once Post ≤ Pre (B903) › (c) a genuinely infeasible pond reports an honest overall FAIL, never a fabricated pass",
+      "lane": "ci",
+      "firstSeen": "2026-07-22",
+      "item": "B266081"
+    },
+    {
+      "id": "e2e/pond-outlet-compound.spec.js:129 › Compound outlet + all-storms-at-once Post ≤ Pre (B903) › (d) outlet stages can be added and removed by hand",
+      "lane": "ci",
+      "firstSeen": "2026-07-22",
+      "item": "B266081"
+    },
+    {
+      "id": "e2e/pond-outlet-compound.spec.js:63 › Compound outlet + all-storms-at-once Post ≤ Pre (B903) › (a) Auto-size produces a genuine multi-stage outlet with an emergency spillway",
+      "lane": "ci",
+      "firstSeen": "2026-07-22",
+      "item": "B266081"
+    },
+    {
+      "id": "e2e/pond-outlet-compound.spec.js:81 › Compound outlet + all-storms-at-once Post ≤ Pre (B903) › (b) the per-storm table has ALLOWABLE/ROUTED/WSE/STORAGE columns and an overall verdict that can't hide a bad storm",
+      "lane": "ci",
+      "firstSeen": "2026-07-22",
+      "item": "B266081"
+    },
+    {
+      "id": "e2e/pond-outlet-render.spec.js:109 › Pond outlet render — proposing an outlet must never crash the workspace (B900) › a proposed outlet survives a reload without crashing (the persisted-crash half of the report)",
+      "lane": "ci",
+      "firstSeen": "2026-07-22",
+      "item": "B266081"
+    },
+    {
+      "id": "e2e/pond-outlet-render.spec.js:61 › Pond outlet render — proposing an outlet must never crash the workspace (B900) › Propose outlet: orifice, with a routed storm table, renders with no throw",
+      "lane": "ci",
+      "firstSeen": "2026-07-22",
+      "item": "B266081"
+    },
+    {
+      "id": "e2e/pond-outlet-render.spec.js:86 › Pond outlet render — proposing an outlet must never crash the workspace (B900) › Restrictor outlet also renders the routed table with no throw",
+      "lane": "ci",
+      "firstSeen": "2026-07-22",
+      "item": "B266081"
+    },
+    {
+      "id": "e2e/yield-panel-layout.spec.js:41 › Yield panel — v3 UI SPEC Part A top-level groups › SITE YIELD header + LAND USE / BUILDINGS / BUILDABILITY / COSTS render; BUILDINGS toggles; footer legend shows",
+      "lane": "ci",
+      "firstSeen": "2026-07-22",
+      "item": "B266081"
+    },
+    {
+      "id": "e2e/contour-hover-elevation.spec.js:166 › NEW-1 — hovering a contour names its elevation › hovering a line names its elevation — one label, tracking the cursor, no ghosts",
+      "lane": "local",
+      "firstSeen": "2026-08-08",
+      "item": "B266081"
+    },
+    {
+      "id": "e2e/contour-hover-elevation.spec.js:246 › NEW-1 — hovering a contour names its elevation › the tag sits BESIDE the pointer, and flips at the edges instead of clipping",
+      "lane": "local",
+      "firstSeen": "2026-08-08",
+      "item": "B266081"
+    },
+    {
+      "id": "e2e/dim-callout-edit.spec.js:225 › NEW-1 — callout border corner radius is zoom-invariant (rectangle at every zoom) › the corner radius stays the same small proportion of the box across zoom",
+      "lane": "local",
+      "firstSeen": "2026-08-08",
+      "item": "B266081"
+    },
+    {
+      "id": "e2e/dim-callout-edit.spec.js:90 › B912 — editable dimension length › double-tap a building's dimension number → type a length → the building resizes",
+      "lane": "local",
+      "firstSeen": "2026-08-08",
+      "item": "B266081"
+    },
+    {
+      "id": "e2e/dock-zone-host-run.spec.js:163 › NEW-1 — the owner's real Weld County plan › the rules still hold AFTER a host resize",
+      "lane": "local",
+      "firstSeen": "2026-08-08",
+      "item": "B266081"
+    },
+    {
+      "id": "e2e/flood-district-scoping.spec.js:133 › flood & drainage district scoping (B1091(×2)) › the VISIBLE panel carries the zone verdict and the scoping reasons; the hidden copy is inert",
+      "lane": "local",
+      "firstSeen": "2026-08-08",
+      "item": "B266081"
+    },
+    {
+      "id": "e2e/layer-point-hover-identify.spec.js:315 › electric layer point symbols + hover identify (NEW-1/NEW-2) › hovering a RASTER-painted layer identifies it through the service",
+      "lane": "local",
+      "firstSeen": "2026-08-08",
+      "item": "B266081"
+    },
+    {
+      "id": "e2e/layer-point-hover-identify.spec.js:345 › electric layer point symbols + hover identify (NEW-1/NEW-2) › an unreachable identify service says so, briefly — never a hanging spinner",
+      "lane": "local",
+      "firstSeen": "2026-08-08",
+      "item": "B266081"
+    },
+    {
+      "id": "e2e/parcel-tools-menu.spec.js:178 › the right rail is the complete answer to 'what can I do to a parcel' › Edit boundary corners gives the gesture a visible home, and actually reshapes",
+      "lane": "local",
+      "firstSeen": "2026-08-08",
+      "item": "B266081"
+    },
+    {
+      "id": "e2e/pond-design-buttons.spec.js:63 › Yield panel — ⚡ Design pond gating (B909/B910, unified single-pond button) › the button doesn't render on a blank (ungeocoded) site — no drainage check is possible without a live GIS pull",
+      "lane": "local",
+      "firstSeen": "2026-08-08",
+      "item": "B266081"
+    },
+    {
+      "id": "e2e/pond-design-buttons.spec.js:83 › Detention Pond draw-tool hint (B909 §2b) › arming the tool shows a transient hint naming both the manual draw and the ⚡ Design pond shortcut; it clears once drawing starts",
+      "lane": "local",
+      "firstSeen": "2026-08-08",
+      "item": "B266081"
+    },
+    {
+      "id": "e2e/pond-detention-method.spec.js:53 › Detention method-by-area guardrail (B904) › (a) an area within the Rational-method range shows a quiet method caption, no watch-out",
+      "lane": "local",
+      "firstSeen": "2026-08-08",
+      "item": "B266081"
+    },
+    {
+      "id": "e2e/pond-detention-method.spec.js:65 › Detention method-by-area guardrail (B904) › (b) an area over the ceiling flags the method transition honestly",
+      "lane": "local",
+      "firstSeen": "2026-08-08",
+      "item": "B266081"
+    },
+    {
+      "id": "e2e/pond-inspector-layout.spec.js:32 › Pond inspector — v3 UI SPEC Part B structure › inspector renders: DETENTION POND header, Dimensions rows, and four collapsed groups",
+      "lane": "local",
+      "firstSeen": "2026-08-08",
+      "item": "B266081"
+    },
+    {
+      "id": "e2e/pond-land-earthwork.spec.js:61 › Detention land-take + earthwork $ (B907) › (a) a drawn detention pond shows a non-zero Detention share in the Yield land breakdown",
+      "lane": "local",
+      "firstSeen": "2026-08-08",
+      "item": "B266081"
+    },
+    {
+      "id": "e2e/pond-land-earthwork.spec.js:77 › Detention land-take + earthwork $ (B907) › (b) the Earthwork cost card prices the pond's real excavation once a $/CY bid is entered",
+      "lane": "local",
+      "firstSeen": "2026-08-08",
+      "item": "B266081"
+    },
+    {
+      "id": "e2e/pond-outlet-autosize.spec.js:115 › Pond detention — one-click auto-size (B902) › (c) the suggestion is overridable (typing wins) and the resulting value is clearable",
+      "lane": "local",
+      "firstSeen": "2026-08-08",
+      "item": "B266081"
+    },
+    {
+      "id": "e2e/pond-outlet-autosize.spec.js:71 › Pond detention — one-click auto-size (B902) › (a) a pond with no release shows a non-empty SUGGESTED release + an enabled one-click path",
+      "lane": "local",
+      "firstSeen": "2026-08-08",
+      "item": "B266081"
+    },
+    {
+      "id": "e2e/pond-outlet-autosize.spec.js:89 › Pond detention — one-click auto-size (B902) › (b) one click sizes an outlet AND shows a Post ≤ Pre routing result — zero manual typing",
+      "lane": "local",
+      "firstSeen": "2026-08-08",
+      "item": "B266081"
+    },
+    {
+      "id": "e2e/pond-outlet-clear.spec.js:63 › Pond outlet fields — clear + persistence (B901) › Allowable release (cfs) can be set, then fully CLEARED via select-all + delete",
+      "lane": "local",
+      "firstSeen": "2026-08-08",
+      "item": "B266081"
+    },
+    {
+      "id": "e2e/pond-outlet-clear.spec.js:97 › Pond outlet fields — clear + persistence (B901) › proposing then removing an outlet, then reloading, shows NO outlet (local persistence)",
+      "lane": "local",
+      "firstSeen": "2026-08-08",
+      "item": "B266081"
+    },
+    {
+      "id": "e2e/pond-outlet-compound.spec.js:112 › Compound outlet + all-storms-at-once Post ≤ Pre (B903) › (c) a genuinely infeasible pond reports an honest overall FAIL, never a fabricated pass",
+      "lane": "local",
+      "firstSeen": "2026-08-08",
+      "item": "B266081"
+    },
+    {
+      "id": "e2e/pond-outlet-compound.spec.js:129 › Compound outlet + all-storms-at-once Post ≤ Pre (B903) › (d) outlet stages can be added and removed by hand",
+      "lane": "local",
+      "firstSeen": "2026-08-08",
+      "item": "B266081"
+    },
+    {
+      "id": "e2e/pond-outlet-compound.spec.js:63 › Compound outlet + all-storms-at-once Post ≤ Pre (B903) › (a) Auto-size produces a genuine multi-stage outlet with an emergency spillway",
+      "lane": "local",
+      "firstSeen": "2026-08-08",
+      "item": "B266081"
+    },
+    {
+      "id": "e2e/pond-outlet-compound.spec.js:81 › Compound outlet + all-storms-at-once Post ≤ Pre (B903) › (b) the per-storm table has ALLOWABLE/ROUTED/WSE/STORAGE columns and an overall verdict that can't hide a bad storm",
+      "lane": "local",
+      "firstSeen": "2026-08-08",
+      "item": "B266081"
+    },
+    {
+      "id": "e2e/pond-outlet-render.spec.js:109 › Pond outlet render — proposing an outlet must never crash the workspace (B900) › a proposed outlet survives a reload without crashing (the persisted-crash half of the report)",
+      "lane": "local",
+      "firstSeen": "2026-08-08",
+      "item": "B266081"
+    },
+    {
+      "id": "e2e/pond-outlet-render.spec.js:61 › Pond outlet render — proposing an outlet must never crash the workspace (B900) › Propose outlet: orifice, with a routed storm table, renders with no throw",
+      "lane": "local",
+      "firstSeen": "2026-08-08",
+      "item": "B266081"
+    },
+    {
+      "id": "e2e/pond-outlet-render.spec.js:86 › Pond outlet render — proposing an outlet must never crash the workspace (B900) › Restrictor outlet also renders the routed table with no throw",
+      "lane": "local",
+      "firstSeen": "2026-08-08",
+      "item": "B266081"
+    },
+    {
+      "id": "e2e/road-branch-and-label.spec.js:100 › NEW-9 — a road's name label can ride the centre line › centre / beside / inside are three DISTINCT places, and centre is the one that rides the line",
+      "lane": "local",
+      "firstSeen": "2026-08-08",
+      "item": "B266081"
+    },
+    {
+      "id": "e2e/wall-kid-drift.spec.js:137 › NEW-2 / NEW-3 — wall strips + side parking on the owner's real plan › the drifted plan renders on the rule: strips span the extended side, both ends flush",
+      "lane": "local",
+      "firstSeen": "2026-08-08",
+      "item": "B266081"
+    },
+    {
+      "id": "e2e/wall-kid-drift.spec.js:190 › NEW-2 / NEW-3 — wall strips + side parking on the owner's real plan › an unrecorded field FOLLOWS a real Depth retype instead of outliving it",
+      "lane": "local",
+      "firstSeen": "2026-08-08",
+      "item": "B266081"
+    },
+    {
+      "id": "e2e/yield-panel-layout.spec.js:41 › Yield panel — v3 UI SPEC Part A top-level groups › SITE YIELD header + LAND USE / BUILDINGS / BUILDABILITY / COSTS render; BUILDINGS toggles; footer legend shows",
+      "lane": "local",
+      "firstSeen": "2026-08-08",
+      "item": "B266081"
+    }
+  ]
+}

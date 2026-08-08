@@ -21,7 +21,7 @@ import { readFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
-import { classify, ceilingFor, headroomFor, isBanded, METRIC_KEYS, DEFAULT_HEADROOM } from "../ui-audit/lib/perfBudgetPolicy.mjs";
+import { classify, ceilingFor, headroomFor, attribute, isBanded, METRIC_KEYS, DEFAULT_HEADROOM } from "../ui-audit/lib/perfBudgetPolicy.mjs";
 import { stemOf, bucketOf, packageOf, diffSnapshots } from "../ui-audit/lib/bundleMetrics.mjs";
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -284,5 +284,91 @@ describe("a runtime measurement moves only through the named ratchet step", () =
       expect(budgets.runtime[k].seededFrom).toMatch(/perf-harness\.mjs/);
       expect(budgets.runtime[k].seededFrom, `${k} must record WHICH scenario`).toMatch(/goose-creek/);
     }
+  });
+});
+
+/* ---- B266084 / B266083 / B266085 ---------------------------------------------------------
+ *
+ * THE DEFECT THESE CLOSE. Growth inside the band annotates and writes nothing, so `main`
+ * accumulated real feature weight above its own recorded baseline, invisibly, until a later
+ * branch added its first kilobyte and tripped a ceiling that was ~90% consumed before it
+ * existed. Its only way out was to RAISE the baseline by everyone else's drift — which
+ * happened five times in the nine days after B1178 was filed (B1401, B1405, B1414, B209502,
+ * B255200), each with an honest reason line saying some version of "main was already N KB
+ * above this stale baseline before this branch", the largest 73.6 KB.
+ */
+describe("B266084 — a branch is charged its own bytes, never main's drift", () => {
+  const spec = { baseline: 1_000_000, target: 900_000, unit: "bytes" };
+  const band = headroomFor(spec.baseline, headroom); // max(2%, 32 KB) = 32768 here
+  const ceiling = ceilingFor(spec, headroom);
+
+  it("splits a measurement into what main carried and what this branch added", () => {
+    const a = attribute(1_030_000, 1_025_000, spec, headroom);
+    expect(a.inherited).toBe(25_000); // main, above its own recorded baseline
+    expect(a.branch).toBe(5_000);     // this branch
+    expect(a.charged).toBe(null);     // nothing over the ceiling at all
+  });
+
+  it("charges the BRANCH when the branch's own growth alone consumes the whole band", () => {
+    const a = attribute(1_000_000 + band + 1, 1_000_000, spec, headroom);
+    expect(a.inherited).toBe(0);
+    expect(a.branch).toBe(band + 1);
+    expect(a.charged).toBe("branch");
+  });
+
+  it("charges the BRANCH when main was clean and the overage is entirely its own", () => {
+    const a = attribute(ceiling + 1, spec.baseline - 5_000, spec, headroom);
+    expect(a.inherited).toBeLessThan(0);
+    expect(a.charged).toBe("branch");
+  });
+
+  it("charges the BASE when the ceiling is breached by drift the branch did not add", () => {
+    // main arrives 1 byte under the ceiling; the branch adds 2 bytes and would be blamed for
+    // the entire band under the old rule. This is precisely the #932-blocked-by-0.1-KB shape.
+    const a = attribute(ceiling + 1, ceiling - 1, spec, headroom);
+    expect(a.branch).toBe(2);
+    expect(a.inherited).toBe(band - 1);
+    expect(a.charged).toBe("base");
+  });
+
+  it("returns null with no base measurement, so the un-attributed verdict stands", () => {
+    // Fairer or identical — never blinder. A missing base ref must not create an amnesty.
+    expect(attribute(1, null, spec, headroom)).toBeNull();
+    expect(attribute(1, undefined, spec, headroom)).toBeNull();
+    expect(attribute(1, NaN, spec, headroom)).toBeNull();
+  });
+
+  it("returns null for a hard-ceiling count metric, which has no band to apportion", () => {
+    expect(attribute(8, 7, { ceiling: 7, unit: "chunks" }, headroom)).toBeNull();
+  });
+
+  it("classify() is untouched — the absolute verdict a push to main is judged on", () => {
+    // The relief is applied by the CALLER, and only for a pull request. If this ever starts
+    // returning something other than "breach", main has lost its absolute gate.
+    expect(classify(ceiling + 1, spec, headroom).status).toBe("breach");
+  });
+});
+
+describe("B266083 — a baseline records the tree it was measured from", () => {
+  const entries = bundle.ratchetLog.entries;
+
+  it("every metric's latest entry names the commit its number can be rebuilt from", () => {
+    // Without this there is nothing for `npm run perf:baseline-verify` to rebuild, which is
+    // why the first four baselines could only be audited by hand, nine days late.
+    for (const key of METRIC_KEYS(bundle).filter((k) => isBanded(bundle[k]))) {
+      const latest = [...entries].reverse().find((e) => e.metric === `bundle.${key}`);
+      expect(latest, `bundle.${key} has no ratchetLog entry`).toBeTruthy();
+      expect(latest.commit, `bundle.${key}'s latest entry records no commit`).toMatch(/^[0-9a-f]{7,40}$/);
+    }
+  });
+
+  it("the ratchet script builds what it measures rather than reading a stray dist/", () => {
+    // The header promised "from a fresh build" for weeks while the code read whatever dist/
+    // happened to exist. Assert the mechanism, not the comment.
+    const src = readFileSync(join(REPO, "scripts", "perf-ratchet.mjs"), "utf8");
+    expect(src).toMatch(/vite", "build"/);
+    expect(src, "the ratchet must refuse a dirty tree — a number from a tree no commit contains is unreproducible")
+      .toMatch(/status", "--porcelain/);
+    expect(src, "the recorded entry must carry commit + sourceHash").toMatch(/commit,\s*sourceHash/);
   });
 });

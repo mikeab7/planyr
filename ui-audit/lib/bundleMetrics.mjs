@@ -214,6 +214,11 @@ export function statsSnapshot(measured, attribution, meta = {}) {
     metrics: {
       siteRouteJsBytes: measured.routes.site?.bytes ?? null,
       siteRouteChunks: measured.routes.site?.chunks.length ?? null,
+      // B266084 — the Notes route rides the snapshot too, so its budget can be attributed
+      // between the base ref and the branch like every other banded metric. A base snapshot
+      // written before this field existed simply reports `null` and falls back to the
+      // un-attributed verdict.
+      notesRouteJsBytes: measured.routes.notes?.bytes ?? null,
       totalJsBytes: measured.totalJsBytes,
       largestChunkBytes: measured.largest.bytes,
       largestChunkStem: measured.largest.stem,
@@ -227,6 +232,7 @@ export function statsSnapshot(measured, attribution, meta = {}) {
 /** Metric units, so a chunk COUNT is never printed as a byte delta. */
 export const METRIC_UNITS = {
   siteRouteJsBytes: "bytes",
+  notesRouteJsBytes: "bytes",
   totalJsBytes: "bytes",
   largestChunkBytes: "bytes",
   siteRouteChunks: "chunks",

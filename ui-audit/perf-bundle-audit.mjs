@@ -34,7 +34,7 @@ import { readFileSync, existsSync, writeFileSync, mkdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadBuild, measureBundle, attributeBytes, statsSnapshot, diffSnapshots, kb, ROOT } from "./lib/bundleMetrics.mjs";
-import { classify, ceilingFor, headroomFor, METRIC_KEYS, DEFAULT_HEADROOM } from "./lib/perfBudgetPolicy.mjs";
+import { classify, ceilingFor, headroomFor, attribute, METRIC_KEYS, DEFAULT_HEADROOM } from "./lib/perfBudgetPolicy.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const BUDGETS = join(HERE, "perf-budgets.json");
@@ -66,11 +66,35 @@ const failures = [];    // ceiling breaches — these fail the build
 const aboveBand = [];   // over the recorded baseline but inside the headroom band — LOUD, passes
 const aboveTarget = []; // knowingly out of budget — reported loudly, never silently passed
 const passes = [];
+const inherited = [];   // B266084 — over the ceiling, but the overage was already on main
+
+/* B266084 — the BASE REF's own measurement, read before anything is judged.
+ *
+ * `--compare` already pointed at this file; it was only ever used to name which modules moved.
+ * Reading its headline metrics here is what lets a breach be attributed instead of blamed.
+ *
+ * ATTRIBUTION RELIEF APPLIES TO A PULL REQUEST ONLY. `GITHUB_BASE_REF` is set by GitHub for a
+ * `pull_request` event and for nothing else, so a push to main — where the base is merely
+ * HEAD^ — keeps the absolute verdict. That asymmetry IS the design: a branch is judged on what
+ * it added, main is judged on what it IS, and drift therefore surfaces on main, where a
+ * deliberate ratchet with a stated reason is the correct answer. `--as-pr` / `--as-main`
+ * override it so the behaviour is drivable from a test rather than only from CI. */
+const AS_PR = process.argv.includes("--as-pr")
+  || (!process.argv.includes("--as-main") && !!process.env.GITHUB_BASE_REF);
+let baseMetrics = null;
+if (COMPARE && existsSync(COMPARE)) {
+  try { baseMetrics = JSON.parse(readFileSync(COMPARE, "utf8"))?.metrics || null; } catch { baseMetrics = null; }
+}
 
 function check(path, value, spec) {
   const r = classify(value, spec, headroom);
-  const row = { metric: path, ...r, owner: budgets.targetOwner?.[path] || null };
-  if (r.status === "breach") failures.push(row);
+  const key = path.replace(/^bundle\./, "");
+  const attr = attribute(value, baseMetrics?.[key], spec, headroom);
+  const row = { metric: path, ...r, attr, owner: budgets.targetOwner?.[path] || null };
+  // A ceiling breach whose overage this branch did not create is reported LOUDLY and passes —
+  // but only on a pull request, and only when the branch's own growth still fits the band.
+  if (r.status === "breach" && AS_PR && attr && attr.charged === "base") inherited.push(row);
+  else if (r.status === "breach") failures.push(row);
   else if (r.status === "aboveBaseline") aboveBand.push(row);
   else if (r.status === "aboveTarget") aboveTarget.push(row);
   else passes.push(row);
@@ -195,10 +219,32 @@ function printComparison() {
   console.log();
 }
 
+/* B266084 — main's OWN drift above its own recorded baseline, printed on EVERY run whether
+ * anything breaches or not. This is the number that was invisible for nine days while five
+ * separate branches were each made to re-record a slice of it as though it were their own
+ * feature's cost. A guard nobody can see is a guard that rots; this one is unmissable. */
+function printInheritedDrift() {
+  const rows = [...passes, ...aboveTarget, ...aboveBand, ...inherited, ...failures]
+    .filter((r) => r.attr && r.unit === "bytes");
+  if (!rows.length) return;
+  const drifting = rows.filter((r) => r.attr.inherited > 256);
+  console.log("  Whose bytes are these? (B266084 — base ref vs this branch):");
+  for (const r of rows) {
+    const a = r.attr;
+    console.log(`    ${r.metric.replace(/^bundle\./, "").padEnd(20)} base ${signed(a.inherited).padStart(11)} vs its baseline · this branch ${signed(a.branch).padStart(11)}`);
+  }
+  if (drifting.length) {
+    console.log(`    ${drifting.length} metric(s) arrive ABOVE BASELINE before this branch adds a line — that drift belongs to`);
+    console.log("    main, not to this pull request, and this branch is not charged for it. It is bounded: a push");
+    console.log("    to main is judged absolutely, so main cannot drift past its own band without going red there.");
+  }
+  console.log();
+}
+
 if (JSON_OUT) {
   console.log(JSON.stringify({
-    routes, totalJsBytes, largest, failures, aboveBand, aboveTarget, passes,
-    headroom, attribution, comparison, compareNote,
+    routes, totalJsBytes, largest, failures, aboveBand, aboveTarget, passes, inherited,
+    asPullRequest: AS_PR, headroom, attribution, comparison, compareNote,
     derivedCeilings: Object.fromEntries(METRIC_KEYS(b).map((k) => [k, ceilingFor(b[k], headroom)])),
   }, null, 2));
 } else {
@@ -214,6 +260,8 @@ if (JSON_OUT) {
 
   console.log(`  Headroom band (NEW-1): baseline + max(${(headroom.pctOfBaseline * 100).toFixed(0)}%, ${kb(headroom.minBytes)}). Growth inside the band is reported, not failed.\n`);
 
+  printInheritedDrift();
+
   for (const p of passes) {
     const ceil = typeof p.ceiling === "number" ? fmt(p.ceiling, p.unit) : p.ceiling;
     console.log(`  ✓ ${p.metric} — ${fmt(p.value, p.unit)} (ceiling ${ceil})`);
@@ -227,6 +275,16 @@ if (JSON_OUT) {
     console.log(`      Inside the ${fmt(a.band, a.unit)} headroom band, so this PASSES — ${fmt(a.bandLeft, a.unit)} of band left before the ${fmt(a.ceiling, a.unit)} ceiling.`);
     console.log("      This is a real, attributable growth. Pay it back with an optimization, or say on the item why it stays.");
     if (a.owner) console.log(`      tracked by: ${a.owner}`);
+  }
+  for (const i of inherited) {
+    const a = i.attr;
+    console.log(`  ⚠ ${i.metric} — OVER CEILING, BUT NOT BY THIS BRANCH: ${fmt(i.value, i.unit)} vs a ${fmt(i.ceiling, i.unit)} ceiling.`);
+    console.log(`      The base ref already measured ${fmt(a.base, i.unit)} — ${fmt(a.inherited, i.unit)} above the recorded baseline`);
+    console.log(`      before this branch existed. This branch adds ${signed(a.branch)}, which fits the ${fmt(a.band, i.unit)} band.`);
+    console.log("      So this PASSES (B266084). Do NOT raise the baseline here to make it green — that would");
+    console.log("      launder main's drift into the record under this branch's name, which is exactly what");
+    console.log("      B1401, B1405, B1414, B209502 and B255200 each had to do before this rule existed.");
+    console.log("      The drift is main's to answer for, and a push to main is judged absolutely.");
   }
   for (const f of failures) {
     if (f.missingRoute) {
@@ -244,6 +302,12 @@ if (JSON_OUT) {
       console.log("      import into the planner of a module that should be behind a dynamic import().");
     } else {
       console.log(`\n  ✗ ${f.metric} — ${fmt(f.value, f.unit)} exceeds the ${fmt(f.ceiling, f.unit)} ceiling by ${fmt(f.delta, f.unit)} (+${f.pct.toFixed(1)}%)`);
+      if (f.attr) {
+        console.log(`      Attributed (B266084): the base ref carried ${signed(f.attr.inherited)} above baseline; THIS BRANCH adds ${signed(f.attr.branch)}.`);
+        if (f.attr.charged === "branch" && f.attr.branchOverBand > 0) {
+          console.log(`      This branch's own growth alone is ${fmt(f.attr.branch, f.unit)} against a ${fmt(f.attr.band, f.unit)} band — the breach is yours.`);
+        }
+      }
       if (f.baseline != null) {
         console.log(`      That ceiling is DERIVED: baseline ${fmt(f.baseline, f.unit)} + a ${fmt(f.band, f.unit)} headroom band.`);
         console.log("      So this is past the point where growth is absorbed silently. Either optimize it back");
@@ -262,6 +326,7 @@ if (JSON_OUT) {
     const notes = [];
     if (aboveBand.length) notes.push(`${aboveBand.length} above baseline, inside the band`);
     if (aboveTarget.length) notes.push(`${aboveTarget.length} above target — tracked`);
+    if (inherited.length) notes.push(`${inherited.length} over ceiling on drift this branch did not add (B266084)`);
     console.log(`✓ All bundle budgets within ceiling${notes.length ? ` (${notes.join("; ")})` : ""}.`);
   }
 }

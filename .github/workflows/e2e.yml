@@ -50,12 +50,32 @@ jobs:
           BASE_URL: ${{ github.event.inputs.base_url || secrets.E2E_BASE_URL || 'https://planyr.io' }}
           E2E_EMAIL: ${{ secrets.E2E_EMAIL }}
           E2E_PASSWORD: ${{ secrets.E2E_PASSWORD }}
+          # B266080 — also emit a MACHINE-READABLE result. The list reporter's text is what the
+          # @claude issue quoted for 17 red runs, and text is the reason nothing could tell a new
+          # regression from the standing 30: it reads identically either way.
+          PLAYWRIGHT_JSON_OUTPUT_NAME: e2e-results.json
         run: |
           set +e
-          npm run e2e > e2e-report.txt 2>&1
+          npm run e2e -- --reporter=list,json > e2e-report.txt 2>&1
           echo "code=$?" >> "$GITHUB_OUTPUT"
           echo "--- report ---"
           cat e2e-report.txt
+
+      # B266080 — THE DRIFT GATE. The raw suite exit code has been 1 every weekday since
+      # 2026-07-22 and will stay 1 until the 30 known-red cases in e2e/known-red.json are fixed
+      # (owner: B266081). A signal that is always red carries no information, so the JOB's
+      # verdict is now the DIFF against that committed ledger, not the raw exit code:
+      #   • a failure that is not on the ledger  → NEW regression → red, named.
+      #   • a ledger entry that PASSED           → the ledger is stale → red, so it must shrink.
+      # The ledger is in the repo, in a diff, reviewable — not in a comment on a muted thread.
+      - name: e2e drift gate (new-vs-known — B266080)
+        id: drift
+        if: always()
+        run: |
+          set +e
+          node scripts/e2e-drift-gate.mjs --report e2e-results.json --lane ci > e2e-drift.txt 2>&1
+          echo "code=$?" >> "$GITHUB_OUTPUT"
+          cat e2e-drift.txt
       - name: Upload Playwright report
         if: always()
         uses: actions/upload-artifact@v4
@@ -65,27 +85,32 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
       - name: Open or bump a @claude issue on failure
-        if: steps.e2e.outputs.code != '0'
+        if: steps.drift.outputs.code != '0'
         uses: actions/github-script@v7
         with:
           script: |
             const fs = require("fs");
             const owner = context.repo.owner, repo = context.repo.repo;
-            let report = "";
-            try { report = fs.readFileSync("e2e-report.txt", "utf8"); } catch (_) {}
-            if (report.length > 5000) report = report.slice(-5000); // keep the issue body sane
+            // B266080 — lead with the DRIFT verdict (what changed), not the raw tail of a report
+            // that has said the same thing every weekday since 2026-07-22. The full list is still
+            // attached as the playwright-report artifact.
+            let drift = "";
+            try { drift = fs.readFileSync("e2e-drift.txt", "utf8"); } catch (_) {}
+            if (drift.length > 5000) drift = drift.slice(-5000);
             const body = [
-              "@claude — the **markup e2e suite** (B278) failed against the deploy. A tool may have",
-              "stopped arming/drawing, a property control may be missing, or a measure may be reading",
-              "wrong — the kind of regression the B421 refinement loop exists to catch.",
+              "@claude — the **e2e drift gate** (B266080) went red against the deploy: either a case",
+              "that was NOT on `e2e/known-red.json` failed (a new regression), or a case that IS on it",
+              "passed (the ledger is stale and must shrink). Both are actionable; a merely-still-red",
+              "known case is not, and no longer files anything.",
               "",
-              "Please reproduce locally (`npm run e2e`, or `BASE_URL=<url> npm run e2e`), find the",
-              "failing tool, fix the engine/host wiring, and re-run. The tool×property spec in",
-              "`src/shared/markup/tools.matrix.js` is the source of truth — do NOT edit it to make a",
-              "red test pass; the code moves to match the matrix.",
+              "Reproduce locally (`npm run e2e`, or `BASE_URL=<url> npm run e2e`), fix it, and re-run.",
+              "The tool×property spec in `src/shared/markup/tools.matrix.js` is the source of truth —",
+              "do NOT edit it to make a red test pass; the code moves to match the matrix. Likewise do",
+              "NOT add a case to the ledger to silence it: that needs `--allow-grow --item B###` and is",
+              "an explicit admission that something is broken and is not being fixed.",
               "",
               "```",
-              report.trim() || "(no report captured)",
+              drift.trim() || "(no drift report captured — the gate itself did not run)",
               "```",
             ].join("\n");
             const { data: open } = await github.rest.issues.listForRepo({
@@ -102,7 +127,7 @@ jobs:
               core.info(`Opened issue #${created.number}`);
             }
       - name: Close the e2e issue when green
-        if: steps.e2e.outputs.code == '0'
+        if: steps.drift.outputs.code == '0'
         uses: actions/github-script@v7
         with:
           script: |
@@ -119,8 +144,80 @@ jobs:
       # failure), which means the steps above always succeed. Without this gate the JOB would
       # report green on a red suite — exactly the masking that hid a 21-failure run. Fail last,
       # after the issue bookkeeping, so the run status is honest.
-      - name: Reflect the e2e result in the job status
-        if: steps.e2e.outputs.code != '0'
+      #
+      # B266080 — the job now reflects the DRIFT verdict. The raw suite code stays 1 while the 30
+      # ledgered cases are outstanding (owner: B266081); making the job red on that forever is
+      # what turned this alarm into wallpaper for 17 consecutive runs. It is still printed, and
+      # the ledger's size is printed by the gate on every run, so the debt is never invisible —
+      # it is just no longer the thing that cries wolf.
+      - name: Reflect the e2e drift verdict in the job status
+        if: steps.drift.outputs.code != '0'
         run: |
-          echo "e2e suite exited with code ${{ steps.e2e.outputs.code }} — failing the job."
+          echo "raw suite exit: ${{ steps.e2e.outputs.code }} · drift gate: ${{ steps.drift.outputs.code }}"
+          echo "The drift gate is red — a NEW failure, or a ledger entry that has started passing."
+          exit 1
+
+  # ── B266082 — THE LANE THAT HAS NEVER RUN IN CI ───────────────────────────────────────────
+  #
+  # The job above tests ONE configuration: signed in, against production planyr.io. `npm run
+  # e2e` with no BASE_URL tests a completely different one — LOGGED OUT, against a local build
+  # of the tree — and nothing in this repository has ever run it. That is not a theoretical
+  # gap. B1179 was filed on 2026-07-30 naming three specs red on main; measured on 2026-08-08
+  # the production lane above was red on exactly ONE of them (module-keepalive), and the other
+  # two had NO WATCHER ANYWHERE. Two of the three had also since been fixed by unrelated work,
+  # which nobody could have known either.
+  #
+  # It runs on the same schedule and on demand, in its own lane of the same ledger, so the two
+  # red sets can never be mistaken for each other. It is deliberately NOT part of the required
+  # `build` check: a full suite plus a build would put ~15 minutes on every pull request, and
+  # a gate people route around is worse than one that runs nightly and is read.
+  #
+  # Its ledger was seeded from a full sweep in the development sandbox (32 cases). Measured
+  # head-to-head against the production lane the same day: 25 of the 30 production failures
+  # ALSO fail here, logged out, on a plain local build — so the standing failures are real
+  # product/spec breakage, not production or auth noise, and anyone can reproduce them.
+  e2e-local:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps chromium
+      - name: Run e2e suite (logged out, against a local build)
+        id: e2e
+        env:
+          PLAYWRIGHT_JSON_OUTPUT_NAME: e2e-results.json
+        run: |
+          set +e
+          npm run e2e -- --reporter=list,json > e2e-local-report.txt 2>&1
+          echo "code=$?" >> "$GITHUB_OUTPUT"
+          echo "--- report ---"
+          cat e2e-local-report.txt
+      - name: e2e drift gate (local lane — B266080)
+        id: drift
+        if: always()
+        run: |
+          set +e
+          node scripts/e2e-drift-gate.mjs --report e2e-results.json --lane local > e2e-local-drift.txt 2>&1
+          echo "code=$?" >> "$GITHUB_OUTPUT"
+          cat e2e-local-drift.txt
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-local
+          path: playwright-report/
+          if-no-files-found: ignore
+          retention-days: 14
+      - name: Reflect the local-lane drift verdict in the job status
+        if: steps.drift.outputs.code != '0'
+        run: |
+          echo "raw suite exit: ${{ steps.e2e.outputs.code }} · drift gate: ${{ steps.drift.outputs.code }}"
           exit 1
