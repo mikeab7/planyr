@@ -26,6 +26,17 @@
  *    named CHROME-NEVER-EATS-A-PRESS worst case — chrome a static reading cannot see — so this mode
  *    selects the feature, waits for the tap record to lapse, and then probes what appeared.
  *
+ * ── ⛔ THE TWO-PRESS INVARIANT (B233153) IS THE PROBE SHAPE EVERYTHING ELSE HERE WAS MISSING, and
+ *    it is run for every feature. Between press 1 and press 2 the harness asks the APP's own
+ *    resolver what a double-click at that point would now address, and requires the answer to still
+ *    be the feature. Chrome that only exists once the gesture is half-finished is invisible to every
+ *    other check in this file, because they all read the DOM before the interaction. Two defects it
+ *    would have caught outright: the road dimension number (NEW-3), and the one it was written for —
+ *    a detention pond whose OWN vertex handle, mounted by press 1, ate press 2.
+ *
+ *    Its sibling, HALF FIVE, drives that case deliberately: select the feature, find a point where
+ *    one of its own grips lands over its own body, deselect, and double-click there.
+ *
  * ── THE --locked VARIANT MAKES A CARVE-OUT INTO A DECISION. A locked feature is select-only: the
  *    double-click selects it and does NOT open Properties. That is deliberate (locking guards the
  *    object from stray edits) but it was never written down or tested, so it was indistinguishable
@@ -68,6 +79,15 @@
  *  7. AN OPEN-PATH MARKUP (line, polyline, traced, infwater) DRAWN AXIS-ALIGNED HAS A ZERO-HEIGHT
  *     BOUNDING BOX. A probe that requires both width AND height skips it and reports "did not
  *     render", which reads as a missing feature rather than a flat one.
+ *
+ *  8. ⛔ A TYPE NAME IN A FIXTURE IS NOT A CLASS, AND NEITHER IS A SHAPE — VERTEX COUNT IS ITS OWN
+ *     VARIABLE (B233153). Six pond variants (bare rect · polygon · +detention · +expansion baseline
+ *     · grouped) all passed on the build the owner's pond was dead on, because every one of them is
+ *     a FOUR-vertex ring whose grips sit at four distant corners. A surveyed basin has dozens, so
+ *     selecting it peppers its edge with 18px hit squares. Hence `surveyRing` and the 44-vertex row.
+ *     The grid grew a SIXTH COLUMN rather than a sixth row on purpose: the layout is height-bound
+ *     against 16:9, so a column is free while a row shrinks the whole plan — and the handle
+ *     decimation is measured in SCREEN pixels, so shrinking it would thin out the grips under test.
  * ───────────────────────────────────────────────────────────────────────────────────────────── */
 import pw from "/opt/node22/lib/node_modules/playwright/index.js";
 import { roadStripBBox } from "../src/workspaces/site-planner/lib/siteModel.js";
@@ -95,6 +115,24 @@ const ring = (cx, cy, w, h) => [
   { x: cx - w / 2, y: cy - h / 2 }, { x: cx + w / 2, y: cy - h / 2 },
   { x: cx + w / 2, y: cy + h / 2 }, { x: cx - w / 2, y: cy + h / 2 },
 ];
+/* ⛔ B233153 — A SURVEYED RING, AND ITS VERTEX COUNT IS THE WHOLE POINT.
+ *
+ * Every pond variant below this line certified GREEN on the exact build the owner's detention pond
+ * was dead on, and the reason is NOT the shape — polygon, detention record and expansion baseline
+ * were all already covered. It is VERTEX COUNT AGAINST HANDLE SIZE AT THE PROBE POINT. Each of those
+ * rings has four vertices, so once selected its grips sit at the four corners, nowhere near where a
+ * centre probe presses. A real detention basin is digitized with dozens, so selecting it peppers its
+ * perimeter band with 18px transparent hit squares — and press 1 is what mounts them, under a
+ * pointer that has not moved. A test that passes on a four-vertex pond proves nothing about this.
+ *
+ * Deterministic (no RNG — a fixture that differs run to run cannot be a guard). The wobble is not
+ * decoration: `decimatedHandles` ranks by CORNER-NESS and thins to 22px on screen, so a smooth
+ * ellipse would keep only a handful of grips and a rectangle only its four. */
+const surveyRing = (cx, cy, rx, ry, n = 44) => Array.from({ length: n }, (_, i) => {
+  const t = (i / n) * Math.PI * 2;
+  const k = 1 + 0.16 * Math.sin(t * 5) + 0.07 * Math.cos(t * 11);
+  return { x: cx + Math.cos(t) * rx * k, y: cy + Math.sin(t) * ry * k };
+});
 
 /* TRAP 1 — a centerline road MUST carry its derived strip bbox or the whole scene's fit breaks. */
 function roadBBox(pts, travelW, curb) {
@@ -131,6 +169,17 @@ const ELS = [
    * the panel is PINNED rather than left to look like a pass. */
   { id: eid(), type: "pond", variant: "grouped", groupId: "zzgrp1", ...rect(3, 4, 320, 220), det: { role: "detention", depth: 8, tobElev: 100, poolElev: 96, freeboard: 1, slope: 3, outlet: "weir", contourInterval: 1, contours: true, daAcres: 12, daImpPct: 70, releaseRateCfs: 5 }, label: "Pond (grouped)", drillOnly: true },
   { id: eid(), type: "building", variant: "grouped", groupId: "zzgrp1", ...rect(4, 4, 240, 160), label: "Building (grouped)", drillOnly: true },
+  /* ⛔ B233153 — THE OWNER'S CASE, and the row every earlier pond variant was missing. A surveyed
+   * ring: 44 vertices, so its selected grips blanket the basin edge instead of sitting on four
+   * distant corners. This is the row the grip-covered probe below exercises. Parked in a SIXTH
+   * COLUMN on purpose: the fixture is height-bound against a 16:9 viewport (5 × 520 wide against
+   * 5 × 430 deep), so a new column costs nothing, while a new ROW would shrink every feature on
+   * screen — and the handle decimation is measured in SCREEN pixels, so shrinking the plan would
+   * quietly thin out the very grips this row exists to produce. */
+  { id: eid(), type: "pond", variant: "surveyed ring (44 vertices)", ...rect(5, 3, 420, 300),
+    points: surveyRing(at(5, 3).x, at(5, 3).y, 170, 120),
+    det: { role: "detention", depth: 8, tobElev: 100, poolElev: 96, freeboard: 1, slope: 3, outlet: "weir", contourInterval: 1, contours: true, daAcres: 12, daImpPct: 70, releaseRateCfs: 5 },
+    label: "Pond (surveyed)", gripProbe: true },
   // TRAP 1 in action: pts + vtx + the roadStripBBox spread, never hand-written bounds.
   { id: eid(), type: "road", label: "Road", roadClass: "truck",
     ...roadBBox([{ x: at(4, 3).x - 200, y: at(4, 3).y }, { x: at(4, 3).x + 200, y: at(4, 3).y }], 30, 1) },
@@ -174,7 +223,7 @@ const NAMES = new Map([
 const site = {
   id: SITE_ID, groupId: SITE_ID, site: "ZZ Double-click audit", name: "Plan 1",
   origin: null, county: null, parcels: [], measures: [], callouts: [], underlay: null,
-  els: ELS.map(({ variant, drillOnly, ...e }) => ({ ...e, locked: LOCKED || undefined })),
+  els: ELS.map(({ variant, drillOnly, gripProbe, ...e }) => ({ ...e, locked: LOCKED || undefined })),
   markups: MARKUPS.map((m) => ({ ...m, locked: LOCKED || undefined })),
   settings: { showDims: true }, updatedAt: Date.now(),
 };
@@ -397,21 +446,107 @@ try {
     }, { id, kind, labels: LABELS });
   }
 
+  /* ── THE TWO-PRESS INVARIANT (B233153) ────────────────────────────────────────────────────────
+   *
+   * Ask the app — BETWEEN press 1 and press 2 — what a double-click at this exact point would now
+   * address. That is the only probe shape that can see chrome which DOES NOT EXIST until the gesture
+   * is half-finished, and it is the shape this harness was missing. On the owner's pond, press 1
+   * selected it, that mounted the pond's own 41-node handle layer, and one 18px hit square landed on
+   * the point already under the cursor: press 2 hit a grip the FIRST PRESS HAD CREATED, so the pair
+   * could not form and the native dblclick retargeted to the root with nothing to resolve. Every
+   * check in this file read the DOM before the interaction, so every one of them was blind to it.
+   *
+   * ⛔ IT ASKS THE APP'S OWN RESOLVER (`window.__plannerHitTarget`, E2E-gated, read-only) rather than
+   * re-implementing the rule here. A second copy of the hit-test is free to disagree with the one the
+   * product uses — the trap lib/featureTarget.js's header names — and a harness that agrees with
+   * itself while the app fails is precisely how a pond got certified 19/19. */
+  const resolveAt = (x, y) => page.evaluate(({ x, y }) => {
+    if (typeof window.__plannerHitTarget !== "function") return { missing: true };
+    try { return { target: window.__plannerHitTarget(x, y) }; } catch (e) { return { threw: String(e) }; }
+  }, { x, y });
+  const resolvedKey = (r) => (r && r.target ? (r.target.kind === "measure" ? `measure:${r.target.i}` : `${r.target.kind}:${r.target.id}`) : null);
+
+  /* WHERE ONE OF THIS FEATURE'S OWN GRIPS COVERS ITS OWN BODY — the owner's press point, found
+   * rather than guessed. Call it with the feature ALREADY SELECTED, so the grips exist to be read.
+   *
+   * The grips are read off the live render and each is sampled INSIDE its box (not merely at its
+   * centre: a grip centred on a ring vertex is half outside the shape, and it is the overlapping
+   * part that traps a press). The handle layer is made pointer-inert for the duration, so
+   * `elementFromPoint` answers with what lies UNDERNEATH — i.e. what the user was aiming at before
+   * press 1 mounted anything. A point that comes back is, by construction, a point that resolves to
+   * this feature's BODY when nothing is selected and to a grip the instant it is. */
+  async function gripCoveredPoint(id, kind) {
+    return page.evaluate(({ id, kind }) => {
+      const key = `${kind}:${id}`;
+      const layer = document.querySelector("[data-handle-layer]");
+      if (!layer) return { grips: 0 };
+      /* ⛔ LEAVES ONLY. A wrapper `<g>` in this layer has a bounding box spanning every grip inside
+       * it — sampling that box lands on ordinary body pixels no grip covers, and the probe then
+       * reports a "grip-covered press" that is nothing of the sort (measured: it named `g` and
+       * pressed the element's own centre). A grip is a leaf: the node that actually paints and
+       * actually carries the `onPointerDown`. */
+      const grips = [...layer.querySelectorAll("*")].filter((n) => {
+        if (n.children.length) return false;
+        const b = n.getBoundingClientRect();
+        return b.width >= 6 && b.height >= 6 && getComputedStyle(n).pointerEvents !== "none";
+      });
+      if (!grips.length) return { grips: 0 };
+      const prev = layer.style.pointerEvents;
+      layer.style.pointerEvents = "none";
+      try {
+        for (const g of grips) {
+          const b = g.getBoundingClientRect();
+          for (const fy of [0.5, 0.25, 0.75]) for (const fx of [0.5, 0.25, 0.75]) {
+            const x = Math.round(b.left + b.width * fx), y = Math.round(b.top + b.height * fy);
+            const n = document.elementFromPoint(x, y);
+            const f = n && n.closest ? n.closest("[data-feature]") : null;
+            if (!f || f.getAttribute("data-feature") !== key) continue;
+            // The BODY is geometry. Text chrome and the dimension number have their own routes
+            // (--labels / NEW-3) and accepting one here would re-open the hole B227940 closed.
+            const tag = (n.tagName || "").toLowerCase();
+            if (tag === "text" || tag === "tspan") continue;
+            if (n.closest('[data-el-dim], [data-testid="el-dim"], [data-label-for]')) continue;
+            return { grips: grips.length, x, y, grip: g.getAttribute("data-testid") || g.tagName.toLowerCase() };
+          }
+        }
+      } finally { layer.style.pointerEvents = prev; }
+      return { grips: grips.length };
+    }, { id, kind });
+  }
+
   /* Two separate down/up pairs at one point — pointer capture releases on the first up before the
-   * second down, which a fast clickCount:2 cannot promise. */
+   * second down, which a fast `dblclick()` / `click({clickCount:2})` cannot promise.
+   *
+   * ⛔ THE `clickCount` METADATA IS NOT COSMETIC, AND ITS ABSENCE BLINDED THIS HARNESS TO B233153.
+   * Chromium synthesises a native `dblclick` only when the second press is stamped `clickCount: 2`;
+   * two bare pairs leave the counter at 1 and NO dblclick is ever delivered. So every row here was
+   * passing on the reconstructed double-TAP alone (`isDoubleTap`, in the feature's own pointerdown)
+   * and the root resolver — the half that carries a REAL user double-click — was never exercised at
+   * all. That is exactly the half a grip kills: when press 2 lands on chrome, the feature's handler
+   * never runs, the tap cannot pair, and only the native dblclick at the root is left. A harness
+   * that cannot deliver one cannot see the bug. The presses stay separate; only the stamp changes. */
   async function doubleClick(x, y) {
     await page.mouse.move(x, y);
-    await page.mouse.down(); await page.mouse.up();
-    await page.mouse.down(); await page.mouse.up();
+    await page.mouse.down({ clickCount: 1 }); await page.mouse.up({ clickCount: 1 });
+    await page.mouse.down({ clickCount: 2 }); await page.mouse.up({ clickCount: 2 });
     await page.waitForTimeout(180);
   }
 
   const targets = [
-    ...ELS.map((e) => ({ id: e.id, kind: "el", drillOnly: !!e.drillOnly })),
+    ...ELS.map((e) => ({ id: e.id, kind: "el", drillOnly: !!e.drillOnly, gripProbe: !!e.gripProbe })),
     ...MARKUPS.map((m) => ({ id: m.id, kind: "markup" })),
   ];
 
   console.log(`\n=== double-click → Properties · ${targets.length} features · mode: ${MODE} ===\n`);
+
+  /* ⛔ A GUARD NOBODY HAS SEEN RUN IS A GUARD THAT ROTS GREEN. The two halves added for B233153 both
+   * depend on an app-side hook and on grips actually mounting, and either can quietly stop
+   * happening — at which point the suite keeps printing a clean score while measuring less than it
+   * did. Both are COUNTED, and a zero is a hard failure at the end of the run, not a shrug. */
+  let invariantsRun = 0, gripProbesRun = 0;
+  const hookLive = await page.evaluate(() => typeof window.__plannerHitTarget === "function");
+  ok("the app exposes its double-click resolution to the harness (window.__plannerHitTarget)", hookLive,
+    hookLive ? "" : "⛔ the two-press invariant cannot measure the product without it — see lib/featureTarget.js");
 
   for (const t of targets) {
     const name = NAMES.get(t.id);
@@ -464,6 +599,21 @@ try {
         zeroed === 0 ? `${selN} selection node(s)` : `⛔ PRECONDITION: Escape left ${zeroed} selection node(s) — this assertion cannot mean anything until that is fixed`);
     }
 
+    /* HALF ONE-AND-A-HALF — THE TWO-PRESS INVARIANT (B233153). The click above IS press 1, and the
+     * feature is now selected with all its selection-only chrome mounted. Ask the app, right here in
+     * the middle of the gesture, what press 2 would resolve to. It must still be this feature. */
+    if (hookLive) {
+      const mid = await resolveAt(pt.x, pt.y);
+      const held = resolvedKey(mid) === `${t.kind}:${t.id}`;
+      invariantsRun++;
+      ok(`${name} — press 1 does not summon chrome that eats press 2`, held,
+        held ? `still resolves to ${resolvedKey(mid)}`
+          : mid.threw ? `⛔ the resolver threw: ${mid.threw}`
+            : resolvedKey(mid) === null
+              ? `⛔ after press 1 this point resolves to NOTHING — press 2 has nowhere to land (${pt.via} at ${pt.x},${pt.y})`
+              : `⛔ after press 1 this point resolves to ${resolvedKey(mid)} instead`);
+    }
+
     await closePanel();
     await page.waitForTimeout(420);            // let the tap record lapse (DBLTAP_MS = 350)
 
@@ -484,6 +634,58 @@ try {
     } else {
       ok(`${name} — double-click opens Properties`, opened, `via the ${pt.via} at ${pt.x},${pt.y}`);
     }
+
+    /* ── HALF FIVE — THE GRIP-COVERED PRESS. B233153 VERBATIM. ─────────────────────────────────
+     *
+     * Press where one of THIS feature's own grips will land once it is selected. Nothing is
+     * selected when press 1 goes down, so it reaches the body and selects; that mounts the grip
+     * squarely under the unmoved pointer; press 2 lands on the grip. On the pre-fix build the root
+     * resolver saw a handle on top and answered "nothing was double-clicked" — silently.
+     *
+     * A locked feature paints no grips (B922) and there is nothing to cover the press, so the case
+     * does not exist in `--locked` mode. That is REPORTED, never silently skipped. */
+    if (!LOCKED) {
+      await closePanel();
+      await deselect();
+      await page.mouse.click(pt.x, pt.y);            // select, so the grips exist to be read
+      await page.waitForTimeout(300);
+      const gp = await gripCoveredPoint(t.id, t.kind);
+      await deselect();
+      await page.waitForTimeout(420);                 // …and let the tap record lapse
+      if (gp && Number.isFinite(gp.x)) {
+        gripProbesRun++;
+        /* The two-press invariant, run WHERE IT BITES. Measured between the presses of one real
+         * double-click: press 1 lands on the body and mounts the grip, and the question is whether
+         * press 2 still has this feature to resolve to. This is the assertion that goes red on the
+         * pre-fix build — the invariant at an ordinary body point does not, because no grip lands
+         * there, which is the whole reason the earlier fixture could not see this. */
+        await page.mouse.move(gp.x, gp.y);
+        await page.mouse.down({ clickCount: 1 }); await page.mouse.up({ clickCount: 1 });
+        const held = await resolveAt(gp.x, gp.y);
+        const same = resolvedKey(held) === `${t.kind}:${t.id}`;
+        ok(`${name} — press 1's own ${gp.grip} does not blank the target for press 2`, same,
+          same ? `still resolves to ${resolvedKey(held)} at ${gp.x},${gp.y}`
+            : `⛔ B233153: with the ${gp.grip} press 1 just mounted, this point resolves to ${resolvedKey(held) || "NOTHING"}`);
+        await page.mouse.down({ clickCount: 2 }); await page.mouse.up({ clickCount: 2 });
+        await page.waitForTimeout(220);
+        const gOpened = await panelOpen();
+        const label = `${name} — a grip mounted BY press 1 does not eat press 2 (${gp.grip})`;
+        if (t.drillOnly) ok(`${label} — GROUPED: drills in, Properties stays shut`, !gOpened, `at ${gp.x},${gp.y}`);
+        else ok(label, gOpened, gOpened ? `at ${gp.x},${gp.y}` : `⛔ B233153: double-click at ${gp.x},${gp.y} opened nothing — its own ${gp.grip} took press 2`);
+      } else {
+        console.log(`SKIP — ${name} — grip-covered press  ::  ${gp && gp.grips ? `${gp.grips} grip(s), none overlapping this feature's own body` : "this feature paints no grips when selected"}`);
+      }
+    }
+  }
+
+  /* ⛔ THE OBSERVED-OR-FAIL CHECK. Both B233153 halves can stop measuring without anything going
+   * red — the hook disappears, or a fixture change leaves no grip over any body — and the suite
+   * would go on printing a full score. An unobserved guard is the failure mode VIEW-INDEPENDENT-ONCE
+   * §6 names, so it is asserted here rather than hoped for. */
+  ok("the two-press invariant actually ran", invariantsRun > 0, `${invariantsRun} feature(s)`);
+  if (!LOCKED) {
+    ok("the grip-covered press actually ran (B233153's own case)", gripProbesRun > 0,
+      gripProbesRun > 0 ? `${gripProbesRun} feature(s)` : "⛔ no grip landed over any feature's body — the surveyed-ring pond fixture is not doing its job");
   }
 
   if (pageErrors.length) console.log("\nPAGE ERRORS:\n" + pageErrors.slice(0, 5).join("\n"));

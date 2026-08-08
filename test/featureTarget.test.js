@@ -9,6 +9,14 @@
  * (NEW-2), and whether a press on a dimension NUMBER was really aimed at the element's body
  * underneath it (NEW-3 — a road's width number is painted on the pavement, so it could not be
  * missed, and the inline width chip swallowed the gesture).
+ *
+ * ⛔ B233153 amends the FIRST of those. A handle on top no longer blanks the answer — it is skipped,
+ * because a grip is chrome belonging to the selected feature and never a feature in its own right.
+ * The case that forced it: on the owner's Bain plan, press 1 on a detention pond selects it, which
+ * MOUNTS that pond's vertex hit squares, and one lands exactly on the point just pressed — so press
+ * 2 hit a handle the first press had created and the gesture resolved to nothing. Six seeded pond
+ * variants all passed, because the variable is not the shape: it is VERTEX COUNT against handle size
+ * at the probe point, and a four-vertex fixture ring keeps its handles at the corners.
  */
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
@@ -63,14 +71,45 @@ describe("resolving the double-click target off the hit stack", () => {
     expect(resolveDoubleClickTarget([feat("el:road7", { dim: true }), feat("el:road7")])).toEqual({ kind: "el", id: "road7" });
   });
 
-  /* A HANDLE on top owns the press. A grip is a manipulation affordance; opening the thing beneath
-   * it would both surprise and make a grip's own future double-click gesture unimplementable. */
-  it("returns nothing when a handle is on top", () => {
-    expect(resolveDoubleClickTarget([{ feature: null, handle: true }, feat("el:e1")])).toBeNull();
+  /* ⛔ B233153 — A HANDLE IS TRANSPARENT TO IDENTIFICATION, and this REPLACES the rule that shipped
+   * first ("a handle on top owns the press → null"). Captured live on the owner's Bain plan: press 1
+   * on a detention pond selects it, which MOUNTS the pond's own 18×18 vertex hit squares, and one of
+   * them lands exactly on the point just pressed. Press 2 then hits the handle, the native dblclick
+   * retargets to the root, and the old rule answered "nothing was double-clicked" — silently, every
+   * time, on a pond whose surveyed ring has dozens of vertices. The first press summoned the thing
+   * that blocked the second. */
+  it("looks PAST a handle on top — a grip is chrome belonging to the feature, not a feature", () => {
+    expect(resolveDoubleClickTarget([{ feature: null, handle: true }, feat("el:e1")])).toEqual({ kind: "el", id: "e1" });
+  });
+
+  it("B233153 — the owner's capture: the pond's OWN vertex handle over the pond's own fill", () => {
+    // The exact stack `elementsFromPoint` returns at his probe point once press 1 has selected it:
+    // the transparent hit square (inside the handle layer, itself inside no feature) over the water.
+    expect(resolveDoubleClickTarget([
+      { feature: null, handle: true, dim: false },     // rect[data-testid="vtx-handle"]
+      { feature: null, handle: true, dim: false },     // g[data-handle-layer="1"]
+      feat("el:e1454853gyzzln"),                       // path[fill=url(#grad-water)] — the pond
+    ])).toEqual({ kind: "el", id: "e1454853gyzzln" });
+  });
+
+  it("looks past a whole STACK of handles — a dense ring overlaps several hit squares", () => {
+    const h = { feature: null, handle: true, dim: false };
+    expect(resolveDoubleClickTarget([h, h, h, h, feat("parcel:p1")])).toEqual({ kind: "parcel", id: "p1" });
+  });
+
+  it("resolves to nothing when handles are ALL there is — a grip out in clear space opens nothing", () => {
+    expect(resolveDoubleClickTarget([{ feature: null, handle: true }])).toBeNull();
+    expect(resolveDoubleClickTarget([{ feature: null, handle: true }, plain()])).toBeNull();
   });
 
   it("still resolves when the handle is BELOW the feature", () => {
     expect(resolveDoubleClickTarget([feat("el:e1"), { feature: null, handle: true }])).toEqual({ kind: "el", id: "e1" });
+  });
+
+  it("a handle never masks a feature painted between it and the one below", () => {
+    // Top-most-first still decides WHICH feature; transparency only removes the handle from the race.
+    expect(resolveDoubleClickTarget([{ feature: null, handle: true }, feat("markup:m1"), feat("el:e1")]))
+      .toEqual({ kind: "markup", id: "m1" });
   });
 
   it("returns nothing on empty canvas, and survives junk", () => {
@@ -165,5 +204,29 @@ describe("source guard — the render must keep stamping what the resolver reads
 
   it("the root dblclick handler is wired to the canvas svg", () => {
     expect(SP).toMatch(/onDoubleClick=\{onBgDouble\}/);
+  });
+
+  /* ⛔ B233153 — the two-press invariant needs to ask the APP what a double-click at a point would
+   * address, mid-gesture. Re-implementing the rule in page script would test the harness's own copy
+   * of it (the "a second hit-test is free to disagree" trap), so the resolution is exposed through
+   * one E2E-gated, read-only hook and the harnesses drive that. If the hook goes, the invariant
+   * silently stops measuring the product — so it is pinned here. */
+  it("the double-click resolution is exposed to the harnesses through the E2E hook", () => {
+    expect(SP).toMatch(/window\.__plannerHitTarget = hook/);
+    expect(SP).toMatch(/dblResolveRef\.current = \(x, y\) => resolveDoubleClickTarget\(hitStackAt\(x, y\)\)/);
+  });
+
+  it("the hook is gated and nulled on unmount, like every other planner probe", () => {
+    const at = SP.indexOf("window.__plannerHitTarget = hook");
+    const block = SP.slice(Math.max(0, at - 400), at + 200);
+    expect(block).toMatch(/window\.__PLANYR_E2E/);
+    expect(SP).toMatch(/if \(window\.__plannerHitTarget === hook\) window\.__plannerHitTarget = null/);
+  });
+
+  /* The grips must keep taking their OWN presses — the fix is about identification, never delivery.
+   * A vertex hit square with `pointerEvents="none"` would be undraggable, which is the regression
+   * a careless reading of B233153 ("make the handle layer transparent") would produce. */
+  it("the vertex hit square still receives its own press (dragging is untouched)", () => {
+    expect(SP).toMatch(/data-testid="vtx-handle"[\s\S]{0,200}onPointerDown=\{onDown\}/);
   });
 });

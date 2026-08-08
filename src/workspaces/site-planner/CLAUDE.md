@@ -618,11 +618,32 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   **(3) A dimension NUMBER over its own body forwards to the body** (`pressIsOverElementBody`): a road's
   width number is anchored to the centreline midpoint, so a double-click aimed at the road could not miss
   it and the inline width chip swallowed the gesture. Fixed once in the shared dispatch, never
-  special-cased for road. Guards: the repo-root `test/` suites **doubleTap** and **featureTarget**, the
-  e2e spec **dblclick-properties** (all four cases mutation-checked red on the pre-fix build), and the
-  ui-audit harness **audit-doubleclick-properties** (every element type × every markup kind × three
-  easement modes, in `centres` / `--labels` / `--locked` modes — `--labels` primes the selection first,
-  because a detail-tier dimension number does not EXIST until its element is selected).
+  special-cased for road.
+  **(4) B233153 — A HANDLE IS TRANSPARENT TO IDENTIFICATION, and this REPLACES the rule that a handle on
+  top owns the press.** Captured live on the owner's Bain plan: press 1 on a detention pond SELECTS it,
+  which mounts that pond's own 18×18 `vtx-handle` hit squares, and one lands exactly on the point already
+  pressed — so press 2 hit a grip **the first press had created**, the tap could not pair, the native
+  dblclick retargeted, and `resolveDoubleClickTarget` answered `null`. Silent, every time. A grip is chrome
+  belonging to the selected feature, never a feature, so it is now SKIPPED — closing every element type that
+  renders grips at once rather than special-casing the pond. **⛔ IDENTIFICATION ONLY: grips keep their own
+  `pointerEvents` and `onPointerDown`, and a vertex must still drag.** The variable that hid this for months
+  was **VERTEX COUNT against handle size at the probe point**, not shape — a four-vertex fixture ring keeps
+  its grips at four distant corners, so six realistic pond variants all certified green.
+  Guards: the repo-root `test/` suites **doubleTap** and **featureTarget** (29, incl. the owner's captured
+  stack verbatim; pre-fix rule ⇒ 4 red), the e2e specs **dblclick-properties** (all four cases
+  mutation-checked red on the pre-fix build) and **chrome-swallows-press** (the B233153 pair — the
+  grip-covered double-click, plus the vertex-drag regression guard, which COUNTS moved vertices because a
+  press falling through an inert grip moves the whole pond and passes any "it changed" check), and the
+  ui-audit harness **audit-doubleclick-properties** (every element type × every markup kind × three easement
+  modes, in `centres` / `--labels` / `--locked` — `--labels` primes the selection first, because a
+  detail-tier dimension number does not EXIST until its element is selected; **HALF FIVE** finds a point
+  where a feature's own grip lands over its own body and double-clicks there; pre-fix ⇒ 39 red).
+  **Two instruments this bug bought, and neither is optional:** `window.__plannerHitTarget(x, y)`
+  (E2E-gated, read-only — the app's OWN resolution asked MID-GESTURE; a harness re-implementing the rule
+  tests its own copy of it), and the **two-press invariant**, the only probe shape that can see chrome which
+  does not exist until the gesture is half-finished. ⛔ And a harness must stamp `clickCount` 1 then 2 or
+  Chromium synthesises **no native `dblclick` at all** — two bare down/up pairs leave the whole root-resolver
+  path unexercised behind a full green score, which is exactly how this survived.
 - **⛔ `pureCache.js` + `viewCull.js`'s `cullRectFor` — VIEW-INDEPENDENT-ONCE (`/CLAUDE.md`), the two
   mechanisms a fix in that class uses. Read the rule before adding a memo here.** The cull rect is
   **LATCHED**, not re-derived: it was a continuous function of `view`, so `cullToView` re-filtered the
