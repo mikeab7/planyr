@@ -113,6 +113,30 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V64545 — B267538: which of the seven sandbox-only failures a REAL runner sees. `Blocker: ci-run`
+
+**Already measured here as far as this machine allows, and the control arm was run rather than
+assumed.** A full 361-case `local` sweep reported 12 failures; 5 are the ledger's remaining rows
+(0 stale) and 7 are not on it. Five of those seven reproduce on **untouched `origin/main`** built
+and served in the same sandbox, so they are not from this branch; two are load-flaky with both
+outcomes observed minutes apart.
+
+**What only a runner can settle.** V63088 recorded the local lane being trimmed against a real
+runner earlier the same day — seven rows removed *because they genuinely pass there*. If that
+holds, all seven of these are this machine. If any of the five fails on a runner, it is a product
+bug and gets its own number.
+
+**The check, on a real `local`-lane run:**
+1. `contour-hover-elevation:246` · `dim-callout-edit:225` · `dock-zone-host-run:119` ·
+   `parcel-tools-menu:178` · `road-branch-and-label:100` — pass, or name the one that does not.
+2. `wall-kid-drift:137` / `:190` and `dock-zone-host-run:163` — run twice. Both outcomes have been
+   observed here; if a runner reproduces the flip, they are flaky under load and want the
+   `intermittent` marker WITH its `{passedRun, failedRun}` evidence, not a plain ledger row.
+3. The gate's own verdict line reads `local … 5 on the known-red ledger`, 0 novel, 0 stale.
+
+**Nothing is added to the ledger before this runs.** Seven rows on one sandbox's word is not the
+standard, and three of them are provably load-sensitive.
+
 ### V64544 — B267536: the pond/detention family on the `ci` lane (signed in, against production). `Blocker: auth`
 
 **Already driven GREEN here, on the lane this sandbox CAN reach — this is the second lane, not the
