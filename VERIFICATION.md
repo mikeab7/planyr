@@ -126,11 +126,11 @@ build — still **596 → 448 ms · 152 → 98 ms**. Plus `test/bootRenderBlocki
 (mutation-proven red on re-injection), `npm test` full suite, lint, and a green build.
 
 **WHAT IS GENUINELY WALLED, and it is narrower than it first looked.** The wall was **re-tested this
-session, not inherited**: Chromium against the branch-preview URL still dies with
-`net::ERR_CONNECTION_RESET`, exactly as **V477** recorded, so no *browser* observation of the deployed
-edge is possible here. But `curl` does get through, which turned out to be enough to discharge (a)
-outright — see below. What remains needs a real browser on a real network, and only that. On
-**production planyr.io**, confirm:
+session against BOTH hosts, not inherited**: Chromium dies with `net::ERR_CONNECTION_RESET` on the
+branch-preview URL *and* on `https://planyr.io` itself, exactly as **V477** recorded, so no *browser*
+observation of the deployed edge is possible here. But `curl` does get through, which turned out to be
+enough to discharge (a) outright — on the preview *and* then on production — see below. What remains
+is only what a browser can see, and only that. On **production planyr.io**, confirm:
 
 - **(a) The font files are served, with the right type.** ✅ **DISCHARGED 2026-08-08 against the REAL
   Cloudflare edge** (the PR #961 branch preview, `claude-google-fonts-render-b.planyr.pages.dev`) — not
@@ -145,8 +145,20 @@ outright — see below. What remains needs a real browser on a real network, and
   `<link>`/`<script>` tags naming `fonts.googleapis.com` or `fonts.gstatic.com`** (the single textual
   match is inside the explanatory HTML comment), the `crossorigin` font preload is present, and the
   hashed app CSS really does carry `url(/fonts/inter-latin.woff2)` and `url(/fonts/inter-latin-ext.woff2)`.
-  ⏳ Re-confirm the same two headers on **planyr.io** itself once this merges — the preview and
-  production are the same Pages project, so this is a formality rather than an open question.
+  ✅ **RE-CONFIRMED ON PRODUCTION `planyr.io` after #961 merged, and it was NOT a formality — see the
+  propagation note below.** Both files: **HTTP 200, `content-type: font/woff2`, byte-identical to the
+  repo copies** (48,256 / 85,068, verified by comparing the downloaded bytes against `public/fonts/`,
+  not just the length). The deployed document on `/`, `/?app` and `/#/` carries **zero live
+  `<link>`/`<script>` tags naming a third-party font host** and **does** carry the `crossorigin` font
+  preload; the hashed app CSS (`/assets/index-cp3yGl0J.css`) carries both `url(/fonts/…)` references.
+  *(`/landing/` still shows four such tags — that is **B1384's intended non-blocking pattern**, two
+  preconnects plus the `media="print"` link and its `<noscript>` fallback. Expected, allowed by
+  `test/bootRenderBlocking.test.js`, and out of scope here.)*
+  ⚠ **PROPAGATION IS NOT ATOMIC — worth knowing before anyone reads a post-merge check.** In the first
+  minutes after the merge the edge served the **new font files** while `/?app` still returned the
+  **old HTML** (Google link present, preload absent). A check run in that window would have reported a
+  half-deployed state as a failure. Both settled within minutes. If a post-deploy check disagrees with
+  itself, re-run it before believing it.
 - **(b) Inter actually renders — the check that catches (a) failing quietly.** In DevTools on a loaded
   app page, `document.fonts.check('16px Inter')` is `true`, and the Network tab shows
   `inter-latin.woff2` fetched from **planyr.io**, once, with **no request to `fonts.googleapis.com` or
