@@ -10,7 +10,7 @@
  */
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
-import { collectCases, compare, nextLedger } from "../scripts/lib/e2eDrift.mjs";
+import { collectCases, compare, nextLedger, validateLedger } from "../scripts/lib/e2eDrift.mjs";
 
 /** A minimal Playwright JSON report, shaped exactly as the real reporter emits it. */
 const report = (specs) => ({
@@ -218,5 +218,66 @@ describe("the REAL Playwright reporter shape (captured fixture)", () => {
     // Never throw on a shape we did not expect — the gate's job is to fail with a reason.
     const noRoot = { suites: real.suites };
     expect(collectCases(noRoot).length).toBe(cases.length);
+  });
+});
+
+/* ---- B266087 — the intermittent marker, and why it is not an amnesty ----------------------
+ *
+ * Measured on the gate's first two real runs: run #41 saw five cases fail after two retries
+ * each, run #42 saw the same five pass. All reach an EXTERNAL GIS service, so they flip with
+ * that service's availability rather than with the code. Under a plain "a passing ledger row is
+ * fatal" rule the gate goes red on every wobble in somebody else's server — the noise machine
+ * this whole item exists to dismantle, rebuilt by the fix for it.
+ *
+ * The marker is the one thing here that WEAKENS the gate, so it is the one thing that has to be
+ * earned: two run numbers that actually observed both outcomes, or the ledger is refused.
+ */
+describe("intermittent rows: reported, never an amnesty", () => {
+  const flip = { failedRun: 41, passedRun: 42, why: "external GIS service" };
+  const ledger = [
+    { id: "solid", lane: "ci", item: "B1", firstSeen: "2026-08-08" },
+    { id: "flappy", lane: "ci", item: "B1", firstSeen: "2026-08-08", intermittent: flip },
+  ];
+
+  it("a passing intermittent row is reported and does NOT fail the gate", () => {
+    const cases = [{ id: "solid", status: "failed" }, { id: "flappy", status: "passed" }];
+    const v = compare({ cases, entries: ledger, lane: "ci" });
+    expect(v.ok).toBe(true);
+    expect(v.stale).toHaveLength(0);
+    expect(v.staleIntermittent.map((e) => e.id)).toEqual(["flappy"]);
+  });
+
+  it("a passing ORDINARY row still fails the gate — the marker is not retroactive cover", () => {
+    const cases = [{ id: "solid", status: "passed" }, { id: "flappy", status: "failed" }];
+    expect(compare({ cases, entries: ledger, lane: "ci" }).ok).toBe(false);
+  });
+
+  it("an intermittent row still counts toward the debt", () => {
+    const cases = [{ id: "solid", status: "failed" }, { id: "flappy", status: "passed" }];
+    expect(compare({ cases, entries: ledger, lane: "ci" }).knownRed).toBe(2);
+  });
+
+  it("the marker CANNOT silence a case that is not on the ledger at all", () => {
+    // The relief only ever applies to an already-recorded row. A brand-new failure is novel
+    // whatever anyone claims about it, which is what stops "it's flaky" being a free pass.
+    const cases = [{ id: "brand-new", status: "failed" }];
+    expect(compare({ cases, entries: ledger, lane: "ci" }).novel).toEqual(["brand-new"]);
+  });
+
+  it("validateLedger REFUSES a marker with no evidence", () => {
+    expect(validateLedger([{ id: "x", lane: "ci", item: "B1", firstSeen: "2026-08-08", intermittent: true }])[0])
+      .toMatch(/needs evidence/);
+    expect(validateLedger([{ id: "x", lane: "ci", item: "B1", firstSeen: "2026-08-08", intermittent: { passedRun: 42 } }])[0])
+      .toMatch(/needs evidence/);
+  });
+
+  it("validateLedger REFUSES evidence that cites one run for both outcomes", () => {
+    expect(validateLedger([{ id: "x", lane: "ci", item: "B1", firstSeen: "2026-08-08", intermittent: { passedRun: 42, failedRun: 42 } }])[0])
+      .toMatch(/same run/);
+  });
+
+  it("the COMMITTED ledger is sound by those rules", () => {
+    const led = JSON.parse(readFileSync(new URL("../e2e/known-red.json", import.meta.url), "utf8"));
+    expect(validateLedger(led.entries)).toEqual([]);
   });
 });

@@ -53,10 +53,17 @@ jobs:
           # B266080 — also emit a MACHINE-READABLE result. The list reporter's text is what the
           # @claude issue quoted for 17 red runs, and text is the reason nothing could tell a new
           # regression from the standing 30: it reads identically either way.
+          #
+          # ⚠ `html` MUST stay in this list (B266087). `--reporter=` REPLACES the config's
+          # `[["list"], ["html"]]` rather than adding to it, so the first cut — `list,json` —
+          # silently stopped writing `playwright-report/`, and the upload step reported
+          # "No files were found with the provided path" on run #42 in BOTH jobs. The artifact
+          # is where a reader goes for the failure detail the issue body no longer quotes, so
+          # losing it while making the alarm quieter would have been a net loss of information.
           PLAYWRIGHT_JSON_OUTPUT_NAME: e2e-results.json
         run: |
           set +e
-          npm run e2e -- --reporter=list,json > e2e-report.txt 2>&1
+          npm run e2e -- --reporter=list,json,html > e2e-report.txt 2>&1
           echo "code=$?" >> "$GITHUB_OUTPUT"
           echo "--- report ---"
           cat e2e-report.txt
@@ -196,7 +203,7 @@ jobs:
           PLAYWRIGHT_JSON_OUTPUT_NAME: e2e-results.json
         run: |
           set +e
-          npm run e2e -- --reporter=list,json > e2e-local-report.txt 2>&1
+          npm run e2e -- --reporter=list,json,html > e2e-local-report.txt 2>&1
           echo "code=$?" >> "$GITHUB_OUTPUT"
           echo "--- report ---"
           cat e2e-local-report.txt

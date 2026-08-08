@@ -72,14 +72,52 @@ export function compare({ cases, entries, lane }) {
   const passed = new Set(cases.filter((c) => c.status === "passed" || c.status === "flaky").map((c) => c.id));
 
   const novel = [...failed].filter((id) => !known.has(id));
-  const stale = mine.filter((e) => passed.has(e.id));
+  const passing = mine.filter((e) => passed.has(e.id));
+  /* B266087 — a row PROVEN to flip between runs is not evidence of a fix when it passes.
+   *
+   * Measured on the first two real runs of this gate: run #41 saw five cases fail after two
+   * retries each; run #42 saw the same five pass. They all reach an EXTERNAL GIS service, so
+   * they flip with that service's availability, not with the code. Under a plain
+   * "a passing ledger row is fatal" rule the gate goes red on every wobble in somebody else's
+   * server — and I wrote the warning myself before I had the data: *a ledger that churns is a
+   * ledger people stop reading.* Shipping that would have rebuilt the noise machine this whole
+   * item exists to dismantle.
+   *
+   * So an `intermittent` row's PASS is reported and not fatal. It is not an amnesty and cannot
+   * be used as one: the row still counts toward the debt, it still fails the gate when it is
+   * the FIRST time a case appears, and the marker demands EVIDENCE — `{ passedRun, failedRun }`,
+   * two run numbers that actually observed both outcomes. `validateLedger()` rejects a marker
+   * without them, so "this one is flaky" can never be asserted to silence something. */
+  const stale = passing.filter((e) => !e.intermittent);
+  const staleIntermittent = passing.filter((e) => e.intermittent);
   const absent = mine.filter((e) => !passed.has(e.id) && !failed.has(e.id));
 
   return {
     lane, ran: cases.length, failed: failed.size, knownRed: known.size,
-    novel, stale, absent,
+    novel, stale, staleIntermittent, absent,
     ok: novel.length === 0 && stale.length === 0,
   };
+}
+
+/** Structural rules a committed ledger must satisfy. Returns a list of problems (empty = fine). */
+export function validateLedger(entries) {
+  const bad = [];
+  for (const e of entries || []) {
+    if (!/^(ci|local)$/.test(e.lane || "")) bad.push(`${e.id}: lane must be ci or local`);
+    if (!/^B\d+$/.test(e.item || "")) bad.push(`${e.id}: no owning backlog item`);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(e.firstSeen || "")) bad.push(`${e.id}: no firstSeen date`);
+    if (e.intermittent) {
+      const m = e.intermittent;
+      // The marker is the one thing here that WEAKENS the gate, so it is the one thing that has
+      // to be earned. Two run numbers that actually saw both outcomes, or it is not admissible.
+      if (!Number.isInteger(m.passedRun) || !Number.isInteger(m.failedRun)) {
+        bad.push(`${e.id}: intermittent needs evidence — { passedRun, failedRun } run numbers that observed both outcomes`);
+      } else if (m.passedRun === m.failedRun) {
+        bad.push(`${e.id}: intermittent evidence cites the same run (${m.passedRun}) for both outcomes`);
+      }
+    }
+  }
+  return bad;
 }
 
 /** The ledger after an --update: listed-and-still-failing kept, passing dropped, novel added. */
