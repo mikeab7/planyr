@@ -12478,9 +12478,20 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       edgeLabels: (drainCtxData?.authority?.overlays || []).filter((o) => o.kind !== "etj").map((o) => o.city).filter(Boolean),
       // A city ONLY governs when the site is actually inside its limits — containment, never the
       // ring union that also picks up a frontage sliver (B209506).
-      cityLabel: jurBadge?.cityContainment === "in" ? (jurBadge?.jur || "").split(" / ")[0].replace(/^City of\s+/, "") || null : null,
+      // NEW-1 — a PARTIAL containment counts too: a city holding part of the site is a real
+      // candidate, and `resolveAdministrator` picks the STRICTER rule, so including it can only
+      // raise the floor. Dropping it would let a site that is half inside a city be priced entirely
+      // on the county's laxer standard.
+      cityLabel: jurBadge?.cityContainment === "in"
+        ? (jurBadge?.jur || "").split(" / ")[0].replace(/^City of\s+/, "") || null
+        : jurBadge?.cityContainment === "partial"
+          ? (jurBadge?.partialCities || [])[0] || null
+          : null,
       // B209508 — what could NOT be checked. This is what makes the result refuse to settle.
       unresolvedRoles: jurBadge?.unresolvedRoles || [],
+      // NEW-2 — and what has not been checked YET. Before the first identify returns there is no
+      // ETJ candidate, and on 16 of 28 sites the ETJ is the rule that governs.
+      jurisdictionPending: jurPending,
     },
     rules: buildRules,
     ffeFt: fmBuild && fmBuild.ffe ? fmBuild.ffe.requiredFfeFt : null,
@@ -12977,7 +12988,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // clutters the one-line summary. So the badge identify skips the `isd` role entirely (one
     // fewer GIS query, and formatJurisdictionBadge then has no ISD to append). The opt-in
     // "⚖︎ Jurisdiction & road authority" detail panel (checkJurisdiction) still shows it.
-    identifyJurisdiction(c.lng, c.lat, { ring: rep, roles: ["county", "city", "etj"] })
+    /* NEW-1 — hand the identify EVERY active parcel ring, not just the biggest one. Containment is
+     * a whole-site question and `rep` is one lot; see `parcelProbePoints` in `jurisdiction.js`. */
+    identifyJurisdiction(c.lng, c.lat, { ring: rep, rings: jurActiveRings, roles: ["county", "city", "etj"] })
       .then((j) => {
         const b = formatJurisdictionBadge(j);
         if (!b) return; // failed / empty identify → no badge (display-only screening info)
@@ -12988,12 +13001,36 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           ? `ETJ boundaries: ${layerVintage("jur_etj") || "vintage unknown"}. ETJs shrink as landowners opt out (SB 2038) — screening only, verify before relying on an ETJ answer.`
           : null;
         const badge = { ...b, ageMs: j.ages?.county ?? j.ages?.city ?? j.ages?.etj ?? null, sourceName: "TxDOT / TxGIO / H-GAC", etjNote };
-        jurBadgeCache.current.set(jurBadgeSig, badge);
+        /* NEW-2 — CACHE ONLY A RESOLVED ANSWER. This cache is keyed on parcel geometry and lives for
+         * the session, so caching a badge whose ETJ lookup failed pinned that site to "couldn't
+         * check" until a reload, on a source measured flaky at exactly this. An unresolved badge is
+         * still SHOWN (it is the honest state); it is simply not remembered, so the next activation
+         * asks again. */
+        if (!badge.unresolved) jurBadgeCache.current.set(jurBadgeSig, badge);
         if (!cancelled) setJurBadge(badge);
       })
-      .catch(() => { /* screening/display-only — a failed identify just shows no badge */ });
+      /* ⛔ NEW-2 — LOUD-FAILURE. This used to swallow the rejection and leave `jurBadge` null, and a
+       * null badge is indistinguishable from "not looked up yet": `assessAdministrator` received an
+       * empty `unresolvedRoles`, reported `settled: true`, and the Yield panel printed a finished FFE
+       * derived from the county rule alone. On sixteen of the owner's sites the missing candidate is
+       * the City of Houston ETJ, whose Ch. 19 standard commonly sits 1–2 ft HIGHER. A jurisdiction we
+       * failed to reach must SAY so. */
+      .catch((e) => {
+        if (cancelled) return;
+        setJurBadge({
+          text: "Jurisdiction · couldn't check", jur: "Jurisdiction · couldn't check", county: null, isd: null,
+          straddle: false, edgeOnlyCities: [], partialCities: [], touchesCities: [],
+          unresolvedRoles: ["city", "etj", "county"], unresolved: true,
+          cityContainment: "unknown", etjLabels: [],
+          sourceName: "TxDOT / TxGIO / H-GAC",
+          failureNote: `The jurisdiction lookup could not be completed (${String((e && e.message) || e)}). Nothing here is settled — re-check before relying on the floodplain rule.`,
+        });
+      });
     return () => { cancelled = true; };
   }, [jurBadgeSig]);
+  /* NEW-2 — the LOADING window is a first-class state too. `jurBadge` is null both before the first
+   * lookup returns and when there is no parcel to ask about; only the first is "pending". */
+  const jurPending = !!jurBadgeSig && !jurBadge;
   // A click in identify mode ADDS the lot under the cursor straight to the plan (no
   // preview-then-confirm) — click more lots to add more; re-click a lot you just added
   // to toggle it off. The info card then shows that lot's appraisal + the jurisdiction
@@ -26717,7 +26754,11 @@ function YieldPanel({
                     {v.key === "ffe" && drainage.administrator && drainage.administrator.unresolved && (
                       <div data-testid="yield-ffe-unresolved" style={{ fontSize: 10.5, color: "var(--warn-text)", lineHeight: 1.45, marginTop: 2, whiteSpace: "normal" }}
                         title={drainage.administrator.unresolvedNote || ""}>
-                        <b>FFE rule not settled</b> — {drainage.administrator.unresolvedRoles.map((r) => `the ${r} lookup failed`).join(" and ")}, so a stricter authority may apply that we could not check.
+                        {/* NEW-2 — pending and failed are different facts and read differently: one
+                            resolves on its own, the other needs a re-check. */}
+                        <b>FFE rule not settled</b> — {drainage.administrator.unresolvedRoles.length
+                          ? `${drainage.administrator.unresolvedRoles.map((r) => `the ${r} lookup failed`).join(" and ")}, so a stricter authority may apply that we could not check.`
+                          : "the jurisdiction is still being looked up, and a city ETJ can impose a stricter floodplain rule than the county."}
                         {drainage.administrator.governingLabel ? ` Provisionally ${drainage.administrator.governingLabel}${drainage.administrator.governingRuleText ? ` (${drainage.administrator.governingRuleText})` : ""} — do not rely on it until the jurisdiction is confirmed.` : ""}
                       </div>
                     )}

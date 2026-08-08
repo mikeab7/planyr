@@ -298,6 +298,42 @@ export function simplifyRing(ring, max = 80) {
   return out;
 }
 
+/* ⛔ NEW-4 — THE QUERY URL HAS A HARD CEILING AND CROSSING IT IS A SILENT 404, NOT AN ERROR.
+ *
+ * `simplifyRing` bounds the VERTEX COUNT, which is the wrong quantity: 80 lon/lat pairs at full
+ * double precision is ~2.5 KB of query string, and `services.arcgis.com` (IIS) answers a request
+ * over roughly 2 KB of query with a plain HTML **404**. Measured on the owner's own parcels — Will
+ * Clayton's county query at 2325 characters 404s while Bain's at 1512 succeeds, on the same service,
+ * seconds apart. A 404 parses as "no such layer", so the county and the ETJ came back EMPTY on any
+ * site with a finely digitised boundary, and empty is exactly what the app reads as "no ETJ here".
+ * That is the flaky-ETJ symptom behind sixteen of his sites, and it is deterministic, not flaky: it
+ * is a property of how many vertices the surveyor drew.
+ *
+ * Two bounds now, and the URL one is the one that matters:
+ *   • coordinates are rounded to 6 decimal places — about 4 inches, far finer than any boundary
+ *     layer's own precision, and it nearly halves the string.
+ *   • the vertex count is then reduced until the built URL fits `MAX_QUERY_URL`, never below a
+ *     triangle. Fewer vertices is a slightly coarser INTERSECT test; a 404 is no test at all.
+ * (POST would remove the ceiling outright, but the B445 same-origin cache proxy is GET-addressed,
+ * so a POST body would silently bypass the cache. Bounded GET keeps both.) */
+export const MAX_QUERY_URL = 1900;
+export const VERTEX_LADDER = [80, 56, 40, 28, 20, 14, 10, 6, 4];
+export const round6 = (ring) => ring.map(([x, y]) => [Math.round(x * 1e6) / 1e6, Math.round(y * 1e6) / 1e6]);
+
+/* Build the params for a source, walking the vertex ladder down until the resulting URL fits the
+ * ceiling. `buildUrl` is injected so this stays pure and unit-testable. Returns the params it
+ * settled on plus the rung it reached, so a caller can report a coarsened test rather than hide it. */
+export function fitIdentifyParams(source, geom, buildUrl, max = MAX_QUERY_URL) {
+  let last = null;
+  for (const verts of (geom.ring ? VERTEX_LADDER : [null])) {
+    const params = buildIdentifyParams(source, verts == null ? geom : { ...geom, maxVerts: verts });
+    const url = buildUrl(params);
+    last = { params, url, verts, reduced: verts != null && verts < VERTEX_LADDER[0] };
+    if (url.length <= max) return last;
+  }
+  return last; // the shortest rung we have; better a coarse test than a 404
+}
+
 const closeRing = (r) => (r.length && (r[0][0] !== r[r.length - 1][0] || r[0][1] !== r[r.length - 1][1]) ? [...r, r[0]] : r);
 
 /* Build the /query params for a source against either a point {lng,lat} or a
@@ -312,8 +348,21 @@ export function buildIdentifyParams(source, geom) {
     spatialRel: "esriSpatialRelIntersects",
     returnGeometry: source.kind === "line" ? "true" : "false",
   };
+  /* NEW-1 — a MULTIPOINT geometry: "which cities contain ANY of these points". One query answers
+   * the whole-assemblage containment question that a single point cannot (see the parcel-coverage
+   * block in `identifyJurisdiction`). Verified live against all three agency services 2026-08-08 —
+   * TxGIO city limits, H-GAC ETJ and TxDOT counties all accept it. */
+  if (geom.points && geom.points.length) {
+    p.geometry = JSON.stringify({ points: geom.points.map(([x, y]) => [x, y]), spatialReference: { wkid: 4326 } });
+    p.geometryType = "esriGeometryMultipoint";
+    p.resultRecordCount = 16;
+    return p;
+  }
   if (geom.ring && geom.ring.length >= 3) {
-    p.geometry = JSON.stringify({ rings: [closeRing(simplifyRing(geom.ring))], spatialReference: { wkid: 4326 } });
+    /* NEW-4 — the ring is fitted to the URL ceiling, not merely to a vertex count. `geom.maxVerts`
+     * lets `identifySource` walk the ladder down until the built URL fits; absent, this is the
+     * historic 80 (now with 6-dp coordinates, which is itself most of the saving). */
+    p.geometry = JSON.stringify({ rings: [closeRing(round6(simplifyRing(geom.ring, geom.maxVerts || 80)))], spatialReference: { wkid: 4326 } });
     p.geometryType = "esriGeometryPolygon";
     p.resultRecordCount = source.kind === "line" ? 40 : 30;
     // A line source against a parcel = its FRONTAGE: buffer the parcel by the tolerance
@@ -372,10 +421,18 @@ export function identifySource(source, geom, opts = {}) {
   }
   const cache = opts.cache || defaultCache;
   const fetchJson = opts.fetchJson || defaultFetchJson;
-  const where = geom.ring ? "poly:" + ringKey(geom.ring) : Number(geom.lng).toFixed(4) + "," + Number(geom.lat).toFixed(4);
+  /* The cache signature must distinguish every geometry SHAPE this connector accepts. A multipoint
+   * carries neither a ring nor a lng/lat, so without its own branch it keyed as "NaN,NaN" and every
+   * multipoint query on earth collided on one entry — the first site's answer served to all of them. */
+  const where = geom.points ? "mpt:" + ringKey(geom.points)
+    : geom.ring ? "poly:" + ringKey(geom.ring)
+    : Number(geom.lng).toFixed(4) + "," + Number(geom.lat).toFixed(4);
   const key = "juris:" + source.id + ":" + where;
   const fetcher = async () => {
-    const params = buildIdentifyParams(source, geom);
+    // NEW-4 — fit the request to the URL ceiling before anything is sent. A ring that overflows it
+    // comes back as an HTML 404 that parses as "this layer has nothing here".
+    const fitted = fitIdentifyParams(source, geom, (pp) => buildQueryUrl(source.url, pp));
+    const params = fitted.params;
     // B1079 — per-source abort cap. The shared default is 9 s (GIS_FETCH_TIMEOUT_MS),
     // which is correct for a warm agency service and FATAL for a cold one: BKDD's first
     // call to a sleeping ArcGIS Server instance measured 16.5–18.3 s (every call after it,
@@ -466,9 +523,71 @@ const humanize = (e) => gisErrorMessage(e);
 // cache makes a repeat/just-reloaded lookup instant and survives a source outage).
 // `onStatus(role, state, msg, {ts, stale})` mirrors the evidence-layer channel.
 // ---------------------------------------------------------------------------
+/* NEW-1 — signed area + centroid of one lon/lat ring (shoelace). Pure. */
+function ringAreaCentroid(ring) {
+  let a = 0, cx = 0, cy = 0;
+  for (let i = 0; i < ring.length; i++) {
+    const [x1, y1] = ring[i], [x2, y2] = ring[(i + 1) % ring.length];
+    const f = x1 * y2 - x2 * y1;
+    a += f; cx += (x1 + x2) * f; cy += (y1 + y2) * f;
+  }
+  a /= 2;
+  if (!a) return null;
+  return { area: Math.abs(a), c: [cx / (6 * a), cy / (6 * a)] };
+}
+
+/* ⛔ NEW-1 — THE POINTS THE CONTAINMENT QUESTION IS ASKED AT, and why there is more than one.
+ *
+ * A site is an ASSEMBLAGE. Twelve of the owner's twenty-eight Texas sites are drawn from more than
+ * one parcel (Goose Creek 16, 8 South 19, Martini 14, Tsakiris 9, Schiel 9…), and the header badge
+ * reduced all of them to `representativeRing` — the single LARGEST lot — and then asked which city
+ * that one lot's centroid was in. On a one-parcel site that is right. On an assemblage it is a coin
+ * flip weighted by lot size, and it is what makes the labels "hit or miss": at Tsakiris two of the
+ * nine parcels sit inside Katy city limits, the biggest happens to be one of them, and the badge
+ * printed a bare "City of Katy · Waller County" for a site that is mostly NOT in Katy.
+ *
+ * So containment is asked of EVERY active parcel, largest first, until the tested parcels account
+ * for `COVER_TARGET` of the drawn site area (hard cap `MAX_TESTED`, because the query cost is real
+ * and a 40-lot assemblage must not fire 40 lookups).
+ *
+ * ⚠ `sampled` and `truncated` are DIFFERENT and only the second is a hole. Stopping because the
+ * tested parcels already cover 98% of the drawn area is a whole-site answer for a screening tool,
+ * and treating it as incomplete would have printed "part in City of Pearland · part unincorporated"
+ * across 8 South — nineteen lots, every one of them inside Pearland. Hitting the hard cap BEFORE
+ * reaching that coverage is genuinely incomplete, and then no whole-site claim is allowed. */
+const COVER_TARGET = 0.98;
+const MAX_TESTED = 16;
+export function parcelProbePoints(rings) {
+  const parts = (rings || [])
+    .filter((r) => r && r.length >= 3)
+    .map(ringAreaCentroid)
+    .filter(Boolean)
+    .sort((a, b) => b.area - a.area);
+  const total = parts.reduce((s, p) => s + p.area, 0);
+  if (!total) return { points: [], total: 0, tested: 0, sampled: false, truncated: false, areaShare: 0 };
+  const points = [];
+  let acc = 0;
+  for (const p of parts) {
+    if (points.length >= MAX_TESTED) break;
+    points.push(p.c);
+    acc += p.area;
+    if (acc / total >= COVER_TARGET) break;
+  }
+  const areaShare = acc / total;
+  return {
+    points, total: parts.length, tested: points.length,
+    sampled: points.length < parts.length,
+    truncated: points.length < parts.length && areaShare < COVER_TARGET,
+    areaShare,
+  };
+}
+
 export async function identifyJurisdiction(lng, lat, opts = {}) {
   const geom = opts.ring && opts.ring.length >= 3 ? { ring: opts.ring } : { lng, lat };
   const roles = opts.roles || ["county", "city", "etj", "isd"]; // B764: ISD joins the default identify
+  // NEW-1 — every ACTIVE parcel ring, when the caller has them. Falls back to the single ring it was
+  // always given, so a caller that has not been updated behaves exactly as before.
+  const probe = parcelProbePoints(opts.rings && opts.rings.length ? opts.rings : (opts.ring ? [opts.ring] : []));
   const out = {
     point: { lng, lat }, city: [], county: [], etj: [], isd: [],
     // B793 — when a ring is queried, cityCentroid holds the CITY names at the centroid
@@ -522,16 +641,67 @@ export async function identifyJurisdiction(lng, lat, opts = {}) {
     if (role === "city") {
       if (state === "failed") {
         out.cityCentroid = null;                 // genuinely unknown — never claim edge-only or unincorporated off this
+        out.cityAll = null; out.citySome = [];
       } else if (!geom.ring) {
         out.cityCentroid = names;                // POINT query: the answer already is the containment answer
-      } else if (!names.length) {
-        out.cityCentroid = [];                   // the whole ring touched no city, so the centroid is in none either
+        out.cityAll = names; out.citySome = [];
+      } else if (!probe.points.length) {
+        out.cityCentroid = names.length ? names : [];
+        out.cityAll = out.cityCentroid; out.citySome = [];
       } else {
+        /* NEW-1 — separate THREE facts the old single-centroid test collapsed into one:
+         *   ALL   — a city containing every tested parcel: it governs the site, and leads.
+         *   SOME  — a city containing some parcels but not all: the site is SPLIT. Real membership,
+         *           so it is never demoted to a footnote, but it may never lead unqualified either.
+         *   TOUCH — a city the boundary merely brushes: the frontage sliver, a footnote (B793).
+         * Two queries buy all three: one MULTIPOINT ("which cities hold any parcel") and, only when
+         * that comes back non-empty, one point per tested parcel to attribute them. The empty case
+         * is 20 of the owner's 28 sites, and it costs exactly what the old single centroid did.
+         *
+         * ⛔ THIS RUNS EVEN WHEN THE RING QUERY FOUND NOTHING, and that is not defensive coding —
+         * it is the Goose Creek case. `opts.ring` is ONE parcel (the biggest), so a ring answer of
+         * "no city" only ever meant "the biggest lot is in no city": at Goose Creek that lot is
+         * outside Baytown while SIX of the sixteen drawn parcels are inside it. Gating the probe on
+         * the ring result would have kept the app blind to exactly the site the owner flagged. */
         try {
-          const rc = await identifySource(srcs[0], { lng, lat }, opts).fresh;
-          out.cityCentroid = rc.error ? null : uniq(rc.items.map((it) => normalizeFeature(srcs[0], it.attrs).name).filter((v) => v != null && v !== "").map(String));
-        } catch (_) { out.cityCentroid = null; }
+          const anyRes = probe.points.length === 1
+            // One parcel: the multipoint IS the point query, so ask it the cheap way and share the
+            // cache entry the per-parcel pass below is about to want.
+            ? await identifySource(srcs[0], { lng: probe.points[0][0], lat: probe.points[0][1] }, opts).fresh
+            : await identifySource(srcs[0], { points: probe.points }, opts).fresh;
+          if (anyRes.error) { out.cityCentroid = null; out.cityAll = null; out.citySome = []; }
+          else {
+            const anyNames = uniq(anyRes.items.map((it) => normalizeFeature(srcs[0], it.attrs).name).filter((v) => v != null && v !== "").map(String));
+            if (!anyNames.length) { out.cityCentroid = []; out.cityAll = []; out.citySome = []; }
+            else {
+              const per = await Promise.all(probe.points.map(async ([px, py]) => {
+                const r = await identifySource(srcs[0], { lng: px, lat: py }, opts).fresh;
+                if (r.error) return null;
+                return uniq(r.items.map((it) => normalizeFeature(srcs[0], it.attrs).name).filter((v) => v != null && v !== "").map(String));
+              }));
+              if (per.some((p) => p === null)) {
+                // A parcel we could not test cannot be counted as inside OR outside. Fall back to
+                // the multipoint fact, which is honest but weaker: these cities hold PART of the site.
+                out.cityAll = []; out.citySome = anyNames; out.cityCentroid = anyNames;
+              } else {
+                const all = anyNames.filter((n) => per.every((p) => p.some((k) => samePlace(k, n))));
+                const some = anyNames.filter((n) => !all.some((k) => samePlace(k, n)));
+                // A TRUNCATED probe (the hard cap hit before the coverage target) never claims a
+                // whole-site answer it did not test. A merely SAMPLED one has covered 98% of the
+                // drawn area and is allowed to.
+                out.cityAll = probe.truncated ? [] : all;
+                out.citySome = probe.truncated ? uniq([...all, ...some]) : some;
+                out.cityCentroid = uniq([...(out.cityAll || []), ...out.citySome]);
+              }
+            }
+          }
+        } catch (_) { out.cityCentroid = null; out.cityAll = null; out.citySome = []; }
       }
+      /* The city LIST is the union of everything we found: the boundary touch AND every city that
+       * holds a parcel. At Goose Creek the ring answer was empty and Baytown was found only by the
+       * parcel probe — left out of this union, Baytown would have been discovered and then silently
+       * dropped, which is a worse failure than never looking. */
+      out.city = uniq([...out.city, ...(out.cityAll || []), ...out.citySome]);
     }
   }));
   /* ⛔ B209506 — ONE DEFINITION OF "WHAT CITY IS THIS IN", AND IT IS CONTAINMENT.
@@ -543,13 +713,33 @@ export async function identifyJurisdiction(lng, lat, opts = {}) {
    * and `unincorporated` therefore read FALSE on genuinely unincorporated land.
    *
    * Containment wins. The ring result is kept, but only as the "also touches" set. */
-  out.cityContainment = out.cityCentroid === null ? "unknown" : (out.cityCentroid.length ? "in" : "none");
+  /* NEW-1 — FOUR containment states, not two. `in` means a city holds the WHOLE site; `partial`
+   * means it holds part of it and the rest is unincorporated (or another city's); `none` is the
+   * unincorporated majority this app was structurally bad at saying; `unknown` is a lookup we could
+   * not make, which is never any of the other three. */
+  out.cityAll = out.cityAll === undefined ? (out.cityCentroid === null ? null : out.cityCentroid) : out.cityAll;
+  out.citySome = out.citySome || [];
+  out.cityContainment = out.cityAll === null ? "unknown"
+    : out.cityAll.length ? "in"
+    : out.citySome.length ? "partial"
+    : "none";
+  out.cityCoverage = {
+    tested: probe.tested, total: probe.total,
+    sampled: probe.sampled, truncated: probe.truncated, areaShare: probe.areaShare,
+  };
   // Back-compat boolean. It can only ever be TRUE on a positive containment answer — an unknown
   // reads false here, and callers that need to tell the two apart read `cityContainment`.
   out.unincorporated = out.cityContainment === "none";
-  // Cities the ring touches that the centroid is NOT in — the footnote set, never the headline.
-  out.edgeOnlyCities = out.cityCentroid === null ? [] : out.city.filter((c) => !out.cityCentroid.some((k) => samePlace(k, c)));
-  out.straddle = out.city.length > 1 || out.county.length > 1 || out.isd.length > 1;
+  // Cities the ring touches that hold NO part of the site — the footnote set, never the headline.
+  const held = [...(out.cityAll || []), ...out.citySome];
+  out.edgeOnlyCities = out.cityAll === null ? [] : out.city.filter((c) => !held.some((k) => samePlace(k, c)));
+  /* `out.straddle` stays the RING fact — "this boundary touches more than one jurisdiction" — which
+   * is a different and equally legitimate question from the badge's "more than one jurisdiction
+   * GOVERNS here". Do not merge them: the badge already demotes a frontage sliver to a qualifier
+   * (B793), and consumers of this field want the geometric answer. NEW-1 only adds the split case,
+   * where the site genuinely lies in a city AND outside it. */
+  out.straddle = out.city.length > 1 || out.county.length > 1 || out.isd.length > 1
+    || out.cityContainment === "partial";
   return out;
 }
 
@@ -594,15 +784,50 @@ export function formatJurisdictionBadge(j, opts = {}) {
   const cities = uniq((j.city || []).filter((v) => v != null && v !== "").map(String));
   // B209506 — dedupe an ETJ against the city limits by PLACE, not by string. "HOUSTON" from H-GAC and
   // "Houston" from TxGIO are the same city, and a case-sensitive compare rendered both.
-  const etjs = uniq((j.etj || []).filter((v) => v != null && v !== "").map(String))
-    .filter((e) => !cities.some((c) => samePlace(c, e)));
+  const etjsRaw = uniq((j.etj || []).filter((v) => v != null && v !== "").map(String));
   const counties = uniq((j.county || []).filter((v) => v != null && v !== "").map(String));
   // B793 — with a POSITIVE centroid answer, a ring-hit city the centroid is not inside is
   // a frontage sliver: it demotes to the tail with an "edge only" qualifier so the badge
   // leads with the dominant jurisdiction. No centroid data (outage) → no demotion claims.
   const centroid = Array.isArray(j.cityCentroid) ? j.cityCentroid : null;
-  const coreCities = centroid === null ? cities : cities.filter((c) => centroid.some((k) => samePlace(k, c)));
-  const edgeCities = centroid === null ? [] : cities.filter((c) => !centroid.some((k) => samePlace(k, c)));
+  /* ⛔ NEW-1 — WHETHER THIS RESULT CAN SPEAK TO CONTAINMENT AT ALL, asked before anything is read
+   * from it. A result that CARRIES containment metadata and reports `null` is saying "we could not
+   * find out"; a bare legacy object (`{city:[…]}` from an older caller or a hand-written fixture)
+   * is saying nothing at all, and the pre-B793 reading of its city list still applies. Collapsing
+   * those two is how the Goose Creek pill came to read a flat "City of Baytown · Harris County" on
+   * land that is in no city: the centroid lookup had failed, and a failed lookup was being rendered
+   * as a positive containment answer. */
+  const hasContainmentMeta = ("cityCentroid" in j) || ("cityAll" in j) || Array.isArray(j.sources);
+  const allCities = Array.isArray(j.cityAll) ? j.cityAll : (centroid === null ? null : centroid);
+  const someCities = Array.isArray(j.citySome) ? j.citySome : [];
+  const containmentUnknown = hasContainmentMeta && allCities === null;
+  // Cities holding the WHOLE site lead. Cities holding PART of it are named but never lead alone.
+  // With containment unknown NOTHING leads from the ring union — that is the defect above.
+  const coreCities = containmentUnknown ? []
+    : allCities === null ? cities
+    : cities.filter((c) => allCities.some((k) => samePlace(k, c)));
+  const partCities = containmentUnknown ? []
+    : cities.filter((c) => someCities.some((k) => samePlace(k, c)) && !coreCities.some((k) => samePlace(k, c)));
+  const edgeCities = containmentUnknown ? []
+    : allCities === null ? []
+    : cities.filter((c) => !coreCities.some((k) => samePlace(k, c)) && !partCities.some((k) => samePlace(k, c)));
+  // Ring cities we cannot classify because containment is unknown: named as a TOUCH, never as the
+  // site's jurisdiction (the owner's rule), and never silently dropped either.
+  const touchCities = containmentUnknown ? cities : [];
+
+  /* ⛔ NEW-2 — AN ETJ IS DEDUPED AGAINST THE CITY LIMITS THE SITE IS ACTUALLY IN, NEVER AGAINST THE
+   * RING UNION. This dropped the governing fact on four of the owner's sites.
+   *
+   * The rule the dedupe exists for is real: a site inside Houston's limits should read "City of
+   * Houston", not "City of Houston / City of Houston · ETJ". But it was filtering against `cities`
+   * — every city the boundary so much as TOUCHES. At Kennedy Greens, JFK, Katz and Pinnacle a
+   * Houston sliver clips the parcel edge while the site itself is unincorporated land inside the
+   * Houston ETJ, so the sliver suppressed its own ETJ and the pill read "City of Houston · edge
+   * only": a jurisdiction the tooltip calls "unlikely to govern" shown INSTEAD of the Ch. 19
+   * authority that sets the finished-floor elevation. Suppress an ETJ only where the city limits
+   * genuinely hold the site. */
+  const inCityLimits = [...coreCities, ...partCities];
+  const etjsAll = etjsRaw.filter((e) => !inCityLimits.some((c) => samePlace(c, e)));
 
   /* ⛔ B209506/B209507 — THE LEAD IS WHAT GOVERNS, AND SILENCE IS NEVER AN ANSWER.
    *
@@ -630,7 +855,13 @@ export function formatJurisdictionBadge(j, opts = {}) {
   const cityState = srcState("city");
   const etjState = srcState("etj");
   const countyState = srcState("county");
+  /* NEW-2 — a role is UNRESOLVED whenever we could not establish the fact the panel depends on, not
+   * only when the source reported an error. The city role has TWO lookups behind it — the boundary
+   * touch and the containment probe — and the second failing on its own leaves the badge unable to
+   * say whether the site is in a city at all. That has to reach `assessAdministrator`, or the
+   * floodplain rule settles on the county's laxer standard with nothing anywhere saying it guessed. */
   const unresolvedRoles = ["city", "etj", "county"].filter((r) => srcState(r) === "failed");
+  if (containmentUnknown && !unresolvedRoles.includes("city")) unresolvedRoles.push("city");
 
   /* The governing slot. Containment decides it; a failed lookup admits it rather than guessing.
    *
@@ -642,19 +873,33 @@ export function formatJurisdictionBadge(j, opts = {}) {
    * same collapse in the opposite direction. */
   const lead = coreCities.length
     ? coreCities.map((c) => `City of ${c}`)
-    : cityState === "failed"
-      ? ["City limits · couldn't check"]
-      : ["Unincorporated"];
+    /* NEW-1 — the SPLIT site. Tsakiris is the real one: two of its nine parcels are inside Katy's
+     * limits and the rest are not, so neither "City of Katy" nor "Unincorporated" is true on its
+     * own. Both halves are stated, and the ⚑ straddle mark carries the rest. */
+    : partCities.length
+      ? [...partCities.map((c) => `Part in City of ${c}`), "part unincorporated"]
+      : containmentUnknown || cityState === "failed"
+        ? ["City limits · couldn't check"]
+        : ["Unincorporated"];
 
   // The ETJ slot. `unavailable` means there is genuinely no ETJ layer for this area — an honest
   // "not applicable", distinct from a failure, so it stays quiet.
+  const etjs = etjsAll;
   const etjParts = etjs.length
     ? etjs.map((c) => `City of ${c} · ETJ`)
     : etjState === "failed"
       ? ["ETJ · couldn't check"]
       : [];
+  // …and once a city is named as the ETJ, its edge sliver is not a second fact worth a slot.
+  const edgeParts = edgeCities.filter((c) => !etjs.some((e) => samePlace(e, c)));
 
-  const parts = [...lead, ...etjParts, ...edgeCities.map((c) => `City of ${c} · edge only`)];
+  const parts = [
+    ...lead, ...etjParts,
+    ...edgeParts.map((c) => `City of ${c} · edge only`),
+    // NEW-1 — a ring city we could not classify. It appears AFTER the governing slot and is marked
+    // as a touch, so it can never be read as the site's jurisdiction.
+    ...touchCities.map((c) => `City of ${c} · touches`),
+  ];
   const jur = parts.join(" / ");
   const county = counties.length
     ? counties.map((c) => `${c} County`).join(" / ")
@@ -668,15 +913,21 @@ export function formatJurisdictionBadge(j, opts = {}) {
   // stays for real multi-jurisdiction membership (2+ core cities, counties, or ISDs — or
   // 2+ cities with no centroid answer to arbitrate).
   const straddle = counties.length > 1 || isds.length > 1 || coreCities.length > 1
-    || (centroid === null && cities.length > 1);
+    // NEW-1 — a genuinely SPLIT site is the straddle this mark was made for.
+    || partCities.length > 0
+    || (allCities === null && !containmentUnknown && cities.length > 1);
   return {
     text, jur, county, isd, straddle,
     edgeOnlyCities: edgeCities,
+    // NEW-1 — cities holding PART of the site, and ring cities left unclassified by a failed lookup.
+    partialCities: partCities,
+    touchesCities: touchCities,
     // B209507 — what the badge could NOT establish, carried explicitly so a consumer (the floodplain
     // administrator especially) can refuse to settle rather than reading silence as absence.
     unresolvedRoles,
     unresolved: unresolvedRoles.length > 0,
-    cityContainment: j.cityContainment || (centroid === null ? "unknown" : centroid.length ? "in" : "none"),
+    cityContainment: j.cityContainment
+      || (containmentUnknown ? "unknown" : coreCities.length ? "in" : partCities.length ? "partial" : centroid === null ? "unknown" : "none"),
     etjLabels: etjs,
   };
 }

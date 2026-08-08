@@ -324,6 +324,42 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   grew for the whole session; they are now capped, squeezed while hidden, and the 45 s overlay
   re-probe is gated on `visible`. All EVICTION — nothing caps what is drawn, and `detectRetina` is
   untouched (the owner has ruled out any retina downgrade).
+- **⛔ `jurisdiction.js` — WHICH JURISDICTION A SITE IS IN, and three things that are easy to get wrong
+  (B276752–B276755, from the owner's 28-site portfolio sweep). Read before touching the header pill or
+  anything that feeds the floodplain administrator.**
+  **(1) CONTAINMENT IS A WHOLE-SITE QUESTION.** A site is an assemblage — twelve of the owner's
+  twenty-eight are multi-parcel — and the identify used to reduce it to `representativeRing`, the single
+  LARGEST lot, then ask which city THAT centroid was in. On an assemblage that is a coin flip weighted by
+  lot size: Tsakiris printed a bare "City of Katy" off two of nine parcels, and Goose Creek's biggest lot
+  is outside Baytown while six of its sixteen are inside. `parcelProbePoints` probes EVERY active parcel
+  (largest first to 98% of drawn area, hard cap 16) and the answer is FOUR states — `in` / `partial` /
+  `none` / `unknown` — never two. `sampled` (coverage target met) and `truncated` (hard cap hit first) are
+  different: only `truncated` forbids a whole-site claim, and conflating them prints "part in City of
+  Pearland" across 8 South's nineteen lots, every one of which is inside Pearland.
+  **(2) AN UNKNOWN MAY NEVER LEAD.** A city appears in the lead slot ONLY on a positive containment
+  answer. With containment unknown the pill says "City limits · couldn't check" and every ring city is
+  demoted to "· touches" — a failed lookup rendered as a positive answer is exactly the reported
+  "City of Baytown" defect. `hasContainmentMeta` keeps this from firing on a legacy bare fixture, which
+  is the same collapse in the opposite direction.
+  **(3) AN ETJ IS DEDUPED AGAINST THE CITY LIMITS THAT HOLD THE SITE, NEVER THE RING UNION.** Deduping
+  against every touching city let a Houston frontage sliver suppress the Houston ETJ on four sites
+  (Kennedy Greens, JFK, Katz, Pinnacle) — showing a jurisdiction the tooltip calls "unlikely to govern"
+  INSTEAD of the Ch. 19 authority that sets the finished floor.
+  **⛔ AND THE ONE THAT LOOKED LIKE FLAKINESS AND WAS NOT: `simplifyRing` BOUNDS VERTICES, WHICH IS THE
+  WRONG QUANTITY.** `services.arcgis.com` answers a /query past ~2 KB of query string with an HTML **404**,
+  and a 404 decodes as "this layer has nothing here" — so county and ETJ came back EMPTY on any finely
+  digitised boundary, deterministically in the vertex count (Will Clayton 2325 chars → 404; Bain 1512 →
+  200, same service, seconds apart). B209507's "measurably flaky ETJ source" was this. `fitIdentifyParams`
+  now rounds coordinates to 6 dp and walks the vertex ladder down until the URL fits `MAX_QUERY_URL`.
+  Do not "simplify" it back to a vertex cap, and do not switch to POST — the B445 cache proxy is
+  GET-addressed, so a POST body silently bypasses the cache.
+  Guards: the repo-root `test/` suites **jurisdiction** (96) and **jurisdictionShapes** (10 — real parcel
+  geometry through the real query builder against RECORDED real agency answers, one fixture per
+  jurisdiction SHAPE, mutation-checked two ways), plus the live ui-audit harness
+  **verify-jurisdiction-portfolio** (all 28 of the owner's sites against the live services; its fixtures
+  are re-recorded by the sibling harness **record-jurisdiction-shapes**). ⚠ A hand-written badge fixture tests
+  the FORMATTER only — both real mislabels were produced UPSTREAM of it, by what the identify asked and
+  how it read the answer, and 96 green formatter tests passed through both.
 - `supabase.js` / `auth.js` / `cloudSync.js` — cloud data + auth (shared across workspaces).
 - `elementSync.js` / `elementRows.js` / `elementJournal.js` — the element-level sync engine, the
   rows↔model fold layer (incl. `foldJournal`), and the persisted pending-edit journal (NEW-F4:
