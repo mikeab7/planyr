@@ -127,18 +127,25 @@ const _recent = []; // diagnostic ring buffer (last N rows) for live/headless de
 /* Tag subsequent reports with the active workspace (the Shell calls this on switch). */
 export function setTelemetryModule(id) { _module = id || null; }
 
-/* Record one error. Fire-and-forget; NEVER throws into the app. */
+/* The outcome shape every reporter returns, for the callers that need to know whether the row
+ * actually left the machine. `reason` says WHY nothing was sent when `ok` is false and there is no
+ * `error`: "suppressed" (dedup / rate cap / session ceiling), "empty", "no-cloud", "threw". */
+const notSent = (reason) => Promise.resolve({ ok: false, reason, error: null, at: Date.now() });
+
+/* Record one error. Fire-and-forget; NEVER throws into the app. Returns a promise of the delivery
+ * outcome — callers are free to ignore it (almost all do), but B265536 made it available so the
+ * one caller that must not fail silently, the performance recorder, can tell. */
 export function reportClientError(error, context = {}) {
   try {
     const row = buildErrorRow(error, { ...context, module: (context && context.module) || _module });
-    if (!row.message) return;
+    if (!row.message) return notSent("empty");
     const decision = decideReport(errorSignature(row.source, row.message), Date.now(), _state);
     _state = decision.state;
-    if (!decision.report) return;
+    if (!decision.report) return notSent("suppressed");
     _recent.push(row);
     if (_recent.length > RECENT_MAX) _recent.shift();
-    sink(row);
-  } catch { /* telemetry must never throw into the app */ }
+    return sink(row);
+  } catch { return notSent("threw"); /* telemetry must never throw into the app */ }
 }
 
 /* Record a structured NON-error telemetry EVENT (B468/NEW-5). The 8 South lockout incident
@@ -157,26 +164,93 @@ export function reportClientEvent(kind, message, extra) {
     const msg = `[tab ${TAB_ID}] ${message == null ? "" : String(message)}${detail}`;
     const row = buildErrorRow(null, { source: "event:" + k, module: _module });
     row.message = truncate(msg, MSG_MAX);
-    if (!row.message) return;
+    if (!row.message) return notSent("empty");
     const decision = decideReport(errorSignature(row.source, row.message), Date.now(), _state);
     _state = decision.state;
-    if (!decision.report) return;
+    if (!decision.report) return notSent("suppressed");
     _recent.push(row);
     if (_recent.length > RECENT_MAX) _recent.shift();
-    sink(row);
-  } catch { /* telemetry must never throw into the app */ }
+    return sink(row);
+  } catch { return notSent("threw"); /* telemetry must never throw into the app */ }
 }
 
-/* The one network write: insert into public.client_errors via the existing anon client.
- * No-op when cloud isn't configured. Fire-and-forget; swallows all errors (including a
- * missing-table / RLS rejection) so a telemetry failure is itself invisible. */
-function sink(row) {
+/* ── The one network write ────────────────────────────────────────────────────────────────────
+ *
+ * ⛔ B265536 — THIS USED TO SWALLOW ITS OWN FAILURE, AND THAT IS A LOUD-FAILURE VIOLATION AT THE
+ * WORST POSSIBLE PLACE. The old body handed the insert promise two empty handlers — one for
+ * success, one for failure — under a comment that said so out loud: *"swallows all errors
+ * (including a missing-table / RLS rejection) so a telemetry failure is itself invisible."*
+ * For an error report that is merely unfortunate. For the
+ * PERFORMANCE RECORDER it is fatal to the whole programme: B1121's stopping rule is *"instrument
+ * it so it captures itself"*, and an instrument whose delivery can fail silently would have let a
+ * week of the owner's normal use produce nothing while everyone waited for data that was never
+ * arriving — the exact rot NEVER-PARK exists to prevent. Worse, the manual "that felt slow just
+ * now" button reported ✓ off the LOCAL capture succeeding, so his highest-value signal was the one
+ * most able to disappear without a trace.
+ *
+ * So the outcome is now RECORDED and READABLE:
+ *   • `_lastSend` / `_delivery` hold what happened, exposed as `window.pfTelemetry.lastSend()` and
+ *     `.delivery()` — a live check needs no database round trip and no dashboard;
+ *   • `sink` returns a promise of `{ ok, status, error }` so a caller that CARES (the recorder)
+ *     can tell "the server took it" from "nothing left the machine";
+ *   • one bounded retry, because the common failure is a momentary network blip and the row is
+ *     already built. One, not a queue: a telemetry channel that retries forever becomes the load.
+ *
+ * ⛔ IT STILL NEVER THROWS INTO THE APP, AND IT NEVER REPORTS ITS OWN FAILURE THROUGH ITSELF.
+ * A failed write reporting a failed write is an infinite loop through the same broken pipe. The
+ * failure is recorded locally and surfaced through the handle and the recorder's UI — never sunk. */
+let _lastSend = null;      // { ok, at, source, status, error, attempts }
+const _delivery = { attempted: 0, ok: 0, failed: 0, lastOkAt: 0, lastFailAt: 0 };
+
+const SINK_RETRY_MS = 2500;
+
+/** Read a PostgREST/supabase-js error into something a human can act on, without ever throwing. */
+function sinkError(e) {
   try {
-    if (!supabase) return;
-    const p = supabase.from("client_errors").insert(row);
-    if (p && typeof p.then === "function") p.then(() => {}, () => {});
-  } catch { /* never throw */ }
+    if (!e) return null;
+    const code = e.code ? String(e.code) : "";
+    const msg = e.message ? String(e.message) : String(e);
+    return { code, message: msg.slice(0, 300), status: Number.isFinite(e.status) ? e.status : null };
+  } catch { return { code: "", message: "unreadable error", status: null }; }
 }
+
+async function insertOnce(row) {
+  const { error } = await supabase.from("client_errors").insert(row);
+  if (error) return { ok: false, error: sinkError(error) };
+  return { ok: true, error: null };
+}
+
+/* Insert into public.client_errors via the existing anon client. Returns a promise of the outcome;
+ * resolves (never rejects) so no caller needs a catch. `{ ok:false, reason:"no-cloud" }` when the
+ * app has no Supabase configuration at all — a different thing from a rejected write, and a reader
+ * must be able to tell them apart. */
+function sink(row) {
+  const stamp = (out) => {
+    _lastSend = { ...out, at: Date.now(), source: row && row.source };
+    _delivery.attempted++;
+    if (out.ok) { _delivery.ok++; _delivery.lastOkAt = _lastSend.at; }
+    else { _delivery.failed++; _delivery.lastFailAt = _lastSend.at; }
+    return _lastSend;
+  };
+  try {
+    if (!supabase) return Promise.resolve(stamp({ ok: false, reason: "no-cloud", error: null, attempts: 0 }));
+    return insertOnce(row)
+      .then((r) => {
+        if (r.ok) return stamp({ ok: true, error: null, attempts: 1 });
+        // One retry. A momentary blip is the common case and the row is already built; a
+        // rejection (RLS, a missing column) will fail again and be recorded as such.
+        return new Promise((res) => setTimeout(res, SINK_RETRY_MS))
+          .then(() => insertOnce(row))
+          .then((r2) => stamp({ ok: r2.ok, error: r2.ok ? null : r2.error, attempts: 2 }),
+            (e) => stamp({ ok: false, error: sinkError(e), attempts: 2 }));
+      }, (e) => stamp({ ok: false, error: sinkError(e), attempts: 1 }));
+  } catch (e) { return Promise.resolve(stamp({ ok: false, error: sinkError(e), attempts: 0 })); }
+}
+
+/** What happened to the last row this page tried to send, and the running tally. Safe to ship —
+ *  it reads module state and touches no network. */
+export function lastTelemetrySend() { return _lastSend ? { ..._lastSend } : null; }
+export function telemetryDelivery() { return { ..._delivery }; }
 
 /* Wire the three global error sources to reportClientError. Idempotent; no-ops where
  * there's no window (tests/SSR). NOT capture-phase, so failed resource loads (blocked
@@ -189,5 +263,16 @@ export function installClientErrorTelemetry(win = typeof window !== "undefined" 
   win.addEventListener("vite:preloadError", (e) => reportClientError((e && e.payload) || e, { source: "vite:preloadError" }));
   // Diagnostic handle (mirrors window.pfSupabase): inspect recent captures live without
   // a DB round-trip. Safe to ship.
-  try { win.pfTelemetry = { reportClientError, reportClientEvent, tab: TAB_ID, recent: () => _recent.slice(), state: () => ({ sent: _state.sent, total: _state.total }) }; } catch { /* ignore */ }
+  try {
+    win.pfTelemetry = {
+      reportClientError, reportClientEvent, tab: TAB_ID,
+      recent: () => _recent.slice(),
+      state: () => ({ sent: _state.sent, total: _state.total }),
+      // B265536 — DID IT ACTUALLY LAND? Readable live, with no database round trip and no
+      // dashboard, which is the whole point: a silent sink is what made this checkable at all.
+      lastSend: lastTelemetrySend,
+      delivery: telemetryDelivery,
+      configured: () => !!supabase,
+    };
+  } catch { /* ignore */ }
 }

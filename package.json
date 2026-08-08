@@ -26,6 +26,8 @@
     "perf:planswitch": "xvfb-run -a --server-args=\"-screen 0 1600x1000x24\" node ui-audit/verify-plan-switch-release.mjs",
     "perf:reraster": "xvfb-run -a --server-args=\"-screen 0 1600x1000x24\" node ui-audit/zoom-reraster-arms.mjs --fake-tiles",
     "perf:recorder": "xvfb-run -a --server-args=\"-screen 0 1600x1000x24\" node ui-audit/verify-perf-recorder.mjs",
+    "perf:capturepipe": "xvfb-run -a --server-args=\"-screen 0 1600x1000x24\" node ui-audit/verify-capture-pipe.mjs --build",
+    "perf:pondcalls": "xvfb-run -a --server-args=\"-screen 0 1600x1000x24\" node ui-audit/count-pond-invocations.mjs --build --assert",
     "perf:midzoom": "xvfb-run -a --server-args=\"-screen 0 1600x1000x24\" node ui-audit/verify-midgesture-zoom.mjs --selftest",
     "perf:zoomab": "xvfb-run -a --server-args=\"-screen 0 1600x1000x24\" node ui-audit/zoom-smoothness-ab.mjs"
   },

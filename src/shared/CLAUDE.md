@@ -92,7 +92,22 @@ into every consumer. Root rules in `/CLAUDE.md`; deep detail in `/docs/REFERENCE
   **⛔ Its correctness is INVISIBLE AT REST** (`renderView.ppf === view.ppf` there), so the guard is the
   ui-audit gate **verify-midgesture-zoom** — `npm run perf:midzoom`, which fails unless the clean
   run is green AND both deliberate mutants go red.
-- `projects/`, `profile/`, `cloud/`, `presence/`, `telemetry/`, `gis/`, `geometry/`, `placement/`.
+- **`telemetry/` — error + performance reporting, and one rule worth knowing before you touch it.
+  ⛔ THE SINK REPORTS ITS OWN OUTCOME (B265536); it used to swallow every write failure**, which made
+  the recorder able to fail in total silence and made the owner's "that felt slow just now" button
+  show ✓ for rows that never left the machine. `clientErrors.sink` returns `{ok, error, attempts}`,
+  keeps `lastSend`/`delivery` on `window.pfTelemetry`, retries **once** (one, not a queue), never
+  throws into the app, and **never reports its own failure through itself** — that is a loop over a
+  broken pipe. `perfRecorderHandle` splits TAKEN from DELIVERED: `requestPerfCapture` answers the
+  first, `perfCaptureDelivery` the second, and the button's ✓ waits for the second. `perfCapture.js`
+  owns the privacy ALLOWLIST (never a denylist) and the encoder — whose frame floor is a LADDER, not
+  a wall (B265541: on a real stall nearly every frame also costs an `fx` pair, and the old wall threw
+  the whole episode away on exactly the captures worth having). Proof + what is still unproven:
+  `/docs/CAPTURE-PIPE.md`; the layer-arm standing note: `/docs/PERF-LAYERS.md`. Guards: the repo-root
+  `test/` suites **capturePipe**, **perfRecorder**, **perfInstrument**, **clientErrors**, plus the
+  ui-audit harness **verify-capture-pipe** (`npm run perf:capturepipe`), whose `rejected` arm is the
+  anti-rot one — before B265536 it was un-failable.
+- `projects/`, `profile/`, `cloud/`, `presence/`, `gis/`, `geometry/`, `placement/`.
 
 **Convention:** shared logic is pure and unit-tested; per-host state/wiring stays in the workspace.
 

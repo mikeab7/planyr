@@ -45,6 +45,7 @@
 import { reportClientEvent } from "./clientErrors.js";
 import { isEnrolled, PERF_SAMPLE_RATE, notePerfEdit, perfEditCount } from "./perfSampling.js";
 import { readScene } from "./perfScene.js";
+import { perfContext } from "./perfRecorderHandle.js";
 
 export { isEnrolled, PERF_SAMPLE_RATE, notePerfEdit };
 
@@ -108,20 +109,36 @@ export function decidePerfSend({ now, state = {}, kind = "tick", maxRows = PERF_
  * Every field is optional and every missing one stays ABSENT rather than becoming null/0: a
  * counter that could not be read must not be indistinguishable from a counter that read zero.
  * (`heapMB` is Chromium-only; `inp` is null until someone interacts.) */
-export function buildPerfRow(sample = {}) {
+export function buildPerfRow(sample = {}, prev = null) {
   const num = (v, d = 0) => (Number.isFinite(v) ? +v.toFixed(d) : undefined);
   const row = {
     k: sample.kind || "tick",
-    t: num(sample.secondsSinceLoad),          // seconds since load — the owner's "a minute or two later"
+    /* ⛔ B265537 — `t` IS WALL-CLOCK SECONDS SINCE THIS PAGE LOADED. Not milliseconds, and not
+     * "interacting time" (that counter exists, but it belongs to the RECORDER, which reports it as
+     * `activeMs`). It was read as milliseconds once, off the owner's own 2026-08-07 series, and
+     * turned an ordinary 237-SECOND gap into an apparent 237 ms one — which made 19 long tasks and
+     * 1,835 ms of blocking look like work landing outside interaction rather than a 0.8% duty
+     * cycle over four minutes. That would have been this programme's fifth false lead. */
+    t: num(sample.secondsSinceLoad),          // WALL seconds since load — the owner's "a minute or two later"
     inp: num(sample.inp, 1),                  // ms
-    lt: num(sample.longtaskMs),               // total long-task ms since load
-    ltn: num(sample.longtasks),               // how many
-    ltx: num(sample.longtaskMaxMs),           // the worst single block
+    /* ⛔ lt / ltn / ltx ARE CUMULATIVE SINCE LOAD AND ONLY EVER GROW (ltx is the worst single block
+     * ever seen in this tab). A reader who takes them for a rate reads a calm tab as a deteriorating
+     * one. So every row after the first also carries its own DELTAS against the previous row from
+     * this tab — `dt` seconds elapsed, `dlt` blocked ms, `dltn` long tasks — which is the shape the
+     * question "is it getting worse?" actually needs, and it removes the differencing (and the
+     * chance to difference the wrong pair) from the reader. */
+    lt: num(sample.longtaskMs),               // CUMULATIVE total long-task ms since load
+    ltn: num(sample.longtasks),               // CUMULATIVE count
+    ltx: num(sample.longtaskMaxMs),           // the worst single block SINCE LOAD (a high-water mark)
+    dt: prev ? num(sample.secondsSinceLoad - prev.secondsSinceLoad, 1) : undefined,
+    dlt: prev ? num(sample.longtaskMs - prev.longtaskMs) : undefined,
+    dltn: prev ? num(sample.longtasks - prev.longtasks) : undefined,
     heap: num(sample.heapMB, 1),
     dom: num(sample.documentNodes),
     cv: num(sample.canvasNodes),              // SVG nodes in the planner canvas — the draw cost proxy
     el: num(sample.elementsDrawn),            // ← the amplification axes
     ly: num(sample.layersOn),
+    lyk: sample.layerKeys || undefined,       // B265539 — WHICH layers, so a fixture can be his
     pn: num(sample.panelsOpen),
     ed: num(sample.editsSinceLoad),
     tl: num(sample.tiles),
@@ -147,6 +164,7 @@ let _lt = { total: 0, count: 0, max: 0 };
 let _interactions = [];
 let _timer = 0;
 let _recent = [];
+let _prevSnap = null;   // the previous row's snapshot, for the B265537 delta columns
 
 /** Everything the instrument currently knows, for a live check without a DB round-trip
  *  (mirrors `window.pfTelemetry.recent()`). Exposed on `window.pfPerf`. */
@@ -162,6 +180,7 @@ export function perfSnapshot(win = typeof window !== "undefined" ? window : unde
     editsSinceLoad: perfEditCount(),
     dpr: win?.devicePixelRatio,
     viewportW: win?.innerWidth,
+    layerKeys: perfContext().layers || undefined,   // B265539
     ...readScene(doc),
   };
 }
@@ -172,7 +191,9 @@ function send(win, kind) {
     const d = decidePerfSend({ now, state: _state, kind });
     if (!d.send) return;
     _state = d.state;
-    const row = buildPerfRow({ ...perfSnapshot(win), kind });
+    const snap = { ...perfSnapshot(win), kind };
+    const row = buildPerfRow(snap, _prevSnap);
+    _prevSnap = snap;                     // B265537 — so the NEXT row can carry real deltas
     _recent.push(row);
     if (_recent.length > 10) _recent.shift();
     reportClientEvent("perf", JSON.stringify(row));

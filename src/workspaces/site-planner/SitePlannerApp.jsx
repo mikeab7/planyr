@@ -16,6 +16,7 @@ import { idbPersist } from "./lib/localDb.js";
 const SiteReviewModal = lazy(() => import("./components/SiteReviewModal.jsx").then((m) => ({ default: m.SiteReviewModal })));
 import { nextConceptName } from "./lib/conceptName.js";
 import { reportClientEvent } from "../../shared/telemetry/clientErrors.js";
+import { noteLayerContext } from "../../shared/telemetry/perfRecorderHandle.js";
 import { initialBootResolved, mayReconcileUrl, pickResumeTarget, mayWriteRouteProject, routeProjectAvailability } from "./lib/bootResume.js";
 
 migrateOldAutosave(); // bring any legacy single-slot autosave into the site store
@@ -56,6 +57,11 @@ export default function App({
   // layer toggled on the map finder is reflected in the planner and vice-versa
   // (global app preference; per-site memory is reserved in the site model, TBD).
   const [overlays, setOverlays] = useState(defaultOverlayState);
+  /* B265539 — tell the recorder WHICH layers are on, not just how many. `ly` has always been a
+   * count, and a count cannot be turned into a fixture: the tab he reports the symptom in carries
+   * four while every battery in this repo runs at zero. One effect keyed on the overlay state —
+   * never per render, never per frame — and the handle sanitises and bounds what it stores. */
+  useEffect(() => { noteLayerContext(overlays); }, [overlays]);
   // Per-layer load status (id → {state, msg}), app-shared so the Layers panel on
   // either page shows which layers are actually painting vs failed/empty.
   const [layerStatus, setLayerStatus] = useState({});

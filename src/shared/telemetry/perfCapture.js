@@ -57,12 +57,24 @@ export const CAPTURE_ENUM_KEYS = [
   "build",       // build id
   "baselineLate",// "y" | "n"
   "visibility",  // "visible" | "hidden"
+  "layers",      // B265539 — WHICH GIS layers are on, by registry key. Public service names from
+                 // this app's own table; sanitised, sorted, bounded, `+`-terminated when cut.
+
   "note",        // free-form ONLY from a fixed internal vocabulary — see NOTE_VOCAB
 ];
 
 /* A capture's `note` may only ever be one of these. It exists so a capture can say something
- * about itself ("baseline never sealed") without opening a free-text channel. */
-export const NOTE_VOCAB = ["", "no-baseline", "baseline-late", "trimmed", "trimmed-hard"];
+ * about itself ("baseline never sealed") without opening a free-text channel.
+ *
+ * ⛔ `no-frames` (B265540) — THE WINDOW HELD NO FRAMES AT ALL, and it exists because the alternative
+ * is a capture that looks ordinary and is empty. The frame loop is gated on interaction by design
+ * (an idle tab's frame deltas measure the browser's throttling policy, not the app), so a MANUAL
+ * capture taken in a still moment — he notices a panel is stuck, he has not moved the pointer for
+ * five seconds — legitimately has no frame track. Such a capture is still worth having: it carries
+ * the long tasks, the scene and the counter history. But a reader must be able to tell "nothing was
+ * happening" from "the track was lost", because those support opposite conclusions, and the owner's
+ * own button is the single worst place to be unable to tell. */
+export const NOTE_VOCAB = ["", "no-baseline", "baseline-late", "no-frames", "trimmed", "trimmed-hard"];
 
 /* ── Plan identity ───────────────────────────────────────────────────────────────────────────
  * A plan id here may be an opaque key OR a name the owner typed. Opaque-looking ids pass; anything
@@ -115,6 +127,7 @@ export function buildCapture(parts) {
   enu("route", p.route);
   enu("build", p.build);
   enu("visibility", p.visibility);
+  enu("layers", p.layers);
 
   const plan = safePlanId(p.planId);
   enu("plan", plan.plan);
@@ -212,6 +225,7 @@ export function assertCaptureClean(cap) {
       else if (v.length > 48) bad.push(`${k}: over-long`);
       else if (k === "note" && !NOTE_VOCAB.includes(v)) bad.push(`note: outside the fixed vocabulary`);
       else if (k === "plan" && !/^[A-Za-z0-9_-]*$/.test(v)) bad.push(`plan: unsanitised`);
+      else if (k === "layers" && !/^[a-z0-9_,+]*$/i.test(v)) bad.push(`layers: unsanitised`);
     } else if (series.has(k)) {
       if (!Array.isArray(v)) bad.push(`${k}: not an array`);
       else if (k === "ltNames" || k === "cCols") {
@@ -239,6 +253,11 @@ export function assertCaptureClean(cap) {
  * dropped. A capture that silently lost its tail would read as a shorter, calmer episode than the
  * one that actually happened. */
 const B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+/* The frame-count ladder `encodeCapture` sheds down (B265541). 60 is the historic floor and is
+ * still tried first — a comfortable window nobody has to caveat. Below it the episode gets shorter
+ * but stays REAL, and only past the last rung is the bare row the honest answer. */
+const FRAME_FLOORS = [60, 30, 16, 8];
 
 export function encodeFrames(deltas) {
   let track = "";
@@ -287,15 +306,33 @@ export function encodeCapture(cap, { maxChars = CAPTURE_MAX_CHARS } = {}) {
     for (let i = 1; i < tasks.length; i++) if (tasks[i][1] < tasks[min][1]) min = i;
     tasks.splice(min, 1); trimmedTasks++; s = build(frames, tasks, counters);
   }
-  const shedFrames = () => {
-    while (s.length > maxChars && frames.length > 60) {
-      const drop = Math.max(1, Math.min(frames.length - 60, Math.ceil((s.length - maxChars) / 1.2)));
+  /* ⛔ B265541 — THE FRAME FLOOR IS A LADDER, NOT A WALL, AND THE OLD WALL LOST THE WHOLE EPISODE
+   * ON EXACTLY THE WORST CAPTURES. This used to stop shedding at 60 frames and, if the row still
+   * did not fit, fall through to the bare last-resort row — which drops EVERY series, frame track
+   * included. Caught by `ui-audit/verify-capture-pipe.mjs` on a real induced stall: one auto
+   * capture arrived `note:"trimmed-hard"` with `framesKept:0`.
+   *
+   * The mechanism is a perverse one. A frame over 63 ms cannot be held in the packed track's one
+   * base-64 digit, so it is ALSO carried explicitly in `fx` as `[index, ms]` — about ten characters
+   * apiece. On a smooth capture almost nothing lands in `fx`; on a genuine stall almost EVERYTHING
+   * does, so 60 retained frames can cost ~660 characters on their own. The jankier the episode, the
+   * likelier the row overran the floor — and the reward for overrunning it was losing all of it.
+   * A capture of a bad moment is the only kind worth having, so the failure was aimed at the data
+   * this whole programme exists to collect.
+   *
+   * Thirty frames of a stall is half a second of evidence and is worth far more than nothing, so
+   * the floor now steps down and the bare row is reached only if even `FRAME_FLOOR_MIN` will not
+   * fit. `framesKept`/`framesDropped` still say exactly what was lost. */
+  const shedFrames = (floor) => {
+    while (s.length > maxChars && frames.length > floor) {
+      const drop = Math.max(1, Math.min(frames.length - floor, Math.ceil((s.length - maxChars) / 1.2)));
       frames = frames.slice(drop);
       trimmedFrames += drop;
       s = build(frames, tasks, counters);
     }
   };
-  shedFrames();
+  const shedToFit = () => { for (const floor of FRAME_FLOORS) { shedFrames(floor); if (s.length <= maxChars) return; } };
+  shedToFit();
 
   /* Stamping the trim onto the row makes the row LONGER, which can push it back over the budget —
    * so the accounting keys go on first and the frame shed runs again underneath them. Getting this
@@ -306,10 +343,31 @@ export function encodeCapture(cap, { maxChars = CAPTURE_MAX_CHARS } = {}) {
     base.framesDropped = trimmedFrames;
     base.note = "trimmed";
     s = build(frames, tasks, counters);
-    shedFrames();
+    shedToFit();
     base.framesKept = frames.length;
     base.framesDropped = trimmedFrames;
     if (s.length > maxChars) base.note = "trimmed-hard";
+    s = build(frames, tasks, counters);
+  }
+  /* ⛔ B265541 — BEFORE GIVING UP THE EPISODE, GIVE UP EVERYTHING ELSE. The shed above holds a
+   * floor under the counters (6) and the long tasks (4), so on a tight budget those floors could
+   * consume the room the frame track needed and the whole thing fell to the bare row — dropping
+   * the series the file's own comment calls "the episode" in order to preserve six counter samples
+   * and four task records. So the last rung before surrender empties BOTH and re-sheds the frames.
+   * The order is the same as it always was, taken to its conclusion: frames go last. */
+  if (s.length > maxChars) {
+    tasks = []; counters = [];
+    shedToFit();
+    /* Same ordering discipline as above: the accounting keys make the row LONGER, so they go on
+     * first, the frames re-shed underneath them, and the note is decided from the FINAL length. */
+    base.framesKept = frames.length;
+    base.framesDropped = trimmedFrames;
+    base.note = "trimmed";
+    s = build(frames, tasks, counters);
+    shedToFit();
+    base.framesKept = frames.length;
+    base.framesDropped = trimmedFrames;
+    base.note = s.length > maxChars ? "trimmed-hard" : "trimmed";
     s = build(frames, tasks, counters);
   }
   /* Last resort: the row still does not fit (a pathological attribution table). Drop the series

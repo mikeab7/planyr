@@ -33,7 +33,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createServer } from "node:http";
-import { fixtureSeed, bainPairArmFixture } from "./lib/planFixture.mjs";
+import { fixtureSeed, bainPairArmFixture, withLayerArm, LAYER_ARMS, OWNER_SCENE } from "./lib/planFixture.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, "..");
@@ -42,7 +42,15 @@ const EXEC = process.env.PW_CHROME || "/opt/pw-browsers/chromium-1194/chrome-lin
 const arg = (f, d) => { const i = process.argv.indexOf(f); return i > -1 && process.argv[i + 1] ? process.argv[i + 1] : d; };
 const JSON_OUT = process.argv.includes("--json");
 const ARM = String(arg("--arm", "quiddity"));
+/* ⛔ B265538 — THE LAYER ARM DEFAULTS TO HIS FOUR, NOT TO ZERO. This battery, like every other one
+ * in the repo, used to run with no map layers mounted at all, while the tab he reports the symptom
+ * in carries `ly 4`. B1435 measured per-frame cost as elements × panels × LAYERS, so a battery at
+ * ly 0 benchmarks a lighter scene than the one under investigation. `--layers none` restores the
+ * old arm for a controlled A/B; see the standing note in lib/planFixture.mjs for what a mounted
+ * layer can and cannot reproduce with every GIS host blocked. */
+const LAYERS = String(arg("--layers", "owner-4"));
 const PORT = Number(arg("--port", 4179));
+if (!LAYER_ARMS[LAYERS]) { console.error(`unknown --layers arm "${LAYERS}" (have: ${Object.keys(LAYER_ARMS).join(", ")})`); process.exit(2); }
 
 /* Every module whose functions are a pure function of the pond model. A call count above one per
  * pond, per gesture, on any of these is the finding. */
@@ -75,7 +83,7 @@ const BASE = `http://localhost:${PORT}/`;
 
 const QUIDDITY = JSON.parse(readFileSync(join(HERE, "fixtures", "bain-quiddity.json"), "utf8"));
 const ORIGINAL = JSON.parse(readFileSync(join(HERE, "fixtures", "bain-concept-original.json"), "utf8"));
-const fixture = bainPairArmFixture(QUIDDITY, ORIGINAL, ARM);
+const fixture = withLayerArm(bainPairArmFixture(QUIDDITY, ORIGINAL, ARM), LAYERS);
 const pondCount = fixture.els.filter((e) => e.type === "pond").length;
 const vertexTotal = fixture.els.filter((e) => e.type === "pond").reduce((s, e) => s + e.points.length, 0);
 
@@ -108,6 +116,9 @@ await page.mouse.move(press.x, press.y, { steps: 20 });
 await page.mouse.up();
 await page.waitForTimeout(150);
 const report = await page.evaluate(() => window.__VPROBE__.end());
+/* Read the SAME counter the owner's telemetry reports (`perfScene.layersOn`), so the arm's claim
+ * about his scene is measured on the page rather than asserted from the fixture. */
+const layerCount = await page.evaluate(() => document.querySelectorAll(".leaflet-layer").length);
 await browser.close();
 server.close();
 
@@ -129,8 +140,23 @@ const pond = report.sites
  * the fixture stops carrying ponds, or a rename orphans the names below, MUST_BE_ZERO would be
  * satisfied by an empty report. That is precisely the failure VIEW-INDEPENDENT-ONCE §6 names, and it
  * is why the two halves are asserted together and never separately. */
-const MUST_BE_ZERO = ["offsetInward", "maxInwardOffset", "volumeBetween", "pondElevations", "stageTable", "areaAtElev"];
-const MUST_BE_PRESENT = ["pondStageModel", "usablePondVolume", "interiorFitter"];
+/* ⛔ B221763 (2026-08-08) — THE LEDGER TIER JOINED `MUST_BE_ZERO`, and `usablePondVolume` MOVED
+ * OUT of `MUST_BE_PRESENT` to get there. B236592 made the geometry leaves free but left the render
+ * body REBUILDING the ledger entries once per render, so on this same fixture a pan still ran
+ * `usablePondVolume`, `incrementalExcavationCf` and `excavationVolume` **254 times** (127 renders ×
+ * 2 ponds) and `detentionStorage` **762**. Cheap is not the bar the owner set — *"a pan with no
+ * model change must rebuild nothing"* is — so the pass is now gated on `pondLedgerSignature`
+ * (`lib/pondLedgerKey.js`) and these three must not run at all. Measured after: 0 · 0 · 0, and
+ * `detentionStorage` 762 → 254 (the residue is the providedDetCf loop, a different pass). */
+const MUST_BE_ZERO = [
+  "offsetInward", "maxInwardOffset", "volumeBetween", "pondElevations", "stageTable", "areaAtElev",
+  "usablePondVolume", "incrementalExcavationCf", "excavationVolume",
+];
+/* `pondLedgerSignature` is the SENTINEL for the ledger half: it is the gate itself, so seeing it
+ * run proves the pass was reached and that the three zeros above are real zeros rather than an
+ * empty report. Without it, deleting the ponds from the fixture would turn this check permanently
+ * green — the exact rot VIEW-INDEPENDENT-ONCE §6 names. */
+const MUST_BE_PRESENT = ["pondStageModel", "pondLedgerSignature", "interiorFitter"];
 
 if (process.argv.includes("--assert")) {
   const byName = new Map(pond.map((s) => [s.name, s]));
@@ -142,7 +168,9 @@ if (process.argv.includes("--assert")) {
   for (const n of MUST_BE_PRESENT) console.log(`  ${byName.has(n) ? "✓" : "✗"} ${n.padEnd(20)} ${byName.has(n) ? `${byName.get(n).calls} call(s), ${byName.get(n).ms} ms` : "NOT OBSERVED"}`);
   if (absent.length) { console.error(`\n⛔ NOT OBSERVED: ${absent.join(", ")} — this probe cannot vouch for a run it never saw, so the zero above proves nothing.`); process.exit(1); }
   if (ran.length) { console.error(`\n⛔ RECURRENCE: ${ran.map((n) => `${n} ran ${byName.get(n).calls}× on a pan`).join(" · ")}`); process.exit(1); }
+  const layersOn = layerCount;
   console.log(`\n✅ a pan recomputed NO pond geometry — ${pondCount} pond(s), ${vertexTotal} ring vertices, untouched.`);
+  console.log(`   layer arm "${LAYERS}": ${layersOn} Leaflet layer(s) mounted (his measured scene carries ${OWNER_SCENE.layersOn}; every GIS host is blocked here, so a mounted layer never fetches — this is a LOWER bound).`);
   process.exit(0);
 }
 
