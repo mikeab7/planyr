@@ -227,30 +227,60 @@ export function editRecoveryVerdict({ hotMs, coldMs, floorPct = null } = {}) {
  * `counters` are compared per key; only keys present in both are judged. Returns a verdict plus
  * the per-key evidence, because "it leaked" without saying WHICH counter leaked is not a finding.
  */
-export function planSwitchVerdict({ a0 = {}, b = {}, a1 = {}, keys = [], tolerancePct = 5 } = {}) {
+export function planSwitchVerdict({ a0 = {}, b = {}, a1 = {}, a2 = null, keys = [], tolerancePct = 5 } = {}) {
   const rows = [];
   for (const k of keys) {
-    const v0 = a0[k], v1 = a1[k];
-    if (!Number.isFinite(v0) || !Number.isFinite(v1)) { rows.push({ counter: k, a0: v0 ?? null, b: b[k] ?? null, a1: v1 ?? null, deltaPct: null, verdict: "unmeasured" }); continue; }
-    const deltaPct = v0 === 0 ? (v1 === 0 ? 0 : null) : +(((v1 - v0) / v0) * 100).toFixed(1);
-    rows.push({
-      counter: k, a0: v0, b: b[k] ?? null, a1: v1, delta: +(v1 - v0).toFixed(2), deltaPct,
-      verdict: deltaPct == null ? "unmeasured" : deltaPct > tolerancePct ? "RETAINED" : deltaPct < -tolerancePct ? "shrank" : "released",
-    });
+    const v0 = a0[k], v1 = a1[k], v2 = a2 ? a2[k] : undefined;
+    if (!Number.isFinite(v0) || !Number.isFinite(v1)) { rows.push({ counter: k, a0: v0 ?? null, b: b[k] ?? null, a1: v1 ?? null, a2: Number.isFinite(v2) ? v2 : null, deltaPct: null, settledPct: null, verdict: "unmeasured" }); continue; }
+    const pctOf = (v) => (v0 === 0 ? (v === 0 ? 0 : null) : +(((v - v0) / v0) * 100).toFixed(1));
+    const deltaPct = pctOf(v1);
+    const settledPct = Number.isFinite(v2) ? pctOf(v2) : null;
+    const verdict = deltaPct == null ? "unmeasured"
+      : deltaPct > tolerancePct
+        ? (a2 == null ? "RETAINED?" : settledPct != null && settledPct > tolerancePct ? "RETAINED" : "transient")
+        : deltaPct < -tolerancePct ? "shrank" : "released";
+    rows.push({ counter: k, a0: v0, b: b[k] ?? null, a1: v1, a2: Number.isFinite(v2) ? v2 : null, delta: +(v1 - v0).toFixed(2), deltaPct, settledPct, verdict });
   }
   const retained = rows.filter((r) => r.verdict === "RETAINED");
+  const unsettled = rows.filter((r) => r.verdict === "RETAINED?");
+  const transient = rows.filter((r) => r.verdict === "transient");
   if (!rows.some((r) => r.verdict !== "unmeasured")) {
     return { verdict: "unmeasured", why: "no counter could be compared across the round trip", rows };
   }
-  if (!retained.length) {
+  if (retained.length) {
     return {
-      verdict: "RELEASED", rows, tolerancePct,
-      why: `returning to plan A costs what plan A cost the first time, within ±${tolerancePct}% on every counter — switching plans does not strand the plan you left`,
+      verdict: "RETAINED", rows, tolerancePct,
+      why: `returning to plan A left ${retained.map((r) => `${r.counter} +${r.settledPct}%`).join(", ")} above what plan A cost on first load, AND STILL ELEVATED after a settle — plan B was not released`,
+    };
+  }
+  /* ⛔ THE VERDICT THAT DID NOT EXIST, AND ITS ABSENCE WAS PRODUCING FALSE POSITIVES (B1121's
+   * recurrence run, 2026-08-08). Sampled ONCE, immediately after the round trip, this test cannot
+   * tell RETENTION from NOT-YET-SWEPT — and a forced `HeapProfiler.collectGarbage` does NOT settle
+   * the difference, because V8's conservative stack scanning pins objects still referenced from the
+   * frames that are on the stack when the collection runs. `PERF-PLAN-SWITCH.md` §14 recorded
+   * exactly that effect ("a forced purge drains 2,343 → 1, but natural allocation pressure does
+   * not") and the single-sample verdict was built anyway.
+   *
+   * Measured: on two REAL plans this reported `retainedHeapMB +39.1%, rendererNodes +38.1%` —
+   * RETAINED — while `ui-audit/session-growth.mjs`, sampling the SAME counters one ordinary round
+   * of work later, found them back BELOW their starting values, on every one of four switch rounds.
+   * A pair cannot distinguish a step from a transient; that is the whole reason this program moved
+   * to curves. */
+  if (transient.length) {
+    return {
+      verdict: "TRANSIENT", rows, tolerancePct,
+      why: `${transient.map((r) => `${r.counter} +${r.deltaPct}%`).join(", ")} immediately after the round trip, but back within ±${tolerancePct}% after a settle — this is the outgoing tree awaiting collection, NOT retention. A single sample here would have reported a leak`,
+    };
+  }
+  if (unsettled.length) {
+    return {
+      verdict: "UNSETTLED", rows, tolerancePct,
+      why: `${unsettled.map((r) => `${r.counter} +${r.deltaPct}%`).join(", ")} immediately after the round trip and NO settle sample was taken — this cannot be called retention. A forced collection does not settle it (conservative stack scanning pins what is still on the stack); re-run with a settle sample`,
     };
   }
   return {
-    verdict: "RETAINED", rows, tolerancePct,
-    why: `returning to plan A left ${retained.map((r) => `${r.counter} +${r.deltaPct}%`).join(", ")} above what plan A cost on first load — plan B was not fully released`,
+    verdict: "RELEASED", rows, tolerancePct,
+    why: `returning to plan A costs what plan A cost the first time, within ±${tolerancePct}% on every counter — switching plans does not strand the plan you left`,
   };
 }
 

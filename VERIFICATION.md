@@ -113,6 +113,28 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V43536 — B1121 (×3): the session-growth probe, run on the machine that HAS the symptom. `Blocker: auth` `Blocker: real-data`
+
+The whole instrument is built, unit-tested (37 cases) and was driven end to end HERE — a 6.5-minute mixed session on the owner's own two plans at his own display density, with 32,202 tiles served and decoded, and a reload at the end. **The cost curve came back an honest NULL: the identical gesture cost 1,323 ms at the start and 1,486 ms at the end, against a ±6.3% floor, and not monotone.** So the symptom did not reproduce here, which narrows where it can live without settling it (`docs/PERF-SESSION-GROWTH.md` §8).
+
+**What this sandbox cannot do, and it is the largest remaining region:** sign in. The egress proxy CORS-blocks the Supabase auth handshake, so the pending-edit journal, cloud sync and any signed-in ambient refresh loop — **the B874 class, the one confirmed mechanism in this repo's history that could starve every frame after it** — were never exercised at all. Its tiles are also synthesised in-process rather than fetched over a real connection.
+
+From a machine with **direct network access** (the owner's browser, or a Cowork session — **not** a Claude sandbox; a headless run against a deployed URL is dead at the network layer here, see V477's note), **signed in**, run:
+
+```
+BASE_URL=https://planyr.io npm run perf:growth -- --fixture bain --fixture-b sylvestri --rounds 8
+```
+
+and record:
+- **(a) THE COST CURVE AND ITS SHAPE.** `FLAT` / `STEP` / `SLOPE` / `SAWTOOTH`, with the stated noise floor. **If it comes back SLOPE, the symptom has finally been reproduced on an instrument** and the candidate table names what to look at. **If it comes back FLAT or STEP again**, the honest conclusion is that the symptom is **not interaction-bound at all**, and the program should stop hunting an accumulation and turn to the baseline cost — B1121 complaint (b), which nothing in this work addresses.
+- **(b) THE RELOAD ROW.** Whether the reload actually restores the cost on his machine. This is the owner's own claim and it has never been measured; everything the two-axis rule excludes depends on it being true.
+- **(c) WHICH CANDIDATES LAND IN THE ADMISSIBLE QUADRANT** (grew AND reset). Here that was only retained heap, at +20% over 6.5 minutes and r = 0.29 against cost — small and uncorrelated.
+- **(d) WHETHER THE TILE CAP STILL HOLDS ON LIVE IMAGERY.** It sat flat at 291 retained-and-decoded tiles here (≈72.8 MB of bitmap) across 32,202 served. **This is the half of V518 that could not be measured before.**
+- **(e) THE FOUR UNMEASURABLE CANDIDATES STAY OPEN** either way — `undoDepth`, `gisCacheEntries`, `pendingJournalOps`, `telemetryBuffer` cannot be sampled from outside the app on any machine.
+
+⏳ **LIVE APP (planyr.io), SIGNED IN, ON A REAL PLAN, FROM A MACHINE WITH DIRECT NETWORK ACCESS** `Blocker: auth` `Blocker: real-data` *(sandbox evidence recorded on B1121 and in `docs/PERF-SESSION-GROWTH.md`; `Cadence: once`)*
+
+
 ### V39552 — B1422 (×2): the Texas Railroad Commission is DEMOTED, not deleted, on his own Weld County plan. `Blocker: real-data`
 
 Everything about this shipped green and was driven headless here on a seeded Weld County coordinate (40.19, −104.72): **10 rows demoted across 3 groups**, each naming its reason, with "Water & sewer" and "Fire hydrants" correctly surviving; the four specs in `e2e/layers-panel-scroll-and-state.spec.js` were each proven RED on the pre-fix build. What a seeded coordinate cannot prove is the behaviour on **his own saved plan**, which carries a real county key, a real identify result and a real GIS context — and this item is a recurrence precisely because the previous pass shipped a mechanism that was green everywhere and inert in the field.

@@ -66,10 +66,21 @@ export function parseBacklog(text) {
       if (next) { push(); mode = next; }
       continue;
     }
-    const itemM = line.match(/^###\s+(B\d+)\b\s*[—-]\s*(.*)$/);
+    /* ⛔ THE `(×N)` IS OPTIONAL AND IT WAS NOT, WHICH MADE THE RECURRENCES INVISIBLE — the exact
+     * items this index exists to surface. The recurrence rule (BACKLOG.md, B636) says a report that
+     * matches an existing item re-opens the ORIGINAL number with a visible count in the title:
+     * `### B1121 (×3) — …`. This pattern required the dash to follow the id immediately, so every
+     * one of those headings failed to match and the item was dropped — silently, because a dropped
+     * item is indistinguishable from an item that does not exist. Eleven Open/Verify items were
+     * missing when this was found (2026-08-08), including **B1121**, the oldest unexplained bug in
+     * the speed program and the one CLAUDE.md points sessions at. A fix that did not stick is the
+     * most important thing on the list; it was the one thing the list could not show. The recurrence
+     * count is captured and carried into the row, so it is visible rather than merely no longer
+     * fatal. */
+    const itemM = line.match(/^###\s+(B\d+)\b\s*(?:\(×(\d+)\))?\s*[—-]\s*(.*)$/);
     if (itemM && (mode === "open" || mode === "verify")) {
       push();
-      cur = { id: itemM[1], section: mode, ...parseHeading(itemM[2]), verifyField: null };
+      cur = { id: itemM[1], section: mode, recurrences: itemM[2] ? Number(itemM[2]) : null, ...parseHeading(itemM[3]), verifyField: null };
       continue;
     }
     // While inside an item body, look for a `Verify:` field (NEW-1). First one wins.
@@ -137,7 +148,10 @@ export function renderIndex(items) {
     const t = ["| B# | Title | Module | Tags | Verify |", "|---|---|---|---|---|"];
     for (const i of rows) {
       const tags = i.tags.length ? i.tags.join(" ") : "—";
-      t.push(`| ${i.id} | ${esc(i.title)} | ${esc(i.module)} | ${tags} | ${verifyStatus(i)} |`);
+      /* The recurrence count rides in the id column. A reader scanning for what to work on should
+       * see "this fix has already failed twice" without opening the backlog. */
+      const id = i.recurrences ? `${i.id} (×${i.recurrences})` : i.id;
+      t.push(`| ${id} | ${esc(i.title)} | ${esc(i.module)} | ${tags} | ${verifyStatus(i)} |`);
     }
     return t;
   };

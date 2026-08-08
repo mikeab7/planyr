@@ -58,7 +58,10 @@
  * Never exits non-zero on a measurement. It is an instrument, not a gate.
  */
 import { chromium } from "playwright";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { perfScenarioSeedMulti, scenarioShape, SCENARIO_ID, SCENARIO_ID_B } from "./lib/perf-scenario.mjs";
+import { readFixture, buildMultiFixtureState } from "./lib/fixtureSeeding.mjs";
 import { frameSamplingFault, plausibilityFloor, observedFps } from "./lib/frameSampling.mjs";
 import { noiseFloor } from "./lib/longSession.mjs";
 import {
@@ -86,8 +89,26 @@ const RUNG_REPS = numArg("--rung-reps", 3);
 const DPR = numArg("--dpr", 1);
 const FAKE_TILES = process.argv.includes("--fake-tiles");
 const SETTLE_MS = numArg("--settle", 30000); // the "after 30 idle seconds" half of the edit test
+/* How long to let the page settle before RE-reading the plan-switch counters. The point is not the
+ * duration — it is that a SECOND sample exists at all (see the note at the a2 read). */
+const SETTLE_AFTER_SWITCH_MS = numArg("--switch-settle", 8000);
 const WANT = String(argOf("--axes", "panels,layers,elements,edits,plans")).split(",").map((s) => s.trim()).filter(Boolean);
 const MIN_FPS = plausibilityFloor(CPU_THROTTLE);
+/* --fixture / --fixture-b: run the axes — the PLANS axis above all — on two REAL saved plans of the
+ * owner's instead of the synthetic pair.
+ *
+ * ⛔ WHY THIS EXISTS, AND IT RETIRES A PROPERTY OF EVERY PLAN-SWITCH NUMBER THIS FILE HAS PRODUCED.
+ * The built-in plan B is plan A TRUNCATED BY HALF (`perfScenarioSiteB`), so every plan-switch
+ * reading ever taken here was a switch between one synthetic plan and a subset of itself — sharing
+ * its origin, its county, its settings and its (absent) rasters. The owner switches between whole,
+ * unrelated, RASTER-BEARING plans, and those tear down and rebuild different things: a different
+ * basemap origin, a different county context, megabytes of reference imagery released or not
+ * released. Names resolve through lib/fixtureSeeding.mjs; omit for the historical synthetic pair. */
+const FIXTURE = String(argOf("--fixture", "")).toLowerCase();
+const FIXTURE_B = String(argOf("--fixture-b", "sylvestri")).toLowerCase();
+const FIX_SITE_A = "axes-plan-a", FIX_SITE_B = "axes-plan-b";
+const PLAN_A = FIXTURE ? FIX_SITE_A : SCENARIO_ID;
+const PLAN_B = FIXTURE ? FIX_SITE_B : SCENARIO_ID_B;
 
 /* ── In-page instrumentation ──────────────────────────────────────────────────────────────────
  * Deliberately MUCH smaller than B1432's. That harness had to settle "does anything accumulate",
@@ -565,17 +586,34 @@ async function runAxis(page, cdp, { axis, rungs, drive, mode = "exact", toleranc
 }
 
 /* ── Main ─────────────────────────────────────────────────────────────────────────────────── */
+let FIXTURE_STATE = null;
 const browser = await chromium.launch({
   executablePath: EXEC,
   headless: false, // ⚠ REQUIRED — a hidden tab starves rAF and the median is garbage (B1086)
   args: ["--ignore-certificate-errors", "--disable-dev-shm-usage"],
 });
 
+let fixtureOut = null;
+if (FIXTURE) {
+  const built = await buildMultiFixtureState(browser, {
+    base: BASE,
+    cacheDir: join(dirname(fileURLToPath(import.meta.url)), ".raster-cache"),
+    plans: [
+      { name: FIXTURE, fixture: readFixture(FIXTURE), siteId: FIX_SITE_A },
+      { name: FIXTURE_B, fixture: readFixture(FIXTURE_B), siteId: FIX_SITE_B },
+    ],
+  });
+  fixtureOut = { a: FIXTURE, b: FIXTURE_B, census: built.census, rasters: built.facts.length };
+  process.stderr.write(`\u00b7 fixtures: ${FIXTURE} (${built.census[FIXTURE].elements} els) \u2194 ${FIXTURE_B} (${built.census[FIXTURE_B].elements} els) \u00b7 ${built.facts.length} raster(s)\n`);
+  FIXTURE_STATE = built.state;
+}
+
 const context = await browser.newContext({
   viewport: { width: 1440, height: 900 }, deviceScaleFactor: DPR, ignoreHTTPSErrors: true,
+  ...(FIXTURE_STATE ? { storageState: FIXTURE_STATE } : {}),
 });
 await context.addInitScript(INSTRUMENT);
-await context.addInitScript(perfScenarioSeedMulti());
+if (!FIXTURE_STATE) await context.addInitScript(perfScenarioSeedMulti());
 await context.addInitScript(() => { window.__PLANYR_E2E = true; });
 
 let tilesServed = 0;
@@ -726,32 +764,50 @@ if (WANT.includes("plans")) {
   await restoreView(page, home);
   const a0 = await counters(page, cdp);
   const a0Probe = await probeRung(page, ctx, home, RUNG_REPS);
-  await switchPlan(page, SCENARIO_ID_B);
+  await switchPlan(page, PLAN_B);
   const b = await counters(page, cdp);
-  await switchPlan(page, SCENARIO_ID);
+  await switchPlan(page, PLAN_A);
   const a1 = await counters(page, cdp);
   const a1Probe = await probeRung(page, ctx, null, RUNG_REPS);
-  /* THE SWITCH HAS TO BE PROVEN, not assumed. Plan B is half of plan A by construction, so if
-   * `elementsDrawn` did not fall, the route change did not take and every number below describes
-   * plan A three times. */
-  const switched = Number.isFinite(a0.elementsDrawn) && Number.isFinite(b.elementsDrawn) && b.elementsDrawn < a0.elementsDrawn;
+  /* ⛔ A SECOND SAMPLE, AFTER ORDINARY WORK — and without it this test cannot tell RETENTION from
+   * NOT-YET-SWEPT. `counters()` already forces collection twice and that is NOT sufficient: V8's
+   * conservative stack scanning pins objects still referenced from the frames on the stack when the
+   * collection runs, so the outgoing tree survives the purge and is gone a moment later
+   * (`PERF-PLAN-SWITCH.md` §14 recorded the effect and the single-sample verdict was built anyway).
+   * On two REAL plans the immediate sample reports `retainedHeapMB +39.1% · rendererNodes +38.1%`
+   * — a leak — while `ui-audit/session-growth.mjs`, sampling the same counters one ordinary round
+   * later, finds them BELOW where they started, on all four of its switch rounds. The probe above
+   * is itself real work, so the settle here is a short wait after it rather than a new workload. */
+  await page.waitForTimeout(SETTLE_AFTER_SWITCH_MS);
+  const a2 = await counters(page, cdp);
+  /* THE SWITCH HAS TO BE PROVEN, not assumed: if it did not take, every number below describes
+   * plan A three times and the round trip reads as a perfect release.
+   *
+   * ⚠ THE PROOF IS "THE ELEMENT COUNT CHANGED", NOT "IT FELL". With the synthetic pair, plan B is
+   * plan A truncated by half, so a fall was a sound test. With `--fixture` the two plans are real
+   * and unrelated, and B may be LARGER than A — under the old test a genuine, larger-B switch would
+   * have been reported as "the route change did not take", suppressing a valid measurement in
+   * exactly the regime the fixture support was added to reach. */
+  const switched = Number.isFinite(a0.elementsDrawn) && Number.isFinite(b.elementsDrawn) && b.elementsDrawn !== a0.elementsDrawn;
   extras.planSwitch = {
     switched,
     a0: { counters: a0, medianMs: a0Probe.probeMedianMs },
     b: { counters: b },
     a1: { counters: a1, medianMs: a1Probe.probeMedianMs },
+    a2: { counters: a2, settleMs: SETTLE_AFTER_SWITCH_MS },
     costDeltaPct: a0Probe.probeWorkMs && a1Probe.probeWorkMs
       ? +(((a1Probe.probeWorkMs - a0Probe.probeWorkMs) / a0Probe.probeWorkMs) * 100).toFixed(1) : null,
     verdict: switched
-      ? planSwitchVerdict({ a0, b, a1, keys })
-      : { verdict: "unmeasured", why: `plan B never rendered (elementsDrawn ${a0.elementsDrawn} → ${b.elementsDrawn}); the route change did not take, so nothing here describes a switch`, rows: [] },
+      ? planSwitchVerdict({ a0, b, a1, a2, keys })
+      : { verdict: "unmeasured", why: `plan B never rendered (elementsDrawn unchanged at ${a0.elementsDrawn}); the route change did not take, so nothing here describes a switch`, rows: [] },
   };
 }
 
 const ranked = rankAxes(results);
 const report = {
-  scenario: SCENARIO_ID,
-  shape: scenarioShape(),
+  scenario: FIXTURE || SCENARIO_ID,
+  fixture: fixtureOut,
+  shape: FIXTURE ? fixtureOut.census[FIXTURE] : scenarioShape(),
   base: BASE,
   dpr: DPR,
   cpuThrottle: CPU_THROTTLE,
@@ -816,7 +872,9 @@ if (extras.planSwitch) {
   L(`    ${p.verdict.why}`);
   if (p.costDeltaPct != null) L(`      the same probe on plan A after the round trip: ${p.costDeltaPct > 0 ? "+" : ""}${p.costDeltaPct}%`);
   for (const row of p.verdict.rows || []) {
-    L(`      ${String(row.counter).padEnd(22)} A₀ ${String(row.a0).padStart(9)} → B ${String(row.b).padStart(9)} → A₁ ${String(row.a1).padStart(9)}  ${row.deltaPct != null ? `${row.deltaPct > 0 ? "+" : ""}${row.deltaPct}%` : "—"}  ${row.verdict}`);
+    /* A₂ — the same counter after a settle. Printed BESIDE A₁ rather than instead of it, so a
+     * reader can see the transient and its decay rather than only the verdict drawn from them. */
+    L(`      ${String(row.counter).padEnd(22)} A₀ ${String(row.a0).padStart(9)} → B ${String(row.b).padStart(9)} → A₁ ${String(row.a1).padStart(9)} → A₂ ${String(row.a2 ?? "—").padStart(9)}  ${row.deltaPct != null ? `${row.deltaPct > 0 ? "+" : ""}${row.deltaPct}%` : "—"} → ${row.settledPct != null ? `${row.settledPct > 0 ? "+" : ""}${row.settledPct}%` : "—"}  ${row.verdict}`);
   }
   L("");
 }

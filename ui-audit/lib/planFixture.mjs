@@ -558,10 +558,29 @@ export function fixtureSite(fixture, { id, name = "fixture", site = "fixture" } 
 
 /** The localStorage seed script, injected before navigation. */
 export function fixtureSeed(fixture, opts) {
-  const rec = fixtureSite(fixture, opts);
+  return fixtureSeedMulti([{ fixture, ...opts }]);
+}
+
+/**
+ * The same seed with SEVERAL real plans in the store at once.
+ *
+ * ⛔ WHY THIS IS NOT A CONVENIENCE. The plan-switch question — "load A, load B, come back to A, was
+ * A ever released?" — needs two plans with DIFFERENT group ids, because the app switches by route
+ * (`#/project/<groupId>/site`). Until now the only two-plan seed in the repo was
+ * `perfScenarioSeedMulti`, whose plan B is plan A truncated by half; so every plan-switch reading
+ * this program has ever taken was a switch between one synthetic plan and a subset of itself. The
+ * owner switches between whole, unrelated, RASTER-BEARING plans, and those release different things.
+ *
+ * The first entry is the one the app opens on, unless `currentId` names another.
+ */
+export function fixtureSeedMulti(entries = [], currentId = null) {
+  const recs = entries.map(({ fixture, ...opts }) => fixtureSite(fixture, opts));
+  if (!recs.length) throw new Error("fixtureSeedMulti needs at least one plan");
+  const byId = Object.fromEntries(recs.map((r) => [r.id, r]));
+  const current = currentId && byId[currentId] ? currentId : recs[0].id;
   return `(() => { try {
-    localStorage.setItem('planarfit:sites:v1', ${JSON.stringify(JSON.stringify({ [rec.id]: rec }))});
-    localStorage.setItem('planarfit:currentSite:v1', ${JSON.stringify(rec.id)});
+    localStorage.setItem('planarfit:sites:v1', ${JSON.stringify(JSON.stringify(byId))});
+    localStorage.setItem('planarfit:currentSite:v1', ${JSON.stringify(current)});
   } catch (e) {} })();`;
 }
 
