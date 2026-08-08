@@ -224,13 +224,50 @@ Two traps worth knowing:
   court actually is — there is no `truckCourt` type), `trailer`, `landscape`, `sidewalk`,
   `parking`, `road`.
 
-## Load timings are refused, not faked
+## Load timings are refused, not faked — and paint is no longer refused (B276576)
 
-When a render-blocking external resource fails — `index.html` pulls the Inter webfont stylesheet
-from `fonts.googleapis.com` with a plain `<link rel=stylesheet>` — first-contentful-paint goes
-from ~330 ms to ~13 s. That is the sandbox, not a regression. The harness detects failed
-cross-origin requests and reports load-sensitive metrics as **MEASURED BUT NOT JUDGED** rather
-than as a breach. A budget that cries wolf gets ignored as fast as one that never fires.
+The original text of this section described a real defect and then lived with it: `index.html`
+pulled the Inter webfont stylesheet from `fonts.googleapis.com` with a plain
+`<link rel=stylesheet>`, the sandbox blocked it, and first-contentful-paint went from ~330 ms to
+~13 s. Refusing to judge was the right call **while that was true** — a budget that cries wolf
+gets ignored as fast as one that never fires.
+
+It is no longer true. **B276576 self-hosted Inter**, so the boot path carries no cross-origin
+render-blocking resource at all, and the mute has been narrowed to the thing that actually
+justifies it. Two gates now, not one:
+
+- **Paint-sensitive** (`firstContentfulPaintMs`, `timeToFirstDragMs`) — muted only when the
+  document really does load a cross-origin **render-blocking** resource. The harness measures
+  that from the live DOM rather than assuming it, so the mute comes back **automatically, naming
+  the culprit**, if a third-party stylesheet or synchronous script is ever reintroduced.
+- **Tile-sensitive** (`firstAerialCoverageMs`) — keeps the original gate. It genuinely cannot
+  complete without the tile hosts, and it is *not* un-muted.
+
+The old single gate muted all three whenever **any** external host failed, which in a sandbox is
+always. A failing aerial *tile* host does not delay first paint by a millisecond — tiles are
+images fetched after boot — so that gate was answering a different question from the one it was
+asked. **A budget muted for a bug that has since been fixed is a budget nobody is enforcing.**
+
+### What un-muting immediately exposed, recorded rather than papered over
+
+The first judged run reported **FCP 688 ms against the 500 ms ceiling**. That is *not* a
+regression from B276576, and the ceiling was deliberately **left alone**:
+
+- The same harness on the **unmodified pre-fix tree** reports **668 ms** on the same container —
+  the gap is run-to-run noise, and it was there all along, hidden by the mute.
+- With a *perfectly fast* font host, the pre-fix build still paints ~150 ms later than the
+  shipped one (`ui-audit/verify-font-blocking.mjs --delay 0`), so the fix moves this metric in
+  the right direction on every measurement available here.
+- The 500 ms ceiling's provenance is **production planyr.io on the owner's machine** (measured
+  328 ms, dpr 2.15, signed in). This is a shared sandbox container. Judging a production-seeded
+  ceiling against a different machine is the precise mistake the `EMULATED` rules elsewhere in
+  this file exist to prevent.
+
+So the honest position is: the *blocker* is gone and paint is judgeable in principle; whether
+**500 ms** is the right number for this metric is a question only a production run can answer,
+and that run is already logged as **V477**. Re-seeding it from a sandbox figure — or nudging the
+ceiling up to 700 so this run goes green — would be choosing a threshold to fit a result, which
+is exactly what this repo forbids.
 
 ## The Site-route allowlist
 

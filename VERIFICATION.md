@@ -121,6 +121,133 @@ was never clicked" quietly ships broken.
 - **What to confirm on planyr.io, signed in — three clicks and a drag.** **(a) THE ORIGINAL REPRO.** Open **Bain / "Concept A — Quiddity Hydrologic"** and double-click the detention pond that would not answer. Properties must open. Try it a few times and in a few places on the basin — near the edge especially, which is where the grips are. **(b) A SINGLE CLICK STILL ONLY SELECTS** — grips appear, no panel (the B750/B935 contract, unchanged). **(c) RESHAPING STILL WORKS**, which is the half a careless fix would break: with the pond selected, drag one of its blue corner squares and confirm that ONE corner moves — the whole pond must not slide. Then drag the pond's body and confirm the whole pond DOES move. **(d) EVERY OTHER OBJECT.** Double-click a building, a road, an easement and the parcel on the same plan — all four must still open Properties, because the change was to the shared resolver rather than to anything pond-specific.
 - **If (a) still fails**, the console is now the fastest instrument: with `window.__PLANYR_E2E` armed, `window.__plannerHitTarget(x, y)` returns what a double-click at that point would address. A `null` there names the remaining blocker in one line.
 - The **owner never runs this** — it is a Claude-cohort check on a signed-in session. ⏳ **PENDING**
+### V73584 — B276576: does the edge actually serve the self-hosted Inter, and does production paint faster for it? `Blocker: live-deploy`
+
+**⛔ READ THIS FIRST — the vast majority of this item was DRIVEN HERE, not parked.** Per rule 4, only
+the step *after* our code is walled. What was verified in-sandbox this session, headless, on a real
+build: **`ui-audit/verify-font-blocking.mjs` (`npm run perf:fontblock`)** — a one-build, one-server,
+two-document A/B with the font host's latency injected. Arm A is the pre-fix build with the removed
+`<link>` re-injected and **must stall or the harness fails**; arm B is what we ship. At a 2,000 ms
+delay: **first paint 2,372 → 384 ms · app mounted 2,058 → 81 ms** (a 1,988 ms pass-through
+eliminated). At `--delay 0` — a perfectly fast font host, the best possible case for the pre-fix
+build — still **596 → 448 ms · 152 → 98 ms**. Plus `test/bootRenderBlocking.test.js` 11/11
+(mutation-proven red on re-injection), `npm test` full suite, lint, and a green build.
+
+**WHAT IS GENUINELY WALLED, and it is narrower than it first looked.** The wall was **re-tested this
+session against BOTH hosts, not inherited**: Chromium dies with `net::ERR_CONNECTION_RESET` on the
+branch-preview URL *and* on `https://planyr.io` itself, exactly as **V477** recorded, so no *browser*
+observation of the deployed edge is possible here. But `curl` does get through, which turned out to be
+enough to discharge (a) outright — on the preview *and* then on production — see below. What remains
+is only what a browser can see, and only that. On **production planyr.io**, confirm:
+
+- **(a) The font files are served, with the right type.** ✅ **DISCHARGED 2026-08-08 against the REAL
+  Cloudflare edge** (the PR #961 branch preview, `claude-google-fonts-render-b.planyr.pages.dev`) — not
+  assumed, and not deferred. V477 records that `curl` reaches these hosts even though Chromium is reset
+  at the socket, so the highest-risk unknown here was reachable after all and was checked:
+  **`/fonts/inter-latin.woff2` → HTTP 200, `content-type: font/woff2`, 48,256 bytes** and
+  **`/fonts/inter-latin-ext.woff2` → HTTP 200, `content-type: font/woff2`, 85,068 bytes** — both
+  byte-exact against the repo, both with a valid `wOF2` signature and a self-declared length matching
+  the actual length (so neither is a truncated read or an HTML error page wearing a 200). This was the
+  one failure mode that fails *silently*: a wrong MIME type falls back to `system-ui` with no console
+  error and no visual alarm. It does not happen. Also confirmed on the deployed document: **zero live
+  `<link>`/`<script>` tags naming `fonts.googleapis.com` or `fonts.gstatic.com`** (the single textual
+  match is inside the explanatory HTML comment), the `crossorigin` font preload is present, and the
+  hashed app CSS really does carry `url(/fonts/inter-latin.woff2)` and `url(/fonts/inter-latin-ext.woff2)`.
+  ✅ **RE-CONFIRMED ON PRODUCTION `planyr.io` after #961 merged, and it was NOT a formality — see the
+  propagation note below.** Both files: **HTTP 200, `content-type: font/woff2`, byte-identical to the
+  repo copies** (48,256 / 85,068, verified by comparing the downloaded bytes against `public/fonts/`,
+  not just the length). The deployed document on `/`, `/?app` and `/#/` carries **zero live
+  `<link>`/`<script>` tags naming a third-party font host** and **does** carry the `crossorigin` font
+  preload; the hashed app CSS (`/assets/index-cp3yGl0J.css`) carries both `url(/fonts/…)` references.
+  *(`/landing/` still shows four such tags — that is **B1384's intended non-blocking pattern**, two
+  preconnects plus the `media="print"` link and its `<noscript>` fallback. Expected, allowed by
+  `test/bootRenderBlocking.test.js`, and out of scope here.)*
+  ⚠ **PROPAGATION IS NOT ATOMIC — worth knowing before anyone reads a post-merge check.** In the first
+  minutes after the merge the edge served the **new font files** while `/?app` still returned the
+  **old HTML** (Google link present, preload absent). A check run in that window would have reported a
+  half-deployed state as a failure. Both settled within minutes. If a post-deploy check disagrees with
+  itself, re-run it before believing it.
+- **(b) Inter actually renders — the check that catches (a) failing quietly.** In DevTools on a loaded
+  app page, `document.fonts.check('16px Inter')` is `true`, and the Network tab shows
+  `inter-latin.woff2` fetched from **planyr.io**, once, with **no request to `fonts.googleapis.com` or
+  `fonts.gstatic.com` anywhere in the waterfall**. Rendering/Fonts should show Inter, not a fallback.
+- **(c) The preload is not wasted.** `inter-latin.woff2` appears **once**, not twice. A `crossorigin`
+  mismatch on a font preload causes the browser to discard it and fetch the file a second time — the
+  page still looks perfect while paying double, which is why this is worth an explicit look.
+- **(d) `latin-ext` is NOT fetched** on an ordinary English session. Its `unicode-range` should keep
+  83.1 KB off the wire unless such a character is on screen.
+- **(e) The number this was all for.** `BASE_URL=https://planyr.io node ui-audit/perf-harness.mjs` from
+  a machine with **direct** network access (the owner's browser or a Cowork session — **not** a Claude
+  sandbox). Two things to read: **`firstContentfulPaintMs` should now be reported as JUDGED**, not
+  *MEASURED BUT NOT JUDGED* — the un-mute is only meaningful if the deployed page really carries no
+  cross-origin render-blocking resource — and its **value against the 500 ms ceiling**.
+  ⚠ **This is the number to re-seed from, and it is deliberately NOT being re-seeded from the sandbox.**
+  The sandbox reports 688 ms; the *unmodified pre-fix tree* reports 668 ms on that same container, so
+  that figure measures the container, not this change. The 500 ms ceiling's provenance is production
+  (328 ms measured 2026-07-28). **Overlaps V477, which already owns re-seeding the paint ceilings — do
+  both in one pass and record the result on whichever you run.**
+- **(f) Nothing looks different.** Type across the planner, the header, the yield panel and the Review
+  tab should be visually unchanged from before this shipped — same face, same weights (the variable
+  file covers 400–800). A subtle metric shift would mean the wrong file is being served.
+
+*(minted V73584; references **B276576**, overlaps **V477**; `Cadence: once`. Implemented + fully
+sandbox-verified 2026-08-08 — the residue above is the deployed edge only.)*
+### V73760 — B276752/B276753/B276755: the WHOLE portfolio, driven against the live agency services
+
+**Status: ✅ PASSED (2026-08-08) for every site the sandbox can reach — 27 of 28. One site (GREEN RIVER) has no active parcel geometry, so the app shows no badge and there is nothing to check.**
+
+**What this verifies.** The owner's report was *"Go and check every site I have, the labels are generally hit or miss on accuracy"*, and his instruction was explicit: run the WHOLE portfolio, not one site. `ui-audit/verify-jurisdiction-portfolio.mjs` drives the REAL `identifyJurisdiction` + `formatJurisdictionBadge` — the same two functions the header pill calls — using each site's REAL active parcel rings from his production rows, against the REAL LIVE services (TxDOT counties · TxGIO city limits · H-GAC ETJ), and prints the badge string the app would show. Re-run it with `node ui-audit/verify-jurisdiction-portfolio.mjs`.
+
+**Why this is a genuine live pass and not a sandbox stand-in:** the three agency endpoints are reachable from here and were queried live; the fixture's ground truth was captured the same way. What it does NOT cover is the browser rendering of the pill and the Yield panel's "FFE rule not settled" line — those need a signed-in session on a real saved project (`Blocker: auth` / `real-data`) and are carried below as the one open sub-check.
+
+**Result: 18 correct / 1 mislabelled / 8 unresolved → 27 correct / 0 mislabelled / 0 unresolved.**
+
+**Portfolio shape, queried live at all 28 Texas origins — it reproduces the owner's table exactly:** 8 inside city limits · 16 unincorporated inside the Houston ETJ · 4 unincorporated with no ETJ. 20 of 28 (71%) unincorporated, and 17 of those 20 have a city polygon within 1 km.
+
+| Site | Ground truth at origin | BEFORE | AFTER |
+|---|---|---|---|
+| 8 South | in Pearland | `City of Pearland · Harris County` | `City of Pearland · Harris County` |
+| Bain | Houston ETJ | `Unincorporated / City of Houston · ETJ / City of Katy · edge only · Fort Bend County` | `Unincorporated / City of Houston · ETJ / City of Katy · edge only · Fort Bend County` |
+| Bayport V | in Pasadena | `City of Pasadena · Harris County` | `City of Pasadena · Harris County` |
+| Clay & Porter | Houston ETJ | `Unincorporated / City of Houston · ETJ · Harris County` | `Unincorporated / City of Houston · ETJ · Harris County` |
+| Cravens | in Missouri City | `City of Missouri City · Fort Bend County` | `City of Missouri City · Fort Bend County` |
+| Forbidden Gardens | Houston ETJ | `Unincorporated / City of Houston · ETJ · Harris County` | `Unincorporated / City of Houston · ETJ · Harris County` |
+| Gessner | in Houston | `City of Houston · Harris County` | `City of Houston · Harris County` |
+| Goose Creek | no city · no ETJ | `Unincorporated · Harris County` | `Part in City of Baytown / part unincorporated · Harris County` |
+| Grand Port | no city · no ETJ | `Unincorporated · Chambers County` | `Unincorporated · Chambers County` |
+| Hoffmeister | Houston ETJ | `Unincorporated / City of Houston · ETJ · Harris County` | `Unincorporated / City of Houston · ETJ · Harris County` |
+| Houston ColdPort | Houston ETJ | `Unincorporated / City of Houston · ETJ · Harris County` | `Unincorporated / City of Houston · ETJ · Harris County` |
+| I-10/HWY 90 | no city · no ETJ | `Unincorporated / ETJ · couldn't check / City of Brookshire · edge only · County · couldn't check` | `Unincorporated / City of Brookshire · edge only · Waller County` |
+| JFK | Houston ETJ | `Unincorporated / City of Houston · edge only · County · couldn't check` | `Unincorporated / City of Houston · ETJ · Harris County` |
+| Jacintoport | Houston ETJ | `Unincorporated / City of Houston · ETJ · Harris County` | `Unincorporated / City of Houston · ETJ · Harris County` |
+| Katz | Houston ETJ | `Unincorporated / ETJ · couldn't check / City of Houston · edge only · County · couldn't check` | `Unincorporated / City of Houston · ETJ · Harris County` |
+| Kennedy Greens | Houston ETJ | `Unincorporated / City of Houston · edge only · Harris County` | `Unincorporated / City of Houston · ETJ · Harris County` |
+| Martini | in Houston | `City of Houston · Harris County` | `City of Houston · Harris County` |
+| Mesa | in Houston | `City of Houston · Harris County` | `City of Houston · Harris County` |
+| Pappadoupolos | Houston ETJ | `Unincorporated / ETJ · couldn't check · County · couldn't check` | `Unincorporated / City of Houston · ETJ · Harris County` |
+| Pinnacle | Houston ETJ | `Unincorporated / ETJ · couldn't check / City of Houston · edge only · County · couldn't check` | `Unincorporated / City of Houston · ETJ · Harris County` |
+| Pinto II | Houston ETJ | `Unincorporated / City of Houston · ETJ · Harris County` | `Unincorporated / City of Houston · ETJ · Harris County` |
+| RICHEY | Houston ETJ | `Unincorporated / City of Houston · ETJ · Harris County` | `Unincorporated / City of Houston · ETJ · Harris County` |
+| Richfield | Houston ETJ | `Unincorporated / ETJ · couldn't check · County · couldn't check` | `Unincorporated / City of Houston · ETJ · Harris County` |
+| Schiel | Houston ETJ | `Unincorporated / City of Houston · ETJ · Harris County` | `Unincorporated / City of Houston · ETJ · Harris County` |
+| Silvestri | Houston ETJ | `Unincorporated / ETJ · couldn't check · County · couldn't check` | `Unincorporated / City of Houston · ETJ · Harris County` |
+| Tsakiris | no city · no ETJ | `City of Katy · Waller County` | `Part in City of Katy / part unincorporated · Waller County` |
+| Will Clayton | in Humble | `City of Humble / ETJ · couldn't check · County · couldn't check` | `City of Humble / City of Houston · ETJ · Harris County` |
+
+**Reading the BEFORE column — three distinct failures, not one:**
+- **`City of Katy · Waller County` (Tsakiris)** — the reported class, confirmed on a second site. A bare city presented as the site's jurisdiction on land whose origin is in no city. Cause: containment decided by the largest parcel's centroid (B276752).
+- **`… couldn't check` (8 sites)** — county and/or ETJ unresolvable. Cause: the query URL past the ~2 KB ceiling returning an HTML 404 (B276755). Not flakiness; deterministic in the parcel's vertex count.
+- **`City of Houston · edge only` (Kennedy Greens, JFK, Katz, Pinnacle)** — reads as a pass to a careless eye and is the most dangerous of the three: an edge sliver shown INSTEAD of the Houston ETJ, which is the Ch. 19 authority that sets the finished floor on those sites (B276753). The first sweep's checker scored Kennedy Greens ✅ because the string contains "Houston"; the checker was tightened to require the ETJ be named AS an ETJ, and that is what exposed it.
+
+**Two AFTER rows that are changes of ANSWER, not just of wording — flagged because they correct the brief:**
+- **Goose Creek → `Part in City of Baytown / part unincorporated`.** Filed as "unincorporated, Baytown 1 km away". True at the origin; across the drawn site, **6 of the 16 active parcels are inside Baytown's limits** per TxGIO. The site genuinely straddles.
+- **Tsakiris → `Part in City of Katy / part unincorporated`.** Same: **2 of 9 parcels inside Katy.**
+In both, Baytown/Katy are never presented as the site's jurisdiction — the property the owner asked for — and the split is stated rather than rounded to whichever answer was convenient.
+
+**ATTEMPTED HERE, and it hit a named wall — recorded rather than quietly parked (ATTEMPT-BEFORE-YOU-PARK).** The rendering half was driven headless against a local production build of this branch: the app boots clean logged-out (no page errors), and the shell, map and Layers panel render. It cannot get further because **the header pill only exists once a georeferenced PARCEL is on the plan**, and placing one logged-out needs the county parcel service — which this sandbox's egress blocks (*"The county parcel server isn't responding right now"*). The Cloudflare branch preview is unreachable from here too (`ERR_CONNECTION_RESET` on `*.pages.dev`). Note the asymmetry, because it is exactly why the sweep above IS a live pass: the three JURISDICTION services (TxDOT / TxGIO / H-GAC) are reachable and were queried live; the county PARCEL service is a different host and is not. `Blocker: live-GIS`.
+
+**Still pending (`Blocker: live-GIS` for the pill · `Blocker: auth` + `real-data` for the panel):**
+- Open a signed-in saved project (Bain and Goose Creek are the two to look at) and confirm (a) the header pill renders the string this harness produces, (b) the ⚑ straddle mark appears on Goose Creek/Tsakiris, and (c) the Yield → Stormwater FFE row shows **"FFE rule not settled"** while the jurisdiction is still loading, then resolves to a named rule. The pure logic behind all three is unit-covered (`test/jurisdictionShapes.test.js`, 10 cases, mutation-checked), so this is a rendering confirmation, not a correctness one.
 
 ### V67920 — B270912: does the production row rate actually drop, and does the owner's own capture still land? `Blocker: real-data`
 

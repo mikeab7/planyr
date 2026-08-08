@@ -1,0 +1,509 @@
+{
+ "_note": "RECORDED live agency answers for the four NEW-3 shape fixtures. Regenerate with ui-audit/record-jurisdiction-shapes.mjs — never hand-edit to make a test pass.",
+ "_recordedAt": "2026-08-08",
+ "shapes": [
+  {
+   "site": "Gessner",
+   "why": "in-city — squarely inside Houston's limits",
+   "lat": 29.9447251677856,
+   "lon": -95.5438983679319,
+   "truth": {
+    "county": "Harris",
+    "city": "Houston",
+    "etj": null,
+    "near1km": [
+     "Houston"
+    ]
+   },
+   "centroid": {
+    "lng": -95.54475652622986,
+    "lat": 29.946202009598558
+   },
+   "probe": [
+    [
+     -95.544696371575,
+     29.946286924637214
+    ],
+    [
+     -95.54238931728045,
+     29.94566047507374
+    ]
+   ],
+   "answers": {
+    "county": {
+     "ring": [
+      "Harris"
+     ],
+     "points": [
+      [
+       "Harris"
+      ],
+      [
+       "Harris"
+      ]
+     ]
+    },
+    "city": {
+     "ring": [
+      "Houston"
+     ],
+     "points": [
+      [
+       "Houston"
+      ],
+      [
+       "Houston"
+      ]
+     ]
+    },
+    "etj": {
+     "ring": [],
+     "points": [
+      [],
+      []
+     ]
+    }
+   }
+  },
+  {
+   "site": "Will Clayton",
+   "why": "in-city PLUS an ETJ — inside Humble's limits and inside Houston's ETJ",
+   "lat": 29.9863137436458,
+   "lon": -95.2656387847919,
+   "truth": {
+    "county": "Harris",
+    "city": "Humble",
+    "etj": "HOUSTON",
+    "near1km": [
+     "Humble",
+     "Houston"
+    ]
+   },
+   "centroid": {
+    "lng": -95.26571217194814,
+    "lat": 29.988117879408996
+   },
+   "probe": [
+    [
+     -95.26565904766876,
+     29.988284287364234
+    ],
+    [
+     -95.26486216775255,
+     29.981779425935095
+    ],
+    [
+     -95.2622245177115,
+     29.98490863583109
+    ],
+    [
+     -95.26108512724585,
+     29.98703541025066
+    ],
+    [
+     -95.27002367914491,
+     29.983623736336575
+    ],
+    [
+     -95.27026423804105,
+     29.981791838303554
+    ]
+   ],
+   "answers": {
+    "county": {
+     "ring": [
+      "Harris"
+     ],
+     "points": [
+      [
+       "Harris"
+      ],
+      [
+       "Harris"
+      ],
+      [
+       "Harris"
+      ],
+      [
+       "Harris"
+      ],
+      [
+       "Harris"
+      ],
+      [
+       "Harris"
+      ]
+     ]
+    },
+    "city": {
+     "ring": [
+      "Humble"
+     ],
+     "points": [
+      [
+       "Humble"
+      ],
+      [
+       "Humble"
+      ],
+      [
+       "Humble"
+      ],
+      [
+       "Humble"
+      ],
+      [
+       "Humble"
+      ],
+      [
+       "Humble"
+      ]
+     ]
+    },
+    "etj": {
+     "ring": [
+      "HOUSTON"
+     ],
+     "points": [
+      [
+       "HOUSTON"
+      ],
+      [
+       "HOUSTON"
+      ],
+      [
+       "HOUSTON"
+      ],
+      [
+       "HOUSTON"
+      ],
+      [
+       "HOUSTON"
+      ],
+      [
+       "HOUSTON"
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "site": "Bain",
+   "why": "unincorporated INSIDE an ETJ — no city holds it, the Houston ETJ reaches it, Katy clips the edge",
+   "lat": 29.7708645040906,
+   "lon": -95.8466825541706,
+   "truth": {
+    "county": "Fort Bend",
+    "city": null,
+    "etj": "HOUSTON",
+    "near1km": [
+     "Katy"
+    ]
+   },
+   "centroid": {
+    "lng": -95.84666987358898,
+    "lat": 29.770864478491525
+   },
+   "probe": [
+    [
+     -95.84623460266009,
+     29.770921569593405
+    ],
+    [
+     -95.84774501020935,
+     29.767810611253214
+    ],
+    [
+     -95.8492246668687,
+     29.772242832099014
+    ],
+    [
+     -95.8451543740618,
+     29.768843119006554
+    ]
+   ],
+   "answers": {
+    "county": {
+     "ring": [
+      "Fort Bend"
+     ],
+     "points": [
+      [
+       "Fort Bend"
+      ],
+      [
+       "Fort Bend"
+      ],
+      [
+       "Fort Bend"
+      ],
+      [
+       "Fort Bend"
+      ]
+     ]
+    },
+    "city": {
+     "ring": [
+      "Katy"
+     ],
+     "points": [
+      [],
+      [],
+      [],
+      []
+     ]
+    },
+    "etj": {
+     "ring": [
+      "HOUSTON"
+     ],
+     "points": [
+      [
+       "HOUSTON"
+      ],
+      [
+       "HOUSTON"
+      ],
+      [
+       "HOUSTON"
+      ],
+      [
+       "HOUSTON"
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "site": "Goose Creek",
+   "why": "unincorporated with a city within 1 km — and the sweep found Baytown actually holds 6 of the 16 drawn parcels",
+   "lat": 29.8122399298171,
+   "lon": -95.0026332218179,
+   "truth": {
+    "county": "Harris",
+    "city": null,
+    "etj": null,
+    "near1km": [
+     "Baytown"
+    ]
+   },
+   "centroid": {
+    "lng": -95.00369488654059,
+    "lat": 29.810391276989506
+   },
+   "probe": [
+    [
+     -95.00368748821627,
+     29.810375638192838
+    ],
+    [
+     -95.0047145897963,
+     29.80547940759892
+    ],
+    [
+     -95.00511607536517,
+     29.81556805482446
+    ],
+    [
+     -95.0023114977514,
+     29.810401793641084
+    ],
+    [
+     -95.00349913039929,
+     29.804962191530237
+    ],
+    [
+     -95.00657984092227,
+     29.816669331967024
+    ],
+    [
+     -95.00331427914972,
+     29.814212080117212
+    ],
+    [
+     -95.00356927362496,
+     29.80373602729813
+    ],
+    [
+     -95.00661358578611,
+     29.8103200053867
+    ],
+    [
+     -95.0074518229837,
+     29.806644172011897
+    ],
+    [
+     -95.00339894440452,
+     29.806724113197173
+    ],
+    [
+     -95.0033394306029,
+     29.80668517424612
+    ],
+    [
+     -95.00708439614779,
+     29.8103193297884
+    ],
+    [
+     -95.00570022788615,
+     29.810321460472053
+    ]
+   ],
+   "answers": {
+    "county": {
+     "ring": [
+      "Harris"
+     ],
+     "points": [
+      [
+       "Harris"
+      ],
+      [
+       "Harris"
+      ],
+      [
+       "Harris"
+      ],
+      [
+       "Harris"
+      ],
+      [
+       "Harris"
+      ],
+      [
+       "Harris"
+      ],
+      [
+       "Harris"
+      ],
+      [
+       "Harris"
+      ],
+      [
+       "Harris"
+      ],
+      [
+       "Harris"
+      ],
+      [
+       "Harris"
+      ],
+      [
+       "Harris"
+      ],
+      [
+       "Harris"
+      ],
+      [
+       "Harris"
+      ]
+     ]
+    },
+    "city": {
+     "ring": [],
+     "points": [
+      [],
+      [
+       "Baytown"
+      ],
+      [],
+      [],
+      [
+       "Baytown"
+      ],
+      [],
+      [],
+      [
+       "Baytown"
+      ],
+      [],
+      [
+       "Baytown"
+      ],
+      [
+       "Baytown"
+      ],
+      [
+       "Baytown"
+      ],
+      [],
+      []
+     ]
+    },
+    "etj": {
+     "ring": [],
+     "points": [
+      [],
+      [],
+      [],
+      [],
+      [],
+      [],
+      [],
+      [],
+      [],
+      [],
+      [],
+      [],
+      [],
+      []
+     ]
+    }
+   }
+  },
+  {
+   "site": "Kennedy Greens",
+   "why": "unincorporated in the Houston ETJ where a Houston sliver ALSO clips the edge",
+   "lat": 29.9250392549964,
+   "lon": -95.3202081765593,
+   "truth": {
+    "county": "Harris",
+    "city": null,
+    "etj": "HOUSTON",
+    "near1km": [
+     "Houston"
+    ]
+   },
+   "centroid": {
+    "lng": -95.3202081765593,
+    "lat": 29.925039248048314
+   },
+   "probe": [
+    [
+     -95.3202713836889,
+     29.9251578207306
+    ]
+   ],
+   "answers": {
+    "county": {
+     "ring": [
+      "Harris"
+     ],
+     "points": [
+      [
+       "Harris"
+      ]
+     ]
+    },
+    "city": {
+     "ring": [
+      "Houston"
+     ],
+     "points": [
+      []
+     ]
+    },
+    "etj": {
+     "ring": [
+      "HOUSTON"
+     ],
+     "points": [
+      [
+       "HOUSTON"
+      ]
+     ]
+    }
+   }
+  }
+ ]
+}
