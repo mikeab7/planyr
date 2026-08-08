@@ -496,11 +496,31 @@ rules are binding shorthand, not optional style. (Full-text home so briefs stay 
      just created — dead by construction, and no source scan can see it.
   3. **A guard that names one component protects one component.** Assert it STRUCTURALLY, on the real render:
      with nothing selected, every element's own centre must answer to that element via `elementFromPoint`.
+  4. **⛔ CHROME MOUNTED BY THE FIRST PRESS IS INVISIBLE TO ANY CHECK THAT READS THE DOM BEFORE THE INTERACTION
+     (B233153) — so the probe shape is the TWO-PRESS INVARIANT: press once, RE-ASK what a double-click at that
+     point now addresses, and require the same feature.** Corollary 2 said chrome that only exists once selected
+     is the worst case; B233153 is that case at its worst, because the chrome was the feature's OWN vertex
+     handle — pressing the pond mounted the 18px hit square that then ate press 2, at the point the pointer had
+     not moved from. **And the variable that hid it was not the SHAPE but VERTEX COUNT against handle size at
+     the probe point:** six realistic four-vertex sandbox ponds all passed, because their grips sit at four
+     distant corners while a surveyed ring peppers its own basin edge. Two things make this observable rather
+     than lucky: the app exposes its own resolution read-only (`window.__plannerHitTarget`, E2E-gated — a
+     harness re-implementing the rule tests its own copy), and a harness must deliver a **native** `dblclick`
+     (`clickCount: 1` then `2`; two bare down/up pairs leave the counter at 1 and Chromium synthesises nothing,
+     so the whole root-resolver path goes unexercised while every row reads green).
+  5. **The fix belongs at the RESOLVER, not on the object that was reported.** A handle is chrome belonging to
+     the selected feature, so it is TRANSPARENT to "which feature was double-clicked" — one rule closes every
+     element type that renders grips at once. Identification only: grips keep their own pointer events and
+     their own `onPointerDown`, and **a vertex must still drag** — assert that in the same commit, counting how
+     many vertices moved (a press falling THROUGH an inert grip moves the whole object, which passes any
+     "the geometry changed" check).
   Precedents: **B1174** (measurement chips), **B1327** (the parcel acreage badge — the third instance, and the
   reason this is a named rule; regressed by B1186 moving the badge anchor to `polylabel`), and **B50010** (an
   element's own DIMENSION NUMBER — a road's is anchored to the centreline midpoint, so it is painted ON the
   pavement and a double-click aimed at the road cannot miss it; the general fix is that chrome sitting over
-  its own object's BODY forwards the press to the body, asked once for every type rather than special-cased).
+  its own object's BODY forwards the press to the body, asked once for every type rather than special-cased), and
+  **B233153** (a detention pond's OWN vertex handle — the fourth instance, and the one that produced clauses 4 and 5
+  above; captured live on the owner's Bain plan after six realistic sandbox reproductions all came back green).
   **⛔ AND THE COROLLARY B50008/B50009 ADD: A GESTURE CAN DIE WITH NOTHING EATING IT.** This rule is about
   chrome swallowing a press, and reading every failure through it is how two other causes survived for
   months — the pair being measured on a WALL CLOCK read inside the handler (so a busy plan spends the whole

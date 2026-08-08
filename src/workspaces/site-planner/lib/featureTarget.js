@@ -34,6 +34,45 @@
  * carries `data-handle-layer`. This module is the pure half — it takes the already-flattened stack
  * (top-most first) and returns the target — so the decision is Node-testable without a DOM.
  *
+ * ⛔ B233153 — A VERTEX HANDLE IS CHROME BELONGING TO THE SELECTED FEATURE, NOT A FEATURE. THE HANDLE
+ * LAYER IS THEREFORE TRANSPARENT TO FEATURE IDENTIFICATION. This REPLACES the rule that shipped here
+ * first — "a handle on top owns the press, return null" — which was wrong for the one case that
+ * matters, and it was wrong in a way no fixture in this repo could see.
+ *
+ * Captured live on the owner's machine (planyr.io, Bain / "Concept A — Quiddity Hydrologic"), one
+ * double-click on a detention pond's water, from a capture-phase listener at the svg root:
+ *
+ *     pointerdown#1 → path[fill=url(#grad-water)]     ← the pond's own fill; it SELECTS (grips 4 → 16)
+ *     pointerup#1, click#1 → same path
+ *     pointerdown#2 → rect[data-testid="vtx-handle"]  ← 18×18 transparent, inside [data-handle-layer]
+ *     click#2, dblclick → that same rect
+ *
+ * Press 1 mounted the pond's OWN handle layer (41 nodes) and one hit square landed exactly on the
+ * point that had just been pressed. Press 2 therefore never reached the pond: the double-tap could
+ * not pair, the native dblclick retargeted, and the root resolver — asked what was double-clicked —
+ * saw a handle on top and answered "nothing". Silent, every time, on that pond. THE FIRST PRESS
+ * SUMMONS THE THING THAT BLOCKS THE SECOND.
+ *
+ * WHY IT WAS INVISIBLE, and the lesson that generalises: the variable is not the SHAPE, it is VERTEX
+ * COUNT against HANDLE SIZE AT THE PROBE POINT. Six realistic pond variants (bare rect · irregular
+ * polygon · rect+detention · polygon+detention · polygon+expansion-baseline · grouped) were seeded
+ * and driven headless and every one passed, because a four-vertex ring puts its handles at the
+ * corners, far from anywhere a centre probe presses. A surveyed ring has dozens, so its basin is
+ * peppered with them. This is CHROME-NEVER-EATS-A-PRESS's third instance (after B1174's measurement
+ * chips and B1327's acreage badge), and its corollary: CHROME MOUNTED BY THE FIRST PRESS IS INVISIBLE
+ * TO ANY CHECK THAT READS THE DOM BEFORE THE INTERACTION.
+ *
+ * FIXED AT THE RESOLVER, NOT ON THE POND — deliberately. The pond is where it was reported; the
+ * defect belongs to every element type that renders vertex handles (a polygon element, a parcel) and
+ * to every kind of grip. One rule here closes all of them at once and cannot be re-opened by a new
+ * element type. A pond-shaped special case would have closed one report.
+ *
+ * ⛔ AND IT DOES NOT TOUCH DRAGGING. Handles keep their own `pointerEvents` and their own
+ * `onPointerDown`, so a grip still takes its press and a vertex still reshapes. What changed is only
+ * the question "WHICH FEATURE was double-clicked" — identification, never delivery. If a grip ever
+ * wants its own double-click gesture, it belongs on the grip's handler (which receives the press
+ * first), never in blanking this answer: blanking it is what made the feature underneath unopenable.
+ *
  * Pure + Node-testable (test/featureTarget.test.js).
  */
 
@@ -66,10 +105,12 @@ export function parseFeatureKey(key) {
  *
  * Two rules, and both are deliberate:
  *
- *  1. A HANDLE ON TOP OWNS THE PRESS — return null. A grip is a manipulation affordance; a
- *     double-click on one is not a request to open the thing underneath it, and guessing would make
- *     a grip's own future gesture unimplementable. Handles are SIBLINGS of the features (the one
- *     `data-handle-layer` group, per the handle-layer rule), so they can never be confused for one.
+ *  1. A HANDLE IS TRANSPARENT — skip it and keep looking (B233153; see the header). A grip is chrome
+ *     belonging to the selected feature, so it can never be the answer to "which feature was
+ *     double-clicked", and it must not stand in the way of the answer either. Handles are SIBLINGS of
+ *     the features (the one `data-handle-layer` group, per the handle-layer rule), so they are never
+ *     confused FOR a feature — they simply are not one. This is the same rule
+ *     `pressIsOverElementBody` below has always applied.
  *  2. OTHERWISE THE TOP-MOST FEATURE WINS, and non-feature nodes above it (the basemap host, the
  *     GIS bands, an un-tagged decoration) are skipped rather than blocking. This is the same
  *     top-most-first order the browser used to pick the press target, so the double-click resolves
@@ -79,7 +120,7 @@ export function resolveDoubleClickTarget(entries) {
   if (!Array.isArray(entries)) return null;
   for (const en of entries) {
     if (!en) continue;
-    if (en.handle) return null;
+    if (en.handle) continue;   // chrome above the feature, not a feature — B233153
     const t = parseFeatureKey(en.feature);
     if (t) return t;
   }

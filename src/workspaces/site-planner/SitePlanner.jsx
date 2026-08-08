@@ -7516,6 +7516,28 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (tool !== "select" || !e) return;
     featureDoubleAction(resolveDoubleClickTarget(hitStackAt(e.clientX, e.clientY)), e);
   };
+  /* ⛔ B233153 — E2E/self-audit hook for the DOUBLE-CLICK RESOLUTION (same `window.__PLANYR_E2E`
+   * gate as the hooks above; never runs in production, nulled on unmount like its neighbours).
+   * Read-only: it asks the app's OWN resolver what a double-click at a client point would address
+   * RIGHT NOW — the same call `onBgDouble` makes, one line up.
+   *
+   * THIS IS THE INSTRUMENT THAT WAS MISSING, and its absence is why a green suite certified a pond
+   * nobody could click. The chrome that ate press 2 (the pond's own vertex handle) did not EXIST
+   * until press 1 mounted it, so every check that reads the DOM before the gesture is blind to it by
+   * construction. And a harness that re-implemented the resolution rule in page script would be
+   * testing its own copy — the "a second hit-test is free to disagree" trap lib/featureTarget.js's
+   * header warns about. So the TWO-PRESS INVARIANT (ui-audit/audit-doubleclick-properties.mjs,
+   * e2e/chrome-swallows-press.spec.js) presses ONCE, asks this, and requires the same feature to
+   * still be the answer. That is the only probe shape that can see chrome which does not exist until
+   * the gesture is half-finished. */
+  const dblResolveRef = useRef(null);
+  useEffect(() => { dblResolveRef.current = (x, y) => resolveDoubleClickTarget(hitStackAt(x, y)); });
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.__PLANYR_E2E) return;
+    const hook = (x, y) => (dblResolveRef.current ? dblResolveRef.current(x, y) : null);
+    window.__plannerHitTarget = hook;
+    return () => { if (window.__plannerHitTarget === hook) window.__plannerHitTarget = null; };
+  }, []);
 
   const addRectParcel = () => {
     const w = Math.max(20, +lotW || 0), d = Math.max(20, +lotD || 0);
