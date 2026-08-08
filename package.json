@@ -25,7 +25,9 @@
     "perf:recompute": "xvfb-run -a --server-args=\"-screen 0 1600x1000x24\" node ui-audit/detect-view-recompute.mjs --build",
     "perf:planswitch": "xvfb-run -a --server-args=\"-screen 0 1600x1000x24\" node ui-audit/verify-plan-switch-release.mjs",
     "perf:reraster": "xvfb-run -a --server-args=\"-screen 0 1600x1000x24\" node ui-audit/zoom-reraster-arms.mjs --fake-tiles",
-    "perf:recorder": "xvfb-run -a --server-args=\"-screen 0 1600x1000x24\" node ui-audit/verify-perf-recorder.mjs"
+    "perf:recorder": "xvfb-run -a --server-args=\"-screen 0 1600x1000x24\" node ui-audit/verify-perf-recorder.mjs",
+    "perf:midzoom": "xvfb-run -a --server-args=\"-screen 0 1600x1000x24\" node ui-audit/verify-midgesture-zoom.mjs --selftest",
+    "perf:zoomab": "xvfb-run -a --server-args=\"-screen 0 1600x1000x24\" node ui-audit/zoom-smoothness-ab.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.104.1",

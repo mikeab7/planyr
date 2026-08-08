@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-08-08 @ `ee3108e` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-08-08 @ `259db28` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_453 source files mapped._
+_454 source files mapped._
 
 ## infra
 
@@ -306,6 +306,8 @@ _453 source files mapped._
   - _exports_: `pushToastPure`, `TOAST_CAP`, `TOAST_TTL_MS`, `ToastHost`, `useToasts`, `visibleToasts`
 - **`src/shared/ui/ToolRail.jsx`** — Shared Bluebeam-style vertical icon rail: presentational items list (tool/header/divider/spacer/node), active-tool accent highlight, theme-token chrome
   - _exports_: `default (ToolRail)`, `RailButton`
+- **`src/shared/viewport/viewAnchor.js`** — the ANCHORED RENDER: the one group transform (`translate(tx ty) scale(k)`) that carries geometry emitted at a held view to where the live view wants it, the drift cap that decides when to re-bake, and the proportional wheel→zoom factor. Pure; the exactness is proved in `test/viewAnchor.test.js`.
+  - _exports_: `ANCHOR_K_EPS`, `ANCHOR_MAX_K`, `anchoredEqualsDirect`, `anchorHolds`, `anchorTransform`, `anchorTransformAttr`, `WHEEL_MAX_NOTCHES`, `WHEEL_NOTCH_LINES`, `WHEEL_NOTCH_PAGES`, `WHEEL_NOTCH_PX`, `wheelNotches`, `wheelZoomFactor`, `ZOOM_PER_NOTCH`, `ZOOM_SETTLE_MS`
 - **`src/shared/viewport/viewportTransform.js`** — Pure shared pan/zoom engine for both canvases: world<->screen, cursor-anchored zoom, fitView, NaN-safe clamps, pinch, Bluebeam pan/tool collision rule
   - _exports_: `clampNum`, `distance`, `fitView`, `midpoint`, `panBy`, `pinchZoom`, `screenToWorld`, `shouldPan`, `worldToScreen`, `zoomAround`
 

@@ -639,6 +639,26 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   **recomputeProbe** and **viewIndependentRegistry**, the ui-audit gate **verify-view-independent**
   (a counter — every visual test in this repo passes on this defect), and the instrument that finds
   the class, **detect-view-recompute**. Enumeration: `/docs/PERF-VIEW-INDEPENDENCE.md`.
+- **⛔ THE VIEW ANCHOR (B1440 pan · B1449 zoom) — `renderView` / `rppf` are the frame the RENDER BODY
+  reasons at, and `view` is the frame everything ELSE does. Read the shared `viewport/` module
+  **viewAnchor** before touching either.** During a gesture the emitted geometry is pinned at an ANCHOR view and
+  one group transform (`translate(tx ty) scale(k)`) carries it, so a pan or a wheel notch writes one
+  attribute instead of re-emitting the plan. **The split is mechanical, not case-by-case:** every
+  `view.ppf` in the RENDER BODY — including `makeLabelFrame`, the cull rect and every `el.w * ppf` —
+  is `rppf`; every one in a HANDLER or an EFFECT stays `view.ppf` (a hit tolerance is about where the
+  pointer is NOW). Mixing them is the whole failure mode: geometry at the anchor with labels, LOD
+  gates and stroke weights at the live zoom, and the group scaling one of them again.
+  **⛔ AND IT IS INVISIBLE AT REST — `rppf === view.ppf` there, so a correct build and a broken one
+  are byte-identical to every unit test, e2e spec and pixel harness in this repo.** That blindness
+  is why this sat unshipped for weeks as "dangerous", and closing it was the first deliverable
+  (`/CLAUDE.md` → DANGEROUS-MEANS-UNOBSERVABLE). Guards: the repo-root `test/` suites **viewAnchor**
+  (the exactness proof + the wheel factor, mutation-checked), **panAnchor** (the source split) and
+  **midGestureZoom**, plus the ui-audit gate **verify-midgesture-zoom** (`npm run perf:midzoom` —
+  drives a real wheel gesture, captures the frame MID-gesture, and fails unless the clean run is
+  green AND both deliberate mutants go red). The owner-facing A/B is **zoom-smoothness-ab**
+  (`npm run perf:zoomab`), which records the same gesture with the anchor on and off.
+  `Plan ▾ → Smooth zoom` is the off switch; it gates the ZOOM anchor only — the pan anchor is never
+  gated on it.
 - `zOrder.js` — per-element `z` stacking key utilities (`nextZ`/`sortByZ`/`normalizeZ`/`ensureZ`, B671).
   `arrange.js` — pure z-order "Arrange" (`reorderByZ`/`arrangeFlags`, B820): Bring-to-Front/Send-to-Back
   over a peer set (a building reorders within its `Z_LAYER` band, a markup within the markup layer;

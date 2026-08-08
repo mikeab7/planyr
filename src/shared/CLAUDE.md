@@ -75,6 +75,23 @@ into every consumer. Root rules in `/CLAUDE.md`; deep detail in `/docs/REFERENCE
   route, so a module shared with the planner's boot path gets hoisted into a chunk every route downloads
   (measured: importing `gisCache` put 11.3 KB on a plain Site load and breached three bundle budgets).
   That is why the cache is cleared by NAMESPACE and told about it through a window event.
+- `viewport/` — the ONE pan/zoom model both canvases drive. `viewportTransform.js` is the math
+  (`worldToScreen`/`screenToWorld`/`zoomAround`/`pinchZoom`/`fitView`) — leave its semantics alone,
+  the Site Planner and Markup both depend on them meaning the same thing.
+  **`viewAnchor.js` (B1449) is the ANCHORED RENDER, and it is the generalisation of B1440's pan
+  increment to a zoom.** Geometry is emitted at a HELD view and one group transform —
+  `translate(tx ty) scale(k)`, `k = view.ppf / anchor.ppf` — carries it to where the live view wants
+  it, so a gesture writes one attribute instead of re-emitting ~1,200 host elements. Three things to
+  know before touching it: **(a)** the composition is EXACT and that is a proof, not a pixel diff
+  (`anchoredEqualsDirect`, plus the repo-root `test/` suite **viewAnchor**); **(b)** at `k === 1` it emits B1440's
+  byte-identical bare `translate` — the pan path is unchanged BY CONSTRUCTION and must stay so;
+  **(c)** `ANCHOR_MAX_K` bounds how far the picture may scale before the caller re-bakes, because
+  mid-gesture the strokes and type are the anchor's, scaled (the trade the owner accepted).
+  `wheelZoomFactor` is the proportional wheel→zoom factor that replaced a sign-only `deltaY < 0 ?
+  1.12 : 1/1.12` — a real mouse detent is preserved to the bit, a trackpad becomes continuous.
+  **⛔ Its correctness is INVISIBLE AT REST** (`renderView.ppf === view.ppf` there), so the guard is the
+  ui-audit gate **verify-midgesture-zoom** — `npm run perf:midzoom`, which fails unless the clean
+  run is green AND both deliberate mutants go red.
 - `projects/`, `profile/`, `cloud/`, `presence/`, `telemetry/`, `gis/`, `geometry/`, `placement/`.
 
 **Convention:** shared logic is pure and unit-tested; per-host state/wiring stays in the workspace.

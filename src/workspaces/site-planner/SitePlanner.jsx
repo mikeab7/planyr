@@ -102,6 +102,9 @@ import { clampToBounds, initialFloatPos, reconcileForNarrow, shouldInspectorTake
 import AppHeader from "../../shared/ui/AppHeader.jsx";
 import RotationStepper, { normalizeDeg } from "../../shared/ui/RotationStepper.jsx";
 import { worldToScreen, screenToWorld, zoomAround, midpoint, distance, pinchZoom } from "../../shared/viewport/viewportTransform.js";
+/* B1449 — the anchored render (the zoom half of B1440's increment) + the proportional wheel factor.
+   `viewAnchor.js` holds the proof that an anchored frame lands exactly where a direct one would. */
+import { anchorTransform, anchorTransformAttr, anchorHolds, wheelZoomFactor, ZOOM_SETTLE_MS } from "../../shared/viewport/viewAnchor.js";
 import ColorField from "../../shared/ui/ColorField.jsx";
 /* LAZY (B1064 tranche a). The Standards footer renders only while the Standards panel is the
  * open one, docked or floating — never at first paint. */
@@ -1940,6 +1943,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     return () => { mq.removeEventListener ? mq.removeEventListener("change", on) : mq.removeListener(on); };
   }, []);
   const lsGet = (k, d) => { try { return localStorage.getItem("planarfit:" + k) || d; } catch (_) { return d; } };
+  const lsSet = (k, v) => { try { localStorage.setItem("planarfit:" + k, String(v)); } catch (_) { /* a full/blocked store must never break a toggle */ } };
   const [parkingRows, setParkingRows] = useState(() => lsGet("parkingRows", "free")); // drawn-parking depth preset
   // Drawn-road width, in feet, as a string. NEW-3: the Road tool no longer has a "free" (drag-a-
   // rectangle) mode — a road is always a clicked centerline at a known width, preset or custom. A
@@ -2053,22 +2057,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // the framed extent and the paper only — and `labelFrame` is what the whole label tier
   // reasons at. `null` (every screen render) → the frame is the view, k = 1, output unchanged.
   const [exportPass, setExportPass] = useState(null);
-  const labelFrame = useMemo(() => makeLabelFrame(view.ppf, exportPass && exportPass.ppf), [view.ppf, exportPass]);
-  const labelPpf = labelFrame.ppf;   // the px-per-foot label DECISIONS are made at
-  const labelK = labelFrame.k;       // label-space px → canvas px (1 on screen)
-  const strokeZk = labelFrame.strokeZk; // the zoom factor `strokeZoom` uses (1 on an export pass)
-  const cullActive = !exportPass && shouldCull(drawableCount);
-  /* VIEW-INDEPENDENT-ONCE (NEW-2). The cull rect is LATCHED: `cullRectFor` hands back the rect we
-     already hold for as long as the true viewport is still comfortably inside it, and only builds
-     a new one when the view approaches its edge or the zoom changes (lib/viewCull.js explains why
-     the containment test is what makes that safe). Holding the same OBJECT is half the fix — a
-     fresh object with the same numbers would still invalidate `drawEls` / `drawElsZ` /
-     `drawParcels` / `drawMarkupsZ` and everything memoised on them.
-     ⛔ It is still genuinely view-derived, and must stay so: pan far enough, or zoom at all, and
-     the whole chain recomputes — exactly once. */
-  const cullRectRef = useRef(null);
-  cullRectRef.current = cullActive ? cullRectFor(view, size, cullRectRef.current) : null;
-  const cullRect = cullRectRef.current;
 
   /* ------------ NEW-2 — THE PAN ANCHOR: the view a coordinate is BAKED at ------------
      `f2p` is `worldToScreen(view, …)`, so every element's pixel geometry used to be a function of
@@ -2093,21 +2081,111 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
      export time rather than inheriting whatever transient representation the screen is holding,
      so a sheet built mid-gesture is identical to one built at rest. That independence is the
      precondition for this increment, not a side effect of it — see `withFullRender`. */
-  const [panAnchor, setPanAnchor] = useState(null);
-  const panAnchored = !exportPass && !!panAnchor && panAnchor.ppf === view.ppf;
-  const rvOffX = panAnchored ? panAnchor.offX : view.offX;
-  const rvOffY = panAnchored ? panAnchor.offY : view.offY;
+  /* ------------ B1449 — THE ZOOM HALF: the same anchor, with the scale term restored ------------
+     The paragraph above is B1440's pan increment and every word of it still holds. What changed is
+     the ONE assumption it leaned on: that `ppf` is constant, so the group transform is a pure
+     translate and nothing about the PICTURE moves.
+
+     A zoom does change `ppf`, so the group transform becomes `translate(tx ty) scale(k)` with
+     `k = view.ppf / anchor.ppf` — which REDUCES to the pure translate above at k = 1, so the pan
+     path is unchanged BY CONSTRUCTION (the owner calls the pan "great" after B1440; this must not
+     and cannot regress it). The exactness is a proof, not a pixel diff: see
+     `shared/viewport/viewAnchor.js` and `test/viewAnchor.test.js`.
+
+     ⛔ WHAT IT COSTS, stated because it IS the product decision and the owner has closed it. While
+     the wheel is still turning the drawing is the settled drawing AT THE ANCHOR'S ZOOM, uniformly
+     scaled: stroke weights and text scale with the plan, and every level-of-detail gate holds the
+     anchor's tier until the gesture settles. Owner, 2026-08-06: *"i think smooth zoom makes sense,
+     unless theres something im not considering"* — told, and accepted.
+
+     ⛔ THE COROLLARY THAT MAKES THE REST OF THE RENDER BODY A MECHANICAL RULE: because the whole
+     mid-gesture frame is "the anchor's frame, uniformly scaled", every render-body consumer of
+     `view.ppf` must read `rppf` — INCLUDING the label tier's own frame. Emit geometry at the anchor
+     while sizing labels at the live zoom and the group scales only one of them; that mixture is the
+     "visibly wrong mid-gesture" failure B1449 named, and it is invisible at rest because at rest
+     the two are equal. Handlers and effects keep the LIVE `view` (a hit tolerance is about where
+     the pointer is NOW, not where the drawing was baked).
+
+     ⛔ AND THE DRIFT CAP. Past `ANCHOR_MAX_K` the anchor is dropped and the frame re-bakes at the
+     live view — one full render, deliberately, rather than an ever-more-wrong picture. Leaflet's
+     own basemap path below re-bases on exactly this principle at ~0.75 zoom levels.
+
+     Behind `smoothZoom` (Plan ▾ → Smooth zoom), so it can be turned off without a deploy. Off, the
+     zoom anchor never arms and the pan anchor behaves exactly as B1440 shipped it. */
+  const [smoothZoom, setSmoothZoom] = useState(() => lsGet("smoothZoom", "1") !== "0");
+  const smoothZoomRef = useRef(smoothZoom);
+  smoothZoomRef.current = smoothZoom;
+  const [viewAnchor, setViewAnchor] = useState(null);
+  /* A same-`ppf` anchor is the PAN case and is never gated on the setting — turning smooth zoom off
+     must not take B1440's pan increment away with it. A different-`ppf` anchor is the zoom case. */
+  const anchorSameZoom = !!viewAnchor && viewAnchor.ppf === view.ppf;
+  const anchored = !exportPass && !!viewAnchor
+    && (anchorSameZoom || (smoothZoom && anchorHolds(view, viewAnchor)));
+  const rvPpf = anchored ? viewAnchor.ppf : view.ppf;
+  const rvOffX = anchored ? viewAnchor.offX : view.offX;
+  const rvOffY = anchored ? viewAnchor.offY : view.offY;
   /* Value-keyed, NOT `[view]`: the whole point is that this identity survives a pan frame, which
      is what lets `f2p` stay stable and every memoised element bail. */
-  const renderView = useMemo(() => ({ ppf: view.ppf, offX: rvOffX, offY: rvOffY }), [view.ppf, rvOffX, rvOffY]);
-  const panDx = view.offX - rvOffX, panDy = view.offY - rvOffY;
-  const panT = panDx || panDy ? `translate(${panDx} ${panDy})` : undefined;
+  const renderView = useMemo(() => ({ ppf: rvPpf, offX: rvOffX, offY: rvOffY }), [rvPpf, rvOffX, rvOffY]);
+  /* THE RENDER PPF. Every px-per-foot the RENDER BODY reasons at is this, never `view.ppf`. */
+  const rppf = renderView.ppf;
+  const viewT = anchored ? anchorTransform(view, renderView) : null;
+  const panT = anchorTransformAttr(viewT);
+  /* Harness contract (`data-pan-dx/dy`, e2e + ui-audit): these stay the group's translate
+     components, which for a pan are still exactly the pan delta. `data-pan-k` is the new zoom term
+     and is 1 whenever no zoom is anchored. */
+  const panDx = viewT ? viewT.tx : 0, panDy = viewT ? viewT.ty : 0;
+  const panK = viewT ? viewT.k : 1;
   /* Arm at the moment the pan passes its dead zone, from the gesture's OWN captured origin (so the
      anchor and the `offX = ox + travel` the handler writes are one frame of reference); disarm on
-     every gesture end, which re-bakes at the settled view in one commit. A zoom re-bakes on its
-     own — `panAnchor.ppf === view.ppf` fails — so no wheel/pinch path has to know this exists. */
-  const armPanAnchor = useCallback((ppf, offX, offY) => setPanAnchor({ ppf, offX, offY }), []);
-  const disarmPanAnchor = useCallback(() => setPanAnchor((a) => (a ? null : a)), []);
+     every gesture end, which re-bakes at the settled view in one commit. The wheel/pinch paths arm
+     and settle it too now — see the wheel-zoom block. */
+  const viewAnchorRef = useRef(null);
+  viewAnchorRef.current = viewAnchor;
+  const armViewAnchor = useCallback((ppf, offX, offY) => { const a = { ppf, offX, offY }; viewAnchorRef.current = a; setViewAnchor(a); }, []);
+  const disarmViewAnchor = useCallback(() => { viewAnchorRef.current = null; setViewAnchor((a) => (a ? null : a)); }, []);
+  /* The freshest view, readable from a native listener attached once at mount. Written on every
+     render AND eagerly by the wheel flush, so two rAF flushes inside one React render cannot lose a
+     notch (the reason the pre-B1449 wheel used a functional `setView`). */
+  const viewRef = useRef(view);
+  viewRef.current = view;
+
+  /* NEW-1 (V481(f)): an EXPORT pass re-frames the LABEL tier. Culling covered the geometry, but
+     every label gate / LOD drop / collision decision read `view.ppf`, so a sheet exported while
+     zoomed OUT inherited the on-screen declutter and silently shipped without a building's name
+     (measured live: 118 text nodes vs 151, "Building 12" unlabelled). `exportPass` therefore
+     carries the SHEET's own px-per-foot — a function of the framed extent and the paper only — and
+     `labelFrame` is what the whole label tier reasons at.
+
+     ⛔ B1449 — IT READS `rppf`, NOT `view.ppf`, AND THAT IS LOAD-BEARING RATHER THAN TIDY. The
+     mid-gesture frame is the anchor's frame uniformly scaled by k; feed the label tier the LIVE
+     zoom and it sizes type, picks LOD tiers and resolves collisions for a scale the geometry beside
+     it was not emitted at — then the group scales one of them again. At rest `rppf === view.ppf`,
+     so this line reads identically whether it is right or wrong, which is precisely why the
+     mid-gesture harness (ui-audit/verify-midgesture-zoom.mjs) had to exist before this shipped.
+     `null` sheet ppf (every screen render) → the frame is the render view, k = 1, output unchanged. */
+  const labelFrame = useMemo(() => makeLabelFrame(rppf, exportPass && exportPass.ppf), [rppf, exportPass]);
+  const labelPpf = labelFrame.ppf;   // the px-per-foot label DECISIONS are made at
+  const labelK = labelFrame.k;       // label-space px → canvas px (1 on screen)
+  const strokeZk = labelFrame.strokeZk; // the zoom factor `strokeZoom` uses (1 on an export pass)
+  const cullActive = !exportPass && shouldCull(drawableCount);
+  /* VIEW-INDEPENDENT-ONCE (NEW-2). The cull rect is LATCHED: `cullRectFor` hands back the rect we
+     already hold for as long as the true viewport is still comfortably inside it, and only builds
+     a new one when the view approaches its edge or the zoom changes (lib/viewCull.js explains why
+     the containment test is what makes that safe). Holding the same OBJECT is half the fix — a
+     fresh object with the same numbers would still invalidate `drawEls` / `drawElsZ` /
+     `drawParcels` / `drawMarkupsZ` and everything memoised on them.
+     ⛔ It is still genuinely view-derived, and must stay so: pan far enough, or zoom at all, and
+     the whole chain recomputes — exactly once.
+     ⛔ B1449 — the rect is built at the RENDER view (so its latch key is constant through a zoom
+     gesture instead of re-arming on every notch) but PROBED against the LIVE one, so a zoom-out
+     still re-arms in time and nothing pops in at the edge. Passing one view for both is what made
+     a wheel notch re-filter the whole model. */
+  const cullRectRef = useRef(null);
+  cullRectRef.current = cullActive
+    ? cullRectFor(renderView, size, cullRectRef.current, undefined, undefined, view)
+    : null;
+  const cullRect = cullRectRef.current;
   const [cursor, setCursor] = useState(null);   // {x,y} feet
   const [hoverElId, setHoverElId] = useState(null); // B226: building under the cursor (select mode, nothing selected) → preview its feature-add buttons
   const [hoverMkId, setHoverMkId] = useState(null); // B156: markup under the cursor in Select mode → pre-click hover glow (set by the markup's own pointer enter/leave, so it matches what a click grabs)
@@ -3304,6 +3382,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const nx = pinchNextRef.current, base = pinch2Ref.current;
     if (!nx || !base) return;
     const factor = nx.dist / base.dist;
+    /* B1449 — a pinch is a zoom, so it gets the same render anchor the wheel does. Armed at the
+       PRE-step view (so this very frame is already anchored) and re-baked when the drift cap says
+       the picture has scaled too far; `onTouchEndPinch` settles it. Without this the pinch is the
+       one zoom path left re-emitting every element per frame. */
+    const v0 = viewRef.current;
+    if (smoothZoomRef.current && v0) {
+      const nv0 = pinchZoom({ scale: v0.ppf, tx: v0.offX, ty: v0.offY }, base.mid, nx.mid, factor, 0.02, 8);
+      const a = viewAnchorRef.current;
+      if (!a || !anchorHolds({ ppf: nv0.scale }, a)) armViewAnchor(v0.ppf, v0.offX, v0.offY);
+    }
     setView((v) => { const nv = pinchZoom({ scale: v.ppf, tx: v.offX, ty: v.offY }, base.mid, nx.mid, factor, 0.02, 8); return { ppf: nv.scale, offX: nv.tx, offY: nv.ty }; });
     pinch2Ref.current = nx; // re-baseline so the next frame is incremental
   };
@@ -3367,6 +3455,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     }
     pinch2Ref.current = null; pinchNextRef.current = null;
     if (pinchRafRef.current) { cancelAnimationFrame(pinchRafRef.current); pinchRafRef.current = 0; }
+    disarmViewAnchor(); // B1449 — the gesture is over; re-bake at the settled zoom in one commit
   };
   const altSnapOffRef = useRef(false); // Alt held during a drag/placement → bypass snap for this one move (re-armed every pointer event)
   // The clipboard payload itself is in planClipboardStore (module scope) — see the import.
@@ -4820,7 +4909,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if (d && d.mode === "pan" && typeof d.ox === "number") d.ox -= delta;
       // NEW-2 — the anchor is a copy of that same captured origin, so it has to be rebased by the
       // same delta or the group transform would carry the panel's width as a permanent offset.
-      setPanAnchor((a) => (a ? { ...a, offX: a.offX - delta } : a));
+      setViewAnchor((a) => { if (!a) return a; const n = { ...a, offX: a.offX - delta }; viewAnchorRef.current = n; return n; });
     }
     // These deps are intentional re-measure TRIGGERS (the body reads only refs, so exhaustive-deps
     // is satisfied by any set): re-run whenever something that can move the canvas's left edge changes.
@@ -4899,18 +4988,54 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
    * by the time the frame paints), then clamp once at the end.
    *
    * The pointerdown listener is CAPTURE-phase on the wrapper so it beats every React handler on the
-   * canvas: no gesture may start against a view with a zoom still queued behind it. */
+   * canvas: no gesture may start against a view with a zoom still queued behind it.
+   *
+   * ------------ B1449 — the two things the owner reported, which are two DIFFERENT defects ------
+   *
+   * He was precise: *"it zooms correctly. It's not lagging like it was … there's a delay, but it
+   * doesn't feel like it's recomputing … Now it just doesn't feel smooth, and it feels like there's
+   * a delay."* Those are two mechanisms and they are fixed in two places.
+   *
+   * (1) "DOESN'T FEEL SMOOTH" — DISCRETENESS, fixed HERE. The factor was `deltaY < 0 ? 1.12 : 1/1.12`,
+   *     which reads only the SIGN: a trackpad, which emits many small deltas per gesture, got a full
+   *     12% jump for each one and zoomed in a violent staircase. `wheelZoomFactor` makes the factor
+   *     proportional to the delta, and preserves a real mouse detent numerically EXACTLY (asserted
+   *     with `Object.is` in test/viewAnchor.test.js) — so the mouse is unchanged and the trackpad
+   *     becomes continuous.
+   *
+   * (2) "THERE'S A DELAY" — INPUT LATENCY, fixed by the ANCHOR (see the zoom-anchor block above),
+   *     not by removing the rAF coalescing. Worth stating, because coalescing was the obvious
+   *     suspect and it is the wrong one: one frame of rAF is ~16 ms, and the delay he can feel is
+   *     the FULL RE-EMIT of every element that each `setView` used to force — the same cost the pan
+   *     had before B1440, and the pan is the control experiment (same coalescing, and he now calls
+   *     it "great"). So the wheel keeps its rAF and gets the anchor instead.
+   *
+   * The gesture's lifetime is a SETTLE TIMER rather than an event boundary, because a wheel has no
+   * "up": arm on the first notch, re-bake `ZOOM_SETTLE_MS` after the last one. */
   const wheelRaf = useRef(0);
   const wheelAccum = useRef(null);   // { f, mx, my } awaiting the next frame
+  const wheelSettleRef = useRef(0);  // pending settle timer (0 = none)
+  const settleZoomAnchor = useCallback(() => {
+    clearTimeout(wheelSettleRef.current); wheelSettleRef.current = 0;
+    disarmViewAnchor();
+  }, [disarmViewAnchor]);
   const flushWheel = () => {
     wheelRaf.current = 0;
     const w = wheelAccum.current;
     wheelAccum.current = null;
     if (!w) return;
-    setView((v) => {
-      const nv = zoomAround({ scale: v.ppf, tx: v.offX, ty: v.offY }, w.f, w.mx, w.my, 0.02, 8);
-      return { ppf: nv.scale, offX: nv.tx, offY: nv.ty };
-    });
+    const v = viewRef.current;
+    const nv = zoomAround({ scale: v.ppf, tx: v.offX, ty: v.offY }, w.f, w.mx, w.my, 0.02, 8);
+    const next = { ppf: nv.scale, offX: nv.tx, offY: nv.ty };
+    /* Arm (or re-bake) the render anchor BEFORE the view moves, at the PRE-step view — so this very
+       notch is already anchored and the first one is not wasted on a full re-emit. Past the drift
+       cap `anchorHolds` says no and we re-anchor here, which costs one full render on purpose. */
+    if (smoothZoomRef.current) {
+      const a = viewAnchorRef.current;
+      if (!a || !anchorHolds(next, a)) armViewAnchor(v.ppf, v.offX, v.offY);
+    }
+    viewRef.current = next;   // eager: a second rAF flush before React re-renders must not lose a notch
+    setView(next);
   };
   const flushWheelNow = () => {
     if (!wheelRaf.current) return;   // nothing pending → byte-identical to the old path
@@ -4918,6 +5043,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     wheelRaf.current = 0;
     flushSync(flushWheel);
   };
+  /* A pointer gesture starting mid-zoom flushes the queued notch AND re-bakes: a pan must begin
+     from a settled frame, or `armViewAnchor` below would overwrite a live zoom anchor and the two
+     gestures would fight over one anchor. */
+  const flushWheelForPointer = () => { flushWheelNow(); if (wheelSettleRef.current) settleZoomAnchor(); };
   useEffect(() => {
     // Attach to the canvas WRAPPER (which holds the SVG + the HTML overlays), so
     // scrolling over a badge / zoom button / selected element still zooms.
@@ -4929,16 +5058,20 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       e.preventDefault();
       const r = wrap.getBoundingClientRect(); // SVG fills the wrapper, so same rect
       const mx = e.clientX - r.left, my = e.clientY - r.top;
-      const f = e.deltaY < 0 ? 1.12 : 1 / 1.12;
+      const f = wheelZoomFactor(e);
+      if (f === 1) return;                    // a zero/garbage delta zooms nothing and starts no gesture
       const prev = wheelAccum.current;
       wheelAccum.current = { f: (prev ? prev.f : 1) * f, mx, my };
       if (!wheelRaf.current) wheelRaf.current = requestAnimationFrame(flushWheel);
+      clearTimeout(wheelSettleRef.current);
+      wheelSettleRef.current = setTimeout(settleZoomAnchor, ZOOM_SETTLE_MS);
     };
     wrap.addEventListener("wheel", onWheel, { passive: false });
-    wrap.addEventListener("pointerdown", flushWheelNow, { capture: true });
+    wrap.addEventListener("pointerdown", flushWheelForPointer, { capture: true });
     return () => {
+      clearTimeout(wheelSettleRef.current);
       wrap.removeEventListener("wheel", onWheel);
-      wrap.removeEventListener("pointerdown", flushWheelNow, { capture: true });
+      wrap.removeEventListener("pointerdown", flushWheelForPointer, { capture: true });
       if (wheelRaf.current) { cancelAnimationFrame(wheelRaf.current); wheelRaf.current = 0; }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -4960,7 +5093,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     capturePidRef.current = null;
     cancelActiveMove(); // a drag-move torn down without a clean pointer-up reverts to pre-drag (B315); no-op otherwise
     drag.current = null;
-    disarmPanAnchor(); // NEW-2 — re-bake at the settled view; a torn-down pan must not leave a live group transform
+    disarmViewAnchor(); // NEW-2 — re-bake at the settled view; a torn-down pan must not leave a live group transform
     setPanning(false);
     setMarquee(null);
     setMkRect(null);
@@ -6022,7 +6155,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     setSel({ kind: "callout", id });
     if (c.locked) return; // locked → select-only
     const st = calloutStyle(c);
-    const { w, h } = calloutLayout(c, st, view.ppf);
+    const { w, h } = calloutLayout(c, st, rppf);
     const bp = f2p(c.box);
     const clickPx = f2p(p2f(e.clientX, e.clientY)); // client → SVG px (identity round-trip; box is in SVG px)
     const zone = calloutDblZone({ x: bp.x - w / 2, y: bp.y - h / 2, w, h }, clickPx, CALLOUT_BORDER_BAND_PX);
@@ -6712,7 +6845,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // NEW-2 — pin the coordinates at the gesture's OWN captured origin the moment it arms, so
       // everything from here to pointer-up is one group transform instead of ~1,200 re-emitted
       // nodes. Batches into the same commit as the setView below. See the pan-anchor block.
-      if (!d.panArmed) armPanAnchor(view.ppf, d.ox, d.oy);
+      if (!d.panArmed) armViewAnchor(view.ppf, d.ox, d.oy);
       d.panArmed = true;
       setView((v) => ({ ...v, offX: d.ox + (e.clientX - d.sx), offY: d.oy + (e.clientY - d.sy) }));
       return;
@@ -7060,7 +7193,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // pending. Commit it SYNCHRONOUSLY first: everything below (and flushElems at the end) must
     // see the settled geometry, never a canvas one move short of where the finger let go.
     flushFrameJobs();
-    disarmPanAnchor(); // NEW-2 — the gesture is over; re-bake coordinates at the settled view (a no-op if no pan armed)
+    disarmViewAnchor(); // NEW-2 — the gesture is over; re-bake coordinates at the settled view (a no-op if no pan armed)
     const d = drag.current;
     if (d && d.mode === "marquee") {
       // Crossing/touch box-select via the shared selection model (B569/B570) — one box-test for
@@ -13482,8 +13615,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       shortFt = Math.min(sp.w, sp.h); longFt = Math.max(sp.w, sp.h);
     } else { shortFt = Math.min(el.w, el.h); longFt = Math.max(el.w, el.h); }
     const chars = Math.max(1, ...lns.map((t) => String(t).length));
-    const byH = (TRAILER_LABEL.fracShort * shortFt * view.ppf) / (lns.length * LH_RATIO); // stack across the short side
-    const byW = (TRAILER_LABEL.fracLong * longFt * view.ppf) / (chars * CW_RATIO);         // text along the long side
+    const byH = (TRAILER_LABEL.fracShort * shortFt * rppf) / (lns.length * LH_RATIO); // stack across the short side
+    const byW = (TRAILER_LABEL.fracLong * longFt * rppf) / (chars * CW_RATIO);         // text along the long side
     const minPx = TRAILER_LABEL.minPx * labelK; // NEW-1: an absolute legibility floor → label frame
     const cap = Math.max(fs, minPx); // never cap below the legibility floor
     const f = Math.min(cap, Math.max(minPx, Math.min(byH, byW)));
@@ -13623,11 +13756,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     let halfW, halfH;
     if (poly) {
       const sp = ringSpanFt(el.points);
-      halfW = (sp.w / 2) * view.ppf; halfH = (sp.h / 2) * view.ppf;
+      halfW = (sp.w / 2) * rppf; halfH = (sp.h / 2) * rppf;
     } else {
       const rad = ((el.rot || 0) * Math.PI) / 180, cw = Math.abs(Math.cos(rad)), sw = Math.abs(Math.sin(rad));
-      halfW = ((el.w / 2) * cw + (el.h / 2) * sw) * view.ppf;
-      halfH = ((el.w / 2) * sw + (el.h / 2) * cw) * view.ppf;
+      halfW = ((el.w / 2) * cw + (el.h / 2) * sw) * rppf;
+      halfH = ((el.w / 2) * sw + (el.h / 2) * cw) * rppf;
     }
     // Per-candidate font: the global screen-space metrics by default; a trailer label is sized
     // to its own real-world extent (B195) and opts out of leader-out (a too-small strip overflows
@@ -13639,8 +13772,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // is answered against the interior that exists rather than a bounding box that overstates it,
     // and the label may slide within that interior to clear an obstacle. A pond is additionally
     // `mustLabel`: it may never end a frame unnamed (see lib/labelFitLadder's header).
-    const ringOpts = poly ? { ring: el.points, ringOrigin: fc, ringPpf: view.ppf } : null;
-    labelCands.push({ el, lid: el.id, c: f2p(fc), lines, importance: (bldgNo.has(el.id) ? 1e12 : 0) + area, halfW, halfH, rot: stripLabelRot(el, flat, ccharW, view.ppf), fs: cfs, lh: clh, charW: ccharW, noLeader, carto: el.type === "pond", ...ringOpts, mustLabel: el.type === "pond" });
+    const ringOpts = poly ? { ring: el.points, ringOrigin: fc, ringPpf: rppf } : null;
+    labelCands.push({ el, lid: el.id, c: f2p(fc), lines, importance: (bldgNo.has(el.id) ? 1e12 : 0) + area, halfW, halfH, rot: stripLabelRot(el, flat, ccharW, rppf), fs: cfs, lh: clh, charW: ccharW, noLeader, carto: el.type === "pond", ...ringOpts, mustLabel: el.type === "pond" });
     if (pondAdd) {
       // B157: the added-detention label, seated on the thickest part of the NEW ground.
       // Rides the SAME LOD/collision pool (its own label id) — not a parallel renderer.
@@ -13794,10 +13927,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     dimItems.push({
       id: el.id,
       box: dimNumberBox({
-        tlx: tl.x, tly: tl.y, w: el.w * view.ppf, h: el.h * view.ppf, cx: c.x, cy: c.y,
+        tlx: tl.x, tly: tl.y, w: el.w * rppf, h: el.h * rppf, cx: c.x, cy: c.y,
         rot: el.rot || 0, horizLong: el.w >= el.h,
         posF: el.type === "road" ? DIM_POS_F_ROAD : DIM_POS_F_DEFAULT,
-        ox: dimOff.x * view.ppf, oy: dimOff.y * view.ppf,
+        ox: dimOff.x * rppf, oy: dimOff.y * rppf,
         textLen: `${f0(dimW)}′`.length, fz: dimFontPx(labelPpf) * labelK,
       }),
     });
@@ -13988,7 +14121,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // dog-ears / bump-outs are building elements but are NOT standalone buildings —
     // they don't get their own dock / parking / bump-out handles.
     if (!el || el.type !== "building" || el.points || el.dogEar) return null;
-    const wpx = Math.abs(el.w) * view.ppf, hpx = Math.abs(el.h) * view.ppf; // rendered footprint, px
+    const wpx = Math.abs(el.w) * rppf, hpx = Math.abs(el.h) * rppf; // rendered footprint, px
     const { dockSides } = dockSidesOf(el);
     const kids = els.filter((x) => x.attachedTo === el.id);
     const cpx = f2p({ x: el.cx, y: el.cy });
@@ -14142,7 +14275,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (tool !== "select" || !featActiveId) return null;
     const el = els.find((x) => x.id === featActiveId);
     if (!el || el.locked || el.points || el.type !== "parking") return null;
-    if (Math.min(Math.abs(el.w), Math.abs(el.h)) * view.ppf < FEAT_BTN_MIN_PX) return null; // B225: hide before it clusters
+    if (Math.min(Math.abs(el.w), Math.abs(el.h)) * rppf < FEAT_BTN_MIN_PX) return null; // B225: hide before it clusters
     const o = rot2(0, el.h / 2, el.rot);              // +local-y depth edge midpoint
     const ms = f2p({ x: el.cx + o.x, y: el.cy + o.y });
     const cpx = f2p({ x: el.cx, y: el.cy });
@@ -14523,8 +14656,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const renderSheetOverlay = (o) => {
     if (o.visible === false) return null; // B277 — hidden overlays don't render on the map (still listed in the References panel, with the eye toggle to bring them back)
     const tl = f2p({ x: o.x, y: o.y });
-    const w = o.imgW * o.ftPerPx * view.ppf;
-    const h = o.imgH * o.ftPerPx * view.ppf;
+    const w = o.imgW * o.ftPerPx * rppf;
+    const h = o.imgH * o.ftPerPx * rppf;
     const cx = tl.x + w / 2, cy = tl.y + h / 2;
     return (
       <g key={o.id} transform={o.rotation ? `rotate(${o.rotation} ${cx} ${cy})` : undefined}
@@ -14592,8 +14725,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     );
     if (!o || tool !== "select") return calib || null;
     const tl = f2p({ x: o.x, y: o.y });
-    const w = o.imgW * o.ftPerPx * view.ppf;
-    const h = o.imgH * o.ftPerPx * view.ppf;
+    const w = o.imgW * o.ftPerPx * rppf;
+    const h = o.imgH * o.ftPerPx * rppf;
     const cx = tl.x + w / 2, cy = tl.y + h / 2;
     return (
       <g data-export="skip">
@@ -14621,7 +14754,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const c = callouts.find((x) => x.id === sel.id);
     if (!c || editCallout?.id === c.id) return null;
     const st = calloutStyle(c);
-    const { w, h } = calloutLayout(c, st, view.ppf);
+    const { w, h } = calloutLayout(c, st, rppf);
     const bp = f2p(c.box);
     const cr = calloutCornerRadius(w, h);
     const gx = bp.x - w / 2, gy = bp.y - h / 2;
@@ -16196,6 +16329,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           <button style={{ ...menuItem(false), marginTop: 2, display: "flex", alignItems: "center", gap: 8 }} onClick={() => { closeHdrMenus(); setStorageOpen(true); }}
             title="How much room this app is using on this device, and what's safe to clear" data-testid="storage-menu-item">
             <span aria-hidden style={{ flex: "none" }}>🗄</span><span>Storage on this device…</span>
+          </button>
+          {/* B1449 — the one switch for the anchored zoom. Off, a wheel notch re-draws the whole
+              plan at the new zoom exactly as it did before (crisper mid-gesture, slower); on, the
+              drawing scales as one piece and re-draws when you stop. The PAN anchor (B1440) is
+              deliberately NOT gated on this — turning smooth zoom off must not take that away. */}
+          <button style={{ ...menuItem(false), marginTop: 2, display: "flex", alignItems: "center", gap: 8 }}
+            role="menuitemcheckbox" aria-checked={smoothZoom} data-testid="smooth-zoom-toggle"
+            onClick={() => { const nx = !smoothZoom; setSmoothZoom(nx); lsSet("smoothZoom", nx ? "1" : "0"); if (!nx) disarmViewAnchor(); }}
+            title="Zoom scales the drawing as one piece while the wheel is turning, then re-draws it sharp the moment you stop. Turn off to re-draw on every notch instead.">
+            <span aria-hidden style={{ flex: "none" }}>{smoothZoom ? "☑" : "☐"}</span><span>Smooth zoom</span>
           </button>
         </AnchoredMenu>
     </div>
@@ -18064,7 +18207,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           selected easement keeps its label at any zoom (edit handles never vanish mid-edit). */}
                       {(isSel || dimCalloutVisible(labelPpf)) && <text x={cp.x} y={cp.y} textAnchor="middle" fontSize={10.5 * labelK} fontWeight="700" fill={ecol} pointerEvents="none" style={INK_HALO}>{easementLabel(m)}{proposed ? " (proposed)" : ""}</text>}
                       {isSel && labelPpf > 0.05 && <text x={cp.x} y={cp.y + 12 * labelK} textAnchor="middle" fontSize={9 * labelK} fontWeight="600" fill={ecol} pointerEvents="none" style={{ paintOrder: "stroke", stroke: "#fff", strokeWidth: 2.5 }}>{Math.round(area).toLocaleString()} sf · {(area / SQFT_PER_ACRE).toFixed(2)} ac</text>}
-                      {inlineLabelEls(easePathFeet, m.inlineLabel, ecol, m.labelSpacing || INLINE_LABEL_SPACING.easement, view.ppf, f2p, `il${m.id}-`, { size: m.labelSize, halo: m.labelHalo, lf: labelFrame, ...easementInsetOpts(m) })}
+                      {inlineLabelEls(easePathFeet, m.inlineLabel, ecol, m.labelSpacing || INLINE_LABEL_SPACING.easement, rppf, f2p, `il${m.id}-`, { size: m.labelSize, halo: m.labelHalo, lf: labelFrame, ...easementInsetOpts(m) })}
                     </g>
                   );
                 }
@@ -18081,7 +18224,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="rgba(0,0,0,0.001)" strokeWidth={MK_HIT_PX} strokeLinecap="round" pointerEvents="stroke" />
                       <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke={nStroke} strokeWidth={vsw} strokeDasharray={da} fill="none" pointerEvents="none" />
                       {/* B620 — inline label riding the line (own color + white halo; appears in exports) */}
-                      {inlineLabelEls(mkPts(m), m.inlineLabel, m.stroke, m.labelSpacing || INLINE_LABEL_SPACING.line, view.ppf, f2p, `il${m.id}-`, { size: m.labelSize, halo: m.labelHalo, place: labelPlaceOf(m), lf: labelFrame })}
+                      {inlineLabelEls(mkPts(m), m.inlineLabel, m.stroke, m.labelSpacing || INLINE_LABEL_SPACING.line, rppf, f2p, `il${m.id}-`, { size: m.labelSize, halo: m.labelHalo, place: labelPlaceOf(m), lf: labelFrame })}
                     </g>
                   );
                 }
@@ -18091,7 +18234,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     <g key={m.id} data-markup={m.id} style={common.style} onPointerDown={common.onPointerDown} onDoubleClick={(e) => onMarkupDouble(e, m.id)}>
                       <polyline points={s} fill="none" stroke="rgba(0,0,0,0.001)" strokeWidth={MK_HIT_PX} strokeLinecap="round" strokeLinejoin="round" pointerEvents="stroke" />
                       <polyline points={s} fill="none" stroke={nStroke} strokeWidth={vsw} strokeDasharray={da} pointerEvents="none" />
-                      {inlineLabelEls(mkPts(m), m.inlineLabel, m.stroke, m.labelSpacing || INLINE_LABEL_SPACING.polyline, view.ppf, f2p, `il${m.id}-`, { size: m.labelSize, halo: m.labelHalo, place: labelPlaceOf(m), lf: labelFrame })}
+                      {inlineLabelEls(mkPts(m), m.inlineLabel, m.stroke, m.labelSpacing || INLINE_LABEL_SPACING.polyline, rppf, f2p, `il${m.id}-`, { size: m.labelSize, halo: m.labelHalo, place: labelPlaceOf(m), lf: labelFrame })}
                     </g>
                   );
                 }
@@ -18108,7 +18251,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     </g>
                   );
                 }
-                const c = f2p({ x: m.cx, y: m.cy }), w = m.w * view.ppf, h = m.h * view.ppf;
+                const c = f2p({ x: m.cx, y: m.cy }), w = m.w * rppf, h = m.h * rppf;
                 const rotTf = `rotate(${m.rot || 0} ${c.x} ${c.y})`;
                 if (m.kind === "ellipse") return (
                   <g key={m.id} data-markup={m.id} style={mkCursor} onPointerDown={common.onPointerDown} onContextMenu={common.onContextMenu}>
@@ -18383,11 +18526,20 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               element's own bounding box, so this ONE transform corrects the pointer path
               (the hover readout AND every placed point) along with the render; `view` is
               untouched, so the pan stays exactly reversible. The export composes from
-              `view` and deliberately does NOT carry it — see lib/mapLock.js. */}
+              `view` and deliberately does NOT carry it — see lib/mapLock.js.
+
+              B1449 — `data-pan-k` is the ZOOM half of the anchored group transform and
+              `data-render-ppf` is the px-per-foot the geometry was actually EMITTED at.
+              `data-view-ppf` stays the LIVE zoom (the harness + e2e contract is untouched);
+              these two are what let a check tell an anchored frame from a settled one — which
+              no pixel or DOM assertion in this repo could do before, and that blindness was
+              itself the defect (DANGEROUS-MEANS-UNOBSERVABLE). `k` is 1 and `render-ppf`
+              equals `view-ppf` whenever no zoom is anchored, i.e. at rest and on every
+              export, so every pre-B1449 assertion reads exactly what it read. */}
           <svg ref={svgRef} data-testid="planner-canvas" width="100%" height="100%" viewBox={`0 0 ${size.w} ${size.h}`} role="application" aria-label="Site plan canvas"
             data-view-offx={view.offX} data-view-offy={view.offY} data-view-ppf={view.ppf}
             data-reg-dx={regShift.dx} data-reg-dy={regShift.dy}
-            data-pan-dx={panDx} data-pan-dy={panDy}
+            data-pan-dx={panDx} data-pan-dy={panDy} data-pan-k={panK} data-render-ppf={rppf}
             style={{ position: "relative", zIndex: 1, transform: (regShift.dx || regShift.dy) ? `translate(${regShift.dx}px, ${regShift.dy}px)` : undefined, background: origin ? "transparent" : PAL.paper, display: "block", touchAction: "none", userSelect: "none", WebkitUserSelect: "none", cursor: spacePan ? (panning ? "grabbing" : "grab") : identifyMode ? ADD_CURSOR : (attachFor || alignFor || traceMode || pobMode || routeMode || xsecMode || ovCalib) ? "crosshair" : (tool === "select" || tool === "pan" || printMode) ? (panning ? "grabbing" : "grab") : "crosshair" }}
             onMouseDown={(e) => {
               // Don't cancel the default action when the mousedown lands on an inline text
@@ -18473,8 +18625,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               {showAerial && underlay && !(origin && basemapOn) && (() => {
                 const tl = f2p({ x: underlay.x, y: underlay.y });
                 const sy = underlay.ftPerPxY || underlay.ftPerPx;
-                const w = underlay.imgW * underlay.ftPerPx * view.ppf;
-                const h = underlay.imgH * sy * view.ppf;
+                const w = underlay.imgW * underlay.ftPerPx * rppf;
+                const h = underlay.imgH * sy * rppf;
                 return <image href={underlay.src} x={tl.x} y={tl.y} width={w} height={h}
                   opacity={underlay.opacity} preserveAspectRatio="none"
                   style={{ cursor: tool === "select" && !underlay.locked ? "move" : "crosshair" }}
@@ -18654,7 +18806,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     // the CORNER ITSELF, the label is a separate pill offset above-right on a short
                     // leader, and it only unfolds once the plan is zoomed in enough to act on it. The dot
                     // carries the same click + tooltip, so nothing is lost when it is folded.
-                    const open = view.ppf >= ROAD_FLAG_LABEL_PPF;
+                    const open = rppf >= ROAD_FLAG_LABEL_PPF;
                     // Width measured the way the text actually sets: "! " glyph, the label at ~0.58em of
                     // 10.5px, a gap, then "Fix". Padding on both ends. (The old estimate omitted the
                     // glyph and the inter-word gap, which is exactly how "Fix" ended up overlapping.)
@@ -18707,8 +18859,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     const top = toePx.reduce((a, b) => (b.y < a.y ? b : a), toePx[0]);
                     return (
                       <g key={e.id}>
-                        <path d={annulus} fillRule="evenodd" fill="url(#pat-berm)" stroke="#7a5f36" strokeWidth={strokeZoom(1.5, view.ppf / 0.35)} strokeLinejoin="round" opacity={0.9} />
-                        {crestRings.map((r, i) => <path key={i} d={ringPath(r)} fill="none" stroke="#7a5f36" strokeWidth={strokeZoom(1, view.ppf / 0.35)} strokeLinejoin="round" opacity={0.6} />)}
+                        <path d={annulus} fillRule="evenodd" fill="url(#pat-berm)" stroke="#7a5f36" strokeWidth={strokeZoom(1.5, rppf / 0.35)} strokeLinejoin="round" opacity={0.9} />
+                        {crestRings.map((r, i) => <path key={i} d={ringPath(r)} fill="none" stroke="#7a5f36" strokeWidth={strokeZoom(1, rppf / 0.35)} strokeLinejoin="round" opacity={0.6} />)}
                         {/* NEW-1 — the berm HEIGHT tag is pond-design-parameter tier, not overview
                             tier: it reveals only once the berm's exterior face (extSlope × height)
                             reads as a real band on screen, and its font rides the shared dimension
@@ -18921,7 +19073,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               {fmHeatOn && fmHeat && (() => {
                 const b = fmHeat.bboxFt;
                 const tl = f2p({ x: b.x, y: b.y });
-                const wPx = b.w * view.ppf, hPx = b.h * view.ppf;
+                const wPx = b.w * rppf, hPx = b.h * rppf;
                 const legend = heatmapLegend(fmHeatCells);
                 const lx = tl.x, ly = tl.y + hPx + 10;
                 const hovCell = cursor ? heatCellAt(fmHeatCells, cursor) : null;
@@ -18987,7 +19139,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               {cfHeatOn && cfHeat && (() => {
                 const b = cfHeat.bboxFt;
                 const tl = f2p({ x: b.x, y: b.y });
-                const wPx = b.w * view.ppf, hPx = b.h * view.ppf;
+                const wPx = b.w * rppf, hPx = b.h * rppf;
                 const legend = cutFillLegend(gsCells);
                 const tot = cutFillTotals(gsCells);
                 const lx = tl.x, ly = tl.y + hPx + 10;
@@ -19035,7 +19187,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 // B913 — one shared geometry helper (auto-size, OR wrap-to-c.boxW when the user has
                 // dragged a width handle). fontPx/lineH/padX/padY/lines/w/h all come from it, so the
                 // committed box, its handles, and the inline editor can't drift.
-                const { fontPx, lineH, padX, padY, w, h, lines } = calloutLayout(c, st, view.ppf);
+                const { fontPx, lineH, padX, padY, w, h, lines } = calloutLayout(c, st, rppf);
                 const border = st.stroke; // B619: no recolor on select — the leader/box keep the callout's own color; blue chrome cues selection
                 const anchor = st.align === "left" ? "start" : st.align === "right" ? "end" : "middle";
                 const tx = st.align === "left" ? bp.x - w / 2 + padX : st.align === "right" ? bp.x + w / 2 - padX : bp.x;
@@ -19118,7 +19270,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 // committed. B913 — when the callout has an explicit width (boxW), the editor takes that
                 // exact width and SOFT-WRAPS (matching the committed wrap); otherwise it auto-sizes and
                 // never wraps, as before. A screen-px minimum (64×30) keeps a tiny/empty box usable.
-                const geo = calloutLayout({ text: editCallout.text || "", boxW: c.boxW }, st, view.ppf);
+                const geo = calloutLayout({ text: editCallout.text || "", boxW: c.boxW }, st, rppf);
                 const { fontPx, lineH, padX, padY } = geo;
                 const wrapped = geo.wrapped;
                 const w = wrapped ? geo.w : Math.max(64, geo.w), h = Math.max(30, geo.h);
@@ -19228,7 +19380,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 </g>
               )}
               {/* draft rect */}
-              {draftRect && (() => { const a = f2p({ x: draftRect.x, y: draftRect.y }), pw = draftRect.w * view.ppf, ph = draftRect.h * view.ppf;
+              {draftRect && (() => { const a = f2p({ x: draftRect.x, y: draftRect.y }), pw = draftRect.w * rppf, ph = draftRect.h * rppf;
                 const curb = +settings.roadCurb || CURB, dw = draftRect.type === "road" ? Math.max(0, Math.min(draftRect.w, draftRect.h) - 2 * curb) : 0;
                 return (
                 <g data-export="skip" pointerEvents="none"><rect x={a.x} y={a.y} width={pw} height={ph} fill={typeStyle(draftRect.type, settings).fill} fillOpacity={0.5} stroke={PAL.accent} strokeWidth={1.5} strokeDasharray="5 4" />
