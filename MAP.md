@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-08-08 @ `e9cde22` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-08-08 @ `ee3108e` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -636,7 +636,7 @@ _453 source files mapped._
 - **`src/workspaces/site-planner/lib/overlayOrder.js`** — Pure draw-order model for placed map references (NEW-2): the two-band below/above-the-plan split, the band-grouped array that IS the draw order, the panel's front-first listing, and the identity-on-no-op reorder / promote mutators
   - _exports_: `OVERLAY_BAND_ABOVE`, `OVERLAY_BAND_BELOW`, `overlayBand`, `overlayBandsGrouped`, `overlayDrawOrder`, `overlayOrderFlags`, `overlayPanelOrder`, `reorderOverlays`, `setOverlayBand`, `splitOverlayBands`
 - **`src/workspaces/site-planner/lib/overlayPdf.js`** — Site-plan overlay rasterizer: lazily reuses Doc Review PDF.js to render a dropped PDF/image page to a white-knockout PNG data URL, reads its scale note, classifies sheet size, rebuilds from stored bytes
-  - _exports_: `baseRasterScale`, `chooseOverlayRasterScale`, `isDxfFile`, `isPdfFile`, `knockoutNearWhite`, `MAX_RERASTER_DIM`, `openOverlayFile`, `rasterizePage`, `rasterizePageHiRes`, `rasterizeStoredDxf`, `rasterizeStoredPdf`
+  - _exports_: `baseRasterScale`, `chooseOverlayRasterScale`, `HIRES_CACHE_PER_OVERLAY`, `isDxfFile`, `isPdfFile`, `knockoutNearWhite`, `MAX_RERASTER_DIM`, `openOverlayFile`, `overlayRasterKey`, `rasterizePage`, `rasterizePageHiRes`, `rasterizeStoredDxf`, `rasterizeStoredPdf`, `RERASTER_LADDER`
 - **`src/workspaces/site-planner/lib/overlayPrint.js`** — Pure DOM-free print/export selection for placed site-plan overlays: filters src-bearing visible overlays, drives the 'Print overlay' checkbox visibility and the export compositing pass
   - _exports_: `hasPrintableOverlay`, `isOverlayPrintable`, `printableOverlays`
 - **`src/workspaces/site-planner/lib/overlayScale.js`** — Pure drawing-scale helpers: engineer scale-note parsing, standard sheet detection, feet-per-point conversions, viewport-sanity auto-scale guard, and Bluebeam-style page=real distance/preset scale entry

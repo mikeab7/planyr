@@ -474,6 +474,61 @@ export function annotationArmFixture(fixture, arm) {
   return out;
 }
 
+/* ---- ZOOM RE-RASTER ARMS (NEW-1) --------------------------------------------------------------
+ * ⛔ THE AXIS EVERY BATTERY IN THIS PROGRAM HAS BEEN BLIND TO, and the blindness is structural
+ * rather than accidental: `raster-arms.mjs` PANS, `annotation-arms.mjs` PANS, `session-axes.mjs`
+ * PANS. B749's Tier-2 re-raster fires on ZOOM — it re-renders a PDF-backed overlay's page at up to
+ * an 8192 px long edge once magnification passes ~1.5× the base raster — so no pan, at any length,
+ * on any plan, can execute it. Sixty-plus runs and it has never once run.
+ *
+ * The four arms below change exactly one thing each, and the last one is the load-bearing control:
+ *   below          the same stepped zoom, entirely UNDER the gate     ← the path must NOT fire
+ *   across         the stepped zoom that CROSSES the gate             ← the path under test
+ *   across-hidden  that same sweep, overlay hidden                    ← removes the overlay entirely
+ *   across-image   that same sweep, overlay NOT PDF-backed            ← the arm that separates the
+ *                                                                       PDF RE-RASTER from ordinary
+ *                                                                       raster cost, holding pixel
+ *                                                                       count, opacity, rotation and
+ *                                                                       footprint EXACTLY
+ *
+ * `across-image` is what makes a separating result mean something. `across` versus `below` also
+ * differs in how much of the plan is on screen (a deeper zoom culls more), so on its own it cannot
+ * distinguish "the re-raster costs" from "this zoom range costs". `across-image` holds the zoom
+ * range, the raster geometry and the blend identical and removes ONLY the PDF backing.
+ */
+export const RERASTER_ARMS = {
+  "below": { title: "stepped zoom entirely below the magnification gate", changes: "nothing — the control; the re-raster must not fire", sweep: "below", expect: "below", budget: 0 },
+  "across": { title: "stepped zoom crossing the magnification gate", changes: "the zoom range only — this is the path under test", sweep: "across", expect: "above", budget: 1 },
+  "across-hidden": { title: "the crossing sweep with the sheet overlay hidden", changes: "removes the overlay entirely — no raster, no re-raster", sweep: "across", expect: "none", budget: 0 },
+  "across-image": { title: "the crossing sweep with an equivalent NON-PDF raster", changes: "PDF BACKING only — same pixels, same opacity, same rotation, same footprint", sweep: "across", expect: "none", budget: 0 },
+  /* ⛔ THE ARM THE GUARD IS BUILT ON. A zoom sweep is out AND BACK by definition, and the pre-fix
+   * code revoked the hi-res the moment the view dropped below the gate — so a return trip paid the
+   * whole 179 MB / 1.36 s raster again, and no single-direction sweep can see that. `budget: 1` is
+   * the whole claim: eighteen notches in, out and back in cost ONE re-raster, not one per crossing. */
+  "outback": { title: "in, back out below the gate, and in again", changes: "the gesture a real zoom actually is — it returns", sweep: "outback", expect: "above", budget: 1 },
+};
+
+/* The most re-rasters an arm may cost before `--assert` fails the run. A COUNT, deliberately, in
+ * the idiom count-pond-invocations established: a millisecond budget passes the moment work that
+ * should not happen at all merely gets cheaper. */
+export const rerasterBudget = (arm) => (RERASTER_ARMS[arm] ? RERASTER_ARMS[arm].budget : 0);
+
+/** Apply a re-raster arm to a fixture. Only the sheet overlay is ever touched. */
+export function rerasterArmFixture(fixture, arm) {
+  if (arm !== "across-hidden" && arm !== "across-image") return fixture;
+  const rasters = (fixture.rasters || []).map((r) => {
+    if (r.role !== "sheetOverlay") return r;
+    if (arm === "across-hidden") return { ...r, visible: false };
+    /* ⚠ `pdfBacked` IS THE ONLY FIELD REMOVED. Every property the compositor's cost depends on —
+     * imgW, imgH, ftPerPx, opacity, rotation, position, visibility — is carried through untouched,
+     * so this arm and `across` draw the SAME picture at the SAME zooms and differ only in whether
+     * `SitePlanner.jsx` is willing to re-render the source page. */
+    const { pdfBacked, ...rest } = r;
+    return rest;
+  });
+  return { ...fixture, rasters };
+}
+
 export function armFixture(fixture, arm) {
   const rasters = (fixture.rasters || []).map((r) => {
     if (arm === "opaque") return r.role === "sheetOverlay" ? { ...r, opacity: 1 } : r;
@@ -515,8 +570,32 @@ export function rasterIdbKey(siteId, spec) {
   return spec.role === "underlay" ? underlayIdbKey(siteId) : overlayIdbKey(siteId, spec.id);
 }
 
-/** The site record the logged-out planner store persists, with rasters attached by `idbKey` only. */
-export function fixtureSite(fixture, { id, name = "fixture", site = "fixture" } = {}) {
+/** The Storage key a PDF-backed overlay is seeded with under `pdfStorage`. The shape mirrors
+ *  `overlayStorage.overlayKey` (uid first, `.pdf` tail) because BOTH halves matter: the tail is what
+ *  `SitePlanner.jsx` tests to decide the overlay is PDF-backed, and the shape is what the harness's
+ *  route interception matches. No real uid appears — `fixture` stands in for one. */
+export const fixtureStorageKey = (siteId, overlayId) => `fixture/site-overlays/${siteId}/${overlayId}.pdf`;
+
+/**
+ * The site record the logged-out planner store persists, with rasters attached by `idbKey` only.
+ *
+ * ⛔ `pdfStorage` — AND THE SEEDING FACT THAT MADE B749 UNREACHABLE IN EVERY ARM EVER RUN.
+ *
+ * `rasterSpecOf` carries `pdfBacked` through precisely because it gates a cost path, and the note
+ * beside it says so. But this seeder never emitted anything a running app could read it from: the
+ * record it builds has an `idbKey` (the RASTER's bytes) and no `storageKey` (the SOURCE PDF's), and
+ * `SitePlanner.jsx`'s Tier-2 effect gates on `overlayDocs.has(id) || storageKey.endsWith(".pdf")`.
+ * `overlayDocs` is populated only by dropping a file in-session, which no harness does. So the
+ * fixture RECORDED that the overlay is PDF-backed and the seed DROPPED it, and the path was
+ * unreachable by construction — a null nobody had measured, dressed as a measurement.
+ *
+ * It defaults to OFF, deliberately. The owner's real row DOES carry a storage key (it was redacted
+ * out of the fixture because it embeds his user id), so every existing arm under-measures him by
+ * exactly this path — but turning it on by default would silently perturb sixty-plus runs of
+ * recorded history, including arms whose whole value is that they are comparable. Opt in, and say
+ * in the report that you did.
+ */
+export function fixtureSite(fixture, { id, name = "fixture", site = "fixture", pdfStorage = false } = {}) {
   const specs = fixture.rasters || [];
   const under = specs.find((r) => r.role === "underlay");
   const overlays = specs.filter((r) => r.role === "sheetOverlay");
@@ -533,6 +612,7 @@ export function fixtureSite(fixture, { id, name = "fixture", site = "fixture" } 
      * signed-in plan holds on disk, and it is what makes the app take its IndexedDB read path. */
     src: null,
     idbKey: rasterIdbKey(id, s),
+    ...(pdfStorage && s.role === "sheetOverlay" && s.pdfBacked ? { storageKey: fixtureStorageKey(id, s.id) } : {}),
   });
   return {
     id, groupId: id, site, name,

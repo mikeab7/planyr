@@ -35,7 +35,7 @@ import { EMPTY_TAP, tapTime, stepDoubleTap } from "./lib/doubleTap.js";
 import { resolveDoubleClickTarget, stackEntries, pressIsOverElementBody } from "./lib/featureTarget.js";
 import { parkDepthForRows, parkRowsForDepth, explodeParkingBands, edgeAbutsPaving } from "./lib/parking.js";
 import { loadAndDownscaleImage } from "./lib/image.js";
-import { openOverlayFile, rasterizePage, rasterizePageHiRes, isPdfFile, isDxfFile, rasterizeStoredPdf, rasterizeStoredDxf, baseRasterScale, chooseOverlayRasterScale } from "./lib/overlayPdf.js";
+import { openOverlayFile, rasterizePage, rasterizePageHiRes, isPdfFile, isDxfFile, rasterizeStoredPdf, rasterizeStoredDxf, baseRasterScale, chooseOverlayRasterScale, overlayRasterKey, HIRES_CACHE_PER_OVERLAY } from "./lib/overlayPdf.js";
 import { isDwgFile, convertDwgToDxf } from "./lib/convertClient.js";
 import { uploadOverlayFile, uploadUnderlayDataUrl, downloadOverlayBytes, downloadOverlayDataUrl, fetchOverlayBytes, fetchOverlayDataUrl, deleteOverlayObject, MAX_BYTES as OVERLAY_MAX_BYTES } from "./lib/overlayStorage.js";
 import { ftPerPointForScale, scaleForFtPerPoint, chooseOverlayScale, SCALE_PRESETS, feetPerInchForPreset, matchScalePreset, feetPerInchFromPair, PAGE_UNITS, REAL_UNITS } from "./lib/overlayScale.js";
@@ -7866,16 +7866,61 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
    * on-screen magnification exceeds ~1.5× its raster pixels, re-render that page at a higher
    * device scale (cap 8192px) to a TRANSIENT revocable object URL (the B45 precedent) and swap
    * it in place — the base data URL stays the record's `src`, so persistence / undo / cloud are
-   * untouched and the hi-res never bloats state. Drop back to the base raster (and revoke) when
-   * zoomed out, so multiple hi-res overlays can't accumulate in memory. */
+   * untouched and the hi-res never bloats state. Drop back to the base raster when zoomed out.
+   *
+   * ⛔ NEW-1 — RE-RASTERS ARE NOW CACHED PER RUNG, AND THE OLD "REVOKE ON ZOOM-OUT" IS GONE.
+   * ui-audit/zoom-reraster-arms.mjs measured this path on the owner's real Bain overlay: one wheel
+   * notch is ×1.12 and the retention rule below kept a hi-res only within 10%, so EVERY notch in
+   * the band re-rendered the whole page — 5461 × 8192 px, 179 MB of RGBA, a **1,360 ms main-thread
+   * long task**, against 51 ms for the identical raster with the PDF backing removed. Dropping the
+   * raster on zoom-out then charged the same freeze again the moment he zoomed back in.
+   * With the octave ladder (`chooseOverlayRasterScale`) the wanted scale is DISCRETE, so a rung
+   * already rendered is simply reused: crossing the gate costs one re-raster and a sweep back and
+   * forth costs none. What is retained is the encoded PNG blob (~3.5 MB), never the decoded
+   * texture; the cache is LRU-bounded per overlay and every eviction revokes its URL. */
   const [hiresById, setHiresById] = useState({});     // id → hi-res object URL (render override only; never persisted)
-  const hiresRef = useRef({});                         // id → { url, scale, page, knockout, revoke } (revoke bookkeeping)
+  const hiresRef = useRef({});                         // id → { key, url, scale, page, knockout } — what is DISPLAYED
+  const hiresCache = useRef(new Map());                // `${id}|${key}` → { url, revoke, at } — every rung still held (LRU)
   const hiresBusy = useRef(new Set());
+  const hiresSeq = useRef(1);                          // monotonic LRU stamp (never a clock — a wall clock is not needed to order our own writes)
+  /* A notch that arrives while a raster is in flight used to be dropped and never retried, leaving
+   * the overlay on a rung the view had already left. Bumping this on completion re-runs the effect,
+   * so the last zoom always wins. */
+  const [hiresTick, setHiresTick] = useState(0);
   const hiresMounted = useRef(true);                   // false after unmount — an in-flight raster must not resurrect state / leak a URL
   const viewPpfRef = useRef(view.ppf);
   viewPpfRef.current = view.ppf;                       // freshest zoom, so an async completion re-checks against the CURRENT view
   const commitHires = () => { if (hiresMounted.current) setHiresById(Object.fromEntries(Object.entries(hiresRef.current).map(([id, v]) => [id, v.url]))); };
-  useEffect(() => () => { hiresMounted.current = false; Object.values(hiresRef.current).forEach((v) => { try { v.revoke && v.revoke(); } catch (_) {} }); hiresRef.current = {}; }, []); // revoke all on unmount
+  /* The cache is the ONLY owner of an object URL now — `hiresRef` just points at one of its
+   * entries — so every revoke goes through here and a displayed raster can never be revoked out
+   * from under the <image> that is showing it. */
+  const hiresCacheDrop = (cacheKey) => {
+    const hit = hiresCache.current.get(cacheKey);
+    if (!hit) return;
+    hiresCache.current.delete(cacheKey);
+    try { hit.revoke && hit.revoke(); } catch (_) {}
+  };
+  const hiresCachePut = (id, key, url, revoke) => {
+    const cacheKey = `${id}|${key}`;
+    hiresCache.current.set(cacheKey, { url, revoke, at: hiresSeq.current++ });
+    // Evict this overlay's least-recently-used rungs beyond the budget. Scoped per overlay so one
+    // heavily-zoomed reference can't evict another's.
+    const mine = [...hiresCache.current.entries()].filter(([k]) => k.startsWith(`${id}|`)).sort((a, b) => a[1].at - b[1].at);
+    const displayed = hiresRef.current[id];
+    for (let i = 0; i < mine.length - HIRES_CACHE_PER_OVERLAY; i++) {
+      if (displayed && mine[i][0] === `${id}|${displayed.key}`) continue; // never evict what is on screen
+      hiresCacheDrop(mine[i][0]);
+    }
+  };
+  const hiresDropOverlay = (id) => {
+    for (const k of [...hiresCache.current.keys()]) if (k.startsWith(`${id}|`)) hiresCacheDrop(k);
+    delete hiresRef.current[id];
+  };
+  useEffect(() => () => {
+    hiresMounted.current = false;
+    for (const k of [...hiresCache.current.keys()]) hiresCacheDrop(k);
+    hiresRef.current = {};
+  }, []); // revoke every rung on unmount — the cache holds them all, so nothing can be missed
   const wantsHires = (o) => { const pm = Math.max(o.imgW, o.imgH); return chooseOverlayRasterScale({ ftPerPx: o.ftPerPx, ppf: viewPpfRef.current, pageMaxPts: pm, baseScale: baseRasterScale(pm) }); };
   // Get a PDF proxy for an overlay: the in-session doc, or load once from stored bytes (cached in overlayDocs).
   const ensureOverlayPdf = async (o) => {
@@ -7896,40 +7941,70 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       const cur = hiresRef.current;
       const liveIds = new Set(sheetOverlays.filter((o) => o.visible !== false).map((o) => o.id));
       let changed = false;
-      for (const id of Object.keys(cur)) if (!liveIds.has(id)) { try { cur[id].revoke && cur[id].revoke(); } catch (_) {} delete cur[id]; changed = true; } // prune gone/hidden
+      // An overlay that is gone or hidden loses its rungs too — hiding a reference should not keep
+      // tens of megabytes of blobs alive, and re-showing it is one cheap re-raster.
+      for (const id of Object.keys(cur)) if (!liveIds.has(id)) { hiresDropOverlay(id); changed = true; }
+      for (const k of [...hiresCache.current.keys()]) if (!liveIds.has(k.split("|")[0])) hiresCacheDrop(k);
       for (const o of sheetOverlays) {
         if (o.visible === false || !o.src) continue;
         const isPdf = overlayDocs.current.has(o.id) || (o.storageKey || "").toLowerCase().endsWith(".pdf");
         if (!isPdf) continue; // a DXF base is already vector-crisp at 4500px; an image can't re-raster
         const dec = wantsHires(o);
         const existing = cur[o.id];
-        if (!dec.isHires) { if (existing) { try { existing.revoke && existing.revoke(); } catch (_) {} delete cur[o.id]; changed = true; } continue; } // zoomed out → base
+        /* ⛔ ZOOMED OUT DROPS THE DISPLAY, NOT THE RUNG. The old code revoked here, so zooming out
+         * and back in paid the whole 179 MB / 1.36 s re-raster again — the single most avoidable
+         * repeat in this path, because a zoom sweep is out AND back by definition. */
+        if (!dec.isHires) { if (existing) { delete cur[o.id]; changed = true; } continue; }
         const page = o.page || 1, knockout = o.knockout !== false;
-        // Re-raster unless we already hold a hi-res for the SAME page + knockout at a close-enough scale — so a
-        // page change / knockout toggle invalidates a stale hi-res instead of leaving the old page displayed.
-        if (existing && existing.page === page && existing.knockout === knockout && Math.abs(existing.scale - dec.scale) <= existing.scale * 0.1) continue;
-        if (hiresBusy.current.has(o.id)) continue;
+        const key = overlayRasterKey(page, knockout, dec.scale);
+        if (existing && existing.key === key) continue;          // already displaying this rung
+        const hit = hiresCache.current.get(`${o.id}|${key}`);
+        if (hit) {                                                // rendered before — reuse, no raster
+          hit.at = hiresSeq.current++;
+          cur[o.id] = { key, url: hit.url, scale: dec.scale, page, knockout };
+          changed = true;
+          continue;
+        }
+        if (hiresBusy.current.has(o.id)) continue;                 // in flight — the tick below re-runs us
         hiresBusy.current.add(o.id);
         (async () => {
+          let raster = null, cached = false;
           try {
             const pdf = await ensureOverlayPdf(o);
             if (!pdf) return;
             const rr = await rasterizePageHiRes(pdf, page, dec.scale, { knockout });
-            // Bail if we unmounted, the overlay was removed/hidden, or the user zoomed back out while we
-            // rasterized — don't resurrect state or leave a hi-res mounted when it's no longer wanted (revoke).
+            raster = rr;
+            // Unmounted, or the overlay was removed → the bytes have nowhere to live; revoke them.
             const o2 = stateRef.current.sheetOverlays.find((x) => x.id === o.id && x.visible !== false);
-            if (!hiresMounted.current || !o2 || !wantsHires(o2).isHires) { try { rr.revoke && rr.revoke(); } catch (_) {} return; }
-            const prev = cur[o.id];
-            cur[o.id] = { url: rr.src, scale: dec.scale, page, knockout, revoke: rr.revoke };
-            if (prev) { try { prev.revoke && prev.revoke(); } catch (_) {} }
-            commitHires();
-          } catch (_) { /* keep the base raster */ } finally { hiresBusy.current.delete(o.id); }
+            if (!hiresMounted.current || !o2) { try { rr.revoke && rr.revoke(); } catch (_) {} raster = null; return; }
+            /* The rung is CACHED whatever the view is doing now. The user zooming back out during
+             * the raster does not make the work worthless — it makes it prefetched, and the whole
+             * point of the cache is that returning to this magnification is then free. Only the
+             * DISPLAY is conditional on the view still wanting it. */
+            hiresCachePut(o.id, key, rr.src, rr.revoke);
+            raster = null; cached = true; // ownership handed to the cache
+            const want = wantsHires(o2);
+            if (want.isHires && overlayRasterKey(o2.page || 1, o2.knockout !== false, want.scale) === key) {
+              cur[o.id] = { key, url: rr.src, scale: dec.scale, page, knockout };
+              commitHires();
+            }
+          } catch (_) { /* keep the base raster */ } finally {
+            if (raster) { try { raster.revoke && raster.revoke(); } catch (_) {} }
+            hiresBusy.current.delete(o.id);
+            /* ⛔ GATED ON `cached`, AND THAT GATE IS LOAD-BEARING. The tick exists so a notch that
+             * arrived mid-raster is not silently dropped — but an UNGATED bump is an infinite loop:
+             * an overlay whose bytes cannot be fetched (Storage down, object gone) produces no
+             * raster, bumps, re-runs, fails again, forever. Bumping only after real work means the
+             * re-run either finds the view settled (and does nothing) or renders the rung the
+             * user actually zoomed to, and a failing fetch retries no more often than it did before. */
+            if (cached && hiresMounted.current) setHiresTick((n) => n + 1);
+          }
         })();
       }
       if (changed) commitHires();
     }, 260); // debounce behind zoom settle
     return () => clearTimeout(timer);
-  }, [view.ppf, sheetOverlays, size.w, size.h]); // eslint-disable-line
+  }, [view.ppf, sheetOverlays, size.w, size.h, hiresTick]); // eslint-disable-line
 
   /* ------------ county parcel lookup ------------ */
   const onCountyChange = (key) => {
