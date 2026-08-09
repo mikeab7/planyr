@@ -13,7 +13,7 @@
  * come back clean — that is the assertion. The CONTROL arm strands one ElementHandle per switch,
  * reproducing B1439's defect exactly, and must come back DIRTY — that is the positive control, and
  * if it comes back clean the guard fails as NOT OBSERVING rather than passing. It also refuses to
- * report anything unless the plan switch is PROVEN by the drawn-element count changing (plan B is
+ * report anything unless the plan switch is PROVEN by the drawn-feature count changing (plan B is
  * half of plan A by construction), so a scenario that silently stopped switching fails loudly too.
  *
  * The decision table is pure and unit-tested in test/planSwitchRelease.test.js; this file only
@@ -28,6 +28,7 @@ import { edgeIndex, detachedNodes } from "./lib/heapSnapshot.mjs";
 import { waitForSelectorReleased } from "./lib/waitRelease.mjs";
 import { releaseVerdict } from "./lib/planSwitchRelease.mjs";
 import { assertMeasurable } from "./lib/tabTiming.mjs";
+import { countFeatures } from "./lib/featureCensus.mjs";
 
 const BASE = (process.env.BASE_URL || "http://localhost:4173/").replace(/\/?$/, "/");
 const EXEC = process.env.PW_CHROME || "/opt/pw-browsers/chromium-1194/chrome-linux/chrome";
@@ -54,10 +55,10 @@ async function measure(cdp) {
   } finally { cdp.off("HeapProfiler.addHeapSnapshotChunk", onChunk); }
 }
 
-const drawn = (page) => page.evaluate(() => {
-  const svg = document.querySelector('[data-testid="planner-canvas"]');
-  return svg ? svg.querySelectorAll("[data-el-id]").length : -1;
-});
+/* ⛔ `switchProven` COUNTS FEATURES, NOT ELEMENTS (NEW-2). An element-only count is blind to four
+ * of the five drawn kinds, so a plan pair differing only in its markups / measurements / callouts /
+ * parcels would read as "the switch never took" and suppress the whole measurement. */
+const drawn = async (page) => (await countFeatures(page, -1)) ?? -1;
 
 /** @param strand  true = reproduce B1439 (keep the ElementHandle); false = the correct behaviour. */
 async function runArm(strand) {
@@ -109,7 +110,7 @@ async function runArm(strand) {
 const guardedArm = await runArm(false);
 const controlArm = await runArm(true);
 
-/* The switch is PROVEN, not assumed: plan B is half of plan A, so the drawn-element count must take
+/* The switch is PROVEN, not assumed: plan B is half of plan A, so the drawn-feature count must take
  * at least two distinct values across the cycle. */
 const switchProven = new Set(guardedArm.seen.filter((n) => n >= 0)).size >= 2;
 
@@ -125,7 +126,7 @@ console.log(`B1439 GUARD — does an A→B→A plan switch release the plan you 
 console.log(`  arm                                    detached before → after      rendererNodes before → after`);
 console.log(`  guarded (handles disposed)             ${String(guardedArm.before.detached).padStart(8)} → ${String(guardedArm.after.detached).padEnd(8)}      ${String(guardedArm.before.rendererNodes).padStart(8)} → ${guardedArm.after.rendererNodes}`);
 console.log(`  control (one handle stranded/switch)   ${String(controlArm.before.detached).padStart(8)} → ${String(controlArm.after.detached).padEnd(8)}      (positive control — MUST be dirty)`);
-console.log(`\n  plan switch proven by drawn-element count changing: ${switchProven ? "yes" : "NO"}   (counts seen: ${guardedArm.seen.join(", ")})`);
+console.log(`\n  plan switch proven by drawn-feature count changing: ${switchProven ? "yes" : "NO"}   (counts seen: ${guardedArm.seen.join(", ")})`);
 console.log(`  detached left by the guarded arm: ${v.detachedLeft}  (limit ${v.thresholds.maxDetached})`);
 console.log(`  rendererNodes delta:              ${v.rendererDelta >= 0 ? "+" : ""}${v.rendererDelta}  (limit +${v.thresholds.maxRendererDelta})`);
 console.log(`  positive control stranded:        ${v.controlLeft}  (must be ≥ ${v.thresholds.minControlDetached})`);

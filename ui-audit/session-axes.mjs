@@ -71,6 +71,7 @@ import {
 import { fakeTilePng, parseTileUrl } from "./lib/fakeTile.mjs";
 import { waitForSelectorReleased } from "./lib/waitRelease.mjs";
 import { assertMeasurable } from "./lib/tabTiming.mjs";
+import { FEATURE_COUNT_FIELD } from "./lib/featureCensus.mjs";
 
 const BASE = (process.env.BASE_URL || "http://localhost:4173/").replace(/\/?$/, "/");
 const EXEC = process.env.PW_CHROME || "/opt/pw-browsers/chromium-1194/chrome-linux/chrome";
@@ -188,6 +189,8 @@ const COUNTERS = `(() => {
     heapMB: performance.memory ? +(performance.memory.usedJSHeapSize / 1048576).toFixed(2) : null,
     documentNodes: document.getElementsByTagName("*").length,
     canvasNodes: svg ? svg.getElementsByTagName("*").length : 0,
+    ${FEATURE_COUNT_FIELD},
+    /* el-tier: the element slice, kept beside the census as detail. */
     elementsDrawn: svg ? svg.querySelectorAll("[data-el-id]").length : 0,
     canvasText: svg ? svg.getElementsByTagName("text").length : 0,
     panelsOpen: docked + floating,
@@ -435,6 +438,7 @@ async function setViewLayers(page, on) {
  * dissolve, the label pass, an undo frame each). A lattice, deterministic, inside the viewport. */
 const elementsDrawnNow = (page) => page.evaluate(() => {
   const svg = document.querySelector('[data-testid="planner-canvas"]');
+  /* el-tier: this axis DRAWS BUILDINGS and counts them; the element tier is the subject. */
   return svg ? svg.querySelectorAll("[data-el-id]").length : 0;
 });
 
@@ -477,6 +481,7 @@ async function drawBuildings(page, count, seed = 0) {
  * the element's own screen position is sampled at the turn, which is how the harness PROVES the
  * nudges landed instead of counting keystrokes it sent into the void. */
 async function selectAnElement(page) {
+  /* el-tier: grabbing one element to nudge — a targeted lookup, not a census. */
   const el = page.locator('[data-el-id]').first();
   if (!(await el.count())) return null;
   const b = await el.boundingBox();
@@ -796,7 +801,11 @@ if (WANT.includes("plans")) {
    * and unrelated, and B may be LARGER than A — under the old test a genuine, larger-B switch would
    * have been reported as "the route change did not take", suppressing a valid measurement in
    * exactly the regime the fixture support was added to reach. */
-  const switched = Number.isFinite(a0.elementsDrawn) && Number.isFinite(b.elementsDrawn) && b.elementsDrawn !== a0.elementsDrawn;
+  /* ⛔ AND THE PROOF COUNTS FEATURES, NOT ELEMENTS (NEW-2). `elementsDrawn` sees one of the five
+   * drawn kinds, so two real plans that differ only in their markups, measurements, callouts or
+   * parcels read as IDENTICAL and a genuine switch is reported as "the route change did not take" —
+   * suppressing a valid measurement in exactly the `--fixture` regime this proof was widened for. */
+  const switched = Number.isFinite(a0.featuresDrawn) && Number.isFinite(b.featuresDrawn) && b.featuresDrawn !== a0.featuresDrawn;
   extras.planSwitch = {
     switched,
     a0: { counters: a0, medianMs: a0Probe.probeMedianMs },
@@ -807,7 +816,7 @@ if (WANT.includes("plans")) {
       ? +(((a1Probe.probeWorkMs - a0Probe.probeWorkMs) / a0Probe.probeWorkMs) * 100).toFixed(1) : null,
     verdict: switched
       ? planSwitchVerdict({ a0, b, a1, a2, keys })
-      : { verdict: "unmeasured", why: `plan B never rendered (elementsDrawn unchanged at ${a0.elementsDrawn}); the route change did not take, so nothing here describes a switch`, rows: [] },
+      : { verdict: "unmeasured", why: `plan B never rendered (featuresDrawn unchanged at ${a0.featuresDrawn}); the route change did not take, so nothing here describes a switch`, rows: [] },
   };
 }
 

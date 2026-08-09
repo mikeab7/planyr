@@ -54,6 +54,7 @@ import {
 } from "./lib/planFixture.mjs";
 import { bucketTrace, layerCensus, median, noiseFloorPct, armVerdict, pairedComparison, decodeFault, renderedDecodedBytes } from "./lib/rasterCost.mjs";
 import { assertMeasurable } from "./lib/tabTiming.mjs";
+import { FEATURE_COUNT_FIELD } from "./lib/featureCensus.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const BASE = (process.env.BASE_URL || "http://localhost:4173/").replace(/\/?$/, "/");
@@ -145,6 +146,8 @@ const READ_COUNTERS = `(() => {
   return {
     canvasNodes: svg ? svg.getElementsByTagName("*").length : null,
     documentNodes: document.getElementsByTagName("*").length,
+    ${FEATURE_COUNT_FIELD},
+    /* el-tier: tier detail beside the census. */
     elementsDrawn: svg ? svg.querySelectorAll("[data-el-id]").length : null,
     leafletTiles: document.querySelectorAll(".leaflet-tile").length,
     heapMB: performance.memory ? +(performance.memory.usedJSHeapSize / 1048576).toFixed(2) : null,

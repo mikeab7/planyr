@@ -30,6 +30,7 @@ import { perfScenarioSeedMulti, SCENARIO_ID, SCENARIO_ID_B } from "./lib/perf-sc
 import { aggregateSnapshot, diffAggregates, edgeIndex, retainerIndex, holderOf, retainingPath, detachedNodes, detachedByClass, liveEntryPoints } from "./lib/heapSnapshot.mjs";
 import { waitForSelectorReleased } from "./lib/waitRelease.mjs";
 import { assertMeasurable } from "./lib/tabTiming.mjs";
+import { FEATURE_COUNT_FIELD } from "./lib/featureCensus.mjs";
 
 const BASE = (process.env.BASE_URL || "http://localhost:4173/").replace(/\/?$/, "/");
 const EXEC = process.env.PW_CHROME || "/opt/pw-browsers/chromium-1194/chrome-linux/chrome";
@@ -50,6 +51,8 @@ const COUNTERS = `(() => {
   return {
     documentNodes: document.getElementsByTagName("*").length,
     canvasNodes: svg ? svg.getElementsByTagName("*").length : 0,
+    ${FEATURE_COUNT_FIELD},
+    /* el-tier: the element count is kept BESIDE the census as tier detail, never as the answer. */
     elementsDrawn: svg ? svg.querySelectorAll("[data-el-id]").length : 0,
     leafletTiles: document.querySelectorAll("img.leaflet-tile").length,
     leafletContainers: document.querySelectorAll(".leaflet-container").length,
@@ -236,10 +239,10 @@ if (JSON_OUT) { console.log(JSON.stringify(out, null, 2)); process.exit(0); }
 const pct = (a, b) => (a && b ? `${(((b - a) / a) * 100).toFixed(1)}%` : "—");
 console.log(`B1439 — plan A → B → A, ×${CYCLES}${NO_E2E ? "  [--no-e2e: the __PLANYR_E2E self-audit hooks are ABSENT]" : "  [__PLANYR_E2E hooks ARMED, as in every harness here]"}: does the plan you left stay alive in the renderer?\n`);
 console.log(`  counter                 before      after      change`);
-for (const k of ["rendererNodes", "documentNodes", "canvasNodes", "elementsDrawn", "layoutObjects", "jsEventListeners", "leafletTiles", "leafletContainers", "heapMB"]) {
+for (const k of ["rendererNodes", "documentNodes", "canvasNodes", "featuresDrawn", "elementsDrawn", "layoutObjects", "jsEventListeners", "leafletTiles", "leafletContainers", "heapMB"]) {
   console.log(`  ${k.padEnd(20)} ${String(a0[k] ?? "—").padStart(9)}  ${String(a1[k] ?? "—").padStart(9)}   ${pct(a0[k], a1[k]).padStart(8)}`);
 }
-if (a1.elementsDrawn !== a0.elementsDrawn) console.log(`\n  ⚠ the round trip did not return to plan A's element count (${a0.elementsDrawn} → ${a1.elementsDrawn}) — treat every number above with that in mind.`);
+if (a1.featuresDrawn !== a0.featuresDrawn) console.log(`\n  ⚠ the round trip did not return to plan A's feature count (${a0.featuresDrawn} → ${a1.featuresDrawn}) — treat every number above with that in mind.`);
 
 console.log(`\n  LISTENERS STILL REGISTERED ON THE LONG-LIVED TARGETS after the round trip (source position from DOMDebugger, not a guess):`);
 for (const [target, g] of Object.entries(out.listeners)) {

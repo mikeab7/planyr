@@ -46,6 +46,7 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { stemOf } from "./lib/bundleMetrics.mjs";
 import { assertMeasurable } from "./lib/tabTiming.mjs";
+import { BLANK_POINT_EXCLUDE } from "./lib/featureCensus.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, "..");
@@ -361,9 +362,9 @@ if (process.argv.includes("--long-session")) {
     console.log(`  target: ${BASE}  ·  scenario: ${site.id}  ·  cpu ${CPU_THROTTLE}x, dpr ${DPR}  ·  ${out.rounds} rounds after ${out.reps} baseline repeats\n`);
     console.log(`  NOISE FLOOR, measured here: wheel ±${out.noiseFloor.floorPct ?? "—"}% (${out.noiseFloor.min}–${out.noiseFloor.max} ms across ${out.reps} repeats${out.noiseFloor.quantumFloored ? ", floored at one frame quantum — the repeats were identical" : ""}) · pan ±${out.panNoiseFloor.floorPct ?? "—"}%`);
     console.log(`  Nothing below the floor is reported as a finding.\n`);
-    console.log(`  round │ wheel med │ pan med │ pan commits/move │  heap │ canvas nodes │ doc nodes │ tiles │ drawn els │ added`);
+    console.log(`  round │ wheel med │ pan med │ pan commits/move │  heap │ canvas nodes │ doc nodes │ features │ added`);
     for (const c of out.series) {
-      console.log(`  ${String(c.round).padStart(5)} │ ${String(c.wheelMedianMs ?? "—").padStart(9)} │ ${String(c.panMedianMs ?? "—").padStart(7)} │ ${String(c.panCommitsPerMove).padStart(16)} │ ${String(c.counters.heapMB ?? "—").padStart(5)} │ ${String(c.counters.canvasNodes).padStart(12)} │ ${String(c.counters.documentNodes).padStart(9)} │ ${String(c.counters.tiles).padStart(5)} │ ${String(c.counters.elementsDrawn).padStart(9)} │ ${String(c.added).padStart(5)}`);
+      console.log(`  ${String(c.round).padStart(5)} │ ${String(c.wheelMedianMs ?? "—").padStart(9)} │ ${String(c.panMedianMs ?? "—").padStart(7)} │ ${String(c.panCommitsPerMove).padStart(16)} │ ${String(c.counters.heapMB ?? "—").padStart(5)} │ ${String(c.counters.canvasNodes).padStart(12)} │ ${String(c.counters.documentNodes).padStart(9)} │ ${String(c.counters.tiles).padStart(5)} │ ${String(c.counters.featuresDrawn ?? c.counters.elementsDrawn).padStart(9)} │ ${String(c.added).padStart(5)}`);
       if (c.wheelFault) console.log(`        ⚠ wheel median SUPPRESSED — ${c.wheelFault}`);
       if (c.panFault) console.log(`        ⚠ pan median SUPPRESSED — ${c.panFault}`);
       if (c.round > 0 && !c.wheelMoved) console.log(`        ⚠ the wheel gesture did not move the view — this checkpoint measured an idle page`);
@@ -376,7 +377,7 @@ if (process.argv.includes("--long-session")) {
     const v = out.verdict;
     console.log(`\n  VERDICT — wheel: ${v.wheel.verdict}${v.wheel.changePct == null ? "" : ` (${v.wheel.changePct > 0 ? "+" : ""}${v.wheel.changePct}% vs the ±${out.noiseFloor.floorPct}% floor)`}`);
     console.log(`           pan:   ${v.pan.verdict}${v.pan.changePct == null ? "" : ` (${v.pan.changePct > 0 ? "+" : ""}${v.pan.changePct}% vs the ±${out.panNoiseFloor.floorPct}% floor)`}`);
-    console.log(`  counters start → end: heap ${v.heapMB.from} → ${v.heapMB.to} MB · canvas nodes ${v.canvasNodes.from} → ${v.canvasNodes.to} · document nodes ${v.documentNodes.from} → ${v.documentNodes.to} · tile <img> ${v.tiles.from} → ${v.tiles.to} (DECODED ${v.tilesLoaded.from} → ${v.tilesLoaded.to}) · drawn elements ${v.elementsDrawn.from} → ${v.elementsDrawn.to}`);
+    console.log(`  counters start → end: heap ${v.heapMB.from} → ${v.heapMB.to} MB · canvas nodes ${v.canvasNodes.from} → ${v.canvasNodes.to} · document nodes ${v.documentNodes.from} → ${v.documentNodes.to} · tile <img> ${v.tiles.from} → ${v.tiles.to} (DECODED ${v.tilesLoaded.from} → ${v.tilesLoaded.to}) · drawn features ${v.featuresDrawn.from} → ${v.featuresDrawn.to} (of which elements ${v.elementsDrawn.from} → ${v.elementsDrawn.to})`);
     if (out.correlations.length) {
       console.log(`\n  Which counter moved WITH the wheel cost (weak evidence over ${out.series.length} points — a name for a suspect, never a proof):`);
       for (const c of out.correlations.slice(0, 5)) console.log(`      r=${String(c.r).padStart(5)}  ${c.counter}  (${c.from} → ${c.to})`);
@@ -533,7 +534,7 @@ const viewNow = () => page.evaluate(() => {
 /* A press point that is BARE CANVAS. Candidates are fixed fractions of the canvas, tried in a
  * fixed order, so the choice is deterministic for a given scene + viewport; the chosen point is
  * reported, because a harness that silently drags somewhere else run to run is not an instrument. */
-const pressPoint = await page.evaluate(() => {
+const pressPoint = await page.evaluate((BLANK) => {
   const svg = document.querySelector('[data-testid="planner-canvas"]');
   const r = svg.getBoundingClientRect();
   for (const fy of [0.5, 0.3, 0.7, 0.15, 0.85]) {
@@ -541,12 +542,16 @@ const pressPoint = await page.evaluate(() => {
       const x = r.left + r.width * fx, y = r.top + r.height * fy;
       const hit = document.elementFromPoint(x, y);
       if (!hit || !svg.contains(hit)) continue;
-      if (hit.closest("[data-el-id]")) continue;          // an element — a press here MOVES it
+      /* ⛔ EXCLUDE EVERY FEATURE, not just elements (NEW-2). A point that is merely free of
+       * ELEMENTS can still be on top of a markup, a measurement, a callout or a parcel — and a
+       * "pan" started there DRAGS THAT FEATURE instead of moving the view, which is not a pan and
+       * silently mutates the plan being measured. */
+      if (hit.closest(BLANK)) continue;                    // inside a feature — a press here MOVES it
       return { x, y, fx, fy };
     }
   }
   return null;
-});
+}, BLANK_POINT_EXCLUDE);
 const px = pressPoint ? pressPoint.x : cx, py = pressPoint ? pressPoint.y : cy;
 results.dragPressAt = pressPoint ? `${pressPoint.fx}×${pressPoint.fy} of the canvas` : "canvas centre (no bare spot found)";
 if (DO_DRAG) {

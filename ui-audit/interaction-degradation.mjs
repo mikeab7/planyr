@@ -62,6 +62,7 @@ import { buildGrowthTable, probeValidityFault, axisVerdict, suspects, viewDrift 
 import { aggregateSnapshot, diffAggregates, perInteraction } from "./lib/heapSnapshot.mjs";
 import { fakeTilePng, parseTileUrl, decodedMB } from "./lib/fakeTile.mjs";
 import { assertMeasurable } from "./lib/tabTiming.mjs";
+import { FEATURE_COUNT_FIELD } from "./lib/featureCensus.mjs";
 
 const BASE = (process.env.BASE_URL || "http://localhost:4173/").replace(/\/?$/, "/");
 const EXEC = process.env.PW_CHROME || "/opt/pw-browsers/chromium-1194/chrome-linux/chrome";
@@ -215,6 +216,8 @@ const COUNTERS = `(() => {
     documentNodes: document.getElementsByTagName("*").length,
     liveNodesAll,
     canvasNodes: svg ? svg.getElementsByTagName("*").length : 0,
+    ${FEATURE_COUNT_FIELD},
+    /* el-tier: tier detail beside the census, never the answer. */
     elementsDrawn: svg ? svg.querySelectorAll("[data-el-id]").length : 0,
     tiles: document.querySelectorAll("img.leaflet-tile").length,
     tilesLoaded: document.querySelectorAll(".leaflet-tile-loaded").length,
@@ -584,8 +587,11 @@ async function runArm(browser, { arm, idleBudgetMs }) {
      * here, and the first full run proved they can silently collapse (66 → 0, 976 → 227) while
      * every frame number still looks plausible. If they move, this checkpoint is measuring the
      * OLD axis, and it says so instead of quietly joining the trend line. */
-    const controlFault = c.elementsDrawn !== baseline.elementsDrawn || c.canvasNodes !== baseline.canvasNodes
-      ? `CONTENT DID NOT STAY CONSTANT: elementsDrawn ${baseline.elementsDrawn} → ${c.elementsDrawn}, canvasNodes ${baseline.canvasNodes} → ${c.canvasNodes}. This checkpoint measures the "how much is drawn" axis, not the interaction-count axis.`
+    /* ⛔ THE CONTROL COUNTS FEATURES (NEW-2). On `elementsDrawn` a markup, measurement, callout or
+     * parcel appearing mid-run is INVISIBLE, so "content stayed constant" could be asserted about a
+     * canvas that gained four fifths of a plan. */
+    const controlFault = c.featuresDrawn !== baseline.featuresDrawn || c.canvasNodes !== baseline.canvasNodes
+      ? `CONTENT DID NOT STAY CONSTANT: featuresDrawn ${baseline.featuresDrawn} → ${c.featuresDrawn}, canvasNodes ${baseline.canvasNodes} → ${c.canvasNodes}. This checkpoint measures the "how much is drawn" axis, not the interaction-count axis.`
       : null;
     if (controlFault) { p.probeMedianMs = null; p.probeP90Ms = null; }
     // Progress to stderr, because the report only prints at the end and the full ladder is a
@@ -688,7 +694,8 @@ const TABLE_KEYS = [
   { counter: "liveNodesAll", unit: "nodes (attached, all types)", decimals: 0 },
   { counter: "detachedApprox", unit: "nodes (upper bound)", decimals: 0 },
   { counter: "canvasNodes", unit: "SVG nodes in the canvas", decimals: 0 },
-  { counter: "elementsDrawn", unit: "drawn elements (the CONTROL — must be flat)", decimals: 0 },
+  { counter: "featuresDrawn", unit: "drawn features, all five kinds (the CONTROL — must be flat)", decimals: 0 },
+  { counter: "elementsDrawn", unit: "of which elements", decimals: 0 },
   { counter: "tiles", unit: "img.leaflet-tile", decimals: 0 },
   { counter: "tilesLoaded", unit: "decoded tiles", decimals: 0 },
   { counter: "tileLayers", unit: ".leaflet-layer", decimals: 0 },

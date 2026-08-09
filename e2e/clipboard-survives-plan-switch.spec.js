@@ -25,41 +25,14 @@
  */
 import { test, expect } from "@playwright/test";
 import { openModule } from "./helpers.js";
+/* NEW-2 — the five draw flows and the on-disk plan reader now live in e2e/drawKinds.js, so
+ * e2e/feature-census.spec.js can seed the identical canvas without a second copy of them. */
+import {
+  canvas, planCrumb, plans, planNamed, selectTool, startBlank,
+  drawPolygonMarkup, drawBuilding, drawLengthMeasure, drawCallout, drawParcel,
+} from "./drawKinds.js";
 
-const canvas = (p) => p.getByTestId("planner-canvas");
-const planCrumb = (p) => p.getByTestId("plan-crumb");
-
-/* Every plan of the site, by name, straight off disk — so an assertion is about the persisted
- * record for the DESTINATION plan, never about whatever happens to be rendered. */
-function plans(page) {
-  return page.evaluate(() => {
-    const map = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
-    const out = {};
-    for (const rec of Object.values(map)) {
-      if (!rec || !rec.id) continue;
-      out[rec.name || "?"] = {
-        els: (rec.els || []).filter((e) => !e.attachedTo).length,
-        markups: (rec.markups || []).length,
-        markupKinds: (rec.markups || []).map((m) => m.kind).sort(),
-        measures: (rec.measures || []).length,
-        callouts: (rec.callouts || []).length,
-        parcels: (rec.parcels || []).length,
-      };
-    }
-    return out;
-  });
-}
-const planNamed = async (page, name) => (await plans(page))[name] || null;
-
-/* ── booting + plan navigation ─────────────────────────────────────────────────────────────── */
-
-async function startBlank(page) {
-  await page.setViewportSize({ width: 1440, height: 900 });
-  await page.goto("/");
-  await openModule(page, "site-planner");
-  await page.getByRole("button", { name: /Start blank/i }).first().click();
-  await expect(canvas(page)).toBeVisible({ timeout: 15_000 });
-}
+/* ── plan navigation ────────────────────────────────────────────────────────────────────── */
 
 /* Create the sibling plan the copies will be pasted into, and come straight back. Done through the
  * real header dropdown — the same two clicks the owner makes — so the remount under test is the
@@ -116,11 +89,6 @@ async function selectFeature(page, target, { edge = false } = {}) {
 }
 const selectPolygon = (page) => selectFeature(page, "markup", { edge: true });
 
-const selectTool = async (page) => {
-  const b = page.getByRole("button", { name: /^Select V$/ });
-  await b.click();
-  await expect(b).toHaveAttribute("aria-pressed", "true");
-};
 
 /* Copy the current selection, then cross the plan boundary and paste. This IS the repro. */
 async function copySwitchPaste(page, { from = "Concept A", to = "Concept B" } = {}) {
@@ -131,82 +99,6 @@ async function copySwitchPaste(page, { from = "Concept A", to = "Concept B" } = 
   await page.keyboard.press("Control+v");
   await page.waitForTimeout(400);
   return { from, to };
-}
-
-/* ── drawing one of each kind ──────────────────────────────────────────────────────────────── */
-
-/* The owner's own case: a markup POLYGON. Click three corners, double-click to close. */
-async function drawPolygonMarkup(page, box) {
-  await page.keyboard.press("Shift+P");
-  const pts = [[0.30, 0.30], [0.46, 0.30], [0.46, 0.46]];
-  for (const [fx, fy] of pts) {
-    await page.mouse.click(box.x + box.width * fx, box.y + box.height * fy);
-    await page.waitForTimeout(90);
-  }
-  await page.mouse.dblclick(box.x + box.width * 0.30, box.y + box.height * 0.46);
-  await expect.poll(() => planNamed(page, "Concept A").then((p) => p && p.markups)).toBe(1);
-  await selectTool(page);
-}
-
-async function drawBuilding(page, box) {
-  await page.getByRole("button", { name: /^Building$/ }).first().click();
-  const x0 = box.x + box.width * 0.58, y0 = box.y + box.height * 0.28;
-  const x1 = box.x + box.width * 0.76, y1 = box.y + box.height * 0.44;
-  await page.mouse.move(x0, y0);
-  await page.mouse.down();
-  await page.mouse.move((x0 + x1) / 2, (y0 + y1) / 2, { steps: 4 });
-  await page.mouse.move(x1, y1, { steps: 6 });
-  await page.mouse.up();
-  await expect.poll(() => planNamed(page, "Concept A").then((p) => p && p.els)).toBe(1);
-  await selectTool(page);
-  return { cx: (x0 + x1) / 2, cy: (y0 + y1) / 2 };
-}
-
-async function drawLengthMeasure(page, box) {
-  await page.getByRole("button", { name: "Measure modes" }).click();
-  await page.getByRole("button", { name: "Length", exact: true }).click();
-  const y = box.y + box.height * 0.62;
-  await page.mouse.click(box.x + box.width * 0.30, y);
-  await page.mouse.click(box.x + box.width * 0.46, y);
-  await expect.poll(() => planNamed(page, "Concept A").then((p) => p && p.measures)).toBe(1);
-  await selectTool(page);
-  return { cx: box.x + box.width * 0.38, cy: y };
-}
-
-/* A callout is committed by its TEXT — a blank one is discarded — so type before leaving. Escape
- * inside the editor commits (it is the Bluebeam finish gesture), it does not cancel. */
-async function drawCallout(page, box) {
-  await page.keyboard.press("q");
-  await page.mouse.click(box.x + box.width * 0.60, box.y + box.height * 0.62);
-  await page.mouse.click(box.x + box.width * 0.72, box.y + box.height * 0.70);
-  await page.keyboard.type("Copy me");
-  await page.keyboard.press("Escape");
-  await expect.poll(() => planNamed(page, "Concept A").then((p) => p && p.callouts)).toBe(1);
-  await selectTool(page);
-  return { cx: box.x + box.width * 0.72, cy: box.y + box.height * 0.70 };
-}
-
-async function drawParcel(page, box) {
-  await page.locator('[data-rail-tab="parcel"]').click();
-  await page.getByTitle(/Add land to this plan/i).click();
-  await page.getByRole("button", { name: /Draw a new boundary/i }).click();
-  await expect(page.getByText(/drop boundary points/i)).toBeVisible();
-  // Kept clear of the left rail's docked panel (which the Parcel tool opens over the canvas's
-  // left edge) and of everything else already drawn.
-  const L = Math.round(box.x + box.width * 0.34), R = Math.round(box.x + box.width * 0.52);
-  const T = Math.round(box.y + box.height * 0.72), B = Math.round(box.y + box.height * 0.90);
-  for (const [x, y] of [[L, T], [R, T], [R, B], [L, B]]) { await page.mouse.click(x, y); await page.waitForTimeout(90); }
-  await page.mouse.click(L, T);
-  await expect.poll(() => planNamed(page, "Concept A").then((p) => p && p.parcels)).toBe(1);
-  await page.keyboard.press("Escape");
-  await selectTool(page);
-  // Collapse the panel the Parcel tool opened, so it can't sit over the canvas we click next.
-  await page.evaluate(() => {
-    const panel = document.querySelector('[data-testid="left-menu-panel"]');
-    const lit = panel && panel.previousElementSibling && panel.previousElementSibling.querySelector('button[aria-pressed="true"]');
-    if (lit) lit.click();
-  });
-  return { edge: { cx: (L + R) / 2, cy: T } };
 }
 
 /* ── the cases ─────────────────────────────────────────────────────────────────────────────── */

@@ -136,7 +136,8 @@ export function buildPerfRow(sample = {}, prev = null) {
     heap: num(sample.heapMB, 1),
     dom: num(sample.documentNodes),
     cv: num(sample.canvasNodes),              // SVG nodes in the planner canvas — the draw cost proxy
-    el: num(sample.elementsDrawn),            // ← the amplification axes
+    fx: num(sample.featuresDrawn),            // ← the amplification axes: ALL five drawn kinds (NEW-2)
+    el: num(sample.elementsDrawn),            //   of which elements
     ly: num(sample.layersOn),
     lyk: sample.layerKeys || undefined,       // B265539 — WHICH layers, so a fixture can be his
     pn: num(sample.panelsOpen),

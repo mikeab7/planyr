@@ -59,6 +59,7 @@ import { rungViewFault } from "./lib/sessionAxes.mjs";
 import { fakeTilePng, parseTileUrl } from "./lib/fakeTile.mjs";
 import { waitForSelectorReleased } from "./lib/waitRelease.mjs";
 import { assertMeasurable } from "./lib/tabTiming.mjs";
+import { FEATURE_COUNT_FIELD } from "./lib/featureCensus.mjs";
 import {
   GROWTH_CANDIDATES, observableCandidates, unobservableCandidates,
   classifyCurve, reloadReset, admissibility, attribute, growthHeadline,
@@ -153,6 +154,8 @@ const COUNTERS = `(async () => {
     liveNodesAll,
     documentNodes: document.getElementsByTagName("*").length,
     canvasNodes: svg ? svg.getElementsByTagName("*").length : 0,
+    ${FEATURE_COUNT_FIELD},
+    /* el-tier: the element slice, kept beside the census as detail — the census is the answer. */
     elementsDrawn: svg ? svg.querySelectorAll("[data-el-id]").length : 0,
     tiles: document.querySelectorAll("img.leaflet-tile").length,
     tilesLoaded: document.querySelectorAll(".leaflet-tile-loaded").length,
@@ -426,6 +429,7 @@ async function enableLayer(page, round) {
  *  undo generation and re-identifies the model array), and it leaves the geometry where it was, so
  *  the edit axis does not quietly move the element axis underneath it. */
 async function nudge(page) {
+  /* el-tier: grabbing one element to nudge — a targeted grab, not a census. */
   const el = page.locator("[data-el-id]").first();
   if (!(await el.count())) return 0;
   const b = await el.boundingBox();

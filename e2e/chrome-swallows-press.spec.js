@@ -57,6 +57,8 @@ async function loadOwnerPlan(page) {
   }, [SITE_ID, site]);
   await page.goto("/");
   await expect(canvas(page)).toBeVisible();
+  /* el-tier: this fixture seeds `markups: [], measures: [], callouts: []` on purpose, so the plan
+     IS its elements and an element count is the honest readiness gate here. */
   await expect.poll(async () => page.locator("[data-el-id]").count(), { timeout: 20_000 }).toBeGreaterThan(10);
   /* Let the fit / label / declutter passes settle. Without this the rects measured below are the
      pre-fit ones and every press lands somewhere else — a flaky guard is worse than no guard. */
@@ -113,6 +115,7 @@ const dockState = (page) => page.evaluate(() => {
 test.describe("NEW-1 — no chrome painted above the plan swallows a press meant for an element", () => {
   test("STRUCTURAL: with nothing selected, every element's own centre answers to that element", async ({ page }) => {
     await loadOwnerPlan(page);
+    /* el-tier: the fixture is elements-only (see loadOwnerPlan) — sweeping them IS sweeping the plan. */
     const ids = await page.locator("[data-el-id]").evaluateAll((ns) => [...new Set(ns.map((n) => n.getAttribute("data-el-id")))]);
     expect(ids.length).toBeGreaterThan(10);
     const stolen = [];
