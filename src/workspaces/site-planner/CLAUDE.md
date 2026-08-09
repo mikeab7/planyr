@@ -182,6 +182,52 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   plus the e2e spec **map-layer-stacking** (whose lift case is mutation-checked three ways: hosting
   the band outside the SVG, rendering it after the handle layer, and dropping its transform mirror
   each turn it red).
+- **⛔ BAKED FEMA FLOOD TILES (B298400–B298402) — the shared model (`shared/gis/`) is the MODEL and the
+  one line in it that must not move: A TILE IS A PICTURE, NEVER A NUMBER.** The flood layer can render
+  from a per-county PMTiles archive under `public/flood/` — range-read off the same Cloudflare Pages
+  origin that serves the app — instead of calling FEMA's `/export` on every pan. Behind
+  `VITE_FLOOD_TILES`, **default OFF**. Four things to know before touching any of it:
+  **(1) PARCEL-SCALE AUTHORITY IS UNCHANGED.** Tiles are generalised, so they answer the fast picture
+  and nothing else; the screening / mitigation math still queries live FEMA, and every tile identify
+  card says so. Never let a number a user acts on come off a tile.
+  **(2) THE FALLBACK IS A PROPERTY OF A PURE FUNCTION, not a hope.** `resolveFloodSource` answers `live`
+  for every way the fast path can be unavailable (flag off · no county · no archive · an archive that
+  failed earlier · called with nothing), each with a stated reason. The runtime half is ONE terminal
+  `_die()` in `floodTileLayer.js`, which tears the slot down through `layers.js`'s **shared `release`
+  helper** and re-enters `syncOverlayLayers` so the raster branch takes over. A per-TILE miss is NOT
+  that — an empty tile is the ordinary case.
+  **(3) THE ABSENCE RULE DIFFERS BY SOURCE.** The build DROPS unshaded Zone X, so on tiles "no polygon"
+  means *outside the mapped floodplain*; on the LIVE layer it means *no effective flood map here*
+  (`identifyGap: "flood"`) — the opposite risk position. `floodAbsenceKindFor` is the one place that
+  decides, and showing the live wording over a tile answer turns a clean result into a scare.
+  **(4) ⛔ CLOUDFLARE PAGES DOES NOT DO HTTP BYTE SERVING — measured, and it refutes the design's own
+  premise.** A ranged GET against a real Pages deployment returns **200 with the full body**, no
+  `accept-ranges`, on EVERY asset (the 6 MiB archive, `manifest.json`, a plain JS bundle); the control
+  through the same proxy returns 206 from other hosts. `pmtiles`' own `FetchSource` REFUSES that, so the
+  layer would have thrown on its first read in production and fallen back to live FEMA **silently** —
+  while the Vite dev server, which DOES honour Range, kept every test and the headless verifier green.
+  The adaptive reader is the flood archive source module: 206 → ranged reads; 200-with-the-whole-body →
+  keep it and serve every later read from memory, so the archive is fetched exactly once (concurrent
+  cold reads deduped, buffer released by `forgetArchive`). `public/_headers` gives `/flood/*` — and the
+  manifest, the same policy, so a refreshed vintage can never appear over stale tiles — an hour of hard
+  cache plus a day of stale-while-revalidate. **Do not replace the source with a bare URL.**
+  **(5) `floodTileLayer.js` IS LAZY BY CONSTRUCTION and must stay so** — it pulls `pmtiles` +
+  `@mapbox/vector-tile` + `pbf` (its own 38 KB chunk). The Leaflet-free half is `floodTileDecode.js`
+  (Leaflet needs a `window`, so anything beside it can only be tested through a browser — the
+  `adminBoundaryData.js` split). `floodTileStyle.js` is the palette + the painter's draw order (a
+  floodway must land ON TOP of the SFHA it sits inside) + the identify wording; `floodManifest.js` is one
+  cached fetch of the build manifest, which is where the **NFHL vintage stamp** comes from — and that
+  stamp may never disappear, it reports "unknown" instead (B1093's rule).
+  The builder is the repo-root build-flood-tiles script (`npm run build:floodtiles`); its
+  `--no-feature-limit --no-tile-size-limit` are deliberate, because tippecanoe's defaults DROP features
+  out of dense tiles and a silently vanishing floodplain is the worst thing this layer could do.
+  Guards: the repo-root `test/` suites **floodTiles** (48 — incl. reading the COMMITTED archives back and
+  asserting the 25 MiB Cloudflare Pages per-file cap), **floodTileRender** (22, driven off the real
+  Harris archive) and **floodArchiveSource** (9 — both measured host behaviours required to decode the
+  same tile feature for feature), plus the ui-audit harness **verify-flood-tiles** (`npm run verify:floodtiles`).
+  ⚠ That harness proves tiles PAINT and proves the fallback ENGAGES; it can never prove the live FEMA
+  layer paints, because every `hazards.fema.gov` request from Chromium in this sandbox is
+  `ERR_CONNECTION_RESET` — it detects that and says so rather than reporting the egress policy as a bug.
 - **`buildingFloodExposure.js` (B1207) answers "is my building in the floodplain?" as a NUMBER** —
   per footprint: overlap by area and percent, the governing zone and its BFE. It **reuses** the
   B707/B712 `zonesFromFeatureCollection` + `gridIntersect` + `zoneWaterSurface` chain (never a second
@@ -454,6 +500,16 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   real transport**, never through a mock `commit` that accepts more parameters than the shipped
   adapter does — that mismatch is exactly what shipped a dead feature green. **B1118:** the load-time heal's `exempt` set — a repaired element must diff and COMMIT, or
   rows-canonical-on-seed adopts the torn rows straight back over the repair.
+- **County ROUTING KEYS (the shared `shared/gis/` normaliser) — a county routing key is normalised at the MAP, never at the call
+  site (B298403).** Two production plans stored `"Harris"`; every `MAP[county]` lookup missed them and,
+  because a missing key is `undefined` and every call site has a `|| fallback`, rendered a confident
+  wrong answer (generic easement rules instead of City of Houston's). `COUNTIES`, `COUNTIES_MAP`,
+  `JURISDICTION_LAYERS`, the statewide county-name tables and `SNAPSHOT_COUNTIES` are all wrapped, so a
+  lookup written later cannot miss. **⛔ NOT the same thing as `floodGroup.countyKey`**, which slugs a
+  DISPLAY NAME to letters-only and would turn `co_larimer` into `colarimer`. Whitespace is REMOVED, not
+  turned into an underscore — the underscore is a state prefix, so `"Fort Bend"` must become `fortbend`.
+  Writes normalise at `createSiteModel`, at `cloudSync.siteRowFor`, and in a Postgres trigger
+  (`db/sites_county_normalize.sql`, applied). Guard: the repo-root `test/` suite **countyKeys** (36).
 - **⛔ `assemblyIntegrity.js` (B1340) — THE bonded-assembly invariant, and the reason this bug family
   is closed rather than patched a ninth time. Read it before touching any write, echo or revert path.**
   A bonded child's world position is REDUNDANT: it is derived from its host across the wall, and only
@@ -990,7 +1046,33 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   Prop from `proposedSurface.sampleProposedAt`, which walks the SAME `grid.owners` the B826
   earthwork rows price off, so chip and ledger cannot drift).
   `fbcdWse.js` — FBCDD Atlas-14 DRAFT WSE samplers (Fort Bend): 0.2% mosaic → `derivedWse02Ft`,
-  per-watershed 100-yr multiplex → `derivedWse1pctFt` (B807).
+  per-watershed 100-yr multiplex → `derivedWse1pctFt` (B807). Its `onSample` hook reports ONE timing
+  per raster to `drainageTiming.js` (B298563) — a group total cannot say WHICH county layer went slow.
+- **⛔ `groundElevation.js` + `drainageTiming.js` (B298560–B298563) — THE DRAINAGE CHECK'S SLOWEST LEG,
+  AND THE INSTRUMENT THAT WOULD HAVE FOUND IT. Read the first module's header before touching
+  `checkDrainage`.** Measured live on the owner's signed-in Bain plan: the whole re-check cost 3.6–8.5 s
+  and ONE call — a USGS 3DEP transect for BARE-EARTH GROUND ELEVATION, whose geometry parameter is
+  **byte-identical run to run** — was 68–90% of it, at 997 / 5,761 / 7,702 ms for the same query.
+  **Four things not to undo:** **(a)** the cache key is built from `elevation.profileQuery`, the SAME
+  derivation that builds the URL, so a change to the georeference, the parcels or the transect rule is a
+  MISS rather than a stale read — never loosen it to a rounded lat/lng or a site id, because serving
+  elevation for the wrong ground is the whole failure mode; it lives in `gisCache`'s IndexedDB tier
+  (TIER-BY-REBUILDABILITY — re-fetchable cache may never compete with saved plans in the ~5 MB store).
+  **(b)** the transect starts at t=0 and the panel is NOT gated on it: `GROUND_PUBLISH_BUDGET_MS` (1.5 s)
+  bounds how long the PUBLISH waits, `GROUND_TIMEOUT_MS` (8 s) bounds the REQUEST, and the late answer
+  patches the number, the freshness dot and the remembered record in place. Four states, never fewer —
+  `value` / `void` / `pending` / `unavailable` — and **NEVER a default elevation**, because an assumed
+  ground surface is how a detention volume comes out confidently wrong. **(c)** the ↻ bypasses the cache
+  as a FORCE REFRESH, not a blocking re-read (the owner needs both "the button corrects a wrong cached
+  value" and "the press is fast"), and a cache hit is LOUD in the freshness hover with its age.
+  **(d)** ⛔ **NEITHER MODULE MAY REJOIN THE SITE ROUTE'S STATIC GRAPH** — both are reached only by the
+  dynamic `import()` inside `checkDrainage`; static they put 8.8 KB on the largest chunk and breached its
+  ceiling. That is why the hover sentence travels WITH the state (`groundElev.note`) instead of the render
+  calling back into the lib, and why the save-leg stamp in `cloudPushWithWatchdog` is gated on a ref.
+  Guards: the repo-root `test/` suites **groundElevation** (28, incl. both source guards),
+  **drainageTiming** (26) and **elevation**, plus the e2e spec **drainage-elevation-latency**
+  (mutation-proven both ways: restoring the gate reddens the publish arm alone, removing the cache
+  reddens the held-value arm alone).
 - Detention outlet / routing / criteria tier (NEW-A, Phase A): `detentionCriteria.js` (the versioned
   jurisdiction criteria registry — cited outlet/geometry criteria, referencing `detentionRules.js` for
   the verified release/storm/freeboard facts; audit + overrides), `outletStructure.js` (per-pond

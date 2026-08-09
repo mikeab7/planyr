@@ -6,6 +6,7 @@ import {
   inpFrom, decidePerfSend, buildPerfRow, readScene,
   installPerfInstrument, perfSnapshot, __resetPerfInstrument,
   PERF_MAX_ROWS, PERF_MIN_GAP_MS,
+  routeLane, phaseAt, ROUTE_MOUNT_MS,
 } from "../src/shared/telemetry/perfInstrument.js";
 import { isEnrolled, notePerfEdit, __resetPerfEdits } from "../src/shared/telemetry/perfSampling.js";
 import { SESSION_MAX } from "../src/shared/telemetry/clientErrors.js";
@@ -275,5 +276,113 @@ describe("the instrument stays OFF every route's critical path", () => {
     expect(SP).toContain('import { notePerfEdit } from "../../shared/telemetry/perfSampling.js";');
     expect(SP).not.toContain("telemetry/perfInstrument.js");
     expect(SP).toContain("histRef.current.push(stateRef.current); notePerfEdit();");
+  });
+});
+
+/* ── NEW-2: WHICH LANE, AND WHEN ─────────────────────────────────────────────────────────────
+ *
+ * ⛔ THE FINDING THAT FORCED THIS. Grouping 51 of the owner's own production reports by `ly`
+ * (layers on) put the WORST main-thread blocks in `ly=0` — almost no DOM, no layers, more heap
+ * than a fully loaded canvas — while every optimisation this programme has shipped targeted the
+ * gesture lane. But `ly=0` conflates a boot, a non-canvas route and a long-idle tab, so no cause
+ * could honestly be named from it. These fields separate them, and they are attribution ONLY: no
+ * fix is written against them here.
+ */
+describe("routeLane — which lane a row belongs to (NEW-2)", () => {
+  it("names the workspace, not the project", () => {
+    /* The project id is dropped deliberately: it is high-cardinality and it identifies the owner's
+     * deals, and "which lane is slow" is never answered by which site is open. */
+    expect(routeLane("#/project/smqfy48tlk9j/site")).toBe("p/site");
+    expect(routeLane("#/project/g-tsakiris/schedule")).toBe("p/schedule");
+    expect(routeLane("#/project/smrp1wrgg6u5/notes")).toBe("p/notes");
+    expect(routeLane("#/project/smqfy48tlk9j/site")).toBe(routeLane("#/project/DIFFERENT-SITE/site"));
+  });
+  it("names the project-less and cross-project forms distinctly", () => {
+    expect(routeLane("#/markup")).toBe("markup");
+    expect(routeLane("#/library")).toBe("library");
+    expect(routeLane("#/all/schedule")).toBe("all/schedule");
+    expect(routeLane("#/")).toBe("home");
+    expect(routeLane("")).toBe("home");
+  });
+  it("⛔ reports an unknown slug VERBATIM instead of folding it into the default", () => {
+    /* `parseRoute` resolves junk to the Site workspace by design. A lane that silently claimed to
+     * be `site` would re-create exactly the blindness this field exists to remove — B1373 is the
+     * precedent: `#/notes` on a build with no Notes opened the Site workspace with no clue. */
+    expect(routeLane("#/quarry")).toBe("quarry");
+    expect(routeLane("#/project/abc/quarry")).toBe("p/quarry");
+  });
+  it("never throws on a malformed hash", () => {
+    for (const h of [null, undefined, "#", "#//", "#/project", "#/project/abc", "#/all"]) {
+      expect(() => routeLane(h)).not.toThrow();
+      expect(typeof routeLane(h)).toBe("string");
+    }
+  });
+});
+
+describe("phaseAt — pre-first-paint vs post-mount vs idle (NEW-2)", () => {
+  it("is `pre` before First Contentful Paint", () => {
+    expect(phaseAt(100, { fcpMs: 800, routeEnteredMs: 0 })).toBe("pre");
+  });
+  it("⛔ treats a supported-but-not-yet-painted read (Infinity) as `pre`, not as unknown", () => {
+    /* An empty paint-entry list means EITHER "this browser has no PerformancePaintTiming" OR "we
+     * genuinely have not painted yet", and those are opposite answers. Collapsing them makes `pre`
+     * unreachable forever. */
+    expect(phaseAt(100, { fcpMs: Infinity, routeEnteredMs: 0 })).toBe("pre");
+  });
+  it("is `mount` just after paint and `idle` once the route settles", () => {
+    expect(phaseAt(1200, { fcpMs: 800, routeEnteredMs: 0 })).toBe("mount");
+    expect(phaseAt(ROUTE_MOUNT_MS + 1, { fcpMs: 800, routeEnteredMs: 0 })).toBe("idle");
+  });
+  it("⛔ measures the mount of THIS ROUTE, not of the page — a workspace switch mounts a fresh tree in an old tab", () => {
+    /* Charging that mount to `idle` is exactly how a route's mount cost hides, and the scheduler
+     * rows are the case in point: their worst blocks land 1–3 seconds after the route is entered,
+     * in a tab that may have been open for an hour. */
+    const hourIn = 3_600_000;
+    expect(phaseAt(hourIn + 2000, { fcpMs: 800, routeEnteredMs: hourIn })).toBe("mount");
+    expect(phaseAt(hourIn + 2000, { fcpMs: 800, routeEnteredMs: 0 })).toBe("idle");
+  });
+  it("says `early` rather than guessing when paint timing is unreadable", () => {
+    /* A phase that MIGHT be either must not be indistinguishable from one that was measured. */
+    expect(phaseAt(500, { fcpMs: NaN, routeEnteredMs: 0 })).toBe("early");
+    expect(phaseAt(500, { fcpMs: null, routeEnteredMs: 0 })).toBe("early");
+    expect(phaseAt(ROUTE_MOUNT_MS + 1, { fcpMs: NaN, routeEnteredMs: 0 })).toBe("idle");
+  });
+  it("never throws on missing options", () => {
+    expect(() => phaseAt(0)).not.toThrow();
+  });
+});
+
+describe("the row carries the attribution (NEW-2)", () => {
+  it("stamps the lane, the phase and the route age", () => {
+    const row = buildPerfRow({ kind: "tick", routeLane: "p/schedule", phase: "mount", secondsInRoute: 2.4 });
+    expect(row).toMatchObject({ rt: "p/schedule", ph: "mount", rts: 2.4 });
+  });
+  it("⛔ stamps the WORST BLOCK's own phase and lane, which its row's phase cannot stand in for", () => {
+    /* `ltx` is a high-water mark since load, so it is routinely reported by a row sent minutes
+     * later, in a different phase, on a different route. Reading a 3-second `ltx` off an `idle`
+     * row as "the app blocks while idle" is the specific misreading this pair prevents. */
+    const row = buildPerfRow({
+      kind: "tick", phase: "idle", routeLane: "p/site", longtaskMaxMs: 3254,
+      longtaskMaxPhase: "mount", longtaskMaxLane: "p/schedule", longtaskMaxAtSec: 2.7,
+    });
+    expect(row.ph).toBe("idle");
+    expect(row.ltxp).toBe("mount");
+    expect(row.ltxr).toBe("p/schedule");
+    expect(row.ltxt).toBe(2.7);
+  });
+  it("leaves every new field ABSENT when it could not be read, never zero or empty", () => {
+    const row = buildPerfRow({ kind: "tick" });
+    for (const k of ["rt", "ph", "rts", "ltxp", "ltxr", "ltxt"]) expect(k in row).toBe(false);
+  });
+  it("stays inside the 2000-character message column with the new fields on a worst-case row", () => {
+    const row = buildPerfRow({
+      kind: "final", secondsSinceLoad: 98765, inp: 1234.5, longtaskMs: 987654, longtasks: 4321,
+      longtaskMaxMs: 76543, heapMB: 1234.5, documentNodes: 99999, canvasNodes: 99999,
+      elementsDrawn: 9999, layersOn: 99, layerKeys: Array.from({ length: 14 }, (_, i) => `layer-key-${i}`),
+      panelsOpen: 99, editsSinceLoad: 9999, tiles: 999, dpr: 2.15, viewportW: 3840,
+      routeLane: "p/schedule", phase: "mount", secondsInRoute: 98765,
+      longtaskMaxPhase: "mount", longtaskMaxLane: "p/schedule", longtaskMaxAtSec: 98765,
+    }, null);
+    expect(JSON.stringify(row).length).toBeLessThan(2000);
   });
 });
