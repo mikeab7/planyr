@@ -7,6 +7,31 @@
 
 _Last updated: 2026-08-09._
 
+## ❓ One question on team sharing I deliberately did NOT answer for you (B326416)
+
+> Your new projects are now shared with your team automatically — **new ones only**, nothing you already
+> have moved, and that is enforced by the database rather than by the app being careful. Teammates can
+> edit a shared plan fully, and you can lock any one plan to view-only from the plan menu. Notes,
+> Library, Review and Schedule stay yours, as you asked.
+>
+> **The one thing you said nothing about, so I left it alone:** when a teammate opens a project you
+> shared, what should they see in those four private modules?
+>
+> I checked how it is built, and today the answer is already **(a) they get their own, empty Notes /
+> Library / Review / Schedule for that project** — those four are stored per-person, so this needs no
+> work at all and is what ships. The alternative, **(b) hide or lock those tabs entirely for anyone who
+> isn't the owner**, is a real change and I did not make it.
+>
+> My read is that (a) is the better default anyway — your teammate can keep their own notes on your
+> project without you seeing them, which is usually what people want. But it is a taste call, not a
+> technical one, so it is yours. **Nothing is broken either way; say the word if you'd rather have (b).**
+>
+> **One heads-up while this is waiting to go live:** I applied the database side already (that is what
+> let me prove nothing existing can leak). Until this merges and deploys, the *old* "Share with team"
+> button on the live site will refuse with a message instead of working. It affects one project and it
+> fails loudly rather than silently — but if you go to share something today and it complains, that is
+> why, and merging fixes it.
+
 ## 🔎 One note of yours is sitting in the cloud with nothing pointing at it — say the word and I'll put it back (B315716)
 
 > While building the duplicate check you asked for, I found a **different** problem in your account, and it is
