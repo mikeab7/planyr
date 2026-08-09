@@ -535,11 +535,15 @@ a look-ahead at what that study will produce, clearly labelled as screening and 
       `baytown.org` are both blocked by the network allowlist. Michael's recollection is "about 2 ft above the
       500-year"; Claude deliberately did **not** encode that, because every other rule in the app cites the
       exact ordinance section it was read from, and a web-search summary is not an ordinance. Two ways to
-      unblock, either is fine: **(a)** add `library.municode.com` + `baytown.org` to the environment's allowed
-      sites, or **(b)** send Claude the PDF/pages of Baytown's Flood Damage Prevention chapter — the
-      non-residential lowest-floor requirement is the part needed. **Worth knowing before spending effort:
+      unblock: **send Claude the PDF or pages of Baytown's Flood Damage Prevention chapter (Ch. 122)** —
+      the non-residential lowest-floor requirement is the part needed. ⚠ Just opening up the websites
+      probably won't do it: Municode serves Baytown's code as a page that builds itself in the browser, so
+      a plain fetch gets the index and no ordinance text, and Baytown's own site times out on the check
+      crawlers do before reading. A second attempt confirmed both dead ends. **Worth knowing before spending effort:
       Harris County's rule (already in the app, verified) is 500-year + 2 ft — the SAME as the recollection —
-      so if the recollection is right the pads do not move at all.** (B286305, 2026-08-09.)
+      so if the recollection is right the pads do not move at all.** Meanwhile the app is NOT guessing and
+      NOT blank: it uses the Harris County rule, says on screen that it is using it and that Baytown's
+      rule is missing, and refuses to call the floor final. (B286305/B286309, 2026-08-09.)
 - [ ] **Is Grand Port inside Baytown's city limits?** The two mapping sources disagree on every lot there:
       Baytown's own map says yes, the state's map says no city at all. At Goose Creek the two agree exactly,
       so this is specific to Grand Port — possibly an annexation the state layer hasn't picked up. If Baytown

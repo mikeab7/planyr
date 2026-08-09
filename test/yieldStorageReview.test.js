@@ -707,6 +707,44 @@ describe("NEW-1c — an authority we have no rule for blocks a settled FFE and i
     expect(rules.baytown.source).toMatch(/NOT TRANSCRIBED/);
   });
 
+  /* ⛔ NEW-1d — THE RENDER GATES ARE PART OF THE CONTRACT, and getting them wrong hid this item's
+   * whole point on the one plan it was built for. `split` and `unmodelled` are INDEPENDENT facts —
+   * how many authorities govern, versus whether we hold their rules — and the panel had them
+   * mutually exclusive. Goose Creek is both, so the "no rule on file for Baytown" line never
+   * rendered there. These cases assert the gate CONDITIONS the panel evaluates. */
+  it("split and unmodelled are independent — Goose Creek is BOTH and must show both", () => {
+    const a = gooseCreek();
+    expect(a.split).toBe(true);
+    expect(a.unmodelledCandidates.length).toBeGreaterThan(0);
+    // The panel gate for the unmodelled line must not exclude a split site.
+    const unmodelledLineShows = !a.unresolved && a.unmodelledCandidates.length > 0;
+    expect(unmodelledLineShows).toBe(true);
+  });
+
+  it("the DEFAULT while unanswered is the authority we DO have, named — never a blank", () => {
+    /* A blank reads as "no requirement", which is the one answer that is certainly wrong. The
+     * governing authority, its rule and its elevation stay available so the panel can state them. */
+    const a = gooseCreek();
+    expect(a.governingLabel).toBe("Harris County (unincorporated)");
+    expect(a.governingRuleText).toBe("wse02pct + 2 ft");
+    expect(a.settled).toBe(false);          // not settled…
+    expect(a.governing).toBeTruthy();       // …but never empty
+  });
+
+  it("an UNMODELLED-but-not-split site still refuses a settled floor", () => {
+    /* The gap this closes: not split, nothing failed, so the verdict row fell through to
+     * "pads pass at X′ FFE" — a settled claim with a governing city's rule missing from the
+     * comparison behind it. */
+    const whollyInBaytown = assessAdministrator({
+      signals: { floodJurKey: "harris", county: "Harris", cityLabel: "Baytown", etjLabel: null },
+      rules,
+    });
+    expect(whollyInBaytown.split).toBe(false);
+    expect(whollyInBaytown.unresolved).toBe(false);
+    expect(whollyInBaytown.unmodelledCandidates.map((u) => u.key)).toContain("baytown");
+    expect(whollyInBaytown.settled).toBe(false);
+  });
+
   it("the comparison that answers 'how many feet do the pads move': Harris is ALREADY 500-yr + 2 ft", () => {
     /* This is the fact that reframes the owner's concern. He expected Baytown (~500-yr + 2 ft) to be
      * materially STRICTER than the basis in use. Harris County's modelled rule — verified, cited at

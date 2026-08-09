@@ -27150,17 +27150,33 @@ function YieldPanel({
                         <b>Two floodplain rules on this site</b> — {drainage.administrator.splitDetail?.inCity != null && drainage.administrator.splitDetail?.tested != null
                           ? `${drainage.administrator.splitDetail.inCity} of ${drainage.administrator.splitDetail.tested} drawn lots sit inside the City of ${drainage.administrator.splitDetail.city} and the rest do not`
                           : `part of the site is inside the City of ${drainage.administrator.splitDetail?.city} and part is not`}, so one finished-floor figure cannot be right for both. Confirm which parcels each rule covers before setting pads.
-                        {drainage.administrator.governingLabel ? ` Shown: ${drainage.administrator.governingLabel}${drainage.administrator.governingRuleText ? ` (${drainage.administrator.governingRuleText})` : ""}.` : ""}
+                        {/* PANEL-BREVITY rule 5 — state it once. When the unmodelled line below is
+                            also showing it already names the governing authority and its rule, so
+                            repeating it here printed the same fact twice on the owner's own site. */}
+                        {drainage.administrator.governingLabel && !drainage.administrator.unmodelledCandidates?.length
+                          ? ` Shown: ${drainage.administrator.governingLabel}${drainage.administrator.governingRuleText ? ` (${drainage.administrator.governingRuleText})` : ""}.` : ""}
                       </div>
                     )}
-                    {/* NEW-1c — an authority that governs here and whose ordinance we have not
-                        transcribed. Ranked below the two states above but above "Rule applied",
-                        because the number shown is a floor from an incomplete comparison. */}
-                    {v.key === "ffe" && drainage.administrator && !drainage.administrator.unresolved && !drainage.administrator.split
+                    {/* ⛔ NEW-1d — THIS RENDERS ALONGSIDE A SPLIT, NOT INSTEAD OF ONE. It was gated
+                        on `!split`, and Goose Creek — the site the whole item was built for — is
+                        BOTH split and unmodelled, so the "no rule for Baytown" fact never reached
+                        the screen on the one plan that needed it. Split and unmodelled are
+                        independent facts about different things (how many authorities, versus
+                        whether we hold their rules); wiring them mutually exclusive hid one.
+
+                        AND IT NAMES THE DEFAULT. An unsettled FFE must never read as "no
+                        requirement" — while the missing ordinance is unanswered the app falls back
+                        to the authority it DOES have, so that authority, its rule and its elevation
+                        are stated outright rather than alluded to as "the authorities we do
+                        have". */}
+                    {v.key === "ffe" && drainage.administrator && !drainage.administrator.unresolved
                       && drainage.administrator.unmodelledCandidates?.length > 0 && (
                       <div data-testid="yield-ffe-unmodelled" style={{ fontSize: 10.5, color: "var(--warn-text)", lineHeight: 1.45, marginTop: 2, whiteSpace: "normal" }}
                         title={drainage.administrator.unmodelledNote || ""}>
-                        <b>No rule on file for {drainage.administrator.unmodelledCandidates.map((u) => u.label).join(" and ")}</b> — {drainage.administrator.unmodelledCandidates.length === 1 ? "it administers" : "they administer"} part of this site, so the elevation shown is a floor from the authorities we do have, not the final answer.
+                        <b>No rule on file for {drainage.administrator.unmodelledCandidates.map((u) => u.label).join(" and ")}</b> — {drainage.administrator.unmodelledCandidates.length === 1 ? "it administers" : "they administer"} part of this site.
+                        {drainage.administrator.governingLabel
+                          ? ` Using ${drainage.administrator.governingLabel}${drainage.administrator.governingRuleText ? ` (${drainage.administrator.governingRuleText})` : ""} meanwhile${Number.isFinite(v.provisionalFfeFt) ? `, so pads screen at ${f1(v.provisionalFfeFt)}′` : ""} — a floor, not the final answer.`
+                          : ""}
                       </div>
                     )}
                     {v.key === "ffe" && drainage.administrator && !drainage.administrator.unresolved && !drainage.administrator.split
