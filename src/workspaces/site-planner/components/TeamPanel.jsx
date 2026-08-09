@@ -9,6 +9,18 @@ import {
   setRole, removeMember, cancelInvite, leaveTeam, renameTeam, deleteTeam,
 } from "../lib/teams.js";
 import { loadSitesList } from "../lib/storage.js";
+/* ⛔ THESE TWO IMPORTS ARE STATIC ON PURPOSE, AND THAT WAS MEASURED RATHER THAN ASSUMED.
+ * The Team tab is lazy while `SitePlanner.jsx` imports `userPrefs.js` statically, so this module
+ * has consumers in two tiers and Rollup gives it its own shared chunk — the same mechanical
+ * outcome `teams.js` already has, recorded in ui-audit/perf-budgets.json's siteRouteAllowlist.
+ * The Site route downloads the SAME BYTES in one more file; it is not route pollution.
+ * ⚠ Three "tidier" dynamic-import arrangements were tried first and every one was WORSE, because
+ * a dynamic import CREATES a chunk rather than moving one: dynamic here → `siteRouteChunks` 7→8,
+ * dynamic for both modules → 7→9. Static keeps the count at 7. Do not re-litigate this by
+ * converting either import to `import()` — run `npm run perf:bundle` if tempted, since lint,
+ * tests and build are all green either way and only that audit can see the difference. */
+import { normalizeSharePref, resetShareContext } from "../lib/newProjectSharing.js";
+import { loadUserPrefs, saveUserPrefs } from "../lib/userPrefs.js";
 import AnchoredMenu from "../../../shared/ui/AnchoredMenu.jsx";
 
 const PAL = { ink: "var(--text-primary)", muted: "var(--text-secondary)", line: "var(--border-default)", accent: "var(--accent)", paper: "var(--surface-raised)", danger: "var(--danger)" };
@@ -39,6 +51,34 @@ export default function TeamPanel({ user, setMsg }) {
   const menuRef = useRef(null);
 
   const say = useCallback((type, text) => setMsg && setMsg(text ? { type, text } : null), [setMsg]);
+
+  /* B326418 — the account-level "new projects are shared by default" switch. Account-scoped
+   * rather than team-scoped on purpose: it governs what happens to projects YOU create, so one
+   * teammate must not be able to change it for everyone. */
+  const [sharePref, setSharePref] = useState(null);   // null = still loading (no static default needed)
+  const [sharePrefBusy, setSharePrefBusy] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    loadUserPrefs(myUid)
+      .then((r) => { if (alive) setSharePref(normalizeSharePref(r && r.prefs && r.prefs.newProjectSharing)); })
+      .catch(() => { if (alive) setSharePref(normalizeSharePref(null)); });
+    return () => { alive = false; };
+  }, [myUid]);
+
+  // LOUD-FAILURE: a preference that only saved on this computer says so, rather than showing a
+  // tick that quietly means nothing on the owner's other machine.
+  const saveSharePref = async (next) => {
+    const clean = normalizeSharePref(next);
+    setSharePref(clean); setSharePrefBusy(true); say();
+    try {
+      const cur = await loadUserPrefs(myUid);
+      const res = await saveUserPrefs(myUid, { ...(cur && cur.prefs), newProjectSharing: clean });
+      if (!res.ok) say("err", `Saved on this computer only — ${res.error || "couldn't reach the cloud"}.`);
+      else { resetShareContext(); say("ok", clean.enabled ? "New projects will be shared with your team." : "New projects will be private."); }
+    } catch (e) {
+      say("err", `Couldn't save that — ${(e && e.message) || "unknown error"}.`);
+    } finally { setSharePrefBusy(false); }
+  };
 
   // List my teams, preferring a specific team id for selection (e.g. a just-created one) so the
   // view flips to it deterministically in a single state update.
@@ -195,6 +235,42 @@ export default function TeamPanel({ user, setMsg }) {
               {inviteForm}
             </div>
           )}
+
+          {/* New-project sharing default (B326418). Deliberately ABOVE the roster: it is the thing
+              a team owner most needs to be able to find and change, and Michael asked for one or
+              two clicks of friction — a checkbox that saves itself, not a buried settings tree.
+              PANEL-BREVITY: one control, one qualifying line. The qualifying line stays because
+              "only from now on" is the fact that stops someone believing their whole history just
+              became visible — brevity is never bought with accuracy. */}
+          {sharePref && <><div style={label}>New projects</div>
+          <div style={{ marginBottom: 14, padding: "8px 10px", border: `1px solid ${PAL.line}`, borderRadius: 8 }}>
+            <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: sharePrefBusy ? "wait" : "pointer", fontSize: 13 }}>
+              <input
+                type="checkbox"
+                checked={sharePref.enabled}
+                disabled={sharePrefBusy}
+                onChange={(e) => saveSharePref({ ...sharePref, enabled: e.target.checked })}
+              />
+              <span>Share new site plans with this team</span>
+            </label>
+            {/* Several teams and none chosen resolves to PRIVATE, so the panel has to say which
+                team it would be — otherwise "on" silently does nothing (LOUD-FAILURE). */}
+            {sharePref.enabled && teams && teams.length > 1 && (
+              <select
+                style={{ ...field, marginTop: 8 }}
+                value={sharePref.teamId || ""}
+                disabled={sharePrefBusy}
+                onChange={(e) => saveSharePref({ ...sharePref, teamId: e.target.value || null })}
+              >
+                <option value="">Pick a team — new projects stay private until you do</option>
+                {teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+              </select>
+            )}
+            <div style={{ fontSize: 11.5, color: PAL.muted, marginTop: 6 }}>
+              Applies only to projects you create from now on — nothing you already have changes.
+              Site plans only; your notes, library, review and schedule stay private.
+            </div>
+          </div></>}
 
           {/* Roster */}
           <div style={label}>Members</div>

@@ -219,8 +219,15 @@ describe("NEW-4 — an outage offers the way forward instead of dead-ending", ()
   /* Mutation: revert newBlankSite to `goPlan(newId())` → red. The blank path must WRITE the
      record when it has an anchor, or `persistOrDrop` throws the located plan away on leave. */
   it("'Start blank' from the map is born LOCATED and is written immediately", () => {
-    const fn = app.slice(app.indexOf("const newBlankSite = (opts)"), app.indexOf("const mapCenterRef"));
+    // B326416 made this path async (it awaits the default-share team before the row is created,
+    // because `team_id` is written only on INSERT). The GUARD is unchanged in intent: the blank
+    // path must still WRITE a located record — only the signature moved.
+    const fn = app.slice(app.indexOf("const newBlankSite = async (opts)"), app.indexOf("const mapCenterRef"));
     expect(fn).toMatch(/saveSite\(\{ id, groupId: id, site: opts\.name \|\| "Untitled site", name: "Concept A", origin: o/);
+    // …and it must be born with whatever sharing the account default resolves to, stamped BEFORE
+    // the write rather than patched in afterwards (an afterwards-UPDATE is refused by the DB).
+    expect(fn).toMatch(/await defaultShareTeam\(/);
+    expect(fn.indexOf("defaultShareTeam(")).toBeLessThan(fn.indexOf("saveSite({"));
     expect(app).toContain("onClick={newBlankSiteHere}");
     expect(app).toMatch(/onViewCenter=\{\(c\) => \{ mapCenterRef\.current = c; \}\}/);
     expect(finder).toMatch(/onViewCenterRef\.current && onViewCenterRef\.current\(\{ lat: c\.lat, lon: c\.lng \}\)/);

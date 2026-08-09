@@ -77,6 +77,15 @@
         "                statically (member lookup) and the now-lazy Team tab also needs. Rollup gives a",
         "                module shared between a static and a lazy consumer its own chunk; the Site route",
         "                downloads the same bytes it always did, in one more file. Added by B1064(a).",
+        "  userPrefs   — src/workspaces/site-planner/lib/userPrefs.js (~12.6 KB incl. its newProjectSharing",
+        "                leaf), added by B326418 for exactly the same mechanical reason as `teams` above:",
+        "                the planner imports it statically (Standards' account scope) and the now-lazy",
+        "                Team tab needs it too for the new-project sharing switch, so Rollup gives a module",
+        "                shared between a static and a lazy consumer its own chunk. The Site route downloads",
+        "                the SAME BYTES it always did, in one more file — siteRouteJsBytes moved +3.8 KB,",
+        "                which is the new feature's own code and not this split. Three dynamic-import",
+        "                arrangements were measured first and all were WORSE (they added chunks rather than",
+        "                moving them: 7 -> 8 -> 9); the static edge is the arrangement that keeps the count at 7.",
         "  cjs-interop — rollup's shared CommonJS interop helper (~0.3 KB), pinned to its own chunk",
         "                so it cannot be absorbed into map-vendor. See the trap note in",
         "                vite.config.js: without this pin every route statically pulls the map",
@@ -84,7 +93,7 @@
         "The guard is UNWEAKENED by this: it still fails by name on any chunk not on this list, and",
         "the NEW-9 regression it exists for (a workspace chunk warming at boot) would still be caught."
       ],
-      "allow": ["index", "SitePlannerApp", "hitTest", "AppHeader", "map-vendor", "cjs-interop", "teams"]
+      "allow": ["index", "SitePlannerApp", "hitTest", "AppHeader", "map-vendor", "cjs-interop", "teams", "userPrefs"]
     },
     "notesRouteJsBytes": {
       "baseline": 634678,

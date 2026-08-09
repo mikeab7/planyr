@@ -113,6 +113,32 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V124976 — B326416–B326419: new projects are shared with the team by default, the per-plan lock holds, and NOTHING pre-existing changed `Blocker: auth`
+
+**Why this is here and what is NOT pending.** The SECURITY property — an existing project can never become
+visible to a teammate — was verified THIS SESSION directly against the production RLS policies, as a real
+`authenticated` role with a real JWT subject (`db/test/team_share_scope.test.sql`: 15/15 pass; the same suite
+run against the old permissive guard fails 3, including the teammate reading the pre-existing project's
+drawing). That is stronger evidence than a browser click and it is **not** awaiting anything. What is pending
+is the signed-in **UI** pass, which the sandbox cannot drive: the proxy CORS-blocks Supabase sign-in, and this
+needs TWO accounts on one team.
+
+Verified here (no browser needed): lint 0 errors · 10,364 unit tests green · build green ·
+`npm run perf:bundle` back to its pre-existing baseline · `panel-copy-budget --check` green ·
+production row counts unchanged by the migration (65 sites / 1 shared / 0 locked, before and after).
+
+**Steps still to run, signed in, with two accounts (A owner, B teammate on one team):**
+1. As A, create a NEW project → B sees it, and can move a building on it (full edit).
+2. As B, open one of A's PRE-EXISTING projects by id / from the list → **must not be visible at all.**
+   This is the one that matters; anything else failing is a bug, this failing is an incident.
+3. As A, plan menu → **Lock to view-only for teammates** → B can still open and read it, but every edit is
+   refused and the plan list shows 🔒. As A, unlock → B can edit again.
+4. As A, Team tab → untick **Share new site plans with this team** → the NEXT new project is private;
+   existing shared ones are unchanged. Re-tick → the next one is shared again.
+5. As B, open a shared project and confirm **Notes / Library / Review / Schedule are B's own and empty** —
+   they are per-user by construction (no team column), so this is a confirmation, not a behaviour to build.
+6. Sign in as a user on NO team → create a project → nothing about the experience differs from today.
+
 ### V121984 — B323424: a layer that is ON, past its zoom gate, and covers NOTHING here reads as dormant `Blocker: live-GIS`
 
 **Three of the four row states are proven here already**, in a real browser, by `e2e/layer-zoom-dormant.spec.js` (6 cases, red on the pre-fix build): checked-below-gate, checked-above-gate, unchecked, the click-to-fix actually moving the map, a second layer KIND with a second gate source, and the map finder. **The fourth state cannot be reached in this sandbox**: it needs the coverage engine's published-extent probes (`prefetchExtents` → `probeService`), and every GIS host is egress-blocked from Chromium here, so coverage resolves to `unknown` rather than `out` and the row correctly reports `drawing`. The pure model is pinned by `test/layerZoomGate.test.js`; what is unproven is the RENDER of that state.
