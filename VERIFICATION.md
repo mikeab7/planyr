@@ -130,6 +130,26 @@ was never clicked" quietly ships broken.
 - **PASS** = contour lines **never appear at all** at that zoom. The row reports itself dormant immediately — hollow dot, `Not showing at this zoom — zoom in N levels` — and clicking that line brings the contours in. Nothing is drawn and then taken away.
 - **FAIL** = lines paint on open and disappear a second or two later while the box stays checked. If that happens, re-run `ui-audit/diagnose-layer-gate-flash.mjs` against the deployed build and report the zooms it holds and the zoom each grid pull was issued at — that pair is the whole diagnosis.
 - **WHILE YOU ARE THERE (cheap, same page):** confirm the layers you had on last time still arrive at all. The fix defers every layer's admission until the opening view is framed, so a regression would look like layers that never load rather than layers that flicker.
+### V115424 — B316864: does a FORCED element survive the CLOUD round trip on a signed-in session? `Blocker: auth`
+
+The on-device half is proven here and does NOT need re-running: the override is written into the saved plan record (asserted on the stored bytes), survives a reload, and rides the export sheet — all on the owner's real Bain plan, 19/19, plus 58/58 on the parity fixture. `bandForce` is an ordinary field on the element object, and `elementRows.rowFor` serializes the WHOLE object as the row's `data`, so there is no new column and no migration. What cannot be run here is the one path that needs a signed-in Supabase session, which this sandbox's proxy CORS-blocks.
+
+- **Where:** planyr.io, **signed in**, any plan with a building and something under it (paving, a pond, a parking field).
+- **The check, three steps.** (1) Right-click the lower object → **Force on top of everything**. PASS = it immediately draws over the building. (2) **Hard-reload the page.** PASS = it is STILL on top, and its Properties panel still shows the "Forced on top of everything" note with its restore button. (3) **Open the same plan on a SECOND device or browser profile** signed in as the same user. PASS = it is on top there too — that is the `site_elements` round trip, and it is the only step this V exists for.
+- **Then put it back:** right-click → **Use the normal layer order**. PASS = it returns under the building, and stays under it after a reload.
+- **FAIL =** the force is lost by any of those three, or the second device shows the old order. A loss at step 2 is local storage; a loss at step 3 is the cloud row — say which, because they are different bugs.
+- **⛔ ALSO CONFIRM THE DEFAULT DID NOT MOVE, on a plan he has NOT touched.** Open any other plan and check nothing has visibly restacked. That property is asserted in `test/elementBandForce.test.js` as a replay of the pre-fix comparator, so this is a belt-and-braces look, not the primary evidence.
+- The **owner never runs this** — Claude-cohort check on a signed-in session. ⏳ **PENDING**
+
+### V115425 — B316865: on a signed-in tab with the GIS layers ON, does a right-click still reach the feature under the acreage badge? `Blocker: auth`
+
+Reproduced, fixed and mutation-proven here on the owner's real Bain plan data (removing the fix turns four rows of `verify-v91632-real-plan.mjs` red). The one configuration this sandbox cannot reach is his live signed-in tab with real GIS layers painting — which matters because that is where OTHER hover-armed chrome could sit in the same stack.
+
+- **Where:** planyr.io, **signed in**, the **Bain / "Concept - Original"** plan (the one this was found on), with the map layers he normally has on.
+- **The check:** move the pointer onto the **detention pond** and let it REST there for a moment (this is the whole point — the badge arms on hover, not on click), then **right-click**. **PASS =** the POND's menu opens — ⚙ Pond settings, the four Arrange rows, Properties, Force on top of everything. **FAIL =** the PARCEL menu opens (*Merge parcels · Hide acreage label · **Delete parcel***), which is the reported defect.
+- **Then the affordance that must NOT have been taken away:** right-click the acreage badge itself where it sits over open ground with nothing beneath it. **PASS =** the badge's own menu still opens (Hide acreage label / Reset label position) — the fix forwards only when something else is genuinely underneath.
+- **And one more, on any plan:** right-click a MARKUP and a MEASUREMENT that sit under a parcel badge. PASS = each opens its own menu. The fix is one shared dispatch across all five families, so a family that regressed would show here.
+- The **owner never runs this** — Claude-cohort check. ⏳ **PENDING**
 
 ### V107264 — B296224: the ledger bridge resolves a REAL `dirty` PR, and refuses a REAL amendment race `Blocker: real-data`
 
@@ -262,15 +282,6 @@ a `live-GIS` blocker, not a to-do that was skipped.
    that is the one behaviour the sandbox cannot show, because its dev server honours Range and takes the
    cheap path instead.
 
-### V91632 — B293073: on ONE OF HIS OWN PLANS, do two overlapping objects actually swap what's on top? `Blocker: real-data`
-
-The three defects behind *"the layers / order feature doesn't work at all"* are fixed and each is proven here by reading paint order back out of the rendered DOM (not from state). What the sandbox cannot know is **which objects he was trying to reorder**, so this is the one check that closes his report rather than mine.
-- planyr.io, signed in, any plan of his with **two overlapping objects of the same kind** — two buildings, two markups, or two text boxes.
-- **The text-box case is the one to run first**, because it is the one that was structurally impossible before: drop two text boxes so they overlap, right-click the lower one → **Bring to Front**. **PASS = the box you clicked is now drawn over the other one.** Pre-fix that menu had no ordering rows at all.
-- Then the case that read as "broken": right-click something that is **the only one of its type on the plan** — a lone pond, a lone paving pad. **PASS = the four Arrange rows are THERE, greyed, and hovering one explains why** ("this is the only … so there is nothing to reorder it against"). Pre-fix the whole group was hidden, with no explanation — which is what "doesn't work at all" looked like.
-- And the cross-the-plan move: right-click a text box → **Send behind the plan**. PASS = the buildings now draw over it.
-- **Report which objects he originally tried**, if he remembers — if it was a building over a paving pad, that is the type-layer question parked on B293072 as an owner decision, NOT a bug, and this V should record that rather than reopen the item.
-- ⏳ **PENDING**
 ### V90096 — B291536: on the note where Backspace "acts funny", does one press now take exactly one step? `Blocker: real-data`
 
 **⛔ THIS IS THE ONE THE SANDBOX CANNOT SETTLE, and the reason is stated rather than glossed.** The reported symptom — a nested bullet un-nesting AND merging in one press — did **not** reproduce on a plain bulleted list here. What did reproduce, and produces exactly that symptom, is a document that MIXES a checklist with a bulleted list, which an Outlook paste routinely makes: Tiptap's list keymap runs its Backspace handler once per list type without stopping at the first one to act, and one press dissolved BOTH levels into plain paragraphs. That class is fixed and mutation-proven. Whether it is the class HIS note holds is his to confirm.

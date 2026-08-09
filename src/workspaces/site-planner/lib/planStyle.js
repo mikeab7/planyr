@@ -196,7 +196,44 @@ export const toHex6 = (c) => {
 // Paint order: ground surfaces first, structures last, so paving/road never
 // cover a building (a dock dog-ear is a building bump-out that sits ON the court).
 const Z_LAYER = { road: 0, paving: 1, sidewalk: 1, landscape: 1, pond: 2, parking: 3, trailer: 3, building: 5 };
-export const zOrder = (el) => Z_LAYER[el.type] ?? 4;
+
+/* ⛔ NEW-1 — THE TYPE-LAYER RULE IS THE DEFAULT AND THE DEFAULT DOES NOT MOVE. `bandForce` IS THE
+ * ONE EXPLICIT ESCAPE HATCH, AND IT IS OPT-IN PER ELEMENT.
+ *
+ * Owner decision (2026-08-09), verbatim, answering the six `{ open: … }` cells B293072 parked:
+ *   "for item one, paving over a building. I mean, I don't think that should be the default.
+ *    But, like, if I try and force it and then I don't see why I shouldn't be able to do that."
+ *
+ * BOTH halves, and shipping either one alone is a wrong answer:
+ *   (a) DEFAULT UNCHANGED. An element with no `bandForce` resolves to exactly the Z_LAYER value it
+ *       always did, so a plan nobody has touched sorts byte-for-byte as before. Ordinary Arrange
+ *       (arrange.js) still reorders only WITHIN a band, so Bring to Front still stops at the band
+ *       edge — crossing is never something an ordinary ordering command can do by accident.
+ *   (b) FORCING WORKS. `bandForce: "front"` lifts THAT ONE element out of its type band into a band
+ *       above every type band, where it draws over everything — including a building.
+ *
+ * ⛔ THE MECHANISM IS DELIBERATELY BORROWED, NOT INVENTED. It is `overlayOrder.js`'s reference-band
+ * model (`aboveParcel`) and the markup / callout / measurement `behindEls` flag, in the one shape
+ * all three already share: a DEFAULT band, ONE explicitly-chosen band on the far side of the plan,
+ * and ordinary front/back ordering INSIDE whichever band the object is in. Because the override is
+ * resolved HERE — inside `zOrder`, the single function every band question in the planner already
+ * asks (the `byZ` render sort, the `drawElsZ` split, `arrangeSel`'s peer set, `arrangePeers`, the
+ * element right-click menu) — there is no second stacking mechanism to keep in sync, and a forced
+ * element automatically gets its own Arrange peer group for free.
+ *
+ * A `bandForce` value that is not a known band is IGNORED (the element keeps its type layer) rather
+ * than defaulting to some other band: an unreadable override must never silently move a building.
+ */
+export const EL_BANDS = { front: 100 };
+export const bandForceOf = (el) => {
+  const v = el && el.bandForce;
+  return typeof v === "string" && Object.prototype.hasOwnProperty.call(EL_BANDS, v) ? v : null;
+};
+export const zOrder = (el) => {
+  const forced = bandForceOf(el);
+  if (forced) return EL_BANDS[forced];
+  return Z_LAYER[el.type] ?? 4;
+};
 // Paint order = the type layer, then the element's explicit `z` (the within-type tiebreak, B671),
 // then id. Before v12 this leaned on Array.sort being stable + array position as the tiebreak — but
 // array order isn't preserved across the cross-tab merge and has no per-row home once elements are

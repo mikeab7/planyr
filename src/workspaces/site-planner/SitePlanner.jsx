@@ -174,7 +174,7 @@ import {
 import { apprRows, apprAll, apprVal, findAttr, situsAddress, ownerName, parcelPanelRows } from "./lib/appraisal.js";
 import { makeParcelDisplayLayer, ADD_CURSOR, PARCEL_MINZOOM } from "./lib/parcelDisplay.js";
 import { geocodeAddress } from "./lib/geocode.js";
-import { TYPE, typeStyle, elStyle, parcelDefaultStyle, toHex6, byZ, zOrder, setPreviewStyleDefaults, setbackLineStyle, setbackChipStyle, SETBACK_LINE } from "./lib/planStyle.js";
+import { TYPE, typeStyle, elStyle, parcelDefaultStyle, toHex6, byZ, zOrder, bandForceOf, setPreviewStyleDefaults, setbackLineStyle, setbackChipStyle, SETBACK_LINE } from "./lib/planStyle.js";
 import { byZAsc, nextZ, Z_GAP } from "./lib/zOrder.js";
 import { reorderByZ, arrangeFlags } from "./lib/arrange.js";
 import { commonStyleState, selectionRingFeet } from "./lib/multiStyle.js";
@@ -4454,7 +4454,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       /* NEW-2 — and the case that used to be pure silence, which is what "the ordering doesn't work
          at all" actually looked like: the object is the only one in its band, so there is nothing
          to reorder it against and the op is a no-op for a reason the user cannot see. Say it. */
-      else if (af) flashWarn(`Nothing to reorder — this is the only one on its layer${s.kind === "el" ? " (a site element always draws in its own type's layer)" : ""}.`, 3500);
+      /* NEW-1 — the parenthetical is now conditional: an element the user has FORCED in front of the
+         plan is deliberately NOT in its own type's layer, and telling it that it is would contradict
+         the state it is visibly in (and the row that put it there). */
+      else if (af) flashWarn(`Nothing to reorder — this is the only one on its layer${s.kind === "el" && !bandForceOf(els.find((e) => e.id === s.id)) ? " (a site element always draws in its own type's layer, unless you force it in front)" : ""}.`, 3500);
       return;
     }
     pushHistory();
@@ -4470,7 +4473,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
      whenever `count < 2`, so right-clicking the single pond on a real plan offered no ordering rows
      at all and no reason why. Returns { count, index, atTop, atBottom, band } or null. */
   const arrangePeers = (s) => {
-    if (s?.kind === "el") { const t = els.find((e) => e.id === s.id); if (!t) return null; const b = zOrder(t); return { peers: els.filter((e) => zOrder(e) === b), band: `${TYPE[t.type]?.label || t.type} layer` }; }
+    /* NEW-1 — a FORCED element's band is no longer its type's, so neither is the name of it. Reading
+       the band off `zOrder` (which resolves the override) rather than off `t.type` is what keeps the
+       peer set, the greying and the label describing the same stack. */
+    if (s?.kind === "el") { const t = els.find((e) => e.id === s.id); if (!t) return null; const b = zOrder(t); return { peers: els.filter((e) => zOrder(e) === b), band: bandForceOf(t) ? "elements forced in front of the plan" : `${TYPE[t.type]?.label || t.type} layer` }; }
     if (s?.kind === "markup") { const t = markups.find((m) => m.id === s.id); if (!t) return null; return { peers: markups.filter((m) => (m.behindEls === true) === (t.behindEls === true)), band: t.behindEls ? "markups behind the plan" : "markups" }; }
     if (s?.kind === "callout") { const t = callouts.find((c) => c.id === s.id); if (!t) return null; return { peers: callouts.filter((c) => (c.behindEls === true) === (t.behindEls === true)), band: t.behindEls ? "notes behind the plan" : "notes" }; }
     if (s?.kind === "measure") { const t = s.id ? measures.find((x) => x.id === s.id) : measures[s.i]; if (!t || !t.id) return null; return { peers: measures.filter((x) => x && x.id && (x.behindEls === true) === (t.behindEls === true)), band: t.behindEls ? "measurements behind the plan" : "measurements" }; }
@@ -4521,6 +4527,27 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if (!target) return a;
       const z = nextZ(a.filter((m) => m.id !== id && (m.behindEls === true) === !!behind));
       return a.map((m) => (m.id === id ? { ...m, behindEls: behind ? true : undefined, z } : m));
+    });
+  };
+  /* ⛔ NEW-1 — THE ELEMENT ESCAPE HATCH. Force ONE element across the type-layer rule, or put it back.
+     Owner's decision, verbatim: *"I don't think that should be the default. But, like, if I try and
+     force it … I don't see why I shouldn't be able to do that."* So the default is untouched and this
+     is the only way across — a deliberate, named action, never something Arrange can do by accident.
+
+     Shaped on `setMeasureBand` / `setCalloutBand` (and the reference band toggle) rather than as a
+     second mechanism: flip the band field, and re-stack on TOP of the band the element ARRIVES in
+     (`nextZ` over its new peers) so it is never dropped underneath whatever was already there — which
+     for a "force this in front" gesture would read as the feature doing nothing.
+     `force` is a band name ("front") or null to return the element to its own type layer. */
+  const setElBand = (id, force) => {
+    pushHistory();
+    setEls((a) => {
+      const target = a.find((e) => e.id === id);
+      if (!target) return a;
+      const next = { ...target, bandForce: force || undefined };
+      const band = zOrder(next);
+      const z = nextZ(a.filter((e) => e.id !== id && zOrder(e) === band));
+      return a.map((e) => (e.id === id ? { ...next, z } : e));
     });
   };
   const applySnapshot = (s) => {
@@ -5075,6 +5102,31 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       setCombineSel([]);
       openParcelPanel();
       return true;
+    }
+    return false;
+  };
+  /* ⛔ NEW-3 — THE RIGHT-CLICK'S TWIN OF `featureDoubleAction`: ONE decision per family, so a press
+   * forwarded by identity-transparent chrome opens the menu the user aimed at.
+   *
+   * The rule it enforces is CHROME-NEVER-EATS-A-PRESS, in its right-click form: chrome painted over
+   * another feature's body may not answer AS itself. `featureDoubleAction` has had that discipline
+   * since B278576; the context menus had five independent DOM handlers and no shared dispatch, so
+   * a fix to the resolver reached the double-click path and nothing else. Returns true when it took
+   * the press, so a caller can fall back to its own menu when the resolver names it after all.
+   *
+   * A `measure` target carries an INDEX rather than an id — that asymmetry is the measurement
+   * selection model's, not this function's, and it is the reason a bare `on${kind}Context` lookup
+   * table would be wrong here. */
+  const featureContextAction = (t, e) => {
+    if (!t || !e) return false;
+    if (t.kind === "el") { if (!els.some((x) => x.id === t.id)) return false; onElContext(e, t.id); return true; }
+    if (t.kind === "markup") { if (!markups.some((x) => x.id === t.id)) return false; onMarkupContext(e, t.id); return true; }
+    if (t.kind === "callout") { if (!callouts.some((x) => x.id === t.id)) return false; onCalloutContext(e, t.id, -1); return true; }
+    if (t.kind === "measure") { if (!measures[t.i]) return false; onMeasureContext(e, t.i); return true; }
+    if (t.kind === "parcel") {
+      if (!settings.parcelSelect) return false;                     // B311: parcels are click-through
+      if (!parcels.some((p) => p.id === t.id)) return false;
+      onParcelContext(e, t.id); return true;
     }
     return false;
   };
@@ -9899,6 +9951,26 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (tool !== "select") return;
     e.preventDefault(); e.stopPropagation();
     if (!parcels.some((p) => p.id === id)) return;
+    /* ⛔ NEW-3 — A RIGHT-CLICK RESOLVES THE SAME WAY A DOUBLE-CLICK DOES, and until this it did not.
+     *
+     * Found on the owner's real Bain plan, not on any fixture: right-click his detention pond and
+     * you get the PARCEL's menu — "Merge parcels · Hide acreage label · Delete parcel" — with the
+     * pond's own Arrange rows, Properties and Delete nowhere in it. Measured stack at that point:
+     * COLD it is `[el:e79404lvnvpt]`; after the cursor merely ARRIVES there it is
+     * `[parcel:…_0 (this badge's rect), el:e79404lvnvpt]` — the badge ENTERS above the pond, exactly
+     * B280402's mechanism, because B1327 gated it on HOVER so it could be dragged at all.
+     *
+     * B280402 answered that for the double-click by making `data-chrome` IDENTITY-TRANSPARENT in
+     * `resolveDoubleClickTarget` — and the app's own resolver still answers `el:e79404lvnvpt` here.
+     * But a right-click never went through that resolver: it is a plain DOM handler on the badge,
+     * so the fix reached one of the two paths. That is why a menu offering **Delete parcel** opened
+     * where the pond's menu belongs — a destructive row standing where a benign one was aimed at.
+     *
+     * So ask the ONE resolver, and forward when the answer is not this lot. The badge keeps its own
+     * menu whenever it is genuinely what was aimed at (over its own lot with nothing else beneath),
+     * which is the affordance B1327/NEW-4 added and this must not take away. */
+    const under = resolveDoubleClickTarget(hitStackAt(e.clientX, e.clientY));
+    if (under && !(under.kind === "parcel" && under.id === id) && featureContextAction(under, e)) return;
     setSel({ kind: "parcel", id });
     setParcelMenu({ x: e.clientX, y: e.clientY, id, fromChip: true });
   };
@@ -18593,7 +18665,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // through the intersection, and no second translucent fill stacking on the first. See roadNetwork.js
   // for why every patch-based attempt (B953…B1006) had to fail on topologies it wasn't tuned for.
   const roadNet = useMemo(() => {
-    const roads = (els || []).filter((x) => isCenterlineRoad(x) && !x.attachedTo);
+    /* NEW-1 — a road the user has FORCED out of its type band leaves the dissolved network with it.
+       The network is one merged region painted in the road band; a forced road has to paint in the
+       forced band instead, so leaving it a member would draw it in BOTH places (the region below,
+       its own strip above). `bandForceOf` is null for every road on every untouched plan, so this
+       filter is an identity no-op there and the dissolve is byte-for-byte what it was. */
+    const roads = (els || []).filter((x) => isCenterlineRoad(x) && !x.attachedTo && !bandForceOf(x));
     if (!roads.length) return { regions: [], stripes: new Map(), outlineCuts: new Map(), memberIds: new Set(), junctionVerts: roadJunctionVerts, trims: roundabouts.trims, roundabouts: roundabouts.geoms };
     const byId = new Map(roads.map((r) => [r.id, r]));
     const strip = new Map(roads.map((r) => [r.id, roadStripRing(r, settings, sharpFor(r), roundabouts.trims.get(r.id))]));
@@ -19757,7 +19834,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   strokes and the tee-cover knockout mask are all superseded by the dissolved road network
                   painted above: a junction is now a boolean union of pavement, not a patch over a seam. */}
               {/* buildings + any layer at/above the building band, painted OVER the overlay. */}
-              {drawElsZ.above.map((el) => <ElNode key={el.id} el={el} f2p={f2p} isSel={sel?.kind === "el" && sel.id === el.id} tool={tool} settings={settings} H={elHandlers} nb={elNeighbors.get(el.id)} dimHidden={dimSuppressed?.has(el.id) || false} roadNet={null} lf={labelFrame} />)}
+              {/* NEW-1 — `roadNet` is handed to this pass too now. It used to be `null` because the
+                  band above buildings held nothing that reads it; a road FORCED across the band edge
+                  lands here, and it needs the same junction-sharpening + roundabout trims the road
+                  band gets. It is excluded from the dissolve (see the roadNet memo), so `inNetwork`
+                  is false and it paints its own strip here rather than twice. */}
+              {drawElsZ.above.map((el) => <ElNode key={el.id} el={el} f2p={f2p} isSel={sel?.kind === "el" && sel.id === el.id} tool={tool} settings={settings} H={elHandlers} nb={elNeighbors.get(el.id)} dimHidden={dimSuppressed?.has(el.id) || false} roadNet={roadNet} lf={labelFrame} />)}
               {/* markup shapes (neutral line/polyline/rect/ellipse/polygon) on top of the elements */}
               {drawMarkupsZ.filter((m) => !m.behindEls).map(renderMarkupNode)}
               {/* NEW-2 — references the user has explicitly promoted ("Draw above the plan"). Same
@@ -22162,6 +22244,23 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   </div>
                 );
               })()}
+              {/* ⛔ NEW-1 — A FORCED ELEMENT MUST BE VISIBLY FORCED, WITH THE WAY BACK RIGHT THERE.
+                  An override that only lives in a right-click menu is an element the owner can end
+                  up stuck out of band with no way to see why. This renders ONLY when the override is
+                  set, so the default inspector gains not one line (PANEL-BREVITY: 0 visible lines
+                  added by default, 2 when forced — and the 2 exist to make the state reversible).
+                  Rendered ABOVE the pond guard because a pond can be forced too. */}
+              {bandForceOf(selEl) && (
+                <div data-testid="el-band-forced-note" style={{ marginTop: 9, padding: "6px 8px", borderRadius: 6, background: PAL.surfacePage, border: `1px solid ${PAL.panelLine}` }}>
+                  <div style={{ fontSize: 11, color: PAL.ink, fontWeight: 600 }}>Forced on top of everything</div>
+                  <div style={{ fontSize: 10, color: PAL.muted, lineHeight: 1.45, marginTop: 2 }}>
+                    This {TYPE[selEl.type]?.label?.toLowerCase() || selEl.type} is drawing outside its type layer because you put it there.
+                  </div>
+                  <button style={{ ...chipSm, marginTop: 5 }} data-testid="el-band-restore"
+                    title="Back to the normal order — buildings over parking over pond over paving over roads"
+                    onClick={() => setElBand(selEl.id, null)}>Use the normal layer order</button>
+                </div>
+              )}
               {selEl.type !== "pond" && (
               <div style={{ display: "flex", gap: 6, marginTop: 9 }}>
                 <button style={chip} onClick={() => toggleLock(selEl.id)} title="Pin in place: prevents accidental moves/edits">{selEl.locked ? "📌 Unpin" : "📌 Pin"}</button>
@@ -24306,8 +24405,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               // NEW-2 — a greyed row says WHY it is greyed. A disabled control with no explanation is
               // indistinguishable from a broken one, which is how this feature was read.
               const aloneInBand = !af || af.count < 2;
+              // NEW-1 — a forced element is alone for a different reason, and saying "the only
+              // <type> on the plan" about it would be false (there may be five more, all in their
+              // own type layer). Name the band it is actually in.
+              const forcedBand = bandForceOf(t);
               const arrWhy = aloneInBand
-                ? `This is the only ${TYPE[t.type]?.label?.toLowerCase() || t.type} on the plan, so there is nothing to reorder it against. Site elements always draw in their own type's layer — a building over paving, paving over a road.`
+                ? (forcedBand
+                  ? `This is the only element forced in front of the plan, so there is nothing to reorder it against. Put it back in its own layer to order it with the other ${TYPE[t.type]?.label?.toLowerCase() || t.type}.`
+                  : `This is the only ${TYPE[t.type]?.label?.toLowerCase() || t.type} on the plan, so there is nothing to reorder it against. Site elements always draw in their own type's layer — a building over paving, paving over a road.`)
                 : "";
               const arrRow = (text, mode, dis, hint) => (
                 <button disabled={dis} title={dis ? (arrWhy || `Already at the ${(mode === "back" || mode === "backward") ? "back" : "front"}.`) : ""}
@@ -24376,6 +24481,22 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       {arrRow("Bring Forward", "forward", af.atTop || af.count < 2, `${MOD}]`)}
                       {arrRow("Send Backward", "backward", af.atBottom || af.count < 2, `${MOD}[`)}
                       {arrRow("Send to Back", "back", af.atBottom || af.count < 2, `${MOD}⇧[`)}
+                      {/* ⛔ NEW-1 — THE ESCAPE HATCH, and it is ONE row on purpose. The four rows
+                          above move an element inside its band and always did; this is the only way
+                          across the band edge, it is named for what it does, and it is nowhere near
+                          an ordinary Bring to Front. Same single-toggle shape markups, measurements
+                          and callouts already use for "Send behind the plan", so there is one idea
+                          in the product rather than two. PANEL-BREVITY: one row, no second sentence
+                          in the menu body — the why lives in the hover. */}
+                      <button style={{ ...menuItem(false), display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}
+                        data-testid="el-band-force"
+                        title={forcedBand
+                          ? "Put this back in its own type layer, where it draws in the usual order (buildings over parking over pond over paving over roads)."
+                          : "Cross the type-layer rule for this one element: draw it on top of everything, buildings included. Everything else keeps the normal order."}
+                        onClick={() => { setElBand(t.id, forcedBand ? null : "front"); setTypeMenu(null); }}>
+                        <span>{forcedBand ? "Use the normal layer order" : "Force on top of everything"}</span>
+                        {forcedBand ? <span style={{ color: PAL.accent, fontWeight: 700 }}>✓</span> : null}
+                      </button>
                     </>
                   )}
                   {/* B875 — pond discoverability: the right-click menu carries the pond-specific
