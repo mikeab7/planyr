@@ -347,10 +347,32 @@ export default function App({
     goPlan(id);
   };
 
-  // "Open blank planner" → a new empty (un-located) site. We do NOT write a record
-  // yet: a blank site that's never edited should never be saved. The planner saves
-  // a fully-formed record the moment you add anything.
-  const newBlankSite = () => { goPlan(newId()); };
+  /* "Open blank planner" → a new empty site. We do NOT write a record yet: a blank site that's
+   * never edited should never be saved. The planner saves a fully-formed record the moment you
+   * add anything.
+   *
+   * NEW-4 — EXCEPT when we already know WHERE it is. Every blank plan started from the map (the
+   * "Start blank" button, and the fallback offered when a county parcel service is down) now
+   * carries the map's current centre as its origin, so it is born located: the aerial, the flood
+   * layer, contours and the county rules are on from the first click, and the plan can never be
+   * stranded in blank space. That one DOES get written immediately — an anchor is a fact worth
+   * keeping even before anything is drawn (and `persistOrDrop` keeps a blank plan that has one). */
+  const newBlankSite = (opts) => {
+    const id = newId();
+    const o = opts && opts.origin && Number.isFinite(opts.origin.lat) && Number.isFinite(opts.origin.lon)
+      ? { lat: opts.origin.lat, lon: opts.origin.lon } : null;
+    if (o) {
+      saveSite({ id, groupId: id, site: opts.name || "Untitled site", name: "Concept A", origin: o, county: opts.county || null, parcels: [], els: [], measures: [], settings: {} });
+      pushLoud(id, "The new site"); // mirror to cloud when logged in; loud on failure
+      refreshSites();
+    }
+    goPlan(id);
+  };
+  // NEW-4 — where the map is looking right now, so a blank plan started from the map header is
+  // born at the spot the owner is staring at rather than nowhere. A plain ref: this is read at
+  // click time only, and re-rendering the whole app on every map pan would be absurd.
+  const mapCenterRef = useRef(null);
+  const newBlankSiteHere = () => newBlankSite(mapCenterRef.current ? { origin: mapCenterRef.current } : null);
 
   // Open a whole project (site group) from the header breadcrumb switcher (B191):
   // resume its active plan if one's open, else its newest. Switching plans changes
@@ -617,7 +639,10 @@ export default function App({
           saveSlot={null}
           toolbarContent={
             <button
-              onClick={newBlankSite}
+              // NEW-4 — starts blank AT THE MAP'S CURRENT CENTRE, so "the county server is down,
+              // I'll just draw it" doesn't produce an unlocated plan.
+              onClick={newBlankSiteHere}
+              title="Start a plan with no parcel — it takes its location from where the map is looking, so you can draw the boundary and still get the aerial, flood layer and county rules"
               style={{
                 padding: "4px 11px", fontSize: 12, fontWeight: 600, borderRadius: 6,
                 border: "1px solid var(--chrome-divider)", background: "var(--chrome-bg-elev)",
@@ -663,7 +688,10 @@ export default function App({
             onRenameSite={renameSite}
             onSharedChange={refreshSites}
             onUseParcels={newSiteFromMap}
+            // NEW-4 — the finder hands us the map's centre (and, when it could resolve one, the
+            // county) so the fallback plan is located from the start.
             onSkip={newBlankSite}
+            onViewCenter={(c) => { mapCenterRef.current = c; }}
           />
         </div>
       </div>

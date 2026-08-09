@@ -49,6 +49,8 @@ describe("O4 — every acreage says what it measures (no bare numbers on pond ma
     expect(src.includes("ac water area</span>")).toBe(false);
   });
   it("the parcel badge is labeled 'Parcel' so a big parcel acreage can't read as a pond area", () => {
-    expect(src).toContain("const txt = `Parcel ${f2(polyArea(pc.points) / SQFT_PER_ACRE)} ac`;");
+    // The subject is the LABEL ("Parcel"), not which area function feeds it: NEW-2 repointed the
+    // badge at `parcelNetSqft` so a promoted deed's save-and-except holes come off the number.
+    expect(src).toContain("const txt = `Parcel ${f2(parcelNetSqft(pc) / SQFT_PER_ACRE)} ac`;");
   });
 });

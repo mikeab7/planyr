@@ -130,6 +130,16 @@ describe("dissolvedParcelSqft — union/dissolve site area (B715)", () => {
     expect(dissolvedParcelSqft(all)).toBeCloseTo(10000, 1); // dissolved footprint, counted once
   });
 
+  it("NEW-2 — deducts save-and-except holes from the site area, on every path", () => {
+    // One parcel with a 4×4 carve-out: 100 − 16 = 84.
+    const holed = P("a", sq(0, 0, 10), { exceptions: [{ pts: sq(3, 3, 4), label: "Save & except" }] });
+    expect(dissolvedParcelSqft([holed])).toBeCloseTo(84, 2);          // single-ring fast path
+    expect(dissolvedParcelSqft([holed, P("b", sq(100, 100, 10))])).toBeCloseTo(184, 2); // no-overlap sum path
+    expect(dissolvedParcelSqft([holed, P("b", sq(6, 6, 10))])).toBeCloseTo(168, 2);     // clipper union path (184 − 16)
+    // An exception on an INACTIVE parcel is not deducted — that parcel isn't counted at all.
+    expect(dissolvedParcelSqft([P("a", sq(0, 0, 10)), P("z", sq(0, 0, 10), { active: false, exceptions: [{ pts: sq(3, 3, 4) }] })])).toBeCloseTo(100, 2);
+  });
+
   it("excludes inactive (superseded) parcels", () => {
     const active = P("a", sq(0, 0, 10));
     const inactive = P("b", sq(0, 0, 10), { active: false });
