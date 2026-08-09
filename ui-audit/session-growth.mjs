@@ -58,6 +58,7 @@ import { noiseFloor } from "./lib/longSession.mjs";
 import { rungViewFault } from "./lib/sessionAxes.mjs";
 import { fakeTilePng, parseTileUrl } from "./lib/fakeTile.mjs";
 import { waitForSelectorReleased } from "./lib/waitRelease.mjs";
+import { assertForeground } from "./lib/tabTiming.mjs";
 import {
   GROWTH_CANDIDATES, observableCandidates, unobservableCandidates,
   classifyCurve, reloadReset, admissibility, attribute, growthHeadline,
@@ -514,6 +515,10 @@ try {
   });
 
   const page = await context.newPage();
+  /* ⛔ A wall-clock reading from a BACKGROUND tab is void — a hidden tab clamps setTimeout, and a
+     setTimeout-paced probe then times the clamp (measured: 3,156 ms for a 138-182 ms gesture).
+     See ui-audit/lib/tabTiming.mjs. Fails loudly rather than reporting a throttled number. */
+  await assertForeground(page, "session-growth");
   const cdp = await context.newCDPSession(page);
   await cdp.send("Performance.enable").catch(() => {});
   await cdp.send("HeapProfiler.enable").catch(() => {});

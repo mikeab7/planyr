@@ -514,6 +514,28 @@ rules are binding shorthand, not optional style. (Full-text home so briefs stay 
      their own `onPointerDown`, and **a vertex must still drag** — assert that in the same commit, counting how
      many vertices moved (a press falling THROUGH an inert grip moves the whole object, which passes any
      "the geometry changed" check).
+  6. **⛔ AND THE FIFTH INSTANCE'S CLAUSE — WHEN THE FEATURE IS SMALLER THAN ITS OWN CHROME, "WHAT IS
+     BENEATH THIS GRIP" AND "WHAT IS THIS GESTURE ABOUT" STOP BEING THE SAME QUESTION.** Clause 5 fixed
+     identification at the resolver by looking THROUGH the handle layer, which answers the first
+     question. It does not answer the second, and those coincide only while the feature is bigger than
+     the chrome it summons. Captured live on the owner's Bain plan: a road stub whose whole rendered
+     body is **6×12 CSS px**, wearing a 12 px endpoint handle inside a 15×22 px handle box. Press 1
+     selected it; press 2, at the same point, addressed **a different, larger road**, and the panel
+     open after press 1 was gone after press 2. **The control matters as much as the capture** — on a
+     LARGE road, a point where press 1 mounts an endpoint handle directly over the press point still
+     resolves to the road and still opens Properties, so looking through the handle layer works and the
+     endpoint handle is not the differentiator. **The SIZE RATIO is.** The rule: **while a double-click
+     is in flight, the feature press 1 selected WINS the hit test at that point** — anchored on the
+     native double-click's own time and distance budgets, so one press outside them is not a gesture and
+     resolves off the stack exactly as before (`featureTarget.gestureAnchorTarget`). Two corollaries:
+     **(a)** a "prefer it on a tie" rule is not enough — it still loses to whatever the stack puts on
+     top, which is the failure; **(b)** the same size ratio makes REVIEW chrome dangerous, not just
+     grips — the min-radius flag's 7 px corner dot is wider than that stub, and it swallowed the press
+     entirely AND ran the corner fix on press 2, **silently re-cutting the alignment**. Chrome that
+     paints ON its feature's body identifies AS that feature and forwards the press; chrome offset into
+     clear space keeps its own action and does NOT claim to be the feature. **A gesture whose contract
+     is "open Properties" must never edit the plan, and never CLOSE a panel that was already open** —
+     both are now asserted for every feature by `audit-doubleclick-properties`.
   Precedents: **B1174** (measurement chips), **B1327** (the parcel acreage badge — the third instance, and the
   reason this is a named rule; regressed by B1186 moving the badge anchor to `polylabel`), and **B50010** (an
   element's own DIMENSION NUMBER — a road's is anchored to the centreline midpoint, so it is painted ON the
@@ -530,6 +552,30 @@ rules are binding shorthand, not optional style. (Full-text home so briefs stay 
   EXCEPTION is user-placed content the user opted into putting on top — a promoted reference (B1198), a markup
   with `behindEls: false` — which is selectable, lockable and demotable in one click from the menu that put it
   there. Guard: the e2e spec **chrome-swallows-press** (mutation-checked both ways).
+- **FOREGROUND-OR-VOID** — **A WALL-CLOCK READING TAKEN FROM A BACKGROUND TAB IS NOT A MEASUREMENT.
+  Before ANY timing from a driven browser, either prove the tab is foreground or pace with a primitive
+  the browser does not throttle — and FAIL LOUDLY rather than report the throttled number.** (Owner
+  rule, 2026-08-09, filed with the measurement that produced it.)
+  1. **THE CASE.** A probe of one double-click gesture on the owner's real plan reported **3,156 ms and
+     2,992 ms**. The tab was `document.visibilityState === "hidden"` throughout (it was being driven
+     from another tab) and the harness paced itself with `setTimeout`, which Chrome CLAMPS in a hidden
+     tab. It was timing the clamp. **The control — same gesture, same build, same tab, same hidden
+     state, ONLY the pacing primitive changed to a MessageChannel yield: 138–182 ms** end to end, 13–63
+     ms of synchronous handler time. Four elements measured honestly: 111 / 138 / 154 / 182 ms. There
+     was never a multi-second interaction cost to chase.
+  2. **WHY IT IS A GUARD AND NOT A NOTE.** This trap's FIRST appearance produced an obvious failure and
+     cost one round of probing. This one produced a **plausible number** — self-consistent, repeatable,
+     in the right units, off by a factor of twenty — that reached the owner and was on its way onto two
+     perf backlog items. A wrong number that looks right is strictly more dangerous than a crash, and
+     nothing downstream can tell them apart, so the check belongs at the source.
+  3. **MACHINE-ENFORCED, because a rule nobody's code consults is not a guard.**
+     `ui-audit/lib/tabTiming.mjs` — `assertForeground(page, harness)` (throws, named), `pacedWait`
+     (a MessageChannel loop; unthrottled, and the drop-in for a `waitForTimeout` INSIDE a timed
+     section), `timingProvenance` (the line a harness prints beside its numbers). Wired into all 28
+     ui-audit harnesses that drive a browser and subtract a clock from a mark; `test/tabTiming.test.js`
+     pins each one AND sweeps the folder, so a NEW timing harness that skips it fails there rather than
+     quietly reporting a throttled number.
+  4. **An "unreadable" visibility state is refused too** — a harness that cannot check cannot vouch.
 - **PERCEPTUAL-PARITY** — **The bar a change to the PICTURE has to clear is that the owner cannot SEE it at
   working zoom — not that the file is unchanged.** (Owner amendment, 2026-08-06, verbatim: *"imperceptible at
   working zoom assuming that one makes the most sense"*, and *"I've got a 2K display, so I'm not gonna see

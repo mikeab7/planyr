@@ -665,7 +665,26 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   `pointerEvents` and `onPointerDown`, and a vertex must still drag.** The variable that hid this for months
   was **VERTEX COUNT against handle size at the probe point**, not shape — a four-vertex fixture ring keeps
   its grips at four distant corners, so six realistic pond variants all certified green.
-  Guards: the repo-root `test/` suites **doubleTap** and **featureTarget** (29, incl. the owner's captured
+  **(5) B278576 — A FEATURE SMALLER THAN ITS OWN CHROME, and the clause (4) does not reach.** (4) makes
+  the resolver look THROUGH the handle layer, which answers *"what is beneath this grip"*. It cannot answer
+  *"what is this GESTURE about"*, and those coincide only while the feature is bigger than the chrome it
+  summons. Captured on the owner's Bain plan: a road stub whose whole body is **6×12 CSS px** wearing a 12 px
+  endpoint handle — press 1 selected it, press 2 addressed **a different, larger road**, and the open panel
+  vanished. **The control separates this from (4):** on a LARGE road, a press point covered by its own
+  endpoint handle still resolves to the road and still opens Properties, so the handle is not the
+  differentiator — the **SIZE RATIO** is. Fix: `gestureAnchorTarget` — **while a double-click is in flight,
+  the feature press 1 selected WINS the hit test at that point**, gated on the native double-click's own
+  `DBLTAP_MS`/`DBLTAP_PX` (borrowed from `doubleTap.js`, never a second copy). It is asked FIRST and wins
+  OUTRIGHT; a tie-break still loses to whatever the stack puts on top, which IS the failure. The two facts it
+  needs come from their one honest source each: `lastPressRef` (stamped in the **capture phase** at the canvas
+  root, because a press EATEN BY CHROME never reaches a feature handler) and `gestureAnchorRef` (a layout
+  effect on `sel`), with **press 1 keeping the anchor for the whole gesture** so chrome that steals press 2
+  cannot hand the gesture to itself. **(5b) B278577 — the same rule on REVIEW chrome:** the min-radius flag's
+  7 px corner dot is wider than that stub, and it swallowed the press outright AND ran `fixRoadRadiusFor` on
+  press 2, **silently re-cutting the alignment**. The DOT sits on the road so it identifies AS the road and
+  forwards the press; the LABEL PILL sits in clear space so it keeps the one-click Fix and claims no feature.
+  ⚠ Owner-facing trade: the dot no longer fixes on one click.
+  Guards: the repo-root `test/` suites **doubleTap** and **featureTarget** (45, incl. the owner's captured
   stack verbatim; pre-fix rule ⇒ 4 red), the e2e specs **dblclick-properties** (all four cases
   mutation-checked red on the pre-fix build) and **chrome-swallows-press** (the B233153 pair — the
   grip-covered double-click, plus the vertex-drag regression guard, which COUNTS moved vertices because a

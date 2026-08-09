@@ -403,3 +403,202 @@ test.describe("B233153 — a feature's own vertex handle, mounted by press 1, mu
     expect(errors, errors.join("\n")).toEqual([]);
   });
 });
+
+/* ═════════════════════════════════════════════════════════════════════════════════════════════
+ * ⛔ NEW-1 — THE FEATURE IS SMALLER THAN ITS OWN CHROME. The fourth instance's successor, and a
+ * DIFFERENT VARIABLE from B233153's.
+ *
+ * B233153 was about grips that are DENSE (a 44-vertex surveyed ring peppers its own edge). This is
+ * about chrome that is BIGGER THAN THE FEATURE. Captured live on the owner's Bain plan: a road stub
+ * whose whole rendered body is 6×12 CSS px, wearing a 12 px endpoint handle inside a 15×22 px handle
+ * box. Press 1 selected it; press 2 addressed a DIFFERENT, LARGER road, and the Properties panel
+ * that was open after press 1 was GONE after press 2.
+ *
+ * The control that rules out the general case, which is why this is its own fixture rather than a
+ * pond variant: on a LARGE road, a point where press 1 mounts an endpoint handle directly over the
+ * press point still resolves to the road and still opens Properties. Looking through the handle
+ * layer works. The endpoint handle is not the differentiator — the SIZE RATIO is.
+ *
+ * The seeded stub reproduces it two ways at once, and both were proven red before the fix:
+ *   · its corners are tighter than its class can hold, so the min-radius REVIEW FLAG paints a 7 px
+ *     dot with an "!" on it — wider than the road — and that dot used to swallow the press
+ *     entirely (0 selection nodes after press 1) and then run the corner fix on press 2, silently
+ *     re-cutting the alignment;
+ *   · and its own grips leave no pixel of it uncovered once selected, which is what the anchored
+ *     resolution answers.
+ * ═════════════════════════════════════════════════════════════════════════════════════════════ */
+const STUB_SITE = "e2e-tiny-road-stub";
+const STUB_ID = "e2eTinyStub";
+const HOST_ID = "e2eHostRoad";
+
+async function loadTinyStub(page) {
+  await armPlannerHooks(page);
+  const { roadStripBBox } = await import("../src/workspaces/site-planner/lib/siteModel.js");
+  const road = (pts, travelW) => ({ pts, vtx: pts.map(() => ({})), travelW, curb: 1, ...roadStripBBox(pts, pts.map(() => ({})), travelW, 1, { defaultRadius: 40 }) });
+  const host = Array.from({ length: 21 }, (_, i) => ({ x: 300 + i * 110, y: 1000 + Math.sin(i / 3) * 60 }));
+  // 7 vertices with real corners inside ~35 ft: a few px across at the fit zoom, corners its class
+  // cannot hold. Deterministic — a fixture that differs run to run cannot be a guard.
+  const stub = [
+    { x: 1400, y: 1000 }, { x: 1409, y: 1012 }, { x: 1400, y: 1024 }, { x: 1408, y: 1034 },
+    { x: 1400, y: 1046 }, { x: 1409, y: 1056 }, { x: 1400, y: 1068 },
+  ];
+  const site = {
+    id: STUB_SITE, groupId: STUB_SITE, site: "Tiny road stub", name: "Plan 1",
+    origin: null, county: null, parcels: [], measures: [], callouts: [], markups: [], underlay: null,
+    els: [
+      { id: HOST_ID, type: "road", label: "Host", roadClass: "truck", ...road(host, 40) },
+      { id: STUB_ID, type: "road", label: "Stub", roadClass: "truck", ...road(stub, 14) },
+      // ⛔ Anchors, not decoration: a plan of nothing but roads does not resolve its initial view
+      // fit, and every screen coordinate then comes out NaN (the trap e2e/road-corner-selffix.spec.js
+      // records). These give zoom-to-fit a real extent to frame.
+      { id: "e2eAnchorA", type: "building", cx: 300, cy: 300, w: 200, h: 150, rot: 0, label: "A" },
+      { id: "e2eAnchorB", type: "building", cx: 2400, cy: 1900, w: 200, h: 150, rot: 0, label: "B" },
+    ],
+    settings: { showDims: true }, updatedAt: Date.now(),
+  };
+  await page.addInitScript(([id, rec]) => {
+    localStorage.setItem("planarfit:sites:v1", JSON.stringify({ [id]: rec }));
+    localStorage.setItem("planarfit:currentSite:v1", id);
+  }, [STUB_SITE, site]);
+  await page.goto("/");
+  await expect(canvas(page)).toBeVisible();
+  await expect.poll(async () => page.locator(`[data-el-id="${STUB_ID}"]`).count(), { timeout: 20_000 }).toBe(1);
+  await page.waitForTimeout(1000);
+}
+
+/* A point ON the stub — found by asking the app, never guessed. With nothing selected, the first
+ * point inside its box that the app's own resolver names as the stub. */
+async function stubPoint(page) {
+  return page.evaluate((id) => {
+    const b = document.querySelector(`[data-el-id="${id}"]`).getBoundingClientRect();
+    for (let y = Math.floor(b.top); y <= Math.ceil(b.bottom); y++)
+      for (let x = Math.floor(b.left); x <= Math.ceil(b.right); x++) {
+        const t = window.__plannerHitTarget && window.__plannerHitTarget(x, y);
+        if (t && t.kind === "el" && t.id === id) return { x, y, w: Math.round(b.width), h: Math.round(b.height) };
+      }
+    return null;
+  }, STUB_ID);
+}
+
+test.describe("NEW-1 — a feature smaller than its own chrome is still selectable and still opens Properties", () => {
+  test("the fixture really is smaller than the chrome it mounts (or nothing below means anything)", async ({ page }) => {
+    await loadTinyStub(page);
+    const pt = await stubPoint(page);
+    expect(pt, "no point on the stub answers to it — it is unreachable by pointer").toBeTruthy();
+    await page.mouse.click(pt.x, pt.y);
+    await page.waitForTimeout(300);
+    const chrome = await page.evaluate(() => {
+      const l = document.querySelector("[data-handle-layer]");
+      if (!l) return null;
+      const b = l.getBoundingClientRect();
+      return { w: Math.round(b.width), h: Math.round(b.height), n: l.querySelectorAll("*").length };
+    });
+    expect(chrome && chrome.n, "the selected stub painted no grips at all").toBeGreaterThan(0);
+    expect(chrome.w * chrome.h,
+      `the stub's chrome (${chrome.w}×${chrome.h}) is not bigger than its body (${pt.w}×${pt.h}) — this fixture no longer reproduces the class`)
+      .toBeGreaterThan(pt.w * pt.h);
+  });
+
+  test("BEHAVIOURAL: a single click selects it, and a double-click opens Properties", async ({ page }) => {
+    const errors = [];
+    page.on("pageerror", (e) => errors.push(String(e)));
+    await loadTinyStub(page);
+    const pt = await stubPoint(page);
+    expect(pt).toBeTruthy();
+
+    // HALF ONE — the half the owner reported as "nothing happens". Pre-fix: 0 selection nodes,
+    // because the min-radius flag's dot took the press and set no selection.
+    await page.mouse.click(pt.x, pt.y);
+    await page.waitForTimeout(300);
+    const selN = await page.locator("[data-handle-layer] *").count();
+    expect(selN, "a single click on the stub selected nothing — its own review chrome ate the press").toBeGreaterThan(0);
+
+    // THE TWO-PRESS INVARIANT, at the moment it bites: press 1 has mounted grips that cover the
+    // whole feature, and press 2 must still be about the stub — not the road underneath it.
+    const mid = await page.evaluate(({ x, y }) => (window.__plannerHitTarget ? window.__plannerHitTarget(x, y) : "no-hook"), pt);
+    expect(mid, "window.__plannerHitTarget is gone — the invariant is no longer measuring the product").not.toBe("no-hook");
+    expect(mid && mid.id, `after press 1 this point resolves to ${JSON.stringify(mid)} — press 2 would address something else`).toBe(STUB_ID);
+
+    await page.keyboard.press("Escape");
+    await page.waitForTimeout(450);
+    await page.mouse.move(pt.x, pt.y);
+    await page.mouse.down({ clickCount: 1 }); await page.mouse.up({ clickCount: 1 });
+    await page.mouse.down({ clickCount: 2 }); await page.mouse.up({ clickCount: 2 });
+    await expect(page.getByTestId("property-panel"),
+      "a double-click on a road smaller than its own chrome opened nothing").toBeVisible();
+    expect(errors, errors.join("\n")).toEqual([]);
+  });
+
+  /* ⛔ THE OWNER'S SECOND SYMPTOM, filed and pinned separately: the panel was present after press 1
+     and GONE after press 2. A gesture whose contract is "always opens Properties" has no state in
+     which it CLOSES it, so the assertion starts from a panel that is already open — the only case
+     here that does, which is why nothing caught it before. */
+  test("BEHAVIOURAL: a double-click can never CLOSE an open Properties panel", async ({ page }) => {
+    await loadTinyStub(page);
+    const pt = await stubPoint(page);
+    await page.mouse.move(pt.x, pt.y);
+    await page.mouse.down({ clickCount: 1 }); await page.mouse.up({ clickCount: 1 });
+    await page.mouse.down({ clickCount: 2 }); await page.mouse.up({ clickCount: 2 });
+    await expect(page.getByTestId("property-panel")).toBeVisible();
+    await page.waitForTimeout(450);                      // let the tap record lapse: a fresh pair
+    await page.mouse.down({ clickCount: 1 }); await page.mouse.up({ clickCount: 1 });
+    await page.mouse.down({ clickCount: 2 }); await page.mouse.up({ clickCount: 2 });
+    await expect(page.getByTestId("property-panel"),
+      "the panel was open before this double-click and gone after it").toBeVisible();
+  });
+
+  /* ⛔ IDENTIFICATION CHANGED; DELIVERY DID NOT — the road half of the pond guard above, and the one
+     the owner asked for by name. Counting WHICH vertices moved is the whole assertion: if the
+     endpoint grip stops receiving its own press, the press falls through to the road body and moves
+     the WHOLE road, which changes the geometry just as thoroughly and passes any "it is different"
+     check while the endpoint is undraggable. */
+  test("REGRESSION GUARD: a road ENDPOINT handle still drags its endpoint, and only its endpoint", async ({ page }) => {
+    const errors = [];
+    page.on("pageerror", (e) => errors.push(String(e)));
+    await loadTinyStub(page);
+
+    // Drive the HOST road, not the stub: it is large enough that its grips are individually
+    // addressable, which is what makes "exactly one moved" a meaningful count.
+    const hostPoint = await page.evaluate((id) => {
+      const b = document.querySelector(`[data-el-id="${id}"]`).getBoundingClientRect();
+      for (let y = Math.floor(b.top); y <= Math.ceil(b.bottom); y++)
+        for (let x = Math.floor(b.left + b.width * 0.45); x <= Math.ceil(b.left + b.width * 0.55); x++) {
+          const t = window.__plannerHitTarget && window.__plannerHitTarget(x, y);
+          if (t && t.kind === "el" && t.id === id) return { x, y };
+        }
+      return null;
+    }, HOST_ID);
+    expect(hostPoint, "no point on the host road answers to it").toBeTruthy();
+    await page.mouse.click(hostPoint.x, hostPoint.y);
+    await page.waitForTimeout(350);
+
+    const gripCentres = () => page.evaluate(() =>
+      [...document.querySelectorAll('[data-handle-layer] circle[data-testid^="road-vtx-"]')]
+        .map((n) => { const b = n.getBoundingClientRect(); return [b.left + b.width / 2, b.top + b.height / 2]; }));
+
+    const before = await gripCentres();
+    expect(before.length, "the selected road painted no vertex grips").toBeGreaterThan(2);
+
+    const end = await page.evaluate(() => {
+      const h = document.querySelector('[data-handle-layer] circle[data-road-endpoint="1"]');
+      if (!h) return null;
+      const b = h.getBoundingClientRect();
+      return { x: Math.round(b.left + b.width / 2), y: Math.round(b.top + b.height / 2) };
+    });
+    expect(end, "the selected road painted no ENDPOINT handle").toBeTruthy();
+
+    await page.mouse.move(end.x, end.y);
+    await page.mouse.down();
+    await page.mouse.move(end.x + 45, end.y + 35, { steps: 8 });
+    await page.mouse.up();
+    await page.waitForTimeout(400);
+
+    const after = await gripCentres();
+    expect(after.length, "the road lost or gained vertices during the drag").toBe(before.length);
+    const moved = before.filter((p, i) => Math.hypot(p[0] - after[i][0], p[1] - after[i][1]) > 4).length;
+    expect(moved, "dragging the endpoint handle moved nothing — the grip is no longer receiving its own press").toBeGreaterThan(0);
+    expect(moved, `the WHOLE ROAD moved (${moved} of ${before.length} vertices) — the press fell through the grip to the body`)
+      .toBeLessThan(before.length / 2);
+    expect(errors, errors.join("\n")).toEqual([]);
+  });
+});

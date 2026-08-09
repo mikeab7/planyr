@@ -14,6 +14,7 @@
  *       node ui-audit/verify-scheduler-loader.mjs              (another)
  */
 import { chromium } from "playwright";
+import { assertForeground } from "./lib/tabTiming.mjs";
 
 const BASE = process.env.BASE_URL || "http://localhost:4173/";
 const EXEC = process.env.PW_CHROME || "/opt/pw-browsers/chromium-1228/chrome-linux64/chrome";
@@ -40,6 +41,10 @@ async function run(responsive) {
   await ctx.route("**/sequence/", (route) =>
     route.fulfill({ status: 200, contentType: "text/html; charset=utf-8", body: stubHtml(responsive) }));
   const page = await ctx.newPage();
+  /* ⛔ A wall-clock reading from a BACKGROUND tab is void — a hidden tab clamps setTimeout, and a
+     setTimeout-paced probe then times the clamp (measured: 3,156 ms for a 138-182 ms gesture).
+     See ui-audit/lib/tabTiming.mjs. Fails loudly rather than reporting a throttled number. */
+  await assertForeground(page, "verify-scheduler-loader");
   let navRequested = false;
   await page.exposeFunction("__noteNavReq", () => { navRequested = true; });
 

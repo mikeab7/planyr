@@ -32,7 +32,7 @@ import { measuresUnderPoint, nextMeasureSelection } from "./lib/measureHit.js";
 import { nearestBoundaryEdge, constrainToEdgeAngle, edgeLockTolFt } from "./lib/edgeConstrain.js";
 import { markupsUnderPoint, nextMarkupSelection, boxCorners } from "./lib/markupPick.js";
 import { EMPTY_TAP, tapTime, stepDoubleTap } from "./lib/doubleTap.js";
-import { resolveDoubleClickTarget, stackEntries, pressIsOverElementBody } from "./lib/featureTarget.js";
+import { resolveDoubleClickTarget, gestureAnchorTarget, stackEntries, pressIsOverElementBody } from "./lib/featureTarget.js";
 import { parkDepthForRows, parkRowsForDepth, explodeParkingBands, edgeAbutsPaving } from "./lib/parking.js";
 import { loadAndDownscaleImage } from "./lib/image.js";
 import { openOverlayFile, rasterizePage, rasterizePageHiRes, isPdfFile, isDxfFile, rasterizeStoredPdf, rasterizeStoredDxf, baseRasterScale, chooseOverlayRasterScale, overlayRasterKey, HIRES_CACHE_PER_OVERLAY } from "./lib/overlayPdf.js";
@@ -7511,10 +7511,53 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
      `onDoubleClick` below is therefore unreachable for a real user double-click; they are kept only
      for harnesses that dispatch a raw dblclick AT a node (where no point hit-test is available).
      A double-click while a multi-point shape is being drawn still finishes it, exactly like Enter. */
+  /* ⛔ NEW-1 — THE IN-FLIGHT GESTURE ANCHOR: what press 1 SELECTED, and where/when it landed.
+   *
+   * The owner's 6×12 px road stub (see lib/featureTarget.js's header): press 1 selected it, and press
+   * 2 — at the same point, inside the same gesture — resolved to a DIFFERENT road, because a feature
+   * that small has no pixel left uncovered once its own grips mount. Skipping the handle layer
+   * (B233153) answers "what is beneath this grip"; it cannot answer "what is this gesture about".
+   *
+   * TWO REFS, because neither fact alone is enough and each has exactly one honest source:
+   *  · `lastPressRef` — WHERE and WHEN the last press landed, stamped in the CAPTURE phase at the
+   *    canvas root so it is recorded whatever handler eventually wins the press. Reading
+   *    `lastTapRef` instead would only see presses that reached a feature's own handler — and a
+   *    press eaten by chrome is precisely the case being closed.
+   *  · `gestureAnchorRef` — WHICH feature that press selected, stamped in a LAYOUT effect on `sel`,
+   *    because the selection is set by the handler and is only true after the commit.
+   *
+   * PRESS 1 KEEPS THE ANCHOR FOR THE WHOLE GESTURE. If press 2 lands on chrome that selects
+   * something else, `sel` moves — and adopting that would hand the gesture straight back to the
+   * thing that stole it. So a selection change that pairs with the anchor already held is IGNORED;
+   * only a press that is NOT a continuation starts a new anchor. Everything else fails open to the
+   * stack: no anchor, or one outside the double-click's own time/distance budget, resolves exactly
+   * as it did before. */
+  const lastPressRef = useRef({ t: 0, x: 0, y: 0 });
+  const gestureAnchorRef = useRef(null);
+  const notePress = (e) => {
+    if (!e) return;
+    lastPressRef.current = { t: tapTime(e), x: e.clientX, y: e.clientY };
+  };
+  const selFeatureKey = (s) => {
+    if (!s || !s.kind) return null;
+    if (s.kind === "measure") return Number.isInteger(s.i) ? `measure:${s.i}` : null;
+    return s.id ? `${s.kind}:${s.id}` : null;
+  };
+  useLayoutEffect(() => {
+    const key = selFeatureKey(sel);
+    if (!key) return;                       // a cleared selection ends nothing: the stale anchor times out on its own
+    const p = lastPressRef.current;
+    const held = gestureAnchorRef.current;
+    if (held && held.key !== key && gestureAnchorTarget(held, p)) return; // same gesture — press 1 keeps it
+    gestureAnchorRef.current = { key, t: p.t, x: p.x, y: p.y };
+  }, [sel]);
+  /* The anchor + this press, in the shape lib/featureTarget.js takes. `at.t` falls back to the same
+   * monotonic clock `tapTime` uses, so the E2E hook (which has no event) is on one timeline with it. */
+  const dblOpts = (e, x, y) => ({ anchor: gestureAnchorRef.current, at: { t: tapTime(e), x, y } });
   const onBgDouble = (e) => {
     if (finishActiveDrawing()) return;
     if (tool !== "select" || !e) return;
-    featureDoubleAction(resolveDoubleClickTarget(hitStackAt(e.clientX, e.clientY)), e);
+    featureDoubleAction(resolveDoubleClickTarget(hitStackAt(e.clientX, e.clientY), dblOpts(e, e.clientX, e.clientY)), e);
   };
   /* ⛔ B233153 — E2E/self-audit hook for the DOUBLE-CLICK RESOLUTION (same `window.__PLANYR_E2E`
    * gate as the hooks above; never runs in production, nulled on unmount like its neighbours).
@@ -7531,7 +7574,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
    * still be the answer. That is the only probe shape that can see chrome which does not exist until
    * the gesture is half-finished. */
   const dblResolveRef = useRef(null);
-  useEffect(() => { dblResolveRef.current = (x, y) => resolveDoubleClickTarget(hitStackAt(x, y)); });
+  useEffect(() => { dblResolveRef.current = (x, y) => resolveDoubleClickTarget(hitStackAt(x, y), dblOpts(null, x, y)); });
   useEffect(() => {
     if (typeof window === "undefined" || !window.__PLANYR_E2E) return;
     const hook = (x, y) => (dblResolveRef.current ? dblResolveRef.current(x, y) : null);
@@ -18667,7 +18710,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             // 2-finger gesture is live (touchCountRef ≥ 2) the pointer-driven vertex edit / pan / draw
             // handlers all bail, so the pinch owns the gesture and nothing fights it.
             onTouchStart={onTouchStartPinch} onTouchMove={onTouchMovePinch} onTouchEnd={onTouchEndPinch} onTouchCancel={onTouchEndPinch}
-            onPointerDownCapture={(e) => { if (touchCountRef.current < 2) onCanvasVtxDownCapture(e); }}
+            /* NEW-1 — `notePress` stamps the gesture anchor's WHERE/WHEN here, in the CAPTURE phase,
+               so it records the press whatever node ends up winning it (chrome that stops
+               propagation included — that press is exactly the one being reasoned about). It is
+               read-only and unconditional: it never touches the event, and it must NOT sit behind
+               the touch-count guard below, because a press swallowed mid-pinch is still a press. */
+            onPointerDownCapture={(e) => { notePress(e); if (touchCountRef.current < 2) onCanvasVtxDownCapture(e); }}
             onContextMenuCapture={onCanvasVtxContextCapture}
             onPointerMoveCapture={(e) => { if (touchCountRef.current < 2) onCanvasVtxMoveCapture(e); }}
             onPointerDown={onBgDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={(e) => abortGesture(e.pointerId)} onDoubleClick={onBgDouble}
@@ -18925,23 +18973,63 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     return (
                       <g key={`rrf${f.id}-${f.i}-${i}`} data-road-radius-flag={`${f.id}:${f.i}`}
                          data-road-radius-shortfall={Math.round(f.shortfallFt || 0)}
-                         data-road-radius-open={open ? "1" : "0"}
-                         style={{ cursor: el ? "pointer" : "default" }}
-                         onPointerDown={(e) => { e.stopPropagation(); }}
-                         onClick={(e) => { e.stopPropagation(); act(); }}>
+                         data-road-radius-open={open ? "1" : "0"}>
+                        {/* ⛔ NEW-1 — CHROME-NEVER-EATS-A-PRESS, INSTANCE FIVE, and the one the seeded
+                            "smaller than its own chrome" audit row found. The two halves of this flag
+                            sit in DIFFERENT PLACES and so they get different rules — which is the
+                            whole lesson, because they used to share one handler on this group.
+
+                            THE CORNER DOT SITS ON THE ROAD. It marks a vertex, so by construction it
+                            is painted on that road's own body — a 7 px disc with an "!" on top, and
+                            on the owner's 6×12 px stub that is WIDER THAN THE ROAD. It carried no
+                            `data-feature`, stopped propagation, set no selection and never called
+                            `isDoubleTap`, so press 1 selected nothing (no panel, no grips — his
+                            report verbatim) and press 2's click ran `fixRoadRadiusFor`. Measured in
+                            the sandbox on a seeded stub: body 7×18 px, 0 selection nodes after press
+                            1, and the road's path data CHANGED after press 2. A gesture whose whole
+                            contract is "open Properties" was re-cutting his alignment.
+                            So the dot now IDENTIFIES AS ITS ROAD and FORWARDS the press: single click
+                            selects, a pair opens Properties, exactly like every other feature.
+
+                            ⚠ THE DELIBERATE TRADE, stated rather than buried: the DOT no longer
+                            applies the fix on one click. A click on your road may not silently re-cut
+                            it, and a dot bigger than the road it marks cannot be told apart from the
+                            road. The one-click Fix (owner rule, 2026-07-25) moves intact to the LABEL
+                            PILL below, which is offset onto clear space on a leader and is the half
+                            that can be aimed at. That pill unfolds only once the plan is zoomed in
+                            enough to act on the corner — which is the same zoom band where the dot
+                            stops being the biggest thing on the road. The dot keeps its tooltip. */}
                         <title>{tip}</title>
                         {open && <line x1={q.x} y1={q.y} x2={bx + 6} y2={by + 11} stroke={PAL.warn} strokeWidth={1.25} />}
                         {open && (
-                          <g data-testid="road-radius-flag-label">
+                          /* The label is chrome in CLEAR SPACE — it is not over the road, so it keeps
+                             the immediate one-click action and deliberately carries no `data-feature`
+                             (it can overhang anything, and claiming to BE the road there would be the
+                             same mis-identification in the other direction). */
+                          <g data-testid="road-radius-flag-label" style={{ cursor: el ? "pointer" : "default" }}
+                             onPointerDown={(e) => { e.stopPropagation(); }}
+                             onClick={(e) => { e.stopPropagation(); act(); }}>
                             <rect x={bx} y={by} width={w} height={22} rx={11} fill={PAL.paper} stroke={PAL.warn} strokeWidth={1.75} />
                             <text x={bx + 12} y={by + 15} style={{ fontSize: 11, fontWeight: 800, fill: PAL.warn }}>!</text>
                             <text x={bx + 12 + 9 + 6} y={by + 15} style={{ fontSize: 10.5, fontWeight: 600, fill: PAL.warn }}>{short}</text>
                             <text x={bx + w - 12 - 20} y={by + 15} style={{ fontSize: 10.5, fontWeight: 800, fill: PAL.accent, textDecoration: "underline" }}>Fix</text>
                           </g>
                         )}
-                        {/* the corner marker itself — always drawn, always the click target */}
-                        <circle cx={q.x} cy={q.y} r={7} fill={PAL.paper} stroke={PAL.warn} strokeWidth={2} />
-                        <text x={q.x} y={q.y + 4} textAnchor="middle" style={{ fontSize: 10.5, fontWeight: 800, fill: PAL.warn }}>!</text>
+                        {/* The corner marker itself — always drawn, and now transparent to the question
+                            "which feature is here": it IS the road, and it answers as the road. */}
+                        <g data-road-radius-dot={f.id} data-feature={el ? `el:${f.id}` : undefined}
+                           style={{ cursor: el ? "pointer" : "default" }}
+                           onPointerDown={(e) => {
+                             if (e.button !== 0 || !el) return;
+                             e.stopPropagation();
+                             const wasSel = sel?.kind === "el" && sel.id === el.id;
+                             if (isDoubleTap(e, el.id, wasSel)) { featureDoubleAction({ kind: "el", id: el.id }, e); return; }
+                             setSel({ kind: "el", id: el.id });
+                           }}
+                           onContextMenu={el ? (e) => onElContext(e, el.id) : undefined}>
+                          <circle cx={q.x} cy={q.y} r={7} fill={PAL.paper} stroke={PAL.warn} strokeWidth={2} />
+                          <text x={q.x} y={q.y + 4} textAnchor="middle" style={{ fontSize: 10.5, fontWeight: 800, fill: PAL.warn }}>!</text>
+                        </g>
                       </g>
                     );
                   })}

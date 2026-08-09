@@ -86,6 +86,7 @@ import {
   RERASTER_SETTLE_MS, MAX_RERASTER_DIM,
 } from "./lib/rerasterProbe.mjs";
 import { sheetPdfBytes } from "./lib/sheetPdf.mjs";
+import { assertForeground } from "./lib/tabTiming.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const BASE = (process.env.BASE_URL || "http://localhost:4173/").replace(/\/?$/, "/");
@@ -316,6 +317,10 @@ async function runArm(browser, planKey, arm, rep) {
   });
 
   const page = await ctx.newPage();
+  /* ⛔ A wall-clock reading from a BACKGROUND tab is void — a hidden tab clamps setTimeout, and a
+     setTimeout-paced probe then times the clamp (measured: 3,156 ms for a 138-182 ms gesture).
+     See ui-audit/lib/tabTiming.mjs. Fails loudly rather than reporting a throttled number. */
+  await assertForeground(page, "zoom-reraster-arms");
   const cdp = await ctx.newCDPSession(page);
   await cdp.send("Performance.enable").catch(() => {});
   if (CPU > 1) await cdp.send("Emulation.setCPUThrottlingRate", { rate: CPU }).catch(() => {});

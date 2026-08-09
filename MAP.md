@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-08-08 @ `bacae4b` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-08-09 @ `e9aa662` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -520,7 +520,7 @@ _455 source files mapped._
 - **`src/workspaces/site-planner/lib/featureHoverAttach.js`** — lazily-loaded attach layer for the vector overlays' hover identify: binds the sticky tooltip on an esri featureLayer and installs the planner-canvas `identifyAt` accessor, kept off the boot bundle to pay the bundle budget.
   - _exports_: `attachFeatureCanvasIdentify`, `wireFeatureHover`
 - **`src/workspaces/site-planner/lib/featureTarget.js`** — which feature a canvas double-click is about, resolved at the SVG root off the live hit stack (plus the dimension-number-over-body test)
-  - _exports_: `EL_DIM_ATTR`, `FEATURE_ATTR`, `FEATURE_KINDS`, `HANDLE_ATTR`, `parseFeatureKey`, `pressIsOverElementBody`, `resolveDoubleClickTarget`, `stackEntries`
+  - _exports_: `EL_DIM_ATTR`, `FEATURE_ATTR`, `FEATURE_KINDS`, `gestureAnchorTarget`, `HANDLE_ATTR`, `parseFeatureKey`, `pressIsOverElementBody`, `resolveDoubleClickTarget`, `stackEntries`
 - **`src/workspaces/site-planner/lib/ffeBalance.js`** — grading milestone (DECISION 3): the balance-optimal finished-floor solver (`solveBalanceFfe` floats the pad UP off the regulatory code minimum to reuse basin spoil as fill, never below it) + the dual FFE readout (`ffeDualDisplay`, "FFE X (code floor Y + Z for balance)"). The net earthwork residual is reported in CY (owner preference), not truckloads. Pure, Node-tested.
   - _exports_: `ffeDualDisplay`, `solveBalanceFfe`
 - **`src/workspaces/site-planner/lib/floodAdministrator.js`** — NEW-8 governing floodplain administrator: candidate resolution from county/city/ETJ/edge signals, deliberate strictest-wins selection with an ambiguity flag, and the BFE back-solved from an assumed FFE

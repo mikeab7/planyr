@@ -113,14 +113,17 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
-### V75312 — B233153: the Bain pond opens Properties now, and its shape still edits. `Blocker: real-data` + `Blocker: auth`
+### V77136 — B278576/B278577: the 6×12 px road stub on the Bain plan opens Properties now, and nothing else on that plan moved. `Blocker: real-data` + `Blocker: auth`
 
-**The symptom is REPRODUCED and FIXED — this entry is the confirmation where he saw it, not a hunt.** V30160 (the capture) is closed. The mechanism, from a capture-phase listener at his svg root: press 1 on the pond water selects it, which MOUNTS the pond's own 41-node handle layer, and an 18×18 transparent `vtx-handle` hit square lands exactly on the point already under the cursor — so press 2 hit a grip the FIRST PRESS HAD CREATED, the double-tap could not pair, and the root resolver answered "nothing was double-clicked". The fix makes the handle layer transparent to feature IDENTIFICATION (never to delivery), so it closes for every element type that renders grips, not just the pond.
-- **What was driven HERE, logged out, with both mutants proven RED first.** `ui-audit/audit-doubleclick-properties.mjs` on a new **44-vertex surveyed-ring pond**: **121/121 centres · 123/123 `--labels` · 78/78 `--locked`**, where the pre-fix resolver gives **39 red** — including the new HALF FIVE, which finds a point where one of the feature's own grips lands over its own body and double-clicks there. `e2e/chrome-swallows-press.spec.js` adds the behavioural case (pre-fix ⇒ red) and the **vertex-drag regression guard** (grip made pointer-inert ⇒ `44 of 44 vertices moved` ⇒ red). `test/featureTarget.test.js` 29 green, 4 red on the pre-fix rule.
-- **What the sandbox cannot speak for.** His pond's ring is a surveyed boundary on a signed-in plan with live flood geometry; the fixture here is a generated 44-vertex ring on a local, logged-out plan. The FIX is geometry-independent (it is one branch in the resolver, and the unit tests drive his captured stack verbatim), but the pond that produced the report has never been clicked on a fixed build.
-- **What to confirm on planyr.io, signed in — three clicks and a drag.** **(a) THE ORIGINAL REPRO.** Open **Bain / "Concept A — Quiddity Hydrologic"** and double-click the detention pond that would not answer. Properties must open. Try it a few times and in a few places on the basin — near the edge especially, which is where the grips are. **(b) A SINGLE CLICK STILL ONLY SELECTS** — grips appear, no panel (the B750/B935 contract, unchanged). **(c) RESHAPING STILL WORKS**, which is the half a careless fix would break: with the pond selected, drag one of its blue corner squares and confirm that ONE corner moves — the whole pond must not slide. Then drag the pond's body and confirm the whole pond DOES move. **(d) EVERY OTHER OBJECT.** Double-click a building, a road, an easement and the parcel on the same plan — all four must still open Properties, because the change was to the shared resolver rather than to anything pond-specific.
-- **If (a) still fails**, the console is now the fastest instrument: with `window.__PLANYR_E2E` armed, `window.__plannerHitTarget(x, y)` returns what a double-click at that point would address. A `null` there names the remaining blocker in one line.
+**The symptom is REPRODUCED and FIXED — this entry is the confirmation where he saw it, not a hunt.** The mechanism, from his own capture: a road stub whose whole rendered body is 6×12 CSS px has no pixel left uncovered once its own grips mount, so press 2 could only resolve to whatever lay under the chrome — a different, larger road. The fix ANCHORS a double-click in flight to whatever press 1 selected, so it closes for every feature type at once, not just for that stub.
+- **The element, and the exact coordinates to use.** planyr.io, signed in, **Bain / "Concept - Original"**, viewport **1600×521**. Element id **`e79463haroul`**. Press 1 previously landed at the point where the handle layer becomes `[664,402,15,22]` with 7 grips; press 2 previously took the handle layer to `[618,342,189,127]` with 28 grips and made the panel disappear. The large-road control is **`e79456earvbw`** — it passed before the fix and must still pass after it.
+- **What was driven HERE, logged out, with the mutants proven RED first.** `ui-audit/audit-doubleclick-properties.mjs` with two new seeded rows (a road stub and a non-road paving, each smaller than the chrome it mounts): **178/180 pre-fix with exactly those rows red → 183/183 centres · 185/185 `--labels` · 112/112 `--locked`**. `e2e/chrome-swallows-press.spec.js` adds four cases, 2 of which go red on the pre-fix build. `test/featureTarget.test.js` 45 green, driving his captured stack verbatim in both directions.
+- **What the sandbox cannot speak for.** The seeded stub reproduces the CLASS (a body smaller than its chrome, on a real canvas, at a real zoom) but it is not his stub: his sits on a signed-in plan among 43 features, welded into a road network, with live flood geometry. The fix is geometry-independent — one branch in the resolver — but the element that produced the report has never been clicked on a fixed build.
+- **What to confirm on planyr.io, signed in — four things.** **(a) THE ORIGINAL REPRO.** Double-click `e79463haroul`. Properties must open, and it must read ELEMENT — ROAD for THAT stub, not for a larger road. **(b) THE PANEL MUST NOT CLOSE.** With Properties already open on it, double-click it again — the panel must survive (the second symptom). **(c) NOTHING MOVED.** After the gesture, the stub's own path data must be unchanged — this is the half B278577 is about, where the min-radius flag's corner dot used to re-cut the alignment. Check whether that stub carries a radius flag at all, and if it does, that a single click on the dot now SELECTS the road instead of fixing it, while the label pill's "Fix" still works. **(d) RE-RUN THE SWEEP.** All 43 rendered `g[data-el-id]` features: 36 were reachable and 35 opened Properties. It must now be 36 of 36, with no new failure anywhere.
+- **The instrument, if (a) still fails:** with `window.__PLANYR_E2E` armed, `window.__plannerHitTarget(x, y)` returns what a double-click at that point would address — asked BETWEEN the two presses, it names the remaining blocker in one line.
+- **⛔ ASSERT ON STATE, NOT ON A CLOCK, and check `document.visibilityState` first** — see FOREGROUND-OR-VOID in `/CLAUDE.md` (B1086 ×2). A hidden tab clamps `setTimeout` and a paced probe then reports a number that is off by a factor of twenty while looking entirely reasonable.
 - The **owner never runs this** — it is a Claude-cohort check on a signed-in session. ⏳ **PENDING**
+
 ### V73584 — B276576: does the edge actually serve the self-hosted Inter, and does production paint faster for it? `Blocker: live-deploy`
 
 **⛔ READ THIS FIRST — the vast majority of this item was DRIVEN HERE, not parked.** Per rule 4, only
@@ -167,18 +170,26 @@ is only what a browser can see, and only that. On **production planyr.io**, conf
   **old HTML** (Google link present, preload absent). A check run in that window would have reported a
   half-deployed state as a failure. Both settled within minutes. If a post-deploy check disagrees with
   itself, re-run it before believing it.
-- **(b) Inter actually renders — the check that catches (a) failing quietly.** In DevTools on a loaded
-  app page, `document.fonts.check('16px Inter')` is `true`, and the Network tab shows
-  `inter-latin.woff2` fetched from **planyr.io**, once, with **no request to `fonts.googleapis.com` or
-  `fonts.gstatic.com` anywhere in the waterfall**. Rendering/Fonts should show Inter, not a fallback.
-- **(c) The preload is not wasted.** `inter-latin.woff2` appears **once**, not twice. A `crossorigin`
-  mismatch on a font preload causes the browser to discard it and fetch the file a second time — the
-  page still looks perfect while paying double, which is why this is worth an explicit look.
-- **(d) `latin-ext` is NOT fetched** on an ordinary English session. Its `unicode-range` should keep
-  83.1 KB off the wire unless such a character is on screen.
-- **(e) The number this was all for.** `BASE_URL=https://planyr.io node ui-audit/perf-harness.mjs` from
-  a machine with **direct** network access (the owner's browser or a Cowork session — **not** a Claude
-  sandbox). Two things to read: **`firstContentfulPaintMs` should now be reported as JUDGED**, not
+- **(b) Inter actually renders — the check that catches (a) failing quietly.** ✅ **DISCHARGED
+  2026-08-09 against PRODUCTION `planyr.io`, in the owner's own browser, on a real signed-in load with
+  a 250-entry resource waterfall.** `document.fonts.check('16px Inter')` is **true**, the computed body
+  `font-family` is **`Inter, system-ui, sans-serif`**, and there are **zero requests to
+  `fonts.googleapis.com` or `fonts.gstatic.com` anywhere in the waterfall**, plus zero live
+  `<link>`/`<script>` tags naming either host. Not a fallback — Inter is what paints.
+- **(c) The preload is not wasted.** ✅ **DISCHARGED 2026-08-09, same session.**
+  `/fonts/inter-latin.woff2` appears **exactly once**, `initiatorType` **`link`**, **48,556 bytes
+  transferred**, and the preload tag's `crossorigin` resolves to **`anonymous`**. No double fetch, so
+  there is no crossorigin mismatch — which was the whole risk (the page looks perfect while paying
+  twice).
+- **(d) `latin-ext` is NOT fetched.** ✅ **DISCHARGED 2026-08-09, same session.** Zero requests for
+  `inter-latin-ext.woff2` on an ordinary English session, so the `unicode-range` split is keeping
+  **83.1 KB** off the wire.
+- **(e) The number this was all for. ⏳ STILL OPEN — and the wall is WIDER than this entry assumed.**
+  ⛔ **RE-TESTED FROM COWORK 2026-08-09, not inherited: `curl` to `https://planyr.io` from a Cowork
+  container returns `000` (connection reset).** So the escape hatch this entry named — "a Cowork
+  session" — is walled too, and it is not just the Claude sandbox. This step now needs a machine with
+  genuinely direct network access. `BASE_URL=https://planyr.io node ui-audit/perf-harness.mjs` from
+  such a machine. Two things to read: **`firstContentfulPaintMs` should now be reported as JUDGED**, not
   *MEASURED BUT NOT JUDGED* — the un-mute is only meaningful if the deployed page really carries no
   cross-origin render-blocking resource — and its **value against the 500 ms ceiling**.
   ⚠ **This is the number to re-seed from, and it is deliberately NOT being re-seeded from the sandbox.**
@@ -186,9 +197,15 @@ is only what a browser can see, and only that. On **production planyr.io**, conf
   that figure measures the container, not this change. The 500 ms ceiling's provenance is production
   (328 ms measured 2026-07-28). **Overlaps V477, which already owns re-seeding the paint ceilings — do
   both in one pass and record the result on whichever you run.**
-- **(f) Nothing looks different.** Type across the planner, the header, the yield panel and the Review
+- **(f) Nothing looks different. ⏳ STILL OPEN — needs a human eye; there is no instrument for it here.**
+  Type across the planner, the header, the yield panel and the Review
   tab should be visually unchanged from before this shipped — same face, same weights (the variable
   file covers 400–800). A subtle metric shift would mean the wrong file is being served.
+
+**STATUS 2026-08-09: (a), (b), (c) and (d) are DISCHARGED against production. Only (e) — the
+perf-harness number — and (f) — the visual look — remain, and BOTH are blocked on a machine this
+program does not have: (e) needs direct network access (Cowork is walled too, re-tested rather than
+assumed) and (f) needs a human eye.** Every part that an instrument could settle has been settled.
 
 *(minted V73584; references **B276576**, overlaps **V477**; `Cadence: once`. Implemented + fully
 sandbox-verified 2026-08-08 — the residue above is the deployed edge only.)*

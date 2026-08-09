@@ -183,6 +183,30 @@ const ELS = [
   // TRAP 1 in action: pts + vtx + the roadStripBBox spread, never hand-written bounds.
   { id: eid(), type: "road", label: "Road", roadClass: "truck",
     ...roadBBox([{ x: at(4, 3).x - 200, y: at(4, 3).y }, { x: at(4, 3).x + 200, y: at(4, 3).y }], 30, 1) },
+  /* ⛔ NEW-1 — THE FEATURE IS SMALLER THAN ITS OWN CHROME, and until this row the fixture had no
+   * case of it at all. #963 gave this audit a 44-vertex surveyed ring — a feature whose grips are
+   * DENSE — and that is a different variable from a feature whose grips are BIGGER THAN IT IS.
+   *
+   * The owner's case, live on Bain: a road stub whose whole rendered body is 6×12 CSS px, wearing a
+   * 12 px endpoint handle inside a 15×22 px handle box. Not one pixel of it is uncovered once it is
+   * selected, so press 2 can only resolve to whatever lies under the chrome.
+   *
+   * The stub below is that condition at this fixture's zoom (≈0.38 px/ft, so ~16 × 32 ft), and its
+   * corners are deliberately tighter than the truck class can hold — which is not decoration
+   * either. A short road between two others is exactly the geometry that trips the min-radius
+   * warning, and that warning paints a 7 px corner dot with an "!" on it: on a body this size the
+   * REVIEW CHROME IS WIDER THAN THE ROAD. Measured on the pre-fix build: 0 selection nodes after
+   * press 1 (nothing selected, no panel — the owner's report verbatim) and the road's path data
+   * CHANGED after press 2, because the flag's click ran the corner fix. A double-click re-cut his
+   * alignment and burnt an undo frame, silently.
+   *
+   * The paving row is the same condition on a NON-ROAD kind, so the case is not filed as a road
+   * quirk: a 16 × 32 ft rect mounts eight resize grips and a rotate arm that together span several
+   * times its own body. */
+  { id: eid(), type: "road", label: "Stub", roadClass: "truck", variant: "smaller than its own chrome",
+    ...roadBBox([{ x: at(5, 0).x, y: at(5, 0).y }, { x: at(5, 0).x + 9, y: at(5, 0).y + 12 },
+      { x: at(5, 0).x, y: at(5, 0).y + 24 }, { x: at(5, 0).x + 8, y: at(5, 0).y + 34 }], 14, 1) },
+  { id: eid(), type: "paving", variant: "smaller than its own chrome", ...rect(5, 4, 16, 32), label: "Chip" },
 ];
 
 /* MARKUPS — every kind, with all THREE easement modes, parked in the two middle rows plus the two
@@ -362,7 +386,7 @@ try {
    * where his eye is, and his eye is on the label. If the label is pointer-transparent the press
    * falls through to the shape and still resolves to the same feature, which is a pass and is
    * reported as such (`via`), not hidden. */
-  async function probePoint(id, kind) {
+  async function probePoint(id, kind, labels = LABELS) {
     return page.evaluate(({ id, kind, labels }) => {
       const key = `${kind}:${id}`;
       const sel = kind === "el" ? `[data-el-id="${id}"]` : `[data-mk-id="${id}"]`;
@@ -378,6 +402,17 @@ try {
        * Proven, not theorised: with the pond group forced to `pointer-events: none` the suite still
        * reported 50/50 before this guard, and goes red with it.
        * `--labels` is the deliberate exception: probing the label/number IS its whole purpose. */
+      /* ⛔ THE PROBE POINT IS JUDGED AS PRESS 1 WILL SEE IT — WITH NOTHING SELECTED, so the handle
+       * layer is made pointer-inert for the duration (it is restored in the `finally` below).
+       * `--labels` PRIMES the selection to make a detail-tier dimension number exist, and on a
+       * feature SMALLER THAN ITS OWN CHROME that priming blankets the whole body in grips: every
+       * candidate then came back UNANSWERED and the row read "unreachable by pointer" for a feature
+       * that is perfectly reachable. Press 1 always lands on a deselected feature, so that is the
+       * state the point has to be valid in. In `centres` mode nothing is selected and there is no
+       * handle layer, so this changes nothing at all. */
+      const hl = document.querySelector("[data-handle-layer]");
+      const hlPrev = hl ? hl.style.pointerEvents : null;
+      if (hl) hl.style.pointerEvents = "none";
       const answers = (x, y) => {
         const n = document.elementFromPoint(x, y);
         const f = n && n.closest ? n.closest("[data-feature]") : null;
@@ -441,10 +476,27 @@ try {
         push(cands, box.left + box.width * fx, box.top + box.height * fy, "interior point");
       }
 
-      for (const c of cands) if (answers(c.x, c.y)) return c;
-      return cands.length ? { ...cands[0], via: cands[0].via + " (UNANSWERED — nothing under it claims this feature)" } : null;
-    }, { id, kind, labels: LABELS });
+      try {
+        for (const c of cands) if (answers(c.x, c.y)) return c;
+        return cands.length ? { ...cands[0], via: cands[0].via + " (UNANSWERED — nothing under it claims this feature)" } : null;
+      } finally { if (hl) hl.style.pointerEvents = hlPrev; }
+    }, { id, kind, labels });
   }
+
+  /* ⛔ IS THIS POINT STILL THIS FEATURE'S, RIGHT NOW? Asked of a DESELECTED plan, because that is
+   * the state press 1 lands in. `--labels` primes the selection to make a detail-tier number exist,
+   * and for most features that number sits ON the body (B592 clamps a rect's onto the footprint; a
+   * road's is anchored to the centreline midpoint) so the point is still the feature's once the
+   * priming is dropped — which is the whole CHROME-NEVER-EATS-A-PRESS case the mode exists to
+   * drive. On a feature SMALLER THAN ITS OWN CHROME the number cannot fit on the body, so it is
+   * placed in clear space, vanishes with the selection, and the probe was aiming at bare canvas:
+   * three rows went red describing a point that does not exist at the moment of the gesture. That
+   * is a broken probe, not a defect, so the mode falls back to the body and SAYS it did. */
+  const answersAt = (id, kind, x, y) => page.evaluate(({ id, kind, x, y }) => {
+    const n = document.elementFromPoint(x, y);
+    const f = n && n.closest ? n.closest("[data-feature]") : null;
+    return !!f && f.getAttribute("data-feature") === `${kind}:${id}`;
+  }, { id, kind, x, y });
 
   /* ── THE TWO-PRESS INVARIANT (B233153) ────────────────────────────────────────────────────────
    *
@@ -514,6 +566,60 @@ try {
     }, { id, kind });
   }
 
+  /* ⛔ NEW-1 — A FINGERPRINT OF EVERY DRAWN COORDINATE ON THE PLAN.
+   *
+   * A double-click IDENTIFIES a feature; it must never EDIT one. Nothing here could see the
+   * difference: every assertion in this file asks whether a panel appeared, so a gesture that opened
+   * Properties AND silently re-cut a road's alignment scored a clean pass. That is not hypothetical —
+   * it is what the road-radius flag did to the owner's stub, and the panel opened on the way past.
+   *
+   * Read off the RENDERED geometry rather than through a state hook, because the render is what a
+   * change has to reach to matter, and it needs no new production surface to observe. Deliberately
+   * whole-plan, not per-feature: the press that edits is often not on the thing it edits (a flag
+   * belonging to road A sits on road B), and a per-feature check would miss exactly that.
+   *
+   * ⛔ IT IS ALWAYS READ WITH NOTHING SELECTED, and that is what makes it mean anything. Selection
+   * MOUNTS geometry — the dimension grab band, the outline cut, review chrome — so a fingerprint
+   * taken while something is selected differs from one taken when nothing is, for reasons that have
+   * nothing to do with an edit. Measured: comparing across that boundary reported all 27 features as
+   * modified, which is a broken instrument, not 27 findings. Chrome the export already knows to drop
+   * (`data-export="skip"`) and the dimension group are excluded for the same reason. */
+  const planFingerprint = () => page.evaluate(() =>
+    [...document.querySelectorAll("[data-el-id] path[d], [data-el-id] polygon[points], [data-el-id] polyline[points], [data-mk-id] path[d], [data-mk-id] polygon[points], [data-mk-id] polyline[points]")]
+      .filter((n) => !n.closest('[data-export="skip"], [data-el-dim], [data-handle-layer]'))
+      .map((n) => `${n.closest("[data-el-id],[data-mk-id]").getAttribute("data-el-id") || n.closest("[data-mk-id]").getAttribute("data-mk-id")}=${n.getAttribute("d") || n.getAttribute("points")}`)
+      /* ⛔ AT A THOUSANDTH OF A PIXEL, not at string equality. A re-render re-derives these
+       * coordinates through the same maths and lands on a different LAST BIT — measured:
+       * 558.0385597644689 against 558.0385597644688, 56 paths' worth, on a plan nobody touched.
+       * That is a double, not an edit. Every edit this guard exists to catch (a re-cut alignment, a
+       * moved vertex) is orders of magnitude larger, so the rounding costs no sensitivity. */
+      .map((s) => s.replace(/-?\d+\.\d+/g, (m) => (+m).toFixed(3)))
+      .sort());
+  /* ⛔ AND IT IS READ ONCE THE PLAN HAS STOPPED MOVING. The first probe of a run read a plan that was
+   * still settling after load (56 paths across five ponds and two markups moved with nothing
+   * touched), which would have shipped as a permanent, meaningless red on whichever feature happens
+   * to be first in the fixture. Two consecutive identical samples, or the run says so out loud —
+   * "it never settled" is a finding about the instrument, not a licence to compare anyway. */
+  async function settledFingerprint(tries = 12) {
+    let prev = await planFingerprint();
+    for (let i = 0; i < tries; i++) {
+      await page.waitForTimeout(150);
+      const now = await planFingerprint();
+      if (now.length === prev.length && now.every((s, k) => s === prev[k])) return now;
+      prev = now;
+    }
+    return { unsettled: true, sample: prev };
+  }
+  /* WHICH feature changed, named — a bare "the plan changed" sends the next reader back to the
+   * browser to find out what. */
+  const fingerprintDiff = (a, b) => {
+    if (!Array.isArray(a) || !Array.isArray(b)) return { changed: -1, who: ["the plan never stopped moving — this comparison cannot mean anything"] };
+    const bs = new Set(b), as = new Set(a);
+    const gone = a.filter((s) => !bs.has(s)), came = b.filter((s) => !as.has(s));
+    const who = [...new Set([...gone, ...came].map((s) => s.slice(0, s.indexOf("="))))];
+    return { changed: gone.length + came.length, who, was: (gone[0] || "").slice(0, 90), now: (came[0] || "").slice(0, 90) };
+  };
+
   /* Two separate down/up pairs at one point — pointer capture releases on the first up before the
    * second down, which a fast `dblclick()` / `click({clickCount:2})` cannot promise.
    *
@@ -561,8 +667,16 @@ try {
       const seed = await probePoint(t.id, t.kind);
       if (seed) { await page.mouse.click(seed.x, seed.y); await page.waitForTimeout(450); }
     }
-    const pt = await probePoint(t.id, t.kind);
+    let pt = await probePoint(t.id, t.kind);
     if (!pt) { ok(`${name} — double-click opens Properties`, false, "feature did not render / has no box"); continue; }
+    if (LABELS && !String(pt.via).includes("UNANSWERED")) {
+      await deselect();                              // drop the priming — press 1 lands on a bare plan
+      await page.waitForTimeout(260);
+      if (!await answersAt(t.id, t.kind, pt.x, pt.y)) {
+        const body = await probePoint(t.id, t.kind, false);
+        if (body) pt = { ...body, via: `${body.via} (its ${pt.via} exists only while selected and sits OFF the body — probed the body instead)` };
+      }
+    }
     /* ⛔ AN UNANSWERED PROBE POINT IS A FAILURE, NOT SOMETHING TO PRESS ANYWAY (B227940).
      * This is THE hole that let the suite certify a pond nobody can click. `probePoint` falls back
      * to its first candidate when no point resolves to the feature — and the loop then pressed it,
@@ -618,6 +732,9 @@ try {
     await page.waitForTimeout(420);            // let the tap record lapse (DBLTAP_MS = 350)
 
     // HALF TWO — the double-click contract itself.
+    await deselect();                          // …so the fingerprint below is read from a bare plan
+    await page.waitForTimeout(420);
+    const before = await settledFingerprint();
     await doubleClick(pt.x, pt.y);
     const opened = await panelOpen();
 
@@ -633,7 +750,30 @@ try {
       ok(`${name} — LOCKED: select-only, Properties stays shut`, !opened, `${pt.via}${selected ? "" : " · nothing appeared selected either"}`);
     } else {
       ok(`${name} — double-click opens Properties`, opened, `via the ${pt.via} at ${pt.x},${pt.y}`);
+      /* ⛔ NEW-1 — AND IT MAY NEVER CLOSE ONE. The owner's second symptom on the 6×12 px stub: the
+       * panel was up after press 1 and GONE after press 2. A gesture whose contract is "always opens
+       * Properties" has no state in which it shuts it, so the same double-click is run a second time
+       * with the panel already open and the panel is required to survive it. This is the only
+       * assertion here that starts from a NON-empty state, which is why it caught nothing before. */
+      if (opened) {
+        await page.waitForTimeout(420);          // let the tap record lapse, so this is a fresh pair
+        await doubleClick(pt.x, pt.y);
+        const stillOpen = await panelOpen();
+        ok(`${name} — a second double-click does not CLOSE Properties`, stillOpen,
+          stillOpen ? "" : "⛔ the panel was open before this gesture and gone after it");
+      }
     }
+
+    /* HALF TWO-AND-A-HALF — IT IDENTIFIES, IT DOES NOT EDIT (NEW-1). Read from a bare plan on both
+     * sides (see `planFingerprint`), so what is compared is the drawing, never the selection chrome.
+     * Asserted for every feature: the plan the owner double-clicked is the plan he still has. */
+    await closePanel();
+    await deselect();
+    await page.waitForTimeout(300);
+    const after = await settledFingerprint();
+    const fd = fingerprintDiff(before, after);
+    ok(`${name} — the double-click did not change the plan`, fd.changed === 0,
+      fd.changed === 0 ? "" : `⛔ a gesture that only IDENTIFIES a feature edited geometry — ${fd.changed} path(s) on ${fd.who.join(", ")}\n        was ${fd.was}\n        now ${fd.now}`);
 
     /* ── HALF FIVE — THE GRIP-COVERED PRESS. B233153 VERBATIM. ─────────────────────────────────
      *

@@ -11,6 +11,7 @@
  * off-screen at the bottom edge.
  */
 import pw from "/opt/node22/lib/node_modules/playwright/index.js";
+import { assertForeground } from "./lib/tabTiming.mjs";
 const { chromium } = pw;
 
 const BASE = process.env.BASE_URL || "http://localhost:4173/";
@@ -31,6 +32,10 @@ const browser = await chromium.launch({ executablePath: EXEC, args: ["--no-sandb
 const ctx = await browser.newContext({ viewport: { width: 1200, height: 640 }, ignoreHTTPSErrors: true });
 await ctx.addInitScript(seed);
 const page = await ctx.newPage();
+/* ⛔ A wall-clock reading from a BACKGROUND tab is void — a hidden tab clamps setTimeout, and a
+   setTimeout-paced probe then times the clamp (measured: 3,156 ms for a 138-182 ms gesture).
+   See ui-audit/lib/tabTiming.mjs. Fails loudly rather than reporting a throttled number. */
+await assertForeground(page, "verify-b915-context-menu-viewport");
 page.on("console", (m) => { if (m.type() === "error" && !/ERR_|Failed to load resource/.test(m.text())) console.log("  [console.error]", m.text().slice(0, 160)); });
 
 // Open the status menu at an arbitrary cursor point by dispatching a real contextmenu on a row,

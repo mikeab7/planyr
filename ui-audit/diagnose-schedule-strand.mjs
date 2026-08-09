@@ -19,6 +19,7 @@
  * Run:  npm run build && npx vite preview --port 4173   (then)  node ui-audit/diagnose-schedule-strand.mjs
  */
 import { chromium } from "playwright";
+import { assertForeground } from "./lib/tabTiming.mjs";
 
 const BASE = process.env.BASE_URL || "http://localhost:4173";
 const EXEC = process.env.PW_CHROME || chromium.executablePath();
@@ -48,6 +49,10 @@ const browser = await chromium.launch({ executablePath: EXEC, args: ["--no-sandb
 const ctx = await browser.newContext({ viewport: { width: 1280, height: 860 } });
 await ctx.addInitScript(seed);
 const page = await ctx.newPage();
+/* ⛔ A wall-clock reading from a BACKGROUND tab is void — a hidden tab clamps setTimeout, and a
+   setTimeout-paced probe then times the clamp (measured: 3,156 ms for a 138-182 ms gesture).
+   See ui-audit/lib/tabTiming.mjs. Fails loudly rather than reporting a throttled number. */
+await assertForeground(page, "diagnose-schedule-strand");
 
 async function waitPanel(ms = 20000) {
   const t0 = Date.now();

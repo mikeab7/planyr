@@ -45,6 +45,7 @@ import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { stemOf } from "./lib/bundleMetrics.mjs";
+import { assertForeground } from "./lib/tabTiming.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, "..");
@@ -268,6 +269,10 @@ await ctx.addInitScript(() => {
 });
 
 const page = await ctx.newPage();
+/* ⛔ A wall-clock reading from a BACKGROUND tab is void — a hidden tab clamps setTimeout, and a
+   setTimeout-paced probe then times the clamp (measured: 3,156 ms for a 138-182 ms gesture).
+   See ui-audit/lib/tabTiming.mjs. Fails loudly rather than reporting a throttled number. */
+await assertForeground(page, "perf-harness");
 const tiles = [];
 const jsChunks = [];
 const failedExternal = new Set();

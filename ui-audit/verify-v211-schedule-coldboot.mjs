@@ -21,6 +21,7 @@ import { readFileSync, existsSync, mkdirSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { assertForeground } from "./lib/tabTiming.mjs";
 
 const BASE = process.env.BASE_URL || "http://localhost:4173/";
 const EXEC = process.env.PW_CHROME || "/opt/pw-browsers/chromium-1228/chrome-linux64/chrome";
@@ -42,6 +43,10 @@ async function runOnce(label) {
   const browser = await chromium.launch({ executablePath: EXEC, args: ["--no-sandbox", "--ignore-certificate-errors"] });
   const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   const page = await ctx.newPage();
+  /* ⛔ A wall-clock reading from a BACKGROUND tab is void — a hidden tab clamps setTimeout, and a
+     setTimeout-paced probe then times the clamp (measured: 3,156 ms for a 138-182 ms gesture).
+     See ui-audit/lib/tabTiming.mjs. Fails loudly rather than reporting a throttled number. */
+  await assertForeground(page, "verify-v211-schedule-coldboot");
   await page.route(/^https:\/\//, async (route) => {
     const url = route.request().url();
     for (const [file, , re] of ASSETS) {

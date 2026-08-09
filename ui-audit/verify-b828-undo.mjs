@@ -17,6 +17,7 @@
  *       node ui-audit/verify-b828-undo.mjs              (another)
  */
 import { chromium } from "@playwright/test";
+import { assertForeground } from "./lib/tabTiming.mjs";
 
 const BASE = process.env.BASE_URL || "http://localhost:4173/";
 const EXEC = process.env.PW_CHROME || "/opt/pw-browsers/chromium-1228/chrome-linux64/chrome";
@@ -39,6 +40,10 @@ const redoBtn = (page) => page.getByRole("button", { name: "Redo", exact: true }
 const browser = await chromium.launch({ executablePath: EXEC, args: ["--no-sandbox", "--ignore-certificate-errors"] });
 const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1 });
 const page = await ctx.newPage();
+/* ⛔ A wall-clock reading from a BACKGROUND tab is void — a hidden tab clamps setTimeout, and a
+   setTimeout-paced probe then times the clamp (measured: 3,156 ms for a 138-182 ms gesture).
+   See ui-audit/lib/tabTiming.mjs. Fails loudly rather than reporting a throttled number. */
+await assertForeground(page, "verify-b828-undo");
 const pageErrors = [];
 page.on("pageerror", (e) => pageErrors.push(String(e)));
 const canvas = () => page.getByTestId("planner-canvas");

@@ -58,6 +58,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { perfScenarioSite } from "./lib/perf-scenario.mjs";
 import { classifyGesture, rankViolations, inverseFindings, formatSite } from "./lib/viewIndependence.mjs";
+import { assertForeground } from "./lib/tabTiming.mjs";
 
 const EXEC = process.env.PW_CHROME || "/opt/pw-browsers/chromium-1194/chrome-linux/chrome";
 const JSON_OUT = process.argv.includes("--json");
@@ -241,6 +242,10 @@ for (const mult of SCALES) {
   await ctx.addInitScript(() => { window.__PLANYR_E2E = true; });
   await ctx.route(/^https?:\/\//, (r) => (r.request().url().startsWith(BASE) ? r.continue() : r.abort()));
   const page = await ctx.newPage();
+  /* ⛔ A wall-clock reading from a BACKGROUND tab is void — a hidden tab clamps setTimeout, and a
+     setTimeout-paced probe then times the clamp (measured: 3,156 ms for a 138-182 ms gesture).
+     See ui-audit/lib/tabTiming.mjs. Fails loudly rather than reporting a throttled number. */
+  await assertForeground(page, "detect-view-recompute");
   await page.goto(BASE, { waitUntil: "load" });
   await page.waitForSelector("svg[role=application]", { timeout: 60_000 });
   await page.waitForTimeout(3000);

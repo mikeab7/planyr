@@ -58,6 +58,7 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createServer } from "node:http";
 import { fixtureSeed, withLayerArm, OWNER_SCENE } from "./lib/planFixture.mjs";
+import { assertForeground } from "./lib/tabTiming.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, "..");
@@ -173,6 +174,10 @@ async function runArm(name, { respond, drive, networkOptIn = true }) {
   });
 
   const page = await ctx.newPage();
+  /* ⛔ A wall-clock reading from a BACKGROUND tab is void — a hidden tab clamps setTimeout, and a
+     setTimeout-paced probe then times the clamp (measured: 3,156 ms for a 138-182 ms gesture).
+     See ui-audit/lib/tabTiming.mjs. Fails loudly rather than reporting a throttled number. */
+  await assertForeground(page, "verify-capture-pipe");
   await page.goto(BASE, { waitUntil: "load" });
   await page.waitForSelector('[data-testid="planner-canvas"]', { timeout: 60000 });
   await page.waitForFunction(() => !!window.pfRec, null, { timeout: 20000 }).catch(() => {});

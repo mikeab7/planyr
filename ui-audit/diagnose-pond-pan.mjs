@@ -58,6 +58,7 @@ import { rungViewFault, viewDrift, pct } from "./lib/sessionAxes.mjs";
 import { pairedDelta, nullFloor, armVerdict, scalingShape, attributionQuality, phaseDelta, topFunctions, median } from "./lib/pondPan.mjs";
 import { attributeProfile, loadSourceMaps, makeFrameResolver } from "./lib/bootTimeline.mjs";
 import { fakeTilePng, parseTileUrl } from "./lib/fakeTile.mjs";
+import { assertForeground } from "./lib/tabTiming.mjs";
 
 const BASE = (process.env.BASE_URL || "http://localhost:4173/").replace(/\/?$/, "/");
 const EXEC = process.env.PW_CHROME || "/opt/pw-browsers/chromium-1194/chrome-linux/chrome";
@@ -459,6 +460,10 @@ await context.route("**/*", (route) => {
 });
 
 const page = await context.newPage();
+/* ⛔ A wall-clock reading from a BACKGROUND tab is void — a hidden tab clamps setTimeout, and a
+   setTimeout-paced probe then times the clamp (measured: 3,156 ms for a 138-182 ms gesture).
+   See ui-audit/lib/tabTiming.mjs. Fails loudly rather than reporting a throttled number. */
+await assertForeground(page, "diagnose-pond-pan");
 const cdp = await context.newCDPSession(page);
 await cdp.send("Performance.enable").catch(() => {});
 await cdp.send("HeapProfiler.enable").catch(() => {});

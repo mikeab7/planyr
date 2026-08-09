@@ -34,6 +34,7 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createServer } from "node:http";
 import { fixtureSeed, bainPairArmFixture, withLayerArm, LAYER_ARMS, OWNER_SCENE } from "./lib/planFixture.mjs";
+import { assertForeground } from "./lib/tabTiming.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, "..");
@@ -92,6 +93,10 @@ const ctx = await browser.newContext({ viewport: { width: 1600, height: 900 }, d
 await ctx.addInitScript(fixtureSeed(fixture, { id: "pond-invocations-site" }));
 await ctx.route(/^https?:\/\//, (route) => (route.request().url().startsWith(BASE) ? route.continue() : route.abort()));
 const page = await ctx.newPage();
+/* ⛔ A wall-clock reading from a BACKGROUND tab is void — a hidden tab clamps setTimeout, and a
+   setTimeout-paced probe then times the clamp (measured: 3,156 ms for a 138-182 ms gesture).
+   See ui-audit/lib/tabTiming.mjs. Fails loudly rather than reporting a throttled number. */
+await assertForeground(page, "count-pond-invocations");
 await page.goto(BASE, { waitUntil: "load" });
 await page.waitForSelector('[data-testid="planner-canvas"]', { timeout: 60000 });
 await page.waitForTimeout(2500);

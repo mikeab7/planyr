@@ -34,6 +34,7 @@ import { readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join, extname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { assertForeground } from "./lib/tabTiming.mjs";
 
 const ROOT = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const DIST = join(ROOT, "dist");
@@ -151,6 +152,10 @@ async function measure(browser, { arm, url }) {
 
   const fontHostRequests = [];
   const page = await ctx.newPage();
+  /* ⛔ A wall-clock reading from a BACKGROUND tab is void — a hidden tab clamps setTimeout, and a
+     setTimeout-paced probe then times the clamp (measured: 3,156 ms for a 138-182 ms gesture).
+     See ui-audit/lib/tabTiming.mjs. Fails loudly rather than reporting a throttled number. */
+  await assertForeground(page, "verify-font-blocking");
 
   /* The one variable under test: the font host answers slowly. Everything else cross-origin is
    * aborted immediately so a blocked tile/auth host cannot contaminate either arm's timings. */
