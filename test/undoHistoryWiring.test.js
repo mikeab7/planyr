@@ -46,6 +46,9 @@ describe("B828: undo records a frame on every editable-state mutation (wiring gu
 
     // the pattern this mirrors: SitePlanner assigns its undo state ref during render, not in an effect
     const sp = read("../src/workspaces/site-planner/SitePlanner.jsx");
-    expect(sp).toMatch(/\n  stateRef\.current = \{ parcels, els, measures, callouts, markups, underlay, sheetOverlays, deletedIds, layerOverrides, layerAbove \};/);
+    // NEW-1 (parcel-drawing-offline) appended `origin` — the geo anchor rides the snapshot so
+    // "Set location" / a placement nudge is a normal undo frame. The guard's subject is the
+    // DURING-RENDER assignment, so it stays anchored on the collections and tolerates the tail.
+    expect(sp).toMatch(/\n  stateRef\.current = \{ parcels, els, measures, callouts, markups, underlay, sheetOverlays, deletedIds, layerOverrides, layerAbove(, origin)? \};/);
   });
 });

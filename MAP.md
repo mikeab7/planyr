@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-08-09 @ `4e23253` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-08-09 @ `595fc58` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_478 source files mapped._
+_485 source files mapped._
 
 ## infra
 
@@ -365,10 +365,14 @@ _478 source files mapped._
   - _exports_: `default`, `ParcelAppraisal`, `ParcelTaxes`
 - **`src/workspaces/site-planner/components/ParcelInfoCard.jsx`** — The address-search parcel card: three rows by default (owner / account / acreage), everything else behind a height-capped fold
   - _exports_: `default (ParcelInfoCard)`, `DETAILS_MAX_HEIGHT`, `LEGAL_MAX_HEIGHT`
+- **`src/workspaces/site-planner/components/ParcelRecordPanel.jsx`** — the Parcel panel's typed RECORD (provenance chip · deed misclosure · owner/account/situs/stated acreage) and the plan PLACEMENT controls. Lazily loaded.
+  - _exports_: `ParcelRecord`, `PlacementControls`
 - **`src/workspaces/site-planner/components/PondSection.jsx`** — PR-L the one developer-readable pond cross-section component (used by the ⚡ Optimize what-changed card AND the pond inspector): maps pondSectionModel marks to a responsive, theme-tokened SVG (grade, berm hatch, storage bands, flood/groundwater/receiving lines, outlet, depth dimension, collision-free labels)
   - _exports_: `default (PondSection)`
 - **`src/workspaces/site-planner/components/RowInfo.jsx`** — Per-row ⓘ info popover for the Layers panel (source · vintage/age · notes); hover/click, portal via AnchoredMenu (B760)
   - _exports_: `default (RowInfo)`
+- **`src/workspaces/site-planner/components/SetLocationDialog.jsx`** — "Set this plan's location": address, typed coordinate, or a pick on a small aerial. The way back for a plan drawn while the county GIS was down. Lazily loaded.
+  - _exports_: `default (SetLocationDialog)`
 - **`src/workspaces/site-planner/components/SiteAnalysis.jsx`** — Site Analysis panel: presence-first environmental/regulatory screening of active parcels with honest present/none/unknown/unavailable states
   - _exports_: `default (SiteAnalysis)`
 - **`src/workspaces/site-planner/components/SiteReviewModal.jsx`** — Legacy-site migration wizard: step through on-device sites to save-to-cloud, keep-on-device, or discard one by one
@@ -695,12 +699,16 @@ _478 source files mapped._
   - _exports_: `arrowGlyphFeatures`, `buildOverlayVectorFragment`, `contourFeatures`, `esriLineFeatures`, `esriPolygonFeatures`, `featureToSvg`, `overlayVectorSvg`, `swapLatLng`
 - **`src/workspaces/site-planner/lib/parcelActions.js`** — THE inventory of every parcel action and the pure model behind the right rail's "Parcel tools" menu: grouped create → modify → remove, per-row enabled/active/why-not, plus the rail-owns-actions / Land-panel-owns-attributes naming split
   - _exports_: `boundaryEditHint`, `PARCEL_ACTIONS`, `PARCEL_GROUPS`, `PARCEL_SURFACES`, `parcelMenuModel`
+- **`src/workspaces/site-planner/lib/parcelArea.js`** — a parcel's MEASURED area, net of save-and-except holes (`parcelNetSqft`) — the one derivation every acreage consumer reads. A leaf module: polyClip.js is on the boot path.
+  - _exports_: `acreageComparison`, `parcelExceptSqft`, `parcelGrossSqft`, `parcelNetSqft`, `parseAcres`, `SQFT_PER_ACRE`
 - **`src/workspaces/site-planner/lib/parcelDisplay.js`** — Shared parcel-outline display layers for map and planner: styleable esri vector layer, image-export layer for query-disabled TxGIO, Drive-snapshot geoJSON layer, add/remove cursors
   - _exports_: `ADD_CURSOR`, `makeParcelDisplayLayer`, `makeParcelImageLayer`, `makeParcelLayer`, `makeSnapshotLayer`, `PARCEL_MINZOOM`, `parcelDisplayIsImageOnly`, `REMOVE_CURSOR`
 - **`src/workspaces/site-planner/lib/parcelOffset.js`** — the setback ring's inward polygon offset (miter with bevel fallback) plus the buildable-envelope area it encloses; lifted out of SitePlanner so the envelope is provable in a unit test
   - _exports_: `lineIntersect`, `offsetPolygon`, `setbackRingArea`
 - **`src/workspaces/site-planner/lib/parcelQuery.js`** — Shared parcel ID/address lookup: SQL-injection-safe where-clause builder with county scoping and primary-CAD to statewide-TxGIO outage fallback plus circuit-breaker health recording
   - _exports_: `buildParcelWhere`, `isDefaultLookupUrl`, `lookupParcels`, `okField`
+- **`src/workspaces/site-planner/lib/parcelRecord.js`** — the parcel RECORD's vocabulary: provenance (county / deed / drawn) and the typed-field list. Read only by the lazy panel; the AREA tier lives in parcelArea.js.
+  - _exports_: `acreageComparison`, `cleanText`, `PARCEL_FIELDS`, `PARCEL_SOURCES`, `parcelExceptSqft`, `parcelGrossSqft`, `parcelNetSqft`, `parcelProvenance`, `parseAcres`, `PROVENANCE_LABEL`, `provenanceLabel`, `SQFT_PER_ACRE`
 - **`src/workspaces/site-planner/lib/parcelSelect.js`** — Pure parcel merge-selection reducer: seeds the Combine set from the current single selection so plain-click-then-Shift-click accumulates, reusing shared nextSelection for toggle math plus the B170 inactive-parcel guard
   - _exports_: `extendMergeSelection`
 - **`src/workspaces/site-planner/lib/parcelSelectHint.js`** — Pure rules for the "Select parcels is off" point-of-failure hint: only on a press that hit a parcel, once per press gesture, rate-limited so a pan across lots can't become a stream.
@@ -723,6 +731,8 @@ _478 source files mapped._
   - _exports_: `CLIP_FRAME_MAX_SMEAR_FT`, `CLIP_KINDS`, `clipboardBBox`, `clipboardLabel`, `clipCalloutTips`, `clipPlacement`, `clipRefKey`, `collectClipboard`, `pasteClipboard`, `resolveClipFrame`, `translateCalloutBy`, `translateParcelBy`
 - **`src/workspaces/site-planner/lib/planClipboardStore.js`** — Module-scope holder for the canvas + overlay clipboards, above every React remount boundary, so a copy survives a plan switch (NEW-1).
   - _exports_: `clearClipboard`, `getCanvasClip`, `getOverlayClip`, `hasAnyClip`, `hasCanvasClip`, `hasOverlayClip`, `setCanvasClip`, `setOverlayClip`
+- **`src/workspaces/site-planner/lib/plannerPlacementCmds.js`** — the placement + deed-promotion COMMANDS, loaded on demand and driven through an `exportSheet`-style `ctx`.
+  - _exports_: `applyOriginState`, `commitOrigin`, `nudgePlan`, `persistPlacement`, `promoteDeedToParcel`, `rotatePlan`
 - **`src/workspaces/site-planner/lib/planStyle.js`** — Shared element style tokens (fills/strokes/weight/pattern per surface type), style resolver, paint z-order, element feet ring outline
   - _exports_: `byZ`, `elRingFeet`, `elStyle`, `getAccountStyleDefaults`, `getPreviewStyleDefaults`, `parcelDefaultStyle`, `setAccountStyleDefaults`, `SETBACK_LINE`, `setbackChipStyle`, `setbackDashArray`, `setbackLineStyle`, `setPreviewStyleDefaults`, `standardScope`, `toHex6`, `TYPE`, `typeStyle`, `zOrder`
 - **`src/workspaces/site-planner/lib/polyClip.js`** — Pure polygon intersection-AREA via ear-clip triangulation + Sutherland–Hodgman; pairwise active-parcel overlap detection for the B652 double-count warning; clipper-lib UNION/dissolve of overlapping active parcels for correct site acreage (B715)
@@ -827,6 +837,10 @@ _478 source files mapped._
   - _exports_: `ANALYSIS_SOURCES`, `analyzeProximitySource`, `analyzeSource`, `buildAnalysisParams`, `buildJurisdictionFinding`, `buildProximityParams`, `buildQueryUrl`, `buildRoadFinding`, `classifyFlood`, `classifyStatus`, `deriveZoning`, `epaProgram`, `isSFHA`, `normalizeAttrs`, `pipelineSummary`, `representativeRing`, `ringCentroid`, `ringsBBox`, `ringsSignature`, `runSiteAnalysis`, `simplifyRing`, `wetlandSummary`, `zoneSummary`
 - **`src/workspaces/site-planner/lib/siteModel.js`** — Canonical per-plan Site Model schema v10: createSiteModel/migrate, semantic selectors, cross-copy union merge with delete-tombstones, and bonded-child/dog-ear/road-centerline load-time repairs
   - _exports_: `activeParcelsOf`, `ANNOTATION_KINDS`, `annotationsOf`, `bondedChildRot`, `buildingNumbers`, `constraintsOf`, `contentCount`, `countJunkEntries`, `createSiteModel`, `crossSectionsOf`, `developableArea`, `EASEMENT_KINDS`, `easementsOf`, `elementsOf`, `exclusionZonesOf`, `isBuilding`, `lineageConflicts`, `mergeSiteContent`, `migrate`, `migrateRoads`, `normalizeBondedChildren`, `normalizeCrossHostBonds`, `normalizeHostRuns`, `normalizeOrphanWallPads`, `normalizeZoneAlongLen`, `offAnchor`, `orphanWallPads`, `parcelAncestors`, `parcelChildrenMap`, `parcelDescendants`, `parcelDisplayInfo`, `parcelDrawingsOf`, `parcelOutline`, `parcelsOf`, `quarterOffset`, `rectRoadEndpoints`, `RESTORED_STRIP_W_FT`, `roadStripBBox`, `roadTravelWidth`, `setbacksOf`, `sheetOverlaysOf`, `SITE_MODEL_VERSION`, `STATUS_META`, `STATUSES`, `statusOf`, `strandedFromHost`, `teamShareOf`, `toMs`, `utilitiesOf`, `UTILITY_KINDS`
+- **`src/workspaces/site-planner/lib/sitePlacement.js`** — putting an UNLOCATED plan on the earth: origin validation, a typed lat/lon parser, and anchor nudging (no drawn coordinate moves).
+  - _exports_: `normalizeOrigin`, `nudgeOrigin`, `originAtOffset`, `parseLatLon`, `rotPt`, `sameOrigin`
+- **`src/workspaces/site-planner/lib/sitePlacementRotate.js`** — rotating a WHOLE plan rigidly about its body centre. Loaded on demand.
+  - _exports_: `normalizeRot`, `ROTATED_FIELDS`, `rotateEntry`, `rotateSiteCollections`, `siteRotationPivot`
 - **`src/workspaces/site-planner/lib/siteRegion.js`** — NEW-8 the synchronous half of the Colorado tier: geometric, network-free site→state resolution ('TX' \| 'CO' \| null) that the detention guard keys off. Its own module so the Colorado PROSE (coloradoRegions.js) can load on demand while this stays on the boot path
   - _exports_: `isColorado`, `siteState`, `STATE_ENVELOPES`
 - **`src/workspaces/site-planner/lib/soils.js`** — USDA SSURGO soils via Soil Data Access (NEW-B2): pure SDA SQL query builder + response parser (hydrologic soil group + seasonal-high water table) + bounded-fetch client. SDA proxy-blocked in sandbox → live-verify.

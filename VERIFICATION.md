@@ -308,6 +308,42 @@ The three defects behind *"the layers / order feature doesn't work at all"* are 
 - **ALSO CONFIRM NOTHING REGRESSED FOR A BLIP.** Signed in on a real plan, hover the map and check the ground-elevation readout still resolves normally — the backoff is a DELAY, never a cap, so a transient failure must still recover within a minute.
 - **⛔ READ-ONLY. Do NOT delete, truncate or modify any row in `public.client_errors`.**
 - The **owner never runs this** — Claude-cohort check. ⏳ **PENDING**
+
+### V96464 — B297904: on a plan located AFTER it was drawn, do the third-party layers actually come alive? `Blocker: live-GIS`
+
+The app's own half is measured HERE and is not what this asks about. `e2e/set-location-unlocated-plan.spec.js` drives the real app logged-out: an unlocated plan with a parcel drawn on it, located by typed coordinate, and with no reload the backdrop map is created and anchored at that point, an Esri imagery tile layer is MOUNTED on it, the Layers panel's "no location yet" state is gone, and the drawn ring is byte-identical before and after. It survives a reload. What cannot be driven here is whether the third-party data actually arrives — every imagery, FEMA and TxDOT host is egress-blocked at the sandbox proxy.
+- **Where.** planyr.io. Map → **Start blank** → draw a parcel with the Parcel tool → Parcel panel → **📍 Set this plan's location** → type an address or a lat/long near a known site → **Set location**.
+- **PASS**, all without reloading: the **aerial paints** under the drawing · the Layers panel lists real layers and **FEMA flood** and **contours** can be toggled on and return geometry · the cursor readout shows a **lat/long and a ground elevation** · the header resolves a **county**, and Standards shows that county's **setbacks** rather than a Harris default.
+- **FAIL** = any of those still dead until a reload, or the drawn boundary having MOVED (it must not move by a foot — the origin decides where the local frame sits, nothing else).
+- **Then adjust the placement:** Parcel panel → **Placement** → ↻ turns the drawing onto the aerial, arrows slide it. Undo must step back through both.
+- **What was proven HERE:** the 6 live cases above plus 24 mutation-proven wiring guards; 8 mutations run against the live spec, all red — including the one that first survived (deleting `ensureBasemapOn()` left the map created and the spec green, so the spec now asserts the TILE LAYER, not the map).
+- The **owner never runs this** — Claude-cohort check. ⏳ **PENDING**
+
+### V96465 — B297905: does a REAL recorded description promote to a boundary that measures right? `Blocker: real-data`
+
+Driven here on synthetic traverses (a 0.3′ closure, a 40′ closure and an open one) through the real button, in a real browser. What that cannot cover is a genuine recorded deed with save-and-except tracts and curved calls, which is the case the acreage has to be right for.
+- **Where.** planyr.io, a plan with a real metes-and-bounds description: Parcel tools → plot the deed → right-click it (or its inspector) → **Use as parcel boundary**.
+- **PASS:** the new parcel's acreage matches the deed's called acreage to within the description's own closure · setbacks, edge runs and the acreage chip behave exactly as on a map-clicked lot · the parcel record shows **From deed** and **closes to N′** · a tract with save-and-except holes has that land DEDUCTED from the site acreage in Yield · the deed markup is still on the plan and **Go to the deed this came from** reaches it.
+- **FAIL:** acreage that ignores an exception · an open traverse that promotes anyway · a 40′ closure that looks like a 0.4′ one.
+- **Colorado control (worth one run):** on Colorado ground, promote, then Align — the parcel must turn WITH the deed by Colorado's convergence (~+0.38°), not Texas's −2.885°. Asserted here against B290241's fix; a live pass confirms it on real ground.
+- The **owner never runs this** — Claude-cohort check. ⏳ **PENDING**
+
+### V96466 — B297906: do the typed parcel fields reach the CLOUD, not just the device? `Blocker: auth`
+
+Typed, persisted and re-read across a reload here, logged-out, in a real browser. The sandbox blocks Supabase sign-in, so the one path not exercised is the cloud round-trip — and these fields ride `site_elements` as ordinary parcel properties, so the risk is low but unproven.
+- **Where.** planyr.io **signed in**. Select a parcel → Parcel panel → **Parcel record** → type a name, owner, account, situs and a stated acreage.
+- **PASS:** the values survive a reload **on a second device / browser** · the provenance chip reads **County record** on a map-clicked lot and **Drawn by hand** on a drawn one · editing a county lot's address sticks (that is the point — a wrong county record must be correctable) · the stated-vs-measured line shows both numbers and their gap.
+- **FAIL:** a value that survives locally but not across devices, or a drawn lot presenting as a county record.
+- The **owner never runs this** — Claude-cohort check. ⏳ **PENDING**
+
+### V96467 — B297907: does the fallback appear on a REAL county outage in production? `Blocker: live-GIS`
+
+Measured here against a genuine outage rather than a stub — every county appraisal host is egress-blocked in this environment, so a click on a lot fails the same way it fails when a county server is down, and the offer appears and produces a located plan. What that cannot show is the behaviour on a live network where one county is down and others answer.
+- **Where.** planyr.io, map view, during (or simulating) a county service outage — the Chambers/Waller CAD hosts are the usual candidates.
+- **PASS:** the failure toast carries **Start the plan here & draw the boundary →** · clicking it opens a plan that already has a location (the aerial is on, the county resolves) · a HEALTHY county that simply has no lot at that point still says "No parcel right there" and offers **nothing** — that distinction is the feature working, not a gap.
+- **FAIL:** a bare banner with no way forward, or the fallback offered on a healthy "no parcel here" answer.
+- The **owner never runs this** — Claude-cohort check. ⏳ **PENDING**
+
 ### V88800 — B290240: does an unincorporated COLORADO site now say Colorado's zoning law instead of Texas's? `Blocker: live-GIS`
 
 The sentence itself is pure and unit-tested in both directions; what cannot be driven here is the card, because it only renders once `identifyJurisdiction` returns `unincorporated`, and that needs external GIS hosts this environment blocks (the whole `gis.colorado.gov` space answers 403 at the sandbox egress proxy — a sandbox limitation, not an endpoint failure).

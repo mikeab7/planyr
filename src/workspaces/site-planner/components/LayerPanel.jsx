@@ -92,6 +92,10 @@ export default function LayerPanel({
    * fires on a POSITIVE mismatch only, so a coordinate-less plan behaves exactly as before.
    */
   siteState = null,
+  /* NEW-1 — what to do about an unlocated plan. Passed only by the planner, and only while the
+   * plan has no origin: it turns the "GIS layers appear once this plan has a location" note from a
+   * dead end into the one-click fix. Null on every other surface. */
+  onSetLocation = null,
 }) {
   const jur = jurisdictionFor(county);
   /* B1091(×2) — WHICH county the flood group reasons about.
@@ -811,6 +815,15 @@ export default function LayerPanel({
         {groupHead("basemap", "Basemap", 0)}
         {!collapsed.basemap && basemapControl}
         <div style={{ fontSize: 10.5, color: MUTED, lineHeight: 1.45, marginTop: 4 }}>{gisNote}</div>
+        {/* NEW-1 — the empty-basemap state is one of the two places the owner meets an unlocated
+            plan, so it carries the fix rather than just the diagnosis. */}
+        {onSetLocation && (
+          <button data-testid="layers-set-location" onClick={onSetLocation}
+            style={{ marginTop: 6, width: "100%", padding: "5px 8px", fontSize: 11, fontWeight: 700, fontFamily: "inherit",
+              border: "1px solid var(--accent)", borderRadius: 6, background: "var(--accent)", color: "var(--on-accent)", cursor: "pointer" }}>
+            📍 Set this plan's location
+          </button>
+        )}
       </div>
     );
   }
