@@ -25,6 +25,7 @@
  */
 import L from "leaflet";
 import { PMTiles } from "pmtiles";
+import { FloodArchiveSource } from "./floodArchiveSource.js";
 import { floodTileTitle, floodTileRows, FLOOD_TILE_IDENTIFY_NOTE } from "./floodTileStyle.js";
 import { decodeFloodTile, paint, featureAt, TILE_PX } from "./floodTileDecode.js";
 import { FLOOD_TILE_MIN_ZOOM, FLOOD_TILE_MAX_ZOOM } from "../../../shared/gis/floodTiles.js";
@@ -35,13 +36,28 @@ import { FLOOD_TILE_MIN_ZOOM, FLOOD_TILE_MAX_ZOOM } from "../../../shared/gis/fl
  * root directory over the network. */
 const ARCHIVES = new Map();
 export function openArchive(url) {
-  let pm = ARCHIVES.get(url);
-  if (!pm) { pm = new PMTiles(url); ARCHIVES.set(url, pm); }
-  return pm;
+  let entry = ARCHIVES.get(url);
+  if (!entry) {
+    /* ⛔ NOT `new PMTiles(url)` — that builds pmtiles' own `FetchSource`, which THROWS on a host
+     * that ignores Range, and Cloudflare Pages (where this app is served from) does exactly that.
+     * `FloodArchiveSource` adapts: ranged reads where byte serving works, whole-file-once where it
+     * does not. The measurement and the refutation are in that module's header; do not "simplify"
+     * this back to a bare URL. */
+    const source = new FloodArchiveSource(url);
+    entry = { source, pm: new PMTiles(source) };
+    ARCHIVES.set(url, entry);
+  }
+  return entry.pm;
 }
 /* Teardown + test seam: a rebuilt archive at the same URL must not be served out of a stale
- * directory cache for the life of the tab. */
-export const forgetArchive = (url) => { if (url == null) ARCHIVES.clear(); else ARCHIVES.delete(url); };
+ * directory cache for the life of the tab — and the held whole-file buffer must be released with
+ * it, or a plan switch leaks a county's worth of archive per visit. */
+export function forgetArchive(url) {
+  const drop = (e) => { if (e && e.source) e.source.release(); };
+  if (url == null) { ARCHIVES.forEach(drop); ARCHIVES.clear(); return; }
+  drop(ARCHIVES.get(url));
+  ARCHIVES.delete(url);
+}
 
 /* ---------------------------------------------------------------------------
  * The layer.

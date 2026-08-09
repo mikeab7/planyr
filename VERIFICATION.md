@@ -143,6 +143,12 @@ a `live-GIS` blocker, not a to-do that was skipped.
 7. **The measurement to record:** time from the layer switching on to the floodplain being visible, tiles
    vs. flag-off, on the same plan. That is the number Phase 1 exists to produce and the only one still
    missing.
+8. **⛔ ADDED after the Cloudflare preview measurement — Pages does NOT do byte serving** (a ranged GET
+   returns 200 with the full body, on every asset; see B298401). So on the live site the reader fetches
+   each archive **whole, once** (`lib/floodArchiveSource.js`). Confirm on a COLD cache that Harris's
+   **5.96 MiB** arrives once and that the second visit is served from cache (a 304, not a re-download) —
+   that is the one behaviour the sandbox cannot show, because its dev server honours Range and takes the
+   cheap path instead.
 
 ### V88800 — B290240: does an unincorporated COLORADO site now say Colorado's zoning law instead of Texas's? `Blocker: live-GIS`
 

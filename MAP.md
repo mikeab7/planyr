@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-08-09 @ `287bbf3` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-08-09 @ `19f1bad` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_462 source files mapped._
+_463 source files mapped._
 
 ## infra
 
@@ -531,6 +531,8 @@ _462 source files mapped._
   - _exports_: `ffeDualDisplay`, `solveBalanceFfe`
 - **`src/workspaces/site-planner/lib/floodAdministrator.js`** — NEW-8 governing floodplain administrator: candidate resolution from county/city/ETJ/edge signals, deliberate strictest-wins selection with an ambiguity flag, and the BFE back-solved from an assumed FFE
   - _exports_: `administratorCandidates`, `assessAdministrator`, `ffeSummary`, `impliedFloodElevation`, `resolveAdministrator`, `ruleKeyFor`
+- **`src/workspaces/site-planner/lib/floodArchiveSource.js`** — adaptive PMTiles byte source: ranged reads where the host honours Range, whole-file-once where it does not (Cloudflare Pages does not)
+  - _exports_: `FloodArchiveSource`
 - **`src/workspaces/site-planner/lib/floodGroup.js`** — Flood & drainage layer-group model (B1070/B1071, pure): four provenance tiers, point-in-district auto-scoping of local drainage authorities, master-toggle state, and the honest empty-state copy (what FEMA actually reported, why a district isn't listed, the governing-district drainage line)
   - _exports_: `COUNTY_DISTRICT`, `COUNTY_LABEL`, `countyKey`, `countyName`, `districtDrainageNote`, `districtName`, `districtReaches`, `districtShort`, `DRAINAGE_DISTRICTS`, `emptyReason`, `FEMA_ZONES_NOT_CHANNELS`, `FLOOD_TIER_ORDER`, `FLOOD_TIERS`, `floodFactsNote`, `floodMasterState`, `floodRowRelevance`, `floodTierLabel`, `governingDistrict`, `isSfhaZone`, `scopeFloodEntries`
 - **`src/workspaces/site-planner/lib/floodManifest.js`** — one cached fetch of `public/flood/manifest.json`, so the panel can state which edition of the NFHL the baked tiles are

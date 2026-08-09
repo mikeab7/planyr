@@ -200,7 +200,18 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   means *outside the mapped floodplain*; on the LIVE layer it means *no effective flood map here*
   (`identifyGap: "flood"`) — the opposite risk position. `floodAbsenceKindFor` is the one place that
   decides, and showing the live wording over a tile answer turns a clean result into a scare.
-  **(4) `floodTileLayer.js` IS LAZY BY CONSTRUCTION and must stay so** — it pulls `pmtiles` +
+  **(4) ⛔ CLOUDFLARE PAGES DOES NOT DO HTTP BYTE SERVING — measured, and it refutes the design's own
+  premise.** A ranged GET against a real Pages deployment returns **200 with the full body**, no
+  `accept-ranges`, on EVERY asset (the 6 MiB archive, `manifest.json`, a plain JS bundle); the control
+  through the same proxy returns 206 from other hosts. `pmtiles`' own `FetchSource` REFUSES that, so the
+  layer would have thrown on its first read in production and fallen back to live FEMA **silently** —
+  while the Vite dev server, which DOES honour Range, kept every test and the headless verifier green.
+  The adaptive reader is the flood archive source module: 206 → ranged reads; 200-with-the-whole-body →
+  keep it and serve every later read from memory, so the archive is fetched exactly once (concurrent
+  cold reads deduped, buffer released by `forgetArchive`). `public/_headers` gives `/flood/*` — and the
+  manifest, the same policy, so a refreshed vintage can never appear over stale tiles — an hour of hard
+  cache plus a day of stale-while-revalidate. **Do not replace the source with a bare URL.**
+  **(5) `floodTileLayer.js` IS LAZY BY CONSTRUCTION and must stay so** — it pulls `pmtiles` +
   `@mapbox/vector-tile` + `pbf` (its own 38 KB chunk). The Leaflet-free half is `floodTileDecode.js`
   (Leaflet needs a `window`, so anything beside it can only be tested through a browser — the
   `adminBoundaryData.js` split). `floodTileStyle.js` is the palette + the painter's draw order (a
@@ -211,8 +222,9 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   `--no-feature-limit --no-tile-size-limit` are deliberate, because tippecanoe's defaults DROP features
   out of dense tiles and a silently vanishing floodplain is the worst thing this layer could do.
   Guards: the repo-root `test/` suites **floodTiles** (48 — incl. reading the COMMITTED archives back and
-  asserting the 25 MiB Cloudflare Pages per-file cap) and **floodTileRender** (22, driven off the real
-  Harris archive), plus the ui-audit harness **verify-flood-tiles** (`npm run verify:floodtiles`).
+  asserting the 25 MiB Cloudflare Pages per-file cap), **floodTileRender** (22, driven off the real
+  Harris archive) and **floodArchiveSource** (9 — both measured host behaviours required to decode the
+  same tile feature for feature), plus the ui-audit harness **verify-flood-tiles** (`npm run verify:floodtiles`).
   ⚠ That harness proves tiles PAINT and proves the fallback ENGAGES; it can never prove the live FEMA
   layer paints, because every `hazards.fema.gov` request from Chromium in this sandbox is
   `ERR_CONNECTION_RESET` — it detects that and says so rather than reporting the egress policy as a bug.
