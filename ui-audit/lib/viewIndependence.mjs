@@ -195,10 +195,22 @@ export function guardVerdict(panSites, registry) {
     const key = `${s.file}:${s.name}`;
     if (!wanted.has(key)) continue;
     seen.add(key);
-    if (s.calls > 1) {
+    /* `max` defaults to 1 and is the number of DISTINCT QUESTIONS the computation is asked per
+     * frame — for a component `useMemo` that is always one. A shared pure-library leaf can be
+     * asked more: `layoutLabelsSolve` is called once for the measurement chips and once for the
+     * element labels, so a perfectly memoised pass still solves twice per gesture and "≤ 1" would
+     * assert something false (B217539).
+     *
+     * ⛔ THIS IS NOT A TOLERANCE DIAL, and it must never be raised to silence a regression. It is
+     * a structural count, and it is PINNED TO THE SOURCE: `test/labelLayoutMemo.test.js` asserts
+     * SitePlanner has exactly two `layoutLabels(` call sites, so adding a third turns CI red and
+     * forces a deliberate decision here rather than a quiet bump. The property being asserted is
+     * still "once per distinct question", which is the whole rule. */
+    const limit = wanted.get(key).max ?? 1;
+    if (s.calls > limit) {
       failures.push({
-        key, calls: s.calls, ms: s.ms, verdict: s.verdict,
-        why: `${wanted.get(key).why} — ran ${s.calls}× during a pure pan (must be ≤ 1)`,
+        key, calls: s.calls, ms: s.ms, verdict: s.verdict, max: limit,
+        why: `${wanted.get(key).why} — ran ${s.calls}× during a pure pan (must be ≤ ${limit})`,
       });
     }
   }

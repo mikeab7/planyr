@@ -786,6 +786,25 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   headers and the parcel badge, where it was actually load-bearing. Read that module's header before
   "restoring" the old `footprint … ac · … sf` form. The pond INSPECTOR is untouched and keeps its full
   Water area / Berm ring / Land take split.
+  **⛔ B217539 — `layoutLabels` IS A MEMO WRAPPER; `layoutLabelsSolve` IS THE PASS. Read this before
+  adding a call site or "tidying" the indirection away.** The greedy COLLISION sweep ran from the render
+  body and re-derived the same placements every frame — measured at **370 executions on one pure pan**,
+  for two distinct answers. Every input is a screen box baked at the pan ANCHOR (B1440), so a pan cannot
+  change one of them. `layoutLabels` now keys a VALUE SIGNATURE and returns the SAME Map on a hit
+  (**370 → 2 solves**, the label pass 36.3 → 9.8 ms per gesture, output byte-for-byte identical).
+  Three things not to undo: **(a)** the memo lives in the LIBRARY, not in two `useMemo`s — a component
+  memo cannot work here (`labelCands` and the obstacle arrays are fresh arrays holding identical values
+  every render, so `Object.is` says "changed" 100% of the time — the B221763 trap), and a third caller
+  would otherwise reintroduce the defect silently; **(b)** `ring` is keyed by IDENTITY, never contents —
+  hashing thousands of vertices per frame costs more than the scan it saves, and the planner replaces
+  `points` wholesale on edit so an edited pond cannot be served its old placement; **(c)** the returned
+  Map is SHARED — read-only, like every memo in this tree. **Not fixed here, and not claimed:**
+  `inlineLines` (2,590×) and `pondLabelText.pondAreaLabelLine` (372×) are reached from the label-CANDIDATE
+  construction in the render body (`SitePlanner.jsx:13878`), a different path. Guards: the repo-root
+  `test/` suite **labelLayoutMemo** (counter + memoised-equals-unmemoised over the owner's real rings,
+  mutation-proven both ways) and the ui-audit gate **verify-view-independent** (registry entry
+  `layoutLabelsSolve`, `max: 2` = the two call sites, pinned to a source assertion). No visual test can
+  see this class — the picture is identical when broken.
   **NEW-2/B221761 — `interiorFitter(ring).spots(w, h, want)` IS MEMOISED, and the reason is worth knowing
   before you touch it.** The fit question is asked in FEET (`layoutLabels` divides the screen size by `ppf`
   first) and a pan is a pure translation at constant scale (B1440), so during a drag the ring, the ppf, the
