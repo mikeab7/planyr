@@ -65,6 +65,10 @@ const RULE_KEY_ALIAS = {
   chambers: "chambers", chamberscounty: "chambers",
   waller: "waller", wallercounty: "waller",
   missouricity: "fortbend", magnolia: "montgomery",
+  // NEW-1c — Baytown maps to its OWN record, not to Harris County's. Its ordinance is a city
+  // ordinance and may differ from the county's; aliasing it to `harris` would have hidden the very
+  // question the owner asked to have checked.
+  baytown: "baytown", cityofbaytown: "baytown",
 };
 export const ruleKeyFor = (k) => {
   const s = String(k || "").toLowerCase().replace(/\s+/g, "");
@@ -217,6 +221,41 @@ export function assessAdministrator({ signals = {}, rules = {}, ffeFt = null, re
    * So "still loading" is unresolved, and it says so in its own words. */
   const pending = !!signals.jurisdictionPending;
   const unresolved = unresolvedRoles.length > 0 || pending;
+  /* ⛔ NEW-1a — JURISDICTION CAN VARY *WITHIN* A SITE, AND EVERYTHING BELOW ASSUMES IT CANNOT.
+   *
+   * Every number this module produces is one number for one site. That held while a site had one
+   * jurisdiction. It does not hold at Goose Creek: 6 of its 14 tested lots are inside the City of
+   * Baytown's limits and the other 8 are in Baytown's ETJ, which means the CITY's floodplain
+   * ordinance governs part of the site and the COUNTY's governs the rest. A single finished-floor
+   * figure is then wrong for one of those groups, and printing it as settled is the same class of
+   * error as the label that started this: a real spatial relationship collapsed into one word.
+   *
+   * This does NOT try to compute per-parcel elevations — the yield engine is site-wide from the
+   * ground up and that is a much larger change (owned by the follow-on item). What it does is
+   * refuse to present one number as settled, and NAME the split so the reader knows a second rule
+   * is in play and which lots it lands on. Refusing honestly is available now; the per-parcel
+   * ledger is not, and pretending otherwise is what this whole family of bugs is made of. */
+  const split = signals.jurisdictionSplit && signals.jurisdictionSplit.city ? signals.jurisdictionSplit : null;
+  /* ⛔ NEW-1c — A CANDIDATE WE HAVE NO RULE FOR IS A HOLE IN THE COMPARISON, AND IT WAS SILENT.
+   *
+   * `administratorCandidates` has always stamped `ruleModeled` on every candidate, with a comment
+   * saying an unmodelled one "is flagged, never dropped and never allowed to govern". The flag was
+   * real; **nothing anywhere read it**. So a city that genuinely administers the floodplain but has
+   * no transcribed rule fell out of `resolveAdministrator`'s `scored.filter(c => c.ffe)` and the
+   * next authority won, presented as settled. That is the same failure as a missing ETJ: an
+   * absence of DATA rendered as an absence of OBLIGATION.
+   *
+   * It is not hypothetical and it is not only Baytown — `montgomery` and `chambers` carry
+   * `ffeRule: null` too, so a Montgomery County site has been taking its floors from whatever else
+   * happened to be in the candidate list.
+   *
+   * An `edge`-kind candidate is excluded deliberately: an edge-only sliver is explicitly NOT
+   * expected to govern (B793/B209506), so demanding its ordinance would fire a warning on almost
+   * every site and train the reader to ignore it. Only a PRIMARY or ETJ candidate — one that
+   * plausibly governs — counts. */
+  const unmodelled = (candidates || [])
+    .filter((c) => c && (c.kind === "primary" || c.kind === "etj") && !c.ffe)
+    .map((c) => ({ key: c.key, label: c.label, kind: c.kind, source: c.rule ? c.rule.source : null }));
   return {
     ...resolved,
     impliedFlood: impliedFloodElevation({ ffeFt, ffe: gov ? gov.ffe : null }),
@@ -230,7 +269,23 @@ export function assessAdministrator({ signals = {}, rules = {}, ffeFt = null, re
     unresolved,
     unresolvedRoles,
     pending,
-    settled: !unresolved && !!gov,
+    // NEW-1a — a split site is not UNRESOLVED (we know the answer) and not SETTLED (there are two
+    // answers). It gets its own state so a caller cannot accidentally treat it as either.
+    split: !!split,
+    splitDetail: split,
+    // NEW-1c — authorities that plausibly govern here and whose rule we have not transcribed.
+    unmodelledCandidates: unmodelled,
+    unmodelledNote: unmodelled.length
+      ? `No floodplain rule is modeled for ${unmodelled.map((u) => u.label).join(" and ")}, which ${unmodelled.length === 1 ? "administers" : "administer"} part or all of this site. ` +
+        `The elevation shown comes from the authorities we DO have, so it is a floor, not the answer — transcribe the missing ordinance before setting pads.`
+      : null,
+    splitNote: split
+      ? `This site spans TWO floodplain authorities: ${split.inCity} of ${split.tested} drawn lots are inside the City of ${split.city}, whose ordinance governs those lots, and the rest are not. ` +
+        `One site-wide finished-floor elevation cannot be correct for both — confirm which parcels each rule applies to before setting pad elevations.`
+      : null,
+    // NEW-1c — an untranscribed authority makes the candidate set incomplete exactly as a failed
+    // lookup does, so it blocks `settled` for the same reason.
+    settled: !unresolved && !split && !unmodelled.length && !!gov,
     unresolvedNote: pending && !unresolvedRoles.length
       ? "Jurisdiction still being looked up. Until the city and ETJ answer, the candidate set is incomplete — " +
         `${ROLE_STAKES.etj}. The FFE rule is NOT settled yet.`

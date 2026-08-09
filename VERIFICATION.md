@@ -144,6 +144,37 @@ a `live-GIS` blocker, not a to-do that was skipped.
    vs. flag-off, on the same plan. That is the number Phase 1 exists to produce and the only one still
    missing.
 
+### V88800 — B290240: does an unincorporated COLORADO site now say Colorado's zoning law instead of Texas's? `Blocker: live-GIS`
+
+The sentence itself is pure and unit-tested in both directions; what cannot be driven here is the card, because it only renders once `identifyJurisdiction` returns `unincorporated`, and that needs external GIS hosts this environment blocks (the whole `gis.colorado.gov` space answers 403 at the sandbox egress proxy — a sandbox limitation, not an endpoint failure).
+- **Where.** planyr.io, a site on **unincorporated Weld or Larimer County ground** (the owner's Johnstown site is the case this was found on). Site **Analysis** panel → the **Zoning / entitlement** card.
+- **PASS** = *"Unincorporated — Colorado counties DO zone (C.R.S. 30-28-111), so this land is zoned by the county, not unzoned. Confirm the district and whether your use is by right, a rezone, or a Use by Special Review."* **FAIL** = any sentence containing the word "Texas".
+- **Also confirm the caveat under it** no longer names City of Houston on a Colorado card.
+- **The Texas control, on the same run:** an unincorporated Harris / Waller / Chambers site must still read *"Unincorporated — Texas counties have no zoning; subdivision platting still applies."* — byte-identical.
+- **What was proven HERE:** `test/coloradoAudit.test.js` (5 assertions, mutation-proven — restore the Texas-everywhere sentence and 3 go red), plus the Texas golden master green and 9,646/9,646 unit tests green.
+- The **owner never runs this** — it is a Claude-cohort check. ⏳ **PENDING**
+
+### V88801 — B290243: does the C.R.S. 37-92-602(8) line stop claiming a pass on a Colorado plan with no pond? `Blocker: live-GIS`
+
+The gate is pure and mutation-proven; what cannot be driven here is the LINE, because it renders inside Yield → Stormwater, which only mounts once the drainage/flood context resolves. Driven logged-out on a seeded Weld plan, the Yield panel gets as far as `Flood data: not checked` and the group never opens — so the line was never on screen either way.
+- **Where.** planyr.io, a **Colorado** plan (Weld / Larimer / Denver). Yield → **Stormwater**. A release rate must be set (Standards → allowable release, or give a pond an outlet) or the statute is honestly "not yet checkable" for a different reason and the test proves nothing.
+- **Three states to confirm, in this order:**
+  1. **Release rate set, NO pond drawn.** PASS = *"Colorado's 72-hour drawdown statute (C.R.S. 37-92-602(8)) needs the allowed release rate"* — the `unknown` line. **FAIL** = *"Inside Colorado's 72/120-hour drawdown limits … screening, not compliance"*, which is the defect: a green water-rights verdict on a facility that does not exist.
+  2. **A real pond, comfortably inside the limits.** PASS = the *"Inside Colorado's 72/120-hour drawdown limits"* line — the gate must not have gone inert. This is the half that matters most: a precondition that silences a working gate is worse than the bug.
+  3. **A real pond, well past the limits** (a large volume against a small release). PASS = the warn line *"Fails Colorado's 72-hour drawdown statute"*.
+- **The Texas control:** on any Texas plan the statute must render NOTHING at all (`applies:false`) and the existing informational drawdown readout must be unchanged.
+- **What was proven HERE:** `test/coloradoAudit.test.js` (6 assertions across all five input states, mutation-proven — delete the precondition and 2 go red), plus the Texas golden master green.
+- The **owner never runs this** — it is a Claude-cohort check. ⏳ **PENDING**
+
+### V78961 — B280402: the acreage badge no longer takes press 2, on his stub, on the repeat `Blocker: real-data` + `Blocker: auth`
+
+**The cause is DIAGNOSED FROM HIS OWN INSTRUMENT READ and REPRODUCED here, so this is a confirmation, not a hunt.** The parcel badge is a hit target while the cursor RESTS on it (a hover gate, B1327/NEW-4, so it can be dragged); resting is what a cursor does between the two presses of a double-click. It is now identity-transparent — it keeps its drag, but the resolver looks through it.
+- **RE-RUN HIS EXACT TABLE**, planyr.io signed in, **Bain / "Concept - Original"**, 1600×521, every run preconditioned on `grips === 0`, no read between presses, gaps reported: pond control → stub first → **stub repeat** → pond control → stub first → **stub repeat**. **PASS = the stub opens ELEMENT — ROAD every time, including the repeat**, 7 grips, box ≈ `[664,402,15,22]`. FAIL = `parcel:e79379lfxyni`, 28 grips, `[618,342,189,127]`, no panel.
+- **AND READ THE STACK, before each gesture**, which is the assertion that names it either way: at (673,414) with nothing selected it must read **`["el:e79463haroul"]`** in BOTH states now — the parcel must no longer ENTER after resting on the stub.
+- **⛔ ARMING IS NO LONGER FOLKLORE.** Open the plan with **`?planyrDiag=1`** on the URL — it latches for the tab, so switching plans keeps it — or set `sessionStorage['planyr:diag'] = '1'`. **No remount is needed**: the hooks are installed always and read the gate at call time (B280403). `window.__PLANYR_E2E = true` still works.
+- **Also confirm the badge still DRAGS** — this fix is identification-only and must not have cost the affordance B1327 exists for: hover a lot's acreage badge, drag it, and it should move as before.
+- **Already confirmed, do NOT re-test:** the plan is byte-identical across every run; the pond control passes; press gaps are inside `DBLTAP_MS`; the first-gesture fix from #965 is intact.
+- The **owner never runs this** — it is a Claude-cohort check on a signed-in session. ⏳ **PENDING**
 ### V84560 — B270913: does the retention job fire ON ITS OWN, tomorrow, with nobody pressing anything? `Blocker: real-data`
 
 **⛔ THIS CHECK IS THE ENTIRE POINT OF THE ITEM, AND IT CANNOT BE DONE IN A SANDBOX.** Everything else about B270913 is proven: the policy is unit-tested against a real Postgres (21 cases, both directions, both clauses mutation-checked), and it was proven a second time **on the production table** with seeded rows that were cleaned up afterwards. What no test here can show is the one thing that decides whether this works: **that `pg_cron` actually runs the job on schedule.** A retention job that silently never runs is indistinguishable from one that correctly had nothing to delete — and since this policy deletes nothing from today's data, that indistinguishability is the EXPECTED state for months. The whole run-log/status half of the item exists for this one question.
@@ -265,6 +296,78 @@ assumed) and (f) needs a human eye.** Every part that an instrument could settle
 
 *(minted V73584; references **B276576**, overlaps **V477**; `Cadence: once`. Implemented + fully
 sandbox-verified 2026-08-08 — the residue above is the deployed edge only.)*
+### V84864 — B286304/B286305: Baytown's own layers, the aggregator audit, and an authority with no rule
+
+**Status: ✅ PASSED (2026-08-09) for everything reachable — 27 of 28 sites correct, 0 mislabelled, 0 unresolved.** GREEN RIVER has no active parcel geometry.
+
+**The owner's correction, both clauses.** *"City of Baytown may very well be 2' above the 500, and the Baytown etj is on their gis."* The second is confirmed and shipped. The first **could not be verified and is deliberately NOT encoded** — see the blocker below.
+
+**Baytown's own GIS, measured per lot on his site `sms69x8rb2qk`:** every tested Goose Creek lot is inside Baytown's ETJ; 6 of 14 are also inside its city limits. **The H-GAC aggregator returns nothing at all of them.** BT_ETJ (layer 11) and BT_City_Limit (layer 12) are both registry rows now, with fixtures at real lot centroids — including the ETJ-ONLY lot, the exact membership H-GAC misses.
+
+**Portfolio sweep, all 28: 27 correct · 0 mislabelled · 0 unresolved.** Two sites changed:
+
+| Site | Before | After |
+|---|---|---|
+| Goose Creek | `Part in City of Baytown (6 of 14 lots) / rest in its ETJ · Harris County` | unchanged — **now corroborated by Baytown's own layer, lot for lot** |
+| Grand Port | `Unincorporated · Chambers County` | `Unincorporated / City of Baytown · ETJ · Chambers County` — a governing ETJ it never had |
+| Bain | `Unincorporated / City of Houston · ETJ / City of Katy · edge only · Fort Bend County` | unchanged — **proven not regressed** |
+
+**The aggregator audit (the real ask).** Of the **10 cities in the owner's footprint, 6 are carried by a routed ETJ source and 4 are NOT: Brookshire, Humble, Katy, Waller.** Three publish their own layers; the URLs are in the audit output and on B286306. Katy was tested — it returns **0 at every probe point on both Tsakiris and Bain**, so wiring it changes no answer, only upgrades an honest "not published" to a verified "no ETJ".
+
+**An authority with no rule now blocks a settled FFE.** `administratorCandidates` had always stamped `ruleModeled` with a comment promising an unmodelled candidate "is flagged, never dropped" — **nothing in the tree ever read that flag.** Measured on Goose Creek's real signals:
+
+| | before | after |
+|---|---|---|
+| candidates | Harris County only | Harris County · **Baytown** (limits) · **Baytown (ETJ)** |
+| `settled` | **true** | **false** |
+| on screen | "Rule applied: Harris County" | "No rule on file for City of Baytown…" |
+
+An EDGE-only candidate is excluded deliberately, and **Bain is asserted to stay settled** — the fix must not turn every touching city into a governing one.
+
+**⛔ HARD BLOCKER, stated rather than worked around: Baytown's ordinance is unreachable from here.** `library.municode.com`, `api.municode.com` and `baytown.org` all return **HTTP 403 — host not in allowlist** (verified 2026-08-09). Web search works but returns SUMMARIES, and a summary is not an ordinance — every other rule record in this repo cites a section it was read from. `rules.baytown.ffeRule` is therefore `null`, `verified: false`, source `NOT TRANSCRIBED`, **with a test asserting the nulls so nobody fills them in from recollection.** The unblock is an egress allowlist entry for Municode, on `OWNER-TODO.md`.
+
+**⚠ THE FFE ANSWER, which corrects the premise.** The expectation was that Baytown (~500-yr + 2 ft) would be materially STRICTER than the basis in use. **Harris County's modelled rule IS 0.2% (500-yr) WSE + 2 ft**, verified and cited at §4.07(b)(1) — the same datum and the same freeboard. **If the recollection is right, the required floor does not move and the pads move ZERO feet.** The exposure exists only if Baytown's ordinance differs from that, which is precisely why this ships as a refusal-to-settle and not an alarm.
+
+**Texas golden master:** regenerated after classifying the diff exhaustively — **0 CHANGED, 0 REMOVED, 3 ADDED** (all null-valued Baytown keys); 23 insertions, 0 deletions.
+
+**⚠ A NEW CONFLICT FOUND AND RAISED, NOT SILENTLY RESOLVED (B286308):** at **Grand Port** the two city-limits publishers disagree on **all 4 lots** — Baytown's own layer says inside the city, TxGIO says no city. At Goose Creek they agree perfectly. If Baytown is right, Grand Port is an INCORPORATED site. Not guessed at; it needs an authoritative record.
+
+**Still pending (`Blocker: live-GIS` · `auth` · `real-data`):** the on-screen rendering, unchanged and unchanged in reason — the sandbox blocks the county parcel service, so no georeferenced parcel can be placed logged-out.
+
+### V79264 — B280704/B280705/B280706: the Goose Creek straddle, the ETJ coverage hole, and the split-jurisdiction refusal
+
+**Status: ✅ PASSED (2026-08-09) for everything this sandbox can reach — 27 of 28 sites.** GREEN RIVER has no active parcel geometry, so the app shows no badge and there is nothing to check.
+
+**What the owner corrected, and why both earlier readings were wrong the same way.** He wrote: *"For goose creek part of the site is in city limits and part is in ETJ, so it should clarify."* The original filing tested the site ORIGIN — one point, which cannot see a straddle. My B276752 sweep tested one probe per parcel but had **no ETJ source that carries Baytown**, so it saw the city-limits half and called the rest "unincorporated". Both were single-source readings of a two-sided fact.
+
+**Ground truth, measured live per parcel against the City of Baytown's own layers (site `sms69x8rb2qk`, 14 tested lots):**
+
+| | lots |
+|---|---|
+| inside Baytown CITY LIMITS (and its ETJ) | 6 |
+| inside Baytown ETJ only | 8 |
+| unincorporated, no ETJ | **0** |
+
+**Badge, before → after:**
+
+| Site | Before (B276752, shipped 2026-08-08) | After |
+|---|---|---|
+| Goose Creek | `Part in City of Baytown / part unincorporated · Harris County` | `Part in City of Baytown (6 of 14 lots) / rest in its ETJ · Harris County` ⚑ |
+| Tsakiris | `Part in City of Katy (2 of 9 lots) / part unincorporated · Waller County` | `Part in City of Katy (2 of 9 lots) / rest outside it · no ETJ published for City of Katy · Waller County` ⚑ |
+| Bain | `Unincorporated / City of Houston · ETJ / City of Katy · edge only · Fort Bend County` | unchanged — **proven not regressed** |
+
+**The three defects this pass closed, each verified:**
+1. **The remainder was hardcoded, not measured.** "part unincorporated" was a literal. It is now derived from what was found, and at Goose Creek that is Baytown's own ETJ.
+2. **The share was missing.** "part in" cannot distinguish one lot of fourteen from thirteen of fourteen; the count now comes from the same probe as the split.
+3. **The ETJ dedupe hid the ETJ on split sites.** Dropping an ETJ whose city already holds the site is right when it holds ALL of it and wrong when it holds part — the case that needs it most.
+
+**The coverage hole, measured (B280705):** the H-GAC "regional" ETJ layer carries **34 cities**; Baytown, Katy, Humble, La Porte, Deer Park, Friendswood, League City, Galveston and Tomball are not among them. Its registry row claimed "all cities". A missing city's ETJ therefore read identically to no ETJ. Baytown's own layer is now a registry row; every other gap now SAYS it is a gap.
+
+**Whole-portfolio re-sweep, all 28 sites: 27 correct · 0 mislabelled · 0 unresolved.** Seven rows first came back `ETJ · couldn't check` — the H-GAC org's documented 429 quota, exhausted by this session's own recording run, not a code fault; the service answered normally minutes later and all seven passed on re-run. That is exactly the flakiness B209507's honest-unknown machinery exists for, and it behaved correctly: it said "couldn't check" rather than "no ETJ".
+
+**Still pending (`Blocker: live-GIS` · `auth` · `real-data`) — unchanged from V73760 and attempted again:**
+- The on-screen rendering of the pill (the ⚑ and the new split wording) and the Yield panel's **"Two floodplain rules on this site"** line, on a signed-in saved project. The sandbox blocks the county PARCEL service, so no georeferenced parcel can be placed logged-out and the pill cannot be made to appear; the Cloudflare preview host is also unreachable from here. The logic behind all of it is unit-covered (`test/jurisdictionShapes.test.js`, 11 cases) and verified against live data — this is a rendering confirmation, not a correctness one.
+
 ### V73760 — B276752/B276753/B276755: the WHOLE portfolio, driven against the live agency services
 
 **Status: ✅ PASSED (2026-08-08) for every site the sandbox can reach — 27 of 28. One site (GREEN RIVER) has no active parcel geometry, so the app shows no badge and there is nothing to check.**

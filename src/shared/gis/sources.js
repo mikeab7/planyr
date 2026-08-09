@@ -495,6 +495,61 @@ export const GIS_SOURCES = {
     },
     lastVerified: "2026-08-05",
     // Katy / west Houston — inside the H-GAC ETJ mosaic.
+    /* ⛔ NEW-1a — THIS LAYER DOES NOT COVER "ALL CITIES", AND THE CLAIM THAT IT DID IS WHY THE
+     * OWNER'S BAYTOWN ETJ WAS INVISIBLE. Queried live 2026-08-09 with `returnDistinctValues`: it
+     * carries exactly **34** cities. Baytown, Katy, Humble, La Porte, Deer Park, Friendswood,
+     * League City, Galveston and Tomball are all absent. A site in a missing city's ETJ therefore
+     * got the SAME empty answer as a site in no ETJ at all — the absence-vs-failure collapse
+     * B209507 closed for a failed request, arriving instead through a request that succeeded and
+     * had nothing to say. `etjRoster` is the honest bound, and `jurisdiction.js` reports a city
+     * outside it as "ETJ not mapped", never as "no ETJ". Re-check with
+     * `node ui-audit/audit-etj-coverage.mjs` — do not hand-edit this list. */
+    roster: [
+      "ARCOLA", "BEASLEY", "CLEVELAND", "CONROE", "CUT AND SHOOT", "EAST BERNARD", "FAIRCHILDS",
+      "FULSHEAR", "HOUSTON", "HUNTSVILLE", "KENDLETON", "MAGNOLIA", "MISSOURI CITY", "MONTGOMERY",
+      "NEEDVILLE", "OAK RIDGE", "ORCHARD", "PASADENA", "PEARLAND", "PLEAK", "RICHMOND",
+      "ROMAN FOREST", "ROSENBERG", "SHENANDOAH", "SIMONTON", "SPLENDORA", "STAFFORD", "STAGECOACH",
+      "SUGAR LAND", "TEXAS CITY", "THOMPSONS", "WESTON LAKES", "WILLIS", "WOODLOCH",
+    ],
+    rosterCheckedAt: "2026-08-09",
+  },
+  /* NEW-1a — the City of Baytown publishes its OWN city-limits and ETJ layers, and it has to be a
+   * registry row because H-GAC's regional mosaic omits it. The owner's Goose Creek site is the
+   * repro: 6 of its 14 tested parcels are inside Baytown's city limits and the other 8 are inside
+   * Baytown's ETJ — not one is plain unincorporated — and the app could see none of it.
+   * Verified live 2026-08-09 against every parcel of site `sms69x8rb2qk`. */
+  /* NEW-1b — Baytown's own CITY LIMITS layer, registered beside its ETJ. Unlike the ETJ this is not
+   * filling a hole: TxGIO's statewide city-limits layer DOES carry Baytown and answered correctly on
+   * every Goose Creek lot. It is registered as a cross-check and a fresher local source — a city's
+   * own boundary is published by the annexing authority itself — and deliberately NOT wired into the
+   * `city` identify, because swapping the containment source on the strength of a second opinion
+   * nobody has reconciled would risk the very answers this work just corrected. Wiring it is a
+   * separate, evidence-first decision. */
+  city_baytown: {
+    key: "city_baytown",
+    label: "City limits — City of Baytown",
+    provider: "City of Baytown GIS",
+    serviceUrl: "https://services8.arcgis.com/2iaYWEMdQLPv0ZUw/arcgis/rest/services/City_of_Baytown_Citizen_Map_WFL1/FeatureServer/12",
+    layerId: 12,
+    geometryType: "polygon",
+    fields: { name: null },
+    coverage: "city",
+    tier: "production",
+    availability: "live",
+    lastVerified: "2026-08-09",
+  },
+  etj_baytown: {
+    key: "etj_baytown",
+    label: "ETJ — City of Baytown",
+    provider: "City of Baytown GIS",
+    serviceUrl: "https://services8.arcgis.com/2iaYWEMdQLPv0ZUw/arcgis/rest/services/City_of_Baytown_Citizen_Map_WFL1/FeatureServer/11",
+    layerId: 11,
+    geometryType: "polygon",
+    fields: { name: null },
+    coverage: "city",
+    tier: "production",
+    availability: "live",
+    lastVerified: "2026-08-09",
   },
   etj_austin: {
     key: "etj_austin",
@@ -1403,7 +1458,7 @@ export const SOURCE_STATE_SCOPE = {
   // (the RRC, the PUC's CCN construct, TCEQ, TxDOT, TEA, TxGIO) or a Texas-region study.
   oilgas: ["TX"], pipelines: ["TX"], ccnWater: ["TX"], ccnSewer: ["TX"], lpst: ["TX"],
   growthFaults: ["TX"], aadt: ["TX"], county: ["TX"], city: ["TX"], road: ["TX"], isd: ["TX"],
-  etj_hgac: ["TX"], etj_austin: ["TX"], etj_fortworth: ["TX"], mud: ["TX"], bkdd: ["TX"],
+  etj_hgac: ["TX"], etj_austin: ["TX"], etj_fortworth: ["TX"], etj_baytown: ["TX"], city_baytown: ["TX"], mud: ["TX"], bkdd: ["TX"],
   hcfcdChannels: ["TX"], hcfcdWatersheds: ["TX"], hcfcdMaapnext: ["TX"],
   fbcddWse02: ["TX"], fbcddWse100: ["TX"],
   bkddStreams: ["TX"], bkddAllStreams: ["TX"], bkddEasements: ["TX"], bkddEasements107: ["TX"],
@@ -1546,6 +1601,11 @@ export const SOURCE_FIXTURE_REACH = {
   etj_hgac: ["regional", "The H-GAC 13-county region; probing it in Dallas would assert a guaranteed zero."],
   etj_austin: ["regional", "One city's 2-mile ETJ ring."],
   etj_fortworth: ["regional", "One city's ETJ."],
+  // NEW-1a — Baytown's own ETJ ring, added because H-GAC's regional mosaic omits Baytown. It is one
+  // city's ETJ, a few km across; two points inside it (one also inside the city limits, one not) is
+  // the most separation this layer HAS, exactly as with the Austin and Fort Worth rows.
+  etj_baytown: ["local", "One city's ETJ ring, a few km across — there is no wider extent to probe."],
+  city_baytown: ["local", "One city's incorporated limits — a few km across, with no wider extent to probe."],
   // The BKDD tier — ONE drainage district, roughly 20 km across. `local` is the honest class:
   // two separated points inside the district is the most separation that exists to buy.
   bkdd: ["local", "The Brookshire–Katy Drainage District is a single district ~20 km across."],

@@ -27,25 +27,31 @@ import { representativeRing, ringCentroid } from "../src/workspaces/site-planner
  *   unincorporated INSIDE an ETJ             → Bain          (Houston ETJ, Katy on the edge)
  *   unincorporated, city within 1 km         → Goose Creek   (Baytown)
  *
- * ⚠ ONE CORRECTION TO THE BRIEF, recorded here because the fixture must state the ground and not
- * the expectation. Goose Creek was filed as "unincorporated, NO ETJ, city within 1 km — the point
- * is NOT in Baytown city limits", and at the site ORIGIN that is exactly right. Across the DRAWN
- * SITE it is not: six of the sixteen active parcels sit inside Baytown's limits. The origin is one
- * point and the site is sixteen, which is the same confusion that produced the bug. The badge
- * therefore reads "Part in City of Baytown / part unincorporated" — Baytown is never presented as
- * the site's jurisdiction, which is the property the owner asked for, and the split is stated
- * rather than rounded to either convenient answer.
- * Responses recorded live 2026-08-08 by `ui-audit/record-jurisdiction-shapes.mjs`. */
+ * ⚠ GOOSE CREEK WAS RE-STATED 2026-08-09 AFTER THE OWNER CORRECTED IT, and the correction is worth
+ * reading before the case below. It was filed — and verified by me — as "unincorporated, NO ETJ,
+ * city within 1 km". His words: "For goose creek part of the site is in city limits and part is in
+ * ETJ, so it should clarify." He is right, and BOTH earlier readings were wrong for the same
+ * reason: they reasoned from ONE point (the site origin), which cannot see a straddle by
+ * construction. Per parcel, live: 6 of 14 tested lots inside Baytown's city limits, the other 8
+ * inside Baytown's ETJ, none unincorporated. A fifth shape (Kennedy Greens) was added separately
+ * because the four named could not fail on the ETJ-dedupe defect.
+ * Responses recorded live by `ui-audit/record-jurisdiction-shapes.mjs` (2026-08-08, Baytown ETJ
+ * added 2026-08-09). */
 
 const FIX = JSON.parse(fs.readFileSync(path.join(process.cwd(), "test/fixtures/jurisdictionShapes.json"), "utf8"));
 const shape = (name) => FIX.shapes.find((s) => s.site === name);
 
+/* NEW-1a — TWO ETJ sources are routed in the Baytown area, because H-GAC's regional mosaic does not
+ * carry Baytown. They are recorded separately and replayed separately; the Baytown layer holds a
+ * single jurisdiction and therefore has no name column, so its recording is a bare presence marker
+ * and the constant comes from the source row, exactly as the real connector does it. */
 const ROLE_OF_URL = (url) =>
   /Texas_County_Boundaries/.test(url) ? "county"
   : /Texas_City_Boundaries/.test(url) ? "city"
+  : /City_of_Baytown_Citizen_Map/.test(url) ? "etj_baytown"
   : /ETJ/i.test(url) ? "etj"
   : null;
-const FIELD = { county: "CNTY_NM", city: "city_name", etj: "CITY" };
+const FIELD = { county: "CNTY_NM", city: "city_name", etj: "CITY", etj_baytown: null };
 
 /* Replay the recorded agency answers. The request is decoded from the URL the REAL query builder
  * produced, so a change to how geometry is encoded shows up here as a decode failure rather than
@@ -66,6 +72,8 @@ function replay(rec, { fail = [] } = {}) {
     } else if (type === "esriGeometryPoint") {
       names = a.points[nearestRecorded(rec, [g.x, g.y])];
     } else throw new Error("unexpected geometryType " + type);
+    // A presence-only layer answers with featureless rows; `normalizeFeature` supplies `nameConst`.
+    if (!FIELD[role]) return { features: (names || []).map(() => ({ attributes: {} })) };
     return { features: (names || []).map((n) => ({ attributes: { [FIELD[role]]: n } })) };
   };
 }
@@ -142,15 +150,41 @@ describe("NEW-3 — a regression fixture per jurisdiction SHAPE, from the owner'
     expect(b.jur.indexOf("Unincorporated")).toBeLessThan(b.jur.indexOf("Katy"));
   });
 
-  it("unincorporated, city within 1 km — Goose Creek never presents Baytown as the site's jurisdiction", async () => {
+  /* ⛔ CORRECTED 2026-08-09 BY THE OWNER, and the correction is the more important finding.
+   *
+   * Filed as "unincorporated, no ETJ, city within 1 km". His words: "For goose creek part of the
+   * site is in city limits and part is in ETJ, so it should clarify." Confirmed live, per parcel:
+   * **6 of the 14 tested lots are inside Baytown's city limits and the other 8 are inside Baytown's
+   * ETJ. Not one is plain unincorporated.** Both the original filing and my first pass reasoned
+   * from a single origin point, which cannot see a straddle by construction.
+   *
+   * Two separate defects were hiding behind that one label. The site is SPLIT — so neither "City of
+   * Baytown" nor "Unincorporated" is true of the whole of it — and the H-GAC ETJ layer the app asks
+   * does not carry Baytown at all, so the ETJ half was invisible no matter how the split was
+   * resolved. This case pins both. */
+  it("SPLIT city limits + ETJ — Goose Creek states which part, and how much", async () => {
     const { b, j } = await badgeFor("Goose Creek");
-    expect(b.text).toBe("Part in City of Baytown / part unincorporated · Harris County");
+    expect(b.text).toBe("Part in City of Baytown (6 of 14 lots) / rest in its ETJ · Harris County");
     expect(j.cityContainment).toBe("partial");
-    // The owner's report was that this site read a flat "City of Baytown · Harris County" with NO
-    // qualifier — an unincorporated site presented as incorporated. That exact string must be dead.
+    // The share is the whole point of the correction: "part in" alone is not actionable.
+    expect(b.cityCoverage.inCity).toBe(6);
+    expect(b.cityCoverage.tested).toBe(14);
+    // The remainder is Baytown's ETJ, NOT unincorporated — asserting the exact wrong answer the
+    // first pass produced, so it cannot come back.
+    expect(b.text).not.toContain("part unincorporated");
+    // And the original report's string stays dead.
     expect(b.text).not.toBe("City of Baytown · Harris County");
     expect(b.jur.startsWith("City of Baytown")).toBe(false);
     expect(b.straddle).toBe(true);
+  });
+
+  it("Baytown's ETJ is only visible because it has its own source — H-GAC does not carry it", async () => {
+    const rec = shape("Goose Creek");
+    // The regression this guards: H-GAC answers, successfully, with nothing.
+    expect(rec.answers.etj.ring).toEqual([]);
+    expect(rec.answers.etj.points.every((p) => p.length === 0)).toBe(true);
+    // Baytown's own layer holds every tested lot.
+    expect(rec.answers.etj_baytown.points.every((p) => p.length > 0)).toBe(true);
   });
 
   /* A FIFTH shape the brief did not name. The portfolio sweep found a defect that none of the four

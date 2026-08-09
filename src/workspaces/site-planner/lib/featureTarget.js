@@ -194,6 +194,21 @@ export function resolveDoubleClickTarget(entries, opts = {}) {
 export const FEATURE_ATTR = "data-feature";
 export const HANDLE_ATTR = "data-handle-layer";
 export const EL_DIM_ATTR = "data-el-dim";
+/* ⛔ NEW-1 (B280402) — CHROME THAT LIVES OUTSIDE THE HANDLE LAYER BUT IS STILL A MANIPULATION
+ * AFFORDANCE. `data-handle-layer` marks the ONE always-on-top group; this marks the strays that
+ * cannot live in it and are nonetheless grips, not features. They are IDENTITY-TRANSPARENT by the
+ * same rule and for the same reason: a grip is chrome belonging to something, never the answer to
+ * "which feature was double-clicked".
+ *
+ * THE CASE: the parcel ACREAGE BADGE. B1327 made it a hit target only while HOVERED so it could be
+ * dragged, and a hover latch is armed by the cursor merely RESTING on it — which is what a cursor
+ * does between the two presses of a double-click. Measured on the owner's Bain plan and reproduced
+ * here: at one point, with nothing selected, the stack reads `["el:<stub>"]` after touching another
+ * feature and `["parcel:<lot>", "el:<stub>"]` after touching the stub. **The parcel does not move
+ * above the element — IT ENTERS**, and the element is still there, second, unchanged. So the second
+ * double-click resolved to the LOT, which opens the Parcel panel and therefore took Properties away.
+ * (His first report called it "a different, larger road"; the instrument proved it a parcel.) */
+export const CHROME_ATTR = "data-chrome";
 export function stackEntries(nodes) {
   const out = [];
   for (const n of nodes || []) {
@@ -201,7 +216,7 @@ export function stackEntries(nodes) {
     const fg = n.closest(`[${FEATURE_ATTR}]`);
     out.push({
       feature: fg ? fg.getAttribute(FEATURE_ATTR) : null,
-      handle: !!n.closest(`[${HANDLE_ATTR}]`),
+      handle: !!n.closest(`[${HANDLE_ATTR}], [${CHROME_ATTR}]`),
       dim: !!n.closest(`[${EL_DIM_ATTR}]`),
     });
   }

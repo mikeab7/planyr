@@ -19,6 +19,21 @@ into every consumer. Root rules in `/CLAUDE.md`; deep detail in `/docs/REFERENCE
   what makes Colorado additive rather than a refactor — the statePlane suite asserts that with `Object.is`. `scaleFactor.js` (NEW-4) reports the grid × elevation combined factor and detects a
   ground-coordinate survey; it deliberately never APPLIES the factor. Read-only screening use
   today; grow additively, not a planner rewrite.
+  **⛔ B290241/B290242 — `statePlane.js`'s FIRST production consumer is `deedAlign.gridConvergenceDeg`,
+  and two things it learned the hard way.** (a) **A CONVERGENCE OR A DISTANCE MUST COME FROM THE
+  SITE'S OWN ZONE** — γ = n·(λ − λ₀) is a function of the cone constant and central meridian, the two
+  things that change when you leave the zone, so asking `index.js` (hardcoded EPSG:2278) for a
+  Colorado bearing answered **−2.885°** where Colorado North answers **+0.378°**: 75 ft of deed drift
+  across a 1,320 ft run, announced in a toast as a confident number. (b) **`slugCounty` STRIPS THE
+  `co_` ROUTING PREFIX** — a plan persists `co_denver`, not `denver`, and without the strip
+  `zoneForCounty` matched nothing and `resolveZone` fell through to the coarse point envelope, which
+  this file's own comment says cannot separate the interleaved Front Range counties (Denver resolved
+  to NORTH). Keep it in step with the Colorado regions module's slug (site-planner `lib/`). `resolveZone` returns an honest **null**
+  outside every modelled zone and callers must refuse rather than rotate — 0 is a real answer here
+  ("on the central meridian"), so it may never double as a sentinel. **Still unconsumed and worth
+  knowing before you cite them as working:** `scaleFactor.js` (B290250) and, outside the deed path,
+  the multi-zone engine — the site-planner's proximity screen still measures every screening distance
+  through the Texas cone, which over-reports Colorado by **1.93%** (B290247).
 - `files/` — `chunkedUpload.js` (any-size chunked Drive upload via /api/uploads/* — pure chunk
   math + the retry/resume loop, B409 rework) + `uploadQueue.js` (the upload-tray queue model).
   `middleTruncate.js` — split a label into head + a PINNED tail, so a list of names that differ only
