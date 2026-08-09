@@ -25,8 +25,15 @@ const rect = (w, h) => [{ x: 0, y: 0 }, { x: w, y: 0 }, { x: w, y: h }, { x: 0, 
 
 describe("NEW-2 — the pointer hot path commits at most once per animation frame", () => {
   it("the cursor readout is scheduled on a frame, never set straight from pointermove", () => {
-    expect(src).toContain('scheduleFrameJob("cursor", () => setCursor(fp));');
+    // NEW-1 (drag gate) — the readout is still scheduled, but the point it reads is now `ptr`, a
+    // stable copy of the raw pointer taken before the click-vs-drag gate REBASES `fp` for an armed
+    // drag. The deferred closure must not see that rebase (it would report the cursor a few feet
+    // off during a drag), so the identifier here is deliberately not `fp`. The PROPERTY the guard
+    // exists for is unchanged and is what is asserted: one coalesced commit per frame, never a
+    // setState straight out of pointermove.
+    expect(src).toMatch(/scheduleFrameJob\("cursor", \(\) => setCursor\((fp|ptr)\)\);/);
     expect(src.includes("\n    setCursor(fp);")).toBe(false); // the old unconditional per-move setState
+    expect(src.includes("\n    setCursor(ptr);")).toBe(false);
   });
 
   it("all three vertex drags share ONE frame job — so a frame commits one geometry update, not three", () => {
