@@ -113,6 +113,15 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V78961 — B280402: the acreage badge no longer takes press 2, on his stub, on the repeat `Blocker: real-data` + `Blocker: auth`
+
+**The cause is DIAGNOSED FROM HIS OWN INSTRUMENT READ and REPRODUCED here, so this is a confirmation, not a hunt.** The parcel badge is a hit target while the cursor RESTS on it (a hover gate, B1327/NEW-4, so it can be dragged); resting is what a cursor does between the two presses of a double-click. It is now identity-transparent — it keeps its drag, but the resolver looks through it.
+- **RE-RUN HIS EXACT TABLE**, planyr.io signed in, **Bain / "Concept - Original"**, 1600×521, every run preconditioned on `grips === 0`, no read between presses, gaps reported: pond control → stub first → **stub repeat** → pond control → stub first → **stub repeat**. **PASS = the stub opens ELEMENT — ROAD every time, including the repeat**, 7 grips, box ≈ `[664,402,15,22]`. FAIL = `parcel:e79379lfxyni`, 28 grips, `[618,342,189,127]`, no panel.
+- **AND READ THE STACK, before each gesture**, which is the assertion that names it either way: at (673,414) with nothing selected it must read **`["el:e79463haroul"]`** in BOTH states now — the parcel must no longer ENTER after resting on the stub.
+- **⛔ ARMING IS NO LONGER FOLKLORE.** Open the plan with **`?planyrDiag=1`** on the URL — it latches for the tab, so switching plans keeps it — or set `sessionStorage['planyr:diag'] = '1'`. **No remount is needed**: the hooks are installed always and read the gate at call time (B280403). `window.__PLANYR_E2E = true` still works.
+- **Also confirm the badge still DRAGS** — this fix is identification-only and must not have cost the affordance B1327 exists for: hover a lot's acreage badge, drag it, and it should move as before.
+- **Already confirmed, do NOT re-test:** the plan is byte-identical across every run; the pond control passes; press gaps are inside `DBLTAP_MS`; the first-gesture fix from #965 is intact.
+- The **owner never runs this** — it is a Claude-cohort check on a signed-in session. ⏳ **PENDING**
 ### V84560 — B270913: does the retention job fire ON ITS OWN, tomorrow, with nobody pressing anything? `Blocker: real-data`
 
 **⛔ THIS CHECK IS THE ENTIRE POINT OF THE ITEM, AND IT CANNOT BE DONE IN A SANDBOX.** Everything else about B270913 is proven: the policy is unit-tested against a real Postgres (21 cases, both directions, both clauses mutation-checked), and it was proven a second time **on the production table** with seeded rows that were cleaned up afterwards. What no test here can show is the one thing that decides whether this works: **that `pg_cron` actually runs the job on schedule.** A retention job that silently never runs is indistinguishable from one that correctly had nothing to delete — and since this policy deletes nothing from today's data, that indistinguishability is the EXPECTED state for months. The whole run-log/status half of the item exists for this one question.
