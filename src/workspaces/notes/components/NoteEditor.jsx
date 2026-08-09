@@ -460,6 +460,60 @@ export default function NoteEditor({
     },
   });
 
+  /* ⛔ THE INSTRUMENT NEW-2 NEEDED, and the reason it is committed rather than improvised.
+   * "Backspace at the start of a block" is a rule about the DOCUMENT TREE, and a harness that
+   * can only reach the document through clicks and key presses cannot state the case it is
+   * testing — it has to type its way into a shape and hope. Every case in
+   * ui-audit/verify-notes-backspace.mjs therefore SEEDS an exact tree and reads the exact tree
+   * back; the keypress under test is still a real one through the browser. Read/seed only, and
+   * behind the same `__PLANYR_E2E` gate every other self-audit hook in this repo uses, so not a
+   * byte of it is reachable in a shipped session. */
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.__PLANYR_E2E || !editor) return undefined;
+    const hook = {
+      json: () => (editor.isDestroyed ? null : editor.getJSON()),
+      /* ⛔ A TRANSACTION, NOT `setContent` — and that is not a style choice. This file's
+       * standing guard is that the string `setContent(` never appears in it, because the
+       * crash it removed (`Cannot read properties of null (reading 'commands')`) came from an
+       * effect calling it against a torn-down instance. A seeding hook has no business
+       * weakening that guard, so it replaces the document the plain way. */
+      setDoc: (json) => {
+        if (editor.isDestroyed) return;
+        const { state, view } = editor;
+        const next = state.schema.nodeFromJSON(json);
+        view.dispatch(state.tr.replaceWith(0, state.doc.content.size, next.content));
+      },
+      /** Put the caret at an absolute document position — the only way to state "the very
+       *  start of THAT block" without depending on where a click happens to land. */
+      caretAt: (pos) => { if (!editor.isDestroyed) editor.chain().focus().setTextSelection(pos).run(); },
+      /** The absolute position just inside the nth node on a path of child indexes. */
+      startOf: (path) => {
+        if (editor.isDestroyed) return null;
+        let node = editor.state.doc;
+        let pos = 0;
+        for (const i of path) {
+          if (!node.child || i >= node.childCount) return null;
+          for (let k = 0; k < i; k += 1) pos += node.child(k).nodeSize;
+          node = node.child(i);
+          pos += 1;                      // step inside this node
+        }
+        return pos;
+      },
+      /** Every textblock's first position, so a sweep can press Backspace at the start of
+       *  EVERY block in a document instead of at the ones somebody thought to list. */
+      eachTextblockStart: (fn) => {
+        if (editor.isDestroyed) return;
+        editor.state.doc.descendants((node, pos) => {
+          if (node.isTextblock) fn(pos + 1, node.textContent || `(empty ${node.type.name})`);
+          return true;
+        });
+      },
+      selection: () => (editor.isDestroyed ? null : { from: editor.state.selection.from, to: editor.state.selection.to, empty: editor.state.selection.empty }),
+    };
+    window.__noteEditor = hook;
+    return () => { if (window.__noteEditor === hook) window.__noteEditor = null; };
+  }, [editor]);
+
   // Unmount (which a page switch causes, via the parent's key) flushes the snapshot.
   useEffect(() => flush, [flush]);
 
