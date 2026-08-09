@@ -182,6 +182,40 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   plus the e2e spec **map-layer-stacking** (whose lift case is mutation-checked three ways: hosting
   the band outside the SVG, rendering it after the handle layer, and dropping its transform mirror
   each turn it red).
+- **⛔ BAKED FEMA FLOOD TILES (B298400–B298402) — the shared model (`shared/gis/`) is the MODEL and the
+  one line in it that must not move: A TILE IS A PICTURE, NEVER A NUMBER.** The flood layer can render
+  from a per-county PMTiles archive under `public/flood/` — range-read off the same Cloudflare Pages
+  origin that serves the app — instead of calling FEMA's `/export` on every pan. Behind
+  `VITE_FLOOD_TILES`, **default OFF**. Four things to know before touching any of it:
+  **(1) PARCEL-SCALE AUTHORITY IS UNCHANGED.** Tiles are generalised, so they answer the fast picture
+  and nothing else; the screening / mitigation math still queries live FEMA, and every tile identify
+  card says so. Never let a number a user acts on come off a tile.
+  **(2) THE FALLBACK IS A PROPERTY OF A PURE FUNCTION, not a hope.** `resolveFloodSource` answers `live`
+  for every way the fast path can be unavailable (flag off · no county · no archive · an archive that
+  failed earlier · called with nothing), each with a stated reason. The runtime half is ONE terminal
+  `_die()` in `floodTileLayer.js`, which tears the slot down through `layers.js`'s **shared `release`
+  helper** and re-enters `syncOverlayLayers` so the raster branch takes over. A per-TILE miss is NOT
+  that — an empty tile is the ordinary case.
+  **(3) THE ABSENCE RULE DIFFERS BY SOURCE.** The build DROPS unshaded Zone X, so on tiles "no polygon"
+  means *outside the mapped floodplain*; on the LIVE layer it means *no effective flood map here*
+  (`identifyGap: "flood"`) — the opposite risk position. `floodAbsenceKindFor` is the one place that
+  decides, and showing the live wording over a tile answer turns a clean result into a scare.
+  **(4) `floodTileLayer.js` IS LAZY BY CONSTRUCTION and must stay so** — it pulls `pmtiles` +
+  `@mapbox/vector-tile` + `pbf` (its own 38 KB chunk). The Leaflet-free half is `floodTileDecode.js`
+  (Leaflet needs a `window`, so anything beside it can only be tested through a browser — the
+  `adminBoundaryData.js` split). `floodTileStyle.js` is the palette + the painter's draw order (a
+  floodway must land ON TOP of the SFHA it sits inside) + the identify wording; `floodManifest.js` is one
+  cached fetch of the build manifest, which is where the **NFHL vintage stamp** comes from — and that
+  stamp may never disappear, it reports "unknown" instead (B1093's rule).
+  The builder is the repo-root build-flood-tiles script (`npm run build:floodtiles`); its
+  `--no-feature-limit --no-tile-size-limit` are deliberate, because tippecanoe's defaults DROP features
+  out of dense tiles and a silently vanishing floodplain is the worst thing this layer could do.
+  Guards: the repo-root `test/` suites **floodTiles** (48 — incl. reading the COMMITTED archives back and
+  asserting the 25 MiB Cloudflare Pages per-file cap) and **floodTileRender** (22, driven off the real
+  Harris archive), plus the ui-audit harness **verify-flood-tiles** (`npm run verify:floodtiles`).
+  ⚠ That harness proves tiles PAINT and proves the fallback ENGAGES; it can never prove the live FEMA
+  layer paints, because every `hazards.fema.gov` request from Chromium in this sandbox is
+  `ERR_CONNECTION_RESET` — it detects that and says so rather than reporting the egress policy as a bug.
 - **`buildingFloodExposure.js` (B1207) answers "is my building in the floodplain?" as a NUMBER** —
   per footprint: overlap by area and percent, the governing zone and its BFE. It **reuses** the
   B707/B712 `zonesFromFeatureCollection` + `gridIntersect` + `zoneWaterSurface` chain (never a second
@@ -412,6 +446,16 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   real transport**, never through a mock `commit` that accepts more parameters than the shipped
   adapter does — that mismatch is exactly what shipped a dead feature green. **B1118:** the load-time heal's `exempt` set — a repaired element must diff and COMMIT, or
   rows-canonical-on-seed adopts the torn rows straight back over the repair.
+- **County ROUTING KEYS (the shared `shared/gis/` normaliser) — a county routing key is normalised at the MAP, never at the call
+  site (B298403).** Two production plans stored `"Harris"`; every `MAP[county]` lookup missed them and,
+  because a missing key is `undefined` and every call site has a `|| fallback`, rendered a confident
+  wrong answer (generic easement rules instead of City of Houston's). `COUNTIES`, `COUNTIES_MAP`,
+  `JURISDICTION_LAYERS`, the statewide county-name tables and `SNAPSHOT_COUNTIES` are all wrapped, so a
+  lookup written later cannot miss. **⛔ NOT the same thing as `floodGroup.countyKey`**, which slugs a
+  DISPLAY NAME to letters-only and would turn `co_larimer` into `colarimer`. Whitespace is REMOVED, not
+  turned into an underscore — the underscore is a state prefix, so `"Fort Bend"` must become `fortbend`.
+  Writes normalise at `createSiteModel`, at `cloudSync.siteRowFor`, and in a Postgres trigger
+  (`db/sites_county_normalize.sql`, applied). Guard: the repo-root `test/` suite **countyKeys** (36).
 - **⛔ `assemblyIntegrity.js` (B1340) — THE bonded-assembly invariant, and the reason this bug family
   is closed rather than patched a ninth time. Read it before touching any write, echo or revert path.**
   A bonded child's world position is REDUNDANT: it is derived from its host across the wall, and only

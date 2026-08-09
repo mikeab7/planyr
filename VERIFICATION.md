@@ -113,6 +113,37 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V96960 — B298401: on planyr.io with the flood-tile flag on, does a Harris plan draw the floodplain instantly — and does a broken archive still fall back to live FEMA? `Blocker: live-GIS`
+**Filed 2026-08-09 with B298401. What was ALREADY proven headless HERE, so this entry is only the gap:**
+`node ui-audit/verify-flood-tiles.mjs` — **10/10 green** against a real Chromium on a seeded Harris plan:
+tiles paint the flood layer in **286–320 ms**, over **3 HTTP range requests totalling 27,392 bytes** of
+`flood-tx-harris.pmtiles`; **zero** agency requests for the picture; the `NFHL as of Nov 15, 2019` stamp is
+on screen; a **404 archive hands the row back to the live FEMA path** (6 agency requests where the working
+archive made 0 — a real mutation check, not a tautology); a county with **no** archive never asks for one.
+Plus `test/floodTiles.test.js` (48) and `test/floodTileRender.test.js` (22) driving the committed archives.
+
+**⛔ WHY THIS IS STILL OWED A BROWSER — the one thing this sandbox structurally cannot show.**
+Every `hazards.fema.gov` request from **Chromium** here dies with `ERR_CONNECTION_RESET` (the egress
+policy; Node reaches the same host fine — that is how the archives were built). So the harness can prove
+the live path is **ENGAGED** and can never prove it **PAINTS**, which means the number the owner actually
+cares about — *how much faster is this than what I have today* — has no live half in this sandbox. That is
+a `live-GIS` blocker, not a to-do that was skipped.
+
+**The pending steps, on planyr.io with `VITE_FLOOD_TILES=1` in the Pages env:**
+1. Open a **Harris** plan. Turn on **FEMA flood zones**. The floodplain should appear essentially with the
+   map, not seconds later, and should stay put through a pan and a zoom (no re-fetch per gesture).
+2. The **Flood & drainage** group's `REGULATORY` heading should read `· NFHL as of Nov 15, 2019`.
+3. Open a **Waller** (Tsakiris) plan and repeat — vintage there is **Jan 15, 2021** for Larimer,
+   **May 16, 2019** for Waller; confirm the stamp names the county actually on screen.
+4. Compare against a **Montgomery** plan (no baked archive): the layer must still paint from live FEMA,
+   just at today's speed. **Nothing may be blank on any of the three.**
+5. Hover the floodplain on the Harris plan: the identify card should name the zone off the tiles and carry
+   the "the parcel's authoritative zone and acreage still come from the live FEMA query" line.
+6. Zoom past z13 and confirm the overzoomed tiles still read as a flood map rather than mush.
+7. **The measurement to record:** time from the layer switching on to the floodplain being visible, tiles
+   vs. flag-off, on the same plan. That is the number Phase 1 exists to produce and the only one still
+   missing.
+
 ### V84560 — B270913: does the retention job fire ON ITS OWN, tomorrow, with nobody pressing anything? `Blocker: real-data`
 
 **⛔ THIS CHECK IS THE ENTIRE POINT OF THE ITEM, AND IT CANNOT BE DONE IN A SANDBOX.** Everything else about B270913 is proven: the policy is unit-tested against a real Postgres (21 cases, both directions, both clauses mutation-checked), and it was proven a second time **on the production table** with seeded rows that were cleaned up afterwards. What no test here can show is the one thing that decides whether this works: **that `pg_cron` actually runs the job on schedule.** A retention job that silently never runs is indistinguishable from one that correctly had nothing to delete — and since this policy deletes nothing from today's data, that indistinguishability is the EXPECTED state for months. The whole run-log/status half of the item exists for this one question.

@@ -25,6 +25,7 @@ import { roadCenterline, dedupeRoadVertices, repairBakedRadii, simplifyRoadVerti
 import { bufferPolyline } from "./metesAndBounds.js";
 import { DEFAULT_ROAD_CLASS, roadClassOf } from "./roadClasses.js";
 import { ensureZ } from "./zOrder.js";
+import { normCountyKey } from "../../../shared/gis/countyKeys.js";
 
 // v12 (B671): every drawn element carries an explicit `z` — the within-type-layer stacking
 // tiebreak that used to be IMPLICIT array position (see planStyle.byZ). `ensureZ` assigns a gapped
@@ -1088,7 +1089,13 @@ export function createSiteModel(p = {}, { onHeal } = {}) {
     scheduleProjectName: p.scheduleProjectName || null,
     // geo anchor + jurisdiction
     origin: p.origin || null,
-    county: p.county || null,
+    /* NEW-4 — the county is a ROUTING KEY, and it is normalised HERE because this function is
+     * the funnel every site record passes through: a localStorage load, a cloud row, an import,
+     * and every save-merge. Two production rows stored "Harris" with a capital H, and every
+     * `MAP[county]` lookup in the app missed them silently — no error, just a plan whose
+     * county-scoped sources resolved to nothing. Normalising at the model boundary fixes both
+     * directions at once (what we read, and what we write back). */
+    county: normCountyKey(p.county),
     // deal stage. Honor an explicit status; otherwise a record stamped with an
     // older schemaVersion is a pre-feature site (→ "active", presumed live), while
     // a fresh record (no prior version) starts in "pursuit".

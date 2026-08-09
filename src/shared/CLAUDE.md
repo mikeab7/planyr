@@ -50,6 +50,21 @@ into every consumer. Root rules in `/CLAUDE.md`; deep detail in `/docs/REFERENCE
   `ui/PanelChrome.jsx` + pure `ui/floatingPanel.js` — the NEW-1 poppable-panel primitive (a
   left-rail panel detached into a draggable card over the map; clamp/persist/pan-isolation math
   is pure + unit-tested, host wiring lives in the Site Planner workspace).
+- `gis/` also holds the two newest cross-workspace pieces, both pure and both worth reading before you
+  touch a county or the flood layer. **County ROUTING KEYS (B298403): normalise at the MAP, never at the
+  call site.** Two production plans stored `"Harris"`; every `MAP[county]` lookup missed them and, because
+  a missing key is `undefined` and every call site has a `|| fallback`, rendered a confident WRONG answer.
+  So the county-keyed config maps are wrapped rather than each reader patched — patching readers one at a
+  time is HOW the class existed. **⛔ Not the same vocabulary as `floodGroup.countyKey`**, which slugs a
+  DISPLAY NAME to letters-only and would turn `co_larimer` into `colarimer`; here whitespace is REMOVED
+  (the underscore is a state prefix), so `"Fort Bend"` → `fortbend`.
+  **BAKED FEMA FLOOD TILES (B298400–B298402): the model, the drop rule, the tiles-vs-live decision, and the
+  NFHL vintage stamp.** ⛔ THE LINE THAT MUST NOT MOVE: **a tile is a PICTURE, never a NUMBER** — tiles are
+  generalised, so parcel-scale authority stays with the live FEMA query and the mitigation math never reads
+  a tile. The fallback is a property of the pure decision function (every unavailable path answers `live`,
+  with a reason), and the ABSENCE RULE differs by source: on tiles "no polygon" means *outside the mapped
+  floodplain*, on the live layer it means *no effective flood map here* — opposite risk positions, decided
+  in one place. Renderers live in the site-planner workspace; nothing here imports Leaflet.
 - `folders/` — the canonical per-project folder tree (B650): `folderTemplate.js` (the one default
   12-category template) + `folderTree.js` (pure flatten / treeify / validate / seed-row builder).
   Shared by the Library editor + the server Drive-mirror; the server-side reconcile executor lives
