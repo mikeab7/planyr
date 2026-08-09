@@ -289,13 +289,30 @@ function buildabilityVerdict(d) {
    * X′" is a claim about the whole site that is false for whichever lots the other ordinance
    * governs. Both are the same VERDICT (an unsettled FFE) so they share one line and differ only in
    * the reason — PANEL-BREVITY: this adds a state without adding a line. */
-  if (d.administrator && (d.administrator.unresolved || d.administrator.split)) {
+  /* ⛔ NEW-1d — AND THE UNMODELLED CASE REFUSES HERE TOO, which it did not.
+   *
+   * `settled` already accounted for an authority with no transcribed rule, and this row did not
+   * read it — it only asked about `unresolved || split`. So a site wholly inside a city whose
+   * ordinance we do not have (not split, nothing failed) fell straight through to
+   * "pads pass at X′ FFE": a settled claim about a floor, with a governing city's rule missing from
+   * the comparison that produced it. Gate on the module's own `settled`, so a fourth state cannot
+   * be added upstream and forgotten here again.
+   *
+   * ⚠ THE NUMBER IS CARRIED, NOT DROPPED. An unsettled FFE is not "no requirement" — the default
+   * while we wait is the authority we DO have, and the panel names it and shows its elevation on
+   * the line beneath. A blank would read as "nothing required", which is the one answer that is
+   * certainly wrong (the same four-state discipline the freshness light uses: unchecked is not a
+   * pass). `provisionalFfeFt` is what the detail line prints. */
+  if (d.administrator && (d.administrator.unresolved || d.administrator.split || d.administrator.unmodelledCandidates?.length)) {
     /* PANEL-BREVITY, and it is a genuine collapse rather than a deletion: the verdict row states
-     * the VERDICT and the line immediately beneath it — `yield-ffe-unresolved` or the new
-     * `yield-ffe-split` — already names which case this is and why, in full. Carrying the reason
-     * here as well printed it twice. Measured: 14 lines / 685 chars before, 13 / 615 after, so this
-     * adds a whole new state (a split jurisdiction) while giving the panel back a line. */
-    return row("?", "warn", "FFE rule not settled", { sortRank: 1, ffeUnsettled: true });
+     * the VERDICT and the line immediately beneath it — `yield-ffe-unresolved`, `yield-ffe-split`
+     * or `yield-ffe-unmodelled` — already names which case this is and why, in full. Carrying the
+     * reason here as well printed it twice. Measured: 14 lines / 685 chars before, 13 / 615 after,
+     * so this adds three states without adding a line. */
+    return row("?", "warn", "FFE rule not settled", {
+      sortRank: 1, ffeUnsettled: true,
+      provisionalFfeFt: Number.isFinite(ffe.requiredFfeFt) ? ffe.requiredFfeFt : null,
+    });
   }
   if (ffe.status === "pass") return row("OK", "good", `pads pass at ${fmtAcFt(ffe.requiredFfeFt)}′ FFE`);
   if (ffe.status === "assumed") return row("OK", "neutral", `pads assumed at ${fmtAcFt(ffe.requiredFfeFt)}′ FFE`);
