@@ -135,9 +135,19 @@ const ZONE_EXTENTS = [
  * "City and County of Denver", "El Paso County". Colorado's two consolidated city-and-counties
  * (Denver, Broomfield) are the reason the connective words are stripped rather than just the
  * trailing "County": none of the counties this project serves has city/and/county/of in its
- * actual name, so removing those tokens is safe and makes every spelling land on one key. */
+ * actual name, so removing those tokens is safe and makes every spelling land on one key.
+ *
+ * ⛔ NEW-2 — THE `co_` ROUTING PREFIX IS STRIPPED FIRST, and leaving it out was a silent
+ * wrong-zone bug. The app PERSISTS a Colorado county as its routing key (`co_denver`, `co_weld`,
+ * `co_elpaso` — `counties.js`, prefixed because Texas and Colorado both have an El Paso and a
+ * Jefferson), and that is the value a plan's `county` field carries. Without this strip
+ * `zoneForCounty("CO", "co_denver")` slugs to `codenver`, matches nothing, returns null, and
+ * `resolveZone` falls through to the COARSE point envelope — which this file's own comment says
+ * cannot separate the interleaved Front Range counties. Measured: Denver then resolved to
+ * **Colorado NORTH (2231)** instead of Central (2232). `coloradoRegions.js`'s own slug already
+ * strips the prefix; the two must agree, or a county resolves to a regime and to no zone. */
 const slugCounty = (c) =>
-  String(c || "").toLowerCase().replace(/\b(city|and|county|of)\b/g, "").replace(/[^a-z]/g, "");
+  String(c || "").toLowerCase().replace(/^co_/, "").replace(/\b(city|and|county|of)\b/g, "").replace(/[^a-z]/g, "");
 
 /* The zone for a county, when the app knows one. `state` is "TX"/"CO" (case-insensitive).
  * Returns null for a county this project has not assigned — an HONEST null, never a guess:

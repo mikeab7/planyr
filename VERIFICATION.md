@@ -113,6 +113,28 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V88800 — B290240: does an unincorporated COLORADO site now say Colorado's zoning law instead of Texas's? `Blocker: live-GIS`
+
+The sentence itself is pure and unit-tested in both directions; what cannot be driven here is the card, because it only renders once `identifyJurisdiction` returns `unincorporated`, and that needs external GIS hosts this environment blocks (the whole `gis.colorado.gov` space answers 403 at the sandbox egress proxy — a sandbox limitation, not an endpoint failure).
+- **Where.** planyr.io, a site on **unincorporated Weld or Larimer County ground** (the owner's Johnstown site is the case this was found on). Site **Analysis** panel → the **Zoning / entitlement** card.
+- **PASS** = *"Unincorporated — Colorado counties DO zone (C.R.S. 30-28-111), so this land is zoned by the county, not unzoned. Confirm the district and whether your use is by right, a rezone, or a Use by Special Review."* **FAIL** = any sentence containing the word "Texas".
+- **Also confirm the caveat under it** no longer names City of Houston on a Colorado card.
+- **The Texas control, on the same run:** an unincorporated Harris / Waller / Chambers site must still read *"Unincorporated — Texas counties have no zoning; subdivision platting still applies."* — byte-identical.
+- **What was proven HERE:** `test/coloradoAudit.test.js` (5 assertions, mutation-proven — restore the Texas-everywhere sentence and 3 go red), plus the Texas golden master green and 9,646/9,646 unit tests green.
+- The **owner never runs this** — it is a Claude-cohort check. ⏳ **PENDING**
+
+### V88801 — B290243: does the C.R.S. 37-92-602(8) line stop claiming a pass on a Colorado plan with no pond? `Blocker: live-GIS`
+
+The gate is pure and mutation-proven; what cannot be driven here is the LINE, because it renders inside Yield → Stormwater, which only mounts once the drainage/flood context resolves. Driven logged-out on a seeded Weld plan, the Yield panel gets as far as `Flood data: not checked` and the group never opens — so the line was never on screen either way.
+- **Where.** planyr.io, a **Colorado** plan (Weld / Larimer / Denver). Yield → **Stormwater**. A release rate must be set (Standards → allowable release, or give a pond an outlet) or the statute is honestly "not yet checkable" for a different reason and the test proves nothing.
+- **Three states to confirm, in this order:**
+  1. **Release rate set, NO pond drawn.** PASS = *"Colorado's 72-hour drawdown statute (C.R.S. 37-92-602(8)) needs the allowed release rate"* — the `unknown` line. **FAIL** = *"Inside Colorado's 72/120-hour drawdown limits … screening, not compliance"*, which is the defect: a green water-rights verdict on a facility that does not exist.
+  2. **A real pond, comfortably inside the limits.** PASS = the *"Inside Colorado's 72/120-hour drawdown limits"* line — the gate must not have gone inert. This is the half that matters most: a precondition that silences a working gate is worse than the bug.
+  3. **A real pond, well past the limits** (a large volume against a small release). PASS = the warn line *"Fails Colorado's 72-hour drawdown statute"*.
+- **The Texas control:** on any Texas plan the statute must render NOTHING at all (`applies:false`) and the existing informational drawdown readout must be unchanged.
+- **What was proven HERE:** `test/coloradoAudit.test.js` (6 assertions across all five input states, mutation-proven — delete the precondition and 2 go red), plus the Texas golden master green.
+- The **owner never runs this** — it is a Claude-cohort check. ⏳ **PENDING**
+
 ### V78961 — B280402: the acreage badge no longer takes press 2, on his stub, on the repeat `Blocker: real-data` + `Blocker: auth`
 
 **The cause is DIAGNOSED FROM HIS OWN INSTRUMENT READ and REPRODUCED here, so this is a confirmation, not a hunt.** The parcel badge is a hit target while the cursor RESTS on it (a hover gate, B1327/NEW-4, so it can be dragged); resting is what a cursor does between the two presses of a double-click. It is now identity-transparent — it keeps its drag, but the resolver looks through it.
