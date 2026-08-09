@@ -23,7 +23,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import {
   FEATURE_KINDS, parseFeatureKey, resolveDoubleClickTarget, pressIsOverElementBody,
-  stackEntries, gestureAnchorTarget, FEATURE_ATTR, HANDLE_ATTR, EL_DIM_ATTR,
+  stackEntries, gestureAnchorTarget, FEATURE_ATTR, HANDLE_ATTR, EL_DIM_ATTR, CHROME_ATTR,
 } from "../src/workspaces/site-planner/lib/featureTarget.js";
 import { DBLTAP_MS, DBLTAP_PX } from "../src/workspaces/site-planner/lib/doubleTap.js";
 
@@ -157,10 +157,12 @@ describe("NEW-3 — was the press aimed at the element's body, or only at its di
 
 describe("flattening a live DOM stack", () => {
   /* A minimal stand-in for the DOM contract these helpers depend on: `closest(selector)`. */
+  /* `closest` takes a SELECTOR LIST now (the handle layer OR B280402's stray chrome), so the fake
+   * has to honour a list the way the DOM does — matching any of its parts. */
   const node = (chain) => ({
     closest: (sel) => {
-      const attr = sel.replace(/[[\]]/g, "");
-      const hit = chain.find((a) => Object.prototype.hasOwnProperty.call(a, attr));
+      const attrs = sel.split(",").map((one) => one.trim().replace(/[[\]]/g, ""));
+      const hit = chain.find((a) => attrs.some((attr) => Object.prototype.hasOwnProperty.call(a, attr)));
       return hit ? { getAttribute: (k) => hit[k] } : null;
     },
   });
@@ -271,6 +273,41 @@ describe("NEW-1 — a double-click in flight is anchored to what press 1 selecte
   });
 });
 
+/* ⛔ B280402 — HOVER-ARMED CHROME. The parcel acreage badge is a hit target only while the cursor
+ * RESTS on it (B1327 gated it on hover so it could be dragged) — and resting on a point is what a
+ * cursor does between the two presses of a double-click. Measured on the owner's Bain plan and
+ * reproduced in the sandbox: at one point, nothing selected, the stack reads `["el:<stub>"]` after
+ * touching another feature and `["parcel:<lot>", "el:<stub>"]` after resting on it. THE PARCEL DOES
+ * NOT MOVE ABOVE THE ELEMENT — IT ENTERS, and the element is still there, second, unchanged. */
+describe("B280402 — chrome outside the handle layer is identity-transparent too", () => {
+  it("a badge over an element does not answer for the parcel it belongs to", () => {
+    const stack = [feat("parcel:lot1", { handle: true }), feat("el:stub")];
+    expect(resolveDoubleClickTarget(stack)).toEqual({ kind: "el", id: "stub" });
+  });
+
+  it("the parcel is still reachable by its own body underneath", () => {
+    expect(resolveDoubleClickTarget([feat("parcel:lot1", { handle: true }), feat("parcel:lot1")]))
+      .toEqual({ kind: "parcel", id: "lot1" });
+  });
+
+  it("`data-chrome` marks it, and stackEntries flags it exactly like the handle layer", () => {
+    const node = (attrs, chrome) => ({
+      closest: (sel) => {
+        if (sel.includes(CHROME_ATTR) && chrome) return { getAttribute: () => "acreage-badge" };
+        if (sel.includes(FEATURE_ATTR)) return attrs ? { getAttribute: () => attrs } : null;
+        return null;
+      },
+    });
+    expect(stackEntries([node("parcel:lot1", true)])[0].handle).toBe(true);
+    expect(stackEntries([node("el:x", false)])[0].handle).toBe(false);
+  });
+
+  it("it changes IDENTIFICATION only — an entry being chrome says nothing about its press", () => {
+    // the resolver never inspects pointer events; the badge keeps its own drag (asserted on source)
+    expect(resolveDoubleClickTarget([feat("parcel:lot1", { handle: true })])).toBeNull();
+  });
+});
+
 describe("source guard — the render must keep stamping what the resolver reads", () => {
   const SP = readFileSync(fileURLToPath(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url)), "utf8");
 
@@ -304,6 +341,16 @@ describe("source guard — the render must keep stamping what the resolver reads
     expect(SP).toMatch(/featureDoubleAction\(resolveDoubleClickTarget\(hitStackAt\(e\.clientX, e\.clientY\), dblOpts\(e, e\.clientX, e\.clientY\)\), e\)/);
     expect(SP).toMatch(/const dblOpts = \(e, x, y\) =>/);
     expect((SP.match(/dblOpts\(/g) || []).length).toBe(2); // exactly the two resolution call sites
+  });
+
+  it("the acreage badge is marked as chrome, and still keeps its own press (B280402)", () => {
+    const at = SP.indexOf('data-chip-parcel={pc.id}');
+    expect(at).toBeGreaterThan(0);
+    const block = SP.slice(at - 200, at + 400);
+    expect(block, "the badge must be identity-transparent").toMatch(/data-chrome="acreage-badge"/);
+    // …and DELIVERY is untouched: it keeps its own pointer events and its own drag starter.
+    expect(block).toMatch(/pointerEvents=\{draggable \? "auto" : "none"\}/);
+    expect(block).toMatch(/onPointerDown=\{draggable \? \(e\) => startAcChip\(e, pc\.id\) : undefined\}/);
   });
 
   /* ⛔ B278578 — THE ANCHOR IS A GESTURE, NOT A LATCH. Two properties, both of which the first
@@ -384,10 +431,16 @@ describe("source guard — the render must keep stamping what the resolver reads
     expect(block).not.toMatch(/data-feature/);
   });
 
-  it("the hook is gated and nulled on unmount, like every other planner probe", () => {
+  /* ⛔ B280403 — the gate MOVED, deliberately, and this pins where it moved TO. It used to sit on the
+   * effect (`if (!window.__PLANYR_E2E) return;`), which meant arming the flag on a live production
+   * tab did nothing until SitePlanner remounted — so the one place these diagnostics are needed was
+   * the one place they could not be switched on. It is now read at CALL time via lib/diagArm.js. */
+  it("the hook is gated at CALL time and nulled on unmount, like every other planner probe", () => {
     const at = SP.indexOf("window.__plannerHitTarget = hook");
     const block = SP.slice(Math.max(0, at - 400), at + 200);
-    expect(block).toMatch(/window\.__PLANYR_E2E/);
+    expect(block).toMatch(/isDiagArmed\(window\)/);
+    expect(block, "gating the INSTALL is what made it unreachable in production")
+      .not.toMatch(/!window\.__PLANYR_E2E\) return;/);
     expect(SP).toMatch(/if \(window\.__plannerHitTarget === hook\) window\.__plannerHitTarget = null/);
   });
 

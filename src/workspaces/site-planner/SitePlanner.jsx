@@ -32,6 +32,7 @@ import { measuresUnderPoint, nextMeasureSelection } from "./lib/measureHit.js";
 import { nearestBoundaryEdge, constrainToEdgeAngle, edgeLockTolFt } from "./lib/edgeConstrain.js";
 import { markupsUnderPoint, nextMarkupSelection, boxCorners } from "./lib/markupPick.js";
 import { EMPTY_TAP, tapTime, stepDoubleTap } from "./lib/doubleTap.js";
+import { isDiagArmed, latchDiagArm } from "./lib/diagArm.js";
 import { resolveDoubleClickTarget, gestureAnchorTarget, stackEntries, pressIsOverElementBody } from "./lib/featureTarget.js";
 import { parkDepthForRows, parkRowsForDepth, explodeParkingBands, edgeAbutsPaving } from "./lib/parking.js";
 import { loadAndDownscaleImage } from "./lib/image.js";
@@ -7630,10 +7631,23 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       };
     };
   });
+  /* ⛔ NEW-1 (B280403) — INSTALLED UNCONDITIONALLY, ANSWERED ONLY WHEN ARMED, AND THE GATE IS READ AT
+   * CALL TIME. These two are the DIAGNOSTIC hooks, and they were gated the way every other probe
+   * here is: on `window.__PLANYR_E2E`, read once at mount by an effect with `[]` deps. That made
+   * them unreachable in the one place the defects they exist for actually live — the owner's
+   * signed-in production tab — because arming the flag there did nothing until `SitePlanner`
+   * remounted. The session that needed them got in by setting the flag and then switching plans and
+   * back, which is folklore that requires knowing this dependency array.
+   * Now: the functions always exist and return `null` until `isDiagArmed()` says otherwise, so
+   * arming can never require a remount. `?planyrDiag=1` arms a tab with no console at all (it
+   * latches into sessionStorage so an in-app plan switch keeps it); `window.__PLANYR_E2E = true`
+   * still works, so every existing harness is untouched. READ-ONLY: they answer questions, they
+   * change nothing — see lib/diagArm.js for why that boundary is the whole safety argument. */
   useEffect(() => {
-    if (typeof window === "undefined" || !window.__PLANYR_E2E) return;
-    const hook = (x, y) => (dblResolveRef.current ? dblResolveRef.current(x, y) : null);
-    const why = (x, y) => (dblWhyRef.current ? dblWhyRef.current(x, y) : null);
+    if (typeof window === "undefined") return;
+    latchDiagArm(window);
+    const hook = (x, y) => (isDiagArmed(window) && dblResolveRef.current ? dblResolveRef.current(x, y) : null);
+    const why = (x, y) => (isDiagArmed(window) && dblWhyRef.current ? dblWhyRef.current(x, y) : null);
     window.__plannerHitTarget = hook;
     window.__plannerHitWhy = why;
     return () => {
@@ -14265,7 +14279,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
        badge that will not actually drag (the other half of the owner's report). */
     const draggable = tool === "select" && hoverChipId === pc.id;
     return (
-      <g key={`pl${pc.id}`} data-print-chip="acre" data-chip-parcel={pc.id} data-feature={`parcel:${pc.id}`} pointerEvents={draggable ? "auto" : "none"}
+      /* ⛔ NEW-1 (B280402) — `data-chrome` makes this badge IDENTITY-TRANSPARENT, and it is the whole
+         fix for the owner's second-double-click failure. B1327 gated the badge on HOVER so it could be
+         dragged; a hover latch is armed by the cursor merely RESTING on it, which is exactly what a
+         cursor does between the two presses of a double-click. Over a feature smaller than its own
+         chrome, that made press 2 resolve to the LOT — which opens the Parcel panel and so takes
+         Properties away, the "panel disappears" half of the report.
+         DELIVERY IS UNTOUCHED: it keeps its own `pointerEvents`, its own `onPointerDown` and its own
+         drag. Only the question "which feature was double-clicked" now looks through it, the same rule
+         the handle layer has had since B233153 — because a badge you drag is a grip, not a feature. */
+      <g key={`pl${pc.id}`} data-print-chip="acre" data-chip-parcel={pc.id} data-chrome="acreage-badge" data-feature={`parcel:${pc.id}`} pointerEvents={draggable ? "auto" : "none"}
         style={draggable ? { cursor: "move" } : undefined}
         onContextMenu={draggable ? (e) => onChipContext(e, pc.id) : undefined}
         onPointerDown={draggable ? (e) => startAcChip(e, pc.id) : undefined}>
@@ -15486,7 +15509,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (!origin) { flashWarn("No county parcel to align to. Add the parcel (＋ Add → Click a lot on the map), or rotate the deed by hand to match the aerial.", 8000); return; }
     const c = deedCentroid(main.pts);
     const [lat, lon] = feetToLatLng(c, origin.lat, origin.lon);
-    const conv = gridConvergenceDeg(lat, lon);
+    /* NEW-2 — the convergence is resolved in the SITE'S OWN state-plane zone (the plan's saved
+     * county wins; the point envelope is the fallback), never in Texas South Central. `null` is an
+     * honest unknown — ground outside every modelled zone — and is a DIFFERENT fact from a 0°
+     * answer on the central meridian, so it gets its own message and rotates nothing. */
+    const conv = gridConvergenceDeg(lat, lon, { state: siteStateId, county: restored?.county || null });
+    if (conv == null) { flashWarn("No county parcel to align to, and Planyr doesn't carry a State Plane zone for this location — so there is no grid rotation it can compute honestly. Rotate the deed by hand to match the aerial.", 9000); return; }
     if (Math.abs(conv) < 0.01) { flashWarn("No county parcel to align to, and this site sits on the State Plane meridian (no grid rotation to correct). Nudge the deed by hand if it needs it.", 8000); return; }
     pushHistory();
     setMarkups((a) => a.map((x) => memberIds.has(x.id)

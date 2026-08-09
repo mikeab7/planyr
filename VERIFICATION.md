@@ -113,6 +113,37 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V88800 — B290240: does an unincorporated COLORADO site now say Colorado's zoning law instead of Texas's? `Blocker: live-GIS`
+
+The sentence itself is pure and unit-tested in both directions; what cannot be driven here is the card, because it only renders once `identifyJurisdiction` returns `unincorporated`, and that needs external GIS hosts this environment blocks (the whole `gis.colorado.gov` space answers 403 at the sandbox egress proxy — a sandbox limitation, not an endpoint failure).
+- **Where.** planyr.io, a site on **unincorporated Weld or Larimer County ground** (the owner's Johnstown site is the case this was found on). Site **Analysis** panel → the **Zoning / entitlement** card.
+- **PASS** = *"Unincorporated — Colorado counties DO zone (C.R.S. 30-28-111), so this land is zoned by the county, not unzoned. Confirm the district and whether your use is by right, a rezone, or a Use by Special Review."* **FAIL** = any sentence containing the word "Texas".
+- **Also confirm the caveat under it** no longer names City of Houston on a Colorado card.
+- **The Texas control, on the same run:** an unincorporated Harris / Waller / Chambers site must still read *"Unincorporated — Texas counties have no zoning; subdivision platting still applies."* — byte-identical.
+- **What was proven HERE:** `test/coloradoAudit.test.js` (5 assertions, mutation-proven — restore the Texas-everywhere sentence and 3 go red), plus the Texas golden master green and 9,646/9,646 unit tests green.
+- The **owner never runs this** — it is a Claude-cohort check. ⏳ **PENDING**
+
+### V88801 — B290243: does the C.R.S. 37-92-602(8) line stop claiming a pass on a Colorado plan with no pond? `Blocker: live-GIS`
+
+The gate is pure and mutation-proven; what cannot be driven here is the LINE, because it renders inside Yield → Stormwater, which only mounts once the drainage/flood context resolves. Driven logged-out on a seeded Weld plan, the Yield panel gets as far as `Flood data: not checked` and the group never opens — so the line was never on screen either way.
+- **Where.** planyr.io, a **Colorado** plan (Weld / Larimer / Denver). Yield → **Stormwater**. A release rate must be set (Standards → allowable release, or give a pond an outlet) or the statute is honestly "not yet checkable" for a different reason and the test proves nothing.
+- **Three states to confirm, in this order:**
+  1. **Release rate set, NO pond drawn.** PASS = *"Colorado's 72-hour drawdown statute (C.R.S. 37-92-602(8)) needs the allowed release rate"* — the `unknown` line. **FAIL** = *"Inside Colorado's 72/120-hour drawdown limits … screening, not compliance"*, which is the defect: a green water-rights verdict on a facility that does not exist.
+  2. **A real pond, comfortably inside the limits.** PASS = the *"Inside Colorado's 72/120-hour drawdown limits"* line — the gate must not have gone inert. This is the half that matters most: a precondition that silences a working gate is worse than the bug.
+  3. **A real pond, well past the limits** (a large volume against a small release). PASS = the warn line *"Fails Colorado's 72-hour drawdown statute"*.
+- **The Texas control:** on any Texas plan the statute must render NOTHING at all (`applies:false`) and the existing informational drawdown readout must be unchanged.
+- **What was proven HERE:** `test/coloradoAudit.test.js` (6 assertions across all five input states, mutation-proven — delete the precondition and 2 go red), plus the Texas golden master green.
+- The **owner never runs this** — it is a Claude-cohort check. ⏳ **PENDING**
+
+### V78961 — B280402: the acreage badge no longer takes press 2, on his stub, on the repeat `Blocker: real-data` + `Blocker: auth`
+
+**The cause is DIAGNOSED FROM HIS OWN INSTRUMENT READ and REPRODUCED here, so this is a confirmation, not a hunt.** The parcel badge is a hit target while the cursor RESTS on it (a hover gate, B1327/NEW-4, so it can be dragged); resting is what a cursor does between the two presses of a double-click. It is now identity-transparent — it keeps its drag, but the resolver looks through it.
+- **RE-RUN HIS EXACT TABLE**, planyr.io signed in, **Bain / "Concept - Original"**, 1600×521, every run preconditioned on `grips === 0`, no read between presses, gaps reported: pond control → stub first → **stub repeat** → pond control → stub first → **stub repeat**. **PASS = the stub opens ELEMENT — ROAD every time, including the repeat**, 7 grips, box ≈ `[664,402,15,22]`. FAIL = `parcel:e79379lfxyni`, 28 grips, `[618,342,189,127]`, no panel.
+- **AND READ THE STACK, before each gesture**, which is the assertion that names it either way: at (673,414) with nothing selected it must read **`["el:e79463haroul"]`** in BOTH states now — the parcel must no longer ENTER after resting on the stub.
+- **⛔ ARMING IS NO LONGER FOLKLORE.** Open the plan with **`?planyrDiag=1`** on the URL — it latches for the tab, so switching plans keeps it — or set `sessionStorage['planyr:diag'] = '1'`. **No remount is needed**: the hooks are installed always and read the gate at call time (B280403). `window.__PLANYR_E2E = true` still works.
+- **Also confirm the badge still DRAGS** — this fix is identification-only and must not have cost the affordance B1327 exists for: hover a lot's acreage badge, drag it, and it should move as before.
+- **Already confirmed, do NOT re-test:** the plan is byte-identical across every run; the pond control passes; press gaps are inside `DBLTAP_MS`; the first-gesture fix from #965 is intact.
+- The **owner never runs this** — it is a Claude-cohort check on a signed-in session. ⏳ **PENDING**
 ### V84560 — B270913: does the retention job fire ON ITS OWN, tomorrow, with nobody pressing anything? `Blocker: real-data`
 
 **⛔ THIS CHECK IS THE ENTIRE POINT OF THE ITEM, AND IT CANNOT BE DONE IN A SANDBOX.** Everything else about B270913 is proven: the policy is unit-tested against a real Postgres (21 cases, both directions, both clauses mutation-checked), and it was proven a second time **on the production table** with seeded rows that were cleaned up afterwards. What no test here can show is the one thing that decides whether this works: **that `pg_cron` actually runs the job on schedule.** A retention job that silently never runs is indistinguishable from one that correctly had nothing to delete — and since this policy deletes nothing from today's data, that indistinguishability is the EXPECTED state for months. The whole run-log/status half of the item exists for this one question.

@@ -144,6 +144,49 @@ export function assessStatutoryDrawdown({ state = null, drawdown = null, constru
     };
   }
 
+  /* ⛔ NEW-3 — A PASS/FAIL NEEDS A VOLUME. WITH NOTHING STORED THERE IS NOTHING TO EVALUATE, AND
+   * THIS GATE USED TO ANSWER ANYWAY.
+   *
+   * `drawdownTime.drawdownHours` accepts a zero volume and returns 0 hours (its own header says it
+   * must never return a zero, "a zero would read as drains instantly, the exact opposite of the
+   * truth" — the guard reads `v < 0`, so 0 goes straight through). 0 hours is inside both statutory
+   * limits, so a Colorado plan with a release rate entered and NO POND DRAWN rendered
+   * "Inside Colorado's 72/120-hour drawdown limits (C.R.S. 37-92-602(8)) — screening, not
+   * compliance": a water-rights screen reading green on a facility that does not exist.
+   *
+   * Fixed HERE rather than in `drawdownHours` deliberately. This is the Colorado statute's own
+   * precondition and the fix is Colorado-only, so Texas's informational readout — which is a
+   * different claim about the same number and is not a gate — is untouched by construction. The
+   * `drawdownHours` zero-volume contract is a real, separate defect and is filed as such.
+   *
+   * "No volume" is `unknown`, never `not-ruled-out`: the statute has not been satisfied here, it
+   * simply has not been asked.
+   *
+   * The precondition reads BOTH signals rather than demanding one field. `assessDrawdown` always
+   * publishes `site.volumeCf`, so an explicit zero is the normal evidence; a caller that supplies
+   * only a time (the reconciliation fixtures do) is caught by a zero drawdown, which given
+   * hours = volume ÷ release can only mean an empty facility. Requiring `volumeCf` alone would make
+   * this refuse a caller that legitimately has none — a guard must not become its own outage. */
+  const siteVolumeCf = drawdown.site ? num(drawdown.site.volumeCf) : null;
+  const siteHoursRaw = drawdown.site ? num(drawdown.site.hours) : null;
+  const nothingStored = siteVolumeCf != null ? !(siteVolumeCf > 0) : siteHoursRaw === 0;
+  if (nothingStored) {
+    return {
+      applies: true,
+      statute,
+      verdict: "unknown",
+      tests: statute.tests.map((t) => evalTest(t, null)),
+      ponds: [],
+      siteHours: null,
+      headline: "Colorado water-rights drawdown — not yet checkable",
+      reason: "no detention volume is stored on this plan yet, so there is nothing for the C.R.S. 37-92-602(8) release tests to measure. Draw the basin (or set its stored volume) to screen the statute.",
+      notification: notificationNote(statute, constructedAfter2015),
+      proxy: true,
+      proxyNote: PROXY_NOTE,
+      note: statute.note,
+    };
+  }
+
   const siteHours = drawdown.site ? num(drawdown.site.hours) : null;
   const tests = statute.tests.map((t) => evalTest(t, siteHours));
   const ponds = (drawdown.ponds || []).map((p) => ({
