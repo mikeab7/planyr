@@ -183,6 +183,32 @@ const CASES = [
     after: doc(P("para one"), P("task one"), TL(TI("task two"))),
   },
   {
+    /* ⛔⛔ THE OWNER'S FIRST SYMPTOM, VERBATIM AND REPRODUCED: one press, and two list items
+     * become ONE item reading "bullet onebullet two". Found by
+     * ui-audit/find-backspace-symptoms.mjs sweeping 414 single-Backspace probes over 99
+     * list-shaped documents — it does NOT happen on a plain bulleted list, which is why the
+     * first pass at this item could not reproduce it and shipped a harness that stayed green
+     * on the broken build. It happens when one list FOLLOWS ANOTHER of a different type,
+     * which is exactly what an Outlook paste makes. RED on the reverted build, by name. */
+    id: "⛔⛔ SYMPTOM — a list that FOLLOWS another list: press 1 merged two items into \"A1A2\"",
+    defect: true,
+    why: "the owner's \"bullet onebullet two\": the first item of the second list leaves its list as a plain line — it must never be absorbed into the item above",
+    before: doc(TL(TI("A1")), UL(LI("A2")), P("A3")),
+    at: [1, 0, 0],
+    after: doc(TL(TI("A1")), P("A2"), P("A3")),
+  },
+  {
+    /* ⛔⛔ THE OWNER'S SECOND SYMPTOM: an EMPTY ORPHAN list item, from one press. Same sweep,
+     * same shape — a bulleted sub-list under a checklist item, caret on the blank line after
+     * it. The default keymap's two passes leave a husk behind. */
+    id: "⛔⛔ SYMPTOM — the blank line after a nested list: press 1 left an EMPTY ORPHAN bullet",
+    defect: true,
+    why: "no step may leave an empty list item behind; the blank line joins the last line above it and nothing is created",
+    before: doc(P("A0"), TL(TI("A1", UL(LI("A2")))), P("")),
+    at: [2],
+    after: doc(P("A0"), TL(TI("A1", UL(LI("A2"))))),
+  },
+  {
     /* ⛔ THE ROW THAT REPRODUCES THE OWNER'S SYMPTOM CLASS, and the reason the list half of
      * this file is not green by accident. Tiptap's ListKeymap runs its Backspace handler
      * ONCE PER LIST TYPE over a forEach that does not stop at the first one to act — so on a
@@ -191,6 +217,7 @@ const CASES = [
      * levels, leaving "bullet one" and "task two" as plain paragraphs — the whole two-level
      * list gone from a single keystroke. */
     id: "⛔ a CHECKLIST nested inside a BULLETED list — the two-pass keymap case",
+    defect: true,
     why: "one press takes ONE step: the inner item stops being a checkbox and becomes a line of its parent bullet. The parent must NOT also leave its list",
     before: doc(P("para one"), UL(LI("bullet one", TL(TI("task two"))))),
     at: [1, 0, 1, 0, 0],
@@ -198,6 +225,7 @@ const CASES = [
   },
   {
     id: "⛔ BULLETS nested inside a CHECKLIST — the same case the other way round",
+    defect: true,
     why: "the hazard is not bullet-specific; one press, one step, and the parent checklist survives",
     before: doc(P("para one"), TL(TI("task one", UL(LI("bullet two"))))),
     at: [1, 0, 1, 0, 0],
@@ -249,6 +277,7 @@ const CASES = [
   },
   {
     id: "HEADING after a paragraph",
+    defect: true,
     why: "the formatting comes off FIRST (it becomes a plain paragraph) — the join is the second press, by which point it is visible",
     before: doc(P("body"), H("Heading")),
     at: [1],
@@ -256,6 +285,7 @@ const CASES = [
   },
   {
     id: "heading after a paragraph, second press",
+    defect: true,
     why: "…and THEN it joins",
     before: doc(P("body"), H("Heading")),
     at: [1],
@@ -299,6 +329,7 @@ const CASES = [
   },
   {
     id: "code block",
+    defect: true,
     why: "the first press turns it back into a plain paragraph — it never merges its code into the prose above",
     before: doc(P("before"), CODE("const x = 1;")),
     at: [1],
@@ -322,6 +353,7 @@ const CASES = [
   },
   {
     id: "paragraph immediately AFTER a table",
+    defect: true,
     why: "the press must not put the whole table one keystroke from deletion — it steps the caret into the last cell and changes nothing",
     before: doc(TABLE(ROW(CELL("a1"), CELL("b1"))), P("after")),
     at: [1],
@@ -330,6 +362,7 @@ const CASES = [
   },
   {
     id: "paragraph after a PICTURE",
+    defect: true,
     why: "the picture is selected, never deleted — the destructive step is a second, deliberate press",
     before: doc(IMG(), P("after")),
     at: [1],
@@ -338,6 +371,7 @@ const CASES = [
   },
   {
     id: "paragraph after a SKETCH",
+    defect: true,
     why: "same rule as the picture — a sketch is a drawing somebody made, and one stray press must not take it",
     before: doc(SKETCH(), P("after")),
     at: [1],
@@ -346,6 +380,7 @@ const CASES = [
   },
   {
     id: "EMPTY paragraph after a picture",
+    defect: true,
     why: "the empty-line case is the one people actually hit, and it must behave the same",
     before: doc(IMG(), P("")),
     at: [1],
@@ -375,6 +410,15 @@ await page.waitForTimeout(1200);
 await page.waitForFunction(() => !!window.__noteEditor, null, { timeout: 20000 });
 
 let failures = 0;
+/* ⛔ A ROW THAT PASSES ON THE BROKEN BUILD IS NOT EVIDENCE, and the two kinds must never be
+ * confused for each other. A **defect row** goes RED when this branch's fix is reverted to
+ * main — it is proof. A **pin** is a boundary main already gets right, kept so a future
+ * change cannot take it away silently; it proves nothing about today and is labelled so
+ * nobody reads it as if it did. The split is printed at the end of every run, and
+ * `DEFECT_ROWS_EXPECTED` fails the run if a defect row is quietly downgraded to a pin. */
+let defectRows = 0;
+let pinRows = 0;
+const DEFECT_ROWS_EXPECTED = 11;
 for (const c of CASES) {
   const seeded = await page.evaluate(([d, path]) => {
     window.__noteEditor.setDoc(d);
@@ -407,6 +451,7 @@ for (const c of CASES) {
   const pass = treeOk && noLitter && keptText;
   if (!pass) failures += 1;
   ok(c.id, pass, c.why);
+  if (c.defect) defectRows += 1; else pinRows += 1;
   if (REPORT || !pass) {
     console.log("    before:\n" + indent(shape(normalise(c.before))));
     console.log("    expected:\n" + indent(want));
@@ -437,6 +482,8 @@ for (const c of CASES.filter((x) => x.caretEndsIn || x.nodeSelected)) {
   }
 }
 
+ok(`${DEFECT_ROWS_EXPECTED} rows are DEFECT rows — proven RED with the fix reverted to main`,
+  defectRows === DEFECT_ROWS_EXPECTED, `${defectRows} defect · ${pinRows} pin (a pin is a boundary main already gets right, kept as a regression guard — it is never evidence)`);
 ok("no page errors during the run", pageErrors.length === 0, pageErrors.slice(0, 2).join(" | "));
 
 const passed = checks.filter((c) => c.pass).length;

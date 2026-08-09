@@ -499,6 +499,15 @@ export default function NoteEditor({
         }
         return pos;
       },
+      /** Every textblock's first position, so a sweep can press Backspace at the start of
+       *  EVERY block in a document instead of at the ones somebody thought to list. */
+      eachTextblockStart: (fn) => {
+        if (editor.isDestroyed) return;
+        editor.state.doc.descendants((node, pos) => {
+          if (node.isTextblock) fn(pos + 1, node.textContent || `(empty ${node.type.name})`);
+          return true;
+        });
+      },
       selection: () => (editor.isDestroyed ? null : { from: editor.state.selection.from, to: editor.state.selection.to, empty: editor.state.selection.empty }),
     };
     window.__noteEditor = hook;

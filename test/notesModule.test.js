@@ -227,6 +227,24 @@ describe("the editor is split off the route's static path", () => {
     expect(root, "the editor must also remount when the body changed underneath it").toMatch(/bodyEpoch/);
   });
 
+  it("⛔ the self-audit hook is GATED, read/seed-only, and cannot reach a shipped session (B291537)", () => {
+    const editor = code("components/NoteEditor.jsx");
+    /* `window.__noteEditor` is how ui-audit/verify-notes-backspace.mjs states the case it is
+     * testing — an exact document tree and an exact caret position. It is kept rather than
+     * torn out after the run, and these are the three properties that make that safe. */
+    expect(editor, "the hook must be installed behind the same gate every self-audit hook here uses")
+      .toMatch(/window\.__PLANYR_E2E/);
+    const install = editor.slice(editor.indexOf("window.__PLANYR_E2E"), editor.indexOf("window.__noteEditor = hook"));
+    expect(install, "the gate must be an early return, not a branch around part of it").toMatch(/return undefined;/);
+    expect(editor, "and it must be removed on unmount so a page switch cannot leave a stale editor reachable")
+      .toMatch(/window\.__noteEditor === hook/);
+    // Nothing in the app may READ it — a hook the product depends on is not a hook.
+    for (const f of ALL_NOTES_FILES) {
+      const body = code(f).replace(/window\.__noteEditor = hook|window\.__noteEditor === hook|window\.__noteEditor = null/g, "");
+      expect(body, `${f} must not depend on the self-audit hook`).not.toMatch(/__noteEditor/);
+    }
+  });
+
   it("there is NO 'sync content on pageId change' effect — that is the crash this shape removed", () => {
     const editor = code("components/NoteEditor.jsx");
     expect(editor, "setContent against a torn-down instance is the null-commands crash").not.toMatch(/\.commands\.setContent/);
