@@ -234,6 +234,40 @@ assumed) and (f) needs a human eye.** Every part that an instrument could settle
 
 *(minted V73584; references **B276576**, overlaps **V477**; `Cadence: once`. Implemented + fully
 sandbox-verified 2026-08-08 — the residue above is the deployed edge only.)*
+### V79264 — B280704/B280705/B280706: the Goose Creek straddle, the ETJ coverage hole, and the split-jurisdiction refusal
+
+**Status: ✅ PASSED (2026-08-09) for everything this sandbox can reach — 27 of 28 sites.** GREEN RIVER has no active parcel geometry, so the app shows no badge and there is nothing to check.
+
+**What the owner corrected, and why both earlier readings were wrong the same way.** He wrote: *"For goose creek part of the site is in city limits and part is in ETJ, so it should clarify."* The original filing tested the site ORIGIN — one point, which cannot see a straddle. My B276752 sweep tested one probe per parcel but had **no ETJ source that carries Baytown**, so it saw the city-limits half and called the rest "unincorporated". Both were single-source readings of a two-sided fact.
+
+**Ground truth, measured live per parcel against the City of Baytown's own layers (site `sms69x8rb2qk`, 14 tested lots):**
+
+| | lots |
+|---|---|
+| inside Baytown CITY LIMITS (and its ETJ) | 6 |
+| inside Baytown ETJ only | 8 |
+| unincorporated, no ETJ | **0** |
+
+**Badge, before → after:**
+
+| Site | Before (B276752, shipped 2026-08-08) | After |
+|---|---|---|
+| Goose Creek | `Part in City of Baytown / part unincorporated · Harris County` | `Part in City of Baytown (6 of 14 lots) / rest in its ETJ · Harris County` ⚑ |
+| Tsakiris | `Part in City of Katy (2 of 9 lots) / part unincorporated · Waller County` | `Part in City of Katy (2 of 9 lots) / rest outside it · no ETJ published for City of Katy · Waller County` ⚑ |
+| Bain | `Unincorporated / City of Houston · ETJ / City of Katy · edge only · Fort Bend County` | unchanged — **proven not regressed** |
+
+**The three defects this pass closed, each verified:**
+1. **The remainder was hardcoded, not measured.** "part unincorporated" was a literal. It is now derived from what was found, and at Goose Creek that is Baytown's own ETJ.
+2. **The share was missing.** "part in" cannot distinguish one lot of fourteen from thirteen of fourteen; the count now comes from the same probe as the split.
+3. **The ETJ dedupe hid the ETJ on split sites.** Dropping an ETJ whose city already holds the site is right when it holds ALL of it and wrong when it holds part — the case that needs it most.
+
+**The coverage hole, measured (B280705):** the H-GAC "regional" ETJ layer carries **34 cities**; Baytown, Katy, Humble, La Porte, Deer Park, Friendswood, League City, Galveston and Tomball are not among them. Its registry row claimed "all cities". A missing city's ETJ therefore read identically to no ETJ. Baytown's own layer is now a registry row; every other gap now SAYS it is a gap.
+
+**Whole-portfolio re-sweep, all 28 sites: 27 correct · 0 mislabelled · 0 unresolved.** Seven rows first came back `ETJ · couldn't check` — the H-GAC org's documented 429 quota, exhausted by this session's own recording run, not a code fault; the service answered normally minutes later and all seven passed on re-run. That is exactly the flakiness B209507's honest-unknown machinery exists for, and it behaved correctly: it said "couldn't check" rather than "no ETJ".
+
+**Still pending (`Blocker: live-GIS` · `auth` · `real-data`) — unchanged from V73760 and attempted again:**
+- The on-screen rendering of the pill (the ⚑ and the new split wording) and the Yield panel's **"Two floodplain rules on this site"** line, on a signed-in saved project. The sandbox blocks the county PARCEL service, so no georeferenced parcel can be placed logged-out and the pill cannot be made to appear; the Cloudflare preview host is also unreachable from here. The logic behind all of it is unit-covered (`test/jurisdictionShapes.test.js`, 11 cases) and verified against live data — this is a rendering confirmation, not a correctness one.
+
 ### V73760 — B276752/B276753/B276755: the WHOLE portfolio, driven against the live agency services
 
 **Status: ✅ PASSED (2026-08-08) for every site the sandbox can reach — 27 of 28. One site (GREEN RIVER) has no active parcel geometry, so the app shows no badge and there is nothing to check.**

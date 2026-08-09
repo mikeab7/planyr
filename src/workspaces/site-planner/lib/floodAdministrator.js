@@ -217,6 +217,21 @@ export function assessAdministrator({ signals = {}, rules = {}, ffeFt = null, re
    * So "still loading" is unresolved, and it says so in its own words. */
   const pending = !!signals.jurisdictionPending;
   const unresolved = unresolvedRoles.length > 0 || pending;
+  /* ⛔ NEW-1a — JURISDICTION CAN VARY *WITHIN* A SITE, AND EVERYTHING BELOW ASSUMES IT CANNOT.
+   *
+   * Every number this module produces is one number for one site. That held while a site had one
+   * jurisdiction. It does not hold at Goose Creek: 6 of its 14 tested lots are inside the City of
+   * Baytown's limits and the other 8 are in Baytown's ETJ, which means the CITY's floodplain
+   * ordinance governs part of the site and the COUNTY's governs the rest. A single finished-floor
+   * figure is then wrong for one of those groups, and printing it as settled is the same class of
+   * error as the label that started this: a real spatial relationship collapsed into one word.
+   *
+   * This does NOT try to compute per-parcel elevations — the yield engine is site-wide from the
+   * ground up and that is a much larger change (owned by the follow-on item). What it does is
+   * refuse to present one number as settled, and NAME the split so the reader knows a second rule
+   * is in play and which lots it lands on. Refusing honestly is available now; the per-parcel
+   * ledger is not, and pretending otherwise is what this whole family of bugs is made of. */
+  const split = signals.jurisdictionSplit && signals.jurisdictionSplit.city ? signals.jurisdictionSplit : null;
   return {
     ...resolved,
     impliedFlood: impliedFloodElevation({ ffeFt, ffe: gov ? gov.ffe : null }),
@@ -230,7 +245,15 @@ export function assessAdministrator({ signals = {}, rules = {}, ffeFt = null, re
     unresolved,
     unresolvedRoles,
     pending,
-    settled: !unresolved && !!gov,
+    // NEW-1a — a split site is not UNRESOLVED (we know the answer) and not SETTLED (there are two
+    // answers). It gets its own state so a caller cannot accidentally treat it as either.
+    split: !!split,
+    splitDetail: split,
+    splitNote: split
+      ? `This site spans TWO floodplain authorities: ${split.inCity} of ${split.tested} drawn lots are inside the City of ${split.city}, whose ordinance governs those lots, and the rest are not. ` +
+        `One site-wide finished-floor elevation cannot be correct for both — confirm which parcels each rule applies to before setting pad elevations.`
+      : null,
+    settled: !unresolved && !split && !!gov,
     unresolvedNote: pending && !unresolvedRoles.length
       ? "Jurisdiction still being looked up. Until the city and ETJ answer, the candidate set is incomplete — " +
         `${ROLE_STAKES.etj}. The FFE rule is NOT settled yet.`

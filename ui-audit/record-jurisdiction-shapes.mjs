@@ -23,6 +23,9 @@ const SRC = {
   county: [JURISDICTION_SOURCES.county.url, "CNTY_NM"],
   city: [JURISDICTION_SOURCES.city.url, "city_name"],
   etj: [ETJ_SOURCES.find((s) => s.id === "etj_hgac").url, "CITY"],
+  /* NEW-1a — Baytown publishes its own ETJ because the H-GAC mosaic omits it; the layer carries a
+   * single jurisdiction, so it has no name column and every hit IS Baytown. */
+  etj_baytown: [ETJ_SOURCES.find((s) => s.id === "etj_baytown").url, null],
 };
 
 /* The four shapes NEW-3 names, and why each one is here. Coordinates come from the owner's own
@@ -31,7 +34,11 @@ const SHAPES = {
   "Gessner": "in-city — squarely inside Houston's limits",
   "Will Clayton": "in-city PLUS an ETJ — inside Humble's limits and inside Houston's ETJ",
   "Bain": "unincorporated INSIDE an ETJ — no city holds it, the Houston ETJ reaches it, Katy clips the edge",
-  "Goose Creek": "unincorporated with a city within 1 km — and the sweep found Baytown actually holds 6 of the 16 drawn parcels",
+  /* CORRECTED 2026-08-09 by the owner: "For goose creek part of the site is in city limits and part
+   * is in ETJ." Confirmed live per parcel — 6 of 14 tested lots inside Baytown's city limits, the
+   * other 8 inside Baytown's ETJ, NONE unincorporated. The original filing (and my first pass) read
+   * one origin point, which cannot see a straddle. */
+  "Goose Creek": "SPLIT — part inside Baytown's city limits, the rest inside Baytown's ETJ",
   /* A FIFTH shape the brief did not name, added because the portfolio sweep found a defect only it
    * can see: unincorporated land inside a city's ETJ where THAT SAME CITY also clips the parcel
    * edge. The ETJ was being deduped against every city the boundary touched, so the sliver
@@ -43,18 +50,22 @@ const SHAPES = {
 
 async function q(url, field, geom) {
   const u = new URL(url + "/query");
-  u.searchParams.set("f", "json"); u.searchParams.set("outFields", field);
+  u.searchParams.set("f", "json"); u.searchParams.set("outFields", field || "*");
   u.searchParams.set("inSR", "4326"); u.searchParams.set("outSR", "4326");
   u.searchParams.set("spatialRel", "esriSpatialRelIntersects");
   u.searchParams.set("returnGeometry", "false");
   u.searchParams.set("geometryType", geom.type); u.searchParams.set("geometry", JSON.stringify(geom.g));
-  for (let a = 0; a < 5; a++) {
+  for (let a = 0; a < 8; a++) {
     try {
       const r = await fetch(u, { signal: AbortSignal.timeout(30000) });
       const j = await r.json();
-      if (!j.error) return [...new Set((j.features || []).map((f) => f.attributes[field]).filter(Boolean).map(String))];
+      if (!j.error) {
+        // A layer with no name column answers by PRESENCE; the caller supplies the constant.
+        if (!field) return (j.features || []).length ? ["__present__"] : [];
+        return [...new Set((j.features || []).map((f) => f.attributes[field]).filter(Boolean).map(String))];
+      }
     } catch (_) { /* retry */ }
-    await new Promise((res) => setTimeout(res, 1500 * (a + 1)));
+    await new Promise((res) => setTimeout(res, 2500 * (a + 1)));
   }
   throw new Error("could not record " + url);
 }

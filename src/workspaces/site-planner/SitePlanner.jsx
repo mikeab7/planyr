@@ -12617,6 +12617,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // NEW-2 — and what has not been checked YET. Before the first identify returns there is no
       // ETJ candidate, and on 16 of 28 sites the ETJ is the rule that governs.
       jurisdictionPending: jurPending,
+      /* NEW-1a — when the site STRADDLES a city limit, two floodplain ordinances are in play and a
+       * single site-wide FFE is wrong for one group of lots. Hand the split down so the panel can
+       * refuse to print one settled number and say which lots are affected. */
+      jurisdictionSplit: jurBadge?.cityContainment === "partial" && (jurBadge?.partialCities || []).length
+        ? {
+            city: jurBadge.partialCities[0],
+            inCity: jurBadge.cityCoverage?.inCity ?? null,
+            tested: jurBadge.cityCoverage?.tested ?? null,
+          }
+        : null,
     },
     rules: buildRules,
     ffeFt: fmBuild && fmBuild.ffe ? fmBuild.ffe.requiredFfeFt : null,
@@ -26936,7 +26946,19 @@ function YieldPanel({
                         {drainage.administrator.governingLabel ? ` Provisionally ${drainage.administrator.governingLabel}${drainage.administrator.governingRuleText ? ` (${drainage.administrator.governingRuleText})` : ""} — do not rely on it until the jurisdiction is confirmed.` : ""}
                       </div>
                     )}
-                    {v.key === "ffe" && drainage.administrator && !drainage.administrator.unresolved && drainage.administrator.governingLabel && (
+                    {/* NEW-1a — a site that straddles a city limit has TWO floodplain authorities,
+                        so the one number above is wrong for one group of lots. This outranks the
+                        "Rule applied" line for the same reason the unresolved state does. */}
+                    {v.key === "ffe" && drainage.administrator && !drainage.administrator.unresolved && drainage.administrator.split && (
+                      <div data-testid="yield-ffe-split" style={{ fontSize: 10.5, color: "var(--warn-text)", lineHeight: 1.45, marginTop: 2, whiteSpace: "normal" }}
+                        title={drainage.administrator.splitNote || ""}>
+                        <b>Two floodplain rules on this site</b> — {drainage.administrator.splitDetail?.inCity != null && drainage.administrator.splitDetail?.tested != null
+                          ? `${drainage.administrator.splitDetail.inCity} of ${drainage.administrator.splitDetail.tested} drawn lots sit inside the City of ${drainage.administrator.splitDetail.city} and the rest do not`
+                          : `part of the site is inside the City of ${drainage.administrator.splitDetail?.city} and part is not`}, so one finished-floor figure cannot be right for both. Confirm which parcels each rule covers before setting pads.
+                        {drainage.administrator.governingLabel ? ` Shown: ${drainage.administrator.governingLabel}${drainage.administrator.governingRuleText ? ` (${drainage.administrator.governingRuleText})` : ""}.` : ""}
+                      </div>
+                    )}
+                    {v.key === "ffe" && drainage.administrator && !drainage.administrator.unresolved && !drainage.administrator.split && drainage.administrator.governingLabel && (
                       <div data-testid="yield-ffe-administrator" style={{ fontSize: 10.5, color: drainage.administrator.ambiguous ? "var(--warn-text)" : Y.muted, lineHeight: 1.45, marginTop: 2, whiteSpace: "normal" }}
                         title={`${drainage.administrator.selectionReason} Candidates: ${drainage.administrator.candidates.map((c) => c.label).join(" · ")}. ${drainage.administrator.governingSource || ""}`}>
                         Rule applied: <b>{drainage.administrator.governingLabel}</b>

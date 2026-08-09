@@ -188,6 +188,17 @@ export const SOURCE_FIXTURES = {
     { label: "Texas City (Galveston)", point: [-94.935, 29.4], expectMinCount: 1 }, // B209505 · live 2026-08-06: 1
   ],
   },
+  /* NEW-1a — two REAL points from the owner's Goose Creek site (`sms69x8rb2qk`), verified live
+   * 2026-08-09: one lot inside Baytown's city limits and one outside them, both inside Baytown's
+   * ETJ. This layer is why the ETJ half of that site is visible at all — H-GAC's regional mosaic
+   * does not carry Baytown. */
+  etj_baytown: {
+  fixtures: [
+    { label: "Goose Creek — lot inside Baytown city limits (also in ETJ)", point: [-95.004715, 29.805479], expectMinCount: 1 },
+    { label: "Baytown ETJ — north-east (Cedar Bayou side)", point: [-94.95, 29.86], expectMinCount: 1 },
+    { label: "Baytown ETJ — south (toward the bay)", point: [-94.98, 29.74], expectMinCount: 1 },
+  ],
+  },
   etj_austin: {
   fixtures: [
     { label: "Austin 2-mile ETJ (NW of the city)", point: [-97.8963, 30.3916], expectMinCount: 1 },
