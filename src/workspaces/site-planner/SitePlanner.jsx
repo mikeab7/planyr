@@ -7543,14 +7543,36 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (s.kind === "measure") return Number.isInteger(s.i) ? `measure:${s.i}` : null;
     return s.id ? `${s.kind}:${s.id}` : null;
   };
+  /* ⛔ NEW-1 (B278578) — THE ANCHOR IS A GESTURE, NOT A LATCH, AND THE FIRST VERSION OF THIS EFFECT
+   * MADE IT A LATCH. It shipped keyed on `[sel]` with `if (!key) return;` on a cleared selection, and
+   * that is two bugs in three lines: a DESELECT left the previous feature's anchor standing, and a
+   * press that did not CHANGE the selection never re-stamped it. Measured live on the owner's Bain
+   * plan (#965 on the edge): the first double-click on the 6×12 px stub opened Properties, and an
+   * immediate second one on the SAME stub failed back to the pre-fix signature — 28 grips, no panel.
+   * Deterministic over two full cycles, and the discriminators name the cause exactly: a SIX SECOND
+   * wait still failed (so it is not a time-based expiry) while ONE SINGLE CLICK ON ANOTHER FEATURE
+   * fixed it (so the latch is cleared by touching something else). Deselecting to bare canvas — which
+   * the harness verified by asserting `grips === 0` — did NOT clear it, because of that early return.
+   *
+   * TWO CHANGES, and together they make a stale anchor structurally impossible:
+   *  · **NO DEPENDENCY ARRAY.** It runs after EVERY commit, so the anchor cannot miss a press that
+   *    re-selected the feature that was already selected. A ref write is cheap; a missed one is a
+   *    dead gesture.
+   *  · **A CLEARED SELECTION CLEARS THE ANCHOR.** Nothing is in flight when nothing is selected.
+   *
+   * And "press 1 keeps the anchor" is now decided by the PRESS rather than by the key: if the anchor
+   * already held is still live for this press (same point, inside the double-click's own budget) it
+   * stands, whoever it names — which is what stops chrome that steals press 2 from re-pointing the
+   * gesture at itself. Otherwise it is re-stamped. The old `held.key !== key` clause could only ever
+   * hold an anchor against a DIFFERENT feature, which is the narrow half of the rule. */
   useLayoutEffect(() => {
     const key = selFeatureKey(sel);
-    if (!key) return;                       // a cleared selection ends nothing: the stale anchor times out on its own
+    if (!key) { gestureAnchorRef.current = null; return; }
     const p = lastPressRef.current;
     const held = gestureAnchorRef.current;
-    if (held && held.key !== key && gestureAnchorTarget(held, p)) return; // same gesture — press 1 keeps it
+    if (held && gestureAnchorTarget(held, p)) return;   // still in flight — press 1 keeps it
     gestureAnchorRef.current = { key, t: p.t, x: p.x, y: p.y };
-  }, [sel]);
+  });
   /* The anchor + this press, in the shape lib/featureTarget.js takes. `at.t` falls back to the same
    * monotonic clock `tapTime` uses, so the E2E hook (which has no event) is on one timeline with it. */
   const dblOpts = (e, x, y) => ({ anchor: gestureAnchorRef.current, at: { t: tapTime(e), x, y } });
@@ -7575,11 +7597,38 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
    * the gesture is half-finished. */
   const dblResolveRef = useRef(null);
   useEffect(() => { dblResolveRef.current = (x, y) => resolveDoubleClickTarget(hitStackAt(x, y), dblOpts(null, x, y)); });
+  /* ⛔ NEW-1 (B278578) — AND WHY IT ANSWERED THAT. The hook above returns a verdict; when a gesture
+   * fails on a plan this sandbox cannot hold, a verdict alone sends the next reader back to guessing
+   * (this item cost exactly that round). This returns the three facts that DECIDE the verdict — what
+   * the anchor names and how old it is, and what the hit stack offers — so a failure on the owner's
+   * own plan is diagnosed from the reading instead of reconstructed from it. Read-only, same E2E
+   * gate, and it takes NO reading between the presses of a gesture: call it before or after, never
+   * during (a probe that observes the middle of a gesture has changed the gesture). */
+  const dblWhyRef = useRef(null);
+  useEffect(() => {
+    dblWhyRef.current = (x, y) => {
+      const at = { t: tapTime(null), x, y };
+      const anchor = gestureAnchorRef.current;
+      const entries = hitStackAt(x, y);
+      return {
+        target: resolveDoubleClickTarget(entries, { anchor, at }),
+        anchor: anchor ? { key: anchor.key, ageMs: Math.round(at.t - anchor.t), dx: Math.round(at.x - anchor.x), dy: Math.round(at.y - anchor.y) } : null,
+        anchorApplies: !!gestureAnchorTarget(anchor, at),
+        selection: selFeatureKey(sel),
+        stack: entries.slice(0, 6).map((en) => `${en.feature || "-"}${en.handle ? "|handle" : ""}${en.dim ? "|dim" : ""}`),
+      };
+    };
+  });
   useEffect(() => {
     if (typeof window === "undefined" || !window.__PLANYR_E2E) return;
     const hook = (x, y) => (dblResolveRef.current ? dblResolveRef.current(x, y) : null);
+    const why = (x, y) => (dblWhyRef.current ? dblWhyRef.current(x, y) : null);
     window.__plannerHitTarget = hook;
-    return () => { if (window.__plannerHitTarget === hook) window.__plannerHitTarget = null; };
+    window.__plannerHitWhy = why;
+    return () => {
+      if (window.__plannerHitTarget === hook) window.__plannerHitTarget = null;
+      if (window.__plannerHitWhy === why) window.__plannerHitWhy = null;
+    };
   }, []);
 
   const addRectParcel = () => {

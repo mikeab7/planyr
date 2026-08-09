@@ -639,12 +639,33 @@ try {
    * all. That is exactly the half a grip kills: when press 2 lands on chrome, the feature's handler
    * never runs, the tap cannot pair, and only the native dblclick at the root is left. A harness
    * that cannot deliver one cannot see the bug. The presses stay separate; only the stamp changes. */
+  /* ⛔ AND IT TAKES NO READING BETWEEN THE TWO PRESSES — A PROBE THAT OBSERVES THE MIDDLE OF A
+   * GESTURE HAS CHANGED THE GESTURE. A `page.evaluate` between the presses costs hundreds of ms and
+   * pushes the pair past DBLTAP_MS, at which point it is two clicks, not a double-click, and it
+   * "reproduces" failures that mean nothing. (Measured: a 900 ms read between presses did exactly
+   * that.) The gap is therefore MEASURED from the events' own timestamps and asserted afterwards,
+   * never assumed — see `gestureGaps`. The deliberate exception is the two-press invariant, which is
+   * a SINGLE press followed by a question; it is not a double-click and does not claim to be. */
   async function doubleClick(x, y) {
+    await page.evaluate(() => { window.__pressTimes = []; });   // ⛔ the WINDOW is the gesture, not the session
     await page.mouse.move(x, y);
     await page.mouse.down({ clickCount: 1 }); await page.mouse.up({ clickCount: 1 });
     await page.mouse.down({ clickCount: 2 }); await page.mouse.up({ clickCount: 2 });
     await page.waitForTimeout(180);
+    return page.evaluate(() => window.__pressTimes.map((t, i, a) => Math.round(t - a[i - 1])).slice(1));
   }
+  /* Every press's OWN timeStamp (the gesture's clock, never the harness's — the same rule
+   * lib/doubleTap.js is built on). Raw timestamps rather than running gaps, because a gap carried
+   * across the reset measures the wrong pair: the first version recorded deselect→press-1 (852 ms)
+   * beside press-1→press-2 (34 ms) and reported the gesture as too slow. The instrument caught its
+   * own defect on its first run, which is the whole reason the gap is measured instead of assumed. */
+  await page.evaluate(() => {
+    window.__pressTimes = [];
+    document.querySelector('[data-testid="planner-canvas"]')
+      .addEventListener("pointerdown", (e) => window.__pressTimes.push(e.timeStamp), true);
+  });
+  const DBLTAP_MS = 350;
+  const gapOk = (gaps) => gaps.length > 0 && gaps.every((g) => g >= 0 && g < DBLTAP_MS);
 
   const targets = [
     ...ELS.map((e) => ({ id: e.id, kind: "el", drillOnly: !!e.drillOnly, gripProbe: !!e.gripProbe })),
@@ -743,8 +764,10 @@ try {
     await deselect();                          // …so the fingerprint below is read from a bare plan
     await page.waitForTimeout(420);
     const before = await settledFingerprint();
-    await doubleClick(pt.x, pt.y);
+    const gaps1 = await doubleClick(pt.x, pt.y);
     const opened = await panelOpen();
+    ok(`${name} — the probe delivered a real double-click (press gap inside DBLTAP_MS)`, gapOk(gaps1),
+      gapOk(gaps1) ? `${gaps1.join(",")} ms` : `⛔ press gap ${gaps1.join(",") || "none"} ms — this was not a double-click, so the verdict below means nothing`);
 
     if (t.drillOnly) {
       /* B261 drill-in: a GROUPED element's double-click selects the member and deliberately does
@@ -770,6 +793,31 @@ try {
         ok(`${name} — a second double-click does not CLOSE Properties`, stillOpen,
           stillOpen ? "" : "⛔ the panel was open before this gesture and gone after it");
       }
+
+      /* ── ⛔ HALF THREE — THE REPEAT GESTURE, AND NOTHING IN THIS SUITE REPEATED ONE BEFORE. ────
+       *
+       * B278578, live on the owner's Bain plan with #965 on the edge: the FIRST double-click on the
+       * 6×12 px stub opened Properties, and an immediate SECOND one on the same stub failed straight
+       * back to the pre-fix signature — 28 grips, no panel. Deterministic over two full cycles. The
+       * discriminators named the cause: a six-second wait still failed (so not a time expiry) while
+       * one single click on ANOTHER feature fixed it (so a per-feature latch), and deselecting to
+       * bare canvas did NOT clear it.
+       *
+       * ⛔ THIS IS THE TEXTURE OF THE ORIGINAL REPORT — it works, then it does not, then it does —
+       * AND A SUITE THAT DOUBLE-CLICKS EACH FEATURE ONCE SHIPS GREEN THROUGH IT. So the gesture is
+       * run TWICE on the same target, with a verified deselect between, exactly as a user repeats
+       * it. Run for every feature, like identifies-not-edits and never-closes-a-panel, because a
+       * guard that names one component protects one component. */
+      await closePanel();
+      const zeroed2 = await deselect();
+      await page.waitForTimeout(420);
+      const gaps2 = await doubleClick(pt.x, pt.y);
+      const reopened = await panelOpen();
+      ok(`${name} — the SAME feature double-clicks a SECOND time (B278578)`, zeroed2 === 0 && gapOk(gaps2) && reopened,
+        zeroed2 !== 0 ? `⛔ PRECONDITION: the deselect left ${zeroed2} selection node(s)`
+          : !gapOk(gaps2) ? `⛔ press gap ${gaps2.join(",")} ms — not a double-click`
+            : reopened ? `gap ${gaps2.join(",")} ms`
+              : "⛔ it opened the first time and not the second — a per-gesture latch survived the deselect");
     }
 
     /* HALF TWO-AND-A-HALF — IT IDENTIFIES, IT DOES NOT EDIT (NEW-1). Read from a bare plan on both
