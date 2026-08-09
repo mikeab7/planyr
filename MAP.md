@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-08-09 @ `536a4f4` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-08-09 @ `1c41514` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_494 source files mapped._
+_495 source files mapped._
 
 ## infra
 
@@ -695,6 +695,8 @@ _494 source files mapped._
   - _exports_: `commonStyleState`, `selectionRingFeet`, `styleCapsOf`
 - **`src/workspaces/site-planner/lib/multiwriter.js`** — the B674 multi-writer switch: default-ON code constant + the `planyr.multiwriter=off` localStorage escape hatch (no build-time env var)
   - _exports_: `MULTIWRITER_DEFAULT`, `MULTIWRITER_KEY`, `multiwriterEnabled`
+- **`src/workspaces/site-planner/lib/newProjectSharing.js`** — Which team a NEWLY CREATED project is born shared with (B326416/B326418): the pure fail-closed resolution over (account preference, your teams) plus the cached runtime half the two creation entry points await. Every ambiguity denies; a solo user resolves to private through the first branch. The real scope guarantee is in the DB (`db/team_share_default.sql`).
+  - _exports_: `DEFAULT_SHARE_PREF`, `defaultShareTeam`, `normalizeSharePref`, `primeShareContext`, `resetShareContext`, `resolveNewPlanTeam`, `resolveNewProjectTeam`, `SHARE_REASONS`
 - **`src/workspaces/site-planner/lib/nhdFlowline.js`** — USGS NHD hydrography decoding (B1072, pure): FType code → plain English (canal/ditch, stream/river…), watercourse title/summary, and the standing inventory-not-a-regulatory-product caveat
   - _exports_: `flowlineSummary`, `flowlineTitle`, `ftypeLabel`, `NHD_FTYPE`, `NHD_INVENTORY_NOTE`
 - **`src/workspaces/site-planner/lib/numEditBox.js`** — where the inline numeric editor paints and at what size: in-place chip box, floating fallback, the not-bigger-than-its-spawn invariant, keyboard nudge
@@ -846,7 +848,7 @@ _494 source files mapped._
 - **`src/workspaces/site-planner/lib/setbackRoles.js`** — the regulatory setback tier: auto-assigns Front / Side / Street side / Rear to every side from frontage geometry, honours the user's own assignment, and groups the boundary into the four ordinance rows
   - _exports_: `autoAssignRoles`, `hasRoleOverrides`, `isRole`, `resolveOverrides`, `resolveRoles`, `ROLE_LABEL`, `ROLE_SHORT`, `roleGroups`, `roleRuns`, `runOverridden`, `runRole`, `SETBACK_ROLES`, `setRunOverride`, `setRunRole`, `shiftOverridesOnDelete`, `shiftOverridesOnInsert`, `STREET_ABUT_FT`
 - **`src/workspaces/site-planner/lib/sharing.js`** — Project team sharing: stamp/clear team_id on a group's sites, doc_reviews, and file_facts then re-pull the local cache
-  - _exports_: `makeProjectPrivate`, `shareProject`
+  - _exports_: `makeProjectPrivate`, `setPlanLock`, `shareProject`
 - **`src/workspaces/site-planner/lib/sheetFurniture.js`** — Map sheet furniture: graphic scale bar and two-tone north arrow, output-unit sized with no-occlude corner placement, screen + export
   - _exports_: `calibBadgePlacement`, `canvasPillBottom`, `furnitureMetrics`, `northArrowPlate`, `pickScaleBar`, `r2`, `scaleBarPlate`, `screenFurniturePlates`
 - **`src/workspaces/site-planner/lib/sheetFurnitureLayout.js`** — Export-only sheet-furniture tier split out of `sheetFurniture.js` (no-occlude corner placement + the SVG-string builders) so it rides the lazy export chunk instead of the Site route's boot chunk

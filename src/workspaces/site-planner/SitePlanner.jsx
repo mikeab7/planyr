@@ -17010,6 +17010,38 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   /* ------------ Plans dropdown grouping (this site's plans vs. other sites) ------------ */
   const planGroup = (s) => s.groupId || s.id;
   const plansHere = (sites || []).filter((s) => planGroup(s) === groupId);
+
+  /* B326417 — the per-plan lock. `teamId` / `ownerId` / `shareLocked` are read-time overlays of
+   * the DB COLUMNS (cloudSync.cloudList), never the stored jsonb, so this reflects what the server
+   * actually enforces rather than what a stale in-memory model believes.
+   *
+   * `canLock` is deliberately narrow: a SHARED plan (nobody to lock out otherwise) that YOU own
+   * (a teammate's attempt is refused by RLS and the guard trigger, so offering it would be a lie —
+   * CHROME-NEVER-EATS-A-PRESS's sibling failure, a control that cannot do what it says).
+   * `ownerId` absent means a local/pre-migration record, which is only ever your own. */
+  const planRecord = (sites || []).find((s) => s.id === siteId) || null;
+  const planShareState = {
+    locked: !!(planRecord && planRecord.shareLocked),
+    canLock: !!(planRecord && planRecord.teamId && (!planRecord.ownerId || planRecord.ownerId === activeUid())),
+  };
+  const [lockBusy, setLockBusy] = useState(false);
+  const togglePlanLock = async () => {
+    if (!siteId || lockBusy) return;
+    setLockBusy(true);
+    try {
+      // Lazy import: the sharing module is signed-in-only and has no business on the planner's
+      // critical-path chunk (the bundle-budget audit charges the Site route for a static edge).
+      const { setPlanLock } = await import("./lib/sharing.js");
+      const r = await setPlanLock(siteId, !planShareState.locked);
+      // LOUD-FAILURE: a refused lock says so. A padlock that silently didn't take is exactly the
+      // "saved ✓ that didn't save" class this repo keeps paying for.
+      if (!r.ok) flashWarn(r.error || "Couldn’t change the lock.");
+      else { onSiteSaved?.(); flashWarn(r.locked ? "Locked — teammates can view this plan but not change it." : "Unlocked — teammates can edit this plan again."); }
+    } catch (e) {
+      flashWarn((e && e.message) || "Couldn’t change the lock.");
+    } finally { setLockBusy(false); setPlanMenu(false); }
+  };
+
   const otherSites = (() => {
     const seen = new Set([groupId]), out = [];
     (sites || []).forEach((s) => { const g = planGroup(s); if (!seen.has(g)) { seen.add(g); out.push(s); } });
@@ -17058,7 +17090,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 2 }}>
                 <button style={{ ...menuItem(cur), flex: 1, minWidth: 0 }} onClick={() => (cur ? setPlanMenu(false) : handleOpenSite(s.id))}>
                   <span style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8 }}>
-                    <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.name || "Untitled plan"}</span>
+                    <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {s.shareLocked && <span aria-label="View-only for teammates" title="View-only for teammates" style={{ marginRight: 4 }}>🔒</span>}
+                      {s.name || "Untitled plan"}
+                    </span>
                     {cur && <span style={{ color: PAL.accentText, fontSize: 10.5, fontWeight: 700, flex: "none" }}>current</span>}
                   </span>
                 </button>
@@ -17083,6 +17118,22 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             title="Restore an earlier automatically-saved version of this plan">
             <span aria-hidden style={{ flex: "none" }}>↺</span><span>Version history…</span>
           </button>
+          {/* B326417 — the per-plan view-only lock. Plan-scoped, so it belongs in the plan menu
+              (everything above this line is plan-scoped too; see the B286000 caption below).
+              Shown only for a SHARED plan you OWN: on a private plan there is nobody to lock out,
+              and on a teammate's plan the control would be a lie — RLS and the guard trigger both
+              refuse it. The row also states the current state rather than only offering the verb,
+              so a locked plan is visibly locked without opening anything. */}
+          {planShareState.canLock && (
+            <button style={{ ...menuItem(false), marginTop: 2, display: "flex", alignItems: "center", gap: 8 }}
+              disabled={lockBusy} onClick={togglePlanLock}
+              title={planShareState.locked
+                ? "Teammates can view this plan but not change it. Click to let them edit again."
+                : "Teammates can edit this plan. Click to make it view-only for them."}>
+              <span aria-hidden style={{ flex: "none" }}>{planShareState.locked ? "🔒" : "🔓"}</span>
+              <span>{planShareState.locked ? "Locked — teammates can view only" : "Lock to view-only for teammates"}</span>
+            </button>
+          )}
           {/* ⛔ B286000 — "This device" IS THE WHOLE POINT OF THIS CAPTION, and Storage staying put
               is a DECIDED trade rather than an oversight. Everything above this line is plan-scoped
               (plan name, plans in this site, New plan, Duplicate, Save now, Version history);

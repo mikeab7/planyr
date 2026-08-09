@@ -16,15 +16,23 @@
 import { supabase } from "./supabase.js";
 import { setAccountStyleDefaults } from "./planStyle.js";
 import { setAccountMeasureDefaults } from "./measureStyle.js";
+import { DEFAULT_SHARE_PREF, normalizeSharePref } from "./newProjectSharing.js";
 
 const MIRROR_KEY = "planyr:userPrefs:v1";
 
 /** The shape we care about today. Additive: a new preference is a new key, never a migration. */
-export const EMPTY_PREFS = { planStandards: { parcelStyle: {}, typeStyles: {}, measureStyle: {} } };
+export const EMPTY_PREFS = {
+  planStandards: { parcelStyle: {}, typeStyles: {}, measureStyle: {} },
+  // B326418 — whether a NEW project is born shared with your team, and which team. Absent means
+  // default-ON (see newProjectSharing.js), so an account that has never opened the switch behaves
+  // as the owner asked. It only ever affects projects created from here on.
+  newProjectSharing: DEFAULT_SHARE_PREF,
+};
 
 const normalize = (p) => ({
   ...EMPTY_PREFS,
   ...(p && typeof p === "object" ? p : {}),
+  newProjectSharing: normalizeSharePref(p && p.newProjectSharing),
   planStandards: {
     parcelStyle: { ...((p && p.planStandards && p.planStandards.parcelStyle) || {}) },
     typeStyles: { ...((p && p.planStandards && p.planStandards.typeStyles) || {}) },

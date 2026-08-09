@@ -1076,6 +1076,11 @@ export function createSiteModel(p = {}, { onHeal } = {}) {
     // flat + back-compatible: an old record has neither → both null → behaves exactly as before.
     teamId: p.teamId || null,
     ownerId: p.ownerId || null,
+    // B326417 — the owner's per-plan view-only lock. Like teamId/ownerId this is a read-time
+    // overlay of a DB COLUMN (`sites.share_locked`), stripped again by `slimForCloud` before any
+    // write, so the model never carries a second, staler copy of an access decision. An old
+    // record has no key → false → today's behaviour exactly.
+    shareLocked: !!p.shareLocked,
     // cross-module connection hint (B-cross-module, schema v9; additive). A project (= site
     // group) and a Schedule (Sequence Planyr) project live in SEPARATE cloud backends that
     // can't read each other, so the canonical pairing is stored on the schedule record

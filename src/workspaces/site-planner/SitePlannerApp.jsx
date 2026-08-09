@@ -5,7 +5,14 @@ import AppHeader from "../../shared/ui/AppHeader.jsx";
 import { defaultOverlayState } from "./lib/layers.js";
 import { testConnection, supabaseConfigured, connectionInfo } from "./lib/supabase.js";
 import { onAuthChange } from "./lib/auth.js";
-import { claimInvites } from "./lib/teams.js";
+import { claimInvites, listMyTeams } from "./lib/teams.js";
+import { primeShareContext, defaultShareTeam, resetShareContext, resolveNewPlanTeam } from "./lib/newProjectSharing.js";
+import { loadUserPrefs } from "./lib/userPrefs.js";
+
+/* B326416 — the loaders the default-sharing resolution needs. Both modules are already on the
+ * Site route's own tier (`SitePlanner.jsx` imports userPrefs statically), so these are plain
+ * static edges and add no chunk. */
+const SHARE_LOADERS = { loadPrefs: loadUserPrefs, listTeams: listMyTeams };
 import { migrateOldAutosave, migrateSiteGroups, migrateScenarios, initHistoryStore, loadSitesList, loadPlansOfGroup, renameSiteGroup, repairSplitProjectNames, groupOf, loadSite, saveSite, deleteSite, getCurrentSiteId, setCurrentSiteId, setActiveUser, pushSiteToCloud, pullCloud, importLegacyIntoCloud, pendingLegacyCount, stageLegacySite, discardLegacySite } from "./lib/storage.js";
 import { idbPersist } from "./lib/localDb.js";
 /* LOADED ON DEMAND (B1092). The legacy-import review modal is signed-in-only and opens
@@ -173,6 +180,11 @@ export default function App({
       // after signup) BEFORE pulling, so a freshly-joined team's shared projects come down in
       // the same pull. Best-effort — never blocks loading the user's own sites.
       await claimInvites().catch(() => {});
+      // B326416 — warm the default-sharing answer (account preference + your teams) right after
+      // invites are claimed, so the FIRST project created in this session already knows whether it
+      // is born shared. Best-effort: a failure leaves the context unset, and an unset context
+      // resolves to "private" rather than guessing.
+      primeShareContext(uid, SHARE_LOADERS).catch(() => {});
       if (seq !== applySeq.current) return; // superseded by a newer auth event
       const res = await pullCloud(uid).catch(() => ({ ok: false }));
       if (seq !== applySeq.current) return; // superseded by a newer auth event — don't apply stale cloud/view state (B43)
@@ -199,6 +211,11 @@ export default function App({
       else { setActiveSiteId(null); setMode("map"); }  // NEW-5: NOT a user exit — the URL writer keeps the route (mayWriteRouteProject)
       refreshSites();
     } else {
+      // B326416 — the sharing context is one user's preference and one user's team list, so it
+      // must not survive a sign-out into the next account. (Unlike the cloud cache below, this is
+      // cheap to rebuild and dangerous to keep: a stale team here would share the wrong person's
+      // project. It re-primes on the next sign-in.)
+      resetShareContext();
       // Deliberately DON'T wipe the per-user cloud cache here. supabase-js also emits
       // SIGNED_OUT for a transient token-refresh failure, and clearing the cache on that
       // made signed-in work vanish (B124). The cache is keyed per-uid and only read while
@@ -330,12 +347,17 @@ export default function App({
   const openSite = (id) => { if (loadSite(id)) goPlan(id); };
 
   // A fresh selection from the map → a brand-new site, with its first plan.
-  const newSiteFromMap = (payload) => {
+  // B326416 — this is one of exactly TWO places a new PROJECT is born, and therefore one of the two
+  // places the team default is resolved. The await is on a warmed cache (primed at sign-in), and it
+  // sits BEFORE `saveSite` on purpose: `team_id` is written only on the row's INSERT, so a team
+  // stamped afterwards would need an UPDATE — which the database now refuses outright.
+  const newSiteFromMap = async (payload) => {
     const id = newId();
     const parcels = (payload.parcels || [])
       .filter((p) => p.points?.length >= 3)
       .map((p, i) => ({ id: `p${id}_${i}`, points: p.points, locked: true, addr: p.addr || null, acct: p.acct || null, attrs: p.attrs || null }));
-    saveSite({ id, groupId: id, site: payload.name || "Untitled site", name: "Concept A", origin: payload.origin || null, county: payload.county || null, parcels, els: [], measures: [], settings: {}, underlay: payload.underlay || null });
+    const { teamId } = await defaultShareTeam(signedInUid, SHARE_LOADERS);
+    saveSite({ id, groupId: id, site: payload.name || "Untitled site", name: "Concept A", origin: payload.origin || null, county: payload.county || null, parcels, els: [], measures: [], settings: {}, underlay: payload.underlay || null, teamId });
     pushLoud(id, "The new site"); // mirror to cloud when logged in (no-op otherwise); loud on failure (NEW-F6)
     // Seed this new project's standard folder tree + mirror it to Google Drive (B650). Idempotent
     // and graceful (no-op signed-out / Drive off); a dynamic import keeps the folder code off the
@@ -357,12 +379,14 @@ export default function App({
    * layer, contours and the county rules are on from the first click, and the plan can never be
    * stranded in blank space. That one DOES get written immediately — an anchor is a fact worth
    * keeping even before anything is drawn (and `persistOrDrop` keeps a blank plan that has one). */
-  const newBlankSite = (opts) => {
+  const newBlankSite = async (opts) => {
     const id = newId();
     const o = opts && opts.origin && Number.isFinite(opts.origin.lat) && Number.isFinite(opts.origin.lon)
       ? { lat: opts.origin.lat, lon: opts.origin.lon } : null;
     if (o) {
-      saveSite({ id, groupId: id, site: opts.name || "Untitled site", name: "Concept A", origin: o, county: opts.county || null, parcels: [], els: [], measures: [], settings: {} });
+      // B326416 — the second (and last) birthplace of a project. See newSiteFromMap.
+      const { teamId } = await defaultShareTeam(signedInUid, SHARE_LOADERS);
+      saveSite({ id, groupId: id, site: opts.name || "Untitled site", name: "Concept A", origin: o, county: opts.county || null, parcels: [], els: [], measures: [], settings: {}, teamId });
       pushLoud(id, "The new site"); // mirror to cloud when logged in; loud on failure
       refreshSites();
     }
@@ -478,8 +502,12 @@ export default function App({
     if (!src) return;
     const group = groupOf(src);
     const id = newId();
+    // B326416 — a new PLAN inherits its PROJECT's sharing; it never consults the account default.
+    // That is what keeps "new projects only" honest from the other direction: adding a plan to an
+    // old private project must not be a back door that shares it.
+    const { teamId } = resolveNewPlanTeam(loadPlansOfGroup(group));
     saveSite({ id, groupId: group, site: src.site || src.name, name: nextConceptForGroup(group),
-      origin: src.origin || null, county: src.county || null, parcels: src.parcels || [], els: [], measures: [], settings: src.settings || {}, underlay: src.underlay || null });
+      origin: src.origin || null, county: src.county || null, parcels: src.parcels || [], els: [], measures: [], settings: src.settings || {}, underlay: src.underlay || null, teamId });
     pushLoud(id, "The new plan"); // NEW-F6
     refreshSites();
     goPlan(id);
@@ -491,7 +519,11 @@ export default function App({
     if (!src) return;
     const group = groupOf(src);
     const id = newId();
-    saveSite({ ...src, id, groupId: group, name: `${src.name || "Plan"} (copy)` });
+    // Inherit from the PROJECT (not from `src`, whose in-memory copy can predate a share/unshare).
+    // A copy is also a fresh plan, so it must never carry the source's lock — the owner locks a
+    // specific plan, not a lineage.
+    saveSite({ ...src, id, groupId: group, name: `${src.name || "Plan"} (copy)`,
+      teamId: resolveNewPlanTeam(loadPlansOfGroup(group)).teamId, shareLocked: false });
     pushLoud(id, "The duplicated plan"); // NEW-F6
     refreshSites();
     goPlan(id);
