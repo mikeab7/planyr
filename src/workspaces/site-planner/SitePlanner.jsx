@@ -4567,7 +4567,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       addParcel: (pc) => setParcels((a) => [...a, pc]),
       selectParcel: (id) => { setSel({ kind: "parcel", id }); setLeftPanel("parcel"); },
       parcelDefaultStyle: () => parcelDefaultStyle(settings),
-      deed: () => deedLib(), deedGroupMembers, deedMainOf,
+      deedLib: () => deedLib(), deedGroupMembers, deedMainOf, // NOT `deed:` — that name is B570's guard subject (the flyout handler)
     };
   };
   const cmds = () => (placeCmds || loadPlaceCmds());

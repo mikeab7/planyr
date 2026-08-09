@@ -110,8 +110,6 @@ export const nudgeOrigin = originAtOffset;
 
 // ── rotating the plan ────────────────────────────────────────────────────────────────
 
-const isPt = (p) => p && typeof p === "object" && Number.isFinite(p.x) && Number.isFinite(p.y);
-
 /* Rotate a point about a pivot. Positive `deg` turns CLOCKWISE on screen, which — in a frame
  * whose +y points SOUTH — is the same sense as a compass bearing and as deedAlign's rotation. */
 export function rotPt(p, deg, pivot) {

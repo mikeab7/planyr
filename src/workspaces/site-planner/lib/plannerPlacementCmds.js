@@ -122,7 +122,7 @@ export function nudgePlan(ctx, dxFt, dyFt) {
  * An OPEN traverse is refused LOUDLY rather than quietly closed: a boundary is not the place to
  * guess at a missing call. */
 export function promoteDeedToParcel(ctx, id) {
-  const misclosure = ctx.deed().misclosure;
+  const misclosure = ctx.deedLib().misclosure;
   const m = ctx.markups().find((x) => x.id === id && x.kind === "encumbrance");
   if (!m || !(m.pts && m.pts.length >= 3)) { ctx.flashWarn("Select a plotted deed boundary first.", 5000); return; }
   const members = ctx.deedGroupMembers(m);
