@@ -284,8 +284,18 @@ function buildabilityVerdict(d) {
    * instead of the number. The elevation is still reachable — the FFE detail line under the row
    * carries it, labelled provisional — but the one-line verdict never asserts a settled floor off an
    * incomplete candidate set. */
-  if (d.administrator && d.administrator.unresolved) {
-    return row("?", "warn", "FFE rule not settled — jurisdiction unknown", { sortRank: 1, ffeUnsettled: true });
+  /* NEW-1a — the SPLIT case refuses for a sharper reason than the unresolved one: there the
+   * jurisdiction is unknown, here it is KNOWN and there are two of it, and a one-line "pads pass at
+   * X′" is a claim about the whole site that is false for whichever lots the other ordinance
+   * governs. Both are the same VERDICT (an unsettled FFE) so they share one line and differ only in
+   * the reason — PANEL-BREVITY: this adds a state without adding a line. */
+  if (d.administrator && (d.administrator.unresolved || d.administrator.split)) {
+    /* PANEL-BREVITY, and it is a genuine collapse rather than a deletion: the verdict row states
+     * the VERDICT and the line immediately beneath it — `yield-ffe-unresolved` or the new
+     * `yield-ffe-split` — already names which case this is and why, in full. Carrying the reason
+     * here as well printed it twice. Measured: 14 lines / 685 chars before, 13 / 615 after, so this
+     * adds a whole new state (a split jurisdiction) while giving the panel back a line. */
+    return row("?", "warn", "FFE rule not settled", { sortRank: 1, ffeUnsettled: true });
   }
   if (ffe.status === "pass") return row("OK", "good", `pads pass at ${fmtAcFt(ffe.requiredFfeFt)}′ FFE`);
   if (ffe.status === "assumed") return row("OK", "neutral", `pads assumed at ${fmtAcFt(ffe.requiredFfeFt)}′ FFE`);

@@ -536,6 +536,20 @@ rules are binding shorthand, not optional style. (Full-text home so briefs stay 
      clear space keeps its own action and does NOT claim to be the feature. **A gesture whose contract
      is "open Properties" must never edit the plan, and never CLOSE a panel that was already open** —
      both are now asserted for every feature by `audit-doubleclick-properties`.
+  7. **⛔ THE SIXTH INSTANCE — CHROME ARMED BY THE CURSOR MERELY *RESTING* ON IT (B280402), and it is
+     the one clause 4 cannot reach.** Clause 4 says chrome mounted by the FIRST PRESS is invisible to
+     any check that reads the DOM before the interaction. This is worse: the parcel acreage badge
+     becomes a hit target on HOVER (B1327/NEW-4 moved the gate from selection to hover so the badge
+     could be dragged at all), and **a cursor resting on a point is exactly what a cursor does between
+     the two presses of a double-click**. Measured on the owner's plan and reproduced: at one point,
+     nothing selected, the stack reads `["el:<stub>"]` after touching another feature and
+     `["parcel:<lot>", "el:<stub>"]` after resting on it — **the parcel does not move above the
+     element, IT ENTERS**, and the element is still there, second, unchanged. It is not paint order and
+     not a pointer-events flip on the element (both proven identical across the two states). **So the
+     probe shape is: park the cursor, let it arm whatever it arms, and RE-ASK** — every other check in
+     this repo reads after a click, never after a plain hover. Fix shape: chrome that is a manipulation
+     affordance is IDENTITY-TRANSPARENT wherever it lives — `data-chrome` joins `data-handle-layer` in
+     the resolver — while keeping its own press, so the badge still drags.
   Precedents: **B1174** (measurement chips), **B1327** (the parcel acreage badge — the third instance, and the
   reason this is a named rule; regressed by B1186 moving the badge anchor to `polylabel`), and **B50010** (an
   element's own DIMENSION NUMBER — a road's is anchored to the centreline midpoint, so it is painted ON the
@@ -599,7 +613,18 @@ rules are binding shorthand, not optional style. (Full-text home so briefs stay 
      call to NAME itself so a failure says which run is void. **There is no list left to rot, and a new
      harness cannot be written without it.**
   4. **An "unreadable" visibility state is refused too** — a harness that cannot check cannot vouch.
-  5. **⛔ AND ITS SIBLING: A PROBE THAT OBSERVES THE MIDDLE OF A GESTURE HAS CHANGED THE GESTURE.**
+  5. **⛔ AND AN INSTRUMENT BUILT TO ANSWER "WHY DID IT FAIL ON HIS MACHINE" HAS TO BE ARMABLE ON HIS
+     MACHINE (B280403).** A read-only diagnostic hook shipped gated on `window.__PLANYR_E2E` — read
+     ONCE AT MOUNT by an effect with `[]` deps — so it was unreachable on the owner's signed-in
+     production tab, which is the only place the defect it was built for exists. The session that
+     needed it armed the flag by hand and forced a remount by switching plans and back; that is
+     folklore, not a feature. **Rule: gate a diagnostic at CALL time, never at mount, and give it a
+     way in that needs no console — `?planyrDiag=1` (latched into `sessionStorage`, so an in-app
+     navigation does not disarm it mid-diagnosis) or the session key.** The boundary that makes this
+     safe and must not be widened: arming exposes READ-ONLY answers, writes nothing, changes no
+     behaviour, and is session-scoped. It is not a debug mode and may never gate anything that
+     mutates. (`lib/diagArm.js`; guards in `test/diagArm.test.js`.)
+  6. **⛔ AND ITS SIBLING: A PROBE THAT OBSERVES THE MIDDLE OF A GESTURE HAS CHANGED THE GESTURE.**
      A reading taken BETWEEN the two presses of a double-click costs hundreds of ms and pushes the
      pair past `DBLTAP_MS` — at which point it is two clicks, not a double-click, and it will
      "reproduce" failures that mean nothing. Measured: a 900 ms read between presses manufactured

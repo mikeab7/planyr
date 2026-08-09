@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-08-09 @ `cf4f77b` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-08-09 @ `44f9759` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_455 source files mapped._
+_456 source files mapped._
 
 ## infra
 
@@ -455,6 +455,8 @@ _455 source files mapped._
   - _exports_: `DEFAULT_RATIONAL_METHOD_MAX_ACRES`, `selectDetentionMethod`
 - **`src/workspaces/site-planner/lib/detentionRules.js`** — Houston-MSA detention criteria as versioned rule-records + drainage-authority resolver, analysis-tier / hydraulic-regime assessors, and pond auto-size solvers; no volume ships without its rule record
   - _exports_: `assessAnalysisTier`, `assessHydraulicRegime`, `AUTHORITY_SHORT`, `authorityForJurisdiction`, `BKDD_OVERLAY_DETAIL`, `BKDD_OVERLAY_SHORT`, `computePumpedCredit`, `computeRateBasedDetention`, `computeRequiredDetention`, `COUNTY_AUTHORITY`, `deadStoragePoolDepthFt`, `DESIGN_STORM_PERIODS`, `DESIGN_STORMS`, `designStorm24hrDepthIn`, `DETENTION_AUTHORITY_CHOICES`, `DETENTION_RULES`, `DETENTION_SOURCES`, `effectiveChannelDischarge`, `effectiveReviewer`, `governingRequirement`, `hydrateDrainageContext`, `interpolateCurve`, `MUNICIPAL_OVERLAYS`, `PARCEL_DISTRICT_TYPES`, `pondAutoValues`, `pondDefaultsFor`, `rateFromImpervious`, `resolveDrainageAuthority`, `resolveDrainageContext`, `ruleBadge`, `ruleFor`, `runoffCoefficient`, `SCREENING_CAVEAT`, `screenOutfall`, `slimDrainageContext`, `solvePondDepth`, `solvePondExpansion`, `SQFT_PER_ACRE`, `stormIntensity`, `TIER_THRESHOLDS`, `WATERSHED_OVERLAYS`
+- **`src/workspaces/site-planner/lib/diagArm.js`** — arms the planner's READ-ONLY resolution diagnostics on a live tab: the gate is read at CALL time (never at mount, which is what made the hooks unreachable in production) from `window.__PLANYR_E2E`, a session key, or `?planyrDiag=1`, which latches so an in-app plan switch keeps it
+  - _exports_: `DIAG_KEY`, `DIAG_PARAM`, `isDiagArmed`, `latchDiagArm`
 - **`src/workspaces/site-planner/lib/dimSlide.js`** — Pure geometry constraining a footprint dimension callout to slide along the long axis, off dog-ear bumps, with collision AABB
   - _exports_: `clampDimOffset`, `DIM_POS_F_DEFAULT`, `DIM_POS_F_ROAD`, `dimNumberBox`, `dimSlideRange`
 - **`src/workspaces/site-planner/lib/districtFacilities.js`** — PR-K/K7 drainage-district facilities ingest scaffold: discover BKDD ArcGIS REST services behind its Web AppBuilder viewer (injectable fetch, graceful degradation), classify a DISTRICT floodway/ROW distinct from a FEMA floodway, name the receiving channel
@@ -520,7 +522,7 @@ _455 source files mapped._
 - **`src/workspaces/site-planner/lib/featureHoverAttach.js`** — lazily-loaded attach layer for the vector overlays' hover identify: binds the sticky tooltip on an esri featureLayer and installs the planner-canvas `identifyAt` accessor, kept off the boot bundle to pay the bundle budget.
   - _exports_: `attachFeatureCanvasIdentify`, `wireFeatureHover`
 - **`src/workspaces/site-planner/lib/featureTarget.js`** — which feature a canvas double-click is about, resolved at the SVG root off the live hit stack (plus the dimension-number-over-body test)
-  - _exports_: `EL_DIM_ATTR`, `FEATURE_ATTR`, `FEATURE_KINDS`, `gestureAnchorTarget`, `HANDLE_ATTR`, `parseFeatureKey`, `pressIsOverElementBody`, `resolveDoubleClickTarget`, `stackEntries`
+  - _exports_: `CHROME_ATTR`, `EL_DIM_ATTR`, `FEATURE_ATTR`, `FEATURE_KINDS`, `gestureAnchorTarget`, `HANDLE_ATTR`, `parseFeatureKey`, `pressIsOverElementBody`, `resolveDoubleClickTarget`, `stackEntries`
 - **`src/workspaces/site-planner/lib/ffeBalance.js`** — grading milestone (DECISION 3): the balance-optimal finished-floor solver (`solveBalanceFfe` floats the pad UP off the regulatory code minimum to reuse basin spoil as fill, never below it) + the dual FFE readout (`ffeDualDisplay`, "FFE X (code floor Y + Z for balance)"). The net earthwork residual is reported in CY (owner preference), not truckloads. Pure, Node-tested.
   - _exports_: `ffeDualDisplay`, `solveBalanceFfe`
 - **`src/workspaces/site-planner/lib/floodAdministrator.js`** — NEW-8 governing floodplain administrator: candidate resolution from county/city/ETJ/edge signals, deliberate strictest-wins selection with an ambiguity flag, and the BFE back-solved from an assumed FFE
@@ -566,7 +568,7 @@ _455 source files mapped._
 - **`src/workspaces/site-planner/lib/inwardBerm.js`** — v3 D1/D5 INWARD berm geometry (outer-toe model): the drawn polygon is the FIXED outer toe; a rim above grade builds the berm INWARD (crest = toe inset by extSlope·h), shrinking the water surface with diminishing returns up to a geometric ceiling where the footprint pinches closed. Also the COMPUTED berm cap (drainage cap vs geometric ceiling, D5). Pure — feeds pondGeom the crest ring; no storage math of its own.
   - _exports_: `bermNeedsInlets`, `bermPinched`, `bermRingAreaSf`, `bermWaterAreaSf`, `bindingBermCap`, `crestRingForBerm`, `crestTopRing`, `drainageBermCapFt`, `EXT_BERM_SLOPE`, `geometricMaxBermFt`, `INFLOW_HEAD_ALLOWANCE_FT`, `INLETS_THROUGH_BERM_NOTE`, `inwardBermSplit`
 - **`src/workspaces/site-planner/lib/jurisdiction.js`** — Registry-driven ArcGIS jurisdiction/road-authority identify (city/ETJ/county intersect + nearest-road maintainer) over the SWR cache with map-overlay styling
-  - _exports_: `buildIdentifyParams`, `countyAtPoint`, `countySourcesForPoint`, `ETJ_SOURCES`, `etjSourcesForPoint`, `fitIdentifyParams`, `formatHighway`, `formatJurisdictionBadge`, `identifyJurisdiction`, `identifyRoadAuthority`, `identifySource`, `JURISDICTION_SOURCES`, `MAX_QUERY_URL`, `normalizeFeature`, `parcelProbePoints`, `placeKey`, `polylineDistMeters`, `polylineLengthMeters`, `proxiedQueryUrl`, `ROAD_AUTHORITY_COLORS`, `ROAD_AUTHORITY_LEGEND`, `ROAD_MAINT_AGENCY`, `roadAuthority`, `roadAuthorityStyle`, `roadDisplayName`, `round6`, `samePlace`, `simplifyRing`, `VERTEX_LADDER`
+  - _exports_: `buildIdentifyParams`, `countyAtPoint`, `countySourcesForPoint`, `ETJ_SOURCES`, `etjCoverageFor`, `etjSourceCovers`, `etjSourcesForPoint`, `fitIdentifyParams`, `formatHighway`, `formatJurisdictionBadge`, `identifyJurisdiction`, `identifyRoadAuthority`, `identifySource`, `JURISDICTION_SOURCES`, `MAX_QUERY_URL`, `normalizeFeature`, `parcelProbePoints`, `placeKey`, `polylineDistMeters`, `polylineLengthMeters`, `proxiedQueryUrl`, `ROAD_AUTHORITY_COLORS`, `ROAD_AUTHORITY_LEGEND`, `ROAD_MAINT_AGENCY`, `roadAuthority`, `roadAuthorityStyle`, `roadDisplayName`, `round6`, `samePlace`, `simplifyRing`, `VERTEX_LADDER`
 - **`src/workspaces/site-planner/lib/kmzExport.js`** — Google Earth (.kmz) export (B684): pure, dependency-free CRC32 + hand-rolled STORE-only ZIP writer, KML builder (lon,lat order, ring closure/holes, per-layer styles, building extrude), and the site→layer feature mapping; reprojection is injected (the shared feetToLatLng), so it never drifts from the map render.
   - _exports_: `buildKml`, `buildKmz`, `crc32`, `elToRingFeet`, `KMZ_MIME`, `kmzFilename`, `siteToFeatures`, `xmlEscape`, `zipStore`
 - **`src/workspaces/site-planner/lib/labelFitLadder.js`** — NEW-1/NEW-2 the ONE ordered fit/fallback ladder for a map label that must sit inside a shape (inline → stacked → abbrev → outside-with-leader) plus the polygon INTERIOR measurer (largest inscribed rectangles, so fit is judged against real room, not a bounding box). Terminates in `outside`, never in a hide — a fit failure may relocate or shorten a label, never blank it.
