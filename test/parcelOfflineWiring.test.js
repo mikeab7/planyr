@@ -132,6 +132,19 @@ describe("NEW-2 — a plotted deed can BECOME the parcel, and the menus can reac
     expect((planner.match(/alignPromotedParcel\(main\.deedGroup/g) || []).length).toBe(2);
   });
 
+  /* Mutation: delete the button or gut `selectDeedOfGroup` → red. MEASURED, not assumed: after
+     promotion the parcel lies over the deed and the Parcel panel takes the dock, so a right-click
+     where the deed visibly is answers with the PARCEL's menu — the deed was kept in the data and
+     lost to the product. This is the door back in. */
+  it("the deed a parcel came from stays REACHABLE, from the parcel it produced", () => {
+    expect(recordPanel).toContain('data-testid="parcel-select-deed"');
+    expect(recordPanel).toMatch(/parcel\.fromDeedGroup && onSelectDeed/);
+    expect(planner).toMatch(/onSelectDeed=\{selectDeedOfGroup\}/);
+    const fn = planner.slice(planner.indexOf("const selectDeedOfGroup = "), planner.indexOf("const deedAlreadyPromoted = "));
+    expect(fn).toMatch(/setSel\(\{ kind: "markup", id: main\.id \}\)/);
+    expect(fn).toContain("openInspector()");
+  });
+
   /* Mutation: drop the `already` guard → red. A second promotion would double-count the tract in
      every yield, coverage and detention number. */
   it("promoting the same deed twice is refused", () => {

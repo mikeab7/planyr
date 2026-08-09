@@ -158,14 +158,24 @@ test.describe("NEW-2 · the legal description becomes the boundary when the coun
     await openDeedInspector(page);
     await page.getByTestId("deed-promote").click();
     await expect.poll(async () => (await parcelsInStore(page, ID)).length, { timeout: 15_000 }).toBe(1);
+    /* ⛔ THE DEED IS STILL REACHABLE — measured, because it was NOT before this shipped.
+       On the real page, once the parcel is promoted it lies over the deed that produced it and the
+       Parcel panel takes the dock, so a right-click where the deed visibly is answers with the
+       PARCEL's menu: `{deedMenu:false, parcelMenu:true}`. "We keep the deed so you can still align
+       or compare it" was true of the DATA and false of the PRODUCT. The door back in is on the
+       parcel itself, and this is the case that proves it opens. */
+    await expect(page.getByTestId("parcel-select-deed")).toBeVisible({ timeout: 20_000 });
+    await page.getByTestId("parcel-select-deed").click();
+    // The deed's own inspector is now open — where Align to county parcel and Rotate live.
+    await expect(page.getByTestId("deed-promote")).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByTestId("deed-promote")).toBeDisabled();
+    await expect(page.getByTestId("deed-promote")).toHaveText(/Already the parcel boundary/i);
+
     /* The tract stays ONE parcel across a reload. A second copy would double-count the acreage in
        every yield, coverage and detention number on the plan, and a reload is where a duplicate
        would appear if any load-time path re-promoted the deed that is still sitting there.
-       ⚠ SCOPE, stated rather than implied: the disabled STATE of the two controls is covered by the
-       mutation-proven source guard in test/parcelOfflineWiring.test.js ("promoting the same deed
-       twice is refused"), not here — once the parcel is laid over the deed that produced it,
-       addressing the deed again is a hit-test contest with the parcel and its grips, and a case
-       that cannot be driven reliably is worse than one that says what it does not cover. */
+       (The disabled control is asserted above, reached through the parcel rather than by winning a
+       hit-test contest against the parcel and its grips.) */
     await page.reload();
     await expect(canvas(page)).toBeVisible({ timeout: 30_000 });
     await page.waitForTimeout(1200);

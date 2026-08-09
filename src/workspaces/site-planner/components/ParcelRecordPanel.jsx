@@ -26,7 +26,7 @@ import { PARCEL_FIELDS, parcelProvenance, provenanceLabel } from "../lib/parcelR
 
 const label = { display: "block", fontSize: 10, textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 700, marginBottom: 2 };
 
-export function ParcelRecord({ parcel, PAL, border, surface, onField }) {
+export function ParcelRecord({ parcel, PAL, border, surface, onField, chip, onSelectDeed }) {
   const prov = provenanceLabel(parcel);
   const src = parcelProvenance(parcel);
   const tone = src === "county" ? PAL.info : src === "deed" ? PAL.purple : PAL.warn;
@@ -77,6 +77,19 @@ export function ParcelRecord({ parcel, PAL, border, surface, onField }) {
       <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.45, marginTop: 4 }}>
         Kept apart from the measured acreage, so the difference stays visible. Measurements always use what's drawn.
       </div>
+      {/* ⛔ THE WAY BACK TO THE DEED, and it is not a convenience — it is what makes "the deed stays
+          on the plan so you can still compare or align it" TRUE. Measured on the real page: once the
+          parcel is promoted it is laid over the deed that produced it and the Parcel panel takes the
+          dock, so a right-click where the deed visibly is answers with the PARCEL's menu, every time.
+          The deed was still there and still un-addressable. Reaching it from the parcel it produced
+          sidesteps the hit-test contest entirely instead of trying to win it. */}
+      {parcel.fromDeedGroup && onSelectDeed && (
+        <button data-testid="parcel-select-deed" style={{ ...chip, width: "100%", marginTop: 8 }}
+          title="Select the deed this boundary came from — to compare it, rotate it, or align it once the county map is back"
+          onClick={() => onSelectDeed(parcel.fromDeedGroup)}>
+          ↩ Go to the deed this came from
+        </button>
+      )}
     </>
   );
 }

@@ -15961,6 +15961,21 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       : ` The calls close to about ${gap.toFixed(2)}′.`;
     flashWarn(`Boundary set from the deed.${closeNote}${exNote} The deed stays on the plan so you can still compare it, or align it once the county map is back.`, 12000);
   };
+  /* NEW-2 — SELECT THE DEED A PARCEL CAME FROM. Promotion lays the new parcel over the deed and
+   * docks the Parcel panel, and measurement on the real page showed the consequence: a right-click
+   * where the deed visibly is answers with the PARCEL's menu, so the deed — which we deliberately
+   * KEEP so it can still be compared or aligned — had become unreachable by pointer. This is the
+   * door back in, from the parcel that produced it. Opens the deed's inspector, which is where
+   * "Align to county parcel" and the rotation stepper live. */
+  const selectDeedOfGroup = (group) => {
+    if (!group) return;
+    const members = markups.filter((m) => m.deedGroup === group && m.kind === "encumbrance");
+    const main = deedMainOf(members, members[0]);
+    if (!main) { flashWarn("That deed is no longer on this plan.", 5000); return; }
+    setSel({ kind: "markup", id: main.id });
+    setMulti([]);
+    openInspector();
+  };
   /* Has this deed already produced a parcel? Both menus read it, so "Use as parcel boundary" can
    * never quietly mint a second copy of the same tract (which would double-count the acreage in
    * every yield, coverage and detention number). */
@@ -17689,7 +17704,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           {_pid === "parcel" && selParcel && (
             <Section title="Parcel record">
               <LazyPanel name="Parcel record" minHeight={180} label="Loading parcel record…">
-                <ParcelRecord parcel={selParcel} PAL={PAL} border={BORDER_1} surface={SURF_RAISED} onField={setParcelField} />
+                <ParcelRecord parcel={selParcel} PAL={PAL} border={BORDER_1} surface={SURF_RAISED} chip={chip}
+                  onField={setParcelField} onSelectDeed={selectDeedOfGroup} />
               </LazyPanel>
             </Section>
           )}
