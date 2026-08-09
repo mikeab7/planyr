@@ -113,6 +113,21 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V114272 — B315712/B315716: a REAL conflict between two signed-in windows keeps the copy in its own project, and a note filed nowhere comes back `Blocker: auth`
+
+**Everything decidable without a network is proven here already.** `test/notesTwoClientConflict.test.js` drives TWO real instances of the store — separate localStorage each — against an in-memory server that owns `rev` exactly as the deployed `notes_touch_rev` trigger owns it: both windows edit one note, one loses the guard, the loser's text is parked, and the resulting store is asserted page by page (the exact count, and every page's project equal to its source's). `ui-audit/verify-notes-project-integrity.mjs` drives the banner, the chip, the recovery and the project-delete count in a real browser, 33 rows. Both are mutation-proven. **What the sandbox cannot do is sign in** — the egress proxy CORS-blocks Supabase auth — so the one thing unconfirmed is the conflict as it actually arrives from the cloud.
+
+- **SIGNED IN on planyr.io, TWO WINDOWS on one account.** Open the same note in both. Type something different in each, a few seconds apart, so the second push is genuinely refused. PASS = the conflict bar names the note, offers **Keep this one** / **Use the other**, and never mentions another person.
+- **Press "Use the other" in the window that lost.** PASS = a page appears named `<title> (this window's copy)` **as a sibling of the note it came from, in the SAME project**, and a line says so in as many words at the moment it happens — not something you have to go and find. FAIL = the copy lands anywhere else, or appears with nothing said.
+- **Then check the account**, with the service role on `planyr_production`:
+  ```sql
+  select id, rev, updated_at, left(doc::text, 80) from public.notes_pages order by updated_at desc limit 5;
+  select jsonb_pretty(data->'pages') from public.notes_trees;
+  ```
+  PASS = both bodies exist, and in the tree blob the copy's root carries the **same `projectId`** as the note it was copied from. This is the assertion that matters; the on-screen line is only how you know without looking.
+- **B315716's half, on the same session:** the note `pg_msgaajbf1o61rit` is in the cloud with 1,909 characters of real content (channel improvements / Willow Point MUD / $3–4 vs $10 per SF / the Hilcorp easement) and in **no tree node**. PASS = the banner says one note is filed in no project, **Put it back** files it under "Not in a project", it opens with that text intact, and it is **still there after a reload** — the loop that deleted and re-downloaded it is broken. FAIL = it is gone again on the next load.
+- **A NULL IS NOT A DISPOSITION HERE (STANDING RULE #2).** If the conflict cannot be provoked, say so and take one of the three admissible routes — provoke it harder, instrument it so it captures itself, or ask the owner whether he has seen another stray copy. Do not record "not reproducible" and archive.
+
 ### V107264 — B296224: the ledger bridge resolves a REAL `dirty` PR, and refuses a REAL amendment race `Blocker: real-data`
 
 **Everything the bridge decides is proven here already** — `test/resolveLedgers.test.js` drives 12 cases, three of them against a genuine `git merge` conflict produced in a throwaway repo (hermetic, no network): two independent appends are unioned, two amendments of one item are refused with the markers left in place, and a clean file passes through byte-identical. **What a sandbox cannot manufacture is the real thing**: this repo's actual `origin/main`, 42 in-flight branches, five bookkeeping files diverging at once, and the specific hunk shapes git produces from them. That is a concurrency class, so it parks.

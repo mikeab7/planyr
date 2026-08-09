@@ -26,11 +26,12 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } fro
 import AppHeader from "../../shared/ui/AppHeader.jsx";
 import NotesTree from "./components/NotesTree.jsx";
 import {
-  addPage, allPageIds, ancestorIds, deleteNode, emptyTree, expiredTrashIds, findPage,
+  addPage, allPageIds, ancestorIds, copyPageWithin, deleteNode, emptyTree, expiredTrashIds, findPage,
   firstPageId, migrate, movePage, pagesInScope, purgeTrashEntry, recentPages, renameNode, restoreNode,
   setPageProject, subtreePageIds, touchPage, trashEntries, trashPageIds,
-  SCOPE_ALL, SCOPE_PROJECT,
+  NO_PROJECT_LABEL, SCOPE_ALL, SCOPE_PROJECT,
 } from "./lib/notesModel.js";
+import { duplicateNotice } from "./lib/notesDuplicates.js";
 import { isQuickOpenChord, quickOpenResults, rankQuickOpen } from "./lib/notesQuickOpen.js";
 import { groupTasksByProject } from "./lib/notesTasks.js";
 import { listProjects, warmProjects, onProjectsChanged } from "../../shared/projects/projects.js";
@@ -63,6 +64,10 @@ const TONE_COLOR = {
 };
 const TREE_SAVE_MS = 400;
 const UNDO_MS = 14000;
+/* The integrity scan reads every page body, so it waits for the tree to settle rather than
+ * riding a rename's keystrokes. Long on purpose: nothing here is urgent, and being late is
+ * free where being expensive is not. */
+const INTEGRITY_SCAN_MS = 2500;
 
 /* ---- module-scope pieces (MODULE-SCOPE-COMPONENTS) --------------------------------------- */
 
@@ -154,6 +159,72 @@ function UndoBar({ deleted, onUndo, onDismiss }) {
         style={{
           flex: "0 0 auto", border: "1px solid var(--border-default)", borderRadius: RADIUS.pill,
           background: "transparent", color: "var(--text-tertiary)", font: "inherit",
+          fontSize: 11.5, fontWeight: 700, padding: "2px 10px", cursor: "pointer",
+        }}
+      >Dismiss</button>
+    </div>
+  );
+}
+
+/** ⛔ THE SAME NOTE IN TWO PROJECTS, AND A NOTE FILED NOWHERE — SAID OUT LOUD (NEW-1/NEW-4).
+ *
+ *  The whole reason this exists: a note was copied into an unrelated pursuit and the product
+ *  had no way to mention it. It was found by hand a week later, under a tombstone heading,
+ *  because the pursuit had since been deleted. Nothing about the copy was announced at the
+ *  moment it was made, and nothing looked for it afterwards.
+ *
+ *  It is deliberately QUIET AND ABSENT rather than dismissible-and-forgotten: it renders only
+ *  when there is a real finding, and it names the finding rather than describing a category.
+ *  One line by default; the detail is one click away, never in the default view
+ *  (PANEL-BREVITY). */
+function IntegrityBanner({ duplicates, unreachable, projectNames, onOpen, onRecover, onDismiss }) {
+  const dupLine = duplicateNotice(duplicates);
+  const lost = (unreachable || []).length;
+  if (!dupLine && !lost) return null;
+  const nameOf = (id) => (id == null ? NO_PROJECT_LABEL : projectNames.get(id) || "a project that no longer exists");
+  const first = duplicates?.[0] || null;
+  return (
+    <div
+      role="alert"
+      data-testid="notes-integrity-banner"
+      data-duplicates={duplicates?.length || 0}
+      data-unreachable={lost}
+      style={{
+        flex: "none", display: "flex", alignItems: "center", gap: 10, padding: "6px 14px",
+        background: "var(--warn-bg)", borderBottom: "1px solid var(--border-default)",
+        color: "var(--warn-text)", fontSize: 12.5, fontWeight: 600,
+      }}
+    >
+      <span style={{ flex: 1, minWidth: 0 }}>
+        {dupLine ? `${dupLine} ${first ? first.pages.map((p) => `“${p.title}” in ${nameOf(p.projectId)}` + (p.where === "bin" ? " (in the bin)" : "")).join(" · ") : ""}` : null}
+        {dupLine && lost ? " " : null}
+        {lost ? `${lost === 1 ? "One note is" : `${lost} notes are`} filed in no project and reachable from nowhere.` : null}
+      </span>
+      {first ? (
+        <button
+          type="button" data-testid="notes-integrity-open" onClick={() => onOpen(first)}
+          style={{
+            flex: "0 0 auto", border: "1px solid var(--warn-text)", borderRadius: RADIUS.pill,
+            background: "transparent", color: "var(--warn-text)", font: "inherit",
+            fontSize: 11.5, fontWeight: 700, padding: "2px 10px", cursor: "pointer",
+          }}
+        >Show me</button>
+      ) : null}
+      {lost ? (
+        <button
+          type="button" data-testid="notes-integrity-recover" onClick={onRecover}
+          style={{
+            flex: "0 0 auto", border: "1px solid var(--warn-text)", borderRadius: RADIUS.pill,
+            background: "transparent", color: "var(--warn-text)", font: "inherit",
+            fontSize: 11.5, fontWeight: 700, padding: "2px 10px", cursor: "pointer",
+          }}
+        >Put {lost === 1 ? "it" : "them"} back</button>
+      ) : null}
+      <button
+        type="button" onClick={onDismiss}
+        style={{
+          flex: "0 0 auto", border: "1px solid var(--border-default)", borderRadius: RADIUS.pill,
+          background: "transparent", color: "var(--warn-text)", font: "inherit",
           fontSize: 11.5, fontWeight: 700, padding: "2px 10px", cursor: "pointer",
         }}
       >Dismiss</button>
@@ -271,6 +342,10 @@ export default function Notes({
   const [deleted, setDeleted] = useState(null);
   const [storageLine, setStorageLine] = useState(() => notesStorageLine());
   const [conflictIds, setConflictIds] = useState([]);
+  /* What the integrity scan found, and whether it has been waved away for this visit
+     (NEW-4). `null` means "not scanned yet", which is not the same as "nothing found". */
+  const [integrity, setIntegrity] = useState({ duplicates: [], unreachable: [] });
+  const [integrityHidden, setIntegrityHidden] = useState(false);
   /* ⛔ THE IN-RAIL SCOPE SWITCH IS GONE (B1420), and B1374's guarantee is UNCHANGED.
    * "Show me everything" is now the DASHBOARD — which shows every project's pages grouped by
    * project — and its crumb is at the top of every screen, so it is still exactly one click
@@ -499,6 +574,52 @@ export default function Notes({
    * branch, which is what a notebook used to be. Recomputed from the tree, never captured,
    * so adding a subpage beside this one is immediately reflected in the ceiling. */
   const notebookPageIds = useMemo(() => (active?.root ? subtreePageIds(active.root) : []), [active]);
+
+  /* WHICH PROJECT THE OPEN NOTE BELONGS TO (NEW-2) — derived from its ROOT, so a subpage
+   * answers with its root's project and there is never a second copy of the fact to drift.
+   * A project id the list cannot resolve is NAMED as unresolved, never captioned as "no
+   * project": a failed lookup and a page that genuinely belongs nowhere are different
+   * states, and describing the first as the second is what made a mis-filing invisible. */
+  const activeProjectLabel = useMemo(() => {
+    if (!active?.root) return null;
+    const pid = active.root.projectId ?? null;
+    if (pid == null) return { name: NO_PROJECT_LABEL, resolved: true, projectId: null };
+    const name = projects.find((p) => p.id === pid)?.name || null;
+    if (name) return { name, resolved: true, projectId: pid };
+    return {
+      name: projectList.state === "failed" ? "Project — couldn’t be looked up" : "A project that no longer exists",
+      resolved: false,
+      projectId: pid,
+    };
+  }, [active, projects, projectList.state]);
+
+  /* ---- THE INTEGRITY SCAN (NEW-4) --------------------------------------------------------
+   *
+   * ⛔ IT READS EVERY PAGE'S BODY, SO IT NEVER RIDES A KEYSTROKE. It runs on a long timer
+   * after the tree settles — the tree changes on a rename or a move, not on typing, and the
+   * debounce covers a drag. It answers two questions and both were unanswerable before:
+   * "is one note living in two projects?" and "is a note filed nowhere at all?".
+   *
+   * `tree` is the only input, which is what keeps this out of VIEW-INDEPENDENT-ONCE's way:
+   * nothing here is a function of the view, and the scan is not re-run because a panel moved.
+   *
+   * ⛔ AND THE SCANNER IS A **DYNAMIC** IMPORT, for the same bundle reason as the cloud tier
+   * and the image database: nothing on the notebook rail's first paint needs it, and this
+   * route's byte budget is the one thing the lazy boundary exists to protect. */
+  useEffect(() => {
+    let live = true;
+    const t = setTimeout(async () => {
+      try {
+        const scan = await import("./lib/notesScan.js");
+        if (!live) return;
+        setIntegrity({ duplicates: scan.scanNoteDuplicates(tree), unreachable: scan.unreachableNotes(tree) });
+      } catch (_) {
+        // A scanner that could not load leaves the last finding on screen rather than
+        // replacing it with a silent all-clear — the one answer it must never invent.
+      }
+    }, INTEGRITY_SCAN_MS);
+    return () => { live = false; clearTimeout(t); };
+  }, [tree]);
 
   const results = useMemo(
     () => (query.trim() ? searchNotes(tree, query, { projectId, scope: projectId == null ? SCOPE_ALL : SCOPE_PROJECT }) : []),
@@ -758,23 +879,84 @@ export default function Notes({
   const handleConflict = useCallback(async (pageId, choice) => {
     /* ⛔ "Use the other" PARKS THIS WINDOW'S TEXT FIRST, as a page beside the
      * one being replaced. Without that step the choice would destroy an edit the user made
-     * — and "never a lost edit" would be a slogan rather than a property. */
+     * — and "never a lost edit" would be a slogan rather than a property.
+     *
+     * ⛔ AND THE PARKED COPY NEVER CHANGES PROJECT (NEW-1). `copyPageWithin` takes the source
+     * page id and NOTHING ELSE — there is no project argument to hand it, so there is no way
+     * for the project the user happens to be STANDING IN to reach the copy. That is the whole
+     * fix: a page's project is a property of the page, not of the viewer. The copy lands as
+     * the source's next sibling, wearing the source root's project, or the write is REFUSED.
+     *
+     * ⛔ AND IT IS SAID OUT LOUD, AT THE MOMENT IT HAPPENS. A copy discovered a week later
+     * under a "from a project you deleted" heading is the failure this item is named for. */
     if (choice === "theirs") {
       const base = treeRef.current || tree;
-      const hit = findPage(base, pageId);
       const localDoc = readPage(pageId);
-      if (hit && localDoc != null) {
-        /* Parked as a SIBLING of the page being replaced — under its parent, or at the top
-         * level of its project when it is a top-level page itself. */
-        const r = addPage(base, hit.parent
-          ? { parentId: hit.parent.id, title: `${hit.page.title} ${notesConflictLine().parkedSuffix}` }
-          : { projectId: hit.root.projectId ?? null, title: `${hit.page.title} ${notesConflictLine().parkedSuffix}` });
-        if (r.pageId && writePage(r.pageId, localDoc)) persistTree(r.tree);
+      if (localDoc != null) {
+        const hit = findPage(base, pageId);
+        const r = copyPageWithin(base, pageId, {
+          title: hit ? `${hit.page.title} ${notesConflictLine().parkedSuffix}` : undefined,
+        });
+        /* A SOURCE THIS WINDOW CANNOT SEE IS A REFUSAL, NOT A GUESS. There is no honest
+         * project for a copy whose source is unknown, so nothing is filed anywhere — and
+         * because parking is what makes "never a lost edit" true, the choice does not
+         * proceed either. Both halves are named (LOUD-FAILURE). */
+        if (r.refused || !r.pageId) {
+          setExportNote("That note is not in this window’s list, so your copy of it could not be kept safely — nothing was changed. Reload and try again.");
+          return;
+        }
+        if (!writePage(r.pageId, localDoc)) {
+          setExportNote("Your copy of that note could not be saved here, so nothing was changed.");
+          return;
+        }
+        persistTree(r.tree);
+        const where = r.projectId == null ? NO_PROJECT_LABEL : (projects.find((p) => p.id === r.projectId)?.name || "its project");
+        setExportNote(`Your copy was kept as “${hit ? `${hit.page.title} ${notesConflictLine().parkedSuffix}` : "a copy"}”, in ${where} — the same place as the note it came from.`);
       }
     }
     const res = await resolveNotesConflict(pageId, choice);
     if (!res.ok) setExportNote(res.error || "That copy could not be saved — nothing was changed.");
-  }, [tree, persistTree]);
+  }, [tree, persistTree, projects]);
+
+  /* ---- the integrity findings, acted on (NEW-4) ------------------------------------------ */
+
+  /** Every project id → its name, for the banner. A binding that no longer resolves is NOT
+   *  folded into "no project" — losing the label must never mean losing the page (B1374). */
+  const projectNames = useMemo(() => new Map(projects.map((p) => [p.id, p.name])), [projects]);
+
+  /** Open the copy that should not exist. It is usually in ANOTHER project (that is the
+   *  finding), so the navigation carries the project with it rather than selecting an id the
+   *  rail cannot show — and a copy sitting in the BIN is named rather than silently skipped. */
+  const handleOpenFinding = useCallback((group) => {
+    const target = group.pages.find((p) => p.where !== "bin") || group.pages[0];
+    if (!target) return;
+    if (target.where === "bin") {
+      setExportNote(`“${target.title}” is in the bin — open the Bin view to restore or delete it for good.`);
+      return;
+    }
+    if ((target.projectId ?? null) !== (projectId ?? null)) onNavigate?.({ projectId: target.projectId ?? null, cross: false });
+    setActivePageId(target.pageId);
+    setQuery("");
+  }, [projectId, onNavigate]);
+
+  /** Put a note that is filed nowhere back where it can be reached. It goes to the named
+   *  "Not in a project" home and NOWHERE ELSE — the page's project is exactly the fact that
+   *  was lost, and inventing a plausible one is the defect this whole item is about. The
+   *  page keeps its own ID, so this re-attaches the existing body rather than copying it. */
+  const handleRecoverUnreachable = useCallback(() => {
+    let next = treeRef.current || tree;
+    let n = 0;
+    for (const orphan of integrity.unreachable) {
+      const r = addPage(next, { projectId: null, id: orphan.pageId, title: `Recovered note — ${orphan.preview.slice(0, 40)}` });
+      if (!r.pageId) continue;
+      next = r.tree;
+      n += 1;
+    }
+    if (!n) return;
+    persistTree(next);
+    setIntegrity((s) => ({ ...s, unreachable: [] }));
+    setExportNote(`${n === 1 ? "One note was" : `${n} notes were`} put back under “${NO_PROJECT_LABEL}”. ${n === 1 ? "It was" : "They were"} filed in no project, so that is where ${n === 1 ? "it" : "they"} went — nothing was guessed.`);
+  }, [tree, persistTree, integrity.unreachable]);
 
   /* ---- export + print ---- */
 
@@ -868,6 +1050,16 @@ export default function Notes({
         onKeepMine={() => handleConflict(conflict.pageId, "mine")}
         onKeepTheirs={() => handleConflict(conflict.pageId, "theirs")}
       />
+      {integrityHidden ? null : (
+        <IntegrityBanner
+          duplicates={integrity.duplicates}
+          unreachable={integrity.unreachable}
+          projectNames={projectNames}
+          onOpen={handleOpenFinding}
+          onRecover={handleRecoverUnreachable}
+          onDismiss={() => setIntegrityHidden(true)}
+        />
+      )}
 
       <div style={{ flex: 1, minHeight: 0, display: "flex" }}>
         <NotesTree
@@ -926,6 +1118,13 @@ export default function Notes({
                    puts on the printed sheet in place of the section heading it no longer
                    has (PDF-PARITY). */
                 trail={activeTrail}
+                /* WHICH PROJECT THIS NOTE BELONGS TO, ON SCREEN WHILE IT IS BEING READ AND
+                   WRITTEN (NEW-2). The owner had no way to see a wrong filing at all — the
+                   rail hides the badge inside a project because everything there belongs
+                   where you are standing, and the Dashboard's grouping is a level up from
+                   the page. So the one surface that is always on screen with the note says
+                   it. Derived from the tree's root, never stored twice. */
+                projectLabel={activeProjectLabel}
                 notebookPageIds={notebookPageIds}
                 searchTerm={highlight}
                 onClearSearch={() => setHighlight("")}

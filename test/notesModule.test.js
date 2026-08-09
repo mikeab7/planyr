@@ -60,6 +60,9 @@ const ALL_NOTES_FILES = [
   "lib/notesSlashMenu.js", "lib/notesQuickOpen.js", "lib/notesVersions.js", "lib/notesTasks.js",
   "lib/notesOutline.js", "lib/notesFileMeta.js", "lib/notesAttachNode.js", "lib/notesCalloutNode.js",
   "lib/notesToggleNode.js",
+  // NEW-1/NEW-4 — a copy never changes project, and the machine that notices when one did.
+  "lib/notesDuplicates.js", "lib/notesScan.js",
+  "lib/notesKeys.js", "lib/notesProjectFiling.js", "lib/notesProjectLink.js",
 ];
 const SKETCH_FILES = ALL_NOTES_FILES.filter((f) => f.includes("Sketch"));
 
@@ -455,10 +458,37 @@ describe("every node and mark a note may contain has a case in the Markdown expo
  * 5. LOUD-FAILURE + the delete cascade, at the storage seam
  * ═══════════════════════════════════════════════════════════════════════════════════════ */
 describe("LOUD-FAILURE — storage is one seam and it never fails silently", () => {
+  /* ⛔ THE SEAM HAS EXACTLY ONE EXEMPTION, AND IT IS WRITTEN DOWN WITH ITS REASON (NEW-3).
+   *
+   * `lib/notesProjectLink.js` answers "what is this project holding?" for the SHARED HEADER
+   * BREADCRUMB — chrome on every route, very often nowhere near a mounted Notes module. It
+   * cannot go through `notesStore.js` for two independent reasons, both measured:
+   *   • the store points at whichever scope the workspace last set, so asking it while Notes
+   *     has never been opened answers with the SIGNED-OUT tree for a signed-in user — a
+   *     confident wrong number in a delete confirmation, the worst place for one;
+   *   • routing that route's dynamic import through the store pulled the whole storage tier
+   *     into a shared chunk and cost the Notes route 12 KB.
+   * The exemption is kept narrow by the second check below rather than by good intentions. */
+  const SEAM_EXEMPT = new Set(["lib/notesProjectLink.js"]);
+
   it("every read and write goes through lib/notesStore.js, so cloud sync is a change THERE and nowhere else", () => {
-    for (const f of ALL_NOTES_FILES.filter((x) => x !== "lib/notesStore.js")) {
+    for (const f of ALL_NOTES_FILES.filter((x) => x !== "lib/notesStore.js" && !SEAM_EXEMPT.has(x))) {
       expect(code(f), `${f} touches localStorage directly, bypassing the storage seam`).not.toMatch(/localStorage/);
     }
+  });
+
+  it("⛔ THE ONE SEAM EXEMPTION STAYS NARROW — the tree and the ledger, never a body, never a picture", () => {
+    const link = code("lib/notesProjectLink.js");
+    expect(link, "it may read the TREE key").toContain("TREE_KEY_BASE");
+    expect(link, "…and stamp the sync LEDGER, or a seed would undo the move").toContain("SYNC_KEY_BASE");
+    expect(link, "⛔ but never a page BODY — bodies belong to the store").not.toMatch(/PAGE_KEY_BASE|notes:page:/);
+    expect(link, "⛔ and never the picture tier").not.toMatch(/indexedDB|notesImageDb/);
+    expect(link, "⛔ and never the network").not.toMatch(/supabase|notesCloud/i);
+    expect(link, "it takes the account EXPLICITLY rather than reading the module's scope").toMatch(/export function projectNotes\(userId,/);
+    expect(link, "…and never re-points the store's own scope").not.toMatch(/setNotesScope/);
+    // The key strings themselves are never restated here — they come from the one leaf that
+    // holds them, so this file cannot drift from the store's idea of where a tree lives.
+    expect(link, "no hardcoded key string").not.toMatch(/"planyr:notes:/);
   });
 
   it("lib/notesImageDb.js is the ONE file that touches indexedDB — images ride the same seam", () => {
@@ -543,10 +573,22 @@ describe("LOUD-FAILURE — storage is one seam and it never fails silently", () 
   });
 
   it("the storage keys are scoped and versioned, so two accounts never read each other's notes", () => {
+    // The strings live in `notesKeys.js` — a dependency-free leaf — so the ONE other module
+    // allowed to touch them (`notesProjectLink.js`, which answers "what is this project
+    // holding?" from a route where Notes is not mounted) cannot drift from the store's idea
+    // of where a tree lives. `notesStore.js` re-exports them, so it is still the seam.
+    const keys = src("lib/notesKeys.js");
+    expect(keys).toMatch(/planyr:notes:tree:v1/);
+    expect(keys).toMatch(/planyr:notes:page:v1/);
+    expect(keys).toMatch(/planyr:notes:sync:v1/);
+    expect(keys).toMatch(/LOCAL_SCOPE = "local"/);
     const store = src("lib/notesStore.js");
-    expect(store).toMatch(/planyr:notes:tree:v1/);
-    expect(store).toMatch(/planyr:notes:page:v1/);
-    expect(store).toMatch(/LOCAL_SCOPE = "local"/);
+    expect(store, "the store re-exports them, so no importer learned they moved")
+      .toMatch(/export \{[^}]*TREE_KEY_BASE[^}]*\} from "\.\/notesKeys\.js"/);
+    const link = src("lib/notesProjectLink.js");
+    expect(link, "and the one outside reader imports them rather than restating them")
+      .toMatch(/from "\.\/notesKeys\.js"/);
+    expect(link, "…and never hardcodes a key of its own").not.toMatch(/"planyr:notes:/);
   });
 
   it("the TREE and the page BODIES are separate keys — one blob would rewrite every note per keystroke", () => {
@@ -691,9 +733,51 @@ describe("cloud sync rides the SAME one seam", () => {
     const root = code("Notes.jsx");
     expect(root).toMatch(/if \(choice === "theirs"\)/);
     expect(root, "the local body must be written to a NEW page before the conflict resolves")
-      .toMatch(/addPage\(base, hit\.parent[\s\S]{0,400}writePage\(r\.pageId, localDoc\)/);
+      .toMatch(/copyPageWithin\(base, pageId[\s\S]{0,600}writePage\(r\.pageId, localDoc\)/);
     expect(root, "and the resolution happens after that").toMatch(/resolveNotesConflict\(pageId, choice\)/);
     expect(root).toContain("ConflictBar");
+  });
+
+  /* ⛔ AND THE COPY NEVER CHANGES PROJECT (NEW-1). A note was copied into an unrelated
+   * pursuit and nobody was told; it was found by hand a week later under a "from a project
+   * you deleted" heading. The behaviour is proven in test/notesProjectIntegrity.test.js and
+   * test/notesTwoClientConflict.test.js — this guards the SHAPE that makes it unprovable to
+   * get wrong: the park may not reach for `projectId` at all, because `copyPageWithin` reads
+   * it off the source record and has no argument for one. */
+  it("⛔ THE PARK CANNOT BE HANDED A PROJECT — the fix is the missing argument", () => {
+    const root = code("Notes.jsx");
+    const park = root.slice(root.indexOf('if (choice === "theirs")'));
+    const call = park.slice(0, park.indexOf("resolveNotesConflict"));
+    expect(call, "the park must go through copyPageWithin, the one copy op").toContain("copyPageWithin(base, pageId");
+    expect(call, "and must not file the copy by a project id of its own").not.toMatch(/projectId:/);
+    expect(call, "an unknown source is REFUSED, never filed somewhere plausible").toMatch(/r\.refused/);
+    expect(call, "and the copy is named out loud when it is made").toMatch(/setExportNote\(/);
+
+    const model = code("lib/notesModel.js");
+    const fn = model.slice(model.indexOf("export function copyPageWithin"));
+    const body = fn.slice(0, fn.indexOf("\n}\n"));
+    expect(body, "the source root's project is the only project it may use")
+      .toContain("const projectId = hit.root.projectId ?? null;");
+    expect(body.match(/^export function copyPageWithin\([^)]*\)/m)[0], "no projectId parameter may exist")
+      .not.toMatch(/projectId/);
+  });
+
+  it("THE DETECTOR SEARCHES THE BIN — both real copies were binned before anyone looked", () => {
+    const scan = code("lib/notesScan.js");
+    const fn = scan.slice(scan.indexOf("export function scanNoteDuplicates"));
+    expect(fn.slice(0, 1400)).toMatch(/trashEntries\(tree\)/);
+    expect(fn.slice(0, 1400)).toMatch(/where: "bin"/);
+    // …and it is reached LAZILY, like the cloud tier: nothing on the rail's first paint
+    // needs it, and this route's byte budget is what the lazy boundary exists to protect.
+    expect(code("Notes.jsx")).toMatch(/await import\("\.\/lib\/notesScan\.js"\)/);
+  });
+
+  it("THE ORPHAN SWEEP WILL NOT DESTROY A BODY THAT STILL HAS WORDS IN IT", () => {
+    const store = code("lib/notesStore.js");
+    const fn = store.slice(store.indexOf("export function sweepOrphans"));
+    expect(fn.slice(0, 600)).toMatch(/hasWords\(readPage\(id\)\)/);
+    expect(code("lib/notesScan.js"), "and what it refused is surfaced, not silently kept forever")
+      .toContain("export function unreachableNotes");
   });
 
   it("the applied schema is committed as a record, naming the migration and the date", () => {

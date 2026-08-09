@@ -315,6 +315,56 @@ export function setPageProject(tree, pageId, projectId) {
   return next;
 }
 
+/** The suffix that makes a copy READ as a copy in the rail, without a second field to keep
+ *  in step with the title. */
+export const COPY_SUFFIX = "(copy)";
+
+/** ⛔ THE ONE WAY A PAGE IS COPIED — AND IT TAKES NO `projectId`, BY CONSTRUCTION (NEW-1).
+ *
+ *  A PAGE'S PROJECT IS A PROPERTY OF THE PAGE, NEVER OF WHOEVER HAPPENS TO BE LOOKING AT IT.
+ *  Every copy this module makes is a copy of a page that is already IN the tree, so its home
+ *  is knowable from the record: the copy lands as the SOURCE'S NEXT SIBLING — under the same
+ *  parent when the source has one (its project is then its root's, derived, and there is
+ *  nothing to pass and nothing to get wrong), and at the top level of the SOURCE ROOT'S OWN
+ *  project when the source is a root itself.
+ *
+ *  There is deliberately no way to say "put the copy over there". A caller that could pass a
+ *  project would eventually pass the one it happens to be showing — which is exactly how a
+ *  note gets copied into an unrelated pursuit and nobody notices for a week.
+ *
+ *  An UNKNOWN source is REFUSED and named (`refused: "unknown-source"`), never quietly filed
+ *  somewhere plausible: a copy with no source has no project, and guessing one is the bug.
+ *  The tree comes back untouched so a caller can report the refusal without having to undo. */
+export function copyPageWithin(tree, sourcePageId, { title, id, at = Date.now() } = {}) {
+  const base = tree || emptyTree();
+  const next = clone(base);
+  const hit = findPage(next, sourcePageId);
+  if (!hit) return { tree: base, pageId: null, projectId: null, refused: "unknown-source" };
+
+  const projectId = hit.root.projectId ?? null;
+  const name = String(title ?? "").trim() || `${hit.page.title} ${COPY_SUFFIX}`;
+  // A SUBPAGE copy carries no `projectId` at all — its root's is the only answer, and storing
+  // a second one is the redundant-state trap this model exists to avoid.
+  const pg = hit.parent
+    ? makePage({ id, title: name, at })
+    : makePage({ id, title: name, at, projectId });
+
+  const siblings = hit.parent
+    ? (Array.isArray(hit.parent.pages) ? hit.parent.pages : (hit.parent.pages = []))
+    : next.pages;
+  siblings.splice(siblings.indexOf(hit.page) + 1, 0, pg);
+  return { tree: next, pageId: pg.id, projectId, refused: null };
+}
+
+/** `pageId → projectId` for every LIVE page, at every depth — the one answer to "which
+ *  project does this page belong to?" asked of a whole tree at once. The duplicate detector
+ *  and the copy invariant both read it, so neither has to re-derive the derivation rule. */
+export function pageProjectIndex(tree) {
+  const out = new Map();
+  walkPages(tree, (pg, { root }) => { out.set(pg.id, root.projectId ?? null); });
+  return out;
+}
+
 /* ---- the bin (B1310) ----------------------------------------------------------------
  *
  * ⛔ DELETE IS A MOVE, NOT A DESTRUCTION — and TOMBSTONE-DELETES is intact, not weakened.
@@ -346,6 +396,14 @@ export function trashPageIds(tree) {
   for (const e of trashOf(tree)) for (const id of e.pageIds || []) out.push(id);
   return out;
 }
+
+/* WHAT A PROJECT IS HOLDING (NEW-3) lives in its own leaf, `notesProjectFiling.js`, and is
+ * re-exported here so this module stays the one place the tree's shape is reasoned about.
+ * The split is a measured BUNDLE decision, not a taxonomy one: the project-delete
+ * confirmation lives in the shared header breadcrumb — chrome on every route — and reaches
+ * these two functions by a dynamic import. Pointing that import at this file would drag the
+ * whole model (and the one-way migration) into a chunk shared with every route. */
+export { projectNoteCensus, moveProjectNotes } from "./notesProjectFiling.js";
 
 /** The bin, newest first, with each entry's expiry stamped on. */
 export function trashEntries(tree, { days = TRASH_RETENTION_DAYS } = {}) {
