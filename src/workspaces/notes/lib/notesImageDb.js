@@ -23,8 +23,14 @@
  * named banner (LOUD-FAILURE). It must never look like a clean save.
  */
 const DB_NAME = "planyr-notes";
-const DB_VERSION = 1;
+/* v2 (NEW-3/NEW-5) added the `versions` store. The `images` store is UNCHANGED and is not
+ * migrated: an upgrade that rewrote every stored picture to add two optional fields would
+ * be a long, interruptible transaction over the largest thing in the database, for nothing.
+ * An attachment simply carries `kind: "file"` and a `name`; a record written by v1 has
+ * neither, and `kind` absent means "image", which is what every v1 record was. */
+const DB_VERSION = 2;
 const STORE = "images";
+const VERSION_STORE = "versions";
 
 const idb = (typeof indexedDB !== "undefined" && indexedDB) ? indexedDB : null;
 
@@ -48,6 +54,16 @@ function openDb() {
           const os = db.createObjectStore(STORE, { keyPath: "key" });
           os.createIndex("scope", "scope", { unique: false });
         }
+        /* Version snapshots (NEW-3). Their own store, not a `kind` column on the images
+         * one: the accounting read there walks EVERY record in a scope, and folding a
+         * note's typing history into that walk would make "how big is this notebook's
+         * pictures?" cost more the longer someone has been writing. Keyed by page, because
+         * every question asked of it is "this page's history". */
+        if (!db.objectStoreNames.contains(VERSION_STORE)) {
+          const vs = db.createObjectStore(VERSION_STORE, { keyPath: "key" });
+          vs.createIndex("page", "page", { unique: false });
+          vs.createIndex("scope", "scope", { unique: false });
+        }
       } catch (_) { /* the open itself still reports through onerror */ }
     };
     req.onsuccess = () => {
@@ -66,8 +82,8 @@ function openDb() {
 
 const UNAVAILABLE = "This browser will not let Planyr store images (private browsing, or storage is switched off).";
 
-function tx(db, mode) {
-  try { return db.transaction(STORE, mode); } catch (_) { return null; }
+function tx(db, mode, store = STORE) {
+  try { return db.transaction(store, mode); } catch (_) { return null; }
 }
 
 /** Write one image record. `{ ok:true }` only when the bytes actually landed. */
@@ -139,9 +155,98 @@ export async function idbListImageMeta(scope) {
       const cur = req.result;
       if (!cur) { resolve(out); return; }
       const v = cur.value || {};
-      out.push({ key: v.key, id: v.id, pageId: v.pageId || null, bytes: Number(v.bytes) || 0, mime: v.mime || "", w: v.w || 0, h: v.h || 0, createdAt: v.createdAt || 0 });
+      out.push({
+        key: v.key, id: v.id, pageId: v.pageId || null, bytes: Number(v.bytes) || 0,
+        mime: v.mime || "", w: v.w || 0, h: v.h || 0, createdAt: v.createdAt || 0,
+        // Absent on every v1 record, and absent MEANS image — see the DB_VERSION note.
+        kind: v.kind || "image", name: v.name || "",
+      });
       cur.continue();
     };
     req.onerror = () => resolve(out);
+  });
+}
+
+/* ---- version snapshots (NEW-3) ---------------------------------------------------------
+ *
+ * The same discipline as the image tier one function up: every call RESOLVES, a failure is
+ * `{ ok:false, error }` for the store to turn into a named banner, and the TRANSACTION —
+ * not the request — is what proves a write is durable. */
+
+/** Write one snapshot. `record` = `{ key, page, scope, pageId, at, reason, pinned, doc }`. */
+export async function idbPutVersion(record) {
+  const db = await openDb();
+  if (!db) return { ok: false, error: UNAVAILABLE };
+  return new Promise((resolve) => {
+    const t = tx(db, "readwrite", VERSION_STORE);
+    if (!t) { resolve({ ok: false, error: UNAVAILABLE }); return; }
+    let req;
+    try { req = t.objectStore(VERSION_STORE).put(record); } catch (e) { resolve({ ok: false, error: String(e?.message || e) }); return; }
+    req.onerror = () => resolve({ ok: false, error: String(req.error?.message || req.error?.name || "the write was refused") });
+    t.oncomplete = () => resolve({ ok: true });
+    t.onabort = () => resolve({ ok: false, error: String(t.error?.message || t.error?.name || "the snapshot was rolled back (the database may be full)") });
+    t.onerror = () => resolve({ ok: false, error: String(t.error?.message || t.error?.name || "the snapshot failed") });
+  });
+}
+
+/** One page's snapshots, newest first, WITHOUT their documents unless asked. A history
+ *  panel lists thirty timestamps; pulling thirty whole documents to draw a list of dates is
+ *  the same mistake `idbListImageMeta` exists to avoid. */
+export async function idbListVersions(pageKey, { withDocs = false } = {}) {
+  const db = await openDb();
+  if (!db) return [];
+  return new Promise((resolve) => {
+    const t = tx(db, "readonly", VERSION_STORE);
+    if (!t) { resolve([]); return; }
+    const out = [];
+    let req;
+    try { req = t.objectStore(VERSION_STORE).index("page").openCursor(IDBKeyRange.only(pageKey)); }
+    catch (_) { resolve([]); return; }
+    req.onsuccess = () => {
+      const cur = req.result;
+      if (!cur) { out.sort((a, b) => b.at - a.at); resolve(out); return; }
+      const v = cur.value || {};
+      out.push({
+        key: v.key, pageId: v.pageId || null, at: Number(v.at) || 0, reason: v.reason || "",
+        pinned: !!v.pinned, bytes: Number(v.bytes) || 0, preview: v.preview || "",
+        ...(withDocs ? { doc: v.doc } : {}),
+      });
+      cur.continue();
+    };
+    req.onerror = () => { out.sort((a, b) => b.at - a.at); resolve(out); };
+  });
+}
+
+/** One snapshot in full, or null. */
+export async function idbGetVersion(key) {
+  const db = await openDb();
+  if (!db) return null;
+  return new Promise((resolve) => {
+    const t = tx(db, "readonly", VERSION_STORE);
+    if (!t) { resolve(null); return; }
+    let req;
+    try { req = t.objectStore(VERSION_STORE).get(key); } catch (_) { resolve(null); return; }
+    req.onsuccess = () => resolve(req.result || null);
+    req.onerror = () => resolve(null);
+  });
+}
+
+/** Drop snapshots by key — retention's hands, and the purge's. */
+export async function idbDeleteVersions(keys) {
+  const list = (Array.isArray(keys) ? keys : [keys]).filter(Boolean);
+  if (!list.length) return { ok: true, removed: 0 };
+  const db = await openDb();
+  if (!db) return { ok: false, removed: 0, error: UNAVAILABLE };
+  return new Promise((resolve) => {
+    const t = tx(db, "readwrite", VERSION_STORE);
+    if (!t) { resolve({ ok: false, removed: 0, error: UNAVAILABLE }); return; }
+    const os = t.objectStore(VERSION_STORE);
+    let removed = 0;
+    for (const k of list) {
+      try { const r = os.delete(k); r.onsuccess = () => { removed += 1; }; } catch (_) { /* counted by the transaction outcome */ }
+    }
+    t.oncomplete = () => resolve({ ok: true, removed });
+    t.onabort = () => resolve({ ok: false, removed: 0, error: String(t.error?.message || "the delete was rolled back") });
+    t.onerror = () => resolve({ ok: false, removed: 0, error: String(t.error?.message || "the delete failed") });
   });
 }

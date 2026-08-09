@@ -20,6 +20,11 @@
  * and every cell containing one renders with a stray backslash. There is a regression
  * test for exactly this (test/notesMarkdown.test.js).
  */
+/* The ONE import here, and it is deliberately the smallest thing in the module: how an
+ * attached file is described in words. It is its own file precisely so this one — which is
+ * on the Notes route's STATIC path — can name a file without reaching into
+ * lib/notesAttachNode.js, which imports the editor engine. */
+import { attachmentLabel } from "./notesFileMeta.js";
 
 /* The node and mark names this exporter handles. test/notesModule.test.js asserts this
  * covers everything lib/notesExtensions.js lets into a document — so adding an extension
@@ -28,7 +33,8 @@
 export const NOTE_MD_HANDLED = {
   nodes: ["doc", "paragraph", "text", "heading", "bulletList", "orderedList", "listItem",
     "taskList", "taskItem", "blockquote", "codeBlock", "horizontalRule", "hardBreak",
-    "table", "tableRow", "tableHeader", "tableCell", "noteImage", "noteSketch"],
+    "table", "tableRow", "tableHeader", "tableCell", "noteImage", "noteSketch",
+    "noteAttachment", "noteCallout", "noteToggle", "noteToggleTitle"],
   marks: ["bold", "italic", "strike", "code", "underline", "link", "textStyle", "highlight"],
 };
 
@@ -45,7 +51,15 @@ const LOSSY = {
   headerlessTable: "tables with no header row",
   missingImage: "an image whose stored copy has gone",
   sketchPlacement: "where a sketch's boxes sit on the canvas",
+  missingAttachment: "an attached file whose stored copy has gone",
+  largeAttachment: "attached files too large to embed (named, not included)",
 };
+
+/* An attachment is embedded as a data URL up to here and merely NAMED beyond it. The cost
+ * of getting this wrong runs one way only: a 40 MB DWG base64'd into a `.md` produces a
+ * file no editor will open, which is worse than a line of text saying what the file was and
+ * how big. Named-not-embedded is reported as lossy, so it is a stated gap either way. */
+export const MD_INLINE_ATTACHMENT_MAX = 2 * 1024 * 1024;
 
 /* ---- images -------------------------------------------------------------------------
  *
@@ -74,10 +88,45 @@ export function imageIdsInDoc(doc) {
   return out;
 }
 
+/** Every ATTACHED FILE id a document references, in document order, de-duplicated. Its own
+ *  function rather than a flag on `imageIdsInDoc` because the two are asked for different
+ *  reasons: pictures are always inlined into an export, attachments only up to a size. */
+export function attachmentIdsInDoc(doc) {
+  const out = [];
+  const seen = new Set();
+  const walk = (n) => {
+    if (!n || typeof n !== "object") return;
+    if (n.type === "noteAttachment") {
+      const id = n.attrs?.fileId;
+      if (id && !seen.has(id)) { seen.add(id); out.push(id); }
+    }
+    (n.content || []).forEach(walk);
+  };
+  walk(doc);
+  return out;
+}
+
+/** Every STORED BLOB a document owns — pictures and attached files together.
+ *
+ *  ⛔ THIS IS WHAT THE PURGE AND THE ORPHAN SWEEP MUST USE (TOMBSTONE-DELETES). A cascade
+ *  that asked only for image ids would leave a deleted page's attachments on the device and
+ *  in the account forever: bytes nothing can reach and nothing will ever free. Adding a new
+ *  kind of stored blob means adding it HERE, not only to its own accessor. */
+export function assetIdsInDoc(doc) {
+  return [...imageIdsInDoc(doc), ...attachmentIdsInDoc(doc)];
+}
+
 /** Every image id across a whole map of `pageId → doc`. */
 export function imageIdsInDocs(bodies) {
   const seen = new Set();
   for (const doc of Object.values(bodies || {})) for (const id of imageIdsInDoc(doc)) seen.add(id);
+  return [...seen];
+}
+
+/** Every attached-file id across a whole map of `pageId → doc`. */
+export function attachmentIdsInDocs(bodies) {
+  const seen = new Set();
+  for (const doc of Object.values(bodies || {})) for (const id of attachmentIdsInDoc(doc)) seen.add(id);
   return [...seen];
 }
 
@@ -109,9 +158,9 @@ function imageMd(node, lossy, images) {
  * It also still reads a sketch saved under the SUPERSEDED outline shape (B1400: `outline` +
  * `positions`), because a note in storage may carry one; that shape brings its own nesting.
  *
- * ⛔ THIS FILE IMPORTS NOTHING (it is on the Notes route's STATIC path, and the sketch model
- * deliberately is not — pulling it in here would put sketch code on every notebook's first
- * paint). The reading below is therefore hand-rolled and defensive. test/notesSketch.test.js
+ * ⛔ THIS FILE DOES NOT IMPORT THE SKETCH MODEL (it is on the Notes route's STATIC path, and
+ * the sketch model deliberately is not — pulling it in here would put sketch code on every
+ * notebook's first paint). The reading below is therefore hand-rolled and defensive. test/notesSketch.test.js
  * guards the drift that invites: it feeds a real sketch node through BOTH this exporter and
  * the model's own `outlineFromSketch`, and fails if the two disagree.
  */
@@ -400,6 +449,55 @@ function taskBlock(node, lossy, depth, images) {
   return out.join("\n");
 }
 
+/* ---- callouts, toggles and attachments (NEW-5 / NEW-7) --------------------------------
+ *
+ * ⛔ A CALLOUT IS **NOT** LOSSY, AND THAT IS WHY THE FIVE TONES ARE THE FIVE THEY ARE.
+ * `> [!NOTE]` / `[!TIP]` / `[!IMPORTANT]` / `[!WARNING]` / `[!CAUTION]` is a real, rendered
+ * construct in GitHub-flavoured Markdown, so the export is the same thing with a different
+ * spelling rather than an approximation — no HTML fallback, nothing added to the lossy list.
+ * A sixth tone would have no marker to map to; do not add one without deciding its fallback
+ * first (lib/notesCalloutNode.js says the same thing from the other end).
+ *
+ * ⛔ A TOGGLE ALWAYS EXPORTS **OPEN**. Paper and a Markdown file have no disclosure
+ * triangle, so a folded section written out folded is simply missing text — the worst class
+ * of export bug, because nothing about the output looks wrong. `<details open>` renders
+ * expanded everywhere and still collapses in viewers that support it.
+ */
+const CALLOUT_MD_MARKER = {
+  info: "NOTE", tip: "TIP", important: "IMPORTANT", warning: "WARNING", danger: "CAUTION",
+};
+
+function calloutMd(node, lossy, depth, images) {
+  const marker = CALLOUT_MD_MARKER[node.attrs?.tone] || CALLOUT_MD_MARKER.info;
+  const inner = blocks(node.content, lossy, depth, images);
+  const body = inner.split("\n").map((l) => (l ? `> ${l}` : ">")).join("\n");
+  return `> [!${marker}]\n${body}`;
+}
+
+function toggleMd(node, lossy, depth, images) {
+  const kids = node.content || [];
+  const titleNode = kids.find((k) => k?.type === "noteToggleTitle");
+  const rest = kids.filter((k) => k?.type !== "noteToggleTitle");
+  const title = inline(titleNode?.content, lossy).trim() || "Details";
+  const body = blocks(rest, lossy, depth, images);
+  return `<details open>\n<summary>${title}</summary>\n\n${body}\n\n</details>`;
+}
+
+/** An attached file. Named ALWAYS; embedded when it is small enough to embed. Silence is
+ *  the one thing this may never do — an export that drops a survey without a word is a
+ *  document that looks complete and is not. */
+function attachmentMd(node, lossy, images) {
+  const label = escapeText(attachmentLabel({
+    name: node.attrs?.name, mime: node.attrs?.mime, size: node.attrs?.size,
+  }));
+  const src = images?.[node.attrs?.fileId];
+  if (!src) {
+    lossy.add(Number(node.attrs?.size) > MD_INLINE_ATTACHMENT_MAX ? LOSSY.largeAttachment : LOSSY.missingAttachment);
+    return `📎 **${label}** — attached file, not included in this export`;
+  }
+  return `📎 [${label}](${src})`;
+}
+
 /** Alignment is not expressible in Markdown at all, so an aligned block becomes an HTML
  *  wrapper. Only non-default alignments pay that cost. */
 function alignWrap(node, md, lossy, tag) {
@@ -442,6 +540,9 @@ function blocks(nodes, lossy, depth = 0, images = null) {
         break;
       }
       case "horizontalRule": out.push("---"); break;
+      case "noteCallout": out.push(calloutMd(node, lossy, depth, images)); break;
+      case "noteToggle": out.push(toggleMd(node, lossy, depth, images)); break;
+      case "noteAttachment": out.push(attachmentMd(node, lossy, images)); break;
       case "noteImage": out.push(imageMd(node, lossy, images)); break;
       case "noteSketch": out.push(sketchMd(node, lossy)); break;
       case "table": out.push(table(node, lossy, images)); break;
@@ -512,6 +613,10 @@ export function docToText(doc) {
     if (!n || typeof n !== "object") return;
     if (n.type === "text" && n.text) { out.push(n.text); return; }
     if (n.type === "hardBreak") { out.push("\n"); return; }
+    /* An attachment's NAME is in its attributes, not in a child text node — so without
+     * this a note whose survey PDF is the whole point could not be found by searching for
+     * the survey's filename, which is exactly how anyone would look for it. */
+    if (n.type === "noteAttachment") { if (n.attrs?.name) out.push(`${n.attrs.name}\n`); return; }
     /* A sketch's words live in its ATTRIBUTES, not in child text nodes, so a plain walk
      * would make every box on it invisible to search — a note whose whole content was a
      * sketch would be unfindable by anything written on it. */
