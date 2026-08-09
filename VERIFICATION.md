@@ -113,6 +113,74 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V97120 — B298560/B298561/B298562: the flood/drainage check's elevation leg, on his own Bain plan `Blocker: real-data` + `Blocker: live-GIS`
+
+**Status: ⏳ PENDING.** Everything reachable from this sandbox is already done and is recorded below; what is left needs the REAL federal service and HIS plan, which is the whole point of the item.
+
+**Why this cannot be closed here.** The claim is a LATENCY claim about `elevation.nationalmap.gov` and about the five Fort Bend county water-surface rasters. The sandbox's egress proxy blocks both hosts, and the county-sampler branch only fires once the live jurisdiction identify resolves the county to Fort Bend. A stub can prove the ORDERING and the GATING (and does — see below); only the live service can prove the numbers.
+
+**Already verified HERE, logged-out, against a seeded georeferenced plan with every host stubbed (e2e `drainage-elevation-latency.spec.js`, 4 arms, mutation-proven both ways):**
+- the transect and the first GIS request are issued within one event-loop turn of each other — the transect is no longer in front of the batch;
+- with 3DEP held 5 s, the panel PUBLISHES and the elevation reads a named `pending` state well inside 4 s, then resolves itself with no second press;
+- a second check publishes the HELD value immediately (`data-ground-cached="1"`) while the forced refresh runs underneath, and the fresh answer then REPLACES it;
+- a 503 from 3DEP produces `unavailable`, whose hover names the service and says nothing was assumed.
+- Mutants: publish budget → 60 s turns arm 2 red alone; `cache: null` turns arm 3 red alone.
+
+**Steps for the live pass (signed in, planyr.io, his Bain plan — "Concept A / Quiddity Hydrologic"):**
+1. Open DevTools → Network, filter `getSamples`. Press **↻ Re-check** in the Yield panel. Record: the wall-clock time from the press to the flood verdicts appearing, and the 3DEP `getSamples` duration. **Expected: the verdicts land in well under a second even when 3DEP takes seconds.**
+2. Confirm the five county rasters (`500YR_WSE`, the `100YR` per-watershed candidates, `Willow_500YR_Existing_WSE`) are requested WITHOUT waiting for `getSamples` to finish. **⚠ `Willow_500YR_Existing_WSE` still starts after the other four — that is correct and deliberate** (mosaic-first; see B298561).
+3. Press **↻** again. Hover the freshness dot. **Expected: the hover states the elevation was HELD from an earlier read, with its age; the press does not wait on USGS; a fresh `getSamples` still goes out.**
+4. Reload the page, open the plan, press **↻**. **Expected: still held — the store is IndexedDB, so a reload must not pay again.**
+5. Record the end-to-end check time for comparison against his measured 3,635 / 8,494 ms.
+
+### V97121 — B298563: does a `draincheck` timing row actually REACH `client_errors`? `Blocker: auth`
+
+**Status: ⏳ PENDING.** Same shape as V62544 (B265536) and pending for the same reason: an automated run is suppressed from the network write by design (B270912), so only a real signed-in browser can prove delivery.
+
+**Steps:** signed in on planyr.io, press **↻ Re-check** on any georeferenced plan. Then either (a) in the console read `window.pfTelemetry.delivery()` and confirm `ok` incremented, or (b) query `public.client_errors` for `source = 'event:draincheck'` and confirm one row per press. **Expected:** one row carrying `legs` with `elev`, the `wse:*` per-raster entries, `calc`, `save` and `total`, plus `ground` / `groundCached`. **Also confirm the negative:** nothing in the row names the site, its address or its geometry — the payload is an allowlist and this is the read-back that proves it.
+### V96960 — B298401: on planyr.io with the flood-tile flag on, does a Harris plan draw the floodplain instantly — and does a broken archive still fall back to live FEMA? `Blocker: live-GIS`
+**Filed 2026-08-09 with B298401. What was ALREADY proven headless HERE, so this entry is only the gap:**
+`node ui-audit/verify-flood-tiles.mjs` — **10/10 green** against a real Chromium on a seeded Harris plan:
+tiles paint the flood layer in **286–320 ms**, over **3 HTTP range requests totalling 27,392 bytes** of
+`flood-tx-harris.pmtiles`; **zero** agency requests for the picture; the `NFHL as of Nov 15, 2019` stamp is
+on screen; a **404 archive hands the row back to the live FEMA path** (6 agency requests where the working
+archive made 0 — a real mutation check, not a tautology); a county with **no** archive never asks for one.
+Plus `test/floodTiles.test.js` (48) and `test/floodTileRender.test.js` (22) driving the committed archives.
+
+**⛔ WHY THIS IS STILL OWED A BROWSER — the one thing this sandbox structurally cannot show.**
+Every `hazards.fema.gov` request from **Chromium** here dies with `ERR_CONNECTION_RESET` (the egress
+policy; Node reaches the same host fine — that is how the archives were built). So the harness can prove
+the live path is **ENGAGED** and can never prove it **PAINTS**, which means the number the owner actually
+cares about — *how much faster is this than what I have today* — has no live half in this sandbox. That is
+a `live-GIS` blocker, not a to-do that was skipped.
+
+**The pending steps, on planyr.io with `VITE_FLOOD_TILES=1` in the Pages env:**
+1. Open a **Harris** plan. Turn on **FEMA flood zones**. The floodplain should appear essentially with the
+   map, not seconds later, and should stay put through a pan and a zoom (no re-fetch per gesture).
+2. The **Flood & drainage** group's `REGULATORY` heading should read `· NFHL as of Nov 15, 2019`.
+3. Open a **Waller** (Tsakiris) plan and repeat — vintage there is **Jan 15, 2021** for Larimer,
+   **May 16, 2019** for Waller; confirm the stamp names the county actually on screen.
+4. Compare against a **Montgomery** plan (no baked archive): the layer must still paint from live FEMA,
+   just at today's speed. **Nothing may be blank on any of the three.**
+5. Hover the floodplain on the Harris plan: the identify card should name the zone off the tiles and carry
+   the "the parcel's authoritative zone and acreage still come from the live FEMA query" line.
+6. Zoom past z13 and confirm the overzoomed tiles still read as a flood map rather than mush.
+7. **The measurement to record:** time from the layer switching on to the floodplain being visible, tiles
+   vs. flag-off, on the same plan. That is the number Phase 1 exists to produce and the only one still
+   missing.
+8. **✅ ALREADY PROVEN AGAINST THE REAL HOST, 2026-08-09 — this is no longer owed.** The SHIPPED
+   adaptive reader (`lib/floodArchiveSource.js`) was driven from Node against the live Cloudflare
+   Pages deployment of this branch: **Harris — header + 5 z13 tiles decoded (38/70/19/60/52
+   features) in ONE request, 5.96 MiB, 1,094 ms total**; **Waller — 1 request, 0.69 MiB, 231 ms.**
+   So the whole-file path works on the actual host, not just in a local simulation of it. What is
+   left below is the BROWSER half.
+9. **⛔ Pages does NOT do byte serving** (a ranged GET
+   returns 200 with the full body, on every asset; see B298401). So on the live site the reader fetches
+   each archive **whole, once** (`lib/floodArchiveSource.js`). Confirm on a COLD cache that Harris's
+   **5.96 MiB** arrives once and that the second visit is served from cache (a 304, not a re-download) —
+   that is the one behaviour the sandbox cannot show, because its dev server honours Range and takes the
+   cheap path instead.
+
 ### V91632 — B293073: on ONE OF HIS OWN PLANS, do two overlapping objects actually swap what's on top? `Blocker: real-data`
 
 The three defects behind *"the layers / order feature doesn't work at all"* are fixed and each is proven here by reading paint order back out of the rendered DOM (not from state). What the sandbox cannot know is **which objects he was trying to reorder**, so this is the one check that closes his report rather than mine.

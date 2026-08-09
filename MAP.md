@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-08-09 @ `8ae4323` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-08-09 @ `4d64bd8` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_456 source files mapped._
+_465 source files mapped._
 
 ## infra
 
@@ -160,6 +160,10 @@ _456 source files mapped._
   - _exports_: `BLANK`, `compareValues`, `DEFAULT_CALENDAR`, `errVal`, `evaluateFormula`, `extractRefs`, `formatValue`, `FORMULA_ERRORS`, `FormulaError`, `FUNCTION_HELP`, `FUNCTION_NAMES`, `FUNCTIONS`, `isBlank`, `isDate`, `isErrVal`, `isFormulaError`, `isoToSerial`, `makeDate`, `numToGeneralStr`, `parse`, `parseFormula`, `parseLooseDate`, `planFormulaColumns`, `serialToISO`, `serialToYMD`, `toBool`, `toDateSerial`, `tokenize`, `toNumber`, `toStr`, `weekdayOf`, `ymdToSerial`
 - **`src/shared/geometry/pasteGeom.js`** — Pure paste-at-cursor placement math: bbox center plus translate so a pasted copy drops centered under the cursor, shared by both canvases
   - _exports_: `bboxCenter`, `centerOn`
+- **`src/shared/gis/countyKeys.js`** — county ROUTING-KEY normalisation (`normCountyKey`) + the case-insensitive map/set wrappers every county-keyed lookup goes through
+  - _exports_: `byCountyKey`, `countyKeySet`, `countyLookup`, `normCountyKey`, `sameCounty`
+- **`src/shared/gis/floodTiles.js`** — baked FEMA NFHL flood tiles — the pure model: per-county archive naming, the drop rule, the tiles-vs-live source decision, and the NFHL vintage stamp
+  - _exports_: `FLOOD_MANIFEST_URL`, `FLOOD_TILE_ABSENCE_NOTE`, `FLOOD_TILE_COUNTIES`, `FLOOD_TILE_DIR`, `FLOOD_TILE_FIELDS`, `FLOOD_TILE_LAYER_NAME`, `FLOOD_TILE_MAX_ZOOM`, `FLOOD_TILE_MIN_ZOOM`, `floodAbsenceKindFor`, `floodArchiveName`, `floodArchiveUrl`, `floodTileCountyKeys`, `floodTilesEnabled`, `floodVintageStamp`, `formatVintage`, `hasFloodTiles`, `keepInTiles`, `manifestCounty`, `resolveFloodSource`, `TILE_DROP_RULE`, `TILE_DROPPED_VARIANTS`
 - **`src/shared/gis/gisProxyCore.js`** — Pure shared core for the same-origin GIS imagery cache proxy: host allowlist, base64url service-URL packing, cache-key hashing, TTL freshness
   - _exports_: `ALLOWED_GIS_HOST_RE`, `b64urlDecode`, `b64urlEncode`, `cacheKey`, `DEFAULT_TTL_MS`, `freshness`, `parseUpstream`, `proxyServiceUrl`
 - **`src/shared/gis/parcelSnapshotBuild.js`** — Pure county parcel snapshot transforms: strip to UI-read fields and quantize polygon coordinates into a compact gzippable GeoJSON FeatureCollection
@@ -469,6 +473,8 @@ _456 source files mapped._
   - _exports_: `DBLTAP_MS`, `DBLTAP_PX`, `EMPTY_TAP`, `pairsWithLastTap`, `stepDoubleTap`, `tapRecord`, `tapTime`
 - **`src/workspaces/site-planner/lib/drafts.js`** — Pure resolver for Bluebeam-style mid-draw undo: decides which in-progress multi-point draft to trim by one vertex (Backspace + Ctrl-Z), and returns null when no draft is active so Ctrl-Z falls through to a global undo
   - _exports_: `resolveDraftStepBack`
+- **`src/workspaces/site-planner/lib/drainageTiming.js`** — NEW-4 per-leg timings for the flood/drainage check (elevation, each county WSE raster, each FEMA pull, the app's own calc, the cloud save), built from a leg-name ALLOWLIST and reported through the production telemetry sink with its delivery outcome kept (no silent sink)
+  - _exports_: `__resetDrainageTiming`, `armDrainageSaveLeg`, `buildDrainageTimingRow`, `createDrainageTimer`, `DRAIN_LEG_KEYS`, `drainageTimingDelivery`, `drainageTimingRecent`, `MAX_LEGS`, `noteDrainageSave`, `reportDrainageTiming`, `SAVE_ATTRIBUTION_MS`, `WSE_LEG_PREFIX`, `wseLegName`
 - **`src/workspaces/site-planner/lib/drawdownStatute.js`** — NEW-7 C.R.S. 37-92-602(8) as a rule record — 97% of a 5-year storm out in 72 hr, 99% of larger events in 120 hr — turning the existing drawdown number into a Colorado water-rights verdict (fail / not-ruled-out / unknown, never 'pass') plus the post-2015 State Engineer notification. Texas is untouched
   - _exports_: `assessStatutoryDrawdown`, `DRAWDOWN_STATUTES`, `statuteForState`
 - **`src/workspaces/site-planner/lib/drawdownTime.js`** — NEW-2 drawdown time at the jurisdiction's allowable release rate: allowable release from the per-acre criterion (or an outlet override), optimistic time-to-empty per pond and site-wide with a prorated capped outfall, and threshold banding
@@ -502,7 +508,7 @@ _456 source files mapped._
 - **`src/workspaces/site-planner/lib/elementSync.js`** — the per-element write engine (B671): diffs live collections vs a shadow map, batches rev-guarded commits, LWW conflict events, dirty-queue backoff
   - _exports_: `createElementSync`, `semanticallyEqual`, `stableStringify`
 - **`src/workspaces/site-planner/lib/elevation.js`** — USGS 3DEP bare-earth DEM sampling: profile elevations along a polyline (metres to survey-ft) plus ditch-depth screening stats
-  - _exports_: `DEP_URL`, `ditchStats`, `M_TO_FT`, `samplePoint`, `sampleProfile`
+  - _exports_: `DEFAULT_INTERPOLATION`, `DEP_SERVICE_LABEL`, `DEP_URL`, `ditchStats`, `M_TO_FT`, `profileQuery`, `samplePoint`, `sampleProfile`
 - **`src/workspaces/site-planner/lib/estimateChallenge.js`** — the "challenge the estimate" engine (B882, pure): sanity-check the estimated WSE vs site grade (`sanityCheckEstimate`), the BFE ±1 ft sensitivity band (`sensitivityBand`), and the estimate-vs-estimate disagreement (`compareEstimates`).
   - _exports_: `BELOW_INVERT_TOL_FT`, `compareEstimates`, `DISAGREE_THRESHOLD_FT`, `IMPLAUSIBLE_DEPTH_FT`, `impliedDepthFt`, `MATERIAL_ABS_FLOOR`, `MATERIAL_REL`, `sanityCheckEstimate`, `SENSITIVITY_DELTA_FT`, `sensitivityBand`
 - **`src/workspaces/site-planner/lib/evidenceLayers.js`** — View-driven Leaflet utility-evidence overlays (OSM Overpass power/hydrants + Mapillary detections) with SWR cache and per-layer status
@@ -527,12 +533,22 @@ _456 source files mapped._
   - _exports_: `ffeDualDisplay`, `solveBalanceFfe`
 - **`src/workspaces/site-planner/lib/floodAdministrator.js`** — NEW-8 governing floodplain administrator: candidate resolution from county/city/ETJ/edge signals, deliberate strictest-wins selection with an ambiguity flag, and the BFE back-solved from an assumed FFE
   - _exports_: `administratorCandidates`, `assessAdministrator`, `ffeSummary`, `impliedFloodElevation`, `resolveAdministrator`, `ruleKeyFor`
+- **`src/workspaces/site-planner/lib/floodArchiveSource.js`** — adaptive PMTiles byte source: ranged reads where the host honours Range, whole-file-once where it does not (Cloudflare Pages does not)
+  - _exports_: `FloodArchiveSource`
 - **`src/workspaces/site-planner/lib/floodGroup.js`** — Flood & drainage layer-group model (B1070/B1071, pure): four provenance tiers, point-in-district auto-scoping of local drainage authorities, master-toggle state, and the honest empty-state copy (what FEMA actually reported, why a district isn't listed, the governing-district drainage line)
   - _exports_: `COUNTY_DISTRICT`, `COUNTY_LABEL`, `countyKey`, `countyName`, `districtDrainageNote`, `districtName`, `districtReaches`, `districtShort`, `DRAINAGE_DISTRICTS`, `emptyReason`, `FEMA_ZONES_NOT_CHANNELS`, `FLOOD_TIER_ORDER`, `FLOOD_TIERS`, `floodFactsNote`, `floodMasterState`, `floodRowRelevance`, `floodTierLabel`, `governingDistrict`, `isSfhaZone`, `scopeFloodEntries`
+- **`src/workspaces/site-planner/lib/floodManifest.js`** — one cached fetch of `public/flood/manifest.json`, so the panel can state which edition of the NFHL the baked tiles are
+  - _exports_: `loadFloodManifest`, `resetFloodManifest`
 - **`src/workspaces/site-planner/lib/floodplainMitigation.js`** — B707 pure engine: NFHL zone classifier (AO/AH/floodway/unstudied-A), lon/lat→site-feet zones, grid-sampled fill∩zone compensating-storage volume with pluggable elevation providers, UNKNOWN-never-zero states, expert bypass, straddle worst-case
   - _exports_: `BFE_SENTINEL_MIN`, `bfeLinesFromFeatureCollection`, `BKDD_DATUM_NOTE`, `bufferedFloodway`, `classifyNfhlFeature`, `combineMitigation`, `computeMitigation`, `crossSectionWselFromFeatureCollection`, `deriveBfeFromLines`, `DERIVED_BFE_NOTE`, `DERIVED_WSE02_DRAFT_NOTE`, `DERIVED_WSE02_NOTE`, `DERIVED_WSE100_DRAFT_NOTE`, `DERIVED_XS_WSEL_NOTE`, `distToPolyline`, `effectivePadElev`, `EST_BOUNDARY_WSE_NOTE`, `EST_EBFE_NOTE`, `EST_MAAPNEXT_NOTE`, `EST_SCREENING_BFE_NOTE`, `EST_WSE_SRCS`, `estimateZoneAWse`, `estWseNote`, `EXCLUSIONS_NOTE`, `EXPERT_BYPASS_LABEL`, `FFE_BASIS_LABEL`, `ffeBasisText`, `floodGeoBbox`, `governingCrossSectionWsel`, `gridIntersect`, `hagForRing`, `isEstimatedWseSrc`, `NAVD88_NOTE`, `NEWER_MODEL_NOTE`, `OFFSITE_NOTE`, `pickWorstCase`, `pointInZone`, `pondFloodplainTier`, `ringInFloodway`, `ringInTrigger`, `sampleRingGrades`, `wedgeMitigation`, `WSE_PROVIDER_LABEL`, `wse1pctForRing`, `wseProvLabel`, `zonesFromFeatureCollection`, `zoneWaterSurface`
 - **`src/workspaces/site-planner/lib/floodplainRules.js`** — B707 editable per-jurisdiction floodplain-mitigation rules (trigger band / ratio / floodway policy / offset scope, verified-flagged placeholder seeds) with drainage-authority + county defaulting
   - _exports_: `atlas14Mandated`, `bfeDataRequirementFor`, `DEFAULT_FLOODPLAIN_RULES`, `defaultFloodJurForAuthority`, `defaultFloodJurForCounty`, `floodJurCounty`, `loadFloodplainRules`, `mitigationOffsetBasis`, `offsetSurfaceBasis`, `offsetSurfaceLabel`, `saveFloodplainRules`, `triggerClasses`
+- **`src/workspaces/site-planner/lib/floodTileDecode.js`** — the Leaflet-free half of the flood tile layer — MVT decode, even-odd point-in-rings hit test, and the canvas paint
+  - _exports_: `decodeFloodTile`, `featureAt`, `latToTileY`, `lngToTileX`, `paint`, `pointInRings`, `TILE_PX`
+- **`src/workspaces/site-planner/lib/floodTileLayer.js`** — the Leaflet glue for baked flood tiles: a PMTiles-backed canvas GridLayer with `identifyAt` and a one-shot fallback to live FEMA (lazy-loaded)
+  - _exports_: `floodPmtilesLayer`, `forgetArchive`, `openArchive`
+- **`src/workspaces/site-planner/lib/floodTileStyle.js`** — how a baked NFHL polygon paints — per-variant fill/stroke, the painter's draw order, and the identify card's wording
+  - _exports_: `FLOOD_TILE_IDENTIFY_NOTE`, `floodTileRows`, `floodTileStyle`, `floodTileTitle`, `paintRank`
 - **`src/workspaces/site-planner/lib/floodZone.js`** — The ONE flood-zone CLASSIFIER (site route, no user-facing strings): which of eight variants a NFHL polygon is, and in particular shaded vs unshaded Zone X — both carry FLD_ZONE 'X' and only ZONE_SUBTY separates the 500-yr band from the all-clear
   - _exports_: `isSfhaZone`, `isShadedXSubtype`, `resolveFloodZone`
 - **`src/workspaces/site-planner/lib/floodZoneCopy.js`** — LAZY-loaded words + provenance for a FEMA flood answer: the answer-first headline ('No mapped floodplain · FEMA Zone X (unshaded)'), the representable no-data/unreachable states, the DFIRM/FIRM-panel decode with county names, and the Layers-panel verdict — deliberately off the site-route chunk
@@ -551,6 +567,8 @@ _456 source files mapped._
   - _exports_: `backoffMs`, `classifyGisError`, `clearCoalesced`, `COALESCE_TTL_MS`, `coalesceRequest`, `fetchArcgisJson`, `GIS_FETCH_RETRIES`, `GIS_FETCH_TIMEOUT_MS`, `GIS_MAX_GET_URL`, `gisErrorMessage`, `GisFetchError`, `pLimit`
 - **`src/workspaces/site-planner/lib/gradingRules.js`** — Grading-standards registry (B825): per-surface-class slope limits with provenance (verified/basis/source), override merge, percent/ratio validation seam, chip labels
   - _exports_: `chipLabel`, `GRADING_RULES`, `gradingRuleFor`, `JURISDICTION_OVERRIDES`, `mergeGradeOverride`, `validateSlopeAgainstRule`
+- **`src/workspaces/site-planner/lib/groundElevation.js`** — NEW-1/NEW-2/NEW-3 the drainage check's bare-earth ground-elevation leg: cached on the EXACT 3DEP request geometry (months-long TTL, IndexedDB tier), started in parallel and never gating the panel (four states — value/void/pending/unavailable, never a fabricated default), bounded with the service named on failure, plus the one hover sentence that states it
+  - _exports_: `beginGroundElevation`, `GROUND_HALF_SPAN_DEG`, `GROUND_INTERPOLATION`, `GROUND_KEY_PREFIX`, `GROUND_PUBLISH_BUDGET_MS`, `GROUND_SAMPLE_COUNT`, `GROUND_SERVICE`, `GROUND_TIMEOUT_MS`, `GROUND_TTL_MS`, `groundCacheKey`, `groundElevNote`, `groundTransectPath`, `medianElevation`
 - **`src/workspaces/site-planner/lib/groundReadout.js`** — pure composition of the cursor elevation readout: the four honest existing-grade states (value / in-flight / no-data / unavailable), the proposed value, and the signed Fill/Cut delta on the cut-fill ramp
   - _exports_: `COARSE_CELL_FT`, `deltaColor`, `groundReadout`
 - **`src/workspaces/site-planner/lib/groundwater.js`** — Depth-to-water screen for pond feasibility (NEW-B3): combines SSURGO seasonal-high water table + TWDB well signals (provenanced), screens wet-vs-dry pond (permanent-pool depth, suggested pool elev). Pure.
@@ -584,7 +602,7 @@ _456 source files mapped._
 - **`src/workspaces/site-planner/lib/layerRequest.js`** — Pure map-layer request shaping: esri dynamic/image/feature layer option builders plus transient-retry policy, with coverage barred from narrowing requests
   - _exports_: `dynamicLayerOptions`, `featureLayerOptions`, `featureRetryDecision`, `identifyCapable`, `imageLayerOptions`, `isTransientStatus`, `overlayExportRequest`, `pointSymbolOptions`, `RASTER_STALL_MS`, `TRANSIENT_STATUS`, `wireRasterStatus`
 - **`src/workspaces/site-planner/lib/layers.js`** — Shared GIS overlay registry + syncOverlayLayers: probes/adds/removes esri-leaflet raster & feature layers, retry/backoff, B445 cache-proxy with direct-agency fallback, per-layer status + vintage
-  - _exports_: `AHJ_LAYERS`, `ALL_LAYERS`, `attachFeatureRetry`, `defaultOverlayState`, `EVIDENCE`, `fetchWithRetry`, `gisProxyEnabled`, `identifyOverlaysAt`, `JLAYERS`, `JURISDICTION_LAYERS`, `jurisdictionFor`, `JURISDICTIONS`, `LAYER_GROUP_LABEL`, `LAYER_GROUP_ORDER`, `LAYER_VINTAGE`, `layerVintage`, `MERGE_GROUPS`, `probeService`, `rasterIdentifyLayers`, `STATEWIDE`, `syncOverlayLayers`, `TERRAIN`, `withTileRetry`
+  - _exports_: `AHJ_LAYERS`, `ALL_LAYERS`, `attachFeatureRetry`, `defaultOverlayState`, `EVIDENCE`, `fetchWithRetry`, `floodArchiveState`, `floodSourceFor`, `gisProxyEnabled`, `identifyOverlaysAt`, `JLAYERS`, `JURISDICTION_LAYERS`, `jurisdictionFor`, `JURISDICTIONS`, `LAYER_GROUP_LABEL`, `LAYER_GROUP_ORDER`, `LAYER_VINTAGE`, `layerVintage`, `markFloodArchiveMissing`, `MERGE_GROUPS`, `probeService`, `rasterIdentifyLayers`, `resetFloodArchiveState`, `STATEWIDE`, `syncOverlayLayers`, `TERRAIN`, `withTileRetry`
 - **`src/workspaces/site-planner/lib/layerSchedule.js`** — GIS overlay load ORDER + staging policy so the map is interactive before the overlay fan-out starts
   - _exports_: `admittedAfter`, `LAYER_STAGE_SIZE`, `layerTier`, `orderLayersByPriority`
 - **`src/workspaces/site-planner/lib/layerWeight.js`** — the visual-hierarchy model — per-layer decision-impact tier (constraint / reference / context) with enforced opacity + weight ceilings, so reference data recedes and the plan stays the subject

@@ -71,6 +71,13 @@ import { prefetchExtents, computeCoverage, boundsFromLeaflet, getNearbyRadiusMil
 import { fetchOverpass } from "./lib/evidenceLayers.js";
 import { loadEasementRules, saveEasementRules, defaultJurForCounty } from "./lib/easementRules.js";
 import { sampleProfile, ditchStats } from "./lib/elevation.js";
+/* ⛔ NEW-1..NEW-4 — `lib/groundElevation.js` and `lib/drainageTiming.js` are reached ONLY by the
+ * dynamic import inside `checkDrainage`, never statically. Both are needed exactly when a human
+ * presses ↻, and the bundle audit charges the Site route for anything on its STATIC graph — with
+ * them static this feature put 8.8 KB on the largest chunk and breached its ceiling by 3.2 KB.
+ * Two consequences to preserve: the ground-elevation hover sentence travels WITH the state
+ * (`groundElev.note`) so the render never calls back into the lib, and the save-leg stamp in
+ * `cloudPushWithWatchdog` is gated on a ref so an ordinary save imports nothing at all. */
 import { sampleWse02Point, sampleWse100Point } from "./lib/fbcdWse.js";
 import { sampleEbfePoint } from "./lib/ebfe.js";
 import { sampleMaapnextWse } from "./lib/hcfcdWse.js";
@@ -3263,6 +3270,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         line: PANE_LINE, lineLabel: PANE_LINE_LABEL,
       },
       admit: (id) => order.indexOf(id) < staged * LAYER_STAGE_SIZE,
+      // NEW-2 — which county's baked flood archive (if any) this plan may use. The plan header's
+      // county is the right key: it is what the site was filed under, and it is stable across a
+      // pan, which the map-view county is not.
+      countyKey: restored?.county || county || null,
       onStatus: (id, state, msg, extra) => setLayerStatus && setLayerStatus((s) => ({ ...s, [id]: state ? { state, msg, ts: extra?.ts ?? null, stale: extra?.stale ?? false } : null })),
       onError: (cfg, msg) => { flashWarn(`⚠ “${cfg.label}” layer failed: ${msg || "service may be down or moved"}.`, 6000); },
     });
@@ -3546,12 +3557,25 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // resolve within ~6s it's silently stalled, so we go LOUD (the B125 banner + Retry) rather
   // than leave the badge spinning forever. Tied to the actual in-flight push (not the debounce),
   // so sustained editing never false-triggers it. Reused by autosave + the manual Retry.
+  const drainSaveArmed = useRef(false); // NEW-4 — is a drainage check waiting to charge a save leg?
   const cloudPushWithWatchdog = (id) => {
     setSaveStatus("saving");
     const wd = setTimeout(() => setCloudSaveFailed(true), 6000);
+    /* NEW-4 — the SAVE leg of a flood/drainage check. The check does not issue this write (it
+     * rides the plan's own debounced push), so it is stamped from here, and `noteDrainageSave`
+     * only attributes it when a check settled inside its window — outside it, a save is just a
+     * save and is never charged to a check it had nothing to do with. */
+    const pushT0 = typeof performance !== "undefined" && performance.now ? performance.now() : Date.now();
+    const stamp = () => {
+      if (!drainSaveArmed.current) return;   // no check is waiting → import nothing, cost nothing
+      drainSaveArmed.current = false;
+      const ms = (typeof performance !== "undefined" && performance.now ? performance.now() : Date.now()) - pushT0;
+      // Already resident: the check that armed this loaded the module a moment ago.
+      import("./lib/drainageTiming.js").then((m) => m.noteDrainageSave(ms)).catch(() => {});
+    };
     return pushSiteToCloud(id)
-      .then((c) => { clearTimeout(wd); setSaveStatus(c.ok ? "saved" : "unsaved"); setCloudSaveFailed(!c.ok); })
-      .catch(() => { clearTimeout(wd); setSaveStatus("unsaved"); setCloudSaveFailed(true); });
+      .then((c) => { clearTimeout(wd); stamp(); setSaveStatus(c.ok ? "saved" : "unsaved"); setCloudSaveFailed(!c.ok); })
+      .catch(() => { clearTimeout(wd); stamp(); setSaveStatus("unsaved"); setCloudSaveFailed(true); });
   };
   // Autosave this site (debounced). Persists on the FIRST real edit (so a 1-element
   // new site is written, not lost), and never persists a still-blank site.
@@ -10137,17 +10161,45 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // Keep the prior good answer visible under a "checking…" hint rather than blanking
     // the whole readout (and don't lose it if this re-check then fails).
     setDrainCtx((prev) => ({ busy: true, auto: isAuto, prev: prev?.ctx ? prev : prev?.prev }));
+    // NEW-4 — every leg of this check is timed, and the row goes to the same production sink the
+    // performance recorder uses. `checkT0` is stamped BEFORE the lazy import below, so `total`
+    // measures the check and not the check minus its own module load.
+    const checkT0 = typeof performance !== "undefined" && performance.now ? performance.now() : Date.now();
+    const [{ beginGroundElevation }, dtim] = await Promise.all([
+      import("./lib/groundElevation.js"),
+      import("./lib/drainageTiming.js"),
+    ]);
+    const { createDrainageTimer, buildDrainageTimingRow, reportDrainageTiming, wseLegName, armDrainageSaveLeg, SAVE_ATTRIBUTION_MS } = dtim;
+    const timer = createDrainageTimer(undefined, checkT0);
+    let drainGroundState = null;
+    let drainCheckError = null;
     try {
       // The identify takes ONE ring — use the largest active parcel (flagged when several).
       const largest = act.reduce((b, p) => (polyArea(p.points) > polyArea(b.points) ? p : b), act[0]);
       const ring = largest.points.map((pt) => { const [la, ln] = feetToLatLng(pt, origin.lat, origin.lon); return [ln, la]; });
       const c = ring.reduce((s, [x, y]) => [s[0] + x / ring.length, s[1] + y / ring.length], [0, 0]);
-      // Ground elevation: median of a short 3DEP line through the parcel centroid
-      // (bare-earth NAVD88 feet; median shrugs off a stray no-data sample).
-      const sampleGround = async ({ lng, lat }) => {
-        const elev = await sampleProfile([[lng - 0.0004, lat], [lng + 0.0004, lat]], 9);
-        const vals = (elev || []).filter((v) => v != null && isFinite(v)).sort((a, b) => a - b);
-        return vals.length ? vals[Math.floor(vals.length / 2)] : null;
+      /* ⛔ NEW-1 / NEW-2 / NEW-3 — GROUND ELEVATION. Started HERE, at t=0, in parallel with every
+       * GIS pull below rather than in front of them (B1442(d) did exactly this for three point
+       * samplers and left this one out — same fix, same shape, same reason), and CACHED on the
+       * exact request geometry so a repeat check pays nothing at all for a value that changes when
+       * USGS re-flies a county. `state` is what the panel may publish immediately; `fresh` is the
+       * late answer that patches it in. See lib/groundElevation.js for the whole rationale,
+       * including why the explicit ↻ forces a refresh WITHOUT blocking on it. */
+      timer.start("elev");
+      const groundLeg = beginGroundElevation({
+        lng: c[0], lat: c[1],
+        force: !isAuto,                 // the ↻ is the "correct a wrong cached value" button
+        cache: gisCache,
+        onFetchSettled: ({ ms }) => timer.mark("elev", ms),
+      });
+      const groundStatePromise = groundLeg.state;
+      /* `resolveDrainageContext` asks for the ground sample inside its own parallel batch; give it
+       * the already-in-flight answer instead of starting a second one. Past the publish budget
+       * this resolves to null and the context publishes WITHOUT site grade — an honest
+       * `ground-elevation-missing`, never a fabricated elevation — and the patch below fills it. */
+      const sampleGround = async () => {
+        const st = await groundStatePromise;
+        return st && st.status === "value" ? st.ft : null;
       };
       // B707/B712: the NFHL polygon pull rides this same explicit click (house
       // rule: never auto-fetch on an edit), the B96 SWR cache, and the same
@@ -10231,14 +10283,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // retry), never an indefinite spinner. The per-source .catch()es still handle plain outages.
       const DRAIN_FETCH_TIMEOUT_MS = 30000;
       let drainTimeoutId = null;
+      // NEW-4 — one leg per source, all started already; `leg` only stamps when each settles, so
+      // the timing costs nothing and cannot change the ordering it is measuring.
+      const leg = (name, p) => { timer.start(name); return p.then((v) => { timer.end(name); return v; }, (e) => { timer.end(name); throw e; }); };
+      timer.start("gis");
       const [ctx, floodGeo, bfeLines, xs, siteGrid] = await Promise.race([
         Promise.all([
-          resolveDrainageContext({ lng: c[0], lat: c[1], ring }, { sampleGround }),
-          floodGeoP,
-          bfeLinesP,
-          crossSectionsP,
-          siteGridP,
-        ]).then((r) => { if (drainTimeoutId) clearTimeout(drainTimeoutId); return r; }),
+          leg("ctx", resolveDrainageContext({ lng: c[0], lat: c[1], ring }, { sampleGround })),
+          leg("flood", floodGeoP),
+          leg("bfeLines", bfeLinesP),
+          leg("xs", crossSectionsP),
+          leg("siteGrid", siteGridP),
+        ]).then((r) => { if (drainTimeoutId) clearTimeout(drainTimeoutId); timer.end("gis"); return r; }),
         new Promise((_, reject) => { drainTimeoutId = setTimeout(() => reject(new Error("flood-data source timed out — ↻ Re-check")), DRAIN_FETCH_TIMEOUT_MS); }),
       ]);
       if (tok !== drainTok.current) return;
@@ -10274,7 +10330,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       floodGeo.wse100Flags = { state: "not-applicable" };
       if ((ctx?.authority?.jurisdiction?.county || []).some((c) => /fort\s*bend/i.test(String(c)))) {
         const [wLat, wLng] = feetToLatLng(bfePt, origin.lat, origin.lon);
-        const [r02, r100] = await Promise.allSettled([sampleWse02Point(wLat, wLng), sampleWse100Point(wLat, wLng)]);
+        // NEW-4 — per-RASTER timings (`wse:FortBend_500YR_WSE`, `wse:Willow_100YR_Existing_WSE`,
+        // …), which is the granularity the owner's own PerformanceResourceTiming timeline had and
+        // the app did not. `wse` is the group's wall clock.
+        const onSample = ({ service, ms }) => { const n = wseLegName(service); if (n) timer.mark(n, ms); };
+        timer.start("wse");
+        const [r02, r100] = await Promise.allSettled([sampleWse02Point(wLat, wLng, { onSample }), sampleWse100Point(wLat, wLng, { onSample })]);
+        timer.end("wse");
         if (r02.status === "fulfilled") {
           floodGeo.derivedWse02 = r02.value != null ? { wseFt: r02.value, source: "fbcdd-wse02-draft" } : null;
           floodGeo.wse02Flags = { state: r02.value != null ? "loaded" : "empty" };
@@ -10312,8 +10374,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       const zoneAUnstudied = (floodGeo.zones || []).some((z) => z.unstudiedA && z.zone === "A");
       const inHarris = (ctx?.authority?.jurisdiction?.county || []).some((c) => /harris/i.test(String(c)));
       const [ptLat, ptLng] = feetToLatLng(bfePt, origin.lat, origin.lon);
-      const ebfeP = zoneAUnstudied ? sampleEbfePoint(ptLat, ptLng) : null;
-      const maapP = zoneAUnstudied && inHarris ? sampleMaapnextWse(ptLat, ptLng) : null;
+      const ebfeP = zoneAUnstudied ? leg("ebfe", sampleEbfePoint(ptLat, ptLng)) : null;
+      const maapP = zoneAUnstudied && inHarris ? leg("maapnext", sampleMaapnextWse(ptLat, ptLng)) : null;
       if (ebfeP) ebfeP.catch(() => {});
       if (maapP) maapP.catch(() => {});
       floodGeo.ebfe = null;
@@ -10366,6 +10428,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       floodGeo.screeningBfeFlags = { state: "not-applicable" };
       if (zoneAUnstudied) {
         const sLat = ptLat, sLng = ptLng;
+        timer.start("screening");
         try {
           // The WIDE, COARSE delineation window — the SAME 3DEP sampler as the site DEM, a
           // different extent (a site-envelope grid would delineate a few acres of a basin that
@@ -10414,6 +10477,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           floodGeo.screeningBfe = { ok: false, stage: "fetch", missing: [`the screening study could not run: ${reason}`], notModeled: NOT_MODELED, clomrNote: CLOMR_NOTE, screening: true };
           floodGeo.screeningBfeFlags = { state: "failed", reason };
         }
+        timer.end("screening");
         if (tok !== drainTok.current) return; // superseded while sampling
       }
       const checkedAt = Date.now();
@@ -10427,7 +10491,20 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         (ctx?.authority?.flags || []).includes("jurisdiction-unavailable")
         || (ctx?.flood?.state === "failed" && prevLC?.flood?.state === "loaded")
       );
-      setDrainCtx({ ctx: { ...ctx, floodGeo }, sig, multiParcel: act.length > 1, checkedAt, auto: isAuto, degraded: autoDegraded });
+      /* NEW-2(b) / NEW-4 — the GROUND-ELEVATION STATE rides the published context, and the panel
+       * is NOT gated on it. `groundState` is whatever was publishable at this moment: the cached
+       * value (instant), or an honest `pending` if the transect blew its publish budget. It is
+       * carried as a four-state object beside the bare number so a consumer can tell "still
+       * loading" from "3DEP has no value here" from "the service failed" — an unresolved number
+       * must read as UNRESOLVED, never as zero and never as a dash that looks like an answer. */
+      const groundState = await groundStatePromise;
+      // NEW-4 — the app's OWN work: the gap between the last network response and the publish.
+      // The owner measured 1,029 / 1,654 ms of it and it is recorded on B1353, which owns moving
+      // these engines off the main thread. This is a GAP IN THE NETWORK TIMELINE, which is solid;
+      // it is deliberately not called a main-thread blocking figure (FOREGROUND-OR-VOID).
+      timer.mark("calc", timer.sinceNetwork());
+      const ctxOut = { ...ctx, groundElev: groundState, floodGeo };
+      setDrainCtx({ ctx: ctxOut, sig, multiParcel: act.length > 1, checkedAt, auto: isAuto, degraded: autoDegraded });
       // B832 — remember WHAT this check fetched (the raw feet envelope + the two
       // point-sample anchors) so auto-revalidation can tell "moved inside the fetched
       // area" (numbers recompute live, no fetch) from "outgrew it" (refetch). JSON-safe.
@@ -10444,9 +10521,53 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // B750 "remember it": persist a slim summary (no bulky geometry) so the readout
       // survives a reload without re-hitting the (flaky) county GIS. Rides the existing
       // settings autosave — no schema change. (B832: skipped for a degraded AUTO run.)
-      if (!autoDegraded) setSettings((sx) => ({ ...sx, drainage: { ...(sx.drainage || {}), lastCheck: { ...slimDrainageContext(ctx), sig, checkedAt, fetch: fetchRec } } }));
+      if (!autoDegraded) setSettings((sx) => ({ ...sx, drainage: { ...(sx.drainage || {}), lastCheck: { ...slimDrainageContext(ctxOut), sig, checkedAt, fetch: fetchRec } } }));
+      /* NEW-2(b) — THE LATE ELEVATION. Either the transect was still in flight when the panel
+       * published, or the ↻ forced a refresh underneath a cached value. Patch the number (and the
+       * remembered record) in place when it lands; a superseded check never writes. */
+      const freshFetch = await groundLeg.fresh;
+      if (freshFetch) {
+        const fresh = await freshFetch;
+        if (tok === drainTok.current) {
+          setDrainCtx((prev) => (prev && prev.ctx && prev.sig === sig
+            ? { ...prev, ctx: { ...prev.ctx, groundElevFt: fresh.ft, groundElev: fresh } }
+            : prev));
+          if (!autoDegraded) {
+            setSettings((sx) => {
+              const lc = sx.drainage?.lastCheck;
+              if (!lc || lc.sig !== sig) return sx; // a newer check owns the record now
+              return { ...sx, drainage: { ...(sx.drainage || {}), lastCheck: { ...lc, groundElevFt: fresh.ft ?? null } } };
+            });
+          }
+        }
+        drainGroundState = fresh;
+      } else {
+        drainGroundState = groundState;
+      }
     } catch (e) {
       if (tok === drainTok.current) setDrainCtx((prev) => ({ error: String((e && e.message) || e), prev: prev?.prev }));
+      drainCheckError = String((e && e.message) || e);
+    } finally {
+      /* NEW-4 — ONE row per check, through the SAME production sink the recorder uses, and the
+       * SAVE leg is armed for the cloud push this check is about to trigger. Never throws. */
+      timer.mark("total", timer.elapsed());
+      let drainRowSent = false;
+      const emit = () => {
+        if (drainRowSent) return;
+        drainRowSent = true;
+        try {
+          reportDrainageTiming(buildDrainageTimingRow({ legs: timer.legs(), auto: isAuto, ground: drainGroundState }));
+        } catch (_) { /* an instrument may never break the thing it measures */ }
+      };
+      // The SAVE leg belongs to the cloud push this check is about to trigger, so wait for it —
+      // but only for the attribution window. A save that never comes (signed out, nothing
+      // changed, a degraded auto run) must NOT cost the row: an absent report and a zero-cost
+      // save look identical to a reader, which is precisely the ambiguity B265536 exists to kill.
+      if (!drainCheckError) {
+        drainSaveArmed.current = true;
+        armDrainageSaveLeg((ms) => { timer.mark("save", ms); emit(); });
+      }
+      setTimeout(() => { drainSaveArmed.current = false; emit(); }, SAVE_ATTRIBUTION_MS + 250);
     }
   };
   // The context to READ from: the live result, or the prior good one preserved under a
@@ -12992,6 +13113,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
        `note` is the one short sentence that says WHY it is red. The readout renders this INSTEAD
        of the old auto-refresh spinner copy, so the panel gains no lines (PANEL-BREVITY). */
     freshness: drainFreshness,
+    /* NEW-1 / NEW-2 / NEW-3 — the ground-elevation leg's own four-state answer, and the ONE
+       sentence that states it. A CACHE HIT must be visible (never silent, or somebody debugs
+       stale numbers blind); a blown budget must name the service. Hover copy, so the default
+       view gains no lines (PANEL-BREVITY — a title is not visible copy). */
+    groundElev: drainCtxData?.groundElev || null,
+    groundElevNote: drainCtxData?.groundElev?.note || null,
     // NEW-19 — ONE source of truth for "have flood facts been ESTABLISHED?" A live fetch
     // (floodGeo loaded) OR a remembered/restored check (drainViewCtx.checkedAt) both count.
     // The header keys its checked-state off THIS, so it can never say "not checked" over the
@@ -26110,7 +26237,23 @@ function YieldPanel({
                 } else if (fl.includes("bfe-datum-unpublished")) {
                   detR.push(warnNote("Cause: the published BFE has no vertical datum — confirm it before comparing elevations.", "regime-unk-datum", "An elevation without its datum (usually NAVD88) can be off by feet; confirm against the FIRM panel."));
                 } else if (fl.includes("ground-elevation-missing")) {
-                  detR.push(actionWarn("Cause: site grade isn't sampled yet — ↻ re-check to pull 3DEP and compare against the BFE.", "regime-unk-grade", "The 1% BFE is known but the bare-earth grade (3DEP) hasn't landed, so the regime can't be settled. Re-checking pulls it.", () => d.onCheck && d.onCheck(), "↻ Re-check"));
+                  /* NEW-2(b)/NEW-3 — WHY the grade is missing is now a KNOWN fact with four
+                     outcomes, and they want different words: "still loading" is not a to-do,
+                     "the federal service failed" names the service, and only two of the four are
+                     a ↻. PANEL-BREVITY rule 5 + the B1104/NEW-5 precedent: the SUBJECT is
+                     computed so the budget still counts ONE literal, and WHICH of the four it is
+                     — with the service named and the held value's age — rides `groundElevNote` in
+                     the note's info argument (hover, exempt) rather than a visible line each.
+                     COLLAPSED, never deleted. An unresolved grade reads as UNRESOLVED in every
+                     branch, never as zero; only the two states a re-pull could fix offer the ↻. */
+                  const gs = d.groundElev || null;
+                  const gSt = gs && gs.status;
+                  const gSubject = gSt === "pending" ? "is still loading" : "is unresolved";
+                  const gRetry = gSt !== "pending" && gSt !== "void";
+                  const gLine = `Cause: site grade ${gSubject} — nothing is assumed in its place, so the regime can't settle against the BFE.`;
+                  detR.push(gRetry
+                    ? actionWarn(gLine, "regime-unk-grade", d.groundElevNote, () => d.onCheck && d.onCheck(), "↻ Re-check")
+                    : warnNote(gLine, "regime-unk-grade", d.groundElevNote || undefined));
                 } else {
                   detR.push(warnNote(`Cause: ${(d.regime.reasons && d.regime.reasons[0]) || "flood facts not established"}. ↻ Re-check to resolve.`, "regime-unk-other"));
                 }
@@ -27006,8 +27149,22 @@ function YieldPanel({
                 headless check assert the state without reading colours. */}
             {drainage.freshness && (drainage.freshness.state === "fresh" || drainage.freshness.state === "stale") && (
               <span data-drain-freshness={drainage.freshness.state} aria-label={drainage.freshness.state === "stale" ? "Flood check is out of date" : "Flood check is up to date"}
-                title={drainage.freshness.note || "The flood check still matches what's drawn."}
+                title={[drainage.freshness.note || "The flood check still matches what's drawn.", drainage.groundElevNote].filter(Boolean).join("\n")}
+                data-ground-elev={drainage.groundElev?.status || undefined}
+                data-ground-cached={drainage.groundElev?.fromCache ? "1" : undefined}
                 style={{ color: drainage.freshness.state === "stale" ? Y.dangerText : "var(--success-text)", fontSize: 9, lineHeight: 1, flex: "none" }}>●</span>
+            )}
+            {/* NEW-2(b) / NEW-3 — the elevation leg is the ONLY part of the check that can still be
+                outstanding once the panel has published, and a failed one must never be silent. One
+                muted glyph, no new line: "…" while it is still loading, "!" when the service failed
+                or timed out (named in the hover). Nothing at all in the ordinary case, which is now
+                the common case because the value is cached. */}
+            {drainage.groundElev && (drainage.groundElev.status === "pending" || drainage.groundElev.status === "unavailable") && (
+              <span data-ground-elev={drainage.groundElev.status} title={drainage.groundElevNote || undefined}
+                aria-label={drainage.groundElev.status === "pending" ? "Ground elevation still loading" : "Ground elevation unavailable"}
+                style={{ color: drainage.groundElev.status === "unavailable" ? Y.warnText : Y.faint, fontSize: 10, lineHeight: 1, flex: "none", cursor: "help" }}>
+                {drainage.groundElev.status === "unavailable" ? "!" : "…"}
+              </span>
             )}
             {/* NEW-20(a) — while a fetch is in flight the line says so ("checking…") instead of an
                 unchanging "not checked", and the ↻ spins + disables so the click is never silent.
