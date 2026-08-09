@@ -43,6 +43,10 @@ import {
   governingDistrict, scopeFloodEntries, floodMasterState,
   floodFactsNote, emptyReason, FEMA_ZONES_NOT_CHANNELS,
 } from "../lib/floodGroup.js";
+// NEW-3 — the baked-tile vintage stamp. Decision + wording are pure (floodTiles.js); the fetch
+// is one cached call per session (floodManifest.js). Both are tiny — no chunk cost worth naming.
+import { floodTilesEnabled, resolveFloodSource, floodVintageStamp } from "../../../shared/gis/floodTiles.js";
+import { loadFloodManifest } from "../lib/floodManifest.js";
 
 // This panel rides on the themed var(--surface-overlay) container, so its text must
 // be theme tokens — the old warm cream-era hexes were dark-on-dark in dark mode (B341).
@@ -588,6 +592,29 @@ export default function LayerPanel({
     isOn: (id) => !!overlays[id]?.on, // a layer you already turned on always stays listed
   });
   const floodMaster = floodMasterState(floodScope.tiers, overlays);
+
+  /* NEW-3 — THE VINTAGE STAMP. Shown whenever the REGULATORY row is drawing from baked tiles,
+   * and never when it is drawing live (a live layer's vintage is "now" and stamping it would be
+   * noise). The county key is the SITE's own — the same one syncOverlayLayers picks the archive
+   * with — so the panel can never stamp a date from a different county's archive than the one
+   * on screen.
+   *
+   * ⛔ PANEL-BREVITY: this adds ZERO visible lines. It renders as a chip on the tier header the
+   * FEMA row already sits under ("REGULATORY · NFHL as of Nov 15, 2019"), which is rule 3 —
+   * a named state, not a sentence explaining the state. Nothing was removed because nothing
+   * needed to be: the default view's line count is unchanged. */
+  const floodTileSource = resolveFloodSource({ enabled: floodTilesEnabled(), countyKey: siteCounty });
+  const tilesAreSource = floodTileSource.source === "tiles";
+  const [floodManifest, setFloodManifest] = useState(null);
+  useEffect(() => {
+    if (!tilesAreSource) return;
+    let alive = true;
+    loadFloodManifest().then((m) => { if (alive) setFloodManifest(m); });
+    return () => { alive = false; };
+  }, [tilesAreSource]);
+  // Deliberately computed even when the manifest is null: `floodVintageStamp` answers "unknown"
+  // rather than nothing, so the line can never silently disappear on a failed fetch.
+  const floodVintage = tilesAreSource ? floodVintageStamp(floodManifest, siteCounty) : null;
   /* ⛔ THE FEMA VERDICT'S WORDS ARE LOADED ON DEMAND, and this is a BUNDLE decision, not a
    * stylistic one. `floodZoneCopy.js` holds every flood sentence plus the NEW-3 FIPS / FIRM
    * provenance tables; a static import from this panel would pin all of it to the site-route
@@ -694,6 +721,16 @@ export default function LayerPanel({
             <span>{t.label}</span>
             {t.key === "advisory" && (
               <span style={{ color: "var(--warn-text)", fontWeight: 700, letterSpacing: 0 }}>· not regulatory</span>
+            )}
+            {/* NEW-3 — the baked-tile vintage, on the tier the FEMA row lives in. Rides the
+                header so it costs no line of its own; the hover carries the county it belongs
+                to, because a stamp with no county is a date you cannot check. */}
+            {t.key === "regulatory" && floodVintage && (
+              <span data-testid="flood-tile-vintage"
+                title={`Drawn from Planyr's baked copy of FEMA's National Flood Hazard Layer for this county. The live FEMA service remains the authority for a parcel's zone and acreage.`}
+                style={{ color: floodVintage.known ? MUTED : "var(--warn-text)", fontWeight: 600, letterSpacing: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                · {floodVintage.text}
+              </span>
             )}
           </div>
           {groupRows(t.rows, `flood-${t.key}`, floodRow)}

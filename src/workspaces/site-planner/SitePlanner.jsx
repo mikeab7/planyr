@@ -3263,6 +3263,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         line: PANE_LINE, lineLabel: PANE_LINE_LABEL,
       },
       admit: (id) => order.indexOf(id) < staged * LAYER_STAGE_SIZE,
+      // NEW-2 — which county's baked flood archive (if any) this plan may use. The plan header's
+      // county is the right key: it is what the site was filed under, and it is stable across a
+      // pan, which the map-view county is not.
+      countyKey: restored?.county || county || null,
       onStatus: (id, state, msg, extra) => setLayerStatus && setLayerStatus((s) => ({ ...s, [id]: state ? { state, msg, ts: extra?.ts ?? null, stale: extra?.stale ?? false } : null })),
       onError: (cfg, msg) => { flashWarn(`⚠ “${cfg.label}” layer failed: ${msg || "service may be down or moved"}.`, 6000); },
     });

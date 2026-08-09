@@ -9,6 +9,7 @@ import { casUpsert, keepaliveCasPush, isMissingVersionColumn, isMissingColumn } 
 import { makeWriteSerializer } from "../../../shared/cloud/serializeWrites.js";
 import { reportClientEvent } from "../../../shared/telemetry/clientErrors.js";
 import { stableStringify } from "./elementSync.js";
+import { normCountyKey } from "../../../shared/gis/countyKeys.js";
 
 // Per-tab memory of the `version` we last synced for each site, so a save can be a
 // compare-and-swap that REJECTS a stale write instead of silently clobbering (B314).
@@ -98,7 +99,11 @@ export function slimForCloud(model) {
 export function siteRowFor(m, { isNew = false, teamId = null } = {}) {
   const row = {
     id: m.id,
-    group_id: m.groupId || null, site: m.site || null, name: m.name || null, county: m.county || null,
+    // NEW-4 — the `county` COLUMN is normalised on the way out too, not just the model field.
+    // `createSiteModel` already normalises what the app holds, but a row can also be written from
+    // a header-only path that never round-tripped the model; this is the last gate before the
+    // column, so no new mixed-case row can be created from this client whatever route it took.
+    group_id: m.groupId || null, site: m.site || null, name: m.name || null, county: normCountyKey(m.county),
     updated_at: new Date(m.updatedAt || Date.now()).toISOString(),
     data: m,
   };
