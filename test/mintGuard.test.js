@@ -146,6 +146,70 @@ describe("mintVerdict — the gate's decision (red on an early or stale mint, gr
     expect(mintVerdict({ ...base, added }).ok).toBe(true);
   });
 
+  /* ---- B290251: an id on main is not automatically an id THIS BRANCH minted ---------------
+   *
+   * `added` is measured against the merge base (that is what catches B1140, above). After a
+   * session follows CLAUDE.md's own instruction to bring `origin/main` into a `dirty` branch, the
+   * base-relative set also contains main's OWN recent ids. Measured on the branch that filed this:
+   * eleven fatal offenders, every one of them main's item arriving via the merge, and the only
+   * "remedy" the gate offered — renumber — would have renamed main's items on this branch.
+   *
+   * The discriminator is the HEADING TEXT. Same text → it came from main. Different text → two
+   * features wearing one number, which is B1140 and stays fatal. */
+  const HEADING = "### B1150 — the coverage engine drops a service on a 500";
+  it("ADVISORY, not fatal: main's own item arriving via a merge (identical heading)", () => {
+    const v = mintVerdict({
+      ...base, mainIds: new Set([1100, 1143, 1150]), added: [1150],
+      headingsHere: new Map([[1150, [HEADING]]]),
+      headingsOnMain: new Map([[1150, [HEADING]]]),
+    });
+    expect(v.ok).toBe(true);
+    expect(v.offenders).toEqual([]);
+    expect(v.advisories[0]).toEqual({ id: "B1150", kind: "from-main", where: "origin/main" });
+  });
+
+  it("whitespace is not a different feature — a re-wrapped or space-padded heading still reads as main's", () => {
+    const v = mintVerdict({
+      ...base, mainIds: new Set([1150]), added: [1150],
+      headingsHere: new Map([[1150, [`${HEADING}   `]]]),
+      headingsOnMain: new Map([[1150, [HEADING.replace(" — ", "  —  ")]]]),
+    });
+    expect(v.ok).toBe(true);
+  });
+
+  it("STILL RED: B1140's case — the same number on two DIFFERENT items, and it names both titles", () => {
+    // This is the assertion that proves the relaxation above did not sell the gate. Both sides
+    // minted B1150 independently; a duplicate heading is guaranteed the moment they meet.
+    const v = mintVerdict({
+      ...base, mainIds: new Set([1150]), added: [1150],
+      headingsHere: new Map([[1150, ["### B1150 — MY OWN unrelated item"]]]),
+      headingsOnMain: new Map([[1150, [HEADING]]]),
+    });
+    expect(v.ok).toBe(false);
+    expect(v.offenders[0]).toMatchObject({
+      id: "B1150", kind: "taken", where: "origin/main",
+      here: "### B1150 — MY OWN unrelated item", there: HEADING,
+    });
+  });
+
+  it("RED when this tree already holds TWO headings for the id — one of them cannot have come from main", () => {
+    const v = mintVerdict({
+      ...base, mainIds: new Set([1150]), added: [1150],
+      headingsHere: new Map([[1150, [HEADING, "### B1150 — a second, different item"]]]),
+      headingsOnMain: new Map([[1150, [HEADING]]]),
+    });
+    expect(v.ok).toBe(false);
+    expect(v.offenders[0].kind).toBe("taken");
+  });
+
+  it("RED, unchanged, when no heading evidence is supplied at all — absence of proof is not exculpation", () => {
+    // The default. A caller that cannot show the headings gets the old, strict verdict; the
+    // relaxation has to be EARNED with evidence, never granted by an empty map.
+    const v = mintVerdict({ ...base, mainIds: new Set([1150]), added: [1150] });
+    expect(v.ok).toBe(false);
+    expect(v.offenders[0]).toMatchObject({ id: "B1150", kind: "taken" });
+  });
+
   it("reports EVERY taken offender, in order — a multi-mint dispatch renumbers once, not one id per pass", () => {
     const mainIds = new Set([1100, 1143, 1145]);
     const v = mintVerdict({ ...base, mainIds, claimedMax: 1145, added: [1145, 1143, 1146] });

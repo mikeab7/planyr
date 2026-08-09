@@ -113,6 +113,16 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V107264 — B296224: the ledger bridge resolves a REAL `dirty` PR, and refuses a REAL amendment race `Blocker: real-data`
+
+**Everything the bridge decides is proven here already** — `test/resolveLedgers.test.js` drives 12 cases, three of them against a genuine `git merge` conflict produced in a throwaway repo (hermetic, no network): two independent appends are unioned, two amendments of one item are refused with the markers left in place, and a clean file passes through byte-identical. **What a sandbox cannot manufacture is the real thing**: this repo's actual `origin/main`, 42 in-flight branches, five bookkeeping files diverging at once, and the specific hunk shapes git produces from them. That is a concurrency class, so it parks.
+
+- **NEXT TIME A PR HERE GOES `mergeable_state: dirty`** — which on this repo's traffic is a matter of hours — resolve it with `git fetch origin main && git merge origin/main` and then `npm run resolve-ledgers` **instead of editing the conflict markers by hand.**
+- **PASS** = it reports the files and hunk counts it unioned, `git status` shows them staged, the conflict markers are gone, `BACKLOG_OPEN.md` and `MAP.md` were regenerated rather than concatenated, and `npm test` is green afterwards (in particular `idUniqueness`, `ledgerDuplicateIds` and `backlogIndex`).
+- **ALSO A PASS, and the more valuable outcome:** it REFUSES, names an id that appears on both sides, and writes nothing. That is the amendment race the bridge exists to stop a union from silently duplicating — record which id, and that the markers were still intact for the hand merge.
+- **FAIL** = it resolves a hunk where the same id really was on both sides, leaves a conflict marker behind, stages a file it did not fully resolve, or reports success while `npm test` then goes red.
+- **Record either way in `.planyr-ledger-merges.log`'s terms** (`resolved` / `refused` / `rolled-back`): that tally is the evidence deciding whether option (c) — the ~1,400-item migration — is worth doing. **If `refused` never fires across a month of merges, the conflicts are 100% arrival-order and (c) is justified by data.** If it fires often, the bridge is already doing the important half and (c) is less urgent than it looks.
+
 ### V97312 — B298756: an attachment reaches the ACCOUNT and comes back on a second machine `Blocker: auth`
 
 **Everything device-side is proven here** — a real file goes through the picker, the chip carries its name, type and size, the document holds only an id, the bytes are in IndexedDB marked `kind: "file"`, the Markdown export embeds it and the print sheet names it (`ui-audit/verify-notes-tier1.mjs` §6, 7 rows). **What the sandbox cannot do is sign in** — the egress proxy CORS-blocks Supabase auth — so the cloud half of the tier is the one thing unconfirmed, and the migration it depends on is exactly what was applied this session.

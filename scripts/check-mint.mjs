@@ -47,8 +47,9 @@ import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
 import {
   B_FILES, V_FILES, PEER_NS, DEFAULT_MAX_FETCH_AGE_S, DEFAULT_PEER_DAYS,
-  headingIdsIn, readRefFile, maxOnRef, assessFreshness, originMainSha, lastFetchAgeSeconds,
-  fetchPeers, peerRefRows, selectPeerRefs, peerClaims, tryGit, selfBranchNames, dropContainedRefs,
+  headingIdsIn, headingLinesIn, sameHeading, readRefFile, maxOnRef, assessFreshness, originMainSha,
+  lastFetchAgeSeconds, fetchPeers, peerRefRows, selectPeerRefs, peerClaims, tryGit, selfBranchNames,
+  dropContainedRefs, newCrossFileCollisions,
 } from "./next-id.mjs";
 import { ringFloor, nextFreeBlock, inBlock } from "./idBlocks.mjs";
 
@@ -97,11 +98,50 @@ const REPO = resolve(HERE, "..");
  *
  * Gaps remain explicitly legal (B1140 established they cost nothing).
  */
-export function mintVerdict({ letter, added, claimedMax, peerOwners = new Map(), mainIds = new Set(), block = null }) {
+export function mintVerdict({
+  letter, added, claimedMax, peerOwners = new Map(), mainIds = new Set(), block = null,
+  headingsHere = new Map(), headingsOnMain = new Map(),
+}) {
   const offenders = [];   // fatal — a proven collision
   const advisories = [];  // reported, never fatal
   for (const n of [...added].sort((a, b) => a - b)) {
-    if (mainIds.has(n)) offenders.push({ id: `${letter}${n}`, kind: "taken", where: "origin/main" });
+    if (mainIds.has(n)) {
+      /* ⛔ AN ID ON MAIN IS NOT AUTOMATICALLY AN ID THIS BRANCH MINTED (B290251).
+       *
+       * `added` is measured against the MERGE BASE — deliberately, and that reasoning stays (see
+       * the comment at its call site: it is what catches B1140, where main and a branch minted the
+       * same number independently). But the base-relative set also contains every id that arrived
+       * from MAIN ITSELF when a session followed CLAUDE.md's own instruction to merge `origin/main`
+       * in to clear a `dirty` PR. Measured 2026-08-09 on the branch that filed this: base cf4f77b,
+       * tip ae2ce02, ELEVEN fatal offenders — B280402, B280403, B280704–B280707, B286000, B286001,
+       * V78961, V79264, V84560 — every one appearing exactly once on main, exactly once here, and
+       * nowhere at the base. The gate was blocking the documented recovery path, and the obvious
+       * escape (renumber) would have renumbered MAIN'S items on this branch, manufacturing the very
+       * duplicate the gate exists to prevent.
+       *
+       * WHAT SEPARATES THE TWO CASES IS THE HEADING TEXT, not the ancestry. Reproduced in a
+       * throwaway-repo lab (`test/mintGateE2E.test.js`, the merge-recovery arms): a plain
+       * `git merge origin/main` moves the merge base to main's tip and never had this problem at
+       * all; the failure shape is a resolution that takes main's CONTENT without its ANCESTRY —
+       * `git merge --squash`, `git checkout origin/main -- BACKLOG.md`, a rebuilt branch. In that
+       * shape the heading here is BYTE-IDENTICAL to main's, because it IS main's. In B1140's shape
+       * the two headings name two different features, which is precisely the duplicate that will
+       * exist the moment they meet.
+       *
+       * So: identical heading → this came from main, ADVISORY. Different heading, or more than one
+       * heading here → FATAL, unchanged, and the message now prints both titles so the reader can
+       * see at a glance which case they are in. The relaxation is covered rather than merely
+       * argued: any id that really does end up with two headings in this tree is caught by the
+       * duplicate-heading check below (B308704), which is fatal and runs on every push.
+       */
+      const here = headingsHere.get(n) || [];
+      const there = headingsOnMain.get(n) || [];
+      if (here.length === 1 && there.length === 1 && sameHeading(here[0], there[0])) {
+        advisories.push({ id: `${letter}${n}`, kind: "from-main", where: "origin/main" });
+      } else {
+        offenders.push({ id: `${letter}${n}`, kind: "taken", where: "origin/main", here: here[0], there: there[0] });
+      }
+    }
     /* ⛔ A PEER BRANCH HOLDING THE NUMBER IS AN ADVISORY, NOT A FAILURE (B36051, owner decision
      * 2026-08-06, verbatim: *"a number is taken only if main has it. A guess made from stale
      * information about an unmerged branch is not a collision and must not fail a build."*).
@@ -167,13 +207,18 @@ export function announceVerdict({ subjects = [], filed = {} }) {
   return { ok: offenders.length === 0, offenders };
 }
 
-/** Local (working-tree) heading ids for a family — what this branch actually says today. */
-function localIds(repo, files, letter) {
-  const texts = files.map((f) => join(repo, f)).filter(existsSync).map((p) => readFileSync(p, "utf8"));
-  return headingIdsIn(texts, letter);
+/** Working-tree text of a family's file pair. */
+function localTexts(repo, files) {
+  return files.map((f) => join(repo, f)).filter(existsSync).map((p) => readFileSync(p, "utf8"));
 }
 
-/** Heading ids for a family on a ref (across the whole file pair). */
+/** Local (working-tree) heading ids for a family — what this branch actually says today. */
+function localIds(repo, files, letter) {
+  return headingIdsIn(localTexts(repo, files), letter);
+}
+
+/** Heading ids for a family on a ref (across the whole file pair), plus the heading LINES —
+ *  the lines are what B290251's same-item test compares. */
 function refIds(repo, ref, files, letter) {
   const texts = [];
   for (const f of files) {
@@ -181,7 +226,7 @@ function refIds(repo, ref, files, letter) {
     if (!r.ok) return { ok: false, reason: r.reason };
     texts.push(r.text);
   }
-  return { ok: true, ids: headingIdsIn(texts, letter) };
+  return { ok: true, ids: headingIdsIn(texts, letter), headings: headingLinesIn(texts, letter) };
 }
 
 /** Run the gate. Returns { ok, unverifiable, reason, families:[verdict] }. */
@@ -251,10 +296,30 @@ export function runGate(repo = REPO, { peerDays = DEFAULT_PEER_DAYS, maxAgeSecon
       claimed: new Set([...onMain.ids, ...owners.keys()]),
     });
 
+    /* B308704 — TWO HEADINGS FOR ONE ID IN THIS TREE IS FATAL, whatever the merge base says.
+     * This is the backstop that makes B290251's "identical heading came from main" relaxation
+     * safe rather than merely reasoned: a genuine independent double-mint that gets merged
+     * together produces two headings, and that is now caught HERE, at push time, instead of
+     * only in CI. The 58 grandfathered historical pairs are excluded at their exact counts —
+     * `newCrossFileCollisions` is the same detector `test/idUniqueness.test.js` runs. */
+    const freshDupes = newCrossFileCollisions(repo, files, letter);
+
     families.push({
-      ...mintVerdict({ letter, added, claimedMax: Math.max(mainMax.max, claims.max), peerOwners: owners, mainIds: onMain.ids, block }),
+      ...mintVerdict({
+        letter, added, claimedMax: Math.max(mainMax.max, claims.max), peerOwners: owners,
+        mainIds: onMain.ids, block,
+        headingsHere: headingLinesIn(localTexts(repo, files), letter),
+        headingsOnMain: onMain.headings,
+      }),
       added, mainMax: mainMax.max, peerMax: claims.max, peersScanned: refs.length,
+      duplicates: freshDupes,
     });
+  }
+  for (const f of families) {
+    for (const d of f.duplicates) {
+      f.offenders.push({ id: d.id, kind: "duplicate", where: `this branch's ${f.letter === "B" ? "BACKLOG" : "VERIFICATION"} files (${d.count} headings)` });
+    }
+    f.ok = f.offenders.length === 0;
   }
   releasePeers(); // leave .git/shallow exactly as we found it
 
@@ -310,6 +375,16 @@ function main(argv) {
     const blocks = res.families.filter((f) => f.block).map((f) => `${f.letter}${f.block.lo}–${f.letter}${f.block.hi}`);
     const outside = advisories.filter((a) => a.kind === "outside");
     const peerHeld = advisories.filter((a) => a.kind === "peer-held");
+    // B290251: said out loud rather than silently swallowed — the reader should be able to see
+    // that the gate CONSIDERED these ids and knows exactly why they are not this branch's mints.
+    const fromMain = advisories.filter((a) => a.kind === "from-main");
+    if (fromMain.length) {
+      process.stderr.write(
+        `\nℹ Mint gate: ${fromMain.map((a) => a.id).join(", ")} came in FROM origin/main (identical heading), not minted here.\n` +
+          `   NOT a failure — this is what merging main into a stale branch looks like. Renumbering these\n` +
+          `   would rename MAIN's items on this branch and create the duplicate the gate exists to prevent.\n`,
+      );
+    }
     if (outside.length) {
       process.stderr.write(
         `\nℹ Mint gate: ${outside.map((a) => a.id).join(", ")} ${outside.length > 1 ? "sit" : "sits"} outside this branch's reserved block ` +
@@ -361,7 +436,20 @@ function main(argv) {
   const lines = [`\n⛔ MINT GATE FAILED — this branch claims backlog ids someone else already holds (B779).\n`];
   for (const f of res.families) {
     if (f.ok) continue;
-    for (const o of f.offenders) lines.push(`   ${o.id} is ALREADY TAKEN on ${o.where}.\n`);
+    for (const o of f.offenders) {
+      if (o.kind === "duplicate") {
+        // B308704 — not a mint race at all: this tree already holds the collision.
+        lines.push(`   ${o.id} has TWO HEADINGS in ${o.where} — one number, two items.\n`);
+        continue;
+      }
+      lines.push(`   ${o.id} is ALREADY TAKEN on ${o.where}.\n`);
+      // B290251: print BOTH titles. If they turn out to be the same item the reader is looking at
+      // a heading edit, not a collision — and that distinction used to cost a whole debugging pass.
+      if (o.here || o.there) {
+        lines.push(`     here: ${(o.here || "(no heading in this tree)").slice(0, 110)}\n`);
+        lines.push(`     main: ${(o.there || "(no heading on main)").slice(0, 110)}\n`);
+      }
+    }
     // Point at this branch's own reserved block, not at a global high-water mark. Moving into
     // your block invalidates nobody else's ids — which is what stops a rejection cascading.
     lines.push(f.block
