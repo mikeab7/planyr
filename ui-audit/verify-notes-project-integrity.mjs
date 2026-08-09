@@ -1,0 +1,275 @@
+/* verify-notes-project-integrity — A COPY NEVER CHANGES PROJECT, AND THE APP SAYS SO.
+ *
+ * ⛔ WHAT THIS IS FOR. One note — Grand Port's "Coordination" — turned up with a
+ * near-identical twin filed under an unrelated Colorado pursuit. Nobody was told when it
+ * happened; it was found by hand six days later, under a "from a project you deleted"
+ * heading, because the pursuit had since been binned. Three things were missing and all
+ * three are driven here, in a real browser, against the real build:
+ *
+ *   1. THE NOTE NEVER SAID WHICH PROJECT IT BELONGED TO while it was open (NEW-2).
+ *   2. NOTHING LOOKED for one note living in two projects (NEW-4).
+ *   3. A NOTE WHOSE TREE NODE WAS LOST was swept off this device every time the tab opened
+ *      and downloaded again on the next sync, reachable from nowhere, in silence (NEW-4).
+ *
+ * ⛔ AND EVERY ROW ASSERTS THE RESULTING STORE, NOT THAT A HANDLER RAN. The banner's own
+ * counts are read from its data attributes, but the recovery is checked by reading the TREE
+ * back out of localStorage — a banner that says the right thing over a store that did not
+ * change is exactly the shape this whole item exists to stop.
+ *
+ * ⛔ MUTATION ARM INCLUDED (arm 5): the same two documents, moved into the SAME project, must
+ * make the banner DISAPPEAR. A detector nobody has seen go quiet is a detector that will fire
+ * on everything.
+ *
+ * Run:
+ *   npx vite preview --port 4173 &
+ *   node ui-audit/verify-notes-project-integrity.mjs
+ */
+import { chromium } from "playwright";
+import { assertMeasurable } from "./lib/tabTiming.mjs";
+import { pacedWait } from "./lib/tabTiming.mjs";
+
+const BASE = process.env.BASE_URL || "http://localhost:4173";
+const EXEC = process.env.PW_CHROME || "/opt/pw-browsers/chromium-1194/chrome-linux/chrome";
+
+const checks = [];
+const ok = (name, cond, extra = "") => {
+  checks.push({ name, pass: !!cond });
+  console.log(`  ${cond ? "✓" : "✗"} ${name}${extra ? ` — ${extra}` : ""}`);
+};
+
+const REMOTE = !/^https?:\/\/(localhost|127\.0\.0\.1)/.test(BASE);
+const PROXY = process.env.HTTPS_PROXY || process.env.https_proxy || "";
+const browser = await chromium.launch({
+  executablePath: EXEC,
+  args: ["--no-sandbox", "--ignore-certificate-errors", ...(REMOTE && PROXY ? [`--proxy-server=${PROXY}`] : [])],
+});
+const ctx = await browser.newContext({ viewport: { width: 1500, height: 950 }, ignoreHTTPSErrors: true });
+const page = await ctx.newPage();
+
+/* ⛔ FOREGROUND-OR-VOID. A hidden tab clamps setTimeout and suspends rAF, so both the clock
+ * and the geometry of every measurement below would be void — and internally consistent
+ * while being void, which is the dangerous half. */
+await assertMeasurable(page, "verify-notes-project-integrity");
+
+const pageErrors = [];
+page.on("pageerror", (e) => pageErrors.push(e.message));
+
+const TREE_KEY = "planyr:notes:tree:v1:local";
+const PAGE_PREFIX = "planyr:notes:page:v1:local:";
+const tb = (id) => page.locator(`[data-testid="${id}"]`);
+const readTree = () => page.evaluate((k) => JSON.parse(localStorage.getItem(k) || "null"), TREE_KEY);
+
+/* The owner's own note, and his own divergence: the two copies differed by ONE WORD in about
+ * forty. Kept at full length on purpose — a short fixture makes the near-duplicate question
+ * trivially easy and proves nothing about the real one. */
+const LINES = [
+  "Civil", "PLAT", "Resubmitted to Baytown 7/13", "CP Grant To Others",
+  "Civil working to include irrigation line", "Sanitary Line Extension",
+  "Can we get this reimbursed?", "Water / Sanitary Additional Reservation",
+  "Working to schedule payment", "LONOs", "Last email to DOW was 7/13, they responded on 7/16",
+  "Truck Turn Exhibit", "Quiddity looking into expanding areas, WB-67", "Permitting",
+];
+const doc = (plat) => ({
+  type: "doc",
+  content: LINES.map((l) => ({ type: "paragraph", content: [{ type: "text", text: l === "PLAT" ? plat : l }] })),
+});
+const ORPHAN = {
+  type: "doc",
+  content: [{ type: "paragraph", content: [{ type: "text", text: "Channel improvements were needed to slow down conveyance. Willow Point MUD to provide water and sanitary." }] }],
+};
+
+const GRAND_PORT = "smqfy2r7pdec";
+const COLORADO = "sms7v3ua7ksy";
+
+/** Seed the device exactly as it would be after the defect: the same note in two projects,
+ *  plus a body whose tree node has gone. `sameProject` is the mutation arm. */
+async function seed({ sameProject = false } = {}) {
+  await page.evaluate(([treeKey, prefix, tree, bodies]) => {
+    localStorage.clear();
+    localStorage.setItem(treeKey, JSON.stringify(tree));
+    for (const [id, body] of Object.entries(bodies)) localStorage.setItem(prefix + id, JSON.stringify(body));
+  }, [
+    TREE_KEY,
+    PAGE_PREFIX,
+    {
+      v: 3,
+      pages: [
+        { id: "gp_coord", title: "Coordination", createdAt: 1, updatedAt: 1, pages: [], projectId: GRAND_PORT },
+        { id: "co_page1", title: "Page 1", createdAt: 1, updatedAt: 1, pages: [], projectId: sameProject ? GRAND_PORT : COLORADO },
+      ],
+      trash: [],
+    },
+    { gp_coord: doc("RPlat"), co_page1: doc("Plat"), lost_note: ORPHAN },
+  ]);
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await page.waitForSelector('[data-testid="notes-tree"]', { timeout: 20000 });
+}
+
+/* The integrity scan is deliberately LATE (it reads every body, so it waits for the tree to
+ * settle). Wait for the banner on its own terms rather than assuming a number. */
+const waitForBanner = async (ms = 12000) => {
+  try { await tb("notes-integrity-banner").waitFor({ state: "visible", timeout: ms }); return true; }
+  catch (_) { return false; }
+};
+
+await page.goto(`${BASE}#/notes`, { waitUntil: "domcontentloaded" });
+
+/* ════ 1. THE SAME NOTE IN TWO PROJECTS IS NAMED, UNPROMPTED ═══════════════════════════ */
+console.log("\n1 · One note, two projects — said out loud (NEW-4)");
+await seed();
+ok("⛔ THE BANNER APPEARS WITH NOBODY ASKING FOR IT", await waitForBanner());
+
+const banner = tb("notes-integrity-banner");
+const dupCount = await banner.getAttribute("data-duplicates");
+const lostCount = await banner.getAttribute("data-unreachable");
+ok("…and it found exactly ONE duplicated note", dupCount === "1", `data-duplicates=${dupCount}`);
+ok("…and the note that is filed nowhere at all, separately", lostCount === "1", `data-unreachable=${lostCount}`);
+
+const text = (await banner.innerText()).replace(/\s+/g, " ");
+ok("it names the note by TITLE, not by id", /Coordination/.test(text) && /Page 1/.test(text), text.slice(0, 150));
+ok("…and says how many projects it is in", /2 different projects/.test(text));
+ok("…and names the second finding in plain words", /filed in no project/.test(text));
+
+/* ════ 2. THE LOST NOTE IS RECOVERABLE, AND THE STORE PROVES IT ════════════════════════ */
+console.log("\n2 · A note filed nowhere is put back (NEW-4)");
+const before = await readTree();
+const beforeIds = (before.pages || []).map((p) => p.id);
+ok("before: the lost note is in NO tree — that is why nothing could reach it", !beforeIds.includes("lost_note"), beforeIds.join(", "));
+ok("…but its body is still on the device, un-destroyed", await page.evaluate((k) => !!localStorage.getItem(k), `${PAGE_PREFIX}lost_note`));
+
+await tb("notes-integrity-recover").click();
+await pacedWait(page, 900);
+const after = await readTree();
+const recovered = (after.pages || []).find((p) => p.id === "lost_note");
+ok("⛔ AFTER: THE STORED TREE HOLDS IT — not just the banner", !!recovered, (after.pages || []).map((p) => p.id).join(", "));
+ok("…in the named no-project home, with NOTHING guessed", recovered && (recovered.projectId ?? null) === null, `projectId=${JSON.stringify(recovered?.projectId ?? null)}`);
+ok("…and it kept its own id, so its existing body is what it re-attached to", recovered?.id === "lost_note");
+ok("…the exact page count went up by ONE and nothing else moved", (after.pages || []).length === (before.pages || []).length + 1);
+ok("…and every pre-existing page still answers with the project it had",
+  beforeIds.every((id) => {
+    const b = (before.pages || []).find((p) => p.id === id);
+    const a = (after.pages || []).find((p) => p.id === id);
+    return (a?.projectId ?? null) === (b?.projectId ?? null);
+  }));
+
+/* ════ 3. THE OPEN NOTE SAYS WHICH PROJECT IT IS IN ════════════════════════════════════ */
+console.log("\n3 · The note says where it is filed, while you are reading it (NEW-2)");
+await tb("notes-integrity-open").click().catch(() => {});
+await pacedWait(page, 600);
+
+const badge = tb("note-project-badge");
+ok("⛔ THE OPEN NOTE WEARS ITS PROJECT — the thing that was invisible before", await badge.count() > 0);
+if (await badge.count()) {
+  const pid = await badge.getAttribute("data-project-id");
+  const label = (await badge.innerText()).trim();
+  const title = await tb("note-title").inputValue();
+  const node = (await readTree()).pages.find((p) => p.title === title);
+  ok("…and the project it names is the one the TREE says, not one the viewer supplied",
+    pid === String(node?.projectId ?? ""), `badge=${pid} tree=${node?.projectId ?? null}`);
+  ok("…an id with no project behind it is NAMED as such, never captioned as 'no project'",
+    (await badge.getAttribute("data-resolved")) === "0" && /no longer exists|couldn/i.test(label), label);
+}
+
+/* …and the recovered note, which genuinely belongs nowhere, says exactly that instead.
+ * "Show me" navigated INTO Grand Port (that is the point — the copy is usually somewhere
+ * else), and inside a project the rail shows that project and nothing else, so the way back
+ * to a no-project note is the all-notes view. */
+await page.goto(`${BASE}#/notes`, { waitUntil: "domcontentloaded" });
+await page.waitForSelector('[data-testid="notes-tree"]', { timeout: 20000 });
+await tb("notes-row-lost_note").click();
+await pacedWait(page, 600);
+const lostLabel = (await tb("note-project-badge").innerText()).trim();
+ok("a note that genuinely belongs to no project says so, in words", /Not in a project/.test(lostLabel), lostLabel);
+ok("…and that is a RESOLVED answer, not a failed lookup wearing the same words",
+  (await tb("note-project-badge").getAttribute("data-resolved")) === "1");
+
+/* ════ 4. IT SURVIVES A RELOAD — the recovery reached storage, not just React ══════════ */
+console.log("\n4 · The recovery is in storage, not in a render");
+await page.reload({ waitUntil: "domcontentloaded" });
+await page.waitForSelector('[data-testid="notes-tree"]', { timeout: 20000 });
+const reloaded = await readTree();
+ok("⛔ THE RECOVERED NOTE IS STILL THERE AFTER A RELOAD", (reloaded.pages || []).some((p) => p.id === "lost_note"));
+ok("…and its body was never destroyed by the orphan sweep on the way through",
+  await page.evaluate((k) => !!localStorage.getItem(k), `${PAGE_PREFIX}lost_note`));
+ok("…and the banner no longer claims a lost note, because there isn't one",
+  (await waitForBanner(9000)) ? (await tb("notes-integrity-banner").getAttribute("data-unreachable")) === "0" : true);
+
+/* ════ 5. MUTATION ARM — the same two notes in ONE project must go QUIET ═══════════════ */
+console.log("\n5 · MUTATION — same words, SAME project: the banner must go quiet");
+await seed({ sameProject: true });
+const stillThere = await waitForBanner(9000);
+if (stillThere) {
+  const dup = await tb("notes-integrity-banner").getAttribute("data-duplicates");
+  ok("⛔ COPYING A NOTE INSIDE ITS OWN PROJECT IS NOT A FINDING", dup === "0", `data-duplicates=${dup}`);
+} else {
+  ok("⛔ COPYING A NOTE INSIDE ITS OWN PROJECT IS NOT A FINDING", true, "banner absent entirely");
+}
+
+/* ════ 6. DELETING A PROJECT SAYS WHAT IT IS ABOUT TO ORPHAN (NEW-3) ═══════════════════
+ *
+ * The delete confirmation for a NOTE already does this well — "Delete 2?" and then "Deleted
+ * DEV COORDINATION and its 2 pages. It is in the bin for 30 days." Project deletion said
+ * nothing at all, which is how two notes ended up under a "from a project you deleted"
+ * heading with the owner none the wiser. */
+console.log("\n6 · Deleting a project names its notes, and offers to take them along (NEW-3)");
+await page.evaluate(([sitesKey, treeKey, gp]) => {
+  localStorage.clear();
+  localStorage.setItem(sitesKey, JSON.stringify({
+    [`${gp}_a`]: { id: `${gp}_a`, groupId: gp, site: "Grand Port", name: "Concept A", updatedAt: Date.now(), schemaVersion: 9 },
+  }));
+  localStorage.setItem(treeKey, JSON.stringify({
+    v: 3,
+    pages: [
+      { id: "gp_a", title: "Coordination", createdAt: 1, updatedAt: 1, projectId: gp, pages: [{ id: "gp_a_sub", title: "Bonding", createdAt: 1, updatedAt: 1, pages: [] }] },
+      { id: "gp_b", title: "Load Study", createdAt: 1, updatedAt: 1, projectId: gp, pages: [] },
+      { id: "loose", title: "Loose note", createdAt: 1, updatedAt: 1, projectId: null, pages: [] },
+    ],
+    trash: [],
+  }));
+}, ["planarfit:sites:v1", TREE_KEY, GRAND_PORT]);
+await page.reload({ waitUntil: "domcontentloaded" });
+await page.waitForSelector('[data-testid="notes-tree"]', { timeout: 20000 });
+
+await tb("project-crumb").click();
+await pacedWait(page, 500);
+/* The per-row ⋯ only mounts for the row under the cursor, so the reliable way in is the
+ * right-click the same handler answers. */
+const row = tb(`project-row-${GRAND_PORT}`);
+ok("the project is listed in the switcher", await row.count() > 0);
+if (await row.count()) {
+  await row.click({ button: "right" });
+  await tb("project-manage-menu").waitFor({ state: "visible", timeout: 10000 });
+  await pacedWait(page, 300);
+  await tb("project-delete").click();
+  await tb("project-delete-notes").waitFor({ state: "visible", timeout: 10000 }).catch(() => {});
+
+  const line = tb("project-delete-notes");
+  const shown = await line.count() > 0;
+  ok("⛔ THE CONFIRMATION SAYS HOW MANY NOTES ARE FILED HERE", shown);
+  if (shown) {
+    const n = await line.getAttribute("data-note-count");
+    const words = (await line.innerText()).replace(/\s+/g, " ");
+    ok("…and the number is the NOTES, not the loose one and not the pages", n === "2", `data-note-count=${n}`);
+    ok("…and it counts the subpages separately, in words", /3 pages/.test(words), words);
+    ok("…and it says they survive either way, so the choice is not a threat", /stay in Notes/.test(words));
+  }
+  ok("…and it offers to take them along", await tb("project-delete-move-notes").count() > 0);
+
+  await tb("project-delete-move-notes").click();
+  await pacedWait(page, 1200);
+  const moved = await readTree();
+  const gpLeft = (moved.pages || []).filter((p) => (p.projectId ?? null) === GRAND_PORT);
+  ok("⛔ AFTER: THE STORED TREE HAS NO NOTE LEFT UNDER THE DELETED PROJECT", gpLeft.length === 0, `${gpLeft.length} left`);
+  ok("…and not one note was lost getting there", (moved.pages || []).length === 3, `${(moved.pages || []).length} roots`);
+  ok("…they are in the named no-project home, never guessed into another project",
+    (moved.pages || []).every((p) => (p.projectId ?? null) === null));
+  ok("…and the tree is marked as owing the cloud a push, so a sync cannot undo the move",
+    await page.evaluate(() => JSON.parse(localStorage.getItem("planyr:notes:sync:v1:local") || "{}").treeDirty === true));
+}
+
+ok("no uncaught page errors across the whole run", pageErrors.length === 0, pageErrors.join(" | ") || "clean");
+
+const passed = checks.filter((c) => c.pass).length;
+console.log(`\n${passed}/${checks.length} checks passed`);
+await browser.close();
+if (passed !== checks.length) process.exit(1);

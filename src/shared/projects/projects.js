@@ -11,6 +11,12 @@
  * chain. This module is browser/UI-only.
  */
 import { loadSitesList, renameSiteGroup, deleteSiteGroup, pullCloud, isCloudActive, activeUid } from "../../workspaces/site-planner/lib/storage.js";
+
+/** Which account's data every project surface is reading. Re-exported through this one
+ *  project-layer seam so a caller that needs to ask a SECOND store the same question — "what
+ *  else belongs to this project?" — resolves the account the same way, rather than reaching
+ *  into the Site Planner store itself. */
+export { activeUid };
 import { groupProjects } from "./projectModel.js";
 
 // Recently deleted (NEW-1) — deleting a project now bins it for 30 days instead of destroying it.
