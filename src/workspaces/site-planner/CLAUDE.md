@@ -30,6 +30,33 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   redundant with `editingId` — one project id addresses two inline editors (its list row and the crumb-level
   rename), and keyed on the id alone BOTH mount with `autoFocus`, the second stealing focus from the first,
   whose `onBlur` commits and closes it in the same frame.
+- **⛔ `layerZoomGate.js` (B323424/B323425) — THE ONE ANSWER TO "IS THIS ROW ACTUALLY DRAWING RIGHT
+  NOW?", and the reason it is shared rather than a note on the contour row.** A checked layer that a
+  zoom gate suppresses looked exactly like a broken one: the owner ticked *"Contour lines (1 ft)"*
+  below the z16 gate and sat for a minute believing the feature had failed. The panel DID carry
+  *"Zoom in to ≥ 16 to load"* — **static helper text that renders identically whether the layer is
+  drawing or not, under a checkbox that says ON. That is the defect, not the fix.** Four live states
+  (`off` · `drawing` · `dormant-zoom` · `dormant-blank`) computed from the ACTUAL current zoom; the
+  row renders dormant with a **hollow** status dot (every live state is a filled dot) and one live
+  line — `Not showing at this zoom — zoom in 3 levels` — that **IS the fix**: clicking it takes the
+  map just past that layer's gate. No legend, no key. **Three things not to undo:** **(a)** the gate
+  is asked BEFORE coverage — below it the layer never queried anything, so *"no data in this area"*
+  would be a fabrication; **(b)** `featureLayerOptions` passes `minZoom: cfg.minZoom ?? 10` to
+  Leaflet, so **every `esriFeature` layer is gated at 10 whether its row says so or not** and Leaflet
+  suppresses it SILENTLY — those rows showed a green "loaded" dot over an empty map, which is worse
+  than the case that was reported; **(c)** the kind-gated rows DECLARE their `minZoom` in the registry
+  and `evidenceLayers.js` imports its two constants from here, because the dangerous failure is the
+  panel and the map holding two different numbers. **B323425, the sibling defect:** the gate must be
+  answered ONCE, at the zoom the plan actually opens at — a plan opens on the default view (≈ z17.25)
+  and the whole-site framing drops it 120 ms later, so a layer admitted in that window fetched,
+  painted, and was then correctly cleared (*"contours paint, then disappear about two seconds after
+  load"*). `SitePlanner`'s `layerGateReady` latch defers every ADD until the framed view is committed.
+  Guards: the repo-root `test/` suite **layerZoomGate** (24, which reads the real registry, the real
+  terrain gate, the real `minVectorZoom` and the real Leaflet default and fails on any drift), the
+  e2e spec **layer-zoom-dormant** (6, proven red pre-fix on a selector that exists on both builds),
+  and the repo-root ui-audit instrument **diagnose-layer-gate-flash**. ⚠ That harness can watch the terrain
+  layer ASK but never ANSWER — 3DEP is `ERR_CONNECTION_RESET` from Chromium here — and it says so
+  rather than scoring itself; the paint-then-vanish half is **V121985**.
 - `layers.js` + `components/LayerPanel.jsx` — map-layer system; `layerPrefs.js` (per-site Layers-panel
   toggle memory — NEW-1, sparse on/off overrides restored on open + persisted on toggle); `coverage.js` (coverage engine);
   `arcgis.js`/`counties.js`/`layerRequest.js` — GIS plumbing; **`gisCache.js` — the screening cache;

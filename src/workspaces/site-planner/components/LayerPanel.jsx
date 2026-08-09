@@ -39,6 +39,10 @@ import { formatAge } from "../lib/gisCache.js";
 import {
   getRelevanceMode, setRelevanceMode, getNearbyRadiusMiles, setNearbyRadiusMiles, subscribeRelevance,
 } from "../lib/coverage.js";
+/* NEW-1 — IS THIS ROW ACTUALLY DRAWING? The pure model (lib/layerZoomGate.js) answers it from
+ * the LIVE zoom, for every zoom-gated layer at once. See that module's header for why this is
+ * shared rather than a contour-shaped patch. */
+import { layerVisibility, combineVisibility, dormantZoomLine, DORMANT_BLANK_LINE } from "../lib/layerZoomGate.js";
 import {
   governingDistrict, scopeFloodEntries, floodMasterState,
   floodFactsNote, emptyReason, FEMA_ZONES_NOT_CHANNELS,
@@ -96,6 +100,16 @@ export default function LayerPanel({
    * plan has no origin: it turns the "GIS layers appear once this plan has a location" note from a
    * dead end into the one-click fix. Null on every other surface. */
   onSetLocation = null,
+  /* NEW-1 — THE LIVE MAP ZOOM, and the callback that changes it.
+   *
+   * These two are what turn a static "Zoom in to ≥ 16 to load" sentence — which reads the same
+   * whether the layer is drawing or not — into a report of the row's ACTUAL state plus the fix.
+   * `mapZoom` is the surface's own current Leaflet zoom (the planner derives it from the
+   * drawing's own scale, which is the model the basemap is slaved to, so it is live during a
+   * gesture rather than one commit behind). `onZoomTo(z)` takes the surface to at least `z`.
+   * Both null on a host that has not wired them: the rows then behave exactly as they did. */
+  mapZoom = null,
+  onZoomTo = null,
 }) {
   const jur = jurisdictionFor(county);
   /* B1091(×2) — WHICH county the flood group reasons about.
@@ -262,19 +276,90 @@ export default function LayerPanel({
       (v) => patch({ above: v }));
   };
 
+  /* ─────────────────────────────────────────────────────────────────────────────────────
+   * NEW-1 — THE DORMANT PRESENTATION, in ONE place so the three row shapes cannot drift.
+   *
+   * A row now reports one of four states rather than two: OFF · DRAWING · DORMANT-ZOOM ·
+   * DORMANT-BLANK (see lib/layerZoomGate.js). The visual job is that a checked-but-suppressed
+   * row looks like neither of its neighbours: not the checked-and-drawing row above it, and
+   * not the unchecked row below it.
+   *
+   * ⛔ NO LEGEND, NO KEY (owner rule, 2026-07-30 — "whatever an apple or a google would do").
+   * The state is carried BY the row: a hollow status dot (every live state is a FILLED dot, so
+   * an outline reads as "nothing is coming out of this one"), muted label, and one live line.
+   * Nothing anywhere explains the convention, because nothing has to.
+   * ───────────────────────────────────────────────────────────────────────────────────── */
+  const memberOf = (id, cfg) => ({
+    cfg, on: !!overlays[id]?.on, zoom: mapZoom,
+    status: layerStatus[id] || null, coverage: coverage[id] || null,
+  });
+  const visFor = (id, cfg) => layerVisibility(memberOf(id, cfg));
+  const visForMembers = (entries) => combineVisibility(entries.map(([id, c]) => memberOf(id, c)));
+  const isDormant = (v) => !!v && (v.state === "dormant-zoom" || v.state === "dormant-blank");
+
+  /* The ONE status dot. A dormant row's dot is HOLLOW and overrides whatever the status
+   * machine says — which is the whole point for an `esriFeature` layer below Leaflet's gate:
+   * that layer reports "loaded" (it did load; Leaflet just declines to draw it), so the row
+   * used to show a confident green dot over an empty map with no text of any kind. */
+  const statusDot = (meta, loading, vis) => {
+    const dormant = isDormant(vis);
+    if (!meta && !dormant) return null;
+    const title = dormant
+      ? (vis.state === "dormant-zoom" ? "On — not showing at this zoom" : "On — nothing to show here")
+      : meta.label;
+    return (
+      <span data-layer-dot={dormant ? "dormant" : (meta ? meta.label : "")} title={title}
+        style={{ width: 8, height: 8, borderRadius: 99, flex: "none", boxSizing: "border-box",
+          background: dormant ? "transparent" : meta.color,
+          border: dormant ? "1.5px solid var(--text-tertiary)" : "none",
+          animation: !dormant && loading ? "pf-pulse 1.1s ease-in-out infinite" : "none" }} />
+    );
+  };
+
+  /* THE LINE IS THE FIX. For a zoom-suppressed row this is a real <button> that takes the map
+   * to just past the gate — clicking the explanation performs the thing it explains, which is
+   * the difference between a warning and an affordance. It REPLACES the row's static status
+   * sentence rather than joining it (PANEL-BREVITY rule 2: new copy replaces, never accumulates)
+   * — the removed sentence is the pipeline's own "Zoom in to ≥ 16 to load (1-ft detail needs
+   * close zoom)". The full rule still lives in the row's ⓘ, which is exempt.
+   * With no `onZoomTo` wired the same words render as a plain caption: still live, still
+   * specific, just not clickable — never a dead-looking button. */
+  const zoomFixLine = (vis, label) => {
+    const text = dormantZoomLine(vis.levels);
+    const common = { fontSize: 10, lineHeight: 1.4, marginTop: 1 };
+    if (typeof onZoomTo !== "function") {
+      return <div data-testid="layer-zoom-note" style={{ ...common, color: "var(--warn-text)" }}>{text}</div>;
+    }
+    return (
+      <button type="button" data-testid="layer-zoom-fix" onClick={() => onZoomTo(vis.target)}
+        aria-label={`${label} — ${text}. Zoom in far enough for it to draw.`}
+        title="Zoom in far enough for this layer to draw."
+        style={{ ...common, display: "block", width: "100%", textAlign: "left", padding: 0,
+          border: "none", background: "transparent", color: "var(--accent)", fontFamily: "inherit",
+          fontWeight: 700, cursor: "pointer" }}>
+        {text}
+      </button>
+    );
+  };
+
   const row = (k, cfg, { dim = false } = {}) => {
     const st = overlays[k];
     if (!st) return null;
     const ls = st.on ? layerStatus[k] : null;
     const meta = ls && STATUS[ls.state];
+    const vis = visFor(k, cfg);
     const age = ls && ls.ts ? formatAge(Date.now() - ls.ts) : "";
     const vintage = layerVintage(k, cfg); // B236: source vintage, distinct from refreshed-age
-    const outHere = st.on && coverage[k] === "out"; // honest "no data here" for an ON regional layer
+    /* NEW-1 — the out-of-area caption now rides the DORMANT model rather than reading `coverage`
+     * directly, so it can never fire under a closed zoom gate: below the gate this layer never
+     * asked the source anything, and "no data in this area" would be a fabrication. */
+    const outHere = vis.state === "dormant-blank" && vis.why === "out-of-area";
     // B760: ALL persistent explanatory text (source, vintage/age, sublabel, note, and any
     // has-jurisdiction caveat) moves behind the per-row ⓘ so the row itself stays ONE line.
     const infoSections = rowInfoSections(cfg, { vintage, age, ls });
     return (
-      <div key={k} style={{ marginBottom: 5, opacity: dim ? 0.55 : 1 }}>
+      <div key={k} data-testid={`layer-row-${k}`} data-layer-state={vis.state}
+        style={{ marginBottom: 5, opacity: dim ? 0.55 : (isDormant(vis) ? 0.78 : 1) }}>
         {/* Row: checkbox + label + ⓘ + status dot — one line (B760). The ⓘ is a real
             <button> OUTSIDE the <label> so clicking it never toggles the checkbox. */}
         <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
@@ -286,14 +371,12 @@ export default function LayerPanel({
                 `overflow: hidden` edge — which is why the owner saw "FEMA flood zones" on two
                 lines with its chip clipped to "FEM". Letting the label shrink and ellipsise (with
                 the full text on hover) keeps every row exactly one line at any panel width. */}
-            <span title={cfg.label} style={{ flex: 1, minWidth: 0, fontSize: compact ? 12 : 12.5, color: INK,
+            <span title={cfg.label} style={{ flex: 1, minWidth: 0, fontSize: compact ? 12 : 12.5,
+              color: isDormant(vis) ? MUTED : INK,
               overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{cfg.label}</span>
           </label>
           <RowInfo label={cfg.label} sections={infoSections} />
-          {meta && (
-            <span title={meta.label} style={{ width: 8, height: 8, borderRadius: 99, flex: "none", background: meta.color,
-              animation: ls.state === "loading" ? "pf-pulse 1.1s ease-in-out infinite" : "none" }} />
-          )}
+          {statusDot(meta, ls && ls.state === "loading", vis)}
         </div>
         {st.on && opacityControl(cfg.label, st.opacity, (v) => set(k, { opacity: v }))}
         {st.on && showAbove && aboveRow(cfg.label, [[k, cfg]], (p) => set(k, p))}
@@ -313,6 +396,9 @@ export default function LayerPanel({
             ft
           </label>
         )}
+        {/* NEW-1 — THE LIVE LINE, and the fix. Replaces the row's static status sentence
+            whenever the zoom is what is suppressing this layer. */}
+        {vis.state === "dormant-zoom" && zoomFixLine(vis, cfg.label)}
         {/* SIGNAL kept inline (A1): honest out-of-coverage caption for an ON layer (e.g. COH
             sewer in Dallas) — the map still renders everything the source returns for the view. */}
         {outHere && (
@@ -320,10 +406,20 @@ export default function LayerPanel({
             No data in this area — this layer only covers its home region. The map still shows whatever the source returns here.
           </div>
         )}
-        {/* SIGNAL kept inline: status reason (failed / empty / needs-setup) */}
-        {meta && (ls.state === "failed" || ls.state === "slow" || ls.state === "empty" || ls.state === "unconfigured") && (
+        {/* SIGNAL kept inline: status reason (failed / empty / needs-setup).
+            NEW-1 — suppressed under a closed zoom gate: the live line above says the same thing
+            about the same fact, and better. A failure or a needs-setup is NOT dormant and still
+            speaks (LOUD-FAILURE). */}
+        {meta && vis.state !== "dormant-zoom" && (ls.state === "failed" || ls.state === "slow" || ls.state === "empty" || ls.state === "unconfigured") && (
           <div style={{ fontSize: 10, color: meta.color, lineHeight: 1.35, marginTop: 1 }}>
             {ls.msg || meta.label}
+          </div>
+        )}
+        {/* NEW-1 — a blank row with nothing else to say still says WHY it is blank; without this
+            an on-but-empty row is the "is it broken?" case all over again, one state along. */}
+        {vis.state === "dormant-blank" && !outHere && !(meta && ls.state === "empty" && ls.msg) && (
+          <div style={{ fontSize: 10, color: MUTED, lineHeight: 1.4, marginTop: 1 }}>
+            {DORMANT_BLANK_LINE[vis.why] || DORMANT_BLANK_LINE["nothing-here"]}
           </div>
         )}
         {/* SIGNAL kept inline (NEW-2/B571): categorical legend for a per-feature-colored overlay
@@ -379,19 +475,21 @@ export default function LayerPanel({
     const meta = combined && STATUS[combined.state];
     const label = pcfg.mergeLabel || pcfg.label;
     const setBoth = (patch) => { set(pk, patch); set(sk, patch); };
+    // NEW-1 — a merged row is dormant only when EVERY on member is; the level it offers is the
+    // shallowest gate among them, because clearing that is what puts something on the map.
+    const vis = visForMembers([[pk, pcfg], [sk, scfg]]);
     return (
-      <div key={pk} style={{ marginBottom: 5, opacity: dim ? 0.55 : 1 }}>
+      <div key={pk} data-testid={`layer-row-${pk}`} data-layer-state={vis.state}
+        style={{ marginBottom: 5, opacity: dim ? 0.55 : (isDormant(vis) ? 0.78 : 1) }}>
         <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
           <label style={{ display: "flex", gap: 6, alignItems: "center", cursor: "pointer", flex: 1, minWidth: 0 }}>
             <input type="checkbox" checked={anyOn} onChange={(e) => setBoth({ on: e.target.checked })} />
-            <span title={label} style={{ flex: 1, minWidth: 0, fontSize: compact ? 12 : 12.5, color: INK,
+            <span title={label} style={{ flex: 1, minWidth: 0, fontSize: compact ? 12 : 12.5,
+              color: isDormant(vis) ? MUTED : INK,
               overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{label}</span>
           </label>
           <RowInfo label={label} sections={mergedInfoSections(pk, pcfg, sk, scfg, anyOn)} />
-          {meta && (
-            <span title={meta.label} style={{ width: 8, height: 8, borderRadius: 99, flex: "none", background: meta.color,
-              animation: combined.state === "loading" ? "pf-pulse 1.1s ease-in-out infinite" : "none" }} />
-          )}
+          {statusDot(meta, combined && combined.state === "loading", vis)}
         </div>
         {anyOn && opacityControl(label, opacity, (v) => setBoth({ opacity: v }))}
         {anyOn && showAbove && aboveRow(label, [[pk, pcfg], [sk, scfg]], setBoth)}
@@ -406,7 +504,8 @@ export default function LayerPanel({
             </span>
           </div>
         )}
-        {meta && (combined.state === "failed" || combined.state === "slow" || combined.state === "empty") && (
+        {vis.state === "dormant-zoom" && zoomFixLine(vis, label)}
+        {meta && vis.state !== "dormant-zoom" && (combined.state === "failed" || combined.state === "slow" || combined.state === "empty") && (
           <div style={{ fontSize: 10, color: meta.color, lineHeight: 1.35, marginTop: 1 }}>{combined.msg || meta.label}</div>
         )}
       </div>
@@ -431,23 +530,24 @@ export default function LayerPanel({
     const statusMeta = combined && STATUS[combined.state];
     const setAll = (patch) => members.forEach(([id]) => set(id, patch));
     const sections = mergeGroupInfoSections(members, { groupNote: meta.note });
+    const vis = visForMembers(members); // NEW-1 — dormant only if every on member is
     return (
-      <div key={mergeGroupKey} style={{ marginBottom: 5, opacity: dim ? 0.55 : 1 }}>
+      <div key={mergeGroupKey} data-testid={`layer-row-${mergeGroupKey}`} data-layer-state={vis.state}
+        style={{ marginBottom: 5, opacity: dim ? 0.55 : (isDormant(vis) ? 0.78 : 1) }}>
         <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
           <label style={{ display: "flex", gap: 6, alignItems: "center", cursor: "pointer", flex: 1, minWidth: 0 }}>
             <input type="checkbox" checked={anyOn} onChange={(e) => setAll({ on: e.target.checked })} />
-            <span title={label} style={{ flex: 1, minWidth: 0, fontSize: compact ? 12 : 12.5, color: INK,
+            <span title={label} style={{ flex: 1, minWidth: 0, fontSize: compact ? 12 : 12.5,
+              color: isDormant(vis) ? MUTED : INK,
               overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{label}</span>
           </label>
           <RowInfo label={label} sections={sections} />
-          {statusMeta && (
-            <span title={statusMeta.label} style={{ width: 8, height: 8, borderRadius: 99, flex: "none", background: statusMeta.color,
-              animation: combined.state === "loading" ? "pf-pulse 1.1s ease-in-out infinite" : "none" }} />
-          )}
+          {statusDot(statusMeta, combined && combined.state === "loading", vis)}
         </div>
         {anyOn && opacityControl(label, opacity, (v) => setAll({ opacity: v }))}
         {anyOn && showAbove && aboveRow(label, members, setAll)}
-        {statusMeta && (combined.state === "failed" || combined.state === "slow" || combined.state === "empty") && (
+        {vis.state === "dormant-zoom" && zoomFixLine(vis, label)}
+        {statusMeta && vis.state !== "dormant-zoom" && (combined.state === "failed" || combined.state === "slow" || combined.state === "empty") && (
           <div style={{ fontSize: 10, color: statusMeta.color, lineHeight: 1.35, marginTop: 1 }}>{combined.msg || statusMeta.label}</div>
         )}
         {dim && (
@@ -669,9 +769,13 @@ export default function LayerPanel({
     const st = overlays[k];
     if (!st) return null;
     const ls = st.on ? layerStatus[k] : null;
-    // B1091 — the out-of-area reason outranks the empty-here one: if this source can't
-    // cover the site at all, "covers this area and reports nothing" would be a lie.
-    const why = floodScope.notes[k] || (st.on && ls && ls.state === "empty"
+    /* B1091 — the out-of-area reason outranks the empty-here one: if this source can't
+     * cover the site at all, "covers this area and reports nothing" would be a lie.
+     * NEW-1 — and a CLOSED ZOOM GATE outranks both, for the same reason one step earlier:
+     * below the gate this row never asked the service anything, so "reports nothing" is not
+     * a finding. The row's own live line already says what is really going on. */
+    const gatedHere = visFor(k, cfg).state === "dormant-zoom";
+    const why = floodScope.notes[k] || (!gatedHere && st.on && ls && ls.state === "empty"
       ? emptyReason(cfg, { coverage: coverage[k] })
       : null);
     return (

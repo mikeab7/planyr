@@ -549,6 +549,10 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
       onViewCenterRef.current && onViewCenterRef.current({ lat: c.lat, lon: c.lng });
     };
     onMove();
+    // NEW-1 — seed the zoom too, not just the centre. `zoom` starts null and only `zoomend`
+    // wrote it, so before the user's first zoom the Layers panel had no idea what zoom it was
+    // looking at and could not report a gated row as dormant at all.
+    onZoom();
     /* B209502 — WARM THE COUNTY GEOMETRY, THEN ASK AGAIN.
      *
      * `countyForView` is synchronous and answers from whatever it has: before the polygon asset
@@ -1873,7 +1877,11 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
                  "not available in Colorado" rather than offered as a toggle that produces an
                  empty map. The view centre is the best state fact the finder has (there is no
                  site here), and an unresolved one hides nothing. */
-              siteState={viewState} />
+              siteState={viewState}
+              /* NEW-1 — the live zoom every row's gate is reported against, and the fix. On this
+                 surface the map is the interactive one, so `setZoom` IS the whole action. */
+              mapZoom={zoom}
+              onZoomTo={(z) => { try { mapRef.current && mapRef.current.setZoom(z); } catch (_) {} }} />
           </div>
           </>)}
         </div>

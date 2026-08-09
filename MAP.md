@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-08-09 @ `3c26eec` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-08-09 @ `536a4f4` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_493 source files mapped._
+_494 source files mapped._
 
 ## infra
 
@@ -653,6 +653,8 @@ _493 source files mapped._
   - _exports_: `admittedAfter`, `LAYER_STAGE_SIZE`, `layerTier`, `orderLayersByPriority`
 - **`src/workspaces/site-planner/lib/layerWeight.js`** — the visual-hierarchy model — per-layer decision-impact tier (constraint / reference / context) with enforced opacity + weight ceilings, so reference data recedes and the plan stays the subject
   - _exports_: `defaultOpacityFor`, `defaultWeightFor`, `EXEMPT_IDS`, `hierarchyProblems`, `isExempt`, `LAYER_TIER`, `sweepableLayerIds`, `TIER_MAX_OPACITY`, `TIER_MAX_WEIGHT`, `tierOf`, `TIERS`, `unpinnedDynamicLayers`
+- **`src/workspaces/site-planner/lib/layerZoomGate.js`** — The ONE zoom-gate model: which zoom each layer starts drawing at, and the four live row states (off / drawing / dormant-zoom / dormant-blank) the Layers panel reports.
+  - _exports_: `combineVisibility`, `DORMANT_BLANK_LINE`, `dormantZoomLine`, `ESRI_FEATURE_DEFAULT_MIN_ZOOM`, `GATE_CLEARANCE`, `layerMinZoom`, `layerVisibility`, `levelsToGate`, `MAPILLARY_MIN_ZOOM`, `OSM_MIN_ZOOM`, `TERRAIN_MIN_ZOOM`
 - **`src/workspaces/site-planner/lib/ledgerBalancer.js`** — Ledger balancer (B830): ranks screening moves that close detention + mitigation together (shrink over-dug, joint berm solve with apply payload, parcel phase-out, building-to-basin, pumped what-if). Exports `rankLedgerMoves`, `solveBermRaise`.
   - _exports_: `BERM_MAX_RAISE_FT`, `overdugAcFt`, `rankLedgerMoves`, `solveBermRaise`
 - **`src/workspaces/site-planner/lib/lercGrid.js`** — LERC payload decode (`decodeGrid`), split out of demGrid.js (B1042) so the `lerc` codec stays off the Site route's boot bundle; static-imported by the terrain worker, dynamic-imported on the main thread
