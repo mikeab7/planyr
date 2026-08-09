@@ -1,8 +1,13 @@
 import { describe, it, expect } from "vitest";
 import {
-  normalizeOrigin, sameOrigin, parseLatLon, originAtOffset, nudgeOrigin,
-  rotPt, rotateEntry, rotateSiteCollections, siteRotationPivot, normalizeRot, ROTATED_FIELDS,
+  normalizeOrigin, sameOrigin, parseLatLon, originAtOffset, nudgeOrigin, rotPt,
 } from "../src/workspaces/site-planner/lib/sitePlacement.js";
+/* The whole-plan rotation tier lives in its own module and is loaded on demand — it is reachable
+ * only from surfaces that are themselves lazy, so keeping it out of the planner's boot chunk is
+ * what pays for this tranche's bundle cost. Same behaviour, same tests. */
+import {
+  rotateEntry, rotateSiteCollections, siteRotationPivot, normalizeRot, ROTATED_FIELDS,
+} from "../src/workspaces/site-planner/lib/sitePlacementRotate.js";
 import { feetToLatLngPair, lngLatToFeet } from "../src/workspaces/site-planner/lib/mapLock.js";
 
 const KATY = { lat: 29.7858, lon: -95.8244 };

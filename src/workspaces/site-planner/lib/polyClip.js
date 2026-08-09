@@ -9,7 +9,7 @@
 // for convex AND concave lots, not just rectangles.
 
 import { polyArea } from "./polygonSplit.js";
-import { parcelExceptSqft } from "./parcelRecord.js"; // NEW-2 — save-and-except holes come off the site area
+import { parcelExceptSqft } from "./parcelArea.js"; // NEW-2 — save-and-except holes come off the site area (leaf module: this file is on the boot path)
 import ClipperLib from "clipper-lib";
 
 const EPS = 1e-9;

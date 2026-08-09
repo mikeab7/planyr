@@ -59,15 +59,20 @@ describe("NEW-1 — a plan's location is SETTABLE, and everything gated on it re
   it("the anchor rides the undo snapshot — recorded, keyed, and restored", () => {
     expect(planner).toMatch(/stateRef\.current = \{[^}]*, origin \};/);              // recorded
     expect(planner).toMatch(/"\|O:" \+ \(s\.origin \?/);                              // keyed (a change is its own frame)
-    expect(planner).toMatch(/if \(s\.origin !== undefined\) applyOriginState\(/);      // restored
+    expect(planner).toMatch(/if \(s\.origin !== undefined\) \{\s*\n\s*const o = normalizeOrigin\(s\.origin\);/); // restored
   });
 
   /* Mutation: delete `ensureBasemapOn()` from applyOriginState → red. The aerial coming on IS
      the owner-visible payoff; a located plan that still shows blank paper reads as a no-op. */
   it("landing an anchor turns the aerial on", () => {
-    const fn = planner.slice(planner.indexOf("const applyOriginState = "), planner.indexOf("const persistPlacement = "));
-    expect(fn).toContain("ensureBasemapOn()");
-    expect(fn).toContain("setOrigin(o)");
+    // The command body moved to lib/plannerPlacementCmds.js (loaded on demand — measured at 9.9 KB
+    // of the Site route's largest chunk when inline). The guard follows it.
+    const cmds = read("../src/workspaces/site-planner/lib/plannerPlacementCmds.js");
+    const fn = cmds.slice(cmds.indexOf("export function applyOriginState"), cmds.indexOf("export function persistPlacement"));
+    expect(fn).toContain("ctx.ensureBasemapOn()");
+    expect(fn).toContain("ctx.setOrigin(o)");
+    // …and the undo path restores it synchronously, in the planner itself.
+    expect(planner).toMatch(/if \(o\) ensureBasemapOn\(\);/);
   });
 
   /* Mutation: delete either entry point → red. A settable origin nobody can reach is B1422 again. */
@@ -80,9 +85,10 @@ describe("NEW-1 — a plan's location is SETTABLE, and everything gated on it re
   /* Mutation: drop the LOUD-FAILURE branch in persistPlacement → red. A "located ✓" that did not
      save is the B473 class this repo has paid for twice. */
   it("a placement that fails to persist is LOUD, never a silent no-op", () => {
-    const fn = planner.slice(planner.indexOf("const persistPlacement = "), planner.indexOf("const commitOrigin = "));
-    expect(fn).toContain("setLocalSaveFailed(true)");
-    expect(fn).toContain("reportClientEvent(");
+    const cmds = read("../src/workspaces/site-planner/lib/plannerPlacementCmds.js");
+    const fn = cmds.slice(cmds.indexOf("export function persistPlacement"), cmds.indexOf("function applyRotated"));
+    expect(fn).toContain("ctx.setLocalSaveFailed(true)");
+    expect(fn).toContain('ctx.report("save-verify-failed"');
   });
 });
 
@@ -100,18 +106,18 @@ describe("NEW-2 — a plotted deed can BECOME the parcel, and the menus can reac
   /* Mutation: remove the `main.closed === false` refusal → red. Manufacturing a boundary from
      calls that never return to the point of beginning is the one thing this must not do. */
   it("an OPEN traverse is refused loudly and mints no parcel", () => {
-    const fn = planner.slice(planner.indexOf("const promoteDeedToParcel = "), planner.indexOf("const deedAlreadyPromoted = "));
+    const fn = read("../src/workspaces/site-planner/lib/plannerPlacementCmds.js");
     const refusal = fn.indexOf("if (main.closed === false)");
     expect(refusal).toBeGreaterThan(-1);
     expect(fn.slice(refusal, refusal + 700)).toMatch(/flashWarn\([^)]*don't close/);
     // The refusal RETURNS before any parcel is created — order matters, not just presence.
-    expect(refusal).toBeLessThan(fn.indexOf("setParcels((a) => [...a, pc])"));
+    expect(refusal).toBeLessThan(fn.indexOf("ctx.addParcel(pc)"));
   });
 
   /* Mutation: drop `deedMisclosureFt` from the promoted parcel, or drop the chip that renders it
      → red. A deed closing to 0.4′ and one closing to 40′ must not look identical on screen. */
   it("the deed's misclosure is CARRIED onto the parcel and RENDERED there", () => {
-    const fn = planner.slice(planner.indexOf("const promoteDeedToParcel = "), planner.indexOf("const deedAlreadyPromoted = "));
+    const fn = read("../src/workspaces/site-planner/lib/plannerPlacementCmds.js");
     expect(fn).toMatch(/deedMisclosureFt: Number\.isFinite\(gap\)/);
     expect(recordPanel).toContain('data-testid="parcel-misclosure"');
     expect(recordPanel).toContain("closes to {parcel.deedMisclosureFt}′");
@@ -148,8 +154,8 @@ describe("NEW-2 — a plotted deed can BECOME the parcel, and the menus can reac
   /* Mutation: drop the `already` guard → red. A second promotion would double-count the tract in
      every yield, coverage and detention number. */
   it("promoting the same deed twice is refused", () => {
-    const fn = planner.slice(planner.indexOf("const promoteDeedToParcel = "), planner.indexOf("const deedAlreadyPromoted = "));
-    expect(fn).toMatch(/const already = parcels\.find\(\(p\) => p\.fromDeedGroup/);
+    const fn = read("../src/workspaces/site-planner/lib/plannerPlacementCmds.js");
+    expect(fn).toMatch(/const already = ctx\.parcels\(\)\.find\(\(p\) => p\.fromDeedGroup/);
   });
 });
 

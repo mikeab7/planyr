@@ -368,10 +368,18 @@ import { normalizeRules, effectiveBuildingProps, fmtClearHeight, fmtSlab } from 
 import { createHistoryStack } from "./lib/history.js";
 /* NEW-1 — putting an unlocated plan on the earth, and adjusting where it sits (the "GIS is down"
  * tranche). Pure + unit-tested; `origin` is state below and this module owns the geometry rules. */
-import { normalizeOrigin, sameOrigin, originAtOffset, rotateSiteCollections, siteRotationPivot, normalizeRot, rotPt } from "./lib/sitePlacement.js";
+import { normalizeOrigin, sameOrigin, originAtOffset, rotPt } from "./lib/sitePlacement.js";
+/* The whole-plan ROTATION tier is loaded on demand: it is reachable only from the Placement controls
+ * and the Set-location dialog, both of which are themselves lazy. See lib/sitePlacementRotate.js. */
+let placeCmds = null;
+const loadPlaceCmds = () => import("./lib/plannerPlacementCmds.js").then((m) => (placeCmds = m));
 /* NEW-2 / NEW-3 — the parcel RECORD: provenance (drawn / from a deed / from the county), the typed
  * fields a hand-drawn lot never had, and the ONE net-of-exceptions area every consumer reads. */
-import { PARCEL_FIELDS, parcelProvenance, provenanceLabel, cleanText, parseAcres, parcelNetSqft, parcelGrossSqft, parcelExceptSqft, acreageComparison } from "./lib/parcelRecord.js";
+import { parseAcres, parcelNetSqft, parcelGrossSqft, parcelExceptSqft, acreageComparison } from "./lib/parcelArea.js";
+/* The record's VOCABULARY (provenance labels, the typed-field list) is imported only by the lazily
+ * loaded panel — see lib/parcelArea.js's header for why the two tiers are kept apart. `cleanText` is
+ * the one string helper the planner itself needs, and it is three lines, so it lives here. */
+const cleanText = (v) => { const s = (v == null ? "" : String(v)).trim(); return s || null; };
 import { resolveDraftStepBack } from "./lib/drafts.js";
 
 /* Geographic basemap under the planner canvas. The planner stays a feet-based
@@ -4484,7 +4492,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // NEW-1 — restore the geo ANCHOR with the geometry. A placement rotate turns the drawing while
     // the anchor stays put, and a nudge does the reverse; undoing only one half would leave the plan
     // sitting somewhere neither state ever described. `undefined` (a pre-NEW-1 frame) leaves it alone.
-    if (s.origin !== undefined) applyOriginState(normalizeOrigin(s.origin));
+    /* Inlined rather than routed through the lazy command module ON PURPOSE: an undo must land in
+       ONE synchronous turn, and awaiting a chunk here would restore the geometry a frame before its
+       anchor. It is the same three effects `applyOriginState` performs. */
+    if (s.origin !== undefined) {
+      const o = normalizeOrigin(s.origin);
+      setOrigin(o);
+      metaRef.current = { ...metaRef.current, origin: o };
+      if (o) ensureBasemapOn();
+    }
     // NEW-1 — restore the GIS Layers-panel visibility too (it lives in the app-shared overlays). Merge
     // the snapshot's on/off onto the LIVE overlays so opacity isn't disturbed, and pre-set prevLayerSig
     // so the [overlays] tracking effect sees this programmatic change as already-accounted-for (no new
@@ -4522,109 +4538,51 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const undo = () => { const prev = histRef.current.undo(stateRef.current); if (prev) { applySnapshot(prev); touchHist(); } };
   const redo = () => { const next = histRef.current.redo(stateRef.current); if (next) { applySnapshot(next); touchHist(); } };
 
-  /* ── NEW-1 — PLACEMENT: putting an unlocated plan on the earth, and adjusting where it sits ──
+  /* ── NEW-1 / NEW-2 — PLACEMENT + DEED PROMOTION, loaded on demand ────────────────────────────
    *
-   * The gap this closes: a plan started with "Start blank" (what you do when the county parcel
-   * service is down) had NO origin, and nothing anywhere could set one. So the aerial, the FEMA
-   * flood layer, the contours, the ground elevation, the cursor lat/lon and county detection —
-   * and therefore jurisdiction, setbacks and drainage rules — were off forever. Draw the parcel
-   * while the GIS is down and the plan was stranded in blank space with no way back.
-   *
-   * Three operations, one contract:
-   *   • SET / MOVE the anchor  — no drawn coordinate changes; the frame re-anchors (sitePlacement)
-   *   • NUDGE the anchor       — the same thing, in feet, for lining a hand-drawn boundary up
-   *   • ROTATE the plan        — the one that DOES move geometry, because the feet frame is
-   *                              axis-aligned to true north and has no rotation term to turn
-   * Each is one undo frame (origin rides the history snapshot) and each persists immediately —
-   * a location is not the kind of edit that should sit in a debounce window. */
-  const applyOriginState = (next) => {
-    const o = normalizeOrigin(next);
-    setOrigin(o);
-    metaRef.current = { ...metaRef.current, origin: o }; // any save in THIS commit must not write the stale anchor
-    if (o) ensureBasemapOn(); // a located plan shows the aerial — that is the whole point of locating it
+   * The bodies live in `lib/plannerPlacementCmds.js`. Measured: kept inline they added 9.9 KB to
+   * the Site route's largest chunk, which arrives with 2.3 KB of band left — and every one of them
+   * is reached only by a deliberate, rare act (locate a plan, nudge its placement, promote a deed).
+   * This is `exportSheet.js`'s pattern (B1042): a `ctx` rebuilt per call, so a new dependency is
+   * added to `placeCtx` rather than closed over. `placeRef` keeps the current planner values, so
+   * the ctx never serves a command a stale collection.
+   */
+  const placeRef = useRef({});
+  const placeCtx = () => {
+    const r = placeRef.current;
+    return {
+      siteId, uid,
+      origin: () => r.origin, state: () => stateRef.current, live: () => liveRef.current,
+      meta: () => metaRef.current, setMeta: (patch) => { metaRef.current = { ...metaRef.current, ...patch }; },
+      markups: () => r.markups, parcels: () => r.parcels,
+      isDeleted: () => deletedSelfRef.current, readOnly: () => readOnlyRef.current,
+      cloudActive: isCloudActive, loadSite, saveSite, pushModelToCloud, onSiteSaved,
+      report: reportClientEvent, flashWarn, flashPolyWarn, pushHistory, flushElems, ensureBasemapOn,
+      setOrigin, setLocalSaveFailed, setSaveStatus, setCloudSaveFailed,
+      bumpPlaceRot: setPlaceRot,
+      setCollections: (n) => {
+        setParcels(n.parcels || []); setEls(n.els || []); setMeasures(n.measures || []);
+        setCallouts(n.callouts || []); setMarkups(n.markups || []); setSheetOverlays(n.sheetOverlays || []);
+      },
+      addParcel: (pc) => setParcels((a) => [...a, pc]),
+      selectParcel: (id) => { setSel({ kind: "parcel", id }); setLeftPanel("parcel"); },
+      parcelDefaultStyle: () => parcelDefaultStyle(settings),
+      deed: () => deedLib(), deedGroupMembers, deedMainOf,
+    };
   };
-  /* Persist a placement change RIGHT NOW rather than on the autosave debounce, and verify it
-   * landed (LOUD-FAILURE — a "located ✓" that didn't save is the B473 class). `collections` is
-   * passed explicitly because liveRef only catches up on the next render. */
-  const persistPlacement = (nextOrigin, collections) => {
-    if (!siteId || deletedSelfRef.current) return;
-    const fresh = !loadSite(siteId);
-    const payload = { id: siteId, ...metaRef.current, origin: nextOrigin, ...liveRef.current, ...(collections || {}) };
-    const ok = saveSite(payload);
-    if (!ok) {
-      setLocalSaveFailed(true);
-      reportClientEvent("save-verify-failed", "placement change did not persist on device", { id: siteId, what: "origin" });
-    } else {
-      setLocalSaveFailed(false);
-      if (fresh) onSiteSaved?.();
-    }
-    if (!isCloudActive() || readOnlyRef.current) return;
-    setSaveStatus("saving");
-    // Push the LIVE payload (not by id): the mirror write above may have failed on a full device,
-    // and a by-id push would then ship the stale pre-placement copy to the cloud too (B473).
-    pushModelToCloud(payload)
-      .then((r) => { if (r && r.ok) { setSaveStatus("saved"); setCloudSaveFailed(false); } else { setSaveStatus("unsaved"); setCloudSaveFailed(true); } })
-      .catch(() => { setSaveStatus("unsaved"); setCloudSaveFailed(true); });
-  };
-  /* Set (or move) the plan's anchor. `rotateDeg` folds a rotation into the SAME undo frame, which
-   * is what makes "line my hand-drawn boundary up with the aerial" one action rather than two. */
-  const commitOrigin = (next, { rotateDeg = 0, note = "" } = {}) => {
-    const o = normalizeOrigin(next);
-    if (!o) { flashWarn("That isn't a usable position — check the address or the latitude/longitude.", 7000); return false; }
-    const had = origin;
-    if (sameOrigin(o, had) && !rotateDeg) return true; // nothing to record
-    pushHistory();
-    let collections = null;
-    let spun = null;
-    if (rotateDeg) {
-      spun = rotateSiteCollections(stateRef.current, rotateDeg);
-      collections = applyRotatedCollections(spun);
-    }
-    applyOriginState(o);
-    persistPlacement(o, collections);
-    flashWarn(note || (had
-      ? `Moved the plan's location. Everything you drew is unchanged — only where it sits on the earth changed.${spun && spun.unrotatable.length ? " The captured aerial underlay can't be turned, so it was left where it was." : ""}`
-      : "Location set — the aerial, flood layer, contours and county rules are switching on. Nothing you drew moved."), 9000);
-    return true;
-  };
-  /* Push a rotated set of collections into state and hand back the same object for the save. */
-  const applyRotatedCollections = (spun) => {
-    const n = spun.next;
-    setParcels(n.parcels || []); setEls(n.els || []); setMeasures(n.measures || []);
-    setCallouts(n.callouts || []); setMarkups(n.markups || []); setSheetOverlays(n.sheetOverlays || []);
-    try { flushElems(n); } catch (_) {} // a rotation is a gesture boundary — commit the settled result now
-    return { parcels: n.parcels, els: n.els, measures: n.measures, callouts: n.callouts, markups: n.markups, sheetOverlays: n.sheetOverlays };
-  };
-  /* Rotate the whole plan about its body centre — for a boundary plotted from a deed, which never
-   * lands square on the aerial first try. The anchor does not move. */
-  const rotatePlan = (deg) => {
-    const d = Number(deg) || 0;
-    if (!d) return;
-    if (!siteRotationPivot(stateRef.current)) { flashWarn("There's nothing drawn to rotate yet.", 5000); return; }
-    pushHistory();
-    const spun = rotateSiteCollections(stateRef.current, d);
-    const collections = applyRotatedCollections(spun);
-    persistPlacement(origin, collections);
-    setPlaceRot((r) => normalizeRot(r + d));
-    if (spun.unrotatable.length)
-      flashWarn(`Turned the plan ${Math.abs(d).toFixed(1)}° ${d > 0 ? "clockwise" : "counter-clockwise"}. The captured aerial underlay is a fixed north-up picture, so it stayed put.`, 9000);
-  };
-  /* Nudge the plan across the ground. NOT a geometry edit: the anchor moves, so every drawn
-   * coordinate is untouched and the plan simply sits somewhere slightly different. */
-  const nudgePlan = (dxFt, dyFt) => {
-    if (!origin) return;
-    const next = originAtOffset(origin, dxFt, dyFt);
-    if (!next) return;
-    pushHistory();
-    applyOriginState(next);
-    persistPlacement(next, null);
-  };
+  const cmds = () => (placeCmds || loadPlaceCmds());
+  /* Every command is async ONLY because its module loads on demand; each still runs in one turn. */
+  const commitOrigin = (next, opts) => { Promise.resolve(cmds()).then((C) => C.commitOrigin(placeCtx(), next, opts)); return true; };
+  const rotatePlan = async (deg) => (await cmds()).rotatePlan(placeCtx(), deg);
+  const nudgePlan = async (dx, dy) => (await cmds()).nudgePlan(placeCtx(), dx, dy);
+  const promoteDeedToParcel = async (id) => { await loadDeed(); (await cmds()).promoteDeedToParcel(placeCtx(), id); };
   // How far this plan has been turned since the location was set — a readout, not a stored field
   // (the geometry itself carries the rotation). Reset with the plan; folded to (-180, 180].
   const [placeRot, setPlaceRot] = useState(0);
   const [placeStepFt, setPlaceStepFt] = useState(25);   // nudge step
   const [placeStepDeg, setPlaceStepDeg] = useState(1);  // rotate step
   const [setLocOpen, setSetLocOpen] = useState(false);  // the Set-location dialog
+  placeRef.current = { origin, markups, parcels };
   // Cancel an in-progress drag-move (Esc / lost focus mid-drag): restore the
   // pre-drag snapshot stashed on drag.current at drag-start and drop the frame
   // pushHistory pushed, so an interrupted move leaves no half-recorded command
@@ -15898,69 +15856,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   };
   const rotateDeedRigid = (m, deg, pivot) => { const { rotatePointsAbout } = deedLib(); return { ...m, pts: rotatePointsAbout(m.pts, deg, pivot), centerline: rotatePointsAbout(m.centerline || [], deg, pivot) }; };
 
-  /* ── NEW-2 — PROMOTE A PLOTTED DEED TO THE PARCEL BOUNDARY ─────────────────────────────────
-   *
-   * When the county service is down, the legal description IS the boundary. A plotted deed was
-   * only ever a MARKUP: the one thing the right-click menu offered was "Align to parcel", which
-   * needs a county parcel to already exist — so with the GIS down there was no path from "I have
-   * the legal description in hand" to a boundary the app treats as land.
-   *
-   * The promoted lot goes through the SAME shape a map-clicked parcel does (a `parcels` entry with
-   * a fresh id, the user's Standards style stamped at birth), so acreage, setbacks, edge runs, the
-   * acreage chip and the area math all work identically. Three things it carries that a clicked
-   * parcel doesn't:
-   *   • `source: "deed"` — the provenance, so a reviewer is never shown a plotted deed as a county
-   *     record (NEW-3);
-   *   • `deedMisclosureFt` — a deed that closes to 0.4 ft and one that closes to 40 ft must not
-   *     look the same on screen;
-   *   • `exceptions` — the save-and-except holes, promoted WITH the tract as one body and deducted
-   *     from every area consumer (parcelRecord.parcelNetSqft → dissolvedParcelSqft).
-   * An OPEN traverse is refused loudly rather than quietly closed for you: a boundary is not the
-   * place to guess at a missing call.
-   *
-   * The deed markup stays, so the owner can still align or compare — and `fromDeedGroup` links the
-   * two, which is what lets a later "Align to county parcel" move the promoted parcel with its deed
-   * (and keeps the deed from "aligning" to its own copy).  */
-  const promoteDeedToParcel = async (id) => {
-    const { misclosure } = await loadDeed();
-    const m = markups.find((x) => x.id === id && x.kind === "encumbrance");
-    if (!m || !(m.pts && m.pts.length >= 3)) { flashWarn("Select a plotted deed boundary first.", 5000); return; }
-    const members = deedGroupMembers(m);
-    const main = deedMainOf(members, m);
-    if (!(main.pts && main.pts.length >= 3)) { flashWarn("That deed has no closed outline to promote.", 6000); return; }
-    const gap = misclosure(main.centerline && main.centerline.length ? main.centerline : [...main.pts, main.pts[0]]);
-    if (main.closed === false) {
-      // LOUD-FAILURE: refuse, and say exactly why — never manufacture a boundary from calls that
-      // don't come back to the point of beginning.
-      flashWarn(`This deed's calls don't close (they end about ${gap.toFixed(1)}′ from where they started), so it can't become a property boundary. Check the description for a missing or mistyped call, then plot it again — or draw the boundary by hand.`, 0);
-      return;
-    }
-    const already = parcels.find((p) => p.fromDeedGroup && main.deedGroup && p.fromDeedGroup === main.deedGroup);
-    if (already) { setSel({ kind: "parcel", id: already.id }); setLeftPanel("parcel"); flashWarn("This deed is already the parcel boundary — selected it.", 6000); return; }
-    const clone = (pts) => pts.map((p) => ({ x: p.x, y: p.y }));
-    const exceptions = members
-      .filter((x) => x.except && x.pts && x.pts.length >= 3)
-      .map((x) => ({ pts: clone(x.pts), label: x.label || "Save & except" }));
-    const pc = {
-      id: uid(), points: clone(main.pts), locked: true,
-      ...parcelDefaultStyle(settings), // born with the user's Standards parcel defaults, like every other parcel (B929)
-      source: "deed",
-      label: main.label && main.label !== "Tract boundary" ? main.label : null,
-      deedMisclosureFt: Number.isFinite(gap) ? Math.round(gap * 100) / 100 : null,
-      fromDeedGroup: main.deedGroup || null,
-      ...(exceptions.length ? { exceptions } : {}),
-    };
-    pushHistory();
-    setParcels((a) => [...a, pc]);
-    setSel({ kind: "parcel", id: pc.id });
-    setLeftPanel("parcel");
-    flashPolyWarn(pc.points, "Parcel"); // same self-intersection / zero-area guard a drawn parcel gets
-    const exNote = exceptions.length ? ` Its ${exceptions.length} save-and-except tract${exceptions.length > 1 ? "s are" : " is"} carved out of the acreage.` : "";
-    const closeNote = gap > 1
-      ? ` ⚠ The calls close to about ${gap.toFixed(1)}′ — loose for a boundary; verify before you rely on it.`
-      : ` The calls close to about ${gap.toFixed(2)}′.`;
-    flashWarn(`Boundary set from the deed.${closeNote}${exNote} The deed stays on the plan so you can still compare it, or align it once the county map is back.`, 12000);
-  };
   /* NEW-2 — SELECT THE DEED A PARCEL CAME FROM. Promotion lays the new parcel over the deed and
    * docks the Parcel panel, and measurement on the real page showed the consequence: a right-click
    * where the deed visibly is answers with the PARCEL's menu, so the deed — which we deliberately
