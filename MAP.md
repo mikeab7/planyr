@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-08-09 @ `f360b5d` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-08-09 @ `536a4f4` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -65,7 +65,7 @@ _494 source files mapped._
   - _exports_: `binPages`, `blobToDataUrl`, `cloudClient`, `dataUrlToBlob`, `emptySyncState`, `fetchImage`, `fetchImageIndex`, `fetchPageIndex`, `fetchPages`, `fetchTree`, `fetchTreeRev`, `forcePage`, `IMAGE_BUCKET`, `IMAGE_MIME_ALLOWED`, `IMAGE_TABLE`, `imagePath`, `isEmptyDoc`, `judgeConflict`, `mergeSyncState`, `mergeTrees`, `PAGE_TABLE`, `pageRev`, `planAdoption`, `planImageSync`, `planPageSeed`, `purgeImagesCloud`, `purgePagesCloud`, `pushImage`, `pushPage`, `pushTree`, `sameDoc`, `syncFailureReason`, `TREE_TABLE`
 - **`src/workspaces/notes/lib/notesDocHtml.js`** — A note's document model → HTML through the EDITOR'S OWN DOMSerializer, so the print sheet cannot drift from the screen (PDF-PARITY by construction). Inlines stored image bytes as data URLs.
   - _exports_: `docToHtml`
-- **`src/workspaces/notes/lib/notesDuplicates.js`** — TODO — describe
+- **`src/workspaces/notes/lib/notesDuplicates.js`** — pure detector for THE SAME NOTE LIVING IN TWO PROJECTS: word-pair Dice similarity over normalised text, same-project and empty pages deliberately excluded, groups (not pairs) out.
   - _exports_: `duplicateNotice`, `findCrossProjectDuplicates`, `MIN_TEXT_CHARS`, `NEAR_DUPLICATE_SIMILARITY`, `normalizeText`, `shingles`, `similarity`
 - **`src/workspaces/notes/lib/notesExtensions.js`** — The ONE declaration of what a note may contain — the editor extension set (incl. images, the empty-page placeholder and search marking), the empty-document constant, and the per-page configured variant.
   - _exports_: `EMPTY_DOC`, `HEADING_LEVELS`, `NOTE_EXTENSIONS`, `NOTE_PLACEHOLDER`, `noteExtensions`
@@ -77,7 +77,7 @@ _494 source files mapped._
   - _exports_: `isImageFile`, `MAX_IMAGE_DIM`, `prepareNoteImage`
 - **`src/workspaces/notes/lib/notesImageNode.js`** — The `noteImage` schema node: the document holds an image ID, never the bytes. Owns the paste/drop intake plugin and the node view that draws a VISIBLE broken-image state when a picture's bytes are gone.
   - _exports_: `default`, `NoteImage`
-- **`src/workspaces/notes/lib/notesKeys.js`** — TODO — describe
+- **`src/workspaces/notes/lib/notesKeys.js`** — the device storage KEY FORMAT and the scope rule, written down once — a dependency-free leaf so the one module allowed to read these keys from outside the Notes route cannot drift from the store.
   - _exports_: `LOCAL_SCOPE`, `PAGE_KEY_BASE`, `scopeFor`, `SYNC_KEY_BASE`, `TREE_KEY_BASE`
 - **`src/workspaces/notes/lib/notesMarkdown.js`** — PURE Markdown export of a note's document model (GFM tables/task lists, HTML fallback for what Markdown cannot spell, plus a lossiness report) and `docToText` for body search.
   - _exports_: `assetIdsInDoc`, `attachmentIdsInDoc`, `attachmentIdsInDocs`, `docToMarkdown`, `docToText`, `escapeText`, `imageIdsInDoc`, `imageIdsInDocs`, `lossyNote`, `MD_INLINE_ATTACHMENT_MAX`, `MD_MAX_HEADING`, `NOTE_MD_HANDLED`, `pageToMarkdown`, `safeFileName`
@@ -89,13 +89,13 @@ _494 source files mapped._
   - _exports_: `default`, `isLayoutTable`, `isSpacerParagraph`, `MEANINGFUL_ALIGN`, `PASTE_MODES`, `pastePlainKey`, `plainTextToContent`, `sliceCarriesFormatting`, `STYLE_MARKS`, `textOfNode`, `tidyPastedFragment`
 - **`src/workspaces/notes/lib/notesPrint.js`** — The Notes print / Save-as-PDF sheet — a pure HTML document builder whose paper CSS mirrors the screen's editor CSS, plus the hidden-iframe driver that opens the print dialogue.
   - _exports_: `buildPrintDocument`, `printHtmlDocument`
-- **`src/workspaces/notes/lib/notesProjectFiling.js`** — TODO — describe
+- **`src/workspaces/notes/lib/notesProjectFiling.js`** — PURE: what a project is holding (`projectNoteCensus`, incl. the bin) and how to move it (`moveProjectNotes`). A leaf with no imports, so the shared header's delete confirmation can reach it without dragging the model onto every route.
   - _exports_: `isLegacyTree`, `moveProjectNotes`, `projectNoteCensus`
-- **`src/workspaces/notes/lib/notesProjectLink.js`** — TODO — describe
+- **`src/workspaces/notes/lib/notesProjectLink.js`** — "what is this project holding?", asked from OUTSIDE the Notes route — account passed in EXPLICITLY, reads the tree blob directly, marks the ledger dirty on a move, and answers `unknown` rather than a confident zero on a legacy tree.
   - _exports_: `moveNotesBetweenProjects`, `projectNotes`
 - **`src/workspaces/notes/lib/notesQuickOpen.js`** — PURE fuzzy ranking for quick open, plus the shortcut's spelling and chord test.
   - _exports_: `fuzzyScore`, `isQuickOpenChord`, `QUICK_OPEN_KEY`, `quickOpenResults`, `rankQuickOpen`, `stepIndex`
-- **`src/workspaces/notes/lib/notesScan.js`** — TODO — describe
+- **`src/workspaces/notes/lib/notesScan.js`** — the integrity pass, lazily imported: `scanNoteDuplicates` (the same note in two projects, bin included) and `unreachableNotes` (a note filed nowhere at all).
   - _exports_: `scanNoteDuplicates`, `unreachableNotes`
 - **`src/workspaces/notes/lib/notesSearchHighlight.js`** — Search marking as ProseMirror DECORATIONS (never marks — it must not write into the document) plus stepping between matches.
   - _exports_: `default`, `findSearchMatches`, `NoteSearchHighlight`, `noteSearchKey`
@@ -246,7 +246,7 @@ _494 source files mapped._
   - _exports_: `choosePlacement`, `METHOD`, `RUNGS`
 - **`src/shared/placement/verifyPlacement.js`** — Placement calibration + auto-verification: derive feet-per-unit from a labeled dimension, grade measured-vs-label percent off, and cross-check two scales for non-uniform stretch
   - _exports_: `calibrateFromDimension`, `CROSS_DISAGREE_PCT`, `crossCheckScales`, `VERIFY_OK_PCT`, `VERIFY_WARN_PCT`, `verifyDimension`
-- **`src/shared/prefs/smoothZoom.js`** — TODO — describe
+- **`src/shared/prefs/smoothZoom.js`** — The smooth-zoom per-device preference: one key, one default, one writer, plus a same-tab + cross-tab subscription the planner reacts to.
   - _exports_: `readSmoothZoom`, `SMOOTH_ZOOM_DEFAULT`, `SMOOTH_ZOOM_KEY`, `subscribeSmoothZoom`, `writeSmoothZoom`
 - **`src/shared/presence/editorLock.js`** — Single-active-editor lock over Web Locks API: one tab edits per project, others go read-only, with cross-tab yield bus and steal-based takeover, degrading open
   - _exports_: `createEditorLock`, `lockRole`
@@ -324,7 +324,7 @@ _494 source files mapped._
   - _exports_: `clampToBounds`, `dockAfterRelinquish`, `FLOAT_MIN_WIDTH`, `FLOAT_SIZE`, `initialFloatPos`, `reconcileForNarrow`, `shouldInspectorTakeDock`
 - **`src/shared/ui/FloatingPanel.jsx`** — NEW-1 poppable panels: a left-rail panel detached into a portal-to-body draggable card over the map (drag-clamp, session-remembered position, map pan/zoom isolation); composes PanelChrome
   - _exports_: `default (FloatingPanel)`
-- **`src/shared/ui/InterfaceSettings.jsx`** — TODO — describe
+- **`src/shared/ui/InterfaceSettings.jsx`** — The Interface section of Settings (display theme + smooth zoom), rendered by both Settings homes so they cannot disagree.
   - _exports_: `default (InterfaceSettings)`
 - **`src/shared/ui/MiddleTruncate.jsx`** — CSS middle-ellipsis label: head ellipsizes, tail always drawn, full text on hover (NEW-4).
   - _exports_: `default (MiddleTruncate)`
@@ -567,7 +567,7 @@ _494 source files mapped._
   - _exports_: `ANCHOR_DRIFT_FT`, `anchorDriftFt`, `canonEnv`, `DRAIN_STUCK_MS`, `ENV_TOL_FT`, `envelopeContains`, `envelopeOf`, `factsFreshness`, `FETCH_TTL_MS`, `fetchStaleForEdit`, `fetchWatchdogFired`, `FRESHNESS_REASONS`, `revalidationNeed`
 - **`src/workspaces/site-planner/lib/fbcdWse.js`** — FBCDD Atlas-14 watershed-study DRAFT WSE point samplers (getSamples, feet, honest-null out of coverage): 0.2% off the county 500YR_WSE mosaic → derivedWse02Ft; 1% off the per-watershed 100YR rasters via extent-routed multiplex (max-finite governing, LOUD on any candidate failure) → derivedWse1pctFt (B807) — Fort Bend drainage checks
   - _exports_: `FBCDD_WSE02_URL`, `sampleWse02Point`, `sampleWse100Point`, `wse02CandidatesForPoint`, `wse100CandidatesForPoint`
-- **`src/workspaces/site-planner/lib/featureEditZoom.js`** — TODO — describe
+- **`src/workspaces/site-planner/lib/featureEditZoom.js`** — The zoom floor below which the on-building +/- edit controls must not exist, derived from a bump-out's own legibility, plus its fade-in ramp.
   - _exports_: `FEAT_EDIT_FADE_SPAN`, `FEAT_EDIT_MAX_FT_PER_PX`, `FEAT_EDIT_MIN_OPACITY`, `FEAT_EDIT_MIN_PPF`, `FEAT_EDIT_MIN_PX`, `featureEditOpacity`
 - **`src/workspaces/site-planner/lib/featureHover.js`** — pure hover WORDING for the vector feature overlays: registry-driven `<Title> (<Source>) · <detail>` matching the OSM tooltips, with HIFLD's withheld sentinels treated as absence and ALL-CAPS agency text title-cased.
   - _exports_: `cleanAttr`, `HOVER_CLEANERS`, `HOVER_MAX_CHARS`, `hoverDetails`, `hoverIdentifyEnabled`, `hoverText`, `hoverTitle`, `pickAttr`, `sourceTag`, `titleCaseAgency`
