@@ -194,9 +194,25 @@ export const SOURCE_FIXTURES = {
    * does not carry Baytown. */
   etj_baytown: {
   fixtures: [
-    { label: "Goose Creek — lot inside Baytown city limits (also in ETJ)", point: [-95.004715, 29.805479], expectMinCount: 1 },
+    /* NEW-1b — the first two are REAL Goose Creek lot centroids, and they are the fixture that
+     * matters: the ETJ-ONLY point asserts exactly the membership H-GAC's aggregator silently
+     * misses (it returns nothing there), so this row going quiet is the regression that made the
+     * app blind to the ETJ covering 100% of the owner's site. */
+    { label: "Goose Creek lot INSIDE Baytown city limits (also in ETJ)", point: [-95.0033394306029, 29.80668517424612], expectMinCount: 1 },
+    { label: "Goose Creek lot in Baytown ETJ ONLY — H-GAC returns nothing here", point: [-95.00570022788615, 29.810321460472053], expectMinCount: 1 },
     { label: "Baytown ETJ — north-east (Cedar Bayou side)", point: [-94.95, 29.86], expectMinCount: 1 },
     { label: "Baytown ETJ — south (toward the bay)", point: [-94.98, 29.74], expectMinCount: 1 },
+  ],
+  },
+  /* NEW-1b — Baytown's own city-limits layer. The in-limits Goose Creek lot must be inside it and
+   * the ETJ-only lot must NOT be — that negative is asserted in `test/jurisdictionShapes.test.js`,
+   * where a zero-count fixture would carry no weight. All four points below were queried live
+   * 2026-08-09 before being written down; none is an expectation someone guessed. */
+  city_baytown: {
+  fixtures: [
+    { label: "Goose Creek lot INSIDE Baytown city limits", point: [-95.0033394306029, 29.80668517424612], expectMinCount: 1 },
+    { label: "Baytown city limits — central", point: [-94.98, 29.74], expectMinCount: 1 },
+    { label: "Baytown city limits — north of the ship channel reach", point: [-94.99, 29.77], expectMinCount: 1 },
   ],
   },
   etj_austin: {

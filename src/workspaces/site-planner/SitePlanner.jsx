@@ -15582,7 +15582,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (!origin) { flashWarn("No county parcel to align to. Add the parcel (＋ Add → Click a lot on the map), or rotate the deed by hand to match the aerial.", 8000); return; }
     const c = deedCentroid(main.pts);
     const [lat, lon] = feetToLatLng(c, origin.lat, origin.lon);
-    const conv = gridConvergenceDeg(lat, lon);
+    /* NEW-2 — the convergence is resolved in the SITE'S OWN state-plane zone (the plan's saved
+     * county wins; the point envelope is the fallback), never in Texas South Central. `null` is an
+     * honest unknown — ground outside every modelled zone — and is a DIFFERENT fact from a 0°
+     * answer on the central meridian, so it gets its own message and rotates nothing. */
+    const conv = gridConvergenceDeg(lat, lon, { state: siteStateId, county: restored?.county || null });
+    if (conv == null) { flashWarn("No county parcel to align to, and Planyr doesn't carry a State Plane zone for this location — so there is no grid rotation it can compute honestly. Rotate the deed by hand to match the aerial.", 9000); return; }
     if (Math.abs(conv) < 0.01) { flashWarn("No county parcel to align to, and this site sits on the State Plane meridian (no grid rotation to correct). Nudge the deed by hand if it needs it.", 8000); return; }
     pushHistory();
     setMarkups((a) => a.map((x) => memberIds.has(x.id)
@@ -27144,7 +27149,18 @@ function YieldPanel({
                         {drainage.administrator.governingLabel ? ` Shown: ${drainage.administrator.governingLabel}${drainage.administrator.governingRuleText ? ` (${drainage.administrator.governingRuleText})` : ""}.` : ""}
                       </div>
                     )}
-                    {v.key === "ffe" && drainage.administrator && !drainage.administrator.unresolved && !drainage.administrator.split && drainage.administrator.governingLabel && (
+                    {/* NEW-1c — an authority that governs here and whose ordinance we have not
+                        transcribed. Ranked below the two states above but above "Rule applied",
+                        because the number shown is a floor from an incomplete comparison. */}
+                    {v.key === "ffe" && drainage.administrator && !drainage.administrator.unresolved && !drainage.administrator.split
+                      && drainage.administrator.unmodelledCandidates?.length > 0 && (
+                      <div data-testid="yield-ffe-unmodelled" style={{ fontSize: 10.5, color: "var(--warn-text)", lineHeight: 1.45, marginTop: 2, whiteSpace: "normal" }}
+                        title={drainage.administrator.unmodelledNote || ""}>
+                        <b>No rule on file for {drainage.administrator.unmodelledCandidates.map((u) => u.label).join(" and ")}</b> — {drainage.administrator.unmodelledCandidates.length === 1 ? "it administers" : "they administer"} part of this site, so the elevation shown is a floor from the authorities we do have, not the final answer.
+                      </div>
+                    )}
+                    {v.key === "ffe" && drainage.administrator && !drainage.administrator.unresolved && !drainage.administrator.split
+                      && !drainage.administrator.unmodelledCandidates?.length && drainage.administrator.governingLabel && (
                       <div data-testid="yield-ffe-administrator" style={{ fontSize: 10.5, color: drainage.administrator.ambiguous ? "var(--warn-text)" : Y.muted, lineHeight: 1.45, marginTop: 2, whiteSpace: "normal" }}
                         title={`${drainage.administrator.selectionReason} Candidates: ${drainage.administrator.candidates.map((c) => c.label).join(" · ")}. ${drainage.administrator.governingSource || ""}`}>
                         Rule applied: <b>{drainage.administrator.governingLabel}</b>

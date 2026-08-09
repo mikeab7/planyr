@@ -31,6 +31,9 @@ import { classifyCcn } from "./ccnClassify.js";
 import { isSfhaZone, isShadedXSubtype } from "./floodZone.js";
 import { screenProximity, fmtDistFt } from "./proximityScreen.js";
 import { summarizeWells } from "./wellStatus.js";
+// NEW-1 — which STATE the site is in, geometrically and without a network call, so the zoning
+// answer holds when every GIS endpoint is down (siteRegion.js is pure geometry, no prose).
+import { siteState } from "./siteRegion.js";
 import { summarizeTransmission, summarizeSubstations } from "./powerScreen.js";
 import { summarizeAadt, summarizeRail, summarizeAirports } from "./accessScreen.js";
 
@@ -821,15 +824,31 @@ export function buildRoadFinding(road) {
   };
 }
 
-// Zoning is DERIVED from the jurisdiction: Houston (city or its ETJ) = no zoning;
-// any other incorporated city = "city zoning applies — confirm"; unincorporated =
-// "no county zoning in Texas." Pure.
-export function deriveZoning(j) {
+/* Zoning is DERIVED from the jurisdiction: Houston (city or its ETJ) = no zoning;
+ * any other incorporated city = "city zoning applies — confirm"; unincorporated =
+ * depends ENTIRELY on the state. Pure.
+ *
+ * ⛔ NEW-1 — THE UNINCORPORATED ANSWER IS A STATEMENT OF STATE LAW, AND IT WAS TEXAS'S, VERBATIM,
+ * IN EVERY STATE. The line read "Unincorporated — Texas counties have no zoning" wherever a site
+ * fell outside a city, and on Colorado ground that is not a mislabel, it is the OPPOSITE of the
+ * law: C.R.S. 30-28-111 et seq. gives Colorado counties zoning authority, and every Front Range
+ * county exercises it — unincorporated Weld is zoned under the Weld County Code, agricultural by
+ * default, with industrial reached by a rezone or a Use by Special Review. A developer who reads
+ * "no county zoning" on raw unincorporated Colorado land prices a by-right industrial development
+ * on ground that needs an entitlement, which is the single most expensive thing on this screen to
+ * get backwards.
+ *
+ * `state` is `siteState()`'s answer ("TX" | "CO" | null) — geometry, no network, so it holds with
+ * every GIS endpoint down. A null state (a legacy ring with no usable coordinates, or ground
+ * outside both envelopes) gets the state-neutral sentence rather than any state's law: this
+ * function may never assert a jurisdiction's zoning doctrine it has not positively identified. */
+export function deriveZoning(j, state = null) {
   const src = ANALYSIS_SOURCES.find((s) => s.id === "zoning");
   const cities = (j.city || []).map((c) => String(c).toLowerCase());
   const etj = (j.etj || []).map((c) => String(c).toLowerCase());
+  const st = state === "CO" ? "CO" : state === "TX" ? "TX" : null;
   let summary;
-  if (j.unincorporated) summary = "Unincorporated — Texas counties have no zoning; subdivision platting still applies.";
+  if (j.unincorporated) summary = UNINCORPORATED_ZONING[st] || UNINCORPORATED_ZONING.unknown;
   else if (cities.includes("houston")) summary = "City of Houston — NO zoning (deed restrictions + Ch. 42 development code apply instead).";
   else if (cities.length) summary = `Within ${j.city.join(", ")} — city zoning likely applies; confirm the district + entitlement path.`;
   else if (etj.includes("houston")) summary = "Houston ETJ — no zoning, but city subdivision/platting authority applies in the ETJ.";
@@ -838,9 +857,22 @@ export function deriveZoning(j) {
     id: "zoning", category: "Zoning / entitlement", label: "Zoning & entitlement context",
     status: "info", summary, detail: [], rows: null,
     sourceName: "Derived from jurisdiction", ageMs: null, ts: null,
-    error: null, caveat: src.caveat, verified: false,
+    // NEW-1 — the shared caveat names City of Houston, which is Texas trivia on a Colorado card.
+    error: null, caveat: st === "CO" ? CO_ZONING_CAVEAT : src.caveat, verified: false,
   };
 }
+
+/* The unincorporated answer, one per state Planyr positively identifies. Keyed rather than
+ * branched so a third state cannot be added without stating its own doctrine. */
+const UNINCORPORATED_ZONING = {
+  TX: "Unincorporated — Texas counties have no zoning; subdivision platting still applies.",
+  CO: "Unincorporated — Colorado counties DO zone (C.R.S. 30-28-111), so this land is zoned by the county, not unzoned. Confirm the district and whether your use is by right, a rezone, or a Use by Special Review.",
+  unknown: "Unincorporated — county zoning authority varies by state. Confirm with the county before assuming the land is unzoned.",
+};
+
+const CO_ZONING_CAVEAT =
+  "Zoning is jurisdiction-specific. Colorado home-rule municipalities (Art. XX) and counties each zone their own territory; " +
+  "confirm the district and the entitlement path with whoever reviews the plat.";
 
 // ---------------------------------------------------------------------------
 // Orchestrator
@@ -882,7 +914,7 @@ export async function runSiteAnalysis(rings, opts = {}) {
     sourceName: null, ageMs: null, ts: null, error: "Couldn't reach the GIS source — temporarily unavailable.", caveat: null, verified: false,
   });
   byId.set("jurisdiction", j && !j.__error ? buildJurisdictionFinding(j) : unknownInfo("jurisdiction", "Jurisdiction", "City / ETJ / county"));
-  byId.set("zoning", j && !j.__error ? deriveZoning(j) : byId.get("zoning") || unknownInfo("zoning", "Zoning / entitlement", "Zoning & entitlement context"));
+  byId.set("zoning", j && !j.__error ? deriveZoning(j, siteState({ lat: c.lat, lng: c.lng })) : byId.get("zoning") || unknownInfo("zoning", "Zoning / entitlement", "Zoning & entitlement context"));
   byId.set("road", road && !road.__error ? buildRoadFinding(road) : unknownInfo("road", "Road authority", "Who maintains the fronting road(s)"));
 
   const findings = CATEGORY_ORDER.map((id) => byId.get(id)).filter(Boolean);
