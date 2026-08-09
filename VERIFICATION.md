@@ -113,6 +113,33 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V97312 — B298756: an attachment reaches the ACCOUNT and comes back on a second machine `Blocker: auth`
+
+**Everything device-side is proven here** — a real file goes through the picker, the chip carries its name, type and size, the document holds only an id, the bytes are in IndexedDB marked `kind: "file"`, the Markdown export embeds it and the print sheet names it (`ui-audit/verify-notes-tier1.mjs` §6, 7 rows). **What the sandbox cannot do is sign in** — the egress proxy CORS-blocks Supabase auth — so the cloud half of the tier is the one thing unconfirmed, and the migration it depends on is exactly what was applied this session.
+
+- **SIGNED IN on planyr.io**, open any note and drop in a **PDF**, an **XLSX** and a **DWG** (the three the owner named). PASS = three chips, each with its own type badge and size.
+- **Then check the account**, with the service role on `planyr_production`:
+  ```sql
+  select id, kind, name, mime, bytes, page_id, deleted_at
+    from public.notes_images where kind = 'file' order by created_at desc limit 10;
+  ```
+  PASS = one row per file, `kind = 'file'`, `name` the real filename, `bytes` non-zero. FAIL = no rows (the upload was refused) or `kind = 'image'` (the client did not tag it).
+- **AND THE BYTES, not just the row:** the object must exist in the private `notes-images` bucket at `<uid>/<id>`. The bucket's MIME allow-list was removed for exactly this; a refusal here means the migration did not take.
+- **THE ONE THAT MATTERS MOST — the SECOND machine.** Sign in on another browser/profile, open the same note, and press **Download** on each chip. PASS = the real file, byte-for-byte, with its own name. FAIL = "File missing", which would mean the lazy cloud fall-through does not cover attachments.
+- **Also confirm nothing regressed for PICTURES**, which share the tier: paste a screenshot into a note on machine A and open it on machine B.
+- Already confirmed, do NOT re-test: the local path, the ceiling refusal, the export and the print sheet — all green headless.
+- The **owner never runs this** — it is a Claude-cohort check on a signed-in session. ⏳ **PENDING**
+
+### V97313 — B298758: a real PDF, from the browser's own dialogue, with a callout and a FOLDED toggle on the page `Blocker: real-data`
+
+The sheet is built and asserted headless (`ui-audit/verify-notes-tier1.mjs` §8): a folded toggle reaches the sheet as an `<details open>` whose contents are in the **laid-out text**, and the callout prints with its tone. What no headless run can do is drive **Save as PDF** — the print dialogue belongs to the browser — so the last hop from sheet to file is unconfirmed, and PDF-PARITY is a mandatory live class.
+
+- **On a real note with real content**, put in: a **danger** callout, a **toggle that is FOLDED on screen**, an **attached file**, a heading or two and a checklist. Press **Print** and choose **Save as PDF**.
+- PASS = the PDF shows **the folded section's contents, expanded**, the callout as a bordered block with its own left rule and glyph, the attachment named with its type and size, and the sheet **light-on-white whatever the app theme is**. FAIL = a blank box where the folded section was — the exact failure the unconditional expand exists to prevent.
+- **Also open the exported Markdown in GitHub** (paste it into a gist preview): the callout must render as a real **NOTE / TIP / IMPORTANT / WARNING / CAUTION** alert, not as a plain quote, and the toggle as an open disclosure.
+- Already confirmed, do NOT re-test: the nodes are in the stored document, the fold survives a reload, the tone changes in place, and the Markdown text is correct — all green headless.
+- The **owner never runs this** — it is a Claude-cohort check. ⏳ **PENDING**
+
 ### V78961 — B280402: the acreage badge no longer takes press 2, on his stub, on the repeat `Blocker: real-data` + `Blocker: auth`
 
 **The cause is DIAGNOSED FROM HIS OWN INSTRUMENT READ and REPRODUCED here, so this is a confirmation, not a hunt.** The parcel badge is a hit target while the cursor RESTS on it (a hover gate, B1327/NEW-4, so it can be dragged); resting is what a cursor does between the two presses of a double-click. It is now identity-transparent — it keeps its drag, but the resolver looks through it.

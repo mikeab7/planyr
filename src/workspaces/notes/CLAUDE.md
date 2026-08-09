@@ -204,6 +204,55 @@ written out in the header of `lib/notesStore.js`; read it there rather than re-d
   nothing — a migrated page never claims a time it does not have.
 - `lib/notesExtensions.js` — the ONE declaration of what a note may contain.
 
+**TIER 1 — the table stakes (NEW-1…NEW-7).** Seven features the category treats as given, all
+landed together. What each one is, and the ONE decision inside it that is not obvious:
+- `lib/notesSlashMenu.js` + `components/NoteSlashMenu.jsx` — **type `/` and name the block**
+  (NEW-1). ⛔ The whole feature is a rule about when NOT to fire: the `/` must be at the start of
+  the block or after whitespace, and what follows must have no spaces and stay short — which is
+  what makes `and/or`, `w/o`, `24/7` and every pasted URL inert. It is a **reading of the
+  document**, recomputed per transaction, so backspacing past the `/` simply stops matching and
+  leaves the character the user typed exactly where it was; there is no marker node to clean up.
+  ↑↓/Enter/Esc are claimed above the default keymap.
+- `lib/notesQuickOpen.js` + `components/QuickOpen.jsx` — **Ctrl/⌘+K jumps to a note by name**
+  (NEW-2). AUDIT-FIRST: **Ctrl+K was unbound** in this repo — the toolbar's link control is a
+  button opening an inline field, with no shortcut — so nothing was displaced. FUZZY over titles
+  (a subsequence, so `gpent` reaches Grand Port › Entitlements), falling **through to the existing
+  full-text index** for body hits; nothing is re-indexed. Title hits always precede body hits. The
+  shortcut is printed in the rail's search placeholder, because a keyboard affordance nobody can
+  discover is one that does not exist. Lazy-loaded — it costs a note nothing until pressed.
+- `lib/notesVersions.js` + `components/NoteHistory.jsx` — **version history with restore**
+  (NEW-3). The bin protects a note somebody DELETED; this protects one somebody MANGLED.
+  ⛔ **Restoring CREATES a version and destroys nothing** — the state being left is snapshotted
+  and pinned first, so restoring the wrong one is itself undoable (`planRestore`, pure).
+  Retention is denser-recent / coarser-older and the NEWEST row is pinned unconditionally.
+  ⛔ Snapshots live in **IndexedDB, never localStorage** (TIER-BY-REBUILDABILITY), and are
+  **device-local in this version** — a stated limit, not an oversight; it needs no schema change
+  and cannot fight the server-owned `rev`.
+- `lib/notesTasks.js` — **every unticked checklist line, across every note** (NEW-4), shown in the
+  rail's third view. ⛔ Ticking one goes **through the open editor** when that note is on screen
+  (`registerOpenNoteDoc` on the store) — writing its JSON round the back of the editor is a
+  silent-loss bug by construction. The key is index **and** text, and the index is trusted only
+  while it still describes the row the rollup showed.
+- `lib/notesAttachNode.js` + `lib/notesFileMeta.js` — **any file, not just pictures** (NEW-5).
+  ⛔ It rides the PICTURE tier — same IndexedDB store, same cloud table, same bucket, same purge
+  cascade — rather than a second blob tier. The account-side change is one migration,
+  `db/notes_attachments.sql`. `assetIdsInDoc` (not `imageIdsInDoc`) is what every delete path must
+  ask, or a deleted page leaves its files behind forever. It survives Markdown (embedded under a
+  size cap, NAMED above it) and Print (name · type · size).
+- `lib/notesOutline.js` + `components/NoteOutline.jsx` — **the note's headings, as navigation**
+  (NEW-6). PURE over the document; its `pos` values restate ProseMirror's own size rule and the
+  unit test resolves every one against the real schema. **Absent, not empty**, when there are no
+  headings. It sits to the RIGHT of a left-aligned sheet, so showing it cannot shift the text.
+- `lib/notesCalloutNode.js` + `lib/notesToggleNode.js` — **callouts and foldable sections**
+  (NEW-7). A callout stores a TONE NAME, never a colour, so screen / paper / Markdown each draw
+  it their own way — and the five tones are GitHub's five, so the export is `> [!NOTE]` rather
+  than an HTML approximation. A toggle is the browser's own `<details>`; the document owns the
+  fold as an attribute, and ⛔ **`docToHtml` opens every one before serialising**, so a folded
+  section can never print as missing text.
+- `db/notes_attachments.sql` — the migration NEW-5 needs: relax the `notes-images` bucket's
+  image-only MIME list and add `name` + `kind` to `notes_images`. Same "committed as a record"
+  discipline as `notes_cloud_sync.sql`.
+
 **Guards that will fail the build if you break them** (the `notesModule` suite under `test/`): the
 eight-place workspace registration checklist · theme-token-only chrome in the three JSX surfaces ·
 no dialog boxes · the editor split (nothing on the static path imports `@tiptap/*`, and the print

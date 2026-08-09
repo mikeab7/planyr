@@ -112,7 +112,10 @@
  * actually true, with a reason when it failed. There is no swallowed catch in here, and
  * there is no state in which the footer claims a sync that did not happen.
  */
-import { docToText, imageIdsInDoc } from "./notesMarkdown.js";
+import { assetIdsInDoc, docToText, imageIdsInDoc } from "./notesMarkdown.js";
+import { openTasksInDoc, rollUpOpenTasks, setTaskCheckedInDoc } from "./notesTasks.js";
+import { MAX_VERSIONS_PER_PAGE, planRestore, planRetention, shouldSnapshot } from "./notesVersions.js";
+import { safeAttachmentName } from "./notesFileMeta.js";
 import { migrate, searchTitles, pagesInScope, walkPages, SCOPE_ALL, SCOPE_PROJECT } from "./notesModel.js";
 import { relativeTime } from "./notesTime.js";
 
@@ -322,6 +325,12 @@ export function sweepOrphans(livePageIds) {
 export const MAX_IMAGE_BYTES = 6 * 1024 * 1024;
 /** The most one notebook's pictures may take in total. */
 export const MAX_NOTEBOOK_IMAGE_BYTES = 200 * 1024 * 1024;
+/** The most one ATTACHED FILE may take (NEW-5). Bigger than the picture ceiling because
+ *  nothing downscales a DWG or a survey PDF — and enforced HERE, on the same seam as the
+ *  image ceilings, so no future intake path can slip past it. The number is the stored
+ *  data-URL length, which is ~4/3 of the file's own size; the cloud bucket's own limit is
+ *  set to match in db/notes_attachments.sql. */
+export const MAX_FILE_BYTES = 34 * 1024 * 1024;
 
 /* ⛔ THE IMAGE DATABASE IS LOADED ON DEMAND, and that is a bundle decision, not a style
  * one. This file is on the Notes route's STATIC path (the rail reads the tree through it),
@@ -404,6 +413,66 @@ export async function readNoteImage(imageId) {
   return r.dataUrl;
 }
 
+/* ---- attached files (NEW-5) -------------------------------------------------------------
+ *
+ * ⛔ AN ATTACHMENT RIDES THE PICTURE TIER. Same IndexedDB store, same cloud table, same
+ * bucket, same purge cascade, same orphan sweep — it differs only by `kind: "file"` and by
+ * carrying the file's NAME. That is a deliberate refusal to build a second blob tier: a
+ * parallel one would need its own sync plan, its own cascade and its own way to leak bytes,
+ * and this module already has exactly one of each. The account-side change it needed is one
+ * migration (db/notes_attachments.sql): stop the bucket refusing non-image types, and carry
+ * `name` + `kind` on the row.
+ */
+
+/** Store one attached file's bytes. `{ ok:true, bytes }` only when they actually landed. */
+export async function putNoteFile({ id, pageId, dataUrl, name = "", mime = "", notebookPageIds = null }) {
+  if (!id || !dataUrl) return { ok: false, error: "no file data" };
+  const label = safeAttachmentName(name);
+  const db = await imageDb();
+  if (!db.notesIdbAvailable()) {
+    return { ok: false, error: failImage(`This browser will not let Planyr store files, so “${label}” was NOT attached. Private browsing usually causes this.`).message };
+  }
+  const bytes = dataUrl.length;
+  if (bytes > MAX_FILE_BYTES) {
+    return { ok: false, error: failImage(`“${label}” is too large to attach (${mb(bytes)}; the limit is ${mb(MAX_FILE_BYTES)}), so it was NOT added. Put it in the Library and link to it instead.`).message };
+  }
+  if (Array.isArray(notebookPageIds)) {
+    const used = await noteImageUsage(notebookPageIds);
+    if (used + bytes > MAX_NOTEBOOK_IMAGE_BYTES) {
+      return { ok: false, error: failImage(`This notebook has reached its storage limit (${mb(used)} of ${mb(MAX_NOTEBOOK_IMAGE_BYTES)}), so “${label}” was NOT attached. Delete some pictures or files first.`).message };
+    }
+  }
+  const r = await db.idbPutImage({
+    key: imageKey(id), scope, id, pageId: pageId || null, dataUrl,
+    mime: mime || "application/octet-stream", w: 0, h: 0, bytes,
+    kind: "file", name: label, createdAt: Date.now(),
+  });
+  if (!r.ok) return { ok: false, error: failImage(`“${label}” could NOT be stored, so it was not attached to the page.`, r.error).message };
+  if (syncOn()) uploadImage({ id, pageId, dataUrl, mime: mime || "application/octet-stream", w: 0, h: 0, bytes, kind: "file", name: label });
+  return { ok: true, bytes };
+}
+
+/** One attached file's bytes as a data URL, or null when they are gone. Same cloud
+ *  fall-through as a picture, for the same reason: a file attached on the desktop has to be
+ *  downloadable from the laptop, and it arrives with the page that needs it. */
+export async function readNoteFile(fileId) { return readNoteImage(fileId); }
+
+/** A map of `fileId → data URL` for a set of ids, skipping anything over `maxBytes`.
+ *  The cap is what stops a Markdown export of a note with a 30 MB drawing producing a
+ *  Markdown file no editor will open; the exporter NAMES what it did not embed. */
+export async function readNoteFiles(fileIds, { maxBytes = Infinity } = {}) {
+  const ids = [...new Set((fileIds || []).filter(Boolean))];
+  if (!ids.length) return {};
+  const meta = new Map((await (await imageDb()).idbListImageMeta(scope)).map((m) => [m.id, m]));
+  const out = {};
+  for (const id of ids) {
+    if ((meta.get(id)?.bytes || 0) > maxBytes) continue;
+    const src = await readNoteFile(id);
+    if (src) out[id] = src;
+  }
+  return out;
+}
+
 /** A map of `imageId → data URL` for a set of ids. Missing ids are simply absent, which is
  *  the signal the exporter turns into its named broken reference. */
 export async function readNoteImages(imageIds) {
@@ -474,10 +543,17 @@ export async function purgePages(pageIds) {
   if (!ids.length) return { pages: 0, images: 0 };
   const imageIds = [];
   for (const id of ids) {
-    for (const imgId of imageIdsInDoc(readPage(id))) imageIds.push(imgId);
+    // ⛔ ASSETS, not images (NEW-5). An attachment left behind after its page is gone is
+    // storage nothing can reach and nothing will ever free — the same leak the body
+    // cascade exists to prevent, one layer down, and the reason `assetIdsInDoc` is the
+    // one accessor a delete path may use.
+    for (const assetId of assetIdsInDoc(readPage(id))) imageIds.push(assetId);
   }
   const pages = deletePages(ids);
   const img = await deleteNoteImages(imageIds);
+  // A purged page's HISTORY goes with it (NEW-3). "Delete forever" that left thirty
+  // snapshots of the deleted note on the device would be a bin with a hole in it.
+  await deletePageVersions(ids);
   if (scoped()) {
     for (const id of ids) sync.pages[id] = { rev: sync.pages[id]?.rev ?? null, dirty: false, purged: true };
     for (const id of imageIds) sync.images[id] = { up: false, purged: true };
@@ -711,6 +787,19 @@ const pageListeners = new Set();
 export function onNotesPagesChanged(fn) { pageListeners.add(fn); return () => pageListeners.delete(fn); }
 function emitPagesChanged(pageIds) {
   const ids = (pageIds || []).filter((id) => id && !sync.pages[id]?.dirty);
+  if (!ids.length) return;
+  for (const fn of pageListeners) { try { fn(ids); } catch (_) { /* a bad listener must not mute the rest */ } }
+}
+
+/** ⛔ THE SAME ANNOUNCEMENT WITHOUT THE DIRTY GUARD — and it has exactly one legitimate
+ *  caller shape (NEW-4). `emitPagesChanged` skips a page this window has unflushed edits
+ *  on, because a remount would discard them: correct for a change arriving from OUTSIDE
+ *  (a sibling window, the cloud seed), where we cannot know what the editor holds. This
+ *  one is for a change THIS module just made itself, to a page it has already established
+ *  no open editor is holding (`openDoc` is checked first). Never call it for a write whose
+ *  page might be on screen. */
+function announcePages(pageIds) {
+  const ids = (pageIds || []).filter(Boolean);
   if (!ids.length) return;
   for (const fn of pageListeners) { try { fn(ids); } catch (_) { /* a bad listener must not mute the rest */ } }
 }
@@ -1018,7 +1107,9 @@ async function seed({ full }) {
         for (const id of imgPlan.upload) {
           const rec = await db.idbGetImage(imageKey(id));
           if (!rec?.dataUrl) continue;
-          await uploadImage({ id, pageId: rec.pageId, dataUrl: rec.dataUrl, mime: rec.mime, w: rec.w, h: rec.h, bytes: rec.bytes });
+          // `kind`/`name` ride along so an ATTACHMENT re-uploads as one (NEW-5) — a v1
+          // record has neither, and absent means picture, which is what every one was.
+          await uploadImage({ id, pageId: rec.pageId, dataUrl: rec.dataUrl, mime: rec.mime, w: rec.w, h: rec.h, bytes: rec.bytes, kind: rec.kind || "image", name: rec.name || "" });
         }
         saveSyncState();
       } else { reportSyncFailure(iIdx.error); }
@@ -1101,8 +1192,196 @@ async function uploadImage(rec) {
   if (r.ok) { sync.images[rec.id] = { up: true, purged: false }; saveSyncState(); return true; }
   // Named, not swallowed — and self-healing: the picture stays unmarked, so the next seed
   // finds it missing on the server and tries again.
-  failImage("A picture was saved on this device but could NOT be copied to your account, so it will not appear on your other computers yet.", r.error);
+  const what = rec.kind === "file" ? `“${rec.name || "a file"}” was attached on this device` : "A picture was saved on this device";
+  failImage(`${what} but could NOT be copied to your account, so it will not appear on your other computers yet.`, r.error);
   return reportSyncFailure(r.error);
+}
+
+/* ---- version history (NEW-3) ------------------------------------------------------------
+ *
+ * ⛔ SNAPSHOTS GO TO INDEXEDDB, NEVER TO LOCALSTORAGE (TIER-BY-REBUILDABILITY). The small
+ * tier was measured at ~78% of a hard ~5 MB cap on the owner's own browser with real saved
+ * plans in it; a note's typing history is bulky and bursty and would crowd irreplaceable
+ * work out of exactly the store that must never fill. Snapshots are user work, so they are
+ * BUDGETED rather than evicted under pressure — the budget is `planRetention`, which runs
+ * after every write.
+ *
+ * ⛔ AND THEY ARE DEVICE-LOCAL IN THIS VERSION, WHICH IS A STATED LIMIT, NOT AN OVERSIGHT.
+ * History does not ride the cloud sync: it needs no schema change, it cannot fight the
+ * server-owned `rev`, and it covers the risk the feature was asked for — a note mangled on
+ * the machine you are sitting at, including by a second window of the same account writing
+ * over it, because THIS device snapshotted the state before that arrived. What it does not
+ * cover is losing the device itself; that is on the backlog by name rather than implied.
+ */
+const versionKey = (pageId, at) => `${scope}:${pageId}:${at}`;
+const versionPageKey = (pageId, s = scope) => `${s}:${pageId}`;
+
+/** A short plain-text preview, stored WITH the row so listing a history costs no document
+ *  reads — the same reasoning as the image metadata index. */
+const previewOf = (doc) => docToText(doc).replace(/\s+/g, " ").slice(0, 160);
+
+/** Take a snapshot of one page, if one is due. `force` is for the moments that always
+ *  deserve a row: leaving the page, and either side of a restore.
+ *
+ *  Returns `{ ok, taken, at }` — never throws, and a refusal is named on the one error
+ *  channel like every other storage failure (LOUD-FAILURE). */
+export async function snapshotPage(pageId, doc, { reason = "typing", pinned = false, force = false, now = Date.now() } = {}) {
+  if (!pageId || !doc) return { ok: false, taken: false, error: "nothing to snapshot" };
+  const db = await imageDb();
+  if (!db.notesIdbAvailable()) return { ok: false, taken: false, error: "this browser will not let Planyr keep version history" };
+
+  const existing = await db.idbListVersions(versionPageKey(pageId));
+  const newest = existing[0] || null;
+  if (!force && !shouldSnapshot(newest?.at, now)) return { ok: true, taken: false, at: newest?.at ?? null };
+  // Nothing changed since the last snapshot → no row. A history of identical entries is
+  // noise that pushes the useful one off the bottom of the list.
+  if (newest && !force) {
+    const prev = await db.idbGetVersion(newest.key);
+    if (prev?.doc && JSON.stringify(prev.doc) === JSON.stringify(doc)) return { ok: true, taken: false, at: newest.at };
+  }
+
+  const at = newest && newest.at >= now ? newest.at + 1 : now;   // one row per instant, always
+  const body = JSON.stringify(doc);
+  const r = await db.idbPutVersion({
+    key: versionKey(pageId, at), page: versionPageKey(pageId), scope, pageId,
+    at, reason, pinned: !!pinned, bytes: body.length, preview: previewOf(doc), doc,
+  });
+  if (!r.ok) {
+    failImage("A version of this note could NOT be kept, so its history may have a gap. Your note itself is unaffected.", r.error);
+    return { ok: false, taken: false, error: r.error };
+  }
+  await applyRetention(pageId, now);
+  return { ok: true, taken: true, at };
+}
+
+/** Enforce the retention plan for one page. Pure decision, storage-side effect — the split
+ *  is what makes every tier boundary a unit test rather than a hope. */
+async function applyRetention(pageId, now = Date.now()) {
+  const db = await imageDb();
+  const rows = await db.idbListVersions(versionPageKey(pageId));
+  const { drop } = planRetention(rows.map((r) => ({ id: r.key, at: r.at, pinned: r.pinned })), { now, max: MAX_VERSIONS_PER_PAGE });
+  if (drop.length) await db.idbDeleteVersions(drop);
+  return drop.length;
+}
+
+/** One page's history, newest first, without the documents (a list of dates costs no
+ *  document reads). */
+export async function readPageVersions(pageId) {
+  if (!pageId) return [];
+  const db = await imageDb();
+  return db.idbListVersions(versionPageKey(pageId));
+}
+
+/** One snapshot's document. */
+export async function readPageVersion(key) {
+  if (!key) return null;
+  const rec = await (await imageDb()).idbGetVersion(key);
+  return rec?.doc || null;
+}
+
+/** ⛔ RESTORE — AND IT CREATES A NEW VERSION RATHER THAN DESTROYING HISTORY.
+ *
+ *  The state being left is snapshotted FIRST and pinned, so restoring the wrong version is
+ *  itself undoable by restoring the one taken a second earlier. Nothing here deletes a row.
+ *  `planRestore` (pure) decides the two writes; this function performs them, in that order,
+ *  and reports honestly if either refuses. */
+export async function restorePageVersion(pageId, key, { now = Date.now() } = {}) {
+  if (!pageId || !key) return { ok: false, error: "nothing to restore" };
+  const rec = await (await imageDb()).idbGetVersion(key);
+  if (!rec?.doc) return { ok: false, error: failImage("That version could not be read back, so nothing was changed.").message };
+
+  const plan = planRestore({ currentDoc: readPage(pageId), versionDoc: rec.doc, versionAt: rec.at, now });
+  if (!plan.ok) return { ok: false, error: plan.error };
+
+  if (plan.snapshotCurrent) {
+    await snapshotPage(pageId, plan.snapshotCurrent.doc, { reason: "before-restore", pinned: true, force: true, now: plan.snapshotCurrent.at });
+  }
+
+  /* ⛔ WHEN THE PAGE IS OPEN, THE RESTORE IS AN **EDIT**, NOT A WRITE BEHIND THE EDITOR'S
+   * BACK. Writing the JSON straight to storage while an editor holds the old document is
+   * the same silent-loss shape the task rollup guards against, only worse: the editor's
+   * own unmount flush would write its stale copy back over the restored one a moment
+   * later. Handed to the editor it becomes one ordinary transaction — undoable, saved
+   * through the one save path, and visible immediately. */
+  if (openDoc && openDoc.pageId === pageId && typeof openDoc.applyDocument === "function") {
+    const applied = openDoc.applyDocument(plan.apply.doc);
+    if (!applied?.ok) return { ok: false, error: applied?.error || "the restored version could not be applied" };
+  } else if (!writePage(pageId, plan.apply.doc)) {
+    return { ok: false, error: "the restored version could not be saved, so nothing was changed" };
+  }
+  await snapshotPage(pageId, plan.apply.doc, { reason: "restored", pinned: true, force: true, now: plan.apply.at });
+  return { ok: true, at: plan.apply.at };
+}
+
+/** Destroy a set of pages' history — the purge's hands only. */
+export async function deletePageVersions(pageIds) {
+  const ids = (Array.isArray(pageIds) ? pageIds : [pageIds]).filter(Boolean);
+  if (!ids.length) return { ok: true, removed: 0 };
+  const db = await imageDb();
+  const keys = [];
+  for (const id of ids) for (const row of await db.idbListVersions(versionPageKey(id))) keys.push(row.key);
+  if (!keys.length) return { ok: true, removed: 0 };
+  return db.idbDeleteVersions(keys);
+}
+
+/* ---- the task rollup (NEW-4) -------------------------------------------------------------
+ *
+ * ⛔ TICKING AN ITEM IN THE ROLLUP GOES THROUGH THE OPEN EDITOR WHEN THERE IS ONE.
+ * The obvious implementation — read the page's JSON, flip the flag, write it back — is a
+ * silent data-loss bug whenever the page being ticked is the page on screen: the editor
+ * holds its document in memory, has up to a debounce of unflushed typing, and would write
+ * the whole of its stale copy back over the change a moment later. So an editor REGISTERS
+ * itself here while it is mounted, and a toggle for that page is handed to it as a real
+ * editor transaction — which lands in the same document, in the same undo history, and
+ * flushes through the same save path as any other edit. Every OTHER page takes the JSON
+ * route and the store announces the change so nothing else is holding a stale copy either.
+ */
+let openDoc = null;
+
+/** The mounted editor claims its page, handing over the two operations that must go
+ *  through it rather than round the back of it: ticking one checklist item (NEW-4) and
+ *  replacing the whole document on a restore (NEW-3). Returns the un-register, so a page
+ *  switch cannot leave a dead claim behind (which would send an edit into a torn-down
+ *  editor). */
+export function registerOpenNoteDoc(pageId, { applyTaskToggle, applyDocument } = {}) {
+  openDoc = { pageId, applyTaskToggle, applyDocument };
+  return () => { if (openDoc && openDoc.pageId === pageId) openDoc = null; };
+}
+
+/** Every UNCHECKED checklist item across a scope, in the rail's own page order. Reads
+ *  bodies, so it lives here rather than in the pure model — the roll-up itself is pure
+ *  (lib/notesTasks.js) and is unit-tested there. */
+export function collectOpenTasks(tree, { projectId = null, scope: sc = SCOPE_PROJECT } = {}) {
+  const pid = sc === SCOPE_ALL ? null : projectId;
+  const pages = [];
+  const scoped = { pages: pagesInScope(tree, pid, pid == null ? SCOPE_ALL : SCOPE_PROJECT) };
+  walkPages(scoped, (pg, { root, trail }) => {
+    pages.push({ pageId: pg.id, pageTitle: pg.title, projectId: root.projectId ?? null, trail: trail || [] });
+  });
+  const bodies = {};
+  for (const p of pages) bodies[p.pageId] = readPage(p.pageId);
+  return rollUpOpenTasks(pages, bodies);
+}
+
+/** Tick (or un-tick) one checklist item from the rollup. Returns `{ ok, changed }`. */
+export function toggleNoteTask(pageId, { index, text }, checked) {
+  if (!pageId) return { ok: false, changed: false };
+  if (openDoc && openDoc.pageId === pageId && typeof openDoc.applyTaskToggle === "function") {
+    return openDoc.applyTaskToggle({ index, text }, checked);
+  }
+  const doc = readPage(pageId);
+  if (!doc) return { ok: false, changed: false };
+  const r = setTaskCheckedInDoc(doc, { index, text }, checked);
+  if (!r.changed) return { ok: true, changed: false };
+  if (!writePage(pageId, r.doc)) return { ok: false, changed: false };
+  announcePages([pageId]);
+  return { ok: true, changed: true };
+}
+
+/** How many open items one page has — used nowhere but the tests and any future badge;
+ *  exported so the rollup's definition of "open" has exactly one home. */
+export function openTaskCount(pageId) {
+  return openTasksInDoc(readPage(pageId)).length;
 }
 
 /* ---- search --------------------------------------------------------------------------- */
