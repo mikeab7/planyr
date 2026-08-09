@@ -154,12 +154,22 @@ written out in the header of `lib/notesStore.js`; read it there rather than re-d
     arrow drag), behind a **cached dynamic import** for the same bundle reason as `notesCloud.js`: a
     note with no sketch never downloads it. A sketch paints from the pure spec first and becomes
     interactive after.
-- `lib/notesBlockKeys.js` — **Backspace at the START of a block undoes a formatting difference
-  BEFORE it restructures anything** (B36051). Registered ABOVE the default keymap. The report it
-  closes: a pasted, right-aligned line in the middle of an Outlook signature merged into the
-  spacer paragraph above it on one keypress, so *"a whole chunk moves to the left"*. Now the
-  first press clears the alignment and stops; the second does the ordinary join, by which point
-  the join is visible rather than a surprise.
+- `lib/notesBlockKeys.js` — **Backspace at the START of a block takes ONE predictable step, at
+  EVERY block boundary** (B36051, then B291536 which made it true everywhere rather than in one
+  place — **its header carries the full table of what the key does at each boundary; read that
+  before touching it**). The first report: a pasted, right-aligned line in the middle of an
+  Outlook signature merged into the spacer paragraph above it on one keypress, so *"a whole
+  chunk moves to the left"*. The recurrence — *"the backspace still acts funny in certain
+  spots"* — was LISTS, where one press un-nested an item AND merged it, or merged upward, left
+  an empty orphan bullet and re-levelled a child. And the boundary nobody had looked at was
+  worse than either: one press at the start of a paragraph following a **picture deleted the
+  picture**. So it is a table now, not a special case: `blockStartAction` is PURE and decides
+  which single step applies (unit-tested by the repo-root `test/` suite **notesBlockKeys**), and it claims the
+  key at a priority ABOVE Tiptap's `ListKeymap` — whose Backspace runs once per list type over a
+  `forEach` that does not stop at the first one to act, and which dissolved BOTH levels of a
+  mixed checklist/bullet list in one press. Driven end to end by the
+  headless harness **verify-notes-backspace** under `ui-audit/`, which asserts the resulting document TREE for every
+  boundary and is mutation-proven.
 - `lib/notesPastePlain.js` — **paste JUST the text** (B36051), Word's "Keep Text Only". ⛔ The
   DEFAULT PASTE IS UNCHANGED — the owner asked for an *option*, so this WATCHES the paste
   (`handlePaste` returns false) rather than intercepting it. Two ways in: **Ctrl/Cmd+Shift+V**,
