@@ -438,6 +438,7 @@ function DocMenu({ at, onPlainPaste, onClose }) {
 export default function NoteEditor({
   pageId, title, onTitleChange, onStatus, onExportMarkdown, onPrintNotice, onSaved,
   scopeLabel, status, updatedAt, searchTerm = "", onClearSearch, notebookPageIds, trail = [],
+  projectLabel = null,
 }) {
   /* Initial content read ONCE, here. Not in an effect — see fix (2) in the header. */
   const [initialDoc] = useState(() => readPage(pageId) || EMPTY_DOC);
@@ -1093,6 +1094,31 @@ export default function NoteEditor({
               onFocus={(e) => { e.target.style.borderBottomColor = "var(--accent-notes)"; }}
               onBlur={(e) => { e.target.style.borderBottomColor = "transparent"; }}
             />
+            {/* ⛔ WHICH PROJECT THIS NOTE BELONGS TO, WHILE YOU ARE READING IT (NEW-2).
+                The owner could not see a note's filing anywhere near the note itself: the
+                rail drops the per-row badge inside a project (everything there belongs where
+                you are standing) and the Dashboard's grouping is a level up from the page. So
+                a note copied into an unrelated pursuit looked exactly like a note in the
+                right place. This is the one surface that is always on screen with the note.
+                It is a LABEL, never a control — re-filing stays on the row's menu, one place,
+                so there is no second way to change the fact. An id that no longer resolves
+                wears the warning colour rather than being captioned as "no project": a failed
+                lookup and a page that genuinely belongs nowhere are different states. */}
+            {projectLabel ? (
+              <span
+                data-testid="note-project-badge"
+                data-project-id={projectLabel.projectId ?? ""}
+                data-resolved={projectLabel.resolved ? "1" : "0"}
+                title={`This note is filed in ${projectLabel.name}`}
+                style={{
+                  flex: "0 1 auto", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis",
+                  whiteSpace: "nowrap", fontSize: 11, fontWeight: 700, letterSpacing: "0.04em",
+                  color: projectLabel.resolved ? "var(--text-secondary)" : "var(--warn-text)",
+                  border: `1px solid ${projectLabel.resolved ? "var(--border-default)" : "var(--warn-text)"}`,
+                  borderRadius: RADIUS.pill, padding: "3px 9px",
+                }}
+              >{projectLabel.name}</span>
+            ) : null}
             {edited ? (
               <span
                 data-testid="note-edited"

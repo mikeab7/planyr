@@ -103,6 +103,34 @@ written out in the header of `lib/notesStore.js`; read it there rather than re-d
   HERE so no intake path can bypass them, and `purgePages` — the ONE place a note's bytes are
   actually destroyed (body **and** images). **Read its header for `ROWS-CANONICAL-ON-SEED`, the
   Notes edition** — which copy of a note wins is written down there, not left to accident.
+- **A COPY NEVER CHANGES PROJECT — four files, one rule.** A note was copied into an unrelated
+  pursuit and nobody was told; it was found by hand a week later under a "from a project you
+  deleted" heading. **A page's `projectId` is a property of the PAGE, never of whoever happens to
+  be looking at it.** So `copyPageWithin` (`lib/notesModel.js`) is the ONE copy op and **takes no
+  project argument at all** — the copy lands as the source's next sibling wearing the source
+  root's project, or it is REFUSED and named. There is deliberately no way to say "put the copy
+  over there", because a caller that could would eventually pass the project it happens to be
+  showing. The conflict park in `Notes.jsx` goes through it and **says so on screen at the moment
+  it happens**. Guards: the repo-root `test/` suites **notesProjectIntegrity** (the decisions) and
+  **notesTwoClientConflict** (two real store instances against an in-memory server that owns `rev`
+  like the deployed trigger — the resulting store, the exact page count AND every page's project),
+  plus the headless harness **verify-notes-project-integrity** under `ui-audit/`. All three are
+  mutation-proven: reverting the copy op to take a viewer's project turns 9 rows red with the exact
+  reported fingerprint.
+  - `lib/notesDuplicates.js` — PURE detector: word-pair Dice similarity over normalised text.
+    ⛔ Same project is never a finding (copying inside a project is ordinary), an empty page is
+    never a finding, and **the BIN counts** — both real copies were binned before anyone looked.
+  - `lib/notesScan.js` — the storage half, **lazily imported** (nothing on the rail's first paint
+    needs it): `scanNoteDuplicates` and `unreachableNotes`. The second answers a defect found in
+    the owner's own account — a body whose tree node had gone, swept off the device on every load
+    and re-downloaded on every sync, reachable from nowhere. `sweepOrphans` now **refuses to
+    destroy a body that still has words in it** and reports what it kept.
+  - `lib/notesProjectFiling.js` + `lib/notesProjectLink.js` + `lib/notesKeys.js` — "what is this
+    project holding?", answerable from a route where Notes is **not mounted**, because the thing
+    that deletes a project is the shared header breadcrumb. The account is passed in EXPLICITLY
+    (reading whatever scope happened to be set would answer with the signed-out tree). ⛔ All three
+    are **leaves**, and that is measured, not stylistic: routing that dynamic import through
+    `notesStore.js` cost the Notes route 12 KB and through `notesModel.js` 9 KB.
 - `lib/notesCloud.js` — **the cloud tier UNDER the seam (B1291), and the only file that may talk to
   Supabase.** The store's public surface did not change when sync landed; this is what grew behind
   it, reached by a cached dynamic `import()` for the same bundle reason as the image DB. Two halves:

@@ -6,17 +6,17 @@
  * with this card (B653); the S key still toggles it, and the collapsed header shows a
  * live "Snap N′" chip so the state stays glanceable without opening the card.
  *
- * ⛔ B286000 — SMOOTH ZOOM LIVES HERE, and the rule it encodes is worth keeping: THIS CARD IS
- * WHERE PER-DEVICE VIEW AND RENDERING BEHAVIOUR GOES. B1449 shipped the toggle into the PLAN
- * menu (the flyout off the plan name in the breadcrumb), which is otherwise entirely plan-scoped
- * — plan name, plans in this site, New plan, Duplicate, Save now, Version history — and which
- * carries no visible label anywhere in the UI, so there was nothing to read that would tell you
- * a rendering preference might be in there. The owner could not find it. Smooth zoom follows
- * neither the plan, the project nor the account: it is a per-DEVICE preference persisted in
- * localStorage under `smoothZoom`. The relocation changed nothing else — same key, same
- * default (on), same `disarmViewAnchor()` on turn-off, same `data-testid`, same title text.
- * Guard: the repo-root `test/` suite **smoothZoomHome** (both directions — present here, absent
- * from the plan menu) + the e2e spec **smooth-zoom-view-menu** (the real card, driven).
+ * ⛔ NEW-1 — SMOOTH ZOOM IS NOT HERE, AND THAT IS THE POINT. B286000 moved it into this card from
+ * the plan menu, reasoning that per-device rendering behaviour belongs with the view toggles; the
+ * owner still could not find it ("I don't know where the option went for it"). The corrected rule
+ * is the one this card now encodes: **View ▾ is a PER-DRAWING display menu** — what is shown on
+ * THIS plan (dock doors, column grid, dimensions, areas) and the drafting aids used on it (grid
+ * size, snap). A preference that follows the DEVICE across every plan and every project is an
+ * INTERFACE setting, and it lives in Settings → Interface beside the display theme
+ * (`shared/ui/InterfaceSettings.jsx`). Same key, same default (on), same behaviour — a
+ * RELOCATION, not a re-implementation. ⛔ There must be exactly ONE switch: a second one here
+ * could disagree with the first, and the counting guard in the repo-root `test/` suite
+ * **smoothZoomHome** goes red in both directions if one comes back.
  * Card anatomy mirrors the Layers card next to it; `pal` is the planner's theme-mapped
  * palette (theme tokens only — B341), and data-export="skip" rides on the shared
  * top-right container so exports never include canvas chrome.
@@ -56,13 +56,13 @@ function GridNumInput({ value, min = 1, max = 1000, style, onCommit }) {
   );
 }
 
-export default function ViewMenu({ open, onToggle, settings, setSnap, patchSettings, pal, smoothZoom, onSmoothZoom }) {
+export default function ViewMenu({ open, onToggle, settings, setSnap, patchSettings, pal }) {
   const row = { display: "flex", gap: 7, alignItems: "center", cursor: "pointer", fontSize: 12.5, color: pal.ink, padding: "3px 0" };
   const numInput = { width: 52, padding: "4px 6px", fontSize: 12, fontFamily: "inherit", color: pal.ink, background: "var(--surface-raised)", border: `1px solid ${pal.panelLine}`, borderRadius: 7 };
   return (
     <div data-wheelscroll="1" style={{ width: open ? 212 : "auto", background: "var(--surface-overlay)", border: `1px solid ${pal.panelLine}`, borderRadius: 9, boxShadow: "0 2px 10px rgba(28,25,20,0.16)", overflow: "hidden" }}>
       <button data-testid="view-menu-btn" onClick={onToggle} aria-expanded={open}
-        title="What's shown on the canvas — visibility toggles, grid & snap, and how zooming redraws"
+        title="What's shown on this drawing — visibility toggles, grid & snap"
         style={{ display: "flex", alignItems: "center", gap: 7, width: "100%", padding: "8px 11px", border: "none", background: "transparent", color: pal.ink, cursor: "pointer", fontFamily: "inherit", fontSize: 12.5, fontWeight: 700 }}>
         <span style={{ color: pal.accent, display: "inline-flex" }}><EyeIcon /></span> View
         {!open && settings.snap && (
@@ -88,26 +88,6 @@ export default function ViewMenu({ open, onToggle, settings, setSnap, patchSetti
           <label style={{ ...row, color: pal.muted, fontSize: 12 }} title="Snap to grid & flush against neighbours — press S to toggle (this browser session only; off by default); hold Alt while dragging to place freely">
             <input type="checkbox" checked={settings.snap} onChange={(e) => setSnap(e.target.checked)} /> Snap to grid &amp; neighbours (S)
           </label>
-          {/* B1449's one switch for the anchored zoom, rehomed here by B286000. Off, a wheel notch
-              re-draws the whole plan at the new zoom exactly as it did before (crisper mid-gesture,
-              slower); on, the drawing scales as one piece and re-draws when you stop. The PAN
-              anchor (B1440) is deliberately NOT gated on this — turning smooth zoom off must not
-              take that away. `onSmoothZoom` owns the persist + `disarmViewAnchor()`; this card
-              only renders the state, so there is still exactly ONE place that decides. */}
-          {onSmoothZoom && (
-            <>
-              <div style={{ borderTop: `1px solid ${pal.panelLine}`, margin: "7px 0" }} />
-              {/* The old home was a fake `role="menuitemcheckbox"` on a <button> carrying a ☑/☐
-                  glyph. Here it is a real <input type="checkbox"> in a <label>, exactly like the
-                  four rows above it — so the checked state is native (no `aria-checked` to keep in
-                  sync, and `menuitemcheckbox` would be invalid anyway outside a `menu` container).
-                  The `data-testid` is unchanged and still addresses the clickable row. */}
-              <label style={row} data-testid="smooth-zoom-toggle"
-                title="Zoom scales the drawing as one piece while the wheel is turning, then re-draws it sharp the moment you stop. Turn off to re-draw on every notch instead.">
-                <input type="checkbox" checked={!!smoothZoom} onChange={(e) => onSmoothZoom(e.target.checked)} /> Smooth zoom
-              </label>
-            </>
-          )}
         </div>
       )}
     </div>

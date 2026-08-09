@@ -43,6 +43,23 @@ export async function signOut() {
   try { await supabase.auth.signOut(); } catch (_) {}
 }
 
+/* NEW-4 — sign out EVERY session for this account, not just this browser. Supabase's `global`
+ * scope revokes all refresh tokens server-side, so a phone or an office machine left signed in is
+ * signed out too; the local session goes with them because the same call clears it here.
+ * ⛔ Unlike `signOut()` above this REPORTS its outcome (LOUD-FAILURE): a security action that
+ * silently fails is worse than one that is not offered, because the user believes they are safe.
+ * There is deliberately NO "active sessions" list beside it — enumerating sessions needs the
+ * service-role admin API, which may never reach the browser (/CLAUDE.md → KEY DECISIONS). */
+export async function signOutEverywhere() {
+  if (!supabase) return { error: "Cloud not configured." };
+  try {
+    const { error } = await supabase.auth.signOut({ scope: "global" });
+    return { error: errMsg(error) };
+  } catch (e) {
+    return { error: (e && e.message) || "Couldn't sign out everywhere." };
+  }
+}
+
 export async function resetPassword(email) {
   if (!supabase) return { error: "Cloud not configured." };
   const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo });

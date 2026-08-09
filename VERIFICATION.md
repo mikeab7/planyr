@@ -130,6 +130,55 @@ was never clicked" quietly ships broken.
 - **PASS** = contour lines **never appear at all** at that zoom. The row reports itself dormant immediately — hollow dot, `Not showing at this zoom — zoom in N levels` — and clicking that line brings the contours in. Nothing is drawn and then taken away.
 - **FAIL** = lines paint on open and disappear a second or two later while the box stays checked. If that happens, re-run `ui-audit/diagnose-layer-gate-flash.mjs` against the deployed build and report the zooms it holds and the zoom each grid pull was issued at — that pair is the whole diagnosis.
 - **WHILE YOU ARE THERE (cheap, same page):** confirm the layers you had on last time still arrive at all. The fix defers every layer's admission until the opening view is framed, so a regression would look like layers that never load rather than layers that flicker.
+### V111104 — B286000 (×2): the smooth-zoom switch is where he now looks for it, on a SIGNED-IN account `Blocker: auth`
+
+**The signed-OUT home is proven here** — `e2e/smooth-zoom-settings.spec.js` (3/3) opens the row-1 Settings gear in a real browser, finds Smooth zoom beside the display theme, confirms it starts ON, flips it, proves `planarfit:smoothZoom` went to `"0"`, reloads, and flips it back; and it proves the row is absent from BOTH the View menu and the plan menu, so there is exactly one switch. **What a sandbox cannot do is sign in** (the egress proxy CORS-blocks Supabase auth), and signed IN the gear is deliberately hidden — the control lives in account → Settings → **Interface** instead. That path has never been rendered here.
+
+- **STEPS** — signed in on planyr.io: click the account pill → **Settings**. The panel should open on **Interface**, with Display theme first and **Smooth zoom** under it.
+- **PASS** = the row is there, checked by default, and toggling it OFF then reloading leaves it OFF; the drawing re-draws on every wheel notch with it off and scales-then-sharpens with it on; and **there is no Smooth zoom row anywhere else** — not in View ▾, not in the plan flyout.
+- **FAIL** = the row is missing, appears in two places, resets on reload, or the setting stops affecting how the wheel zoom draws.
+- **The specific regression to watch for:** a change made in Settings must take effect on the canvas **without a reload** (the planner subscribes to the preference), and turning it OFF mid-gesture must not leave a scaled frame on screen.
+
+### V111105 — B312544: the +/− controls are gone at whole-site zoom on the REAL Bain plan `Blocker: real-data`
+
+**The rule and the wiring are proven here** — `test/featureEditZoom.test.js` (11, including a verbatim replay of the pre-fix rule showing it armed at every one of his reported zooms) and `e2e/feature-edit-zoom.spec.js`, which drives a real wheel gesture either side of the 0.80 px/ft floor on a real drawn building and reads the answer against the app's own `data-render-ppf`. **What only his own plan can settle is whether the chosen zoom is the RIGHT one** — the threshold is a judgement about when an edit is worth offering, and the repro is a 109-acre site with buildings far larger than anything a sandbox fixture draws.
+
+- **STEPS** — open **Bain / "Concept - Original"**, zoom out until the whole site fits and the scale bar reads about 0–1,000 ft. Hover or select Building 3 or 4.
+- **PASS** = no green `+` / red `−` anywhere on the buildings at that zoom. Zoom in and they FADE in — softly, not popping — at a zoom where a bump-out is clearly a shape rather than a dot, and they are clickable the instant they are visible (a press must not be swallowed by a faint control).
+- **FAIL** = still visible at whole-site zoom · or they now wait so long that placing a dock zone or bump-out at a normal working zoom has become awkward. **The second failure is the one to report back with a number**: say roughly how far in you had to go, and the threshold moves as a product decision on the item — never nudged quietly.
+- Also worth a glance on a SMALL site, so the absolute rule is confirmed to read the same at both ends: a 30-acre plan should behave identically at the same scale-bar reading.
+
+### V111106 — B1173 (×2): both header rows survive real fullscreen on HIS screen `Blocker:` none — owner judgement only
+
+**Everything mechanical is proven here** — `ui-audit/verify-new1-fullscreen.mjs` (23/23) shows the header on screen at `top = 0`, at the same height as outside fullscreen, carrying row 1 and all five module tabs, **read before any pointer is moved**, with exactly one header claiming the mode, no stray floating exit button, the drawing still welded to the imagery, a refused request reporting itself, and a workspace switch from inside fullscreen keeping the document fullscreen with `f` still live. `e2e/module-keepalive.spec.js` (7/7) covers the same from the product side. **What a headless browser has none of is browser chrome**, so the one thing it cannot show is the thing fullscreen is FOR.
+
+- **STEPS** — on a plan, press the ⤢ button (or Ctrl/⌘+Shift+F).
+- **PASS** = the browser tab strip, address bar and OS taskbar are gone, AND the Planyr breadcrumb row and workspace-tab row are both still there, unmoved, with no hover needed. Switch **project**, then **plan**, then to **Review** and back — all without leaving fullscreen. Press ⤢ again (or Esc) and everything returns.
+- **FAIL** = either row missing or sliding away · the tabs needing a hover · a duplicate "Exit fullscreen" control floating over the drawing · the drawing shifting relative to the aerial on the way in or out · `f`/⤢ dead after switching workspace.
+- **This supersedes V544**, which was written for the top-edge reveal that no longer exists. Do not chase V544's steps.
+
+### V111107 — B312545: the Settings panel's four sections, rendered `Blocker: auth`
+
+**Nothing below the nav has been rendered here.** Sign-in is impossible in this sandbox, and the whole panel is signed-in only, so this item's evidence is source guards (`test/fullscreenChrome.test.js`, 6) and nothing else. That is stated plainly rather than dressed up: the nav, the section switch, the password form, the sign-out-everywhere round trip and the responsive collapse are all owed.
+
+- **STEPS** — signed in: account pill → **Settings**.
+- **PASS** = it opens on **Interface**, NOT on change password. The nav lists **Profile · Team · Account & security · Interface**; each switches without the modal jumping. **Account & security** holds change password (which still works — set one and sign back in with it) and **Sign out on all devices**. Squeeze the window narrow: the nav becomes a row of chips above the content rather than a squashed column.
+- **CHECK THE SIGN-OUT-EVERYWHERE ACTION PROPERLY, since it is the one new capability** — sign in on a second device or a private window first, press it, and confirm BOTH sessions end. If it fails it must say so on screen; a silent failure here is the worst outcome, because you would believe you were signed out when you were not.
+- **FAIL** = opens on the password form · a section is empty · Profile or Team lost anything they had · the panel overflows its modal at any width · sign-out-everywhere leaves the other session alive, or fails silently.
+### V114272 — B315712/B315716: a REAL conflict between two signed-in windows keeps the copy in its own project, and a note filed nowhere comes back `Blocker: auth`
+
+**Everything decidable without a network is proven here already.** `test/notesTwoClientConflict.test.js` drives TWO real instances of the store — separate localStorage each — against an in-memory server that owns `rev` exactly as the deployed `notes_touch_rev` trigger owns it: both windows edit one note, one loses the guard, the loser's text is parked, and the resulting store is asserted page by page (the exact count, and every page's project equal to its source's). `ui-audit/verify-notes-project-integrity.mjs` drives the banner, the chip, the recovery and the project-delete count in a real browser, 33 rows. Both are mutation-proven. **What the sandbox cannot do is sign in** — the egress proxy CORS-blocks Supabase auth — so the one thing unconfirmed is the conflict as it actually arrives from the cloud.
+
+- **SIGNED IN on planyr.io, TWO WINDOWS on one account.** Open the same note in both. Type something different in each, a few seconds apart, so the second push is genuinely refused. PASS = the conflict bar names the note, offers **Keep this one** / **Use the other**, and never mentions another person.
+- **Press "Use the other" in the window that lost.** PASS = a page appears named `<title> (this window's copy)` **as a sibling of the note it came from, in the SAME project**, and a line says so in as many words at the moment it happens — not something you have to go and find. FAIL = the copy lands anywhere else, or appears with nothing said.
+- **Then check the account**, with the service role on `planyr_production`:
+  ```sql
+  select id, rev, updated_at, left(doc::text, 80) from public.notes_pages order by updated_at desc limit 5;
+  select jsonb_pretty(data->'pages') from public.notes_trees;
+  ```
+  PASS = both bodies exist, and in the tree blob the copy's root carries the **same `projectId`** as the note it was copied from. This is the assertion that matters; the on-screen line is only how you know without looking.
+- **B315716's half, on the same session:** the note `pg_msgaajbf1o61rit` is in the cloud with 1,909 characters of real content (channel improvements / Willow Point MUD / $3–4 vs $10 per SF / the Hilcorp easement) and in **no tree node**. PASS = the banner says one note is filed in no project, **Put it back** files it under "Not in a project", it opens with that text intact, and it is **still there after a reload** — the loop that deleted and re-downloaded it is broken. FAIL = it is gone again on the next load.
+- **A NULL IS NOT A DISPOSITION HERE (STANDING RULE #2).** If the conflict cannot be provoked, say so and take one of the three admissible routes — provoke it harder, instrument it so it captures itself, or ask the owner whether he has seen another stray copy. Do not record "not reproducible" and archive.
 ### V115424 — B316864: does a FORCED element survive the CLOUD round trip on a signed-in session? `Blocker: auth`
 
 The on-device half is proven here and does NOT need re-running: the override is written into the saved plan record (asserted on the stored bytes), survives a reload, and rides the export sheet — all on the owner's real Bain plan, 19/19, plus 58/58 on the parity fixture. `bandForce` is an ordinary field on the element object, and `elementRows.rowFor` serializes the WHOLE object as the row's `data`, so there is no new column and no migration. What cannot be run here is the one path that needs a signed-in Supabase session, which this sandbox's proxy CORS-blocks.

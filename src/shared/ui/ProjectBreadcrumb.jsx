@@ -37,7 +37,7 @@ import {
   listProjects, filterProjects, relTime, warmProjectsIfEmpty,
   renameProject as storeRename, deleteProject as storeDelete,
   listDeletedProjects, restoreDeletedProject, purgeDeletedProject, purgeExpiredDeletedProjects,
-  DELETED_RETENTION_DAYS,
+  DELETED_RETENTION_DAYS, activeUid,
 } from "../projects/projects.js";
 import { resolveCurrentName } from "../projects/projectModel.js";
 
@@ -307,9 +307,53 @@ export default function ProjectBreadcrumb({
     // pushed back through the bridge prop, so skip it there. (rename-revert)
     if (!controlled) { refresh(); notifyStoreChange(); }
   };
-  const doDelete = (id) => {
+  /* ---- WHAT ELSE IS FILED HERE (NEW-3) ---------------------------------------------------
+   *
+   * ⛔ DELETING A PROJECT USED TO ORPHAN ITS NOTES IN SILENCE. The note-delete confirmation
+   * already does this well — it says "Delete 2?" and then "Deleted DEV COORDINATION and its
+   * 2 pages. It is in the bin for 30 days." — and project deletion said nothing at all, so
+   * notes filed to a deleted pursuit simply reappeared later under a "from a project you
+   * deleted" heading, which is where the owner found two of them a week afterwards. This is
+   * that same honesty, one level up.
+   *
+   * ⛔ THE NOTES MODULE IS REACHED BY A **DYNAMIC** IMPORT AND FOR A HARD REASON. This
+   * breadcrumb is chrome on every route; a static import would hoist the notes storage tier
+   * into the chunk every route downloads and breach the bundle budgets (the same rule that
+   * keeps the storage panel off the header). Loading it when the menu opens costs nothing
+   * until somebody actually goes to delete a project. A failure to load is NOT fatal and is
+   * NOT silent either: the count reads as unknown and the confirmation says so, rather than
+   * claiming a confident zero. */
+  const [noteCensus, setNoteCensus] = useState(null);   // { state, noteCount, pageCount } | null
+  useEffect(() => {
+    if (!menuFor?.confirm) { setNoteCensus(null); return undefined; }
+    let live = true;
+    setNoteCensus({ state: "loading" });
+    (async () => {
+      try {
+        const notes = await import("../../workspaces/notes/lib/notesProjectLink.js");
+        const c = notes.projectNotes(activeUid(), menuFor.id);
+        if (live) setNoteCensus(c.unknown ? { state: "failed" } : { state: "ready", ...c });
+      } catch (_) {
+        if (live) setNoteCensus({ state: "failed" });
+      }
+    })();
+    return () => { live = false; };
+  }, [menuFor?.confirm, menuFor?.id]);
+
+  const doDelete = (id, { moveNotes = false } = {}) => {
     const wasCurrent = id === currentProject?.id;
     setMenuFor(null);
+    /* Move FIRST, delete second. The other order leaves a window in which the project is
+     * gone and its notes still point at it — which is precisely the orphan being avoided. */
+    if (moveNotes) {
+      import("../../workspaces/notes/lib/notesProjectLink.js")
+        .then((notes) => {
+          const r = notes.moveNotesBetweenProjects(activeUid(), id, null);
+          if (!r.ok) flashToast(r.error || "Those notes couldn't be moved, so they are still filed under the deleted project.");
+          else if (r.moved) flashToast(`${r.moved === 1 ? "1 note" : `${r.moved} notes`} moved to “Not in a project”.`, 5000);
+        })
+        .catch(() => flashToast("Those notes couldn't be moved, so they are still filed under the deleted project."));
+    }
     if (onDeleteProject) {
       onDeleteProject(id); // controlled (Schedule) — the bridge deletes + routes home in the embedded app
       return;
@@ -690,12 +734,33 @@ export default function ProjectBreadcrumb({
                       old "can't be undone" (which is no longer true, and made the stakes read higher
                       than they are). Permanent destruction lives behind "Delete forever" in the bin. */}
                   Delete <strong style={{ color: "var(--text-primary)" }}>{menuFor.name}</strong>? It moves to Recently deleted — you can restore it for {DELETED_RETENTION_DAYS} days.
+                  {/* NEW-3 — say what ELSE is filed here, in as many words, before it goes.
+                      Absent when there is nothing to say (PANEL-BREVITY); an unknown count is
+                      NAMED as unknown, never rendered as a confident zero. */}
+                  {noteCensus?.state === "ready" && noteCensus.noteCount > 0 ? (
+                    <div data-testid="project-delete-notes" data-note-count={noteCensus.noteCount} style={{ marginTop: 7, color: "var(--warn-text)", fontWeight: 600 }}>
+                      {noteCensus.noteCount === 1 ? "1 note is" : `${noteCensus.noteCount} notes are`} filed here
+                      {noteCensus.pageCount > noteCensus.noteCount ? ` (${noteCensus.pageCount} pages)` : ""}. They stay in Notes either way.
+                    </div>
+                  ) : null}
+                  {noteCensus?.state === "failed" ? (
+                    <div data-testid="project-delete-notes-unknown" style={{ marginTop: 7, color: "var(--warn-text)", fontWeight: 600 }}>
+                      Couldn’t check whether any notes are filed here.
+                    </div>
+                  ) : null}
                 </div>
-                <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
+                <div style={{ display: "flex", gap: 6, justifyContent: "flex-end", flexWrap: "wrap" }}>
                   <button
                     onClick={() => setMenuFor((m) => ({ ...m, confirm: false }))}
                     style={{ ...btnSm, background: "var(--hover-menu)", color: "var(--text-primary)" }}
                   >Cancel</button>
+                  {noteCensus?.state === "ready" && noteCensus.noteCount > 0 ? (
+                    <button
+                      data-testid="project-delete-move-notes"
+                      onClick={() => doDelete(menuFor.id, { moveNotes: true })}
+                      style={{ ...btnSm, background: "var(--hover-menu)", color: "var(--text-primary)" }}
+                    >Move notes out &amp; delete</button>
+                  ) : null}
                   <button
                     data-testid="project-delete-confirm"
                     onClick={() => doDelete(menuFor.id)}
