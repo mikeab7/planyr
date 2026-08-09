@@ -106,6 +106,12 @@ const ParcelTaxes = lazy(() => import("./components/ParcelDataPanel.jsx").then((
  * Lazy for the same reason as the panels above: a modal opened at most once per session, carrying
  * its own interactive Leaflet map, has no business on the planner's boot chunk. */
 const SetLocationDialog = lazy(() => import("./components/SetLocationDialog.jsx"));
+/* NEW-1 / NEW-3 — the Parcel panel's record + placement bodies, lazily loaded for exactly the reason
+ * the appraisal panels above are: both render only inside the Parcel panel (one only for a selected
+ * lot, one only once the plan has a location), and the Site route's largest chunk has no headroom to
+ * spend on code most sessions never reach. One module, so they share one chunk and one load. */
+const ParcelRecord = lazy(() => import("./components/ParcelRecordPanel.jsx").then((m) => ({ default: m.ParcelRecord })));
+const PlacementControls = lazy(() => import("./components/ParcelRecordPanel.jsx").then((m) => ({ default: m.PlacementControls })));
 import LazyPanel from "./components/LazyPanel.jsx";
 import AnchoredMenu from "../../shared/ui/AnchoredMenu.jsx";
 import PanelChrome from "../../shared/ui/PanelChrome.jsx";
@@ -362,7 +368,7 @@ import { normalizeRules, effectiveBuildingProps, fmtClearHeight, fmtSlab } from 
 import { createHistoryStack } from "./lib/history.js";
 /* NEW-1 — putting an unlocated plan on the earth, and adjusting where it sits (the "GIS is down"
  * tranche). Pure + unit-tested; `origin` is state below and this module owns the geometry rules. */
-import { normalizeOrigin, sameOrigin, originAtOffset, rotateSiteCollections, siteRotationPivot, normalizeRot } from "./lib/sitePlacement.js";
+import { normalizeOrigin, sameOrigin, originAtOffset, rotateSiteCollections, siteRotationPivot, normalizeRot, rotPt } from "./lib/sitePlacement.js";
 /* NEW-2 / NEW-3 — the parcel RECORD: provenance (drawn / from a deed / from the county), the typed
  * fields a hand-drawn lot never had, and the ONE net-of-exceptions area every consumer reads. */
 import { PARCEL_FIELDS, parcelProvenance, provenanceLabel, cleanText, parseAcres, parcelNetSqft, parcelGrossSqft, parcelExceptSqft, acreageComparison } from "./lib/parcelRecord.js";
@@ -15883,7 +15889,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     setMarkups((a) => a.map((x) => memberIds.has(x.id)
       ? { ...rotateDeedRigid(x, conv, c), rotApplied: x.id === main.id ? normalizeDeg((x.rotApplied || 0) + conv) : x.rotApplied }
       : x));
-    alignPromotedParcel(main.deedGroup, (pt) => rotPtAbout(pt, conv, c)); // NEW-2 — the promoted boundary turns with its deed
+    // NEW-2 — the promoted boundary turns with its deed. `rotPt` is the same rotation
+    // `deedAlign.rotatePointsAbout` applies to the markup (identical formula, identical sense), so the
+    // parcel and the deed can never end up at different angles.
+    alignPromotedParcel(main.deedGroup, (pt) => rotPt(pt, conv, c));
     setDeedAlignHint(null);
     flashWarn(`No county parcel to fit — rotated the deed ${describeRotation(conv)} for the State Plane grid convergence here (this assumes the survey's bearings are grid north). Verify against the aerial, or nudge by hand.`, 9000);
   };
@@ -15952,6 +15961,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       : ` The calls close to about ${gap.toFixed(2)}′.`;
     flashWarn(`Boundary set from the deed.${closeNote}${exNote} The deed stays on the plan so you can still compare it, or align it once the county map is back.`, 12000);
   };
+  /* Has this deed already produced a parcel? Both menus read it, so "Use as parcel boundary" can
+   * never quietly mint a second copy of the same tract (which would double-count the acreage in
+   * every yield, coverage and detention number). */
+  const deedAlreadyPromoted = (m) =>
+    !!(m && m.deedGroup && parcels.some((p) => p.fromDeedGroup === m.deedGroup));
   /* Apply a deed's rigid alignment to the parcel PROMOTED from it, so the two never drift apart:
    * aligning the deed to the county map moves the boundary the deed produced with it. */
   const alignPromotedParcel = (deedGroup, apply) => {
@@ -17654,89 +17668,29 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           {/* NEW-1 — PLACEMENT. A boundary drawn from a deed never lands square on the aerial first
               try, so once the plan has a location the owner can turn it to true north and slide the
               anchor until the drawn lines sit on the imagery. Collapsed by default (it is a
-              once-per-plan adjustment, not a daily control). Two different operations, deliberately
-              labelled as such: TURN moves the drawing, SLIDE moves only where the plan sits. */}
+              once-per-plan adjustment, not a daily control). Body in components/ParcelRecordPanel.jsx
+              — LAZY, for the same reason as the appraisal panels below. */}
           {_pid === "parcel" && origin && (
             <Section title="Placement" collapsed>
-              <div style={{ fontSize: 11.5, color: PAL.muted, lineHeight: 1.5, marginBottom: 8 }}>
-                Line the drawing up with the aerial. Every step is undoable.
-              </div>
-              <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.07em", fontWeight: 700, color: PAL.muted, marginBottom: 4 }}>Turn the plan</div>
-              <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 10 }}>
-                <button style={{ ...chip, flex: "none", minWidth: 34 }} title="Turn counter-clockwise" data-testid="placement-rot-ccw"
-                  onClick={() => rotatePlan(-placeStepDeg)}>↺</button>
-                <button style={{ ...chip, flex: "none", minWidth: 34 }} title="Turn clockwise" data-testid="placement-rot-cw"
-                  onClick={() => rotatePlan(placeStepDeg)}>↻</button>
-                <select value={placeStepDeg} onChange={(e) => setPlaceStepDeg(Number(e.target.value))} aria-label="Turn step"
-                  style={{ flex: "none", padding: "5px 6px", fontSize: 11.5, fontFamily: "inherit", border: BORDER_1, borderRadius: 6, background: SURF_RAISED, color: PAL.ink }}>
-                  {[0.1, 0.5, 1, 5, 15, 90].map((d) => <option key={d} value={d}>{d}°</option>)}
-                </select>
-                <span style={{ flex: 1 }} />
-                <span data-testid="placement-rot-readout" style={{ fontSize: 11.5, color: PAL.muted, fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS }}>
-                  {placeRot ? `${placeRot > 0 ? "+" : ""}${placeRot.toFixed(1)}°` : "—"}
-                </span>
-              </div>
-              <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.07em", fontWeight: 700, color: PAL.muted, marginBottom: 4 }}>Slide the plan</div>
-              <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
-                <button style={{ ...chip, flex: "none", minWidth: 34 }} title="Slide west" data-testid="placement-nudge-w" onClick={() => nudgePlan(-placeStepFt, 0)}>←</button>
-                <button style={{ ...chip, flex: "none", minWidth: 34 }} title="Slide north" data-testid="placement-nudge-n" onClick={() => nudgePlan(0, -placeStepFt)}>↑</button>
-                <button style={{ ...chip, flex: "none", minWidth: 34 }} title="Slide south" data-testid="placement-nudge-s" onClick={() => nudgePlan(0, placeStepFt)}>↓</button>
-                <button style={{ ...chip, flex: "none", minWidth: 34 }} title="Slide east" data-testid="placement-nudge-e" onClick={() => nudgePlan(placeStepFt, 0)}>→</button>
-                <select value={placeStepFt} onChange={(e) => setPlaceStepFt(Number(e.target.value))} aria-label="Slide step"
-                  style={{ flex: "none", padding: "5px 6px", fontSize: 11.5, fontFamily: "inherit", border: BORDER_1, borderRadius: 6, background: SURF_RAISED, color: PAL.ink }}>
-                  {[1, 5, 25, 100, 500].map((d) => <option key={d} value={d}>{d}′</option>)}
-                </select>
-              </div>
-              <button style={{ ...chip, width: "100%" }} data-testid="placement-move" onClick={() => setSetLocOpen(true)}>📍 Move to a different spot…</button>
+              <LazyPanel name="Placement" minHeight={120} label="Loading placement…">
+                <PlacementControls
+                  PAL={PAL} chip={chip} border={BORDER_1} surface={SURF_RAISED} numFont={NUM_FONT} tabularNums={TABULAR_NUMS}
+                  rotApplied={placeRot} stepDeg={placeStepDeg} onStepDeg={setPlaceStepDeg} stepFt={placeStepFt} onStepFt={setPlaceStepFt}
+                  onRotate={rotatePlan} onNudge={nudgePlan} onMove={() => setSetLocOpen(true)} />
+              </LazyPanel>
             </Section>
           )}
           {/* NEW-3 — PARCEL RECORD. One place the parcel's facts live, whatever the lot came from:
               typed by hand for a drawn or deed-derived boundary, and EDITABLE for a county-pulled
               one (a county record with a wrong address should be correctable). The provenance chip
               is the load-bearing part — a plan that is later reviewed must never present a
-              hand-drawn boundary as though it came from the county. */}
+              hand-drawn boundary as though it came from the county. Body in
+              components/ParcelRecordPanel.jsx — LAZY (B1064 tranche). */}
           {_pid === "parcel" && selParcel && (
             <Section title="Parcel record">
-              {(() => {
-                const prov = provenanceLabel(selParcel);
-                const src = parcelProvenance(selParcel);
-                const tone = src === "county" ? PAL.info : src === "deed" ? PAL.purple : PAL.warn;
-                const field = (f) => (
-                  <label key={f.key} style={{ display: "block", marginBottom: 7 }}>
-                    <span style={{ display: "block", fontSize: 10, textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 700, color: PAL.muted, marginBottom: 2 }}>{f.label}</span>
-                    <input
-                      defaultValue={selParcel[f.key] || ""} placeholder={f.placeholder}
-                      key={`${selParcel.id}:${f.key}:${selParcel[f.key] || ""}`}
-                      data-testid={`parcel-field-${f.key}`}
-                      onKeyDown={(e) => { e.stopPropagation(); if (e.key === "Enter") e.currentTarget.blur(); if (e.key === "Escape") { e.currentTarget.value = selParcel[f.key] || ""; e.currentTarget.blur(); } }}
-                      onBlur={(e) => setParcelField(selParcel.id, f.key, e.target.value)}
-                      style={{ width: "100%", boxSizing: "border-box", padding: "6px 8px", fontSize: 12, fontFamily: "inherit", border: BORDER_1, borderRadius: 6, outline: "none", color: PAL.ink, background: SURF_RAISED }} />
-                  </label>
-                );
-                return (
-                  <>
-                    <div data-testid="parcel-provenance" title={prov.long}
-                      style={{ display: "inline-block", marginBottom: 8, padding: "2px 8px", borderRadius: 99, fontSize: 10.5, fontWeight: 700, color: tone, border: `1px solid ${tone}`, background: "transparent" }}>
-                      {prov.short}
-                    </div>
-                    {PARCEL_FIELDS.map(field)}
-                    <label style={{ display: "block" }}>
-                      <span style={{ display: "block", fontSize: 10, textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 700, color: PAL.muted, marginBottom: 2 }}>Stated acreage</span>
-                      <input
-                        defaultValue={selParcel.statedAcres != null ? String(selParcel.statedAcres) : ""}
-                        key={`${selParcel.id}:statedAcres:${selParcel.statedAcres ?? ""}`}
-                        placeholder="e.g. 12.50 — what the deed or county calls it"
-                        data-testid="parcel-field-statedAcres"
-                        onKeyDown={(e) => { e.stopPropagation(); if (e.key === "Enter") e.currentTarget.blur(); if (e.key === "Escape") { e.currentTarget.value = selParcel.statedAcres != null ? String(selParcel.statedAcres) : ""; e.currentTarget.blur(); } }}
-                        onBlur={(e) => setParcelField(selParcel.id, "statedAcres", e.target.value)}
-                        style={{ width: "100%", boxSizing: "border-box", padding: "6px 8px", fontSize: 12, fontFamily: "inherit", border: BORDER_1, borderRadius: 6, outline: "none", color: PAL.ink, background: SURF_RAISED }} />
-                    </label>
-                    <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.45, marginTop: 4 }}>
-                      Kept apart from the measured acreage, so the difference stays visible. Measurements always use what's drawn.
-                    </div>
-                  </>
-                );
-              })()}
+              <LazyPanel name="Parcel record" minHeight={180} label="Loading parcel record…">
+                <ParcelRecord parcel={selParcel} PAL={PAL} border={BORDER_1} surface={SURF_RAISED} onField={setParcelField} />
+              </LazyPanel>
             </Section>
           )}
           {/* Appraisal record + taxing units for the selected lot — LAZY (B1064 tranche).
@@ -21483,6 +21437,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         onClick={() => alignDeedToParcel(dm.id)}>
                         📐 {hasParcel ? "Align to county parcel" : "Rotate to grid north"}
                       </button>
+                      {/* NEW-2 — promote the plotted deed to a real parcel boundary. */}
+                      <button data-testid="deed-promote" style={{ ...chip, width: "100%", fontWeight: 700, marginTop: 6 }}
+                        disabled={deedAlreadyPromoted(dm)}
+                        title={deedAlreadyPromoted(dm) ? "This deed is already a parcel on the plan" : "Turn this deed into a real parcel — acreage, setbacks and the area math all start working on it"}
+                        onClick={() => promoteDeedToParcel(dm.id)}>
+                        ▦ {deedAlreadyPromoted(dm) ? "Already the parcel boundary" : "Use as parcel boundary"}
+                      </button>
+                      {!deedAlreadyPromoted(dm) && (
+                        <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.5, marginTop: 6 }}>
+                          With the county map down, the legal description is the best boundary you have. The deed stays on the plan either way.
+                        </div>
+                      )}
                       <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.5, marginTop: 6 }}>
                         {hasParcel
                           ? "Surveys state bearings on State Plane grid north; the parcel and aerial are true north. This spins the deed onto the county parcel to cancel that ~1–2° tilt (which fans out to tens of feet over a long line)."
@@ -24255,7 +24221,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             {isDeed && row({ text: hasParcel ? "Align to county parcel" : "Rotate to grid north", dis: !!m.locked, title: m.locked ? "Unlock this deed first" : "", on: () => { alignDeedToParcel(dm.id); close(); } })}
             {/* NEW-1 — a markup reaches its inspector from its own menu, like a measurement always could. */}
             {row({ text: "Properties\u2026", on: () => { setSel({ kind: "markup", id: m.id }); openInspector(); close(); } })}
-            {row({ text: m.locked ? "Unlock" : "Lock", hint: m.locked ? "\ud83d\udd12" : "\ud83d\udd13", on: () => { toggleMarkupLock(m.id); close(); } })}
+            {/* NEW-2 — the way out when the county service is down: the legal description IS the
+                boundary, so turn the plotted deed into a real parcel. Sits beside Align because the
+                two are the same decision from opposite sides (fit MY deed to THEIR map · make my
+                deed the map). Already-promoted deeds say so instead of silently making a second. */}
+            {isDeed && row({
+              text: deedAlreadyPromoted(dm) ? "Already the parcel boundary" : "Use as parcel boundary",
+              dis: deedAlreadyPromoted(dm),
+              title: deedAlreadyPromoted(dm) ? "This deed is already a parcel on the plan" : "Turn this deed into a real parcel — acreage, setbacks and the area math all start working on it",
+              on: () => { promoteDeedToParcel(dm.id); close(); },
+            })}
+            {row({ text: m.locked ? "Unlock" : "Lock", hint: m.locked ? "🔒" : "🔓", on: () => { toggleMarkupLock(m.id); close(); } })}
             {/* NEW-6 — every drawn kind is copyable, and says so in its own menu. */}
             {row({ text: "Copy", hint: `${MOD}C`, on: () => { copyRef({ kind: "markup", id: m.id }); close(); } })}
             {/* NEW-1 — and every drawn kind is DUPLICABLE. Only elements and references had this. */}
