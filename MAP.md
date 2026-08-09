@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-08-09 @ `7ef5b32` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-08-09 @ `4d64bd8` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -24,7 +24,7 @@ _465 source files mapped._
 - **`src/app/buildSkew.js`** — Notices when this tab is running an older deploy than the one the server is serving, and says so without reloading anything itself
   - _exports_: `fetchServedBuild`, `installBuildSkewWatch`, `isBuildSkewed`, `LOADED_BUILD`, `shouldOfferReload`, `SKEW_FIRST_CHECK_MS`, `SKEW_POLL_MS`, `VERSION_URL`
 - **`src/app/chunkReload.js`** — Stale-chunk-after-deploy recovery: vite:preloadError listener, cache-busting reloadFresh, cooldown/stuck loop guard, flushAll on unload
-  - _exports_: `arrivedViaFreshReload`, `clearReloadGuard`, `hasReloadParam`, `installChunkReloadGuard`, `isChunkLoadError`, `recoveryStage`, `RELOAD_COOLDOWN_MS`, `RELOAD_GUARD_KEY`, `RELOAD_PARAM`, `reloadFresh`, `shouldReloadAfterPreloadError`, `stripReloadParam`
+  - _exports_: `arrivedViaFreshReload`, `chunkNameOf`, `clearRecovery`, `clearReloadGuard`, `hasReloadParam`, `installChunkReloadGuard`, `isChunkLoadError`, `landingReport`, `noteRecoveryAttempt`, `readRecovery`, `RECOVERY_EPISODE_MAX_MS`, `RECOVERY_KEY`, `RECOVERY_SETTLE_MS`, `recoveryLine`, `recoveryStage`, `RELOAD_COOLDOWN_MS`, `RELOAD_GUARD_KEY`, `RELOAD_PARAM`, `reloadFresh`, `shouldReloadAfterPreloadError`, `shouldReportFailure`, `stripReloadParam`, `writeRecovery`
 - **`src/app/ErrorBoundary.jsx`** — Per-workspace React class error boundary: contains render crashes, detects chunk-load errors, offers cache-busting reload vs mid-deploy 'try again'
   - _exports_: `default (ErrorBoundary)`
 - **`src/app/flushRegistry.js`** — Cross-workspace flush-before-navigate registry: registerFlush/flushAll give each live workspace one synchronous local-save + keepalive cloud push before a forced reload
@@ -237,7 +237,7 @@ _465 source files mapped._
 - **`src/shared/telemetry/perfCaptureStore.js`** — The bounded on-device copy of a performance capture — IndexedDB (the LARGE tier, per TIER-BY-REBUILDABILITY), pruned to three on every write, summarised for the storage panel.
   - _exports_: `CAPTURE_PREFIX`, `clearPerfCaptures`, `listCaptureKeys`, `MAX_CAPTURES`, `perfCaptureSummary`, `readPerfCaptures`, `savePerfCapture`
 - **`src/shared/telemetry/perfInstrument.js`** — Always-on sampled client PERFORMANCE telemetry: longtask + Event Timing/INP observers plus a periodic scene sample (heap, canvas nodes, elements drawn, layers on, panels open, edits since load) through the existing reportClientEvent sink, with its own row ceiling so it can never spend the error budget
-  - _exports_: `__resetPerfInstrument`, `buildPerfRow`, `decidePerfSend`, `inpFrom`, `installPerfInstrument`, `isEnrolled`, `notePerfEdit`, `PERF_LONGTASK_MS`, `PERF_MAX_ROWS`, `PERF_MIN_GAP_MS`, `PERF_SAMPLE_MS`, `PERF_SAMPLE_RATE`, `perfSnapshot`, `readScene`
+  - _exports_: `__resetPerfInstrument`, `buildPerfRow`, `decidePerfSend`, `inpFrom`, `installPerfInstrument`, `isEnrolled`, `notePerfEdit`, `PERF_LONGTASK_MS`, `PERF_MAX_ROWS`, `PERF_MIN_GAP_MS`, `PERF_SAMPLE_MS`, `PERF_SAMPLE_RATE`, `perfSnapshot`, `phaseAt`, `readScene`, `ROUTE_MOUNT_MS`, `routeLane`
 - **`src/shared/telemetry/perfRecorder.js`** — The always-on performance recorder: interaction-gated frame loop, long-animation-frame observer, periodic scene counters, and the capture path. Lazy-loaded from main.jsx; never on any route’s critical path.
   - _exports_: `__resetPerfRecorder`, `capture`, `installPerfRecorder`, `RECORDER_DEFAULTS`
 - **`src/shared/telemetry/perfRecorderHandle.js`** — The tiny always-loaded half of the recorder — the kill switch, the bind seam the manual control calls, and the plan/zoom context setters.
@@ -828,7 +828,7 @@ _465 source files mapped._
 - **`src/workspaces/site-planner/lib/terrainLayers.js`** — Main-thread terrain glue (B704/B705/B706): view-driven contour + drainage-arrow layerGroups (canvas renderer, swr last-good, proxy-direct fallback), singleton terrain worker with crash rebuild, shared grid LRU sampled by the hover readout
   - _exports_: `CONTOUR_HOVER_CLASS`, `contourLayer`, `fetchSiteGrid`, `flowLayer`, `sampleTerrainGrids`, `sampleTerrainGridsInfo`, `setContourHover`, `siteGridZoom`, `TERRAIN_MIN_ZOOM`, `warmCursorGrid`
 - **`src/workspaces/site-planner/lib/terrainLazy.js`** — the ONE on-demand loader for the terrain pipeline: `loadTerrain()` (cached import, retries after a failure) + the synchronous `terrainNow()` the per-move cursor sample reads + the `contourHover` router
-  - _exports_: `contourHover`, `loadTerrain`, `terrainNow`
+  - _exports_: `__resetTerrainLazy`, `contourHover`, `loadTerrain`, `retryDelayMs`, `terrainNow`
 - **`src/workspaces/site-planner/lib/terrainWorker.js`** — Terrain Web Worker (B704/B705): LERC decode -> masked smooth -> contours + flow arrows off the main thread; imports pure modules only (guarded by test/terrainWorker.test.js)
   - _exports_: _(none)_
 - **`src/workspaces/site-planner/lib/tileBudget.js`** — Pure tile/overscan budget: how much basemap is held off-screen, how many tiles are retained, and when the retina uplift is worth its cost

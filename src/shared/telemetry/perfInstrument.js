@@ -79,6 +79,63 @@ export function inpFrom(durations, { longSessionAt = 50 } = {}) {
   return +v[Math.min(idx, v.length - 1)].toFixed(1);
 }
 
+/* ── Pure: WHICH LANE (NEW-2) ─────────────────────────────────────────────────────────────────
+ *
+ * ⛔ THE DEFECT: EVERY OPTIMISATION THIS PROGRAMME HAS SHIPPED TARGETED A LANE NOBODY HAD
+ * CONFIRMED THE COST WAS IN. Grouping 51 of the owner's own reports by `ly` (layers on) put the
+ * WORST blocks in `ly=0` — rows with almost no DOM, no layers, and MORE heap than a fully loaded
+ * canvas. Pond memoisation, the octave raster ladder, anchored pan and zoom and label collision
+ * all live in the GESTURE lane, and `ly=0` is not it. But `ly=0` could equally be a boot, a
+ * non-canvas route, or a long-idle tab, and the payload could not tell those apart — so naming a
+ * cause from it would have been this programme's FOURTH mechanism refuted for being asserted
+ * before an instrument could see it. These two fields are the instrument, and nothing else in
+ * this change is a fix.
+ *
+ * ⚠ ONE HONEST CORRECTION TO THE PREMISE, recorded because it changes what this is worth. The ROW
+ * was never fully unattributed: `client_errors.module` already carries the workspace and `.url`
+ * carries the hash, both written by `buildErrorRow`, and reading them is how the ly=0 question was
+ * answered before this shipped. What did NOT exist, at all, is the PHASE — and the phase is the
+ * half that mattered, because `ltx` is a HIGH-WATER MARK since load, so a row's own timestamp says
+ * nothing about when the worst block it reports actually happened. `ltxp`/`ltxt` below are the
+ * genuinely new fact; `rt` is a convenience that makes the payload self-describing instead of
+ * only joinable.
+ */
+
+/** How long after entering a route counts as that route's mount, rather than its steady state. */
+export const ROUTE_MOUNT_MS = 10_000;
+
+/* A hash -> a LANE. The project id is deliberately dropped: it is high-cardinality, it identifies
+ * the owner's deals, and the question ("which lane is slow") is answered by the workspace, never
+ * by which site is open. Grammar per `app/route.js`: `#/`, `#/<slug>`, `#/all/<slug>`,
+ * `#/project/<id>/<slug>`. An unknown slug is reported VERBATIM rather than folded into a default
+ * — `parseRoute` resolves junk to the Site workspace, and a lane that silently claims to be `site`
+ * is the same blindness this field exists to remove (B1373's lesson). */
+export function routeLane(hash) {
+  const segs = String(hash || "").replace(/^#/, "").split("/").filter(Boolean);
+  if (!segs.length) return "home";
+  if (segs[0] === "project") return segs[2] ? `p/${segs[2]}` : "p/?";
+  if (segs[0] === "all") return segs[1] ? `all/${segs[1]}` : "all/?";
+  return segs[0];
+}
+
+/* WHEN in the page's life this measurement belongs to. Four values, and the fourth is the point:
+ *   `pre`   — before First Contentful Paint. Nothing has been drawn yet; this is boot.
+ *   `mount` — painted, and within `ROUTE_MOUNT_MS` of ENTERING THIS ROUTE. Route, not page load:
+ *             a workspace switch mounts a whole new tree in an old tab, and charging that to
+ *             "idle" is exactly how a mount cost hides.
+ *   `idle`  — steady state.
+ *   `early` — FCP could not be read (no PerformancePaintTiming), so `pre` and `mount` cannot be
+ *             separated. Reported as its own value rather than guessed at: a phase that might be
+ *             either must not be indistinguishable from one that was measured. */
+export function phaseAt(now, { fcpMs = null, routeEnteredMs = 0 } = {}) {
+  const late = now - (Number(routeEnteredMs) || 0) >= ROUTE_MOUNT_MS;
+  /* `Infinity` means "paint timing works and we have not painted yet" — that is `pre`, and it is
+   * why the test here is NaN/null rather than `!Number.isFinite`, which would swallow it. */
+  if (fcpMs == null || Number.isNaN(fcpMs)) return late ? "idle" : "early";
+  if (now < fcpMs) return "pre";                 // only ever the FIRST page load — FCP happens once
+  return late ? "idle" : "mount";
+}
+
 /* ── Pure: the send decision ──────────────────────────────────────────────────────────────── */
 
 /* Should this perf row go out, given what has already gone out?
@@ -130,6 +187,17 @@ export function buildPerfRow(sample = {}, prev = null) {
     lt: num(sample.longtaskMs),               // CUMULATIVE total long-task ms since load
     ltn: num(sample.longtasks),               // CUMULATIVE count
     ltx: num(sample.longtaskMaxMs),           // the worst single block SINCE LOAD (a high-water mark)
+    /* ⛔ NEW-2 — WHERE AND WHEN THE WORST BLOCK HAPPENED, which `ltx` alone cannot say. `ltx` is a
+     * high-water mark, so it is routinely reported by a row sent minutes later, in a different
+     * phase, on a different route. Reading a 3-second `ltx` off an idle row as "the app blocks
+     * while idle" is the mistake this pair prevents: these are stamped AT THE MOMENT the block was
+     * observed, not when the row was sent. */
+    ltxp: sample.longtaskMaxPhase || undefined,   // phase when the worst block happened
+    ltxr: sample.longtaskMaxLane || undefined,    // route lane when the worst block happened
+    ltxt: num(sample.longtaskMaxAtSec, 1),        // seconds since load when it happened
+    rt: sample.routeLane || undefined,            // the lane this row was sampled on
+    ph: sample.phase || undefined,                // pre | mount | idle | early
+    rts: num(sample.secondsInRoute, 1),           // seconds since THIS route was entered
     dt: prev ? num(sample.secondsSinceLoad - prev.secondsSinceLoad, 1) : undefined,
     dlt: prev ? num(sample.longtaskMs - prev.longtaskMs) : undefined,
     dltn: prev ? num(sample.longtasks - prev.longtasks) : undefined,
@@ -160,20 +228,51 @@ export { readScene };
 let _state = { sent: 0, lastAt: 0 };
 let _installed = false;
 let _t0 = 0;
-let _lt = { total: 0, count: 0, max: 0 };
+let _lt = { total: 0, count: 0, max: 0, maxAt: 0, maxLane: "", maxPhase: "" };
 let _interactions = [];
 let _timer = 0;
 let _recent = [];
 let _prevSnap = null;   // the previous row's snapshot, for the B265537 delta columns
+/* NEW-2 — route attribution. `_routeAt` is a performance.now() stamp of the last hash change, so
+ * "mount" means mount of THIS route rather than of the page; `_fcp` is read once and cached. */
+let _routeAt = 0;
+let _lane = "";
+let _fcp = null;
+
+/* First Contentful Paint as a `performance.now()` stamp.
+ *
+ * ⛔ THREE OUTCOMES, NOT TWO, and collapsing the middle one is the trap. An empty paint-entry list
+ * means EITHER "this browser has no PerformancePaintTiming" (Safari until recently) OR "we have
+ * genuinely not painted yet" — and those are opposite answers. Caching the first read as "absent"
+ * would make `pre` unreachable forever, so the entry type's SUPPORT is checked separately:
+ * supported-but-not-yet-painted returns Infinity (every `now` is before it, so the phase is `pre`),
+ * unsupported returns NaN (the phase degrades to `early`, which says so out loud). Only a real
+ * measurement is cached. */
+function fcpMs(win) {
+  if (_fcp !== null) return _fcp;
+  try {
+    const e = win.performance.getEntriesByName("first-contentful-paint")[0];
+    if (e) { _fcp = e.startTime; return _fcp; }
+    const types = win.PerformanceObserver && win.PerformanceObserver.supportedEntryTypes;
+    return types && types.indexOf("paint") > -1 ? Infinity : NaN;
+  } catch (_) { return NaN; }
+}
 
 /** Everything the instrument currently knows, for a live check without a DB round-trip
  *  (mirrors `window.pfTelemetry.recent()`). Exposed on `window.pfPerf`. */
 export function perfSnapshot(win = typeof window !== "undefined" ? window : undefined) {
   const doc = win && win.document;
   const now = win && win.performance ? win.performance.now() : 0;
+  let hash = ""; try { hash = win.location.hash; } catch (_) { /* ignore */ }
   return {
     kind: "snapshot",
     secondsSinceLoad: (now - _t0) / 1000,
+    routeLane: routeLane(hash),                                    // NEW-2
+    phase: phaseAt(now, { fcpMs: fcpMs(win), routeEnteredMs: _routeAt }),
+    secondsInRoute: (now - _routeAt) / 1000,
+    longtaskMaxPhase: _lt.maxPhase || undefined,
+    longtaskMaxLane: _lt.maxLane || undefined,
+    longtaskMaxAtSec: _lt.maxAt ? (_lt.maxAt - _t0) / 1000 : undefined,
     inp: inpFrom(_interactions),
     longtaskMs: _lt.total, longtasks: _lt.count, longtaskMaxMs: _lt.max,
     heapMB: win?.performance?.memory ? win.performance.memory.usedJSHeapSize / 1048576 : undefined,
@@ -208,12 +307,32 @@ export function installPerfInstrument(win = typeof window !== "undefined" ? wind
   if (!isEnrolled(tabId, rate)) return false;
   _installed = true;
   try { _t0 = win.performance ? win.performance.now() : 0; } catch (_) { _t0 = 0; }
+  /* NEW-2 — the route clock. Started at install rather than at 0 so a tab that was already deep
+   * into a route when the (idle-deferred) instrument armed is not reported as mid-mount; and
+   * re-stamped on every hash change, because a workspace switch mounts a fresh tree in an old tab
+   * and that mount is precisely the cost `ph` exists to attribute. */
+  _routeAt = _t0;
+  try { _lane = routeLane(win.location.hash); } catch (_) { _lane = ""; }
+  try {
+    win.addEventListener("hashchange", () => {
+      try { _routeAt = win.performance ? win.performance.now() : 0; _lane = routeLane(win.location.hash); }
+      catch (_) { /* telemetry must never throw into the app */ }
+    });
+  } catch (_) { /* ignore */ }
 
   try {
     new win.PerformanceObserver((list) => {
       for (const e of list.getEntries()) {
         _lt.total += e.duration; _lt.count++;
-        if (e.duration > _lt.max) _lt.max = e.duration;
+        if (e.duration > _lt.max) {
+          /* ⛔ STAMPED HERE, NOT AT SEND TIME. `ltx` is a high-water mark that a row minutes later
+           * still reports; without this the phase and lane of the worst block are the phase and
+           * lane of whatever the tab happened to be doing when the row went out. */
+          _lt.max = e.duration;
+          _lt.maxAt = e.startTime;
+          _lt.maxLane = _lane;
+          _lt.maxPhase = phaseAt(e.startTime, { fcpMs: fcpMs(win), routeEnteredMs: _routeAt });
+        }
         /* A single block this long is worth its own row — it is the freeze the user felt, and the
          * periodic tick two minutes later cannot tell you WHEN it happened or what the scene was
          * at the time. Still gated by the ceiling and the minimum gap. */
@@ -252,6 +371,7 @@ export function installPerfInstrument(win = typeof window !== "undefined" ? wind
 export function __resetPerfInstrument(win) {
   try { if (_timer && win) win.clearInterval(_timer); } catch (_) { /* ignore */ }
   _installed = false; _timer = 0; _t0 = 0;
-  _lt = { total: 0, count: 0, max: 0 };
+  _lt = { total: 0, count: 0, max: 0, maxAt: 0, maxLane: "", maxPhase: "" };
+  _routeAt = 0; _lane = ""; _fcp = null;
   _interactions = []; _recent = []; _state = { sent: 0, lastAt: 0 };
 }
