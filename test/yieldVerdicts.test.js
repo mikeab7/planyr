@@ -338,7 +338,10 @@ describe("B209508 — the Buildability row refuses to state an FFE on an unresol
 
   it("states the GAP, not the number, when a jurisdiction role failed", () => {
     const r = rowFor({ ...bb("assumed", 144.8), administrator: { unresolved: true, unresolvedRoles: ["etj"] } });
-    expect(r.sentence).toBe("FFE rule not settled — jurisdiction unknown");
+    // NEW-1a — the reason moved DOWN to the detail line (`yield-ffe-unresolved`), which already
+    // carried it in full; printing it in both places was the duplication PANEL-BREVITY forbids.
+    // The verdict — refuse to state a floor — is unchanged and is what this case exists to pin.
+    expect(r.sentence).toBe("FFE rule not settled");
     expect(r.sentence).not.toMatch(/144\.8/);   // the specific pattern the owner asked to eliminate
     expect(r.tone).toBe("warn");
     expect(r.ffeUnsettled).toBe(true);

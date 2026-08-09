@@ -62,6 +62,13 @@
       [],
       []
      ]
+    },
+    "etj_baytown": {
+     "ring": [],
+     "points": [
+      [],
+      []
+     ]
     }
    }
   },
@@ -184,6 +191,17 @@
        "HOUSTON"
       ]
      ]
+    },
+    "etj_baytown": {
+     "ring": [],
+     "points": [
+      [],
+      [],
+      [],
+      [],
+      [],
+      []
+     ]
     }
    }
   },
@@ -271,12 +289,21 @@
        "HOUSTON"
       ]
      ]
+    },
+    "etj_baytown": {
+     "ring": [],
+     "points": [
+      [],
+      [],
+      [],
+      []
+     ]
     }
    }
   },
   {
    "site": "Goose Creek",
-   "why": "unincorporated with a city within 1 km — and the sweep found Baytown actually holds 6 of the 16 drawn parcels",
+   "why": "SPLIT — part inside Baytown's city limits, the rest inside Baytown's ETJ",
    "lat": 29.8122399298171,
    "lon": -95.0026332218179,
    "truth": {
@@ -448,6 +475,55 @@
       [],
       []
      ]
+    },
+    "etj_baytown": {
+     "ring": [
+      "__present__"
+     ],
+     "points": [
+      [
+       "__present__"
+      ],
+      [
+       "__present__"
+      ],
+      [
+       "__present__"
+      ],
+      [
+       "__present__"
+      ],
+      [
+       "__present__"
+      ],
+      [
+       "__present__"
+      ],
+      [
+       "__present__"
+      ],
+      [
+       "__present__"
+      ],
+      [
+       "__present__"
+      ],
+      [
+       "__present__"
+      ],
+      [
+       "__present__"
+      ],
+      [
+       "__present__"
+      ],
+      [
+       "__present__"
+      ],
+      [
+       "__present__"
+      ]
+     ]
     }
    }
   },
@@ -501,6 +577,12 @@
       [
        "HOUSTON"
       ]
+     ]
+    },
+    "etj_baytown": {
+     "ring": [],
+     "points": [
+      []
      ]
     }
    }
