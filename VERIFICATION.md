@@ -143,7 +143,13 @@ a `live-GIS` blocker, not a to-do that was skipped.
 7. **The measurement to record:** time from the layer switching on to the floodplain being visible, tiles
    vs. flag-off, on the same plan. That is the number Phase 1 exists to produce and the only one still
    missing.
-8. **⛔ ADDED after the Cloudflare preview measurement — Pages does NOT do byte serving** (a ranged GET
+8. **✅ ALREADY PROVEN AGAINST THE REAL HOST, 2026-08-09 — this is no longer owed.** The SHIPPED
+   adaptive reader (`lib/floodArchiveSource.js`) was driven from Node against the live Cloudflare
+   Pages deployment of this branch: **Harris — header + 5 z13 tiles decoded (38/70/19/60/52
+   features) in ONE request, 5.96 MiB, 1,094 ms total**; **Waller — 1 request, 0.69 MiB, 231 ms.**
+   So the whole-file path works on the actual host, not just in a local simulation of it. What is
+   left below is the BROWSER half.
+9. **⛔ Pages does NOT do byte serving** (a ranged GET
    returns 200 with the full body, on every asset; see B298401). So on the live site the reader fetches
    each archive **whole, once** (`lib/floodArchiveSource.js`). Confirm on a COLD cache that Harris's
    **5.96 MiB** arrives once and that the second visit is served from cache (a 304, not a re-download) —
