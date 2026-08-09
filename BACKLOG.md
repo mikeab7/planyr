@@ -120,6 +120,13 @@ Add a new tag to this legend **in the same commit** you first use it (this preve
 - **The payback, measured rather than guessed: the References panel body is 19.4 KB** of the largest chunk (28,911 source chars, `_pid === "references"`), and it renders only when that tab is open. Extracting it behind `LazyPanel` — exactly what `ParcelDataPanel.jsx` and this tranche's own `ParcelRecordPanel.jsx` already do — pays the 7.5 KB with 12 KB to spare. Runners-up for reference: Analysis 0.9 KB, Standards ~0.
 - **Deliberately NOT done in the same change.** It is a large extraction in code that tranche never touched, it carries its own e2e surface (`references-handle-layer`, the overlay order and promote specs), and a botched prop hand-off would break a shipped feature to satisfy a number. It wants its own session and its own verification, not a tail-end refactor.
 - **The ceiling was NOT ratcheted.** Recording it would have been one command; the constraint on that block was explicit, and the honest position is that the band is spent, not that the ceiling is wrong.
+- **⛔ AND THE CLEANUP DID NOT PLANT THIS REPO'S SIGNATURE DEFECT.** Three tiers now load on demand
+  (`plannerPlacementCmds` · `sitePlacementRotate` · `ParcelRecordPanel`), and a lazy tier that silently
+  fails to load is exactly the "mechanism that exists and never fires" family — rotation or the parcel
+  record would simply not work, and a unit test importing the module directly would still pass happily.
+  **Proven to FIRE in a real browser, by mutation:** rejecting each dynamic import in turn
+  (`Promise.reject(new Error("chunk failed"))`) turns the live specs RED, all three. The 13 live cases
+  were also re-run in full AFTER the split, not only before it.
 
 ### B290251 — The mint gate reports a FALSE `TAKEN` on main's own ids after you follow CLAUDE.md's mandated conflict resolution `[Infra / Testing]` (task) #infra #testing  *(filed 2026-08-09 — hit while shipping the Colorado audit (#972), by doing exactly what `CLAUDE.md` → Workflow & deploy instructs. Minted from this branch's reserved block B290240–B290255. **DEDUPE-FIRST** — searched `check-mint`, `mint gate`, `B779`, `B1140`, `B6864`, `mintFatality`: B779 built the gate, B6864–B6867 replaced the high-water-mark rule with reserved blocks. This is neither of those verdicts misfiring — it is the "added by this branch" INPUT being wrong after a merge. New item.)*
 `[ ]` `npm run check-mint` measures "ids added by this branch" against the MERGE BASE, so after you merge `origin/main` into a branch to clear a conflict, every id main added since the base looks like this branch minted it — and the gate then calls each one `ALREADY TAKEN on origin/main` and blocks the push.
