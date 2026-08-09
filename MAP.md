@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-08-09 @ `ed7f8d3` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-08-09 @ `2aa1ad9` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -734,7 +734,7 @@ _485 source files mapped._
 - **`src/workspaces/site-planner/lib/plannerPlacementCmds.js`** — the placement + deed-promotion COMMANDS, loaded on demand and driven through an `exportSheet`-style `ctx`.
   - _exports_: `applyOriginState`, `commitOrigin`, `nudgePlan`, `persistPlacement`, `promoteDeedToParcel`, `rotatePlan`
 - **`src/workspaces/site-planner/lib/planStyle.js`** — Shared element style tokens (fills/strokes/weight/pattern per surface type), style resolver, paint z-order, element feet ring outline
-  - _exports_: `byZ`, `elRingFeet`, `elStyle`, `getAccountStyleDefaults`, `getPreviewStyleDefaults`, `parcelDefaultStyle`, `setAccountStyleDefaults`, `SETBACK_LINE`, `setbackChipStyle`, `setbackDashArray`, `setbackLineStyle`, `setPreviewStyleDefaults`, `standardScope`, `toHex6`, `TYPE`, `typeStyle`, `zOrder`
+  - _exports_: `bandForceOf`, `byZ`, `EL_BANDS`, `elRingFeet`, `elStyle`, `getAccountStyleDefaults`, `getPreviewStyleDefaults`, `parcelDefaultStyle`, `setAccountStyleDefaults`, `SETBACK_LINE`, `setbackChipStyle`, `setbackDashArray`, `setbackLineStyle`, `setPreviewStyleDefaults`, `standardScope`, `toHex6`, `TYPE`, `typeStyle`, `zOrder`
 - **`src/workspaces/site-planner/lib/polyClip.js`** — Pure polygon intersection-AREA via ear-clip triangulation + Sutherland–Hodgman; pairwise active-parcel overlap detection for the B652 double-count warning; clipper-lib UNION/dissolve of overlapping active parcels for correct site acreage (B715)
   - _exports_: `dissolvedParcelSqft`, `overlappingParcelPairs`, `PARCEL_OVERLAP_TOL`, `polyIntersectArea`, `triangulate`
 - **`src/workspaces/site-planner/lib/polygonSplit.js`** — Pure parcel-split geometry: straight-line cut pairing all crossings for concave lots, plus bent-polyline path cut

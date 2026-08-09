@@ -451,3 +451,62 @@ describe("source guard — the render must keep stamping what the resolver reads
     expect(SP).toMatch(/data-testid="vtx-handle"[\s\S]{0,200}onPointerDown=\{onDown\}/);
   });
 });
+
+/* ⛔ NEW-3 — THE RIGHT-CLICK PATH, which B280402's fix never reached.
+ *
+ * FOUND ON THE OWNER'S REAL BAIN PLAN, and not findable anywhere else: the parcel acreage badge is
+ * a hit target only while HOVERED (B1327, so it can be dragged), so the cursor merely ARRIVING at
+ * his detention pond puts the badge's rect above the pond in the stack — measured, both states:
+ *
+ *     COLD  : [{feature: "el:e79404lvnvpt", chrome: false}]
+ *     HOVER : [{feature: "parcel:psmr9olizi5ue_0", chrome: TRUE}, {feature: "el:e79404lvnvpt", …}]
+ *
+ * B280402 made `data-chrome` identity-transparent inside `resolveDoubleClickTarget`, and the app's
+ * own resolver still answers `el:e79404lvnvpt` at that point. But a right-click is a plain DOM
+ * handler on the badge and never asked the resolver — so right-clicking the pond opened the PARCEL
+ * menu: "Merge parcels · Hide acreage label · Delete parcel", with the pond's Arrange rows,
+ * Properties and Delete nowhere in it. A DESTRUCTIVE row standing where a benign one was aimed at.
+ *
+ * The live proof is `ui-audit/verify-v91632-real-plan.mjs` (mutation-checked: removing the two
+ * lines below turns four of its rows red, including V91632's own lone-instance case). This is the
+ * CI-runnable half — no browser here can drive a hover — so it pins the WIRING.
+ */
+describe("NEW-3 — a right-click resolves the same way a double-click does", () => {
+  const SP = readFileSync(fileURLToPath(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url)), "utf8");
+
+  it("the acreage badge's context handler asks the ONE resolver before claiming the press", () => {
+    const at = SP.indexOf("const onChipContext");
+    expect(at, "onChipContext not found").toBeGreaterThan(-1);
+    const block = SP.slice(at, at + 3200);
+    expect(block, "the badge must resolve what is actually under the point, via the shared resolver")
+      .toMatch(/resolveDoubleClickTarget\(hitStackAt\(e\.clientX, e\.clientY\)\)/);
+    expect(block, "…and forward the press when the answer is not its own lot")
+      .toMatch(/featureContextAction\(under, e\)\) return;/);
+  });
+
+  it("there is ONE right-click dispatch, covering every feature family", () => {
+    const at = SP.indexOf("const featureContextAction");
+    expect(at, "featureContextAction not found — a per-call-site fix is the next recurrence").toBeGreaterThan(-1);
+    const block = SP.slice(at, at + 1200);
+    for (const [kind, call] of [
+      ["el", "onElContext"], ["markup", "onMarkupContext"], ["callout", "onCalloutContext"],
+      ["measure", "onMeasureContext"], ["parcel", "onParcelContext"],
+    ]) {
+      expect(block, `the right-click dispatch must handle the "${kind}" family`).toContain(call);
+    }
+    /* A measurement is addressed by INDEX, not by id — the selection model's asymmetry, and the
+     * reason a bare `on${kind}Context` lookup table would be wrong here. */
+    expect(block).toMatch(/measures\[t\.i\]/);
+    /* B311 — parcels are click-through when the setting says so; forwarding must respect that. */
+    expect(block).toMatch(/settings\.parcelSelect/);
+  });
+
+  it("the badge keeps its OWN menu when it is genuinely what was aimed at", () => {
+    const at = SP.indexOf("const onChipContext");
+    const block = SP.slice(at, at + 3200);
+    expect(block, "over its own lot with nothing beneath, the chip menu must still open")
+      .toMatch(/setParcelMenu\(\{ x: e\.clientX, y: e\.clientY, id, fromChip: true \}\)/);
+    expect(block, "…and the forward must exclude the badge's own parcel, or it recurses into itself")
+      .toMatch(/under\.kind === "parcel" && under\.id === id/);
+  });
+});
