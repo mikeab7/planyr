@@ -235,3 +235,50 @@ describe("the fbcddWse02 registry row — provisional multiplex table (B827)", (
     expect(holePin).toBeTruthy();
   });
 });
+
+
+// ---------------------------------------------------------------------------------------------
+/* NEW-4 — PER-RASTER timings. The owner's own PerformanceResourceTiming timeline had this
+ * granularity and the app did not, which is why an eight-second check stayed invisible: a group
+ * total cannot tell you WHICH county layer went slow. The hook is passive and may never throw
+ * into the sample it is measuring. */
+describe("onSample — one timing per county raster (NEW-4)", () => {
+  const seen = [];
+  const fetchImpl = async () => okJson({ samples: [{ value: "141.2" }] });
+  const onSample = (r) => seen.push(r);
+
+  it("names the mosaic on the 0.2% path", async () => {
+    seen.length = 0;
+    await sampleWse02Point(P.lat, P.lng, { fetchImpl, onSample });
+    expect(seen).toHaveLength(1);
+    expect(typeof seen[0].service).toBe("string");
+    expect(seen[0].ok).toBe(true);
+    expect(Number.isFinite(seen[0].ms)).toBe(true);
+  });
+
+  it("names EVERY candidate raster on the multiplexed 1% path", async () => {
+    seen.length = 0;
+    await sampleWse100Point(P.lat, P.lng, { fetchImpl, onSample, services: [SVC_HOME, SVC_SEAM, SVC_FAR] });
+    expect(seen.map((r) => r.service).sort()).toEqual([SVC_HOME.name, SVC_SEAM.name].sort());
+  });
+
+  it("reports a FAILED sample as failed rather than dropping it — a leg that errored still cost time", async () => {
+    seen.length = 0;
+    const bad = async () => ({ ok: false, status: 500, json: async () => ({}) });
+    await sampleWse100Point(P.lat, P.lng, { fetchImpl: bad, onSample, services: [SVC_HOME] }).catch(() => {});
+    expect(seen).toHaveLength(1);
+    expect(seen[0].ok).toBe(false);
+    expect(seen[0].reason).toMatch(/500/);
+  });
+
+  it("a hook that throws cannot take the sample down with it", async () => {
+    const boom = () => { throw new Error("instrument broke"); };
+    await expect(sampleWse02Point(P.lat, P.lng, { fetchImpl, onSample: boom })).resolves.toBeCloseTo(141.2, 6);
+  });
+
+  it("zero candidates means zero fetches AND zero timings", async () => {
+    seen.length = 0;
+    expect(await sampleWse100Point(P.lat, P.lng, { fetchImpl, onSample, services: [SVC_FAR] })).toBeNull();
+    expect(seen).toHaveLength(0);
+  });
+});

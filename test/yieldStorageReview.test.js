@@ -635,6 +635,126 @@ describe("NEW-10 — cut/fill balance, and labelling a borrow-driven surplus", (
  * 1–2 ft HIGHER. At the Bain site the City of Houston ETJ is what raises the Houston candidate, and
  * that ETJ lookup is measurably flaky (0 at three of six points in the owner's Houston sweep). When
  * it fails, silence used to read as "no ETJ" and the county's laxer rule was reported as settled. */
+/* ═══ NEW-1c — AN AUTHORITY WITH NO TRANSCRIBED RULE MUST SAY SO ════════════════════════════════
+ *
+ * The owner's Goose Creek is part inside the City of Baytown's limits and 100% inside Baytown's ETJ.
+ * `RULE_KEY_ALIAS` had no `baytown` entry, so Baytown resolved to nothing and — by this module's own
+ * contract — could never govern. The site took its finished floors from Harris County with NOTHING
+ * anywhere recording that a city ordinance had been skipped.
+ *
+ * `administratorCandidates` had always stamped `ruleModeled` with a comment promising an unmodelled
+ * candidate "is flagged, never dropped". The flag was real and **nothing read it** — it appears
+ * nowhere else in the tree. That is the defect these cases pin, and it is not Baytown-only:
+ * `montgomery` and `chambers` carry `ffeRule: null` too.
+ *
+ * ⛔ AND THE NUMBERS ARE DELIBERATELY ABSENT. The owner's recollection is "~2 ft above the 500-year"
+ * and he asked for that to be CHECKED against the adopted ordinance, not confirmed. Municode and
+ * baytown.org are both refused by this environment's egress allowlist, so the rule is recorded as
+ * NOT TRANSCRIBED. The last case guards that: if someone fills the numbers in from memory, it goes
+ * red. */
+describe("NEW-1c — an authority we have no rule for blocks a settled FFE and is named", () => {
+  const rules = DEFAULT_BUILDABILITY_RULES;
+  // Goose Creek's real shape: Harris County, partly inside Baytown's limits, wholly in its ETJ.
+  const gooseCreek = (over = {}) => assessAdministrator({
+    signals: {
+      floodJurKey: "harris", county: "Harris",
+      cityLabel: "Baytown", etjLabel: "Baytown", edgeLabels: [],
+      jurisdictionSplit: { city: "Baytown", inCity: 6, tested: 14 }, ...over,
+    },
+    rules,
+  });
+
+  it("Baytown is RAISED as a candidate at all — before this it resolved to nothing", () => {
+    const a = gooseCreek();
+    expect(a.candidates.some((c) => c.key === "baytown" && c.kind === "primary")).toBe(true);
+    expect(a.candidates.some((c) => c.key === "baytown" && c.kind === "etj")).toBe(true);
+  });
+
+  it("an unmodelled PRIMARY/ETJ candidate blocks `settled` and is named", () => {
+    const a = gooseCreek();
+    expect(a.unmodelledCandidates.map((u) => u.key)).toContain("baytown");
+    expect(a.settled).toBe(false);
+    expect(a.unmodelledNote).toMatch(/No floodplain rule is modeled for/);
+    expect(a.unmodelledNote).toMatch(/floor, not the answer/);
+    // The provisional answer is still computed — the reader needs what we DID find.
+    expect(a.governingLabel).toBe("Harris County (unincorporated)");
+  });
+
+  it("the same site with Baytown invisible settles — this is the regression, stated", () => {
+    const before = assessAdministrator({ signals: { floodJurKey: "harris", county: "Harris" }, rules });
+    expect(before.settled).toBe(true);
+    expect(before.candidates.some((c) => c.key === "baytown")).toBe(false);
+  });
+
+  it("an EDGE-only candidate with no rule does NOT block settling — Bain must not regress", () => {
+    /* Bain touches Katy at an edge and Katy has no modelled rule. An edge sliver is explicitly not
+     * expected to govern (B793/B209506), so demanding its ordinance would fire on nearly every site
+     * and train the reader to ignore the warning. */
+    const bainSite = assessAdministrator({
+      signals: { floodJurKey: "fortbend", county: "Fort Bend", cityLabel: null, etjLabel: "Houston", edgeLabels: ["Katy"] },
+      rules,
+    });
+    expect(bainSite.candidates.some((c) => c.key === "katy" && c.kind === "edge")).toBe(true);
+    expect(bainSite.unmodelledCandidates).toEqual([]);
+    expect(bainSite.settled).toBe(true);
+    expect(bainSite.governingLabel).toBe("Fort Bend County");
+  });
+
+  it("⛔ Baytown's rule is NOT transcribed, and must not be filled in from recollection", () => {
+    expect(rules.baytown).toBeTruthy();
+    expect(rules.baytown.ffeRule).toBe(null);
+    expect(rules.baytown.verified).toBe(false);
+    expect(rules.baytown.source).toMatch(/NOT TRANSCRIBED/);
+  });
+
+  /* ⛔ NEW-1d — THE RENDER GATES ARE PART OF THE CONTRACT, and getting them wrong hid this item's
+   * whole point on the one plan it was built for. `split` and `unmodelled` are INDEPENDENT facts —
+   * how many authorities govern, versus whether we hold their rules — and the panel had them
+   * mutually exclusive. Goose Creek is both, so the "no rule on file for Baytown" line never
+   * rendered there. These cases assert the gate CONDITIONS the panel evaluates. */
+  it("split and unmodelled are independent — Goose Creek is BOTH and must show both", () => {
+    const a = gooseCreek();
+    expect(a.split).toBe(true);
+    expect(a.unmodelledCandidates.length).toBeGreaterThan(0);
+    // The panel gate for the unmodelled line must not exclude a split site.
+    const unmodelledLineShows = !a.unresolved && a.unmodelledCandidates.length > 0;
+    expect(unmodelledLineShows).toBe(true);
+  });
+
+  it("the DEFAULT while unanswered is the authority we DO have, named — never a blank", () => {
+    /* A blank reads as "no requirement", which is the one answer that is certainly wrong. The
+     * governing authority, its rule and its elevation stay available so the panel can state them. */
+    const a = gooseCreek();
+    expect(a.governingLabel).toBe("Harris County (unincorporated)");
+    expect(a.governingRuleText).toBe("wse02pct + 2 ft");
+    expect(a.settled).toBe(false);          // not settled…
+    expect(a.governing).toBeTruthy();       // …but never empty
+  });
+
+  it("an UNMODELLED-but-not-split site still refuses a settled floor", () => {
+    /* The gap this closes: not split, nothing failed, so the verdict row fell through to
+     * "pads pass at X′ FFE" — a settled claim with a governing city's rule missing from the
+     * comparison behind it. */
+    const whollyInBaytown = assessAdministrator({
+      signals: { floodJurKey: "harris", county: "Harris", cityLabel: "Baytown", etjLabel: null },
+      rules,
+    });
+    expect(whollyInBaytown.split).toBe(false);
+    expect(whollyInBaytown.unresolved).toBe(false);
+    expect(whollyInBaytown.unmodelledCandidates.map((u) => u.key)).toContain("baytown");
+    expect(whollyInBaytown.settled).toBe(false);
+  });
+
+  it("the comparison that answers 'how many feet do the pads move': Harris is ALREADY 500-yr + 2 ft", () => {
+    /* This is the fact that reframes the owner's concern. He expected Baytown (~500-yr + 2 ft) to be
+     * materially STRICTER than the basis in use. Harris County's modelled rule — verified, cited at
+     * §4.07(b)(1) — is the SAME datum and the SAME freeboard, so if his recollection is right the
+     * required floor does not move at all. The exposure is only if Baytown differs from that. */
+    expect(rules.harris.ffeRule).toEqual({ basis: "wse02pct", plusFt: 2 });
+    expect(rules.harris.verified).toBe(true);
+  });
+});
+
 describe("B209508 — an unknown jurisdiction input is a first-class state", () => {
   const rules = DEFAULT_BUILDABILITY_RULES;
   const bain = (unresolvedRoles, etjLabel) => assessAdministrator({

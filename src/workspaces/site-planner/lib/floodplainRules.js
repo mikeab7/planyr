@@ -35,6 +35,7 @@
  *   locationRule  — where the compensating cut must sit (plain-language screening copy)
  *   source/sourceDate/verified/note — provenance; unverified rules stamp every output.
  */
+import { normCountyKey } from "../../../shared/gis/countyKeys.js";
 const LS = "planarfit:floodplainRules:v1";
 
 export const DEFAULT_FLOODPLAIN_RULES = {
@@ -187,8 +188,10 @@ export const defaultFloodJurForAuthority = (authorityId) =>
  * the plan header). Harris county alone can't distinguish COH from unincorporated —
  * default to the county rule and let the picker/identify refine it. */
 export const defaultFloodJurForCounty = (county) =>
+  // NEW-4 — through the shared routing-key normaliser rather than a local `.toLowerCase()`, so
+  // every county-keyed lookup in the app agrees on what a key IS (trim + case + underscores).
   ({ harris: "harris", fortbend: "fortbend", montgomery: "montgomery", chambers: "chambers", waller: "waller" }[
-    String(county || "").toLowerCase()
+    normCountyKey(county)
   ] || "generic");
 
 /* The zone classes a rule's trigger obligates (feeds computeMitigation). */

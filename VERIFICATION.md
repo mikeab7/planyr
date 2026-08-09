@@ -138,6 +138,169 @@ The sheet is built and asserted headless (`ui-audit/verify-notes-tier1.mjs` §8)
 - PASS = the PDF shows **the folded section's contents, expanded**, the callout as a bordered block with its own left rule and glyph, the attachment named with its type and size, and the sheet **light-on-white whatever the app theme is**. FAIL = a blank box where the folded section was — the exact failure the unconditional expand exists to prevent.
 - **Also open the exported Markdown in GitHub** (paste it into a gist preview): the callout must render as a real **NOTE / TIP / IMPORTANT / WARNING / CAUTION** alert, not as a plain quote, and the toggle as an open disclosure.
 - Already confirmed, do NOT re-test: the nodes are in the stored document, the fold survives a reload, the tone changes in place, and the Markdown text is correct — all green headless.
+
+### V97120 — B298560/B298561/B298562: the flood/drainage check's elevation leg, on his own Bain plan `Blocker: real-data` + `Blocker: live-GIS`
+
+**Status: ⏳ PENDING.** Everything reachable from this sandbox is already done and is recorded below; what is left needs the REAL federal service and HIS plan, which is the whole point of the item.
+
+**Why this cannot be closed here.** The claim is a LATENCY claim about `elevation.nationalmap.gov` and about the five Fort Bend county water-surface rasters. The sandbox's egress proxy blocks both hosts, and the county-sampler branch only fires once the live jurisdiction identify resolves the county to Fort Bend. A stub can prove the ORDERING and the GATING (and does — see below); only the live service can prove the numbers.
+
+**Already verified HERE, logged-out, against a seeded georeferenced plan with every host stubbed (e2e `drainage-elevation-latency.spec.js`, 4 arms, mutation-proven both ways):**
+- the transect and the first GIS request are issued within one event-loop turn of each other — the transect is no longer in front of the batch;
+- with 3DEP held 5 s, the panel PUBLISHES and the elevation reads a named `pending` state well inside 4 s, then resolves itself with no second press;
+- a second check publishes the HELD value immediately (`data-ground-cached="1"`) while the forced refresh runs underneath, and the fresh answer then REPLACES it;
+- a 503 from 3DEP produces `unavailable`, whose hover names the service and says nothing was assumed.
+- Mutants: publish budget → 60 s turns arm 2 red alone; `cache: null` turns arm 3 red alone.
+
+**Steps for the live pass (signed in, planyr.io, his Bain plan — "Concept A / Quiddity Hydrologic"):**
+1. Open DevTools → Network, filter `getSamples`. Press **↻ Re-check** in the Yield panel. Record: the wall-clock time from the press to the flood verdicts appearing, and the 3DEP `getSamples` duration. **Expected: the verdicts land in well under a second even when 3DEP takes seconds.**
+2. Confirm the five county rasters (`500YR_WSE`, the `100YR` per-watershed candidates, `Willow_500YR_Existing_WSE`) are requested WITHOUT waiting for `getSamples` to finish. **⚠ `Willow_500YR_Existing_WSE` still starts after the other four — that is correct and deliberate** (mosaic-first; see B298561).
+3. Press **↻** again. Hover the freshness dot. **Expected: the hover states the elevation was HELD from an earlier read, with its age; the press does not wait on USGS; a fresh `getSamples` still goes out.**
+4. Reload the page, open the plan, press **↻**. **Expected: still held — the store is IndexedDB, so a reload must not pay again.**
+5. Record the end-to-end check time for comparison against his measured 3,635 / 8,494 ms.
+
+### V97121 — B298563: does a `draincheck` timing row actually REACH `client_errors`? `Blocker: auth`
+
+**Status: ⏳ PENDING.** Same shape as V62544 (B265536) and pending for the same reason: an automated run is suppressed from the network write by design (B270912), so only a real signed-in browser can prove delivery.
+
+**Steps:** signed in on planyr.io, press **↻ Re-check** on any georeferenced plan. Then either (a) in the console read `window.pfTelemetry.delivery()` and confirm `ok` incremented, or (b) query `public.client_errors` for `source = 'event:draincheck'` and confirm one row per press. **Expected:** one row carrying `legs` with `elev`, the `wse:*` per-raster entries, `calc`, `save` and `total`, plus `ground` / `groundCached`. **Also confirm the negative:** nothing in the row names the site, its address or its geometry — the payload is an allowlist and this is the read-back that proves it.
+### V96960 — B298401: on planyr.io with the flood-tile flag on, does a Harris plan draw the floodplain instantly — and does a broken archive still fall back to live FEMA? `Blocker: live-GIS`
+**Filed 2026-08-09 with B298401. What was ALREADY proven headless HERE, so this entry is only the gap:**
+`node ui-audit/verify-flood-tiles.mjs` — **10/10 green** against a real Chromium on a seeded Harris plan:
+tiles paint the flood layer in **286–320 ms**, over **3 HTTP range requests totalling 27,392 bytes** of
+`flood-tx-harris.pmtiles`; **zero** agency requests for the picture; the `NFHL as of Nov 15, 2019` stamp is
+on screen; a **404 archive hands the row back to the live FEMA path** (6 agency requests where the working
+archive made 0 — a real mutation check, not a tautology); a county with **no** archive never asks for one.
+Plus `test/floodTiles.test.js` (48) and `test/floodTileRender.test.js` (22) driving the committed archives.
+
+**⛔ WHY THIS IS STILL OWED A BROWSER — the one thing this sandbox structurally cannot show.**
+Every `hazards.fema.gov` request from **Chromium** here dies with `ERR_CONNECTION_RESET` (the egress
+policy; Node reaches the same host fine — that is how the archives were built). So the harness can prove
+the live path is **ENGAGED** and can never prove it **PAINTS**, which means the number the owner actually
+cares about — *how much faster is this than what I have today* — has no live half in this sandbox. That is
+a `live-GIS` blocker, not a to-do that was skipped.
+
+**The pending steps, on planyr.io with `VITE_FLOOD_TILES=1` in the Pages env:**
+1. Open a **Harris** plan. Turn on **FEMA flood zones**. The floodplain should appear essentially with the
+   map, not seconds later, and should stay put through a pan and a zoom (no re-fetch per gesture).
+2. The **Flood & drainage** group's `REGULATORY` heading should read `· NFHL as of Nov 15, 2019`.
+3. Open a **Waller** (Tsakiris) plan and repeat — vintage there is **Jan 15, 2021** for Larimer,
+   **May 16, 2019** for Waller; confirm the stamp names the county actually on screen.
+4. Compare against a **Montgomery** plan (no baked archive): the layer must still paint from live FEMA,
+   just at today's speed. **Nothing may be blank on any of the three.**
+5. Hover the floodplain on the Harris plan: the identify card should name the zone off the tiles and carry
+   the "the parcel's authoritative zone and acreage still come from the live FEMA query" line.
+6. Zoom past z13 and confirm the overzoomed tiles still read as a flood map rather than mush.
+7. **The measurement to record:** time from the layer switching on to the floodplain being visible, tiles
+   vs. flag-off, on the same plan. That is the number Phase 1 exists to produce and the only one still
+   missing.
+8. **✅ ALREADY PROVEN AGAINST THE REAL HOST, 2026-08-09 — this is no longer owed.** The SHIPPED
+   adaptive reader (`lib/floodArchiveSource.js`) was driven from Node against the live Cloudflare
+   Pages deployment of this branch: **Harris — header + 5 z13 tiles decoded (38/70/19/60/52
+   features) in ONE request, 5.96 MiB, 1,094 ms total**; **Waller — 1 request, 0.69 MiB, 231 ms.**
+   So the whole-file path works on the actual host, not just in a local simulation of it. What is
+   left below is the BROWSER half.
+9. **⛔ Pages does NOT do byte serving** (a ranged GET
+   returns 200 with the full body, on every asset; see B298401). So on the live site the reader fetches
+   each archive **whole, once** (`lib/floodArchiveSource.js`). Confirm on a COLD cache that Harris's
+   **5.96 MiB** arrives once and that the second visit is served from cache (a 304, not a re-download) —
+   that is the one behaviour the sandbox cannot show, because its dev server honours Range and takes the
+   cheap path instead.
+
+### V91632 — B293073: on ONE OF HIS OWN PLANS, do two overlapping objects actually swap what's on top? `Blocker: real-data`
+
+The three defects behind *"the layers / order feature doesn't work at all"* are fixed and each is proven here by reading paint order back out of the rendered DOM (not from state). What the sandbox cannot know is **which objects he was trying to reorder**, so this is the one check that closes his report rather than mine.
+- planyr.io, signed in, any plan of his with **two overlapping objects of the same kind** — two buildings, two markups, or two text boxes.
+- **The text-box case is the one to run first**, because it is the one that was structurally impossible before: drop two text boxes so they overlap, right-click the lower one → **Bring to Front**. **PASS = the box you clicked is now drawn over the other one.** Pre-fix that menu had no ordering rows at all.
+- Then the case that read as "broken": right-click something that is **the only one of its type on the plan** — a lone pond, a lone paving pad. **PASS = the four Arrange rows are THERE, greyed, and hovering one explains why** ("this is the only … so there is nothing to reorder it against"). Pre-fix the whole group was hidden, with no explanation — which is what "doesn't work at all" looked like.
+- And the cross-the-plan move: right-click a text box → **Send behind the plan**. PASS = the buildings now draw over it.
+- **Report which objects he originally tried**, if he remembers — if it was a building over a paving pad, that is the type-layer question parked on B293072 as an owner decision, NOT a bug, and this V should record that rather than reopen the item.
+- ⏳ **PENDING**
+### V90096 — B291536: on the note where Backspace "acts funny", does one press now take exactly one step? `Blocker: real-data`
+
+**⛔ THIS IS THE ONE THE SANDBOX CANNOT SETTLE, and the reason is stated rather than glossed.** The reported symptom — a nested bullet un-nesting AND merging in one press — did **not** reproduce on a plain bulleted list here. What did reproduce, and produces exactly that symptom, is a document that MIXES a checklist with a bulleted list, which an Outlook paste routinely makes: Tiptap's list keymap runs its Backspace handler once per list type without stopping at the first one to act, and one press dissolved BOTH levels into plain paragraphs. That class is fixed and mutation-proven. Whether it is the class HIS note holds is his to confirm.
+- **Where:** planyr.io, signed in, the page the report came from (project Silvestri, page "Utility") or any note where it misbehaved.
+- **The check, three presses, one at a time.** (1) Caret at the very start of a **nested** bullet → one Backspace → it should **outdent one level and change nothing else** (no merging with the bullet above). (2) Undo. Caret at the very start of a **top-level** bullet → one Backspace → it should become a **plain line keeping its words**, with **no empty bullet left behind**, and the line above untouched. (3) A **second** Backspace from there joins it to the line above — that step is meant to be the second one.
+- **Also worth one press while he is there, because it was the worst thing found and no report existed for it:** put the caret at the start of the line directly under a **picture** and press Backspace once. The picture must become **selected (outlined), not deleted**.
+- **PASS =** every press changes exactly one thing. **FAIL =** any press changes two or more, or leaves an empty bullet.
+- **⛔ AND IF IT FAILS, CAPTURE THE TREE RATHER THAN DESCRIBING IT.** With `window.__PLANYR_E2E` armed, `window.__noteEditor.json()` returns the document before and after the press; that is what turns a second report into a fixed row in `ui-audit/verify-notes-backspace.mjs` instead of another round of guessing.
+- **Already confirmed here, do NOT re-test:** 37/37 boundary rows against the built app, mutation-proven RED without the fix (11 of 37).
+- The **owner never runs this** — it is a Claude-cohort check on a signed-in session with his real note. ⏳ **PENDING**
+### V85616 — B287056: on the next deploy, does a `chunk-recovery` row actually appear — and does it say `recovered`? `Blocker: real-data`
+
+**⛔ THIS IS THE ONLY CHECK THAT MATTERS AND IT NEEDS A REAL DEPLOY.** Every branch of the guard is unit-tested (`test/chunkRecovery.test.js`, 21) and the sandbox has no deploy at all, so nothing here can fire `landed` or `recovered` — those two require an open tab, a new build replacing its chunks, and a navigation. The item exists because **361 production rows recorded no outcome**; a shipped recorder that turns out to write nothing would be the same defect with a nicer comment.
+
+- **RUN IT AFTER THE NEXT PRODUCTION DEPLOY** (any merge to `main` publishes). Ideally leave a planyr.io tab open on a Site route BEFORE the deploy lands, then switch workspaces (Library / Review / Schedule) once it has — that is the exact gesture that pulls a not-yet-loaded chunk.
+- One read-only query against `planyr_production`:
+  ```sql
+  select at, build, module, message
+  from public.client_errors
+  where source = 'event:chunk-recovery'
+  order by at desc limit 50;
+  ```
+- **PASS** = at least one row whose message JSON carries an `"o"` naming a branch, and — if a rescue happened — the PAIR `{"o":"landed",…}` followed within ~15 s by `{"o":"recovered",…}` from the same `[tab …]` id. **FAIL** = a deploy day with `vite:preloadError` rows and NO `event:chunk-recovery` rows beside them; that means the recorder is not running and the item is not done.
+- **ALSO CHECK THE LADDER HELD.** If a storm recurs, `f` must climb (1, 2, 3, 5, 10, 25…) across a HANDFUL of rows, not one row per failure. A `chunk-recovery` row count that tracks the `preloadError` count 1:1 means the ladder is bypassed and the instrument has become the noise.
+- **THE QUESTION THIS FINALLY ANSWERS, in one query** — of N episodes, how many reached `recovered`. Until it returns rows, the "37 of 54 episodes went quiet, consistent with a rescue" reading on B287056 stays an INFERENCE and must be reported as one.
+- **⛔ READ-ONLY. Do NOT delete, truncate or modify any row in `public.client_errors` — it is the owner's data.**
+- The **owner never runs this** — Claude-cohort check. ⏳ **PENDING**
+
+### V85617 — B287057: do the new `rt` / `ph` / `ltxp` fields arrive on the owner's own rows, and what do they say the ly=0 lane is? `Blocker: real-data`
+
+**The fields are unit-tested (`test/perfInstrument.test.js`, 42) and worth nothing until they ride real rows from his machine** — the instrument enrols a quarter of page loads and sends at most six rows on one of them, so this needs his ordinary use, not a harness. Automated runs are suppressed from production by design (B270912), which is why no sandbox run can produce these.
+
+- **RUN IT ~3 DAYS AFTER THE DEPLOY.** Read-only against `planyr_production`:
+  ```sql
+  select module,
+         (regexp_match(message,'"rt":"([^"]+)"'))[1]  as lane,
+         (regexp_match(message,'"ltxp":"([a-z]+)"'))[1] as worst_block_phase,
+         count(*) n,
+         max((regexp_match(message,'"ltx":([0-9.]+)'))[1]::numeric) max_ltx
+  from public.client_errors
+  where source = 'event:perf' and user_agent not ilike '%Headless%'
+  group by 1,2,3 order by max_ltx desc nulls last;
+  ```
+- **PASS** = rows carrying `rt` and `ph`, and at least one row carrying `ltxp`/`ltxr`/`ltxt`. **FAIL** = new rows still shaped like the old ones (the enrolment gate or the deploy did not take).
+- **THE FINDING TO CONFIRM OR REFUTE.** The pre-ship read said the worst blocks are the **Scheduler mounting** — `scheduler`, k=longtask, mean `t` ≈ 3 s since load, mean worst block **2,268 ms**, max **7,837 ms** — against `site-planner` boot at 320 ms and his working canvas at 407 ms. **PASS on the finding = `ltxp` reads `mount` (or `pre`) with `ltxr` = `p/schedule` on the largest `ltx` values.** If `ltxp` comes back `idle` on those rows the finding is REFUTED and no boot/mount work should be written against it — which is exactly why this attribution shipped before any fix.
+- **⛔ NO FIX MAY BE WRITTEN AGAINST ly=0 UNTIL THIS PASSES.** The owner's instruction was explicit: three mechanisms have already been refuted in this programme for being named before an instrument could see them.
+- **⛔ READ-ONLY. Do NOT delete, truncate or modify any row in `public.client_errors`.**
+- The **owner never runs this** — Claude-cohort check. ⏳ **PENDING**
+
+### V85618 — B287060: does the terrain retry storm stop? `Blocker: real-data`
+
+**Timing/race class — the backoff is deterministic and unit-tested (`test/terrainLazyBackoff.test.js`, 9), but the storm only exists when a chunk is genuinely dead on a real tab.**
+
+- **RUN IT ON THE NEXT DEPLOY DAY**, same read as V85616's, comparing the `vite:preloadError` shape:
+  ```sql
+  select build, regexp_replace(message,'.*/assets/','') chunk, count(*) n,
+         min(at) t0, max(at) t1, max(at)-min(at) span
+  from public.client_errors
+  where source = 'vite:preloadError' and at > '2026-08-09'
+  group by 1,2 having count(*) > 2 order by n desc;
+  ```
+- **PASS** = no episode with a `span` measured in HOURS. The reference failure is build `53d1bac` / `terrainLayers-aE2wQGtV.js` at **2 h 20 m and 81 rows**; after the backoff, an equivalent dead chunk should produce a span bounded by the ladder (attempts thinning to one a minute) rather than one attempt per mouse movement. **FAIL** = another multi-hour, ~10-s-cadence run of identical rows.
+- **ALSO CONFIRM NOTHING REGRESSED FOR A BLIP.** Signed in on a real plan, hover the map and check the ground-elevation readout still resolves normally — the backoff is a DELAY, never a cap, so a transient failure must still recover within a minute.
+- **⛔ READ-ONLY. Do NOT delete, truncate or modify any row in `public.client_errors`.**
+- The **owner never runs this** — Claude-cohort check. ⏳ **PENDING**
+### V88800 — B290240: does an unincorporated COLORADO site now say Colorado's zoning law instead of Texas's? `Blocker: live-GIS`
+
+The sentence itself is pure and unit-tested in both directions; what cannot be driven here is the card, because it only renders once `identifyJurisdiction` returns `unincorporated`, and that needs external GIS hosts this environment blocks (the whole `gis.colorado.gov` space answers 403 at the sandbox egress proxy — a sandbox limitation, not an endpoint failure).
+- **Where.** planyr.io, a site on **unincorporated Weld or Larimer County ground** (the owner's Johnstown site is the case this was found on). Site **Analysis** panel → the **Zoning / entitlement** card.
+- **PASS** = *"Unincorporated — Colorado counties DO zone (C.R.S. 30-28-111), so this land is zoned by the county, not unzoned. Confirm the district and whether your use is by right, a rezone, or a Use by Special Review."* **FAIL** = any sentence containing the word "Texas".
+- **Also confirm the caveat under it** no longer names City of Houston on a Colorado card.
+- **The Texas control, on the same run:** an unincorporated Harris / Waller / Chambers site must still read *"Unincorporated — Texas counties have no zoning; subdivision platting still applies."* — byte-identical.
+- **What was proven HERE:** `test/coloradoAudit.test.js` (5 assertions, mutation-proven — restore the Texas-everywhere sentence and 3 go red), plus the Texas golden master green and 9,646/9,646 unit tests green.
+- The **owner never runs this** — it is a Claude-cohort check. ⏳ **PENDING**
+
+### V88801 — B290243: does the C.R.S. 37-92-602(8) line stop claiming a pass on a Colorado plan with no pond? `Blocker: live-GIS`
+
+The gate is pure and mutation-proven; what cannot be driven here is the LINE, because it renders inside Yield → Stormwater, which only mounts once the drainage/flood context resolves. Driven logged-out on a seeded Weld plan, the Yield panel gets as far as `Flood data: not checked` and the group never opens — so the line was never on screen either way.
+- **Where.** planyr.io, a **Colorado** plan (Weld / Larimer / Denver). Yield → **Stormwater**. A release rate must be set (Standards → allowable release, or give a pond an outlet) or the statute is honestly "not yet checkable" for a different reason and the test proves nothing.
+- **Three states to confirm, in this order:**
+  1. **Release rate set, NO pond drawn.** PASS = *"Colorado's 72-hour drawdown statute (C.R.S. 37-92-602(8)) needs the allowed release rate"* — the `unknown` line. **FAIL** = *"Inside Colorado's 72/120-hour drawdown limits … screening, not compliance"*, which is the defect: a green water-rights verdict on a facility that does not exist.
+  2. **A real pond, comfortably inside the limits.** PASS = the *"Inside Colorado's 72/120-hour drawdown limits"* line — the gate must not have gone inert. This is the half that matters most: a precondition that silences a working gate is worse than the bug.
+  3. **A real pond, well past the limits** (a large volume against a small release). PASS = the warn line *"Fails Colorado's 72-hour drawdown statute"*.
+- **The Texas control:** on any Texas plan the statute must render NOTHING at all (`applies:false`) and the existing informational drawdown readout must be unchanged.
+- **What was proven HERE:** `test/coloradoAudit.test.js` (6 assertions across all five input states, mutation-proven — delete the precondition and 2 go red), plus the Texas golden master green.
 - The **owner never runs this** — it is a Claude-cohort check. ⏳ **PENDING**
 
 ### V78961 — B280402: the acreage badge no longer takes press 2, on his stub, on the repeat `Blocker: real-data` + `Blocker: auth`
@@ -270,6 +433,44 @@ assumed) and (f) needs a human eye.** Every part that an instrument could settle
 
 *(minted V73584; references **B276576**, overlaps **V477**; `Cadence: once`. Implemented + fully
 sandbox-verified 2026-08-08 — the residue above is the deployed edge only.)*
+### V84864 — B286304/B286305: Baytown's own layers, the aggregator audit, and an authority with no rule
+
+**Status: ✅ PASSED (2026-08-09) for everything reachable — 27 of 28 sites correct, 0 mislabelled, 0 unresolved.** GREEN RIVER has no active parcel geometry.
+
+**The owner's correction, both clauses.** *"City of Baytown may very well be 2' above the 500, and the Baytown etj is on their gis."* The second is confirmed and shipped. The first **could not be verified and is deliberately NOT encoded** — see the blocker below.
+
+**Baytown's own GIS, measured per lot on his site `sms69x8rb2qk`:** every tested Goose Creek lot is inside Baytown's ETJ; 6 of 14 are also inside its city limits. **The H-GAC aggregator returns nothing at all of them.** BT_ETJ (layer 11) and BT_City_Limit (layer 12) are both registry rows now, with fixtures at real lot centroids — including the ETJ-ONLY lot, the exact membership H-GAC misses.
+
+**Portfolio sweep, all 28: 27 correct · 0 mislabelled · 0 unresolved.** Two sites changed:
+
+| Site | Before | After |
+|---|---|---|
+| Goose Creek | `Part in City of Baytown (6 of 14 lots) / rest in its ETJ · Harris County` | unchanged — **now corroborated by Baytown's own layer, lot for lot** |
+| Grand Port | `Unincorporated · Chambers County` | `Unincorporated / City of Baytown · ETJ · Chambers County` — a governing ETJ it never had |
+| Bain | `Unincorporated / City of Houston · ETJ / City of Katy · edge only · Fort Bend County` | unchanged — **proven not regressed** |
+
+**The aggregator audit (the real ask).** Of the **10 cities in the owner's footprint, 6 are carried by a routed ETJ source and 4 are NOT: Brookshire, Humble, Katy, Waller.** Three publish their own layers; the URLs are in the audit output and on B286306. Katy was tested — it returns **0 at every probe point on both Tsakiris and Bain**, so wiring it changes no answer, only upgrades an honest "not published" to a verified "no ETJ".
+
+**An authority with no rule now blocks a settled FFE.** `administratorCandidates` had always stamped `ruleModeled` with a comment promising an unmodelled candidate "is flagged, never dropped" — **nothing in the tree ever read that flag.** Measured on Goose Creek's real signals:
+
+| | before | after |
+|---|---|---|
+| candidates | Harris County only | Harris County · **Baytown** (limits) · **Baytown (ETJ)** |
+| `settled` | **true** | **false** |
+| on screen | "Rule applied: Harris County" | "No rule on file for City of Baytown…" |
+
+An EDGE-only candidate is excluded deliberately, and **Bain is asserted to stay settled** — the fix must not turn every touching city into a governing one.
+
+**⛔ HARD BLOCKER, stated rather than worked around: Baytown's ordinance is unreachable from here.** `library.municode.com`, `api.municode.com` and `baytown.org` all return **HTTP 403 — host not in allowlist** (verified 2026-08-09). Web search works but returns SUMMARIES, and a summary is not an ordinance — every other rule record in this repo cites a section it was read from. `rules.baytown.ffeRule` is therefore `null`, `verified: false`, source `NOT TRANSCRIBED`, **with a test asserting the nulls so nobody fills them in from recollection.** The unblock is an egress allowlist entry for Municode, on `OWNER-TODO.md`.
+
+**⚠ THE FFE ANSWER, which corrects the premise.** The expectation was that Baytown (~500-yr + 2 ft) would be materially STRICTER than the basis in use. **Harris County's modelled rule IS 0.2% (500-yr) WSE + 2 ft**, verified and cited at §4.07(b)(1) — the same datum and the same freeboard. **If the recollection is right, the required floor does not move and the pads move ZERO feet.** The exposure exists only if Baytown's ordinance differs from that, which is precisely why this ships as a refusal-to-settle and not an alarm.
+
+**Texas golden master:** regenerated after classifying the diff exhaustively — **0 CHANGED, 0 REMOVED, 3 ADDED** (all null-valued Baytown keys); 23 insertions, 0 deletions.
+
+**⚠ A NEW CONFLICT FOUND AND RAISED, NOT SILENTLY RESOLVED (B286308):** at **Grand Port** the two city-limits publishers disagree on **all 4 lots** — Baytown's own layer says inside the city, TxGIO says no city. At Goose Creek they agree perfectly. If Baytown is right, Grand Port is an INCORPORATED site. Not guessed at; it needs an authoritative record.
+
+**Still pending (`Blocker: live-GIS` · `auth` · `real-data`):** the on-screen rendering, unchanged and unchanged in reason — the sandbox blocks the county parcel service, so no georeferenced parcel can be placed logged-out.
+
 ### V79264 — B280704/B280705/B280706: the Goose Creek straddle, the ETJ coverage hole, and the split-jurisdiction refusal
 
 **Status: ✅ PASSED (2026-08-09) for everything this sandbox can reach — 27 of 28 sites.** GREEN RIVER has no active parcel geometry, so the app shows no badge and there is nothing to check.
