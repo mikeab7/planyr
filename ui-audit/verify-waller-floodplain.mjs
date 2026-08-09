@@ -22,6 +22,7 @@
  *      BASE_URL=http://localhost:4188/ node ui-audit/verify-waller-floodplain.mjs
  */
 import { chromium } from "playwright";
+import { assertMeasurable } from "./lib/tabTiming.mjs";
 
 const BASE = process.env.BASE_URL || "http://localhost:4188/";
 const EXEC = process.env.PW_CHROME || "/opt/pw-browsers/chromium-1194/chrome-linux/chrome";
@@ -165,6 +166,8 @@ async function run() {
   // ── Case A — the Waller record + the suggested FFE accept flow ────────────────
   const ctxA = await mkCtx(browser, wallerSite, "s_waller", MOCKS_A);
   const pageA = await ctxA.newPage();
+  /* ⛔ A background tab cannot be measured — clamped setTimeout, suspended rAF (a view change then updates state while the drawing never repaints). See ui-audit/lib/tabTiming.mjs. */
+  await assertMeasurable(pageA, "verify-waller-floodplain");
   pageA.on("pageerror", (e) => { failures++; console.log(`  [FAIL] pageerror(A) — ${e.message}`); });
   const tA = await runCheck(pageA);
 
@@ -198,6 +201,8 @@ async function run() {
   // ── Case B — pond purpose (Hybrid) + the sizing assistant ─────────────────────
   const ctxB = await mkCtx(browser, fbPondSite, "s_pond", MOCKS_B);
   const pageB = await ctxB.newPage();
+  /* ⛔ A background tab cannot be measured — clamped setTimeout, suspended rAF (a view change then updates state while the drawing never repaints). See ui-audit/lib/tabTiming.mjs. */
+  await assertMeasurable(pageB, "verify-waller-floodplain");
   pageB.on("pageerror", (e) => { failures++; console.log(`  [FAIL] pageerror(B) — ${e.message}`); });
   await runCheck(pageB);
 

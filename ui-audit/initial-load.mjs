@@ -2,6 +2,7 @@
  * fresh load — i.e. time-to-imagery-coverage. B65 load-regression check. */
 import { chromium } from "playwright";
 import { PNG } from "pngjs";
+import { assertMeasurable } from "./lib/tabTiming.mjs";
 const BASE = process.env.BASE_URL || "http://localhost:4173/";
 const EXEC = process.env.PW_CHROME || "/opt/pw-browsers/chromium-1194/chrome-linux/chrome";
 const site = {
@@ -29,6 +30,13 @@ const browser = await chromium.launch({ executablePath: EXEC, args: ["--no-sandb
 const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1 });
 await ctx.addInitScript(seed);
 const page = await ctx.newPage();
+/* ⛔ A BACKGROUND TAB CANNOT BE MEASURED — not its clock, and not its pixels. A hidden tab clamps
+   setTimeout (a setTimeout-paced probe then times the clamp: 3,156 ms for a 138-182 ms gesture) AND
+   suspends requestAnimationFrame, so after a view change the app's state attributes update while the
+   drawing never repaints — every box, position, hit test and screenshot then agrees with every other
+   and describes a view the app already left. One precondition covers both, rAF liveness probe
+   included; see ui-audit/lib/tabTiming.mjs. Fails loudly rather than reporting either. */
+await assertMeasurable(page, "initial-load");
 if (process.env.THROTTLE) {
   const client = await ctx.newCDPSession(page);
   await client.send("Network.emulateNetworkConditions", { offline: false, latency: 80, downloadThroughput: (1.2 * 1024 * 1024) / 8, uploadThroughput: (512 * 1024) / 8 });

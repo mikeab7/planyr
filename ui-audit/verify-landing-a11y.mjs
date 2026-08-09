@@ -1,4 +1,5 @@
 import { chromium } from "playwright";
+import { assertMeasurable } from "./lib/tabTiming.mjs";
 const BASE = "http://localhost:4173";
 const b = await chromium.launch({ args: ["--no-sandbox","--ignore-certificate-errors","--use-gl=angle","--use-angle=swiftshader","--enable-unsafe-swiftshader"] });
 let fails = 0;
@@ -9,6 +10,8 @@ const sleep = (ms)=>new Promise(r=>setTimeout(r,ms));
 console.log("\n=== LANDING a11y structure / keyboard / anchors ===");
 {
   const ctx = await b.newContext({ viewport:{width:1280,height:900} }); const p = await ctx.newPage();
+  /* ⛔ A background tab cannot be measured — clamped setTimeout, suspended rAF (a view change then updates state while the drawing never repaints). See ui-audit/lib/tabTiming.mjs. */
+  await assertMeasurable(p, "verify-landing-a11y");
   await p.goto(BASE+"/landing/", { waitUntil:"load" }); await sleep(1200);
   const struct = await p.evaluate(()=>{
     const h1 = [...document.querySelectorAll("h1")];
@@ -51,6 +54,8 @@ console.log("\n=== LANDING a11y structure / keyboard / anchors ===");
 console.log("\n=== /?app boots the real app ===");
 {
   const ctx = await b.newContext({ viewport:{width:1280,height:900} }); const p = await ctx.newPage();
+  /* ⛔ A background tab cannot be measured — clamped setTimeout, suspended rAF (a view change then updates state while the drawing never repaints). See ui-audit/lib/tabTiming.mjs. */
+  await assertMeasurable(p, "verify-landing-a11y");
   await p.addInitScript(()=>Object.defineProperty(navigator,"webdriver",{get:()=>false})); // simulate a human
   await p.goto(BASE+"/?app", { waitUntil:"domcontentloaded" }); await sleep(2500);
   const r = await p.evaluate(()=>({ url: location.pathname+location.search, onLanding: location.pathname.indexOf("/landing")>=0, rootChildren: (document.getElementById("root")||{}).childElementCount||0, bodyText: (document.body.innerText||"").replace(/\s+/g," ").trim().length }));

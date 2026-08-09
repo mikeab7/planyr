@@ -7,6 +7,7 @@
  * isn't exercised — the dummy host is unreachable, which is exactly how the error path is tested.)
  */
 import { chromium } from "playwright";
+import { assertMeasurable } from "./lib/tabTiming.mjs";
 const BASE = "http://localhost:4173";
 const b = await chromium.launch({ args: ["--no-sandbox","--ignore-certificate-errors","--use-gl=angle","--use-angle=swiftshader","--enable-unsafe-swiftshader"] });
 let fails = 0;
@@ -15,6 +16,8 @@ const sleep = (ms)=>new Promise(r=>setTimeout(r,ms));
 
 const ctx = await b.newContext({ viewport:{width:1280,height:900} });
 const p = await ctx.newPage();
+/* ⛔ A background tab cannot be measured — clamped setTimeout, suspended rAF (a view change then updates state while the drawing never repaints). See ui-audit/lib/tabTiming.mjs. */
+await assertMeasurable(p, "verify-login-ui");
 const errs=[]; p.on("pageerror",e=>errs.push(e.message));
 await p.goto(BASE+"/", { waitUntil:"domcontentloaded" });
 await sleep(2500); // let the app shell boot

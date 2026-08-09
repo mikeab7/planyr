@@ -23,8 +23,9 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import {
   FEATURE_KINDS, parseFeatureKey, resolveDoubleClickTarget, pressIsOverElementBody,
-  stackEntries, FEATURE_ATTR, HANDLE_ATTR, EL_DIM_ATTR,
+  stackEntries, gestureAnchorTarget, FEATURE_ATTR, HANDLE_ATTR, EL_DIM_ATTR,
 } from "../src/workspaces/site-planner/lib/featureTarget.js";
+import { DBLTAP_MS, DBLTAP_PX } from "../src/workspaces/site-planner/lib/doubleTap.js";
 
 const feat = (feature, extra = {}) => ({ feature, handle: false, dim: false, ...extra });
 const plain = () => feat(null);
@@ -191,6 +192,85 @@ describe("flattening a live DOM stack", () => {
   });
 });
 
+/* ⛔ NEW-1 — THE IN-FLIGHT GESTURE ANCHOR, the clause B233153 did not reach.
+ *
+ * The owner's stub, on Bain: a road whose whole body is 6×12 CSS px, wearing a 12 px endpoint
+ * handle. Press 1 selected it; press 2, at the same point, resolved to a DIFFERENT, LARGER road,
+ * because a feature that small has no pixel left uncovered once its own grips mount. Skipping the
+ * handle (B233153) answers "what is beneath this grip" — it cannot answer "what is this gesture
+ * about", and those coincide only while the feature is bigger than the chrome it summons.
+ *
+ * The control that rules out the general case is in the header of the module under test: on a LARGE
+ * road, a press point covered by its own endpoint handle still resolves to the road. So these cases
+ * pin the narrow thing that changed — press 1's feature wins for the rest of ITS OWN gesture, and
+ * nothing else moves.
+ */
+describe("NEW-1 — a double-click in flight is anchored to what press 1 selected", () => {
+  const anchor = { key: "el:stub", t: 1000, x: 400, y: 300 };
+  // The owner's captured stack, mid-gesture: his stub's own grip on top, and underneath it a road
+  // that is NOT the one press 1 selected.
+  const ownerStack = [feat(null, { handle: true }), feat("el:otherRoad")];
+
+  it("press 2 addresses the feature press 1 selected, not what the stack now offers", () => {
+    expect(resolveDoubleClickTarget(ownerStack, { anchor, at: { t: 1150, x: 400, y: 300 } }))
+      .toEqual({ kind: "el", id: "stub" });
+  });
+
+  it("without the anchor the SAME stack resolves to the other road — this is the defect, pinned", () => {
+    expect(resolveDoubleClickTarget(ownerStack)).toEqual({ kind: "el", id: "otherRoad" });
+  });
+
+  it("an anchor whose feature is GONE from the stack still wins — that is the whole point", () => {
+    expect(resolveDoubleClickTarget([plain(), plain()], { anchor, at: { t: 1100, x: 400, y: 300 } }))
+      .toEqual({ kind: "el", id: "stub" });
+  });
+
+  it("a press outside the double-click's own TIME budget is not a gesture — the stack decides", () => {
+    expect(resolveDoubleClickTarget(ownerStack, { anchor, at: { t: 1000 + DBLTAP_MS, x: 400, y: 300 } }))
+      .toEqual({ kind: "el", id: "otherRoad" });
+  });
+
+  it("a press outside its DISTANCE budget is not a gesture either", () => {
+    expect(resolveDoubleClickTarget(ownerStack, { anchor, at: { t: 1100, x: 400 + DBLTAP_PX + 1, y: 300 } }))
+      .toEqual({ kind: "el", id: "otherRoad" });
+  });
+
+  it("inside the distance budget it still holds (the pointer never has to be exactly still)", () => {
+    expect(resolveDoubleClickTarget(ownerStack, { anchor, at: { t: 1100, x: 400 + DBLTAP_PX, y: 300 - DBLTAP_PX } }))
+      .toEqual({ kind: "el", id: "stub" });
+  });
+
+  it("every feature kind can be the anchor, measurements by index included", () => {
+    for (const [key, want] of [["markup:m1", { kind: "markup", id: "m1" }], ["callout:c2", { kind: "callout", id: "c2" }],
+      ["parcel:p3", { kind: "parcel", id: "p3" }], ["measure:4", { kind: "measure", i: 4 }]]) {
+      expect(resolveDoubleClickTarget(ownerStack, { anchor: { ...anchor, key }, at: { t: 1100, x: 400, y: 300 } })).toEqual(want);
+    }
+  });
+
+  it("a malformed or empty anchor key never half-resolves — it falls through to the stack", () => {
+    for (const key of ["", "el:", ":x", "nope:1", "measure:-1", "measure:x", null, undefined, 7]) {
+      expect(resolveDoubleClickTarget(ownerStack, { anchor: { ...anchor, key }, at: { t: 1100, x: 400, y: 300 } }))
+        .toEqual({ kind: "el", id: "otherRoad" });
+    }
+  });
+
+  it("no anchor, no `at`, or a non-array stack all behave exactly as before", () => {
+    expect(resolveDoubleClickTarget(ownerStack, {})).toEqual({ kind: "el", id: "otherRoad" });
+    expect(resolveDoubleClickTarget(ownerStack, { anchor })).toEqual({ kind: "el", id: "otherRoad" });
+    expect(resolveDoubleClickTarget(null, { anchor: null, at: { t: 1, x: 0, y: 0 } })).toBeNull();
+    expect(resolveDoubleClickTarget(null, { anchor, at: { t: 1000, x: 400, y: 300 } })).toEqual({ kind: "el", id: "stub" });
+  });
+
+  it("a press that arrives BEFORE the anchor (clocks crossed) is refused, never treated as a pair", () => {
+    expect(gestureAnchorTarget(anchor, { t: 900, x: 400, y: 300 })).toBeNull();
+  });
+
+  it("the anchor is inert on its own", () => {
+    expect(gestureAnchorTarget(null, { t: 1100, x: 400, y: 300 })).toBeNull();
+    expect(gestureAnchorTarget(anchor, null)).toBeNull();
+  });
+});
+
 describe("source guard — the render must keep stamping what the resolver reads", () => {
   const SP = readFileSync(fileURLToPath(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url)), "utf8");
 
@@ -213,7 +293,61 @@ describe("source guard — the render must keep stamping what the resolver reads
    * silently stops measuring the product — so it is pinned here. */
   it("the double-click resolution is exposed to the harnesses through the E2E hook", () => {
     expect(SP).toMatch(/window\.__plannerHitTarget = hook/);
-    expect(SP).toMatch(/dblResolveRef\.current = \(x, y\) => resolveDoubleClickTarget\(hitStackAt\(x, y\)\)/);
+    expect(SP).toMatch(/dblResolveRef\.current = \(x, y\) => resolveDoubleClickTarget\(hitStackAt\(x, y\), dblOpts\(null, x, y\)\)/);
+  });
+
+  /* ⛔ NEW-1 — the hook must resolve the way the PRODUCT does, anchor included. If the E2E hook and
+   * `onBgDouble` stop passing the same options, the two-press invariant goes back to measuring a
+   * resolution nobody experiences — green while the gesture is broken, which is this file's whole
+   * subject. Both call sites go through `dblOpts`, and that is pinned here. */
+  it("the hook and the real dblclick handler resolve through the SAME options", () => {
+    expect(SP).toMatch(/featureDoubleAction\(resolveDoubleClickTarget\(hitStackAt\(e\.clientX, e\.clientY\), dblOpts\(e, e\.clientX, e\.clientY\)\), e\)/);
+    expect(SP).toMatch(/const dblOpts = \(e, x, y\) =>/);
+    expect((SP.match(/dblOpts\(/g) || []).length).toBe(2); // exactly the two resolution call sites
+  });
+
+  /* The anchor's WHERE/WHEN must be stamped in the CAPTURE phase at the canvas root. Reading it from
+   * the double-tap record instead would only ever see presses that reached a feature's own handler —
+   * and a press EATEN BY CHROME is exactly the case the anchor exists for. */
+  it("the press is stamped in the capture phase, so chrome that swallows it is still recorded", () => {
+    expect(SP).toMatch(/onPointerDownCapture=\{\(e\) => \{ notePress\(e\);/);
+    expect(SP).toMatch(/lastPressRef\.current = \{ t: tapTime\(e\), x: e\.clientX, y: e\.clientY \}/);
+    /* …and UNCONDITIONALLY. It shares the capture handler with the vertex-drag hook, which bails
+     * during a 2-finger pinch; a press swallowed mid-pinch is still a press, and gating the stamp
+     * behind that guard would leave the anchor holding stale coordinates. */
+    expect(SP).toMatch(/onPointerDownCapture=\{\(e\) => \{ notePress\(e\); if \(touchCountRef\.current < 2\)/);
+  });
+
+  /* ⛔ NEW-1 — CHROME-NEVER-EATS-A-PRESS, instance five, and the reason it is TWO guards: the
+   * road-radius flag has a dot ON the road and a label pill OFF it, and they need opposite rules.
+   * The dot used to carry no `data-feature`, stop propagation, set no selection and never call
+   * `isDoubleTap` — on a road stub smaller than the dot that made the road unselectable AND let a
+   * double-click run `fixRoadRadiusFor`, silently re-cutting the alignment. */
+  const dotBlock = () => {
+    const at = SP.indexOf("data-road-radius-dot=");
+    expect(at).toBeGreaterThan(0);
+    return SP.slice(at, at + 900);
+  };
+
+  it("the flag's corner dot identifies AS its road and forwards the press to it", () => {
+    const block = dotBlock();
+    expect(block).toMatch(/data-feature=\{el \? `el:\$\{f\.id\}` : undefined\}/);
+    expect(block).toMatch(/isDoubleTap\(e, el\.id, wasSel\)/);
+    expect(block).toMatch(/featureDoubleAction\(\{ kind: "el", id: el\.id \}, e\)/);
+    expect(block).toMatch(/setSel\(\{ kind: "el", id: el\.id \}\)/);
+  });
+
+  it("the dot no longer applies the fix — a press on a road may never re-cut it", () => {
+    expect(dotBlock()).not.toMatch(/\bact\(\)/);
+  });
+
+  it("the one-click Fix survives, on the label pill that sits in clear space", () => {
+    const at = SP.indexOf('data-testid="road-radius-flag-label"');
+    expect(at).toBeGreaterThan(0);
+    const block = SP.slice(at, at + 400);
+    expect(block).toMatch(/onClick=\{\(e\) => \{ e\.stopPropagation\(\); act\(\); \}\}/);
+    // …and it must NOT claim to be the road: it is offset onto whatever happens to lie under it.
+    expect(block).not.toMatch(/data-feature/);
   });
 
   it("the hook is gated and nulled on unmount, like every other planner probe", () => {

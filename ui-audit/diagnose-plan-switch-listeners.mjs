@@ -24,6 +24,7 @@
 import { chromium } from "playwright";
 import { perfScenarioSeedMulti, SCENARIO_ID, SCENARIO_ID_B } from "./lib/perf-scenario.mjs";
 import { waitForSelectorReleased } from "./lib/waitRelease.mjs";
+import { assertMeasurable } from "./lib/tabTiming.mjs";
 
 const BASE = (process.env.BASE_URL || "http://localhost:4173/").replace(/\/?$/, "/");
 const EXEC = process.env.PW_CHROME || "/opt/pw-browsers/chromium-1194/chrome-linux/chrome";
@@ -93,6 +94,13 @@ await ctx.addInitScript(() => { window.__PLANYR_E2E = true; });
 await ctx.addInitScript(perfScenarioSeedMulti());
 await ctx.route("**/*", (r) => (r.request().url().startsWith(BASE) ? r.continue() : r.abort()));
 const page = await ctx.newPage();
+/* ⛔ A BACKGROUND TAB CANNOT BE MEASURED — not its clock, and not its pixels. A hidden tab clamps
+   setTimeout (a setTimeout-paced probe then times the clamp: 3,156 ms for a 138-182 ms gesture) AND
+   suspends requestAnimationFrame, so after a view change the app's state attributes update while the
+   drawing never repaints — every box, position, hit test and screenshot then agrees with every other
+   and describes a view the app already left. One precondition covers both, rAF liveness probe
+   included; see ui-audit/lib/tabTiming.mjs. Fails loudly rather than reporting either. */
+await assertMeasurable(page, "diagnose-plan-switch-listeners");
 const cdp = await ctx.newCDPSession(page);
 await cdp.send("HeapProfiler.enable").catch(() => {});
 await page.goto(BASE, { waitUntil: "load" });

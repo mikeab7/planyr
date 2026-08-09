@@ -7,6 +7,7 @@
  *
  * Run: node ui-audit/verify-library-refactor.mjs   (preview server on :4173)
  */
+import { assertMeasurable } from "./lib/tabTiming.mjs";
 import { chromium } from "playwright";
 
 const BASE = process.env.BASE_URL || "http://localhost:4173/";
@@ -18,6 +19,8 @@ const check = (ok, label) => { console.log(`  ${ok ? "✓" : "✗"} ${label}`); 
 async function run() {
   const browser = await chromium.launch({ executablePath: EXEC, args: ["--no-sandbox", "--ignore-certificate-errors"] });
   const page = await (await browser.newContext({ viewport: { width: 1280, height: 820 } })).newPage();
+  /* ⛔ A background tab cannot be measured — clamped setTimeout, suspended rAF (a view change then updates state while the drawing never repaints). See ui-audit/lib/tabTiming.mjs. */
+  await assertMeasurable(page, "verify-library-refactor");
   const pageErrors = [];
   page.on("pageerror", (e) => pageErrors.push(String(e)));
   // Console errors count EXCEPT resource-load failures (the sandbox blocks the cloud

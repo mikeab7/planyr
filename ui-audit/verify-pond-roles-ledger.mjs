@@ -16,6 +16,7 @@
  *      BASE_URL=http://localhost:4189/ node ui-audit/verify-pond-roles-ledger.mjs
  */
 import { chromium } from "playwright";
+import { assertMeasurable } from "./lib/tabTiming.mjs";
 
 const BASE = process.env.BASE_URL || "http://localhost:4189/";
 const EXEC = process.env.PW_CHROME || "/opt/pw-browsers/chromium-1194/chrome-linux/chrome";
@@ -125,6 +126,8 @@ async function run() {
     localStorage.setItem('planarfit:currentSite:v1', 's_roles');
   } catch (e) {} })();`);
   const pageA = await ctxA.newPage();
+  /* ⛔ A background tab cannot be measured — clamped setTimeout, suspended rAF (a view change then updates state while the drawing never repaints). See ui-audit/lib/tabTiming.mjs. */
+  await assertMeasurable(pageA, "verify-pond-roles-ledger");
   pageA.on("pageerror", (e) => { failures++; console.log(`  [FAIL] pageerror(A) — ${e.message}`); });
   const tA = await openYield(pageA);
 
@@ -150,6 +153,8 @@ async function run() {
     localStorage.setItem('planarfit:currentSite:v1', 's_det');
   } catch (e) {} })();`);
   const pageB = await ctxB.newPage();
+  /* ⛔ A background tab cannot be measured — clamped setTimeout, suspended rAF (a view change then updates state while the drawing never repaints). See ui-audit/lib/tabTiming.mjs. */
+  await assertMeasurable(pageB, "verify-pond-roles-ledger");
   pageB.on("pageerror", (e) => { failures++; console.log(`  [FAIL] pageerror(B) — ${e.message}`); });
   const tB = await openYield(pageB);
 
@@ -177,6 +182,8 @@ async function run() {
     localStorage.setItem('planarfit:currentSite:v1', 's_bal');
   } catch (e) {} })();`);
   const pageE = await ctxE2.newPage();
+  /* ⛔ A background tab cannot be measured — clamped setTimeout, suspended rAF (a view change then updates state while the drawing never repaints). See ui-audit/lib/tabTiming.mjs. */
+  await assertMeasurable(pageE, "verify-pond-roles-ledger");
   pageE.on("pageerror", (e) => { failures++; console.log(`  [FAIL] pageerror(E) — ${e.message}`); });
   let tE = await openYield(pageE);
   await pageE.locator('button:has-text("▸ Ledger balancer")').first().click({ timeout: 4000 }).catch(() => {});
@@ -217,6 +224,8 @@ async function run() {
     localStorage.setItem('planarfit:currentSite:v1', 's_enc');
   } catch (e) {} })();`);
   const pageF = await ctxF.newPage();
+  /* ⛔ A background tab cannot be measured — clamped setTimeout, suspended rAF (a view change then updates state while the drawing never repaints). See ui-audit/lib/tabTiming.mjs. */
+  await assertMeasurable(pageF, "verify-pond-roles-ledger");
   pageF.on("pageerror", (e) => { failures++; console.log(`  [FAIL] pageerror(F) — ${e.message}`); });
   const tF = await openYield(pageF);
 

@@ -50,6 +50,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createServer } from "node:http";
+import { assertMeasurable } from "./lib/tabTiming.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, "..");
@@ -120,6 +121,13 @@ async function openPage({ recorder = true, fast = true } = {}) {
   /* Everything external is blocked — this harness must be hermetic. */
   await ctx.route(/^https?:\/\//, (route) => (route.request().url().startsWith(BASE) ? route.continue() : route.abort()));
   const page = await ctx.newPage();
+  /* ⛔ A BACKGROUND TAB CANNOT BE MEASURED — not its clock, and not its pixels. A hidden tab clamps
+     setTimeout (a setTimeout-paced probe then times the clamp: 3,156 ms for a 138-182 ms gesture) AND
+     suspends requestAnimationFrame, so after a view change the app's state attributes update while the
+     drawing never repaints — every box, position, hit test and screenshot then agrees with every other
+     and describes a view the app already left. One precondition covers both, rAF liveness probe
+     included; see ui-audit/lib/tabTiming.mjs. Fails loudly rather than reporting either. */
+  await assertMeasurable(page, "verify-perf-recorder");
   await page.goto(recorder ? BASE : `${BASE}?perfrec=off`, { waitUntil: "load" });
   /* The recorder is armed in an idle gap after boot, so it is not there the instant load fires. */
   if (recorder) await page.waitForFunction(() => !!window.pfRec, null, { timeout: 30000 });

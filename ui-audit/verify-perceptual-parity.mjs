@@ -25,6 +25,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { decodePng } from "./lib/pngDiff.mjs";
 import { perceptualParity, parityLine } from "./lib/perceptualDiff.mjs";
 import { perfScenarioSeed } from "./lib/perf-scenario.mjs";
+import { assertMeasurable } from "./lib/tabTiming.mjs";
 
 const argOf = (f, d) => { const i = process.argv.indexOf(f); return i > -1 ? process.argv[i + 1] : d; };
 const BEFORE = argOf("--before", "http://localhost:4173/");
@@ -44,6 +45,13 @@ async function shoot(base, label) {
   await ctx.addInitScript(() => { window.__PLANYR_E2E = true; });
   await ctx.route(/^https?:\/\//, (r) => (r.request().url().startsWith(base) ? r.continue() : r.abort()));
   const page = await ctx.newPage();
+  /* ⛔ A BACKGROUND TAB CANNOT BE MEASURED — not its clock, and not its pixels. A hidden tab clamps
+     setTimeout (a setTimeout-paced probe then times the clamp: 3,156 ms for a 138-182 ms gesture) AND
+     suspends requestAnimationFrame, so after a view change the app's state attributes update while the
+     drawing never repaints — every box, position, hit test and screenshot then agrees with every other
+     and describes a view the app already left. One precondition covers both, rAF liveness probe
+     included; see ui-audit/lib/tabTiming.mjs. Fails loudly rather than reporting either. */
+  await assertMeasurable(page, "verify-perceptual-parity");
   const out = [];
   try {
     await page.goto(base, { waitUntil: "load" });

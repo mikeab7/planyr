@@ -8,6 +8,7 @@
 import pw from "/opt/node22/lib/node_modules/playwright/index.js";
 const { chromium } = pw;
 import { mkdirSync } from "node:fs";
+import { assertMeasurable } from "./lib/tabTiming.mjs";
 const OUT = new URL("./screens/", import.meta.url).pathname;
 mkdirSync(OUT, { recursive: true });
 const BASE = process.env.BASE_URL || "http://localhost:4174/";
@@ -29,11 +30,15 @@ const boot = async (page) => { await page.goto(BASE, { waitUntil: "load" }); awa
 
 // Tab A alone (logged out) → no conflict banner.
 const a = await ctx.newPage();
+/* ⛔ A background tab cannot be measured — clamped setTimeout, suspended rAF (a view change then updates state while the drawing never repaints). See ui-audit/lib/tabTiming.mjs. */
+await assertMeasurable(a, "verify-multitab");
 await boot(a);
 check("Logged-out Tab A alone: no multi-tab banner", (await bannerCount(a)) === 0);
 
 // Open Tab B on the SAME project. Logged out, neither tab should warn.
 const b = await ctx.newPage();
+/* ⛔ A background tab cannot be measured — clamped setTimeout, suspended rAF (a view change then updates state while the drawing never repaints). See ui-audit/lib/tabTiming.mjs. */
+await assertMeasurable(b, "verify-multitab");
 await boot(b);
 await a.waitForTimeout(1200); // let presence 'hello'/'here' settle
 check("Logged-out Tab B (same project) → still no banner", (await bannerCount(b)) === 0);

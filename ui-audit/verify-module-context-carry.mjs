@@ -26,6 +26,7 @@
  */
 import { chromium } from "playwright";
 import { existsSync } from "node:fs";
+import { assertMeasurable } from "./lib/tabTiming.mjs";
 
 const BASE = process.env.BASE_URL || "http://localhost:4173/";
 const EXEC = process.env.PW_CHROME
@@ -110,6 +111,13 @@ async function transitionTable(browser) {
   const rows = [];
   const ctx = await newCtx(browser, { stubSequence: true });
   const page = await ctx.newPage();
+  /* ⛔ A BACKGROUND TAB CANNOT BE MEASURED — not its clock, and not its pixels. A hidden tab clamps
+     setTimeout (a setTimeout-paced probe then times the clamp: 3,156 ms for a 138-182 ms gesture) AND
+     suspends requestAnimationFrame, so after a view change the app's state attributes update while the
+     drawing never repaints — every box, position, hit test and screenshot then agrees with every other
+     and describes a view the app already left. One precondition covers both, rAF liveness probe
+     included; see ui-audit/lib/tabTiming.mjs. Fails loudly rather than reporting either. */
+  await assertMeasurable(page, "verify-module-context-carry");
   for (const from of MODULES) {
     for (const to of MODULES) {
       if (from.id === to.id) continue;
@@ -147,6 +155,13 @@ async function grandPortCase(browser) {
   console.log("\nPART B — Grand Port: Site Planner → Schedule, with the embed on its Dashboard");
   const ctx = await newCtx(browser, { stubSequence: true });
   const page = await ctx.newPage();
+  /* ⛔ A BACKGROUND TAB CANNOT BE MEASURED — not its clock, and not its pixels. A hidden tab clamps
+     setTimeout (a setTimeout-paced probe then times the clamp: 3,156 ms for a 138-182 ms gesture) AND
+     suspends requestAnimationFrame, so after a view change the app's state attributes update while the
+     drawing never repaints — every box, position, hit test and screenshot then agrees with every other
+     and describes a view the app already left. One precondition covers both, rAF liveness probe
+     included; see ui-audit/lib/tabTiming.mjs. Fails loudly rather than reporting either. */
+  await assertMeasurable(page, "verify-module-context-carry");
 
   // B1 — open Grand Port in the Site Planner from the dashboard, the way the owner does.
   await page.goto(`${BASE}#/`, { waitUntil: "load" });
@@ -211,6 +226,13 @@ async function unlinkedProjectCase(browser) {
   console.log("\nPART C — a project with NO linked schedule");
   const ctx = await newCtx(browser, { stubSequence: true });
   const page = await ctx.newPage();
+  /* ⛔ A BACKGROUND TAB CANNOT BE MEASURED — not its clock, and not its pixels. A hidden tab clamps
+     setTimeout (a setTimeout-paced probe then times the clamp: 3,156 ms for a 138-182 ms gesture) AND
+     suspends requestAnimationFrame, so after a view change the app's state attributes update while the
+     drawing never repaints — every box, position, hit test and screenshot then agrees with every other
+     and describes a view the app already left. One precondition covers both, rAF liveness probe
+     included; see ui-audit/lib/tabTiming.mjs. Fails loudly rather than reporting either. */
+  await assertMeasurable(page, "verify-module-context-carry");
   await page.goto(`${BASE}#/project/${UNLINKED_GID}/site`, { waitUntil: "load" });
   await page.waitForTimeout(2600);
   await page.locator("[data-testid=module-tab-scheduler]:visible").first().click({ timeout: 6000 }).catch(() => {});

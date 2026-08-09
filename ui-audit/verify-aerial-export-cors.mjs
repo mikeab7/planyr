@@ -21,6 +21,7 @@ import { createServer } from "http";
 import { deflateSync } from "zlib";
 import { execSync } from "child_process";
 import { aerialPlacement, feetExtentToBbox } from "../src/workspaces/site-planner/lib/arcgis.js";
+import { assertMeasurable } from "./lib/tabTiming.mjs";
 
 /* ---- a tiny dependency-free RGB PNG (a colorful diagonal-band raster) ---- */
 const crcTable = (() => { const t = []; for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
@@ -75,6 +76,13 @@ const EXEC = process.env.PW_CHROME || ((await import("fs")).existsSync("/opt/pw-
   ? "/opt/pw-browsers/chromium/chrome-linux/chrome" : undefined);
 const browser = await chromium.launch({ executablePath: EXEC, args: ["--no-sandbox", "--ignore-certificate-errors"] });
 const page = await browser.newPage({ viewport: { width: 400, height: 300 } });
+/* ⛔ A BACKGROUND TAB CANNOT BE MEASURED — not its clock, and not its pixels. A hidden tab clamps
+   setTimeout (a setTimeout-paced probe then times the clamp: 3,156 ms for a 138-182 ms gesture) AND
+   suspends requestAnimationFrame, so after a view change the app's state attributes update while the
+   drawing never repaints — every box, position, hit test and screenshot then agrees with every other
+   and describes a view the app already left. One precondition covers both, rAF liveness probe
+   included; see ui-audit/lib/tabTiming.mjs. Fails loudly rather than reporting either. */
+await assertMeasurable(page, "verify-aerial-export-cors");
 
 const result = await page.evaluate(async ({ url, inlineSrc }) => {
   const W = 300, H = 200, SVGNS = "http://www.w3.org/2000/svg", XL = "http://www.w3.org/1999/xlink";

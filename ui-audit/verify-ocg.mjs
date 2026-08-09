@@ -12,6 +12,7 @@
  */
 import pw from "/home/user/planyr/node_modules/playwright-core/index.js";
 import { mkdirSync } from "node:fs";
+import { assertMeasurable } from "./lib/tabTiming.mjs";
 const { chromium } = pw;
 const OUT = new URL("./screens/", import.meta.url).pathname;
 mkdirSync(OUT, { recursive: true });
@@ -52,6 +53,13 @@ const waitRed = (page, want) => page.waitForFunction((want) => {
 const browser = await chromium.launch({ executablePath: EXEC, args: ["--no-sandbox", "--ignore-certificate-errors"] });
 const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1, ignoreHTTPSErrors: true });
 const page = await ctx.newPage();
+/* ⛔ A BACKGROUND TAB CANNOT BE MEASURED — not its clock, and not its pixels. A hidden tab clamps
+   setTimeout (a setTimeout-paced probe then times the clamp: 3,156 ms for a 138-182 ms gesture) AND
+   suspends requestAnimationFrame, so after a view change the app's state attributes update while the
+   drawing never repaints — every box, position, hit test and screenshot then agrees with every other
+   and describes a view the app already left. One precondition covers both, rAF liveness probe
+   included; see ui-audit/lib/tabTiming.mjs. Fails loudly rather than reporting either. */
+await assertMeasurable(page, "verify-ocg");
 const pageErrors = [];
 const NOISE = /ERR_TUNNEL|ERR_CONNECTION|ERR_CERT|Failed to load resource|net::/i;
 page.on("pageerror", (e) => pageErrors.push(String(e)));

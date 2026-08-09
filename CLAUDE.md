@@ -514,6 +514,28 @@ rules are binding shorthand, not optional style. (Full-text home so briefs stay 
      their own `onPointerDown`, and **a vertex must still drag** — assert that in the same commit, counting how
      many vertices moved (a press falling THROUGH an inert grip moves the whole object, which passes any
      "the geometry changed" check).
+  6. **⛔ AND THE FIFTH INSTANCE'S CLAUSE — WHEN THE FEATURE IS SMALLER THAN ITS OWN CHROME, "WHAT IS
+     BENEATH THIS GRIP" AND "WHAT IS THIS GESTURE ABOUT" STOP BEING THE SAME QUESTION.** Clause 5 fixed
+     identification at the resolver by looking THROUGH the handle layer, which answers the first
+     question. It does not answer the second, and those coincide only while the feature is bigger than
+     the chrome it summons. Captured live on the owner's Bain plan: a road stub whose whole rendered
+     body is **6×12 CSS px**, wearing a 12 px endpoint handle inside a 15×22 px handle box. Press 1
+     selected it; press 2, at the same point, addressed **a different, larger road**, and the panel
+     open after press 1 was gone after press 2. **The control matters as much as the capture** — on a
+     LARGE road, a point where press 1 mounts an endpoint handle directly over the press point still
+     resolves to the road and still opens Properties, so looking through the handle layer works and the
+     endpoint handle is not the differentiator. **The SIZE RATIO is.** The rule: **while a double-click
+     is in flight, the feature press 1 selected WINS the hit test at that point** — anchored on the
+     native double-click's own time and distance budgets, so one press outside them is not a gesture and
+     resolves off the stack exactly as before (`featureTarget.gestureAnchorTarget`). Two corollaries:
+     **(a)** a "prefer it on a tie" rule is not enough — it still loses to whatever the stack puts on
+     top, which is the failure; **(b)** the same size ratio makes REVIEW chrome dangerous, not just
+     grips — the min-radius flag's 7 px corner dot is wider than that stub, and it swallowed the press
+     entirely AND ran the corner fix on press 2, **silently re-cutting the alignment**. Chrome that
+     paints ON its feature's body identifies AS that feature and forwards the press; chrome offset into
+     clear space keeps its own action and does NOT claim to be the feature. **A gesture whose contract
+     is "open Properties" must never edit the plan, and never CLOSE a panel that was already open** —
+     both are now asserted for every feature by `audit-doubleclick-properties`.
   Precedents: **B1174** (measurement chips), **B1327** (the parcel acreage badge — the third instance, and the
   reason this is a named rule; regressed by B1186 moving the badge anchor to `polylabel`), and **B50010** (an
   element's own DIMENSION NUMBER — a road's is anchored to the centreline midpoint, so it is painted ON the
@@ -530,6 +552,53 @@ rules are binding shorthand, not optional style. (Full-text home so briefs stay 
   EXCEPTION is user-placed content the user opted into putting on top — a promoted reference (B1198), a markup
   with `behindEls: false` — which is selectable, lockable and demotable in one click from the menu that put it
   there. Guard: the e2e spec **chrome-swallows-press** (mutation-checked both ways).
+- **FOREGROUND-OR-VOID** — **A BACKGROUND TAB CANNOT BE MEASURED: NOT ITS CLOCK, AND NOT ITS PIXELS.
+  A browser-driving harness MUST assert `document.visibilityState === "visible"` BEFORE it measures
+  ANYTHING — time or geometry — and FAIL LOUDLY if it is not.** (Owner rule, 2026-08-09, filed with
+  both measurements that produced it. **ONE precondition rather than two rules, deliberately: one
+  cause produces both failures, and a harness must not be able to satisfy it by halves.**)
+  0. **⛔ CLAUSE 2 — GEOMETRY, AND IT IS THE MORE DANGEROUS OF THE TWO. Any DOM measurement taken
+     after a VIEW CHANGE on a background tab is void, because rAF is SUSPENDED and the drawing never
+     repaints.** Measured on the owner's live tab at `visibilityState === "hidden"`: `requestAnimation
+     Frame` **did not fire once** when raced against a MessageChannel loop for two full seconds. A CDP
+     wheel then updated the app's STATE correctly — `data-view-ppf` and `data-render-ppf` both
+     0.0501 → 0.1062, a clean 2× zoom in — while the pond's DOM geometry **did not move at all**:
+     centre (892.9, 248), width 143.4 px, identical to three wheel gestures earlier, to one decimal
+     place. **A throttled timer gives you a wrong NUMBER; a suspended rAF gives you a wrong PICTURE
+     THAT IS INTERNALLY CONSISTENT** — boxes, positions, sizes and hit tests all agree with each other
+     and all describe a view the app already left, and the app's own state attributes will confirm the
+     view you asked for. Anything built on `elementFromPoint`, `getBoundingClientRect` or a screenshot
+     inherits it silently. **It cost a false lead before it was caught:** an apparent anchored-zoom
+     defect (a wheel-out at pointer x=900 leaving the drawing at x=104, moving AWAY from the pointer)
+     was flagged against **B1449 / B258992 / V56000** and is **REFUTED — a stale frame, not a broken
+     anchor. The anchored-zoom work is not implicated; do not re-open it on that evidence.**
+     **THE rAF LIVENESS PROBE IS PART OF THE ASSERTION, not an extra:** race one rAF against a
+     MessageChannel loop, because it catches the case `visibilityState` cannot — a tab that claims to
+     be visible while its frame loop is wedged anyway.
+  1. **CLAUSE 1 — TIMING.** A probe of one double-click gesture on the owner's real plan reported **3,156 ms and
+     2,992 ms**. The tab was `document.visibilityState === "hidden"` throughout (it was being driven
+     from another tab) and the harness paced itself with `setTimeout`, which Chrome CLAMPS in a hidden
+     tab. It was timing the clamp. **The control — same gesture, same build, same tab, same hidden
+     state, ONLY the pacing primitive changed to a MessageChannel yield: 138–182 ms** end to end, 13–63
+     ms of synchronous handler time. Four elements measured honestly: 111 / 138 / 154 / 182 ms. There
+     was never a multi-second interaction cost to chase.
+  2. **WHY IT IS A GUARD AND NOT A NOTE.** This trap's FIRST appearance produced an obvious failure and
+     cost one round of probing. This one produced a **plausible number** — self-consistent, repeatable,
+     in the right units, off by a factor of twenty — that reached the owner and was on its way onto two
+     perf backlog items. A wrong number that looks right is strictly more dangerous than a crash, and
+     nothing downstream can tell them apart, so the check belongs at the source.
+  3. **MACHINE-ENFORCED, because a rule nobody's code consults is not a guard.**
+     `ui-audit/lib/tabTiming.mjs` — **`assertMeasurable(page, harness)`** is the one precondition
+     (visibility THEN rAF liveness, both throwing and both named), plus `pacedWait` (a MessageChannel
+     loop; unthrottled, and the drop-in for a `waitForTimeout` INSIDE a timed section) and
+     `timingProvenance`. **Wired into ALL 347 ui-audit harnesses that drive a browser — universal, not
+     a list.** The first version named the 28 that read a clock; clause 2 swept in nearly all the rest
+     for a real reason rather than a loose heuristic — almost every harness here clicks "Zoom to fit"
+     and then measures a bounding box, which is exactly the pattern that returns a stale frame. So
+     `test/tabTiming.test.js` requires it of every harness that launches Chromium, and requires the
+     call to NAME itself so a failure says which run is void. **There is no list left to rot, and a new
+     harness cannot be written without it.**
+  4. **An "unreadable" visibility state is refused too** — a harness that cannot check cannot vouch.
 - **PERCEPTUAL-PARITY** — **The bar a change to the PICTURE has to clear is that the owner cannot SEE it at
   working zoom — not that the file is unchanged.** (Owner amendment, 2026-08-06, verbatim: *"imperceptible at
   working zoom assuming that one makes the most sense"*, and *"I've got a 2K display, so I'm not gonna see

@@ -9,6 +9,7 @@
  * Run: npm run build && npx vite preview --port 4173, then  node ui-audit/verify-new-site-save.mjs */
 import { chromium } from "playwright";
 import { mkdirSync } from "node:fs";
+import { assertMeasurable } from "./lib/tabTiming.mjs";
 
 const BASE = process.env.BASE_URL || "http://localhost:4173/";
 const OUT = new URL("./screens/", import.meta.url).pathname;
@@ -33,6 +34,13 @@ const domMarkups = (page) => page.evaluate(() => document.querySelectorAll("svg 
 const browser = await chromium.launch({ executablePath: process.env.PW_CHROME || undefined, args: ["--no-sandbox", "--ignore-certificate-errors"] });
 const ctx = await browser.newContext({ viewport: { width: 1380, height: 900 }, ignoreHTTPSErrors: true });
 const page = await ctx.newPage();
+/* ⛔ A BACKGROUND TAB CANNOT BE MEASURED — not its clock, and not its pixels. A hidden tab clamps
+   setTimeout (a setTimeout-paced probe then times the clamp: 3,156 ms for a 138-182 ms gesture) AND
+   suspends requestAnimationFrame, so after a view change the app's state attributes update while the
+   drawing never repaints — every box, position, hit test and screenshot then agrees with every other
+   and describes a view the app already left. One precondition covers both, rAF liveness probe
+   included; see ui-audit/lib/tabTiming.mjs. Fails loudly rather than reporting either. */
+await assertMeasurable(page, "verify-new-site-save");
 const errs = []; page.on("pageerror", (e) => errs.push(String(e)));
 await page.goto(BASE, { waitUntil: "domcontentloaded" });
 await page.waitForTimeout(3500);

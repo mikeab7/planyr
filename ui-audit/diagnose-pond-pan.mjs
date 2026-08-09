@@ -58,6 +58,7 @@ import { rungViewFault, viewDrift, pct } from "./lib/sessionAxes.mjs";
 import { pairedDelta, nullFloor, armVerdict, scalingShape, attributionQuality, phaseDelta, topFunctions, median } from "./lib/pondPan.mjs";
 import { attributeProfile, loadSourceMaps, makeFrameResolver } from "./lib/bootTimeline.mjs";
 import { fakeTilePng, parseTileUrl } from "./lib/fakeTile.mjs";
+import { assertMeasurable } from "./lib/tabTiming.mjs";
 
 const BASE = (process.env.BASE_URL || "http://localhost:4173/").replace(/\/?$/, "/");
 const EXEC = process.env.PW_CHROME || "/opt/pw-browsers/chromium-1194/chrome-linux/chrome";
@@ -459,6 +460,13 @@ await context.route("**/*", (route) => {
 });
 
 const page = await context.newPage();
+/* ⛔ A BACKGROUND TAB CANNOT BE MEASURED — not its clock, and not its pixels. A hidden tab clamps
+   setTimeout (a setTimeout-paced probe then times the clamp: 3,156 ms for a 138-182 ms gesture) AND
+   suspends requestAnimationFrame, so after a view change the app's state attributes update while the
+   drawing never repaints — every box, position, hit test and screenshot then agrees with every other
+   and describes a view the app already left. One precondition covers both, rAF liveness probe
+   included; see ui-audit/lib/tabTiming.mjs. Fails loudly rather than reporting either. */
+await assertMeasurable(page, "diagnose-pond-pan");
 const cdp = await context.newCDPSession(page);
 await cdp.send("Performance.enable").catch(() => {});
 await cdp.send("HeapProfiler.enable").catch(() => {});

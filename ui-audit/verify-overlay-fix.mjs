@@ -9,6 +9,7 @@ import pw from "/opt/node22/lib/node_modules/playwright/index.js";
 const { chromium } = pw;
 import { mkdirSync } from "node:fs";
 import { deflateSync, crc32 } from "node:zlib";
+import { assertMeasurable } from "./lib/tabTiming.mjs";
 const OUT = new URL("./screens/", import.meta.url).pathname;
 mkdirSync(OUT, { recursive: true });
 const BASE = process.env.BASE_URL || "http://localhost:4173/";
@@ -48,6 +49,13 @@ const imgBox = (page) => page.evaluate(() => { const i = document.querySelector(
   const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1, ignoreHTTPSErrors: true });
   await ctx.addInitScript(seed);
   const page = await ctx.newPage();
+  /* ⛔ A BACKGROUND TAB CANNOT BE MEASURED — not its clock, and not its pixels. A hidden tab clamps
+     setTimeout (a setTimeout-paced probe then times the clamp: 3,156 ms for a 138-182 ms gesture) AND
+     suspends requestAnimationFrame, so after a view change the app's state attributes update while the
+     drawing never repaints — every box, position, hit test and screenshot then agrees with every other
+     and describes a view the app already left. One precondition covers both, rAF liveness probe
+     included; see ui-audit/lib/tabTiming.mjs. Fails loudly rather than reporting either. */
+  await assertMeasurable(page, "verify-overlay-fix");
   page.on("dialog", async (d) => { console.log("  [A DIALOG]", d.message().slice(0, 120)); fail++; await d.accept().catch(() => {}); });
   await page.goto(BASE, { waitUntil: "load" }); await page.waitForTimeout(1600);
   try { await page.locator('[title="Zoom to fit"]').first().click({ timeout: 4000 }); } catch (e) {}
@@ -71,6 +79,13 @@ const imgBox = (page) => page.evaluate(() => { const i = document.querySelector(
   const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1, ignoreHTTPSErrors: true });
   await ctx.addInitScript(seed);
   const page = await ctx.newPage();
+  /* ⛔ A BACKGROUND TAB CANNOT BE MEASURED — not its clock, and not its pixels. A hidden tab clamps
+     setTimeout (a setTimeout-paced probe then times the clamp: 3,156 ms for a 138-182 ms gesture) AND
+     suspends requestAnimationFrame, so after a view change the app's state attributes update while the
+     drawing never repaints — every box, position, hit test and screenshot then agrees with every other
+     and describes a view the app already left. One precondition covers both, rAF liveness probe
+     included; see ui-audit/lib/tabTiming.mjs. Fails loudly rather than reporting either. */
+  await assertMeasurable(page, "verify-overlay-fix");
   await page.goto(BASE, { waitUntil: "load" }); await page.waitForTimeout(1600);
   try { await page.locator('[title="Zoom to fit"]').first().click({ timeout: 4000 }); } catch (e) {}
   await page.waitForTimeout(600);

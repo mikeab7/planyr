@@ -196,7 +196,10 @@ describe("per-type click wiring (the pond regression, and the types the owner as
    * handler and the render-side identity it depends on; the LIVE half (which asserts the dblclick's
    * own TARGET really is the svg) is e2e/dblclick-properties.spec.js. */
   it("the double-click is resolved at the canvas ROOT, off the live hit stack", () => {
-    expect(SP).toMatch(/const onBgDouble = \(e\) => \{[\s\S]{0,400}featureDoubleAction\(resolveDoubleClickTarget\(hitStackAt\(e\.clientX, e\.clientY\)\), e\);/);
+    /* NEW-1 — the resolution now also carries the IN-FLIGHT GESTURE ANCHOR (`dblOpts`): press 2 of a
+     * double-click addresses whatever press 1 selected, which is what a feature smaller than its own
+     * chrome needs (see lib/featureTarget.js). The stack read is unchanged and still comes first. */
+    expect(SP).toMatch(/const onBgDouble = \(e\) => \{[\s\S]{0,400}featureDoubleAction\(resolveDoubleClickTarget\(hitStackAt\(e\.clientX, e\.clientY\), dblOpts\(e, e\.clientX, e\.clientY\)\), e\);/);
     expect(SP, "a double-click mid-draw must still finish the shape, exactly like Enter").toMatch(/const onBgDouble = \(e\) => \{\s*\n\s*if \(finishActiveDrawing\(\)\) return;/);
     expect(SP, "the root resolver must use the browser's own hit-test, never a second geometric one").toMatch(/document\.elementsFromPoint\(x, y\)/);
     // Every family the resolver can name must actually be stamped on the render, or a double-click

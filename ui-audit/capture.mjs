@@ -13,6 +13,7 @@
  */
 import { chromium } from "playwright";
 import { mkdirSync } from "node:fs";
+import { assertMeasurable } from "./lib/tabTiming.mjs";
 
 const BASE = process.env.BASE_URL || "http://localhost:4173/";
 const OUT = new URL("./screens/", import.meta.url).pathname;
@@ -115,6 +116,13 @@ async function shot(browser, s) {
   const ctx = await browser.newContext({ viewport: s.viewport || { width: 1440, height: 900 }, deviceScaleFactor: 1.5 });
   await ctx.addInitScript(s.rawSeed || seedScript(s.seed));
   const page = await ctx.newPage();
+  /* ⛔ A BACKGROUND TAB CANNOT BE MEASURED — not its clock, and not its pixels. A hidden tab clamps
+     setTimeout (a setTimeout-paced probe then times the clamp: 3,156 ms for a 138-182 ms gesture) AND
+     suspends requestAnimationFrame, so after a view change the app's state attributes update while the
+     drawing never repaints — every box, position, hit test and screenshot then agrees with every other
+     and describes a view the app already left. One precondition covers both, rAF liveness probe
+     included; see ui-audit/lib/tabTiming.mjs. Fails loudly rather than reporting either. */
+  await assertMeasurable(page, "capture");
   await page.goto(BASE, { waitUntil: "load" });
   await page.waitForTimeout(1400);
   if (s.prep) { try { await s.prep(page); } catch (e) { console.warn(`  prep(${s.name}) warn:`, e.message); } }

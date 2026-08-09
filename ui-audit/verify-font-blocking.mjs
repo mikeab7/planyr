@@ -34,6 +34,7 @@ import { readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join, extname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { assertMeasurable } from "./lib/tabTiming.mjs";
 
 const ROOT = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const DIST = join(ROOT, "dist");
@@ -151,6 +152,13 @@ async function measure(browser, { arm, url }) {
 
   const fontHostRequests = [];
   const page = await ctx.newPage();
+  /* ⛔ A BACKGROUND TAB CANNOT BE MEASURED — not its clock, and not its pixels. A hidden tab clamps
+     setTimeout (a setTimeout-paced probe then times the clamp: 3,156 ms for a 138-182 ms gesture) AND
+     suspends requestAnimationFrame, so after a view change the app's state attributes update while the
+     drawing never repaints — every box, position, hit test and screenshot then agrees with every other
+     and describes a view the app already left. One precondition covers both, rAF liveness probe
+     included; see ui-audit/lib/tabTiming.mjs. Fails loudly rather than reporting either. */
+  await assertMeasurable(page, "verify-font-blocking");
 
   /* The one variable under test: the font host answers slowly. Everything else cross-origin is
    * aborted immediately so a blocked tile/auth host cannot contaminate either arm's timings. */

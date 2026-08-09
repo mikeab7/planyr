@@ -75,6 +75,50 @@
  *
  * Pure + Node-testable (test/featureTarget.test.js).
  */
+import { pairsWithLastTap } from "./doubleTap.js";
+
+/* ⛔ NEW-1 — AND THE CLAUSE B233153 DID NOT REACH: #963 TAUGHT THE RESOLVER TO LOOK *THROUGH* THE
+ * HANDLE LAYER; IT DID NOT TEACH IT THAT PRESS 2 IS STILL ABOUT WHATEVER PRESS 1 SELECTED.
+ *
+ * Captured live on the owner's Bain plan, on a road stub whose whole rendered body is 6×12 CSS px:
+ *
+ *     press 1  → path, owner e79463haroul. It SELECTS. Handle layer becomes 15×22 px, 7 grips.
+ *     between  → elementFromPoint is a circle[data-road-endpoint], r=6, inside [data-handle-layer].
+ *     press 2  → the handle layer becomes 189×127 px with 28 grips, and the panel is GONE.
+ *                Press 2 addressed a DIFFERENT, LARGER road than press 1 did.
+ *
+ * The control that rules out the general case, run for exactly that reason: on a large road, a point
+ * where press 1 mounts an endpoint handle directly over the press point still resolves to the road
+ * and still opens Properties. Looking through the handle layer works. The endpoint handle is not the
+ * differentiator.
+ *
+ * THE DIFFERENTIATOR IS THAT THE FEATURE IS SMALLER THAN ITS OWN CHROME. A 6×12 body wearing a 12 px
+ * endpoint handle has no pixel left uncovered once it is selected, so press 2 can only resolve to
+ * whatever lies under the chrome — and what lies under it there is a different road. Skipping the
+ * handle (B233153) answers "what is beneath this grip"; it cannot answer "what is this GESTURE
+ * about". Those are the same question only while the feature is bigger than the chrome it mounts.
+ *
+ * SO A DOUBLE-CLICK IN FLIGHT IS ANCHORED. Press 1 selected a feature at a point; press 2 lands at
+ * the SAME point inside the SAME budget the double-tap itself uses — by construction it is the same
+ * gesture, and it is about the same thing. The anchor wins outright rather than merely being
+ * preferred: a rule that only breaks ties still loses to whatever the stack puts on top, which is
+ * the failure being closed. It is also NARROW — the gates are the native double-click's own
+ * thresholds (`pairsWithLastTap`), so one press outside the window or 15 px away is not a gesture
+ * and resolves off the stack exactly as before.
+ *
+ * ⛔ AND IT IS IDENTIFICATION ONLY, like the handle rule beside it. Nothing here changes which node
+ * takes a press, so a grip still drags and a vertex still reshapes. */
+export function gestureAnchorTarget(anchor, at) {
+  if (!anchor || !anchor.key || !at) return null;
+  /* The SAME budget the reconstructed double-tap uses, borrowed rather than re-declared: a second
+   * copy of DBLTAP_MS/DBLTAP_PX here would let the anchor and the pair disagree about what a
+   * double-click IS, and the disagreement would be invisible (both answers look reasonable). */
+  const held = pairsWithLastTap(
+    { id: "gesture", t: anchor.t, x: anchor.x, y: anchor.y },
+    { id: "gesture", t: at.t, x: at.x, y: at.y },
+  );
+  return held ? parseFeatureKey(anchor.key) : null;
+}
 
 /* The kinds a double-click can address. `measure` is addressed BY INDEX (that is how the planner's
  * own selection stores it: `sel = { kind: "measure", i }`); everything else by id. */
@@ -103,8 +147,14 @@ export function parseFeatureKey(key) {
  * where `feature` is the nearest enclosing `data-feature` value (null if the node is not inside a
  * feature) and `handle` marks a node inside the always-on-top handle layer.
  *
- * Two rules, and both are deliberate:
+ * `opts.anchor` / `opts.at` carry the in-flight gesture (see `gestureAnchorTarget`): what press 1
+ * selected, and where/when this press landed. Omit them and the resolution is purely the stack's.
  *
+ * Three rules, and all three are deliberate:
+ *
+ *  0. A DOUBLE-CLICK IN FLIGHT IS ANCHORED TO WHAT PRESS 1 SELECTED (NEW-1; see the header). Asked
+ *     FIRST, because the whole point is that it must not lose to whatever the stack puts on top —
+ *     on a feature smaller than its own chrome, the stack has nothing left of the feature to find.
  *  1. A HANDLE IS TRANSPARENT — skip it and keep looking (B233153; see the header). A grip is chrome
  *     belonging to the selected feature, so it can never be the answer to "which feature was
  *     double-clicked", and it must not stand in the way of the answer either. Handles are SIBLINGS of
@@ -116,7 +166,9 @@ export function parseFeatureKey(key) {
  *     top-most-first order the browser used to pick the press target, so the double-click resolves
  *     to whatever the user was pressing on.
  */
-export function resolveDoubleClickTarget(entries) {
+export function resolveDoubleClickTarget(entries, opts = {}) {
+  const anchored = gestureAnchorTarget(opts.anchor, opts.at);
+  if (anchored) return anchored;
   if (!Array.isArray(entries)) return null;
   for (const en of entries) {
     if (!en) continue;

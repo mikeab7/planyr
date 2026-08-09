@@ -15,6 +15,7 @@
  *   node ui-audit/verify-rename-revert.mjs */
 import { chromium } from "playwright";
 import { mkdirSync } from "node:fs";
+import { assertMeasurable } from "./lib/tabTiming.mjs";
 
 const BASE = process.env.BASE_URL || "http://localhost:4173/";
 const OUT = new URL("./screens/", import.meta.url).pathname;
@@ -61,6 +62,13 @@ const pageErrors = [];
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 860 } });
   await ctx.addInitScript(seedScript(true));
   const page = await ctx.newPage();
+  /* ⛔ A BACKGROUND TAB CANNOT BE MEASURED — not its clock, and not its pixels. A hidden tab clamps
+     setTimeout (a setTimeout-paced probe then times the clamp: 3,156 ms for a 138-182 ms gesture) AND
+     suspends requestAnimationFrame, so after a view change the app's state attributes update while the
+     drawing never repaints — every box, position, hit test and screenshot then agrees with every other
+     and describes a view the app already left. One precondition covers both, rAF liveness probe
+     included; see ui-audit/lib/tabTiming.mjs. Fails loudly rather than reporting either. */
+  await assertMeasurable(page, "verify-rename-revert");
   page.on("pageerror", (e) => pageErrors.push("A: " + e));
   await page.goto(BASE, { waitUntil: "domcontentloaded" });
   await page.waitForTimeout(3000);
@@ -105,6 +113,13 @@ const pageErrors = [];
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 860 } });
   await ctx.addInitScript(seedScript(false)); // no currentSite → boot straight to the map
   const page = await ctx.newPage();
+  /* ⛔ A BACKGROUND TAB CANNOT BE MEASURED — not its clock, and not its pixels. A hidden tab clamps
+     setTimeout (a setTimeout-paced probe then times the clamp: 3,156 ms for a 138-182 ms gesture) AND
+     suspends requestAnimationFrame, so after a view change the app's state attributes update while the
+     drawing never repaints — every box, position, hit test and screenshot then agrees with every other
+     and describes a view the app already left. One precondition covers both, rAF liveness probe
+     included; see ui-audit/lib/tabTiming.mjs. Fails loudly rather than reporting either. */
+  await assertMeasurable(page, "verify-rename-revert");
   page.on("pageerror", (e) => pageErrors.push("B: " + e));
   await page.goto(BASE, { waitUntil: "domcontentloaded" });
   await page.waitForTimeout(2500);
