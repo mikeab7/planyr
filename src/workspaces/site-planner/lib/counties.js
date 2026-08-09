@@ -34,6 +34,10 @@ import { situsKey } from "./appraisal.js";
  * guess for a real answer. See countyPolygons.js for why the geometry is bundled rather than
  * fetched on demand. */
 import { resolveCounty, loadCountyPolygons, countyPolygonsReady } from "./countyPolygons.js";
+/* NEW-4 — county ROUTING KEYS are normalised at the map itself, not at each call site.
+ * See shared/gis/countyKeys.js for why (a raw `MAP[county]` missed the two production rows
+ * spelled "Harris", silently). */
+import { byCountyKey, countyKeySet, normCountyKey } from "../../../shared/gis/countyKeys.js";
 
 export { loadCountyPolygons, countyPolygonsReady };
 
@@ -79,7 +83,7 @@ const publishedButUnprobed =
 /* The four counties whose OWN parcel service is live-verified share one help shape too. */
 const ownHelp = (source, idKind) => `${source}. Search by ${idKind} or a site address.`;
 
-export const COUNTIES = {
+const COUNTIES_RAW = {
   harris: {
     state: "TX",
     label: "Harris County · HCAD",
@@ -378,7 +382,7 @@ export const COUNTIES = {
  * (the actual pain); Fort Bend is included as reliable-source insurance (Phase 2, tiled). Harris is
  * deliberately EXCLUDED (1.5M parcels — too big for the browser). Kept in lockstep with the
  * parcel-cache Function's allowlist (functions/api/parcel-cache/_handler.js). */
-export const SNAPSHOT_COUNTIES = new Set(["chambers", "waller", "fortbend"]);
+export const SNAPSHOT_COUNTIES = countyKeySet(["chambers", "waller", "fortbend"]);
 
 const ID_RE =
   /(hcad_?num|^acct|account|parcel_?id|prop_?id|^pid$|quick_?ref|geo_?id|^pin$|^gid$)/i;
@@ -423,7 +427,9 @@ export async function resolveTaxRates(county, attrs) {
  * agency's GIS site; county servers move occasionally, so a layer that 404s can
  * be re-pointed here. Several are flagged provisional where not live-verified.
  * ----------------------------------------------------------------------- */
-export const JURISDICTION_LAYERS = {
+export const COUNTIES = byCountyKey(COUNTIES_RAW);
+
+const JURISDICTION_LAYERS_RAW = {
   // B898: Harris's direct-agency layers (drainage channels, storm sewer, water/wastewater
   // mains) moved OUT of this per-county nesting into the flat `AHJ_LAYERS` registry in
   // layers.js (same `county` tag convention as EVIDENCE.coh_hydrants) — they now render
@@ -510,7 +516,7 @@ export function detectField(fields, kind) {
  *     returns a lot is the source of truth. Overlap at borders is intentional so a
  *     straddle click queries both counties. (No precise boundary polygons bundled.)
  * If layerUrl is null it's resolved from mapServer at runtime. */
-export const COUNTIES_MAP = {
+const COUNTIES_MAP_RAW = {
   harris: {
     state: "TX",
     center: [29.76, -95.37],
@@ -831,6 +837,14 @@ export function noParcelSourceNote(identity) {
 // Texas counties). The circuit breaker must never skip these (they're the universal
 // fallback), and a hit FROM one of them standing in for a real-CAD county is what the
 // honest "statewide backup" badge keys off (B244).
+/* NEW-4 — the county-keyed config maps, wrapped so EVERY lookup normalises its key (see
+ * shared/gis/countyKeys.js). Declared here — after the three literals above and before the first
+ * module-level consumer (`STATEWIDE_KEYS`, immediately below) — because a `const` is in its
+ * temporal dead zone until its own line runs, so a wrapper placed at the end of the file would
+ * throw on load. The `_RAW` literals stay private: nothing outside should hold the unwrapped map. */
+export const COUNTIES_MAP = byCountyKey(COUNTIES_MAP_RAW);
+export const JURISDICTION_LAYERS = byCountyKey(JURISDICTION_LAYERS_RAW);
+
 export const STATEWIDE_KEYS = Object.entries(COUNTIES_MAP).filter(([, c]) => c.statewide).map(([k]) => k);
 
 /* NEW-2 — ONE URL MUST NOT CARRY TWO HEALTH POLICIES.
@@ -934,20 +948,20 @@ export const stateForCountyKey = (key) => (COUNTIES_MAP[key] && COUNTIES_MAP[key
  * county whose own server is down degrades to nothing instead of to TxGIO. The five new counties
  * are added with the spelling TxGIO's own `county` column uses (upper case, spaces not
  * underscores) — verified against the live layer, which is why FORT BEND is two words. */
-const TXGIO_COUNTY_NAME = {
+const TXGIO_COUNTY_NAME = byCountyKey({
   harris: "HARRIS", fortbend: "FORT BEND", chambers: "CHAMBERS", waller: "WALLER",
   montgomery: "MONTGOMERY", brazoria: "BRAZORIA", galveston: "GALVESTON", liberty: "LIBERTY",
   austintx: "AUSTIN",
-};
+});
 
 /* NEW-5 — the same idea for Colorado. The state composite scopes on `countyName`, spelled in
  * title case (not TxGIO's upper case), so the two states need their own maps rather than one
  * shared one with a case rule. */
-const CO_COUNTY_NAME = {
+const CO_COUNTY_NAME = byCountyKey({
   co_adams: "Adams", co_denver: "Denver", co_arapahoe: "Arapahoe", co_larimer: "Larimer",
   co_weld: "Weld", co_jefferson: "Jefferson", co_elpaso: "El Paso", co_boulder: "Boulder",
   co_broomfield: "Broomfield",
-};
+});
 
 /* The statewide-backup parcel source for a county whose primary CAD is unavailable,
  * or null when there's no stand-in. Returns null for a county that has NO statewide

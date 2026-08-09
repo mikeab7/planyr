@@ -412,6 +412,16 @@ results.timeToFirstDragMs = Math.round(await page.evaluate(() => new Promise((re
  * than no guard — it is the B1086 trap in a new place, and it nearly certified an unverified fix.
  * B1349's own definition of the defect is "in flight on an idle page, no gesture, four seconds of
  * idle", so the metric now waits for exactly that: a settle window with no gesture in it. */
+/* ⚠ AND THE SNAPSHOT IS STILL TAKEN ON THE WRONG SIDE OF THE HARNESS'S OWN POINTER (B295168,
+ * 2026-08-06). The settle above is correct and stays. What is NOT correct is that it runs AFTER the
+ * time-to-first-drag gesture, and that gesture moves the mouse across the canvas — so any chunk a
+ * POINTER MOVE can pull lands in a list whose name, and whose failure message below, both say
+ * "boot". Measured on main at 1d2f31a with the reference plan seeded: idle page, no mouse, eight
+ * seconds → `terrainLayers` ABSENT; one mouse move → `terrainLayers` arrives (the cursor
+ * ground-elevation readout). That cost B1349 a false red for a defect that was genuinely fixed.
+ * Do NOT quiet it by widening the allowlist — the other names it is red on are real. The fix is
+ * two page loads in one run (one that gestures, one that never receives input), and it is B295168's
+ * to make with its own before/after, because it changes a number other sessions read. */
 const BOOT_SETTLE_MS = 4000;
 await page.waitForTimeout(BOOT_SETTLE_MS);
 const bootChunks = [...new Set(jsChunks)];

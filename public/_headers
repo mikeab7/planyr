@@ -33,6 +33,24 @@
   X-Frame-Options: DENY
   Content-Security-Policy: frame-ancestors 'none'
 
+# Baked FEMA flood tiles (B298400/B298401). These are NOT content-hashed — the filename is stable
+# and the bytes change only on a deliberate rebuild against a new NFHL edition, which happens on the
+# order of years. They are also the biggest single files we serve (Harris is 5.96 MiB).
+#
+# ⛔ THE REASON THIS MATTERS MORE THAN IT LOOKS: Cloudflare Pages does NOT do HTTP byte serving.
+# Measured 2026-08-09 on a real Pages deployment — a ranged GET returns 200 with the FULL body, no
+# accept-ranges, on every asset including a plain JS bundle (the control: the same request through
+# the same egress proxy returns 206 from raw.githubusercontent.com). So the reader fetches each
+# archive WHOLE, once (see lib/floodArchiveSource.js), and the cache policy is what stops that being
+# once per page load. One hour hard, then a day of stale-while-revalidate: the archive is served
+# instantly from cache while a background revalidation collects a cheap 304.
+#
+# The manifest carries the SAME policy on purpose. It supplies the "NFHL as of <date>" stamp, and a
+# manifest that could refresh while the tiles it describes stayed cached would put a new date over an
+# old map — the exact dishonesty the stamp exists to prevent.
+/flood/*
+  Cache-Control: public, max-age=3600, stale-while-revalidate=86400
+
 # The deploy stamp (B1373). This file is how a tab that has been open across a deploy finds
 # out it is running yesterday's build — so it is the ONE file that must never be answered
 # from a cache. no-store (not merely no-cache): a revalidated 304 would still be truthful,

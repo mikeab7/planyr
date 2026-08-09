@@ -4,6 +4,8 @@
  * design manual / utility criteria; the user confirms and edits here. Stored in
  * localStorage so edits persist per device.
  */
+import { normCountyKey } from "../../../shared/gis/countyKeys.js";
+
 const LS = "planarfit:easementRules:v1";
 
 export const DEFAULT_EASEMENT_RULES = {
@@ -22,6 +24,9 @@ export function loadEasementRules() {
 }
 export function saveEasementRules(rules) { try { localStorage.setItem(LS, JSON.stringify(rules)); } catch (_) {} }
 
-// Best-guess jurisdiction key for a county (user can override in the UI).
+/* Best-guess jurisdiction key for a county (user can override in the UI).
+ * NEW-4 — the key is NORMALISED first. This lookup was raw, so the two production rows storing
+ * `"Harris"` resolved to `"generic"` instead of `"coh"` — silently, because a missing key returns
+ * undefined and the `|| "generic"` fallback made it look like a deliberate answer. */
 export const defaultJurForCounty = (county) =>
-  ({ harris: "coh", fortbend: "fortbend", chambers: "generic", waller: "generic" }[county] || "generic");
+  ({ harris: "coh", fortbend: "fortbend", chambers: "generic", waller: "generic" }[normCountyKey(county)] || "generic");

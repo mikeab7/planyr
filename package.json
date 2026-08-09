@@ -31,10 +31,13 @@
     "perf:pondcalls": "xvfb-run -a --server-args=\"-screen 0 1600x1000x24\" node ui-audit/count-pond-invocations.mjs --build --assert",
     "perf:midzoom": "xvfb-run -a --server-args=\"-screen 0 1600x1000x24\" node ui-audit/verify-midgesture-zoom.mjs --selftest",
     "perf:zoomab": "xvfb-run -a --server-args=\"-screen 0 1600x1000x24\" node ui-audit/zoom-smoothness-ab.mjs",
-    "perf:fontblock": "xvfb-run -a --server-args=\"-screen 0 1600x1000x24\" node ui-audit/verify-font-blocking.mjs"
+    "perf:fontblock": "xvfb-run -a --server-args=\"-screen 0 1600x1000x24\" node ui-audit/verify-font-blocking.mjs",
+    "verify:floodtiles": "xvfb-run -a --server-args=\"-screen 0 1600x1000x24\" node ui-audit/verify-flood-tiles.mjs",
+    "build:floodtiles": "node scripts/build-flood-tiles.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.104.1",
+    "@mapbox/vector-tile": "^2.0.5",
     "@supabase/supabase-js": "^2.108.1",
     "@tiptap/extension-highlight": "^3.29.2",
     "@tiptap/extension-list": "^3.29.2",
@@ -51,8 +54,10 @@
     "esri-leaflet": "^3.0.12",
     "leaflet": "^1.9.4",
     "lerc": "^2.0.0",
+    "pbf": "^4.0.2",
     "pdf-lib": "^1.17.1",
     "pdfjs-dist": "^6.0.227",
+    "pmtiles": "^4.4.1",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "tesseract.js": "^5.1.1"
