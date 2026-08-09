@@ -341,10 +341,32 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   demoted to "· touches" — a failed lookup rendered as a positive answer is exactly the reported
   "City of Baytown" defect. `hasContainmentMeta` keeps this from firing on a legacy bare fixture, which
   is the same collapse in the opposite direction.
-  **(3) AN ETJ IS DEDUPED AGAINST THE CITY LIMITS THAT HOLD THE SITE, NEVER THE RING UNION.** Deduping
-  against every touching city let a Houston frontage sliver suppress the Houston ETJ on four sites
-  (Kennedy Greens, JFK, Katz, Pinnacle) — showing a jurisdiction the tooltip calls "unlikely to govern"
-  INSTEAD of the Ch. 19 authority that sets the finished floor.
+  **(3) AN ETJ IS DEDUPED AGAINST THE CITY LIMITS THAT HOLD THE SITE, NEVER THE RING UNION — AND NOT
+  AT ALL ON A SPLIT SITE.** Deduping against every touching city let a Houston frontage sliver suppress
+  the Houston ETJ on four sites (Kennedy Greens, JFK, Katz, Pinnacle) — showing a jurisdiction the
+  tooltip calls "unlikely to govern" INSTEAD of the Ch. 19 authority that sets the finished floor. And
+  on a **partial** site the same city's ETJ is exactly what governs the part its limits do not cover,
+  so suppressing it there re-creates the silence (Goose Creek read "part unincorporated" while all 8 of
+  those lots sit in Baytown's own ETJ).
+  **(4) B280704 — A SPLIT'S REMAINDER IS MEASURED, NEVER ASSUMED, AND THE SHARE IS PART OF THE ANSWER.**
+  The first cut of the split label hardcoded "part unincorporated". At Goose Creek that is false — 6 of
+  14 lots are in Baytown's limits and the other 8 in its ETJ, none unincorporated — and calling ETJ land
+  unincorporated drops the city's floodplain standard out of the FFE comparison. The remainder is
+  resolved in order: its own city's ETJ · another city's ETJ · couldn't check · no ETJ published ·
+  genuinely unincorporated. The COUNT rides the lead because "part in" cannot tell one lot of fourteen
+  from thirteen of fourteen, and it comes from the same probe as the split so the words and the number
+  cannot disagree.
+  **(5) B280705 — A "REGIONAL" LAYER'S COVERAGE IS A CLAIM; CHECK IT.** H-GAC's ETJ mosaic says it covers
+  the 13-county region and carries **34 cities** — Baytown, Katy, Humble, La Porte, Deer Park,
+  Friendswood, League City, Galveston and Tomball are absent. A missing city's ETJ read identically to no
+  ETJ. Sources declare a `roster`; `etjCoverageFor` returns `not-mapped` outside it and the badge says
+  *"no ETJ published for City of X"*. Baytown has its own registry row (`etj_baytown`); ~70 other cities
+  are still uncovered but now say so. Re-check with the ui-audit harness **audit-etj-coverage**.
+  **(6) B280706 — JURISDICTION VARIES *WITHIN* A SITE, and every yield number assumes it cannot.** A
+  split site is a THIRD administrator state: not `unresolved` (the answer is known) and not `settled`
+  (there are two). The panel refuses one site-wide FFE and names the split. **Per-parcel FFE numbers are
+  NOT built** — the whole ledger is site-wide by construction — and that gap is owned by **B280707**,
+  not implied. Half-doing it would put two contradictory floors on one drawing.
   **⛔ AND THE ONE THAT LOOKED LIKE FLAKINESS AND WAS NOT: `simplifyRing` BOUNDS VERTICES, WHICH IS THE
   WRONG QUANTITY.** `services.arcgis.com` answers a /query past ~2 KB of query string with an HTML **404**,
   and a 404 decodes as "this layer has nothing here" — so county and ETJ came back EMPTY on any finely
@@ -733,7 +755,11 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   drives a real wheel gesture, captures the frame MID-gesture, and fails unless the clean run is
   green AND both deliberate mutants go red). The owner-facing A/B is **zoom-smoothness-ab**
   (`npm run perf:zoomab`), which records the same gesture with the anchor on and off.
-  `Plan ▾ → Smooth zoom` is the off switch; it gates the ZOOM anchor only — the pan anchor is never
+  **The on-canvas `View ▾` menu → Smooth zoom** is the off switch (`components/ViewMenu.jsx`; moved
+  there from the plan menu by **B286000** — a per-device rendering preference does not belong in a
+  plan-scoped flyout, and the owner could not find it there. Same `smoothZoom` localStorage key,
+  same default, same `disarmViewAnchor()` on turn-off; `SitePlanner`'s `applySmoothZoom` is the one
+  place that decides, so the card renders state and owns no copy of the rule). It gates the ZOOM anchor only — the pan anchor is never
   gated on it.
 - `zOrder.js` — per-element `z` stacking key utilities (`nextZ`/`sortByZ`/`normalizeZ`/`ensureZ`, B671).
   `arrange.js` — pure z-order "Arrange" (`reorderByZ`/`arrangeFlags`, B820): Bring-to-Front/Send-to-Back

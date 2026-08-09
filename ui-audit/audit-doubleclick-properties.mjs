@@ -245,9 +245,17 @@ const NAMES = new Map([
   ...MARKUPS.map((m) => [m.id, `markup ${m.kind}${m.mode ? ` (${m.mode})` : ""}`]),
 ]);
 
+/* ⛔ B280402 — A LOT WHOSE ACREAGE BADGE LANDS ON THE TINY STUB, and it is the fixture condition the
+ * repeat-gesture row was missing. The badge is anchored at the lot's POLYLABEL (B1186 — the pole of
+ * inaccessibility, guaranteed inside the ring), so a small square lot centred on the stub puts its
+ * badge squarely over it. That is not contrived: a lot with a driveway stub in its middle is the
+ * ordinary case, and it is exactly the geometry on the owner's Bain plan. Without a parcel
+ * OVERLAPPING a feature smaller than its own chrome, nothing here can bite. */
+const AUDIT_LOT = (() => { const p = at(5, 0); const w = 210, d = 160;
+  return { id: "zzlot1", points: [{ x: p.x - w, y: p.y - d }, { x: p.x + w, y: p.y - d }, { x: p.x + w, y: p.y + d }, { x: p.x - w, y: p.y + d }] }; })();
 const site = {
   id: SITE_ID, groupId: SITE_ID, site: "ZZ Double-click audit", name: "Plan 1",
-  origin: null, county: null, parcels: [], measures: [], callouts: [], underlay: null,
+  origin: null, county: null, parcels: [AUDIT_LOT], measures: [], callouts: [], underlay: null,
   els: ELS.map(({ variant, drillOnly, gripProbe, ...e }) => ({ ...e, locked: LOCKED || undefined })),
   markups: MARKUPS.map((m) => ({ ...m, locked: LOCKED || undefined })),
   settings: { showDims: true }, updatedAt: Date.now(),
@@ -678,7 +686,7 @@ try {
    * depend on an app-side hook and on grips actually mounting, and either can quietly stop
    * happening — at which point the suite keeps printing a clean score while measuring less than it
    * did. Both are COUNTED, and a zero is a hard failure at the end of the run, not a shrug. */
-  let invariantsRun = 0, gripProbesRun = 0;
+  let invariantsRun = 0, gripProbesRun = 0, hoverProbesRun = 0;
   const hookLive = await page.evaluate(() => typeof window.__plannerHitTarget === "function");
   ok("the app exposes its double-click resolution to the harness (window.__plannerHitTarget)", hookLive,
     hookLive ? "" : "⛔ the two-press invariant cannot measure the product without it — see lib/featureTarget.js");
@@ -740,6 +748,29 @@ try {
     } else {
       ok(`${name} — single click selects`, zeroed === 0 && selN > 0,
         zeroed === 0 ? `${selN} selection node(s)` : `⛔ PRECONDITION: Escape left ${zeroed} selection node(s) — this assertion cannot mean anything until that is fixed`);
+    }
+
+    /* ── ⛔ HALF ONE-AND-A-QUARTER — HOVER-ARMED CHROME (B280402). ────────────────────────────────
+     *
+     * Some chrome becomes a hit target merely because the CURSOR IS RESTING ON IT — the parcel
+     * acreage badge is gated on hover (B1327) precisely so it can be dragged. A cursor resting on a
+     * point is what a cursor DOES between the two presses of a double-click, so that chrome arms
+     * itself mid-gesture and takes press 2. Measured on the owner's plan and reproduced here: at one
+     * point, with nothing selected, the stack reads `["el:<stub>"]` after touching another feature
+     * and `["parcel:<lot>", "el:<stub>"]` after resting on it — the parcel does not move above the
+     * element, IT ENTERS, and the element is still there, second, unchanged.
+     *
+     * This is invisible to every other check in this file: they all read after a click, never after
+     * a plain HOVER. So the cursor is parked on the probe point, given time to arm whatever it arms,
+     * and the resolver is asked again — it must still name this feature. */
+    await page.mouse.move(pt.x, pt.y);
+    await page.waitForTimeout(260);                    // let a hover latch arm and re-render
+    if (hookLive) {
+      const hov = await resolveAt(pt.x, pt.y);
+      const held = resolvedKey(hov) === `${t.kind}:${t.id}`;
+      hoverProbesRun++;
+      ok(`${name} — resting the cursor on it does not arm chrome that steals the gesture`, held,
+        held ? "" : `⛔ B280402: with the cursor merely hovering, this point resolves to ${resolvedKey(hov) || "NOTHING"} instead`);
     }
 
     /* HALF ONE-AND-A-HALF — THE TWO-PRESS INVARIANT (B233153). The click above IS press 1, and the
@@ -879,6 +910,7 @@ try {
    * would go on printing a full score. An unobserved guard is the failure mode VIEW-INDEPENDENT-ONCE
    * §6 names, so it is asserted here rather than hoped for. */
   ok("the two-press invariant actually ran", invariantsRun > 0, `${invariantsRun} feature(s)`);
+  ok("the hover-armed-chrome probe actually ran (B280402's own case)", hoverProbesRun > 0, `${hoverProbesRun} feature(s)`);
   if (!LOCKED) {
     ok("the grip-covered press actually ran (B233153's own case)", gripProbesRun > 0,
       gripProbesRun > 0 ? `${gripProbesRun} feature(s)` : "⛔ no grip landed over any feature's body — the surveyed-ring pond fixture is not doing its job");

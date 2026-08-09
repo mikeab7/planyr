@@ -32,6 +32,7 @@ import { measuresUnderPoint, nextMeasureSelection } from "./lib/measureHit.js";
 import { nearestBoundaryEdge, constrainToEdgeAngle, edgeLockTolFt } from "./lib/edgeConstrain.js";
 import { markupsUnderPoint, nextMarkupSelection, boxCorners } from "./lib/markupPick.js";
 import { EMPTY_TAP, tapTime, stepDoubleTap } from "./lib/doubleTap.js";
+import { isDiagArmed, latchDiagArm } from "./lib/diagArm.js";
 import { resolveDoubleClickTarget, gestureAnchorTarget, stackEntries, pressIsOverElementBody } from "./lib/featureTarget.js";
 import { parkDepthForRows, parkRowsForDepth, explodeParkingBands, edgeAbutsPaving } from "./lib/parking.js";
 import { loadAndDownscaleImage } from "./lib/image.js";
@@ -2111,8 +2112,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
      live view — one full render, deliberately, rather than an ever-more-wrong picture. Leaflet's
      own basemap path below re-bases on exactly this principle at ~0.75 zoom levels.
 
-     Behind `smoothZoom` (Plan ▾ → Smooth zoom), so it can be turned off without a deploy. Off, the
-     zoom anchor never arms and the pan anchor behaves exactly as B1440 shipped it. */
+     Behind `smoothZoom` (the on-canvas View ▾ menu → Smooth zoom — moved there from the plan menu
+     by B286000, same localStorage key and same default), so it can be turned off without a deploy.
+     Off, the zoom anchor never arms and the pan anchor behaves exactly as B1440 shipped it. */
   const [smoothZoom, setSmoothZoom] = useState(() => lsGet("smoothZoom", "1") !== "0");
   const smoothZoomRef = useRef(smoothZoom);
   smoothZoomRef.current = smoothZoom;
@@ -2145,6 +2147,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   viewAnchorRef.current = viewAnchor;
   const armViewAnchor = useCallback((ppf, offX, offY) => { const a = { ppf, offX, offY }; viewAnchorRef.current = a; setViewAnchor(a); }, []);
   const disarmViewAnchor = useCallback(() => { viewAnchorRef.current = null; setViewAnchor((a) => (a ? null : a)); }, []);
+  /* B286000 — the ONE place turning smooth zoom on/off is decided, so the control can be rendered
+     anywhere (it now lives in the on-canvas View menu) without a second copy of the persist +
+     disarm pair. Turning it OFF must disarm any live anchor in the same commit, or the last
+     gesture's scaled frame is left on screen with nothing to re-bake it. */
+  const applySmoothZoom = useCallback((on) => {
+    const nx = !!on;
+    setSmoothZoom(nx);
+    lsSet("smoothZoom", nx ? "1" : "0");
+    if (!nx) disarmViewAnchor();
+  }, [disarmViewAnchor]);
   /* The freshest view, readable from a native listener attached once at mount. Written on every
      render AND eagerly by the wheel flush, so two rAF flushes inside one React render cannot lose a
      notch (the reason the pre-B1449 wheel used a functional `setView`). */
@@ -7619,10 +7631,23 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       };
     };
   });
+  /* ⛔ NEW-1 (B280403) — INSTALLED UNCONDITIONALLY, ANSWERED ONLY WHEN ARMED, AND THE GATE IS READ AT
+   * CALL TIME. These two are the DIAGNOSTIC hooks, and they were gated the way every other probe
+   * here is: on `window.__PLANYR_E2E`, read once at mount by an effect with `[]` deps. That made
+   * them unreachable in the one place the defects they exist for actually live — the owner's
+   * signed-in production tab — because arming the flag there did nothing until `SitePlanner`
+   * remounted. The session that needed them got in by setting the flag and then switching plans and
+   * back, which is folklore that requires knowing this dependency array.
+   * Now: the functions always exist and return `null` until `isDiagArmed()` says otherwise, so
+   * arming can never require a remount. `?planyrDiag=1` arms a tab with no console at all (it
+   * latches into sessionStorage so an in-app plan switch keeps it); `window.__PLANYR_E2E = true`
+   * still works, so every existing harness is untouched. READ-ONLY: they answer questions, they
+   * change nothing — see lib/diagArm.js for why that boundary is the whole safety argument. */
   useEffect(() => {
-    if (typeof window === "undefined" || !window.__PLANYR_E2E) return;
-    const hook = (x, y) => (dblResolveRef.current ? dblResolveRef.current(x, y) : null);
-    const why = (x, y) => (dblWhyRef.current ? dblWhyRef.current(x, y) : null);
+    if (typeof window === "undefined") return;
+    latchDiagArm(window);
+    const hook = (x, y) => (isDiagArmed(window) && dblResolveRef.current ? dblResolveRef.current(x, y) : null);
+    const why = (x, y) => (isDiagArmed(window) && dblWhyRef.current ? dblWhyRef.current(x, y) : null);
     window.__plannerHitTarget = hook;
     window.__plannerHitWhy = why;
     return () => {
@@ -12606,6 +12631,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // NEW-2 — and what has not been checked YET. Before the first identify returns there is no
       // ETJ candidate, and on 16 of 28 sites the ETJ is the rule that governs.
       jurisdictionPending: jurPending,
+      /* NEW-1a — when the site STRADDLES a city limit, two floodplain ordinances are in play and a
+       * single site-wide FFE is wrong for one group of lots. Hand the split down so the panel can
+       * refuse to print one settled number and say which lots are affected. */
+      jurisdictionSplit: jurBadge?.cityContainment === "partial" && (jurBadge?.partialCities || []).length
+        ? {
+            city: jurBadge.partialCities[0],
+            inCity: jurBadge.cityCoverage?.inCity ?? null,
+            tested: jurBadge.cityCoverage?.tested ?? null,
+          }
+        : null,
     },
     rules: buildRules,
     ffeFt: fmBuild && fmBuild.ffe ? fmBuild.ffe.requiredFfeFt : null,
@@ -14244,7 +14279,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
        badge that will not actually drag (the other half of the owner's report). */
     const draggable = tool === "select" && hoverChipId === pc.id;
     return (
-      <g key={`pl${pc.id}`} data-print-chip="acre" data-chip-parcel={pc.id} data-feature={`parcel:${pc.id}`} pointerEvents={draggable ? "auto" : "none"}
+      /* ⛔ NEW-1 (B280402) — `data-chrome` makes this badge IDENTITY-TRANSPARENT, and it is the whole
+         fix for the owner's second-double-click failure. B1327 gated the badge on HOVER so it could be
+         dragged; a hover latch is armed by the cursor merely RESTING on it, which is exactly what a
+         cursor does between the two presses of a double-click. Over a feature smaller than its own
+         chrome, that made press 2 resolve to the LOT — which opens the Parcel panel and so takes
+         Properties away, the "panel disappears" half of the report.
+         DELIVERY IS UNTOUCHED: it keeps its own `pointerEvents`, its own `onPointerDown` and its own
+         drag. Only the question "which feature was double-clicked" now looks through it, the same rule
+         the handle layer has had since B233153 — because a badge you drag is a grip, not a feature. */
+      <g key={`pl${pc.id}`} data-print-chip="acre" data-chip-parcel={pc.id} data-chrome="acreage-badge" data-feature={`parcel:${pc.id}`} pointerEvents={draggable ? "auto" : "none"}
         style={draggable ? { cursor: "move" } : undefined}
         onContextMenu={draggable ? (e) => onChipContext(e, pc.id) : undefined}
         onPointerDown={draggable ? (e) => startAcChip(e, pc.id) : undefined}>
@@ -16527,19 +16571,22 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             title="Restore an earlier automatically-saved version of this plan">
             <span aria-hidden style={{ flex: "none" }}>↺</span><span>Version history…</span>
           </button>
-          <button style={{ ...menuItem(false), marginTop: 2, display: "flex", alignItems: "center", gap: 8 }} onClick={() => { closeHdrMenus(); setStorageOpen(true); }}
+          {/* ⛔ B286000 — "This device" IS THE WHOLE POINT OF THIS CAPTION, and Storage staying put
+              is a DECIDED trade rather than an oversight. Everything above this line is plan-scoped
+              (plan name, plans in this site, New plan, Duplicate, Save now, Version history);
+              Storage is device-scoped, which is the same structural defect that made Smooth zoom
+              unfindable in here. Smooth zoom MOVED (it is a rendering preference, and the canvas
+              View menu already owns those — B286000). Storage did NOT, and the reason is measured
+              and on the record in `src/shared/CLAUDE.md`: `StoragePanel` is mounted from THIS menu
+              precisely because the header gear and `AuthPanel` land in the entry chunk every route
+              downloads — even a lazy stub there cost +0.8 KB on all four routes and breached the
+              Notes route's bundle ceiling in CI. So the honest fix for a device-scoped row inside a
+              plan-scoped menu is to SAY it is device-scoped, which costs one muted caption instead
+              of a bundle breach. If the gear ever stops being on the entry chunk, move it. */}
+          <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, margin: "11px 0 3px" }}>This device</div>
+          <button style={{ ...menuItem(false), display: "flex", alignItems: "center", gap: 8 }} onClick={() => { closeHdrMenus(); setStorageOpen(true); }}
             title="How much room this app is using on this device, and what's safe to clear" data-testid="storage-menu-item">
             <span aria-hidden style={{ flex: "none" }}>🗄</span><span>Storage on this device…</span>
-          </button>
-          {/* B1449 — the one switch for the anchored zoom. Off, a wheel notch re-draws the whole
-              plan at the new zoom exactly as it did before (crisper mid-gesture, slower); on, the
-              drawing scales as one piece and re-draws when you stop. The PAN anchor (B1440) is
-              deliberately NOT gated on this — turning smooth zoom off must not take that away. */}
-          <button style={{ ...menuItem(false), marginTop: 2, display: "flex", alignItems: "center", gap: 8 }}
-            role="menuitemcheckbox" aria-checked={smoothZoom} data-testid="smooth-zoom-toggle"
-            onClick={() => { const nx = !smoothZoom; setSmoothZoom(nx); lsSet("smoothZoom", nx ? "1" : "0"); if (!nx) disarmViewAnchor(); }}
-            title="Zoom scales the drawing as one piece while the wheel is turning, then re-draws it sharp the moment you stop. Turn off to re-draw on every notch instead.">
-            <span aria-hidden style={{ flex: "none" }}>{smoothZoom ? "☑" : "☐"}</span><span>Smooth zoom</span>
           </button>
         </AnchoredMenu>
     </div>
@@ -19910,7 +19957,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           <div style={{ pointerEvents: "none", display: "flex", gap: 8, alignItems: "flex-start", height: "100%", minHeight: 0 }}>
           <div style={{ pointerEvents: "auto", display: "flex", maxHeight: "100%", minHeight: 0 }}>
             <ViewMenu open={viewMenuOpen} onToggle={() => setViewMenuOpen((o) => !o)} settings={settings}
-              setSnap={setSnap} patchSettings={(patch) => setSettings((s) => ({ ...s, ...patch }))} pal={PAL} />
+              setSnap={setSnap} patchSettings={(patch) => setSettings((s) => ({ ...s, ...patch }))} pal={PAL}
+              smoothZoom={smoothZoom} onSmoothZoom={applySmoothZoom} />
           </div>
           {/* Layers control — same shared layers as the map finder. ALWAYS rendered
               (B693): an unlocated plan gets the control DISABLED with the plain reason
@@ -26921,7 +26969,19 @@ function YieldPanel({
                         {drainage.administrator.governingLabel ? ` Provisionally ${drainage.administrator.governingLabel}${drainage.administrator.governingRuleText ? ` (${drainage.administrator.governingRuleText})` : ""} — do not rely on it until the jurisdiction is confirmed.` : ""}
                       </div>
                     )}
-                    {v.key === "ffe" && drainage.administrator && !drainage.administrator.unresolved && drainage.administrator.governingLabel && (
+                    {/* NEW-1a — a site that straddles a city limit has TWO floodplain authorities,
+                        so the one number above is wrong for one group of lots. This outranks the
+                        "Rule applied" line for the same reason the unresolved state does. */}
+                    {v.key === "ffe" && drainage.administrator && !drainage.administrator.unresolved && drainage.administrator.split && (
+                      <div data-testid="yield-ffe-split" style={{ fontSize: 10.5, color: "var(--warn-text)", lineHeight: 1.45, marginTop: 2, whiteSpace: "normal" }}
+                        title={drainage.administrator.splitNote || ""}>
+                        <b>Two floodplain rules on this site</b> — {drainage.administrator.splitDetail?.inCity != null && drainage.administrator.splitDetail?.tested != null
+                          ? `${drainage.administrator.splitDetail.inCity} of ${drainage.administrator.splitDetail.tested} drawn lots sit inside the City of ${drainage.administrator.splitDetail.city} and the rest do not`
+                          : `part of the site is inside the City of ${drainage.administrator.splitDetail?.city} and part is not`}, so one finished-floor figure cannot be right for both. Confirm which parcels each rule covers before setting pads.
+                        {drainage.administrator.governingLabel ? ` Shown: ${drainage.administrator.governingLabel}${drainage.administrator.governingRuleText ? ` (${drainage.administrator.governingRuleText})` : ""}.` : ""}
+                      </div>
+                    )}
+                    {v.key === "ffe" && drainage.administrator && !drainage.administrator.unresolved && !drainage.administrator.split && drainage.administrator.governingLabel && (
                       <div data-testid="yield-ffe-administrator" style={{ fontSize: 10.5, color: drainage.administrator.ambiguous ? "var(--warn-text)" : Y.muted, lineHeight: 1.45, marginTop: 2, whiteSpace: "normal" }}
                         title={`${drainage.administrator.selectionReason} Candidates: ${drainage.administrator.candidates.map((c) => c.label).join(" · ")}. ${drainage.administrator.governingSource || ""}`}>
                         Rule applied: <b>{drainage.administrator.governingLabel}</b>

@@ -116,8 +116,27 @@ export const ETJ_SOURCES = [
     url: GIS_SOURCES.etj_hgac.serviceUrl,
     fields: { name: "CITY" }, titleCaseName: true,
     ttl: 7 * 24 * 3600 * 1000,
-    sourceName: "H-GAC (Houston-Galveston Area Council)", coverage: "13-county Houston-Galveston region (all cities)",
+    /* NEW-1a — the roster is the HONEST bound on what this layer can answer, read from the registry
+     * so there is one source of truth. The old `coverage` string claimed "all cities" and was wrong
+     * by about seventy of them. */
+    roster: GIS_SOURCES.etj_hgac.roster,
+    sourceName: "H-GAC (Houston-Galveston Area Council)", coverage: "34 named cities in the H-GAC region — NOT all of them (see `roster`)",
     note: "City ETJ across the H-GAC 13-county region. Screening only; verify with the city.",
+  },
+  /* ⛔ NEW-1a — BAYTOWN, because H-GAC's "regional" mosaic does not carry it. The owner reported
+   * that part of Goose Creek is in Baytown's city limits and part in its ETJ; the app showed
+   * neither, because the one ETJ source it asks omits Baytown entirely (see `roster` on the H-GAC
+   * row). Measured on his site `sms69x8rb2qk`: 6 of 14 tested parcels inside Baytown's limits, the
+   * other 8 inside Baytown's ETJ, none unincorporated. This layer carries a single jurisdiction, so
+   * it takes `nameConst` exactly like the Austin and Fort Worth rows. */
+  {
+    id: "etj_baytown", role: "etj", label: "ETJ (extraterritorial jurisdiction)", kind: "polygon",
+    region: "Baytown", bbox: [29.6, -95.15, 30.0, -94.75],
+    url: GIS_SOURCES.etj_baytown.serviceUrl,
+    fields: { name: null }, nameConst: "Baytown",
+    ttl: 7 * 24 * 3600 * 1000,
+    sourceName: "City of Baytown GIS", coverage: "City of Baytown ETJ",
+    note: "City of Baytown ETJ, from the city's own layer (the H-GAC regional ETJ mosaic does not include Baytown). Screening only; verify with the city.",
   },
   {
     id: "etj_austin", role: "etj", label: "ETJ (extraterritorial jurisdiction)", kind: "polygon",
@@ -147,6 +166,30 @@ const bboxHas = (b, lat, lng) => b && lat >= b[0] && lat <= b[2] && lng >= b[1] 
  * This is what keeps a Houston click at exactly one ETJ query. Pure. */
 export function etjSourcesForPoint(lat, lng) {
   return ETJ_SOURCES.filter((s) => bboxHas(s.bbox, lat, lng));
+}
+
+/* ⛔ NEW-1a — DOES ANY ROUTED ETJ SOURCE ACTUALLY CARRY THIS CITY?
+ *
+ * An ETJ query that succeeds and returns nothing has been read as "this site is in no ETJ". For a
+ * city the layer does not carry, that is a fabrication: the correct answer is "we don't publish an
+ * ETJ for that city." H-GAC's mosaic is described in its own registry row as covering the whole
+ * 13-county region and in fact carries **34** cities — Baytown, Katy, Humble, La Porte, Deer Park,
+ * Friendswood, League City, Galveston and Tomball are not among them. The owner's Goose Creek is
+ * the case in point: 8 of its 14 tested parcels are inside Baytown's ETJ and the app saw nothing.
+ *
+ * A source declares what it covers: an explicit `roster` (H-GAC), or a `nameConst` (a single-city
+ * layer). A source that declares NEITHER is assumed to cover everything in its bbox — the honest
+ * default, because an undeclared roster is unknown, not empty. Pure. */
+export function etjSourceCovers(source, cityName) {
+  if (!source) return false;
+  if (source.nameConst) return samePlace(source.nameConst, cityName);
+  if (Array.isArray(source.roster)) return source.roster.some((n) => samePlace(n, cityName));
+  return true;
+}
+export function etjCoverageFor(cityName, lat, lng) {
+  const srcs = etjSourcesForPoint(lat, lng);
+  if (!srcs.length) return "no-layer";                                    // outside every covered metro
+  return srcs.some((s) => etjSourceCovers(s, cityName)) ? "covered" : "not-mapped";
 }
 
 /* NEW-5 — the COUNTY role becomes region-routed too, exactly the way ETJ already is.
@@ -684,6 +727,9 @@ export async function identifyJurisdiction(lng, lat, opts = {}) {
                 // the multipoint fact, which is honest but weaker: these cities hold PART of the site.
                 out.cityAll = []; out.citySome = anyNames; out.cityCentroid = anyNames;
               } else {
+                // NEW-1a — keep the PER-PARCEL answer, not just the roll-up. "Part in Baytown" is
+                // not actionable; "6 of the 14 lots" is, and it is the same data.
+                out.cityPerParcel = per;
                 const all = anyNames.filter((n) => per.every((p) => p.some((k) => samePlace(k, n))));
                 const some = anyNames.filter((n) => !all.some((k) => samePlace(k, n)));
                 // A TRUNCATED probe (the hard cap hit before the coverage target) never claims a
@@ -726,7 +772,16 @@ export async function identifyJurisdiction(lng, lat, opts = {}) {
   out.cityCoverage = {
     tested: probe.tested, total: probe.total,
     sampled: probe.sampled, truncated: probe.truncated, areaShare: probe.areaShare,
+    // NEW-1a — HOW MANY of the tested parcels each city holds. A straddle is not a yes/no; the
+    // reader needs to know whether it is one lot of fourteen or thirteen.
+    inCity: out.cityPerParcel ? out.cityPerParcel.filter((p) => p && p.length).length : null,
+    outsideCity: out.cityPerParcel ? out.cityPerParcel.filter((p) => p && !p.length).length : null,
   };
+  /* ⛔ NEW-1a — CITIES WHOSE ETJ THIS APP CANNOT SEE. A city that holds or touches the site and is
+   * carried by NO routed ETJ source is reported as "ETJ not mapped", never folded into the silence
+   * that means "no ETJ here". Those are opposite facts and they imply different floodplain rules. */
+  out.etjUnmappedCities = uniq(out.city.filter((c) => etjCoverageFor(c, lat, lng) === "not-mapped"
+    && !out.etj.some((e) => samePlace(e, c))));
   // Back-compat boolean. It can only ever be TRUE on a positive containment answer — an unknown
   // reads false here, and callers that need to tell the two apart read `cityContainment`.
   out.unincorporated = out.cityContainment === "none";
@@ -829,6 +884,16 @@ export function formatJurisdictionBadge(j, opts = {}) {
   const inCityLimits = [...coreCities, ...partCities];
   const etjsAll = etjsRaw.filter((e) => !inCityLimits.some((c) => samePlace(c, e)));
 
+  /* NEW-1a — the two pieces the split lead needs. `splitCount` is the share of the drawn site the
+   * city actually holds, taken from the SAME per-parcel probe the split was derived from (so the
+   * words and the number can never disagree); it is omitted when the probe did not record one.
+   * `remainderLabel` names what the REST of the site is, and it is the fact that the first cut of
+   * this got wrong by assuming. */
+  const cov = j.cityCoverage || null;
+  const splitCount = cov && Number.isFinite(cov.inCity) && Number.isFinite(cov.tested) && cov.tested > 0
+    ? ` (${cov.inCity} of ${cov.tested} lot${cov.tested === 1 ? "" : "s"})`
+    : "";
+
   /* ⛔ B209506/B209507 — THE LEAD IS WHAT GOVERNS, AND SILENCE IS NEVER AN ANSWER.
    *
    * Two defects, one line of code. `parts` was built as coreCities → etjs → edgeCities and the badge
@@ -871,13 +936,44 @@ export function formatJurisdictionBadge(j, opts = {}) {
    * pre-B793 reading of its city list still applies. Treating absent metadata as failure would have
    * printed "City limits · couldn't check" on every one of those, which is its own false alarm — the
    * same collapse in the opposite direction. */
+  /* NEW-1a — WHAT THE REST OF A SPLIT SITE IS. Never assume "unincorporated": at Goose Creek the
+   * other 8 of 14 lots are inside Baytown's own ETJ, and calling that unincorporated would drop the
+   * city's floodplain standard from the comparison entirely. Order of truth: a named ETJ that
+   * reaches the site · an ETJ we could not check · an ETJ nobody publishes for that city ·
+   * genuinely unincorporated. */
+  /* ⛔ AND THE DEDUPE THAT IS RIGHT FOR A WHOLE SITE IS WRONG FOR A SPLIT ONE. `etjsAll` drops an
+   * ETJ whose city already holds the site — correct when the city holds ALL of it (you do not say
+   * "City of Houston / City of Houston · ETJ"). On a SPLIT site the same city's ETJ is exactly what
+   * governs the part its limits do NOT cover, so dropping it re-created the very silence this item
+   * is about: Goose Creek read "part unincorporated" while all 8 of those lots sit in Baytown's own
+   * ETJ. The remainder therefore reads the RAW ETJ names. */
+  const ownEtj = etjsRaw.find((e) => partCities.some((c) => samePlace(c, e)));
+  const remainderLabel = ownEtj
+    ? "rest in its ETJ"
+    : etjsAll.length
+    ? `rest in City of ${etjsAll[0]} · ETJ`
+    : etjState === "failed"
+      ? "rest · ETJ couldn't check"
+      : (j.etjUnmappedCities || []).length
+        ? `rest outside it · no ETJ published for City of ${j.etjUnmappedCities[0]}`
+        : "part unincorporated";
+
   const lead = coreCities.length
     ? coreCities.map((c) => `City of ${c}`)
-    /* NEW-1 — the SPLIT site. Tsakiris is the real one: two of its nine parcels are inside Katy's
-     * limits and the rest are not, so neither "City of Katy" nor "Unincorporated" is true on its
-     * own. Both halves are stated, and the ⚑ straddle mark carries the rest. */
+    /* ⛔ NEW-1 / NEW-1a — the SPLIT site, and BOTH halves have to be named correctly.
+     *
+     * Goose Creek is the case that corrected this: 6 of its 14 tested lots are inside Baytown's
+     * city limits and the other 8 are inside Baytown's ETJ — NOT ONE is plain unincorporated. The
+     * first cut of this line said "part unincorporated" unconditionally, which was a guess about
+     * the remainder dressed as a finding. The remainder is now described by what was actually
+     * found out there: an ETJ if one reaches it, "unincorporated" only when nothing does, and an
+     * honest "not checked" when the ETJ lookup could not answer.
+     *
+     * The COUNT rides the lead because "part in" is not actionable on its own — one lot of
+     * fourteen and thirteen of fourteen are different sites, and the reader cannot tell them apart
+     * from the word "part". */
     : partCities.length
-      ? [...partCities.map((c) => `Part in City of ${c}`), "part unincorporated"]
+      ? [...partCities.map((c) => `Part in City of ${c}${splitCount}`), remainderLabel]
       : containmentUnknown || cityState === "failed"
         ? ["City limits · couldn't check"]
         : ["Unincorporated"];
@@ -885,11 +981,15 @@ export function formatJurisdictionBadge(j, opts = {}) {
   // The ETJ slot. `unavailable` means there is genuinely no ETJ layer for this area — an honest
   // "not applicable", distinct from a failure, so it stays quiet.
   const etjs = etjsAll;
-  const etjParts = etjs.length
-    ? etjs.map((c) => `City of ${c} · ETJ`)
-    : etjState === "failed"
-      ? ["ETJ · couldn't check"]
-      : [];
+  // NEW-1a — on a SPLIT site the remainder label already names the ETJ (and the failure state), so
+  // its own slot would print the same fact twice.
+  const splitOwnsEtj = partCities.length > 0;
+  const etjParts = splitOwnsEtj ? []
+    : etjs.length
+      ? etjs.map((c) => `City of ${c} · ETJ`)
+      : etjState === "failed"
+        ? ["ETJ · couldn't check"]
+        : [];
   // …and once a city is named as the ETJ, its edge sliver is not a second fact worth a slot.
   const edgeParts = edgeCities.filter((c) => !etjs.some((e) => samePlace(e, c)));
 
@@ -922,6 +1022,9 @@ export function formatJurisdictionBadge(j, opts = {}) {
     // NEW-1 — cities holding PART of the site, and ring cities left unclassified by a failed lookup.
     partialCities: partCities,
     touchesCities: touchCities,
+    // NEW-1a — the split, in numbers, and the cities whose ETJ nobody publishes.
+    cityCoverage: cov,
+    etjUnmappedCities: j.etjUnmappedCities || [],
     // B209507 — what the badge could NOT establish, carried explicitly so a consumer (the floodplain
     // administrator especially) can refuse to settle rather than reading silence as absence.
     unresolvedRoles,

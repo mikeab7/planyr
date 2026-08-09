@@ -123,6 +123,30 @@ was never clicked" quietly ships broken.
 - **⛔ AND IF IT FAILS, CAPTURE THE TREE RATHER THAN DESCRIBING IT.** With `window.__PLANYR_E2E` armed, `window.__noteEditor.json()` returns the document before and after the press; that is what turns a second report into a fixed row in `ui-audit/verify-notes-backspace.mjs` instead of another round of guessing.
 - **Already confirmed here, do NOT re-test:** 37/37 boundary rows against the built app, mutation-proven RED without the fix (11 of 37).
 - The **owner never runs this** — it is a Claude-cohort check on a signed-in session with his real note. ⏳ **PENDING**
+### V78961 — B280402: the acreage badge no longer takes press 2, on his stub, on the repeat `Blocker: real-data` + `Blocker: auth`
+
+**The cause is DIAGNOSED FROM HIS OWN INSTRUMENT READ and REPRODUCED here, so this is a confirmation, not a hunt.** The parcel badge is a hit target while the cursor RESTS on it (a hover gate, B1327/NEW-4, so it can be dragged); resting is what a cursor does between the two presses of a double-click. It is now identity-transparent — it keeps its drag, but the resolver looks through it.
+- **RE-RUN HIS EXACT TABLE**, planyr.io signed in, **Bain / "Concept - Original"**, 1600×521, every run preconditioned on `grips === 0`, no read between presses, gaps reported: pond control → stub first → **stub repeat** → pond control → stub first → **stub repeat**. **PASS = the stub opens ELEMENT — ROAD every time, including the repeat**, 7 grips, box ≈ `[664,402,15,22]`. FAIL = `parcel:e79379lfxyni`, 28 grips, `[618,342,189,127]`, no panel.
+- **AND READ THE STACK, before each gesture**, which is the assertion that names it either way: at (673,414) with nothing selected it must read **`["el:e79463haroul"]`** in BOTH states now — the parcel must no longer ENTER after resting on the stub.
+- **⛔ ARMING IS NO LONGER FOLKLORE.** Open the plan with **`?planyrDiag=1`** on the URL — it latches for the tab, so switching plans keeps it — or set `sessionStorage['planyr:diag'] = '1'`. **No remount is needed**: the hooks are installed always and read the gate at call time (B280403). `window.__PLANYR_E2E = true` still works.
+- **Also confirm the badge still DRAGS** — this fix is identification-only and must not have cost the affordance B1327 exists for: hover a lot's acreage badge, drag it, and it should move as before.
+- **Already confirmed, do NOT re-test:** the plan is byte-identical across every run; the pond control passes; press gaps are inside `DBLTAP_MS`; the first-gesture fix from #965 is intact.
+- The **owner never runs this** — it is a Claude-cohort check on a signed-in session. ⏳ **PENDING**
+### V84560 — B270913: does the retention job fire ON ITS OWN, tomorrow, with nobody pressing anything? `Blocker: real-data`
+
+**⛔ THIS CHECK IS THE ENTIRE POINT OF THE ITEM, AND IT CANNOT BE DONE IN A SANDBOX.** Everything else about B270913 is proven: the policy is unit-tested against a real Postgres (21 cases, both directions, both clauses mutation-checked), and it was proven a second time **on the production table** with seeded rows that were cleaned up afterwards. What no test here can show is the one thing that decides whether this works: **that `pg_cron` actually runs the job on schedule.** A retention job that silently never runs is indistinguishable from one that correctly had nothing to delete — and since this policy deletes nothing from today's data, that indistinguishability is the EXPECTED state for months. The whole run-log/status half of the item exists for this one question.
+
+- **RUN IT AFTER 07:20 UTC on 2026-08-10** (or any later day — the schedule is daily, `20 7 * * *`), against `planyr_production` with the service role. One query:
+  ```sql
+  select * from public.client_errors_retention_status;
+  select id, ran_at, ordinary_deleted, manual_deleted, rows_before, rows_after, duration_ms
+    from public.client_errors_retention_runs order by id;
+  ```
+- **PASS** = `status = 'ok'` **and** a run row exists that **nobody triggered** — i.e. `ran_at` at ≈07:20 UTC, with an `id` greater than 1. `ordinary_deleted = 0` and `manual_deleted = 0` on that row is the CORRECT result and must be read as a healthy no-op, not as a failure: 0 of ~5,300 rows are eligible and none will be until roughly 2026-09-18.
+- **FAIL** = `status` still reads **`never-run`**, or the only row is `id = 1`. That row is the manual proof run from 2026-08-09 (`ordinary_deleted 2` — three seeded `B270913-live-proof` rows, two of which were correctly deleted); it is evidence the FUNCTION works and says nothing about the SCHEDULE. **`stale`** on a later read means it fired once and stopped.
+- **If it FAILS, the first thing to check is `cron.job` and `cron.job_run_details`,** not the function: `select * from cron.job where jobname = 'planyr-client-errors-retention';` and `select * from cron.job_run_details order by start_time desc limit 10;`. Supabase runs pg_cron jobs in the `postgres` database only; the job was created there, owned by `postgres`, and read back active at apply time.
+- **⛔ DO NOT "verify" this by calling `select public.prune_client_errors()` yourself.** A hand-triggered run writes exactly the same row as a scheduled one, so doing that DESTROYS the only evidence this check exists to gather — it converts an unanswered question into a permanent false pass. If you need to confirm the function still works, the unit suite already does that on every CI run.
+- This is a Claude-cohort check on the production database. **The owner never runs this.** ⏳ **PENDING**
 
 ### V78960 — B280400: does the stub's double-click still work on the SECOND try? `Blocker: real-data` + `Blocker: auth`
 
@@ -229,6 +253,40 @@ assumed) and (f) needs a human eye.** Every part that an instrument could settle
 
 *(minted V73584; references **B276576**, overlaps **V477**; `Cadence: once`. Implemented + fully
 sandbox-verified 2026-08-08 — the residue above is the deployed edge only.)*
+### V79264 — B280704/B280705/B280706: the Goose Creek straddle, the ETJ coverage hole, and the split-jurisdiction refusal
+
+**Status: ✅ PASSED (2026-08-09) for everything this sandbox can reach — 27 of 28 sites.** GREEN RIVER has no active parcel geometry, so the app shows no badge and there is nothing to check.
+
+**What the owner corrected, and why both earlier readings were wrong the same way.** He wrote: *"For goose creek part of the site is in city limits and part is in ETJ, so it should clarify."* The original filing tested the site ORIGIN — one point, which cannot see a straddle. My B276752 sweep tested one probe per parcel but had **no ETJ source that carries Baytown**, so it saw the city-limits half and called the rest "unincorporated". Both were single-source readings of a two-sided fact.
+
+**Ground truth, measured live per parcel against the City of Baytown's own layers (site `sms69x8rb2qk`, 14 tested lots):**
+
+| | lots |
+|---|---|
+| inside Baytown CITY LIMITS (and its ETJ) | 6 |
+| inside Baytown ETJ only | 8 |
+| unincorporated, no ETJ | **0** |
+
+**Badge, before → after:**
+
+| Site | Before (B276752, shipped 2026-08-08) | After |
+|---|---|---|
+| Goose Creek | `Part in City of Baytown / part unincorporated · Harris County` | `Part in City of Baytown (6 of 14 lots) / rest in its ETJ · Harris County` ⚑ |
+| Tsakiris | `Part in City of Katy (2 of 9 lots) / part unincorporated · Waller County` | `Part in City of Katy (2 of 9 lots) / rest outside it · no ETJ published for City of Katy · Waller County` ⚑ |
+| Bain | `Unincorporated / City of Houston · ETJ / City of Katy · edge only · Fort Bend County` | unchanged — **proven not regressed** |
+
+**The three defects this pass closed, each verified:**
+1. **The remainder was hardcoded, not measured.** "part unincorporated" was a literal. It is now derived from what was found, and at Goose Creek that is Baytown's own ETJ.
+2. **The share was missing.** "part in" cannot distinguish one lot of fourteen from thirteen of fourteen; the count now comes from the same probe as the split.
+3. **The ETJ dedupe hid the ETJ on split sites.** Dropping an ETJ whose city already holds the site is right when it holds ALL of it and wrong when it holds part — the case that needs it most.
+
+**The coverage hole, measured (B280705):** the H-GAC "regional" ETJ layer carries **34 cities**; Baytown, Katy, Humble, La Porte, Deer Park, Friendswood, League City, Galveston and Tomball are not among them. Its registry row claimed "all cities". A missing city's ETJ therefore read identically to no ETJ. Baytown's own layer is now a registry row; every other gap now SAYS it is a gap.
+
+**Whole-portfolio re-sweep, all 28 sites: 27 correct · 0 mislabelled · 0 unresolved.** Seven rows first came back `ETJ · couldn't check` — the H-GAC org's documented 429 quota, exhausted by this session's own recording run, not a code fault; the service answered normally minutes later and all seven passed on re-run. That is exactly the flakiness B209507's honest-unknown machinery exists for, and it behaved correctly: it said "couldn't check" rather than "no ETJ".
+
+**Still pending (`Blocker: live-GIS` · `auth` · `real-data`) — unchanged from V73760 and attempted again:**
+- The on-screen rendering of the pill (the ⚑ and the new split wording) and the Yield panel's **"Two floodplain rules on this site"** line, on a signed-in saved project. The sandbox blocks the county PARCEL service, so no georeferenced parcel can be placed logged-out and the pill cannot be made to appear; the Cloudflare preview host is also unreachable from here. The logic behind all of it is unit-covered (`test/jurisdictionShapes.test.js`, 11 cases) and verified against live data — this is a rendering confirmation, not a correctness one.
+
 ### V73760 — B276752/B276753/B276755: the WHOLE portfolio, driven against the live agency services
 
 **Status: ✅ PASSED (2026-08-08) for every site the sandbox can reach — 27 of 28. One site (GREEN RIVER) has no active parcel geometry, so the app shows no badge and there is nothing to check.**
@@ -500,26 +558,6 @@ not change, and (b) **edit a pond's depth or drag a pond vertex and confirm they
 half is the one that matters, because a memo that never invalidates is the failure mode in the other
 direction. **PASS** — numbers hold on a pan and move on an edit. **FAIL** — either a stale number
 after an edit, or a reconciliation error naming a pond.
-
-### V56000 — B1449: does the zoom FEEL smooth and professional on his own Bain plans? `Blocker: real-data`
-
-**⛔ A LEAD RAISED AGAINST THIS ENTRY IS REFUTED (2026-08-09) — do not re-open it.** A report that a wheel-out at pointer x=900 left the drawing at x=104, moving AWAY from the pointer, was measured on a tab with `document.visibilityState === "hidden"`, where rAF is SUSPENDED: the DOM was a stale frame from a previous view while the app's own `data-view-ppf` / `data-render-ppf` correctly reported the new one. The anchor is not implicated. **When you run this check, assert `visibilityState === "visible"` first** — see FOREGROUND-OR-VOID in `/CLAUDE.md` (B1086 ×2).
-
-**The acceptance criterion is his, and he said so plainly:** *"I don't really care what the process is as long as the end result is smooth and professional… world class quality."* So this is not discharged by a millisecond target, and no number below is the bar. What the numbers are for is to say what changed and let him judge the real thing.
-
-**What was driven HERE, headless, and what it showed.** `npm run perf:midzoom` — a real wheel gesture on the reference plan, the frame captured MID-gesture (inside the 220 ms settle) and again once settled: **27 nodes checked, worst 0.74 px, observed scale 1.4049 against k 1.4049, zero settle jump.** That is the geometry proven exact while the gesture is still running, which nothing in this repo could observe before. Its `--selftest` also proves the harness goes RED on demand: a deliberately double-scaled frame fails and is correctly diagnosed `double-scaled`, and a build with the anchor disabled fails on "no anchor armed" rather than passing vacuously. `npm run perf:zoomab` — the SAME scripted 8-notch sweep, in and back out, one build, anchor on vs off: **wheel→DOM 51 → 21 ms · 25,149 → 6,528 DOM mutation records · re-bakes 180 ms after the last notch**, with a video of each arm.
-
-**What only he can answer, and the three specific things to watch for** — each is a real consequence of the trade he accepted, so any of them coming back as "no" is a product answer, not a bug report:
-
-1. **Does the wheel still feel late?** The delay he named was the re-emit, and it is measured 2.4× shorter. If it still feels late on a Bain plan, the residual is the component body itself, not the emit, and that is a different item.
-2. **Does the drawing look wrong WHILE the wheel is turning?** It scales as one piece, so line weights and text grow and shrink with it and the parking-stripe / dock-door detail holds the tier it started at until he stops. He was told this and accepted it — but "accepted in the abstract" and "fine to look at" are different, and this is the check.
-3. **Does it snap correctly the instant he stops?** The re-bake is ~180 ms after the last notch. Nothing should MOVE at that moment (the harness proves the geometry does not); what changes is sharpness and detail.
-
-Also worth one look: **a trackpad**, if he has one to hand. The wheel factor now reads the size of the scroll rather than only its direction, which is a much bigger change on a trackpad than on a wheel mouse — a mouse detent is numerically identical to before.
-
-**If any of it is wrong, `Plan ▾ → Smooth zoom` turns the whole thing off** and the zoom reverts to re-drawing on every notch. That switch existing is part of the deliverable.
-
-⏳ **LIVE APP (planyr.io), HIS OWN MACHINE, HIS OWN BAIN PLANS** `Blocker: real-data` *(sandbox evidence recorded on B1449; `Cadence: once`)*
 
 ### V52208 — B255200: does the recorder actually fire on HIS machine — and if it never does, B1121 closes. `Blocker: auth` `Blocker: real-data`
 
