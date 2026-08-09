@@ -230,6 +230,26 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   "complies" — two modules contradicting each other about one statute on one screen is the failure it
   prevents. **B1129:** the regime falls back to the plan's SAVED county when GIS is down (identified
   county still wins) — the guard must hold with every endpoint dead, which is when defaults bite.
+  **⛔ B290240–B290250 (the 2026-08-09 missing-data audit) — WHAT THE APP SAYS ON A COLORADO SITE
+  WHEN IT DOES NOT KNOW, MEASURED ON THE REAL SCREEN. Read this before citing the Colorado tier as
+  working.** The detention guard is SOUND and was the hypothesis most expected to fail: the owner's
+  Weld site renders `N/A · Detention: Colorado detention — not carried yet` and a Denver site
+  `N/A · Detention: MHFD WQCV + EURV — not carried yet` — never a zero, never a blank. **What is NOT
+  sound is everything around it.** (1) **`capabilityFor()` HAS NO PRODUCTION CALL SITE** (B290245) —
+  the `CAPABILITIES` table describes an intent, seven of its eight declared gaps render nothing, and
+  detention is guarded independently inside `computeRequiredDetention`. Never cite a `wired:false`
+  row as evidence a surface degrades honestly. (2) **`CO_STATE_FLOOD_STANDARD` (the CWCB 1-ft
+  freeboard floor) is applied to nothing** (B290246); the record used to claim otherwise and B290244
+  corrected the words. A Colorado pad reads `Rule applied: Generic / unknown` and can sit BELOW the
+  statutory floor. (3) **`deriveZoning` asserted Texas law in every state** (B290240, FIXED) — the
+  worst finding here, because it is a false ENTITLEMENT answer, not a wrong number. (4) The C.R.S.
+  37-92-602(8) gate answered on a zero volume (B290243, FIXED). (5) Colorado water law — prior
+  appropriation, a permanent pool needing a decree or an augmentation plan — appears on **no** surface
+  (B290248), while the pond inspector happily offers `Permanent pool elev. (ft)`. Instruments, both
+  ui-audit harnesses: **audit-colorado-missing-data** (every county through every Colorado module)
+  and **audit-colorado-surfaces** (the real planner's rendered text on the owner's ground); the
+  shipped fixes are guarded by the repo-root `test/` suite **coloradoAudit** and the ui-audit harness
+  **verify-colorado-deed-north**, both mutation-proven.
   **B1127, the trap to remember:** `yieldVerdicts.detentionVerdict` had NO branch for
   `kind:"unavailable"`, so it fell to `loadingRow` and every Colorado site read "Detention: checking
   flood data" forever while 26 unit tests and the bundle harness passed. **A new `kind` with no render

@@ -229,6 +229,21 @@ export const CO_STATE_FLOOD_STANDARD = {
  *
  * One table, one question: for THIS capability in THIS state, may Planyr show a number?
  * `wired: false` is never a silent blank — it carries the copy a surface renders instead.
+ *
+ * ⛔ AUDIT-FIRST CORRECTION, 2026-08-09 (NEW-4) — READ THIS BEFORE TRUSTING A ROW BELOW.
+ * "the copy a surface renders instead" DESCRIBES AN INTENT, NOT THE SHIPPED CODE.
+ * `capabilityFor()` has **no production call site**: a repo-wide sweep finds it only in
+ * `test/coloradoGuard.test.js`. Every gap below is therefore a DECLARATION of what should be
+ * guarded, and only ONE of them is actually enforced — `detentionVolume`, guarded independently
+ * inside `computeRequiredDetention` by its own `siteState === "CO"` check, which is the guard the
+ * owner sees ("Detention: Colorado detention — not carried yet"). The other rows describe
+ * behaviour no surface performs; the `requiredFfe` row said so in words that were flatly untrue
+ * until this pass corrected them. `CO_STATE_FLOOD_STANDARD` likewise has no production consumer.
+ *
+ * Keep the table — it is the honest inventory, and it is what the wiring work will read. But a
+ * row here is a CLAIM ABOUT A GAP, never evidence that a surface renders the gap, and no future
+ * audit may cite one as proof that Colorado degrades honestly somewhere. Wiring it into the
+ * surfaces is filed with its plan.
  * ------------------------------------------------------------------------- */
 export const CAPABILITIES = {
   detentionVolume: {
@@ -275,14 +290,25 @@ export const CAPABILITIES = {
   requiredFfe: {
     label: "Required finished floor elevation",
     TX: { wired: true },
+    /* ⛔ NEW-4 — CORRECTED 2026-08-09. This record used to read "Planyr applies that floor", and
+     * that was FALSE: `CO_STATE_FLOOD_STANDARD` has no production consumer, and neither does this
+     * matrix (see the header note on `capabilityFor`). On a Colorado site `requiredFfe()` resolves
+     * against `buildability.DEFAULT_BUILDABILITY_RULES.generic`, whose `ffeRule` is `null`, so the
+     * panel renders "Rule applied: Generic / unknown" and the pad falls through to the site-basis
+     * screening pad (pond design WSE + freeboard, or highest adjacent grade + a margin) with no
+     * CWCB freeboard anywhere in it. `wired` is therefore `false`, not `"partial"`: a record that
+     * claims a floor it does not apply is worse than one that admits the gap, because it is the
+     * one place a reader would go to check. Wiring the floor for real is filed with its plan. */
     CO: {
-      wired: "partial",
-      headline: "Colorado FFE uses the CWCB statewide floor only",
+      wired: false,
+      headline: "Colorado FFE not yet wired — the CWCB statewide floor is NOT applied",
       detail:
         "Colorado has a statewide minimum — one foot of freeboard above the 100-year flood, two feet " +
-        "for critical facilities (CWCB, 2 CCR 408-1). Planyr applies that floor. It does NOT yet carry " +
-        "the local floodplain ordinance for any Colorado jurisdiction, and local rules are frequently " +
-        "stricter, so treat the number as a minimum, not the requirement.",
+        "for critical facilities (CWCB, 2 CCR 408-1). Planyr CARRIES that standard as a record but " +
+        "does NOT yet apply it to a finished floor, and it holds no local Colorado floodplain " +
+        "ordinance either. Any pad elevation shown on a Colorado site is a good-practice screening " +
+        "figure, not a code minimum, and it can sit BELOW the statewide floor. Set the finished floor " +
+        "with your engineer against the CWCB rule and the local ordinance.",
     },
   },
   drainageAuthority: {
