@@ -113,6 +113,24 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V121984 — B323424: a layer that is ON, past its zoom gate, and covers NOTHING here reads as dormant `Blocker: live-GIS`
+
+**Three of the four row states are proven here already**, in a real browser, by `e2e/layer-zoom-dormant.spec.js` (6 cases, red on the pre-fix build): checked-below-gate, checked-above-gate, unchecked, the click-to-fix actually moving the map, a second layer KIND with a second gate source, and the map finder. **The fourth state cannot be reached in this sandbox**: it needs the coverage engine's published-extent probes (`prefetchExtents` → `probeService`), and every GIS host is egress-blocked from Chromium here, so coverage resolves to `unknown` rather than `out` and the row correctly reports `drawing`. The pure model is pinned by `test/layerZoomGate.test.js`; what is unproven is the RENDER of that state.
+
+- **HOW TO DRIVE IT** — on planyr.io, open a plan well outside the Houston region (a Colorado plan, or Dallas) and turn on a layer whose data only covers its home region — a City of Houston utility row, or the district drainage rows. Zoom in past its gate first, so the zoom state is not what you are looking at.
+- **PASS** = the row renders in the dormant treatment — **hollow (outlined) status dot, muted label, dimmed row**, checkbox still checked — and carries an honest line saying the data does not reach this area, with **no** "zoom in N levels" affordance offered (no zoom fixes it, and offering one would be a lie). The row's `data-layer-state` attribute reads `dormant-blank`.
+- **ALSO CHECK, in the same pass:** a layer that is ON, in coverage, and simply came back with nothing gets the same dormant treatment and keeps its own specific message rather than a generic one.
+- **FAIL** = the row is indistinguishable from a drawing one (filled dot, full-contrast label), or it offers a zoom-to-fix line it cannot honour, or it claims "no data in this area" while actually being below its zoom gate.
+
+### V121985 — B323425: contours no longer paint-then-vanish on opening a real plan `Blocker: live-GIS`
+
+**The CAUSE and the FIX are both measured here**, on the real app, by `ui-audit/diagnose-layer-gate-flash.mjs`: pre-fix, four terrain DEM grid pulls went out at map zoom **17.25** while the plan settles at **15.08**; post-fix, **zero**, with the gate answered once at the plan's real opening zoom. `e2e/layer-zoom-dormant.spec.js` guards that (proven red pre-fix at 4 pulls). **What this sandbox cannot produce is the PAINT itself** — every `elevation.nationalmap.gov` request from Chromium here is `ERR_CONNECTION_RESET` (curl succeeds; the browser does not), so no contour line can be drawn at all and the "vanishing" half has never been on screen here.
+
+- **HOW TO DRIVE IT** — on planyr.io, open **Tsakiris** (or any tract whose whole-site view sits below the contour gate) with **Contour lines (1 ft)** left checked from a previous visit, so the terrain is already cached. Watch the first five seconds after the plan opens.
+- **PASS** = contour lines **never appear at all** at that zoom. The row reports itself dormant immediately — hollow dot, `Not showing at this zoom — zoom in N levels` — and clicking that line brings the contours in. Nothing is drawn and then taken away.
+- **FAIL** = lines paint on open and disappear a second or two later while the box stays checked. If that happens, re-run `ui-audit/diagnose-layer-gate-flash.mjs` against the deployed build and report the zooms it holds and the zoom each grid pull was issued at — that pair is the whole diagnosis.
+- **WHILE YOU ARE THERE (cheap, same page):** confirm the layers you had on last time still arrive at all. The fix defers every layer's admission until the opening view is framed, so a regression would look like layers that never load rather than layers that flicker.
+
 ### V107264 — B296224: the ledger bridge resolves a REAL `dirty` PR, and refuses a REAL amendment race `Blocker: real-data`
 
 **Everything the bridge decides is proven here already** — `test/resolveLedgers.test.js` drives 12 cases, three of them against a genuine `git merge` conflict produced in a throwaway repo (hermetic, no network): two independent appends are unioned, two amendments of one item are refused with the markers left in place, and a clean file passes through byte-identical. **What a sandbox cannot manufacture is the real thing**: this repo's actual `origin/main`, 42 in-flight branches, five bookkeeping files diverging at once, and the specific hunk shapes git produces from them. That is a concurrency class, so it parks.

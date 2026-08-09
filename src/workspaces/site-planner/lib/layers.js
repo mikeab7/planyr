@@ -18,6 +18,11 @@ import { JURISDICTION_SOURCES, ETJ_SOURCES, roadAuthorityStyle, ROAD_AUTHORITY_L
 import { GIS_SOURCES } from "../../../shared/gis/sources.js";
 import { overpassLayer, mapillaryLayer } from "./evidenceLayers.js";
 import { TERRAIN_MIN_ZOOM } from "./terrainGate.js";
+/* NEW-1 — every zoom gate in the app, declared in ONE leaf so the registry rows below can
+ * state theirs and the Layers panel can report it as live state. `PIPELINE_VECTOR_MIN_ZOOM`
+ * mirrors VECTOR_SOURCES.txrrc_pipe.query.minVectorZoom (pinned by test/layerZoomGate). */
+import { OSM_MIN_ZOOM, MAPILLARY_MIN_ZOOM } from "./layerZoomGate.js";
+const PIPELINE_VECTOR_MIN_ZOOM = 13;
 import { loadTerrain } from "./terrainLazy.js";
 import {
   isTransientStatus, dynamicLayerOptions, imageLayerOptions, featureLayerOptions, featureRetryDecision,
@@ -221,6 +226,11 @@ export const STATEWIDE = {
     // lines). NOT a surveyed easement — the caveat below is as prominent as the band.
     kind: "pipelineCorridor", label: "Pipeline easement corridor (assumed)",
     pipelineSource: "txrrc_pipe", corridorWidth: true, // corridorWidth → LayerPanel shows the inline width control
+    // NEW-1 — DECLARED so the Layers panel can say "not showing at this zoom" and offer the
+    // fix. The corridor only exists where the centrelines came back as VECTORS, so its gate is
+    // the pipeline source's own `query.minVectorZoom`; `test/layerZoomGate.test.js` pins the two
+    // together, because a declared number that drifts from the runtime one is worse than none.
+    minZoom: PIPELINE_VECTOR_MIN_ZOOM,
     opacity: 0.85,
     note: "ASSUMED screening corridor drawn off a SCHEMATIC centerline — NOT a surveyed easement. Doubly approximate (schematic line × assumed width). Confirm via title commitment / recorded easement instrument + an 811 one-call before relying on it.",
     // NEW-1 stacking role (lib/mapStack.js): A buffered band — a fill, so it goes under the plan (its centreline rides over).
@@ -364,6 +374,7 @@ export const EVIDENCE = {
     // B898: MEMBER of the consolidated "Electric" layer (mergeGroup electric, alongside
     // hifld_tx/hifld_substations below) — `label` is the per-provider ⓘ line, not a solo row.
     kind: "overpass", label: "Power lines & poles", source: "OpenStreetMap", opacity: 0.55,
+    minZoom: OSM_MIN_ZOOM, // NEW-1 — declared so the panel reports the gate as LIVE state, not static advice
     query: { lines: true, poles: true, substations: true },
     note: "OpenStreetMap — transmission solid, distribution dashed; poles/towers as dots. Loads at zoom ≥ 14.",
     // NEW-1 stacking role (lib/mapStack.js): Transmission/distribution lines (poles ride the same layer as its nodes).
@@ -410,6 +421,7 @@ export const EVIDENCE = {
     // B898: MEMBER of the consolidated "Fire hydrants" layer (mergeGroup fire_hydrants,
     // alongside coh_hydrants/mapillary below).
     kind: "overpass", label: "Fire hydrants", source: "OpenStreetMap", opacity: 0.55,
+    minZoom: OSM_MIN_ZOOM, // NEW-1 — declared so the panel reports the gate as LIVE state, not static advice
     query: { hydrants: true },
     note: "OpenStreetMap fire hydrants. Loads at zoom ≥ 14.",
     // NEW-1 stacking role (lib/mapStack.js): Hydrant points.
@@ -436,6 +448,7 @@ export const EVIDENCE = {
     // poles — the note is honest about both; it surfaces under Fire hydrants since that's
     // its primary siting use, per the brief's explicit "3 hydrant layers" grouping).
     kind: "mapillary", label: "Poles & hydrants from street imagery",
+    minZoom: MAPILLARY_MIN_ZOOM, // NEW-1 — declared so the panel reports the gate as LIVE state
     sublabel: "Detected in crowdsourced street-level photos.",
     source: "Mapillary", opacity: 0.55,
     note: "Pole & fire-hydrant detections from crowdsourced street-level photos. Loads at zoom ≥ 16.",
@@ -502,6 +515,10 @@ export const TERRAIN = {
   contours: {
     kind: "contours", label: "Contour lines (1 ft)",
     source: "USGS 3DEP", opacity: 0.9,
+    // NEW-1 — THE ROW THE OWNER REPORTED. Declaring the gate here is what lets the Layers panel
+    // render this row as DORMANT (on, but suppressed) with a live "zoom in N levels" fix,
+    // instead of a static sentence under a checkbox that says ON.
+    minZoom: TERRAIN_MIN_ZOOM,
     note: `1-ft lines traced from LiDAR bare-earth ground heights (NAVD88), heavier line every 5 ft. Lines BREAK where the LiDAR has no data (water). Loads at zoom ≥ ${TERRAIN_MIN_ZOOM}. Screening only — verify with survey; agrees with the cross-section tool (same data).`,
     // NEW-1 stacking role (lib/mapStack.js): THE owner case: 1-ft contour hairlines must cross his buildings, not hide behind them.
     role: "line",
@@ -513,6 +530,7 @@ export const TERRAIN = {
   flowdir: {
     kind: "flowdir", label: "Water flow direction", // B760: plain label; arrow semantics live in the ⓘ note
     source: "USGS 3DEP", opacity: 0.9,
+    minZoom: TERRAIN_MIN_ZOOM, // NEW-1 — same terrain gate as contours; declared for the panel's live state
     note: `Downhill direction of the ground surface — bolder/longer arrow = steeper fall. Flat or unclear spots get no arrow rather than a guess. Loads at zoom ≥ ${TERRAIN_MIN_ZOOM}. Screening only — confirm drainage with your civil engineer.`,
     // NEW-1 stacking role (lib/mapStack.js): Flow arrows — strokes, and useless buried under a pad.
     role: "line",

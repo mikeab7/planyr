@@ -58,7 +58,7 @@ import { sanitizeLayerOverrides, overridesFromOverlays, overlaysWithOverrides, a
 import { sanitizeLayerAbove, aboveFromOverlays, applyAboveOverrides, aboveSig } from "./lib/layerPrefs.js";
 import { BASEMAPS } from "./lib/basemaps.js";
 import {
-  ppfToZoom, exactContainerPoint,
+  ppfToZoom, zoomToPpf, exactContainerPoint,
   basemapWrapPoint, registrationShift, sanitizeShift, tileNwFeet,
 } from "./lib/mapLock.js";
 import { overscanPx, keepBufferFor, retinaForZoom, tileWeight, tileCacheLimit } from "./lib/tileBudget.js";
@@ -2622,6 +2622,19 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [basemapSrc, setBasemapSrc] = useState(origin ? "esri" : "off");
   const basemapOn = basemapSrc !== "off" && !!origin;
   const [basemapStatus, setBasemapStatus] = useState(null); // "loading" | "loaded" | "failed" | null — the Basemap row's status dot
+  /* NEW-1 / NEW-2 — THE ZOOM THE BACKDROP MAP HAS ACTUALLY COMMITTED TO, which is the zoom every
+   * layer's gate is evaluated against. Distinct from `ppfToZoom(view.ppf, …)`, which is where the
+   * DRAWING is right now: the two agree at rest and diverge for the length of a gesture (the
+   * commit is debounced) and, critically, for the whole window between the plan opening and its
+   * opening view being framed. NEW-2 is that window; nothing was watching it. */
+  const [geoZoom, setGeoZoom] = useState(null);
+  /* NEW-2 — has the plan's OPENING view been framed, and has the basemap committed to it?
+   * Two facts, deliberately separate, because they land one render apart and only the pair
+   * means "the zoom a layer's gate would be answered against is the zoom this plan is at".
+   * `layerGateReady` is a ONE-SHOT latch: it exists to close the opening window, and keeping it
+   * a latch is what stops the overlay sync from re-running on every frame of a zoom gesture. */
+  const [viewFramed, setViewFramed] = useState(false);
+  const [layerGateReady, setLayerGateReady] = useState(false);
   const geoSrcRef = useRef(null); // which BASEMAPS source the live tile layers were built from
   // "Make sure the aerial is on" (identify mode, analysis-layer framing, geocoded add):
   // keeps the user's chosen source if one is already on, else the Esri default.
@@ -2703,8 +2716,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       zoomControl: false, attributionControl: false, dragging: false, scrollWheelZoom: false,
       doubleClickZoom: false, boxZoom: false, keyboard: false, touchZoom: false, tap: false,
       zoomSnap: 0, fadeAnimation: false, zoomAnimation: false, inertia: false,
-    }).setView([origin.lat, origin.lon], 17);
+      /* NEW-2 — BORN AT THE DRAWING'S OWN ZOOM, not at a hardcoded 17.
+       *
+       * This map is a slaved backdrop: its zoom is `ppfToZoom(view.ppf, origin.lat)` by
+       * construction, and every commit re-asserts that. Creating it at 17 meant that between
+       * creation and the first commit it CLAIMED a zoom the plan was never at — and a
+       * zoom-gated layer added in that window (the overlay staging runs on idle callbacks)
+       * evaluated its gate against that claim, painted, and was then correctly withdrawn the
+       * moment the real view landed. That is the owner's "contours paint, then disappear about
+       * two seconds later": not a crash, a gate answered against a zoom nobody was looking at. */
+    }).setView([origin.lat, origin.lon], ppfToZoom(view.ppf, origin.lat));
     geoMapRef.current = map;
+    setGeoZoom(ppfToZoom(view.ppf, origin.lat));
     /* NEW-1 — the THREE stacking bands, created ONCE, each in its own host:
      *   AREA (fills)                → a pane inside Leaflet's map pane, under the planner SVG
      *   AREA-FRONT (lifted fills)   → a pane inside the plan SVG's `data-gis-front-band` group,
@@ -2746,7 +2769,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // E2E-only hook (never runs in production): expose the backdrop map so the panel-toggle
     // flash spec can count Leaflet `viewreset` events — a tile-wipe fires one, a panBy doesn't.
     if (typeof window !== "undefined" && window.__PLANYR_E2E) window.__geoMap = map;
-    return () => { try { map.remove(); } catch (_) {} geoMapRef.current = null; geoBaseRef.current = null; geoBackfillRef.current = null; overlayRefs.current = {}; geoCommitRef.current = null; if (typeof window !== "undefined" && window.__geoMap === map) window.__geoMap = null; };
+    return () => { try { map.remove(); } catch (_) {} geoMapRef.current = null; geoBaseRef.current = null; geoBackfillRef.current = null; overlayRefs.current = {}; geoCommitRef.current = null; setGeoZoom(null); if (typeof window !== "undefined" && window.__geoMap === map) window.__geoMap = null; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [origin]);
 
@@ -3119,6 +3142,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // `setView` path (B65's snapshot still masks that unavoidable wipe). This
     // supersedes the B821/B837 approach of wiping-then-masking the toggle flash.
     const commit = (c, zoom, ghost) => {
+      /* NEW-2 — publish the zoom the basemap is being committed to. Guarded so a pure PAN (the
+       * common case — same zoom, `panBy`) dispatches nothing: an unguarded setState here is the
+       * B1189 pump, and this effect is exactly the one that produced that runaway. */
+      setGeoZoom((z) => (z != null && Math.abs(z - zoom) < 1e-4 ? z : zoom));
       const cur = map.getZoom();
       if (Math.abs(zoom - cur) < 1e-3) {
         setWrapTransform("");
@@ -3294,6 +3321,28 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     let staged = overlayStagedRef.current ? Infinity : 0;
     let idleId = null, idleTimer = null;
     const order = orderLayersByPriority(overlays, ALL_LAYERS);
+    /* ⛔ NEW-2 — THE ZOOM GATE RESOLVES BEFORE FIRST PAINT, and this is where that is enforced.
+     *
+     * The owner's report: opening the site, contour lines rendered IMMEDIATELY and then vanished
+     * about two seconds later. Diagnosed rather than guessed (ui-audit/diagnose-layer-gate-flash.mjs
+     * measures the whole sequence on the real app): a plan opens on the DEFAULT view — ppf 0.35,
+     * which at this latitude is Leaflet zoom ~17.4, comfortably past the z16 terrain gate — and the
+     * whole-site framing (`requestFit`, 120 ms after the workspace becomes active) then drops it to
+     * roughly z14.6 on a tract the size of Tsakiris. Every layer admitted in that window answered
+     * its gate against a zoom the plan was never going to be at: the contours fetched, painted,
+     * and were then CORRECTLY cleared by the terrain pipeline on the first post-fit `moveend`.
+     * A paint that is withdrawn reads as a crash, which is why this is a separate defect from the
+     * dormant-state work and not a duplicate of it.
+     *
+     * The fix is to answer the gate once, against the view the plan actually opens at: no layer is
+     * ADMITTED until the backdrop map has committed the framed view. `viewFramed` alone is not
+     * enough — it goes true one render BEFORE the commit lands — so the test is that the committed
+     * zoom has caught up with the drawing's own. That is self-correcting by construction: any later
+     * divergence (a gesture in flight) simply defers admissions to the settle, which is what the
+     * staging tier wants anyway.
+     * It gates ADDS ONLY. A removal, an opacity change and a lift are untouched, exactly as with
+     * the staging gate it composes with. */
+    const gateResolved = layerGateReady;
     const sync = () => syncOverlayLayers(geoMapRef.current, overlays, overlayRefs.current, {
       // NEW-1 — the two stacking bands (lib/mapStack.js). Each layer lands in the one its
       // declared ROLE names: fills under the plan, strokes and points over it.
@@ -3302,7 +3351,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         areaFront: PANE_AREA_FRONT, areaFrontLabel: PANE_AREA_FRONT_LABEL, // NEW-1 — the "Show above plan" band
         line: PANE_LINE, lineLabel: PANE_LINE_LABEL,
       },
-      admit: (id) => order.indexOf(id) < staged * LAYER_STAGE_SIZE,
+      admit: (id) => gateResolved && order.indexOf(id) < staged * LAYER_STAGE_SIZE,
       // NEW-2 — which county's baked flood archive (if any) this plan may use. The plan header's
       // county is the right key: it is what the site was filed under, and it is stable across a
       // pan, which the map-view county is not.
@@ -3329,7 +3378,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if (idleId != null && typeof cancelIdleCallback === "function") { try { cancelIdleCallback(idleId); } catch (_) {} }
       if (idleTimer) clearTimeout(idleTimer);
     };
-  }, [overlays, origin, basemapOn]); // eslint-disable-line
+  }, [overlays, origin, basemapOn, layerGateReady]); // eslint-disable-line
+
+  /* NEW-2 — the latch itself. It flips exactly once, when the framed view has been COMMITTED to
+   * the backdrop map, and does nothing thereafter — so a zoom gesture (which moves `view.ppf`
+   * every frame) never re-enters the overlay sync above. Cheap by construction: after the flip
+   * the first line returns. */
+  useEffect(() => {
+    if (layerGateReady || !origin || !viewFramed || geoZoom == null) return;
+    if (Math.abs(geoZoom - ppfToZoom(view.ppf, origin.lat)) < 0.01) setLayerGateReady(true);
+  }, [layerGateReady, viewFramed, geoZoom, view.ppf, origin]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /* Coverage (NEW-1/B283): which layers' DATA reaches the planner's current view, for
      the Layers panel relevance picker. The geo basemap follows the SVG view, so recompute
@@ -5176,7 +5234,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
 
   // Reframe when this view becomes active — its real size is known only once shown.
   useEffect(() => {
-    if (active) { const t = setTimeout(() => requestFit(), 120); return () => clearTimeout(t); }
+    if (active) { const t = setTimeout(() => { requestFit(); setViewFramed(true); }, 120); return () => clearTimeout(t); }
   }, [active]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /* ------------ wheel zoom (non-passive) ------------
@@ -20456,7 +20514,21 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       disabledReason: origin ? null : "This plan has no location yet — the aerial needs a real-world spot to anchor to.",
                     }}
                     gisNote={origin ? null : "GIS layers (flood, wetlands, boundaries, utilities) appear here once this plan has a location."}
-                    onSetLocation={origin ? null : () => setSetLocOpen(true)} />
+                    onSetLocation={origin ? null : () => setSetLocOpen(true)}
+                    /* NEW-1 — the LIVE zoom every row's gate is reported against, and the fix.
+                       Deliberately the DRAWING's own zoom rather than `geoZoom` (the backdrop's
+                       last commit): the two agree at rest, and during a gesture the drawing is
+                       the thing the owner is looking at, so a row that says "zoom in 2 levels"
+                       counts down as he zooms instead of lagging a commit behind.
+                       `onZoomTo` zooms about the canvas CENTRE — the same anchor the ＋/－
+                       buttons use — so the plan stays framed where he left it. */
+                    mapZoom={origin ? ppfToZoom(view.ppf, origin.lat) : null}
+                    onZoomTo={origin ? (z) => setView((v) => {
+                      const want = zoomToPpf(z, origin.lat);
+                      if (!(want > v.ppf)) return v; // already past the gate — never zoom OUT to "fix" it
+                      const nv = zoomAround({ scale: v.ppf, tx: v.offX, ty: v.offY }, want / v.ppf, size.w / 2, size.h / 2, 0.02, 8);
+                      return { ppf: nv.scale, offX: nv.tx, offY: nv.ty };
+                    }) : null} />
                   {/* utility-evidence drawing tools (map-dependent — a located site only).
                       Active states ride the theme tokens (accent + on-accent), never raw
                       hexes — the B341/B508 chrome-region rule (B696 sweep). */}
