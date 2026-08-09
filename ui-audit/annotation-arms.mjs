@@ -45,6 +45,7 @@ import { pngDataUrl } from "./lib/synthRaster.mjs";
 import { cachedRaster } from "./lib/fixtureSeeding.mjs";
 import { bucketTrace, layerCensus, median, noiseFloorPct, armVerdict, pairedComparison, annotationFault } from "./lib/rasterCost.mjs";
 import { assertMeasurable } from "./lib/tabTiming.mjs";
+import { FEATURE_COUNT_FIELD } from "./lib/featureCensus.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const BASE = (process.env.BASE_URL || "http://localhost:4173/").replace(/\/?$/, "/");
@@ -124,6 +125,9 @@ function readAnnotations(ids) {
     measures: present(ids.measures, (id) => `[data-measure="${id}"]`).length,
     textNodes: svg.getElementsByTagName("text").length,
     canvasNodes: svg.getElementsByTagName("*").length,
+    featuresDrawn: new Set([...svg.querySelectorAll("[data-feature]")].map((n) => n.getAttribute("data-feature"))).size,
+    /* el-tier: this harness measures the annotation TIERS separately and by name; the element
+     * count is the fourth tier, wanted on its own. NEW-2 added the census beside it. */
     elementsDrawn: svg.querySelectorAll("[data-el-id]").length,
   };
 }
@@ -140,6 +144,8 @@ const READ_COUNTERS = `(() => {
   return {
     canvasNodes: svg ? svg.getElementsByTagName("*").length : null,
     textNodes: svg ? svg.getElementsByTagName("text").length : null,
+    ${FEATURE_COUNT_FIELD},
+    /* el-tier: tier detail beside the census. */
     elementsDrawn: svg ? svg.querySelectorAll("[data-el-id]").length : null,
     leafletTiles: document.querySelectorAll(".leaflet-tile").length,
     heapMB: performance.memory ? +(performance.memory.usedJSHeapSize / 1048576).toFixed(2) : null,

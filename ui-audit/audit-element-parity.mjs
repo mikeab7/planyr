@@ -222,7 +222,10 @@ try {
 
   const contentFill = () => page.evaluate(() => {
     const c = document.querySelector('[data-testid="planner-canvas"]').getBoundingClientRect();
-    const boxes = [...document.querySelectorAll("[data-el-id]")].map((g) => g.getBoundingClientRect()).filter((b) => b.width && b.height);
+    /* ⛔ ALL FIVE DRAWN KINDS (NEW-2). "How much of the canvas does the plan fill" answered from
+     * elements alone under-reports a plan whose extent is set by a parcel ring or a markup, and a
+     * fit check that under-reports is a fit check that passes a fit that did not happen. */
+    const boxes = [...document.querySelectorAll("[data-feature]")].map((g) => g.getBoundingClientRect()).filter((b) => b.width && b.height);
     if (!boxes.length) return 0;
     const x0 = Math.min(...boxes.map((b) => b.left)), x1 = Math.max(...boxes.map((b) => b.right));
     const y0 = Math.min(...boxes.map((b) => b.top)), y1 = Math.max(...boxes.map((b) => b.bottom));

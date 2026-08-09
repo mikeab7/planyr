@@ -59,6 +59,7 @@ import { pairedDelta, nullFloor, armVerdict, scalingShape, attributionQuality, p
 import { attributeProfile, loadSourceMaps, makeFrameResolver } from "./lib/bootTimeline.mjs";
 import { fakeTilePng, parseTileUrl } from "./lib/fakeTile.mjs";
 import { assertMeasurable } from "./lib/tabTiming.mjs";
+import { FEATURE_COUNT_FIELD } from "./lib/featureCensus.mjs";
 
 const BASE = (process.env.BASE_URL || "http://localhost:4173/").replace(/\/?$/, "/");
 const EXEC = process.env.PW_CHROME || "/opt/pw-browsers/chromium-1194/chrome-linux/chrome";
@@ -184,6 +185,8 @@ const COUNTERS = `(() => {
   if (!svg) return null;
   return {
     canvasNodes: svg.getElementsByTagName("*").length,
+    ${FEATURE_COUNT_FIELD},
+    /* el-tier: the rung assertion counts PONDS, which are elements — the element tier is the subject. */
     elementsDrawn: svg.querySelectorAll("[data-el-id]").length,
     canvasText: svg.getElementsByTagName("text").length,
     canvasPaths: svg.getElementsByTagName("path").length,
@@ -318,6 +321,7 @@ async function setZoom(page, ppf) {
 const counters = (page) => page.evaluate(COUNTERS);
 const elCount = (page) => page.evaluate(() => {
   const svg = document.querySelector('[data-testid="planner-canvas"]');
+  /* el-tier: the pond ladder adds ELEMENTS and verifies each one landed. */
   return svg ? svg.querySelectorAll("[data-el-id]").length : 0;
 });
 

@@ -44,7 +44,7 @@ export const CAPTURE_NUMERIC_KEYS = [
   "ratio", "multiplier", "sustainMs", "floorMs", "fires",
   "p50Ms", "p95Ms", "p99Ms", "maxMs", "jankFrames",
   "longTasks", "longTaskMs", "longTaskMaxMs",
-  "heapMB", "domNodes", "canvasNodes", "elementsDrawn", "layersOn", "panelsOpen", "tiles",
+  "heapMB", "domNodes", "canvasNodes", "featuresDrawn", "elementsDrawn", "layersOn", "panelsOpen", "tiles",
   "ppf", "editsSinceLoad", "planSwitches", "dpr", "viewportW", "viewportH", "hardwareThreads",
   "deviceMemoryGB", "recorderSelfUs", "counterSamples", "sentRows",
 ];
@@ -163,6 +163,7 @@ export function buildCapture(parts) {
   num("heapMB", p.heapMB, 1);
   num("domNodes", p.domNodes);
   num("canvasNodes", p.canvasNodes);
+  num("featuresDrawn", p.featuresDrawn);
   num("elementsDrawn", p.elementsDrawn);
   num("layersOn", p.layersOn);
   num("panelsOpen", p.panelsOpen);

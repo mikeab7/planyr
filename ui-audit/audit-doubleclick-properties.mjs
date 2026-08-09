@@ -316,7 +316,8 @@ try {
    * reason that has nothing to do with the click contract. */
   const contentFill = () => page.evaluate(() => {
     const c = document.querySelector('[data-testid="planner-canvas"]').getBoundingClientRect();
-    const boxes = [...document.querySelectorAll("[data-el-id],[data-mk-id]")].map((g) => g.getBoundingClientRect()).filter((b) => b.width && b.height);
+    /* NEW-2 — measured across every drawn kind, not the element + markup pair alone. */
+    const boxes = [...document.querySelectorAll("[data-feature]")].map((g) => g.getBoundingClientRect()).filter((b) => b.width && b.height);
     if (!boxes.length) return 0;
     const x0 = Math.min(...boxes.map((b) => b.left)), x1 = Math.max(...boxes.map((b) => b.right));
     const y0 = Math.min(...boxes.map((b) => b.top)), y1 = Math.max(...boxes.map((b) => b.bottom));
@@ -600,10 +601,14 @@ try {
    * nothing to do with an edit. Measured: comparing across that boundary reported all 27 features as
    * modified, which is a broken instrument, not 27 findings. Chrome the export already knows to drop
    * (`data-export="skip"`) and the dimension group are excluded for the same reason. */
+  /* ⛔ AND IT FINGERPRINTS EVERY DRAWN KIND, NOT ELEMENTS AND MARKUPS (NEW-2). Clause 6 of
+   * CHROME-NEVER-EATS-A-PRESS is that a gesture contracted to OPEN PROPERTIES must never edit the
+   * plan — and on an el+markup fingerprint, a double-click that silently moved a measurement, a
+   * callout or a parcel passed as "the plan did not change". */
   const planFingerprint = () => page.evaluate(() =>
-    [...document.querySelectorAll("[data-el-id] path[d], [data-el-id] polygon[points], [data-el-id] polyline[points], [data-mk-id] path[d], [data-mk-id] polygon[points], [data-mk-id] polyline[points]")]
+    [...document.querySelectorAll("[data-feature] path[d], [data-feature] polygon[points], [data-feature] polyline[points]")]
       .filter((n) => !n.closest('[data-export="skip"], [data-el-dim], [data-handle-layer]'))
-      .map((n) => `${n.closest("[data-el-id],[data-mk-id]").getAttribute("data-el-id") || n.closest("[data-mk-id]").getAttribute("data-mk-id")}=${n.getAttribute("d") || n.getAttribute("points")}`)
+      .map((n) => `${n.closest("[data-feature]").getAttribute("data-feature")}=${n.getAttribute("d") || n.getAttribute("points")}`)
       /* ⛔ AT A THOUSANDTH OF A PIXEL, not at string equality. A re-render re-derives these
        * coordinates through the same maths and lands on a different LAST BIT — measured:
        * 558.0385597644689 against 558.0385597644688, 56 paths' worth, on a plan nobody touched.

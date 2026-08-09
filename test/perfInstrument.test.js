@@ -126,12 +126,17 @@ describe("buildPerfRow — short, and a missing counter is ABSENT rather than ze
 /* A minimal DOM stand-in. Deliberately hand-built rather than jsdom: the counting RULES are what
  * is under test (especially the exact-id panel match), and a fixture makes the wrong answer
  * visible as a number instead of as an environment difference. */
-function fakeDoc({ panels = [], docked = false, els = 0, canvasNodes = 0, tiles = 0, layers = 0 } = {}) {
+function fakeDoc({ panels = [], docked = false, els = 0, canvasNodes = 0, tiles = 0, layers = 0, featureKeys = null } = {}) {
   const testids = [];
   for (const p of panels) testids.push(`floating-panel-${p}`, `floating-panel-${p}-chrome`, `floating-panel-${p}-chrome-dock`, `floating-panel-${p}-chrome-close`);
+  /* NEW-2 — the fixture now models `[data-feature]` too, and models it the way the render really
+   * behaves: one NODE per stamp, with chrome repeating its owner's key, so a test that counted
+   * nodes instead of distinct keys would come out wrong here rather than only in a browser. */
+  const featureNodes = (featureKeys || Array.from({ length: els }, (_, i) => `el:e${i}`))
+    .map((k) => ({ getAttribute: (a) => (a === "data-feature" ? k : null) }));
   const svg = {
     getElementsByTagName: () => ({ length: canvasNodes }),
-    querySelectorAll: (s) => (s === "[data-el-id]" ? { length: els } : { length: 0 }),
+    querySelectorAll: (s) => (s === "[data-el-id]" ? { length: els } : s === "[data-feature]" ? featureNodes : []),
   };
   return {
     querySelector: (s) => (s === '[data-testid="planner-canvas"]' ? svg : s === '[data-testid="left-menu-panel"]' ? (docked ? {} : null) : null),
@@ -156,7 +161,22 @@ describe("readScene — the exact-id panel count, which a prefix match gets wron
 
   it("reads the canvas axes", () => {
     const s = readScene(fakeDoc({ els: 140, canvasNodes: 2200, tiles: 105, layers: 9 }));
-    expect(s).toMatchObject({ elementsDrawn: 140, canvasNodes: 2200, tiles: 105, layersOn: 9 });
+    expect(s).toMatchObject({ elementsDrawn: 140, featuresDrawn: 140, canvasNodes: 2200, tiles: 105, layersOn: 9 });
+  });
+
+  /* NEW-2 — THE MISS THIS COLUMN EXISTS FOR. A plan of one element plus one of each other drawn
+   * kind reads as ONE element and FIVE features; the old column reported the 1 and called it the
+   * scene. Measured live at 120 against 145 on the owner's own Silvestri plan. */
+  it("counts every drawn kind, not just elements — and counts KEYS, not nodes", () => {
+    const s = readScene(fakeDoc({
+      els: 1,
+      featureKeys: [
+        "el:b1", "markup:m1", "measure:0", "callout:c1", "parcel:p1",
+        "el:b1", "parcel:p1",   // chrome repeating its owner's key — a pond label, an acreage badge
+      ],
+    }));
+    expect(s.elementsDrawn).toBe(1);
+    expect(s.featuresDrawn).toBe(5);
   });
 
   it("never throws on a hostile or absent document — rule 3", () => {

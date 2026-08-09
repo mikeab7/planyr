@@ -294,6 +294,7 @@ export function capture(reason) {
       heapMB: heapMB(),
       domNodes: scene.documentNodes,
       canvasNodes: scene.canvasNodes,
+      featuresDrawn: scene.featuresDrawn,
       elementsDrawn: scene.elementsDrawn,
       layersOn: scene.layersOn,
       layers: ctx.layers,          // B265539 — WHICH ones, so a fixture arm can be his rather than a guess

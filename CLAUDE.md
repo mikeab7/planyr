@@ -635,6 +635,60 @@ rules are binding shorthand, not optional style. (Full-text home so briefs stay 
      be a double-click. `audit-doubleclick-properties` now measures and asserts its own gap, and that
      assertion caught a defect in ITSELF on its first run (it was timing deselect→press-1, not
      press-1→press-2), which is the argument for measuring rather than assuming in one line.
+- **COUNT-EVERY-KIND** — **A PLAN'S CONTENTS ARE ITS FIVE DRAWN KINDS. A count that reads `[data-el-id]`
+  sees ONE of them and reports the other four as NOTHING HAPPENED.** (NEW-2, 2026-08-09.) Measured live on
+  the owner's Silvestri pair: a cross-plan paste landed three markup objects, the app correctly said so, and
+  the element count read **120 before, 120 after** — a false "paste succeeds silently but writes nothing"
+  was one keystroke from being filed against a working feature. The plan holds **145 distinct features**
+  against those 120 elements. Every feature stamps `data-feature="<kind>:<id>"` (el · markup · measure ·
+  callout · parcel); count **DISTINCT KEYS, never NODES** — chrome carries its owner's key too, so a node
+  count drifts with selection and hover. Use `ui-audit/lib/featureCensus.mjs`; a targeted
+  `[data-el-id="b3"]` lookup is untouched, and a genuine element-tier read says so with an `el-tier:`
+  marker naming why. Enforced by `test/featureCensus.test.js` (source sweep + the counting rule) and
+  `e2e/feature-census.spec.js` (one of each kind = five, with an el-only counter answering ONE beside it).
+  **⛔ AND THE THING THAT RESCUED IT: Ctrl+Z, then diff the feature list. WHEN A COUNT SAYS NOTHING HAPPENED
+  BUT THE APP SAYS IT DID, THE UNDO KNOWS** — an undo frame exists only if something was really committed,
+  and undoing it names exactly what went in. A counter can be blind to a kind; the model's own history cannot.
+  The same trap applies to picking a "blank" canvas point: free of ELEMENTS is not free of FEATURES, and a
+  pan started on a markup DRAGS IT (`BLANK_POINT_EXCLUDE`).
+- **SYNTHETIC-KEYS-DONT-EDIT** — **A SYNTHETIC KEYSTROKE DOES NOT MUTATE THE PLAN, AND ONE DOM READ IS NOT
+  A CHECK. Drive the real input, then RE-READ UNTIL THE FEATURE IS GENUINELY ABSENT.** (NEW-3, 2026-08-09.
+  Sits beside FOREGROUND-OR-VOID because it is the same species: a harness that believes its own instrument.)
+  1. **THE COST, which is the reason it is a rule and not a note.** This has taken **two cleanup rounds on
+     the owner's LIVE plans** — a stray easement left on Bain / "Concept - Original" (2026-08-08) and three
+     pasted markups left on Silvestri (V27088, 2026-08-09). Both times the harness "deleted" the object,
+     **reported success, and the object was still on his plan**, so a human had to finish it by hand.
+  2. **THE MECHANISM, MEASURED rather than reasoned** (build 7307342, one selected building, count before →
+     after). The planner's key handler is bound to **`window`**, and `new KeyboardEvent(…)` defaults
+     **`bubbles: false`** — a real key event never does — so a synthetic event dispatched on `document` or
+     `document.body` never propagates to it:
+
+         document.dispatchEvent(new KeyboardEvent("keydown", {key:"Delete"}))        1 → 1  ✗
+         document.body.dispatchEvent(…)                                              1 → 1  ✗
+         window.dispatchEvent(…)                    (the listener's own target)      1 → 0  ✓
+         …any of the three with { bubbles: true }                                    1 → 0  ✓
+         page.keyboard.press("Delete")              (a real key event)               1 → 0  ✓
+
+     So it is NOT that the app rejects untrusted events — it never checks `isTrusted`. It is one missing
+     option, and it fails in **total silence**: no error, nothing in the console, the object still selected.
+  3. **AND TWO MORE GATES SWALLOW THE KEY BY DESIGN**, so a driver can do everything right and still no-op:
+     a **FOCUSED FIELD** (while `activeElement` is an input/select/textarea/contentEditable the handler
+     returns early so you can type — correct product behaviour, invisible to a driver that did not blur),
+     and an **INACTIVE PLANNER** (`if (!active) return` — a keep-alive planner behind another workspace
+     must never eat keys).
+  4. **THE RULE.** Never dispatch a synthetic keystroke to mutate the plan. Use the driver's real key input
+     (`page.keyboard.press` / CDP `Input.dispatchKeyEvent`), or press the control that does the job — the
+     Properties panel's **Delete element**, or the right-click menu's. **And RE-READ BETWEEN ATTEMPTS:** the
+     DOM read races the re-render, which is exactly how a pass was reported for an object still present.
+     Poll until the feature is ABSENT, then **reload and confirm** — a removal that never reached storage
+     comes back.
+  5. **MACHINE-ENFORCED, both halves.** `ui-audit/lib/deleteFeature.mjs` is the only supported deletion
+     driver (`deleteFeatureUntilGone` escalates key → panel → menu, re-reading between each, and **THROWS
+     rather than reporting a pass it did not earn**); `test/deleteDrive.test.js` pins the verdict table and
+     **sweeps `ui-audit/` + `e2e/` for the banned shape**. The claim itself cannot become folklore:
+     `ui-audit/verify-delete-drive.mjs` re-measures the table above against the real app every run and
+     **fails if the banned shape ever starts working** — the day the key wiring changes, the rule says so
+     instead of quietly going stale.
 - **PERCEPTUAL-PARITY** — **The bar a change to the PICTURE has to clear is that the owner cannot SEE it at
   working zoom — not that the file is unchanged.** (Owner amendment, 2026-08-06, verbatim: *"imperceptible at
   working zoom assuming that one makes the most sense"*, and *"I've got a 2K display, so I'm not gonna see
