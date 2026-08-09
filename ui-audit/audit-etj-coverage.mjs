@@ -17,6 +17,7 @@
  *
  * Usage: node ui-audit/audit-etj-coverage.mjs [--json]
  */
+import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -62,7 +63,39 @@ for (const src of ETJ_SOURCES) {
   rows.push({ id: src.id, liveCount: L.length, declaredCount: D.length, added, removed });
 }
 
-if (asJson) console.log(JSON.stringify({ drift, rows }, null, 2));
+/* ⛔ NEW-1b — AUDIT THE AGGREGATOR AGAINST THE OWNER'S ACTUAL FOOTPRINT.
+ *
+ * "HGAC missing Baytown means it may be missing others." It does. Roster drift (above) only catches
+ * a layer changing under us; this catches the layer never having carried a city we DEPEND ON. The
+ * footprint is every city that holds or touches one of his sites, taken from the portfolio fixture's
+ * recorded ground truth — so this asks the question of the places his work actually lands, not of an
+ * abstract city list. For each city the aggregator does NOT carry, it searches ArcGIS Online for a
+ * layer that city publishes itself, so the gap comes with a lead rather than just a complaint. */
+const PORTFOLIO = JSON.parse(fs.readFileSync(path.join(ROOT, "ui-audit/fixtures/jurisdiction-portfolio.json"), "utf8"));
+const footprint = [...new Set(PORTFOLIO.sites.flatMap((s) => [s.truth.city, ...(s.truth.near1km || [])]).filter(Boolean))].sort();
+const covered = [];
+const missing = [];
+for (const city of footprint) {
+  // A city is covered if ANY routed ETJ source declares it (roster or nameConst).
+  const anySource = ETJ_SOURCES.some((src) =>
+    (src.nameConst && src.nameConst.toLowerCase() === city.toLowerCase())
+    || (Array.isArray(src.roster) && src.roster.some((n) => n.trim().toUpperCase() === city.trim().toUpperCase())));
+  (anySource ? covered : missing).push(city);
+}
+
+async function findOwnLayer(city) {
+  const q = encodeURIComponent(`${city} AND (ETJ OR "extraterritorial")`);
+  try {
+    const j = await (await fetch(`https://www.arcgis.com/sharing/rest/search?f=json&num=10&q=${q}`, { signal: AbortSignal.timeout(25000) })).json();
+    const hit = (j.results || []).find((r) => r.url && new RegExp(city.replace(/\s+/g, ".?"), "i").test(`${r.title} ${r.owner}`));
+    return hit ? { title: hit.title, owner: hit.owner, url: hit.url } : null;
+  } catch (_) { return null; }
+}
+
+const leads = {};
+for (const city of missing) leads[city] = await findOwnLayer(city);
+
+if (asJson) console.log(JSON.stringify({ drift, rows, footprint: { covered, missing, leads } }, null, 2));
 else {
   for (const r of rows) {
     if (r.unresolved) { console.log(`?  ${r.id} — service unreachable (reported, NOT counted as drift)`); continue; }
@@ -74,5 +107,12 @@ else {
     if (r.removed.length) console.log(`   − in the roster, no longer carried: ${r.removed.join(", ")}`);
   }
   console.log(drift ? `\n${drift} source(s) DRIFTED — update the roster in src/shared/gis/sources.js.` : "\nNo roster drift.");
+  console.log(`\n── The owner's footprint: ${footprint.length} cities hold or touch one of his sites ──`);
+  console.log(`✅ carried by a routed ETJ source (${covered.length}): ${covered.join(", ") || "(none)"}`);
+  console.log(`❌ NOT carried — an ETJ here reads as "no ETJ" (${missing.length}):`);
+  for (const city of missing) {
+    const l = leads[city];
+    console.log(`   ${city}${l ? `  → publishes its own: ${l.owner} | ${l.title}\n        ${l.url}` : "  → no self-published layer found"}`);
+  }
 }
 process.exit(drift > 0 ? 1 : 0);

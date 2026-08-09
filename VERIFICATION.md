@@ -234,6 +234,44 @@ assumed) and (f) needs a human eye.** Every part that an instrument could settle
 
 *(minted V73584; references **B276576**, overlaps **V477**; `Cadence: once`. Implemented + fully
 sandbox-verified 2026-08-08 — the residue above is the deployed edge only.)*
+### V84864 — B286304/B286305: Baytown's own layers, the aggregator audit, and an authority with no rule
+
+**Status: ✅ PASSED (2026-08-09) for everything reachable — 27 of 28 sites correct, 0 mislabelled, 0 unresolved.** GREEN RIVER has no active parcel geometry.
+
+**The owner's correction, both clauses.** *"City of Baytown may very well be 2' above the 500, and the Baytown etj is on their gis."* The second is confirmed and shipped. The first **could not be verified and is deliberately NOT encoded** — see the blocker below.
+
+**Baytown's own GIS, measured per lot on his site `sms69x8rb2qk`:** every tested Goose Creek lot is inside Baytown's ETJ; 6 of 14 are also inside its city limits. **The H-GAC aggregator returns nothing at all of them.** BT_ETJ (layer 11) and BT_City_Limit (layer 12) are both registry rows now, with fixtures at real lot centroids — including the ETJ-ONLY lot, the exact membership H-GAC misses.
+
+**Portfolio sweep, all 28: 27 correct · 0 mislabelled · 0 unresolved.** Two sites changed:
+
+| Site | Before | After |
+|---|---|---|
+| Goose Creek | `Part in City of Baytown (6 of 14 lots) / rest in its ETJ · Harris County` | unchanged — **now corroborated by Baytown's own layer, lot for lot** |
+| Grand Port | `Unincorporated · Chambers County` | `Unincorporated / City of Baytown · ETJ · Chambers County` — a governing ETJ it never had |
+| Bain | `Unincorporated / City of Houston · ETJ / City of Katy · edge only · Fort Bend County` | unchanged — **proven not regressed** |
+
+**The aggregator audit (the real ask).** Of the **10 cities in the owner's footprint, 6 are carried by a routed ETJ source and 4 are NOT: Brookshire, Humble, Katy, Waller.** Three publish their own layers; the URLs are in the audit output and on B286306. Katy was tested — it returns **0 at every probe point on both Tsakiris and Bain**, so wiring it changes no answer, only upgrades an honest "not published" to a verified "no ETJ".
+
+**An authority with no rule now blocks a settled FFE.** `administratorCandidates` had always stamped `ruleModeled` with a comment promising an unmodelled candidate "is flagged, never dropped" — **nothing in the tree ever read that flag.** Measured on Goose Creek's real signals:
+
+| | before | after |
+|---|---|---|
+| candidates | Harris County only | Harris County · **Baytown** (limits) · **Baytown (ETJ)** |
+| `settled` | **true** | **false** |
+| on screen | "Rule applied: Harris County" | "No rule on file for City of Baytown…" |
+
+An EDGE-only candidate is excluded deliberately, and **Bain is asserted to stay settled** — the fix must not turn every touching city into a governing one.
+
+**⛔ HARD BLOCKER, stated rather than worked around: Baytown's ordinance is unreachable from here.** `library.municode.com`, `api.municode.com` and `baytown.org` all return **HTTP 403 — host not in allowlist** (verified 2026-08-09). Web search works but returns SUMMARIES, and a summary is not an ordinance — every other rule record in this repo cites a section it was read from. `rules.baytown.ffeRule` is therefore `null`, `verified: false`, source `NOT TRANSCRIBED`, **with a test asserting the nulls so nobody fills them in from recollection.** The unblock is an egress allowlist entry for Municode, on `OWNER-TODO.md`.
+
+**⚠ THE FFE ANSWER, which corrects the premise.** The expectation was that Baytown (~500-yr + 2 ft) would be materially STRICTER than the basis in use. **Harris County's modelled rule IS 0.2% (500-yr) WSE + 2 ft**, verified and cited at §4.07(b)(1) — the same datum and the same freeboard. **If the recollection is right, the required floor does not move and the pads move ZERO feet.** The exposure exists only if Baytown's ordinance differs from that, which is precisely why this ships as a refusal-to-settle and not an alarm.
+
+**Texas golden master:** regenerated after classifying the diff exhaustively — **0 CHANGED, 0 REMOVED, 3 ADDED** (all null-valued Baytown keys); 23 insertions, 0 deletions.
+
+**⚠ A NEW CONFLICT FOUND AND RAISED, NOT SILENTLY RESOLVED (B286308):** at **Grand Port** the two city-limits publishers disagree on **all 4 lots** — Baytown's own layer says inside the city, TxGIO says no city. At Goose Creek they agree perfectly. If Baytown is right, Grand Port is an INCORPORATED site. Not guessed at; it needs an authoritative record.
+
+**Still pending (`Blocker: live-GIS` · `auth` · `real-data`):** the on-screen rendering, unchanged and unchanged in reason — the sandbox blocks the county parcel service, so no georeferenced parcel can be placed logged-out.
+
 ### V79264 — B280704/B280705/B280706: the Goose Creek straddle, the ETJ coverage hole, and the split-jurisdiction refusal
 
 **Status: ✅ PASSED (2026-08-09) for everything this sandbox can reach — 27 of 28 sites.** GREEN RIVER has no active parcel geometry, so the app shows no badge and there is nothing to check.
