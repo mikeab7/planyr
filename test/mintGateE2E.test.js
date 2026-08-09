@@ -31,7 +31,7 @@
  */
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -44,9 +44,19 @@ const CLI = join(REPO, "scripts", "check-mint.mjs");
 
 const git = (cwd, ...args) => execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
 
-/** The four id files, so a scratch repo has the same shape the gate reads in the real one. */
-function writeBacklog(dir, { open = [], done = [], vOpen = [], vDone = [] }) {
-  const head = (l, ids) => ids.map((n) => `### ${l}${n} — scratch item\n[ ] a body line\n`).join("\n");
+/**
+ * The four id files, so a scratch repo has the same shape the gate reads in the real one.
+ *
+ * `own` lists ids this branch minted FOR ITSELF, which get a distinct title. That distinction is
+ * load-bearing since B290251: the gate now separates "main's item arrived here via a merge" from
+ * "two sessions minted one number for two features" by comparing the HEADING TEXT, and this
+ * fixture used to give every item the identical title `scratch item` — under which the two cases
+ * really are indistinguishable, in the fixture and in life. Modelling two different features as
+ * two different titles is what makes case (a) an honest test rather than a coincidence.
+ */
+function writeBacklog(dir, { open = [], done = [], vOpen = [], vDone = [], own = [] }) {
+  const title = (l, n) => (own.includes(`${l}${n}`) ? `THIS BRANCH'S OWN unrelated feature` : `scratch item`);
+  const head = (l, ids) => ids.map((n) => `### ${l}${n} — ${title(l, n)}\n[ ] a body line\n`).join("\n");
   writeFileSync(join(dir, "BACKLOG.md"), `# Backlog\n\n${head("B", open)}`);
   writeFileSync(join(dir, "BACKLOG-DONE.md"), `# Archive\n\n${head("B", done)}`);
   writeFileSync(join(dir, "VERIFICATION.md"), `# Verify\n\n${head("V", vOpen)}`);
@@ -129,12 +139,13 @@ const advisoriesOf = (res, letter) => res.families.find((f) => f.letter === lett
 
 describe("the mint gate BLOCKS a real push (the path that had never once fired)", () => {
   it("(a) REJECTS an id main took while this branch was in flight, and names origin/main", () => {
-    // We minted B102 against a main that did not have it. Main has since merged its own B102.
-    const repo = workBranch("takes-b102", { open: [99, 100, 102], done: [50], vOpen: [50], vDone: [10] });
+    // We minted B102 against a main that did not have it, for OUR OWN feature. Main has since
+    // merged its own, different, B102.
+    const repo = workBranch("takes-b102", { open: [99, 100, 102], done: [50], vOpen: [50], vDone: [10], own: ["B102"] });
     const res = runGate(repo);
     expect(res.unverifiable, res.reason).toBeFalsy();
     expect(res.ok).toBe(false);
-    expect(offendersOf(res, "B")).toEqual([{ id: "B102", kind: "taken", where: "origin/main" }]);
+    expect(offendersOf(res, "B")).toMatchObject([{ id: "B102", kind: "taken", where: "origin/main" }]);
 
     const { code, err } = cli(repo);
     expect(code).toBe(1);
@@ -237,6 +248,107 @@ describe("the mint gate LETS THROUGH what it should (a gate that cries wolf gets
     writeFileSync(join(repo, "src-ish.txt"), "a code change\n");
     commitAll(repo, "code only");
     expect(runGate(repo).ok).toBe(true);
+  });
+});
+
+/* ---- (f) THE MERGE-RECOVERY ARMS (B290251) ------------------------------------------------
+ *
+ * The gate blocked the recovery path CLAUDE.md itself prescribes. A stale PR needs a new push, a
+ * `dirty` PR swallows every nudge, and the documented fix for both is to bring `origin/main` into
+ * the branch — after which every id main added since the base looked like this branch's mint.
+ * Measured 2026-08-09 on the branch that filed the item: base cf4f77b, tip ae2ce02, ELEVEN fatal
+ * offenders, all of them main's own items.
+ *
+ * These four arms are the whole argument, and they are written together deliberately: two prove
+ * the false red is gone, two prove the true red survives it. Building them found something the
+ * item did not know — a plain `git merge origin/main` moves the merge base to main's tip and was
+ * never affected at all. The failure shape is a resolution that takes main's CONTENT without its
+ * ANCESTRY (`git merge --squash`, `git checkout origin/main -- BACKLOG.md`, a rebuilt branch), and
+ * an arm that only exercised a clean merge commit would have passed before the fix and proved
+ * nothing.
+ */
+describe("(f) merging main in no longer reads as minting main's ids (B290251)", () => {
+  /** Resolve conflict markers by KEEPING BOTH SIDES — the resolution CLAUDE.md prescribes. */
+  function keepBothSides(dir) {
+    for (const f of ["BACKLOG.md", "BACKLOG-DONE.md", "VERIFICATION.md", "VERIFICATION-DONE.md"]) {
+      const p = join(dir, f);
+      writeFileSync(p, readFileSync(p, "utf8")
+        .replace(/^<<<<<<< .*\n/gm, "").replace(/^=======\n/gm, "").replace(/^>>>>>>> .*\n/gm, ""));
+    }
+  }
+  const softGit = (dir, ...args) => { try { git(dir, ...args); } catch { /* a conflict is the point */ } };
+
+  it("a CONTENT-ONLY merge of main (squash / checkout-theirs) is CLEAN — this is the measured defect", () => {
+    // main took B102 / V52 after we branched. We bring its content in without its ancestry, so the
+    // merge base does not move and B102 / V52 read as "added by this branch" — while being, byte
+    // for byte, main's own headings.
+    const repo = workBranch("merged-main-content", { open: [99, 100, 104], done: [50], vOpen: [50], vDone: [10] });
+    softGit(repo, "merge", "--squash", "origin/main");
+    keepBothSides(repo);
+    commitAll(repo, "bring main's ledger content in to clear the conflict");
+
+    const res = runGate(repo);
+    expect(res.unverifiable, res.reason).toBeFalsy();
+    expect(res.baseRef).toBeTruthy();
+    // the merge base really did NOT move — otherwise this arm proves nothing
+    expect(res.families.find((f) => f.letter === "B").added).toContain(102);
+    expect(res.ok).toBe(true);
+    expect(offendersOf(res, "B")).toEqual([]);
+    expect(advisoriesOf(res, "B").find((a) => a.id === "B102")).toMatchObject({ kind: "from-main" });
+
+    const { code, err } = cli(repo);
+    expect(code).toBe(0);
+    expect(err).toMatch(/B102.*came in FROM origin\/main/);
+    expect(err).not.toMatch(/MINT GATE FAILED/);
+  });
+
+  it("an ordinary MERGE COMMIT of main is clean too — and was never the failing shape", () => {
+    const repo = workBranch("merged-main-commit", { open: [99, 100, 104], done: [50], vOpen: [50], vDone: [10] });
+    softGit(repo, "merge", "--no-commit", "origin/main");
+    keepBothSides(repo);
+    git(repo, "add", "-A");
+    git(repo, "-c", "user.email=e2e@planyr.test", "-c", "user.name=Mint Gate E2E", "commit", "-q", "-m", "Merge origin/main");
+    expect(runGate(repo).ok).toBe(true);
+  });
+
+  it("STILL REJECTS a genuine double-mint after the same merge — the duplicate heading is fatal", () => {
+    // B1140's case carried through the merge: we hold B102 for OUR item, main holds B102 for its
+    // own. Bringing main in produces two `### B102` headings, which is exactly the collision the
+    // gate exists for. Before this change it PASSED — the merge base had moved past it.
+    const repo = clone(ORIGIN, join(ROOT, "double-mint-then-merge"));
+    git(repo, "checkout", "-q", "-b", "double-mint-then-merge", "origin/main~1");
+    writeFileSync(join(repo, "BACKLOG.md"), "# Backlog\n\n### B99 — scratch item\n[ ] a body line\n\n### B102 — MY OWN unrelated item\n[ ] a body line\n");
+    commitAll(repo, "this branch mints B102 for its own item");
+    softGit(repo, "merge", "--no-commit", "origin/main");
+    keepBothSides(repo);
+    git(repo, "add", "-A");
+    git(repo, "-c", "user.email=e2e@planyr.test", "-c", "user.name=Mint Gate E2E", "commit", "-q", "-m", "Merge origin/main");
+
+    expect((readFileSync(join(repo, "BACKLOG.md"), "utf8").match(/^### B102\b/gm) || []).length).toBe(2);
+    const res = runGate(repo);
+    expect(res.ok).toBe(false);
+    expect(offendersOf(res, "B").some((o) => o.id === "B102" && o.kind === "duplicate")).toBe(true);
+
+    const { code, err } = cli(repo);
+    expect(code).toBe(1);
+    expect(err).toMatch(/B102 has TWO HEADINGS/);
+  });
+
+  it("STILL REJECTS a double-mint that has NOT merged main — and prints both titles", () => {
+    const repo = clone(ORIGIN, join(ROOT, "double-mint-unmerged"));
+    git(repo, "checkout", "-q", "-b", "double-mint-unmerged", "origin/main~1");
+    writeFileSync(join(repo, "BACKLOG.md"), "# Backlog\n\n### B99 — scratch item\n[ ] a body line\n\n### B102 — MY OWN unrelated item\n[ ] a body line\n");
+    commitAll(repo, "this branch mints B102 for its own item");
+
+    const res = runGate(repo);
+    expect(res.ok).toBe(false);
+    expect(offendersOf(res, "B")[0]).toMatchObject({ id: "B102", kind: "taken", where: "origin/main" });
+
+    const { code, err } = cli(repo);
+    expect(code).toBe(1);
+    expect(err).toMatch(/B102 is ALREADY TAKEN on origin\/main/);
+    expect(err).toMatch(/here: ### B102 — MY OWN unrelated item/); // both titles, so the reader
+    expect(err).toMatch(/main: ### B102 — scratch item/);          // can see which case this is
   });
 });
 

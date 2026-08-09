@@ -139,6 +139,92 @@ export function newCrossFileCollisions(repo, files, letter, baseline = KNOWN_LEG
   return findDuplicateIds(repo, files, letter).filter(({ id, count }) => count > (baseline[id] || 1));
 }
 
+/* ---- SAME-FILE duplicate headings (B308704) ----------------------------------------------
+ *
+ * WHY A SECOND, NARROWER GUARD WHEN THE CROSS-FILE ONE ALREADY EXISTS. The cross-pair check above
+ * counts an id across BACKLOG.md ∪ BACKLOG-DONE.md, and a count of two there is AMBIGUOUS by
+ * design: it is also the shape of a legitimate DEDUPE-FIRST recurrence caught mid-move, and of the
+ * live↔archive race B780 grandfathered 58 of. So its baseline had to be permissive, and 31 ids
+ * that are unambiguously wrong hid inside that permission.
+ *
+ * TWO HEADINGS FOR ONE ID **INSIDE A SINGLE FILE** IS NEVER LEGITIMATE. A recurrence MOVES a
+ * heading between files; it never leaves two in one. Measured on `main` at ed7f8d3: 24 B ids in
+ * BACKLOG-DONE.md and 7 V ids in VERIFICATION-DONE.md each name two different items — B127 is both
+ * "Measure-type dropdown renders behind/clipped by the rail" and "Two-tab convergence: a stale tab
+ * could thin the durable store". Every one is in B127–B755, entirely below B6864, so every one
+ * predates the reserved-block fix and none has occurred since. Zero live-file collisions.
+ *
+ * The baseline below is the frozen inheritance, keyed `<file>::<id>` so a dup cannot migrate
+ * between files unnoticed, and it is SHRINK-ONLY exactly like its cross-file sibling. */
+export const SAME_FILE_LEGACY_DUPES = {
+  B: {
+    "BACKLOG-DONE.md::B127": 2, "BACKLOG-DONE.md::B131": 2, "BACKLOG-DONE.md::B151": 2,
+    "BACKLOG-DONE.md::B239": 2, "BACKLOG-DONE.md::B316": 2, "BACKLOG-DONE.md::B341": 2,
+    "BACKLOG-DONE.md::B343": 2, "BACKLOG-DONE.md::B348": 2, "BACKLOG-DONE.md::B350": 2,
+    "BACKLOG-DONE.md::B360": 2, "BACKLOG-DONE.md::B417": 2, "BACKLOG-DONE.md::B418": 2,
+    "BACKLOG-DONE.md::B445": 3, "BACKLOG-DONE.md::B485": 2, "BACKLOG-DONE.md::B489": 2,
+    "BACKLOG-DONE.md::B562": 2, "BACKLOG-DONE.md::B566": 2, "BACKLOG-DONE.md::B568": 2,
+    "BACKLOG-DONE.md::B569": 2, "BACKLOG-DONE.md::B590": 2, "BACKLOG-DONE.md::B594": 2,
+    "BACKLOG-DONE.md::B597": 2, "BACKLOG-DONE.md::B717": 2, "BACKLOG-DONE.md::B755": 2,
+  },
+  V: {
+    "VERIFICATION-DONE.md::V45": 2, "VERIFICATION-DONE.md::V92": 2, "VERIFICATION-DONE.md::V119": 2,
+    "VERIFICATION-DONE.md::V120": 2, "VERIFICATION-DONE.md::V123": 2, "VERIFICATION-DONE.md::V130": 2,
+    "VERIFICATION-DONE.md::V275": 2,
+  },
+};
+
+/** Per-FILE heading counts > 1, as [{ file, id, count, key }] sorted by file then id. Pure over
+ *  `[{ file, text }]` so the CI guard, the CLI and the unit test all read the same function. */
+export function sameFileDuplicatesIn(entries, letter) {
+  const out = [];
+  for (const { file, text } of entries) {
+    for (const { id, count } of findDuplicateIdsIn([text], letter)) {
+      out.push({ file, id, count, key: `${file}::${id}` });
+    }
+  }
+  return out.sort((a, b) => a.file.localeCompare(b.file) || Number(a.id.slice(1)) - Number(b.id.slice(1)));
+}
+
+/** sameFileDuplicatesIn over the on-disk pair for a family (missing files skipped). */
+export function sameFileDuplicates(repo, files, letter) {
+  const entries = files
+    .map((f) => ({ file: f, path: join(repo, f) }))
+    .filter(({ path }) => existsSync(path))
+    .map(({ file, path }) => ({ file, text: readFileSync(path, "utf8") }));
+  return sameFileDuplicatesIn(entries, letter);
+}
+
+/** Same-file duplicates NOT covered by the frozen baseline — an unknown key, or a known key at a
+ *  HIGHER count. This is what fails the build; the 31 inherited pairs are grandfathered, not blessed. */
+export function newSameFileDuplicates(repo, files, letter, baseline = SAME_FILE_LEGACY_DUPES[letter] || {}) {
+  return sameFileDuplicates(repo, files, letter).filter(({ key, count }) => count > (baseline[key] || 1));
+}
+
+/** Every `### <L>###` HEADING LINE of a family, grouped by id: Map<number, string[]>.
+ *  headingIdsIn answers "which ids exist"; this answers "and what do they SAY" — which is what
+ *  lets the mint gate tell main's own item arriving via a merge from an independent double-mint
+ *  wearing the same number (B290251). Pure. */
+export function headingLinesIn(texts, letter) {
+  const re = new RegExp(`^###\\s+${letter}(\\d+)\\b.*$`, "gm");
+  const out = new Map();
+  for (const t of texts) {
+    for (const m of (t || "").matchAll(re)) {
+      const n = Number(m[1]);
+      if (!out.has(n)) out.set(n, []);
+      out.get(n).push(m[0]);
+    }
+  }
+  return out;
+}
+
+/** Two heading lines describe the SAME item. Whitespace-insensitive so a re-wrap or a trailing
+ *  space is not read as a different feature; everything else must match exactly. */
+export function sameHeading(a, b) {
+  const norm = (s) => (s || "").replace(/\s+/g, " ").trim();
+  return Boolean(a) && Boolean(b) && norm(a) === norm(b);
+}
+
 /* ============================================================================================
  * B779 — WHY THIS SECTION WAS REWRITTEN. B779 shipped `--against-main` + the late-bind rule and
  * claimed it "collapses the collision window from a whole session to a few seconds." Six

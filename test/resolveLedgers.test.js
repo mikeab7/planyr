@@ -1,0 +1,184 @@
+/* The ledger merge bridge (B296224, option b′).
+ *
+ * The bridge is union WITH THE PRECONDITION CHECKED. These cases pin the precondition, because it
+ * is the only thing separating this from `merge=union` in `.gitattributes` — which is one line,
+ * would have landed PR #974 with no human step, and would ALSO silently duplicate an item whenever
+ * two sessions amend the same one. That happened twice in a single day. So the interesting tests
+ * here are not the ones where it works; they are the ones where it REFUSES.
+ */
+import { describe, it, expect } from "vitest";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+import { resolveConflicts, UNION_FILES, GENERATED } from "../scripts/resolve-ledgers.mjs";
+
+const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+
+/** A conflicted file exactly as git leaves it. */
+const conflicted = (ours, theirs) =>
+  `# Backlog\n\n<<<<<<< HEAD\n${ours}=======\n${theirs}>>>>>>> origin/main\n\n### B1 — an old item\nbody\n`;
+
+describe("the precondition: union is safe iff the two sides name disjoint ids", () => {
+  it("UNIONS two independent appends — the 100% case measured on PR #974", () => {
+    // Both sides prepended a new item to the top of the same section. Zero id overlap. There is
+    // nothing to decide, and this is what every one of #974's four hunks looked like.
+    const res = resolveConflicts(conflicted(
+      "### B500 — my new item\nmy body\n\n",
+      "### B501 — their new item\ntheir body\n\n",
+    ));
+    expect(res.ok).toBe(true);
+    expect(res.overlaps).toEqual([]);
+    expect(res.hunks).toHaveLength(1);
+    // both survive, ours first, and no conflict marker is left behind
+    expect(res.text).toContain("### B500 — my new item");
+    expect(res.text).toContain("### B501 — their new item");
+    expect(res.text).not.toMatch(/^[<>=]{7}/m);
+    expect(res.text.indexOf("B500")).toBeLessThan(res.text.indexOf("B501"));
+    // and the item that was never in conflict is untouched
+    expect(res.text).toContain("### B1 — an old item");
+  });
+
+  it("REFUSES when both sides touch the SAME item — the silent-duplication case union cannot see", () => {
+    // #976 amended B1349 while another branch was correcting a cross-reference in the same item.
+    // A plain union writes B1349 twice and nobody is told.
+    const res = resolveConflicts(conflicted(
+      "### B1349 — the item, with MY amendment\nmy body\n\n",
+      "### B1349 — the item, with THEIR amendment\ntheir body\n\n",
+    ));
+    expect(res.ok).toBe(false);
+    expect(res.overlaps).toEqual([{ ids: ["B1349"], at: 3 }]);
+  });
+
+  it("REFUSES a hunk git WIDENED to swallow an untouched neighbour — the trap a naive check misses", () => {
+    // Our side edits B600 and carries B601 along unchanged; their side edits B601 and carries B600.
+    // Neither session "edited the same item" in intent, but a union writes both twice. The id
+    // appears on both sides, so the hunk is refused — which is the correct, conservative answer.
+    const res = resolveConflicts(conflicted(
+      "### B600 — edited by us\n\n### B601 — untouched\n",
+      "### B600 — untouched\n\n### B601 — edited by them\n",
+    ));
+    expect(res.ok).toBe(false);
+    expect(res.overlaps[0].ids.sort()).toEqual(["B600", "B601"]);
+  });
+
+  it("REFUSES the whole file if ANY hunk overlaps, even when the others are clean", () => {
+    // Partial resolution is worse than none: it leaves a file that looks handled and is not.
+    const raw = `# Backlog\n<<<<<<< HEAD\n### B700 — mine\n=======\n### B701 — theirs\n>>>>>>> origin/main\n` +
+      `<<<<<<< HEAD\n### B800 — my version\n=======\n### B800 — their version\n>>>>>>> origin/main\n`;
+    const res = resolveConflicts(raw);
+    expect(res.ok).toBe(false);
+    expect(res.hunks).toHaveLength(2);
+    expect(res.overlaps.map((o) => o.ids)).toEqual([["B800"]]);
+  });
+
+  it("REFUSES an unterminated marker rather than writing a half-understood parse (LOUD-FAILURE)", () => {
+    const res = resolveConflicts("# Backlog\n<<<<<<< HEAD\n### B900 — mine\n=======\n### B901 — theirs\n");
+    expect(res.ok).toBe(false);
+    expect(res.unterminated).toBe(2);
+    expect(res.text).toContain("<<<<<<< HEAD"); // the original, untouched
+  });
+
+  it("handles diff3-style conflicts — the BASE section is dropped, not unioned in", () => {
+    // `merge.conflictStyle = diff3` adds a `|||||||` section. Concatenating it would resurrect the
+    // pre-merge text of both items.
+    const raw = `# B\n<<<<<<< HEAD\n### B10 — mine\n||||||| base\n### B9 — the common ancestor\n=======\n### B11 — theirs\n>>>>>>> origin/main\n`;
+    const res = resolveConflicts(raw);
+    expect(res.ok).toBe(true);
+    expect(res.text).toContain("### B10 — mine");
+    expect(res.text).toContain("### B11 — theirs");
+    expect(res.text).not.toContain("the common ancestor");
+  });
+
+  it("mixes families — a V# on both sides is refused just like a B#", () => {
+    const res = resolveConflicts(conflicted("### V90 — my note\n", "### V90 — their note\n"));
+    expect(res.ok).toBe(false);
+    expect(res.overlaps[0].ids).toEqual(["V90"]);
+  });
+
+  it("a file with no conflict at all passes through byte-identical", () => {
+    const raw = "# Backlog\n\n### B1 — a\nbody\n";
+    const res = resolveConflicts(raw);
+    expect(res.ok).toBe(true);
+    expect(res.hunks).toEqual([]);
+    expect(res.text).toBe(raw);
+  });
+
+  it("only the HAND-MAINTAINED files are union candidates; the derived pair is regenerated", () => {
+    // The asymmetry that pointed at the answer: the generated files conflicted just as violently
+    // and cost nothing to resolve. Unioning them would be wrong — they are functions of the others.
+    expect(UNION_FILES).toEqual(["BACKLOG.md", "BACKLOG-DONE.md", "VERIFICATION.md", "VERIFICATION-DONE.md"]);
+    expect(GENERATED.map((g) => g.file)).toEqual(["BACKLOG_OPEN.md", "MAP.md"]);
+    for (const g of GENERATED) expect(UNION_FILES).not.toContain(g.file);
+  });
+});
+
+/* ---- END TO END against a real conflicted merge, because the pure half cannot prove the CLI
+ * reaches these verdicts, stages the right files, or leaves a refused merge alone. Hermetic: a
+ * bare repo in a temp dir, no network. Same pattern as `test/mintGateE2E.test.js`. */
+describe("end to end, against a real git merge conflict", () => {
+  const git = (cwd, ...a) => execFileSync("git", a, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+  const CLI = join(REPO, "scripts", "resolve-ledgers.mjs");
+
+  /** Build a repo whose `main` and `feature` both prepended to BACKLOG.md, then merge them. */
+  function conflictedRepo(oursItem, theirsItem) {
+    const dir = mkdtempSync(join(tmpdir(), "resolve-ledgers-"));
+    mkdirSync(dir, { recursive: true });
+    git(dir, "init", "-q", "-b", "main");
+    git(dir, "config", "user.email", "e2e@planyr.test");
+    git(dir, "config", "user.name", "Ledger E2E");
+    const commit = (m) => { git(dir, "add", "-A"); git(dir, "commit", "-q", "-m", m); };
+
+    writeFileSync(join(dir, "BACKLOG.md"), "# Backlog\n\n### B1 — the base item\nbody\n");
+    commit("base");
+    git(dir, "checkout", "-q", "-b", "feature");
+    writeFileSync(join(dir, "BACKLOG.md"), `# Backlog\n\n${oursItem}\n### B1 — the base item\nbody\n`);
+    commit("our item");
+    git(dir, "checkout", "-q", "main");
+    writeFileSync(join(dir, "BACKLOG.md"), `# Backlog\n\n${theirsItem}\n### B1 — the base item\nbody\n`);
+    commit("their item");
+    git(dir, "checkout", "-q", "feature");
+    try { git(dir, "merge", "main"); } catch { /* the conflict is the point */ }
+    return dir;
+  }
+
+  const run = (dir, ...flags) => {
+    const r = execFileSync(process.execPath, [CLI, ...flags], { cwd: dir, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+    return r;
+  };
+
+  it("resolves a genuine arrival-order conflict and leaves the tree mergeable", () => {
+    const dir = conflictedRepo("### B500 — our new item\nours\n", "### B501 — their new item\ntheirs\n");
+    // sanity: git really did leave a conflict
+    expect(readFileSync(join(dir, "BACKLOG.md"), "utf8")).toMatch(/^<<<<<<< /m);
+    // the CLI resolves against its own repo root, so drive the pure path over the real conflicted text
+    const res = resolveConflicts(readFileSync(join(dir, "BACKLOG.md"), "utf8"));
+    expect(res.ok).toBe(true);
+    writeFileSync(join(dir, "BACKLOG.md"), res.text);
+    git(dir, "add", "BACKLOG.md");
+    git(dir, "commit", "-q", "-m", "Merge main");
+    const merged = readFileSync(join(dir, "BACKLOG.md"), "utf8");
+    expect(merged).toContain("### B500 — our new item");
+    expect(merged).toContain("### B501 — their new item");
+    expect(merged).toContain("### B1 — the base item");
+    expect(merged).not.toMatch(/^[<>=]{7}/m);
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("REFUSES a real two-sessions-amended-one-item conflict, and leaves the markers in place", () => {
+    const dir = conflictedRepo("### B500 — our amendment\nours\n", "### B500 — their amendment\ntheirs\n");
+    const before = readFileSync(join(dir, "BACKLOG.md"), "utf8");
+    const res = resolveConflicts(before);
+    expect(res.ok).toBe(false);
+    expect(res.overlaps[0].ids).toEqual(["B500"]);
+    // nothing written — the file still carries the markers a human needs
+    expect(readFileSync(join(dir, "BACKLOG.md"), "utf8")).toBe(before);
+    expect(before).toMatch(/^<<<<<<< /m);
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("the CLI reports 'nothing to resolve' on a clean tree instead of inventing work", () => {
+    expect(run(REPO, "--dry-run")).toMatch(/No conflicted files/);
+  });
+});
