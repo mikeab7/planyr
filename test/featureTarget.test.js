@@ -306,6 +306,40 @@ describe("source guard — the render must keep stamping what the resolver reads
     expect((SP.match(/dblOpts\(/g) || []).length).toBe(2); // exactly the two resolution call sites
   });
 
+  /* ⛔ B278578 — THE ANCHOR IS A GESTURE, NOT A LATCH. Two properties, both of which the first
+   * version got wrong in three lines, and both of which are reproducible in the sandbox even though
+   * the owner's second-gesture failure is not: a DESELECT must clear it (the effect used to return
+   * early on a cleared selection, leaving the last feature's anchor standing), and it must run on
+   * EVERY commit (keyed on `[sel]`, a press that re-selected the already-selected feature never
+   * re-stamped it). */
+  it("a cleared selection CLEARS the anchor, and the effect has no dependency array", () => {
+    const at = SP.indexOf("const key = selFeatureKey(sel);");
+    expect(at).toBeGreaterThan(0);
+    const block = SP.slice(at, at + 420);
+    expect(block, "a deselect must clear the anchor, never return early and leave it standing")
+      .toMatch(/if \(!key\) \{ gestureAnchorRef\.current = null; return; \}/);
+    expect(block, "the anchor must be re-stamped on every commit — a missed press is a dead gesture")
+      .toMatch(/gestureAnchorRef\.current = \{ key, t: p\.t, x: p\.x, y: p\.y \};\n\s*\}\);/);
+    expect(block, "keyed on [sel], a press that re-selected the SAME feature never re-stamps it")
+      .not.toMatch(/\}, \[sel\]\);/);
+  });
+
+  it("press 1 keeps the anchor by the PRESS, not by the key", () => {
+    const at = SP.indexOf("const key = selFeatureKey(sel);");
+    const block = SP.slice(at, at + 420);
+    expect(block).toMatch(/if \(held && gestureAnchorTarget\(held, p\)\) return;/);
+    // the old clause could only ever hold an anchor against a DIFFERENT feature — the narrow half
+    expect(block).not.toMatch(/held\.key !== key/);
+  });
+
+  /* The diagnostic hook: a verdict alone sends the next reader back to guessing on a plan this
+   * sandbox cannot hold, which is what B278578 cost. */
+  it("the resolver exposes WHY it answered, not just what", () => {
+    expect(SP).toMatch(/window\.__plannerHitWhy = why/);
+    expect(SP).toMatch(/anchorApplies: !!gestureAnchorTarget\(anchor, at\)/);
+    expect(SP).toMatch(/if \(window\.__plannerHitWhy === why\) window\.__plannerHitWhy = null/);
+  });
+
   /* The anchor's WHERE/WHEN must be stamped in the CAPTURE phase at the canvas root. Reading it from
    * the double-tap record instead would only ever see presses that reached a feature's own handler —
    * and a press EATEN BY CHROME is exactly the case the anchor exists for. */

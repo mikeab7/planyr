@@ -599,6 +599,17 @@ rules are binding shorthand, not optional style. (Full-text home so briefs stay 
      call to NAME itself so a failure says which run is void. **There is no list left to rot, and a new
      harness cannot be written without it.**
   4. **An "unreadable" visibility state is refused too** — a harness that cannot check cannot vouch.
+  5. **⛔ AND ITS SIBLING: A PROBE THAT OBSERVES THE MIDDLE OF A GESTURE HAS CHANGED THE GESTURE.**
+     A reading taken BETWEEN the two presses of a double-click costs hundreds of ms and pushes the
+     pair past `DBLTAP_MS` — at which point it is two clicks, not a double-click, and it will
+     "reproduce" failures that mean nothing. Measured: a 900 ms read between presses manufactured
+     exactly such a failure and nearly became a bug report. **So a harness either takes its reading
+     only at the END of the gesture, or it MEASURES the press-to-press interval from the events' own
+     `timeStamp`s and asserts it is inside the budget** — never assumes it. The deliberate exception
+     is the TWO-PRESS INVARIANT, which is a single press followed by a question and does not claim to
+     be a double-click. `audit-doubleclick-properties` now measures and asserts its own gap, and that
+     assertion caught a defect in ITSELF on its first run (it was timing deselect→press-1, not
+     press-1→press-2), which is the argument for measuring rather than assuming in one line.
 - **PERCEPTUAL-PARITY** — **The bar a change to the PICTURE has to clear is that the owner cannot SEE it at
   working zoom — not that the file is unchanged.** (Owner amendment, 2026-08-06, verbatim: *"imperceptible at
   working zoom assuming that one makes the most sense"*, and *"I've got a 2K display, so I'm not gonna see

@@ -602,3 +602,108 @@ test.describe("NEW-1 — a feature smaller than its own chrome is still selectab
     expect(errors, errors.join("\n")).toEqual([]);
   });
 });
+
+/* ═════════════════════════════════════════════════════════════════════════════════════════════
+ * ⛔ B278578 — THE GESTURE ANCHOR IS A GESTURE, NOT A LATCH.
+ *
+ * Reported live on the owner's Bain plan with #965 on the edge: the FIRST double-click on the 6×12 px
+ * stub opened Properties and an immediate SECOND one failed back to the pre-fix signature. The
+ * discriminators he isolated point at a per-feature latch — a six-second wait still failed (not a
+ * time expiry), one click on another feature fixed it, and deselecting to bare canvas did not.
+ *
+ * ⛔ HONEST SCOPE, because this is the difference between a fix and a hope: THIS SANDBOX CANNOT
+ * REPRODUCE HIS SECOND-GESTURE FAILURE — the repeat-gesture row passes here on the very build it
+ * fails on for him. What IS reproducible, and what these cases pin, is the latch itself: the anchor
+ * used to survive a deselect and to go un-refreshed by a press that did not CHANGE the selection.
+ * Both are now structurally impossible. Whether that was his cause is settled by his re-run (V77137),
+ * and `window.__plannerHitWhy` is what will name it in one line if it is not.
+ * ═════════════════════════════════════════════════════════════════════════════════════════════ */
+test.describe("B278578 — the double-click anchor must not survive its own gesture", () => {
+  test("a deselect CLEARS the anchor (it used to latch on the last feature touched)", async ({ page }) => {
+    await loadTinyStub(page);
+    const pt = await stubPoint(page);
+    expect(pt).toBeTruthy();
+
+    await page.mouse.click(pt.x, pt.y);            // select — this arms an anchor
+    await page.waitForTimeout(300);
+    const armed = await page.evaluate(({ x, y }) => window.__plannerHitWhy(x, y), pt);
+    expect(armed, "window.__plannerHitWhy is gone — this case can no longer measure the product").toBeTruthy();
+    expect(armed.anchor && armed.anchor.key, "press 1 did not arm an anchor at all").toBe(`el:${STUB_ID}`);
+
+    await page.keyboard.press("Escape");
+    await page.waitForTimeout(200);
+    const empty = await page.evaluate(() => {
+      const c = document.querySelector('[data-testid="planner-canvas"]').getBoundingClientRect();
+      for (const fx of [0.5, 0.08]) for (const fy of [0.05, 0.95]) {
+        const x = Math.round(c.left + c.width * fx), y = Math.round(c.top + c.height * fy);
+        const n = document.elementFromPoint(x, y);
+        if (n && n.closest && !n.closest("[data-feature]") && !n.closest("[data-handle-layer]")) return { x, y };
+      }
+      return null;
+    });
+    expect(empty, "no empty canvas point to deselect against").toBeTruthy();
+    await page.mouse.click(empty.x, empty.y);
+    await page.waitForTimeout(300);
+    expect(await page.locator("[data-handle-layer] *").count(), "the deselect did not clear the selection").toBe(0);
+
+    /* THE ASSERTION, and it goes RED on #965: nothing is selected, so nothing is in flight. The old
+       effect returned early on a cleared selection and left the previous feature's anchor standing. */
+    const after = await page.evaluate(({ x, y }) => window.__plannerHitWhy(x, y), pt);
+    expect(after.selection, "the selection is not actually cleared").toBeNull();
+    expect(after.anchor, `the anchor survived the deselect: ${JSON.stringify(after.anchor)}`).toBeNull();
+  });
+
+  test("the SAME feature double-clicks a second time, with a deselect in between", async ({ page }) => {
+    await loadTinyStub(page);
+    const pt = await stubPoint(page);
+    const gesture = async () => {
+      // ⛔ no reading between the presses — a probe that observes the middle of a gesture has
+      // changed the gesture. The gap is read afterwards from the events' own timestamps.
+      await page.evaluate(() => {
+        window.__pt = [];
+        document.querySelector('[data-testid="planner-canvas"]').addEventListener("pointerdown", (e) => window.__pt.push(e.timeStamp), { capture: true, once: false });
+      });
+      await page.mouse.move(pt.x, pt.y);
+      await page.mouse.down({ clickCount: 1 }); await page.mouse.up({ clickCount: 1 });
+      await page.mouse.down({ clickCount: 2 }); await page.mouse.up({ clickCount: 2 });
+      await page.waitForTimeout(250);
+      const gaps = await page.evaluate(() => window.__pt.map((t, i, a) => Math.round(t - a[i - 1])).slice(1));
+      return gaps;
+    };
+    /* ⛔ ESCAPE ALONE DOES NOT RELIABLY CLEAR THE CANVAS SELECTION (measured — it closes the panel
+       and can leave the handle layer up), so the deselect presses EMPTY CANVAS, the way a user drops
+       a selection. The empty point is asked of the document rather than hard-coded, and `grips === 0`
+       is a PRECONDITION: without it "it failed the second time" could just mean "it was never
+       deselected", which is a different bug wearing this one's clothes. */
+    const deselectHere = async () => {
+      await page.keyboard.press("Escape");
+      await page.waitForTimeout(150);
+      const empty = await page.evaluate(() => {
+        const c = document.querySelector('[data-testid="planner-canvas"]').getBoundingClientRect();
+        for (const fx of [0.5, 0.08, 0.92]) for (const fy of [0.05, 0.95, 0.5]) {
+          const x = Math.round(c.left + c.width * fx), y = Math.round(c.top + c.height * fy);
+          const n = document.elementFromPoint(x, y);
+          if (n && n.closest && !n.closest("[data-feature]") && !n.closest("[data-handle-layer]")) return { x, y };
+        }
+        return null;
+      });
+      expect(empty, "no empty canvas point to deselect against").toBeTruthy();
+      await page.mouse.click(empty.x, empty.y);
+      await page.waitForTimeout(420);          // …and let the tap record lapse (DBLTAP_MS = 350)
+      expect(await page.locator("[data-handle-layer] *").count(),
+        "PRECONDITION: the deselect left the selection up, so the repeat below would prove nothing").toBe(0);
+    };
+
+    const g1 = await gesture();
+    expect(g1.every((g) => g >= 0 && g < 350), `press gap ${g1} is not a double-click`).toBe(true);
+    await expect(page.getByTestId("property-panel"), "the FIRST double-click did not open Properties").toBeVisible();
+
+    await page.getByRole("button", { name: "Close properties" }).click().catch(() => {});
+    await deselectHere();
+
+    const g2 = await gesture();
+    expect(g2.every((g) => g >= 0 && g < 350), `press gap ${g2} is not a double-click`).toBe(true);
+    await expect(page.getByTestId("property-panel"),
+      "it opened the first time and not the second — a per-gesture latch survived the deselect").toBeVisible();
+  });
+});

@@ -113,6 +113,15 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V78960 — B280400: does the stub's double-click still work on the SECOND try? `Blocker: real-data` + `Blocker: auth`
+
+**⛔ THIS IS THE ONE THAT DECIDES IT, because the sandbox cannot.** The repeat-gesture failure he reported does NOT reproduce here — the new repeat row passes on the same build it fails on for him, on every one of the 28 fixture features. One real latch was found by reading and is fixed and mutation-proven (the anchor used to survive a deselect, and a press that re-selected the already-selected feature never re-stamped it), but **it is not proven to be his cause**. His re-run is the verdict.
+- **Re-run HIS EXACT TABLE**, planyr.io signed in, **Bain / "Concept - Original"**, 1600×521, ~60 ms between presses, **every run preconditioned on `grips === 0`** rather than assumed: pond control → stub first → stub immediately again → pond control → stub first → stub immediately again. Then the discriminators: `B` repeat after a six-second wait · `C` repeat after one single click on the pond · `D` repeat immediately. **PASS = the stub opens ELEMENT — ROAD every time, 7 grips, handle box ≈ `[664,402,15,22]`.** FAIL = 28 grips, box ≈ `[618,342,189,127]`, no panel.
+- **⛔ AND IF IT FAILS, DO NOT RECONSTRUCT IT — ASK THE APP.** With `window.__PLANYR_E2E` armed, **`window.__plannerHitWhy(x, y)`** returns what the anchor names and how old it is (`{key, ageMs, dx, dy}`), whether it still applies, what the selection is, and the top of the hit stack. Call it **before or after** the gesture — **never between the two presses** (a read there costs hundreds of ms, pushes the pair past `DBLTAP_MS`, and manufactures a failure: B280401).
+- **Measure the press-to-press gap and report it** with the result, from the events' own `timeStamp`s. A run whose gap is outside `DBLTAP_MS` is two clicks, not a double-click, and its verdict means nothing.
+- **Already confirmed, do NOT re-test:** the plan is byte-identical across every run (B278577's silent re-cut is gone), and the pond control passes (#963 intact).
+- The **owner never runs this** — it is a Claude-cohort check on a signed-in session. ⏳ **PENDING**
+
 ### V77136 — B278576/B278577: the 6×12 px road stub on the Bain plan opens Properties now, and nothing else on that plan moved. `Blocker: real-data` + `Blocker: auth`
 
 **The symptom is REPRODUCED and FIXED — this entry is the confirmation where he saw it, not a hunt.** The mechanism, from his own capture: a road stub whose whole rendered body is 6×12 CSS px has no pixel left uncovered once its own grips mount, so press 2 could only resolve to whatever lay under the chrome — a different, larger road. The fix ANCHORS a double-click in flight to whatever press 1 selected, so it closes for every feature type at once, not just for that stub.
