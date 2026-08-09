@@ -113,6 +113,16 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V90096 — B291536: on the note where Backspace "acts funny", does one press now take exactly one step? `Blocker: real-data`
+
+**⛔ THIS IS THE ONE THE SANDBOX CANNOT SETTLE, and the reason is stated rather than glossed.** The reported symptom — a nested bullet un-nesting AND merging in one press — did **not** reproduce on a plain bulleted list here. What did reproduce, and produces exactly that symptom, is a document that MIXES a checklist with a bulleted list, which an Outlook paste routinely makes: Tiptap's list keymap runs its Backspace handler once per list type without stopping at the first one to act, and one press dissolved BOTH levels into plain paragraphs. That class is fixed and mutation-proven. Whether it is the class HIS note holds is his to confirm.
+- **Where:** planyr.io, signed in, the page the report came from (project Silvestri, page "Utility") or any note where it misbehaved.
+- **The check, three presses, one at a time.** (1) Caret at the very start of a **nested** bullet → one Backspace → it should **outdent one level and change nothing else** (no merging with the bullet above). (2) Undo. Caret at the very start of a **top-level** bullet → one Backspace → it should become a **plain line keeping its words**, with **no empty bullet left behind**, and the line above untouched. (3) A **second** Backspace from there joins it to the line above — that step is meant to be the second one.
+- **Also worth one press while he is there, because it was the worst thing found and no report existed for it:** put the caret at the start of the line directly under a **picture** and press Backspace once. The picture must become **selected (outlined), not deleted**.
+- **PASS =** every press changes exactly one thing. **FAIL =** any press changes two or more, or leaves an empty bullet.
+- **⛔ AND IF IT FAILS, CAPTURE THE TREE RATHER THAN DESCRIBING IT.** With `window.__PLANYR_E2E` armed, `window.__noteEditor.json()` returns the document before and after the press; that is what turns a second report into a fixed row in `ui-audit/verify-notes-backspace.mjs` instead of another round of guessing.
+- **Already confirmed here, do NOT re-test:** 37/37 boundary rows against the built app, mutation-proven RED without the fix (11 of 37).
+- The **owner never runs this** — it is a Claude-cohort check on a signed-in session with his real note. ⏳ **PENDING**
 ### V88800 — B290240: does an unincorporated COLORADO site now say Colorado's zoning law instead of Texas's? `Blocker: live-GIS`
 
 The sentence itself is pure and unit-tested in both directions; what cannot be driven here is the card, because it only renders once `identifyJurisdiction` returns `unincorporated`, and that needs external GIS hosts this environment blocks (the whole `gis.colorado.gov` space answers 403 at the sandbox egress proxy — a sandbox limitation, not an endpoint failure).
