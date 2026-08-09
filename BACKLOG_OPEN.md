@@ -15,7 +15,7 @@
 | B295168 | The site-route chunk guard snapshots AFTER its own gesture, so it reports input-driven chunks as boot-path ones | [Infra / Testing] | #infra #testing #perf | sandbox |
 | B287058 | `SitePlanner.jsx` is 27,146 lines with 206 `useState` in ONE component: extraction by STATE OWNERSHIP | [Site Planner] | #site-planner #perf #infra | sandbox |
 | B287059 | The clipper-lib polygon offsetting that sized 55,631 ms of a 55,760 ms gesture runs on the MAIN THREAD | [Site Planner] | #site-planner #perf #pond | live |
-| B297909 | The Site route's largest chunk has 2.3 KB of band left, so ANY feature now breaches it — the measured payback is the References panel | [Site Planner / perf] | #site-planner #perf | sandbox |
+| B297909 | The Site route's largest chunk is ~30 KB into a 32 KB band, and the measured payback is the References panel | [Site Planner / perf] | #site-planner #perf | sandbox |
 | B290251 | The mint gate reports a FALSE `TAKEN` on main's own ids after you follow CLAUDE.md's mandated conflict resolution | [Infra / Testing] | #infra #testing | sandbox |
 | B290245 | The Colorado CAPABILITY GUARD has no production call site: eight declared gaps render nothing | [Site Planner / Colorado] | #site-planner #gis #entitlements | sandbox |
 | B290246 | Colorado's statewide FFE floor (CWCB 2 CCR 408-1) is carried as a record and applied to nothing | [Site Planner / floodplain] | #site-planner #floodplain #entitlements | live |
