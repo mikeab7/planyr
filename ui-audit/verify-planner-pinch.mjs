@@ -8,6 +8,7 @@
  * Run: BASE_URL=http://localhost:4173/ PW_CHROME=/opt/pw-browsers/chromium-1194/chrome-linux/chrome node ui-audit/verify-planner-pinch.mjs
  */
 import { chromium } from "playwright";
+import { assertMeasurable } from "./lib/tabTiming.mjs";
 const BASE = process.env.BASE_URL || "http://localhost:4173/";
 const EXEC = process.env.PW_CHROME || "/opt/pw-browsers/chromium-1194/chrome-linux/chrome";
 
@@ -19,6 +20,8 @@ const b = await chromium.launch({ executablePath: EXEC, args:["--no-sandbox","--
 const ctx = await b.newContext({ viewport:{width:390,height:844}, deviceScaleFactor:2, hasTouch:true, isMobile:true });
 await ctx.addInitScript(seed);
 const p = await ctx.newPage();
+/* ⛔ A background tab cannot be measured — clamped setTimeout, suspended rAF (a view change then updates state while the drawing never repaints). See ui-audit/lib/tabTiming.mjs. */
+await assertMeasurable(p, "verify-planner-pinch");
 await p.goto(BASE,{waitUntil:"load"}); await p.waitForTimeout(1800);
 
 const ppf = async () => p.evaluate(() => {

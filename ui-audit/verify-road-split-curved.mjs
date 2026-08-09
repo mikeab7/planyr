@@ -19,6 +19,7 @@ import pw from "/opt/node22/lib/node_modules/playwright/index.js";
 const { chromium } = pw;
 import { mkdirSync, readFileSync } from "node:fs";
 import { roadCenterline } from "../src/workspaces/site-planner/lib/roadGeometry.js";
+import { assertMeasurable } from "./lib/tabTiming.mjs";
 
 // Distance from a point to the straight CHORD between two control points — the hit test as it was.
 const segDist = (p, a, b) => {
@@ -70,6 +71,13 @@ async function openPlan(rec) {
     localStorage.setItem('planarfit:currentSite:v1', ${JSON.stringify(rec.id)});
   } catch (e) {} })();`);
   const page = await ctx.newPage();
+  /* ⛔ A BACKGROUND TAB CANNOT BE MEASURED — not its clock, and not its pixels. A hidden tab clamps
+     setTimeout (a setTimeout-paced probe then times the clamp: 3,156 ms for a 138-182 ms gesture) AND
+     suspends requestAnimationFrame, so after a view change the app's state attributes update while the
+     drawing never repaints — every box, position, hit test and screenshot then agrees with every other
+     and describes a view the app already left. One precondition covers both, rAF liveness probe
+     included; see ui-audit/lib/tabTiming.mjs. Fails loudly rather than reporting either. */
+  await assertMeasurable(page, "verify-road-split-curved");
   const errors = [];
   page.on("pageerror", (e) => errors.push(String(e)));
   page.on("console", (m) => { if (m.type() === "error" && !NOISE.test(m.text())) errors.push(m.text()); });

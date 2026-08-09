@@ -3,6 +3,7 @@
  * all behind the bars. Rendered at a realistic ~21-month range so month names show in full.
  * Mirrors the exact colors/weights now in buildGanttSVG. Output: gantt-header-final.png */
 import pw from "/opt/node22/lib/node_modules/playwright/index.js";
+import { assertMeasurable } from "./lib/tabTiming.mjs";
 const { chromium } = pw;
 const EXEC = process.env.PW_CHROME || "/opt/pw-browsers/chromium-1228/chrome-linux64/chrome";
 
@@ -49,6 +50,13 @@ const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><style>body{margi
 </body></html>`;
 const browser = await chromium.launch({ executablePath: EXEC, args: ["--no-sandbox", "--ignore-certificate-errors"] });
 const page = await browser.newPage({ viewport: { width: W + 90, height: svgH + 130 }, deviceScaleFactor: 2.5 });
+/* ⛔ A BACKGROUND TAB CANNOT BE MEASURED — not its clock, and not its pixels. A hidden tab clamps
+   setTimeout (a setTimeout-paced probe then times the clamp: 3,156 ms for a 138-182 ms gesture) AND
+   suspends requestAnimationFrame, so after a view change the app's state attributes update while the
+   drawing never repaints — every box, position, hit test and screenshot then agrees with every other
+   and describes a view the app already left. One precondition covers both, rAF liveness probe
+   included; see ui-audit/lib/tabTiming.mjs. Fails loudly rather than reporting either. */
+await assertMeasurable(page, "mockup-gantt-header-final");
 await page.setContent(html, { waitUntil: "networkidle" });
 await page.screenshot({ path: "ui-audit/screens/gantt-header-final.png", fullPage: true });
 await browser.close();

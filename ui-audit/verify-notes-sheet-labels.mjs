@@ -17,6 +17,7 @@
  * Run:  npm run build && npx vite preview --port 4173   (one shell)
  *       node ui-audit/verify-notes-sheet-labels.mjs            (another)
  */
+import { assertMeasurable } from "./lib/tabTiming.mjs";
 const pw = await import("/opt/node22/lib/node_modules/playwright/index.js");
 const chromium = pw.chromium || (pw.default && pw.default.chromium);
 const BASE = process.env.BASE_URL || "http://localhost:4173/";
@@ -81,6 +82,8 @@ const check = (cond, msg) => { console.log((cond ? "  ✓ " : "  ✗ ") + msg); 
 const browser = await chromium.launch({ executablePath: EXEC, args: ["--no-sandbox", "--ignore-certificate-errors"] });
 const ctx = await browser.newContext({ viewport: { width: 1500, height: 950 }, ignoreHTTPSErrors: true });
 const page = await ctx.newPage();
+/* ⛔ A background tab cannot be measured — clamped setTimeout, suspended rAF (a view change then updates state while the drawing never repaints). See ui-audit/lib/tabTiming.mjs. */
+await assertMeasurable(page, "verify-notes-sheet-labels");
 const pageErrors = [];
 page.on("pageerror", (e) => pageErrors.push(String(e)));
 const allRows = () => page.evaluate(() =>

@@ -25,6 +25,7 @@
  *       BASE_URL=http://localhost:4193/ node ui-audit/verify-boot-watchdog.mjs
  */
 import { chromium } from "playwright";
+import { assertMeasurable } from "./lib/tabTiming.mjs";
 
 const BASE = process.env.BASE_URL || "http://localhost:4193/";
 const EXEC = process.env.PW_CHROME || "/opt/pw-browsers/chromium-1194/chrome-linux/chrome";
@@ -80,6 +81,13 @@ async function run() {
     await prep(ctx);
     let loads = 0;
     const page = await ctx.newPage();
+    /* ⛔ A BACKGROUND TAB CANNOT BE MEASURED — not its clock, and not its pixels. A hidden tab clamps
+       setTimeout (a setTimeout-paced probe then times the clamp: 3,156 ms for a 138-182 ms gesture) AND
+       suspends requestAnimationFrame, so after a view change the app's state attributes update while the
+       drawing never repaints — every box, position, hit test and screenshot then agrees with every other
+       and describes a view the app already left. One precondition covers both, rAF liveness probe
+       included; see ui-audit/lib/tabTiming.mjs. Fails loudly rather than reporting either. */
+    await assertMeasurable(page, "verify-boot-watchdog");
     page.on("load", () => { loads++; });
     await page.goto(url, { waitUntil: "commit" });
     // confirm the override actually took (the linchpin of the whole harness)
@@ -110,6 +118,13 @@ async function run() {
     });
     let loads = 0;
     const page = await ctx.newPage();
+    /* ⛔ A BACKGROUND TAB CANNOT BE MEASURED — not its clock, and not its pixels. A hidden tab clamps
+       setTimeout (a setTimeout-paced probe then times the clamp: 3,156 ms for a 138-182 ms gesture) AND
+       suspends requestAnimationFrame, so after a view change the app's state attributes update while the
+       drawing never repaints — every box, position, hit test and screenshot then agrees with every other
+       and describes a view the app already left. One precondition covers both, rAF liveness probe
+       included; see ui-audit/lib/tabTiming.mjs. Fails loudly rather than reporting either. */
+    await assertMeasurable(page, "verify-boot-watchdog");
     page.on("load", () => { loads++; });
     await page.goto(url, { waitUntil: "commit" });
     // Poll for the "Updating Planyr…" overlay during the recovery window.
@@ -139,6 +154,13 @@ async function run() {
     await ctx.route(`**${entry}*`, (route) => { entryHits++; route.abort("failed"); });
     let loads = 0;
     const page = await ctx.newPage();
+    /* ⛔ A BACKGROUND TAB CANNOT BE MEASURED — not its clock, and not its pixels. A hidden tab clamps
+       setTimeout (a setTimeout-paced probe then times the clamp: 3,156 ms for a 138-182 ms gesture) AND
+       suspends requestAnimationFrame, so after a view change the app's state attributes update while the
+       drawing never repaints — every box, position, hit test and screenshot then agrees with every other
+       and describes a view the app already left. One precondition covers both, rAF liveness probe
+       included; see ui-audit/lib/tabTiming.mjs. Fails loudly rather than reporting either. */
+    await assertMeasurable(page, "verify-boot-watchdog");
     page.on("load", () => { loads++; });
     await page.goto(url, { waitUntil: "commit" });
     // Wait out the bounded auto-reloads (MAX=3 × DELAY 2500ms + slack), then the stuck screen.

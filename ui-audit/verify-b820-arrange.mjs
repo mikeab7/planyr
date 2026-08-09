@@ -5,6 +5,7 @@
  * and a markup rect. Boots the planner logged-out and drives the real SVG canvas + menus.
  * Building fill #f3ece1 · parking #cdd7dd · markup stroke #7c3aed. Run on preview :4173. */
 import pw from "/opt/node22/lib/node_modules/playwright/index.js";
+import { assertMeasurable } from "./lib/tabTiming.mjs";
 const { chromium } = pw;
 
 const BASE = process.env.BASE_URL || "http://localhost:4173/";
@@ -44,6 +45,13 @@ const browser = await chromium.launch({ executablePath: EXEC, args: ["--no-sandb
 const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1, ignoreHTTPSErrors: true });
 await ctx.addInitScript(seed);
 const page = await ctx.newPage();
+/* ⛔ A BACKGROUND TAB CANNOT BE MEASURED — not its clock, and not its pixels. A hidden tab clamps
+   setTimeout (a setTimeout-paced probe then times the clamp: 3,156 ms for a 138-182 ms gesture) AND
+   suspends requestAnimationFrame, so after a view change the app's state attributes update while the
+   drawing never repaints — every box, position, hit test and screenshot then agrees with every other
+   and describes a view the app already left. One precondition covers both, rAF liveness probe
+   included; see ui-audit/lib/tabTiming.mjs. Fails loudly rather than reporting either. */
+await assertMeasurable(page, "verify-b820-arrange");
 const errors = [];
 // Offline aerial/tile fetches fail in the sandbox — that's expected, not a regression. Only real
 // JS pageerrors and non-network console errors count.

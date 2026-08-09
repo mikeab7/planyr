@@ -35,6 +35,7 @@ import { chromium } from "playwright";
 import { createHash } from "node:crypto";
 import { decodePng, diffImages } from "./lib/pngDiff.mjs";
 import { perfScenarioSeed } from "./lib/perf-scenario.mjs";
+import { assertMeasurable } from "./lib/tabTiming.mjs";
 
 const argOf = (f, d) => { const i = process.argv.indexOf(f); return i > -1 ? process.argv[i + 1] : d; };
 const LOD = argOf("--lod", "http://localhost:4173/");
@@ -67,6 +68,13 @@ async function shoot(base) {
   });
   await ctx.route(/^https?:\/\//, (r) => (r.request().url().startsWith(base) ? r.continue() : r.abort()));
   const page = await ctx.newPage();
+  /* ⛔ A BACKGROUND TAB CANNOT BE MEASURED — not its clock, and not its pixels. A hidden tab clamps
+     setTimeout (a setTimeout-paced probe then times the clamp: 3,156 ms for a 138-182 ms gesture) AND
+     suspends requestAnimationFrame, so after a view change the app's state attributes update while the
+     drawing never repaints — every box, position, hit test and screenshot then agrees with every other
+     and describes a view the app already left. One precondition covers both, rAF liveness probe
+     included; see ui-audit/lib/tabTiming.mjs. Fails loudly rather than reporting either. */
+  await assertMeasurable(page, "verify-stall-lod-parity");
   await page.goto(base, { waitUntil: "load" });
   await page.waitForSelector("svg[role=application]", { timeout: 60_000 });
   await page.waitForTimeout(2500);

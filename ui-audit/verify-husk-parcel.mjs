@@ -5,6 +5,7 @@
 // against the fixed build the list must render, show the site, and read the healthy parcel's
 // acreage. Usage: node ui-audit/verify-husk-parcel.mjs <url> <expect: crash|healthy>
 import { chromium } from "playwright";
+import { assertMeasurable } from "./lib/tabTiming.mjs";
 
 const TARGET = process.argv[2] || "http://localhost:4173/";
 const EXPECT = process.argv[3] || "healthy";
@@ -31,6 +32,13 @@ const browser = await chromium.launch({
 });
 const ctx = await browser.newContext();
 const page = await ctx.newPage();
+/* ⛔ A BACKGROUND TAB CANNOT BE MEASURED — not its clock, and not its pixels. A hidden tab clamps
+   setTimeout (a setTimeout-paced probe then times the clamp: 3,156 ms for a 138-182 ms gesture) AND
+   suspends requestAnimationFrame, so after a view change the app's state attributes update while the
+   drawing never repaints — every box, position, hit test and screenshot then agrees with every other
+   and describes a view the app already left. One precondition covers both, rAF liveness probe
+   included; see ui-audit/lib/tabTiming.mjs. Fails loudly rather than reporting either. */
+await assertMeasurable(page, "verify-husk-parcel");
 
 const errors = [];
 page.on("pageerror", (err) => errors.push(err.message));

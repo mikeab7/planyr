@@ -12,6 +12,7 @@
 // M/D dates; add + delete work; no runtime errors. (Nothing is left in the repo's public/ dir.)
 //
 // Run:  node ui-audit/verify-b613-notes-panel.mjs
+import { assertMeasurable } from "./lib/tabTiming.mjs";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -97,6 +98,8 @@ const pw = await import("/opt/node22/lib/node_modules/playwright/index.js");
 const chromium = pw.chromium || (pw.default && pw.default.chromium);
 const browser = await chromium.launch({ executablePath: EXEC, args: ["--no-sandbox", "--ignore-certificate-errors", "--disable-background-networking"] });
 const page = await browser.newContext({ viewport: { width: 1100, height: 850 } }).then(c => c.newPage());
+/* ⛔ A background tab cannot be measured — clamped setTimeout, suspended rAF (a view change then updates state while the drawing never repaints). See ui-audit/lib/tabTiming.mjs. */
+await assertMeasurable(page, "verify-b613-notes-panel");
 const errors = [];
 page.on("console", m => { if (m.type() === "error") errors.push(m.text()); });
 page.on("pageerror", e => errors.push("PAGEERROR: " + e.message));

@@ -19,6 +19,7 @@ import { readFileSync, existsSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { extname, join, normalize } from "node:path";
+import { assertMeasurable } from "./lib/tabTiming.mjs";
 
 const ROOT = new URL("../public/", import.meta.url).pathname;
 const NM = new URL("../node_modules/", import.meta.url).pathname;
@@ -102,6 +103,13 @@ const seg = d => {
 async function pass(align) {
   console.log(`\n── align="${align}" ──────────────────────────────`);
   const page = await browser.newPage({ viewport: { width: 1500, height: 950 }, deviceScaleFactor: 2 });
+  /* ⛔ A BACKGROUND TAB CANNOT BE MEASURED — not its clock, and not its pixels. A hidden tab clamps
+     setTimeout (a setTimeout-paced probe then times the clamp: 3,156 ms for a 138-182 ms gesture) AND
+     suspends requestAnimationFrame, so after a view change the app's state attributes update while the
+     drawing never repaints — every box, position, hit test and screenshot then agrees with every other
+     and describes a view the app already left. One precondition covers both, rAF liveness probe
+     included; see ui-audit/lib/tabTiming.mjs. Fails loudly rather than reporting either. */
+  await assertMeasurable(page, "verify-gantt-labels-deps");
   await routeCDN(page);
   const real = [];
   page.on("console", m => { if (m.type() === "error" && !BENIGN.some(r => r.test(m.text()))) real.push(m.text()); });

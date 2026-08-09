@@ -3,6 +3,7 @@
  * horribly incomplete … you're missing all the properties for every tool.") Logged-out — drawing
  * needs no auth; only saving does. Run: node ui-audit/audit-markup-tools.mjs  (preview on :4173). */
 import { chromium } from "playwright";
+import { assertMeasurable } from "./lib/tabTiming.mjs";
 
 const EXEC = process.env.PW_CHROMIUM || undefined;
 const BASE = "http://localhost:4173";
@@ -53,6 +54,13 @@ async function countMarkups(page) {
 const run = async () => {
   const browser = await chromium.launch({ executablePath: EXEC, args: ["--no-sandbox", "--ignore-certificate-errors"] });
   const page = await browser.newPage({ viewport: { width: 1400, height: 900 } });
+  /* ⛔ A BACKGROUND TAB CANNOT BE MEASURED — not its clock, and not its pixels. A hidden tab clamps
+     setTimeout (a setTimeout-paced probe then times the clamp: 3,156 ms for a 138-182 ms gesture) AND
+     suspends requestAnimationFrame, so after a view change the app's state attributes update while the
+     drawing never repaints — every box, position, hit test and screenshot then agrees with every other
+     and describes a view the app already left. One precondition covers both, rAF liveness probe
+     included; see ui-audit/lib/tabTiming.mjs. Fails loudly rather than reporting either. */
+  await assertMeasurable(page, "audit-markup-tools");
   page.on("pageerror", (e) => console.log("  ‼ pageerror:", e.message));
   await page.goto(BASE, { waitUntil: "domcontentloaded" });
 

@@ -2,6 +2,7 @@
  * NEW-1 (vertical rules over bars), NEW-2 (broken left edge), NEW-3 (diagonal deps),
  * NEW-4 (timeline framing). Screenshots the .split-gantt and dumps the SVG paint order. */
 import pw from "/opt/node22/lib/node_modules/playwright/index.js";
+import { assertMeasurable } from "./lib/tabTiming.mjs";
 const { chromium } = pw;
 const BASE = process.env.BASE_URL || "http://localhost:4173/";
 const EXEC = process.env.PW_CHROME || "/opt/pw-browsers/chromium-1228/chrome-linux64/chrome";
@@ -9,6 +10,13 @@ const EXEC = process.env.PW_CHROME || "/opt/pw-browsers/chromium-1228/chrome-lin
 const browser = await chromium.launch({ executablePath: EXEC, args: ["--no-sandbox", "--ignore-certificate-errors"] });
 const ctx = await browser.newContext({ viewport: { width: 1700, height: 1050 }, ignoreHTTPSErrors: true, deviceScaleFactor: 3 });
 const page = await ctx.newPage();
+/* ⛔ A BACKGROUND TAB CANNOT BE MEASURED — not its clock, and not its pixels. A hidden tab clamps
+   setTimeout (a setTimeout-paced probe then times the clamp: 3,156 ms for a 138-182 ms gesture) AND
+   suspends requestAnimationFrame, so after a view change the app's state attributes update while the
+   drawing never repaints — every box, position, hit test and screenshot then agrees with every other
+   and describes a view the app already left. One precondition covers both, rAF liveness probe
+   included; see ui-audit/lib/tabTiming.mjs. Fails loudly rather than reporting either. */
+await assertMeasurable(page, "diagnose-gantt-export");
 page.on("console", (m) => { if (m.type() === "error") console.log("  [err]", m.text().slice(0, 160)); });
 const seqFrame = () => page.frames().find((f) => f.url().includes("/sequence/"));
 const blobFrames = () => page.frames().filter((f) => f.url().startsWith("blob:"));

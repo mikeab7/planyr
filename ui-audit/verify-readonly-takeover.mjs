@@ -16,6 +16,7 @@
  * Run: npm run build && npx vite preview --port 4173, then  node ui-audit/verify-readonly-takeover.mjs */
 import { chromium } from "playwright";
 import { mkdirSync } from "node:fs";
+import { assertMeasurable } from "./lib/tabTiming.mjs";
 
 const BASE = process.env.BASE_URL || "http://localhost:4173/";
 const OUT = new URL("./screens/", import.meta.url).pathname;
@@ -40,6 +41,8 @@ const pageErrors = [];
 
 // --- Tab A: the first/active editor ---
 const a = await context.newPage();
+/* ⛔ A background tab cannot be measured — clamped setTimeout, suspended rAF (a view change then updates state while the drawing never repaints). See ui-audit/lib/tabTiming.mjs. */
+await assertMeasurable(a, "verify-readonly-takeover");
 a.on("pageerror", (e) => pageErrors.push("A:" + e));
 await a.goto(BASE, { waitUntil: "domcontentloaded" });
 await a.waitForTimeout(3000);
@@ -47,6 +50,8 @@ check("Tab A is the active editor — no read-only banner", !(await roVisible(a)
 
 // --- Tab B: a second tab on the SAME plan → must go read-only ---
 const b = await context.newPage();
+/* ⛔ A background tab cannot be measured — clamped setTimeout, suspended rAF (a view change then updates state while the drawing never repaints). See ui-audit/lib/tabTiming.mjs. */
+await assertMeasurable(b, "verify-readonly-takeover");
 b.on("pageerror", (e) => pageErrors.push("B:" + e));
 await b.goto(BASE, { waitUntil: "domcontentloaded" });
 await b.waitForTimeout(3000);

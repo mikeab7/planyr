@@ -15,7 +15,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { visibilityVerdict, timingProvenance } from "../ui-audit/lib/tabTiming.mjs";
+import { visibilityVerdict, rafVerdict, timingProvenance } from "../ui-audit/lib/tabTiming.mjs";
 
 describe("the visibility verdict", () => {
   it('passes ONLY on a literally visible tab', () => {
@@ -48,61 +48,74 @@ describe("the visibility verdict", () => {
   });
 });
 
-/* ⛔ A RULE NOBODY'S CODE CONSULTS IS NOT A GUARD (the owner's words, filing this item). The rule
- * exists in /CLAUDE.md and in ui-audit/lib/tabTiming.mjs — this is what makes the harnesses that
- * actually take wall-clock readings from a driven browser consult it, and what makes a new one
- * fail here rather than silently report a throttled number. */
-describe("every browser-driving timing harness proves its tab is in the foreground", () => {
-  const TIMING_HARNESSES = [
-    "perf-harness", "interaction-degradation", "session-axes", "session-growth", "zoom-smoothness-ab",
-    "verify-midgesture-zoom", "verify-font-blocking", "initial-load", "detect-view-recompute",
-    "verify-view-independent", "zoom-reraster-arms", "verify-capture-pipe", "verify-perf-recorder",
-    "count-pond-invocations", "verify-plan-switch-release",
-    // …and the ones the folder sweep below found rather than memory: every harness that both drives
-    // a browser and subtracts a clock from a mark, whether or not "perf" is in its name.
-    "boot-tail", "diagnose-pan-commits", "diagnose-pond-pan", "diagnose-schedule-strand",
-    "diagnose-zoom-cost", "stress-markup", "verify-b441-optimistic-parcel", "verify-b828-undo",
-    "verify-b915-context-menu-viewport", "verify-new2-vertex-drag", "verify-parcel-resilience",
-    "verify-scheduler-loader", "verify-v211-schedule-coldboot",
-  ];
-  const src = (n) => readFileSync(fileURLToPath(new URL(`../ui-audit/${n}.mjs`, import.meta.url)), "utf8");
-
-  it.each(TIMING_HARNESSES)("%s calls assertForeground on its page", (name) => {
-    const s = src(name);
-    expect(s).toMatch(/import \{ assertForeground \} from "\.\/lib\/tabTiming\.mjs";/);
-    expect(s).toMatch(new RegExp(`await assertForeground\\(page, "${name}"\\)`));
+/* ⛔ CLAUSE 2 — GEOMETRY, and it is the more dangerous half. On the owner's hidden tab
+ * `requestAnimationFrame` did not fire ONCE in two seconds, so a CDP wheel updated the app's STATE
+ * correctly (`data-view-ppf` / `data-render-ppf` 0.0501 → 0.1062, a clean 2× zoom) while the pond's
+ * DOM geometry did not move at all — centre (892.9, 248), width 143.4 px, identical to three wheel
+ * gestures earlier, to one decimal place.
+ *
+ * A throttled timer gives a wrong NUMBER. A suspended rAF gives a wrong PICTURE THAT IS INTERNALLY
+ * CONSISTENT: boxes, positions, hit tests and screenshots all agree with each other and all describe
+ * a view the app already left. It cost one false lead before it was caught — an apparent
+ * anchored-zoom defect against B1449 / B258992 / V56000, REFUTED as a stale frame. */
+describe("the rAF-liveness verdict — the positive control visibilityState cannot give", () => {
+  it("passes when a frame callback ran", () => {
+    expect(rafVerdict(true).ok).toBe(true);
   });
 
-  /* The list above is the thing that rots: a new timing harness lands, nobody adds it, and the
-   * suite stays green while measuring less than it did. So the list is checked against the FOLDER —
-   * anything that both drives a browser and reads a clock has to be either listed here or listed as
-   * a deliberate exemption, with a reason. */
-  const EXEMPT = new Set([
-    // Reads a clock only to stamp a FIXTURE (`updatedAt: Date.now()`), never to measure elapsed time.
-    // These are behavioural harnesses; a throttled tab changes nothing about what they assert.
-  ]);
+  it("refuses a wedged frame loop and says the DOM is what is void, not the clock", () => {
+    const v = rafVerdict(false, { harness: "detect-view-recompute", windowMs: 1200 });
+    expect(v.ok).toBe(false);
+    expect(v.message).toMatch(/detect-view-recompute/);
+    expect(v.message).toMatch(/1200 ms/);
+    expect(v.message).toMatch(/VOID/);
+    expect(v.message, "the message must name the trap: state updates, the drawing does not")
+      .toMatch(/state attributes/);
+  });
 
-  it("no browser-driving harness MEASURES elapsed time without being listed or exempted", () => {
-    const dir = fileURLToPath(new URL("../ui-audit/", import.meta.url));
-    const unlisted = [];
-    for (const f of readdirSync(dir)) {
-      if (!f.endsWith(".mjs")) continue;
-      const name = f.slice(0, -4);
-      if (TIMING_HARNESSES.includes(name) || EXEMPT.has(name)) continue;
+  it("is asked SEPARATELY from visibility — a tab can claim visible with its frame loop wedged", () => {
+    // Both verdicts pass on their own inputs; the precondition requires BOTH, which is the point.
+    expect(visibilityVerdict("visible").ok).toBe(true);
+    expect(rafVerdict(false).ok).toBe(false);
+  });
+});
+
+/* ⛔ A RULE NOBODY'S CODE CONSULTS IS NOT A GUARD (the owner's words, filing this item). The rule
+ * lives in /CLAUDE.md and in ui-audit/lib/tabTiming.mjs — this is what makes the harnesses RUN it.
+ *
+ * ⛔ AND IT IS UNIVERSAL, NOT A LIST, BECAUSE CLAUSE 2 MADE A LIST INDEFENSIBLE. The first version
+ * of this guard named the harnesses that take wall-clock readings — 28 of them. Clause 2 (geometry)
+ * then swept in nearly every other one, and for a real reason rather than a loose heuristic: almost
+ * every harness here clicks "Zoom to fit" and then measures a bounding box, which is exactly the
+ * pattern that returns a stale frame on a hidden tab. So the precondition is required of EVERY
+ * harness that drives a browser. There is no list left to rot, and a new harness cannot be written
+ * without it. */
+describe("every browser-driving harness proves its tab is measurable before it measures", () => {
+  const dir = fileURLToPath(new URL("../ui-audit/", import.meta.url));
+  const driving = readdirSync(dir)
+    .filter((f) => f.endsWith(".mjs"))
+    .filter((f) => /chromium\.launch\(/.test(readFileSync(dir + f, "utf8")));
+
+  /* No exemptions today, and the set is deliberately empty rather than absent: an exemption has to
+   * be written down WITH ITS REASON, so the next reader can judge it. */
+  const EXEMPT = new Set([]);
+
+  it("the sweep actually found harnesses (an empty set would pass this file trivially)", () => {
+    expect(driving.length).toBeGreaterThan(300);
+  });
+
+  it.each(driving.filter((f) => !EXEMPT.has(f)))("%s asserts its tab is measurable", (f) => {
+    const s = readFileSync(dir + f, "utf8");
+    expect(s, "missing the import from ui-audit/lib/tabTiming.mjs").toMatch(/import \{ assertMeasurable \} from "\.\/lib\/tabTiming\.mjs";/);
+    expect(s, "imports the precondition but never calls it").toMatch(/await assertMeasurable\(/);
+  });
+
+  /* The call must name the harness, so a failure says WHICH run is void rather than "a page". */
+  it("each call names its own harness", () => {
+    const unnamed = driving.filter((f) => {
       const s = readFileSync(dir + f, "utf8");
-      if (!/chromium\.launch\(/.test(s)) continue;
-      /* "MEASURES elapsed time" = subtracts two clock reads, or reports a duration it computed.
-       * A bare `Date.now()` used as a fixture timestamp is not a measurement and does not count —
-       * that distinction is why this check can be strict without drowning in false positives. */
-      const measures = /(?:performance|Date)\.now\(\)\s*-\s*[A-Za-z_$]/.test(s)   // clock minus a MARK
-        || /[A-Za-z_$][\w$]*\s*=\s*(?:performance|Date)\.now\(\)\s*-\s*/.test(s)
-        || /\b(?:elapsed|durationMs|msElapsed)\b/.test(s);
-      /* ⛔ `Date.now() - 3 * 86400000` is a FIXTURE timestamp ("three days ago"), not a measurement,
-       * and matching it swept in 30 behavioural harnesses that time nothing. The distinction is
-       * whether the clock is subtracted from a MARK (an identifier) or from a constant offset. */
-      if (measures) unlisted.push(name);
-    }
-    expect(unlisted, "these harnesses time a driven browser but never prove the tab is foreground — "
-      + "add them to TIMING_HARNESSES and wire assertForeground, or exempt them with a reason").toEqual([]);
+      return !new RegExp(`assertMeasurable\\([^,]+, "${f.slice(0, -4).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}"\\)`).test(s);
+    });
+    expect(unnamed, "these harnesses call the precondition without naming themselves").toEqual([]);
   });
 });

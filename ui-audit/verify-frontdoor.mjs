@@ -1,4 +1,5 @@
 import { chromium } from "playwright";
+import { assertMeasurable } from "./lib/tabTiming.mjs";
 const BASE = "http://localhost:4173";
 const b = await chromium.launch({ args: ["--no-sandbox","--ignore-certificate-errors","--use-gl=angle","--use-angle=swiftshader","--enable-unsafe-swiftshader","--ignore-gpu-blocklist"] });
 
@@ -11,6 +12,8 @@ console.log("\n=== FRONT DOOR (real-user redirect; auth callbacks must NOT bounc
 async function fd(name, { url, seed, expectLanding }) {
   const ctx = await b.newContext();
   const p = await ctx.newPage();
+  /* ⛔ A background tab cannot be measured — clamped setTimeout, suspended rAF (a view change then updates state while the drawing never repaints). See ui-audit/lib/tabTiming.mjs. */
+  await assertMeasurable(p, "verify-frontdoor");
   await p.addInitScript(() => Object.defineProperty(navigator, "webdriver", { get: () => false }));
   if (seed) await p.addInitScript((k) => { try { localStorage.setItem(k, k.startsWith("sb-") ? '{"access_token":"x"}' : "{}"); } catch(e){} }, seed);
   await p.goto(BASE + url, { waitUntil: "domcontentloaded", timeout: 30000 }).catch(()=>{});
@@ -32,6 +35,8 @@ await fd("AUTH ?type=recovery&code=        → app",     { url:"/?type=recovery&
 // automation must never redirect (webdriver true)
 {
   const ctx = await b.newContext(); const p = await ctx.newPage();
+  /* ⛔ A background tab cannot be measured — clamped setTimeout, suspended rAF (a view change then updates state while the drawing never repaints). See ui-audit/lib/tabTiming.mjs. */
+  await assertMeasurable(p, "verify-frontdoor");
   await p.goto(BASE + "/", { waitUntil:"domcontentloaded" }).catch(()=>{});
   await new Promise(r=>setTimeout(r,300));
   expect("automation /                     → app (webdriver exempt)", !p.url().includes("/landing/"), "→ "+p.url().replace(BASE,""));
@@ -46,6 +51,8 @@ const real = (t)=> !/ERR_CONNECTION_CLOSED|fonts\.(googleapis|gstatic)/.test(t);
 // 1) baseline + rapid resize
 {
   const ctx = await b.newContext({ viewport:{width:1440,height:900} }); const p = await ctx.newPage(); const errs=[]; watch(p,errs);
+  /* ⛔ A background tab cannot be measured — clamped setTimeout, suspended rAF (a view change then updates state while the drawing never repaints). See ui-audit/lib/tabTiming.mjs. */
+  await assertMeasurable(p, "verify-frontdoor");
   await p.goto(BASE+"/landing/", { waitUntil:"load" }); await new Promise(r=>setTimeout(r,1500));
   const ready = await p.evaluate(()=>!!window.__landingReady);
   expect("baseline: ready, webgl boots", ready, "ready="+ready);
@@ -57,6 +64,8 @@ const real = (t)=> !/ERR_CONNECTION_CLOSED|fonts\.(googleapis|gstatic)/.test(t);
 // 2) fast scroll down+up
 {
   const ctx = await b.newContext({ viewport:{width:1440,height:900} }); const p = await ctx.newPage(); const errs=[]; watch(p,errs);
+  /* ⛔ A background tab cannot be measured — clamped setTimeout, suspended rAF (a view change then updates state while the drawing never repaints). See ui-audit/lib/tabTiming.mjs. */
+  await assertMeasurable(p, "verify-frontdoor");
   await p.goto(BASE+"/landing/", { waitUntil:"load" }); await new Promise(r=>setTimeout(r,1000));
   for (let i=0;i<12;i++){ await p.evaluate(y=>window.scrollTo(0,y), Math.random()*9000|0); await new Promise(r=>setTimeout(r,60)); }
   await p.evaluate(()=>window.scrollTo(0,document.body.scrollHeight)); await new Promise(r=>setTimeout(r,200));
@@ -67,6 +76,8 @@ const real = (t)=> !/ERR_CONNECTION_CLOSED|fonts\.(googleapis|gstatic)/.test(t);
 // 3) reduced motion
 {
   const ctx = await b.newContext({ viewport:{width:1440,height:900}, reducedMotion:"reduce" }); const p = await ctx.newPage(); const errs=[]; watch(p,errs);
+  /* ⛔ A background tab cannot be measured — clamped setTimeout, suspended rAF (a view change then updates state while the drawing never repaints). See ui-audit/lib/tabTiming.mjs. */
+  await assertMeasurable(p, "verify-frontdoor");
   await p.goto(BASE+"/landing/", { waitUntil:"load" }); await new Promise(r=>setTimeout(r,1400));
   const st = await p.evaluate(()=>({ ready:!!window.__landingReady, reveal:getComputedStyle(document.querySelector(".reveal")).opacity, yield0:document.querySelector('[data-yield="coverage"]').textContent }));
   expect("reduced-motion: ready + reveals shown", st.ready && st.reveal==="1", JSON.stringify(st));
@@ -76,6 +87,8 @@ const real = (t)=> !/ERR_CONNECTION_CLOSED|fonts\.(googleapis|gstatic)/.test(t);
 // 4) WebGL absent → fallback
 {
   const ctx = await b.newContext({ viewport:{width:1440,height:900} }); const p = await ctx.newPage(); const errs=[]; watch(p,errs);
+  /* ⛔ A background tab cannot be measured — clamped setTimeout, suspended rAF (a view change then updates state while the drawing never repaints). See ui-audit/lib/tabTiming.mjs. */
+  await assertMeasurable(p, "verify-frontdoor");
   await p.addInitScript(()=>{ const g=HTMLCanvasElement.prototype.getContext; HTMLCanvasElement.prototype.getContext=function(t){ if(String(t).indexOf("webgl")>=0) return null; return g.apply(this,arguments); }; });
   await p.goto(BASE+"/landing/", { waitUntil:"load" }); await new Promise(r=>setTimeout(r,1400));
   const st = await p.evaluate(()=>({ ready:!!window.__landingReady, fallback:!!window.__landingWebglFallback, fbShown:document.getElementById("bg-fallback").classList.contains("show") }));
@@ -88,6 +101,8 @@ const real = (t)=> !/ERR_CONNECTION_CLOSED|fonts\.(googleapis|gstatic)/.test(t);
 //    Count page inits via a sessionStorage counter (survives reload, set in an init script).
 {
   const ctx = await b.newContext({ viewport:{width:960,height:800} }); const p = await ctx.newPage();
+  /* ⛔ A background tab cannot be measured — clamped setTimeout, suspended rAF (a view change then updates state while the drawing never repaints). See ui-audit/lib/tabTiming.mjs. */
+  await assertMeasurable(p, "verify-frontdoor");
   await p.addInitScript(()=>{ try { sessionStorage.__inits = (+sessionStorage.__inits||0)+1; } catch(e){} });
   await p.goto(BASE+"/landing/", { waitUntil:"load" }); await new Promise(r=>setTimeout(r,600));
   await p.setViewportSize({ width: 700, height: 800 }); // cross 860 (desktop→mobile)
@@ -100,6 +115,8 @@ const real = (t)=> !/ERR_CONNECTION_CLOSED|fonts\.(googleapis|gstatic)/.test(t);
 // 6) no reload on a same-mode resize (desktop→desktop must NOT reload)
 {
   const ctx = await b.newContext({ viewport:{width:1440,height:900} }); const p = await ctx.newPage();
+  /* ⛔ A background tab cannot be measured — clamped setTimeout, suspended rAF (a view change then updates state while the drawing never repaints). See ui-audit/lib/tabTiming.mjs. */
+  await assertMeasurable(p, "verify-frontdoor");
   await p.addInitScript(()=>{ try { sessionStorage.__inits = (+sessionStorage.__inits||0)+1; } catch(e){} });
   await p.goto(BASE+"/landing/", { waitUntil:"load" }); await new Promise(r=>setTimeout(r,600));
   await p.setViewportSize({ width: 1100, height: 700 }); // still desktop, no breakpoint crossed

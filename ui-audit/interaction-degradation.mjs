@@ -61,7 +61,7 @@ import { waitForSelectorReleased } from "./lib/waitRelease.mjs";
 import { buildGrowthTable, probeValidityFault, axisVerdict, suspects, viewDrift } from "./lib/interactionAxis.mjs";
 import { aggregateSnapshot, diffAggregates, perInteraction } from "./lib/heapSnapshot.mjs";
 import { fakeTilePng, parseTileUrl, decodedMB } from "./lib/fakeTile.mjs";
-import { assertForeground } from "./lib/tabTiming.mjs";
+import { assertMeasurable } from "./lib/tabTiming.mjs";
 
 const BASE = (process.env.BASE_URL || "http://localhost:4173/").replace(/\/?$/, "/");
 const EXEC = process.env.PW_CHROME || "/opt/pw-browsers/chromium-1194/chrome-linux/chrome";
@@ -523,10 +523,13 @@ async function runArm(browser, { arm, idleBudgetMs }) {
   });
 
   const page = await context.newPage();
-  /* ⛔ A wall-clock reading from a BACKGROUND tab is void — a hidden tab clamps setTimeout, and a
-     setTimeout-paced probe then times the clamp (measured: 3,156 ms for a 138-182 ms gesture).
-     See ui-audit/lib/tabTiming.mjs. Fails loudly rather than reporting a throttled number. */
-  await assertForeground(page, "interaction-degradation");
+  /* ⛔ A BACKGROUND TAB CANNOT BE MEASURED — not its clock, and not its pixels. A hidden tab clamps
+     setTimeout (a setTimeout-paced probe then times the clamp: 3,156 ms for a 138-182 ms gesture) AND
+     suspends requestAnimationFrame, so after a view change the app's state attributes update while the
+     drawing never repaints — every box, position, hit test and screenshot then agrees with every other
+     and describes a view the app already left. One precondition covers both, rAF liveness probe
+     included; see ui-audit/lib/tabTiming.mjs. Fails loudly rather than reporting either. */
+  await assertMeasurable(page, "interaction-degradation");
   const cdp = await context.newCDPSession(page);
   await cdp.send("Performance.enable").catch(() => {});
   await cdp.send("HeapProfiler.enable").catch(() => {});

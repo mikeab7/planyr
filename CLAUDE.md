@@ -552,11 +552,30 @@ rules are binding shorthand, not optional style. (Full-text home so briefs stay 
   EXCEPTION is user-placed content the user opted into putting on top — a promoted reference (B1198), a markup
   with `behindEls: false` — which is selectable, lockable and demotable in one click from the menu that put it
   there. Guard: the e2e spec **chrome-swallows-press** (mutation-checked both ways).
-- **FOREGROUND-OR-VOID** — **A WALL-CLOCK READING TAKEN FROM A BACKGROUND TAB IS NOT A MEASUREMENT.
-  Before ANY timing from a driven browser, either prove the tab is foreground or pace with a primitive
-  the browser does not throttle — and FAIL LOUDLY rather than report the throttled number.** (Owner
-  rule, 2026-08-09, filed with the measurement that produced it.)
-  1. **THE CASE.** A probe of one double-click gesture on the owner's real plan reported **3,156 ms and
+- **FOREGROUND-OR-VOID** — **A BACKGROUND TAB CANNOT BE MEASURED: NOT ITS CLOCK, AND NOT ITS PIXELS.
+  A browser-driving harness MUST assert `document.visibilityState === "visible"` BEFORE it measures
+  ANYTHING — time or geometry — and FAIL LOUDLY if it is not.** (Owner rule, 2026-08-09, filed with
+  both measurements that produced it. **ONE precondition rather than two rules, deliberately: one
+  cause produces both failures, and a harness must not be able to satisfy it by halves.**)
+  0. **⛔ CLAUSE 2 — GEOMETRY, AND IT IS THE MORE DANGEROUS OF THE TWO. Any DOM measurement taken
+     after a VIEW CHANGE on a background tab is void, because rAF is SUSPENDED and the drawing never
+     repaints.** Measured on the owner's live tab at `visibilityState === "hidden"`: `requestAnimation
+     Frame` **did not fire once** when raced against a MessageChannel loop for two full seconds. A CDP
+     wheel then updated the app's STATE correctly — `data-view-ppf` and `data-render-ppf` both
+     0.0501 → 0.1062, a clean 2× zoom in — while the pond's DOM geometry **did not move at all**:
+     centre (892.9, 248), width 143.4 px, identical to three wheel gestures earlier, to one decimal
+     place. **A throttled timer gives you a wrong NUMBER; a suspended rAF gives you a wrong PICTURE
+     THAT IS INTERNALLY CONSISTENT** — boxes, positions, sizes and hit tests all agree with each other
+     and all describe a view the app already left, and the app's own state attributes will confirm the
+     view you asked for. Anything built on `elementFromPoint`, `getBoundingClientRect` or a screenshot
+     inherits it silently. **It cost a false lead before it was caught:** an apparent anchored-zoom
+     defect (a wheel-out at pointer x=900 leaving the drawing at x=104, moving AWAY from the pointer)
+     was flagged against **B1449 / B258992 / V56000** and is **REFUTED — a stale frame, not a broken
+     anchor. The anchored-zoom work is not implicated; do not re-open it on that evidence.**
+     **THE rAF LIVENESS PROBE IS PART OF THE ASSERTION, not an extra:** race one rAF against a
+     MessageChannel loop, because it catches the case `visibilityState` cannot — a tab that claims to
+     be visible while its frame loop is wedged anyway.
+  1. **CLAUSE 1 — TIMING.** A probe of one double-click gesture on the owner's real plan reported **3,156 ms and
      2,992 ms**. The tab was `document.visibilityState === "hidden"` throughout (it was being driven
      from another tab) and the harness paced itself with `setTimeout`, which Chrome CLAMPS in a hidden
      tab. It was timing the clamp. **The control — same gesture, same build, same tab, same hidden
@@ -569,12 +588,16 @@ rules are binding shorthand, not optional style. (Full-text home so briefs stay 
      perf backlog items. A wrong number that looks right is strictly more dangerous than a crash, and
      nothing downstream can tell them apart, so the check belongs at the source.
   3. **MACHINE-ENFORCED, because a rule nobody's code consults is not a guard.**
-     `ui-audit/lib/tabTiming.mjs` — `assertForeground(page, harness)` (throws, named), `pacedWait`
-     (a MessageChannel loop; unthrottled, and the drop-in for a `waitForTimeout` INSIDE a timed
-     section), `timingProvenance` (the line a harness prints beside its numbers). Wired into all 28
-     ui-audit harnesses that drive a browser and subtract a clock from a mark; `test/tabTiming.test.js`
-     pins each one AND sweeps the folder, so a NEW timing harness that skips it fails there rather than
-     quietly reporting a throttled number.
+     `ui-audit/lib/tabTiming.mjs` — **`assertMeasurable(page, harness)`** is the one precondition
+     (visibility THEN rAF liveness, both throwing and both named), plus `pacedWait` (a MessageChannel
+     loop; unthrottled, and the drop-in for a `waitForTimeout` INSIDE a timed section) and
+     `timingProvenance`. **Wired into ALL 347 ui-audit harnesses that drive a browser — universal, not
+     a list.** The first version named the 28 that read a clock; clause 2 swept in nearly all the rest
+     for a real reason rather than a loose heuristic — almost every harness here clicks "Zoom to fit"
+     and then measures a bounding box, which is exactly the pattern that returns a stale frame. So
+     `test/tabTiming.test.js` requires it of every harness that launches Chromium, and requires the
+     call to NAME itself so a failure says which run is void. **There is no list left to rot, and a new
+     harness cannot be written without it.**
   4. **An "unreadable" visibility state is refused too** — a harness that cannot check cannot vouch.
 - **PERCEPTUAL-PARITY** — **The bar a change to the PICTURE has to clear is that the owner cannot SEE it at
   working zoom — not that the file is unchanged.** (Owner amendment, 2026-08-06, verbatim: *"imperceptible at

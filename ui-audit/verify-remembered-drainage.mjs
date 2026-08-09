@@ -19,6 +19,7 @@
  *      BASE_URL=http://localhost:4188/ node ui-audit/verify-remembered-drainage.mjs
  */
 import { chromium } from "playwright";
+import { assertMeasurable } from "./lib/tabTiming.mjs";
 
 const BASE = process.env.BASE_URL || "http://localhost:4188/";
 const EXEC = process.env.PW_CHROME || "/opt/pw-browsers/chromium-1194/chrome-linux/chrome";
@@ -98,6 +99,8 @@ async function run() {
     localStorage.setItem('planarfit:currentSite:v1', 's_mit');
   } catch (e) {} })();`);
   const pageA = await ctxA.newPage();
+  /* ⛔ A background tab cannot be measured — clamped setTimeout, suspended rAF (a view change then updates state while the drawing never repaints). See ui-audit/lib/tabTiming.mjs. */
+  await assertMeasurable(pageA, "verify-remembered-drainage");
   pageA.on("pageerror", (e) => { failures++; console.log(`  [FAIL] pageerror(A) — ${e.message}`); });
   const tA = await openYield(pageA);
 
@@ -118,6 +121,8 @@ async function run() {
     localStorage.setItem('planarfit:currentSite:v1', 's_leg');
   } catch (e) {} })();`);
   const pageB = await ctxB.newPage();
+  /* ⛔ A background tab cannot be measured — clamped setTimeout, suspended rAF (a view change then updates state while the drawing never repaints). See ui-audit/lib/tabTiming.mjs. */
+  await assertMeasurable(pageB, "verify-remembered-drainage");
   pageB.on("pageerror", (e) => { failures++; console.log(`  [FAIL] pageerror(B) — ${e.message}`); });
   const tB = await openYield(pageB);
 
@@ -142,6 +147,8 @@ async function run() {
     localStorage.setItem('planarfit:currentSite:v1', 's_split');
   } catch (e) {} })();`);
   const pageC = await ctxC.newPage();
+  /* ⛔ A background tab cannot be measured — clamped setTimeout, suspended rAF (a view change then updates state while the drawing never repaints). See ui-audit/lib/tabTiming.mjs. */
+  await assertMeasurable(pageC, "verify-remembered-drainage");
   pageC.on("pageerror", (e) => { failures++; console.log(`  [FAIL] pageerror(C) — ${e.message}`); });
   const tC = await openYield(pageC);
 
@@ -159,6 +166,8 @@ async function run() {
     localStorage.setItem('planarfit:currentSite:v1', 's_legpond');
   } catch (e) {} })();`);
   const pageD = await ctxD.newPage();
+  /* ⛔ A background tab cannot be measured — clamped setTimeout, suspended rAF (a view change then updates state while the drawing never repaints). See ui-audit/lib/tabTiming.mjs. */
+  await assertMeasurable(pageD, "verify-remembered-drainage");
   pageD.on("pageerror", (e) => { failures++; console.log(`  [FAIL] pageerror(D) — ${e.message}`); });
   const tD = await openYield(pageD);
 
@@ -179,6 +188,8 @@ async function run() {
     localStorage.setItem('planarfit:currentSite:v1', 's_auto');
   } catch (e) {} })();`);
   const pageG = await ctxG.newPage();
+  /* ⛔ A background tab cannot be measured — clamped setTimeout, suspended rAF (a view change then updates state while the drawing never repaints). See ui-audit/lib/tabTiming.mjs. */
+  await assertMeasurable(pageG, "verify-remembered-drainage");
   pageG.on("pageerror", (e) => { failures++; console.log(`  [FAIL] pageerror(G) — ${e.message}`); });
   await pageG.goto(BASE, { waitUntil: "load" });
   await pageG.waitForTimeout(6500); // load debounce (1.2 s) + the auto attempt settling

@@ -29,6 +29,7 @@ import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { extname, join, normalize } from "node:path";
 import * as E from "./stress/scheduler-engine.mjs";
+import { assertMeasurable } from "./lib/tabTiming.mjs";
 
 const ROOT = new URL("../public/", import.meta.url).pathname;
 const NM = new URL("../node_modules/", import.meta.url).pathname;
@@ -92,6 +93,13 @@ const overlap = (a, b, pad = 0) => a.left - pad < b.right && a.right + pad > b.l
 // matching the fixture's own "~33% zoom" spec without needing to drive the zoom control. Height is
 // generously oversized so all 119 rows mount at once (no virtualization cutoff to work around).
 const page = await browser.newPage({ viewport: { width: 1600, height: 3400 }, deviceScaleFactor: 1 });
+/* ⛔ A BACKGROUND TAB CANNOT BE MEASURED — not its clock, and not its pixels. A hidden tab clamps
+   setTimeout (a setTimeout-paced probe then times the clamp: 3,156 ms for a 138-182 ms gesture) AND
+   suspends requestAnimationFrame, so after a view change the app's state attributes update while the
+   drawing never repaints — every box, position, hit test and screenshot then agrees with every other
+   and describes a view the app already left. One precondition covers both, rAF liveness probe
+   included; see ui-audit/lib/tabTiming.mjs. Fails loudly rather than reporting either. */
+await assertMeasurable(page, "verify-b629-dense-gantt-207");
 await page.route("**/*", route => {
   const u = route.request().url();
   for (const key of Object.keys(LIB)) if (u.includes(key)) return route.fulfill({ status: 200, contentType: "text/javascript", body: LIB[key] });

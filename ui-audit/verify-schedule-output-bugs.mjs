@@ -18,6 +18,7 @@ import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
 import { readFileSync } from "node:fs";
 import { extname, join, normalize } from "node:path";
+import { assertMeasurable } from "./lib/tabTiming.mjs";
 
 const ROOT = new URL("../public/", import.meta.url).pathname;
 const VENDOR = process.env.SEQ_VENDOR || "";
@@ -50,6 +51,13 @@ const ok = (name, cond, extra = "") => { results.push({ name, pass: !!cond }); c
 const browser = await chromium.launch({ executablePath: EXEC, args: ["--no-sandbox", "--ignore-certificate-errors"], acceptDownloads: true });
 const ctx = await browser.newContext({ viewport: { width: 1500, height: 950 }, acceptDownloads: true });
 const page = await ctx.newPage();
+/* ⛔ A BACKGROUND TAB CANNOT BE MEASURED — not its clock, and not its pixels. A hidden tab clamps
+   setTimeout (a setTimeout-paced probe then times the clamp: 3,156 ms for a 138-182 ms gesture) AND
+   suspends requestAnimationFrame, so after a view change the app's state attributes update while the
+   drawing never repaints — every box, position, hit test and screenshot then agrees with every other
+   and describes a view the app already left. One precondition covers both, rAF liveness probe
+   included; see ui-audit/lib/tabTiming.mjs. Fails loudly rather than reporting either. */
+await assertMeasurable(page, "verify-schedule-output-bugs");
 const pageErrors = [];
 page.on("pageerror", e => pageErrors.push(e.message));
 

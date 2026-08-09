@@ -8,7 +8,7 @@
  * Run: node ui-audit/verify-parcel-resilience.mjs  (vite preview on :4173) */
 import { chromium } from "playwright";
 import { mkdirSync } from "node:fs";
-import { assertForeground } from "./lib/tabTiming.mjs";
+import { assertMeasurable } from "./lib/tabTiming.mjs";
 
 const BASE = process.env.BASE_URL || "http://localhost:4173/";
 const OUT = new URL("./screens/", import.meta.url).pathname;
@@ -28,10 +28,13 @@ const seed = `(() => { try {
 
 const browser = await chromium.launch({ executablePath: process.env.PW_CHROME || undefined, args: ["--no-sandbox", "--ignore-certificate-errors"] });
 const page = await browser.newPage({ viewport: { width: 1280, height: 860 } });
-/* ⛔ A wall-clock reading from a BACKGROUND tab is void — a hidden tab clamps setTimeout, and a
-   setTimeout-paced probe then times the clamp (measured: 3,156 ms for a 138-182 ms gesture).
-   See ui-audit/lib/tabTiming.mjs. Fails loudly rather than reporting a throttled number. */
-await assertForeground(page, "verify-parcel-resilience");
+/* ⛔ A BACKGROUND TAB CANNOT BE MEASURED — not its clock, and not its pixels. A hidden tab clamps
+   setTimeout (a setTimeout-paced probe then times the clamp: 3,156 ms for a 138-182 ms gesture) AND
+   suspends requestAnimationFrame, so after a view change the app's state attributes update while the
+   drawing never repaints — every box, position, hit test and screenshot then agrees with every other
+   and describes a view the app already left. One precondition covers both, rAF liveness probe
+   included; see ui-audit/lib/tabTiming.mjs. Fails loudly rather than reporting either. */
+await assertMeasurable(page, "verify-parcel-resilience");
 
 const pageErrors = [];
 const consoleErrors = [];

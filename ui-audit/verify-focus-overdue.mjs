@@ -17,6 +17,7 @@ import { chromium } from "playwright";
 import { createServer } from "node:http";
 import { readFile, access } from "node:fs/promises";
 import { extname, join, normalize } from "node:path";
+import { assertMeasurable } from "./lib/tabTiming.mjs";
 
 const NM = new URL("../node_modules/", import.meta.url).pathname;
 const LIB = {
@@ -85,6 +86,13 @@ const BENIGN = [/supabase/i, /\[BABEL\]/i, /CORS/i, /ERR_FAILED/i, /WebSocket/i,
 const EXEC = process.env.PW_CHROME || "/opt/pw-browsers/chromium-1194/chrome-linux/chrome";
 const browser = await chromium.launch({ executablePath: EXEC, args: ["--no-sandbox","--ignore-certificate-errors"] });
 const page = await browser.newPage({ viewport: { width: 1400, height: 900 } });
+/* ⛔ A BACKGROUND TAB CANNOT BE MEASURED — not its clock, and not its pixels. A hidden tab clamps
+   setTimeout (a setTimeout-paced probe then times the clamp: 3,156 ms for a 138-182 ms gesture) AND
+   suspends requestAnimationFrame, so after a view change the app's state attributes update while the
+   drawing never repaints — every box, position, hit test and screenshot then agrees with every other
+   and describes a view the app already left. One precondition covers both, rAF liveness probe
+   included; see ui-audit/lib/tabTiming.mjs. Fails loudly rather than reporting either. */
+await assertMeasurable(page, "verify-focus-overdue");
 const real = [];
 page.on("console", m => { if (m.type()==="error" && !BENIGN.some(r=>r.test(m.text()))) real.push(m.text()); });
 page.on("pageerror", e => { if (!BENIGN.some(r=>r.test(e.message))) real.push("PAGEERROR: " + e.message); });

@@ -18,6 +18,7 @@ import { chromium } from "playwright";
 import { createServer } from "http";
 import { deflateSync } from "zlib";
 import { aerialTileGrid, pickAerialTileZoom, feetExtentToBbox } from "../src/workspaces/site-planner/lib/arcgis.js";
+import { assertMeasurable } from "./lib/tabTiming.mjs";
 
 /* ---- a tiny dependency-free 256×256 RGB PNG (a colourful raster, one per tile) ---- */
 const crcTable = (() => { const t = []; for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
@@ -97,6 +98,13 @@ const stitchAerialDataUrl = async (bm, bbox, grid) => {
 
 const browser = await chromium.launch();
 const page = await browser.newPage();
+/* ⛔ A BACKGROUND TAB CANNOT BE MEASURED — not its clock, and not its pixels. A hidden tab clamps
+   setTimeout (a setTimeout-paced probe then times the clamp: 3,156 ms for a 138-182 ms gesture) AND
+   suspends requestAnimationFrame, so after a view change the app's state attributes update while the
+   drawing never repaints — every box, position, hit test and screenshot then agrees with every other
+   and describes a view the app already left. One precondition covers both, rAF liveness probe
+   included; see ui-audit/lib/tabTiming.mjs. Fails loudly rather than reporting either. */
+await assertMeasurable(page, "verify-aerial-tile-stitch");
 // Distinct query token per run so the happy run's cached tiles can't satisfy the fail run's
 // injected 500 (headless Chromium keeps an aggressive in-memory image cache keyed by URL).
 const bmHappy = { tiles: tilesTemplate + "?run=happy", maxNative };

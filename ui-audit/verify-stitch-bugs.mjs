@@ -9,6 +9,7 @@
  * Run:  npm run build && npx vite preview --port 4173    (one shell)
  *       node ui-audit/verify-stitch-bugs.mjs             (another)
  */
+import { assertMeasurable } from "./lib/tabTiming.mjs";
 const pw = await import("/opt/node22/lib/node_modules/playwright/index.js");
 const chromium = pw.chromium || (pw.default && pw.default.chromium);
 const BASE = process.env.BASE_URL || "http://localhost:4173/";
@@ -65,6 +66,8 @@ const check = (cond, msg) => { console.log((cond ? "  ✓ " : "  ✗ ") + msg); 
 const browser = await chromium.launch({ executablePath: EXEC, args: ["--no-sandbox", "--ignore-certificate-errors"] });
 const ctx = await browser.newContext({ viewport: { width: 1500, height: 950 }, ignoreHTTPSErrors: true });
 const page = await ctx.newPage();
+/* ⛔ A background tab cannot be measured — clamped setTimeout, suspended rAF (a view change then updates state while the drawing never repaints). See ui-audit/lib/tabTiming.mjs. */
+await assertMeasurable(page, "verify-stitch-bugs");
 const pageErrors = [];
 page.on("pageerror", (e) => pageErrors.push(String(e)));
 await page.goto(BASE, { waitUntil: "load" });
@@ -156,6 +159,8 @@ console.log("\nFIX-1 — removing the world-frame sheet doesn't strand an unalig
 // the earlier grouped composite would otherwise still be on this canvas.
 const ctx2 = await browser.newContext({ viewport: { width: 1500, height: 950 }, ignoreHTTPSErrors: true });
 const p2 = await ctx2.newPage();
+/* ⛔ A background tab cannot be measured — clamped setTimeout, suspended rAF (a view change then updates state while the drawing never repaints). See ui-audit/lib/tabTiming.mjs. */
+await assertMeasurable(p2, "verify-stitch-bugs");
 p2.on("pageerror", (e) => pageErrors.push(String(e)));
 await p2.goto(BASE, { waitUntil: "load" });
 await sleep(1200);
