@@ -1,5 +1,35 @@
 # VERIFICATION-DONE.md — archived verification items (passed / superseded)
 
+
+### V56000 — B1449: does the zoom FEEL smooth and professional on his own Bain plans? — ✅ **PASSED 2026-08-09 (owner acceptance)**
+
+**✅ PASSED 2026-08-09 — the OWNER, on his own machine, on his own plans. His words: *"I think we're good."*** That sentence is the whole verdict and it is the right kind of evidence, because this check never had a number to hit: the criterion was stated by him at the outset — *"I don't really care what the process is as long as the end result is smooth and professional… world class quality."* The three watch-items below are exactly the questions only he could answer, and he answered them. B1449 is CLOSED on this acceptance and archived.
+
+**⛔ TWO THINGS THIS PASS DOES *NOT* BLESS, recorded so the closure cannot be read wider than it is.**
+1. **The mid-gesture picture is still un-counter-scaled** — watch-item 2 below. That trade was accepted, not fixed, and it now has an item of its own (**B286001**, deliberate-and-deferred) precisely so closing the parent could not bury it.
+2. **The refuted lead stays refuted.** The "anchor moves away from the pointer" report was a stale frame on a hidden tab (rAF suspended), not a defect — see the note below and FOREGROUND-OR-VOID in `/CLAUDE.md`. Do not re-open the anchored-zoom work on that evidence.
+
+**Note on the copy below:** it says `Plan ▾ → Smooth zoom`. The switch moved to the on-canvas **View ▾** menu on 2026-08-09 (**B286000**) — same key, same default, same behaviour. Original text kept verbatim as the record of what was asked and what was measured.
+
+---
+
+**⛔ A LEAD RAISED AGAINST THIS ENTRY IS REFUTED (2026-08-09) — do not re-open it.** A report that a wheel-out at pointer x=900 left the drawing at x=104, moving AWAY from the pointer, was measured on a tab with `document.visibilityState === "hidden"`, where rAF is SUSPENDED: the DOM was a stale frame from a previous view while the app's own `data-view-ppf` / `data-render-ppf` correctly reported the new one. The anchor is not implicated. **When you run this check, assert `visibilityState === "visible"` first** — see FOREGROUND-OR-VOID in `/CLAUDE.md` (B1086 ×2).
+
+**The acceptance criterion is his, and he said so plainly:** *"I don't really care what the process is as long as the end result is smooth and professional… world class quality."* So this is not discharged by a millisecond target, and no number below is the bar. What the numbers are for is to say what changed and let him judge the real thing.
+
+**What was driven HERE, headless, and what it showed.** `npm run perf:midzoom` — a real wheel gesture on the reference plan, the frame captured MID-gesture (inside the 220 ms settle) and again once settled: **27 nodes checked, worst 0.74 px, observed scale 1.4049 against k 1.4049, zero settle jump.** That is the geometry proven exact while the gesture is still running, which nothing in this repo could observe before. Its `--selftest` also proves the harness goes RED on demand: a deliberately double-scaled frame fails and is correctly diagnosed `double-scaled`, and a build with the anchor disabled fails on "no anchor armed" rather than passing vacuously. `npm run perf:zoomab` — the SAME scripted 8-notch sweep, in and back out, one build, anchor on vs off: **wheel→DOM 51 → 21 ms · 25,149 → 6,528 DOM mutation records · re-bakes 180 ms after the last notch**, with a video of each arm.
+
+**What only he can answer, and the three specific things to watch for** — each is a real consequence of the trade he accepted, so any of them coming back as "no" is a product answer, not a bug report:
+
+1. **Does the wheel still feel late?** The delay he named was the re-emit, and it is measured 2.4× shorter. If it still feels late on a Bain plan, the residual is the component body itself, not the emit, and that is a different item.
+2. **Does the drawing look wrong WHILE the wheel is turning?** It scales as one piece, so line weights and text grow and shrink with it and the parking-stripe / dock-door detail holds the tier it started at until he stops. He was told this and accepted it — but "accepted in the abstract" and "fine to look at" are different, and this is the check.
+3. **Does it snap correctly the instant he stops?** The re-bake is ~180 ms after the last notch. Nothing should MOVE at that moment (the harness proves the geometry does not); what changes is sharpness and detail.
+
+Also worth one look: **a trackpad**, if he has one to hand. The wheel factor now reads the size of the scroll rather than only its direction, which is a much bigger change on a trackpad than on a wheel mouse — a mouse detent is numerically identical to before.
+
+**If any of it is wrong, `Plan ▾ → Smooth zoom` turns the whole thing off** and the zoom reverts to re-drawing on every notch. That switch existing is part of the deliverable.
+
+⏳ **LIVE APP (planyr.io), HIS OWN MACHINE, HIS OWN BAIN PLANS** `Blocker: real-data` *(sandbox evidence recorded on B1449; `Cadence: once`)*
 ### V641 — B1319 (the inline number editor: in place, at the chip's own size, spinner-free): the headless before/during/after pass at two zooms, in both themes, on the owner's real parcel
 
 **✅ PASSED 2026-07-31 — Claude, in-session, headless Chromium (`ui-audit/verify-numedit-inplace.mjs`, 89/89).** Driven logged out, no external GIS, geometry seeded locally — so every strand of this was Claude-doable HERE and none of it was filed as owed. Five passes: light + dark × fit-zoom + zoomed-in on a synthetic 900 × 600 ft parcel with a building hard against the setback line (the owner's case), plus a fifth on his REAL 60-vertex Weld County boundary (`test/fixtures/weldParcelProduction.json`, site `sms7v3ua7ksy`).

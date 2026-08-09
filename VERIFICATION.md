@@ -122,6 +122,21 @@ was never clicked" quietly ships broken.
 - **Also confirm the badge still DRAGS** — this fix is identification-only and must not have cost the affordance B1327 exists for: hover a lot's acreage badge, drag it, and it should move as before.
 - **Already confirmed, do NOT re-test:** the plan is byte-identical across every run; the pond control passes; press gaps are inside `DBLTAP_MS`; the first-gesture fix from #965 is intact.
 - The **owner never runs this** — it is a Claude-cohort check on a signed-in session. ⏳ **PENDING**
+### V84560 — B270913: does the retention job fire ON ITS OWN, tomorrow, with nobody pressing anything? `Blocker: real-data`
+
+**⛔ THIS CHECK IS THE ENTIRE POINT OF THE ITEM, AND IT CANNOT BE DONE IN A SANDBOX.** Everything else about B270913 is proven: the policy is unit-tested against a real Postgres (21 cases, both directions, both clauses mutation-checked), and it was proven a second time **on the production table** with seeded rows that were cleaned up afterwards. What no test here can show is the one thing that decides whether this works: **that `pg_cron` actually runs the job on schedule.** A retention job that silently never runs is indistinguishable from one that correctly had nothing to delete — and since this policy deletes nothing from today's data, that indistinguishability is the EXPECTED state for months. The whole run-log/status half of the item exists for this one question.
+
+- **RUN IT AFTER 07:20 UTC on 2026-08-10** (or any later day — the schedule is daily, `20 7 * * *`), against `planyr_production` with the service role. One query:
+  ```sql
+  select * from public.client_errors_retention_status;
+  select id, ran_at, ordinary_deleted, manual_deleted, rows_before, rows_after, duration_ms
+    from public.client_errors_retention_runs order by id;
+  ```
+- **PASS** = `status = 'ok'` **and** a run row exists that **nobody triggered** — i.e. `ran_at` at ≈07:20 UTC, with an `id` greater than 1. `ordinary_deleted = 0` and `manual_deleted = 0` on that row is the CORRECT result and must be read as a healthy no-op, not as a failure: 0 of ~5,300 rows are eligible and none will be until roughly 2026-09-18.
+- **FAIL** = `status` still reads **`never-run`**, or the only row is `id = 1`. That row is the manual proof run from 2026-08-09 (`ordinary_deleted 2` — three seeded `B270913-live-proof` rows, two of which were correctly deleted); it is evidence the FUNCTION works and says nothing about the SCHEDULE. **`stale`** on a later read means it fired once and stopped.
+- **If it FAILS, the first thing to check is `cron.job` and `cron.job_run_details`,** not the function: `select * from cron.job where jobname = 'planyr-client-errors-retention';` and `select * from cron.job_run_details order by start_time desc limit 10;`. Supabase runs pg_cron jobs in the `postgres` database only; the job was created there, owned by `postgres`, and read back active at apply time.
+- **⛔ DO NOT "verify" this by calling `select public.prune_client_errors()` yourself.** A hand-triggered run writes exactly the same row as a scheduled one, so doing that DESTROYS the only evidence this check exists to gather — it converts an unanswered question into a permanent false pass. If you need to confirm the function still works, the unit suite already does that on every CI run.
+- This is a Claude-cohort check on the production database. **The owner never runs this.** ⏳ **PENDING**
 
 ### V78960 — B280400: does the stub's double-click still work on the SECOND try? `Blocker: real-data` + `Blocker: auth`
 
@@ -499,26 +514,6 @@ not change, and (b) **edit a pond's depth or drag a pond vertex and confirm they
 half is the one that matters, because a memo that never invalidates is the failure mode in the other
 direction. **PASS** — numbers hold on a pan and move on an edit. **FAIL** — either a stale number
 after an edit, or a reconciliation error naming a pond.
-
-### V56000 — B1449: does the zoom FEEL smooth and professional on his own Bain plans? `Blocker: real-data`
-
-**⛔ A LEAD RAISED AGAINST THIS ENTRY IS REFUTED (2026-08-09) — do not re-open it.** A report that a wheel-out at pointer x=900 left the drawing at x=104, moving AWAY from the pointer, was measured on a tab with `document.visibilityState === "hidden"`, where rAF is SUSPENDED: the DOM was a stale frame from a previous view while the app's own `data-view-ppf` / `data-render-ppf` correctly reported the new one. The anchor is not implicated. **When you run this check, assert `visibilityState === "visible"` first** — see FOREGROUND-OR-VOID in `/CLAUDE.md` (B1086 ×2).
-
-**The acceptance criterion is his, and he said so plainly:** *"I don't really care what the process is as long as the end result is smooth and professional… world class quality."* So this is not discharged by a millisecond target, and no number below is the bar. What the numbers are for is to say what changed and let him judge the real thing.
-
-**What was driven HERE, headless, and what it showed.** `npm run perf:midzoom` — a real wheel gesture on the reference plan, the frame captured MID-gesture (inside the 220 ms settle) and again once settled: **27 nodes checked, worst 0.74 px, observed scale 1.4049 against k 1.4049, zero settle jump.** That is the geometry proven exact while the gesture is still running, which nothing in this repo could observe before. Its `--selftest` also proves the harness goes RED on demand: a deliberately double-scaled frame fails and is correctly diagnosed `double-scaled`, and a build with the anchor disabled fails on "no anchor armed" rather than passing vacuously. `npm run perf:zoomab` — the SAME scripted 8-notch sweep, in and back out, one build, anchor on vs off: **wheel→DOM 51 → 21 ms · 25,149 → 6,528 DOM mutation records · re-bakes 180 ms after the last notch**, with a video of each arm.
-
-**What only he can answer, and the three specific things to watch for** — each is a real consequence of the trade he accepted, so any of them coming back as "no" is a product answer, not a bug report:
-
-1. **Does the wheel still feel late?** The delay he named was the re-emit, and it is measured 2.4× shorter. If it still feels late on a Bain plan, the residual is the component body itself, not the emit, and that is a different item.
-2. **Does the drawing look wrong WHILE the wheel is turning?** It scales as one piece, so line weights and text grow and shrink with it and the parking-stripe / dock-door detail holds the tier it started at until he stops. He was told this and accepted it — but "accepted in the abstract" and "fine to look at" are different, and this is the check.
-3. **Does it snap correctly the instant he stops?** The re-bake is ~180 ms after the last notch. Nothing should MOVE at that moment (the harness proves the geometry does not); what changes is sharpness and detail.
-
-Also worth one look: **a trackpad**, if he has one to hand. The wheel factor now reads the size of the scroll rather than only its direction, which is a much bigger change on a trackpad than on a wheel mouse — a mouse detent is numerically identical to before.
-
-**If any of it is wrong, `Plan ▾ → Smooth zoom` turns the whole thing off** and the zoom reverts to re-drawing on every notch. That switch existing is part of the deliverable.
-
-⏳ **LIVE APP (planyr.io), HIS OWN MACHINE, HIS OWN BAIN PLANS** `Blocker: real-data` *(sandbox evidence recorded on B1449; `Cadence: once`)*
 
 ### V52208 — B255200: does the recorder actually fire on HIS machine — and if it never does, B1121 closes. `Blocker: auth` `Blocker: real-data`
 
