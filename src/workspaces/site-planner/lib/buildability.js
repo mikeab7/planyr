@@ -93,6 +93,36 @@ export const DEFAULT_BUILDABILITY_RULES = {
   },
   montgomery: { label: "Montgomery County", ffeRule: null, fillToElevate: null, pathwayNote: null, verified: false, source: "Not yet transcribed.", sourceDate: null, note: "No FFE rule modeled — VERIFY with the county." },
   chambers: { label: "Chambers County", ffeRule: null, fillToElevate: null, pathwayNote: null, verified: false, source: "Not yet transcribed.", sourceDate: null, note: "No FFE rule modeled — VERIFY with the county." },
+  /* ⛔ NEW-1c — THE CITY OF BAYTOWN EXISTS AS A CANDIDATE NOW; ITS NUMBERS DELIBERATELY DO NOT.
+   *
+   * The owner's Goose Creek is part inside Baytown's city limits and 100% inside Baytown's ETJ, and
+   * `RULE_KEY_ALIAS` had no `baytown` entry at all — so Baytown resolved to nothing, was never a
+   * candidate, and by this module's own contract could never govern. The site took its finished
+   * floors from another authority with nothing anywhere saying a city ordinance had been skipped.
+   *
+   * ⛔ `ffeRule` IS NULL ON PURPOSE AND MUST NOT BE FILLED IN FROM MEMORY. The owner's recollection
+   * is "roughly 2 ft above the 500-year", and he asked explicitly for that to be CHECKED against the
+   * adopted ordinance rather than confirmed. It could not be: Baytown publishes its code through
+   * Municode and both `library.municode.com` and `baytown.org` are refused by this environment's
+   * egress allowlist (HTTP 403, verified 2026-08-09). A web-search SUMMARY is not an ordinance and
+   * is not admissible here — every other record in this table cites a section it was read from.
+   * This is the same discipline `mhfdDetention.js` applies to the MHFD coefficients it cannot fetch:
+   * name the document, refuse to invent the number.
+   *
+   * WHAT A NULL RULE NOW DOES, which is the point of adding the record at all: the candidate is
+   * RAISED and reported as unmodelled, so `assessAdministrator` refuses to settle instead of
+   * silently letting the remaining authority win. Before this, "we have no rule for the city that
+   * governs a third of your site" and "the county governs" were the same screen. */
+  baytown: {
+    label: "City of Baytown",
+    ffeRule: null,
+    fillToElevate: null,
+    pathwayNote: null,
+    verified: false,
+    source: "NOT TRANSCRIBED — Baytown Code of Ordinances (Municode) could not be reached from this environment; egress-blocked 2026-08-09.",
+    sourceDate: null,
+    note: "No FFE rule modeled. The owner's recollection is ~2 ft above the 0.2% (500-yr) elevation, UNVERIFIED and deliberately not encoded. Read Ch. 122 (Flood Damage Prevention) for the non-residential lowest-floor requirement and record the datum + freeboard WITH the section, as the Harris §4.07(b)(1) and Fort Bend §5.02(c) records do. NOTE for whoever transcribes it: Harris County unincorporated is ALREADY 500-yr WSE + 2 ft here, so if the recollection is right the required floor does not move — the exposure is only if Baytown differs from that.",
+  },
   // Waller (NEW-1): Art. 5 §B(2) nonresidential — lowest floor ≥ 500-yr WSE + 2 ft when
   // the structure is in the 1% floodplain; ≥ 500-yr WSE + 1 ft when in the 500-yr band
   // only. §D(5): an A Zone with no depth number → slab ≥ highest adjacent grade + 4 ft

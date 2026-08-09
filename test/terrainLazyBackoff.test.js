@@ -74,6 +74,53 @@ describe("loadTerrain — the network is not touched inside the backoff window",
   });
 });
 
+describe("⛔ B1349 / PR #976 NON-REGRESSION — the backoff may never reach the SUCCESS path", () => {
+  /* #976 closed B1349's terrainLayers half by MEASUREMENT on main at 1d2f31a: seeded reference plan,
+   * idle page, no mouse, no click, eight seconds -> `terrainLayers` ABSENT; **first mouse move over
+   * the canvas -> it arrives**, via useGroundElevation -> terrainLazy.loadTerrain() -> warmCursorGrid,
+   * which #976 calls "the correct on-demand pattern this item itself prescribed".
+   *
+   * That is the exact call chain B287060's backoff sits in. A backoff that delayed the FIRST attempt
+   * would push the chunk past that first mouse move and silently re-open an item #976 had just closed
+   * on evidence — and no test in this repo would have noticed, because every other assertion here is
+   * about the FAILURE path. So the property is pinned by number, at the source. */
+  beforeEach(() => __resetTerrainLazy());
+
+  it("costs a healthy first load NOTHING — attempt 1 waits zero, so the first pointer move still pulls the chunk", () => {
+    expect(retryDelayMs(0)).toBe(0);
+  });
+
+  it("issues the import IMMEDIATELY on a cold call — no window is armed before anything has failed", async () => {
+    /* A cold `loadTerrain()` must reach the import, not the backoff refusal. Under vitest the import
+     * itself cannot resolve (no bundler graph for `./terrainLayers.js`), so the discriminator is
+     * WHICH rejection comes back: the backoff refusal names itself, a real import failure does not. */
+    await expect(loadTerrain(1_000)).rejects.not.toThrow(/backing off/);
+  });
+
+  it("⛔ SOURCE GUARD — the backoff window starts at ZERO and is only ever armed in the rejection handler", () => {
+    /* Why a source guard and not a behavioural one: `__resetTerrainLazy()` zeroes `nextTryAt`, and
+     * every behavioural test needs that isolation — so a mutation that arms the window AT MODULE LOAD
+     * ("safer: never hammer, not even once") is wiped by the harness before any assertion sees it.
+     * Verified: that exact mutation leaves all 11 other tests green. The initial value is therefore
+     * pinned where the harness cannot launder it. */
+    const src = readFileSync(join(here, "../src/workspaces/site-planner/lib/terrainLazy.js"), "utf8");
+    expect(src).toMatch(/let mod = null, loading = null, fails = 0, nextTryAt = 0;/);
+    const arms = src.match(/nextTryAt = (?!0;)/g) || [];
+    expect(arms.length).toBe(1);                                  // exactly one place arms it…
+    expect(src).toMatch(/fails \+= 1;\s*\n\s*nextTryAt = now \+ retryDelayMs\(fails\);/); // …the failure handler
+  });
+
+  it("⛔ the backoff is armed by a FAILURE and by nothing else — a never-failed loader is never delayed", async () => {
+    /* Mutation this catches: arming `nextTryAt` at module load, or before the import rather than in
+     * the rejection handler, both of which read as "a slightly safer backoff" and both of which
+     * would delay the healthy first fetch. */
+    for (const t of [0, 5_000, 10 ** 9]) {
+      __resetTerrainLazy();
+      await expect(loadTerrain(t)).rejects.not.toThrow(/backing off/);
+    }
+  });
+});
+
 describe("the call sites still handle a rejection (LOUD-FAILURE, not a new silent path)", () => {
   const read = (p) => readFileSync(join(here, "..", p), "utf8");
   it("⛔ every loadTerrain() caller has a rejection handler — an unhandled one would feed the very telemetry channel this item is cleaning up", () => {

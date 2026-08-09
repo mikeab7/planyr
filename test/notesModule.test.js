@@ -227,6 +227,24 @@ describe("the editor is split off the route's static path", () => {
     expect(root, "the editor must also remount when the body changed underneath it").toMatch(/bodyEpoch/);
   });
 
+  it("⛔ the self-audit hook is GATED, read/seed-only, and cannot reach a shipped session (B291537)", () => {
+    const editor = code("components/NoteEditor.jsx");
+    /* `window.__noteEditor` is how ui-audit/verify-notes-backspace.mjs states the case it is
+     * testing — an exact document tree and an exact caret position. It is kept rather than
+     * torn out after the run, and these are the three properties that make that safe. */
+    expect(editor, "the hook must be installed behind the same gate every self-audit hook here uses")
+      .toMatch(/window\.__PLANYR_E2E/);
+    const install = editor.slice(editor.indexOf("window.__PLANYR_E2E"), editor.indexOf("window.__noteEditor = hook"));
+    expect(install, "the gate must be an early return, not a branch around part of it").toMatch(/return undefined;/);
+    expect(editor, "and it must be removed on unmount so a page switch cannot leave a stale editor reachable")
+      .toMatch(/window\.__noteEditor === hook/);
+    // Nothing in the app may READ it — a hook the product depends on is not a hook.
+    for (const f of ALL_NOTES_FILES) {
+      const body = code(f).replace(/window\.__noteEditor = hook|window\.__noteEditor === hook|window\.__noteEditor = null/g, "");
+      expect(body, `${f} must not depend on the self-audit hook`).not.toMatch(/__noteEditor/);
+    }
+  });
+
   it("there is NO 'sync content on pageId change' effect — that is the crash this shape removed", () => {
     const editor = code("components/NoteEditor.jsx");
     expect(editor, "setContent against a torn-down instance is the null-commands crash").not.toMatch(/\.commands\.setContent/);
@@ -844,15 +862,27 @@ describe("the project a notebook belongs to", () => {
     expect(paste).toMatch(/\$from\.after\(listDepth\)/);
   });
 
-  it("⛔ BACKSPACE at the start of a block undoes formatting BEFORE it restructures (B36051)", () => {
+  it("⛔ BACKSPACE at the start of a block takes ONE step, at EVERY boundary (B36051 → B291536)", () => {
     const keys = code("lib/notesBlockKeys.js");
-    expect(keys, "it must be asked BEFORE the default joinBackward").toMatch(/BLOCK_KEYS_PRIORITY = 160/);
+    expect(keys, "it must be asked BEFORE the default joinBackward AND before ListKeymap").toMatch(/BLOCK_KEYS_PRIORITY = 160/);
     expect(keys, "only at the very start of a block, and only on an empty selection")
       .toMatch(/parentOffset !== 0/);
-    expect(keys).toMatch(/if \(!selection\.empty\) return false/);
-    // It claims the key ONLY when there is a real alignment difference to undo.
-    expect(keys).toMatch(/MEANINGFUL\.has\(align\)/);
+    expect(keys).toMatch(/if \(!selection\.empty\) return null/);
+    // The alignment case B36051 shipped is still the FIRST thing it looks at.
+    expect(keys).toMatch(/MEANINGFUL_ALIGN\.has/);
     expect(keys).toMatch(/textAlign: null/);
+    /* ⛔ AND IT IS A TABLE NOW, NOT A SPECIAL CASE. The recurrence ("the backspace still acts
+     * funny in certain spots") was lists, and the boundary nobody had looked at deleted a
+     * PICTURE. Every row below is a boundary the decision has to name; the behaviour itself is
+     * unit-tested against real ProseMirror states in test/notesBlockKeys.test.js and driven
+     * for real in ui-audit/verify-notes-backspace.mjs. */
+    for (const action of [
+      "clear-align", "heading-to-paragraph", "codeblock-to-paragraph", "lift-blockquote",
+      "outdent-list-item", "list-item-to-paragraph", "select-node-before", "into-table-cell",
+      "join-textblock", "join", "none",
+    ]) expect(keys, `the boundary table must name "${action}"`).toContain(`"${action}"`);
+    expect(keys, "the decision is PURE, so it can be unit-tested").toMatch(/export function blockStartAction/);
+    expect(keys, "typing '- ' then Backspace still takes the bullet back").toMatch(/undoInputRule\(\)/);
   });
 
   it("the three paste glyphs are OUR drawings, and there are three of them", () => {

@@ -527,6 +527,29 @@ a look-ahead at what that study will produce, clearly labelled as screening and 
 - [ ] **A >50 MB file** (optional) — to confirm the "50 MB per-file cloud limit" banner text. The automated
       tester's upload bridge caps at 10 MB, so this one needs a manual drop.
 
+## One thing only Michael can unblock
+
+- [ ] **Let Claude reach Municode (or hand over the Baytown flood ordinance).** Part of Goose Creek is inside
+      the City of Baytown's limits and *all* of it is inside Baytown's ETJ, so Baytown's flood rules apply to
+      it — but Claude cannot read Baytown's ordinance from its sandbox: `library.municode.com` and
+      `baytown.org` are both blocked by the network allowlist. Michael's recollection is "about 2 ft above the
+      500-year"; Claude deliberately did **not** encode that, because every other rule in the app cites the
+      exact ordinance section it was read from, and a web-search summary is not an ordinance. Two ways to
+      unblock: **send Claude the PDF or pages of Baytown's Flood Damage Prevention chapter (Ch. 122)** —
+      the non-residential lowest-floor requirement is the part needed. ⚠ Just opening up the websites
+      probably won't do it: Municode serves Baytown's code as a page that builds itself in the browser, so
+      a plain fetch gets the index and no ordinance text, and Baytown's own site times out on the check
+      crawlers do before reading. A second attempt confirmed both dead ends. **Worth knowing before spending effort:
+      Harris County's rule (already in the app, verified) is 500-year + 2 ft — the SAME as the recollection —
+      so if the recollection is right the pads do not move at all.** Meanwhile the app is NOT guessing and
+      NOT blank: it uses the Harris County rule, says on screen that it is using it and that Baytown's
+      rule is missing, and refuses to call the floor final. (B286305/B286309, 2026-08-09.)
+- [ ] **Is Grand Port inside Baytown's city limits?** The two mapping sources disagree on every lot there:
+      Baytown's own map says yes, the state's map says no city at all. At Goose Creek the two agree exactly,
+      so this is specific to Grand Port — possibly an annexation the state layer hasn't picked up. If Baytown
+      is right, Grand Port is an incorporated site and Baytown's rules govern it outright. Claude did not pick
+      a winner. (B286308, 2026-08-09.)
+
 ## Quick housekeeping in his account
 - [ ] **One concept in Silvestri is still labelled "Concept D - Sylvestri Retail"** (the old spelling). The
       PROJECT name is fixed everywhere — all five concepts now say Silvestri — but that one line is the plan's

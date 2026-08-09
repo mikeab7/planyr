@@ -113,6 +113,25 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V91632 — B293073: on ONE OF HIS OWN PLANS, do two overlapping objects actually swap what's on top? `Blocker: real-data`
+
+The three defects behind *"the layers / order feature doesn't work at all"* are fixed and each is proven here by reading paint order back out of the rendered DOM (not from state). What the sandbox cannot know is **which objects he was trying to reorder**, so this is the one check that closes his report rather than mine.
+- planyr.io, signed in, any plan of his with **two overlapping objects of the same kind** — two buildings, two markups, or two text boxes.
+- **The text-box case is the one to run first**, because it is the one that was structurally impossible before: drop two text boxes so they overlap, right-click the lower one → **Bring to Front**. **PASS = the box you clicked is now drawn over the other one.** Pre-fix that menu had no ordering rows at all.
+- Then the case that read as "broken": right-click something that is **the only one of its type on the plan** — a lone pond, a lone paving pad. **PASS = the four Arrange rows are THERE, greyed, and hovering one explains why** ("this is the only … so there is nothing to reorder it against"). Pre-fix the whole group was hidden, with no explanation — which is what "doesn't work at all" looked like.
+- And the cross-the-plan move: right-click a text box → **Send behind the plan**. PASS = the buildings now draw over it.
+- **Report which objects he originally tried**, if he remembers — if it was a building over a paving pad, that is the type-layer question parked on B293072 as an owner decision, NOT a bug, and this V should record that rather than reopen the item.
+- ⏳ **PENDING**
+### V90096 — B291536: on the note where Backspace "acts funny", does one press now take exactly one step? `Blocker: real-data`
+
+**⛔ THIS IS THE ONE THE SANDBOX CANNOT SETTLE, and the reason is stated rather than glossed.** The reported symptom — a nested bullet un-nesting AND merging in one press — did **not** reproduce on a plain bulleted list here. What did reproduce, and produces exactly that symptom, is a document that MIXES a checklist with a bulleted list, which an Outlook paste routinely makes: Tiptap's list keymap runs its Backspace handler once per list type without stopping at the first one to act, and one press dissolved BOTH levels into plain paragraphs. That class is fixed and mutation-proven. Whether it is the class HIS note holds is his to confirm.
+- **Where:** planyr.io, signed in, the page the report came from (project Silvestri, page "Utility") or any note where it misbehaved.
+- **The check, three presses, one at a time.** (1) Caret at the very start of a **nested** bullet → one Backspace → it should **outdent one level and change nothing else** (no merging with the bullet above). (2) Undo. Caret at the very start of a **top-level** bullet → one Backspace → it should become a **plain line keeping its words**, with **no empty bullet left behind**, and the line above untouched. (3) A **second** Backspace from there joins it to the line above — that step is meant to be the second one.
+- **Also worth one press while he is there, because it was the worst thing found and no report existed for it:** put the caret at the start of the line directly under a **picture** and press Backspace once. The picture must become **selected (outlined), not deleted**.
+- **PASS =** every press changes exactly one thing. **FAIL =** any press changes two or more, or leaves an empty bullet.
+- **⛔ AND IF IT FAILS, CAPTURE THE TREE RATHER THAN DESCRIBING IT.** With `window.__PLANYR_E2E` armed, `window.__noteEditor.json()` returns the document before and after the press; that is what turns a second report into a fixed row in `ui-audit/verify-notes-backspace.mjs` instead of another round of guessing.
+- **Already confirmed here, do NOT re-test:** 37/37 boundary rows against the built app, mutation-proven RED without the fix (11 of 37).
+- The **owner never runs this** — it is a Claude-cohort check on a signed-in session with his real note. ⏳ **PENDING**
 ### V85616 — B287056: on the next deploy, does a `chunk-recovery` row actually appear — and does it say `recovered`? `Blocker: real-data`
 
 **⛔ THIS IS THE ONLY CHECK THAT MATTERS AND IT NEEDS A REAL DEPLOY.** Every branch of the guard is unit-tested (`test/chunkRecovery.test.js`, 21) and the sandbox has no deploy at all, so nothing here can fire `landed` or `recovered` — those two require an open tab, a new build replacing its chunks, and a navigation. The item exists because **361 production rows recorded no outcome**; a shipped recorder that turns out to write nothing would be the same defect with a nicer comment.
@@ -320,6 +339,44 @@ assumed) and (f) needs a human eye.** Every part that an instrument could settle
 
 *(minted V73584; references **B276576**, overlaps **V477**; `Cadence: once`. Implemented + fully
 sandbox-verified 2026-08-08 — the residue above is the deployed edge only.)*
+### V84864 — B286304/B286305: Baytown's own layers, the aggregator audit, and an authority with no rule
+
+**Status: ✅ PASSED (2026-08-09) for everything reachable — 27 of 28 sites correct, 0 mislabelled, 0 unresolved.** GREEN RIVER has no active parcel geometry.
+
+**The owner's correction, both clauses.** *"City of Baytown may very well be 2' above the 500, and the Baytown etj is on their gis."* The second is confirmed and shipped. The first **could not be verified and is deliberately NOT encoded** — see the blocker below.
+
+**Baytown's own GIS, measured per lot on his site `sms69x8rb2qk`:** every tested Goose Creek lot is inside Baytown's ETJ; 6 of 14 are also inside its city limits. **The H-GAC aggregator returns nothing at all of them.** BT_ETJ (layer 11) and BT_City_Limit (layer 12) are both registry rows now, with fixtures at real lot centroids — including the ETJ-ONLY lot, the exact membership H-GAC misses.
+
+**Portfolio sweep, all 28: 27 correct · 0 mislabelled · 0 unresolved.** Two sites changed:
+
+| Site | Before | After |
+|---|---|---|
+| Goose Creek | `Part in City of Baytown (6 of 14 lots) / rest in its ETJ · Harris County` | unchanged — **now corroborated by Baytown's own layer, lot for lot** |
+| Grand Port | `Unincorporated · Chambers County` | `Unincorporated / City of Baytown · ETJ · Chambers County` — a governing ETJ it never had |
+| Bain | `Unincorporated / City of Houston · ETJ / City of Katy · edge only · Fort Bend County` | unchanged — **proven not regressed** |
+
+**The aggregator audit (the real ask).** Of the **10 cities in the owner's footprint, 6 are carried by a routed ETJ source and 4 are NOT: Brookshire, Humble, Katy, Waller.** Three publish their own layers; the URLs are in the audit output and on B286306. Katy was tested — it returns **0 at every probe point on both Tsakiris and Bain**, so wiring it changes no answer, only upgrades an honest "not published" to a verified "no ETJ".
+
+**An authority with no rule now blocks a settled FFE.** `administratorCandidates` had always stamped `ruleModeled` with a comment promising an unmodelled candidate "is flagged, never dropped" — **nothing in the tree ever read that flag.** Measured on Goose Creek's real signals:
+
+| | before | after |
+|---|---|---|
+| candidates | Harris County only | Harris County · **Baytown** (limits) · **Baytown (ETJ)** |
+| `settled` | **true** | **false** |
+| on screen | "Rule applied: Harris County" | "No rule on file for City of Baytown…" |
+
+An EDGE-only candidate is excluded deliberately, and **Bain is asserted to stay settled** — the fix must not turn every touching city into a governing one.
+
+**⛔ HARD BLOCKER, stated rather than worked around: Baytown's ordinance is unreachable from here.** `library.municode.com`, `api.municode.com` and `baytown.org` all return **HTTP 403 — host not in allowlist** (verified 2026-08-09). Web search works but returns SUMMARIES, and a summary is not an ordinance — every other rule record in this repo cites a section it was read from. `rules.baytown.ffeRule` is therefore `null`, `verified: false`, source `NOT TRANSCRIBED`, **with a test asserting the nulls so nobody fills them in from recollection.** The unblock is an egress allowlist entry for Municode, on `OWNER-TODO.md`.
+
+**⚠ THE FFE ANSWER, which corrects the premise.** The expectation was that Baytown (~500-yr + 2 ft) would be materially STRICTER than the basis in use. **Harris County's modelled rule IS 0.2% (500-yr) WSE + 2 ft**, verified and cited at §4.07(b)(1) — the same datum and the same freeboard. **If the recollection is right, the required floor does not move and the pads move ZERO feet.** The exposure exists only if Baytown's ordinance differs from that, which is precisely why this ships as a refusal-to-settle and not an alarm.
+
+**Texas golden master:** regenerated after classifying the diff exhaustively — **0 CHANGED, 0 REMOVED, 3 ADDED** (all null-valued Baytown keys); 23 insertions, 0 deletions.
+
+**⚠ A NEW CONFLICT FOUND AND RAISED, NOT SILENTLY RESOLVED (B286308):** at **Grand Port** the two city-limits publishers disagree on **all 4 lots** — Baytown's own layer says inside the city, TxGIO says no city. At Goose Creek they agree perfectly. If Baytown is right, Grand Port is an INCORPORATED site. Not guessed at; it needs an authoritative record.
+
+**Still pending (`Blocker: live-GIS` · `auth` · `real-data`):** the on-screen rendering, unchanged and unchanged in reason — the sandbox blocks the county parcel service, so no georeferenced parcel can be placed logged-out.
+
 ### V79264 — B280704/B280705/B280706: the Goose Creek straddle, the ETJ coverage hole, and the split-jurisdiction refusal
 
 **Status: ✅ PASSED (2026-08-09) for everything this sandbox can reach — 27 of 28 sites.** GREEN RIVER has no active parcel geometry, so the app shows no badge and there is nothing to check.

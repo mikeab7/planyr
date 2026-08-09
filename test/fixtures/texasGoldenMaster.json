@@ -2057,6 +2057,11 @@
         "verified": false,
         "ffeRule": null
       },
+      "baytown": {
+        "label": "City of Baytown",
+        "verified": false,
+        "ffeRule": null
+      },
       "waller": {
         "label": "Waller County (unincorporated)",
         "verified": true,
@@ -2187,6 +2192,24 @@
         "unknownReason": "no FFE rule modeled for this jurisdiction — verify locally"
       },
       "chambers|noInputs": {
+        "requiredFfeFt": null,
+        "basis": null,
+        "plusFt": null,
+        "governingBasis": null,
+        "pendingBases": [],
+        "losingBases": [],
+        "unknownReason": "no FFE rule modeled for this jurisdiction — verify locally"
+      },
+      "baytown": {
+        "requiredFfeFt": null,
+        "basis": null,
+        "plusFt": null,
+        "governingBasis": null,
+        "pendingBases": [],
+        "losingBases": [],
+        "unknownReason": "no FFE rule modeled for this jurisdiction — verify locally"
+      },
+      "baytown|noInputs": {
         "requiredFfeFt": null,
         "basis": null,
         "plusFt": null,
