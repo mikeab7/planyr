@@ -116,13 +116,16 @@ import { assetIdsInDoc, docToText, imageIdsInDoc } from "./notesMarkdown.js";
 import { openTasksInDoc, rollUpOpenTasks, setTaskCheckedInDoc } from "./notesTasks.js";
 import { MAX_VERSIONS_PER_PAGE, planRestore, planRetention, shouldSnapshot } from "./notesVersions.js";
 import { safeAttachmentName } from "./notesFileMeta.js";
-import { migrate, searchTitles, pagesInScope, walkPages, SCOPE_ALL, SCOPE_PROJECT } from "./notesModel.js";
+import { migrate, searchTitles, pagesInScope, trashEntries, walkPages, SCOPE_ALL, SCOPE_PROJECT } from "./notesModel.js";
 import { relativeTime } from "./notesTime.js";
 
-export const TREE_KEY_BASE = "planyr:notes:tree:v1";
-export const PAGE_KEY_BASE = "planyr:notes:page:v1";
-export const SYNC_KEY_BASE = "planyr:notes:sync:v1";
-export const LOCAL_SCOPE = "local";
+/* The key strings live in `notesKeys.js` — a leaf with no dependencies — so the ONE other
+ * module allowed to touch these keys (`notesProjectLink.js`, which answers "what is this
+ * project holding?" from a route where Notes is not mounted) cannot drift from this file's
+ * idea of where a tree lives. Re-exported here so every existing importer is unchanged: this
+ * is still the seam. */
+export { TREE_KEY_BASE, PAGE_KEY_BASE, SYNC_KEY_BASE, LOCAL_SCOPE } from "./notesKeys.js";
+import { LOCAL_SCOPE, PAGE_KEY_BASE, SYNC_KEY_BASE, TREE_KEY_BASE } from "./notesKeys.js";
 
 /* ---- scope ------------------------------------------------------------------------- */
 
@@ -298,13 +301,33 @@ export function listStoredPageIds(s = scope) {
  *
  *  ⛔ It deliberately does NOT tombstone anything in the cloud. This sweep judges against
  *  THIS DEVICE's tree, which on a fresh sign-in is behind the account's; treating what it
- *  finds as a delete would let a device that has not synced yet erase the account. */
+ *  finds as a delete would let a device that has not synced yet erase the account.
+ *
+ *  ⛔ AND IT WILL NOT DESTROY A BODY THAT STILL HAS WORDS IN IT (NEW-4). Found in the
+ *  owner's own account: a page whose TREE NODE had gone but whose body row was still in the
+ *  cloud, holding real notes. The sweep deleted the local copy, the next seed downloaded it
+ *  again (`planPageSeed` adopts any row this device does not have), and the loop ran for
+ *  days with the note reachable from nowhere and nothing ever saying so. An interrupted
+ *  delete leaves an EMPTY or a stray body; a body with paragraphs in it is somebody's work,
+ *  and the honest thing to do with work whose home is missing is to SAY SO — which
+ *  `unreachableNotes` (lib/notesScan.js) does — not to quietly delete it every time the tab
+ *  opens.
+ *
+ *  Returns `{ removed, kept }`: what it cleared, and what it refused to. */
 export function sweepOrphans(livePageIds) {
   const live = new Set(livePageIds || []);
   const orphans = listStoredPageIds().filter((id) => !live.has(id));
-  if (orphans.length) deletePages(orphans);
-  return orphans;
+  const kept = [];
+  const removed = [];
+  for (const id of orphans) (hasWords(readPage(id)) ? kept : removed).push(id);
+  if (removed.length) deletePages(removed);
+  return { removed, kept };
 }
+
+/** Does this document have anything a person actually wrote in it? The bar for "worth
+ *  keeping" — and deliberately lower than the duplicate detector's, because refusing to
+ *  destroy something is a cheaper mistake than reporting a false duplicate. */
+const hasWords = (doc) => docToText(doc).trim().length > 0;
 
 /* ---- images (B1311) ------------------------------------------------------------------
  *

@@ -879,9 +879,21 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   could reach. `arrangePeers` is now the ONE peer-set resolver for all four families — never re-derive one.
   The three menus that share a shape build their rows from ONE `arrangeGroup` helper; the element menu
   keeps its own `arrRow` (different menu component, different header style) and is asserted separately.
-  **Whether an ELEMENT may cross its type-layer band at all** (paving over a building) is a
-  drawing-convention decision parked for the owner as an `{ open: … }` cell on the capability table —
-  deliberately not decided in code. Guards: the repo-root `e2e/` declaration table **elementCapabilities.table** (a new
+  **⛔ B316864 — THE OWNER ANSWERED THE CROSS-BAND QUESTION, AND THE ANSWER IS BOTH HALVES.** It used
+  to be an `{ open: … }` cell on the capability table (*"paving over a building"*); it is now
+  `crossBand: yes` for all six element types. **The DEFAULT did not move** — `road → paving → pond →
+  parking → building` is still absolute for every untouched element, and ordinary Arrange still stops
+  at the band edge — but an explicit **"Force on top of everything"** row lifts ONE element across it,
+  reversibly. It resolves in **`planStyle.zOrder`** (`bandForceOf` / `EL_BANDS`), the single function
+  every band question already asks, so there is no second stacking mechanism and a forced element gets
+  its own Arrange peer group for free. The shape is BORROWED from the `behindEls` toggle markups /
+  measurements / callouts carry and from `overlayOrder.js`'s `aboveParcel` — do not invent a third.
+  Two things not to undo: a road forced out of its band is excluded from the DISSOLVED `roadNet` (it
+  would otherwise paint twice, once in the merged region and once as its own strip), and `bandForce`
+  is ignored unless it names a known band, because an unreadable override must never silently move a
+  building. Guards: the repo-root `test/` suite **elementBandForce** (which REPLAYS the pre-fix comparator, so a
+  default that drifts goes red; mutation-proven three ways) plus the ui-audit harnesses
+  **audit-element-parity** (58/58) and **verify-v91632-real-plan** (the owner's real Bain plan). Guards: the repo-root `e2e/` declaration table **elementCapabilities.table** (a new
   selectable type cannot ship without answering every capability), the repo-root `test/` suite
   **elementCapabilities** (proven red four ways on the pre-fix source) and the ui-audit harness
   **audit-element-parity** (right-clicks one of every kind on a deliberately OVERLAPPING fixture and

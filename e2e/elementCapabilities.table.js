@@ -65,7 +65,21 @@ const YES = "yes";
 export const ELEMENT_CAPABILITIES = [
   /* ---- SITE ELEMENTS (`kind: "el"`) --------------------------------------------------------
    * One family, one row shape: these all share the element inspector and the element right-click
-   * menu, so the interesting declarations are the per-type ones (a road has no rectangle W/H). */
+   * menu, so the interesting declarations are the per-type ones (a road has no rectangle W/H).
+   *
+   * ⛔ THE SIX `crossBand` CELLS BELOW WERE THE ONLY `{ open: … }` LEFT IN THIS TABLE, AND THE OWNER
+   * HAS NOW ANSWERED THEM (2026-08-09, NEW-1). Verbatim: *"for item one, paving over a building. I
+   * mean, I don't think that should be the default. But, like, if I try and force it and then I
+   * don't see why I shouldn't be able to do that."* — so the answer is BOTH halves, and they are
+   * recorded here as `yes` because the CAPABILITY exists, not because the behaviour changed by
+   * default. The type-layer rule (road → paving → pond → parking → building) is still absolute for
+   * every element nobody has touched, and ordinary Arrange still stops at the band edge; the
+   * capability is the explicit "Force on top of everything" row, which is the same single-toggle
+   * escape hatch markups, measurements, callouts and references already carry. See
+   * `site-planner/lib/planStyle.js` (`bandForceOf` / `EL_BANDS`) for the one place it resolves.
+   *
+   * The MECHANISM this table exists for is untouched: a new element type still cannot ship without
+   * declaring `crossBand` — `yes`, or an `na` with a reason, or a fresh `open` for the owner. */
   {
     type: "building", label: "Building", family: "el",
     props: {
@@ -75,14 +89,14 @@ export const ELEMENT_CAPABILITIES = [
     actions: {
       properties: YES, copy: YES, duplicate: YES, lock: YES,
       arrangeEnds: YES, arrangeSteps: YES,
-      crossBand: { open: "Should an element be allowed to cross the type-layer rule at all — e.g. paving drawn OVER a building? Today the rule is absolute: road → paving → pond → parking → building, and Arrange only reorders within a band. Markups, measurements and references each have an explicit cross-the-plan escape hatch; elements deliberately do not, because the drawing convention is what makes a site plan readable. Owner's call." },
+      crossBand: YES,
       delete: YES,
     },
   },
   {
     type: "paving", label: "Paving", family: "el",
     props: { stroke: YES, fill: YES, lineWeight: YES, dash: YES, size: YES, rotation: YES, label: YES, lock: YES },
-    actions: { properties: YES, copy: YES, duplicate: YES, lock: YES, arrangeEnds: YES, arrangeSteps: YES, crossBand: { open: "see building" }, delete: YES },
+    actions: { properties: YES, copy: YES, duplicate: YES, lock: YES, arrangeEnds: YES, arrangeSteps: YES, crossBand: YES, delete: YES },
   },
   {
     type: "road", label: "Road", family: "el",
@@ -90,22 +104,22 @@ export const ELEMENT_CAPABILITIES = [
       stroke: YES, fill: YES, lineWeight: YES, dash: YES, rotation: YES, label: YES, lock: YES,
       size: { na: "a centreline road is sized by its travel width + its drawn centreline, not by a W×H box; the width field lives in the road card and the length is the geometry the user drew" },
     },
-    actions: { properties: YES, copy: YES, duplicate: YES, lock: YES, arrangeEnds: YES, arrangeSteps: YES, crossBand: { open: "see building" }, delete: YES },
+    actions: { properties: YES, copy: YES, duplicate: YES, lock: YES, arrangeEnds: YES, arrangeSteps: YES, crossBand: YES, delete: YES },
   },
   {
     type: "parking", label: "Car Parking", family: "el",
     props: { stroke: YES, fill: YES, lineWeight: YES, dash: YES, size: YES, rotation: YES, label: YES, lock: YES },
-    actions: { properties: YES, copy: YES, duplicate: YES, lock: YES, arrangeEnds: YES, arrangeSteps: YES, crossBand: { open: "see building" }, delete: YES },
+    actions: { properties: YES, copy: YES, duplicate: YES, lock: YES, arrangeEnds: YES, arrangeSteps: YES, crossBand: YES, delete: YES },
   },
   {
     type: "trailer", label: "Trailer Parking", family: "el",
     props: { stroke: YES, fill: YES, lineWeight: YES, dash: YES, size: YES, rotation: YES, label: YES, lock: YES },
-    actions: { properties: YES, copy: YES, duplicate: YES, lock: YES, arrangeEnds: YES, arrangeSteps: YES, crossBand: { open: "see building" }, delete: YES },
+    actions: { properties: YES, copy: YES, duplicate: YES, lock: YES, arrangeEnds: YES, arrangeSteps: YES, crossBand: YES, delete: YES },
   },
   {
     type: "pond", label: "Detention Pond", family: "el",
     props: { stroke: YES, fill: YES, lineWeight: YES, dash: YES, size: YES, rotation: YES, label: YES, lock: YES },
-    actions: { properties: YES, copy: YES, duplicate: YES, lock: YES, arrangeEnds: YES, arrangeSteps: YES, crossBand: { open: "see building" }, delete: YES },
+    actions: { properties: YES, copy: YES, duplicate: YES, lock: YES, arrangeEnds: YES, arrangeSteps: YES, crossBand: YES, delete: YES },
   },
 
   /* ---- MARKUPS (`kind: "markup"`) ----------------------------------------------------------
