@@ -93,6 +93,51 @@ const settingsPanel = {
  * account → Settings (`AuthPanel`), which is where a signed-in owner looks for it. A signed-out
  * user reaches it by signing in; the amber banner's "Free up space & retry" (B1428) works
  * regardless of route or session, so nothing is unreachable — only less convenient. */
+/* ⛔ IS THERE A DOCUMENT ON SCREEN THAT SOMEBODY COULD BE WRITING IN? (B291538.) The same
+ * `getClientRects()` probe the header uses for its own keep-alive gate, and for the same
+ * reason: workspaces are kept mounted-but-hidden, so a Notes editor left behind on another
+ * tab is in the DOM with no boxes at all. A surface with boxes is painted; a surface with
+ * none is not there. Anything editable — the note body, a Review markup field — makes the
+ * bare `f` fullscreen shortcut stand down, because in that place a letter is a letter. */
+function writeableDocumentOnScreen() {
+  if (typeof document === "undefined") return false;
+  for (const el of document.querySelectorAll('[contenteditable="true"], [contenteditable=""]')) {
+    if (el.getClientRects().length) return true;
+  }
+  return false;
+}
+
+/* NEW-3/B291538 — fullscreen's VISIBLE home. Before this it had no control at all: the only
+ * ways in were a bare `f` and folklore, which is what made the shortcut worth defending even
+ * as it swallowed the owner's typing. A button costs one 30×26 slot in the row-1 right zone
+ * and makes the mode discoverable, which is the half of the fix that is not a bug fix. */
+function FullscreenButton({ active, onToggle }) {
+  return (
+    <button
+      onClick={onToggle}
+      data-testid="toggle-fullscreen"
+      aria-pressed={active}
+      aria-label={active ? "Leave full screen" : "Full screen"}
+      /* ⛔ NOT the words "Exit fullscreen" — that is the floating exit button's title, and
+         e2e/module-keepalive.spec.js locates it by `getByTitle(/Exit fullscreen/i)`. Two matches
+         is a strict-mode failure, so this control says it a different way on purpose. */
+      title={active ? "Leave full screen (Ctrl/⌘+Shift+F)" : "Full screen (Ctrl/⌘+Shift+F)"}
+      style={{
+        display: "grid", placeItems: "center", width: 30, height: 26, borderRadius: 7,
+        border: `1px solid ${LINE}`, background: "var(--chrome-bg)", color: "var(--chrome-text)",
+        cursor: "pointer", flex: "none",
+      }}
+    >
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+        strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ display: "block" }}>
+        {active
+          ? <><path d="M9 3v6H3" /><path d="M15 3v6h6" /><path d="M9 21v-6H3" /><path d="M15 21v-6h6" /></>
+          : <><path d="M3 9V3h6" /><path d="M21 9V3h-6" /><path d="M3 15v6h6" /><path d="M21 15v6h-6" /></>}
+      </svg>
+    </button>
+  );
+}
+
 function SettingsMenu() {
   const [open, setOpen] = useState(false);
   const anchor = useRef(null);
@@ -462,6 +507,14 @@ export default function AppHeader({
   useEffect(() => {
     const handle = (e) => {
       const tag = e.target.tagName;
+      /* The modifier shortcut is checked BEFORE the typing-surface guard on purpose: it is the
+         one route to fullscreen that has to work while the caret is inside a note. */
+      if ((e.key === "F" || e.key === "f") && (e.ctrlKey || e.metaKey) && e.shiftKey) {
+        if (!headerOnScreen()) return;
+        e.preventDefault();
+        toggleRef.current();
+        return;
+      }
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || e.target.isContentEditable) return;
       // Keep-alive gate: with workspaces kept mounted-but-hidden, EVERY workspace's header has this
       // window listener. A hidden header (a `display:none` ancestor ⇒ no client rects) must ignore
@@ -471,7 +524,23 @@ export default function AppHeader({
       // now fixed for the whole fullscreen session, so the exception would have swallowed `f` (no
       // way back out) — `headerOnScreen()` needs no exception and is checked unconditionally.
       if (!headerOnScreen()) return;
-      if (e.key === "f" || e.key === "F") toggleRef.current();
+      /* ⛔ A BARE LETTER IS NEVER A GLOBAL COMMAND WHILE A WRITEABLE DOCUMENT IS ON SCREEN
+         (B291538). The owner's report was *"double-click on a blank part of the page, then
+         type — the view flips to fullscreen and the typed text goes nowhere"*, and he read it
+         as double-click being BOUND to fullscreen. AUDIT-FIRST: it is not, and never was —
+         nothing in this repo binds a double-click to fullscreen. What actually happens is
+         this line. `f` toggles fullscreen for any press whose target is not itself a typing
+         surface, so the instant a gesture leaves focus on <body> — and a press on inert
+         chrome does exactly that — the next letter he types is read as a command instead of
+         as a letter. Measured with a note open and focus on <body>: one bare `f` entered real
+         fullscreen and the keystroke was gone.
+         The gate is the presence of the document, not where focus happens to be: if there is
+         a live contenteditable surface painted on screen, the user is in a place where
+         letters mean letters. Fullscreen keeps two homes that no typing can reach — the
+         button in the row-1 right zone, and Ctrl/Cmd+Shift+F — so nothing became
+         unreachable. Where there is no document (the Site Planner canvas, the map) the bare
+         `f` is untouched, which is why ui-audit/verify-new1-fullscreen.mjs still passes. */
+      if ((e.key === "f" || e.key === "F") && !e.altKey && !writeableDocumentOnScreen()) toggleRef.current();
       // NEW-1 — do NOT fight Esc. In real fullscreen the browser consumes it and exits on its own;
       // `fullscreenchange` then restores the header. Acting here as well would be a second toggle
       // over the top of that. Esc only does the work in the chrome-hide fallback, where nothing
@@ -698,6 +767,9 @@ export default function AppHeader({
               "always green", and it renders a LOUD error state instead of silently vanishing. */}
           <CloudSyncBadge state={saveState} onRetry={onRetrySave} detail={saveDetail} />
           {saveSlot}
+          {/* NEW-3/B291538 — fullscreen's visible control. It has to exist here because the
+              bare `f` shortcut now stands down wherever a writeable document is on screen. */}
+          <FullscreenButton active={fullscreen} onToggle={() => toggleRef.current()} />
           {/* Theme gear — signed-out only; signed-in users switch theme in account → Settings (B389) */}
           {!accountActive && <SettingsMenu />}
           {authControl}

@@ -96,9 +96,16 @@ describe("deedAlign — grid convergence (no-parcel theoretical fallback)", () =
     expect(c).toBeLessThan(1.7);
   });
 
+  /* NEW-2 — the west-of-meridian probe moved from 101.5°W to 99.5°W. Both are west of the zone's
+   * 99°W central meridian, which is what this test is about, but 101.5°W sits OUTSIDE the Texas
+   * South Central envelope Planyr models (the Houston MSA and its reach) — and out there 2278 is
+   * genuinely the wrong zone, so the honest answer is now null rather than a number from a
+   * projection that does not govern. 99.5°W keeps the sign check inside the modelled area. */
   it("vanishes on the zone's central meridian (99°W) and flips sign west of it", () => {
     expect(Math.abs(gridConvergenceDeg(29.80, -99.0))).toBeLessThan(0.02);
-    expect(gridConvergenceDeg(29.80, -101.5)).toBeLessThan(0);
+    expect(gridConvergenceDeg(29.80, -99.5)).toBeLessThan(0);
+    // Outside every modelled zone → an honest unknown, never a wrong-zone number.
+    expect(gridConvergenceDeg(29.80, -101.5)).toBeNull();
   });
 
   it("sign is consistent with the projection: a true-north line reads −convergence in grid", () => {
@@ -109,9 +116,17 @@ describe("deedAlign — grid convergence (no-parcel theoretical fallback)", () =
     expect(Math.abs(gridAz + gridConvergenceDeg(lat, lon))).toBeLessThan(0.05);
   });
 
-  it("returns 0 for non-finite input rather than throwing", () => {
-    expect(gridConvergenceDeg(NaN, -95.8)).toBe(0);
-    expect(gridConvergenceDeg(29.8, undefined)).toBe(0);
+  /* NEW-2 — CONTRACT CHANGE, deliberate: an unusable input now answers NULL, not 0.
+   *
+   * 0 is a REAL answer here — "you are on the zone's central meridian, there is nothing to
+   * correct" — and this function's one caller ROTATES A SURVEYED BOUNDARY by what it returns. A
+   * sentinel that collides with a meaningful value cannot be told apart from it, and the caller's
+   * `Math.abs(conv) < 0.01` test read the sentinel as the meaningful value. Ground outside every
+   * modelled state-plane zone returns null for the same reason: refuse, never guess.
+   * The 0-on-the-meridian case is asserted just below, so the two stay distinguishable. */
+  it("returns an honest NULL for non-finite input rather than 0 or a throw", () => {
+    expect(gridConvergenceDeg(NaN, -95.8)).toBeNull();
+    expect(gridConvergenceDeg(29.8, undefined)).toBeNull();
   });
 });
 

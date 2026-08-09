@@ -4325,7 +4325,20 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // markup layer) so the patch AND the B921/NEW-2 no-op cue read the same list.
     let peers = null;
     if (s?.kind === "el") { const t = els.find((e) => e.id === s.id); if (!t) return; const band = zOrder(t); peers = els.filter((e) => zOrder(e) === band); }
-    else if (s?.kind === "markup") { peers = markups; }
+    /* NEW-2 — a markup reorders within ITS OWN BAND, not against every markup on the plan. The
+       markup layer renders in TWO passes split on `behindEls` (below), so a markup sent behind the
+       buildings can never paint above one that was not — yet the peer set here was the whole
+       `markups` array. That made both halves of Arrange lie on a mixed plan: `arrangeFlags` could
+       grey out "Bring to Front" on a markup that WAS at the front of everything it can reach, and
+       "Bring to Front" could hand out a z above a peer in the other band, which changes the number
+       and nothing on screen. Measurements already did this correctly; markups now match. */
+    else if (s?.kind === "markup") { const t = markups.find((m) => m.id === s.id); if (!t) return; peers = markups.filter((m) => (m.behindEls === true) === (t.behindEls === true)); }
+    /* NEW-2 — CALLOUTS AND TEXT BOXES JOIN THE STACKING MODEL. Until this they were the only drawn
+       object with no ordering at ALL: no `z`, no Arrange rows, no chord, and a render pass that
+       mapped the raw `callouts` array — so two overlapping text boxes could not be reordered by any
+       means the app offered. Same model as markups and measurements (explicit `z` + a `behindEls`
+       band), deliberately reused rather than reinvented. */
+    else if (s?.kind === "callout") { const t = callouts.find((c) => c.id === s.id); if (!t) return; peers = callouts.filter((c) => (c.behindEls === true) === (t.behindEls === true)); }
     // NEW-2 — a measurement reorders within the MEASUREMENT band, the same way a markup reorders
     // within the markup layer. `sel` for a measurement carries an index, not an id, so resolve the
     // id here; a legacy measurement saved without one simply has nothing to reorder against.
@@ -4337,13 +4350,66 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // via a keyboard chord that read as "nothing works." Flash a brief cue instead. Skip a lone
       // item (nothing to reorder) so we don't cry "already at back" when there's no stack at all.
       const af = arrangeFlags(peers, s.id);
-      if (af && af.count > 1) flashWarn(`Already at the ${(mode === "back" || mode === "backward") ? "back" : "front"}.`, 2500);
+      const front = !(mode === "back" || mode === "backward");
+      if (af && af.count > 1) flashWarn(`Already at the ${front ? "front" : "back"}.`, 2500);
+      /* NEW-2 — and the case that used to be pure silence, which is what "the ordering doesn't work
+         at all" actually looked like: the object is the only one in its band, so there is nothing
+         to reorder it against and the op is a no-op for a reason the user cannot see. Say it. */
+      else if (af) flashWarn(`Nothing to reorder — this is the only one on its layer${s.kind === "el" ? " (a site element always draws in its own type's layer)" : ""}.`, 3500);
       return;
     }
     pushHistory();
     if (s.kind === "el") setEls((a) => a.map((e) => (patch[e.id] != null ? { ...e, z: patch[e.id] } : e)));
     else if (s.kind === "measure") setMeasures((a) => a.map((m) => (m.id && patch[m.id] != null ? { ...m, z: patch[m.id] } : m)));
+    else if (s.kind === "callout") setCallouts((a) => a.map((c) => (patch[c.id] != null ? { ...c, z: patch[c.id] } : c)));
     else setMarkups((a) => a.map((m) => (patch[m.id] != null ? { ...m, z: patch[m.id] } : m)));
+  };
+  /* NEW-2 — the peer set an Arrange op would act on, for the CURRENT selection. The menus need it
+     to answer two different questions with one fact: is the object at an end of its stack (grey the
+     row), and — the case that read to the owner as "the feature doesn't work at all" — is it ALONE
+     in its band while the plan holds other objects? The Arrange group used to be hidden outright
+     whenever `count < 2`, so right-clicking the single pond on a real plan offered no ordering rows
+     at all and no reason why. Returns { count, index, atTop, atBottom, band } or null. */
+  const arrangePeers = (s) => {
+    if (s?.kind === "el") { const t = els.find((e) => e.id === s.id); if (!t) return null; const b = zOrder(t); return { peers: els.filter((e) => zOrder(e) === b), band: `${TYPE[t.type]?.label || t.type} layer` }; }
+    if (s?.kind === "markup") { const t = markups.find((m) => m.id === s.id); if (!t) return null; return { peers: markups.filter((m) => (m.behindEls === true) === (t.behindEls === true)), band: t.behindEls ? "markups behind the plan" : "markups" }; }
+    if (s?.kind === "callout") { const t = callouts.find((c) => c.id === s.id); if (!t) return null; return { peers: callouts.filter((c) => (c.behindEls === true) === (t.behindEls === true)), band: t.behindEls ? "notes behind the plan" : "notes" }; }
+    if (s?.kind === "measure") { const t = s.id ? measures.find((x) => x.id === s.id) : measures[s.i]; if (!t || !t.id) return null; return { peers: measures.filter((x) => x && x.id && (x.behindEls === true) === (t.behindEls === true)), band: t.behindEls ? "measurements behind the plan" : "measurements" }; }
+    return null;
+  };
+  /* NEW-2 — cross-band move for a CALLOUT / text box: "Send behind the plan" / "Bring above the
+     plan". The exact sibling of `setMeasureBand` and the markup menu's "Send behind buildings" —
+     annotations were the one drawn family with no way across the plan at all. Re-stacks on arrival
+     so it is never dropped underneath whatever was already in the band it lands in. */
+  const setCalloutBand = (id, behind) => {
+    pushHistory();
+    setCallouts((a) => {
+      const target = a.find((c) => c.id === id);
+      if (!target) return a;
+      const z = nextZ(a.filter((c) => c.id !== id && (c.behindEls === true) === !!behind));
+      return a.map((c) => (c.id === id ? { ...c, behindEls: behind ? true : undefined, z } : c));
+    });
+  };
+  /* NEW-1 — ONE Duplicate for every drawn family, built on the clipboard pair the app already has
+     (`collectClipboard` → `pasteClipboard`) rather than a fourth bespoke cloner. Before this only
+     ELEMENTS and references could be duplicated: a markup, a callout and a measurement each had a
+     Copy row and no Duplicate, for no reason anyone would defend — the drift the owner reported.
+     Offset by one grid step so the copy is visibly its own object, and it becomes the selection. */
+  const duplicateRef = (ref) => {
+    if (!ref) return;
+    const payload = collectClipboard([ref], stateRef.current);
+    if (!payload.items.length) return;
+    const off = settings.gridSize || 10;
+    const made = pasteClipboard(payload.items, { mint: uid, translate: clipTranslate(), dx: off, dy: off });
+    pushHistory();
+    if (made.els.length) setEls((a) => [...a, ...made.els]);
+    if (made.markups.length) setMarkups((a) => [...a, ...withStackZ(a, made.markups)]);
+    if (made.measures.length) setMeasures((a) => [...a, ...withStackZ(a, made.measures)]);
+    if (made.callouts.length) setCallouts((a) => [...a, ...withStackZ(a, made.callouts)]);
+    if (made.parcels.length) setParcels((a) => [...a, ...made.parcels]);
+    const refs = made.refs;
+    setMulti(refs.length > 1 ? refs : []);
+    setSel(refs[0] || null);
   };
   /* NEW-2 — cross-band move for a measurement: "Send behind the plan" / "Bring above the plan".
      Mirrors `setBehind` on the markup menu (and the reference's "Draw above/below the plan"), and
@@ -5203,7 +5269,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // ⌘/Ctrl+] = Bring Forward (⇧ = to Front), ⌘/Ctrl+[ = Send Backward (⇧ = to Back).
       if ((e.ctrlKey || e.metaKey) && (e.code === "BracketRight" || e.code === "BracketLeft")) {
         // NEW-2 — measurements are layerable objects now, so they answer the same chords.
-        if (sel?.kind === "el" || sel?.kind === "markup" || sel?.kind === "measure") {
+        if (sel?.kind === "el" || sel?.kind === "markup" || sel?.kind === "measure" || sel?.kind === "callout") {
           e.preventDefault();
           const fwd = e.code === "BracketRight";
           arrangeSel(e.shiftKey ? (fwd ? "front" : "back") : (fwd ? "forward" : "backward"));
@@ -6231,7 +6297,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     pushHistory();
     const c = { id: uid(), tip: calloutDraft.tip, box: fp, text: "" };
     setCalloutDraft(null);
-    setCallouts((a) => [...a, c]);
+    // NEW-2 — a new annotation stacks ON TOP of the ones already there, the same way a new markup
+    // or measurement does. Without a z it sorts as 0 and lands under everything drawn before it.
+    setCallouts((a) => [...a, { ...c, z: nextZ(a) }]);
     setSel({ kind: "callout", id: c.id });
     setTool("select");
     setEditCallout({ id: c.id, text: "", isNew: true });
@@ -6240,7 +6308,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const placeText = (fp) => {
     pushHistory();
     const c = { id: uid(), box: fp, noLeader: true, text: "" };
-    setCallouts((a) => [...a, c]);
+    setCallouts((a) => [...a, { ...c, z: nextZ(a) }]);   // NEW-2 — see placeCallout
     setSel({ kind: "callout", id: c.id });
     setTool("select");
     setEditCallout({ id: c.id, text: "", isNew: true });
@@ -6368,6 +6436,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   };
   const selMeasure = sel?.kind === "measure" ? measures[sel.i] : null; // NEW — the selected measurement (Properties inspector)
   const toggleMeasureLock = (id) => { pushHistory(); setMeasures((a) => a.map((x) => (x.id === id ? { ...x, locked: !x.locked } : x))); };
+  /* NEW-1 — the same toggle for a callout / text box. The RENDER and every gesture handler have
+     honoured `c.locked` from the start (select-only, no drag, no resize, no leader edit), but no
+     control anywhere in the app could set or clear it — so an annotation was the one drawn object
+     a user could not lock, and a legacy or pasted locked one could never be freed. */
+  const toggleCalloutLock = (id) => { pushHistory(); setCallouts((a) => a.map((c) => (c.id === id ? { ...c, locked: !c.locked } : c))); };
   const selMarkup = sel?.kind === "markup" ? markups.find((m) => m.id === sel.id) : null;
   const setSelMarkup = (patch) => { pushHistory(); setMarkups((a) => a.map((m) => m.id === selMarkup.id ? { ...m, ...patch } : m)); setMkStyle((s) => ({ ...s, ...patch })); };
   // Geometry patch (w/h/rot) — kept out of mkStyle so new shapes don't inherit a past size/angle.
@@ -15632,7 +15705,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (!origin) { flashWarn("No county parcel to align to. Add the parcel (＋ Add → Click a lot on the map), or rotate the deed by hand to match the aerial.", 8000); return; }
     const c = deedCentroid(main.pts);
     const [lat, lon] = feetToLatLng(c, origin.lat, origin.lon);
-    const conv = gridConvergenceDeg(lat, lon);
+    /* NEW-2 — the convergence is resolved in the SITE'S OWN state-plane zone (the plan's saved
+     * county wins; the point envelope is the fallback), never in Texas South Central. `null` is an
+     * honest unknown — ground outside every modelled zone — and is a DIFFERENT fact from a 0°
+     * answer on the central meridian, so it gets its own message and rotates nothing. */
+    const conv = gridConvergenceDeg(lat, lon, { state: siteStateId, county: restored?.county || null });
+    if (conv == null) { flashWarn("No county parcel to align to, and Planyr doesn't carry a State Plane zone for this location — so there is no grid rotation it can compute honestly. Rotate the deed by hand to match the aerial.", 9000); return; }
     if (Math.abs(conv) < 0.01) { flashWarn("No county parcel to align to, and this site sits on the State Plane meridian (no grid rotation to correct). Nudge the deed by hand if it needs it.", 8000); return; }
     pushHistory();
     setMarkups((a) => a.map((x) => memberIds.has(x.id)
@@ -18124,6 +18202,97 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     idx.sort((a, b) => byZAsc(a.m, b.m));
     return { below: idx.filter(({ m }) => m.behindEls === true), above: idx.filter(({ m }) => m.behindEls !== true) };
   }, [measures]);
+  /* NEW-2 — CALLOUTS AND TEXT BOXES JOIN THE STACKING MODEL, and this memo is where the owner's
+     "the layers / order feature doesn't work at all" was structurally true rather than merely
+     awkward. The callout pass rendered `callouts.map(...)` — the RAW state array — so an annotation
+     had no z, no band, and no ordering op could reach it: two overlapping text boxes were stuck in
+     whatever order they happened to be created in, permanently, with no menu row, no chord and no
+     panel control anywhere in the app to change it.
+     The model is the MEASUREMENT model, deliberately reused: an explicit `z` (lib/zOrder.js —
+     nextZ / Z_GAP / byZAsc, the same helpers elements, markups and measurements use) orders
+     annotations against each other, and a `behindEls` flag picks the band. Sorting reorders the DOM
+     only; `c.id` stays each callout's identity, so selection, editing and the leader handles are
+     untouched. DEFAULT PRESERVES TODAY'S APPEARANCE EXACTLY: `behindEls` is undefined on every
+     callout ever saved and only `=== true` sends one down, and byZAsc falls back to (0, id) so an
+     un-migrated set keeps a stable order rather than shuffling on load. */
+  const calloutBands = useMemo(() => {
+    const sorted = [...callouts].sort(byZAsc);
+    return { below: sorted.filter((c) => c.behindEls === true), above: sorted.filter((c) => c.behindEls !== true) };
+  }, [callouts]);
+  /* NEW-2 — one callout/text-box node, lifted out of the render body so annotations can be
+     drawn in TWO passes like markups and measurements: `calloutBands.below` paints BEFORE the
+     site elements ("send behind the plan"), `calloutBands.above` after. Body is unchanged —
+     only where it is called from moved. */
+  const renderCalloutNode = (c) => {
+                const bp = f2p(c.box);
+                const st = calloutStyle(c);
+                // B913 — one shared geometry helper (auto-size, OR wrap-to-c.boxW when the user has
+                // dragged a width handle). fontPx/lineH/padX/padY/lines/w/h all come from it, so the
+                // committed box, its handles, and the inline editor can't drift.
+                const { fontPx, lineH, padX, padY, w, h, lines } = calloutLayout(c, st, rppf);
+                const border = st.stroke; // B619: no recolor on select — the leader/box keep the callout's own color; blue chrome cues selection
+                const anchor = st.align === "left" ? "start" : st.align === "right" ? "end" : "middle";
+                const tx = st.align === "left" ? bp.x - w / 2 + padX : st.align === "right" ? bp.x + w / 2 - padX : bp.x;
+                const tips = calloutTips(c).map((p) => f2p(p));
+                const boxRect = { x: bp.x - w / 2, y: bp.y - h / 2, w, h };
+                const cr = calloutCornerRadius(w, h); // NEW-1 — zoom-invariant, low → rectangle at every zoom
+                const ah = Math.max(7, fontPx * 0.7);
+                return (
+                  <g key={c.id} data-testid={`callout-${c.id}`} data-feature={`callout:${c.id}`} data-callout-leaders={tips.length}>
+                    {/* N leaders — each anchored from its OWN nearest box edge/corner (not one shared
+                        box-centre anchor) via the shared nearestRectPerimeterPoint geometry helper. */}
+                    {tips.map((tp, i) => {
+                      const origin = nearestRectPerimeterPoint(boxRect, tp);
+                      const ang = Math.atan2(tp.y - origin.y, tp.x - origin.x);
+                      return (
+                        <g key={i} data-testid={`callout-leader-${c.id}-${i}`} onContextMenu={(e) => onCalloutContext(e, c.id, i)}
+                          onPointerDown={(e) => {
+                            // NEW-2 — a LEADER: single click SELECTS the callout; a double-click opens
+                            // Properties (never text edit). stopPropagation so the leader click doesn't fall
+                            // through to the canvas (which would deselect + start a pan and eat the dblclick);
+                            // the double-tap is reconstructed here (own gesture id) like the box path. A locked
+                            // callout stays select-only (B679); right-click still offers Add/Delete Leader.
+                            if (tool !== "select" || e.button !== 0) return;
+                            e.stopPropagation();
+                            setSel({ kind: "callout", id: c.id });
+                            if (isDoubleTap(e, `${c.id}:leader`, sel?.kind === "callout" && sel.id === c.id) && !c.locked) {
+                              openInspector();   // a leader has no text interior — always Properties (B948)
+                            }
+                          }}>
+                          <line x1={origin.x} y1={origin.y} x2={tp.x} y2={tp.y} stroke={border} strokeWidth={1.6} />
+                          <polygon points={`${tp.x},${tp.y} ${tp.x - ah * Math.cos(ang - 0.4)},${tp.y - ah * Math.sin(ang - 0.4)} ${tp.x - ah * Math.cos(ang + 0.4)},${tp.y - ah * Math.sin(ang + 0.4)}`} fill={border} />
+                          {/* a transparent, wider hit-stroke so a thin leader is still easy to right-click */}
+                          <line x1={origin.x} y1={origin.y} x2={tp.x} y2={tp.y} stroke="transparent" strokeWidth={10} data-export="skip" />
+                        </g>
+                      );
+                    })}
+                    {/* B680 — hide the committed box + text while its editor is open so the textarea is the
+                        ONLY box on screen (was drawing a second, offset box behind the editor overlay). */}
+                    {editCallout?.id !== c.id && <rect data-testid={`callout-box-${c.id}`} x={boxRect.x} y={boxRect.y} width={w} height={h} rx={cr} ry={cr}
+                      fill={st.fill} stroke={border} strokeWidth={1.4}
+                      pointerEvents="all" /* B142: select across the whole box even when the fill is none/transparent (was only the painted area / thin border) */
+                      style={{ cursor: tool === "select" ? "move" : "default" }}
+                      onPointerDown={(e) => startMoveCallout(e, c.id, "box")}
+                      onContextMenu={(e) => onCalloutContext(e, c.id, -1)}
+                      onDoubleClick={(e) => {
+                        // NEW-2 — raw-dispatch path only (a real double-click retargets to the root
+                        // `<svg>` and is resolved by onBgDouble — see onElDouble). Same decision either
+                        // way: the click LOCATION branches it (interior text → edit; border → Properties).
+                        e.stopPropagation();
+                        calloutDblAction(e, c.id);
+                      }} />}
+                    {editCallout?.id !== c.id && lines.map((ln, i) => (
+                      <text key={i} x={tx} y={bp.y - h / 2 + padY + fontPx * 0.82 + i * lineH} textAnchor={anchor}
+                        fontSize={fontPx} fill={st.color} textDecoration={st.underline ? "underline" : undefined}
+                        fontWeight={st.bold ? 700 : 500} fontStyle={st.italic ? "italic" : "normal"} pointerEvents="none">{ln}</text>
+                    ))}
+                    {/* NEW-1 — the callout's selection outline, its B913 width grips and the
+                        per-leader re-aim grips are no longer drawn here: they live in the
+                        always-on-top handle layer (calloutHandles), so a grip can never end up
+                        under a measurement, a label or a promoted reference. */}
+                  </g>
+                );
+  };
   const drawParcels = useMemo(() => cullToView(parcels, cullRect, { enabled: !!cullRect, keep: cullKeep }), [parcels, cullRect, cullKeep]);
   // B953/NEW-1 — clean-tee junction geometry (world feet), recomputed only when els/settings change;
   // rendered through f2p each frame. Drawn as an overlay after the element pass (see the render below).
@@ -19115,6 +19284,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               {/* markups sent BEHIND the buildings (B820 layer ordering) paint before the elements,
                   the rest after — both in z order. See renderMarkupNode / markupsZ above. */}
               {drawMarkupsZ.filter((m) => m.behindEls).map(renderMarkupNode)}
+              {/* NEW-2 — callouts / text boxes the user has sent BEHIND the plan. Same renderer,
+                  first pass, exactly like the markup and measurement bands above and below. */}
+              {calloutBands.below.map(renderCalloutNode)}
               {/* NEW-2 — measurements the user has sent BEHIND the plan. Same renderer, first pass:
                   under the buildings, so a measured area can sit as ground the layout is drawn on.
                   Empty on every plan that predates the feature (`behindEls` is opt-in), so this pass
@@ -19595,78 +19767,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   </g>
                 );
               })()}
-              {/* callouts & text boxes — sized in the drawing's frame (scale with
-                  zoom) so they don't balloon when you zoom out. */}
-              {callouts.map((c) => {
-                const bp = f2p(c.box);
-                const st = calloutStyle(c);
-                // B913 — one shared geometry helper (auto-size, OR wrap-to-c.boxW when the user has
-                // dragged a width handle). fontPx/lineH/padX/padY/lines/w/h all come from it, so the
-                // committed box, its handles, and the inline editor can't drift.
-                const { fontPx, lineH, padX, padY, w, h, lines } = calloutLayout(c, st, rppf);
-                const border = st.stroke; // B619: no recolor on select — the leader/box keep the callout's own color; blue chrome cues selection
-                const anchor = st.align === "left" ? "start" : st.align === "right" ? "end" : "middle";
-                const tx = st.align === "left" ? bp.x - w / 2 + padX : st.align === "right" ? bp.x + w / 2 - padX : bp.x;
-                const tips = calloutTips(c).map((p) => f2p(p));
-                const boxRect = { x: bp.x - w / 2, y: bp.y - h / 2, w, h };
-                const cr = calloutCornerRadius(w, h); // NEW-1 — zoom-invariant, low → rectangle at every zoom
-                const ah = Math.max(7, fontPx * 0.7);
-                return (
-                  <g key={c.id} data-testid={`callout-${c.id}`} data-feature={`callout:${c.id}`} data-callout-leaders={tips.length}>
-                    {/* N leaders — each anchored from its OWN nearest box edge/corner (not one shared
-                        box-centre anchor) via the shared nearestRectPerimeterPoint geometry helper. */}
-                    {tips.map((tp, i) => {
-                      const origin = nearestRectPerimeterPoint(boxRect, tp);
-                      const ang = Math.atan2(tp.y - origin.y, tp.x - origin.x);
-                      return (
-                        <g key={i} data-testid={`callout-leader-${c.id}-${i}`} onContextMenu={(e) => onCalloutContext(e, c.id, i)}
-                          onPointerDown={(e) => {
-                            // NEW-2 — a LEADER: single click SELECTS the callout; a double-click opens
-                            // Properties (never text edit). stopPropagation so the leader click doesn't fall
-                            // through to the canvas (which would deselect + start a pan and eat the dblclick);
-                            // the double-tap is reconstructed here (own gesture id) like the box path. A locked
-                            // callout stays select-only (B679); right-click still offers Add/Delete Leader.
-                            if (tool !== "select" || e.button !== 0) return;
-                            e.stopPropagation();
-                            setSel({ kind: "callout", id: c.id });
-                            if (isDoubleTap(e, `${c.id}:leader`, sel?.kind === "callout" && sel.id === c.id) && !c.locked) {
-                              openInspector();   // a leader has no text interior — always Properties (B948)
-                            }
-                          }}>
-                          <line x1={origin.x} y1={origin.y} x2={tp.x} y2={tp.y} stroke={border} strokeWidth={1.6} />
-                          <polygon points={`${tp.x},${tp.y} ${tp.x - ah * Math.cos(ang - 0.4)},${tp.y - ah * Math.sin(ang - 0.4)} ${tp.x - ah * Math.cos(ang + 0.4)},${tp.y - ah * Math.sin(ang + 0.4)}`} fill={border} />
-                          {/* a transparent, wider hit-stroke so a thin leader is still easy to right-click */}
-                          <line x1={origin.x} y1={origin.y} x2={tp.x} y2={tp.y} stroke="transparent" strokeWidth={10} data-export="skip" />
-                        </g>
-                      );
-                    })}
-                    {/* B680 — hide the committed box + text while its editor is open so the textarea is the
-                        ONLY box on screen (was drawing a second, offset box behind the editor overlay). */}
-                    {editCallout?.id !== c.id && <rect data-testid={`callout-box-${c.id}`} x={boxRect.x} y={boxRect.y} width={w} height={h} rx={cr} ry={cr}
-                      fill={st.fill} stroke={border} strokeWidth={1.4}
-                      pointerEvents="all" /* B142: select across the whole box even when the fill is none/transparent (was only the painted area / thin border) */
-                      style={{ cursor: tool === "select" ? "move" : "default" }}
-                      onPointerDown={(e) => startMoveCallout(e, c.id, "box")}
-                      onContextMenu={(e) => onCalloutContext(e, c.id, -1)}
-                      onDoubleClick={(e) => {
-                        // NEW-2 — raw-dispatch path only (a real double-click retargets to the root
-                        // `<svg>` and is resolved by onBgDouble — see onElDouble). Same decision either
-                        // way: the click LOCATION branches it (interior text → edit; border → Properties).
-                        e.stopPropagation();
-                        calloutDblAction(e, c.id);
-                      }} />}
-                    {editCallout?.id !== c.id && lines.map((ln, i) => (
-                      <text key={i} x={tx} y={bp.y - h / 2 + padY + fontPx * 0.82 + i * lineH} textAnchor={anchor}
-                        fontSize={fontPx} fill={st.color} textDecoration={st.underline ? "underline" : undefined}
-                        fontWeight={st.bold ? 700 : 500} fontStyle={st.italic ? "italic" : "normal"} pointerEvents="none">{ln}</text>
-                    ))}
-                    {/* NEW-1 — the callout's selection outline, its B913 width grips and the
-                        per-leader re-aim grips are no longer drawn here: they live in the
-                        always-on-top handle layer (calloutHandles), so a grip can never end up
-                        under a measurement, a label or a promoted reference. */}
-                  </g>
-                );
-              })}
+              {/* callouts & text boxes (ABOVE the plan) — sized in the drawing's frame
+                  (scale with zoom) so they don't balloon when you zoom out. */}
+              {calloutBands.above.map(renderCalloutNode)}
               {/* callout draft: tip placed, waiting for the box click */}
               {tool === "callout" && calloutDraft && (<>
                 {cursor && <line x1={f2p(calloutDraft.tip).x} y1={f2p(calloutDraft.tip).y} x2={f2p(cursor).x} y2={f2p(cursor).y} stroke={PAL.accent} strokeWidth={1.5} strokeDasharray="5 4" />}
@@ -21093,6 +21196,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 <Field label="Padding X / Y"><span style={{ display: "flex", gap: 5 }}><NumInput style={{ ...numInput, width: 42 }} value={cs.padX} min={0} step={1} coarse={4} onCommit={(n) => setSelCallout({ padX: n })} /> <NumInput style={{ ...numInput, width: 42 }} value={cs.padY} min={0} step={1} coarse={4} onCommit={(n) => setSelCallout({ padY: n })} /></span></Field>
                 <Field label="Line spacing"><NumInput style={numInput} value={cs.lineHeight} min={0.8} step={0.1} coarse={0.5} onCommit={(n) => setSelCallout({ lineHeight: n })} /></Field>
                 <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
+                  {/* NEW-1 — the markup and measurement inspectors both carry a Lock chip here; this
+                      one carried only Delete, so an annotation was the one drawn object with no lock
+                      control anywhere in the app despite the render honouring `locked` throughout. */}
+                  <button style={chip} onClick={() => toggleCalloutLock(selCallout.id)}>{selCallout.locked ? "🔒 Unlock" : "🔓 Lock"}</button>
                   <button style={{ ...chip, color: PAL.danger }} onClick={() => deleteSel(null, { entry: "panel:callout" })}>{selCallout.noLeader ? "Delete text box" : "Delete callout"}</button>
                 </div>
               </Section>
@@ -23724,6 +23831,37 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             <span>{text}</span>{hint && <span style={{ fontSize: 11, color: dis ? PAL.disabled : PAL.muted, fontWeight: 400 }}>{hint}</span>}
           </button>
         );
+        /* NEW-1/NEW-2 — ONE Arrange group, rendered identically for every family that has one.
+         * Before this each menu hand-rolled its own: the markup menu offered all four modes, the
+         * measurement menu offered TWO of them, and the callout menu offered none at all — the
+         * "same right menu options" drift the owner reported, in its purest form. Building the
+         * group once is what stops the fourth menu drifting away again.
+         *
+         * ⛔ AND IT NEVER RENDERS AS AN EMPTY SPACE. The old markup/measurement menus hid the whole
+         * group behind `count > 1`, so right-clicking the only object on its layer showed no
+         * ordering rows and no reason — which is what "the layers / order feature doesn't work at
+         * all" looked like from the outside. A lone object now gets the four rows GREYED with a
+         * plain-English hover reason, so the answer is visible instead of absent. */
+        const arrangeGroup = (ref, { hdr }) => {
+          const info = arrangePeers(ref);
+          if (!info) return null;
+          const af = arrangeFlags(info.peers, ref.id);
+          if (!af) return null;
+          const alone = af.count < 2;
+          const why = alone ? `This is the only one on the ${info.band} layer, so there is nothing to reorder it against.` : "";
+          const r = (text, mode, dis, hint) => row({
+            text, hint, dis: dis || alone, title: dis && !alone ? `Already at the ${(mode === "back" || mode === "backward") ? "back" : "front"}.` : why,
+            on: () => { arrangeSel(mode, ref); close(); },
+          });
+          return <>
+            {hdr}
+            {r("Bring to Front", "front", af.atTop, `${MOD}⇧]`)}
+            {r("Bring Forward", "forward", af.atTop, `${MOD}]`)}
+            {r("Send Backward", "backward", af.atBottom, `${MOD}[`)}
+            {r("Send to Back", "back", af.atBottom, `${MOD}⇧[`)}
+          </>;
+        };
+        const sep = <div style={{ borderTop: `1px solid ${PAL.panelLine}`, marginTop: 4, paddingTop: 4 }} />;
         let header = "", body = null;
         if (mapMenu.kind === "markup") {
           const m = markups.find((x) => x.id === mapMenu.id);
@@ -23734,24 +23872,22 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           const groupN = m.deedGroup ? markups.filter((x) => x.deedGroup === m.deedGroup).length : 1;
           header = isDeed ? "Deed (metes & bounds)" : m.kind === "easement" ? "Easement" : "Markup";
           const delText = isDeed ? `Delete deed${groupN > 1 ? " + exceptions" : ""}` : `Delete ${m.kind === "easement" ? "easement" : "markup"}`;
-          // B820 — Arrange (z-order) among the markups, plus "Send behind buildings" (a markup normally
-          // floats over the elements; this drops it — the whole deed group, if it's a deed — beneath them).
-          const af = arrangeFlags(markups, m.id);
+          // B820/NEW-1 — Arrange (z-order) among the markups IN THIS BAND (see arrangePeers), plus
+          // "Send behind buildings" (a markup normally floats over the elements; this drops it —
+          // the whole deed group, if it's a deed — beneath them).
           const setBehind = () => { pushHistory(); const nextBehind = !m.behindEls; const grp = m.deedGroup; setMarkups((a) => a.map((x) => (x.id === m.id || (grp && x.deedGroup === grp)) ? { ...x, behindEls: nextBehind } : x)); close(); };
           body = <>
             {isDeed && row({ text: hasParcel ? "Align to county parcel" : "Rotate to grid north", dis: !!m.locked, title: m.locked ? "Unlock this deed first" : "", on: () => { alignDeedToParcel(dm.id); close(); } })}
-            {row({ text: m.locked ? "Unlock" : "Lock", hint: m.locked ? "🔒" : "🔓", on: () => { toggleMarkupLock(m.id); close(); } })}
+            {/* NEW-1 — a markup reaches its inspector from its own menu, like a measurement always could. */}
+            {row({ text: "Properties\u2026", on: () => { setSel({ kind: "markup", id: m.id }); openInspector(); close(); } })}
+            {row({ text: m.locked ? "Unlock" : "Lock", hint: m.locked ? "\ud83d\udd12" : "\ud83d\udd13", on: () => { toggleMarkupLock(m.id); close(); } })}
             {/* NEW-6 — every drawn kind is copyable, and says so in its own menu. */}
             {row({ text: "Copy", hint: `${MOD}C`, on: () => { copyRef({ kind: "markup", id: m.id }); close(); } })}
-            <div style={{ borderTop: `1px solid ${PAL.panelLine}`, marginTop: 4, paddingTop: 4 }} />
-            {af && af.count > 1 && <>
-              {row({ text: "Bring to Front", hint: `${MOD}⇧]`, dis: af.atTop, on: () => { arrangeSel("front", { kind: "markup", id: m.id }); close(); } })}
-              {row({ text: "Bring Forward", hint: `${MOD}]`, dis: af.atTop, on: () => { arrangeSel("forward", { kind: "markup", id: m.id }); close(); } })}
-              {row({ text: "Send Backward", hint: `${MOD}[`, dis: af.atBottom, on: () => { arrangeSel("backward", { kind: "markup", id: m.id }); close(); } })}
-              {row({ text: "Send to Back", hint: `${MOD}⇧[`, dis: af.atBottom, on: () => { arrangeSel("back", { kind: "markup", id: m.id }); close(); } })}
-            </>}
+            {/* NEW-1 — and every drawn kind is DUPLICABLE. Only elements and references had this. */}
+            {row({ text: "Duplicate", hint: `${MOD}D`, on: () => { duplicateRef({ kind: "markup", id: m.id }); close(); } })}
+            {arrangeGroup({ kind: "markup", id: m.id }, { hdr: sep })}
             {row({ text: m.behindEls ? "Bring in front of buildings" : "Send behind buildings", on: setBehind })}
-            <div style={{ borderTop: `1px solid ${PAL.panelLine}`, marginTop: 4, paddingTop: 4 }} />
+            {sep}
             {row({ text: delText, hint: "Del", danger: true, on: () => { deleteMarkupById(m.id); } })}
           </>;
         } else if (mapMenu.kind === "measure") {
@@ -23759,24 +23895,20 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           const m = measures[mapMenu.i];
           if (!m) return null;
           header = "Measurement";
-          // NEW-2 — Arrange, in the SAME wording the markup and reference menus already use, because
-          // a measurement is now a layerable object like any other. Front/back move it within the
-          // measurement band; the last row crosses the plan.
-          const mBand = measures.filter((x) => x && x.id && (x.behindEls === true) === (m.behindEls === true));
-          const maf = m.id ? arrangeFlags(mBand, m.id) : null;
+          /* NEW-1 — Arrange, from the ONE shared group. This menu used to render TWO of the four
+             modes (front/back, and in different wording: "Bring to front" against the markup
+             menu's "Bring to Front"), which is the drift in miniature — same concept, same
+             keyboard chords already wired, half the rows and a different capitalisation. */
           body = <>
             {row({ text: "Properties…", on: () => { setSel({ kind: "measure", i: mapMenu.i }); openInspector(); close(); } })}
-            {m.id && <div style={{ borderTop: `1px solid ${PAL.panelLine}`, marginTop: 4, paddingTop: 4 }} />}
-            {m.id && maf && maf.count > 1 && <>
-              {row({ text: "Bring to front", hint: `${MOD}⇧]`, dis: maf.atTop, on: () => { arrangeSel("front", { kind: "measure", id: m.id }); close(); } })}
-              {row({ text: "Send to back", hint: `${MOD}⇧[`, dis: maf.atBottom, on: () => { arrangeSel("back", { kind: "measure", id: m.id }); close(); } })}
-            </>}
+            {m.id && arrangeGroup({ kind: "measure", id: m.id }, { hdr: sep })}
             {m.id && row({ text: m.behindEls ? "Bring above the plan" : "Send behind the plan",
               title: m.behindEls ? "Draw this measurement over the buildings again" : "Draw this measurement under the buildings, so the plan sits on top of it",
               on: () => { setMeasureBand(m.id, !m.behindEls); close(); } })}
             <div style={{ borderTop: `1px solid ${PAL.panelLine}`, marginTop: 4, paddingTop: 4 }} />
             {row({ text: m.locked ? "Unlock" : "Lock", hint: m.locked ? "🔒" : "🔓", on: () => { toggleMeasureLock(m.id); close(); } })}
             {row({ text: "Copy", hint: `${MOD}C`, on: () => { copyRef({ kind: "measure", id: m.id, i: mapMenu.i }); close(); } })}
+            {row({ text: "Duplicate", hint: `${MOD}D`, on: () => { duplicateRef({ kind: "measure", id: m.id, i: mapMenu.i }); close(); } })}
             <div style={{ borderTop: `1px solid ${PAL.panelLine}`, marginTop: 4, paddingTop: 4 }} />
             {row({ text: "Delete measurement", hint: "Del", danger: true, on: () => { deleteSel({ kind: "measure", i: mapMenu.i }, { entry: "menu:measure" }); close(); } })}
           </>;
@@ -23785,10 +23917,22 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           const c = callouts.find((x) => x.id === mapMenu.id);
           if (!c) return null;
           header = c.noLeader ? "Text box" : "Callout";
+          /* NEW-1/NEW-2 — THE MENU THE AUDIT FOUND EMPTIEST. An annotation had Add Leader, Copy and
+             Delete and nothing else: no Properties row, no Lock (while the code has honoured
+             `c.locked` all along, with no way to set or clear it), no Duplicate, and — the
+             structural one — no ordering of any kind, because callouts were rendered from the raw
+             state array. All four are the same drift, closed together. */
           body = <>
-            {row({ text: "Add Leader", on: () => { setAddLeaderFor(c.id); flashWarn("Add Leader: click where the new leader should point — Esc to cancel.", 0); close(); } })}
-            {mapMenu.leaderIndex >= 0 && row({ text: "Delete Leader", danger: true, on: () => { removeLeaderFromCallout(c.id, mapMenu.leaderIndex); close(); } })}
+            {row({ text: "Properties…", on: () => { setSel({ kind: "callout", id: c.id }); openInspector(); close(); } })}
+            {row({ text: "Add Leader", dis: !!c.locked, title: c.locked ? "Unlock this note first" : "", on: () => { setAddLeaderFor(c.id); flashWarn("Add Leader: click where the new leader should point — Esc to cancel.", 0); close(); } })}
+            {mapMenu.leaderIndex >= 0 && row({ text: "Delete Leader", danger: true, dis: !!c.locked, on: () => { removeLeaderFromCallout(c.id, mapMenu.leaderIndex); close(); } })}
+            {row({ text: c.locked ? "Unlock" : "Lock", hint: c.locked ? "\ud83d\udd12" : "\ud83d\udd13", on: () => { toggleCalloutLock(c.id); close(); } })}
             {row({ text: "Copy", hint: `${MOD}C`, on: () => { copyRef({ kind: "callout", id: c.id }); close(); } })}
+            {row({ text: "Duplicate", hint: `${MOD}D`, on: () => { duplicateRef({ kind: "callout", id: c.id }); close(); } })}
+            {arrangeGroup({ kind: "callout", id: c.id }, { hdr: sep })}
+            {row({ text: c.behindEls ? "Bring above the plan" : "Send behind the plan",
+              title: c.behindEls ? "Draw this note over the buildings again" : "Draw this note under the buildings, so the plan sits on top of it",
+              on: () => { setCalloutBand(c.id, !c.behindEls); close(); } })}
             <div style={{ borderTop: `1px solid ${PAL.panelLine}`, marginTop: 4, paddingTop: 4 }} />
             {row({ text: c.noLeader ? "Delete text box" : "Delete callout", hint: "Del", danger: true, on: () => { deleteSel({ kind: "callout", id: c.id }, { entry: "menu:callout" }); close(); } })}
           </>;
@@ -23825,8 +23969,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               const band = zOrder(t);
               const af = arrangeFlags(els.filter((e) => zOrder(e) === band), t.id);
               const MOD = (typeof navigator !== "undefined" && /Mac|iPhone|iPad|iPod/.test(navigator.platform || navigator.userAgent || "")) ? "⌘" : "Ctrl+";
+              // NEW-2 — a greyed row says WHY it is greyed. A disabled control with no explanation is
+              // indistinguishable from a broken one, which is how this feature was read.
+              const aloneInBand = !af || af.count < 2;
+              const arrWhy = aloneInBand
+                ? `This is the only ${TYPE[t.type]?.label?.toLowerCase() || t.type} on the plan, so there is nothing to reorder it against. Site elements always draw in their own type's layer — a building over paving, paving over a road.`
+                : "";
               const arrRow = (text, mode, dis, hint) => (
-                <button disabled={dis} style={{ ...menuItem(false), ...(dis ? { color: PAL.disabled } : {}), cursor: dis ? "default" : "pointer", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}
+                <button disabled={dis} title={dis ? (arrWhy || `Already at the ${(mode === "back" || mode === "backward") ? "back" : "front"}.`) : ""}
+                  style={{ ...menuItem(false), ...(dis ? { color: PAL.disabled } : {}), cursor: dis ? "default" : "pointer", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}
                   onClick={dis ? undefined : () => { arrangeSel(mode, { kind: "el", id: t.id }); setTypeMenu(null); }}>
                   <span>{text}</span><span style={{ fontSize: 11, color: dis ? PAL.disabled : PAL.muted, fontWeight: 400 }}>{hint}</span>
                 </button>
@@ -23875,13 +24026,22 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       {t.groupId && <button style={menuItem(false)} onClick={() => { ungroupGroup(t.groupId); setTypeMenu(null); }}>⊟ Ungroup</button>}
                     </>
                   )}
-                  {af && af.count > 1 && (
+                  {/* NEW-2 — the Arrange group NEVER VANISHES. It used to be hidden outright when the
+                      element was alone in its type-layer band (`af.count > 1`), which on a real plan
+                      is most elements — one pond, one paving pad, one truck court — so right-clicking
+                      them offered no ordering rows at all and no reason why. That silence is what the
+                      owner's "the layers / order feature doesn't work at all" actually looked like.
+                      The rows are now always present, greyed with a plain-English reason when the op
+                      cannot move anything. (Whether an element should be allowed to cross its type
+                      layer at all — paving OVER a building — is a drawing-convention decision parked
+                      for the owner on the capability table, deliberately not decided here.) */}
+                  {af && (
                     <>
                       <div style={hdr(true)}>Arrange</div>
-                      {arrRow("Bring to Front", "front", af.atTop, `${MOD}⇧]`)}
-                      {arrRow("Bring Forward", "forward", af.atTop, `${MOD}]`)}
-                      {arrRow("Send Backward", "backward", af.atBottom, `${MOD}[`)}
-                      {arrRow("Send to Back", "back", af.atBottom, `${MOD}⇧[`)}
+                      {arrRow("Bring to Front", "front", af.atTop || af.count < 2, `${MOD}⇧]`)}
+                      {arrRow("Bring Forward", "forward", af.atTop || af.count < 2, `${MOD}]`)}
+                      {arrRow("Send Backward", "backward", af.atBottom || af.count < 2, `${MOD}[`)}
+                      {arrRow("Send to Back", "back", af.atBottom || af.count < 2, `${MOD}⇧[`)}
                     </>
                   )}
                   {/* B875 — pond discoverability: the right-click menu carries the pond-specific
@@ -23916,8 +24076,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     </>
                   )}
                   <div style={hdr(true)}>Edit</div>
+                  {/* NEW-1 — an element could not reach its own inspector from its own menu, and could
+                      not be COPIED from it, while every other family offered both. Both were reachable
+                      by other means (double-click, Ctrl+C), which is exactly why the gap was invisible. */}
+                  <button style={menuItem(false)} onClick={() => { setSel({ kind: "el", id: typeMenu.id }); openInspector(); setTypeMenu(null); }}>Properties…</button>
+                  <button style={menuItem(false)} onClick={() => { copyRef({ kind: "el", id: typeMenu.id }); setTypeMenu(null); }}>Copy</button>
                   <button style={menuItem(false)} onClick={() => { duplicateEl(typeMenu.id); setTypeMenu(null); }}>Duplicate</button>
-                  <button style={menuItem(!!t.locked)} onClick={() => { toggleLock(typeMenu.id); setTypeMenu(null); }}>{t.locked ? "Unpin" : "Pin"}</button>
+                  {/* NEW-1 — ONE NAME PER CONCEPT. This said "Pin"/"Unpin" while the markup, measurement,
+                      callout and reference menus all said "Lock"/"Unlock" for the identical `locked`
+                      field. A user cannot be expected to know those are one idea. */}
+                  <button style={menuItem(!!t.locked)} onClick={() => { toggleLock(typeMenu.id); setTypeMenu(null); }}>{t.locked ? "Unlock" : "Lock"}</button>
                   {!t.points && <button style={menuItem(false)} onClick={() => { setSel({ kind: "el", id: typeMenu.id }); setAlignFor(typeMenu.id); setTypeMenu(null); }}>Align rotation…</button>}
                   {t.attachedTo
                     ? <button style={menuItem(false)} onClick={() => { detach(typeMenu.id); setTypeMenu(null); }}>Detach</button>
@@ -27131,10 +27299,37 @@ function YieldPanel({
                         <b>Two floodplain rules on this site</b> — {drainage.administrator.splitDetail?.inCity != null && drainage.administrator.splitDetail?.tested != null
                           ? `${drainage.administrator.splitDetail.inCity} of ${drainage.administrator.splitDetail.tested} drawn lots sit inside the City of ${drainage.administrator.splitDetail.city} and the rest do not`
                           : `part of the site is inside the City of ${drainage.administrator.splitDetail?.city} and part is not`}, so one finished-floor figure cannot be right for both. Confirm which parcels each rule covers before setting pads.
-                        {drainage.administrator.governingLabel ? ` Shown: ${drainage.administrator.governingLabel}${drainage.administrator.governingRuleText ? ` (${drainage.administrator.governingRuleText})` : ""}.` : ""}
+                        {/* PANEL-BREVITY rule 5 — state it once. When the unmodelled line below is
+                            also showing it already names the governing authority and its rule, so
+                            repeating it here printed the same fact twice on the owner's own site. */}
+                        {drainage.administrator.governingLabel && !drainage.administrator.unmodelledCandidates?.length
+                          ? ` Shown: ${drainage.administrator.governingLabel}${drainage.administrator.governingRuleText ? ` (${drainage.administrator.governingRuleText})` : ""}.` : ""}
                       </div>
                     )}
-                    {v.key === "ffe" && drainage.administrator && !drainage.administrator.unresolved && !drainage.administrator.split && drainage.administrator.governingLabel && (
+                    {/* ⛔ NEW-1d — THIS RENDERS ALONGSIDE A SPLIT, NOT INSTEAD OF ONE. It was gated
+                        on `!split`, and Goose Creek — the site the whole item was built for — is
+                        BOTH split and unmodelled, so the "no rule for Baytown" fact never reached
+                        the screen on the one plan that needed it. Split and unmodelled are
+                        independent facts about different things (how many authorities, versus
+                        whether we hold their rules); wiring them mutually exclusive hid one.
+
+                        AND IT NAMES THE DEFAULT. An unsettled FFE must never read as "no
+                        requirement" — while the missing ordinance is unanswered the app falls back
+                        to the authority it DOES have, so that authority, its rule and its elevation
+                        are stated outright rather than alluded to as "the authorities we do
+                        have". */}
+                    {v.key === "ffe" && drainage.administrator && !drainage.administrator.unresolved
+                      && drainage.administrator.unmodelledCandidates?.length > 0 && (
+                      <div data-testid="yield-ffe-unmodelled" style={{ fontSize: 10.5, color: "var(--warn-text)", lineHeight: 1.45, marginTop: 2, whiteSpace: "normal" }}
+                        title={drainage.administrator.unmodelledNote || ""}>
+                        <b>No rule on file for {drainage.administrator.unmodelledCandidates.map((u) => u.label).join(" and ")}</b> — {drainage.administrator.unmodelledCandidates.length === 1 ? "it administers" : "they administer"} part of this site.
+                        {drainage.administrator.governingLabel
+                          ? ` Using ${drainage.administrator.governingLabel}${drainage.administrator.governingRuleText ? ` (${drainage.administrator.governingRuleText})` : ""} meanwhile${Number.isFinite(v.provisionalFfeFt) ? `, so pads screen at ${f1(v.provisionalFfeFt)}′` : ""} — a floor, not the final answer.`
+                          : ""}
+                      </div>
+                    )}
+                    {v.key === "ffe" && drainage.administrator && !drainage.administrator.unresolved && !drainage.administrator.split
+                      && !drainage.administrator.unmodelledCandidates?.length && drainage.administrator.governingLabel && (
                       <div data-testid="yield-ffe-administrator" style={{ fontSize: 10.5, color: drainage.administrator.ambiguous ? "var(--warn-text)" : Y.muted, lineHeight: 1.45, marginTop: 2, whiteSpace: "normal" }}
                         title={`${drainage.administrator.selectionReason} Candidates: ${drainage.administrator.candidates.map((c) => c.label).join(" · ")}. ${drainage.administrator.governingSource || ""}`}>
                         Rule applied: <b>{drainage.administrator.governingLabel}</b>

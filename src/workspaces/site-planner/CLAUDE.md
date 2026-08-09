@@ -230,6 +230,26 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   "complies" — two modules contradicting each other about one statute on one screen is the failure it
   prevents. **B1129:** the regime falls back to the plan's SAVED county when GIS is down (identified
   county still wins) — the guard must hold with every endpoint dead, which is when defaults bite.
+  **⛔ B290240–B290250 (the 2026-08-09 missing-data audit) — WHAT THE APP SAYS ON A COLORADO SITE
+  WHEN IT DOES NOT KNOW, MEASURED ON THE REAL SCREEN. Read this before citing the Colorado tier as
+  working.** The detention guard is SOUND and was the hypothesis most expected to fail: the owner's
+  Weld site renders `N/A · Detention: Colorado detention — not carried yet` and a Denver site
+  `N/A · Detention: MHFD WQCV + EURV — not carried yet` — never a zero, never a blank. **What is NOT
+  sound is everything around it.** (1) **`capabilityFor()` HAS NO PRODUCTION CALL SITE** (B290245) —
+  the `CAPABILITIES` table describes an intent, seven of its eight declared gaps render nothing, and
+  detention is guarded independently inside `computeRequiredDetention`. Never cite a `wired:false`
+  row as evidence a surface degrades honestly. (2) **`CO_STATE_FLOOD_STANDARD` (the CWCB 1-ft
+  freeboard floor) is applied to nothing** (B290246); the record used to claim otherwise and B290244
+  corrected the words. A Colorado pad reads `Rule applied: Generic / unknown` and can sit BELOW the
+  statutory floor. (3) **`deriveZoning` asserted Texas law in every state** (B290240, FIXED) — the
+  worst finding here, because it is a false ENTITLEMENT answer, not a wrong number. (4) The C.R.S.
+  37-92-602(8) gate answered on a zero volume (B290243, FIXED). (5) Colorado water law — prior
+  appropriation, a permanent pool needing a decree or an augmentation plan — appears on **no** surface
+  (B290248), while the pond inspector happily offers `Permanent pool elev. (ft)`. Instruments, both
+  ui-audit harnesses: **audit-colorado-missing-data** (every county through every Colorado module)
+  and **audit-colorado-surfaces** (the real planner's rendered text on the owner's ground); the
+  shipped fixes are guarded by the repo-root `test/` suite **coloradoAudit** and the ui-audit harness
+  **verify-colorado-deed-north**, both mutation-proven.
   **B1127, the trap to remember:** `yieldVerdicts.detentionVerdict` had NO branch for
   `kind:"unavailable"`, so it fell to `loadingRow` and every Colorado site read "Detention: checking
   flood data" forever while 26 unit tests and the bundle harness passed. **A new `kind` with no render
@@ -763,9 +783,30 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   gated on it.
 - `zOrder.js` — per-element `z` stacking key utilities (`nextZ`/`sortByZ`/`normalizeZ`/`ensureZ`, B671).
   `arrange.js` — pure z-order "Arrange" (`reorderByZ`/`arrangeFlags`, B820): Bring-to-Front/Send-to-Back
-  over a peer set (a building reorders within its `Z_LAYER` band, a markup within the markup layer;
-  a markup can also be sent behind the elements). Wired via `arrangeSel` + the right-click menus + the
-  ⌘/Ctrl+]/[ chords in `SitePlanner.jsx`.
+  over a peer set. Wired via `arrangeSel` + `arrangePeers` + the right-click menus + the ⌘/Ctrl+]/[
+  chords in `SitePlanner.jsx`.
+  **⛔ NEW-1/NEW-2 — FOUR FAMILIES ORDER, AND THEY ORDER THE SAME WAY. Read this before touching a
+  context menu or the callout render.** The owner's *"the layers / order feature doesn't work at all"*
+  was three separate holes, none of which a state read could see: **(a) CALLOUTS AND TEXT BOXES WERE
+  OUTSIDE THE MODEL ENTIRELY** — rendered from the raw `callouts` array, so they had no `z`, no band,
+  no menu rows and no chord, and two overlapping text boxes could not be reordered by any means the
+  app offered. They now use the measurement model verbatim (`calloutBands` + `behindEls` + `setCalloutBand`),
+  and a plan saved with no `z` still orders correctly because `byZAsc` falls back to (0, id).
+  **(b) THE ARRANGE GROUP VANISHED when the object was alone in its band** (`af.count > 1`), which on a
+  real plan is most elements — one pond, one paving pad — so right-clicking them offered no ordering
+  rows and no reason. The rows are now always present, GREYED with a stated reason; `arrangeSel` flashes
+  the same reason for the chord. **(c) THE MARKUP PEER SET WAS THE WHOLE `markups` ARRAY** while the
+  render splits on `behindEls`, so the flags could grey a markup that was at the front of everything it
+  could reach. `arrangePeers` is now the ONE peer-set resolver for all four families — never re-derive one.
+  The three menus that share a shape build their rows from ONE `arrangeGroup` helper; the element menu
+  keeps its own `arrRow` (different menu component, different header style) and is asserted separately.
+  **Whether an ELEMENT may cross its type-layer band at all** (paving over a building) is a
+  drawing-convention decision parked for the owner as an `{ open: … }` cell on the capability table —
+  deliberately not decided in code. Guards: the repo-root `e2e/` declaration table **elementCapabilities.table** (a new
+  selectable type cannot ship without answering every capability), the repo-root `test/` suite
+  **elementCapabilities** (proven red four ways on the pre-fix source) and the ui-audit harness
+  **audit-element-parity** (right-clicks one of every kind on a deliberately OVERLAPPING fixture and
+  reads paint order from the DOM — a tidy fixture reports PASS on a dead implementation).
 - **⛔ `labelLayout.js` also holds the GEOMETRY level-of-detail tier (B1345) — read it before "tidying"
   a stall band back into N `<line>`s.** Every other tier here gates a LABEL; this one is the only one
   that touches drawn geometry, and it is a change of REPRESENTATION, never decimation: below
