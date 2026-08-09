@@ -84,13 +84,10 @@ const page = await ctx.newPage();
    probe included; see ui-audit/lib/tabTiming.mjs. */
 await assertMeasurable(page, "diagnose-layer-gate-flash");
 
-const demRequests = [];
-const zoomNow = async () => page.evaluate(() => {
-  const m = window.__geoMap;
-  try { return m ? m.getZoom() : null; } catch (_) { return null; }
-}).catch(() => null);
-
-let demRequestsActive = demRequests;
+/* The DEM grid pulls for the pass currently being watched. Reassigned per pass rather than
+ * cleared in place, so a request that lands between two passes is never attributed to the wrong
+ * one — the timestamps are relative to each pass's own t0. */
+let demRequestsActive = [];
 page.on("request", (r) => {
   const u = r.url();
   // `exportImage` is the terrain pipeline's DEM grid pull — the one the z16 gate governs.
