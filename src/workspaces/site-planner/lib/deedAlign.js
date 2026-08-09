@@ -28,7 +28,11 @@
  * very measurements the deed exists to carry. (Contrast fitToBoundary.js, which solves a
  * full SIMILARITY incl. scale, for landing a scanned drawing whose plot size is unknown.)
  */
-import { projectToGrid, gridToProject } from "../../../shared/coordinates/index.js";
+/* NEW-2 — the MULTI-ZONE engine, for the convergence only. `solveDeedAlignment` (the empirical
+ * fit) reads the two outlines and needs no projection at all, so nothing else here moves. This
+ * module is reached only through `deedLazy.js`, so the zone registry rides the deed chunk and
+ * never the boot path. */
+import { resolveZone, projectToZone, zoneToProject } from "../../../shared/coordinates/statePlane.js";
 
 // residual / characteristic-size ratio at or below which a fit is called "confident".
 export const CONFIDENT_FRAC = 0.02; // 2%
@@ -166,16 +170,37 @@ export function solveDeedAlignment(deedRing, parcelRing, opts = {}) {
   };
 }
 
-/* Grid-north-vs-true-north convergence at a site, in degrees, from the shared EPSG:2278
- * projection. POSITIVE = State Plane grid north lies EAST of true north (the Houston/Katy
- * case, ~+1.5°). Because metesAndBounds plots a grid azimuth β as if it were the true
- * azimuth, and trueAzimuth = gridAzimuth + convergence, rotating the whole deed by
- * +convergence (a clockwise-on-screen turn) brings a grid-referenced description onto the
- * true-north plan. Returns 0 for non-finite input. */
-export function gridConvergenceDeg(lat, lon) {
-  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return 0;
-  const p = projectToGrid(lat, lon);
-  const up = gridToProject({ x: p.x, y: p.y + 1000 }); // a point 1000 ft due GRID-north
+/* Grid-north-vs-true-north convergence at a site, in degrees. POSITIVE = State Plane grid north
+ * lies EAST of true north (the Houston/Katy case, ~+1.5°). Because metesAndBounds plots a grid
+ * azimuth β as if it were the true azimuth, and trueAzimuth = gridAzimuth + convergence, rotating
+ * the whole deed by +convergence (a clockwise-on-screen turn) brings a grid-referenced description
+ * onto the true-north plan.
+ *
+ * ⛔ NEW-2 — THE CONVERGENCE MUST COME FROM THE SITE'S OWN STATE-PLANE ZONE, and until now it came
+ * from Texas South Central (EPSG:2278) at every point on earth. Convergence is γ = n·(λ − λ₀), so
+ * it is a function of the ZONE's cone constant and central meridian — the two things that change
+ * when you leave the zone. Measured on the owner's Johnstown, Colorado ground: the Texas cone
+ * answers **−2.885°** where Colorado North (EPSG:2231) answers **+0.378°**. That 3.26° error
+ * rotates a plotted deed **75 ft off across a 1,320-ft boundary run** — and the app states it as a
+ * confident, named number in a toast ("rotated 2.89° counter-clockwise for the State Plane grid
+ * convergence here"), which is exactly the shape of wrong this codebase exists to prevent. Every
+ * Colorado county measures the same way: Denver −2.923 vs +0.320, Fort Collins −2.967 vs +0.270,
+ * Colorado Springs −2.713 vs +0.590.
+ *
+ * `resolveZone` answers county-first (Colorado's zone boundaries ARE county lines) and falls back
+ * to the coarse point envelopes; a Texas point resolves to `tx_sc`, whose Lambert engine reproduces
+ * `./index.js` bit-for-bit, so Texas is unchanged BY CONSTRUCTION (asserted in test/deedAlign).
+ *
+ * Returns **null** — an honest unknown, never 0 — for non-finite input and for ground outside every
+ * modelled zone. 0 is not a safe stand-in here: it is a real answer meaning "you are on the central
+ * meridian, there is nothing to correct", and the caller must be able to tell the two apart before
+ * it rotates a surveyed boundary. */
+export function gridConvergenceDeg(lat, lon, { state = null, county = null } = {}) {
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+  const zone = resolveZone({ state, county, lat, lon });
+  if (!zone) return null;                      // no modelled zone here — refuse, never guess
+  const p = projectToZone(zone, lat, lon);
+  const up = zoneToProject(zone, { x: p.x, y: p.y + 1000 }); // a point 1000 ft due GRID-north
   const dLat = up.lat - lat;
   const dLon = (up.lon - lon) * Math.cos((lat * Math.PI) / 180); // east component, in degrees
   return (Math.atan2(dLon, dLat) * 180) / Math.PI; // angle of grid-north east of true north
