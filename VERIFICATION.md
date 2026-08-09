@@ -113,6 +113,62 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V85616 — B287056: on the next deploy, does a `chunk-recovery` row actually appear — and does it say `recovered`? `Blocker: real-data`
+
+**⛔ THIS IS THE ONLY CHECK THAT MATTERS AND IT NEEDS A REAL DEPLOY.** Every branch of the guard is unit-tested (`test/chunkRecovery.test.js`, 21) and the sandbox has no deploy at all, so nothing here can fire `landed` or `recovered` — those two require an open tab, a new build replacing its chunks, and a navigation. The item exists because **361 production rows recorded no outcome**; a shipped recorder that turns out to write nothing would be the same defect with a nicer comment.
+
+- **RUN IT AFTER THE NEXT PRODUCTION DEPLOY** (any merge to `main` publishes). Ideally leave a planyr.io tab open on a Site route BEFORE the deploy lands, then switch workspaces (Library / Review / Schedule) once it has — that is the exact gesture that pulls a not-yet-loaded chunk.
+- One read-only query against `planyr_production`:
+  ```sql
+  select at, build, module, message
+  from public.client_errors
+  where source = 'event:chunk-recovery'
+  order by at desc limit 50;
+  ```
+- **PASS** = at least one row whose message JSON carries an `"o"` naming a branch, and — if a rescue happened — the PAIR `{"o":"landed",…}` followed within ~15 s by `{"o":"recovered",…}` from the same `[tab …]` id. **FAIL** = a deploy day with `vite:preloadError` rows and NO `event:chunk-recovery` rows beside them; that means the recorder is not running and the item is not done.
+- **ALSO CHECK THE LADDER HELD.** If a storm recurs, `f` must climb (1, 2, 3, 5, 10, 25…) across a HANDFUL of rows, not one row per failure. A `chunk-recovery` row count that tracks the `preloadError` count 1:1 means the ladder is bypassed and the instrument has become the noise.
+- **THE QUESTION THIS FINALLY ANSWERS, in one query** — of N episodes, how many reached `recovered`. Until it returns rows, the "37 of 54 episodes went quiet, consistent with a rescue" reading on B287056 stays an INFERENCE and must be reported as one.
+- **⛔ READ-ONLY. Do NOT delete, truncate or modify any row in `public.client_errors` — it is the owner's data.**
+- The **owner never runs this** — Claude-cohort check. ⏳ **PENDING**
+
+### V85617 — B287057: do the new `rt` / `ph` / `ltxp` fields arrive on the owner's own rows, and what do they say the ly=0 lane is? `Blocker: real-data`
+
+**The fields are unit-tested (`test/perfInstrument.test.js`, 42) and worth nothing until they ride real rows from his machine** — the instrument enrols a quarter of page loads and sends at most six rows on one of them, so this needs his ordinary use, not a harness. Automated runs are suppressed from production by design (B270912), which is why no sandbox run can produce these.
+
+- **RUN IT ~3 DAYS AFTER THE DEPLOY.** Read-only against `planyr_production`:
+  ```sql
+  select module,
+         (regexp_match(message,'"rt":"([^"]+)"'))[1]  as lane,
+         (regexp_match(message,'"ltxp":"([a-z]+)"'))[1] as worst_block_phase,
+         count(*) n,
+         max((regexp_match(message,'"ltx":([0-9.]+)'))[1]::numeric) max_ltx
+  from public.client_errors
+  where source = 'event:perf' and user_agent not ilike '%Headless%'
+  group by 1,2,3 order by max_ltx desc nulls last;
+  ```
+- **PASS** = rows carrying `rt` and `ph`, and at least one row carrying `ltxp`/`ltxr`/`ltxt`. **FAIL** = new rows still shaped like the old ones (the enrolment gate or the deploy did not take).
+- **THE FINDING TO CONFIRM OR REFUTE.** The pre-ship read said the worst blocks are the **Scheduler mounting** — `scheduler`, k=longtask, mean `t` ≈ 3 s since load, mean worst block **2,268 ms**, max **7,837 ms** — against `site-planner` boot at 320 ms and his working canvas at 407 ms. **PASS on the finding = `ltxp` reads `mount` (or `pre`) with `ltxr` = `p/schedule` on the largest `ltx` values.** If `ltxp` comes back `idle` on those rows the finding is REFUTED and no boot/mount work should be written against it — which is exactly why this attribution shipped before any fix.
+- **⛔ NO FIX MAY BE WRITTEN AGAINST ly=0 UNTIL THIS PASSES.** The owner's instruction was explicit: three mechanisms have already been refuted in this programme for being named before an instrument could see them.
+- **⛔ READ-ONLY. Do NOT delete, truncate or modify any row in `public.client_errors`.**
+- The **owner never runs this** — Claude-cohort check. ⏳ **PENDING**
+
+### V85618 — B287060: does the terrain retry storm stop? `Blocker: real-data`
+
+**Timing/race class — the backoff is deterministic and unit-tested (`test/terrainLazyBackoff.test.js`, 9), but the storm only exists when a chunk is genuinely dead on a real tab.**
+
+- **RUN IT ON THE NEXT DEPLOY DAY**, same read as V85616's, comparing the `vite:preloadError` shape:
+  ```sql
+  select build, regexp_replace(message,'.*/assets/','') chunk, count(*) n,
+         min(at) t0, max(at) t1, max(at)-min(at) span
+  from public.client_errors
+  where source = 'vite:preloadError' and at > '2026-08-09'
+  group by 1,2 having count(*) > 2 order by n desc;
+  ```
+- **PASS** = no episode with a `span` measured in HOURS. The reference failure is build `53d1bac` / `terrainLayers-aE2wQGtV.js` at **2 h 20 m and 81 rows**; after the backoff, an equivalent dead chunk should produce a span bounded by the ladder (attempts thinning to one a minute) rather than one attempt per mouse movement. **FAIL** = another multi-hour, ~10-s-cadence run of identical rows.
+- **ALSO CONFIRM NOTHING REGRESSED FOR A BLIP.** Signed in on a real plan, hover the map and check the ground-elevation readout still resolves normally — the backoff is a DELAY, never a cap, so a transient failure must still recover within a minute.
+- **⛔ READ-ONLY. Do NOT delete, truncate or modify any row in `public.client_errors`.**
+- The **owner never runs this** — Claude-cohort check. ⏳ **PENDING**
+
 ### V78961 — B280402: the acreage badge no longer takes press 2, on his stub, on the repeat `Blocker: real-data` + `Blocker: auth`
 
 **The cause is DIAGNOSED FROM HIS OWN INSTRUMENT READ and REPRODUCED here, so this is a confirmation, not a hunt.** The parcel badge is a hit target while the cursor RESTS on it (a hover gate, B1327/NEW-4, so it can be dragged); resting is what a cursor does between the two presses of a double-click. It is now identity-transparent — it keeps its drag, but the resolver looks through it.
