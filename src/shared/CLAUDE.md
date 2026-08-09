@@ -120,6 +120,23 @@ into every consumer. Root rules in `/CLAUDE.md`; deep detail in `/docs/REFERENCE
   `test/` suites **capturePipe**, **perfRecorder**, **perfInstrument**, **clientErrors**, plus the
   ui-audit harness **verify-capture-pipe** (`npm run perf:capturepipe`), whose `rejected` arm is the
   anti-rot one — before B265536 it was un-failable.
+  **⛔ THIRD: THE TABLE HAS RETENTION NOW, AND ITS RUN LOG IS NOT OPTIONAL DECORATION (B270913).**
+  `client_errors_retention.sql` is the applied policy — **90 days** for an ordinary row, **365 days**
+  for a perf capture whose `kind` is `"manual"` (the owner pressing "that felt slow just now" is the
+  rarest and highest-value row in the table). Both numbers are chosen so the policy **deletes nothing
+  today**: 0 of ~5,300 rows are older than 90 days. Which is exactly the trap — a job that silently
+  never runs looks identical to one that correctly had nothing to delete, for months. So every run
+  writes a row to `public.client_errors_retention_runs` **including a run that deleted nothing** (a
+  0/0 row is an EMPTY report; no row at all is an ABSENT one), and
+  `public.client_errors_retention_status` names which you have: `never-run` · `stale` · `ok`. **Do
+  not "simplify" the insert behind an `if deleted > 0`** — that single change re-creates the entire
+  failure mode. Two things to know if you touch the predicate: the manual classifier reads the
+  encoder's literal output (`"kind":"manual"` in a `source='event:perfcap'` message) by REGEX rather
+  than a `::jsonb` cast, because a cast raises and one malformed row would abort the whole nightly
+  delete; and `prune_client_errors` is SECURITY **INVOKER** with EXECUTE revoked from
+  `public`/`anon`/`authenticated`, because a definer-rights delete function is a hole. Guard: the
+  repo-root `test/` suite **clientErrorsRetention**, which runs the SHIPPED `.sql` files verbatim
+  against a real Postgres (PGlite, devDependency only) and mutation-checks both clauses.
 - `projects/`, `profile/`, `cloud/`, `presence/`, `gis/`, `geometry/`, `placement/`.
 
 **Convention:** shared logic is pure and unit-tested; per-host state/wiring stays in the workspace.

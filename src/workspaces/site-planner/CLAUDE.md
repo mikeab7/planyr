@@ -755,7 +755,11 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   drives a real wheel gesture, captures the frame MID-gesture, and fails unless the clean run is
   green AND both deliberate mutants go red). The owner-facing A/B is **zoom-smoothness-ab**
   (`npm run perf:zoomab`), which records the same gesture with the anchor on and off.
-  `Plan ▾ → Smooth zoom` is the off switch; it gates the ZOOM anchor only — the pan anchor is never
+  **The on-canvas `View ▾` menu → Smooth zoom** is the off switch (`components/ViewMenu.jsx`; moved
+  there from the plan menu by **B286000** — a per-device rendering preference does not belong in a
+  plan-scoped flyout, and the owner could not find it there. Same `smoothZoom` localStorage key,
+  same default, same `disarmViewAnchor()` on turn-off; `SitePlanner`'s `applySmoothZoom` is the one
+  place that decides, so the card renders state and owns no copy of the rule). It gates the ZOOM anchor only — the pan anchor is never
   gated on it.
 - `zOrder.js` — per-element `z` stacking key utilities (`nextZ`/`sortByZ`/`normalizeZ`/`ensureZ`, B671).
   `arrange.js` — pure z-order "Arrange" (`reorderByZ`/`arrangeFlags`, B820): Bring-to-Front/Send-to-Back
