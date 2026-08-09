@@ -580,6 +580,197 @@ console.log("\n9 · The things that already worked still work");
   await tb("notes-search").fill("");
 }
 
+/* ════ 10. ⛔ AN OVERLAY OWNS THE KEYBOARD, OR IT WRITES INTO THE NOTE (B298753 ×2) ════════
+ *
+ * THE REPORT THIS SECTION EXISTS FOR, because it reached a real note. Ctrl+K opened the
+ * palette over the editor; the owner typed `Quadvest`; the list never filtered and the word
+ * was written into his real, previously-empty Entitlements note.
+ *
+ * ⛔ AND §3 ABOVE WAS GREEN THROUGHOUT — because it waits for the panel before it types.
+ * That wait is exactly what a person does not do, and it is what made a data-writing bug
+ * look like a passing feature. So every row below asserts BOTH halves, always: the list
+ * filtered to the expected note AND the underlying document is byte-for-byte unchanged. A
+ * check that asserted only "the panel opened" would have passed on the shipped build.
+ */
+console.log("\n10 · The palette owns the keyboard (B298753 ×2)");
+{
+  await newPage("Quadvest water");
+  const target = await newPage("Entitlements");
+  await caretInDoc();
+  await settle();
+  const before = JSON.stringify(await readBody(target));
+
+  /* HIS GESTURE, EXACTLY: the chord, then typing, with no wait for the panel in between.
+   *
+   * ⛔ AND A MEASURED ADMISSION, BECAUSE IT DECIDES WHICH ROW ACTUALLY HAS TEETH. On a WARM
+   * cache this timing race does not reproduce here at all: against the broken build these
+   * rows stayed green at 55 ms between keystrokes AND at full speed, because Playwright's
+   * key dispatch is slower than a React commit once the chunk is already downloaded. So the
+   * rows below assert the PROPERTY and are worth having, but they are not the ones that
+   * catch the regression. The two that are, are the deterministic focus row immediately
+   * after this block — which reproduces the owner's symptom exactly, by putting focus back
+   * where he had it — and §11, which makes the gap a real network round trip. */
+  await page.keyboard.press("Control+k");
+  await page.keyboard.type("Quadvest", { delay: 0 });
+  await page.waitForTimeout(700);
+
+  ok("⛔ THE LIST FILTERED TO THE NOTE HE MEANT",
+    (await page.locator('[data-testid^="notes-quick-open-hit-"]').allInnerTexts()).join("|") === "Quadvest water",
+    (await page.locator('[data-testid^="notes-quick-open-hit-"]').allInnerTexts()).join("|"));
+  ok("…every character reached the field, including the first",
+    (await tb("notes-quick-open-input").inputValue()) === "Quadvest",
+    await tb("notes-quick-open-input").inputValue());
+
+  await settle();
+  ok("⛔ AND THE DOCUMENT BEHIND IT IS BYTE-FOR-BYTE UNCHANGED",
+    JSON.stringify(await readBody(target)) === before, `${before} → ${JSON.stringify(await readBody(target))}`);
+
+  /* ⛔ THE DETERMINISTIC ONE, AND IT IS THE OWNER'S SYMPTOM WITH THE RACE TAKEN OUT.
+   *
+   * His report was not "a character leaked" — it was that the palette never took the
+   * keyboard at all and the whole word went into the note. Rather than try to lose a race on
+   * purpose, put focus back exactly where he had it, with the palette open, and type. A
+   * build whose safety depends on focus fails this every time; a build that swallows at the
+   * window does not care where focus is, which is the property being claimed. */
+  await page.evaluate(() => { document.querySelector('[data-testid="note-body"]')?.focus(); });
+  await page.waitForTimeout(120);
+  const beforeStolen = JSON.stringify(await readBody(target));
+  await page.keyboard.type(" water", { delay: 20 });
+  await settle();
+  ok("⛔ WITH FOCUS PUT BACK IN THE NOTE, TYPING STILL DOES NOT REACH IT",
+    JSON.stringify(await readBody(target)) === beforeStolen,
+    `${beforeStolen} → ${JSON.stringify(await readBody(target))}`);
+  ok("…it went to the palette instead, which is where the person was looking",
+    (await tb("notes-quick-open-input").inputValue()) === "Quadvest water",
+    await tb("notes-quick-open-input").inputValue());
+  await page.keyboard.press("Backspace");
+  await page.keyboard.press("Backspace");
+  await page.keyboard.press("Backspace");
+  await page.keyboard.press("Backspace");
+  await page.keyboard.press("Backspace");
+  await page.keyboard.press("Backspace");
+  await page.waitForTimeout(200);
+
+  /* Escape closes it and gives the caret back — otherwise focus is nowhere and the next
+     keystroke lands on the page rather than in the note. */
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(300);
+  ok("Escape closes the palette", await tb("notes-quick-open").count() === 0);
+  await page.keyboard.type("back in the note", { delay: 8 });
+  await settle();
+  ok("…and typing goes back to the NOTE, where the caret was",
+    textOf(await readBody(target)).includes("back in the note"), textOf(await readBody(target)));
+  ok("…and the word he typed at the palette is still nowhere in the note",
+    !textOf(await readBody(target)).includes("Quadvest"), textOf(await readBody(target)));
+
+  /* ⛔ ENTER STILL OPENS THE HIT, typed straight through with no wait. */
+  await page.keyboard.press("Control+k");
+  await page.keyboard.type("Quadvest", { delay: 0 });
+  await page.waitForTimeout(500);
+  await page.keyboard.press("Enter");
+  await page.waitForTimeout(600);
+  ok("Enter opens the note the list was showing", (await tb("note-title").inputValue()) === "Quadvest water",
+    await tb("note-title").inputValue());
+}
+
+/* ════ 11. THE COLD CASE — the palette's chunk still downloading ══════════════════════ */
+console.log("\n11 · The palette is late and the keyboard is still safe (B298753 ×2)");
+{
+  /* ⛔ THIS IS THE CONDITION HE ACTUALLY HIT AND THE ONE A WARM SANDBOX CANNOT REACH: the
+   * FIRST Ctrl+K on a freshly-deployed build downloads the palette's lazy chunk, so the gap
+   * between "open" and "on screen" is a network round trip rather than a React commit. A
+   * fresh browser context is the only honest way to get an unwarmed cache; the route delays
+   * the chunk so the gap is wide enough to type a whole word into. */
+  const coldCtx = await browser.newContext({ viewport: { width: 1500, height: 950 }, ignoreHTTPSErrors: true });
+  const cold = await coldCtx.newPage();
+  await cold.route(/QuickOpen-.*\.js$/, async (route) => {
+    await new Promise((r) => setTimeout(r, 900));
+    await route.continue();
+  });
+  await cold.goto(`${BASE}#/notes`, { waitUntil: "domcontentloaded" });
+  await cold.evaluate(() => { localStorage.clear(); });
+  await cold.reload({ waitUntil: "domcontentloaded" });
+  await cold.waitForSelector('[data-testid="notes-tree"]', { timeout: 20000 });
+
+  for (const t of ["Quadvest water", "Entitlements"]) {
+    await cold.locator('[data-testid="notes-new-page"]').click();
+    await cold.waitForTimeout(350);
+    await cold.locator('[data-testid="note-title"]').fill(t);
+    await cold.waitForTimeout(600);
+  }
+  const coldAt = await cold.evaluate(() => {
+    const b = document.querySelector('[data-testid="note-body"]');
+    const r = (b.lastElementChild || b).getBoundingClientRect();
+    return { x: r.right - 2, y: r.top + 8 };
+  });
+  await cold.mouse.click(coldAt.x, coldAt.y);
+  await cold.waitForTimeout(400);
+
+  const coldId = await cold.evaluate(() => {
+    const t = JSON.parse(localStorage.getItem("planyr:notes:tree:v1:local") || "null");
+    const title = document.querySelector('[data-testid="note-title"]').value;
+    const hit = [];
+    const go = (n) => { if (n.title === title) hit.push(n.id); (n.pages || []).forEach(go); };
+    (t?.pages || []).forEach(go);
+    return hit[0];
+  });
+  const readCold = () => cold.evaluate((k) => localStorage.getItem(k), PAGE_PREFIX + coldId);
+  const coldBefore = await readCold();
+
+  await cold.keyboard.press("Control+k");
+  await cold.keyboard.type("Quadvest", { delay: 55 });   // the whole word lands inside the gap
+  await cold.waitForTimeout(2000);
+
+  ok("⛔ WITH THE PANEL STILL DOWNLOADING, THE DOCUMENT IS STILL UNTOUCHED",
+    (await readCold()) === coldBefore, `${coldBefore} → ${await readCold()}`);
+  ok("…and when it arrives it is already filtered by what was typed at it",
+    (await cold.locator('[data-testid^="notes-quick-open-hit-"]').allInnerTexts()).join("|") === "Quadvest water",
+    (await cold.locator('[data-testid^="notes-quick-open-hit-"]').allInnerTexts()).join("|"));
+  ok("…with every character, none swallowed by the wait",
+    (await cold.locator('[data-testid="notes-quick-open-input"]').inputValue()) === "Quadvest",
+    await cold.locator('[data-testid="notes-quick-open-input"]').inputValue());
+
+  await coldCtx.close();
+}
+
+/* ════ 12. THE SAME CLASS ON THE OTHER TWO OVERLAYS ══════════════════════════════════ */
+console.log("\n12 · Every other surface that accepts keystrokes (B298753 ×2)");
+{
+  const id = await newPage("Other overlays");
+  await caretInDoc();
+
+  /* THE SLASH MENU IS THE DELIBERATE OPPOSITE, and it is worth stating rather than assuming:
+   * its keystrokes are SUPPOSED to reach the document, because the `/h2` you type IS the
+   * filter and is removed when a command runs. What must NOT reach the document is the
+   * navigation — an arrow or an Escape must never arrive as a character. */
+  await page.keyboard.type("/head", { delay: 25 });
+  await page.waitForTimeout(150);
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("ArrowUp");
+  await page.keyboard.press("Escape");
+  await settle();
+  const afterSlash = textOf(await readBody(id));
+  ok("the slash menu's arrows and Escape never arrive as text", afterSlash.trim() === "/head", JSON.stringify(afterSlash));
+
+  /* THE HISTORY PANEL IS A SIDE PANE, NOT AN OVERLAY — it never takes focus, so typing while
+   * it is open must keep going to the note. A pane that quietly ate keystrokes would be the
+   * mirror image of the palette bug and just as invisible. */
+  await page.keyboard.press("Control+a");
+  await page.keyboard.press("Backspace");
+  await settle();
+  await tb("nt-history").click();
+  await page.waitForSelector('[data-testid="note-history"]', { timeout: 5000 });
+  await caretInDoc();
+  await page.keyboard.type("typed with history open", { delay: 8 });
+  await settle();
+  ok("the history pane does not eat keystrokes — they go to the note",
+    textOf(await readBody(id)).includes("typed with history open"), textOf(await readBody(id)));
+  await tb("note-history-close").click();
+  await page.waitForTimeout(200);
+  ok("…and closing it changes nothing in the document",
+    textOf(await readBody(id)).includes("typed with history open"));
+}
+
 /* ---- report -------------------------------------------------------------------------- */
 ok("no uncaught page errors", pageErrors.length === 0, pageErrors.slice(0, 3).join(" | "));
 

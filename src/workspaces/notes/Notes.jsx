@@ -515,25 +515,104 @@ export default function Notes({
    *
    * The listener is on the WINDOW because the whole point is reaching it from inside the
    * document, and it is gated on `isActive` — workspaces here are kept mounted-but-hidden,
-   * so an ungated window key would fire from a module nobody is looking at. */
+   * so an ungated window key would fire from a module nobody is looking at.
+   *
+   * ═══ ⛔ THE PALETTE CLAIMS THE KEYBOARD AT THE CHORD, NOT WHEN IT MOUNTS (B298753 ×2) ═══════
+   *
+   * THE DEFECT THIS SHAPE EXISTS FOR, because it reached a real note. As first shipped, the
+   * chord only set state and the PANEL claimed the keyboard by focusing its own field in a
+   * mount effect. Between those two moments — a React commit, and on the FIRST use the
+   * download of the palette's lazy chunk — nothing was claiming anything, and the editor
+   * still had focus. Every character typed in that window went into the NOTE. On a warm
+   * cache that is one character; on a cold one it is the whole word, and the palette then
+   * appears showing an unfiltered list, which is exactly what the owner saw: `Quadvest`
+   * written into a real, previously-empty Entitlements note, and a list that never filtered.
+   *
+   * ⛔ SO THE GATE IS HERE, IN THE MODULE THAT IS ALREADY LOADED, AND IT ARMS ON THE SAME
+   * KEYPRESS THAT OPENS THE PALETTE. There is no window to miss, and — this is the part that
+   * matters — the fix does NOT depend on focus landing anywhere. Whatever is focused, while
+   * `quickOpen` is true every key that is not aimed at the palette is swallowed before it can
+   * reach the document.
+   *
+   * ⛔ AND SWALLOWED KEYS ARE NOT LOST — THEY ARE BUFFERED INTO THE QUERY. Eating the
+   * keystrokes would fix the data loss and leave the feature feeling broken (you type a name
+   * and nothing happens). Buffering puts each character where the person meant it to go, so
+   * typing straight through the chord filters the list even if the panel has not painted yet.
+   *
+   * WHY NOT "JUST FOCUS IT SOONER". Focus is a race with a lazy chunk, a React commit and
+   * anything else that may take focus back; a correctness property must not be a race. The
+   * panel still focuses its field on mount — that is what makes the caret blink in the right
+   * place — but nothing depends on it, which is the whole point. */
   const [quickOpen, setQuickOpen] = useState(false);
   const [quickQuery, setQuickQuery] = useState("");
+  /* ⛔ THE REF IS AUTHORITATIVE FOR THE KEY GATE and is never mirrored from state during
+   * render — a `ref.current = quickOpen` line here would overwrite the synchronous flip the
+   * keydown handler just made, on the very next render, and put the gap straight back. It is
+   * set in exactly two places: the chord (true) and `closeQuickOpen` (false). */
+  const quickOpenRef = useRef(false);
 
+  /** The ONE way the palette closes, so the ref and the state can never disagree — a ref
+   *  left true would swallow every keystroke in the note, which is a worse bug than the one
+   *  this is fixing. */
+  const closeQuickOpen = useCallback(() => {
+    quickOpenRef.current = false;
+    setQuickOpen(false);
+  }, []);
+
+  /** ⛔ ONE LISTENER, AND THE OPEN/SWALLOW DECISION IS A **REF**, NOT STATE (B298753 ×2).
+   *
+   *  Splitting this in two — a chord listener, plus a swallow listener armed by
+   *  `quickOpen` — leaves a gap exactly one React commit wide, and Playwright types the
+   *  first character into it: the palette is open as far as the app is concerned, and
+   *  nothing is claiming the keyboard yet. Measured on the fixed-but-split version, that
+   *  gap ate the `Q` of `Quadvest` — the document was safe, but the letter was gone, which
+   *  is a quieter version of the same bug.
+   *
+   *  With one handler the ref flips SYNCHRONOUSLY, inside the very event that opens the
+   *  palette, so the next keydown already sees an open palette. There is no gap to lose a
+   *  character in, and nothing about this depends on a render having happened. */
   useEffect(() => {
     if (!isActive) return undefined;
+    const inPalette = (t) => t instanceof Element && !!t.closest('[data-testid="notes-quick-open"]');
+
     const onKey = (e) => {
-      if (!isQuickOpenChord(e)) return;
+      if (!quickOpenRef.current) {
+        if (!isQuickOpenChord(e)) return;
+        e.preventDefault();
+        e.stopPropagation();
+        quickOpenRef.current = true;                   // synchronous — this is the whole fix
+        setQuickQuery("");
+        setQuickOpen(true);
+        return;
+      }
+
+      // ---- the palette is open ----
+      if (inPalette(e.target)) return;                 // its field, and its own arrows/Enter
+      if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); closeQuickOpen(); return; }
+      // A modifier chord is somebody else's command — including Ctrl+K again. Swallow it
+      // rather than let it act on a document the user is not looking at, but never treat it
+      // as typed text.
+      if (e.ctrlKey || e.metaKey || e.altKey) { e.preventDefault(); e.stopPropagation(); return; }
       e.preventDefault();
       e.stopPropagation();
-      setQuickQuery("");
-      setQuickOpen(true);
+      if (e.key === "Backspace") { setQuickQuery((q) => q.slice(0, -1)); return; }
+      // `key.length === 1` is the honest test for "a character was typed": it admits letters,
+      // digits, punctuation and space, and excludes every named key (Enter, ArrowUp, Tab…).
+      if (e.key.length === 1) setQuickQuery((q) => q + e.key);
+      /* …and hand focus over as soon as there is something to hand it to. This is the
+       * SELF-HEALING half: if focus never landed for any reason, the first swallowed key
+       * puts it right, so Enter and the arrows — which this gate deliberately does not
+       * re-implement — work natively from the second key onward. */
+      document.querySelector('[data-testid="notes-quick-open-input"]')?.focus();
     };
+
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isActive]);
 
   // Leaving the workspace must not leave a palette floating over whatever replaced it.
-  useEffect(() => { if (!isActive) setQuickOpen(false); }, [isActive]);
+  useEffect(() => { if (!isActive) closeQuickOpen(); }, [isActive, closeQuickOpen]);
 
   const quickResults = useMemo(() => {
     if (!quickOpen) return [];
@@ -891,9 +970,9 @@ export default function Notes({
             query={quickQuery}
             results={quickResults}
             onQuery={setQuickQuery}
-            onClose={() => setQuickOpen(false)}
+            onClose={closeQuickOpen}
             onPick={(hit) => {
-              setQuickOpen(false);
+              closeQuickOpen();
               setActivePageId(hit.pageId);
               setQuery("");
               // A BODY hit carries the phrase into the page, exactly as the rail's own

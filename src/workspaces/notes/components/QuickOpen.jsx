@@ -40,9 +40,29 @@ export default function QuickOpen({ open, results = [], query, onQuery, onPick, 
    * and `.select()` selected the text back — making each character replace the last. The
    * field ended up holding one letter and the list answering a query nobody typed. */
   useEffect(() => {
-    if (!open) return;
-    inputRef.current?.focus();
-    inputRef.current?.select();
+    if (!open) return undefined;
+    /* ⛔ WHERE THE CARET WAS, REMEMBERED BEFORE IT IS TAKEN (B298753 ×2). Closing the palette
+     * must put you back where you were typing — otherwise Escape leaves focus nowhere and
+     * the next keystroke goes to the page instead of the note. Restored on unmount, which
+     * is when the palette closes (the caller renders it conditionally). */
+    const opener = document.activeElement;
+    /* ⛔ FOCUS, NEVER `select()` (B298753 ×2). The palette always opens with an EMPTY query, so
+     * selecting had nothing to select — except in the one case that matters: a character
+     * typed in the instant before the panel painted is buffered into the query by the gate
+     * in Notes.jsx, and `select()` then highlighted it so the NEXT keystroke replaced it.
+     * Measured: typing `Quadvest` straight through the chord left the field reading
+     * `uadvest`. The caret goes to the END instead, which is what continuing to type means. */
+    const el = inputRef.current;
+    if (el) {
+      el.focus();
+      const end = el.value.length;
+      try { el.setSelectionRange(end, end); } catch (_) { /* not all inputs allow it */ }
+    }
+    return () => {
+      if (opener instanceof HTMLElement && document.contains(opener)) {
+        try { opener.focus(); } catch (_) { /* an element that went away needs no focus */ }
+      }
+    };
   }, [open]);
 
   useEffect(() => {
