@@ -2111,8 +2111,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
      live view — one full render, deliberately, rather than an ever-more-wrong picture. Leaflet's
      own basemap path below re-bases on exactly this principle at ~0.75 zoom levels.
 
-     Behind `smoothZoom` (Plan ▾ → Smooth zoom), so it can be turned off without a deploy. Off, the
-     zoom anchor never arms and the pan anchor behaves exactly as B1440 shipped it. */
+     Behind `smoothZoom` (the on-canvas View ▾ menu → Smooth zoom — moved there from the plan menu
+     by B286000, same localStorage key and same default), so it can be turned off without a deploy.
+     Off, the zoom anchor never arms and the pan anchor behaves exactly as B1440 shipped it. */
   const [smoothZoom, setSmoothZoom] = useState(() => lsGet("smoothZoom", "1") !== "0");
   const smoothZoomRef = useRef(smoothZoom);
   smoothZoomRef.current = smoothZoom;
@@ -2145,6 +2146,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   viewAnchorRef.current = viewAnchor;
   const armViewAnchor = useCallback((ppf, offX, offY) => { const a = { ppf, offX, offY }; viewAnchorRef.current = a; setViewAnchor(a); }, []);
   const disarmViewAnchor = useCallback(() => { viewAnchorRef.current = null; setViewAnchor((a) => (a ? null : a)); }, []);
+  /* B286000 — the ONE place turning smooth zoom on/off is decided, so the control can be rendered
+     anywhere (it now lives in the on-canvas View menu) without a second copy of the persist +
+     disarm pair. Turning it OFF must disarm any live anchor in the same commit, or the last
+     gesture's scaled frame is left on screen with nothing to re-bake it. */
+  const applySmoothZoom = useCallback((on) => {
+    const nx = !!on;
+    setSmoothZoom(nx);
+    lsSet("smoothZoom", nx ? "1" : "0");
+    if (!nx) disarmViewAnchor();
+  }, [disarmViewAnchor]);
   /* The freshest view, readable from a native listener attached once at mount. Written on every
      render AND eagerly by the wheel flush, so two rAF flushes inside one React render cannot lose a
      notch (the reason the pre-B1449 wheel used a functional `setView`). */
@@ -16527,19 +16538,22 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             title="Restore an earlier automatically-saved version of this plan">
             <span aria-hidden style={{ flex: "none" }}>↺</span><span>Version history…</span>
           </button>
-          <button style={{ ...menuItem(false), marginTop: 2, display: "flex", alignItems: "center", gap: 8 }} onClick={() => { closeHdrMenus(); setStorageOpen(true); }}
+          {/* ⛔ B286000 — "This device" IS THE WHOLE POINT OF THIS CAPTION, and Storage staying put
+              is a DECIDED trade rather than an oversight. Everything above this line is plan-scoped
+              (plan name, plans in this site, New plan, Duplicate, Save now, Version history);
+              Storage is device-scoped, which is the same structural defect that made Smooth zoom
+              unfindable in here. Smooth zoom MOVED (it is a rendering preference, and the canvas
+              View menu already owns those — B286000). Storage did NOT, and the reason is measured
+              and on the record in `src/shared/CLAUDE.md`: `StoragePanel` is mounted from THIS menu
+              precisely because the header gear and `AuthPanel` land in the entry chunk every route
+              downloads — even a lazy stub there cost +0.8 KB on all four routes and breached the
+              Notes route's bundle ceiling in CI. So the honest fix for a device-scoped row inside a
+              plan-scoped menu is to SAY it is device-scoped, which costs one muted caption instead
+              of a bundle breach. If the gear ever stops being on the entry chunk, move it. */}
+          <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, margin: "11px 0 3px" }}>This device</div>
+          <button style={{ ...menuItem(false), display: "flex", alignItems: "center", gap: 8 }} onClick={() => { closeHdrMenus(); setStorageOpen(true); }}
             title="How much room this app is using on this device, and what's safe to clear" data-testid="storage-menu-item">
             <span aria-hidden style={{ flex: "none" }}>🗄</span><span>Storage on this device…</span>
-          </button>
-          {/* B1449 — the one switch for the anchored zoom. Off, a wheel notch re-draws the whole
-              plan at the new zoom exactly as it did before (crisper mid-gesture, slower); on, the
-              drawing scales as one piece and re-draws when you stop. The PAN anchor (B1440) is
-              deliberately NOT gated on this — turning smooth zoom off must not take that away. */}
-          <button style={{ ...menuItem(false), marginTop: 2, display: "flex", alignItems: "center", gap: 8 }}
-            role="menuitemcheckbox" aria-checked={smoothZoom} data-testid="smooth-zoom-toggle"
-            onClick={() => { const nx = !smoothZoom; setSmoothZoom(nx); lsSet("smoothZoom", nx ? "1" : "0"); if (!nx) disarmViewAnchor(); }}
-            title="Zoom scales the drawing as one piece while the wheel is turning, then re-draws it sharp the moment you stop. Turn off to re-draw on every notch instead.">
-            <span aria-hidden style={{ flex: "none" }}>{smoothZoom ? "☑" : "☐"}</span><span>Smooth zoom</span>
           </button>
         </AnchoredMenu>
     </div>
@@ -19910,7 +19924,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           <div style={{ pointerEvents: "none", display: "flex", gap: 8, alignItems: "flex-start", height: "100%", minHeight: 0 }}>
           <div style={{ pointerEvents: "auto", display: "flex", maxHeight: "100%", minHeight: 0 }}>
             <ViewMenu open={viewMenuOpen} onToggle={() => setViewMenuOpen((o) => !o)} settings={settings}
-              setSnap={setSnap} patchSettings={(patch) => setSettings((s) => ({ ...s, ...patch }))} pal={PAL} />
+              setSnap={setSnap} patchSettings={(patch) => setSettings((s) => ({ ...s, ...patch }))} pal={PAL}
+              smoothZoom={smoothZoom} onSmoothZoom={applySmoothZoom} />
           </div>
           {/* Layers control — same shared layers as the map finder. ALWAYS rendered
               (B693): an unlocated plan gets the control DISABLED with the plain reason
