@@ -535,18 +535,27 @@ export async function fetchImageIndex(client) {
   return { ok: true, index: (data || []).map((r) => ({ id: r.id, pageId: r.page_id || null, deleted: !!r.deleted_at })) };
 }
 
-export async function pushImage(client, uid, { id, pageId, dataUrl, mime = "", w = 0, h = 0, bytes = 0 }) {
+export async function pushImage(client, uid, { id, pageId, dataUrl, mime = "", w = 0, h = 0, bytes = 0, kind = "image", name = "" }) {
   const blob = dataUrlToBlob(dataUrl);
-  if (!blob) return { ok: false, error: "the picture could not be read back for upload" };
+  const what = kind === "file" ? "file" : "picture";
+  if (!blob) return { ok: false, error: `the ${what} could not be read back for upload` };
   const type = blob.type || mime || "";
-  // The bucket's allow-list, checked HERE so an unsupported picture is refused by name
-  // instead of coming back as an opaque 400 nobody can act on.
-  if (!IMAGE_MIME_ALLOWED.includes(type)) return { ok: false, error: `pictures of type ${type || "unknown"} cannot be stored in the cloud` };
+  /* The bucket's allow-list, checked HERE so an unsupported picture is refused by name
+   * instead of coming back as an opaque 400 nobody can act on.
+   *
+   * ⛔ IT APPLIES TO PICTURES ONLY (NEW-5). An ATTACHMENT is any file by definition — a
+   * DWG, an XLSX, whatever a consultant sends — and the bucket's own mime restriction was
+   * lifted for exactly that in db/notes_attachments.sql. Keeping the check for images is
+   * still worth it: a picture with an odd type is a mistake worth naming, and this is the
+   * only place that can name it before the network does. */
+  if (kind !== "file" && !IMAGE_MIME_ALLOWED.includes(type)) {
+    return { ok: false, error: `pictures of type ${type || "unknown"} cannot be stored in the cloud` };
+  }
   const path = imagePath(uid, id);
-  const up = await client.storage.from(IMAGE_BUCKET).upload(path, blob, { contentType: type, upsert: true });
+  const up = await client.storage.from(IMAGE_BUCKET).upload(path, blob, { contentType: type || "application/octet-stream", upsert: true });
   if (up.error) return { ok: false, error: up.error.message };
   const { error } = await client.from(IMAGE_TABLE).upsert(
-    { id, page_id: pageId || null, path, mime: type, bytes, width: w, height: h, deleted_at: null },
+    { id, page_id: pageId || null, path, mime: type, bytes, width: w, height: h, kind, name: name || null, deleted_at: null },
     { onConflict: "user_id,id" },
   );
   if (error) return { ok: false, error: error.message };

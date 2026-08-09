@@ -36,6 +36,19 @@ export function docToHtml(doc, images = null) {
   try { box.appendChild(DOMSerializer.fromSchema(schema).serializeFragment(node.content)); }
   catch (_) { return ""; }
 
+  /* ⛔ EVERY TOGGLE PRINTS OPEN (NEW-7), unconditionally — it is not an option a caller can
+   * forget. Paper has no disclosure triangle, so a folded section written out folded is
+   * simply missing text, and nothing about the resulting sheet looks wrong. This file has
+   * exactly two callers and both of them are the print path, so "always" is the correct
+   * rule rather than a flag; if a screen-side caller ever appears, it needs its own entry
+   * point, not a parameter here. */
+  for (const d of Array.from(box.querySelectorAll("details"))) d.setAttribute("open", "");
+
+  /* An attachment is a NAME on paper — the bytes cannot ride a sheet. The node's own
+   * `renderHTML` already writes the name, type and size as the link's text; all that is
+   * removed is the dead `href="#"`, which on paper would print as a link to nowhere. */
+  for (const a of Array.from(box.querySelectorAll("a[data-note-file]"))) a.removeAttribute("href");
+
   for (const img of Array.from(box.querySelectorAll("img[data-note-image]"))) {
     const src = images ? images[img.getAttribute("data-note-image")] : null;
     if (src) { img.setAttribute("src", src); continue; }

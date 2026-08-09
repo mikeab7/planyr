@@ -50,6 +50,15 @@ export function editedLabel(ms, { now = Date.now() } = {}) {
   return rel === "just now" ? "Edited just now" : `Edited ${rel} ago`;
 }
 
+/** A moment, as a version-history row says it: "just now" · "12m ago" · "2 Jul".
+ *  The "ago" is added only to the ELAPSED forms — a calendar date does not take one, and
+ *  "2 Jul ago" is exactly the sort of small wrongness that makes a list look unreliable. */
+export function stampLabel(ms, { now = Date.now() } = {}) {
+  const rel = relativeTime(ms, { now });
+  if (!rel || rel === "just now") return rel || "";
+  return /^\d+[mhdw]$/.test(rel) ? `${rel} ago` : rel;
+}
+
 /** How long a binned item has left. "" once it is due. */
 export function daysLeft(expiresAt, { now = Date.now() } = {}) {
   if (!Number.isFinite(expiresAt)) return "";

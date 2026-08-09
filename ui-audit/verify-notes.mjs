@@ -219,7 +219,11 @@ const subtreeIds = (node) => { const out = []; const go = (n) => { out.push(n.id
  * localStorage cannot see them at all — this is how the harness proves where they went. */
 const imageRecords = () => page.evaluate(() => new Promise((resolve) => {
   let req;
-  try { req = indexedDB.open("planyr-notes", 1); } catch (_) { resolve([]); return; }
+  /* ⛔ NO VERSION NUMBER. The notes database went to v2 when version snapshots landed
+     (NEW-3), and `open(name, 1)` against a v2 database is a VersionError, not a miss — so a
+     pinned version turns every future schema change into a red row that reads like the app
+     lost its pictures. Opening without one always gets whatever the app actually created. */
+  try { req = indexedDB.open("planyr-notes"); } catch (_) { resolve([]); return; }
   req.onerror = () => resolve([]);
   req.onsuccess = () => {
     const db = req.result;
@@ -598,7 +602,7 @@ ok("the sheet is light-on-white, whatever the app theme is", /rgb\(255,\s*255,\s
 /* ════ 14. A PICTURE WHOSE BYTES ARE GONE SAYS SO ══════════════════════════════════════ */
 const gone = imgs[0].id;
 await page.evaluate((id) => new Promise((resolve) => {
-  const req = indexedDB.open("planyr-notes", 1);
+  const req = indexedDB.open("planyr-notes");   // no version — see the note above
   req.onsuccess = () => {
     const tx = req.result.transaction("images", "readwrite");
     tx.objectStore("images").delete(`local:${id}`);
@@ -673,9 +677,14 @@ ok("⛔ THE RECENT TAB IS GONE — two segments, Pages and Bin",
   await tb("notes-view-recent").count() === 0
   && await tb("notes-view-tree").count() === 1
   && await tb("notes-view-bin").count() === 1);
-ok("...and the tab strip really is down to two",
-  await page.locator('[role="tablist"][aria-label="Notes view"] button').count() === 2,
-  `${await page.locator('[role="tablist"][aria-label="Notes view"] button').count()} tab(s)`);
+/* ⛔ THREE SEGMENTS AGAIN, AND IT IS NOT A REVERSAL OF B36050 (NEW-4). Recent went because
+   it re-sorted the SAME pages by a fact the owner does not navigate by. TASKS shows something
+   no other surface in the module can show at all — every unticked checklist line across every
+   note — so the count assertion moves from "two" to "these three, by name", which is the
+   thing actually worth guarding. RECENT is still asserted gone, one check above. */
+ok("...and the tab strip is exactly Pages, Tasks and Bin",
+  (await page.locator('[role="tablist"][aria-label="Notes view"] button').allInnerTexts()).join("|") === "Pages|Tasks|Bin",
+  (await page.locator('[role="tablist"][aria-label="Notes view"] button').allInnerTexts()).join("|"));
 ok("⛔ ...while the times themselves are STILL IN THE MODEL — nothing was orphaned to remove a view",
   flatPages(await readTree()).map((x) => x.node).filter((p) => Number.isFinite(p.updatedAt)).length >= 3);
 

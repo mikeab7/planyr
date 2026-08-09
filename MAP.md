@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-08-09 @ `4d64bd8` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-08-09 @ `4b5a9bd` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_465 source files mapped._
+_478 source files mapped._
 
 ## infra
 
@@ -43,32 +43,50 @@ _465 source files mapped._
   - _exports_: _(none)_
 - **`src/workspaces/notes/components/NoteEditor.jsx`** — One note page (title · toolbar · document) and the module's ONLY editor-engine import — the lazy boundary. Snapshots the document as plain JSON at edit time so the flush never queries a torn-down instance.
   - _exports_: `default (NoteEditor)`, `PASTE_MODE_META`
+- **`src/workspaces/notes/components/NoteHistory.jsx`** — Version-history pane: earlier snapshots of the open page, with a preview and Restore.
+  - _exports_: `default (NoteHistory)`
+- **`src/workspaces/notes/components/NoteOutline.jsx`** — Outline pane derived from the open note's headings — click to go, caret section highlighted, collapsible, absent with no headings.
+  - _exports_: `default (NoteOutline)`
+- **`src/workspaces/notes/components/NoteSlashMenu.jsx`** — The command list drawn at the caret when `/` opens it; renders only — every decision is the plugin's.
+  - _exports_: `default (NoteSlashMenu)`
 - **`src/workspaces/notes/components/NotesTree.jsx`** — Notes left rail in three views (Notebooks · Recent · Bin) — inline rename (Enter/Esc), an inline delete confirmation and an inline Move panel that finally reaches the model's move ops, never a dialog box.
   - _exports_: `default (NotesTree)`
 - **`src/workspaces/notes/components/NoteToolbar.jsx`** — Notes formatting bar — block style, font, size, marks, colour/highlight popovers, alignment, lists, quote/code/divider/link/table, undo-redo, pictures, print and Markdown export — grouped by frequency, with the long tail behind a More drawer, plus a table group shown only inside a table. Reads active state from the editor; cancels mousedown to keep the caret.
   - _exports_: `default (NoteToolbar)`
+- **`src/workspaces/notes/components/QuickOpen.jsx`** — Ctrl/⌘+K palette: fuzzy title jump falling through to the full-text index.
+  - _exports_: `default (QuickOpen)`
+- **`src/workspaces/notes/lib/notesAttachNode.js`** — The `noteAttachment` schema node — any file as a chip; bytes ride the picture tier behind the storage seam.
+  - _exports_: `default`, `downloadDataUrl`, `NoteAttachment`
 - **`src/workspaces/notes/lib/notesBlockKeys.js`** — Backspace at the START of a block undoes a formatting difference before it restructures anything, so one keypress can never silently merge a multi-block region.
   - _exports_: `BLOCK_KEYS_PRIORITY`, `blockStartAction`, `default`
+- **`src/workspaces/notes/lib/notesCalloutNode.js`** — The `noteCallout` schema node: a coloured block storing a TONE NAME, never a colour.
+  - _exports_: `CALLOUT_TONE_IDS`, `CALLOUT_TONES`, `default`, `DEFAULT_CALLOUT_TONE`, `NoteCallout`
 - **`src/workspaces/notes/lib/notesCloud.js`** — The cloud tier under the notes storage seam: pure sync decisions (tree merge, which-copy-wins page seed, picture plan, sign-in adoption) plus the revision-guarded Supabase transport for `notes_trees` / `notes_pages` / `notes_images` and the private `notes-images` bucket. Imported only by `notesStore.js`, and only dynamically.
   - _exports_: `binPages`, `blobToDataUrl`, `cloudClient`, `dataUrlToBlob`, `emptySyncState`, `fetchImage`, `fetchImageIndex`, `fetchPageIndex`, `fetchPages`, `fetchTree`, `fetchTreeRev`, `forcePage`, `IMAGE_BUCKET`, `IMAGE_MIME_ALLOWED`, `IMAGE_TABLE`, `imagePath`, `isEmptyDoc`, `judgeConflict`, `mergeSyncState`, `mergeTrees`, `PAGE_TABLE`, `pageRev`, `planAdoption`, `planImageSync`, `planPageSeed`, `purgeImagesCloud`, `purgePagesCloud`, `pushImage`, `pushPage`, `pushTree`, `sameDoc`, `syncFailureReason`, `TREE_TABLE`
 - **`src/workspaces/notes/lib/notesDocHtml.js`** — A note's document model → HTML through the EDITOR'S OWN DOMSerializer, so the print sheet cannot drift from the screen (PDF-PARITY by construction). Inlines stored image bytes as data URLs.
   - _exports_: `docToHtml`
 - **`src/workspaces/notes/lib/notesExtensions.js`** — The ONE declaration of what a note may contain — the editor extension set (incl. images, the empty-page placeholder and search marking), the empty-document constant, and the per-page configured variant.
   - _exports_: `EMPTY_DOC`, `HEADING_LEVELS`, `NOTE_EXTENSIONS`, `NOTE_PLACEHOLDER`, `noteExtensions`
+- **`src/workspaces/notes/lib/notesFileMeta.js`** — How an attached file is described in words — size, type badge, safe name — shared by the chip, the export and the print sheet.
+  - _exports_: `attachmentLabel`, `fileExtLabel`, `fileSizeLabel`, `safeAttachmentName`
 - **`src/workspaces/notes/lib/notesImageDb.js`** — The raw IndexedDB tier under the note-image store — the ONE file that touches `indexedDB`. Every call resolves rather than rejects, and reports whether the bytes actually landed.
-  - _exports_: `idbDeleteImages`, `idbGetImage`, `idbListImageMeta`, `idbPutImage`, `notesIdbAvailable`
+  - _exports_: `idbDeleteImages`, `idbDeleteVersions`, `idbGetImage`, `idbGetVersion`, `idbListImageMeta`, `idbListVersions`, `idbPutImage`, `idbPutVersion`, `notesIdbAvailable`
 - **`src/workspaces/notes/lib/notesImageIntake.js`** — A pasted or dropped file → a downscaled, re-encoded data URL, choosing PNG vs JPEG by whichever is smaller. GIF and SVG pass through untouched rather than being silently flattened.
   - _exports_: `isImageFile`, `MAX_IMAGE_DIM`, `prepareNoteImage`
 - **`src/workspaces/notes/lib/notesImageNode.js`** — The `noteImage` schema node: the document holds an image ID, never the bytes. Owns the paste/drop intake plugin and the node view that draws a VISIBLE broken-image state when a picture's bytes are gone.
   - _exports_: `default`, `NoteImage`
 - **`src/workspaces/notes/lib/notesMarkdown.js`** — PURE Markdown export of a note's document model (GFM tables/task lists, HTML fallback for what Markdown cannot spell, plus a lossiness report) and `docToText` for body search.
-  - _exports_: `docToMarkdown`, `docToText`, `escapeText`, `imageIdsInDoc`, `imageIdsInDocs`, `lossyNote`, `MD_MAX_HEADING`, `NOTE_MD_HANDLED`, `pageToMarkdown`, `safeFileName`
+  - _exports_: `assetIdsInDoc`, `attachmentIdsInDoc`, `attachmentIdsInDocs`, `docToMarkdown`, `docToText`, `escapeText`, `imageIdsInDoc`, `imageIdsInDocs`, `lossyNote`, `MD_INLINE_ATTACHMENT_MAX`, `MD_MAX_HEADING`, `NOTE_MD_HANDLED`, `pageToMarkdown`, `safeFileName`
 - **`src/workspaces/notes/lib/notesModel.js`** — PURE notebook › section › page tree schema, page timestamps, every structural op (add/rename/move/delete/search/migrate) and the 30-day BIN. `deleteNode` is a soft delete that still computes the FULL cascade of orphaned page ids and stamps it on the trash entry.
   - _exports_: `addPage`, `allPageIds`, `ancestorIds`, `boundProjectIds`, `DEFAULT_PAGE_TITLE`, `deleteNode`, `emptyTree`, `expiredTrashIds`, `findPage`, `firstPageId`, `makePage`, `migrate`, `movePage`, `newId`, `NO_PROJECT`, `NO_PROJECT_LABEL`, `NOTES_TREE_VERSION`, `pagesInScope`, `projectGroups`, `projectOfPage`, `purgeTrashEntry`, `recentPages`, `renameNode`, `restoreNode`, `SCOPE_ALL`, `SCOPE_PROJECT`, `searchTitles`, `setPageProject`, `subtreePageIds`, `touchPage`, `TRASH_RETENTION_DAYS`, `trashEntries`, `trashPageIds`, `walkPages`
+- **`src/workspaces/notes/lib/notesOutline.js`** — PURE outline of a document: headings, their ProseMirror positions, the active section, and which rows fold.
+  - _exports_: `activeOutlineIndex`, `LEAF_NODES`, `nodeSize`, `outlineFromDoc`, `outlineHasChildren`, `textOfNode`, `visibleOutline`
 - **`src/workspaces/notes/lib/notesPastePlain.js`** — Word's three paste modes (keep source · merge formatting · keep text only) plus the structural sanitisation — nbsp spacer collapse, layout-table unwrap, list-lift — that runs in all three.
   - _exports_: `default`, `isLayoutTable`, `isSpacerParagraph`, `MEANINGFUL_ALIGN`, `PASTE_MODES`, `pastePlainKey`, `plainTextToContent`, `sliceCarriesFormatting`, `STYLE_MARKS`, `textOfNode`, `tidyPastedFragment`
 - **`src/workspaces/notes/lib/notesPrint.js`** — The Notes print / Save-as-PDF sheet — a pure HTML document builder whose paper CSS mirrors the screen's editor CSS, plus the hidden-iframe driver that opens the print dialogue.
   - _exports_: `buildPrintDocument`, `printHtmlDocument`
+- **`src/workspaces/notes/lib/notesQuickOpen.js`** — PURE fuzzy ranking for quick open, plus the shortcut's spelling and chord test.
+  - _exports_: `fuzzyScore`, `isQuickOpenChord`, `QUICK_OPEN_KEY`, `quickOpenResults`, `rankQuickOpen`, `stepIndex`
 - **`src/workspaces/notes/lib/notesSearchHighlight.js`** — Search marking as ProseMirror DECORATIONS (never marks — it must not write into the document) plus stepping between matches.
   - _exports_: `default`, `findSearchMatches`, `NoteSearchHighlight`, `noteSearchKey`
 - **`src/workspaces/notes/lib/notesSketchEditor.js`** — Sketch mode's INTERACTIVE half — double-click empty canvas to make a box, type in the box, drag a box to move it, drag from its dot onto another box to draw an arrow. Behind a cached dynamic import so a note with no sketch never downloads it.
@@ -79,12 +97,20 @@ _465 source files mapped._
   - _exports_: `default`, `NoteSketch`
 - **`src/workspaces/notes/lib/notesSketchRender.js`** — The ONE sketch drawing builder, used by the schema node's renderHTML AND the node view — class names only, no colours, so screen and paper cannot drift (PDF-PARITY).
   - _exports_: `sketchAltText`, `sketchSpec`, `specToDom`
+- **`src/workspaces/notes/lib/notesSlashMenu.js`** — The slash-menu trigger rule (never mid-word), the command catalogue, and the extension that owns the arrows, Enter and Escape.
+  - _exports_: `applySlashCommand`, `default`, `filterSlashCommands`, `NoteSlashMenu`, `readSlashState`, `SLASH_COMMANDS`, `SLASH_MAX_QUERY`, `slashPluginKey`, `slashQueryFromText`, `stepIndex`
 - **`src/workspaces/notes/lib/notesStore.js`** — The ONE storage seam for Notes — per-account scoped keys, tree and page bodies kept separate, image bytes in IndexedDB behind enforced ceilings, `purgePages` as the one place bytes are destroyed, every failure broadcast (LOUD-FAILURE). Cloud sync would be a change here and nowhere else.
-  - _exports_: `clearNotesStorageError`, `deleteNoteImages`, `deletePages`, `lastNotesStorageError`, `listStoredPageIds`, `LOCAL_SCOPE`, `markPagesBinned`, `markPagesRestored`, `MAX_IMAGE_BYTES`, `MAX_NOTEBOOK_IMAGE_BYTES`, `noteImageUsage`, `notesConflictFor`, `notesConflictLine`, `notesConflicts`, `notesScope`, `notesScopeLabel`, `notesStorageLine`, `notesSyncState`, `onNotesConflict`, `onNotesPagesChanged`, `onNotesStorageError`, `onNotesSyncState`, `PAGE_KEY_BASE`, `pageKey`, `purgePages`, `putNoteImage`, `readNoteImage`, `readNoteImages`, `readPage`, `readTreeRaw`, `refreshNotesSync`, `reportImageProblem`, `resolveNotesConflict`, `searchNotes`, `setNotesScope`, `startNotesSync`, `stopNotesSync`, `sweepImagesOfMissingPages`, `sweepOrphans`, `SYNC_KEY_BASE`, `syncKey`, `TREE_KEY_BASE`, `treeKey`, `writePage`, `writeTree`
+  - _exports_: `clearNotesStorageError`, `collectOpenTasks`, `deleteNoteImages`, `deletePages`, `deletePageVersions`, `lastNotesStorageError`, `listStoredPageIds`, `LOCAL_SCOPE`, `markPagesBinned`, `markPagesRestored`, `MAX_FILE_BYTES`, `MAX_IMAGE_BYTES`, `MAX_NOTEBOOK_IMAGE_BYTES`, `noteImageUsage`, `notesConflictFor`, `notesConflictLine`, `notesConflicts`, `notesScope`, `notesScopeLabel`, `notesStorageLine`, `notesSyncState`, `onNotesConflict`, `onNotesPagesChanged`, `onNotesStorageError`, `onNotesSyncState`, `openTaskCount`, `PAGE_KEY_BASE`, `pageKey`, `purgePages`, `putNoteFile`, `putNoteImage`, `readNoteFile`, `readNoteFiles`, `readNoteImage`, `readNoteImages`, `readPage`, `readPageVersion`, `readPageVersions`, `readTreeRaw`, `refreshNotesSync`, `registerOpenNoteDoc`, `reportImageProblem`, `resolveNotesConflict`, `restorePageVersion`, `searchNotes`, `setNotesScope`, `snapshotPage`, `startNotesSync`, `stopNotesSync`, `sweepImagesOfMissingPages`, `sweepOrphans`, `SYNC_KEY_BASE`, `syncKey`, `toggleNoteTask`, `TREE_KEY_BASE`, `treeKey`, `writePage`, `writeTree`
 - **`src/workspaces/notes/lib/notesTabKey.js`** — Tab belongs to the document: a low-priority fallback behind the table and list handlers, plus the Escape-then-Tab keyboard-trap escape
   - _exports_: `default`, `TAB_CHAR`, `TAB_PRIORITY`
+- **`src/workspaces/notes/lib/notesTasks.js`** — PURE checklist reading and writing over a document — the task rollup's whole decision layer.
+  - _exports_: `groupTasksByProject`, `openTasksInDoc`, `rollUpOpenTasks`, `setTaskCheckedInDoc`, `tasksInDoc`
 - **`src/workspaces/notes/lib/notesTime.js`** — How a note's age is written, in one place — relative ("5h"), absolute, edited-label and bin countdown. `null` means unknown and renders as nothing, so a migrated page never claims a time it does not have.
-  - _exports_: `absoluteStamp`, `daysLeft`, `editedLabel`, `relativeTime`
+  - _exports_: `absoluteStamp`, `daysLeft`, `editedLabel`, `relativeTime`, `stampLabel`
+- **`src/workspaces/notes/lib/notesToggleNode.js`** — The `noteToggle` / `noteToggleTitle` schema nodes — a foldable section built on the browser's own details element.
+  - _exports_: `default`, `NoteToggle`, `NoteToggleTitle`, `TOGGLE_TITLE_PLACEHOLDER`, `toggleClickKey`
+- **`src/workspaces/notes/lib/notesVersions.js`** — PURE version-history policy: when a snapshot is due, which are kept, and the restore plan that never destroys history.
+  - _exports_: `MAX_VERSIONS_PER_PAGE`, `planRestore`, `planRetention`, `RETENTION_TIERS`, `shouldSnapshot`, `SNAPSHOT_MIN_GAP_MS`, `versionReasonLabel`
 - **`src/workspaces/notes/Notes.jsx`** — Notes workspace root (lazy chunk) — owns the notebook/section/page TREE, the bin and its 30-day sweep, search, export, print and the storage-error banner; pulls the editor via `lazy()` so the rail paints first, and keys it by page id so a page switch flushes the outgoing autosave.
   - _exports_: `default (Notes)`
 

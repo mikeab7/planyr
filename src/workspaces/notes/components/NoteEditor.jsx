@@ -36,12 +36,23 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { EditorContent, useEditor } from "@tiptap/react";
 import { noteExtensions, EMPTY_DOC } from "../lib/notesExtensions.js";
 import { PASTE_MODES } from "../lib/notesPastePlain.js";
-import { readNoteImages, readPage, writePage } from "../lib/notesStore.js";
-import { docToMarkdown, imageIdsInDoc, safeFileName } from "../lib/notesMarkdown.js";
+import {
+  readNoteFiles, readNoteImages, readPage, readPageVersions, registerOpenNoteDoc,
+  restorePageVersion, snapshotPage, writePage,
+} from "../lib/notesStore.js";
+import {
+  attachmentIdsInDoc, docToMarkdown, imageIdsInDoc, safeFileName, MD_INLINE_ATTACHMENT_MAX,
+} from "../lib/notesMarkdown.js";
 import { docToHtml } from "../lib/notesDocHtml.js";
 import { buildPrintDocument, printHtmlDocument } from "../lib/notesPrint.js";
 import { absoluteStamp, editedLabel } from "../lib/notesTime.js";
+import { activeOutlineIndex, outlineFromDoc } from "../lib/notesOutline.js";
+import { setTaskCheckedInDoc } from "../lib/notesTasks.js";
+import { applySlashCommand } from "../lib/notesSlashMenu.js";
 import NoteToolbar from "./NoteToolbar.jsx";
+import NoteSlashMenu from "./NoteSlashMenu.jsx";
+import NoteOutline from "./NoteOutline.jsx";
+import NoteHistory from "./NoteHistory.jsx";
 
 const SAVE_DEBOUNCE_MS = 600;
 const RADIUS = { control: 8, pill: 999 }; // mirrored from shared/ui/controls.jsx — see NoteToolbar
@@ -94,6 +105,52 @@ const EDITOR_CSS = `
 .planyr-note .planyr-note-image.ProseMirror-selectednode img { outline: 2px solid var(--accent-notes); outline-offset: 1px; }
 .planyr-note .planyr-note-image[data-missing] { border: 1px dashed var(--danger-text); border-radius: ${RADIUS.control}px; padding: 14px; background: var(--surface-page); }
 .planyr-note .planyr-note-image-missing { color: var(--danger-text); font-size: 12.5px; font-weight: 600; }
+
+/* A CALLOUT (NEW-7). The node stores a NAME — info / tip / important / warning / danger —
+   and never a colour, so the ink is entirely here and the same block prints black-on-white
+   and exports as GitHub's own "> [!NOTE]" syntax. The icon is a ::before rather than
+   content: an icon inserted as text would be selectable, deletable and would ride into the
+   Markdown on top of the marker that already says the same thing.
+   PDF-PARITY: lib/notesPrint.js mirrors every rule below at paper weight. */
+.planyr-note .planyr-callout { position: relative; border: 1px solid var(--border-default); border-left: 3px solid var(--text-tertiary); border-radius: ${RADIUS.control}px; background: var(--surface-page); padding: 10px 12px 10px 34px; }
+.planyr-note .planyr-callout > * + * { margin-top: 0.5em; }
+.planyr-note .planyr-callout::before { position: absolute; left: 11px; top: 9px; font-size: 13px; line-height: 1.25; content: "ℹ"; color: var(--text-tertiary); font-weight: 700; }
+.planyr-note .planyr-callout[data-callout="info"] { border-left-color: var(--accent-notes); }
+.planyr-note .planyr-callout[data-callout="info"]::before { content: "ℹ"; color: var(--accent-notes-text); }
+.planyr-note .planyr-callout[data-callout="tip"] { border-left-color: var(--save-badge); }
+.planyr-note .planyr-callout[data-callout="tip"]::before { content: "✦"; color: var(--save-badge); }
+.planyr-note .planyr-callout[data-callout="important"] { border-left-color: var(--accent-review); }
+/* The glyph takes the AA-SAFE "-text" variant of the hue, never the fill token: amber on a
+   white sheet is about 2:1 and would be the low-contrast trap the theming rule forbids. */
+.planyr-note .planyr-callout[data-callout="important"]::before { content: "★"; color: var(--accent-review-text); }
+.planyr-note .planyr-callout[data-callout="warning"] { border-left-color: var(--warn-text); background: var(--warn-bg); }
+.planyr-note .planyr-callout[data-callout="warning"]::before { content: "▲"; color: var(--warn-text); }
+.planyr-note .planyr-callout[data-callout="danger"] { border-left-color: var(--danger-text); background: var(--danger-bg); }
+.planyr-note .planyr-callout[data-callout="danger"]::before { content: "!"; color: var(--danger-text); }
+
+/* A TOGGLE (NEW-7) - the browser's own details element, so folding needs no measuring, no
+   animation frame and no height cache, and paper inherits the same element. The document
+   owns the open/closed state as an attribute (lib/notesToggleNode.js); the marker area is
+   the only part that folds, because a press on the WORDS has to place the caret or the
+   title would be the one line in the document you cannot edit. */
+.planyr-note .planyr-toggle { border: 1px solid var(--border-default); border-radius: ${RADIUS.control}px; background: var(--surface-page); padding: 7px 11px; }
+.planyr-note .planyr-toggle > * + * { margin-top: 0.5em; }
+.planyr-note .planyr-toggle-title { cursor: text; font-weight: 650; color: var(--text-primary); list-style: none; }
+.planyr-note .planyr-toggle-title::-webkit-details-marker { display: none; }
+.planyr-note .planyr-toggle-title::before { display: inline-block; width: 14px; margin-left: -3px; content: "▶"; font-size: 9px; color: var(--text-tertiary); cursor: pointer; }
+.planyr-note .planyr-toggle[open] > .planyr-toggle-title::before { content: "▼"; }
+
+/* AN ATTACHED FILE (NEW-5). Same discipline as a picture: the document holds an id, the
+   bytes are behind the storage seam, and a chip whose bytes are GONE says so in as many
+   words rather than downloading nothing. */
+.planyr-note .planyr-note-file { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border: 1px solid var(--border-default); border-radius: ${RADIUS.control}px; background: var(--surface-page); text-decoration: none; }
+.planyr-note .planyr-note-file.ProseMirror-selectednode { outline: 2px solid var(--accent-notes); outline-offset: 1px; }
+.planyr-note .planyr-note-file[data-missing] { border: 1px dashed var(--danger-text); }
+.planyr-note .planyr-note-file-badge { flex: 0 0 auto; font-size: 9.5px; font-weight: 800; letter-spacing: 0.06em; padding: 2px 6px; border-radius: ${RADIUS.pill}px; border: 1px solid var(--border-strong); color: var(--text-secondary); }
+.planyr-note .planyr-note-file-name { flex: 1 1 auto; min-width: 0; font-size: 13px; font-weight: 650; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.planyr-note .planyr-note-file-size { flex: 0 0 auto; font-size: 11.5px; font-weight: 600; color: var(--text-tertiary); }
+.planyr-note .planyr-note-file-get { flex: 0 0 auto; height: 22px; padding: 0 10px; border-radius: ${RADIUS.pill}px; border: 1px solid var(--accent-notes); background: transparent; color: var(--accent-notes-text); font: inherit; font-size: 11.5px; font-weight: 700; cursor: pointer; }
+.planyr-note .planyr-note-file-get:disabled { border-color: var(--danger-text); color: var(--danger-text); cursor: default; }
 
 /* SKETCH MODE (lib/notesSketchNode.js). The drawing carries CLASS NAMES and no colours at
    all, so the ink is entirely here — which is what lets the same drawing theme with the app
@@ -389,6 +446,10 @@ export default function NoteEditor({
   /* The pending snapshot is PLAIN JSON captured at edit time, so the flush never has to
    * ask a possibly-destroyed editor for anything — see fix (1) in the header. */
   const pendingRef = useRef(null);
+  /* The version snapshot's own copy of the document. Declared beside `pendingRef` because
+   * they are written together and read apart — see the unmount effect further down for the
+   * hook-cleanup-order bug that is the whole reason there are two of them. */
+  const lastDocRef = useRef(null);
   const timerRef = useRef(0);
 
   /* Callbacks land in a ref so `flush` can be referentially stable: an unstable flush would
@@ -426,14 +487,36 @@ export default function NoteEditor({
   const pasteRef = useRef(null);
   pasteRef.current = pasteOffer;
 
+  /* THE SLASH MENU (NEW-1). All of the decision — whether it is open, what is in it, which
+   * row is highlighted — lives in the plugin (lib/notesSlashMenu.js) reading the document.
+   * This state is a MIRROR for rendering, never the source: a second source of truth for
+   * "is the menu open" is how a menu ends up open over a document that has moved on. */
+  const [slash, setSlash] = useState({ open: false, items: [], index: 0, from: 0, to: 0, query: "" });
+  const [slashAt, setSlashAt] = useState(null);
+  const slashRef = useRef(slash);
+  slashRef.current = slash;
+
+  /* The one place a real file dialog can be opened from — a ProseMirror keymap cannot open
+   * one, so the two slash commands that need it hand back here. `pendingPick` says which
+   * kind the open dialog is for, so one <input> serves both. */
+  const pickRef = useRef(null);
+  const pendingPick = useRef("image");
+
   const extensions = useMemo(
     () => noteExtensions({
       imageContext,
       onSearchMatches: (m) => setFind(m),
       onPasted: ({ from, to, text }) => setPasteOffer({ from, to, text, at: Date.now() }),
+      onSlash: (s) => setSlash(s),
+      onSlashRun: (id, range) => runSlashRef.current?.(id, range),
     }),
     [imageContext],
   );
+
+  /* The command runner in a ref so the extension list stays stable — rebuilding extensions
+   * would rebuild the whole editor, and an editor that rebuilds mid-keystroke loses the
+   * keystroke. Same reasoning as the callback refs above. */
+  const runSlashRef = useRef(null);
 
   const editor = useEditor({
     extensions,
@@ -453,7 +536,12 @@ export default function NoteEditor({
       },
     },
     onUpdate: ({ editor: ed }) => {
-      pendingRef.current = { id: pageId, doc: ed.getJSON() };
+      const doc = ed.getJSON();
+      // Two refs, deliberately: `pendingRef` is the SAVE's queue and is emptied by the
+      // flush; `lastDocRef` is the version snapshot's and is never emptied. See the unmount
+      // effect below for the cleanup-order bug that separating them fixes.
+      lastDocRef.current = { id: pageId, doc };
+      pendingRef.current = { id: pageId, doc };
       onStatusRef.current?.("unsaved");
       if (timerRef.current) clearTimeout(timerRef.current);
       timerRef.current = setTimeout(flush, SAVE_DEBOUNCE_MS);
@@ -532,6 +620,167 @@ export default function NoteEditor({
     editor.commands.setNoteSearch(searchTerm || "");
     if (searchTerm) editor.commands.stepNoteSearch(0);
   }, [editor, searchTerm]);
+
+  /* ---- THE SLASH MENU (NEW-1) ------------------------------------------------------------
+   *
+   * Running a command is deliberately routed through here rather than left to the plugin:
+   * two of the fifteen (Image, Attachment) need a file dialog, which only a React surface
+   * can open. Everything else goes straight to `applySlashCommand`, which deletes the typed
+   * `/query` and applies the block IN ONE CHAIN — so a single Ctrl+Z puts back both. */
+  const runSlash = useCallback((id, range) => {
+    if (!editor || editor.isDestroyed) return;
+    applySlashCommand(editor, id, range, {
+      onPickFile: (kind) => { pendingPick.current = kind === "attachment" ? "attachment" : "image"; pickRef.current?.click(); },
+    });
+  }, [editor]);
+  runSlashRef.current = runSlash;
+
+  /* Where to draw it: the editor's own coordinates for the `/` itself, resolved at the
+   * moment it is shown — the same technique the paste chip uses, and for the same reason
+   * (a remembered mouse position is not where the caret is). */
+  useEffect(() => {
+    if (!slash.open || !editor || editor.isDestroyed) { setSlashAt(null); return; }
+    try {
+      const coords = editor.view.coordsAtPos(Math.min(slash.from, editor.state.doc.content.size));
+      const host = editor.view.dom.closest("[data-testid='note-mat']")?.getBoundingClientRect();
+      setSlashAt(host ? { x: coords.left - host.left, y: coords.bottom - host.top } : null);
+    } catch (_) { setSlashAt(null); }
+  }, [slash.open, slash.from, slash.query, editor]);
+
+  const pickFiles = useCallback((e) => {
+    const files = Array.from(e.target.files || []);
+    e.target.value = "";
+    if (!files.length || !editor || editor.isDestroyed) return;
+    if (pendingPick.current === "attachment") editor.commands.insertNoteFiles(files);
+    else editor.commands.insertNoteImages(files);
+  }, [editor]);
+
+  /* ---- THE OUTLINE (NEW-6) ----------------------------------------------------------------
+   *
+   * Derived from the DOCUMENT, not from the DOM: `outlineFromDoc` is pure and its positions
+   * are ProseMirror's own, which is what lets a row scroll the editor to a real place and
+   * what lets the active row be decided by comparing the caret's position rather than by
+   * measuring anything. Recomputed on every transaction because a heading typed a second
+   * ago has to appear a second ago — this is cheap (a walk of the JSON), and it is exactly
+   * the model-derived kind of work VIEW-INDEPENDENT-ONCE has no quarrel with: it depends on
+   * the document and the selection, never on the viewport. */
+  const [outlineOpen, setOutlineOpen] = useState(true);
+  const [foldedHeadings, setFoldedHeadings] = useState(() => new Set());
+  const [docTick, setDocTick] = useState(0);
+  useEffect(() => {
+    if (!editor || editor.isDestroyed) return undefined;
+    const bump = () => setDocTick((n) => n + 1);
+    editor.on("update", bump);
+    editor.on("selectionUpdate", bump);
+    return () => { editor.off("update", bump); editor.off("selectionUpdate", bump); };
+  }, [editor]);
+
+  const outline = useMemo(() => {
+    if (!editor || editor.isDestroyed) return [];
+    return outlineFromDoc(editor.getJSON());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editor, docTick]);
+
+  const outlineActive = useMemo(() => {
+    if (!editor || editor.isDestroyed) return -1;
+    return activeOutlineIndex(outline, editor.state.selection.from);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editor, outline, docTick]);
+
+  const goToHeading = useCallback((entry) => {
+    if (!editor || editor.isDestroyed) return;
+    const pos = Math.min(entry.pos + 1, editor.state.doc.content.size);
+    editor.chain().focus().setTextSelection(pos).scrollIntoView().run();
+  }, [editor]);
+
+  /* ---- VERSION HISTORY (NEW-3) -------------------------------------------------------------
+   *
+   * ⛔ A SNAPSHOT IS NOT A SAVE, and it does not ride the save debounce. Saving happens every
+   * 600 ms because losing 600 ms of typing is unacceptable; snapshotting that often would put
+   * a row in the history for every sentence. The store decides whether one is DUE
+   * (`shouldSnapshot`, ~90 s) and refuses a row identical to the last, so this effect can
+   * simply offer the document after every edit and let the policy do the deciding — the
+   * policy lives in ONE place (lib/notesVersions.js) rather than being spread across the two
+   * callers below.
+   *
+   * The two moments that always deserve a row are LEAVING the page and either side of a
+   * restore, and those pass `force`. */
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [versions, setVersions] = useState([]);
+  const [historyBusy, setHistoryBusy] = useState(false);
+  const refreshVersions = useCallback(async () => {
+    setHistoryBusy(true);
+    const rows = await readPageVersions(pageId);
+    setVersions(rows);
+    setHistoryBusy(false);
+  }, [pageId]);
+
+  useEffect(() => { if (historyOpen) refreshVersions(); }, [historyOpen, refreshVersions]);
+
+  // Offer a snapshot as typing settles. Same debounce family as the save, one order of
+  // magnitude out — see the note above for why the two cadences are different.
+  useEffect(() => {
+    if (!editor || editor.isDestroyed || !docTick) return undefined;
+    const t = setTimeout(() => {
+      if (editor.isDestroyed) return;
+      snapshotPage(pageId, editor.getJSON()).then((r) => { if (r.taken && historyOpen) refreshVersions(); });
+    }, 1500);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [docTick, editor, pageId]);
+
+  /* ⛔ LEAVING THE PAGE ALWAYS TAKES ONE — and it reads its OWN ref, not `pendingRef`.
+   *
+   * This is the same hook-cleanup-ORDER trap this file's header is about, one layer along,
+   * and it cost a red harness row before it was seen: `pendingRef` is CLEARED by the save
+   * flush, whose cleanup is registered EARLIER in this component and therefore runs FIRST.
+   * A snapshot reading `pendingRef` on unmount reliably found null and took no version at
+   * all — silently, because "no versions yet" is also what a page nobody edited looks like.
+   * `lastDocRef` is written at edit time and never cleared by anybody, so leaving a page
+   * that was typed into always leaves a row behind, and one that was not still leaves none. */
+  useEffect(() => () => {
+    const last = lastDocRef.current;
+    if (last?.id === pageId && last.doc) snapshotPage(pageId, last.doc, { reason: "closed", force: true });
+  }, [pageId]);
+
+  const handleRestore = useCallback(async (v) => {
+    setHistoryBusy(true);
+    const r = await restorePageVersion(pageId, v.key);
+    if (!r.ok) onPrintNotice?.(r.error || "That version could not be restored, so nothing was changed.");
+    await refreshVersions();
+    setHistoryBusy(false);
+  }, [pageId, refreshVersions, onPrintNotice]);
+
+  /* ---- WHAT THE ROLLUP AND THE RESTORE ARE ALLOWED TO DO TO THIS DOCUMENT (NEW-3 / NEW-4)
+   *
+   * ⛔ BOTH GO THROUGH THE EDITOR, NEVER ROUND THE BACK OF IT. Writing this page's JSON to
+   * storage while this instance holds the document is a silent-loss bug by construction:
+   * the editor's own next save — or its unmount flush — writes its stale copy back over the
+   * change. Registered as real editor operations they become ordinary transactions: in the
+   * document, in the undo history, saved by the one save path. */
+  useEffect(() => {
+    if (!editor || editor.isDestroyed) return undefined;
+    return registerOpenNoteDoc(pageId, {
+      applyTaskToggle: (ref, checked) => {
+        if (editor.isDestroyed) return { ok: false, changed: false };
+        const r = setTaskCheckedInDoc(editor.getJSON(), ref, checked);
+        if (!r.changed) return { ok: true, changed: false };
+        const node = editor.schema.nodeFromJSON(r.doc);
+        editor.view.dispatch(editor.state.tr.replaceWith(0, editor.state.doc.content.size, node.content).setMeta("addToHistory", true));
+        return { ok: true, changed: true };
+      },
+      applyDocument: (doc) => {
+        if (editor.isDestroyed) return { ok: false, error: "the editor closed before the version could be applied" };
+        try {
+          const node = editor.schema.nodeFromJSON(doc);
+          editor.view.dispatch(editor.state.tr.replaceWith(0, editor.state.doc.content.size, node.content));
+          return { ok: true };
+        } catch (e) {
+          return { ok: false, error: `that version could not be read back (${e?.message || e})` };
+        }
+      },
+    });
+  }, [editor, pageId]);
 
   /* ⛔ CLICK IN THE BLANK PART OF THE PAGE AND THE CARET GOES THERE — AND NOTHING ELSE
    * HAPPENS (B1368 → B1393, B1393 ×2, and B1393 ×3 which is the one that got it right).
@@ -708,7 +957,13 @@ export default function NoteEditor({
   const exportPage = useCallback(async () => {
     if (!editor || editor.isDestroyed) return;
     const json = editor.getJSON();
-    const images = await readNoteImages(imageIdsInDoc(json));
+    // Pictures always inline; attached FILES inline up to a size and are otherwise NAMED
+    // and reported as lossy (NEW-5) — a 30 MB drawing base64'd into a `.md` produces a file
+    // nothing will open, which is a worse answer than a stated one.
+    const images = {
+      ...await readNoteImages(imageIdsInDoc(json)),
+      ...await readNoteFiles(attachmentIdsInDoc(json), { maxBytes: MD_INLINE_ATTACHMENT_MAX }),
+    };
     const { markdown, lossy } = docToMarkdown(json, { title, images });
     onExportMarkdown?.({ markdown, lossy, filename: safeFileName(title) });
   }, [editor, title, onExportMarkdown]);
@@ -737,8 +992,28 @@ export default function NoteEditor({
   return (
     <div className="planyr-note" style={{ display: "flex", flexDirection: "column", minHeight: 0, flex: 1, background: "var(--surface-page)" }}>
       <EditorStyles />
-      <NoteToolbar editor={editor} onExport={exportPage} onPrint={printPage} />
+      <NoteToolbar
+        editor={editor}
+        onExport={exportPage}
+        onPrint={printPage}
+        onAttach={() => { pendingPick.current = "attachment"; pickRef.current?.click(); }}
+        onHistory={() => setHistoryOpen((v) => !v)}
+        historyOpen={historyOpen}
+      />
       <FindBar term={find.term} count={find.count} index={find.index} onStep={stepFind} onClear={onClearSearch} />
+
+      {/* ONE file picker for both slash commands and the toolbar's attach button — which
+          kind of insert it is for is decided when it is opened, not by having two of them. */}
+      <input
+        ref={pickRef}
+        data-testid="note-file-input"
+        type="file"
+        multiple
+        onChange={pickFiles}
+        style={{ display: "none" }}
+      />
+
+      <div style={{ flex: 1, minHeight: 0, display: "flex" }}>
 
       {/* The mat. It is the WHOLE pane, and a press — single OR double — anywhere on it lands
           the caret (B1368, B1393); see focusFromMat. `data-testid` so the headless check can
@@ -769,6 +1044,16 @@ export default function NoteEditor({
           onExpand={() => setPasteExpanded(true)}
           onPick={applyPasteMode}
           onDismiss={() => setPasteOffer(null)}
+        />
+        {/* THE SLASH MENU (NEW-1). Drawn over the mat at the `/` itself; every decision
+            about it is the plugin's — see lib/notesSlashMenu.js. */}
+        <NoteSlashMenu
+          open={slash.open}
+          items={slash.items}
+          index={slash.index}
+          at={slashAt}
+          onPick={(id) => runSlash(id, { from: slashRef.current.from, to: slashRef.current.to })}
+          onHover={() => {}}
         />
         {/* A DOCUMENT page (the owner's choice over a free-form canvas): a fixed-width sheet.
             ⛔ IT IS LEFT-ALIGNED, NOT CENTRED (B1369). Centring it read as "my stuff is
@@ -828,6 +1113,32 @@ export default function NoteEditor({
 
           <EditorContent editor={editor} />
         </div>
+      </div>
+
+        {/* ⛔ BOTH PANES SIT TO THE **RIGHT** OF THE SHEET, and that is what makes them free
+            of VIEWPORT-STABLE's compensation problem: the document column is left-aligned
+            (B1369), so opening or closing either one cannot move the text sideways. There
+            is no delta to measure because there is no delta. */}
+        <NoteOutline
+          entries={outline}
+          activeIndex={outlineActive}
+          collapsed={foldedHeadings}
+          open={outlineOpen}
+          onToggleOpen={() => setOutlineOpen((v) => !v)}
+          onGo={goToHeading}
+          onToggleRow={(id) => setFoldedHeadings((prev) => {
+            const next = new Set(prev);
+            if (next.has(id)) next.delete(id); else next.add(id);
+            return next;
+          })}
+        />
+        <NoteHistory
+          open={historyOpen}
+          versions={versions}
+          busy={historyBusy}
+          onRestore={handleRestore}
+          onClose={() => setHistoryOpen(false)}
+        />
       </div>
       <DocMenu at={docMenu} onPlainPaste={pastePlainFromClipboard} onClose={() => setDocMenu(null)} />
     </div>

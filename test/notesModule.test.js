@@ -42,14 +42,24 @@ const stripComments = (s) => s
 const code = (rel) => stripComments(src(rel));
 
 const MODULE_ID = "notes";
-const JSX_SURFACES = ["Notes.jsx", "components/NotesTree.jsx", "components/NoteEditor.jsx"];
+const JSX_SURFACES = [
+  "Notes.jsx", "components/NotesTree.jsx", "components/NoteEditor.jsx",
+  // NEW-1…NEW-6 chrome. Added to the SURFACE list, not just the file list, so the
+  // theme-token and module-scope guards cover them like every other visible surface.
+  "components/NoteSlashMenu.jsx", "components/NoteOutline.jsx", "components/NoteHistory.jsx",
+  "components/QuickOpen.jsx",
+];
 const ALL_NOTES_FILES = [
   "Notes.jsx", "components/NotesTree.jsx", "components/NoteEditor.jsx", "components/NoteToolbar.jsx",
+  "components/NoteSlashMenu.jsx", "components/NoteOutline.jsx", "components/NoteHistory.jsx", "components/QuickOpen.jsx",
   "lib/notesModel.js", "lib/notesStore.js", "lib/notesCloud.js", "lib/notesMarkdown.js", "lib/notesExtensions.js",
   "lib/notesTime.js", "lib/notesPrint.js", "lib/notesImageDb.js", "lib/notesImageIntake.js",
   "lib/notesImageNode.js", "lib/notesSearchHighlight.js", "lib/notesDocHtml.js", "lib/notesTabKey.js",
   "lib/notesSketchModel.js", "lib/notesSketchRender.js", "lib/notesSketchNode.js", "lib/notesSketchEditor.js",
   "lib/notesPastePlain.js", "lib/notesBlockKeys.js",
+  "lib/notesSlashMenu.js", "lib/notesQuickOpen.js", "lib/notesVersions.js", "lib/notesTasks.js",
+  "lib/notesOutline.js", "lib/notesFileMeta.js", "lib/notesAttachNode.js", "lib/notesCalloutNode.js",
+  "lib/notesToggleNode.js",
 ];
 const SKETCH_FILES = ALL_NOTES_FILES.filter((f) => f.includes("Sketch"));
 
@@ -253,8 +263,14 @@ describe("the editor is split off the route's static path", () => {
 
   it("the pending snapshot is plain JSON captured at edit time, not queried at flush time", () => {
     const editor = src("components/NoteEditor.jsx");
-    expect(editor, "onUpdate must snapshot getJSON() into pendingRef").toMatch(/pendingRef\.current = \{ id: pageId, doc: ed\.getJSON\(\) \}/);
+    expect(editor, "onUpdate must read getJSON() at EDIT time").toMatch(/onUpdate: \(\{ editor: ed \}\) => \{\s*\n\s*const doc = ed\.getJSON\(\);/);
+    expect(editor, "…and put that plain object in pendingRef").toMatch(/pendingRef\.current = \{ id: pageId, doc \}/);
     expect(editor, "the flush writes the captured object").toMatch(/writePage\(pending\.id, pending\.doc\)/);
+    /* NEW-3 added a SECOND ref holding the same document for the version snapshot, and the
+     * separation is load-bearing: `pendingRef` is emptied by the flush, whose cleanup runs
+     * BEFORE the snapshot's on unmount, so a snapshot reading it found null every time. */
+    expect(editor, "the version snapshot keeps its own copy, which the flush never clears").toMatch(/lastDocRef\.current = \{ id: pageId, doc \}/);
+    expect(editor, "…and the unmount snapshot reads THAT ref").toMatch(/const last = lastDocRef\.current;/);
   });
 
   it("beforeunload uses the SAME flush as unmount", () => {
@@ -351,10 +367,13 @@ describe("no dialog boxes anywhere in the module (owner rule)", () => {
     expect(bar).not.toMatch(/useState\([^)]*editor\s*\./);
     /* The count stays capped as a second, blunter net. The bar's useStates are: the two
      * colour popovers' open flags, the link editor's open + href, the overflow drawer's
-     * open flag, and the table grid picker's open + hovered size + grown grid (B1372) —
-     * every one of them a transient control-chrome flag, none of them a formatting state. */
+     * open flag, the table grid picker's open + hovered size + grown grid (B1372), and the
+     * callout tone picker's open flag (NEW-7) — every one of them a transient control-chrome
+     * flag, none of them a formatting state. The callout control reads its CURRENT TONE from
+     * `editor.getAttributes("noteCallout")` on every render, which is the sharper assertion
+     * above and the reason raising this blunt cap by one is not a weakening. */
     const states = [...bar.matchAll(/useState\(/g)].length;
-    expect(states, "a mirrored active-state copy drifts the moment the caret moves").toBeLessThanOrEqual(7);
+    expect(states, "a mirrored active-state copy drifts the moment the caret moves").toBeLessThanOrEqual(8);
   });
 });
 

@@ -27,21 +27,30 @@ import AppHeader from "../../shared/ui/AppHeader.jsx";
 import NotesTree from "./components/NotesTree.jsx";
 import {
   addPage, allPageIds, ancestorIds, deleteNode, emptyTree, expiredTrashIds, findPage,
-  firstPageId, migrate, movePage, pagesInScope, purgeTrashEntry, renameNode, restoreNode,
+  firstPageId, migrate, movePage, pagesInScope, purgeTrashEntry, recentPages, renameNode, restoreNode,
   setPageProject, subtreePageIds, touchPage, trashEntries, trashPageIds,
   SCOPE_ALL, SCOPE_PROJECT,
 } from "./lib/notesModel.js";
+import { isQuickOpenChord, quickOpenResults, rankQuickOpen } from "./lib/notesQuickOpen.js";
+import { groupTasksByProject } from "./lib/notesTasks.js";
 import { listProjects, warmProjects, onProjectsChanged } from "../../shared/projects/projects.js";
 import {
-  clearNotesStorageError, markPagesBinned, markPagesRestored, notesConflictFor, notesConflictLine,
+  clearNotesStorageError, collectOpenTasks, markPagesBinned, markPagesRestored, notesConflictFor, notesConflictLine,
   notesScopeLabel, notesStorageLine, onNotesConflict, onNotesStorageError, onNotesSyncState,
-  onNotesPagesChanged, purgePages, readNoteImages, readPage, readTreeRaw, resolveNotesConflict, searchNotes,
-  setNotesScope, startNotesSync, stopNotesSync, sweepImagesOfMissingPages, sweepOrphans,
-  writePage, writeTree,
+  onNotesPagesChanged, purgePages, readNoteFiles, readNoteImages, readPage, readTreeRaw,
+  resolveNotesConflict, searchNotes, setNotesScope, startNotesSync, stopNotesSync,
+  sweepImagesOfMissingPages, sweepOrphans, toggleNoteTask, writePage, writeTree,
 } from "./lib/notesStore.js";
-import { imageIdsInDocs, pageToMarkdown, safeFileName } from "./lib/notesMarkdown.js";
+import {
+  attachmentIdsInDocs, imageIdsInDocs, pageToMarkdown, safeFileName, MD_INLINE_ATTACHMENT_MAX,
+} from "./lib/notesMarkdown.js";
 
 const NoteEditor = lazy(() => import("./components/NoteEditor.jsx"));
+/* QUICK OPEN is lazy for the same reason the editor is (NEW-2): it is a palette nobody has
+ * asked for until they press the shortcut, so it has no business on the bytes the rail must
+ * download before it can paint. It is small, and the rule is the rule — this route's byte
+ * budget is the one thing the lazy boundary exists to protect. */
+const QuickOpen = lazy(() => import("./components/QuickOpen.jsx"));
 
 const RADIUS = { control: 8, pill: 999 }; // mirrored from shared/ui/controls.jsx — see NoteToolbar
 /* The footer's one line is coloured by what it SAYS, never by anything else — a failed sync
@@ -496,6 +505,75 @@ export default function Notes({
     [query, tree, projectId],
   );
 
+  /* ---- QUICK OPEN (NEW-2) ----------------------------------------------------------------
+   *
+   * ⛔ Ctrl/⌘+K WAS UNBOUND. AUDIT-FIRST, before choosing it: nothing in this repo claimed
+   * it — not the toolbar's link control (a button that opens an inline field, no shortcut),
+   * not the editor's keymap, not the shell's window handlers. So there is no link insertion
+   * to break, and no reason to fall back to Notion's Ctrl+P split. The shortcut is printed
+   * on the rail's search box so it is discoverable without a manual.
+   *
+   * The listener is on the WINDOW because the whole point is reaching it from inside the
+   * document, and it is gated on `isActive` — workspaces here are kept mounted-but-hidden,
+   * so an ungated window key would fire from a module nobody is looking at. */
+  const [quickOpen, setQuickOpen] = useState(false);
+  const [quickQuery, setQuickQuery] = useState("");
+
+  useEffect(() => {
+    if (!isActive) return undefined;
+    const onKey = (e) => {
+      if (!isQuickOpenChord(e)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      setQuickQuery("");
+      setQuickOpen(true);
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [isActive]);
+
+  // Leaving the workspace must not leave a palette floating over whatever replaced it.
+  useEffect(() => { if (!isActive) setQuickOpen(false); }, [isActive]);
+
+  const quickResults = useMemo(() => {
+    if (!quickOpen) return [];
+    const scope = projectId == null ? SCOPE_ALL : SCOPE_PROJECT;
+    // Every page in scope, with its trail — the shape `rankQuickOpen` wants, and a list the
+    // model already builds for its own reasons. No second index.
+    const entries = recentPages(tree, { projectId, limit: Number.MAX_SAFE_INTEGER });
+    const titleHits = rankQuickOpen(entries, quickQuery, { limit: 12 });
+    // The BODY half is the full-text index that already exists and already works — quick
+    // open falls through to it rather than re-implementing it.
+    const bodyHits = quickQuery.trim() ? searchNotes(tree, quickQuery, { projectId, scope }) : [];
+    return quickOpenResults({ titleHits, bodyHits });
+  }, [quickOpen, quickQuery, tree, projectId]);
+
+  /* ---- THE TASK ROLLUP (NEW-4) ------------------------------------------------------------
+   *
+   * Recomputed from the tree and the page bodies. It reads every page in scope, which is why
+   * it is computed only while the Tasks view is actually open (`tasksOpen`) — a rollup nobody
+   * is looking at must not read every note on every keystroke. */
+  const [tasksOpen, setTasksOpen] = useState(false);
+  const [taskTick, setTaskTick] = useState(0);
+  const taskGroups = useMemo(() => {
+    if (!tasksOpen) return [];
+    const scope = projectId == null ? SCOPE_ALL : SCOPE_PROJECT;
+    return groupTasksByProject(collectOpenTasks(tree, { projectId, scope }), projects);
+    // `taskTick` is a deliberate dependency: ticking an item rewrites a page BODY, which the
+    // tree does not change, so nothing else here would tell this memo to look again. The
+    // linter cannot see that — this memo reads page bodies through the store, which is not a
+    // value in its own dependency list — so the suppression is the honest form of it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tasksOpen, tree, projectId, projects, taskTick]);
+
+  const handleToggleTask = useCallback((t) => {
+    const r = toggleNoteTask(t.pageId, { index: t.index, text: t.text }, true);
+    // LOUD-FAILURE: a tick that did not land must not simply vanish off the list.
+    if (!r.ok) setExportNote("That item could not be ticked off — the note it lives in could not be saved.");
+    else if (!r.changed) setExportNote("That item has already moved or changed in its note, so nothing was ticked. Open the note to check.");
+    setTaskTick((n) => n + 1);
+  }, []);
+
   /* ---- tree actions ---- */
 
   /* ⛔ A PAGE MADE INSIDE A PROJECT IS FILED THERE, WITH NO EXTRA STEP (B1374, kept through
@@ -635,8 +713,15 @@ export default function Notes({
     if (!hit) return;
     const bodies = {};
     for (const id of subtreePageIds(hit.page)) bodies[id] = readPage(id);
-    // Pictures are inlined as data URLs so an exported branch is one self-contained file.
-    const images = await readNoteImages(imageIdsInDocs(bodies));
+    /* Pictures are inlined as data URLs so an exported branch is one self-contained file —
+       and so are ATTACHED FILES, up to a size (NEW-5). Past that they are NAMED in the
+       Markdown and reported as lossy rather than embedded: a 30 MB drawing base64'd into a
+       `.md` produces a file nothing will open, which is a worse outcome than a stated one.
+       Both maps are `id → data URL`, so the exporter takes one merged map. */
+    const images = {
+      ...await readNoteImages(imageIdsInDocs(bodies)),
+      ...await readNoteFiles(attachmentIdsInDocs(bodies), { maxBytes: MD_INLINE_ATTACHMENT_MAX }),
+    };
     const { markdown, lossy } = pageToMarkdown(hit.page, bodies, { images });
     handleExportPage({ markdown, lossy, filename: safeFileName(hit.page.title) });
   }, [tree, handleExportPage]);
@@ -657,6 +742,10 @@ export default function Notes({
       for (const k of node.pages || []) walk(k, [...trail, node.title]);
     };
     walk(hit.page, []);
+    /* Paper does not carry bytes, so an attachment prints as its NAME, its type and its
+       size — which is the whole of what a printed sheet can honestly say about a file, and
+       infinitely better than the silence it used to print (PDF-PARITY, NEW-5). The chip's
+       words come from the node itself, so no data URL is needed here. */
     const images = await readNoteImages(imageIdsInDocs(bodies));
     const [{ docToHtml }, { buildPrintDocument, printHtmlDocument }] = await Promise.all([
       import("./lib/notesDocHtml.js"),
@@ -734,6 +823,14 @@ export default function Notes({
           onRestore={handleRestore}
           onPurge={handlePurge}
           onPurgeAll={handlePurgeAll}
+          /* THE TASK ROLLUP (NEW-4). Opening the item carries its own words in as the
+             search term, so the editor marks the line and steps to it — the same mechanism
+             a search hit already uses, which is why "jump straight to that line" needed no
+             new plumbing in the editor. */
+          taskGroups={taskGroups}
+          onToggleTask={handleToggleTask}
+          onOpenTask={(t) => { setActivePageId(t.pageId); setHighlight(t.text); setQuery(""); }}
+          onViewChange={(v) => setTasksOpen(v === "tasks")}
         />
 
         <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", minHeight: 0 }}>
@@ -784,6 +881,29 @@ export default function Notes({
           </div>
         </div>
       </div>
+
+      {/* QUICK OPEN (NEW-2). Rendered last so it paints over the rail and the document,
+          and opened only by the shortcut — it costs a note nothing until it is asked for. */}
+      {quickOpen ? (
+        <Suspense fallback={null}>
+          <QuickOpen
+            open
+            query={quickQuery}
+            results={quickResults}
+            onQuery={setQuickQuery}
+            onClose={() => setQuickOpen(false)}
+            onPick={(hit) => {
+              setQuickOpen(false);
+              setActivePageId(hit.pageId);
+              setQuery("");
+              // A BODY hit carries the phrase into the page, exactly as the rail's own
+              // search hits do — landing on the note without being shown where the words
+              // are is what made search feel unfinished before B1291's find bar.
+              setHighlight(hit.where === "body" ? quickQuery : "");
+            }}
+          />
+        </Suspense>
+      ) : null}
     </div>
   );
 }
