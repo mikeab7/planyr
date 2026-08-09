@@ -6,7 +6,7 @@
  * header must not react; (4) the Schedule iframe survives a switch (no Gantt re-boot).
  * The signed-in halves (open drawing survives a switch, no cloud re-pull) are V-items. */
 import { test, expect } from "@playwright/test";
-import { openModule, moduleTab, expectOnScreen, expectOffScreen } from "./helpers.js";
+import { openModule, moduleTab, expectOnScreen } from "./helpers.js";
 
 test.describe("keep-alive module switching (logged out)", () => {
   test("a visited workspace stays mounted (hidden) after switching away", async ({ page }) => {
@@ -34,24 +34,17 @@ test.describe("keep-alive module switching (logged out)", () => {
     await expect(iframe).toBeVisible();
   });
 
-  /* B1179 / B266082 — this case was RED on main for 17 consecutive scheduled runs, and BOTH of
-   * its halves were wrong in a way that hid the other.
+  /* B1179 / B266082 rewrote this case once already, for a stale step. B1173(×2) rewrites it
+   * again, for a changed PRODUCT DECISION rather than a stale one — and the difference is worth
+   * recording, because the assertions that go are the ones that were right about the old design.
    *
-   * (1) It pressed Escape to leave fullscreen. Since B1156, `f` asks for REAL browser
-   *     fullscreen (the Fullscreen API on documentElement) and DELIBERATELY leaves Esc to the
-   *     browser, which owns that gesture in native mode — fighting it would double-toggle.
-   *     Headless Chromium has no browser chrome, so nothing exits on Esc. Probed directly on
-   *     this build: after `f` → {fullscreenElement: true}; after Escape → {fullscreenElement:
-   *     true}; after document.exitFullscreen() → {fullscreenElement: false}. The APP is right;
-   *     the STEP was written for the old chrome-hide `f`, where Esc did the work.
-   * (2) Its "the chrome is back" assertion was toBeVisible() on a module tab — which is true of
-   *     a tab sitting at y = −44, off the top of the screen. So the stale step above did not
-   *     even fail where it was wrong: it failed one line later, on a click, and the case's real
-   *     subject (does a HIDDEN module's header react to a global key?) was never reached.
-   *
-   * Rewritten to exercise the product as it actually is, on BOTH exit paths, and to assert
-   * position rather than mere visibility. Nothing is relaxed: the native path now proves the
-   * chrome genuinely collapses and genuinely returns, which the old version never did. */
+   * B1156 made `f` a real browser fullscreen AND hid the header, so this case proved the chrome
+   * genuinely left the screen (`expectOffScreen` on a module tab) and came back. The owner's second
+   * report overruled the hiding: "I should still have the two headers at the top when I go into
+   * full screen." So the chrome must NOT leave the screen, and the two `expectOffScreen` steps are
+   * inverted rather than deleted — the position assertion is exactly as strict, it just asserts the
+   * opposite fact. NOTHING ELSE IS RELAXED, and the case's real subject is unchanged: does a HIDDEN
+   * module's header react to a global key? */
   test("global keys act on the visible module only (hidden headers ignore 'f') — native fullscreen", async ({ page }) => {
     await page.goto("/");
     await openModule(page, "doc-review");   // Review now mounted
@@ -59,33 +52,38 @@ test.describe("keep-alive module switching (logged out)", () => {
 
     // 'f' toggles fullscreen in the ACTIVE (Site) header…
     await page.keyboard.press("f");
-    await expect(page.getByTitle(/Exit fullscreen/i)).toBeVisible();
     expect(await page.evaluate(() => !!document.fullscreenElement), "'f' should enter REAL browser fullscreen (B1156)").toBe(true);
-    // …and the chrome really collapses — the tabs leave the screen, they do not merely "hide".
-    await expectOffScreen(page, moduleTab(page, "site-planner"), "the Site tab in fullscreen");
+    // …exactly ONE header claims the mode — the visible one. (Two claiming it is the "two stacked"
+    // defect the #869 harness exists to catch, and it is invisible now that nothing floats.)
+    await expect(page.locator('header[data-fullscreen="on"]')).toHaveCount(1);
+    // …AND BOTH ROWS STAY PUT. This is B1173(×2): the tabs are still on screen, so a plan or a
+    // workspace can be switched without leaving fullscreen first.
+    // BOTH rows, asserted by a control from each: the workspace tabs (row 2) and the fullscreen
+    // toggle (row 1). The breadcrumb's plan crumb is deliberately NOT used here — this spec never
+    // opens a plan, so it does not exist, and asserting it would be testing the fixture.
+    await expectOnScreen(page, moduleTab(page, "site-planner"), "the Site tab (row 2) IN fullscreen");
+    await expectOnScreen(page, page.getByTestId("toggle-fullscreen").filter({ visible: true }), "the row-1 controls IN fullscreen");
+    // …and the one exit control reports the mode it is in.
+    await expect(page.getByTestId("toggle-fullscreen").filter({ visible: true })).toHaveAttribute("aria-pressed", "true");
 
     // Leave the way the browser's own UI would. Esc belongs to the BROWSER in native mode and
     // there is no browser UI here, so the API is the honest stand-in (the same call every
     // ui-audit fullscreen harness makes).
     await page.evaluate(() => document.exitFullscreen());
-    await expect(page.getByTitle(/Exit fullscreen/i)).toHaveCount(0);
+    await expect(page.locator('header[data-fullscreen="on"]')).toHaveCount(0);
     await expectOnScreen(page, moduleTab(page, "site-planner"), "the Site tab after leaving fullscreen");
 
-    // THE ACTUAL SUBJECT, which the stale step above never reached: the hidden Review header
-    // must not have reacted to the global key. Switching there shows normal chrome.
+    // THE ACTUAL SUBJECT: the hidden Review header must not have reacted to the global key.
     await openModule(page, "doc-review");
     await expectOnScreen(page, moduleTab(page, "doc-review"), "the Review tab");
-    await expect(page.getByTitle(/Exit fullscreen/i)).toHaveCount(0);
+    await expect(page.locator('header[data-fullscreen="on"]')).toHaveCount(0);
   });
 
-  /* The OTHER half of B1156's design, and the branch Escape genuinely owns. When the Fullscreen
-   * API refuses (no user activation, a permissions policy, an iframe without allow="fullscreen")
-   * or does not exist at all (iOS Safari has no fullscreen for a non-video element), `f` falls
-   * back to a plain chrome-hide — and there, Escape IS the app's job. Deleting the Escape
-   * assertion outright would have left that path with no coverage at all, which is how a spec
-   * "quietly rewritten to match current behaviour" blesses a future regression. So it is not
-   * deleted; it is aimed at the path it describes. */
-  test("the fullscreen FALLBACK (request refused) puts the chrome back on Escape", async ({ page }) => {
+  /* The branch that used to be the chrome-hide FALLBACK. B1173(×2) retired the fallback — with the
+   * header staying put there was nothing left for it to do, so it would have been a keypress that
+   * visibly changed nothing. The obligation it encoded (never a silent no-op — LOUD-FAILURE) is
+   * unchanged and is now met by a notice, so this case is re-aimed at that rather than deleted. */
+  test("a REFUSED fullscreen request says so, and leaves the chrome alone", async ({ page }) => {
     await page.addInitScript(() => {
       // Refuse every fullscreen request, exactly as a permissions policy would.
       const refuse = () => Promise.reject(new Error("fullscreen-refused-by-test"));
@@ -98,14 +96,11 @@ test.describe("keep-alive module switching (logged out)", () => {
     await openModule(page, "site-planner");
 
     await page.keyboard.press("f");
-    await expect(page.getByTitle(/Exit fullscreen/i)).toBeVisible();
+    await expect(page.getByTestId("fullscreen-refused")).toBeVisible();
     expect(await page.evaluate(() => !!document.fullscreenElement), "the request was refused, so the browser must NOT be in fullscreen").toBe(false);
-    await expectOffScreen(page, moduleTab(page, "site-planner"), "the Site tab in fallback fullscreen");
-
-    // Fallback mode never entered browser fullscreen, so the app owns the exit — and Escape is it.
-    await page.keyboard.press("Escape");
-    await expect(page.getByTitle(/Exit fullscreen/i)).toHaveCount(0);
-    await expectOnScreen(page, moduleTab(page, "site-planner"), "the Site tab after Escape");
+    // No header may claim a mode the document is not in, and nothing moved.
+    await expect(page.locator('header[data-fullscreen="on"]')).toHaveCount(0);
+    await expectOnScreen(page, moduleTab(page, "site-planner"), "the Site tab after a refused request");
   });
 
   test("stray keys with hidden workspaces mounted don't crash anything", async ({ page }) => {

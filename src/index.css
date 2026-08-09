@@ -469,6 +469,17 @@ input[type="range"] { height: 18px; }
 .no-hscrollbar { scrollbar-width: none; -ms-overflow-style: none; -webkit-overflow-scrolling: touch; }
 .no-hscrollbar::-webkit-scrollbar { height: 0; width: 0; display: none; }
 
+/* NEW-4 — the Settings panel's section nav. A column beside the content on a desktop-width
+   modal; a wrapping row above it once the modal is squeezed to a phone's width, where a fixed
+   side column would leave the content a sliver. Done in CSS rather than with a matchMedia hook
+   because the panel needs no JS to know how wide it is, and this file costs no route bundle. */
+.settings-nav { flex: 0 0 148px; display: flex; flex-direction: column; gap: 2px; }
+@media (max-width: 560px) {
+  .settings-shell { flex-direction: column; }
+  .settings-nav { flex: none; flex-direction: row; flex-wrap: wrap; }
+  .settings-nav > button { flex: 1 1 auto; }
+}
+
 @keyframes pf-pulse {
   0%, 100% { opacity: 1; transform: scale(1); }
   50% { opacity: .35; transform: scale(.7); }
