@@ -268,7 +268,7 @@ function viewportOf(el) {
   return w > 0 && h > 0 ? { width: w, height: h, measured: true } : { width: 1024, height: 768, measured: false };
 }
 
-export default function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatus = {}, setLayerStatus, sites = [], activeSiteId, onOpenSite, onDeleteSite, onSetStatus, onRenameSite, onSharedChange, onUseParcels, onSkip }) {
+export default function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatus = {}, setLayerStatus, sites = [], activeSiteId, onOpenSite, onDeleteSite, onSetStatus, onRenameSite, onSharedChange, onUseParcels, onSkip, onViewCenter }) {
   const elRef = useRef(null);
   const mapRef = useRef(null);
   const addrTokRef = useRef(0); // B545: address-search generation — a newer search invalidates an older in-flight one
@@ -314,6 +314,19 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
   const [addr, setAddr] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
+  /* NEW-4 — a county outage used to produce a banner and nothing else: the owner was left on a map
+   * that would not give him a lot, with no indication that he could proceed anyway. When a source
+   * reports UNAVAILABLE (as opposed to "no parcel right there", which is a different fact), the
+   * way forward is offered in the same breath — start the plan at this point and draw the boundary
+   * by hand, with the location captured so the plan is never stranded. */
+  const [fallbackOffer, setFallbackOffer] = useState(null); // {at:{lat,lon}} | null
+  const onViewCenterRef = useRef(onViewCenter);
+  onViewCenterRef.current = onViewCenter;
+  const failUnavailable = (msg, at) => {
+    setErr(msg);
+    const c = at || (mapRef.current ? mapRef.current.getCenter() : null);
+    setFallbackOffer(c ? { at: { lat: c.lat, lon: c.lon != null ? c.lon : c.lng } } : null);
+  };
   const [basemap, setBasemap] = useState("esri");
   const [labels, setLabels] = useState(true);
   const [selectMode, setSelectMode] = useState(false); // off = pan only; on = add/remove parcels
@@ -531,6 +544,9 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
       // math). It has to hold when every GIS endpoint is down, which is exactly when a site
       // falls through to a default — the same reason coloradoRegions.js is network-free.
       setViewState(siteState({ lat: c.lat, lng: c.lng }));
+      // NEW-4 — report the centre up so a blank plan started from the header is born LOCATED at
+      // the spot the owner is looking at, instead of nowhere.
+      onViewCenterRef.current && onViewCenterRef.current({ lat: c.lat, lon: c.lng });
     };
     onMove();
     /* B209502 — WARM THE COUNTY GEOMETRY, THEN ASK AGAIN.
@@ -1282,7 +1298,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
     // down), or a primary whose breaker is open, are skipped this click.
     const { candidates, realPrimaries } = resolveCandidates(latlng);
     if (!candidates.length) { setErr("Parcel services are still loading — give it a second and click again."); return; }
-    setErr(""); setBackupNotice(null); setCachedNotice(null);
+    setErr(""); setFallbackOffer(null); setBackupNotice(null); setCachedNotice(null);
 
     // Instant local toggle-off: a click inside an already-highlighted parcel deselects
     // it with zero network round-trip — we already have its geometry (B441).
@@ -1338,11 +1354,14 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
         const gap = noParcelSourceNote(countyIdentity(latlng.lat, latlng.lng));
         // "Couldn't reach any parcel server" reads differently from "reached one, but
         // there's no parcel at this exact point" (B245).
-        setErr(res.responded === 0
-          ? "The county parcel server isn't responding right now — try again in a moment, or trace the lot from the Aerial underlay."
-          : gap
-            ? `${gap} You can still trace the lot from the Aerial underlay.`
-            : "No parcel right there — zoom in and click directly on a lot.");
+        /* NEW-4 — an OUTAGE carries the fallback; the other two do not. "No parcel right there" is a
+         * real answer about this point, and a county with no wired source (`gap`) is a coverage fact
+         * — neither is a reason to offer "start the plan here anyway", which exists for the case
+         * where the service that WOULD have answered is down. */
+        if (res.responded === 0) failUnavailable("The county parcel server isn't responding right now — try again in a moment, or start the plan here and draw the boundary yourself.", latlng);
+        else setErr(gap
+          ? `${gap} You can still trace the lot from the Aerial underlay.`
+          : "No parcel right there — zoom in and click directly on a lot.");
         return;
       }
       // The authoritative live answer always wins: drop the optimistic outline and rebuild
@@ -1371,7 +1390,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
       }
     } catch (e) {
       if (optKey) rollbackHit(optKey);
-      setErr(humanizeError(e));
+      failUnavailable(humanizeError(e), latlng); // NEW-4 — a thrown lookup is an outage too
     } finally {
       setBusy(false);
     }
@@ -1436,7 +1455,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
     const q = addr.trim();
     if (!q) return;
     const tok = ++addrTokRef.current; // B545: claim this search's generation; guard every async setState below
-    setBusy(true); setErr(""); setParcelInfo(null);
+    setBusy(true); setErr(""); setFallbackOffer(null); setParcelInfo(null);
     try {
       const center = mapRef.current ? mapRef.current.getCenter() : null;
       const hit = await geocodeAddress(q, center);
@@ -1446,13 +1465,37 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
       mapRef.current.flyTo([hit.lat, hit.lon], 18, { duration: 0.75 });
       await selectParcelAt({ lat: hit.lat, lng: hit.lon }, hit.label, tok); // NEW-2: select + surface parcel info
     } catch (_) {
-      if (tok === addrTokRef.current) setErr("Address search is unavailable right now — pan/zoom the map to your site instead.");
+      if (tok === addrTokRef.current) failUnavailable("Address search is unavailable right now — pan/zoom the map to your site, or start the plan where the map is looking and draw the boundary.");
     } finally {
       if (tok === addrTokRef.current) setBusy(false);
     }
   };
 
   const clearSel = () => { clearHilites(); setSelected([]); setParcelInfo(null); setBackupNotice(null); setCachedNotice(null); };
+
+  /* NEW-4 — THE FALLBACK. Start a plan with no parcel, LOCATED at `at` (or wherever the map is
+   * looking), so the owner can draw the boundary himself and still get the aerial, the flood
+   * layer, contours and the county's rules. This is the whole point of capturing the origin here:
+   * a plan born located can never be stranded, and when the county service comes back the drawn
+   * boundary is already sitting on the right ground.
+   *
+   * The county is resolved best-effort on the same 3s race `planSelected` uses — it is a nicety
+   * (the planner re-resolves it from the origin on load), so an outage never blocks the fallback. */
+  const startBlankHere = async (at) => {
+    const c = at || (mapRef.current ? mapRef.current.getCenter() : null);
+    if (!c) { onSkip && onSkip(); return; }
+    const origin = { lat: c.lat, lon: c.lon != null ? c.lon : c.lng };
+    setErr(""); setFallbackOffer(null);
+    let county = null;
+    try {
+      const ans = await Promise.race([
+        countyAtPoint(origin.lon, origin.lat),
+        new Promise((res) => setTimeout(() => res(null), 3000)),
+      ]);
+      county = ans?.name ? countyKeyForName(ans.name) : null;
+    } catch (_) { /* the planner resolves it from the origin on load */ }
+    onSkip && onSkip({ origin, county, name: parcelInfo?.label || addr.trim() || "Untitled site" });
+  };
   // Always capture the planner underlay from Esri: it supports image `export`
   // (USGS tiles render on the map but its export op returns no image). The
   // boundary aligns to either source, so the planner aerial stays reliable.
@@ -1707,6 +1750,8 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
             cachedAsOfLabel={parcelInfo.cached ? fmtAsOf(parcelInfo.cached.asOf) : ""}
             onDismiss={() => setParcelInfo(null)}
             onPlan={planSelected}
+            // NEW-4 — the unavailable state offers the fallback instead of dead-ending.
+            onStartBlank={parcelInfo.status === "unavailable" ? () => { const m = mapRef.current; startBlankHere(m ? m.getCenter() : null); setParcelInfo(null); } : null}
           />
           </Suspense></PanelErrorBoundary>
         )}
@@ -1835,8 +1880,16 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
 
         {/* error toast (bottom-left) — surfaced only when there's an error */}
         {err && (
-          <div style={{ position: "absolute", left: 12, bottom: 12, zIndex: 1000, maxWidth: 380, background: "var(--surface-overlay)", border: `1px solid ${PAL.panelLine}`, borderRadius: 8, padding: "8px 11px", fontSize: 12.5, color: PAL.accent, lineHeight: 1.45, pointerEvents: "none" }}>
+          <div style={{ position: "absolute", left: 12, bottom: 12, zIndex: 1000, maxWidth: 380, background: "var(--surface-overlay)", border: `1px solid ${PAL.panelLine}`, borderRadius: 8, padding: "8px 11px", fontSize: 12.5, color: PAL.accent, lineHeight: 1.45, pointerEvents: fallbackOffer ? "auto" : "none" }}>
             {err}
+            {/* NEW-4 — the way forward rides WITH the bad news. Only on a genuine source outage:
+                "no parcel right there" is an answer, not an outage, and gets no button. */}
+            {fallbackOffer && (
+              <button onClick={() => startBlankHere(fallbackOffer.at)} data-testid="map-start-blank-here"
+                style={{ display: "block", width: "100%", marginTop: 8, height: 30, borderRadius: 6, border: "none", background: PAL.accent, color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
+                Start the plan here &amp; draw the boundary →
+              </button>
+            )}
           </div>
         )}
         {/* statewide-backup notice (bottom-left) — the clicked lot was answered by the

@@ -1339,7 +1339,8 @@ export function parcelDisplayInfo(parcels) {
     out.set(p.id, {
       tag, depth,
       superseded: (kids.get(p.id) || []).length > 0,
-      name: (p && p.addr) || `Parcel ${tag}`,
+      // NEW-3 — a typed NAME wins over the situs address, which wins over the positional tag.
+      name: (p && p.label) || (p && p.addr) || `Parcel ${tag}`,
       parentId: isRoot(p) ? null : p.parentId,
     });
   }
