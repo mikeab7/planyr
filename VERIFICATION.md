@@ -115,6 +115,31 @@ was never clicked" quietly ships broken.
 
 ### V97120 — B298560/B298561/B298562: the flood/drainage check's elevation leg, on his own Bain plan `Blocker: real-data` + `Blocker: live-GIS`
 
+**Status: ✅ PASSED (2026-08-09) on (b), (c) and (d) — verified live by the owner on his own Bain plan, signed in, edge `3ecd1e1`. One RESIDUE, (a), and it is a mis-specified criterion of mine rather than a defect — see below.**
+
+**THE HEADLINE, and it is the user-visible one: THE COUNTY LAYERS NOW START AT 5 ms.** Warm run, second ↻, PerformanceResourceTiming, offsets from the first request:
+
+| at | host | duration |
+|---|---|---|
+| 0 ms | elevation.nationalmap.gov | 657 ms |
+| 5 ms | gisportal.fortbendcountytx.gov ×4 | 52 / 52 / 52 / 57 ms |
+| 58 ms | gisportal.fortbendcountytx.gov | 44 ms |
+| 1,596 ms | supabase save | 1,380 ms |
+| 3,093 ms | supabase save | 256 ms |
+| | **TOTAL** | **3,349 ms** |
+
+**Every flood-zone answer is in hand by ~100 ms.** Before this they did not begin until the elevation call returned — 1,000 ms on a good day, 7,702 ms on a bad one. **B298561 (NEW-2) is CONFIRMED on his own plan**, including the county-sampler ordering arm that was explicitly out of the sandbox's reach.
+
+**And the loud state shipped properly (B298560/B298562).** The freshness hover reads, verbatim: *"The flood check still matches what's drawn. Ground elevation 135.4 ft NAVD88 — USGS 3DEP elevation, bare-earth, pulled just now."* Provenance named, `data-ground-elev` present for a headless read, nothing silent.
+
+**⛔ CORRECTION TO MY OWN ACCEPTANCE CRITERIA, recorded so this ledger is honest rather than flattering (owner's own correction).** Criterion (a) asked that a warm re-check **not** hit `elevation.nationalmap.gov`. It DOES — 657 ms — **and that is CORRECT, not a failure**: the explicit ↻ is *specified* to bypass the cache, so hitting USGS is the button doing its job, and the hover saying *"pulled just now"* is the confirmation. **(a) was untestable on the path it was written for** — ↻ is by definition the explicit path — so the cache-HIT half is the residue, and the assertion to use is the hover's provenance line (it must read *"held from an earlier … read"* with an age, not *"pulled just now"*) whenever someone can trigger a NON-explicit check.
+
+**RESIDUE:** (a) only — the cache-hit path, on a non-explicit check. (b) real latency, (c) the county-sampler ordering, (d) the named provenance in the hover: **all discharged live.**
+
+**⛔ AND A NEW DATUM THAT LANDS ON B298562's BUDGET, from the cold run on the same plan minutes earlier: a Fort Bend layer took 5,067 ms.** The county service is **not reliably fast either** — 52 ms warm against 5,067 ms cold, same endpoint. B298562 bounded the elevation call at 8 s and left the county samplers on their own 8 s default; whatever budget covers one should cover the other, or the next eight-second check is blamed on the wrong host. Recorded on B298562 as an open follow-up; **not built in this pass.**
+
+<details><summary>Original pending note (kept for the record)</summary>
+
 **Status: ⏳ PENDING.** Everything reachable from this sandbox is already done and is recorded below; what is left needs the REAL federal service and HIS plan, which is the whole point of the item.
 
 **Why this cannot be closed here.** The claim is a LATENCY claim about `elevation.nationalmap.gov` and about the five Fort Bend county water-surface rasters. The sandbox's egress proxy blocks both hosts, and the county-sampler branch only fires once the live jurisdiction identify resolves the county to Fort Bend. A stub can prove the ORDERING and the GATING (and does — see below); only the live service can prove the numbers.
@@ -133,9 +158,11 @@ was never clicked" quietly ships broken.
 4. Reload the page, open the plan, press **↻**. **Expected: still held — the store is IndexedDB, so a reload must not pay again.**
 5. Record the end-to-end check time for comparison against his measured 3,635 / 8,494 ms.
 
+</details>
+
 ### V97121 — B298563: does a `draincheck` timing row actually REACH `client_errors`? `Blocker: auth`
 
-**Status: ⏳ PENDING.** Same shape as V62544 (B265536) and pending for the same reason: an automated run is suppressed from the network write by design (B270912), so only a real signed-in browser can prove delivery.
+**Status: ⏳ PENDING** — not covered by the 2026-08-09 live pass (that pass read PerformanceResourceTiming, which is a different question from whether the app's own row reached the table). Unchanged below. Same shape as V62544 (B265536) and pending for the same reason: an automated run is suppressed from the network write by design (B270912), so only a real signed-in browser can prove delivery.
 
 **Steps:** signed in on planyr.io, press **↻ Re-check** on any georeferenced plan. Then either (a) in the console read `window.pfTelemetry.delivery()` and confirm `ok` incremented, or (b) query `public.client_errors` for `source = 'event:draincheck'` and confirm one row per press. **Expected:** one row carrying `legs` with `elev`, the `wse:*` per-raster entries, `calc`, `save` and `total`, plus `ground` / `groundCached`. **Also confirm the negative:** nothing in the row names the site, its address or its geometry — the payload is an allowlist and this is the read-back that proves it.
 ### V96960 — B298401: on planyr.io with the flood-tile flag on, does a Harris plan draw the floodplain instantly — and does a broken archive still fall back to live FEMA? `Blocker: live-GIS`
