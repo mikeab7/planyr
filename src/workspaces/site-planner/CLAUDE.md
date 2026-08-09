@@ -949,7 +949,33 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   Prop from `proposedSurface.sampleProposedAt`, which walks the SAME `grid.owners` the B826
   earthwork rows price off, so chip and ledger cannot drift).
   `fbcdWse.js` — FBCDD Atlas-14 DRAFT WSE samplers (Fort Bend): 0.2% mosaic → `derivedWse02Ft`,
-  per-watershed 100-yr multiplex → `derivedWse1pctFt` (B807).
+  per-watershed 100-yr multiplex → `derivedWse1pctFt` (B807). Its `onSample` hook reports ONE timing
+  per raster to `drainageTiming.js` (B298563) — a group total cannot say WHICH county layer went slow.
+- **⛔ `groundElevation.js` + `drainageTiming.js` (B298560–B298563) — THE DRAINAGE CHECK'S SLOWEST LEG,
+  AND THE INSTRUMENT THAT WOULD HAVE FOUND IT. Read the first module's header before touching
+  `checkDrainage`.** Measured live on the owner's signed-in Bain plan: the whole re-check cost 3.6–8.5 s
+  and ONE call — a USGS 3DEP transect for BARE-EARTH GROUND ELEVATION, whose geometry parameter is
+  **byte-identical run to run** — was 68–90% of it, at 997 / 5,761 / 7,702 ms for the same query.
+  **Four things not to undo:** **(a)** the cache key is built from `elevation.profileQuery`, the SAME
+  derivation that builds the URL, so a change to the georeference, the parcels or the transect rule is a
+  MISS rather than a stale read — never loosen it to a rounded lat/lng or a site id, because serving
+  elevation for the wrong ground is the whole failure mode; it lives in `gisCache`'s IndexedDB tier
+  (TIER-BY-REBUILDABILITY — re-fetchable cache may never compete with saved plans in the ~5 MB store).
+  **(b)** the transect starts at t=0 and the panel is NOT gated on it: `GROUND_PUBLISH_BUDGET_MS` (1.5 s)
+  bounds how long the PUBLISH waits, `GROUND_TIMEOUT_MS` (8 s) bounds the REQUEST, and the late answer
+  patches the number, the freshness dot and the remembered record in place. Four states, never fewer —
+  `value` / `void` / `pending` / `unavailable` — and **NEVER a default elevation**, because an assumed
+  ground surface is how a detention volume comes out confidently wrong. **(c)** the ↻ bypasses the cache
+  as a FORCE REFRESH, not a blocking re-read (the owner needs both "the button corrects a wrong cached
+  value" and "the press is fast"), and a cache hit is LOUD in the freshness hover with its age.
+  **(d)** ⛔ **NEITHER MODULE MAY REJOIN THE SITE ROUTE'S STATIC GRAPH** — both are reached only by the
+  dynamic `import()` inside `checkDrainage`; static they put 8.8 KB on the largest chunk and breached its
+  ceiling. That is why the hover sentence travels WITH the state (`groundElev.note`) instead of the render
+  calling back into the lib, and why the save-leg stamp in `cloudPushWithWatchdog` is gated on a ref.
+  Guards: the repo-root `test/` suites **groundElevation** (28, incl. both source guards),
+  **drainageTiming** (26) and **elevation**, plus the e2e spec **drainage-elevation-latency**
+  (mutation-proven both ways: restoring the gate reddens the publish arm alone, removing the cache
+  reddens the held-value arm alone).
 - Detention outlet / routing / criteria tier (NEW-A, Phase A): `detentionCriteria.js` (the versioned
   jurisdiction criteria registry — cited outlet/geometry criteria, referencing `detentionRules.js` for
   the verified release/storm/freeboard facts; audit + overrides), `outletStructure.js` (per-pond

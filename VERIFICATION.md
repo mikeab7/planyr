@@ -113,6 +113,32 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V97120 — B298560/B298561/B298562: the flood/drainage check's elevation leg, on his own Bain plan `Blocker: real-data` + `Blocker: live-GIS`
+
+**Status: ⏳ PENDING.** Everything reachable from this sandbox is already done and is recorded below; what is left needs the REAL federal service and HIS plan, which is the whole point of the item.
+
+**Why this cannot be closed here.** The claim is a LATENCY claim about `elevation.nationalmap.gov` and about the five Fort Bend county water-surface rasters. The sandbox's egress proxy blocks both hosts, and the county-sampler branch only fires once the live jurisdiction identify resolves the county to Fort Bend. A stub can prove the ORDERING and the GATING (and does — see below); only the live service can prove the numbers.
+
+**Already verified HERE, logged-out, against a seeded georeferenced plan with every host stubbed (e2e `drainage-elevation-latency.spec.js`, 4 arms, mutation-proven both ways):**
+- the transect and the first GIS request are issued within one event-loop turn of each other — the transect is no longer in front of the batch;
+- with 3DEP held 5 s, the panel PUBLISHES and the elevation reads a named `pending` state well inside 4 s, then resolves itself with no second press;
+- a second check publishes the HELD value immediately (`data-ground-cached="1"`) while the forced refresh runs underneath, and the fresh answer then REPLACES it;
+- a 503 from 3DEP produces `unavailable`, whose hover names the service and says nothing was assumed.
+- Mutants: publish budget → 60 s turns arm 2 red alone; `cache: null` turns arm 3 red alone.
+
+**Steps for the live pass (signed in, planyr.io, his Bain plan — "Concept A / Quiddity Hydrologic"):**
+1. Open DevTools → Network, filter `getSamples`. Press **↻ Re-check** in the Yield panel. Record: the wall-clock time from the press to the flood verdicts appearing, and the 3DEP `getSamples` duration. **Expected: the verdicts land in well under a second even when 3DEP takes seconds.**
+2. Confirm the five county rasters (`500YR_WSE`, the `100YR` per-watershed candidates, `Willow_500YR_Existing_WSE`) are requested WITHOUT waiting for `getSamples` to finish. **⚠ `Willow_500YR_Existing_WSE` still starts after the other four — that is correct and deliberate** (mosaic-first; see B298561).
+3. Press **↻** again. Hover the freshness dot. **Expected: the hover states the elevation was HELD from an earlier read, with its age; the press does not wait on USGS; a fresh `getSamples` still goes out.**
+4. Reload the page, open the plan, press **↻**. **Expected: still held — the store is IndexedDB, so a reload must not pay again.**
+5. Record the end-to-end check time for comparison against his measured 3,635 / 8,494 ms.
+
+### V97121 — B298563: does a `draincheck` timing row actually REACH `client_errors`? `Blocker: auth`
+
+**Status: ⏳ PENDING.** Same shape as V62544 (B265536) and pending for the same reason: an automated run is suppressed from the network write by design (B270912), so only a real signed-in browser can prove delivery.
+
+**Steps:** signed in on planyr.io, press **↻ Re-check** on any georeferenced plan. Then either (a) in the console read `window.pfTelemetry.delivery()` and confirm `ok` incremented, or (b) query `public.client_errors` for `source = 'event:draincheck'` and confirm one row per press. **Expected:** one row carrying `legs` with `elev`, the `wse:*` per-raster entries, `calc`, `save` and `total`, plus `ground` / `groundCached`. **Also confirm the negative:** nothing in the row names the site, its address or its geometry — the payload is an allowlist and this is the read-back that proves it.
+
 ### V78961 — B280402: the acreage badge no longer takes press 2, on his stub, on the repeat `Blocker: real-data` + `Blocker: auth`
 
 **The cause is DIAGNOSED FROM HIS OWN INSTRUMENT READ and REPRODUCED here, so this is a confirmation, not a hunt.** The parcel badge is a hit target while the cursor RESTS on it (a hover gate, B1327/NEW-4, so it can be dragged); resting is what a cursor does between the two presses of a double-click. It is now identity-transparent — it keeps its drag, but the resolver looks through it.
