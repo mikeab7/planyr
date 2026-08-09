@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-08-09 @ `ed7f8d3` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-08-09 @ `2aa1ad9` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_485 source files mapped._
+_488 source files mapped._
 
 ## infra
 
@@ -236,6 +236,8 @@ _485 source files mapped._
   - _exports_: `choosePlacement`, `METHOD`, `RUNGS`
 - **`src/shared/placement/verifyPlacement.js`** — Placement calibration + auto-verification: derive feet-per-unit from a labeled dimension, grade measured-vs-label percent off, and cross-check two scales for non-uniform stretch
   - _exports_: `calibrateFromDimension`, `CROSS_DISAGREE_PCT`, `crossCheckScales`, `VERIFY_OK_PCT`, `VERIFY_WARN_PCT`, `verifyDimension`
+- **`src/shared/prefs/smoothZoom.js`** — The smooth-zoom per-device preference: one key, one default, one writer, plus a same-tab + cross-tab subscription the planner reacts to.
+  - _exports_: `readSmoothZoom`, `SMOOTH_ZOOM_DEFAULT`, `SMOOTH_ZOOM_KEY`, `subscribeSmoothZoom`, `writeSmoothZoom`
 - **`src/shared/presence/editorLock.js`** — Single-active-editor lock over Web Locks API: one tab edits per project, others go read-only, with cross-tab yield bus and steal-based takeover, degrading open
   - _exports_: `createEditorLock`, `lockRole`
 - **`src/shared/presence/multiTab.js`** — Multi-tab presence over BroadcastChannel: detect the same project open in another same-browser tab to warn of edit conflicts, with pure summarize/prune heartbeat helpers
@@ -312,6 +314,8 @@ _485 source files mapped._
   - _exports_: `clampToBounds`, `dockAfterRelinquish`, `FLOAT_MIN_WIDTH`, `FLOAT_SIZE`, `initialFloatPos`, `reconcileForNarrow`, `shouldInspectorTakeDock`
 - **`src/shared/ui/FloatingPanel.jsx`** — NEW-1 poppable panels: a left-rail panel detached into a portal-to-body draggable card over the map (drag-clamp, session-remembered position, map pan/zoom isolation); composes PanelChrome
   - _exports_: `default (FloatingPanel)`
+- **`src/shared/ui/InterfaceSettings.jsx`** — The Interface section of Settings (display theme + smooth zoom), rendered by both Settings homes so they cannot disagree.
+  - _exports_: `default (InterfaceSettings)`
 - **`src/shared/ui/MiddleTruncate.jsx`** — CSS middle-ellipsis label: head ellipsizes, tail always drawn, full text on hover (NEW-4).
   - _exports_: `default (MiddleTruncate)`
 - **`src/shared/ui/moduleAccent.js`** — MODULE_ACCENT: single source of truth for per-workspace accent hexes (Site/Schedule/Review/Library) as pure React-free constants
@@ -412,7 +416,7 @@ _485 source files mapped._
 - **`src/workspaces/site-planner/lib/assemblyIntegrity.js`** — the bonded-assembly invariant + tear detector: re-derives every `attachedTo` child from its host (via `normalizeBondedChildren`) and reports what moved, so a partial apply can reach neither the canvas nor the wire
   - _exports_: `ASSEMBLY_TEAR_TOL_FT`, `assemblyIntegrity`, `assemblyTears`, `orphanPayload`, `tearPayload`
 - **`src/workspaces/site-planner/lib/auth.js`** — Thin Supabase Auth wrappers: signUp/signIn/signOut/reset/updatePassword, getUser, onAuthChange with pinned redirect origin
-  - _exports_: `getUser`, `onAuthChange`, `resetPassword`, `signIn`, `signOut`, `signUp`, `updatePassword`
+  - _exports_: `getUser`, `onAuthChange`, `resetPassword`, `signIn`, `signOut`, `signOutEverywhere`, `signUp`, `updatePassword`
 - **`src/workspaces/site-planner/lib/authMail.js`** — The one source of truth for who auth email comes from, and the confirmation / password-reset copy generated from it
   - _exports_: `AUTH_SENDER_EMAIL`, `AUTH_SENDER_LABEL`, `AUTH_SENDER_NAME`, `PASSWORD_RESET_MSG`, `SIGNUP_CONFIRM_MSG`
 - **`src/workspaces/site-planner/lib/basemaps.js`** — Shared aerial basemap SOURCE registry (Esri/USGS tiles + export + maxNative ceilings, B220 rule) + the planner's Off/Aerial/USGS choices; used by MapFinder and the planner Basemap control
@@ -553,6 +557,8 @@ _485 source files mapped._
   - _exports_: `ANCHOR_DRIFT_FT`, `anchorDriftFt`, `canonEnv`, `DRAIN_STUCK_MS`, `ENV_TOL_FT`, `envelopeContains`, `envelopeOf`, `factsFreshness`, `FETCH_TTL_MS`, `fetchStaleForEdit`, `fetchWatchdogFired`, `FRESHNESS_REASONS`, `revalidationNeed`
 - **`src/workspaces/site-planner/lib/fbcdWse.js`** — FBCDD Atlas-14 watershed-study DRAFT WSE point samplers (getSamples, feet, honest-null out of coverage): 0.2% off the county 500YR_WSE mosaic → derivedWse02Ft; 1% off the per-watershed 100YR rasters via extent-routed multiplex (max-finite governing, LOUD on any candidate failure) → derivedWse1pctFt (B807) — Fort Bend drainage checks
   - _exports_: `FBCDD_WSE02_URL`, `sampleWse02Point`, `sampleWse100Point`, `wse02CandidatesForPoint`, `wse100CandidatesForPoint`
+- **`src/workspaces/site-planner/lib/featureEditZoom.js`** — The zoom floor below which the on-building +/- edit controls must not exist, derived from a bump-out's own legibility, plus its fade-in ramp.
+  - _exports_: `FEAT_EDIT_FADE_SPAN`, `FEAT_EDIT_MAX_FT_PER_PX`, `FEAT_EDIT_MIN_OPACITY`, `FEAT_EDIT_MIN_PPF`, `FEAT_EDIT_MIN_PX`, `featureEditOpacity`
 - **`src/workspaces/site-planner/lib/featureHover.js`** — pure hover WORDING for the vector feature overlays: registry-driven `<Title> (<Source>) · <detail>` matching the OSM tooltips, with HIFLD's withheld sentinels treated as absence and ALL-CAPS agency text title-cased.
   - _exports_: `cleanAttr`, `HOVER_CLEANERS`, `HOVER_MAX_CHARS`, `hoverDetails`, `hoverIdentifyEnabled`, `hoverText`, `hoverTitle`, `pickAttr`, `sourceTag`, `titleCaseAgency`
 - **`src/workspaces/site-planner/lib/featureHoverAttach.js`** — lazily-loaded attach layer for the vector overlays' hover identify: binds the sticky tooltip on an esri featureLayer and installs the planner-canvas `identifyAt` accessor, kept off the boot bundle to pay the bundle budget.

@@ -113,6 +113,42 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V111104 — B286000 (×2): the smooth-zoom switch is where he now looks for it, on a SIGNED-IN account `Blocker: auth`
+
+**The signed-OUT home is proven here** — `e2e/smooth-zoom-settings.spec.js` (3/3) opens the row-1 Settings gear in a real browser, finds Smooth zoom beside the display theme, confirms it starts ON, flips it, proves `planarfit:smoothZoom` went to `"0"`, reloads, and flips it back; and it proves the row is absent from BOTH the View menu and the plan menu, so there is exactly one switch. **What a sandbox cannot do is sign in** (the egress proxy CORS-blocks Supabase auth), and signed IN the gear is deliberately hidden — the control lives in account → Settings → **Interface** instead. That path has never been rendered here.
+
+- **STEPS** — signed in on planyr.io: click the account pill → **Settings**. The panel should open on **Interface**, with Display theme first and **Smooth zoom** under it.
+- **PASS** = the row is there, checked by default, and toggling it OFF then reloading leaves it OFF; the drawing re-draws on every wheel notch with it off and scales-then-sharpens with it on; and **there is no Smooth zoom row anywhere else** — not in View ▾, not in the plan flyout.
+- **FAIL** = the row is missing, appears in two places, resets on reload, or the setting stops affecting how the wheel zoom draws.
+- **The specific regression to watch for:** a change made in Settings must take effect on the canvas **without a reload** (the planner subscribes to the preference), and turning it OFF mid-gesture must not leave a scaled frame on screen.
+
+### V111105 — B312544: the +/− controls are gone at whole-site zoom on the REAL Bain plan `Blocker: real-data`
+
+**The rule and the wiring are proven here** — `test/featureEditZoom.test.js` (11, including a verbatim replay of the pre-fix rule showing it armed at every one of his reported zooms) and `e2e/feature-edit-zoom.spec.js`, which drives a real wheel gesture either side of the 0.80 px/ft floor on a real drawn building and reads the answer against the app's own `data-render-ppf`. **What only his own plan can settle is whether the chosen zoom is the RIGHT one** — the threshold is a judgement about when an edit is worth offering, and the repro is a 109-acre site with buildings far larger than anything a sandbox fixture draws.
+
+- **STEPS** — open **Bain / "Concept - Original"**, zoom out until the whole site fits and the scale bar reads about 0–1,000 ft. Hover or select Building 3 or 4.
+- **PASS** = no green `+` / red `−` anywhere on the buildings at that zoom. Zoom in and they FADE in — softly, not popping — at a zoom where a bump-out is clearly a shape rather than a dot, and they are clickable the instant they are visible (a press must not be swallowed by a faint control).
+- **FAIL** = still visible at whole-site zoom · or they now wait so long that placing a dock zone or bump-out at a normal working zoom has become awkward. **The second failure is the one to report back with a number**: say roughly how far in you had to go, and the threshold moves as a product decision on the item — never nudged quietly.
+- Also worth a glance on a SMALL site, so the absolute rule is confirmed to read the same at both ends: a 30-acre plan should behave identically at the same scale-bar reading.
+
+### V111106 — B1173 (×2): both header rows survive real fullscreen on HIS screen `Blocker:` none — owner judgement only
+
+**Everything mechanical is proven here** — `ui-audit/verify-new1-fullscreen.mjs` (23/23) shows the header on screen at `top = 0`, at the same height as outside fullscreen, carrying row 1 and all five module tabs, **read before any pointer is moved**, with exactly one header claiming the mode, no stray floating exit button, the drawing still welded to the imagery, a refused request reporting itself, and a workspace switch from inside fullscreen keeping the document fullscreen with `f` still live. `e2e/module-keepalive.spec.js` (7/7) covers the same from the product side. **What a headless browser has none of is browser chrome**, so the one thing it cannot show is the thing fullscreen is FOR.
+
+- **STEPS** — on a plan, press the ⤢ button (or Ctrl/⌘+Shift+F).
+- **PASS** = the browser tab strip, address bar and OS taskbar are gone, AND the Planyr breadcrumb row and workspace-tab row are both still there, unmoved, with no hover needed. Switch **project**, then **plan**, then to **Review** and back — all without leaving fullscreen. Press ⤢ again (or Esc) and everything returns.
+- **FAIL** = either row missing or sliding away · the tabs needing a hover · a duplicate "Exit fullscreen" control floating over the drawing · the drawing shifting relative to the aerial on the way in or out · `f`/⤢ dead after switching workspace.
+- **This supersedes V544**, which was written for the top-edge reveal that no longer exists. Do not chase V544's steps.
+
+### V111107 — B312545: the Settings panel's four sections, rendered `Blocker: auth`
+
+**Nothing below the nav has been rendered here.** Sign-in is impossible in this sandbox, and the whole panel is signed-in only, so this item's evidence is source guards (`test/fullscreenChrome.test.js`, 6) and nothing else. That is stated plainly rather than dressed up: the nav, the section switch, the password form, the sign-out-everywhere round trip and the responsive collapse are all owed.
+
+- **STEPS** — signed in: account pill → **Settings**.
+- **PASS** = it opens on **Interface**, NOT on change password. The nav lists **Profile · Team · Account & security · Interface**; each switches without the modal jumping. **Account & security** holds change password (which still works — set one and sign back in with it) and **Sign out on all devices**. Squeeze the window narrow: the nav becomes a row of chips above the content rather than a squashed column.
+- **CHECK THE SIGN-OUT-EVERYWHERE ACTION PROPERLY, since it is the one new capability** — sign in on a second device or a private window first, press it, and confirm BOTH sessions end. If it fails it must say so on screen; a silent failure here is the worst outcome, because you would believe you were signed out when you were not.
+- **FAIL** = opens on the password form · a section is empty · Profile or Team lost anything they had · the panel overflows its modal at any width · sign-out-everywhere leaves the other session alive, or fails silently.
+
 ### V107264 — B296224: the ledger bridge resolves a REAL `dirty` PR, and refuses a REAL amendment race `Blocker: real-data`
 
 **Everything the bridge decides is proven here already** — `test/resolveLedgers.test.js` drives 12 cases, three of them against a genuine `git merge` conflict produced in a throwaway repo (hermetic, no network): two independent appends are unioned, two amendments of one item are refused with the markers left in place, and a clean file passes through byte-identical. **What a sandbox cannot manufacture is the real thing**: this repo's actual `origin/main`, 42 in-flight branches, five bookkeeping files diverging at once, and the specific hunk shapes git produces from them. That is a concurrency class, so it parks.

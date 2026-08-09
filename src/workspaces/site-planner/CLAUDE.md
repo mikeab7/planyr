@@ -831,12 +831,35 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   drives a real wheel gesture, captures the frame MID-gesture, and fails unless the clean run is
   green AND both deliberate mutants go red). The owner-facing A/B is **zoom-smoothness-ab**
   (`npm run perf:zoomab`), which records the same gesture with the anchor on and off.
-  **The on-canvas `View ▾` menu → Smooth zoom** is the off switch (`components/ViewMenu.jsx`; moved
-  there from the plan menu by **B286000** — a per-device rendering preference does not belong in a
-  plan-scoped flyout, and the owner could not find it there. Same `smoothZoom` localStorage key,
-  same default, same `disarmViewAnchor()` on turn-off; `SitePlanner`'s `applySmoothZoom` is the one
-  place that decides, so the card renders state and owns no copy of the rule). It gates the ZOOM anchor only — the pan anchor is never
-  gated on it.
+  **⛔ `Settings → Interface → Smooth zoom` is the off switch, and it has moved TWICE — do not move
+  it again without reading why.** B1449 put it in the plan menu; **B286000** moved it to the
+  on-canvas `View ▾` menu; the owner still could not find it, and the corrected rule is that
+  **View ▾ is a per-DRAWING display menu** while this follows the DEVICE across every plan and every
+  project. Its one home is now the Interface section of Settings, beside the display theme
+  (the shared `ui/` Interface-settings component, rendered by BOTH Settings homes — the signed-in account panel
+  and the signed-out header gear — so they cannot disagree). The persisted value lives in
+  the shared `prefs/` smooth-zoom module (same `planarfit:smoothZoom` key, same default ON, one writer + a
+  subscription); the planner SUBSCRIBES, because the control is now outside the component, and keeps
+  the half only it can do — `disarmViewAnchor()` on turn-off, hung off the subscription so a change
+  from the modal, the gear or another tab all disarm. ⛔ There must be exactly ONE switch; the
+  repo-root `test/` suite **smoothZoomHome** counts occurrences in both directions, and the e2e spec
+  **smooth-zoom-settings** drives the real control. It gates the ZOOM anchor only — the pan anchor
+  is never gated on it.
+- **⛔ `featureEditZoom.js` (NEW-2) — WHEN THE ON-BUILDING `+`/`−` CONTROLS MAY EXIST, and it is a
+  ZOOM question rather than a building-size one.** `FEAT_BTN_MIN_PX` (B225) asks whether the
+  BUILDING has room to seat the cluster; a 900 ft industrial building clears that at almost any zoom
+  a site plan is read at, so on the owner's 109-acre Bain plan the controls armed with the whole
+  site in the viewport, at full size, over the two largest objects on the drawing — while the
+  bump-out they place was a few pixels wide. The second gate asks whether the EDIT is legible:
+  the smallest feature these controls place is a `DOGEAR_W` × `DOGEAR_D` (55 × 60 ft) bump-out, and
+  its short side must render at **44 px**, which fixes the floor at **0.8 px per foot (1.25 ft per
+  pixel)** — an absolute zoom, so it reads the same on a 30-acre site and a 900-acre one. Both gates
+  must pass; neither replaces the other. Above the floor the controls ramp to full strength over
+  the next 35% of zoom (a fade, not a pop) and are **fully clickable the whole time** — opacity is
+  presentation, never a hit-test gate. It is asked with `rppf`, the RENDER view, never `view.ppf`.
+  Guards: the repo-root `test/` suite **featureEditZoom** (which replays the pre-fix rule as a
+  mutation check) and the e2e spec **feature-edit-zoom** (a real wheel gesture either side of the
+  threshold, read against the app's own `data-render-ppf`).
 - `zOrder.js` — per-element `z` stacking key utilities (`nextZ`/`sortByZ`/`normalizeZ`/`ensureZ`, B671).
   `arrange.js` — pure z-order "Arrange" (`reorderByZ`/`arrangeFlags`, B820): Bring-to-Front/Send-to-Back
   over a peer set. Wired via `arrangeSel` + `arrangePeers` + the right-click menus + the ⌘/Ctrl+]/[

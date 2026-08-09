@@ -123,6 +123,8 @@ import { worldToScreen, screenToWorld, zoomAround, midpoint, distance, pinchZoom
 /* B1449 — the anchored render (the zoom half of B1440's increment) + the proportional wheel factor.
    `viewAnchor.js` holds the proof that an anchored frame lands exactly where a direct one would. */
 import { anchorTransform, anchorTransformAttr, anchorHolds, wheelZoomFactor, ZOOM_SETTLE_MS } from "../../shared/viewport/viewAnchor.js";
+import { readSmoothZoom, subscribeSmoothZoom } from "../../shared/prefs/smoothZoom.js";
+import { featureEditOpacity } from "./lib/featureEditZoom.js";
 import ColorField from "../../shared/ui/ColorField.jsx";
 /* LAZY (B1064 tranche a). The Standards footer renders only while the Standards panel is the
  * open one, docked or floating — never at first paint. */
@@ -434,6 +436,12 @@ const POND_ADD_FILL_DEFAULT = "#A7D3DD"; // B157: default "added area" fill — 
 // its PERPENDICULAR on-screen dimension clears the cluster. ~22px inset + 9px radius on
 // each side means opposite buttons overlap below ~68px; this adds a small legibility
 // margin. Tunable. (The map's Building Pin + Progress Arc live in MapFinder — untouched.)
+// ⛔ NEW-2 — THIS GATE IS ABOUT THE CONTAINER, AND IT IS ONLY HALF THE ANSWER. It asks whether the
+// BUILDING is big enough on screen to seat the cluster, which a 900 ft industrial building clears
+// at almost any zoom a site plan is read at — so on the owner's 109-acre Bain plan the controls
+// armed with the whole site in the viewport, at full size, over the two largest objects on the
+// drawing. The second gate (`lib/featureEditZoom.js`) asks whether the EDIT is legible yet, in
+// feet per pixel. Both must pass; read that module's header before changing either.
 const FEAT_BTN_MIN_PX = 72;
 // Structural column-grid drawing (B568/B569). Subtle gray for the column lines (drafting
 // grid, explicitly allowed a subtle gray by the theme rule) — proven legible on both the
@@ -1976,7 +1984,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     return () => { mq.removeEventListener ? mq.removeEventListener("change", on) : mq.removeListener(on); };
   }, []);
   const lsGet = (k, d) => { try { return localStorage.getItem("planarfit:" + k) || d; } catch (_) { return d; } };
-  const lsSet = (k, v) => { try { localStorage.setItem("planarfit:" + k, String(v)); } catch (_) { /* a full/blocked store must never break a toggle */ } };
+  // (Its `lsSet` twin went with NEW-1: smooth zoom was its last caller, and that setting is now
+  // written by `shared/prefs/smoothZoom.js`, which owns the same `planarfit:` prefix.)
   const [parkingRows, setParkingRows] = useState(() => lsGet("parkingRows", "free")); // drawn-parking depth preset
   // Drawn-road width, in feet, as a string. NEW-3: the Road tool no longer has a "free" (drag-a-
   // rectangle) mode — a road is always a clicked centerline at a known width, preset or custom. A
@@ -2143,10 +2152,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
      live view — one full render, deliberately, rather than an ever-more-wrong picture. Leaflet's
      own basemap path below re-bases on exactly this principle at ~0.75 zoom levels.
 
-     Behind `smoothZoom` (the on-canvas View ▾ menu → Smooth zoom — moved there from the plan menu
-     by B286000, same localStorage key and same default), so it can be turned off without a deploy.
+     Behind `smoothZoom` (Settings → Interface → Smooth zoom — moved there from the View menu by
+     NEW-1, which moved it from the plan menu by B286000; same localStorage key and same default),
+     so it can be turned off without a deploy.
      Off, the zoom anchor never arms and the pan anchor behaves exactly as B1440 shipped it. */
-  const [smoothZoom, setSmoothZoom] = useState(() => lsGet("smoothZoom", "1") !== "0");
+  const [smoothZoom, setSmoothZoom] = useState(readSmoothZoom);
   const smoothZoomRef = useRef(smoothZoom);
   smoothZoomRef.current = smoothZoom;
   const [viewAnchor, setViewAnchor] = useState(null);
@@ -2178,16 +2188,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   viewAnchorRef.current = viewAnchor;
   const armViewAnchor = useCallback((ppf, offX, offY) => { const a = { ppf, offX, offY }; viewAnchorRef.current = a; setViewAnchor(a); }, []);
   const disarmViewAnchor = useCallback(() => { viewAnchorRef.current = null; setViewAnchor((a) => (a ? null : a)); }, []);
-  /* B286000 — the ONE place turning smooth zoom on/off is decided, so the control can be rendered
-     anywhere (it now lives in the on-canvas View menu) without a second copy of the persist +
-     disarm pair. Turning it OFF must disarm any live anchor in the same commit, or the last
-     gesture's scaled frame is left on screen with nothing to re-bake it. */
-  const applySmoothZoom = useCallback((on) => {
-    const nx = !!on;
-    setSmoothZoom(nx);
-    lsSet("smoothZoom", nx ? "1" : "0");
-    if (!nx) disarmViewAnchor();
-  }, [disarmViewAnchor]);
+  /* B286000 / NEW-1 — the control now lives OUTSIDE this component entirely (Settings → Interface),
+     so the planner cannot be handed a setter: it SUBSCRIBES to the shared preference instead. The
+     persist half is `shared/prefs/smoothZoom.js` (one key, one default, one writer); the half only
+     the planner can do stays here — turning it OFF must disarm any live anchor in the same commit,
+     or the last gesture's scaled frame is left on screen with nothing to re-bake it. That applies
+     to a change made from the modal, from the signed-out gear, or from another tab on this device,
+     which is why the disarm hangs off the SUBSCRIPTION rather than off a click handler. */
+  useEffect(() => subscribeSmoothZoom((on) => {
+    setSmoothZoom(on);
+    if (!on) disarmViewAnchor();
+  }), [disarmViewAnchor]);
   /* The freshest view, readable from a native listener attached once at mount. Written on every
      render AND eagerly by the wheel flush, so two rAF flushes inside one React render cannot lose a
      notch (the reason the pre-B1449 wheel used a functional `setView`). */
@@ -14679,8 +14690,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // on the building's on-screen footprint size (FEAT_BTN_MIN_PX) so they vanish before
   // they can cluster/spill when zoomed out.
   const featActiveId = sel?.kind === "el" ? sel.id : (tool === "select" ? hoverElId : null);
+  /* NEW-2 — the ZOOM half of the gate, shared by every on-building edit cluster below. 0 means the
+     edit these controls make is not legible yet, so they must not exist at this zoom at all. */
+  const featEditOpacity = featureEditOpacity(rppf);
   const sideAddNodes = (() => {
-    if (tool !== "select" || !featActiveId) return null;
+    if (tool !== "select" || !featActiveId || !featEditOpacity) return null;
     const el = els.find((x) => x.id === featActiveId);
     if (el && el.locked) return null;
     // dog-ears / bump-outs are building elements but are NOT standalone buildings —
@@ -14693,7 +14707,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const sides = [["top", 0, -1], ["bottom", 0, 1], ["left", -1, 0], ["right", 1, 0]];
     const depths = zoneDepthDefaults(settings);
     return (
-      <g>
+      /* NEW-2 — a FADE, not a pop. `opacity` is presentation only: the controls are fully
+         clickable the whole time they are on screen, because a half-faded control that ignored a
+         press would be its own bug. */
+      <g opacity={featEditOpacity} data-testid="feature-edit-nodes">
         {sides.map(([name, nx, ny]) => {
           // B225: an inset control needs its wall's PERPENDICULAR on-screen size to clear the
           // cluster; below that it piles onto the opposite wall. A long/narrow footprint keeps
@@ -14837,7 +14854,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // "+ / −" on a selected car-parking field's depth edge: add or remove a row +
   // drive aisle. Keeps stacking, so you can build a multi-aisle lot.
   const parkingAddNodes = (() => {
-    if (tool !== "select" || !featActiveId) return null;
+    if (tool !== "select" || !featActiveId || !featEditOpacity) return null; // NEW-2: the zoom gate
     const el = els.find((x) => x.id === featActiveId);
     if (!el || el.locked || el.points || el.type !== "parking") return null;
     if (Math.min(Math.abs(el.w), Math.abs(el.h)) * rppf < FEAT_BTN_MIN_PX) return null; // B225: hide before it clusters
@@ -14850,7 +14867,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const minus = { x: ms.x + ux * 16 + tx * 12, y: ms.y + uy * 16 + ty * 12 };
     const canShrink = parkRowsForDepth(el.h, cfgOf(el).stallDepth || settings.stallDepth, cfgOf(el).aisle ?? settings.aisle) > 1;
     return (
-      <g>
+      <g opacity={featEditOpacity} data-testid="feature-edit-nodes">
         {featNode("parkAdd", plus, false, "#2563eb", "Add one parking row", () => growParking(el, 1), null)}
         {canShrink && featNode("parkSub", minus, true, "#b91c1c", "", null, () => growParking(el, -1))}
       </g>
@@ -20409,8 +20426,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           <div style={{ pointerEvents: "none", display: "flex", gap: 8, alignItems: "flex-start", height: "100%", minHeight: 0 }}>
           <div style={{ pointerEvents: "auto", display: "flex", maxHeight: "100%", minHeight: 0 }}>
             <ViewMenu open={viewMenuOpen} onToggle={() => setViewMenuOpen((o) => !o)} settings={settings}
-              setSnap={setSnap} patchSettings={(patch) => setSettings((s) => ({ ...s, ...patch }))} pal={PAL}
-              smoothZoom={smoothZoom} onSmoothZoom={applySmoothZoom} />
+              setSnap={setSnap} patchSettings={(patch) => setSettings((s) => ({ ...s, ...patch }))} pal={PAL} />
           </div>
           {/* Layers control — same shared layers as the map finder. ALWAYS rendered
               (B693): an unlocated plan gets the control DISABLED with the plain reason

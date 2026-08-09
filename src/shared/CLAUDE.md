@@ -167,6 +167,18 @@ into every consumer. Root rules in `/CLAUDE.md`; deep detail in `/docs/REFERENCE
   `public`/`anon`/`authenticated`, because a definer-rights delete function is a hole. Guard: the
   repo-root `test/` suite **clientErrorsRetention**, which runs the SHIPPED `.sql` files verbatim
   against a real Postgres (PGlite, devDependency only) and mutation-checks both clauses.
+- **`prefs/` + `ui/InterfaceSettings.jsx` — SETTINGS THAT ARE ABOUT THE APP, NOT ABOUT A DRAWING
+  (NEW-1/NEW-4).** `prefs/smoothZoom.js` owns the smooth-zoom preference: one key
+  (`planarfit:smoothZoom` — the prefix stays, renaming it would silently reset the setting for
+  anyone who turned it off), one default (ON), one writer, and a subscription that fires for a
+  same-tab change AND for another tab on the device. It is a module rather than a prop **because
+  the control lives outside the planner** (in the Settings modal the Shell mounts, and in the
+  signed-out header gear) while the behaviour lives inside it — the planner subscribes and keeps
+  the half only it can do, `disarmViewAnchor()` on turn-off. `ui/InterfaceSettings.jsx` is the ONE
+  Interface section both Settings homes render (display theme + smooth zoom), so the two can never
+  disagree; ⛔ there must be exactly one smooth-zoom switch in the app, counted in both directions
+  by the repo-root `test/` suite **smoothZoomHome**. Dependency-free and small by construction —
+  this lands in the entry chunk every route downloads.
 - `projects/`, `profile/`, `cloud/`, `presence/`, `gis/`, `geometry/`, `placement/`.
 
 **Convention:** shared logic is pure and unit-tested; per-host state/wiring stays in the workspace.
