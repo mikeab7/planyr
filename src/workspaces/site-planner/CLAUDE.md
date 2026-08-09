@@ -839,9 +839,30 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   gated on it.
 - `zOrder.js` — per-element `z` stacking key utilities (`nextZ`/`sortByZ`/`normalizeZ`/`ensureZ`, B671).
   `arrange.js` — pure z-order "Arrange" (`reorderByZ`/`arrangeFlags`, B820): Bring-to-Front/Send-to-Back
-  over a peer set (a building reorders within its `Z_LAYER` band, a markup within the markup layer;
-  a markup can also be sent behind the elements). Wired via `arrangeSel` + the right-click menus + the
-  ⌘/Ctrl+]/[ chords in `SitePlanner.jsx`.
+  over a peer set. Wired via `arrangeSel` + `arrangePeers` + the right-click menus + the ⌘/Ctrl+]/[
+  chords in `SitePlanner.jsx`.
+  **⛔ NEW-1/NEW-2 — FOUR FAMILIES ORDER, AND THEY ORDER THE SAME WAY. Read this before touching a
+  context menu or the callout render.** The owner's *"the layers / order feature doesn't work at all"*
+  was three separate holes, none of which a state read could see: **(a) CALLOUTS AND TEXT BOXES WERE
+  OUTSIDE THE MODEL ENTIRELY** — rendered from the raw `callouts` array, so they had no `z`, no band,
+  no menu rows and no chord, and two overlapping text boxes could not be reordered by any means the
+  app offered. They now use the measurement model verbatim (`calloutBands` + `behindEls` + `setCalloutBand`),
+  and a plan saved with no `z` still orders correctly because `byZAsc` falls back to (0, id).
+  **(b) THE ARRANGE GROUP VANISHED when the object was alone in its band** (`af.count > 1`), which on a
+  real plan is most elements — one pond, one paving pad — so right-clicking them offered no ordering
+  rows and no reason. The rows are now always present, GREYED with a stated reason; `arrangeSel` flashes
+  the same reason for the chord. **(c) THE MARKUP PEER SET WAS THE WHOLE `markups` ARRAY** while the
+  render splits on `behindEls`, so the flags could grey a markup that was at the front of everything it
+  could reach. `arrangePeers` is now the ONE peer-set resolver for all four families — never re-derive one.
+  The three menus that share a shape build their rows from ONE `arrangeGroup` helper; the element menu
+  keeps its own `arrRow` (different menu component, different header style) and is asserted separately.
+  **Whether an ELEMENT may cross its type-layer band at all** (paving over a building) is a
+  drawing-convention decision parked for the owner as an `{ open: … }` cell on the capability table —
+  deliberately not decided in code. Guards: the repo-root `e2e/` declaration table **elementCapabilities.table** (a new
+  selectable type cannot ship without answering every capability), the repo-root `test/` suite
+  **elementCapabilities** (proven red four ways on the pre-fix source) and the ui-audit harness
+  **audit-element-parity** (right-clicks one of every kind on a deliberately OVERLAPPING fixture and
+  reads paint order from the DOM — a tidy fixture reports PASS on a dead implementation).
 - **⛔ `labelLayout.js` also holds the GEOMETRY level-of-detail tier (B1345) — read it before "tidying"
   a stall band back into N `<line>`s.** Every other tier here gates a LABEL; this one is the only one
   that touches drawn geometry, and it is a change of REPRESENTATION, never decimation: below

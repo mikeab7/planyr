@@ -150,6 +150,25 @@ a `live-GIS` blocker, not a to-do that was skipped.
    that is the one behaviour the sandbox cannot show, because its dev server honours Range and takes the
    cheap path instead.
 
+### V91632 — B293073: on ONE OF HIS OWN PLANS, do two overlapping objects actually swap what's on top? `Blocker: real-data`
+
+The three defects behind *"the layers / order feature doesn't work at all"* are fixed and each is proven here by reading paint order back out of the rendered DOM (not from state). What the sandbox cannot know is **which objects he was trying to reorder**, so this is the one check that closes his report rather than mine.
+- planyr.io, signed in, any plan of his with **two overlapping objects of the same kind** — two buildings, two markups, or two text boxes.
+- **The text-box case is the one to run first**, because it is the one that was structurally impossible before: drop two text boxes so they overlap, right-click the lower one → **Bring to Front**. **PASS = the box you clicked is now drawn over the other one.** Pre-fix that menu had no ordering rows at all.
+- Then the case that read as "broken": right-click something that is **the only one of its type on the plan** — a lone pond, a lone paving pad. **PASS = the four Arrange rows are THERE, greyed, and hovering one explains why** ("this is the only … so there is nothing to reorder it against"). Pre-fix the whole group was hidden, with no explanation — which is what "doesn't work at all" looked like.
+- And the cross-the-plan move: right-click a text box → **Send behind the plan**. PASS = the buildings now draw over it.
+- **Report which objects he originally tried**, if he remembers — if it was a building over a paving pad, that is the type-layer question parked on B293072 as an owner decision, NOT a bug, and this V should record that rather than reopen the item.
+- ⏳ **PENDING**
+### V90096 — B291536: on the note where Backspace "acts funny", does one press now take exactly one step? `Blocker: real-data`
+
+**⛔ THIS IS THE ONE THE SANDBOX CANNOT SETTLE, and the reason is stated rather than glossed.** The reported symptom — a nested bullet un-nesting AND merging in one press — did **not** reproduce on a plain bulleted list here. What did reproduce, and produces exactly that symptom, is a document that MIXES a checklist with a bulleted list, which an Outlook paste routinely makes: Tiptap's list keymap runs its Backspace handler once per list type without stopping at the first one to act, and one press dissolved BOTH levels into plain paragraphs. That class is fixed and mutation-proven. Whether it is the class HIS note holds is his to confirm.
+- **Where:** planyr.io, signed in, the page the report came from (project Silvestri, page "Utility") or any note where it misbehaved.
+- **The check, three presses, one at a time.** (1) Caret at the very start of a **nested** bullet → one Backspace → it should **outdent one level and change nothing else** (no merging with the bullet above). (2) Undo. Caret at the very start of a **top-level** bullet → one Backspace → it should become a **plain line keeping its words**, with **no empty bullet left behind**, and the line above untouched. (3) A **second** Backspace from there joins it to the line above — that step is meant to be the second one.
+- **Also worth one press while he is there, because it was the worst thing found and no report existed for it:** put the caret at the start of the line directly under a **picture** and press Backspace once. The picture must become **selected (outlined), not deleted**.
+- **PASS =** every press changes exactly one thing. **FAIL =** any press changes two or more, or leaves an empty bullet.
+- **⛔ AND IF IT FAILS, CAPTURE THE TREE RATHER THAN DESCRIBING IT.** With `window.__PLANYR_E2E` armed, `window.__noteEditor.json()` returns the document before and after the press; that is what turns a second report into a fixed row in `ui-audit/verify-notes-backspace.mjs` instead of another round of guessing.
+- **Already confirmed here, do NOT re-test:** 37/37 boundary rows against the built app, mutation-proven RED without the fix (11 of 37).
+- The **owner never runs this** — it is a Claude-cohort check on a signed-in session with his real note. ⏳ **PENDING**
 ### V88800 — B290240: does an unincorporated COLORADO site now say Colorado's zoning law instead of Texas's? `Blocker: live-GIS`
 
 The sentence itself is pure and unit-tested in both directions; what cannot be driven here is the card, because it only renders once `identifyJurisdiction` returns `unincorporated`, and that needs external GIS hosts this environment blocks (the whole `gis.colorado.gov` space answers 403 at the sandbox egress proxy — a sandbox limitation, not an endpoint failure).
