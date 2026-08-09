@@ -5,7 +5,27 @@
 > step; tick/remove it once he's done it. This is the **owner's** plate only. Browser click-throughs and
 > signed-in spot-checks are the Claude cohort's job (`VERIFICATION.md`), **never** Michael's — do NOT list those here.
 
-_Last updated: 2026-08-07._
+_Last updated: 2026-08-09._
+
+## 🔎 One note of yours is sitting in the cloud with nothing pointing at it — say the word and I'll put it back (B315716)
+
+> While building the duplicate check you asked for, I found a **different** problem in your account, and it is
+> the one I'd want you to know about: there is a note with real content in it — channel improvements to slow
+> down conveyance, Willow Point MUD providing water and sanitary, the feasibility study in progress, the
+> pricing note about single-family developers offering $3–4 a foot against hoping for $10, and Hilcorp's
+> blanket easement — and **it does not appear anywhere in your notes list.** Not in a project, not in the bin.
+> It has been unreachable for days.
+>
+> **What went wrong:** the app tidies up leftover scraps every time you open Notes. This note lost the entry
+> that says where it lives, so the tidy-up treated it as a scrap and deleted the local copy — and then the next
+> sync downloaded it again, forever, with you never able to see it. That loop is now closed: the tidy-up will
+> **never** delete something that still has words in it, and when it finds one it says so and offers to put it
+> back.
+>
+> **What I need from you: nothing, unless you want it back sooner.** Next time you open Notes signed in, a line
+> at the top will say one note is filed in no project, with a **Put it back** button. It goes to "Not in a
+> project" — I deliberately do not guess which project it belonged to, because that guess is the whole bug we
+> just fixed. If you'd rather I restore it for you directly, say so and I'll do it.
 
 ## ✅ CLOSED — both jurisdiction fixes are LIVE, nothing on your end (B209502–B209509)
 
