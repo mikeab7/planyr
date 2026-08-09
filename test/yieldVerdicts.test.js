@@ -347,6 +347,33 @@ describe("B209508 — the Buildability row refuses to state an FFE on an unresol
     expect(r.ffeUnsettled).toBe(true);
   });
 
+  /* ⛔ NEW-1d — an authority with NO TRANSCRIBED RULE refuses the same way, and the number survives.
+   *
+   * This row only asked about `unresolved || split`, so a site wholly inside a city whose ordinance
+   * we do not hold fell through to "pads pass at X′ FFE" — a settled claim about a floor with a
+   * governing city's rule missing from the comparison behind it. */
+  it("an unmodelled governing authority refuses the settled floor too", () => {
+    const r = rowFor({ ...bb("pass", 144.8), administrator: { unresolved: false, unmodelledCandidates: [{ key: "baytown", label: "City of Baytown" }] } });
+    expect(r.sentence).toBe("FFE rule not settled");
+    expect(r.sentence).not.toMatch(/144\.8/);
+    expect(r.ffeUnsettled).toBe(true);
+  });
+
+  it("⛔ the elevation is CARRIED, not dropped — unsettled must never read as 'no requirement'", () => {
+    /* The default while the missing ordinance is unanswered is the authority we DO have. A blank
+     * would read as nothing required, which is the one answer that is certainly wrong — the same
+     * four-state discipline the freshness light uses: unchecked is not a pass. The detail line
+     * prints this value beside the authority's name. */
+    for (const admin of [
+      { unresolved: true, unresolvedRoles: ["etj"] },
+      { unresolved: false, split: true, splitDetail: { city: "Baytown", inCity: 6, tested: 14 } },
+      { unresolved: false, unmodelledCandidates: [{ key: "baytown", label: "City of Baytown" }] },
+    ]) {
+      const r = rowFor({ ...bb("pass", 144.8), administrator: admin });
+      expect(r.provisionalFfeFt).toBe(144.8);
+    }
+  });
+
   it("holds for a PASSING pad too — passing off an incomplete rule set is the same false comfort", () => {
     const r = rowFor({ ...bb("pass", 144.8), administrator: { unresolved: true, unresolvedRoles: ["etj"] } });
     expect(r.sentence).not.toMatch(/144\.8/);
