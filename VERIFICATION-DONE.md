@@ -1,6 +1,46 @@
 # VERIFICATION-DONE.md — archived verification items (passed / superseded)
 
 
+
+### V84560 — B270913: does the retention job fire ON ITS OWN, with nobody pressing anything? — ✅ **PASSED 2026-08-10**
+
+**✅ PASSED 2026-08-10 — Claude, in-session, read straight off `planyr_production`. The job fires unattended, and it has now done so TWICE on consecutive days.**
+
+| id | ran_at (UTC) | ordinary_deleted | manual_deleted | rows_before → after | ms |
+|---|---|---|---|---|---|
+| 1 | 2026-08-09 02:52:36 | 2 | 0 | 5,288 → 5,286 | 3 |
+| 2 | **2026-08-09 07:20:00** | **0** | **0** | 5,400 → 5,400 | 98 |
+| 3 | **2026-08-10 07:20:00** | **0** | **0** | 5,435 → 5,435 | 208 |
+
+`client_errors_retention_status` → **`status: ok`** · `runs_recorded 3` · `last_run_at 2026-08-10 07:20:00` · `last_total_deleted 0`.
+
+**WHY THIS IS A PASS AND NOT A SHRUG.** Rows 2 and 3 are the verdict: **nobody triggered them.** They landed at `07:20:00.188` and `07:20:00.219` — the scheduled minute, to the fraction — and pg_cron's own independent ledger confirms them from the other side: `cron.job_run_details` holds exactly two runs for this job, both **`succeeded`**, `return_message: "1 row"`, matching timestamps. Row 1 is the 2026-08-09 manual proof run and was explicitly discounted; the check was written so that row alone could not pass it.
+
+**`0` DELETED IS THE CORRECT ANSWER, AND THE WHOLE POINT IS THAT IT IS NOW LEGIBLE AS ONE.** 0 of 5,435 rows are eligible, and none will be until **2026-09-18** (the oldest row is 2026-06-20 and the window is 90 days). Before this item, "the job ran and found nothing" and "the job never ran" produced the identical observation. They now produce different rows, and the status view names which one you are looking at. That distinction is the deliverable; this check is the proof it works on the real schedule rather than only in a test.
+
+**⛔ THE CHECK WAS RUN THE ONLY WAY THAT MEANS ANYTHING: `prune_client_errors()` WAS NOT CALLED BY HAND.** A hand-triggered run writes a byte-identical row to a scheduled one, so calling it to "see if it works" destroys the only evidence this check exists to gather. That prohibition was written into the check when it was created, before the answer was known, and it was honoured.
+
+**STOPPING RULE MET, and it was met with margin.** The rule said: *closes when a run row that nobody triggered appears on the schedule with `status = ok`.* Two such rows exist, on consecutive days, so this is not a one-off that happened to fire once.
+
+**Also re-confirmed in the same pass, because the promise was that nothing outside the policy is touched:** the owner's two rows from 2026-08-07 19:07:38 (`event:stale-cache-overruled` and `event:element-rows-canonical` on Sylvestri `sms4zs8unbkg`) are **still present**, and the table's oldest row is unmoved at 2026-06-20 22:16:28.
+
+---
+
+*Original check, kept verbatim as the record of what was asked before the answer was known:*
+
+**⛔ THIS CHECK IS THE ENTIRE POINT OF THE ITEM, AND IT CANNOT BE DONE IN A SANDBOX.** Everything else about B270913 is proven: the policy is unit-tested against a real Postgres (21 cases, both directions, both clauses mutation-checked), and it was proven a second time **on the production table** with seeded rows that were cleaned up afterwards. What no test here can show is the one thing that decides whether this works: **that `pg_cron` actually runs the job on schedule.** A retention job that silently never runs is indistinguishable from one that correctly had nothing to delete — and since this policy deletes nothing from today's data, that indistinguishability is the EXPECTED state for months. The whole run-log/status half of the item exists for this one question.
+
+- **RUN IT AFTER 07:20 UTC on 2026-08-10** (or any later day — the schedule is daily, `20 7 * * *`), against `planyr_production` with the service role. One query:
+  ```sql
+  select * from public.client_errors_retention_status;
+  select id, ran_at, ordinary_deleted, manual_deleted, rows_before, rows_after, duration_ms
+    from public.client_errors_retention_runs order by id;
+  ```
+- **PASS** = `status = 'ok'` **and** a run row exists that **nobody triggered** — i.e. `ran_at` at ≈07:20 UTC, with an `id` greater than 1. `ordinary_deleted = 0` and `manual_deleted = 0` on that row is the CORRECT result and must be read as a healthy no-op, not as a failure: 0 of ~5,300 rows are eligible and none will be until roughly 2026-09-18.
+- **FAIL** = `status` still reads **`never-run`**, or the only row is `id = 1`. That row is the manual proof run from 2026-08-09 (`ordinary_deleted 2` — three seeded `B270913-live-proof` rows, two of which were correctly deleted); it is evidence the FUNCTION works and says nothing about the SCHEDULE. **`stale`** on a later read means it fired once and stopped.
+- **If it FAILS, the first thing to check is `cron.job` and `cron.job_run_details`,** not the function: `select * from cron.job where jobname = 'planyr-client-errors-retention';` and `select * from cron.job_run_details order by start_time desc limit 10;`. Supabase runs pg_cron jobs in the `postgres` database only; the job was created there, owned by `postgres`, and read back active at apply time.
+- **⛔ DO NOT "verify" this by calling `select public.prune_client_errors()` yourself.** A hand-triggered run writes exactly the same row as a scheduled one, so doing that DESTROYS the only evidence this check exists to gather — it converts an unanswered question into a permanent false pass. If you need to confirm the function still works, the unit suite already does that on every CI run.
+- This is a Claude-cohort check on the production database. **The owner never runs this.** ⏳ **PENDING**
 ### V56000 — B1449: does the zoom FEEL smooth and professional on his own Bain plans? — ✅ **PASSED 2026-08-09 (owner acceptance)**
 
 **✅ PASSED 2026-08-09 — the OWNER, on his own machine, on his own plans. His words: *"I think we're good."*** That sentence is the whole verdict and it is the right kind of evidence, because this check never had a number to hit: the criterion was stated by him at the outset — *"I don't really care what the process is as long as the end result is smooth and professional… world class quality."* The three watch-items below are exactly the questions only he could answer, and he answered them. B1449 is CLOSED on this acceptance and archived.

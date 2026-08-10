@@ -490,22 +490,6 @@ The gate is pure and mutation-proven; what cannot be driven here is the LINE, be
 - **Also confirm the badge still DRAGS** — this fix is identification-only and must not have cost the affordance B1327 exists for: hover a lot's acreage badge, drag it, and it should move as before.
 - **Already confirmed, do NOT re-test:** the plan is byte-identical across every run; the pond control passes; press gaps are inside `DBLTAP_MS`; the first-gesture fix from #965 is intact.
 - The **owner never runs this** — it is a Claude-cohort check on a signed-in session. ⏳ **PENDING**
-### V84560 — B270913: does the retention job fire ON ITS OWN, tomorrow, with nobody pressing anything? `Blocker: real-data`
-
-**⛔ THIS CHECK IS THE ENTIRE POINT OF THE ITEM, AND IT CANNOT BE DONE IN A SANDBOX.** Everything else about B270913 is proven: the policy is unit-tested against a real Postgres (21 cases, both directions, both clauses mutation-checked), and it was proven a second time **on the production table** with seeded rows that were cleaned up afterwards. What no test here can show is the one thing that decides whether this works: **that `pg_cron` actually runs the job on schedule.** A retention job that silently never runs is indistinguishable from one that correctly had nothing to delete — and since this policy deletes nothing from today's data, that indistinguishability is the EXPECTED state for months. The whole run-log/status half of the item exists for this one question.
-
-- **RUN IT AFTER 07:20 UTC on 2026-08-10** (or any later day — the schedule is daily, `20 7 * * *`), against `planyr_production` with the service role. One query:
-  ```sql
-  select * from public.client_errors_retention_status;
-  select id, ran_at, ordinary_deleted, manual_deleted, rows_before, rows_after, duration_ms
-    from public.client_errors_retention_runs order by id;
-  ```
-- **PASS** = `status = 'ok'` **and** a run row exists that **nobody triggered** — i.e. `ran_at` at ≈07:20 UTC, with an `id` greater than 1. `ordinary_deleted = 0` and `manual_deleted = 0` on that row is the CORRECT result and must be read as a healthy no-op, not as a failure: 0 of ~5,300 rows are eligible and none will be until roughly 2026-09-18.
-- **FAIL** = `status` still reads **`never-run`**, or the only row is `id = 1`. That row is the manual proof run from 2026-08-09 (`ordinary_deleted 2` — three seeded `B270913-live-proof` rows, two of which were correctly deleted); it is evidence the FUNCTION works and says nothing about the SCHEDULE. **`stale`** on a later read means it fired once and stopped.
-- **If it FAILS, the first thing to check is `cron.job` and `cron.job_run_details`,** not the function: `select * from cron.job where jobname = 'planyr-client-errors-retention';` and `select * from cron.job_run_details order by start_time desc limit 10;`. Supabase runs pg_cron jobs in the `postgres` database only; the job was created there, owned by `postgres`, and read back active at apply time.
-- **⛔ DO NOT "verify" this by calling `select public.prune_client_errors()` yourself.** A hand-triggered run writes exactly the same row as a scheduled one, so doing that DESTROYS the only evidence this check exists to gather — it converts an unanswered question into a permanent false pass. If you need to confirm the function still works, the unit suite already does that on every CI run.
-- This is a Claude-cohort check on the production database. **The owner never runs this.** ⏳ **PENDING**
-
 ### V78960 — B280400: does the stub's double-click still work on the SECOND try? `Blocker: real-data` + `Blocker: auth`
 
 **⛔ THIS IS THE ONE THAT DECIDES IT, because the sandbox cannot.** The repeat-gesture failure he reported does NOT reproduce here — the new repeat row passes on the same build it fails on for him, on every one of the 28 fixture features. One real latch was found by reading and is fixed and mutation-proven (the anchor used to survive a deselect, and a press that re-selected the already-selected feature never re-stamped it), but **it is not proven to be his cause**. His re-run is the verdict.
