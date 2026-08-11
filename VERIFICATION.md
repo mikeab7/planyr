@@ -113,6 +113,16 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V159584 — B364016: Delete forever STAYS deleted across three reloads, on his account `Blocker: auth`
+
+Proven without a browser at the layer where it is decided, and this time through the STORE rather than on in-memory trees — which is the gap that let the first fix ship broken. `test/notesBinPurge.test.js`: purge → reload → three reloads deep, each one also syncing against a server still holding the page live; every earlier case round-tripped through storage too; the 6,000-merge fuzz reloads between rounds. Mutation-proven — restoring the missing argument turns 5 of 19 rows red including the fuzz.
+
+- **HIS OWN STOPPING RULE, ADOPTED VERBATIM.** Create a scratch page, type in it, bin it, press **Delete forever**, reload. PASS = the id is absent from BOTH the live list and the bin, locally and in the cloud, and **stays absent across three reloads**. FAIL = it appears in either, on either side, at any point.
+- **AND IT MUST NOT COME BACK AS A GHOST.** PASS = nothing appears in the sidebar with no content in it. That is the shape this recurrence took and it is the one to look for.
+- **THE 23 ENTRIES AND THE ZOMBIES** — the V152576 checks still stand and are not superseded by this one.
+- **AND AN ORDINARY DELETE STILL WORKS.** Bin a note; check it is still restorable. A tombstone must bury a PURGE, never an ordinary delete.
+- **A NULL IS NOT A DISPOSITION (STANDING RULE #2).** If it cannot be provoked, say so and take one of the three admissible routes. Do not record "not reproducible" and archive — this item has now been reported fixed once and was not.
+
 ### V152576 — B357011: the bin he emptied STAYS empty, and the resurrected entries are cleared up `Blocker: auth`
 
 Proven without a browser at the layer where it is decided — `test/notesBinPurge.test.js`: his exact sequence with the revisions, both merge directions, a second equally-stale window, a restore racing a purge, and a 6,000-merge fuzz across five seeds with zero resurrections, mutation-proven. What the sandbox cannot do is sign in, so the account itself is the last mile. **His bin is at 23 entries right now because a reload put them back — that is the defect, not him changing his mind.**

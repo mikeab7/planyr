@@ -1,3 +1,32 @@
+### B364017 — The regression report on the placement gesture: REFUTED, and the instrument now answers the question itself `[Notes / Testing]` (bug) #notes #testing #ui  *(owner chat block, 2026-08-11 — STILL BROKEN #2, filed fairly by the reporter as a COMPARATIVE result with the caveat stated: "synthetic events do not move the native caret… but this is the same instrument, the same page shape, the same coordinates". Minted **B364017** from this branch's reserved block B364016–B364031 against origin/main 73c5011. **DEDUPE-FIRST** — this is the MOUSE edition of the repo's own **SYNTHETIC-KEYS-DONT-EDIT** rule, which covers the keyboard and is guarded by `verify-delete-drive`; filed as its own item because the mouse had no such guard and the gap cost a false regression report on a working feature.)*
+`[x]` **✅ DONE 2026-08-11 — the feature works with a real mouse, and the verdict table is now measured every run instead of being folklore.**
+- Verify: sandbox — `ui-audit/verify-notes-anchor-soak.mjs` **32/32** on the reported build · `ui-audit/verify-press-drive.mjs` 6/6.
+- Origin: filed 2026-08-11 from chat.
+- **THE ANSWER IS THAT IT WORKS.** The real-input soak places a block at every point across three window sizes on the exact build the report was made against. Nothing regressed.
+- **⛔ AND THE CAUSE OF THE FALSE NEGATIVE IS ONE WORD: the placement moved from `dblclick` to `mousedown` in that same shipment.** A driver dispatching a synthetic `click` or `dblclick` produces **no `mousedown` at all**, so it reaches nothing — with the right element under the cursor and the editor focused. Every symptom of a broken feature and none of the cause. That is why the result was comparative: the instrument was correct an hour earlier and the door it was knocking on had moved.
+- **THE MEASURED TABLE, re-measured on every run by `verify-press-drive.mjs`** (aimed at the same element for every row, so a "no" is about the event and never about the aim):
+
+  | how the press was made | result |
+  |---|---|
+  | the driver's real `mouse.click` | **places a block** |
+  | the driver's real `mouse.dblclick` | **places a block** (press 2 lands inside what press 1 made) |
+  | synthetic `click`, bubbling | does nothing |
+  | synthetic `dblclick`, bubbling | does nothing — **the shape that produced the report** |
+  | synthetic `mousedown`, `bubbles: false` | does nothing |
+  | synthetic `mousedown`, `bubbles: true` | **places a block** |
+
+- **⛔ SO THE FIX IS A GUARD, NOT A CODE CHANGE.** The run FAILS if the measured table stops matching the documented one, so the day the wiring moves again this says so — instead of a harness quietly reporting a working feature as broken, or a broken one as working. `ui-audit/lib/pressFeature.mjs` is the supported driver and **throws rather than reporting a pass it did not earn**, the same discipline `deleteFeature.mjs` follows for the keyboard.
+- **For any harness that needs it:** use the real mouse, or dispatch `mousedown` with `bubbles: true`.
+
+### B364018 — A conflict prompt on a note nobody edited: the two copies differed only by empty blocks `[Notes]` (bug) #notes #sync #ui  *(owner chat block, 2026-08-11 — the "ALSO, FOR AWARENESS" item, raised without a demand and correctly left unresolved because it is his data: "a conflict appearing on a note nobody edited is worth a look". Minted **B364018** from this branch's reserved block. **DEDUPE-FIRST** — **B1391** built the quiet-settle path (`judgeConflict`) that stops a moved REVISION being reported as a disagreement, and this is a second class of non-disagreement it did not know about; filed as its own number rather than a B1391 recurrence because B1391's rule is intact and correct.)*
+`[x]` **✅ DONE 2026-08-11 — and it was a real conflict, which is why it is worth naming.**
+- Verify: sandbox — `test/notesBinPurge.test.js`, five cases including both directions and three ways it must still fire.
+- Origin: filed 2026-08-11 from chat.
+- **WHAT HE SAW.** *"“Load Study” also changed in another of your windows. Nothing was overwritten — pick which to keep."* on a note he had not touched.
+- **THE CAUSE, and it is this shipment's own doing.** The one-time clean-up announced *"Cleared 10 empty boxes left behind by an earlier version, across 1 note."* One window had cleaned that note; the other still had the ten empty blocks. The copies genuinely differed — **by exactly the objects the app itself has decided are worthless and is deleting everywhere.**
+- **⛔ THE RULE: AN EMPTY BLOCK CANNOT BE THE SUBSTANCE OF A DISAGREEMENT.** Asking somebody to choose between "the copy with ten invisible empty boxes" and "the copy without" is not a decision. `judgeConflict` now compares the two copies with the litter discounted — the same reasoning `canonNode` already applies to a null attribute, which is the difference between *the bytes differ* and *the note differs*. The CLEAN copy wins and stays owed to the cloud, so the litter leaves the account instead of being kept in silence on whichever side happened to have it.
+- **⛔ AND IT MUST STILL FIRE ON A REAL ONE**, which is the half that would be easy to lose: an edit to the words, an edit made INSIDE a block, and a block holding a picture are all still genuine disagreements and are all asserted.
+
 ### B357008 — A double-click committed an EMPTY block before anything was typed, and the litter is what made the gesture "intermittent" `[Notes]` (bug) #notes #ui #persistence  *(owner chat block, 2026-08-11 — NEW-1 and NEW-2 of the gesture block, both reproduced live before they were filed. Minted **B357008** from this branch's reserved block B357008–B357023 against origin/main af0d914. **DEDUPE-FIRST** — searched Open / ⏳ Verify / Done across `anchor`, `noteAnchor`, `placeAnchor`, `empty`, `provisional`, `intermittent`, `B1393`, `B342993`, `B350000`, `B350001`, `B350004`: **B350000/B350001** fixed WHERE a block lands and proved it at 38 positions — that work is intact and this is not a recurrence of it; **B350004** fixed a press inside a block with WORDS in it, and an EMPTY one is the case it could not reach, because there is no text for the browser to put a caret on. Net-new.)*
 `[x]` **✅ DONE 2026-08-11 — 32/32 in a new soak harness across three window sizes, and mutation-proven at the seam.**
 - Verify: sandbox — `ui-audit/verify-notes-anchor-soak.mjs` 32/32 · `test/notesAnchorPrune.test.js` 21 cases.
