@@ -55,6 +55,7 @@
  */
 import { supabase } from "../../site-planner/lib/supabase.js";
 import { tombstoneIds, withTombstones } from "./notesModel.js";
+import { pruneEmptyAnchors } from "./notesAnchorPrune.js";
 
 /** The app's ONE Supabase client, handed to the store so every transport function below can
  *  still take its client as a parameter (and therefore still be testable against a fake).
@@ -377,6 +378,21 @@ export function planPageSeed({ index = [], state = emptySyncState(), localIds = 
 export function judgeConflict({ localDoc, serverDoc } = {}) {
   if (sameDoc(localDoc, serverDoc)) return { silent: true, why: "identical" };
   if (isEmptyDoc(localDoc) && !isEmptyDoc(serverDoc)) return { silent: true, why: "nothing-local" };
+  /* ⛔ AN EMPTY BLOCK IS NOT THE SUBSTANCE OF A DISAGREEMENT (the third finding of the live
+   * pass). A conflict prompt appeared on a note the owner had not touched: *"“Load Study” also
+   * changed in another of your windows"*. It was real, and it was a choice with nothing in it —
+   * the one-time clean-up had removed ten empty blocks here while the other window still had
+   * them, so the two copies differed by exactly the litter the app itself had decided is
+   * worthless and is deleting everywhere. Interrupting somebody to pick between "the copy with
+   * ten invisible empty boxes" and "the copy without" is not a decision.
+   *
+   * So the comparison discounts them — the same reasoning `canonNode` already applies to a null
+   * attribute: the difference between *the bytes differ* and *the note differs*. The CLEAN copy
+   * is what survives, and the caller pushes it, so the litter leaves the account rather than
+   * being quietly kept. */
+  if (sameDoc(pruneEmptyAnchors(localDoc).doc, pruneEmptyAnchors(serverDoc).doc)) {
+    return { silent: true, why: "litter-only" };
+  }
   return { silent: false, why: "diverged" };
 }
 

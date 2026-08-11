@@ -22,15 +22,41 @@
  * The fuzz at the bottom is deliberately the same shape as the one that found the page-loss
  * holes: a hand-written case list is what missed those, and it would have missed this.
  */
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 
 import {
   addPage, deleteNode, emptyTree, migrate, purgeTrashEntry, restoreNode, tombstoneIds,
   trashEntries, withTombstones, TOMB_RETENTION_DAYS,
 } from "../src/workspaces/notes/lib/notesModel.js";
-import { mergeTrees } from "../src/workspaces/notes/lib/notesCloud.js";
+import { judgeConflict, mergeTrees } from "../src/workspaces/notes/lib/notesCloud.js";
+
+const mem = new Map();
+globalThis.window = globalThis.window || {};
+globalThis.window.localStorage = {
+  get length() { return mem.size; },
+  key: (i) => [...mem.keys()][i] ?? null,
+  getItem: (k) => (mem.has(k) ? mem.get(k) : null),
+  setItem: (k, v) => { mem.set(k, String(v)); },
+  removeItem: (k) => { mem.delete(k); },
+  clear: () => mem.clear(),
+};
+const store = await import("../src/workspaces/notes/lib/notesStore.js");
 
 const clone = (v) => JSON.parse(JSON.stringify(v));
+
+/**
+ * ⛔ THE STEP THE FIRST ROUND DID NOT HAVE, AND IT IS WHY THE FIRST ROUND SHIPPED BROKEN.
+ *
+ * Every case below used to work on in-memory trees — including a 6,000-merge fuzz — and NOT ONE
+ * of them went through `migrate` or through storage. `migrate` was silently dropping the
+ * tombstone ledger on every read (it built a fresh object and then asked THAT object for its
+ * tombs), so the ledger was destroyed the instant it was written and the merge fell back to a
+ * plain union. A purge-then-RELOAD on ONE client was not a case anybody had.
+ *
+ * `reload` is that missing step, and it is the real one: the tree goes to localStorage through
+ * the store's own writer and comes back through the store's own reader.
+ */
+const reload = (tree) => { store.writeTree(tree); return migrate(store.readTreeRaw()); };
 const trashIds = (t) => trashEntries(t).map((e) => e.id).sort();
 const liveIds = (t) => {
   const out = [];
@@ -38,6 +64,8 @@ const liveIds = (t) => {
   for (const p of t.pages || []) walk(p);
   return out.sort();
 };
+
+beforeEach(() => { mem.clear(); });
 
 /** A tree with three top-level notes, all binned — the shape of an emptied bin. */
 function binnedThree() {
@@ -94,9 +122,40 @@ describe("⛔ THE INCIDENT — a stale window may not resurrect an emptied bin",
     expect(trashIds(server)).toEqual([]);
 
     // The stale tab reloads and merges, which is the step that resurrected all 23.
-    const merged = mergeTrees(stale, server);
+    const merged = mergeTrees(reload(stale), reload(server));
     expect(trashIds(merged)).toEqual([]);
     expect(liveIds(merged)).toEqual([]);
+  });
+
+  /* ⛔ HIS SECOND REPORT, AND IT NEEDS NO SECOND CLIENT AT ALL. Create a page, bin it, press
+   * Delete forever, RELOAD. The row went and stayed gone — and the page came back in the LIVE
+   * list, as a note with nothing in it, and was pushed to the cloud. */
+  it("⛔ PURGE → RELOAD ON ONE CLIENT: the id is absent from BOTH pages and trash, three reloads deep", () => {
+    let t = addPage(emptyTree(), { id: "pg_msp3ucx811rq9ao", title: "Scratch" }).tree;
+    const beforeBin = clone(t);                       // what a server that never saw any of it holds
+    const del = deleteNode(t, "pg_msp3ucx811rq9ao");
+    t = purgeTrashEntry(del.tree, del.entry.id).tree;
+
+    for (let i = 0; i < 3; i += 1) {
+      t = reload(t);
+      expect(tombstoneIds(t).has("pg_msp3ucx811rq9ao"), `reload ${i + 1} kept the ledger`).toBe(true);
+      expect(liveIds(t), `reload ${i + 1} live`).toEqual([]);
+      expect(trashIds(t), `reload ${i + 1} trash`).toEqual([]);
+      // …and each reload also syncs against a server still holding the page LIVE.
+      t = mergeTrees(t, beforeBin);
+      expect(liveIds(t), `reload ${i + 1} after sync`).toEqual([]);
+      expect(trashIds(t), `reload ${i + 1} after sync`).toEqual([]);
+    }
+  });
+
+  it("⛔ AND THE LEDGER SURVIVES THE STORE ITSELF — the one step the first round never took", () => {
+    let t = addPage(emptyTree(), { id: "a", title: "A" }).tree;
+    const del = deleteNode(t, "a");
+    t = purgeTrashEntry(del.tree, del.entry.id).tree;
+    const ids = [...tombstoneIds(t)].sort();
+    expect(ids).toHaveLength(2);
+    expect([...tombstoneIds(reload(t))].sort()).toEqual(ids);
+    expect([...tombstoneIds(reload(reload(t)))].sort()).toEqual(ids);
   });
 
   it("…and in the other direction, because whichever side purged is the side with news", () => {
@@ -188,9 +247,11 @@ describe("PROPERTY: across thousands of two-client merges, a purged id never com
       for (let round = 0; round < 1200; round += 1) {
         let base = emptyTree();
         for (let i = 0; i < 4; i += 1) base = addPage(base, { id: `p${i}`, title: `P${i}` }).tree;
-        const a = randomOps(clone(base), rand, 4);
-        const b = randomOps(clone(base), rand, 4);
-        const merged = mergeTrees(a, b);
+        /* ⛔ RELOADED, which is the step whose absence let the ledger be dropped for a whole
+         * shipment. Each side goes to storage and comes back the way the app reads it. */
+        const a = reload(randomOps(clone(base), rand, 4));
+        const b = reload(randomOps(clone(base), rand, 4));
+        const merged = reload(mergeTrees(a, b));
         const tombs = tombstoneIds(merged);
         purges += tombs.size;
         const back = [...liveIds(merged), ...trashIds(merged)].filter((id) => tombs.has(id));
@@ -212,5 +273,50 @@ describe("PROPERTY: across thousands of two-client merges, a purged id never com
       const b = randomOps(clone(base), rand, 3);
       expect(tombstoneIds(mergeTrees(a, b)).size).toBe(tombstoneIds(mergeTrees(b, a)).size);
     }
+  });
+});
+
+/* ════════════════════════════════════════════════════════════════════════════════════════
+ * A DIFFERENCE THAT IS ONLY LITTER IS NOT A DISAGREEMENT
+ *
+ * The third finding of the live pass: a conflict prompt appeared on a note nobody had edited —
+ * *"“Load Study” also changed in another of your windows."* It was REAL, and it was a choice
+ * with nothing in it: the one-time clean-up had removed ten empty blocks on one side while the
+ * other window still had them, so the two copies differed by exactly the objects the app itself
+ * had decided are worthless.
+ * ═══════════════════════════════════════════════════════════════════════════════════════ */
+describe("judgeConflict — empty blocks cannot be what two windows disagree about", () => {
+  const para = (t) => ({ type: "paragraph", ...(t ? { content: [{ type: "text", text: t }] } : {}) });
+  const anchor = (kids) => ({ type: "noteAnchor", attrs: { x: 10, y: 20, w: 180 }, content: kids });
+  const doc = (...c) => ({ type: "doc", content: c });
+
+  it("⛔ THE SAME NOTE, ONE COPY STILL CARRYING THE LITTER, IS NOT A CONFLICT", () => {
+    const clean = doc(para("Load Study — 4.2 MW, feeder to the north."));
+    const littered = doc(para("Load Study — 4.2 MW, feeder to the north."), anchor([para()]), anchor([para("   ")]));
+    expect(judgeConflict({ localDoc: clean, serverDoc: littered })).toEqual({ silent: true, why: "litter-only" });
+    expect(judgeConflict({ localDoc: littered, serverDoc: clean })).toEqual({ silent: true, why: "litter-only" });
+  });
+
+  it("⛔ AND A REAL EDIT STILL IS ONE — the guard must not swallow a genuine divergence", () => {
+    const mine = doc(para("Load Study — 4.2 MW"), anchor([para()]));
+    const theirs = doc(para("Load Study — 6.0 MW"));
+    expect(judgeConflict({ localDoc: mine, serverDoc: theirs }).silent).toBe(false);
+  });
+
+  it("…including an edit made INSIDE a block, which is content like any other", () => {
+    const mine = doc(para("Same"), anchor([para("mine")]));
+    const theirs = doc(para("Same"), anchor([para("theirs")]));
+    expect(judgeConflict({ localDoc: mine, serverDoc: theirs }).silent).toBe(false);
+  });
+
+  it("identical copies are still settled as identical, not as litter", () => {
+    const d = doc(para("Same"), anchor([para("kept")]));
+    expect(judgeConflict({ localDoc: d, serverDoc: clone(d) })).toEqual({ silent: true, why: "identical" });
+  });
+
+  it("and a block holding a PICTURE is never litter, so it can still be a real disagreement", () => {
+    const mine = doc(para("Same"), anchor([{ type: "noteImage", attrs: { imageId: "img1" } }]));
+    const theirs = doc(para("Same"));
+    expect(judgeConflict({ localDoc: mine, serverDoc: theirs }).silent).toBe(false);
   });
 });

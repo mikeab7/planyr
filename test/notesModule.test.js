@@ -66,6 +66,8 @@ const ALL_NOTES_FILES = [
   "lib/notesKeys.js", "lib/notesProjectFiling.js", "lib/notesProjectLink.js",
   // NEW-2/NEW-3 — a block that stays where you put it, and how big the writing is.
   "lib/notesAnchorNode.js", "lib/notesZoom.js",
+  // An abandoned press leaves nothing behind: the ONE definition of an empty block.
+  "lib/notesAnchorPrune.js",
 ];
 const SKETCH_FILES = ALL_NOTES_FILES.filter((f) => f.includes("Sketch"));
 

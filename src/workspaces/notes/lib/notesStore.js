@@ -988,6 +988,18 @@ function settleQuietly(pageId, row) {
     if (!writePageLocal(pageId, row.doc)) return false;   // LOUD-FAILURE: a refused write is not a resolution
     emitPagesChanged([pageId]);
   }
+  /* ⛔ THE COPIES DIFFERED ONLY BY EMPTY BLOCKS — see `judgeConflict`. The CLEAN one wins and
+   * stays owed to the cloud, so the litter leaves the account instead of being kept in silence
+   * on whichever side happened to have it. */
+  if (verdict.why === "litter-only") {
+    const { doc: clean } = pruneEmptyAnchors(localDoc);
+    if (!writePageLocal(pageId, clean)) return false;
+    emitPagesChanged([pageId]);
+    sync.pages[pageId] = { rev: row.rev, dirty: true, purged: false };
+    conflicts.delete(pageId);
+    schedulePush();
+    return true;
+  }
   sync.pages[pageId] = { rev: row.rev, dirty: false, purged: false };
   conflicts.delete(pageId);
   return true;

@@ -89,6 +89,37 @@ written out in the header of `lib/notesStore.js`; read it there rather than re-d
   **drag-to-size grid** (B1372), never a fixed 3×3 and never a dialog. It re-declares the two shared control radii locally
   instead of importing the shared `shared/ui/controls` primitives: that import makes the bundler
   hoist a third shared chunk onto the **Site** route and the perf audit goes red.
+- **⛔ A PURGE IS A TOMBSTONED FACT, NOT AN ABSENCE (B357011, then B364016) — read this before
+  touching the bin or the merge.** He emptied the bin; the cloud tree went to **rev 991** with one
+  entry. A tab still on **rev 966** with unpushed edits reloaded, came back with **all 23 entries**,
+  and **pushed the resurrection up as rev 992**, overwriting the good state. The cause is
+  structural: the tree merge is a **UNION**, in which an addition wins and a deletion is the
+  ABSENCE of an entry — and absence loses to any copy that still has one. `purgeTrashEntry` records
+  the entry id and every page id it named in a tombstone ledger carried IN THE TREE, and **rule 0**
+  of `mergeTrees` honours it before every other rule. Four things not to undo:
+  1. **Rule 0 runs FIRST.** Rule 1 lifts a live node out when a bin entry names it, and a
+     resurrected entry would do exactly that to a page somebody had since restored.
+  2. **It shares rule 5's body**, so a child added under a purged parent afterwards is still
+     RESCUED — B342992's defect must not arrive through the new door.
+  3. **An entry is filtered by the ids it NAMES, not only its own.** Two devices deleting the same
+     note mint two DIFFERENT entry ids, so purging one leaves the other still naming pages whose
+     bytes are destroyed. That is the zombie state, and only the fuzz found it.
+  4. **⛔ `migrate` MUST PASS `raw.tombs` THROUGH — this is the one that shipped broken (B364016).**
+     It built a fresh object and then asked *that* object for its tombstones, so the ledger was
+     destroyed on every read, and every read goes through `migrate`. Rule 0 was correct and
+     completely inert: purge a page, reload, and it came back **in the LIVE list** as a note with
+     nothing in it, then pushed to the cloud.
+  **⛔ AND THE REASON NOTHING CAUGHT THAT: the tests never went through storage.** The whole suite,
+  including a 6,000-merge fuzz, worked on in-memory trees — so a purge-then-RELOAD on ONE client was
+  not a case anybody had. Every case now round-trips through the real store and the fuzz reloads
+  between rounds. The zombie clean-up accepts the server's `purged_at` as its ONLY evidence ("no
+  body on this device" is a different claim). Guards: the repo-root `test/` suite **notesBinPurge**,
+  mutation-proven in both directions.
+  - **AND A DIFFERENCE THAT IS ONLY LITTER IS NOT A DISAGREEMENT (B364018).** A conflict prompt
+    appeared on a note nobody had edited, because the one-time clean-up had removed ten empty blocks
+    on one device and not yet on the other. `judgeConflict` discounts empty blocks — the CLEAN copy
+    wins and is pushed — while a real edit, an edit made inside a block, and a block holding a
+    picture all still raise one.
 - `lib/notesModel.js` — PURE page-tree schema + every structural op, page **timestamps**, the
   project filing (`pagesInScope` · `projectGroups` · `setPageProject` · `projectOfPage`), the
   **bin**, and **the one-way migration off the superseded four-level shape — read its header
@@ -162,6 +193,34 @@ written out in the header of `lib/notesStore.js`; read it there rather than re-d
     block is out of flow, so every block below the text was, to the mat, empty page. It swallowed
     the press and sent the caret to the end of the document. Verified as a REAL failure with a
     real mouse in a foreground tab before it was touched, and re-verified after.
+  - **⛔ AND THE SIXTH ROUND COLLAPSED THE TWO GESTURES INTO ONE (B357008/B357009), because the
+    "intermittency" had a mechanical explanation and it was ONE bug, not two.** *(a)* A
+    double-click committed an **empty** block the instant it was pressed — five presses with
+    nothing typed produced five nodes in storage, all surviving a reload. *(b)* An empty block
+    draws nothing and **still occupies its box and still takes the press**, so the second attempt
+    at a spot you already tried lands inside the first attempt's invisible leftover and appears
+    to do nothing. That is the whole of *"it works intermittently"*: it fails exactly where you
+    already tried once and gave up. *(c)* A single click in open page sent the caret to the
+    nearest text position, which on a mostly-empty page is a LONG JUMP — *"it goes still goes all
+    the way to the left."*
+    **So: an empty block is PROVISIONAL** (`lib/notesAnchorPrune.js` — the editor drops one when
+    the caret leaves, on blur and on Escape; `writePage` prunes it so a crash or a closed tab
+    cannot carry one out either), **it is VISIBLY outlined while it exists**, and **a press in
+    blank space places the caret where you pressed** — with the nearest-text-position path kept
+    only for a press genuinely beside a line, measured against where that position actually is.
+    **There is no separate double-click handler any more**, and that removal is the point: one
+    gesture, one rule, no invisible document state choosing between them. Guards: the repo-root
+    `test/` suite **notesAnchorPrune** and the soak harness **verify-notes-anchor-soak** (three
+    window sizes including his ~520-tall one; presses that type nothing must leave the stored
+    document BYTE-IDENTICAL).
+  - **⛔ AND DRIVE IT WITH A REAL MOUSE — A SYNTHETIC CLICK REACHES NOTHING HERE (B364017).** The
+    placement is on `mousedown`, and a synthetic `click`/`dblclick` produces no `mousedown` at
+    all, so it does nothing while the right element is under the cursor and the editor is
+    focused. That cost a false *"the gesture has regressed to nothing"* report on a build where
+    the real mouse worked 32 times out of 32. This is **SYNTHETIC-KEYS-DONT-EDIT on the mouse**:
+    use the press driver **pressFeature** under `ui-audit/lib/`, and **verify-press-drive** re-measures the whole verdict
+    table every run, so the day the wiring moves again it says so rather than a harness reporting
+    a working feature as broken.
 - **HOW BIG THE WRITING IS (B342994, `lib/notesZoom.js`).** Ctrl+wheel and Ctrl+=/−/0 scale the
   **document**, never the app; the browser's own zoom is suppressed for those gestures so the two
   cannot fight; the level is per-scope, persisted, and does not sync (a comfortable size belongs to

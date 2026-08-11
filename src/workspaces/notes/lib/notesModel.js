@@ -911,7 +911,20 @@ export function migrate(raw) {
     const m = migrateTrashEntry(e);
     if (m) trash.push(m);
   }
-  // The tombstone ledger rides through untouched apart from expiry — a tree written before it
-  // existed simply has none, which is the correct starting state.
-  return withTombstones({ v: NOTES_TREE_VERSION, pages, trash }, [], { at: Date.now() });
+  /* ⛔ `raw.tombs` — AND THAT ARGUMENT IS THE WHOLE OF THE FIRST FIX'S FAILURE. It was omitted,
+   * so `withTombstones` read the ledger off the fresh object being built, found none, and
+   * returned an empty one. Every read of the tree goes through here, so the ledger was
+   * destroyed the instant it was written and the merge fell straight back to a plain union.
+   *
+   * WHAT THAT COST, measured on his account: he created a page, binned it, pressed Delete
+   * forever — correct, the row went — and RELOADED. The page came back **into the live list**,
+   * as a note with nothing in it and nothing recoverable, and was pushed to the cloud. Worse
+   * than the bug it replaced, which at least put things back in the bin.
+   *
+   * ⛔ AND IT WAS INVISIBLE TO EVERY TEST WRITTEN FOR IT, which is the part worth remembering:
+   * the whole suite — including a 6,000-merge fuzz — worked on in-memory trees and never once
+   * went through `migrate` or through storage. A purge-then-RELOAD on ONE client was not a
+   * case anybody had. `test/notesBinPurge.test.js` now round-trips every case through the real
+   * store, and the fuzz reloads between rounds. */
+  return withTombstones({ v: NOTES_TREE_VERSION, pages, trash, tombs: raw.tombs }, [], { at: Date.now() });
 }
