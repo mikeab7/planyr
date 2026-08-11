@@ -771,11 +771,27 @@ describe("cloud sync rides the SAME one seam", () => {
       .not.toMatch(/projectId/);
   });
 
-  it("THE DETECTOR SEARCHES THE BIN — both real copies were binned before anyone looked", () => {
+  /* ⛔ SUPERSEDED, AND THE REVERSAL IS THE POINT (NEW-4). This used to pin the opposite
+   * property — "THE DETECTOR SEARCHES THE BIN" — because both copies of the original incident
+   * were binned by the time anyone looked. That is right for a FORENSIC pass and wrong for a
+   * BANNER: what it put on his screen was one copy in the bin and one in a project deleted a
+   * week earlier, with nothing to act on and Dismiss the only exit. A bar that cannot be
+   * satisfied teaches you to dismiss the one that will one day be real. */
+  it("THE BANNER'S SCAN ONLY LOOKS WHERE SOMETHING CAN BE DONE — not the bin, not dead projects", () => {
     const scan = code("lib/notesScan.js");
     const fn = scan.slice(scan.indexOf("export function scanNoteDuplicates"));
-    expect(fn.slice(0, 1400)).toMatch(/trashEntries\(tree\)/);
-    expect(fn.slice(0, 1400)).toMatch(/where: "bin"/);
+    const body = fn.slice(0, fn.indexOf("\n}\n"));
+    expect(body, "the bin is not walked at all").not.toMatch(/trashEntries\(tree\)/);
+    expect(body, "and a copy in a project that no longer exists is filtered out")
+      .toMatch(/known\.has\(r\.projectId\)/);
+    expect(body, "…while a page in NO project is never filtered — nowhere is a real place")
+      .toMatch(/r\.projectId == null \|\|/);
+    expect(body, "and a finding he has settled with 'keep both' stays settled").toMatch(/duplicateKey\(g\)/);
+
+    /* ⛔ AND AN UNKNOWN PROJECT LIST NEVER READS AS "they are all dead". An empty READY list
+     * and a FAILED lookup are opposite facts, and letting the second wear the first's clothes
+     * would silently suppress a real finding. */
+    expect(code("Notes.jsx")).toMatch(/liveProjectIds: projectList\.state === "ready" \? projects\.map\(\(p\) => p\.id\) : null/);
     // …and it is reached LAZILY, like the cloud tier: nothing on the rail's first paint
     // needs it, and this route's byte budget is what the lazy boundary exists to protect.
     expect(code("Notes.jsx")).toMatch(/await import\("\.\/lib\/notesScan\.js"\)/);

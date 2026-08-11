@@ -88,8 +88,15 @@ const COLORADO = "sms7v3ua7ksy";
 /** Seed the device exactly as it would be after the defect: the same note in two projects,
  *  plus a body whose tree node has gone. `sameProject` is the mutation arm. */
 async function seed({ sameProject = false } = {}) {
-  await page.evaluate(([treeKey, prefix, tree, bodies]) => {
+  await page.evaluate(([treeKey, prefix, tree, bodies, sitesKey, projectIds]) => {
     localStorage.clear();
+    /* ⛔ BOTH PROJECTS REALLY EXIST HERE, and that is load-bearing rather than scenery. Since
+       NEW-4 a copy whose project has been DELETED is not a finding — there is nothing to
+       decide about a tombstone — so a fixture that names two projects without creating them
+       would prove the banner silent for the wrong reason entirely. */
+    localStorage.setItem(sitesKey, JSON.stringify(Object.fromEntries(projectIds.map((g, i) => (
+      [`${g}_a`, { id: `${g}_a`, groupId: g, site: `Project ${i + 1}`, name: "Concept A", updatedAt: Date.now(), schemaVersion: 9 }]
+    )))));
     localStorage.setItem(treeKey, JSON.stringify(tree));
     for (const [id, body] of Object.entries(bodies)) localStorage.setItem(prefix + id, JSON.stringify(body));
   }, [
@@ -100,10 +107,21 @@ async function seed({ sameProject = false } = {}) {
       pages: [
         { id: "gp_coord", title: "Coordination", createdAt: 1, updatedAt: 1, pages: [], projectId: GRAND_PORT },
         { id: "co_page1", title: "Page 1", createdAt: 1, updatedAt: 1, pages: [], projectId: sameProject ? GRAND_PORT : COLORADO },
+        /* A note filed under a project that has since been deleted — not a duplicate of
+           anything, and here only so the "where am I filed?" badge has an unresolvable case
+           to answer honestly. */
+        { id: "dead_note", title: "Old pursuit", createdAt: 1, updatedAt: 1, pages: [], projectId: "a-project-that-went" },
       ],
       trash: [],
     },
-    { gp_coord: doc("RPlat"), co_page1: doc("Plat"), [LOST_ID]: ORPHAN },
+    {
+      gp_coord: doc("RPlat"),
+      co_page1: doc("Plat"),
+      dead_note: { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "Broker called about the 40 acres east of the rail spur." }] }] },
+      [LOST_ID]: ORPHAN,
+    },
+    "planarfit:sites:v1",
+    [GRAND_PORT, COLORADO],
   ]);
   await page.reload({ waitUntil: "domcontentloaded" });
   await page.waitForSelector('[data-testid="notes-tree"]', { timeout: 20000 });
@@ -199,9 +217,20 @@ if (await badge.count()) {
   const node = (await readTree()).pages.find((p) => p.title === title);
   ok("…and the project it names is the one the TREE says, not one the viewer supplied",
     pid === String(node?.projectId ?? ""), `badge=${pid} tree=${node?.projectId ?? null}`);
-  ok("…an id with no project behind it is NAMED as such, never captioned as 'no project'",
-    (await badge.getAttribute("data-resolved")) === "0" && /no longer exists|couldn/i.test(label), label);
+  ok("…by the project's own NAME, and marked as a resolved answer",
+    (await badge.getAttribute("data-resolved")) === "1" && label.length > 0, label);
 }
+
+/* …and the case the badge exists for: a note still filed under a project that has since been
+ * deleted. That is NOT the same fact as "no project", and captioning it as if it were is the
+ * conflation that hid the original mis-filing for a week. */
+await page.goto(`${BASE}#/notes`, { waitUntil: "domcontentloaded" });
+await page.waitForSelector('[data-testid="notes-tree"]', { timeout: 20000 });
+await tb("notes-row-dead_note").click();
+await pacedWait(page, 600);
+const deadLabel = (await tb("note-project-badge").innerText()).trim();
+ok("⛔ AN ID WITH NO PROJECT BEHIND IT IS NAMED AS SUCH, never captioned as 'no project'",
+  (await tb("note-project-badge").getAttribute("data-resolved")) === "0" && /no longer exists|couldn/i.test(deadLabel), deadLabel);
 
 /* …and the recovered note, which genuinely belongs nowhere, says exactly that instead.
  * "Show me" navigated INTO Grand Port (that is the point — the copy is usually somewhere
@@ -290,7 +319,10 @@ if (await row.count()) {
     const n = await line.getAttribute("data-note-count");
     const words = (await line.innerText()).replace(/\s+/g, " ");
     ok("…and the number is the NOTES, not the loose one and not the pages", n === "2", `data-note-count=${n}`);
-    ok("…and it counts the subpages separately, in words", /3 pages/.test(words), words);
+    /* ⛔ SUBPAGES, NOT A TOTAL (NEW-6). It used to read "(3 pages)" for two notes, one of
+       which has a single page under it — the note itself folded into the page figure, so two
+       things read as three. */
+    ok("…and it counts the subpages separately, in words", /\+ 1 subpage\b/.test(words) && !/3 pages/.test(words), words);
   ok("…and the fixture really is the tree under test — the seed was not flushed away",
     JSON.stringify(await readTree()).includes("gp_a_sub"));
     ok("…and it says they survive either way, so the choice is not a threat", /stay in Notes/.test(words));
@@ -308,6 +340,181 @@ if (await row.count()) {
   ok("…and the tree is marked as owing the cloud a push, so a sync cannot undo the move",
     await page.evaluate(() => JSON.parse(localStorage.getItem("planyr:notes:sync:v1:local") || "{}").treeDirty === true));
 }
+
+/* ════ 7. THE BIN YOU CAN ACTUALLY JUDGE (NEW-3, and NEW-6 on its third surface) ═══════
+ *
+ * The owner, verbatim: *"figure out the bin thing because there is, like, a bunch of items in
+ * there, but I cannot even see it. Like, if I wanted to check to see if I should keep it, I
+ * cannot."* Twenty-one entries, SIXTEEN of them called "Untitled page", each showing a name
+ * and a countdown and nothing else. The fixture reproduces that: three entries whose titles
+ * are useless, one of them empty, one carrying a subpage, one from a project that has since
+ * been deleted. */
+console.log("\n7 · The bin can be read without restoring anything (NEW-3 / NEW-6)");
+await page.reload({ waitUntil: "domcontentloaded" });
+await page.waitForSelector('[data-testid="notes-tree"]', { timeout: 20000 });
+await page.evaluate(([sitesKey, treeKey, prefix, gp]) => {
+  localStorage.clear();
+  localStorage.setItem(sitesKey, JSON.stringify({
+    [`${gp}_a`]: { id: `${gp}_a`, groupId: gp, site: "Grand Port", name: "Concept A", updatedAt: Date.now(), schemaVersion: 9 },
+  }));
+  const entry = (id, node, projectId, pageIds) => ({
+    id, kind: "page", node, parentId: null, index: 0, projectId,
+    /* ⛔ THREE DAYS AGO, NOT A FIXED DATE. The bin purges anything past its 30-day window on
+       load, so a hard-coded timestamp becomes an empty bin the moment the calendar catches up
+       with it — a fixture that quietly stops testing anything. */
+    title: node.title, deletedAt: Date.now() - 3 * 86400000, pageIds,
+  });
+  const pg = (id, title, pages = []) => ({ id, title, createdAt: 1, updatedAt: 1, pages });
+  localStorage.setItem(treeKey, JSON.stringify({
+    v: 3,
+    pages: [pg("live", "A live note")],
+    trash: [
+      entry("tr1", pg("b1", "Untitled page"), gp, ["b1"]),
+      entry("tr2", pg("b2", "Untitled page", [pg("b2k", "Untitled page")]), "a-dead-project", ["b2", "b2k"]),
+      entry("tr3", pg("b3", "Untitled page"), null, ["b3"]),
+      entry("tr4", pg("b4", "Untitled page"), null, ["b4"]),
+    ],
+  }));
+  localStorage.setItem(`${prefix}live`, JSON.stringify({ type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "Still here." }] }] }));
+  localStorage.setItem(`${prefix}b1`, JSON.stringify({ type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "Detention pond came back two feet low on the survey." }] }] }));
+  localStorage.setItem(`${prefix}b2`, JSON.stringify({ type: "doc", content: [{ type: "paragraph" }] }));
+  localStorage.setItem(`${prefix}b2k`, JSON.stringify({ type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "Truck turn exhibit, WB-67 around the north dock." }] }] }));
+  localStorage.setItem(`${prefix}b3`, JSON.stringify({ type: "doc", content: [{ type: "paragraph" }] }));
+  localStorage.setItem(`${prefix}b4`, JSON.stringify({ type: "doc", content: [{ type: "paragraph" }] }));
+}, ["planarfit:sites:v1", TREE_KEY, PAGE_PREFIX, GRAND_PORT]);
+await page.reload({ waitUntil: "domcontentloaded" });
+await page.waitForSelector('[data-testid="notes-tree"]', { timeout: 20000 });
+await tb("notes-view-bin").click();
+await tb("notes-bin").waitFor({ state: "visible", timeout: 10000 });
+await pacedWait(page, 500);
+
+const binText = (id) => page.evaluate((sel) => (document.querySelector(sel)?.innerText || "").replace(/\s+/g, " "), `[data-testid="notes-bin-${id}"]`);
+const r1 = await binText("tr1");
+ok("⛔ AN ENTRY SHOWS THE WORDS IN IT — the whole of what makes it judgeable", /Detention pond/.test(r1), r1.slice(0, 120));
+ok("…and how much of it there is", /\d+ characters/.test(r1), (r1.match(/\d+ characters/) || [""])[0]);
+ok("…and when it went", /deleted /.test(r1), (r1.match(/deleted [^·]*/) || [""])[0].trim());
+ok("…and the project it came from, by NAME", /Grand Port/.test(r1), r1.slice(0, 160));
+
+const r2 = await binText("tr2");
+ok("⛔ A NOTE WITH ONE PAGE UNDER IT SAYS “+ 1 SUBPAGE”, NOT “2 PAGES” (NEW-6)",
+  /\+ 1 subpage\b/.test(r2) && !/2 pages/.test(r2), r2.slice(0, 200));
+ok("…and it borrows the words from the subpage, because its own body is blank",
+  /Truck turn exhibit/.test(r2), r2.slice(0, 140));
+ok("…and a project that has since been deleted is NAMED as gone, not captioned as “no project”",
+  /no longer exists/.test(r2), (r2.match(/[^·]*no longer exists/) || [""])[0].trim());
+
+const r3 = await binText("tr3");
+ok("a page nothing was ever written in says exactly that", /Empty — nothing was ever written/.test(r3), r3.slice(0, 120));
+ok("…and it is the one with no “Read it”, because there is nothing to read",
+  await tb("notes-bin-peek-tr3").count() === 0 && await tb("notes-bin-peek-tr1").count() > 0);
+ok("…and “Not in a project” is still said in plain words where that is the true answer", /Not in a project/.test(r3), r3.slice(0, 160));
+
+const head = await page.evaluate(() => (document.querySelector('[data-testid="notes-bin"] p')?.innerText || "").replace(/\s+/g, " "));
+ok("⛔ THE BIN COUNTS DELETED NOTES, NOT PAGES (NEW-6) — five pages went in, four notes did",
+  /4 deleted notes/.test(head) && !/5 /.test(head), head);
+
+/* READ IT — the whole point: judge the note without putting it back in the live tree. */
+await tb("notes-bin-peek-tr1").click();
+await tb("notes-peek").waitFor({ state: "visible", timeout: 10000 });
+await pacedWait(page, 700);
+const peekText = (await tb("notes-peek").innerText()).replace(/\s+/g, " ");
+ok("⛔ “READ IT” OPENS THE NOTE WITHOUT RESTORING IT", /Detention pond/.test(peekText), peekText.slice(0, 140));
+ok("…and says out loud that nothing here changes it", /Nothing you do here changes it/.test(peekText));
+ok("…and it is genuinely READ-ONLY, not merely labelled so",
+  await page.evaluate(() => document.querySelector('[data-testid="note-body"]')?.getAttribute("contenteditable") === "false"));
+ok("⛔ AND THE TREE IS UNTOUCHED BY READING — the entry is still in the bin, still not live",
+  await page.evaluate((k) => {
+    const t = JSON.parse(localStorage.getItem(k) || "null");
+    return (t.trash || []).length === 4 && (t.pages || []).length === 1;
+  }, TREE_KEY));
+await tb("notes-peek-close").click();
+await pacedWait(page, 400);
+
+/* AND THE BULK CLEAR — sixteen of his rows were empty pages, and clearing them one at a time
+ * is exactly why they were still there. */
+ok("⛔ IT OFFERS TO CLEAR THE EMPTY ONES IN ONE ACTION", await tb("notes-bin-purge-empties").count() > 0,
+  (await tb("notes-bin-purge-empties").innerText().catch(() => "")).trim());
+await tb("notes-bin-purge-empties").click();
+await pacedWait(page, 1000);
+const afterPurge = await readTree();
+const leftIds = (afterPurge.trash || []).map((e) => e.id).sort().join(",");
+ok("…and it took EXACTLY the empty ones", leftIds === "tr1,tr2", leftIds || "empty");
+ok("⛔ …INCLUDING THE ONE WHOSE OWN BODY IS BLANK BUT WHOSE SUBPAGE IS NOT — that one is not empty",
+  (afterPurge.trash || []).some((e) => e.id === "tr2"));
+ok("…and their bodies are gone from the device, which is what “forever” has to mean",
+  await page.evaluate((p) => !localStorage.getItem(`${p}b3`) && !localStorage.getItem(`${p}b4`), PAGE_PREFIX));
+ok("…and the words that were NOT empty are all still on the device",
+  await page.evaluate((p) => !!localStorage.getItem(`${p}b1`) && !!localStorage.getItem(`${p}b2k`), PAGE_PREFIX));
+ok("…and the note that was never deleted is untouched", (afterPurge.pages || []).length === 1
+  && await page.evaluate((p) => !!localStorage.getItem(`${p}live`), PAGE_PREFIX));
+
+/* ════ 8. A BANNER THAT CAN BE SATISFIED (NEW-4) ══════════════════════════════════════
+ *
+ * What he was actually shown: *"One note appears in 2 different projects (2 copies).
+ * “Coordination” in Grand Port · “Page 1” in a project that no longer exists (in the bin)"* —
+ * one copy already in the bin, the other's project deleted a week earlier. Nothing to act on,
+ * and Dismiss the only way out. */
+console.log("\n8 · The duplicate bar only names copies somebody can act on (NEW-4)");
+await page.reload({ waitUntil: "domcontentloaded" });
+await page.waitForSelector('[data-testid="notes-tree"]', { timeout: 20000 });
+await page.evaluate(([sitesKey, treeKey, prefix, gp, lines]) => {
+  localStorage.clear();
+  localStorage.setItem(sitesKey, JSON.stringify({
+    [`${gp}_a`]: { id: `${gp}_a`, groupId: gp, site: "Grand Port", name: "Concept A", updatedAt: Date.now(), schemaVersion: 9 },
+  }));
+  const body = { type: "doc", content: lines.map((l) => ({ type: "paragraph", content: [{ type: "text", text: l }] })) };
+  const pg = (id, title, projectId) => ({ id, title, createdAt: 1, updatedAt: 1, projectId, pages: [] });
+  localStorage.setItem(treeKey, JSON.stringify({
+    v: 3,
+    pages: [pg("gp_coord", "Coordination", gp)],
+    trash: [{
+      id: "tr_dup", kind: "page", node: pg("co_page1", "Page 1", "a-dead-project"), parentId: null, index: 0,
+      projectId: "a-dead-project", title: "Page 1", deletedAt: Date.now() - 3 * 86400000, pageIds: ["co_page1"],
+    }],
+  }));
+  localStorage.setItem(`${prefix}gp_coord`, JSON.stringify(body));
+  localStorage.setItem(`${prefix}co_page1`, JSON.stringify(body));
+}, ["planarfit:sites:v1", TREE_KEY, PAGE_PREFIX, GRAND_PORT, LINES]);
+await page.reload({ waitUntil: "domcontentloaded" });
+await page.waitForSelector('[data-testid="notes-tree"]', { timeout: 20000 });
+await pacedWait(page, 4000);
+
+const bannerNow = await waitForBanner(6000);
+const dupNow = bannerNow ? await tb("notes-integrity-banner").getAttribute("data-duplicates") : "0";
+ok("⛔ THE UNSATISFIABLE FINDING IS NOT REPORTED — one copy is in the bin, the other's project is gone",
+  dupNow === "0", `data-duplicates=${dupNow}${bannerNow ? "" : " (banner absent entirely)"}`);
+
+/* …and the mutation arm: the SAME fixture with both copies live in live projects is still a
+ * finding, so the silence above is a decision and not a broken scan. */
+await page.reload({ waitUntil: "domcontentloaded" });
+await page.waitForSelector('[data-testid="notes-tree"]', { timeout: 20000 });
+await page.evaluate(([treeKey, gp]) => {
+  const t = JSON.parse(localStorage.getItem(treeKey));
+  const node = t.trash[0].node;
+  node.projectId = gp;                       // a project that still exists…
+  t.pages.push(node);                        // …and the copy is live, not binned
+  t.trash = [];
+  t.pages[0].projectId = null;               // two DIFFERENT live places
+  localStorage.setItem(treeKey, JSON.stringify(t));
+}, [TREE_KEY, GRAND_PORT]);
+await page.reload({ waitUntil: "domcontentloaded" });
+await page.waitForSelector('[data-testid="notes-tree"]', { timeout: 20000 });
+ok("⛔ MUTATION — the same two copies, both live in live places, IS still reported",
+  await waitForBanner(14000) && (await tb("notes-integrity-banner").getAttribute("data-duplicates")) === "1",
+  `data-duplicates=${await tb("notes-integrity-banner").getAttribute("data-duplicates").catch(() => "absent")}`);
+
+/* …and it can now be ENDED from the bar, which is the half that was missing. */
+ok("it offers to keep just one of them", await tb("notes-dupe-keep-gp_coord").count() > 0);
+ok("…and to keep both and stop being told", await tb("notes-dupe-keep-both").count() > 0);
+await tb("notes-dupe-keep-both").click();
+await pacedWait(page, 1200);
+ok("⛔ “KEEP BOTH” ENDS IT — and the finding does not come back on the next load",
+  await page.evaluate(() => JSON.parse(localStorage.getItem("planyr:notes:dupes-ignored:v1:local") || "[]").length === 1));
+await page.reload({ waitUntil: "domcontentloaded" });
+await page.waitForSelector('[data-testid="notes-tree"]', { timeout: 20000 });
+await pacedWait(page, 4000);
+const dupAfter = (await waitForBanner(5000)) ? await tb("notes-integrity-banner").getAttribute("data-duplicates") : "0";
+ok("…proven by a reload, not by the render that dismissed it", dupAfter === "0", `data-duplicates=${dupAfter}`);
 
 ok("no uncaught page errors across the whole run", pageErrors.length === 0, pageErrors.join(" | ") || "clean");
 

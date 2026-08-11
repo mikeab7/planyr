@@ -113,6 +113,31 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V145568 — B350002: HIS OWN twenty-one-entry bin is now judgeable without restoring anything `Blocker: real-data`
+
+Every mechanism is driven headless against a fixture built to his shape (three useless titles, one empty, one carrying a subpage, one from a deleted project) — `ui-audit/verify-notes-project-integrity.mjs` §7, 21 checks. What this sandbox cannot do is look at HIS bin, which is the thing he asked about.
+
+- **OPEN NOTES → BIN, signed in.** PASS = each of the sixteen "Untitled page" rows now shows the words in it, so you can tell them apart at a glance. FAIL = any row still shows nothing but a name and a countdown.
+- **THE ROW'S FACTS.** PASS = every row names the project it came from (or says plainly that the project no longer exists, or that where it came from was never recorded), when it went, and how much is in it.
+- **READ IT.** Press **Read it** on a row. PASS = the note opens read-only, says "Nothing you do here changes it", and the bin still holds the entry afterwards — nothing has been restored into the live tree. FAIL = it lands back in the rail, or it is editable.
+- **THE BULK CLEAR.** PASS = "Delete the N empty ones forever" names the number of genuinely empty ones, and pressing it takes exactly those and leaves everything with words in it. FAIL = it takes a row that had words, or the count is wrong.
+- **A NULL IS NOT A DISPOSITION (STANDING RULE #2).** If a row still cannot be judged, that is a FAIL to report, not a "could not reproduce".
+
+### V145569 — B350003: the duplicate bar on his real account only names copies he can do something about `Blocker: real-data`
+
+Mutation-proven both ways headless (`ui-audit/verify-notes-project-integrity.mjs` §8): the exact fixture he was shown is silent, and the same two copies both live in live projects is still reported.
+
+- **OPEN NOTES, signed in, and wait for the integrity bar.** PASS = the finding he reported — *"“Coordination” in Grand Port · “Page 1” in a project that no longer exists (in the bin)"* — is **gone**, because neither copy is actionable. FAIL = it is still there.
+- **AND A REAL ONE STILL SPEAKS.** Copy a note into a second live project. PASS = the bar names it. FAIL = it stays silent, which would mean the filter is over-reaching.
+- **ENDING ONE.** On a real finding, press **Keep both**. PASS = it goes, and it is still gone after a reload. FAIL = it comes back.
+
+### V145570 — B350000: a note with a narrowed anchored block PRINTS where it sits `Blocker: print-engine`
+
+Everything on screen is proven — 38 click positions across the full editor width, each landing exactly where it was clicked, read back out of storage (`ui-audit/verify-notes-anchor-zoom.mjs` §9). The print sheet's box arithmetic was changed to match the editor's and the two stylesheets are pinned to each other by unit test, but headless Chromium's `window.print()` produces no paginated output, so the sheet itself has not been seen.
+
+- **PRINT A NOTE that has a block anchored near the RIGHT-HAND edge** (double-click blank space over on the right and type a sentence long enough to wrap). PASS = on the PDF the block sits at the same place across the page as it does on screen, at the same width, with its words breaking in the same places. FAIL = it has moved, changed width, or wrapped differently.
+- **AND ONE ANCHORED LOW ON THE PAGE.** PASS = it prints where it sits rather than being clipped or pushed onto the next sheet mid-block.
+
 ### V138560 — B342992: the recovered note opens on his own machine, and a two-window merge no longer loses a page `Blocker: auth`
 
 **Both merge holes are proven without a browser** — `test/notesReachability.test.js` reproduces each in four lines and then sweeps 6,000 randomised two-device merges across five seeds with zero pages left neither live nor binned. **The recovery of his actual note is already done as data**: `notes_trees` went 910 → 911 under a guarded update, and a full re-audit of the account returns zero bodies without a node. What the sandbox cannot do is sign in, so the last mile is his own signed-in session.

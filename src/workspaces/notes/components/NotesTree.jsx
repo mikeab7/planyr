@@ -546,27 +546,87 @@ function SearchResults({ results, onSelectHit, query }) {
   );
 }
 
-function BinList({ entries, onRestore, onPurge, onPurgeAll }) {
+/* ⛔ A BIN YOU CAN ACTUALLY JUDGE (NEW-3).
+ *
+ * What it showed before: a title, a countdown, Restore, Delete forever. Sixteen of his
+ * twenty-one rows read "Untitled page", so the only way to find out what one WAS, was to
+ * restore it into his live tree and delete it again. Every fact needed to decide was already
+ * on hand and simply not rendered — the words are in the bodies (still on disk, because that
+ * is what makes a restore work), and the project, the date and the size are on the entry.
+ *
+ * The row is also a BUTTON now: it opens the note READ-ONLY, so "let me just look at it"
+ * costs nothing and touches nothing. */
+function BinList({ entries, onRestore, onPurge, onPurgeAll, onPeek, onPurgeEmpties }) {
   if (!entries.length) {
     return <p style={{ margin: "8px 10px", fontSize: 12, color: "var(--text-tertiary)" }}>The bin is empty.</p>;
   }
+  const empties = entries.filter((e) => e.empty);
   return (
     <div data-testid="notes-bin" style={{ padding: "2px 6px 10px", display: "flex", flexDirection: "column", gap: 4 }}>
       {/* The count belongs HERE — where it answers a question you actually asked by opening
           the bin — not permanently on the tab (PANEL-BREVITY). */}
       <p style={{ margin: "2px 4px 4px", fontSize: 11, fontWeight: 600, color: "var(--text-tertiary)" }}>
-        {entries.length === 1 ? "1 deleted page" : `${entries.length} deleted pages`} · kept 30 days
+        {/* ⛔ NOTES, NOT PAGES (NEW-6). Each entry is one deleted NOTE, which may have carried
+            subpages with it — calling the entry count a page count was the same miscount the
+            confirmation had, on a third surface. */}
+        {entries.length === 1 ? "1 deleted note" : `${entries.length} deleted notes`} · kept 30 days
       </p>
+
+      {/* ⛔ SIXTEEN OF HIS TWENTY-ONE ROWS WERE EMPTY PAGES. Clearing them one at a time is why
+          they were still there; one action for the whole class is the difference between a bin
+          that gets emptied and one that does not. Absent when there are none. */}
+      {empties.length > 1 ? (
+        <button
+          type="button"
+          data-testid="notes-bin-purge-empties"
+          onMouseDown={(ev) => ev.preventDefault()}
+          onClick={() => onPurgeEmpties(empties.map((e) => e.id))}
+          style={{
+            ...rowBase, width: "auto", alignSelf: "flex-start", padding: "3px 10px", fontSize: 11.5,
+            fontWeight: 650, border: "1px solid var(--border-default)", color: "var(--text-secondary)",
+          }}
+        >Delete the {empties.length} empty ones forever</button>
+      ) : null}
+
       {entries.map((e) => (
         <div key={e.id} data-testid={`notes-bin-${e.id}`} style={{ ...rowBase, flexDirection: "column", alignItems: "stretch", gap: 4, cursor: "default", border: "1px solid var(--border-default)" }}>
           <span style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
             <span style={{ flex: 1, minWidth: 0, fontWeight: 650, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{e.title || "Untitled"}</span>
             <span style={{ flex: "0 0 auto", fontSize: 10.5, fontWeight: 600, color: "var(--text-tertiary)" }}>{daysLeft(e.expiresAt)}</span>
           </span>
-          {e.pageIds?.length > 1 ? (
-            <span style={{ fontSize: 11, color: "var(--text-tertiary)" }}>{e.pageIds.length} pages</span>
-          ) : null}
-          <span style={{ display: "flex", gap: 5 }}>
+
+          {/* ⛔ THE WORDS THEMSELVES — the one thing that makes "should I keep this?" answerable
+              when sixteen rows share a title. An empty note says so rather than showing a gap. */}
+          <span
+            data-testid={`notes-bin-preview-${e.id}`}
+            style={{ fontSize: 11, lineHeight: 1.45, color: e.empty ? "var(--text-tertiary)" : "var(--text-secondary)", fontStyle: e.empty ? "italic" : "normal", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}
+          >{e.empty ? "Empty — nothing was ever written in it" : e.preview}</span>
+
+          <span style={{ display: "flex", flexWrap: "wrap", gap: 6, fontSize: 10.5, color: "var(--text-tertiary)" }}>
+            <span data-testid={`notes-bin-project-${e.id}`} style={{ color: e.projectResolved ? "var(--text-tertiary)" : "var(--warn-text)", fontWeight: e.projectResolved ? 600 : 700 }}>
+              {e.projectLabel}
+            </span>
+            {e.deletedAt ? <span>· deleted {absoluteStamp(e.deletedAt).split(",")[0]}</span> : null}
+            {e.chars ? <span>· {e.chars} characters</span> : null}
+            {/* ⛔ AND HERE TOO (NEW-6). `pageIds` is the delete's cascade set and INCLUDES the
+                note itself, so a note with one subpage announced itself as "2 pages" in the bin
+                long after the confirmation had been fixed. */}
+            {e.pageIds?.length > 1 ? <span>· + {subpagesPhrase(e.pageIds.length - 1).replace("its ", "")}</span> : null}
+          </span>
+
+          <span style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
+            {e.pageId && !e.empty ? (
+              <button
+                type="button"
+                data-testid={`notes-bin-peek-${e.id}`}
+                onMouseDown={(ev) => ev.preventDefault()}
+                onClick={() => onPeek(e)}
+                style={{
+                  ...rowBase, width: "auto", padding: "3px 10px", fontSize: 12, fontWeight: 650,
+                  border: "1px solid var(--border-default)", color: "var(--text-primary)",
+                }}
+              >Read it</button>
+            ) : null}
             <button
               type="button"
               data-testid={`notes-bin-restore-${e.id}`}
@@ -712,7 +772,7 @@ export default function NotesTree({
   activePageId, query, results,
   onQueryChange, onSelectPage, onSelectHit, onAddPage, onAddSubpage,
   onRename, onDelete, onExportPage, onPrintPage, onSetPageProject,
-  onMovePage, onRestore, onPurge, onPurgeAll, onAllNotes,
+  onMovePage, onRestore, onPurge, onPurgeAll, onPeekBin, onPurgeEmpties, binFacts, onAllNotes,
   taskGroups = [], onToggleTask, onOpenTask, onViewChange,
 }) {
   /* EXPANDED, not collapsed — the inverse of what this used to hold, and the whole point.
@@ -746,7 +806,11 @@ export default function NotesTree({
     }
     return out;
   }, [projects, tree]);
-  const bin = useMemo(() => trashEntries(tree), [tree]);
+  /* ⛔ THE BIN'S FACTS COME FROM THE WORKSPACE, NOT FROM HERE (NEW-3). Reading every binned
+   * page's BODY is a storage question, and this component is the rail — it renders on every
+   * keystroke of a rename. The workspace computes them once, only while the Bin view is open.
+   * Falls back to the bare entries so a build that has not wired it still lists the bin. */
+  const bin = useMemo(() => (binFacts?.length ? binFacts : trashEntries(tree)), [binFacts, tree]);
 
   /* OPEN THE PATH TO THE PAGE YOU ARE ON, and leave the rest shut. It only ever ADDS: a
    * branch the user opened by hand stays open, because a rail that closes what you just
@@ -985,7 +1049,7 @@ export default function NotesTree({
         ) : view === "tasks" ? (
           <TaskList groups={taskGroups} onToggle={onToggleTask} onOpen={onOpenTask} />
         ) : view === "bin" ? (
-          <BinList entries={bin} onRestore={onRestore} onPurge={onPurge} onPurgeAll={onPurgeAll} />
+          <BinList entries={bin} onRestore={onRestore} onPurge={onPurge} onPurgeAll={onPurgeAll} onPeek={onPeekBin} onPurgeEmpties={onPurgeEmpties} />
         ) : roots.length === 0 ? (
           /* ⛔ AN EMPTY RAIL MUST EXPLAIN ITSELF (B1374, kept). Inside a project with notes
              living elsewhere, the way to all of them is the Dashboard — one click, from here
