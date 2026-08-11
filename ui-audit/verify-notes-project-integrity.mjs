@@ -184,7 +184,14 @@ ok("…with the words the person actually wrote", /Channel improvements/i.test(r
 ok("…how much of it there is", /\d+ characters/.test(rowText), (rowText.match(/\d+ characters/) || [""])[0]);
 ok("…and when it was written, recovered from the id itself", /written /.test(rowText), (rowText.match(/written [^·]*/) || [""])[0].trim());
 
-const after = await readTree();
+/* ⛔ POLLED, NOT READ ONCE. The recovery is written a beat after the bar renders, so a single
+ * read races it — and a race that usually wins is worse than one that never does, because it
+ * fails on somebody else's slower machine and reads as a real regression. */
+let after = await readTree();
+for (let i = 0; i < 40 && !(after.pages || []).some((p) => p.id === LOST_ID); i += 1) {
+  await pacedWait(page, 250);
+  after = await readTree();
+}
 const recovered = (after.pages || []).find((p) => p.id === LOST_ID);
 ok("⛔ AND THE STORED TREE HOLDS IT — not just the banner", !!recovered, (after.pages || []).map((p) => p.id).join(", "));
 ok("…in the named no-project home, with NOTHING guessed", recovered && (recovered.projectId ?? null) === null, `projectId=${JSON.stringify(recovered?.projectId ?? null)}`);
@@ -427,6 +434,22 @@ ok("⛔ AND THE TREE IS UNTOUCHED BY READING — the entry is still in the bin, 
     const t = JSON.parse(localStorage.getItem(k) || "null");
     return (t.trash || []).length === 4 && (t.pages || []).length === 1;
   }, TREE_KEY));
+await tb("notes-peek-close").click();
+await pacedWait(page, 400);
+
+/* ⛔ AND THE CONTAINER CASE, which is the one that failed on his account. The entry `tr2` is a
+ * note whose OWN body is blank and whose words live in its subpage — exactly DEV
+ * COORDINATION, which has no row in `notes_pages` at all. The row's preview came from the
+ * child while the reader opened the parent, so the list showed 48 characters of real text and
+ * Read it showed a heading and nothing else. */
+await tb("notes-bin-peek-tr2").click();
+await tb("notes-peek").waitFor({ state: "visible", timeout: 10000 });
+await pacedWait(page, 900);
+const containerText = (await tb("notes-peek").innerText()).replace(/\s+/g, " ");
+ok("⛔ READING A CONTAINER SHOWS ITS SUBPAGE'S WORDS — what the row promised, not a bare heading",
+  /Truck turn exhibit/.test(containerText), containerText.slice(0, 160));
+ok("…and the row's own preview says the same thing, because one walk feeds both",
+  /Truck turn exhibit/.test(await binText("tr2")));
 await tb("notes-peek-close").click();
 await pacedWait(page, 400);
 

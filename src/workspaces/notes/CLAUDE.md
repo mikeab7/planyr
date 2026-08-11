@@ -206,7 +206,12 @@ written out in the header of `lib/notesStore.js`; read it there rather than re-d
     else — so the only way to find out what one WAS, was to restore it into the live tree and
     delete it again. Each row now carries the WORDS (borrowed from the first page in the cascade
     that has any), the project it came from, when it went and how big it is; **"Read it" opens it
-    read-only without restoring it**; and one action clears the empty ones. ⛔ Four project
+    read-only without restoring it**; and one action clears the empty ones. ⛔ **The row and the
+    reader are ONE walk** (B357012): DEV COORDINATION is a container with no row in `notes_pages`
+    at all, its words live in its child, and the list read the child while the reader opened the
+    parent — so the row said "656 characters" and Read it showed a bare heading. `collectBinFacts`
+    now builds the preview, the count and the reader's page list from the same reads, and the
+    reader renders every page in the entry that has words. ⛔ Four project
     states, not two: a live project · "Not in a project" · one that no longer exists · and an
     entry binned before the bin recorded where a page came from, which says so rather than
     claiming the note belonged nowhere.

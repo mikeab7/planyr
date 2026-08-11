@@ -940,14 +940,65 @@ describe("the project a notebook belongs to", () => {
     expect(ed, "Click and Type must not set alignment from where you pressed").not.toMatch(/setTextAlign/);
     expect(ed, "and it must not pad the document to reach the press").not.toMatch(/MAX_CLICK_PARAGRAPHS|paragraphStep|gap \/ step/);
     expect(ed, "the padding's clean-up bookkeeping went with the padding").not.toMatch(/claimRef|dropClaim/);
-    // It still has to decide on the CONTENT's bottom edge — `.ProseMirror` carries a
-    // min-height, so most blank space is INSIDE it and the naive guard never fires.
-    expect(ed).toMatch(/lastElementChild[\s\S]{0,200}contentBottom/);
-    // At most ONE new line, and only when the last block is not already empty.
-    expect(ed).toMatch(/lastIsEmptyParagraph/);
-    expect(ed).toMatch(/insertContentAt\(doc\.content\.size, \{ type: "paragraph" \}\)/);
+    /* ⛔ AND THE RULE ITSELF CHANGED AGAIN, on his measurement: *"If I do a single click, it
+     * goes still goes all the way to the left."* B1393 ×3's "nearest real text position" is a
+     * LONG JUMP on a page that looks empty — the caret flies to the end of a paragraph far
+     * above, or to the end of the document. So the nearest position is now CHECKED against the
+     * page before it is taken, and a press that is not beside a line places at the press point
+     * instead. Two things must therefore be true of this file, and both are properties rather
+     * than spellings: */
+    expect(ed, "the nearest position is checked, not trusted").toMatch(/pressIsBesideLine\(editor, hit\.pos, e\.clientY\)/);
+    expect(ed, "and the tolerance is the LINE'S OWN height, read from the browser")
+      .toMatch(/coordsAtPos\(pos\)[\s\S]{0,300}c\.bottom - c\.top/);
+    // ⛔ THE END OF THE DOCUMENT IS NEVER WHERE A PRESS GOES ANY MORE — that WAS the fling.
+    expect(ed, "no press may send the caret to the end of the document").not.toMatch(/focus\("end"\)/);
+    expect(ed, "and the padding paragraph it used to add is gone with it")
+      .not.toMatch(/insertContentAt\(doc\.content\.size, \{ type: "paragraph" \}\)/);
+    expect(ed, "…along with the bookkeeping that took those paragraphs back").not.toMatch(/matInsertsRef/);
+    // ⛔ ONE GESTURE, ONE RULE: there is no separate double-click handler to disagree with it.
+    expect(ed, "a double-click must not be a second, different gesture").not.toMatch(/onDoubleClick=/);
     // …and a press ON text is still the browser's business, or word-select dies.
     expect(ed).toMatch(/if \(el\.closest\("\.ProseMirror"\)/);
+  });
+
+  it("⛔ AN ABANDONED PRESS IS PROVISIONAL — enforced at the SEAM, not only in the gesture", () => {
+    /* Five double-clicks with nothing typed produced five nodes in his storage, each with
+     * x/y/w and no text, all surviving a reload. An empty block draws nothing and still takes
+     * the press, so the next attempt at that spot lands in the leftover and appears to do
+     * nothing — which is what "it works intermittently" turned out to be. */
+    const store = read(NOTES, "lib", "notesStore.js");
+    const fn = store.slice(store.indexOf("export function writePage"));
+    expect(fn.slice(0, 900), "the save path prunes, so a crash or a closed tab cannot carry one out")
+      .toMatch(/pruneEmptyAnchors\(doc\)/);
+    expect(store, "and the one-time clean-up for notes already carrying them")
+      .toContain("export function sweepEmptyAnchors");
+    const ed = code("components/NoteEditor.jsx");
+    expect(ed, "the caret leaving takes one away").toMatch(/onSelectionUpdate[\s\S]{0,200}dropEmptyAnchors/);
+    expect(ed, "and so does losing focus altogether").toMatch(/onBlur[\s\S]{0,120}dropEmptyAnchors/);
+    expect(ed, "and Escape, for the way out that needs no second click").toMatch(/Escape[\s\S]{0,200}dropEmptyAnchors/);
+    /* ⛔ AND IT IS VISIBLE WHILE IT EXISTS. An invisible obstacle is the bug; the outline is
+     * the fix, and it is driven by the SAME predicate the storage seam uses. */
+    expect(ed).toMatch(/planyr-anchor\[data-empty="1"\]/);
+    expect(read(NOTES, "lib", "notesAnchorNode.js"), "one definition of empty, not two")
+      .toMatch(/anchorIsEmpty\(n\.toJSON\(\)\)/);
+  });
+
+  it("⛔ A PURGE IS A TOMBSTONED FACT, so emptying the bin survives a stale window", () => {
+    /* Measured with revisions: he emptied the bin (cloud rev 991, one entry), a tab still on
+     * rev 966 reloaded, and all 23 entries came back AND were pushed up as rev 992. A union
+     * merge cannot represent a deletion, because a deletion is an absence. */
+    const model = read(NOTES, "lib", "notesModel.js");
+    expect(model).toContain("export function tombstoneIds");
+    expect(model).toContain("export function withTombstones");
+    const purge = model.slice(model.indexOf("export function purgeTrashEntry"));
+    expect(purge.slice(0, 800), "the purge records the entry id AND every page id it named")
+      .toMatch(/withTombstones\(next, \[entryId, e\?\.node\?\.id, \.\.\.pageIds\]/);
+    const cloud = read(NOTES, "lib", "notesCloud.js");
+    const merge = cloud.slice(cloud.indexOf("export function mergeTrees"));
+    expect(merge.slice(0, 4000), "rule 0 runs before the union").toMatch(/const tombs = new Set\(\[\.\.\.tombstoneIds\(L\), \.\.\.tombstoneIds\(S\)\]\)/);
+    expect(merge.slice(0, 6000), "a tombstoned entry never survives").toMatch(/if \(tombs\.has\(String\(e\.id\)\)\) continue;/);
+    expect(merge.slice(0, 9000), "…nor a tombstoned live node").toMatch(/deleted\.has\(pg\.id\) \|\| tombs\.has\(String\(pg\.id\)\)/);
+    expect(merge.slice(0, 9000), "and the ledger rides on to the next stale client").toMatch(/tombs: withTombstones/);
   });
 
   it("⛔ TAB HAS A DEFINED ANSWER IN EVERY CONTEXT, and none of them destroys content (B1392 ×2)", () => {

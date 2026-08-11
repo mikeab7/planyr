@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-08-11 @ `2bea3d3` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-08-11 @ `af0d914` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_498 source files mapped._
+_499 source files mapped._
 
 ## infra
 
@@ -58,7 +58,9 @@ _498 source files mapped._
 - **`src/workspaces/notes/components/QuickOpen.jsx`** — Ctrl/⌘+K palette: fuzzy title jump falling through to the full-text index.
   - _exports_: `default (QuickOpen)`
 - **`src/workspaces/notes/lib/notesAnchorNode.js`** — the `noteAnchor` schema node: a block that stays where it was double-clicked. Position is two numbers ON the node (unscaled document pixels), so it cannot crawl, cannot leak alignment, leaves no padding paragraphs, and rides the document into storage, sync and the PDF. Plus the pure `clampAnchor`.
-  - _exports_: `ANCHOR_EDGE_PAD`, `ANCHOR_MIN_WIDTH`, `ANCHOR_WIDTH`, `anchorExtent`, `default`, `NoteAnchor`, `placeAnchor`
+  - _exports_: `ANCHOR_EDGE_PAD`, `ANCHOR_MIN_WIDTH`, `ANCHOR_WIDTH`, `anchorExtent`, `anchorPosAtSelection`, `default`, `NoteAnchor`, `placeAnchor`
+- **`src/workspaces/notes/lib/notesAnchorPrune.js`** — an anchored block with nothing in it is PROVISIONAL: the one definition of "empty", used by the screen and by the storage seam, so an abandoned press never reaches the disk or the cloud
+  - _exports_: `anchorIsEmpty`, `countEmptyAnchors`, `pruneEmptyAnchors`
 - **`src/workspaces/notes/lib/notesAttachNode.js`** — The `noteAttachment` schema node — any file as a chip; bytes ride the picture tier behind the storage seam.
   - _exports_: `default`, `downloadDataUrl`, `NoteAttachment`
 - **`src/workspaces/notes/lib/notesBlockKeys.js`** — Backspace at the START of a block undoes a formatting difference before it restructures anything, so one keypress can never silently merge a multi-block region.
@@ -86,7 +88,7 @@ _498 source files mapped._
 - **`src/workspaces/notes/lib/notesMarkdown.js`** — PURE Markdown export of a note's document model (GFM tables/task lists, HTML fallback for what Markdown cannot spell, plus a lossiness report) and `docToText` for body search.
   - _exports_: `assetIdsInDoc`, `attachmentIdsInDoc`, `attachmentIdsInDocs`, `docToMarkdown`, `docToText`, `escapeText`, `imageIdsInDoc`, `imageIdsInDocs`, `lossyNote`, `MD_INLINE_ATTACHMENT_MAX`, `MD_MAX_HEADING`, `NOTE_MD_HANDLED`, `pageToMarkdown`, `safeFileName`
 - **`src/workspaces/notes/lib/notesModel.js`** — PURE notebook › section › page tree schema, page timestamps, every structural op (add/rename/move/delete/search/migrate) and the 30-day BIN. `deleteNode` is a soft delete that still computes the FULL cascade of orphaned page ids and stamps it on the trash entry.
-  - _exports_: `addPage`, `adoptUnreachable`, `allPageIds`, `ancestorIds`, `boundProjectIds`, `COPY_SUFFIX`, `copyPageWithin`, `DEFAULT_PAGE_TITLE`, `deleteNode`, `descendantPageIds`, `emptyTree`, `expiredTrashIds`, `findPage`, `firstPageId`, `makePage`, `migrate`, `movePage`, `moveProjectNotes`, `newId`, `NO_PROJECT`, `NO_PROJECT_LABEL`, `NOTES_TREE_VERSION`, `pageProjectIndex`, `pagesInScope`, `projectGroups`, `projectNoteCensus`, `projectOfPage`, `purgeTrashEntry`, `recentPages`, `recoveredTitle`, `renameNode`, `restoreNode`, `SCOPE_ALL`, `SCOPE_PROJECT`, `searchTitles`, `setPageProject`, `subpagesPhrase`, `subtreePageIds`, `touchPage`, `TRASH_RETENTION_DAYS`, `trashEntries`, `trashPageIds`, `walkPages`
+  - _exports_: `addPage`, `adoptUnreachable`, `allPageIds`, `ancestorIds`, `boundProjectIds`, `COPY_SUFFIX`, `copyPageWithin`, `DEFAULT_PAGE_TITLE`, `deleteNode`, `descendantPageIds`, `emptyTree`, `expiredTrashIds`, `findPage`, `firstPageId`, `makePage`, `migrate`, `movePage`, `moveProjectNotes`, `newId`, `NO_PROJECT`, `NO_PROJECT_LABEL`, `NOTES_TREE_VERSION`, `pageProjectIndex`, `pagesInScope`, `projectGroups`, `projectNoteCensus`, `projectOfPage`, `purgeTrashEntry`, `recentPages`, `recoveredTitle`, `renameNode`, `restoreNode`, `SCOPE_ALL`, `SCOPE_PROJECT`, `searchTitles`, `setPageProject`, `subpagesPhrase`, `subtreePageIds`, `TOMB_RETENTION_DAYS`, `tombstoneIds`, `touchPage`, `TRASH_RETENTION_DAYS`, `trashEntries`, `trashPageIds`, `walkPages`, `withTombstones`
 - **`src/workspaces/notes/lib/notesOutline.js`** — PURE outline of a document: headings, their ProseMirror positions, the active section, and which rows fold.
   - _exports_: `activeOutlineIndex`, `LEAF_NODES`, `nodeSize`, `outlineFromDoc`, `outlineHasChildren`, `textOfNode`, `visibleOutline`
 - **`src/workspaces/notes/lib/notesPastePlain.js`** — Word's three paste modes (keep source · merge formatting · keep text only) plus the structural sanitisation — nbsp spacer collapse, layout-table unwrap, list-lift — that runs in all three.
@@ -114,7 +116,7 @@ _498 source files mapped._
 - **`src/workspaces/notes/lib/notesSlashMenu.js`** — The slash-menu trigger rule (never mid-word), the command catalogue, and the extension that owns the arrows, Enter and Escape.
   - _exports_: `applySlashCommand`, `default`, `filterSlashCommands`, `NoteSlashMenu`, `readSlashState`, `SLASH_COMMANDS`, `SLASH_MAX_QUERY`, `slashPluginKey`, `slashQueryFromText`, `stepIndex`
 - **`src/workspaces/notes/lib/notesStore.js`** — The ONE storage seam for Notes — per-account scoped keys, tree and page bodies kept separate, image bytes in IndexedDB behind enforced ceilings, `purgePages` as the one place bytes are destroyed, every failure broadcast (LOUD-FAILURE). Cloud sync would be a change here and nowhere else.
-  - _exports_: `clearNotesStorageError`, `collectBinFacts`, `collectOpenTasks`, `deleteNoteImages`, `deletePages`, `deletePageVersions`, `ignoreDuplicate`, `lastNotesStorageError`, `listStoredPageIds`, `LOCAL_SCOPE`, `markPagesBinned`, `markPagesRestored`, `MAX_FILE_BYTES`, `MAX_IMAGE_BYTES`, `MAX_NOTEBOOK_IMAGE_BYTES`, `noteImageUsage`, `notesConflictFor`, `notesConflictLine`, `notesConflicts`, `notesScope`, `notesScopeLabel`, `notesStorageLine`, `notesSyncState`, `onNotesConflict`, `onNotesPagesChanged`, `onNotesStorageError`, `onNotesSyncState`, `openTaskCount`, `PAGE_KEY_BASE`, `pageKey`, `purgePages`, `putNoteFile`, `putNoteImage`, `readIgnoredDuplicates`, `readNoteFile`, `readNoteFiles`, `readNoteImage`, `readNoteImages`, `readNotesZoom`, `readPage`, `readPageVersion`, `readPageVersions`, `readTreeRaw`, `refreshNotesSync`, `registerOpenNoteDoc`, `reportImageProblem`, `resolveNotesConflict`, `restorePageVersion`, `searchNotes`, `setNotesScope`, `snapshotPage`, `startNotesSync`, `stopNotesSync`, `sweepImagesOfMissingPages`, `sweepOrphans`, `SYNC_KEY_BASE`, `syncKey`, `toggleNoteTask`, `TREE_KEY_BASE`, `treeKey`, `writeNotesZoom`, `writePage`, `writeTree`
+  - _exports_: `clearNotesStorageError`, `collectBinFacts`, `collectOpenTasks`, `deleteNoteImages`, `deletePages`, `deletePageVersions`, `ignoreDuplicate`, `lastNotesStorageError`, `listStoredPageIds`, `LOCAL_SCOPE`, `markPagesBinned`, `markPagesRestored`, `MAX_FILE_BYTES`, `MAX_IMAGE_BYTES`, `MAX_NOTEBOOK_IMAGE_BYTES`, `noteImageUsage`, `notesConflictFor`, `notesConflictLine`, `notesConflicts`, `notesScope`, `notesScopeLabel`, `notesStorageLine`, `notesSyncState`, `onNotesConflict`, `onNotesPagesChanged`, `onNotesStorageError`, `onNotesSyncState`, `openTaskCount`, `PAGE_KEY_BASE`, `pageKey`, `purgePages`, `putNoteFile`, `putNoteImage`, `readIgnoredDuplicates`, `readNoteFile`, `readNoteFiles`, `readNoteImage`, `readNoteImages`, `readNotesZoom`, `readPage`, `readPageVersion`, `readPageVersions`, `readTreeRaw`, `refreshNotesSync`, `registerOpenNoteDoc`, `reportImageProblem`, `resolveNotesConflict`, `restorePageVersion`, `searchNotes`, `setNotesScope`, `snapshotPage`, `startNotesSync`, `stopNotesSync`, `sweepEmptyAnchors`, `sweepImagesOfMissingPages`, `sweepOrphans`, `SYNC_KEY_BASE`, `syncKey`, `toggleNoteTask`, `TREE_KEY_BASE`, `treeKey`, `writeNotesZoom`, `writePage`, `writeTree`
 - **`src/workspaces/notes/lib/notesTabKey.js`** — Tab belongs to the document: a low-priority fallback behind the table and list handlers, plus the Escape-then-Tab keyboard-trap escape
   - _exports_: `default`, `TAB_CHAR`, `TAB_PRIORITY`
 - **`src/workspaces/notes/lib/notesTasks.js`** — PURE checklist reading and writing over a document — the task rollup's whole decision layer.

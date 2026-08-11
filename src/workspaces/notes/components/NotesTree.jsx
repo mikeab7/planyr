@@ -600,14 +600,16 @@ function BinList({ entries, onRestore, onPurge, onPurgeAll, onPeek, onPurgeEmpti
           <span
             data-testid={`notes-bin-preview-${e.id}`}
             style={{ fontSize: 11, lineHeight: 1.45, color: e.empty ? "var(--text-tertiary)" : "var(--text-secondary)", fontStyle: e.empty ? "italic" : "normal", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}
-          >{e.empty ? "Empty — nothing was ever written in it" : e.preview}</span>
+          >{e.gone
+            ? "Its writing was permanently deleted and cannot be brought back"
+            : (e.empty ? "Empty — nothing was ever written in it" : e.preview)}</span>
 
           <span style={{ display: "flex", flexWrap: "wrap", gap: 6, fontSize: 10.5, color: "var(--text-tertiary)" }}>
             <span data-testid={`notes-bin-project-${e.id}`} style={{ color: e.projectResolved ? "var(--text-tertiary)" : "var(--warn-text)", fontWeight: e.projectResolved ? 600 : 700 }}>
               {e.projectLabel}
             </span>
             {e.deletedAt ? <span>· deleted {absoluteStamp(e.deletedAt).split(",")[0]}</span> : null}
-            {e.chars ? <span>· {e.chars} characters</span> : null}
+            {e.chars ? <span>· {e.chars} character{e.chars === 1 ? "" : "s"}</span> : null}
             {/* ⛔ AND HERE TOO (NEW-6). `pageIds` is the delete's cascade set and INCLUDES the
                 note itself, so a note with one subpage announced itself as "2 pages" in the bin
                 long after the confirmation had been fixed. */}
@@ -615,7 +617,7 @@ function BinList({ entries, onRestore, onPurge, onPurgeAll, onPeek, onPurgeEmpti
           </span>
 
           <span style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
-            {e.pageId && !e.empty ? (
+            {e.reading?.length ? (
               <button
                 type="button"
                 data-testid={`notes-bin-peek-${e.id}`}

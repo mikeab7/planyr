@@ -42,7 +42,7 @@ import {
   collectBinFacts, ignoreDuplicate, onNotesPagesChanged, purgePages, readIgnoredDuplicates, readNoteFiles,
   readNoteImages, readPage, readTreeRaw,
   resolveNotesConflict, searchNotes, setNotesScope, startNotesSync, stopNotesSync,
-  sweepImagesOfMissingPages, sweepOrphans, toggleNoteTask, writePage, writeTree,
+  sweepEmptyAnchors, sweepImagesOfMissingPages, sweepOrphans, toggleNoteTask, writePage, writeTree,
 } from "./lib/notesStore.js";
 import {
   attachmentIdsInDocs, imageIdsInDocs, pageToMarkdown, safeFileName, MD_INLINE_ATTACHMENT_MAX,
@@ -346,6 +346,17 @@ export default function Notes({
     const keep = [...allPageIds(loaded), ...trashPageIds(loaded)];
     sweepOrphans(keep);
     sweepImagesOfMissingPages(keep);
+
+    /* ⛔ AND THE ONE-TIME CLEAN-UP FOR NOTES ALREADY CARRYING EMPTY BLOCKS. Everything else in
+     * this round stops NEW ones being made; this is the only thing that helps a note that
+     * already has a handful in it, each one an invisible dead zone that would go on swallowing
+     * presses at that spot forever. It touches only pages that actually change, it goes
+     * through `writePage` so the cleaned copy reaches the cloud too, and its bar for "empty"
+     * refuses to guess — see `notesAnchorPrune.js`. It is SAID rather than done quietly. */
+    const swept = sweepEmptyAnchors(keep);
+    if (swept.removed) {
+      setExportNote(`Cleared ${swept.removed} empty box${swept.removed === 1 ? "" : "es"} left behind by an earlier version, across ${swept.pages} note${swept.pages === 1 ? "" : "s"}.`);
+    }
 
     treeRef.current = loaded;   // seed the ref with what was just read, so a flush before
     setTree(loaded);            // the first edit cannot write a null over real notebooks
@@ -809,9 +820,16 @@ export default function Notes({
 
   /** ⛔ READ IT WITHOUT RESTORING IT. The whole complaint was that deciding required a round
    *  trip through his live tree. Opens read-only; nothing is written, nothing moves. */
+  /** ⛔ AND IT READS WHAT THE ROW PROMISED — see `collectBinFacts` for the measured mismatch.
+   *  `reading` is the list of pages in the entry that actually have words in them, in order,
+   *  computed by the SAME pass that computed the preview and the character count. */
   const handlePeekBin = useCallback((entry) => {
-    if (!entry?.pageId) return;
-    setPeek({ pageId: entry.pageId, title: entry.title || "Untitled", entryId: entry.id });
+    const reading = (entry?.reading || []).filter((r) => r?.pageId);
+    setPeek({
+      entryId: entry.id,
+      title: entry.title || "Untitled",
+      pages: reading.length ? reading : [],
+    });
   }, []);
 
   /** Clear every empty note in one action — sixteen of his twenty-one rows. */
@@ -823,8 +841,8 @@ export default function Notes({
       next = r.tree;
       ids.push(...r.pageIds);
     }
-    if (!ids.length) return;
-    persistTree(next);
+    if (!entryIds?.length) return;   // the TOMBSTONE has to be persisted even for an entry
+    persistTree(next);               // that named no pages, or the purge cannot survive a merge
     purgePages(ids);
     setExportNote(`${entryIds.length} empty ${entryIds.length === 1 ? "note" : "notes"} deleted for good. Nothing that had words in it was touched.`);
   }, [tree, persistTree]);
@@ -1205,16 +1223,34 @@ export default function Notes({
                   }}
                 >Close</button>
               </div>
-              <Suspense fallback={<EditorFallback />}>
-                <NoteEditor
-                  key={`peek:${peek.pageId}`}
-                  pageId={peek.pageId}
-                  title={peek.title}
-                  readOnly
-                  status="saved"
-                  scopeLabel={scopeLabel}
-                />
-              </Suspense>
+              {/* ⛔ IT READS THE WHOLE ENTRY, IN ORDER — every page in the binned subtree that
+                  has words in it, which is exactly the set the row's preview and character
+                  count were computed from. His report: the row showed real text and "656
+                  characters", and Read it showed a heading and nothing else, because the entry
+                  was a CONTAINER with no body of its own and its words lived in its child. The
+                  list read the child; the reader opened the parent. One walk feeds both now
+                  (see `collectBinFacts`), so they cannot disagree again. */}
+              <div style={{ flex: 1, minHeight: 0, overflow: "auto" }}>
+                {(peek.pages || []).map((pg, i) => (
+                  <div key={pg.pageId} style={i ? { borderTop: "1px solid var(--border-default)" } : undefined}>
+                    <Suspense fallback={<EditorFallback />}>
+                      <NoteEditor
+                        key={`peek:${pg.pageId}`}
+                        pageId={pg.pageId}
+                        title={pg.title || peek.title}
+                        readOnly
+                        status="saved"
+                        scopeLabel={scopeLabel}
+                      />
+                    </Suspense>
+                  </div>
+                ))}
+                {!(peek.pages || []).length ? (
+                  <p data-testid="notes-peek-nothing" style={{ margin: "18px 16px", color: "var(--text-secondary)", fontSize: 13 }}>
+                    There is nothing to read in this one — no writing was ever saved in it, or it has already been deleted for good.
+                  </p>
+                ) : null}
+              </div>
             </div>
           ) : activePage ? (
             <Suspense fallback={<EditorFallback />}>
