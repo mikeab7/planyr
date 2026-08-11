@@ -537,6 +537,26 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   turned into an underscore — the underscore is a state prefix, so `"Fort Bend"` must become `fortbend`.
   Writes normalise at `createSiteModel`, at `cloudSync.siteRowFor`, and in a Postgres trigger
   (`db/sites_county_normalize.sql`, applied). Guard: the repo-root `test/` suite **countyKeys** (36).
+- **`jurisdictionBadgeFit.js` (NEW-2) — HOW THE HEADER PILL GETS SHORTER, and the rule behind it:
+  ⛔ NAVIGATION WINS.** The pill must shrink, truncate or collapse before it ever overlaps the
+  project / plan chips — never the other way round. The owner could not open the plan switcher on a
+  laptop at all: the pill's own text span answered every point of the chip's right end, the ▾ caret
+  included (*"the unincorporated / city of Houston / ETJ / Harris County chip is too big and it
+  covers it"*). **It was NOT a z-index or overlay problem** — plain flex overflow; the LAYOUT half
+  of the fix is the row-1 zone flexes in the shared app-header component and the shared `CRUMB_MIN_W`
+  floor on both crumbs (see `/src/shared/CLAUDE.md`). This module is the CONTENT half: it drops **whole FACTS, governing one
+  first** ("Unincorporated +3"), never characters — a CSS ellipsis yields *"Part in City of
+  Bayto…"*, which reads as a different, WRONG answer rather than a short one. `formatJurisdictionBadge`
+  publishes `parts` for it, because a segment can itself contain " · " and re-splitting the rendered
+  string shatters one fact into two. **The full string never stops being available** (the tooltip's
+  first line + `data-jurisdiction-full`). Two things not to undo in the component: the fit is
+  measured against the space the PARENT gives, never the pill's own width (measuring the pill
+  LATCHES — abbreviating shrinks it, which then "proves" the short form is all that fits), and the
+  natural width comes from an always-mounted hidden copy of the full text. Guards: the repo-root
+  `test/` suite **headerNavPriority** (pure model through the real formatter + source guards on the
+  zone flexes) and the ui-audit harness **verify-header-nav-clickable** (132 checks, real
+  `elementFromPoint` at every point of each chip's box, at 1024/1280/1440/1600 on the longest string
+  in his portfolio; mutation-proven — 201/201 points lost pre-fix at 1280 AND 1440).
 - **⛔ `assemblyIntegrity.js` (B1340) — THE bonded-assembly invariant, and the reason this bug family
   is closed rather than patched a ninth time. Read it before touching any write, echo or revert path.**
   A bonded child's world position is REDUNDANT: it is derived from its host across the wall, and only
@@ -872,30 +892,40 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   repo-root `test/` suite **smoothZoomHome** counts occurrences in both directions, and the e2e spec
   **smooth-zoom-settings** drives the real control. It gates the ZOOM anchor only — the pan anchor
   is never gated on it.
-- **⛔ `featureEditZoom.js` (B312544 · NEW-1) — WHEN THE ON-BUILDING `+`/`−` CONTROLS MAY EXIST, and
-  it is a ZOOM question rather than a building-size one.** `FEAT_BTN_MIN_PX` (B225) asks whether the
-  BUILDING has room to seat the cluster; a 900 ft industrial building clears that at almost any zoom
-  a site plan is read at, so on the owner's 109-acre Bain plan the controls armed with the whole
-  site in the viewport, at full size, over the two largest objects on the drawing — while the
-  bump-out they place was a few pixels wide. The second gate asks whether the EDIT is legible.
-  **⛔ AND THE DERIVATION OF THAT SECOND GATE IS THE THING TO READ BEFORE TOUCHING THE NUMBER, because
-  the first cut of it overshot and the owner sent it back (NEW-1).** B312544 required the 55 × 60 ft
-  bump-out's short side to reach **44 px** — a MINIMUM-TOUCH-TARGET figure — and **the bump-out is
-  not the touch target**; the +/− disc is, and B225 governs it. The bump-out only has to be
-  IDENTIFIABLE, so the criterion is now **the placed feature is never smaller on screen than the
-  control that places it, keyline included**: the disc is `FEAT_CTRL_R` 9 px with a `FEAT_CTRL_STROKE`
-  1.75 px white keyline, so 19.75 px ÷ 55 ft fixes the floor at **0.359 px per foot (2.78 ft per
-  pixel)**, and the planner's control **renders FROM those two exported constants** so the threshold
-  cannot drift from the real disc. On the owner's plan that puts Building 3 (788 ft) at about 283 px
-  — near a third of his canvas, against two thirds at the 0.80 floor. Both gates must pass; neither
-  replaces the other. The gate is ABSOLUTE, so it reads the same on a 30-acre site and a 900-acre
-  one; above the floor the controls ramp to full strength over the next 35% of zoom (a fade, not a
-  pop) and are **fully clickable the whole time** — opacity is presentation, never a hit-test gate.
-  It is asked with `rppf`, the RENDER view, never `view.ppf`. Guards: the repo-root `test/` suite
-  **featureEditZoom** (which replays BOTH superseded rules as mutation checks — the pre-B312544 rule
-  must disagree at whole-site zoom, and the 44 px rule must disagree across the band this amendment
-  re-opens) and the e2e spec **feature-edit-zoom** (a real wheel gesture either side of the
-  threshold, read against the app's own `data-render-ppf`).
+- **⛔ `featureEditZoom.js` (B312544 · B335984 · NEW-1) — WHEN THE ON-BUILDING `+`/`−` CONTROLS MAY
+  EXIST. `FEAT_BTN_MIN_PX` (B225) asks whether the BUILDING has room to seat the cluster; a 900 ft
+  industrial building clears that at almost any zoom a site plan is read at, so on the owner's
+  109-acre Bain plan the controls armed with the whole site in the viewport, at full size, over the
+  two largest objects on the drawing — while the bump-out they place was a few pixels wide. The
+  second gate asks whether the EDIT is legible. Both must pass; neither replaces the other.
+  **⛔ THE VALUE IS OWNER-SET AND MUST NOT BE RE-DERIVED — THREE VALUES HAVE SHIPPED AND THE FIRST
+  TWO WERE BOTH DERIVED FROM THE 55 ft BUMP-OUT AND BOTH CAME IN LATE.** #990 required 44 px across
+  it (a minimum-TOUCH-TARGET figure, and the bump-out is not the touch target); #994 required the
+  disc's own outer width, 19.75 px ÷ 55 ft = 0.359 px/ft; the owner sent BOTH back. The live floor
+  is **0.25 px per foot — 4 FEET PER PIXEL — STATED, not computed**, with both failed derivations
+  named in the module header so a future session that finds it arbitrary is reading the record of
+  why re-deriving fails. `FEAT_CTRL_R` / `FEAT_CTRL_STROKE` are still exported and the cluster still
+  renders from them (that is the CONTROL's size, a real fact) but they no longer feed the threshold,
+  and neither does `DOGEAR_W`. Building 3 on his plan renders about 197 px at the floor.
+  **⛔ AND THE GATE IS NO LONGER PURELY ABSOLUTE — say so, do not "restore" it.** An absolute px/ft
+  floor puts a bigger share of a SMALLER screen under the building: at 0.359 Building 3 was about a
+  third of his 1600 px monitor's canvas and closer to half of his 1191 px laptop's. So the floor is
+  the EARLIER of the owner-set 0.25 px/ft and a **VIEWPORT CAP** — the zoom at which
+  `FEAT_EDIT_REF_SPAN_FT` (800 ft, a CONSTANT) would reach a quarter of the canvas width. **It is
+  still SITE-size independent**, which is the property that was actually asked for: nothing reads
+  the plan, the site, the selected building or any drawn geometry, so a 30-acre and a 900-acre site
+  on one screen arm at the identical zoom. The cap binds below 800 px of canvas and nowhere above.
+  **The B312544 defect cannot return through it at any width, and that is a proof:** whole-site zoom
+  is itself `canvasW ÷ siteSpanFt`, so both sides scale with the canvas and the cap sits a CONSTANT
+  1.48× tighter than the overview on his Bain frontage, on a phone exactly as on a monitor.
+  Above the floor the controls ramp to full strength over the next 35% of zoom (a fade, not a pop)
+  and are **fully clickable the whole time** — opacity is presentation, never a hit-test gate. It is
+  asked with `rppf` and `size.w`, never `view.ppf`. Guards: the repo-root `test/` suite
+  **featureEditZoom** (which replays ALL THREE superseded rules as mutation checks and fails if the
+  floor ever equals either failed derivation again) and the e2e spec **feature-edit-zoom** (a real
+  wheel gesture either side of the floor **in force on the canvas the browser opened** — the
+  viewport half is a function of a measured canvas, which no source reading can evaluate — plus a
+  real `elementFromPoint` hit test on each faded disc).
 - `zOrder.js` — per-element `z` stacking key utilities (`nextZ`/`sortByZ`/`normalizeZ`/`ensureZ`, B671).
   `arrange.js` — pure z-order "Arrange" (`reorderByZ`/`arrangeFlags`, B820): Bring-to-Front/Send-to-Back
   over a peer set. Wired via `arrangeSel` + `arrangePeers` + the right-click menus + the ⌘/Ctrl+]/[

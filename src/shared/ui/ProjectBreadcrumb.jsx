@@ -74,6 +74,11 @@ const LockIcon = ({ size = 11 }) => (
   </svg>
 );
 
+/* NEW-2 — the floor a crumb may be squeezed to. Below this the ▾ caret and the icons start to
+ * crowd out the name entirely, and a chip too small to aim at is a different way to lose the same
+ * click the owner lost to the jurisdiction pill. */
+export const CRUMB_MIN_W = 92;
+
 const crumbBtn = (extra) => ({
   display: "flex", alignItems: "center", gap: 5, flex: "none",
   height: 24, padding: "0 8px", borderRadius: 6,
@@ -400,7 +405,12 @@ export default function ProjectBreadcrumb({
   const currentName = resolveCurrentName(currentProject, projects);
 
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 2, minWidth: 0, flex: "none" }}>
+    /* NEW-2 — the crumb row may SHRINK (it used to be `flex: "none"`), so that when the header is
+       tight the project NAME ellipsises inside its own crumb instead of the whole row being clipped
+       by the zone's `overflow: hidden` — which cuts the last crumb's ▾ caret off, the exact thing
+       the owner could not click. Each crumb carries its own min-width below, so shrinking can never
+       squeeze one to nothing. */
+    <div style={{ display: "flex", alignItems: "center", gap: 2, minWidth: 0, flex: "0 1 auto" }}>
       {/* Dashboard crumb (B192) — literal text, always visible, primary route home */}
       <button
         onClick={goDashboard}
@@ -425,7 +435,10 @@ export default function ProjectBreadcrumb({
         title={cross ? "Browsing all projects" : currentProject ? "Switch project" : "Choose a project"}
         aria-haspopup="menu"
         aria-expanded={open}
-        style={crumbBtn({ color: (currentProject || cross) ? INK : MUTED, maxWidth: 240, minWidth: 0 })}
+        /* NEW-2 — shrinkable BETWEEN two bounds. The name ellipsises down to the floor and no
+           further, so the lock, the ⚠ and the ▾ always have room and the crumb never becomes a
+           sliver you cannot aim at. */
+        style={crumbBtn({ color: (currentProject || cross) ? INK : MUTED, flex: "0 1 auto", maxWidth: 240, minWidth: CRUMB_MIN_W })}
       >
         {currentProject && !cross && (
           <span title="Private: only you can see this project. Sharing is always a deliberate act."

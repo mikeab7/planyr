@@ -1018,6 +1018,11 @@ export function formatJurisdictionBadge(j, opts = {}) {
     || (allCities === null && !containmentUnknown && cities.length > 1);
   return {
     text, jur, county, isd, straddle,
+    /* NEW-2 — the badge's display SEGMENTS, in reading order, so a consumer that has to shorten
+     * the line (the header pill at a laptop width) can drop whole facts instead of cutting a
+     * sentence mid-word. `jur` is these joined by " / " and a segment may itself contain " · ",
+     * so re-splitting the string is lossy — hand them over rather than let each caller guess. */
+    parts,
     edgeOnlyCities: edgeCities,
     // NEW-1 — cities holding PART of the site, and ring cities left unclassified by a failed lookup.
     partialCities: partCities,

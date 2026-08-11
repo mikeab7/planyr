@@ -118,6 +118,10 @@ import PanelChrome from "../../shared/ui/PanelChrome.jsx";
 import FloatingPanel from "../../shared/ui/FloatingPanel.jsx";
 import { clampToBounds, initialFloatPos, reconcileForNarrow, shouldInspectorTakeDock, dockAfterRelinquish, FLOAT_MIN_WIDTH, FLOAT_SIZE } from "../../shared/ui/floatingPanel.js";
 import AppHeader from "../../shared/ui/AppHeader.jsx";
+/* NEW-2 — the ONE floor a header crumb may be squeezed to, shared with the project crumb so the
+   plan chip beside it cannot be given a different one. No new module reaches any chunk: AppHeader
+   above already imports this file. */
+import { CRUMB_MIN_W } from "../../shared/ui/ProjectBreadcrumb.jsx";
 import RotationStepper, { normalizeDeg } from "../../shared/ui/RotationStepper.jsx";
 import { worldToScreen, screenToWorld, zoomAround, midpoint, distance, pinchZoom } from "../../shared/viewport/viewportTransform.js";
 /* B1449 — the anchored render (the zoom half of B1440's increment) + the proportional wheel factor.
@@ -14825,8 +14829,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // they can cluster/spill when zoomed out.
   const featActiveId = sel?.kind === "el" ? sel.id : (tool === "select" ? hoverElId : null);
   /* NEW-2 — the ZOOM half of the gate, shared by every on-building edit cluster below. 0 means the
-     edit these controls make is not legible yet, so they must not exist at this zoom at all. */
-  const featEditOpacity = featureEditOpacity(rppf);
+     edit these controls make is not legible yet, so they must not exist at this zoom at all.
+     NEW-1 (third value) — it takes the CANVAS WIDTH as well as the zoom: the floor is the earlier
+     of an owner-set absolute px/ft and a cap on how much of the screen a reference building span
+     may fill, so a laptop does not have to give up half its canvas to reach the controls. Still
+     site-size independent — nothing here reads the plan. */
+  const featEditOpacity = featureEditOpacity(rppf, size.w);
   const sideAddNodes = (() => {
     if (tool !== "select" || !featActiveId || !featEditOpacity) return null;
     const el = els.find((x) => x.id === featActiveId);
@@ -17058,7 +17066,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // remains, handed to the breadcrumb as a trailing crumb (planSlot) so the header reads
   // Map / 🔒 <Site> ▾ / <Plan> ▾ — project, then its plan right beside it.
   const plannerPlanCrumb = (
-    <div ref={planAnchor} style={{ position: "relative", flex: "none" }}>
+    /* NEW-2 — shrinkable, with a floor (CRUMB_MIN_W), for the same reason the project crumb is:
+       when the header is tight the plan NAME must ellipsise inside the chip rather than the whole
+       chip being clipped by the zone — clipping takes the ▾ caret, which is the control the owner
+       could not reach. */
+    <div ref={planAnchor} style={{ position: "relative", flex: "0 1 auto", minWidth: 0 }}>
       {/* Styled to match the breadcrumb crumbs (height/padding/radius) so the three
           segments share one hit-target geometry; hierarchy is by weight, not by fading. */}
       <button
@@ -17068,13 +17080,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           height: 24, padding: "0 8px", borderRadius: 6, border: "none",
           background: "transparent", cursor: "pointer", fontFamily: "inherit",
           fontSize: 12.5, fontWeight: 500, color: "var(--chrome-text)",
-          maxWidth: 200, whiteSpace: "nowrap",
+          maxWidth: 200, minWidth: CRUMB_MIN_W, whiteSpace: "nowrap",
         }}
         onClick={() => setPlanMenu((o) => !o)}
         title="Switch or rename plan"
         data-testid="plan-crumb"
       >
-        <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{planLabel}</span><span style={{ color: "var(--chrome-muted)", fontSize: 11, flex: "none" }}>▾</span>
+        <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{planLabel}</span><span data-testid="plan-caret" style={{ color: "var(--chrome-muted)", fontSize: 11, flex: "none" }}>▾</span>
       </button>
         <AnchoredMenu open={planMenu} onClose={() => { setPlanMenu(false); setPlanDelArm(null); }} anchorRef={planAnchor} placement="below-left" gap={8} width={284} panelStyle={{ ...menuPanel, padding: 10 }}>
           <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, marginBottom: 5 }}>Plan name</div>

@@ -49,6 +49,29 @@ into every consumer. Root rules in `/CLAUDE.md`; deep detail in `/docs/REFERENCE
   The **deed-import readers** that feed the Site Planner metes-and-bounds plotter: `docxText.js`
   (.docx + the `readDeedFile` dispatcher), `docText.js` (legacy binary .doc, OLE/CFB), and
   `pdfText.js` (PDF embedded text layer, lazily loaded).
+- **⛔ `ui/AppHeader.jsx` + `ui/ProjectBreadcrumb.jsx` — NAVIGATION WINS, and it is the ROW-1 ZONE
+  FLEXES that decide it (NEW-2). Read this before changing any of the three.** The owner could not
+  switch plans on a laptop: *"the unincorporated / city of Houston / ETJ / Harris County chip is too
+  big and it covers it."* He reproduced it — the pill overlapped the plan chip's box by a sliver,
+  and `elementFromPoint` along the chip's right edge returned THE PILL'S TEXT SPAN for the last
+  stretch of it, **the ▾ caret included**. **NOT a z-index or overlay problem** (the pill is
+  `position: static`, `z-index: auto`): plain flex overflow. The cause was `left: flex 1 | centre:
+  0 1 auto (max 40%) | right: flex 1` — basis-0 side zones take an EQUAL SHARE regardless of what
+  they hold, so navigation was handed less than the breadcrumb needed while the pill sat under its
+  cap and never shrank, and the centre's `overflow: hidden` clipped nothing because the pill was not
+  over-wide *for its zone*. The rule is now one-directional: **LEFT `0 1 auto` (max 60%)** takes the
+  width it needs and shrinks only after the centre has collapsed · **CENTRE `1 1 0%`** takes what is
+  LEFT OVER, so its width never depends on its own content · **RIGHT `0 0 auto`** (the account
+  controls were never the contended pair). **The stated cost: the badge is centred in the space that
+  remains, not in the window.** `CRUMB_MIN_W` is the ONE floor both crumbs read — the site-planner's
+  plan chip imports it, because two floors that can drift is how one of the pair becomes squeezable
+  again — and the crumb ROW is shrinkable (`0 1 auto`): while it was `flex: none` the zone's
+  `overflow: hidden` clipped the last crumb's caret off, the same lost click by another route. The
+  phone layout is untouched (the row scrolls sideways there). Guards: the repo-root `test/` suite
+  **headerNavPriority** (source guards on all three flexes + the shared floor) and the ui-audit
+  harness **verify-header-nav-clickable** — a real `elementFromPoint` sweep of every point of each
+  chip's box at 1024/1280/1440/1600, mutation-proven (201/201 points lost pre-fix at 1280 AND 1440).
+  ⚠ A CENTRE-ONLY hit test passes on this defect; so does a short jurisdiction string at any width.
 - `theme/palette.js` — JS mirror of the CSS theme tokens (keep in sync; SVG/canvas can't use
   `var()`). `ui/statusTokens.js` — the single project-status palette source. `ui/controls.jsx` —
   shared control primitives (Button/ToggleChip/IconButton/Field/Section/MenuItem) + the one
