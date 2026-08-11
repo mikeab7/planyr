@@ -1,9 +1,16 @@
-/* NEW-2 — the on-building +/− edit controls must not arm until the edit they make is legible.
+/* B312544 · NEW-1 — the on-building +/− edit controls must not arm until the edit they make is
+ * legible, and the threshold for that is derived from the CONTROL, not from a touch-target figure.
  *
  * OWNER REPORT (Bain / "Concept - Original", 109 acres, whole site in the viewport, scale bar
  * reading 0–1,000 FEET): the green + and red − rendered at FULL SIZE over Buildings 3 and 4, the
  * largest objects on a plan he was trying to read, while the bump-out one of them places was a few
  * pixels wide. "I shouldn't be zoomed out this far and they show up. I should have to zoom in more."
+ *
+ * OWNER AMENDMENT on the shipped build (NEW-1): "you did go a little too far… now you really have
+ * to zoom in, but way too much to where the building almost becomes most of the screen by the time
+ * that you can increase or decrease it." The floor moved 0.80 → 0.359 px per foot. This spec asserts
+ * against the library's exported threshold rather than a literal, so it follows that number — what
+ * it independently proves is that the app ASKS the gate with the right zoom at runtime.
  *
  * ⛔ WHY THIS SPEC EXISTS BESIDE THE UNIT SUITE. `test/featureEditZoom.test.js` proves the RULE and
  * proves the wiring by reading the source. Neither can see whether the gate is asked with the right
@@ -39,6 +46,23 @@ const renderPpf = (page) => page.evaluate(() => {
   return g ? Number(g.getAttribute("data-render-ppf")) : null;
 });
 
+/* ⛔ READ THE ZOOM ONLY ONCE THE GESTURE HAS SETTLED. The gate is asked with `rppf` — the anchored
+ * RENDER view — and mid-gesture that deliberately LAGS the live view while one group transform
+ * carries the picture (the view anchor, B1440/B1449). Reading `data-render-ppf` in the frame after
+ * the last wheel notch therefore returns the zoom the gesture STARTED at, not the one it ended at.
+ * That is correct product behaviour and a broken measurement, and it is the FOREGROUND-OR-VOID
+ * family: a self-consistent number describing a view the app has already left. So poll until the
+ * render view has caught up with `data-view-ppf` (the live zoom), then read. */
+async function settledPpf(page) {
+  await expect.poll(async () => page.evaluate(() => {
+    const g = document.querySelector("[data-render-ppf]");
+    if (!g) return false;
+    const r = Number(g.getAttribute("data-render-ppf")), v = Number(g.getAttribute("data-view-ppf"));
+    return Number.isFinite(r) && Number.isFinite(v) && Math.abs(r - v) <= v * 1e-6;
+  }), { timeout: 10_000 }).toBe(true);
+  return renderPpf(page);
+}
+
 /* A LARGE building, deliberately: this is the whole point of the item. A small building was
  * already gated by B225's footprint rule, so it could never have shown the defect — only a
  * building big enough to clear that rule at a wide zoom can. */
@@ -55,7 +79,7 @@ async function drawBuilding(page) {
   return { cx: Math.round((x1 + x2) / 2), cy: Math.round((y1 + y2) / 2) };
 }
 
-test.describe("NEW-2 — the +/− edit controls wait for a zoom where the edit means something", () => {
+test.describe("B312544/NEW-1 — the +/− edit controls wait for a zoom where the edit means something", () => {
   test("they are gone at whole-site zoom, return on zoom-in, and track the published threshold", async ({ page }) => {
     const errors = [];
     page.on("pageerror", (e) => errors.push(String(e)));
@@ -74,14 +98,14 @@ test.describe("NEW-2 — the +/− edit controls wait for a zoom where the edit 
 
     // THE OWNER'S CASE. A blank plan opens at a whole-site zoom, and the building just drawn spans
     // most of the viewport — so B225's footprint gate is comfortably satisfied and anything hidden
-    // here is hidden by the NEW-2 zoom gate alone. Before this item the controls were here.
-    const widePpf = await renderPpf(page);
+    // here is hidden by the zoom gate alone. Before this item the controls were here.
+    const widePpf = await settledPpf(page);
     expect(widePpf, "the default blank-plan view is a whole-site zoom").toBeLessThan(FEAT_EDIT_MIN_PPF);
     await expect.poll(() => editNodes(page).count()).toBe(0);
 
     // Zoom in past the threshold and they arrive.
     await wheelZoom(page, 12, -1);
-    const closePpf = await renderPpf(page);
+    const closePpf = await settledPpf(page);
     expect(closePpf, "the wheel-in should cross the threshold").toBeGreaterThanOrEqual(FEAT_EDIT_MIN_PPF);
     await expect.poll(() => editNodes(page).count(), { timeout: 10_000 }).toBeGreaterThan(0);
 
@@ -96,7 +120,7 @@ test.describe("NEW-2 — the +/− edit controls wait for a zoom where the edit 
     // …and back out to the overview: gone again, so the gate is a live function of the zoom rather
     // than a one-way reveal.
     await wheelZoom(page, 12, +1);
-    expect(await renderPpf(page)).toBeLessThan(FEAT_EDIT_MIN_PPF);
+    expect(await settledPpf(page)).toBeLessThan(FEAT_EDIT_MIN_PPF);
     await expect.poll(() => editNodes(page).count()).toBe(0);
 
     expect(errors, `page errors: ${errors.join(" | ")}`).toEqual([]);

@@ -122,6 +122,24 @@ was never clicked" quietly ships broken.
 - **THE STALE-LOCAL CASE, which is the condition that made the holes reachable:** his local tree was 98 revisions behind AND flagged dirty. After this build lands, open Notes on that machine and let it sync. PASS = the recovered note is still there afterwards, every other note is still there, and nothing in the bin has come back to life.
 - **A REAL TWO-WINDOW MERGE.** Two windows on one account. In window A, bin a note that has a subpage. In window B — which has not seen it — add a NEW subpage under that same note and type in it. Let both sync. PASS = the binned note and the subpage the entry named are in the bin, and **B's new subpage is still live**, at the top level of the same project, with its text. FAIL = it is gone from both the tree and the bin (the exact shape that lost the Bain note).
 - **A NULL IS NOT A DISPOSITION (STANDING RULE #2).** If the two-window case cannot be provoked, say so and take one of the three admissible routes — provoke it harder, instrument it, or ask him whether he has seen another note vanish. Do not record "not reproducible" and archive.
+### V131552 — B335984: the +/− controls now arrive at a zoom he'd actually work at, on the REAL Bain plan `Blocker: real-data`
+
+**Everything mechanical is proven here.** `test/featureEditZoom.test.js` (14) pins the re-derived floor and replays BOTH superseded rules as mutation checks — the pre-gate rule must arm across his whole-site band, and the 44 px rule must refuse across the band this amendment re-opens. `e2e/feature-edit-zoom.spec.js` drives a real wheel gesture either side of the new floor on a real drawn building, reading the app's own `data-render-ppf` **only once the gesture has settled**, and confirms the controls are clickable the whole time they are faded. **What only his own plan can settle is the JUDGEMENT** — whether this zoom is the one at which offering the edit feels right on a 109-acre site. **This supersedes V111105**, whose second FAIL clause he tripped; do not chase V111105's 0.80 px/ft steps.
+
+- **STEPS** — open **Bain / "Concept - Original"**. Zoom out until the whole site fits (scale bar about 0–1,000 ft): the green `+` / red `−` must still be **absent**. Now zoom in slowly, hovering or selecting Building 3.
+- **PASS** = they fade in when Building 3 takes up roughly a **third** of the drawing area — not two thirds. They are clickable the instant they are visible, and adding a dock zone or a bump-out at that zoom feels like a normal working move rather than a close-up.
+- **FAIL, either direction, and BOTH are worth reporting** = back at whole-site zoom (the original defect returning) · or still waiting until the building fills most of the screen. **Report it with the same kind of number you gave last time** — roughly what fraction of the screen the building covers when they appear — and the threshold moves again as a stated product decision, never a quiet nudge.
+- Also glance at a SMALL site at the same scale-bar reading: the rule is absolute zoom, so a 30-acre plan must behave identically.
+
+### V131553 — B335985: a Google Earth export of a real plan opens clean `Blocker: real-data`
+
+**Proven here on his own rows:** `ui-audit/fixtures/bain-concept-original.json` through the real `siteToFeatures` + `buildKml` — **261 placemarks before (209 of them dock-door pins) → 52 now, zero dock doors**; `test/kmzExport.test.js` (40) pins the default, the run-per-side shape, and `settings.showDocks` being inert in both directions. **What cannot be done here is the export itself**: a KMZ needs a plan placed on the map (a signed-in, georeferenced plan), and nothing can open Google Earth in this sandbox.
+
+- **STEPS** — on **Bain / "Concept - Original"**, File ▸ **Export to Google Earth (KMZ)**. Open the file in Google Earth. Then repeat with **Export with 3D buildings**.
+- **PASS** = no dock-door pins anywhere — the site reads as boundary, buildings, parking, ponds and roads, with the folder tree intact. Toggling **Show dock doors** in View ▾ on the canvas and exporting again produces an **identical** file: the canvas checkbox must no longer change what is in the export.
+- **ALSO** — from the map view, right-click the empty map ▸ **Export to Google Earth (KMZ)** with several sites visible: same result across all of them, regardless of what each plan had shown on screen when it was last saved.
+- **FAIL** = dock-door markers still present · the file changes when the View ▾ toggle changes · anything else missing that used to be there (buildings, boundary, ponds, roads, the 3D massing on the second export).
+- **WORTH SAYING IF IT COMES UP:** dock doors can still be exported, as one line per dock side carrying the door count, but **there is no button for it** — that follows the dimension lines, which have been off with no control since this export was built. If you want a checkbox for either, say so and it becomes a small, separate piece of work.
 
 ### V124976 — B326416–B326419: new projects are shared with the team by default, the per-plan lock holds, and NOTHING pre-existing changed `Blocker: auth`
 
@@ -174,15 +192,6 @@ production row counts unchanged by the migration (65 sites / 1 shared / 0 locked
 - **PASS** = the row is there, checked by default, and toggling it OFF then reloading leaves it OFF; the drawing re-draws on every wheel notch with it off and scales-then-sharpens with it on; and **there is no Smooth zoom row anywhere else** — not in View ▾, not in the plan flyout.
 - **FAIL** = the row is missing, appears in two places, resets on reload, or the setting stops affecting how the wheel zoom draws.
 - **The specific regression to watch for:** a change made in Settings must take effect on the canvas **without a reload** (the planner subscribes to the preference), and turning it OFF mid-gesture must not leave a scaled frame on screen.
-
-### V111105 — B312544: the +/− controls are gone at whole-site zoom on the REAL Bain plan `Blocker: real-data`
-
-**The rule and the wiring are proven here** — `test/featureEditZoom.test.js` (11, including a verbatim replay of the pre-fix rule showing it armed at every one of his reported zooms) and `e2e/feature-edit-zoom.spec.js`, which drives a real wheel gesture either side of the 0.80 px/ft floor on a real drawn building and reads the answer against the app's own `data-render-ppf`. **What only his own plan can settle is whether the chosen zoom is the RIGHT one** — the threshold is a judgement about when an edit is worth offering, and the repro is a 109-acre site with buildings far larger than anything a sandbox fixture draws.
-
-- **STEPS** — open **Bain / "Concept - Original"**, zoom out until the whole site fits and the scale bar reads about 0–1,000 ft. Hover or select Building 3 or 4.
-- **PASS** = no green `+` / red `−` anywhere on the buildings at that zoom. Zoom in and they FADE in — softly, not popping — at a zoom where a bump-out is clearly a shape rather than a dot, and they are clickable the instant they are visible (a press must not be swallowed by a faint control).
-- **FAIL** = still visible at whole-site zoom · or they now wait so long that placing a dock zone or bump-out at a normal working zoom has become awkward. **The second failure is the one to report back with a number**: say roughly how far in you had to go, and the threshold moves as a product decision on the item — never nudged quietly.
-- Also worth a glance on a SMALL site, so the absolute rule is confirmed to read the same at both ends: a 30-acre plan should behave identically at the same scale-bar reading.
 
 ### V111106 — B1173 (×2): both header rows survive real fullscreen on HIS screen `Blocker:` none — owner judgement only
 

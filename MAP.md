@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-08-11 @ `7b51cef` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-08-11 @ `5005176` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -574,7 +574,7 @@ _498 source files mapped._
 - **`src/workspaces/site-planner/lib/fbcdWse.js`** — FBCDD Atlas-14 watershed-study DRAFT WSE point samplers (getSamples, feet, honest-null out of coverage): 0.2% off the county 500YR_WSE mosaic → derivedWse02Ft; 1% off the per-watershed 100YR rasters via extent-routed multiplex (max-finite governing, LOUD on any candidate failure) → derivedWse1pctFt (B807) — Fort Bend drainage checks
   - _exports_: `FBCDD_WSE02_URL`, `sampleWse02Point`, `sampleWse100Point`, `wse02CandidatesForPoint`, `wse100CandidatesForPoint`
 - **`src/workspaces/site-planner/lib/featureEditZoom.js`** — The zoom floor below which the on-building +/- edit controls must not exist, derived from a bump-out's own legibility, plus its fade-in ramp.
-  - _exports_: `FEAT_EDIT_FADE_SPAN`, `FEAT_EDIT_MAX_FT_PER_PX`, `FEAT_EDIT_MIN_OPACITY`, `FEAT_EDIT_MIN_PPF`, `FEAT_EDIT_MIN_PX`, `featureEditOpacity`
+  - _exports_: `FEAT_CTRL_R`, `FEAT_CTRL_STROKE`, `FEAT_EDIT_FADE_SPAN`, `FEAT_EDIT_MAX_FT_PER_PX`, `FEAT_EDIT_MIN_OPACITY`, `FEAT_EDIT_MIN_PPF`, `FEAT_EDIT_MIN_PX`, `featureEditOpacity`
 - **`src/workspaces/site-planner/lib/featureHover.js`** — pure hover WORDING for the vector feature overlays: registry-driven `<Title> (<Source>) · <detail>` matching the OSM tooltips, with HIFLD's withheld sentinels treated as absence and ALL-CAPS agency text title-cased.
   - _exports_: `cleanAttr`, `HOVER_CLEANERS`, `HOVER_MAX_CHARS`, `hoverDetails`, `hoverIdentifyEnabled`, `hoverText`, `hoverTitle`, `pickAttr`, `sourceTag`, `titleCaseAgency`
 - **`src/workspaces/site-planner/lib/featureHoverAttach.js`** — lazily-loaded attach layer for the vector overlays' hover identify: binds the sticky tooltip on an esri featureLayer and installs the planner-canvas `identifyAt` accessor, kept off the boot bundle to pay the bundle budget.
