@@ -4,6 +4,7 @@ import path from "node:path";
 import { identifyJurisdiction, formatJurisdictionBadge, parcelProbePoints } from "../src/workspaces/site-planner/lib/jurisdiction.js";
 import { feetToLatLngPair } from "../src/workspaces/site-planner/lib/mapLock.js";
 import { representativeRing, ringCentroid } from "../src/workspaces/site-planner/lib/siteAnalysis.js";
+import { replay, freshCache } from "../ui-audit/lib/shapeReplay.js";
 
 /* ═══ NEW-3 — ONE REGRESSION FIXTURE PER JURISDICTION SHAPE, FROM THE OWNER'S REAL SITES ═════════
  *
@@ -44,66 +45,13 @@ const shape = (name) => FIX.shapes.find((s) => s.site === name);
 /* NEW-1a — TWO ETJ sources are routed in the Baytown area, because H-GAC's regional mosaic does not
  * carry Baytown. They are recorded separately and replayed separately; the Baytown layer holds a
  * single jurisdiction and therefore has no name column, so its recording is a bare presence marker
- * and the constant comes from the source row, exactly as the real connector does it. */
-const ROLE_OF_URL = (url) =>
-  /Texas_County_Boundaries/.test(url) ? "county"
-  : /Texas_City_Boundaries/.test(url) ? "city"
-  : /City_of_Baytown_Citizen_Map/.test(url) ? "etj_baytown"
-  : /ETJ/i.test(url) ? "etj"
-  : null;
-const FIELD = { county: "CNTY_NM", city: "city_name", etj: "CITY", etj_baytown: null };
-
-/* Replay the recorded agency answers. The request is decoded from the URL the REAL query builder
- * produced, so a change to how geometry is encoded shows up here as a decode failure rather than
- * quietly returning the wrong recording. */
-function replay(rec, { fail = [] } = {}) {
-  return async (url) => {
-    const u = new URL(url);
-    const role = ROLE_OF_URL(url);
-    if (!role) throw new Error("unexpected service: " + url);
-    if (fail.includes(role)) throw new Error(`simulated ${role} outage`);
-    const type = u.searchParams.get("geometryType");
-    const g = JSON.parse(u.searchParams.get("geometry"));
-    const a = rec.answers[role];
-    let names;
-    if (type === "esriGeometryPolygon") names = a.ring;
-    else if (type === "esriGeometryMultipoint") {
-      names = [...new Set(g.points.map((p) => nearestRecorded(rec, p)).flatMap((i) => a.points[i]))];
-    } else if (type === "esriGeometryPoint") {
-      names = a.points[nearestRecorded(rec, [g.x, g.y])];
-    } else throw new Error("unexpected geometryType " + type);
-    // A presence-only layer answers with featureless rows; `normalizeFeature` supplies `nameConst`.
-    if (!FIELD[role]) return { features: (names || []).map(() => ({ attributes: {} })) };
-    return { features: (names || []).map((n) => ({ attributes: { [FIELD[role]]: n } })) };
-  };
-}
-// Map a queried point back to the probe point it was recorded for. Exact in practice; nearest keeps
-// the replay robust to a last-digit rounding change without ever silently matching a distant point.
-function nearestRecorded(rec, [x, y]) {
-  let best = -1, bestD = Infinity;
-  rec.probe.forEach(([px, py], i) => {
-    const d = Math.hypot(px - x, py - y);
-    if (d < bestD) { bestD = d; best = i; }
-  });
-  if (bestD > 1e-4) throw new Error(`no recorded answer near ${x},${y} (closest ${bestD})`);
-  return best;
-}
-
-function freshCache() {
-  const store = new Map();
-  return {
-    swr(key, fetcher) {
-      if (store.has(key)) {
-        const d = store.get(key);
-        return { cached: { data: d, ageMs: 0, ts: 1 }, stale: false, fresh: Promise.resolve({ data: d, ageMs: 0, ts: 1 }) };
-      }
-      const fresh = fetcher()
-        .then((data) => { store.set(key, data); return { data, ageMs: 0, ts: 1, updated: true }; })
-        .catch((error) => ({ data: [], ageMs: null, ts: null, error }));
-      return { cached: null, stale: false, fresh };
-    },
-  };
-}
+ * and the constant comes from the source row, exactly as the real connector does it.
+ *
+ * ⛔ NEW-1 (B367296) — THE REPLAY ITSELF NOW LIVES IN `ui-audit/lib/shapeReplay.js`, shared with the
+ * BROWSER harness that renders these same five shapes through the real component. The badge is a
+ * rendering surface, so it needs both checks; a second copy of the replay would be a second thing to
+ * keep in step with the recorder, and the day they drift the browser check is exercising a fixture
+ * this suite has never seen. */
 
 async function badgeFor(name, opts = {}) {
   const rec = shape(name);
@@ -134,20 +82,33 @@ describe("NEW-3 — a regression fixture per jurisdiction SHAPE, from the owner'
 
   it("in-city PLUS an ETJ — Will Clayton names Humble's limits AND the Houston ETJ", async () => {
     const { b, j } = await badgeFor("Will Clayton");
-    expect(b.text).toBe("City of Humble / City of Houston · ETJ · Harris County");
+    // SHAPE 2 — the governing city leads, the other city's ETJ is the qualifier beside it.
+    expect(b.text).toBe("City of Humble · Houston ETJ · Harris County");
+    expect(b.shape).toBe("in-city-etj");
     expect(j.cityContainment).toBe("in");
     // The ETJ must survive the dedupe: it is a DIFFERENT city from the one whose limits hold the
     // site, and dropping it loses the Ch. 19 floodplain rule.
     expect(b.etjLabels).toEqual(["Houston"]);
   });
 
-  it("unincorporated INSIDE an ETJ — Bain leads Unincorporated, names the ETJ, demotes the Katy sliver", async () => {
+  /* SHAPE 3, RE-STATED BY NEW-1 (B367296) after the owner's Clay & Porter report. It read
+   * "Unincorporated / City of Houston ETJ" and his words were *"it would be just City of Houston
+   * ETJ."* An ETJ is by definition the unincorporated band OUTSIDE a city's limits, so the pair was
+   * redundant, not contradictory — and, worse, the same " / " also joined the Katy sliver, which
+   * governs nothing here. The ETJ now leads alone and Katy sits behind the em dash. */
+  it("unincorporated INSIDE an ETJ — Bain leads with the governing ETJ and demotes the Katy sliver", async () => {
     const { b, j } = await badgeFor("Bain");
-    expect(b.text).toBe("Unincorporated / City of Houston · ETJ / City of Katy · edge only · Fort Bend County");
+    expect(b.text).toBe("City of Houston ETJ · Fort Bend County — touches City of Katy");
+    expect(b.shape).toBe("etj");
+    // ⛔ The MODEL is untouched: the land IS unincorporated, the label simply stopped saying so twice.
     expect(j.cityContainment).toBe("none");
+    expect(j.unincorporated).toBe(true);
+    expect(b.text).not.toContain("Unincorporated");
     expect(b.edgeOnlyCities).toEqual(["Katy"]);
-    // The regression that started this family: the sliver must never occupy the lead slot.
-    expect(b.jur.indexOf("Unincorporated")).toBeLessThan(b.jur.indexOf("Katy"));
+    // The regression that started this family: the sliver must never occupy the lead slot — and it
+    // may no longer share a separator with the governing answer either.
+    expect(b.jur).not.toContain("Katy");
+    expect(b.tail).toBe("touches City of Katy");
   });
 
   /* ⛔ CORRECTED 2026-08-09 BY THE OWNER, and the correction is the more important finding.
@@ -164,14 +125,18 @@ describe("NEW-3 — a regression fixture per jurisdiction SHAPE, from the owner'
    * resolved. This case pins both. */
   it("SPLIT city limits + ETJ — Goose Creek states which part, and how much", async () => {
     const { b, j } = await badgeFor("Goose Creek");
-    expect(b.text).toBe("Part in City of Baytown (6 of 14 lots) / rest in its ETJ · Harris County");
+    // NEW-1 — both halves GOVERN part of the site, so they are slots in the governing chain ("·").
+    // Only a non-governing city gets demoted behind the em dash, and there is none here.
+    expect(b.text).toBe("Part in City of Baytown (6 of 14 lots) · rest in its ETJ · Harris County");
+    expect(b.shape).toBe("split");
+    expect(b.tail).toBe(null);
     expect(j.cityContainment).toBe("partial");
     // The share is the whole point of the correction: "part in" alone is not actionable.
     expect(b.cityCoverage.inCity).toBe(6);
     expect(b.cityCoverage.tested).toBe(14);
     // The remainder is Baytown's ETJ, NOT unincorporated — asserting the exact wrong answer the
     // first pass produced, so it cannot come back.
-    expect(b.text).not.toContain("part unincorporated");
+    expect(b.text).not.toContain("unincorporated");
     // And the original report's string stays dead.
     expect(b.text).not.toBe("City of Baytown · Harris County");
     expect(b.jur.startsWith("City of Baytown")).toBe(false);
@@ -195,12 +160,13 @@ describe("NEW-3 — a regression fixture per jurisdiction SHAPE, from the owner'
    * finished floor. Four of the owner's sites are this shape: Kennedy Greens, JFK, Katz, Pinnacle. */
   it("ETJ city ALSO clipping the edge — Kennedy Greens names the ETJ, not the sliver", async () => {
     const { b, j } = await badgeFor("Kennedy Greens");
-    expect(b.text).toBe("Unincorporated / City of Houston · ETJ · Harris County");
+    expect(b.text).toBe("City of Houston ETJ · Harris County");
+    expect(b.shape).toBe("etj");
     expect(j.cityContainment).toBe("none");
     expect(b.etjLabels).toEqual(["Houston"]);
     // The regression: an edge sliver may not stand in for the ETJ, and once the ETJ is named the
-    // sliver is not a second slot.
-    expect(b.jur).not.toContain("edge only");
+    // sliver is not a second slot — nor a tail, since it is the very same city.
+    expect(b.tail).toBe(null);
   });
 
   it("the site centroid alone is NOT enough — Goose Creek's biggest lot is outside Baytown", async () => {
@@ -227,7 +193,9 @@ describe("NEW-3 — a regression fixture per jurisdiction SHAPE, from the owner'
 describe("NEW-2 — an unresolved role is first-class on every shape, and never fails open", () => {
   it("a failed ETJ lookup on Bain SAYS so instead of reading as 'no ETJ here'", async () => {
     const { b } = await badgeFor("Bain", { fail: ["etj"] });
-    expect(b.jur).toContain("ETJ · couldn't check");
+    expect(b.jur).toContain("Couldn't check ETJ");
+    // …and with the ETJ unknown there is no ETJ to imply it, so "Unincorporated" is printed again.
+    expect(b.jur.startsWith("Unincorporated")).toBe(true);
     expect(b.unresolved).toBe(true);
     expect(b.unresolvedRoles).toContain("etj");
     // The stake: with the Houston ETJ missing, the floodplain rule falls back to the county's, which
@@ -239,13 +207,13 @@ describe("NEW-2 — an unresolved role is first-class on every shape, and never 
     const { b } = await badgeFor("Goose Creek", { fail: ["city"] });
     expect(b.cityContainment).toBe("unknown");
     expect(b.unresolvedRoles).toContain("city");
-    expect(b.jur).toContain("couldn't check");
+    expect(b.jur).toContain("Couldn't check city limits");
     expect(b.jur.startsWith("City of ")).toBe(false);
   });
 
   it("a failed COUNTY lookup is named, not omitted", async () => {
     const { b } = await badgeFor("Gessner", { fail: ["county"] });
-    expect(b.county).toBe("County · couldn't check");
+    expect(b.county).toBe("Couldn't check county");
     expect(b.unresolvedRoles).toContain("county");
   });
 });
