@@ -872,20 +872,29 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   repo-root `test/` suite **smoothZoomHome** counts occurrences in both directions, and the e2e spec
   **smooth-zoom-settings** drives the real control. It gates the ZOOM anchor only — the pan anchor
   is never gated on it.
-- **⛔ `featureEditZoom.js` (NEW-2) — WHEN THE ON-BUILDING `+`/`−` CONTROLS MAY EXIST, and it is a
-  ZOOM question rather than a building-size one.** `FEAT_BTN_MIN_PX` (B225) asks whether the
+- **⛔ `featureEditZoom.js` (B312544 · NEW-1) — WHEN THE ON-BUILDING `+`/`−` CONTROLS MAY EXIST, and
+  it is a ZOOM question rather than a building-size one.** `FEAT_BTN_MIN_PX` (B225) asks whether the
   BUILDING has room to seat the cluster; a 900 ft industrial building clears that at almost any zoom
   a site plan is read at, so on the owner's 109-acre Bain plan the controls armed with the whole
   site in the viewport, at full size, over the two largest objects on the drawing — while the
-  bump-out they place was a few pixels wide. The second gate asks whether the EDIT is legible:
-  the smallest feature these controls place is a `DOGEAR_W` × `DOGEAR_D` (55 × 60 ft) bump-out, and
-  its short side must render at **44 px**, which fixes the floor at **0.8 px per foot (1.25 ft per
-  pixel)** — an absolute zoom, so it reads the same on a 30-acre site and a 900-acre one. Both gates
-  must pass; neither replaces the other. Above the floor the controls ramp to full strength over
-  the next 35% of zoom (a fade, not a pop) and are **fully clickable the whole time** — opacity is
-  presentation, never a hit-test gate. It is asked with `rppf`, the RENDER view, never `view.ppf`.
-  Guards: the repo-root `test/` suite **featureEditZoom** (which replays the pre-fix rule as a
-  mutation check) and the e2e spec **feature-edit-zoom** (a real wheel gesture either side of the
+  bump-out they place was a few pixels wide. The second gate asks whether the EDIT is legible.
+  **⛔ AND THE DERIVATION OF THAT SECOND GATE IS THE THING TO READ BEFORE TOUCHING THE NUMBER, because
+  the first cut of it overshot and the owner sent it back (NEW-1).** B312544 required the 55 × 60 ft
+  bump-out's short side to reach **44 px** — a MINIMUM-TOUCH-TARGET figure — and **the bump-out is
+  not the touch target**; the +/− disc is, and B225 governs it. The bump-out only has to be
+  IDENTIFIABLE, so the criterion is now **the placed feature is never smaller on screen than the
+  control that places it, keyline included**: the disc is `FEAT_CTRL_R` 9 px with a `FEAT_CTRL_STROKE`
+  1.75 px white keyline, so 19.75 px ÷ 55 ft fixes the floor at **0.359 px per foot (2.78 ft per
+  pixel)**, and the planner's control **renders FROM those two exported constants** so the threshold
+  cannot drift from the real disc. On the owner's plan that puts Building 3 (788 ft) at about 283 px
+  — near a third of his canvas, against two thirds at the 0.80 floor. Both gates must pass; neither
+  replaces the other. The gate is ABSOLUTE, so it reads the same on a 30-acre site and a 900-acre
+  one; above the floor the controls ramp to full strength over the next 35% of zoom (a fade, not a
+  pop) and are **fully clickable the whole time** — opacity is presentation, never a hit-test gate.
+  It is asked with `rppf`, the RENDER view, never `view.ppf`. Guards: the repo-root `test/` suite
+  **featureEditZoom** (which replays BOTH superseded rules as mutation checks — the pre-B312544 rule
+  must disagree at whole-site zoom, and the 44 px rule must disagree across the band this amendment
+  re-opens) and the e2e spec **feature-edit-zoom** (a real wheel gesture either side of the
   threshold, read against the app's own `data-render-ppf`).
 - `zOrder.js` — per-element `z` stacking key utilities (`nextZ`/`sortByZ`/`normalizeZ`/`ensureZ`, B671).
   `arrange.js` — pure z-order "Arrange" (`reorderByZ`/`arrangeFlags`, B820): Bring-to-Front/Send-to-Back
@@ -1295,6 +1304,22 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   declutter/LOD/collision, label sizes and stroke-zoom are a function of the plan and the paper,
   never of the live zoom. It IS on the boot path (SitePlanner imports it statically, ~1 KB pure). PDF-PARITY: `printMetricPairs`/`printStormwaterBars` deliberately stay in
   `SitePlanner.jsx` so screen and sheet read one derivation.
+  **⛔ NEW-2 — A MODEL-BUILT EXPORT DECIDES ITS OWN CONTENTS; A CANVAS DISPLAY TOGGLE NEVER DOES.**
+  `kmzExport.js` gated its dock doors on `settings.showDocks`, the View ▾ checkbox — so a
+  drawing-legibility preference decided what went into a file for a different audience, and turning
+  dock doors on to check a layout silently changed an exported KMZ (on the owner's Bain plan, five
+  buildings and several hundred doors, Google Earth opened under a blanket of pins). Every content
+  decision in that module is now an `opts` flag with a stated default, all OFF, on the
+  `includeDimensions` precedent; `settings` is read there only for MODEL facts (door o.c./width,
+  building rules) that determine where a thing physically is. **`includeDockDoors` also changed the
+  REPRESENTATION** — one LINE per dock side carrying the door count and the o.c., never a point per
+  door — so even opting in costs a handful of placemarks per building rather than hundreds. There is
+  no UI for it, exactly as `includeDimensions` has none. **The deliberate exception, which is not
+  the same defect:** `exportSheet.js`'s PDF/PNG path CLONES the live `<svg>` and so inherits every
+  display toggle by construction — that artifact is the drawing on paper for the same audience, set
+  by the user while looking at the drawing they are printing. Guard: the repo-root `test/` suite
+  **kmzExport**, which sweeps every model-built export module for the whole class of toggle rather
+  than for the dock doors alone.
 
 - **`lib/numEditBox.js` + `components/NumEditField.jsx` (NEW-1) — the canvas's ONE inline numeric
   editor, and the rule that it may never be bigger than the control it edits.** Clicking a setback
