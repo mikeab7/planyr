@@ -115,7 +115,7 @@ was never clicked" quietly ships broken.
 
 ### V165104 — B369536: on or after **2026-09-18**, does the retention job actually DELETE? `Blocker: real-data`
 
-**Not due until 2026-09-18** — the first row in `public.client_errors` is not eligible before then, so an earlier read can only return `WAIT` and proves nothing. A one-shot Routine is armed for **2026-09-19 08:00 UTC** to fire this; if it is not honoured, run it by hand.
+**Due 2026-09-19, and the extra day is not slack — read this before filing a failure.** The oldest row is **2026-06-20 22:16:28 UTC**, so it crosses 90 days at **2026-09-18 22:16 UTC** — *after* that morning's 07:20 run. **The first run that can delete anything is 2026-09-19 07:20 UTC.** A read on 2026-09-18 will correctly return `WAIT` and proves nothing; do not report that as a failure. A one-shot Routine is armed for **2026-09-19 08:00 UTC**; if it is not honoured, run it by hand.
 
 **⛔ THE ONE THING THAT CAN RUIN THIS CHECK, AND IT TAKES ONE KEYSTROKE: do NOT call `select public.prune_client_errors()`.** A hand-run writes a run row byte-identical to a scheduled one, so it manufactures exactly the evidence this check exists to gather, permanently and undetectably. That is the same trap V84560 was written around, and it is why the reader below is `select`-only. Do not seed rows, do not age a row "to test it", do not help it along.
 
