@@ -913,7 +913,8 @@ ok("...and it does NOT slide right as the window widens — the whole 'aligned t
 const mat = await tb("note-mat").boundingBox();
 const bodyBox = await tb("note-body").boundingBox();
 const blankClickY = Math.min(mat.y + mat.height - 40, bodyBox.y + bodyBox.height + 60);
-const parasBefore = nodesOf(await readBody(r3Page), "paragraph").length;
+const before3 = await readBody(r3Page);
+const parasBefore = nodesOf(before3, "paragraph").length;
 await page.mouse.click(bodyBox.x + 40, blankClickY);
 await page.waitForTimeout(200);
 const focusedAfterBlankClick = await page.evaluate(() => !!document.activeElement?.closest?.(".ProseMirror"));
@@ -928,9 +929,17 @@ await settle();
 const blankDoc = await readBody(r3Page);
 ok("clicking the empty space BELOW the text lands the caret and typing goes in",
   focusedAfterBlankClick && textOf(blankDoc).includes("CLICKED-THE-BLANK-PART"));
-ok("⛔ ...and it padded NOTHING to get there — at most one new line, never a stack of blanks",
-  nodesOf(blankDoc, "paragraph").length <= parasBefore + 1,
-  `${parasBefore} → ${nodesOf(blankDoc, "paragraph").length} paragraph(s)`);
+/* ⛔ SUPERSEDED, AND THE PROTECTION IS KEPT RATHER THAN DROPPED. B1393 ×3's rule was "the
+   caret goes to the nearest real text position and nothing else", and its guard counted
+   PARAGRAPHS. The owner then measured that rule on his own machine: a press in open page sends
+   the caret to the end of a paragraph far above — *"it goes still goes all the way to the
+   left"*. The caret now goes WHERE HE PRESSED, in a positioned block, so the paragraph count
+   legitimately rises by the block's own line. What must still be true — and is what "padded
+   NOTHING" was ever really guarding — is that the FLOW of the document is untouched. */
+const flowParas = (d) => (d?.content || []).filter((n) => n.type === "paragraph").length;
+ok("⛔ ...and it padded NOTHING to get there — the document's own flow is untouched",
+  flowParas(blankDoc) <= flowParas(before3) + 1 && textOf(blankDoc).includes("CLICKED-THE-BLANK-PART"),
+  `${flowParas(before3)} → ${flowParas(blankDoc)} flow paragraph(s)`);
 ok("⛔ ...and left no alignment behind",
   !/"textAlign":"(center|right|justify)"/.test(JSON.stringify(blankDoc)));
 
@@ -1337,9 +1346,15 @@ await page.keyboard.type("AAA", { delay: 8 });
 await settle();
 const afterClickType = await readBody(r4Page);
 
-ok("⛔ EXACTLY ONE PARAGRAPH EXISTS — no padding was injected to reach the press (B1393 ×3)",
-  nodesOf(afterClickType, "paragraph").length === 1,
-  `${nodesOf(afterClickType, "paragraph").length} paragraph(s): ${JSON.stringify(textOf(afterClickType)).slice(0, 60)}`);
+/* ⛔ SUPERSEDED BY THE PRESS RULE ITSELF (see the note further up). The page's own flow still
+   holds exactly the one empty paragraph it started with; the words are in a block at the press
+   point, which is the whole of what changed. */
+ok("⛔ THE PAGE'S FLOW STILL HOLDS EXACTLY ONE PARAGRAPH — nothing was padded to reach the press",
+  (afterClickType.content || []).filter((n) => n.type === "paragraph").length === 1,
+  `${(afterClickType.content || []).filter((n) => n.type === "paragraph").length} flow paragraph(s)`);
+ok("⛔ ...AND THE WORDS ARE IN A BLOCK AT THE PRESS POINT, not at the end of the document",
+  (afterClickType.content || []).some((n) => n.type === "noteAnchor" && textOf(n).includes("AAA")),
+  JSON.stringify((afterClickType.content || []).map((n) => n.type)));
 ok("⛔ ...AND IT CARRIES NO ALIGNMENT — the centring that made the line crawl as he typed is gone",
   !/"textAlign":"(center|right|justify)"/.test(JSON.stringify(afterClickType)),
   (JSON.stringify(afterClickType).match(/"textAlign":"[a-z]+"/g) || ["none"]).join(","));
@@ -1353,7 +1368,8 @@ await settle();
 const afterEnter = await readBody(r4Page);
 ok("⛔ ENTER AFTER A BLANK-SPACE PRESS MAKES A PLAIN PARAGRAPH — no alignment inherited from nowhere",
   !/"textAlign":"(center|right|justify)"/.test(JSON.stringify(afterEnter))
-  && nodesOf(afterEnter, "paragraph").length === 2,
+  && nodesOf(afterEnter, "paragraph").length === 3      // the page's own line + two in the block
+  && textOf(afterEnter).includes("BBB"),
   `${nodesOf(afterEnter, "paragraph").length} paragraph(s), align ${(JSON.stringify(afterEnter).match(/"textAlign":"[a-z]+"/g) || ["none"]).join(",")}`);
 
 /* ⛔ THE SAME GESTURE TWICE GIVES THE SAME ANSWER — his consequence (3). One press below a
@@ -1371,8 +1387,13 @@ await page.mouse.click(bodyBox2.x + 400, clickY + 30);
 await page.waitForTimeout(250);
 await settle();
 const afterSecond = nodesOf(await readBody(r4Page), "paragraph").length;
-ok("⛔ A PRESS BELOW THE TEXT ADDS AT MOST ONE LINE, AND ONLY WHEN THERE ISN'T ONE ALREADY",
-  afterFirst === oneLine + 1 && afterSecond === afterFirst,
+/* ⛔ SUPERSEDED, AND IT IS NOW A STRONGER CLAIM THAN THE ONE IT REPLACES. The old rule added a
+   line at the END of the document for a press below the text — which is the long jump he
+   reported. A press below the text now adds NOTHING to the flow at all; it puts a provisional
+   block where he pressed, and that block is discarded unless he types in it. Neither press
+   here types, so after both of them the document is exactly as it was. */
+ok("⛔ TWO PRESSES BELOW THE TEXT, NOTHING TYPED, AND THE FLOW IS UNCHANGED BY EITHER",
+  afterFirst === oneLine && afterSecond === oneLine,
   `${oneLine} → ${afterFirst} → ${afterSecond} paragraph(s)`);
 ok("...and neither press left an alignment behind, wherever across the column it landed",
   !/"textAlign":"(center|right|justify)"/.test(JSON.stringify(await readBody(r4Page))));

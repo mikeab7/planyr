@@ -54,6 +54,7 @@
  * deleted note comes back from the dead.
  */
 import { supabase } from "../../site-planner/lib/supabase.js";
+import { tombstoneIds, withTombstones } from "./notesModel.js";
 
 /** The app's ONE Supabase client, handed to the store so every transport function below can
  *  still take its client as a parameter (and therefore still be testable against a fake).
@@ -90,6 +91,10 @@ export const emptySyncState = () => ({ treeRev: null, treeDirty: false, pages: {
  * path is "the server row wins on seed" and never reaches this function. When it does, the
  * rules are, in order:
  *
+ *   0. A PURGE ON EITHER SIDE WINS OVER EVERYTHING, including a copy that still has the entry
+ *      or the page. It is the only rule that can beat a union, and it exists because a
+ *      deletion is otherwise an ABSENCE and absence always loses. See rule 0 in the body, and
+ *      `tombstoneIds` in the model for the measured resurrection that produced it.
  *   1. A DELETE ON EITHER SIDE WINS. The union of both bins IS the merged bin, and any live
  *      node whose id sits in that union is lifted out of the live tree. This is the
  *      conservative direction and it is safe by construction: a "lost" restore leaves the
@@ -139,12 +144,58 @@ export function mergeTrees(local, server, { onRescue } = {}) {
   const L = local && typeof local === "object" ? local : { pages: [], trash: [] };
   const S = server && typeof server === "object" ? server : { pages: [], trash: [] };
 
+  /* ⛔ RULE 0, AND IT RUNS BEFORE EVERYTHING ELSE: A PURGE WINS A UNION.
+   *
+   * THE BUG, measured on the owner's account with revisions. He emptied the bin — cloud tree
+   * rev 991, one entry left. A tab open since rev 966 still held all 23 entries and had
+   * unpushed edits, so its reload took THIS path. The union brought all 23 back, and the stale
+   * tab then pushed the resurrection up as rev 992 and overwrote the good state. **Emptying
+   * the bin could not stick while any other window had not yet seen it**, and the same is true
+   * of any purge from anywhere.
+   *
+   * The cause is structural rather than a slip: in a union an ADDITION wins and a DELETION is
+   * the ABSENCE of an entry, and absence loses to any copy that still has one. So the deletion
+   * is made into a positive fact — a tombstone, carried in the tree itself, merged like
+   * everything else and honoured before any of the rules below. This is TOMBSTONE-DELETES,
+   * which the rest of the product has had since B276.
+   *
+   * It is deliberately the FIRST thing that happens: rule 1 lifts a live node out because a
+   * bin entry names it, and a resurrected entry would do exactly that to a page somebody has
+   * since restored. */
+  const tombs = new Set([...tombstoneIds(L), ...tombstoneIds(S)]);
+  const mergedTombs = [
+    ...(Array.isArray(L.tombs) ? L.tombs : []),
+    ...(Array.isArray(S.tombs) ? S.tombs : []),
+  ];
+
+  /** A bin entry with every purged page taken out of it, or `null` when nothing is left.
+   *
+   * ⛔ THIS IS THE HALF THE FUZZ FOUND, and no hand-written case would have. Two devices that
+   * delete the SAME note mint two DIFFERENT entry ids, so purging one device's entry
+   * tombstones its id and the OTHER device's entry sails through the union untouched — still
+   * naming pages whose bytes are destroyed. That is precisely the zombie state on his account:
+   * bin rows offering to restore notes whose content no longer exists anywhere. So an entry is
+   * filtered by the ids it NAMES, not only by its own id. */
+  const pruneEntry = (e) => {
+    const pageIds = (e.pageIds || []).filter((id) => !tombs.has(String(id)));
+    if ((e.pageIds || []).length && !pageIds.length) return null;   // nothing recoverable left
+    if (pageIds.length === (e.pageIds || []).length && !tombs.has(String(e?.node?.id))) return e;
+    if (tombs.has(String(e?.node?.id))) return null;                // its own root is gone
+    const strip = (n) => (!n || tombs.has(String(n.id))
+      ? null
+      : { ...n, pages: (n.pages || []).map(strip).filter(Boolean) });
+    return { ...e, pageIds, node: strip(e.node) };
+  };
+
   const trash = [];
   const trashIds = new Set();
   for (const e of [...(L.trash || []), ...(S.trash || [])]) {
     if (!e || !e.id || trashIds.has(e.id)) continue;
+    if (tombs.has(String(e.id))) continue;                       // purged for real (rule 0)
+    const kept = pruneEntry(e);
+    if (!kept) continue;
     trashIds.add(e.id);
-    trash.push(e);
+    trash.push(kept);
   }
   // Every page id any bin ACTUALLY NAMES. A live copy on the other side loses to it (rule 1);
   // a page this set does not name was deleted by nobody and is rescued (rule 5).
@@ -200,7 +251,12 @@ export function mergeTrees(local, server, { onRescue } = {}) {
         ? [...walk(other?.pages || [], branchProject, false), ...walk(pg.pages || [], branchProject, true)]
         : [...walk(pg.pages || [], branchProject, false), ...walk(other?.pages || [], branchProject, true)];
 
-      if (deleted.has(pg.id)) {
+      /* ⛔ RULE 0 ON THE LIVE SIDE, AND IT SHARES RULE 5'S BODY DELIBERATELY. A page whose
+       * bytes were destroyed may not come back as a node with nothing behind it — but it is
+       * walked, not skipped, because the other device may have added a child under it AFTER
+       * the purge, and that child is a page nobody deleted. Skipping early here would be
+       * B342992's exact defect in a new costume: a delete taking more than it named. */
+      if (deleted.has(pg.id) || tombs.has(String(pg.id))) {
         /* ⛔ RULE 5. This node really was deleted, so it goes — but `kids` are the survivors
          * the merge just built, and every one of them is a page NO bin entry names. Lift them
          * to the top level of the branch's project rather than letting the early return take
@@ -227,7 +283,14 @@ export function mergeTrees(local, server, { onRescue } = {}) {
     try { onRescue(rescued.map((p) => ({ pageId: p.id, title: p.title, projectId: p.projectId ?? null }))); }
     catch (_) { /* a bad listener must not lose the pages it was told about */ }
   }
-  return { v: L.v || S.v || 3, pages: [...pages, ...rescued], trash };
+  return {
+    v: L.v || S.v || 3,
+    pages: [...pages, ...rescued],
+    trash,
+    // The ledger merges like everything else, deduped and aged out by the model's own rule —
+    // a tombstone that reached only one device has to reach the other one.
+    tombs: withTombstones({ tombs: mergedTombs }, []).tombs,
+  };
 }
 
 const laterOf = (a, b) => (Number.isFinite(a) && Number.isFinite(b) ? Math.max(a, b) : (Number.isFinite(a) ? a : (Number.isFinite(b) ? b : null)));

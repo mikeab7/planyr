@@ -375,6 +375,13 @@ for (let i = 0; i < offsets.length; i += 16) {
   for (let j = 0; j < batch.length; j += 1) {
     const docY = frame.blankFrom + j * ROW;
     await clickAtDoc(batch[j], docY);
+    /* ⛔ ONE CHARACTER, DELIBERATELY. Since the provisional-block round an EMPTY block is
+     * discarded the moment the caret leaves it — so a sweep that typed nothing would be
+     * measuring one block being replaced 38 times, and would write nothing to storage at all.
+     * Typing makes each one real, which is what lets the count and the stored numbers below
+     * mean what they say. */
+    await page.keyboard.type("x");
+    await pacedWait(page, 90);
     const a = await newest();
     seen.push({ clicked: batch[j], stored: a.left ?? null, row: docY, storedY: a.top ?? null, blocks: a.n, want: j + 1 });
   }

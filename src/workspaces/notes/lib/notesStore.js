@@ -150,9 +150,10 @@ import { assetIdsInDoc, docToText, imageIdsInDoc } from "./notesMarkdown.js";
 import { openTasksInDoc, rollUpOpenTasks, setTaskCheckedInDoc } from "./notesTasks.js";
 import { MAX_VERSIONS_PER_PAGE, planRestore, planRetention, shouldSnapshot } from "./notesVersions.js";
 import { safeAttachmentName } from "./notesFileMeta.js";
-import { migrate, searchTitles, pagesInScope, trashEntries, walkPages, SCOPE_ALL, SCOPE_PROJECT } from "./notesModel.js";
+import { migrate, purgeTrashEntry, searchTitles, pagesInScope, trashEntries, walkPages, SCOPE_ALL, SCOPE_PROJECT } from "./notesModel.js";
 import { normalizeZoom, zoomKey, ZOOM_DEFAULT } from "./notesZoom.js";
 import { IGNORED_DUPES_KEY_BASE } from "./notesKeys.js";
+import { countEmptyAnchors, pruneEmptyAnchors } from "./notesAnchorPrune.js";
 import { relativeTime } from "./notesTime.js";
 
 /* The key strings live in `notesKeys.js` — a leaf with no dependencies — so the ONE other
@@ -332,7 +333,15 @@ function writePageLocal(pageId, doc, s = scope) {
  *  and, when signed in, marks THAT page as owing the cloud a push. */
 export function writePage(pageId, doc) {
   if (!pageId) return false;
-  const ok = writePageLocal(pageId, doc);
+  /* ⛔ AN EMPTY ANCHORED BLOCK IS PROVISIONAL AND NEVER LEAVES THE SESSION. Read the header of
+   * `notesAnchorPrune.js` before changing this line: the editor removes one the moment the
+   * caret leaves it, which is what you SEE, and this is what makes it TRUE. Every way an
+   * abandoned double-click could otherwise reach the disk or the cloud — an autosave firing in
+   * the half-second before the first keystroke, a closed tab, a crash, a page switch — comes
+   * through here. This is a discard of something nobody has put anything in, not a deletion of
+   * data, which is why it is silent; the bar for "empty" is a whitelist and refuses to guess. */
+  const clean = pruneEmptyAnchors(doc).doc;
+  const ok = writePageLocal(pageId, clean);
   if (ok && scoped()) {
     const prev = sync.pages[pageId] || {};
     // A deliberate write clears the device-level tombstone: only a real body write can, and
@@ -409,6 +418,44 @@ export function sweepOrphans(livePageIds) {
  *  keeping" — and deliberately lower than the duplicate detector's, because refusing to
  *  destroy something is a cheaper mistake than reporting a false duplicate. */
 const hasWords = (doc) => docToText(doc).trim().length > 0;
+
+/**
+ * ⛔ THE ONE-TIME CLEAN-UP FOR NOTES THAT ARE ALREADY CARRYING THE LITTER.
+ *
+ * `writePage` stops any NEW empty anchored block reaching storage, and the editor removes one
+ * as soon as the caret leaves it — but neither of those helps a note that already has a
+ * handful sitting in it from before the fix, and each one is an invisible dead zone that will
+ * go on swallowing double-clicks forever. So every stored body is read once on load and
+ * rewritten if it is holding any.
+ *
+ * Three deliberate properties:
+ *   • It goes through `writePage`, so the CLEANED copy is pushed to the cloud too. Cleaning
+ *     only this device would leave the litter to come straight back down on the next sync.
+ *   • It touches only pages that actually change — a page with nothing to remove is not
+ *     rewritten, so this does not mark the whole account dirty and does not restamp anything.
+ *   • The bar for "empty" is `notesAnchorPrune`'s whitelist, which refuses to guess: a block
+ *     with a picture, an attachment, a sketch or any node type this code has not heard of is
+ *     content and is kept.
+ *
+ * Returns `{ pages, removed }` — how many notes were cleaned and how many blocks went — so
+ * the caller can say so rather than doing it behind his back.
+ */
+export function sweepEmptyAnchors(pageIds) {
+  const ids = Array.isArray(pageIds) ? pageIds.filter(Boolean) : listStoredPageIds();
+  let pages = 0;
+  let removed = 0;
+  for (const id of ids) {
+    const doc = readPage(id);
+    if (!doc) continue;
+    const n = countEmptyAnchors(doc);
+    if (!n) continue;
+    const { doc: clean } = pruneEmptyAnchors(doc);
+    if (!writePage(id, clean)) continue;    // LOUD-FAILURE: a refused write is not counted
+    pages += 1;
+    removed += n;
+  }
+  return { pages, removed };
+}
 
 /* ---- images (B1311) ------------------------------------------------------------------
  *
@@ -1165,6 +1212,26 @@ async function seed({ full }) {
       for (const id of imgs) sync.images[id] = { up: false, purged: true };
     }
 
+    /* ⛔ AND THE ZOMBIES GO WITH THEM. A bin entry every one of whose pages the SERVER says is
+     * purged is not recoverable by anybody: `doc` is NULL up there and the bytes are gone. It
+     * was sitting in his bin offering a restore that could only ever produce an empty note —
+     * 15 of his 24 rows, put back by the union merge after he had emptied the bin for real.
+     *
+     * ⛔ THE SERVER'S `purged_at` IS THE ONLY EVIDENCE ACCEPTED. "No body on this device" is
+     * NOT the same claim — a signed-in device legitimately has not downloaded every binned
+     * page's body — and treating the two as one would destroy recoverable entries. Purging the
+     * entry here also TOMBSTONES it, so it cannot come back from a stale window either. */
+    if (plan.purged.length) {
+      const dead = new Set(plan.purged);
+      let t = migrate(readTreeRaw());
+      const zombies = trashEntries(t).filter((e) => (e.pageIds || []).length > 0
+        && (e.pageIds || []).every((id) => dead.has(id)));
+      if (zombies.length) {
+        for (const e of zombies) t = purgeTrashEntry(t, e.id).tree;
+        if (writeTreeLocal(t)) { treeChanged = true; sync.treeDirty = true; }
+      }
+    }
+
     const need = [...plan.adopt, ...plan.conflicts];
     if (need.length) {
       const got = await c.fetchPages(client(), need);
@@ -1505,13 +1572,33 @@ export function openTaskCount(pageId) {
  */
 export function collectBinFacts(tree, projects = []) {
   const byId = new Map((projects || []).filter(Boolean).map((p) => [p.id, p.name]));
+  const titles = new Map();
+  const titleWalk = (node) => {
+    if (!node) return;
+    titles.set(node.id, node.title);
+    for (const k of node.pages || []) titleWalk(k);
+  };
   return trashEntries(tree).map((e) => {
-    /* The first page in the entry's cascade with anything in it — for a note that was binned
-     * with subpages, the words that identify it may be one level down. */
+    titleWalk(e.node);
+    /* ⛔ ONE PASS COMPUTES THE PREVIEW *AND* WHAT "READ IT" WILL OPEN, and that is the whole
+     * of the fix rather than a tidy-up. His report: the row for DEV COORDINATION showed real
+     * text and "656 characters", and pressing Read it showed a heading and nothing else. The
+     * reason, from the database: DEV COORDINATION is the CONTAINER (`sec_…`) and has no row in
+     * `notes_pages` at all — its words live in its child. The list was reading the child and
+     * the reader was opening the parent. Two passes over the same cascade, disagreeing.
+     *
+     * So `reading` is the list the reader opens, built HERE, from the same reads the preview
+     * came from. They cannot disagree because they are the same walk. */
+    const reading = [];
     let text = "";
+    let anyStored = false;
     for (const id of e.pageIds || []) {
-      const t = docToText(readPage(id)).replace(/\s+/g, " ").trim();
-      if (t) { text = t; break; }
+      const doc = readPage(id);
+      if (doc) anyStored = true;
+      const t = docToText(doc).replace(/\s+/g, " ").trim();
+      if (!t) continue;
+      reading.push({ pageId: id, title: titles.get(id) || "", chars: t.length });
+      if (!text) text = t;
     }
     /* ⛔ FOUR STATES, NOT TWO, AND THE FOURTH IS THE ONE THAT WOULD HAVE BEEN A LIE. An entry
      * binned before the bin recorded where a page came from has NO `projectId` key at all,
@@ -1525,7 +1612,17 @@ export function collectBinFacts(tree, projects = []) {
       preview: text.slice(0, 160),
       chars: text.length,
       empty: text.length === 0,
-      pageId: (e.pageIds || [])[0] || null,
+      reading,
+      /* ⛔ "NOTHING WAS EVER WRITTEN IN THIS" AND "THE WRITING IS GONE" ARE OPPOSITE FACTS and
+       * the bin showed the first for both. 15 of his 24 rows had been purged for real — body
+       * destroyed, `purged_at` set — and then resurrected as bin entries by the union merge,
+       * so the bin was offering to restore notes whose content no longer exists anywhere.
+       * `gone` is the honest third state: there is no body on this device for ANY page in the
+       * cascade, so there is nothing to show and nothing a restore would bring back. */
+      gone: text.length === 0 && !anyStored && (e.pageIds || []).length > 0,
+      // The page the words came from — never blindly the first in the cascade, which for a
+      // container is the container itself and has no body at all.
+      pageId: reading[0]?.pageId || (e.pageIds || [])[0] || null,
       projectId,
       /* "No project" is a real place; a project that has since been deleted is NOT the same
        * thing and must not be captioned as if it were. */

@@ -44,6 +44,8 @@
  */
 import { Node, mergeAttributes } from "@tiptap/core";
 
+import { anchorIsEmpty } from "./notesAnchorPrune.js";
+
 /** The width a block gets when there is room for it. */
 export const ANCHOR_WIDTH = 180;
 /** ⛔ THE NARROWEST A BLOCK MAY BE SQUEEZED TO — small on purpose. An earlier version of this
@@ -190,6 +192,34 @@ export const NoteAnchor = Node.create({
         return true;
       },
 
+      /** ⛔ THE PROVISIONAL BLOCK'S OWN LIFECYCLE — every empty block that is not the one the
+       *  caret is in, gone.
+       *
+       *  This is the half you SEE; `writePage`'s prune is the half that makes it true (read
+       *  `notesAnchorPrune.js`'s header for the report that produced both). An empty block
+       *  draws nothing and still takes the press, so one left behind by an abandoned gesture
+       *  is an invisible dead zone at exactly the spot somebody just tried to use.
+       *
+       *  ⛔ IT WRITES NO UNDO FRAME. Ctrl+Z after abandoning a block must undo the last thing
+       *  you MEANT to do, not put an empty box back; and nothing was lost, so there is nothing
+       *  to restore. */
+      dropEmptyAnchors: ({ keep = null } = {}) => ({ tr, state, dispatch }) => {
+        const targets = [];
+        state.doc.descendants((node, pos) => {
+          if (node.type.name !== "noteAnchor") return true;
+          if (pos !== keep && anchorIsEmpty(node.toJSON())) targets.push({ pos, size: node.nodeSize });
+          return false;                       // nothing inside a block is another block
+        });
+        if (!targets.length) return false;
+        if (dispatch) {
+          // Back to front, so an earlier delete cannot move a later one's position.
+          for (let i = targets.length - 1; i >= 0; i -= 1) tr.delete(targets[i].pos, targets[i].pos + targets[i].size);
+          tr.setMeta("addToHistory", false);
+          dispatch(tr);
+        }
+        return true;
+      },
+
       /** Move one — the drag's commit, and the only way an anchor's position ever changes. */
       moveNoteAnchor: (pos, { x, y }) => ({ tr, dispatch }) => {
         const node = tr.doc.nodeAt(pos);
@@ -214,6 +244,20 @@ export const NoteAnchor = Node.create({
       dom.style.left = `${Math.round(num(node.attrs.x))}px`;
       dom.style.top = `${Math.round(num(node.attrs.y))}px`;
       dom.style.width = `${Math.round(num(node.attrs.w, ANCHOR_WIDTH))}px`;
+
+      /* ⛔ AN EMPTY BLOCK IS NEVER INVISIBLE. One that draws nothing still occupies its box
+       * and still takes the press, so it becomes a dead zone at the exact spot somebody just
+       * tried to use — which is what "it works intermittently" turned out to be. It is
+       * outlined and it says what to do with it (the words are in the stylesheet).
+       *
+       * ⛔ AND IT ASKS THE SAME QUESTION THE STORAGE SEAM ASKS. `anchorIsEmpty` decides both
+       * what is drawn as empty and what is discarded unwritten; two definitions would mean a
+       * block that looks provisional and is kept, or looks real and is thrown away. */
+      const markEmpty = (n) => {
+        if (anchorIsEmpty(n.toJSON())) dom.setAttribute("data-empty", "1");
+        else dom.removeAttribute("data-empty");
+      };
+      markEmpty(node);
 
       const grip = document.createElement("div");
       grip.className = "planyr-anchor-grip";
@@ -271,6 +315,7 @@ export const NoteAnchor = Node.create({
           dom.style.width = `${Math.round(num(next.attrs.w, ANCHOR_WIDTH))}px`;
           dom.setAttribute("data-anchor-x", String(Math.round(num(next.attrs.x))));
           dom.setAttribute("data-anchor-y", String(Math.round(num(next.attrs.y))));
+          markEmpty(next);
           return true;
         },
         ignoreMutation: (m) => m.type === "attributes" && m.target === dom,
@@ -278,5 +323,16 @@ export const NoteAnchor = Node.create({
     };
   },
 });
+
+/** Where the block holding the caret starts, or `null` when the caret is not in one. The
+ *  position, not the node, because that is what `dropEmptyAnchors` needs to spare it. */
+export function anchorPosAtSelection(state) {
+  const $from = state?.selection?.$from;
+  if (!$from) return null;
+  for (let d = $from.depth; d > 0; d -= 1) {
+    if ($from.node(d).type.name === "noteAnchor") return $from.before(d);
+  }
+  return null;
+}
 
 export default NoteAnchor;

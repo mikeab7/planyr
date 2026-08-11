@@ -72,7 +72,55 @@ export const NO_PROJECT_LABEL = "Not in a project";
 /* ---- construction ---------------------------------------------------------------- */
 
 export function emptyTree() {
-  return { v: NOTES_TREE_VERSION, pages: [], trash: [] };
+  return { v: NOTES_TREE_VERSION, pages: [], trash: [], tombs: [] };
+}
+
+/** How long a purge is REMEMBERED. Far longer than the bin's own 30 days, because the job of
+ *  a tombstone is to outlive every copy of the thing it buried: a device that has been asleep
+ *  for a month must still be told, on the day it wakes up, that this was deleted for real. */
+export const TOMB_RETENTION_DAYS = 400;
+
+/** ⛔ A PURGE IS A FACT, NOT AN ABSENCE — and this list is where that fact lives.
+ *
+ * THE BUG IT CLOSES, measured on the owner's account with revisions. He emptied the bin; the
+ * cloud tree went to rev 991 holding ONE entry. A tab that had been open a while was still on
+ * rev 966 with all 23 entries and unpushed edits of its own. It reloaded, merged — and the
+ * merge is a UNION, in which an addition wins and a deletion is merely the absence of an
+ * entry. **Absence loses to any copy that still has it.** All 23 came back, and the stale tab
+ * then PUSHED the resurrection up as rev 992 and overwrote the good state. So emptying the bin
+ * could not stick as long as any other window had not yet seen it.
+ *
+ * A tombstone turns the deletion into something that can WIN a union. It records the ids a
+ * purge destroyed, so the merge can refuse to re-add them however many copies still exist.
+ * This is TOMBSTONE-DELETES, which the rest of the product has had since B276 and Notes did
+ * not.
+ *
+ * It records the ENTRY id and every PAGE id the entry named, in one flat list, because both
+ * kinds can be resurrected by the same union and both must be refused. */
+export function tombstoneIds(tree) {
+  const out = new Set();
+  for (const t of Array.isArray(tree?.tombs) ? tree.tombs : []) {
+    if (t && t.id) out.add(String(t.id));
+  }
+  return out;
+}
+
+/** Add tombstones, keeping one row per id and dropping any that have outlived their purpose. */
+export function withTombstones(tree, ids, { at = Date.now() } = {}) {
+  const next = { ...tree };
+  const cutoff = at - TOMB_RETENTION_DAYS * 86400000;
+  const byId = new Map();
+  for (const t of Array.isArray(tree?.tombs) ? tree.tombs : []) {
+    if (!t || !t.id) continue;
+    if (Number.isFinite(t.at) && t.at < cutoff) continue;
+    byId.set(String(t.id), { id: String(t.id), at: Number.isFinite(t.at) ? t.at : at });
+  }
+  for (const id of ids || []) {
+    if (!id) continue;
+    if (!byId.has(String(id))) byId.set(String(id), { id: String(id), at });
+  }
+  next.tombs = [...byId.values()];
+  return next;
 }
 
 /* TIMESTAMPS LIVE ON THE PAGE NODE, AND NOWHERE ELSE (B1312). The tree is read on every
@@ -619,13 +667,17 @@ export function restoreNode(tree, entryId, { at = Date.now() } = {}) {
 /** Drop an entry from the bin for good and hand back the page ids whose bodies (and whose
  *  images) the caller must now destroy. This is the ONLY point at which a note's bytes are
  *  actually removed. */
-export function purgeTrashEntry(tree, entryId) {
+export function purgeTrashEntry(tree, entryId, { at = Date.now() } = {}) {
   const next = clone(tree);
   if (!Array.isArray(next.trash)) next.trash = [];
   const idx = next.trash.findIndex((e) => e.id === entryId);
   if (idx < 0) return { tree: next, pageIds: [] };
   const [e] = next.trash.splice(idx, 1);
-  return { tree: next, pageIds: (e.pageIds || []).slice() };
+  const pageIds = (e.pageIds || []).slice();
+  /* ⛔ THE PURGE IS RECORDED, NOT JUST PERFORMED — read `tombstoneIds`' header for the
+   * measured resurrection this closes. The entry id AND every page id it named, because a
+   * union merge can bring either back. */
+  return { tree: withTombstones(next, [entryId, e?.node?.id, ...pageIds], { at }), pageIds };
 }
 
 /* ---- listing + search --------------------------------------------------------------- */
@@ -845,7 +897,7 @@ export function migrate(raw) {
       if (!e || typeof e !== "object") continue;
       trash.push(legacyTrashEntry(e));
     }
-    return { v: NOTES_TREE_VERSION, pages, trash };
+    return { v: NOTES_TREE_VERSION, pages, trash, tombs: [] };
   }
 
   if (!Array.isArray(raw.pages)) return emptyTree();
@@ -859,5 +911,7 @@ export function migrate(raw) {
     const m = migrateTrashEntry(e);
     if (m) trash.push(m);
   }
-  return { v: NOTES_TREE_VERSION, pages, trash };
+  // The tombstone ledger rides through untouched apart from expiry — a tree written before it
+  // existed simply has none, which is the correct starting state.
+  return withTombstones({ v: NOTES_TREE_VERSION, pages, trash }, [], { at: Date.now() });
 }

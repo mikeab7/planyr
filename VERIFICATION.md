@@ -113,6 +113,16 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V152576 — B357011: the bin he emptied STAYS empty, and the resurrected entries are cleared up `Blocker: auth`
+
+Proven without a browser at the layer where it is decided — `test/notesBinPurge.test.js`: his exact sequence with the revisions, both merge directions, a second equally-stale window, a restore racing a purge, and a 6,000-merge fuzz across five seeds with zero resurrections, mutation-proven. What the sandbox cannot do is sign in, so the account itself is the last mile. **His bin is at 23 entries right now because a reload put them back — that is the defect, not him changing his mind.**
+
+- **OPEN NOTES SIGNED IN, on a tab that has been open a while, and let it sync.** PASS = the entries he emptied are gone and stay gone; the cloud `notes_trees` trash count does not go UP. FAIL = any of the 23 comes back.
+- **THE ZOMBIES.** 15 of his 24 `notes_pages` rows have `purged_at` set and `doc` NULL. PASS = the bin entries naming only those pages are gone from the bin on the next load, and none of them is offering a Restore. FAIL = a row still offers to restore content that no longer exists.
+- **⛔ AND THE TWO-WINDOW TEST, which is the actual repro.** Two windows on the account. In window A, empty the bin. Leave window B alone — it has not seen it. Reload B. PASS = B comes back with the bin EMPTY and the cloud rev does not gain 23 entries. FAIL = they come back.
+- **AND AN ORDINARY DELETE STILL WORKS.** Bin a note in one window; check it is restorable in the other. PASS = it restores. A tombstone must bury a PURGE, never an ordinary delete.
+- **A NULL IS NOT A DISPOSITION (STANDING RULE #2).** If the resurrection cannot be provoked, say so and take one of the three admissible routes — provoke it harder, instrument it, or ask him whether he has seen it again. Do not record "not reproducible" and archive.
+
 ### V145568 — B350002: HIS OWN twenty-one-entry bin is now judgeable without restoring anything `Blocker: real-data`
 
 Every mechanism is driven headless against a fixture built to his shape (three useless titles, one empty, one carrying a subpage, one from a deleted project) — `ui-audit/verify-notes-project-integrity.mjs` §7, 21 checks. What this sandbox cannot do is look at HIS bin, which is the thing he asked about.
