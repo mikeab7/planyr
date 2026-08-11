@@ -383,6 +383,15 @@ export async function cloudList(uid) {
     if (r && "team_id" in r) m.teamId = r.team_id || null;   // DB column is the source of truth for sharing
     if (r && "user_id" in r) m.ownerId = r.user_id || null;  // who created/owns it (for "owned by teammate")
     if (r && "share_locked" in r) m.shareLocked = !!r.share_locked; // B326417 — owner's view-only lock
+    /* NEW-2 — stamp the mirror EXPLICITLY, so the merge can tell "the cloud says private" (team_id
+     * present and null) from "the cloud did not say" (pre-migration DB, no such column). Overlaying
+     * the three fields above is not enough on its own: `mergePulledSites` folds this row against the
+     * local cache with `mergeSiteContent`, which picks scalars from whichever copy has the newer
+     * `updatedAt` — and the local copy is routinely newer (B458's mirror write), so the authority
+     * read here was being thrown away again one function later. `shareMirror` is NOT a Site Model
+     * field: createSiteModel drops it, so it can never be persisted or pushed back as a second copy
+     * of an access decision (B714). */
+    if (r && "team_id" in r) m.shareMirror = { teamId: r.team_id || null, ownerId: r.user_id || null, shareLocked: !!r.share_locked };
     // Seed the header-content baseline from what the cloud ALREADY has (post-overlay, so it matches
     // the shape a local push would send). If the local copy turns out identical, even the boot
     // re-push skips — no per-load version churn. Any real local difference still pushes.

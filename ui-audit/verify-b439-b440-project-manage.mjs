@@ -68,11 +68,13 @@ try {
   // ───────────────────── SITE (uncontrolled — drives the store) ─────────────────────
   await openPicker();
 
-  // kebab reveals on hover
-  await page.hover('[data-testid="project-row-zzsite-a"]');
-  await page.waitForTimeout(120);
+  /* NEW-2 (2026-08-11) — STRENGTHENED. This used to hover the row first and assert the kebab was
+   * then revealed. The kebab is now ALWAYS rendered, because hover-gating it left touch users with
+   * no rename or delete at all and keyboard users with nothing in the DOM to tab to — which is what
+   * made removing the crumb-level rename safe. So the check no longer hovers: it asserts the kebab
+   * is present on a row nobody has touched. */
   const kebabVisible = await page.evaluate(() => !!document.querySelector('[data-testid="project-kebab-zzsite-a"]'));
-  ok("Hovering a project row reveals the ⋯ kebab", kebabVisible);
+  ok("The manage kebab is present with NO hover (touch- and keyboard-reachable)", kebabVisible);
 
   // right-click opens the manage menu with Rename + Delete
   await page.click('[data-testid="project-row-zzsite-a"]', { button: "right" });

@@ -164,26 +164,51 @@ test.describe("NEW-4 / NEW-2 — renaming from the map viewer's project dropdown
   });
 });
 
-test.describe("NEW-4 — renaming the project you are looking at, from the crumb", () => {
-  /* In the PLANNER the crumb names one project, so the rename belongs on the crumb itself rather
-   * than behind a hover-revealed kebab on a list row (invisible, and dead on touch). It reuses the
-   * same inline editor and the same single write path as the row menu — one implementation. */
-  test("the dropdown carries a plain 'Rename' row for the open project, and it sticks", async ({ page }) => {
+/* ⛔ REPLACES the old "NEW-4 — renaming from the crumb" describe, which asserted a control the owner
+ * asked to REMOVE (2026-08-11: "I don't need a rename Clay & Porter right there… there already is the
+ * option for the three dots, so I don't need a second option there"). It is rewritten rather than
+ * deleted, because the CONCERN behind NEW-4 is still live and is now the thing under test.
+ *
+ * NEW-4's rename row existed because the per-row kebab was hover-revealed — "invisible, and dead on
+ * touch". That was true, so removing the crumb row is only safe because the kebab stopped being
+ * hover-gated. This suite therefore asserts BOTH halves: the duplicate is gone, AND the surviving
+ * entry point is reachable with no hover at all and still writes every plan in the group. Removing
+ * one of two entry points must never leave zero. */
+test.describe("NEW-1 / NEW-2 — one rename entry point, reachable without a mouse", () => {
+  test("the crumb-level 'Rename “…”' row and the duplicate 'All projects' row are BOTH gone", async ({ page }) => {
     await seedProject(page, SILVESTRI);
     await boot(page);
-    // Open the project from the switcher — that lands us in the planner, where a current project exists.
     await openProjectCrumb(page);
     await page.getByTestId("project-row-grp").getByRole("button").first().click();
     await expect(page.getByTestId("planner-canvas")).toBeVisible({ timeout: 20_000 });
 
     await openProjectCrumb(page);
-    const renameRow = page.getByTestId("project-rename-current");
-    await expect(renameRow).toBeVisible({ timeout: 10_000 });
-    await renameRow.click();
-    const input = page.getByTestId("project-rename-current-input");
+    // The dropdown is a project LIST plus a New-project action — no second rename, no second
+    // route to the dashboard (the Dashboard crumb sits immediately to the left of this control).
+    await expect(page.getByTestId("project-rename-current")).toHaveCount(0);
+    await expect(page.locator('button:has-text("All projects (")')).toHaveCount(0);
+    await expect(page.locator('button:has-text("New project")')).toBeVisible();
+  });
+
+  test("⛔ the kebab is reachable with NO hover, and rename through it still writes every plan", async ({ page }) => {
+    await seedProject(page, SILVESTRI);
+    await boot(page);
+    await openProjectCrumb(page);
+
+    /* The load-bearing assertion. Pre-fix the kebab rendered only while `hoverRow === p.id`, so on a
+     * touch device there was no rename at all and a keyboard user had nothing in the DOM to tab to.
+     * Click it WITHOUT hovering first — that is the case that used to be impossible. */
+    const kebab = page.getByTestId("project-kebab-grp");
+    await expect(kebab).toBeVisible();
+    await kebab.click();
+
+    await page.getByTestId("project-rename").click();
+    const input = page.getByRole("textbox", { name: /^Rename / });
+    await expect(input).toBeVisible();
     await input.fill("Silvestri");
     await input.press("Enter");
 
+    // Still ONE write path over the whole group, and it still survives a reload.
     await expect.poll(() => readStore(page).then((r) => [...new Set(r.map((s) => s.site))]), { timeout: 15_000 })
       .toEqual(["Silvestri"]);
     await page.reload();

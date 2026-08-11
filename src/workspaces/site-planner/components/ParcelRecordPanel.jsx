@@ -23,6 +23,7 @@
  * straight back onto the boot chunk.
  */
 import { PARCEL_FIELDS, parcelProvenance, provenanceLabel } from "../lib/parcelRecord.js";
+import { PinIcon } from "./icons.jsx";
 
 const label = { display: "block", fontSize: 10, textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 700, marginBottom: 2 };
 
@@ -127,7 +128,9 @@ export function PlacementControls({
           {[1, 5, 25, 100, 500].map((d) => <option key={d} value={d}>{d}′</option>)}
         </select>
       </div>
-      <button style={{ ...chip, width: "100%" }} data-testid="placement-move" onClick={onMove}>📍 Move to a different spot…</button>
+      <button style={{ ...chip, width: "100%" }} data-testid="placement-move" onClick={onMove}>
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}><PinIcon size={11} /> Move to a different spot…</span>
+      </button>
     </>
   );
 }
