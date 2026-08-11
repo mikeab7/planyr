@@ -145,6 +145,28 @@ was never clicked" quietly ships broken.
 - **AND ON BAIN** = `City of Houston ETJ · Fort Bend County — touches City of Katy`. Katy must be after the dash. If it is ellipsised away at his window width that is B367298 and not a failure of this item — but the part BEFORE the dash must be complete and readable.
 - **AND THE NUMBER THAT MATTERS DID NOT MOVE.** On any of the 16 ETJ sites, open Yield → Stormwater and check the floodplain administrator still names the **City of Houston** candidate and the finished-floor rule is still the Ch. 19 one (0.2% WSE + 2 ft). B367297 is the item that guarantees this in code; this is the eyes-on confirmation that nothing else was reading the label.
 - **A NULL IS NOT A DISPOSITION (STANDING RULE #2).** If the pill cannot be provoked into showing anything, say so and take one of the three admissible routes — do not record "not reproducible" and archive.
+### V165104 — B369536: on or after **2026-09-18**, does the retention job actually DELETE? `Blocker: real-data`
+
+**Due 2026-09-19, and the extra day is not slack — read this before filing a failure.** The oldest row is **2026-06-20 22:16:28 UTC**, so it crosses 90 days at **2026-09-18 22:16 UTC** — *after* that morning's 07:20 run. **The first run that can delete anything is 2026-09-19 07:20 UTC.** A read on 2026-09-18 will correctly return `WAIT` and proves nothing; do not report that as a failure. A one-shot Routine is armed for **2026-09-19 08:00 UTC**; if it is not honoured, run it by hand.
+
+**⛔ THE ONE THING THAT CAN RUIN THIS CHECK, AND IT TAKES ONE KEYSTROKE: do NOT call `select public.prune_client_errors()`.** A hand-run writes a run row byte-identical to a scheduled one, so it manufactures exactly the evidence this check exists to gather, permanently and undetectably. That is the same trap V84560 was written around, and it is why the reader below is `select`-only. Do not seed rows, do not age a row "to test it", do not help it along.
+
+**Steps.** Paste **QUERY 1** from `src/shared/telemetry/client_errors_retention_check.sql` into the Supabase SQL editor on `lyeqzkuiwngunutlkkmi`. One row comes back. Then paste **QUERY 2** from the bottom of the same file (commented out) for the independent pg_cron corroboration.
+
+**Expect / PASS** = `verdict` reads **`PASS-first-deletion-observed`**, with `ordinary_missed 0`, `manual_missed 0`, a non-null `first_deletion_run_id`, and `liveness = ok`. QUERY 2 shows one `succeeded` cron row per calendar day, each paired with exactly one run row.
+
+**FAIL, and they mean different things:**
+- **`FAIL-policy-not-applied`** — the job fired, reported success, and left rows behind that were past 90 days when it ran. **The policy is broken, not the check.** Re-open B369536 with a `Recurrence:` line; the number to report is `ordinary_missed`.
+- **`FAIL-stale`** / **`FAIL-never-run`** — the schedule has stopped. This is a B270913 recurrence (its stopping rule named exactly this), not a new item.
+- **`WAIT-no-eligible-rows-yet` after 2026-09-19** — not a pass and not a "check again later". The 2026-09-18 date is derived from the oldest row (2026-06-20 22:16:28 + 90 days); if nothing was eligible, either that row was removed by something else or the arithmetic is wrong. Re-open and say which.
+- **A `succeeded` cron row in QUERY 2 with NO run row beside it** — worse than any of the above: the function ran and its unconditional insert did not land. That is a new defect, not this one.
+
+**What is already proven, so this is a confirmation and not a discovery.** `test/clientErrorsRetentionCheck.test.js` (26) runs the shipped `.sql` files verbatim against a real Postgres and produces all five verdicts from seeded data at a fast-forwarded clock — including the first deletion, the manual capture surviving beside it, and the `FAIL-policy-not-applied` case mutation-proven by widening the shipped 90-day window to 400. The reader is proven read-only against a live database, and proven unable to be satisfied by an off-schedule (hand) run. It was executed against **production** on 2026-08-11 and returned `WAIT-no-eligible-rows-yet` · 3 scheduled runs · 1 off-schedule · 5,707 rows · next eligible **2026-09-18** — so the query itself is known to work there; only the date is owed.
+
+**A NULL IS NOT A DISPOSITION (STANDING RULE #2).** Whatever comes back, record it here with the date and archive per rule 3. Do not close this on "nothing to see yet".
+
+- Cadence: once · **Due 2026-09-18**
+- Blocker: `real-data` (the production table, and a date that has not arrived)
 
 ### V159584 — B364016: Delete forever STAYS deleted across three reloads, on his account `Blocker: auth`
 
