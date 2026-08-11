@@ -468,13 +468,35 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   now rounds coordinates to 6 dp and walks the vertex ladder down until the URL fits `MAX_QUERY_URL`.
   Do not "simplify" it back to a vertex cap, and do not switch to POST — the B445 cache proxy is
   GET-addressed, so a POST body silently bypasses the cache.
-  Guards: the repo-root `test/` suites **jurisdiction** (96) and **jurisdictionShapes** (10 — real parcel
+  **⛔ (7) B367296/B367297 — THE WORDS LIVE IN `jurisdictionLabel.js`, AND THE LABEL IS A LEAF.** The
+  owner reported Clay & Porter reading *"Unincorporated / City of Houston ETJ"* — *"it's either
+  Unincorporated or it's COH ETJ."* He is right about the display and the reason is the opposite of
+  the one he gave, and the code encodes the right one: a Texas ETJ IS the unincorporated band outside
+  a city's limits, so ETJ land is necessarily unincorporated and the pair was REDUNDANT, not
+  contradictory. **Do NOT make the two exclusive in the model** — `cityContainment: "none"` and
+  `unincorporated: true` still hold on every ETJ site, and the county tier reads them. The real defect
+  was the SEPARATOR: one " / " carried both *"Houston governs platting here"* and *"Katy is merely
+  next door"*. Three levels now, each meaning one thing — `·` between GOVERNING slots (authority · ETJ
+  · county · ISD, always leading with what governs) · `+` between co-equal peers in one slot · `—`
+  introducing the non-governing tail. Four shapes and no others; `split` and `unknown` are states, not
+  shapes. **And the label is a LEAF: nothing may read a fact back out of it.** `SitePlanner.jsx`
+  derived the governing city as `(jurBadge?.jur||"").split(" / ")[0].replace(/^City of\s+/,"")` and
+  fed it to `assessAdministrator` as `cityLabel` — under the new grammar that returns
+  `"Humble · Houston ETJ"`, which matches no rule record, so the CITY's floodplain ordinance is never
+  raised and the site is priced on the county's. Read `governingCityOf(badge)` instead.
+  Guards: the repo-root `test/` suites **jurisdiction** (86), **jurisdictionShapes** (11 — real parcel
   geometry through the real query builder against RECORDED real agency answers, one fixture per
-  jurisdiction SHAPE, mutation-checked two ways), plus the live ui-audit harness
-  **verify-jurisdiction-portfolio** (all 28 of the owner's sites against the live services; its fixtures
-  are re-recorded by the sibling harness **record-jurisdiction-shapes**). ⚠ A hand-written badge fixture tests
-  the FORMATTER only — both real mislabels were produced UPSTREAM of it, by what the identify asked and
-  how it read the answer, and 96 green formatter tests passed through both.
+  jurisdiction SHAPE, mutation-checked two ways), **jurisdictionLabel** (18 — the shapes, the grammar,
+  and the guard that the model never became exclusive) and **jurisdictionCoupling** (7 — the RED proof
+  through the real administrator resolver, plus a source sweep for the banned parse; mutation-proven),
+  plus two ui-audit harnesses: **verify-jurisdiction-badge-shapes** (`npm run verify:jurbadge` — the
+  REAL component and header, four widths × both themes, over the same recorded answers via the shared
+  replay helper in the repo-root ui-audit lib; asserts the rendered DOM text, that a clip can only ever eat the tail
+  and never the governing lead, and AA contrast) and the live **verify-jurisdiction-portfolio** (all 28
+  of the owner's sites against the live services; its fixtures are re-recorded by the sibling harness
+  **record-jurisdiction-shapes**). ⚠ A hand-written badge fixture tests the FORMATTER only — both real
+  mislabels were produced UPSTREAM of it, by what the identify asked and how it read the answer, and 96
+  green formatter tests passed through both.
 - `supabase.js` / `auth.js` / `cloudSync.js` — cloud data + auth (shared across workspaces).
 - `elementSync.js` / `elementRows.js` / `elementJournal.js` — the element-level sync engine, the
   rows↔model fold layer (incl. `foldJournal`), and the persisted pending-edit journal (NEW-F4:

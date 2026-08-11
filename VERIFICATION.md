@@ -113,6 +113,38 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V162864 — B367296: the header pill on Clay & Porter reads just the ETJ, and Bain no longer joins Katy to the answer `Blocker: auth`
+
+**Proven here, as far as this environment can reach — the residual is only the signed-in header on his own account.**
+
+- **THE WHOLE PORTFOLIO, LIVE.** All 28 sites driven through the real `identifyJurisdiction` + `formatJurisdictionBadge` against the real TxDOT / TxGIO / H-GAC services (`node ui-audit/verify-jurisdiction-portfolio.mjs`), before and after: **27 correct → 27 correct**, 0 mislabelled, 0 unresolved, 1 site with no drawn geometry, both runs.
+
+| site | before | after |
+|---|---|---|
+| 8 South | City of Pearland · Harris County | *(unchanged)* |
+| Bain | Unincorporated / City of Houston · ETJ / City of Katy · edge only · Fort Bend County | **City of Houston ETJ · Fort Bend County — touches City of Katy** |
+| Bayport V | City of Pasadena · Harris County | *(unchanged)* |
+| Clay & Porter | Unincorporated / City of Houston · ETJ · Harris County | **City of Houston ETJ · Harris County** |
+| Cravens | City of Missouri City · Fort Bend County | *(unchanged)* |
+| Forbidden Gardens | Unincorporated / City of Houston · ETJ · Harris County | **City of Houston ETJ · Harris County** |
+| Gessner | City of Houston · Harris County | *(unchanged)* |
+| Goose Creek | Part in City of Baytown (6 of 14 lots) / rest in its ETJ · Harris County | **Part in City of Baytown (6 of 14 lots) · rest in its ETJ · Harris County** |
+| Grand Port | Unincorporated / City of Baytown · ETJ · Chambers County | **City of Baytown ETJ · Chambers County** |
+| Hoffmeister · Houston ColdPort · JFK · Jacintoport · Katz · Kennedy Greens · Pappadoupolos · Pinnacle · Pinto II · RICHEY · Richfield · Schiel · Silvestri | Unincorporated / City of Houston · ETJ · Harris County | **City of Houston ETJ · Harris County** |
+| I-10/HWY 90 | Unincorporated / City of Brookshire · edge only · Waller County | **Unincorporated · Waller County — touches City of Brookshire** |
+| Martini · Mesa | City of Houston · Harris County | *(unchanged)* |
+| Tsakiris | Part in City of Katy (2 of 9 lots) / rest outside it · no ETJ published for City of Katy · Waller County | **Part in City of Katy (2 of 9 lots) · rest outside it (no ETJ published for City of Katy) · Waller County** |
+| Will Clayton | City of Humble / City of Houston · ETJ · Harris County | **City of Humble · Houston ETJ · Harris County** |
+
+- **EVERY IN-CITY SITE STILL NAMES ITS CITY** (8 South, Bayport V, Cravens, Gessner, Martini, Mesa, Will Clayton). **EVERY ETJ SITE NOW LEADS WITH THE ETJ** (16). **EVERY NO-ETJ SITE READS UNINCORPORATED** with its nearby city behind the em dash (I-10/HWY 90). **GOOSE CREEK STILL DOES NOT CLAIM BAYTOWN** — it reports 6 of 14 lots and names the ETJ that holds the other 8.
+- **RENDERED, IN A REAL BROWSER.** `npm run verify:jurbadge` — the real `AppHeader` + `JurisdictionBadge` over the real identify chain and the recorded agency answers, 4 widths × both themes: **49/49**, mutation-proven (restoring the "Unincorporated ·" prefix turns 16 rows red). It also measured the clip: Bain 464 px → 349 px at 980 px, and the governing lead always fits — residual tail ellipsising is **B367298**.
+
+**WHAT IS STILL PENDING, AND IT IS ONLY THIS.** The header pill on **his signed-in account, on planyr.io, with Clay & Porter open** — the sandbox cannot sign in to Supabase (proxy CORS), so the one thing not driven here is the real plan loading its real parcels and painting the pill.
+
+- **PASS** = Clay & Porter's header reads exactly `City of Houston ETJ · Harris County` — the words "Unincorporated" and "/" both absent.
+- **AND ON BAIN** = `City of Houston ETJ · Fort Bend County — touches City of Katy`. Katy must be after the dash. If it is ellipsised away at his window width that is B367298 and not a failure of this item — but the part BEFORE the dash must be complete and readable.
+- **AND THE NUMBER THAT MATTERS DID NOT MOVE.** On any of the 16 ETJ sites, open Yield → Stormwater and check the floodplain administrator still names the **City of Houston** candidate and the finished-floor rule is still the Ch. 19 one (0.2% WSE + 2 ft). B367297 is the item that guarantees this in code; this is the eyes-on confirmation that nothing else was reading the label.
+- **A NULL IS NOT A DISPOSITION (STANDING RULE #2).** If the pill cannot be provoked into showing anything, say so and take one of the three admissible routes — do not record "not reproducible" and archive.
 ### V165104 — B369536: on or after **2026-09-18**, does the retention job actually DELETE? `Blocker: real-data`
 
 **Due 2026-09-19, and the extra day is not slack — read this before filing a failure.** The oldest row is **2026-06-20 22:16:28 UTC**, so it crosses 90 days at **2026-09-18 22:16 UTC** — *after* that morning's 07:20 run. **The first run that can delete anything is 2026-09-19 07:20 UTC.** A read on 2026-09-18 will correctly return `WAIT` and proves nothing; do not report that as a failure. A one-shot Routine is armed for **2026-09-19 08:00 UTC**; if it is not honoured, run it by hand.
