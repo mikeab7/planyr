@@ -739,8 +739,13 @@ export default function ProjectBreadcrumb({
                       NAMED as unknown, never rendered as a confident zero. */}
                   {noteCensus?.state === "ready" && noteCensus.noteCount > 0 ? (
                     <div data-testid="project-delete-notes" data-note-count={noteCensus.noteCount} style={{ marginTop: 7, color: "var(--warn-text)", fontWeight: 600 }}>
+                      {/* ⛔ NOTES, THEN SUBPAGES — never a TOTAL (NEW-6). A note that has one
+                          page under it is one note, and the count in brackets used to fold the
+                          note itself into a "pages" figure, so two things read as three. */}
                       {noteCensus.noteCount === 1 ? "1 note is" : `${noteCensus.noteCount} notes are`} filed here
-                      {noteCensus.pageCount > noteCensus.noteCount ? ` (${noteCensus.pageCount} pages)` : ""}. They stay in Notes either way.
+                      {noteCensus.pageCount > noteCensus.noteCount
+                        ? ` (+ ${noteCensus.pageCount - noteCensus.noteCount} ${noteCensus.pageCount - noteCensus.noteCount === 1 ? "subpage" : "subpages"})`
+                        : ""}. They stay in Notes either way.
                     </div>
                   ) : null}
                   {noteCensus?.state === "failed" ? (

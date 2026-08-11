@@ -44,8 +44,16 @@
  */
 import { Node, mergeAttributes } from "@tiptap/core";
 
-export const ANCHOR_MIN_WIDTH = 180;
-/** How far from the editor's edges an anchor may be dropped, so it is never half off-page. */
+/** The width a block gets when there is room for it. */
+export const ANCHOR_WIDTH = 180;
+/** ⛔ THE NARROWEST A BLOCK MAY BE SQUEEZED TO — small on purpose. An earlier version of this
+ *  fix used a READABLE floor (90 px) and slid the block left when the click did not leave room
+ *  for one. That is the same defect in a smaller coat: his own acceptance test says "assert
+ *  stored left equals click x minus editor left, for EVERY step. No clamping band anywhere."
+ *  A narrow column at the far edge is a choice he is allowed to make, and he can drag it; a
+ *  block that quietly went somewhere else is not. */
+export const ANCHOR_MIN_WIDTH = 32;
+/** How far from the editor's RIGHT edge a block keeps clear. */
 export const ANCHOR_EDGE_PAD = 4;
 
 const num = (v, fallback = 0) => {
@@ -53,15 +61,46 @@ const num = (v, fallback = 0) => {
   return Number.isFinite(n) ? n : fallback;
 };
 
-/** Clamp a dropped point into the editor's own box. Pure, so the placement rule is testable
- *  without a browser — and so the harness can state the expected pixel itself. */
-export function clampAnchor({ x, y, width, height, blockWidth = ANCHOR_MIN_WIDTH, blockHeight = 24 }) {
-  const maxX = Math.max(ANCHOR_EDGE_PAD, num(width) - blockWidth - ANCHOR_EDGE_PAD);
-  const maxY = Math.max(ANCHOR_EDGE_PAD, num(height) - blockHeight - ANCHOR_EDGE_PAD);
-  return {
-    x: Math.round(Math.min(Math.max(num(x), ANCHOR_EDGE_PAD), maxX)),
-    y: Math.round(Math.min(Math.max(num(y), ANCHOR_EDGE_PAD), maxY)),
-  };
+/** ⛔ A BLOCK STARTS WHERE YOU CLICKED. IT IS NARROWED TO FIT — IT IS NEVER SLID SIDEWAYS.
+ *
+ *  THE BUG THIS REPLACES, measured on the owner's own window: a click at x=1010 produced a
+ *  block at x=884, and so did a click at x=900. Everything right of about x=888 was clamped
+ *  flush to the right margin — a silent jump of up to **126 px** — and the clamped value was
+ *  WRITTEN TO STORAGE, so it survived a reload. From the far side of the screen that is
+ *  indistinguishable from "it went somewhere else", which is the entire complaint.
+ *
+ *  The old rule kept a fixed 180 px block fully inside the box, which can only be done by
+ *  moving it. The new rule keeps the thing the person actually chose — the LEFT EDGE — and
+ *  spends the width instead: `w` shrinks to whatever is left before the margin, down to
+ *  `ANCHOR_MIN_WIDTH`. Only past that floor, where a column would be unreadable anyway, does
+ *  the left edge move — and then by the smallest amount that buys a usable column.
+ *
+ *  ⛔ AND THERE IS NO VERTICAL CLAMP AT ALL ANY MORE. `y` is returned untouched. A click near
+ *  the bottom used to be nudged up (measured: a click at y=470 landed at 461) and a block that
+ *  GREW while being typed into was pushed around by the same reasoning one layer up. The page
+ *  extends to hold it instead — see `anchorExtent` and its use in NoteEditor.
+ */
+export function placeAnchor({ x, y, width, minWidth = ANCHOR_MIN_WIDTH, preferred = ANCHOR_WIDTH }) {
+  const boxW = num(width);
+  // The left edge is what was chosen, and it is kept — always. The only thing that ever moves
+  // it is a click left of the page itself, which is not a place.
+  const left = Math.max(ANCHOR_EDGE_PAD, num(x));
+  const room = boxW - left - ANCHOR_EDGE_PAD;
+  const w = Math.max(minWidth, Math.min(preferred, room));
+  return { x: Math.round(left), y: Math.round(num(y)), w: Math.round(w) };
+}
+
+/** How far down the page the anchored blocks reach, so the editor can be told to be at least
+ *  that tall. Pure, and deliberately takes the measured heights rather than guessing them —
+ *  a block's height is its text, which only the browser knows. */
+export function anchorExtent(blocks = [], { pad = 40 } = {}) {
+  let bottom = 0;
+  for (const b of blocks || []) {
+    const y = num(b?.y);
+    const h = num(b?.height, 24);
+    if (y + h > bottom) bottom = y + h;
+  }
+  return bottom > 0 ? Math.ceil(bottom + pad) : 0;
 }
 
 export const NoteAnchor = Node.create({
@@ -77,7 +116,7 @@ export const NoteAnchor = Node.create({
     return {
       x: { default: 0, parseHTML: (el) => num(el.getAttribute("data-anchor-x")), renderHTML: (a) => ({ "data-anchor-x": Math.round(num(a.x)) }) },
       y: { default: 0, parseHTML: (el) => num(el.getAttribute("data-anchor-y")), renderHTML: (a) => ({ "data-anchor-y": Math.round(num(a.y)) }) },
-      w: { default: ANCHOR_MIN_WIDTH, parseHTML: (el) => num(el.getAttribute("data-anchor-w"), ANCHOR_MIN_WIDTH), renderHTML: (a) => ({ "data-anchor-w": Math.round(num(a.w, ANCHOR_MIN_WIDTH)) }) },
+      w: { default: ANCHOR_WIDTH, parseHTML: (el) => num(el.getAttribute("data-anchor-w"), ANCHOR_WIDTH), renderHTML: (a) => ({ "data-anchor-w": Math.round(num(a.w, ANCHOR_WIDTH)) }) },
     };
   },
 
@@ -92,7 +131,7 @@ export const NoteAnchor = Node.create({
   renderHTML({ HTMLAttributes, node }) {
     const x = Math.round(num(node?.attrs?.x));
     const y = Math.round(num(node?.attrs?.y));
-    const w = Math.round(num(node?.attrs?.w, ANCHOR_MIN_WIDTH));
+    const w = Math.round(num(node?.attrs?.w, ANCHOR_WIDTH));
     return [
       "div",
       mergeAttributes({ class: "planyr-anchor", style: `left:${x}px;top:${y}px;width:${w}px` }, HTMLAttributes),
@@ -115,14 +154,14 @@ export const NoteAnchor = Node.create({
        *  text block it already ended in, so nothing needs restoring and nothing is left
        *  behind. The node is out of flow, so where it sits in the document order changes
        *  nothing about what anybody sees. */
-      addNoteAnchorAt: ({ x, y, w = ANCHOR_MIN_WIDTH }) => ({ chain, state }) => {
+      addNoteAnchorAt: ({ x, y, w = ANCHOR_WIDTH }) => ({ chain, state }) => {
         const { doc } = state;
         const tail = doc.lastChild;
         const at = tail && tail.isTextblock ? doc.content.size - tail.nodeSize : doc.content.size;
         return chain()
           .insertContentAt(at, {
             type: "noteAnchor",
-            attrs: { x: Math.round(num(x)), y: Math.round(num(y)), w: Math.round(num(w, ANCHOR_MIN_WIDTH)) },
+            attrs: { x: Math.round(num(x)), y: Math.round(num(y)), w: Math.round(num(w, ANCHOR_WIDTH)) },
             content: [{ type: "paragraph" }],
           })
           .focus(at + 2)
@@ -170,11 +209,11 @@ export const NoteAnchor = Node.create({
       dom.className = "planyr-anchor";
       dom.setAttribute("data-anchor-x", String(Math.round(num(node.attrs.x))));
       dom.setAttribute("data-anchor-y", String(Math.round(num(node.attrs.y))));
-      dom.setAttribute("data-anchor-w", String(Math.round(num(node.attrs.w, ANCHOR_MIN_WIDTH))));
+      dom.setAttribute("data-anchor-w", String(Math.round(num(node.attrs.w, ANCHOR_WIDTH))));
       dom.setAttribute("data-testid", "note-anchor");
       dom.style.left = `${Math.round(num(node.attrs.x))}px`;
       dom.style.top = `${Math.round(num(node.attrs.y))}px`;
-      dom.style.width = `${Math.round(num(node.attrs.w, ANCHOR_MIN_WIDTH))}px`;
+      dom.style.width = `${Math.round(num(node.attrs.w, ANCHOR_WIDTH))}px`;
 
       const grip = document.createElement("div");
       grip.className = "planyr-anchor-grip";
@@ -204,9 +243,10 @@ export const NoteAnchor = Node.create({
         const nx = from.x + (e.clientX - from.px) / from.scale;
         const ny = from.y + (e.clientY - from.py) / from.scale;
         const host = editor.view.dom;
-        const c = clampAnchor({ x: nx, y: ny, width: host.offsetWidth, height: host.offsetHeight, blockWidth: dom.offsetWidth, blockHeight: dom.offsetHeight });
+        const c = placeAnchor({ x: nx, y: ny, width: host.offsetWidth, preferred: dom.offsetWidth });
         dom.style.left = `${c.x}px`;
         dom.style.top = `${c.y}px`;
+        dom.style.width = `${c.w}px`;
       });
       const end = (e) => {
         if (!from) return;
@@ -228,7 +268,7 @@ export const NoteAnchor = Node.create({
           if (next.type.name !== "noteAnchor") return false;
           dom.style.left = `${Math.round(num(next.attrs.x))}px`;
           dom.style.top = `${Math.round(num(next.attrs.y))}px`;
-          dom.style.width = `${Math.round(num(next.attrs.w, ANCHOR_MIN_WIDTH))}px`;
+          dom.style.width = `${Math.round(num(next.attrs.w, ANCHOR_WIDTH))}px`;
           dom.setAttribute("data-anchor-x", String(Math.round(num(next.attrs.x))));
           dom.setAttribute("data-anchor-y", String(Math.round(num(next.attrs.y))));
           return true;

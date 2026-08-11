@@ -139,6 +139,29 @@ written out in the header of `lib/notesStore.js`; read it there rather than re-d
   property. It inserts **before the document's last block**, deliberately — appending leaves a
   blank line ProseMirror restores and cannot be deleted away. Proof is geometric, in
   **verify-notes-anchor-zoom**: the rendered rect against the clicked coordinates.
+  - **⛔ AND THE FIFTH ROUND (B350000/B350001) KILLED THREE MORE WAYS IT MOVED, all of them
+    measured on the owner's own window rather than argued.** (a) **NO CLAMPING BAND.** Everything
+    right of about the three-quarter mark was pushed flush to the right margin — a click at
+    x=1010 and a click at x=900 both produced a block at x=884, a silent slide of up to 126 px,
+    and the clamped number was WRITTEN TO STORAGE. The left edge is the thing he chose, so it is
+    kept unconditionally and the WIDTH is spent instead (`placeAnchor`). There was a second floor
+    hiding under the first: a `min-width: 120px` in the stylesheet, which quietly undid the
+    narrowing — a placement rule and a stylesheet floor cannot both own the width. (b) **NO
+    VERTICAL NUDGE:** a click at y=470 landed at 461; there is now no vertical clamp at all and
+    the page grows to hold the block (`anchorExtent`). (c) **THE GESTURE USED TO MOVE THE EDGE IT
+    THEN MEASURED AGAINST** — the first press of a double-click below the last line adds a line
+    (that is what clicking under text means everywhere else), which pushed the content's bottom
+    edge down, so the double-click decided it was on content and declined: no block, and the
+    added line left behind. The question is now asked against the document as the person FOUND
+    it (`matBottomRef`). His own acceptance test is the guard: a 20 px sweep across the full
+    width, asserting stored left equals click x minus editor left at every step, with the same
+    exactness demanded vertically and the result read back out of storage.
+  - **AND A PRESS INSIDE A BLOCK IS CONTENT (B350004).** His original complaint — *"it keeps
+    wanting to just go to wherever there is text on the left"* — was still live and was NOT the
+    same bug: the mat's "is this blank space?" test measures the last FLOW child, and an anchored
+    block is out of flow, so every block below the text was, to the mat, empty page. It swallowed
+    the press and sent the caret to the end of the document. Verified as a REAL failure with a
+    real mouse in a foreground tab before it was touched, and re-verified after.
 - **HOW BIG THE WRITING IS (B342994, `lib/notesZoom.js`).** Ctrl+wheel and Ctrl+=/−/0 scale the
   **document**, never the app; the browser's own zoom is suppressed for those gestures so the two
   cannot fight; the level is per-scope, persisted, and does not sync (a comfortable size belongs to
@@ -166,6 +189,27 @@ written out in the header of `lib/notesStore.js`; read it there rather than re-d
     the owner's own account — a body whose tree node had gone, swept off the device on every load
     and re-downloaded on every sync, reachable from nowhere. `sweepOrphans` now **refuses to
     destroy a body that still has words in it** and reports what it kept.
+    - **⛔ A FINDING IS ONLY REPORTED IF SOMEBODY CAN ACT ON IT (B350003).** The bar told him
+      *"One note appears in 2 different projects… “Coordination” in Grand Port · “Page 1” in a
+      project that no longer exists (in the bin)"* — one copy already binned, the other's project
+      deleted a week earlier. **Nothing to do, and Dismiss the only exit**, which is how you teach
+      somebody to dismiss the one that will one day be real. So `scanNoteDuplicates` no longer
+      walks the bin and drops copies in projects that are gone; the PURE detector
+      (`notesDuplicates.js`) is unchanged and still compares whatever it is handed, because a
+      deliberate forensic pass over everything is a different question from a banner. A finding
+      can also now be ENDED from the bar — keep this one, or keep both and stop being told
+      (`duplicateKey`, remembered per account). ⛔ An unknown project list passes `null`, never
+      `[]`: "the lookup failed" and "there are no projects" are opposite facts, and letting the
+      first wear the second's clothes would silently suppress a real finding.
+  - **THE BIN YOU CAN JUDGE (B350002, `collectBinFacts` in `lib/notesStore.js`).** Twenty-one
+    entries, sixteen of them called "Untitled page", showing a name and a countdown and nothing
+    else — so the only way to find out what one WAS, was to restore it into the live tree and
+    delete it again. Each row now carries the WORDS (borrowed from the first page in the cascade
+    that has any), the project it came from, when it went and how big it is; **"Read it" opens it
+    read-only without restoring it**; and one action clears the empty ones. ⛔ Four project
+    states, not two: a live project · "Not in a project" · one that no longer exists · and an
+    entry binned before the bin recorded where a page came from, which says so rather than
+    claiming the note belonged nowhere.
   - `lib/notesProjectFiling.js` + `lib/notesProjectLink.js` + `lib/notesKeys.js` — "what is this
     project holding?", answerable from a route where Notes is **not mounted**, because the thing
     that deletes a project is the shared header breadcrumb. The account is passed in EXPLICITLY

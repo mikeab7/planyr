@@ -10,44 +10,92 @@
  * zoom ladder, what each gesture means, and the scroll arithmetic that keeps the same writing
  * under the eye across a step.
  */
+import { readFileSync } from "node:fs";
+
 import { describe, expect, it } from "vitest";
 
-import { clampAnchor, ANCHOR_EDGE_PAD, ANCHOR_MIN_WIDTH } from "../src/workspaces/notes/lib/notesAnchorNode.js";
+import {
+  anchorExtent, placeAnchor, ANCHOR_EDGE_PAD, ANCHOR_MIN_WIDTH, ANCHOR_WIDTH,
+} from "../src/workspaces/notes/lib/notesAnchorNode.js";
 import {
   normalizeZoom, scrollTopAfterZoom, stepZoom, zoomForKey, zoomForWheel, zoomLabel, zoomKey,
   ZOOM_DEFAULT, ZOOM_MAX, ZOOM_MIN, ZOOM_STEPS,
 } from "../src/workspaces/notes/lib/notesZoom.js";
 
-describe("clampAnchor — a block is never dropped half off the page", () => {
-  const box = { width: 800, height: 600 };
+/* ⛔ THE NUMBERS IN THIS BLOCK ARE HIS, MEASURED ON HIS OWN WINDOW. The editor box was
+ * x=281 w=787 (right edge 1068) and 240 tall. A click at x=1010 produced a block at x=884,
+ * and so did a click at x=900 — everything right of ~888 was slid flush to the margin, up to
+ * 126 px, and the slid value was written to storage. These cases are that report. */
+describe("placeAnchor — a block starts where you clicked, and is NARROWED to fit", () => {
+  const box = { width: 787 };
 
-  it("leaves a point that is already inside exactly where it was", () => {
-    expect(clampAnchor({ x: 420, y: 245, ...box })).toEqual({ x: 420, y: 245 });
+  it("leaves a click with room to spare exactly where it was, at the full width", () => {
+    expect(placeAnchor({ x: 69, y: 99, ...box })).toEqual({ x: 69, y: 99, w: ANCHOR_WIDTH });
   });
 
-  it("pulls a point beyond the right or bottom edge back inside", () => {
-    const c = clampAnchor({ x: 5000, y: 5000, ...box, blockWidth: 180, blockHeight: 24 });
-    expect(c.x).toBe(800 - 180 - ANCHOR_EDGE_PAD);
-    expect(c.y).toBe(600 - 24 - ANCHOR_EDGE_PAD);
+  it("⛔ HIS CASE: a click near the right edge KEEPS ITS LEFT EDGE and gives up width instead", () => {
+    // x=1010 client → 729 inside the editor. The old rule answered 603 (a 126 px slide).
+    const r = placeAnchor({ x: 729, y: 200, ...box });
+    expect(r.x).toBe(729);
+    expect(r.w).toBe(787 - 729 - ANCHOR_EDGE_PAD);
+    expect(r.x + r.w).toBeLessThanOrEqual(787 - ANCHOR_EDGE_PAD);   // still inside the margin
   });
 
-  it("never lets it sit at a negative offset", () => {
-    expect(clampAnchor({ x: -400, y: -9, ...box })).toEqual({ x: ANCHOR_EDGE_PAD, y: ANCHOR_EDGE_PAD });
+  it("…and so does a click hard against the edge, at the narrowest the block goes", () => {
+    const r = placeAnchor({ x: 782, y: 0, ...box });
+    expect(r.x).toBe(782);                                          // his left edge, kept
+    expect(r.w).toBe(ANCHOR_MIN_WIDTH);
   });
 
-  it("survives a box smaller than the block itself rather than producing nonsense", () => {
-    const c = clampAnchor({ x: 50, y: 50, width: 40, height: 10 });
-    expect(c.x).toBe(ANCHOR_EDGE_PAD);
-    expect(c.y).toBe(ANCHOR_EDGE_PAD);
+  it("⛔ AND TWO DIFFERENT CLICKS NEVER LAND IN THE SAME PLACE — the tell that gave it away", () => {
+    // x=1010 and x=900 both produced 884 before. 729 and 619 inside the editor.
+    expect(placeAnchor({ x: 729, y: 0, ...box }).x).not.toBe(placeAnchor({ x: 619, y: 0, ...box }).x);
   });
 
-  it("rounds to whole pixels — a stored position is a number somebody may read", () => {
-    expect(clampAnchor({ x: 100.4, y: 200.6, ...box })).toEqual({ x: 100, y: 201 });
+  it("⛔ HIS OWN ACCEPTANCE TEST: a 20px sweep across the FULL width, no clamping band anywhere", () => {
+    const slid = [];
+    for (let x = ANCHOR_EDGE_PAD; x <= 787; x += 20) {
+      const r = placeAnchor({ x, y: 0, ...box });
+      if (r.x !== x) slid.push({ clicked: x, got: r.x });
+    }
+    expect(slid).toEqual([]);
   });
 
-  it("refuses nonsense input instead of writing NaN into the document", () => {
-    expect(clampAnchor({ x: undefined, y: "abc", ...box })).toEqual({ x: ANCHOR_EDGE_PAD, y: ANCHOR_EDGE_PAD });
-    expect(ANCHOR_MIN_WIDTH).toBeGreaterThan(0);
+  it("⛔ THERE IS NO VERTICAL CLAMP AT ALL — y comes back untouched, however far down", () => {
+    // His other measurement: a click at y=470 landed at 461, a silent 9 px nudge upward.
+    expect(placeAnchor({ x: 10, y: 470, ...box }).y).toBe(470);
+    expect(placeAnchor({ x: 10, y: 99999, ...box }).y).toBe(99999);
+  });
+
+  it("never starts left of the margin", () => {
+    expect(placeAnchor({ x: -400, y: 10, ...box }).x).toBe(ANCHOR_EDGE_PAD);
+  });
+
+  it("refuses nonsense instead of writing NaN into the document", () => {
+    const r = placeAnchor({ x: undefined, y: "abc", ...box });
+    expect(r).toEqual({ x: ANCHOR_EDGE_PAD, y: 0, w: ANCHOR_WIDTH });
+  });
+});
+
+describe("anchorExtent — the page grows to hold the blocks", () => {
+  it("reports how far down the lowest block reaches, plus breathing room", () => {
+    expect(anchorExtent([{ y: 100, height: 24 }], { pad: 40 })).toBe(164);
+    expect(anchorExtent([{ y: 100, height: 24 }, { y: 380, height: 156 }], { pad: 40 })).toBe(576);
+  });
+
+  it("⛔ IT IS THE BLOCK'S REAL HEIGHT THAT COUNTS — which is why the caller measures the DOM", () => {
+    // The crawl he measured: a block at y=380 that grew to 156 px tall. Before this the page
+    // did not know it was there at all, so the browser scrolled to reach the caret instead.
+    expect(anchorExtent([{ y: 380, height: 24 }])).toBeLessThan(anchorExtent([{ y: 380, height: 156 }]));
+  });
+
+  it("asks for nothing when there are no blocks — an ordinary note is unaffected", () => {
+    expect(anchorExtent([])).toBe(0);
+    expect(anchorExtent(null)).toBe(0);
+  });
+
+  it("survives a block with no measured height rather than producing NaN", () => {
+    expect(Number.isFinite(anchorExtent([{ y: 10 }]))).toBe(true);
   });
 });
 
@@ -149,5 +197,42 @@ describe("VIEWPORT-STABLE — the same writing stays under the eye", () => {
 
   it("⛔ RETURNS NULL WHEN NOTHING CHANGED — a no-op must not touch the scroller at all", () => {
     expect(scrollTopAfterZoom({ anchorOffset: 1000, viewportOffset: 0, from: 1.25, to: 1.25 })).toBeNull();
+  });
+});
+
+/* ⛔ PDF-PARITY, AS A SOURCE PROPERTY — because the two stylesheets are a deliberate mirror and
+ * nothing else can catch them drifting. A block is now NARROWED to fit rather than slid sideways
+ * (NEW-1), which means its width is doing work it never used to: if paper and screen disagree
+ * about what that width MEANS — content box or border box, and how much of it the left padding
+ * takes — the same block wraps its words in two different places, and a note that reads fine on
+ * screen prints with a word on its own line. */
+describe("the screen and the paper measure an anchored block the same way", () => {
+  const read = (p) => readFileSync(new URL(p, import.meta.url), "utf8");
+  const rule = (css, sel) => {
+    const at = css.indexOf(`${sel} {`);
+    return at < 0 ? "" : css.slice(at, css.indexOf("}", at));
+  };
+  const screen = rule(read("../src/workspaces/notes/components/NoteEditor.jsx"), ".planyr-note .ProseMirror .planyr-anchor");
+  const paper = rule(read("../src/workspaces/notes/lib/notesPrint.js"), ".note-body .planyr-anchor");
+
+  it("both exist — a missing rule would silently drop the position on one of them", () => {
+    expect(screen).toContain("position: absolute");
+    expect(paper).toContain("position: absolute");
+  });
+
+  it("⛔ BOTH COUNT THE BOX THE SAME WAY", () => {
+    expect(screen).toContain("box-sizing: border-box");
+    expect(paper).toContain("box-sizing: border-box");
+  });
+
+  it("⛔ AND BOTH SPEND THE SAME PADDING, so the words break in the same places", () => {
+    const pad = (css) => (css.match(/padding:\s*([^;]+);/) || [])[1]?.trim();
+    expect(pad(screen)).toBe("3px 6px 3px 16px");
+    expect(pad(paper)).toBe(pad(screen));
+  });
+
+  it("⛔ AND NEITHER PUTS A WIDTH FLOOR UNDER IT — that floor defeated the whole of NEW-1", () => {
+    expect(screen).not.toContain("min-width");
+    expect(paper).not.toContain("min-width");
   });
 });

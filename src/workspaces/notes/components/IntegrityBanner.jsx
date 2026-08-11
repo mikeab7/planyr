@@ -31,7 +31,7 @@ const RADIUS = { control: 8, pill: 999 };
  *  ⛔ THE RECOVERY IS NOT A BUTTON, IT IS DONE. Auto-adoption runs on load, so the note is
  *  reachable before anyone reads this. A "Put it back" the user had to find was one more
  *  chance for a real note to sit lost while a banner talked about it. */
-export default function IntegrityBanner({ duplicates, unreachable, recovered, projectNames, projects, onOpen, onFile, onBin, onDismiss }) {
+export default function IntegrityBanner({ duplicates, unreachable, recovered, projectNames, projects, onOpen, onFile, onBin, onKeepOne, onKeepBoth, onDismiss }) {
   const dupLine = duplicateNotice(duplicates);
   const lost = (recovered || []).length;
   const stillLost = (unreachable || []).length;
@@ -62,6 +62,24 @@ export default function IntegrityBanner({ duplicates, unreachable, recovered, pr
             {`${dupLine} ${first ? first.pages.map((p) => `“${p.title}” in ${nameOf(p.projectId)}` + (p.where === "bin" ? " (in the bin)" : "")).join(" · ") : ""}`}
           </span>
           {first ? <button type="button" data-testid="notes-integrity-open" onClick={() => onOpen(first)} style={pill()}>Show me</button> : null}
+        </div>
+      ) : null}
+      {/* ⛔ THE RESOLUTION IS HERE, NOT SOMEWHERE ELSE (NEW-4). A finding whose only exit is
+          Dismiss is a finding that teaches you to dismiss findings. Every copy can be kept on
+          its own — the others go to the BIN, so the choice is undoable — or both can be kept
+          and the pair remembered so it stops asking. */}
+      {first ? (
+        <div data-testid="notes-dupe-actions" style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          {first.pages.map((p) => (
+            <button
+              key={p.pageId}
+              type="button"
+              data-testid={`notes-dupe-keep-${p.pageId}`}
+              onClick={() => onKeepOne(first, p.pageId)}
+              style={pill()}
+            >Keep only the one in {p.projectId == null ? NO_PROJECT_LABEL : (projectNames.get(p.projectId) || "that project")}</button>
+          ))}
+          <button type="button" data-testid="notes-dupe-keep-both" onClick={() => onKeepBoth(first)} style={pill()}>Keep both, stop telling me</button>
         </div>
       ) : null}
 

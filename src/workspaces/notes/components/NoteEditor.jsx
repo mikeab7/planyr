@@ -35,7 +35,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { EditorContent, useEditor } from "@tiptap/react";
 import { noteExtensions, EMPTY_DOC } from "../lib/notesExtensions.js";
-import { clampAnchor } from "../lib/notesAnchorNode.js";
+import { anchorExtent, placeAnchor } from "../lib/notesAnchorNode.js";
 import {
   normalizeZoom, scrollTopAfterZoom, zoomForKey, zoomForWheel, zoomLabel, ZOOM_DEFAULT,
 } from "../lib/notesZoom.js";
@@ -105,7 +105,12 @@ const EDITOR_CSS = `
    the sibling-margin rule above would otherwise ADD to the top offset of an absolutely
    positioned child. */
 .planyr-note .ProseMirror { position: relative; }
-.planyr-note .ProseMirror .planyr-anchor { position: absolute; margin: 0 !important; min-width: 120px; padding: 3px 6px 3px 16px; border: 1px dashed transparent; border-radius: 5px; }
+/* ⛔ NO min-width FLOOR HERE. There was one — 120px — and it silently defeated the whole of
+   NEW-1: placeAnchor narrows a block so its LEFT EDGE can be kept, and a stylesheet floor under
+   the narrowed width just pushed it back out over the right margin. The width is written
+   explicitly by renderHTML AND by the node view, so nothing here needs a floor; the only floor
+   is ANCHOR_MIN_WIDTH, in the one file that decides placement. */
+.planyr-note .ProseMirror .planyr-anchor { position: absolute; margin: 0 !important; box-sizing: border-box; padding: 3px 6px 3px 16px; border: 1px dashed transparent; border-radius: 5px; }
 .planyr-note .ProseMirror .planyr-anchor:hover, .planyr-note .ProseMirror .planyr-anchor:focus-within { border-color: var(--border-strong); }
 .planyr-note .ProseMirror .planyr-anchor-grip { position: absolute; left: 3px; top: 5px; width: 9px; height: 14px; cursor: grab; border-radius: 2px; opacity: 0; background: repeating-linear-gradient(to bottom, var(--text-tertiary) 0 2px, transparent 2px 4px); }
 .planyr-note .ProseMirror .planyr-anchor:hover .planyr-anchor-grip, .planyr-note .ProseMirror .planyr-anchor:focus-within .planyr-anchor-grip { opacity: 1; }
@@ -455,7 +460,7 @@ function DocMenu({ at, onPlainPaste, onClose }) {
 export default function NoteEditor({
   pageId, title, onTitleChange, onStatus, onExportMarkdown, onPrintNotice, onSaved,
   scopeLabel, status, updatedAt, searchTerm = "", onClearSearch, notebookPageIds, trail = [],
-  projectLabel = null,
+  projectLabel = null, readOnly = false, readOnlyNote = "",
 }) {
   /* Initial content read ONCE, here. Not in an effect — see fix (2) in the header. */
   const [initialDoc] = useState(() => readPage(pageId) || EMPTY_DOC);
@@ -543,6 +548,10 @@ export default function NoteEditor({
     // as the caret moves — including selection-only transactions.
     shouldRerenderOnTransaction: true,
     immediatelyRender: false,
+    /* ⛔ READ-ONLY IS A REAL MODE, NOT A DISABLED ONE (NEW-3). Reading a binned note must not
+     * be able to change it — `editable: false` means no transaction is ever generated, so the
+     * save path is not merely skipped, it is unreachable. */
+    editable: !readOnly,
     /* The accessible name carries the KEYBOARD TRAP ESCAPE (B1392). Tab now indents inside
      * the note instead of jumping to the browser's toolbar, so the way OUT has to be
      * announced rather than known: Escape releases the next Tab. */
@@ -842,15 +851,31 @@ export default function NoteEditor({
   const focusFromMat = useCallback((e) => {
     if (!editor || editor.isDestroyed) return;
     // A fresh press (not the second half of a double-click) starts the tally over.
-    if (e.detail <= 1) matInsertsRef.current = 0;
+    if (e.detail <= 1) { matInsertsRef.current = 0; matBottomRef.current = null; }
     const el = e.target;
     if (!(el instanceof Element)) return;
     if (el.closest("input, textarea, select, button, a")) return;
+
+    /* ⛔ A PRESS INSIDE AN ANCHORED BLOCK IS A PRESS ON CONTENT (NEW-5). This is the owner's
+     * ORIGINAL complaint — *"it keeps wanting to just go to wherever there is text on the
+     * left"* — and it was still live: clicking into an existing block and typing put the words
+     * at the END OF THE DOCUMENT, and each click added a paragraph there too. Reproduced with a
+     * real mouse in a foreground tab, so it is not the instrument.
+     *
+     * THE CAUSE IS THAT THE MAT COULD NOT SEE THE BLOCKS. Its "is this blank space?" test is
+     * `clientY > the bottom of the last FLOW child` — and an anchored block is out of flow, so
+     * it contributes nothing to that bottom edge. Every block sitting below the flow text was
+     * therefore, to the mat, empty page: it swallowed the press, cancelled it, and sent the
+     * caret to the end. The block is content; the browser already places the caret in it
+     * correctly, and the only thing needed is to stop taking the press away from it. */
+    if (el.closest(".planyr-anchor")) return;
 
     const dom = editor.view.dom;
     const box = dom.getBoundingClientRect();
     const last = dom.lastElementChild;
     const contentBottom = last ? last.getBoundingClientRect().bottom : box.top;
+    // The edge as it stood before this gesture touched anything — see `matBottomRef`.
+    if (e.detail <= 1) matBottomRef.current = contentBottom;
 
     if (e.clientY <= contentBottom + BLANK_SLACK) {
       /* At or beside real content. Inside the document the browser is already right — and
@@ -903,6 +928,15 @@ export default function NoteEditor({
   /* How many empty lines the mat's own press handler has just added during THIS gesture —
      see the note where it is incremented. Reset on every fresh press. */
   const matInsertsRef = useRef(0);
+  /* ⛔ WHERE THE WRITING ENDED WHEN THIS GESTURE BEGAN — and it has to be remembered, because
+     the gesture MOVES that edge underneath itself. The first press of a double-click below the
+     text adds a line (that is what clicking under text means everywhere else), which pushes the
+     content's bottom edge down by a line; the double-click then asks "was this blank space?"
+     against the edge its own first press had just moved, decided the click was on content, and
+     declined. Measured just under the last line: no block at all, and the line the press added
+     left behind — round 2's litter arriving through the one door that was still open. So the
+     question is asked against the document as the person found it, not as the gesture left it. */
+  const matBottomRef = useRef(null);
   const [zoom, setZoom] = useState(() => normalizeZoom(readNotesZoom()));
   const scrollerRef = useRef(null);
   const zoomRef = useRef(zoom);
@@ -966,6 +1000,42 @@ export default function NoteEditor({
     return () => window.removeEventListener("keydown", onKey, { capture: true });
   }, [applyZoom]);
 
+  /* ⛔ THE PAGE GROWS TO HOLD THE BLOCKS — WHICH IS WHY THEY STOP MOVING (NEW-2, round 2).
+   *
+   * MEASURED ON HIS MACHINE: a block anchored at y=380 was at y=380 after one word and at
+   * **y=343 once the text had wrapped to 156 px tall**. It moved 37 px UP, under the caret,
+   * mid-sentence — and was fine again after a reload, which is exactly the "random" feeling
+   * he described. The stored offset was correct the whole time.
+   *
+   * THE CAUSE IS NOT A LAYOUT CLAMP, IT IS THE SCROLLER. An absolutely positioned block adds
+   * NOTHING to its container's height, so a block low on the page — or one that grows while
+   * being typed into — hangs outside the scrollable area entirely. The browser then does the
+   * only thing it can to keep the caret visible: it scrolls. Everything on screen slides up,
+   * including the block, and no amount of "the position is an attribute" prevents it.
+   *
+   * So the editor is told how tall it actually needs to be. Heights come from the DOM because
+   * a block's height IS its text and only the browser knows that; the arithmetic is pure
+   * (`anchorExtent`). A `min-height` cannot feed back into the anchors' own heights — they are
+   * out of flow and sized by their width — so there is no loop to guard against. */
+  useLayoutEffect(() => {
+    if (!editor || editor.isDestroyed) return undefined;
+    const dom = editor.view.dom;
+    const measure = () => {
+      const blocks = [...dom.querySelectorAll(".planyr-anchor")].map((el) => ({
+        y: parseFloat(el.style.top) || 0,
+        height: el.offsetHeight,
+      }));
+      const need = anchorExtent(blocks);
+      dom.style.minHeight = need ? `max(46vh, ${need}px)` : "";
+    };
+    measure();
+    /* Re-measured as the text inside a block reflows, which is the half that matters: the
+     * block gets taller as you type and the page has to keep up in the same frame. */
+    const ro = typeof ResizeObserver === "function" ? new ResizeObserver(measure) : null;
+    if (ro) for (const el of dom.querySelectorAll(".planyr-anchor")) ro.observe(el);
+    return () => ro?.disconnect();
+  }, [editor, docTick]);
+
   /* ⛔ DOUBLE-CLICK IN BLANK SPACE STARTS A BLOCK **WHERE YOU CLICKED** (NEW-2).
    *
    * A single click keeps B1393 ×3's rule exactly — nearest real text position, nothing else,
@@ -994,18 +1064,24 @@ export default function NoteEditor({
     const dom = editor.view.dom;
     const box = dom.getBoundingClientRect();
     const last = dom.lastElementChild;
-    const contentBottom = last ? last.getBoundingClientRect().bottom : box.top;
-    // Only BLANK space. A double-click on or beside text still selects a word.
+    const live = last ? last.getBoundingClientRect().bottom : box.top;
+    /* Only BLANK space. A double-click on or beside text still selects a word. ⛔ Asked against
+     * the edge THIS GESTURE FOUND, never the one its own first press left behind — see
+     * `matBottomRef` for the measurement, which was a lost block and a stray blank line. */
+    const contentBottom = Number.isFinite(matBottomRef.current) ? Math.min(matBottomRef.current, live) : live;
     if (e.clientY <= contentBottom + BLANK_SLACK && (el.closest(".ProseMirror") || el.closest("[contenteditable]"))) return;
 
     /* The live scale, measured rather than assumed: `offsetWidth` is unzoomed CSS pixels and
      * the client rect is zoomed ones, so their ratio IS the zoom, whatever set it. */
     const scale = box.width / (dom.offsetWidth || 1) || 1;
-    const point = clampAnchor({
+    /* ⛔ NARROWED TO FIT, NEVER SLID SIDEWAYS, AND NEVER NUDGED UP. See `placeAnchor` for the
+     * measurements that killed the old clamp: a click at x=1010 and a click at x=900 both
+     * produced a block at x=884, and the clamped value was written to storage. `height` is no
+     * longer passed at all — there is no vertical clamp; the page grows instead. */
+    const point = placeAnchor({
       x: (e.clientX - box.left) / scale,
       y: (e.clientY - box.top) / scale,
       width: dom.offsetWidth,
-      height: dom.offsetHeight,
     });
     e.preventDefault();
     e.stopPropagation();

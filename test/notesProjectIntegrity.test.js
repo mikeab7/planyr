@@ -229,7 +229,14 @@ describe("findCrossProjectDuplicates", () => {
     expect(found[0].pages.find((p) => p.pageId === "co_page1").where).toBe("bin");
   });
 
-  it("⛔ SEARCHES THE BIN — both real copies were binned before anyone looked at them", () => {
+  /* ⛔ THE PURE DETECTOR IS INDIFFERENT TO WHERE A ROW CAME FROM, AND STAYS THAT WAY. It
+   * compares whatever it is handed, which is what makes a FORENSIC pass over everything —
+   * including the bin, where both copies of the original incident were by the time anyone
+   * looked — possible at all. What changed with NEW-4 is one layer up: `scanNoteDuplicates`
+   * no longer HANDS it the bin or pages in deleted projects, because a banner naming two
+   * copies nobody can act on has no exit but Dismiss. Both halves are deliberate; the choice
+   * of what to scan belongs to the caller, and is tested in `notesBinFacts`. */
+  it("compares rows from the BIN just as readily — the forensic pass both copies needed", () => {
     const found = findCrossProjectDuplicates([
       row("a", GRAND_PORT, COORDINATION, "bin"),
       row("b", COLORADO, COORDINATION, "bin"),

@@ -152,6 +152,7 @@ import { MAX_VERSIONS_PER_PAGE, planRestore, planRetention, shouldSnapshot } fro
 import { safeAttachmentName } from "./notesFileMeta.js";
 import { migrate, searchTitles, pagesInScope, trashEntries, walkPages, SCOPE_ALL, SCOPE_PROJECT } from "./notesModel.js";
 import { normalizeZoom, zoomKey, ZOOM_DEFAULT } from "./notesZoom.js";
+import { IGNORED_DUPES_KEY_BASE } from "./notesKeys.js";
 import { relativeTime } from "./notesTime.js";
 
 /* The key strings live in `notesKeys.js` — a leaf with no dependencies — so the ONE other
@@ -278,6 +279,31 @@ export function writeNotesZoom(z, s = scope) {
   const st = store();
   if (!st) return false;
   try { st.setItem(zoomKey(s), String(normalizeZoom(z))); return true; } catch (_) { return false; /* a preference is not data — the level simply does not persist */ }
+}
+
+/* ---- findings the person has settled (NEW-4) --------------------------------------------
+ *
+ * "Keep both and stop telling me" is a real answer to a duplicate, and it has to survive a
+ * reload or it is not an answer at all. Device-scoped like the zoom level: a judgement about
+ * two notes is not data, and a failure to read or write it simply means the bar asks again. */
+const ignoredKey = (s = scope) => `${IGNORED_DUPES_KEY_BASE}:${s}`;
+
+export function readIgnoredDuplicates(s = scope) {
+  const st = store();
+  if (!st) return [];
+  try {
+    const raw = JSON.parse(st.getItem(ignoredKey(s)) || "[]");
+    return Array.isArray(raw) ? raw.filter((x) => typeof x === "string") : [];
+  } catch (_) { return []; /* a preference is not data — the bar simply asks again */ }
+}
+
+export function ignoreDuplicate(key, s = scope) {
+  const st = store();
+  if (!st || !key) return false;
+  try {
+    st.setItem(ignoredKey(s), JSON.stringify([...new Set([...readIgnoredDuplicates(s), key])]));
+    return true;
+  } catch (_) { return false; /* a preference is not data — the bar simply asks again */ }
 }
 
 /* ---- page bodies ---------------------------------------------------------------------- */
@@ -1460,6 +1486,55 @@ export function toggleNoteTask(pageId, { index, text }, checked) {
  *  exported so the rollup's definition of "open" has exactly one home. */
 export function openTaskCount(pageId) {
   return openTasksInDoc(readPage(pageId)).length;
+}
+
+/* ---- what is actually IN the bin (NEW-3) ------------------------------------------------
+ *
+ * ⛔ THE BIN COULD NOT BE JUDGED. The owner, verbatim: *"figure out the bin thing because
+ * there is, like, a bunch of items in there, but I cannot even see it. Like, if I wanted to
+ * check to see if I should keep it, I cannot."* Twenty-one entries, sixteen of them literally
+ * "Untitled page", showing a title and a countdown and nothing else — so the ONLY way to find
+ * out what one was, was to RESTORE it into his live tree and delete it again. A bin that costs
+ * you a round trip through your own notes to read is a bin nobody empties, which is how it got
+ * to twenty-one.
+ *
+ * This is the half only the storage seam can do: the titles are in the tree, but the WORDS are
+ * in the bodies, and the bodies of binned pages are deliberately still on disk (that is what
+ * makes a restore work). Everything else — the project it came from, when it went, how big it
+ * is — is on the entry already and was simply never shown.
+ */
+export function collectBinFacts(tree, projects = []) {
+  const byId = new Map((projects || []).filter(Boolean).map((p) => [p.id, p.name]));
+  return trashEntries(tree).map((e) => {
+    /* The first page in the entry's cascade with anything in it — for a note that was binned
+     * with subpages, the words that identify it may be one level down. */
+    let text = "";
+    for (const id of e.pageIds || []) {
+      const t = docToText(readPage(id)).replace(/\s+/g, " ").trim();
+      if (t) { text = t; break; }
+    }
+    /* ⛔ FOUR STATES, NOT TWO, AND THE FOURTH IS THE ONE THAT WOULD HAVE BEEN A LIE. An entry
+     * binned before the bin recorded where a page came from has NO `projectId` key at all,
+     * which is not the same fact as `null` — and `null` reads on screen as the definite
+     * statement "Not in a project". Saying that about a note that was in fact filed somewhere
+     * is precisely the conflation NEW-1 exists to stop, so an absent field says so. */
+    const recorded = Object.prototype.hasOwnProperty.call(e, "projectId");
+    const projectId = recorded ? (e.projectId ?? null) : null;
+    return {
+      ...e,
+      preview: text.slice(0, 160),
+      chars: text.length,
+      empty: text.length === 0,
+      pageId: (e.pageIds || [])[0] || null,
+      projectId,
+      /* "No project" is a real place; a project that has since been deleted is NOT the same
+       * thing and must not be captioned as if it were. */
+      projectLabel: !recorded
+        ? "where it came from was not recorded"
+        : (projectId == null ? "Not in a project" : (byId.get(projectId) || "a project that no longer exists")),
+      projectResolved: recorded && (projectId == null || byId.has(projectId)),
+    };
+  });
 }
 
 /* ---- search --------------------------------------------------------------------------- */
