@@ -113,6 +113,77 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V161952 — B366384–B366386: sharing tells the truth about an already-shared project, and the state is visible `Blocker: auth`
+
+**Why this is here and what is NOT pending.** The DATABASE half is done and was proven against the real
+production rows this session, impersonating the owner and writing nothing (all three calls returned
+`changed:0`). That is stronger than a click-through and is **not** awaiting anything:
+
+| scenario (real data) | answer | was |
+|---|---|---|
+| re-share **8 South** (`smqiljx5fngg`, v587) to the team it ALREADY has | `outcome:"already", matched:1, mismatched:0` | returned `0` → *"This project isn't in the cloud yet"* |
+| a group that does not exist | `outcome:"not-found", matched:0` | indistinguishable from the above |
+| **Goose Creek** (4 plans) private→private, corrected group key | `outcome:"already", matched:4, plans:4` | — (proves the key reaches every plan) |
+
+Also verified here (no browser): `db/team_share_state.sql` **applied to production 2026-08-11**, both RPCs
+confirmed keyed on `coalesce(data->>'groupId', id)` with `coalesce(group_id, id)` absent from both bodies ·
+**visibility unchanged by the migration — still exactly 2 shared projects, 8 South + RICHEY** · lint 0 errors ·
+the full unit suite green incl. the new **shareMirror** (18) · build green.
+
+**What is pending, and why it cannot be driven here.** The sandbox proxy CORS-blocks Supabase sign-in, so the
+signed-in UI cannot be reached at all. Every step below needs a real signed-in session.
+
+**Steps still to run, signed in as the owner:**
+1. Open the map list. **8 South and RICHEY must each read `Shared with HIP Houston`** on the row's second
+   line (accent, beside the status and acreage) with the shared glyph at the left. **The other 32 must not.**
+   ⛔ This is the one that proves B366385 — before the fix all three indicators were blank.
+2. Right-click **8 South** → the share section must read **`Shared with HIP Houston`**, the HIP Houston row
+   must show **`✓ Unshare`**, and **Make private** must be offered. Right-click any unshared project → it must
+   read **`Private — only you can see this`** and its team row must offer **`Share`**.
+3. Click the already-shared team row's… no — first just **re-share 8 South to HIP Houston** (click the team it
+   already has is an UNSHARE, so instead reopen and share it again after step 4). **Confirm no
+   "isn't in the cloud yet" message appears at any point.**
+4. Unshare **8 South**, confirm the row's `Shared with…` line disappears, then share it back to HIP Houston
+   and confirm the line returns. Reload and confirm it is still there — that is the mirror surviving a save.
+5. **The multi-plan check (B366386).** Share **Silvestri** (5 plans) → then confirm from the database that
+   **all 5 rows carry the team**:
+   `select id, name, team_id from sites where coalesce(data->>'groupId', id) = 'smrp1wrgg6u5' and deleted_at is null;`
+   Then unshare it and confirm **all 5 clear**. Repeat for **Goose Creek** (4 plans) if you want the second
+   sample. ⚠ Note this is expected to PASS on today's data — the corrected key selects the same rows as the
+   old one for every one of his real groups (measured); the fix is preventive. What the check is really
+   guarding is that the share reaches all 5 at once and the unshare clears all 5 at once.
+6. Open the **Team** tab → the shared-projects count for HIP Houston must read **2**, not 0.
+7. Before/after list-row appearance for the record: BEFORE = status + acreage only, with a small accent
+   figures glyph whose meaning was hover-only. AFTER = the same line plus `· Shared with HIP Houston`.
+
+### V161953 — B366387–B366389: the project switcher is a project LIST again, and its icons match `Blocker:` none — owner judgement only
+
+**⚠ MOST OF THIS IS ALREADY PASSED HERE, in a real browser, per ATTEMPT-BEFORE-YOU-PARK.** The dropdown is
+logged-out reachable, so it was driven rather than parked. `e2e/project-rename.spec.js` — **8/8 passed**
+against Chromium (`PW_CHROME=/opt/pw-browsers/chromium-1234/chrome-linux64/chrome`, the repo's pinned
+Playwright wants revision 1228 which is not in this image):
+
+- ✅ **No "All projects (…)" row** in the open dropdown (`toHaveCount(0)`), and **no `project-rename-current`**.
+- ✅ **The kebab is clicked with NO hover first** — the case that was impossible before — and rename through it
+  still writes **every plan in the group** and survives a reload.
+- ✅ Captured the open dropdown before and after. **BEFORE:** search field → **`▦ All projects (Map)` · current**
+  → the project row (no kebab, timestamp only) → `+ New project`. **AFTER:** search field → the project row
+  carrying **`current` AND the ⋮ kebab, with nothing hovered** → `+ New project`. One row shorter, and it now
+  reads as a list of projects with a New-project action, which is what the owner asked for.
+- ✅ Also green here: lint 0 errors · the full unit suite incl. **projectSwitcherChrome** (21) · build green ·
+  both re-pointed ui-audit harnesses (**verify-new1to3** inverted, **verify-b439-b440-project-manage**
+  strengthened) updated in the same commit as the change they describe.
+
+**What is genuinely left, and neither is something a harness can answer:**
+1. **The owner's own look at the two icons.** *"They just look kinda like shit"* is an aesthetic verdict, and
+   the fix (matched monochrome stroke SVGs inheriting their row's colour, Delete's in the danger red) has to
+   be judged by him on his own display. If the new pencil/wastebasket still read wrong, say so and they get
+   redrawn — this is not a "confirm it works" step.
+2. **A real touch device.** The kebab being reachable without hover is asserted in a browser, but *tapping* it
+   on a phone or tablet is the case the whole precondition exists for, and only real touch hardware proves it.
+   ⛔ If this fails, B366388's removal of the crumb rename is unsafe and must be reverted with it.
+
+
 ### V124976 — B326416–B326419: new projects are shared with the team by default, the per-plan lock holds, and NOTHING pre-existing changed `Blocker: auth`
 
 **Why this is here and what is NOT pending.** The SECURITY property — an existing project can never become

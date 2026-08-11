@@ -8,7 +8,8 @@
  * Site records are persisted as the canonical Site Model (see lib/siteModel.js):
  * loadSite migrates on read, saveSite normalizes on write.
  */
-import { createSiteModel, migrate, mergeSiteContent, contentCount, isBuilding, toMs, countJunkEntries } from "./siteModel.js";
+import { createSiteModel, migrate, mergeSiteContent, contentCount, isBuilding, toMs, countJunkEntries,
+  shareMirrorOf, withShareMirror } from "./siteModel.js";
 import { cloudUpsert, cloudDelete, cloudHardDelete, cloudRestore, cloudDeletedRows, cloudList, clearSiteVersions, keepaliveCloudPush, fetchSiteForReconcile } from "./cloudSync.js";
 import { reconcileGroupNames, resolveNameFor, groupKeyOf, maxStampOf } from "./projectName.js";
 import { idbGet, idbPut, idbAvailable, idbDeleteByPrefix } from "./localDb.js";
@@ -164,7 +165,16 @@ export function mergePulledSites(existing, cloudModels, selfUid, tombstones, opt
     // site_elements tombstone rows now — a stale header tombstone must never drop an element the
     // rows have restored). A full pre-cutover row merges exactly as before.
     const forMerge = slim ? { ...n, deletedIds: [] } : n;
-    map[n.id] = local ? mergeSiteContent(local, forMerge) : n;
+    /* NEW-2 — the SHARING POINTER IS RE-STAMPED FROM THE CLOUD COLUMN AFTER THE MERGE, because the
+     * merge is exactly where it was being lost. `mergeSiteContent` resolves scalars by taking the
+     * copy with the newer `updatedAt`, and B458's immediate mirror write makes the LOCAL copy newer
+     * on any project that has been edited since its last push — so a stale local `teamId: null`
+     * outvoted `sites.team_id` on every pull, and the share icon, the share menu's checked state and
+     * TeamPanel's shared-projects count all went blank together. The column is the authority
+     * (siteModel.js → SHARE_MIRROR_FIELDS), so it is copied, never voted on. A pre-migration row
+     * reports no mirror and is left exactly as it was. */
+    const merged = local ? mergeSiteContent(local, forMerge) : n;
+    map[n.id] = withShareMirror(merged, shareMirrorOf(m));
   }
   // TEAM: only re-push rows THIS user owns. A teammate's shared row (ownerId set to someone else)
   // is read-through only — re-pushing it from your device would churn versions / risk a false
@@ -1197,6 +1207,25 @@ export function saveSite(partial, { skipHistory = false } = {}) {
    * stamp in the group, so it wins and applies. Anything without a newer stamp is corrected. */
   const authority = resolveNameFor(model, Object.values(sites).filter((s) => s && s.id !== model.id && groupKeyOf(s) === groupKeyOf(model)));
   if (authority) model = { ...model, ...authority };
+  /* NEW-2 — A CONTENT SAVE MAY NEVER MOVE THE SHARING POINTER, and this is the local half of the
+   * rule `siteRowFor` already enforces on the wire (B714). Same reasoning, same failure: the planner
+   * holds a model loaded BEFORE a share happened, so its `partial` carries `teamId: null` EXPLICITLY
+   * — and an explicit key wins a spread, so an ordinary autosave (or a keepalive flush, or a late
+   * debounced write) blanked the mirror the pull had just stamped, putting the indicator back to
+   * private seconds after it appeared. So for a record that ALREADY EXISTS the share fields come
+   * from the store, never from the caller.
+   *
+   * A BRAND-NEW record is the deliberate exception, and it is the one legitimate local writer: a new
+   * plan is born carrying its team (SitePlannerApp's `defaultShareTeam` / `resolveNewPlanTeam`,
+   * B326416), mirroring the INSERT path the Postgres guard leaves open on purpose. Nothing else may
+   * set it: the explicit share path writes the COLUMN and the value comes back on the next pull. */
+  if (existing) {
+    model = withShareMirror(model, {
+      teamId: existing.teamId === undefined ? model.teamId : existing.teamId,
+      ownerId: existing.ownerId === undefined ? model.ownerId : existing.ownerId,
+      shareLocked: existing.shareLocked === undefined ? model.shareLocked : existing.shareLocked,
+    });
+  }
   sites[partial.id] = model;
   lastSeenAt[partial.id] = model.updatedAt;
   return writeSites(sites);

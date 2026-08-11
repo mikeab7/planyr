@@ -51,6 +51,7 @@ import {
 // is one cached call per session (floodManifest.js). Both are tiny — no chunk cost worth naming.
 import { floodTilesEnabled, resolveFloodSource, floodVintageStamp } from "../../../shared/gis/floodTiles.js";
 import { loadFloodManifest } from "../lib/floodManifest.js";
+import { PinIcon } from "./icons.jsx";
 
 // This panel rides on the themed var(--surface-overlay) container, so its text must
 // be theme tokens — the old warm cream-era hexes were dark-on-dark in dark mode (B341).
@@ -925,7 +926,9 @@ export default function LayerPanel({
           <button data-testid="layers-set-location" onClick={onSetLocation}
             style={{ marginTop: 6, width: "100%", padding: "5px 8px", fontSize: 11, fontWeight: 700, fontFamily: "inherit",
               border: "1px solid var(--accent)", borderRadius: 6, background: "var(--accent)", color: "var(--on-accent)", cursor: "pointer" }}>
-            📍 Set this plan's location
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 5, justifyContent: "center" }}>
+              <PinIcon size={11} /> Set this plan's location
+            </span>
           </button>
         )}
       </div>

@@ -1,4 +1,5 @@
 import { formatAge } from "../lib/gisCache.js";
+import { PinIcon } from "./icons.jsx";
 
 /* B763 — the passive jurisdiction badge in the site header. Display-only screening
  * info from the B93 identify, auto-run once per active-parcel activation (never per
@@ -36,7 +37,8 @@ export default function JurisdictionBadge({ badge }) {
         color: "var(--text-primary)", whiteSpace: "nowrap", overflow: "hidden",
       }}
     >
-      <span aria-hidden="true" style={{ flex: "none", fontSize: 11 }}>📍</span>
+      {/* NEW-3 — drawn pin, not the 📍 emoji: it now inherits the pill's own text colour. */}
+      <span style={{ flex: "none", display: "grid", placeItems: "center" }}><PinIcon size={11} /></span>
       <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{badge.text}</span>
       {badge.straddle && <span aria-hidden="true" style={{ flex: "none", color: "var(--warn-text)", fontWeight: 700 }}>⚑</span>}
     </span>
