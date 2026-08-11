@@ -52,6 +52,7 @@ const JSX_SURFACES = [
 const ALL_NOTES_FILES = [
   "Notes.jsx", "components/NotesTree.jsx", "components/NoteEditor.jsx", "components/NoteToolbar.jsx",
   "components/NoteSlashMenu.jsx", "components/NoteOutline.jsx", "components/NoteHistory.jsx", "components/QuickOpen.jsx",
+  "components/IntegrityBanner.jsx",
   "lib/notesModel.js", "lib/notesStore.js", "lib/notesCloud.js", "lib/notesMarkdown.js", "lib/notesExtensions.js",
   "lib/notesTime.js", "lib/notesPrint.js", "lib/notesImageDb.js", "lib/notesImageIntake.js",
   "lib/notesImageNode.js", "lib/notesSearchHighlight.js", "lib/notesDocHtml.js", "lib/notesTabKey.js",
@@ -63,6 +64,10 @@ const ALL_NOTES_FILES = [
   // NEW-1/NEW-4 — a copy never changes project, and the machine that notices when one did.
   "lib/notesDuplicates.js", "lib/notesScan.js",
   "lib/notesKeys.js", "lib/notesProjectFiling.js", "lib/notesProjectLink.js",
+  // NEW-2/NEW-3 — a block that stays where you put it, and how big the writing is.
+  "lib/notesAnchorNode.js", "lib/notesZoom.js",
+  // An abandoned press leaves nothing behind: the ONE definition of an empty block.
+  "lib/notesAnchorPrune.js",
 ];
 const SKETCH_FILES = ALL_NOTES_FILES.filter((f) => f.includes("Sketch"));
 
@@ -529,7 +534,13 @@ describe("LOUD-FAILURE — storage is one seam and it never fails silently", () 
     // A catch whose body has no fail() / broadcast() / return is the silent path.
     for (const m of store.matchAll(/catch\s*\([^)]*\)\s*\{([^}]*)\}/g)) {
       const body = m[1].trim();
-      const benign = /a bad listener must not mute the rest|Safari private mode/.test(m[0]) || /return\s+(null|\[\]|false|0)/.test(body);
+      /* ⛔ A CATCH IS BENIGN ONLY WHEN IT SAYS WHY, IN THE CATCH. The list is deliberately a
+         list of NAMED REASONS rather than a shape: "it returns a falsy value" would wave
+         through the next real swallowed failure that happens to return null. "A preference is
+         not data" covers the zoom level (NEW-3) — a refused read means 100%, which is a
+         correct answer, not a hidden one. */
+      const benign = /a bad listener must not mute the rest|Safari private mode|a preference is not data/.test(m[0])
+        || /return\s+(null|\[\]|false|0)/.test(body);
       expect(body.length > 0 && (/fail\(|broadcast\(/.test(body) || benign), `empty or silent catch: ${m[0].slice(0, 90)}`).toBe(true);
     }
   });
@@ -762,11 +773,27 @@ describe("cloud sync rides the SAME one seam", () => {
       .not.toMatch(/projectId/);
   });
 
-  it("THE DETECTOR SEARCHES THE BIN — both real copies were binned before anyone looked", () => {
+  /* ⛔ SUPERSEDED, AND THE REVERSAL IS THE POINT (NEW-4). This used to pin the opposite
+   * property — "THE DETECTOR SEARCHES THE BIN" — because both copies of the original incident
+   * were binned by the time anyone looked. That is right for a FORENSIC pass and wrong for a
+   * BANNER: what it put on his screen was one copy in the bin and one in a project deleted a
+   * week earlier, with nothing to act on and Dismiss the only exit. A bar that cannot be
+   * satisfied teaches you to dismiss the one that will one day be real. */
+  it("THE BANNER'S SCAN ONLY LOOKS WHERE SOMETHING CAN BE DONE — not the bin, not dead projects", () => {
     const scan = code("lib/notesScan.js");
     const fn = scan.slice(scan.indexOf("export function scanNoteDuplicates"));
-    expect(fn.slice(0, 1400)).toMatch(/trashEntries\(tree\)/);
-    expect(fn.slice(0, 1400)).toMatch(/where: "bin"/);
+    const body = fn.slice(0, fn.indexOf("\n}\n"));
+    expect(body, "the bin is not walked at all").not.toMatch(/trashEntries\(tree\)/);
+    expect(body, "and a copy in a project that no longer exists is filtered out")
+      .toMatch(/known\.has\(r\.projectId\)/);
+    expect(body, "…while a page in NO project is never filtered — nowhere is a real place")
+      .toMatch(/r\.projectId == null \|\|/);
+    expect(body, "and a finding he has settled with 'keep both' stays settled").toMatch(/duplicateKey\(g\)/);
+
+    /* ⛔ AND AN UNKNOWN PROJECT LIST NEVER READS AS "they are all dead". An empty READY list
+     * and a FAILED lookup are opposite facts, and letting the second wear the first's clothes
+     * would silently suppress a real finding. */
+    expect(code("Notes.jsx")).toMatch(/liveProjectIds: projectList\.state === "ready" \? projects\.map\(\(p\) => p\.id\) : null/);
     // …and it is reached LAZILY, like the cloud tier: nothing on the rail's first paint
     // needs it, and this route's byte budget is what the lazy boundary exists to protect.
     expect(code("Notes.jsx")).toMatch(/await import\("\.\/lib\/notesScan\.js"\)/);
@@ -915,14 +942,65 @@ describe("the project a notebook belongs to", () => {
     expect(ed, "Click and Type must not set alignment from where you pressed").not.toMatch(/setTextAlign/);
     expect(ed, "and it must not pad the document to reach the press").not.toMatch(/MAX_CLICK_PARAGRAPHS|paragraphStep|gap \/ step/);
     expect(ed, "the padding's clean-up bookkeeping went with the padding").not.toMatch(/claimRef|dropClaim/);
-    // It still has to decide on the CONTENT's bottom edge — `.ProseMirror` carries a
-    // min-height, so most blank space is INSIDE it and the naive guard never fires.
-    expect(ed).toMatch(/lastElementChild[\s\S]{0,200}contentBottom/);
-    // At most ONE new line, and only when the last block is not already empty.
-    expect(ed).toMatch(/lastIsEmptyParagraph/);
-    expect(ed).toMatch(/insertContentAt\(doc\.content\.size, \{ type: "paragraph" \}\)/);
+    /* ⛔ AND THE RULE ITSELF CHANGED AGAIN, on his measurement: *"If I do a single click, it
+     * goes still goes all the way to the left."* B1393 ×3's "nearest real text position" is a
+     * LONG JUMP on a page that looks empty — the caret flies to the end of a paragraph far
+     * above, or to the end of the document. So the nearest position is now CHECKED against the
+     * page before it is taken, and a press that is not beside a line places at the press point
+     * instead. Two things must therefore be true of this file, and both are properties rather
+     * than spellings: */
+    expect(ed, "the nearest position is checked, not trusted").toMatch(/pressIsBesideLine\(editor, hit\.pos, e\.clientY\)/);
+    expect(ed, "and the tolerance is the LINE'S OWN height, read from the browser")
+      .toMatch(/coordsAtPos\(pos\)[\s\S]{0,300}c\.bottom - c\.top/);
+    // ⛔ THE END OF THE DOCUMENT IS NEVER WHERE A PRESS GOES ANY MORE — that WAS the fling.
+    expect(ed, "no press may send the caret to the end of the document").not.toMatch(/focus\("end"\)/);
+    expect(ed, "and the padding paragraph it used to add is gone with it")
+      .not.toMatch(/insertContentAt\(doc\.content\.size, \{ type: "paragraph" \}\)/);
+    expect(ed, "…along with the bookkeeping that took those paragraphs back").not.toMatch(/matInsertsRef/);
+    // ⛔ ONE GESTURE, ONE RULE: there is no separate double-click handler to disagree with it.
+    expect(ed, "a double-click must not be a second, different gesture").not.toMatch(/onDoubleClick=/);
     // …and a press ON text is still the browser's business, or word-select dies.
     expect(ed).toMatch(/if \(el\.closest\("\.ProseMirror"\)/);
+  });
+
+  it("⛔ AN ABANDONED PRESS IS PROVISIONAL — enforced at the SEAM, not only in the gesture", () => {
+    /* Five double-clicks with nothing typed produced five nodes in his storage, each with
+     * x/y/w and no text, all surviving a reload. An empty block draws nothing and still takes
+     * the press, so the next attempt at that spot lands in the leftover and appears to do
+     * nothing — which is what "it works intermittently" turned out to be. */
+    const store = read(NOTES, "lib", "notesStore.js");
+    const fn = store.slice(store.indexOf("export function writePage"));
+    expect(fn.slice(0, 900), "the save path prunes, so a crash or a closed tab cannot carry one out")
+      .toMatch(/pruneEmptyAnchors\(doc\)/);
+    expect(store, "and the one-time clean-up for notes already carrying them")
+      .toContain("export function sweepEmptyAnchors");
+    const ed = code("components/NoteEditor.jsx");
+    expect(ed, "the caret leaving takes one away").toMatch(/onSelectionUpdate[\s\S]{0,200}dropEmptyAnchors/);
+    expect(ed, "and so does losing focus altogether").toMatch(/onBlur[\s\S]{0,120}dropEmptyAnchors/);
+    expect(ed, "and Escape, for the way out that needs no second click").toMatch(/Escape[\s\S]{0,200}dropEmptyAnchors/);
+    /* ⛔ AND IT IS VISIBLE WHILE IT EXISTS. An invisible obstacle is the bug; the outline is
+     * the fix, and it is driven by the SAME predicate the storage seam uses. */
+    expect(ed).toMatch(/planyr-anchor\[data-empty="1"\]/);
+    expect(read(NOTES, "lib", "notesAnchorNode.js"), "one definition of empty, not two")
+      .toMatch(/anchorIsEmpty\(n\.toJSON\(\)\)/);
+  });
+
+  it("⛔ A PURGE IS A TOMBSTONED FACT, so emptying the bin survives a stale window", () => {
+    /* Measured with revisions: he emptied the bin (cloud rev 991, one entry), a tab still on
+     * rev 966 reloaded, and all 23 entries came back AND were pushed up as rev 992. A union
+     * merge cannot represent a deletion, because a deletion is an absence. */
+    const model = read(NOTES, "lib", "notesModel.js");
+    expect(model).toContain("export function tombstoneIds");
+    expect(model).toContain("export function withTombstones");
+    const purge = model.slice(model.indexOf("export function purgeTrashEntry"));
+    expect(purge.slice(0, 800), "the purge records the entry id AND every page id it named")
+      .toMatch(/withTombstones\(next, \[entryId, e\?\.node\?\.id, \.\.\.pageIds\]/);
+    const cloud = read(NOTES, "lib", "notesCloud.js");
+    const merge = cloud.slice(cloud.indexOf("export function mergeTrees"));
+    expect(merge.slice(0, 4000), "rule 0 runs before the union").toMatch(/const tombs = new Set\(\[\.\.\.tombstoneIds\(L\), \.\.\.tombstoneIds\(S\)\]\)/);
+    expect(merge.slice(0, 6000), "a tombstoned entry never survives").toMatch(/if \(tombs\.has\(String\(e\.id\)\)\) continue;/);
+    expect(merge.slice(0, 9000), "…nor a tombstoned live node").toMatch(/deleted\.has\(pg\.id\) \|\| tombs\.has\(String\(pg\.id\)\)/);
+    expect(merge.slice(0, 9000), "and the ledger rides on to the next stale client").toMatch(/tombs: withTombstones/);
   });
 
   it("⛔ TAB HAS A DEFINED ANSWER IN EVERY CONTEXT, and none of them destroys content (B1392 ×2)", () => {

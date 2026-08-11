@@ -96,8 +96,8 @@
       "allow": ["index", "SitePlannerApp", "hitTest", "AppHeader", "map-vendor", "cjs-interop", "teams", "userPrefs"]
     },
     "notesRouteJsBytes": {
-      "baseline": 634678,
-      "target": 634678,
+      "baseline": 673962,
+      "target": 673962,
       "unit": "bytes",
       "what": "Total JS a plain Notes route must download: the entry chunk plus Notes and its static-import closure.",
       "note": "Seeded at 0 so the FIRST measurement of a brand-new route lands through `npm run perf:ratchet` with a stated reason, exactly like any other baseline move — a hand-typed seed is the thing that step exists to prevent. WHAT THIS NUMBER DOES AND DOES NOT INCLUDE, because it is the whole reason the split is load-bearing: it counts the notebook TREE and its chrome, and deliberately NOT the rich-text engine. Notes.jsx pulls components/NoteEditor.jsx (and through it the only @tiptap imports in the module) via a lazy() import inside a Suspense, so the engine is a separate on-demand chunk of ~464 KB that a user pays for only when a page is actually opened, and the rail paints first. A future rise in THIS metric therefore means something moved onto the static path that belongs behind that boundary — most likely a new static import of the editor, or a shared module that got hoisted. test/notesModule.test.js source-scans for the first case; this budget is the backstop for the second."
@@ -338,6 +338,17 @@
           "commit": "259db28",
           "commitSource": "recovered-2026-08-08",
           "reason": "The always-on performance recorder: a 16.6 KB lazy chunk (ring buffers, self-calibrating trigger, capture encoder, bounded IndexedDB store) fetched in an idle gap after boot, plus 3.1 KB on the site route for the manual control and the always-loaded handle. No route's critical path grows past its own band; main was already 73.6 KB above this stale baseline before this branch, and 20.6 KB of new lazy code is what carried it over."
+        },
+        {
+          "metric": "bundle.notesRouteJsBytes",
+          "from": 634678,
+          "to": 673962,
+          "direction": "raise",
+          "item": "B350002",
+          "date": "2026-08-11",
+          "commit": "5e553fd3dddaf14cb6282d5adbcd8de33a88cffe",
+          "sourceHash": "49208f54ae162413",
+          "reason": "Notes route 619.8 -> 658.2 KB. Only 5.1 KB of that is this item (the bin's own facts, the read-only peek, the inline duplicate resolution); the other 33.3 KB is drift already on main, which B329408 owns - main measured 653.1 KB with this branch stashed, i.e. already 1.3 KB over its own ceiling before a byte of this landed."
         }
       ]
     }

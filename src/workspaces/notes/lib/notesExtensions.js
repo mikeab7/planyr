@@ -39,6 +39,7 @@ import NoteImage from "./notesImageNode.js";
 import NoteAttachment from "./notesAttachNode.js";
 import NoteCallout from "./notesCalloutNode.js";
 import NoteToggle, { NoteToggleTitle } from "./notesToggleNode.js";
+import NoteAnchor from "./notesAnchorNode.js";
 import NoteSlashMenu from "./notesSlashMenu.js";
 import NoteSketch from "./notesSketchNode.js";
 import NoteTabKey from "./notesTabKey.js";
@@ -99,6 +100,10 @@ export const NOTE_EXTENSIONS = [
   NoteCallout,
   NoteToggleTitle,
   NoteToggle,
+  // A block that stays where it was put (NEW-2). Out of flow, so the rest of the document
+  // does not know it exists; its position is two numbers ON THE NODE, which is what makes it
+  // survive a reload, a sync and the PDF without a second store to keep in step.
+  NoteAnchor,
 
   // SKETCH MODE: a chart drawn from an indented outline. It is a NODE IN THIS SCHEMA rather
   // than a canvas store bolted alongside, and that is what makes it persist, sync, print and

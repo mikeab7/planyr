@@ -114,7 +114,7 @@ describe("mergeTrees", () => {
   });
 
   it("survives junk on either side rather than throwing — a merge is not a place to crash", () => {
-    expect(mergeTrees(null, null)).toEqual({ v: 3, pages: [], trash: [] });
+    expect(mergeTrees(null, null)).toEqual({ v: 3, pages: [], trash: [], tombs: [] });
     expect(mergeTrees(tree([root("A", [page("p1")])]), undefined).pages).toHaveLength(1);
   });
 

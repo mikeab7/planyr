@@ -167,6 +167,17 @@ into every consumer. Root rules in `/CLAUDE.md`; deep detail in `/docs/REFERENCE
   `public`/`anon`/`authenticated`, because a definer-rights delete function is a hole. Guard: the
   repo-root `test/` suite **clientErrorsRetention**, which runs the SHIPPED `.sql` files verbatim
   against a real Postgres (PGlite, devDependency only) and mutation-checks both clauses.
+  **⛔ AND THE FOLLOW-UP READER (B369536): `client_errors_retention_check.sql` is `select`-ONLY, and
+  that is load-bearing.** V84560 proved the job FIRES (three unattended runs, all 0/0); nothing has
+  yet proved the DELETE matches anything, because the first row is not eligible until **2026-09-18**.
+  Until then "the delete works" and "the delete matches nothing" still read identically — the same
+  indistinguishability one layer in. The reader answers it in one paste, and its sharpest column is
+  `ordinary_missed`: any ordinary row older than 90 days **at the moment the last run ran** that is
+  still here means the job fires and deletes nothing. **⛔ NEVER call `prune_client_errors()` by hand
+  to "check on it"** — a hand-run writes a byte-identical row, manufacturing the very evidence the
+  check is waiting for; that is why the reader contains no mutating statement and why an off-schedule
+  deletion can never raise its verdict above `WAIT`. Guard: **clientErrorsRetentionCheck**, which
+  produces all five verdicts from a seeded database and mutation-proves the FAIL one.
 - **`prefs/` + `ui/InterfaceSettings.jsx` — SETTINGS THAT ARE ABOUT THE APP, NOT ABOUT A DRAWING
   (NEW-1/NEW-4).** `prefs/smoothZoom.js` owns the smooth-zoom preference: one key
   (`planarfit:smoothZoom` — the prefix stays, renaming it would silently reset the setting for

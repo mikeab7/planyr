@@ -145,11 +145,18 @@ export function elToRingFeet(el) {
 // Measure records are {mode, pts} (new) or {a,b} (legacy) — normalize to a feet point list.
 const measPtsFeet = (m) => (m && m.pts ? m.pts : m && m.a && m.b ? [m.a, m.b] : []);
 
-// Dock-door CENTRE points for a box building, in planner feet. Mirrors the canvas dock-door
-// placement (dockSidesFor → dockDoorRun → placeDockDoors): doors sit on each validated dock
-// wall, evenly spaced at the door o.c., with any corner bump-out span removed. Column-line
-// snapping is dropped for the export (lengthLines = []) — the o.c. spacing is what matters here.
-function buildingDockDoorPoints(el, els, settings) {
+// Dock-door RUNS for a box building, in planner feet: ONE line per dock side, spanning the doors
+// that side actually carries (outer face of the first door to the outer face of the last), plus the
+// door count. Mirrors the canvas dock-door placement (dockSidesFor → dockDoorRun → placeDockDoors):
+// doors sit on each validated dock wall, evenly spaced at the door o.c., with any corner bump-out
+// span removed. Column-line snapping is dropped for the export (lengthLines = []) — the o.c.
+// spacing is what matters here.
+//
+// ⛔ NEW-2 — A RUN PER SIDE, NOT A PIN PER DOOR. This used to return every door CENTRE, and each
+// centre became its own <Placemark><Point>: on the owner's Bain plan (five buildings, several
+// hundred doors) Google Earth opened under a blanket of pins. Four lines per building says the same
+// thing — where the docks are and how many — and stays readable in a 3D walkthrough.
+function buildingDockDoorRuns(el, els, settings) {
   if (!el || el.points || !Number.isFinite(el.w) || !Number.isFinite(el.h)) return [];
   const { dockSides } = dockSidesFor(el);
   if (!dockSides.length) return [];
@@ -166,11 +173,18 @@ function buildingDockDoorPoints(el, els, settings) {
     const bump = (sign) => { const d = dogEars.find((x) => x.dogEar.side === side && x.dogEar.sign === sign); return d ? (horiz ? d.w : d.h) : 0; };
     const startF = bump(-1), endF = L - bump(1);
     if (endF - startF < doorWidth) continue;
-    for (const cF of placeDockDoors(startF, endF, [], { doorOC, doorWidth })) {
+    const doors = placeDockDoors(startF, endF, [], { doorOC, doorWidth });
+    if (!doors.length) continue;
+    // The run spans the full door openings, so a side carrying a single door still gets a real
+    // line (one door wide) rather than a degenerate zero-length one.
+    const a = Math.max(startF, doors[0] - doorWidth / 2);
+    const b = Math.min(endF, doors[doors.length - 1] + doorWidth / 2);
+    const at = (cF) => {
       const lx = horiz ? -hw + cF : (side === "left" ? -hw : hw);
       const ly = horiz ? (side === "top" ? -hh : hh) : -hh + cF;
-      out.push(toWorld(lx, ly));
-    }
+      return toWorld(lx, ly);
+    };
+    out.push({ side, count: doors.length, doorOC, pts: [at(a), at(b)] });
   }
   return out;
 }
@@ -184,13 +198,23 @@ function buildingDockDoorPoints(el, els, settings) {
 
 // Map a site model's drawn geometry to KML features, reprojecting every foot vertex through
 // `project(ptFeet) -> [lon, lat]`. Throws (LOUD-FAILURE) if any vertex reprojects to NaN.
-// opts: { extrudeBuildings, includeDimensions, prefix:[…outer folder…] }.
+// opts: { extrudeBuildings, includeDimensions, includeDockDoors, prefix:[…outer folder…] }.
+//
+// ⛔ NEW-2 — WHAT GOES IN THE FILE IS THE EXPORT'S DECISION, NEVER A CANVAS DISPLAY TOGGLE. The dock
+// doors used to be gated on `settings.showDocks`, the View ▾ checkbox: a drawing-legibility
+// preference was deciding the contents of a file built for a different audience, so turning dock
+// doors on to check a layout silently changed what an exported KMZ contained — and a saved plan's
+// remembered toggle did the same to the map viewer's multi-site export, with nobody looking. Every
+// content decision here is an `opts` flag with its own default, on the `includeDimensions`
+// precedent, and `settings` is read ONLY for model facts (door o.c. / width, building rules) that
+// determine where a thing physically IS. Do not reach for a display toggle in this file again;
+// `test/kmzExport.test.js` sweeps the source for the whole class.
 export function siteToFeatures(model, project, opts = {}) {
   const parcels = arr(model && model.parcels);
   const els = arr(model && model.els);
   const measures = arr(model && model.measures);
   const settings = (model && model.settings) || {};
-  const { extrudeBuildings = false, includeDimensions = false, prefix = [] } = opts;
+  const { extrudeBuildings = false, includeDimensions = false, includeDockDoors = false, prefix = [] } = opts;
   const rules = normalizeRules(settings.buildingRules);
   const features = [];
   const F = (...names) => [...prefix, ...names];
@@ -234,10 +258,16 @@ export function siteToFeatures(model, project, opts = {}) {
     }
     features.push({ geom: "polygon", name, folder: F(layer), rings: [projClosed(ring)], style, height, extrude });
 
-    // Dock doors as point markers (buildings only).
-    if (isBuilding(el) && settings.showDocks !== false) {
-      for (const pt of buildingDockDoorPoints(el, els, settings)) {
-        features.push({ geom: "point", name: "Dock door", folder: F("Dock doors"), coord: projPt(pt) });
+    // Dock doors — optional, default OFF (a pin or a line per dock side is clutter in a 3D
+    // walkthrough), and decided by the EXPORT, never by `settings.showDocks`. See the opts note.
+    if (includeDockDoors && isBuilding(el)) {
+      for (const run of buildingDockDoorRuns(el, els, settings)) {
+        features.push({
+          geom: "line",
+          name: `Dock doors — ${run.count} @ ${run.doorOC}′ o.c.`,
+          folder: F("Dock doors"),
+          coords: run.pts.map(projPt),
+        });
       }
     }
   });

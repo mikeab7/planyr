@@ -71,6 +71,16 @@ body { font: 11.5pt/1.55 -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sa
 /* A CALLOUT on paper (NEW-7). The node carries a NAME, never a colour, so this is the
    entire ink for it — printed light-on-white with a coloured rule and the same glyph the
    screen draws, mirroring components/NoteEditor.jsx → EDITOR_CSS rule for rule. */
+/* ⛔ AN ANCHORED BLOCK PRINTS WHERE IT SITS (NEW-2, PDF-PARITY). Its left/top ride in the
+   serialised markup (the node's own renderHTML writes them), so paper reads the same two
+   numbers the screen does. There is no second stylesheet holding the position and therefore
+   nothing to drift. .note-body is the positioned ancestor, as .ProseMirror is on screen. */
+.note-body { position: relative; }
+/* Same box arithmetic as the screen, deliberately: box-sizing and the LEFT padding are copied
+   across so a narrowed block wraps its words at the same place on paper. The grip is hidden
+   rather than removed from the layout for exactly that reason. */
+.note-body .planyr-anchor { position: absolute; margin: 0 !important; box-sizing: border-box; padding: 3px 6px 3px 16px; break-inside: avoid; }
+.note-body .planyr-anchor-grip { display: none; }
 .note-body .planyr-callout { position: relative; border: 1px solid #D8DBE2; border-left: 3px solid #5B6270; border-radius: 6px; background: #FAFAFC; padding: 7px 9px 7px 26px; break-inside: avoid; }
 .note-body .planyr-callout > * + * { margin-top: 0.5em; }
 .note-body .planyr-callout::before { position: absolute; left: 8px; top: 6px; font-size: 10pt; font-weight: 700; content: "i"; color: #5B6270; }

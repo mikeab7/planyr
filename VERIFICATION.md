@@ -183,6 +183,101 @@ Playwright wants revision 1228 which is not in this image):
    on a phone or tablet is the case the whole precondition exists for, and only real touch hardware proves it.
    ⛔ If this fails, B366388's removal of the crumb rename is unsafe and must be reverted with it.
 
+### V165104 — B369536: on or after **2026-09-18**, does the retention job actually DELETE? `Blocker: real-data`
+
+**Due 2026-09-19, and the extra day is not slack — read this before filing a failure.** The oldest row is **2026-06-20 22:16:28 UTC**, so it crosses 90 days at **2026-09-18 22:16 UTC** — *after* that morning's 07:20 run. **The first run that can delete anything is 2026-09-19 07:20 UTC.** A read on 2026-09-18 will correctly return `WAIT` and proves nothing; do not report that as a failure. A one-shot Routine is armed for **2026-09-19 08:00 UTC**; if it is not honoured, run it by hand.
+
+**⛔ THE ONE THING THAT CAN RUIN THIS CHECK, AND IT TAKES ONE KEYSTROKE: do NOT call `select public.prune_client_errors()`.** A hand-run writes a run row byte-identical to a scheduled one, so it manufactures exactly the evidence this check exists to gather, permanently and undetectably. That is the same trap V84560 was written around, and it is why the reader below is `select`-only. Do not seed rows, do not age a row "to test it", do not help it along.
+
+**Steps.** Paste **QUERY 1** from `src/shared/telemetry/client_errors_retention_check.sql` into the Supabase SQL editor on `lyeqzkuiwngunutlkkmi`. One row comes back. Then paste **QUERY 2** from the bottom of the same file (commented out) for the independent pg_cron corroboration.
+
+**Expect / PASS** = `verdict` reads **`PASS-first-deletion-observed`**, with `ordinary_missed 0`, `manual_missed 0`, a non-null `first_deletion_run_id`, and `liveness = ok`. QUERY 2 shows one `succeeded` cron row per calendar day, each paired with exactly one run row.
+
+**FAIL, and they mean different things:**
+- **`FAIL-policy-not-applied`** — the job fired, reported success, and left rows behind that were past 90 days when it ran. **The policy is broken, not the check.** Re-open B369536 with a `Recurrence:` line; the number to report is `ordinary_missed`.
+- **`FAIL-stale`** / **`FAIL-never-run`** — the schedule has stopped. This is a B270913 recurrence (its stopping rule named exactly this), not a new item.
+- **`WAIT-no-eligible-rows-yet` after 2026-09-19** — not a pass and not a "check again later". The 2026-09-18 date is derived from the oldest row (2026-06-20 22:16:28 + 90 days); if nothing was eligible, either that row was removed by something else or the arithmetic is wrong. Re-open and say which.
+- **A `succeeded` cron row in QUERY 2 with NO run row beside it** — worse than any of the above: the function ran and its unconditional insert did not land. That is a new defect, not this one.
+
+**What is already proven, so this is a confirmation and not a discovery.** `test/clientErrorsRetentionCheck.test.js` (26) runs the shipped `.sql` files verbatim against a real Postgres and produces all five verdicts from seeded data at a fast-forwarded clock — including the first deletion, the manual capture surviving beside it, and the `FAIL-policy-not-applied` case mutation-proven by widening the shipped 90-day window to 400. The reader is proven read-only against a live database, and proven unable to be satisfied by an off-schedule (hand) run. It was executed against **production** on 2026-08-11 and returned `WAIT-no-eligible-rows-yet` · 3 scheduled runs · 1 off-schedule · 5,707 rows · next eligible **2026-09-18** — so the query itself is known to work there; only the date is owed.
+
+**A NULL IS NOT A DISPOSITION (STANDING RULE #2).** Whatever comes back, record it here with the date and archive per rule 3. Do not close this on "nothing to see yet".
+
+- Cadence: once · **Due 2026-09-18**
+- Blocker: `real-data` (the production table, and a date that has not arrived)
+
+### V159584 — B364016: Delete forever STAYS deleted across three reloads, on his account `Blocker: auth`
+
+Proven without a browser at the layer where it is decided, and this time through the STORE rather than on in-memory trees — which is the gap that let the first fix ship broken. `test/notesBinPurge.test.js`: purge → reload → three reloads deep, each one also syncing against a server still holding the page live; every earlier case round-tripped through storage too; the 6,000-merge fuzz reloads between rounds. Mutation-proven — restoring the missing argument turns 5 of 19 rows red including the fuzz.
+
+- **HIS OWN STOPPING RULE, ADOPTED VERBATIM.** Create a scratch page, type in it, bin it, press **Delete forever**, reload. PASS = the id is absent from BOTH the live list and the bin, locally and in the cloud, and **stays absent across three reloads**. FAIL = it appears in either, on either side, at any point.
+- **AND IT MUST NOT COME BACK AS A GHOST.** PASS = nothing appears in the sidebar with no content in it. That is the shape this recurrence took and it is the one to look for.
+- **THE 23 ENTRIES AND THE ZOMBIES** — the V152576 checks still stand and are not superseded by this one.
+- **AND AN ORDINARY DELETE STILL WORKS.** Bin a note; check it is still restorable. A tombstone must bury a PURGE, never an ordinary delete.
+- **A NULL IS NOT A DISPOSITION (STANDING RULE #2).** If it cannot be provoked, say so and take one of the three admissible routes. Do not record "not reproducible" and archive — this item has now been reported fixed once and was not.
+
+### V152576 — B357011: the bin he emptied STAYS empty, and the resurrected entries are cleared up `Blocker: auth`
+
+Proven without a browser at the layer where it is decided — `test/notesBinPurge.test.js`: his exact sequence with the revisions, both merge directions, a second equally-stale window, a restore racing a purge, and a 6,000-merge fuzz across five seeds with zero resurrections, mutation-proven. What the sandbox cannot do is sign in, so the account itself is the last mile. **His bin is at 23 entries right now because a reload put them back — that is the defect, not him changing his mind.**
+
+- **OPEN NOTES SIGNED IN, on a tab that has been open a while, and let it sync.** PASS = the entries he emptied are gone and stay gone; the cloud `notes_trees` trash count does not go UP. FAIL = any of the 23 comes back.
+- **THE ZOMBIES.** 15 of his 24 `notes_pages` rows have `purged_at` set and `doc` NULL. PASS = the bin entries naming only those pages are gone from the bin on the next load, and none of them is offering a Restore. FAIL = a row still offers to restore content that no longer exists.
+- **⛔ AND THE TWO-WINDOW TEST, which is the actual repro.** Two windows on the account. In window A, empty the bin. Leave window B alone — it has not seen it. Reload B. PASS = B comes back with the bin EMPTY and the cloud rev does not gain 23 entries. FAIL = they come back.
+- **AND AN ORDINARY DELETE STILL WORKS.** Bin a note in one window; check it is restorable in the other. PASS = it restores. A tombstone must bury a PURGE, never an ordinary delete.
+- **A NULL IS NOT A DISPOSITION (STANDING RULE #2).** If the resurrection cannot be provoked, say so and take one of the three admissible routes — provoke it harder, instrument it, or ask him whether he has seen it again. Do not record "not reproducible" and archive.
+
+### V145568 — B350002: HIS OWN twenty-one-entry bin is now judgeable without restoring anything `Blocker: real-data`
+
+Every mechanism is driven headless against a fixture built to his shape (three useless titles, one empty, one carrying a subpage, one from a deleted project) — `ui-audit/verify-notes-project-integrity.mjs` §7, 21 checks. What this sandbox cannot do is look at HIS bin, which is the thing he asked about.
+
+- **OPEN NOTES → BIN, signed in.** PASS = each of the sixteen "Untitled page" rows now shows the words in it, so you can tell them apart at a glance. FAIL = any row still shows nothing but a name and a countdown.
+- **THE ROW'S FACTS.** PASS = every row names the project it came from (or says plainly that the project no longer exists, or that where it came from was never recorded), when it went, and how much is in it.
+- **READ IT.** Press **Read it** on a row. PASS = the note opens read-only, says "Nothing you do here changes it", and the bin still holds the entry afterwards — nothing has been restored into the live tree. FAIL = it lands back in the rail, or it is editable.
+- **THE BULK CLEAR.** PASS = "Delete the N empty ones forever" names the number of genuinely empty ones, and pressing it takes exactly those and leaves everything with words in it. FAIL = it takes a row that had words, or the count is wrong.
+- **A NULL IS NOT A DISPOSITION (STANDING RULE #2).** If a row still cannot be judged, that is a FAIL to report, not a "could not reproduce".
+
+### V145569 — B350003: the duplicate bar on his real account only names copies he can do something about `Blocker: real-data`
+
+Mutation-proven both ways headless (`ui-audit/verify-notes-project-integrity.mjs` §8): the exact fixture he was shown is silent, and the same two copies both live in live projects is still reported.
+
+- **OPEN NOTES, signed in, and wait for the integrity bar.** PASS = the finding he reported — *"“Coordination” in Grand Port · “Page 1” in a project that no longer exists (in the bin)"* — is **gone**, because neither copy is actionable. FAIL = it is still there.
+- **AND A REAL ONE STILL SPEAKS.** Copy a note into a second live project. PASS = the bar names it. FAIL = it stays silent, which would mean the filter is over-reaching.
+- **ENDING ONE.** On a real finding, press **Keep both**. PASS = it goes, and it is still gone after a reload. FAIL = it comes back.
+
+### V145570 — B350000: a note with a narrowed anchored block PRINTS where it sits `Blocker: print-engine`
+
+Everything on screen is proven — 38 click positions across the full editor width, each landing exactly where it was clicked, read back out of storage (`ui-audit/verify-notes-anchor-zoom.mjs` §9). The print sheet's box arithmetic was changed to match the editor's and the two stylesheets are pinned to each other by unit test, but headless Chromium's `window.print()` produces no paginated output, so the sheet itself has not been seen.
+
+- **PRINT A NOTE that has a block anchored near the RIGHT-HAND edge** (double-click blank space over on the right and type a sentence long enough to wrap). PASS = on the PDF the block sits at the same place across the page as it does on screen, at the same width, with its words breaking in the same places. FAIL = it has moved, changed width, or wrapped differently.
+- **AND ONE ANCHORED LOW ON THE PAGE.** PASS = it prints where it sits rather than being clipped or pushed onto the next sheet mid-block.
+
+### V138560 — B342992: the recovered note opens on his own machine, and a two-window merge no longer loses a page `Blocker: auth`
+
+**Both merge holes are proven without a browser** — `test/notesReachability.test.js` reproduces each in four lines and then sweeps 6,000 randomised two-device merges across five seeds with zero pages left neither live nor binned. **The recovery of his actual note is already done as data**: `notes_trees` went 910 → 911 under a guarded update, and a full re-audit of the account returns zero bodies without a node. What the sandbox cannot do is sign in, so the last mile is his own signed-in session.
+
+- **OPEN NOTES SIGNED IN on planyr.io.** PASS = a top-level note under **“Not in a project”** named `Recovered — Channel Improvements were needed to slow down co…`, and opening it shows the Bain meeting notes intact: channel improvements to slow conveyance, the Quiddity drainage analysis, no offsite easements, Willow Point MUD for water/sanitary, the feasibility study, the $3–4/SF vs $10/SF pricing note, and the Hillcorp blanket easement. FAIL = it is missing, or opens empty.
+- **⛔ ITS NAME IS NOT THE ORIGINAL AND MUST NOT PRETEND TO BE.** The title lived on the entry that went missing. PASS = it is obviously a recovery and the bar (or this note's own row) says the name was lost. Renaming it is his to do.
+- **THE STALE-LOCAL CASE, which is the condition that made the holes reachable:** his local tree was 98 revisions behind AND flagged dirty. After this build lands, open Notes on that machine and let it sync. PASS = the recovered note is still there afterwards, every other note is still there, and nothing in the bin has come back to life.
+- **A REAL TWO-WINDOW MERGE.** Two windows on one account. In window A, bin a note that has a subpage. In window B — which has not seen it — add a NEW subpage under that same note and type in it. Let both sync. PASS = the binned note and the subpage the entry named are in the bin, and **B's new subpage is still live**, at the top level of the same project, with its text. FAIL = it is gone from both the tree and the bin (the exact shape that lost the Bain note).
+- **A NULL IS NOT A DISPOSITION (STANDING RULE #2).** If the two-window case cannot be provoked, say so and take one of the three admissible routes — provoke it harder, instrument it, or ask him whether he has seen another note vanish. Do not record "not reproducible" and archive.
+### V131552 — B335984: the +/− controls now arrive at a zoom he'd actually work at, on the REAL Bain plan `Blocker: real-data`
+
+**Everything mechanical is proven here.** `test/featureEditZoom.test.js` (14) pins the re-derived floor and replays BOTH superseded rules as mutation checks — the pre-gate rule must arm across his whole-site band, and the 44 px rule must refuse across the band this amendment re-opens. `e2e/feature-edit-zoom.spec.js` drives a real wheel gesture either side of the new floor on a real drawn building, reading the app's own `data-render-ppf` **only once the gesture has settled**, and confirms the controls are clickable the whole time they are faded. **What only his own plan can settle is the JUDGEMENT** — whether this zoom is the one at which offering the edit feels right on a 109-acre site. **This supersedes V111105**, whose second FAIL clause he tripped; do not chase V111105's 0.80 px/ft steps.
+
+- **STEPS** — open **Bain / "Concept - Original"**. Zoom out until the whole site fits (scale bar about 0–1,000 ft): the green `+` / red `−` must still be **absent**. Now zoom in slowly, hovering or selecting Building 3.
+- **PASS** = they fade in when Building 3 takes up roughly a **third** of the drawing area — not two thirds. They are clickable the instant they are visible, and adding a dock zone or a bump-out at that zoom feels like a normal working move rather than a close-up.
+- **FAIL, either direction, and BOTH are worth reporting** = back at whole-site zoom (the original defect returning) · or still waiting until the building fills most of the screen. **Report it with the same kind of number you gave last time** — roughly what fraction of the screen the building covers when they appear — and the threshold moves again as a stated product decision, never a quiet nudge.
+- Also glance at a SMALL site at the same scale-bar reading: the rule is absolute zoom, so a 30-acre plan must behave identically.
+
+### V131553 — B335985: a Google Earth export of a real plan opens clean `Blocker: real-data`
+
+**Proven here on his own rows:** `ui-audit/fixtures/bain-concept-original.json` through the real `siteToFeatures` + `buildKml` — **261 placemarks before (209 of them dock-door pins) → 52 now, zero dock doors**; `test/kmzExport.test.js` (40) pins the default, the run-per-side shape, and `settings.showDocks` being inert in both directions. **What cannot be done here is the export itself**: a KMZ needs a plan placed on the map (a signed-in, georeferenced plan), and nothing can open Google Earth in this sandbox.
+
+- **STEPS** — on **Bain / "Concept - Original"**, File ▸ **Export to Google Earth (KMZ)**. Open the file in Google Earth. Then repeat with **Export with 3D buildings**.
+- **PASS** = no dock-door pins anywhere — the site reads as boundary, buildings, parking, ponds and roads, with the folder tree intact. Toggling **Show dock doors** in View ▾ on the canvas and exporting again produces an **identical** file: the canvas checkbox must no longer change what is in the export.
+- **ALSO** — from the map view, right-click the empty map ▸ **Export to Google Earth (KMZ)** with several sites visible: same result across all of them, regardless of what each plan had shown on screen when it was last saved.
+- **FAIL** = dock-door markers still present · the file changes when the View ▾ toggle changes · anything else missing that used to be there (buildings, boundary, ponds, roads, the 3D massing on the second export).
+- **WORTH SAYING IF IT COMES UP:** dock doors can still be exported, as one line per dock side carrying the door count, but **there is no button for it** — that follows the dimension lines, which have been off with no control since this export was built. If you want a checkbox for either, say so and it becomes a small, separate piece of work.
 
 ### V124976 — B326416–B326419: new projects are shared with the team by default, the per-plan lock holds, and NOTHING pre-existing changed `Blocker: auth`
 
@@ -235,15 +330,6 @@ production row counts unchanged by the migration (65 sites / 1 shared / 0 locked
 - **PASS** = the row is there, checked by default, and toggling it OFF then reloading leaves it OFF; the drawing re-draws on every wheel notch with it off and scales-then-sharpens with it on; and **there is no Smooth zoom row anywhere else** — not in View ▾, not in the plan flyout.
 - **FAIL** = the row is missing, appears in two places, resets on reload, or the setting stops affecting how the wheel zoom draws.
 - **The specific regression to watch for:** a change made in Settings must take effect on the canvas **without a reload** (the planner subscribes to the preference), and turning it OFF mid-gesture must not leave a scaled frame on screen.
-
-### V111105 — B312544: the +/− controls are gone at whole-site zoom on the REAL Bain plan `Blocker: real-data`
-
-**The rule and the wiring are proven here** — `test/featureEditZoom.test.js` (11, including a verbatim replay of the pre-fix rule showing it armed at every one of his reported zooms) and `e2e/feature-edit-zoom.spec.js`, which drives a real wheel gesture either side of the 0.80 px/ft floor on a real drawn building and reads the answer against the app's own `data-render-ppf`. **What only his own plan can settle is whether the chosen zoom is the RIGHT one** — the threshold is a judgement about when an edit is worth offering, and the repro is a 109-acre site with buildings far larger than anything a sandbox fixture draws.
-
-- **STEPS** — open **Bain / "Concept - Original"**, zoom out until the whole site fits and the scale bar reads about 0–1,000 ft. Hover or select Building 3 or 4.
-- **PASS** = no green `+` / red `−` anywhere on the buildings at that zoom. Zoom in and they FADE in — softly, not popping — at a zoom where a bump-out is clearly a shape rather than a dot, and they are clickable the instant they are visible (a press must not be swallowed by a faint control).
-- **FAIL** = still visible at whole-site zoom · or they now wait so long that placing a dock zone or bump-out at a normal working zoom has become awkward. **The second failure is the one to report back with a number**: say roughly how far in you had to go, and the threshold moves as a product decision on the item — never nudged quietly.
-- Also worth a glance on a SMALL site, so the absolute rule is confirmed to read the same at both ends: a 30-acre plan should behave identically at the same scale-bar reading.
 
 ### V111106 — B1173 (×2): both header rows survive real fullscreen on HIS screen `Blocker:` none — owner judgement only
 

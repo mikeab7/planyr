@@ -17,6 +17,8 @@
 export const TREE_KEY_BASE = "planyr:notes:tree:v1";
 export const PAGE_KEY_BASE = "planyr:notes:page:v1";
 export const SYNC_KEY_BASE = "planyr:notes:sync:v1";
+/** Findings the person has said "keep both, stop telling me" about (NEW-4). */
+export const IGNORED_DUPES_KEY_BASE = "planyr:notes:dupes-ignored:v1";
 
 /** Signed in, a user's notes live under their id; signed out, under `local`. Two accounts on
  *  one machine therefore never read each other's notes. */

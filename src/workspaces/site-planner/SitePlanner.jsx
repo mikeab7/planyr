@@ -124,7 +124,7 @@ import { worldToScreen, screenToWorld, zoomAround, midpoint, distance, pinchZoom
    `viewAnchor.js` holds the proof that an anchored frame lands exactly where a direct one would. */
 import { anchorTransform, anchorTransformAttr, anchorHolds, wheelZoomFactor, ZOOM_SETTLE_MS } from "../../shared/viewport/viewAnchor.js";
 import { readSmoothZoom, subscribeSmoothZoom } from "../../shared/prefs/smoothZoom.js";
-import { featureEditOpacity } from "./lib/featureEditZoom.js";
+import { featureEditOpacity, FEAT_CTRL_R, FEAT_CTRL_STROKE } from "./lib/featureEditZoom.js";
 import ColorField from "../../shared/ui/ColorField.jsx";
 /* LAZY (B1064 tranche a). The Standards footer renders only while the Standards panel is the
  * open one, docked or floating — never at first paint. */
@@ -14776,12 +14776,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   //  • each long-side corner: a 55′×60′ bump-out (purple)
   // A side/corner handle: a coloured "+" to add a feature, or a red "−" to
   // remove the one already there (so a feature can't be stacked twice).
-  const featNode = (key, pos, exists, color, addTitle, onAdd, onRemove, r = 9) => (
+  // NEW-1: the disc's radius and keyline come from `featureEditZoom.js`, because the zoom gate that
+  // decides whether this control may exist is DERIVED from its outer width (the placed feature is
+  // never smaller on screen than the control that places it). Hardcoding them here again is what
+  // would let the threshold and the real control drift apart.
+  const featNode = (key, pos, exists, color, addTitle, onAdd, onRemove, r = FEAT_CTRL_R) => (
     <g key={key} style={{ cursor: "pointer" }} onPointerDown={(e) => { if (e.button !== 0) return; e.stopPropagation(); exists ? onRemove() : onAdd(); }}>
       <title>{exists ? "Remove this — click to subtract" : addTitle}</title>
-      <circle cx={pos.x} cy={pos.y} r={r} fill={exists ? "#b91c1c" : color} stroke="#ffffff" strokeWidth={1.75} />
-      <line x1={pos.x - r * 0.5} y1={pos.y} x2={pos.x + r * 0.5} y2={pos.y} stroke="#ffffff" strokeWidth={1.75} />
-      {!exists && <line x1={pos.x} y1={pos.y - r * 0.5} x2={pos.x} y2={pos.y + r * 0.5} stroke="#ffffff" strokeWidth={1.75} />}
+      <circle cx={pos.x} cy={pos.y} r={r} fill={exists ? "#b91c1c" : color} stroke="#ffffff" strokeWidth={FEAT_CTRL_STROKE} />
+      <line x1={pos.x - r * 0.5} y1={pos.y} x2={pos.x + r * 0.5} y2={pos.y} stroke="#ffffff" strokeWidth={FEAT_CTRL_STROKE} />
+      {!exists && <line x1={pos.x} y1={pos.y - r * 0.5} x2={pos.x} y2={pos.y + r * 0.5} stroke="#ffffff" strokeWidth={FEAT_CTRL_STROKE} />}
     </g>
   );
   // B242 — a "+ / −" PAIR (both visible together) for the on-building controls: a coloured "+"
@@ -14791,19 +14795,19 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const glyphPlus = (cx, cy, color, r, title, onClick) => (
     <g style={{ cursor: "pointer" }} onPointerDown={(e) => { if (e.button !== 0) return; e.stopPropagation(); onClick(); }}>
       <title>{title}</title>
-      <circle cx={cx} cy={cy} r={r} fill={color} stroke="#ffffff" strokeWidth={1.75} />
-      <line x1={cx - r * 0.5} y1={cy} x2={cx + r * 0.5} y2={cy} stroke="#ffffff" strokeWidth={1.75} />
-      <line x1={cx} y1={cy - r * 0.5} x2={cx} y2={cy + r * 0.5} stroke="#ffffff" strokeWidth={1.75} />
+      <circle cx={cx} cy={cy} r={r} fill={color} stroke="#ffffff" strokeWidth={FEAT_CTRL_STROKE} />
+      <line x1={cx - r * 0.5} y1={cy} x2={cx + r * 0.5} y2={cy} stroke="#ffffff" strokeWidth={FEAT_CTRL_STROKE} />
+      <line x1={cx} y1={cy - r * 0.5} x2={cx} y2={cy + r * 0.5} stroke="#ffffff" strokeWidth={FEAT_CTRL_STROKE} />
     </g>
   );
   const glyphMinus = (cx, cy, r, title, onClick) => (
     <g style={{ cursor: "pointer" }} onPointerDown={(e) => { if (e.button !== 0) return; e.stopPropagation(); onClick(); }}>
       <title>{title}</title>
-      <circle cx={cx} cy={cy} r={r} fill="#b91c1c" stroke="#ffffff" strokeWidth={1.75} />
-      <line x1={cx - r * 0.5} y1={cy} x2={cx + r * 0.5} y2={cy} stroke="#ffffff" strokeWidth={1.75} />
+      <circle cx={cx} cy={cy} r={r} fill="#b91c1c" stroke="#ffffff" strokeWidth={FEAT_CTRL_STROKE} />
+      <line x1={cx - r * 0.5} y1={cy} x2={cx + r * 0.5} y2={cy} stroke="#ffffff" strokeWidth={FEAT_CTRL_STROKE} />
     </g>
   );
-  const featPair = (key, pos, tan, opt, r = 9) => {
+  const featPair = (key, pos, tan, opt, r = FEAT_CTRL_R) => {
     const both = opt.canAdd && opt.canRemove, gap = r + 3;
     const aP = both ? { x: pos.x - tan.x * gap, y: pos.y - tan.y * gap } : pos;
     const rP = both ? { x: pos.x + tan.x * gap, y: pos.y + tan.y * gap } : pos;

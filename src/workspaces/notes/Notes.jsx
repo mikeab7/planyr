@@ -26,21 +26,23 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } fro
 import AppHeader from "../../shared/ui/AppHeader.jsx";
 import NotesTree from "./components/NotesTree.jsx";
 import {
-  addPage, allPageIds, ancestorIds, copyPageWithin, deleteNode, emptyTree, expiredTrashIds, findPage,
+  addPage, adoptUnreachable, allPageIds, ancestorIds, copyPageWithin, deleteNode, emptyTree, expiredTrashIds, findPage,
   firstPageId, migrate, movePage, pagesInScope, purgeTrashEntry, recentPages, renameNode, restoreNode,
-  setPageProject, subtreePageIds, touchPage, trashEntries, trashPageIds,
+  setPageProject, subpagesPhrase, subtreePageIds, touchPage, trashEntries, trashPageIds,
   NO_PROJECT_LABEL, SCOPE_ALL, SCOPE_PROJECT,
 } from "./lib/notesModel.js";
 import { duplicateNotice } from "./lib/notesDuplicates.js";
+import { absoluteStamp } from "./lib/notesTime.js";
 import { isQuickOpenChord, quickOpenResults, rankQuickOpen } from "./lib/notesQuickOpen.js";
 import { groupTasksByProject } from "./lib/notesTasks.js";
 import { listProjects, warmProjects, onProjectsChanged } from "../../shared/projects/projects.js";
 import {
   clearNotesStorageError, collectOpenTasks, markPagesBinned, markPagesRestored, notesConflictFor, notesConflictLine,
   notesScopeLabel, notesStorageLine, onNotesConflict, onNotesStorageError, onNotesSyncState,
-  onNotesPagesChanged, purgePages, readNoteFiles, readNoteImages, readPage, readTreeRaw,
+  collectBinFacts, ignoreDuplicate, onNotesPagesChanged, purgePages, readIgnoredDuplicates, readNoteFiles,
+  readNoteImages, readPage, readTreeRaw,
   resolveNotesConflict, searchNotes, setNotesScope, startNotesSync, stopNotesSync,
-  sweepImagesOfMissingPages, sweepOrphans, toggleNoteTask, writePage, writeTree,
+  sweepEmptyAnchors, sweepImagesOfMissingPages, sweepOrphans, toggleNoteTask, writePage, writeTree,
 } from "./lib/notesStore.js";
 import {
   attachmentIdsInDocs, imageIdsInDocs, pageToMarkdown, safeFileName, MD_INLINE_ATTACHMENT_MAX,
@@ -52,6 +54,9 @@ const NoteEditor = lazy(() => import("./components/NoteEditor.jsx"));
  * download before it can paint. It is small, and the rule is the rule — this route's byte
  * budget is the one thing the lazy boundary exists to protect. */
 const QuickOpen = lazy(() => import("./components/QuickOpen.jsx"));
+/* The integrity bar renders only when something is actually wrong, so its bytes have no
+ * business on the rail's first paint either — see its own header. */
+const IntegrityBanner = lazy(() => import("./components/IntegrityBanner.jsx"));
 
 const RADIUS = { control: 8, pill: 999 }; // mirrored from shared/ui/controls.jsx — see NoteToolbar
 /* The footer's one line is coloured by what it SAYS, never by anything else — a failed sync
@@ -144,7 +149,10 @@ function UndoBar({ deleted, onUndo, onDismiss }) {
       }}
     >
       <span style={{ flex: 1, minWidth: 0 }}>
-        Deleted “{deleted.title || "Untitled"}”{deleted.pageIds.length > 1 ? ` and its ${deleted.pageIds.length} pages` : ""}. It is in the bin for 30 days.
+        {/* ⛔ THE COUNT IS WHAT ELSE WENT, NOT INCLUDING THIS NOTE (NEW-4). `pageIds` is the
+            delete's cascade set and includes the note itself, so this used to tell somebody
+            that one page with one child took "its 2 pages" with it. */}
+        Deleted “{deleted.title || "Untitled"}”{deleted.pageIds.length > 1 ? ` and ${subpagesPhrase(deleted.pageIds.length - 1)}` : ""}. It is in the bin for 30 days.
       </span>
       <button
         type="button" data-testid="notes-undo" onClick={onUndo}
@@ -159,72 +167,6 @@ function UndoBar({ deleted, onUndo, onDismiss }) {
         style={{
           flex: "0 0 auto", border: "1px solid var(--border-default)", borderRadius: RADIUS.pill,
           background: "transparent", color: "var(--text-tertiary)", font: "inherit",
-          fontSize: 11.5, fontWeight: 700, padding: "2px 10px", cursor: "pointer",
-        }}
-      >Dismiss</button>
-    </div>
-  );
-}
-
-/** ⛔ THE SAME NOTE IN TWO PROJECTS, AND A NOTE FILED NOWHERE — SAID OUT LOUD (NEW-1/NEW-4).
- *
- *  The whole reason this exists: a note was copied into an unrelated pursuit and the product
- *  had no way to mention it. It was found by hand a week later, under a tombstone heading,
- *  because the pursuit had since been deleted. Nothing about the copy was announced at the
- *  moment it was made, and nothing looked for it afterwards.
- *
- *  It is deliberately QUIET AND ABSENT rather than dismissible-and-forgotten: it renders only
- *  when there is a real finding, and it names the finding rather than describing a category.
- *  One line by default; the detail is one click away, never in the default view
- *  (PANEL-BREVITY). */
-function IntegrityBanner({ duplicates, unreachable, projectNames, onOpen, onRecover, onDismiss }) {
-  const dupLine = duplicateNotice(duplicates);
-  const lost = (unreachable || []).length;
-  if (!dupLine && !lost) return null;
-  const nameOf = (id) => (id == null ? NO_PROJECT_LABEL : projectNames.get(id) || "a project that no longer exists");
-  const first = duplicates?.[0] || null;
-  return (
-    <div
-      role="alert"
-      data-testid="notes-integrity-banner"
-      data-duplicates={duplicates?.length || 0}
-      data-unreachable={lost}
-      style={{
-        flex: "none", display: "flex", alignItems: "center", gap: 10, padding: "6px 14px",
-        background: "var(--warn-bg)", borderBottom: "1px solid var(--border-default)",
-        color: "var(--warn-text)", fontSize: 12.5, fontWeight: 600,
-      }}
-    >
-      <span style={{ flex: 1, minWidth: 0 }}>
-        {dupLine ? `${dupLine} ${first ? first.pages.map((p) => `“${p.title}” in ${nameOf(p.projectId)}` + (p.where === "bin" ? " (in the bin)" : "")).join(" · ") : ""}` : null}
-        {dupLine && lost ? " " : null}
-        {lost ? `${lost === 1 ? "One note is" : `${lost} notes are`} filed in no project and reachable from nowhere.` : null}
-      </span>
-      {first ? (
-        <button
-          type="button" data-testid="notes-integrity-open" onClick={() => onOpen(first)}
-          style={{
-            flex: "0 0 auto", border: "1px solid var(--warn-text)", borderRadius: RADIUS.pill,
-            background: "transparent", color: "var(--warn-text)", font: "inherit",
-            fontSize: 11.5, fontWeight: 700, padding: "2px 10px", cursor: "pointer",
-          }}
-        >Show me</button>
-      ) : null}
-      {lost ? (
-        <button
-          type="button" data-testid="notes-integrity-recover" onClick={onRecover}
-          style={{
-            flex: "0 0 auto", border: "1px solid var(--warn-text)", borderRadius: RADIUS.pill,
-            background: "transparent", color: "var(--warn-text)", font: "inherit",
-            fontSize: 11.5, fontWeight: 700, padding: "2px 10px", cursor: "pointer",
-          }}
-        >Put {lost === 1 ? "it" : "them"} back</button>
-      ) : null}
-      <button
-        type="button" onClick={onDismiss}
-        style={{
-          flex: "0 0 auto", border: "1px solid var(--border-default)", borderRadius: RADIUS.pill,
-          background: "transparent", color: "var(--warn-text)", font: "inherit",
           fontSize: 11.5, fontWeight: 700, padding: "2px 10px", cursor: "pointer",
         }}
       >Dismiss</button>
@@ -346,6 +288,13 @@ export default function Notes({
      (NEW-4). `null` means "not scanned yet", which is not the same as "nothing found". */
   const [integrity, setIntegrity] = useState({ duplicates: [], unreachable: [] });
   const [integrityHidden, setIntegrityHidden] = useState(false);
+  /* What auto-adoption actually rescued this visit — reported, never healed in a silence
+     indistinguishable from the failure itself. */
+  const [recovered, setRecovered] = useState([]);
+  /* Bumped when a duplicate is settled, so the scan re-runs and the bar goes quiet. */
+  const [dupeTick, setDupeTick] = useState(0);
+  /* A binned note being read WITHOUT being restored (NEW-3). */
+  const [peek, setPeek] = useState(null);
   /* ⛔ THE IN-RAIL SCOPE SWITCH IS GONE (B1420), and B1374's guarantee is UNCHANGED.
    * "Show me everything" is now the DASHBOARD — which shows every project's pages grouped by
    * project — and its crumb is at the top of every screen, so it is still exactly one click
@@ -397,6 +346,17 @@ export default function Notes({
     const keep = [...allPageIds(loaded), ...trashPageIds(loaded)];
     sweepOrphans(keep);
     sweepImagesOfMissingPages(keep);
+
+    /* ⛔ AND THE ONE-TIME CLEAN-UP FOR NOTES ALREADY CARRYING EMPTY BLOCKS. Everything else in
+     * this round stops NEW ones being made; this is the only thing that helps a note that
+     * already has a handful in it, each one an invisible dead zone that would go on swallowing
+     * presses at that spot forever. It touches only pages that actually change, it goes
+     * through `writePage` so the cleaned copy reaches the cloud too, and its bar for "empty"
+     * refuses to guess — see `notesAnchorPrune.js`. It is SAID rather than done quietly. */
+    const swept = sweepEmptyAnchors(keep);
+    if (swept.removed) {
+      setExportNote(`Cleared ${swept.removed} empty box${swept.removed === 1 ? "" : "es"} left behind by an earlier version, across ${swept.pages} note${swept.pages === 1 ? "" : "s"}.`);
+    }
 
     treeRef.current = loaded;   // seed the ref with what was just read, so a flush before
     setTree(loaded);            // the first edit cannot write a null over real notebooks
@@ -612,14 +572,29 @@ export default function Notes({
       try {
         const scan = await import("./lib/notesScan.js");
         if (!live) return;
-        setIntegrity({ duplicates: scan.scanNoteDuplicates(tree), unreachable: scan.unreachableNotes(tree) });
+        /* ⛔ ONLY DUPLICATES SOMEBODY CAN ACT ON (NEW-4). The live project ids go in, so a copy
+         * whose project was deleted is not reported as a decision he has to make — and neither
+         * is one he has already settled with "keep both".
+         *
+         * ⛔ AND A LOOKUP THAT FAILED PASSES `null`, NOT AN EMPTY LIST. They are opposite
+         * facts: an empty READY list says "there are no projects, so every filed copy is a
+         * tombstone", while a failed one says nothing at all — and letting the second wear the
+         * first's clothes would silently suppress a real finding, which is the one answer this
+         * scan must never invent. */
+        setIntegrity({
+          duplicates: scan.scanNoteDuplicates(tree, {
+            liveProjectIds: projectList.state === "ready" ? projects.map((p) => p.id) : null,
+            ignored: readIgnoredDuplicates(),
+          }),
+          unreachable: scan.unreachableNotes(tree),
+        });
       } catch (_) {
         // A scanner that could not load leaves the last finding on screen rather than
         // replacing it with a silent all-clear — the one answer it must never invent.
       }
     }, INTEGRITY_SCAN_MS);
     return () => { live = false; clearTimeout(t); };
-  }, [tree]);
+  }, [tree, projects, projectList.state, dupeTick]);
 
   const results = useMemo(
     () => (query.trim() ? searchNotes(tree, query, { projectId, scope: projectId == null ? SCOPE_ALL : SCOPE_PROJECT }) : []),
@@ -835,6 +810,43 @@ export default function Notes({
     purgePages(r.pageIds);
   }, [tree, persistTree]);
 
+  /* ⛔ THE BIN'S FACTS, COMPUTED ONLY WHILE THE BIN IS OPEN (NEW-3). It reads every binned
+   * page's body, which is cheap for a bin and pointless for a rail nobody is looking at. */
+  const [binOpen, setBinOpen] = useState(false);
+  const binFacts = useMemo(
+    () => (binOpen ? collectBinFacts(tree, projects) : []),
+    [binOpen, tree, projects],
+  );
+
+  /** ⛔ READ IT WITHOUT RESTORING IT. The whole complaint was that deciding required a round
+   *  trip through his live tree. Opens read-only; nothing is written, nothing moves. */
+  /** ⛔ AND IT READS WHAT THE ROW PROMISED — see `collectBinFacts` for the measured mismatch.
+   *  `reading` is the list of pages in the entry that actually have words in them, in order,
+   *  computed by the SAME pass that computed the preview and the character count. */
+  const handlePeekBin = useCallback((entry) => {
+    const reading = (entry?.reading || []).filter((r) => r?.pageId);
+    setPeek({
+      entryId: entry.id,
+      title: entry.title || "Untitled",
+      pages: reading.length ? reading : [],
+    });
+  }, []);
+
+  /** Clear every empty note in one action — sixteen of his twenty-one rows. */
+  const handlePurgeEmpties = useCallback((entryIds) => {
+    let next = treeRef.current || tree;
+    const ids = [];
+    for (const id of entryIds || []) {
+      const r = purgeTrashEntry(next, id);
+      next = r.tree;
+      ids.push(...r.pageIds);
+    }
+    if (!entryIds?.length) return;   // the TOMBSTONE has to be persisted even for an entry
+    persistTree(next);               // that named no pages, or the purge cannot survive a merge
+    purgePages(ids);
+    setExportNote(`${entryIds.length} empty ${entryIds.length === 1 ? "note" : "notes"} deleted for good. Nothing that had words in it was touched.`);
+  }, [tree, persistTree]);
+
   const handlePurgeAll = useCallback(() => {
     let next = tree;
     const ids = [];
@@ -939,24 +951,77 @@ export default function Notes({
     setQuery("");
   }, [projectId, onNavigate]);
 
-  /** Put a note that is filed nowhere back where it can be reached. It goes to the named
-   *  "Not in a project" home and NOWHERE ELSE — the page's project is exactly the fact that
-   *  was lost, and inventing a plausible one is the defect this whole item is about. The
-   *  page keeps its own ID, so this re-attaches the existing body rather than copying it. */
-  const handleRecoverUnreachable = useCallback(() => {
+  /* ⛔ AUTO-ADOPTION: A BODY WITH NO NODE IS GIVEN ONE, ON SIGHT (NEW-1).
+   *
+   * The previous round surfaced the finding and offered a button. That was still a note
+   * sitting lost while a banner talked about it — and the banner did not even name which
+   * note. Healing is now the default: the scan runs, anything it finds gets a node under the
+   * named "Recovered notes" home, and the bar reports what ALREADY happened.
+   *
+   * ⛔ IT GUESSES NOTHING. No project (that fact died with the node), no title (that died
+   * with it too — the page is named from its own first line and the bar says so). And it
+   * keeps each page's own ID, so this re-attaches the existing body rather than copying it.
+   *
+   * ⛔ A REFUSED WRITE IS NOT A RECOVERY. If persisting fails, the note stays in
+   * `unreachable` and the bar says the browser refused — never a silent "all better". */
+  useEffect(() => {
+    if (!integrity.unreachable.length) return;
+    const base = treeRef.current || tree;
+    const r = adoptUnreachable(base, integrity.unreachable);
+    if (!r.adopted.length) return;
+    const byId = new Map(integrity.unreachable.map((o) => [o.pageId, o]));
+    persistTree(r.tree);
+    setRecovered((prev) => [
+      ...prev,
+      ...r.adopted.map((a) => ({ ...a, ...(byId.get(a.pageId) || {}) })),
+    ]);
+    setIntegrity((st) => ({ ...st, unreachable: [] }));
+  }, [integrity.unreachable, tree, persistTree]);
+
+  /** ⛔ THE THREE HONEST ANSWERS TO A DUPLICATE, IN THE BAR ITSELF (NEW-4). The previous
+   *  version offered "Show me" and "Dismiss" — a finding with no resolution, which is how a
+   *  banner that cannot be satisfied trains somebody to ignore the one that matters. */
+  const handleKeepOne = useCallback((group, keepPageId) => {
     let next = treeRef.current || tree;
-    let n = 0;
-    for (const orphan of integrity.unreachable) {
-      const r = addPage(next, { projectId: null, id: orphan.pageId, title: `Recovered note — ${orphan.preview.slice(0, 40)}` });
-      if (!r.pageId) continue;
-      next = r.tree;
-      n += 1;
+    const binned = [];
+    for (const p of group.pages) {
+      if (p.pageId === keepPageId) continue;
+      const { tree: t2, removedPageIds, entry } = deleteNode(next, p.pageId);
+      if (!entry) continue;
+      next = t2;
+      binned.push(...(removedPageIds || []));
+      markPagesBinned(entry.pageIds);
     }
-    if (!n) return;
+    if (!binned.length) return;
     persistTree(next);
-    setIntegrity((s) => ({ ...s, unreachable: [] }));
-    setExportNote(`${n === 1 ? "One note was" : `${n} notes were`} put back under “${NO_PROJECT_LABEL}”. ${n === 1 ? "It was" : "They were"} filed in no project, so that is where ${n === 1 ? "it" : "they"} went — nothing was guessed.`);
-  }, [tree, persistTree, integrity.unreachable]);
+    setDupeTick((n) => n + 1);
+    setExportNote(`Kept one copy. The ${binned.length === 1 ? "other is" : "others are"} in the bin for 30 days, so this is undoable.`);
+  }, [tree, persistTree]);
+
+  /** …and the third: they are both meant to be there. Remembered, so it stops asking. */
+  const handleKeepBoth = useCallback(async (group) => {
+    const scan = await import("./lib/notesScan.js");
+    ignoreDuplicate(scan.duplicateKey(group));
+    setDupeTick((n) => n + 1);
+    setExportNote("Kept both. I won't mention that pair again.");
+  }, []);
+
+  /** File a recovered note into a project — or leave it loose, which is a real place with a
+   *  name and not a shrug. A recovered page is already at the top level, so this is the one
+   *  re-file and nothing else. */
+  const handleFileRecovered = useCallback((pageId, pid) => {
+    persistTree(movePage(treeRef.current || tree, pageId, null, 0, { projectId: pid }));
+    setRecovered((prev) => prev.filter((r) => r.pageId !== pageId));
+    const where = pid == null ? NO_PROJECT_LABEL : (projects.find((p) => p.id === pid)?.name || "that project");
+    setExportNote(`Filed under ${where}. You can rename it from the row's menu — its original name was lost with its entry.`);
+  }, [tree, persistTree, projects]);
+
+  /** …and the other honest answer: they did not want it. Bins it like any other note, with
+   *  the same undo and the same 30 days. */
+  const handleBinRecovered = useCallback((pageId) => {
+    setRecovered((prev) => prev.filter((r) => r.pageId !== pageId));
+    handleDelete(pageId);
+  }, [handleDelete]);
 
   /* ---- export + print ---- */
 
@@ -1014,6 +1079,11 @@ export default function Notes({
     ]);
     const html = buildPrintDocument({
       title: hit.page.title || "Note",
+      /* ⛔ AND THIS ONE IS DELIBERATELY A TOTAL, which is the exception the NEW-6 sweep found
+         and kept. Everywhere else a count answers "how many things am I about to act on?",
+         where folding a note in with its subpages makes two things read as three. Here it
+         describes WHAT IS ON THE PAPER — and every one of those sections really is printed,
+         so the total is the honest number. */
       meta: `${pages.length === 1 ? "1 page" : `${pages.length} pages`} · Planyr Notes`,
       pages: pages.map((p) => ({ ...p, html: docToHtml(bodies[p.id], images) })),
     });
@@ -1051,14 +1121,21 @@ export default function Notes({
         onKeepTheirs={() => handleConflict(conflict.pageId, "theirs")}
       />
       {integrityHidden ? null : (
+        <Suspense fallback={null}>
         <IntegrityBanner
           duplicates={integrity.duplicates}
           unreachable={integrity.unreachable}
+          recovered={recovered}
+          projects={projects}
           projectNames={projectNames}
           onOpen={handleOpenFinding}
-          onRecover={handleRecoverUnreachable}
+          onFile={handleFileRecovered}
+          onBin={handleBinRecovered}
+          onKeepOne={handleKeepOne}
+          onKeepBoth={handleKeepBoth}
           onDismiss={() => setIntegrityHidden(true)}
         />
+        </Suspense>
       )}
 
       <div style={{ flex: 1, minHeight: 0, display: "flex" }}>
@@ -1094,6 +1171,9 @@ export default function Notes({
           onRestore={handleRestore}
           onPurge={handlePurge}
           onPurgeAll={handlePurgeAll}
+          binFacts={binFacts}
+          onPeekBin={handlePeekBin}
+          onPurgeEmpties={handlePurgeEmpties}
           /* THE TASK ROLLUP (NEW-4). Opening the item carries its own words in as the
              search term, so the editor marks the line and steps to it — the same mechanism
              a search hit already uses, which is why "jump straight to that line" needed no
@@ -1101,11 +1181,78 @@ export default function Notes({
           taskGroups={taskGroups}
           onToggleTask={handleToggleTask}
           onOpenTask={(t) => { setActivePageId(t.pageId); setHighlight(t.text); setQuery(""); }}
-          onViewChange={(v) => setTasksOpen(v === "tasks")}
+          onViewChange={(v) => { setTasksOpen(v === "tasks"); setBinOpen(v === "bin"); }}
         />
 
         <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", minHeight: 0 }}>
-          {activePage ? (
+          {/* ⛔ READING A BINNED NOTE, WITHOUT RESTORING IT (NEW-3). Its own editor instance,
+              keyed on the page so it mounts fresh, `readOnly` so no transaction can be
+              generated at all — and a bar that says plainly what you are looking at, because a
+              deleted note that looks exactly like a live one is its own trap. */}
+          {peek ? (
+            <div data-testid="notes-peek" style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
+              <div
+                role="status"
+                style={{
+                  flex: "none", display: "flex", alignItems: "center", gap: 10, padding: "6px 14px",
+                  background: "var(--surface-raised)", borderBottom: "1px solid var(--border-default)",
+                  color: "var(--text-secondary)", fontSize: 12.5, fontWeight: 600,
+                }}
+              >
+                <span style={{ flex: 1, minWidth: 0 }}>
+                  Reading “{peek.title}” from the bin. Nothing you do here changes it.
+                </span>
+                <button
+                  type="button"
+                  data-testid="notes-peek-restore"
+                  onClick={() => { handleRestore(peek.entryId); setPeek(null); }}
+                  style={{
+                    flex: "0 0 auto", border: "1px solid var(--accent-notes)", borderRadius: RADIUS.pill,
+                    background: "var(--accent-notes)", color: "var(--on-accent-notes)", font: "inherit",
+                    fontSize: 11.5, fontWeight: 700, padding: "2px 12px", cursor: "pointer",
+                  }}
+                >Restore it</button>
+                <button
+                  type="button"
+                  data-testid="notes-peek-close"
+                  onClick={() => setPeek(null)}
+                  style={{
+                    flex: "0 0 auto", border: "1px solid var(--border-default)", borderRadius: RADIUS.pill,
+                    background: "transparent", color: "var(--text-tertiary)", font: "inherit",
+                    fontSize: 11.5, fontWeight: 700, padding: "2px 10px", cursor: "pointer",
+                  }}
+                >Close</button>
+              </div>
+              {/* ⛔ IT READS THE WHOLE ENTRY, IN ORDER — every page in the binned subtree that
+                  has words in it, which is exactly the set the row's preview and character
+                  count were computed from. His report: the row showed real text and "656
+                  characters", and Read it showed a heading and nothing else, because the entry
+                  was a CONTAINER with no body of its own and its words lived in its child. The
+                  list read the child; the reader opened the parent. One walk feeds both now
+                  (see `collectBinFacts`), so they cannot disagree again. */}
+              <div style={{ flex: 1, minHeight: 0, overflow: "auto" }}>
+                {(peek.pages || []).map((pg, i) => (
+                  <div key={pg.pageId} style={i ? { borderTop: "1px solid var(--border-default)" } : undefined}>
+                    <Suspense fallback={<EditorFallback />}>
+                      <NoteEditor
+                        key={`peek:${pg.pageId}`}
+                        pageId={pg.pageId}
+                        title={pg.title || peek.title}
+                        readOnly
+                        status="saved"
+                        scopeLabel={scopeLabel}
+                      />
+                    </Suspense>
+                  </div>
+                ))}
+                {!(peek.pages || []).length ? (
+                  <p data-testid="notes-peek-nothing" style={{ margin: "18px 16px", color: "var(--text-secondary)", fontSize: 13 }}>
+                    There is nothing to read in this one — no writing was ever saved in it, or it has already been deleted for good.
+                  </p>
+                ) : null}
+              </div>
+            </div>
+          ) : activePage ? (
             <Suspense fallback={<EditorFallback />}>
               {/* key = page id + BODY EPOCH — the remount is the fix. See this file's
                   header for the page half, and `bodyEpoch` above for the second window's. */}
