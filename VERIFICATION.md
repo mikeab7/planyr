@@ -113,6 +113,108 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V161952 — B366384–B366386: sharing tells the truth about an already-shared project, and the state is visible `Blocker: auth`
+
+**Why this is here and what is NOT pending.** The DATABASE half is done and was proven against the real
+production rows this session, impersonating the owner and writing nothing (all three calls returned
+`changed:0`). That is stronger than a click-through and is **not** awaiting anything:
+
+| scenario (real data) | answer | was |
+|---|---|---|
+| re-share **8 South** (`smqiljx5fngg`, v587) to the team it ALREADY has | `outcome:"already", matched:1, mismatched:0` | returned `0` → *"This project isn't in the cloud yet"* |
+| a group that does not exist | `outcome:"not-found", matched:0` | indistinguishable from the above |
+| **Goose Creek** (4 plans) private→private, corrected group key | `outcome:"already", matched:4, plans:4` | — (proves the key reaches every plan) |
+
+Also verified here (no browser): `db/team_share_state.sql` **applied to production 2026-08-11**, both RPCs
+confirmed keyed on `coalesce(data->>'groupId', id)` with `coalesce(group_id, id)` absent from both bodies ·
+**visibility unchanged by the migration — still exactly 2 shared projects, 8 South + RICHEY** · lint 0 errors ·
+the full unit suite green incl. the new **shareMirror** (18) · build green.
+
+**What is pending, and why it cannot be driven here.** The sandbox proxy CORS-blocks Supabase sign-in, so the
+signed-in UI cannot be reached at all. Every step below needs a real signed-in session.
+
+**Steps still to run, signed in as the owner:**
+1. Open the map list. **8 South and RICHEY must each read `Shared with HIP Houston`** on the row's second
+   line (accent, beside the status and acreage) with the shared glyph at the left. **The other 32 must not.**
+   ⛔ This is the one that proves B366385 — before the fix all three indicators were blank.
+2. Right-click **8 South** → the share section must read **`Shared with HIP Houston`**, the HIP Houston row
+   must show **`✓ Unshare`**, and **Make private** must be offered. Right-click any unshared project → it must
+   read **`Private — only you can see this`** and its team row must offer **`Share`**.
+3. Click the already-shared team row's… no — first just **re-share 8 South to HIP Houston** (click the team it
+   already has is an UNSHARE, so instead reopen and share it again after step 4). **Confirm no
+   "isn't in the cloud yet" message appears at any point.**
+4. Unshare **8 South**, confirm the row's `Shared with…` line disappears, then share it back to HIP Houston
+   and confirm the line returns. Reload and confirm it is still there — that is the mirror surviving a save.
+5. **The multi-plan check (B366386).** Share **Silvestri** (5 plans) → then confirm from the database that
+   **all 5 rows carry the team**:
+   `select id, name, team_id from sites where coalesce(data->>'groupId', id) = 'smrp1wrgg6u5' and deleted_at is null;`
+   Then unshare it and confirm **all 5 clear**. Repeat for **Goose Creek** (4 plans) if you want the second
+   sample. ⚠ Note this is expected to PASS on today's data — the corrected key selects the same rows as the
+   old one for every one of his real groups (measured); the fix is preventive. What the check is really
+   guarding is that the share reaches all 5 at once and the unshare clears all 5 at once.
+6. Open the **Team** tab → the shared-projects count for HIP Houston must read **2**, not 0.
+7. Before/after list-row appearance for the record: BEFORE = status + acreage only, with a small accent
+   figures glyph whose meaning was hover-only. AFTER = the same line plus `· Shared with HIP Houston`.
+
+### V161953 — B366387–B366389: the project switcher is a project LIST again, and its icons match `Blocker:` none — owner judgement only
+
+**⚠ MOST OF THIS IS ALREADY PASSED HERE, in a real browser, per ATTEMPT-BEFORE-YOU-PARK.** The dropdown is
+logged-out reachable, so it was driven rather than parked. `e2e/project-rename.spec.js` — **8/8 passed**
+against Chromium (`PW_CHROME=/opt/pw-browsers/chromium-1234/chrome-linux64/chrome`, the repo's pinned
+Playwright wants revision 1228 which is not in this image):
+
+- ✅ **No "All projects (…)" row** in the open dropdown (`toHaveCount(0)`), and **no `project-rename-current`**.
+- ✅ **The kebab is clicked with NO hover first** — the case that was impossible before — and rename through it
+  still writes **every plan in the group** and survives a reload.
+- ✅ Captured the open dropdown before and after. **BEFORE:** search field → **`▦ All projects (Map)` · current**
+  → the project row (no kebab, timestamp only) → `+ New project`. **AFTER:** search field → the project row
+  carrying **`current` AND the ⋮ kebab, with nothing hovered** → `+ New project`. One row shorter, and it now
+  reads as a list of projects with a New-project action, which is what the owner asked for.
+- ✅ Also green here: lint 0 errors · the full unit suite incl. **projectSwitcherChrome** (21) · build green ·
+  both re-pointed ui-audit harnesses (**verify-new1to3** inverted, **verify-b439-b440-project-manage**
+  strengthened) updated in the same commit as the change they describe.
+
+**What is genuinely left, and neither is something a harness can answer:**
+1. **The owner's own look at the two icons.** *"They just look kinda like shit"* is an aesthetic verdict, and
+   the fix (matched monochrome stroke SVGs inheriting their row's colour, Delete's in the danger red) has to
+   be judged by him on his own display. If the new pencil/wastebasket still read wrong, say so and they get
+   redrawn — this is not a "confirm it works" step.
+2. **A real touch device.** The kebab being reachable without hover is asserted in a browser, but *tapping* it
+   on a phone or tablet is the case the whole precondition exists for, and only real touch hardware proves it.
+   ⛔ If this fails, B366388's removal of the crumb rename is unsafe and must be reverted with it.
+
+### V162864 — B367296: the header pill on Clay & Porter reads just the ETJ, and Bain no longer joins Katy to the answer `Blocker: auth`
+
+**Proven here, as far as this environment can reach — the residual is only the signed-in header on his own account.**
+
+- **THE WHOLE PORTFOLIO, LIVE.** All 28 sites driven through the real `identifyJurisdiction` + `formatJurisdictionBadge` against the real TxDOT / TxGIO / H-GAC services (`node ui-audit/verify-jurisdiction-portfolio.mjs`), before and after: **27 correct → 27 correct**, 0 mislabelled, 0 unresolved, 1 site with no drawn geometry, both runs.
+
+| site | before | after |
+|---|---|---|
+| 8 South | City of Pearland · Harris County | *(unchanged)* |
+| Bain | Unincorporated / City of Houston · ETJ / City of Katy · edge only · Fort Bend County | **City of Houston ETJ · Fort Bend County — touches City of Katy** |
+| Bayport V | City of Pasadena · Harris County | *(unchanged)* |
+| Clay & Porter | Unincorporated / City of Houston · ETJ · Harris County | **City of Houston ETJ · Harris County** |
+| Cravens | City of Missouri City · Fort Bend County | *(unchanged)* |
+| Forbidden Gardens | Unincorporated / City of Houston · ETJ · Harris County | **City of Houston ETJ · Harris County** |
+| Gessner | City of Houston · Harris County | *(unchanged)* |
+| Goose Creek | Part in City of Baytown (6 of 14 lots) / rest in its ETJ · Harris County | **Part in City of Baytown (6 of 14 lots) · rest in its ETJ · Harris County** |
+| Grand Port | Unincorporated / City of Baytown · ETJ · Chambers County | **City of Baytown ETJ · Chambers County** |
+| Hoffmeister · Houston ColdPort · JFK · Jacintoport · Katz · Kennedy Greens · Pappadoupolos · Pinnacle · Pinto II · RICHEY · Richfield · Schiel · Silvestri | Unincorporated / City of Houston · ETJ · Harris County | **City of Houston ETJ · Harris County** |
+| I-10/HWY 90 | Unincorporated / City of Brookshire · edge only · Waller County | **Unincorporated · Waller County — touches City of Brookshire** |
+| Martini · Mesa | City of Houston · Harris County | *(unchanged)* |
+| Tsakiris | Part in City of Katy (2 of 9 lots) / rest outside it · no ETJ published for City of Katy · Waller County | **Part in City of Katy (2 of 9 lots) · rest outside it (no ETJ published for City of Katy) · Waller County** |
+| Will Clayton | City of Humble / City of Houston · ETJ · Harris County | **City of Humble · Houston ETJ · Harris County** |
+
+- **EVERY IN-CITY SITE STILL NAMES ITS CITY** (8 South, Bayport V, Cravens, Gessner, Martini, Mesa, Will Clayton). **EVERY ETJ SITE NOW LEADS WITH THE ETJ** (16). **EVERY NO-ETJ SITE READS UNINCORPORATED** with its nearby city behind the em dash (I-10/HWY 90). **GOOSE CREEK STILL DOES NOT CLAIM BAYTOWN** — it reports 6 of 14 lots and names the ETJ that holds the other 8.
+- **RENDERED, IN A REAL BROWSER.** `npm run verify:jurbadge` — the real `AppHeader` + `JurisdictionBadge` over the real identify chain and the recorded agency answers, 4 widths × both themes: **49/49**, mutation-proven (restoring the "Unincorporated ·" prefix turns 16 rows red). It also measured the clip: Bain 464 px → 349 px at 980 px, and the governing lead always fits — residual tail ellipsising is **B367298**.
+
+**WHAT IS STILL PENDING, AND IT IS ONLY THIS.** The header pill on **his signed-in account, on planyr.io, with Clay & Porter open** — the sandbox cannot sign in to Supabase (proxy CORS), so the one thing not driven here is the real plan loading its real parcels and painting the pill.
+
+- **PASS** = Clay & Porter's header reads exactly `City of Houston ETJ · Harris County` — the words "Unincorporated" and "/" both absent.
+- **AND ON BAIN** = `City of Houston ETJ · Fort Bend County — touches City of Katy`. Katy must be after the dash. If it is ellipsised away at his window width that is B367298 and not a failure of this item — but the part BEFORE the dash must be complete and readable.
+- **AND THE NUMBER THAT MATTERS DID NOT MOVE.** On any of the 16 ETJ sites, open Yield → Stormwater and check the floodplain administrator still names the **City of Houston** candidate and the finished-floor rule is still the Ch. 19 one (0.2% WSE + 2 ft). B367297 is the item that guarantees this in code; this is the eyes-on confirmation that nothing else was reading the label.
+- **A NULL IS NOT A DISPOSITION (STANDING RULE #2).** If the pill cannot be provoked into showing anything, say so and take one of the three admissible routes — do not record "not reproducible" and archive.
 ### V165104 — B369536: on or after **2026-09-18**, does the retention job actually DELETE? `Blocker: real-data`
 
 **Due 2026-09-19, and the extra day is not slack — read this before filing a failure.** The oldest row is **2026-06-20 22:16:28 UTC**, so it crosses 90 days at **2026-09-18 22:16 UTC** — *after* that morning's 07:20 run. **The first run that can delete anything is 2026-09-19 07:20 UTC.** A read on 2026-09-18 will correctly return `WAIT` and proves nothing; do not report that as a failure. A one-shot Routine is armed for **2026-09-19 08:00 UTC**; if it is not honoured, run it by hand.

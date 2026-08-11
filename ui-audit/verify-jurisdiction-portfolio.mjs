@@ -16,8 +16,10 @@
  * against the fixture's recorded ground truth:
  *
  *   in-city      → the badge NAMES that city and does not read "Unincorporated"
- *   ETJ          → the badge reads "Unincorporated" and NAMES the ETJ city
- *   no-ETJ       → the badge reads "Unincorporated"; any nearby city is DEMOTED, never the lead
+ *   ETJ          → the badge LEADS with "City of <X> ETJ" and does NOT also print "Unincorporated"
+ *                  (NEW-1: an ETJ is the unincorporated band outside a city's limits, so the pair
+ *                  was redundant — and the same separator also carried merely-adjacent cities)
+ *   no-ETJ       → the badge reads "Unincorporated"; any nearby city sits behind the em dash
  *
  * ⛔ IT IS A LIVE-NETWORK HARNESS AND IS NOT PART OF `npm test`. The agency services are exactly
  * the flaky dependency this whole item is about, so a network failure here is reported as
@@ -86,39 +88,58 @@ const fixture = JSON.parse(fs.readFileSync(FIXTURE, "utf8"));
 
 const norm = (s) => String(s || "").toLowerCase().replace(/^city of\s+/, "").trim();
 
-/* The verdict for ONE site: does the badge string agree with the recorded ground truth?
- * Three shapes, and the third is the one this whole item exists for. */
+/* The verdict for ONE site: does the badge agree with the recorded ground truth?
+ *
+ * ⛔ RE-STATED BY NEW-1 (B367296). This used to split `jur` on " / " and classify each part by the
+ * qualifier glued to it ("· ETJ", "· edge only", "· touches"). That parse WAS the defect it was
+ * auditing: one separator carried both "this city governs you" and "this city is next door", so the
+ * judge had to reconstruct a distinction the label never made. It now reads the STRUCTURED badge —
+ * `shape`, `governingCities`, `etjLabels`, `tail` — exactly as NEW-2 requires of every consumer, and
+ * checks the STRING only for the property the owner actually asked for: no city that governs nothing
+ * may appear anywhere in the governing chain. */
 function judge(site, badge) {
-  const jur = badge ? badge.jur : "";
-  const leadsUninc = /^Unincorporated/.test(jur);
-  const problems = [];
   if (!badge) return { ok: false, problems: ["no badge produced"] };
+  const problems = [];
   if (badge.unresolvedRoles && badge.unresolvedRoles.length) {
     return { unresolved: true, problems: [`lookup failed: ${badge.unresolvedRoles.join(", ")}`] };
   }
-  /* The rule being checked is the owner's, stated verbatim on NEW-1: a site whose land is in no
-   * city reads UNINCORPORATED, and any city that merely touches it "appears only after the
-   * governing answer, clearly marked as a touch and never as the site's jurisdiction."
-   *
-   * `truth` is the containment answer at the site's ORIGIN — one point. That is the right check for
+  const jur = badge.jur || "";
+  const gov = badge.governingCities || [];
+  const etjs = badge.etjLabels || [];
+
+  /* `truth` is the containment answer at the site's ORIGIN — one point. That is the right check for
    * "did the app claim a city where the ground says none", and it is NOT a whole-site answer: a
-   * drawn assemblage can genuinely straddle a city limit that its origin sits outside of (Goose
-   * Creek and Tsakiris both do). So a QUALIFIED city — "part in", an ETJ, an edge-only touch — is
-   * always acceptable; only a BARE city lead is a mislabel. */
-  const bare = jur.split(" / ").filter((p) => /^City of /.test(p) && !/· ETJ|· edge only|· touches/.test(p));
+   * drawn assemblage can genuinely straddle a city limit its origin sits outside of (Goose Creek and
+   * Tsakiris both do). So a SPLIT is always acceptable; only a bare whole-site city claim is a
+   * mislabel. */
   if (site.truth.city) {
-    if (leadsUninc) problems.push(`in ${site.truth.city} city limits but the badge leads "Unincorporated"`);
+    if (badge.shape === "unincorporated") problems.push(`in ${site.truth.city} city limits but the badge reads "Unincorporated"`);
     if (!jur.toLowerCase().includes(norm(site.truth.city))) problems.push(`does not name ${site.truth.city}`);
   } else {
-    if (bare.length) problems.push(`names "${bare[0]}" as the site's jurisdiction — the land at the origin is in no city`);
-    else if (!leadsUninc && !/^Part in City of/.test(jur)) problems.push(`UNINCORPORATED but the badge leads "${jur.split(" / ")[0]}"`);
-    // The ETJ has to be named AS an ETJ — a city that happens to appear as an edge-only sliver is
-    // not the ETJ answer, and on 16 of these sites the ETJ is the governing floodplain rule.
-    if (site.truth.etj) {
-      const named = jur.split(" / ").some((p) => /· ETJ$/.test(p) && norm(p.replace(/ · ETJ$/, "")) === norm(site.truth.etj));
-      if (!named) problems.push(`in the ${site.truth.etj} ETJ but the badge does not name it as an ETJ`);
-    }
+    if (gov.length) problems.push(`names "${gov[0]}" as holding the whole site — the land at the origin is in no city`);
+    else if (!["unincorporated", "etj", "split"].includes(badge.shape)) problems.push(`UNINCORPORATED but the badge reads "${jur}"`);
+    // The ETJ has to be named AS an ETJ — a city that happens to touch the edge is not the ETJ
+    // answer, and on 16 of these sites the ETJ is the governing floodplain rule.
+    if (site.truth.etj && !etjs.some((e) => norm(e) === norm(site.truth.etj)))
+      problems.push(`in the ${site.truth.etj} ETJ but the badge does not name it as an ETJ`);
   }
+
+  /* ⛔ NEW-1, THE ITEM ITSELF, checked on EVERY site rather than only the ones with a known touch.
+   * (a) a city that governs nothing may not appear in the governing chain — it belongs behind the
+   * em dash; (b) once an ETJ is named, "Unincorporated" is redundant and must not be printed. */
+  /* ⚠ An edge city that is ALSO the named ETJ is not a violation — it is the Kennedy Greens shape,
+   * and it was the whole point of B276754: Houston clips the parcel edge AND Houston's ETJ governs
+   * the land. The name in the chain is the ETJ (which governs), not the sliver (which does not), and
+   * the formatter already drops the duplicate tail. Only a city with NO governing role may not
+   * appear. Four of the owner's sites are this shape — checking it naively reports all four as
+   * mislabels, which is how a judge manufactures its own failure. */
+  const adjacentOnly = (badge.edgeOnlyCities || []).filter(
+    (c) => !etjs.some((e) => norm(e) === norm(c)) && !gov.some((g) => norm(g) === norm(c)),
+  );
+  for (const c of adjacentOnly)
+    if (jur.toLowerCase().includes(norm(c))) problems.push(`"${c}" merely touches the site but sits in the GOVERNING chain: "${jur}"`);
+  if (etjs.length && /Unincorporated/i.test(badge.text || ""))
+    problems.push(`names an ETJ and still prints "Unincorporated" — an ETJ is unincorporated land by definition`);
   return { ok: problems.length === 0, problems };
 }
 
@@ -143,14 +164,14 @@ for (const site of fixture.sites) {
     badge = formatJurisdictionBadge(j);
   } catch (e) { err = String(e && e.message || e); }
   const verdict = err ? { unresolved: true, problems: [err] } : judge(site, badge);
-  rows.push({ site: site.site, truth: site.truth, badge: badge ? badge.text : null, verdict });
+  rows.push({ site: site.site, truth: site.truth, badge: badge ? badge.text : null, shape: badge ? badge.shape : null, verdict });
   // Pace the sweep. Twenty-eight sites is ~110 queries at three agencies; fired back to back they
   // throttle, and a throttled run reads as a wall of "couldn't check" that says nothing about the
   // labels. Slower and honest beats fast and unreadable.
   await new Promise((res) => setTimeout(res, 400));
   if (!asJson) {
     const mark = verdict.skipped ? "–" : verdict.unresolved ? "?" : verdict.ok ? "✅" : "❌";
-    console.log(`${mark} ${site.site.padEnd(19)} ${badge ? badge.text : "(no badge)"}`);
+    console.log(`${mark} ${site.site.padEnd(19)} ${(badge ? badge.shape : "-").padEnd(15)} ${badge ? badge.text : "(no badge)"}`);
     for (const p of verdict.problems || []) console.log(`   ↳ ${p}`);
   }
 }

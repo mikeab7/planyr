@@ -42,33 +42,36 @@ const gooseCreek = formatJurisdictionBadge({
 });
 
 describe("the shortened pill drops whole FACTS, governing one first", () => {
-  it("segments the owner's reported pill in reading order", () => {
-    expect(bain.text).toBe("Unincorporated / City of Houston · ETJ · Harris County · Katy ISD");
+  it("segments the owner's reported pill in reading order, governing slot first", () => {
+    // The label grammar is B367296's: `·` separates SLOTS of the governing chain, and an ETJ site
+    // leads with the city whose ETJ reaches it (unincorporated is implied, not printed).
+    expect(bain.text).toBe("City of Houston ETJ · Harris County · Katy ISD");
     expect(jurisdictionSegments(bain)).toEqual([
-      "Unincorporated", "City of Houston · ETJ", "Harris County", "Katy ISD",
+      "City of Houston ETJ", "Harris County", "Katy ISD",
     ]);
   });
 
-  it("shortens it to the governing fact plus a count — his own example", () => {
+  it("shortens it to the governing fact plus a count", () => {
     expect(abbreviateJurisdiction(bain)).toEqual({
-      text: "Unincorporated +3", hidden: 3, full: bain.text,
+      text: "City of Houston ETJ +2", hidden: 2, full: bain.text,
     });
   });
 
   it("⛔ never cuts a segment in half — the split lead survives intact", () => {
     // A CSS ellipsis on this line yields "Part in City of Bayto…", which reads as a DIFFERENT,
-    // wrong answer rather than a short one. The lead is kept whole or not at all.
+    // wrong answer rather than a short one. The lead is kept whole or not at all — and on a split
+    // site the lead names BOTH halves, because both really govern.
     const short = abbreviateJurisdiction(gooseCreek);
-    expect(short.text).toBe("Part in City of Baytown (6 of 14 lots) +3");
+    expect(short.text).toBe("Part in City of Baytown (6 of 14 lots) · rest in its ETJ +2");
     expect(gooseCreek.text.startsWith("Part in City of Baytown (6 of 14 lots)")).toBe(true);
     expect(short.full).toBe(gooseCreek.text);
   });
 
-  it("⛔ splits on the SEGMENT separator, never on ' · ' — an ETJ is one fact, not two", () => {
-    // "City of Houston · ETJ" contains the same middle dot the top-level join uses. Splitting the
-    // rendered string on it would shatter one segment into two and mis-count everything after.
-    expect(jurisdictionSegments(bain)).toContain("City of Houston · ETJ");
-    expect(abbreviateJurisdiction(bain).hidden).toBe(3);
+  it("⛔ takes the SLOTS the label built, never a re-split of the rendered string", () => {
+    // The split shape's lead slot contains the same middle dot the chain is joined with. Splitting
+    // the rendered text would shatter that one governing fact into two and mis-count the rest.
+    expect(jurisdictionSegments(gooseCreek)).toContain("Part in City of Baytown (6 of 14 lots) · rest in its ETJ");
+    expect(abbreviateJurisdiction(gooseCreek).hidden).toBe(2);
   });
 
   it("says nothing about a count it does not have, and survives a null", () => {
@@ -78,15 +81,31 @@ describe("the shortened pill drops whole FACTS, governing one first", () => {
     expect(jurisdictionSegments(null)).toEqual([]);
   });
 
-  it("falls back to the joined string for a legacy badge with no `parts`", () => {
+  it("⛔ a legacy badge with no slots keeps its chain WHOLE — it is never re-split", () => {
+    // Recovering a fact from the rendered label is banned repo-wide (test/jurisdictionCoupling),
+    // and this module does not get an exemption for being the one that shortens it. A legacy badge
+    // contributes its governing chain as one opaque segment: shorter than ideal, never wrong.
     const legacy = { text: "Unincorporated · Harris County", jur: "Unincorporated", county: "Harris County" };
     expect(jurisdictionSegments(legacy)).toEqual(["Unincorporated", "Harris County"]);
     expect(abbreviateJurisdiction(legacy).text).toBe("Unincorporated +1");
+    const legacyChain = { text: "A · B · C", jur: "A · B", county: "C" };
+    expect(jurisdictionSegments(legacyChain)).toEqual(["A · B", "C"]);
   });
 
-  it("the formatter now publishes its segments — the shortener never re-parses the display string", () => {
+  it("the non-governing tail is the LAST segment — the first thing worth dropping", () => {
+    const withTail = formatJurisdictionBadge({
+      city: ["Katy"], cityAll: [], cityCentroid: [], etj: [], county: ["Fort Bend"],
+      sources: [{ id: "city", state: "ok" }, { id: "county", state: "ok" }],
+    });
+    const segs = jurisdictionSegments(withTail);
+    expect(withTail.tail).toBeTruthy();
+    expect(segs[segs.length - 1]).toBe(withTail.tail);
+    expect(abbreviateJurisdiction(withTail).text.startsWith(segs[0])).toBe(true);
+  });
+
+  it("the label publishes its slots — the shortener never re-parses the display string", () => {
     expect(Array.isArray(bain.parts)).toBe(true);
-    expect(bain.parts).toEqual(["Unincorporated", "City of Houston · ETJ"]);
+    expect(bain.parts).toEqual(["City of Houston ETJ"]);
   });
 });
 

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { parcelCardRows } from "../lib/appraisal.js";
+import { PinIcon, EmptyCircleIcon, WarnTriangleIcon } from "./icons.jsx";
 
 /* ParcelInfoCard (B233, reshaped by NEW-1) — the card that drops in under the map
  * finder's search pill after a "Go". Three distinct states: found (the parcel's key
@@ -80,7 +81,12 @@ export default function ParcelInfoCard({
         : { top: 64, left: "50%", transform: "translateX(-50%)", width: 348, maxWidth: "calc(100% - 540px)" }),
     }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 11px", borderBottom: found ? `1px solid ${PAL.panelLine}` : "none" }}>
-        <span style={{ flex: "none", fontSize: 13 }}>{found ? "📍" : info.status === "none" ? "○" : "⚠"}</span>
+        {/* NEW-3 — one slot, one icon family. It used to render a COLOUR emoji pin against two text
+            glyphs, so the three states of the same badge didn't match each other. */}
+        <span style={{ flex: "none", display: "grid", placeItems: "center",
+          color: info.status === "unavailable" ? "var(--warn-text)" : found ? PAL.accent : PAL.muted }}>
+          {found ? <PinIcon size={13} /> : info.status === "none" ? <EmptyCircleIcon size={13} /> : <WarnTriangleIcon size={13} />}
+        </span>
         <span style={{ flex: 1, fontSize: 12.5, fontWeight: 700, color: info.status === "unavailable" ? PAL.accent : PAL.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
           {found ? (info.addr || info.label || "Parcel")
             : info.status === "none" ? "No parcel at this point"

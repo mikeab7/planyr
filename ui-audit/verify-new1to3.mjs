@@ -63,8 +63,13 @@ await projCrumb.click();
 await page.waitForTimeout(400);
 const search = page.locator('input[placeholder="Search projects…"]');
 await ok("Dropdown search field present", await search.isVisible());
-const allProj = page.locator('button:has-text("All projects (Dashboard)")');
-await ok('"All projects (dashboard)" row pinned', await allProj.isVisible());
+/* NEW-1 (2026-08-11) — INVERTED DELIBERATELY. This used to assert the pinned "All projects
+ * (Dashboard)" row was VISIBLE. The owner had it removed as a duplicate: it called the same
+ * goDashboard handler as the Dashboard crumb, which is permanently visible immediately to the left
+ * of the control that opens this dropdown. The check is kept, pointing the other way, so the row
+ * cannot quietly come back. */
+const allProj = page.locator('button:has-text("All projects (")');
+await ok('"All projects (…)" duplicate row REMOVED from the dropdown', (await allProj.count()) === 0);
 const newProj = page.locator('button:has-text("New project")');
 await ok('"New project" action at bottom', await newProj.isVisible());
 // recent projects newest-first: Katy (2m) before Brookshire (3h) before Schiel (5d)

@@ -222,6 +222,10 @@ import { PARCEL_SURFACES, parcelMenuModel, boundaryEditHint } from "./lib/parcel
 // helpers stay on the critical path.
 import { getKey, setKey } from "./lib/titleKey.js";
 import { identifyJurisdiction, identifyRoadAuthority, polylineDistMeters, formatJurisdictionBadge, countyAtPoint } from "./lib/jurisdiction.js";
+/* NEW-2 — the STRUCTURED accessor for "which city governs here". Never recover this by parsing the
+ * badge label: that coupling silently downgraded the floodplain rule on 16 of the owner's 28 sites
+ * the moment the wording changed. See jurisdictionLabel.js's header. */
+import { governingCityOf } from "./lib/jurisdictionLabel.js";
 import { representativeRing, ringCentroid, ringsSignature } from "./lib/siteAnalysis.js";
 import JurisdictionBadge from "./components/JurisdictionBadge.jsx";
 import SourceTag from "./components/SourceTag.jsx";
@@ -13068,11 +13072,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // candidate, and `resolveAdministrator` picks the STRICTER rule, so including it can only
       // raise the floor. Dropping it would let a site that is half inside a city be priced entirely
       // on the county's laxer standard.
-      cityLabel: jurBadge?.cityContainment === "in"
-        ? (jurBadge?.jur || "").split(" / ")[0].replace(/^City of\s+/, "") || null
-        : jurBadge?.cityContainment === "partial"
-          ? (jurBadge?.partialCities || [])[0] || null
-          : null,
+      /* ⛔ NEW-2 (B367297) — READ THE MODEL, NEVER THE LABEL. This was
+       *     (jurBadge?.jur || "").split(" / ")[0].replace(/^City of\s+/, "")
+       * — the governing city recovered by PARSING the badge string. It survived only because the
+       * old label happened to put the city first and join everything with " / ". Under NEW-1's
+       * grammar the same parse returns "Humble · Houston ETJ" on an in-city-plus-ETJ site; that
+       * matches no rule record, so the CITY's floodplain ordinance is never raised as a candidate
+       * and the site is priced on the county's, which in flat Harris/Fort Bend floodplain commonly
+       * sits 1–2 ft LOWER. `governingCityOf` answers the same question from the structured model
+       * and cannot be broken by a wording change. */
+      cityLabel: governingCityOf(jurBadge),
       // B209508 — what could NOT be checked. This is what makes the result refuse to settle.
       unresolvedRoles: jurBadge?.unresolvedRoles || [],
       // NEW-2 — and what has not been checked YET. Before the first identify returns there is no
@@ -13620,8 +13629,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       .catch((e) => {
         if (cancelled) return;
         setJurBadge({
-          text: "Jurisdiction · couldn't check", jur: "Jurisdiction · couldn't check", county: null, isd: null,
-          straddle: false, edgeOnlyCities: [], partialCities: [], touchesCities: [],
+          // NEW-1 — no internal separator: in the badge's grammar " · " joins GOVERNING slots, and a
+          // failure is not one of them.
+          text: "Couldn't check jurisdiction", jur: "Couldn't check jurisdiction", county: null, isd: null,
+          tail: null, shape: "unknown",
+          straddle: false, governingCities: [], edgeOnlyCities: [], partialCities: [], touchesCities: [],
           unresolvedRoles: ["city", "etj", "county"], unresolved: true,
           cityContainment: "unknown", etjLabels: [],
           sourceName: "TxDOT / TxGIO / H-GAC",

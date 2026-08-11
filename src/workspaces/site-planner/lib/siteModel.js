@@ -1517,6 +1517,58 @@ export const teamShareOf = (m) => ({
   ownerId: (m && m.ownerId) || null,
 });
 
+/* ⛔ NEW-2 — THE SHARING POINTER IS NOT CONTENT, SO IT IS NEVER DECIDED BY A TIMESTAMP.
+ *
+ * `teamId` / `ownerId` / `shareLocked` are read-time MIRRORS of server-owned COLUMNS
+ * (`sites.team_id` / `user_id` / `share_locked`). Every OTHER scalar on the model is content, and
+ * `mergeSiteContent` resolves content by taking the copy with the newer `updatedAt`. For these
+ * three that rule is always wrong, and it is what made every sharing indicator blank:
+ *
+ *   B458's immediate mirror write advances the LOCAL `updatedAt` on every edit while the cloud
+ *   push lags behind it (stated verbatim in storage.js's B460 note). So on `pullCloud` the local
+ *   copy is routinely the newer one, `...newer` took its STALE `teamId: null`, and the cloud's
+ *   authoritative column was discarded — on every pull, for every project. The owner's two shared
+ *   projects (8 South, RICHEY) therefore read as private on the map list, in the share menu and in
+ *   TeamPanel's shared-projects count, all three at once, while the database said otherwise.
+ *
+ * This is the SAME DEFECT SHAPE as the rename split (B1415–B1418), and it takes the same rule:
+ * ⛔ never re-derive the winner from `updatedAt`. There, `siteRenamedAt` is the fact that decides;
+ * here the deciding fact is simpler — the COLUMN is the authority, full stop, so the mirror is
+ * copied rather than voted on.
+ *
+ * READ-ONLY BY CONSTRUCTION, which is what keeps B714 intact. Nothing here writes a share value
+ * anywhere outward: `shareMirrorOf` only reads what the cloud REPORTED, and `withShareMirror` only
+ * stamps it onto a local model. `team_id` still changes through the explicit share path alone
+ * (`lib/sharing.js` → `set_project_team`), `siteRowFor` still strips all three from every content
+ * update, and the Postgres guard still refuses any UPDATE that moves `team_id` outside the RPC.
+ * That deny-by-default guard is precisely WHY this bug existed — the pointer was deliberately kept
+ * off the content path — so the fix had to make the READ direction authoritative, never the write.
+ *
+ * `absent` is the load-bearing distinction: a pre-migration database returns no `team_id` column at
+ * all, which must read as "the cloud did not say" (leave the local value alone) and never as "the
+ * cloud says private" (blank it). Conflating those would unshare a project on any client whose
+ * database predates db/team_sharing.sql.
+ */
+export const SHARE_MIRROR_FIELDS = ["teamId", "ownerId", "shareLocked"];
+
+// Read the share mirror a cloud row reported, or null when it reported none (pre-migration DB).
+// `cloudList` stamps `shareMirror` on the raw model; it is deliberately NOT a Site Model field, so
+// createSiteModel drops it and it can never be persisted or pushed as a second copy of the truth.
+export function shareMirrorOf(rawCloudModel) {
+  const mir = rawCloudModel && rawCloudModel.shareMirror;
+  if (!mir || typeof mir !== "object") return null;
+  return { teamId: mir.teamId || null, ownerId: mir.ownerId || null, shareLocked: !!mir.shareLocked };
+}
+
+// Stamp an authoritative share mirror onto a model. Identity-preserving when nothing moves, so a
+// pull over an already-correct cache allocates nothing. A null mirror is a no-op (see `absent`).
+export function withShareMirror(model, mirror) {
+  if (!model || !mirror) return model;
+  const same = SHARE_MIRROR_FIELDS.every((k) => (k === "shareLocked" ? !!model[k] === !!mirror[k] : (model[k] || null) === (mirror[k] || null)));
+  if (same) return model;
+  return { ...model, teamId: mirror.teamId || null, ownerId: mirror.ownerId || null, shareLocked: !!mirror.shareLocked };
+}
+
 // Everything that constrains development: title easements + routed easement
 // corridors (from markups), per-parcel setbacks (derived), and the live GIS
 // constraint layers enabled for this site (reserved).

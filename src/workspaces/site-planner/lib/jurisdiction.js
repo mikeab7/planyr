@@ -34,6 +34,10 @@ import { proxyServiceUrl } from "../../../shared/gis/gisProxyCore.js";
 /* B209502 — the network-free county floor beneath the live boundary identify. Pure; answers only
  * once its asset is resident, and returns a `pending` verdict rather than a guess before that. */
 import { resolveCounty } from "./countyPolygons.js";
+/* NEW-1 (B367296) — the ONE canonical label formatter. Read its header before changing any badge
+ * wording: it owns the four shapes and the three-level separator grammar that keeps a governing
+ * authority from being joined to a merely-adjacent city by the same mark. */
+import { formatJurisdictionLabel } from "./jurisdictionLabel.js";
 
 // ---------------------------------------------------------------------------
 // Source registry — one row per layer. `kind` picks the query: "polygon" = a
@@ -824,16 +828,21 @@ export const placeKey = (name) =>
 export const samePlace = (a, b) => placeKey(a) === placeKey(b) && placeKey(a) !== "";
 
 /* B763 — compact jurisdiction badge for the ACTIVE parcel/site. Turns an
- * `identifyJurisdiction` result into ONE screening-line string a developer reads
- * without toggling any boundary layer:
- *   • in a city            → "City of Houston · Harris County"
- *   • in an ETJ, no city    → "City of Baytown · ETJ · Harris County"
- *   • neither               → "Unincorporated · Waller County"
- *   • straddle              → both listed ("City of Houston / City of Katy · …"),
- *                             `straddle:true` so the badge can mark it (⚑).
- * ETJ names already covered by a matched city are dropped (a limit straddle reads
- * "City of Houston", not "… / City of Houston · ETJ"). Once B764 lands, an ISD name
- * appends via `opts.isd`. Pure → unit-tested; null when there's nothing to show. */
+ * `identifyJurisdiction` result into ONE screening line a developer reads without toggling any
+ * boundary layer.
+ *
+ * ⛔ NEW-1 (B367296) — THE STRINGS THEMSELVES LIVE IN `jurisdictionLabel.js`, WHICH IS THE ONE
+ * CANONICAL FORMATTER. Read that module's header before touching any wording here: it owns the
+ * four shapes, the three-level separator grammar (`·` governing slots · `+` co-equal peers ·
+ * `—` the non-governing tail), and the rule that once an ETJ is named "Unincorporated" is implied
+ * and is not printed. THIS function's job is the DERIVATION — turning the identify result into the
+ * structured model that formatter consumes. Keeping those apart is what stopped the old code from
+ * joining "Houston governs platting here" and "Katy is next door" with the same slash.
+ *
+ * Everything about the MODEL is unchanged: an ETJ site is still `cityContainment: "none"` and
+ * still `unincorporated: true`, because in Texas an ETJ IS unincorporated land. Only the label
+ * stopped saying both. Once B764 lands, an ISD name appends via `opts.isd`.
+ * Pure → unit-tested; null when there's nothing to show. */
 export function formatJurisdictionBadge(j, opts = {}) {
   if (!j) return null;
   const cities = uniq((j.city || []).filter((v) => v != null && v !== "").map(String));
@@ -947,68 +956,60 @@ export function formatJurisdictionBadge(j, opts = {}) {
    * governs the part its limits do NOT cover, so dropping it re-created the very silence this item
    * is about: Goose Creek read "part unincorporated" while all 8 of those lots sit in Baytown's own
    * ETJ. The remainder therefore reads the RAW ETJ names. */
+  /* ⛔ NEW-1 — the remainder's own wording carries NO governing separator. It is one slot in the
+   * governing chain, so an inner " · " would read as a second slot; a parenthetical does not. */
   const ownEtj = etjsRaw.find((e) => partCities.some((c) => samePlace(c, e)));
   const remainderLabel = ownEtj
     ? "rest in its ETJ"
     : etjsAll.length
-    ? `rest in City of ${etjsAll[0]} · ETJ`
+    ? `rest in ${etjsAll[0]} ETJ`
     : etjState === "failed"
-      ? "rest · ETJ couldn't check"
+      ? "rest (couldn't check ETJ)"
       : (j.etjUnmappedCities || []).length
-        ? `rest outside it · no ETJ published for City of ${j.etjUnmappedCities[0]}`
-        : "part unincorporated";
+        ? `rest outside it (no ETJ published for City of ${j.etjUnmappedCities[0]})`
+        : "rest unincorporated";
 
-  const lead = coreCities.length
-    ? coreCities.map((c) => `City of ${c}`)
-    /* ⛔ NEW-1 / NEW-1a — the SPLIT site, and BOTH halves have to be named correctly.
-     *
-     * Goose Creek is the case that corrected this: 6 of its 14 tested lots are inside Baytown's
-     * city limits and the other 8 are inside Baytown's ETJ — NOT ONE is plain unincorporated. The
-     * first cut of this line said "part unincorporated" unconditionally, which was a guess about
-     * the remainder dressed as a finding. The remainder is now described by what was actually
-     * found out there: an ETJ if one reaches it, "unincorporated" only when nothing does, and an
-     * honest "not checked" when the ETJ lookup could not answer.
-     *
-     * The COUNT rides the lead because "part in" is not actionable on its own — one lot of
-     * fourteen and thirteen of fourteen are different sites, and the reader cannot tell them apart
-     * from the word "part". */
-    : partCities.length
-      ? [...partCities.map((c) => `Part in City of ${c}${splitCount}`), remainderLabel]
-      : containmentUnknown || cityState === "failed"
-        ? ["City limits · couldn't check"]
-        : ["Unincorporated"];
+  /* ⛔ NEW-1a — the SPLIT site, and BOTH halves have to be named correctly.
+   *
+   * Goose Creek is the case that corrected this: 6 of its 14 tested lots are inside Baytown's
+   * city limits and the other 8 are inside Baytown's ETJ — NOT ONE is plain unincorporated. The
+   * first cut of this line said "part unincorporated" unconditionally, which was a guess about
+   * the remainder dressed as a finding. The remainder is now described by what was actually
+   * found out there: an ETJ if one reaches it, "unincorporated" only when nothing does, and an
+   * honest "not checked" when the ETJ lookup could not answer.
+   *
+   * The COUNT rides the lead because "part in" is not actionable on its own — one lot of
+   * fourteen and thirteen of fourteen are different sites, and the reader cannot tell them apart
+   * from the word "part". (The lead itself is assembled by the formatter from the model below.) */
 
   // The ETJ slot. `unavailable` means there is genuinely no ETJ layer for this area — an honest
   // "not applicable", distinct from a failure, so it stays quiet.
   const etjs = etjsAll;
-  // NEW-1a — on a SPLIT site the remainder label already names the ETJ (and the failure state), so
-  // its own slot would print the same fact twice.
-  const splitOwnsEtj = partCities.length > 0;
-  const etjParts = splitOwnsEtj ? []
-    : etjs.length
-      ? etjs.map((c) => `City of ${c} · ETJ`)
-      : etjState === "failed"
-        ? ["ETJ · couldn't check"]
-        : [];
   // …and once a city is named as the ETJ, its edge sliver is not a second fact worth a slot.
   const edgeParts = edgeCities.filter((c) => !etjs.some((e) => samePlace(e, c)));
-
-  const parts = [
-    ...lead, ...etjParts,
-    ...edgeParts.map((c) => `City of ${c} · edge only`),
-    // NEW-1 — a ring city we could not classify. It appears AFTER the governing slot and is marked
-    // as a touch, so it can never be read as the site's jurisdiction.
-    ...touchCities.map((c) => `City of ${c} · touches`),
-  ];
-  const jur = parts.join(" / ");
-  const county = counties.length
-    ? counties.map((c) => `${c} County`).join(" / ")
-    : countyState === "failed" ? "County · couldn't check" : null;
-  // B764: the ISD from the identify result (j.isd, TEA names already carry the ISD/CISD suffix),
-  // or an explicit opts.isd override. Multiple → a straddle across districts.
   const isds = uniq((j.isd || []).filter((v) => v != null && v !== "").map(String));
-  const isd = opts.isd ? String(opts.isd) : (isds.length ? isds.join(" / ") : null);
-  const text = [jur, county, isd].filter(Boolean).join(" · ");
+
+  /* ⛔ NEW-1 — THE STRUCTURED MODEL, AND THE HANDOFF. Everything above is DERIVATION (what the
+   * agencies said and what it means); everything below the handoff is PRESENTATION, and it lives
+   * in `jurisdictionLabel.js` so there is exactly one place that decides how a governing authority
+   * and a next-door city are told apart. Nothing reads back out of the strings — the structured
+   * fields are returned alongside them for that (NEW-2). */
+  const label = formatJurisdictionLabel({
+    governingCities: coreCities,
+    partialCities: partCities,
+    splitNote: splitCount,
+    remainderLabel,
+    etjCities: etjs,
+    counties,
+    isds,
+    isdOverride: opts.isd || null,
+    adjacentCities: edgeParts,
+    unclassifiedCities: touchCities,
+    cityUnresolved: containmentUnknown || cityState === "failed",
+    etjUnresolved: etjState === "failed",
+    countyUnresolved: countyState === "failed",
+  });
+  const { text, jur, county, isd, tail, shape } = label;
   // B793 — a mere edge-only sliver is qualified in-line, not flagged: the ⚑ straddle mark
   // stays for real multi-jurisdiction membership (2+ core cities, counties, or ISDs — or
   // 2+ cities with no centroid answer to arbitrate).
@@ -1018,11 +1019,20 @@ export function formatJurisdictionBadge(j, opts = {}) {
     || (allCities === null && !containmentUnknown && cities.length > 1);
   return {
     text, jur, county, isd, straddle,
-    /* NEW-2 — the badge's display SEGMENTS, in reading order, so a consumer that has to shorten
-     * the line (the header pill at a laptop width) can drop whole facts instead of cutting a
-     * sentence mid-word. `jur` is these joined by " / " and a segment may itself contain " · ",
-     * so re-splitting the string is lossy — hand them over rather than let each caller guess. */
-    parts,
+    // NEW-1 — the non-governing tail as its own field, and WHICH of the six shapes this is. A
+    // consumer that wants one of them never has to take the label apart to get it.
+    tail, shape,
+    /* NEW-2 (B371361) — the label's SLOTS, in reading order, so a consumer that has to SHORTEN the
+     * line (the header pill at a laptop width) drops whole facts instead of cutting a sentence
+     * mid-word. It is the same principle as the two fields above: nothing reads back out of the
+     * strings. `formatJurisdictionLabel` already builds this array — it is passed through rather
+     * than re-split, because a re-split is exactly the parse `governingCities` exists to retire. */
+    parts: label.slots,
+    /* ⛔ NEW-2 — THE CITY THAT GOVERNS, AS DATA. `SitePlanner.jsx` used to recover this by parsing
+     * `jur`, and that parse fed the floodplain administrator's `cityLabel` — the signal deciding
+     * whether a city's ordinance is even a candidate for the finished-floor elevation. See
+     * `jurisdictionLabel.governingCityOf`. */
+    governingCities: coreCities,
     edgeOnlyCities: edgeCities,
     // NEW-1 — cities holding PART of the site, and ring cities left unclassified by a failed lookup.
     partialCities: partCities,

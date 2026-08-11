@@ -4,7 +4,10 @@
  * workspace (the header component is shared, so the breadcrumb is identical across
  * Site / Schedule / Markup). The "Dashboard" crumb (B192) is always-visible literal
  * text routing to the all-projects view; the project crumb (B191) opens a portal
- * dropdown (search · "All projects" · recent projects newest-first · New project).
+ * dropdown (search · recent projects newest-first · Recently deleted · New project).
+ * ⛔ That dropdown deliberately carries NO "All projects" row and NO crumb-level rename
+ * (NEW-1 / NEW-2) — both duplicated a control sitting inches away. See the note at the
+ * top of the dropdown body before re-adding either.
  *
  * Persist-before-switch (B193): the workspace flushes the current project on the way
  * out (SitePlanner's unmount flush / Doc Review's persistence flush). This component
@@ -22,7 +25,8 @@
  *   onDeleteProject — (id) => void           (B439; optional — uncontrolled falls back to the store)
  *   saveState       — "synced"|"saving"|"offline"|"error"|"local"|null  (current project)
  *
- * Per-row rename/delete (B439): every project row carries a hover-revealed kebab (⋯) and a
+ * Per-row rename/delete (B439): every project row carries an ALWAYS-VISIBLE kebab (NEW-2 — it was
+ * hover-revealed, which left touch and keyboard users with no rename at all) and a
  * right-click menu (both open the SAME menu — right-click is invisible and dead on touch) with
  * Rename (edits the row label in place) and Delete (a confirm step before acting). In controlled
  * mode (e.g. the Schedule module) the workspace supplies onRenameProject/onDeleteProject to drive
@@ -78,6 +82,63 @@ const LockIcon = ({ size = 11 }) => (
  * crowd out the name entirely, and a chip too small to aim at is a different way to lose the same
  * click the owner lost to the jurisdiction pill. */
 export const CRUMB_MIN_W = 92;
+/* NEW-3 — Rename / Delete get REAL icons, in this file's own idiom (stroke, currentColor, the
+ * DashboardIcon/LockIcon shape above). What was there: a bare Unicode pencil `✎` and an emoji
+ * wastebasket `🗑`. The owner's read — "they just look kinda like shit" — has a precise cause: `✎`
+ * is a TEXT glyph, so it renders flat and monochrome in the UI font, while `🗑` resolves to a
+ * full-COLOUR emoji from the OS font. Two items in one menu that don't belong to the same visual
+ * family, both at the mercy of whatever font the platform picks, and the coloured one ignoring the
+ * `--danger` red its own row is set in. Inheriting `currentColor` is the fix for that last part:
+ * Delete's icon is now red because its row is red, rather than in spite of it. */
+const PencilIcon = ({ size = 13 }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor"
+    strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"
+    style={{ flex: "none", display: "block" }}>
+    <path d="M4 20h4L20 8l-4-4L4 16z" />
+    <path d="M14.5 5.5L18.5 9.5" />
+  </svg>
+);
+
+const TrashIcon = ({ size = 13 }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor"
+    strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"
+    style={{ flex: "none", display: "block" }}>
+    <path d="M4 7h16" />
+    <path d="M9 7V4h6v3" />
+    <path d="M6 7l1 13h10l1-13" />
+    <path d="M10 11v6M14 11v6" />
+  </svg>
+);
+
+// NEW-2 — the per-row manage affordance, now a drawn glyph rather than the `⋯` text character it
+// was. Same reason as the pair above: a text ellipsis is at the mercy of the platform font, and this
+// one sits beside real SVG icons in the same row.
+const KebabIcon = ({ size = 14 }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"
+    style={{ flex: "none", display: "block" }}>
+    <circle cx="12" cy="5" r="1.9" /><circle cx="12" cy="12" r="1.9" /><circle cx="12" cy="19" r="1.9" />
+  </svg>
+);
+
+const WarnIcon = ({ size = 13 }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor"
+    strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"
+    style={{ flex: "none", display: "block", marginTop: 1 }}>
+    <path d="M12 4L2.5 20h19z" />
+    <path d="M12 10v4.5M12 17.4v.1" />
+  </svg>
+);
+
+// "This project has a linked schedule" (schema v9). Was a 📅 emoji — a colour glyph used as an icon
+// in a row of monochrome text, which is the same defect as the wastebasket below it.
+const CalendarIcon = ({ size = 12 }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor"
+    strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"
+    style={{ flex: "none", display: "block" }}>
+    <rect x="3.5" y="5" width="17" height="16" rx="2" />
+    <path d="M3.5 10h17M8 3v4M16 3v4" />
+  </svg>
+);
 
 const crumbBtn = (extra) => ({
   display: "flex", alignItems: "center", gap: 5, flex: "none",
@@ -177,7 +238,6 @@ export default function ProjectBreadcrumb({
   const [toast, setToast] = useState(null); // transient "saved on device" notice (B193)
   const [menuFor, setMenuFor] = useState(null); // {id, name, x, y, confirm} — per-row manage menu (B439)
   const [editingId, setEditingId] = useState(null); // project id being renamed inline (B439)
-  const [editingWhere, setEditingWhere] = useState("row"); // WHICH editor owns it — "row" | "crumb" (NEW-4)
   const [editVal, setEditVal] = useState("");
   // Recently deleted (NEW-1) — the restore bin. Deleting a project soft-deletes it, so the plans
   // AND their elements survive and a restore returns the project whole.
@@ -282,14 +342,19 @@ export default function ProjectBreadcrumb({
     const y = (e.clientY || r.bottom) + 2;
     setMenuFor({ id: p.id, name: p.name, x, y, confirm: false });
   };
-  /* ⛔ `editingWhere` is NOT redundant with `editingId` — one identity, two editors is a trap.
-   * The SAME project id addresses two inline editors: its row in the list, and (NEW-4) the crumb-
-   * level "Rename “…”" row for the open project. Keyed on `editingId` alone, clicking either one
-   * mounted BOTH, each with `autoFocus`; the second to mount stole focus from the first, whose
-   * `onBlur` then committed and closed the editor in the same frame. It looked like the rename
-   * simply refused to open, and only in the planner (where the crumb-level editor exists at all).
-   * So the surface is part of the key, and exactly one editor is ever live. */
-  const startRename = (p, where = "row") => { setMenuFor(null); setEditingWhere(where); setEditingId(p.id); setEditVal(p.name || ""); };
+  /* ⛔ `editingWhere` IS GONE, and the trap it guarded went with it — read this before adding a
+   * second inline rename editor anywhere in this file.
+   *
+   * It existed because ONE project id addressed TWO editors: the project's row in the list, and the
+   * crumb-level "Rename “…”" row (removed in NEW-2 above). Keyed on `editingId` alone, clicking
+   * either mounted BOTH, each with `autoFocus`; the second to mount stole focus from the first,
+   * whose `onBlur` then committed and closed it in the same frame — so the rename looked like it
+   * simply refused to open, and only in the planner, where the crumb editor existed at all.
+   *
+   * With the crumb editor removed there is exactly ONE editor per id, so the surface is no longer
+   * part of the key and the state was dead weight. ⛔ If a second rename editor is ever reintroduced,
+   * the discriminator has to come back WITH it — `editingId` alone cannot address two editors. */
+  const startRename = (p) => { setMenuFor(null); setEditingId(p.id); setEditVal(p.name || ""); };
   const commitRename = (id) => {
     const v = (editVal || "").trim();
     setEditingId(null);
@@ -449,9 +514,14 @@ export default function ProjectBreadcrumb({
         <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
           {cross ? "All projects" : (currentName || "Select a project")}
         </span>
+        {/* NEW-3 — the at-risk marker on the crumb itself. Two fixes in one: the `⚠` text glyph
+            becomes a drawn triangle (most platforms resolve U+26A0 to a colour emoji), and the
+            HARDCODED `#f59e0b` becomes `--warn-text`. The raw hex was the B341 trap exactly — a
+            chrome-region component pinning a colour instead of a token, which reads fine until the
+            chrome flips theme, and which the contrast audit cannot check. */}
         {atRisk(saveState) && (
           <span title="Saved on this device: the cloud is unreachable" aria-hidden
-            style={{ flex: "none", color: "#f59e0b", fontSize: 11 }}>⚠</span>
+            style={{ flex: "none", color: "var(--warn-text)", display: "grid", placeItems: "center" }}><WarnIcon size={12} /></span>
         )}
         <span style={{ opacity: 0.6, fontSize: 11, flex: "none" }}>▾</span>
       </button>
@@ -484,63 +554,34 @@ export default function ProjectBreadcrumb({
         {atRisk(saveState) && (
           <div style={{ display: "flex", gap: 7, alignItems: "flex-start", padding: "7px 9px", marginBottom: 4,
             borderRadius: 7, background: "var(--surface-page)", border: "1px solid var(--warn-text)", color: "var(--warn-text)", fontSize: 11.5, lineHeight: 1.4 }}>
-            {/* B525: token-themed warn row (was a hardcoded light-amber box that became a light slab in dark mode) */}
-            <span aria-hidden>⚠</span>
+            {/* B525: token-themed warn row (was a hardcoded light-amber box that became a light slab in dark mode)
+                NEW-3 — and the marker is a drawn triangle now, not a `⚠` text glyph. Same reason as the
+                menu icons: most platforms resolve U+26A0 to a COLOUR emoji, which then ignores the
+                `--warn-text` token this whole row is deliberately painted in. */}
+            <WarnIcon />
             <span>This project's latest changes are saved on this device — the cloud is unreachable. Switching is safe; they'll sync next time you edit or close this tab.</span>
           </div>
         )}
 
-        {/* All projects (Dashboard) — pinned at top, then a divider (B191/B192) */}
-        <button
-          onClick={goDashboard}
-          onMouseEnter={() => setHoverRow("__dash")}
-          onMouseLeave={() => setHoverRow(null)}
-          style={row({ background: hoverRow === "__dash" ? "var(--hover-ghost)" : (onDash ? "var(--hover-menu)" : "transparent"), fontWeight: 600 })}
-        >
-          <span style={{ display: "flex", alignItems: "center", gap: 8, color: "var(--text-secondary)" }}>
-            <DashboardIcon size={14} />
-            All projects ({homeLabel})
-          </span>
-          {onDash && <span style={{ color: accent, fontSize: 10.5, fontWeight: 700 }}>current</span>}
-        </button>
+        {/* ⛔ NEW-1 / NEW-2 — TWO ROWS DELIBERATELY REMOVED FROM THE TOP OF THIS DROPDOWN. Do not
+            re-add either; each was a SECOND control for something already reachable inches away.
+            (Owner, 2026-08-11: "I don't know that I need an all projects map button because I have
+            that right to the top left right there. And I don't need a rename Clay & Porter right
+            there… there already is the option for the three dots, so I don't need a second option.")
 
-        {/* NEW-4 — rename THIS project, where the owner actually looks for it. Until now the only
-            rename was a right-click (or a hover-revealed kebab) on a row in a list — invisible, and
-            dead on touch. The crumb the user just opened is the control that NAMES the project they
-            are looking at, so renaming it belongs here. It reuses the SAME inline editor and the
-            SAME commitRename write path as the per-row menu — one rename implementation, not two. */}
-        {canRename && currentProject?.id && (
-          <>
-            <div style={divider} />
-            {editingId === currentProject.id && editingWhere === "crumb" ? (
-              <RenameInput
-                value={editVal}
-                onChange={setEditVal}
-                onCommit={() => commitRename(currentProject.id)}
-                onCancel={() => setEditingId(null)}
-                label={`Rename ${currentName}`}
-                testId="project-rename-current-input"
-                style={{ width: "100%", margin: "2px 0", padding: "6px 8px", border: `1px solid ${accent}`, borderRadius: 7 }}
-              />
-            ) : (
-              <button
-                data-testid="project-rename-current"
-                onClick={() => startRename({ id: currentProject.id, name: currentName }, "crumb")}
-                onMouseEnter={() => setHoverRow("__rename")}
-                onMouseLeave={() => setHoverRow(null)}
-                style={row({ background: hoverRow === "__rename" ? "var(--hover-ghost)" : "transparent" })}
-              >
-                <span style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
-                  <span aria-hidden style={{ fontSize: 12, opacity: 0.8 }}>✎</span>
-                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                    Rename “{currentName}”
-                  </span>
-                </span>
-              </button>
-            )}
-          </>
-        )}
+            NEW-1, the "All projects ({homeLabel})" row: it called `goDashboard` — the SAME handler as
+            the Dashboard crumb button, which is permanently visible immediately to the LEFT of the
+            crumb that opens this dropdown. Its `current` marker is not lost: the crumb already
+            carries `aria-current="page"` and switches from MUTED to INK when `onDash`, which is the
+            same signal in both the accessibility tree and the colour.
 
+            NEW-2, the "Rename “{currentName}”" row: every project row below has a kebab carrying
+            Rename and Delete (B439). It existed because that kebab was hover-revealed and therefore
+            "invisible, and dead on touch" — a real concern, so it was NOT simply deleted: the kebab
+            is now always rendered (see the row above), which makes it reachable by tap AND by keyboard
+            before this crumb-level duplicate went away. One entry point, not two, and not zero.
+
+            What is LEFT here is a project LIST plus a New-project action, which is what a switcher is. */}
         <div style={divider} />
 
         {/* Recent projects — newest-edited first, relative timestamps */}
@@ -552,7 +593,7 @@ export default function ProjectBreadcrumb({
           ) : (
             filtered.map((p) => {
               const cur = p.id === currentProject?.id;
-              const editing = editingId === p.id && editingWhere === "row";
+              const editing = editingId === p.id;
               const active = hoverRow === p.id || menuFor?.id === p.id; // row highlighted while its menu is open
               return (
                 <div
@@ -589,12 +630,30 @@ export default function ProjectBreadcrumb({
                           <span
                             title="Has a linked schedule"
                             aria-label="Has a linked schedule"
-                            style={{ flex: "none", fontSize: 10.5, opacity: 0.85 }}
-                          >📅</span>
+                            style={{ flex: "none", display: "grid", placeItems: "center", color: "var(--text-tertiary)" }}
+                          ><CalendarIcon /></span>
                         )}
                       </button>
+                      {/* ⛔ NEW-2 — THE KEBAB IS ALWAYS RENDERED, AND THAT IS THE PRECONDITION FOR
+                          REMOVING THE CRUMB-LEVEL RENAME, NOT A COSMETIC CHANGE.
+                          It used to render only while `active` (`hoverRow === p.id`), set purely by
+                          onMouseEnter — and the only other route to this menu is `onContextMenu`, a
+                          right-click. So on a touch device there was no rename or delete AT ALL, and
+                          for a keyboard user the control was not merely invisible but ABSENT FROM THE
+                          DOM, so it could not be tabbed to either. The crumb-level rename was
+                          covering for that (its own comment said so: "invisible, and dead on touch"),
+                          which is why it could not simply be deleted — removing one of two entry
+                          points must not leave zero. Present always; hover only BRIGHTENS it, since
+                          opacity/colour is presentation and must never be the hit-test gate.
+                          The row's timestamp / "current" marker now sits BESIDE it instead of being
+                          swapped out by it, so hovering a row no longer hides when it was edited. */}
                       <span style={{ flex: "none", display: "flex", alignItems: "center", gap: 6, paddingRight: 7 }}>
-                        {canManage && active ? (
+                        {cur ? (
+                          <span style={{ color: accent, fontSize: 10.5, fontWeight: 700 }}>current</span>
+                        ) : (
+                          <span style={{ color: "var(--text-tertiary)", fontSize: 11 }}>{relTime(p.updatedAt)}</span>
+                        )}
+                        {canManage && (
                           <button
                             onClick={(e) => openManageMenu(e, p)}
                             title="Rename or delete"
@@ -602,14 +661,11 @@ export default function ProjectBreadcrumb({
                             data-testid={`project-kebab-${p.id}`}
                             style={{
                               flex: "none", cursor: "pointer", border: "none", background: "transparent",
-                              color: "var(--text-secondary)", borderRadius: 5, padding: "0 5px",
-                              fontSize: 16, lineHeight: 1, fontFamily: "inherit",
+                              color: active ? "var(--text-secondary)" : "var(--text-tertiary)",
+                              borderRadius: 5, padding: "2px 3px", lineHeight: 0, fontFamily: "inherit",
+                              display: "grid", placeItems: "center",
                             }}
-                          >⋯</button>
-                        ) : cur ? (
-                          <span style={{ color: accent, fontSize: 10.5, fontWeight: 700 }}>current</span>
-                        ) : (
-                          <span style={{ color: "var(--text-tertiary)", fontSize: 11 }}>{relTime(p.updatedAt)}</span>
+                          ><KebabIcon /></button>
                         )}
                       </span>
                     </>
@@ -724,7 +780,7 @@ export default function ProjectBreadcrumb({
                     onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
                     style={menuItem()}
                   >
-                    <span aria-hidden style={{ fontSize: 12, opacity: 0.8 }}>✎</span> Rename
+                    <PencilIcon /> Rename
                   </button>
                 )}
                 {canDelete && (
@@ -736,7 +792,7 @@ export default function ProjectBreadcrumb({
                     onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
                     style={menuItem({ color: "var(--danger, #dc2626)" })}
                   >
-                    <span aria-hidden style={{ fontSize: 12 }}>🗑</span> Delete
+                    <TrashIcon /> Delete
                   </button>
                 )}
               </>

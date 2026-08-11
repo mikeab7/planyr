@@ -21,24 +21,30 @@
  * answer without measuring pixels. Shortening the DEFAULT VIEW is the tool; deleting a fact is not
  * (PANEL-BREVITY §6, same principle on a different surface).
  *
- * Pure — no DOM, no React. Unit-tested in test/jurisdictionBadgeFit.test.js.
+ * Pure — no DOM, no React. Guarded in test/headerNavPriority.test.js.
  */
 
 /**
  * The badge's display segments in reading order, governing fact first.
  * @param {object|null} badge a `formatJurisdictionBadge` result.
- * @returns {string[]} e.g. ["Unincorporated", "City of Houston · ETJ", "Harris County", "Katy ISD"]
+ * @returns {string[]} e.g. ["City of Houston ETJ", "Harris County", "Katy ISD"] — and the
+ *   non-governing tail, if there is one, as the LAST segment, because it is the first thing worth
+ *   dropping and the last thing anyone reads.
  */
 export function jurisdictionSegments(badge) {
   if (!badge) return [];
-  /* `parts` is authoritative when present. A segment can itself contain " · " (an ETJ reads
-   * "City of Houston · ETJ"), so splitting the joined string on that separator would shatter one
-   * fact into two; " / " is the segment separator and is the only safe fallback for a legacy or
-   * hand-written badge object that predates `parts`. */
-  const jurParts = Array.isArray(badge.parts) && badge.parts.length
+  /* ⛔ `parts` IS `formatJurisdictionLabel`'s OWN `slots` ARRAY, HANDED THROUGH — and there is
+   * deliberately NO string fallback that takes the rendered label apart. `SLOT_SEP` would in fact
+   * split the chain correctly under the current grammar (peers inside a slot join with `+`), and
+   * that is exactly the temptation the coupling guard exists to refuse: recovering a jurisdiction
+   * FACT from the jurisdiction LABEL is the parse `governingCities` was introduced to retire, and
+   * it is banned repo-wide by test/jurisdictionCoupling. A legacy or hand-written badge with no
+   * slots therefore contributes its governing chain as ONE opaque segment — shorter than ideal,
+   * never wrong. */
+  const slots = Array.isArray(badge.parts) && badge.parts.length
     ? badge.parts.filter((p) => p != null && String(p) !== "")
-    : String(badge.jur || "").split(" / ").filter(Boolean);
-  return [...jurParts.map(String), badge.county, badge.isd]
+    : [badge.jur].filter((p) => p != null && String(p).trim() !== "");
+  return [...slots.map(String), badge.county, badge.isd, badge.tail]
     .filter((p) => p != null && String(p).trim() !== "")
     .map(String);
 }

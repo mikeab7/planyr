@@ -1,5 +1,6 @@
 import { useLayoutEffect, useRef, useState } from "react";
 import { formatAge } from "../lib/gisCache.js";
+import { PinIcon } from "./icons.jsx";
 import { abbreviateJurisdiction } from "../lib/jurisdictionBadgeFit.js";
 
 /* B763 — the passive jurisdiction badge in the site header. Display-only screening
@@ -9,11 +10,12 @@ import { abbreviateJurisdiction } from "../lib/jurisdictionBadgeFit.js";
  * only (B341/B508). The `badge` prop is the `formatJurisdictionBadge` result (+ ageMs /
  * sourceName); null → renders nothing. A straddle is marked ⚑ (warn token).
  *
- * ⛔ NEW-2 — NAVIGATION WINS, AND THIS IS THE CONTENT HALF OF THAT RULE. On a laptop the owner
- * could not open the plan switcher at all: the pill ran over the plan chip and its own text span
- * answered every point of the chip's right end, the ▾ caret included. The layout half (which zone
- * yields) is in `AppHeader`; here the pill SHORTENS ITSELF when the room it is given cannot hold
- * the full line — dropping whole facts, governing one first, rather than cutting a word in half.
+ * ⛔ NEW-2 (B371361) — NAVIGATION WINS, AND THIS IS THE CONTENT HALF OF THAT RULE. On a laptop the
+ * owner could not open the plan switcher at all: the pill ran over the plan chip and its own text
+ * span answered every point of the chip's right end, the ▾ caret included. The layout half (which
+ * zone yields) is in `AppHeader`; here the pill SHORTENS ITSELF when the room it is given cannot
+ * hold the full line — dropping whole SLOTS, governing one first, rather than cutting a word in
+ * half.
  *
  * THREE THINGS NOT TO UNDO:
  *  (a) the FULL string stays in the tooltip AND in `data-jurisdiction-full`, always — shortening
@@ -38,8 +40,8 @@ export default function JurisdictionBadge({ badge }) {
     if (!pill || !span || !ghost || !pill.parentElement) return undefined;
     const host = pill.parentElement;
     const measure = () => {
-      /* The pill's chrome — icon, gaps, padding, border, the ⚑ — is whatever the pill is beyond
-         its text span, and that difference holds whether the text is truncated or not. */
+      /* The pill's chrome — pin, gaps, padding, border, the ⚑ — is whatever the pill is beyond its
+         text span, and that difference holds whether the text is truncated or not. */
       const chrome = pill.offsetWidth - span.offsetWidth;
       const cs = typeof getComputedStyle === "function" ? getComputedStyle(host) : null;
       const pad = cs ? (parseFloat(cs.paddingLeft) || 0) + (parseFloat(cs.paddingRight) || 0) : 0;
@@ -62,14 +64,21 @@ export default function JurisdictionBadge({ badge }) {
     "Jurisdiction of the active parcel: screening only; verify with the jurisdiction.",
     badge.sourceName ? `Source: ${badge.sourceName}` : "",
     age ? `As of ${age}` : "",
-    // B793 — "edge only" = the city's limits touch only the parcel edge (the centroid is
-    // outside), so that city's rules are unlikely to govern the site as a whole.
-    badge.edgeOnlyCities?.length ? `"Edge only": ${badge.edgeOnlyCities.map((c) => `City of ${c}`).join(", ")} touches only the parcel edge: unlikely to govern the site as a whole.` : "",
+    /* ⛔ NEW-1 — WHY "UNINCORPORATED" IS NOT PRINTED BESIDE AN ETJ, said once, where the reader is.
+     * The two are not alternatives: in Texas an extraterritorial jurisdiction IS the unincorporated
+     * band outside a city's limits, so ETJ land is unincorporated by definition and the word adds
+     * nothing. The label leads with what GOVERNS; the fact itself is unchanged in the model. */
+    badge.shape === "etj" ? "In a city's ETJ — which is, by definition, unincorporated land just outside that city's limits. The city's platting and (often) floodplain rules still reach here; the county remains the taxing authority." : "",
+    /* ⛔ NEW-1 — ANYTHING AFTER THE EM DASH REGULATES NOTHING HERE, and that is the whole point of
+     * the dash: the old label joined "this city governs your platting" and "this city is next door"
+     * with the same slash, and a reader could not tell them apart. B793's edge-only sliver is the
+     * ordinary case — the city's limits meet the parcel boundary and nothing more. */
+    badge.edgeOnlyCities?.length ? `After the dash — ${badge.edgeOnlyCities.map((c) => `City of ${c}`).join(", ")} meets only the parcel edge. It does not govern this site; it is named so a neighbouring jurisdiction is never a surprise.` : "",
     // NEW-1 — the two states the whole-site containment model added. A "part in" city really does
     // govern part of the site, so it is stated as membership; a "touches" city is a city we could
     // not classify, and saying which it is matters more than hiding the gap.
     badge.partialCities?.length ? `"Part in": some of the drawn parcels sit inside ${badge.partialCities.map((c) => `City of ${c}`).join(", ")} and some do not — the site is split, and both standards may apply.` : "",
-    badge.touchesCities?.length ? `"Touches": ${badge.touchesCities.map((c) => `City of ${c}`).join(", ")} borders the site, but the containment check did not complete — we cannot yet say whether the site is inside it.` : "",
+    badge.touchesCities?.length ? `"Containment unchecked": ${badge.touchesCities.map((c) => `City of ${c}`).join(", ")} borders the site, but the containment check did not complete — we cannot yet say whether the site is inside it.` : "",
     badge.failureNote || "",
     badge.etjNote || "",
     badge.straddle ? "⚑ Straddles a boundary: touches multiple jurisdictions." : "",
@@ -90,7 +99,8 @@ export default function JurisdictionBadge({ badge }) {
         color: "var(--text-primary)", whiteSpace: "nowrap", overflow: "hidden",
       }}
     >
-      <span aria-hidden="true" style={{ flex: "none", fontSize: 11 }}>📍</span>
+      {/* NEW-3 — drawn pin, not the 📍 emoji: it now inherits the pill's own text colour. */}
+      <span style={{ flex: "none", display: "grid", placeItems: "center" }}><PinIcon size={11} /></span>
       <span ref={textRef} data-jurisdiction-text="1" style={{ overflow: "hidden", textOverflow: "ellipsis" }}>
         {abbrev ? short.text : text}
       </span>
