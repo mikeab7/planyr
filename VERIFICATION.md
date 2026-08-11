@@ -113,6 +113,16 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V138560 — B342992: the recovered note opens on his own machine, and a two-window merge no longer loses a page `Blocker: auth`
+
+**Both merge holes are proven without a browser** — `test/notesReachability.test.js` reproduces each in four lines and then sweeps 6,000 randomised two-device merges across five seeds with zero pages left neither live nor binned. **The recovery of his actual note is already done as data**: `notes_trees` went 910 → 911 under a guarded update, and a full re-audit of the account returns zero bodies without a node. What the sandbox cannot do is sign in, so the last mile is his own signed-in session.
+
+- **OPEN NOTES SIGNED IN on planyr.io.** PASS = a top-level note under **“Not in a project”** named `Recovered — Channel Improvements were needed to slow down co…`, and opening it shows the Bain meeting notes intact: channel improvements to slow conveyance, the Quiddity drainage analysis, no offsite easements, Willow Point MUD for water/sanitary, the feasibility study, the $3–4/SF vs $10/SF pricing note, and the Hillcorp blanket easement. FAIL = it is missing, or opens empty.
+- **⛔ ITS NAME IS NOT THE ORIGINAL AND MUST NOT PRETEND TO BE.** The title lived on the entry that went missing. PASS = it is obviously a recovery and the bar (or this note's own row) says the name was lost. Renaming it is his to do.
+- **THE STALE-LOCAL CASE, which is the condition that made the holes reachable:** his local tree was 98 revisions behind AND flagged dirty. After this build lands, open Notes on that machine and let it sync. PASS = the recovered note is still there afterwards, every other note is still there, and nothing in the bin has come back to life.
+- **A REAL TWO-WINDOW MERGE.** Two windows on one account. In window A, bin a note that has a subpage. In window B — which has not seen it — add a NEW subpage under that same note and type in it. Let both sync. PASS = the binned note and the subpage the entry named are in the bin, and **B's new subpage is still live**, at the top level of the same project, with its text. FAIL = it is gone from both the tree and the bin (the exact shape that lost the Bain note).
+- **A NULL IS NOT A DISPOSITION (STANDING RULE #2).** If the two-window case cannot be provoked, say so and take one of the three admissible routes — provoke it harder, instrument it, or ask him whether he has seen another note vanish. Do not record "not reproducible" and archive.
+
 ### V124976 — B326416–B326419: new projects are shared with the team by default, the per-plan lock holds, and NOTHING pre-existing changed `Blocker: auth`
 
 **Why this is here and what is NOT pending.** The SECURITY property — an existing project can never become

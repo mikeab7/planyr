@@ -775,8 +775,8 @@ ok("the branch about to be deleted has a SUBPAGE under it — a flat delete woul
 await rowAction(page1, "rm");
 await page.waitForTimeout(300);
 ok("delete asks inline rather than with a dialog box", await tb(`notes-del-${page1}-yes`).count() === 1);
-ok("...and it SAYS how many pages are going, before it happens rather than after",
-  /Delete \d+\?/.test(await tb(`notes-del-${page1}-yes`).locator("xpath=..").innerText()),
+ok("...and it SAYS how many SUBPAGES are going — never counting the note itself (NEW-4)",
+  /Delete \+ \d+ subpages?\?/.test(await tb(`notes-del-${page1}-yes`).locator("xpath=..").innerText()),
   (await tb(`notes-del-${page1}-yes`).locator("xpath=..").innerText()).replace(/\s+/g, " "));
 
 await tb(`notes-del-${page1}-yes`).click();
@@ -1324,7 +1324,14 @@ const bodyBox2 = await tb("note-body").boundingBox();
 const clickX = bodyBox2.x + bodyBox2.width * 0.78;
 const clickY = Math.min(matBox.y + matBox.height - 60, bodyBox2.y + 260);
 
-await page.mouse.dblclick(clickX, clickY);
+/* ⛔ A SINGLE PRESS, NOT A DOUBLE-CLICK — SUPERSEDED BY NEW-2, AND THE PROTECTION IS KEPT.
+   B1393 ×3's rule ("the caret goes to the nearest real text position and NOTHING else") is
+   about a CLICK, and every assertion below is still asserted against one. What changed is
+   that a DOUBLE-click in blank space now starts a positioned block at the point pressed —
+   a different gesture with its own contract, proven in ui-audit/verify-notes-anchor-zoom.mjs
+   against the rendered rect. Leaving this driving a dblclick would have quietly re-pointed
+   four of B1393's guarantees at a feature they were never written for. */
+await page.mouse.click(clickX, clickY);
 await page.waitForTimeout(220);
 await page.keyboard.type("AAA", { delay: 8 });
 await settle();
@@ -2104,6 +2111,32 @@ const railSize = async (label) => {
   console.log(`     · ${label}: ${r.lines} visible lines · ${r.chars} characters · ${r.rows} tree rows`);
   return r;
 };
+/* ⛔ MEASURE THE SAME DATA THE CEILING WAS SET AGAINST. This run seeds several trees
+   directly into storage over its lifetime, which leaves page BODIES behind whose nodes are
+   gone — and since NEW-1 those are no longer destroyed on sight, they are RECOVERED into the
+   rail as real rows. That is the feature working, and it is not what this budget is about:
+   the ceiling measures the rail's CHROME AND COPY, not how many notes happen to exist. So the
+   scope is put back to exactly the tree under test first. Without this the check reads as a
+   copy regression when what actually changed is the row count. */
+await page.evaluate(() => {
+  const tree = JSON.parse(localStorage.getItem("planyr:notes:tree:v1:local") || "null");
+  const live = new Set();
+  const walk = (n) => { if (!n?.id) return; live.add(n.id); (n.pages || []).forEach(walk); };
+  (tree?.pages || []).forEach(walk);
+  for (const e of tree?.trash || []) for (const id of e.pageIds || []) live.add(id);
+  const prefix = "planyr:notes:page:v1:local:";
+  for (const k of Object.keys(localStorage)) {
+    if (k.startsWith(prefix) && !live.has(k.slice(prefix.length))) localStorage.removeItem(k);
+  }
+  // …and the nodes a previous recovery already added for those same stray bodies. Both halves
+  // are this run's own leavings, not the tree under test.
+  if (tree) {
+    tree.pages = (tree.pages || []).filter((p) => !String(p.title || "").startsWith("Recovered — "));
+    localStorage.setItem("planyr:notes:tree:v1:local", JSON.stringify(tree));
+  }
+});
+await page.reload({ waitUntil: "domcontentloaded" });
+await page.waitForSelector('[data-testid="notes-tree"]', { timeout: 20000 });
 await page.evaluate((x) => { window.location.hash = `#/project/${x}/notes`; }, GP);
 await page.waitForTimeout(900);
 const inProject = await railSize("inside a project (his own data)");

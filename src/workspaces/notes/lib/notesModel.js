@@ -80,11 +80,24 @@ export function emptyTree() {
  * REAL value here and means "unknown", which is what every page written before timestamps
  * existed honestly is: it shows no time rather than claiming it was edited the moment you
  * upgraded. */
+/* ⛔ A BLANK TITLE BECOMES THE DEFAULT **HERE**, AT THE ONE CONSTRUCTOR, NOT AT EACH CALLER
+ * (NEW-1). Every caller used `title || DEFAULT_PAGE_TITLE`, which lets `"   "` straight
+ * through — truthy, and invisible in the rail, so the row renders as a blank line and the
+ * note reads as lost when it is merely unnamed. Found by the titleless-node sweep below
+ * rather than by inspection. Doing it once, at construction, is what makes "no path can mint
+ * an unnamed page" a property instead of a habit.
+ *
+ * ⛔ AND IT IS ONLY A DISPLAY DEFAULT. A title is NEVER load-bearing for identity or for
+ * reachability anywhere in Notes — identity is the id, full stop (see the header of
+ * notesStore.js). A node whose title is null, undefined, empty or whitespace survives every
+ * path in this module intact; test/notesReachability.test.js runs all five falsy values
+ * through eleven of them. Nothing here may start keying, filtering or deduping on a title. */
 export function makePage({ id, title = DEFAULT_PAGE_TITLE, createdAt, updatedAt, at = Date.now(), pages, projectId } = {}) {
   const born = Number.isFinite(createdAt) ? createdAt : at;
+  const named = String(title ?? "");
   const node = {
     id: id || newId("pg"),
-    title: String(title),
+    title: named.trim() ? named : DEFAULT_PAGE_TITLE,
     createdAt: born,
     updatedAt: Number.isFinite(updatedAt) ? updatedAt : born,
     pages: pages ? clone(pages) : [],
@@ -133,6 +146,30 @@ export function subtreePageIds(page) {
   const go = (p) => { out.push(p.id); for (const k of kidsOf(p)) go(k); };
   if (page?.id) go(page);
   return out;
+}
+
+/** Everything a delete takes BESIDES the page you clicked.
+ *
+ *  ⛔ THE CASCADE SET IS NOT THE COUNT TO SHOW A PERSON (NEW-4). `subtreePageIds` includes the
+ *  node itself, because that is what a DELETE needs — every body to clear. Rendering that same
+ *  number as "and its N pages" counts the note you are deleting as one of its own subpages, so
+ *  a page with a single child announced itself as "Delete 2?" and then "and its 2 pages". An
+ *  inflated count is not a cosmetic problem: it is how somebody is led to believe they lost
+ *  something they did not, which is exactly what sent a session chasing a phantom.
+ *
+ *  There is deliberately no "section" here to name. B1420 removed that species on purpose — an
+ *  empty parent is a PAGE with children, not a different kind of thing — so the honest word for
+ *  what else goes is SUBPAGES, at any depth. */
+export function descendantPageIds(page) {
+  return subtreePageIds(page).slice(1);
+}
+
+/** "and its 2 subpages", or an empty string when the page stands alone. One phrasing, used by
+ *  the confirmation, the undo bar and the tests, so they cannot drift. */
+export function subpagesPhrase(count) {
+  const n = Number(count) || 0;
+  if (n <= 0) return "";
+  return `its ${n} ${n === 1 ? "subpage" : "subpages"}`;
 }
 
 /** The first page in reading order, or null. Used to pick a landing page. */
@@ -355,6 +392,79 @@ export function copyPageWithin(tree, sourcePageId, { title, id, at = Date.now() 
   siblings.splice(siblings.indexOf(hit.page) + 1, 0, pg);
   return { tree: next, pageId: pg.id, projectId, refused: null };
 }
+
+/* ---- nothing may exist without a home (NEW-1) -------------------------------------------
+ *
+ * ⛔ THE GUARANTEE THIS MODULE OWES, STATED AS A PROPERTY: **every stored page body has a node
+ * in this tree — live or in the bin.** It was true of notebooks and it was never enforced for
+ * bodies, and the gap cost a real note: 215 revisions of the owner's Bain meeting notes,
+ * healthy in storage and in the cloud, with no node in either tree and nothing in the bin
+ * naming it. Not destroyed. UNREACHABLE, which is worse, because nothing could say so.
+ *
+ * `adoptUnreachable` is the SELF-HEALING half. The detector finds a body with no node; this
+ * gives it one, in a place a person can actually see, without inventing a single fact:
+ *
+ *   • THE HOME IS NAMED AND REAL — a top-level page called "Recovered notes", in NO project.
+ *     It is found by title-and-shape and reused, so a second run adds to it rather than
+ *     making a second one.
+ *   • THE PROJECT IS NEVER GUESSED. Which project the note belonged to is precisely the fact
+ *     that was lost with its node. "Not in a project" is a real, named place; a guess is the
+ *     defect this whole family of items exists to make impossible.
+ *   • THE TITLE IS NOT INVENTED EITHER. The title lived on the node, so it is gone. The
+ *     recovered page is named from the first words the person actually wrote, and the
+ *     workspace says out loud that the original name was lost — a plausible-looking title
+ *     would be a small lie told at exactly the wrong moment.
+ *   • THE BODY IS NOT TOUCHED. This adds a node and nothing else. The document is theirs.
+ */
+/** Name a recovered page from its own first words — never from a guess. */
+export function recoveredTitle(firstLine) {
+  const words = String(firstLine || "").replace(/\s+/g, " ").trim();
+  if (!words) return "Recovered note (name lost)";
+  return `Recovered — ${words.slice(0, 48)}${words.length > 48 ? "…" : ""}`;
+}
+
+/** Give every unreachable body a node, at the TOP LEVEL, in no project.
+ *
+ *  `orphans` is `[{ pageId, firstLine, createdAt }]` from `unreachableNotes`. Returns the new
+ *  tree and what it adopted — so the caller can say so rather than healing in a silence
+ *  indistinguishable from the failure itself.
+ *
+ *  ⛔ THERE IS NO "RECOVERED" CONTAINER NODE, AND THAT IS A DELIBERATE REVERSAL. A grouping
+ *  page would have to be found again on the next run, and the only thing available to find it
+ *  by is its TITLE — which would make a title load-bearing for identity in the one code path
+ *  whose entire job is repairing a reachability failure. The same item forbids exactly that
+ *  (see the header of notesStore.js). Top-level pages in the named "Not in a project" home are
+ *  just as visible — the Dashboard groups them under that heading — and every lookup here
+ *  stays keyed on the id, which is the only thing that identifies a page. */
+export function adoptUnreachable(tree, orphans = [], { at = Date.now() } = {}) {
+  const list = (orphans || []).filter((o) => o?.pageId);
+  if (!list.length) return { tree, adopted: [] };
+  const known = new Set(allPageIds(tree));
+  for (const e of trashOfSafe(tree)) for (const id of e?.pageIds || []) known.add(id);
+  const fresh = list.filter((o) => !known.has(o.pageId));
+  if (!fresh.length) return { tree, adopted: [] };
+
+  const next = clone(tree || emptyTree());
+  if (!Array.isArray(next.pages)) next.pages = [];
+  const adopted = [];
+  for (const o of fresh) {
+    // The page keeps its OWN id, so this re-attaches the existing body rather than copying it.
+    const node = makePage({
+      id: o.pageId,
+      title: recoveredTitle(o.firstLine || o.preview),
+      at,
+      createdAt: Number.isFinite(o.createdAt) ? o.createdAt : at,
+      projectId: null,
+    });
+    next.pages.push(node);
+    adopted.push({ pageId: node.id, title: node.title });
+  }
+  return { tree: next, adopted };
+}
+
+/* `trashOf` is declared further down (the bin section owns it); this is the same read, safe to
+ * use above that point. Kept tiny and local rather than hoisting the bin section up here. */
+const trashOfSafe = (tree) => (Array.isArray(tree?.trash) ? tree.trash : []);
 
 /** `pageId → projectId` for every LIVE page, at every depth — the one answer to "which
  *  project does this page belong to?" asked of a whole tree at once. The duplicate detector

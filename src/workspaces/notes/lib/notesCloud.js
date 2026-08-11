@@ -103,8 +103,39 @@ export const emptySyncState = () => ({ treeRev: null, treeDirty: false, pages: {
  *      Page timestamps take the LATER `updatedAt` and the EARLIER `createdAt`, which is the
  *      honest reading of both regardless of which side is "winning".
  *   4. A PAGE MOVED ON BOTH DEVICES keeps the LOCAL placement and appears exactly once.
+ *   5. A DELETE ONLY TAKES WHAT IT ACTUALLY NAMED. See below — this is the rule that was
+ *      missing, and its absence is what made a real note unreachable.
+ *
+ * ⛔ RULE 5, AND WHY IT IS NOT A REFINEMENT OF RULE 1 BUT A CORRECTION OF IT (NEW-1).
+ *
+ * THE BUG, reproduced in four lines and then found in the owner's live account. Device A adds
+ * a subpage under a page and keeps typing in it. Device B — which has never seen that subpage
+ * — bins the parent. `deleteNode` stamps the entry with the cascade IT could see, so the
+ * entry names the parent and the children B knew about, and NOT A's new one. The merge then
+ * hit the parent, saw its id in `deleted`, and returned **before recursing** — so A's subpage
+ * was neither kept live nor carried into the bin. It was dropped on the floor, while its BODY
+ * (a different storage key, untouched by any of this) stayed perfectly healthy.
+ *
+ * That is exactly the failure that reached the owner: `deleted_at` NULL, `purged_at` NULL, 215
+ * revisions of real work, no node in the local tree, no node in the cloud tree, and nothing in
+ * the bin naming it. Not destroyed — UNREACHABLE, which is worse, because nothing was
+ * available to say so.
+ *
+ * THE FIX IS A DEFINITION, NOT A PATCH: **a delete's scope is exactly the set of ids its entry
+ * names.** That set is not a guess — `deleteNode` computes the full cascade at delete time and
+ * stamps it on the entry precisely so the scope is a fact rather than a re-derivation. A page
+ * outside that set was not deleted by anybody: no user ever chose it, and the device that did
+ * the deleting had never heard of it. So it is RESCUED — kept live, lifted to the top level of
+ * the project its branch belonged to, and REPORTED through `onRescue` so the workspace can say
+ * out loud that it moved.
+ *
+ * ⛔ THE ALTERNATIVE WAS CONSIDERED AND REFUSED: sweeping the unknown descendants into the bin
+ * entry alongside their parent. It keeps rule 1 tidier, and it is wrong — the bin purges for
+ * real at 30 days, so that choice quietly destroys work whose author never deleted it and
+ * never saw a prompt. TOMBSTONE-DELETES exists to stop a deleted note coming BACK; it is not a
+ * licence to destroy one nobody deleted. Rule 1 is untouched for every id an entry names.
  */
-export function mergeTrees(local, server) {
+export function mergeTrees(local, server, { onRescue } = {}) {
   const L = local && typeof local === "object" ? local : { pages: [], trash: [] };
   const S = server && typeof server === "object" ? server : { pages: [], trash: [] };
 
@@ -115,12 +146,32 @@ export function mergeTrees(local, server) {
     trashIds.add(e.id);
     trash.push(e);
   }
-  // Every page id any bin claims. A live copy on the other side loses to it (rule 1).
+  // Every page id any bin ACTUALLY NAMES. A live copy on the other side loses to it (rule 1);
+  // a page this set does not name was deleted by nobody and is rescued (rule 5).
   const deleted = new Set();
   for (const e of trash) {
     if (e?.node?.id) deleted.add(e.node.id);
     for (const pid of e?.pageIds || []) deleted.add(pid);
   }
+
+  /* ⛔ THE OTHER SIDE'S COPY OF A PAGE IS FOUND BY ID, ANYWHERE IN ITS TREE — NEVER BY
+   * POSITION (NEW-1, the second hole). The old walk looked the counterpart up among the
+   * SIBLINGS at the same spot, so the moment a page was re-parented on one device, the merge
+   * stopped being able to see the OTHER device's copy of it — and every child that copy had
+   * gained was dropped. Found by a randomised sweep, not by reading: two devices, no bins
+   * involved at all, one `move` on one side and one `add` on the other, and a brand-new page
+   * disappeared. These indexes make "the same page" a question about identity rather than
+   * about where it happens to sit. */
+  const indexTree = (nodes, map) => {
+    for (const n of nodes || []) {
+      if (!n?.id) continue;
+      if (!map.has(n.id)) map.set(n.id, n);
+      indexTree(n.pages, map);
+    }
+    return map;
+  };
+  const aIndex = indexTree(L.pages, new Map());
+  const bIndex = indexTree(S.pages, new Map());
 
   /* ONE RECURSIVE MERGE, because there is now ONE node type (B1420). The old model needed a
    * merge per level — pages inside sections inside notebooks — and each level was its own
@@ -129,30 +180,54 @@ export function mergeTrees(local, server) {
    * page that was re-parented on one device must appear EXACTLY once, in the local
    * placement (rule 4), never in both its old and its new home. */
   const seen = new Set();
-  const mergeList = (a = [], b = []) => {
+  const rescued = [];
+
+  /** Walk one side's list. `fromServer` marks a list that came from the SERVER tree — every id
+   *  the LOCAL tree also holds is skipped there, because local owns the placement (rule 4)
+   *  whether or not the local walk has reached it yet. Ordering must not decide that. */
+  const walk = (nodes, projectId, fromServer) => {
     const out = [];
-    const byId = new Map((b || []).filter(Boolean).map((p) => [p.id, p]));
-    const push = (pg, other) => {
-      if (!pg?.id || deleted.has(pg.id) || seen.has(pg.id)) return;
+    for (const pg of nodes || []) {
+      if (!pg?.id || seen.has(pg.id)) continue;
+      if (fromServer && aIndex.has(pg.id)) continue;          // local placement wins (rule 4)
       seen.add(pg.id);
+      // A node's own project when it has one (a root), otherwise its branch's — which is what
+      // a rescued page needs in order to land somewhere real rather than nowhere.
+      const branchProject = pg.projectId !== undefined ? (pg.projectId ?? null) : projectId;
+      const other = (fromServer ? aIndex : bIndex).get(pg.id) || null;
+      // The children are the UNION of both sides' children of THIS page, local ones first.
+      const kids = fromServer
+        ? [...walk(other?.pages || [], branchProject, false), ...walk(pg.pages || [], branchProject, true)]
+        : [...walk(pg.pages || [], branchProject, false), ...walk(other?.pages || [], branchProject, true)];
+
+      if (deleted.has(pg.id)) {
+        /* ⛔ RULE 5. This node really was deleted, so it goes — but `kids` are the survivors
+         * the merge just built, and every one of them is a page NO bin entry names. Lift them
+         * to the top level of the branch's project rather than letting the early return take
+         * them with it. This is the line whose absence orphaned a real note. */
+        for (const k of kids) rescued.push({ ...k, projectId: branchProject == null ? null : String(branchProject) });
+        continue;
+      }
       const merged = other
         ? { ...pg, updatedAt: laterOf(pg.updatedAt, other.updatedAt), createdAt: earlierOf(pg.createdAt, other.createdAt) }
         : { ...pg };
-      merged.pages = mergeList(pg.pages || [], other?.pages || []);
+      merged.pages = kids;
       out.push(merged);
-    };
-    for (const pg of a || []) push(pg, byId.get(pg?.id));
-    const aIds = new Set((a || []).filter(Boolean).map((p) => p.id));
-    for (const pg of b || []) if (pg?.id && !aIds.has(pg.id)) push(pg, null);
+    }
     return out;
   };
 
   // Roots also carry `projectId`, and rule 3 (the local title wins) covers it: this function
   // is only reached when local has unpushed changes, so a re-filing done here is the one
   // with something to say. A root only the server has keeps the server's project.
-  const pages = mergeList(L.pages || [], S.pages || []);
+  const pages = [...walk(L.pages || [], null, false), ...walk(S.pages || [], null, true)];
 
-  return { v: L.v || S.v || 3, pages, trash };
+  // Rescued pages go at the END of the top level, so nothing that was already there moves.
+  if (rescued.length && typeof onRescue === "function") {
+    try { onRescue(rescued.map((p) => ({ pageId: p.id, title: p.title, projectId: p.projectId ?? null }))); }
+    catch (_) { /* a bad listener must not lose the pages it was told about */ }
+  }
+  return { v: L.v || S.v || 3, pages: [...pages, ...rescued], trash };
 }
 
 const laterOf = (a, b) => (Number.isFinite(a) && Number.isFinite(b) ? Math.max(a, b) : (Number.isFinite(a) ? a : (Number.isFinite(b) ? b : null)));

@@ -78,6 +78,7 @@ written out in the header of `lib/notesStore.js`; read it there rather than re-d
   a table crashing on `setContent` against a torn-down instance) — read it before changing the save
   path. There must never be a "sync content on pageId change" effect; the search effect there is
   decorations-only and guards `isDestroyed`, which is the bar any new effect has to clear.
+- `components/IntegrityBanner.jsx` — the bar for the two findings nothing could previously mention (a note in two projects; a note that had lost its place). **Its own lazy chunk** — it renders only when something is actually wrong, so its bytes have no business on the rail's first paint.
 - `components/NoteToolbar.jsx` — formatting bar, **grouped by frequency**: what you reach for while
   writing on the row, the long tail behind **More**. Every active state is read from
   `editor.isActive(...)`, never mirrored into React state; every control cancels `mousedown` so the
@@ -103,6 +104,46 @@ written out in the header of `lib/notesStore.js`; read it there rather than re-d
   HERE so no intake path can bypass them, and `purgePages` — the ONE place a note's bytes are
   actually destroyed (body **and** images). **Read its header for `ROWS-CANONICAL-ON-SEED`, the
   Notes edition** — which copy of a note wins is written down there, not left to accident.
+- **⛔ NOTHING MAY EXIST WITHOUT A HOME — the reachability guarantee, and the two merge holes
+  that broke it (B342992).** A real note went unreachable in the owner's account: 215 revisions
+  of Bain meeting notes, healthy in storage AND in the cloud, with **no node in either tree and
+  nothing in the bin naming it.** Not destroyed — unreachable, which is worse, because nothing
+  could say so. Root cause was **`mergeTrees`, twice**, and neither hole is visible in a
+  hand-read (both were found by a randomised sweep):
+  1. **A DELETE TOOK MORE THAN IT NAMED.** The merge lifted out every id in a bin entry and
+     returned BEFORE recursing — so a page the *other* device had added under the deleted
+     parent was neither kept live nor carried into the bin. **Rule 5** now says a delete's scope
+     is exactly the ids its entry names; anything else is RESCUED to the top level of its
+     branch's project and reported through `onRescue`.
+  2. **THE OTHER SIDE'S COPY WAS LOOKED UP BY POSITION.** Re-parenting a page on one device made
+     the merge blind to that page's copy on the other, and every child it had gained there went
+     with it — **no bin involved at all**. Counterparts are now found by **id, anywhere in the
+     tree**.
+  Belt to those braces: `sweepOrphans` refuses to destroy a body that still has words in it,
+  `unreachableNotes` looks for the property being violated on every load, and `adoptUnreachable`
+  heals it — **guessing nothing**, which is why there is deliberately **no title-keyed
+  "Recovered" container** (see the next bullet). Guards: the repo-root `test/` suite
+  **notesReachability** (minimal cases + a 6,000-merge property across five seeds) and the
+  headless **verify-notes-project-integrity**. Recovery lives in `lib/notesScan.js` + `adoptUnreachable` (`lib/notesModel.js`).
+- **⛔ AND A TITLE IS NEVER LOAD-BEARING FOR IDENTITY OR REACHABILITY.** Asked directly — *is the
+  note unreachable BECAUSE it has no title?* — and the answer is **no**, proven across five falsy
+  values and eleven paths. The reason every node in his live tree carries a title is not a filter
+  eating the empty ones: **no path can mint one**, and since B342992 that is true at the one
+  constructor (`makePage`) rather than at each caller, which is what let `"   "` through. Nothing
+  here may key, index, dedupe or drop on a title. Identity is the id.
+- **A BLOCK THAT STAYS WHERE YOU PUT IT (B342993, `lib/notesAnchorNode.js`).** Double-click blank
+  space and a **real positioned node** lands at the point pressed — its position is two numbers on
+  the node, so it cannot crawl as you type, cannot leak alignment onto the next paragraph, leaves
+  no padding paragraphs, and rides the document into storage, sync and the PDF. **Read that file's
+  header before touching it**: this is the FOURTH round, and the previous check passed on the wrong
+  property. It inserts **before the document's last block**, deliberately — appending leaves a
+  blank line ProseMirror restores and cannot be deleted away. Proof is geometric, in
+  **verify-notes-anchor-zoom**: the rendered rect against the clicked coordinates.
+- **HOW BIG THE WRITING IS (B342994, `lib/notesZoom.js`).** Ctrl+wheel and Ctrl+=/−/0 scale the
+  **document**, never the app; the browser's own zoom is suppressed for those gestures so the two
+  cannot fight; the level is per-scope, persisted, and does not sync (a comfortable size belongs to
+  the screen you are at). CSS `zoom`, not a transform — the text must RE-WRAP and the caret must
+  stay the browser's own.
 - **A COPY NEVER CHANGES PROJECT — four files, one rule.** A note was copied into an unrelated
   pursuit and nobody was told; it was found by hand a week later under a "from a project you
   deleted" heading. **A page's `projectId` is a property of the PAGE, never of whoever happens to
