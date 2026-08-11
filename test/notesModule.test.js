@@ -52,6 +52,7 @@ const JSX_SURFACES = [
 const ALL_NOTES_FILES = [
   "Notes.jsx", "components/NotesTree.jsx", "components/NoteEditor.jsx", "components/NoteToolbar.jsx",
   "components/NoteSlashMenu.jsx", "components/NoteOutline.jsx", "components/NoteHistory.jsx", "components/QuickOpen.jsx",
+  "components/IntegrityBanner.jsx",
   "lib/notesModel.js", "lib/notesStore.js", "lib/notesCloud.js", "lib/notesMarkdown.js", "lib/notesExtensions.js",
   "lib/notesTime.js", "lib/notesPrint.js", "lib/notesImageDb.js", "lib/notesImageIntake.js",
   "lib/notesImageNode.js", "lib/notesSearchHighlight.js", "lib/notesDocHtml.js", "lib/notesTabKey.js",
@@ -63,6 +64,8 @@ const ALL_NOTES_FILES = [
   // NEW-1/NEW-4 — a copy never changes project, and the machine that notices when one did.
   "lib/notesDuplicates.js", "lib/notesScan.js",
   "lib/notesKeys.js", "lib/notesProjectFiling.js", "lib/notesProjectLink.js",
+  // NEW-2/NEW-3 — a block that stays where you put it, and how big the writing is.
+  "lib/notesAnchorNode.js", "lib/notesZoom.js",
 ];
 const SKETCH_FILES = ALL_NOTES_FILES.filter((f) => f.includes("Sketch"));
 
@@ -529,7 +532,13 @@ describe("LOUD-FAILURE — storage is one seam and it never fails silently", () 
     // A catch whose body has no fail() / broadcast() / return is the silent path.
     for (const m of store.matchAll(/catch\s*\([^)]*\)\s*\{([^}]*)\}/g)) {
       const body = m[1].trim();
-      const benign = /a bad listener must not mute the rest|Safari private mode/.test(m[0]) || /return\s+(null|\[\]|false|0)/.test(body);
+      /* ⛔ A CATCH IS BENIGN ONLY WHEN IT SAYS WHY, IN THE CATCH. The list is deliberately a
+         list of NAMED REASONS rather than a shape: "it returns a falsy value" would wave
+         through the next real swallowed failure that happens to return null. "A preference is
+         not data" covers the zoom level (NEW-3) — a refused read means 100%, which is a
+         correct answer, not a hidden one. */
+      const benign = /a bad listener must not mute the rest|Safari private mode|a preference is not data/.test(m[0])
+        || /return\s+(null|\[\]|false|0)/.test(body);
       expect(body.length > 0 && (/fail\(|broadcast\(/.test(body) || benign), `empty or silent catch: ${m[0].slice(0, 90)}`).toBe(true);
     }
   });

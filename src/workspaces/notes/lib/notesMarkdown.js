@@ -34,7 +34,7 @@ export const NOTE_MD_HANDLED = {
   nodes: ["doc", "paragraph", "text", "heading", "bulletList", "orderedList", "listItem",
     "taskList", "taskItem", "blockquote", "codeBlock", "horizontalRule", "hardBreak",
     "table", "tableRow", "tableHeader", "tableCell", "noteImage", "noteSketch",
-    "noteAttachment", "noteCallout", "noteToggle", "noteToggleTitle"],
+    "noteAttachment", "noteCallout", "noteToggle", "noteToggleTitle", "noteAnchor"],
   marks: ["bold", "italic", "strike", "code", "underline", "link", "textStyle", "highlight"],
 };
 
@@ -541,6 +541,16 @@ function blocks(nodes, lossy, depth = 0, images = null) {
       }
       case "horizontalRule": out.push("---"); break;
       case "noteCallout": out.push(calloutMd(node, lossy, depth, images)); break;
+      /* ⛔ AN ANCHORED BLOCK EXPORTS ITS WORDS, AND SAYS THE PLACEMENT DID NOT SURVIVE
+       * (NEW-2). Markdown has no way to say "this sits here on the page", so the honest
+       * thing is to carry the text and NAME the loss — the same contract every other
+       * construct here has. Silently exporting it as an ordinary paragraph would make the
+       * Markdown claim to be a faithful copy when it is not. */
+      case "noteAnchor": {
+        lossy.add("a block placed at a point on the page (its position)");
+        out.push(blocks(node.content, lossy, depth, images));
+        break;
+      }
       case "noteToggle": out.push(toggleMd(node, lossy, depth, images)); break;
       case "noteAttachment": out.push(attachmentMd(node, lossy, images)); break;
       case "noteImage": out.push(imageMd(node, lossy, images)); break;

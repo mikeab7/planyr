@@ -78,6 +78,10 @@ const ORPHAN = {
   content: [{ type: "paragraph", content: [{ type: "text", text: "Channel improvements were needed to slow down conveyance. Willow Point MUD to provide water and sanitary." }] }],
 };
 
+/* ⛔ HIS REAL PAGE ID, deliberately: the id encodes the moment the page was made
+   (`Date.now()` in base 36), which is the one fact that survives a lost node — so a made-up
+   id would skip the very path that recovers the date. */
+const LOST_ID = "pg_msgaajbf1o61rit";
 const GRAND_PORT = "smqfy2r7pdec";
 const COLORADO = "sms7v3ua7ksy";
 
@@ -99,10 +103,14 @@ async function seed({ sameProject = false } = {}) {
       ],
       trash: [],
     },
-    { gp_coord: doc("RPlat"), co_page1: doc("Plat"), lost_note: ORPHAN },
+    { gp_coord: doc("RPlat"), co_page1: doc("Plat"), [LOST_ID]: ORPHAN },
   ]);
   await page.reload({ waitUntil: "domcontentloaded" });
   await page.waitForSelector('[data-testid="notes-tree"]', { timeout: 20000 });
+  /* Read the tree IMMEDIATELY — auto-adoption is deliberately late but it is not slow, and by
+     the time the banner is on screen the recovery has already happened. That is the feature;
+     capturing "before" after waiting for the banner would be measuring the wrong moment. */
+  return readTree();
 }
 
 /* The integrity scan is deliberately LATE (it reads every body, so it waits for the tree to
@@ -116,34 +124,55 @@ await page.goto(`${BASE}#/notes`, { waitUntil: "domcontentloaded" });
 
 /* ════ 1. THE SAME NOTE IN TWO PROJECTS IS NAMED, UNPROMPTED ═══════════════════════════ */
 console.log("\n1 · One note, two projects — said out loud (NEW-4)");
-await seed();
+const seeded = await seed();
 ok("⛔ THE BANNER APPEARS WITH NOBODY ASKING FOR IT", await waitForBanner());
 
 const banner = tb("notes-integrity-banner");
 const dupCount = await banner.getAttribute("data-duplicates");
 const lostCount = await banner.getAttribute("data-unreachable");
 ok("…and it found exactly ONE duplicated note", dupCount === "1", `data-duplicates=${dupCount}`);
-ok("…and the note that is filed nowhere at all, separately", lostCount === "1", `data-unreachable=${lostCount}`);
+const recoveredCount = await banner.getAttribute("data-recovered");
+ok("…and the note that was filed nowhere is reported as RECOVERED, not as still lost",
+  recoveredCount === "1" && lostCount === "0", `data-recovered=${recoveredCount} data-unreachable=${lostCount}`);
 
 const text = (await banner.innerText()).replace(/\s+/g, " ");
 ok("it names the note by TITLE, not by id", /Coordination/.test(text) && /Page 1/.test(text), text.slice(0, 150));
 ok("…and says how many projects it is in", /2 different projects/.test(text));
-ok("…and names the second finding in plain words", /filed in no project/.test(text));
+ok("…and names the second finding in plain words", /has been put back/.test(text), text.slice(-140));
 
-/* ════ 2. THE LOST NOTE IS RECOVERABLE, AND THE STORE PROVES IT ════════════════════════ */
-console.log("\n2 · A note filed nowhere is put back (NEW-4)");
-const before = await readTree();
+/* ════ 2. THE LOST NOTE IS ALREADY BACK, AND THE BAR SAYS SO ══════════════════════════
+ *
+ * ⛔ SUPERSEDED BY NEW-1's SECOND ROUND, AND THE CHANGE IS THE POINT. The first version of
+ * this bar said "One note is filed in no project and reachable from nowhere" and offered a
+ * "Put it back" button. The owner's verdict: a correct finding, rendered useless — it named
+ * no note, opened nothing, and left a real note sitting lost while a banner talked about it.
+ * Recovery is now done BY THE TIME the bar is read. */
+console.log("\n2 · A note filed nowhere is already back, and the bar names it (NEW-1)");
+const before = seeded;
 const beforeIds = (before.pages || []).map((p) => p.id);
-ok("before: the lost note is in NO tree — that is why nothing could reach it", !beforeIds.includes("lost_note"), beforeIds.join(", "));
-ok("…but its body is still on the device, un-destroyed", await page.evaluate((k) => !!localStorage.getItem(k), `${PAGE_PREFIX}lost_note`));
+ok("before: the lost note is in NO tree — that is why nothing could reach it", !beforeIds.includes(LOST_ID), beforeIds.join(", "));
 
-await tb("notes-integrity-recover").click();
-await pacedWait(page, 900);
+// The scan is deliberately late; wait for the recovery on its own terms.
+await tb("notes-recovered-summary").waitFor({ state: "visible", timeout: 15000 });
+const summary = (await tb("notes-recovered-summary").innerText()).replace(/\s+/g, " ");
+ok("⛔ THE BAR REPORTS WHAT ALREADY HAPPENED, not what could", /has been put back/.test(summary), summary.slice(0, 120));
+ok("…and says WHY it has no name, rather than inventing one", /name lived on the entry that went missing/.test(summary));
+ok("…and is plural-correct for one", /^One note had lost its place/.test(summary));
+
+const lostRow = tb(`notes-recovered-${LOST_ID}`);
+ok("⛔ IT NAMES THE NOTE — by its own first line, which is all that survived", await lostRow.count() > 0);
+const rowText = (await lostRow.innerText()).replace(/\s+/g, " ");
+ok("…with the words the person actually wrote", /Channel improvements/i.test(rowText), rowText.slice(0, 90));
+ok("…how much of it there is", /\d+ characters/.test(rowText), (rowText.match(/\d+ characters/) || [""])[0]);
+ok("…and when it was written, recovered from the id itself", /written /.test(rowText), (rowText.match(/written [^·]*/) || [""])[0].trim());
+
 const after = await readTree();
-const recovered = (after.pages || []).find((p) => p.id === "lost_note");
-ok("⛔ AFTER: THE STORED TREE HOLDS IT — not just the banner", !!recovered, (after.pages || []).map((p) => p.id).join(", "));
+const recovered = (after.pages || []).find((p) => p.id === LOST_ID);
+ok("⛔ AND THE STORED TREE HOLDS IT — not just the banner", !!recovered, (after.pages || []).map((p) => p.id).join(", "));
 ok("…in the named no-project home, with NOTHING guessed", recovered && (recovered.projectId ?? null) === null, `projectId=${JSON.stringify(recovered?.projectId ?? null)}`);
-ok("…and it kept its own id, so its existing body is what it re-attached to", recovered?.id === "lost_note");
+ok("…it kept its own id, so its existing body is what it re-attached to", recovered?.id === LOST_ID);
+ok("…and its name says it is a recovery rather than pretending to be the original",
+  String(recovered?.title || "").startsWith("Recovered — "), JSON.stringify(recovered?.title));
 ok("…the exact page count went up by ONE and nothing else moved", (after.pages || []).length === (before.pages || []).length + 1);
 ok("…and every pre-existing page still answers with the project it had",
   beforeIds.every((id) => {
@@ -151,6 +180,10 @@ ok("…and every pre-existing page still answers with the project it had",
     const a = (after.pages || []).find((p) => p.id === id);
     return (a?.projectId ?? null) === (b?.projectId ?? null);
   }));
+
+/* …and the ways out are in the bar itself, which is the half that was missing. */
+ok("it offers to file it under a project, inline", await tb(`notes-recovered-file-${LOST_ID}`).count() > 0);
+ok("…and to bin it, for the honest answer that they did not want it", await tb(`notes-recovered-bin-${LOST_ID}`).count() > 0);
 
 /* ════ 3. THE OPEN NOTE SAYS WHICH PROJECT IT IS IN ════════════════════════════════════ */
 console.log("\n3 · The note says where it is filed, while you are reading it (NEW-2)");
@@ -176,7 +209,7 @@ if (await badge.count()) {
  * to a no-project note is the all-notes view. */
 await page.goto(`${BASE}#/notes`, { waitUntil: "domcontentloaded" });
 await page.waitForSelector('[data-testid="notes-tree"]', { timeout: 20000 });
-await tb("notes-row-lost_note").click();
+await tb(`notes-row-${LOST_ID}`).click();
 await pacedWait(page, 600);
 const lostLabel = (await tb("note-project-badge").innerText()).trim();
 ok("a note that genuinely belongs to no project says so, in words", /Not in a project/.test(lostLabel), lostLabel);
@@ -188,9 +221,9 @@ console.log("\n4 · The recovery is in storage, not in a render");
 await page.reload({ waitUntil: "domcontentloaded" });
 await page.waitForSelector('[data-testid="notes-tree"]', { timeout: 20000 });
 const reloaded = await readTree();
-ok("⛔ THE RECOVERED NOTE IS STILL THERE AFTER A RELOAD", (reloaded.pages || []).some((p) => p.id === "lost_note"));
+ok("⛔ THE RECOVERED NOTE IS STILL THERE AFTER A RELOAD", (reloaded.pages || []).some((p) => p.id === LOST_ID));
 ok("…and its body was never destroyed by the orphan sweep on the way through",
-  await page.evaluate((k) => !!localStorage.getItem(k), `${PAGE_PREFIX}lost_note`));
+  await page.evaluate((k) => !!localStorage.getItem(k), `${PAGE_PREFIX}${LOST_ID}`));
 ok("…and the banner no longer claims a lost note, because there isn't one",
   (await waitForBanner(9000)) ? (await tb("notes-integrity-banner").getAttribute("data-unreachable")) === "0" : true);
 
@@ -212,6 +245,13 @@ if (stillThere) {
  * nothing at all, which is how two notes ended up under a "from a project you deleted"
  * heading with the owner none the wiser. */
 console.log("\n6 · Deleting a project names its notes, and offers to take them along (NEW-3)");
+/* ⛔ RELOAD BEFORE SEEDING, NOT AFTER. The workspace flushes its in-memory tree on `unload`
+   (deliberately — a pending tree write must survive a closed tab), so seeding and THEN
+   reloading lets the outgoing page write its own tree straight back over the fixture. The
+   first version of this arm did exactly that and spent a check reporting the previous arm's
+   data. Reload first, so nothing is holding a tree, then seed, then load. */
+await page.reload({ waitUntil: "domcontentloaded" });
+await page.waitForSelector('[data-testid="notes-tree"]', { timeout: 20000 });
 await page.evaluate(([sitesKey, treeKey, gp]) => {
   localStorage.clear();
   localStorage.setItem(sitesKey, JSON.stringify({
@@ -251,6 +291,8 @@ if (await row.count()) {
     const words = (await line.innerText()).replace(/\s+/g, " ");
     ok("…and the number is the NOTES, not the loose one and not the pages", n === "2", `data-note-count=${n}`);
     ok("…and it counts the subpages separately, in words", /3 pages/.test(words), words);
+  ok("…and the fixture really is the tree under test — the seed was not flushed away",
+    JSON.stringify(await readTree()).includes("gp_a_sub"));
     ok("…and it says they survive either way, so the choice is not a threat", /stay in Notes/.test(words));
   }
   ok("…and it offers to take them along", await tb("project-delete-move-notes").count() > 0);

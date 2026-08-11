@@ -32,13 +32,18 @@
  *     touches DECORATIONS, never content, and it guards on `editor.isDestroyed` — which is
  *     the discipline any future effect in this file has to meet.
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { EditorContent, useEditor } from "@tiptap/react";
 import { noteExtensions, EMPTY_DOC } from "../lib/notesExtensions.js";
+import { clampAnchor } from "../lib/notesAnchorNode.js";
+import {
+  normalizeZoom, scrollTopAfterZoom, zoomForKey, zoomForWheel, zoomLabel, ZOOM_DEFAULT,
+} from "../lib/notesZoom.js";
 import { PASTE_MODES } from "../lib/notesPastePlain.js";
 import {
   readNoteFiles, readNoteImages, readPage, readPageVersions, registerOpenNoteDoc,
   restorePageVersion, snapshotPage, writePage,
+  readNotesZoom, writeNotesZoom,
 } from "../lib/notesStore.js";
 import {
   attachmentIdsInDoc, docToMarkdown, imageIdsInDoc, safeFileName, MD_INLINE_ATTACHMENT_MAX,
@@ -93,6 +98,18 @@ const EDITOR_CSS = `
 .planyr-note .ProseMirror .tableWrapper { overflow-x: auto; }
 .planyr-note .ProseMirror .ProseMirror-gapcursor:after { border-top-color: var(--text-primary); }
 .planyr-note .ProseMirror ::selection { background: var(--accent-notes); color: var(--on-accent-notes); }
+
+/* ⛔ A BLOCK THAT STAYS WHERE YOU PUT IT (NEW-2). Out of flow, so the rest of the document
+   does not know it exists — no padding paragraphs, no reflow, nothing to backspace through.
+   The position rule on .ProseMirror is what it anchors to; the margin reset matters because
+   the sibling-margin rule above would otherwise ADD to the top offset of an absolutely
+   positioned child. */
+.planyr-note .ProseMirror { position: relative; }
+.planyr-note .ProseMirror .planyr-anchor { position: absolute; margin: 0 !important; min-width: 120px; padding: 3px 6px 3px 16px; border: 1px dashed transparent; border-radius: 5px; }
+.planyr-note .ProseMirror .planyr-anchor:hover, .planyr-note .ProseMirror .planyr-anchor:focus-within { border-color: var(--border-strong); }
+.planyr-note .ProseMirror .planyr-anchor-grip { position: absolute; left: 3px; top: 5px; width: 9px; height: 14px; cursor: grab; border-radius: 2px; opacity: 0; background: repeating-linear-gradient(to bottom, var(--text-tertiary) 0 2px, transparent 2px 4px); }
+.planyr-note .ProseMirror .planyr-anchor:hover .planyr-anchor-grip, .planyr-note .ProseMirror .planyr-anchor:focus-within .planyr-anchor-grip { opacity: 1; }
+.planyr-note .ProseMirror .planyr-anchor-grip:active { cursor: grabbing; }
 
 /* An empty page says what to do. Both halves — the extension and this rule — landed
    together; a rule with no extension matches nothing, which is what a blank page was. */
@@ -824,6 +841,8 @@ export default function NoteEditor({
    * edge. */
   const focusFromMat = useCallback((e) => {
     if (!editor || editor.isDestroyed) return;
+    // A fresh press (not the second half of a double-click) starts the tally over.
+    if (e.detail <= 1) matInsertsRef.current = 0;
     const el = e.target;
     if (!(el instanceof Element)) return;
     if (el.closest("input, textarea, select, button, a")) return;
@@ -858,7 +877,155 @@ export default function NoteEditor({
       return;
     }
     // Exactly ONE new line, which is what clicking under the text means everywhere else.
+    /* ⛔ AND IT IS COUNTED, BECAUSE A DOUBLE-CLICK IS TWO OF THESE (NEW-2). `mousedown` fires
+     * once per press, so the double-click that starts an anchored block runs this handler
+     * twice on its way — and each run that lands below the text adds a line. Left alone that
+     * is round 2's permanent padding paragraphs arriving through the other door: junk in the
+     * document, in the Markdown and on the PDF, from a gesture that never asked for it. The
+     * count is what `anchorFromMat` takes back, exactly and deterministically. */
+    matInsertsRef.current += 1;
     editor.chain().focus().insertContentAt(doc.content.size, { type: "paragraph" }).run();
+  }, [editor]);
+
+  /* ---- HOW BIG THE WRITING IS (NEW-3) ----------------------------------------------------
+   *
+   * ⛔ THE DOCUMENT ZOOMS, THE APP DOES NOT. The sheet scales; the rail, the toolbar and the
+   * header do not. The browser already has a control that scales everything together — what
+   * it does not have is "make the writing bigger and leave my navigation where it is", which
+   * is the one being asked for. Every rule (the steps, the wheel curve, what each key means,
+   * where the level is kept) is pure and unit-tested in lib/notesZoom.js; this is the wiring.
+   *
+   * ⛔ IT USES CSS `zoom`, NOT A TRANSFORM, AND THAT IS THE LOAD-BEARING CHOICE. A transform
+   * paints the same layout larger — the line breaks stay put and the caret drifts out of the
+   * glyphs. `zoom` RE-LAYS OUT at the new size, so text rewraps, the caret is the browser's
+   * own, and the anchored blocks of NEW-2 keep their geometry. It is also why `anchorFromMat`
+   * can recover the live scale by measuring rather than by being told. */
+  /* How many empty lines the mat's own press handler has just added during THIS gesture —
+     see the note where it is incremented. Reset on every fresh press. */
+  const matInsertsRef = useRef(0);
+  const [zoom, setZoom] = useState(() => normalizeZoom(readNotesZoom()));
+  const scrollerRef = useRef(null);
+  const zoomRef = useRef(zoom);
+  zoomRef.current = zoom;
+
+  /* ⛔ THE SAME WRITING STAYS UNDER THE EYE ACROSS A STEP (VIEWPORT-STABLE). Left alone, a
+   * zoom throws the reader somewhere else: the content above the viewport changes height, so
+   * the same scrollTop points at a different paragraph. The anchor's offset is measured
+   * BEFORE the change and the new scroll position is arithmetic, not a guess — and it is
+   * applied in a layout effect, before paint, so nothing is ever seen in the wrong place. */
+  const zoomFrom = useRef(zoom);
+  const applyZoom = useCallback((next) => {
+    const to = normalizeZoom(next);
+    setZoom((cur) => {
+      if (to === cur) return cur;
+      const sc = scrollerRef.current;
+      if (sc) zoomFrom.current = { from: cur, to, scrollTop: sc.scrollTop };
+      writeNotesZoom(to);
+      return to;
+    });
+  }, []);
+
+  useLayoutEffect(() => {
+    const rec = zoomFrom.current;
+    const sc = scrollerRef.current;
+    if (!rec || typeof rec !== "object" || !sc) return;
+    zoomFrom.current = null;
+    // The anchor is the top of the viewport, expressed in the document's OWN frame — which is
+    // what makes it comparable across two different zoom levels.
+    const anchorOffset = rec.scrollTop / rec.from;
+    const nextTop = scrollTopAfterZoom({ anchorOffset, viewportOffset: 0, from: rec.from, to: rec.to });
+    if (nextTop != null) sc.scrollTop = nextTop;
+  }, [zoom]);
+
+  /* Ctrl+wheel. Non-passive and `preventDefault`ed, because the whole point is that the
+   * BROWSER's zoom does not also fire — two things scaling on one gesture is worse than
+   * neither. Attached by hand for exactly that reason: React's onWheel is passive. */
+  useEffect(() => {
+    const sc = scrollerRef.current;
+    if (!sc) return undefined;
+    const onWheel = (e) => {
+      if (!(e.ctrlKey || e.metaKey)) return;
+      e.preventDefault();
+      applyZoom(zoomForWheel(zoomRef.current, e.deltaY, { deltaMode: e.deltaMode }));
+    };
+    sc.addEventListener("wheel", onWheel, { passive: false });
+    return () => sc.removeEventListener("wheel", onWheel);
+  }, [applyZoom]);
+
+  /* Ctrl+= / Ctrl+- / Ctrl+0. On the WINDOW, because the caret is usually inside the document
+   * and a listener on the pane would miss half of them — and gated on this editor being
+   * mounted, which it only is on the Notes route. */
+  useEffect(() => {
+    const onKey = (e) => {
+      const next = zoomForKey(zoomRef.current, e);
+      if (next == null) return;
+      e.preventDefault();
+      applyZoom(next);
+    };
+    window.addEventListener("keydown", onKey, { capture: true });
+    return () => window.removeEventListener("keydown", onKey, { capture: true });
+  }, [applyZoom]);
+
+  /* ⛔ DOUBLE-CLICK IN BLANK SPACE STARTS A BLOCK **WHERE YOU CLICKED** (NEW-2).
+   *
+   * A single click keeps B1393 ×3's rule exactly — nearest real text position, nothing else,
+   * horizontal position deliberately ignored. That rule is right for a click and it is not
+   * what "double-click into empty space and type there" means, which is why this is a
+   * separate gesture rather than a change to that one.
+   *
+   * What lands is a REAL POSITIONED NODE (`noteAnchor`), not an emulation. Read that file's
+   * header for the three previous rounds and why padding paragraphs plus text-align was
+   * wrong in four distinct ways. The short version: the position is two numbers on the node,
+   * so it cannot crawl as you type, cannot leak onto the next paragraph, leaves nothing to
+   * backspace through, and rides the document into storage, the cloud and the PDF.
+   *
+   * ⛔ THE COORDINATES ARE CONVERTED OUT OF SCREEN SPACE HERE. The stored point is in the
+   * document's OWN frame — client position minus the editor's box, divided by the live zoom
+   * (NEW-3). Storing what was on the screen would move every anchored block the moment
+   * somebody zoomed, which is the same class of mistake as storing a colour instead of a
+   * tone name. */
+  const anchorFromMat = useCallback((e) => {
+    if (!editor || editor.isDestroyed) return;
+    const el = e.target;
+    if (!(el instanceof Element)) return;
+    if (el.closest("input, textarea, select, button, a")) return;
+    if (el.closest(".planyr-anchor")) return;              // already in one — that is a word select
+
+    const dom = editor.view.dom;
+    const box = dom.getBoundingClientRect();
+    const last = dom.lastElementChild;
+    const contentBottom = last ? last.getBoundingClientRect().bottom : box.top;
+    // Only BLANK space. A double-click on or beside text still selects a word.
+    if (e.clientY <= contentBottom + BLANK_SLACK && (el.closest(".ProseMirror") || el.closest("[contenteditable]"))) return;
+
+    /* The live scale, measured rather than assumed: `offsetWidth` is unzoomed CSS pixels and
+     * the client rect is zoomed ones, so their ratio IS the zoom, whatever set it. */
+    const scale = box.width / (dom.offsetWidth || 1) || 1;
+    const point = clampAnchor({
+      x: (e.clientX - box.left) / scale,
+      y: (e.clientY - box.top) / scale,
+      width: dom.offsetWidth,
+      height: dom.offsetHeight,
+    });
+    e.preventDefault();
+    e.stopPropagation();
+
+    /* ⛔ TAKE BACK THE LINES THE TWO PRESSES JUST ADDED, BEFORE PLACING THE BLOCK. Only the
+     * ones this gesture created, only while they are still empty, and only from the end —
+     * so a document that legitimately ends in a blank line keeps it, and nothing a person
+     * typed is ever touched. This is what makes "it leaves nothing behind" true rather than
+     * nearly true; the harness asserts the paragraph count is unchanged, because round 2
+     * shipped exactly this litter and the owner found it in his PDFs. */
+    let owed = matInsertsRef.current;
+    matInsertsRef.current = 0;
+    while (owed > 0) {
+      const { doc: d } = editor.state;
+      const lastNode = d.lastChild;
+      if (!lastNode || lastNode.type.name !== "paragraph" || lastNode.content.size !== 0 || d.childCount <= 1) break;
+      editor.commands.deleteRange({ from: d.content.size - lastNode.nodeSize, to: d.content.size });
+      owed -= 1;
+    }
+    editor.commands.addNoteAnchorAt(point);
   }, [editor]);
 
   /* ---- PASTE JUST THE TEXT (B36051) ------------------------------------------------------
@@ -1022,7 +1189,11 @@ export default function NoteEditor({
       <div
         data-testid="note-mat"
         onMouseDown={focusFromMat}
-        onDoubleClick={focusFromMat}
+        /* ⛔ A DOUBLE-CLICK IN BLANK SPACE IS A DIFFERENT GESTURE FROM A CLICK (NEW-2). The
+           click keeps B1393 ×3's rule; the double-click starts a block AT THE POINT PRESSED.
+           Bound separately and deliberately — routing both through one handler is how the
+           previous rounds ended up making one gesture mean two things. */
+        onDoubleClick={anchorFromMat}
         /* Ctrl/Cmd+Shift+V — the shortcut everyone already knows. Caught here rather than in
            the extension's keymap because the payload is the SYSTEM clipboard, which only the
            async clipboard API can read; a ProseMirror keybinding cannot await one. */
@@ -1037,6 +1208,7 @@ export default function NoteEditor({
           e.preventDefault();
           setDocMenu({ x: e.clientX, y: e.clientY });
         }}
+        ref={scrollerRef}
         style={{ flex: 1, minHeight: 0, overflow: "auto", display: "flex", flexDirection: "column", position: "relative" }}
       >
         <PasteOptions
@@ -1066,7 +1238,15 @@ export default function NoteEditor({
             AUDIT-FIRST: the alternative explanation — a right/centre TextAlign stuck on the
             paragraphs — was checked against the real stored documents and refuted; not one
             paragraph carries anything but the default. This is layout, not data. */}
-        <div style={{ maxWidth: 820, width: "100%", flex: "1 0 auto", margin: 0, padding: "22px 20px 96px 13px" }}>
+        {/* ⛔ THE ZOOM IS ON THE SHEET AND NOWHERE ELSE (NEW-3) — not on the pane, which would
+            scale the paste chip and the slash menu with it, and not on the app. `zoom` rather
+            than a transform so the text RE-WRAPS at the new size and the caret stays the
+            browser's own. */}
+        <div
+          data-testid="note-sheet"
+          data-zoom={zoom}
+          style={{ maxWidth: 820, width: "100%", flex: "1 0 auto", margin: 0, padding: "22px 20px 96px 13px", zoom }}
+        >
           <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
             <input
               data-testid="note-title"
@@ -1118,6 +1298,23 @@ export default function NoteEditor({
                   borderRadius: RADIUS.pill, padding: "3px 9px",
                 }}
               >{projectLabel.name}</span>
+            ) : null}
+            {/* The level, shown only when it is NOT 100% (PANEL-BREVITY: a chip that always
+                reads "100%" is furniture). Clicking it goes back to 100%, which is the one
+                thing anybody wants from a zoom indicator. */}
+            {zoom !== ZOOM_DEFAULT ? (
+              <button
+                type="button"
+                data-testid="note-zoom-level"
+                title="Back to 100% (Ctrl+0)"
+                onClick={() => applyZoom(ZOOM_DEFAULT)}
+                style={{
+                  flex: "0 0 auto", fontSize: 11, fontWeight: 700, letterSpacing: "0.04em",
+                  color: "var(--text-secondary)", border: "1px solid var(--border-default)",
+                  borderRadius: RADIUS.pill, padding: "3px 9px", background: "transparent",
+                  font: "inherit", cursor: "pointer",
+                }}
+              >{zoomLabel(zoom)}</button>
             ) : null}
             {edited ? (
               <span

@@ -103,6 +103,40 @@
  *     same as its title. Asserted in test/notesSync.test.js, not assumed.
  *
  * ═══════════════════════════════════════════════════════════════════════════════════════
+ * EVERY BODY HAS A NODE, AND IDENTITY IS THE ID (NEW-1)
+ * ═══════════════════════════════════════════════════════════════════════════════════════
+ * The reachability guarantee used to be written for NOTEBOOKS — "nothing can become
+ * unreachable" (B1374) — and it was never extended to the thing that actually holds the
+ * words. It is extended here, as two properties, because the gap cost a real note.
+ *
+ * ⛔ PROPERTY 1 — NO BODY MAY EXIST WITHOUT A NODE. For every `planyr:notes:page:v1:<scope>:
+ * <id>` key there must be a node with that id in the tree: live, or inside a bin entry. A
+ * body with no node is not a deleted note and not a corrupt one — it is a note nobody can
+ * reach, and the product has no way to mention it. That is strictly worse than losing it,
+ * because it looks exactly like nothing being wrong.
+ *
+ *   WHAT BROKE IT: `mergeTrees`, twice, and neither was visible in a hand-read (both are in
+ *   test/notesReachability.test.js as minimal cases and as a randomised property). A delete
+ *   lifted out MORE than its entry named, taking pages the deleting device had never heard
+ *   of; and the other side's copy of a page was looked up by POSITION, so re-parenting made
+ *   the merge blind to the children that copy had gained.
+ *
+ *   WHAT ENFORCES IT NOW: the merge rules (rule 5, notesCloud.js), `sweepOrphans` refusing to
+ *   destroy a body that still has words in it, `unreachableNotes` (lib/notesScan.js) looking
+ *   for the property being violated on every load, and `adoptUnreachable` healing it by
+ *   giving the body a node — in a named place, guessing NOTHING.
+ *
+ * ⛔ PROPERTY 2 — A TITLE IS NEVER LOAD-BEARING FOR IDENTITY OR REACHABILITY. A page is its
+ * ID. Nothing in Notes may key, index, dedupe, filter or drop on a title: not the merge, not
+ * the migration, not the recovery path, not a Map somewhere convenient. Two pages may share a
+ * title; a page may have none. This is written down because it was asked directly — *is the
+ * note unreachable BECAUSE it has no title?* — and the answer is NO, proven across five falsy
+ * values and eleven paths. But the reason it is no must stay true, so it is a rule rather
+ * than a happy accident: `makePage` applies the display default at the one constructor, and
+ * the recovery path deliberately has no title-keyed "Recovered" container for exactly this
+ * reason (see `adoptUnreachable`).
+ *
+ * ═══════════════════════════════════════════════════════════════════════════════════════
  * LOUD-FAILURE. A full quota, a disabled store, a private-mode browser, a refused upload or
  * a dead network must NEVER look like a clean save. Every local failure path broadcasts
  * through `onNotesStorageError`, which the workspace renders as a named banner; every write
@@ -117,6 +151,7 @@ import { openTasksInDoc, rollUpOpenTasks, setTaskCheckedInDoc } from "./notesTas
 import { MAX_VERSIONS_PER_PAGE, planRestore, planRetention, shouldSnapshot } from "./notesVersions.js";
 import { safeAttachmentName } from "./notesFileMeta.js";
 import { migrate, searchTitles, pagesInScope, trashEntries, walkPages, SCOPE_ALL, SCOPE_PROJECT } from "./notesModel.js";
+import { normalizeZoom, zoomKey, ZOOM_DEFAULT } from "./notesZoom.js";
 import { relativeTime } from "./notesTime.js";
 
 /* The key strings live in `notesKeys.js` — a leaf with no dependencies — so the ONE other
@@ -223,6 +258,26 @@ export function writeTree(tree) {
   const ok = writeTreeLocal(tree);
   if (ok && scoped()) { sync.treeDirty = true; saveSyncState(); schedulePush(); }
   return ok;
+}
+
+/* ---- how big the writing is (NEW-3) -----------------------------------------------------
+ *
+ * A device preference, so it rides the SAME seam as everything else here rather than a stray
+ * `localStorage` call in a component — and it is scoped like every other notes key, so two
+ * accounts on one machine do not inherit each other's eyesight. It deliberately does NOT
+ * sync: a comfortable size is a property of the screen you are sitting at, not of the
+ * account, and pushing a laptop's zoom onto a desktop would be a bug wearing a feature's
+ * clothes. A failure to read or write it is a no-op at 100%, never an unreadable page. */
+export function readNotesZoom(s = scope) {
+  const st = store();
+  if (!st) return ZOOM_DEFAULT;
+  try { return normalizeZoom(st.getItem(zoomKey(s))); } catch (_) { return ZOOM_DEFAULT; /* a preference is not data — a refused read means 100%, never a banner */ }
+}
+
+export function writeNotesZoom(z, s = scope) {
+  const st = store();
+  if (!st) return false;
+  try { st.setItem(zoomKey(s), String(normalizeZoom(z))); return true; } catch (_) { return false; /* a preference is not data — the level simply does not persist */ }
 }
 
 /* ---- page bodies ---------------------------------------------------------------------- */

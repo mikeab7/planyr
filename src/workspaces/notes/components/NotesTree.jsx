@@ -47,7 +47,8 @@
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  ancestorIds, boundProjectIds, findPage, pagesInScope, projectGroups, subtreePageIds, trashEntries,
+  ancestorIds, boundProjectIds, descendantPageIds, findPage, pagesInScope, projectGroups,
+  subpagesPhrase, subtreePageIds, trashEntries,
   NO_PROJECT_LABEL, SCOPE_ALL, SCOPE_PROJECT,
 } from "../lib/notesModel.js";
 import { absoluteStamp, daysLeft } from "../lib/notesTime.js";
@@ -142,8 +143,12 @@ function RenameField({ value, onCommit, onCancel, testid }) {
 function ConfirmDelete({ onYes, onNo, testid, count }) {
   return (
     <span style={{ display: "inline-flex", alignItems: "center", gap: 3, flex: "0 0 auto" }}>
+      {/* ⛔ THE NUMBER NAMES WHAT ELSE GOES, NEVER THE PAGE YOU CLICKED (NEW-4). It used to
+          render the whole cascade set, which includes this page — so one page with one child
+          asked "Delete 2?". A count that is wrong in the alarming direction is how somebody
+          is led to believe they lost something they did not. */}
       <span style={{ fontSize: 11, fontWeight: 700, color: "var(--danger-text)" }}>
-        {count > 1 ? `Delete ${count}?` : "Delete?"}
+        {count > 0 ? `Delete + ${subpagesPhrase(count).replace("its ", "")}?` : "Delete?"}
       </span>
       <MiniButton title="Confirm delete" tone="danger" testid={`${testid}-yes`} onClick={onYes}>✓</MiniButton>
       <MiniButton title="Keep it" testid={`${testid}-no`} onClick={onNo}>✕</MiniButton>
@@ -771,7 +776,7 @@ export default function NotesTree({
 
   /** How many pages a delete would take — so the inline confirmation can say so before it
    *  happens, rather than the Undo bar saying so afterwards (TOMBSTONE-DELETES made visible). */
-  const cascadeCount = (id) => subtreePageIds(findPage(tree, id)?.page).length;
+  const cascadeCount = (id) => descendantPageIds(findPage(tree, id)?.page).length;
 
   /* Where a page may be filed. Built from the WHOLE visible set, and a page can never be
    * offered ITS OWN SUBTREE — that move would detach the branch, so the model refuses it and

@@ -64,7 +64,30 @@ export function unreachableNotes(tree) {
     if (known.has(id)) continue;
     const text = docToText(readPage(id)).replace(/\s+/g, " ").trim();
     if (!text) continue;                              // an empty stray is not a lost note
-    out.push({ pageId: id, text, preview: text.slice(0, 120) });
+    /* ⛔ EVERYTHING A PERSON NEEDS TO RECOGNISE IT, BECAUSE ITS NAME IS GONE. The TITLE lived
+     * on the tree node, so a note that lost its node lost its name with it. There is nothing
+     * to look up and nothing honest to invent — so the first line of what they wrote stands in
+     * for it, and the size says how much is there. `createdAt` is decodable from the id (it is
+     * `Date.now()` in base 36) and is the one date that survived the node. */
+    out.push({
+      pageId: id,
+      text,
+      preview: text.slice(0, 120),
+      firstLine: text.slice(0, 72) + (text.length > 72 ? "…" : ""),
+      chars: text.length,
+      createdAt: createdAtFromId(id),
+      titleLost: true,
+    });
   }
   return out;
+}
+
+/** A page id is `pg_` + `Date.now().toString(36)` + a counter + noise, so the moment the page
+ *  was made is recoverable from the id alone — which matters here precisely because every
+ *  other record of this page's history lived on the node that went missing. Returns null
+ *  rather than a guess when the id is not one this app minted. */
+export function createdAtFromId(pageId) {
+  const body = String(pageId || "").split("_")[1] || "";
+  const t = parseInt(body.slice(0, 8), 36);
+  return Number.isFinite(t) && t > 1.4e12 && t < 4e12 ? t : null;
 }

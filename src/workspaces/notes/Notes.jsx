@@ -26,12 +26,13 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } fro
 import AppHeader from "../../shared/ui/AppHeader.jsx";
 import NotesTree from "./components/NotesTree.jsx";
 import {
-  addPage, allPageIds, ancestorIds, copyPageWithin, deleteNode, emptyTree, expiredTrashIds, findPage,
+  addPage, adoptUnreachable, allPageIds, ancestorIds, copyPageWithin, deleteNode, emptyTree, expiredTrashIds, findPage,
   firstPageId, migrate, movePage, pagesInScope, purgeTrashEntry, recentPages, renameNode, restoreNode,
-  setPageProject, subtreePageIds, touchPage, trashEntries, trashPageIds,
+  setPageProject, subpagesPhrase, subtreePageIds, touchPage, trashEntries, trashPageIds,
   NO_PROJECT_LABEL, SCOPE_ALL, SCOPE_PROJECT,
 } from "./lib/notesModel.js";
 import { duplicateNotice } from "./lib/notesDuplicates.js";
+import { absoluteStamp } from "./lib/notesTime.js";
 import { isQuickOpenChord, quickOpenResults, rankQuickOpen } from "./lib/notesQuickOpen.js";
 import { groupTasksByProject } from "./lib/notesTasks.js";
 import { listProjects, warmProjects, onProjectsChanged } from "../../shared/projects/projects.js";
@@ -52,6 +53,9 @@ const NoteEditor = lazy(() => import("./components/NoteEditor.jsx"));
  * download before it can paint. It is small, and the rule is the rule — this route's byte
  * budget is the one thing the lazy boundary exists to protect. */
 const QuickOpen = lazy(() => import("./components/QuickOpen.jsx"));
+/* The integrity bar renders only when something is actually wrong, so its bytes have no
+ * business on the rail's first paint either — see its own header. */
+const IntegrityBanner = lazy(() => import("./components/IntegrityBanner.jsx"));
 
 const RADIUS = { control: 8, pill: 999 }; // mirrored from shared/ui/controls.jsx — see NoteToolbar
 /* The footer's one line is coloured by what it SAYS, never by anything else — a failed sync
@@ -144,7 +148,10 @@ function UndoBar({ deleted, onUndo, onDismiss }) {
       }}
     >
       <span style={{ flex: 1, minWidth: 0 }}>
-        Deleted “{deleted.title || "Untitled"}”{deleted.pageIds.length > 1 ? ` and its ${deleted.pageIds.length} pages` : ""}. It is in the bin for 30 days.
+        {/* ⛔ THE COUNT IS WHAT ELSE WENT, NOT INCLUDING THIS NOTE (NEW-4). `pageIds` is the
+            delete's cascade set and includes the note itself, so this used to tell somebody
+            that one page with one child took "its 2 pages" with it. */}
+        Deleted “{deleted.title || "Untitled"}”{deleted.pageIds.length > 1 ? ` and ${subpagesPhrase(deleted.pageIds.length - 1)}` : ""}. It is in the bin for 30 days.
       </span>
       <button
         type="button" data-testid="notes-undo" onClick={onUndo}
@@ -159,72 +166,6 @@ function UndoBar({ deleted, onUndo, onDismiss }) {
         style={{
           flex: "0 0 auto", border: "1px solid var(--border-default)", borderRadius: RADIUS.pill,
           background: "transparent", color: "var(--text-tertiary)", font: "inherit",
-          fontSize: 11.5, fontWeight: 700, padding: "2px 10px", cursor: "pointer",
-        }}
-      >Dismiss</button>
-    </div>
-  );
-}
-
-/** ⛔ THE SAME NOTE IN TWO PROJECTS, AND A NOTE FILED NOWHERE — SAID OUT LOUD (NEW-1/NEW-4).
- *
- *  The whole reason this exists: a note was copied into an unrelated pursuit and the product
- *  had no way to mention it. It was found by hand a week later, under a tombstone heading,
- *  because the pursuit had since been deleted. Nothing about the copy was announced at the
- *  moment it was made, and nothing looked for it afterwards.
- *
- *  It is deliberately QUIET AND ABSENT rather than dismissible-and-forgotten: it renders only
- *  when there is a real finding, and it names the finding rather than describing a category.
- *  One line by default; the detail is one click away, never in the default view
- *  (PANEL-BREVITY). */
-function IntegrityBanner({ duplicates, unreachable, projectNames, onOpen, onRecover, onDismiss }) {
-  const dupLine = duplicateNotice(duplicates);
-  const lost = (unreachable || []).length;
-  if (!dupLine && !lost) return null;
-  const nameOf = (id) => (id == null ? NO_PROJECT_LABEL : projectNames.get(id) || "a project that no longer exists");
-  const first = duplicates?.[0] || null;
-  return (
-    <div
-      role="alert"
-      data-testid="notes-integrity-banner"
-      data-duplicates={duplicates?.length || 0}
-      data-unreachable={lost}
-      style={{
-        flex: "none", display: "flex", alignItems: "center", gap: 10, padding: "6px 14px",
-        background: "var(--warn-bg)", borderBottom: "1px solid var(--border-default)",
-        color: "var(--warn-text)", fontSize: 12.5, fontWeight: 600,
-      }}
-    >
-      <span style={{ flex: 1, minWidth: 0 }}>
-        {dupLine ? `${dupLine} ${first ? first.pages.map((p) => `“${p.title}” in ${nameOf(p.projectId)}` + (p.where === "bin" ? " (in the bin)" : "")).join(" · ") : ""}` : null}
-        {dupLine && lost ? " " : null}
-        {lost ? `${lost === 1 ? "One note is" : `${lost} notes are`} filed in no project and reachable from nowhere.` : null}
-      </span>
-      {first ? (
-        <button
-          type="button" data-testid="notes-integrity-open" onClick={() => onOpen(first)}
-          style={{
-            flex: "0 0 auto", border: "1px solid var(--warn-text)", borderRadius: RADIUS.pill,
-            background: "transparent", color: "var(--warn-text)", font: "inherit",
-            fontSize: 11.5, fontWeight: 700, padding: "2px 10px", cursor: "pointer",
-          }}
-        >Show me</button>
-      ) : null}
-      {lost ? (
-        <button
-          type="button" data-testid="notes-integrity-recover" onClick={onRecover}
-          style={{
-            flex: "0 0 auto", border: "1px solid var(--warn-text)", borderRadius: RADIUS.pill,
-            background: "transparent", color: "var(--warn-text)", font: "inherit",
-            fontSize: 11.5, fontWeight: 700, padding: "2px 10px", cursor: "pointer",
-          }}
-        >Put {lost === 1 ? "it" : "them"} back</button>
-      ) : null}
-      <button
-        type="button" onClick={onDismiss}
-        style={{
-          flex: "0 0 auto", border: "1px solid var(--border-default)", borderRadius: RADIUS.pill,
-          background: "transparent", color: "var(--warn-text)", font: "inherit",
           fontSize: 11.5, fontWeight: 700, padding: "2px 10px", cursor: "pointer",
         }}
       >Dismiss</button>
@@ -346,6 +287,9 @@ export default function Notes({
      (NEW-4). `null` means "not scanned yet", which is not the same as "nothing found". */
   const [integrity, setIntegrity] = useState({ duplicates: [], unreachable: [] });
   const [integrityHidden, setIntegrityHidden] = useState(false);
+  /* What auto-adoption actually rescued this visit — reported, never healed in a silence
+     indistinguishable from the failure itself. */
+  const [recovered, setRecovered] = useState([]);
   /* ⛔ THE IN-RAIL SCOPE SWITCH IS GONE (B1420), and B1374's guarantee is UNCHANGED.
    * "Show me everything" is now the DASHBOARD — which shows every project's pages grouped by
    * project — and its crumb is at the top of every screen, so it is still exactly one click
@@ -939,24 +883,49 @@ export default function Notes({
     setQuery("");
   }, [projectId, onNavigate]);
 
-  /** Put a note that is filed nowhere back where it can be reached. It goes to the named
-   *  "Not in a project" home and NOWHERE ELSE — the page's project is exactly the fact that
-   *  was lost, and inventing a plausible one is the defect this whole item is about. The
-   *  page keeps its own ID, so this re-attaches the existing body rather than copying it. */
-  const handleRecoverUnreachable = useCallback(() => {
-    let next = treeRef.current || tree;
-    let n = 0;
-    for (const orphan of integrity.unreachable) {
-      const r = addPage(next, { projectId: null, id: orphan.pageId, title: `Recovered note — ${orphan.preview.slice(0, 40)}` });
-      if (!r.pageId) continue;
-      next = r.tree;
-      n += 1;
-    }
-    if (!n) return;
-    persistTree(next);
-    setIntegrity((s) => ({ ...s, unreachable: [] }));
-    setExportNote(`${n === 1 ? "One note was" : `${n} notes were`} put back under “${NO_PROJECT_LABEL}”. ${n === 1 ? "It was" : "They were"} filed in no project, so that is where ${n === 1 ? "it" : "they"} went — nothing was guessed.`);
-  }, [tree, persistTree, integrity.unreachable]);
+  /* ⛔ AUTO-ADOPTION: A BODY WITH NO NODE IS GIVEN ONE, ON SIGHT (NEW-1).
+   *
+   * The previous round surfaced the finding and offered a button. That was still a note
+   * sitting lost while a banner talked about it — and the banner did not even name which
+   * note. Healing is now the default: the scan runs, anything it finds gets a node under the
+   * named "Recovered notes" home, and the bar reports what ALREADY happened.
+   *
+   * ⛔ IT GUESSES NOTHING. No project (that fact died with the node), no title (that died
+   * with it too — the page is named from its own first line and the bar says so). And it
+   * keeps each page's own ID, so this re-attaches the existing body rather than copying it.
+   *
+   * ⛔ A REFUSED WRITE IS NOT A RECOVERY. If persisting fails, the note stays in
+   * `unreachable` and the bar says the browser refused — never a silent "all better". */
+  useEffect(() => {
+    if (!integrity.unreachable.length) return;
+    const base = treeRef.current || tree;
+    const r = adoptUnreachable(base, integrity.unreachable);
+    if (!r.adopted.length) return;
+    const byId = new Map(integrity.unreachable.map((o) => [o.pageId, o]));
+    persistTree(r.tree);
+    setRecovered((prev) => [
+      ...prev,
+      ...r.adopted.map((a) => ({ ...a, ...(byId.get(a.pageId) || {}) })),
+    ]);
+    setIntegrity((st) => ({ ...st, unreachable: [] }));
+  }, [integrity.unreachable, tree, persistTree]);
+
+  /** File a recovered note into a project — or leave it loose, which is a real place with a
+   *  name and not a shrug. A recovered page is already at the top level, so this is the one
+   *  re-file and nothing else. */
+  const handleFileRecovered = useCallback((pageId, pid) => {
+    persistTree(movePage(treeRef.current || tree, pageId, null, 0, { projectId: pid }));
+    setRecovered((prev) => prev.filter((r) => r.pageId !== pageId));
+    const where = pid == null ? NO_PROJECT_LABEL : (projects.find((p) => p.id === pid)?.name || "that project");
+    setExportNote(`Filed under ${where}. You can rename it from the row's menu — its original name was lost with its entry.`);
+  }, [tree, persistTree, projects]);
+
+  /** …and the other honest answer: they did not want it. Bins it like any other note, with
+   *  the same undo and the same 30 days. */
+  const handleBinRecovered = useCallback((pageId) => {
+    setRecovered((prev) => prev.filter((r) => r.pageId !== pageId));
+    handleDelete(pageId);
+  }, [handleDelete]);
 
   /* ---- export + print ---- */
 
@@ -1051,14 +1020,19 @@ export default function Notes({
         onKeepTheirs={() => handleConflict(conflict.pageId, "theirs")}
       />
       {integrityHidden ? null : (
+        <Suspense fallback={null}>
         <IntegrityBanner
           duplicates={integrity.duplicates}
           unreachable={integrity.unreachable}
+          recovered={recovered}
+          projects={projects}
           projectNames={projectNames}
           onOpen={handleOpenFinding}
-          onRecover={handleRecoverUnreachable}
+          onFile={handleFileRecovered}
+          onBin={handleBinRecovered}
           onDismiss={() => setIntegrityHidden(true)}
         />
+        </Suspense>
       )}
 
       <div style={{ flex: 1, minHeight: 0, display: "flex" }}>
