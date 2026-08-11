@@ -139,7 +139,12 @@ export function formatJurisdictionLabel(model = {}) {
 
   const chain = [jur, county, isd].filter(Boolean).join(SLOT_SEP);
   const text = tail ? `${chain}${TOUCH_SEP}${tail}` : chain;
-  return { shape, jur, county, isd, tail, text };
+  /* NEW-2 (B371361) — `slots` is handed back, not just joined away. The header pill has to be able
+   * to SHORTEN this line when the row is tight, and it must drop whole facts rather than characters
+   * (a CSS ellipsis turns "Part in City of Baytown (6 of 14 lots)" into a different, wrong answer).
+   * Returning the array it already built is the same rule as `governingCities`: nothing downstream
+   * should have to take a rendered string apart. */
+  return { shape, slots, jur, county, isd, tail, text };
 }
 
 /* ⛔ NEW-2 — THE STRUCTURED ACCESSOR, and the whole reason it is exported.

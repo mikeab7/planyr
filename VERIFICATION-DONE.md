@@ -1,3 +1,20 @@
+### V131552 — B335984: the +/− controls now arrive at a zoom he'd actually work at, on the REAL Bain plan — ❌ **FAILED 2026-08-11 (owner verdict), SUPERSEDED BY V166928**
+
+**HE RAN IT AND IT FAILED ON THIS ENTRY'S OWN SECOND FAIL CLAUSE**, with exactly the kind of number it asked for: *"it still shows up for the Zoom and the plus minus. Let's make it available a little bit sooner."* At the 0.359 px/ft floor Building 3 rendered about a THIRD of his 1600 px monitor's canvas and closer to HALF of his 1191 px laptop's — and he is now working on the laptop. The threshold moved again as a stated product decision (**B371360**, an OWNER-SET floor plus a viewport cap), which is what this entry said would happen. **Do not chase the 0.359 steps below — V166928 re-asks the same question at the live number.** Archived as a recorded FAIL, never as a null (STANDING RULE #2).
+
+<details><summary>the superseded steps, kept for the record</summary>
+
+
+**Everything mechanical is proven here.** `test/featureEditZoom.test.js` (14) pins the re-derived floor and replays BOTH superseded rules as mutation checks — the pre-gate rule must arm across his whole-site band, and the 44 px rule must refuse across the band this amendment re-opens. `e2e/feature-edit-zoom.spec.js` drives a real wheel gesture either side of the new floor on a real drawn building, reading the app's own `data-render-ppf` **only once the gesture has settled**, and confirms the controls are clickable the whole time they are faded. **What only his own plan can settle is the JUDGEMENT** — whether this zoom is the one at which offering the edit feels right on a 109-acre site. **This supersedes V111105**, whose second FAIL clause he tripped; do not chase V111105's 0.80 px/ft steps.
+
+- **STEPS** — open **Bain / "Concept - Original"**. Zoom out until the whole site fits (scale bar about 0–1,000 ft): the green `+` / red `−` must still be **absent**. Now zoom in slowly, hovering or selecting Building 3.
+- **PASS** = they fade in when Building 3 takes up roughly a **third** of the drawing area — not two thirds. They are clickable the instant they are visible, and adding a dock zone or a bump-out at that zoom feels like a normal working move rather than a close-up.
+- **FAIL, either direction, and BOTH are worth reporting** = back at whole-site zoom (the original defect returning) · or still waiting until the building fills most of the screen. **Report it with the same kind of number you gave last time** — roughly what fraction of the screen the building covers when they appear — and the threshold moves again as a stated product decision, never a quiet nudge.
+- Also glance at a SMALL site at the same scale-bar reading: the rule is absolute zoom, so a 30-acre plan must behave identically.
+
+
+</details>
+
 # VERIFICATION-DONE.md — archived verification items (passed / superseded)
 
 

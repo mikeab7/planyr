@@ -621,13 +621,34 @@ export default function AppHeader({
       {/* ── Row 1 — 35px (−20% from 44 per B169; contents stay vertically centered) ── */}
       <div className={narrow ? "no-hscrollbar" : undefined} style={{ height: 35, display: "flex", alignItems: "center", ...rowScroll }}>
 
-        {/* Left zone. Desktop: clip overflow so a long breadcrumb (project + plan) can never
-            paint OVER the centered badge — the "text overlaps and looks like shit" bug the owner
-            reported. The breadcrumb's project crumb already ellipsis-truncates; this guarantees
-            nothing spills past the zone edge if it's still wider than its share. (Dropdowns
-            portal to <body>, so overflow:hidden here never clips a menu.) Narrow keeps the
-            zoneFixed no-shrink so the whole row scrolls sideways instead — unchanged. */}
-        <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 4, paddingLeft: 12, minWidth: 0, ...(narrow ? zoneFixed : { overflow: "hidden" }) }}>
+        {/* ⛔ NEW-2 — NAVIGATION WINS. Read this before changing any of the three zone flexes.
+            The owner could not open the plan switcher on a laptop: "the unincorporated / city of
+            Houston / ETJ / Harris County chip is too big and it covers it." Measured at a 1191 px
+            viewport — the pill overlapped the plan chip's box by a sliver, and `elementFromPoint`
+            along the chip's right edge returned THE PILL'S TEXT SPAN for the last stretch of it,
+            the ▾ CARET INCLUDED. NOT a z-index or overlay problem (the pill is position:static,
+            z-index:auto): plain flex overflow, a pill that would not shrink running over its
+            neighbour.
+
+            The zones used to be `1 | 0 1 auto (max 40%) | 1`, which optically centred the badge by
+            giving the two side zones an EQUAL SHARE regardless of what they held — so the left
+            zone was handed less than the breadcrumb needed while the pill sat comfortably under
+            its cap and never shrank. The rule is now explicit and one-directional:
+
+              LEFT (navigation)  `0 1 auto` — takes the width it needs, capped, and shrinks only
+                                 after the centre has already collapsed (its basis is content, the
+                                 centre's is 0, so negative free space lands here last).
+              CENTRE (the pill)  `1 1 0%`   — takes what is LEFT OVER and centres within it, so its
+                                 width never depends on its own content and it truncates,
+                                 abbreviates (JurisdictionBadge) or collapses on its own.
+              RIGHT (account)    `0 0 auto` — the save badge, fullscreen, gear and auth pill keep
+                                 their size; they were never the contended pair.
+
+            The cost, stated: the badge is centred in the space that remains rather than in the
+            window. That is what "navigation wins" buys. Narrow (phone) is untouched — the row
+            scrolls sideways there and the zoneFixed no-shrink still applies. (Dropdowns portal to
+            <body>, so overflow:hidden here never clips a menu.) */}
+        <div style={{ display: "flex", alignItems: "center", gap: 4, paddingLeft: 12, minWidth: 0, ...(narrow ? { flex: 1, ...zoneFixed } : { flex: "0 1 auto", maxWidth: "60%", overflow: "hidden" }) }}>
           {/* Logo — the Planyr brand mark + wordmark (BrandMark, theme-aware).
               Also a secondary route to the Dashboard (the labeled crumb is primary, B192). */}
           <button
@@ -666,18 +687,19 @@ export default function AppHeader({
           )}
         </div>
 
-        {/* Center zone — the jurisdiction badge. On desktop it's capped at 40% AND allowed to
-            SHRINK (flex 0 1 auto + minWidth 0 + overflow hidden), so when the row gets tight the
-            badge truncates via its own ellipsis instead of holding a fixed width and shoving the
-            breadcrumb into an overlap (the old flexShrink:0 was the root cause). On a phone the cap
-            squeezes the site/plan switcher, so it keeps its natural width and rides the row's
-            sideways scroll (no shrink/clip) as before. */}
+        {/* Center zone — the jurisdiction badge. NEW-2: on desktop it takes the space LEFT OVER
+            after navigation (`1 1 0%`), so its width is a function of its neighbours and never of
+            its own content — which is what lets the pill inside it truncate, abbreviate or
+            collapse without ever pushing into the breadcrumb. The old `0 1 auto` + 40% cap could
+            not shrink below its content while the side zones held equal shares, which is exactly
+            how a 419 px pill came to sit on top of the plan chip. On a phone the row scrolls
+            sideways, so the badge keeps its natural width (no shrink/clip) as before. */}
         <div
           style={{
             display: "flex", alignItems: "center", justifyContent: "center", padding: "0 8px",
             ...(narrow
               ? { flexShrink: 0, maxWidth: "none" }
-              : { flex: "0 1 auto", minWidth: 0, overflow: "hidden", maxWidth: "40%" }),
+              : { flex: "1 1 0%", minWidth: 0, overflow: "hidden" }),
           }}
         >
           {centerContent}
@@ -685,10 +707,13 @@ export default function AppHeader({
 
         {/* Right zone — cloud-sync badge · settings · auth. On narrow use `1 0 auto`: still
             GROWS to pin the auth pill rightward when the row has slack, but never SHRINKS its
-            controls into clipped slivers when it overflows (then the row scrolls instead). */}
+            controls into clipped slivers when it overflows (then the row scrolls instead). On
+            desktop it is now `0 0 auto` (NEW-2): the centre zone grows instead, which still pins
+            these controls to the right edge, and these were never the contended pair — shrinking
+            them would clip the auth pill to buy room for a label. */}
         <div
           style={{
-            flex: narrow ? "1 0 auto" : 1, display: "flex", alignItems: "center",
+            flex: narrow ? "1 0 auto" : "0 0 auto", display: "flex", alignItems: "center",
             justifyContent: "flex-end", gap: 6, paddingRight: 12,
           }}
         >

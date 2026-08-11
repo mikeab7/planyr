@@ -1022,6 +1022,12 @@ export function formatJurisdictionBadge(j, opts = {}) {
     // NEW-1 — the non-governing tail as its own field, and WHICH of the six shapes this is. A
     // consumer that wants one of them never has to take the label apart to get it.
     tail, shape,
+    /* NEW-2 (B371361) — the label's SLOTS, in reading order, so a consumer that has to SHORTEN the
+     * line (the header pill at a laptop width) drops whole facts instead of cutting a sentence
+     * mid-word. It is the same principle as the two fields above: nothing reads back out of the
+     * strings. `formatJurisdictionLabel` already builds this array — it is passed through rather
+     * than re-split, because a re-split is exactly the parse `governingCities` exists to retire. */
+    parts: label.slots,
     /* ⛔ NEW-2 — THE CITY THAT GOVERNS, AS DATA. `SitePlanner.jsx` used to recover this by parsing
      * `jur`, and that parse fed the floodplain administrator's `cityLabel` — the signal deciding
      * whether a city's ordinance is even a candidate for the finished-floor elevation. See
