@@ -26,6 +26,7 @@ import { supabase, supabaseRest, currentAccessToken } from "./lib/supabase.js";
 import { createIdMinter, randomIdSalt } from "../../shared/ids.js";
 import { mergeSiteContent, createSiteModel } from "./lib/siteModel.js";
 import { assemblyIntegrity, tearPayload, orphanPayload, unhealablePayload } from "./lib/assemblyIntegrity.js";
+import { groupCasEnabled } from "./lib/groupCas.js";
 import { extendMergeSelection } from "./lib/parcelSelect.js";
 import { parcelSelectHintDecision, PARCEL_HINT_COOLDOWN_MS } from "./lib/parcelSelectHint.js";
 import { measuresUnderPoint, nextMeasureSelection } from "./lib/measureHit.js";
@@ -4177,6 +4178,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       patchElement: applyZPatch,
       report: reportClientEvent,
       selfUid: () => activeUid(),   // NEW-4 — a getter, not a snapshot (see editorNames.js)
+      // B1341 stage 2 — asked at CALL time, so the kill switch can be thrown without a reload.
+      groupCas: groupCasEnabled,
       // NEW-1 — bonded (attachedTo) elements are cascade-DERIVED unless the current gesture /
       // selection targets them; everything else (incl. deletes, el = null) stays direct.
       isDirectEdit: (kind, id, el) => kind !== "el" || !el || el.attachedTo == null || isDirectTouched(kind, id),

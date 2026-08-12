@@ -39,6 +39,10 @@ function raceWithTimeout(build, label, { timeoutMs = COMMIT_TIMEOUT_MS, setTimer
 // backstop, so a project without the migration degrades to the previous behaviour rather than
 // breaking. Module-scoped on purpose (one probe per page load, not one per site).
 let atomicUnavailable = false;
+// B1341 stage 2 — the same latch for the 4-arg group-CAS overload. A project without that migration
+// answers PGRST202, and that must degrade to the 3-arg atomic call rather than reaching the engine
+// as a write failure (the B1117 precedent, which this deliberately mirrors rather than reinvents).
+let groupsUnavailable = false;
 const missingFunction = (err) => {
   const m = ((err && (err.message || err.hint || err.details)) || "").toLowerCase();
   return (err && err.code === "PGRST202") || m.includes("could not find the function") ||
@@ -55,17 +59,38 @@ export async function commitElements(client, siteId, ops, opts = {}) {
   if (!Array.isArray(ops) || ops.length === 0) return { ok: true, results: [] };
   const wantAtomic = !!opts.atomic && !atomicUnavailable;
   const latched = !!opts.atomic && atomicUnavailable;   // asked, but this project has no overload
+  // B1341 stage 2 — groups ride ONLY on an atomic call: "the named assemblies are current" and "the
+  // whole batch landed" are one guarantee, and sending groups without atomicity would let a batch
+  // half-apply after passing the group check, which is the defect wearing a new hat.
+  const groups = wantAtomic && Array.isArray(opts.groups) && opts.groups.length && !groupsUnavailable
+    ? opts.groups : null;
   // Annotate the result ONLY when the caller asked for atomic: a plain call's return shape stays
   // exactly what it was before B1120, so no existing caller or test sees a new field. `sentAtomic`
   // is what actually went on the wire; `fellBack` marks the one legitimate un-atomic send.
-  const tag = (r) => (opts.atomic ? { ...r, sentAtomic: wantAtomic, ...(latched ? { fellBack: true } : {}) } : r);
-  const args = wantAtomic
-    ? { p_site: siteId, p_ops: ops, p_atomic: true }
-    : { p_site: siteId, p_ops: ops };
+  // `sentGroups` is the B1120 lesson applied to stage 2: report what went ON THE WIRE, not what was
+  // asked for, so the engine can catch its own request being lost. That exact loss shipped silently
+  // once already for `atomic`, and a fixed-arity adapter would drop `groups` the identical way.
+  const tag = (r) => (opts.atomic
+    ? { ...r, sentAtomic: wantAtomic, sentGroups: groups ? groups.length : 0, ...(latched ? { fellBack: true } : {}) }
+    : r);
+  const args = groups
+    ? { p_site: siteId, p_ops: ops, p_atomic: true, p_groups: groups }
+    : wantAtomic
+      ? { p_site: siteId, p_ops: ops, p_atomic: true }
+      : { p_site: siteId, p_ops: ops };
   const t = raceWithTimeout(() => client.rpc("commit_elements", args), "commit", opts);
   try {
     const { data, error } = await t.race;
     if (error) {
+      // B1341 stage 2 — no 4-arg overload on this project: latch and retry WITHOUT groups. The
+      // retry keeps `atomic`, so the call degrades to exactly the B1117 behaviour rather than to
+      // the un-guarded per-row path.
+      if (groups && missingFunction(error)) {
+        groupsUnavailable = true;
+        t.done();
+        const r = await commitElements(client, siteId, ops, { ...opts, groups: null });
+        return { ...r, groupsFellBack: true };
+      }
       if (wantAtomic && missingFunction(error)) {
         atomicUnavailable = true;                       // latch, then retry this batch un-atomically
         t.done();
@@ -81,7 +106,15 @@ export async function commitElements(client, siteId, ops, opts = {}) {
     // so the engine can catch its own request being lost between here and there. That exact loss
     // shipped silently once already.
     if (data && !Array.isArray(data) && typeof data === "object") {
-      return tag({ ok: true, results: Array.isArray(data.results) ? data.results : [], applied: data.applied !== false });
+      // B1341 stage 2 — `groupConflict` means the server refused the call OUTRIGHT because a named
+      // assembly had moved, and wrote NOTHING. It is carried through verbatim (assembly, expected,
+      // actual, members) because naming what moved is the whole point of the derived digest.
+      return tag({
+        ok: true,
+        results: Array.isArray(data.results) ? data.results : [],
+        applied: data.applied !== false,
+        ...(Array.isArray(data.groupConflict) && data.groupConflict.length ? { groupConflict: data.groupConflict } : {}),
+      });
     }
     return tag({ ok: true, results: Array.isArray(data) ? data : [] });
   } catch (e) {

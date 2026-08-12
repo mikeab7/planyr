@@ -113,6 +113,38 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V179984 — B1341 stage 2: turning group CAS ON, on a real two-writer plan `Blocker: auth` `Blocker: real-data`
+
+**⛔ THIS IS THE ONE THING STAGE 2 CANNOT PROVE WITHOUT A LIVE RACE, and it ships OFF precisely so
+that turning it on is a deliberate, reversible act rather than a side effect of a deploy.**
+
+**What IS proven, and it is more than usual.** The server half runs against the REAL production
+database — `db/test/commit_elements_group_cas.test.sql`, 9/9, self-rolling-back (verified afterwards:
+zero rows left), and **mutation-proven** (disable the digest comparison and the stale call is
+accepted, moving the host row to rev 2). The client half is `test/assemblyGroupCas.test.js` (23),
+including the request body through the real transport and three mutants that each go red. Lint 0,
+full unit suite green, build green.
+
+**Why the rest cannot be driven here.** It is a two-signed-in-writer race on one cloud plan, and the
+sandbox proxy CORS-blocks the Supabase sign-in, so a second authenticated client cannot exist.
+
+**Steps, in order — and the first one is the point:**
+1. On ONE device, arm it: `localStorage.setItem("planarfit:groupCas", "1")` in the console, reload.
+2. Ordinary editing must be **completely unchanged**. Drag a building with dock zones, undo, redo,
+   paste an assembly, delete one. ⛔ If anything about normal single-writer use feels different, turn
+   it straight back off (`"0"`, reload) and say so — that is the kill switch doing its job.
+3. Open the same plan in a second tab, both signed in. Move a bonded child in tab B; in tab A, move
+   the HOST. Tab A's call should be refused on the group revision (nothing written) and re-committed
+   at the fresh revs a moment later, with the assembly ending up coherent in BOTH tabs.
+4. In telemetry, `element-group-conflict` should appear for that round, naming the assembly. It is
+   not an error — it is the guard reporting that it fired. `element-group-unresolved` WOULD be a
+   problem (it means the group never settled) and should not appear.
+5. Confirm the digest is being sent at all — a call with `p_groups` absent means the switch is not
+   armed on that device, or the batch did not span an assembly (a single-element batch stays on the
+   per-row path by design).
+6. Leave it on for a working session on a real plan. If it is quiet, that is the result stage 3
+   needs before it can retire the per-row expectation.
+
 ### V173456 — B377888: a stale delete no longer eats an element created after it, on the owner's own two-tab plan `Blocker: auth` `Blocker: real-data`
 
 **🚚 DEPLOY CONFIRMED SERVING 2026-08-12** — `node ui-audit/verify-deploy.mjs delete-vs-create-dropped` reports the marker live in `assets/index-fZW_RI6I.js` + `assets/SitePlannerApp-KrpKxn4C.js` on planyr.io, so whoever runs the steps below is testing the fixed build and does not need to check that first.
