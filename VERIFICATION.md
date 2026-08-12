@@ -115,6 +115,8 @@ was never clicked" quietly ships broken.
 
 ### V173456 — B377888: a stale delete no longer eats an element created after it, on the owner's own two-tab plan `Blocker: auth` `Blocker: real-data`
 
+**🚚 DEPLOY CONFIRMED SERVING 2026-08-12** — `node ui-audit/verify-deploy.mjs delete-vs-create-dropped` reports the marker live in `assets/index-fZW_RI6I.js` + `assets/SitePlannerApp-KrpKxn4C.js` on planyr.io, so whoever runs the steps below is testing the fixed build and does not need to check that first.
+
 **What was proven HERE, without a browser, and it is not nothing.** The engine half is driven by
 `test/deleteVsCreate.test.js` (7) against the real `createElementSync`, using the owner's real
 geometry from `smsdrvzr9gzx`, one test per direction and one per seam — the diff, the pre-send
@@ -142,29 +144,36 @@ all, and without one there is no realtime row to race.
 
 ### V173457 — B377889: all five members of Building 3 are back on Richfield / Concept A, and the trailer row sits outboard of a 135 ft truck court `Blocker: real-data`
 
-**⛔ READ THIS FIRST — THE REPLAY IS BLOCKED ON A RELOAD, NOT ON A DECISION.** The restore was
-executed 2026-08-12 through `commit_elements(..., p_atomic => true)` with `op:"restore"` under the
-owner's own `auth.uid()` and returned `applied:true` (revs 8 / 10 / 7). **Four seconds later a live
-tab running the un-fixed build re-deleted `e1454943cgzlnc` and pulled `e1454941cgzlnc` back.** The
-truck court `e1454940cgzlnc` survived and is live. So the sequence is: deploy → **every open tab on
-this plan is reloaded** → replay the RPC → then verify below. Replaying before the reload will be
-undone again, exactly as measured.
+**✅ PROVEN IN THE DATA 2026-08-12, through the app's own invariant — not by eye, and not by a
+SELECT alone.** All five members are live and correctly bonded, and the real rows were run back
+through `normalizeBondedChildren` / `missingBondSiblings` / `impossibleStacks`:
 
-**Steps:**
-1. Confirm the deploy is serving the fix (`node ui-audit/verify-deploy.mjs delete-vs-create-dropped`).
-2. Reload every browser tab that has Richfield / Concept A open. (This is the one owner-side step;
-   it is on `OWNER-TODO.md`.)
-3. Replay the restore for `e1454943cgzlnc` and re-bond + re-place `e1454941cgzlnc`.
-4. **From the SERVED app**, open Richfield / Concept A and confirm Building 3 shows **five** members:
-   the building, a truck court and a trailer row on each of two walls.
-5. The restored trailer row must sit **outboard of the 135 ft truck court**, not flush against the
-   building. Its across-wall offset is 470 ft (310 half-host + 135 court + 25 half-trailer);
-   `cy` should read **-1232.81**, not -1097.81.
-6. Reload once more and confirm it is still there — that is the repair surviving a round trip.
-7. `select id, rev, deleted_at from site_elements where site_id='smsdrvzr9gzx' and assembly_id='e1454939cgzlnc';`
-   must show **five live rows, none tombstoned**.
+| element | type | across-wall offset |
+|---|---|---|
+| `e1454940cgzlnc` | truck court (right) | **377.50 ft** |
+| `e1454941cgzlnc` | trailer row (right) | **470.00 ft** |
+| `e1454942cgzlnc` | truck court (left) | **377.50 ft** |
+| `e1454943cgzlnc` | trailer row (left) | **470.00 ft** |
+
+Each trailer row is **outboard of a 135 ft truck court** (470 − 377.5 = 92.5 = half the court plus
+half the trailer). `missingBondSiblings()` → `[]`; `impossibleStacks()` → `[]`; the heal returns the
+list **by identity**, i.e. it agrees there is nothing to repair.
+
+**The route there, recorded honestly.** The restore was executed through
+`commit_elements(..., p_atomic => true)` with `op:"restore"` under the owner's own `auth.uid()`
+(revs 8 / 10 / 7). **Four seconds later a live tab on the un-fixed build undid two of the three
+writes** — the bug caught in the act. Further writes at 14:27 (revs 14 and 11, above this session's)
+put them back, so a client did that, not this session; the outcome is verified, the credit is not
+claimed.
+
+**What is still pending, and it is the only thing.** MERGED ≠ LIVE: a database read is not a
+rendered plan. Open Richfield / Concept A in the served, signed-in app and confirm Building 3 draws
+with five members and neither trailer row flush against the building. Nothing is required from the
+owner.
 
 ### V173458 — B377890: the heal refuses to invent a layout when a bonded sibling is missing `Blocker: real-data`
+
+**🚚 DEPLOY CONFIRMED SERVING 2026-08-12** — `node ui-audit/verify-deploy.mjs delete-vs-create-dropped` reports the marker live in `assets/index-fZW_RI6I.js` + `assets/SitePlannerApp-KrpKxn4C.js` on planyr.io, so whoever runs the steps below is testing the fixed build and does not need to check that first.
 
 **What was proven HERE, and it is most of the item.** `test/assemblyMissingSibling.test.js` (12)
 runs the real `normalizeBondedChildren` / `assemblyIntegrity` over the owner's real Building 3
@@ -187,6 +196,8 @@ green, build green.
    correct again the moment the information it needs is back.
 
 ### V173459 — B377891: a second tab of the owner's own account never names a teammate `Blocker: auth`
+
+**🚚 DEPLOY CONFIRMED SERVING 2026-08-12** — `node ui-audit/verify-deploy.mjs delete-vs-create-dropped` reports the marker live in `assets/index-fZW_RI6I.js` + `assets/SitePlannerApp-KrpKxn4C.js` on planyr.io, so whoever runs the steps below is testing the fixed build and does not need to check that first.
 
 **What was proven HERE.** `test/editorNames.test.js` (+3, including the pre-fix snapshot
 construction asserted directly) and `test/conflictMatrix.test.js` (+3, every attributing row of the
