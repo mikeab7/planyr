@@ -24,6 +24,7 @@
 import { makeWriteSerializer } from "../../../shared/cloud/serializeWrites.js";
 import { KIND_TO_FIELD } from "./elementRows.js";
 import { nextZ } from "./zOrder.js";
+import { assemblyDigest } from "./assemblyDigest.js";
 
 const FIELDS = Object.entries(KIND_TO_FIELD); // [ [kind, field], ... ]
 
@@ -144,6 +145,9 @@ export function createElementSync(opts = {}) {
     // declares itself out of date. A stale client's ops are rejected by the rev guard forever;
     // re-queueing them on the plain debounce is a ~1 RPC/s hot loop with no exit.
     maxRejectStreak = 4,
+    // B1341 stage 2 — () => bool, asked at CALL time. Omitted → group CAS is OFF and every call is
+    // byte-for-byte its pre-stage-2 self, which is what makes this stage inert until switched on.
+    groupCas = null,
   } = opts;
 
   // key -> { kind, id, json, rev, z }  (last COMMITTED state)
@@ -641,6 +645,7 @@ export function createElementSync(opts = {}) {
     // batch has nothing to be atomic about, so it keeps the plain 2-arg call and the blast radius
     // of the new overload stays small.
     const atomic = batchSpansAssembly(batch);
+    const groups = atomic ? groupsFor(batch, live) : [];   // B1341 stage 2 — groups ride only on atomic
     // NEW-1 — the post-write assertion. Runs on EVERY settle path (ok, rejected, rolled back,
     // transport failure) via the returns below, exactly once per batch, and never throws into the
     // commit path: a detector that can take the write engine down is worse than the bug it watches.
@@ -653,7 +658,7 @@ export function createElementSync(opts = {}) {
     serialize(siteId, async () => {
       const ops = batch.map(opFor);
       let res;
-      try { res = await commit(ops, { atomic }); }
+      try { res = await commit(ops, groups.length ? { atomic, groups } : { atomic }); }
       finally {
         inflight = false;
         for (const e of batch) inflightKeys.delete(skey(e.kind, e.id));
@@ -678,6 +683,10 @@ export function createElementSync(opts = {}) {
       }
       if (!res || !res.ok) return onTransportFailure(batch, res);
       attempt = 0;
+      // B1341 stage 2 — the server refused the call OUTRIGHT: a named assembly moved underneath
+      // this batch and NOTHING was written. This is the case B1117's rollback could not see, because
+      // every op in the batch may hold a perfectly valid per-row rev.
+      if (Array.isArray(res.groupConflict) && res.groupConflict.length) return onGroupConflict(batch, res.groupConflict);
       // B1117 — `applied === false`: the server rolled the WHOLE call back, so nothing landed —
       // including ops whose own per-op status reads "ok". Treating those as committed is precisely
       // the tear this mode exists to prevent, so the entire batch is re-queued at the fresh revs the
@@ -719,6 +728,52 @@ export function createElementSync(opts = {}) {
     });
   }
 
+  /* B1341 stage 2 — the GROUP REVISIONS this batch is betting on.
+   *
+   * For every assembly the batch touches, the digest of what THIS TAB believes its live members
+   * are, built from the shadow — which is the only honest source, because the shadow IS "the rows
+   * as I last saw them". The server recomputes the same string from its own rows and refuses the
+   * whole call if they differ.
+   *
+   * ⛔ It must include EVERY live member of the assembly, not just the ones being written. A digest
+   * over the written subset would answer "did the rows I am touching move", which is what the
+   * per-row rev guard already answers; the question stage 2 exists to ask is "did the ASSEMBLY
+   * move" — and the tear this whole family is made of is precisely a SIBLING moving underneath you.
+   *
+   * Returns [] when the switch is off, when nothing in the batch is bonded, or when the engine has
+   * no `liveCollections` to resolve roots with — in each case the call goes out exactly as it does
+   * today (B1117 semantics, untouched). */
+  function groupsFor(batch, live) {
+    if (!groupCas || !groupCas()) return [];
+    const roots = new Set();
+    for (const e of batch) {
+      if (e.kind !== "el") continue;
+      const cur = (live && live.byKey.get(skey("el", e.id))) || e.el;
+      const r = rootIdOf(cur, e.id);
+      if (r != null) roots.add(r);
+    }
+    if (!roots.size) return [];
+    // Bucket every LIVE shadow entry by its assembly root, so a member nobody is writing still
+    // counts. The shadow holds only live rows (a delete removes its entry), which matches the
+    // server's `deleted_at is null` filter — the two definitions of "member" must not drift.
+    const members = new Map();
+    for (const [key, shad] of shadow) {
+      if (shad.kind !== "el") continue;
+      const cur = (live && live.byKey.get(key)) || null;
+      let root = cur ? rootIdOf(cur, shad.id) : null;
+      if (root == null) {                       // not on the canvas → read the bond off the shadow json
+        try { root = rootIdOf(JSON.parse(shad.json || "null"), shad.id); } catch (_) { root = shad.id; }
+      }
+      if (root == null || !roots.has(root)) continue;
+      let list = members.get(root);
+      if (!list) { list = []; members.set(root, list); }
+      list.push({ id: shad.id, rev: shad.rev });
+    }
+    const out = [];
+    for (const [root, list] of members) out.push({ assembly: root, expected: assemblyDigest(list) });
+    return out;
+  }
+
   // Does this batch carry more than one member of the same assembly? (B1117 — the atomic gate.)
   function batchSpansAssembly(batch) {
     if (batch.length < 2) return false;
@@ -733,6 +788,40 @@ export function createElementSync(opts = {}) {
       seen.add(root);
     }
     return false;
+  }
+
+  /* B1341 stage 2 — a call refused on the GROUP revision. Nothing was written, so — exactly as in
+   * `onAtomicRollback` — no shadow json may advance; only the REVS the conflict rows carry are
+   * adopted, so the retry is built against the assembly as it actually is. The difference from the
+   * rollback path is that the conflict names MEMBERS THIS BATCH NEVER TOUCHED, which is the whole
+   * point: those are the siblings that moved, and adopting their revs is what makes the next attempt
+   * agree with the server instead of losing the same race again. */
+  function onGroupConflict(batch, conflicts) {
+    for (const c of conflicts || []) {
+      for (const m of (c && c.members) || []) {
+        if (!m || m.id == null || typeof m.rev !== "number") continue;
+        const key = skey(m.kind || "el", m.id);
+        const cur = shadow.get(key);
+        // Keep OUR json as the diff baseline (the canvas still holds it and we still intend to
+        // write it); adopt only the rev, flagged `stale` because json and rev now disagree.
+        if (cur) shadow.set(key, { ...cur, rev: m.rev, stale: true });
+      }
+    }
+    for (const e of batch) { const key = skey(e.kind, e.id); if (!dirty.has(key)) enqueue(key, e); }
+    splitStreak += 1;
+    report("element-group-conflict", "the assembly moved underneath this batch — nothing written, re-committing at fresh revs",
+      { siteId, ops: batch.length, streak: splitStreak, assemblies: conflicts.map((c) => c && c.assembly).filter(Boolean).slice(0, 10) });
+    onEvent({ type: "assembly-split", ids: batch.map((e) => e.id), streak: splitStreak, rolledBack: true, groupConflict: true });
+    if (splitStreak >= maxRejectStreak) {
+      setState("stale");
+      report("element-group-unresolved", "an assembly would not commit whole against its group revision", { siteId, streak: splitStreak });
+      onEvent({ type: "client-stale", streak: splitStreak, pending: dirty.size, reason: "group-conflict" });
+      return;
+    }
+    const wait = backoff[Math.min(splitStreak - 1, backoff.length - 1)];
+    if (backoffHandle != null) clearTimer(backoffHandle);
+    setState("retrying");
+    backoffHandle = setTimer(() => { backoffHandle = null; flush(); }, wait);
   }
 
   // B1117 — an atomic call the server rolled back. NOTHING was written, so no shadow json may be

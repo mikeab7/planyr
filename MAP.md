@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-08-12 @ `c219e4e` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-08-12 @ `da721f6` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_502 source files mapped._
+_504 source files mapped._
 
 ## infra
 
@@ -433,6 +433,8 @@ _502 source files mapped._
   - _exports_: `aerialPlacement`, `aerialTileGrid`, `BACKUP_GRACE_MS`, `featureToParcel`, `feetExtentToBbox`, `feetToLatLng`, `geoJsonToEsriFeature`, `getLayerInfo`, `humanizeError`, `identifyAtPoint`, `identifyParcelAcross`, `identifyParcelDetailed`, `identifyParcelEager`, `isQueryCapabilityError`, `largestRingLngLat`, `listLayers`, `lngLatFeatureToParcel`, `lngLatRingToFeet`, `lngLatToGlobalPixel`, `outerRingsLngLat`, `overlayExportPlacement`, `PARCEL_FETCH_TIMEOUT_MS`, `ParcelFetchError`, `pickAerialTileZoom`, `queryAtPoint`, `queryFeatures`, `resolveLayerUrl`
 - **`src/workspaces/site-planner/lib/arrange.js`** — element/markup z-order "Arrange" (B820): `reorderByZ`/`arrangeFlags`/`ARRANGE_MODES` — pure z-based Bring-to-Front/Send-to-Back over a peer set (within a type-layer band for elements, the markup layer for markups)
   - _exports_: `ARRANGE_MODES`, `arrangeFlags`, `reorderByZ`
+- **`src/workspaces/site-planner/lib/assemblyDigest.js`** — B1341 stage 2: the GROUP REVISION of a bonded assembly, DERIVED from its live members' `id:rev` pairs (never stored, so it cannot drift). Twin of the `assembly_digest` SQL function.
+  - _exports_: `assemblyDigest`, `digestsByAssembly`, `memberToken`
 - **`src/workspaces/site-planner/lib/assemblyIntegrity.js`** — the bonded-assembly invariant + tear detector: re-derives every `attachedTo` child from its host (via `normalizeBondedChildren`) and reports what moved, so a partial apply can reach neither the canvas nor the wire
   - _exports_: `ASSEMBLY_TEAR_TOL_FT`, `assemblyIntegrity`, `assemblyTears`, `orphanPayload`, `tearPayload`, `unhealablePayload`
 - **`src/workspaces/site-planner/lib/auth.js`** — Thin Supabase Auth wrappers: signUp/signIn/signOut/reset/updatePassword, getUser, onAuthChange with pinned redirect origin
@@ -629,6 +631,8 @@ _502 source files mapped._
   - _exports_: `COARSE_CELL_FT`, `deltaColor`, `groundReadout`
 - **`src/workspaces/site-planner/lib/groundwater.js`** — Depth-to-water screen for pond feasibility (NEW-B3): combines SSURGO seasonal-high water table + TWDB well signals (provenanced), screens wet-vs-dry pond (permanent-pool depth, suggested pool elev). Pure.
   - _exports_: `combineDepthToWater`, `pondGroundwaterScreen`
+- **`src/workspaces/site-planner/lib/groupCas.js`** — B1341 stage 2: the group-CAS kill switch (ships OFF; `VITE_GROUP_CAS` or the `planarfit:groupCas` device key, read at call time).
+  - _exports_: `GROUP_CAS_KEY`, `groupCasEnabled`
 - **`src/workspaces/site-planner/lib/hcfcdWse.js`** — HCFCD MAAPnext model WSE sampler (B882, Harris County): registry-driven ImageServer getSamples for the 1% + 0.2% WSE rasters; no-op until the provisional endpoints are confirmed live. `sampleMaapnextWse`/`maapnextEndpoints`/`clearMaapnextCache`.
   - _exports_: `clearMaapnextCache`, `maapnextEndpoints`, `maapnextOutage`, `sampleMaapnextWse`
 - **`src/workspaces/site-planner/lib/history.js`** — Pure undo/redo snapshot stack for the planner canvas: keyOf-based no-op dedup, explicit live-state compare, drop-on-abort drag transactions

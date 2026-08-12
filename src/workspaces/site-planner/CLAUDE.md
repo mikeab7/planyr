@@ -562,6 +562,21 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   shadow was advanced while it queued is **accepted in silence with no conflict anywhere**: in the diff,
   before the op is built, and after a refusal (plus the unload keepalive, which has no result handler).
   Guard: the repo-root `test/` suite **deleteVsCreate** (both directions, every seam, with the two controls).
+  **⛔ B1341 STAGE 2 — GROUP CAS, and it is NOT B1117 with a longer name.** B1117 made a CALL atomic;
+  two calls can each be internally atomic and still disagree, because every per-row rev guard passes
+  while a SIBLING moves underneath you. `assemblyDigest.js` is the GROUP REVISION — `id:rev` pairs of
+  an assembly's LIVE members, sorted, comma-joined — **DERIVED, never stored**: a `group_rev` column
+  would be a second copy of a fact the row revs already carry, which is the defect this family is made
+  of. `db/commit_elements_group_cas.sql` adds a 4th defaulted `p_groups`; a mismatch refuses the call
+  WHOLE (`{applied:false, groupConflict:[…]}`, nothing written) and null/empty delegates to the 3-arg
+  form so no client in the wild changes. `groupCas.js` is the kill switch and **ships OFF** — read at
+  CALL time, so it can be thrown without a reload. Two things not to undo: the digest covers **every
+  live member, not the written subset** (a subset digest asks the question the per-row guard already
+  answers — and a test that missed this passed on a deliberately wrong build until the mutation check
+  caught it), and `elementApi`'s PGRST202 latch degrades to the 3-arg **ATOMIC** call, never to the
+  per-row path. Guards: `db/test/commit_elements_group_cas.test.sql` (self-rolling-back, run against
+  the real database, mutation-proven) + the repo-root `test/` suite **assemblyGroupCas** (23, incl.
+  the real request body). Live-verify: **V179984**.
   **B377891:** `selfUid` is a GETTER here and in `editorNames.js` — a snapshot taken before auth
   resolves is null for the whole session, which silently disabled B1116's and B1099's foreign-author
   gates and made `createNameResolver` invent "a teammate" for the owner's own second tab.
