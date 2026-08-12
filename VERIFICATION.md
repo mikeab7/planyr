@@ -115,6 +115,8 @@ was never clicked" quietly ships broken.
 
 ### V173456 — B377888: a stale delete no longer eats an element created after it, on the owner's own two-tab plan `Blocker: auth` `Blocker: real-data`
 
+**🚚 DEPLOY CONFIRMED SERVING 2026-08-12** — `node ui-audit/verify-deploy.mjs delete-vs-create-dropped` reports the marker live in `assets/index-fZW_RI6I.js` + `assets/SitePlannerApp-KrpKxn4C.js` on planyr.io, so whoever runs the steps below is testing the fixed build and does not need to check that first.
+
 **What was proven HERE, without a browser, and it is not nothing.** The engine half is driven by
 `test/deleteVsCreate.test.js` (7) against the real `createElementSync`, using the owner's real
 geometry from `smsdrvzr9gzx`, one test per direction and one per seam — the diff, the pre-send
@@ -171,6 +173,8 @@ owner.
 
 ### V173458 — B377890: the heal refuses to invent a layout when a bonded sibling is missing `Blocker: real-data`
 
+**🚚 DEPLOY CONFIRMED SERVING 2026-08-12** — `node ui-audit/verify-deploy.mjs delete-vs-create-dropped` reports the marker live in `assets/index-fZW_RI6I.js` + `assets/SitePlannerApp-KrpKxn4C.js` on planyr.io, so whoever runs the steps below is testing the fixed build and does not need to check that first.
+
 **What was proven HERE, and it is most of the item.** `test/assemblyMissingSibling.test.js` (12)
 runs the real `normalizeBondedChildren` / `assemblyIntegrity` over the owner's real Building 3
 numbers, and **`e2e/assembly-missing-sibling.spec.js` (3) drives the REAL app in a browser, logged
@@ -192,6 +196,8 @@ green, build green.
    correct again the moment the information it needs is back.
 
 ### V173459 — B377891: a second tab of the owner's own account never names a teammate `Blocker: auth`
+
+**🚚 DEPLOY CONFIRMED SERVING 2026-08-12** — `node ui-audit/verify-deploy.mjs delete-vs-create-dropped` reports the marker live in `assets/index-fZW_RI6I.js` + `assets/SitePlannerApp-KrpKxn4C.js` on planyr.io, so whoever runs the steps below is testing the fixed build and does not need to check that first.
 
 **What was proven HERE.** `test/editorNames.test.js` (+3, including the pre-fix snapshot
 construction asserted directly) and `test/conflictMatrix.test.js` (+3, every attributing row of the
