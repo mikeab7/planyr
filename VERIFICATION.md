@@ -113,6 +113,99 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V173456 — B377888: a stale delete no longer eats an element created after it, on the owner's own two-tab plan `Blocker: auth` `Blocker: real-data`
+
+**What was proven HERE, without a browser, and it is not nothing.** The engine half is driven by
+`test/deleteVsCreate.test.js` (7) against the real `createElementSync`, using the owner's real
+geometry from `smsdrvzr9gzx`, one test per direction and one per seam — the diff, the pre-send
+check, the conflict result, and the unload keepalive — **with both controls**: create-then-delete
+still re-issues at the fresh rev, and delete-vs-edit with no observed birth is byte-for-byte its
+pre-change self. Lint 0, full unit suite green, build green.
+
+**Why the rest cannot be driven here.** This is a TWO-SIGNED-IN-TAB race on one cloud plan. The
+sandbox proxy CORS-blocks the Supabase sign-in, so a second authenticated client cannot exist at
+all, and without one there is no realtime row to race.
+
+**Steps still to run, signed in as the owner:**
+1. Open **Richfield / Concept A** in two tabs of the same browser, both signed in.
+2. In tab B, select any element and press Delete, then **immediately pull the network** (DevTools →
+   Network → Offline) so the delete stays queued.
+3. In tab A, draw a NEW building with dock zones (host + courts + trailer rows).
+4. Bring tab B back online. **The new assembly must survive.** Before the fix, tab B's queued delete
+   re-issued against whichever new row shared its id path and rows seconds old were tombstoned.
+5. Tab B should show a toast reading **"… was re-created in another tab of yours after you deleted
+   it — it's back on the plan."** with a **Show** action that zooms to it. ⛔ It must NOT say a name.
+6. Confirm from the database that nothing new is tombstoned:
+   `select id, rev, deleted_at from site_elements where site_id='smsdrvzr9gzx' and deleted_at is not null order by deleted_at desc limit 10;`
+7. In the telemetry channel, `element-delete-fabricated` and/or `element-delete-vs-create-dropped`
+   should appear for the run. Neither is an error — they are the guard reporting that it fired.
+
+### V173457 — B377889: all five members of Building 3 are back on Richfield / Concept A, and the trailer row sits outboard of a 135 ft truck court `Blocker: real-data`
+
+**⛔ READ THIS FIRST — THE REPLAY IS BLOCKED ON A RELOAD, NOT ON A DECISION.** The restore was
+executed 2026-08-12 through `commit_elements(..., p_atomic => true)` with `op:"restore"` under the
+owner's own `auth.uid()` and returned `applied:true` (revs 8 / 10 / 7). **Four seconds later a live
+tab running the un-fixed build re-deleted `e1454943cgzlnc` and pulled `e1454941cgzlnc` back.** The
+truck court `e1454940cgzlnc` survived and is live. So the sequence is: deploy → **every open tab on
+this plan is reloaded** → replay the RPC → then verify below. Replaying before the reload will be
+undone again, exactly as measured.
+
+**Steps:**
+1. Confirm the deploy is serving the fix (`node ui-audit/verify-deploy.mjs delete-vs-create-dropped`).
+2. Reload every browser tab that has Richfield / Concept A open. (This is the one owner-side step;
+   it is on `OWNER-TODO.md`.)
+3. Replay the restore for `e1454943cgzlnc` and re-bond + re-place `e1454941cgzlnc`.
+4. **From the SERVED app**, open Richfield / Concept A and confirm Building 3 shows **five** members:
+   the building, a truck court and a trailer row on each of two walls.
+5. The restored trailer row must sit **outboard of the 135 ft truck court**, not flush against the
+   building. Its across-wall offset is 470 ft (310 half-host + 135 court + 25 half-trailer);
+   `cy` should read **-1232.81**, not -1097.81.
+6. Reload once more and confirm it is still there — that is the repair surviving a round trip.
+7. `select id, rev, deleted_at from site_elements where site_id='smsdrvzr9gzx' and assembly_id='e1454939cgzlnc';`
+   must show **five live rows, none tombstoned**.
+
+### V173458 — B377890: the heal refuses to invent a layout when a bonded sibling is missing `Blocker: real-data`
+
+**What was proven HERE, and it is most of the item.** `test/assemblyMissingSibling.test.js` (12)
+runs the real `normalizeBondedChildren` / `assemblyIntegrity` over the owner's real Building 3
+numbers, and **`e2e/assembly-missing-sibling.spec.js` (3) drives the REAL app in a browser, logged
+out** — seeding his building with the truck court removed, reading the trailer's across-wall offset
+off the live SVG (470 ft, not 335), confirming the stored record keeps its bond and its position,
+and confirming `assembly-tear-unhealable` is reported while `assembly-tear-healed` never claims it,
+with the court-present control beside it. Both are **mutation-proven**: restoring the pre-fix rule
+reddens them and reproduces the 135 ft pull to the decimal. Lint 0, 530 test files / 10,709 tests
+green, build green.
+
+**Steps still to run, on real data:**
+1. On a signed-in plan, delete a truck court that has a trailer row bonded beyond it.
+2. **The trailer row must NOT move.** Before the fix it jumped inboard by exactly the court's depth
+   and ended up flush against the building.
+3. Reload. It must still not have moved — the load-time heal is the seam that used to do this.
+4. `assembly-tear-unhealable` must appear in the telemetry channel naming the element, the bond
+   (`forCourt` / `prevZone`) and the id that is gone. `assembly-tear-healed` must NOT claim it.
+5. Restore the truck court. The trailer must then re-fit to its proper outboard anchor — the heal is
+   correct again the moment the information it needs is back.
+
+### V173459 — B377891: a second tab of the owner's own account never names a teammate `Blocker: auth`
+
+**What was proven HERE.** `test/editorNames.test.js` (+3, including the pre-fix snapshot
+construction asserted directly) and `test/conflictMatrix.test.js` (+3, every attributing row of the
+matrix × both directions, plus the forgotten-`self` default). The wording is a model fact rather
+than a string, so the matrix is fully unit-testable. Lint, unit suite and build green.
+
+**Why the rest cannot be driven here.** The banner only appears for a signed-in cloud plan with a
+second live writer, and the sandbox cannot sign in.
+
+**Steps still to run, signed in as the owner:**
+1. Open one cloud plan in two tabs of the same browser, both signed in as him.
+2. Edit the same element from both within a few seconds so a conflict banner fires.
+3. **Every banner must read "… in another tab of yours" and must name NOBODY** — not "a teammate",
+   not a display name. ⛔ This is the whole item.
+4. Reload one tab and repeat IMMEDIATELY, before the page settles. This is the case that produced
+   the report: the resolver used to read the signed-in id once, at mount, before auth had resolved.
+5. On a genuinely SHARED project (8 South or RICHEY), have a second account edit an element. That
+   banner **must** name the teammate — the fix must not have made every conflict anonymous.
+
 ### V161952 — B366384–B366386: sharing tells the truth about an already-shared project, and the state is visible `Blocker: auth`
 
 **Why this is here and what is NOT pending.** The DATABASE half is done and was proven against the real
