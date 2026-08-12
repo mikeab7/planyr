@@ -549,6 +549,22 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   real transport**, never through a mock `commit` that accepts more parameters than the shipped
   adapter does — that mismatch is exactly what shipped a dead feature green. **B1118:** the load-time heal's `exempt` set — a repaired element must diff and COMMIT, or
   rows-canonical-on-seed adopts the torn rows straight back over the repair.
+  **⛔ B377888 — DELETE WINS IS THE RULE FOR delete-vs-EDIT AND THE WRONG RULE FOR delete-vs-CREATE.**
+  A delete whose base predates the row's existence is a decision about a row that no longer exists, and
+  re-issuing it kills something it was never about (measured: three deletes re-applied to rows 1.75 s old
+  on `smsdrvzr9gzx`). There is no `created_at` to read, so two client observations stand in, and the
+  SECOND is the one that catches it: `births` (a live row for a key the shadow never held, recorded
+  BEFORE the pending branch in `applyRemoteRow`) and **`remoteOnly` — keys the SHADOW learned from a
+  remote row that the CANVAS never showed.** `reconcile` mints a delete for exactly one reason,
+  shadow-has/collections-lack, and cannot tell a user deleting something from a row that arrived and was
+  dropped on the way to the canvas; such a delete has no base at all, and is refused with the row handed
+  BACK. Asked at THREE seams, because `opFor` sends at the shadow's CURRENT rev — so a delete whose
+  shadow was advanced while it queued is **accepted in silence with no conflict anywhere**: in the diff,
+  before the op is built, and after a refusal (plus the unload keepalive, which has no result handler).
+  Guard: the repo-root `test/` suite **deleteVsCreate** (both directions, every seam, with the two controls).
+  **B377891:** `selfUid` is a GETTER here and in `editorNames.js` — a snapshot taken before auth
+  resolves is null for the whole session, which silently disabled B1116's and B1099's foreign-author
+  gates and made `createNameResolver` invent "a teammate" for the owner's own second tab.
 - **County ROUTING KEYS (the shared `shared/gis/` normaliser) — a county routing key is normalised at the MAP, never at the call
   site (B298403).** Two production plans stored `"Harris"`; every `MAP[county]` lookup missed them and,
   because a missing key is `undefined` and every call site has a `|| fallback`, rendered a confident
@@ -610,6 +626,21 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   **assemblyIntegrity** (28, incl. all six required races, each proven red with the write seam disabled)
   and the e2e spec **assembly-tear-detector**, which measures BEFORE any reload — a reload heals this
   bug, so any check that reloads first proves nothing.
+  **⛔ B377890 — AND WHAT THE HEAL MUST NOT DO. A heal that meets a state it cannot repair has two honest
+  options: repair it, or say so.** It had a third — quietly produce *a* layout and report success — and
+  it took it: a truck court was deleted, `normalizeCrossHostBonds` dropped its trailer's `forCourt` as
+  "dangling", `normalizeStrandedZones` read the orphan as a chain HEAD, and the trailer was laid flush
+  against the dock wall 135 ft inboard (exactly the missing court's depth) under an
+  `assembly-tear-healed`. B1124's rule is SPLIT on the fact it was always about: a bond naming a REAL
+  element on the WRONG host is still re-pointed; a bond naming NOTHING is a MISSING SIBLING and both the
+  bond and the geometry are left alone. `assemblyIntegrity` returns **`unhealable`** — deliberately
+  separate from `tears`, so "we fixed it" and "we cannot fix it" can never become one number — carrying
+  `missingBondSiblings` (bookkeeping) and **`impossibleStacks` (GEOMETRY: a trailer row first in the
+  stack on a wall with no truck court)**. The geometric one is load-bearing: after the old pass tidied
+  the dangling reference away, every bond in the plan was coherent and the drawing was impossible, so
+  any check reading the bonds would have passed. Guards: the repo-root `test/` suite **assemblyMissingSibling** and the
+  e2e spec **assembly-missing-sibling** (the LOAD seam persists what it decides, so only a browser
+  proves the plan on disk), both mutation-proven on the owner's real Building 3 rows.
 - `bondRemap.js` — the ONE id-bearing bond inventory (`attachedTo` · `forCourt` · `forTrailer` ·
   `prevZone`) + the remap rule EVERY copy path must use (B1124). Both copy paths used to remap only
   `attachedTo`, so a duplicated building's trailer parking stayed bonded to the ORIGINAL building's

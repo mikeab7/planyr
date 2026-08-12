@@ -15,7 +15,7 @@ import { planDelete, shouldHintTypingGuard, TYPING_GUARD_HINT } from "./lib/dele
 import { rowsToModel, KIND_TO_FIELD, foldNeverSyncedLocal, foldJournal, reconcileSeedRows } from "./lib/elementRows.js";
 import { writeJournal, readJournal, clearJournal, sweepJournals, journalSessionId } from "./lib/elementJournal.js";
 import { ToastHost, useToasts } from "../../shared/ui/Toast.jsx";
-import { createNameResolver, describeElement } from "./lib/editorNames.js";
+import { createNameResolver, describeElement, SELF_ACTOR } from "./lib/editorNames.js";
 import { toastForSyncEvent } from "./lib/conflictToasts.js";
 import { listMembers } from "./lib/teams.js";
 import { multiwriterEnabled } from "./lib/multiwriter.js";
@@ -25,7 +25,7 @@ import { commitElements, fetchElements, keepaliveCommit } from "./lib/elementApi
 import { supabase, supabaseRest, currentAccessToken } from "./lib/supabase.js";
 import { createIdMinter, randomIdSalt } from "../../shared/ids.js";
 import { mergeSiteContent, createSiteModel } from "./lib/siteModel.js";
-import { assemblyIntegrity, tearPayload, orphanPayload } from "./lib/assemblyIntegrity.js";
+import { assemblyIntegrity, tearPayload, orphanPayload, unhealablePayload } from "./lib/assemblyIntegrity.js";
 import { extendMergeSelection } from "./lib/parcelSelect.js";
 import { parcelSelectHintDecision, PARCEL_HINT_COOLDOWN_MS } from "./lib/parcelSelectHint.js";
 import { measuresUnderPoint, nextMeasureSelection } from "./lib/measureHit.js";
@@ -3948,6 +3948,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (res.orphans && res.orphans.length)
       reportClientEvent("assembly-orphan-pad", `${res.orphans.length} bonded pad(s) on a building carried no wall role (${seam})`,
         { id: siteId, seam, ...orphanPayload(res.orphans) });
+    /* ⛔ NEW-3 — what the heal CANNOT repair is reported BEFORE anything it can, and is never
+       folded into the tear/repair counts. A missing bonded sibling is a piece of the assembly that
+       was deleted, so there is nothing left to derive the geometry from; the previous behaviour was
+       to invent a layout anyway and log a successful heal. This is the "surface it and leave the
+       geometry alone" half — the leaving-alone half lives in siteModel's two passes. */
+    if (res.unhealable && res.unhealable.length)
+      reportClientEvent("assembly-tear-unhealable",
+        `${res.unhealable.length} bonded assembly defect(s) the heal must NOT repair — a sibling is missing (${seam})`,
+        { id: siteId, seam, ...unhealablePayload(res.unhealable) });
     // Adopt for an orphan even with no tear — the re-tag is a zero-geometry repair, so it would
     // otherwise be thrown away here (this seam deliberately ignores sub-tolerance geometry churn).
     if (!res.tears.length) return (res.orphans && res.orphans.length) ? res.els : list;
@@ -4167,7 +4176,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       onEvent: (ev) => { try { syncEventRef.current(ev); } catch (_) {} }, // B673 — late-bound (the handler needs helpers defined further down)
       patchElement: applyZPatch,
       report: reportClientEvent,
-      selfUid: activeUid(),
+      selfUid: () => activeUid(),   // NEW-4 — a getter, not a snapshot (see editorNames.js)
       // NEW-1 — bonded (attachedTo) elements are cascade-DERIVED unless the current gesture /
       // selection targets them; everything else (incl. deletes, el = null) stays direct.
       isDirectEdit: (kind, id, el) => kind !== "el" || !el || el.attachedTo == null || isDirectTouched(kind, id),
@@ -4195,7 +4204,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // never move geometry.
       afterCommit: (summary) => {
         try {
-          const tears = assemblyIntegrity(stateRef.current.els).tears;
+          const res = assemblyIntegrity(stateRef.current.els);
+          if (res.unhealable && res.unhealable.length)
+            reportClientEvent("assembly-tear-unhealable",
+              `${res.unhealable.length} bonded assembly defect(s) survive a commit — a sibling is missing (${summary && summary.outcome})`,
+              { id: siteId, seam: "post-commit", ...unhealablePayload(res.unhealable) });
+          const tears = res.tears;
           if (!tears.length) return;
           reportClientEvent("assembly-tear-detected",
             `a bonded child sits ${Math.round(tears[0].dist)} ft off its host after a commit (${summary && summary.outcome})`,
@@ -4207,7 +4221,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // B673 — who to blame in a conflict toast: self → "you (another window)"; teammates via the
     // list_team_members roster RPC (profiles RLS is own-row-only); cached per site session.
     nameResolverRef.current = createNameResolver({
-      selfUid: activeUid(),
+      // NEW-4 — a GETTER, not a snapshot. `activeUid()` is null until the auth session resolves,
+      // and on any load where the planner mounted first a snapshot froze that null for the whole
+      // plan session — which is what let a second tab of this same account be reported as a
+      // teammate. Read at resolve time, a late sign-in is picked up.
+      selfUid: () => activeUid(),
       teamIdOf: () => { try { return loadSite(siteId)?.teamId || null; } catch (_) { return null; } },
       fetchRoster: listMembers,
     });
@@ -7505,7 +7523,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const localEl = ((stateRef.current && stateRef.current[field]) || []).find((x) => x && x.id === id);
     const elForLabel = localEl || ev.local || (ev.remote && ev.remote.data) || null;
     const label = describeElement(kind, elForLabel, stateRef.current ? stateRef.current.els : []);
-    const spec = toastForSyncEvent(ev, { name: "", label });
+    const spec = toastForSyncEvent(ev, { name: "", label, self: true });
     if (!spec) return;
     if (spec.removeFromCanvas) applyRemoteInstr({ action: "remove", kind, id }); // deletion is showing; Restore re-adds
     if (ev.type === "restore-conflict" && ev.remote) {
@@ -7514,9 +7532,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       else if (ev.remote.data) applyRemoteInstr({ action: "upsert", kind, id, el: ev.remote.data });
     }
     const uid = (ev.remote && (ev.remote.deleted_by || ev.remote.updated_by)) || null;
-    const resolve = nameResolverRef.current ? nameResolverRef.current(uid) : Promise.resolve("a teammate");
-    Promise.resolve(resolve).then((name) => {
-      const finalSpec = toastForSyncEvent(ev, { name, label });
+    // NEW-4 — `actor` is `{ name, self }`; `self` means "this account, another tab" (or an actor we
+    // could not prove is a different account). With no resolver at all we cannot prove anything, so
+    // the unattributed wording is the honest default — never "a teammate".
+    const resolve = nameResolverRef.current ? nameResolverRef.current(uid) : Promise.resolve(SELF_ACTOR);
+    Promise.resolve(resolve).then((actor) => {
+      const { name, self } = actor || SELF_ACTOR;
+      const finalSpec = toastForSyncEvent(ev, { name, label, self });
       if (!finalSpec) return;
       const localCopy = ev.local || localEl || null;
       const action =

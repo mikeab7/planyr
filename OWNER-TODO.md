@@ -5,7 +5,20 @@
 > step; tick/remove it once he's done it. This is the **owner's** plate only. Browser click-throughs and
 > signed-in spot-checks are the Claude cohort's job (`VERIFICATION.md`), **never** Michael's — do NOT list those here.
 
-_Last updated: 2026-08-09._
+_Last updated: 2026-08-12._
+
+## 🔄 One reload, once this deploys — to get Building 3 whole again on Richfield
+
+> Two pieces of Building 3 on **Richfield / Concept A** — a truck court and a trailer row — were wiped out
+> by a bug where one browser tab's old "delete" landed on things a second tab had just drawn. Both pieces
+> were still recoverable, and the fix for the underlying bug is in this release.
+>
+> I put one of the two pieces back today and it stuck. When I put the other one back, a tab you still had
+> open — running the old, un-fixed version — wiped it out again about four seconds later. That is the bug
+> itself, caught in the act, and it is exactly what this release stops.
+>
+> **What I need from you: once this deploys, close or reload any browser tab that has Richfield open.**
+> That's it. Then I'll put the last piece back and it will stay put. Nothing to decide, nothing to check.
 
 ## ❓ One question on team sharing I deliberately did NOT answer for you (B326416)
 
