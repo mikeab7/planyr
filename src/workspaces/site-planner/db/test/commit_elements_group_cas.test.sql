@@ -138,6 +138,37 @@ begin
   then rep := rep || E'\n  ok  8. an unknown assembly digests to the empty string, not null';
   else failed := failed + 1; rep := rep || E'\n  FAIL 8. unknown assembly did not digest to empty'; end if;
 
+  -- ---- 9. B447472 — THE KIND COLLISION ------------------------------------
+  -- `assembly_id` inherits the (site_id, kind, id) namespace: an id is unique only PER KIND, and
+  -- stage 1 gives an unbonded row its OWN id as its assembly_id. So a markup can share an
+  -- element's id and land on the same assembly KEY while being its own assembly entirely. Live on
+  -- the owner's Katz plan: `el:e6327` (28 members) and `markup:e6327` (no host) — the server
+  -- digested 29 tokens where the client digests 28, which is a groupConflict no retry can ever
+  -- converge out of. The client is RIGHT (a markup has no host, so it is a member of nothing but
+  -- itself); the predicate belongs here.
+  insert into public.site_elements (site_id, id, kind, data, z_index, rev)
+  values (site, host, 'markup', jsonb_build_object('id', host, 'type', 'line'), 9, 1);
+
+  select count(*) into n from public.site_elements
+   where site_id = site and assembly_id = host and deleted_at is null;
+  t := public.assembly_digest(site, host);
+  if n = 3 and t not like '%markup%' and array_length(string_to_array(t, ','), 1) = 2
+  then rep := rep || E'\n  ok  9. a markup sharing the host''s id collides on assembly_id and is NOT a member';
+  else failed := failed + 1;
+    rep := rep || format(E'\n  FAIL 9. %s rows share the assembly key and the digest is %L (expected the 2 live el members)', n, t); end if;
+
+  -- …and the conflict payload names the SAME set, because the client ADOPTS what it names.
+  res := public.commit_elements(site, jsonb_build_array(
+           jsonb_build_object('op','update','id',host,'kind','el','expected',4,
+                              'data', jsonb_build_object('id',host,'type','building','cx',1002))
+         ), true, jsonb_build_array(jsonb_build_object('assembly', host, 'expected', 'deliberately-stale')));
+  if (res->>'applied') = 'false'
+     and not exists (select 1 from jsonb_array_elements(res->'groupConflict'->0->'members') m
+                      where m->>'kind' <> 'el')
+     and jsonb_array_length(res->'groupConflict'->0->'members') = 2
+  then rep := rep || E'\n  ok 10. the conflict''s members list carries the same el-only set';
+  else failed := failed + 1; rep := rep || format(E'\n  FAIL 10. members payload disagrees with the digest: %s', res); end if;
+
   -- ---- report + ROLL EVERYTHING BACK --------------------------------------
   -- ⚠ RAISE's placeholder is a bare `%`, never `%s` — a `%s` prints the value then a literal 's'.
   raise exception E'\n=== B1341 stage 2 — group CAS ===%\n\n% (fixtures rolled back, nothing written)',

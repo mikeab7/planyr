@@ -5,6 +5,7 @@ import { assemblyDigest, digestsByAssembly, memberToken } from "../src/workspace
 import { groupCasEnabled, GROUP_CAS_KEY } from "../src/workspaces/site-planner/lib/groupCas.js";
 import { createElementSync } from "../src/workspaces/site-planner/lib/elementSync.js";
 import { commitElements } from "../src/workspaces/site-planner/lib/elementApi.js";
+import { sqlAssemblyDigest, sqlConflictMembers } from "./helpers/sqlDigestParity.js";
 
 /* B1341 STAGE 2 — GROUP CAS: one revision for a bonded assembly.
  *
@@ -45,13 +46,6 @@ describe("the group revision is DERIVED, and identical on both sides", () => {
     expect(assemblyDigest([{ id: "h", rev: 1 }, { id: "k", rev: 2 }])).not.toBe(before);
   });
 
-  it("the SQL twin computes the same string — the two definitions may not drift", () => {
-    // string_agg(id || ':' || rev, ',' order by id) over live rows of the assembly.
-    expect(SQL).toMatch(/string_agg\(t\.id \|\| ':' \|\| t\.rev, ',' order by t\.id\)/);
-    expect(SQL).toMatch(/and t\.deleted_at is null/);          // LIVE rows only, both sides
-    expect(SQL).toMatch(/coalesce\(string_agg/);               // …and empty, never null
-  });
-
   it("digestsByAssembly buckets by root and ignores non-element kinds", () => {
     const rootOf = (e) => (e.el && e.el.attachedTo != null ? e.el.attachedTo : e.id);
     const out = digestsByAssembly([
@@ -61,6 +55,130 @@ describe("the group revision is DERIVED, and identical on both sides", () => {
     ], rootOf);
     expect([...out.keys()]).toEqual(["h"]);
     expect(out.get("h")).toBe("h:1,k:2");
+  });
+});
+
+/* ⛔ B447472 — THE PARITY SUITE, AND THE TEST IT REPLACES.
+ *
+ * What used to stand here was
+ *     expect(SQL).toMatch(/string_agg\(t\.id \|\| ':' \|\| t\.rev, ',' order by t\.id\)/)
+ * — an assertion about the shape of the PROJECTION, which is structurally blind to the WHERE
+ * clause beside it. Both sides can agree character-for-character on how to build a token and still
+ * digest DIFFERENT MEMBER SETS, and that is what shipped: the SQL had no `kind` predicate, so it
+ * folded in every live row sharing an `assembly_id`, while the client twin skips `kind !== "el"`.
+ *
+ * ⛔ THE ROOT CAUSE IS NOT "THE SERVER FORGOT A FILTER" — it is that `assembly_id` INHERITS THE ID
+ * NAMESPACE'S NON-UNIQUENESS. The PK is (site_id, kind, id), so an id is unique only per KIND
+ * (B420256), and stage 1 sets an unbonded element's `assembly_id` to its OWN id. Two unrelated
+ * singleton assemblies of DIFFERENT kinds therefore collide on the assembly key: on the owner's
+ * Katz plan (site `smqh3au6aeb4`), `el:e6327` is a building with 27 bonded children and
+ * `markup:e6327` is an unrelated markup with no host — the markup is not a member of the
+ * building's assembly, it is its own assembly that happens to share the NAME. Server digested 29
+ * tokens, client 28, permanently. Read it as a namespace collision, or the next person
+ * rediscovers it through a callout instead of a markup.
+ *
+ * ⛔ THE CLIENT IS RIGHT AND DOES NOT MOVE. A markup has no host, so it is a member of nothing but
+ * itself. This is settled, not a live choice — do not "fix" a future recurrence by folding non-el
+ * rows into `digestsByAssembly`.
+ *
+ * The fixture is drawn from that live assembly, verified read-only against production 2026-08-13
+ * (28 el + 1 markup, all at rev 2 — and the ONLY such assembly in the whole table). LATENT ONLY:
+ * group CAS ships OFF, so nothing is broken today; it bites the instant stage 2 is switched on.
+ */
+describe("PARITY — both implementations, one member set", () => {
+  const sqlDigest = sqlAssemblyDigest(SQL);
+  const conflictMembers = sqlConflictMembers(SQL);
+  const SITE = "smqh3au6aeb4";
+
+  // A row as the DATABASE holds it: assembly_id is GENERATED as coalesce(data->>'attachedTo', id).
+  const row = (kind, id, rev, attachedTo = null, deleted_at = null) => ({
+    site_id: SITE, kind, id, rev, deleted_at,
+    attachedTo,
+    assembly_id: attachedTo == null ? id : attachedTo,
+  });
+
+  // The same rows as the ENGINE's shadow holds them, fed through the client twin.
+  const rootOf = (e) => (e.el && e.el.attachedTo != null ? e.el.attachedTo : e.id);
+  const clientDigest = (rows, assembly) => {
+    const out = digestsByAssembly(
+      rows.filter((r) => r.deleted_at == null).map((r) => ({ kind: r.kind, id: r.id, rev: r.rev, el: { attachedTo: r.attachedTo } })),
+      rootOf,
+    );
+    return out.get(assembly) ?? "";
+  };
+
+  const serverDigest = (rows, assembly) => sqlDigest.digest(rows, { p_site: SITE, p_assembly: assembly });
+
+  /** The owner's real Katz assembly: a building + 27 bonded children, and an unrelated markup
+   *  that collides with the host's id across the kind namespace. */
+  const katzRows = () => {
+    const kids = ["e6328", "e6329", "e6330", "e6331", "e6332", "e6333",
+      "e79361", "e79362", "e79363", "e79364", "e79365", "e79366", "e79367", "e79368", "e79369",
+      "e79370", "e79371", "e79372", "e79373", "e79374", "e79375",
+      "e8971", "e8972", "e8984", "e8985", "e8986", "e8987"];
+    return [
+      row("el", "e6327", 2),                              // the host
+      ...kids.map((id) => row("el", id, 2, "e6327")),      // 27 bonded children
+      row("markup", "e6327", 2),                           // ⛔ NOT a member — its own assembly
+    ];
+  };
+
+  it("⛔ the KIND COLLISION — a markup sharing the host's id is not a member on either side", () => {
+    const rows = katzRows();
+    expect(rows.filter((r) => r.assembly_id === "e6327").length).toBe(29);   // the fixture really collides
+    expect(serverDigest(rows, "e6327")).toBe(clientDigest(rows, "e6327"));
+    expect(serverDigest(rows, "e6327").split(",")).toHaveLength(28);         // 28 el members, not 29
+    expect(serverDigest(rows, "e6327")).not.toMatch(/markup/);
+  });
+
+  it("the markup is its OWN assembly, and the server says so too", () => {
+    const rows = katzRows();
+    // Asked as the markup's own assembly, the server must not answer with the building's members.
+    expect(serverDigest(rows, "e6327").includes("e6328:2")).toBe(true);
+    const markupOnly = sqlDigest.members(rows, { p_site: SITE, p_assembly: "e6327" })
+      .filter((r) => r.kind !== "el");
+    expect(markupOnly).toHaveLength(0);
+  });
+
+  it("an ordinary assembly agrees — the control, so the fix is not just a blanket empty answer", () => {
+    const rows = [row("el", "h", 1), row("el", "k1", 2, "h"), row("el", "k2", 3, "h")];
+    expect(serverDigest(rows, "h")).toBe("h:1,k1:2,k2:3");
+    expect(serverDigest(rows, "h")).toBe(clientDigest(rows, "h"));
+  });
+
+  it("a tombstone is a member on NEITHER side", () => {
+    const rows = [row("el", "h", 1), row("el", "k1", 2, "h"), row("el", "k2", 9, "h", "2026-08-13T00:00:00Z")];
+    expect(serverDigest(rows, "h")).toBe("h:1,k1:2");
+    expect(serverDigest(rows, "h")).toBe(clientDigest(rows, "h"));
+  });
+
+  it("rows of ANOTHER site never enter the digest", () => {
+    const rows = [row("el", "h", 1), { ...row("el", "k1", 7, "h"), site_id: "other-site" }];
+    expect(serverDigest(rows, "h")).toBe("h:1");
+  });
+
+  it("an empty group is '' on both sides — a legitimate value, never null", () => {
+    expect(serverDigest([row("el", "h", 1)], "no-such-assembly")).toBe("");
+    expect(clientDigest([row("el", "h", 1)], "no-such-assembly")).toBe("");
+  });
+
+  /* The conflict payload is a SECOND query with its own where clause, and the client ADOPTS every
+   * member it names into the shadow. A membership disagreement here deadlocks the retry exactly as
+   * one in the digest does, so it is checked separately rather than assumed to follow. */
+  it("the conflict's MEMBERS list carries the same set the digest does", () => {
+    const rows = katzRows();
+    const named = conflictMembers.rows(rows, { p_site: SITE, v_asm: "e6327" });
+    expect(named.map((r) => r.kind).every((k) => k === "el")).toBe(true);
+    expect(named).toHaveLength(28);
+    expect(named.map((r) => `${r.id}:${r.rev}`).sort().join(",")).toBe(serverDigest(rows, "e6327"));
+  });
+
+  it("the interpreter really read the migration's own filters — including the kind predicate", () => {
+    // Not a format assertion: these are the conditions the evaluator ABOVE ran. If the file stops
+    // being readable by it, `sqlAssemblyDigest` throws rather than passing vacuously.
+    expect(sqlDigest.conditions).toContain("t.deleted_at is null");
+    expect(sqlDigest.conditions).toContain("t.kind = 'el'");
+    expect(conflictMembers.conditions).toContain("t.kind = 'el'");
   });
 });
 

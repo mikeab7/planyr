@@ -2139,6 +2139,14 @@ const cascadeDates = (tasks, bodies = []) => {
   queue.forEach(id => {
     const t = map[id];
     const preds = t.predecessors.filter(p => map[p.id]);
+    // B443249 — predecessors that contribute NO date: an id with no row in this project (missing), or a
+    // live row that has no dates of its own yet (unscheduled). Both were dropped in total silence by the
+    // filters above/below, so the successor rendered a confident date derived from a SUBSET of its stated
+    // inputs and nothing anywhere said so (LOUD-FAILURE). Recorded per task so the grid can mark them.
+    // Topological order guarantees a live predecessor is already resolved when we read it here.
+    t.predUnresolved = t.predecessors
+      .filter(p => !map[p.id] || !(map[p.id].end || map[p.id].start))
+      .map(p => p.id);
     // A meeting-bound task (B816): a real body, not a summary/parent (parents come from rollup), not a
     // locked finish (bound+pinnedEnd is rejected on entry — if both are set the lock wins as a safe fallback).
     const bound = !!(t.meetingBound && bodyMap[t.meetingBodyId] && !parentIds.has(t.id) && !(t.pinnedEnd && t.end));
@@ -2148,6 +2156,18 @@ const cascadeDates = (tasks, bodies = []) => {
     // date (soft-pin, below) and flag it LOUDLY so the row surfaces the broken binding (LOUD-FAILURE).
     const bodyMissing = !!(t.meetingBound && !bodyMap[t.meetingBodyId] && !parentIds.has(t.id));
     t.meetingBodyMissing = bodyMissing;
+    // ── B443248 — A SUMMARY ROW'S DATES ARE OWNED BY rollupParentDates, NEVER BY THIS LOOP ──────────
+    // Deriving a parent's span here treated it as a leaf and read durValue/durUnit — fields a parent does
+    // not carry (rollup writes the derived `duration` only, leaving durValue at its 0 default). So a
+    // 40-working-day summary COLLAPSED to a 0-day milestone sitting on its own start, and every FS
+    // successor was then scheduled off that collapsed end. That is the owner-reported "Mobilize" defect:
+    // Grand Port task 228 landed on 2026-08-10 — the next working day after parent 108's START — instead
+    // of 2026-10-05, the next working day after its real FINISH. rollupParentDates restored the parent's
+    // end immediately afterwards, which is why the wrong successor date was a STABLE fixed point: re-running
+    // the recompute reproduced it exactly, and detectCascadeDrift (stored vs engine) could never see it.
+    // Parents never took a predecessor-driven start either (the rollup overwrote it in the same breath), so
+    // skipping is behaviour-preserving for the parent itself and CORRECT for every row reading its finish.
+    if (parentIds.has(t.id)) { t.finishConflict = false; t.startConflict = false; return; }
     // Locked FINISH (B616): the end is a FIXED POINT — successors cascade from it, the start
     // back-calcs to preserve the working-day duration, and the end never moves/exceeds the lock.
     // If the predecessor chain can't fit the duration before the locked finish, flag a LOUD
@@ -2169,6 +2189,7 @@ const cascadeDates = (tasks, bodies = []) => {
       return;
     }
     t.finishConflict = false;
+    t.startConflict = false;
     // The predecessor-derived earliest start ("packet ready"), computed even for pinned tasks so a
     // bound task can test feasibility against it.
     const predEarly = preds.length
@@ -2178,7 +2199,13 @@ const cascadeDates = (tasks, bodies = []) => {
     // B864: an orphaned bound task that HAS a stored date holds it like a pin, so preds can't overwrite
     // the intended meeting date; end/duration still re-derive from that preserved start. A bound task with
     // NO stored date has nothing to lose, so it falls through to normal FS scheduling (unchanged behavior).
-    if (!preds.length || t.pinnedStart || (bodyMissing && t.start)) { const r = resolveTaskSpan(t); t.end = r.end; t.duration = r.duration; }
+    if (!preds.length || t.pinnedStart || (bodyMissing && t.start)) {
+      const r = resolveTaskSpan(t); t.end = r.end; t.duration = r.duration;
+      // B443250 — a pinned start WINS over the chain (that is the contract, and it stays), but a pin that
+      // sits BEFORE the chain allows is a real conflict that used to be resolved in total silence. Flag it
+      // so the row says the logic is being overridden, exactly as a locked finish already does (B616).
+      if (t.pinnedStart && t.start && predEarly && predEarly > t.start) t.startConflict = true;
+    }
     else {
       const starts = preds.map(p => constrainedStartFrom(map[p.id], p, t.duration)).filter(Boolean);
       if (starts.length) t.start = starts.reduce((a,b) => a>b?a:b, starts[0]);
@@ -2269,12 +2296,32 @@ const rollupParentDates = tasks => {
   return tasks.map(t => map[t.id]);
 };
 
+// B443248 — THE recompute. A summary row's dates come from its children (rollup) while its successors'
+// dates come from the cascade, so ONE cascade→rollup pass can leave a successor a generation behind
+// whenever a parent's own dates moved during that pass. Two changes make the pair correct:
+//   • seed with a rollup, so the FIRST cascade reads real parent finishes rather than whatever the stored
+//     (possibly stale) parent row happened to say, and
+//   • iterate to a FIXED POINT, so a move propagates transitively down a chain of any depth in one call.
+// PASS_CAP is a runaway guard, never the normal exit — a real schedule settles in two passes (the second
+// only proves stability). Every cascade+rollup call site goes through this; none of them pairs by hand.
+const RECOMPUTE_PASS_CAP = 12;
+const recomputeSchedule = (tasks, bodies = []) => {
+  let out = rollupParentDates(tasks);
+  for (let i = 0; i < RECOMPUTE_PASS_CAP; i++) {
+    const next = rollupParentDates(cascadeDates(out, bodies));
+    const stable = next.length === out.length && next.every((t, k) => t.start === out[k].start && t.end === out[k].end);
+    out = next;
+    if (stable) break;
+  }
+  return out;
+};
+
 // Recompute leaf cascade + parent roll-ups after a STRUCTURAL move (indent / outdent /
 // paste) that changes parentId. Without this the moved task's old and new parents keep
 // stale summary start/end/duration until the next in-subtree date edit happens to run
 // the rollup — the same recompute updateTask runs after a date edit. Pure; preserves
 // array order (so a caller can still renumber afterwards).
-const recomputeAfterStructureChange = tasks => rollupParentDates(cascadeDates(tasks));
+const recomputeAfterStructureChange = tasks => recomputeSchedule(tasks);
 
 // B835 (recurrence ×2) — the SCHEDULING-INPUT fields. Editing ANY of these can move this task's OR a
 // successor's dates, so updateTask must re-run cascadeDates + rollupParentDates before it persists. The
@@ -2369,7 +2416,7 @@ const mergeCloudDoc = (base, ours, theirs) => {
 // B836 — load-path glue: run the normal recompute (cascade → rollup) on a project's already-stripped
 // tasks AND record any drift it corrected into `sink`. Keeps the three load sites DRY and identical.
 const recascadeWithDrift = (tasks, projName, sink) => {
-  const out = rollupParentDates(cascadeDates(tasks));   // cascadeDates/rollup return NEW objects — `tasks` keeps its stored starts for the diff
+  const out = recomputeSchedule(tasks);                 // the recompute returns NEW objects — `tasks` keeps its stored starts for the diff
   const dr = detectCascadeDrift(tasks, out);
   if (dr.length) sink.push({ project: projName, tasks: dr });
   return out;
@@ -3297,7 +3344,14 @@ const _cpCanvas = (typeof document !== 'undefined') ? document.createElement('ca
 const _cpCtx = _cpCanvas ? _cpCanvas.getContext('2d') : null;
 function _cpMeasure(text, font) { if (!_cpCtx) return 0; _cpCtx.font = font; return _cpCtx.measureText(text).width; }
 
-function ContactPicker({ value, contacts, onCommit, onCancel, variant = "master" }) {
+/* B443536 — `seeded` says WHERE the opening `value` came from, and it decides the caret.
+ * Type-to-edit hands the picker the single character that opened it; select-all would then
+ * highlight that character so the NEXT keystroke REPLACES it — typing "Scott" gave "cott",
+ * with the search correctly filtered on "S" the whole time (the character was captured and
+ * written, then destroyed on keystroke 2, which is why the report says the search sees it).
+ * Opening on an EXISTING owner is the opposite case: select-all is right there, so typing a
+ * new name replaces the old one instead of appending to it. One flag, two correct behaviours. */
+function ContactPicker({ value, contacts, onCommit, onCancel, variant = "master", seeded = false }) {
   const isGrid = variant === "grid";
   const [query, setQuery] = React.useState(value || '');
   const [highlight, setHighlight] = React.useState(-1);
@@ -3306,7 +3360,13 @@ function ContactPicker({ value, contacts, onCommit, onCancel, variant = "master"
   const inputRef = React.useRef(null);
   const wrapRef = React.useRef(null);
 
-  React.useEffect(() => { inputRef.current?.focus(); inputRef.current?.select(); }, []);
+  React.useEffect(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    el.focus();
+    if (seeded) { const n = el.value.length; el.setSelectionRange(n, n); }  // caret AFTER the typed char
+    else el.select();                                                       // replace the existing owner
+  }, []);
 
   const q = query.trim().toLowerCase();
   const suggestions = (q
@@ -4192,7 +4252,7 @@ function SuggestionsView({data, updateTask, setData, rows, setRows, loading, onC
       if (ids.size) { const extra = patch.health === 'green' ? { percentComplete: 100 } : {}; ts = ts.map(t => ids.has(t.id) ? { ...t, health: patch.health, ...extra } : t); }
     }
     if ('duration' in patch || 'start' in patch || 'end' in patch || 'predecessors' in patch || 'meetingBound' in patch || 'meetingBodyId' in patch || 'pinnedMeetingDate' in patch || 'minMeetingsAfter' in patch) {
-      ts = cascadeDates(ts); ts = rollupParentDates(ts);
+      ts = recomputeSchedule(ts);
     }
     return ts;
   };
@@ -4271,7 +4331,7 @@ function SuggestionsView({data, updateTask, setData, rows, setRows, loading, onC
     }
     let prov = { id: newId, name: eff.patch.name.trim(), start: fallbackStart, end: '', duration: dur, durUnit: 'd', durValue: dur, predecessors: preds, health: eff.patch.health || 'gray', percentComplete: 0, parentId: parent ? parent.id : null, responsibleParty: eff.patch.responsibleParty || '', notes: [], isExpanded: true };
     prov.end = calcEnd(prov.start, prov.duration);
-    let sim = cascadeDates([...proj.tasks, prov]); sim = rollupParentDates(sim);
+    let sim = recomputeSchedule([...proj.tasks, prov]);
     const c = sim.find(t => t.id === newId) || prov;
     newTask = { ...prov, start: c.start, end: c.end, duration: c.duration };
   }
@@ -4308,7 +4368,7 @@ function SuggestionsView({data, updateTask, setData, rows, setRows, loading, onC
         }
       }
       tasks.splice(insertIdx, 0, t);
-      const recomputed = rollupParentDates(cascadeDates(tasks));
+      const recomputed = recomputeSchedule(tasks);
       return { ...d, projects: { ...d.projects, [pid]: { ...p, tasks: recomputed } } };
     });
     const sb = window.__sb;
@@ -5157,8 +5217,7 @@ function App() {
           d._pinnedClean = true;
           Object.keys(d.projects).forEach(pid => {
             let tasks = d.projects[pid].tasks.map(({_pinStart, __wasDirectEdit, ...t}) => t);
-            tasks = cascadeDates(tasks);
-            tasks = rollupParentDates(tasks);
+            tasks = recomputeSchedule(tasks);
             d.projects[pid] = {...d.projects[pid], tasks};
           });
         if (window.__planarCloudError) setOfflineFallback(true);
@@ -5204,8 +5263,7 @@ function App() {
             if (t.pinnedEnd && t.end) return t;                        // preserve a locked finish (B616) — never re-derive its end
             const r = resolveTaskSpan(t); return {...t, end: r.end, duration: r.duration};  // unit-aware re-derive (days/weeks vs calendar)
           });
-          tasks = cascadeDates(tasks);
-          tasks = rollupParentDates(tasks);
+          tasks = recomputeSchedule(tasks);
           newProjects[id] = {...proj, tasks};
         });
         return {...d, projects: newProjects};
@@ -5694,8 +5752,7 @@ function App() {
         }
       }
       if (touchesSchedule(updates)) {   // B835 (recurrence ×2) — fires for durValue/durUnit (typed duration) + pinnedStart/pinnedEnd (unpin/unlock) too, not just {duration}/{start}
-        tasks = cascadeDates(tasks);
-        tasks = rollupParentDates(tasks);
+        tasks = recomputeSchedule(tasks);
         // B816 — a bound task whose meeting moved from a prior meeting rolled a cycle; announce it (once).
         for (const t of tasks) {
           const prev = _prevBoundStart[t.id];
@@ -7209,7 +7266,7 @@ function App() {
           // Re-cascade immediately (same discipline as the Holidays editor): a cadence/lead edit must
           // move bound tasks + deadline rows NOW, not on the next unrelated task edit.
           const proj2 = nd.projects[nd.aPid];
-          nd.projects = {...nd.projects, [nd.aPid]: {...proj2, tasks: rollupParentDates(cascadeDates((proj2.tasks || []).map(t => ({...t}))))}};
+          nd.projects = {...nd.projects, [nd.aPid]: {...proj2, tasks: recomputeSchedule((proj2.tasks || []).map(t => ({...t})))}};
           return nd;
         })}
         onClose={()=>setMeetingCalOpen(false)} />}
@@ -9243,7 +9300,10 @@ function StatusPicker({value, onChange}) {
 }
 
 // ── DepCell ───────────────────────────────────────────────
-function DepCell({items, renderLabel, renderName, s, title}) {
+// `flagged` (B443249) marks an entry that contributes NOTHING to the derived date — a predecessor with no
+// dates of its own, or an id with no row left in this project. Such an entry used to render identically to
+// a satisfied one, so a date computed from a SUBSET of its inputs looked exactly like a real one.
+function DepCell({items, renderLabel, renderName, s, title, flagged}) {
   const [hovered, setHovered] = useState(false);
   const [pos, setPos] = useState({top:0, left:0, width:0});
   const ref = useRef(null);
@@ -9269,7 +9329,7 @@ function DepCell({items, renderLabel, renderName, s, title}) {
         {slots.map((item, i) => (
           <div key={i} style={{display:"flex", alignItems:"baseline", gap:3, overflow:"hidden", width:"100%", lineHeight:1.2, minHeight:10}}>
             {item != null && <>
-              <span style={{fontSize:10, color:"#1d4ed8", fontFamily:"'Inter',system-ui,sans-serif", fontWeight:500, flexShrink:0}}>{renderLabel(item)}</span>
+              <span style={{fontSize:10, color: flagged && flagged(item) ? "var(--warn-text,#a16207)" : "#1d4ed8", fontFamily:"'Inter',system-ui,sans-serif", fontWeight:500, flexShrink:0}}>{flagged && flagged(item) ? "⚠ " : ""}{renderLabel(item)}</span>
               <span style={{fontSize:10, color:"var(--mut)", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", flex:1}}>· {renderName(item)}</span>
               {i === 1 && extra > 0 &&
                 <span style={{fontSize:9, color:"#94a3b8", flexShrink:0, marginLeft:3, fontFamily:"'Inter',system-ui,sans-serif"}}>+{extra}</span>}
@@ -9411,6 +9471,7 @@ function Cell({task, col, colMasterIdxs, edit, setEdit, commit, commitAndAdvance
           <ContactPicker
             variant="grid"
             value={editStartChar != null ? editStartChar : (task.responsibleParty || "")}
+            seeded={editStartChar != null}
             contacts={contacts || []}
             onCommit={(name, newContact) => { if (newContact && addContact) addContact(newContact); commit(task.id, "responsibleParty", name); }}
             onCancel={() => setEdit(null)}
@@ -9547,7 +9608,10 @@ function Cell({task, col, colMasterIdxs, edit, setEdit, commit, commitAndAdvance
       // Start pin (existing) + Finish lock (B616) — one padlock, identical icon + interaction.
       const isStart = col.k === "start";
       const isPinned = !task.hasChildren && (isStart ? task.pinnedStart : task.pinnedEnd);
-      const isConflict = !task.hasChildren && !isStart && !!task.finishConflict;
+      // B443250 — the start cell carries its own conflict: a pinned start EARLIER than the predecessor
+      // chain allows. The pin still wins (that is the contract); this makes the override visible instead
+      // of silently resolved, reusing B616's locked-finish treatment exactly.
+      const isConflict = !task.hasChildren && (isStart ? !!task.startConflict : !!task.finishConflict);
       const unpin = e => {
         e.stopPropagation();
         if (isStart) updateTask(task.id, {pinnedStart: false, predecessors: task.predecessors}, projId);
@@ -9556,7 +9620,9 @@ function Cell({task, col, colMasterIdxs, edit, setEdit, commit, commitAndAdvance
       return (
         <span style={{...s,...mono,justifyContent:"center",color: isConflict ? "var(--danger,#d83a3a)" : task.hasChildren ? "#94a3b8" : "var(--mut)",fontSize:11,fontWeight: isConflict ? 700 : undefined}}
           title={task.hasChildren ? "Computed from subtasks"
-            : isConflict ? "Locked finish can't be met — the predecessor chain needs more time. Move the finish, shorten the duration, or change the dependency."
+            : isConflict ? (isStart
+                ? "Pinned start is earlier than the predecessors allow — the pin is winning and the dependency is being overridden. Unpin to follow the predecessors, or change the dependency."
+                : "Locked finish can't be met — the predecessor chain needs more time. Move the finish, shorten the duration, or change the dependency.")
             : isPinned ? (isStart ? "Start pinned — click the lock to let the predecessor drive this date" : "Finish locked (hard constraint) — click the lock to let it flow from start + duration")
             : undefined}>
           {isConflict && <span style={{marginRight:2,flexShrink:0,fontSize:11}}>⚠</span>}
@@ -9688,8 +9754,15 @@ function Cell({task, col, colMasterIdxs, edit, setEdit, commit, commitAndAdvance
       </span>;
     case "predecessors": {
       const preds = normPreds(task.predecessors);
+      // B443249 — name the predecessors that drive nothing. `predUnresolved` is set by the cascade, so the
+      // mark can never disagree with the engine that ignored them.
+      const un = new Set(task.predUnresolved || []);
+      const unNames = [...un].map(id => { const n = getTaskName(id); return n ? `${id} · ${n}` : `${id} (no longer in this schedule)`; });
       return <DepCell items={preds} renderLabel={p => fmtPreds([p])} renderName={p => getTaskName(p.id)} s={s}
-        title={predLagPlainEnglish(fmtPreds(preds))} />;
+        flagged={p => un.has(p.id)}
+        title={unNames.length
+          ? `This date is NOT driven by ${unNames.length === 1 ? "" : "any of "}${unNames.join("; ")} — ${unNames.length === 1 ? "it has" : "they have"} no dates. The date shown comes from the remaining predecessors only.`
+          : predLagPlainEnglish(fmtPreds(preds))} />;
     }
     case "successors": {
       const ids = succMap[task.id] || [];
@@ -10698,8 +10771,7 @@ function SettingsPanel({data, setData, onClose, openFile, fileLinked, initialSec
     const newProjects = {};
     Object.entries(d.projects || {}).forEach(([pid, proj]) => {
       let tasks = (proj.tasks || []).map(t => ({...t}));   // clone — never mutate prior state
-      tasks = cascadeDates(tasks);                          // respects pinnedStart
-      tasks = rollupParentDates(tasks);
+      tasks = recomputeSchedule(tasks);                     // respects pinnedStart
       newProjects[pid] = {...proj, tasks};
     });
     return {...d, settings:{...d.settings, holidays}, projects: newProjects};
@@ -10868,8 +10940,7 @@ function SettingsPanel({data, setData, onClose, openFile, fileLinked, initialSec
                   const newProjects = {};
                   Object.entries(d.projects).forEach(([pid, proj]) => {
                     let tasks = proj.tasks.map(({pinnedStart, _pinStart, __wasDirectEdit, ...t}) => t);
-                    tasks = cascadeDates(tasks);
-                    tasks = rollupParentDates(tasks);
+                    tasks = recomputeSchedule(tasks);
                     newProjects[pid] = {...proj, tasks};
                   });
                   return {...d, _pinnedClean: true, projects: newProjects};
@@ -11608,6 +11679,7 @@ function MasterView({data, setData, updateTask, setNotesCtx, goToTask}) {
           {isE(t,"responsibleParty")
             ? <ContactPicker
                 value={localEdit?.initChar != null ? localEdit.initChar : (t.responsibleParty||"")}
+                seeded={localEdit?.initChar != null}
                 contacts={data.settings?.contacts||[]}
                 onCommit={(name, newContact) => {
                   if (newContact) {

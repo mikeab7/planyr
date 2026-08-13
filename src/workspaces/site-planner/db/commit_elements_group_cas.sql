@@ -56,6 +56,26 @@
 -- HOW TO PROVE IT: `db/test/commit_elements_group_cas.test.sql` — a self-rolling-back test against
 -- the real database that drives every outcome, INCLUDING the rejection path, and writes nothing.
 
+-- ⛔ B447472 — AND ONLY `el` ROWS, BECAUSE `assembly_id` INHERITS THE ID NAMESPACE'S
+-- NON-UNIQUENESS. This is NOT "the server forgot a filter"; read it as a namespace collision or
+-- the next person rediscovers it through a callout instead of a markup.
+--
+-- The PK is (site_id, kind, id), so an id is unique only PER KIND — B420256's whole subject.
+-- Stage 1 sets an unbonded element's `assembly_id` to its OWN id, so that non-uniqueness is
+-- inherited straight into the assembly key: two unrelated SINGLETON assemblies of different kinds
+-- collide on the name. On the owner's Katz plan (site `smqh3au6aeb4`), `el:e6327` is a building
+-- with 27 bonded children and `markup:e6327` is an unrelated markup with `attachedTo = NONE` —
+-- its own assembly, which merely shares the NAME. Without this predicate the server digested 29
+-- tokens where the client digests 28, forever, and that assembly would have refused EVERY commit
+-- with a permanent groupConflict the retry can never converge out of.
+--
+-- ⛔ THE CLIENT IS RIGHT AND MUST NOT CHANGE. `lib/assemblyDigest.js`'s `digestsByAssembly` skips
+-- `kind !== "el"` because a markup or a measurement has no host and so is a member of nothing but
+-- itself. This is settled: never "fix" a recurrence by folding non-el rows in on the client side.
+--
+-- Verified read-only against production 2026-08-13: with `kind = 'el'` filtered, the number of
+-- assemblies containing a duplicate id drops to ZERO across the whole table.
+--
 -- The digest, as a function, so the RPC and the test cannot compute it two different ways.
 create or replace function public.assembly_digest(p_site text, p_assembly text)
 returns text
@@ -68,6 +88,7 @@ as $$
     from public.site_elements t
    where t.site_id = p_site
      and t.assembly_id = p_assembly
+     and t.kind = 'el'
      and t.deleted_at is null;
 $$;
 
@@ -75,8 +96,10 @@ revoke execute on function public.assembly_digest(text, text) from public, anon;
 grant  execute on function public.assembly_digest(text, text) to authenticated;
 
 comment on function public.assembly_digest(text, text) is
-  'B1341 stage 2 — the GROUP REVISION of a bonded assembly: id:rev pairs of its LIVE rows, sorted '
-  'by id, comma-joined. Derived, never stored, so it cannot drift from the revs it summarises. '
+  'B1341 stage 2 — the GROUP REVISION of a bonded assembly: id:rev pairs of its LIVE el rows, '
+  'sorted by id, comma-joined. Derived, never stored, so it cannot drift from the revs it '
+  'summarises. B447472: el ONLY — assembly_id inherits the (site,kind,id) namespace, so a markup '
+  'can share an unbonded element''s id and is its own assembly, not a member of that element''s. '
   'Client twin: lib/assemblyDigest.js — keep them character-for-character equivalent.';
 
 create or replace function public.commit_elements(p_site text, p_ops jsonb, p_atomic boolean, p_groups jsonb)
@@ -117,10 +140,13 @@ begin
         'assembly', v_asm,
         'expected', v_want,
         'actual',   v_have,
+        -- Same membership rule as the digest (B447472's `kind = 'el'` included) — the client
+        -- ADOPTS every member named here into its shadow, so a set that disagrees with the digest
+        -- deadlocks the retry just as surely as a digest that disagrees.
         'members',  coalesce((
           select jsonb_agg(jsonb_build_object('id', t.id, 'kind', t.kind, 'rev', t.rev) order by t.id)
             from public.site_elements t
-           where t.site_id = p_site and t.assembly_id = v_asm and t.deleted_at is null
+           where t.site_id = p_site and t.assembly_id = v_asm and t.kind = 'el' and t.deleted_at is null
         ), '[]'::jsonb)
       ));
     end if;

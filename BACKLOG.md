@@ -3137,6 +3137,133 @@ physical row is a later polish," so **B104** is that remaining polish for the *m
 2. **NAMING the pieces.** Shipped behaviour is UNCHANGED from before this item — pieces carry no label. Copying the parent's name onto three parcels would pre-empt his answer, and dropping it is what the app already did, so this is the neutral hold. The question is Parcel 1A / 1B / 1C, or the original name staying on the largest piece with the rest named after it.
 
 **COST, stated rather than left to be found.** The engine adds **6.4 KB** to the Site route and the largest chunk against a clean-tree baseline measured on this machine. It stays: it replaced a ~1.5 KB special case that refused the cuts the tool exists for, all four bundle metrics remain inside their headroom band and PASS, and the four metrics already above baseline were above it on the clean tree too (pre-existing, B329408 / B1064).
+### B443248 — A successor of a SUMMARY row was scheduled off the summary's collapsed START, not its real FINISH `[Schedule]` (bug) #scheduler #gantt  *(owner chat 2026-08-13, arrived as the "Grand Port / Mobilize" report. Minted **B443248 / V238192** from this branch's reserved block B443248–B443263 against `origin/main` 7ec8daf. DEDUPE-FIRST — searched Open / ⏳ Verify / Done across `predecessor`, `cascade`, `rollup`, `summary`, `parent date`, `durValue`, **B835**, **B836**, **B615**, **B616**, **B864**: B835 is the SCHEDULE_INPUT_KEYS gate (an edit that never cascaded), B836 is the drift detector, B615 is the typed-duration model that introduced `durValue`. None of them touches how a PARENT row's span is resolved inside the cascade. Net-new.)*
+`[ ]` **⏳ SHIPPED 2026-08-13. `Verify: live` → V238192 (MERGED ≠ LIVE).**
+- Verify: live → **V238192** (`Blocker: real-data` — his signed-in Grand Port document).
+- Origin: filed 2026-08-13 from chat; shipped the same session.
+- **NEVER-PARK disposition: REPRODUCED AND FIXED.** Not instrumented-and-left, not asked-about.
+- **⛔ THE OWNER'S OWN LEADING HYPOTHESIS IS REFUTED. The date did not come from the clock.** His framing —
+  "adding a predecessor STAMPS THE CURRENT DATE onto the successor start" — was the single most likely
+  mechanism and it is wrong. `updateTask` handles `predecessors` correctly: it normalises the list, clears
+  any manual pin so the cascade can take effect, and `touchesSchedule` fires a full recompute. Nothing on
+  that path reads `NOW`. **2026-08-10 is a DERIVED date** — it is the next working day after Friday
+  2026-08-07, and its resemblance to the day of the edit is a coincidence.
+- **WHAT IT WAS DERIVED FROM — the predecessor's START, because the predecessor's FINISH had been silently
+  discarded.** Read straight off his live document: task 228 "Mobilize" (0d, FS after 106 and 108); task
+  **108 "CCID3: Lift Station & Force Main Approval" is a SUMMARY row** with three children running to
+  2026-10-02, stored `duration: 40` and `durValue: 0`. A parent gets `duration` written by
+  `rollupParentDates` and never gets a `durValue` — but `cascadeDates` resolved every row as a leaf, so
+  `resolveTaskSpan` read `durValue: 0` and **collapsed a 40-working-day summary into a 0-day milestone
+  sitting on its own start, 2026-08-07.** The FS successor then computed the next working day after that:
+  Monday **2026-08-10**. `rollupParentDates` restored 108's finish to 2026-10-02 immediately afterwards —
+  which is exactly why the wrong date was **a STABLE FIXED POINT**: re-running the recompute reproduced it
+  byte for byte, and `detectCascadeDrift` (stored vs engine) could never see it because the engine agreed
+  with the stored value. Correct answer, confirmed on his data: **2026-10-05**.
+- **This is NOT the "mechanism that exists and never fires" class (hypothesis 1 — refuted).** There is a
+  real scheduling engine, it does re-run on a predecessor edit, it is a full topological recompute, and it
+  propagates transitively. It supports FS / SS / FF / SF with lag in working OR calendar days (hypothesis 5
+  — answered: all four types, both lag units). Both predecessors WERE resolvable (hypothesis 2 — 106 and
+  108 are both real rows in the same project; 106 simply has no dates).
+- **THE RED "Needs Attn." DOT IS NOT A DEPENDENCY VERDICT (hypothesis: refuted).** It is
+  `computeDisplayHealth`'s `cf.overdueRed` rule — finish in the past, 0% complete. The app did not know
+  anything was wrong with the dependency; it only knew a date had passed.
+- **THE PADLOCK ANSWER (hypotheses 6 + 7).** The padlock is a pinned start (or a locked finish); a pinned
+  date WINS over predecessor logic, and adding a predecessor deliberately clears the pin. Rows 26/27/30/42/43
+  wear one because their dates were typed by hand; Mobilize does not, because adding predecessors unpinned
+  it — so it was exactly a row the engine was supposed to be computing, and it computed off a collapsed
+  input. The difference between rows 28 and 42 is real but it is not the cause. Row 42 also happens to have
+  a LEAF predecessor, so it was never exposed to this defect.
+- **THE FIX.** `cascadeDates` no longer derives a span for a row that is a parent — a summary's dates are
+  owned by `rollupParentDates`, full stop (parents never took a predecessor-driven start either, because
+  the rollup overwrote it in the same breath, so the skip is behaviour-preserving for the parent itself).
+  And the cascade/rollup pair — hand-written at nine call sites — is now the single `recomputeSchedule`,
+  which seeds with a rollup so the first cascade reads real parent finishes and then **iterates to a fixed
+  point**, so one call propagates a move transitively down a chain of any depth.
+- **EXISTING SCHEDULES RECALCULATE, AND SAY SO.** The cloud load path already routes through
+  `recascadeWithDrift`, so every saved document is re-derived on open and the B836 drift banner NAMES each
+  corrected row. Measured against his live Grand Port document: **exactly one row moves — Mobilize,
+  2026-08-10 → 2026-10-05** — and it arrives named, not swapped in silence. Across all six of his projects
+  there are **9 predecessor links pointing at a summary row** (Goose Creek 4, 8 South 3, Grand Port 2), so
+  that is the full population exposed to this class.
+- Guards, all four MUTATION-PROVEN RED: `test/schedulerEngine.test.js` (removing the summary skip → 5 fail;
+  dropping the fixed-point iteration → 1 fail) and `ui-audit/verify-summary-pred-dates.mjs` /
+  `npm run verify:schedpreds`, which drives the REAL Grid on his exact row shape and reads the Start cell
+  off the screen. With the skip reverted the harness reads **08/10/26** — his screen, reproduced.
+- Bundle: **zero delta, byte-identical** (`dist/assets/index-*.js` gzip identical with and without the
+  change). The Schedule module is the standalone `public/sequence/index.html`, never part of the main
+  bundle, so the ceiling is untouched.
+- Files: `public/sequence/index.html`, `ui-audit/stress/scheduler-engine.mjs` (verbatim mirror),
+  `test/schedulerEngine.test.js`, `ui-audit/verify-summary-pred-dates.mjs`, `ui-audit/lib/vendorCdn.mjs`.
+
+### B443249 — A predecessor that drives NOTHING looked identical to one that does `[Schedule]` (bug) #scheduler #ui  *(owner chat 2026-08-13, the "unresolvable predecessor" half of the Grand Port report. Minted B443249 / V238193.)*
+`[ ]` **⏳ SHIPPED 2026-08-13. `Verify: live` → V238193 (MERGED ≠ LIVE).**
+- Verify: live → **V238193** (`Blocker: real-data`).
+- Origin: filed 2026-08-13 from chat; shipped the same session.
+- **THE GAP.** Mobilize's second predecessor, 106 "ETJ Permit: Lift Station & Force Main", has **no dates
+  at all** (its one child is blank too). `cascadeDates` filtered it out — correctly, it can drive nothing —
+  and then said nothing about having done so. The row rendered a confident date computed from **one of its
+  two stated inputs**, and the two entries in the Predecessor cell were pixel-identical. That is the
+  fabricated-date-looks-exactly-like-a-real-one failure this repo keeps paying for (LOUD-FAILURE).
+- **THE FIX.** The cascade records `predUnresolved` per task — a live predecessor with no dates of its own,
+  or an id with no row left in this project. The grid's Predecessor cell marks those entries with a ⚠ in
+  the warn colour while satisfied ones stay blue, and the cell's hover names them and says plainly that the
+  date shown comes from the remaining predecessors only. The mark is derived from the engine's own output,
+  so it can never disagree with what the engine actually ignored.
+- PANEL-BREVITY: **no line added anywhere.** The mark rides the existing entry (one glyph), and the
+  explanation replaces the existing cell hover rather than adding one. No new banner.
+- Guards: `test/schedulerEngine.test.js` (dateless pred · missing id · satisfied row records nothing —
+  mutation-proven: stubbing `predUnresolved` to `[]` fails 3) and the browser harness asserts the marked
+  entry is the ETJ one, has real box area on screen, and that the satisfied CCID3 entry is NOT marked.
+
+### B443250 — A pinned start that beats its predecessor chain won silently `[Schedule]` (bug) #scheduler #ui  *(owner chat 2026-08-13, the "a conflict must be visible, never silently resolved" clause. Minted B443250 / V238194.)*
+`[ ]` **⏳ SHIPPED 2026-08-13. `Verify: live` → V238194 (MERGED ≠ LIVE).**
+- Verify: live → **V238194** (`Blocker: real-data`).
+- Origin: filed 2026-08-13 from chat; shipped the same session.
+- **THE GAP.** A locked FINISH that the chain can't meet has flagged `finishConflict` since B616 — red date,
+  ⚠, a tooltip and a banner. A pinned START earlier than the chain allows had **no equivalent**: the pin
+  won, the dependency was discarded, and nothing said so. The precedence rule was right; its visibility was
+  missing.
+- **THE FIX.** `startConflict`, set when a pinned start precedes the predecessor-derived earliest start.
+  **The pin still wins — the contract is unchanged** — but the Start cell now turns red with the same ⚠ and
+  says the dependency is being overridden and how to hand control back.
+- PANEL-BREVITY: reuses B616's existing treatment; no new banner and no new line — the start cell's tooltip
+  branches on which endpoint it is instead of gaining a second string.
+- Guards: `test/schedulerEngine.test.js` (pin before the chain → flagged and the pin holds · pin after →
+  not flagged · unpinned row → never flagged; mutation-proven: deleting the flag fails 2).
+### B447472 — `assembly_digest()` had no kind predicate, so the two sides of the group revision digested DIFFERENT MEMBER SETS `[Site Planner / Persistence]` (bug) #site-planner #persistence #sync #infra  *(adversarial review of B1341 stage 2 + a steel-man pass, 2026-08-13. Minted **B447472 / V242416** LATE via `git fetch origin main && npm run next-id -- --against-main`, from this branch's reserved block B447472–B447487 · V242416–V242431 against `origin/main` 2396734. **DEDUPE-FIRST — searched Open / ⏳ Verify / Done across `assembly_digest`, `digestsByAssembly`, `groupCas`, `p_groups`, `groupConflict`, `assembly_id`, `kind`, `B1341`, `B1340`, `B1117`, `B420256`, `B377888`, `B377890`.** Neighbours, none of them this: **B1341** is the staged feature this defect lives inside — stage 2 is SHIPPED and unchanged in every other respect, this corrects one predicate in it; **B420256** is the same ROOT CAUSE (an id is unique only per KIND) in the commit-RESULT pairing path, and is why this one was looked for; **B1117** is the atomic call; **B1340/B377890** are the client-side integrity heals. Net-new.)*
+`[ ]` **⏳ SHIPPED 2026-08-13. `Verify: live` → V242416 (MERGED ≠ LIVE).**
+- Verify: live → **V242416** (`Blocker: auth` + `real-data` — the DB half is proven only by running `db/test/commit_elements_group_cas.test.sql` against the real database, and the repro assembly is on a signed-in plan).
+- **THE DEFECT.** `assembly_digest()` in `db/commit_elements_group_cas.sql` filtered on `site_id`, `assembly_id` and `deleted_at` — and **nothing else**. Its client twin `digestsByAssembly()` (`lib/assemblyDigest.js`) opens with `if (e.kind !== "el") continue`. So for an affected assembly the two sides digest different member sets and **can never agree**: every commit is refused with a `groupConflict` whose retry recomputes the identical disagreement, until `maxRejectStreak` declares the tab stale. That assembly simply cannot be saved.
+- **⛔ THE ROOT CAUSE IS NOT "THE SERVER FORGOT A FILTER" — that reading was steel-manned and replaced, and the better one is the whole value of this item.** `assembly_id` **INHERITS THE ID NAMESPACE'S NON-UNIQUENESS.** The PK is `(site_id, kind, id)`, so an id is unique only per KIND (**B420256**); stage 1 sets an unbonded element's `assembly_id` to its OWN id, so that non-uniqueness passes straight into the assembly key and **two unrelated SINGLETON assemblies of different kinds collide on the name**. Verified on production: `markup:e6327` has `attachedTo = NONE` and `assembly_id = e6327`; `el:e6327` has `attachedTo = NONE` and `assembly_id = e6327`. The markup is **not a member of the building's assembly at all** — it is its own assembly that happens to share the NAME. Read it that way, or the next person rediscovers it through a callout instead of a markup.
+- **LIVE INSTANCE, read-only against production 2026-08-13.** Site `smqh3au6aeb4` (Katz / Plan 1), assembly `e6327` = **28 `el` members + 1 unrelated `markup`**. Server digested 29 tokens, client 28. A sweep of the whole table finds **exactly one** such assembly today — and with `kind = 'el'` filtered, the count of assemblies containing a duplicate id drops to **ZERO**. ⛔ **The Katz plan was NOT touched and nothing was written to `public.site_elements`** — that data is legitimate and the code must tolerate it (same standing as B420256).
+- **LATENT ONLY, and that is why it was worth fixing now rather than later.** Group CAS is OFF (`elementSync.js` `groupCas = null`; `groupsFor` returns `[]` when unset), so nothing is broken today. It bites the instant stage 2 is switched on — i.e. it is a defect that would present as "the flag we just enabled broke saving", at the worst possible moment to be diagnosing it.
+- **THE FIX.** `and t.kind = 'el'` in `assembly_digest()`, and the same predicate on the `groupConflict` **members** subquery — the client ADOPTS every member that payload names into its shadow, so a membership disagreement there deadlocks the retry exactly as one in the digest does. **⛔ THE CLIENT IS RIGHT AND DOES NOT MOVE:** a markup has no host, so it is a member of nothing but itself. Settled, not an open choice — never make the two agree by folding non-`el` rows in on the client side. The false claim in `assemblyDigest.js`'s header (that the database's `assembly_id` "never groups them with it") is **deleted and replaced with the namespace explanation**, not reworded.
+- **APPLIED TO PRODUCTION this session**, because the stage-2 migration was already deployed and the DEPLOYED function was the broken one — a repo-only fix would have left the live database wrong. `create or replace` on both functions plus the re-`grant`s; additive, idempotent, no client behaviour change (the flag is off). Post-apply check on the live database: `assembly_digest('smqh3au6aeb4','e6327')` now returns **28 tokens, naming no markup**, while 29 rows still share the assembly key — the data is intact, only the question changed.
+- **⛔ THE TEST GAP MATTERED AS MUCH AS THE FIX, AND IT IS CLOSED STRUCTURALLY.** `test/assemblyGroupCas.test.js:50` asserted the SQL matched a regex of the `string_agg` EXPRESSION. That pins the shape of the PROJECTION and is **structurally blind to the WHERE clause beside it** — both sides can agree character-for-character on how to build a token and still disagree about who is in the set. Its neighbour asserted "a markup is never in an assembly", **a claim about the DATABASE tested only against the client**. Both are replaced by a **PARITY suite** (`test/helpers/sqlDigestParity.js`): it reads the real migration, parses the projection AND the filter, EXECUTES both over one row set, and compares against the client twin over the same rows — with a kind-collision fixture drawn from the live `e6327` assembly (28 real ids at their real revs + the colliding markup), plus controls (an ordinary assembly, a tombstone, another site's rows, the empty group) so the suite cannot pass by answering empty. The interpreter **THROWS on any construct it cannot model** rather than skipping it, so a future edit that moves the SQL outside what it understands fails loudly instead of passing vacuously.
+- **PROVEN RED BEFORE THE FIX: 4 of the new parity cases failed against today's SQL** — the kind collision (server 29 tokens vs client 28), the markup-is-its-own-assembly case, the conflict-members set, and the predicate readback — while the other 28 cases in the file stayed green, so the suite is not merely asserting the new implementation. **32/32 green after.**
+- The real-Postgres half gains matching checks 9 and 10 in `db/test/commit_elements_group_cas.test.sql` (a markup inserted at the host's own id: it must collide on `assembly_id`, stay out of the digest, and stay out of the members payload). Self-rolling-back as before.
+- **DELIBERATELY NOT DONE, offered and declined as out of scope:** `db/site_elements.sql`'s per-op loop reads `jsonb_array_elements(p_ops)` with no `ORDER BY`, which B420256's positional pairing rests on. Postgres preserves array order in practice and `pairCommitResults` VERIFIES the pairing and falls back loudly, so it is hardening, not a defect — not inflated into this trip.
+- **Housekeeping:** `BACKLOG.md` carried three committed **merge-conflict markers** (`<<<<<<< HEAD` / `=======` / `>>>>>>> origin/main`) around the B442688 and B435536 blocks, landed by an earlier bad merge into the ⏳ Verify section. Removed, keeping BOTH sides per this file's own rule. No item content changed.
+- Sandbox: `test/assemblyGroupCas.test.js` 32 green (4 proven red pre-fix), full suite + lint + build green.
+### B443536 — The Owner cell ate the character that opened it: typing `Scott` saved `cott` `[Scheduler]` (bug) #scheduler #ui  *(owner chat block 2026-08-13, arrived as the Schedule / Owner-column report, verbatim: *"we type a person's name into the owner column … it uses the first letter for searching the contact list or the registry, but after that, it forgets that first letter. Test it and figure it out."* Minted **B443536 / V238480** LATE via `git fetch origin main && npm run next-id -- --against-main`, from this branch's reserved block B443536–B443551 · V238480–V238495. **DEDUPE-FIRST — searched Open / ⏳ Verify / Done across `ContactPicker`, `editStartChar`, `initChar`, `responsibleParty`, `type-to-edit`, `first letter`, `first character`, `select()`, `setSelectionRange`, `seed`, `B291538`, `B865`, `B212`, `B583`.** One near neighbour, and it is NOT this: **B291538** is also "the first letter typed goes nowhere", but its cause is a bare `f` being swallowed as a global fullscreen command in the SHELL, a different module and a different mechanism — it is not re-opened and does not take this number. **B865** (NO_AUTOFILL) and **B212** (Tab through visible columns) touch the same editors without owning caret behaviour. Net-new.)*
+`[x]` **SHIPPED.** `public/sequence/index.html` — `ContactPicker` gains a `seeded` prop; both call sites wire it.
+- Verify: **live** — `V238480`, `Blocker: auth`. Narrowly scoped: the INTERACTION is fully proven here (see below); what the sandbox cannot reach is the **signed-in cloud round-trip** — type an owner on a real cloud project, reload, confirm the whole name came back. The scheduler falls back to its baked seed when Supabase is unreachable, which is the proxy's CORS wall, so that half is genuinely blocked.
+- Sandbox evidence: `ui-audit/verify-owner-first-char.mjs` **18/18** in a real browser with real key events · `test/ownerPickerSeed.test.js` (5) as the CI-runnable half. Both mutation-proven — see below.
+- **Confirmed on LIVE PRODUCTION and on the DEPLOYED branch build** (2026-08-13, logged out). The sandbox browser cannot reach `planyr.io` or `*.pages.dev`, but Node can, so the deployed bytes were fetched and driven: `planyr.io` reproduces the owner's report exactly — trace `["S","c","co","cot","cott"]`, committed `"cott"` — and this branch's Cloudflare preview gives `["S","Sc","Sco","Scot","Scott"]`, committed `"Scott"`. V238480 stays open for the signed-in round-trip only.
+
+**THE MEASURED CAUSE, and it is none of the three shapes the report proposed.** The keystroke trace, read out of the real input after EVERY key, was `["S","c","co","cot","cott"]`. So the character is **captured**, **written into the field**, and **used to filter the registry** — it is present and correct after keystroke 1. It dies on **keystroke 2**. `ContactPicker`'s mount effect ran `inputRef.current?.select()` **unconditionally**, so the seeded character was left SELECTED; the next key replaced the selection instead of appending to it. Not a seed written before mount, not a stale re-render, not a `preventDefault` that ate the key — the character was destroyed by a caret decision one keystroke later, which is exactly why the search legitimately sees the letter the field has lost.
+
+**AND IT WAS DATA DAMAGE, NOT A DISPLAY GLITCH.** `cott` is what `commit()` stored on the task, and `commitTyped()` then auto-added **`cott` as a new contact** — so one mistyped-looking edit both mis-assigned the task and polluted the registry that every later autocomplete reads from. The harness asserts the COMMITTED value (read back off the task model through the closed cell, never off the input that was typed into), not just the rendered one.
+
+**NOT A RACE — MEASURED, not assumed.** The report asked whether typing speed matters, because a mount/keystroke race needs a different guard. Typed with **no delay between keys** the field reads `anda` for `Wanda` on the broken build and `Wanda` on the fixed one: the loss is deterministic, so the guard is a plain assertion and needs no timing tolerance.
+
+**THE "IT MIGHT BE SHARED" HYPOTHESIS IS REFUTED BY MEASUREMENT.** Predecessor, Task name and Duration all keep their opening character (`["1","12"]`, `["Z","Ze","Zet","Zeta"]`, `["3","37"]`) — every other type-to-edit editor is UNCONTROLLED with `defaultValue`, and none calls `select()` on mount. `NotesModal` already documents the correct behaviour in its own comment (*"caret at end so an initChar keystroke continues seamlessly"*). `ContactPicker` was the lone outlier, so the fix belongs IN it rather than at a shared ancestor. It does serve **two** call sites, though — the grid cell and the master-table cell (which seeds via `localEdit.initChar`) — and both were affected and are both fixed.
+
+**THE FIX IS ONE FLAG BECAUSE THERE ARE TWO CORRECT BEHAVIOURS.** `seeded` says where the opening `value` came from. Type-to-edit → caret AFTER the character. Click / double-click on an existing owner → select-all, so typing a new name REPLACES the old one rather than appending to it. Deleting the `select()` outright is the tempting one-line fix and it is **wrong**: the inverse mutation (never select) makes replacing `Scott` with `Dana` produce `ScottDana`, and that case is asserted so the over-fix cannot ship either.
+
+**MUTATIONS RUN (every assertion proven RED, then restored).** Browser harness: revert the branch to an unconditional `select()` → **8 red**, reproducing `cott` and `riya` verbatim · never-select (the over-fix) → the two double-click REPLACE checks red at `ScottDana` · drop `seeded=` at the grid call site only → **8 red**. Unit test: unconditional `select()` · drop the grid prop · hardcode `seeded={true}` · drop the `= false` default → one distinct assertion red each.
+
+**AN UNMATCHED NAME IS AN EXPLICIT OUTCOME, and that is now asserted rather than assumed.** A free-typed name that matches no contact already shows a visible `+ Add "Priya" as new contact` row before commit and is accepted as a real owner; the harness reads that row's text. No new copy was added (PANEL-BREVITY: net zero lines).
 
 ### B442688 — The View menu toggled ORNAMENT when what he reaches for is hiding a CLASS of content `[Site Planner / UI]` (feature) #site-planner #ui  *(owner chat block 2026-08-13, arrived as NEW-1, verbatim: "for the view, it's kind of pointless, most of those items — like show dock doors or not show dock doors. If I have dock doors there, I always want them to show. … What it really should be is being able to hide a whole set of stuff. Like buildings and pond and roads … And when I say remove, I don't mean remove, I just mean hide temporarily. And then another one for markups — I should be able to hide all markups." Minted **B442688 / V237632** LATE via `git fetch origin main && npm run next-id -- --against-main`, from this branch's reserved block B442688–B442703 · V237632–V237647; code, tests and commit keep the provisional `NEW-1` label. **DEDUPE-FIRST — searched Open / ⏳ Verify / Done across `View menu`, `ViewMenu`, `visibility`, `hide`, `showDims`, `showAreas`, `chipHidden`, `acreage`, `collapse`, `B653`, `B286000`, `B121`, `B422`, `B1404`, `B1327`, `B280402`, `B1254`, `B242544`, `B1423`.** Six neighbours, none of them this: **B653** CREATED this menu and established that view state lives on the canvas it affects — that rule is applied here, not changed, and B653 is not re-opened (it is not defective; its CONTENTS are what the owner objects to); **B286000** moved smooth zoom OUT of this menu and is the precedent for "View ▾ is a per-DRAWING display menu", which is exactly why the new groups belong here and the device preferences still do not; **B121** shipped `showDims`/`showAreas` as label-legibility toggles — both KEPT, relocated, still their own settings keys; **B422** is DOC REVIEW's named markup layers (show/hide/lock/rename/reorder), a different module and a roadmap stub, deliberately not merged with this; **B1404/B1327/B280402** own the parcel acreage chip, which ALREADY SHIPPED and is NOT re-implemented here (see the note); **B1254** is per-GIS-layer "show above plan", a different axis. Net-new.)*
 `[x]` **SHIPPED.** `src/workspaces/site-planner/lib/contentVisibility.js` + a rebuilt View menu.
