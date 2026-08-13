@@ -253,14 +253,26 @@ describe("every delete entry point in SitePlanner.jsx is wired to the contract",
     expect(src).toMatch(/if \(e\.key === "Delete" \|\| e\.key === "Backspace"\) \{ e\.preventDefault\(\); deleteSel\(null, \{ entry: "key:delete" \}\)/);
   });
 
-  it("clears BOTH selection stores on a delete and on an undo/redo snapshot", () => {
+  it("leaves NO STALE REF in either selection store after a delete or an undo/redo snapshot", () => {
     // A one-item `multi` left pointing at a just-deleted element is what made the Delete key dead
-    // until an unrelated click reset it — in deleteSel itself, and again in applySnapshot.
+    // until an unrelated click reset it. The INVARIANT is "no ref to something that isn't there";
+    // clearing both stores is one way to satisfy it, and it is the one `deleteSel` uses.
     const del = src.slice(src.indexOf("const deleteSel = (target, opts)"));
     const body = del.slice(0, del.indexOf("\n  };"));
     expect(body).toMatch(/setSel\(null\); setMulti\(\[\]\)/);
+    /* ⛔ B385040 — applySnapshot satisfies the SAME invariant a STRICTER way, and this assertion was
+       rewritten rather than deleted. Blanking the selection on every undo also dropped selections
+       that were still perfectly valid (undo a nudge and the Properties panel you were working in
+       closed under you — the owner's "the screen flashes on every ctrl z" has a sibling here). It
+       now FILTERS both stores against the restored collections: anything the snapshot still holds
+       survives, anything it does not is dropped. Nothing stale can get through a filter that tests
+       membership, so the property this test exists for is stronger than it was, not weaker. Assert
+       the property — that both stores are re-derived from the snapshot — never the old literal. */
     const snap = src.slice(src.indexOf("const applySnapshot = (s) =>"));
-    expect(snap.slice(0, snap.indexOf("\n  };"))).toMatch(/setSel\(null\); setMulti\(\[\]\)/);
+    const snapBody = snap.slice(0, snap.indexOf("\n  };"));
+    expect(snapBody).toMatch(/const snapHas = \(r\) =>/);          // membership is tested against the snapshot
+    expect(snapBody).toMatch(/setSel\(\(cur\) => \(snapHas\(cur\) \? cur : null\)\)/);
+    expect(snapBody).toMatch(/setMulti\(\(cur\) => \{[\s\S]*?\.filter\(snapHas\)/); // multi is filtered, never left as-is
   });
 
   it("reports every attempt AND every outcome through the client_errors event channel", () => {
