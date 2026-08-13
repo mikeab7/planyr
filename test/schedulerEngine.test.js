@@ -1307,7 +1307,13 @@ describe("anti-drift: the round-3 scheduler fixes still exist in the real source
   });
   it("C1: the global key handler bails while any blocking overlay is open", () => {
     expect(src).toMatch(/const overlayOpenRef = useRef\(false\);/);
-    expect(src).toMatch(/if \(overlayOpenRef\.current\) return;/);
+    /* NEW-1 widened this: the guard now also bails on the keystroke that DISMISSED the overlay.
+     * Asking "is an overlay open?" reads false for that one key, because the modal has already
+     * closed itself by the time this handler runs — and the grid then acted on a key aimed at the
+     * modal, re-opening the status picker. The property C1 cares about is unchanged and strictly
+     * stronger; only the expression moved. Full reasoning + the browser proof live in
+     * test/menuPortalIsolation.test.js and ui-audit/verify-grid-overlay-input.mjs. */
+    expect(src).toMatch(/if \(overlayOpenRef\.current \|\| overlayAtKeyStartRef\.current\) return;/);
   });
   it("C2: Delete blanks the whole multi-cell selection", () => {
     expect(src).toMatch(/Multi-cell range delete/);

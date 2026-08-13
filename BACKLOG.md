@@ -52,6 +52,17 @@ Add a new tag to this legend **in the same commit** you first use it (this preve
 
 ## 🔲 Open
 
+### B463922 — The grid's viewport moves while editing, and scrollTop is the wrong thing to measure `[Scheduler]` (bug) #scheduler #ui #testing  *(owner chat block 2026-08-13: *"sometimes if I am editing cells I will just jump halfway down the schedule or all the way up."* Minted **B463922**. **DEDUPE-FIRST — searched `scrollTop`, `scrollIntoView`, `goToFocus`, `reveal`, `VIEWPORT-STABLE`, `B837`, `B838`, `B65`: VIEWPORT-STABLE is the SITE PLANNER's canvas rule, a different surface and a different mechanism. Net-new.)*
+`[ ]` **NOT FIXED — instrument shipped, cause not proven.** `ui-audit/diagnose-grid-overlays.mjs`.
+- Verify: live
+- Stopping rule: closed when a driven path is shown to move the RENDERED position of a row the user is looking at, or when the owner reports it gone.
+
+**WHAT IS ESTABLISHED.** The likely mechanism is named and located: the grid's keep-the-selected-row-visible effect (`GridView`, deps `[selectedId, selectedColIdx, tasks]`) re-runs on **every** change to `tasks` and scrolls to the selected row's **index** — so a row that changes position under an anchored scroll would drag the view with it. That is also the source of the `scrollTop = -6` write seen earlier (at the top of the list the reveal maths goes negative and is clamped, harmless there, not harmless mid-list).
+
+**⛔ WHAT STOPPED ME SHIPPING A FIX, and it is the honest part.** Driving it, `scrollTop` **did** move ~500 px twice — collapsing a group above the selection, and a date edit that re-sorted the row. But **zero programmatic writes** were recorded and `maxScroll` was unchanged for the date edit, so it was **not** a write and **not** clamping: that is Chrome's **scroll anchoring** adjusting the number precisely to keep the *picture* still. **A moving scrollTop is not a jumping view.** Measuring the number instead of the rendered position is the same class of error as the three instrument failures this session already produced (a body-only overlay scan blind to the modal; a 60-char slice that cut off the phrase it searched for; a paste test that bypassed the selection it was testing). Shipping a fix on that evidence would have been a guess.
+
+**WHAT THE NEXT SESSION SHOULD DO:** re-measure the **rendered viewport position of a known row** (`getBoundingClientRect` before/after, in the foreground per FOREGROUND-OR-VOID) rather than `scrollTop`, across: collapse/expand above the selection · a date edit that re-sorts · add/delete/indent/outdent · undo/redo · column filter · a second tab editing the same schedule. Then, and only then, name the mechanism.
+
 ### B454480 — "Tab sometimes doesn't work": instrumented, and the answer is one sentence `[Notes]` (bug) #notes #ui #testing  *(owner chat block 2026-08-13, NEW-1, with his screenshot of a Richfield "Utilities" note — a bulleted list with a nested sub-list and an autolinked email in it. Minted **B454480–B454481 / V249424** LATE via `git fetch origin main && npm run next-id -- --against-main`, from this branch's reserved block B454480–B454495 · V249424–V249439. **DEDUPE-FIRST — searched Open / ⏳ Verify / Done across `Tab`, `notesTabKey`, `indent`, `outdent`, `sinkListItem`, `B1392`, `B291536`, `B36051`.** **B1392** and **B1392 ×2** own this key and are the direct ancestors — the second one wrote the context table this item extends. Neither had driven the FIRST-ITEM case, which is the whole of "sometimes". Not a recurrence: those items fixed contexts that were failing; this one measures which contexts fail now and finds the answer is one, for a structural reason. Net-new.)*
 `[ ]` **⛔ SHIPPED as an INSTRUMENT plus a written rule — and the honest answer is that Tab is right everywhere except one case, which cannot be "fixed" without putting litter in his documents. That trade-off is his call and is flagged in the session reply.**
 - Verify: sandbox (`ui-audit/audit-notes-tab.mjs`, 29 pinned rows)
@@ -3137,6 +3148,36 @@ physical row is a later polish," so **B104** is that remaining polish for the *m
 ---
 
 ## ⏳ Verify — awaiting live confirmation
+
+### B463920 — The Enter that accepted the successor prompt re-opened the status menu it had just closed `[Scheduler]` (bug) #scheduler #ui  *(owner chat block 2026-08-13 from a live screenshot, Permitting/Entitlements → SIA. Minted **B463920 / V258864** LATE against fresh main. **DEDUPE-FIRST — searched Open / ⏳ Verify / Done across `overlayOpenRef`, `successorPrompt`, `HealthPicker`, `StatusPicker`, `picker`, `Enter`, `B456208`, `B443536`: nothing owns overlay key ownership.** Net-new.)*
+`[x]` **SHIPPED.** `public/sequence/index.html` — the key guard latches in capture.
+- Verify: **live** — `V258864`, `Blocker: auth` + `real-data`.
+- Evidence: `ui-audit/verify-grid-overlay-input.mjs` **12/12** · `test/menuPortalIsolation.test.js` (9).
+
+**⛔ BOTH REPORTED HYPOTHESES ARE WRONG, and the measurement is the item.** The menu is not "never told to close" and the prompt does not "steal the closing event". The menu **closes correctly** — control: with no prompt in play, picking a swatch left a menu up **0/9**. What happens is that the **Enter which dismisses the prompt is handled twice**: the modal applies and closes, and the same keystroke then reaches the grid's document-level handler, which by design opens the picker on a picker column (`Enter on a picker column opens its picker`) and fires a **synthetic click on the dot** — captured as `HTMLDocument.onKey → HTMLElement.click()`, `isTrusted=false`. The menu in the screenshot is **a second menu**, opened by the keystroke that dismissed the prompt. The signature is the proof and is now a test: **Enter 7/7 left a menu open · Escape 0/7 · ✕ 0/7**, because only Enter maps to a picker action.
+
+**THE GUARD EXISTED AND ASKED THE WRONG QUESTION.** `overlayOpenRef` bails while an overlay is open, but it reads **false** for the one keystroke that dismissed it — the modal has already closed itself synchronously by then. Fixed by **latching the answer in capture** (`window` capture runs before React's root handler and before the document handler), so the question becomes *"did this keystroke BEGIN while an overlay owned the keyboard?"*.
+
+**WHY NOT "THE MODAL SWALLOWS THE KEY" (option a).** That fixes `SuccessorPromptModal`. **Thirteen** overlays feed that ref, and the next one added arrives with the same hole — the defect is in the question the guard asks, not in one modal's manners. The latch covers all thirteen by construction and needs nothing from any modal.
+
+**THE FEATURE SURVIVES, ASSERTED AS LOUDLY AS THE BUG.** With no overlay in play, Enter on a picker column still opens the picker. Mutation M3 (killing the cell's mousedown to "fix" NEW-2) turns that assertion **red**, so it is load-bearing rather than decorative.
+
+**MUTATIONS: revert the latch → Enter back to 4/4 with Escape and ✕ still 0/4** (the asymmetry reproduces exactly) · unit: live-ref-only guard · latch on bubble instead of capture → one distinct assertion red each.
+
+### B463921 — A press inside a floating menu armed drag-select in the grid cell underneath it `[Scheduler]` (bug) #scheduler #ui #selection  *(owner chat block 2026-08-13, same screenshot: a stray selection band around "Submit Plat" he never made. Minted **B463921** from the same block. **DEDUPE-FIRST — searched `createPortal`, `drag-select`, `selRange`, `onMouseDown`, `stopPropagation`, `B456208`, `B1174`, `B1327`, `B280402`: the CHROME-NEVER-EATS-A-PRESS family is about chrome EATING a press; this is the mirror — a press ESCAPING an overlay into the grid. Related in theme, different in mechanism. Net-new.)*
+`[x]` **SHIPPED.** `public/sequence/index.html` — `MENU_STOPS_GRID` on every cell-level portal.
+- Verify: **live** — `V258864` (shares the click-through with B463920).
+- Evidence: same harness, **12/12**, mutation-proven.
+
+**IT NEEDS A DRAG, WHICH IS WHY A CLICK-ONLY CHECK MISSED IT.** A plain click on a swatch leaks nothing. **Press, move a few pixels, release** — what a real hand does — and a selection band paints down the grid (measured: rows 2–8 of the status column).
+
+**⛔ THE PRESS ARRIVES THROUGH REACT'S TREE, NOT THE DOM — and that is the load-bearing evidence.** A DOM-level listener on the grid cell **never fires**, which rules out "the click falls through to what is underneath". A React portal bubbles to its **React** parent (the grid cell) rather than its DOM parent (`body`), so the press lands on the cell's `onMouseDown` — which is what arms drag-select. The swatch stops `click`; nothing stopped `mousedown`.
+
+**ONE FIX AT THE SHARED LEVEL (the #948 lesson, and the ContactPicker audit already proved it applies in this file).** `MENU_STOPS_GRID` is a single definition spread onto the root of every menu a grid cell portals out — **ContactPicker** (dropdown + the new confirm overlay), **HealthPicker**, **StatusPicker**, **DepCell**. `click` is deliberately left alone so each menu's own item handlers keep working.
+
+**TWO NON-REGRESSIONS ASSERTED, because killing drag-select would be worse than the leak:** clicking a swatch still commits the value (`"Complete" → "Needs Attn."`) and the menu still closes on that click · **ordinary drag-select in the grid still works** when the press did not start in a menu. Mutation M3 proves both are real.
+
+**THE REGRESSION CHECK ON THE NEW CONFIRM OVERLAY (B456208), asked for and re-run AFTER this fix:** clean — no selection leaked while it was up or when clicking its buttons, and it closes when another overlay opens on top. `verify-contact-confirm` **21/21** and `verify-owner-first-char` **18/18** both still green.
 
 ### B463072 — A summary row's Duration cell printed the stale leftover: 40 working days rendered as "0d" `[Schedule]` (bug) #scheduler #ui #export  *(owner chat 2026-08-13, the follow-up audit B443248 provoked — "does anything ELSE still read the stale one?". Minted **B463072 / V258016** against `origin/main` ef8ec2a. DEDUPE-FIRST — searched Open / ⏳ Verify / Done across `durValue`, `duration cell`, `typed duration`, `fmtTaskDuration`, **B621/B615-in-code** (the typed-duration model that introduced `durValue`), **B616/B622**, **B835**, **B443248**: B621 built the two-number model and is where the leftover comes from, B443248 stopped the SCHEDULER reading it. Nothing covers the DISPLAY reading it. Net-new, same family.)*
 `[ ]` **⏳ SHIPPED 2026-08-13. `Verify: live` → V258016 (MERGED ≠ LIVE).**

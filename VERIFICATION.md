@@ -113,6 +113,20 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V258864 — B463920 + B463921: the status menu behaves on his own board `Blocker: auth` `Blocker: real-data`
+
+**Proven here already** — `ui-audit/verify-grid-overlay-input.mjs`, 12/12 in a real browser, mutation-proven three ways: Enter dismissing the successor prompt no longer re-opens the picker (Enter 0/4, Escape 0/4, ✕ 0/4, with all three routes proven to have actually raised prompts) · Enter on a picker column with nothing else open still opens the picker · press-and-drag inside a menu leaks no selection · clicking a swatch still commits · ordinary drag-select still works.
+
+**Pending, signed in on a real project:**
+1. Mark a task Complete from the ● column; when the successor prompt appears, press **Enter**.
+   **Expect:** the prompt applies and closes, and **no colour menu is left on screen**.
+2. Repeat, dismissing with **Escape**, then with the **✕**. Same expectation.
+3. With no prompt in play, select a status cell and press **Enter** — **expect the picker to open** (this is a feature; if it stopped working, that is a regression).
+4. Open the status menu, press a colour and **move the mouse slightly before releasing**. **Expect:** the value is set and **no blue selection band** appears anywhere in the grid.
+5. Drag across several cells normally. **Expect:** drag-select still works exactly as before.
+
+**Result:** ⏳ pending.
+
 ### V258016 — B463072: a group header's Duration reads its real span on his own schedules `Blocker: real-data` `Blocker: auth`
 
 **Proven here already, in a real browser.** `ui-audit/verify-summary-pred-dates.mjs`

@@ -1463,6 +1463,32 @@ const NO_AUTOFILL = {
   "data-bwignore": true,
   "data-form-type": "other",
 };
+
+/* NEW-2 — ⛔ A REACT PORTAL BUBBLES TO ITS REACT PARENT, NOT ITS DOM PARENT. A floating menu
+ * rendered by a grid cell lives in <body> visually, but its events still travel up the REACT tree
+ * and land on that cell's handlers. So a press inside the menu reaches the cell's `onMouseDown` —
+ * which is what arms drag-select — and dragging a few pixels before release (what a real hand does)
+ * paints a selection band down the grid that the user never asked for.
+ *
+ * Measured: a plain click leaks nothing; press-move-release on a status swatch selected rows 2-8 of
+ * the status column. The press does NOT arrive through the DOM — a DOM-level listener on the cell
+ * never fires — which is the evidence that rules out "the click is falling through to what's
+ * underneath" and pins it on React's tree.
+ *
+ * This is the whole fix, in one place, spread onto the ROOT of every menu a grid cell portals out:
+ * the pointer events that arm grid selection stop at the menu's edge. It is deliberately only the
+ * grid-arming pair — `click` is left alone so each menu's own item handlers keep working, and
+ * nothing here touches ordinary drag-select in the grid, which still works normally whenever the
+ * press did not start inside a menu. Both of those are asserted, because a fix that killed
+ * drag-select would be a worse bug than the leak.
+ *
+ * Enforced by test/menuPortalIsolation.test.js, which sweeps the file so a NEW cell-level menu
+ * cannot be added without it. */
+const MENU_STOPS_GRID = {
+  onMouseDown: e => e.stopPropagation(),
+  onMouseUp:   e => e.stopPropagation(),
+  "data-menu-isolated": "1",
+};
 // Excel-style fill palette: 5 columns x 4 rows = 20 swatches. Top rows = pastel tints
 // (read well on light grid rows + leave room for text); bottom rows = stronger fills
 // (work well as Gantt-bar accents). Used by the right-click Format toolbar.
@@ -3512,7 +3538,7 @@ function ContactPicker({ value, contacts, onCommit, onCancel, variant = "master"
    * explanatory paragraph). "No" is a real button AND the Escape key AND is what a stray click
    * leaves you on — saying no must never be the hard path. */
   const confirmNew = (pendingNew && pos) ? ReactDOM.createPortal(
-    <div data-contact-dd data-contact-confirm style={{position:'fixed', left:pos.left, top:pos.top, width:pos.width, zIndex:100000,
+    <div data-contact-dd data-contact-confirm {...MENU_STOPS_GRID} style={{position:'fixed', left:pos.left, top:pos.top, width:pos.width, zIndex:100000,
       background:'#fff', border:'1px solid var(--bd2)', borderRadius:7, boxShadow:'0 6px 20px rgba(0,0,0,.13)', padding:'9px 11px'}}>
       <div style={{fontSize:12, color:'var(--txt)', lineHeight:1.4, marginBottom:8}}>
         No match — add "<span style={{fontWeight:600}}>{pendingNew}</span>" as a new contact?
@@ -3528,7 +3554,7 @@ function ContactPicker({ value, contacts, onCommit, onCancel, variant = "master"
     </div>, document.body) : null;
 
   const dropdown = (!pendingNew && totalItems > 0 && pos) ? ReactDOM.createPortal(
-    <div data-contact-dd style={{position:'fixed', left:pos.left, top:pos.top, width:pos.width, zIndex:100000,
+    <div data-contact-dd {...MENU_STOPS_GRID} style={{position:'fixed', left:pos.left, top:pos.top, width:pos.width, zIndex:100000,
       background:'#fff', border:'1px solid var(--bd2)', borderRadius:7, boxShadow:'0 6px 20px rgba(0,0,0,.13)',
       overflow:'hidden', maxHeight:220, overflowY:'auto'}}>
       {suggestions.map((c, i) => (
@@ -5455,9 +5481,42 @@ function App() {
   }, [successorPrompt, notesCtx, projCtx, taskCtx, renameModal, pdfExportOpen, formatOpen, settingsOpen,
       automationOpen, contactsOpen, historyOpen, reviewOpen, meetingCalOpen]);
 
+  /* NEW-1 — ⛔ THE GUARD ABOVE ASKS "IS AN OVERLAY OPEN?" AND THE RIGHT QUESTION IS "DID THIS
+   * KEYSTROKE BEGIN WHILE ONE WAS?" — those differ for exactly one keystroke, the one that
+   * DISMISSES the overlay, and that is the keystroke that caused the bug.
+   *
+   * Measured: press Enter on the successor prompt and the modal applies and closes itself
+   * synchronously, so by the time this same event reaches the document-level handler below the ref
+   * already reads false. The handler then does what Enter on a picker column is designed to do —
+   * fire a synthetic click on the dot and open the picker — so the status menu the user had just
+   * closed REAPPEARS. It is not the first menu left orphaned; it is a second one, opened by the
+   * keystroke that dismissed the prompt. Enter left a menu up 7/7; Escape 0/7; the ✕ button 0/7;
+   * and with no prompt in play, picking a swatch left one up 0/9.
+   *
+   * WHY LATCHING AND NOT "THE MODAL SWALLOWS THE KEY": making SuccessorPromptModal call
+   * stopImmediatePropagation fixes SuccessorPromptModal. Thirteen overlays feed the ref above, and
+   * the next one added would arrive with the same hole — the defect is in the QUESTION the guard
+   * asks, not in any one modal's manners. Latching in capture (window capture runs before anything
+   * on document, and before React's root handler) records the answer while it is still true, so
+   * every overlay is covered by construction and no modal has to remember anything.
+   *
+   * It deliberately does NOT touch the legitimate feature: with no overlay in play the latch is
+   * false at keydown, and Enter on a picker column still opens the picker. Both directions asserted
+   * in ui-audit/verify-grid-overlay-input.mjs. */
+  const overlayAtKeyStartRef = useRef(false);
+  useEffect(() => {
+    const latch = () => { overlayAtKeyStartRef.current = overlayOpenRef.current; };
+    window.addEventListener("keydown", latch, true);
+    return () => window.removeEventListener("keydown", latch, true);
+  }, []);
+
   useEffect(() => {
     const onKey = (e) => {
-      if (overlayOpenRef.current) return;  // a modal/menu owns the keyboard — don't run grid shortcuts behind it
+      // A modal/menu owns the keyboard — don't run grid shortcuts behind it. `overlayAtKeyStart`
+      // also covers the keystroke that DISMISSED the overlay: by the time that one arrives here the
+      // modal has already closed itself, so the live ref reads false and the grid would act on a key
+      // the user aimed at the modal (NEW-1 — that is what re-opened the status menu).
+      if (overlayOpenRef.current || overlayAtKeyStartRef.current) return;
       const tag = document.activeElement.tagName;
       const typing = tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
       if (e.key === "Insert" && !typing) {
@@ -9249,7 +9308,7 @@ function HealthPicker({value, onChange}) {
         </span>
       </span>
       {open && ReactDOM.createPortal(
-        <div ref={menuRef}
+        <div ref={menuRef} {...MENU_STOPS_GRID}
           style={{position:"fixed",top:pos.top,left:pos.left,
             background:"#fff",border:"1px solid var(--bd2)",borderRadius:6,
             padding:"5px 4px",display:"flex",flexDirection:"column",gap:2,
@@ -9350,7 +9409,7 @@ function StatusPicker({value, onChange}) {
         {(HEALTH[value]||HEALTH.gray).label}
       </span>
       {open && ReactDOM.createPortal(
-        <div ref={menuRef}
+        <div ref={menuRef} {...MENU_STOPS_GRID}
           style={{position:"fixed",top:pos.top,left:pos.left,background:"#fff",
             border:"1px solid var(--bd2)",borderRadius:6,padding:"5px 6px",
             display:"flex",flexDirection:"column",gap:3,
@@ -9409,7 +9468,7 @@ function DepCell({items, renderLabel, renderName, s, title, flagged}) {
         ))}
       </div>
       {hovered && extra > 0 && ReactDOM.createPortal(
-        <div
+        <div {...MENU_STOPS_GRID}
           style={{position:"fixed", top:pos.top, left:pos.left, minWidth:pos.width, background:"#fff", border:"1px solid var(--bd2)", borderRadius:6, padding:"8px 10px", zIndex:9999, boxShadow:"0 4px 16px rgba(0,0,0,0.12)", display:"flex", flexDirection:"column", gap:5}}
           onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)}>
           {items.map((item, i) => (
