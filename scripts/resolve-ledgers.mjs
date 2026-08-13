@@ -149,7 +149,7 @@ export function seedSide(text) {
  * Returns false when the file has no conflict stages (already resolved) — then the copy on disk is
  * left exactly as it is and only the regeneration runs, which is the pre-existing behaviour.
  */
-function seedGenerated(file) {
+function generatedSides(file) {
   const stage = (n) => { try { return git("show", `:${n}:${file}`); } catch { return ""; } };
   let ours = stage(2), theirs = stage(3);
   if (!ours && !theirs) {
@@ -158,9 +158,54 @@ function seedGenerated(file) {
     try { ours = git("show", `HEAD:${file}`); } catch { ours = ""; }
     try { theirs = git("show", `MERGE_HEAD:${file}`); } catch { theirs = ""; }
   }
+  return { ours, theirs };
+}
+
+function seedGenerated(file, sides) {
+  const { ours, theirs } = sides;
   if (!ours && !theirs) return false;
   writeFileSync(join(REPO, file), `${seedSide(theirs)}\n${seedSide(ours)}\n`);
   return true;
+}
+
+/** Every `- **`path`** — description` line in a MAP-shaped file, as `path → description`. PURE. */
+export function describedPaths(text) {
+  const out = new Map();
+  for (const line of (text || "").split("\n")) {
+    const m = line.match(/^- \*\*`(.+?)`\*\* — (.*)$/);
+    if (m) out.set(m[1], m[2].trim());
+  }
+  return out;
+}
+
+/**
+ * THE POST-CONDITION FOR THE GENERATED PAIR (B384433): **a bridge run may never reduce the set of
+ * described paths.** Returns the paths that WERE described on some side and came back undescribed.
+ *
+ * ⛔ WHY A RUNTIME GUARD AND NOT ONLY A TEST. The seed rule is now correct, but the failure it
+ * replaced was SILENT — the bridge printed `✅ … MAP.md (regenerated)` while dropping 48 of `main`'s
+ * one-liners, and only an unrelated `--check` in a later step caught it. A future change to
+ * `build-map.mjs`'s preservation, to the line format, or to the seed can re-open exactly that hole,
+ * and the report would stay green. So the property is asserted where the loss would happen, in the
+ * same shape as this script's existing duplicate-id post-condition: check the result, and REFUSE
+ * rather than report a success it did not earn (LOUD-FAILURE).
+ *
+ * ⛔ AND THE PRECISION THAT STOPS IT BEING A NUISANCE: a path legitimately vanishes when the merge
+ * DELETED or RENAMED that file, and the fresh scan is right to drop it. So the check is scoped to
+ * paths the regenerated file STILL LISTS — described before, present now, undescribed now. That is
+ * exactly the PR #978 shape (the 48 files all still existed; only their descriptions were gone) and
+ * it cannot fire on a deletion.
+ */
+export function lostDescriptions(oursText, theirsText, resultText) {
+  const before = new Map([...describedPaths(theirsText), ...describedPaths(oursText)]);
+  const after = describedPaths(resultText);
+  const lost = [];
+  for (const [path, desc] of after) {
+    if (desc !== TODO_DESC) continue;                 // still described — fine
+    const had = before.get(path);
+    if (had && had !== TODO_DESC) lost.push(path);    // described before, present now, TODO now
+  }
+  return lost;
 }
 
 /** Files git currently reports as unmerged. */
@@ -243,11 +288,32 @@ function main(argv) {
     return 1;
   }
 
-  // ---- 3. the generated pair: regenerate rather than union, then stage everything we fixed
+  // ---- 3. the generated pair: regenerate rather than union, then CHECK NOTHING WAS LOST
+  const losses = [];
   for (const g of GENERATED) {
     if (!mine.includes(g.file)) continue;
-    seedGenerated(g.file);
+    const sides = generatedSides(g.file);
+    seedGenerated(g.file, sides);
     execFileSync(process.execPath, [join(REPO, ...g.build[0].split("/"))], { cwd: REPO, stdio: ["ignore", "pipe", "pipe"] });
+    const lost = lostDescriptions(sides.ours, sides.theirs, readFileSync(join(REPO, g.file), "utf8"));
+    if (lost.length) losses.push({ file: g.file, lost });
+  }
+
+  if (losses.length) {
+    // Roll the union back too: a run that lost hand-authored content is not a partial success, and
+    // leaving the ledgers staged would let it be committed as one.
+    for (const b of backup) writeFileSync(join(REPO, b.file), b.raw);
+    process.stderr.write(
+      `\n⛔ REFUSING — a regenerated file came back MISSING hand-authored descriptions that one side\n` +
+      `   of the merge had written. "Generated" does not mean "fully derived": these one-liners are\n` +
+      `   preserved from the copy on disk and CANNOT be recreated by the generator. Dropping them is\n` +
+      `   silent data loss, which is the exact failure this script exists to prevent (B384432/B384433).\n\n` +
+      losses.map((l) => `     ${l.file}: ${l.lost.length} lost — ${l.lost.slice(0, 8).join(", ")}` +
+        `${l.lost.length > 8 ? `, +${l.lost.length - 8} more` : ""}\n`).join("") +
+      `\n   Nothing was staged and the ledgers are restored. Resolve by hand, and put the case on\n` +
+      `   B384432 — the seed rule has regressed.\n\n`);
+    logRun({ outcome: "refused-description-loss", files: mine.length, lost: losses.reduce((n, l) => n + l.lost.length, 0) });
+    return 1;
   }
   for (const f of mine) { try { git("add", "--", f); } catch { /* reported below by status */ } }
 

@@ -12,7 +12,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from "nod
 import { tmpdir } from "node:os";
 import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { resolveConflicts, seedSide, UNION_FILES, GENERATED } from "../scripts/resolve-ledgers.mjs";
+import { resolveConflicts, seedSide, describedPaths, lostDescriptions, UNION_FILES, GENERATED } from "../scripts/resolve-ledgers.mjs";
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -233,5 +233,65 @@ describe("the generated pair: a seed that keeps BOTH sides' preserved descriptio
     // conflating them is how a concatenated MAP.md would get committed with every path twice.
     for (const g of GENERATED) expect(UNION_FILES).not.toContain(g.file);
     expect(GENERATED.map((g) => g.file)).toEqual(["BACKLOG_OPEN.md", "MAP.md"]);
+  });
+});
+
+/* B384433 — THE POST-CONDITION: a bridge run may never reduce the set of described paths.
+ *
+ * B384432 fixed the seed. This asserts the PROPERTY, at the place the loss would happen, because the
+ * failure it replaced was SILENT: the bridge printed `✅ … MAP.md (regenerated)` while dropping 48 of
+ * main's one-liners, and only an unrelated `--check` in a later step noticed. A future change to
+ * build-map's preservation, to the line format, or to the seed re-opens exactly that hole with the
+ * report still green.
+ *
+ * MUTATION-PROVEN AGAINST THE REAL PR #978 DATA, not a constructed case. Driving `lostDescriptions`
+ * over the two actual MAP.md sides of that merge (ours `d0728b1`, theirs `651849d`): the pre-fix
+ * `git checkout --ours` seed loses **48** paths and the union seed loses **0** — the 48 matching the
+ * count measured live when the defect was found. That run is not committed as a test because CI
+ * checks out at depth 1 and could not reach those commits; a history-dependent test would pass
+ * vacuously, which is the rot this guard exists to prevent. The cases below are its structural
+ * mirror, and `parses the REAL committed MAP.md` is the check that keeps the whole thing honest. */
+describe("B384433 · the generated pair may never come back with fewer descriptions", () => {
+  const TODO = "TODO — describe";
+  const line = (p, d) => "- **`" + p + "`** — " + d;
+
+  it("REPORTS a path that was described on one side and came back TODO — the PR #978 shape", () => {
+    const ours = line("src/a.js", "ours knows this one");
+    const theirs = [line("src/a.js", "ours knows this one"), line("src/b.js", "main described this while we sat")].join("\n");
+    // What `--ours` seeding produces: b.js still exists in the tree, but its description is gone.
+    const result = [line("src/a.js", "ours knows this one"), line("src/b.js", TODO)].join("\n");
+    expect(lostDescriptions(ours, theirs, result)).toEqual(["src/b.js"]);
+  });
+
+  it("is GREEN on the union seed — the mutation contrast, in the same two inputs", () => {
+    const ours = line("src/a.js", "ours knows this one");
+    const theirs = [line("src/a.js", "ours knows this one"), line("src/b.js", "main described this while we sat")].join("\n");
+    const seed = describedPaths(`${seedSide(theirs)}\n${seedSide(ours)}\n`);
+    const inventory = ["src/a.js", "src/b.js"];
+    const result = inventory.map((p) => line(p, seed.get(p) ?? TODO)).join("\n");
+    expect(lostDescriptions(ours, theirs, result)).toEqual([]);
+  });
+
+  it("does NOT fire when the merge DELETED the file — the fresh scan is right to drop it", () => {
+    // The precision that stops this being a nuisance: scoped to paths the result still LISTS.
+    const ours = line("src/gone.js", "a described file this merge removes");
+    const theirs = line("src/kept.js", "still here");
+    const result = line("src/kept.js", "still here");
+    expect(lostDescriptions(ours, theirs, result)).toEqual([]);
+  });
+
+  it("does NOT fire on a path that was TODO on BOTH sides — nothing was lost", () => {
+    const ours = line("src/new.js", TODO);
+    const theirs = line("src/new.js", TODO);
+    expect(lostDescriptions(ours, theirs, line("src/new.js", TODO))).toEqual([]);
+  });
+
+  it("⛔ parses the REAL committed MAP.md — the anti-rot check", () => {
+    // If the line format drifts, the regex stops matching, `lostDescriptions` returns [] for
+    // everything, and the guard above becomes a permanent green that can never fail. Pin it to the
+    // real artefact so a format change reddens the guard instead of silently disarming it.
+    const real = describedPaths(readFileSync(join(REPO, "MAP.md"), "utf8"));
+    expect(real.size).toBeGreaterThan(400);
+    expect([...real.values()].filter((d) => d === TODO)).toEqual([]);
   });
 });
