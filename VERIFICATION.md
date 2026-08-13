@@ -113,6 +113,99 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V250304 — B455360: a complicated parcel cut, on his own signed-in cloud plans `Blocker: auth`
+
+**What is proven WITHOUT sign-in, and it is a lot.** `e2e/parcel-split-complex-cut.spec.js` is
+**5/5 driving the REAL app** on his recorded 95-acre Goose Creek tract (24 vertices, 12 of them
+reflex, and a pinched interior exclusion): the Split tool is armed from the parcel rail exactly as
+he would arm it, a four-point bent "creek" cut is clicked across the lot and finished on Enter, and
+the result is read back off **what renders** — the parcel groups on the canvas and the acreage
+badges, each recomputed from its own new outline. A six-crossing zig-zag makes **FOUR pieces**
+(36.00 + 26.97 + 24.47 + 7.93 = 95.37 ac, the whole tract), the bent cut makes two (63.46 + 31.91 =
+95.37 ac), the toast he reported never appears, and a cut drawn in clear space is refused with
+words about THAT cut. Beside it: `test/polygonSplit.test.js` **31 passing** — including the
+pre-fix pipeline reproducing his exact toast on two of his own production parcels, area
+conservation to one part in 10⁹ on three real tracts, and 800 randomised bent cuts — mutation-proven
+three ways. Unit **11,059 passing**, lint 0 errors, build green.
+
+**⛔ WHAT I COULD NOT TEST, stated plainly.**
+1. **The signed-in cloud round-trip.** Parcels live in the site record, so a split writes new
+   parcel rows through the cloud save path. The sandbox proxy CORS-blocks Supabase sign-in, so the
+   split was only ever verified against on-device storage. **Steps:** open a real plan signed in →
+   split a parcel with a bent cut → reload → confirm the same pieces, the same acreages, and the
+   superseded parent still listed greyed under them → open the plan in a second tab and confirm it
+   agrees.
+2. **The per-edge remap on a parcel that actually carries setbacks and role overrides.** The
+   fixtures used here carry the plan default. **Steps:** on a plan where individual sides have
+   different setbacks and at least one hand-assigned role, split it and confirm each piece keeps
+   the setback on the sides it inherited, that a side the CUT created shows the plan default, and
+   that the buildable envelope redraws without a stray line.
+3. **His own screenshot's tract.** He described a wooded tract with a creek running diagonally
+   through it and a road corridor along one side. That specific plan was not identified here;
+   Goose Creek is the nearest recorded equivalent in the repo. **Steps:** run the cut he was
+   trying to make, on the plan he was trying to make it on.
+### V238192 — B443248: "Mobilize" on his own Grand Port opens at 10/05/26, and the correction arrives NAMED `Blocker: real-data` `Blocker: auth`
+
+**Proven here already, in a real browser, on his exact row shape.** `ui-audit/verify-summary-pred-dates.mjs`
+(`npm run verify:schedpreds`) seeds the seven Grand Port rows that matter — 106 "ETJ Permit" (dateless,
+one blank child), 108 "CCID3 Approval" (a summary carrying `duration: 40` / `durValue: 0` with three
+children running to 2026-10-02), and 228 "Mobilize" (0d, FS after both) with the WRONG stored dates
+08/10/26 still in place — renders the real Sequence app, and reads the Start cell off the screen:
+**10/05/26**. **Mutation-proven: revert the `parentIds.has(t.id)` skip in `cascadeDates` and the same cell
+reads 08/10/26** — his screen, reproduced exactly. Engine half: `test/schedulerEngine.test.js` (fixed
+point · three-hop transitive propagation · leaf spans still derived from `durValue` · `detectCascadeDrift`
+naming the correction), also mutation-proven. Full suite 10,987 green.
+
+**Also measured against his LIVE saved document** (read directly from `planar_data`): running the fixed
+engine over all 243 Grand Port rows moves **exactly one — Mobilize, 2026-08-10 → 2026-10-05** — and
+nothing else shifts. Across all six of his projects, **9 predecessor links point at a summary row**
+(Goose Creek 4, 8 South 3, Grand Port 2).
+
+**What still needs his own signed-in session.** The sandbox cannot reach Supabase, so the harness
+necessarily exercises the SEED load path. The B836 drift banner — the thing that tells him which dates
+were corrected — fires on the CLOUD load path (`recascadeWithDrift`), which only runs signed in.
+
+**Steps:**
+1. Open the **Schedule** tab, project **Grand Port**. A banner should appear at the top naming
+   **Mobilize** as a row whose saved start didn't match its predecessors and was recalculated.
+2. Find **Mobilize** in the Construction group. Start and Finish must both read **10/05/26** — the
+   Monday after CCID3's 10/02/26 finish. It must NOT read 08/10/26.
+3. The red "Needs Attn." dot on that row should be **gone** (it was only ever "this finished in the
+   past"; the date is now in the future).
+4. Check **Goose Creek** and **8 South** the same way — they have 4 and 3 links pointing at summary
+   rows, so some of their dates will move too. Anything that moves should be named in the banner.
+5. ⚠ Worth his eye: Mobilize now sits AFTER "Begin Drafting Contract" (08/25/26), which is the sane
+   order he expected. Confirm the new dates read like a schedule someone would actually build.
+
+### V238193 — B443249: the ETJ Permit predecessor is visibly marked as driving nothing `Blocker: real-data` `Blocker: auth`
+
+**Proven here already.** The same browser harness asserts the Predecessor cell renders TWO entries that
+look DIFFERENT: the dateless ETJ Permit one carries a ⚠ and has real box area on screen, the satisfied
+CCID3 one does not. Engine half unit-tested for a dateless predecessor, a missing id, and a fully
+satisfied row (mutation-proven).
+
+**Steps:**
+1. On **Mobilize**, hover the Predecessor cell. It should say plainly that the ETJ Permit row has no
+   dates and that the date shown comes from the remaining predecessor only.
+2. Give **ETJ Permit** (or its child "Submit Permit") a real start and duration. The ⚠ should clear and
+   Mobilize should move if ETJ now finishes later than CCID3.
+3. Scan his three schedules for any other ⚠ in a Predecessor cell — each one is a link he thinks is
+   driving a date and which is not.
+
+### V238194 — B443250: a pinned start that beats its predecessors now says so `Blocker: real-data` `Blocker: auth`
+
+**Proven here already.** Unit-tested three ways (pin before the chain → flagged AND the pin holds · pin
+at/after → not flagged · unpinned → never flagged), mutation-proven.
+
+**Steps:**
+1. Pick a row with a predecessor and type a Start date EARLIER than the predecessor finishes. The
+   padlock appears (as before) and the date should now also turn **red with a ⚠**.
+2. Hover it: it should say the pin is winning and the dependency is being overridden, and how to hand
+   control back.
+3. Click the padlock to unpin. The red should clear and the date should jump to what the predecessor
+   implies.
+4. ⚠ Worth his eye: this may light up rows he pinned deliberately long ago. That is the point — but if
+   it turns out to be noisy across his real schedules, say so and it can be softened.
 ### V242416 — B447472: the corrected `assembly_digest()` against the REAL database, on the assembly that carries the kind collision `Blocker: auth` + `real-data`
 
 **Why this cannot be closed in the sandbox.** The client half is proven here — `test/assemblyGroupCas.test.js`
@@ -140,6 +233,55 @@ was the broken one). Post-apply read on the live database: `assembly_digest('smq
 
 **Nothing on the owner's side.** The migration is applied; this is a check, not a task.
 
+### V238480 — B443536: an owner name typed into a SIGNED-IN project survives the cloud round-trip `Blocker: auth`
+
+**What is already proven here, in a real browser — this is NOT the pending part.**
+`ui-audit/verify-owner-first-char.mjs` (18/18, Chromium, real key events via
+`page.keyboard`, not synthetic `KeyboardEvent`s) drives the actual Owner cell and reads the
+actual input back after every keystroke:
+- type-to-edit `Scott` → the field reads `Scott` (it read `cott` before the fix), and the
+  trace `["S","Sc","Sco","Scot","Scott"]` shows the opening character surviving keystroke 2,
+- the value COMMITTED to the task equals what was typed (read off the closed cell, which
+  renders from the task model — not off the input),
+- an existing contact, a brand-new name, and a PASTE after the opening character all keep it,
+- double-click on an existing owner still SELECTS it, so typing replaces rather than appends,
+- fast typing (no delay between keys) behaves identically — the defect was not a race,
+- Predecessor / Task name / Duration keep their opening character too.
+Mutation-proven in both directions (revert → 8 red · over-fix → the replace case red).
+
+**What is PENDING and why the sandbox cannot reach it.** The scheduler's real projects live in
+Supabase, and the egress proxy CORS-blocks the sign-in handshake, so every check above ran
+against the module's baked seed data in this-device mode. The unverified step is the
+persistence round-trip, which this change does not touch but which is where a truncated name
+would become permanent:
+
+1. Sign in on https://planyr.io and open a real Schedule project.
+2. Click (do not double-click) an Owner cell so it is selected, then type a name straight in —
+   e.g. `Scott` — without pausing.
+3. **Expect:** the field reads `Scott` from the first keystroke on; the dropdown filters as you
+   type; an unknown name offers `+ Add "Scott" as new contact`.
+4. Press Enter, then RELOAD the page.
+5. **Expect:** the cell still reads `Scott`, whole. Open the Contacts panel — the registry holds
+   `Scott`, not `cott`.
+6. Repeat once in the master/table view (the second picker call site, which seeds via
+   `initChar`), and once by double-clicking a cell that already has an owner and typing a
+   different name — that one must REPLACE, not append.
+
+**⛔ THE BUG IS CONFIRMED ON LIVE PRODUCTION, AND THE FIX ON THE DEPLOYED BRANCH BUILD (2026-08-13).**
+The sandbox browser has no egress to `planyr.io` or `*.pages.dev`, but **Node does** — so the
+deployed page bytes were fetched and served locally, and the real built artifact driven. Same
+gesture, two deployed builds, logged out:
+
+| build | keystroke trace | committed |
+|---|---|---|
+| `planyr.io` (main, without the fix) | `["S","c","co","cot","cott"]` | `"cott"` |
+| this branch's Cloudflare preview | `["S","Sc","Sco","Scot","Scott"]` | `"Scott"` |
+
+So the owner's report is reproduced on the app he actually uses, not only in a local server,
+and the shipped artifact carries the fix. **This does not close V238480** — everything above is
+logged out, and the step below is the one the proxy's auth wall blocks.
+
+**Result:** ⏳ pending — signed-in round-trip only.
 
 ### V229360 — B434416/B434417/B434418 + B421493: the two-stage box, a resize that persists, and a re-file that travels `Blocker: auth`
 

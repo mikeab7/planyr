@@ -392,7 +392,7 @@ import {
  * precedent. The GUARD itself is unaffected: its verdict and copy live in detentionRules.js and
  * render immediately; this lazy tier only ENRICHES that line with the regime name and the statute. */
 import { siteState as resolveSiteState } from "./lib/siteRegion.js";
-import { splitPolygonByLine, splitPolygonByPath } from "./lib/polygonSplit.js";
+import { splitPolygonByCut, remapEdgeVector } from "./lib/polygonSplit.js";
 import { overlappingParcelPairs, dissolvedParcelSqft, polyIntersectArea } from "./lib/polyClip.js";
 import { screenFurniturePlates, calibBadgePlacement, canvasPillBottom } from "./lib/sheetFurniture.js";
 import { normalizeRules, effectiveBuildingProps, fmtClearHeight, fmtSlab } from "./lib/buildingProps.js";
@@ -583,7 +583,7 @@ const TOOLS = [
   { id: "pan", label: "Pan", hint: "Hand tool — drag anywhere to move the canvas; clicks don't select. Shortcut: H, or hold Space to pan temporarily (press V for Select)" },
   { id: "marquee", label: "Marquee", hint: "Box-select (M): drag a box over the drawing — everything it touches is selected together, ready to move (drag any one) or delete. In the Select tool you can also Ctrl/⌘-click to toggle an object, Shift-click to add. Esc / click empty to clear" },
   { id: "parcel", label: "Parcel", hint: "Draw mode: click to drop boundary points, then click the first point (or double-click) to close — draw as many as you like • Remove mode: click a parcel to delete it • click Done (or Esc) to exit" },
-  { id: "split", label: "Split", hint: "Cut a parcel: click points to draw a line across it — two points cut straight, or add more for a bent/stepped cut; double-click (or Enter) to finish. It splits into two — then delete the piece you don't want" },
+  { id: "split", label: "Split", hint: "Cut a parcel: click points to draw the line across it — two points cut straight, or add as many as you like for a bent or stepped cut following a creek, a road or an easement; double-click (or Enter) to finish. A cut that leaves the lot and comes back makes more than two pieces — then delete any you don't want" },
   { id: "callout", label: "Callout", hint: "Annotation (Q): click the point you're calling out, then click where the text box goes, and type. Drag the box to move it, the dot to re-aim the leader; double-click to edit the text. Drag a side handle to set a fixed width (text wraps); Alt+Z shrinks the box back to fit its text" },
   { id: "text", label: "Text", hint: "Text box (T): click where the text goes and type — no leader line. Same size / align / colour / bold / italic options. Drag to move, double-click to edit; Alt+Z shrinks the box to fit its text" },
   { id: "building", label: "Building", hint: "Drag for a rectangle, or click points for an irregular footprint (click the 1st point / double-click to close)" },
@@ -6456,10 +6456,24 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     else if (measureMode === "count" && measDraft.length >= 1) { pushHistory(); setMeasures((m) => [...m, ...withStackZ(m, [{ id: uid(), mode: "count", pts: measDraft, ...std }])]); }
     setMeasDraft([]);
   };
-  // Split the selected parcel (or whichever parcel the cut crosses) along a
-  // polyline of >=2 points. Two points cut along the infinite line through them
-  // (a straight cut — concave lots can yield more than two pieces); 3+ points
-  // bend the cut through the interior.
+  /* NEW-1 — SPLIT ALONG AN ARBITRARY CUT. One engine, no case analysis.
+   *
+   * The owner: "I tried to split a parcel, but it seems like it only allows very simple cuts."
+   * He was right, and the message he got named the limit exactly — a straight line entering one
+   * edge and leaving the opposite one, crossing the boundary exactly twice. Anything else came
+   * back "That cut crosses the parcel ambiguously (concave shape)". Real parcels are concave and
+   * real splits follow a creek, a road centreline or an easement with bends in it, so that
+   * refusal landed on the cuts that matter. Two of his own production parcels reproduce it.
+   *
+   * `splitPolygonByCut` handles the general case — a multi-segment cut, a cut crossing the
+   * boundary any even number of times (and so producing three or more pieces), a cut that
+   * re-enters. It also decides the refusals, each with copy naming what is wrong with THAT cut.
+   *
+   * LOUD-FAILURE: this never quietly produces a wrong split, never drops a piece unreported and
+   * never loses acreage. Every outcome that is not a clean division either refuses by name, or
+   * ships and SAYS what it had to account for (a scrap too small to be a parcel, a parent whose
+   * own outline self-overlaps).
+   */
   const performSplit = (path) => {
     // Drop consecutive coincident points (a finishing double-click adds the last twice).
     const pts = path.filter((p, i) => i === 0 || dist(p, path[i - 1]) > 0.01);
@@ -6467,21 +6481,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const ordered = sel?.kind === "parcel"
       ? [parcels.find((p) => p.id === sel.id), ...parcels.filter((p) => p.id !== sel.id)].filter(Boolean)
       : parcels;
+    let firstRefusal = null;
     for (const pc of ordered) {
-      const pieces = pts.length === 2
-        ? splitPolygonByLine(pc.points, pts[0], pts[1])
-        : splitPolygonByPath(pc.points, pts);
-      if (pieces) {
-        // Backstop guard: if the pieces don't conserve the original area (they overlap or
-        // omit a wedge) or come out self-intersecting, the cut was ambiguous — skip with a
-        // warning instead of saving corrupted geometry that throws off every downstream
-        // yield number. A clean straight cut through a concave lot now produces all the
-        // real pieces (e.g. 3 for a U-shaped lot), which this still accepts.
-        const whole = polyArea(pc.points), sum = pieces.reduce((s, r) => s + polyArea(r), 0);
-        if (pieces.some(polySelfIntersects) || Math.abs(sum - whole) > whole * 0.02 + 1) {
-          flashWarn("That cut crosses the parcel ambiguously (concave shape) — try a straight cut between two opposite edges.", 7000);
-          return;
-        }
+      const res = splitPolygonByCut(pc.points, pts);
+      if (!res.ok) {
+        // Remember only the FIRST parcel's reason: with several parcels on the plan, the ones the
+        // cut never went near would otherwise overwrite it with "never crosses the parcel".
+        if (!firstRefusal) firstRefusal = res;
+        continue;
+      }
+      {
+        const pieces = res.pieces;
         pushHistory();
         // B651 — split is a REPLACEMENT, not an addition: create + activate the pieces as
         // CHILDREN (each carries parentId), and SUPERSEDE the parent in place (mark it inactive
@@ -6489,17 +6499,42 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         // children nested under it — so the original real parcel stays visible). The parent +
         // its children can never both be active (the Active toggle enforces mutual exclusion),
         // so the active set that feeds Yield/Analysis stays spatially non-overlapping.
+        /* Attributes ride onto every piece; anything DERIVED from the outline is recomputed, not
+         * copied. Acreage and the badge are already derived from `points` at render, so they are
+         * right for free. The per-edge vectors are the ones that would go stale silently: a piece
+         * has different edges from its parent, so `setbacks` and the role overrides are REMAPPED
+         * through the engine's edge provenance and an edge the CUT created takes the plan's
+         * default setback and no role assignment, rather than a neighbour's value.
+         * `label` is deliberately NOT carried: naming the pieces is an owner decision (see the
+         * backlog item), and copying one name onto three parcels would pre-empt it. */
+        const baseSb = +settings.setback || 0;
         const inherit = { addr: pc.addr || null, acct: pc.acct || null, attrs: pc.attrs || null };
-        const made = pieces.map((ring) => ({ id: uid(), points: ring, locked: true, active: true, parentId: pc.id, ...inherit }));
+        const made = pieces.map(({ ring, edgeSrc }) => ({
+          id: uid(), points: ring, locked: true, active: true, parentId: pc.id, ...inherit,
+          setbacks: remapEdgeVector(pc.setbacks, edgeSrc, baseSb),
+          roleOverrides: remapEdgeVector(pc.roleOverrides, edgeSrc, null),
+          roles: remapEdgeVector(pc.roles, edgeSrc, null),
+        }));
         // Retain the parent (active:false = superseded, non-counting) followed by its children.
         // Do NOT tombstone it — it is no longer deleted; a tombstone would strip it on the next
         // cross-copy merge. (The mutual-exclusion guard + the overlap warning, B652, cover the
         // rare merge-skew case where a stale copy re-activates the parent.)
         setParcels((arr) => arr.flatMap((p) => (p.id === pc.id ? [{ ...p, active: false }, ...made] : [p])));
         setSel({ kind: "parcel", id: made[0].id });
+        /* Say what happened. Three or more pieces is a real outcome of a real cut and the plan
+         * should not leave you counting them; a scrap dropped or a parent whose outline overlaps
+         * itself is never swallowed. Every clause here is a fact about THIS cut. */
+        const notes = [];
+        if (made.length > 2) notes.push(`Cut made ${made.length} pieces`);
+        if (res.slivers) notes.push(`${res.slivers.count === 1 ? "one scrap" : `${res.slivers.count} scraps`} too small to be a parcel left out (${Math.round(res.slivers.area).toLocaleString()} sf)`);
+        if (res.outlineDrift) notes.push(`this parcel's outline overlaps itself, so its stated acreage runs ${Math.round(res.outlineDrift.sqft).toLocaleString()} sf above the land it encloses`);
+        if (notes.length) flashWarn(`${notes.join(" — ")}.`, 9000);
         return;
       }
     }
+    // Nothing took the cut. Report what was wrong with THIS cut against the parcel it was aimed
+    // at, never generic advice to draw something simpler.
+    if (firstRefusal) flashWarn(firstRefusal.message, 7000);
   };
 
   /* ------------ merge parcels (Shift-click multi-select) ------------ */
