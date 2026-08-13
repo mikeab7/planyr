@@ -3050,6 +3050,100 @@ physical row is a later polish," so **B104** is that remaining polish for the *m
 
 ## ⏳ Verify — awaiting live confirmation
 
+### B443248 — A successor of a SUMMARY row was scheduled off the summary's collapsed START, not its real FINISH `[Schedule]` (bug) #scheduler #gantt  *(owner chat 2026-08-13, arrived as the "Grand Port / Mobilize" report. Minted **B443248 / V238192** from this branch's reserved block B443248–B443263 against `origin/main` 7ec8daf. DEDUPE-FIRST — searched Open / ⏳ Verify / Done across `predecessor`, `cascade`, `rollup`, `summary`, `parent date`, `durValue`, **B835**, **B836**, **B615**, **B616**, **B864**: B835 is the SCHEDULE_INPUT_KEYS gate (an edit that never cascaded), B836 is the drift detector, B615 is the typed-duration model that introduced `durValue`. None of them touches how a PARENT row's span is resolved inside the cascade. Net-new.)*
+`[ ]` **⏳ SHIPPED 2026-08-13. `Verify: live` → V238192 (MERGED ≠ LIVE).**
+- Verify: live → **V238192** (`Blocker: real-data` — his signed-in Grand Port document).
+- Origin: filed 2026-08-13 from chat; shipped the same session.
+- **NEVER-PARK disposition: REPRODUCED AND FIXED.** Not instrumented-and-left, not asked-about.
+- **⛔ THE OWNER'S OWN LEADING HYPOTHESIS IS REFUTED. The date did not come from the clock.** His framing —
+  "adding a predecessor STAMPS THE CURRENT DATE onto the successor start" — was the single most likely
+  mechanism and it is wrong. `updateTask` handles `predecessors` correctly: it normalises the list, clears
+  any manual pin so the cascade can take effect, and `touchesSchedule` fires a full recompute. Nothing on
+  that path reads `NOW`. **2026-08-10 is a DERIVED date** — it is the next working day after Friday
+  2026-08-07, and its resemblance to the day of the edit is a coincidence.
+- **WHAT IT WAS DERIVED FROM — the predecessor's START, because the predecessor's FINISH had been silently
+  discarded.** Read straight off his live document: task 228 "Mobilize" (0d, FS after 106 and 108); task
+  **108 "CCID3: Lift Station & Force Main Approval" is a SUMMARY row** with three children running to
+  2026-10-02, stored `duration: 40` and `durValue: 0`. A parent gets `duration` written by
+  `rollupParentDates` and never gets a `durValue` — but `cascadeDates` resolved every row as a leaf, so
+  `resolveTaskSpan` read `durValue: 0` and **collapsed a 40-working-day summary into a 0-day milestone
+  sitting on its own start, 2026-08-07.** The FS successor then computed the next working day after that:
+  Monday **2026-08-10**. `rollupParentDates` restored 108's finish to 2026-10-02 immediately afterwards —
+  which is exactly why the wrong date was **a STABLE FIXED POINT**: re-running the recompute reproduced it
+  byte for byte, and `detectCascadeDrift` (stored vs engine) could never see it because the engine agreed
+  with the stored value. Correct answer, confirmed on his data: **2026-10-05**.
+- **This is NOT the "mechanism that exists and never fires" class (hypothesis 1 — refuted).** There is a
+  real scheduling engine, it does re-run on a predecessor edit, it is a full topological recompute, and it
+  propagates transitively. It supports FS / SS / FF / SF with lag in working OR calendar days (hypothesis 5
+  — answered: all four types, both lag units). Both predecessors WERE resolvable (hypothesis 2 — 106 and
+  108 are both real rows in the same project; 106 simply has no dates).
+- **THE RED "Needs Attn." DOT IS NOT A DEPENDENCY VERDICT (hypothesis: refuted).** It is
+  `computeDisplayHealth`'s `cf.overdueRed` rule — finish in the past, 0% complete. The app did not know
+  anything was wrong with the dependency; it only knew a date had passed.
+- **THE PADLOCK ANSWER (hypotheses 6 + 7).** The padlock is a pinned start (or a locked finish); a pinned
+  date WINS over predecessor logic, and adding a predecessor deliberately clears the pin. Rows 26/27/30/42/43
+  wear one because their dates were typed by hand; Mobilize does not, because adding predecessors unpinned
+  it — so it was exactly a row the engine was supposed to be computing, and it computed off a collapsed
+  input. The difference between rows 28 and 42 is real but it is not the cause. Row 42 also happens to have
+  a LEAF predecessor, so it was never exposed to this defect.
+- **THE FIX.** `cascadeDates` no longer derives a span for a row that is a parent — a summary's dates are
+  owned by `rollupParentDates`, full stop (parents never took a predecessor-driven start either, because
+  the rollup overwrote it in the same breath, so the skip is behaviour-preserving for the parent itself).
+  And the cascade/rollup pair — hand-written at nine call sites — is now the single `recomputeSchedule`,
+  which seeds with a rollup so the first cascade reads real parent finishes and then **iterates to a fixed
+  point**, so one call propagates a move transitively down a chain of any depth.
+- **EXISTING SCHEDULES RECALCULATE, AND SAY SO.** The cloud load path already routes through
+  `recascadeWithDrift`, so every saved document is re-derived on open and the B836 drift banner NAMES each
+  corrected row. Measured against his live Grand Port document: **exactly one row moves — Mobilize,
+  2026-08-10 → 2026-10-05** — and it arrives named, not swapped in silence. Across all six of his projects
+  there are **9 predecessor links pointing at a summary row** (Goose Creek 4, 8 South 3, Grand Port 2), so
+  that is the full population exposed to this class.
+- Guards, all four MUTATION-PROVEN RED: `test/schedulerEngine.test.js` (removing the summary skip → 5 fail;
+  dropping the fixed-point iteration → 1 fail) and `ui-audit/verify-summary-pred-dates.mjs` /
+  `npm run verify:schedpreds`, which drives the REAL Grid on his exact row shape and reads the Start cell
+  off the screen. With the skip reverted the harness reads **08/10/26** — his screen, reproduced.
+- Bundle: **zero delta, byte-identical** (`dist/assets/index-*.js` gzip identical with and without the
+  change). The Schedule module is the standalone `public/sequence/index.html`, never part of the main
+  bundle, so the ceiling is untouched.
+- Files: `public/sequence/index.html`, `ui-audit/stress/scheduler-engine.mjs` (verbatim mirror),
+  `test/schedulerEngine.test.js`, `ui-audit/verify-summary-pred-dates.mjs`, `ui-audit/lib/vendorCdn.mjs`.
+
+### B443249 — A predecessor that drives NOTHING looked identical to one that does `[Schedule]` (bug) #scheduler #ui  *(owner chat 2026-08-13, the "unresolvable predecessor" half of the Grand Port report. Minted B443249 / V238193.)*
+`[ ]` **⏳ SHIPPED 2026-08-13. `Verify: live` → V238193 (MERGED ≠ LIVE).**
+- Verify: live → **V238193** (`Blocker: real-data`).
+- Origin: filed 2026-08-13 from chat; shipped the same session.
+- **THE GAP.** Mobilize's second predecessor, 106 "ETJ Permit: Lift Station & Force Main", has **no dates
+  at all** (its one child is blank too). `cascadeDates` filtered it out — correctly, it can drive nothing —
+  and then said nothing about having done so. The row rendered a confident date computed from **one of its
+  two stated inputs**, and the two entries in the Predecessor cell were pixel-identical. That is the
+  fabricated-date-looks-exactly-like-a-real-one failure this repo keeps paying for (LOUD-FAILURE).
+- **THE FIX.** The cascade records `predUnresolved` per task — a live predecessor with no dates of its own,
+  or an id with no row left in this project. The grid's Predecessor cell marks those entries with a ⚠ in
+  the warn colour while satisfied ones stay blue, and the cell's hover names them and says plainly that the
+  date shown comes from the remaining predecessors only. The mark is derived from the engine's own output,
+  so it can never disagree with what the engine actually ignored.
+- PANEL-BREVITY: **no line added anywhere.** The mark rides the existing entry (one glyph), and the
+  explanation replaces the existing cell hover rather than adding one. No new banner.
+- Guards: `test/schedulerEngine.test.js` (dateless pred · missing id · satisfied row records nothing —
+  mutation-proven: stubbing `predUnresolved` to `[]` fails 3) and the browser harness asserts the marked
+  entry is the ETJ one, has real box area on screen, and that the satisfied CCID3 entry is NOT marked.
+
+### B443250 — A pinned start that beats its predecessor chain won silently `[Schedule]` (bug) #scheduler #ui  *(owner chat 2026-08-13, the "a conflict must be visible, never silently resolved" clause. Minted B443250 / V238194.)*
+`[ ]` **⏳ SHIPPED 2026-08-13. `Verify: live` → V238194 (MERGED ≠ LIVE).**
+- Verify: live → **V238194** (`Blocker: real-data`).
+- Origin: filed 2026-08-13 from chat; shipped the same session.
+- **THE GAP.** A locked FINISH that the chain can't meet has flagged `finishConflict` since B616 — red date,
+  ⚠, a tooltip and a banner. A pinned START earlier than the chain allows had **no equivalent**: the pin
+  won, the dependency was discarded, and nothing said so. The precedence rule was right; its visibility was
+  missing.
+- **THE FIX.** `startConflict`, set when a pinned start precedes the predecessor-derived earliest start.
+  **The pin still wins — the contract is unchanged** — but the Start cell now turns red with the same ⚠ and
+  says the dependency is being overridden and how to hand control back.
+- PANEL-BREVITY: reuses B616's existing treatment; no new banner and no new line — the start cell's tooltip
+  branches on which endpoint it is instead of gaining a second string.
+- Guards: `test/schedulerEngine.test.js` (pin before the chain → flagged and the pin holds · pin after →
+  not flagged · unpinned row → never flagged; mutation-proven: deleting the flag fails 2).
+
 ### B435536 — An easement's label rendered at a fixed screen size, so it dwarfed the easement it named `[Site Planner]` (bug) #site-planner #ui #markup  *(owner chat amendment 2026-08-13, arrived as NEW-6, reported with a screenshot from production. Minted **B435536 / V230480** from this branch's reserved block B435536–B435551 against `origin/main` 56a0ae9. DEDUPE-FIRST — searched Open / ⏳ Verify / Done across `label`, `easement`, `labelSize`, `zoom gate`, `B911`, `B1152`, `B149`, `B1345`, `B371360`: **B911** is the parcel/edge DIMENSION labels (same disease, different layer, already fixed and the direct precedent this reuses); **B1152** is the per-measurement reveal zoom. Neither touches a markup's centroid NAME label. Net-new.)*
 `[ ]` **⏳ SHIPPED 2026-08-13. `Verify: live` → V230480 (MERGED ≠ LIVE).**
 - Verify: live → **V230480** (`Blocker: real-data` — his own 8 South / Concept A plan).
