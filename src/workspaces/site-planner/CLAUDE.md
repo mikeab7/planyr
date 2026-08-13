@@ -58,7 +58,22 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   layer ASK but never ANSWER — 3DEP is `ERR_CONNECTION_RESET` from Chromium here — and it says so
   rather than scoring itself; the paint-then-vanish half is **V121985**.
 - `layers.js` + `components/LayerPanel.jsx` — map-layer system; `layerPrefs.js` (per-site Layers-panel
-  toggle memory — NEW-1, sparse on/off overrides restored on open + persisted on toggle); `coverage.js` (coverage engine);
+  toggle memory — NEW-1, sparse on/off overrides restored on open + persisted on toggle).
+  **⛔ B385040 — `applyOnOverrides` / `applyAboveOverrides` ARE IDENTITY-STABLE, and that is load-bearing
+  rather than an optimisation.** Three effects in `SitePlanner.jsx` key off the `overlays` OBJECT
+  identity, one of which clears its intervals and idle callbacks and then re-stages and RE-ADDS the
+  whole Leaflet overlay stack. Both functions preserved each INNER layer state's identity and then
+  allocated a fresh OUTER map every call, so `applySnapshot`'s unconditional restore rebuilt every GIS
+  layer on **every Ctrl+Z** — the owner's *"the screen flashes on every ctrl z"*. Fixed at BOTH ends
+  deliberately: the pure functions return the INPUT when nothing moved (so no caller can trip it), and
+  `applySnapshot` skips the setState entirely when `overridesSig`/`aboveSig` already match
+  `prevLayerSig`/`prevAboveSig`. **⛔ IT IS UNOBSERVABLE WITHOUT THE INSTRUMENT** — the layer SET is
+  byte-identical either side of the defect, so `window.__plannerLayers()` reports `identityEpoch`
+  (incremented by the `[overlays]` effect itself); mutation-proven at 2 → 4 across two undos.
+  Same restore also FILTERS `sel`/`multi` against the snapshot instead of blanking them, so a
+  still-valid selection survives an undo (B743's no-stale-ref invariant is met more strictly, not
+  waived). Guards: the repo-root `test/` suite **undoLayerStability** + the e2e spec
+  **undo-dock-plan-menu**. `coverage.js` (coverage engine);
   `arcgis.js`/`counties.js`/`layerRequest.js` — GIS plumbing; **`gisCache.js` — the screening cache;
   its persistent tier lives in `localDb.js`'s IndexedDB store, NOT localStorage (B1427 — a disposable
   cache was crowding saved plans out of the ~5 MB cap; see /CLAUDE.md → TIER-BY-REBUILDABILITY). Two
@@ -692,6 +707,25 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   the repo-root fixture **ui-audit/fixtures/weld-concept-a.json** (the owner's real rows — the defect IS the
   fixture, do not "fix" the numbers), the repo-root `test/` suite **hostRunHeal** and the e2e spec
   **dock-zone-host-run**.
+- **⛔ `dockZones.js` — WHICH WALLS ARE LOADED IS *STORED*, NOT RE-DERIVED ON EVERY READ (B385041).**
+  `dockSidesFor` opened with `el.w >= el.h ? ["top","bottom"] : ["left","right"]`, so shrinking a
+  cross-dock building past square rotated the entire dock assembly 90° MID-DRAG — and with `>=`, one
+  foot either side of square flipped it and flipped it back. `el.dockAxis` (`"x"` = top/bottom,
+  `"y"` = left/right) is stamped once and never re-derived: at CREATION, by the load-time
+  `healDockAxes` (which stamps the axis a plan CURRENTLY RENDERS, so no existing plan moves), and in
+  `refitChildren` — the one funnel every building resize goes through — from the PRE-resize
+  footprint. A stored `dockSide` is the more specific statement and WINS on an established building;
+  ⛔ the `established` gate is not ceremony — a legacy record can carry a `dockSide` that disagrees
+  with what it renders, and honouring it unconditionally on load would strand (and therefore prune)
+  the zones bonded to the walls the plan actually shows. `rotateDockAxisPatch` is the DELIBERATE way
+  to turn the face (Properties → Loading → `Dock face` → `turn ⟳`), which has to exist now that a
+  resize cannot do it by accident. B548's contract (depth/length readouts, massing panel, column
+  grid, dock-door count) holds against the STORED value for free, because they all read
+  `dockSidesFor`. **B416/B417 are the CONSEQUENCE of the old flip, not duplicates — they still prune
+  stranded zones and are untouched; they simply almost never fire now.** Guards: the repo-root
+  `test/` suite **dockOrientation** (which replays the pre-fix rule as the mutation check) + the e2e
+  spec **undo-dock-plan-menu** (real edge-grip drags, the dock face read off the painted
+  `data-dock-apron` band; mutation-proven 4/4 red).
 - **⛔ `dockZones.js` — A BONDED ZONE'S SPAN IS *ANCHORED*, AND THAT IS ONE FIELD, NOT TWO (NEW-1).**
   `layoutZoneByKind` builds the zone centre as `b.c + u·center + tan·alongShift`, and for a long time
   the ONLY along-wall term there was `alongShift` — the B492 corner-bump-out trim. The LENGTH came

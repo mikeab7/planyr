@@ -383,16 +383,109 @@ export function layoutStack(b, side, depths) {
   return depths.map((_, i) => ({ i, geom: layoutZone(b, side, i, depths) }));
 }
 
-// Dock-capable sides run along a building's TWO LONG sides; the dock preset chooses how
-// many — cross = both, single = one, none = neither. A square (w === h) tie-breaks to the
-// horizontal pair (top/bottom), matching `el.w >= el.h`. PURE (depends only on the element's
-// own footprint + dock fields), so the canvas, the panel and the stranded-zone guard below
-// all share one source of truth. (Extracted from SitePlanner's old inline `dockSidesOf`.)
+/* ⛔ NEW-2 (B385041) — THE DOCK ORIENTATION IS STORED, NOT RE-DERIVED ON EVERY READ.
+ *
+ * THE REPORT, verbatim: *"if I had a cross-dock and I shrink it lengthwise, it almost seemed to
+ * recompute where the docks went versus where the parking went, when I made it deeper than it was
+ * long. I don't really want it to do that. Let me just play around instead of correcting it for me
+ * — it doesn't help if I'm just trying to figure out what will and won't fit."*
+ *
+ * THE CAUSE, one line: this function used to open with
+ *     const longSides = el.w >= el.h ? ["top", "bottom"] : ["left", "right"];
+ * so which walls were loaded was a LIVE function of whichever dimension happened to be larger AT
+ * READ TIME. Shrink a cross-dock building lengthwise past square and the whole dock assembly —
+ * truck courts, trailer parking, buffers, sidewalks, dog-ears — rotated 90° onto the other walls
+ * MID-DRAG. And because the comparison is `>=`, one foot either side of square flips it and flips
+ * it back: dragging THROUGH square did it twice.
+ *
+ * THE FIX is the pattern this codebase already uses for every other value a user can mean
+ * deliberately (dog-ears, side parking, trailer length, zone spans): DERIVE BY DEFAULT, PRESERVE
+ * ONCE ESTABLISHED. `el.dockAxis` ("x" = the top/bottom pair, "y" = left/right) is stamped when the
+ * orientation is first established — at creation, at the first resize of a building that predates
+ * this field, or when the user sets it — and from then on a resize can never re-derive it. Pure
+ * aspect-ratio derivation survives ONLY for a building that has no established orientation yet.
+ *
+ * ⛔ AND A STORED `dockSide` IS THE SAME STATEMENT, MORE SPECIFICALLY: it names a wall, which names
+ * an axis. It used to be honoured only `if (longSides.includes(el.dockSide))`, i.e. it was thrown
+ * away the instant the aspect ratio flipped — an explicit choice discarded by an implicit one. It
+ * now WINS, always, for a building whose orientation is established. The `established` gate is not
+ * ceremony: a legacy record can carry a `dockSide` that disagrees with what it currently RENDERS
+ * (that is what the old validation did for a living), and honouring it unconditionally on load
+ * would strand — and therefore prune — the zones bonded to the walls the plan actually shows.
+ */
+export const DOCK_AXES = { x: ["top", "bottom"], y: ["left", "right"] };
+const SIDE_AXIS = { top: "x", bottom: "x", left: "y", right: "y" };
+
+/** Has this building's dock orientation been ESTABLISHED (stamped), or is it still derived? */
+export const dockAxisEstablished = (el) => !!el && (el.dockAxis === "x" || el.dockAxis === "y");
+
+/** The axis the dock walls run along: "x" (top/bottom) or "y" (left/right). Stored wins; a stored
+ *  `dockSide` on an established building is the more specific statement and wins over that. */
+export function dockAxisOf(el) {
+  if (!el) return "x";
+  if (dockAxisEstablished(el)) {
+    if ((el.dock || "cross") === "single" && SIDE_AXIS[el.dockSide]) return SIDE_AXIS[el.dockSide];
+    return el.dockAxis;
+  }
+  return (Number(el.w) || 0) >= (Number(el.h) || 0) ? "x" : "y"; // no orientation yet → aspect ratio
+}
+
+/** The patch that ESTABLISHES a building's orientation from its CURRENT footprint, preserving
+ *  exactly what it renders today: the axis it is being read at, plus (single-load) the wall it is
+ *  actually docked on, so a stale `dockSide` cannot become authoritative by being stamped. Returns
+ *  `null` when there is nothing to establish — already stamped, or not a plain building. */
+export function establishDockAxisPatch(el) {
+  if (!el || el.type !== "building" || el.dogEar || dockAxisEstablished(el)) return null;
+  const axis = dockAxisOf(el);                      // the derived answer, i.e. what it looks like now
+  const patch = { dockAxis: axis };
+  if ((el.dock || "cross") === "single") patch.dockSide = dockSidesFor(el).dside;
+  return patch;
+}
+
+/** Stamp `el` if it needs it, else return it untouched (identity-stable). */
+export function withDockAxis(el) {
+  const p = establishDockAxisPatch(el);
+  return p ? { ...el, ...p } : el;
+}
+
+/** Load-time heal: establish every plain building's orientation from what the plan currently shows.
+ *  Identity-stable — a list with nothing to stamp is returned as-is, so an already-healed plan does
+ *  no work and is not marked dirty. */
+export function healDockAxes(els) {
+  if (!Array.isArray(els)) return els;
+  let changed = false;
+  const next = els.map((e) => { const y = withDockAxis(e); if (y !== e) changed = true; return y; });
+  return changed ? next : els;
+}
+
+/** Turn the dock face a quarter turn — the DELIBERATE way to do what a resize used to do by
+ *  accident. Returns the patch (axis + the mapped single-load wall), never mutating. */
+export function rotateDockAxisPatch(el) {
+  const axis = dockAxisOf(el) === "x" ? "y" : "x";
+  const patch = { dockAxis: axis };
+  if ((el.dock || "cross") === "single") {
+    const cur = dockSidesFor(el).dside;
+    patch.dockSide = { top: "left", bottom: "right", left: "top", right: "bottom" }[cur] || DOCK_AXES[axis][1];
+  }
+  return patch;
+}
+
+// Dock-capable sides run along a building's two loaded walls; the dock preset chooses how
+// many — cross = both, single = one, none = neither. Which PAIR of walls those are is
+// `dockAxisOf` above (stored once established, else the aspect ratio, where a square tie-breaks
+// to the horizontal pair). PURE (depends only on the element's own footprint + dock fields), so
+// the canvas, the panel, the depth/length readouts, the dock-door count and the stranded-zone
+// guard below all share one source of truth — B548's "these must never disagree" contract now
+// holding against the STORED orientation rather than a recomputed one.
+// (Extracted from SitePlanner's old inline `dockSidesOf`.)
 export function dockSidesFor(el) {
-  const longSides = el.w >= el.h ? ["top", "bottom"] : ["left", "right"];
+  const longSides = DOCK_AXES[dockAxisOf(el)];
   const dock = (el && el.dock) || "cross";
   if (dock === "none") return { dside: longSides[1], dockSides: [] };
   if (dock === "single") {
+    // An established building's stored side is authoritative (dockAxisOf already adopted its axis,
+    // so it is always one of `longSides`); an un-established one keeps the old validation, which is
+    // what preserves a legacy plan's appearance until its orientation is stamped.
     const dside = longSides.includes(el.dockSide) ? el.dockSide : longSides[1];
     return { dside, dockSides: [dside] };
   }
