@@ -64,3 +64,73 @@ export function abbreviateJurisdiction(badge) {
   const hidden = segs.length - 1;
   return { text: hidden > 0 ? `${segs[0]} +${hidden}` : segs[0], hidden, full };
 }
+
+/* ⛔ B367298 — THE RUNGS, because ONE short form is not enough on the owner's longest labels.
+ *
+ * `abbreviateJurisdiction` drops every segment but the governing one and appends "+N". On a normal
+ * label that fits any header. On a SPLIT site it does not: "Part in City of Baytown limits (full
+ * purpose, 6 of 14 lots) +1" is nearly the whole line, and at his laptop widths the pill fell back
+ * to a CSS ellipsis and cut it mid-word — the exact failure `abbreviateJurisdiction` exists to
+ * prevent, reached from underneath. Measured in a real browser on Goose Creek and Tsakiris at 761
+ * and 860 px; invisible to a source-level guard, which is why the browser harness found it.
+ *
+ * So the shortener returns a LADDER, and every rung is COMPLETE FACTS — never a cut word:
+ *   1. the full line
+ *   2. the governing fact + "+N"                        (what `abbreviateJurisdiction` returns)
+ *   3. the governing fact WITHOUT its parenthetical qualifier + "+N"
+ *      — "(full purpose, 6 of 14 lots)" is itself a fact, so it is dropped as a UNIT
+ *   4. NOTHING. The pin alone, and the whole answer on hover.
+ *
+ * ⛔ RUNG 4 IS DELIBERATE AND IS NOT A COP-OUT. Below a certain width no true statement about a
+ * split jurisdiction fits, and the alternatives are a fragment ("Part in City of Bayto…", which
+ * reads as a different answer) or a form that drops the qualifier that carries the meaning ("City of
+ * Baytown", which claims the whole site is in it). Showing nothing is the only one of the three that
+ * cannot mislead, and it costs nothing: the tooltip and `data-jurisdiction-full` still carry every
+ * word. This is "navigation wins" followed to its end — a pill with no room to say something TRUE
+ * yields the room rather than say something wrong.
+ *
+ * Pure. Guarded in test/jurisdictionBadgeRungs.test.js and driven in a browser by the ui-audit
+ * harness verify-jurisdiction-badge-shapes.
+ */
+/* ⛔ THE DEEPEST RUNG, BUILT FROM THE MODEL AND NEVER BY CHOPPING THE LABEL. The bare identity of
+ * the authority: who governs, with every qualifier dropped as a unit. It is the last thing that can
+ * be said truthfully in very little room, and it is the difference between a pill that still names
+ * Baytown at a narrow width and one that shows nothing at all (measured: Goose Creek at 761 px needs
+ * 231 px for the next rung up and is granted 213).
+ *
+ * ⚠ "Part in" is KEPT. Without it "City of Baytown" claims the whole site is inside the city, which
+ * is a different — and wrong — answer; shortening may drop facts, never reverse one. And it is
+ * assembled from `governingCities` / `partialCities` / `etjLabels`, never from `jur`, because
+ * recovering a jurisdiction FACT from the jurisdiction LABEL is banned repo-wide
+ * (test/jurisdictionCoupling). Returns null when the badge cannot say who governs. */
+export function governingIdentity(badge) {
+  if (!badge) return null;
+  const one = (v) => (Array.isArray(v) && v.length ? String(v[0]) : null);
+  const part = one(badge.partialCities);
+  if (part) return `Part in City of ${part}`;
+  const gov = one(badge.governingCities);
+  if (gov) return `City of ${gov}`;
+  const etj = one(badge.etjLabels);
+  if (etj) return `City of ${etj} ETJ`;
+  if (badge.cityContainment === "unknown") return "Couldn't check city limits";
+  return badge.cityContainment === "none" ? "Unincorporated" : null;
+}
+
+export function jurisdictionRungs(badge) {
+  const segs = jurisdictionSegments(badge);
+  const full = badge && badge.text ? String(badge.text) : segs.join(" · ");
+  if (!segs.length) return [""];
+  const hidden = segs.length - 1;
+  const plus = (t) => (hidden > 0 ? `${t} +${hidden}` : t);
+  const lead = segs[0];
+  // The parenthetical is a whole fact and comes off as one. Only ever a TRAILING one, so a name
+  // that legitimately contains brackets mid-string is left alone.
+  const bare = lead.replace(/\s*\([^()]*\)\s*$/, "").trim();
+  const rungs = [full, plus(lead)];
+  if (bare && bare !== lead) rungs.push(plus(bare));
+  const identity = governingIdentity(badge);
+  if (identity) rungs.push(plus(identity));
+  rungs.push("");
+  // De-duplicate while keeping order: on a one-segment badge rungs 1 and 2 are the same string.
+  return rungs.filter((r, i) => rungs.indexOf(r) === i);
+}

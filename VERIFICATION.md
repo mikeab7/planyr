@@ -113,6 +113,19 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V278320 — B487600: a shared reference file survives a delete in a sibling plan — the SIGNED-IN leg `Blocker: auth`
+**Status:** ⏳ pending — needs a signed-in account against real Supabase Storage.
+**Verified here (sandbox, 2026-08-13):** the pure rule + all three call sites (repo-root `test/sharedAssetRefs.test.js`, 17, with the pre-fix rule replayed as a mutation check); lint 0 errors; build green; bundle audit inside band with no new breach. **The database guard was proven against PRODUCTION on the real deletion path** — `storage.allow_delete_query` set exactly as the Storage API sets it: a shared object was REFUSED naming all four Goose Creek plans, an unreferenced object passed through, and neither probe committed.
+**Why it still needs a live pass:** the sandbox blocks sign-in, so the CLIENT half — the app actually reaching `loadSitesList()` at delete time and skipping the release — has never run against a real signed-in session with real Storage.
+**Steps:**
+1. Sign in. Open a project with two plans sharing one reference drawing (**Goose Creek** has four; **Bain** has two). ⚠ Do this on a THROWAWAY duplicate first — the whole point is that a wrong result destroys a real file.
+2. In plan A, remove the reference drawing. Expect: it goes from plan A only.
+3. Open plan B. **Expect the drawing still renders.** Pre-fix it would be gone (and gone from every other plan too).
+4. Reload plan B with the device cache cleared, so it must fetch from the cloud. Expect it still loads — proving the CLOUD object survived, not just the device copy.
+5. Check `client_errors` for `overlay-asset-retained` naming plan B as the holder.
+6. Repeat 2–5 for the aerial underlay (a plan made with **New plan, same parcel**), and for **deleting plan A entirely** — plan B's image must survive that too.
+7. Last-holder cleanup: remove the drawing from every plan, then confirm the object is finally released (no permanent orphan).
+
 ### V275056 — B463922: the schedule stops jumping while HE edits it `Blocker: real-data`
 
 **What is proven here, and it is not nothing.** `ui-audit/verify-grid-row-hold.mjs` drives the real
@@ -185,33 +198,75 @@ browser in this environment can sign in and the write engine never starts.
 converges on its own and `assembly-split` maps to no toast at all. Only the persistent case shows
 the banner. That is the intended design, not a miss; a toast per transient conflict would be noise.
 
-### V258992 — B464048: a keystroke typed in an inspector field can no longer delete the plan — the SIGNED-IN leg `Blocker: auth`
+### V258992 — B464048 / B464049 / B477808: the inspector keyboard + error-state work, on a SIGNED-IN plan `Blocker: auth`
 
-**Everything logged-out is proven here, on his own plan, and is NOT what this entry is waiting for.**
-`ui-audit/fixtures/fm359-concept-a.json` is his real FM 359 "Concept A" pulled verbatim from
-production (site `smsrpaiqu5sv`), and three instruments drive it in a real browser:
-`diagnose-key-scope-paths.mjs` re-measures all eight arms (was 7 of 8 deleting Building 1 and its
-eight bonded elements, 18 → 9; now 0 of 8) · `verify-delete-undo-restores.mjs` proves **32/32** that
-Ctrl+Z brings Building 1 back property-for-property through BOTH delete routes, drawn in the same
-place to a tenth of a pixel, surviving a reload — and its `--no-undo` self-test takes 26 of those 32
-red, so it can genuinely tell recovery from permanent loss · `e2e/inspector-key-scope.spec.js` (10)
-is **mutation-proven RED on the pre-fix build, 7 failed / 3 passed**, the 3 being its controls.
+**Everything below was proven LOGGED OUT on the owner's own rows** — `ui-audit/fixtures/fm359-concept-a.json`
+is his real FM 359 "Concept A" (site `smsrpaiqu5sv`) pulled verbatim from production, and three
+instruments drive it in a real browser: `diagnose-key-scope-paths` (all eight arms: was 7 of 8
+deleting Building 1 and its eight bonded elements, 18 → 9; now 0 of 8) · `verify-delete-undo-restores`
+(**32/32**, both delete routes, property-for-property, same pixels, survives a reload; its `--no-undo`
+self-test takes 26 of those 32 red) · `verify-field-focus-vs-invalid` (**20/20**, both themes,
+computed styles off the live element). `e2e/inspector-key-scope.spec.js` is mutation-proven RED on
+the pre-fix build (7 failed / 3 passed, the 3 being its controls).
 
-**WHAT IS STILL PENDING, and it is one path.** Every measurement above reads the LOGGED-OUT store.
-On a signed-in plan the same delete and the same undo travel through `elementSync` — the atomic
-group commit, the pending journal, the rows-canonical seed — and the sandbox cannot sign in (the
-proxy CORS-blocks Supabase auth). So the signed-in steps are:
+**WHY THIS IS PARKED AND NOT SKIPPED.** All of that reads the LOGGED-OUT store. A signed-in plan
+writes through `elementSync` — the atomic group commit, the pending journal, the rows-canonical seed
+— and the sandbox cannot sign in (the proxy CORS-blocks Supabase auth). The delete and the undo take
+a genuinely different path there. ⛔ **Do not spend a session trying to defeat the sign-in wall; run
+the checklist below in a real signed-in browser instead.** It is written to be executed cold — no
+part of the investigation has to be re-derived.
 
-1. Open FM 359 RD, Fulshear → **Concept A**, signed in, on planyr.io.
-2. Select **Building 1**, open Properties, click into **Depth (ft)**, press **Enter**, then press
-   **Backspace**. Expected: the building is still there, and a note reads *"The keyboard is still on
-   the panel. Click the plan, then press Delete."*
-3. Repeat with **Escape**, with **Tab**, and after clicking the **▲** stepper.
-4. Click the drawing, press **Delete** — the building MUST still delete (the control; a guard that
-   breaks deleting is worse than the bug).
-5. Undo it with **Ctrl+Z** and confirm the truck courts, both bump-outs, the dock face, both parking
-   rows and both sidewalks are all back — then **reload** and confirm they are still back, which is
-   the leg that proves the restore reached the server rather than only the tab.
+**WHAT YOU NEED:** planyr.io, signed in · the project **FM 359 RD, Fulshear, TX 77441** · plan
+**"Concept A"** · **Building 1** is the large cross-dock building, **1675 × 613**, with two small
+bump-outs on opposite corners (id `e1454615maruai`). "Properties" = the right-hand ELEMENT · BUILDING
+inspector; **Depth (ft)** is the field under FOOTPRINT, directly below **Length (ft)**.
+
+#### ARM 1 — NON-DESTRUCTIVE. Safe on the real plan; changes nothing you cannot undo in place.
+
+Every step here either types into a field or presses a key that must be REFUSED. Nothing is deleted.
+Read the **screen** for each ✅ unless a step says otherwise.
+
+| # | Do this | Read this ON SCREEN |
+|---|---|---|
+| 1 | Click Building 1 once, then open **Properties** from the right rail. | The FOOTPRINT group shows **Length (ft) 1675** and **Depth (ft) 613**. |
+| 2 | Click into **Depth (ft)**. | The box takes a **1 px orange-red border** (the brand accent). This is ORDINARY FOCUS and must NOT look like an error — no message, no icon. |
+| 3 | Select all and type **`-5`**. Do not press Enter. | A **2 px red border**, a **⚠**, and one line: **"Smallest allowed is 1"**. Compare with step 2 — the error must be obviously heavier, not just a different shade. |
+| 4 | Select all and type **`613`**. | The message and ⚠ **disappear**; the border returns to the 1 px accent. |
+| 5 | **THE CLAMP — the most valuable check here.** Select all, type **`200000`**, press **Enter**. | The field shows **100000** and a line reads **"✎ Using 100000"**. ⛔ Before this work the app silently stored 100,000 and said nothing. If the note is missing, that is the defect back. |
+| 6 | Select all, type **`613.7`**, press **Enter**. | The field shows **613.7** and a line reads **"✎ Showing 614"** — the model keeps 613.7 exactly; only the display rounds. |
+| 7 | Still in the box, press **Enter**. | Focus **stays in the field** (the caret is still there, the value selected). It must NOT jump out to the page. |
+| 8 | Now press **Backspace** — the reported gesture. | **The building is still there.** A note reads *"The keyboard is still on the panel. Click the plan, then press Delete."* |
+| 9 | Press **Delete**. Then **Escape**, then **Backspace**. Then **Tab**, then **Backspace**. Then click the **▲** stepper, then **Backspace**. | The building survives **every** one of them. These are four of the seven measured ways it used to die. |
+| 10 | Set **Depth** back to **613** and press **Enter**. Click the drawing once to leave the field. | The plan is exactly as you found it. |
+| 11 | Switch the app to the other theme (Settings → Interface) and repeat steps 2–4. | Same story in dark: focus = accent, error = heavier + red + ⚠ + message. |
+
+If any of 3, 5, 6 or 8 fails, **stop and report** — those are the four findings this work is made of.
+
+#### ARM 2 — DESTRUCTIVE. ⛔ RUN THIS ON A **DUPLICATE** OF THE PLAN, **NEVER** ON THE ORIGINAL.
+
+**Why the warning is written down rather than assumed.** This arm deliberately deletes Building 1,
+which takes **eight bonded elements** with it (two truck courts, two bump-outs, two sidewalks, two
+side-parking rows — 18 elements down to 9), and then relies on undo to bring them back. Undo is
+proven whole on the fixture — **and proven-on-a-fixture is not proven on his production document.
+The entire reason to run this signed in is that we do not yet know the two behave identically.** A
+verification step that can destroy the thing it is verifying does not get to assume its own result.
+
+**FIRST:** open the plan menu and **duplicate "Concept A"** (e.g. "Concept A (copy)"). Confirm the
+title bar shows the COPY. Everything below happens on the copy. If anything goes wrong, delete the
+copy — the original is untouched.
+
+| # | Do this | Read this |
+|---|---|---|
+| 1 | On the copy, click Building 1 on the **drawing** (not the panel), then press **Delete**. | **ON SCREEN:** the building AND its truck courts, bump-outs, sidewalks and parking all disappear together. This is the control — a guard that broke deleting would be worse than the bug. |
+| 2 | Press **Ctrl+Z** **once**. | **ON SCREEN:** every one of them is back in the same place — both truck courts, both bump-outs on their original corners, both parking rows, both sidewalks, the dock face on the same side. ⛔ **One press must be enough.** If a second Ctrl+Z is needed to complete it, that is a NEW defect — file it, because a user who sees the building reappear will assume they are whole. |
+| 3 | Open Properties on the restored building. | **ON SCREEN:** Length **1675**, Depth **613**, and the Loading group still reads cross-dock on the same face. |
+| 4 | **Reload the page** (this is the leg the sandbox cannot do — it proves the restore reached the SERVER, not just the tab). | **OUT OF STORAGE:** after the reload the building and all eight bonded elements are still present. If anything is missing only after the reload, the undo did not reach `site_elements` — that is a data-loss defect and outranks everything else in this entry. |
+| 5 | Open the plan in a **second tab / another device**, signed in as the same user. | The same 18 elements. (Catches an undo that settled locally but never synced.) |
+| 6 | Delete the duplicate plan. | The original "Concept A" is untouched. |
+
+**Record the result here** (date · who · which arms · what you saw), and move the entry to
+`VERIFICATION-DONE.md` only when BOTH arms have passed.
+
 ### V266993 — B472049: a completed split no longer leaves the parent drawn `Blocker: real-data`
 
 **Proven here:** `test/splitIntegrity.test.js` (20) — conservation, union-outline equality and no
