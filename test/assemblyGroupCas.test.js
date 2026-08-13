@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { assemblyDigest, digestsByAssembly, memberToken } from "../src/workspaces/site-planner/lib/assemblyDigest.js";
+import { assemblyDigest, compareIds, digestsByAssembly, memberToken } from "../src/workspaces/site-planner/lib/assemblyDigest.js";
 import { groupCasEnabled, GROUP_CAS_KEY } from "../src/workspaces/site-planner/lib/groupCas.js";
 import { createElementSync } from "../src/workspaces/site-planner/lib/elementSync.js";
 import { commitElements } from "../src/workspaces/site-planner/lib/elementApi.js";
@@ -170,7 +170,63 @@ describe("PARITY — both implementations, one member set", () => {
     const named = conflictMembers.rows(rows, { p_site: SITE, v_asm: "e6327" });
     expect(named.map((r) => r.kind).every((k) => k === "el")).toBe(true);
     expect(named).toHaveLength(28);
-    expect(named.map((r) => `${r.id}:${r.rev}`).sort().join(",")).toBe(serverDigest(rows, "e6327"));
+    // ⛔ sorted by ID, not by the assembled token — the ordering NEW-1 found (see below).
+    expect(named.sort((a, b) => compareIds(a.id, b.id)).map((r) => `${r.id}:${r.rev}`).join(","))
+      .toBe(serverDigest(rows, "e6327"));
+  });
+
+  /* ⛔ NEW-1 — THE ORDERING DISAGREEMENT, which is a DIFFERENT defect from the kind collision above
+   * and produces the identical symptom. The client sorted the finished `id:rev` token; the server
+   * orders by the id. Those agree only while no member's id is a PREFIX of another's — because the
+   * token comparison puts the separator `:` (0x3A) against the longer id's next character, and
+   * every digit (0x30–0x39) and the hyphen (0x2D) sort below it.
+   *
+   * Found by driving an ordinary hour of editing through the real engine with the flag forced on
+   * (`ui-audit/session-group-cas.mjs`) — 500 refusals, 45 of them spurious, none converging — and
+   * confirmed against the production database, which answers `e6327:4,e63271:2` where the old
+   * client answered `e63271:2,e6327:4`. A digest mismatch on an assembly nothing is wrong with is a
+   * refusal no retry can clear: every save on that building lost, permanently.
+   *
+   * ⛔ THE FIXTURE HAS TO CONTAIN A PREFIX PAIR OR THE TEST IS VACUOUS. Katz's ids are prefix-free,
+   * which is why 28 real members and the whole parity suite above passed on the broken build. */
+  describe("⛔ NEW-1 — ORDERING, over ids that actually stress it", () => {
+    const prefixRows = [
+      row("el", "e6327", 4),
+      row("el", "e63271", 2, "e6327"),      // 'e6327' ⊂ 'e63271' — the shape the token sort inverts
+      row("el", "e6328", 1, "e6327"),
+    ];
+
+    it("a member whose id PREFIXES another's orders identically on both sides", () => {
+      expect(serverDigest(prefixRows, "e6327")).toBe("e6327:4,e63271:2,e6328:1");
+      expect(clientDigest(prefixRows, "e6327")).toBe(serverDigest(prefixRows, "e6327"));
+    });
+
+    it("the OLD client rule really did disagree — so this test could have failed", () => {
+      const oldWay = prefixRows.map((r) => `${r.id}:${r.rev}`).sort().join(",");
+      expect(oldWay).toBe("e63271:2,e6327:4,e6328:1");            // …and the server says otherwise
+      expect(oldWay).not.toBe(serverDigest(prefixRows, "e6327"));
+    });
+
+    it("hyphenated ids too — the app's own e2e fixture already holds such a pair", () => {
+      const rows = [row("el", "e2e-bldg-1", 3), row("el", "e2e-bldg-11", 5, "e2e-bldg-1")];
+      expect(clientDigest(rows, "e2e-bldg-1")).toBe(serverDigest(rows, "e2e-bldg-1"));
+      expect(serverDigest(rows, "e2e-bldg-1")).toBe("e2e-bldg-1:3,e2e-bldg-11:5");
+    });
+
+    it("compareIds is code-POINT order, matching UTF-8 byte order rather than UTF-16 units", () => {
+      // U+1D400 is a surrogate pair; UTF-16 unit order would put it BELOW U+E000, byte order above.
+      expect(compareIds("a\u{1D400}", "a")).toBe(1);
+      expect(compareIds("e6327", "e63271")).toBe(-1);
+      expect(compareIds("e6327", "e6327")).toBe(0);
+    });
+
+    it("⛔ the interpreter REFUSES a digest whose collation is not pinned", () => {
+      // The ordering is part of the digest string, so an unstated collation is an unmodellable
+      // dependency, not a detail — a linguistic collation may reorder on a Postgres upgrade.
+      const loosened = SQL.replace(/order by t\.id collate "C"/g, "order by t.id");
+      expect(() => sqlAssemblyDigest(loosened)).toThrow(/DATABASE DEFAULT collation/);
+      expect(sqlDigest.collation).toBe("C");
+    });
   });
 
   it("the interpreter really read the migration's own filters — including the kind predicate", () => {

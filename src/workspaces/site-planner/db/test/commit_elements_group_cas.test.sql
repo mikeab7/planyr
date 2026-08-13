@@ -169,6 +169,29 @@ begin
   then rep := rep || E'\n  ok 10. the conflict''s members list carries the same el-only set';
   else failed := failed + 1; rep := rep || format(E'\n  FAIL 10. members payload disagrees with the digest: %s', res); end if;
 
+  -- ---- 11. NEW-1 — THE ORDERING, over a PREFIX PAIR ----------------------
+  -- The client used to sort the assembled `id:rev` token; this orders by the id. Those agree only
+  -- while no member's id is a prefix of another's, because the token comparison puts `:` (0x3A)
+  -- against the longer id's next character and every digit and the hyphen sort below it. Same
+  -- members, same revs, different STRING — a groupConflict the retry re-earns forever. The fixture
+  -- MUST contain a prefix pair or this passes on the broken build (the owner's real data has none
+  -- inside an assembly, which is exactly why an hour on a realistic plan could not have found it).
+  insert into public.site_elements (site_id, id, kind, data, z_index, rev)
+  values (site, host || '1', 'el', jsonb_build_object('id', host || '1', 'type', 'parking', 'attachedTo', host), 5, 3);
+
+  t := public.assembly_digest(site, host);
+  -- The two orderings, computed here rather than hardcoded, so the check does not drift with the
+  -- revs the earlier steps happen to leave behind.
+  d0 := (select string_agg(id || ':' || rev, ',' order by id collate "C")            -- by the id
+           from public.site_elements
+          where site_id = site and assembly_id = host and kind = 'el' and deleted_at is null);
+  d1 := (select string_agg(x, ',' order by x collate "C") from (                      -- by the token
+           select id || ':' || rev as x from public.site_elements
+            where site_id = site and assembly_id = host and kind = 'el' and deleted_at is null) y);
+  if t = d0 and d0 <> d1 and t like '%gcas-host:%' and t like '%gcas-host1:%'
+  then rep := rep || format(E'\n  ok 11. a PREFIX PAIR orders by the id (%L) — demonstrably NOT the token order (%L)', d0, d1);
+  else failed := failed + 1; rep := rep || format(E'\n  FAIL 11. digest %L / by-id %L / by-token %L', t, d0, d1); end if;
+
   -- ---- report + ROLL EVERYTHING BACK --------------------------------------
   -- ⚠ RAISE's placeholder is a bare `%`, never `%s` — a `%s` prints the value then a literal 's'.
   raise exception E'\n=== B1341 stage 2 — group CAS ===%\n\n% (fixtures rolled back, nothing written)',

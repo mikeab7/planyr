@@ -7805,7 +7805,25 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // name (async, cached roster), labels the element, applies any canvas side-effect, and pushes.
   syncEventRef.current = (ev) => {
     const kind = ev && ev.kind, id = ev && ev.id;
-    if (!kind || !id) return;
+    /* ⛔ NEW-1 — A PLAN-WIDE EVENT HAS NO ELEMENT, AND THIS GUARD WAS EATING THE ONE WARNING THAT
+     * MATTERS. Every row of the B673 matrix is about a single element, so this handler opened by
+     * requiring `kind` and `id` — and `client-stale` carries NEITHER (`elementSync.js` emits it as
+     * `{ type, streak, pending }`). So the toast that says "your recent changes here can't be saved"
+     * was built, mapped and unit-tested, and then dropped on the floor before it could be pushed.
+     * The engine has STOPPED committing at that point and will not resume without a reload, so the
+     * screen said nothing at the exact moment the user needed to be told something.
+     *
+     * This is not a group-CAS bug — the same silence is live today on the NEW-3 rejected-op streak.
+     * It was found by asking whether a refusal is genuinely VISIBLE rather than reading the mapping
+     * and assuming, which is the whole lesson: a mechanism that looks right and never fires. The
+     * companion half — a `stale` engine still painting a green "synced" badge — is fixed at the
+     * save-badge switch below. Guarded by `test/staleVisible.test.js` and the e2e spec
+     * `stale-tab-is-loud`. */
+    if (!kind || !id) {
+      const wide = toastForSyncEvent(ev, { name: "", label: "", self: true });
+      if (wide) pushToast({ text: wide.text, action: null });
+      return;
+    }
     const field = KIND_TO_FIELD[kind];
     const localEl = ((stateRef.current && stateRef.current[field]) || []).find((x) => x && x.id === id);
     const elForLabel = localEl || ev.local || (ev.remote && ev.remote.data) || null;
@@ -17728,6 +17746,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (cloudActive && readOnly) return "readonly";
     // B671 — the per-element write engine feeds the SAME badge: a dropped element commit is
     // crash-severity (LOUD-FAILURE) → "error"; in-flight / retrying element commits → "saving".
+    /* ⛔ NEW-1 — `stale` IS THE LOUDEST STATE THERE IS, and it used to fall through to green.
+     * `failed` means a commit did not land and the engine is still trying; `stale` means it has
+     * GIVEN UP — no further commit is issued until `retryNow()` or a reload. That is strictly worse,
+     * and it was not in this switch at all, so the badge landed on the resting `"synced"` case and
+     * told the user their work was in the cloud while nothing was being written. Ahead of `failed`
+     * because it subsumes it. */
+    if (cloudActive && elemSync.state === "stale") return "error";
     if (cloudActive && elemSync.state === "failed") return "error";
     if (saveStatus === "saving" || (cloudActive && (elemSync.state === "syncing" || elemSync.state === "retrying"))) return "saving";
     if (cloudSaveFailed) return "error";
@@ -19824,7 +19849,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         // Conflict needs a reload, not a blind retry — so only offer "Retry now" for a plain
         // failed write; the conflict case gets its own explanation (the loud banner handles reload).
         onRetrySave={() => { retryCloudSave(); retryElems(); }}
-        saveDetail={elemSync.state === "failed" ? "Some changes haven't reached the cloud — Retry" : elemSync.pending > 0 && (elemSync.state === "syncing" || elemSync.state === "retrying") ? `Syncing ${elemSync.pending} change${elemSync.pending === 1 ? "" : "s"}…` : undefined}
+        saveDetail={elemSync.state === "stale" ? "This tab is out of date — reload to keep saving" :
+          elemSync.state === "failed" ? "Some changes haven't reached the cloud — Retry" : elemSync.pending > 0 && (elemSync.state === "syncing" || elemSync.state === "retrying") ? `Syncing ${elemSync.pending} change${elemSync.pending === 1 ? "" : "s"}…` : undefined}
         centerContent={<JurisdictionBadge badge={jurBadge} />}
         planSlot={plannerPlanCrumb}
         authControl={authControl}

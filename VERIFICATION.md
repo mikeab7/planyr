@@ -113,6 +113,39 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V273520 — B484337: does a tab that has STOPPED saving actually say so? `Blocker: auth`
+
+**What was found, so the check is aimed at the right thing.** The owner asked for proof, on the
+running app rather than from the code, that a refused save is genuinely visible — "this repo's
+signature defect is a mechanism that looks right and never fires, and a safety check whose warning
+never reaches the screen is precisely that shape." It never fired. Two independent swallows, both
+now fixed: the sync-event handler dropped any event without a `kind`/`id`, and `client-stale` has
+neither; and the save badge never named the `stale` state, so a tab that had given up committing
+painted a green **"synced"**.
+
+**Proven here, and NOT what this entry waits on.** The engine really reaches `stale` and the event
+it emits really carries no element (`test/staleVisible.test.js`, driven through the real engine);
+the matrix really turns it into the reload warning; both source repairs are mutation-proven red
+when reverted. What cannot be done here is the only thing that matters to him — seeing it.
+
+**Why it is blocked.** The `stale` state exists only on a signed-in cloud session, and this
+sandbox's egress proxy answers `403 to CONNECT` for the Supabase host (measured, not assumed), so no
+browser in this environment can sign in and the write engine never starts.
+
+**The signed-in steps, for whoever has a browser:**
+1. Sign in, open a plan with a bonded building, and open the SAME plan in a second tab.
+2. In tab B, drag the building repeatedly. In tab A, drag the same building at the same time.
+3. Keep going until tab A's engine gives up (several consecutive fully-rejected batches).
+4. **PASS** requires BOTH: a toast reading *"This tab is out of date — your recent changes here
+   can't be saved. Reload the page to catch up."*, and the save badge turning to its **error**
+   state with the detail *"This tab is out of date — reload to keep saving"*.
+   **FAIL** is a green "synced" badge, or silence, while edits stop reaching the cloud.
+5. Reload tab A and confirm saving resumes.
+
+**One correction to carry into the check.** A single group refusal is deliberately SILENT — it
+converges on its own and `assembly-split` maps to no toast at all. Only the persistent case shows
+the banner. That is the intended design, not a miss; a toast per transient conflict would be noise.
+
 ### V258992 — B464048: a keystroke typed in an inspector field can no longer delete the plan — the SIGNED-IN leg `Blocker: auth`
 
 **Everything logged-out is proven here, on his own plan, and is NOT what this entry is waiting for.**
