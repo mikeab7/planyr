@@ -32,6 +32,7 @@
     "perf:midzoom": "xvfb-run -a --server-args=\"-screen 0 1600x1000x24\" node ui-audit/verify-midgesture-zoom.mjs --selftest",
     "perf:zoomab": "xvfb-run -a --server-args=\"-screen 0 1600x1000x24\" node ui-audit/zoom-smoothness-ab.mjs",
     "perf:fontblock": "xvfb-run -a --server-args=\"-screen 0 1600x1000x24\" node ui-audit/verify-font-blocking.mjs",
+    "verify:schedpreds": "xvfb-run -a --server-args=\"-screen 0 1600x1000x24\" node ui-audit/verify-summary-pred-dates.mjs",
     "verify:floodtiles": "xvfb-run -a --server-args=\"-screen 0 1600x1000x24\" node ui-audit/verify-flood-tiles.mjs",
     "verify:jurbadge": "xvfb-run -a --server-args=\"-screen 0 1600x1000x24\" node ui-audit/verify-jurisdiction-badge-shapes.mjs",
     "build:floodtiles": "node scripts/build-flood-tiles.mjs",

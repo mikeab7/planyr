@@ -113,6 +113,68 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V238192 — B443248: "Mobilize" on his own Grand Port opens at 10/05/26, and the correction arrives NAMED `Blocker: real-data` `Blocker: auth`
+
+**Proven here already, in a real browser, on his exact row shape.** `ui-audit/verify-summary-pred-dates.mjs`
+(`npm run verify:schedpreds`) seeds the seven Grand Port rows that matter — 106 "ETJ Permit" (dateless,
+one blank child), 108 "CCID3 Approval" (a summary carrying `duration: 40` / `durValue: 0` with three
+children running to 2026-10-02), and 228 "Mobilize" (0d, FS after both) with the WRONG stored dates
+08/10/26 still in place — renders the real Sequence app, and reads the Start cell off the screen:
+**10/05/26**. **Mutation-proven: revert the `parentIds.has(t.id)` skip in `cascadeDates` and the same cell
+reads 08/10/26** — his screen, reproduced exactly. Engine half: `test/schedulerEngine.test.js` (fixed
+point · three-hop transitive propagation · leaf spans still derived from `durValue` · `detectCascadeDrift`
+naming the correction), also mutation-proven. Full suite 10,987 green.
+
+**Also measured against his LIVE saved document** (read directly from `planar_data`): running the fixed
+engine over all 243 Grand Port rows moves **exactly one — Mobilize, 2026-08-10 → 2026-10-05** — and
+nothing else shifts. Across all six of his projects, **9 predecessor links point at a summary row**
+(Goose Creek 4, 8 South 3, Grand Port 2).
+
+**What still needs his own signed-in session.** The sandbox cannot reach Supabase, so the harness
+necessarily exercises the SEED load path. The B836 drift banner — the thing that tells him which dates
+were corrected — fires on the CLOUD load path (`recascadeWithDrift`), which only runs signed in.
+
+**Steps:**
+1. Open the **Schedule** tab, project **Grand Port**. A banner should appear at the top naming
+   **Mobilize** as a row whose saved start didn't match its predecessors and was recalculated.
+2. Find **Mobilize** in the Construction group. Start and Finish must both read **10/05/26** — the
+   Monday after CCID3's 10/02/26 finish. It must NOT read 08/10/26.
+3. The red "Needs Attn." dot on that row should be **gone** (it was only ever "this finished in the
+   past"; the date is now in the future).
+4. Check **Goose Creek** and **8 South** the same way — they have 4 and 3 links pointing at summary
+   rows, so some of their dates will move too. Anything that moves should be named in the banner.
+5. ⚠ Worth his eye: Mobilize now sits AFTER "Begin Drafting Contract" (08/25/26), which is the sane
+   order he expected. Confirm the new dates read like a schedule someone would actually build.
+
+### V238193 — B443249: the ETJ Permit predecessor is visibly marked as driving nothing `Blocker: real-data` `Blocker: auth`
+
+**Proven here already.** The same browser harness asserts the Predecessor cell renders TWO entries that
+look DIFFERENT: the dateless ETJ Permit one carries a ⚠ and has real box area on screen, the satisfied
+CCID3 one does not. Engine half unit-tested for a dateless predecessor, a missing id, and a fully
+satisfied row (mutation-proven).
+
+**Steps:**
+1. On **Mobilize**, hover the Predecessor cell. It should say plainly that the ETJ Permit row has no
+   dates and that the date shown comes from the remaining predecessor only.
+2. Give **ETJ Permit** (or its child "Submit Permit") a real start and duration. The ⚠ should clear and
+   Mobilize should move if ETJ now finishes later than CCID3.
+3. Scan his three schedules for any other ⚠ in a Predecessor cell — each one is a link he thinks is
+   driving a date and which is not.
+
+### V238194 — B443250: a pinned start that beats its predecessors now says so `Blocker: real-data` `Blocker: auth`
+
+**Proven here already.** Unit-tested three ways (pin before the chain → flagged AND the pin holds · pin
+at/after → not flagged · unpinned → never flagged), mutation-proven.
+
+**Steps:**
+1. Pick a row with a predecessor and type a Start date EARLIER than the predecessor finishes. The
+   padlock appears (as before) and the date should now also turn **red with a ⚠**.
+2. Hover it: it should say the pin is winning and the dependency is being overridden, and how to hand
+   control back.
+3. Click the padlock to unpin. The red should clear and the date should jump to what the predecessor
+   implies.
+4. ⚠ Worth his eye: this may light up rows he pinned deliberately long ago. That is the point — but if
+   it turns out to be noisy across his real schedules, say so and it can be softened.
 ### V242416 — B447472: the corrected `assembly_digest()` against the REAL database, on the assembly that carries the kind collision `Blocker: auth` + `real-data`
 
 **Why this cannot be closed in the sandbox.** The client half is proven here — `test/assemblyGroupCas.test.js`

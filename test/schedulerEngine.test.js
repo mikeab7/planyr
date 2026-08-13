@@ -523,7 +523,9 @@ describe("anti-drift: the schedule-input fixes still exist in the real source", 
     expect(src).toMatch(/if \(parsed\.value !== taskDurValue\(t\) \|\| parsed\.unit !== taskDurUnit\(t\)\) updateTask\(t\.id, \{durValue: parsed\.value, durUnit: parsed\.unit\}, t\.projId\)/);
   });
   it("indent/outdent/paste recompute roll-ups after a structural move", () => {
-    expect(src).toMatch(/const recomputeAfterStructureChange = tasks => rollupParentDates\(cascadeDates\(tasks\)\);/);
+    // B443248 re-pointed this at recomputeSchedule (cascade→rollup iterated to a fixed point); the
+    // structural-move call sites below are unchanged.
+    expect(src).toMatch(/const recomputeAfterStructureChange = tasks => recomputeSchedule\(tasks\);/);
     // every structural-move handler routes through it (5 call sites)
     expect((src.match(/renumberTasks\(recomputeAfterStructureChange\(/g) || []).length).toBeGreaterThanOrEqual(4);
     expect(src).toMatch(/recomputeAfterStructureChange\(sortByVisualOrder\(final\)\)/);
@@ -2081,5 +2083,134 @@ describe("B864(b) — keyed-array (tasks/bodies) merge honors adds, deletes, and
     const m = E.mergeCloudDoc(base, ours, theirs);
     expect(m.projects.a.tasks).toHaveLength(1);   // our task in project a
     expect(m.projects.b).toBeTruthy();            // their new project b
+  });
+});
+
+// ── B443248 / B443249 / B443250 — the owner-reported "Mobilize" defect ────────────────────────
+// Grand Port task 228 "Mobilize" (0d, FS after 106 and 108) sat on 2026-08-10 — which read like the
+// clock, because it was roughly the day the link was made. It was not the clock. It was the next
+// WORKING DAY after predecessor 108's START, because cascadeDates resolved 108 (a SUMMARY row whose
+// three children run to 2026-10-02) as if it were a leaf: a parent carries `duration` from the rollup
+// but leaves `durValue` at 0, so resolveTaskSpan collapsed a 40-working-day parent to a 0-day milestone
+// on its own start. rollupParentDates restored the parent's finish immediately afterwards — which is
+// exactly why the wrong successor date was a STABLE fixed point that re-running the recompute could not
+// correct, and that detectCascadeDrift (stored vs engine) could never see.
+const GP = () => ([
+  // 108 — the summary. duration 40 from a prior rollup, durValue 0 (a parent never carries one).
+  { id: 108, name: "CCID3 Approval", start: "2026-08-07", end: "2026-10-02", duration: 40, durValue: 0, durUnit: "d", predecessors: [], parentId: null },
+  { id: 109, name: "Revise routing", start: "2026-08-07", end: "2026-08-13", duration: 5, durValue: 5, durUnit: "d", predecessors: [], parentId: 108 },
+  { id: 110, name: "CWA Approval",   start: "2026-08-14", end: "2026-08-20", duration: 5, durValue: 5, durUnit: "d", predecessors: [{id:109,type:"FS",lag:0}], parentId: 108 },
+  { id: 111, name: "LONO Approvals", start: "2026-08-21", end: "2026-10-02", duration: 30, durValue: 30, durUnit: "d", predecessors: [{id:110,type:"FS",lag:0}], parentId: 108 },
+  // 106 — an UNSCHEDULED predecessor: a summary with one blank child. Contributes no date at all.
+  { id: 106, name: "ETJ Permit",   start: "", end: "", duration: 0, durValue: 0, durUnit: "d", predecessors: [], parentId: null },
+  { id: 107, name: "Submit Permit", start: "", end: "", duration: 0, durValue: 0, durUnit: "d", predecessors: [], parentId: 106 },
+  // 228 — the reported row.
+  { id: 228, name: "Mobilize", start: "2026-08-10", end: "2026-08-10", duration: 0, durValue: 0, durUnit: "d",
+    predecessors: [{id:106,type:"FS",lag:0},{id:108,type:"FS",lag:0}], parentId: null },
+]);
+const byId = arr => Object.fromEntries(arr.map(t => [t.id, t]));
+
+describe("B443248 — a successor of a SUMMARY row schedules off the summary's real FINISH", () => {
+  it("Mobilize starts the next working day after its summary predecessor's FINISH, not its START", () => {
+    const out = byId(E.recomputeSchedule(GP()));
+    expect(out[108].end).toBe("2026-10-02");            // the parent keeps its rolled-up finish
+    expect(out[228].start).toBe("2026-10-05");          // Monday after Fri 2026-10-02 — NOT 2026-08-10
+    expect(out[228].end).toBe("2026-10-05");            // 0d milestone: finish = start
+  });
+  it("the summary row's own dates come from its children, never from durValue", () => {
+    const out = byId(E.recomputeSchedule(GP()));
+    expect([out[108].start, out[108].end]).toEqual(["2026-08-07", "2026-10-02"]);
+  });
+  it("the recompute is a FIXED POINT — running it again moves nothing", () => {
+    const once = E.recomputeSchedule(GP());
+    const twice = E.recomputeSchedule(once);
+    expect(twice.map(t => [t.id, t.start, t.end])).toEqual(once.map(t => [t.id, t.start, t.end]));
+  });
+  it("a change PROPAGATES transitively: a child moves → the summary moves → the successor and ITS successor move", () => {
+    const tasks = GP().concat([
+      { id: 229, name: "Pour slab", start: "", end: "", duration: 5, durValue: 5, durUnit: "d", predecessors: [{id:228,type:"FS",lag:0}], parentId: null },
+      { id: 230, name: "Steel",     start: "", end: "", duration: 5, durValue: 5, durUnit: "d", predecessors: [{id:229,type:"FS",lag:0}], parentId: null },
+    ]);
+    const before = byId(E.recomputeSchedule(tasks));
+    expect(before[228].start).toBe("2026-10-05");
+    expect(before[230].start).toBe("2026-10-13");
+    // Push the LAST child of the summary out by two working weeks.
+    const moved = tasks.map(t => t.id === 111 ? { ...t, durValue: 40, duration: 40 } : t);
+    const after = byId(E.recomputeSchedule(moved));
+    expect(after[108].end).toBe("2026-10-16");
+    expect(after[228].start).toBe("2026-10-19");        // one hop
+    expect(after[229].start).toBe("2026-10-20");        // two hops
+    expect(after[230].start).toBe("2026-10-27");        // three hops — transitive, in ONE call
+  });
+  it("detectCascadeDrift NAMES the correction, so an existing saved schedule self-corrects visibly on load", () => {
+    const stored = GP();
+    const drift = E.detectCascadeDrift(stored, E.recomputeSchedule(stored));
+    expect(drift.map(d => [d.id, d.from, d.to])).toEqual([[228, "2026-08-10", "2026-10-05"]]);
+  });
+  it("a leaf task's own span is still derived from durValue/durUnit (the parent skip is not a blanket skip)", () => {
+    const out = byId(E.recomputeSchedule(GP()));
+    expect(out[109].end).toBe("2026-08-13");            // 5 working days from 2026-08-07 inclusive
+    expect(out[110].start).toBe("2026-08-14");
+  });
+});
+
+describe("B443249 — a predecessor that drives NOTHING is named, never silently dropped", () => {
+  it("an UNSCHEDULED (dateless) predecessor is recorded on the successor", () => {
+    const out = byId(E.recomputeSchedule(GP()));
+    expect(out[228].predUnresolved).toEqual([106]);     // 106 has no dates; 108 does and is absent
+  });
+  it("a MISSING predecessor id (no such row) is recorded too", () => {
+    const tasks = GP().concat([
+      { id: 300, name: "Orphan link", start: "2026-09-01", end: "2026-09-01", duration: 0, durValue: 0, durUnit: "d",
+        predecessors: [{id:9999,type:"FS",lag:0}], parentId: null },
+    ]);
+    expect(byId(E.recomputeSchedule(tasks))[300].predUnresolved).toEqual([9999]);
+  });
+  it("a fully satisfied row records nothing", () => {
+    const out = byId(E.recomputeSchedule(GP()));
+    expect(out[110].predUnresolved).toEqual([]);
+  });
+});
+
+describe("B443250 — a pinned start still WINS, but a pin that beats the chain says so", () => {
+  it("a pinned start earlier than the predecessors allow flags startConflict and keeps the pin", () => {
+    const tasks = GP().map(t => t.id === 228 ? { ...t, pinnedStart: true } : t);
+    const out = byId(E.recomputeSchedule(tasks));
+    expect(out[228].start).toBe("2026-08-10");          // the pin wins — unchanged contract
+    expect(out[228].startConflict).toBe(true);          // …and it is no longer silent
+  });
+  it("a pinned start at or after the chain's earliest is NOT a conflict", () => {
+    const tasks = GP().map(t => t.id === 228 ? { ...t, pinnedStart: true, start: "2026-11-02", end: "2026-11-02" } : t);
+    expect(byId(E.recomputeSchedule(tasks))[228].startConflict).toBe(false);
+  });
+  it("an unpinned row never carries a start conflict", () => {
+    expect(byId(E.recomputeSchedule(GP()))[228].startConflict).toBe(false);
+  });
+});
+
+describe("anti-drift: B443248/B443249/B443250 exist VERBATIM in src + mirror", () => {
+  const src = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
+  const mjs = readFileSync(fileURLToPath(new URL("../ui-audit/stress/scheduler-engine.mjs", import.meta.url)), "utf8");
+  it("cascadeDates skips date derivation for a summary row in both", () => {
+    for (const s of [src, mjs]) expect(s).toMatch(/if \(parentIds\.has\(t\.id\)\) \{ t\.finishConflict = false; t\.startConflict = false; return; \}/);
+  });
+  it("predUnresolved is computed in both", () => {
+    for (const s of [src, mjs]) expect(s).toMatch(/\.filter\(p => !map\[p\.id\] \|\| !\(map\[p\.id\]\.end \|\| map\[p\.id\]\.start\)\)/);
+  });
+  it("the pinned-start conflict flag is set in both", () => {
+    for (const s of [src, mjs]) expect(s).toMatch(/if \(t\.pinnedStart && t\.start && predEarly && predEarly > t\.start\) t\.startConflict = true;/);
+  });
+  it("recomputeSchedule iterates to a fixed point in both", () => {
+    for (const s of [src, mjs]) expect(s).toMatch(/const next = rollupParentDates\(cascadeDates\(out, bodies\)\);/);
+  });
+  it("no cascade+rollup pair is hand-written outside recomputeSchedule in index.html", () => {
+    // Every call site goes through the one recompute; a hand-paired call is the shape that let the
+    // parent's restored finish arrive one pass too late for its successors.
+    const pairs = src.match(/rollupParentDates\(cascadeDates\(/g) || [];
+    expect(pairs.length).toBe(1);                        // the single occurrence inside recomputeSchedule
+  });
+  it("the grid marks a flagged predecessor entry and the pinned-start conflict", () => {
+    expect(src).toMatch(/flagged=\{p => un\.has\(p\.id\)\}/);
+    expect(src).toMatch(/isStart \? !!task\.startConflict : !!task\.finishConflict/);
   });
 });
