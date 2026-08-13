@@ -20,6 +20,7 @@
  * calm. Both were caught happening while this file was being written.
  *
  * Run:  node ui-audit/verify-grid-row-hold.mjs      [PW_CHROME=<chrome>]
+ *       PLANYR_URL=https://planyr.io/sequence/ node ui-audit/verify-grid-row-hold.mjs   (the deployed bytes)
  * Exit 0 = every anchor held. Exit 1 = a real jump, a vacuous step, or a wandering selection.
  */
 import { chromium } from "playwright";
