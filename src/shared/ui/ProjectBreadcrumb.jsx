@@ -33,6 +33,7 @@
  * its own store over the bridge; uncontrolled (Site Planner / Markup) falls back to the site store.
  */
 import { useEffect, useRef, useState } from "react";
+import { RADIUS } from "./radius.js";
 import { createPortal } from "react-dom";
 import AnchoredMenu from "./AnchoredMenu.jsx";
 import ContextMenu from "./ContextMenu.jsx";
@@ -142,21 +143,21 @@ const CalendarIcon = ({ size = 12 }) => (
 
 const crumbBtn = (extra) => ({
   display: "flex", alignItems: "center", gap: 5, flex: "none",
-  height: 24, padding: "0 8px", borderRadius: 6,
+  height: 24, padding: "0 8px", borderRadius: RADIUS.sm,
   border: "none", background: "transparent", cursor: "pointer",
   fontFamily: "inherit", fontSize: 12.5, fontWeight: 600, whiteSpace: "nowrap",
   ...extra,
 });
 
 const panel = {
-  padding: 8, borderRadius: 10, background: "var(--surface-raised)", color: "var(--text-primary)",
+  padding: 8, borderRadius: RADIUS.md, background: "var(--surface-raised)", color: "var(--text-primary)",
   border: "1px solid var(--border-default)", boxShadow: "0 14px 34px rgba(0,0,0,0.28)",
   fontFamily: "system-ui, sans-serif",
 };
 
 const row = (extra) => ({
   display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10,
-  width: "100%", textAlign: "left", padding: "7px 9px", borderRadius: 7,
+  width: "100%", textAlign: "left", padding: "7px 9px", borderRadius: RADIUS.sm,
   border: "none", background: "transparent", cursor: "pointer",
   fontFamily: "inherit", fontSize: 12.5, color: "var(--text-primary)", ...extra,
 });
@@ -167,11 +168,11 @@ const divider = { height: 1, background: "var(--border-default)", margin: "6px 4
 // dropdown's click-away backdrop so a click inside it never closes the parent dropdown.
 const menuItem = (extra) => ({
   display: "flex", alignItems: "center", gap: 8, width: "100%", textAlign: "left",
-  padding: "7px 9px", borderRadius: 6, border: "none", background: "transparent",
+  padding: "7px 9px", borderRadius: RADIUS.sm, border: "none", background: "transparent",
   cursor: "pointer", fontFamily: "inherit", fontSize: 12.5, color: "var(--text-primary)", ...extra,
 });
 const btnSm = {
-  cursor: "pointer", border: "none", borderRadius: 6, padding: "5px 11px",
+  cursor: "pointer", border: "none", borderRadius: RADIUS.sm, padding: "5px 11px",
   fontFamily: "inherit", fontSize: 12, fontWeight: 700,
 };
 
@@ -193,7 +194,7 @@ function RenameInput({ value, onChange, onCommit, onCancel, label, testId, style
       aria-label={label}
       data-testid={testId}
       style={{
-        display: "block", minWidth: 0, padding: "5px 7px", borderRadius: 6, outline: "none",
+        display: "block", minWidth: 0, padding: "5px 7px", borderRadius: RADIUS.sm, outline: "none",
         fontFamily: "inherit", fontSize: 12.5, color: "var(--text-primary)", background: "var(--surface-page)",
         ...style,
       }}
@@ -546,14 +547,14 @@ export default function ProjectBreadcrumb({
           placeholder="Search projects…"
           style={{
             width: "100%", boxSizing: "border-box", padding: "7px 9px", marginBottom: 6,
-            border: "1px solid var(--border-default)", borderRadius: 7, outline: "none",
+            border: "1px solid var(--border-default)", borderRadius: RADIUS.sm, outline: "none",
             fontFamily: "inherit", fontSize: 12.5, color: "var(--text-primary)", background: "var(--surface-page)",
           }}
         />
 
         {atRisk(saveState) && (
           <div style={{ display: "flex", gap: 7, alignItems: "flex-start", padding: "7px 9px", marginBottom: 4,
-            borderRadius: 7, background: "var(--surface-page)", border: "1px solid var(--warn-text)", color: "var(--warn-text)", fontSize: 11.5, lineHeight: 1.4 }}>
+            borderRadius: RADIUS.sm, background: "var(--surface-page)", border: "1px solid var(--warn-text)", color: "var(--warn-text)", fontSize: 11.5, lineHeight: 1.4 }}>
             {/* B525: token-themed warn row (was a hardcoded light-amber box that became a light slab in dark mode)
                 NEW-3 — and the marker is a drawn triangle now, not a `⚠` text glyph. Same reason as the
                 menu icons: most platforms resolve U+26A0 to a COLOUR emoji, which then ignores the
@@ -662,7 +663,7 @@ export default function ProjectBreadcrumb({
                             style={{
                               flex: "none", cursor: "pointer", border: "none", background: "transparent",
                               color: active ? "var(--text-secondary)" : "var(--text-tertiary)",
-                              borderRadius: 5, padding: "2px 3px", lineHeight: 0, fontFamily: "inherit",
+                              borderRadius: RADIUS.sm, padding: "2px 3px", lineHeight: 0, fontFamily: "inherit",
                               display: "grid", placeItems: "center",
                             }}
                           ><KebabIcon /></button>
@@ -852,14 +853,14 @@ export default function ProjectBreadcrumb({
         <div role="status" style={{
           position: "fixed", top: 84, left: "50%", transform: "translateX(-50%)", zIndex: 9000,
           maxWidth: 520, display: "flex", alignItems: "center", gap: 10,
-          background: "#1f2a44", color: "#eaf0ff", border: "1px solid #3b5bbf", borderRadius: 10,
+          background: "#1f2a44", color: "#eaf0ff", border: "1px solid #3b5bbf", borderRadius: RADIUS.md,
           padding: "9px 13px", fontSize: 12.5, fontWeight: 600, fontFamily: "system-ui, sans-serif",
           boxShadow: "0 10px 30px rgba(0,0,0,0.32)",
         }}>
           <span style={{ flex: 1 }}>{toast}</span>
           <button onClick={() => setToast(null)} title="Dismiss" style={{
             flex: "none", cursor: "pointer", background: "rgba(255,255,255,0.16)", color: "#fff",
-            border: "none", borderRadius: 6, padding: "2px 8px", fontFamily: "inherit", fontSize: 12, fontWeight: 700,
+            border: "none", borderRadius: RADIUS.sm, padding: "2px 8px", fontFamily: "inherit", fontSize: 12, fontWeight: 700,
           }}>✕</button>
         </div>,
         document.body,

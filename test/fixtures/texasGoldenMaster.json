@@ -1953,15 +1953,15 @@
     },
     "baytown": {
       "label": "City of Baytown",
-      "trigger": null,
+      "trigger": "1pct_plus_02pct",
       "ratio": null,
       "floodwayPolicy": null,
       "offsetScope": null,
       "offsetElevBasis": null,
       "floodwayBufferFt": null,
-      "verified": false,
-      "source": "City of Baytown flood damage prevention ordinance — NOT TRANSCRIBED. Both publication routes (library.municode.com, baytown.org) are refused by this environment's egress proxy; measured 2026-08-12.",
-      "sourceDate": null
+      "verified": true,
+      "source": "City of Baytown, TX, Code of Ordinances, Subpart B — Land Development Code, Ch. 110 (FLOODS), Art. II (Flood Damage Prevention), Sec. 110-31 (applicability) + Sec. 110-26 (definitions). Version JUL 2 2026, codified through Ord. No. 16,449 enacted 2026-04-23. Owner-read via Municode 2026-08-13.",
+      "sourceDate": "2026-07-02"
     },
     "chambers": {
       "label": "Chambers County",
@@ -2071,8 +2071,22 @@
       },
       "baytown": {
         "label": "City of Baytown",
-        "verified": false,
-        "ffeRule": null
+        "verified": true,
+        "ffeRule": {
+          "kind": "bases",
+          "bases": [
+            {
+              "basis": "wse02pct",
+              "plusFt": 0,
+              "when": null
+            },
+            {
+              "basis": "wse1pct",
+              "plusFt": 2,
+              "when": null
+            }
+          ]
+        }
       },
       "waller": {
         "label": "Waller County (unincorporated)",
@@ -2213,22 +2227,30 @@
         "unknownReason": "no FFE rule modeled for this jurisdiction — verify locally"
       },
       "baytown": {
-        "requiredFfeFt": null,
-        "basis": null,
-        "plusFt": null,
-        "governingBasis": null,
+        "requiredFfeFt": 142.8,
+        "basis": "wse02pct",
+        "plusFt": 0,
+        "governingBasis": {
+          "basis": "wse02pct",
+          "plusFt": 0
+        },
         "pendingBases": [],
-        "losingBases": [],
-        "unknownReason": "no FFE rule modeled for this jurisdiction — verify locally"
+        "losingBases": [
+          "wse1pct"
+        ],
+        "unknownReason": null
       },
       "baytown|noInputs": {
         "requiredFfeFt": null,
         "basis": null,
         "plusFt": null,
         "governingBasis": null,
-        "pendingBases": [],
+        "pendingBases": [
+          "wse02pct",
+          "wse1pct"
+        ],
         "losingBases": [],
-        "unknownReason": "no FFE rule modeled for this jurisdiction — verify locally"
+        "unknownReason": "no water-surface elevation available for any FFE basis — need one of: 0.2% (500-yr) water-surface elevation; 1% water-surface elevation (BFE)"
       },
       "waller": {
         "requiredFfeFt": 144.8,

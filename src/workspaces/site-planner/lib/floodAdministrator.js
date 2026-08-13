@@ -37,7 +37,35 @@ export function administratorCandidates({ authorityId = null, county = null, cit
     // A candidate with NO modeled rule still counts — "City of Katy touches the edge and we have no
     // floodplain rule for it" is exactly the kind of gap NEW-8 exists to surface. It is flagged
     // (`ruleModeled:false`), never dropped and never allowed to govern.
-    out.push({ key, kind, label: label || (rule && rule.label) || rawKey, reason, rule, ruleModeled: !!rule, ffe: ffeSummary(rule) });
+    /* ⛔ NEW-8 — "WE HAVE NO RULE FOR THIS AUTHORITY" AND "WE HAVE ITS RULE BUT NOT ITS REACH" ARE
+     * DIFFERENT HOLES, and until Baytown's ordinance was read only the first one existed.
+     *
+     * `ruleModeled:false` covered the case where an authority plausibly governs and we hold nothing
+     * for it. Baytown now breaks that: its rule IS transcribed (Sec. 110-102(2), the higher of the
+     * 500-yr elevation and BFE + 24 in), so it leaves `unmodelled` — but on the ETJ two thirds of
+     * Goose Creek and on Grand Port's limited-purpose area we still do not know whether the article
+     * REACHES that land, because Sec. 110-31 does not say and Ch. 110 never mentions
+     * extraterritorial or limited-purpose territory. Without this flag that candidate would have
+     * quietly become an ordinary scored rule the moment it acquired a number — the overstatement
+     * arriving through the front door instead of the fallback.
+     *
+     * It is DECLARED BY THE RULE RECORD, never inferred from the kind: a record says
+     * `limitedPurposeScope: "silent" | "unknown"` about itself. Every other city (Houston's Ch. 19
+     * on sixteen of the owner's sites) declares nothing and is completely unaffected — which is the
+     * property that makes this safe to add to a shared resolver. */
+    const scope = rule ? rule.limitedPurposeScope : null;
+    const reachUnknown = (kind === "etj" || kind === "limited") && (scope === "silent" || scope === "unknown");
+    out.push({
+      key, kind, label: label || (rule && rule.label) || rawKey, reason, rule,
+      ruleModeled: !!rule, ffe: ffeSummary(rule),
+      applicabilityUnknown: reachUnknown,
+      applicabilityNote: reachUnknown
+        ? (scope === "silent"
+          ? `${(rule && rule.label) || rawKey}'s floodplain ordinance was read and does NOT say whether it reaches this land. Its number is shown for comparison; which authority governs here is unresolved.`
+          : `Whether ${(rule && rule.label) || rawKey}'s floodplain ordinance reaches this land has not been established. Its number is shown for comparison; which authority governs here is unresolved.`)
+        : null,
+      applicabilityCitation: reachUnknown && rule ? (rule.limitedPurposeCitation || null) : null,
+    });
   };
   // The resolved drainage authority / floodplain rules key is the app's best single answer.
   if (floodJurKey) push(floodJurKey, "primary", null, "resolved floodplain rules for this site");
@@ -147,7 +175,12 @@ export function resolveAdministrator(candidates = [], { requiredFfeAt = null } =
    * governing slot, even when nothing else has a rule. Its whole point is that we do NOT know
    * whether the city's ordinance reaches this land; letting it govern by default would be the
    * overstatement arriving through the fallback instead of through the front door. */
-  const canGovern = (c) => c.kind !== "limited";
+  /* ⛔ NEW-8 extends the same refusal to any candidate whose REACH is unknown, whatever its kind.
+   * Before Baytown's ordinance was read this only had to exclude `limited`, because a limited-purpose
+   * candidate never had a rule to score with. Now it does, and an ETJ candidate whose ordinance is
+   * silent about the ETJ is exactly as unqualified to govern as the limited one — same reason, and
+   * it must not become governing merely by being the highest number in the pool. */
+  const canGovern = (c) => c.kind !== "limited" && !c.applicabilityUnknown;
   const withRule = scored.filter((c) => c.rule && canGovern(c));
   const pool = primaries.length ? primaries : withRule.length ? withRule : scored.filter(canGovern).length ? scored.filter(canGovern) : scored;
   const sorted = [...pool].sort((a, b) => b.score - a.score);
@@ -276,6 +309,14 @@ export function assessAdministrator({ signals = {}, rules = {}, ffeFt = null, re
   const unmodelled = (candidates || [])
     .filter((c) => c && (c.kind === "primary" || c.kind === "etj" || c.kind === "limited") && !c.ffe)
     .map((c) => ({ key: c.key, label: c.label, kind: c.kind, source: c.rule ? c.rule.source : null }));
+  // NEW-8 — the other half of the same question: rule known, reach unknown. See the return below.
+  const unresolvedReach = (candidates || [])
+    .filter((c) => c && c.applicabilityUnknown && c.ffe)
+    .map((c) => ({
+      key: c.key, label: c.label, kind: c.kind,
+      note: c.applicabilityNote, citation: c.applicabilityCitation,
+      ffe: c.ffe, source: c.rule ? c.rule.source : null,
+    }));
   return {
     ...resolved,
     impliedFlood: impliedFloodElevation({ ffeFt, ffe: gov ? gov.ffe : null }),
@@ -293,6 +334,16 @@ export function assessAdministrator({ signals = {}, rules = {}, ffeFt = null, re
     // answers). It gets its own state so a caller cannot accidentally treat it as either.
     split: !!split,
     splitDetail: split,
+    /* ⛔ NEW-8 — authorities whose RULE we hold but whose REACH over this land is unresolved. The
+     * panel must show their number ALONGSIDE the governing one and say the authority question is
+     * open; it must never silently pick one. Kept separate from `unmodelledCandidates` on purpose —
+     * "we don't have their ordinance" and "we have it and it doesn't say whether it applies here"
+     * are different problems with different remedies (transcribe it vs ask the city). */
+    unresolvedApplicability: unresolvedReach,
+    unresolvedApplicabilityNote: unresolvedReach.length
+      ? `${unresolvedReach.map((u) => u.label).join(" and ")} ${unresolvedReach.length === 1 ? "has a floodplain rule on file but its ordinance does not state whether it reaches this land" : "have floodplain rules on file but their ordinances do not state whether they reach this land"}. ` +
+        `Both standards are shown so the difference is visible; which one governs is an open question for the city, not something this screening can settle.`
+      : null,
     // NEW-1c — authorities that plausibly govern here and whose rule we have not transcribed.
     unmodelledCandidates: unmodelled,
     unmodelledNote: unmodelled.length
@@ -305,7 +356,9 @@ export function assessAdministrator({ signals = {}, rules = {}, ffeFt = null, re
       : null,
     // NEW-1c — an untranscribed authority makes the candidate set incomplete exactly as a failed
     // lookup does, so it blocks `settled` for the same reason.
-    settled: !unresolved && !split && !unmodelled.length && !!gov,
+    // NEW-8 — an open reach question makes the candidate set unsettled for the same reason an
+    // untranscribed ordinance does: a stricter authority may govern and we cannot say whether it does.
+    settled: !unresolved && !split && !unmodelled.length && !unresolvedReach.length && !!gov,
     unresolvedNote: pending && !unresolvedRoles.length
       ? "Jurisdiction still being looked up. Until the city and ETJ answer, the candidate set is incomplete — " +
         `${ROLE_STAKES.etj}. The FFE rule is NOT settled yet.`

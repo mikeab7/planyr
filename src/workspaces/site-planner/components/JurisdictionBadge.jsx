@@ -1,4 +1,5 @@
 import { useLayoutEffect, useRef, useState } from "react";
+import { RADIUS } from "../../../shared/ui/radius.js";
 import { formatAge } from "../lib/gisCache.js";
 import { PinIcon } from "./icons.jsx";
 import { abbreviateJurisdiction } from "../lib/jurisdictionBadgeFit.js";
@@ -95,7 +96,7 @@ export default function JurisdictionBadge({ badge }) {
         position: "relative",
         display: "inline-flex", alignItems: "center", gap: 5, maxWidth: "100%", minWidth: 0,
         background: "var(--surface-raised)", border: "1px solid var(--border-default)",
-        borderRadius: 999, padding: "2px 10px", fontSize: 11.5, fontWeight: 600,
+        borderRadius: RADIUS.pill, padding: "2px 10px", fontSize: 11.5, fontWeight: 600,
         color: "var(--text-primary)", whiteSpace: "nowrap", overflow: "hidden",
       }}
     >

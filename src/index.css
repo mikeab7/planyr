@@ -65,6 +65,16 @@
   --surface-page:   #F3F5F8;
   --surface-raised: #FFFFFF;
   --surface-overlay: rgba(255, 255, 255, 0.94); /* frosted floating panels over the map */
+
+  /* B427411 — the corner-radius scale. JS mirror: src/shared/ui/radius.js (keep in step, the
+     way palette.js mirrors the colour tokens). Four steps and no more: pill for fully-round
+     chips and bars, sm for a control nested inside another rounded surface, md for a standalone
+     control, lg for a surface that contains other things. A control inside a rounded container
+     should be concentric with it (outer minus the gap) — see `nestedIn` in the JS module. */
+  --radius-pill: 999px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
   --border-default: #E1E5EB;
   --border-strong:  #CDD3DC;
   --text-primary:   #1B1E26;
@@ -531,4 +541,24 @@ kbd {
   position: sticky;
   top: 0;
   z-index: 2;
+}
+
+/* B427411 — Leaflet ships its own corner radii on the zoom control (4px on the bar, 2px on the
+   buttons). Once B427408 moved that control into a clear corner it became prominent map chrome
+   sitting beside our own panels, and the owner's ask was that the chrome match — so it reads from
+   the same scale as everything else rather than from a vendor default. Scoped to the control we
+   place; Leaflet's other widgets are untouched. */
+.leaflet-control-zoom.leaflet-bar { border-radius: var(--radius-md); overflow: hidden; }
+/* The buttons keep NO radius of their own — the container is rounded and clips them, so one
+   curve is defined in one place. Leaflet's own 2px on each button is invisible under that clip
+   but still reads as an off-scale value to anything auditing computed style, and a corner that
+   exists only to be hidden is exactly the ad-hoc kind this scale replaces. */
+/* Leaflet sets these under `.leaflet-touch .leaflet-bar a:first-child` — three classes plus a
+   type, which outranks a two-class selector, so the override has to match its specificity
+   rather than assume ours wins. Written out per corner for the same reason. */
+.leaflet-touch .leaflet-control-zoom.leaflet-bar a:first-child,
+.leaflet-touch .leaflet-control-zoom.leaflet-bar a:last-child,
+.leaflet-control-zoom.leaflet-bar a {
+  border-top-left-radius: 0; border-top-right-radius: 0;
+  border-bottom-left-radius: 0; border-bottom-right-radius: 0;
 }

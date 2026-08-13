@@ -21,6 +21,7 @@
  * light/dark; hierarchy comes from color + weight + the pulse, never from fading.
  */
 import { Component, useEffect, useRef, useState } from "react";
+import { RADIUS } from "./radius.js";
 
 // state → presentation. Pure + exported so the truth-table is unit-locked: a future
 // edit can't silently let a failed save read the same as "all good" (cloudSyncBadge.test.js).
@@ -79,7 +80,7 @@ function CloudGlyph({ variant, size = 15 }) {
 
 const popPanel = {
   position: "absolute", right: 0, top: "calc(100% + 7px)", zIndex: 70, width: 248,
-  padding: "11px 13px", borderRadius: 10, background: "var(--surface-raised)", color: "var(--text-primary)",
+  padding: "11px 13px", borderRadius: RADIUS.md, background: "var(--surface-raised)", color: "var(--text-primary)",
   border: "1px solid var(--border-default)", boxShadow: "0 12px 30px rgba(0,0,0,0.28)",
   fontFamily: "system-ui, sans-serif", textAlign: "left",
 };
@@ -109,7 +110,7 @@ function Badge({ state, onRetry, detail }) {
         aria-haspopup={canPop ? "dialog" : undefined}
         aria-expanded={canPop ? open : undefined}
         style={{
-          display: "grid", placeItems: "center", width: 26, height: 24, borderRadius: 7, flex: "none",
+          display: "grid", placeItems: "center", width: 26, height: 24, borderRadius: RADIUS.sm, flex: "none",
           background: "transparent", color: v.color, cursor: canPop ? "pointer" : "default",
           // The loud failure state gets a hairline ring in its own color so it pops out of the
           // quiet chrome at a glance — the rest carry no border.
@@ -133,7 +134,7 @@ function Badge({ state, onRetry, detail }) {
                 type="button"
                 onClick={() => { setOpen(false); onRetry(); }}
                 style={{
-                  marginTop: 10, width: "100%", padding: "6px 11px", borderRadius: 7, cursor: "pointer",
+                  marginTop: 10, width: "100%", padding: "6px 11px", borderRadius: RADIUS.sm, cursor: "pointer",
                   fontFamily: "inherit", fontSize: 12, fontWeight: 700, border: "none",
                   background: "var(--accent)", color: "var(--on-accent)",
                 }}
@@ -171,7 +172,7 @@ export class CloudBadgeBoundary extends Component {
         <span role="img" aria-label="Cloud sync: status unavailable"
           data-testid="cloud-sync-badge" data-sync-state="crashed"
           title="Sync status couldn't be read: your latest work is saved on this device."
-          style={{ display: "grid", placeItems: "center", width: 26, height: 24, borderRadius: 7,
+          style={{ display: "grid", placeItems: "center", width: 26, height: 24, borderRadius: RADIUS.sm,
             color: "var(--danger)", border: "1px solid var(--danger)" }}>
           <CloudGlyph variant="cloud-slash" />
         </span>

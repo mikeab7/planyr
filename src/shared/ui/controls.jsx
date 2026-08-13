@@ -14,9 +14,21 @@
  * accent, --accent unless the host overrides").
  */
 import { useState } from "react";
-
 // The single source of the control scale. Radius 8 is the median of the pre-convergence
 // spread (6/7/8/9) and already the Site Planner chip/iconBtn value — the smallest net move.
+/* ⛔ B427411 — THESE THREE AGREE WITH `shared/ui/radius.js` BY VALUE, AND THEY STAY LITERAL.
+ *
+ * This partial scale predates that file and is why the scale's numbers are 6/8/12/999 rather than
+ * a rounder-looking 10/14: adopting what the tree already agreed on made the map-chrome pass a
+ * consolidation instead of a restyle. `control === md`, `pill === pill`, `panel === lg`.
+ *
+ * ⛔ Do NOT "tidy" this into `{ control: RADIUS.md, … }`. It was tried and it breaks the build:
+ * `test/notesModule.test.js` regex-parses the DIGITS out of this line and cross-checks them
+ * against seven Notes components that hand-copy `{ control: 8, pill: 999 }` under a "mirrored
+ * from shared/ui/controls" comment. An identifier where a number was leaves that contract with
+ * nothing to read. Repointing those seven copies is the real fix and is a known follow-up on
+ * B427411 — Notes is neither the map chrome nor the header, and re-styling a workspace nobody
+ * reported is scope that block did not ask for. If you change a number here, change it there. */
 export const RADIUS = { control: 8, pill: 999, panel: 12 };
 export const PAD = { sm: "5px 10px", md: "7px 12px", lg: "9px 14px" };
 export const FONT = { sm: 11.5, md: 12.5 };
@@ -93,7 +105,7 @@ export function Section({ title, children, collapsed, accent }) {
       <div onClick={() => setOpen((o) => !o)} role="button" tabIndex={0} aria-expanded={open} aria-label={title}
         onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setOpen((o) => !o); } }}
         style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", padding: "10px 12px", userSelect: "none" }}>
-        {accent && <span style={{ width: 6, height: 6, borderRadius: 99, background: accent, flex: "none" }} />}
+        {accent && <span style={{ width: 6, height: 6, borderRadius: RADIUS.pill, background: accent, flex: "none" }} />}
         <span style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: "0.09em", textTransform: "uppercase", color: "var(--text-secondary)", flex: 1 }}>{title}</span>
         <span style={{ fontSize: 10.5, color: "var(--text-secondary)", transform: open ? "rotate(90deg)" : "none", transition: "transform .18s ease", width: 9 }}>▶</span>
       </div>
@@ -107,7 +119,7 @@ export const menuPanelStyle = { background: "var(--surface-raised)", border: "1p
 export function MenuItem({ active = false, style, children, ...rest }) {
   return (
     <button style={{
-      display: "block", width: "100%", textAlign: "left", padding: "7px 10px", fontSize: FONT.md, borderRadius: 7, cursor: "pointer",
+      display: "block", width: "100%", textAlign: "left", padding: "7px 10px", fontSize: FONT.md, borderRadius: RADIUS.control, cursor: "pointer",
       border: "none", background: active ? "var(--hover-menu)" : "transparent", color: "var(--text-primary)", fontFamily: "inherit", fontWeight: active ? 650 : 500, ...style,
     }} {...rest}>{children}</button>
   );

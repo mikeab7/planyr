@@ -36,6 +36,28 @@
  *   source/sourceDate/verified/note — provenance; unverified rules stamp every output.
  */
 import { normCountyKey } from "../../../shared/gis/countyKeys.js";
+
+/* ⛔ NEW-8 — HOW FAR A CITY'S FLOODPLAIN ARTICLE REACHES IS ONE FACT WITH ONE HOME.
+ *
+ * `floodAdministrator` decides whether a candidate may govern, and it is handed the BUILDABILITY
+ * rules; this applicability question is transcribed HERE, with the ordinance. Two copies of one
+ * clause is exactly the shape that drifts (the `updated_by` mirror, the `group_rev` column), so the
+ * buildability record IMPORTS this rather than restating it, and `test/baytownFlood.test.js`
+ * asserts the two records agree.
+ *
+ *   "governs"          the ordinance says it reaches this land
+ *   "does-not-govern"  the ordinance says it does not
+ *   "silent"           the ordinance was READ and does not say  ← a finding
+ *   "unknown"          the ordinance has not been read          ← not a finding
+ *
+ * A city that declares NOTHING is unaffected everywhere — that is what keeps this safe to consult
+ * from a shared resolver that sixteen of the owner's sites already depend on. */
+export const LIMITED_PURPOSE_SCOPE = {
+  baytown: {
+    scope: "silent",
+    citation: "Sec. 110-31, in full: \"This article shall apply to all moderate and special flood hazard areas within the jurisdiction of the city.\" No occurrence of extraterritorial, limited-purpose or industrial district anywhere in Ch. 110.",
+  },
+};
 const LS = "planarfit:floodplainRules:v1";
 
 export const DEFAULT_FLOODPLAIN_RULES = {
@@ -92,38 +114,63 @@ export const DEFAULT_FLOODPLAIN_RULES = {
    * Baytown now affects TWO of the owner's sites in TWO counties: Goose Creek (Harris — about a
    * third of the drawn site is inside Baytown's full-purpose limits, the rest in its ETJ) and Grand
    * Port (Chambers — 99% inside a Baytown LIMITED-PURPOSE ANNEXATION area, 100% inside its ETJ). So
-   * "which floodplain standard applies" is a live question on both, and the honest answer today is
-   * that we do not know.
+   * "which floodplain standard applies" is a live question on both.
    *
-   * ⛔ WHY THERE IS NO DATUM AND NO FREEBOARD HERE: the adopted ordinance could not be READ from
-   * this environment. `library.municode.com` and `baytown.org` are both refused by the network
-   * egress proxy (measured 2026-08-12: connection refused, not a 404), and this repo's standing
-   * rule is that a rule record is transcribed from the primary source or it is not written at all —
-   * an invented freeboard is a wrong FLOOR, which is the most expensive kind of wrong number this
-   * app can produce. `verified: false` + `ffeRule: null` puts Baytown in `assessAdministrator`'s
-   * `unmodelled` list, so the panel says "no rule on file for City of Baytown" and names the
-   * default it is using meanwhile — which is the behaviour B280706 built for exactly this case.
+   * ⛔ NEW-8 (B435537) — THE ORDINANCE HAS NOW BEEN READ, and this record is transcribed from it.
+   * The previous version of this block said the datum and freeboard could not be written because
+   * `library.municode.com` and `baytown.org` are both refused by this environment's egress proxy
+   * (measured 2026-08-12: connection refused, not a 404). That is still true of THIS sandbox — the
+   * text below was pulled from Municode in the owner's own browser and supplied verbatim, which is
+   * the same provenance route the Waller record took (B986) and the Harris / Fort Bend records took
+   * (owner-read PDFs, PR #594). Current version JUL 2 2026, codified through Ord. No. 16,449
+   * enacted 2026-04-23.
    *
-   * ⛔ AND THE SECOND QUESTION, WHICH IS NOT THE SAME ONE: whether Baytown's floodplain ordinance
-   * reaches a LIMITED-PURPOSE annexation area at all. That is Grand Port's whole situation, and it
-   * cannot be answered from the boundary layer — only from the ordinance's own applicability
-   * section and the annexation agreement. Until it is read, `limitedPurposeScope: "unknown"` and
-   * the candidate is raised but refused the governing slot (see floodAdministrator's "limited"
-   * kind). Reporting that the ordinance DOES NOT SAY and reporting that we HAVE NOT READ IT are
-   * different statements, and this is the second one.
+   * ⛔ WHAT IS TRANSCRIBED AND WHAT IS STILL NULL — the excerpt is Art. II's ELEVATION standard, and
+   * that is not the same thing as its COMPENSATING-STORAGE standard. `trigger` is transcribed
+   * because it follows directly from the applicability clause plus the definitions (below), but
+   * `ratio` / `floodwayPolicy` / `offsetScope` were NOT in the text that was read and are therefore
+   * still null. A mitigation ratio invented to fill this record out would be exactly the kind of
+   * number this file's header forbids.
    *
-   * The unblock is on OWNER-TODO.md: the adopted PDF, from any route this sandbox is not refused. */
+   * WHY `trigger` IS "1pct_plus_02pct" AND IT IS NOT AN INFERENCE: Sec. 110-31 is the whole
+   * applicability clause — "This article shall apply to all moderate and special flood hazard areas
+   * within the jurisdiction of the city" — and Sec. 110-26 defines a moderate flood hazard area as
+   * "areas between the limits of the base flood and the 0.2-percent-annual-chance (or 500-year)
+   * flood … shown on flood maps as zones labeled with the letters B or X (shaded)".
+   * ⛔ SO BAYTOWN REGULATES SHADED ZONE X. A site entirely outside the 100-year but inside the
+   * 500-year still gets a Baytown finished-floor rule. Most administrators in this metro do not do
+   * that — do not let a generic "outside the SFHA, no rule" path swallow it.
+   *
+   * ⛔ AND THE SECOND QUESTION, WHICH IS NOT THE SAME ONE AND IS NOW ANSWERED "THE ORDINANCE DOES
+   * NOT SAY": whether Baytown's floodplain ordinance reaches a LIMITED-PURPOSE annexation area
+   * (Grand Port) or the ETJ (two thirds of Goose Creek). Sec. 110-31, quoted in full above, is the
+   * entire applicability clause; a search of all of Chapter 110 for "extraterritorial",
+   * "limited-purpose" and "industrial district" returns ZERO hits. So `limitedPurposeScope` moves
+   * from "unknown" (we had not read it) to **"silent"** (we read it and it does not say). Those are
+   * different statements and the distinction is the point — `silent` is a finding, and it still
+   * refuses the governing slot for that land.
+   *
+   * ⚠ ONE PIECE OF REAL TEXTUAL EVIDENCE, LABELLED AS AN INFERENCE AND NOT AS THE RULE: Sec. 110-32
+   * adopts the CHAMBERS COUNTY flood insurance study by reference alongside Harris's. Baytown's
+   * full-purpose limits are overwhelmingly in Harris; the Chambers side is where its limited
+   * annexation reaches, and is exactly where Grand Port sits. A city that adopts a neighbouring
+   * county's flood study is a city that expects to administer floodplain there. Suggestive, not
+   * dispositive, and it must never be rendered as the rule. */
   baytown: {
     label: "City of Baytown",
-    trigger: null, ratio: null, floodwayPolicy: null, offsetScope: null,
-    ffeRule: null,
-    locationRule: "Not on file — confirm with the City of Baytown Public Works & Engineering floodplain administrator.",
-    source: "City of Baytown flood damage prevention ordinance — NOT TRANSCRIBED. Both publication routes (library.municode.com, baytown.org) are refused by this environment's egress proxy; measured 2026-08-12.",
-    sourceDate: null,
-    verified: false,
-    unreadable: { reason: "egress-blocked", hosts: ["library.municode.com", "www.baytown.org"], checkedAt: "2026-08-12" },
-    limitedPurposeScope: "unknown",
-    note: "No Baytown rule on file: the ordinance could not be read from this environment, so neither its datum nor its freeboard is recorded. Whether it reaches limited-purpose annexation territory (Grand Port) is likewise unread — not 'no'.",
+    trigger: "1pct_plus_02pct",
+    ratio: null, floodwayPolicy: null, offsetScope: null,
+    ffeRule: null,   // the FFE rule lives in buildability.js, like every other jurisdiction
+    locationRule: "Not in the transcribed excerpt — confirm compensating-storage placement with the City of Baytown Public Works & Engineering floodplain administrator.",
+    source: "City of Baytown, TX, Code of Ordinances, Subpart B — Land Development Code, Ch. 110 (FLOODS), Art. II (Flood Damage Prevention), Sec. 110-31 (applicability) + Sec. 110-26 (definitions). Version JUL 2 2026, codified through Ord. No. 16,449 enacted 2026-04-23. Owner-read via Municode 2026-08-13.",
+    sourceDate: "2026-07-02",
+    verified: true,
+    partial: { transcribed: ["trigger"], notTranscribed: ["ratio", "floodwayPolicy", "offsetScope"], reason: "the excerpt read was Art. II's ELEVATION standard (Sec. 110-102) plus applicability and definitions; its compensating-storage provisions were not in it." },
+    limitedPurposeScope: LIMITED_PURPOSE_SCOPE.baytown.scope,
+    limitedPurposeCitation: LIMITED_PURPOSE_SCOPE.baytown.citation,
+    adoptedStudies: ["Flood Insurance Study for Harris County, Texas, eff. 2007-06-18, INCLUDING ANY FEMA-ISSUED PRELIMINARY MAPS", "Flood Insurance Study for Chambers County, Texas, dated 2015-05-04"],
+    adoptsPreliminaryMaps: true,   // Sec. 110-32 adopts preliminary maps by reference, not only effective ones
+    note: "Baytown regulates BOTH special and moderate flood hazard areas (Sec. 110-31), and a moderate flood hazard area is shaded Zone X / Zone B (Sec. 110-26) — so a site outside the 100-year but inside the 500-year is still regulated here. Sec. 110-32 adopts the Harris AND Chambers county studies, and adopts FEMA-issued PRELIMINARY maps by reference. Mitigation ratio / floodway policy / offset scope are NOT transcribed. Whether the article reaches the ETJ or a limited-purpose annexation area: the ordinance is SILENT (see limitedPurposeCitation) — that is a finding, not an unread field.",
   },
   chambers: {
     label: "Chambers County",

@@ -5,6 +5,7 @@
  * for what folded in and what deliberately did not ship). Auth state is owned by the Shell;
  * this calls the auth wrappers and the profile hook's save/reload passed in via `profileApi`. */
 import { lazy, useEffect, useRef, useState } from "react";
+import { RADIUS } from "../../../shared/ui/radius.js";
 import { signIn, signUp, signOut, signOutEverywhere, resetPassword, updatePassword } from "../lib/auth.js";
 // The confirmation / reset copy NAMES the address the email arrives from (NEW-2) — a user
 // watching for "planyr.io" never finds it otherwise and assumes the signup failed. Both
@@ -20,8 +21,8 @@ import LazyPanel from "./LazyPanel.jsx";
 import InterfaceSettings from "../../../shared/ui/InterfaceSettings.jsx";
 
 const PAL = { ink: "var(--text-primary)", muted: "var(--text-secondary)", line: "var(--border-default)", accent: "var(--accent)", paper: "var(--surface-raised)" };
-const field = { width: "100%", boxSizing: "border-box", padding: "9px 11px", fontSize: 13, border: `1px solid ${PAL.line}`, borderRadius: 8, color: PAL.ink, fontFamily: "inherit", marginTop: 6 };
-const btn = (primary) => ({ padding: "9px 14px", fontSize: 13, borderRadius: 8, cursor: "pointer", fontFamily: "inherit", fontWeight: 600, border: `1px solid ${primary ? PAL.accent : PAL.line}`, background: primary ? PAL.accent : "var(--surface-raised)", color: primary ? "var(--on-accent)" : PAL.ink });
+const field = { width: "100%", boxSizing: "border-box", padding: "9px 11px", fontSize: 13, border: `1px solid ${PAL.line}`, borderRadius: RADIUS.md, color: PAL.ink, fontFamily: "inherit", marginTop: 6 };
+const btn = (primary) => ({ padding: "9px 14px", fontSize: 13, borderRadius: RADIUS.md, cursor: "pointer", fontFamily: "inherit", fontWeight: 600, border: `1px solid ${primary ? PAL.accent : PAL.line}`, background: primary ? PAL.accent : "var(--surface-raised)", color: primary ? "var(--on-accent)" : PAL.ink });
 const linkBtn = { border: "none", background: "transparent", color: PAL.accent, cursor: "pointer", fontSize: 12, fontFamily: "inherit", padding: "6px 2px" };
 const s = (v) => (v == null ? "" : String(v)).trim();
 
@@ -56,7 +57,7 @@ function Wrap({ onClose, children, msg, width = 360, title = "Account" }) {
   }, [onClose]);
   return (
     <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 5000, background: "rgba(20,18,15,0.55)", display: "grid", placeItems: "center" }}>
-      <div ref={panelRef} tabIndex={-1} role="dialog" aria-modal="true" aria-label={title} onClick={(e) => e.stopPropagation()} style={{ background: PAL.paper, borderRadius: 14, boxShadow: "0 20px 60px rgba(0,0,0,0.35)", padding: 22, width, maxWidth: "92vw", maxHeight: "88vh", overflowY: "auto", outline: "none" }}>
+      <div ref={panelRef} tabIndex={-1} role="dialog" aria-modal="true" aria-label={title} onClick={(e) => e.stopPropagation()} style={{ background: PAL.paper, borderRadius: RADIUS.lg, boxShadow: "0 20px 60px rgba(0,0,0,0.35)", padding: 22, width, maxWidth: "92vw", maxHeight: "88vh", overflowY: "auto", outline: "none" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 12 }}>
           <h2 style={{ margin: 0, fontSize: 16, color: PAL.ink }}>{title}</h2>
           <button onClick={onClose} aria-label="Close" style={{ ...btn(false), padding: "4px 10px", fontSize: 12 }}>Close <span aria-hidden="true">✕</span></button>
@@ -170,7 +171,7 @@ function AccountView({ user, profileApi, initialTab, onClose }) {
         aria-current={on ? "true" : undefined}
         onClick={() => { setTab(sec.id); setMsg(null); }}
         style={{
-          display: "block", width: "100%", textAlign: "left", padding: "7px 9px", borderRadius: 8,
+          display: "block", width: "100%", textAlign: "left", padding: "7px 9px", borderRadius: RADIUS.md,
           border: `1px solid ${on ? PAL.accent : "transparent"}`, cursor: "pointer", fontFamily: "inherit",
           background: on ? "var(--hover-ghost)" : "transparent", color: PAL.ink,
         }}

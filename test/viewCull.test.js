@@ -118,8 +118,22 @@ describe("the export renders the COMPLETE model, whatever the view (hard constra
     // the element-label candidate pass and the dimension-number collision pass
     expect(SP).toMatch(/const labelCands = \[\];[\s\S]{0,1400}?\n  for \(const el of drawEls\) \{/);
     expect(SP).toMatch(/const dimItems = \[\];[\s\S]{0,400}?\n  for \(const el of drawEls\) \{/);
-    // …and `drawEls` is only ever the culled set of `els`, with the cull disabled when cullRect is null
-    expect(SP).toMatch(/const drawEls = useMemo\(\(\) => cullToView\(els, cullRect, \{ enabled: !!cullRect, keep: cullKeep \}\)/);
+    /* …and `drawEls` is the CULL of `els`, with the cull disabled when cullRect is null. The cull's
+     * own arguments are pinned exactly as before; what changed (NEW-1) is that the View menu's
+     * content-visibility filter now runs INSIDE the same memo, immediately before the cull.
+     *
+     * ⛔ THE TWO ARE DIFFERENT IN KIND, and the distinction is why this guard was widened rather
+     * than relaxed. CULLING is an invisible optimisation the user never asked for, so it may never
+     * change what an export contains — that is the hard constraint this block defends, and it is
+     * untouched. HIDING is an explicit decision the user just made while looking at the drawing he
+     * is about to print, and the PDF/PNG path CLONES the live `<svg>`, so hidden content is
+     * legitimately absent from that sheet (the same deliberate exception `kmzExport.js`'s header
+     * names). A model-built export — KMZ — decides its own contents and is unaffected either way. */
+    expect(SP).toMatch(/const drawEls = useMemo\(\(\) => \{[\s\S]{0,400}?cullToView\(vis, cullRect, \{ enabled: !!cullRect, keep: cullKeep \}\)/);
+    // the visibility filter is applied to the MODEL LIST going into the cull, never to `els` itself
+    expect(SP).toMatch(/const vis = hiddenGroups \? els\.filter\(\(el\) => !elHidden\(hiddenGroups, el\)\) : els;/);
+    // and the metrics pass still iterates the MODEL — the whole promise of "hide never deletes"
+    expect(SP).toMatch(/\n  els\.forEach\(\(e\) => \{\n    const a = isCenterlineRoad\(e\)/);
     expect(SP).toMatch(/cullActive = !exportPass/);
   });
 

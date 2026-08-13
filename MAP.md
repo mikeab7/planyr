@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-08-13 @ `01f66ec` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-08-13 @ `e6ec634` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_511 source files mapped._
+_513 source files mapped._
 
 ## infra
 
@@ -356,6 +356,8 @@ _511 source files mapped._
   - _exports_: `loadIdSet`, `pruneSet`, `saveIdSet`
 - **`src/shared/ui/ProjectBreadcrumb.jsx`** — Row-1 Dashboard/Project breadcrumb + switcher dropdown: search, recents, New project, inline rename/delete kebab, at-risk-save surfacing, cloud-cache warm
   - _exports_: `CRUMB_MIN_W`, `default (ProjectBreadcrumb)`
+- **`src/shared/ui/radius.js`** — the ONE corner-radius scale (pill/sm/md/lg) + `nestedIn`, the concentric rule for a control inside a rounded surface; CSS mirror is `--radius-*` in `index.css`
+  - _exports_: `nestedIn`, `RADIUS`
 - **`src/shared/ui/RotationStepper.jsx`** — The one app-wide rotation control: type-to-set 2dp field + spinner nudges, wrap to [0,360), fine Shift+Arrow, invalid-flash-revert, locked-disable
   - _exports_: `default (RotationStepper)`, `formatDeg`, `normalizeDeg`, `parseRotationInput`
 - **`src/shared/ui/statusTokens.js`** — STATUS_TOKENS: single project-lifecycle status palette (color/glyph/map-pin tier/opacity/z) with monotonic salience rules; statusToken() + darken()
@@ -448,7 +450,7 @@ _511 source files mapped._
 - **`src/workspaces/site-planner/lib/authMail.js`** — The one source of truth for who auth email comes from, and the confirmation / password-reset copy generated from it
   - _exports_: `AUTH_SENDER_EMAIL`, `AUTH_SENDER_LABEL`, `AUTH_SENDER_NAME`, `PASSWORD_RESET_MSG`, `SIGNUP_CONFIRM_MSG`
 - **`src/workspaces/site-planner/lib/basemaps.js`** — Shared aerial basemap SOURCE registry (Esri/USGS tiles + export + maxNative ceilings, B220 rule) + the planner's Off/Aerial/USGS choices; used by MapFinder and the planner Basemap control
-  - _exports_: `BASEMAPS`, `PLANNER_BASEMAP_CHOICES`
+  - _exports_: `BASEMAPS`, `FINDER_BASEMAP_CHOICES`, `PLANNER_BASEMAP_CHOICES`
 - **`src/workspaces/site-planner/lib/bondRemap.js`** — The ONE id-bearing bond inventory + remap rule shared by every copy path (B1124): a reference inside the copied set is remapped to the new id, one outside it is dropped, never left dangling to a foreign element.
   - _exports_: `carryHostRoleTags`, `HOST_ROLE_TAGS`, `ID_BOND_TAGS`, `remapBondRefs`
 - **`src/workspaces/site-planner/lib/bootResume.js`** — Pure boot-resume decisions: gate URL/pointer reconciliation until auth+cloud pull settles, pick which saved plan to resume into
@@ -483,6 +485,8 @@ _511 source files mapped._
   - _exports_: `conceptLettersToNumber`, `nextConceptName`, `numberToConcept`, `parseConceptIndex`
 - **`src/workspaces/site-planner/lib/conflictToasts.js`** — the B673 conflict policy matrix as a pure mapping: elementSync event → toast spec (who gets told what, which action rides along)
   - _exports_: `toastForSyncEvent`
+- **`src/workspaces/site-planner/lib/contentVisibility.js`** — the View menu's content model: which GROUPS (elements by type, parcels, markups, measurements, callouts, the acreage-label master) are temporarily hidden. Pure predicates over a sparse hidden-map; never touches geometry, so no number moves
+  - _exports_: `anyHidden`, `EL_GROUPS`, `EL_KEY_PREFIX`, `EL_KEYS`, `elHidden`, `elKey`, `groupsFor`, `groupState`, `hiddenKeys`, `hiddenSummary`, `isHidden`, `KNOWN_KEYS`, `normalizeRetiredToggles`, `OTHER_GROUPS`, `parcelAcreageHidden`, `setManyVisible`, `setVisible`, `showAll`
 - **`src/workspaces/site-planner/lib/contours.js`** — Pure contour-line math (B704): 1-ft interval auto-pick, sentinel-embedded voids, d3-contour marching squares, grid-border + dilated-void strip passes, pixel-space simplify, index flags + sparse labels
   - _exports_: `buildContourIndex`, `composeContourPaint`, `contourLabelText`, `DOUBLE_STAMP_PX`, `hitContour`, `HOVER_LABEL_GAP_PX`, `HOVER_TOL_PX`, `hoverLabelPlacement`, `hoverLabelSize`, `joinSeams`, `LABEL_CAP`, `LABEL_MIN_SEP_CELLS`, `pickLabels`
 - **`src/workspaces/site-planner/lib/contourTrace.js`** — worker-only marching-squares contour tracer (the sole `d3-contour` consumer): border/void strips, tile-interior clip, deterministic label anchors
@@ -610,7 +614,7 @@ _511 source files mapped._
 - **`src/workspaces/site-planner/lib/floodplainMitigation.js`** — B707 pure engine: NFHL zone classifier (AO/AH/floodway/unstudied-A), lon/lat→site-feet zones, grid-sampled fill∩zone compensating-storage volume with pluggable elevation providers, UNKNOWN-never-zero states, expert bypass, straddle worst-case
   - _exports_: `BFE_SENTINEL_MIN`, `bfeLinesFromFeatureCollection`, `BKDD_DATUM_NOTE`, `bufferedFloodway`, `classifyNfhlFeature`, `combineMitigation`, `computeMitigation`, `crossSectionWselFromFeatureCollection`, `deriveBfeFromLines`, `DERIVED_BFE_NOTE`, `DERIVED_WSE02_DRAFT_NOTE`, `DERIVED_WSE02_NOTE`, `DERIVED_WSE100_DRAFT_NOTE`, `DERIVED_XS_WSEL_NOTE`, `distToPolyline`, `effectivePadElev`, `EST_BOUNDARY_WSE_NOTE`, `EST_EBFE_NOTE`, `EST_MAAPNEXT_NOTE`, `EST_SCREENING_BFE_NOTE`, `EST_WSE_SRCS`, `estimateZoneAWse`, `estWseNote`, `EXCLUSIONS_NOTE`, `EXPERT_BYPASS_LABEL`, `FFE_BASIS_LABEL`, `ffeBasisText`, `floodGeoBbox`, `governingCrossSectionWsel`, `gridIntersect`, `hagForRing`, `isEstimatedWseSrc`, `NAVD88_NOTE`, `NEWER_MODEL_NOTE`, `OFFSITE_NOTE`, `pickWorstCase`, `pointInZone`, `pondFloodplainTier`, `ringInFloodway`, `ringInTrigger`, `sampleRingGrades`, `wedgeMitigation`, `WSE_PROVIDER_LABEL`, `wse1pctForRing`, `wseProvLabel`, `zonesFromFeatureCollection`, `zoneWaterSurface`
 - **`src/workspaces/site-planner/lib/floodplainRules.js`** — B707 editable per-jurisdiction floodplain-mitigation rules (trigger band / ratio / floodway policy / offset scope, verified-flagged placeholder seeds) with drainage-authority + county defaulting
-  - _exports_: `atlas14Mandated`, `bfeDataRequirementFor`, `DEFAULT_FLOODPLAIN_RULES`, `defaultFloodJurForAuthority`, `defaultFloodJurForCounty`, `floodJurCounty`, `loadFloodplainRules`, `mitigationOffsetBasis`, `offsetSurfaceBasis`, `offsetSurfaceLabel`, `saveFloodplainRules`, `triggerClasses`
+  - _exports_: `atlas14Mandated`, `bfeDataRequirementFor`, `DEFAULT_FLOODPLAIN_RULES`, `defaultFloodJurForAuthority`, `defaultFloodJurForCounty`, `floodJurCounty`, `LIMITED_PURPOSE_SCOPE`, `loadFloodplainRules`, `mitigationOffsetBasis`, `offsetSurfaceBasis`, `offsetSurfaceLabel`, `saveFloodplainRules`, `triggerClasses`
 - **`src/workspaces/site-planner/lib/floodTileDecode.js`** — the Leaflet-free half of the flood tile layer — MVT decode, even-odd point-in-rings hit test, and the canvas paint
   - _exports_: `decodeFloodTile`, `featureAt`, `latToTileY`, `lngToTileX`, `paint`, `pointInRings`, `TILE_PX`
 - **`src/workspaces/site-planner/lib/floodTileLayer.js`** — the Leaflet glue for baked flood tiles: a PMTiles-backed canvas GridLayer with `identifyAt` and a one-shot fallback to live FEMA (lazy-loaded)
@@ -668,7 +672,7 @@ _511 source files mapped._
 - **`src/workspaces/site-planner/lib/labelFitLadder.js`** — NEW-1/NEW-2 the ONE ordered fit/fallback ladder for a map label that must sit inside a shape (inline → stacked → abbrev → outside-with-leader) plus the polygon INTERIOR measurer (largest inscribed rectangles, so fit is judged against real room, not a bounding box). Terminates in `outside`, never in a hide — a fit failure may relocate or shorten a label, never blank it.
   - _exports_: `inlineLines`, `interiorFitter`, `labelForms`, `LADDER_RUNGS`, `pointInRing`
 - **`src/workspaces/site-planner/lib/labelLayout.js`** — Pure label level-of-detail plus collision engine: line-dropping by priority, greedy overlap resolution, leader overflow, and dimension-callout zoom gates
-  - _exports_: `__labelLayoutProbe`, `boxesOverlap`, `boxOf`, `buildingLabelLines`, `DETAIL_LABEL_MIN_PX`, `detailLabelVisible`, `DIM_CALLOUT_MIN_PPF`, `DIM_FONT_BASE_PX`, `DIM_FONT_MIN_SCALE`, `dimCalloutVisible`, `dimFontPx`, `dimFontScale`, `fitLines`, `layoutLabels`, `layoutLabelsSolve`, `POND_PARAM_LABEL_MIN_PX`, `pondParamFontPx`, `pondParamLabelVisible`, `segmentsPath`, `STALL_PITCH_MIN_PX`, `stallStripesExplicit`, `suppressedDimIds`
+  - _exports_: `__labelLayoutProbe`, `boxesOverlap`, `boxOf`, `buildingLabelLines`, `DETAIL_LABEL_MIN_PX`, `detailLabelVisible`, `DIM_CALLOUT_MIN_PPF`, `DIM_FONT_BASE_PX`, `DIM_FONT_MIN_SCALE`, `dimCalloutVisible`, `dimFontPx`, `dimFontScale`, `featureExtentFt`, `featureNameFontPx`, `featureNameLabelVisible`, `fitLines`, `LABEL_CHAR_W_RATIO`, `labelTextWidthPx`, `layoutLabels`, `layoutLabelsSolve`, `POND_PARAM_LABEL_MIN_PX`, `pondParamFontPx`, `pondParamLabelVisible`, `segmentsPath`, `STALL_PITCH_MIN_PX`, `stallStripesExplicit`, `suppressedDimIds`
 - **`src/workspaces/site-planner/lib/landingView.js`** — Where the Map view OPENS, derived from the user's own saved sites: no sites → the continental US, one → its area, many → the densest cluster; fitted with generous padding and clamped out to metro scale. Pure.
   - _exports_: `boundsCenter`, `boundsOf`, `clampedFitZoom`, `CLUSTER_RADIUS_MI`, `clusterSites`, `CONUS_BOUNDS`, `densestCluster`, `fitZoom`, `LANDING_MAX_ZOOM`, `LANDING_MIN_ZOOM`, `LANDING_PAD_FRAC`, `landingView`, `locatedPoints`, `milesBetween`
 - **`src/workspaces/site-planner/lib/layerPanelInfo.js`** — Pure Layers-panel row helpers: per-row ⓘ content assembly + merged City/ETJ combined-status precedence (B760/B761)
@@ -694,7 +698,7 @@ _511 source files mapped._
 - **`src/workspaces/site-planner/lib/localDb.js`** — IndexedDB async key/value store (get/put/delete/deleteByPrefix/forEachByPrefix + durable persist), self-healing open, no-op fallback where IDB is unavailable; large-but-finite durable home for the version-history ring, cached rasters and the GIS cache
   - _exports_: `idbAvailable`, `idbDelete`, `idbDeleteByPrefix`, `idbForEachByPrefix`, `idbGet`, `idbPersist`, `idbPut`
 - **`src/workspaces/site-planner/lib/mapChromeStack.js`** — the ONE map-overlay stacking model (an open panel outranks map chrome — Leaflet controls, scale bar) plus the available-room panel height
-  - _exports_: `LEAFLET_CONTROL_Z`, `MAP_CHROME_Z`, `panelMaxHeight`
+  - _exports_: `LEAFLET_CONTROL_Z`, `MAP_CHROME_Z`, `panelMaxHeight`, `ZOOM_CONTROL_CLEARANCE_PX`
 - **`src/workspaces/site-planner/lib/mapillaryClient.js`** — Leaflet-free Mapillary request shaping: builds bbox map_features URL (same-origin token-injecting proxy, or direct Graph API with a user token) and filters to pole/hydrant detections
   - _exports_: `mapillaryRequestUrl`, `MLY_FIELDS`, `MLY_LIMIT`, `MLY_PROXY_PATH`, `pickDetections`
 - **`src/workspaces/site-planner/lib/mapLock.js`** — THE projection welding the planner's feet frame to the Web-Mercator basemap — scaled-Mercator feet↔lat/lng plus the matching ppf↔zoom, both anchored at the site origin

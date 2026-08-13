@@ -207,6 +207,73 @@ describe("a refused call is re-committed against the assembly as it ACTUALLY is"
     expect(h.events.some((e) => e.type === "assembly-split" && e.groupConflict)).toBe(true);
   });
 
+  /* ⛔ THE DEADLOCK THIS FEATURE COULD HAVE SHIPPED WITH, found by asking "how could turning this
+   * on go wrong?" rather than by a failing test.
+   *
+   * The server digests every LIVE row of the assembly; the client digests every row in its shadow.
+   * If another writer CREATED a member and this tab's realtime has not delivered it, the two can
+   * never agree — the omission is recomputed identically on every retry, and after
+   * `maxRejectStreak` the tab declares itself stale and stops saving. Recoverable by a reload, but
+   * reachable by exactly the two-writer case the feature exists for, which is the worst possible
+   * place for a stuck state. The conflict payload carries id/kind/rev, which is enough to converge
+   * without a refetch. */
+  it("⛔ converges when the conflict names a member this tab has NEVER seen", async () => {
+    const h = makeHarness();
+    let call = 0;
+    h.setResponder((ops, opts) => {
+      call += 1;
+      if (call === 1) {
+        // The server knows a FOURTH member this tab has never heard of.
+        expect(opts.groups[0].expected).toBe("h:1,k1:2,k2:3");
+        return {
+          ok: true, applied: false, results: [],
+          groupConflict: [{
+            assembly: "h", expected: opts.groups[0].expected, actual: "h:1,k1:2,k2:3,k3:4",
+            members: [{ id: "h", kind: "el", rev: 1 }, { id: "k1", kind: "el", rev: 2 },
+                      { id: "k2", kind: "el", rev: 3 }, { id: "k3", kind: "el", rev: 4 }],
+          }],
+        };
+      }
+      return { ok: true, applied: true, results: ops.map((o) => ({ id: o.id, status: "ok", rev: (o.expected || 0) + 1 })) };
+    });
+    h.sync.reconcile({ els: moved(h.els) }, {});
+    h.sync.flushGesture();
+    await tick();
+    h.runTimers();                                    // the backoff retry
+    await tick();
+
+    // The retry's digest now INCLUDES the member it had never seen — so it can match, and does.
+    expect(h.calls[1].opts.groups[0].expected).toBe("h:1,k1:2,k2:3,k3:4");
+    expect(h.events.some((e) => e.type === "client-stale")).toBe(false);
+    expect(h.reports.some((r) => r.name === "element-group-member-unknown")).toBe(true);
+  });
+
+  it("…and adopting that unknown member must NOT make the next diff invent a delete for it (B377888)", async () => {
+    const h = makeHarness();
+    let call = 0;
+    h.setResponder((ops) => {
+      call += 1;
+      if (call === 1) return {
+        ok: true, applied: false, results: [],
+        groupConflict: [{ assembly: "h", expected: "x", actual: "y",
+          members: [{ id: "k3", kind: "el", rev: 4 }] }],
+      };
+      return { ok: true, applied: true, results: ops.map((o) => ({ id: o.id, status: "ok", rev: (o.expected || 0) + 1 })) };
+    });
+    h.sync.reconcile({ els: moved(h.els) }, {});
+    h.sync.flushGesture();
+    await tick();
+    h.runTimers(); await tick();
+    // k3 is now in the shadow and has NEVER been on this canvas — the exact shape `reconcile` reads
+    // as a deletion. The diff has to actually RUN for this to mean anything: without the reconcile
+    // below the assertion passes on a build that would delete it (found by mutation check).
+    h.sync.reconcile({ els: moved(h.els) }, {});
+    h.runTimers(); await tick();
+    const deletes = h.calls.flatMap((c) => c.ops).filter((o) => o.op === "delete");
+    expect(deletes).toHaveLength(0);
+    expect(h.sync.shadowSnapshot().has("el:k3")).toBe(true);   // …and it was really adopted
+  });
+
   it("gives up LOUDLY rather than looping when the group will not settle", async () => {
     const h = makeHarness();
     h.setResponder(() => ({

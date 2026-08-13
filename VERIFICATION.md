@@ -158,6 +158,199 @@ Unit **10,955 passing**. Lint 0 errors, build green.
    them — they move together. One **Ctrl+Z** puts them all back.
 8. On a second computer: **move a note into a different project** on one, wait for the sync line to
    settle, then check the other. It must follow, and must not drift back.
+### V237632 — B442688: the View menu's content groups on the owner's OWN signed-in plans `Blocker: auth` + `real-data`
+
+**What is proven HERE, and for this item it is nearly the whole claim.** `ui-audit/verify-content-visibility.mjs`
+drives the owner's REAL Silvestri plan (98 elements over 6 types, 3 parcels, 6 markups, 2 measurements,
+16 callouts — the only fixture carrying all five families at once) and his Bain plan for the pond:
+**33/33**. Every family hidden on its own and restored; the Elements master; a reload; Show all.
+Full suite green (543 files / 10,958 tests) incl. `test/contentVisibility.test.js` (30), lint clean,
+build green, bundle audit passing.
+
+**THE BEFORE / AFTER NUMBERS THE BLOCK ASKED FOR — the point being that they are IDENTICAL.**
+On Silvestri, with **every element hidden** (76 of them: 9 buildings, 23 car parking, 5 trailer
+parking, 7 roads, 14 paving, 18 sidewalks) the Yield panel reads, character for character, what it
+read with everything shown:
+
+| | shown | all elements hidden |
+|---|---|---|
+| Buildings | 62.13 ac · 24% | 62.13 ac · 24% |
+| Open space | 133.81 ac · 51% | 133.81 ac · 51% |
+| Pond | 0.00 ac · 0% | 0.00 ac · 0% |
+| Paving | 66.26 ac · 25% | 66.26 ac · 25% |
+| Site | 262.20 ac · 11.42M sf | 262.20 ac · 11.42M sf |
+| Impervious | 49% | 49% |
+| Easements | 5.82 ac · 253,434 sf | 5.82 ac · 253,434 sf |
+
+The harness does not compare those fields one at a time — it compares the WHOLE metrics region as a
+string and requires byte-identity, so a number nobody thought to list cannot drift either. Screenshots:
+`ui-audit/shots/content-visibility/before.png` and `.../elements-hidden.png` (the second is the whole
+claim in one frame: an empty canvas, the amber "6 groups hidden · Show all" banner, and the panel
+still reading 62.13 ac of buildings). Regenerate with `--shots`.
+
+**Also proven here:** nothing is written — the saved record's `els`/`parcels`/`markups`/`measures`/
+`callouts` are byte-identical after hiding, and no `commit_elements` / `site_elements` request leaves
+the browser. **Mutation-proven:** moving the filter one seam earlier (filtering `els` before the
+metrics pass) leaves the canvas pixel-identical and takes Buildings to `0.00 ac · 0%` — 33/33 → 28/33.
+
+**What CANNOT be checked here, and why each is a real blocker rather than a to-do.**
+1. **`auth`** — the sandbox proxy CORS-blocks Supabase sign-in, so every arm ran SIGNED OUT against a
+   locally-seeded copy of his plans. The "nothing is written" claim is therefore proven for the local
+   store and for the absence of an outbound request; it has not been observed against a live
+   `site_elements` table with realtime attached and a second tab open.
+2. **`real-data`** — the fixtures are redacted snapshots. His live plans carry rasters, GIS layers and
+   a drainage context none of which the sandbox can reach.
+3. **The plan-switch case is proven INDIRECTLY and that is stated rather than glossed.** The harness
+   proves the hide is persisted into the plan record and survives a full reload; a plan switch remounts
+   the planner and re-reads that same record, so the mechanism is the same one. It has not been driven
+   as a two-plan gesture.
+
+**The signed-in steps still pending** (any browser-equipped session, on planyr.io):
+1. Open a plan with buildings, ponds, roads, parcels and markups. Note the Yield panel's numbers.
+2. Open **View ▾**. Hide each group in turn — Elements (and each type under it), Parcels, Markups,
+   Measurements, Text & callouts. Confirm each leaves the canvas and **that not one number in Yield
+   moves by a single unit**, Site Analysis included.
+3. Confirm the header turns amber and NAMES what is hidden while the card is closed.
+4. Reload, and switch to another plan and back. The hidden groups should still be hidden, and the
+   other plan should be unaffected (the state is per plan).
+5. Press **Show all**. Everything returns.
+6. Confirm **Parcel acreage** in *Labels* hides every chip, and that a lot you had hidden by hand
+   (right-click → Hide acreage label) STAYS hidden when you turn the master back off.
+7. Confirm dock doors are drawn on every building with no toggle for them anywhere — and, if you have
+   a plan where you had turned them OFF, that they are back.
+
+### V230480 — B435536: the easement label on 8 South no longer dwarfs its own easement `Blocker: real-data`
+
+**Proven here already, logged out, in a real browser.** `e2e/easement-label-fit.spec.js` seeds his own
+production easement row (`e1454917vfjirh`, 60 ft centreline, ~513 ft, the 30-character
+`CONVEYANCE CHANNEL 2 DIVERSION` override), selects it, sweeps a real wheel zoom from below his
+reported frame inward, and at every step reads the REAL `getBBox()` of the label and of the easement
+polygon off every rendered copy — asserting the label is never wider than the feature. It also
+asserts the label is HIDDEN at his reported zoom, that it does REVEAL further in (a spec that hid it
+forever would prove nothing), and that the font CHANGES across the sweep (shrinking to a smaller
+constant is explicitly not the fix). **Mutation-proven: restoring the pre-fix line fails it at
+199.5 px of label over 10.3 px of feature** — his reported 199 px, reproduced. Unit half:
+`test/featureNameLabel.test.js` (18). Full suite 10,969 green, lint 0, build green.
+
+**What still needs his own plan.** The seeded site is not 8 South: it has one easement, no aerial, no
+GIS and none of his 77 other features competing for the same space.
+
+**Steps:**
+1. Open **8 South / Concept A** (`smqiljx5fngg`) at whole-site zoom. Select the easement
+   `CONVEYANCE CHANNEL 2 DIVERSION`. **The label must not draw.** The hatched band, the centreline
+   and the edit handles must all still be there — only the name is gone.
+2. Zoom in until the easement reads as a band rather than a line. The label appears, and it should
+   look like it belongs to the same drawing as the labels beside it rather than sitting on top of it.
+3. Check the two siblings, which got the same fix and which he did NOT report: a **traced** overlay
+   line and a **deed encumbrance** boundary. Same behaviour — name hidden when the feature is small,
+   revealed and consistently sized when it is not.
+4. ⚠ Judgement call worth his eye: the reveal is later for a LONG name than a short one on the same
+   easement. That is deliberate (the label has to fit the feature) but it means renaming an easement
+   changes when its name appears. If that reads as a bug rather than as a rule, say so.
+5. Export a PDF at whole-site zoom and confirm the same: no name printed across the sheet, and no
+   easement printed with a name wider than itself.
+
+### V230481 — B435537: Baytown's ordinance on his two Baytown-area sites `Blocker: real-data` `Blocker: auth`
+
+**Proven without a browser.** `test/baytownFlood.test.js` (23) drives the real rule records through the
+real resolver: the higher-of rule at three surface pairs, the shaded-Zone-X case, both hazard areas,
+the provenance, the `silent` applicability finding, the governance refusals, and the guard that no
+other city changed behaviour. Texas golden master regenerated with **all 14 differing paths proven to
+be under a `baytown` key**. Full suite 10,969 green.
+
+**Steps:**
+1. **Goose Creek** (`sms69x8rb2qk`), southern parcel (`e1454746tcmstb`, 96.2% inside full-purpose
+   city limits): the floodplain authority must NAME the City of Baytown and cite **Sec. 110-102(2)**.
+   ⚠ Expect the printed FFE to still come from **Harris County**, which is the stricter of the two by
+   2 ft — that is the existing strictest-wins design, and step 5 is the question it raises.
+2. The northern and middle parcels (ETJ only): Baytown and Harris County must appear **side by side**
+   with the authority marked unresolved, and no settled floor printed.
+3. **Grand Port** (`smqfy2r7pdec`): the same side-by-side against Chambers County, which has no
+   modelled rule — so Baytown's is the only number, and it must still not read as settled.
+4. **A site in shaded Zone X inside Baytown must get a Baytown floor, not a no-rule answer.** This is
+   the one most likely to be wrong in the wild, because most administrators in this metro do not
+   regulate the 500-year band and a generic "outside the SFHA" path would swallow it.
+5. **No site outside Baytown's ETJ may gain a Baytown rule** — walk a few of the other 26.
+6. ⚠ **A decision for him, not a check:** inside Baytown's full-purpose limits the resolver still
+   ranks Harris County above the city because it is stricter, so the county's number prints on land
+   the city administers. Conservative (it can only over-elevate) but arguably wrong. Changing it moves
+   numbers across the portfolio, so it was reported rather than altered under this ticket.
+
+### V222352 — B427408–B427413: the map-chrome pass on the OWNER'S OWN WINDOW, and on the signed-in surfaces the radius sweep could not reach `Blocker: auth` + `real-data`
+
+**What is proven HERE, and it is nearly all of it — this is deliberately a SHORT list.** The whole
+block was driven headless on the built app by `ui-audit/verify-map-chrome.mjs`: **17/17 clean, and 11
+of those checks RED against a `origin/main` build served beside it**, which is the part that makes the
+green meaningful. Desktop 1600x900 with the Your-sites panel seeded, expanded and asserted on screen
+before anything was measured against it; phone 390x844 for the other direction the owner asked for.
+The zoom reachability check is a real `elementFromPoint` hit test, the collapse check reads the panel's
+own rendered width (268 -> 150 -> 268), the imagery check asks the DOM where the control actually
+lives, and the radius check sweeps every visible element's four computed corners (208 off-scale
+pre-fix -> 0). Full suite green (541 files / 10,918 tests), lint clean, build green.
+
+**BEFORE / AFTER — the full map view, as the owner asked. COMMITTED, at
+`ui-audit/shots/map-chrome/desktop-before.png` and `.../desktop-after.png`** — the harness writes to
+`ui-audit/out/`, which is gitignored, so the two views worth keeping are copied where they survive.
+Regenerate the full set (phone, and the layers-collapsed state) with
+`node ui-audit/verify-map-chrome.mjs --shots`. The before shot shows the reported defect
+plainly: the zoom control is not merely overlapped, it is entirely invisible under Your sites.
+
+**What CANNOT be checked here, and why each is a real blocker rather than a to-do.**
+1. **`auth`** — the sandbox proxy CORS-blocks Supabase sign-in, so the radius sweep ran over the
+   SIGNED-OUT chrome. Three surfaces it therefore never saw are exactly the ones the owner named:
+   the **account chip** ("even the Michael Butler at the top, that chip has different radii"), the
+   **cloud-sync badge** in its signed-in states, and the **project breadcrumb** carrying real project
+   and plan names. All three were repointed to the scale and are covered by unit-level review, but
+   no computed-style sweep has run over them.
+2. **`real-data`** — the harness seeds 14 synthetic sites. The owner has 28, with real names, real
+   statuses and a much taller list, and the jurisdiction pill on a real plan is the longest string in
+   his portfolio.
+3. **His display.** PERCEPTUAL-PARITY's viewing geometry is stated, not measured: he is on a 2K panel
+   and this repo cannot know its physical width or his viewing distance. Whether the consolidated
+   scale reads as consistent is finally his eye's call, and only on his screen.
+
+**The signed-in steps still pending** (any browser-equipped session, on planyr.io):
+1. Sign in, open the **Map** view at a wide desktop window with **Your sites expanded** and the
+   **Layers panel open**. Confirm both zoom buttons are fully visible and clickable in the bottom-left
+   corner, with nothing over them and no banner landing on them.
+2. Collapse the Layers panel with its header control; confirm the imagery behind it is genuinely freed
+   rather than left under a stub. Reload and confirm it is still collapsed; expand it and reload again.
+3. In the layer list, confirm **BASE & TERRAIN** leads with the Esri/USGS control and **Place names**
+   beneath it with its own info affordance, and that switching base imagery still works.
+4. Look at the corners: the account chip, the cloud badge, the breadcrumb, the search bar and its two
+   buttons, the two panels. **The question is whether anything still disagrees**, not whether any one
+   value is right.
+5. Repeat 1-3 on a phone.
+
+### V215200 — B420256: a real multi-op commit still settles correctly on the plan that holds one id under two kinds `Blocker: auth` + `real-data`
+
+**What is proven HERE, and it is the mechanism itself.** `test/elementResultPairing.test.js` drives the
+REAL sync engine over the owner's actual collision — `e6327` as both `el` and `markup` — through one
+batch carrying both ops, and asserts each op receives its own result across five shapes: conflict beside
+ok (and the mirror), a `deleted` result that must not tombstone the neighbour, the B1117 atomic-rollback
+rev adoption, and an out-of-order response. It was **proven RED on the unfixed code first** — 5 of 7
+failing, with the two passing cases being deliberate controls, so the suite is not merely describing the
+new implementation. Full repo suite green (542 files / 10,931 tests), lint 0 errors, build green, bundle
+audit passing.
+
+**What CANNOT be checked here, and why it is a real blocker rather than a to-do.** The collision lives on
+one signed-in plan (site `smqh3au6aeb4`, Katz / Plan 1) and the pairing only executes against a genuine
+multi-op `commit_elements` round trip. The sandbox proxy CORS-blocks the Supabase auth handshake, so no
+self-test here can sign in, open that plan, or issue a real RPC — every test above injects the commit
+adapter. **This plan must NOT be modified to make the check easier:** the duplicate id is legitimate live
+data and the code's job is to tolerate it.
+
+**The signed-in steps still pending, in order:**
+1. Sign in on planyr.io, open **Katz / Plan 1** (`smqh3au6aeb4`) and confirm both `e6327` objects render —
+   the building AND the markup — as they do today. Nothing about the drawing should change.
+2. Move the building and the markup **in one gesture** (marquee both, drag once) so a single batch carries
+   both ops, then reload and confirm both kept their new positions.
+3. With a second window open on the same plan, edit the building in window A and the markup in window B,
+   then commit both — the loser should toast for the kind that actually lost, and only that kind.
+4. Check `client_errors` for `element-results-unaligned`. It should be **absent**: its presence would mean
+   the live RPC is not returning one result per op in op order, which is the assumption the fix rests on.
+
+Recorded 2026-08-13 · shipped in the same session · ⏳ pending.
 
 ### V209424 — B407328: the screening study still runs, and still returns the SAME numbers, now that its engine arrives by dynamic import `Blocker: real-data` + `live-GIS`
 

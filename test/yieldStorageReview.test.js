@@ -23,7 +23,7 @@ import {
 } from "../src/workspaces/site-planner/lib/floodAdministrator.js";
 import { apronElevFt, assessApron, apronFillIncluded, APRON_FILL_TYPES } from "../src/workspaces/site-planner/lib/apronElevation.js";
 import { cutFillBalance, padFillDemandCf, classifyStorageSurplus, assessCutFill } from "../src/workspaces/site-planner/lib/cutFillBalance.js";
-import { DEFAULT_BUILDABILITY_RULES } from "../src/workspaces/site-planner/lib/buildability.js";
+import { DEFAULT_BUILDABILITY_RULES, requiredFfe } from "../src/workspaces/site-planner/lib/buildability.js";
 
 const ACFT = 43560;
 // A square pond, big enough that 3:1 side slopes don't pinch it off.
@@ -670,12 +670,21 @@ describe("NEW-1c — an authority we have no rule for blocks a settled FFE and i
     expect(a.candidates.some((c) => c.key === "baytown" && c.kind === "etj")).toBe(true);
   });
 
-  it("an unmodelled PRIMARY/ETJ candidate blocks `settled` and is named", () => {
+  /* ⛔ UPDATED BY NEW-8 (B435537) — THE HOLE MOVED, IT DID NOT CLOSE. Baytown's rule is now
+   * transcribed (Sec. 110-102(2)), so it is no longer an UNMODELLED candidate. What remains open on
+   * Goose Creek is different and narrower: the ETJ two thirds. Baytown's ordinance was read and does
+   * NOT say whether it reaches extraterritorial land (Sec. 110-31 is the whole applicability clause;
+   * Ch. 110 never mentions the ETJ), so that candidate carries `applicabilityUnknown` and still
+   * blocks a settled floor. Same invariant — the site never prints a settled FFE and the gap is
+   * NAMED — reached through the field that now describes it truthfully. */
+  it("an authority whose REACH is unresolved blocks `settled` and is named", () => {
     const a = gooseCreek();
-    expect(a.unmodelledCandidates.map((u) => u.key)).toContain("baytown");
+    expect(a.unmodelledCandidates.map((u) => u.key)).not.toContain("baytown");   // the rule IS on file now
+    expect(a.unresolvedApplicability.map((u) => u.key)).toContain("baytown");
     expect(a.settled).toBe(false);
-    expect(a.unmodelledNote).toMatch(/No floodplain rule is modeled for/);
-    expect(a.unmodelledNote).toMatch(/floor, not the answer/);
+    expect(a.unresolvedApplicabilityNote).toMatch(/does not state whether/);
+    // and its NUMBER is available for the side-by-side the owner asked for
+    expect(a.unresolvedApplicability.find((u) => u.key === "baytown").ffe).toBeTruthy();
     // The provisional answer is still computed — the reader needs what we DID find.
     expect(a.governingLabel).toBe("Harris County (unincorporated)");
   });
@@ -700,11 +709,20 @@ describe("NEW-1c — an authority we have no rule for blocks a settled FFE and i
     expect(bainSite.governingLabel).toBe("Fort Bend County");
   });
 
-  it("⛔ Baytown's rule is NOT transcribed, and must not be filled in from recollection", () => {
+  /* ⛔ SUPERSEDED BY NEW-8 (B435537). This case asserted that Baytown's rule was NOT transcribed and
+   * must not be filled in from the owner's recollection ("roughly 2 ft above the 500-year"). That
+   * held until he supplied the ordinance text from his own browser. The recollection was then
+   * CHECKED rather than confirmed, and it was wrong: Sec. 110-102(2) is the HIGHER OF the 500-year
+   * elevation and BFE + 24 in, which is up to 2 ft BELOW his version where the 500-yr sits well
+   * above the BFE, and above it where the two surfaces are close. So the rule is now transcribed —
+   * and the reason this case existed is vindicated rather than retired. */
+  it("⛔ Baytown's rule is transcribed from the ordinance, and is NOT the recollected 500-yr + 2", () => {
     expect(rules.baytown).toBeTruthy();
-    expect(rules.baytown.ffeRule).toBe(null);
-    expect(rules.baytown.verified).toBe(false);
-    expect(rules.baytown.source).toMatch(/NOT TRANSCRIBED/);
+    expect(rules.baytown.verified).toBe(true);
+    expect(rules.baytown.source).toMatch(/110-102\(2\)/);
+    const byBasis = Object.fromEntries(rules.baytown.ffeRule.bases.map((b) => [b.basis, b.plusFt]));
+    expect(byBasis.wse02pct).toBe(0);   // the 500-yr elevation itself — NOT 500-yr + 2
+    expect(byBasis.wse1pct).toBe(2);    // BFE + 24 in
   });
 
   /* ⛔ NEW-1d — THE RENDER GATES ARE PART OF THE CONTRACT, and getting them wrong hid this item's
@@ -712,13 +730,14 @@ describe("NEW-1c — an authority we have no rule for blocks a settled FFE and i
    * how many authorities govern, versus whether we hold their rules — and the panel had them
    * mutually exclusive. Goose Creek is both, so the "no rule on file for Baytown" line never
    * rendered there. These cases assert the gate CONDITIONS the panel evaluates. */
-  it("split and unmodelled are independent — Goose Creek is BOTH and must show both", () => {
+  it("split and an unresolved REACH are independent — Goose Creek is BOTH and must show both", () => {
+    // NEW-8: the second fact is now "rule on file, reach unresolved" rather than "no rule on file".
     const a = gooseCreek();
     expect(a.split).toBe(true);
-    expect(a.unmodelledCandidates.length).toBeGreaterThan(0);
-    // The panel gate for the unmodelled line must not exclude a split site.
-    const unmodelledLineShows = !a.unresolved && a.unmodelledCandidates.length > 0;
-    expect(unmodelledLineShows).toBe(true);
+    expect(a.unresolvedApplicability.length).toBeGreaterThan(0);
+    // The panel gate for that line must not exclude a split site (the B1d trap, unchanged).
+    const reachLineShows = !a.unresolved && a.unresolvedApplicability.length > 0;
+    expect(reachLineShows).toBe(true);
   });
 
   it("the DEFAULT while unanswered is the authority we DO have, named — never a blank", () => {
@@ -731,27 +750,39 @@ describe("NEW-1c — an authority we have no rule for blocks a settled FFE and i
     expect(a.governing).toBeTruthy();       // …but never empty
   });
 
-  it("an UNMODELLED-but-not-split site still refuses a settled floor", () => {
-    /* The gap this closes: not split, nothing failed, so the verdict row fell through to
-     * "pads pass at X′ FFE" — a settled claim with a governing city's rule missing from the
-     * comparison behind it. */
+  /* ⛔ THIS CASE INVERTED UNDER NEW-8, AND THE INVERSION IS THE DELIVERABLE. It used to assert that a
+   * site wholly inside Baytown's full-purpose limits could NOT print a settled floor, because the
+   * governing city's rule was missing from the comparison. Transcribing Sec. 110-102(2) is precisely
+   * what fixes that, so the same site now SETTLES — with a cited, verified city ordinance behind the
+   * number instead of silence. Kept (rather than deleted) so the before/after is on the record. */
+  it("a site wholly inside Baytown's LIMITS now settles, on a cited city ordinance", () => {
     const whollyInBaytown = assessAdministrator({
       signals: { floodJurKey: "harris", county: "Harris", cityLabel: "Baytown", etjLabel: null },
       rules,
     });
     expect(whollyInBaytown.split).toBe(false);
     expect(whollyInBaytown.unresolved).toBe(false);
-    expect(whollyInBaytown.unmodelledCandidates.map((u) => u.key)).toContain("baytown");
-    expect(whollyInBaytown.settled).toBe(false);
+    expect(whollyInBaytown.unmodelledCandidates.map((u) => u.key)).not.toContain("baytown");
+    expect(whollyInBaytown.unresolvedApplicability).toEqual([]);   // full-purpose limits: reach is not in question
+    expect(whollyInBaytown.settled).toBe(true);
+    expect(whollyInBaytown.candidates.find((c) => c.key === "baytown").rule.source).toMatch(/110-102\(2\)/);
   });
 
   it("the comparison that answers 'how many feet do the pads move': Harris is ALREADY 500-yr + 2 ft", () => {
-    /* This is the fact that reframes the owner's concern. He expected Baytown (~500-yr + 2 ft) to be
-     * materially STRICTER than the basis in use. Harris County's modelled rule — verified, cited at
-     * §4.07(b)(1) — is the SAME datum and the SAME freeboard, so if his recollection is right the
-     * required floor does not move at all. The exposure is only if Baytown differs from that. */
+    /* ⛔ ANSWERED BY NEW-8, AND THE ANSWER IS "THEY DO NOT MOVE — AND BAYTOWN IS THE LOOSER RULE".
+     * The concern was that Baytown (recollected as ~500-yr + 2) would be materially STRICTER than the
+     * basis in use. Measured against the real ordinance: Harris County is 500-yr WSE + 2 (§4.07(b)(1),
+     * verified), while Baytown Sec. 110-102(2) is the HIGHER OF the 500-yr elevation and BFE + 24 in.
+     * Wherever the 500-yr sits at least 2 ft above the BFE — the ordinary case in flat Harris and
+     * Chambers floodplain — Baytown's number IS the 500-yr, i.e. 2.0 ft BELOW Harris's.
+     * Consequence: on Goose Creek the strictest-wins resolver keeps Harris, and no pad moves. */
     expect(rules.harris.ffeRule).toEqual({ basis: "wse02pct", plusFt: 2 });
     expect(rules.harris.verified).toBe(true);
+    const bt = requiredFfe(rules.baytown, { wse1pctFt: 50, wse02Ft: 54.5 }).requiredFfeFt;
+    const ha = requiredFfe(rules.harris, { wse1pctFt: 50, wse02Ft: 54.5 }).requiredFfeFt;
+    expect(bt).toBeCloseTo(54.5, 6);
+    expect(ha).toBeCloseTo(56.5, 6);
+    expect(ha - bt).toBeCloseTo(2.0, 6);      // Harris stays stricter by 2 ft — the pads do not move
   });
 });
 
