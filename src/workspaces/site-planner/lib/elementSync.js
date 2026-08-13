@@ -284,6 +284,12 @@ export function createElementSync(opts = {}) {
    * A key leaves this map the moment a diff SEES the element in the collections. From then on the
    * canvas has genuinely held it, so a delete for it is a real user intent and is honoured. */
   const remoteOnly = new Map();      // key -> { rev, at }  (server has it, this canvas never showed it)
+  /* B1341 stage 2 — key -> assembly id, learned from a group conflict. An adopted-from-conflict
+   * member carries a rev but NO data, so its host cannot be read off its json the way every other
+   * membership question is answered — and without this it buckets under its own id, drops out of
+   * the next digest, and the very deadlock the adoption exists to break stays shut. The server
+   * named the assembly in the conflict; that is the honest source, so record it rather than infer. */
+  const assemblyOf = new Map();
   /* Keys whose stale delete was DROPPED and whose server row was handed back to the canvas. Until
    * the canvas actually shows the element again, the shadow holds it and the collections do not —
    * which is the exact shape the diff reads as "deleted", so without this the next reconcile would
@@ -817,6 +823,9 @@ export function createElementSync(opts = {}) {
       let root = cur ? rootIdOf(cur, shad.id) : null;
       if (root == null) {                       // not on the canvas → read the bond off the shadow json
         try { root = rootIdOf(JSON.parse(shad.json || "null"), shad.id); } catch (_) { root = shad.id; }
+        // …and a member adopted from a conflict has no json at all, so fall back to what the
+        // SERVER told us its assembly was.
+        if (root === shad.id && assemblyOf.has(key)) root = assemblyOf.get(key);
       }
       if (root == null || !roots.has(root)) continue;
       let list = members.get(root);
@@ -858,7 +867,31 @@ export function createElementSync(opts = {}) {
         const cur = shadow.get(key);
         // Keep OUR json as the diff baseline (the canvas still holds it and we still intend to
         // write it); adopt only the rev, flagged `stale` because json and rev now disagree.
-        if (cur) shadow.set(key, { ...cur, rev: m.rev, stale: true });
+        if (cur) { shadow.set(key, { ...cur, rev: m.rev, stale: true }); continue; }
+        /* ⛔ A MEMBER WE HAVE NEVER HEARD OF, and without this the guard DEADLOCKS.
+         *
+         * The server's digest covers every live row of the assembly; ours covers every row in the
+         * shadow. If another writer CREATED a member and this tab's realtime has not delivered it
+         * yet, the two can never agree — our digest omits it, every retry recomputes the same
+         * omission, and after `maxRejectStreak` the tab declares itself stale and stops saving.
+         * Loud and recoverable (a reload fixes it), but it is a stuck state reachable by exactly
+         * the two-writer case this feature exists for, which is the worst possible place for one.
+         *
+         * The conflict payload carries what is needed to converge: id, kind and rev. Adopt it as a
+         * shadow entry with NO json — a mixed json↔rev pairing, which is already a representable,
+         * handled state (`stale` keeps `reconcileSeedRows` from substituting it into a re-seed).
+         * The next digest then includes the member at the right rev and the retry can succeed, with
+         * no refetch and no extra round trip.
+         *
+         * ⛔ AND IT MUST BE MARKED `remoteOnly`, or B377888 fires on our own repair: the shadow now
+         * holds an element the CANVAS has never shown, which is precisely the shape `reconcile`
+         * reads as "the user deleted this". Same fact, same guard — the row is the server's, and
+         * this tab has no deletion to express. */
+        shadow.set(key, { kind: m.kind || "el", id: m.id, json: "", rev: m.rev, z: 0, stale: true });
+        if (!remoteOnly.has(key)) remoteOnly.set(key, { rev: m.rev, at: now() });
+        if (c.assembly != null) assemblyOf.set(key, c.assembly);   // the only record of where it belongs
+        report("element-group-member-unknown", "the conflict named a member this tab has never seen — adopted so the retry can converge",
+          { siteId, id: m.id, kind: m.kind || "el", rev: m.rev });
       }
     }
     for (const e of batch) { const key = skey(e.kind, e.id); if (!dirty.has(key)) enqueue(key, e); }
