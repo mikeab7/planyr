@@ -2045,8 +2045,16 @@ const resolveTaskSpan = t => resolveDuration(t.start, taskDurValue(t), taskDurUn
 const startForEnd = (end, duration) => !end ? "" : (duration <= 1 ? end : addBD(end, -(Math.max(1, duration) - 1)));
 // Display: a task's duration with its typed unit. Month/year bars also expose the derived
 // working-day count via the cell tooltip (nothing hidden — B615).
-const fmtTaskDuration = t => {
+// B463072 — `isSummary` is NOT optional decoration. A parent row carries TWO durations: the span
+// rollupParentDates derives from its children (`duration`, always working days) and the leftover typed
+// value a parent never legitimately owns (`durValue`/`durUnit`, which the rollup does not rewrite, so it
+// keeps whatever it happened to hold). Reading the leftover printed **"0d" on a 40-working-day summary**
+// — measured on the owner's Grand Port row "CCID3: Lift Station & Force Main Approval", which rendered
+// 08/07/26 · 10/02/26 · 0d. Same family as B443248: that one let a stale leftover drive a SUCCESSOR'S
+// DATE, this one let it drive the NUMBER ON SCREEN. For a summary the rolled span is the only truth.
+const fmtTaskDuration = (t, isSummary = false) => {
   if (t.duration === "" || t.duration == null) return "";
+  if (isSummary) return `${t.duration}d`;
   const u = taskDurUnit(t);
   return `${taskDurValue(t)}${u}`;
 };
@@ -9750,7 +9758,7 @@ function Cell({task, col, colMasterIdxs, edit, setEdit, commit, commitAndAdvance
     case "duration":
       return <span style={{...s,...mono,color: task.hasChildren ? "#94a3b8" : "var(--mut)"}}
         title={task.hasChildren ? "Computed from subtasks" : (durTooltip(task) || undefined)}>
-        {fmtTaskDuration(task)}
+        {fmtTaskDuration(task, task.hasChildren)}
       </span>;
     case "predecessors": {
       const preds = normPreds(task.predecessors);
@@ -11511,7 +11519,7 @@ function MasterView({data, setData, updateTask, setNotesCtx, goToTask}) {
         case 'name': val = t.name||''; break;
         case 'start': val = fmtD(t.start); break;
         case 'end': val = fmtD(t.end); break;
-        case 'duration': val = fmtTaskDuration(t)||`${t.duration}d`; break;   // match the unit-aware cell display
+        case 'duration': val = fmtTaskDuration(t, !t.isLeaf)||`${t.duration}d`; break;   // match the unit-aware cell display (B463072: a summary prints its ROLLED span)
         case 'health': val = HEALTH[t.health]?.label||''; break;
         case 'percentComplete': val = `${t.percentComplete||0}%`; break;
         case 'responsibleParty': val = t.responsibleParty||''; break;
@@ -11650,7 +11658,7 @@ function MasterView({data, setData, updateTask, setNotesCtx, goToTask}) {
         return <td key={col.k} style={{...tdBase,cursor:t.isLeaf?"text":"default"}} onClick={onCellClick} onDoubleClick={()=>{ if (!t.isLeaf) return; setLocalEdit({id:t.id,projId:t.projId,col:"duration"}); }}>
           {isE(t,"duration")
             ? <input {...NO_AUTOFILL} autoFocus style={{display:"block",width:"100%",height:"18px",border:"none",borderBottom:"1.5px solid var(--blue)",outline:"none",background:"transparent",fontSize:12,fontFamily:"inherit",color:"var(--txt)",padding:"0 2px"}} defaultValue={localEdit?.initChar ?? fmtTaskDuration(t)} onBlur={e=>commit(t,"duration",e.target.value)} onKeyDown={e=>{if(e.key==="Enter")commit(t,"duration",e.target.value);if(e.key==="Escape")setLocalEdit(null);}} />
-            : <span style={{color:"var(--mut)"}} title={durTooltip(t)||undefined}>{fmtTaskDuration(t)||"0d"}</span>}
+            : <span style={{color:"var(--mut)"}} title={t.isLeaf ? (durTooltip(t)||undefined) : "Computed from subtasks"}>{fmtTaskDuration(t, !t.isLeaf)||"0d"}</span>}
         </td>;
       case "health":
         return <td key={col.k} data-hmenu="1" onClick={onCellClick}

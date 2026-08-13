@@ -3113,6 +3113,57 @@ physical row is a later polish," so **B104** is that remaining polish for the *m
 
 ## ⏳ Verify — awaiting live confirmation
 
+### B463072 — A summary row's Duration cell printed the stale leftover: 40 working days rendered as "0d" `[Schedule]` (bug) #scheduler #ui #export  *(owner chat 2026-08-13, the follow-up audit B443248 provoked — "does anything ELSE still read the stale one?". Minted **B463072 / V258016** against `origin/main` ef8ec2a. DEDUPE-FIRST — searched Open / ⏳ Verify / Done across `durValue`, `duration cell`, `typed duration`, `fmtTaskDuration`, **B621/B615-in-code** (the typed-duration model that introduced `durValue`), **B616/B622**, **B835**, **B443248**: B621 built the two-number model and is where the leftover comes from, B443248 stopped the SCHEDULER reading it. Nothing covers the DISPLAY reading it. Net-new, same family.)*
+`[ ]` **⏳ SHIPPED 2026-08-13. `Verify: live` → V258016 (MERGED ≠ LIVE).**
+- Verify: live → **V258016** (`Blocker: real-data` — his signed-in Grand Port / Goose Creek / 8 South).
+- Origin: filed 2026-08-13 from chat; shipped the same session.
+- **NEVER-PARK disposition: REPRODUCED AND FIXED** (measured on the real page before touching anything).
+- **THE AUDIT THAT FOUND IT, stated so the sweep can be judged rather than trusted.** B443248 established
+  that a group header carries TWO durations — the span `rollupParentDates` derives from its children
+  (`duration`, always working days) and the typed leftover the rollup never rewrites (`durValue`/`durUnit`)
+  — and that nothing keeps them in agreement. Every read of those fields was enumerated across the whole
+  app: **44 sites in `public/sequence/index.html`, and ZERO in `src/`, `functions/` and `server/`** (the
+  React bundle, the Pages Functions and the Cloud Run tier never touch the schedule duration model at all;
+  the MCP schedule tool at `functions/api/mcp/_tools.js` reads `t.duration`, the inherited span — correct).
+- **FOUR LIVE READS OF THE STALE LEFTOVER, all through `fmtTaskDuration`, which had no parent guard:**
+  the project **Grid** duration cell (`hasChildren` was already in hand — it drove the cell's colour and
+  its "Computed from subtasks" tooltip, but not its VALUE); the **Master** cross-project view (whose own
+  comment already read *"Parent durations roll up from children — locked, same as the project grid"*
+  while it rendered the leftover); and the **export / exhibit column** layout, whose `||` fallback to
+  `${t.duration}d` only fires on a blank duration and so never caught a leftover of `0`.
+- **MEASURED ON THE REAL PAGE, pre-fix**, on the owner's own row shape: `CCID3: Lift Station & Force Main
+  Approval` rendered **`08/07/26 · 10/02/26 · 0d`** — forty working days of permitting printed as a
+  zero-day milestone, in the grid and in the export. Post-fix the same cell reads **`40d`**, while the
+  leaf beside it still reads the unit it was typed in (`30d`).
+- **READS THAT WERE ALREADY CORRECT** (checked, not assumed): `cascadeDates` (guarded by B443248's parent
+  skip) · `durTooltip` (only called when `!hasChildren`) · Gantt bar geometry and `buildGanttSVG` /
+  `buildPDFHtml` (**zero** `durValue` reads — bars come from `start`/`end`) · `detectCascadeDrift`
+  (compares starts) · the v7 migration and the holiday re-cascade (both run `resolveDuration` over parents
+  but are immediately followed by a rollup, so the collapsed value never survives) · the master view's
+  duration EDITOR seed, which is leaf-only by construction (`if (!t.isLeaf) return`) and must keep seeding
+  the typed unit so a leaf edits in the unit it was typed in.
+- **THE FIX.** `fmtTaskDuration(t, isSummary)` — a summary short-circuits to `${t.duration}d`, the rolled
+  span, in working days. A summary deliberately does NOT inherit the leftover UNIT either: a row once
+  typed "2mo" that later became a parent would otherwise print "2mo" for a span its children put at 63
+  working days, which is a second wrong number rather than a fix.
+- **POSITIVE CONTROL — the sweep was pointed at source known to contain the defect before it was trusted
+  finding nothing.** Run against pre-#1020 `ea8fc18`, the same searches surface 1 grid + 2 export
+  one-armed `fmtTaskDuration` sites, and 2 unguarded `resolveTaskSpan` call sites against 0 parent guards
+  (the exact shape of the already-confirmed B443248). Against current source: 0 and 1.
+- **THE DURABLE GUARD is a source sweep, not a case list**: `test/schedulerEngine.test.js` fails if any
+  render or export site calls `fmtTaskDuration` one-armed, with the leaf-only editor seed named as the
+  single sanctioned exception — so the NEXT such site cannot be added silently.
+- Guards MUTATION-PROVEN RED both ways: dropping the `isSummary` short-circuit → 4 unit failures;
+  reverting the grid to `fmtTaskDuration(task)` → 4 unit failures **and** the browser harness reads
+  **`"summaryDur":"0d"`**, reproducing the defect exactly.
+- Bundle: **zero delta — 0 of the repo's own `perf-bundle-audit --json` metrics differ from `origin/main`**
+  (head vs base captured separately and diffed). The four "above baseline" lines that tool prints are
+  pre-existing on main and identical on both sides.
+- PANEL-BREVITY: no copy added — one cell's VALUE corrected, and the master view's tooltip repointed to
+  the same "Computed from subtasks" string the grid already used.
+- Files: `public/sequence/index.html`, `ui-audit/stress/scheduler-engine.mjs` (verbatim mirror),
+  `test/schedulerEngine.test.js`, `ui-audit/verify-summary-pred-dates.mjs`.
+
 ### B455360 — Parcel split only accepted trivial cuts; it now takes a general polyline cut `[Site Planner / parcels]` (feature) #site-planner #parcel #geometry #ui  *(owner chat block 2026-08-13, arrived as NEW-1, verbatim: "I tried to split a parcel, but it seems like it only allows very simple cuts. And I'd like to split a parcel with a more complicated cut. So let's fix this." Minted **B455360 / V250304** LATE via `git fetch origin main && npm run next-id -- --against-main`, from this branch's reserved block B455360–B455375 · V250304–V250319 (origin/main c378cc8); code, tests and commits keep the provisional `NEW-1` label. **DEDUPE-FIRST — searched Open / ⏳ Verify / Done across `parcel split`, `split parcel`, `splitPolygon`, `polygonSplit`, `concave`, `acreage`, `deed`, `promote`, `parcel drawing`, `B128`, `B416`, `B628`, `B651`, `B652`, `B682`.** Six neighbours, none of them this, and NOT a recurrence of any: **B128** (Done) made a STRAIGHT cut correct on a concave lot by pairing all crossings along the infinite line — that work is intact, still tested, and is now the independent ORACLE the general engine is cross-checked against; **B416** (Done) made the Split control reachable from the Parcel panel — discoverability, not geometry; **B628** owns the canvas/parcel menu the tool is armed from; **B651** (⏳ Verify) made a split a REPLACEMENT (parent superseded, children active) — that model is unchanged and this rides on it; **B652** is the active-parcel overlap warning; **B682** is the acreage-label duplication defect. The limit reported here was never filed by anyone: the engine had no representation for a cut that bends or crosses the boundary more than twice. Net-new.)*
 `[x]` **SHIPPED.** `src/workspaces/site-planner/lib/polygonSplit.js` — `splitPolygonByCut`, a general polygon-split-by-polyline — wired as the Split tool's only caller.
 - Verify: **live** — `V250304` (a signed-in pass on his own cloud plans; `Blocker: auth`). The logged-out half is proven HERE and is unusually strong for this class — see the evidence below.

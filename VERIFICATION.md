@@ -113,6 +113,29 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V258016 — B463072: a group header's Duration reads its real span on his own schedules `Blocker: real-data` `Blocker: auth`
+
+**Proven here already, in a real browser.** `ui-audit/verify-summary-pred-dates.mjs`
+(`npm run verify:schedpreds`) renders the real Grid on his CCID3 row shape and reads the Duration CELL by
+column position: **`40d`** for the summary, **`30d`** for the leaf beside it. **Mutation-proven: revert the
+grid to the one-armed call and the same cell reads `0d`.** Unit half in `test/schedulerEngine.test.js`
+(leftover unit not inherited · leaf untouched · blank stays blank · 0-day summary still 0d · end-to-end
+against the engine's own rolled span), also mutation-proven. Full suite green.
+
+**What still needs his own signed-in session.** The sandbox renders a seeded project, not his real ones,
+and cannot exercise the PDF/exhibit export path end to end (it needs a real export run).
+
+**Steps:**
+1. Open **Grand Port**. Find the group **CCID3: Lift Station & Force Main Approval**. Its Duration should
+   read **40d**, matching its 08/07/26 → 10/02/26 span. Before this it read 0d.
+2. Scan the other group headers in Grand Port, **Goose Creek** and **8 South** — any that used to read a
+   suspiciously small number (0d especially) should now read a span that matches their bars.
+3. Open the **cross-project Master view** and check the same headers there — it had the identical defect.
+4. **Export a PDF / exhibit with the Duration column shown.** The printed group rows must carry the same
+   number as the screen. This is the one path that could not be exercised here.
+5. ⚠ Worth his eye: a leaf still shows the unit he typed (3mo, 30cd, 15d); a group header always shows
+   working days. If a group reading "40d" beside a child reading "2mo" is confusing, say so.
+
 ### V250304 — B455360: a complicated parcel cut, on his own signed-in cloud plans `Blocker: auth`
 
 **What is proven WITHOUT sign-in, and it is a lot.** `e2e/parcel-split-complex-cut.spec.js` is
