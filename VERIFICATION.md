@@ -200,6 +200,16 @@ data path the sandbox cannot reach.
 4. If it happens even once, note what was on screen and what you had just done; that is the missing
    observation, and it is worth more than another sandbox pass.
 
+**Confirmed on the DEPLOYED build (2026-08-13), because merged and deployed are different claims.**
+`planyr.io/sequence/` fetched and hashed: byte-identical to `origin/main`, so the deploy is current.
+Driven on those exact bytes: the edited row holds its place through a fold, the selection stays on
+it, what is typed next lands in the cell it was in, and #1028's Enter-latch and portal mousedown
+guard still hold (12/12). Scope: Chromium cannot reach the public internet from this sandbox, so the
+deployed bytes are served locally — the artifact is the deployed one, the edge is not under test.
+
+**⛔ What that does NOT settle: his symptom has never been seen by any instrument here.** Both fixes
+are real; neither is known to be the thing he described.
+
 **Status:** ⏳ pending. **Do not mark B463922 Done on the sandbox evidence alone** — an owner-reported
 symptom is never closed on a null (NEVER-PARK), and the question is on `OWNER-TODO.md`.
 ### V273520 — B484337: does a tab that has STOPPED saving actually say so? `Blocker: auth`

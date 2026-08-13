@@ -34,6 +34,16 @@
 > **§7's list of five lies takes a SIXTH, and it is the one that produced this document:** a browser
 > driver scrolls to reach an off-screen target, invisibly to every JS-level scroll probe.
 >
+> ### ⚰️ KILLED HYPOTHESES — do not re-open these
+>
+> | hypothesis | how it died | the measurement that killed it |
+> |---|---|---|
+> | **Chrome's scroll anchoring lost its anchor** (§5's leading theory) | **KILLED** | `overflow-anchor:none` on the container *and every descendant*, computed style verified: unchanged, −501 to the pixel. Chromium launched with `--disable-blink-features=ScrollAnchoring`: unchanged. **Positive control: inserting 500 px of content above the viewport moved `scrollTop` by exactly 0** — this container was never anchoring anything, because its rows are absolutely positioned and an out-of-flow box is never an anchor candidate. |
+> | **The keep-the-selected-row-visible effect chases a stale index** (§3) | **KILLED** twice over | Zero scroll writes on the path, as §3 found — and the path itself turned out to be the harness. |
+> | **Virtualisation recycles rows inconsistently across a collapse** (§5's fallback) | **NEVER NEEDED** | The collapse path is correct when driven the way a human drives it: −24 px for one row removed, −48 px for two, `scrollTop` unmoved. There is no anomaly left for it to explain. |
+>
+> A hypothesis that is merely left unmentioned gets re-suspected by the next reader. These are dead.
+>
 > **What replaced this:** `ui-audit/verify-grid-row-hold.mjs` (rendered position, ±2 px, every click
 > through `lib/visibleClick.mjs`, a model witness AND a selection witness, and a self-test that
 > re-proves the gate every run) — plus the two real fixes it found: the collapse triangle no longer

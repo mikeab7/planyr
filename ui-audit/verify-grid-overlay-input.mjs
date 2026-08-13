@@ -26,22 +26,33 @@ import { extname, join, normalize } from "node:path";
 import { assertMeasurable } from "./lib/tabTiming.mjs";
 import { pacedWait } from "./lib/tabTiming.mjs";
 import { ensureVendored, rewriteCdn, serveVendored } from "./lib/vendorCdn.mjs";
+import { servedProvenance, provenanceReport } from "./lib/deployedTarget.mjs";
 
 const ROOT = new URL("../public/", import.meta.url).pathname;
 const EXEC = process.env.PW_CHROME || "/opt/pw-browsers/chromium-1234/chrome-linux64/chrome";
 const MIME = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".svg": "image/svg+xml", ".json": "application/json" };
 
+/* MERGED IS NOT DEPLOYED. With PLANYR_URL set this drives the artifact the owner actually opens,
+   and states which commit's bytes came back before it measures anything. */
+const DEPLOYED = process.env.PLANYR_URL || null;
+let deployedBody = null;
 await ensureVendored();
 const server = createServer(async (req, res) => {
   try {
     if (await serveVendored(req, res)) return;
     let p = decodeURIComponent(req.url.split("?")[0]); if (p.endsWith("/")) p += "index.html";
     const fp = normalize(join(ROOT, p)); if (!fp.startsWith(ROOT)) { res.writeHead(403); return res.end(); }
-    let body = await readFile(fp);
+    let body = (deployedBody && p.endsWith("sequence/index.html")) ? deployedBody : await readFile(fp);
     if (p.endsWith("sequence/index.html")) body = Buffer.from(rewriteCdn(body.toString("utf8")));
     res.writeHead(200, { "Content-Type": MIME[extname(fp)] || "application/octet-stream" }); res.end(body);
   } catch { res.writeHead(404); res.end("not found"); }
 });
+if (DEPLOYED) {
+  const prov = await servedProvenance(DEPLOYED);
+  console.log(provenanceReport(prov, DEPLOYED));
+  if (!prov.ok) { console.log("FAIL — the deployed artifact could not be read, so nothing here is a measurement of it."); process.exit(1); }
+  deployedBody = prov.body;                       // drive the bytes he actually receives
+}
 await new Promise(r => server.listen(0, r));
 const url = `http://localhost:${server.address().port}/sequence/`;
 
