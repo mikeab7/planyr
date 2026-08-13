@@ -29,6 +29,7 @@ import { extname, join, normalize } from "node:path";
 import { assertMeasurable } from "./lib/tabTiming.mjs";
 import { pacedWait } from "./lib/tabTiming.mjs";
 import { ensureVendored, rewriteCdn, serveVendored } from "./lib/vendorCdn.mjs";
+import { servedProvenance, provenanceReport } from "./lib/deployedTarget.mjs";
 import { visibleClick, installScrollWitness, targetVisibility } from "./lib/visibleClick.mjs";
 
 const TOL = 2;                       // px the anchor row may move on screen
@@ -37,17 +38,27 @@ const ROOT = new URL("../public/", import.meta.url).pathname;
 const EXEC = process.env.PW_CHROME || "/opt/pw-browsers/chromium-1234/chrome-linux64/chrome";
 const MIME = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".svg": "image/svg+xml", ".json": "application/json" };
 
+/* MERGED IS NOT DEPLOYED. With PLANYR_URL set this drives the artifact the owner actually opens,
+   and states which commit's bytes came back before it measures anything. */
+const DEPLOYED = process.env.PLANYR_URL || null;
+let deployedBody = null;
 await ensureVendored();
 const server = createServer(async (req, res) => {
   try {
     if (await serveVendored(req, res)) return;
     let p = decodeURIComponent(req.url.split("?")[0]); if (p.endsWith("/")) p += "index.html";
     const fp = normalize(join(ROOT, p)); if (!fp.startsWith(ROOT)) { res.writeHead(403); return res.end(); }
-    let body = await readFile(fp);
+    let body = (deployedBody && p.endsWith("sequence/index.html")) ? deployedBody : await readFile(fp);
     if (p.endsWith("sequence/index.html")) body = Buffer.from(rewriteCdn(body.toString("utf8")));
     res.writeHead(200, { "Content-Type": MIME[extname(fp)] || "application/octet-stream" }); res.end(body);
   } catch { res.writeHead(404); res.end("not found"); }
 });
+if (DEPLOYED) {
+  const prov = await servedProvenance(DEPLOYED);
+  console.log(provenanceReport(prov, DEPLOYED));
+  if (!prov.ok) { console.log("FAIL — the deployed artifact could not be read, so nothing here is a measurement of it."); process.exit(1); }
+  deployedBody = prov.body;                       // drive the bytes he actually receives
+}
 await new Promise(r => server.listen(0, r));
 const url = `http://localhost:${server.address().port}/sequence/`;
 
@@ -181,6 +192,57 @@ await step(`expand group ${g1} again`, ROW, ROW, () => clickToggle(g1, "Expand")
 rowTop = await page.evaluate(i => window.__rowTop(i), ROW);
 const g2 = await pickToggleRow("Collapse", rowTop);
 await step(`collapse a second group (${g2}) above it`, ROW, ROW, () => clickToggle(g2, "Collapse"));
+
+/* 1b. THE CONSEQUENCE THE OWNER WOULD FEEL: after folding a group, the next thing he types must
+   land in the cell he was in — not in a neighbour. The selection witness above proves the highlight
+   stayed put; this proves the WRITE followed it. Before the fix the fold moved the selection onto
+   the group row, so the next keystroke edited a different task altogether.
+   Two things this step has to get right, both learned by getting them wrong: the group folded must
+   NOT be an ancestor of the edited row (folding its own parent hides it, and then nothing can be
+   typed into it — a vacuous "nothing was written"), and a SUMMARY row above it legitimately changes
+   too, because a parent rolls up its children's dates. So the assertion is: the edited row changed,
+   and every other row that changed is a summary row. */
+await boot();
+ROW = await midRow();
+{
+  const START = 2;                                  // the Start column — type-to-edit commits on Enter
+  const reads = () => page.evaluate(() => [...document.querySelectorAll("[data-task-row]")]
+    .map(r => [r.getAttribute("data-task-row"), ((r.children[2] || {}).innerText || "").trim(),
+               !!r.querySelector('span[title="Collapse"], span[title="Expand"]')]));
+  await page.locator(`[data-task-row="${ROW}"] > div`).nth(START).click();
+  await pacedWait(page, 250);
+  // the FARTHEST visible group above — the closest one is usually the row's own parent
+  const cands = (await page.evaluate(() => window.__toggles("Collapse")))
+    .filter(t => t.visible && t.top < 0 + 10000);
+  let folded = null;
+  const rowTop1b = await page.evaluate(i => window.__rowTop(i), ROW);
+  for (const c of cands.filter(t => t.top < rowTop1b - 20)) {
+    await clickToggle(c.row, "Collapse");
+    await pacedWait(page, 500);
+    const stillThere = await page.evaluate(i => !!document.querySelector(`[data-task-row="${i}"]`), ROW);
+    if (stillThere) { folded = c.row; break; }
+    await clickToggle(c.row, "Expand");             // that one was an ancestor — put it back
+    await pacedWait(page, 400);
+  }
+  const before = await reads();
+  if (!folded) { failures.push("type-after-fold: no non-ancestor group was foldable, so the check never ran"); line("  ✗ type-after-fold — nothing foldable that keeps the edited row on screen"); }
+  else {
+    await page.keyboard.type("2/3/27", { delay: 30 });
+    await page.keyboard.press("Enter");
+    await pacedWait(page, 700);
+    const after = await reads();
+    const bMap = new Map(before.map(([id, v]) => [id, v]));
+    const sum = new Map(after.map(([id, v, isSummary]) => [id, isSummary]));
+    const moved = after.filter(([id, v]) => bMap.has(id) && bMap.get(id) !== v).map(([id, v]) => [id, v]);
+    const ours = moved.filter(([id]) => id === String(ROW));
+    const strays = moved.filter(([id]) => id !== String(ROW) && !sum.get(id));
+    if (!moved.length) { failures.push("type-after-fold: NOTHING was written — the step proves nothing"); line("  ✗ type-after-fold — ⚠ nothing was written anywhere"); }
+    else if (!ours.length) { failures.push(`type-after-fold: the value did NOT land on row ${ROW} — it went to ${JSON.stringify(moved)}`); line(`  ✗ type-after-fold — the value landed on ${JSON.stringify(moved)}, not on the edited row`); }
+    else if (strays.length) { failures.push(`type-after-fold: it also wrote to non-summary row(s) ${JSON.stringify(strays)}`); line(`  ✗ type-after-fold — it also changed ${JSON.stringify(strays)}`); }
+    else line(`  ✓ after folding group ${folded}, what he types lands in the cell he was in — row ${ROW} = ${JSON.stringify(ours[0][1])}` +
+              (moved.length > 1 ? `; the only other change is the summary roll-up ${JSON.stringify(moved.filter(([id]) => id !== String(ROW)))}` : ""));
+  }
+}
 
 // 2. Nothing selected: the top of the view is what must hold.
 await boot();
