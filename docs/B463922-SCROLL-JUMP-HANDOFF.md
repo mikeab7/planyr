@@ -1,5 +1,48 @@
 # B463922 — the Schedule grid throws the edited row off screen. Handoff.
 
+> ## ⛔⛔ REFUTED 2026-08-13 — READ THIS BEFORE ANYTHING BELOW IT.
+>
+> **The +477 px jump this document reports is the instrument's own scroll.** Everything below was
+> written in good faith and the numbers are reproducible to the pixel — but they measure Playwright,
+> not the product, and the whole document should be read as the record of a wrong turn.
+>
+> **The mechanism.** `diagnose-grid-view-anchor.mjs` clicks `[title="Collapse"]` on the FIRST
+> rendered row of a **virtualised** grid. A virtualiser renders a buffer of rows **above** the
+> viewport, so that toggle sat **75 px off screen**. Every browser driver scrolls a target into view
+> before clicking it, through CDP — where a patched `scrollTop` setter cannot see it. So
+> **"programmatic scroll writes: 0" was the TELL, not the corroboration.**
+>
+> | how the SAME collapse was driven | Δ row on screen | ΔscrollTop |
+> |---|---|---|
+> | this document's click, toggle 75 px **above** the view | **+477 px, off screen** | −501 |
+> | `.click()` in page JS on that identical toggle | **−24 px** | 0 |
+> | a click on a toggle **inside** the view | **−48 px** | 0 |
+>
+> A toggle **below** the viewport moved it the other way (+459). Magnitude and sign both follow where
+> the target sat. **In a virtualised list, "the first rendered row" is not "a row on screen."**
+>
+> **Scroll anchoring (§5's best hypothesis) is CLEARED three ways, so do not spend a session on it:**
+> `overflow-anchor:none` on the container and every descendant (computed style verified) — unchanged;
+> Chromium launched with `--disable-blink-features=ScrollAnchoring` — unchanged; and the positive
+> control that makes those mean something — inserting **500 px** above the viewport moved `scrollTop`
+> by **exactly 0**, because these rows are absolutely positioned and an out-of-flow box is never an
+> anchor candidate. The container was never anchoring, so it could not have lost an anchor.
+>
+> **§3's conclusion is REVERSED.** The keep-the-selected-row-visible effect is still innocent, but
+> "any fix must make that effect ACT on this path" followed from a jump that was not real.
+>
+> **§7's list of five lies takes a SIXTH, and it is the one that produced this document:** a browser
+> driver scrolls to reach an off-screen target, invisibly to every JS-level scroll probe.
+>
+> **What replaced this:** `ui-audit/verify-grid-row-hold.mjs` (rendered position, ±2 px, every click
+> through `lib/visibleClick.mjs`, a model witness AND a selection witness, and a self-test that
+> re-proves the gate every run) — plus the two real fixes it found: the collapse triangle no longer
+> steals the selection from the cell you are editing, and the row you are working on now holds its
+> place on screen when the list re-lays out. See **B463922** in `BACKLOG.md` and **V275056**.
+>
+> **The owner's own symptom is still unobserved.** Nothing here has ever seen it. It is not closed.
+
+
 **Status: reproduced and localised; mechanism NOT established; no fix shipped.**
 Written so a fresh session can start cold. Read this before touching `GridView`'s scroll behaviour.
 

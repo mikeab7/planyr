@@ -1,3 +1,33 @@
+/* ⛔⛔ REFUTED 2026-08-13 (B463922) — THE +477px JUMP THIS FILE REPORTED WAS THIS FILE'S OWN SCROLL.
+ *
+ * Read this before quoting anything below it. The reproduction was real and repeatable and it
+ * measured the DRIVER, not the product. This harness clicked `[title="Collapse"]` on the FIRST
+ * rendered row of a VIRTUALISED grid — and a virtualiser renders a buffer of rows ABOVE the
+ * viewport, so that toggle sat 75px off screen. Playwright scrolls a target into view before
+ * clicking it, through CDP, where no patched `scrollTop` setter can see it. So "programmatic
+ * writes: 0" was not corroboration; it was the tell.
+ *
+ * The three measurements that settle it, same build, same seed data:
+ *   this file's click, toggle 75px ABOVE the view  → row moves +477px   scrollTop −501
+ *   JS .click() on the SAME toggle (no driver scroll) → row moves −24px  scrollTop 0   ← correct
+ *   a click on a toggle INSIDE the view            → row moves  −48px   scrollTop 0    ← correct
+ * and a toggle BELOW the viewport moved it the other way (+459). The magnitude and the sign both
+ * follow where the target sat, which is the driver's signature, not the app's.
+ *
+ * SCROLL ANCHORING IS CLEARED TOO, three ways: `overflow-anchor:none` on the container and every
+ * descendant changed nothing; launching with ScrollAnchoring disabled changed nothing; and the
+ * positive control — inserting 500px of content above the viewport — moved scrollTop by EXACTLY 0,
+ * because these rows are absolutely positioned and an out-of-flow box is never an anchor candidate.
+ * The container was never anchoring anything, so it could not have lost an anchor.
+ *
+ * WHAT REPLACED IT: `ui-audit/verify-grid-row-hold.mjs` — same verdict quantity (rendered position),
+ * but every click goes through `lib/visibleClick.mjs`, which refuses an off-screen target, and every
+ * step carries a model witness AND a selection witness. It found the real defect in this area: the
+ * collapse triangle stole the selection from the cell being edited.
+ *
+ * This file is kept for the record. Its steps below still click buffered rows; treat any number it
+ * prints on the collapse path as a measurement of Playwright.
+ */
 /* B463922 — DOES THE VIEW JUMP WHILE EDITING? MEASURED AS RENDERED POSITION, NOT scrollTop.
  *
  * ⛔ WHY THIS FILE EXISTS AT ALL, and it is the whole lesson: the first attempt measured `scrollTop`

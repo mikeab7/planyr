@@ -13,7 +13,7 @@
  * the revs it summarises, because it IS the revs.
  *
  * ⛔ AND IT IS A PLAIN STRING, NOT A HASH.
- * `id:rev` pairs, sorted by id, joined by `,`. A hash would be shorter and would make a mismatch
+ * `id:rev` pairs, sorted BY THE ID in byte order, joined by `,`. A hash would be shorter and would make a mismatch
  * unreadable — you would know the group moved and nothing about how. This form answers "which
  * member changed, and to what" straight off the wire, in a log line, with no tooling. A twelve
  * member assembly is ~250 characters; that is a rounding error on a payload that carries the
@@ -21,7 +21,7 @@
  * or the separators, because the SQL side has to produce the identical text.
  *
  * THE SQL TWIN, which must stay character-for-character equivalent:
- *   string_agg(id || ':' || rev, ',' order by id)   over live rows with this assembly_id
+ *   string_agg(id || ':' || rev, ',' order by id collate "C")   over live rows with this assembly_id
  * Guarded by `test/assemblyGroupCas.test.js` (which reads the migration and re-derives the
  * expression) and proven against a real Postgres by `db/test/commit_elements_group_cas.test.sql`.
  *
@@ -34,19 +34,70 @@
 // without re-deriving the separator convention.
 export const memberToken = (id, rev) => `${id}:${Number(rev) || 0}`;
 
+/* ⛔ NEW-1 — ORDER BY THE ID, NEVER BY THE TOKEN, AND THAT IS NOT A STYLE PREFERENCE.
+ *
+ * What stood here was `toks.sort()` under the comment "sort the WHOLE token, matching `order by id`
+ * given ids are unique within an assembly." The claim is FALSE and the reasoning names the wrong
+ * property: uniqueness is not what makes those two orders agree — PREFIX-FREEDOM is. Sorting the
+ * token compares the separator `:` (0x3A) against whatever character the longer id has in that
+ * position, and every digit (0x30–0x39) and the hyphen (0x2D) sort BELOW it. So the moment one
+ * member's id is a prefix of another's, the two sides order the same set differently:
+ *
+ *     ids  e6327 (rev 4) and e63271 (rev 2)
+ *     server, `order by t.id`   →  "e6327:4,e63271:2"
+ *     client, sort the token    →  "e63271:2,e6327:4"     ← same members, same revs, ≠ string
+ *
+ * Measured against the production database, not reasoned about. A digest mismatch is a
+ * `groupConflict`, the client re-reads and re-commits, and gets the identical mismatch back: a
+ * PERMANENT refusal that no retry can converge out of, for an assembly nothing is wrong with. It
+ * costs the owner every save he makes on that building, and the only escape is reloading the tab
+ * into the same wall.
+ *
+ * ⛔ IT IS THE SAME SPECIES AS B447472 AND A DIFFERENT CAUSE, which is the reason to write it down.
+ * That one was a MEMBERSHIP disagreement (the server folded in a markup sharing the id namespace);
+ * this is an ORDERING disagreement over an identical membership. Both produce one symptom — a
+ * groupConflict that never converges — so finding one is no evidence about the other, and a check
+ * that only compares member SETS is blind to this by construction. Parity has to be asserted on the
+ * STRING, over ids that actually stress the ordering.
+ *
+ * Not yet biting: on 2026-08-13 the owner's table held ZERO prefix pairs inside a single assembly
+ * across 393 assemblies and 1,104 ids — but it already holds one prefix pair on a site
+ * (`e2e-bldg-1` ⊂ `e2e-bldg-11`), so it is one bond away, and group CAS was about to be switched on
+ * for everyone.
+ *
+ * BYTE ORDER ON BOTH SIDES, PINNED. The SQL says `order by t.id collate "C"` — byte order, stated
+ * rather than inherited, because the database's default is `en_US.UTF-8` and a linguistic collation
+ * is free to reorder anything it likes on a version bump. UTF-8 byte order IS code-point order, so
+ * this comparator walks CODE POINTS (`Array.from`), not UTF-16 code units: JS's default `<` puts
+ * the surrogate range above U+E000 where byte order puts it below. App ids are `[a-z0-9-]` today
+ * and neither subtlety can reach them — which is exactly why both sides must stop depending on that
+ * and say what they mean.
+ */
+export function compareIds(a, b) {
+  const A = Array.from(String(a));
+  const B = Array.from(String(b));
+  const n = Math.min(A.length, B.length);
+  for (let i = 0; i < n; i += 1) {
+    const x = A[i].codePointAt(0);
+    const y = B[i].codePointAt(0);
+    if (x !== y) return x < y ? -1 : 1;
+  }
+  return A.length === B.length ? 0 : A.length < B.length ? -1 : 1;
+}
+
 /* The group revision for a set of live members.
  * `members` — iterable of { id, rev }. Order does not matter (sorted here).
  * Returns "" for an empty group, which is a legitimate value: an assembly whose members have all
  * been deleted, and a client that believes that is CORRECT if the server agrees. */
 export function assemblyDigest(members) {
-  const toks = [];
+  const live = [];
   for (const m of members || []) {
     if (!m || m.id == null) continue;
-    toks.push(memberToken(m.id, m.rev));
+    live.push(m);
   }
-  // Sort the WHOLE token, matching `order by id` given ids are unique within an assembly.
-  toks.sort();
-  return toks.join(",");
+  // ⛔ Sort by the ID (see compareIds above) — NEVER by the assembled token.
+  live.sort((a, b) => compareIds(a.id, b.id));
+  return live.map((m) => memberToken(m.id, m.rev)).join(",");
 }
 
 /* Group the members of a shadow-like map by assembly, and digest each.

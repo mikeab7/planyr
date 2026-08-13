@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-08-13 @ `b7b676f` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-08-13 @ `3069d0ed` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -444,7 +444,7 @@ _518 source files mapped._
 - **`src/workspaces/site-planner/lib/arrange.js`** — element/markup z-order "Arrange" (B820): `reorderByZ`/`arrangeFlags`/`ARRANGE_MODES` — pure z-based Bring-to-Front/Send-to-Back over a peer set (within a type-layer band for elements, the markup layer for markups)
   - _exports_: `ARRANGE_MODES`, `arrangeFlags`, `reorderByZ`
 - **`src/workspaces/site-planner/lib/assemblyDigest.js`** — B1341 stage 2: the GROUP REVISION of a bonded assembly, DERIVED from its live members' `id:rev` pairs (never stored, so it cannot drift). Twin of the `assembly_digest` SQL function.
-  - _exports_: `assemblyDigest`, `digestsByAssembly`, `memberToken`
+  - _exports_: `assemblyDigest`, `compareIds`, `digestsByAssembly`, `memberToken`
 - **`src/workspaces/site-planner/lib/assemblyIntegrity.js`** — the bonded-assembly invariant + tear detector: re-derives every `attachedTo` child from its host (via `normalizeBondedChildren`) and reports what moved, so a partial apply can reach neither the canvas nor the wire
   - _exports_: `ASSEMBLY_TEAR_TOL_FT`, `assemblyIntegrity`, `assemblyTears`, `orphanPayload`, `tearPayload`, `unhealablePayload`
 - **`src/workspaces/site-planner/lib/auth.js`** — Thin Supabase Auth wrappers: signUp/signIn/signOut/reset/updatePassword, getUser, onAuthChange with pinned redirect origin
@@ -664,7 +664,7 @@ _518 source files mapped._
 - **`src/workspaces/site-planner/lib/jurisdiction.js`** — Registry-driven ArcGIS jurisdiction/road-authority identify (city/ETJ/county intersect + nearest-road maintainer) over the SWR cache with map-overlay styling
   - _exports_: `buildIdentifyParams`, `CITY_SHARE_MIN`, `CITY_SHARE_WHOLE`, `CITY_SOURCES`, `cityAreasFromFeatures`, `citySourcesForPoint`, `countyAtPoint`, `countySourcesForPoint`, `ETJ_SOURCES`, `etjCoverageFor`, `etjSourceCovers`, `etjSourcesForPoint`, `fitIdentifyParams`, `formatHighway`, `formatJurisdictionBadge`, `identifyCityShares`, `identifyJurisdiction`, `identifyRoadAuthority`, `identifySource`, `JURISDICTION_SOURCES`, `MAX_QUERY_URL`, `mergeCityAreas`, `normalizeFeature`, `parcelProbePoints`, `placeKey`, `polylineDistMeters`, `polylineLengthMeters`, `proxiedQueryUrl`, `ROAD_AUTHORITY_COLORS`, `ROAD_AUTHORITY_LEGEND`, `ROAD_MAINT_AGENCY`, `roadAuthority`, `roadAuthorityStyle`, `roadDisplayName`, `round6`, `samePlace`, `shareQueryRing`, `simplifyRing`, `VERTEX_LADDER`
 - **`src/workspaces/site-planner/lib/jurisdictionBadgeFit.js`** — How the header jurisdiction pill shortens when the row is tight: whole facts, governing one first (NAVIGATION WINS)
-  - _exports_: `abbreviateJurisdiction`, `jurisdictionSegments`
+  - _exports_: `abbreviateJurisdiction`, `governingIdentity`, `jurisdictionRungs`, `jurisdictionSegments`
 - **`src/workspaces/site-planner/lib/jurisdictionLabel.js`** — The ONE canonical jurisdiction label: the four shapes (in-city · in-city+ETJ · ETJ · unincorporated) plus the split/unknown states, and the three-level separator grammar that keeps a GOVERNING authority (`·`), its co-equal peers (`+`) and a merely-adjacent city (`—`) from ever sharing a mark. Once an ETJ is named "Unincorporated" is implied and not printed. Also `governingCityOf`, the structured accessor that replaced parsing the label to find the city whose floodplain rule applies.
   - _exports_: `formatJurisdictionLabel`, `governingCityOf`, `JURISDICTION_SHAPES`, `jurisdictionShapeOf`, `LIMIT_CLASS_NOUN`, `PEER_SEP`, `shareNote`, `SLOT_SEP`, `TOUCH_SEP`
 - **`src/workspaces/site-planner/lib/jurisdictionShare.js`** — A jurisdiction share measured as an AREA fraction on the real ring (clipper-lib booleans in a local metre frame), never by sampling vertices or points — vertex sampling read 70–85% on a site that is 99% inside. Honours interior rings: each polygon is even-odd differenced against its own holes FIRST, then the set is unioned non-zero, so duplicate parcel records cannot cancel. Also the honesty half: `distanceToBoundaryM` (segment-to-segment, both ways) and `shareConfidence`, which refuses to state a share when the geometry's tolerance is a material fraction of the answer, plus `southIsLargerY`, which reads the planner's y-sign from the projection instead of assuming it.
@@ -889,7 +889,7 @@ _518 source files mapped._
   - _exports_: `CHIP_MIN_EDGE_PX`, `CHIP_MIN_GAP_PX`, `CHIP_MIN_SEP_PX`, `CHIP_TURN_BREAK_DEG`, `chipRoleWords`, `chipRunOfEdge`, `setbackChipRuns`, `setbackChipsVisible`
 - **`src/workspaces/site-planner/lib/setbackRoles.js`** — the regulatory setback tier: auto-assigns Front / Side / Street side / Rear to every side from frontage geometry, honours the user's own assignment, and groups the boundary into the four ordinance rows
   - _exports_: `autoAssignRoles`, `hasRoleOverrides`, `isRole`, `resolveOverrides`, `resolveRoles`, `ROLE_LABEL`, `ROLE_SHORT`, `roleGroups`, `roleRuns`, `runOverridden`, `runRole`, `SETBACK_ROLES`, `setRunOverride`, `setRunRole`, `shiftOverridesOnDelete`, `shiftOverridesOnInsert`, `STREET_ABUT_FT`
-- **`src/workspaces/site-planner/lib/sharedAssetRefs.js`** — Who else is using this source file? The one cross-plan ref-count for shared overlay/underlay assets (cloud object + device raster), so a delete in one plan can never destroy bytes another plan still renders from.
+- **`src/workspaces/site-planner/lib/sharedAssetRefs.js`** — TODO — describe
   - _exports_: `ASSET_TIERS`, `assetHolders`, `canReleaseAsset`, `collectAssetRefs`, `idbKeysHeldByOtherPlans`, `idbKeysReleasableOnPlanDelete`, `planAssetKeys`, `releasePlanForOverlay`
 - **`src/workspaces/site-planner/lib/sharing.js`** — Project team sharing: stamp/clear team_id on a group's sites, doc_reviews, and file_facts then re-pull the local cache
   - _exports_: `makeProjectPrivate`, `setPlanLock`, `shareProject`
