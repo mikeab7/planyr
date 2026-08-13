@@ -49,7 +49,8 @@ export default function NoteOutline({
       data-testid="note-outline"
       aria-label="Outline"
       style={{
-        flex: "none", width: 208, minWidth: 0, overflowY: "auto",
+        /* ⛔ SHRINKS BEFORE THE PAGE DOES (B421492) — navigation yields to the document. */
+        flex: "0 1 auto", width: 208, minWidth: 104, overflowY: "auto",
         borderLeft: "1px solid var(--border-default)", background: "var(--surface-raised)",
         padding: "10px 6px 24px",
       }}

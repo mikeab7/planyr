@@ -463,9 +463,17 @@ const pB = await blankPoint({ dx: 460, dy: 230 });
 await page.mouse.dblclick(pB.x, pB.y); await pacedWait(page, 250); await page.keyboard.type("BBB");
 await pacedWait(page, 500);
 
-const blockText = () => page.evaluate(() => [...document.querySelectorAll('[data-testid="note-anchor"]')].map((e) => e.innerText.trim()));
+/* ⛔ THE BOX'S CONTENT, NOT THE BOX'S CHROME. Reading the element's own `innerText` picked up the
+ * delete button's "×" once controls became visible on selection (B434418), so every row read
+ * "×\n\nAAA" and failed on text the app had put in exactly the right place. */
+const blockText = () => page.evaluate(() => [...document.querySelectorAll('[data-testid="note-anchor"]')]
+  .map((e) => (e.querySelector(".planyr-anchor-content") || e).innerText.trim()));
 const clickInto = async (i, marker) => {
   const box = await tb("note-anchor").nth(i).boundingBox();
+  /* ⛔ TWO PRESSES — entering an existing box is OneNote's two-stage gesture now (B434416):
+   * press 1 selects the box, press 2 puts the caret where you pressed. */
+  await page.mouse.click(box.x + box.width - 12, box.y + box.height - 10);
+  await pacedWait(page, 160);
   await page.mouse.click(box.x + box.width - 12, box.y + box.height - 10);
   await pacedWait(page, 220);
   await page.keyboard.type(marker);

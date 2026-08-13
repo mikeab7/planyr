@@ -38,7 +38,8 @@ export default function NoteHistory({ open, versions = [], busy = false, onResto
       data-testid="note-history"
       aria-label="Version history"
       style={{
-        flex: "none", width: 268, minWidth: 0, overflowY: "auto",
+        /* ⛔ SHRINKS BEFORE THE PAGE DOES (B421492), but keeps enough width to read a row. */
+        flex: "0 1 auto", width: 268, minWidth: 180, overflowY: "auto",
         borderLeft: "1px solid var(--border-default)", background: "var(--surface-raised)",
         padding: "10px 8px 24px",
       }}
