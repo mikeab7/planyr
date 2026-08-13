@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-08-13 @ `cb26f3a2` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-08-13 @ `020446a7` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_515 source files mapped._
+_517 source files mapped._
 
 ## infra
 
@@ -739,6 +739,8 @@ _515 source files mapped._
   - _exports_: `flowlineSummary`, `flowlineTitle`, `ftypeLabel`, `NHD_FTYPE`, `NHD_INVENTORY_NOTE`
 - **`src/workspaces/site-planner/lib/numEditBox.js`** — where the inline numeric editor paints and at what size: in-place chip box, floating fallback, the not-bigger-than-its-spawn invariant, keyboard nudge
   - _exports_: `nudgeNumEditValue`, `NUMEDIT_FLOAT`, `numEditBox`, `numEditFitsSpawn`, `SETBACK_CHIP`, `setbackChipPlateW`, `setbackChipSpawn`
+- **`src/workspaces/site-planner/lib/operationEnvelope.js`** — WHO did a write and WHAT operation it was part of. Mints one `op_id` per user-visible action (not per row or per batch) and stamps it with `op_kind` from a CLOSED vocabulary, the per-tab `actor_session_id` and the account id. The session id is the load-bearing field — both of the owner's live sessions authenticate as the same account, so `updated_by` can never answer "was that my other tab?". Also reads rows back as grouped operations for a plain-English activity list, so a merge reads "merged 2 parcels into 1" and never as net row arithmetic, and decides undo ownership: your own operation undoes silently, another session's needs confirmation naming them, an un-enveloped legacy frame warns without blocking.
+  - _exports_: `createOperationTracker`, `describeOperation`, `envelopeAnswersWhoAndWhat`, `groupRowsIntoOperations`, `halfLandedComposites`, `isCompositeOpKind`, `isOpKind`, `makeEnvelope`, `mintOpId`, `OP_KIND_LIST`, `OP_KINDS`, `undoOwnership`
 - **`src/workspaces/site-planner/lib/outletStructure.js`** — Pond OUTLET STRUCTURE model + stage→discharge rating curve (NEW-A2): orifice / weir / restrictor / multistage discharge (with tailwater submergence), inverse orifice sizing, default-outlet proposal, validation. Pure hydraulics.
   - _exports_: `DEFAULT_ORIFICE_C`, `DEFAULT_WEIR_C`, `defaultOutletForPond`, `orificeAreaSf`, `OUTLET_KINDS`, `outletDischarge`, `outletLowestElev`, `outletProblems`, `sizeOrificeForRelease`, `sizeWeirForRelease`, `stageDischarge`
 - **`src/workspaces/site-planner/lib/overlayAlign.js`** — Pure overlay alignment math: image-point-to-world, scale-about-a-point, 2-point and least-squares Procrustes similarity transforms (scale+rotate+translate) with RMS residual
@@ -907,6 +909,8 @@ _515 source files mapped._
   - _exports_: `buildSdaRequest`, `buildSoilQuery`, `parseSoilResponse`, `resolveSoils`, `SDA_ENDPOINT`, `SDA_PROXY_PATH`
 - **`src/workspaces/site-planner/lib/sourceHealth.js`** — Per-source circuit breaker for county parcel servers: track consecutive failures, open/cooldown/half-open, filter healthy candidates, and decide the honest statewide-backup badge
   - _exports_: `filterHealthyCandidates`, `isSourceOpen`, `isStatewideBackup`, `recordSourceResult`, `resetSourceHealth`, `SOURCE_COOLDOWN_MS`, `SOURCE_FAIL_THRESHOLD`, `sourceCooldownMs`
+- **`src/workspaces/site-planner/lib/splitIntegrity.js`** — What a parcel split must conserve, measured across the parcels that are ACTIVE **and not deleted** — reading either column alone silently passes (`active` alone balances a piece that has vanished; `!deleted` alone double-counts a superseded parent). Three checks: area conservation, union-outline equality against the parent (the owner's own argument for dropping the superseded parent — the children's union reproduces its outline, so it adds nothing but a duplicate boundary; it also catches a cut that balances area while leaving a gap), and whether a split's own emitted pieces survived its operation window. Names no culprit for a piece that did not — the rows cannot say.
+  - _exports_: `AREA_TOLERANCE_SQFT`, `auditSplit`, `isLiveActive`, `liveActive`, `OUTLINE_TOLERANCE_SQFT`, `overlappingPairs`, `ringAreaAcres`, `ringAreaSqft`, `SPLIT_SURVIVAL_WINDOW_MS`, `splitConservation`, `splitOutputsSurvived`, `SQFT_PER_ACRE`, `unionOutlineMatches`
 - **`src/workspaces/site-planner/lib/stageStorageDischarge.js`** — Stage-storage-discharge curve (NEW-A3): pairs pondGeom storage (volumeBetween) with the outlet rating curve over the basin's stage range; interpolation helpers feed the reservoir routing. Anchored ponds only. Pure.
   - _exports_: `buildStageStorageDischarge`, `dischargeAtElev`, `dischargeAtStorage`, `elevAtStorage`, `storageAtElev`
 - **`src/workspaces/site-planner/lib/standardsApply.js`** — Standards "Apply now" (NEW-3): push a standard onto existing parcels (stamped → write) or existing elements (render-resolved → clear the per-element override), plus the impact counts the chip shows.
