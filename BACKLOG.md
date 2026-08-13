@@ -93,6 +93,22 @@ Add a new tag to this legend **in the same commit** you first use it (this preve
 `[x]` **SHIPPED. Fixed, mutation-proven, and merged this session.**
 - Verify: live → **V258992** (`Blocker: auth` — the signed-in leg only; every logged-out path is proven here).
 - Origin: filed 2026-08-13 from chat.
+- **RECURRENCE vs NET-NEW — the owner asked at the start and asked twice more; the answer, kept verbatim:**
+  **net-new against both, borrowing B293072's shape — declare it, fail the build on an undeclared entry — as the keyboard counterpart to B1188's mouse rule.**
+  Expanded once, so the shorthand can be re-derived: **B1188** is the CLICK contract (a panel whose
+  open/closed state was wrongly DERIVED from the selection); **B293072** is the element CAPABILITIES
+  table (element types drifting apart on properties and right-click actions, closed by a declaration
+  plus a build-failing check). Neither covers WHERE A KEY IS ALLOWED TO ACT — nothing did.
+- **EVERYTHING SHIPPED IN THIS STRAND, one table so it never has to be reconstructed:**
+
+  | id | what |
+  |---|---|
+  | **B464048** | the keystroke that deleted the building — keyboard scope + the declared key contract (PR #1030) |
+  | **B464049 (×2)** | the field that "looked broken" — first fix wrong and REVERTED, real error state built (PR #1030, corrected in #1033) |
+  | **B464050** | **NOT an undo bug** — legacy duplicate `z` repaired at load; invariant pinned (PR #1034) |
+  | **B477808** | the silent clamp: typing 200,000 for a depth stored 100,000 and said nothing (PR #1033) |
+  | **B481328** | a red e2e check that was a STALE TEST, not a defect — diagnosed, fixed, filed (PR #1035) |
+  | **V258992** | the signed-in click-through — the only thing still open (`Blocker: auth`) |
 - **HIS WORDS.** *"go check out this site and figure out what's wrong with these text boxes where I'm trying to input the depth, and it's not letting me... I think I had pressed backspace or something in the text box and ended up deleting my building. That was really weird."* Site FM 359 RD, Fulshear — plan **"Concept A"**, Building 1 (`e1454615maruai`, 1675 × 613, cross-dock, two bump-outs), editing **Depth (ft)** in the ELEMENT · BUILDING inspector.
 - **⛔ THE NUMBER THAT MAKES THIS A DATA-LOSS BUG RATHER THAN A CURIOSITY: SEVEN OF EIGHT.** Measured on his real plan, pulled verbatim from production into `ui-audit/fixtures/fm359-concept-a.json` and driven logged out (`ui-audit/diagnose-key-scope-paths.mjs`). After each ordinary interaction, ONE keystroke:
 
@@ -3259,7 +3275,6 @@ physical row is a later polish," so **B104** is that remaining polish for the *m
 
 ## ⏳ Verify — awaiting live confirmation
 
-<<<<<<< HEAD
 ### B463922 — Collapsing a group above the row you are editing throws that row off the screen `[Scheduler]` (bug) #scheduler #ui #testing  *(owner chat block 2026-08-13: *"sometimes if I am editing cells I will just jump halfway down the schedule or all the way up."* Minted **B463922**. **DEDUPE-FIRST — `scrollTop`, `scrollIntoView`, `goToFocus`, `reveal`, `VIEWPORT-STABLE`, `B837`, `B838`, `B65`: VIEWPORT-STABLE is the SITE PLANNER canvas rule, a different surface and mechanism. Net-new.)*
 `[⏳]` **AMENDED 2026-08-13 — the committed reproduction is REFUTED, a real defect beside it is FIXED, and the owner's own symptom is NOT yet proven gone (`V275056`).**
 - Verify: live — `V275056`
@@ -3292,7 +3307,6 @@ and a toggle **below** the viewport moved it the other way (+459). Magnitude *an
 **THE SIXTH WAY AN INSTRUMENT LIED HERE, and it belongs on the handoff's list of five:** a browser driver scrolls to reach an off-screen target, and that scroll is invisible to every JS-level scroll probe. **In a virtualised list, "the first rendered row" is NOT "a row on screen."**
 
 **THE WITNESS IS THE REUSABLE PART.** Before it existed all fourteen paths read green, seven of them earned by doing nothing — the same vacuous-green shape as `close:[0,0]` in `verify-grid-overlay-input` and the paste test that bypassed its own selection. A step that changed nothing is now printed as proving nothing.
-=======
 ### B484337 — The tab stops saving and the screen says "synced" `[Site Planner / persistence · UI]` (bug, DATA LOSS) #site-planner #sync #ui  *(found 2026-08-13 answering the owner's "prove a refusal is genuinely visible on the running app rather than from the code — this repo's signature defect is a mechanism that looks right and never fires". It never fired. Minted **B484337** from the same reserved block. DEDUPE-FIRST — searched Open / ⏳ Verify / Done across `client-stale`, `conflictToasts`, `saveState`, `elemSync`, `LOUD-FAILURE`, `B671`, `B673`, `B465`, `B209`, `B595`, `B610`: **B671** wired the engine into the save badge and named `failed`/`syncing`/`retrying` — it never named `stale`; **B673** built the toast matrix including this row, and the row was correct. Nothing owns the delivery. **Net-new.**)*
 `[x]` **SHIPPED** — parks in ⏳ Verify (V273520) for the signed-in click-through.
 - Verify: live — the stale state needs a signed-in cloud session, and this sandbox's proxy answers `403 to CONNECT` for the Supabase host, so no browser here can reach it.
@@ -3301,7 +3315,6 @@ and a toggle **below** the viewport moved it the other way (+459). Magnitude *an
 - **`stale` IS WORSE THAN `failed`, which is the part that was missed.** `failed` means a commit did not land and the engine is still trying; `stale` means it issues no further commit until `retryNow()` or a reload.
 - **LIVE TODAY, not a group-CAS bug.** The same silence sits on the already-shipped NEW-3 rejected-op streak (`elementSync.js:768`); group CAS merely adds a second door to it.
 - Guard: `test/staleVisible.test.js` — the engine half is BEHAVIOURAL (the real engine is driven to `stale` and its event caught, asserting it carries no kind/id); the rendering half is a source check, stated as weaker than a click-through rather than passed off as one. Both halves mutation-proven.
->>>>>>> origin/main
 
 ### B463920 — The Enter that accepted the successor prompt re-opened the status menu it had just closed `[Scheduler]` (bug) #scheduler #ui  *(owner chat block 2026-08-13 from a live screenshot, Permitting/Entitlements → SIA. Minted **B463920 / V258864** LATE against fresh main. **DEDUPE-FIRST — searched Open / ⏳ Verify / Done across `overlayOpenRef`, `successorPrompt`, `HealthPicker`, `StatusPicker`, `picker`, `Enter`, `B456208`, `B443536`: nothing owns overlay key ownership.** Net-new.)*
 `[x]` **SHIPPED.** `public/sequence/index.html` — the key guard latches in capture.
