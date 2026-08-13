@@ -338,15 +338,35 @@ describe("NEW-3 — the floodplain administrator sees the limited-purpose area, 
     expect(a.settled).toBe(false);
   });
 
-  it("the Baytown rule record says the ordinance is UNREAD — it does not invent a freeboard", async () => {
+  /* ⛔ SUPERSEDED BY NEW-8 (B435537) — THE ORDINANCE HAS SINCE BEEN READ. This case used to assert
+   * `ffeRule === null`, `verified === false`, `unreadable.reason === "egress-blocked"` and
+   * `limitedPurposeScope === "unknown"`, and every one of those was the correct assertion at the
+   * time: Baytown publishes through Municode, which this environment's egress proxy refuses, and the
+   * standing rule is that a rule record is transcribed from the primary source or it is not written.
+   *
+   * The owner supplied the text from his own browser (Ch. 110 Art. II, version JUL 2 2026), so the
+   * FACT changed and these assertions had to. ⚠ THE DISCIPLINE DID NOT: what is asserted below is
+   * still "no number without a citation", and the applicability question — which the ordinance turns
+   * out not to answer — is now `"silent"` (read, and it does not say) rather than `"unknown"` (not
+   * read). Those two are deliberately different values. */
+  it("the Baytown rule record carries the ordinance it was transcribed from — no number without a citation", async () => {
     const { DEFAULT_FLOODPLAIN_RULES: RULES } = await import("../src/workspaces/site-planner/lib/floodplainRules.js");
+    const { DEFAULT_BUILDABILITY_RULES: BRULES } = await import("../src/workspaces/site-planner/lib/buildability.js");
     const r = RULES.baytown;
     expect(r).toBeTruthy();
-    expect(r.ffeRule).toBe(null);
-    expect(r.verified).toBe(false);
-    expect(r.unreadable.reason).toBe("egress-blocked");
-    expect(r.limitedPurposeScope).toBe("unknown");
-    // ⛔ The one thing that must never appear here is a number nobody read.
-    expect(JSON.stringify(r)).not.toMatch(/plusFt/);
+    expect(r.verified).toBe(true);
+    expect(r.unreadable).toBeUndefined();
+    expect(r.source).toMatch(/110-31/);
+    expect(r.sourceDate).toBeTruthy();
+    // read, and it does not say — a FINDING, not an unread field
+    expect(r.limitedPurposeScope).toBe("silent");
+    expect(r.limitedPurposeCitation).toMatch(/110-31/);
+    // the FFE numbers live in the buildability record, and every one of them cites its section
+    const b = BRULES.baytown;
+    expect(b.ffeRule.bases.map((x) => x.plusFt)).toEqual([0, 2]);
+    expect(b.source).toMatch(/110-102\(2\)/);
+    // ⛔ still the one thing that must never appear: an untranscribed field holding a number
+    expect(r.ratio).toBeNull();
+    expect(r.floodwayPolicy).toBeNull();
   });
 });

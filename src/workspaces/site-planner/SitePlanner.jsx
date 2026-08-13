@@ -256,7 +256,7 @@ import { DOGEAR_W, DOGEAR_D, dogEarGeom, dogEarSize, sidewalkSpanForBumps, isDog
   wallStripBox, wallKidBox, wallKidPerp, wallKidAlong, hostAxisExtents, ownExtents, bumpsOfHost, sideParkAlongRun,
   sideParkStack } from "./lib/dogEar.js";
 import { CURB_TYPES as COST_CURB_TYPES, CURB_TYPE_META, roadCurbType, roadCurbedSides, roadPanWidth, roadQuantities, costRollup } from "./lib/costTakeoff.js";
-import { layoutLabels, buildingLabelLines, dimCalloutVisible, detailLabelVisible, pondParamLabelVisible, pondParamFontPx, suppressedDimIds, dimFontScale, dimFontPx, boxOf, DIM_CALLOUT_MIN_PPF, stallStripesExplicit, segmentsPath } from "./lib/labelLayout.js";
+import { layoutLabels, buildingLabelLines, dimCalloutVisible, detailLabelVisible, pondParamLabelVisible, pondParamFontPx, suppressedDimIds, dimFontScale, dimFontPx, boxOf, DIM_CALLOUT_MIN_PPF, stallStripesExplicit, segmentsPath, featureNameLabelVisible, featureNameFontPx, featureExtentFt } from "./lib/labelLayout.js";
 import { inlineLines } from "./lib/labelFitLadder.js";
 import { calloutLayout, minCalloutWidthFt } from "./lib/calloutLayout.js";
 import { splitOverlayBands, overlayPanelOrder, overlayOrderFlags, reorderOverlays, setOverlayBand, overlayBand } from "./lib/overlayOrder.js";
@@ -804,6 +804,14 @@ const ROW4 = { display: "flex", alignItems: "center", gap: 4 };
 const ROWB6 = { display: "flex", alignItems: "baseline", gap: 6 };
 const ROWSB = { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "2px 0" };
 const INK_HALO = { paintOrder: "stroke", stroke: "#fff", strokeWidth: 3 };
+/* NEW-6 — the base size (at working zoom) of each centroid FEATURE-NAME label. These are the three
+ * labels that were authored as a bare constant screen size with no zoom ramp and no fit test; the
+ * numbers are their historic sizes, unchanged, and they are now the `basePx` handed to
+ * `featureNameFontPx` / `featureNameLabelVisible` rather than a final font size. Named here so the
+ * gate and the render cannot drift, and so a new one cannot be added without choosing a base. */
+const EASE_LABEL_BASE_PX = 10.5;      // easement — the reported case (B435536)
+const ENCUMBER_LABEL_BASE_PX = 11;    // deed encumbrance boundary
+const TRACED_LABEL_BASE_PX = 9.5;     // traced overlay line
 /* The one line-style choice list, shared by every dash <select> (parcel boundary + setback, as a
  * Standards default and as a per-object override, plus the markup/easement pickers). */
 const DASH_OPTIONS = [
@@ -19398,7 +19406,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           so they hold their intended size on a sheet instead of scaling with the zoom. */}
                       {m.kind === "infwater" && pp.map((q, i) => <circle key={i} cx={q.x} cy={q.y} r={3 * labelK} fill="#dc2626" stroke="#fff" strokeWidth={1} />)}
                       {m.kind === "traced" && pp.map((q, i) => <rect key={i} x={q.x - 2 * labelK} y={q.y - 2 * labelK} width={4 * labelK} height={4 * labelK} fill={col} stroke="#fff" strokeWidth={0.8} />)}
-                      {mid && <text x={mid.x} y={mid.y - 6 * labelK} textAnchor="middle" fontSize={9.5 * labelK} fontWeight="700" fill={col} pointerEvents="none" style={INK_HALO}>{m.label}</text>}
+                      {/* NEW-6 — same rule as the easement label below: this was the identical
+                          constant-screen-px shape, found by the same audit and fixed in the same pass. */}
+                      {mid && featureNameLabelVisible(m.label, featureExtentFt(m.pts), labelPpf, TRACED_LABEL_BASE_PX) && <text x={mid.x} y={mid.y - 6 * labelK} textAnchor="middle" fontSize={featureNameFontPx(labelPpf, TRACED_LABEL_BASE_PX) * labelK} fontWeight="700" fill={col} pointerEvents="none" style={INK_HALO}>{m.label}</text>}
                     </g>
                   );
                 }
@@ -19417,8 +19427,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
                         return <text key={i} x={mx} y={my - 3 * labelK} textAnchor="middle" fontSize={9 * labelK} fontFamily={NUM_FONT} fontVariantNumeric={TABULAR_NUMS} fill={stroke} pointerEvents="none" style={{ paintOrder: "stroke", stroke: "#fff", strokeWidth: 2.5 }}>{c.label}</text>;
                       })}
-                      {/* NEW-1 (the constant-screen-px audit) — `labelK`, as above. */}
-                      <text x={cp.x} y={cp.y} textAnchor="middle" fontSize={11 * labelK} fontWeight="700" fill={stroke} pointerEvents="none" style={INK_HALO}>{m.label}</text>
+                      {/* NEW-6 — same rule as the easement label below (see labelLayout.js): a feature's
+                          name may not render wider than the feature, and the font rides the shared ramp. */}
+                      {featureNameLabelVisible(m.label, featureExtentFt(m.pts), labelPpf, ENCUMBER_LABEL_BASE_PX) && <text x={cp.x} y={cp.y} textAnchor="middle" fontSize={featureNameFontPx(labelPpf, ENCUMBER_LABEL_BASE_PX) * labelK} fontWeight="700" fill={stroke} pointerEvents="none" style={INK_HALO}>{m.label}</text>}
                     </g>
                   );
                 }
@@ -19441,12 +19452,20 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       <polygon points={ring} fill={`url(#pat-ease-${easementType(m.easeType).key})`} stroke={ecol} strokeWidth={strokeZoom(isSel ? 2.4 : 1.8, zk)} strokeDasharray={proposed ? dashZoom("7 5", zk) : undefined} />
                       {/* centerline shown for strip easements; flat-capped strip is the polygon above */}
                       {cen.length > 1 && <polyline points={cen.map((p) => `${p.x},${p.y}`).join(" ")} fill="none" stroke={ecol} strokeWidth={strokeZoom(0.9, zk)} strokeDasharray={dashZoom("4 3", zk)} opacity={0.7} pointerEvents="none" />}
-                      {/* NEW-1 (extends B149) — the easement's centroid label ("50′ Utility Esmt") rides
-                          the shared zoom-FLOOR gate (dimCalloutVisible), so at site-overview zoom it drops
-                          like the auto dims + measurement labels and reveals on zoom-in; the hatched fill +
-                          centerline geometry always stay (keep-geometry, avoid the on/off flicker). A
-                          selected easement keeps its label at any zoom (edit handles never vanish mid-edit). */}
-                      {(isSel || dimCalloutVisible(labelPpf)) && <text x={cp.x} y={cp.y} textAnchor="middle" fontSize={10.5 * labelK} fontWeight="700" fill={ecol} pointerEvents="none" style={INK_HALO}>{easementLabel(m)}{proposed ? " (proposed)" : ""}</text>}
+                      {/* ⛔ NEW-6 — the easement's centroid label is a FEATURE NAME and rides the shared
+                          name-label rule: the declutter floor, B149's band test, AND the fit test (it may
+                          never render wider than the easement it names). Its font rides `dimFontScale` like
+                          every dimension on the drawing instead of the old constant 10.5 screen px.
+                          ⛔ `isSel` NO LONGER LIFTS THE GATE, and that is the fix, not a regression: on the
+                          owner's 8 South plan a SELECTED easement rendering 21x3 px wore a 199 px label
+                          across the drawing. Selecting something you cannot see must not make its name the
+                          largest thing on screen. The hatched fill + centerline geometry always stay
+                          (keep-geometry, avoid the on/off flicker) and the edit handles are unaffected. */}
+                      {(() => {
+                        const txt = `${easementLabel(m)}${proposed ? " (proposed)" : ""}`;
+                        if (!featureNameLabelVisible(txt, featureExtentFt(m.pts), labelPpf, EASE_LABEL_BASE_PX)) return null;
+                        return <text x={cp.x} y={cp.y} textAnchor="middle" fontSize={featureNameFontPx(labelPpf, EASE_LABEL_BASE_PX) * labelK} fontWeight="700" fill={ecol} pointerEvents="none" style={INK_HALO}>{txt}</text>;
+                      })()}
                       {isSel && labelPpf > 0.05 && <text x={cp.x} y={cp.y + 12 * labelK} textAnchor="middle" fontSize={9 * labelK} fontWeight="600" fill={ecol} pointerEvents="none" style={{ paintOrder: "stroke", stroke: "#fff", strokeWidth: 2.5 }}>{Math.round(area).toLocaleString()} sf · {(area / SQFT_PER_ACRE).toFixed(2)} ac</text>}
                       {inlineLabelEls(easePathFeet, m.inlineLabel, ecol, m.labelSpacing || INLINE_LABEL_SPACING.easement, rppf, f2p, `il${m.id}-`, { size: m.labelSize, halo: m.labelHalo, lf: labelFrame, ...easementInsetOpts(m) })}
                     </g>
