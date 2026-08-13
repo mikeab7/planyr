@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-08-13 @ `b03ccdb` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-08-13 @ `3968b16` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -334,7 +334,7 @@ _507 source files mapped._
   - _exports_: `clampToBounds`, `dockAfterRelinquish`, `FLOAT_MIN_WIDTH`, `FLOAT_SIZE`, `initialFloatPos`, `reconcileForNarrow`, `shouldInspectorTakeDock`
 - **`src/shared/ui/FloatingPanel.jsx`** — NEW-1 poppable panels: a left-rail panel detached into a portal-to-body draggable card over the map (drag-clamp, session-remembered position, map pan/zoom isolation); composes PanelChrome
   - _exports_: `default (FloatingPanel)`
-- **`src/shared/ui/headerCenterFit.js`** — TODO — describe
+- **`src/shared/ui/headerCenterFit.js`** — how wide the row-1 centre slot may be so it is centred on the HEADER rather than on the leftover space, and which of the three layouts to run (`centered` / `tight` / `unmeasured`) — `centerSlotMaxWidth`, `centerSlotPlan`, `CENTER_SLOT_GAP`, `CENTER_SLOT_MIN`
   - _exports_: `CENTER_SLOT_GAP`, `CENTER_SLOT_MIN`, `centerSlotMaxWidth`, `centerSlotPlan`
 - **`src/shared/ui/InterfaceSettings.jsx`** — The Interface section of Settings (display theme + smooth zoom), rendered by both Settings homes so they cannot disagree.
   - _exports_: `default (InterfaceSettings)`
@@ -379,7 +379,7 @@ _507 source files mapped._
   - _exports_: `collapseStorageKey`, `default (Collapse)`, `readOpen`
 - **`src/workspaces/site-planner/components/CursorChip.jsx`** — the ONE cursor chip both map surfaces paint: coordinate pair + the always-present elevation readout (coords give way first so no elevation field is ever truncated)
   - _exports_: `default (CursorChip)`
-- **`src/workspaces/site-planner/components/icons.jsx`** — TODO — describe
+- **`src/workspaces/site-planner/components/icons.jsx`** — Small stroke icons (pin / empty-circle / warn-triangle) shared by the planner's panel components, replacing the 📍 emoji that ignored its row's theme colour; route-local on purpose so the bytes stay off every other route's chunk. — `PinIcon`, `EmptyCircleIcon`, `WarnTriangleIcon`
   - _exports_: `EmptyCircleIcon`, `PinIcon`, `WarnTriangleIcon`
 - **`src/workspaces/site-planner/components/JurisdictionBadge.jsx`** — Passive site-header chip showing the active parcel's jurisdiction (city/ETJ/county) from the auto-run B93 identify; display-only, ⚑ on straddle (B763)
   - _exports_: `default (JurisdictionBadge)`
@@ -437,7 +437,7 @@ _507 source files mapped._
   - _exports_: `aerialPlacement`, `aerialTileGrid`, `BACKUP_GRACE_MS`, `featureToParcel`, `feetExtentToBbox`, `feetToLatLng`, `geoJsonToEsriFeature`, `getLayerInfo`, `humanizeError`, `identifyAtPoint`, `identifyParcelAcross`, `identifyParcelDetailed`, `identifyParcelEager`, `isQueryCapabilityError`, `largestRingLngLat`, `listLayers`, `lngLatFeatureToParcel`, `lngLatRingToFeet`, `lngLatToGlobalPixel`, `outerRingsLngLat`, `overlayExportPlacement`, `PARCEL_FETCH_TIMEOUT_MS`, `ParcelFetchError`, `pickAerialTileZoom`, `queryAtPoint`, `queryFeatures`, `resolveLayerUrl`
 - **`src/workspaces/site-planner/lib/arrange.js`** — element/markup z-order "Arrange" (B820): `reorderByZ`/`arrangeFlags`/`ARRANGE_MODES` — pure z-based Bring-to-Front/Send-to-Back over a peer set (within a type-layer band for elements, the markup layer for markups)
   - _exports_: `ARRANGE_MODES`, `arrangeFlags`, `reorderByZ`
-- **`src/workspaces/site-planner/lib/assemblyDigest.js`** — TODO — describe
+- **`src/workspaces/site-planner/lib/assemblyDigest.js`** — B1341 stage 2: the GROUP REVISION of a bonded assembly, DERIVED from its live members' `id:rev` pairs (never stored, so it cannot drift). Twin of the `assembly_digest` SQL function.
   - _exports_: `assemblyDigest`, `digestsByAssembly`, `memberToken`
 - **`src/workspaces/site-planner/lib/assemblyIntegrity.js`** — the bonded-assembly invariant + tear detector: re-derives every `attachedTo` child from its host (via `normalizeBondedChildren`) and reports what moved, so a partial apply can reach neither the canvas nor the wire
   - _exports_: `ASSEMBLY_TEAR_TOL_FT`, `assemblyIntegrity`, `assemblyTears`, `orphanPayload`, `tearPayload`, `unhealablePayload`
@@ -533,7 +533,7 @@ _507 source files mapped._
   - _exports_: `DBLTAP_MS`, `DBLTAP_PX`, `EMPTY_TAP`, `pairsWithLastTap`, `stepDoubleTap`, `tapRecord`, `tapTime`
 - **`src/workspaces/site-planner/lib/drafts.js`** — Pure resolver for Bluebeam-style mid-draw undo: decides which in-progress multi-point draft to trim by one vertex (Backspace + Ctrl-Z), and returns null when no draft is active so Ctrl-Z falls through to a global undo
   - _exports_: `resolveDraftStepBack`
-- **`src/workspaces/site-planner/lib/dragGate.js`** — TODO — describe
+- **`src/workspaces/site-planner/lib/dragGate.js`** — The click-vs-drag gate: a press writes nothing until the pointer travels past the shared slop (TRAVEL only, never duration), and the point is rebased on arming so a real drag starts without a jump (opt-out for point drags).
   - _exports_: `DRAG_SLOP_PX`, `dragArmed`, `dragTravelPx`, `gatedPoint`, `makeDragGate`, `stepDragGate`
 - **`src/workspaces/site-planner/lib/drainageTiming.js`** — NEW-4 per-leg timings for the flood/drainage check (elevation, each county WSE raster, each FEMA pull, the app's own calc, the cloud save), built from a leg-name ALLOWLIST and reported through the production telemetry sink with its delivery outcome kept (no silent sink)
   - _exports_: `__resetDrainageTiming`, `armDrainageSaveLeg`, `buildDrainageTimingRow`, `createDrainageTimer`, `DRAIN_LEG_KEYS`, `drainageTimingDelivery`, `drainageTimingRecent`, `MAX_LEGS`, `noteDrainageSave`, `reportDrainageTiming`, `SAVE_ATTRIBUTION_MS`, `WSE_LEG_PREFIX`, `wseLegName`
@@ -637,7 +637,7 @@ _507 source files mapped._
   - _exports_: `COARSE_CELL_FT`, `deltaColor`, `groundReadout`
 - **`src/workspaces/site-planner/lib/groundwater.js`** — Depth-to-water screen for pond feasibility (NEW-B3): combines SSURGO seasonal-high water table + TWDB well signals (provenanced), screens wet-vs-dry pond (permanent-pool depth, suggested pool elev). Pure.
   - _exports_: `combineDepthToWater`, `pondGroundwaterScreen`
-- **`src/workspaces/site-planner/lib/groupCas.js`** — TODO — describe
+- **`src/workspaces/site-planner/lib/groupCas.js`** — B1341 stage 2: the group-CAS kill switch (ships OFF; `VITE_GROUP_CAS` or the `planarfit:groupCas` device key, read at call time).
   - _exports_: `GROUP_CAS_KEY`, `groupCasEnabled`
 - **`src/workspaces/site-planner/lib/hcfcdWse.js`** — HCFCD MAAPnext model WSE sampler (B882, Harris County): registry-driven ImageServer getSamples for the 1% + 0.2% WSE rasters; no-op until the provisional endpoints are confirmed live. `sampleMaapnextWse`/`maapnextEndpoints`/`clearMaapnextCache`.
   - _exports_: `clearMaapnextCache`, `maapnextEndpoints`, `maapnextOutage`, `sampleMaapnextWse`
@@ -653,9 +653,9 @@ _507 source files mapped._
   - _exports_: `bermNeedsInlets`, `bermPinched`, `bermRingAreaSf`, `bermWaterAreaSf`, `bindingBermCap`, `crestRingForBerm`, `crestTopRing`, `drainageBermCapFt`, `EXT_BERM_SLOPE`, `geometricMaxBermFt`, `INFLOW_HEAD_ALLOWANCE_FT`, `INLETS_THROUGH_BERM_NOTE`, `inwardBermSplit`
 - **`src/workspaces/site-planner/lib/jurisdiction.js`** — Registry-driven ArcGIS jurisdiction/road-authority identify (city/ETJ/county intersect + nearest-road maintainer) over the SWR cache with map-overlay styling
   - _exports_: `buildIdentifyParams`, `countyAtPoint`, `countySourcesForPoint`, `ETJ_SOURCES`, `etjCoverageFor`, `etjSourceCovers`, `etjSourcesForPoint`, `fitIdentifyParams`, `formatHighway`, `formatJurisdictionBadge`, `identifyJurisdiction`, `identifyRoadAuthority`, `identifySource`, `JURISDICTION_SOURCES`, `MAX_QUERY_URL`, `normalizeFeature`, `parcelProbePoints`, `placeKey`, `polylineDistMeters`, `polylineLengthMeters`, `proxiedQueryUrl`, `ROAD_AUTHORITY_COLORS`, `ROAD_AUTHORITY_LEGEND`, `ROAD_MAINT_AGENCY`, `roadAuthority`, `roadAuthorityStyle`, `roadDisplayName`, `round6`, `samePlace`, `simplifyRing`, `VERTEX_LADDER`
-- **`src/workspaces/site-planner/lib/jurisdictionBadgeFit.js`** — TODO — describe
+- **`src/workspaces/site-planner/lib/jurisdictionBadgeFit.js`** — How the header jurisdiction pill shortens when the row is tight: whole facts, governing one first (NAVIGATION WINS)
   - _exports_: `abbreviateJurisdiction`, `jurisdictionSegments`
-- **`src/workspaces/site-planner/lib/jurisdictionLabel.js`** — TODO — describe
+- **`src/workspaces/site-planner/lib/jurisdictionLabel.js`** — The ONE canonical jurisdiction label: the four shapes (in-city · in-city+ETJ · ETJ · unincorporated) plus the split/unknown states, and the three-level separator grammar that keeps a GOVERNING authority (`·`), its co-equal peers (`+`) and a merely-adjacent city (`—`) from ever sharing a mark. Once an ETJ is named "Unincorporated" is implied and not printed. Also `governingCityOf`, the structured accessor that replaced parsing the label to find the city whose floodplain rule applies.
   - _exports_: `formatJurisdictionLabel`, `governingCityOf`, `JURISDICTION_SHAPES`, `jurisdictionShapeOf`, `PEER_SEP`, `SLOT_SEP`, `TOUCH_SEP`
 - **`src/workspaces/site-planner/lib/kmzExport.js`** — Google Earth (.kmz) export (B684): pure, dependency-free CRC32 + hand-rolled STORE-only ZIP writer, KML builder (lon,lat order, ring closure/holes, per-layer styles, building extrude), and the site→layer feature mapping; reprojection is injected (the shared feetToLatLng), so it never drifts from the map render.
   - _exports_: `buildKml`, `buildKmz`, `crc32`, `elToRingFeet`, `KMZ_MIME`, `kmzFilename`, `siteToFeatures`, `xmlEscape`, `zipStore`
