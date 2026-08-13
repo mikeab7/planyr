@@ -113,6 +113,52 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V202272 — B400176 + B342996: a rename made in one window is not undone by another, on his account `Blocker: auth`
+
+**What is proven WITHOUT sign-in, and it is most of the substance.** The root cause was reproduced
+with a REAL keyboard and fixed: `ui-audit/verify-notes-rename-live.mjs` is **15/15** across a full
+window and his short one, having been **11/15** on the build before the change — after typing a new
+name the stored tree now carries it within a frame instead of lagging 400 ms, and a brand-new page
+is on disk within a frame instead of existing only in memory. The seam itself is driven by
+`test/notesTreeWriteThrough.test.js` — **11 cases through two real store instances** against an
+in-memory server that owns `rev` the way the deployed trigger owns it: the loss demonstrated, then
+rename / new page / move / delete each surviving a seed, a rename reaching the second window and not
+being reverted by it, the later of two rival renames winning, a tie resolving to the local copy, and
+ten interleaved write-then-sync rounds with the other window editing between each. Mutation-proven
+in both directions (restoring "local title always wins" turns three red; putting one mutator back on
+the render's tree copy turns the source guard red with the call named). Unit **10,917 passing**;
+`verify-notes` 294/294, `verify-notes-anchor-soak` 32/32, `verify-notes-box-drag` **43/43**,
+`verify-press-drive` 6/6, `verify-notes-anchor-zoom` 40/40, `verify-notes-project-integrity` 73/73,
+`verify-notes-tier1` 80/80, `verify-notes-backspace` 40/40, `verify-notes-doubleclick` 13/13. Lint 0,
+build green.
+
+**What still needs a signed-in browser, and why the sandbox cannot answer it.** Every case above
+talks to a FAKE server. The real one is Supabase with `notes_touch_rev` and RLS, and the proxy here
+CORS-blocks sign-in, so the account's own revision behaviour is the one thing not exercised. Steps,
+on his account, in this order:
+
+1. Open Notes in **two windows** on the same account, both showing the same loose note.
+2. In window A, rename it — type it, do not paste. Watch the rail in A: the note must stay in the
+   list, in place, wearing the new name. **It must not disappear at any point**, which is the exact
+   symptom reported.
+3. Leave both windows open for a minute so a sync tick lands in each. In window B, the new name must
+   appear **and stay**. Reload B: still the new name.
+4. Back in A, reload. Still the new name — not the old one coming back from the account.
+5. Make a NEW page in A and, without touching anything else, wait for the sync line to say synced,
+   then reload B. **The new page must be there.** This is the half that used to lose a page outright
+   rather than merely lag a name.
+6. Check the account's tree revision either side of step 3: it should advance, and the title stored
+   there should be the NEW one. A revision that advances while the OLD name is what landed is the
+   defect returning.
+
+**What a failure would look like, so it is recognisable:** the note vanishing from the rail and
+coming back on reload (the stored copy being adopted over the screen), or window B quietly restoring
+the old name a minute after A set it (the merge's title rule).
+
+**⛔ NOT COVERED BY THIS CHECK, deliberately.** Re-filing a note into a different PROJECT still does
+not travel between machines — the merge's placement rule is unchanged and that half of **B342996**
+is still open. Do not read a pass here as covering it.
+
 ### V195264 — B393168/B393169/B393170: the Baytown jurisdiction badges, measured BY AREA, on the owner's own signed-in plans `Blocker: real-data` `Blocker: auth`
 
 **What is proven WITHOUT a browser, and it is the substance of the three items.** The share is now an

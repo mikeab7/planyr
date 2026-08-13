@@ -67,7 +67,6 @@ const TONE_COLOR = {
   warn: "var(--warn-text)",
   error: "var(--danger-text)",
 };
-const TREE_SAVE_MS = 400;
 const UNDO_MS = 14000;
 /* The integrity scan reads every page body, so it waits for the tree to settle rather than
  * riding a rename's keystrokes. Long on purpose: nothing here is urgent, and being late is
@@ -301,8 +300,7 @@ export default function Notes({
    * from inside a project. What went is a whole segmented control that duplicated a control
    * already on screen (PANEL-BREVITY). The empty-rail state still offers the same click
    * explicitly, in the one place someone could conclude their notes were gone. */
-  const treeTimer = useRef(0);
-  const treeRef = useRef(null);   // the latest tree, captured at edit time (see the flush note below)
+  const treeRef = useRef(null);   // the LIVE tree — see `persistTree` / `treeNow` for why nothing reads a render's copy
   const undoTimer = useRef(0);
 
   /* Scope FIRST, then read: the store keys by the signed-in user's id (or `local`), so two
@@ -429,31 +427,50 @@ export default function Notes({
    * notebook vanished on reload. A debounce and an effect that both own the same write is
    * a race; only one of them may. */
 
-  /* Persist the tree on a short debounce. Titles are cheap, but a rename is a keystroke
-   * stream like any other, and page BODIES are not in here — this write stays small no
-   * matter how much has been written into the notebook. */
+  /* ⛔ THE TREE IS WRITTEN THROUGH, NOT DEBOUNCED — AND THAT IS A CORRECTNESS RULE, NOT A
+   * PERFORMANCE ONE (B400176).
+   *
+   * The report: *"rename a loose page and the sidebar stops showing it at all; a reload brings
+   * it back in the right place."* The cause is that this tree has TWO readers and they were
+   * reading different copies. The rail renders from React state; the cloud sync reads
+   * `localStorage`. A 400 ms debounce sat between them, so for that window the stored copy was
+   * the tree as it was BEFORE the edit — and the sync does not merely read it:
+   *   • `seed()` decides whether this device owes an edit by asking `sync.treeDirty`, which
+   *     only becomes true when `writeTree` runs. Inside the window it is FALSE, so a seed
+   *     concludes this device is clean and ADOPTS the account's tree wholesale — a tree that
+   *     cannot contain an edit this device has not written yet, let alone pushed. It then hands
+   *     that back through `onTree`, which is the row leaving the rail.
+   *   • `pushPending` pushes `readTreeRaw()` — the stored copy — so an edit made in the window
+   *     is not merely late to the account, it is skipped.
+   * Measured with a real keyboard before the fix (`verify-notes-rename-live`): after typing a
+   * new name, the screen said "PROBE13 TITLE" and the stored tree said "Untitled page"; after
+   * making a new page, the rail had three and the stored tree had two. A page that exists only
+   * in memory is one sync tick away from never having existed.
+   *
+   * ⛔ SO THE DEBOUNCE BOUGHT NOTHING AND COST THIS. The write it delayed is LOCAL — the
+   * network push is debounced separately and still is, inside `writeTree` (`schedulePush`), so
+   * removing this one adds no traffic. And the tree carries no page bodies, which is the
+   * property that makes writing it on a keystroke cheap: `ui-audit/measure-tree-write.mjs`
+   * records the cost against a deliberately oversized notebook.
+   *
+   * The rule that replaces it: THE STORED TREE IS NEVER STALER THAN THE SCREEN. Anything that
+   * reads the tree — this window, another window, the seed, the push — reads the same one. */
   const persistTree = useCallback((next) => {
-    treeRef.current = next;                       // capture at edit time, never read back later
+    treeRef.current = next;      // the LIVE tree: every mutator reads this, never a render's copy
     setTree(next);
-    if (treeTimer.current) clearTimeout(treeTimer.current);
-    treeTimer.current = setTimeout(() => {
-      treeTimer.current = 0;
-      if (!writeTree(treeRef.current)) setStatus("error");
-    }, TREE_SAVE_MS);
+    if (!writeTree(next)) setStatus("error");
   }, []);
 
-  const flushTree = useCallback(() => {
-    if (!treeTimer.current || !treeRef.current) return;
-    clearTimeout(treeTimer.current);
-    treeTimer.current = 0;
-    if (!writeTree(treeRef.current)) setStatus("error");
-  }, []);
-
-  // A pending tree write must not be lost to a tab close, same as a pending page body.
-  useEffect(() => {
-    window.addEventListener("beforeunload", flushTree);
-    return () => { window.removeEventListener("beforeunload", flushTree); flushTree(); };
-  }, [flushTree]);
+  /** ⛔ THE LIVE TREE, AND EVERY MUTATOR BELOW MUST READ IT RATHER THAN THE RENDER'S `tree`.
+   *
+   * The same defect, one layer up: a callback that closes over `tree` holds the tree as it was
+   * when that render ran, so two edits inside one render cycle — or any edit made after the
+   * store replaced the tree underneath us through `onTree` — writes the older one back over
+   * the newer. Two callbacks here already did this correctly and the rest did not, which is
+   * exactly the kind of split that survives review. Reading through the ref also makes these
+   * callbacks referentially STABLE, so the rail stops rebuilding every handler on every
+   * keystroke of a rename. */
+  const treeNow = useCallback(() => treeRef.current || emptyTree(), []);
 
   /* THE PROJECT LIST — and, just as important, WHETHER IT LOADED (B482 ×2, NEW-1).
    *
@@ -755,26 +772,26 @@ export default function Notes({
    * B1420's collapse). Made from the Dashboard it belongs to no project, which is a real
    * place with the same shape — never a holding pen. */
   const handleAddPage = useCallback(() => {
-    const r = addPage(tree, { projectId: projectId || null });
+    const r = addPage(treeNow(), { projectId: projectId || null });
     persistTree(r.tree);
     setActivePageId(r.pageId);
     setQuery("");
-  }, [tree, projectId, persistTree]);
+  }, [projectId, persistTree, treeNow]);
 
   /** A page UNDER another page — the whole point of the collapse, and reachable by direct
    *  action (the row's menu) rather than by a mode. */
   const handleAddSubpage = useCallback((parentId) => {
-    const r = addPage(tree, { parentId });
+    const r = addPage(treeNow(), { parentId });
     persistTree(r.tree);
     if (r.pageId) setActivePageId(r.pageId);
-  }, [tree, persistTree]);
+  }, [persistTree, treeNow]);
 
   /** Re-file a TOP-LEVEL page into a project, or out of every project (B1374, B1420). */
   const handleSetPageProject = useCallback((pageId, pid) => {
-    persistTree(setPageProject(tree, pageId, pid));
-  }, [tree, persistTree]);
+    persistTree(setPageProject(treeNow(), pageId, pid));
+  }, [persistTree, treeNow]);
 
-  const handleRename = useCallback((id, title) => persistTree(renameNode(tree, id, title)), [tree, persistTree]);
+  const handleRename = useCallback((id, title) => persistTree(renameNode(treeNow(), id, title)), [persistTree, treeNow]);
 
   /* ---- the bin ---- */
 
@@ -782,7 +799,7 @@ export default function Notes({
    *  orphaned page ids and stamps it on the trash entry; nothing is cleared here, and the
    *  purge later clears every id on that entry (bodies AND images). */
   const handleDelete = useCallback((id) => {
-    const { tree: next, removedPageIds, entry } = deleteNode(tree, id);
+    const { tree: next, removedPageIds, entry } = deleteNode(treeNow(), id);
     if (!entry) return;
     persistTree(next);
     // The cloud half of the same cascade: the bodies STAY (that is the bin), the rows are
@@ -792,23 +809,23 @@ export default function Notes({
     setDeleted({ id: entry.id, title: entry.title, pageIds: entry.pageIds });
     if (undoTimer.current) clearTimeout(undoTimer.current);
     undoTimer.current = setTimeout(() => { undoTimer.current = 0; setDeleted(null); }, UNDO_MS);
-  }, [tree, activePageId, persistTree]);
+  }, [activePageId, persistTree, treeNow]);
 
   const handleRestore = useCallback((entryId) => {
-    const r = restoreNode(tree, entryId);
+    const r = restoreNode(treeNow(), entryId);
     persistTree(r.tree);
     if (r.pageIds.length) markPagesRestored(r.pageIds);   // …and it reaches the other one back
     setDeleted((d) => (d && d.id === entryId ? null : d));
     if (r.restored && r.pageIds.length) setActivePageId(r.pageIds[0]);
-  }, [tree, persistTree]);
+  }, [persistTree, treeNow]);
 
   /** DELETE FOREVER — the ONE place a note's bytes are destroyed. */
   const handlePurge = useCallback((entryId) => {
-    const r = purgeTrashEntry(tree, entryId);
+    const r = purgeTrashEntry(treeNow(), entryId);
     persistTree(r.tree);
     setDeleted((d) => (d && d.id === entryId ? null : d));
     purgePages(r.pageIds);
-  }, [tree, persistTree]);
+  }, [persistTree, treeNow]);
 
   /* ⛔ THE BIN'S FACTS, COMPUTED ONLY WHILE THE BIN IS OPEN (NEW-3). It reads every binned
    * page's body, which is cheap for a bin and pointless for a rail nobody is looking at. */
@@ -864,7 +881,7 @@ export default function Notes({
    *
    * ONE op now, for every move there is: reorder among siblings, nest under another page,
    * lift back to the top level. Three ops became one when the three levels became one. */
-  const handleMovePage = useCallback((pageId, toParentId, index, opts) => persistTree(movePage(tree, pageId, toParentId, index, opts)), [tree, persistTree]);
+  const handleMovePage = useCallback((pageId, toParentId, index, opts) => persistTree(movePage(treeNow(), pageId, toParentId, index, opts)), [persistTree, treeNow]);
 
   const handleTitleChange = useCallback((title) => {
     if (activePageId) handleRename(activePageId, title);
@@ -876,17 +893,18 @@ export default function Notes({
    *  characters restored. */
   const handleTitleCommit = useCallback(() => {
     if (!activePageId) return;
-    const base = treeRef.current || tree;
+    const base = treeNow();
     const next = commitTitle(base, activePageId);
     if (next !== base) persistTree(next);
-  }, [activePageId, tree, persistTree]);
+  }, [activePageId, persistTree, treeNow]);
 
   /** Stamp the edited time — driven by the editor's write, NOT by a keystroke, so the field
    *  can only ever record a save that actually landed. */
   const handleSaved = useCallback((pageId) => {
-    const next = touchPage(treeRef.current || tree, pageId);
-    if (next !== (treeRef.current || tree)) persistTree(next);
-  }, [tree, persistTree]);
+    const base = treeNow();
+    const next = touchPage(base, pageId);
+    if (next !== base) persistTree(next);
+  }, [persistTree, treeNow]);
 
   /* ---- conflicts (B1291) ----
    *
@@ -1021,11 +1039,11 @@ export default function Notes({
    *  name and not a shrug. A recovered page is already at the top level, so this is the one
    *  re-file and nothing else. */
   const handleFileRecovered = useCallback((pageId, pid) => {
-    persistTree(movePage(treeRef.current || tree, pageId, null, 0, { projectId: pid }));
+    persistTree(movePage(treeNow(), pageId, null, 0, { projectId: pid }));
     setRecovered((prev) => prev.filter((r) => r.pageId !== pageId));
     const where = pid == null ? NO_PROJECT_LABEL : (projects.find((p) => p.id === pid)?.name || "that project");
     setExportNote(`Filed under ${where}. You can rename it from the row's menu — its original name was lost with its entry.`);
-  }, [tree, persistTree, projects]);
+  }, [persistTree, projects, treeNow]);
 
   /** …and the other honest answer: they did not want it. Bins it like any other note, with
    *  the same undo and the same 30 days. */

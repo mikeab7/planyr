@@ -131,6 +131,41 @@ written out in the header of `lib/notesStore.js`; read it there rather than re-d
     on one device and not yet on the other. `judgeConflict` discounts empty blocks — the CLEAN copy
     wins and is pushed — while a real edit, an edit made inside a block, and a block holding a
     picture all still raise one.
+- **⛔ THE STORED TREE IS NEVER STALER THAN THE SCREEN (B400176) — read this before touching how the
+  tree is saved.** The rail renders from React state; the cloud sync reads `localStorage`. `Notes.jsx`
+  wrote the stored copy on a **400 ms debounce**, so for that window the two disagreed — and the sync
+  does not merely READ that copy, it decides from it. `seed()` asks `sync.treeDirty` (only true once
+  `writeTree` has run) to decide whether this device owes anything, concludes it is CLEAN inside the
+  window, and **adopts the account's tree wholesale** over the top; `pushPending` pushes
+  `readTreeRaw()`, so the edit is skipped rather than merely late. Reported as a renamed note leaving
+  the sidebar until a reload; the same window loses a brand-new page outright (measured with a real
+  keyboard: rail 3, disk 2). So **`persistTree` writes through** — the debounce delayed a LOCAL write
+  while the network push was already debounced separately inside `writeTree`, so removing it costs no
+  traffic, and the per-keystroke cost is measured rather than argued
+  (the **measure-tree-write** harness under `ui-audit/`: 0.007 ms on his notebook, 1.167 ms on one fifty times its size,
+  against a 2 ms budget). **And every tree mutator reads `treeNow()`, never the render's `tree`** —
+  fourteen of sixteen closed over a stale copy. Guards: the repo-root `test/` suite **notesTreeWriteThrough** (two real
+  store instances, the loss demonstrated then each op proven to survive a seed), the headless
+  **verify-notes-rename-live** under `ui-audit/` (real keyboard), and a source guard in **notesModule** that
+  pins the shape — a reintroduced timer looks correct to every test that waits before reading.
+  - **AND THE NAME COMES FROM WHOEVER TYPED IT LAST, NOT FROM WHOEVER IS LOCAL (B342996 ×2).**
+    `mergeTrees` rule 3 was an unconditional "the local title wins", justified by the merge only
+    running when this device owes an edit — which says nothing about ANOTHER page's name, or about
+    which name is newer. A rename therefore could not travel between two machines in either
+    direction: the stale side reverted it AND pushed the old name back up. `renameNode` /
+    `setPageProject` now stamp `updatedAt` (there was nothing to compare before), and a tie or a
+    missing stamp still resolves to LOCAL. ⛔ **PLACEMENT IS DELIBERATELY UNCHANGED** — parent, order
+    and `projectId` stay on rule 4 (local wins), which the reachability fuzz and the project-integrity
+    suites are built around; that half of B342996 is still open.
+- **⛔ A NODE VIEW'S CLOSURE `node` IS THE NODE AS IT WAS BUILT — never read `node.attrs` in a handler
+  (B400177).** `update(next)` re-styles the element and does NOT rebind `node`, so the width handle,
+  which measured from `num(node.attrs.x)`, resized against the box's OLD left edge once the box had
+  been dragged: a drag asking for 90 more produced 34 LESS. Live geometry (`getBoundingClientRect`)
+  cannot go stale, so that is what both handles ask, and the move drag's two dead `node.attrs` reads
+  were deleted rather than left as a trap. The handle also keeps its GRAB OFFSET now, like the move
+  drag does — without it the right edge re-seated under the cursor on press (asked 90, got 86). ⛔ It
+  was found by DRIVING the control with a real mouse after it was reported as "present but not
+  behaviour-verified"; the shipping test had located it in the DOM and never used it.
 - **A BOX CAN BE DELETED AND RESIZED, AND A PRESS THAT DOES NOT MOVE WRITES NOTHING (B391073).** A
   box had a grab handle and no way to remove it and no way to change its width; both are now on the
   box, both hidden until you hover or put the caret in it, and neither reaches paper. ⛔ **Only the

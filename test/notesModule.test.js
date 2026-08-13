@@ -1035,7 +1035,58 @@ describe("the project a notebook belongs to", () => {
     expect(merge.slice(0, 4000), "rule 0 runs before the union").toMatch(/const tombs = new Set\(\[\.\.\.tombstoneIds\(L\), \.\.\.tombstoneIds\(S\)\]\)/);
     expect(merge.slice(0, 6000), "a tombstoned entry never survives").toMatch(/if \(tombs\.has\(String\(e\.id\)\)\) continue;/);
     expect(merge.slice(0, 9000), "…nor a tombstoned live node").toMatch(/deleted\.has\(pg\.id\) \|\| tombs\.has\(String\(pg\.id\)\)/);
-    expect(merge.slice(0, 9000), "and the ledger rides on to the next stale client").toMatch(/tombs: withTombstones/);
+    /* The window is a character count over one function, so it has to grow when that function
+     * is documented further — B342996 added rule 3's amendment above this line. Widened rather
+     * than narrowed deliberately: a guard that silently stops reaching its own subject is the
+     * rot-green failure this repo names elsewhere, so the slice must always cover the whole
+     * merge. */
+    expect(merge.slice(0, 12000), "and the ledger rides on to the next stale client").toMatch(/tombs: withTombstones/);
+  });
+
+  /* ⛔ THE STORED TREE IS NEVER STALER THAN THE SCREEN (B400176).
+   *
+   * The rail renders from React state; the cloud sync reads `localStorage`. A debounce between
+   * them meant that for 400 ms after every edit the two disagreed — and the sync does not just
+   * READ the stored copy, it decides from it: `seed()` asks `sync.treeDirty` (only true once
+   * `writeTree` has run) to decide whether this device owes anything, concludes it is clean,
+   * and adopts the account's tree over the top. His report was a renamed note leaving the
+   * sidebar until a reload; the same window loses a brand-new page outright.
+   *
+   * ⛔ THIS IS A SOURCE GUARD AND IT IS DELIBERATELY NARROW. The behaviour is covered by
+   * `test/notesTreeWriteThrough.test.js` (the seam) and `ui-audit/verify-notes-rename-live.mjs`
+   * (a real keyboard). What no runtime check can see is the shape coming BACK, because the
+   * reintroduced timer would look correct in every test that waits a moment before reading —
+   * which is nearly all of them. So the shape is what is pinned.
+   *
+   * The cost of the write-through is measured, not assumed: `ui-audit/measure-tree-write.mjs`. */
+  it("⛔ THE TREE IS WRITTEN THROUGH, AND EVERY MUTATOR READS THE LIVE TREE (B400176)", () => {
+    const workspace = read(NOTES, "Notes.jsx");
+
+    // `persistTree` writes on the spot — no timer stands between the edit and the disk.
+    const persist = workspace.slice(workspace.indexOf("const persistTree = useCallback"));
+    const body = persist.slice(0, persist.indexOf("}, ["));
+    expect(body, "persistTree writes the tree immediately").toMatch(/if \(!writeTree\(next\)\) setStatus\("error"\)/);
+    expect(body, "no timer may sit between an edit and the stored copy the sync reads")
+      .not.toMatch(/setTimeout|setInterval|requestIdleCallback|queueMicrotask/);
+    expect(workspace, "the debounce constant is gone, not merely unused").not.toMatch(/TREE_SAVE_MS/);
+
+    /* ⛔ AND THE SECOND HALF, which is the same defect one layer up: a callback that closes over
+     * the render's `tree` writes an older tree back over a newer one. Two mutators already read
+     * the ref and the rest did not — exactly the sort of split that survives review — so every
+     * one of them goes through `treeNow()` now. */
+    expect(workspace, "the live-tree accessor exists").toMatch(/const treeNow = useCallback\(\(\) => treeRef\.current \|\| emptyTree\(\), \[\]\)/);
+    const MUTATORS = [
+      "addPage(", "renameNode(", "setPageProject(", "deleteNode(",
+      "restoreNode(", "purgeTrashEntry(", "movePage(", "commitTitle(", "touchPage(",
+    ];
+    for (const fn of MUTATORS) {
+      const calls = workspace.split(fn).slice(1).map((s) => s.slice(0, 40));
+      expect(calls.length, `${fn} is still called from the workspace`).toBeGreaterThan(0);
+      for (const args of calls) {
+        expect(args, `${fn} must read the LIVE tree, never a render's copy`).not.toMatch(/^\s*tree\s*[,)]/);
+        expect(args, `${fn} must not read treeRef around a stale fallback`).not.toMatch(/treeRef\.current \|\| tree/);
+      }
+    }
   });
 
   it("⛔ TAB HAS A DEFINED ANSWER IN EVERY CONTEXT, and none of them destroys content (B1392 ×2)", () => {

@@ -265,8 +265,37 @@ export function mergeTrees(local, server, { onRescue } = {}) {
         for (const k of kids) rescued.push({ ...k, projectId: branchProject == null ? null : String(branchProject) });
         continue;
       }
+      /* ⛔ RULE 3, AMENDED: THE NAME COMES FROM WHICHEVER SIDE WAS EDITED LAST, NOT FROM
+       * WHICHEVER SIDE IS LOCAL (B342996).
+       *
+       * It used to be an unconditional "the local title wins", justified by: this function only
+       * runs when this device has unpushed changes, so its copy is the one with something to
+       * say. That reasoning does not survive contact with a second page. Owing an edit on page
+       * X says nothing about page Y, and even for X the account may hold a NEWER name typed on
+       * the other computer since this device last synced. Measured: rename a note on one
+       * machine, push it, then let a second machine that still held the old name sync — the
+       * old name won the merge AND was pushed back up, so the account ended holding the name
+       * the owner had just replaced. A rename simply could not travel between two machines.
+       *
+       * `updatedAt` is now stamped by `renameNode` (it was not, which is why there was nothing
+       * to compare), and a tie or a missing stamp still resolves to LOCAL — the conservative
+       * answer, because the copy in front of someone is the one they can see is wrong.
+       *
+       * ⛔ DELIBERATELY NOT EXTENDED TO PLACEMENT. Where a page SITS — its parent, its order,
+       * and its project — stays on rule 4 (local wins), which the reachability fuzz and the
+       * project-integrity suites are built around. Recency is the right rule for a value; it is
+       * not obviously the right rule for a structure, and changing both at once is how the
+       * merge's hard-won rules get quietly re-litigated. The project half is its own item. */
+      const theirsIsNewer = other
+        && Number.isFinite(other.updatedAt)
+        && (!Number.isFinite(pg.updatedAt) || other.updatedAt > pg.updatedAt);
       const merged = other
-        ? { ...pg, updatedAt: laterOf(pg.updatedAt, other.updatedAt), createdAt: earlierOf(pg.createdAt, other.createdAt) }
+        ? {
+          ...pg,
+          ...(theirsIsNewer ? { title: other.title } : null),
+          updatedAt: laterOf(pg.updatedAt, other.updatedAt),
+          createdAt: earlierOf(pg.createdAt, other.createdAt),
+        }
         : { ...pg };
       merged.pages = kids;
       out.push(merged);
