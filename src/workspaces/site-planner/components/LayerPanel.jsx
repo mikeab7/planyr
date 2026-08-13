@@ -18,6 +18,7 @@
  * meta-filter, so it sits BELOW the groups (B696), not above them.
  */
 import { useEffect, useState } from "react";
+import { RADIUS } from "../../../shared/ui/radius.js";
 import RowInfo from "./RowInfo.jsx";
 import {
   rowInfoSections, combineLayerStatus,
@@ -72,6 +73,10 @@ const RELEVANCE_LABEL = { all: "Show all", dim: "Dim", hide: "Hide" };
 
 export default function LayerPanel({
   overlays, setOverlays, county, layerStatus = {}, coverage = {}, compact = false, basemap = null, gisNote = null,
+  /* B427410 — the basemap's PLACE-NAME overlay, when the host has one: `{ value, onChange }`.
+   * Rendered under the source it belongs to (see `basemapControl`), never as its own row —
+   * it is drawn BY the basemap and means nothing without it. Absent (planner) → not shown. */
+  placeNames = null,
   // B1091(×2) — the county this SITE is actually in (the saved site record's own county), kept
   // separate from `county` above, which is the layer-registry key / lookup selector. Only
   // used as the fallback when no identify has resolved. Absent (map finder) → null.
@@ -310,7 +315,7 @@ export default function LayerPanel({
       : meta.label;
     return (
       <span data-layer-dot={dormant ? "dormant" : (meta ? meta.label : "")} title={title}
-        style={{ width: 8, height: 8, borderRadius: 99, flex: "none", boxSizing: "border-box",
+        style={{ width: 8, height: 8, borderRadius: RADIUS.pill, flex: "none", boxSizing: "border-box",
           background: dormant ? "transparent" : meta.color,
           border: dormant ? "1.5px solid var(--text-tertiary)" : "none",
           animation: !dormant && loading ? "pf-pulse 1.1s ease-in-out infinite" : "none" }} />
@@ -753,7 +758,7 @@ export default function LayerPanel({
   const agencyBadge = (cfg) => (cfg.agency ? (
     <span title={cfg.source || cfg.agency}
       style={{ fontSize: 9, fontWeight: 700, letterSpacing: "0.04em", color: MUTED, border: `1px solid ${LINE}`,
-        borderRadius: 4, padding: "0 3px", flex: "none", whiteSpace: "nowrap" }}>
+        borderRadius: RADIUS.sm, padding: "0 3px", flex: "none", whiteSpace: "nowrap" }}>
       {cfg.agency}
     </span>
   ) : null);
@@ -890,8 +895,8 @@ export default function LayerPanel({
     <div style={{ marginBottom: 6 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
         <div role="group" aria-label="Aerial basemap source" title={basemap.disabledReason || "Which aerial imagery draws under the plan."}
-          style={{ display: "flex", flex: 1, border: `1px solid ${LINE}`, borderRadius: 6, overflow: "hidden", opacity: basemap.disabledReason ? 0.5 : 1 }}>
-          {PLANNER_BASEMAP_CHOICES.map((c, i) => (
+          style={{ display: "flex", flex: 1, border: `1px solid ${LINE}`, borderRadius: RADIUS.sm, overflow: "hidden", opacity: basemap.disabledReason ? 0.5 : 1 }}>
+          {(basemap.choices || PLANNER_BASEMAP_CHOICES).map((c, i) => (
             <button key={c.key} title={c.title} aria-pressed={basemap.value === c.key}
               disabled={!!basemap.disabledReason} aria-disabled={!!basemap.disabledReason}
               onClick={() => !basemap.disabledReason && basemap.onChange(c.key)}
@@ -901,12 +906,28 @@ export default function LayerPanel({
           ))}
         </div>
         {bmStatus && !basemap.disabledReason && basemap.value !== "off" && (
-          <span title={bmStatus.label} style={{ width: 8, height: 8, borderRadius: 99, flex: "none", background: bmStatus.color,
+          <span title={bmStatus.label} style={{ width: 8, height: 8, borderRadius: RADIUS.pill, flex: "none", background: bmStatus.color,
             animation: basemap.status === "loading" ? "pf-pulse 1.1s ease-in-out infinite" : "none" }} />
         )}
       </div>
       {basemap.disabledReason && (
         <div style={{ fontSize: 10, color: MUTED, lineHeight: 1.4, marginTop: 3 }}>{basemap.disabledReason}</div>
+      )}
+      {/* B427410 — PLACE NAMES: a PROPERTY OF THE BASE LAYER, rendered directly under the source
+          it belongs to, with the same ⓘ every other row in this panel carries.
+          Owner: "the labels — I don't even know what labels it's talking about." It was a bare
+          word beside a checkbox, in a strip of its own, and it was the only control in the panel
+          with no info affordance — so there was nothing to hover and nothing to read. Two things
+          fix that and both are needed: the WORD ("Place names" says what it draws; "Labels" could
+          mean anything on a screen this dense), and the NOTE, which says whose labels they are
+          and why they can be turned off. Rendered here rather than as a layer ROW because it is
+          not an independent overlay — it is drawn by the basemap and means nothing without it. */}
+      {placeNames && !basemap.disabledReason && basemap.value !== "off" && (
+        <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", marginTop: 5, fontSize: 11.5 }}>
+          <input type="checkbox" checked={!!placeNames.value} onChange={(e) => placeNames.onChange(e.target.checked)} />
+          <span style={{ flex: 1 }}>Place names</span>
+          <RowInfo label="Place names" sections={[{ text: "City, road and landmark names drawn OVER the aerial by the imagery provider — part of the base layer, not a separate overlay. Turn them off for a clean picture of the ground, or when they sit on top of something you are trying to read." }]} />
+        </label>
       )}
     </div>
   );
@@ -925,7 +946,7 @@ export default function LayerPanel({
         {onSetLocation && (
           <button data-testid="layers-set-location" onClick={onSetLocation}
             style={{ marginTop: 6, width: "100%", padding: "5px 8px", fontSize: 11, fontWeight: 700, fontFamily: "inherit",
-              border: "1px solid var(--accent)", borderRadius: 6, background: "var(--accent)", color: "var(--on-accent)", cursor: "pointer" }}>
+              border: "1px solid var(--accent)", borderRadius: RADIUS.sm, background: "var(--accent)", color: "var(--on-accent)", cursor: "pointer" }}>
             <span style={{ display: "inline-flex", alignItems: "center", gap: 5, justifyContent: "center" }}>
               <PinIcon size={11} /> Set this plan's location
             </span>
@@ -963,7 +984,7 @@ export default function LayerPanel({
         <button data-testid="layers-clear-all" onClick={clearAllLayers}
           title="Turn every reference layer off. Your plan and the aerial stay exactly as they are."
           style={{ display: "flex", alignItems: "center", gap: 6, width: "100%", marginBottom: 6,
-            padding: "5px 8px", border: `1px solid ${LINE}`, borderRadius: 6, background: "transparent",
+            padding: "5px 8px", border: `1px solid ${LINE}`, borderRadius: RADIUS.sm, background: "transparent",
             color: INK, fontFamily: "inherit", fontSize: 11.5, fontWeight: 700, cursor: "pointer" }}>
           <span aria-hidden="true" style={{ color: MUTED }}>⊘</span>
           <span style={{ flex: 1, textAlign: "left" }}>Turn all {sweepIds.length} layer{sweepIds.length > 1 ? "s" : ""} off</span>
@@ -1009,7 +1030,7 @@ export default function LayerPanel({
           </div>
           <input type="password" value={tok} placeholder="Your own token (optional, MLY|…)" autoComplete="off"
             onChange={(e) => { setTok(e.target.value); setMapillaryToken(e.target.value.trim()); }}
-            style={{ width: "100%", boxSizing: "border-box", padding: "5px 7px", fontSize: 11, fontFamily: "ui-monospace, monospace", border: `1px solid ${LINE}`, borderRadius: 6, color: INK }} />
+            style={{ width: "100%", boxSizing: "border-box", padding: "5px 7px", fontSize: 11, fontFamily: "ui-monospace, monospace", border: `1px solid ${LINE}`, borderRadius: RADIUS.sm, color: INK }} />
           <div style={{ fontSize: 10, color: MUTED, lineHeight: 1.4, marginTop: 2 }}>
             {tok ? "Using your token on this device only." : "Leave blank to use Planyr's built-in access. Source: Mapillary."}
           </div>
@@ -1037,7 +1058,7 @@ export default function LayerPanel({
         <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
           <span style={{ ...groupHdr, margin: 0, flex: "none" }}>Relevance</span>
           <div role="group" aria-label="Relevance" title="How to show layers whose data doesn't reach this view. Affects this list only — never the map."
-            style={{ display: "flex", flex: 1, border: `1px solid ${LINE}`, borderRadius: 6, overflow: "hidden" }}>
+            style={{ display: "flex", flex: 1, border: `1px solid ${LINE}`, borderRadius: RADIUS.sm, overflow: "hidden" }}>
             {["all", "dim", "hide"].map((m) => (
               <button key={m} onClick={() => setRelevanceMode(m)} aria-pressed={mode === m}
                 style={{ ...segBtn(mode === m), borderLeft: m !== "all" ? `1px solid ${LINE}` : "none" }}>

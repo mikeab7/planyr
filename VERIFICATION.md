@@ -113,6 +113,52 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V222352 — B427408–B427413: the map-chrome pass on the OWNER'S OWN WINDOW, and on the signed-in surfaces the radius sweep could not reach `Blocker: auth` + `real-data`
+
+**What is proven HERE, and it is nearly all of it — this is deliberately a SHORT list.** The whole
+block was driven headless on the built app by `ui-audit/verify-map-chrome.mjs`: **17/17 clean, and 11
+of those checks RED against a `origin/main` build served beside it**, which is the part that makes the
+green meaningful. Desktop 1600x900 with the Your-sites panel seeded, expanded and asserted on screen
+before anything was measured against it; phone 390x844 for the other direction the owner asked for.
+The zoom reachability check is a real `elementFromPoint` hit test, the collapse check reads the panel's
+own rendered width (268 -> 150 -> 268), the imagery check asks the DOM where the control actually
+lives, and the radius check sweeps every visible element's four computed corners (208 off-scale
+pre-fix -> 0). Full suite green (541 files / 10,918 tests), lint clean, build green.
+
+**BEFORE / AFTER — the full map view, as the owner asked. COMMITTED, at
+`ui-audit/shots/map-chrome/desktop-before.png` and `.../desktop-after.png`** — the harness writes to
+`ui-audit/out/`, which is gitignored, so the two views worth keeping are copied where they survive.
+Regenerate the full set (phone, and the layers-collapsed state) with
+`node ui-audit/verify-map-chrome.mjs --shots`. The before shot shows the reported defect
+plainly: the zoom control is not merely overlapped, it is entirely invisible under Your sites.
+
+**What CANNOT be checked here, and why each is a real blocker rather than a to-do.**
+1. **`auth`** — the sandbox proxy CORS-blocks Supabase sign-in, so the radius sweep ran over the
+   SIGNED-OUT chrome. Three surfaces it therefore never saw are exactly the ones the owner named:
+   the **account chip** ("even the Michael Butler at the top, that chip has different radii"), the
+   **cloud-sync badge** in its signed-in states, and the **project breadcrumb** carrying real project
+   and plan names. All three were repointed to the scale and are covered by unit-level review, but
+   no computed-style sweep has run over them.
+2. **`real-data`** — the harness seeds 14 synthetic sites. The owner has 28, with real names, real
+   statuses and a much taller list, and the jurisdiction pill on a real plan is the longest string in
+   his portfolio.
+3. **His display.** PERCEPTUAL-PARITY's viewing geometry is stated, not measured: he is on a 2K panel
+   and this repo cannot know its physical width or his viewing distance. Whether the consolidated
+   scale reads as consistent is finally his eye's call, and only on his screen.
+
+**The signed-in steps still pending** (any browser-equipped session, on planyr.io):
+1. Sign in, open the **Map** view at a wide desktop window with **Your sites expanded** and the
+   **Layers panel open**. Confirm both zoom buttons are fully visible and clickable in the bottom-left
+   corner, with nothing over them and no banner landing on them.
+2. Collapse the Layers panel with its header control; confirm the imagery behind it is genuinely freed
+   rather than left under a stub. Reload and confirm it is still collapsed; expand it and reload again.
+3. In the layer list, confirm **BASE & TERRAIN** leads with the Esri/USGS control and **Place names**
+   beneath it with its own info affordance, and that switching base imagery still works.
+4. Look at the corners: the account chip, the cloud badge, the breadcrumb, the search bar and its two
+   buttons, the two panels. **The question is whether anything still disagrees**, not whether any one
+   value is right.
+5. Repeat 1-3 on a phone.
+
 ### V215200 — B420256: a real multi-op commit still settles correctly on the plan that holds one id under two kinds `Blocker: auth` + `real-data`
 
 **What is proven HERE, and it is the mechanism itself.** `test/elementResultPairing.test.js` drives the

@@ -9,14 +9,17 @@ import { syncOverlayLayers, withTileRetry, ALL_LAYERS, probeService } from "./li
 import { PANE_AREA, PANE_LINE, PANE_AREA_LABEL, PANE_LINE_LABEL } from "./lib/mapStack.js";
 import { tileCacheLimit } from "./lib/tileBudget.js";
 import { boundTileCache, capTileCache, releaseLayer } from "./lib/tileLifecycle.js";
-import { BASEMAPS } from "./lib/basemaps.js";
+import { BASEMAPS, FINDER_BASEMAP_CHOICES } from "./lib/basemaps.js";
+// B427411 — the ONE corner-radius scale. Never a bare number at a call site: eight of them
+// disagreed visibly in this file alone before it existed.
+import { RADIUS, nestedIn } from "../../shared/ui/radius.js";
 import { prefetchExtents, computeCoverage, boundsFromLeaflet, getNearbyRadiusMiles, subscribeRelevance } from "./lib/coverage.js";
 import LayerPanel from "./components/LayerPanel.jsx";
 import { siteState } from "./lib/siteRegion.js";
 // NEW-3 — the ONE map-overlay stacking model. Leaflet fixes its own control containers at
 // z-index 1000; these panels sat at 1000 too, so whether the zoom buttons and the scale bar
 // covered them came down to document order. An open panel now outranks map chrome outright.
-import { MAP_CHROME_Z, panelMaxHeight } from "./lib/mapChromeStack.js";
+import { MAP_CHROME_Z, panelMaxHeight, ZOOM_CONTROL_CLEARANCE_PX } from "./lib/mapChromeStack.js";
 import { useGroundElevation } from "./components/useGroundElevation.js";
 import CursorChip from "./components/CursorChip.jsx";
 import { contourHover } from "./lib/terrainLazy.js";
@@ -366,7 +369,26 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
   const toggleSitesPanel = () => setSitesPanelOpen((v) => { const n = !v; try { localStorage.setItem("planarfit:sitesPanelClosed:v1", n ? "0" : "1"); } catch (_) {} return n; });
   // Layers/imagery panel: on a phone it collapses to a tap (default closed) so it stops
   // covering the search bar; desktop keeps it always-open as before.
-  const [layersPanelOpen, setLayersPanelOpen] = useState(() => { try { return !window.matchMedia("(max-width: 760px)").matches; } catch (_) { return true; } });
+  /* B427409 — the panel's open state now PERSISTS, on the `sitesPanelClosed` pattern one state
+   * above. Making it collapsible on desktop without remembering the choice would mean re-closing
+   * it on every visit, which is its own small version of the same complaint. Phone still defaults
+   * CLOSED (it would otherwise cover the search bar) and desktop still defaults OPEN, so nothing
+   * moves for anyone until they touch the control; only an explicit choice is stored. */
+  const [layersPanelOpen, setLayersPanelOpen] = useState(() => {
+    let stored = null;
+    try { stored = localStorage.getItem("planarfit:layersPanelClosed:v1"); } catch (_) { /* private mode */ }
+    if (stored === "1") return false;
+    if (stored === "0") return true;
+    try { return !window.matchMedia("(max-width: 760px)").matches; } catch (_) { return true; }
+  });
+  /* One control drives both breakpoints (B427409). The phone half is unchanged: opening Layers
+   * there closes Your sites, because the two overlays would otherwise stack on a narrow screen. */
+  const toggleLayersPanel = () => setLayersPanelOpen((v) => {
+    const n = !v;
+    try { localStorage.setItem("planarfit:layersPanelClosed:v1", n ? "0" : "1"); } catch (_) { /* private mode */ }
+    if (n) { try { if (window.matchMedia("(max-width: 760px)").matches) setSitesPanelOpen(false); } catch (_) {} }
+    return n;
+  });
   const [hoverRow, setHoverRow] = useState(null);
   // Jurisdiction for the Layers panel — follows the map's current area (B13). NEW-1: seeded
   // from where the map is about to OPEN rather than from a hardcoded "harris", so a
@@ -550,10 +572,25 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
      * exactly the continental-US case, and the effect below re-lands once the list is in —
      * but only while the user hasn't touched the map. */
     const cfg = landingView(sitesRef.current, viewportOf(elRef.current));
-    // Phone: the full-width search bar now owns the top-left, so move the +/- zoom control
-    // to the bottom-left (clear there) instead of leaving it half-hidden behind the bar.
-    // Desktop is unchanged (top-left, where the Your-sites panel sits over it as before).
-    const phone = (() => { try { return window.matchMedia("(max-width: 760px)").matches; } catch (_) { return false; } })();
+    // ⛔ B427408 — THE ZOOM CONTROL OWNS THE BOTTOM-LEFT CORNER AT EVERY BREAKPOINT, AND THE
+    // BREAKPOINT BRANCH THAT USED TO LIVE HERE IS GONE ON PURPOSE.
+    //
+    // What was here before moved the control to `bottomleft` on a phone and left it at `topleft`
+    // on desktop, with a comment that said in as many words: "Desktop is unchanged (top-left,
+    // where the Your-sites panel sits over it as before)". The Your-sites panel is `top: 10,
+    // left: 10, width: 232` — the SAME corner Leaflet puts `topleft` in — so on desktop the panel
+    // covered the control completely: the owner could not press `+` at all, and only the bottom
+    // sliver of `−` showed below the panel. The occlusion was seen, fixed for one breakpoint, and
+    // knowingly left on the other.
+    //
+    // ⛔ NOT A z-index FIX. Raising the control above the panel just moves the collision — the
+    // buttons would then sit on top of the site list and eat presses meant for it. The fix is a
+    // corner nothing else claims, and there is exactly one: `topleft` is the sites panel (desktop)
+    // / the search bar (phone), `topright` is the layers panel, `bottomright` is the scale bar.
+    //
+    // ONE POSITION, NO BRANCH — which is also the point. Two of the six defects in this block
+    // exist because the desktop path was left behind while the phone path was fixed; a control
+    // whose position does not depend on the breakpoint cannot drift apart again.
     // NEW-6 — "I can't zoom out far enough" was THIS, and only this: a hard `minZoom: 8` floor on
     // the Leaflet map. It was not the tile sources (both Esri World Imagery and USGS serve from
     // z0), not a bounds clamp (no `maxBounds` is ever set), and not the projection (one Web
@@ -561,7 +598,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
     // pull back and see another state at all — you could only jump by picking a site.
     // z3 puts the continent on screen, which is what a two-state product needs.
     const map = L.map(elRef.current, { zoomControl: false, minZoom: 3, maxZoom: 21 }).setView(cfg.center, cfg.zoom);
-    L.control.zoom({ position: phone ? "bottomleft" : "topleft" }).addTo(map);
+    L.control.zoom({ position: "bottomleft" }).addTo(map);
     mapRef.current = map;
     L.control.scale({ imperial: true, metric: false, position: "bottomright", maxWidth: 130 }).addTo(map); // graphic scale (B96b)
     setZoom(map.getZoom());
@@ -1574,7 +1611,9 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
 
   const asm = selected.length ? computeAssembly(selected, BASEMAPS.esri.export) : null;
 
-  const field = { padding: "8px 10px", fontSize: 13, border: `1px solid ${PAL.panelLine}`, borderRadius: 8, color: PAL.ink, background: "var(--surface-raised)", fontFamily: "inherit" };
+  /* B427410 — the `field` style object that used to live here dressed ONE control: the Imagery
+   * <select> above the layer list. That control is now a row INSIDE the list (LayerPanel's basemap
+   * control), styled by the panel, so the object had no reader left. */
 
   // One left-rail site row — shared by every status section (B235). Status marker,
   // name (struck through when Dead), status + acreage, and the hover "show on map" ⊕.
@@ -1591,7 +1630,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
         style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 12px", cursor: "pointer", borderLeft: `3px solid ${isActive ? PAL.accent : "transparent"}`, background: isActive ? "#fbf3ee" : "transparent" }}>
         <button title={`Status: ${STATUS_META[st]?.label || st} — click to change`} aria-label="Set status"
           onClick={(e) => { e.stopPropagation(); openSiteMenu(s, e.clientX, e.clientY); }}
-          style={{ width: 16, height: 16, flex: "none", display: "grid", placeItems: "center", borderRadius: 99, cursor: "pointer", padding: 0,
+          style={{ width: 16, height: 16, flex: "none", display: "grid", placeItems: "center", borderRadius: RADIUS.pill, cursor: "pointer", padding: 0,
             border: `1.5px solid ${t.color}`, background: t.hollow ? "var(--surface-raised)" : t.color, color: t.hollow ? t.color : "#fff", fontSize: 9, lineHeight: 1, fontFamily: "inherit" }}>
           {t.glyph}
         </button>
@@ -1611,7 +1650,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
                 else if (e.key === "Escape") cancelRename();
               }}
               onBlur={(e) => { if (skipRenameBlurRef.current) { skipRenameBlurRef.current = false; return; } commitRename(s.id, e.target.value, renaming.name); }}
-              style={{ width: "100%", boxSizing: "border-box", fontSize: 12.5, fontWeight: 600, color: PAL.ink, fontFamily: "inherit", padding: "1px 4px", border: `1px solid ${PAL.accent}`, borderRadius: 4, outline: "none", background: "var(--surface-raised)" }} />
+              style={{ width: "100%", boxSizing: "border-box", fontSize: 12.5, fontWeight: 600, color: PAL.ink, fontFamily: "inherit", padding: "1px 4px", border: `1px solid ${PAL.accent}`, borderRadius: RADIUS.sm, outline: "none", background: "var(--surface-raised)" }} />
           ) : (
             <div style={{ fontSize: 12.5, fontWeight: 600, color: PAL.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", textDecoration: t.struck ? "line-through" : "none" }}>{s.site || s.name || "Untitled site"}</div>
           )}
@@ -1629,7 +1668,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
             only the non-destructive locate (⊕) stays here. */}
         <div style={{ display: "flex", gap: 2, flex: "none", alignItems: "center", opacity: showActions ? 1 : 0, transition: "opacity .12s", pointerEvents: showActions ? "auto" : "none" }}>
           {s.origin && <button title="Show on map (zoom to the plan)" aria-label="Show on map" onClick={(e) => { e.stopPropagation(); flyToSite(s); }}
-            className="gbtn" style={{ border: "none", background: "transparent", color: PAL.muted, cursor: "pointer", lineHeight: 0, padding: 3, borderRadius: 5 }}>
+            className="gbtn" style={{ border: "none", background: "transparent", color: PAL.muted, cursor: "pointer", lineHeight: 0, padding: 3, borderRadius: RADIUS.sm }}>
             <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"><circle cx="8" cy="8" r="5.2" /><circle cx="8" cy="8" r="1.4" fill="currentColor" stroke="none" /><path d="M8 1.2v2M8 12.8v2M1.2 8h2M12.8 8h2" /></svg>
           </button>}
         </div>
@@ -1661,11 +1700,11 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
         {mapMenu && (
           <ContextMenu x={mapMenu.x} y={mapMenu.y} onClose={() => setMapMenu(null)} minWidth={236} zIndex={3999}
             className="" ariaLabel="Map actions"
-            panelStyle={{ background: "var(--surface-raised)", border: `1px solid ${PAL.panelLine}`, borderRadius: 8, boxShadow: "0 10px 30px rgba(28,25,20,0.22)", padding: 4, fontFamily: "inherit" }}>
+            panelStyle={{ background: "var(--surface-raised)", border: `1px solid ${PAL.panelLine}`, borderRadius: RADIUS.lg, boxShadow: "0 10px 30px rgba(28,25,20,0.22)", padding: 4, fontFamily: "inherit" }}>
             <div style={{ fontSize: 10, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 700, padding: "6px 10px 4px" }}>Map</div>
-            <button onClick={() => exportSitesKmz(false)} style={{ display: "block", width: "100%", textAlign: "left", background: "transparent", border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 13, color: PAL.ink, padding: "7px 10px", borderRadius: 6 }}
+            <button onClick={() => exportSitesKmz(false)} style={{ display: "block", width: "100%", textAlign: "left", background: "transparent", border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 13, color: PAL.ink, padding: "7px 10px", borderRadius: RADIUS.sm }}
               onMouseEnter={(e) => (e.currentTarget.style.background = "var(--surface-overlay)")} onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}>Export to Google Earth (KMZ)</button>
-            <button onClick={() => exportSitesKmz(true)} style={{ display: "block", width: "100%", textAlign: "left", background: "transparent", border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 13, color: PAL.ink, padding: "7px 10px", borderRadius: 6 }}
+            <button onClick={() => exportSitesKmz(true)} style={{ display: "block", width: "100%", textAlign: "left", background: "transparent", border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 13, color: PAL.ink, padding: "7px 10px", borderRadius: RADIUS.sm }}
               onMouseEnter={(e) => (e.currentTarget.style.background = "var(--surface-overlay)")} onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}>Export with 3D buildings</button>
           </ContextMenu>
         )}
@@ -1675,7 +1714,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
           position: "absolute", zIndex: narrow ? 1100 : 1000,
           display: "flex", alignItems: "center",
           background: PAL.chrome,
-          borderRadius: 99,
+          borderRadius: RADIUS.pill,
           boxShadow: "0 4px 20px rgba(0,0,0,0.45), 0 1px 4px rgba(0,0,0,0.25)",
           padding: "0 6px",
           height: 42,
@@ -1692,14 +1731,21 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
               padding: "0 10px", background: "transparent", border: "none", outline: "none",
               color: PAL.chromeInk, fontSize: 13, fontFamily: "inherit",
             }}
-            placeholder={narrow ? "Find a site…" : "Find a site — address or place…"}
+            // B427412 — say what to TYPE, not what the control is for. The old text was
+            // "Find a site — address or place…", and it had three problems in one line: the em dash
+            // the owner asked to lose, a restatement of the control's own purpose (the button beside
+            // it says Go and the field is plainly a search), and two different sentences for narrow
+            // and wide. Now one instruction naming the accepted input, with the narrow variant a
+            // strict shortening of the wide one rather than a different thought.
+            placeholder={narrow ? "Type an address…" : "Type an address, city or place…"}
+            aria-label="Search for an address or place"
             value={addr}
             onChange={(e) => setAddr(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter" && !busy) goAddress(); }}
           />
           <button
             style={{
-              flex: "none", height: 30, padding: "0 11px", borderRadius: 6,
+              flex: "none", height: 30, padding: "0 11px", borderRadius: nestedIn(RADIUS.pill),
               border: "none", background: PAL.accent, color: "#fff",
               fontSize: 12, fontWeight: 700, cursor: busy ? "default" : "pointer",
               fontFamily: "inherit", opacity: busy && !selectMode ? 0.6 : 1,
@@ -1720,7 +1766,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
               onClick={() => setSelectMode(true)}
               style={{
                 flex: "none", display: "flex", alignItems: "center", gap: 5,
-                height: 30, padding: "0 11px", borderRadius: 6,
+                height: 30, padding: "0 11px", borderRadius: nestedIn(RADIUS.pill),
                 border: "1px solid var(--chrome-divider)", background: "var(--chrome-bg-elev)",
                 color: PAL.chromeInk, fontSize: 12.5, fontWeight: 600,
                 cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap",
@@ -1740,7 +1786,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
               <button
                 onClick={() => setSelectMode(false)}
                 style={{
-                  flex: "none", height: 30, padding: "0 10px", borderRadius: 6,
+                  flex: "none", height: 30, padding: "0 10px", borderRadius: nestedIn(RADIUS.pill),
                   border: "1px solid var(--chrome-divider)", background: "var(--chrome-bg-elev)",
                   color: PAL.chromeInk, fontSize: 12, fontWeight: 600,
                   cursor: "pointer", fontFamily: "inherit",
@@ -1752,7 +1798,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
           )}
           {selected.length > 0 && (
             <>
-              <span style={{ width: 7, height: 7, borderRadius: 99, background: PAL.accent, flex: "none" }} />
+              <span style={{ width: 7, height: 7, borderRadius: RADIUS.pill, background: PAL.accent, flex: "none" }} />
               <span style={{
                 flex: "none", color: PAL.chromeInk, fontSize: 12.5, fontWeight: 600,
                 padding: "0 8px", whiteSpace: "nowrap",
@@ -1763,7 +1809,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
                 onClick={clearSel}
                 title="Clear selection"
                 style={{
-                  flex: "none", width: 26, height: 26, borderRadius: 5,
+                  flex: "none", width: 26, height: 26, borderRadius: nestedIn(RADIUS.pill),
                   border: "none", background: "transparent",
                   color: PAL.chromeMuted, fontSize: 13, lineHeight: 1,
                   cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
@@ -1774,7 +1820,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
               <button
                 onClick={planSelected}
                 style={{
-                  flex: "none", height: 30, padding: "0 11px", borderRadius: 6,
+                  flex: "none", height: 30, padding: "0 11px", borderRadius: nestedIn(RADIUS.pill),
                   border: "none", background: PAL.accent, color: "#fff",
                   fontSize: 12, fontWeight: 700, cursor: "pointer",
                   fontFamily: "inherit", whiteSpace: "nowrap",
@@ -1808,7 +1854,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
 
         {/* saved sites */}
         {sites.length > 0 && (
-          <div style={{ position: "absolute", background: "var(--surface-overlay)", border: `1px solid ${PAL.panelLine}`, borderRadius: 10, boxShadow: "0 4px 18px rgba(28,25,20,0.14)", overflow: "hidden",
+          <div style={{ position: "absolute", background: "var(--surface-overlay)", border: `1px solid ${PAL.panelLine}`, borderRadius: RADIUS.lg, boxShadow: "0 4px 18px rgba(28,25,20,0.14)", overflow: "hidden",
             // Phone: drop below the full-width search bar; a slim tap when closed, a wider
             // overlay (above the layers panel) when the user opens it.
             ...(narrow
@@ -1826,7 +1872,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
             {/* Type-to-filter the list by name (B235). */}
             <div style={{ padding: "0 8px 6px" }}>
               <input value={nameFilter} onChange={(e) => setNameFilter(e.target.value)} placeholder="Filter by name…" aria-label="Filter sites by name"
-                style={{ width: "100%", boxSizing: "border-box", padding: "5px 8px", fontSize: 12, border: `1px solid ${PAL.panelLine}`, borderRadius: 7, color: PAL.ink, background: "var(--surface-raised)", fontFamily: "inherit", outline: "none" }} />
+                style={{ width: "100%", boxSizing: "border-box", padding: "5px 8px", fontSize: 12, border: `1px solid ${PAL.panelLine}`, borderRadius: RADIUS.sm, color: PAL.ink, background: "var(--surface-raised)", fontFamily: "inherit", outline: "none" }} />
             </div>
             {/* Status chips = POSITIVE multi-select filters (B235): tap to show only those
                 statuses (list + map pins both). None selected = show everything. Colors +
@@ -1837,12 +1883,12 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
                 return (
                   <button key={st} onClick={() => toggleStatusFilter(st)}
                     title={`${STATUS_META[st]?.label || st}: ${n} — ${on ? "click to remove from the filter" : "click to show only this status"}`}
-                    style={{ display: "flex", alignItems: "center", gap: 4, padding: "2px 7px", borderRadius: 99, cursor: "pointer", fontFamily: "inherit",
+                    style={{ display: "flex", alignItems: "center", gap: 4, padding: "2px 7px", borderRadius: RADIUS.pill, cursor: "pointer", fontFamily: "inherit",
                       fontSize: 10.5, fontWeight: 600, lineHeight: 1.3, border: `1px solid ${on ? t.color : PAL.panelLine}`,
                       background: on ? t.color : "var(--surface-raised)", color: on ? "#fff" : PAL.ink, opacity: anySel && !on ? 0.55 : 1, textDecoration: t.struck ? "line-through" : "none" }}>
                     {/* Solid status disc (matches the map pin): filled dot off, inverted on.
                         Pursuit/Active are glyphless discs; settled stages carry ‖/✓/✕ (B433). */}
-                    <span style={{ width: 12, height: 12, flex: "none", display: "grid", placeItems: "center", borderRadius: 99, background: on ? "rgba(255,255,255,0.92)" : t.color, color: on ? t.color : "#fff", fontSize: 7.5, lineHeight: 1 }}>{t.glyph}</span>
+                    <span style={{ width: 12, height: 12, flex: "none", display: "grid", placeItems: "center", borderRadius: RADIUS.pill, background: on ? "rgba(255,255,255,0.92)" : t.color, color: on ? t.color : "#fff", fontSize: 7.5, lineHeight: 1 }}>{t.glyph}</span>
                     {STATUS_META[st]?.label || st}<span style={{ color: on ? "rgba(255,255,255,0.85)" : PAL.muted, fontWeight: 700 }}>{n}</span>
                   </button>
                 );
@@ -1866,7 +1912,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
                         style={{ display: "flex", alignItems: "center", gap: 6, width: "100%", background: "var(--surface-raised)", borderTop: `1px solid ${PAL.panelLine}`, borderLeft: "none", borderRight: "none", borderBottom: "none", cursor: "pointer", fontFamily: "inherit", padding: "5px 12px" }}>
                         <span style={{ fontSize: 8, lineHeight: 1, transform: collapsed ? "rotate(-90deg)" : "none", display: "inline-block", color: PAL.muted }}>▼</span>
                         {/* Solid status disc, matching the map pin (B433). */}
-                        <span style={{ width: 14, height: 14, flex: "none", display: "grid", placeItems: "center", borderRadius: 99, background: t.color, color: "#fff", fontSize: 8.5, lineHeight: 1 }}>{t.glyph}</span>
+                        <span style={{ width: 14, height: 14, flex: "none", display: "grid", placeItems: "center", borderRadius: RADIUS.pill, background: t.color, color: "#fff", fontSize: 8.5, lineHeight: 1 }}>{t.glyph}</span>
                         <span style={{ flex: 1, textAlign: "left", fontSize: 11, fontWeight: 700, color: PAL.ink, textDecoration: t.struck ? "line-through" : "none" }}>{STATUS_META[st]?.label || st}</span>
                         <span style={{ color: PAL.muted, fontWeight: 700, fontSize: 11 }}>{rows.length}</span>
                       </button>
@@ -1882,30 +1928,43 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
 
         {/* imagery + labels + overlay layers control — on a phone this collapses to a tap
             (default closed) so it stops covering the search bar / Select-parcels button. */}
-        <div style={{ position: "absolute", background: "var(--surface-overlay)", border: `1px solid ${PAL.panelLine}`, borderRadius: 8, padding: narrow && !layersPanelOpen ? 0 : "6px 9px 8px", fontSize: 12, color: PAL.ink, boxShadow: "0 2px 8px rgba(0,0,0,0.12)",
+        <div style={{ position: "absolute", background: "var(--surface-overlay)", border: `1px solid ${PAL.panelLine}`, borderRadius: RADIUS.lg, padding: layersPanelOpen ? "6px 9px 8px" : 0, fontSize: 12, color: PAL.ink, boxShadow: "0 2px 8px rgba(0,0,0,0.12)",
           ...(narrow
             ? { top: 60, right: 8, zIndex: MAP_CHROME_Z.panel, width: layersPanelOpen ? "min(300px, calc(100vw - 16px))" : "auto" }
-            : { top: 10, right: 10, zIndex: MAP_CHROME_Z.panel, width: 268, maxHeight: panelMaxHeight({ topPx: 10, bottomPx: 76 }), display: "flex", flexDirection: "column" }) }}>
-          {narrow && (
-            <button onClick={() => setLayersPanelOpen((o) => { const n = !o; if (narrow && n) setSitesPanelOpen(false); return n; })} title={layersPanelOpen ? "Collapse layers" : "Imagery & layers"}
+            /* B427409 — DESKTOP COLLAPSES TOO, and collapsing FREES THE MAP. The width and the
+               height bound are now conditional on the same `layersPanelOpen` the phone uses:
+               closed, the card shrinks to its header bar (`width: "auto"`, no max-height, no flex
+               column) instead of staying a 268-wide block pinned over the imagery. A collapsed
+               panel that still covers the map would answer the letter of the report and not the
+               point of it. */
+            : { top: 10, right: 10, zIndex: MAP_CHROME_Z.panel,
+                ...(layersPanelOpen
+                  ? { width: 268, maxHeight: panelMaxHeight({ topPx: 10, bottomPx: 76 }), display: "flex", flexDirection: "column" }
+                  : { width: "auto" }) }) }}>
+          {/* B427409 — ONE control, at EVERY breakpoint. This button used to be wrapped in
+              `{narrow && (...)}`, so on desktop the panel had no way to close and the owner's only
+              recourse was collapsing each section by hand: "I can't hide that layers panel without
+              collapsing all the individual ones, and I feel like I should be able to just collapse
+              it all together." Same defect shape as the zoom control in B427408 — the phone path
+              was built and the desktop path was left behind — and it is fixed the same way, by
+              removing the branch rather than adding a second control. */}
+          {(
+            <button onClick={toggleLayersPanel} title={layersPanelOpen ? "Collapse layers" : "Imagery & layers"}
               style={{ display: "flex", alignItems: "center", gap: 6, width: "100%", background: "transparent", border: "none", cursor: "pointer", fontFamily: "inherit",
                 fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.07em", fontWeight: 700, padding: layersPanelOpen ? "0 0 6px" : "8px 11px" }}>
               <span style={{ fontSize: 8, lineHeight: 1, transform: layersPanelOpen ? "none" : "rotate(-90deg)", display: "inline-block" }}>▼</span>
               <span style={{ flex: 1, textAlign: "left" }}>Imagery &amp; layers</span>
             </button>
           )}
-          {(!narrow || layersPanelOpen) && (<>
-          <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-            <span style={{ color: PAL.muted }}>Imagery</span>
-            <select style={{ ...field, padding: "4px 6px", fontSize: 12, flex: 1 }} value={basemap} onChange={(e) => setBasemap(e.target.value)}>
-              {Object.entries(BASEMAPS).map(([k, b]) => <option key={k} value={k}>{b.label}</option>)}
-            </select>
-            <label style={{ display: "flex", gap: 5, alignItems: "center", cursor: "pointer" }}>
-              <input type="checkbox" checked={labels} onChange={(e) => setLabels(e.target.checked)} /> Labels
-            </label>
-          </div>
-          <div style={{ borderTop: `1px solid ${PAL.panelLine}`, margin: "7px -9px 6px" }} />
-          <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.07em", fontWeight: 700, marginBottom: 4 }}>Layers</div>
+          {layersPanelOpen && (<>
+          {/* B427410 — the Imagery <select> and the bare "Labels" checkbox that used to sit HERE,
+              in their own strip above a "LAYERS" heading and divided off from it, are gone. The
+              basemap IS a layer: it now renders inside the list's own Base & terrain group via
+              LayerPanel's `basemap` prop — the same control the planner has always had — so
+              choosing Esri vs USGS reads as picking a base rather than operating a separate
+              machine. The divider and the "LAYERS" heading went with it: LayerPanel renders its
+              own group headers, and Base & terrain is the first of them, so the heading was
+              labelling a list that already labels itself. */}
           {/* NEW-3 — the list takes whatever height the card has left instead of a flat 260px
               (about four rows of a twenty-eight layer list). The card itself is bounded by
               panelMaxHeight above, so this can never run off the bottom of the map. */}
@@ -1919,6 +1978,14 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
                 site, no drainage identify), so it feeds the flood scoping too. In the
                 planner the two are deliberately different signals. */}
             <LayerPanel overlays={overlays} setOverlays={setOverlays} county={viewCounty} siteCounty={viewCounty} layerStatus={layerStatus} coverage={coverage} surface="finder"
+              /* B427410 — the basemap as a BASE LAYER inside the list, not a separate strip above
+                 it. Choices are DERIVED from the shared BASEMAPS registry, so a source added there
+                 shows up here with no second edit; there is no "off" on this surface because the
+                 finder's map always has a base (see basemaps.js). `placeNames` is the same
+                 provider label overlay the bare "Labels" checkbox used to toggle, now named so it
+                 says what it draws and carrying the ⓘ every other row in this panel has. */
+              basemap={{ value: basemap, onChange: setBasemap, choices: FINDER_BASEMAP_CHOICES }}
+              placeNames={{ value: labels, onChange: setLabels }}
               /* NEW-2 — which STATE the map is looking at, so a Texas-only source is named as
                  "not available in Colorado" rather than offered as a toggle that produces an
                  empty map. The view centre is the best state fact the finder has (there is no
@@ -1934,13 +2001,13 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
 
         {/* error toast (bottom-left) — surfaced only when there's an error */}
         {err && (
-          <div style={{ position: "absolute", left: 12, bottom: 12, zIndex: 1000, maxWidth: 380, background: "var(--surface-overlay)", border: `1px solid ${PAL.panelLine}`, borderRadius: 8, padding: "8px 11px", fontSize: 12.5, color: PAL.accent, lineHeight: 1.45, pointerEvents: fallbackOffer ? "auto" : "none" }}>
+          <div style={{ position: "absolute", left: 12, bottom: ZOOM_CONTROL_CLEARANCE_PX, zIndex: 1000, maxWidth: 380, background: "var(--surface-overlay)", border: `1px solid ${PAL.panelLine}`, borderRadius: RADIUS.lg, padding: "8px 11px", fontSize: 12.5, color: PAL.accent, lineHeight: 1.45, pointerEvents: fallbackOffer ? "auto" : "none" }}>
             {err}
             {/* NEW-4 — the way forward rides WITH the bad news. Only on a genuine source outage:
                 "no parcel right there" is an answer, not an outage, and gets no button. */}
             {fallbackOffer && (
               <button onClick={() => startBlankHere(fallbackOffer.at)} data-testid="map-start-blank-here"
-                style={{ display: "block", width: "100%", marginTop: 8, height: 30, borderRadius: 6, border: "none", background: PAL.accent, color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
+                style={{ display: "block", width: "100%", marginTop: 8, height: 30, borderRadius: RADIUS.sm, border: "none", background: PAL.accent, color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
                 Start the plan here &amp; draw the boundary →
               </button>
             )}
@@ -1951,7 +2018,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
             about provenance so a possibly-staler source is never mistaken for the
             county's own record (B244). */}
         {backupNotice && !err && (
-          <div style={{ position: "absolute", left: 12, bottom: 12, zIndex: 1000, maxWidth: 380, background: "rgba(255,250,240,0.96)", border: "1px solid #e6c478", borderRadius: 8, padding: "8px 11px", fontSize: 12, color: "#8a5a00", lineHeight: 1.45 }}>
+          <div style={{ position: "absolute", left: 12, bottom: ZOOM_CONTROL_CLEARANCE_PX, zIndex: 1000, maxWidth: 380, background: "rgba(255,250,240,0.96)", border: "1px solid #e6c478", borderRadius: RADIUS.lg, padding: "8px 11px", fontSize: 12, color: "#8a5a00", lineHeight: 1.45 }}>
             <b>Statewide backup source.</b> {backupNotice.county} county’s own parcel server is unavailable, so this lot came from the all-Texas TxGIO layer — accurate for selection, but it may lag recent county updates.
           </div>
         )}
@@ -1959,13 +2026,13 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
             snapshot because the live county server was unreachable (B629). Same honesty as the
             statewide-backup notice: a possibly-staler local copy is never mistaken for a live record. */}
         {cachedNotice && !err && !backupNotice && (
-          <div style={{ position: "absolute", left: 12, bottom: 12, zIndex: 1000, maxWidth: 380, background: "rgba(255,250,240,0.96)", border: "1px solid #e6c478", borderRadius: 8, padding: "8px 11px", fontSize: 12, color: "#8a5a00", lineHeight: 1.45 }}>
+          <div style={{ position: "absolute", left: 12, bottom: ZOOM_CONTROL_CLEARANCE_PX, zIndex: 1000, maxWidth: 380, background: "rgba(255,250,240,0.96)", border: "1px solid #e6c478", borderRadius: RADIUS.lg, padding: "8px 11px", fontSize: 12, color: "#8a5a00", lineHeight: 1.45 }}>
             <b>Cached copy{fmtAsOf(cachedNotice.asOf)}.</b> {cachedNotice.county} county’s live parcel server is unavailable, so this lot came from Planyr’s saved snapshot — accurate for selection, but it may lag recent county updates.
           </div>
         )}
         {/* contextual selection guidance — only while actively selecting (not a persistent fixture) */}
         {!err && selectMode && (
-          <div style={{ position: "absolute", left: 12, bottom: 12, zIndex: 1000, maxWidth: 380, background: "var(--surface-overlay)", border: `1px solid ${PAL.panelLine}`, borderRadius: 8, padding: "8px 11px", fontSize: 12.5, color: PAL.ink, lineHeight: 1.45, pointerEvents: "none" }}>
+          <div style={{ position: "absolute", left: 12, bottom: ZOOM_CONTROL_CLEARANCE_PX, zIndex: 1000, maxWidth: 380, background: "var(--surface-overlay)", border: `1px solid ${PAL.panelLine}`, borderRadius: RADIUS.lg, padding: "8px 11px", fontSize: 12.5, color: PAL.ink, lineHeight: 1.45, pointerEvents: "none" }}>
             {zoom != null && zoom < PARCEL_MINZOOM
               ? "Click any lot to add it (＋) — it works even before the purple outlines appear. Zoom in a little to see the lines."
               : "Click a lot to add it (＋). Hover an added lot and click to remove it (−). Add several, then Plan."}
@@ -1982,7 +2049,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
       {statusMenu && (
         <ContextMenu x={statusMenu.x} y={statusMenu.y} onClose={() => setStatusMenu(null)} width={180} zIndex={4200}
           className="" ariaLabel="Project actions"
-          panelStyle={{ background: "var(--surface-raised)", border: `1px solid ${PAL.panelLine}`, borderRadius: 10, boxShadow: "0 14px 40px rgba(0,0,0,0.28)", padding: "4px 0" }}>
+          panelStyle={{ background: "var(--surface-raised)", border: `1px solid ${PAL.panelLine}`, borderRadius: RADIUS.lg, boxShadow: "0 14px 40px rgba(0,0,0,0.28)", padding: "4px 0" }}>
           <>
             <div style={{ fontSize: 10, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 700, padding: "6px 12px 4px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{statusMenu.site.site || statusMenu.site.name || "Site"}</div>
             {STATUSES.map((st) => {
@@ -1991,7 +2058,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
                 <button key={st} onClick={() => setStatus(statusMenu.site.id, st)}
                   style={{ display: "flex", alignItems: "center", gap: 9, width: "100%", textAlign: "left", padding: "7px 12px", border: "none",
                     background: cur ? "#fbf3ee" : "transparent", color: PAL.ink, cursor: "pointer", fontFamily: "inherit", fontSize: 12.5, fontWeight: cur ? 700 : 500, textDecoration: t.struck ? "line-through" : "none" }}>
-                  <span style={{ width: 15, height: 15, flex: "none", display: "grid", placeItems: "center", borderRadius: 99,
+                  <span style={{ width: 15, height: 15, flex: "none", display: "grid", placeItems: "center", borderRadius: RADIUS.pill,
                     border: `1.5px solid ${t.color}`, background: t.hollow ? "var(--surface-raised)" : t.color, color: t.hollow ? t.color : "#fff", fontSize: 9, lineHeight: 1 }}>{t.glyph}</span>
                   <span style={{ flex: 1 }}>{STATUS_META[st]?.label || st}</span>
                   {cur && <span style={{ color: PAL.accent, fontWeight: 800 }}>✓</span>}
@@ -2082,12 +2149,12 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
       )}
       {confirmDel && (
         <div onClick={() => setConfirmDel(null)} style={{ position: "fixed", inset: 0, zIndex: 4000, background: "rgba(20,18,15,0.5)", display: "grid", placeItems: "center" }}>
-          <div onClick={(e) => e.stopPropagation()} style={{ background: "var(--surface-raised)", borderRadius: 12, boxShadow: "0 18px 50px rgba(0,0,0,0.3)", padding: 20, width: 340, maxWidth: "92vw" }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ background: "var(--surface-raised)", borderRadius: RADIUS.lg, boxShadow: "0 18px 50px rgba(0,0,0,0.3)", padding: 20, width: 340, maxWidth: "92vw" }}>
             <div style={{ fontSize: 15, fontWeight: 700, color: PAL.ink, marginBottom: 6 }}>Delete this site?</div>
             <div style={{ fontSize: 12.5, color: PAL.muted, lineHeight: 1.5, marginBottom: 16 }}>“{confirmDel.site || confirmDel.name || "this site"}” and all of its plans move to Recently deleted. You can restore it from the project switcher for 30 days.</div>
             <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-              <button className="gbtn" style={{ padding: "8px 14px", fontSize: 12.5, borderRadius: 8, border: `1px solid ${PAL.panelLine}`, background: "var(--surface-raised)", color: PAL.ink, cursor: "pointer", fontWeight: 600 }} onClick={() => setConfirmDel(null)}>Cancel</button>
-              <button style={{ padding: "8px 14px", fontSize: 12.5, borderRadius: 8, border: "1px solid #b91c1c", background: "#b91c1c", color: "#fff", cursor: "pointer", fontWeight: 600 }} onClick={() => { onDeleteSite && onDeleteSite(confirmDel.id); setConfirmDel(null); }}>Delete</button>
+              <button className="gbtn" style={{ padding: "8px 14px", fontSize: 12.5, borderRadius: RADIUS.md, border: `1px solid ${PAL.panelLine}`, background: "var(--surface-raised)", color: PAL.ink, cursor: "pointer", fontWeight: 600 }} onClick={() => setConfirmDel(null)}>Cancel</button>
+              <button style={{ padding: "8px 14px", fontSize: 12.5, borderRadius: RADIUS.md, border: "1px solid #b91c1c", background: "#b91c1c", color: "#fff", cursor: "pointer", fontWeight: 600 }} onClick={() => { onDeleteSite && onDeleteSite(confirmDel.id); setConfirmDel(null); }}>Delete</button>
             </div>
           </div>
         </div>

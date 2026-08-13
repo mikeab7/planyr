@@ -39,3 +39,26 @@ export const PLANNER_BASEMAP_CHOICES = [
   { key: "esri", label: "Aerial", title: "Esri World Imagery — sharpest at deep zoom (native to z19)" },
   { key: "usgs", label: "USGS", title: "USGS imagery — federal source; tops out around neighborhood zoom (native to z16)" },
 ];
+
+/* B427410 — the MAP FINDER's basemap choices, and they are DERIVED FROM `BASEMAPS` rather than
+ * written out again.
+ *
+ * Owner: "do I really need one that just says imagery? Should that not maybe be a background
+ * layer itself, so I can choose between Esri or whatever else?" — he is right, and the planner
+ * had already answered it: its aerial source is a row inside the Layers panel's Base & terrain
+ * group. The finder was the surface left behind, with a separate `Imagery` dropdown in its own
+ * strip ABOVE the layer list, divided off from the group the choice belongs to. Passing these
+ * through `LayerPanel`'s existing `basemap` prop is what folds it in, so the two surfaces now
+ * offer the same choice in the same place.
+ *
+ * ⛔ DERIVED, not a second literal. The planner's list is hand-written because it carries an
+ * "off" state that is not a basemap at all (no backdrop — the drafting paper shows). The finder
+ * has no such state: its map always has a base, and an "off" there would just be a blank screen.
+ * Everything else is exactly the registry, so mapping it is what guarantees a source added to
+ * `BASEMAPS` appears on the finder without anyone remembering to add it here too — which is the
+ * mistake the hand-written dropdown was one edit away from making. */
+export const FINDER_BASEMAP_CHOICES = Object.entries(BASEMAPS).map(([key, b]) => ({
+  key,
+  label: b.label,
+  title: b.attr ? `${b.label} imagery — ${b.attr.replace(/&copy;/g, "©")}` : b.label,
+}));
