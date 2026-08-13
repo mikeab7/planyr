@@ -34,6 +34,8 @@
  * 10-08-2024 regs (the old +1.5 came from the superseded 2023-09 18-in rule).
  *
  * Editable/verified pattern (easementRules.js); keys match floodplainRules.js. */
+import { LIMITED_PURPOSE_SCOPE } from "./floodplainRules.js";
+
 const LS = "planarfit:buildabilityRules:v1";
 
 export const DEFAULT_BUILDABILITY_RULES = {
@@ -93,35 +95,63 @@ export const DEFAULT_BUILDABILITY_RULES = {
   },
   montgomery: { label: "Montgomery County", ffeRule: null, fillToElevate: null, pathwayNote: null, verified: false, source: "Not yet transcribed.", sourceDate: null, note: "No FFE rule modeled — VERIFY with the county." },
   chambers: { label: "Chambers County", ffeRule: null, fillToElevate: null, pathwayNote: null, verified: false, source: "Not yet transcribed.", sourceDate: null, note: "No FFE rule modeled — VERIFY with the county." },
-  /* ⛔ NEW-1c — THE CITY OF BAYTOWN EXISTS AS A CANDIDATE NOW; ITS NUMBERS DELIBERATELY DO NOT.
+  /* ⛔ NEW-8 (B435537) — THE CITY OF BAYTOWN, TRANSCRIBED FROM THE ADOPTED ORDINANCE.
    *
-   * The owner's Goose Creek is part inside Baytown's city limits and 100% inside Baytown's ETJ, and
-   * `RULE_KEY_ALIAS` had no `baytown` entry at all — so Baytown resolved to nothing, was never a
-   * candidate, and by this module's own contract could never govern. The site took its finished
-   * floors from another authority with nothing anywhere saying a city ordinance had been skipped.
+   * The previous version of this record shipped `ffeRule: null` with a note saying the ordinance
+   * could not be read: Baytown publishes through Municode and both `library.municode.com` and
+   * `baytown.org` are refused by this environment's egress proxy. That is still true of the
+   * sandbox — the text below was pulled from Municode in the owner's own browser and supplied
+   * verbatim, the same provenance route the Waller record took (B986) and the Harris / Fort Bend
+   * records took (owner-read PDFs, PR #594).
    *
-   * ⛔ `ffeRule` IS NULL ON PURPOSE AND MUST NOT BE FILLED IN FROM MEMORY. The owner's recollection
-   * is "roughly 2 ft above the 500-year", and he asked explicitly for that to be CHECKED against the
-   * adopted ordinance rather than confirmed. It could not be: Baytown publishes its code through
-   * Municode and both `library.municode.com` and `baytown.org` are refused by this environment's
-   * egress allowlist (HTTP 403, verified 2026-08-09). A web-search SUMMARY is not an ordinance and
-   * is not admissible here — every other record in this table cites a section it was read from.
-   * This is the same discipline `mhfdDetention.js` applies to the MHFD coefficients it cannot fetch:
-   * name the document, refuse to invent the number.
+   * ⛔ AND IT CORRECTS THE OWNER'S OWN RECOLLECTION, WHICH IS WHY HE ASKED FOR IT TO BE CHECKED
+   * RATHER THAN CONFIRMED. His recollection was "roughly 2 ft above the 500-year". The ordinance is
+   * NOT 500-yr + 2. Sec. 110-102(2) is the HIGHER OF the 500-year elevation and BFE + 24 inches:
    *
-   * WHAT A NULL RULE NOW DOES, which is the point of adding the record at all: the candidate is
-   * RAISED and reported as unmodelled, so `assessAdministrator` refuses to settle instead of
-   * silently letting the remaining authority win. Before this, "we have no rule for the city that
-   * governs a third of your site" and "the county governs" were the same screen. */
+   *   "New construction and substantial improvements of any commercial, INDUSTRIAL, or other
+   *    nonresidential structure shall either have the lowest floor, including basement, and all
+   *    components of the electrical and mechanical systems and any other service facility elevated
+   *    to at least the 500-year floodplain elevation or 24 inches above the base flood elevation,
+   *    WHICHEVER IS HIGHER …"
+   *
+   * Where the 500-year sits MORE than 2 ft above the BFE — common in flat Harris and Chambers
+   * floodplain — his version is HIGHER than the code requires; where the two surfaces are close,
+   * BFE + 2 governs and his version is LOWER. Both directions are real, which is exactly why the
+   * recollection could not be encoded as-is.
+   *
+   * ⛔ THE NONRESIDENTIAL PARAGRAPH IS NOT SPLIT BY HAZARD AREA, and this is the non-obvious part.
+   * Residential, Sec. 110-102(1), IS split into (a) special and (b) moderate flood hazard areas.
+   * Nonresidential, (2), is a SINGLE paragraph governed by the section preamble — "The design and
+   * construction of projects located within an area of special or moderate flood hazard shall, at a
+   * minimum, meet the following requirements" — so the SAME elevation applies in a moderate flood
+   * hazard area as in a special one. Neither basis carries a `when`, and that absence is the
+   * transcription: adding `when: "in_1pct"` to either would silently exempt shaded Zone X, which is
+   * the assumption this comment exists to prevent. Fixtures cover both areas.
+   *
+   * Dry floodproofing to that same elevation is an accepted ALTERNATIVE for nonresidential (the
+   * "or, together with attendant utility and sanitary facilities, be designed so that below … the
+   * structure is watertight" limb). Recorded as copy in `pathwayNote`, not modelled as a number. */
   baytown: {
     label: "City of Baytown",
-    ffeRule: null,
+    ffeRule: {
+      bases: [
+        { basis: "wse02pct", plusFt: 0, label: "500-yr (0.2%) floodplain elevation" },
+        { basis: "wse1pct", plusFt: 2, label: "BFE + 24 in" },
+      ],
+    },
     fillToElevate: null,
-    pathwayNote: null,
-    verified: false,
-    source: "NOT TRANSCRIBED — Baytown Code of Ordinances (Municode) could not be reached from this environment; egress-blocked 2026-08-09.",
-    sourceDate: null,
-    note: "No FFE rule modeled. The owner's recollection is ~2 ft above the 0.2% (500-yr) elevation, UNVERIFIED and deliberately not encoded. Read Ch. 122 (Flood Damage Prevention) for the non-residential lowest-floor requirement and record the datum + freeboard WITH the section, as the Harris §4.07(b)(1) and Fort Bend §5.02(c) records do. NOTE for whoever transcribes it: Harris County unincorporated is ALREADY 500-yr WSE + 2 ft here, so if the recollection is right the required floor does not move — the exposure is only if Baytown differs from that.",
+    // NEW-8 — the reach question, from its ONE home (floodplainRules.LIMITED_PURPOSE_SCOPE). This is
+    // the record `floodAdministrator` is handed, so the flag has to be readable from here.
+    limitedPurposeScope: LIMITED_PURPOSE_SCOPE.baytown.scope,
+    limitedPurposeCitation: LIMITED_PURPOSE_SCOPE.baytown.citation,
+    pathwayNote:
+      "Baytown Sec. 110-102(2): a nonresidential structure may EITHER elevate the lowest floor (and all electrical/mechanical components and service facilities) to the governing elevation, OR be dry-floodproofed — watertight below that elevation, walls substantially impermeable, structural components able to resist hydrostatic and hydrodynamic loads and buoyancy. Dry floodproofing is an accepted alternative here and is noted, not modeled. The ordinance excerpt read does not state a fill-to-elevate policy, so none is recorded.",
+    verified: true,
+    source:
+      "City of Baytown, TX, Code of Ordinances, Subpart B — Land Development Code, Ch. 110 (FLOODS), Art. II (Flood Damage Prevention), Sec. 110-102(2) (nonresidential construction), with Sec. 110-31 (applicability), Sec. 110-26 (definitions) and Sec. 110-32 (adopted maps). Version JUL 2 2026, codified through Ord. No. 16,449 enacted 2026-04-23. Owner-read via Municode 2026-08-13.",
+    sourceDate: "2026-07-02",
+    note:
+      "FFE = the HIGHER OF the 500-year floodplain elevation and BFE + 24 in (Sec. 110-102(2)) — NOT 500-yr + 2. Applies in BOTH special and moderate flood hazard areas: the nonresidential paragraph is not split by hazard area, and Sec. 110-26 defines a moderate flood hazard area as shaded Zone X / Zone B, so a site outside the 100-year but inside the 500-year is still regulated. Sec. 110-32 adopts the Harris County FIS (eff. 2007-06-18) INCLUDING FEMA-ISSUED PRELIMINARY MAPS and the Chambers County FIS (2015-05-04). ⛔ APPLICABILITY BEYOND THE CITY LIMITS IS AN OPEN QUESTION AND THE ORDINANCE IS SILENT: Sec. 110-31 in full is \"This article shall apply to all moderate and special flood hazard areas within the jurisdiction of the city\", and Ch. 110 contains no occurrence of extraterritorial, limited-purpose or industrial district. See floodplainRules.baytown.limitedPurposeScope = \"silent\". Dry floodproofing accepted for nonresidential; noted, not modeled.",
   },
   // Waller (NEW-1): Art. 5 §B(2) nonresidential — lowest floor ≥ 500-yr WSE + 2 ft when
   // the structure is in the 1% floodplain; ≥ 500-yr WSE + 1 ft when in the 500-yr band

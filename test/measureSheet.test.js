@@ -229,13 +229,35 @@ describe("(d) constant-screen-px sizing that used to survive onto the sheet", ()
   });
 
   it("the semantic markup labels ride labelK, so they hold their size at sheet scale", () => {
-    // utilRoute fitting + label, traced/infwater label, encumbrance call + centroid label.
+    // utilRoute fitting + label, encumbrance per-call bearing, and the two vertex marks.
     expect(SP).toMatch(/fontSize=\{8 \* labelK\} fontWeight="800"/);
-    expect(SP).toMatch(/fontSize=\{9\.5 \* labelK\} fontWeight="700"/);
     expect(SP).toMatch(/fontSize=\{9 \* labelK\} fontFamily=\{NUM_FONT\}/);
-    expect(SP).toMatch(/fontSize=\{11 \* labelK\} fontWeight="700"/);
     expect(SP).toMatch(/r=\{3 \* labelK\} fill="#dc2626"/);
     expect(SP).toMatch(/width=\{4 \* labelK\} height=\{4 \* labelK\}/);
+  });
+
+  /* ⛔ NEW-6 (B435536) — THE THREE CENTROID *NAME* LABELS NOW RIDE A ZOOM RAMP AS WELL AS `labelK`,
+   * and this guard was rewritten rather than deleted.
+   *
+   * It used to pin the literals `fontSize={9.5 * labelK}` (traced) and `fontSize={11 * labelK}`
+   * (encumbrance), which was the right assertion when a constant screen size was the intended
+   * design. It is no longer: a feature's NAME label was rendering wider than the feature it named
+   * (the owner's `CONVEYANCE CHANNEL 2 DIVERSION` at 199 px over a 21 px easement), so the size now
+   * comes from `featureNameFontPx(labelPpf, …)` — the shared dimension-number ramp.
+   *
+   * ⚠ THE INVARIANT THIS TEST EXISTS FOR IS UNCHANGED AND STILL ASSERTED: the label must still be
+   * multiplied by `labelK`, so it holds its intended size at SHEET scale rather than at screen
+   * scale. Only the base moved from a literal to a named constant. Asserting the invariant instead
+   * of the literal is what keeps this guard alive across a legitimate change. */
+  it("NEW-6 — the centroid NAME labels still ride labelK, on top of the zoom ramp", () => {
+    for (const base of ["EASE_LABEL_BASE_PX", "ENCUMBER_LABEL_BASE_PX", "TRACED_LABEL_BASE_PX"]) {
+      expect(SP, `${base} must be declared`).toMatch(new RegExp(`const ${base} = [\\d.]+;`));
+      // …and its rendered size must be the ramp TIMES labelK — never one without the other.
+      expect(SP, `${base} must render through featureNameFontPx(...) * labelK`)
+        .toMatch(new RegExp(`fontSize=\\{featureNameFontPx\\(labelPpf, ${base}\\) \\* labelK\\}`));
+    }
+    // and every one of them is gated by the fit rule, not merely resized
+    expect((SP.match(/featureNameLabelVisible\(/g) || []).length).toBeGreaterThanOrEqual(3);
   });
 
   it("in-progress tool drafts never reach a sheet (constant px, and not document content)", () => {
