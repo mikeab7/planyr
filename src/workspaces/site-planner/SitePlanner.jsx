@@ -3,7 +3,8 @@ import { flushSync } from "react-dom";
 import ContextMenu from "../../shared/ui/ContextMenu.jsx";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
-import { loadSite, saveSite, deleteSite, isCloudActive, activeUid, pushSiteToCloud, pushModelToCloud, keepaliveFlushSite, listVersions, getVersion, backupNow, reconcileSiteFromCloud } from "./lib/storage.js";
+import { loadSite, saveSite, deleteSite, loadSitesList, isCloudActive, activeUid, pushSiteToCloud, pushModelToCloud, keepaliveFlushSite, listVersions, getVersion, backupNow, reconcileSiteFromCloud } from "./lib/storage.js";
+import { collectAssetRefs, releasePlanForOverlay } from "./lib/sharedAssetRefs.js";
 import { idbGet, idbPut, idbDelete, idbAvailable } from "./lib/localDb.js";
 import { registerFlush } from "../../app/flushRegistry.js";
 import { createEditorLock } from "../../shared/presence/editorLock.js";
@@ -8482,6 +8483,21 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (hist) pushHistory();
     setSheetOverlays((arr) => arr.map((o) => (o.id === id ? { ...o, ...patch } : o)));
   };
+  /* ⛔ NEW-1 — THE AERIAL UNDERLAY IS SHARED TOO, and this path had NO ref-count at all. `New plan,
+   * same parcel` copies `underlay: src.underlay` (SitePlannerApp), so two plans routinely point at
+   * one backdrop; removing it from either used to delete both tiers outright. Same rule, same
+   * module — and B474's hazard makes it the worst tier to get wrong: an underlay whose `src` was
+   * dropped and whose bytes are gone is unrecoverable. */
+  const releaseUnderlayAssets = (u) => {
+    if (!u) return;
+    const refs = collectAssetRefs(loadSitesList());
+    const { release, kept } = releasePlanForOverlay(refs, u, siteId);
+    for (const r of release) { if (r.tier === "storage") deleteOverlayObject(r.key); else idbDelete(r.key); }
+    if (kept.length)
+      reportClientEvent("underlay-asset-retained", "kept an aerial backdrop another plan still references", {
+        siteId, kept: kept.map((k) => ({ what: k.what, reason: k.reason, heldBy: k.heldBy })),
+      });
+  };
   const removeOverlay = (id) => {
     const o = sheetOverlays.find((x) => x.id === id);
     if (!o) { flashWarn("Couldn't delete that drawing — it's no longer in the list.", 5000); return; } // count-check: never a phantom no-op delete (B461)
@@ -8489,17 +8505,26 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const doc = overlayDocs.current.get(id);
     if (doc) { try { doc.destroy(); } catch (_) {} overlayDocs.current.delete(id); }
     overlayDocTouch.current.delete(id);   // NEW-5(ii) — never leave an LRU entry for a gone overlay
-    // Ref-count the shared source: a Duplicate/Paste (B461) copies the storageKey, so only drop the
-    // cloud object when no OTHER overlay still points at it (else we'd orphan the sibling's image).
-    const shared = o.storageKey && sheetOverlays.some((x) => x.id !== id && x.storageKey === o.storageKey);
-    if (o.storageKey && !shared) deleteOverlayObject(o.storageKey); // clean up the cloud copy (B72 polish)
-    // B748 — the DWG provenance object rides its own key; drop it too (ref-counted) so a delete doesn't orphan it in Storage.
-    const sharedDwg = o.sourceDwgKey && sheetOverlays.some((x) => x.id !== id && x.sourceDwgKey === o.sourceDwgKey);
-    if (o.sourceDwgKey && !sharedDwg) deleteOverlayObject(o.sourceDwgKey);
-    // B474 review (#23) — evict the cached IndexedDB raster too, ref-counted like storageKey (a Duplicate/Paste
-    // copies the key, so only drop the entry when no other overlay still points at it).
-    const sharedIdb = o.idbKey && sheetOverlays.some((x) => x.id !== id && x.idbKey === o.idbKey);
-    if (o.idbKey && !sharedIdb) idbDelete(o.idbKey);
+    /* ⛔ NEW-1 — THE REF-COUNT SPANS EVERY PLAN, NOT THIS ONE. `⧉ Duplicate plan` copies an overlay
+     * record wholesale, so a sibling plan can hold the SAME `storageKey` / `idbKey`; ref-counting
+     * against `sheetOverlays` (this plan's list) could not see it, and removing the picture from a
+     * duplicate DESTROYED the original's image in both tiers. That happened in production on
+     * 2026-08-13 — the bytes for the owner's Woods Road overlay are gone. `sharedAssetRefs` asks
+     * the question against the whole plan list, releases BOTH tiers together or neither, and
+     * refuses on any unknown answer (an orphaned object is recoverable; a deleted one is not).
+     * The DATABASE is the authority — `db/overlay_object_release_guard.sql` refuses the delete
+     * outright when a live plan still references the key, so a stale tab cannot orphan bytes. */
+    const assetRefs = collectAssetRefs(loadSitesList());
+    const { release, kept } = releasePlanForOverlay(assetRefs, o, siteId);
+    for (const r of release) {
+      if (r.tier === "storage") deleteOverlayObject(r.key); // cloud copy (B72 polish / B748 DWG provenance)
+      else idbDelete(r.key);                                // this device's cached raster (B474 review #23)
+    }
+    // LOUD-FAILURE: a refusal is reported, never silent — this is the line that says the bytes were KEPT.
+    if (kept.length)
+      reportClientEvent("overlay-asset-retained", "kept a source file another plan still references", {
+        siteId, overlayId: id, kept: kept.map((k) => ({ what: k.what, reason: k.reason, heldBy: k.heldBy })),
+      });
     setSheetOverlays((arr) => arr.filter((x) => x.id !== id));
     setDeletedIds((d) => (d.includes(id) ? d : [...d, id])); // B276: tombstone the deletion so a stale/cloud copy can't resurrect it on reload/merge
     setSelOverlay((s) => (s === id ? null : s));
@@ -17793,7 +17818,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 6 }}>
                     <button style={{ ...iconBtn, color: showAerial ? PAL.ink : PAL.muted }} title={showAerial ? "Hide aerial" : "Show aerial"} onClick={() => setShowAerial((v) => !v)}>{showAerial ? <EyeIcon /> : <EyeOffIcon />}</button>
                     <button style={iconBtn} title={underlay.locked ? "Unlock (drag to reposition)" : "Lock (click-through)"} onClick={() => { pushHistory(); setUnderlay((u) => (u ? { ...u, locked: !u.locked } : u)); }}>{underlay.locked ? <LockIcon /> : <UnlockIcon />}</button>
-                    <button style={{ ...iconBtn, color: PAL.accent }} title="Remove" onClick={() => { pushHistory(); if (underlay?.idbKey) idbDelete(underlay.idbKey); if (underlay?.storageKey) deleteOverlayObject(underlay.storageKey); setUnderlay(null); setShowAerial(false); setUnderlayLost(false); }}><XIcon /></button>
+                    <button style={{ ...iconBtn, color: PAL.accent }} title="Remove" onClick={() => { pushHistory(); releaseUnderlayAssets(underlay); setUnderlay(null); setShowAerial(false); setUnderlayLost(false); }}><XIcon /></button>
                   </div>
                   {aerialSel && (
                     <div style={{ display: "flex", flexDirection: "column", gap: 7, marginTop: 8 }}>

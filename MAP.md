@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-08-13 @ `f2670fa` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-08-13 @ `b7b676f` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_517 source files mapped._
+_518 source files mapped._
 
 ## infra
 
@@ -889,6 +889,8 @@ _517 source files mapped._
   - _exports_: `CHIP_MIN_EDGE_PX`, `CHIP_MIN_GAP_PX`, `CHIP_MIN_SEP_PX`, `CHIP_TURN_BREAK_DEG`, `chipRoleWords`, `chipRunOfEdge`, `setbackChipRuns`, `setbackChipsVisible`
 - **`src/workspaces/site-planner/lib/setbackRoles.js`** — the regulatory setback tier: auto-assigns Front / Side / Street side / Rear to every side from frontage geometry, honours the user's own assignment, and groups the boundary into the four ordinance rows
   - _exports_: `autoAssignRoles`, `hasRoleOverrides`, `isRole`, `resolveOverrides`, `resolveRoles`, `ROLE_LABEL`, `ROLE_SHORT`, `roleGroups`, `roleRuns`, `runOverridden`, `runRole`, `SETBACK_ROLES`, `setRunOverride`, `setRunRole`, `shiftOverridesOnDelete`, `shiftOverridesOnInsert`, `STREET_ABUT_FT`
+- **`src/workspaces/site-planner/lib/sharedAssetRefs.js`** — Who else is using this source file? The one cross-plan ref-count for shared overlay/underlay assets (cloud object + device raster), so a delete in one plan can never destroy bytes another plan still renders from.
+  - _exports_: `ASSET_TIERS`, `assetHolders`, `canReleaseAsset`, `collectAssetRefs`, `idbKeysHeldByOtherPlans`, `idbKeysReleasableOnPlanDelete`, `planAssetKeys`, `releasePlanForOverlay`
 - **`src/workspaces/site-planner/lib/sharing.js`** — Project team sharing: stamp/clear team_id on a group's sites, doc_reviews, and file_facts then re-pull the local cache
   - _exports_: `makeProjectPrivate`, `setPlanLock`, `shareProject`
 - **`src/workspaces/site-planner/lib/sheetFurniture.js`** — Map sheet furniture: graphic scale bar and two-tone north arrow, output-unit sized with no-occlude corner placement, screen + export

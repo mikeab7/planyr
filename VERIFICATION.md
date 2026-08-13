@@ -113,6 +113,19 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V278320 — B487600: a shared reference file survives a delete in a sibling plan — the SIGNED-IN leg `Blocker: auth`
+**Status:** ⏳ pending — needs a signed-in account against real Supabase Storage.
+**Verified here (sandbox, 2026-08-13):** the pure rule + all three call sites (repo-root `test/sharedAssetRefs.test.js`, 17, with the pre-fix rule replayed as a mutation check); lint 0 errors; build green; bundle audit inside band with no new breach. **The database guard was proven against PRODUCTION on the real deletion path** — `storage.allow_delete_query` set exactly as the Storage API sets it: a shared object was REFUSED naming all four Goose Creek plans, an unreferenced object passed through, and neither probe committed.
+**Why it still needs a live pass:** the sandbox blocks sign-in, so the CLIENT half — the app actually reaching `loadSitesList()` at delete time and skipping the release — has never run against a real signed-in session with real Storage.
+**Steps:**
+1. Sign in. Open a project with two plans sharing one reference drawing (**Goose Creek** has four; **Bain** has two). ⚠ Do this on a THROWAWAY duplicate first — the whole point is that a wrong result destroys a real file.
+2. In plan A, remove the reference drawing. Expect: it goes from plan A only.
+3. Open plan B. **Expect the drawing still renders.** Pre-fix it would be gone (and gone from every other plan too).
+4. Reload plan B with the device cache cleared, so it must fetch from the cloud. Expect it still loads — proving the CLOUD object survived, not just the device copy.
+5. Check `client_errors` for `overlay-asset-retained` naming plan B as the holder.
+6. Repeat 2–5 for the aerial underlay (a plan made with **New plan, same parcel**), and for **deleting plan A entirely** — plan B's image must survive that too.
+7. Last-holder cleanup: remove the drawing from every plan, then confirm the object is finally released (no permanent orphan).
+
 ### V258992 — B464048: a keystroke typed in an inspector field can no longer delete the plan — the SIGNED-IN leg `Blocker: auth`
 
 **Everything logged-out is proven here, on his own plan, and is NOT what this entry is waiting for.**
