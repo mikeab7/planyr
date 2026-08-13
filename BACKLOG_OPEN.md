@@ -16,7 +16,7 @@
 | B464050 | Undo after a delete re-spaces every element's layer key | [Site Planner / undo] | #site-planner #selection #sync | sandbox |
 | B472049 | A notch split left the superseded parent drawn, so it read as a duplicate | [Site Planner] | #site-planner #parcel | live |
 | B472048 | An operation envelope: who did a write, and what operation it was part of | [Site Planner / data] | #site-planner #persistence #infra | live |
-| B463922 | The grid's viewport moves while editing, and scrollTop is the wrong thing to measure | [Scheduler] | #scheduler #ui #testing | live |
+| B463922 | Collapsing a group above the row you are editing throws that row off the screen | [Scheduler] | #scheduler #ui #testing | live |
 | B454480 | "Tab sometimes doesn't work": instrumented, and the answer is one sentence | [Notes] | #notes #ui #testing | sandbox |
 | B454481 | Typing and formatting, attacked rather than confirmed | [Notes] | #notes #testing #ui | sandbox |
 | B434416 | A text box had no SELECTED state at all, so "click it and press Delete" could not work | [Notes] | #notes #ui | live |
