@@ -31,7 +31,7 @@
 -- already carry, maintained by a different code path, and two copies of one fact disagreeing under
 -- a race is the defect, not the fix. This digest cannot drift from the revs it summarises because
 -- it IS the revs:
---     string_agg(id || ':' || rev, ',' order by id)   over LIVE rows of that assembly
+--     string_agg(id || ':' || rev, ',' order by id collate "C")   over LIVE rows of that assembly
 -- The client twin is `lib/assemblyDigest.js` and must stay character-for-character equivalent.
 -- Live rows only, on both sides: a tombstone is not a member (the stage 1 index is partial for the
 -- same reason), and counting one would make a delete look like a change to every sibling.
@@ -76,6 +76,26 @@
 -- Verified read-only against production 2026-08-13: with `kind = 'el'` filtered, the number of
 -- assemblies containing a duplicate id drops to ZERO across the whole table.
 --
+-- ⛔ NEW-1 — `order by t.id collate "C"`, AND BOTH WORDS OF THAT ARE LOAD-BEARING.
+--
+-- BY THE ID, not by the assembled token. The client used to sort the finished `id:rev` string,
+-- which compares the separator `:` (0x3A) against the longer id's next character — and every digit
+-- (0x30–0x39) and the hyphen (0x2D) sort below it. So a PREFIX PAIR orders differently on the two
+-- sides. Measured here, on this database:
+--     ids e6327 (rev 4) and e63271 (rev 2)
+--     order by id     → 'e6327:4,e63271:2'
+--     sort the token  → 'e63271:2,e6327:4'
+-- Identical membership, identical revs, different string ⇒ a groupConflict the retry re-earns every
+-- time: a PERMANENT refusal of every save on an assembly nothing is wrong with. Same symptom as
+-- B447472 and a completely different cause (that was MEMBERSHIP, this is ORDERING), which is why
+-- finding one said nothing about the other and why parity must be asserted on the STRING.
+--
+-- `collate "C"` — byte order, STATED rather than inherited. This database's default is
+-- `en_US.UTF-8`; a linguistic collation is free to reorder on an ICU/glibc version bump, and the
+-- client cannot follow it. Byte order is code-point order, which the JS twin now matches exactly
+-- (it walks code points, not UTF-16 units). Today no real id is reordered by the difference
+-- (verified: 0 of 1,104), so this pins a dependency rather than fixing a live break.
+--
 -- The digest, as a function, so the RPC and the test cannot compute it two different ways.
 create or replace function public.assembly_digest(p_site text, p_assembly text)
 returns text
@@ -84,7 +104,7 @@ stable
 security invoker
 set search_path = public
 as $$
-  select coalesce(string_agg(t.id || ':' || t.rev, ',' order by t.id), '')
+  select coalesce(string_agg(t.id || ':' || t.rev, ',' order by t.id collate "C"), '')
     from public.site_elements t
    where t.site_id = p_site
      and t.assembly_id = p_assembly
@@ -97,7 +117,7 @@ grant  execute on function public.assembly_digest(text, text) to authenticated;
 
 comment on function public.assembly_digest(text, text) is
   'B1341 stage 2 — the GROUP REVISION of a bonded assembly: id:rev pairs of its LIVE el rows, '
-  'sorted by id, comma-joined. Derived, never stored, so it cannot drift from the revs it '
+  'sorted by id in BYTE order (collate "C"), comma-joined. Derived, never stored, so it cannot drift from the revs it '
   'summarises. B447472: el ONLY — assembly_id inherits the (site,kind,id) namespace, so a markup '
   'can share an unbonded element''s id and is its own assembly, not a member of that element''s. '
   'Client twin: lib/assemblyDigest.js — keep them character-for-character equivalent.';
@@ -144,7 +164,7 @@ begin
         -- ADOPTS every member named here into its shadow, so a set that disagrees with the digest
         -- deadlocks the retry just as surely as a digest that disagrees.
         'members',  coalesce((
-          select jsonb_agg(jsonb_build_object('id', t.id, 'kind', t.kind, 'rev', t.rev) order by t.id)
+          select jsonb_agg(jsonb_build_object('id', t.id, 'kind', t.kind, 'rev', t.rev) order by t.id collate "C")
             from public.site_elements t
            where t.site_id = p_site and t.assembly_id = v_asm and t.kind = 'el' and t.deleted_at is null
         ), '[]'::jsonb)
