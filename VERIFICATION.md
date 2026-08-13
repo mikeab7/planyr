@@ -113,6 +113,37 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V250304 — B455360: a complicated parcel cut, on his own signed-in cloud plans `Blocker: auth`
+
+**What is proven WITHOUT sign-in, and it is a lot.** `e2e/parcel-split-complex-cut.spec.js` is
+**5/5 driving the REAL app** on his recorded 95-acre Goose Creek tract (24 vertices, 12 of them
+reflex, and a pinched interior exclusion): the Split tool is armed from the parcel rail exactly as
+he would arm it, a four-point bent "creek" cut is clicked across the lot and finished on Enter, and
+the result is read back off **what renders** — the parcel groups on the canvas and the acreage
+badges, each recomputed from its own new outline. A six-crossing zig-zag makes **FOUR pieces**
+(36.00 + 26.97 + 24.47 + 7.93 = 95.37 ac, the whole tract), the bent cut makes two (63.46 + 31.91 =
+95.37 ac), the toast he reported never appears, and a cut drawn in clear space is refused with
+words about THAT cut. Beside it: `test/polygonSplit.test.js` **31 passing** — including the
+pre-fix pipeline reproducing his exact toast on two of his own production parcels, area
+conservation to one part in 10⁹ on three real tracts, and 800 randomised bent cuts — mutation-proven
+three ways. Unit **11,059 passing**, lint 0 errors, build green.
+
+**⛔ WHAT I COULD NOT TEST, stated plainly.**
+1. **The signed-in cloud round-trip.** Parcels live in the site record, so a split writes new
+   parcel rows through the cloud save path. The sandbox proxy CORS-blocks Supabase sign-in, so the
+   split was only ever verified against on-device storage. **Steps:** open a real plan signed in →
+   split a parcel with a bent cut → reload → confirm the same pieces, the same acreages, and the
+   superseded parent still listed greyed under them → open the plan in a second tab and confirm it
+   agrees.
+2. **The per-edge remap on a parcel that actually carries setbacks and role overrides.** The
+   fixtures used here carry the plan default. **Steps:** on a plan where individual sides have
+   different setbacks and at least one hand-assigned role, split it and confirm each piece keeps
+   the setback on the sides it inherited, that a side the CUT created shows the plan default, and
+   that the buildable envelope redraws without a stray line.
+3. **His own screenshot's tract.** He described a wooded tract with a creek running diagonally
+   through it and a road corridor along one side. That specific plan was not identified here;
+   Goose Creek is the nearest recorded equivalent in the repo. **Steps:** run the cut he was
+   trying to make, on the plan he was trying to make it on.
 ### V238192 — B443248: "Mobilize" on his own Grand Port opens at 10/05/26, and the correction arrives NAMED `Blocker: real-data` `Blocker: auth`
 
 **Proven here already, in a real browser, on his exact row shape.** `ui-audit/verify-summary-pred-dates.mjs`
