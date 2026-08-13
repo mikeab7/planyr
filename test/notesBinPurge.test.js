@@ -75,6 +75,21 @@ function binnedThree() {
   return t;
 }
 
+/* ⛔ B385043 — NAME THE BIN ENTRY YOU MEAN. `trashEntries` sorts NEWEST FIRST on `deletedAt`, a
+ * millisecond stamp, and `binnedThree` bins all three in a tight loop — so which entry is `[0]` is
+ * decided by how fast the machine is. On a fast run all three share one millisecond and `sort` is
+ * stable, so `[0]` is the insertion-order first, "a"; on a slower run they get distinct stamps and
+ * `[0]` is the newest, "c". Measured, not guessed: forcing the clock forward between deletions moves
+ * the answer from "a" to "c" with nothing else changed. That is a genuine flake — it went red in CI
+ * on a commit that passed five consecutive local runs — and it is PRE-EXISTING on `main`, not
+ * introduced by the change that happened to be under it. A test that means "one particular page"
+ * asks for it BY ID; index into a time-sorted list only when the ORDER is the thing under test. */
+const entryForPage = (tree, pageId) => {
+  const e = trashEntries(tree).find((x) => (x.pageIds || []).includes(pageId) || (x.node && x.node.id === pageId));
+  if (!e) throw new Error(`no bin entry for page "${pageId}"`);
+  return e;
+};
+
 describe("a purge is recorded, not merely performed", () => {
   it("stamps the entry id and every page id it named", () => {
     let t = emptyTree();
@@ -175,15 +190,34 @@ describe("⛔ THE INCIDENT — a stale window may not resurrect an emptied bin",
     expect(tombstoneIds(twice).size).toBeGreaterThan(0);
   });
 
+  /* B385043 — the guard for the fix above, and it does the thing the flake proved is necessary:
+     it FORCES the slow-clock case rather than hoping for it. Under distinct millisecond stamps the
+     bin's order really does reverse, and the named lookup must still find page "a". A run of this
+     file on a fast machine exercises the same-millisecond case for free, so between them both
+     tie-break outcomes are covered every time. */
+  it("⛔ the named lookup survives the slow clock that made the old index flaky", () => {
+    let t = emptyTree();
+    for (const id of ["a", "b", "c"]) t = addPage(t, { id, title: id.toUpperCase() }).tree;
+    for (const id of ["a", "b", "c"]) {
+      const s = Date.now(); while (Date.now() === s) { /* force a distinct deletedAt */ }
+      t = deleteNode(t, id).tree;
+    }
+    // The precondition: the stamps really are distinct, so this is the reversed-order case.
+    expect(new Set(trashEntries(t).map((e) => e.deletedAt)).size).toBe(3);
+    // …and under it, the OLD index picks "c" while the named lookup still means "a".
+    const byIndex = trashEntries(t)[0];
+    expect(byIndex.node && byIndex.node.id).toBe("c");
+    expect(liveIds(restoreNode(clone(t), entryForPage(t, "a").id).tree)).toEqual(["a"]);
+  });
+
   it("a purged page may not come back as a LIVE node either", () => {
     const before = binnedThree();
     let server = clone(before);
     for (const e of trashEntries(server)) server = purgeTrashEntry(server, e.id).tree;
-    /* The stale client restored one of them before it learned about the purge. Found BY ITS
-     * PAGE ID, not by position: `trashEntries` sorts newest-first, and three deletes in the
-     * same millisecond leave that order down to the clock — which made this row a coin flip. */
-    const entryA = trashEntries(before).find((e) => (e.pageIds || []).includes("a"));
-    const stale = restoreNode(clone(before), entryA.id).tree;
+    // The stale client restored one of them before it learned about the purge. WHICH one is not the
+    // point of this test — that it comes back live, and is then refused by the merge, is — so it is
+    // named rather than indexed out of a clock-sorted list (see entryForPage above).
+    const stale = restoreNode(clone(before), entryForPage(before, "a").id).tree;
     expect(liveIds(stale)).toEqual(["a"]);
     const merged = mergeTrees(stale, server);
     expect(liveIds(merged)).toEqual([]);

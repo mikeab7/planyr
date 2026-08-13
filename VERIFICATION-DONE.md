@@ -1,3 +1,80 @@
+### V173456 — B377888: a stale delete no longer eats an element created after it — ✅ **PASSED 2026-08-13, on eight hours of the owner's own work**
+
+**THE VERDICT: the bug is gone from the field.** Read first-hand and read-only from `public.client_errors`
+and `public.site_elements` (nothing written), over the owner's real session on Richfield / Concept A
+(`smsdrvzr9gzx`) on the shipped build, from 14:30Z 2026-08-12 onward:
+
+| signal | count | reading |
+|---|---|---|
+| `element-delete-reapplied` | **0** | the defect itself never fired again |
+| `delete-attempt` / `delete-outcome` | **7 / 7** | every delete that started, finished — no attempt lost between the two seams |
+| `assembly-tear-detected` / `assembly-tear-healed` | **3 / 3** | every tear the heal saw, it repaired |
+| `assembly-tear-unhealable` | **0** | the heal never had to refuse, and never invented a layout |
+
+**⛔ THE STRONGEST SINGLE PIECE, recorded verbatim because it is the exact INVERSE of the original
+defect.** At **16:19:33** the owner selected Building 3 and pressed Delete.
+
+    delete-attempt   [tab 87e55bdd] key:delete → building   {"n":1,"kinds":["el"],"ids":["e1454939cgzlnc"]}
+    delete-outcome   [tab 87e55bdd] key:delete → removed building   {"result":"removed","n":1,"removed":9,"locked":0,
+                     "ids":["e1454939cgzlnc","e1454940cgzlnc","e1454941cgzlnc","e1454942cgzlnc","e1454943cgzlnc",
+                            "e1454945jjatdk","e1454946jjatdk","e1454952epkkus","e1454953epkkus"]}
+
+One keystroke naming ONE id; the host and all eight bonded children removed; and every one of those
+nine rows carries the **IDENTICAL `deleted_at` 2026-08-12 16:19:33.33175** — one atomic group removal
+at a single microsecond. The original bug was a PARTIAL apply: 2 of 5 members died **1.1 s apart** in
+a race. **The assembly now travels as a unit on the way out**, which is the property B1341 is chasing.
+
+**And it is not one lucky instance — it repeated three more times in the same session**, each a whole
+group at one microsecond: `22:38:23.479687` (10 rows), `22:39:54.189099` (1 row), `22:45:06.855268`
+(9 rows). Four group removals, three of them multi-member, zero partial applies.
+
+**⛔ WHAT THIS DOES NOT CLAIM, and it must not be rounded up.** `element-delete-vs-create-dropped` has
+**ZERO production rows**. That guard — the specific branch that drops a delete whose base predates the
+row's existence — is **DEPLOYED AND UNEXERCISED IN THE FIELD**. It is proven by `test/deleteVsCreate.test.js`
+(7, on the owner's real geometry, one test per direction and per seam, with both controls) and by the
+conflict matrix, **not by a live save**. It proves itself the next time two tabs actually race; this
+entry closes on the OBSERVED behaviour above, not on that guard having fired.
+
+**Steps that remain optional rather than pending.** The deliberate two-tab offline race in the original
+steps would exercise the unfired guard directly. It is not a blocker on this item and **nothing is
+required from the owner** — eight hours of his real work is a stronger sample than a staged race.
+
+### V173457 — B377889: Building 3 is whole on Richfield / Concept A — ✅ **PASSED 2026-08-13, in the SERVED, SIGNED-IN APP**
+
+**MERGED ≠ LIVE is satisfied: this is a rendered plan, not a database read.** The pending half of this
+entry was "open Richfield / Concept A in the served, signed-in app and confirm Building 3 draws with
+five members." The owner's own session answered it:
+
+1. **The restore landed THROUGH THE APP, not by hand.** `e1454940cgzlnc` went rev 7 → 8 and
+   `e1454943cgzlnc` rev 9 → 14, with `deleted_at` cleared between 14:19Z and 14:27Z. A hand-written
+   `UPDATE` leaves `rev` untouched — the rev bumps are the proof a client write path ran.
+2. **He then SELECTED Building 3 in the running app and deleted it** (16:19:33, above). You cannot
+   select what does not render, and the app resolved that one selection to the host **and all eight
+   bonded children** — the assembly was whole, correctly bonded, and known to the renderer as one
+   object. That is the confirmation this entry was waiting for, delivered by use rather than by a
+   click-through.
+3. **Eight hours of continued work on that plan** with `assembly-tear-unhealable` at zero and no
+   partial-apply event of any kind.
+
+**Nothing is required from the owner.** Building 3 being deleted at the end is his own edit, not a
+regression — the item was about it being *whole and restorable*, and it was.
+
+### V173458 — B377890: the heal never invented a layout on real data — ✅ **PASSED 2026-08-13**
+
+**FIELD RESULT.** Over the same eight hours on the owner's real plans: `assembly-tear-detected` **3**,
+`assembly-tear-healed` **3**, `assembly-tear-unhealable` **0**. Every tear the heal met, it repaired;
+it never reported a success it had not earned, and no impossible layout reached the canvas. The three
+tears were small and correctly handled — `off host by up to 0 ft (commit)` on `smsdrvzr9gzx` and
+`up to 3 ft (canvas/commit)` on `smshwnnijjfi`.
+
+**⛔ WHAT THIS DOES NOT CLAIM.** The **REFUSAL** branch — the one that reports `assembly-tear-unhealable`
+and declines to move a trailer row whose truck court is gone — **never fired in production**, because
+no missing-sibling state arose. It is proven by `e2e/assembly-missing-sibling.spec.js` (3), which drives
+the REAL app in a browser on the owner's real Building 3 numbers and is **mutation-proven** (restoring
+the pre-fix rule reddens it and reproduces the 135 ft pull to the decimal), and by
+`test/assemblyMissingSibling.test.js` (12). Field evidence proves the heal is CORRECT on real data and
+does not fabricate; the browser e2e proves it REFUSES when it must. Neither is rounded up into the other.
+
 ### V131552 — B335984: the +/− controls now arrive at a zoom he'd actually work at, on the REAL Bain plan — ❌ **FAILED 2026-08-11 (owner verdict), SUPERSEDED BY V166928**
 
 **HE RAN IT AND IT FAILED ON THIS ENTRY'S OWN SECOND FAIL CLAUSE**, with exactly the kind of number it asked for: *"it still shows up for the Zoom and the plus minus. Let's make it available a little bit sooner."* At the 0.359 px/ft floor Building 3 rendered about a THIRD of his 1600 px monitor's canvas and closer to HALF of his 1191 px laptop's — and he is now working on the laptop. The threshold moved again as a stated product decision (**B371360**, an OWNER-SET floor plus a viewport cap), which is what this entry said would happen. **Do not chase the 0.359 steps below — V166928 re-asks the same question at the live number.** Archived as a recorded FAIL, never as a null (STANDING RULE #2).

@@ -98,12 +98,15 @@ export function overlaysWithOverrides(overrides, above = null) {
 export function applyAboveOverrides(overlays, above) {
   const ab = sanitizeLayerAbove(above);
   const out = {};
+  let changed = false;
   for (const [k, st] of Object.entries(overlays || {})) {
     if (!liftable(k)) { out[k] = st; continue; }
     const want = ab[k] === true;
-    out[k] = st && !!st.above === want ? st : { ...(st || {}), above: want };
+    if (st && !!st.above === want) { out[k] = st; continue; }
+    out[k] = { ...(st || {}), above: want };
+    changed = true;
   }
-  return out;
+  return changed ? out : (overlays || out); // NEW-1 (B385040) — see applyOnOverrides
 }
 
 // Stable string signature of a sparse lifted map — the aboveSig twin of overridesSig, for the
@@ -115,15 +118,31 @@ export const aboveSig = (above) => Object.keys(sanitizeLayerAbove(above)).sort()
 // returns to that layer's default on-state. Used by undo/redo restore so reverting a layer toggle
 // doesn't also disturb opacity. Reference-stable per layer (returns the same object when unchanged),
 // so React can skip untouched layers.
+//
+// ⛔ NEW-1 (B385040) — AND REFERENCE-STABLE FOR THE WHOLE MAP, not just per layer. This function
+// carefully preserved each INNER layer state's identity when unchanged, and then handed back a
+// BRAND-NEW OUTER object every single call. Three effects in SitePlanner.jsx key off `overlays`
+// identity — the layer staging/sync effect (whose cleanup clears its intervals and idle callbacks
+// and then re-stages and RE-ADDS the entire Leaflet overlay stack), the coverage recompute, and the
+// persist — so an undo that touched no layer at all still tore the whole GIS stack down and put it
+// back. That is the owner's "the screen flashes on every ctrl z".
+//
+// Returning the INPUT when nothing moved is the half of the fix that no caller can undo by being
+// written carelessly: the guard lives with the value rather than with each consumer. (`applySnapshot`
+// additionally skips the setState entirely on a matching `overridesSig`, so React is not even asked;
+// this one makes the answer safe for every other caller, present and future.)
 export function applyOnOverrides(overlays, overrides) {
   const defaults = defaultOverlayState();
   const ov = sanitizeLayerOverrides(overrides);
   const out = {};
+  let changed = false;
   for (const [k, st] of Object.entries(overlays || {})) {
     const wantOn = k in ov ? ov[k] : !!(defaults[k] && defaults[k].on);
-    out[k] = st && !!st.on === wantOn ? st : { ...(st || {}), on: wantOn };
+    if (st && !!st.on === wantOn) { out[k] = st; continue; }
+    out[k] = { ...(st || {}), on: wantOn };
+    changed = true;
   }
-  return out;
+  return changed ? out : (overlays || out);
 }
 
 // Stable string signature of a sparse override map (registry-sanitized, sorted) — for the undo/redo

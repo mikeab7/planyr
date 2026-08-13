@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-08-13 @ `3968b16` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-08-13 @ `afa8707` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -380,7 +380,7 @@ _507 source files mapped._
 - **`src/workspaces/site-planner/components/CursorChip.jsx`** — the ONE cursor chip both map surfaces paint: coordinate pair + the always-present elevation readout (coords give way first so no elevation field is ever truncated)
   - _exports_: `default (CursorChip)`
 - **`src/workspaces/site-planner/components/icons.jsx`** — Small stroke icons (pin / empty-circle / warn-triangle) shared by the planner's panel components, replacing the 📍 emoji that ignored its row's theme colour; route-local on purpose so the bytes stay off every other route's chunk. — `PinIcon`, `EmptyCircleIcon`, `WarnTriangleIcon`
-  - _exports_: `EmptyCircleIcon`, `PinIcon`, `WarnTriangleIcon`
+  - _exports_: `CloseXIcon`, `DuplicateIcon`, `EmptyCircleIcon`, `HistoryIcon`, `PadlockIcon`, `PinIcon`, `PlusIcon`, `SaveIcon`, `StorageIcon`, `WarnTriangleIcon`
 - **`src/workspaces/site-planner/components/JurisdictionBadge.jsx`** — Passive site-header chip showing the active parcel's jurisdiction (city/ETJ/county) from the auto-run B93 identify; display-only, ⚑ on straddle (B763)
   - _exports_: `default (JurisdictionBadge)`
 - **`src/workspaces/site-planner/components/LayerPanel.jsx`** — Shared map-layer toggle UI (both finder + planner): checkbox/opacity/status/vintage per layer + coverage relevance picker
@@ -526,7 +526,7 @@ _507 source files mapped._
 - **`src/workspaces/site-planner/lib/districtFacilities.js`** — PR-K/K7 drainage-district facilities ingest scaffold: discover BKDD ArcGIS REST services behind its Web AppBuilder viewer (injectable fetch, graceful degradation), classify a DISTRICT floodway/ROW distinct from a FEMA floodway, name the receiving channel
   - _exports_: `ASSUMED_CHANNEL_TAG`, `BKDD_APPVIEWER`, `classifyDistrictFacilities`, `discoverDistrictServices`, `districtFloodwayNote`, `districtIdNote`, `facilityKind`
 - **`src/workspaces/site-planner/lib/dockZones.js`** — Building-anchored dock-zone stack geometry: outward court/trailer/buffer chain, catalog layers, dock-side axes, stranded-zone pruning
-  - _exports_: `ALONG_ANCHOR`, `alongAnchorFromDrag`, `alongLenIsChainEcho`, `alongOffsetFor`, `anchoredAlongSpan`, `boxExtentAlong`, `catalogDepthDefault`, `DOCK_ZONES`, `dockSidesFor`, `footprintAxes`, `footprintDepth`, `footprintLength`, `layoutStack`, `layoutZone`, `layoutZoneByKind`, `MAX_DOCK_ZONES`, `normalizeAlongAnchor`, `pruneStrandedZones`, `resizedAlongLen`, `resizedZoneAlongFit`, `resizedZoneAlongLen`, `strandedZoneIds`, `usableCourtSpan`, `ZONE_CATALOG`, `zoneAlongExtent`, `zoneAlongPlacement`, `zoneAlongSpan`, `zoneDepthDefault`, `zoneDepthDefaults`, `zoneDepthExtent`
+  - _exports_: `ALONG_ANCHOR`, `alongAnchorFromDrag`, `alongLenIsChainEcho`, `alongOffsetFor`, `anchoredAlongSpan`, `boxExtentAlong`, `catalogDepthDefault`, `DOCK_AXES`, `DOCK_ZONES`, `dockAxisEstablished`, `dockAxisOf`, `dockSidesFor`, `establishDockAxisPatch`, `footprintAxes`, `footprintDepth`, `footprintLength`, `healDockAxes`, `layoutStack`, `layoutZone`, `layoutZoneByKind`, `MAX_DOCK_ZONES`, `normalizeAlongAnchor`, `pruneStrandedZones`, `resizedAlongLen`, `resizedZoneAlongFit`, `resizedZoneAlongLen`, `rotateDockAxisPatch`, `strandedZoneIds`, `usableCourtSpan`, `withDockAxis`, `ZONE_CATALOG`, `zoneAlongExtent`, `zoneAlongPlacement`, `zoneAlongSpan`, `zoneDepthDefault`, `zoneDepthDefaults`, `zoneDepthExtent`
 - **`src/workspaces/site-planner/lib/dogEar.js`** — Corner bump-out geometry (flush corner placement + resize round-trip) AND the wall-hugging-child placement rule: the sidewalk span over the extended side, plus the always-flush perpendicular offset every wall strip / side-parking row is derived from
   - _exports_: `bumpSidewalkSide`, `bumpsOfHost`, `DOGEAR_D`, `DOGEAR_W`, `dogEarDesc`, `dogEarGeom`, `dogEarSize`, `hostAxisExtents`, `isDogEarSide`, `localToWorld`, `ownExtents`, `SIDE_PARK_PIN_TOL_FT`, `sideOfBondedBox`, `sideParkAlongRun`, `sideParkStack`, `sidewalkSpanForBumps`, `wallKidAlong`, `wallKidBox`, `wallKidPerp`, `wallStripBox`
 - **`src/workspaces/site-planner/lib/doubleTap.js`** — the reconstructed double-click gesture, budgeted on the EVENT's own clock (never a wall clock read inside the handler)
