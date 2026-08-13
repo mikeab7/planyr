@@ -13,6 +13,8 @@
 //   • the summary row 108 still reads its rolled-up finish 10/02/26
 //   • the Predecessor cell VISIBLY marks 106 (the dateless one) and does not mark 108
 //   • the drift banner names Mobilize, so an existing saved schedule self-corrects in the open
+//   • (B463072) the SUMMARY row's Duration cell reads its ROLLED span, not the leftover typed value —
+//     pre-fix this printed "0d" on a row visibly spanning 08/07/26 to 10/02/26
 //
 // Regression net: revert the `parentIds.has(t.id)` skip in cascadeDates and the Start cell reads 08/10/26.
 import { chromium } from "playwright";
@@ -96,7 +98,12 @@ const probe = await page.evaluate(() => {
   const rowFor = name => rows.find(r => new RegExp("^\\d+\\s*▾?\\s*" + name).test(norm(r.textContent))) || null;
   // No \b anchors: the grid paints cells with no separators, so the row text runs "Mobilize10/05/2610/05/26".
   const datesIn = row => row ? norm(row.textContent).match(/\d{2}\/\d{2}\/\d{2}/g) || [] : [];
-  const mob = rowFor("Mobilize"), sum = rowFor("CCID3");
+  const mob = rowFor("Mobilize"), sum = rowFor("CCID3"), kid = rowFor("LONO");
+  // B463072 — read the Duration CELL by column position rather than by regex over the row text: the row
+  // renders its cells with no separators, so "10/02/2640d" would defeat a text match.
+  const cellsOf = r => r ? [...r.children].map(c => norm(c.textContent)) : [];
+  const durCell = r => { const c = cellsOf(r); const i = c.findIndex(x => /^\d{2}\/\d{2}\/\d{2}$/.test(x)); return i >= 0 ? c[i+2] : null; };
+  const summaryDur = durCell(sum), childDur = durCell(kid);
   // A predecessor that drives NOTHING renders with a ⚠ before its id. Read the marked entries and the
   // unmarked ones separately: the point is that they look DIFFERENT, not merely that a ⚠ exists.
   const predEntries = mob ? [...mob.querySelectorAll("span")]
@@ -110,6 +117,7 @@ const probe = await page.evaluate(() => {
     scenario: window.__PL_SCENARIO__ || null,
     mobilizeText: mob ? norm(mob.textContent).slice(0, 90) : null,
     mobilizeDates: datesIn(mob), summaryDates: datesIn(sum),
+    summaryDur, childDur,
     predEntries,
   };
 });
@@ -129,9 +137,12 @@ const pass = rendered
   && marked.length === 1 && /^ETJ Permit/.test(marked[0].name) // exactly the dateless predecessor is marked…
   && marked[0].box.w > 0 && marked[0].box.h > 0                // …visibly, with real box area on screen
   && unmarked.length === 1 && /^CCID3/.test(unmarked[0].name)  // …and the satisfied one is left alone
+  && probe.summaryDur === "40d"                                // B463072: the summary prints its ROLLED span…
+  && probe.summaryDur !== "0d"                                 // …never the leftover typed value it still carries
+  && probe.childDur === "30d"                                  // …and a LEAF still prints what was typed on it
   && real.length === 0;
 console.log(pass
-  ? "✅ PASS — Mobilize reads 10/05/26 (next working day after its summary predecessor's real finish); the dateless predecessor is visibly marked and the satisfied one is not"
+  ? "✅ PASS — Mobilize reads 10/05/26 (next working day after its summary predecessor's real finish); the dateless predecessor is visibly marked and the satisfied one is not; the summary's Duration cell reads 40d, not 0d"
   : "❌ FAIL");
 // NOT asserted here: the B836 drift banner that NAMES this correction on an existing saved schedule. It
 // fires on the CLOUD load path (recascadeWithDrift), which this sandbox cannot reach — the harness
