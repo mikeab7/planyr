@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-08-13 @ `609eb6f` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-08-13 @ `d320e02` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_509 source files mapped._
+_510 source files mapped._
 
 ## infra
 
@@ -869,6 +869,8 @@ _509 source files mapped._
   - _exports_: `cornerTurns`, `spaceOut`, `turnBetween`
 - **`src/workspaces/site-planner/lib/screeningBfe.js`** — independent SCREENING base-flood-elevation engine: SCS/NRCS unit-hydrograph peak discharge (hydrology) + Manning normal-depth solve over a terrain-sampled cross-section (hydraulics), with a peak-rate-factor uncertainty band, the not-modelled list, the CLOMR/LOMR note, and the 44 CFR 60.3(b)(3) BFE-data threshold research. Returns an explicit unknown rather than any elevation it did not compute.
   - _exports_: `BFE_DATA_REQUIREMENT`, `bfeDataLikelyRequired`, `CLOMR_NOTE`, `default`, `MANNING_N`, `manningDischarge`, `normalDepthWse`, `NOT_MODELED`, `PRF_FLAT_COASTAL`, `PRF_STANDARD`, `SCREENING_DISCLAIMER`, `screeningBfe`, `screeningPeakDischarge`, `sectionAtWse`
+- **`src/workspaces/site-planner/lib/screeningBfeCopy.js`** — The screening study's words, constants and threshold test — the dependency-free LEAF that keeps the hydrology engine off the Site route's boot path.
+  - _exports_: `BFE_DATA_REQUIREMENT`, `bfeDataLikelyRequired`, `CLOMR_NOTE`, `NOT_MODELED`, `SCREENING_DISCLAIMER`, `SCREENING_STORMS`, `screeningBfeHeadline`, `screeningDeclined`, `screeningStudyNote`, `SECTION_HALF_WIDTH_FT`, `WATERSHED_GRID_ZOOM`, `WATERSHED_PAD_DEG`
 - **`src/workspaces/site-planner/lib/screeningBfeSite.js`** — The live-wiring layer for `screeningBfe.js`: turns a real site (terrain grid, footprint, Atlas-14 rainfall, SSURGO soils) into the engine's four inputs and runs BOTH the 1% and the 0.2% (500-yr) storms Waller ordinance §5.C(3) requires, from one derivation. Also the panel headline + the behind-the-fold method note.
   - _exports_: `atlas14Depths`, `default`, `SCREENING_STORMS`, `screeningBfeForSite`, `screeningBfeHeadline`, `screeningDeclined`, `screeningStudyNote`, `SECTION_HALF_WIDTH_FT`, `terrainInputsForScreeningBfe`, `WATERSHED_GRID_ZOOM`, `WATERSHED_PAD_DEG`
 - **`src/workspaces/site-planner/lib/setbackChips.js`** — groups parcel edges into one LABELLED setback run per side (shared value + direction spread), so a digitized curve reads as a handful of chips, not one per segment

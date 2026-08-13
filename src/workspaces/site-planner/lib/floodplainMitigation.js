@@ -19,7 +19,11 @@
  * only); hydrograph routing; conveyance hydraulics (Harris' offsetScope notes when
  * conveyance also governs).
  */
-import { NOT_MODELED, SCREENING_DISCLAIMER } from "./screeningBfe.js";
+/* NEW-1 — these two come from the COPY LEAF, never from `screeningBfe.js`. This module is on the
+ * Site route's boot path, so importing a constant from the engine hoists the whole hydrology +
+ * hydraulics engine (plus `upstreamArea.js` and `channelSection.js`) into the critical-path chunk
+ * for two strings. `screeningBfeCopy.js` imports nothing. ⛔ Do not "tidy" this back to the engine. */
+import { NOT_MODELED, SCREENING_DISCLAIMER } from "./screeningBfeCopy.js";
 import { pointInRing } from "./pondGeom.js";
 import { lngLatRingToFeet } from "./arcgis.js";
 /* NEW-1 — the `isSFHA` import from siteAnalysis.js is GONE, and that is the optimization that pays
