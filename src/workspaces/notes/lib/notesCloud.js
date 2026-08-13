@@ -104,8 +104,14 @@ export const emptySyncState = () => ({ treeRev: null, treeDirty: false, pages: {
  *      the B276 / B556 / B596 / B612 failure TOMBSTONE-DELETES exists to prevent.
  *   2. NOTHING ELSE IS EVER DROPPED. A notebook, section or page present on only one side is
  *      appended, never discarded. A merge cannot lose a note.
- *   3. FOR A NODE ON BOTH SIDES, THE LOCAL TITLE WINS — this function is only reached when
- *      the local tree has unpushed changes, so local is the side with something to say.
+ *   3. FOR A NODE ON BOTH SIDES, THE MORE RECENTLY EDITED SIDE OWNS ITS NAME AND ITS PROJECT
+ *      (B342996 ×2, extended by B421493). It used to be an unconditional "local wins",
+ *      justified by this function only running when local has unpushed changes — but owing an
+ *      edit on ONE page says nothing about another page's name, and a rename or a re-file made
+ *      on the other computer since this one last synced is simply newer. So `renameNode` and
+ *      `setPageProject` stamp `updatedAt`, and the later stamp takes both fields; a tie or a
+ *      missing stamp still resolves to LOCAL, which is the conservative answer.
+ *      ⛔ NAME AND PROJECT ONLY — both are VALUES. PLACEMENT (parent, order) stays rule 4's.
  *      Page timestamps take the LATER `updatedAt` and the EARLIER `createdAt`, which is the
  *      honest reading of both regardless of which side is "winning".
  *   4. A PAGE MOVED ON BOTH DEVICES keeps the LOCAL placement and appears exactly once.
@@ -281,18 +287,39 @@ export function mergeTrees(local, server, { onRescue } = {}) {
        * to compare), and a tie or a missing stamp still resolves to LOCAL — the conservative
        * answer, because the copy in front of someone is the one they can see is wrong.
        *
-       * ⛔ DELIBERATELY NOT EXTENDED TO PLACEMENT. Where a page SITS — its parent, its order,
-       * and its project — stays on rule 4 (local wins), which the reachability fuzz and the
-       * project-integrity suites are built around. Recency is the right rule for a value; it is
-       * not obviously the right rule for a structure, and changing both at once is how the
-       * merge's hard-won rules get quietly re-litigated. The project half is its own item. */
+       * ⛔ EXTENDED TO `projectId` IN B421493, AND TO NOTHING ELSE. Where a page SITS — its
+       * PARENT and its ORDER among siblings — remains rule 4's, local wins, untouched: that is
+       * what the reachability fuzz and the project-integrity suites are built around, and the
+       * walk below is unchanged. A note's project is a VALUE on a root, not a position, which is
+       * the distinction that makes one safe and the other not. See the merge site below. */
       const theirsIsNewer = other
         && Number.isFinite(other.updatedAt)
         && (!Number.isFinite(pg.updatedAt) || other.updatedAt > pg.updatedAt);
+      /* ⛔ AND THE PROJECT A NOTE IS FILED UNDER TRAVELS THE SAME WAY (B421493). B342996 fixed
+       * the NAME by recency and deliberately left this half alone, because `projectId` sits with
+       * PLACEMENT — parent, order, project — and rule 4 gives placement to the local side, which
+       * the reachability fuzz and both project-integrity suites are built around. Deferring it
+       * was the right call for one round and the wrong answer to keep: re-file a note on the
+       * laptop and the desktop silently put it back, then pushed the old filing up, exactly as
+       * the name used to.
+       *
+       * What makes this safe to change now, and it is a real distinction rather than a
+       * reassurance: `projectId` is a ROOT-ONLY property and it is a VALUE, not a position. It
+       * says which group a top-level note belongs to; it does not say who a note's parent is, or
+       * where among its siblings it sits. Rule 4 keeps both of those untouched — the WALK is
+       * unchanged, `aIndex` still wins the placement, and a subpage's project is still derived
+       * from its root rather than stored. So this is the same recency question the title now
+       * answers, asked of the other field a re-file writes.
+       *
+       * ⛔ AND IT IS TAKEN ONLY WHEN BOTH SIDES ARE ROOTS. A node that is a root here and a
+       * subpage there is a genuine structural disagreement, and adopting a project id across
+       * that would be inventing an answer to a question rule 4 has already settled. */
+      const bothRoots = other && pg.projectId !== undefined && other.projectId !== undefined;
       const merged = other
         ? {
           ...pg,
           ...(theirsIsNewer ? { title: other.title } : null),
+          ...(theirsIsNewer && bothRoots ? { projectId: other.projectId ?? null } : null),
           updatedAt: laterOf(pg.updatedAt, other.updatedAt),
           createdAt: earlierOf(pg.createdAt, other.createdAt),
         }

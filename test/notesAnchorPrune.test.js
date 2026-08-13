@@ -22,6 +22,7 @@ import {
   anchorIsEmpty, countEmptyAnchors, pruneEmptyAnchors,
 } from "../src/workspaces/notes/lib/notesAnchorPrune.js";
 import { addPage, deleteNode, emptyTree } from "../src/workspaces/notes/lib/notesModel.js";
+import { ANCHOR_EDGE_PAD, ANCHOR_MIN_WIDTH, fitAnchorBox } from "../src/workspaces/notes/lib/notesAnchorNode.js";
 
 const mem = new Map();
 globalThis.window = globalThis.window || {};
@@ -200,5 +201,65 @@ describe("⛔ THE BIN READER READS WHAT THE ROW PROMISED", () => {
     const [row] = store.collectBinFacts(deleteNode(t, "blank").tree, []);
     expect(row.empty).toBe(true);
     expect(row.gone).toBe(false);
+  });
+});
+
+/* ⛔ A BOX THAT FITS THE ROOM IT ACTUALLY HAS (B421490).
+ *
+ * `placeAnchor` spends the WIDTH to keep the LEFT EDGE somebody chose, and only moves that edge
+ * past the point where a column would be unreadable anyway. That rule ran at PLACEMENT only —
+ * so narrowing the window, or opening the History panel, or opening the same note on a smaller
+ * screen, left a box hanging off the end of the sheet, where the outline panel paints over it
+ * and takes its presses. Measured on a narrow window: a box's delete button and its width handle
+ * both answered `note-outline` instead of themselves.
+ *
+ * `fitAnchorBox` is the same rule at RENDER. The STORED attributes are deliberately untouched —
+ * widening the window must give back exactly what was asked for, not a number that suited one
+ * screen and quietly overwrote the intent.
+ */
+describe("fitAnchorBox — the render-time fit (B421490)", () => {
+  it("leaves a box alone when there is room for it", () => {
+    expect(fitAnchorBox({ x: 60, w: 200, hostWidth: 800 })).toEqual({ x: 60, w: 200 });
+  });
+
+  it("spends the WIDTH and keeps the LEFT EDGE when the room runs short", () => {
+    const fit = fitAnchorBox({ x: 340, w: 180, hostWidth: 420 });
+    expect(fit.x).toBe(340);                    // the edge he chose is kept
+    expect(fit.w).toBe(420 - 340 - ANCHOR_EDGE_PAD);
+    expect(fit.x + fit.w).toBeLessThanOrEqual(420);
+  });
+
+  it("never renders narrower than the readable floor", () => {
+    const fit = fitAnchorBox({ x: 100, w: 300, hostWidth: 120 });
+    expect(fit.w).toBe(ANCHOR_MIN_WIDTH);
+  });
+
+  /* ⛔ THIS CASE ONCE ASSERTED THE OPPOSITE, AND THE OPPOSITE WAS A REGRESSION. The first version
+   * moved the left edge "just enough to stay reachable" once the width hit its floor, following a
+   * sentence in `placeAnchor`'s header. `verify-notes-anchor-zoom` — the owner's own acceptance
+   * test for B350000 — went red inside the hour: a click at x=760 stored 751. A clamping band is
+   * a clamping band whatever justifies it, and this module has paid for that lesson once. */
+  it("⛔ NEVER MOVES THE LEFT EDGE — not even when the width is already at its floor", () => {
+    expect(fitAnchorBox({ x: 900, w: 200, hostWidth: 300 })).toEqual({ x: 900, w: ANCHOR_MIN_WIDTH });
+    expect(fitAnchorBox({ x: 760, w: 180, hostWidth: 795 }).x).toBe(760);
+    for (let x = 0; x <= 1200; x += 20) {
+      expect(fitAnchorBox({ x, w: 180, hostWidth: 800 }).x, `x=${x}`).toBe(x);
+    }
+  });
+
+  it("never shrinks on a GUESS — an unmeasured host returns what it was given", () => {
+    expect(fitAnchorBox({ x: 340, w: 180, hostWidth: 0 })).toEqual({ x: 340, w: 180 });
+    expect(fitAnchorBox({ x: 340, w: 180, hostWidth: undefined })).toEqual({ x: 340, w: 180 });
+  });
+
+  it("is IDEMPOTENT — re-fitting an already-fitted box changes nothing", () => {
+    const once = fitAnchorBox({ x: 340, w: 180, hostWidth: 420 });
+    expect(fitAnchorBox({ ...once, hostWidth: 420 })).toEqual(once);
+  });
+
+  it("gives the full width back when the room returns, because the STORE was never touched", () => {
+    const narrow = fitAnchorBox({ x: 340, w: 180, hostWidth: 420 });
+    expect(narrow.w).toBeLessThan(180);
+    expect(fitAnchorBox({ x: 340, w: 180, hostWidth: 900 })).toEqual({ x: 340, w: 180 });
   });
 });

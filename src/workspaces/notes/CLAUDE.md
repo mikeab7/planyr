@@ -166,9 +166,56 @@ written out in the header of `lib/notesStore.js`; read it there rather than re-d
   drag does — without it the right edge re-seated under the cursor on press (asked 90, got 86). ⛔ It
   was found by DRIVING the control with a real mouse after it was reported as "present but not
   behaviour-verified"; the shipping test had located it in the DOM and never used it.
+- **⛔ A BOX IS A THING YOU SELECT, ONENOTE-STYLE — and nothing appears on hover (B434416/B434418).**
+  The owner: *"if I click on the box, I should be able to just press delete, but it doesn't seem like
+  I can ever even click on the box."* Measured, and he was exactly right: after a press the element
+  carried the class `planyr-anchor` and **nothing else**. There was no such thing as a selected box,
+  so Delete had nothing to act on and every affordance had to hang off the pointer being over it.
+  **Press 1 SELECTS** (the caret does not enter — the box is the thing you have hold of) · **press 2
+  ENTERS it** · **Escape backs out to selected** · **Escape again deselects** · arrows nudge, Delete
+  removes in one undoable step, click-away clears. A press on empty page still places a new box.
+  ⛔ Two traps this cost, both invisible to a confirming test: the selection ring is an attribute on
+  an element the EDITOR owns, so blurring rebuilt the node view and dropped it (it is repainted on
+  every transaction now); and the key rule was bound in TWO places, so one Escape ran it twice and
+  left editing *and* deselected in the same keystroke.
+- **⛔ A GESTURE COMMITS ITS OWN RECORD, NEVER `dom.style` (B434417) — read this before touching any
+  drag here.** Resize committed `parseFloat(dom.style.width)` at pointer-up. The DOM is not the
+  gesture's memory: anything that re-renders the node view between the last move and the release
+  rewrites that style from the node's CURRENT attrs, after which the fallback wrote the 180px
+  default. On his signed-in account a sync tick does exactly that. **Measured on his account:
+  rendered 300, stored 180, 180 after a reload** — so the box went on rendering at the size he
+  dragged to and the change evaporated on reload. His word for it was *"dog shit"*, and the reason
+  is that it looked like it worked. The MOVE drag had the identical `dom.style.left` hazard and was
+  fixed in the same pass. ⛔ **AND THE HARNESS THAT SHIPPED IT WAS GREEN AND DID READ STORAGE** — it
+  passed because a signed-out sandbox has nothing that re-renders mid-gesture. The check was right
+  and its CONDITIONS were unreachable; `verify-notes-box-selection` now forces that re-render on
+  every run.
+- **SELECT SEVERAL BOXES AND MOVE THEM TOGETHER (B421494, `lib/notesMarquee.js`).** A press on blank
+  page already meant "place a box", so one gesture had to learn two meanings: the boundary is
+  DISTANCE and it is decided at **mouse-UP** — deciding at mouse-down is impossible and deciding at
+  first-move is worse, because a one-pixel tremor would silently change what the gesture meant.
+  Proven at 0px, 1px and either side of the threshold, on both axes and diagonally. Boxes it TOUCHES
+  are caught; Shift toggles; a group drag applies ONE delta clamped against the whole set's bounding
+  box (clamping per box DEFORMS the arrangement); arrows nudge; Delete removes all of it as one undo
+  step. ⛔ Placement now completes on mouse-UP, which flipped a row in **verify-press-drive**'s
+  documented table — that harness exists so a change to what drivers may rely on is announced rather
+  than discovered.
+- **⛔ THE SYSTEMATIC SWEEP — the **sweep-notes** harness under `ui-audit/`; run it before believing this module is
+  well.** The owner asked for it by name: *"you need to loop and debug everything about this
+  module."* It ENUMERATES controls from the DOM rather than listing them (a list rots the day
+  somebody adds a control), asks six GENERIC questions of everything — does it throw · does Ctrl+Z
+  restore the document byte-for-byte · does redo re-apply · does a toggle toggle · does anything
+  paint outside the sheet · does the stored copy agree with the screen — and NAMES what it did not
+  cover. Its first run found five real defects: a delete button buried under its own box's text
+  (**B421488** — visible, labelled, unclickable, and invisible to every existing check because they
+  clicked through an element handle rather than a pixel), a box delete that could not be undone
+  (**B421489**), a box hanging off the page with unreachable controls (**B421490**), *"Edited 2 Jul
+  2025 ago"* on every note older than two months (**B421491**), and the History panel crushing the
+  page to a 156px sliver (**B421492**). ⛔ **A SWEEP THAT REPORTS NOTHING IS A FAILED SWEEP** and it
+  says so in its own output.
 - **A BOX CAN BE DELETED AND RESIZED, AND A PRESS THAT DOES NOT MOVE WRITES NOTHING (B391073).** A
   box had a grab handle and no way to remove it and no way to change its width; both are now on the
-  box, both hidden until you hover or put the caret in it, and neither reaches paper. ⛔ **Only the
+  box, both revealed by SELECTING it (B434418 moved them off hover), and neither reaches paper. ⛔ **Only the
   WIDTH is settable** — a box's height is its words, and a fixed height can only be honoured by
   clipping them. ⛔ **A press with no movement commits nothing at all** — not a transaction, not an
   undo frame — and the drag keeps its grab offset and re-reads the editor's box on every move, so a

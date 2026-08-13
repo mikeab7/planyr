@@ -44,7 +44,14 @@ const SHAPES = [
   { id: "synthetic-click-on-target", places: false, why: "a synthetic click produces no mousedown, so nothing runs" },
   { id: "synthetic-dblclick-on-target", places: false, why: "same — and this is the exact shape that reported a false regression" },
   { id: "synthetic-mousedown-no-bubble", places: false, why: "the handler is on the mat, an ancestor; a non-bubbling event never reaches it" },
-  { id: "synthetic-mousedown-bubbles", places: true, why: "a real event bubbles, and React's listener is reached" },
+  /* ⛔ THIS ROW FLIPPED, AND THE HARNESS FLIPPING IT IS THE HARNESS DOING ITS JOB (B421494).
+   * Marquee select gave the blank-page press a second meaning, and the two can only be told
+   * apart by how far the pointer travels — which is not knowable until the button comes UP. So
+   * placement now completes on mouse-UP rather than on mouse-DOWN, and a lone synthetic
+   * mousedown, having no release to follow it, completes nothing. That is a real change to what
+   * a driver may rely on, which is exactly why it is written down here rather than discovered by
+   * somebody's harness reporting a working feature as broken for the second time. */
+  { id: "synthetic-mousedown-bubbles", places: false, why: "placement completes on mouse-UP now (the marquee's distance test); a lone mousedown never finishes the gesture" },
 ];
 
 const REMOTE = !/^https?:\/\/(localhost|127\.0\.0\.1)/.test(BASE);

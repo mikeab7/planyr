@@ -175,6 +175,111 @@ at/after → not flagged · unpinned → never flagged), mutation-proven.
    implies.
 4. ⚠ Worth his eye: this may light up rows he pinned deliberately long ago. That is the point — but if
    it turns out to be noisy across his real schedules, say so and it can be softened.
+### V229360 — B434416/B434417/B434418 + B421493: the two-stage box, a resize that persists, and a re-file that travels `Blocker: auth`
+
+**What is proven WITHOUT sign-in, and it is deliberately adversarial** (his instruction: *"Try to
+REFUTE each fix rather than confirm it. Default to refuted if uncertain."*).
+`ui-audit/verify-notes-box-selection.mjs` is **88/88** across a full window, his short one, and a
+zoom other than 100%, and every persistence claim is read at the DOCUMENT level and then again
+AFTER A RELOAD. Its ten attacks are the ones he listed plus the ones that would refute my own
+claims: hover reveals nothing · a click selects · Delete removes and Ctrl+Z restores *and survives
+a reload* · a resize reaches the document, the render agrees with it, and it survives a reload ·
+**a re-render forced mid-drag does not eat the resize** (the condition his account has and a
+sandbox does not) · resizing a box that was MOVED first widens it without moving it · the LAST box
+of a crowded page selects and resizes alone · the two-stage press and the Escape ladder · typing
+and Backspace inside an entered box edit its WORDS, not the box · and a press on blank page still
+places. Beside it: `sweep-notes` **265 checks over 44 controls, clean** · `verify-notes-marquee`
+58/58 · `verify-notes-box-drag` 43/43 · `verify-notes-anchor-soak` 32/32 · `verify-notes-anchor-zoom`
+40/40 · `verify-notes` 294/294 · `verify-press-drive` 6/6 · `verify-notes-rename-live` 15/15.
+Unit **10,955 passing**. Lint 0 errors, build green.
+
+**⛔ WHAT I COULD NOT TEST, stated plainly because skipping this is what produced the round.**
+1. **The signed-in condition itself.** The resize defect only appeared on his account because a
+   sync tick re-renders a node view mid-gesture. The sandbox cannot sign in (the proxy CORS-blocks
+   Supabase auth), so that re-render is SIMULATED — forced by hand at the same moment. The
+   simulation reproduced his exact numbers on the broken build (rendered 300, stored 180, 180 after
+   reload) and passes on the fixed one, but a real sync tick has not been run against it.
+2. **The re-file travelling between two real machines** (B421493) — every case is against an
+   in-memory server that owns `rev` like the deployed trigger, not against Supabase.
+3. **Print and Markdown parity for a resized box** — the export path is exercised for crashes, not
+   compared.
+
+**Steps on his account, in this order:**
+1. Open a note with a box. **Hover it and do not click.** Nothing may appear — no grip, no ×, no
+   corner handle.
+2. **Click it once.** A ring appears and so do the three controls. The caret must NOT be in the
+   text.
+3. Press **Delete**. The box goes. **Ctrl+Z** — it comes back. Reload: still back.
+4. Click a box once, then **drag its bottom-right handle wider**. Let go. **Reload the page.** The
+   box must still be the size you dragged it to. This is the exact check that failed before.
+5. Do step 4 again on a box you have **first moved** with its grip, and again with the document
+   zoomed in. Same result both times.
+6. Click a box **twice** — the caret goes in and you can type. **Escape** backs out to the box being
+   selected; **Escape** again deselects.
+7. Drag on empty page across several boxes: a band appears and they all select. Drag any one of
+   them — they move together. One **Ctrl+Z** puts them all back.
+8. On a second computer: **move a note into a different project** on one, wait for the sync line to
+   settle, then check the other. It must follow, and must not drift back.
+### V237632 — B442688: the View menu's content groups on the owner's OWN signed-in plans `Blocker: auth` + `real-data`
+
+**What is proven HERE, and for this item it is nearly the whole claim.** `ui-audit/verify-content-visibility.mjs`
+drives the owner's REAL Silvestri plan (98 elements over 6 types, 3 parcels, 6 markups, 2 measurements,
+16 callouts — the only fixture carrying all five families at once) and his Bain plan for the pond:
+**33/33**. Every family hidden on its own and restored; the Elements master; a reload; Show all.
+Full suite green (543 files / 10,958 tests) incl. `test/contentVisibility.test.js` (30), lint clean,
+build green, bundle audit passing.
+
+**THE BEFORE / AFTER NUMBERS THE BLOCK ASKED FOR — the point being that they are IDENTICAL.**
+On Silvestri, with **every element hidden** (76 of them: 9 buildings, 23 car parking, 5 trailer
+parking, 7 roads, 14 paving, 18 sidewalks) the Yield panel reads, character for character, what it
+read with everything shown:
+
+| | shown | all elements hidden |
+|---|---|---|
+| Buildings | 62.13 ac · 24% | 62.13 ac · 24% |
+| Open space | 133.81 ac · 51% | 133.81 ac · 51% |
+| Pond | 0.00 ac · 0% | 0.00 ac · 0% |
+| Paving | 66.26 ac · 25% | 66.26 ac · 25% |
+| Site | 262.20 ac · 11.42M sf | 262.20 ac · 11.42M sf |
+| Impervious | 49% | 49% |
+| Easements | 5.82 ac · 253,434 sf | 5.82 ac · 253,434 sf |
+
+The harness does not compare those fields one at a time — it compares the WHOLE metrics region as a
+string and requires byte-identity, so a number nobody thought to list cannot drift either. Screenshots:
+`ui-audit/shots/content-visibility/before.png` and `.../elements-hidden.png` (the second is the whole
+claim in one frame: an empty canvas, the amber "6 groups hidden · Show all" banner, and the panel
+still reading 62.13 ac of buildings). Regenerate with `--shots`.
+
+**Also proven here:** nothing is written — the saved record's `els`/`parcels`/`markups`/`measures`/
+`callouts` are byte-identical after hiding, and no `commit_elements` / `site_elements` request leaves
+the browser. **Mutation-proven:** moving the filter one seam earlier (filtering `els` before the
+metrics pass) leaves the canvas pixel-identical and takes Buildings to `0.00 ac · 0%` — 33/33 → 28/33.
+
+**What CANNOT be checked here, and why each is a real blocker rather than a to-do.**
+1. **`auth`** — the sandbox proxy CORS-blocks Supabase sign-in, so every arm ran SIGNED OUT against a
+   locally-seeded copy of his plans. The "nothing is written" claim is therefore proven for the local
+   store and for the absence of an outbound request; it has not been observed against a live
+   `site_elements` table with realtime attached and a second tab open.
+2. **`real-data`** — the fixtures are redacted snapshots. His live plans carry rasters, GIS layers and
+   a drainage context none of which the sandbox can reach.
+3. **The plan-switch case is proven INDIRECTLY and that is stated rather than glossed.** The harness
+   proves the hide is persisted into the plan record and survives a full reload; a plan switch remounts
+   the planner and re-reads that same record, so the mechanism is the same one. It has not been driven
+   as a two-plan gesture.
+
+**The signed-in steps still pending** (any browser-equipped session, on planyr.io):
+1. Open a plan with buildings, ponds, roads, parcels and markups. Note the Yield panel's numbers.
+2. Open **View ▾**. Hide each group in turn — Elements (and each type under it), Parcels, Markups,
+   Measurements, Text & callouts. Confirm each leaves the canvas and **that not one number in Yield
+   moves by a single unit**, Site Analysis included.
+3. Confirm the header turns amber and NAMES what is hidden while the card is closed.
+4. Reload, and switch to another plan and back. The hidden groups should still be hidden, and the
+   other plan should be unaffected (the state is per plan).
+5. Press **Show all**. Everything returns.
+6. Confirm **Parcel acreage** in *Labels* hides every chip, and that a lot you had hidden by hand
+   (right-click → Hide acreage label) STAYS hidden when you turn the master back off.
+7. Confirm dock doors are drawn on every building with no toggle for them anywhere — and, if you have
+   a plan where you had turned them OFF, that they are back.
 
 ### V230480 — B435536: the easement label on 8 South no longer dwarfs its own easement `Blocker: real-data`
 
@@ -386,6 +491,19 @@ the old name a minute after A set it (the merge's title rule).
 not travel between machines — the merge's placement rule is unchanged and that half of **B342996**
 is still open. Do not read a pass here as covering it.
 
+**✅ PASSED — verified on the owner's own signed-in account, 2026-08-13.** Rename updates the sidebar
+with **no reload** and the stored tree agrees **immediately**; a brand-new page is on disk **the moment
+it is created**, read back out of storage without reloading. Delete-a-box works (a real button with
+the `Delete this box` accessible name). The title deletes one character at a time all the way to
+empty with no snap-back — past the "u" that used to trigger it — and retyping commits. Line spacing
+is present (Single / 1.15 / 1.5 / Double plus space before and after).
+
+**⛔ WHAT HE EXPLICITLY DID NOT VERIFY, kept rather than quietly dropped:** the click-jump (he accepts
+the real-mouse result and discounts his own synthetic no-movement finding as worthless evidence), the
+resize BEHAVIOUR (his "present but unverified" flag is what surfaced the stale-origin defect that
+B400177 then fixed), and the Sketch panel layout. **And the half of B342996 this entry names as out of
+scope — a re-file travelling between computers — is still open and is NEW-3 of the 2026-08-13 block.**
+
 ### V195264 — B393168/B393169/B393170: the Baytown jurisdiction badges, measured BY AREA, on the owner's own signed-in plans `Blocker: real-data` `Blocker: auth`
 
 **What is proven WITHOUT a browser, and it is the substance of the three items.** The share is now an
@@ -470,6 +588,18 @@ only a signed-in session can show is that a selection click writes NOTHING to th
 - **⛔ AND NOTHING WITH A PURGED BODY MAY RENDER AS A NOTE.** PASS = no note in the sidebar opens empty with nothing recoverable behind it. That is the shape this recurrence took.
 - **AN ORDINARY DELETE STILL WORKS.** Bin a note; it is still restorable. A tombstone buries a PURGE, never a delete.
 - **A NULL IS NOT A DISPOSITION (STANDING RULE #2).** Reported fixed twice already — if it cannot be provoked, say so and take one of the three admissible routes, naming which.
+**✅ PASSED — verified on the owner's own signed-in account, 2026-08-13.** He ran the two-window case
+this sandbox cannot reach, and it holds in the STRONGER form: the purge did not merely survive, it
+PROPAGATED. Window B created `TWOWIN` (`pg_msqzi8nj1mghpu8`); window A reloaded, saw it, binned it and
+deleted it forever; window B — still holding `TWOWIN` in its own view at a PRE-PURGE revision — was
+then forced to write and push by creating a new page in it. `TWOWIN` did not come back: not in window
+B, not in local storage, not in the cloud (**tree rev 1307, `twowin_back` false**). **Window B had
+already dropped it from its own list before the forced write**, which is the propagation rather than
+the mere survival. Single-window purge also held across two reloads, twice, local and cloud. His
+baseline is restored exactly: **10 live · bin 24 · `live_but_purged` 0.** This closes the item that
+broke three times — B357011 shipped the rule, B364016 found `migrate` wiping the ledger, B391072
+found it running on only one of the two adopt paths.
+
 ### V187136 — B385040: an undo really does not rebuild the GIS layer stack on a located, signed-in plan `Blocker: live-GIS` `Blocker: auth`
 
 **What IS proven here, and it is the part that matters most.** The defect was INVISIBLE to every

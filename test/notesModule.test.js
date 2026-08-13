@@ -70,6 +70,8 @@ const ALL_NOTES_FILES = [
   "lib/notesAnchorPrune.js",
   // How far apart the lines are — a BLOCK property, never a text style.
   "lib/notesSpacing.js",
+  // B421494 — select several boxes and move them together; the place/select boundary lives here.
+  "lib/notesMarquee.js",
 ];
 const SKETCH_FILES = ALL_NOTES_FILES.filter((f) => f.includes("Sketch"));
 
@@ -1031,16 +1033,23 @@ describe("the project a notebook belongs to", () => {
     expect(purge.slice(0, 800), "the purge records the entry id AND every page id it named")
       .toMatch(/withTombstones\(next, \[entryId, e\?\.node\?\.id, \.\.\.pageIds\]/);
     const cloud = read(NOTES, "lib", "notesCloud.js");
-    const merge = cloud.slice(cloud.indexOf("export function mergeTrees"));
-    expect(merge.slice(0, 4000), "rule 0 runs before the union").toMatch(/const tombs = new Set\(\[\.\.\.tombstoneIds\(L\), \.\.\.tombstoneIds\(S\)\]\)/);
-    expect(merge.slice(0, 6000), "a tombstoned entry never survives").toMatch(/if \(tombs\.has\(String\(e\.id\)\)\) continue;/);
-    expect(merge.slice(0, 9000), "…nor a tombstoned live node").toMatch(/deleted\.has\(pg\.id\) \|\| tombs\.has\(String\(pg\.id\)\)/);
+    /* ⛔ THE SLICE IS THE WHOLE FUNCTION, NOT A CHARACTER COUNT. The fixed windows below had to be
+     * widened twice in two days as `mergeTrees` gained the rules that made it correct — and a
+     * guard that silently stops reaching its own subject is the rot-green failure this repo names
+     * elsewhere. The function ends where the next top-level declaration begins. */
+    const mergeStart = cloud.indexOf("export function mergeTrees");
+    const nextDecl = cloud.indexOf("\nconst laterOf", mergeStart);
+    const merge = cloud.slice(mergeStart, nextDecl > 0 ? nextDecl : undefined);
+    expect(merge.length, "the slice must actually cover the whole merge").toBeGreaterThan(4000);
+    expect(merge, "rule 0 runs before the union").toMatch(/const tombs = new Set\(\[\.\.\.tombstoneIds\(L\), \.\.\.tombstoneIds\(S\)\]\)/);
+    expect(merge, "a tombstoned entry never survives").toMatch(/if \(tombs\.has\(String\(e\.id\)\)\) continue;/);
+    expect(merge, "…nor a tombstoned live node").toMatch(/deleted\.has\(pg\.id\) \|\| tombs\.has\(String\(pg\.id\)\)/);
     /* The window is a character count over one function, so it has to grow when that function
      * is documented further — B342996 added rule 3's amendment above this line. Widened rather
      * than narrowed deliberately: a guard that silently stops reaching its own subject is the
      * rot-green failure this repo names elsewhere, so the slice must always cover the whole
      * merge. */
-    expect(merge.slice(0, 12000), "and the ledger rides on to the next stale client").toMatch(/tombs: withTombstones/);
+    expect(merge, "and the ledger rides on to the next stale client").toMatch(/tombs: withTombstones/);
   });
 
   /* ⛔ THE STORED TREE IS NEVER STALER THAN THE SCREEN (B400176).
