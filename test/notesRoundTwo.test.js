@@ -19,7 +19,7 @@ import {
   purgeTrashEntry, recentPages, restoreNode, touchPage, trashEntries, trashPageIds,
   TRASH_RETENTION_DAYS,
 } from "../src/workspaces/notes/lib/notesModel.js";
-import { absoluteStamp, daysLeft, editedLabel, relativeTime } from "../src/workspaces/notes/lib/notesTime.js";
+import { absoluteStamp, daysLeft, editedLabel, relativeTime, stampLabel } from "../src/workspaces/notes/lib/notesTime.js";
 import { docToMarkdown, imageIdsInDoc, imageIdsInDocs, pageToMarkdown } from "../src/workspaces/notes/lib/notesMarkdown.js";
 import { buildPrintDocument } from "../src/workspaces/notes/lib/notesPrint.js";
 
@@ -246,6 +246,24 @@ describe("a page records when it was made and when it was touched", () => {
     expect(editedLabel(null)).toBe("");
     expect(editedLabel(now - 5 * 3600000, { now })).toBe("Edited 5h ago");
     expect(editedLabel(now - 1000, { now })).toBe("Edited just now");
+
+    /* ⛔ PAST SIXTY DAYS `relativeTime` RETURNS A CALENDAR DATE, AND A CALENDAR DATE TAKES NO
+     * "ago" (B421491). This read "Edited 2 Jul 2025 ago" on every note the owner had not touched
+     * in two months — which is most of them. `stampLabel` had the guard and stated the rule in its
+     * own comment; `editedLabel` did not. Both are asserted here now, at the same instants, so
+     * neither can drift from the rule again. */
+    const OLD = now - 400 * 86400000;                 // well past the calendar-date threshold
+    const oldRel = relativeTime(OLD, { now });
+    expect(oldRel).not.toMatch(/^\d+[mhdw]$/);         // the precondition: it really is a date
+    expect(editedLabel(OLD, { now })).toBe(`Edited ${oldRel}`);
+    expect(editedLabel(OLD, { now })).not.toMatch(/ ago$/);
+    expect(stampLabel(OLD, { now })).toBe(oldRel);
+    expect(stampLabel(OLD, { now })).not.toMatch(/ ago$/);
+
+    // …and just inside the threshold both still say "ago", so the guard did not overreach.
+    const RECENT = now - 3 * 86400000;
+    expect(editedLabel(RECENT, { now })).toBe("Edited 3d ago");
+    expect(stampLabel(RECENT, { now })).toBe("3d ago");
     expect(absoluteStamp(null)).toBe("");
     expect(absoluteStamp(now)).not.toBe("");
   });

@@ -35,7 +35,10 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { EditorContent, useEditor } from "@tiptap/react";
 import { noteExtensions, EMPTY_DOC } from "../lib/notesExtensions.js";
-import { anchorExtent, anchorPosAtSelection, placeAnchor } from "../lib/notesAnchorNode.js";
+import { anchorExtent, anchorPosAtSelection, fitAnchorBox, placeAnchor } from "../lib/notesAnchorNode.js";
+import {
+  applyMarquee, boxesInMarquee, gestureOutcome, marqueeRect, moveSelection, nudgeDelta, toggleSelection,
+} from "../lib/notesMarquee.js";
 import {
   normalizeZoom, scrollTopAfterZoom, zoomForKey, zoomForWheel, zoomLabel, ZOOM_DEFAULT,
 } from "../lib/notesZoom.js";
@@ -110,28 +113,58 @@ const EDITOR_CSS = `
    the narrowed width just pushed it back out over the right margin. The width is written
    explicitly by renderHTML AND by the node view, so nothing here needs a floor; the only floor
    is ANCHOR_MIN_WIDTH, in the one file that decides placement. */
-.planyr-note .ProseMirror .planyr-anchor { position: absolute; margin: 0 !important; box-sizing: border-box; padding: 3px 6px 3px 16px; border: 1px dashed transparent; border-radius: 5px; }
-.planyr-note .ProseMirror .planyr-anchor:hover, .planyr-note .ProseMirror .planyr-anchor:focus-within { border-color: var(--border-strong); }
+/* ⛔ A BOX AND ITS CONTROLS STAY REACHABLE EVEN WHEN THE BOX OVERHANGS THE SHEET (B421490 ×3).
+   The left edge somebody chose is never moved — that is B350000's rule and its acceptance test
+   guards it — so narrowing the window far enough leaves a box hanging past the sheet, where the
+   outline and history panels are. Those panels come later in the document and would otherwise
+   take its presses, which is how a box's delete and width handles became unclickable. Stacking is
+   the right lever here: it keeps the box usable without moving anything the owner placed. */
+.planyr-note .ProseMirror .planyr-anchor { position: absolute; z-index: 2; margin: 0 !important; box-sizing: border-box; padding: 3px 6px 3px 16px; border: 1px dashed transparent; border-radius: 5px; }
+/* ⛔ NOTHING APPEARS BECAUSE THE POINTER PASSED OVER A BOX (B434418). Every affordance used to
+   sit at zero opacity and be revealed by hover, which the owner asked for the removal of in as
+   many words: *"I don't need it to leave visible every time I hover over something. I should have
+   to click on the box and then press delete."* Hover reveal is also what made the controls
+   unfindable — you had to already know they were there to put the pointer in the right few
+   pixels. They now belong to the SELECTED state, which is a thing you chose.
+   (No backticks in this block: it is inside a template literal, and that trap has broken this
+   build five times now — see the guard in the notesModule suite.) */
+.planyr-note .ProseMirror .planyr-anchor:focus-within { border-color: var(--border-strong); }
 /* ⛔ AN EMPTY BLOCK IS NEVER INVISIBLE, AND THAT IS THE WHOLE OF THE "INTERMITTENT" BUG. One
    that draws nothing still occupies its box and still takes the press, so a second attempt at
    the same spot landed inside the first attempt's leftover and appeared to do nothing at all.
    It is outlined whenever it is empty, and while the caret is in it, it says what to do. The
    words are content, not a node — nothing here reaches the document, the Markdown or the PDF. */
+/* ⛔ SELECTED IS OBVIOUS AT A GLANCE (B421494) — a solid accent ring and a faint wash, so a set
+   of nine reads as one thing. It is a BORDER COLOUR on the existing border rather than an outline
+   or a box-shadow: both of those paint outside the element's box, which would put chrome over the
+   neighbouring box's controls and re-create the press-swallowing defect this module keeps hitting. */
+.planyr-note .ProseMirror .planyr-anchor[data-selected="1"] { border-color: var(--accent-notes); border-style: solid; background: color-mix(in srgb, var(--accent-notes) 8%, transparent); }
 .planyr-note .ProseMirror .planyr-anchor[data-empty="1"] { border-color: var(--border-default); border-style: dashed; }
 .planyr-note .ProseMirror .planyr-anchor[data-empty="1"]:focus-within { border-color: var(--accent-notes); }
 .planyr-note .ProseMirror .planyr-anchor[data-empty="1"]:focus-within .planyr-anchor-content::after { content: "Type here"; position: absolute; left: 16px; top: 3px; pointer-events: none; color: var(--text-tertiary); font-style: italic; }
 .planyr-note .ProseMirror .planyr-anchor-content { position: relative; }
 .planyr-note .ProseMirror .planyr-anchor-grip { position: absolute; left: 3px; top: 5px; width: 9px; height: 14px; cursor: grab; border-radius: 2px; opacity: 0; background: repeating-linear-gradient(to bottom, var(--text-tertiary) 0 2px, transparent 2px 4px); }
-.planyr-note .ProseMirror .planyr-anchor:hover .planyr-anchor-grip, .planyr-note .ProseMirror .planyr-anchor:focus-within .planyr-anchor-grip { opacity: 1; }
+.planyr-note .ProseMirror .planyr-anchor[data-selected="1"] .planyr-anchor-grip { opacity: 1; }
 .planyr-note .ProseMirror .planyr-anchor-grip:active { cursor: grabbing; }
 /* ⛔ A DELETE AND A WIDTH HANDLE, on the box itself. Both appear on hover or while the caret is
    in the box — the same rule the grab handle already followed, so a page of boxes is not a page
    of chrome. Neither prints: notesPrint.js hides every one of them. */
+/* ⛔ THE BOX'S OWN CHROME SITS ABOVE THE BOX'S OWN TEXT, AND THAT z-index IS THE WHOLE FIX
+   (B421488). The delete button is inside the box's padding box, so its 16px square overlaps the
+   first line of text; the content wrapper below is position:relative (it has to be, for the empty
+   box's "Type here" hint) and is appended LAST, so with both at z-index:auto the CONTENT painted
+   on top. Paint order is hit-test order, so a press at the button's own centre landed on the
+   paragraph: the control was visible, enabled, correctly labelled, and impossible to click. This
+   is CHROME-NEVER-EATS-A-PRESS with the sides reversed — the content ate the chrome — and it is
+   why the grip and the width handle were unaffected: both sit OUTSIDE the content's box (the grip
+   in the left padding, the handle past the bottom-right corner) and neither ever overlapped it.
+   The rule the z-index encodes: a control drawn ON the box belongs to the box's chrome layer. */
+.planyr-note .ProseMirror .planyr-anchor-grip, .planyr-note .ProseMirror .planyr-anchor-del, .planyr-note .ProseMirror .planyr-anchor-size { z-index: 1; }
 .planyr-note .ProseMirror .planyr-anchor-del { position: absolute; right: 2px; top: 2px; width: 16px; height: 16px; padding: 0; line-height: 14px; border: 1px solid var(--border-default); border-radius: 4px; background: var(--surface-raised); color: var(--text-secondary); font: inherit; font-size: 12px; cursor: pointer; opacity: 0; }
-.planyr-note .ProseMirror .planyr-anchor:hover .planyr-anchor-del, .planyr-note .ProseMirror .planyr-anchor:focus-within .planyr-anchor-del { opacity: 1; }
+.planyr-note .ProseMirror .planyr-anchor[data-selected="1"] .planyr-anchor-del { opacity: 1; }
 .planyr-note .ProseMirror .planyr-anchor-del:hover { border-color: var(--danger); color: var(--danger); }
 .planyr-note .ProseMirror .planyr-anchor-size { position: absolute; right: -3px; bottom: -3px; width: 12px; height: 12px; cursor: ew-resize; border-right: 2px solid var(--border-strong); border-bottom: 2px solid var(--border-strong); border-bottom-right-radius: 4px; opacity: 0; }
-.planyr-note .ProseMirror .planyr-anchor:hover .planyr-anchor-size, .planyr-note .ProseMirror .planyr-anchor:focus-within .planyr-anchor-size { opacity: 1; }
+.planyr-note .ProseMirror .planyr-anchor[data-selected="1"] .planyr-anchor-size { opacity: 1; }
 
 /* An empty page says what to do. Both halves — the extension and this rule — landed
    together; a rule with no extension matches nothing, which is what a blank page was. */
@@ -912,6 +945,246 @@ export default function NoteEditor({
     editor.chain().dropEmptyAnchors().addNoteAnchorAt(point).run();
   }, [editor]);
 
+  /* ═══ SELECT SEVERAL BOXES AND MOVE THEM TOGETHER (B421494) ══════════════════════════════
+   *
+   * ⛔ THE WHOLE DIFFICULTY IS THAT THE PRESS IS ALREADY SPOKEN FOR. A press on blank page places
+   * a box; a marquee wants the same press. The boundary is DISTANCE and it is decided at
+   * mouse-UP — see `notesMarquee.js` for why deciding at mouse-down is impossible and deciding
+   * at first-move is worse. Everything below is wiring; every decision is in that pure module,
+   * where it is tested at zero pixels, one pixel, and either side of the threshold.
+   *
+   * ⛔ AND THE PLACEMENT PATH IS UNTOUCHED BELOW THE THRESHOLD. Four rounds of work went into
+   * what a press on blank page does, with a soak harness that asserts an abandoned press leaves
+   * storage BYTE-IDENTICAL. A press that does not travel still reaches exactly the same code. */
+  const [selection, setSelection] = useState(() => new Set());
+  /* ⛔ THE SECOND STAGE OF ONENOTE'S MODEL (B434416): which selected box the caret has been let
+   * INTO. Selecting a box and editing its words are different states, and conflating them is why
+   * "click the box and press Delete" could not work — every press went straight to the text, so
+   * there was never a moment at which the BOX was the thing you had hold of. */
+  const [editingId, setEditingId] = useState(null);
+  const editingRef = useRef(null);
+  editingRef.current = editingId;
+  const [band, setBand] = useState(null);          // the rubber band, in DOCUMENT space
+  const selRef = useRef(selection);
+  selRef.current = selection;
+
+  /** The editor's live frame: where it is on screen, and the zoom, measured rather than assumed. */
+  const frame = useCallback(() => {
+    if (!editor || editor.isDestroyed) return null;
+    const dom = editor.view.dom;
+    const box = dom.getBoundingClientRect();
+    return { dom, box, scale: box.width / (dom.offsetWidth || 1) || 1 };
+  }, [editor]);
+
+  const toDoc = useCallback((clientX, clientY) => {
+    const f = frame();
+    if (!f) return null;
+    return { x: (clientX - f.box.left) / f.scale, y: (clientY - f.box.top) / f.scale };
+  }, [frame]);
+
+  /** Every box on the page, in document space, by id. Read from the DOM because a box's HEIGHT
+   *  is its words and only the browser knows that. */
+  const boxesNow = useCallback(() => {
+    if (!editor || editor.isDestroyed) return [];
+    return [...editor.view.dom.querySelectorAll(".planyr-anchor")].map((el) => ({
+      id: el.getAttribute("data-anchor-id"),
+      x: parseFloat(el.getAttribute("data-anchor-x")) || 0,
+      y: parseFloat(el.style.top) || 0,
+      w: parseFloat(el.getAttribute("data-anchor-w")) || parseFloat(el.style.width) || 0,
+      h: el.offsetHeight,
+    })).filter((b) => b.id);
+  }, [editor]);
+
+  /* Every box needs an identity before a selection can refer to it; old documents have none.
+   * It is stamped outside the undo history — see the command's own note. */
+  useEffect(() => {
+    if (!editor || editor.isDestroyed || readOnly) return;
+    editor.commands.ensureNoteAnchorIds();
+  }, [editor, readOnly, docTick]);
+
+  /* ⛔ THE SELECTION IS VISIBLE, and it is painted onto the real elements rather than mirrored
+   * into a second render tree. A selection you cannot see is a selection you will move by
+   * accident — and re-rendering every box through React to show a ring would remount node views
+   * the editor owns, which is a different and worse bug. */
+  useEffect(() => {
+    if (!editor || editor.isDestroyed) return undefined;
+    const paint = () => {
+      if (editor.isDestroyed) return;
+      for (const el of editor.view.dom.querySelectorAll(".planyr-anchor")) {
+        const on = selection.has(String(el.getAttribute("data-anchor-id")));
+        if (on) el.setAttribute("data-selected", "1"); else el.removeAttribute("data-selected");
+      }
+    };
+    paint();
+    /* ⛔ AND REPAINTED ON EVERY TRANSACTION, because the attribute lives on an element the EDITOR
+     * owns and can replace at any time. Measured: pressing Escape to leave a box blurred the
+     * editor, the node view was rebuilt, and the ring vanished while the box was still selected —
+     * so "Escape backs out to the box being selected" silently did not happen. An effect keyed on
+     * React state alone cannot see a re-render the editor caused for its own reasons. */
+    editor.on("transaction", paint);
+    editor.on("focus", paint);
+    editor.on("blur", paint);
+    return () => { editor.off("transaction", paint); editor.off("focus", paint); editor.off("blur", paint); };
+  }, [editor, selection, docTick]);
+
+  const clearSelection = useCallback(() => {
+    setSelection((s) => (s.size ? new Set() : s));
+    setEditingId(null);
+  }, []);
+
+  /**
+   * The blank-page gesture, from press to release.
+   *
+   * ⛔ IT IS ONE HANDLER FOR BOTH OUTCOMES, deliberately. Two handlers racing to decide what a
+   * press meant is precisely the shape that made this gesture behave differently depending on
+   * invisible state, four rounds running.
+   */
+  const beginBlankGesture = useCallback((e) => {
+    const f = frame();
+    const from = toDoc(e.clientX, e.clientY);
+    if (!f || !from) return false;
+    const startClient = { x: e.clientX, y: e.clientY };
+    const additive = e.shiftKey;
+    let moved = false;
+
+    const onMove = (ev) => {
+      const outcome = gestureOutcome(startClient, { x: ev.clientX, y: ev.clientY });
+      if (outcome !== "select") return;              // still inside the slop — nothing has happened
+      moved = true;
+      const to = toDoc(ev.clientX, ev.clientY);
+      if (!to) return;
+      const rect = marqueeRect(from, to);
+      setBand(rect);
+      setSelection(applyMarquee(additive ? selRef.current : new Set(), boxesInMarquee(rect, boxesNow()), { additive }));
+    };
+
+    const onUp = (ev) => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+      setBand(null);
+      const outcome = gestureOutcome(startClient, { x: ev.clientX, y: ev.clientY });
+      if (outcome === "select") return;              // the selection is already set; place nothing
+      /* ⛔ BELOW THE THRESHOLD THIS IS A PLACE, AND IT IS THE UNCHANGED PLACE. */
+      if (!moved) {
+        clearSelection();
+        placeBlockAt(ev.clientX, ev.clientY);
+      }
+    };
+
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    return true;
+  }, [frame, toDoc, boxesNow, placeBlockAt, clearSelection]);
+
+  /** Dragging any SELECTED box moves the whole set, by one delta, as one undo step. */
+  const beginGroupDrag = useCallback((e, id) => {
+    const f = frame();
+    if (!f) return false;
+    const ids = new Set([...selRef.current].map(String));
+    if (!ids.has(String(id)) || ids.size < 2) return false;
+    const start = { x: e.clientX, y: e.clientY };
+    const startBoxes = boxesNow().filter((b) => ids.has(String(b.id)));
+    if (!startBoxes.length) return false;
+    e.preventDefault();
+    e.stopPropagation();
+
+    const onMove = (ev) => {
+      const dx = (ev.clientX - start.x) / f.scale;
+      const dy = (ev.clientY - start.y) / f.scale;
+      const moves = moveSelection(startBoxes, { dx, dy }, { maxX: f.dom.offsetWidth });
+      for (const m of moves) {
+        const el = f.dom.querySelector(`[data-anchor-id="${m.id}"]`);
+        if (el) { el.style.left = `${m.x}px`; el.style.top = `${m.y}px`; }
+      }
+    };
+    const onUp = (ev) => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+      const dx = (ev.clientX - start.x) / f.scale;
+      const dy = (ev.clientY - start.y) / f.scale;
+      if (!dx && !dy) return;                        // a press that never moved writes NOTHING
+      editor.commands.moveNoteAnchors(moveSelection(startBoxes, { dx, dy }, { maxX: f.dom.offsetWidth }));
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    return true;
+  }, [frame, boxesNow, editor]);
+
+  /** Arrow keys nudge the selection; Delete removes all of it, as one step. Escape clears. */
+  const selectionKeyDown = useCallback((e) => {
+    if (!editor || editor.isDestroyed || readOnly) return false;
+    const ids = [...selRef.current];
+    if (ids.length < 1) return false;
+    /* ⛔ WHILE THE CARET IS INSIDE A BOX, THE KEYS BELONG TO THE TEXT. Escape is the one exception
+     * — it is the way back OUT to the box — and getting this wrong would mean Delete eating a
+     * whole box while somebody was editing a word in it. */
+    if (editingRef.current) {
+      if (e.key !== "Escape") return false;
+      e.preventDefault();
+      setEditingId(null);
+      if (editor && !editor.isDestroyed) editor.commands.blur();
+      return true;
+    }
+    if (e.key === "Escape") { clearSelection(); return true; }
+    /* ⛔ UNDO IS FORWARDED, BECAUSE THE GESTURE THAT MADE THE SELECTION TOOK FOCUS AWAY. The
+     * press that starts a marquee is `preventDefault`ed so it cannot move the caret, which leaves
+     * `document.activeElement` on `<body>` — and Ctrl+Z on the body reaches nothing. Measured: a
+     * group move and a group delete were both correct in the document and could not be undone,
+     * which for a DESTRUCTIVE action is the worse half of the feature. Forwarding is deliberately
+     * narrower than focusing the editor here: focusing would put a live caret back in the page
+     * while boxes are still selected, so the next letter typed would land somewhere nobody asked
+     * for. This changes what UNDO reaches and nothing else. */
+    if ((e.ctrlKey || e.metaKey) && (e.key === "z" || e.key === "Z" || e.key === "y" || e.key === "Y")) {
+      e.preventDefault();
+      const redo = e.key === "y" || e.key === "Y" || e.shiftKey;
+      if (redo) editor.commands.redo(); else editor.commands.undo();
+      clearSelection();
+      return true;
+    }
+    if (e.key === "Delete" || e.key === "Backspace") {
+      e.preventDefault();
+      editor.commands.removeNoteAnchors(ids);
+      clearSelection();
+      /* ⛔ AND FOCUS GOES BACK TO THE DOCUMENT, WHICH IS WHAT MAKES THE DELETE UNDOABLE — the
+       * same defect, and the same fix, as the single box's × (B421489). Clearing the selection
+       * unbinds the window handler that forwarded Ctrl+Z, so without this the very next keypress
+       * had nowhere to go and a group delete could not be taken back. There is no selection left
+       * by this point, so a live caret is exactly right rather than a surprise. */
+      editor.commands.focus();
+      return true;
+    }
+    const d = nudgeDelta(e.key, { shift: e.shiftKey });
+    if (!d) return false;
+    e.preventDefault();
+    const f = frame();
+    const members = boxesNow().filter((b) => selRef.current.has(String(b.id)));
+    editor.commands.moveNoteAnchors(moveSelection(members, d, { maxX: f ? f.dom.offsetWidth : Infinity }));
+    return true;
+  }, [editor, readOnly, clearSelection, frame, boxesNow]);
+
+  /* ⛔ WHILE BOXES ARE SELECTED, THEIR KEYS ARE BOUND TO THE WINDOW — and that is a measured
+   * necessity, not a convenience. A marquee is drawn on blank page, and the press that starts it
+   * is `preventDefault`ed so it does not move the caret; the consequence is that when the band is
+   * released `document.activeElement` is `<body>`. Every key handler on the mat is therefore
+   * unreachable: measured after a real drag, Escape, the arrow keys and Delete all did nothing at
+   * all while three boxes sat visibly selected. A feature whose keyboard half silently does not
+   * exist is exactly the shape of defect this module keeps shipping.
+   *
+   * ⛔ IT IS BOUND ONLY WHILE A SELECTION EXISTS, and it declines while a FORM FIELD has focus, so
+   * the page title can still be typed in and arrowed through. The editor itself is deliberately
+   * NOT excluded: a live selection is the mode you are in, and clicking into the document clears
+   * it on the way (see the mat's press rule), so the two can never both be live by accident. */
+  useEffect(() => {
+    if (!selection.size) return undefined;
+    const onKey = (e) => {
+      const el = document.activeElement;
+      if (el && el.closest && el.closest("input, textarea, select")) return;
+      selectionKeyDown(e);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [selection, selectionKeyDown]);
+
   /* ⛔ ONE RULE FOR EVERY PRESS ON THE PAGE, AND IT IS ONE SENTENCE:
    *
    *      A PRESS BESIDE A LINE OF WRITING GOES INTO THAT LINE.
@@ -983,6 +1256,49 @@ export default function NoteEditor({
 
     const inBlock = el.closest(".planyr-anchor");
     if (inBlock) {
+      /* ⛔ A PRESS ON A BOX THAT IS PART OF A SELECTION MOVES THE WHOLE SELECTION (B421494), and
+       * a press on any other box CLEARS it — anything else leaves somebody dragging one box
+       * while nine still look selected. Shift toggles that box in or out instead. */
+      /* ⛔ THE TWO-STAGE MODEL, AND IT IS THE WHOLE OF B434416.
+       *
+       * His report, in his words: *"if I click on the box, I should be able to just press delete,
+       * but it doesn't seem like I can ever even click on the box."* He was exactly right, and
+       * measured: after a press the element carried the class `planyr-anchor` and NOTHING else.
+       * There was no such thing as a selected box, so there was nothing for Delete to act on and
+       * nothing for a control to hang off except the pointer happening to be over it.
+       *
+       *   press 1 on an unselected box  → SELECT IT. The caret does not enter; the box is now the
+       *                                   thing you have hold of, and Delete removes it.
+       *   press 2 on a selected box     → ENTER IT. The caret goes where you pressed and it is an
+       *                                   ordinary text box again.
+       *   Escape while editing          → back out to the box being selected.
+       *   Escape while selected         → deselect.
+       *
+       * ⛔ SHIFT STILL TOGGLES, and a press on a box that is part of a MULTI-selection still drags
+       * the whole set — those are checked first, because both are unambiguous. */
+      const id = inBlock.getAttribute("data-anchor-id");
+      if (id && e.shiftKey) {
+        e.preventDefault();
+        setEditingId(null);
+        setSelection((prev) => toggleSelection(prev, id, { additive: true }));
+        return;
+      }
+      if (id && selRef.current.has(String(id)) && selRef.current.size > 1) {
+        if (beginGroupDrag(e, id)) return;
+      }
+      if (id) {
+        const alreadySelected = selRef.current.has(String(id)) && selRef.current.size === 1;
+        if (!alreadySelected) {
+          /* Stage 1. Nothing is typed and no caret moves — this press is about the BOX. */
+          e.preventDefault();
+          setEditingId(null);
+          setSelection(new Set([String(id)]));
+          return;
+        }
+        /* Stage 2: it was already selected, so this press is about its words. Fall through to the
+         * ordinary text behaviour below, which is the browser's and must stay the browser's. */
+        setEditingId(String(id));
+      } else if (selRef.current.size) clearSelection();
       if (inBlock.getAttribute("data-empty") !== "1") return;   // it has words; the browser is right
       e.preventDefault();
       const pos = editor.view.posAtDOM(inBlock, 0);
@@ -1008,11 +1324,13 @@ export default function NoteEditor({
       return;
     }
 
-    // Blank space: the caret goes where the press went.
+    /* Blank space. ⛔ WHAT HAPPENS NEXT IS NOT DECIDED YET — a press that travels is a marquee
+     * and a press that does not is the unchanged placement. `beginBlankGesture` owns both, and
+     * the decision is made at mouse-UP against a measured distance. */
     e.preventDefault();
     e.stopPropagation();
-    placeBlockAt(e.clientX, e.clientY);
-  }, [editor, placeBlockAt]);
+    if (!beginBlankGesture(e)) placeBlockAt(e.clientX, e.clientY);
+  }, [editor, placeBlockAt, beginBlankGesture, beginGroupDrag, clearSelection]);
 
   /* ---- HOW BIG THE WRITING IS (NEW-3) ----------------------------------------------------
    *
@@ -1111,10 +1429,21 @@ export default function NoteEditor({
     if (!editor || editor.isDestroyed) return undefined;
     const dom = editor.view.dom;
     const measure = () => {
-      const blocks = [...dom.querySelectorAll(".planyr-anchor")].map((el) => ({
-        y: parseFloat(el.style.top) || 0,
-        height: el.offsetHeight,
-      }));
+      const nodes = [...dom.querySelectorAll(".planyr-anchor")];
+      /* ⛔ AND THE HORIZONTAL HALF OF THE SAME QUESTION (B421490). The vertical rule grows the page
+       * so a low block still has somewhere to be; there is no equivalent sideways, so a box wider
+       * than the room left to it hangs off the sheet — under the outline panel, which paints later
+       * and takes its presses. Same rule as placement: keep the left edge, spend the width. The
+       * stored width is not touched, so widening the window gives it straight back. */
+      const hostWidth = dom.clientWidth;
+      const blocks = nodes.map((el) => {
+        const x = parseFloat(el.getAttribute("data-anchor-x")) || parseFloat(el.style.left) || 0;
+        const w = parseFloat(el.getAttribute("data-anchor-w")) || parseFloat(el.style.width);
+        const fit = fitAnchorBox({ x, w, hostWidth });
+        if (Math.round(parseFloat(el.style.width)) !== fit.w) el.style.width = `${fit.w}px`;
+        if (Math.round(parseFloat(el.style.left)) !== fit.x) el.style.left = `${fit.x}px`;
+        return { y: parseFloat(el.style.top) || 0, height: el.offsetHeight };
+      });
       const need = anchorExtent(blocks);
       dom.style.minHeight = need ? `max(46vh, ${need}px)` : "";
     };
@@ -1123,6 +1452,12 @@ export default function NoteEditor({
      * block gets taller as you type and the page has to keep up in the same frame. */
     const ro = typeof ResizeObserver === "function" ? new ResizeObserver(measure) : null;
     if (ro) for (const el of dom.querySelectorAll(".planyr-anchor")) ro.observe(el);
+    /* ⛔ AND THE EDITOR ITSELF IS OBSERVED, not only the blocks inside it (B421490). The width fit
+     * above is a function of the EDITOR's width, and nothing was watching that: a block only
+     * re-measured when its own text reflowed, so narrowing the window left every box at the width
+     * a wider window had allowed. That is the state in which a box's controls end up under the
+     * outline panel. */
+    if (ro) ro.observe(dom);
     return () => ro?.disconnect();
   }, [editor, docTick]);
 
@@ -1297,6 +1632,12 @@ export default function NoteEditor({
            the extension's keymap because the payload is the SYSTEM clipboard, which only the
            async clipboard API can read; a ProseMirror keybinding cannot await one. */
         onKeyDown={(e) => {
+          /* ⛔ THE SELECTION'S KEYS ARE **NOT** HANDLED HERE, and that is deliberate (B434416).
+             They were, briefly, and the result was that one Escape ran the rule TWICE — once from
+             this handler and once from the window binding above — so a single press left editing
+             AND cleared the selection in the same keystroke, which made the two-stage model
+             impossible to use. The window binding already covers every focus state including this
+             one, so this handler must not also claim them. */
           /* ⛔ ESCAPE ABANDONS A BLOCK YOU HAVE NOT TYPED IN. The caret leaving takes one away
              on its own; this is the way out that does not require going somewhere else first,
              and it is the one somebody reaches for when they realise they pressed by mistake.
@@ -1353,7 +1694,15 @@ export default function NoteEditor({
         <div
           data-testid="note-sheet"
           data-zoom={zoom}
-          style={{ maxWidth: 820, width: "100%", flex: "1 0 auto", margin: 0, padding: "22px 20px 96px 13px", zoom }}
+          /* ⛔ THE READING COLUMN HAS A FLOOR, AND THE PANELS BESIDE IT YIELD FIRST (B421492).
+             Outline and History were each `flex: none` at a fixed width, so on a narrow window
+             the SHEET absorbed the whole shortfall: opening History took the page from 424px to
+             **156px** — the same sliver B391075 measured for a sketch inside a box — and the
+             header's own status line then painted 96px outside it. A page narrower than a
+             sentence is not a page. So the sheet may shrink but never below a readable column,
+             and the two panels shrink before it does; if even that is not enough the ROW
+             scrolls, which is honest, rather than the document quietly disappearing. */
+          style={{ maxWidth: 820, width: "100%", flex: "1 1 auto", minWidth: 260, margin: 0, padding: "22px 20px 96px 13px", zoom }}
         >
           <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
             <input
@@ -1449,7 +1798,27 @@ export default function NoteEditor({
             >{badge.text}</span>
           </div>
 
-          <EditorContent editor={editor} />
+          {/* ⛔ THE BAND IS DRAWN IN THE EDITOR'S OWN FRAME, which is the frame its coordinates
+              were measured in — anywhere else and the rectangle drifts from the boxes it is
+              selecting the moment anything above it changes height. `pointerEvents: none` so it
+              cannot take the presses of the gesture drawing it; chrome that eats its own gesture
+              is this module's most-repeated defect. */}
+          <div style={{ position: "relative" }}>
+            <EditorContent editor={editor} />
+            {band ? (
+              <div
+                data-testid="note-marquee"
+                aria-hidden="true"
+                style={{
+                  position: "absolute", pointerEvents: "none", zIndex: 3,
+                  left: band.x, top: band.y, width: band.w, height: band.h,
+                  border: "1px solid var(--accent-notes)",
+                  background: "color-mix(in srgb, var(--accent-notes) 12%, transparent)",
+                  borderRadius: 3,
+                }}
+              />
+            ) : null}
+          </div>
         </div>
       </div>
 
