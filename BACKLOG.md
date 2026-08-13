@@ -3170,7 +3170,7 @@ physical row is a later polish," so **B104** is that remaining polish for the *m
   now has a guard it never had, even though it never carried the bug.
 - **MEASURED ON THE REAL PAGE, pre-fix**, on the owner's own row shape: `CCID3: Lift Station & Force Main
   Approval` rendered **`08/07/26 · 10/02/26 · 0d`** — forty working days of permitting printed as a
-  zero-day milestone, in the grid and in the export. Post-fix the same cell reads **`40d`**, while the
+  zero-day milestone, in the grid and in the cross-project view. Post-fix the same cell reads **`40d`**, while the
   leaf beside it still reads the unit it was typed in (`30d`).
 - **READS THAT WERE ALREADY CORRECT** (checked, not assumed): `cascadeDates` (guarded by B443248's parent
   skip) · `durTooltip` (only called when `!hasChildren`) · Gantt bar geometry and `buildGanttSVG` /
@@ -3201,6 +3201,7 @@ physical row is a later polish," so **B104** is that remaining polish for the *m
 - Files: `public/sequence/index.html`, `ui-audit/stress/scheduler-engine.mjs` (verbatim mirror),
   `test/schedulerEngine.test.js`, `ui-audit/verify-summary-pred-dates.mjs`,
   `ui-audit/verify-schedule-export-duration.mjs` (new — the export artifact check).
+  `test/schedulerEngine.test.js`, `ui-audit/verify-summary-pred-dates.mjs`.
 ### B456208 — The Owner field turned any typo into a person, silently `[Scheduler]` (feature) #scheduler #ui #persistence  *(owner chat block 2026-08-13, arrived as the answer to a question this session raised off the B443536 sweep — his instruction, verbatim: *"YES - make it ask before adding a new contact. Build it. Right now that field silently turns a typo into a person. That is the same shape as everything else this repo keeps producing: something that looks like an answer without anyone having decided it."* Minted **B456208 / V251152** LATE via `git fetch origin main && npm run next-id -- --against-main`, from this branch's reserved block B456208–B456223 · V251152–V251167; code and tests keep the provisional `NEW-1` label. **DEDUPE-FIRST — searched Open / ⏳ Verify / Done across `ContactPicker`, `commitTyped`, `ensureContacts`, `contacts`, `registry`, `auto-add`, `confirm`, `B443536`, `B291538`, `B865`, `B418`.** **B443536** is the parent — it fixed the CARET in this same component and its data sweep is what exposed this — but it is a different defect (a character eaten by a selection) and is NOT re-opened; this is the create-on-commit behaviour beside it. Nothing else owns contact creation. Net-new.)*
 `[x]` **SHIPPED.** `public/sequence/index.html` — `ContactPicker` asks before creating.
 - Verify: **live** — `V251152`, `Blocker: auth` + `real-data`. Narrowly scoped: the whole interaction is proven here (21 browser assertions, mutation-proven). What the sandbox cannot settle is whether it NAGS in real use against his own 17-contact registry — and a guard that nags gets switched off, which would leave things worse than before.
