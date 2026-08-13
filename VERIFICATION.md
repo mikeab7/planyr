@@ -113,6 +113,33 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V258992 — B464048: a keystroke typed in an inspector field can no longer delete the plan — the SIGNED-IN leg `Blocker: auth`
+
+**Everything logged-out is proven here, on his own plan, and is NOT what this entry is waiting for.**
+`ui-audit/fixtures/fm359-concept-a.json` is his real FM 359 "Concept A" pulled verbatim from
+production (site `smsrpaiqu5sv`), and three instruments drive it in a real browser:
+`diagnose-key-scope-paths.mjs` re-measures all eight arms (was 7 of 8 deleting Building 1 and its
+eight bonded elements, 18 → 9; now 0 of 8) · `verify-delete-undo-restores.mjs` proves **32/32** that
+Ctrl+Z brings Building 1 back property-for-property through BOTH delete routes, drawn in the same
+place to a tenth of a pixel, surviving a reload — and its `--no-undo` self-test takes 26 of those 32
+red, so it can genuinely tell recovery from permanent loss · `e2e/inspector-key-scope.spec.js` (10)
+is **mutation-proven RED on the pre-fix build, 7 failed / 3 passed**, the 3 being its controls.
+
+**WHAT IS STILL PENDING, and it is one path.** Every measurement above reads the LOGGED-OUT store.
+On a signed-in plan the same delete and the same undo travel through `elementSync` — the atomic
+group commit, the pending journal, the rows-canonical seed — and the sandbox cannot sign in (the
+proxy CORS-blocks Supabase auth). So the signed-in steps are:
+
+1. Open FM 359 RD, Fulshear → **Concept A**, signed in, on planyr.io.
+2. Select **Building 1**, open Properties, click into **Depth (ft)**, press **Enter**, then press
+   **Backspace**. Expected: the building is still there, and a note reads *"The keyboard is still on
+   the panel. Click the plan, then press Delete."*
+3. Repeat with **Escape**, with **Tab**, and after clicking the **▲** stepper.
+4. Click the drawing, press **Delete** — the building MUST still delete (the control; a guard that
+   breaks deleting is worse than the bug).
+5. Undo it with **Ctrl+Z** and confirm the truck courts, both bump-outs, the dock face, both parking
+   rows and both sidewalks are all back — then **reload** and confirm they are still back, which is
+   the leg that proves the restore reached the server rather than only the tab.
 ### V266993 — B472049: a completed split no longer leaves the parent drawn `Blocker: real-data`
 
 **Proven here:** `test/splitIntegrity.test.js` (20) — conservation, union-outline equality and no
