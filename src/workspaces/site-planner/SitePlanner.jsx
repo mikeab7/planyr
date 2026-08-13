@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo, memo, Fragment, lazy, Suspense } from "react";
+import { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo, useId, memo, Fragment, lazy, Suspense } from "react";
 import { flushSync } from "react-dom";
 import ContextMenu from "../../shared/ui/ContextMenu.jsx";
 import L from "leaflet";
@@ -26053,7 +26053,15 @@ function AlignIcon({ dir }) {
 // behind a visible <Field> label — e.g. the Custom width… entry inside the Road flyout.
 function NumInput({ value, onCommit, min, max, style, placeholder, step, coarse, ariaLabel, allowClear = false }) {
   const [draft, setDraft] = useState(value == null ? "" : String(value));
+  /* The one-line note shown when a commit did not take the number as typed (rounded / clamped).
+   * Cleared by the next keystroke — it reports THIS commit, never a stale one. */
+  const [altered, setAltered] = useState(null);
+  const msgId = useId();
   const editing = useRef(false);
+  /* What we last handed to `onCommit`, so the effect below can notice the caller handing back
+   * something different. Cleared once compared — it is about ONE commit, never a standing state. */
+  const committedRef = useRef(null);
+  const fmtNum = (n) => String(Math.round(n * 1000) / 1000);
   useEffect(() => { if (!editing.current) setDraft(value == null ? "" : String(value)); }, [value]);
   // Clamp a candidate value the same way for a typed commit AND a stepper nudge: floor at min,
   // ceil at max (default 1e7 bounds the absurd). Reject NaN AND ±Infinity here — parseFloat("1e999")
@@ -26067,6 +26075,7 @@ function NumInput({ value, onCommit, min, max, style, placeholder, step, coarse,
   };
   const commit = () => {
     editing.current = false;
+    setAltered(null);
     // B901 — an intentionally EMPTIED field is a CLEAR, not a typo: for a field whose caller
     // opted in (allowClear — every call site already null-coalesces its own onCommit), commit
     // null so the value actually clears. Without this branch an empty draft fell into the
@@ -26082,9 +26091,42 @@ function NumInput({ value, onCommit, min, max, style, placeholder, step, coarse,
     }
     const v = clampNum(parseFloat(draft));
     if (v == null) { setDraft(value == null ? "" : String(value)); return; }
+    /* ⛔ B464051 / LOUD-FAILURE — IF WE CHANGED HIS NUMBER, SAY SO, IN THE MOMENT. Measured on
+     * the real inspector before this line existed: type `613.7` into Depth and the field commits
+     * 613.7, then re-renders showing **614** — because every dimension call site passes
+     * `value={Math.round(...)}`, so the round-trip silently rounds. Type `200000` and `clampNum`
+     * silently returns MAX_DIM (100,000). Neither said anything. Silently swapping a developer's
+     * dimension for a different one is exactly what LOUD-FAILURE exists to stop, and it is the
+     * honest half of the owner's "it's not letting me": sometimes it genuinely was not taking
+     * what he typed, it was taking something near it.
+     *
+     * Reported, never prevented — the clamp and the round are both correct behaviour. */
+    const typed = parseFloat(draft);
+    const shown = Math.abs(v - typed) > 1e-9 ? v : null;
+    setAltered(shown != null ? `Using ${fmtNum(v)}` : null);
     setDraft(String(v));
+    committedRef.current = v;
     if (v !== value) onCommit(v);
   };
+  /* ⛔ B464051, THE OTHER HALF — AND THE FIRST GUESS ABOUT IT WAS WRONG, which is why it is worth
+   * writing down. It looked like these fields silently ROUND: every dimension call site passes
+   * `value={Math.round(...)}`, so type `613.7` into Depth and 614 is what you see afterwards. The
+   * browser measurement says otherwise — the MODEL stores 613.7 exactly; nothing alters the number
+   * the user committed. What is rounded is the DISPLAY, so the figure on screen stops being the
+   * figure in the drawing, silently. That is a smaller problem than a swapped dimension and a real
+   * one all the same, and it deserves the true words rather than the dramatic ones.
+   *
+   * Detected by watching what the CALLER hands back: we know what we committed, so a `value` that
+   * returns different is the display disagreeing with the model, whatever caused it. No call site
+   * had to be changed and no rounding was removed — the rounding is deliberate. */
+  useEffect(() => {
+    if (committedRef.current == null || value == null) return;
+    const sent = committedRef.current;
+    committedRef.current = null;
+    if (Math.abs(value - sent) > 1e-9) setAltered(`Showing ${fmtNum(value)}`);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value]);
+
   // B618 — stepper / arrow-key nudge (opt-in via `step`). Nudges about the COMMITTED value
   // (falls back to the current draft when the prop isn't yet a number) so repeated presses never
   // drift, rounds to kill float dust (0.1+0.2 → 0.30000000000000004), and commits immediately.
@@ -26094,6 +26136,7 @@ function NumInput({ value, onCommit, min, max, style, placeholder, step, coarse,
     const v = clampNum(Math.round((base + d) * 1000) / 1000);
     if (v == null) return;
     editing.current = false;
+    setAltered(null); // a stepper's own clamp is self-evident; never leave a stale note behind it
     setDraft(String(v));
     if (v !== value) onCommit(v);
   };
@@ -26119,13 +26162,18 @@ function NumInput({ value, onCommit, min, max, style, placeholder, step, coarse,
     return null;
   })();
 
+  /* The one message this control shows: what is WRONG with the value, or what we DID to it.
+   * They are mutually exclusive by construction — a rejected draft never commits, so it can never
+   * also have been rounded. */
+  const note = invalidReason || altered;
   const input = (
     <input style={style} value={draft} placeholder={placeholder} inputMode="decimal" aria-label={ariaLabel}
       aria-invalid={invalidReason ? "true" : undefined}
-      aria-errormessage={invalidReason || undefined}
-      title={invalidReason || undefined}
+      /* ⛔ `aria-describedby`, not `aria-errormessage`: it is universally supported, and it also
+       * carries the non-error "Using 614" note, which is not an error message at all. */
+      aria-describedby={note ? msgId : undefined}
       onFocus={() => { editing.current = true; }}
-      onChange={(e) => setDraft(e.target.value)}
+      onChange={(e) => { setAltered(null); setDraft(e.target.value); }}
       onBlur={commit}
       onKeyDown={(e) => {
         /* NEW-1 — ENTER COMMITS IN PLACE AND KEEPS THE CARET. It used to `blur()`, which is the
@@ -26153,20 +26201,49 @@ function NumInput({ value, onCommit, min, max, style, placeholder, step, coarse,
       }}
     />
   );
-  /* ⛔ COLOUR IS NEVER THE ONLY CUE (owner requirement, and blue-vs-red is precisely the pair a
-   * red-green colour-blind reader cannot separate). Four independent signals carry this state: the
-   * ⚠ glyph, its accessible name, `aria-invalid` on the input itself, and — last — the colour. */
-  const warnGlyph = invalidReason ? (
-    <span data-testid="numinput-invalid" role="img" aria-label={`Invalid: ${invalidReason}`} title={invalidReason}
-      style={{ fontSize: 12, lineHeight: 1, color: "var(--danger)", cursor: "help", userSelect: "none" }}>⚠</span>
+  /* ⛔ COLOUR IS NEVER THE ONLY CUE — WCAG 1.4.1 (Use of Color), and it is not satisfied by a
+   * coloured border, nor by an icon on its own: the user has to be able to tell WHICH field is
+   * wrong and WHAT is wrong with it. Before this, Planyr had no invalid state whatsoever, so an
+   * unusable value was reported by nothing at all — an accessibility failure independent of the
+   * bug that surfaced it. Four signals now, and the colour is the last of them:
+   *   1  a short TEXT MESSAGE naming the problem
+   *   2  `aria-describedby` tying that message to the input, so a screen reader reads it
+   *   3  an icon beside the field (⚠ for a refusal, ✎ for "we adjusted it")
+   *   4  the border — heavier AND red, so it differs from focus in weight as well as hue
+   * The FOCUS ring is untouched and stays the brand accent: a bare ring with no message means you
+   * are simply typing, which is unambiguous once every real error carries words. */
+  const glyph = note ? (
+    <span data-testid={invalidReason ? "numinput-invalid" : "numinput-altered"} aria-hidden="true"
+      style={{ fontSize: 11, lineHeight: 1, color: invalidReason ? "var(--danger-text)" : "var(--text-secondary)", userSelect: "none" }}>
+      {invalidReason ? "⚠" : "✎"}
+    </span>
   ) : null;
 
-  if (step == null) {
-    if (!warnGlyph) return input;
-    return (
-      <span data-field-group="1" style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>{input}{warnGlyph}</span>
-    );
-  }
+  /* PANEL-BREVITY: ONE short line, and only while there is something to say — the default view of
+   * every panel that uses this control is byte-identical to before. */
+  const noteLine = note ? (
+    <span id={msgId} data-testid="numinput-note" role={invalidReason ? "alert" : "status"}
+      style={{ fontSize: 10.5, lineHeight: 1.25, textAlign: "right", maxWidth: 168,
+        color: invalidReason ? "var(--danger-text)" : "var(--text-secondary)" }}>
+      {glyph} {note}
+    </span>
+  ) : null;
+
+  /* ⛔ THE WRAPPER IS UNCONDITIONAL, AND THAT IS LOAD-BEARING. The first cut returned the bare row
+   * when there was nothing to say and a wrapped column when there was — so the moment a message
+   * appeared, React saw a different tree shape at that position, REMOUNTED the <input>, and the
+   * field lost focus mid-keystroke. Typing `-5` left `-` in the box and dropped the `5`: a control
+   * that genuinely stops accepting input the instant it has something to tell you, which is a
+   * crueller version of the very complaint this work started from. Caught by the browser harness,
+   * invisible to every unit test. Same family as MODULE-SCOPE-COMPONENTS: keep the tree stable and
+   * let the CONTENT change. */
+  const stack = (row) => (
+    <span data-field-group="1" style={{ display: "inline-flex", flexDirection: "column", alignItems: "flex-end", gap: noteLine ? 3 : 0 }}>
+      {row}{noteLine}
+    </span>
+  );
+
+  if (step == null) return stack(input);
   // preventDefault on mousedown keeps the input focused so a click nudges rather than firing a
   // blur-commit on a half-typed draft first (same trick as RotationStepper's spinner).
   const spinBtn = {
@@ -26174,10 +26251,9 @@ function NumInput({ value, onCommit, min, max, style, placeholder, step, coarse,
     lineHeight: 1, border: BORDER_1, borderRadius: 4,
     background: SURF_RAISED, color: "var(--text-secondary)", cursor: "pointer", fontFamily: "inherit",
   };
-  return (
-    <span data-field-group="1" style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+  return stack(
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
       {input}
-      {warnGlyph}
       <span style={{ display: "flex", flexDirection: "column", gap: 2 }}>
         <button type="button" style={spinBtn} aria-label="Increase" title="Increase (↑ · Shift for a larger step)"
           onMouseDown={(e) => e.preventDefault()} onClick={() => nudge(step)}>▲</button>

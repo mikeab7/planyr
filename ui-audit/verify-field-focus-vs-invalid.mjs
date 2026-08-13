@@ -1,25 +1,35 @@
-/* NEW-1 — A FOCUSED FIELD AND A REJECTED FIELD MUST NOT LOOK ALIKE. Proven on the rendered element.
+/* B464049 / B464051 — AN ERROR MUST NOT LOOK LIKE ORDINARY FOCUS, and a number the app CHANGED
+ * must say so. Proven on the rendered element, in both themes.
  *
- * The owner reported that the Depth box in the building inspector "wasn't letting" him type, and
- * sent a frame of it wearing a red outline. ⛔ NOTHING WAS REJECTING HIS INPUT — driven every way it
- * can be driven, the field took the value every time (ui-audit/diagnose-inspector-key-leak.mjs).
- * What he was looking at was the FOCUS ring: `--accent` (#C2410C light / #F26B3A dark) with a soft
- * accent halo, measuring **14.4 / 13.4 ΔE00** from this app's own error colour `--danger`. A plainly
- * different hue measures ~49 by the same metric. Red means rejected; the field was reporting an
- * error it had not had.
+ * The owner reported the Depth box "wasn't letting" him type and sent a frame of it outlined in
+ * orange-red. ⛔ NOTHING WAS REJECTING HIS INPUT — every drive path took the value.
  *
- * ⛔ THIS READS THE COMPUTED STYLE OFF THE LIVE ELEMENT, never the stylesheet. A token can be
- * defined correctly and lose to a `!important`, a local override or a theme block that never
- * applies — and the thing the owner sees is the rendered pixel, not the declaration.
+ * ⛔ AND THE FIRST FIX FOR THAT WAS THE WRONG END OF THE PROBLEM, which is why this harness is
+ * shaped the way it is. It concluded the FOCUS ring was impersonating an error (`--accent` sits
+ * ~14 ΔE00 from `--danger`) and moved focus to blue across ~194 controls. Orange-red IS Planyr's
+ * accent — the Select tool, the "Select parcels: on" pill, every active control — so a field
+ * glowing in it while you type is normal, and restyling every text box in the app is a large
+ * visible change aimed at something that was never the cause. **The defect is the ERROR STATE:**
+ * this app had no invalid state at all, so an unusable value was reported by nothing — no colour,
+ * no icon, no message. That is a WCAG 1.4.1 (Use of Color) failure in its own right, independent
+ * of the bug that surfaced it, and identifying an error by a coloured border alone would not fix
+ * it either.
  *
- * Six things are asserted, in BOTH themes, with both states on screen at once:
- *   1  the focused border is BLUE, and is not the accent
- *   2  the invalid border is the DANGER red
- *   3  focused vs invalid are far apart perceptually (ΔE00, the repo's own CIEDE2000)
- *   4  the invalid state BEATS focus — a field you are still typing in keeps saying it is refused
- *   5  NON-COLOUR CUES exist: aria-invalid, an accessible error message, and a visible ⚠ glyph
- *      (colour alone fails a red-green colour-blind reader, and blue-vs-red is that exact pair)
- *   6  the valid, unfocused field is untouched
+ * ⛔ THIS READS THE COMPUTED STYLE OFF THE LIVE ELEMENT, never the stylesheet — a token can be
+ * right and still lose to a `!important` or a specificity it cannot see. That is not theoretical
+ * here: the invalid rule's first cut set every token correctly, put `aria-invalid` on the element
+ * and rendered its icon, and the border stayed the focus colour, because the focus rule's three
+ * `:not()` arguments out-specify a bare `[aria-invalid]:focus` wherever it sits in the file.
+ *
+ * Asserted in BOTH themes:
+ *   1  the FOCUS ring is still the brand accent — the revert is real, not claimed
+ *   2  a rejected value differs from focus in HUE **and in WEIGHT** (a heavier border), so the two
+ *      never read alike even before the words are read
+ *   3  it carries a SHORT TEXT MESSAGE naming what is wrong, tied to the input by aria-describedby
+ *   4  …and an icon, and `aria-invalid` — four cues, colour last (WCAG 1.4.1)
+ *   5  a value the app ROUNDED or CLAMPED says so in the moment (LOUD-FAILURE), with its own
+ *      non-error wording, and is never dressed as a rejection
+ *   6  a valid, unfocused field is untouched, and typing a good value clears the state in place
  *
  * Run:  npm run build && npx vite preview --port 4184   (separate shell)
  *       BASE_URL=http://localhost:4184/ node ui-audit/verify-field-focus-vs-invalid.mjs
@@ -81,41 +91,54 @@ async function open(browser, theme) {
   return { ctx, page };
 }
 
-/** The two number inputs in the inspector: Length (the control) and Depth (the reported field). */
-async function fields(page) {
-  const grab = async (label) => {
-    const h = await page.evaluateHandle((lbl) => {
-      for (const row of document.querySelectorAll("div")) {
-        const s = row.firstElementChild;
-        if (s && s.tagName === "SPAN" && (s.textContent || "").trim() === lbl) { const i = row.querySelector("input"); if (i) return i; }
-      }
-      return null;
-    }, label);
-    const el = h.asElement();
-    if (!el) throw new Error(`no "${label}" input in the inspector`);
-    return el;
-  };
-  return { depth: await grab("Depth (ft)"), length: await grab("Length (ft)") };
+/* ⛔ THE FIELD IS RE-RESOLVED ON EVERY READ, NEVER HELD. When a message appears the control
+ * re-renders into a different wrapper, so an `ElementHandle` grabbed earlier is DETACHED — and a
+ * detached node answers `getComputedStyle` with empty strings and `inputValue` with junk, which
+ * reads as "the style did not apply" rather than as "you are asking a dead node". This harness
+ * reported exactly that on its first run against the corrected build (borderColor "", value "-").
+ * Same family as the undisposed-handle contamination B1439 records. */
+const findInput = (page, label) => page.evaluateHandle((lbl) => {
+  for (const row of document.querySelectorAll("div")) {
+    const s = row.firstElementChild;
+    if (s && s.tagName === "SPAN" && (s.textContent || "").trim() === lbl) { const i = row.querySelector("input"); if (i) return i; }
+  }
+  return null;
+}, label);
+
+async function clickField(page, label) {
+  const h = await findInput(page, label);
+  const el = h.asElement();
+  if (!el) throw new Error(`no "${label}" input in the inspector`);
+  await el.click();
+  await el.dispose();
 }
 
 /** What the element ACTUALLY renders as, plus the accessibility state riding with it. */
-const read = (el) => el.evaluate((n) => {
+const readField = (page, label) => page.evaluate((lbl) => {
+  let n = null;
+  for (const row of document.querySelectorAll("div")) {
+    const s = row.firstElementChild;
+    if (s && s.tagName === "SPAN" && (s.textContent || "").trim() === lbl) { const i = row.querySelector("input"); if (i) { n = i; break; } }
+  }
+  if (!n) return null;
   const cs = getComputedStyle(n);
+  const id = n.getAttribute("aria-describedby");
+  const m = id && document.getElementById(id);
   return {
+    value: n.value,
     borderColor: cs.borderTopColor,
-    boxShadow: cs.boxShadow,
+    borderWidth: cs.borderTopWidth,
     ariaInvalid: n.getAttribute("aria-invalid"),
-    ariaErrorMessage: n.getAttribute("aria-errormessage"),
-    title: n.getAttribute("title"),
+    describedBy: id,
+    describedText: m ? m.textContent.trim() : null,
   };
-});
+}, label);
 
 const browser = await chromium.launch({ executablePath: EXEC, args: ["--no-sandbox", "--ignore-certificate-errors"] });
 
 for (const theme of ["light", "dark"]) {
   console.log(`\n=== ${theme} theme — the two states side by side on the real inspector ===`);
   const { ctx, page } = await open(browser, theme);
-  const { depth, length } = await fields(page);
 
   /* The tokens as the ROOT actually resolves them, so the ΔE00 claims in the CSS comment and in the
    * backlog are re-measured every run rather than trusted. */
@@ -126,47 +149,51 @@ for (const theme of ["light", "dark"]) {
   });
 
   // STATE 1 — valid and unfocused (the control).
-  const resting = await read(length);
+  const resting = await readField(page, "Length (ft)");
 
   // STATE 2 — focused, valid. This is what he was looking at.
-  await depth.click();
+  await clickField(page, "Depth (ft)");
   await page.waitForTimeout(200);
-  const focused = await read(depth);
+  const focused = await readField(page, "Depth (ft)");
 
   // STATE 3 — genuinely rejected. Depth is min 1 / max MAX_DIM, so a negative is really refused.
   await page.keyboard.press("Control+A");
   await page.keyboard.type("-5");
   await page.waitForTimeout(250);
-  const invalid = await read(depth);
-  const glyph = page.locator('[data-testid="numinput-invalid"]').first();
-  const glyphSeen = await glyph.isVisible().catch(() => false);
-  const glyphName = glyphSeen ? await glyph.getAttribute("aria-label") : null;
+  const invalid = await readField(page, "Depth (ft)");
 
   const cFocus = rgb(focused.borderColor), cInvalid = rgb(invalid.borderColor);
   const cAccent = rgb(tokens.accent), cDanger = rgb(tokens.danger);
 
-  ok(`${theme}: the FOCUSED border is blue, not the accent`,
-    isBlueish(cFocus) && de(cFocus, cAccent) > 20,
-    `border ${focused.borderColor} · ΔE00 from --accent ${de(cFocus, cAccent)}`);
+  ok(`${theme}: the FOCUS ring is still the BRAND ACCENT (the revert is real)`,
+    de(cFocus, cAccent) < 3,
+    `border ${focused.borderColor} · ΔE00 from --accent ${de(cFocus, cAccent)} · width ${focused.borderWidth}`);
 
-  ok(`${theme}: the REJECTED border is the danger red`,
-    isRedish(cInvalid) && de(cInvalid, cDanger) < 3,
+  ok(`${theme}: a REJECTED value is the danger red`,
+    de(cInvalid, cDanger) < 3,
     `border ${invalid.borderColor} · ΔE00 from --danger ${de(cInvalid, cDanger)}`);
 
-  const sep = de(cFocus, cInvalid);
-  ok(`${theme}: focused and rejected are unmistakably different`, sep > 35,
-    `ΔE00 ${sep} between the two states (the OLD focus-vs-danger pair measured ${theme === "light" ? "14.39" : "13.36"})`);
+  /* ⛔ WEIGHT, not only hue — the two states are both warm here by design, so the error must be
+   * legible as different before any colour is judged. */
+  const wFocus = parseFloat(focused.borderWidth), wInvalid = parseFloat(invalid.borderWidth);
+  ok(`${theme}: …and differs from focus in WEIGHT as well as hue`,
+    wInvalid > wFocus,
+    `focus ${focused.borderWidth} → rejected ${invalid.borderWidth} (ΔE00 between them ${de(cFocus, cInvalid)})`);
 
-  ok(`${theme}: rejected BEATS focused — the field is still focused and still says refused`,
-    isRedish(cInvalid),
-    `still focused: ${await page.evaluate(() => document.activeElement.tagName)} · border ${invalid.borderColor}`);
+  ok(`${theme}: the rejection carries a SHORT TEXT MESSAGE, tied to the input`,
+    invalid.ariaInvalid === "true" && !!invalid.describedBy && /Smallest allowed is 1/.test(invalid.describedText || ""),
+    `aria-invalid=${invalid.ariaInvalid} · aria-describedby→ "${invalid.describedText}"`);
 
-  ok(`${theme}: NON-COLOUR cues carry the state`,
-    invalid.ariaInvalid === "true" && !!invalid.ariaErrorMessage && glyphSeen && /Invalid/i.test(glyphName || ""),
-    `aria-invalid=${invalid.ariaInvalid} · message "${invalid.ariaErrorMessage}" · ⚠ visible=${glyphSeen} named "${glyphName}"`);
+  ok(`${theme}: the message is ONE short line (PANEL-BREVITY)`,
+    (invalid.describedText || "").length <= 60 && !(invalid.describedText || "").includes("\n"),
+    `${(invalid.describedText || "").length} chars`);
+
+  ok(`${theme}: an icon rides with it — colour is the LAST cue, never the only one`,
+    await page.locator('[data-testid="numinput-invalid"]').first().isVisible().catch(() => false),
+    "⚠ rendered inside the message line");
 
   ok(`${theme}: a valid, unfocused field is untouched and carries no error state`,
-    resting.ariaInvalid == null && !isRedish(rgb(resting.borderColor)),
+    resting.ariaInvalid == null && resting.describedBy == null && de(rgb(resting.borderColor), cDanger) > 20,
     `border ${resting.borderColor}`);
 
   /* THE RECORD: the same two rows shot in each state, so the owner can see what he approved.
@@ -183,19 +210,46 @@ for (const theme of ["light", "dark"]) {
     return null;
   });
   if (clip) await page.screenshot({ path: `${OUT}field-rejected-${theme}.png`, clip });
+
   await page.keyboard.press("Control+A");
   await page.keyboard.type("613");
   await page.waitForTimeout(250);
-  const refocused = await read(depth);
-  ok(`${theme}: typing a valid value CLEARS the rejected state in place`,
-    refocused.ariaInvalid == null && isBlueish(rgb(refocused.borderColor)),
+  const refocused = await readField(page, "Depth (ft)");
+  ok(`${theme}: typing a valid value CLEARS the state in place`,
+    refocused.ariaInvalid == null && refocused.describedBy == null && de(rgb(refocused.borderColor), cAccent) < 3,
     `border ${refocused.borderColor} · aria-invalid=${refocused.ariaInvalid}`);
   if (clip) await page.screenshot({ path: `${OUT}field-focused-${theme}.png`, clip });
+
+  /* ⛔ B464051 — THE SILENT ALTERATION, measured rather than argued. Every dimension call site
+   * passes `value={Math.round(...)}`, so a decimal round-trips to a different number; and
+   * `clampNum` silently returns MAX_DIM for anything larger. Both are correct behaviour and
+   * neither used to be reported. */
+  for (const [typed, stored, note, why] of [
+    ["200000", "100000", "Using 100000", "CLAMPED — the committed value really is changed"],
+    ["613.7", "613.7", "Showing 614", "stored EXACTLY; it is the DISPLAY that rounds"],
+  ]) {
+    await clickField(page, "Depth (ft)");
+    await page.keyboard.press("Control+A");
+    await page.keyboard.type(typed);
+    await page.keyboard.press("Enter");
+    await page.waitForTimeout(400);
+    const after = await readField(page, "Depth (ft)");
+    const model = await page.evaluate((id) => {
+      const m = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+      const site = m[Object.keys(m)[0]] || {};
+      const e = (site.els || []).find((x) => x.id === id);
+      return e ? e.h : null;
+    }, B1);
+    ok(`${theme}: ${typed} — ${why}, and the app SAYS SO`,
+      String(model) === stored && new RegExp(note).test(after.describedText || "") && after.ariaInvalid == null,
+      `model holds ${model} · note "${after.describedText}" · aria-invalid=${after.ariaInvalid} (a change is not a rejection)`);
+    if (clip && typed === "613.7") await page.screenshot({ path: `${OUT}field-altered-${theme}.png`, clip });
+  }
 
   await ctx.close();
 }
 
 await browser.close();
 const failed = results.filter((r) => !r.pass);
-console.log(`\n  ${results.length - failed.length}/${results.length} checks passed · shots in ui-audit/screens/field-{focused,rejected}-{light,dark}.png`);
+console.log(`\n  ${results.length - failed.length}/${results.length} checks passed · shots in ui-audit/screens/field-{focused,rejected,altered}-{light,dark}.png`);
 if (failed.length) { console.log(`  FAILED: ${failed.map((f) => f.n).join(" · ")}`); process.exit(1); }
