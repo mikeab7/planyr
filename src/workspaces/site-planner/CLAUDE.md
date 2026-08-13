@@ -912,6 +912,29 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   does not exist until the gesture is half-finished. ⛔ And a harness must stamp `clickCount` 1 then 2 or
   Chromium synthesises **no native `dblclick` at all** — two bare down/up pairs leave the whole root-resolver
   path unexercised behind a full green score, which is exactly how this survived.
+- **⛔ `dragGate.js` — THE click-vs-drag gate. Every `drag.current` that MOVES existing geometry
+  carries it (`...startGate(e)`), and it is applied in ONE place: the top of `onMove`, above every
+  mode branch.** The owner's report — *"I intend to just click on something to select it, it
+  actually also moves it, a couple feet or a pixel or two"* — was a missing test: the move branch
+  wrote new positions on the FIRST pointermove, so a pixel of tremor was a committed move, and the
+  ambient flush-snap (tolerance up to 20 ft) could then pull the element onto a neighbour's edge —
+  the "couple of feet", and why it was intermittent. Four rules: **(a) TRAVEL ONLY, NEVER DURATION**
+  — the pan path's tap test pairs slop with a 400 ms limit, which is right for "tap or pan" and
+  wrong here; copying it ships the mirror-image bug (a slow, careful press that starts dragging),
+  so the module holds no clock and a unit test fails if it acquires one. **(b)** the undo frame is
+  pushed on the ARMING frame (`histOnArm`), never on the press — `pushHistory()` on pointer-down is
+  what filled Ctrl+Z with no-op frames — and `cancelActiveMove` must not `drop()` a frame that was
+  never pushed. **(c) THE REBASE IS OPT-OUT, and the two cases are not interchangeable:** a MOVE
+  carries a grab offset so rebasing it is invisible, while a POINT drag (`vertex` / `elVertex` /
+  `measureVertex` / `mkVertex` / `easeVertex` / `roadVtx` / `roadEnd`) writes the pointer's own
+  position — rebased, it trails the cursor for the whole gesture and a road endpoint lands OUTSIDE
+  the snap-and-connect magnet, so those pass `{ rebase: false }`. **(d)** release paths that WRITE
+  or WARN are gated on `dragArmed(d)` too, so a click cannot prune an apron, weld a junction or
+  flash a civil-radius warning. `pan` / `draw` / `mkDraw` / `marquee` are deliberately UNGATED (they
+  create geometry or move the camera; a slop gate would change what they mean). Guards: the
+  repo-root `test/` suite **dragGate** (the pure rule + a wiring guard over every drag start, both
+  mutation-proven red) and the e2e spec **click-never-moves** (all four cases proven red on the
+  pre-fix build, where a tremor click moved a building 771.43 → 774.29 ft).
 - **⛔ `pureCache.js` + `viewCull.js`'s `cullRectFor` — VIEW-INDEPENDENT-ONCE (`/CLAUDE.md`), the two
   mechanisms a fix in that class uses. Read the rule before adding a memo here.** The cull rect is
   **LATCHED**, not re-derived: it was a continuous function of `view`, so `cullToView` re-filtered the

@@ -1479,10 +1479,18 @@ export default function DocReview({
       return;
     }
     if (dragRef.current) { // moving a markup: translate its page-unit points live (B293)
-      const dx = rawP.x - dragRef.current.start.x, dy = rawP.y - dragRef.current.start.y;
-      if (!dragRef.current.moved && Math.hypot(dx * view.scale, dy * view.scale) < 3) { setCursor(rawP); return; }
-      dragRef.current.moved = true;
-      setDragPreview({ id: dragRef.current.id, pts: dragRef.current.orig.map((q) => ({ x: q.x + dx, y: q.y + dy })) });
+      const d0 = dragRef.current;
+      const dx = rawP.x - d0.start.x, dy = rawP.y - d0.start.y;
+      if (!d0.moved && Math.hypot(dx * view.scale, dy * view.scale) < 3) { setCursor(rawP); return; }
+      /* NEW-1 — the planner's drag-gate rule, applied here too: opening the gate must not LEAP the
+       * markup by the travel it swallowed getting here. `armOff` is that travel, recorded once on
+       * the arming move and subtracted from every later delta (including the commit on release),
+       * so the drag starts from where the gesture actually became a drag. B293 already had the
+       * travel test — this is the missing half of it. */
+      if (!d0.moved) d0.armOff = { x: dx, y: dy };
+      d0.moved = true;
+      const ax = dx - d0.armOff.x, ay = dy - d0.armOff.y;
+      setDragPreview({ id: d0.id, pts: d0.orig.map((q) => ({ x: q.x + ax, y: q.y + ay })) });
       return;
     }
     // Shift = snap cursor to 45° from draft start point during TWOPOINT drawing (B431)
@@ -1541,7 +1549,10 @@ export default function DocReview({
       const d = dragRef.current; dragRef.current = null;
       try { e.currentTarget.releasePointerCapture(e.pointerId); } catch (_) {}
       if (d.moved) { // commit the move ONCE on pointer-up so it's a single edit/save (B293) + one undo frame (B303)
-        const p = toPage(e), dx = p.x - d.start.x, dy = p.y - d.start.y;
+        // NEW-1 — commit through the SAME arm rebase the live preview used, or the markup would
+        // hop by the arming travel the instant the drag was released.
+        const p = toPage(e), off = d.armOff || { x: 0, y: 0 };
+        const dx = p.x - d.start.x - off.x, dy = p.y - d.start.y - off.y;
         pushHistory();
         setMarkups((a) => a.map((m) => (m.id === d.id ? { ...m, pts: d.orig.map((q) => ({ x: q.x + dx, y: q.y + dy })) } : m)));
       }

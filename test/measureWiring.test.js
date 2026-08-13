@@ -205,8 +205,12 @@ describe("NEW-2: EVERY interactive measurement surface opens Properties on doubl
     const chip = bodyOf("startMeasChip");
     expect(chip).toMatch(/isDoubleTap\(e, m\.id, sel\?\.kind === "measure" && sel\.i === i\)/);
     // …and it returns before the drag arms, so a double-click never pushes a no-op undo frame.
-    // (`lastIndexOf` because the branch's own comment names pushHistory() before the call site.)
-    expect(chip.indexOf("isDoubleTap")).toBeLessThan(chip.lastIndexOf("pushHistory()"));
+    // NEW-1/NEW-2 (drag gate) — this is now structural rather than ordering: the handler pushes NO
+    // undo frame at all, because the frame moved to the first real MOVEMENT for every drag in the
+    // planner. So a double-click can't burn a frame, and neither can a plain click.
+    expect(chip.replace(/\/\/[^\n]*/g, "")).not.toMatch(/pushHistory\(\)/);
+    expect(chip.indexOf("isDoubleTap")).toBeLessThan(chip.indexOf("drag.current ="));
+    expect(chip).toMatch(/\.\.\.startGate\(e\)/);
   });
 });
 
