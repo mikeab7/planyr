@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-08-12 @ `da721f6` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-08-13 @ `651849d` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_504 source files mapped._
+_505 source files mapped._
 
 ## infra
 
@@ -332,6 +332,8 @@ _504 source files mapped._
   - _exports_: `clampToBounds`, `dockAfterRelinquish`, `FLOAT_MIN_WIDTH`, `FLOAT_SIZE`, `initialFloatPos`, `reconcileForNarrow`, `shouldInspectorTakeDock`
 - **`src/shared/ui/FloatingPanel.jsx`** — NEW-1 poppable panels: a left-rail panel detached into a portal-to-body draggable card over the map (drag-clamp, session-remembered position, map pan/zoom isolation); composes PanelChrome
   - _exports_: `default (FloatingPanel)`
+- **`src/shared/ui/headerCenterFit.js`** — how wide the row-1 centre slot may be so it is centred on the HEADER rather than on the leftover space, and which of the three layouts to run (`centered` / `tight` / `unmeasured`) — `centerSlotMaxWidth`, `centerSlotPlan`, `CENTER_SLOT_GAP`, `CENTER_SLOT_MIN`
+  - _exports_: `CENTER_SLOT_GAP`, `CENTER_SLOT_MIN`, `centerSlotMaxWidth`, `centerSlotPlan`
 - **`src/shared/ui/InterfaceSettings.jsx`** — The Interface section of Settings (display theme + smooth zoom), rendered by both Settings homes so they cannot disagree.
   - _exports_: `default (InterfaceSettings)`
 - **`src/shared/ui/MiddleTruncate.jsx`** — CSS middle-ellipsis label: head ellipsizes, tail always drawn, full text on hover (NEW-4).
